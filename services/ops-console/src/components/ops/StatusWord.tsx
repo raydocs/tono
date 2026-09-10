@@ -56,16 +56,24 @@ export function toneForWord(word: AnyHealthWord): Tone {
 export function StatusWord({
   word,
   reason,
+  tone: given,
   size = 'micro',
   className,
 }: {
   word: AnyHealthWord;
   reason?: string | null;
+  /**
+   * The tone the side that judged this subject chose, when it sent one. The
+   * table above is the fallback for rows that arrived carrying only a word;
+   * passing the engine's own tone is what lets a retired machine keep its word
+   * without wearing an alarm nobody can act on.
+   */
+  tone?: Tone;
   /** `row` is the 15 px/500 tier a card headline sits at; tables stay at 11 px. */
   size?: 'micro' | 'row';
   className?: string;
 }) {
-  const tone = toneForWord(word);
+  const tone = given ?? toneForWord(word);
   const type = size === 'row' ? 'text-row' : 'text-micro';
   if (!isAlarm(tone)) {
     return (

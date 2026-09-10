@@ -15,8 +15,8 @@ test('a failing hub is an error, not an empty list', async ({ page }) => {
   await expect(page.getByRole('status')).toBeVisible();
   await expect(page.getByText('数据源 未知')).toBeVisible();
   // R2: counts that were never measured must not be rendered as zero.
-  await expect(page.getByRole('button', { name: /台在售/ })).toHaveCount(0);
-  await expect(page.locator('body')).not.toContainText('0 台在售');
+  await expect(page.getByRole('button', { name: /台正常/ })).toHaveCount(0);
+  await expect(page.locator('body')).not.toContainText('0 台正常');
   await expect(page).toHaveScreenshot('error.png');
 });
 

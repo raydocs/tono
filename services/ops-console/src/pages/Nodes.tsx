@@ -1,28 +1,57 @@
 import { useMemo, useState } from 'react';
 import { LayoutGrid, Table as TableIcon } from 'lucide-react';
+import type { NodeLifecycle, NodeSummaryDto, SystemHealthDto } from '@contract';
+import { Chip } from '@/components/ops/Chip';
 import { CountText } from '@/components/ops/CountText';
-import { DataTable, type DataColumn, type TableState } from '@/components/ops/DataTable';
+import { type TableState } from '@/components/ops/DataTable';
 import { DetailDrawer, Fact } from '@/components/ops/DetailDrawer';
 import { Empty } from '@/components/ops/Empty';
-import { QuotaBar } from '@/components/ops/QuotaGauge';
+import { PageNote } from '@/components/ops/PageNote';
 import { StatusWord } from '@/components/ops/StatusWord';
-import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
-import { formatCount, formatDate, formatPercent, splitBytes } from '@/lib/display';
 import { closeNode, openNode, openNodePage } from '@/lib/hash-route';
 import { usePrivacy } from '@/lib/privacy';
 import { useIsPhone } from '@/lib/use-phone';
-import { countLine, NODE_FILTERS, selectNodes, type NodeFilter, type NodeFilterId } from '@/lib/selectors';
+import {
+  countFragments,
+  countLine,
+  lifecycleCounts,
+  NODE_LIFECYCLE_CHIPS,
+  selectLifecycle,
+  selectNodes,
+  topFragments,
+  type NodeFilter,
+  type NodeFilterId,
+} from '@/lib/selectors';
+import { newestFetch, type Resource } from '@/lib/use-resource';
 import { cn } from '@/lib/utils';
 import type { Tone } from '@/components/ops/StatusWord';
+import type { FleetNodeDto } from '@/lib/types';
 import type { FleetState } from '@/lib/use-fleet';
 import { NodeCardGrid } from './NodeCardGrid';
-import { toNodeView, type NodeView } from './node-metrics';
+import { NodeTable } from './NodeTable';
+import { toNodeView } from './node-metrics';
 
-export default function NodesPage({ fleet, selected }: { fleet: FleetState; selected: string | null }) {
+/** How many fragments of the count sentence fit on a phone before it eats the page. */
+const PHONE_FRAGMENTS = 3;
+
+export default function NodesPage({
+  nodes,
+  health,
+  fleet,
+  selected,
+}: {
+  /** The engine's judgement of the fleet. The page shows this and nothing else. */
+  nodes: Resource<NodeSummaryDto[]>;
+  health: Resource<SystemHealthDto>;
+  /** The legacy read, for the drawer's flat facts only. */
+  fleet: FleetState;
+  selected: string | null;
+}) {
   const privacy = usePrivacy();
   const phone = useIsPhone();
   const [filter, setFilter] = useState<NodeFilter>(null);
+  const [lifecycle, setLifecycle] = useState<NodeLifecycle | null>(null);
   const [chosen, setChosen] = useState<'cards' | 'table'>('cards');
   /**
    * One card per screen at 390 px is a scroll through forty-five screens to
@@ -32,49 +61,66 @@ export default function NodesPage({ fleet, selected }: { fleet: FleetState; sele
    */
   const view = phone ? 'table' : chosen;
 
-  const liveAgents = fleet.status === 'ready' ? fleet.live?.agents ?? null : null;
-  const all = useMemo(
-    () => (fleet.status === 'ready' ? fleet.fleet.nodes : []),
-    [fleet],
-  );
-  const counts = useMemo(() => countLine(all), [all]);
-  const allViews = useMemo(
-    () => all.map((node) => toNodeView(node, liveAgents)),
-    [all, liveAgents],
-  );
-  const kept = useMemo(
-    () => new Set(selectNodes(all, filter).map((node) => node.name)),
-    [all, filter],
-  );
-  const views = useMemo(() => allViews.filter((row) => kept.has(row.node.name)), [allViews, kept]);
-  /**
-   * The client-side leg of the path has no collector behind it yet, so every
-   * node answers "not wired" and the column is forty-five identical em dashes
-   * wide enough to push the mainland return leg off the card. It comes back on
-   * its own the moment one node has a measurement — the condition is the data,
-   * not a flag somebody has to remember to flip.
-   */
-  const pathWired = useMemo(() => allViews.some((row) => row.path.value !== null), [allViews]);
-  const selectedView = allViews.find((row) => row.node.name === selected) ?? null;
+  const all = useMemo(() => (nodes.status === 'ready' ? nodes.data : []), [nodes]);
+  const facts = useMemo(() => {
+    const out = new Map<string, FleetNodeDto>();
+    if (fleet.status !== 'ready') return out;
+    for (const node of fleet.fleet.nodes) out.set(node.name, node);
+    return out;
+  }, [fleet]);
 
-  const tableState: TableState = fleet.status === 'loading'
+  /**
+   * A retired machine is inventory, not fleet.
+   *
+   * A machine that was taken out of service answers no probe, so leaving it in
+   * the list filled the page with alarms nobody can act on — and made the count
+   * sentence disagree with the daily page, which had already stopped raising
+   * incidents for it. It is one chip away, and the chip carries its count.
+   */
+  const onShow = useMemo(() => selectLifecycle(all, lifecycle), [all, lifecycle]);
+  const lifecycles = useMemo(() => lifecycleCounts(all), [all]);
+  const counts = useMemo(() => countLine(onShow), [onShow]);
+  const fragments = useMemo(
+    () => {
+      const all = countFragments(counts);
+      return phone ? topFragments(all, PHONE_FRAGMENTS, filter) : all;
+    },
+    [counts, phone, filter],
+  );
+  const rows = useMemo(() => selectNodes(onShow, filter), [onShow, filter]);
+  const views = useMemo(
+    () => rows.map((node) => toNodeView(node, facts.get(node.name))),
+    [rows, facts],
+  );
+  /**
+   * The client-side leg is measured for some machines and not others. The
+   * column comes back the moment one node in the whole fleet has a
+   * measurement — the condition is the data, not a flag somebody has to
+   * remember to flip — and the nodes without one show the em dash and who
+   * should have measured it.
+   */
+  const pathWired = useMemo(() => all.some((node) => node.forwardWorst.value !== null), [all]);
+  const selectedView = useMemo(() => {
+    const found = all.find((node) => node.name === selected);
+    return found ? toNodeView(found, facts.get(found.name)) : null;
+  }, [all, selected, facts]);
+
+  const tableState: TableState = nodes.status === 'loading'
     ? 'loading'
-    : fleet.status === 'error'
+    : nodes.status === 'error'
       ? 'error'
       : views.length === 0
         ? 'empty'
         : 'ready';
-
-  const columns = useMemo(() => nodeColumns(pathWired, phone), [pathWired, phone]);
 
   return (
     <div className="page-wrap">
       <div className="page-head">
         {/* R2 reaches the headline too: a fleet that failed to load has no counts,
             and a zero count would be a measurement the console never took. */}
-        {fleet.status === 'ready' ? (
+        {nodes.status === 'ready' ? (
           <p className="text-verdict">
-            {NODE_FILTERS.map((id, index) => (
+            {fragments.map((id, index) => (
               <span key={id}>
                 {index === 0 ? null : <span className="mx-2 text-[var(--muted-foreground)]">·</span>}
                 <CountBit
@@ -89,63 +135,90 @@ export default function NodesPage({ fleet, selected }: { fleet: FleetState; sele
           </p>
         ) : (
           <p className="text-verdict text-[var(--muted-foreground)]">
-            {fleet.status === 'loading' ? copy.loading : copy.loadError}
+            {nodes.status === 'loading' ? copy.loading : copy.loadError}
           </p>
         )}
 
-        {fleet.status === 'ready' && all.length > 0 && !pathWired ? (
+        <PageNote
+          fetchedAt={newestFetch(nodes, health, fleet)}
+          backfill={health.status === 'ready' ? health.data.backfill : null}
+        />
+
+        {nodes.status === 'ready' && all.length > 0 && !pathWired ? (
           <p className="text-body text-[var(--muted-foreground)]">{copy.pathNotWired}</p>
         ) : null}
 
-        {phone ? null : (
-          <div className="toolbar-row">
-            <button
-              type="button"
-              aria-pressed={view === 'cards'}
-              className={cn(
-                'flex h-8 items-center gap-1 rounded-[999px] border border-[var(--hairline)] px-3 text-micro',
-                view === 'cards' && 'bg-[var(--accent)] text-white',
-              )}
-              onClick={() => setChosen('cards')}
+        <div className="toolbar-row">
+          {NODE_LIFECYCLE_CHIPS.map((id) => (
+            <Chip
+              key={id}
+              active={lifecycle === id}
+              count={lifecycles[id]}
+              onClick={() => {
+                setLifecycle((current) => (current === id ? null : id));
+                setFilter(null);
+              }}
             >
-              <LayoutGrid size={12} />
-              {copy.viewCards}
-            </button>
-            <button
-              type="button"
-              aria-pressed={view === 'table'}
-              className={cn(
-                'flex h-8 items-center gap-1 rounded-[999px] border border-[var(--hairline)] px-3 text-micro',
-                view === 'table' && 'bg-[var(--accent)] text-white',
-              )}
-              onClick={() => setChosen('table')}
-            >
-              <TableIcon size={12} />
-              {copy.viewTable}
-            </button>
-          </div>
-        )}
+              {copy.nodeLifecycle[id]}
+            </Chip>
+          ))}
+
+          {phone ? null : (
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                type="button"
+                aria-pressed={view === 'cards'}
+                className={cn(
+                  'flex h-8 items-center gap-1 rounded-[999px] border border-[var(--hairline)] px-3 text-micro',
+                  view === 'cards' && 'bg-[var(--accent)] text-white',
+                )}
+                onClick={() => setChosen('cards')}
+              >
+                <LayoutGrid size={12} />
+                {copy.viewCards}
+              </button>
+              <button
+                type="button"
+                aria-pressed={view === 'table'}
+                className={cn(
+                  'flex h-8 items-center gap-1 rounded-[999px] border border-[var(--hairline)] px-3 text-micro',
+                  view === 'table' && 'bg-[var(--accent)] text-white',
+                )}
+                onClick={() => setChosen('table')}
+              >
+                <TableIcon size={12} />
+                {copy.viewTable}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
-      {fleet.status === 'error' && !fleet.sessionExpired ? (
-        <Empty message={fleet.message || copy.loadError} />
+      {nodes.status === 'error' && !nodes.sessionExpired ? (
+        <Empty message={nodes.message || copy.loadError} />
       ) : view === 'cards' ? (
-        fleet.status === 'loading' ? (
+        nodes.status === 'loading' ? (
           <Empty message={copy.loading} />
         ) : views.length === 0 ? (
           <Empty message={copy.emptyList} />
         ) : (
-          <NodeCardGrid views={views} selected={selected} showPath={pathWired} onOpen={openNode} />
+          <NodeCardGrid
+            views={views}
+            selected={selected}
+            showPath={pathWired}
+            onOpen={openNode}
+            onOpenPage={openNodePage}
+          />
         )
       ) : (
-        <DataTable
-          rows={views}
-          columns={columns}
-          getRowId={(row) => row.node.name}
-          selectedId={selected}
-          onRowClick={(row) => openNode(row.node.name)}
+        <NodeTable
+          views={views}
+          selected={selected}
+          showPath={pathWired}
+          phone={phone}
           state={tableState}
-          errorMessage={fleet.status === 'error' ? fleet.message : undefined}
+          errorMessage={nodes.status === 'error' ? nodes.message : undefined}
+          onOpen={openNode}
         />
       )}
 
@@ -155,7 +228,7 @@ export default function NodesPage({ fleet, selected }: { fleet: FleetState; sele
         action={selectedView ? (
           <button
             type="button"
-            className="text-micro text-[var(--accent)] hover:underline"
+            className="text-micro text-[color:var(--accent)] hover:underline"
             onClick={() => openNodePage(selectedView.node.name)}
           >
             {copy.nodeOpenPage}
@@ -165,7 +238,12 @@ export default function NodesPage({ fleet, selected }: { fleet: FleetState; sele
       >
         {selectedView ? (
           <>
-            <StatusWord word={selectedView.health} className="self-start" />
+            <StatusWord
+              word={selectedView.word}
+              tone={selectedView.tone}
+              reason={selectedView.reason}
+              className="self-start"
+            />
             <Fact label={copy.facts.ip} measured={selectedView.ip} render={privacy.ip} />
             <Fact label={copy.facts.os} measured={selectedView.os} />
             <Fact label={copy.facts.provider} measured={selectedView.provider} />
@@ -185,8 +263,10 @@ export default function NodesPage({ fleet, selected }: { fleet: FleetState; sele
  * in the fragment's own tone once it is on.
  */
 const FRAGMENT_TONE: Record<NodeFilterId, Tone | 'none'> = {
-  listed: 'none',
+  lost: 'sev',
   blocked: 'sev',
+  degraded: 'warn',
+  ok: 'none',
   unmeasured: 'unk',
 };
 
@@ -215,157 +295,3 @@ function CountBit({
   );
 }
 
-function nodeColumns(showPath: boolean, phone: boolean): DataColumn<NodeView>[] {
-  if (phone) return phoneColumns();
-  return [
-    {
-      id: 'status',
-      header: copy.status,
-      width: '74px',
-      sortValue: (row) => row.health,
-      cell: (row) => <StatusWord word={row.health} />,
-    },
-    {
-      id: 'name',
-      header: copy.node,
-      sortValue: (row) => row.node.name,
-      cell: (row) => (
-        <div className="flex items-baseline gap-2">
-          <span className="min-w-0 truncate text-row">{row.node.name}</span>
-          <span className="min-w-0 shrink truncate text-micro text-[var(--muted-foreground)]">{row.region}</span>
-        </div>
-      ),
-    },
-    {
-      id: 'listed',
-      header: copy.listed,
-      width: '64px',
-      sortValue: (row) => (row.node.catalogListed === true ? 1 : 0),
-      cell: (row) => (row.node.catalogListed === true ? copy.listed : copy.unlisted),
-    },
-    {
-      id: 'occupancy',
-      header: copy.inUse,
-      width: '64px',
-      align: 'right',
-      mono: true,
-      sortValue: (row) => row.occupancy.value,
-      cell: (row) => `${formatCount(row.occupancy.value)} ${copy.occupancyUnit}`,
-    },
-    {
-      id: 'traffic',
-      header: copy.periodTraffic,
-      width: '224px',
-      align: 'right',
-      mono: true,
-      sortValue: (row) => row.used.value ?? -1,
-      cell: (row) => <TrafficCell row={row} />,
-    },
-    ...(showPath ? [{
-      id: 'path',
-      header: copy.customerPath,
-      width: '96px',
-      cell: (row: NodeView) => <Value value={row.path.value} source={row.path.source} />,
-    }] : []),
-    {
-      id: 'mainland',
-      header: copy.mainlandReturn,
-      width: '150px',
-      mono: true,
-      sortValue: (row) => row.mainland.value ?? '',
-      cell: (row) => <Value value={row.mainland.value} source={row.mainland.source} mono />,
-    },
-    {
-      id: 'renew',
-      header: copy.renew,
-      width: '112px',
-      align: 'right',
-      mono: true,
-      sortValue: (row) => row.renew.value ?? 0,
-      cell: (row) => (
-        <Value
-          value={row.renew.value == null ? null : formatDate(row.renew.value)}
-          source={row.renew.source}
-          mono
-        />
-      ),
-    },
-  ];
-}
-
-/** The three the fleet is judged on, at 390 px: the word, the name, the quota. */
-function phoneColumns(): DataColumn<NodeView>[] {
-  return [
-    {
-      id: 'status',
-      header: copy.status,
-      width: '68px',
-      sortValue: (row) => row.health,
-      cell: (row) => <StatusWord word={row.health} />,
-    },
-    {
-      id: 'name',
-      header: copy.node,
-      sortValue: (row) => row.node.name,
-      cell: (row) => <span className="block truncate text-body">{row.node.name}</span>,
-    },
-    {
-      id: 'traffic',
-      header: copy.periodTraffic,
-      width: '104px',
-      align: 'right',
-      mono: true,
-      sortValue: (row) => row.used.value ?? -1,
-      cell: (row) => <CompactTrafficCell row={row} />,
-    },
-  ];
-}
-
-/**
- * Used and the bar, with the arithmetic in the title.
- *
- * Used, the cap and the remaining share spelled out needs about 200 px and a phone column
- * has a hundred; right-aligned, the overflow is clipped from the left, which
- * turns the used figure — the only part anybody reads — into "· TB". The bar
- * already carries the ratio.
- */
-function CompactTrafficCell({ row }: { row: NodeView }) {
-  if (row.used.value == null) return <Value value={null} source={row.used.source} mono />;
-  const used = splitBytes(row.used.value);
-  const quota = row.quota;
-  const full = quota == null
-    ? copy.usageNoQuota(`${used.number} ${used.unit}`)
-    : copy.usageTitle(
-      `${used.number} ${used.unit}`,
-      `${splitBytes(quota).number} ${splitBytes(quota).unit}`,
-      formatPercent((quota - row.used.value) / quota),
-    );
-  return (
-    <span className="inline-flex w-full flex-col items-end gap-1" title={full}>
-      <span className="truncate">{used.number} {used.unit}</span>
-      {quota == null ? null : <QuotaBar used={row.used.value} quota={quota} />}
-    </span>
-  );
-}
-
-/** Used, quota and the remaining share, over the same 2 px bar the card uses. */
-function TrafficCell({ row }: { row: NodeView }) {
-  if (row.quota == null) {
-    return <span className="text-micro text-[var(--muted-foreground)]">{copy.noQuota}</span>;
-  }
-  if (row.used.value == null) {
-    return <Value value={null} source={row.used.source} mono />;
-  }
-  const used = splitBytes(row.used.value);
-  const cap = splitBytes(row.quota);
-  const remain = formatPercent((row.quota - row.used.value) / row.quota);
-  return (
-    <span className="inline-flex w-full flex-col items-end gap-1">
-      <span className="truncate">
-        {used.number} {used.unit} / {cap.number} {cap.unit}
-        <span className="text-[var(--muted-foreground)]"> · {copy.remaining} {remain}</span>
-      </span>
-      <QuotaBar used={row.used.value} quota={row.quota} />
-    </span>
-  );
-}
