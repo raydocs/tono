@@ -110,6 +110,7 @@ export async function getSystemHealth(req: Request, e: Env): Promise<Response> {
     cronLastDurationMs,
     cronLastError,
     cronSteps,
+    backfill: null,
     updatedAt: t,
   };
   // A missing source is not ok — the 死人开关.
