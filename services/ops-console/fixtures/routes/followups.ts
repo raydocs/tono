@@ -167,12 +167,6 @@ function digestOf(file: OpsFile | null, store: Store): unknown {
   const at = nowSec();
   const since = overnightFrom(at);
   const rows = file === null ? [] : incidentsNow(file, store);
-  const say = (row: Record<string, unknown>) => ({
-    id: String(row.id),
-    title: String(row.title),
-    severity: String(row.severity),
-    closure: (row.closure as Closure | null) ?? null,
-  });
   const resolved = rows.filter((row) => (
     row.status === 'resolved' && typeof row.resolvedAt === 'number' && row.resolvedAt >= since
   ));
@@ -184,16 +178,16 @@ function digestOf(file: OpsFile | null, store: Store): unknown {
   const live = rows.filter((row) => row.status !== 'resolved');
   const end = endOfDay(at);
   return {
-    day: startOfDay(at),
-    overnight: { resolved: resolved.map(say), opened: opened.map(say) },
-    open: live.length,
+    day: new Date(at * 1000).toISOString().slice(0, 10),
+    overnight: { resolved, opened },
+    open: live,
     due: {
       followups: store.followups.filter(
         (row) => row.doneAt === null && row.dueAt !== null && row.dueAt <= end,
-      ).length,
+      ),
       checks: live.filter(
         (row) => typeof row.nextCheckAt === 'number' && row.nextCheckAt <= end,
-      ).length,
+      ),
     },
     updatedAt: at,
   };

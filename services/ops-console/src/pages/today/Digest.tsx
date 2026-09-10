@@ -40,7 +40,7 @@ export function Digest({
   const night = overnight.resolved.length + overnight.opened.length;
   if (night === 0 && !beforeNoon()) return null;
 
-  const owed = due.followups + due.checks + choresToday;
+  const owed = due.followups.length + due.checks.length + choresToday;
   if (night === 0 && openCount === 0 && owed === 0) {
     return (
       <section className="rounded-[12px] border border-[var(--hairline)] px-4 py-3">
@@ -90,11 +90,11 @@ export function Digest({
           <span className="text-body text-[var(--muted-foreground)]">{copy.digestNoDue}</span>
         ) : (
           <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-            {due.followups === 0 ? null : (
-              <Jump onClick={() => goPage('customers')}>{copy.digestDueFollowups(due.followups)}</Jump>
+            {due.followups.length === 0 ? null : (
+              <Jump onClick={() => goPage('customers')}>{copy.digestDueFollowups(due.followups.length)}</Jump>
             )}
-            {due.checks === 0 ? null : (
-              <Jump onClick={onShowOpen}>{copy.digestDueChecks(due.checks)}</Jump>
+            {due.checks.length === 0 ? null : (
+              <Jump onClick={onShowOpen}>{copy.digestDueChecks(due.checks.length)}</Jump>
             )}
             {choresToday === 0 ? null : (
               <Jump onClick={onShowChores}>{copy.digestDueChores(choresToday)}</Jump>

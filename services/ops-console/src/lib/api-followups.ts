@@ -70,16 +70,20 @@ export type DigestIncidentDto = {
   closure: IncidentClosure | null;
 };
 
+/**
+ * The hub's shape (contract/followups.ts): full rows, not counts, so a line
+ * can link to its own drawer and the block can count without a second read.
+ */
 export type DigestDto = {
-  day: number;
+  day: string;
   overnight: {
-    resolved: DigestIncidentDto[];
-    opened: DigestIncidentDto[];
+    resolved: IncidentDto[];
+    opened: IncidentDto[];
   };
-  open: number;
+  open: IncidentDto[];
   due: {
-    followups: number;
-    checks: number;
+    followups: FollowupDto[];
+    checks: IncidentDto[];
   };
   updatedAt: number;
 };
