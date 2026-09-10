@@ -287,6 +287,8 @@ describe('writeParsedSegment and retainTrafficDaily', () => {
     expect(await candidateRow()).toMatchObject({ users: 2, bytes_30d: 140, connections_30d: 2 });
   });
 
+
+
   it('recomputes rather than accumulates: rows outside the window drop back out', async () => {
     await writeParsedSegment(db(), await baiduSegment({ bytes_up: 100 }), RECEIVED, 'seg-window');
     await db().prepare(

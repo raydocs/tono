@@ -52,11 +52,29 @@ export function utcDay(unix: number): number {
   return Math.floor(unix / DAY) * DAY;
 }
 
-function rangeDays(range: RangeKey | undefined): number {
-  if (range === '7d') return 7;
-  if (range === '30d') return 30;
-  if (range === '90d') return 90;
-  return 1;
+const RANGE_DAYS: Partial<Record<RangeKey, number>> = { '7d': 7, '30d': 30, '90d': 90 };
+
+/**
+ * Which rows a range admits. `24h` — the console's default, sent whenever the
+ * operator has not picked a range — is a *rolling* twenty-four hours, not
+ * "since UTC midnight": at 09:00 Beijing (01:00 UTC) the honest answer is last
+ * night's fleet, not the one hour since midnight. It therefore reaches back
+ * into yesterday's UTC day and then filters on `last_seen_at`. The day-keyed
+ * ranges are N UTC days ending today: today and the N-1 before it.
+ *
+ * `90d` is capped in practice by what the per-device table holds: the one-shot
+ * backfill seeds 30 days, and `ops_client_version_daily` (which does go back
+ * further) has no device ids to recover, so days 31-90 fill in as the table
+ * grows rather than appearing at once.
+ */
+function rangeWindow(
+  range: RangeKey | undefined,
+  nowSec: number,
+): { rangeStart: number; minSeenAt: number } {
+  const today = utcDay(nowSec);
+  const days = range == null ? undefined : RANGE_DAYS[range];
+  if (days === undefined) return { rangeStart: today - DAY, minSeenAt: nowSec - DAY };
+  return { rangeStart: today - (days - 1) * DAY, minSeenAt: 0 };
 }
 
 function parseVersion(value: string): { core: number[]; pre: string | null } {
@@ -124,7 +142,13 @@ async function windowsForDay(db: D1Database, day: number): Promise<Row[]> {
   return windows.results ?? [];
 }
 
-/** The version each device last reported, one row per device. */
+/**
+ * The version each device last reported, one row per device. A window with no
+ * `device_id` (older clients, before the column was populated) is dropped
+ * rather than counted: adoption is a per-device question, the per-device table
+ * has no row to put it in, and counting such a customer only on the live day
+ * would make the same fleet look different either side of midnight.
+ */
 function deviceRowsFrom(rows: readonly Row[]): DeviceRow[] {
   const best = new Map<string, DeviceRow>();
   for (const row of rows) {
@@ -190,10 +214,17 @@ export async function backfillDeviceDaily(
   }
 }
 
+/**
+ * `dayAt` is the day being rolled up — cron passes *yesterday*. The backfill
+ * that rides along walks back from now, not from that day, so `nowSec` is a
+ * separate argument; leaving it out would shift the 30-day window and the
+ * done-marker one day into the past.
+ */
 export async function rollupClientVersionsDaily(
   db: D1Database,
   dayAt: number,
   force = false,
+  nowSec: number = Math.floor(Date.now() / 1000),
 ): Promise<{ skipped: boolean; rows: number }> {
   const day = utcDay(dayAt);
   try {
@@ -202,7 +233,7 @@ export async function rollupClientVersionsDaily(
         'SELECT 1 AS ok FROM ops_client_version_daily WHERE day_at = ? LIMIT 1',
       ).bind(day).first();
       if (existing) {
-        await backfillDeviceDaily(db, dayAt);
+        await backfillDeviceDaily(db, nowSec);
         return { skipped: true, rows: 0 };
       }
     } else {
@@ -235,7 +266,7 @@ export async function rollupClientVersionsDaily(
     const written = statements.length;
     for (const device of deviceRowsFrom(rows)) statements.push(deviceStatement(db, day, device));
     await runChunks(db, statements);
-    await backfillDeviceDaily(db, dayAt);
+    await backfillDeviceDaily(db, nowSec);
     return { skipped: false, rows: written };
   } catch (error) {
     if (missingTable(error)) return { skipped: true, rows: 0 };
@@ -265,13 +296,16 @@ async function latestStableVersion(db: D1Database, platform: Platform): Promise<
 
 async function devicesInRange(
   db: D1Database,
-  rangeStart: number,
-  today: number,
+  window: { rangeStart: number; today: number; minSeenAt: number },
   platform: Platform | null,
 ): Promise<DeviceRow[]> {
+  const { rangeStart, today, minSeenAt } = window;
   const best = new Map<string, DeviceRow & { day: number }>();
   const keep = (row: DeviceRow & { day: number }) => {
     if (platform && row.platform !== platform) return;
+    // A device whose newest row is too old has no newer one, so dropping stale
+    // rows here drops the device rather than pinning it at a stale version.
+    if (row.seenAt < minSeenAt) return;
     const current = best.get(row.deviceId);
     if (!current || row.day > current.day
       || (row.day === current.day && row.seenAt >= current.seenAt)) {
@@ -299,10 +333,13 @@ async function devicesInRange(
   } catch (error) {
     if (!missingTable(error)) throw error;
   }
-  // Today has not been rolled up yet — the daily pass writes yesterday. Union
-  // the live windows so a device that upgraded this morning is not reported at
-  // whatever it ran last night.
-  for (const row of deviceRowsFrom(await windowsForDay(db, today))) keep({ ...row, day: today });
+  // Today has no rollup yet, and yesterday's may not have run either — the
+  // daily pass writes yesterday at some point *during* today, so just after
+  // UTC midnight neither day is in the table. Union the live windows for both
+  // so the default view is the fleet, not whoever reported since midnight.
+  for (let day = today; day >= rangeStart && day >= today - DAY; day -= DAY) {
+    for (const row of deviceRowsFrom(await windowsForDay(db, day))) keep({ ...row, day });
+  }
   return [...best.values()];
 }
 
@@ -322,7 +359,7 @@ export async function adoptionMatrix(
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid platform');
   }
   const today = utcDay(nowSec);
-  const rangeStart = today - (rangeDays(opts.range) - 1) * DAY;
+  const { rangeStart, minSeenAt } = rangeWindow(opts.range, nowSec);
   const wanted = only === null ? PLATFORMS : PLATFORMS.filter((name) => name === only);
   const latest = {} as Record<Platform, string | null>;
   const released: Platform[] = [];
@@ -338,7 +375,7 @@ export async function adoptionMatrix(
       latest[platform] = await latestStableVersion(db, platform);
       published[platform] = await publishedStableVersions(db, platform);
     }
-    for (const device of await devicesInRange(db, rangeStart, today, only)) {
+    for (const device of await devicesInRange(db, { rangeStart, today, minSeenAt }, only)) {
       const key = `${device.platform}:${versionBucket(device.version, published[device.platform] ?? [])}`;
       devices.set(key, (devices.get(key) ?? 0) + 1);
       let seen = users.get(key);

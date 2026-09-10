@@ -330,6 +330,25 @@ describe('adoption matrix', () => {
     expect(cellOf(week, 'windows', 'behind_one')).toEqual({ users: 0, devices: 0 });
   });
 
+  it('24h is a rolling day: last night counts, the same hour yesterday does not', async () => {
+    await seedWindowsStable();
+    // NOW is 08:00 UTC, so the window opens at 08:00 yesterday.
+    await seedDeviceDay({
+      day: DAY_AT - DAY, deviceId: 'd-late', userId: 'u-a', version: '0.0.34',
+      seenAt: DAY_AT - 3600,
+    });
+    await seedDeviceDay({
+      day: DAY_AT - DAY, deviceId: 'd-early', userId: 'u-b', version: '0.0.34',
+      seenAt: DAY_AT - DAY + 3600,
+    });
+
+    const matrix = await adoptionMatrix(db(), { range: '24h', nowSec: NOW });
+    expect(cellOf(matrix, 'windows', 'current')).toEqual({ users: 1, devices: 1 });
+  });
+
+
+
+
   it('reports released platforms, buckets unknown versions, and filters by platform', async () => {
     await seedWindowsStable();
     await seedDeviceDay({ day: DAY_AT - DAY, deviceId: 'd-a', userId: 'u-a', version: '0.0.31' });
@@ -385,6 +404,21 @@ describe('client version device daily', () => {
     ).bind(DAY_AT).first<{ app_version: string; c: number }>();
     expect(again?.app_version).toBe('0.0.35');
     expect(Number(again?.c)).toBe(1);
+  });
+
+  it('backfills from now, not from the day being rolled up', async () => {
+    await seedUser('u-a', 'a@example.com');
+    await seedWindow({
+      id: 'w-today', userId: 'u-a', deviceId: 'd-today', receivedAt: DAY_AT + 10,
+      version: '0.0.34', os: 'Windows 11',
+    });
+
+    // Cron rolls up *yesterday*; the backfill still has to walk back from today.
+    await rollupClientVersionsDaily(db(), DAY_AT - DAY, false, NOW);
+    const rows = await db().prepare(
+      'SELECT day_at, device_id FROM ops_client_version_device_daily',
+    ).all<{ day_at: number; device_id: string }>();
+    expect(rows.results).toEqual([{ day_at: DAY_AT, device_id: 'd-today' }]);
   });
 
   it('backfills thirty days in chunks, once, then stays done', async () => {
