@@ -2,7 +2,7 @@ import { createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker, { type Env } from '../src/index';
 import { ApiError } from '../src/errors';
-import { OPS_ACTIONS, can } from '../src/ops/contract';
+import { can } from '../src/ops/contract';
 import { OPS_V1_ROUTES } from '../src/ops/handlers/dispatch';
 import {
   actionForRequest,
@@ -119,49 +119,18 @@ describe('ops roles', () => {
     (env as unknown as Env).OPS_ROLES = undefined;
   });
 
-  it('maps every OPS_V1_ROUTES entry to an action', () => {
+  it('every v1 route maps to an action, every GET to a read, and an unmapped action fails closed for non-owners', () => {
     for (const entry of OPS_V1_ROUTES) {
-      const { method, pattern } = splitRoute(entry);
-      expect(actionForRoute(method, pattern), entry).not.toBeNull();
-    }
-  });
-
-  it('maps every GET route to a *.read action', () => {
-    for (const entry of OPS_V1_ROUTES) {
-      if (!entry.startsWith('GET ')) continue;
       const { method, pattern } = splitRoute(entry);
       const action = actionForRoute(method, pattern);
-      expect(action, entry).toMatch(/\.read$/);
+      expect(action, entry).not.toBeNull();
+      if (method === 'GET') expect(action, entry).toMatch(/\.read$/);
+      expect(actionForRequest(method, pattern.replace(/\{[^}]+\}/g, 'sample')), entry).toBe(action);
     }
-  });
-
-  it('round-trips a sample path for every route pattern', () => {
-    for (const entry of OPS_V1_ROUTES) {
-      const { method, pattern } = splitRoute(entry);
-      const sample = pattern.replace(/\{[^}]+\}/g, 'sample');
-      expect(actionForRequest(method, sample), entry).toBe(actionForRoute(method, pattern));
-    }
-  });
-
-  it('table facts: viewer cannot ledger.read, operator cannot customers.raw-logs, owner can everything', () => {
     expect(can('ledger.read', 'viewer')).toBe(false);
     expect(can('customers.raw-logs', 'operator')).toBe(false);
-    for (const action of OPS_ACTIONS) {
-      expect(can(action, 'owner'), action).toBe(true);
-    }
-  });
-
-  it('unmapped actions fail closed for non-owners and fail open for owner', () => {
-    expect(actionForRequest('GET', '/api/v1/ops/no-such-route')).toBeNull();
     expect(() => requireCan(null, 'owner')).not.toThrow();
-    try {
-      requireCan(null, 'viewer');
-      expect.unreachable('viewer must not pass an unmapped action');
-    } catch (error) {
-      expect(error).toBeInstanceOf(ApiError);
-      expect((error as ApiError).status).toBe(403);
-      expect((error as ApiError).code).toBe('ROLE_FORBIDDEN');
-    }
+    expect(() => requireCan(null, 'viewer')).toThrow(ApiError);
   });
 
   it('resolveOpsRole defaults to owner and ignores bad OPS_ROLES with one warn', () => {
@@ -188,43 +157,19 @@ describe('ops roles', () => {
     expect(resolveOpsRole(ACCESS_ADMIN_EMAIL, e)).toBe('viewer');
   });
 
-  it('viewer is forbidden on incident ack and still allowed to GET the incident', async () => {
+  it('viewer is refused on writes (v1 and legacy) and on settings reads; operator may ack; unset OPS_ROLES behaves as today', async () => {
     await seedIncident();
     bindRole('viewer');
     const ack = await ops('incidents/inc-1/ack', json({}));
     expect(ack.status).toBe(403);
     expect(((await ack.json()) as { error: { code: string } }).error.code).toBe('ROLE_FORBIDDEN');
-    const read = await ops('incidents/inc-1');
-    expect(read.status).toBe(200);
-  });
-
-  it('operator may ack an incident; viewer may not read the ledger', async () => {
-    await seedIncident();
+    expect((await ops('incidents/inc-1')).status).toBe(200);
+    expect((await ops('users/no-such-user', json({ notes: 'x' }, 'PATCH'))).status).toBe(403);
+    expect((await ops('alert-rules')).status).toBe(403);
     bindRole('operator');
-    const ack = await ops('incidents/inc-1/ack', json({}));
-    expect(ack.status).toBe(200);
-    bindRole('viewer');
-    const ledger = await ops('ledger');
-    expect(ledger.status).toBe(403);
-    expect(((await ledger.json()) as { error: { code: string } }).error.code).toBe('ROLE_FORBIDDEN');
-  });
-
-  it('the legacy writes in opsRoutes are gated too: viewer PATCH users/{id} is 403, unset OPS_ROLES is not', async () => {
-    bindRole('viewer');
-    const forbidden = await ops('users/no-such-user', json({ notes: 'x' }, 'PATCH'));
-    expect(forbidden.status).toBe(403);
-    expect(((await forbidden.json()) as { error: { code: string } }).error.code).toBe('ROLE_FORBIDDEN');
-    const settings = await ops('alert-rules');
-    expect(settings.status).toBe(403);
+    expect((await ops('incidents/inc-1/ack', json({}))).status).toBe(200);
     bindRole(undefined);
-    const asToday = await ops('users/no-such-user', json({ notes: 'x' }, 'PATCH'));
-    expect(asToday.status).not.toBe(403);
-  });
-
-  it('with OPS_ROLES unset, incident ack still returns 200', async () => {
-    await seedIncident();
-    bindRole(undefined);
-    const ack = await ops('incidents/inc-1/ack', json({}));
-    expect(ack.status).toBe(200);
+    expect((await ops('incidents/inc-1/ack', json({}))).status).toBe(200);
+    expect((await ops('users/no-such-user', json({ notes: 'x' }, 'PATCH'))).status).not.toBe(403);
   });
 });

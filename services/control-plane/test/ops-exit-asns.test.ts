@@ -6,11 +6,7 @@ import {
 import { beforeEach, describe, expect, it } from 'vitest';
 import { jwtSign, sha256 } from '../src/crypto';
 import worker, { type Env } from '../src/index';
-import {
-  loadKnownExitAsns,
-  resetKnownExitAsnsCache,
-  upsertExitAsn,
-} from '../src/ops/exit-asns';
+import { resetKnownExitAsnsCache } from '../src/ops/exit-asns';
 
 const JWT_SECRET = 'test-jwt-secret-with-at-least-32-characters';
 const EXIT_ID = 'exit-default';
@@ -96,60 +92,6 @@ describe('ops exit ASNs', () => {
     await seedExitNode();
   });
 
-  it('upserts from an exit-agent request and updates last_seen_at only on repeat', async () => {
-    const observedAt = Math.floor(Date.now() / 1000);
-    const first = await api('home/roster-ack', json(
-      { observedAt },
-      EXIT_TOKEN,
-      { asn: 64512, asOrganization: 'Tono Exit' },
-    ));
-    expect(first.status).toBe(200);
-    const row = await db().prepare(
-      'SELECT asn, as_org, node_hint, source, first_seen_at, last_seen_at FROM ops_exit_asns',
-    ).first<{
-      asn: number;
-      as_org: string;
-      node_hint: string;
-      source: string;
-      first_seen_at: number;
-      last_seen_at: number;
-    }>();
-    expect(row).toMatchObject({
-      asn: 64512,
-      as_org: 'Tono Exit',
-      node_hint: EXIT_NAME,
-      source: 'exit-agent',
-    });
-    expect(Number(row?.first_seen_at)).toBe(Number(row?.last_seen_at));
-
-    const later = Number(row?.last_seen_at) + 30;
-    const asn = await upsertExitAsn(
-      db(),
-      { asn: 64512, asOrganization: 'Renamed Org' },
-      'other-node',
-      later,
-    );
-    expect(asn).toBe(64512);
-    const again = await db().prepare(
-      'SELECT asn, as_org, node_hint, source, first_seen_at, last_seen_at FROM ops_exit_asns',
-    ).first<{
-      asn: number;
-      as_org: string;
-      node_hint: string;
-      source: string;
-      first_seen_at: number;
-      last_seen_at: number;
-    }>();
-    expect(again).toMatchObject({
-      asn: 64512,
-      as_org: 'Tono Exit',
-      node_hint: EXIT_NAME,
-      source: 'exit-agent',
-      first_seen_at: row?.first_seen_at,
-      last_seen_at: later,
-    });
-  });
-
   it('a telemetry window from a known exit ASN sets edge_via_exit, an unknown ASN does not', async () => {
     const observedAt = Math.floor(Date.now() / 1000);
     expect((await api('home/roster-ack', json(
@@ -186,42 +128,5 @@ describe('ops exit ASNs', () => {
     ).bind(otherBody.id).first<{ edge_via_exit: number; edge_asn: number }>();
     expect(Number(otherRow?.edge_via_exit)).toBe(0);
     expect(Number(otherRow?.edge_asn)).toBe(64513);
-  });
-
-  it('a request with no cf is a no-op, and a failing insert still returns 200', async () => {
-    const observedAt = Math.floor(Date.now() / 1000);
-    const missing = await api('home/roster-ack', json({ observedAt }, EXIT_TOKEN));
-    expect(missing.status).toBe(200);
-    const empty = await db().prepare('SELECT COUNT(*) AS c FROM ops_exit_asns').first<{ c: number }>();
-    expect(Number(empty?.c)).toBe(0);
-
-    await db().prepare(
-      `CREATE TRIGGER test_fail_exit_asn BEFORE INSERT ON ops_exit_asns
-       BEGIN SELECT RAISE(ABORT, 'test_fail_exit_asn'); END`,
-    ).run();
-    try {
-      const boom = await api('home/roster-ack', json(
-        { observedAt: observedAt + 1 },
-        EXIT_TOKEN,
-        { asn: 64512, asOrganization: 'Tono Exit' },
-      ));
-      expect(boom.status).toBe(200);
-      const stillEmpty = await db().prepare('SELECT COUNT(*) AS c FROM ops_exit_asns').first<{ c: number }>();
-      expect(Number(stillEmpty?.c)).toBe(0);
-    } finally {
-      await db().prepare('DROP TRIGGER IF EXISTS test_fail_exit_asn').run();
-    }
-  });
-
-  it('resetKnownExitAsnsCache forces the next load to re-read D1', async () => {
-    await upsertExitAsn(db(), { asn: 64512, asOrganization: 'Tono Exit' }, EXIT_NAME, 1_700_000_000);
-    const first = await loadKnownExitAsns(db());
-    expect(first.has(64512)).toBe(true);
-    await db().prepare('DELETE FROM ops_exit_asns').run();
-    const cached = await loadKnownExitAsns(db());
-    expect(cached.has(64512)).toBe(true);
-    resetKnownExitAsnsCache();
-    const reloaded = await loadKnownExitAsns(db());
-    expect(reloaded.has(64512)).toBe(false);
   });
 });

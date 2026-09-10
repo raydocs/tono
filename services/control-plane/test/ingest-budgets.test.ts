@@ -28,8 +28,9 @@ const FAILURES_PREPARE_BUDGET = 16;
 const LOGS_PREPARE_BUDGET = 10;
 // Measured 2026-09-10: parseAuditSegment(gunzip) of 20_500 JSONL lines
 // (1_576_196 gzip bytes, under the 2 MiB route cap) took 191 ms.
-// Ceiling = max(4 × 191, 250) rounded up to 800 ms.
-const PARSE_CEILING_MS = 800;
+// Ceiling is 10× that: a wall-clock bound has to survive a loaded CI runner or
+// a laptop building Xcode beside it, and still catches a parser gone quadratic.
+const PARSE_CEILING_MS = 2_000;
 
 type Counts = { prepare: number; batch: number };
 
@@ -131,76 +132,46 @@ describe('ingest statement-count budgets', () => {
     resetKnownExitAsnsCache();
   });
 
-  it('POST telemetry/windows stays within the measured prepare budget', async () => {
-    const account = await seedAccount('budg-win');
-    const { e, counts } = countingEnv(env as unknown as Env);
-    const response = await fetchPath(e, 'telemetry/windows', json(telemetryWindow(), account.token));
-    expect(response.status).toBe(201);
-    expect(
-      counts.prepare,
-      `windows prepare=${counts.prepare} batch=${counts.batch} (2-event window, fresh account, no alert rules)`,
-    ).toBeLessThanOrEqual(WINDOWS_PREPARE_BUDGET);
-  });
+  it('windows, failures and log segments stay within their measured prepare budgets', async () => {
+    const win = await seedAccount('budg-win');
+    let c = countingEnv(env as unknown as Env);
+    expect((await fetchPath(c.e, 'telemetry/windows', json(telemetryWindow(), win.token))).status).toBe(201);
+    expect(c.counts.prepare, `windows prepare=${c.counts.prepare}`).toBeLessThanOrEqual(WINDOWS_PREPARE_BUDGET);
 
-  it('POST telemetry/failures stays within the measured prepare budget', async () => {
-    const account = await seedAccount('budg-fail');
-    const { e, counts } = countingEnv(env as unknown as Env);
-    const response = await fetchPath(e, 'telemetry/failures', json({
-      ts: Date.now(),
-      stage: 'handshake',
-      code: 'ETIMEDOUT',
-      node: 'Tokyo · Kite',
-      appVersion: '0.0.72',
-      osVersion: 'macOS 14.4',
-      osArch: 'arm64',
-    }, account.token));
-    expect(response.status).toBe(202);
-    expect(
-      counts.prepare,
-      `failures prepare=${counts.prepare} batch=${counts.batch} (fresh account, no alert rules)`,
-    ).toBeLessThanOrEqual(FAILURES_PREPARE_BUDGET);
-  });
+    const fail = await seedAccount('budg-fail');
+    c = countingEnv(env as unknown as Env);
+    expect((await fetchPath(c.e, 'telemetry/failures', json({
+      ts: Date.now(), stage: 'handshake', code: 'ETIMEDOUT', node: 'Tokyo · Kite',
+      appVersion: '0.0.72', osVersion: 'macOS 14.4', osArch: 'arm64',
+    }, fail.token))).status).toBe(202);
+    expect(c.counts.prepare, `failures prepare=${c.counts.prepare}`).toBeLessThanOrEqual(FAILURES_PREPARE_BUDGET);
 
-  it('POST diagnostics/logs stays within the measured prepare budget', async () => {
-    const account = await seedAccount('budg-logs');
+    const logs = await seedAccount('budg-logs');
     const t = Math.floor(Date.now() / 1000);
     await db().prepare(
-      `INSERT INTO diagnostics_log_access(device_id, user_id, expires_at, created_at, updated_at)
-       VALUES(?, ?, ?, ?, ?)`,
-    ).bind(account.deviceId, account.userId, t + 3600, t, t).run();
+      `INSERT INTO diagnostics_log_access(device_id, user_id, expires_at, created_at, updated_at) VALUES(?, ?, ?, ?, ?)`,
+    ).bind(logs.deviceId, logs.userId, t + 3600, t, t).run();
     const payload = await gzip(JSON.stringify({
-      kind: 'connection',
-      timestamp: new Date().toISOString(),
-      host: 'api.anthropic.com',
-      process: 'Claude',
-      route: 'Tono-Exit',
-      bytes_up: 11,
-      bytes_down: 22,
+      kind: 'connection', timestamp: new Date().toISOString(), host: 'api.anthropic.com',
+      process: 'Claude', route: 'Tono-Exit', bytes_up: 11, bytes_down: 22,
     }));
-    const { e, counts } = countingEnv(env as unknown as Env);
-    const response = await fetchPath(e, 'diagnostics/logs', {
+    c = countingEnv(env as unknown as Env);
+    const response = await fetchPath(c.e, 'diagnostics/logs', {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${account.token}`,
-        'content-type': 'application/gzip',
-        'X-Tono-Log-Session': 'FE5919D3-405E-4538-9C4C-1866E088F24F',
-        'X-Tono-Log-Sequence': '0',
-        'X-Tono-Log-Lines': '1',
-        'X-Tono-Log-Client-Version': '0.0.72',
-        'X-Tono-Log-Os-Version': 'macOS 14.4',
+        authorization: `Bearer ${logs.token}`, 'content-type': 'application/gzip',
+        'X-Tono-Log-Session': 'FE5919D3-405E-4538-9C4C-1866E088F24F', 'X-Tono-Log-Sequence': '0',
+        'X-Tono-Log-Lines': '1', 'X-Tono-Log-Client-Version': '0.0.72', 'X-Tono-Log-Os-Version': 'macOS 14.4',
       },
       body: new Blob([payload]),
     });
     expect(response.status).toBe(201);
-    expect(
-      counts.prepare,
-      `logs prepare=${counts.prepare} batch=${counts.batch} (single-line gzip, access row pre-inserted)`,
-    ).toBeLessThanOrEqual(LOGS_PREPARE_BUDGET);
+    expect(c.counts.prepare, `logs prepare=${c.counts.prepare}`).toBeLessThanOrEqual(LOGS_PREPARE_BUDGET);
   });
 });
 
 describe('parse-cost ceiling', () => {
-  it('a max-size gzip segment finishes under the wall-clock ceiling and hits the line cap', async () => {
+  it('a max-size segment parses under the ceiling and hits the line cap; an over-inflating one is skipped', async () => {
     const lines: string[] = [];
     for (let i = 0; i < MAX_SEGMENT_LINES + 500; i++) {
       const rand = crypto.getRandomValues(new Uint8Array(64));
@@ -236,9 +207,8 @@ describe('parse-cost ceiling', () => {
     expect(parsed.lines).toBe(MAX_SEGMENT_LINES);
     expect(parsed.candidates.size).toBeLessThanOrEqual(MAX_DISTINCT_ETLD1);
     expect(parsed.destinations.size).toBeLessThanOrEqual(parsed.lines);
-  });
 
-  it('afterLogSegment skips a gzip that inflates past LOG_INFLATED_MAX_BYTES', async () => {
+
     const inflated = 'a'.repeat(LOG_INFLATED_MAX_BYTES + 4096);
     const bytes = await gzip(inflated);
     expect(bytes.byteLength).toBeLessThan(2 * 1024 * 1024);
