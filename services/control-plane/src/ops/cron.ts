@@ -7,6 +7,7 @@ import { flattenBacklog, retainConnectionDaily, retainConnectionEvents, rollupCo
 import { PROJECT_BACKLOG_LIMIT, projectBacklog, retainActivityHours, retainSessions } from './customers';
 import { retainDeliveries } from './alerts';
 import { expireStaleJobs } from './jobs';
+import { runWorkerJobs } from './jobs-worker';
 import { readAgentNetCounters, rollAllNodeCycles } from './quota';
 import { retainClientVersionDaily, rollupClientVersionsDaily } from './releases';
 import { retainHomeLineUsage } from './home-lines';
@@ -30,7 +31,7 @@ export type OpsCronReport = {
   project: OpsCronStep<{ windows: number; hours: number }>;
   verdicts: OpsCronStep<{ nodes: number; transitions: number }>;
   alerts: OpsCronStep<{ planned: number; sent: number; failed: number }>;
-  jobs: OpsCronStep<{ expired: number }>;
+  jobs: OpsCronStep<{ expired: number; ran: number }>;
   quota: OpsCronStep<{ ran: boolean; rolled: number; skipped: number }>;
   daily: OpsCronStep<{ ran: boolean }>;
   retention: OpsCronStep;
@@ -192,8 +193,9 @@ export async function runOpsCron(e: Env, nowSec: number): Promise<OpsCronReport>
   const alerts = await step('alerts', { planned: 0, sent: 0, failed: 0 }, () =>
     planAndSendAlerts(e, alertTransitions, nowSec));
 
-  const jobs = await step('jobs', { expired: 0 }, async () => ({
+  const jobs = await step('jobs', { expired: 0, ran: 0 }, async () => ({
     expired: await expireStaleJobs(e.DB, nowSec),
+    ran: await runWorkerJobs(e, nowSec),
   }));
 
   const quota = await step('quota', { ran: false, rolled: 0, skipped: 0 }, async () => {

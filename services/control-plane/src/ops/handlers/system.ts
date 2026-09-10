@@ -6,6 +6,7 @@ import {
   Env,
   Row,
   entityJson,
+  jsonNoStore,
   missingTable,
   now,
   nullInt,
@@ -149,4 +150,24 @@ export async function getSystemHealth(req: Request, e: Env): Promise<Response> {
   // A missing source is not ok — the 死人开关.
   dto.ok = sources.every((source) => source.state === 'ready');
   return entityJson(e, req, dto, weakEtag([t, dto.ok ? 1 : 0, sources.map((s) => s.state).join(',')]), assertSystemHealth);
+}
+
+const PULSE_OK_SECONDS = 15 * 60;
+
+export async function getSystemPulse(e: Env, buildSha: string): Promise<Response> {
+  const t = now();
+  let cronAgeSec: number | null = null;
+  try {
+    const cron = await e.DB.prepare(
+      "SELECT ran_at FROM ops_cron_state WHERE key = 'last_report'",
+    ).first<Row>();
+    const ranAt = nullInt(cron?.ran_at);
+    if (ranAt != null && ranAt > 0) cronAgeSec = t - ranAt;
+  } catch (error) {
+    if (!missingTable(error) && !String(error).includes('no such column')) {
+      // Table is optional; missing cron is not ok.
+    }
+  }
+  const ok = cronAgeSec != null && cronAgeSec >= 0 && cronAgeSec <= PULSE_OK_SECONDS;
+  return jsonNoStore({ ok, cronAgeSec, buildSha });
 }

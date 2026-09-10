@@ -395,3 +395,75 @@ export function retirementCatalogPlan(yaml: string, name: string): {
     safe,
   };
 }
+
+/** Inverse of retirementCatalogPlan: put one proxy block back into `proxies:`. */
+export function relistCatalogPlan(yaml: string, name: string, block: string): {
+  yaml: string;
+  alreadyListed: boolean;
+  warnings: string[];
+  safe: boolean;
+} {
+  const warnings: string[] = [];
+  let prefix = '';
+  let items: Array<{ name: string; block: string }> = [];
+  let suffix = '';
+  try {
+    ({ prefix, items, suffix } = splitManagedCatalogProxies(yaml));
+  } catch {
+    return { yaml, alreadyListed: false, warnings: ['目录没有可安全编辑的 proxies 列表。'], safe: false };
+  }
+  if (items.some((item) => item.name === name)) {
+    return { yaml, alreadyListed: true, warnings, safe: true };
+  }
+  if (!catalogProxyUsesManagedIdentity(block) || catalogProxyName(block) !== name) {
+    return { yaml, alreadyListed: false, warnings: ['上架模板不是该节点的有效目录条目。'], safe: false };
+  }
+  const body = [...items.map((item) => item.block.replace(/\s+$/, '')), block.replace(/\s+$/, '')].join('\n') + '\n';
+  let next = `${prefix}${body}${suffix}`;
+  if (!next.endsWith('\n')) next += '\n';
+  const member = `      - ${name}`;
+  const lines = next.split('\n');
+  let inGroups = false;
+  let inTono = false;
+  let inProxies = false;
+  let inserted = false;
+  const out: string[] = [];
+  for (const line of lines) {
+    if (/^proxy-groups\s*:/.test(line)) {
+      inGroups = true;
+      inTono = false;
+      inProxies = false;
+      out.push(line);
+      continue;
+    }
+    if (inGroups && line.trim() && !/^\s/.test(line) && !line.trimStart().startsWith('#')) {
+      if (inTono && inProxies && !inserted) out.push(member);
+      inGroups = false;
+      inTono = false;
+      inProxies = false;
+    }
+    if (inGroups) {
+      const named = catalogGroupName(line);
+      if (named && /^\s*-\s+/.test(line)) {
+        if (inTono && inProxies && !inserted) out.push(member);
+        inTono = named === 'Tono-Exit';
+        inProxies = false;
+      }
+      if (inTono && /^\s+proxies\s*:/.test(line)) inProxies = true;
+      if (inTono && inProxies && new RegExp(`^[ \\t]+-[ \\t]+${escapeRegExp(name)}[ \\t]*(?:#.*)?$`).test(line)) {
+        inserted = true;
+      }
+    }
+    out.push(line);
+  }
+  if (inTono && inProxies && !inserted) out.push(member);
+  next = out.join('\n');
+  if (yaml.endsWith('\n') && !next.endsWith('\n')) next += '\n';
+  try {
+    next = managedCatalogYAML(next);
+  } catch {
+    warnings.push('改写后的目录未通过发布校验。');
+    return { yaml, alreadyListed: false, warnings, safe: false };
+  }
+  return { yaml: next, alreadyListed: false, warnings, safe: true };
+}
