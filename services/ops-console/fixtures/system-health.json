@@ -109,6 +109,14 @@
       "windowsFlattened": 8640,
       "windowsProjected": 3200
     },
+    "coverage": {
+      "nodesListed": 18,
+      "nodesSweptFresh": 16,
+      "nodesWithAgent": 17,
+      "customersActive": 20,
+      "customersReportedFresh": 14,
+      "asOfSec": 1724999970
+    },
     "updatedAt": 1724999970
   }
 }

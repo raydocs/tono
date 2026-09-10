@@ -59,6 +59,14 @@
     "cronLastError": null,
     "cronSteps": null,
     "backfill": null,
+    "coverage": {
+      "nodesListed": 0,
+      "nodesSweptFresh": 0,
+      "nodesWithAgent": 0,
+      "customersActive": 0,
+      "customersReportedFresh": 0,
+      "asOfSec": 1724999970
+    },
     "updatedAt": 1724999970
   }
 }
