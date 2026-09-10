@@ -3,6 +3,7 @@ import {
   getNodes, getNode, getNodeBindings, getNodeHistory, getNodeConnections,
   getNodeErrors, getNodeJobs, postNodeJob, patchNodeProfile,
 } from './nodes';
+import { getNodeRetirePreview } from '../retire-dependencies';
 import {
   getCustomers, getCustomer, getCustomerConnections, getCustomerActivity,
   getCustomerDestinations, getCustomerServices,
@@ -43,6 +44,7 @@ export const OPS_V1_ROUTES = [
   'GET /api/v1/ops/nodes/{name}/errors',
   'GET /api/v1/ops/nodes/{name}/bindings',
   'GET /api/v1/ops/nodes/{name}/jobs',
+  'GET /api/v1/ops/nodes/{name}/retire-preview',
   'POST /api/v1/ops/nodes/{name}/jobs',
   'PATCH /api/v1/ops/nodes/{name}/profile',
   'GET /api/v1/ops/customers',
@@ -113,6 +115,7 @@ const ROUTES: Array<{ method: string; re: RegExp; handle: Handler }> = [
   { method: 'GET', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/errors$/, handle: (req, e, _a, p) => getNodeErrors(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/bindings$/, handle: (req, e, _a, p) => getNodeBindings(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/jobs$/, handle: (req, e, _a, p) => getNodeJobs(req, e, p[0]) },
+  { method: 'GET', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/retire-preview$/, handle: (req, e, _a, p) => getNodeRetirePreview(req, e, p[0]) },
   { method: 'POST', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/jobs$/, handle: (req, e, a, p) => postNodeJob(req, e, p[0], a) },
   { method: 'PATCH', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/profile$/, handle: (req, e, a, p) => patchNodeProfile(req, e, p[0], a) },
   { method: 'GET', re: /^\/api\/v1\/ops\/nodes\/([^/]+)$/, handle: (req, e, _a, p) => getNode(req, e, p[0]) },
