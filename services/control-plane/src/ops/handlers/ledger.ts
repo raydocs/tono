@@ -62,6 +62,18 @@ function parseCurrency(value: unknown): string {
   return text;
 }
 
+const REVENUE_KINDS: ReadonlySet<string> = new Set(['revenue', 'refund', 'credit']);
+
+function currencyForKind(kind: string, value: unknown): string {
+  const omitted = value === undefined || value === null || value === '';
+  if (omitted) return kind === 'cost' ? 'USD' : 'CNY';
+  const currency = parseCurrency(value);
+  if (REVENUE_KINDS.has(kind) && currency !== 'CNY') {
+    throw new ApiError(400, 'VALIDATION_ERROR', '收款只收人民币');
+  }
+  return currency;
+}
+
 function parseNote(value: unknown, required = false): string | null {
   if (value === undefined || value === null || value === '') {
     if (required) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid note');
@@ -143,7 +155,7 @@ export async function postLedger(req: Request, e: Env, actor: Actor): Promise<Re
   const subjectType = oneOf(b.subjectType, LEDGER_SUBJECT_TYPES, 'subjectType');
   const subjectId = parseSubjectId(b.subjectId);
   const amountMinor = parseAmount(b.amountMinor);
-  const currency = parseCurrency(b.currency);
+  const currency = currencyForKind(kind, b.currency);
   const fxDate = parseDay(b.fxDate as string | null | undefined, utcDateString(t));
   const { rate, day } = await rateFor(e, currency, fxDate);
   const cnyMinor = cnyMinorFrom(amountMinor, rate);

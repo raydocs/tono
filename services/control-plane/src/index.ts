@@ -78,6 +78,7 @@ import {
   opsRoutes, publicSystemRoute,
   type OpsRouterDeps,
 } from './ops/router';
+import { insertUserCarryingAllowlistProfile } from './signup-profile';
 
 export { parseBytesRange } from './http';
 export { retirementCatalogPlan } from './catalog-yaml';
@@ -1361,18 +1362,7 @@ async function accountForVerifiedEmail(
     // The verified email or OIDC claim is the account-creation authority.
     // INSERT OR IGNORE makes concurrent first sign-ins converge on the same
     // unique email without requiring an invitation/redemption transaction.
-    await e.DB.prepare(
-      `INSERT OR IGNORE INTO users(
-         id, email, password_hash, password_salt, created_at, updated_at
-       ) VALUES(?, ?, ?, ?, ?, ?)`,
-    ).bind(
-      userId,
-      emailAddr,
-      'PASSWORD_AUTH_DISABLED',
-      'PASSWORD_AUTH_DISABLED',
-      t,
-      t,
-    ).run();
+    await insertUserCarryingAllowlistProfile(e, userId, emailAddr, t);
   } catch (error) {
     // Resolve a concurrent first sign-in below. D1 uniqueness constraints
     // ensure that only the account for this verified email can be selected.

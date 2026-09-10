@@ -46,6 +46,19 @@ import {
   OPS_USERS_PAGE_LIMIT,
 } from '../reads';
 
+function optionalWechatId(value: unknown): string | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string') {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid wechatId');
+  }
+  const text = value.trim();
+  if (text === '') return null;
+  if (text.length > 64 || /[\r\n\0]/.test(text)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid wechatId');
+  }
+  return text;
+}
+
 export async function getOpsUsers(req: Request, e: Env): Promise<Response> {
   const url = new URL(req.url);
   const rawLimit = url.searchParams.get('limit');
@@ -184,6 +197,7 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
   const b = await body(req, 16 * 1024);
   rejectUnexpectedKeys(b, [
     'email', 'line', 'homeExitId', 'accountRef', 'productAccountId', 'openedAt', 'notes', 'contact',
+    'wechatId',
   ]);
   const address = email(b.email);
   const createdAt = now();
@@ -193,22 +207,26 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
   const user = await e.DB.prepare('SELECT * FROM users WHERE email = ?').bind(address).first<Row>();
   const incomplete: string[] = [];
   if (!user) incomplete.push('user_not_registered');
+  const storeProfile = b.notes !== undefined || b.contact !== undefined || b.wechatId !== undefined;
+  const pendingProfile = !user && storeProfile;
   let binding = null;
   let account = null;
   let exitIdentityIssued = false;
   if (user) {
     await exitClientUUID(e, String(user.id));
     exitIdentityIssued = true;
-    if (b.notes !== undefined || b.contact !== undefined) {
+    if (b.notes !== undefined || b.contact !== undefined || b.wechatId !== undefined) {
       await e.DB.prepare(
         `UPDATE users SET
            notes = CASE WHEN ? THEN ? ELSE notes END,
            contact = CASE WHEN ? THEN ? ELSE contact END,
+           wechat_id = CASE WHEN ? THEN ? ELSE wechat_id END,
            updated_at = ?
          WHERE id = ?`,
       ).bind(
         b.notes !== undefined, optionalNotes(b.notes),
         b.contact !== undefined, optionalNotes(b.contact, 'contact', 200),
+        b.wechatId !== undefined, optionalWechatId(b.wechatId),
         now(), user.id,
       ).run();
     }
@@ -259,6 +277,19 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
       account = await assignedProductForUser(e, String(user.id));
     }
     if (!account) incomplete.push('claude');
+  } else if (pendingProfile) {
+    await e.DB.prepare(
+      `UPDATE signup_allowlist SET
+         wechat_id = CASE WHEN ? THEN ? ELSE wechat_id END,
+         contact = CASE WHEN ? THEN ? ELSE contact END,
+         notes = CASE WHEN ? THEN ? ELSE notes END
+       WHERE email = ?`,
+    ).bind(
+      b.wechatId !== undefined, optionalWechatId(b.wechatId),
+      b.contact !== undefined, optionalNotes(b.contact, 'contact', 200),
+      b.notes !== undefined, optionalNotes(b.notes),
+      address,
+    ).run();
   }
   await writeOpsAudit(e, actor.email, 'user.onboard', 'user', user ? String(user.id) : null, address);
   return Response.json({
@@ -269,6 +300,7 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
     binding: binding ? publicHomeBinding(binding) : null,
     account: account ? publicProductAccount(account) : null,
     incomplete,
+    pendingProfile,
   }, { status: user && incomplete.length === 0 ? 200 : 202 });
 }
 
@@ -279,7 +311,7 @@ export async function patchOpsUser(req: Request, e: Env, actor: { email: string 
   // customer can connect again, a silent success is the worst possible
   // answer: the operator believes the account was reset and only finds out
   // when the customer is still suspended.
-  rejectUnexpectedKeys(b, ['status', 'expiresAt', 'notes', 'contact', 'plan', 'resetUsage']);
+  rejectUnexpectedKeys(b, ['status', 'expiresAt', 'notes', 'contact', 'plan', 'resetUsage', 'wechatId']);
   const status = b.status;
   const expiresAt = b.expiresAt;
   // The console is where a quota lockout is noticed — the dashboard raises
@@ -309,8 +341,9 @@ export async function patchOpsUser(req: Request, e: Env, actor: { email: string 
   if (
     status === undefined && expiresAt === undefined && resetUsage === undefined
     && b.notes === undefined && b.contact === undefined && b.plan === undefined
+    && b.wechatId === undefined
   ) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'status, expiresAt, notes, contact, plan or resetUsage is required');
+    throw new ApiError(400, 'VALIDATION_ERROR', 'status, expiresAt, notes, contact, plan, wechatId or resetUsage is required');
   }
   if (status === 'active') {
     const residual = await e.DB.prepare(
@@ -340,6 +373,7 @@ export async function patchOpsUser(req: Request, e: Env, actor: { email: string 
        expires_at = CASE WHEN ? THEN ? ELSE expires_at END,
        notes = CASE WHEN ? THEN ? ELSE notes END,
        contact = CASE WHEN ? THEN ? ELSE contact END,
+       wechat_id = CASE WHEN ? THEN ? ELSE wechat_id END,
        plan = CASE WHEN ? THEN ? ELSE plan END,
        usage_baseline_bytes = CASE WHEN ? THEN usage_reported_bytes ELSE usage_baseline_bytes END,
        usage_bytes = CASE WHEN ? THEN 0 ELSE usage_bytes END,
@@ -353,6 +387,8 @@ export async function patchOpsUser(req: Request, e: Env, actor: { email: string 
     b.notes === undefined ? null : optionalNotes(b.notes),
     b.contact !== undefined,
     b.contact === undefined ? null : optionalNotes(b.contact, 'contact', 200),
+    b.wechatId !== undefined,
+    b.wechatId === undefined ? null : optionalWechatId(b.wechatId),
     b.plan !== undefined,
     b.plan === undefined || b.plan === null || b.plan === '' ? null : PRODUCT_CLAUDE,
     resetUsage === true,
@@ -363,6 +399,13 @@ export async function patchOpsUser(req: Request, e: Env, actor: { email: string 
   if (!updated.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'User not found');
   if (resetUsage === true) {
     await writeOpsAudit(e, actor.email, 'user.usage-reset', 'user', mt[1], 'billing cycle reset');
+  }
+  if (b.wechatId !== undefined) {
+    const wechatId = optionalWechatId(b.wechatId);
+    await writeOpsAudit(
+      e, actor.email, 'user.wechat.update', 'user', mt[1],
+      wechatId == null ? 'cleared' : wechatId,
+    );
   }
   const changedFields = [
     status !== undefined ? 'status' : null,

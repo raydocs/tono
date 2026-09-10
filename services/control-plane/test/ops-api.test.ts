@@ -381,6 +381,53 @@ describe('ops v1 api', () => {
     expect(detail.health).toBe('未上报');
   });
 
+  it('PATCH wechatId round-trips into GET customers/{id} and list', async () => {
+    await seedUser();
+    const patched = await ops('users/u-1', json({ wechatId: '  wxid_alice  ' }, 'PATCH'));
+    expect(patched.status).toBe(200);
+    const detail = assertCustomerDetail(await (await ops('customers/u-1')).json());
+    expect(detail.wechatId).toBe('wxid_alice');
+    const list = assertList(await (await ops('customers')).json(), assertCustomerSummary);
+    expect(list.items.find((item) => item.userId === 'u-1')?.wechatId).toBe('wxid_alice');
+    const audit = await db().prepare(
+      "SELECT action FROM ops_audit WHERE action = 'user.wechat.update' AND target_id = 'u-1'",
+    ).first<{ action: string }>();
+    expect(audit?.action).toBe('user.wechat.update');
+    const cleared = await ops('users/u-1', json({ wechatId: '' }, 'PATCH'));
+    expect(cleared.status).toBe(200);
+    expect(assertCustomerDetail(await (await ops('customers/u-1')).json()).wechatId).toBeNull();
+  });
+
+  it('POST users/onboard stores wechatId', async () => {
+    await seedUser('u-1', 'a@example.com');
+    const onboarded = await ops('users/onboard', json({
+      email: 'a@example.com', wechatId: 'wxid_onboard',
+    }));
+    expect([200, 202]).toContain(onboarded.status);
+    expect(assertCustomerDetail(await (await ops('customers/u-1')).json()).wechatId).toBe('wxid_onboard');
+  });
+
+  it('GET customers?q= matches email or wechat id, and default list is unchanged', async () => {
+    await seedUser('u-1', 'a@example.com');
+    await seedUser('u-2', 'b@example.com');
+    expect((await ops('users/u-1', json({ wechatId: 'wxid_unique_zzz' }, 'PATCH'))).status).toBe(200);
+    const byWechat = assertList(await (await ops('customers?q=UNIQUE_zzz')).json(), assertCustomerSummary);
+    expect(byWechat.items.map((item) => item.userId)).toEqual(['u-1']);
+    const byEmail = assertList(await (await ops('customers?q=B@EXAMPLE')).json(), assertCustomerSummary);
+    expect(byEmail.items.map((item) => item.userId)).toEqual(['u-2']);
+    const all = assertList(await (await ops('customers')).json(), assertCustomerSummary);
+    expect(all.items.map((item) => item.userId).sort()).toEqual(['u-1', 'u-2']);
+  });
+
+  it('contact and notes are readable on GET customers/{id} after PATCH', async () => {
+    await seedUser();
+    const patched = await ops('users/u-1', json({ contact: 'wechat-phone', notes: 'vip' }, 'PATCH'));
+    expect(patched.status).toBe(200);
+    const detail = assertCustomerDetail(await (await ops('customers/u-1')).json());
+    expect(detail.contact).toBe('wechat-phone');
+    expect(detail.notes).toBe('vip');
+  });
+
   it('incidents list, detail, ack, snooze, resolve, notes', async () => {
     await db().prepare(
       `INSERT INTO ops_incidents(

@@ -173,6 +173,7 @@ export interface CustomerFailureDto {
 export interface CustomerSummaryDto {
   userId: string;
   email: string;
+  wechatId: string | null;
   verdict: CustomerVerdict;
   health: CustomerHealthWord;
   tone: Tone;
@@ -196,6 +197,9 @@ export interface CustomerSummaryDto {
 export interface CustomerDetailDto {
   userId: string;
   email: string;
+  wechatId: string | null;
+  contact: string | null;
+  notes: string | null;
   verdict: CustomerVerdict;
   health: CustomerHealthWord;
   tone: Tone;
@@ -383,8 +387,8 @@ export function assertCustomerFailure(value: unknown, path = 'lastFailure'): Cus
 }
 
 const CUSTOMER_SUMMARY_KEYS = [
-  'userId', 'email', 'verdict', 'health', 'tone', 'reason', 'lifecycle', 'deviceCount', 'platforms',
-  'selectedServer', 'connected', 'lastFailure', 'usageBytes', 'quotaBytes', 'services',
+  'userId', 'email', 'wechatId', 'verdict', 'health', 'tone', 'reason', 'lifecycle', 'deviceCount',
+  'platforms', 'selectedServer', 'connected', 'lastFailure', 'usageBytes', 'quotaBytes', 'services',
   'minAppVersion', 'expiresAt', 'lastSeenAt', 'updatedAt',
 ];
 
@@ -393,6 +397,7 @@ export function assertCustomerSummary(value: unknown, path = 'customerSummary'):
   return {
     userId: text(row, path, 'userId'),
     email: text(row, path, 'email'),
+    wechatId: optText(row, path, 'wechatId'),
     verdict: oneOf<CustomerVerdict>(row, path, 'verdict', CUSTOMER_VERDICTS),
     health: oneOf<CustomerHealthWord>(row, path, 'health', CUSTOMER_HEALTH_WORDS),
     tone: oneOf<Tone>(row, path, 'tone', TONES),
@@ -416,8 +421,8 @@ export function assertCustomerSummary(value: unknown, path = 'customerSummary'):
 }
 
 const CUSTOMER_DETAIL_KEYS = [
-  'userId', 'email', 'verdict', 'health', 'tone', 'reason', 'lifecycle',
-  'now', 'devices', 'chores', 'billing', 'updatedAt',
+  'userId', 'email', 'wechatId', 'contact', 'notes', 'verdict', 'health', 'tone', 'reason',
+  'lifecycle', 'now', 'devices', 'chores', 'billing', 'updatedAt',
 ];
 
 export function assertCustomerDetail(value: unknown, path = 'customerDetail'): CustomerDetailDto {
@@ -425,6 +430,9 @@ export function assertCustomerDetail(value: unknown, path = 'customerDetail'): C
   return {
     userId: text(row, path, 'userId'),
     email: text(row, path, 'email'),
+    wechatId: optText(row, path, 'wechatId'),
+    contact: optText(row, path, 'contact'),
+    notes: optText(row, path, 'notes'),
     verdict: oneOf<CustomerVerdict>(row, path, 'verdict', CUSTOMER_VERDICTS),
     health: oneOf<CustomerHealthWord>(row, path, 'health', CUSTOMER_HEALTH_WORDS),
     tone: oneOf<Tone>(row, path, 'tone', TONES),

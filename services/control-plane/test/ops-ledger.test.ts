@@ -142,10 +142,10 @@ describe('ops ledger, month close, live FX', () => {
     vi.mocked(globalThis.fetch).mockImplementation(accessFetch);
   });
 
-  it('posts a USD entry using the stored rate and computes cnyMinor', async () => {
+  it('posts a USD cost using the stored rate and computes cnyMinor', async () => {
     await seedRate(DAY(), 'USD', 7.2);
     const res = await ops('ledger', json({
-      kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-1',
+      kind: 'cost', category: 'server', subjectType: 'node', subjectId: NODE,
       amountMinor: 1000, currency: 'usd', month: MONTH(),
     }));
     expect(res.status).toBe(201);
@@ -160,6 +160,48 @@ describe('ops ledger, month close, live FX', () => {
       "SELECT action FROM ops_audit WHERE target_id = ? AND action = 'ledger.create'",
     ).bind(row.id).first<{ action: string }>();
     expect(audit?.action).toBe('ledger.create');
+  });
+
+  it('rejects USD revenue with 收款只收人民币', async () => {
+    await seedRate(DAY(), 'USD', 7.2);
+    const res = await ops('ledger', json({
+      kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-1',
+      amountMinor: 1000, currency: 'USD', month: MONTH(),
+    }));
+    expect(res.status).toBe(400);
+    const body = await res.json() as { error: { code: string; message: string } };
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+    expect(body.error.message).toBe('收款只收人民币');
+  });
+
+  it('defaults omitted currency to CNY for revenue and USD for cost', async () => {
+    await seedRate(DAY(), 'USD', 7.2);
+    const revenue = await ops('ledger', json({
+      kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-1',
+      amountMinor: 500, month: MONTH(),
+    }));
+    expect(revenue.status).toBe(201);
+    expect(assertLedgerEntry(await revenue.json()).currency).toBe('CNY');
+    const cost = await ops('ledger', json({
+      kind: 'cost', category: 'server', subjectType: 'node', subjectId: NODE,
+      amountMinor: 400, month: MONTH(),
+    }));
+    expect(cost.status).toBe(201);
+    expect(assertLedgerEntry(await cost.json()).currency).toBe('USD');
+  });
+
+  it('rejects PATCH that tries to change currency', async () => {
+    const created = await ops('ledger', json({
+      kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-1',
+      amountMinor: 100, currency: 'CNY', month: MONTH(),
+    }));
+    expect(created.status).toBe(201);
+    const entry = assertLedgerEntry(await created.json());
+    const patch = await ops(`ledger/${entry.id}`, json({ currency: 'USD' }, 'PATCH'));
+    expect(patch.status).toBe(400);
+    expect((await patch.json() as { error: { code: string } }).error.code).toBe('VALIDATION_ERROR');
+    const listed = assertList(await (await ops(`ledger?month=${MONTH()}`)).json(), assertLedgerEntry);
+    expect(listed.items.find((row) => row.id === entry.id)?.currency).toBe('CNY');
   });
 
   it('returns 409 FX_RATE_MISSING when no rate exists for a non-CNY currency', async () => {

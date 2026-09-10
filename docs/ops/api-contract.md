@@ -34,8 +34,9 @@
 | `GET nodes/{name}/bindings` | `NodeBindingsDto` |
 | `GET nodes/{name}/jobs`、`POST nodes/{name}/jobs` | `ListDto<JobDto>` / `JobDto` |
 | `PATCH nodes/{name}/profile` | `NodeDetailDto` |
-| `GET customers?cursor&limit&focus&since` | `ListDto<CustomerSummaryDto>` |
-| `GET customers/{id}` | `CustomerDetailDto`（`devices[]` 带每台设备的 live 字段：`connected`、`selectedServer`、`lastSeenAt`、`lastFailAt/Code/Node`，来自 `ops_device_status`） |
+| `GET customers?cursor&limit&focus&q&since` | `ListDto<CustomerSummaryDto>`（`wechatId`。`q` 按 email 或 wechat_id 子串过滤，大小写不敏感；缺省/空 `q` 行为与原来相同） |
+| `GET customers/{id}` | `CustomerDetailDto`（`wechatId`、`contact`、`notes` 来自 `users`；`devices[]` 带每台设备的 live 字段：`connected`、`selectedServer`、`lastSeenAt`、`lastFailAt/Code/Node`，来自 `ops_device_status`） |
+| `POST users/onboard` | 已注册写 `users.wechat_id/contact/notes`，`pendingProfile: false`；未注册把这三项写在 `signup_allowlist` 上，`pendingProfile: true`，首次注册带到 `users`。其余 legacy 响应字段不变 |
 | `GET customers/{id}/connections?deviceId=` | `ListDto<ConnectionEventDto>`（`deviceId` 可选，按设备过滤） |
 | `GET customers/{id}/activity?range` | `ListDto<ActivityHourDto>` |
 | `GET customers/{id}/destinations?range` | `ListDto<DestinationRowDto>` |
@@ -63,8 +64,8 @@
 | `GET audit?before&beforeId&limit&targetId&actorEmail` | `AuditListDto` (`{ entries, hasMore, nextBefore, nextBeforeId }`) |
 | `GET system/health` | `SystemHealthDto`（`backfill` 为 `BackfillHealthDto`，flatten/project 游标都追上后为 `null`） |
 | `GET ledger?month=` | `ListDto<LedgerEntryDto>`，最新在前。`month` 为 `YYYY-MM`，缺省当月 |
-| `POST ledger` | 201 `LedgerEntryDto`。body `{ kind, category, subjectType, subjectId?, amountMinor, currency, month, paidAt?, note?, fxDate? }`。`cnyMinor` 按 `fxDate`（缺省当天）已存汇率换算；非 CNY 且无汇率时 409 `FX_RATE_MISSING`。目标月已锁定则 409 `MONTH_CLOSED` |
-| `PATCH ledger/{id}` | `LedgerEntryDto`。只接受 `{ note?, paidAt?, subjectType?, subjectId? }`；月已锁定 409 `MONTH_CLOSED` |
+| `POST ledger` | 201 `LedgerEntryDto`。body `{ kind, category, subjectType, subjectId?, amountMinor, currency?, month, paidAt?, note?, fxDate? }`。`currency` 可省略：`revenue`/`refund`/`credit` 缺省 `CNY`，`cost` 缺省 `USD`。收款三类必须是 `CNY`，否则 400 `VALIDATION_ERROR`「收款只收人民币」。`cnyMinor` 按 `fxDate`（缺省当天）已存汇率换算；非 CNY 且无汇率时 409 `FX_RATE_MISSING`。目标月已锁定则 409 `MONTH_CLOSED` |
+| `PATCH ledger/{id}` | `LedgerEntryDto`。只接受 `{ note?, paidAt?, subjectType?, subjectId? }`，不能改 `currency`；月已锁定 409 `MONTH_CLOSED` |
 | `POST ledger/{id}/reverse` | 201 `LedgerEntryDto`。在当前月写入一笔相反效果（`cnyMinor` 取反），`reverses` / 原行 `reversedBy` 互指。锁定月也允许——这就是冲正的意义 |
 | `GET months/{month}` | `MonthSummaryDto`。收入 = Σ(revenue+credit)−Σ(refund)；成本 = Σ cost；客户成本 = 名下 Claude/ChatGPT 账号成本 + 该月该节点/线路字节占比摊到的 server/home_line 成本。用量缺测或有字节无成本时 `pending: true` 且客户 `marginCnyMinor` 为 null |
 | `POST months/{month}/close` | `MonthSummaryDto`。body `{ notes? }`。已锁定 409 `MONTH_CLOSED`，写入当时的汇总数字 |

@@ -180,6 +180,7 @@ const nodeDetail = () => ({
 const customerSummary = () => ({
   userId: 'u-1',
   email: 'a@example.com',
+  wechatId: 'wxid_alice',
   verdict: 'unreachable' as const,
   health: '连不上' as const,
   tone: 'sev' as const,
@@ -202,6 +203,9 @@ const customerSummary = () => ({
 const customerDetail = () => ({
   userId: 'u-1',
   email: 'a@example.com',
+  wechatId: 'wxid_alice',
+  contact: 'alice',
+  notes: 'vip',
   verdict: 'ok' as const,
   health: '正常' as const,
   tone: 'ok' as const,
