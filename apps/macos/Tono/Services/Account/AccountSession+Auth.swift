@@ -11,7 +11,11 @@ extension AccountSession {
         hasStartedRestore = true
         state = .restoring
         do {
-            if var journal = UpdateHandoffStore.load() {
+            if let journal = try? UpdateHandoffStore.recordFirstLaunchMigration(
+                currentAppVersion: Bundle.main.object(
+                    forInfoDictionaryKey: "CFBundleShortVersionString"
+                ) as? String ?? ""
+            ) {
                 ConnectionTelemetryBuffer.shared.record(
                     "updateResumeBegin",
                     stage: journal.phase.rawValue,
@@ -19,8 +23,6 @@ extension AccountSession {
                     generation: Int(journal.connectionGeneration),
                     updateResume: true
                 )
-                journal = journal.advancing(to: .firstLaunchMigration)
-                try? UpdateHandoffStore.write(journal)
             }
             // Crash recovery can invoke networksetup and helper IPC. Run it on
             // the serialized runtime actor so the first window paints

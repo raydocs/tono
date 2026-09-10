@@ -30,6 +30,8 @@ pub use protected_connectivity::{
     PostLockDecision, ProtectedFailureCode, TUN_PROBE_ORIGINS, classify_exhausted_data_plane,
     classify_post_lock,
 };
-pub use update_journal::{UpdateHandoffJournal, UpdateHandoffPhase};
+pub use update_journal::{
+    UpdateHandoffJournal, UpdateHandoffPhase, commit_verified_recovery, record_install_started,
+};
 pub use credentials::{CredentialKey, CredentialStore};
 pub use node::{EXIT_GROUP_NAME, NodeProtocol, NodeRejection, ValidatedNode};

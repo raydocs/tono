@@ -1,9 +1,14 @@
 //! Windows update handoff journal. Compatible with the macOS contract.
+//!
+//! Each phase is advanced only by the owner that completed the matching
+//! operation. `prepare` writes `UpdatePrepared` and nothing later; jumping
+//! to `ConnectionQuiescing` or `Committed` from here is an illegal skip.
 
 use std::path::PathBuf;
 
 use tono_core::update_journal::{
-    self, UpdateHandoffJournal, UpdateHandoffPhase, advance_pending, journal_path, load, write_prepared,
+    self, UpdateHandoffJournal, UpdateHandoffPhase, advance_pending, commit_verified_recovery,
+    journal_path, load, record_first_launch_migration, write_prepared,
 };
 use tono_logging::{Type, logging};
 
@@ -33,25 +38,42 @@ pub fn save_prepared(journal: &UpdateHandoffJournal) -> std::io::Result<()> {
     write_prepared(&current_path(), journal)
 }
 
-pub fn begin_first_launch_migration() -> Option<UpdateHandoffJournal> {
-    if let Err(error) = advance_pending(&current_path(), UpdateHandoffPhase::FirstLaunchMigration) {
-        logging!(
-            warn,
-            Type::System,
-            "Tono: update migration not recorded; evidence retained: {error}"
-        );
-        return None;
-    }
-    load_pending()
+pub fn record_owner_phase(phase: UpdateHandoffPhase) -> std::io::Result<()> {
+    advance_pending(&current_path(), phase)
 }
 
-pub fn mark_committed() {
-    if let Err(error) = advance_pending(&current_path(), UpdateHandoffPhase::Committed) {
-        logging!(
-            warn,
-            Type::System,
-            "Tono: update commit refused; evidence retained: {error}"
-        );
+pub fn begin_first_launch_migration(current_app_version: &str) -> Option<UpdateHandoffJournal> {
+    match record_first_launch_migration(&current_path(), current_app_version) {
+        Ok(Some(journal))
+            if journal.phase == UpdateHandoffPhase::FirstLaunchMigration =>
+        {
+            Some(journal)
+        }
+        Ok(_) => None,
+        Err(error) => {
+            logging!(
+                warn,
+                Type::System,
+                "Tono: update migration not recorded; evidence retained: {error}"
+            );
+            None
+        }
+    }
+}
+
+/// New process: only a verified recovery (or an unprotected first launch that
+/// has already migrated) may commit. Persistence failure leaves the file.
+pub fn commit_if_verified(current_app_version: &str) -> bool {
+    match commit_verified_recovery(&current_path(), current_app_version) {
+        Ok(committed) => committed,
+        Err(error) => {
+            logging!(
+                warn,
+                Type::System,
+                "Tono: update commit refused; evidence retained: {error}"
+            );
+            false
+        }
     }
 }
 
@@ -62,10 +84,22 @@ pub fn prepare(
     was_connected: bool,
     keep_kill_switch: bool,
 ) -> UpdateHandoffJournal {
-    let mut journal = UpdateHandoffJournal::new(previous, next, generation, was_connected, keep_kill_switch);
-    journal.advance(UpdateHandoffPhase::ConnectionQuiescing);
-    // The command fills in metadata before the single fallible save_prepared.
-    journal
+    UpdateHandoffJournal::new(previous, next, generation, was_connected, keep_kill_switch)
 }
 
 pub use update_journal::{UpdateHandoffJournal as Journal, UpdateHandoffPhase as Phase};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prepare_stays_at_update_prepared() {
+        let journal = prepare("0.0.72", "0.0.73", 9, true, true);
+        assert_eq!(journal.phase, UpdateHandoffPhase::UpdatePrepared);
+        assert_eq!(journal.previous_app_version, "0.0.72");
+        assert_eq!(journal.next_app_version, "0.0.73");
+        assert!(journal.was_connected);
+        assert!(journal.keep_kill_switch_armed);
+    }
+}

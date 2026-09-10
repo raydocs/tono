@@ -39,7 +39,7 @@
 
 - 客户端准入 hy2：Windows `admit_node` / `proxy_endpoint_of` 与 macOS `validatedOwnedNode` / Helper UDP 放行在本分支落地；合进 `main` 之前 App 仍吃不进托管 hy2 块。macOS `ConfigParser` 的 `hy2://` 仍是手工 URL。
 - 连接失败只换下一座城市（macOS `rotateCatalogExitAfterConnectFailure`），不换同一座城市的备用传输。自动切换（G2.8）不做，直到家宽三网证明。
-- Windows 更新日记：`update_handoff.rs` 的 `prepare` 跳到 `ConnectionQuiescing`，`begin_first_launch_migration` 直接进 `FirstLaunchMigration`，`mark_committed` 跳过中间相位；`tono-core/src/update_journal.rs` 的 `allowed_next` 会判 Failed，随后 `mark_committed` 可能擦掉失败证据（issue #26）。
+- Windows 更新日记：`update_handoff.rs` 的 `prepare` 不再跳到 `ConnectionQuiescing`；所有者按相位推进，`commit_verified_recovery` 才允许删日记。真机 G3.3 之前不算过门。安装器入口写 `InstallStarted` 仍待 G3.2。
 - 客户更新源：`services/control-plane/public/appcast.xml` 0.0.67；`public/windows/latest.json` 0.0.34。
 
 **已开、未合、这一发要用的分支**

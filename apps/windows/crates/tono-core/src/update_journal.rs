@@ -89,9 +89,13 @@ impl UpdateHandoffJournal {
                     | (UpdatePrepared, ConnectionQuiescing)
                     | (ConnectionQuiescing, CleanShutdownCompleted)
                     | (CleanShutdownCompleted, ProtectedHandoffRecorded)
+                    // A machine that was not protected has no WFP handoff to record.
+                    | (CleanShutdownCompleted, InstallStarted)
                     | (ProtectedHandoffRecorded, InstallStarted)
                     | (InstallStarted, FirstLaunchMigration)
                     | (FirstLaunchMigration, ProtectionResuming)
+                    // Nothing to resume when the previous process was not protected.
+                    | (FirstLaunchMigration, Verified)
                     | (ProtectionResuming, Verified)
                     | (Verified, Committed)
                     | (_, Failed)
@@ -223,6 +227,103 @@ pub fn advance_pending(path: &Path, phase: UpdateHandoffPhase) -> io::Result<()>
         fs::remove_file(path)?;
     }
     Ok(())
+}
+
+/// Record a real failure without pretending a later success happened.
+/// An already-failed journal is left byte-for-byte; there is no journal to
+/// invent when the file is missing.
+pub fn fail_pending(path: &Path, code: &str, stage: &str) -> io::Result<()> {
+    let Some(mut journal) = load(path)? else {
+        return Ok(());
+    };
+    if journal.phase == UpdateHandoffPhase::Failed {
+        return Ok(());
+    }
+    journal.last_error_code = Some(code.into());
+    journal.last_error_stage = Some(stage.into());
+    journal.phase = UpdateHandoffPhase::Failed;
+    journal.updated_at_unix = unix_now();
+    write_atomic(path, &journal)
+}
+
+/// New process after a successful install. Only the binary whose version is
+/// the journal's `next_app_version` may enter `FirstLaunchMigration`. An old
+/// binary that is still running after `InstallStarted` (installer killed,
+/// user cancelled, rollback) records `Failed` and keeps the file.
+pub fn record_first_launch_migration(
+    path: &Path,
+    current_app_version: &str,
+) -> io::Result<Option<UpdateHandoffJournal>> {
+    let Some(journal) = load(path)? else {
+        return Ok(None);
+    };
+    if journal.phase == UpdateHandoffPhase::Failed {
+        return Ok(Some(journal));
+    }
+    if journal.next_app_version != current_app_version {
+        fail_pending(
+            path,
+            "TONO_UPDATE_INSTALL_ABORTED",
+            &format!("{:?}->FirstLaunchMigration", journal.phase),
+        )?;
+        return load(path);
+    }
+    advance_pending(path, UpdateHandoffPhase::FirstLaunchMigration)?;
+    load(path)
+}
+
+/// Installer process entry. Legal from a completed quiesce, a recorded
+/// protected handoff, or a retry that is already at `InstallStarted`.
+/// Missing file is not an update; do not invent a journal.
+pub fn record_install_started(path: &Path) -> io::Result<bool> {
+    let Some(journal) = load(path)? else {
+        return Ok(false);
+    };
+    match journal.phase {
+        UpdateHandoffPhase::InstallStarted => Ok(true),
+        UpdateHandoffPhase::CleanShutdownCompleted
+        | UpdateHandoffPhase::ProtectedHandoffRecorded => {
+            advance_pending(path, UpdateHandoffPhase::InstallStarted)?;
+            Ok(true)
+        }
+        UpdateHandoffPhase::Failed => Ok(false),
+        other => {
+            fail_pending(
+                path,
+                "TONO_JOURNAL_ILLEGAL_PHASE",
+                &format!("{other:?}->InstallStarted"),
+            )?;
+            Ok(false)
+        }
+    }
+}
+
+/// Persist Verified then Committed, and only then remove the file.
+/// Returns `Ok(false)` when there is no journal, the version does not match,
+/// or this process is not the owner of a verified recovery. Persistence
+/// failure leaves the file; it never reports commit.
+pub fn commit_verified_recovery(path: &Path, current_app_version: &str) -> io::Result<bool> {
+    let Some(journal) = load(path)? else {
+        return Ok(false);
+    };
+    if journal.next_app_version != current_app_version {
+        return Ok(false);
+    }
+    let unprotected_first_launch = journal.phase == UpdateHandoffPhase::FirstLaunchMigration
+        && !journal.was_connected
+        && !journal.keep_kill_switch_armed;
+    let can_commit = matches!(
+        journal.phase,
+        UpdateHandoffPhase::ProtectionResuming | UpdateHandoffPhase::Verified
+    ) || unprotected_first_launch;
+    if !can_commit {
+        return Ok(false);
+    }
+    if journal.phase != UpdateHandoffPhase::Verified {
+        advance_pending(path, UpdateHandoffPhase::Verified)?;
+    }
+    advance_pending(path, UpdateHandoffPhase::Committed)?;
+    Ok(true)
 }
 
 fn unix_now() -> u64 {
@@ -425,5 +526,160 @@ mod tests {
             journal.last_error_code.as_deref(),
             Some("TONO_JOURNAL_ILLEGAL_PHASE")
         );
+    }
+
+    const PROTECTED_OWNERS: [UpdateHandoffPhase; 7] = [
+        UpdateHandoffPhase::ConnectionQuiescing,
+        UpdateHandoffPhase::CleanShutdownCompleted,
+        UpdateHandoffPhase::ProtectedHandoffRecorded,
+        UpdateHandoffPhase::InstallStarted,
+        UpdateHandoffPhase::FirstLaunchMigration,
+        UpdateHandoffPhase::ProtectionResuming,
+        UpdateHandoffPhase::Verified,
+    ];
+
+    #[test]
+    fn owner_replay_advances_in_order_and_crash_at_each_phase_never_commits() {
+        for (crash_after, stopped_at) in PROTECTED_OWNERS.iter().copied().enumerate() {
+            let dir = env::temp_dir().join(format!(
+                "tono-journal-crash-{}-{}",
+                std::process::id(),
+                crash_after
+            ));
+            let path = journal_path(&dir);
+            write_atomic(
+                &path,
+                &UpdateHandoffJournal::new("0.0.72", "0.0.73", 4, true, true),
+            )
+            .unwrap();
+            for phase in PROTECTED_OWNERS.iter().copied().take(crash_after + 1) {
+                advance_pending(&path, phase).unwrap();
+            }
+            assert_eq!(load(&path).unwrap().unwrap().phase, stopped_at);
+            assert!(path.exists());
+            if stopped_at != UpdateHandoffPhase::Verified {
+                // A crashed owner must not let a later commit skip Verified.
+                assert!(advance_pending(&path, UpdateHandoffPhase::Committed).is_err());
+                assert_eq!(
+                    load(&path).unwrap().unwrap().phase,
+                    UpdateHandoffPhase::Failed
+                );
+                assert!(path.exists());
+            }
+            fs::remove_dir_all(&dir).unwrap();
+        }
+        let dir = env::temp_dir().join(format!("tono-journal-owners-ok-{}", std::process::id()));
+        let path = journal_path(&dir);
+        write_atomic(
+            &path,
+            &UpdateHandoffJournal::new("0.0.72", "0.0.73", 4, true, true),
+        )
+        .unwrap();
+        for phase in PROTECTED_OWNERS {
+            advance_pending(&path, phase).unwrap();
+            assert_eq!(load(&path).unwrap().unwrap().phase, phase);
+        }
+        assert!(commit_verified_recovery(&path, "0.0.73").unwrap());
+        assert!(!path.exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn unprotected_first_launch_commits_only_after_verified() {
+        let dir = env::temp_dir().join(format!("tono-journal-unprot-{}", std::process::id()));
+        let path = journal_path(&dir);
+        write_atomic(
+            &path,
+            &UpdateHandoffJournal::new("0.0.72", "0.0.73", 1, false, false),
+        )
+        .unwrap();
+        for phase in [
+            UpdateHandoffPhase::ConnectionQuiescing,
+            UpdateHandoffPhase::CleanShutdownCompleted,
+            UpdateHandoffPhase::InstallStarted,
+            UpdateHandoffPhase::FirstLaunchMigration,
+        ] {
+            advance_pending(&path, phase).unwrap();
+            assert!(!commit_verified_recovery(&path, "0.0.72").unwrap());
+            assert_eq!(load(&path).unwrap().unwrap().phase, phase);
+        }
+        assert!(commit_verified_recovery(&path, "0.0.73").unwrap());
+        assert!(!path.exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn commit_verified_recovery_rejects_wrong_version_and_failed_journal() {
+        let dir = env::temp_dir().join(format!("tono-journal-cvr-{}", std::process::id()));
+        let path = journal_path(&dir);
+        let mut journal = UpdateHandoffJournal::new("0.0.72", "0.0.73", 1, true, true);
+        journal.advance(UpdateHandoffPhase::ConnectionQuiescing);
+        journal.advance(UpdateHandoffPhase::CleanShutdownCompleted);
+        journal.advance(UpdateHandoffPhase::ProtectedHandoffRecorded);
+        journal.advance(UpdateHandoffPhase::InstallStarted);
+        journal.advance(UpdateHandoffPhase::FirstLaunchMigration);
+        journal.advance(UpdateHandoffPhase::ProtectionResuming);
+        write_atomic(&path, &journal).unwrap();
+        assert!(!commit_verified_recovery(&path, "0.0.72").unwrap());
+        assert_eq!(
+            load(&path).unwrap().unwrap().phase,
+            UpdateHandoffPhase::ProtectionResuming
+        );
+        journal.advance(UpdateHandoffPhase::Failed);
+        write_atomic(&path, &journal).unwrap();
+        assert!(!commit_verified_recovery(&path, "0.0.73").unwrap());
+        assert_eq!(load(&path).unwrap().unwrap().phase, UpdateHandoffPhase::Failed);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn old_binary_after_install_started_fails_and_keeps_the_file() {
+        let dir = env::temp_dir().join(format!("tono-journal-oldbin-{}", std::process::id()));
+        let path = journal_path(&dir);
+        let mut journal = UpdateHandoffJournal::new("0.0.72", "0.0.73", 1, true, true);
+        journal.advance(UpdateHandoffPhase::ConnectionQuiescing);
+        journal.advance(UpdateHandoffPhase::CleanShutdownCompleted);
+        journal.advance(UpdateHandoffPhase::ProtectedHandoffRecorded);
+        write_atomic(&path, &journal).unwrap();
+        assert!(record_install_started(&path).unwrap());
+        let loaded = record_first_launch_migration(&path, "0.0.72").unwrap().unwrap();
+        assert_eq!(loaded.phase, UpdateHandoffPhase::Failed);
+        assert_eq!(
+            loaded.last_error_code.as_deref(),
+            Some("TONO_UPDATE_INSTALL_ABORTED")
+        );
+        assert!(path.exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn new_binary_records_first_launch_only_from_install_started() {
+        let dir = env::temp_dir().join(format!("tono-journal-newbin-{}", std::process::id()));
+        let path = journal_path(&dir);
+        write_atomic(
+            &path,
+            &UpdateHandoffJournal::new("0.0.72", "0.0.73", 1, true, true),
+        )
+        .unwrap();
+        assert!(!record_install_started(&path).unwrap());
+        assert_eq!(
+            load(&path).unwrap().unwrap().phase,
+            UpdateHandoffPhase::Failed
+        );
+        fs::remove_dir_all(&dir).unwrap();
+
+        let path = journal_path(&dir);
+        let mut journal = UpdateHandoffJournal::new("0.0.72", "0.0.73", 1, true, true);
+        journal.advance(UpdateHandoffPhase::ConnectionQuiescing);
+        journal.advance(UpdateHandoffPhase::CleanShutdownCompleted);
+        journal.advance(UpdateHandoffPhase::ProtectedHandoffRecorded);
+        write_atomic(&path, &journal).unwrap();
+        assert!(record_install_started(&path).unwrap());
+        assert!(record_install_started(&path).unwrap());
+        let launched = record_first_launch_migration(&path, "0.0.73")
+            .unwrap()
+            .unwrap();
+        assert_eq!(launched.phase, UpdateHandoffPhase::FirstLaunchMigration);
+        fs::remove_dir_all(dir).unwrap();
     }
 }

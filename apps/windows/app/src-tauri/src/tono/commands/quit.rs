@@ -110,30 +110,91 @@ pub async fn stop_service_on_unprotected_quit() {
 
 #[tauri::command]
 pub async fn tono_prepare_update(
+    app: AppHandle,
     state: tauri::State<'_, Arc<TonoState>>,
     next_version: String,
 ) -> Result<(), String> {
-    let inner = state.lock().await;
     if next_version.trim().is_empty() {
         return Err("TONO_UPDATE_VERSION_REQUIRED".into());
     }
     let previous = env!("CARGO_PKG_VERSION");
-    let mut journal = crate::tono::update_handoff::prepare(
-        previous,
-        next_version.trim(),
-        inner.connect_generation,
-        inner.fsm.status().is_connected,
-        inner.fsm.kill_switch_armed(),
-    );
-    journal.selected_node_anonymous_id = inner.selected_node.clone();
-    journal.catalog_revision = Some(inner.catalog_tracker.current_revision());
-    journal.helper_protocol_version = tono_service_protocol::PROTOCOL_REVISION.to_string();
-    journal.build_commit = option_env!("VERGEN_GIT_SHA")
-        .or(option_env!("GITHUB_SHA"))
-        .unwrap_or("")
-        .to_string();
+    let (mut journal, connected, keep_kill_switch) = {
+        let inner = state.lock().await;
+        let journal = crate::tono::update_handoff::prepare(
+            previous,
+            next_version.trim(),
+            inner.connect_generation,
+            inner.fsm.status().is_connected,
+            inner.fsm.kill_switch_armed(),
+        );
+        (
+            journal,
+            inner.fsm.status().is_connected || inner.fsm.status().is_connecting,
+            inner.fsm.kill_switch_armed(),
+        )
+    };
+    journal.selected_node_anonymous_id = {
+        let inner = state.lock().await;
+        inner.selected_node.clone()
+    };
+    {
+        let inner = state.lock().await;
+        journal.catalog_revision = Some(inner.catalog_tracker.current_revision());
+        journal.helper_protocol_version = tono_service_protocol::PROTOCOL_REVISION.to_string();
+        journal.build_commit = option_env!("VERGEN_GIT_SHA")
+            .or(option_env!("GITHUB_SHA"))
+            .unwrap_or("")
+            .to_string();
+        journal.was_connected = connected;
+        journal.keep_kill_switch_armed = keep_kill_switch;
+    }
     crate::tono::update_handoff::save_prepared(&journal)
         .map_err(|error| format!("TONO_UPDATE_JOURNAL: {error}"))?;
+
+    fn record(phase: crate::tono::update_handoff::Phase) -> Result<(), String> {
+        crate::tono::update_handoff::record_owner_phase(phase)
+            .map_err(|error| format!("TONO_UPDATE_JOURNAL: {error}"))
+    }
+
+    record(crate::tono::update_handoff::Phase::ConnectionQuiescing)?;
+    {
+        let mut inner = state.lock().await;
+        // Keep WFP armed across the install; this is not a user Disconnect.
+        inner.invalidate_connection(false);
+        inner.tasks.abort_catalog_sync();
+    }
+    if connected {
+        if let Err(error) = service::tono_stop_core(false).await {
+            let _ = record(crate::tono::update_handoff::Phase::Failed);
+            return Err(format!(
+                "TONO_UPDATE_JOURNAL: core did not stop before install: {error}"
+            ));
+        }
+        if let Err(error) = service::tono_restore_protected_dns().await {
+            logging!(
+                warn,
+                Type::System,
+                "Tono: update quiesce DNS restore failed (barrier stays armed): {error}"
+            );
+        }
+        let mut inner = state.lock().await;
+        inner.controller_secret = None;
+        inner.controller_port = None;
+        if inner.fsm.status().is_connected {
+            let _ = inner.fsm.tunnel_died();
+        } else if keep_kill_switch {
+            inner.fsm.initial_release_failed();
+        }
+        super::emit_status(&app, &super::status_of(&inner));
+    }
+
+    record(crate::tono::update_handoff::Phase::CleanShutdownCompleted)?;
+    if keep_kill_switch {
+        record(crate::tono::update_handoff::Phase::ProtectedHandoffRecorded)?;
+    }
+    // Sparkle-equivalent: this process is about to invoke the installer and exit.
+    // G3.2 still moves the durable write into NSIS itself.
+    record(crate::tono::update_handoff::Phase::InstallStarted)?;
     Ok(())
 }
 
