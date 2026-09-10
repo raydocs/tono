@@ -508,6 +508,24 @@ describe('ops ledger, month close, live FX', () => {
     }));
     expect(tooEarly.status).toBe(400);
   });
+
+  it('lists a priced in-service node without a cost entry as a bill without ledger', async () => {
+    const month = MONTH();
+    const t = tnow();
+    await db().prepare(
+      `INSERT INTO ops_node_profiles(id, catalog_name, status, price, currency, created_at, updated_at)
+       VALUES('p-recon-1', 'Osaka · Recon', 'active', 80, 'USD', ?, ?)`,
+    ).bind(t, t).run();
+    const summary = assertMonthSummary(await (await ops(`months/${month}`)).json());
+    expect(summary.unreconciledBills).toBe(1);
+    expect(summary.reconciliation?.billsWithoutLedger).toEqual([
+      expect.objectContaining({
+        subjectType: 'node',
+        subjectId: 'Osaka · Recon',
+        reason: 'no_ledger',
+      }),
+    ]);
+  });
 });
 
 function csvEntry(over: Partial<LedgerEntryDto>): LedgerEntryDto {
