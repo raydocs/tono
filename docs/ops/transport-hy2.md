@@ -95,3 +95,17 @@
 | 经 hy2 到 `google.com:443` | **189ms 通**（直连 Google 仍超时） |
 
 结论：大陆 UDP 到这家美国机可用。Panstar 东京仍被商家入站 UDP 拦住。自动切换默认关，直到家宽三网对 **这台 Dedirock**（或放行后的 Panstar）再测一轮。生产目录暂不塞 hy2 块（等 G2.6/G2.7 合进 `main`；本分支已做 Windows/macOS 准入与 Helper UDP 放行）。
+
+## hy2 身份：全量 UUID，不是共享口令（G2.5）
+
+目录合同是 `password: {{TONO_CLIENT_UUID}}`。Dedirock 手工 hy2 原先是 `auth.type: password` 加一份不在 42 个 VLESS UUID 里的共享口令，所以**客户 UUID 一个都认证不上**。手选「备用通道」对客户等于无效。
+
+正确做法：
+
+- 只读 `/opt/tono-xray/current/config.json` 的全部 VLESS `id`，写成 `/opt/tono-hy2/auth-allow.sha256`（只存 SHA-256）。
+- 本机 sidecar `tono-hy2-auth` 绑 `127.0.0.1:18765`，Hysteria2 `auth.type: http`。
+- 若 `config.yaml` / `/opt/tono-hy2/auth` 里还有旧共享口令，hash 也进 allowlist，ops 探测 yaml 仍能用。
+- `--hy2-sync-identities` 默认 dry-run；`--apply` 等 18765 listen 再重启 `tono-hy2`，**不 stop / 不改 `tono-xray`，不覆盖已有 `tono-hy2.service` 单元**。
+- 口令与 UUID 不准拷出盒子、不准进仓库。机上用 UUID 打 HTTP 鉴权；随机口令必须拒。
+
+东京不要跑 `--apply`：入站 UDP 仍被商家拦，改鉴权也测不出客户路径。生产目录仍不 PUT hy2 块。

@@ -89,4 +89,23 @@ class Hy2StaysOptIn < Minitest::Test
     assert_match(/subjectAltName=DNS:\$CERT_CN/, hy2)
     assert_match(/This script must never stop, replace, or rewrite tono-xray/, hy2)
   end
+
+  def test_hy2_auth_is_http_over_every_xray_uuid_not_the_first_password
+    hy2 = File.read(HY2_REMOTE)
+    source = File.read(SCRIPT)
+    refute_match(/clients\[0\]\["id"\]/, hy2)
+    refute_match(/password: \$password/, hy2)
+    assert_match(/type: http/, hy2)
+    assert_match(/sync-identities/, hy2)
+    refute_match(/type: command/, hy2)
+    assert_match(/127\.0\.0\.1:18765/, hy2)
+    assert_match(/hy2_sync_identities/, source)
+    assert_match(/--hy2-sync-identities/, source)
+    assert_match(/wait_localhost_tcp 18765/, hy2)
+    assert_match(/pre-http-auth/, hy2)
+    assert_match(/knownUuidAccepted/, hy2)
+    assert_match(/this path never rewrites tono-hy2\.service/, hy2)
+    refute_match(/private_output_path!.*hy2_sync/, source)
+    assert_match(/Identity sync never writes a catalog source/, source)
+  end
 end

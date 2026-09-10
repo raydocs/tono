@@ -242,6 +242,7 @@ options = {
   port: 443,
   hy2: false,
   hy2_port: 443,
+  hy2_sync_identities: false,
   target: DEFAULT_REALITY_TARGET,
   allow_unusable_servername: false,
   apply: false,
@@ -254,6 +255,8 @@ parser = OptionParser.new do |flags|
     plan succeeds, then performs an isolated authenticated Reality data-plane test.
     --hy2 is a separate complement: it adds Hysteria2 UDP beside an existing
     tono-xray TCP service and never stops or rewrites Reality. Default is TCP only.
+    --hy2-sync-identities copies every VLESS UUID into hy2 HTTP auth on a node
+    that already has tono-hy2; it does not reinstall hy2 or touch xray.
   USAGE
   flags.on("--ssh ALIAS", "SSH config alias or user@host (known host key required)") { |value| options[:ssh] = value }
   flags.on("--name NAME", "Unique managed node display name") { |value| options[:name] = value }
@@ -264,6 +267,7 @@ parser = OptionParser.new do |flags|
   flags.on("--port PORT", Integer, "Reality TCP port (default: 443)") { |value| options[:port] = value }
   flags.on("--hy2", "Add Hysteria2 UDP beside existing Reality TCP; never the default") { options[:hy2] = true }
   flags.on("--hy2-port PORT", Integer, "Hysteria2 UDP port (default: 443)") { |value| options[:hy2_port] = value }
+  flags.on("--hy2-sync-identities", "Copy every xray UUID into hy2 auth; never reinstalls hy2") { options[:hy2_sync_identities] = true }
   flags.on("--output PATH", "Private one-node YAML path (default: Tono Operations catalog.d)") { |value| options[:output] = value }
   flags.on("--apply", "Install, verify, and retain the node; publication remains a separate approval") { options[:apply] = true }
 end
@@ -295,6 +299,32 @@ begin
       fail!("--expected-exit-ipv4 must be an IPv4 address, not a hostname.")
     end
   end
+  fail!("--hy2-sync-identities cannot be combined with a fresh --hy2 install.") if options[:hy2] && options[:hy2_sync_identities]
+
+  repo_root = File.expand_path("../..", __dir__)
+  hy2_script_path = File.join(repo_root, "tooling/scripts/remote/manage-tono-hy2-node.sh")
+  hy2_script = File.binread(hy2_script_path)
+
+  if options[:hy2_sync_identities]
+    # Identity sync never writes a catalog source; skip the private YAML gate.
+    result = run_remote(
+      ssh_target,
+      hy2_script,
+      options[:apply] ? "sync-identities" : "sync-identities-dry-run",
+      [],
+    )
+    fail!("tono-xray must stay running; refusing hy2 identity sync.") unless result["xrayUntouched"] == true
+    if options[:apply]
+      puts("Hy2 identity sync applied. xray pid #{result["xrayPid"]} unchanged. allowlist #{result["allowlist"]}.")
+      fail!("hy2 HTTP auth did not accept a known xray UUID.") unless result["knownUuidAccepted"] == true
+      fail!("hy2 HTTP auth accepted a random password.") unless result["randomRejected"] == true
+    else
+      puts("Hy2 identity dry-run: #{result["xrayClients"]} xray clients would be hashed into hy2 HTTP auth. xray pid #{result["xrayPid"]} unchanged.")
+      puts("Re-run with --hy2-sync-identities --apply to write the allowlist and restart tono-hy2 only.")
+    end
+    exit(0)
+  end
+
   slug = node_name.downcase.gsub(/[^a-z0-9]+/, "-").gsub(/\A-|-\z/, "")
   slug = "node-#{SecureRandom.hex(4)}" if slug.empty?
   output_name = options[:hy2] ? "#{slug}-hy2.yaml" : "#{slug}.yaml"
@@ -304,11 +334,8 @@ begin
     output_name,
   )
   output_path = private_output_path!(options[:output] || default_output)
-  repo_root = File.expand_path("../..", __dir__)
   remote_script_path = File.join(repo_root, "tooling/scripts/remote/manage-tono-reality-node.sh")
   remote_script = File.binread(remote_script_path)
-  hy2_script_path = File.join(repo_root, "tooling/scripts/remote/manage-tono-hy2-node.sh")
-  hy2_script = File.binread(hy2_script_path)
 
   if options[:hy2]
     preflight = run_remote(ssh_target, hy2_script, "preflight", [options[:hy2_port]])

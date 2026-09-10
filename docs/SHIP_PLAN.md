@@ -34,7 +34,7 @@
 - 目录与保护已经按传输层区分端点：macOS `ConfigPipeline.DialEndpoint.transport`；Windows `ProxyEndpoint.protocol` 含 `Udp`。hy2 要接的是这两处，不是新造一套防火墙。
 - 控制面目录合同已接受同节点 hy2 块（`password: {{TONO_CLIENT_UUID}}` + fingerprint，禁止 skip-cert-verify；迁移 0072）。**生产目录仍不塞块**，直到客户端准入合入。
 - 杭州 `47.110.84.71` 只出站：东京 VLESS TCP 通；Dedirock hy2 UDP 握手 5/5 且经 hy2 到 Google 通。Panstar 东京入站 UDP 被商家拦住。自动切换默认关。
-- **2026-09-11：** 杭州阿里云（非移动）打东京/Dedirock Reality dest SNI，拿到微软 `r.bing.com` 证书。出口没挂。「移动用不了」要用移动家宽测；东京 hy2 仍进不来，大陆 hy2 备用目前是 Dedirock。
+- **2026-09-11：** 杭州阿里云（非移动）打东京/Dedirock Reality dest SNI，拿到微软 `r.bing.com` 证书。出口没挂。「移动用不了」要用移动家宽测；东京 hy2 仍进不来，大陆 hy2 备用目前是 Dedirock。Dedirock 手工 hy2 原先是共享口令，目录 UUID 登不上；本分支改为 HTTP 鉴权吃全部 VLESS UUID。
 
 **还没有的（这一发要补）**
 
@@ -208,9 +208,9 @@
 
 - 目标：provisioner 增加 hy2 角色，不拆现有 Reality TCP。
 - 文件：`tooling/scripts/provision-reality-node.rb`（现技能明确「不要为 Reality 开 UDP」——hy2 是**另一次**、显式的 `--hy2` 路径，默认不加）；systemd 单元、证书 10 年自签带 SAN，指纹写回私有 YAML。UFW 仍不擅自改。
-- 密码派生：目录块仍用 `{{TONO_CLIENT_UUID}}`。节点 `auth.password` 目前取现有 xray 的第一个 client UUID，**还不是**全量账户同步；舰队多用户 hy2 身份仍待 hub。不要对已有手工 hy2 的 Dedirock / 东京再跑 `--hy2 --apply`。
-- 唯一测试：provisioner dry-run 在「未传 `--hy2`」时仍然不开放 UDP（Reality 远程脚本无 UDP listen；默认 `hy2: false`）。
-- 本分支已落地 opt-in 补装路径。验收机仍待老板。
+- 密码派生：目录块仍用 `{{TONO_CLIENT_UUID}}`。节点 hy2 走 **`auth.type: http`**（`127.0.0.1:18765`），allowlist 是全部 VLESS UUID 的 SHA-256，外加本机遗留共享口令的 hash（ops 探测仍能用）。禁止 `auth.type: password` 只吃第一个 UUID；禁止 `command`（口令进 `ps`）。已有手工 hy2 用 `--hy2-sync-identities`（默认 dry-run；`--apply` 只写 hy2 鉴权并重启 `tono-hy2` / `tono-hy2-auth`）。**不要**对 Dedirock / 东京再跑 `--hy2 --apply`。
+- 唯一测试：provisioner dry-run 在「未传 `--hy2`」时仍然不开放 UDP；hy2 远程脚本不含 `clients[0]["id"]` / `password: $password`，含 `type: http` 与 `sync-identities`。
+- 本分支已落地 opt-in 补装路径与身份同步。Dedirock 要 `--apply` 之后，客户 UUID 才能登 hy2；东京 UDP 仍被商家拦，不要在那台上 apply。
 
 **G2.6 Windows 准入 hy2** — Grok · M
 
