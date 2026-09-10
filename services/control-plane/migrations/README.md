@@ -41,4 +41,5 @@ Ops tables after the sequence was unique. Applied in numeric order:
 - `0053_ops_ledger.sql` — ledger entries, month close, daily FX rates
 - `0054_users_wechat_id.sql` — `users.wechat_id` for operator WeChat contact
 - `0055_signup_allowlist_profile.sql` — `signup_allowlist.wechat_id` / `contact` / `notes` for onboard-before-register
+- `0056_ops_first_connected_at.sql` — `ops_customer_status.first_connected_at` for the onboarding funnel
 - `0057_ops_probe_unreachable.sql` — `ops_node_status.verdict` CHECK adds `probe_unreachable`

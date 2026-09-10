@@ -65,10 +65,10 @@ export type NodeHealthWord = (typeof NODE_HEALTH_WORDS)[number];
  * evidence: silence is `unreported`, not health (R1 — missing data is never
  * green).
  */
-export const CUSTOMER_VERDICTS = ['unreachable', 'unstable', 'unreported', 'offline', 'ok'] as const;
+export const CUSTOMER_VERDICTS = ['unreachable', 'unstable', 'never_used', 'unreported', 'offline', 'ok'] as const;
 export type CustomerVerdict = (typeof CUSTOMER_VERDICTS)[number];
 
-export const CUSTOMER_HEALTH_WORDS = ['连不上', '不稳', '未上报', '离线', '正常'] as const;
+export const CUSTOMER_HEALTH_WORDS = ['连不上', '不稳', '还没用起来', '未上报', '离线', '正常'] as const;
 export type CustomerHealthWord = (typeof CUSTOMER_HEALTH_WORDS)[number];
 
 /** The six palette roles. Colour never carries meaning alone (R5). */
@@ -82,6 +82,13 @@ export type NodeLifecycle = (typeof NODE_LIFECYCLES)[number];
 /** 在用 / 已停用 / 已到期 — likewise neutral. */
 export const CUSTOMER_LIFECYCLES = ['active', 'suspended', 'expired'] as const;
 export type CustomerLifecycle = (typeof CUSTOMER_LIFECYCLES)[number];
+
+/**
+ * Onboarding funnel. Order is the path from invite to first successful
+ * connect; a person occupies exactly one stage.
+ */
+export const FUNNEL_STAGES = ['invited', 'registered', 'device_added', 'reported', 'connected'] as const;
+export type FunnelStage = (typeof FUNNEL_STAGES)[number];
 
 export const SEVERITIES = ['severe', 'warn', 'notice'] as const;
 export type Severity = (typeof SEVERITIES)[number];
@@ -211,6 +218,7 @@ export function healthWordForVerdict(verdict: NodeVerdict): { word: NodeHealthWo
 const CUSTOMER_WORD_BY_VERDICT: Record<CustomerVerdict, { word: CustomerHealthWord; tone: Tone }> = {
   unreachable: { word: '连不上', tone: 'sev' },
   unstable: { word: '不稳', tone: 'warn' },
+  never_used: { word: '还没用起来', tone: 'unk' },
   unreported: { word: '未上报', tone: 'unk' },
   offline: { word: '离线', tone: 'info' },
   ok: { word: '正常', tone: 'ok' },
@@ -236,6 +244,7 @@ const TONE_BY_WORD: Record<string, Tone> = {
   不稳: 'warn',
   未测: 'unk',
   未上报: 'unk',
+  还没用起来: 'unk',
   离线: 'info',
   正常: 'ok',
 };

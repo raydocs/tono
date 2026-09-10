@@ -9,6 +9,7 @@ import {
   getCustomers, getCustomer, getCustomerConnections, getCustomerActivity,
   getCustomerDestinations, getCustomerServices,
 } from './customers';
+import { getFunnel } from './funnel';
 import {
   getIncidents, getIncident, postIncidentAck, postIncidentSnooze,
   postIncidentResolve, postIncidentNotes, patchIncident,
@@ -50,6 +51,7 @@ export const OPS_V1_ROUTES = [
   'POST /api/v1/ops/nodes/{name}/jobs',
   'PATCH /api/v1/ops/nodes/{name}/profile',
   'GET /api/v1/ops/customers',
+  'GET /api/v1/ops/customers/funnel',
   'GET /api/v1/ops/customers/{id}',
   'GET /api/v1/ops/customers/{id}/connections',
   'GET /api/v1/ops/customers/{id}/activity',
@@ -123,6 +125,7 @@ const ROUTES: Array<{ method: string; re: RegExp; handle: Handler }> = [
   { method: 'PATCH', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/profile$/, handle: (req, e, a, p) => patchNodeProfile(req, e, p[0], a) },
   { method: 'GET', re: /^\/api\/v1\/ops\/nodes\/([^/]+)$/, handle: (req, e, _a, p) => getNode(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/customers$/, handle: (req, e) => getCustomers(req, e) },
+  { method: 'GET', re: /^\/api\/v1\/ops\/customers\/funnel$/, handle: (req, e) => getFunnel(req, e) },
   { method: 'GET', re: /^\/api\/v1\/ops\/customers\/([^/]+)\/connections$/, handle: (req, e, _a, p) => getCustomerConnections(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/customers\/([^/]+)\/activity$/, handle: (req, e, _a, p) => getCustomerActivity(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/customers\/([^/]+)\/destinations$/, handle: (req, e, _a, p) => getCustomerDestinations(req, e, p[0]) },

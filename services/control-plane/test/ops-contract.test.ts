@@ -14,6 +14,7 @@ import {
   assertConnectionEvent,
   assertCustomerDetail,
   assertCustomerSummary,
+  assertFunnel,
   assertDestinationRow,
   assertDirectCandidate,
   assertFxRate,
@@ -198,6 +199,9 @@ const customerSummary = () => ({
   minAppVersion: '0.0.70',
   expiresAt: 1_759_276_800,
   lastSeenAt: 1_757_000_000,
+  stage: 'connected' as const,
+  stageSinceAt: 1_756_999_000,
+  firstConnectedAt: 1_756_999_000,
   updatedAt: 1_757_000_100,
 });
 
@@ -249,6 +253,9 @@ const customerDetail = () => ({
     firstEntitledAt: 1_700_000_000,
     createdAt: 1_700_000_000,
   },
+  stage: 'connected' as const,
+  stageSinceAt: 1_756_999_000,
+  firstConnectedAt: 1_756_999_000,
   updatedAt: 1_757_000_100,
 });
 
@@ -362,6 +369,27 @@ const CASES: Array<[string, (value: unknown, path?: string) => unknown, () => Re
   })],
   ['customerSummary', assertCustomerSummary, customerSummary],
   ['customerDetail', assertCustomerDetail, customerDetail],
+  ['funnel', assertFunnel, () => ({
+    stages: [
+      { stage: 'invited' as const, count: 1 },
+      { stage: 'registered' as const, count: 1 },
+      { stage: 'device_added' as const, count: 0 },
+      { stage: 'reported' as const, count: 1 },
+      { stage: 'connected' as const, count: 4 },
+    ],
+    items: [{
+      key: 'invite:b@example.com',
+      userId: null,
+      email: 'b@example.com',
+      wechatId: 'wxid_bob',
+      contact: null,
+      notes: 'vip',
+      stage: 'invited' as const,
+      stageSinceAt: 1_756_900_000,
+      lastSeenAt: null,
+    }],
+    updatedAt: 1_757_000_100,
+  })],
   ['connectionEvent', assertConnectionEvent, connectionEvent],
   ['activityHour', assertActivityHour, () => ({
     hourAt: 1_757_000_000,
@@ -749,6 +777,7 @@ describe('vocabulary mapping', () => {
   const CUSTOMER_TABLE: Array<[CustomerVerdict, CustomerHealthWord, Tone]> = [
     ['unreachable', '连不上', 'sev'],
     ['unstable', '不稳', 'warn'],
+    ['never_used', '还没用起来', 'unk'],
     ['unreported', '未上报', 'unk'],
     ['offline', '离线', 'info'],
     ['ok', '正常', 'ok'],

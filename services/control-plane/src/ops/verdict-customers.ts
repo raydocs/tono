@@ -1,6 +1,8 @@
 // Customer-side desires. Kept beside the node engine so verdict.ts stays under
 // the file-size cap. Type-only import: no runtime cycle with ./verdict.
 
+import type { CustomerVerdict, FunnelStage } from './contract';
+import { funnelDays, stageSentence } from './funnel';
 import type {
   CustomerVerdictInput,
   IncidentDesire,
@@ -33,6 +35,21 @@ export function customerFreshnessVerdict(
   if (lastSeenAt == null || !Number.isFinite(lastSeenAt) || lastSeenAt <= 0) return 'unreported';
   if (nowSec - lastSeenAt > HEARTBEAT_FRESH_SECONDS) return 'unreported';
   return 'fresh';
+}
+
+/**
+ * Never-connected people are 还没用起来, not 未上报/离线. Unreachable,
+ * unstable and ok stay as they are.
+ */
+export function neverUsedOverride(
+  verdict: CustomerVerdict,
+  stage: FunnelStage,
+  stageSinceAt: number,
+  nowSec: number,
+): { verdict: CustomerVerdict; reason: string } | null {
+  if (stage === 'connected') return null;
+  if (verdict !== 'unreported' && verdict !== 'offline') return null;
+  return { verdict: 'never_used', reason: stageSentence(stage, funnelDays(nowSec, stageSinceAt)) };
 }
 
 function sampleFresh(atMs: number | null | undefined, heartbeatSec: number | null, nowSec: number): boolean {
