@@ -9,6 +9,7 @@ import {
   relistCatalogPlan,
   retirementCatalogPlan,
   splitManagedCatalogProxies,
+  catalogBaseName,
 } from '../../catalog-yaml';
 import {
   type Env,
@@ -85,7 +86,7 @@ export async function operationsFleetNodes(e: Env, cache?: OpsRequestCache) {
   let catalogSource: Row;
   if (catalogResult.state === 'ready') {
     try {
-      catalogNames = new Set(splitManagedCatalogProxies(catalogResult.catalog.yaml).items.map((item) => item.name));
+      catalogNames = new Set(splitManagedCatalogProxies(catalogResult.catalog.yaml).items.map((item) => catalogBaseName(item.name)));
       catalogRevision = catalogResult.catalog.revision;
       catalogSource = { state: 'ready', revision: catalogRevision };
     } catch (error) {

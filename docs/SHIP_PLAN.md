@@ -186,6 +186,7 @@
 - 客户端用 mihomo 手工 `type: hysteria2` + `sni` + `skip-cert-verify: false` + `fingerprint`。
 - 电信 / 联通 / 移动各 5 次握手 + 30 秒下载。记成功率、是否 UDP 阻断、是否仅限速。
 - 写 `docs/ops/transport-hy2.md`：每运营商 `ok | throttled | blocked`。任一 `blocked` → 自动切换对该运营商不做，客户端开关默认关。
+- **2026-09-10 实测：** 东京 hy2 本机握手成功；Panstar 入站 UDP（443 与高位端口）从杭州、洛杉矶、美国云端均不通。按本节降级：自动切换默认关。详见该文件。
 - 验收：文件存在且有三个运营商结论。没有这份文件，G2.4 之后的「自动」任务一律不做。
 
 **G2.4 目录合同：hy2 块过发布门** — Grok · M · 迁移 **0072**
@@ -206,7 +207,7 @@
 - 文件：`tooling/scripts/provision-reality-node.rb`（现技能明确「不要为 Reality 开 UDP」——hy2 是**另一次**、显式的 `--hy2` 路径，默认不加）；systemd 单元、ufw 放行该 UDP 端口；证书 10 年自签，指纹写回 profile。
 - 密码派生：与 VLESS 相同占位，不要第二套用户密钥。
 - 唯一测试：provisioner dry-run 在「未传 `--hy2`」时仍然不开放 UDP（保持旧安全合同）。
-- 验收：T0 那台东京机用这条路径重装或补装后，VLESS TCP 仍通，hy2 UDP 仍通。
+- 验收：两台选定机用这条路径补装后，VLESS TCP 仍通，hy2 UDP 仍通。
 
 **G2.6 Windows 准入 hy2** — Grok · M
 
