@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { jwtSign } from '../src/crypto';
 import worker, { type Env } from '../src/index';
 import { enqueueJob } from '../src/ops/jobs';
+import { afterLogSegment } from '../src/ops/ingest-hooks';
 
 const JWT_SECRET = 'test-jwt-secret-with-at-least-32-characters';
 const COLLECTOR = 'collector-test-token-with-at-least-32-chars';
@@ -448,6 +449,7 @@ describe('ops ingest hooks', () => {
     ).bind(account.userId).first<{ c: number }>();
     expect(Number(stored?.c)).toBe(2);
   });
+
 
   it('ops-ingest jobs lease, heartbeat, and complete behind the collector token', async () => {
     const missing = await api('ops-ingest/jobs?executor=hub&max=1');
