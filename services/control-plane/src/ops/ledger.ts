@@ -66,6 +66,37 @@ export async function loadClosedMonth(db: D1Database, month: string): Promise<Ro
   return monthClosed(db, month);
 }
 
+/**
+ * The two halves of a month that are not totals: who was allocated what, and
+ * what each machine cost per GB. Stored on `ops_month_close.summary_json` at
+ * close because the rows behind them keep moving afterwards.
+ */
+type MonthSnapshot = { customers: MonthCustomerDto[]; nodes: MonthNodeDto[]; partial: boolean };
+
+/** Matches the column's CHECK. A month too big to store keeps its totals only. */
+const SNAPSHOT_MAX_BYTES = 65_536;
+const PARTIAL_SNAPSHOT = JSON.stringify({ customers: [], nodes: [], partial: true });
+
+export function encodeMonthSnapshot(summary: MonthSummaryDto): string {
+  const json = JSON.stringify({ customers: summary.customers, nodes: summary.nodes });
+  return new TextEncoder().encode(json).length > SNAPSHOT_MAX_BYTES ? PARTIAL_SNAPSHOT : json;
+}
+
+function decodeMonthSnapshot(raw: unknown): MonthSnapshot | null {
+  if (typeof raw !== 'string' || raw === '') return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const row = parsed as { customers?: unknown; nodes?: unknown; partial?: unknown };
+  if (row.partial === true) return { customers: [], nodes: [], partial: true };
+  if (!Array.isArray(row.customers) || !Array.isArray(row.nodes)) return null;
+  return { customers: row.customers as MonthCustomerDto[], nodes: row.nodes as MonthNodeDto[], partial: false };
+}
+
 type BytesRow = { user_id: string; node: string; bytes: number };
 type AccountRow = { id: string; user_id: string | null };
 type UserRow = { id: string; email: string };
@@ -216,6 +247,12 @@ export async function loadMonthSummary(db: D1Database, month: string, nowSec: nu
   const unreconciled = customers.filter((row) => row.pending).length + nodes.filter((row) => row.pending).length;
   if (closed) updatedAt = Math.max(updatedAt, Number(closed.closed_at ?? 0));
 
+  // A closed month answers with the halves it was closed with. A month closed
+  // before the snapshot column existed — or one whose snapshot did not fit —
+  // has none, so it answers live and says so rather than pretending.
+  const snapshot = closed ? decodeMonthSnapshot(closed.summary_json) : null;
+  const frozenPartial = Boolean(closed) && (snapshot === null || snapshot.partial);
+
   return {
     month,
     closedAt: closed ? Number(closed.closed_at) : null,
@@ -224,11 +261,12 @@ export async function loadMonthSummary(db: D1Database, month: string, nowSec: nu
     costCnyMinor: closed ? Number(closed.cost_cny_minor) : costCnyMinor,
     marginCnyMinor: closed ? Number(closed.margin_cny_minor) : revenueCnyMinor - costCnyMinor,
     byCategory,
-    customers,
-    nodes,
+    customers: snapshot && !snapshot.partial ? snapshot.customers : customers,
+    nodes: snapshot && !snapshot.partial ? snapshot.nodes : nodes,
     unreconciled: closed ? Number(closed.unreconciled) : unreconciled,
     frozen: Boolean(closed),
     frozenAt: closed ? Number(closed.closed_at) : null,
+    ...(frozenPartial ? { frozenPartial: true } : {}),
     // 月结对账 is D2's; the keys ship now so the console can compile against
     // the finished shape rather than a growing one.
     reconciliation: { billsWithoutLedger: [], ledgerWithoutBill: [], asOfSec: nowSec },
@@ -244,18 +282,22 @@ const CSV_HEADERS = [
 ] as const;
 
 function csvCell(value: unknown): string {
-  let text = value == null ? '' : String(value);
-  if (/^[=+\-@\t\r]/.test(text)) {
-    text = `'${text}`;
-    return `"${text.replace(/"/g, '""')}"`;
+  const text = value == null ? '' : String(value);
+  // Formula guard on text that a spreadsheet would execute. A number is a
+  // number: `-80000` is arithmetic, and quoting it into `'-80000` turned every
+  // negative amount in the export into a string nobody could sum. Prefix only
+  // `= + @` / tab / CR, or `-` followed by a non-digit.
+  if (/^[=+@\t\r]/.test(text) || /^-($|[^0-9])/.test(text)) {
+    return `"${`'${text}`.replace(/"/g, '""')}"`;
   }
   if (/[",\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
   return text;
 }
 
-function signedTotalCny(kind: string, cnyMinor: number): number {
-  if (kind === 'revenue' || kind === 'credit') return cnyMinor;
-  if (kind === 'refund' || kind === 'cost') return -cnyMinor;
+/** Money in counts up, money out counts down — in whatever unit it is asked in. */
+function signedTotal(kind: string, minor: number): number {
+  if (kind === 'revenue' || kind === 'credit') return minor;
+  if (kind === 'refund' || kind === 'cost') return -minor;
   return 0;
 }
 
@@ -265,8 +307,8 @@ export function ledgerCsv(entries: LedgerEntryDto[]): string {
   let cny = 0;
   const currencies = new Set<string>();
   for (const entry of entries) {
-    amount += entry.amountMinor;
-    cny += signedTotalCny(entry.kind, entry.cnyMinor);
+    amount += signedTotal(entry.kind, entry.amountMinor);
+    cny += signedTotal(entry.kind, entry.cnyMinor);
     currencies.add(entry.currency);
     lines.push([
       entry.id, entry.kind, entry.category, entry.subjectType, entry.subjectId,

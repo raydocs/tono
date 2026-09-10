@@ -8,6 +8,7 @@ import {
   int,
   num,
   oneOf,
+  optBool,
   optInt,
   optNum,
   optText,
@@ -118,6 +119,13 @@ export interface MonthSummaryDto {
   unreconciled: number;
   frozen: boolean;
   frozenAt: number | null;
+  /**
+   * Set only when a closed month has no stored snapshot — closed before the
+   * snapshot column existed, or too big to store — so `customers` and `nodes`
+   * on this response are live rows and may already disagree with what was
+   * signed off. Absent means the frozen halves are the frozen halves.
+   */
+  frozenPartial?: boolean;
   /** Optional on the wire (org plan v2 §0.3); the Worker always sends both. */
   reconciliation?: MonthReconciliationDto;
   /** How many bills and orphan ledger rows are still unpaired this month. */
@@ -239,7 +247,7 @@ export function assertMonthReconciliation(
 const SUMMARY_KEYS = [
   'month', 'closedAt', 'closedBy', 'revenueCnyMinor', 'costCnyMinor', 'marginCnyMinor',
   'byCategory', 'customers', 'nodes', 'unreconciled', 'frozen', 'frozenAt',
-  'reconciliation', 'unreconciledBills', 'updatedAt',
+  'frozenPartial', 'reconciliation', 'unreconciledBills', 'updatedAt',
 ];
 
 export function assertMonthSummary(value: unknown, path = 'monthSummary'): MonthSummaryDto {
@@ -257,6 +265,9 @@ export function assertMonthSummary(value: unknown, path = 'monthSummary'): Month
     unreconciled: int(row, path, 'unreconciled'),
     frozen: bool(row, path, 'frozen'),
     frozenAt: optInt(row, path, 'frozenAt'),
+    ...(row.frozenPartial === undefined
+      ? {}
+      : { frozenPartial: optBool(row, path, 'frozenPartial') ?? undefined }),
     ...(row.reconciliation === undefined ? {} : {
       reconciliation: assertMonthReconciliation(row.reconciliation, `${path}.reconciliation`),
     }),
