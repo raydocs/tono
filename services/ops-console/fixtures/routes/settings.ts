@@ -13,6 +13,7 @@ import type {
 } from '@contract';
 import { nowSec } from '../../src/lib/clock';
 import { materializeOps } from '../../src/lib/ops-fixtures';
+import { createPublishStore, publishRoute, type PublishStore } from './settings-publish';
 
 /**
  * The 设置 half of the fixture dev server.
@@ -40,6 +41,8 @@ type Store = {
   usage: HomeLineUsageDayDto[];
   candidates: DirectCandidateDto[];
   audit: AuditEntryDto[];
+  /** The catalogue, the routing rules and the home inventory; see the sibling file. */
+  publish: PublishStore;
 };
 
 type Request = {
@@ -117,6 +120,7 @@ export function createSettingsFixtures(rootDir: string) {
       ? {
         alertRules: [], deliveries: [], providers: [],
         homeLines: [], usage: [], candidates: [], audit: [],
+        publish: createPublishStore(true),
       }
       : {
         alertRules: shift(read<ListDto<AlertRuleDto>>('alert-rules.json')).items,
@@ -129,6 +133,7 @@ export function createSettingsFixtures(rootDir: string) {
           // where it was captured; without this the inbox says 两年前.
           .map((row) => ({ ...row, firstSeen: row.firstSeen + (nowSec() - clock) })),
         audit: shift(read<{ entries: AuditEntryDto[] }>('audit.json')).entries,
+        publish: createPublishStore(false),
       };
     stores.set(key, made);
     return made;
@@ -452,6 +457,11 @@ export function createSettingsFixtures(rootDir: string) {
     return true;
   }
 
+  /** The four resources `settings-publish.ts` owns, plus the rules document. */
+  const PUBLISH_RESOURCES = new Set([
+    'exit-catalog', 'catalog-revisions', 'traffic-policy', 'home-exits', 'home-bindings',
+  ]);
+
   const HANDLERS: Record<string, (request: Request & { store: Store }) => boolean> = {
     'alert-rules': alertRules,
     'alert-deliveries': deliveries,
@@ -476,13 +486,35 @@ export function createSettingsFixtures(rootDir: string) {
   }): boolean {
     const parts = options.route.split('/').map(decodeURIComponent);
     const handler = HANDLERS[parts[0]];
-    if (!handler) return false;
+    const publishes = PUBLISH_RESOURCES.has(parts[0]);
+    // Claim the route before building anything: a store is seven files read and
+    // re-stamped, and every 今天 and 客户 request comes through here too.
+    if (!handler && !publishes) return false;
+    const query = new URLSearchParams(options.url.split('?')[1] ?? '');
     const store = storeFor(options.session, options.empty);
+    // The publishing resources go first; they hand back anything they do not
+    // own, including `traffic-policy/draft-from-candidates`, which belongs to
+    // 直连候选 rather than to the rules editor.
+    if (publishes && publishRoute({
+      req: options.req,
+      res: options.res,
+      parts,
+      query,
+      store: store.publish,
+      note: (action, targetType, targetId, summary) => note(store, action, targetType, targetId, summary),
+      sendJson,
+      sendEmpty,
+      readBody,
+      newId,
+    })) {
+      return true;
+    }
+    if (!handler) return false;
     return handler({
       req: options.req,
       res: options.res,
       parts,
-      query: new URLSearchParams(options.url.split('?')[1] ?? ''),
+      query,
       session: options.session,
       empty: options.empty,
       store,

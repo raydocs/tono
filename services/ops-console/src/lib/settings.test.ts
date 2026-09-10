@@ -35,6 +35,12 @@ function usage(dayAt: number, bytes: number, source: HomeLineUsageDayDto['source
 }
 
 describe('resolveSection', () => {
+  it('knows the three sections that publish something', () => {
+    expect(resolveSection('catalog')).toBe('catalog');
+    expect(resolveSection('policy')).toBe('policy');
+    expect(resolveSection('homeinventory')).toBe('homeinventory');
+  });
+
   it('falls back to 告警 for a hash that names nothing', () => {
     expect(resolveSection(null)).toBe('alerts');
     expect(resolveSection('nope')).toBe('alerts');
