@@ -1,6 +1,7 @@
 // Parse a gzip/JSONL traffic-audit segment into daily destination, service,
 // and DIRECT-candidate aggregates. Pure: no import from index, no network.
 
+import { rollupDirectCandidates30d } from './candidates-rollup';
 import {
   etld1,
   familyForHost,
@@ -9,10 +10,12 @@ import {
   type FamilyId,
 } from './service-families';
 
+export { rollupDirectCandidates30d };
+export { UPSERT_BATCH, retainTrafficDaily, writeParsedSegment } from './traffic-write';
+
 export const MAX_SEGMENT_LINES = 20_000;
 export const MAX_DISTINCT_ETLD1 = 2_000;
 export const MAX_PROCESS_CHARS = 40;
-export const UPSERT_BATCH = 50;
 export const OTHER_ETLD1 = '__other__';
 export const IP_ETLD1 = '__ip__';
 
@@ -83,10 +86,6 @@ export type NormalizedConnection = {
 const CONNECTION_KINDS = new Set(['connection', 'connection_opened', 'directDial']);
 const ROUTES = new Set<Route>(['cloud', 'residential', 'direct', 'reject', 'unknown']);
 const SKIP_HOSTS = new Set(['', 'unknown', '*', '-']);
-
-function missingTable(error: unknown): boolean {
-  return String(error).includes('no such table');
-}
 
 function str(row: Record<string, unknown>, ...keys: string[]): string {
   for (const key of keys) {
@@ -173,21 +172,14 @@ function serviceKey(day: number, family: FamilyId, route: Route): string {
   return `${day}\t${family}\t${route}`;
 }
 
+/** Candidates are per (UTC day, etld1) so the 30-day window can be recomputed. */
+export function candidateKey(day: number, e: string): string {
+  return `${day}\t${e}`;
+}
+
 function bumpProcess(agg: DestinationAgg, process: string): void {
   if (!process) return;
   agg.processes.set(process, (agg.processes.get(process) ?? 0) + 1);
-}
-
-function topProcess(counts: Map<string, number>): string | null {
-  let best: string | null = null;
-  let n = 0;
-  for (const [name, count] of counts) {
-    if (count > n || (count === n && (best === null || name < best))) {
-      best = name;
-      n = count;
-    }
-  }
-  return best;
 }
 
 async function decodeSegment(
@@ -303,10 +295,11 @@ export async function parseAuditSegment(
     }
 
     if (conn.route === 'cloud' && e !== OTHER_ETLD1 && e !== IP_ETLD1 && isLikelyDomestic(e)) {
-      let cand = parsed.candidates.get(e);
+      const cKey = candidateKey(day, e);
+      let cand = parsed.candidates.get(cKey);
       if (!cand) {
         cand = { firstSeen: seenSec, lastSeen: seenSec, bytes: 0, connections: 0 };
-        parsed.candidates.set(e, cand);
+        parsed.candidates.set(cKey, cand);
       }
       cand.connections += 1;
       cand.bytes += conn.bytesUp + conn.bytesDown;
@@ -315,128 +308,4 @@ export async function parseAuditSegment(
     }
   }
   return parsed;
-}
-
-function parseDestKey(key: string): { dayAt: number; etld1: string; route: Route; node: string } {
-  const [day, e, route, node] = key.split('\t');
-  return { dayAt: Number(day), etld1: e, route: route as Route, node: node ?? '' };
-}
-
-function parseServiceKey(key: string): { dayAt: number; family: string; route: Route } {
-  const [day, family, route] = key.split('\t');
-  return { dayAt: Number(day), family, route: route as Route };
-}
-
-async function runBatches(db: D1Database, statements: D1PreparedStatement[]): Promise<void> {
-  for (let i = 0; i < statements.length; i += UPSERT_BATCH) {
-    const chunk = statements.slice(i, i + UPSERT_BATCH);
-    try {
-      await db.batch(chunk);
-    } catch (error) {
-      if (missingTable(error)) return;
-      throw error;
-    }
-  }
-}
-
-export async function writeParsedSegment(
-  db: D1Database,
-  parsed: ParsedSegment,
-  nowSec: number,
-): Promise<void> {
-  const statements: D1PreparedStatement[] = [];
-  for (const [key, agg] of parsed.destinations) {
-    const { dayAt: day, etld1: e, route, node } = parseDestKey(key);
-    statements.push(db.prepare(
-      `INSERT INTO traffic_destination_daily(
-         user_id, device_id, day_at, etld1, route, node,
-         connections, bytes_up, bytes_down, top_process, updated_at
-       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(user_id, device_id, day_at, etld1, route, node) DO UPDATE SET
-         connections = connections + excluded.connections,
-         bytes_up = bytes_up + excluded.bytes_up,
-         bytes_down = bytes_down + excluded.bytes_down,
-         top_process = CASE
-           WHEN excluded.connections >= traffic_destination_daily.connections
-           THEN COALESCE(excluded.top_process, traffic_destination_daily.top_process)
-           ELSE COALESCE(traffic_destination_daily.top_process, excluded.top_process)
-         END,
-         updated_at = excluded.updated_at`,
-    ).bind(
-      parsed.userId,
-      parsed.deviceId,
-      day,
-      e,
-      route,
-      node,
-      agg.connections,
-      agg.bytesUp,
-      agg.bytesDown,
-      topProcess(agg.processes),
-      nowSec,
-    ));
-  }
-  for (const [key, agg] of parsed.services) {
-    const { dayAt: day, family, route } = parseServiceKey(key);
-    statements.push(db.prepare(
-      `INSERT INTO service_usage_daily(
-         user_id, day_at, family, route, bytes, sessions, last_seen_at
-       ) VALUES(?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(user_id, day_at, family, route) DO UPDATE SET
-         bytes = bytes + excluded.bytes,
-         sessions = sessions + excluded.sessions,
-         last_seen_at = MAX(last_seen_at, excluded.last_seen_at)`,
-    ).bind(
-      parsed.userId,
-      day,
-      family,
-      route,
-      agg.bytes,
-      agg.sessions,
-      agg.lastSeenAt,
-    ));
-  }
-  for (const [e, agg] of parsed.candidates) {
-    statements.push(db.prepare(
-      `INSERT INTO direct_candidates(
-         etld1, first_seen, last_seen, users, bytes_30d, connections_30d, status
-       ) VALUES(?, ?, ?, 1, ?, ?, 'new')
-       ON CONFLICT(etld1) DO UPDATE SET
-         first_seen = MIN(first_seen, excluded.first_seen),
-         last_seen = MAX(last_seen, excluded.last_seen),
-         users = users + excluded.users,
-         bytes_30d = bytes_30d + excluded.bytes_30d,
-         connections_30d = connections_30d + excluded.connections_30d`,
-    ).bind(e, agg.firstSeen, agg.lastSeen, agg.bytes, agg.connections));
-  }
-  if (statements.length === 0) return;
-  await runBatches(db, statements);
-}
-
-export async function retainTrafficDaily(
-  db: D1Database,
-  nowSec: number,
-  days = 90,
-  limit = 500,
-): Promise<void> {
-  const cutoff = nowSec - days * 86_400;
-  const tables = ['traffic_destination_daily', 'service_usage_daily'] as const;
-  const column = 'day_at';
-  try {
-    for (const table of tables) {
-      await db.prepare(
-        `DELETE FROM ${table} WHERE rowid IN (
-           SELECT rowid FROM ${table} WHERE ${column} < ? LIMIT ?
-         )`,
-      ).bind(cutoff, limit).run();
-    }
-    await db.prepare(
-      `DELETE FROM direct_candidates WHERE rowid IN (
-         SELECT rowid FROM direct_candidates WHERE last_seen < ? LIMIT ?
-       )`,
-    ).bind(cutoff, limit).run();
-  } catch (error) {
-    if (missingTable(error)) return;
-    throw error;
-  }
 }

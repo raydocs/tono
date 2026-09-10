@@ -11,7 +11,7 @@ import { runWorkerJobs } from './jobs-worker';
 import { readAgentNetCounters, rollAllNodeCycles } from './quota';
 import { retainClientVersionDaily, rollupClientVersionsDaily } from './releases';
 import { retainHomeLineUsage } from './home-lines';
-import { retainTrafficDaily } from './traffic-parse';
+import { retainTrafficDaily, rollupDirectCandidates30d } from './traffic-parse';
 import { planAndSendAlerts, runVerdictPass } from './verdict-run';
 import { retainFollowups } from './handlers/followups';
 import { fetchAndStoreFxRates } from './fx';
@@ -240,6 +240,7 @@ export async function runOpsCron(e: Env, nowSec: number): Promise<OpsCronReport>
     const yesterday = today - DAY;
     await rollupConnectionDaily(e.DB, yesterday);
     await rollupClientVersionsDaily(e.DB, yesterday, ranToday);
+    await rollupDirectCandidates30d(e.DB, nowSec).catch((error) => console.error('ops cron: direct-candidate rollup failed', error));
     await markRun(e.DB, 'daily', nowSec);
     return { ran: true };
   });
