@@ -58,7 +58,8 @@ export function TextField({
   value: string;
   onChange: (value: string) => void;
   mono?: boolean;
-  type?: 'text' | 'date' | 'url';
+  /** `password` is a secret on its way up. Nothing in here ever renders one back. */
+  type?: 'text' | 'date' | 'url' | 'password';
 }) {
   return (
     <Field label={label} hint={hint}>

@@ -108,6 +108,13 @@
 }
 .row-selected { background: color-mix(in srgb, var(--foreground) 6%, transparent); }
 
+/* The only colour 设置 is allowed: which lines a publish would add and which
+   it would take away. The two faintest washes in the palette, because this is
+   a document being read rather than a state being judged — and the +/- sign in
+   the first column says the same thing without them. */
+.diff-add { background: hsl(var(--ok-bg)); color: hsl(var(--ok-fg)); }
+.diff-del { background: hsl(var(--sev-bg)); color: hsl(var(--sev-fg)); }
+
 /* A fragment of the page's count sentence: prose that is also a control. */
 .count-bit {
   border-bottom: 2px solid transparent;

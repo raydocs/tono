@@ -6,11 +6,13 @@ import { Alerts } from './settings/Alerts';
 import { Audit } from './settings/Audit';
 import { Candidates } from './settings/Candidates';
 import { Catalog } from './settings/Catalog';
+import { HomeInventory } from './settings/HomeInventory';
 import { HomeLines } from './settings/HomeLines';
+import { Policy } from './settings/Policy';
 import { Providers } from './settings/Providers';
 
 /**
- * The settings page: six surfaces behind one rail.
+ * The settings page: eight surfaces behind one rail.
  *
  * Deliberately plain: no health words, no tones, no counts in the headline.
  * Nothing on this page is a measurement, and borrowing the incident page's
@@ -46,16 +48,18 @@ export default function SettingsPage({ section }: { section: string | null }) {
 }
 
 function Body({ section }: { section: SettingsSection }) {
-  if (section === 'providers') return <Providers />;
+  if (section === 'catalog') return <Catalog />;
+  if (section === 'policy') return <Policy />;
+  if (section === 'homeinventory') return <HomeInventory />;
   if (section === 'homelines') return <HomeLines />;
+  if (section === 'providers') return <Providers />;
   if (section === 'candidates') return <Candidates />;
   if (section === 'audit') return <Audit />;
-  if (section === 'catalog') return <Catalog />;
   return <Alerts />;
 }
 
 /**
- * The six names, and which one you are on.
+ * The eight names, and which one you are on.
  *
  * A rule on the left rather than a filled pill: the shell's nav already owns
  * the filled-pill idiom for pages, and reusing it one level down made the two

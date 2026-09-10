@@ -1,14 +1,37 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { open, settle } from './ops';
 
-const SECTIONS = ['alerts', 'providers', 'homelines', 'candidates', 'audit', 'catalog'] as const;
+const SECTIONS = [
+  'alerts', 'catalog', 'policy', 'homeinventory',
+  'homelines', 'providers', 'candidates', 'audit',
+] as const;
 
 /**
- * 设置 is six surfaces behind one rail, so every one of them gets a baseline in
- * both the ready and the empty case. The empty half is the half that matters:
- * a settings page that renders a zero-row table where it should say "还没有告警
- * 规则" is the one that lets an operator believe alerting is configured.
+ * 设置 is eight surfaces behind one rail, so every one of them gets a baseline
+ * in both the ready and the empty case. The empty half is the half that
+ * matters: a settings page that renders a zero-row table where it should say
+ * "还没有告警规则" is the one that lets an operator believe alerting is
+ * configured.
+ *
+ * The three publishing sections get flow tests on top of the baselines,
+ * because a picture of an editor proves nothing about what pressing 发布 does.
  */
+
+/**
+ * `?fixtures=conflict` is not one of the four sets `open` knows; it is a
+ * per-request flag the settings fixtures read, so this one goes direct.
+ */
+async function openConflicting(page: Page, hash: string, session: string): Promise<void> {
+  await page.goto(`/ops2/?fixtures=conflict&session=${session}#${hash}`, { waitUntil: 'networkidle' });
+  await settle(page);
+}
+
+/** Type into a document editor without losing what is already in it. */
+async function append(page: Page, label: string, line: string): Promise<void> {
+  const box = page.getByLabel(label);
+  const text = await box.inputValue();
+  await box.fill(`${text}${line}`);
+}
 test.describe('设置', () => {
   for (const section of SECTIONS) {
     test(`${section} 有数据`, async ({ page }) => {
@@ -81,7 +104,7 @@ test.describe('设置', () => {
 
     await page.getByRole('button', { name: '生成分流草案' }).click();
     const dialog = page.getByRole('dialog');
-    await expect(dialog.getByText('这里只出草案，不改线上的分流规则。复制出去，自己贴到该贴的地方。')).toBeVisible();
+    await expect(dialog.getByText('这里只出草案，不改线上的分流规则。装进编辑器之后还得自己按发布。')).toBeVisible();
     await expect(dialog.locator('pre')).toContainText('bilibili.com');
   });
 
@@ -129,5 +152,82 @@ test.describe('设置', () => {
     await expect(drawer.getByText('这里只填凭据的名字，不要填内容本身。')).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot('providers-drawer.png');
+  });
+  /** The publish is a compare-and-swap; landing one has to move the version. */
+  test('发出去之后线上版本就是新的那一版', async ({ page }, testInfo) => {
+    await open(page, '/settings/catalog', 'default', `catalog-${testInfo.project.name}`);
+    await page.getByRole('button', { name: '开始编辑' }).click();
+    await append(page, '节点目录原文', '# checked by hand\n');
+
+    await page.getByRole('button', { name: '发布', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText(/这会改变所有客户端下次拉取的节点单子/)).toBeVisible();
+    await dialog.getByRole('button', { name: '发布', exact: true }).click();
+
+    await expect(page.getByText('线上从 r37 变成了 r38')).toBeVisible();
+    await expect(page.getByText('线上 r38').first()).toBeVisible();
+  });
+
+  /** The expensive bug: a publish that lands on top of somebody else's. */
+  test('目录在别人手里动过了就不发，并且说清楚差在哪儿', async ({ page }, testInfo) => {
+    await openConflicting(page, '/settings/catalog', `conflict-${testInfo.project.name}`);
+    await page.getByRole('button', { name: '开始编辑' }).click();
+    await append(page, '节点目录原文', '# my own change\n');
+
+    await page.getByRole('button', { name: '发布', exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: '发布', exact: true }).click();
+
+    await expect(page.getByText('线上目录在你改的这段时间里变过了')).toBeVisible();
+    await expect(page.getByText(/线上现在是 r38/)).toBeVisible();
+    await expect(page.getByText(/线上多了 1 行/)).toBeVisible();
+  });
+
+  test('试运行把服务端要存的那份原文摆出来', async ({ page }, testInfo) => {
+    await open(page, '/settings/policy', 'default', `dry-${testInfo.project.name}`);
+    await page.getByRole('button', { name: '开始编辑' }).click();
+    await page.getByRole('button', { name: '试运行' }).click();
+
+    await expect(page.getByText('服务端会存成这样')).toBeVisible();
+    await expect(page.locator('pre').first()).toContainText('bilibili.com');
+    await expect(page.getByText('这份不签名也能发')).toBeVisible();
+  });
+
+  test('把候选草案装进分流规则的编辑器', async ({ page }, testInfo) => {
+    await open(page, '/settings/candidates', 'default', `hand-${testInfo.project.name}`);
+    await page.getByRole('button', { name: '接受', exact: true }).click();
+    await page.getByRole('button', { name: '生成分流草案' }).click();
+    await page.getByRole('button', { name: '把草案装进编辑器' }).click();
+
+    await expect(page).toHaveURL(/#\/settings\/policy/);
+    await expect(page.getByText('直连候选的草案已经放进编辑框，还没发布')).toBeVisible();
+    await expect(page.getByLabel('分流规则原文')).toHaveValue(/bilibili\.com/);
+  });
+
+  test('批量导入把加了几条、跳过几条都说出来', async ({ page }, testInfo) => {
+    await open(page, '/settings/homeinventory', 'default', `import-${testInfo.project.name}`);
+    await page.getByRole('button', { name: '批量导入' }).click();
+
+    const dialog = page.getByRole('dialog');
+    await dialog.getByLabel('家宽线路，一行一条').fill(
+      '203.0.113.90:41090:carol:hunter2\n198.51.100.24:41080:alpha:whatever',
+    );
+    await dialog.getByRole('button', { name: '加入库存' }).click();
+
+    await expect(dialog.getByText('加了 1 条 · 跳过 1 条')).toBeVisible();
+    await expect(dialog.getByText('已经在库存里了')).toBeVisible();
+  });
+
+  test('停用一条线路，下一次读就是停用的', async ({ page }, testInfo) => {
+    await open(page, '/settings/homeinventory', 'default', `toggle-${testInfo.project.name}`);
+    const row = page.locator('tbody tr').filter({ hasText: 'Preview Catalog Line' });
+    await row.getByRole('button', { name: '停用' }).click();
+    await expect(row.getByRole('button', { name: '启用' })).toBeVisible();
+  });
+
+  test('绑着客户的线路删不掉，并且说清楚为什么', async ({ page }) => {
+    await open(page, '/settings/homeinventory');
+    const row = page.locator('tbody tr').filter({ hasText: 'Preview Home Alpha' });
+    await expect(row.getByRole('button', { name: '删除' })).toBeDisabled();
+    await expect(row.getByText('2 人')).toBeVisible();
   });
 });

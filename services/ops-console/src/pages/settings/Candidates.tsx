@@ -7,6 +7,8 @@ import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
 import { settingsApi } from '@/lib/api-settings';
 import { formatBytesMeasured, formatWhen, formatWhenAgo } from '@/lib/display';
+import { openSettings } from '@/lib/hash-route';
+import { stashPolicyDraft } from '@/lib/settings-publish';
 import {
   CANDIDATE_FILTERS,
   candidateCounts,
@@ -96,7 +98,17 @@ export function Candidates() {
         />
       </div>
 
-      <DraftDialog text={draft} onClose={() => setDraft(null)} />
+      <DraftDialog
+        text={draft}
+        onClose={() => setDraft(null)}
+        onLoad={(text) => {
+          // The draft travels in memory rather than in the hash: it is a few
+          // kilobytes of JSON, and the rules editor is the only reader.
+          stashPolicyDraft(text);
+          setDraft(null);
+          openSettings('policy');
+        }}
+      />
     </div>
   );
 }

@@ -11,9 +11,17 @@ import { copy } from '@/copy/copy';
 import { nowSec } from './clock';
 import { formatDate } from './display';
 
-/** The six sections, in rail order. `alerts` is where an unnamed hash lands. */
+/**
+ * The eight sections, in rail order. `alerts` is where an unnamed hash lands.
+ *
+ * The order is the order of consequence rather than of frequency: the three
+ * that change what a client fetches next — the node catalogue, the routing
+ * rules, and the home inventory both of those draw from — come first, and the
+ * bookkeeping an operator does around them follows.
+ */
 export const SETTINGS_SECTIONS = [
-  'alerts', 'providers', 'homelines', 'candidates', 'audit', 'catalog',
+  'alerts', 'catalog', 'policy', 'homeinventory',
+  'homelines', 'providers', 'candidates', 'audit',
 ] as const;
 
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
