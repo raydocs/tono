@@ -128,6 +128,11 @@ function validateRuleBody(b: Record<string, unknown>, partial: boolean): void {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid fireOn');
     }
   }
+  if (!partial || b.secretRef !== undefined) {
+    if (b.secretRef != null && b.secretRef !== '' && !/^ALERT_[A-Z0-9_]+$/.test(String(b.secretRef))) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid secretRef');
+    }
+  }
 }
 
 export async function postAlertRule(req: Request, e: Env, actor: Actor): Promise<Response> {
@@ -235,7 +240,7 @@ export async function postAlertRuleTest(req: Request, e: Env, rawId: string, act
       openedAt: t, impactCount: 0,
     }],
   };
-  await sendPending(e.DB, sendEnv, fetch, t);
+  await sendPending(e.DB, sendEnv, fetch, t, 5, deliveryId);
   await auditWrite(e, actor.email, 'alert-rule.test', 'alert_rule', ruleId, String(rule.name));
   const dto = ruleDto(await loadRule(e, ruleId), await lastFired(e, ruleId));
   check(e, () => { assertAlertRule(dto); });

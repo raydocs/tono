@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
+import type { Env } from '../src/env';
 import {
   type AlertRule,
   type AlertSendEnv,
@@ -16,6 +17,7 @@ import {
   sendPending,
   shapePayload,
 } from '../src/ops/alerts';
+import { envSecret } from '../src/ops/verdict-run';
 
 const db = () => (env as unknown as { DB: D1Database }).DB;
 const NOW = 1_800_000_000;
@@ -208,6 +210,28 @@ async function insertRule(rule: AlertRule, at = NOW): Promise<void> {
   ).run();
 }
 
+async function insertIncident(t: IncidentTransition, at = NOW): Promise<void> {
+  await db().prepare(
+    `INSERT INTO ops_incidents(
+       id, dedupe_key, kind, subject_type, subject_id, severity, status, title, detail,
+       rules_version, opened_at, last_seen_at, impact_count, updated_at
+     ) VALUES(?, ?, ?, ?, ?, ?, 'open', ?, ?, 1, ?, ?, ?, ?)`,
+  ).bind(
+    t.incidentId, t.dedupeKey, t.kind, t.subjectType, t.subjectId, t.severity,
+    t.title, t.detail, t.openedAt, at, t.impactCount, at,
+  ).run();
+}
+
+function sendEnvFor(t: IncidentTransition, over: Partial<AlertSendEnv> = {}): AlertSendEnv {
+  return {
+    secrets: { WEBHOOK_SECRET: 's3cret' },
+    allowedHosts: 'hooks.example.com',
+    consoleUrl: CONSOLE,
+    incidents: [t],
+    ...over,
+  };
+}
+
 async function countDeliveries(): Promise<number> {
   const row = await db().prepare('SELECT COUNT(*) AS c FROM ops_alert_deliveries').first<{ c: number }>();
   return Number(row?.c ?? 0);
@@ -249,8 +273,10 @@ describe('ops alert deliveries (d1)', () => {
     const rule = baseRule();
     const t = baseTransition();
     await insertRule(rule);
-    await planDeliveries(db(), [t], [rule], NOW);
-    await planDeliveries(db(), [t], [rule], NOW);
+    const first = await planDeliveries(db(), [t], [rule], NOW);
+    const second = await planDeliveries(db(), [t], [rule], NOW);
+    expect(first.pending).toBe(1);
+    expect(second.pending).toBe(0);
     expect(await countDeliveries()).toBe(1);
   });
 
@@ -338,5 +364,108 @@ describe('ops alert deliveries (d1)', () => {
       'SELECT id FROM ops_alert_deliveries ORDER BY id',
     ).all<{ id: string }>();
     expect(left.results.map((row) => row.id)).toEqual(['new']);
+  });
+
+  it('retries a pending delivery by loading the incident from ops_incidents', async () => {
+    const rule = baseRule();
+    const t = baseTransition();
+    await insertRule(rule);
+    await insertIncident(t);
+    await planDeliveries(db(), [t], [rule], NOW);
+    const first = await sendPending(
+      db(), sendEnvFor(t), async () => new Response('nope', { status: 502 }), NOW,
+    );
+    expect(first.failed).toBe(1);
+    const retry = await sendPending(
+      db(),
+      sendEnvFor(t, { incidents: [] }),
+      async () => new Response('ok', { status: 200 }),
+      NOW + backoffSeconds(0),
+    );
+    expect(retry.sent).toBe(1);
+    const row = await db().prepare(
+      'SELECT status FROM ops_alert_deliveries',
+    ).first<{ status: string }>();
+    expect(row?.status).toBe('sent');
+  });
+
+  it('lets a later recurrence use the real dedupe key after a cooldown suppress', async () => {
+    const rule = baseRule({ cooldownSeconds: 3600 });
+    const opened = baseTransition({ transition: 'open' });
+    await insertRule(rule);
+    const plannedOpen = await planDeliveries(db(), [opened], [rule], NOW);
+    expect(plannedOpen.pending).toBe(1);
+    const sent = await sendPending(
+      db(), sendEnvFor(opened), async () => new Response('ok', { status: 200 }), NOW,
+    );
+    expect(sent.sent).toBe(1);
+
+    const escalate = baseTransition({ transition: 'escalate', incidentId: 'inc-1' });
+    const inside = await planDeliveries(db(), [escalate], [rule], NOW + 10);
+    expect(inside.suppressed).toBe(1);
+    expect(inside.pending).toBe(0);
+    const suppressed = await db().prepare(
+      "SELECT status, dedupe_key FROM ops_alert_deliveries WHERE status = 'suppressed'",
+    ).first<{ status: string; dedupe_key: string }>();
+    expect(suppressed?.status).toBe('suppressed');
+    const realKey = deliveryDedupeKey(rule.id, escalate.dedupeKey, 'escalate', escalate.openedAt);
+    expect(suppressed?.dedupe_key).not.toBe(realKey);
+
+    const after = await planDeliveries(db(), [escalate], [rule], NOW + 4000);
+    expect(after.pending).toBe(1);
+    const pending = await db().prepare(
+      "SELECT status, dedupe_key FROM ops_alert_deliveries WHERE status = 'pending'",
+    ).first<{ status: string; dedupe_key: string }>();
+    expect(pending?.status).toBe('pending');
+    expect(pending?.dedupe_key).toBe(realKey);
+    const resent = await sendPending(
+      db(), sendEnvFor(escalate), async () => new Response('ok', { status: 200 }), NOW + 4000,
+    );
+    expect(resent.sent).toBe(1);
+  });
+
+  it('claims a pending row so concurrent drainers POST once', async () => {
+    const rule = baseRule();
+    const t = baseTransition();
+    await insertRule(rule);
+    await planDeliveries(db(), [t], [rule], NOW);
+    const calls: string[] = [];
+    let release!: (value: Response) => void;
+    let started!: () => void;
+    const sawFetch = new Promise<void>((resolve) => { started = resolve; });
+    const fetchImpl: FetchImpl = async (url) => {
+      calls.push(url);
+      if (calls.length === 1) {
+        started();
+        return new Promise<Response>((resolve) => { release = resolve; });
+      }
+      return new Response('ok', { status: 200 });
+    };
+    const first = sendPending(db(), sendEnvFor(t), fetchImpl, NOW);
+    await sawFetch;
+    const second = await sendPending(db(), sendEnvFor(t), fetchImpl, NOW);
+    release(new Response('ok', { status: 200 }));
+    const firstResult = await first;
+    expect(calls).toHaveLength(1);
+    expect(firstResult.sent + second.sent).toBe(1);
+    const row = await db().prepare(
+      'SELECT status FROM ops_alert_deliveries',
+    ).first<{ status: string }>();
+    expect(row?.status).toBe('sent');
+  });
+});
+
+describe('ops alert secret refs', () => {
+  it('envSecret only resolves ALERT_ worker secrets', () => {
+    const secrets = {
+      JWT_SECRET: 'test-jwt-secret-with-at-least-32-characters',
+      ADMIN_API_TOKEN: 'admin-test-token-with-at-least-32-characters',
+      RESEND_API_KEY: 're_test-key-with-at-least-32-characters',
+      ALERT_TELEGRAM_BOT_TOKEN: '123:ABC',
+    } as unknown as Env;
+    expect(envSecret(secrets, 'JWT_SECRET')).toBeUndefined();
+    expect(envSecret(secrets, 'ADMIN_API_TOKEN')).toBeUndefined();
+    expect(envSecret(secrets, 'RESEND_API_KEY')).toBeUndefined();
+    expect(envSecret(secrets, 'ALERT_TELEGRAM_BOT_TOKEN')).toBe('123:ABC');
   });
 });

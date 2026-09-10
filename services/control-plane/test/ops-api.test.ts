@@ -296,6 +296,48 @@ describe('ops v1 api', () => {
     expect(deleted.status).toBe(204);
   });
 
+  it('rejects alert-rule secretRef values that are not ALERT_ secrets', async () => {
+    const denied = await ops('alert-rules', json({
+      name: 'exfil', channel: 'webhook', target: 'https://api.telegram.org/bot',
+      template: 'telegram', secretRef: 'JWT_SECRET',
+    }));
+    expect(denied.status).toBe(400);
+    expect(await denied.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
+    const allowed = await ops('alert-rules', json({
+      name: 'telegram', channel: 'webhook', target: '-100123',
+      template: 'telegram', secretRef: 'ALERT_TELEGRAM_BOT_TOKEN',
+    }));
+    expect(allowed.status).toBe(201);
+    const patched = await ops(
+      `alert-rules/${assertAlertRule(await allowed.json()).id}`,
+      json({ secretRef: 'JWT_SECRET' }, 'PATCH'),
+    );
+    expect(patched.status).toBe(400);
+    expect(await patched.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
+  });
+
+  it('alert-rule test drains only the synthetic delivery', async () => {
+    const created = await ops('alert-rules', json({
+      name: 'down', channel: 'webhook', target: 'https://hooks.example.com/in',
+      template: 'generic',
+    }));
+    expect(created.status).toBe(201);
+    const rule = assertAlertRule(await created.json());
+    const due = Math.floor(Date.now() / 1000) - 10;
+    await db().prepare(
+      `INSERT INTO ops_alert_deliveries(
+         id, rule_id, incident_id, dedupe_key, transition, status, attempts, created_at, next_attempt_at
+       ) VALUES('real-pending', ?, 'inc-real', 'real-key', 'open', 'pending', 0, ?, ?)`,
+    ).bind(rule.id, due, due).run();
+    const tested = await ops(`alert-rules/${rule.id}/test`, json({}));
+    expect(tested.status).toBe(200);
+    const real = await db().prepare(
+      "SELECT status, attempts FROM ops_alert_deliveries WHERE id = 'real-pending'",
+    ).first<{ status: string; attempts: number }>();
+    expect(real?.status).toBe('pending');
+    expect(Number(real?.attempts)).toBe(0);
+  });
+
   it('GET audit and system/health', async () => {
     await seedNode();
     await ops(`nodes/${encodeURIComponent(NODE)}/jobs`, json({ type: 'collect_quality' }));

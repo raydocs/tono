@@ -105,7 +105,8 @@ export async function loadEnabledAlertRules(db: D1Database): Promise<AlertRule[]
   }
 }
 
-function envSecret(e: Env, ref: string): string | undefined {
+export function envSecret(e: Env, ref: string): string | undefined {
+  if (!/^ALERT_[A-Z0-9_]+$/.test(ref)) return undefined;
   const value = (e as unknown as Record<string, unknown>)[ref];
   return typeof value === 'string' && value.length ? value : undefined;
 }

@@ -48,8 +48,7 @@ export type AlertSendEnv = {
   consoleUrl: string;
   resendApiKey?: string;
   emailFrom?: string;
-  // Shaping needs title/detail/severity, which the outbox does not store.
-  // The incidents table arrives later; until then the caller hands them in.
+  // Shaping needs title/detail/severity. Missing entries load from ops_incidents.
   incidents?: IncidentTransition[];
 };
 
@@ -99,12 +98,14 @@ async function hmacSha256Hex(message: string, secret: string): Promise<string> {
   return bytesToHex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message)));
 }
 
-async function batchAll(db: D1Database, statements: D1PreparedStatement[]): Promise<void> {
+async function batchAll(db: D1Database, statements: D1PreparedStatement[]): Promise<D1Result[]> {
+  const out: D1Result[] = [];
   // D1 rejects a batch above 50 statements; a noisy fan-out would otherwise
   // 500 the whole planning pass and leave the outbox half-written.
   for (let i = 0; i < statements.length; i += D1_BATCH_LIMIT) {
-    await db.batch(statements.slice(i, i + D1_BATCH_LIMIT));
+    out.push(...await db.batch(statements.slice(i, i + D1_BATCH_LIMIT)));
   }
+  return out;
 }
 
 function incidentConsoleUrl(consoleUrl: string, incidentId: string): string {
@@ -242,6 +243,7 @@ export async function planDeliveries(
     }
 
     const statements: D1PreparedStatement[] = [];
+    const pendingIdx: number[] = [];
     for (const t of transitions) {
       for (const rule of active) {
         if (!ruleMatches(rule, t)) continue;
@@ -260,7 +262,7 @@ export async function planDeliveries(
                  id, rule_id, incident_id, dedupe_key, transition, status,
                  attempts, created_at
                ) VALUES(?, ?, ?, ?, ?, 'suppressed', 0, ?)`,
-            ).bind(crypto.randomUUID(), rule.id, t.incidentId, key, t.transition, nowSec),
+            ).bind(crypto.randomUUID(), rule.id, t.incidentId, `${key}:suppressed:${nowSec}`, t.transition, nowSec),
             db.prepare(
               `UPDATE ops_alert_rule_state
                SET suppressed_count = suppressed_count + 1
@@ -270,6 +272,7 @@ export async function planDeliveries(
           result.suppressed += 1;
           continue;
         }
+        pendingIdx.push(statements.length);
         statements.push(
           db.prepare(
             `INSERT OR IGNORE INTO ops_alert_deliveries(
@@ -278,10 +281,12 @@ export async function planDeliveries(
              ) VALUES(?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
           ).bind(crypto.randomUUID(), rule.id, t.incidentId, key, t.transition, nowSec, nowSec),
         );
-        result.pending += 1;
       }
     }
-    if (statements.length) await batchAll(db, statements);
+    if (statements.length) {
+      const results = await batchAll(db, statements);
+      result.pending = pendingIdx.filter((i) => Number(results[i]?.meta.changes ?? 0) > 0).length;
+    }
   } catch (error) {
     if (missingTable(error)) return { deferred: 0, pending: 0, suppressed: 0 };
     throw error;
@@ -289,14 +294,26 @@ export async function planDeliveries(
   return result;
 }
 
-function lookupIncident(
-  env: AlertSendEnv,
-  incidentId: string | null,
-  fallback: IncidentTransition | undefined,
-): IncidentTransition | null {
-  if (fallback && fallback.incidentId === incidentId) return fallback;
-  if (!incidentId || !env.incidents) return fallback ?? null;
-  return env.incidents.find((item) => item.incidentId === incidentId) ?? fallback ?? null;
+async function lookupIncident(db: D1Database, env: AlertSendEnv, row: Row): Promise<IncidentTransition | null> {
+  const id = row.incident_id == null ? null : String(row.incident_id);
+  const cached = id && env.incidents?.find((item) => item.incidentId === id);
+  if (cached) return cached;
+  if (!id) return null;
+  try {
+    const inc = await db.prepare('SELECT * FROM ops_incidents WHERE id = ?').bind(id).first<Row>();
+    if (!inc) return null;
+    return {
+      incidentId: id, dedupeKey: String(inc.dedupe_key),
+      transition: String(row.transition) as IncidentPhase,
+      severity: String(inc.severity) as AlertSeverity, kind: String(inc.kind),
+      subjectType: String(inc.subject_type), subjectId: String(inc.subject_id),
+      title: String(inc.title), detail: inc.detail == null ? '' : String(inc.detail),
+      openedAt: Number(inc.opened_at), impactCount: Number(inc.impact_count) || 0,
+    };
+  } catch (error) {
+    if (missingTable(error)) return null;
+    throw error;
+  }
 }
 
 async function deliverEmail(
@@ -339,6 +356,7 @@ export async function sendPending(
   fetchImpl: FetchImpl,
   nowSec: number,
   budget = 5,
+  onlyId?: string,
 ): Promise<SendPendingResult> {
   const result: SendPendingResult = { sent: 0, failed: 0 };
   let rows: Row[];
@@ -349,9 +367,10 @@ export async function sendPending(
        FROM ops_alert_deliveries d
        JOIN ops_alert_rules r ON r.id = d.rule_id
        WHERE d.status = 'pending' AND (d.next_attempt_at IS NULL OR d.next_attempt_at <= ?)
+         AND (? IS NULL OR d.id = ?)
        ORDER BY d.created_at ASC, d.id ASC
        LIMIT ?`,
-    ).bind(nowSec, budget).all<Row>();
+    ).bind(nowSec, onlyId ?? null, onlyId ?? null, budget).all<Row>();
     rows = pending.results;
   } catch (error) {
     if (missingTable(error)) return result;
@@ -359,7 +378,14 @@ export async function sendPending(
   }
 
   for (const row of rows) {
-    const incident = lookupIncident(env, row.incident_id == null ? null : String(row.incident_id), undefined);
+    const attemptsNow = Number(row.attempts);
+    const claimed = await db.prepare(
+      `UPDATE ops_alert_deliveries SET attempts = attempts + 1, next_attempt_at = ?
+       WHERE id = ? AND status = 'pending' AND attempts = ?`,
+    ).bind(nowSec + backoffSeconds(attemptsNow), row.id, attemptsNow).run();
+    if (Number(claimed.meta.changes ?? 0) !== 1) continue;
+
+    const incident = await lookupIncident(db, env, row);
     const secret = row.secret_ref ? env.secrets[String(row.secret_ref)] : undefined;
     let responseCode: number | null = null;
     let payloadSha: string | null = null;
@@ -368,6 +394,7 @@ export async function sendPending(
 
     try {
       if (!incident) throw new Error('incident context missing');
+      if (row.secret_ref && !secret) throw new Error(`secret ${row.secret_ref} is not available`);
       const channel = String(row.channel) as AlertChannel;
       if (channel === 'email') {
         const sent = await deliverEmail(env, fetchImpl, incident, String(row.target), String(row.id));
@@ -403,25 +430,25 @@ export async function sendPending(
       errorText = clipError(error);
     }
 
-    const attempts = Number(row.attempts) + 1;
+    const attempts = attemptsNow + 1;
     const terminal = !ok && attempts >= MAX_ATTEMPTS;
     const status = ok ? 'sent' : terminal ? 'failed' : 'pending';
     const nextAttempt = ok || terminal ? null : nowSec + backoffSeconds(attempts - 1);
     const statements: D1PreparedStatement[] = [
       db.prepare(
         `UPDATE ops_alert_deliveries
-         SET status = ?, attempts = ?, sent_at = ?, next_attempt_at = ?,
+         SET status = ?, sent_at = ?, next_attempt_at = ?,
              response_code = ?, error = ?, payload_sha256 = ?
-         WHERE id = ? AND status = 'pending'`,
+         WHERE id = ? AND attempts = ?`,
       ).bind(
         status,
-        attempts,
         ok ? nowSec : null,
         nextAttempt,
         responseCode,
         errorText,
         payloadSha,
         row.id,
+        attempts,
       ),
     ];
     if (ok) {
