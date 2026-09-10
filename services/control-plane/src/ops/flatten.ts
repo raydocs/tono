@@ -68,7 +68,7 @@ const FLATTEN_WINDOW_SQL = `INSERT OR IGNORE INTO connection_events(
   platform, app_version, os_version, os_arch,
   kind, node, stage, outcome, code, error, action, reason, from_node, to_node,
   elapsed_ms, delay_ms, exit_delay_ms, tcp_delay_ms, catalog_revision,
-  edge_asn, edge_as_org, edge_country, edge_region, edge_via_exit
+  edge_asn, edge_as_org, edge_country, edge_region, edge_via_exit, attempt_id
 )
 SELECT
   ? || ':' || ev.key,
@@ -104,7 +104,13 @@ SELECT
   ?,
   ?,
   ?,
-  ?
+  ?,
+  CASE
+    WHEN json_extract(ev.value, '$.attemptId') IS NULL THEN NULL
+    WHEN LENGTH(CAST(json_extract(ev.value, '$.attemptId') AS TEXT)) BETWEEN 1 AND 64
+    THEN CAST(json_extract(ev.value, '$.attemptId') AS TEXT)
+    ELSE NULL
+  END
 FROM json_each(?, '$.events') ev
 WHERE json_extract(ev.value, '$.kind') IN (${FLATTEN_KIND_SQL})`;
 

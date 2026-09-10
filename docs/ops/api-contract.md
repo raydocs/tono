@@ -35,8 +35,8 @@
 | `GET nodes/{name}/jobs`、`POST nodes/{name}/jobs` | `ListDto<JobDto>` / `JobDto` |
 | `PATCH nodes/{name}/profile` | `NodeDetailDto` |
 | `GET customers?cursor&limit&focus&since` | `ListDto<CustomerSummaryDto>` |
-| `GET customers/{id}` | `CustomerDetailDto` |
-| `GET customers/{id}/connections` | `ListDto<ConnectionEventDto>` |
+| `GET customers/{id}` | `CustomerDetailDto`（`devices[]` 带每台设备的 live 字段：`connected`、`selectedServer`、`lastSeenAt`、`lastFailAt/Code/Node`，来自 `ops_device_status`） |
+| `GET customers/{id}/connections?deviceId=` | `ListDto<ConnectionEventDto>`（`deviceId` 可选，按设备过滤） |
 | `GET customers/{id}/activity?range` | `ListDto<ActivityHourDto>` |
 | `GET customers/{id}/destinations?range` | `ListDto<DestinationRowDto>` |
 | `GET customers/{id}/services?range` | `ListDto<ServiceUsageDto>` |
@@ -67,7 +67,7 @@
 
 公开（无 Access、无登录）`GET /api/v1/system/pulse` 返回 `{ ok, cronAgeSec, buildSha }`：`ok` 表示 cron 在 15 分钟内跑过；`cache-control: no-store`；按 IP 每小时 60 次。不含源名或其它内部细节。
 
-采集侧（`/api/v1/ops-ingest/*`）与客户端侧（`/api/v1/telemetry/failures`）不归这份合同管，它们有各自的入站校验。`POST /api/v1/telemetry/failures` 与周期窗口事件（`telemetryEventStringKeys`）接受可选 `attemptId`（≤64 字）：**accepted, not yet used**——写入窗口 JSON 供以后投影去重，`connection_events` 无此列，失败即报不落库。
+采集侧（`/api/v1/ops-ingest/*`）与客户端侧（`/api/v1/telemetry/failures`）不归这份合同管，它们有各自的入站校验。`POST /api/v1/telemetry/failures` 与周期窗口事件（`telemetryEventStringKeys`）接受可选 `attemptId`（≤64 字），写入 `connection_events.attempt_id`；失败即报与随后窗口里的同一次尝试 `(user_id, attempt_id)` 只留一行（两边都是 `INSERT OR IGNORE`）。客户投影先写 `ops_device_status`，再按规则合成 `ops_customer_status`：`connected`＝任一台有新鲜心跳的已连接设备，`selected_server`＝最近见到的已连接设备的节点，`last_seen_at`＝max，`app_version`＝近 30 天各设备的最低版本，`last_fail_*`＝各设备最近一次，`fails_30m`＝求和。
 现有 `/ops/dashboard|fleet-nodes|activity|live|users|metrics|usage-hours` 在切换前保持不动。
 
 `GET audit` 由 shared-admin 先于 v1 dispatch 承接，信封是 `{ entries, hasMore, nextBefore, nextBeforeId }`，条目上 `actorType` / `actorRole` / `requestId` 可空。词表与库一致：`actor_type` 为 `access_admin|token_admin|collector|exit_node|system`，`actor_role` 为 `owner`；配额 `counts` 为 `in|out|in_out`、`level` 为 `ok|chore|warn|severe`（无配额时 `level: ok` 且 `quota: null`）；路由 `cloud|residential|direct|reject|unknown`；连接来源 `window|direct|diagnostics|failure`；告警 `fireOn` 为 `open|open_resolve`，投递 `transition` 另加 `test`；事故事件 `type` 为 `opened|escalated|deescalated|acked|snoozed|note|job|alert|resolved`；事故 `closure` 为 `verified|false_positive|manual`（可空）；跟进 `kind` 为 `reply|await_customer|callback|verified|note`，主体 `user|incident|node`；版本档 `current|behind_one|behind_more|unreported`。

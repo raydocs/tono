@@ -300,6 +300,52 @@ describe('ops v1 api', () => {
     assertList(await (await ops('customers/u-1/services?range=7d')).json(), assertServiceUsage);
   });
 
+  it('GET customers/{id} exposes per-device live status and connections filter by deviceId', async () => {
+    await seedUser();
+    await db().prepare(
+      `INSERT INTO devices(id, user_id, installation_id, name, status, created_at, updated_at)
+       VALUES('d-mac', 'u-1', 'inst-mac', 'MacBook', 'active', ?, ?),
+             ('d-win', 'u-1', 'inst-win', 'DESKTOP', 'active', ?, ?)`,
+    ).bind(NOW, NOW, NOW, NOW).run();
+    await db().prepare(
+      `INSERT INTO ops_device_status(
+         user_id, device_id, platform, app_version, os_version, selected_server,
+         connected, last_seen_at, last_fail_at, last_fail_code, last_fail_node, fails_30m, updated_at
+       ) VALUES
+         ('u-1', 'd-mac', 'macos', '0.0.20', 'macOS 15', 'Tokyo · Fuji', 1, ?, NULL, NULL, NULL, 0, ?),
+         ('u-1', 'd-win', 'windows', '0.0.18', 'Windows 11', 'Los Angeles · Mesa', 0, ?, ?, 'ETIMEDOUT', 'Los Angeles · Mesa', 1, ?)`,
+    ).bind(NOW, NOW, NOW - 10, NOW - 10, NOW).run();
+    await db().prepare(
+      `INSERT INTO connection_events(
+         id, at_ms, received_at, source, user_id, device_id, kind, node
+       ) VALUES
+         ('e-mac', ?, ?, 'window', 'u-1', 'd-mac', 'connectOk', 'Tokyo · Fuji'),
+         ('e-win', ?, ?, 'failure', 'u-1', 'd-win', 'connectFail', 'Los Angeles · Mesa')`,
+    ).bind(NOW * 1000, NOW, (NOW - 10) * 1000, NOW - 10).run();
+
+    const detail = assertCustomerDetail(await (await ops('customers/u-1')).json());
+    const byId = Object.fromEntries(detail.devices.map((row) => [row.id, row]));
+    expect(byId['d-mac']).toMatchObject({
+      name: 'MacBook', connected: true, selectedServer: 'Tokyo · Fuji',
+      lastFailAt: null, lastFailCode: null, lastFailNode: null, appVersion: '0.0.20',
+    });
+    expect(byId['d-win']).toMatchObject({
+      name: 'DESKTOP', connected: false, selectedServer: 'Los Angeles · Mesa',
+      lastFailCode: 'ETIMEDOUT', lastFailNode: 'Los Angeles · Mesa', appVersion: '0.0.18',
+    });
+
+    const filtered = assertList(
+      await (await ops('customers/u-1/connections?deviceId=d-win')).json(),
+      assertConnectionEvent,
+    );
+    expect(filtered.items.map((row) => row.id)).toEqual(['e-win']);
+    const all = assertList(
+      await (await ops('customers/u-1/connections')).json(),
+      assertConnectionEvent,
+    );
+    expect(all.items.map((row) => row.id).sort()).toEqual(['e-mac', 'e-win']);
+  });
+
   it('customer list and detail take an open customer-repeat-fail as 连不上', async () => {
     await seedUser('u-fail', 'fail@example.com');
     const t = Math.floor(Date.now() / 1000);

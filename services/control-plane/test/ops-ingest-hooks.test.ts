@@ -257,7 +257,7 @@ describe('ops ingest hooks', () => {
     expect(status).toMatchObject({ last_fail_code: 'ETIMEDOUT', last_fail_node: 'Tokyo · Kite' });
   });
 
-  it('accepts attemptId on failures and window events without storing a new column', async () => {
+  it('stores attemptId on failures and window events', async () => {
     const account = await seedAccount('attempt');
     const fail = await api('telemetry/failures', json({
       ts: Date.now(), stage: 'handshake', code: 'ETIMEDOUT', node: 'Tokyo · Kite',
@@ -265,6 +265,10 @@ describe('ops ingest hooks', () => {
       attemptId: 'att-abc-001',
     }, account.token));
     expect(fail.status).toBe(202);
+    const storedFail = await db().prepare(
+      "SELECT attempt_id FROM connection_events WHERE user_id = ? AND source = 'failure'",
+    ).bind(account.userId).first<{ attempt_id: string }>();
+    expect(storedFail?.attempt_id).toBe('att-abc-001');
     const tooLong = await api('telemetry/failures', json({
       ts: Date.now(), stage: 'handshake', code: 'ETIMEDOUT', node: 'Tokyo · Kite',
       appVersion: '0.0.72', osVersion: 'macOS 14.4', osArch: 'arm64',
@@ -284,6 +288,44 @@ describe('ops ingest hooks', () => {
     ).bind(account.userId).first<{ payload_json: string }>();
     const payload = JSON.parse(stored?.payload_json ?? '{}') as { events: Array<{ attemptId?: string }> };
     expect(payload.events[0]?.attemptId).toBe('att-win-1');
+    const flattened = await db().prepare(
+      "SELECT attempt_id FROM connection_events WHERE user_id = ? AND source = 'window' AND kind = 'connectFail'",
+    ).bind(account.userId).first<{ attempt_id: string }>();
+    expect(flattened?.attempt_id).toBe('att-win-1');
+  });
+
+  it('keeps one connection_events row when a failure POST and a later window share attemptId', async () => {
+    const account = await seedAccount('dedupe');
+    const attemptId = 'att-same-001';
+    const fail = await api('telemetry/failures', json({
+      ts: Date.now(), stage: 'handshake', code: 'ETIMEDOUT', node: 'Tokyo · Kite',
+      appVersion: '0.0.72', osVersion: 'Windows 11 Pro 23H2', osArch: 'x86_64',
+      attemptId,
+    }, account.token));
+    expect(fail.status).toBe(202);
+
+    const body = telemetryWindow();
+    body.window.uiState = 'notConnected';
+    body.window.events = [
+      { ts: Date.now() - 5_000, kind: 'connectFail', node: 'Tokyo · Kite', stage: 'handshake', code: 'ETIMEDOUT', attemptId },
+    ] as unknown as typeof body.window.events;
+    body.window.eventCount = 1;
+    const posted = await api('telemetry/windows', json(body, account.token));
+    expect(posted.status).toBe(201);
+
+    const events = await db().prepare(
+      'SELECT COUNT(*) AS c FROM connection_events WHERE user_id = ? AND attempt_id = ?',
+    ).bind(account.userId, attemptId).first<{ c: number }>();
+    expect(Number(events?.c)).toBe(1);
+    const status = await db().prepare(
+      'SELECT fails_30m FROM ops_customer_status WHERE user_id = ?',
+    ).bind(account.userId).first<{ fails_30m: number }>();
+    expect(Number(status?.fails_30m)).toBe(1);
+    const device = await db().prepare(
+      'SELECT fails_30m, last_fail_code FROM ops_device_status WHERE user_id = ? AND device_id = ?',
+    ).bind(account.userId, account.deviceId).first<{ fails_30m: number; last_fail_code: string }>();
+    expect(Number(device?.fails_30m)).toBe(1);
+    expect(device?.last_fail_code).toBe('ETIMEDOUT');
   });
 
   it('POST diagnostics/logs parses a gzip fixture into traffic rows', async () => {

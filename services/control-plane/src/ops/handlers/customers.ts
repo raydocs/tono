@@ -13,6 +13,7 @@ import {
   type ActivityHourDto,
   type ChoreDto,
   type CustomerDetailDto,
+  type CustomerDeviceDto,
   type CustomerNowDto,
   type CustomerSummaryDto,
   type CustomerVerdict,
@@ -235,6 +236,15 @@ export async function getCustomer(req: Request, e: Env, rawId: string): Promise<
   } catch (error) {
     if (!missingTable(error)) throw error;
   }
+  const liveById = new Map<string, Row>();
+  try {
+    const live = await e.DB.prepare(
+      'SELECT * FROM ops_device_status WHERE user_id = ?',
+    ).bind(userId).all<Row>();
+    for (const row of live.results ?? []) liveById.set(String(row.device_id), row);
+  } catch (error) {
+    if (!missingTable(error)) throw error;
+  }
   const nowBlock: CustomerNowDto = {
     connected: measured(status?.connected === true, status?.lastSeenAt ?? null, 'telemetry'),
     node: status?.selectedServer ?? null,
@@ -250,16 +260,7 @@ export async function getCustomer(req: Request, e: Env, rawId: string): Promise<
   const dto: CustomerDetailDto = {
     userId, email: String(user.email), verdict, health: word.word, tone: word.tone,
     reason, lifecycle, now: nowBlock,
-    devices: devices.map((row) => ({
-      id: String(row.id), name: String(row.name),
-      platform: asPlatform(sniffPlatform(nullText(row.os_version) ?? status?.osVersion)),
-      appVersion: status?.deviceId === String(row.id) ? status.appVersion : null,
-      osVersion: status?.deviceId === String(row.id) ? status.osVersion : null,
-      status: String(row.status),
-      selectedServer: status?.deviceId === String(row.id) ? status.selectedServer : null,
-      lastSeenAt: status?.deviceId === String(row.id) ? status.lastSeenAt : nullInt(row.updated_at),
-      createdAt: Number(row.created_at),
-    })),
+    devices: devices.map((row) => deviceDto(row, liveById.get(String(row.id)), status)),
     chores: choresFor(user, status, t),
     billing: {
       plan: nullText(user.plan),
@@ -275,15 +276,55 @@ export async function getCustomer(req: Request, e: Env, rawId: string): Promise<
   return entityJson(e, req, dto, weakEtag([userId, dto.updatedAt]), assertCustomerDetail);
 }
 
+function parseDeviceId(raw: string | null): string | null {
+  if (raw == null || raw === '') return null;
+  if (raw.length > 128 || /[\r\n\0]/.test(raw)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid deviceId');
+  }
+  return raw;
+}
+
+function deviceDto(
+  row: Row,
+  live: Row | undefined,
+  status: Awaited<ReturnType<typeof customerStatus>>,
+): CustomerDeviceDto {
+  const id = String(row.id);
+  const fromCustomer = status?.deviceId === id;
+  return {
+    id, name: String(row.name),
+    platform: asPlatform(live?.platform)
+      ?? asPlatform(sniffPlatform(nullText(row.os_version) ?? status?.osVersion)),
+    appVersion: nullText(live?.app_version) ?? (fromCustomer ? status?.appVersion ?? null : null),
+    osVersion: nullText(live?.os_version) ?? (fromCustomer ? status?.osVersion ?? null : null),
+    status: String(row.status),
+    selectedServer: nullText(live?.selected_server)
+      ?? (fromCustomer ? status?.selectedServer ?? null : null),
+    lastSeenAt: nullInt(live?.last_seen_at)
+      ?? (fromCustomer ? status?.lastSeenAt ?? null : nullInt(row.updated_at)),
+    createdAt: Number(row.created_at),
+    connected: Number(live?.connected) === 1,
+    lastFailAt: nullInt(live?.last_fail_at),
+    lastFailCode: nullText(live?.last_fail_code),
+    lastFailNode: nullText(live?.last_fail_node),
+  };
+}
+
 export async function getCustomerConnections(req: Request, e: Env, rawId: string): Promise<Response> {
   const userId = decodeName(rawId, 'id');
   await loadUser(e, userId);
-  const { cursor, limit } = pageParams(new URL(req.url));
+  const url = new URL(req.url);
+  const { cursor, limit } = pageParams(url);
+  const deviceId = parseDeviceId(url.searchParams.get('deviceId'));
   let rows: Row[] = [];
   try {
-    rows = (await e.DB.prepare(
-      'SELECT * FROM connection_events WHERE user_id = ? ORDER BY at_ms DESC, id DESC LIMIT 500',
-    ).bind(userId).all<Row>()).results ?? [];
+    rows = deviceId
+      ? (await e.DB.prepare(
+        'SELECT * FROM connection_events WHERE user_id = ? AND device_id = ? ORDER BY at_ms DESC, id DESC LIMIT 500',
+      ).bind(userId, deviceId).all<Row>()).results ?? []
+      : (await e.DB.prepare(
+        'SELECT * FROM connection_events WHERE user_id = ? ORDER BY at_ms DESC, id DESC LIMIT 500',
+      ).bind(userId).all<Row>()).results ?? [];
   } catch (error) {
     if (!missingTable(error)) throw error;
   }
@@ -293,7 +334,10 @@ export async function getCustomerConnections(req: Request, e: Env, rawId: string
   const last = sliced[sliced.length - 1];
   const nextCursor = page.length > limit && last ? encodeCursor(String(last.atMs), last.id) : null;
   const updatedAt = sliced[0] ? Math.floor(sliced[0].atMs / 1000) : now();
-  return listJson(e, req, sliced, nextCursor, updatedAt, weakEtag([userId, updatedAt, rows.length]), assertConnectionEvent);
+  return listJson(
+    e, req, sliced, nextCursor, updatedAt,
+    weakEtag([userId, deviceId, updatedAt, rows.length]), assertConnectionEvent,
+  );
 }
 
 export async function getCustomerActivity(req: Request, e: Env, rawId: string): Promise<Response> {
