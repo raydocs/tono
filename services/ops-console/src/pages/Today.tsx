@@ -115,6 +115,7 @@ export default function TodayPage({
         openCount={open.length}
         choresToday={choresDueToday(chores).length}
         onShowOpen={() => setTab('open')}
+        onShowResolved={() => setTab('resolved')}
         onShowChores={() => setTab('chores')}
       />
 

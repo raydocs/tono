@@ -77,7 +77,8 @@ function seed(empty: boolean): Store {
   const at = nowSec();
   if (empty) return { followups: [], handling: new Map() };
   return {
-    handling: new Map(),
+    // The one opening of the flapping night somebody has already called wrong.
+    handling: new Map([[FLAP_MISTAKEN, { closure: 'false_positive' as Closure, nextCheckAt: null }]]),
     followups: [
       {
         id: 'fu_seed_01',
@@ -138,6 +139,104 @@ function overnightFrom(at: number): number {
 
 function listOf(rows: readonly Followup[]): unknown {
   return { items: [...rows], nextCursor: null, total: rows.length, updatedAt: nowSec() };
+}
+
+/* ------------------------------------------------------------ 抖动之夜 */
+
+/**
+ * The night the engine flapped, on the dense set.
+ *
+ * 劣化 opened ten times on one machine with lives of about a minute, and the
+ * morning read printed all ten — which is the bad night the grouped digest is
+ * built for, so the dense set has to contain one.
+ *
+ * They are generated rather than committed to `incidents.dense.json` because
+ * 昨夜 is computed from the clock at read time: rows pinned to fixed offsets
+ * from the file's own clock fall in or out of the window depending on what
+ * hour the suite runs at, and a group that is sometimes nine rows is not a
+ * baseline. Here they are laid out inside the window that this read computed.
+ */
+const FLAP_NODE = 'Tokyo · Fuji';
+const FLAP_ID = 'inc-flap-';
+/** Lives in seconds. Fifty-nine of them is the shortest, and is not a fault. */
+const FLAP_LIVES = [59, 71, 96, 62, 143, 88, 67, 205, 74, 61];
+/** Only the dense set is dense; the other two are counted in single figures. */
+const DENSE_ENOUGH = 12;
+/**
+ * One of the ten was judged a mistake afterwards, so the group ends two
+ * different ways: a line that says 已恢复 ×10 over nine repairs and one false
+ * alarm is the lie this whole card exists to stop, at group scale.
+ */
+const FLAP_MISTAKEN = `${FLAP_ID}09`;
+
+function flapRow(index: number, openedAt: number, life: number): Record<string, unknown> {
+  const id = `${FLAP_ID}${String(index + 1).padStart(2, '0')}`;
+  const resolvedAt = openedAt + life;
+  return {
+    id,
+    dedupeKey: `node:${FLAP_NODE}:node_degraded:${id}`,
+    kind: 'node_degraded',
+    subjectType: 'node',
+    subjectId: FLAP_NODE,
+    severity: 'warn',
+    status: 'resolved',
+    tone: 'warn',
+    title: `${FLAP_NODE} 回程丢包，2 人在用`,
+    summary: '判定来回跳，两分钟不到又自己好了。',
+    parentIncidentId: null,
+    rulesVersion: 3,
+    impactCount: 2,
+    evidence: [
+      { label: 'loss', value: '[{"key":"unicom","lossPct":9.8}]', asOfSec: resolvedAt, source: 'engine' },
+      { label: 'occupancy', value: '2', asOfSec: resolvedAt, source: 'engine' },
+    ],
+    openedAt,
+    lastSeenAt: resolvedAt,
+    ackedAt: null,
+    snoozedUntil: null,
+    resolvedAt,
+    nextCheckAt: null,
+    closure: null,
+  };
+}
+
+function flapDetail(row: Record<string, unknown>): unknown {
+  const id = String(row.id);
+  const events = [
+    { id: `iev-${id}-01`, incidentId: id, at: row.openedAt, type: 'opened', actor: 'system', note: row.title },
+    { id: `iev-${id}-02`, incidentId: id, at: row.resolvedAt, type: 'resolved', actor: 'system', note: '判定又回到正常' },
+  ];
+  const empty = { items: [], nextCursor: null, total: 0, updatedAt: row.resolvedAt };
+  return {
+    incident: { ...row },
+    events: { items: events, nextCursor: null, total: events.length, updatedAt: row.resolvedAt },
+    jobs: empty,
+    deliveries: empty,
+  };
+}
+
+/**
+ * Lay the flapping night into the dense file, once. It is written into the
+ * file rather than into the digest response so the ten openings are real rows
+ * everywhere: the group line opens a drawer that exists, and the 最近恢复 tab
+ * behind 还有 N 组 lists the same incidents the block counted.
+ */
+function withFlapping(file: OpsFile | null): OpsFile | null {
+  if (file !== null) seedFlapping(file);
+  return file;
+}
+
+function seedFlapping(file: OpsFile): void {
+  if (file.list.items.length < DENSE_ENOUGH) return;
+  if (file.list.items.some((row) => String(row.id).startsWith(FLAP_ID))) return;
+  const shift = nowSec() - file.clock;
+  const nightStart = overnightFrom(nowSec()) - shift;
+  const step = Math.floor((file.clock - nightStart) / (FLAP_LIVES.length + 1));
+  for (const [index, life] of FLAP_LIVES.entries()) {
+    const row = flapRow(index, nightStart + step * (index + 1), life);
+    file.list.items.push(row);
+    file.details[String(row.id)] = flapDetail(row);
+  }
 }
 
 function readKind(value: unknown): FollowupKind | null {
@@ -388,7 +487,7 @@ export function createFollowupFixtures() {
       parts,
       query: new URLSearchParams(options.url.split('?')[1] ?? ''),
       store: storeFor(options.session, options.empty),
-      file: options.incidents(),
+      file: withFlapping(options.incidents()),
     };
     if (parts[0] === 'digest' && parts.length === 1) {
       sendJson(options.res, digestOf(context.file, context.store));

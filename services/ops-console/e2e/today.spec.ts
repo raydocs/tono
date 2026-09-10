@@ -209,6 +209,46 @@ test.describe('早报', () => {
     await expect(page.getByRole('dialog')).toBeVisible();
   });
 
+  /**
+   * The night the engine flapped: 劣化 opened ten times on one machine with
+   * lives of about a minute, and the block printed all ten. It now says the
+   * thing once, says that it is flapping, and stops at six lines a half — the
+   * rest are counted, with the list they came from one click away.
+   */
+  test('反复开关的一夜归成一行，抖动自己也是一条线，超过六组只报数', async ({ page }) => {
+    await open(page, '/today', 'dense');
+    const digest = page.locator('section').filter({ hasText: '早报' }).first();
+
+    const flap = digest.locator('.night-group').filter({ hasText: '反复开关' });
+    await expect(flap).toHaveCount(1);
+    await expect(flap).toContainText('Tokyo · Fuji 回程丢包，2 人在用 ×10');
+    // Nine of the ten were repairs and one was a mistake, counted apart:
+    // 已恢复 ×10 over a false alarm is the lie the closure word exists to stop.
+    await expect(flap).toContainText('已恢复 ×9 · 误报 ×1');
+    await expect(flap).toContainText('反复开关 10 次，最短 59 秒，判定可能在抖动');
+
+    // Four groups recovered and six of the twenty-one still open: ten lines,
+    // and the fifteen that did not fit are a number rather than a wall.
+    await expect(digest.locator('.night-group')).toHaveCount(10);
+    const more = digest.getByRole('button', { name: '还有 15 组' });
+    await expect(more).toBeVisible();
+    // One screen at 1440×900, on the worst night the fixtures have.
+    const box = await digest.boundingBox();
+    expect(box!.height).toBeLessThan(450);
+    await expect(page).toHaveScreenshot('digest-dense.png');
+
+    await more.click();
+    await expect(page.getByRole('tab', { name: /进行中/ })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  /** What a flapping machine raises is a question about the machine, not about its tenth minute. */
+  test('抖动那一行去的是机器的页面', async ({ page }) => {
+    await open(page, '/today', 'dense');
+    const digest = page.locator('section').filter({ hasText: '早报' }).first();
+    await digest.getByRole('button', { name: /反复开关/ }).click();
+    await expect(page).toHaveURL(/#\/nodes\/Tokyo/);
+  });
+
   test('平安的一夜也有一句话，不是三个空标题', async ({ page }) => {
     await open(page, '/today', 'empty');
     await expect(page.getByText('昨夜无事，今天没有到期的事')).toBeVisible();
