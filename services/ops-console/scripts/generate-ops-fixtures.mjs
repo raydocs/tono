@@ -1962,6 +1962,21 @@ export const GENERATED_FIXTURE_FILES = [
   'incidents.dense.json',
   'incidents.empty.json',
   'node-acceptance.json',
+
+  // dept:a
+  // append your entries inside your block
+
+  // dept:b
+  // append your entries inside your block
+
+  // dept:c
+  // append your entries inside your block
+
+  // dept:d
+  // append your entries inside your block
+
+  // dept:e
+  // append your entries inside your block
 ];
 
 export function generateOpsFixtures(outDir = defaultDir) {
@@ -2007,6 +2022,21 @@ export function generateOpsFixtures(outDir = defaultDir) {
     'incidents.dense.json': writeJson('incidents.dense.json', incidentsDense, true),
     'incidents.empty.json': writeJson('incidents.empty.json', incidentsEmpty, true),
     'node-acceptance.json': writeJson('node-acceptance.json', nodeAcceptance),
+
+    // dept:a
+    // append your entries inside your block
+
+    // dept:b
+    // append your entries inside your block
+
+    // dept:c
+    // append your entries inside your block
+
+    // dept:d
+    // append your entries inside your block
+
+    // dept:e
+    // append your entries inside your block
   };
 
   const verdictCounts = {};

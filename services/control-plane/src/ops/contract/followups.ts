@@ -3,8 +3,8 @@
 
 import type { FollowupKind, FollowupSubjectType } from './vocabulary';
 import { FOLLOWUP_KINDS, FOLLOWUP_SUBJECT_TYPES } from './vocabulary';
-import type { IncidentDto } from './operations';
-import { assertIncident } from './operations';
+import type { IncidentDto } from './incidents';
+import { assertIncident } from './incidents';
 import {
   arrayOf,
   assertList,
