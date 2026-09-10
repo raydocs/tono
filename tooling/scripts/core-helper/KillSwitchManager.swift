@@ -863,7 +863,7 @@ final class KillSwitchManager {
             guard !host.contains(":"), canonicalPublicAddress(host) != nil else {
                 throw HelperFailure.invalid("Proxy target host is not a public IP literal.")
             }
-            guard transport == "tcp" else {
+            guard transport == "tcp" || transport == "udp" else {
                 throw HelperFailure.invalid("Proxy target transport is invalid.")
             }
             let addresses = try validateAddresses(item["addresses"] ?? [])
@@ -897,7 +897,7 @@ final class KillSwitchManager {
                   let portNumber = item["port"] as? NSNumber,
                   let port = UInt16(exactly: portNumber.intValue),
                   port > 0,
-                  transport == "tcp" else {
+                  transport == "tcp" || transport == "udp" else {
                 throw HelperFailure.invalid("Proxy endpoint is invalid.")
             }
             let host = try normalizeHost(rawHost)

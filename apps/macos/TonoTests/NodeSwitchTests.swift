@@ -10,6 +10,34 @@ final class NodeSwitchTests: XCTestCase {
         XCTAssertEqual(union, [old, extra, next])
     }
 
+    func testHy2AdmissionKeepsTcpAndUdpDialEndpointsOnTheSameHost() throws {
+        let tcp = Fixture.realityNode(server: "203.0.114.7", port: 443)
+        let hy2 = Fixture.hy2Node(server: "203.0.114.7", port: 443)
+        let admitted = try ConfigPipeline.validatedOwnedNode(hy2)
+        XCTAssertEqual(admitted.type, .hysteria2)
+        XCTAssertEqual(admitted.tlsFingerprint, Fixture.hy2Fingerprint)
+        XCTAssertEqual(
+            try ConfigPipeline.ownedNodeYAML(hy2).contains("fingerprint:"),
+            true
+        )
+
+        var skipped = hy2
+        skipped.skipCertVerify = true
+        XCTAssertThrowsInjectionError("unsafeNode(\(hy2.name))") {
+            try ConfigPipeline.validatedOwnedNode(skipped)
+        }
+
+        let tcpDial = try ConfigPipeline.dialEndpoints(for: tcp)
+        let udpDial = try ConfigPipeline.dialEndpoints(for: hy2)
+        XCTAssertEqual(tcpDial.map(\.transport), ["tcp"])
+        XCTAssertEqual(udpDial.map(\.transport), ["udp"])
+        let union = ConfigPipeline.uniqueDialEndpoints(tcpDial + udpDial)
+        XCTAssertEqual(union, [
+            .init(host: "203.0.114.7", port: 443, transport: "tcp"),
+            .init(host: "203.0.114.7", port: 443, transport: "udp"),
+        ])
+    }
+
     func testDrainClosesOnlyConnectionsBoundToThePreviousExit() {
         let stale = fixtureConnection(
             id: "old-1",

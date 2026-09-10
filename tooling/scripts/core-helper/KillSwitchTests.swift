@@ -514,7 +514,7 @@ extension KillSwitchManager {
             } catch {
                 rejectedPrivateTarget = true
             }
-            let rejectedUDPProxyTarget: Bool
+            let acceptedUDPProxyTarget: Bool
             do {
                 _ = try resolveProxyTargets(
                     [[
@@ -524,9 +524,23 @@ extension KillSwitchManager {
                     ]],
                     previous: []
                 )
-                rejectedUDPProxyTarget = false
+                acceptedUDPProxyTarget = true
             } catch {
-                rejectedUDPProxyTarget = true
+                acceptedUDPProxyTarget = false
+            }
+            let rejectedQuicProxyTarget: Bool
+            do {
+                _ = try resolveProxyTargets(
+                    [[
+                        "host": "8.8.4.4",
+                        "transport": "quic",
+                        "port": 443,
+                    ]],
+                    previous: []
+                )
+                rejectedQuicProxyTarget = false
+            } catch {
+                rejectedQuicProxyTarget = true
             }
             let persisted = persistentObject(state, allowedUID: 501)
             // Split into named steps: as a single boolean chain this grew past
@@ -641,7 +655,8 @@ extension KillSwitchManager {
                 && pinsAgree
                 && hostsAgree
                 && rejectedPrivateTarget
-                && rejectedUDPProxyTarget
+                && acceptedUDPProxyTarget
+                && rejectedQuicProxyTarget
         } catch {
             return false
         }

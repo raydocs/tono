@@ -32,12 +32,13 @@
 - macOS 失败即报已合（PR #119）。Windows 周期遥测骨架在 `apps/windows/app/src-tauri/src/tono/telemetry.rs`，`connectFail` 事件名已列入白名单。
 - Windows 插件 IPC 命名空间源码已改为 `tono-plugin-core`（`crates/tono-plugin-core/src/lib.rs` 的 `PluginBuilder::new` 与 `app/tests/core-plugin-namespace.test.ts`）。**实机尚未用新包复测**，`docs/WINDOWS_0_0_72_DEVICE_ACCEPTANCE.md` 仍记着 FAIL。
 - 目录与保护已经按传输层区分端点：macOS `ConfigPipeline.DialEndpoint.transport`；Windows `ProxyEndpoint.protocol` 含 `Udp`。hy2 要接的是这两处，不是新造一套防火墙。
+- 控制面目录合同已接受同节点 hy2 块（`password: {{TONO_CLIENT_UUID}}` + fingerprint，禁止 skip-cert-verify；迁移 0072）。**生产目录仍不塞块**，直到客户端准入合入。
+- 杭州 `47.110.84.71` 只出站：东京 VLESS TCP 通；Dedirock hy2 UDP 握手 5/5 且经 hy2 到 Google 通。Panstar 东京入站 UDP 被商家拦住。自动切换默认关。
 
 **还没有的（这一发要补）**
 
-- 托管目录准入写死 VLESS：macOS `ConfigPipeline.validatedOwnedNode`（`type == .vless` 且 Reality）；Windows `tono_core::node::admit_node`（`NotVless`）。macOS `ConfigParser` 能解析 `hy2://`，那是手工 URL，进不了托管目录。
-- 控制面 `catalog-yaml.ts` 的 `catalogProxyUsesManagedIdentity` 要求每个 proxy 块恰好一个 `uuid: {{TONO_CLIENT_UUID}}`。hy2 块用 `password`，现在发不出去。
-- 连接失败只换下一座城市（macOS `rotateCatalogExitAfterConnectFailure`），不换同一座城市的备用传输。
+- 客户端准入 hy2：Windows `admit_node` / `proxy_endpoint_of` 与 macOS `validatedOwnedNode` / Helper UDP 放行在本分支落地；合进 `main` 之前 App 仍吃不进托管 hy2 块。macOS `ConfigParser` 的 `hy2://` 仍是手工 URL。
+- 连接失败只换下一座城市（macOS `rotateCatalogExitAfterConnectFailure`），不换同一座城市的备用传输。自动切换（G2.8）不做，直到家宽三网证明。
 - Windows 更新日记：`update_handoff.rs` 的 `prepare` 跳到 `ConnectionQuiescing`，`begin_first_launch_migration` 直接进 `FirstLaunchMigration`，`mark_committed` 跳过中间相位；`tono-core/src/update_journal.rs` 的 `allowed_next` 会判 Failed，随后 `mark_committed` 可能擦掉失败证据（issue #26）。
 - 客户更新源：`services/control-plane/public/appcast.xml` 0.0.67；`public/windows/latest.json` 0.0.34。
 

@@ -79,7 +79,10 @@ nonisolated enum HelperProtocolVersion {
     ///   files. Behaviour is unchanged; the bump exists so installed daemons
     ///   pick up the same compiled helper. Compile and CONTRACT hash now share
     ///   one source-file manifest in `build-core-helper.sh`.
-    static let current = "3.15.0"
+    /// - 3.15.0 → 3.16.0: proxy endpoints may be UDP (hy2 on the same public
+    ///   IPv4/port as VLESS TCP). A 3.15.0 daemon rejects `transport: udp` and
+    ///   would leave the backup path fail-closed even after the GUI admits it.
+    static let current = "3.16.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

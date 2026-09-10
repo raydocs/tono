@@ -692,7 +692,10 @@ mod tests {
         collections::BTreeSet,
         net::{IpAddr, Ipv4Addr, Ipv6Addr},
     };
-    use tono_core::{connection::ConnectionStatus, node::ValidatedNode};
+    use tono_core::{
+        connection::ConnectionStatus,
+        node::{NodeProtocol, ValidatedNode},
+    };
 
     #[test]
     fn dns_listener_conflict_reports_both_socket_owners_consistently() {
@@ -1246,6 +1249,26 @@ mod tests {
             client_fingerprint: None,
             reality_public_key: "0123456789abcdef0123456789abcdef0123456789a".to_string(),
             reality_short_id: "0123456789abcdef".to_string(),
+            protocol: NodeProtocol::VlessReality,
+            tls_fingerprint: None,
+        }
+    }
+
+    fn hy2_node() -> ValidatedNode {
+        ValidatedNode {
+            name: "US Reality 01 · hy2".to_string(),
+            server: Ipv4Addr::new(203, 0, 113, 7),
+            port: 8443,
+            uuid: "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d".to_string(),
+            servername: "www.microsoft.com".to_string(),
+            flow: None,
+            client_fingerprint: None,
+            reality_public_key: String::new(),
+            reality_short_id: String::new(),
+            protocol: NodeProtocol::Hysteria2,
+            tls_fingerprint: Some(
+                "e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db".to_string(),
+            ),
         }
     }
 
@@ -1499,6 +1522,14 @@ mod tests {
         assert_eq!(endpoint.ip, "203.0.113.7");
         assert_eq!(endpoint.port, 8443);
         assert_eq!(endpoint.protocol, tono_service_protocol::ProxyProtocol::Tcp);
+    }
+
+    #[test]
+    fn hy2_proxy_endpoint_is_udp() {
+        let endpoint = proxy_endpoint_of(&hy2_node());
+        assert_eq!(endpoint.ip, "203.0.113.7");
+        assert_eq!(endpoint.port, 8443);
+        assert_eq!(endpoint.protocol, tono_service_protocol::ProxyProtocol::Udp);
     }
 
     #[test]

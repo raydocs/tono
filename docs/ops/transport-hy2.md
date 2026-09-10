@@ -75,4 +75,4 @@
 | hy2 握手 5 次 | **5/5**，经代理 TCP 到 `1.1.1.1:443` 约 145–149ms |
 | 经 hy2 到 `google.com:443` | **189ms 通**（直连 Google 仍超时） |
 
-结论：大陆 UDP 到这家美国机可用。Panstar 东京仍被商家入站 UDP 拦住。自动切换默认关，直到家宽三网对 **这台 Dedirock**（或放行后的 Panstar）再测一轮。生产目录暂不塞 hy2 块（客户端准入 G2.6/G2.7 未合）。
+结论：大陆 UDP 到这家美国机可用。Panstar 东京仍被商家入站 UDP 拦住。自动切换默认关，直到家宽三网对 **这台 Dedirock**（或放行后的 Panstar）再测一轮。生产目录暂不塞 hy2 块（等 G2.6/G2.7 合进 `main`；本分支已做 Windows/macOS 准入与 Helper UDP 放行）。

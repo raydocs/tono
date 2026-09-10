@@ -32,4 +32,4 @@ pub use protected_connectivity::{
 };
 pub use update_journal::{UpdateHandoffJournal, UpdateHandoffPhase};
 pub use credentials::{CredentialKey, CredentialStore};
-pub use node::{EXIT_GROUP_NAME, NodeRejection, ValidatedNode};
+pub use node::{EXIT_GROUP_NAME, NodeProtocol, NodeRejection, ValidatedNode};

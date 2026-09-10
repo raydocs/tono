@@ -1,10 +1,10 @@
 //! Catalog node admission contract.
 //!
 //! A catalog node is usable only if every rule holds: VLESS over TLS with
-//! Reality, a valid UUID, `xtls-rprx-vision` flow (when present), TCP
-//! carrier (when present), no skip-cert-verify, and a public IPv4 literal
-//! server. Only whitelisted fields survive into [`ValidatedNode`]; every
-//! other byte of server YAML is discarded.
+//! Reality, or Hysteria2 with a pinned certificate; a valid UUID (as `uuid`
+//! or `password`); no skip-cert-verify; and a public IPv4 literal server.
+//! Only whitelisted fields survive into [`ValidatedNode`]; every other byte
+//! of server YAML is discarded.
 
 use serde::Deserialize;
 use std::collections::HashSet;
@@ -53,8 +53,10 @@ pub enum NodeRejection {
     Malformed(String),
     #[error("name is empty, over 128 bytes, or contains control characters")]
     BadName,
-    #[error("type must be vless")]
+    #[error("type must be vless or hysteria2")]
     NotVless,
+    #[error("hy2 fingerprint must be a 64-hex SHA-256")]
+    BadFingerprint,
     #[error("tls must be enabled")]
     TlsDisabled,
     #[error("uuid is missing or not a valid UUID")]
@@ -81,6 +83,14 @@ pub enum NodeRejection {
     DuplicateOrReservedName(String),
 }
 
+/// Which transport the catalog admitted. Hy2 is the same node identity as
+/// the VLESS block (` · hy2` suffix); it is not a second account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeProtocol {
+    VlessReality,
+    Hysteria2,
+}
+
 /// A catalog node that passed admission. Whitelisted fields only (§4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidatedNode {
@@ -88,10 +98,10 @@ pub struct ValidatedNode {
     /// Guaranteed public IPv4 literal.
     pub server: Ipv4Addr,
     pub port: u16,
-    /// UUID as supplied (validated to parse).
+    /// UUID as supplied (validated to parse). For hy2 this is `password`.
     pub uuid: String,
-    /// Emitted as Mihomo's `servername` key (never `sni`, which Reality
-    /// silently ignores).
+    /// Emitted as Mihomo's `servername` key for VLESS (never `sni`, which
+    /// Reality silently ignores). For hy2 this is the TLS SNI.
     pub servername: String,
     /// `xtls-rprx-vision` when supplied by the catalog; omitted otherwise
     /// (macOS parity: the contract constrains the value, not its presence).
@@ -99,6 +109,9 @@ pub struct ValidatedNode {
     pub client_fingerprint: Option<String>,
     pub reality_public_key: String,
     pub reality_short_id: String,
+    pub protocol: NodeProtocol,
+    /// SHA-256 of the hy2 leaf cert, lowercase hex, no colons.
+    pub tls_fingerprint: Option<String>,
 }
 
 impl ValidatedNode {
@@ -111,33 +124,49 @@ impl ValidatedNode {
             map.insert(Value::String(key.to_string()), value);
         };
         put("name", Value::String(self.name.clone()));
-        put("type", Value::String("vless".to_string()));
         put("server", Value::String(self.server.to_string()));
         put(
             "port",
             Value::Number(serde_yaml_ng::Number::from(self.port)),
         );
-        put("uuid", Value::String(self.uuid.clone()));
-        put("tls", Value::Bool(true));
-        put("servername", Value::String(self.servername.clone()));
-        if let Some(flow) = &self.flow {
-            put("flow", Value::String(flow.clone()));
+        match self.protocol {
+            NodeProtocol::Hysteria2 => {
+                put("type", Value::String("hysteria2".to_string()));
+                put("password", Value::String(self.uuid.clone()));
+                put("sni", Value::String(self.servername.clone()));
+                if let Some(fingerprint) = &self.tls_fingerprint {
+                    put("fingerprint", Value::String(fingerprint.clone()));
+                }
+            }
+            NodeProtocol::VlessReality => {
+                put("type", Value::String("vless".to_string()));
+                put("uuid", Value::String(self.uuid.clone()));
+                put("tls", Value::Bool(true));
+                put("servername", Value::String(self.servername.clone()));
+                if let Some(flow) = &self.flow {
+                    put("flow", Value::String(flow.clone()));
+                }
+                if let Some(fingerprint) = &self.client_fingerprint {
+                    put("client-fingerprint", Value::String(fingerprint.clone()));
+                }
+                put("network", Value::String(REQUIRED_NETWORK.to_string()));
+                let mut reality = serde_yaml_ng::Mapping::new();
+                reality.insert(
+                    Value::String("public-key".to_string()),
+                    Value::String(self.reality_public_key.clone()),
+                );
+                reality.insert(
+                    Value::String("short-id".to_string()),
+                    Value::String(self.reality_short_id.clone()),
+                );
+                put("reality-opts", Value::Mapping(reality));
+            }
         }
-        if let Some(fingerprint) = &self.client_fingerprint {
-            put("client-fingerprint", Value::String(fingerprint.clone()));
-        }
-        put("network", Value::String(REQUIRED_NETWORK.to_string()));
-        let mut reality = serde_yaml_ng::Mapping::new();
-        reality.insert(
-            Value::String("public-key".to_string()),
-            Value::String(self.reality_public_key.clone()),
-        );
-        reality.insert(
-            Value::String("short-id".to_string()),
-            Value::String(self.reality_short_id.clone()),
-        );
-        put("reality-opts", Value::Mapping(reality));
         map
+    }
+
+    pub fn is_hysteria2(&self) -> bool {
+        self.protocol == NodeProtocol::Hysteria2
     }
 }
 
@@ -156,6 +185,10 @@ struct RawProxy {
     port: u16,
     #[serde(default)]
     uuid: Option<String>,
+    #[serde(default)]
+    password: Option<String>,
+    #[serde(default)]
+    fingerprint: Option<String>,
     #[serde(default)]
     tls: Option<bool>,
     #[serde(default)]
@@ -191,6 +224,9 @@ pub fn admit_node(value: &serde_yaml_ng::Value) -> Result<ValidatedNode, NodeRej
     let name = raw.name.trim();
     if name.is_empty() || name.len() > 128 || name.chars().any(is_forbidden_scalar_char) {
         return Err(NodeRejection::BadName);
+    }
+    if raw.kind == "hysteria2" {
+        return admit_hysteria2(raw);
     }
     if raw.kind != "vless" {
         return Err(NodeRejection::NotVless);
@@ -293,6 +329,89 @@ pub fn admit_node(value: &serde_yaml_ng::Value) -> Result<ValidatedNode, NodeRej
         client_fingerprint,
         reality_public_key: public_key.to_string(),
         reality_short_id: short_id.to_string(),
+        protocol: NodeProtocol::VlessReality,
+        tls_fingerprint: None,
+    })
+}
+
+fn parse_hyphenated_uuid(raw: &str) -> Result<String, NodeRejection> {
+    let uuid = raw.trim();
+    if uuid.is_empty() || uuid.len() != 36 {
+        return Err(NodeRejection::BadUuid);
+    }
+    uuid::Uuid::parse_str(uuid)
+        .map(|parsed| parsed.to_string())
+        .map_err(|_| NodeRejection::BadUuid)
+}
+
+fn normalize_sha256_fingerprint(raw: &str) -> Option<String> {
+    let hex: String = raw
+        .chars()
+        .filter(|ch| *ch != ':')
+        .map(|ch| ch.to_ascii_lowercase())
+        .collect();
+    if hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Some(hex)
+    } else {
+        None
+    }
+}
+
+fn admit_hysteria2(raw: RawProxy) -> Result<ValidatedNode, NodeRejection> {
+    let name = raw.name.trim();
+    if name.is_empty() || name.len() > 128 || name.chars().any(is_forbidden_scalar_char) {
+        return Err(NodeRejection::BadName);
+    }
+    if raw.skip_cert_verify == Some(true) {
+        return Err(NodeRejection::SkipCertVerify);
+    }
+    let password = raw
+        .password
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or(NodeRejection::BadUuid)?;
+    let uuid = parse_hyphenated_uuid(password)?;
+    let servername = raw
+        .servername
+        .as_deref()
+        .or(raw.sni.as_deref())
+        .ok_or(NodeRejection::SniInvalid)?;
+    let servername = normalize_sni_host(servername).ok_or(NodeRejection::SniInvalid)?;
+    let fingerprint = raw
+        .fingerprint
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .and_then(normalize_sha256_fingerprint)
+        .ok_or(NodeRejection::BadFingerprint)?;
+    match raw.network.as_deref().map(str::trim) {
+        None | Some("") | Some("udp") => {}
+        Some(network) if network.eq_ignore_ascii_case("udp") => {}
+        Some(_) => return Err(NodeRejection::UnsupportedNetwork),
+    }
+    if raw.port == 0 {
+        return Err(NodeRejection::BadPort);
+    }
+    let server_text = raw.server.trim();
+    let server: Ipv4Addr = server_text
+        .parse()
+        .map_err(|_| NodeRejection::ServerNotPublicIpv4)?;
+    if !is_public_ipv4(server) {
+        return Err(NodeRejection::ServerNotPublicIpv4);
+    }
+    Ok(ValidatedNode {
+        name: name.to_string(),
+        server,
+        port: raw.port,
+        uuid,
+        servername,
+        flow: None,
+        client_fingerprint: None,
+        reality_public_key: String::new(),
+        reality_short_id: String::new(),
+        protocol: NodeProtocol::Hysteria2,
+        tls_fingerprint: Some(fingerprint),
     })
 }
 
@@ -492,6 +611,46 @@ ws-opts: { path: /ignored }
             assert!(keys.contains(&key.to_string()), "missing key {key}");
         }
         assert_eq!(keys.len(), 11);
+    }
+
+    fn passing_hy2_yaml() -> &'static str {
+        r#"
+name: "🇺🇸 US Reality 01 · hy2"
+type: hysteria2
+server: 8.8.8.8
+port: 443
+password: "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d"
+sni: "www.microsoft.com"
+fingerprint: "E3:AA:4A:74:5A:A9:05:39:AB:1A:49:3D:94:0E:EB:A7:B4:30:5B:75:16:AB:84:16:7E:46:C9:8A:D9:FE:D3:DB"
+"#
+    }
+
+    #[test]
+    fn admits_hysteria2_and_rejects_skip_cert_verify() {
+        let node = admit_yaml(passing_hy2_yaml()).unwrap();
+        assert_eq!(node.protocol, NodeProtocol::Hysteria2);
+        assert_eq!(node.name, "🇺🇸 US Reality 01 · hy2");
+        assert_eq!(node.server, Ipv4Addr::new(8, 8, 8, 8));
+        assert_eq!(node.port, 443);
+        assert_eq!(node.uuid, "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d");
+        assert_eq!(node.servername, "www.microsoft.com");
+        assert_eq!(
+            node.tls_fingerprint.as_deref(),
+            Some("e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db")
+        );
+        let yaml = serde_yaml_ng::to_string(&node.to_runtime_mapping()).unwrap();
+        assert!(yaml.contains("type: hysteria2"));
+        assert!(yaml.contains("password:"));
+        assert!(yaml.contains("fingerprint:"));
+        assert!(!yaml.contains("skip-cert-verify"));
+        assert!(!yaml.contains("uuid:"));
+        assert!(!yaml.contains("reality-opts"));
+
+        let rejected = format!("{}\nskip-cert-verify: true\n", passing_hy2_yaml().trim());
+        assert_eq!(
+            admit_yaml(&rejected).unwrap_err(),
+            NodeRejection::SkipCertVerify
+        );
     }
 
     #[test]

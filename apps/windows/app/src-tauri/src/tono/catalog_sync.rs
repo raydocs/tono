@@ -485,7 +485,7 @@ mod tests {
     use std::net::Ipv4Addr;
     use std::path::{Path, PathBuf};
     use tono_core::catalog::{CatalogCache, catalog_digest};
-    use tono_core::node::ValidatedNode;
+    use tono_core::node::{NodeProtocol, ValidatedNode};
     use tono_core::{CatalogError, CatalogTracker, ExitCatalogResponse};
 
     fn node(name: &str) -> ValidatedNode {
@@ -499,6 +499,8 @@ mod tests {
             client_fingerprint: None,
             reality_public_key: "0123456789abcdef0123456789abcdef0123456789a".to_string(),
             reality_short_id: "0123456789abcdef".to_string(),
+            protocol: NodeProtocol::VlessReality,
+            tls_fingerprint: None,
         }
     }
 

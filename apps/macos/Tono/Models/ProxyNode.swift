@@ -114,6 +114,8 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
     var alterId: Int?          // vmess
     var flow: String?           // vless, e.g. xtls-rprx-vision
     var clientFingerprint: String?
+    /// SHA-256 of the hy2 leaf cert. Not `client-fingerprint` (uTLS).
+    var tlsFingerprint: String?
     var realityPublicKey: String?
     var realityShortId: String?
 
@@ -143,6 +145,6 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
         case id, flag, name, type, server, port, relay, latency, isActive, subscriptionId
         case username, password, uuid, cipher, udp
         case sni, skipCertVerify, network, wsPath, wsHost, grpcServiceName, tls, alterId
-        case flow, clientFingerprint, realityPublicKey, realityShortId
+        case flow, clientFingerprint, tlsFingerprint, realityPublicKey, realityShortId
     }
 }
