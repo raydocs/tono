@@ -8,9 +8,11 @@ import type {
   NodeDetailDto,
   NodeErrorRowDto,
   NodeHistoryEntryDto,
+  QuotaCounts,
+  QuotaCycleKind,
   RangeKey,
 } from '@contract';
-import { getJson, postJson } from './api';
+import { getJson, patchJson, postJson } from './api';
 
 /**
  * The 节点详情 page's own half of the wire.
@@ -55,6 +57,45 @@ export type RetireRequest = {
   reason: string;
 };
 
+/**
+ * The allowance as the 商家 sells it, which is four separate decisions: how
+ * much, when the counter turns over, which day it turns over on, and which
+ * direction is billed. The three counting rules disagree by a factor of two,
+ * so none of them is a safe default to guess.
+ */
+export type NodeQuotaInput = {
+  quotaBytes: number;
+  cycleKind: QuotaCycleKind;
+  cycleAnchorDay: number;
+  counts: QuotaCounts;
+};
+
+/**
+ * What the 这台机器 form sends.
+ *
+ * Every key is optional and the Worker refuses one it does not know, so the
+ * form sends the fields it owns and nothing else — the measured half of the
+ * page (the address, the system, the five registrations) is not in here
+ * because nobody types it. `quota: null` is how an allowance is taken off
+ * again; leaving the key out would mean "unchanged", which is a different
+ * answer.
+ */
+export type NodeProfileInput = {
+  provider?: string | null;
+  providerAccountId?: string | null;
+  region?: string | null;
+  lineTags?: string[];
+  port?: number | null;
+  price?: number | null;
+  currency?: string | null;
+  /** Days in one billing period, the way it is written on the invoice. */
+  billingCycle?: number | null;
+  renewsAt?: number | null;
+  expiresAt?: number | null;
+  notes?: string | null;
+  quota?: NodeQuotaInput | null;
+};
+
 export const nodeApi = {
   detail: (name: string, signal?: AbortSignal) =>
     getJson<NodeDetailDto>(nodePath(name), signal),
@@ -66,6 +107,14 @@ export const nodeApi = {
     getJson<ListDto<NodeHistoryEntryDto>>(nodePath(name, '/history'), signal),
   jobs: (name: string, signal?: AbortSignal) =>
     getJson<ListDto<JobDto>>(nodePath(name, '/jobs'), signal),
+
+  /**
+   * The hand-kept half of the node, written back. It answers with the whole
+   * detail rather than the profile alone, so the page re-reads one response
+   * instead of stitching a patch into what it already had.
+   */
+  saveProfile: (name: string, input: NodeProfileInput) =>
+    patchJson<NodeDetailDto>(nodePath(name, '/profile'), input),
 
   enqueueJob: (name: string, request: NodeJobRequest) =>
     postJson<JobDto>(nodePath(name, '/jobs'), request),

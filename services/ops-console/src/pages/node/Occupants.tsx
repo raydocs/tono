@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import type { Measured, NodeOccupantDto } from '@contract';
 import { DataTable, type DataColumn } from '@/components/ops/DataTable';
-import { Empty } from '@/components/ops/Empty';
+import { EmptyLine } from '@/components/ops/Empty';
 import { Section } from '@/components/ops/Section';
 import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
@@ -33,7 +33,7 @@ export function NodeOccupants({ occupancy }: { occupancy: Measured<NodeOccupantD
         </span>
       }
     >
-      {rows.length === 0 ? <Empty message={copy.nodeNoOccupants} /> : (
+      {rows.length === 0 ? <EmptyLine message={copy.nodeNoOccupants} /> : (
         <DataTable
           rows={[...rows]}
           columns={columns}

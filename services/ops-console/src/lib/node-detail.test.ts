@@ -4,13 +4,20 @@ import { copy } from '@/copy/copy';
 import { nowSec } from './clock';
 import {
   actionBlockReason,
+  anchorDayOf,
   barSize,
+  bytesToGb,
   canCancelJob,
   foldErrors,
   formatBillingCycle,
   formatDeadline,
   formatMoney,
+  gbToBytes,
   NODE_ACTIONS,
+  numberOrNull,
+  parseLineTags,
+  reasonSentence,
+  textOrNull,
   type NodeActionId,
   type NodeActionSubject,
 } from './node-detail';
@@ -146,5 +153,67 @@ describe('folding the error rows into categories', () => {
 
   it('has nothing to fold when nothing was reported', () => {
     expect(foldErrors([])).toEqual([]);
+  });
+});
+
+
+describe('why the word, in words the operator can act on', () => {
+  it('says nothing at all about a healthy machine', () => {
+    // The engine writes `ok` there, and production printed it under 正常.
+    expect(reasonSentence('ok', 'ok')).toBeNull();
+    expect(reasonSentence('ok', '大陆正常')).toBeNull();
+  });
+
+  it('turns every token the engine can write into a sentence', () => {
+    const tokens = [
+      'unreachable', 'likely_blocked', 'agent_missing', 'machine_pressure',
+      'snapshot_stale', 'carrier_loss', 'customer_fail', 'error_spike', 'collector_stale',
+    ];
+    for (const token of tokens) {
+      const said = reasonSentence('degraded', token);
+      expect(said, token).toBe(copy.nodeReason[token as keyof typeof copy.nodeReason]);
+      expect(said, token).not.toBe(token);
+    }
+  });
+
+  it('passes a sentence through untouched', () => {
+    expect(reasonSentence('degraded', '联通去程成功率掉到 76%'))
+      .toBe('联通去程成功率掉到 76%');
+  });
+
+  it('drops a token nobody has translated rather than printing it', () => {
+    expect(reasonSentence('degraded', 'some_new_rule')).toBeNull();
+    expect(reasonSentence('degraded', null)).toBeNull();
+    expect(reasonSentence('degraded', '  ')).toBeNull();
+  });
+});
+
+describe('what the 这台机器 form sends back', () => {
+  it('reads an empty box as "there is none"', () => {
+    expect(textOrNull('  ')).toBeNull();
+    expect(textOrNull(' Bandwagon ')).toBe('Bandwagon');
+    expect(numberOrNull('')).toBeNull();
+    expect(numberOrNull('abc')).toBeNull();
+    expect(numberOrNull('5.5')).toBe(5.5);
+  });
+
+  it('keeps a two-word line tag as one tag', () => {
+    expect(parseLineTags('CN2 GIA · 晚高峰限速')).toEqual(['CN2 GIA', '晚高峰限速']);
+    expect(parseLineTags('CMIN2，移动优先、香港中转')).toEqual(['CMIN2', '移动优先', '香港中转']);
+    expect(parseLineTags('   ')).toEqual([]);
+  });
+
+  it('takes the allowance in the GB the invoice is written in, and gives it back', () => {
+    const bytes = gbToBytes('1000');
+    expect(bytes).toBe(1_000_000_000_000);
+    expect(bytesToGb(bytes)).toBe('1000');
+    expect(bytesToGb(null)).toBe('');
+    expect(gbToBytes('')).toBeNull();
+  });
+
+  it('recovers the anchor day from the cycle the meter is already using', () => {
+    const march9 = Math.floor(new Date(2026, 2, 9).getTime() / 1_000);
+    expect(anchorDayOf(march9)).toBe('9');
+    expect(anchorDayOf(null)).toBe('1');
   });
 });

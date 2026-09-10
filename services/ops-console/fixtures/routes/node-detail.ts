@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { nowSec } from '../../src/lib/clock';
 import { materializeOps } from '../../src/lib/ops-fixtures';
 
 /**
@@ -185,6 +186,10 @@ export function serveNodeRoutes(options: {
     void handleWrite(req, res, file, parts, name);
     return true;
   }
+  if (method === 'PATCH') {
+    void handleProfile(req, res, file, parts, name);
+    return true;
+  }
   if (method !== 'GET' && method !== 'HEAD') {
     res.statusCode = 405;
     res.end();
@@ -222,6 +227,103 @@ function readFor(file: NodeFile, parts: string[], name: string, range: string): 
   // the toggle look broken.
   if (section === 'errors') return file.errors[range] ?? file.errors['30d'] ?? file.errors['7d'] ?? null;
   return null;
+}
+
+/** Exactly the keys the Worker takes on the profile; anything else is refused. */
+const PROFILE_KEYS = new Set([
+  'provider', 'providerAccountId', 'region', 'lineTags', 'port', 'price',
+  'currency', 'billingCycle', 'renewsAt', 'expiresAt', 'notes', 'quota',
+]);
+
+const DATE_KEYS = new Set(['renewsAt', 'expiresAt']);
+
+type QuotaBody = {
+  quotaBytes?: unknown;
+  cycleKind?: unknown;
+  cycleAnchorDay?: unknown;
+  counts?: unknown;
+};
+
+function nullableInt(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.round(parsed) : null;
+}
+
+/**
+ * 这台机器, written back.
+ *
+ * The dates go into the store one clock-shift early on purpose: every read
+ * here is materialised from the file's recorded clock to now, so a date stored
+ * as the operator typed it would come back two years late — and a form whose
+ * own answer disagrees with what was typed is worse than no form.
+ */
+async function handleProfile(
+  req: IncomingMessage,
+  res: ServerResponse,
+  file: NodeFile,
+  parts: string[],
+  name: string,
+) {
+  if (parts[2] !== 'profile' || parts.length !== 3) {
+    fail(res, 404, 'NOT_FOUND', parts.join('/'));
+    return;
+  }
+  const body = await readBody(req);
+  const unknown = Object.keys(body).filter((key) => !PROFILE_KEYS.has(key));
+  if (unknown.length > 0) {
+    fail(res, 400, 'UNKNOWN_FIELD', unknown.join(', '));
+    return;
+  }
+
+  const facts = file.detail.facts as Record<string, unknown>;
+  const back = nowSec() - file.clock;
+  for (const [key, value] of Object.entries(body)) {
+    if (key === 'quota') continue;
+    if (key === 'lineTags') {
+      facts.lineTags = Array.isArray(value) ? value.map((tag) => String(tag)) : [];
+      continue;
+    }
+    if (DATE_KEYS.has(key)) {
+      const at = nullableInt(value);
+      facts[key] = at === null ? null : at - back;
+      continue;
+    }
+    if (key === 'port' || key === 'billingCycle') {
+      facts[key] = nullableInt(value);
+      continue;
+    }
+    if (key === 'price') {
+      facts.price = value === null || value === '' ? null : Number(value);
+      continue;
+    }
+    facts[key] = value === null || value === '' ? null : String(value);
+  }
+  if ('quota' in body) applyQuota(file, body.quota as QuotaBody | null);
+  facts.updatedAt = file.clock;
+  file.detail.updatedAt = file.clock;
+
+  send(res, materializeOps({ ...file.detail, name, jobs: file.jobs.items }, file.clock));
+}
+
+/** The allowance the 商家 sold, and the share of it the meter has already seen. */
+function applyQuota(file: NodeFile, body: QuotaBody | null) {
+  const measured = file.detail.quota as Measured<Record<string, unknown>>;
+  const row = measured.value;
+  if (body === null) {
+    row.quota = null;
+    row.pct = null;
+    row.projectedExhaustAt = null;
+    row.level = 'ok';
+    return;
+  }
+  const quota = nullableInt(body.quotaBytes);
+  row.quota = quota;
+  if (body.cycleKind) row.cycleKind = String(body.cycleKind);
+  if (body.counts) row.counts = String(body.counts);
+  const used = typeof row.used === 'number' ? row.used : null;
+  row.pct = quota && quota > 0 && used !== null ? used / quota : null;
+  measured.asOfSec = file.clock;
 }
 
 async function handleWrite(

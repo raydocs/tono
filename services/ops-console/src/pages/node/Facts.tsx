@@ -1,5 +1,6 @@
 import { Check } from 'lucide-react';
 import type { Measured as ContractMeasured, NodeBindingsDto, NodeFactsDto, NodeQuotaDto } from '@contract';
+import { Action } from '@/components/ops/Action';
 import { Fact } from '@/components/ops/DetailDrawer';
 import { QuotaGauge } from '@/components/ops/QuotaGauge';
 import { Section } from '@/components/ops/Section';
@@ -17,8 +18,12 @@ import { sourceWord } from '@/lib/sources';
  * They share one stamp — the profile's `updatedAt` — because they were all
  * typed in at once and nothing measures them; dating the price differently
  * from the renewal date would suggest one of them came from the machine.
+ *
+ * And because nothing measures them, the edit affordance belongs on this
+ * heading and on no other: every dash in this block is a dash until somebody
+ * types the answer, which is why the block was nine of them on production.
  */
-export function NodeFacts({ facts }: { facts: NodeFactsDto }) {
+export function NodeFacts({ facts, onEdit }: { facts: NodeFactsDto; onEdit: () => void }) {
   const privacy = usePrivacy();
   const at = facts.updatedAt;
   const say = (value: string | null): Measured<string | null> => (
@@ -28,7 +33,10 @@ export function NodeFacts({ facts }: { facts: NodeFactsDto }) {
   const cycle = formatBillingCycle(facts.billingCycle);
 
   return (
-    <Section title={copy.nodeSections.facts}>
+    <Section
+      title={copy.nodeSections.facts}
+      aside={<Action onClick={onEdit}>{copy.nodeEdit}</Action>}
+    >
       <div className="grid gap-x-8 sm:grid-cols-2">
         <Fact label={copy.nodeFacts.ip} measured={say(facts.publicIp)} render={privacy.ip} />
         <Fact label={copy.nodeFacts.os} measured={say(facts.os)} />

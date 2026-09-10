@@ -5,7 +5,7 @@
     "verdict": "blocked",
     "health": "被墙",
     "tone": "sev",
-    "reason": "大陆三网都握不上手，只有香港中转还通",
+    "reason": "likely_blocked",
     "lifecycle": "listed",
     "catalogListed": true,
     "facts": {
