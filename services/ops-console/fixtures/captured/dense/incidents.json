@@ -19,7 +19,9 @@
       "lastSeenAt": 1724999940,
       "ackedAt": null,
       "snoozedUntil": null,
-      "resolvedAt": null
+      "resolvedAt": null,
+      "nextCheckAt": null,
+      "closure": null
     },
     {
       "id": "id_e9b8aa665e0a2bd5",
@@ -40,7 +42,9 @@
       "lastSeenAt": 1724999940,
       "ackedAt": null,
       "snoozedUntil": null,
-      "resolvedAt": null
+      "resolvedAt": null,
+      "nextCheckAt": null,
+      "closure": null
     },
     {
       "id": "id_3db733b3d8c7521d",
@@ -61,7 +65,9 @@
       "lastSeenAt": 1724999880,
       "ackedAt": null,
       "snoozedUntil": null,
-      "resolvedAt": null
+      "resolvedAt": null,
+      "nextCheckAt": null,
+      "closure": null
     },
     {
       "id": "id_b540a2fa80dac1a5",
@@ -82,7 +88,9 @@
       "lastSeenAt": 1724999820,
       "ackedAt": null,
       "snoozedUntil": null,
-      "resolvedAt": null
+      "resolvedAt": null,
+      "nextCheckAt": null,
+      "closure": null
     },
     {
       "id": "id_3965de83efdd2725",
@@ -103,7 +111,9 @@
       "lastSeenAt": 1724999760,
       "ackedAt": null,
       "snoozedUntil": null,
-      "resolvedAt": null
+      "resolvedAt": null,
+      "nextCheckAt": null,
+      "closure": null
     },
     {
       "id": "id_24918690397905d2",
@@ -124,7 +134,9 @@
       "lastSeenAt": 1724999700,
       "ackedAt": null,
       "snoozedUntil": null,
-      "resolvedAt": null
+      "resolvedAt": null,
+      "nextCheckAt": null,
+      "closure": null
     },
     {
       "id": "id_0c57fb5f56ca07b9",
@@ -145,7 +157,9 @@
       "lastSeenAt": 1724999640,
       "ackedAt": null,
       "snoozedUntil": null,
-      "resolvedAt": null
+      "resolvedAt": null,
+      "nextCheckAt": null,
+      "closure": null
     },
     {
       "id": "id_329f84cb9b5e5fd8",
@@ -166,7 +180,9 @@
       "lastSeenAt": 1724999580,
       "ackedAt": null,
       "snoozedUntil": null,
-      "resolvedAt": null
+      "resolvedAt": null,
+      "nextCheckAt": null,
+      "closure": null
     },
     {
       "id": "id_c9c7ffbce5c1044f",
@@ -187,7 +203,9 @@
       "lastSeenAt": 1724999520,
       "ackedAt": null,
       "snoozedUntil": null,
-      "resolvedAt": null
+      "resolvedAt": null,
+      "nextCheckAt": null,
+      "closure": null
     },
     {
       "id": "id_545b87925d743cb6",
@@ -208,7 +226,9 @@
       "lastSeenAt": 1724999460,
       "ackedAt": null,
       "snoozedUntil": null,
-      "resolvedAt": null
+      "resolvedAt": null,
+      "nextCheckAt": null,
+      "closure": null
     },
     {
       "id": "id_0569ec3b1a5c2805",
@@ -229,7 +249,9 @@
       "lastSeenAt": 1724999400,
       "ackedAt": null,
       "snoozedUntil": null,
-      "resolvedAt": null
+      "resolvedAt": null,
+      "nextCheckAt": null,
+      "closure": null
     },
     {
       "id": "id_3f009a2fe9707598",
@@ -250,7 +272,9 @@
       "lastSeenAt": 1724999340,
       "ackedAt": null,
       "snoozedUntil": null,
-      "resolvedAt": null
+      "resolvedAt": null,
+      "nextCheckAt": null,
+      "closure": null
     },
     {
       "id": "id_068d746eac27b266",
@@ -271,7 +295,9 @@
       "lastSeenAt": 1724999280,
       "ackedAt": null,
       "snoozedUntil": null,
-      "resolvedAt": null
+      "resolvedAt": null,
+      "nextCheckAt": null,
+      "closure": null
     }
   ],
   "nextCursor": null,
