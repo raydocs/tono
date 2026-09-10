@@ -1223,6 +1223,11 @@ export interface TranslationResources {
         exitLatencySlow: string
         lastSynced: string
         noMatches: string
+        protocol: {
+          backup: string
+          cloud: string
+          vlessReality: string
+        }
         readyToConnect: string
         refresh: string
         refreshing: string

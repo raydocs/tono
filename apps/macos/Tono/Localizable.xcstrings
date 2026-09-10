@@ -2,6 +2,16 @@
   "sourceLanguage": "en",
   "strings": {
     "": {},
+    "Backup channel": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "备用通道"
+          }
+        }
+      }
+    },
     "Connected means protected.": {
       "localizations": {
         "zh-Hans": {

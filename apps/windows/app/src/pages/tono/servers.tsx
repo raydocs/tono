@@ -34,11 +34,12 @@ import {
   readNodeLatency,
 } from './node-latency'
 import {
+  nodeCityLabel,
   nodeCityParts,
   nodeCityTitleKey,
   nodeCode,
   nodeDisplayName,
-  nodeProtocol,
+  nodeProtocolKey,
 } from './node-meta'
 
 const catalogStatusQueryKey = ['tono', 'catalog-status'] as const
@@ -120,10 +121,9 @@ const ServersPage = () => {
         await Promise.all([mutateServers(), mutateTonoStatus()])
         // Announce the localized city the card shows, not the raw wire name —
         // otherwise the toast says "Tokyo · Dawn" over a card labelled 东京.
-        const cityKey = nodeCityTitleKey(name)
         showToast(
           t('tono.nodes.switchedTo', {
-            name: cityKey ? t(cityKey) : nodeDisplayName(name),
+            name: nodeCityLabel(name, t),
           }),
         )
       } catch (error) {
@@ -212,12 +212,13 @@ const ServersPage = () => {
         display.toLowerCase().includes(query) ||
         server.name.toLowerCase().includes(query) ||
         parts.city.toLowerCase().includes(query) ||
-        (parts.codename?.toLowerCase().includes(query) ?? false)
+        (parts.codename?.toLowerCase().includes(query) ?? false) ||
+        t(nodeProtocolKey(server.name)).toLowerCase().includes(query)
       const matchesRegion =
         !regionFilter || nodeCode(server.name) === regionFilter
       return matchesQuery && matchesRegion
     })
-  }, [query, regionFilter, servers])
+  }, [query, regionFilter, servers, t])
   const regionOptions = useMemo(() => {
     return Array.from(
       new Set((servers ?? []).map((server) => nodeCode(server.name))),
@@ -742,6 +743,7 @@ const ServersPage = () => {
                   // has the same summary (localNodeAccessibilitySummary).
                   const cardSummary = [
                     cityTitle,
+                    t(nodeProtocolKey(server.name)),
                     regionLabel(nodeCode(server.name)),
                     latencyText,
                     cardStatus,
@@ -988,7 +990,7 @@ const ServersPage = () => {
                               letterSpacing: 0.2,
                             }}
                           >
-                            {nodeProtocol(server.name)}
+                            {t(nodeProtocolKey(server.name))}
                           </span>
                         </span>
                       </span>

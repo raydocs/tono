@@ -145,6 +145,11 @@ export const customerCopy = {
     client: '平台与版本',
     carrier: '运营商',
   } as const,
+  /** Channel on a connection row. hy2 is the same-node backup, never the English type name. */
+  transportWord: {
+    tcp: '主通道',
+    hy2: '备用通道',
+  } as const,
   daySummary: (ok: number, fail: number, switched: number) => `${ok} 次连上 · ${fail} 次失败 · ${switched} 次换节点`,
   /** The upload went through the tunnel, so the carrier on it is the exit's. */
   carrierViaExit: '这条上报走的是隧道，看到的是出口的运营商',

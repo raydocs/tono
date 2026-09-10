@@ -22,6 +22,9 @@ struct ActiveNodeCard: View {
         let parsed = ConfigParser.extractFlag(from: nodeName)
         let code = nodeRegionCode(flag: parsed.flag, name: parsed.cleanName)
         var parts: [String] = []
+        if ProxyNode.catalogBaseName(for: parsed.cleanName) != parsed.cleanName {
+            parts.append(String(localized: "Backup channel"))
+        }
         if let codename = nodeCityParts(cleanName).codename { parts.append(codename) }
         if let group = groupName { parts.append(group) }
         parts.append(code)

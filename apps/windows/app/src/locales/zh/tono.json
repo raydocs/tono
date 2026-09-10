@@ -370,6 +370,11 @@
     "waitingForSync": "等待首次同步",
     "verifiedSyncHint": "每 5 分钟自动同步。断开时可测全部节点。",
     "catalogError": "最近一次刷新失败：{{error}}",
+    "protocol": {
+      "backup": "备用通道",
+      "vlessReality": "VLESS · Reality",
+      "cloud": "Tono Cloud"
+    },
     "regions": {
       "all": "全部",
       "us": "美国",

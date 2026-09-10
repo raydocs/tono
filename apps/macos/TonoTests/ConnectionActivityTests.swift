@@ -54,6 +54,12 @@ final class ConnectionActivityTests: XCTestCase {
         // Same wire name, same codename as Windows' node-meta.ts.
         XCTAssertEqual(ProxyNode.displayName(for: "US-VLESS-Reality"), "Los Angeles · Grove")
         XCTAssertEqual(ProxyNode.displayName(for: "Tokyo · Fuji"), "Tokyo · Fuji")
+        XCTAssertEqual(ProxyNode.displayName(for: "Tokyo · Fuji · hy2"), "Tokyo · Fuji")
+        XCTAssertEqual(ProxyNode.catalogBaseName(for: "Tokyo · Sakura · hy2"), "Tokyo · Sakura")
+        let hy2 = ProxyNode(id: "hy2", flag: "🇯🇵", name: "Tokyo · Sakura · hy2", type: .hysteria2)
+        XCTAssertEqual(hy2.displayName, "Tokyo · Sakura")
+        XCTAssertEqual(hy2.protocolType, String(localized: "Backup channel"))
+        XCTAssertNotEqual(hy2.protocolType, "Hysteria2")
     }
 
     private func fixture(

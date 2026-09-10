@@ -190,3 +190,31 @@ it('shows an in-flight spinner on the chosen card and disables the others until 
     expect((east as HTMLButtonElement).disabled).toBe(false)
   })
 })
+
+it('lets the user pick the hy2 sibling and labels it as the backup channel', async () => {
+  serversMock.mockResolvedValue([
+    {
+      name: 'Tokyo · Sakura',
+      server: '203.0.113.10',
+      port: 443,
+      selected: true,
+      available: true,
+    },
+    {
+      name: 'Tokyo · Sakura · hy2',
+      server: '203.0.113.10',
+      port: 443,
+      selected: false,
+      available: true,
+    },
+  ])
+  renderPage()
+  const backup = await screen.findByRole('button', {
+    name: /Backup channel/,
+  })
+  expect(backup.textContent).toContain('Backup channel')
+  fireEvent.click(backup)
+  await waitFor(() =>
+    expect(selectServerMock).toHaveBeenCalledWith('Tokyo · Sakura · hy2'),
+  )
+})

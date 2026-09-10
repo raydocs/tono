@@ -48,4 +48,9 @@ describe('copy', () => {
   it('exposes the five shell pages', () => {
     expect(Object.keys(copy.pages)).toEqual(['today', 'nodes', 'customers', 'clients', 'settings']);
   });
+
+  it('calls the hy2 timeline channel 备用通道, never hysteria2', () => {
+    expect(copy.transportWord.hy2).toBe('备用通道');
+    expect(JSON.stringify(copy.transportWord).toLowerCase()).not.toContain('hysteria');
+  });
 });

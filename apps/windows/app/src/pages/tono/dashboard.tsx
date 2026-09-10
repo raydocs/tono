@@ -45,10 +45,9 @@ import {
   readNodeLatency,
 } from './node-latency'
 import {
+  nodeCityLabel,
   nodeCityParts,
-  nodeCityTitleKey,
   nodeCode,
-  nodeDisplayName,
 } from './node-meta'
 
 const hex = (color: string, alpha: number) =>
@@ -282,9 +281,7 @@ const ActiveNodeCard = ({
                 whiteSpace: 'nowrap',
               }}
             >
-              {nodeCityTitleKey(serverName)
-                ? t(nodeCityTitleKey(serverName)!)
-                : nodeDisplayName(serverName)}
+              {nodeCityLabel(serverName, t)}
             </span>
             <span style={{ fontSize: 11, color: text.tertiary }}>
               {nodeCityParts(serverName).codename
@@ -709,9 +706,7 @@ const DashboardPage = () => {
         : t('tono.dashboard.directOn')
       : t('tono.dashboard.taglineIdle')
   const selectedCity = status?.selectedServer
-    ? nodeCityTitleKey(status.selectedServer)
-      ? t(nodeCityTitleKey(status.selectedServer)!)
-      : nodeDisplayName(status.selectedServer)
+    ? nodeCityLabel(status.selectedServer, t)
     : t('tono.dashboard.noServer')
   const protectionValue = selectedCity
   const protectionDetail = connectHint

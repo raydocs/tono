@@ -11,8 +11,21 @@ const NODE_DISPLAY_NAMES: Record<string, string> = {
   'JP-VLESS-Reality': 'Tokyo · Dawn',
 }
 
-export const nodeDisplayName = (wireName: string) =>
-  NODE_DISPLAY_NAMES[wireName] ?? wireName
+/** Same-node backup transport. Folded into the basename for display. */
+export const HY2_NAME_SUFFIX = ' · hy2'
+
+export const isHy2CatalogName = (wireName: string) =>
+  wireName.endsWith(HY2_NAME_SUFFIX)
+
+export const catalogBaseName = (wireName: string) =>
+  isHy2CatalogName(wireName)
+    ? wireName.slice(0, -HY2_NAME_SUFFIX.length)
+    : wireName
+
+export const nodeDisplayName = (wireName: string) => {
+  const base = catalogBaseName(wireName)
+  return NODE_DISPLAY_NAMES[base] ?? base
+}
 
 const CITY_CODES: Record<string, string> = {
   'los angeles': 'US',
@@ -65,8 +78,24 @@ export const nodeCode = (wireName: string) => {
   return 'GL'
 }
 
-export const nodeProtocol = (wireName: string) =>
-  /vless/i.test(wireName) ? 'VLESS · Reality' : 'Tono Cloud'
+export const nodeProtocolKey = (wireName: string): TranslationKey =>
+  isHy2CatalogName(wireName)
+    ? 'tono.nodes.protocol.backup'
+    : /vless/i.test(catalogBaseName(wireName))
+      ? 'tono.nodes.protocol.vlessReality'
+      : 'tono.nodes.protocol.cloud'
+
+/** City the user thinks in, plus 「备用通道」 when this row is the hy2 sibling. */
+export const nodeCityLabel = (
+  wireName: string,
+  t: (key: TranslationKey) => string,
+) => {
+  const titleKey = nodeCityTitleKey(wireName)
+  const city = titleKey ? t(titleKey) : nodeDisplayName(wireName)
+  return isHy2CatalogName(wireName)
+    ? `${city} · ${t('tono.nodes.protocol.backup')}`
+    : city
+}
 
 export type NodeRegion = 'us' | 'jp' | 'other'
 

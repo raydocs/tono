@@ -131,12 +131,24 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
         "JP-VLESS-Reality": "Tokyo · Dawn",
     ]
 
+    private static let hy2NameSuffix = " · hy2"
+
+    static func catalogBaseName(for rawName: String) -> String {
+        guard rawName.hasSuffix(hy2NameSuffix) else { return rawName }
+        return String(rawName.dropLast(hy2NameSuffix.count))
+    }
+
     static func displayName(for rawName: String) -> String {
-        cityNames[rawName] ?? rawName
+        let base = catalogBaseName(for: rawName)
+        return cityNames[base] ?? base
     }
 
     var displayName: String { Self.displayName(for: name) }
-    var protocolType: String { type.displayName }
+    var protocolType: String {
+        type == .hysteria2
+            ? String(localized: "Backup channel")
+            : type.displayName
+    }
     var ping: Int { latency }
 
     var latencyColor: LatencyLevel { LatencyLevel.level(for: latency, kind: .exit) }

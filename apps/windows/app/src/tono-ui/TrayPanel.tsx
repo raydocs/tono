@@ -12,10 +12,9 @@ import {
   readNodeLatency,
 } from '@/pages/tono/node-latency'
 import {
+  nodeCityLabel,
   nodeCityParts,
-  nodeCityTitleKey,
   nodeCode,
-  nodeDisplayName,
 } from '@/pages/tono/node-meta'
 import { useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
@@ -87,11 +86,8 @@ export const TrayPanel = () => {
   const action = actionFor(uiState)
   const busy = action == null
   const serverName = status?.selectedServer
-  const cityKey = serverName ? nodeCityTitleKey(serverName) : null
   const city = serverName
-    ? cityKey
-      ? t(cityKey)
-      : nodeDisplayName(serverName)
+    ? nodeCityLabel(serverName, t)
     : t('tono.tray.noServer')
   const cityParts = serverName ? nodeCityParts(serverName) : null
   const region = serverName ? nodeCode(serverName) : null
@@ -237,8 +233,7 @@ export const TrayPanel = () => {
       {picking && (
         <div className="tono-tray-picker">
           {(servers ?? []).map((server) => {
-            const key = nodeCityTitleKey(server.name)
-            const label = key ? t(key) : nodeDisplayName(server.name)
+            const label = nodeCityLabel(server.name, t)
             const active = server.selected || server.name === serverName
             return (
               <button

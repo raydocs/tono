@@ -2,7 +2,7 @@ import { useLockFn } from 'ahooks'
 import { useTranslation } from 'react-i18next'
 
 import { useTonoStatus } from '@/hooks/use-tono'
-import { nodeCityTitleKey, nodeDisplayName } from '@/pages/tono/node-meta'
+import { nodeCityLabel } from '@/pages/tono/node-meta'
 import { showNotice } from '@/services/notice-service'
 import { useThemeMode } from '@/services/states'
 import { tonoText } from '@/tono-ui/theme'
@@ -43,9 +43,7 @@ export const SupportContact = ({
   const text = tonoText(dark)
   const { status } = useTonoStatus()
   const server = status?.selectedServer
-    ? nodeCityTitleKey(status.selectedServer)
-      ? t(nodeCityTitleKey(status.selectedServer)!)
-      : nodeDisplayName(status.selectedServer)
+    ? nodeCityLabel(status.selectedServer, t)
     : undefined
 
   const copy = useLockFn(async () => {

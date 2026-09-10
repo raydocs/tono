@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  catalogBaseName,
+  isHy2CatalogName,
+  nodeCityLabel,
   nodeCityParts,
   nodeCityTitleKey,
   nodeCode,
+  nodeProtocolKey,
   nodeRegion,
 } from './node-meta'
 
@@ -57,6 +61,32 @@ describe('nodeCityParts', () => {
     })
     expect(nodeCityTitleKey('Tokyo · Sakura')).toBe('tono.cities.tokyo')
     expect(nodeCityTitleKey('Paris · Seine')).toBeNull()
+  })
+
+  it('folds the hy2 sibling into the basename and labels it as the backup channel', () => {
+    expect(catalogBaseName('Tokyo · Sakura · hy2')).toBe('Tokyo · Sakura')
+    expect(isHy2CatalogName('Tokyo · Sakura · hy2')).toBe(true)
+    expect(isHy2CatalogName('Tokyo · Sakura')).toBe(false)
+    expect(nodeCityParts('Tokyo · Sakura · hy2')).toEqual({
+      city: 'Tokyo',
+      codename: 'Sakura',
+    })
+    expect(nodeProtocolKey('Tokyo · Sakura · hy2')).toBe(
+      'tono.nodes.protocol.backup',
+    )
+    expect(nodeProtocolKey('Tokyo · Sakura')).toBe('tono.nodes.protocol.cloud')
+    expect(nodeProtocolKey('US-VLESS-Reality · hy2')).toBe(
+      'tono.nodes.protocol.backup',
+    )
+    expect(nodeProtocolKey('US-VLESS-Reality')).toBe(
+      'tono.nodes.protocol.vlessReality',
+    )
+    expect(nodeCityLabel('Tokyo · Sakura · hy2', (key) => `t:${key}`)).toBe(
+      't:tono.cities.tokyo · t:tono.nodes.protocol.backup',
+    )
+    expect(nodeCityLabel('Tokyo · Sakura', (key) => `t:${key}`)).toBe(
+      't:tono.cities.tokyo',
+    )
   })
 })
 

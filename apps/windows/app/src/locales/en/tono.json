@@ -370,6 +370,11 @@
     "waitingForSync": "Waiting for first sync",
     "verifiedSyncHint": "Automatic sync runs every 5 minutes. Invalid updates never replace the last verified copy. Test All is available while disconnected.",
     "catalogError": "Latest refresh failed: {{error}}",
+    "protocol": {
+      "backup": "Backup channel",
+      "vlessReality": "VLESS · Reality",
+      "cloud": "Tono Cloud"
+    },
     "regions": {
       "all": "All",
       "us": "United States",
