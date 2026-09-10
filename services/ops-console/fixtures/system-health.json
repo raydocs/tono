@@ -1,0 +1,109 @@
+{
+  "clock": 1725000000,
+  "health": {
+    "ok": false,
+    "buildSha": "a1b2c3d",
+    "contractVersion": 1,
+    "sources": [
+      {
+        "source": "collector",
+        "state": "ready",
+        "asOfSec": 1724999955,
+        "message": null
+      },
+      {
+        "source": "komari",
+        "state": "ready",
+        "asOfSec": 1724999940,
+        "message": null
+      },
+      {
+        "source": "telemetry",
+        "state": "ready",
+        "asOfSec": 1724999970,
+        "message": null
+      },
+      {
+        "source": "catalog",
+        "state": "ready",
+        "asOfSec": 1724999880,
+        "message": null
+      },
+      {
+        "source": "profile",
+        "state": "ready",
+        "asOfSec": 1724996400,
+        "message": null
+      },
+      {
+        "source": "engine",
+        "state": "ready",
+        "asOfSec": 1724999910,
+        "message": null
+      },
+      {
+        "source": "jobs",
+        "state": "missing",
+        "asOfSec": null,
+        "message": null
+      },
+      {
+        "source": "manual",
+        "state": "ready",
+        "asOfSec": 1724913600,
+        "message": null
+      }
+    ],
+    "cronLastRunAt": 1724999880,
+    "cronLastDurationMs": 2810,
+    "cronLastError": null,
+    "cronSteps": {
+      "flatten": {
+        "ok": true,
+        "ms": 820,
+        "error": null
+      },
+      "project": {
+        "ok": true,
+        "ms": 1240,
+        "error": null
+      },
+      "verdicts": {
+        "ok": true,
+        "ms": 310,
+        "error": null
+      },
+      "alerts": {
+        "ok": true,
+        "ms": 90,
+        "error": null
+      },
+      "jobs": {
+        "ok": true,
+        "ms": 40,
+        "error": null
+      },
+      "quota": {
+        "ok": true,
+        "ms": 160,
+        "error": null
+      },
+      "daily": {
+        "ok": true,
+        "ms": 70,
+        "error": null
+      },
+      "retention": {
+        "ok": true,
+        "ms": 55,
+        "error": null
+      }
+    },
+    "backfill": {
+      "windowsTotal": 8640,
+      "windowsFlattened": 8640,
+      "windowsProjected": 3200
+    },
+    "updatedAt": 1724999970
+  }
+}

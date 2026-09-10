@@ -361,10 +361,272 @@ const denseLive = {
 
 const emptyFleet = { clock: CLOCK, nodes: [], sources: fleet.sources };
 
+/*
+ * The engine's own answer for the same fleet.
+ *
+ * 节点 reads `GET nodes` and nothing else, so these summaries are generated from
+ * the same specs the legacy fleet rows are: one machine, one name, one quota,
+ * two shapes. A fixture where the engine disagreed with the fleet read about
+ * how much traffic a node has used would hide exactly the class of bug the two
+ * endpoints exist to keep apart.
+ */
+const WORD_BY_VERDICT = {
+  down: { word: '失联', tone: 'sev' },
+  blocked: { word: '被墙', tone: 'sev' },
+  degraded: { word: '劣化', tone: 'warn' },
+  pressure: { word: '劣化', tone: 'warn' },
+  no_probe: { word: '未测', tone: 'unk' },
+  unknown: { word: '未测', tone: 'unk' },
+  ok: { word: '正常', tone: 'ok' },
+};
+
+const REASON = {
+  down: '大陆三网都连不上，探针也没心跳',
+  blocked: '联通电信都不通，海外能连上',
+  degraded: '移动丢包 12%，其余两网正常',
+  pressure: '本周期流量快用完了',
+  no_probe: '还没有从大陆测过这台机器',
+  unknown: null,
+  ok: null,
+};
+
+const CARRIERS = ['unicom', 'telecom', 'mobile'];
+
+/**
+ * 已退役 is a decision somebody made, not a measurement — so it is a list.
+ * Matched on the prefix, because the dense set is the same machines with a
+ * paragraph of Chinese appended to every name.
+ */
+const RETIRED = ['Buffalo · Erie', 'Catalog Only', '深圳 · 南山备用出口 01', '澳门 · 氹仔'];
+
+function lifecycleOf(spec) {
+  if (RETIRED.some((name) => spec.name.startsWith(name))) return 'retired';
+  return spec.listed === true ? 'listed' : 'unlisted';
+}
+
+function quotaCell(spec) {
+  // A machine nobody has entered a cap for: the card says 未设额度 and offers
+  // the page where it is filled in, rather than leaving the cell blank.
+  if (spec.noProfileUsed || spec.i % 9 === 4) {
+    return {
+      value: {
+        quota: null, used: null, pct: null, projectedExhaustAt: null,
+        level: 'ok', cycleKind: 'manual', cycleStart: null, cycleEnd: null, counts: 'in_out',
+      },
+      asOfSec: null,
+      source: 'profile',
+    };
+  }
+  const quota = TiB;
+  // Every eleventh machine is nearly out of quota, so 劣化 by pressure and the
+  // red end of the gauge both have a node to render.
+  const used = spec.i % 11 === 5
+    ? Math.round(quota * 0.96)
+    : (20 + (spec.i % 9) * 8) * GiB;
+  const pct = used / quota;
+  const level = pct >= 1 ? 'severe' : pct >= 0.9 ? 'warn' : pct >= 0.7 ? 'chore' : 'ok';
+  return {
+    value: {
+      quota,
+      used,
+      pct,
+      projectedExhaustAt: pct >= 0.7 ? CLOCK + (2 + (spec.i % 5)) * 86400 : null,
+      level,
+      cycleKind: 'calendar_day',
+      cycleStart: CLOCK - 12 * 86400,
+      cycleEnd: CLOCK + 18 * 86400,
+      counts: 'in_out',
+    },
+    asOfSec: CLOCK - 3600,
+    source: 'profile',
+  };
+}
+
+/**
+ * The client-side leg, for the machines that have one.
+ *
+ * Two thirds of the fleet has a measurement and the rest has none, because that
+ * is the state this column shipped into: the page has to show a real figure
+ * beside an honest em dash without either looking like the other.
+ */
+function forwardWorst(spec) {
+  if (spec.i % 3 === 2) return { value: null, asOfSec: null, source: 'telemetry' };
+  const rate = spec.down ? 0.14 : spec.blocked ? 0.31 : 0.88 + ((spec.i % 6) * 0.02);
+  return {
+    value: {
+      carrier: CARRIERS[spec.i % CARRIERS.length],
+      successRate: Math.round(rate * 1000) / 1000,
+      medianTcpMs: 120 + (spec.i % 9) * 30,
+      topFailure: spec.down ? 'ETIMEDOUT' : null,
+      attempts: 40 + spec.i,
+      users: 1 + (spec.i % 4),
+    },
+    asOfSec: CLOCK - 300 - (spec.i % 7) * 60,
+    source: 'telemetry',
+  };
+}
+
+function returnWorst(spec) {
+  if (spec.noQuality) return { value: null, asOfSec: null, source: 'komari' };
+  return {
+    value: {
+      carrier: CARRIERS[(spec.i + 1) % CARRIERS.length],
+      latencyMs: 40 + (spec.i % 11) * 9,
+      lossPct: spec.down ? 100 : spec.lossy ? 12 : 0,
+      samples: 6,
+    },
+    asOfSec: CLOCK - 45,
+    source: 'komari',
+  };
+}
+
+function verdictOf(spec, quota) {
+  if (spec.down) return 'down';
+  if (spec.blocked) return 'blocked';
+  if (spec.noQuality) return 'no_probe';
+  if (spec.degraded) return 'degraded';
+  if (quota.value.pct !== null && quota.value.pct >= 0.9) return 'pressure';
+  if (spec.noAgent) return 'unknown';
+  return 'ok';
+}
+
+function nodeSummary(spec) {
+  const lifecycle = lifecycleOf(spec);
+  const quota = quotaCell(spec);
+  const verdict = verdictOf(spec, quota);
+  const { word, tone } = WORD_BY_VERDICT[verdict];
+  const renews = CLOCK + (8 + (spec.i % 20)) * 86400;
+  // A machine paid to a date rather than on auto-renew: the card's last cell
+  // has to read the same either way.
+  const onExpiry = spec.i % 7 === 6;
+  return {
+    name: spec.name,
+    verdict,
+    health: word,
+    tone,
+    reason: REASON[verdict],
+    lifecycle,
+    catalogListed: spec.i % 13 === 7 ? null : lifecycle === 'listed',
+    region: spec.i % 8 === 3 ? null : spec.name.split(' · ')[0],
+    provider: spec.i % 3 === 0 ? 'Bandwagon' : spec.i % 3 === 1 ? 'BuyVM' : 'demo',
+    occupancy: {
+      value: spec.occupancy ?? 0,
+      asOfSec: spec.noAgent ? null : CLOCK - 40,
+      source: 'telemetry',
+    },
+    quota,
+    forwardWorst: forwardWorst(spec),
+    returnWorst: returnWorst(spec),
+    renewsAt: onExpiry ? null : renews,
+    expiresAt: onExpiry ? renews : null,
+    choreCount: (spec.i % 3 === 0 ? 1 : 0) + (quota.value.quota === null ? 1 : 0),
+    incidentCount: verdict === 'down' || verdict === 'blocked' ? 1 : 0,
+    updatedAt: CLOCK - (spec.i % 5) * 60,
+  };
+}
+
+function nodeList(rows) {
+  return {
+    clock: CLOCK,
+    list: {
+      items: rows,
+      nextCursor: null,
+      total: rows.length,
+      updatedAt: CLOCK - 30,
+    },
+  };
+}
+
+const summaries = specs.map(nodeSummary);
+const denseSummaries = denseSpecs.map(nodeSummary);
+
+const CRON_STEPS = {
+  flatten: { ok: true, ms: 820, error: null },
+  project: { ok: true, ms: 1_240, error: null },
+  verdicts: { ok: true, ms: 310, error: null },
+  alerts: { ok: true, ms: 90, error: null },
+  jobs: { ok: true, ms: 40, error: null },
+  quota: { ok: true, ms: 160, error: null },
+  daily: { ok: true, ms: 70, error: null },
+  retention: { ok: true, ms: 55, error: null },
+};
+
+function source(id, state, asOfSec, message = null) {
+  return { source: id, state, asOfSec, message };
+}
+
+/**
+ * The three source pictures the header pill has to render.
+ *
+ * The normal set has an executor nobody has installed — the expected gap, which
+ * the pill words 未接 and greys rather than reddens — and a backfill still
+ * running. The dense set is fully wired with one feed nineteen hours behind, so
+ * the warn wording has a baseline. The empty set is everything ready.
+ */
+const health = {
+  clock: CLOCK,
+  health: {
+    ok: false,
+    buildSha: 'a1b2c3d',
+    contractVersion: 1,
+    sources: [
+      source('collector', 'ready', CLOCK - 45),
+      source('komari', 'ready', CLOCK - 60),
+      source('telemetry', 'ready', CLOCK - 30),
+      source('catalog', 'ready', CLOCK - 120),
+      source('profile', 'ready', CLOCK - 3600),
+      source('engine', 'ready', CLOCK - 90),
+      source('jobs', 'missing', null),
+      source('manual', 'ready', CLOCK - 86400),
+    ],
+    cronLastRunAt: CLOCK - 120,
+    cronLastDurationMs: 2_810,
+    cronLastError: null,
+    cronSteps: CRON_STEPS,
+    backfill: { windowsTotal: 8_640, windowsFlattened: 8_640, windowsProjected: 3_200 },
+    updatedAt: CLOCK - 30,
+  },
+};
+
+const denseHealth = {
+  clock: CLOCK,
+  health: {
+    ...health.health,
+    sources: [
+      source('collector', 'ready', CLOCK - 45),
+      source('komari', 'stale', CLOCK - 19 * 3600, '大陆探针没有回报'),
+      source('telemetry', 'ready', CLOCK - 30),
+      source('catalog', 'ready', CLOCK - 120),
+      source('profile', 'ready', CLOCK - 3600),
+      source('engine', 'ready', CLOCK - 90),
+      source('jobs', 'ready', CLOCK - 300),
+      source('manual', 'ready', CLOCK - 86400),
+    ],
+    backfill: null,
+  },
+};
+
+const emptyHealth = {
+  clock: CLOCK,
+  health: {
+    ...health.health,
+    ok: true,
+    sources: health.health.sources.map((row) => source(row.source, 'ready', row.asOfSec ?? CLOCK - 60)),
+    cronSteps: null,
+    backfill: null,
+  },
+};
+
 const dir = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures');
 writeFileSync(join(dir, 'fleet-nodes.json'), `${JSON.stringify(fleet, null, 2)}\n`);
 writeFileSync(join(dir, 'live.json'), `${JSON.stringify(live, null, 2)}\n`);
 writeFileSync(join(dir, 'fleet-nodes.dense.json'), `${JSON.stringify(denseFleet, null, 2)}\n`);
 writeFileSync(join(dir, 'live.dense.json'), `${JSON.stringify(denseLive, null, 2)}\n`);
 writeFileSync(join(dir, 'fleet-nodes.empty.json'), `${JSON.stringify(emptyFleet, null, 2)}\n`);
-console.log(`wrote ${nodes.length} fleet nodes, ${denseNodes.length} dense`);
+writeFileSync(join(dir, 'nodes.json'), `${JSON.stringify(nodeList(summaries), null, 2)}\n`);
+writeFileSync(join(dir, 'nodes.dense.json'), `${JSON.stringify(nodeList(denseSummaries), null, 2)}\n`);
+writeFileSync(join(dir, 'nodes.empty.json'), `${JSON.stringify(nodeList([]), null, 2)}\n`);
+writeFileSync(join(dir, 'system-health.json'), `${JSON.stringify(health, null, 2)}\n`);
+writeFileSync(join(dir, 'system-health.dense.json'), `${JSON.stringify(denseHealth, null, 2)}\n`);
+writeFileSync(join(dir, 'system-health.empty.json'), `${JSON.stringify(emptyHealth, null, 2)}\n`);
+console.log(`wrote ${nodes.length} fleet nodes, ${denseNodes.length} dense, ${summaries.length} summaries`);
