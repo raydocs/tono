@@ -587,6 +587,7 @@ describe('ops v1 api', () => {
       jobs: { ok: true, ms: 2, error: null },
       quota: { ok: true, ms: 3, error: null },
       daily: { ok: true, ms: 4, error: null },
+      fx: { ok: true, ms: 7, error: null },
       retention: { ok: true, ms: 6, error: null },
     };
     await db().prepare(
@@ -594,7 +595,7 @@ describe('ops v1 api', () => {
     ).bind(NOW, JSON.stringify(steps)).run();
     const health = assertSystemHealth(await (await ops('system/health')).json());
     expect(health.cronLastRunAt).toBe(NOW);
-    expect(health.cronLastDurationMs).toBe(51);
+    expect(health.cronLastDurationMs).toBe(58);
     expect(health.cronLastError).toBe('verdict boom');
     expect(health.cronSteps).toEqual(steps);
   });
@@ -703,6 +704,14 @@ describe('ops v1 api', () => {
       'GET /api/v1/ops/alert-deliveries',
       'GET /api/v1/ops/audit',
       'GET /api/v1/ops/system/health',
+      'GET /api/v1/ops/ledger',
+      'POST /api/v1/ops/ledger',
+      'PATCH /api/v1/ops/ledger/{id}',
+      'POST /api/v1/ops/ledger/{id}/reverse',
+      'GET /api/v1/ops/months/{month}',
+      'POST /api/v1/ops/months/{month}/close',
+      'GET /api/v1/ops/months/{month}/export.csv',
+      'GET /api/v1/ops/fx',
     ];
     expect([...OPS_V1_ROUTES].sort()).toEqual([...tested].sort());
   });

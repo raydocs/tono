@@ -76,6 +76,12 @@ export function optInt(row: Record<string, unknown>, path: string, key: string):
 }
 
 /** Non-integer measurements: rates, percentages, loss. NaN is drift, not data. */
+export function num(row: Record<string, unknown>, path: string, key: string): number {
+  const value = row[key];
+  if (typeof value !== 'number' || !Number.isFinite(value)) violation(`${path}.${key}`);
+  return value as number;
+}
+
 export function optNum(row: Record<string, unknown>, path: string, key: string): number | null {
   const value = row[key];
   if (value === null) return null;

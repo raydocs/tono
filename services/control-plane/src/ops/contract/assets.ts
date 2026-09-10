@@ -68,7 +68,7 @@ export interface SourceHealthDto {
  * over a dead collector is the failure mode the 死人开关 exists to catch.
  */
 export const CRON_STEP_NAMES = [
-  'flatten', 'project', 'verdicts', 'alerts', 'jobs', 'quota', 'daily', 'retention',
+  'flatten', 'project', 'verdicts', 'alerts', 'jobs', 'quota', 'daily', 'fx', 'retention',
 ] as const;
 export type CronStepName = (typeof CRON_STEP_NAMES)[number];
 

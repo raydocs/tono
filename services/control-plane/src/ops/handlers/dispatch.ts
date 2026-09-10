@@ -30,6 +30,9 @@ import {
   postAlertRuleTest, getAlertDeliveries,
 } from './alerts';
 import { getSystemHealth } from './system';
+import {
+  getFx, getLedger, getMonth, getMonthExport, patchLedger, postLedger, postLedgerReverse, postMonthClose,
+} from './ledger';
 import type { Actor } from './common';
 
 export const OPS_V1_ROUTES = [
@@ -91,6 +94,14 @@ export const OPS_V1_ROUTES = [
   'GET /api/v1/ops/alert-deliveries',
   'GET /api/v1/ops/audit',
   'GET /api/v1/ops/system/health',
+  'GET /api/v1/ops/ledger',
+  'POST /api/v1/ops/ledger',
+  'PATCH /api/v1/ops/ledger/{id}',
+  'POST /api/v1/ops/ledger/{id}/reverse',
+  'GET /api/v1/ops/months/{month}',
+  'POST /api/v1/ops/months/{month}/close',
+  'GET /api/v1/ops/months/{month}/export.csv',
+  'GET /api/v1/ops/fx',
 ] as const;
 
 type Handler = (req: Request, e: Env, actor: Actor, params: string[]) => Promise<Response>;
@@ -153,6 +164,14 @@ const ROUTES: Array<{ method: string; re: RegExp; handle: Handler }> = [
   { method: 'DELETE', re: /^\/api\/v1\/ops\/alert-rules\/([^/]+)$/, handle: (req, e, a, p) => deleteAlertRule(req, e, p[0], a) },
   { method: 'GET', re: /^\/api\/v1\/ops\/alert-deliveries$/, handle: (req, e) => getAlertDeliveries(req, e) },
   { method: 'GET', re: /^\/api\/v1\/ops\/system\/health$/, handle: (req, e) => getSystemHealth(req, e) },
+  { method: 'GET', re: /^\/api\/v1\/ops\/ledger$/, handle: (req, e) => getLedger(req, e) },
+  { method: 'POST', re: /^\/api\/v1\/ops\/ledger$/, handle: (req, e, a) => postLedger(req, e, a) },
+  { method: 'POST', re: /^\/api\/v1\/ops\/ledger\/([^/]+)\/reverse$/, handle: (req, e, a, p) => postLedgerReverse(req, e, p[0], a) },
+  { method: 'PATCH', re: /^\/api\/v1\/ops\/ledger\/([^/]+)$/, handle: (req, e, a, p) => patchLedger(req, e, p[0], a) },
+  { method: 'GET', re: /^\/api\/v1\/ops\/months\/([^/]+)\/export\.csv$/, handle: (req, e, _a, p) => getMonthExport(req, e, p[0]) },
+  { method: 'POST', re: /^\/api\/v1\/ops\/months\/([^/]+)\/close$/, handle: (req, e, a, p) => postMonthClose(req, e, p[0], a) },
+  { method: 'GET', re: /^\/api\/v1\/ops\/months\/([^/]+)$/, handle: (req, e, _a, p) => getMonth(req, e, p[0]) },
+  { method: 'GET', re: /^\/api\/v1\/ops\/fx$/, handle: (req, e) => getFx(req, e) },
 ];
 
 export async function dispatchOpsV1(
