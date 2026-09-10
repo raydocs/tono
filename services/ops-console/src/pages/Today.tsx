@@ -139,7 +139,10 @@ export default function TodayPage({
         onShowChores={() => setTab('chores')}
       />
 
-      <div className="flex items-center gap-5 border-b border-[var(--hairline)] text-body">
+      {/* Three tabs, one line, always: on a phone the strip scrolls sideways
+          rather than wrapping, because a tab row that reflows every time a
+          count changes moves the list the thumb was aiming at. */}
+      <div className="today-tabs flex items-center gap-5 border-b border-[var(--hairline)] text-body">
         {TABS.map((id) => (
           <button
             key={id}

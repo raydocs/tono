@@ -13,6 +13,7 @@ import { closeIncident, openCustomer } from '@/lib/hash-route';
 import { childrenOf, evidenceSentence, incidentSubject } from '@/lib/incidents';
 import { usePrivacy } from '@/lib/privacy';
 import { sourceWord } from '@/lib/sources';
+import { useIsPhone } from '@/lib/use-phone';
 import { useResource } from '@/lib/use-resource';
 import { cn } from '@/lib/utils';
 import { CloseDialog } from './CloseDialog';
@@ -47,6 +48,7 @@ export function IncidentDrawer({
   onChanged: () => void;
 }) {
   const privacy = usePrivacy();
+  const phone = useIsPhone();
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
@@ -82,10 +84,15 @@ export function IncidentDrawer({
    * bottom edge is
    * claiming, silencing, and the one press that ends the incident — which now
    * has to say how it ended before it will run.
+   *
+   * On a phone the three of them are the bar the sheet exists for, so they lose
+   * the heading and the rule above it: 24 px of label on the bottom edge of a
+   * 390 px screen is 24 px the buttons do not get, and a bar of three verbs
+   * needs no word telling the reader they are actions.
    */
-  const actions = !incident ? null : (
-    <Block title={copy.incidentDrawer.actions}>
-      <ActionRow className="pt-1">
+  const bar = !incident ? null : (
+    <>
+      <ActionRow className={cn('sheet-actions', phone ? 'flex-nowrap' : 'pt-1')}>
         {incident.status === 'open' ? (
           <Action pending={pending} onClick={() => run(() => opsApi.ackIncident(incident.id))}>
             {copy.incidentPrimary.ack}
@@ -99,7 +106,10 @@ export function IncidentDrawer({
         </Action>
       </ActionRow>
       {failure ? <p className="panel-error mt-2 rounded-[10px] px-3 py-2 text-body">{failure}</p> : null}
-    </Block>
+    </>
+  );
+  const actions = bar === null ? null : phone ? bar : (
+    <Block title={copy.incidentDrawer.actions}>{bar}</Block>
   );
 
   return (

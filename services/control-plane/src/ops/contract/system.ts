@@ -54,6 +54,19 @@ export interface BackfillHealthDto {
   windowsProjected: number;
 }
 
+/**
+ * 今天的数字有多少是测过的。目录节点：大陆扫描行 ≤26 小时、agent 样本 ≤15 分钟；
+ * 活跃客户：ops_customer_status.last_seen_at ≤40 分钟。
+ */
+export interface CoverageDto {
+  nodesListed: number;
+  nodesSweptFresh: number;
+  nodesWithAgent: number;
+  customersActive: number;
+  customersReportedFresh: number;
+  asOfSec: number;
+}
+
 export interface SystemHealthDto {
   ok: boolean;
   buildSha: string | null;
@@ -64,6 +77,7 @@ export interface SystemHealthDto {
   cronLastError: string | null;
   cronSteps: CronStepsHealthDto | null;
   backfill: BackfillHealthDto | null;
+  coverage?: CoverageDto;
   updatedAt: number;
 }
 
@@ -81,7 +95,7 @@ export function assertSourceHealth(value: unknown, path = 'sourceHealth'): Sourc
 
 const SYSTEM_HEALTH_KEYS = [
   'ok', 'buildSha', 'contractVersion', 'sources',
-  'cronLastRunAt', 'cronLastDurationMs', 'cronLastError', 'cronSteps', 'backfill', 'updatedAt',
+  'cronLastRunAt', 'cronLastDurationMs', 'cronLastError', 'cronSteps', 'backfill', 'coverage', 'updatedAt',
 ];
 
 const CRON_STEP_HEALTH_KEYS = ['ok', 'ms', 'error'];
@@ -121,6 +135,7 @@ export function assertSystemHealth(value: unknown, path = 'systemHealth'): Syste
     backfill: row.backfill === undefined || row.backfill === null
       ? null
       : assertBackfillHealth(row.backfill, `${path}.backfill`),
+    ...(row.coverage === undefined ? {} : { coverage: assertCoverage(row.coverage, `${path}.coverage`) }),
     updatedAt: int(row, path, 'updatedAt'),
   };
 }
@@ -133,5 +148,22 @@ export function assertBackfillHealth(value: unknown, path = 'backfill'): Backfil
     windowsTotal: int(row, path, 'windowsTotal'),
     windowsFlattened: int(row, path, 'windowsFlattened'),
     windowsProjected: int(row, path, 'windowsProjected'),
+  };
+}
+
+const COVERAGE_KEYS = [
+  'nodesListed', 'nodesSweptFresh', 'nodesWithAgent',
+  'customersActive', 'customersReportedFresh', 'asOfSec',
+];
+
+export function assertCoverage(value: unknown, path = 'coverage'): CoverageDto {
+  const row = fields(value, path, COVERAGE_KEYS);
+  return {
+    nodesListed: int(row, path, 'nodesListed'),
+    nodesSweptFresh: int(row, path, 'nodesSweptFresh'),
+    nodesWithAgent: int(row, path, 'nodesWithAgent'),
+    customersActive: int(row, path, 'customersActive'),
+    customersReportedFresh: int(row, path, 'customersReportedFresh'),
+    asOfSec: int(row, path, 'asOfSec'),
   };
 }

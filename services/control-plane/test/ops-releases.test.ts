@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiError } from '../src/errors';
 import {
   adoptionMatrix,
+  backfillDeviceDaily,
   compareVersions,
   createRelease,
   currentRelease,
@@ -45,6 +46,42 @@ async function seedWindow(input: {
     input.receivedAt * 1000, input.receivedAt * 1000 + 60_000,
     input.version, input.os,
   ).run();
+}
+
+async function seedDeviceDay(input: {
+  day: number;
+  deviceId: string;
+  userId: string;
+  version: string;
+  platform?: string;
+  seenAt?: number;
+}) {
+  await db().prepare(
+    `INSERT INTO ops_client_version_device_daily(
+       day_at, platform, device_id, user_id, app_version, last_seen_at
+     ) VALUES(?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    input.day, input.platform ?? 'windows', input.deviceId, input.userId,
+    input.version, input.seenAt ?? input.day,
+  ).run();
+}
+
+async function seedWindowsStable() {
+  await createRelease(db(), {
+    platform: 'windows', channel: 'stable', version: '0.0.34', publishedAt: NOW - 20,
+  }, NOW - 20);
+  await createRelease(db(), {
+    platform: 'windows', channel: 'stable', version: '0.0.33', publishedAt: NOW - 40,
+  }, NOW - 40);
+}
+
+function cellOf(
+  matrix: Awaited<ReturnType<typeof adoptionMatrix>>,
+  platform: string,
+  bucket: string,
+) {
+  const found = matrix.cells.find((row) => row.platform === platform && row.bucket === bucket);
+  return { users: found?.users ?? -1, devices: found?.devices ?? -1 };
 }
 
 describe('sniffPlatform', () => {
@@ -233,49 +270,196 @@ describe('client version daily rollup', () => {
 });
 
 describe('adoption matrix', () => {
-  it('buckets observed versions and marks platforms with no releases as unreleased', async () => {
-    const v34 = await createRelease(db(), {
-      platform: 'windows', channel: 'stable', version: '0.0.34', publishedAt: NOW - 20,
-    }, NOW - 20);
-    await createRelease(db(), {
-      platform: 'windows', channel: 'stable', version: '0.0.33', publishedAt: NOW - 40,
-    }, NOW - 40);
-    await createRelease(db(), {
-      platform: 'windows', channel: 'stable', version: '0.0.32', publishedAt: NOW - 60,
-    }, NOW - 60);
-    await updateRelease(db(), v34.id, { publish: true }, NOW - 20);
+  it('counts a device once however many days it reported inside the range', async () => {
+    await seedWindowsStable();
+    for (const back of [0, 1, 2]) {
+      await seedDeviceDay({ day: DAY_AT - back * DAY, deviceId: 'd-a', userId: 'u-a', version: '0.0.34' });
+    }
+    for (const range of ['7d', '30d'] as const) {
+      const matrix = await adoptionMatrix(db(), { range, nowSec: NOW });
+      expect(cellOf(matrix, 'windows', 'current'), range).toEqual({ users: 1, devices: 1 });
+    }
+  });
 
-    await db().prepare(
-      `INSERT INTO ops_client_version_daily(day_at, platform, app_version, devices, users)
-       VALUES
-         (?, 'windows', '0.0.34', 4, 3),
-         (?, 'windows', '0.0.33', 2, 2),
-         (?, 'windows', '0.0.31', 1, 1),
-         (?, 'macos', '0.0.67', 5, 4),
-         (?, 'linux', '0.1.0', 1, 1)`,
-    ).bind(DAY_AT, DAY_AT, DAY_AT, DAY_AT, DAY_AT).run();
+  it('takes the newest version a device reported, not every version it passed through', async () => {
+    await seedWindowsStable();
+    await seedDeviceDay({ day: DAY_AT - 3 * DAY, deviceId: 'd-a', userId: 'u-a', version: '0.0.33' });
+    await seedDeviceDay({ day: DAY_AT - DAY, deviceId: 'd-a', userId: 'u-a', version: '0.0.34' });
 
-    const matrix = await adoptionMatrix(db(), { days: 30, nowSec: NOW });
+    const matrix = await adoptionMatrix(db(), { range: '7d', nowSec: NOW });
+    expect(cellOf(matrix, 'windows', 'current')).toEqual({ users: 1, devices: 1 });
+    expect(cellOf(matrix, 'windows', 'behind_one')).toEqual({ users: 0, devices: 0 });
+  });
+
+  it('excludes a device whose last report is before the range start', async () => {
+    await seedWindowsStable();
+    await seedDeviceDay({ day: DAY_AT - 10 * DAY, deviceId: 'd-old', userId: 'u-a', version: '0.0.34' });
+
+    const week = await adoptionMatrix(db(), { range: '7d', nowSec: NOW });
+    expect(cellOf(week, 'windows', 'current')).toEqual({ users: 0, devices: 0 });
+    const month = await adoptionMatrix(db(), { range: '30d', nowSec: NOW });
+    expect(cellOf(month, 'windows', 'current')).toEqual({ users: 1, devices: 1 });
+  });
+
+  it('counts a customer once per cell and in every bucket a device of theirs lands in', async () => {
+    await seedWindowsStable();
+    await seedDeviceDay({ day: DAY_AT - DAY, deviceId: 'd-1', userId: 'u-a', version: '0.0.34' });
+    await seedDeviceDay({ day: DAY_AT - DAY, deviceId: 'd-2', userId: 'u-a', version: '0.0.34' });
+    await seedDeviceDay({ day: DAY_AT - DAY, deviceId: 'd-3', userId: 'u-a', version: '0.0.33' });
+
+    const matrix = await adoptionMatrix(db(), { range: '30d', nowSec: NOW });
+    expect(cellOf(matrix, 'windows', 'current')).toEqual({ users: 1, devices: 2 });
+    expect(cellOf(matrix, 'windows', 'behind_one')).toEqual({ users: 1, devices: 1 });
+  });
+
+  it("unions today's live windows, which no rollup has written yet", async () => {
+    await seedWindowsStable();
+    await seedUser('u-a', 'a@example.com');
+    await seedDeviceDay({ day: DAY_AT - DAY, deviceId: 'd-live', userId: 'u-a', version: '0.0.33' });
+    await seedWindow({
+      id: 'w-live', userId: 'u-a', deviceId: 'd-live', receivedAt: DAY_AT + 10,
+      version: '0.0.34', os: 'Windows 11 Pro 23H2',
+    });
+
+    const today = await adoptionMatrix(db(), { range: '24h', nowSec: NOW });
+    expect(cellOf(today, 'windows', 'current')).toEqual({ users: 1, devices: 1 });
+    expect(cellOf(today, 'windows', 'behind_one')).toEqual({ users: 0, devices: 0 });
+    // Yesterday's row is outside 24h and must not resurrect the old version.
+    const week = await adoptionMatrix(db(), { range: '7d', nowSec: NOW });
+    expect(cellOf(week, 'windows', 'current')).toEqual({ users: 1, devices: 1 });
+    expect(cellOf(week, 'windows', 'behind_one')).toEqual({ users: 0, devices: 0 });
+  });
+
+  it('24h is a rolling day: last night counts, the same hour yesterday does not', async () => {
+    await seedWindowsStable();
+    // NOW is 08:00 UTC, so the window opens at 08:00 yesterday.
+    await seedDeviceDay({
+      day: DAY_AT - DAY, deviceId: 'd-late', userId: 'u-a', version: '0.0.34',
+      seenAt: DAY_AT - 3600,
+    });
+    await seedDeviceDay({
+      day: DAY_AT - DAY, deviceId: 'd-early', userId: 'u-b', version: '0.0.34',
+      seenAt: DAY_AT - DAY + 3600,
+    });
+
+    const matrix = await adoptionMatrix(db(), { range: '24h', nowSec: NOW });
+    expect(cellOf(matrix, 'windows', 'current')).toEqual({ users: 1, devices: 1 });
+  });
+
+
+
+
+  it('reports released platforms, buckets unknown versions, and filters by platform', async () => {
+    await seedWindowsStable();
+    await seedDeviceDay({ day: DAY_AT - DAY, deviceId: 'd-a', userId: 'u-a', version: '0.0.31' });
+    await seedDeviceDay({
+      day: DAY_AT - DAY, deviceId: 'd-m', userId: 'u-b', version: '0.0.67', platform: 'macos',
+    });
+
+    const matrix = await adoptionMatrix(db(), { range: '30d', nowSec: NOW });
+    expect(matrix.released).toEqual(['windows']);
     expect(matrix.latest.windows).toBe('0.0.34');
     expect(matrix.latest.macos).toBeNull();
-    expect(matrix.unreleased).toEqual({
-      macos: true, linux: true, android: true, ios: true,
+    expect(cellOf(matrix, 'windows', 'unreported')).toEqual({ users: 1, devices: 1 });
+    expect(cellOf(matrix, 'macos', 'unreported')).toEqual({ users: 1, devices: 1 });
+    expect(matrix.cells).toHaveLength(20);
+
+    const only = await adoptionMatrix(db(), { platform: 'windows', range: '30d', nowSec: NOW });
+    expect(new Set(only.cells.map((row) => row.platform))).toEqual(new Set(['windows']));
+    expect(only.cells).toHaveLength(4);
+    await expect(adoptionMatrix(db(), { platform: 'amiga', range: '30d', nowSec: NOW }))
+      .rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe('client version device daily', () => {
+  it('writes one row per device at the version it last reported, and a re-run replaces it', async () => {
+    await seedUser('u-a', 'a@example.com');
+    await seedWindow({
+      id: 'w1', userId: 'u-a', deviceId: 'd-a', receivedAt: DAY_AT + 10,
+      version: '0.0.33', os: 'Windows 11 Pro 23H2',
+    });
+    await seedWindow({
+      id: 'w2', userId: 'u-a', deviceId: 'd-a', receivedAt: DAY_AT + 20,
+      version: '0.0.34', os: 'Windows 11 Pro 23H2',
     });
 
-    const windows = matrix.days.find((row) => row.platform === 'windows');
-    expect(windows?.unreleased).toBeUndefined();
-    expect(windows?.versions).toEqual([
-      { version: '0.0.34', devices: 4, users: 3, bucket: 'current' },
-      { version: '0.0.33', devices: 2, users: 2, bucket: 'behind_one' },
-      { version: '0.0.31', devices: 1, users: 1, bucket: 'unreported' },
-    ]);
-    const macos = matrix.days.find((row) => row.platform === 'macos');
-    expect(macos).toMatchObject({
-      unreleased: true,
-      versions: [{ version: '0.0.67', devices: 5, users: 4, bucket: 'unreported' }],
+    await rollupClientVersionsDaily(db(), NOW);
+    const first = await db().prepare(
+      `SELECT platform, device_id, user_id, app_version, last_seen_at
+       FROM ops_client_version_device_daily WHERE day_at = ?`,
+    ).bind(DAY_AT).all<Record<string, unknown>>();
+    expect(first.results).toEqual([{
+      platform: 'windows', device_id: 'd-a', user_id: 'u-a',
+      app_version: '0.0.34', last_seen_at: DAY_AT + 20,
+    }]);
+
+    await seedWindow({
+      id: 'w3', userId: 'u-a', deviceId: 'd-a', receivedAt: DAY_AT + 30,
+      version: '0.0.35', os: 'Windows 11 Pro 23H2',
     });
-    const linux = matrix.days.find((row) => row.platform === 'linux');
-    expect(linux?.unreleased).toBe(true);
+    await rollupClientVersionsDaily(db(), NOW, true);
+    const again = await db().prepare(
+      'SELECT app_version, COUNT(*) AS c FROM ops_client_version_device_daily WHERE day_at = ?',
+    ).bind(DAY_AT).first<{ app_version: string; c: number }>();
+    expect(again?.app_version).toBe('0.0.35');
+    expect(Number(again?.c)).toBe(1);
+  });
+
+  it('backfills from now, not from the day being rolled up', async () => {
+    await seedUser('u-a', 'a@example.com');
+    await seedWindow({
+      id: 'w-today', userId: 'u-a', deviceId: 'd-today', receivedAt: DAY_AT + 10,
+      version: '0.0.34', os: 'Windows 11',
+    });
+
+    // Cron rolls up *yesterday*; the backfill still has to walk back from today.
+    await rollupClientVersionsDaily(db(), DAY_AT - DAY, false, NOW);
+    const rows = await db().prepare(
+      'SELECT day_at, device_id FROM ops_client_version_device_daily',
+    ).all<{ day_at: number; device_id: string }>();
+    expect(rows.results).toEqual([{ day_at: DAY_AT, device_id: 'd-today' }]);
+  });
+
+  it('backfills thirty days in chunks, once, then stays done', async () => {
+    await seedUser('u-a', 'a@example.com');
+    await seedWindow({
+      id: 'w-near', userId: 'u-a', deviceId: 'd-a', receivedAt: DAY_AT - 3 * DAY + 10,
+      version: '0.0.34', os: 'Windows 11',
+    });
+    await seedWindow({
+      id: 'w-far', userId: 'u-a', deviceId: 'd-b', receivedAt: DAY_AT - 20 * DAY + 10,
+      version: '0.0.33', os: 'Windows 11',
+    });
+    await seedWindow({
+      id: 'w-past', userId: 'u-a', deviceId: 'd-c', receivedAt: DAY_AT - 40 * DAY + 10,
+      version: '0.0.30', os: 'Windows 11',
+    });
+
+    const first = await backfillDeviceDaily(db(), NOW);
+    expect(first).toEqual({ done: false, days: 5 });
+    let calls = 1;
+    let done = first.done;
+    while (!done && calls < 20) {
+      done = (await backfillDeviceDaily(db(), NOW)).done;
+      calls += 1;
+    }
+    expect(calls).toBe(6);
+
+    const rows = await db().prepare(
+      'SELECT day_at, device_id FROM ops_client_version_device_daily ORDER BY day_at DESC',
+    ).all<{ day_at: number; device_id: string }>();
+    expect(rows.results).toEqual([
+      { day_at: DAY_AT - 3 * DAY, device_id: 'd-a' },
+      { day_at: DAY_AT - 20 * DAY, device_id: 'd-b' },
+    ]);
+
+    // Idempotent: the marker is set, so nothing is walked again.
+    expect(await backfillDeviceDaily(db(), NOW)).toEqual({ done: true, days: 0 });
+    const after = await db().prepare(
+      'SELECT COUNT(*) AS c FROM ops_client_version_device_daily',
+    ).first<{ c: number }>();
+    expect(Number(after?.c)).toBe(2);
   });
 });
 
@@ -304,5 +488,16 @@ describe('client version daily retention', () => {
       'SELECT app_version FROM ops_client_version_daily',
     ).all<{ app_version: string }>();
     expect(kept.results.map((row) => row.app_version)).toEqual(['keep']);
+  });
+
+  it('prunes the per-device table on the same cutoff', async () => {
+    await seedDeviceDay({ day: DAY_AT - 3 * DAY, deviceId: 'd-old', userId: 'u-a', version: '0.0.30' });
+    await seedDeviceDay({ day: DAY_AT, deviceId: 'd-new', userId: 'u-a', version: '0.0.34' });
+
+    expect(await retainClientVersionDaily(db(), DAY_AT + 10, 1, 500)).toBe(1);
+    const left = await db().prepare(
+      'SELECT device_id FROM ops_client_version_device_daily',
+    ).all<{ device_id: string }>();
+    expect(left.results.map((row) => row.device_id)).toEqual(['d-new']);
   });
 });

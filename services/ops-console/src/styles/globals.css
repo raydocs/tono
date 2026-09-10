@@ -284,8 +284,78 @@ button.ops-chip:hover:not(:disabled) { transform: translateY(-1px); border-color
   }
   .incident-row:last-child { margin-bottom: 0; border-bottom: 1px solid var(--hairline); }
   .incident-row .sev-rail { width: 100%; height: 3px; align-self: stretch; }
-  .incident-row .ops-action { width: 100%; justify-content: center; }
-  .incident-row > [role="presentation"] { width: 100%; }
+  /* One button per line meant two or three thumb-width slabs under every
+     incident and the next card starting below the fold. They share a line
+     instead, in the order they were written — the act that moves the fault
+     leads — and each is 44 px tall, the smallest target a thumb hits blind. */
+  .incident-row > [role="presentation"] { width: 100%; display: flex; flex-wrap: wrap; gap: 8px; }
+  .incident-row .ops-action { flex: 1 1 40%; min-height: 44px; justify-content: center; }
+}
+
+/* 今天 on a phone, which is where it is read: at three in the morning, from a
+   Telegram alert, with one hand. Everything here is about the thumb — the tabs
+   scroll rather than wrap, the morning read folds shut so the incidents are
+   the first thing under the sentence, and nothing pressable is under 44 px. */
+@media (max-width: 640px) {
+  /* 32 px of verdict is two words a line on a 390 px screen, and the sentence
+     is the one thing that has to be read before the list under it. It still
+     takes two lines at 24; balancing them keeps the second from being one
+     stranded character under a full first line. */
+  .page-wrap .text-verdict { font-size: 24px; text-wrap: balance; }
+
+  /* Three tabs and three counts do not fit one 350 px line. Wrapping them
+     would move the list every time a count changed, so the strip scrolls
+     sideways instead and the rule under the live tab stays the only mark. */
+  .today-tabs {
+    gap: 20px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .today-tabs::-webkit-scrollbar { display: none; }
+  .today-tabs .ops-tab {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    min-height: 44px;
+    padding-top: 10px;
+    white-space: nowrap;
+  }
+
+  /* The morning read is a paragraph of prose sitting on top of the list it
+     summarises. Folded, it keeps the two counts that decide whether it is
+     worth opening; nothing in it is lost, it is one tap further away. */
+  .digest-fold > summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    list-style: none;
+    cursor: pointer;
+  }
+  .digest-fold > summary::-webkit-details-marker { display: none; }
+  .digest-fold > summary::after {
+    content: '';
+    margin-left: auto;
+    width: 6px;
+    height: 6px;
+    border-right: 1.5px solid var(--muted-foreground);
+    border-bottom: 1.5px solid var(--muted-foreground);
+    transform: rotate(45deg) translateY(-2px);
+  }
+  .digest-fold[open] > summary::after { transform: rotate(-135deg) translateY(-2px); }
+  .digest-fold[open] > .digest-body { padding-top: 12px; }
+  /* 昨夜's titles wrap here rather than ending in an ellipsis: the whole point
+     of the line is which machine it was, and that is the half being cut. */
+  .digest-fold .night-title {
+    overflow: visible;
+    white-space: normal;
+    text-overflow: clip;
+  }
+
+  /* The sheet's action bar sits on the bottom edge; three buttons across it,
+     each a thumb tall, is the whole reason the drawer became a sheet. */
+  .sheet-actions .ops-action { flex: 1 1 28%; min-height: 44px; justify-content: center; }
 }
 
 /* The connection timeline: a day heading that sticks while its rows scroll. */

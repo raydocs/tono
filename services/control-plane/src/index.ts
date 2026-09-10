@@ -3108,7 +3108,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       await afterLogSegment(e, {
         userId: a.userId,
         deviceId: a.deviceId ?? null,
-        bytes: payload,
+        bytes: payload, segmentId: stored.id,
         receivedAt: stored.receivedAt,
       });
     }

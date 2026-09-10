@@ -148,7 +148,7 @@ export async function afterSnapshot(e: Env, nowSec: number): Promise<void> {
 
 export async function afterLogSegment(
   e: Env,
-  input: { userId: string; deviceId: string | null; bytes: Uint8Array; receivedAt: number },
+  input: { userId: string; deviceId: string | null; bytes: Uint8Array; receivedAt: number; segmentId: string },
 ): Promise<void> {
   if (e.OPS_TRAFFIC_PARSE === '0') return;
   if (input.bytes.byteLength > LOG_PARSE_MAX) {
@@ -167,7 +167,7 @@ export async function afterLogSegment(
       receivedAt: input.receivedAt,
       gunzip: false,
     });
-    await writeParsedSegment(e.DB, parsed, now());
+    await writeParsedSegment(e.DB, parsed, now(), input.segmentId);
   });
 }
 

@@ -8,6 +8,7 @@ import {
   SERVICE_FAMILIES_VERSION,
 } from '../src/ops/service-families';
 import {
+  candidateKey,
   deriveRoute,
   IP_ETLD1,
   MAX_DISTINCT_ETLD1,
@@ -16,6 +17,7 @@ import {
   OTHER_ETLD1,
   parseAuditSegment,
   retainTrafficDaily,
+  rollupDirectCandidates30d,
   writeParsedSegment,
 } from '../src/ops/traffic-parse';
 
@@ -135,7 +137,7 @@ describe('parseAuditSegment', () => {
       line({ host: 'www.baidu.com', process: 'Safari', route: 'Tono-Exit', bytes_up: 10, bytes_down: 20 }),
       ctx,
     );
-    const cand = parsed.candidates.get('baidu.com');
+    const cand = parsed.candidates.get(candidateKey(DAY, 'baidu.com'));
     expect(cand).toMatchObject({ connections: 1, bytes: 30 });
     const dest = [...parsed.destinations.values()][0];
     expect(dest.connections).toBe(1);
@@ -210,18 +212,39 @@ describe('parseAuditSegment', () => {
   });
 });
 
+async function baiduSegment(fields: Record<string, unknown>, over = ctx) {
+  return await parseAuditSegment(
+    line({ host: 'www.baidu.com', process: 'Safari', route: 'Tono-Exit', ...fields }),
+    over,
+  );
+}
+
+async function counts() {
+  const row = await db().prepare(
+    `SELECT
+       (SELECT COUNT(*) FROM traffic_destination_daily) AS dest,
+       (SELECT COUNT(*) FROM service_usage_daily) AS svc,
+       (SELECT COUNT(*) FROM direct_candidate_daily) AS daily,
+       (SELECT COALESCE(SUM(bytes_30d), 0) FROM direct_candidates) AS bytes,
+       (SELECT COALESCE(SUM(connections_30d), 0) FROM direct_candidates) AS conns`,
+  ).first<Record<string, number>>();
+  return {
+    dest: Number(row?.dest), svc: Number(row?.svc), daily: Number(row?.daily),
+    bytes: Number(row?.bytes), conns: Number(row?.conns),
+  };
+}
+
+const candidateRow = () => db().prepare(
+  'SELECT users, bytes_30d, connections_30d, first_seen, last_seen, status FROM direct_candidates WHERE etld1 = ?',
+).bind('baidu.com').first<{
+  users: number; bytes_30d: number; connections_30d: number;
+  first_seen: number; last_seen: number; status: string;
+}>();
+
 describe('writeParsedSegment and retainTrafficDaily', () => {
-  it('accumulates upserts across two segments and retains old daily rows', async () => {
-    const first = await parseAuditSegment(
-      line({ host: 'www.baidu.com', process: 'Safari', route: 'Tono-Exit', bytes_up: 100 }),
-      ctx,
-    );
-    await writeParsedSegment(db(), first, RECEIVED);
-    const second = await parseAuditSegment(
-      line({ host: 'www.baidu.com', process: 'Chrome', route: 'Tono-Exit', bytes_down: 250 }),
-      ctx,
-    );
-    await writeParsedSegment(db(), second, RECEIVED + 10);
+  it('folds two segments from one customer into one daily row and one customer', async () => {
+    await writeParsedSegment(db(), await baiduSegment({ bytes_up: 100 }), RECEIVED, 'seg-1');
+    await writeParsedSegment(db(), await baiduSegment({ bytes_down: 250, process: 'Chrome' }), RECEIVED + 10, 'seg-2');
 
     const dest = await db().prepare(
       `SELECT connections, bytes_up, bytes_down, top_process, day_at
@@ -235,22 +258,126 @@ describe('writeParsedSegment and retainTrafficDaily', () => {
     });
     expect(dest?.top_process).toMatch(/Safari|Chrome/);
 
-    const cand = await db().prepare(
-      'SELECT connections_30d, bytes_30d, users, status FROM direct_candidates WHERE etld1 = ?',
-    ).bind('baidu.com').first<{
-      connections_30d: number; bytes_30d: number; users: number; status: string;
-    }>();
-    expect(cand).toMatchObject({
-      connections_30d: 2, bytes_30d: 350, users: 2, status: 'new',
-    });
+    const daily = await db().prepare(
+      'SELECT user_id, day_at, bytes, connections FROM direct_candidate_daily WHERE etld1 = ?',
+    ).bind('baidu.com').all<{ user_id: string; day_at: number; bytes: number; connections: number }>();
+    expect(daily.results).toEqual([
+      { user_id: ctx.userId, day_at: DAY, bytes: 350, connections: 2 },
+    ]);
 
+    // Between rollups the byte counters are already live; `users` is not.
+    expect(await candidateRow()).toMatchObject({
+      users: 0, bytes_30d: 350, connections_30d: 2, status: 'new',
+    });
+    await rollupDirectCandidates30d(db(), RECEIVED);
+    expect(await candidateRow()).toMatchObject({
+      users: 1, bytes_30d: 350, connections_30d: 2, status: 'new',
+    });
+  });
+
+  it('counts two customers on one domain as two', async () => {
+    await writeParsedSegment(db(), await baiduSegment({ bytes_up: 100 }), RECEIVED, 'seg-a');
+    await writeParsedSegment(
+      db(),
+      await baiduSegment({ bytes_up: 40 }, { ...ctx, userId: 'u-two', deviceId: 'd-two' }),
+      RECEIVED,
+      'seg-b',
+    );
+    await rollupDirectCandidates30d(db(), RECEIVED);
+    expect(await candidateRow()).toMatchObject({ users: 2, bytes_30d: 140, connections_30d: 2 });
+  });
+
+
+
+  it('recomputes rather than accumulates: rows outside the window drop back out', async () => {
+    await writeParsedSegment(db(), await baiduSegment({ bytes_up: 100 }), RECEIVED, 'seg-window');
+    await db().prepare(
+      `INSERT INTO direct_candidate_daily(user_id, day_at, etld1, bytes, connections, last_seen_at)
+       VALUES('u-stale', ?, 'baidu.com', 999, 9, ?)`,
+    ).bind(DAY - 31 * 86_400, RECEIVED).run();
+
+    await rollupDirectCandidates30d(db(), RECEIVED);
+    expect(await candidateRow()).toMatchObject({ users: 1, bytes_30d: 100, connections_30d: 1 });
+
+    // Move the window past everything: the counters shrink to zero.
+    await rollupDirectCandidates30d(db(), RECEIVED + 31 * 86_400);
+    expect(await candidateRow()).toMatchObject({ users: 0, bytes_30d: 0, connections_30d: 0 });
+  });
+
+  it('writes nothing the second time a segment id is parsed', async () => {
+    const parsed = await baiduSegment({ bytes_up: 100 });
+    expect(await writeParsedSegment(db(), parsed, RECEIVED, 'seg-once'))
+      .toMatchObject({ skipped: false });
+    const before = await counts();
+
+    expect(await writeParsedSegment(db(), parsed, RECEIVED + 5, 'seg-once'))
+      .toEqual({ skipped: true, rows: 0 });
+    expect(await counts()).toEqual(before);
+
+    const ledger = await db().prepare(
+      'SELECT segment_id, user_id, lines, connection_rows FROM ops_traffic_segments',
+    ).all<{ segment_id: string; user_id: string; lines: number; connection_rows: number }>();
+    expect(ledger.results).toEqual([
+      { segment_id: 'seg-once', user_id: ctx.userId, lines: 1, connection_rows: 1 },
+    ]);
+
+    // A different id carrying the same bytes is a different segment.
+    expect(await writeParsedSegment(db(), parsed, RECEIVED + 6, 'seg-twice'))
+      .toMatchObject({ skipped: false });
+    const after = await counts();
+    expect(after.bytes).toBe(before.bytes + 100);
+    expect(after.conns).toBe(before.conns + 1);
+    expect(after.daily).toBe(before.daily);
+  });
+
+  it('backfills direct_candidate_daily from the destination rollup exactly once', async () => {
+    const seedDest = (userId: string, etld1: string, up: number, down: number) => db().prepare(
+      `INSERT INTO traffic_destination_daily(
+         user_id, device_id, day_at, etld1, route, node,
+         connections, bytes_up, bytes_down, updated_at
+       ) VALUES(?, '', ?, ?, 'cloud', '', 3, ?, ?, ?)`,
+    ).bind(userId, DAY, etld1, up, down, RECEIVED).run();
+    await seedDest('u-bf', 'baidu.com', 100, 200);
+    await seedDest('u-bf', 'google.com', 1, 2);
+    await seedDest('u-bf', OTHER_ETLD1, 1, 2);
+    await seedDest('u-bf', IP_ETLD1, 1, 2);
+
+    expect(await rollupDirectCandidates30d(db(), RECEIVED)).toMatchObject({ backfilled: 1 });
+    const rows = await db().prepare(
+      'SELECT user_id, etld1, bytes, connections FROM direct_candidate_daily ORDER BY etld1',
+    ).all<{ user_id: string; etld1: string; bytes: number; connections: number }>();
+    expect(rows.results).toEqual([
+      { user_id: 'u-bf', etld1: 'baidu.com', bytes: 300, connections: 3 },
+    ]);
+
+    await seedDest('u-bf', 'sina.com.cn', 5, 5);
+    expect(await rollupDirectCandidates30d(db(), RECEIVED)).toMatchObject({ backfilled: 0 });
+    const again = await db().prepare(
+      'SELECT COUNT(*) AS c FROM direct_candidate_daily',
+    ).first<{ c: number }>();
+    expect(Number(again?.c)).toBe(1);
+  });
+
+  it('retains recent daily rows, segments and candidates, and prunes the rest', async () => {
+    await writeParsedSegment(db(), await baiduSegment({ bytes_up: 100 }), RECEIVED, 'seg-keep');
     await db().prepare(
       `INSERT INTO traffic_destination_daily(
          user_id, device_id, day_at, etld1, route, node,
          connections, bytes_up, bytes_down, updated_at
        ) VALUES('u-old', '', 1000, 'old.cn', 'cloud', '', 1, 0, 0, 1000)`,
     ).run();
+    await db().prepare(
+      `INSERT INTO direct_candidate_daily(user_id, day_at, etld1, bytes, connections, last_seen_at)
+       VALUES('u-old', 1000, 'old.cn', 1, 1, 1000)`,
+    ).run();
+    await db().prepare(
+      `INSERT INTO ops_traffic_segments(
+         segment_id, user_id, device_id, received_at, parsed_at, lines, connection_rows
+       ) VALUES('seg-old', 'u-old', NULL, 1000, 1000, 1, 1)`,
+    ).run();
+
     await retainTrafficDaily(db(), RECEIVED, 90, 500);
+
     const leftover = await db().prepare(
       "SELECT COUNT(*) AS count FROM traffic_destination_daily WHERE user_id = 'u-old'",
     ).first<{ count: number }>();
@@ -259,5 +386,13 @@ describe('writeParsedSegment and retainTrafficDaily', () => {
       'SELECT COUNT(*) AS count FROM traffic_destination_daily WHERE user_id = ?',
     ).bind(ctx.userId).first<{ count: number }>();
     expect(Number(kept?.count)).toBe(1);
+    const daily = await db().prepare(
+      'SELECT user_id FROM direct_candidate_daily',
+    ).all<{ user_id: string }>();
+    expect(daily.results.map((row) => row.user_id)).toEqual([ctx.userId]);
+    const segments = await db().prepare(
+      'SELECT segment_id FROM ops_traffic_segments',
+    ).all<{ segment_id: string }>();
+    expect(segments.results.map((row) => row.segment_id)).toEqual(['seg-keep']);
   });
 });

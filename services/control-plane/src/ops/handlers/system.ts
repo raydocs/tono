@@ -1,5 +1,6 @@
 import { envInt } from '../../env';
 import { CONTRACT_VERSION, SOURCE_IDS, assertSystemHealth, type BackfillHealthDto, type CronStepsHealthDto, type SourceHealthDto, type SourceId, type SourceState, type SystemHealthDto } from '../contract';
+import { coverageOf } from '../coverage';
 import { storedLiveSnapshot } from '../live';
 import { OPS_CRON_STEPS, parseLastReport } from '../cron';
 import {
@@ -135,6 +136,7 @@ export async function getSystemHealth(req: Request, e: Env): Promise<Response> {
       // Table is optional; any missing-object error is treated as "no cron yet".
     }
   }
+  const coverage = await coverageOf(e, t);
   const dto: SystemHealthDto = {
     ok: sources.every((source) => source.state === 'ready' || source.state === 'stale'),
     buildSha: nullText((e as Env & { BUILD_SHA?: string }).BUILD_SHA),
@@ -145,6 +147,7 @@ export async function getSystemHealth(req: Request, e: Env): Promise<Response> {
     cronLastError,
     cronSteps,
     backfill: await backfillHealth(e, t),
+    ...(coverage ? { coverage } : {}),
     updatedAt: t,
   };
   // A missing source is not ok — the 死人开关.
