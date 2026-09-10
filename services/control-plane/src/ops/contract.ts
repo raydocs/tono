@@ -58,3 +58,4 @@ export * from './contract/worthwhile';
 
 // dept:e
 // append your entries inside your block
+export * from './contract/roles';

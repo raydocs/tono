@@ -2,7 +2,8 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { Empty } from '@/components/ops/Empty';
 import { copy } from '@/copy/copy';
 import { opsApi } from '@/lib/api';
-import { BLANK_ROUTE, readRoute, type OpsRoute } from '@/lib/hash-route';
+import { BLANK_ROUTE, goPage, readRoute, type OpsRoute } from '@/lib/hash-route';
+import { can, currentRole, firstAllowedPage, PAGE_REQUIRES } from '@/lib/roles';
 import { useBeat } from '@/lib/use-poll';
 import { useFleet } from '@/lib/use-fleet';
 import { newestFetch, useResource } from '@/lib/use-resource';
@@ -82,6 +83,11 @@ export function App() {
     if (!window.location.hash) {
       window.location.hash = '#/today';
     }
+    const role = currentRole();
+    const current = readRoute();
+    if (!can(PAGE_REQUIRES[current.page], role)) {
+      goPage(firstAllowedPage(role));
+    }
     return () => {
       window.removeEventListener('hashchange', sync);
       window.removeEventListener('popstate', sync);
@@ -93,6 +99,8 @@ export function App() {
   const people = customers.status === 'ready' ? customers.data : [];
   const waiting = funnel.status === 'ready' ? funnel.data : null;
   const open = incidents.status === 'ready' ? incidents.data : [];
+  const role = currentRole();
+  const page = can(PAGE_REQUIRES[route.page], role) ? route.page : firstAllowedPage(role);
 
   return (
     <Shell
@@ -105,12 +113,12 @@ export function App() {
       incidents={open}
     >
       <Suspense fallback={<div className="page-wrap"><Empty message={copy.loading} /></div>}>
-        {route.page === 'nodes' ? (
+        {page === 'nodes' ? (
           route.nodeName
             ? <NodeDetailPage name={route.nodeName} customers={people} />
             : <NodesPage nodes={nodes} health={health} fleet={fleet} selected={route.node} />
         )
-          : route.page === 'customers' ? (
+          : page === 'customers' ? (
             route.customerId
               ? <CustomerDetailPage userId={route.customerId} />
               : (
@@ -125,9 +133,9 @@ export function App() {
                 />
               )
           )
-            : route.page === 'clients'
+            : page === 'clients'
               ? <ClientsPage releases={releases} health={health} onChanged={releases.reload} />
-              : route.page === 'settings' ? <SettingsPage section={route.section} />
+              : page === 'settings' ? <SettingsPage section={route.section} />
                 : (
                   <TodayPage
                     incidents={incidents}
