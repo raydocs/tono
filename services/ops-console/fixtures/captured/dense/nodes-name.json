@@ -108,7 +108,11 @@
         "platform": "windows",
         "appVersion": "0.0.72",
         "online": true,
-        "lastSeenAt": 1724999984
+        "lastSeenAt": 1724999984,
+        "connected": false,
+        "lastFailAt": null,
+        "lastFailCode": null,
+        "lastFailNode": null
       }
     ],
     "asOfSec": 1724999984,
