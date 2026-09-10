@@ -198,6 +198,41 @@ describe('ops v1 api', () => {
     assertList(await (await ops('customers/u-1/services?range=7d')).json(), assertServiceUsage);
   });
 
+  it('customer list and detail take an open customer-repeat-fail as 连不上', async () => {
+    await seedUser('u-fail', 'fail@example.com');
+    const t = Math.floor(Date.now() / 1000);
+    await db().prepare(
+      `INSERT INTO ops_incidents(
+         id, dedupe_key, kind, subject_type, subject_id, severity, status, title,
+         rules_version, opened_at, last_seen_at, impact_count, updated_at
+       ) VALUES('inc-fail', 'customer-repeat-fail:u-fail', 'customer-repeat-fail', 'user', 'u-fail',
+                'warn', 'open', '连续失败', 1, ?, ?, 1, ?)`,
+    ).bind(t, t, t).run();
+    const list = assertList(await (await ops('customers')).json(), assertCustomerSummary);
+    const row = list.items.find((item) => item.userId === 'u-fail');
+    expect(row?.verdict).toBe('unreachable');
+    expect(row?.health).toBe('连不上');
+    const detail = assertCustomerDetail(await (await ops('customers/u-fail')).json());
+    expect(detail.verdict).toBe('unreachable');
+    expect(detail.health).toBe('连不上');
+  });
+
+  it('customer list and detail treat a 50-minute-old heartbeat as 未上报', async () => {
+    await seedUser('u-stale', 'stale@example.com');
+    const seen = Math.floor(Date.now() / 1000) - 50 * 60;
+    await db().prepare(
+      `INSERT INTO ops_customer_status(user_id, connected, selected_server, last_seen_at, updated_at)
+       VALUES('u-stale', 1, ?, ?, ?)`,
+    ).bind(NODE, seen, seen).run();
+    const list = assertList(await (await ops('customers')).json(), assertCustomerSummary);
+    const row = list.items.find((item) => item.userId === 'u-stale');
+    expect(row?.verdict).toBe('unreported');
+    expect(row?.health).toBe('未上报');
+    const detail = assertCustomerDetail(await (await ops('customers/u-stale')).json());
+    expect(detail.verdict).toBe('unreported');
+    expect(detail.health).toBe('未上报');
+  });
+
   it('incidents list, detail, ack, snooze, resolve, notes', async () => {
     await db().prepare(
       `INSERT INTO ops_incidents(
@@ -211,6 +246,12 @@ describe('ops v1 api', () => {
     expect(detail.incident.id).toBe('inc-1');
     assertIncident(await (await ops('incidents/inc-1/ack', json({}))).json());
     assertIncident(await (await ops('incidents/inc-1/snooze', json({ until: NOW + 3600 }))).json());
+    const secondsAt = Math.floor(Date.now() / 1000);
+    const snoozedBySeconds = await ops('incidents/inc-1/snooze', json({ seconds: 14400 }));
+    expect(snoozedBySeconds.status).toBe(200);
+    const snoozedBody = assertIncident(await snoozedBySeconds.json());
+    expect(snoozedBody.snoozedUntil).toBeGreaterThanOrEqual(secondsAt + 14400);
+    expect(snoozedBody.snoozedUntil).toBeLessThanOrEqual(Math.floor(Date.now() / 1000) + 14400);
     assertIncident(await (await ops('incidents/inc-1/notes', json({ note: 'watching' }))).json());
     assertIncident(await (await ops('incidents/inc-1/resolve', json({ note: 'recovered' }))).json());
   });
@@ -336,6 +377,38 @@ describe('ops v1 api', () => {
     ).first<{ status: string; attempts: number }>();
     expect(real?.status).toBe('pending');
     expect(Number(real?.attempts)).toBe(0);
+  });
+
+  it('GET /api/v1/system/pulse is public, unauthenticated, and exact-shaped', async () => {
+    const context = createExecutionContext();
+    const res = await worker.fetch(
+      new Request('https://test/api/v1/system/pulse'),
+      env as unknown as Env,
+      context,
+    );
+    await waitOnExecutionContext(context);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(await res.json()).toEqual({ ok: false, cronAgeSec: null, buildSha: 'development' });
+
+    const ranAt = Math.floor(Date.now() / 1000) - 60;
+    await db().prepare(
+      `INSERT INTO ops_cron_state(key, ran_at) VALUES('last_report', ?)`,
+    ).bind(ranAt).run();
+    const live = createExecutionContext();
+    const again = await worker.fetch(
+      new Request('https://test/api/v1/system/pulse'),
+      env as unknown as Env,
+      live,
+    );
+    await waitOnExecutionContext(live);
+    const body = await again.json() as { ok: boolean; cronAgeSec: number | null; buildSha: string };
+    expect(Object.keys(body).sort()).toEqual(['buildSha', 'cronAgeSec', 'ok']);
+    expect(again.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.buildSha).toBe('development');
+    expect(body.cronAgeSec).toBeGreaterThanOrEqual(60);
+    expect(body.cronAgeSec).toBeLessThan(15 * 60);
   });
 
   it('GET audit and system/health', async () => {

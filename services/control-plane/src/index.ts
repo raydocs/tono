@@ -75,7 +75,7 @@ import {
   publicUser,
 } from './ops/reads';
 import {
-  opsRoutes,
+  opsRoutes, publicSystemRoute,
   type OpsRouterDeps,
 } from './ops/router';
 
@@ -2784,9 +2784,8 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     return Response.json({ ok: true, version: '0.0.1', buildSha: buildSha(e), service: 'api' });
   }
 
-  if (p === '/api/v1/system/version' && m === 'GET') {
-    return Response.json({ service: 'api', version: '0.0.1', buildSha: buildSha(e) });
-  }
+  const publicSystem = await publicSystemRoute(req, e, p, m, { buildSha, consumeRateLimit });
+  if (publicSystem) return publicSystem;
 
   if (p === '/api/v1/auth/methods' && m === 'GET') {
     const appleAudience = providerAudience(e, 'apple');

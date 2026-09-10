@@ -1,3 +1,5 @@
+import { sha256 } from '../crypto';
+import { clientIp } from '../auth';
 import { ApiError } from '../errors';
 import {
   type Env,
@@ -11,6 +13,7 @@ import {
   operationsCatalogRevisions,
 } from './reads';
 import { dispatchOpsV1, OPS_V1_ROUTES } from './handlers/dispatch';
+import { getSystemPulse } from './handlers/system';
 import { getOpsDashboard } from './legacy-handlers/dashboard';
 import { getOpsSystemVersion } from './legacy-handlers/system';
 import {
@@ -37,6 +40,27 @@ import { getOpsActivity } from './legacy-handlers/activity';
 import { getOpsIncidentNode } from './legacy-handlers/incidents-node';
 
 export { OPS_V1_ROUTES };
+
+export async function publicSystemRoute(
+  req: Request,
+  e: Env,
+  p: string,
+  m: string,
+  deps: {
+    buildSha: (e: Env) => string;
+    consumeRateLimit: (e: Env, key: string, limit: number, windowSeconds: number) => Promise<void>;
+  },
+): Promise<Response | null> {
+  if (m !== 'GET') return null;
+  if (p === '/api/v1/system/version') {
+    return Response.json({ service: 'api', version: '0.0.1', buildSha: deps.buildSha(e) });
+  }
+  if (p === '/api/v1/system/pulse') {
+    await deps.consumeRateLimit(e, `rl:${await sha256(`system-pulse:ip:${clientIp(req)}`)}`, 60, 3600);
+    return getSystemPulse(e, deps.buildSha(e));
+  }
+  return null;
+}
 
 export type OpsRouterDeps = {
   buildSha: (e: Env) => string;

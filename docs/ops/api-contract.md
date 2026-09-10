@@ -41,7 +41,7 @@
 | `GET customers/{id}/services?range` | `ListDto<ServiceUsageDto>` |
 | `GET incidents?status&severity&subjectType&since` | `ListDto<IncidentDto>` |
 | `GET incidents/{id}` | `IncidentDetailDto` (`{ incident, events, jobs, deliveries }`) |
-| `POST incidents/{id}/ack\|snooze\|resolve\|notes` | `IncidentDto` |
+| `POST incidents/{id}/ack\|snooze\|resolve\|notes` | `IncidentDto`。`snooze` 接受 `until`（epoch 秒）、`durationSec`，或控制台用的 `seconds`（1..7 天） |
 | `GET jobs?status&executor`、`POST jobs/{id}/cancel` | `ListDto<JobDto>` / `JobDto` |
 | `GET releases?platform&channel`、`POST releases`、`PATCH releases/{id}` | `ListDto<ReleaseDto>` / `ReleaseDto` |
 | `GET releases/adoption?range` | `AdoptionMatrixDto` |
@@ -55,6 +55,8 @@
 | `GET alert-deliveries` | `ListDto<AlertDeliveryDto>` |
 | `GET audit?before&beforeId&limit&targetId&actorEmail` | `AuditListDto` (`{ entries, hasMore, nextBefore, nextBeforeId }`) |
 | `GET system/health` | `SystemHealthDto` |
+
+公开（无 Access、无登录）`GET /api/v1/system/pulse` 返回 `{ ok, cronAgeSec, buildSha }`：`ok` 表示 cron 在 15 分钟内跑过；`cache-control: no-store`；按 IP 每小时 60 次。不含源名或其它内部细节。
 
 采集侧（`/api/v1/ops-ingest/*`）与客户端侧（`/api/v1/telemetry/failures`）不归这份合同管，它们有各自的入站校验。
 现有 `/ops/dashboard|fleet-nodes|activity|live|users|metrics|usage-hours` 在切换前保持不动。

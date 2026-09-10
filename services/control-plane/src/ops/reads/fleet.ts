@@ -5,6 +5,8 @@ import {
 } from '../../crypto';
 import { ApiError } from '../../errors';
 import {
+  CLIENT_UUID_PLACEHOLDER,
+  relistCatalogPlan,
   retirementCatalogPlan,
   splitManagedCatalogProxies,
 } from '../../catalog-yaml';
@@ -261,6 +263,90 @@ export async function retireFleetNode(e: Env, actorEmail: string, name: string, 
     changes: preview.changes,
     warnings: preview.warnings,
   };
+}
+
+function proxyBlockFromProfile(name: string, publicIp: string): string {
+  return [
+    `  - name: ${name}`,
+    '    type: vless',
+    `    server: ${publicIp}`,
+    '    port: 443',
+    `    uuid: ${CLIENT_UUID_PLACEHOLDER}`,
+    '    network: tcp',
+    '    tls: true',
+    '',
+  ].join('\n');
+}
+
+export async function relistFleetNode(
+  e: Env,
+  actorEmail: string,
+  name: string,
+  requestBody: Row = {},
+): Promise<{ revision: number; previousRevision: number; alreadyListed: boolean; sha256: string }> {
+  if (requestBody.expectedRevision != null
+    && (!Number.isSafeInteger(requestBody.expectedRevision) || requestBody.expectedRevision < 0)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid expectedRevision');
+  }
+  const catalog = await managedCatalogTemplate(e);
+  const expected = requestBody.expectedRevision == null ? catalog.revision : Number(requestBody.expectedRevision);
+  if (expected !== catalog.revision) {
+    throw new ApiError(409, 'CATALOG_CONFLICT', 'Managed catalog changed; preview relist again');
+  }
+  let block = typeof requestBody.block === 'string' ? requestBody.block : '';
+  if (!block.trim()) {
+    const profile = await e.DB.prepare(
+      'SELECT public_ip FROM ops_node_profiles WHERE catalog_name = ?',
+    ).bind(name).first<Row>();
+    const ip = profile?.public_ip == null ? '' : String(profile.public_ip).trim();
+    if (!ip) throw new ApiError(422, 'RELIST_NO_TEMPLATE', 'No stored catalog template for this node');
+    block = proxyBlockFromProfile(name, ip);
+  }
+  const plan = relistCatalogPlan(catalog.yaml, name, block);
+  if (!plan.safe) {
+    throw new ApiError(422, 'RELIST_UNSAFE', plan.warnings[0] ?? 'Node cannot be relisted');
+  }
+  const digest = await sha256(plan.yaml);
+  const changedAt = now();
+  if (plan.alreadyListed) {
+    await e.DB.prepare(
+      `UPDATE ops_node_profiles SET status = 'active', updated_at = ? WHERE catalog_name = ?`,
+    ).bind(changedAt, name).run();
+    return { revision: catalog.revision, previousRevision: catalog.revision, alreadyListed: true, sha256: digest };
+  }
+  const revision = catalog.revision + 1;
+  const encrypted = await encryptCatalog(plan.yaml, requiredCatalogKey(e));
+  const results = await e.DB.batch([
+    e.DB.prepare(
+      `UPDATE managed_exit_catalog
+       SET revision = ?, ciphertext = ?, nonce = ?, content_sha256 = ?, updated_at = ?
+       WHERE singleton_id = 1 AND revision = ?`,
+    ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, changedAt, catalog.revision),
+    e.DB.prepare(
+      `INSERT INTO ops_node_profiles(id, catalog_name, status, created_at, updated_at)
+       SELECT ?, ?, 'active', ?, ?
+       WHERE EXISTS (
+         SELECT 1 FROM managed_exit_catalog
+         WHERE singleton_id = 1 AND revision = ? AND content_sha256 = ?
+       )
+       ON CONFLICT(catalog_name) DO UPDATE SET status = 'active', updated_at = excluded.updated_at`,
+    ).bind(id(), name, changedAt, changedAt, revision, digest),
+    e.DB.prepare(
+      `INSERT INTO ops_audit(
+         id, at, actor_email, action, target_type, target_id, summary,
+         actor_type, actor_role, request_id
+       )
+       SELECT ?, ?, ?, 'node.relist', 'fleet_node', ?, ?, 'access_admin', 'owner', NULL
+       WHERE EXISTS (
+         SELECT 1 FROM managed_exit_catalog
+         WHERE singleton_id = 1 AND revision = ? AND content_sha256 = ?
+       )`,
+    ).bind(id(), changedAt, actorEmail.slice(0, 254), name, `relisted ${name}`.slice(0, 500), revision, digest),
+  ]);
+  if (!results[0].meta.changes) {
+    throw new ApiError(409, 'CATALOG_CONFLICT', 'Managed catalog changed; preview relist again');
+  }
+  return { revision, previousRevision: catalog.revision, alreadyListed: false, sha256: digest };
 }
 
 export async function operationsDashboard(e: Env, cache?: OpsRequestCache) {

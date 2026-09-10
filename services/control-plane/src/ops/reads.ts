@@ -3,6 +3,7 @@ export {
   operationsRetirePreview,
   fleetNodeName,
   retireFleetNode,
+  relistFleetNode,
   operationsDashboard,
 } from './reads/fleet';
 export {

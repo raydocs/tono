@@ -10,7 +10,7 @@ import type {
 export const PATH_WARN_MS = 400;
 export const PATH_SEVERE_MS = 800;
 
-const HEARTBEAT_FRESH_SECONDS = 40 * 60;
+export const HEARTBEAT_FRESH_SECONDS = 40 * 60;
 const FUTURE_SKEW_SECONDS = 5 * 60;
 const PATH_OPEN_STREAK = 2;
 const PATH_CLOSE_STREAK = 2;
@@ -19,6 +19,20 @@ const SWITCH_CHURN = 4;
 
 function clipTitle(value: string): string {
   return value.length <= 200 ? value : value.slice(0, 200);
+}
+
+/**
+ * Read-side freshness when no open customer-* incident exists.
+ * Stale or missing heartbeat is 未上报; a fresh sample is `fresh` so the
+ * caller can distinguish 离线 (heard from, not connected) from 正常.
+ */
+export function customerFreshnessVerdict(
+  lastSeenAt: number | null | undefined,
+  nowSec: number,
+): 'unreported' | 'fresh' {
+  if (lastSeenAt == null || !Number.isFinite(lastSeenAt) || lastSeenAt <= 0) return 'unreported';
+  if (nowSec - lastSeenAt > HEARTBEAT_FRESH_SECONDS) return 'unreported';
+  return 'fresh';
 }
 
 function sampleFresh(atMs: number | null | undefined, heartbeatSec: number | null, nowSec: number): boolean {

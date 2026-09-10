@@ -238,14 +238,88 @@ async function countDeliveries(): Promise<number> {
 }
 
 describe('ops alert deliveries (d1)', () => {
-  it('defers until delay_seconds have elapsed', async () => {
+  it('plans a pending row immediately when delay has not elapsed', async () => {
     const rule = baseRule({ delaySeconds: 60 });
     const t = baseTransition({ openedAt: NOW - 30 });
     await insertRule(rule);
     const planned = await planDeliveries(db(), [t], [rule], NOW);
     expect(planned.deferred).toBe(1);
-    expect(planned.pending).toBe(0);
-    expect(await countDeliveries()).toBe(0);
+    expect(planned.pending).toBe(1);
+    const row = await db().prepare(
+      'SELECT status, next_attempt_at FROM ops_alert_deliveries',
+    ).first<{ status: string; next_attempt_at: number }>();
+    expect(row?.status).toBe('pending');
+    expect(Number(row?.next_attempt_at)).toBe(t.openedAt + 60);
+  });
+
+  it('sends a delayed severe alert only after the delay, and suppresses if resolved first', async () => {
+    const openedAt = NOW;
+    const rule = baseRule({ minSeverity: 'severe', delaySeconds: 900 });
+    const t = baseTransition({
+      severity: 'severe', openedAt, title: '严重事故',
+    });
+    await insertRule(rule);
+    await insertIncident(t, openedAt);
+    const planned = await planDeliveries(db(), [t], [rule], openedAt + 10);
+    expect(planned.pending).toBe(1);
+    const earlyCalls: string[] = [];
+    const early = await sendPending(
+      db(), sendEnvFor(t), async (url) => {
+        earlyCalls.push(String(url));
+        return new Response('ok', { status: 200 });
+      }, openedAt + 10,
+    );
+    expect(early.sent).toBe(0);
+    expect(earlyCalls).toHaveLength(0);
+    const pending = await db().prepare(
+      'SELECT status FROM ops_alert_deliveries',
+    ).first<{ status: string }>();
+    expect(pending?.status).toBe('pending');
+
+    const lateCalls: string[] = [];
+    const sent = await sendPending(
+      db(), sendEnvFor(t), async (url) => {
+        lateCalls.push(String(url));
+        return new Response('ok', { status: 200 });
+      }, openedAt + 901,
+    );
+    expect(sent.sent).toBe(1);
+    expect(lateCalls).toHaveLength(1);
+    const delivered = await db().prepare(
+      'SELECT status FROM ops_alert_deliveries',
+    ).first<{ status: string }>();
+    expect(delivered?.status).toBe('sent');
+  });
+
+  it('suppresses a delayed delivery if the incident resolves before the delay', async () => {
+    const openedAt = NOW;
+    const rule = baseRule({ minSeverity: 'severe', delaySeconds: 900, id: 'rule-delay-resolve' });
+    const t = baseTransition({
+      incidentId: 'inc-delay-resolve',
+      dedupeKey: 'node:exit-a:delay-resolve',
+      severity: 'severe',
+      openedAt,
+    });
+    await insertRule(rule);
+    await insertIncident(t, openedAt);
+    await planDeliveries(db(), [t], [rule], openedAt + 10);
+    await db().prepare(
+      "UPDATE ops_incidents SET status = 'resolved', resolved_at = ?, updated_at = ? WHERE id = ?",
+    ).bind(openedAt + 500, openedAt + 500, t.incidentId).run();
+    const calls: string[] = [];
+    const result = await sendPending(
+      db(), sendEnvFor(t), async (url) => {
+        calls.push(String(url));
+        return new Response('ok', { status: 200 });
+      }, openedAt + 901,
+    );
+    expect(result.sent).toBe(0);
+    expect(calls).toHaveLength(0);
+    const row = await db().prepare(
+      'SELECT status, error FROM ops_alert_deliveries',
+    ).first<{ status: string; error: string | null }>();
+    expect(row?.status).toBe('suppressed');
+    expect(row?.error).toBe('resolved before delay');
   });
 
   it('suppresses inside cooldown and bumps the counter', async () => {
