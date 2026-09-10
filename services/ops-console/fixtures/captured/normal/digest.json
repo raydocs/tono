@@ -1,0 +1,140 @@
+{
+  "day": "2026-09-11",
+  "overnight": {
+    "resolved": [],
+    "opened": [
+      {
+        "id": "id_0d63732b05911258",
+        "dedupeKey": "id_ac21edfc20677ad4",
+        "kind": "node_blocked",
+        "subjectType": "node",
+        "subjectId": "Preview Seoul",
+        "severity": "warn",
+        "status": "open",
+        "tone": "warn",
+        "title": "Preview Seoul 被墙",
+        "summary": null,
+        "parentIncidentId": null,
+        "rulesVersion": 1,
+        "impactCount": 2,
+        "evidence": [],
+        "openedAt": 1724996085,
+        "lastSeenAt": 1724999940,
+        "ackedAt": null,
+        "snoozedUntil": null,
+        "resolvedAt": null,
+        "nextCheckAt": null,
+        "closure": null
+      }
+    ]
+  },
+  "open": [
+    {
+      "id": "id_0d63732b05911258",
+      "dedupeKey": "id_ac21edfc20677ad4",
+      "kind": "node_blocked",
+      "subjectType": "node",
+      "subjectId": "Preview Seoul",
+      "severity": "warn",
+      "status": "open",
+      "tone": "warn",
+      "title": "Preview Seoul 被墙",
+      "summary": null,
+      "parentIncidentId": null,
+      "rulesVersion": 1,
+      "impactCount": 2,
+      "evidence": [],
+      "openedAt": 1724996085,
+      "lastSeenAt": 1724999940,
+      "ackedAt": null,
+      "snoozedUntil": null,
+      "resolvedAt": null,
+      "nextCheckAt": null,
+      "closure": null
+    }
+  ],
+  "due": {
+    "followups": [],
+    "checks": []
+  },
+  "worthwhile": {
+    "weekOf": "2026-09-07",
+    "computedAt": 1725000000,
+    "picks": [
+      {
+        "kind": "idle_node",
+        "subjectType": "node",
+        "subjectId": "Preview Seoul",
+        "subjectLabel": "Preview Seoul",
+        "metric": {
+          "kind": "cnyMinor",
+          "value": 500
+        },
+        "payoff": {
+          "kind": "cny",
+          "value": 500,
+          "isEstimate": true
+        },
+        "confidence": "low",
+        "deadlineSec": 1725172800,
+        "evidenceAsOfSec": 1724999970,
+        "action": {
+          "page": "nodes",
+          "section": null,
+          "subjectId": "Preview Seoul"
+        },
+        "id": "id_566cead89d6be555"
+      },
+      {
+        "kind": "month_unclosed",
+        "subjectType": "month",
+        "subjectId": "2026-08",
+        "subjectLabel": "2026-08",
+        "metric": {
+          "kind": "days",
+          "value": 9
+        },
+        "payoff": {
+          "kind": "hours",
+          "value": 0,
+          "isEstimate": false
+        },
+        "confidence": "high",
+        "deadlineSec": null,
+        "evidenceAsOfSec": null,
+        "action": {
+          "page": "settings",
+          "section": "ledger",
+          "subjectId": "2026-08"
+        },
+        "id": "id_8145ab4a0922c0f5"
+      },
+      {
+        "kind": "route_direct",
+        "subjectType": "etld1",
+        "subjectId": "bilibili.com",
+        "subjectLabel": "bilibili.com",
+        "metric": {
+          "kind": "bytes",
+          "value": 4096
+        },
+        "payoff": {
+          "kind": "cny",
+          "value": 0,
+          "isEstimate": true
+        },
+        "confidence": "low",
+        "deadlineSec": null,
+        "evidenceAsOfSec": 1724999940,
+        "action": {
+          "page": "settings",
+          "section": "candidates",
+          "subjectId": "bilibili.com"
+        },
+        "id": "id_8a6f1ff7cdd9051c"
+      }
+    ],
+    "considered": 4
+  },
+  "updatedAt": 1725000000
+}

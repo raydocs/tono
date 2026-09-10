@@ -54,6 +54,7 @@ type Seed = {
 type Store = {
   entries: LedgerEntryDto[];
   closed: Map<string, { closedAt: number; closedBy: string }>;
+  seeded: boolean;
 };
 
 type Request = {
@@ -167,7 +168,7 @@ export function createLedgerFixtures(rootDir: string) {
     const key = `${session}/${empty ? 'empty' : 'normal'}`;
     const found = stores.get(key);
     if (found) return found;
-    const made: Store = { entries: empty ? [] : seedEntries(), closed: new Map() };
+    const made: Store = { entries: empty ? [] : seedEntries(), closed: new Map(), seeded: !empty };
     stores.set(key, made);
     return made;
   }
@@ -257,6 +258,18 @@ export function createLedgerFixtures(rootDir: string) {
     }).filter((row) => row.costCnyMinor !== 0 || row.pending);
 
     const shut = store.closed.get(month) ?? null;
+    const billsWithoutLedger = store.seeded && month === monthOf(nowSec()) ? [{
+      subjectType: 'node' as const,
+      subjectId: 'Osaka · Kita',
+      label: 'Osaka · Kita',
+      category: 'server' as const,
+      ownerUserId: null,
+      expectedMinor: 8_000,
+      expectedCurrency: 'USD',
+      ledgerCnyMinor: null,
+      entryIds: [] as string[],
+      reason: 'no_ledger' as const,
+    }] : [];
     return {
       month,
       closedAt: shut?.closedAt ?? null,
@@ -269,8 +282,8 @@ export function createLedgerFixtures(rootDir: string) {
       nodes,
       unreconciled: customers.filter((row) => row.pending).length
         + nodes.filter((row) => row.pending).length,
-      reconciliation: { billsWithoutLedger: [], ledgerWithoutBill: [], asOfSec: nowSec() },
-      unreconciledBills: 0,
+      reconciliation: { billsWithoutLedger, ledgerWithoutBill: [], asOfSec: nowSec() },
+      unreconciledBills: billsWithoutLedger.length,
       updatedAt: rows.reduce((newest, row) => Math.max(newest, row.createdAt), nowSec()),
     };
   }
@@ -346,19 +359,30 @@ export function createLedgerFixtures(rootDir: string) {
     sendJson(res, row, 201);
   }
 
-  /** The reversal lands in the month it is made in, never in the month it undoes. */
+  /**
+   * The reversal lands in the month it is made in, never in the month it undoes
+   * — so the month that can refuse it is the current one.
+   *
+   * Only the yuan figure flips sign. The original amount stays what was paid:
+   * the operator reconciles that column against an invoice, and an invoice for
+   * minus two hundred yuan does not exist.
+   */
   function reverse(store: Store, row: LedgerEntryDto, res: ServerResponse): void {
     if (row.reversedBy !== null) {
       sendRefusal(res, 409, 'ALREADY_REVERSED', '这一笔已经冲正过了');
       return;
     }
     const at = nowSec();
+    const month = monthOf(at);
+    if (store.closed.has(month)) {
+      sendRefusal(res, 409, 'MONTH_CLOSED', '这个月已经锁了');
+      return;
+    }
     const mirror: LedgerEntryDto = {
       ...row,
-      id: newId(),
-      amountMinor: -row.amountMinor,
+      id: `reverse:${row.id}`,
       cnyMinor: -row.cnyMinor,
-      month: monthOf(at),
+      month,
       paidAt: at,
       reverses: row.id,
       reversedBy: null,

@@ -16,6 +16,7 @@ import {
   type NodeVerdictInput,
   type VerdictInput,
 } from '../src/ops/verdict';
+import { replayHistoryRow } from '../src/ops/replay';
 
 const NOW = 1_800_000_000;
 
@@ -627,5 +628,28 @@ describe('maintenance and fleet collector', () => {
       severity: 'notice',
       impactCount: want,
     });
+  });
+});
+
+describe('replay', () => {
+  it('replays LIKELY_BLOCKED + ok + 5 handshake users as blocked / node-blocked', () => {
+    const row = replayHistoryRow({
+      at: NOW,
+      node: 'Tokyo · Test',
+      toVerdict: 'blocked',
+      evidenceJson: JSON.stringify({
+        ok: true,
+        blockStatus: 'LIKELY_BLOCKED',
+        fails30m: {
+          attempts: 10,
+          failures: 5,
+          distinctUsers: 5,
+          handshakeDistinctUsers: 5,
+        },
+      }),
+    });
+    expect(row).not.toBeNull();
+    expect(row!.nowVerdict).toBe('blocked');
+    expect(row!.wouldOpenKind).toBe('node-blocked');
   });
 });

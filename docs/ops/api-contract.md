@@ -55,7 +55,7 @@
 | `GET followups?due=today\|overdue\|open` | `ListDto<FollowupDto>`，所有主体，到期最早在前，最多 200；缺省 `due=open` |
 | `GET digest?day=YYYY-MM-DD` | `DigestDto`。缺省今天，按 Asia/Shanghai 日界。`overnight.resolved` 不含 `false_positive`。`worthwhile`：本周（周一起，Asia/Shanghai）最值得做的 ≤3 件事，每件带 `payoff`（`isEstimate` 标估算）与 `confidence` |
 | `GET jobs?status&executor`、`POST jobs/{id}/cancel` | `ListDto<JobDto>` / `JobDto` |
-| `GET releases?platform&channel`、`POST releases`、`PATCH releases/{id}` | `ListDto<ReleaseDto>` / `ReleaseDto`。行上带 `sizeBytes`／`verifiedAt`／`signed`／`downloadUrl`（有 `r2Key` 时为 `https://releases.afk.ccwu.cc/download/<r2Key>`，否则 null）／`minOsVersion`；后四项在 D3 落地前恒为 null／false。即将：`POST releases` 与 `PATCH releases/{id}` 会要求 `r2Key`／`sha256`／`sizeBytes`／签名齐全，并以此为 `publish` 的闸门 |
+| `GET releases?platform&channel`、`POST releases`、`PATCH releases/{id}` | `ListDto<ReleaseDto>` / `ReleaseDto`。行上带 `sizeBytes`／`verifiedAt`／`signed`／`downloadUrl`（有 `r2Key` 时为 `https://releases.afk.ccwu.cc/download/<r2Key>`，否则 null）／`minOsVersion`。`POST releases` body 加可选 `r2Key`、`sha256`、`sizeBytes`、`signature`、`minOsVersion`；`PATCH releases/{id}` 加 `publish: true` 时校验：`r2Key` 存在、R2 对象存在、`sizeBytes` 相等、sha256 相等，未接更新器的平台 409 `RELEASE_CHANNEL_UNWIRED`，未校验或不匹配则 409 `RELEASE_UNVERIFIED`（body `{ reason: 'missing_object' | 'size_mismatch' | 'sha256_mismatch' | 'no_r2_key' }`）；通过则写 `verified_at` 与 `objectEtag`。`withdraw` 不受此限 |
 | `GET releases/adoption?range` | `AdoptionMatrixDto`。采用率 = 区间内每设备最后版本，按客户去重；一个客户的设备落在不同档时每档都计入 |
 | `GET direct-candidates?status` | `ListDto<DirectCandidateDto>`。`users` / `bytes30d` 为滚动 30 天（含今天，UTC 日），按 用户×域名×日 聚合后再汇总；日志段按 segment id 幂等，重复上传不计数 |
 | `POST direct-candidates/{etld1}/accept\|reject` | `DirectCandidateDto` |
@@ -71,9 +71,9 @@
 | `POST ledger` | 201 `LedgerEntryDto`。body `{ kind, category, subjectType, subjectId?, amountMinor, currency?, month, paidAt?, note?, fxDate? }`。`currency` 可省略：`revenue`/`refund`/`credit` 缺省 `CNY`，`cost` 缺省 `USD`。收款三类必须是 `CNY`，否则 400 `VALIDATION_ERROR`「收款只收人民币」。`amountMinor` ≤ 1e12；`month` 须在 `[2024-01, 当前月+24]`。`cnyMinor` 按 `fxDate`（缺省当天）已存汇率换算；非 CNY 且无汇率时 409 `FX_RATE_MISSING`。目标月已锁定则 409 `MONTH_CLOSED` |
 | `PATCH ledger/{id}` | `LedgerEntryDto`。只接受 `{ note?, paidAt?, subjectType?, subjectId? }`，不能改 `currency`；月已锁定 409 `MONTH_CLOSED` |
 | `POST ledger/{id}/reverse` | 201 `LedgerEntryDto`。在当前月写入一笔相反效果（`cnyMinor` 取反），id 为 `reverse:<原 id>`，`reverses` / 原行 `reversedBy` 互指。当前月已锁定 409 `MONTH_CLOSED`；已冲正 409 `ALREADY_REVERSED` |
-| `GET months/{month}` | `MonthSummaryDto`。收入 = Σ(revenue+credit)−Σ(refund)；成本 = Σ cost；客户成本 = 名下 Claude/ChatGPT 账号成本 + 该月该节点/线路字节占比摊到的 server/home_line 成本。用量缺测或有字节无成本时 `pending: true` 且客户 `marginCnyMinor` 为 null。已关账时 `frozen: true`、`frozenAt` 为关账时刻，`revenueCnyMinor`/`costCnyMinor`/`marginCnyMinor`/`unreconciled` 取 `ops_month_close` 冻结值；客户与节点行仍按现算。未关账 `frozen: false`、`frozenAt: null`。`billsWithoutLedger` = 本月应有账单（有价格的在役节点 / 月付家宽 / 在用 Claude·ChatGPT 账号）但没有 `cost` 台账；`ledgerWithoutBill` = 有 `cost` 台账但对象不存在 / 已退役 / 没登记价格；按 `(subjectType, subjectId)` 配对，冲正对冲后计；`fleet` 类目不进对账。`unreconciledBills` 是两边行数之和，与按用量算的 `unreconciled` 不是一个数 |
-| `POST months/{month}/close` | `MonthSummaryDto`。body `{ notes? }`。已锁定 409 `MONTH_CLOSED`，写入当时的汇总数字 |
-| `GET months/{month}/export.csv` | `text/csv; charset=utf-8`，UTF-8 BOM，一行一笔 + 合计行。合计 CNY 为收入+贷记−退款−成本；多币种时金额列留空。以 `= + - @`、tab、CR 开头的单元格前加 `'` 并加引号。不是 JSON，不进 GET 检查器表 |
+| `GET months/{month}` | `MonthSummaryDto`。收入 = Σ(revenue+credit)−Σ(refund)；成本 = Σ cost；客户成本 = 名下 Claude/ChatGPT 账号成本 + 该月该节点/线路字节占比摊到的 server/home_line 成本。用量缺测或有字节无成本时 `pending: true` 且客户 `marginCnyMinor` 为 null。已关账时 `frozen: true`、`frozenAt` 为关账时刻，`revenueCnyMinor`/`costCnyMinor`/`marginCnyMinor`/`unreconciled` 取 `ops_month_close` 冻结值；`customers[]`/`nodes[]` 取关账时写入的 `summary_json`，不再现算。快照缺失（关账早于该列）或超 65536 字节只存了 `{ customers: [], nodes: [], partial: true }` 时现算这两列并带 `frozenPartial: true`。未关账 `frozen: false`、`frozenAt: null`。`billsWithoutLedger` = 本月应有账单（有价格的在役节点 / 月付家宽 / 在用 Claude·ChatGPT 账号）但没有 `cost` 台账；`ledgerWithoutBill` = 有 `cost` 台账但对象不存在 / 已退役 / 没登记价格；按 `(subjectType, subjectId)` 配对，冲正对冲后计；`fleet` 类目不进对账。`unreconciledBills` 是两边行数之和，与按用量算的 `unreconciled` 不是一个数 |
+| `POST months/{month}/close` | `MonthSummaryDto`。body `{ notes? }`。已锁定 409 `MONTH_CLOSED`，写入当时的四个总数，并把 `customers[]`/`nodes[]` 写入 `summary_json`（超 65536 字节则存 `{ customers: [], nodes: [], partial: true }`） |
+| `GET months/{month}/export.csv` | `text/csv; charset=utf-8`，UTF-8 BOM，一行一笔 + 合计行。合计 CNY 与同币种原币合计均为收入+贷记−退款−成本；多币种时金额列留空。以 `= + @`、tab、CR 开头，或 `-` 后跟非数字的单元格前加 `'` 并加引号；负数金额不加前缀。不是 JSON，不进 GET 检查器表 |
 | `GET fx?day=&base=` | `FxRateDto`。返回该日或更早最近一条（自带 `day`）。`base=CNY` 时汇率 1、不查表。没有更早记录 409 `FX_RATE_MISSING` |
 
 `PATCH nodes/{name}/profile` 字段全可选（未知键 400）：`provider` ≤80、`providerAccountId`（须存在于 `provider_accounts` 或 null）、`region` ≤80、`lineTags` 最多 8×32、`port` 1..65535、`price` ≥0、`currency` 三字母、`billingCycle` 1..3660 天、`renewsAt`/`expiresAt` unix 秒、`notes` ≤2000、`quota` 为 `{ quotaBytes, cycleKind, cycleAnchorDay, counts }` 或 `null`（null 清周期）。无 profile 行时，节点只要在 catalog/status 里就会补一行。写 `ops_audit` `node.profile.update`。
@@ -100,6 +100,7 @@
 | 路由 | 返回 |
 |---|---|
 | `GET system/health` | 可选 `coverage`：`CoverageDto`（`nodesListed`；`nodesSweptFresh` = 目录节点大陆扫描行 ≤26h；`nodesWithAgent` = 目录节点 agent 样本 ≤15min；`customersActive`；`customersReportedFresh` = `ops_customer_status.last_seen_at` ≤40min；`asOfSec`）。不改变 `ok` |
+| `POST replay` | `ReplayDto { rulesVersion, items: ReplayRowDto[], skipped, updatedAt }`。Body `{ since, until?, node? }`（unix 秒）。只读：用当前 `VERDICT_RULES_VERSION` 重判 `ops_node_status_history.evidence_json`，不走迟滞。上限 2000 行；缺证据 / 截断计入 `skipped`。`ReplayRowDto { at, node, wasVerdict, nowVerdict, wouldOpenKind, wouldOpenSeverity, differs }` |
 
 ### 部门 B
 
@@ -109,7 +110,7 @@
 
 | 路由 | 返回 |
 |---|---|
-| `GET releases/channels` | `ListDto<UpdateChannelDto>`。每个平台一行，按 `PLATFORMS` 顺序；`wired` 只有 macos（Sparkle `/appcast.xml`）与 windows（Tauri `/windows/latest.json`）为 true，其余没有更新器（`kind`／`feedPath` 为 null）。`current` 是该平台最新一条已发布未撤回的 stable |
+| `GET releases/channels` | `ListDto<UpdateChannelDto>`。每个平台一行，按 `PLATFORMS` 顺序；`wired` 只有 macos（Sparkle `/appcast.xml`）与 windows（Tauri `/windows/latest.json`）为 true，其余没有更新器（`kind`／`feedPath` 为 null）。`current` 是该平台最新一条已发布、已校验、未撤回的 stable |
 
 ### 部门 E
 

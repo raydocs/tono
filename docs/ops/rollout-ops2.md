@@ -33,6 +33,8 @@
 
 第十二次 `89d01d75`（PR #135，迁移 0067 三张新表）：采用率 / 直连候选 / 日志段的计数语义（部门 D）、`system/health.coverage`（部门 A）、手机版今天页（部门 A）、D 与 E 的合同（发布更新源、月结对账、每周三件事、角色、遥测关闭字节）。部署前备份 `2026-09-10T10:59:08Z.sql.gz`。preview 库已演练到 0071（含 0070 删四张孤儿表），部门 E 的 PR #136 合入 `ops/platform` 后下一次集成部署。
 
+第十三次 `1ea1286d`（PR #139；迁移 0070 删四张孤儿表、0071 `ops_exit_asns`，均先在 preview 演练）：角色门（`OPS_ROLES` 未设时一律 owner）、入口预算、CI 分片、按依赖序清库脚本 `tooling/scripts/wipe-d1-in-order.mjs`、生产恢复文档、24 小时滚动采用率。部署前备份 `2026-09-10T12:42:24Z.sql.gz`（带 `.sha256`）。部署后 `sqlite_master` 无孤儿表。
+
 ## 0.2 恢复演练结论（2026-09-10，详见 `docs/ops/restore-drill-2026-09-10.md`）
 
 今天的备份 `backups/control-plane-d1/20260910T085207Z.sql.gz` 能恢复、恢复后能当数据用（20 用户 / 27 设备 / 7533 遥测窗口，`quick_check` ok，外键零违例），导入 28 秒，全流程 wrangler 时间约 1.5 分钟。五条要记住的：

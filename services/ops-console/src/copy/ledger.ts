@@ -34,6 +34,20 @@ export const ledgerCopy = {
     pendingCustomers: '客户',
     pendingNodes: '机器',
     byCategory: '按类目',
+
+    /* ------------------------------------------------------------- 月结对账 */
+
+    recon: '没对上的',
+    reconNone: '这个月账单和台账都对上了',
+    reconLead: '一边是这个月该有的账单，一边是已经记上的支出。对上的不列。',
+    billsWithoutLedger: (n: number) => `账单有台账没有 ${n} 项`,
+    ledgerWithoutBill: (n: number) => `台账有账单没有 ${n} 项`,
+    reconReason: {
+      no_ledger: '没记支出',
+      unknown_subject: '对象不存在',
+      retired_subject: '已经退役',
+      no_price: '没登记价格',
+    } as const,
     categoryColumn: '类目',
     amountColumn: '金额',
     noCategories: '这个月还没记过账',

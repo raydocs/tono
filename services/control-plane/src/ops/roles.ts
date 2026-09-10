@@ -27,6 +27,7 @@ const ROUTE_ACTIONS: Record<OpsV1Route, OpsAction> = {
   'POST /api/v1/ops/customers/{id}/followups': 'incidents.handle',
   'GET /api/v1/ops/incidents': 'incidents.read',
   'GET /api/v1/ops/incidents/{id}': 'incidents.read',
+  'POST /api/v1/ops/replay': 'incidents.read',
   'POST /api/v1/ops/incidents/{id}/ack': 'incidents.handle',
   'POST /api/v1/ops/incidents/{id}/snooze': 'incidents.handle',
   'POST /api/v1/ops/incidents/{id}/resolve': 'incidents.handle',

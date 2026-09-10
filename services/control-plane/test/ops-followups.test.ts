@@ -259,4 +259,23 @@ describe('ops followups, incident closure, digest', () => {
     ).all<{ id: string }>();
     expect((left.results ?? []).map((row) => row.id)).toEqual(['fu-keep']);
   });
+
+  it('reports idle node in weekly worthwhile digest', async () => {
+    const t = tnow();
+    await db().prepare(
+      `INSERT INTO ops_node_profiles(
+         id, catalog_name, status, price, currency, created_at, updated_at
+       ) VALUES('np-idle', 'idle-node-1', 'active', 100, 'CNY', ?, ?)`,
+    ).bind(t, t).run();
+
+    const response = await ops('digest');
+    expect(response.status).toBe(200);
+    const digest = assertDigest(await response.json());
+    expect(digest.worthwhile).toBeDefined();
+    const picks = digest.worthwhile!.picks;
+    expect(picks.length).toBeGreaterThanOrEqual(1);
+    expect(picks[0].kind).toBe('idle_node');
+    expect(picks[0].payoff?.kind).toBe('cny');
+  });
 });
+

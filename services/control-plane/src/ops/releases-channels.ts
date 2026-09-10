@@ -10,22 +10,11 @@
 // all, and the console must say 未接 rather than showing a path that answers
 // nothing.
 
-import { PLATFORMS, type Platform, type UpdateChannelDto, type UpdateChannelKind } from './contract';
+import { PLATFORMS, type UpdateChannelDto } from './contract';
 import { currentRelease } from './releases';
+import { UPDATE_CHANNELS } from './releases-verify';
 
-type ChannelShape = {
-  kind: UpdateChannelKind | null;
-  feedPath: string | null;
-  wired: boolean;
-};
-
-export const UPDATE_CHANNELS: Record<Platform, ChannelShape> = {
-  macos: { kind: 'sparkle', feedPath: '/appcast.xml', wired: true },
-  windows: { kind: 'tauri', feedPath: '/windows/latest.json', wired: true },
-  linux: { kind: null, feedPath: null, wired: false },
-  android: { kind: null, feedPath: null, wired: false },
-  ios: { kind: null, feedPath: null, wired: false },
-};
+export { UPDATE_CHANNELS };
 
 function missingTable(error: unknown): boolean {
   return String(error).includes('no such table');

@@ -321,8 +321,11 @@ describe('ops ledger, month close, live FX', () => {
     const text = new TextDecoder().decode(bytes.subarray(3));
     const lines = text.trim().split(/\r\n/);
     expect(lines[0]).toContain('amountMinor');
-    expect(lines[lines.length - 1]).toContain('total');
-    expect(lines[lines.length - 1]).toContain(',140,');
+    const total = lines[lines.length - 1].split(',');
+    expect(total[1]).toBe('total');
+    // 100 in, 40 out: 60, in yuan and in the original currency alike.
+    expect(Number(total[5])).toBe(60);
+    expect(Number(total[9])).toBe(60);
     expect(lines.length).toBe(4);
   });
 
@@ -429,29 +432,24 @@ describe('ops ledger, month close, live FX', () => {
     }))).status).toBe(201);
     const closed = await ops(`months/${month}/close`, json({ notes: 'lock' }));
     expect(closed.status).toBe(200);
-    const before = await closed.json() as {
-      frozen?: boolean; frozenAt?: number | null; unreconciled: number;
-      revenueCnyMinor: number; costCnyMinor: number; marginCnyMinor: number;
-      customers: { userId: string; marginCnyMinor: number | null }[];
-    };
+    const before = assertMonthSummary(await closed.json());
     expect(before.unreconciled).toBe(0);
+    expect(before.customers[0].marginCnyMinor).toBe(16000);
     await db().prepare(
       `INSERT INTO customer_activity_hours(
          user_id, device_id, hour_at, online_minutes, connected_minutes, bytes_up, bytes_down, node
        ) VALUES('u-a', 'd-2', ?, 60, 60, ?, 0, 'un-costed-node')`,
     ).bind(monthStart(month) + 7200, 2_000_000_000).run();
-    const after = await (await ops(`months/${month}`)).json() as {
-      frozen?: boolean; frozenAt?: number | null; unreconciled: number;
-      revenueCnyMinor: number; costCnyMinor: number; marginCnyMinor: number;
-      customers: { userId: string; marginCnyMinor: number | null; pending: boolean }[];
-    };
+    const after = assertMonthSummary(await (await ops(`months/${month}`)).json());
     expect(after.frozen).toBe(true);
     expect(typeof after.frozenAt).toBe('number');
     expect(after.unreconciled).toBe(before.unreconciled);
     expect(after.revenueCnyMinor).toBe(before.revenueCnyMinor);
     expect(after.costCnyMinor).toBe(before.costCnyMinor);
     expect(after.marginCnyMinor).toBe(before.marginCnyMinor);
-    expect(after.customers.find((row) => row.userId === 'u-a')?.pending).toBe(true);
+    expect(after.customers[0].marginCnyMinor).toBe(before.customers[0].marginCnyMinor);
+    expect(after.customers[0].marginCnyMinor).toBe(16000);
+    expect(after.frozenPartial).toBeUndefined();
   });
 
   it('paginates GET ledger in SQL and reports COUNT(*) as total', async () => {
@@ -507,6 +505,24 @@ describe('ops ledger, month close, live FX', () => {
       amountMinor: 100, currency: 'CNY', month: '2023-12',
     }));
     expect(tooEarly.status).toBe(400);
+  });
+
+  it('lists a priced in-service node without a cost entry as a bill without ledger', async () => {
+    const month = MONTH();
+    const t = tnow();
+    await db().prepare(
+      `INSERT INTO ops_node_profiles(id, catalog_name, status, price, currency, created_at, updated_at)
+       VALUES('p-recon-1', 'Osaka · Recon', 'active', 80, 'USD', ?, ?)`,
+    ).bind(t, t).run();
+    const summary = assertMonthSummary(await (await ops(`months/${month}`)).json());
+    expect(summary.unreconciledBills).toBe(1);
+    expect(summary.reconciliation?.billsWithoutLedger).toEqual([
+      expect.objectContaining({
+        subjectType: 'node',
+        subjectId: 'Osaka · Recon',
+        reason: 'no_ledger',
+      }),
+    ]);
   });
 });
 

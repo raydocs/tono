@@ -105,6 +105,14 @@
       }
     },
     "backfill": null,
+    "coverage": {
+      "nodesListed": 38,
+      "nodesSweptFresh": 10,
+      "nodesWithAgent": 35,
+      "customersActive": 60,
+      "customersReportedFresh": 42,
+      "asOfSec": 1724999970
+    },
     "updatedAt": 1724999970
   }
 }

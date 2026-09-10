@@ -17,6 +17,7 @@ import {
 } from '../src/ops/releases';
 
 const db = () => (env as unknown as { DB: D1Database }).DB;
+const bucket = () => (env as unknown as { RELEASES: R2Bucket }).RELEASES;
 const DAY = 86400;
 const NOW = 1_800_000_000;
 const DAY_AT = utcDay(NOW);
@@ -142,13 +143,21 @@ describe('versionBucket', () => {
 
 describe('client release CRUD', () => {
   it('creates, lists, publishes, yanks and enforces the unique key', async () => {
+    const key = 'clients/windows/0.0.34.zip';
+    const body = new TextEncoder().encode('windows 0.0.34');
+    await bucket().put(key, body);
+    const sha256 = [...new Uint8Array(await crypto.subtle.digest('SHA-256', body))]
+      .map((b) => b.toString(16).padStart(2, '0')).join('');
     const windows = await createRelease(db(), {
       platform: 'windows',
       channel: 'stable',
       version: '0.0.34',
       build: '34',
       notes: 'polish',
-    }, NOW);
+      r2Key: key,
+      sizeBytes: body.byteLength,
+      sha256,
+    }, NOW, bucket());
     expect(windows).toMatchObject({
       platform: 'windows', channel: 'stable', version: '0.0.34',
       build: '34', notes: 'polish', publishedAt: null, yankedAt: null,
@@ -175,7 +184,7 @@ describe('client release CRUD', () => {
     ]);
     expect(await currentRelease(db(), 'windows', 'stable')).toBeNull();
 
-    const published = await updateRelease(db(), windows.id, { publish: true }, NOW + 10);
+    const published = await updateRelease(db(), windows.id, { publish: true }, NOW + 10, bucket());
     expect(published.publishedAt).toBe(NOW + 10);
     expect(await currentRelease(db(), 'windows', 'stable')).toMatchObject({
       id: windows.id, version: '0.0.34',
@@ -499,5 +508,27 @@ describe('client version daily retention', () => {
       'SELECT device_id FROM ops_client_version_device_daily',
     ).all<{ device_id: string }>();
     expect(left.results.map((row) => row.device_id)).toEqual(['d-new']);
+  });
+});
+
+describe('release verification on publish', () => {
+  it('rejects publishing when sha256 does not match', async () => {
+    const key = 'clients/macos/1.0.0.zip';
+    const bodyBytes = new TextEncoder().encode('twelve bytes');
+    await bucket().put(key, bodyBytes);
+    const release = await createRelease(db(), {
+      platform: 'macos',
+      channel: 'stable',
+      version: '1.0.0',
+      r2Key: key,
+      sizeBytes: bodyBytes.byteLength,
+      sha256: 'a'.repeat(64),
+    }, NOW);
+    await expect(updateRelease(db(), release.id, { publish: true }, NOW, bucket()))
+      .rejects.toMatchObject({
+        status: 409,
+        code: 'RELEASE_UNVERIFIED',
+        reason: 'sha256_mismatch',
+      });
   });
 });
