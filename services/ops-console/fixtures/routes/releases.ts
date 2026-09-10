@@ -24,7 +24,7 @@ const UPDATE_CHANNELS = [
   { platform: 'ios', kind: null, feedPath: null, wired: false },
 ] as const;
 
-/** Newest published, non-withdrawn stable row per platform in the loaded set. */
+/** Newest published, verified, non-withdrawn stable row per platform in the loaded set. */
 export function updateChannels(file: ReleasesFixtureFile): unknown {
   const rows = UPDATE_CHANNELS.map((channel) => {
     const newest = file.list.items
@@ -32,6 +32,7 @@ export function updateChannels(file: ReleasesFixtureFile): unknown {
         row.platform === channel.platform
         && row.channel === 'stable'
         && typeof row.publishedAt === 'number'
+        && typeof row.verifiedAt === 'number'
         && row.withdrawnAt === null
       ))
       .sort((a, b) => Number(b.publishedAt) - Number(a.publishedAt))[0];

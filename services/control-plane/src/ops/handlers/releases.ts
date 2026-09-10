@@ -47,10 +47,10 @@ function releaseDto(row: ClientRelease): ReleaseDto {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     sizeBytes: row.sizeBytes ?? null,
-    verifiedAt: null,
-    signed: false,
+    verifiedAt: row.verifiedAt,
+    signed: row.signature !== null,
     downloadUrl: row.r2Key ? `${DOWNLOAD_BASE}${row.r2Key}` : null,
-    minOsVersion: null,
+    minOsVersion: row.minOsVersion,
   };
 }
 
@@ -72,7 +72,7 @@ export async function postRelease(req: Request, e: Env, actor: Actor): Promise<R
   const b = await body(req, 16 * 1024);
   rejectUnexpectedKeys(b, [
     'platform', 'channel', 'version', 'build', 'r2Key', 'sizeBytes', 'sha256',
-    'notes', 'minSupportedVersion', 'publishedAt',
+    'signature', 'minOsVersion', 'notes', 'minSupportedVersion', 'publishedAt',
   ]);
   const created = await createRelease(e.DB, {
     platform: String(b.platform),
@@ -82,10 +82,12 @@ export async function postRelease(req: Request, e: Env, actor: Actor): Promise<R
     r2Key: b.r2Key as string | null | undefined,
     sizeBytes: b.sizeBytes as number | null | undefined,
     sha256: b.sha256 as string | null | undefined,
+    signature: b.signature as string | null | undefined,
+    minOsVersion: b.minOsVersion as string | null | undefined,
     notes: b.notes as string | null | undefined,
     minSupportedVersion: b.minSupportedVersion as string | null | undefined,
     publishedAt: b.publishedAt as number | null | undefined,
-  }, now());
+  }, now(), e.RELEASES);
   await auditWrite(e, actor.email, 'release.create', 'release', created.id, `${created.platform} ${created.version}`);
   const dto = releaseDto(created);
   check(e, () => { assertRelease(dto); });
@@ -102,7 +104,7 @@ export async function patchRelease(req: Request, e: Env, rawId: string, actor: A
     publish: b.publish === true,
     yank: b.yank === true || b.withdraw === true,
     yankReason: (b.yankReason as string | null | undefined),
-  }, now());
+  }, now(), e.RELEASES);
   await auditWrite(e, actor.email, 'release.update', 'release', idValue, `updated ${updated.version}`);
   const dto = releaseDto(updated);
   check(e, () => { assertRelease(dto); });

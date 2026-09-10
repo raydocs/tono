@@ -55,7 +55,7 @@
 | `GET followups?due=today\|overdue\|open` | `ListDto<FollowupDto>`，所有主体，到期最早在前，最多 200；缺省 `due=open` |
 | `GET digest?day=YYYY-MM-DD` | `DigestDto`。缺省今天，按 Asia/Shanghai 日界。`overnight.resolved` 不含 `false_positive`。`worthwhile`：本周（周一起，Asia/Shanghai）最值得做的 ≤3 件事，每件带 `payoff`（`isEstimate` 标估算）与 `confidence` |
 | `GET jobs?status&executor`、`POST jobs/{id}/cancel` | `ListDto<JobDto>` / `JobDto` |
-| `GET releases?platform&channel`、`POST releases`、`PATCH releases/{id}` | `ListDto<ReleaseDto>` / `ReleaseDto`。行上带 `sizeBytes`／`verifiedAt`／`signed`／`downloadUrl`（有 `r2Key` 时为 `https://releases.afk.ccwu.cc/download/<r2Key>`，否则 null）／`minOsVersion`；后四项在 D3 落地前恒为 null／false。即将：`POST releases` 与 `PATCH releases/{id}` 会要求 `r2Key`／`sha256`／`sizeBytes`／签名齐全，并以此为 `publish` 的闸门 |
+| `GET releases?platform&channel`、`POST releases`、`PATCH releases/{id}` | `ListDto<ReleaseDto>` / `ReleaseDto`。行上带 `sizeBytes`／`verifiedAt`／`signed`／`downloadUrl`（有 `r2Key` 时为 `https://releases.afk.ccwu.cc/download/<r2Key>`，否则 null）／`minOsVersion`。`POST releases` body 加可选 `r2Key`、`sha256`、`sizeBytes`、`signature`、`minOsVersion`；`PATCH releases/{id}` 加 `publish: true` 时校验：`r2Key` 存在、R2 对象存在、`sizeBytes` 相等、sha256 相等，未接更新器的平台 409 `RELEASE_CHANNEL_UNWIRED`，未校验或不匹配则 409 `RELEASE_UNVERIFIED`（body `{ reason: 'missing_object' | 'size_mismatch' | 'sha256_mismatch' | 'no_r2_key' }`）；通过则写 `verified_at` 与 `objectEtag`。`withdraw` 不受此限 |
 | `GET releases/adoption?range` | `AdoptionMatrixDto`。采用率 = 区间内每设备最后版本，按客户去重；一个客户的设备落在不同档时每档都计入 |
 | `GET direct-candidates?status` | `ListDto<DirectCandidateDto>`。`users` / `bytes30d` 为滚动 30 天（含今天，UTC 日），按 用户×域名×日 聚合后再汇总；日志段按 segment id 幂等，重复上传不计数 |
 | `POST direct-candidates/{etld1}/accept\|reject` | `DirectCandidateDto` |
@@ -109,7 +109,7 @@
 
 | 路由 | 返回 |
 |---|---|
-| `GET releases/channels` | `ListDto<UpdateChannelDto>`。每个平台一行，按 `PLATFORMS` 顺序；`wired` 只有 macos（Sparkle `/appcast.xml`）与 windows（Tauri `/windows/latest.json`）为 true，其余没有更新器（`kind`／`feedPath` 为 null）。`current` 是该平台最新一条已发布未撤回的 stable |
+| `GET releases/channels` | `ListDto<UpdateChannelDto>`。每个平台一行，按 `PLATFORMS` 顺序；`wired` 只有 macos（Sparkle `/appcast.xml`）与 windows（Tauri `/windows/latest.json`）为 true，其余没有更新器（`kind`／`feedPath` 为 null）。`current` 是该平台最新一条已发布、已校验、未撤回的 stable |
 
 ### 部门 E
 
