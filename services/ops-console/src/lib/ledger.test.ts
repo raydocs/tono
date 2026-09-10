@@ -155,6 +155,8 @@ const SUMMARY: MonthSummaryDto = {
     { name: 'Seoul · Han', costCnyMinor: 4_000, bytes: null, cnyPerGbMinor: null, pending: true },
   ],
   unreconciled: 2,
+  reconciliation: { billsWithoutLedger: [], ledgerWithoutBill: [], asOfSec: NOW },
+  unreconciledBills: 0,
   updatedAt: NOW,
 };
 

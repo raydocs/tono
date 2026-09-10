@@ -1,4 +1,4 @@
-import type { ListDto } from '@contract';
+import type { ListDto, MonthReconciliationDto } from '@contract';
 import { urlFor } from './api';
 import { send } from './api-customer-actions';
 import { readAccounts, type ProductAccount } from './customers-legacy';
@@ -86,6 +86,9 @@ export type MonthSummaryDto = {
   customers: MonthCustomerRow[];
   nodes: MonthNodeRow[];
   unreconciled: number;
+  /** 月结对账：账单有台账没有 / 台账有账单没有。D2 填内容；现在恒为空。 */
+  reconciliation?: MonthReconciliationDto;
+  unreconciledBills?: number;
   updatedAt: number;
 };
 

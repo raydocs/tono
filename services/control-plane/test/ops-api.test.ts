@@ -29,6 +29,8 @@ import {
   assertRelease,
   assertServiceUsage,
   assertSystemHealth,
+  assertUpdateChannel,
+  PLATFORMS,
 } from '../src/ops/contract';
 
 const ACCESS_TEAM_DOMAIN = 'test-team.cloudflareaccess.com';
@@ -485,6 +487,11 @@ describe('ops v1 api', () => {
     const patched = assertRelease(await (await ops(`releases/${release.id}`, json({ publish: true }, 'PATCH'))).json());
     expect(patched.publishedAt).not.toBeNull();
     assertAdoptionMatrix(await (await ops('releases/adoption?range=30d')).json());
+    const channels = assertList(await (await ops('releases/channels')).json(), assertUpdateChannel);
+    expect(channels.items.map((row) => row.platform)).toEqual([...PLATFORMS]);
+    expect(channels.items.filter((row) => row.wired).map((row) => row.platform)).toEqual(['macos', 'windows']);
+    expect(channels.items.find((row) => row.platform === 'macos')?.current?.version).toBe('0.0.72');
+    expect(channels.items.find((row) => row.platform === 'linux')?.kind).toBeNull();
   });
 
   it('direct-candidates accept/reject and traffic-policy draft', async () => {
@@ -836,6 +843,7 @@ describe('ops v1 api', () => {
       'POST /api/v1/ops/releases',
       'PATCH /api/v1/ops/releases/{id}',
       'GET /api/v1/ops/releases/adoption',
+      'GET /api/v1/ops/releases/channels',
       'GET /api/v1/ops/direct-candidates',
       'POST /api/v1/ops/direct-candidates/{etld1}/accept',
       'POST /api/v1/ops/direct-candidates/{etld1}/reject',

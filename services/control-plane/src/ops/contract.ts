@@ -54,6 +54,7 @@ export * from './contract/route-table';
 
 // dept:d
 // append your entries inside your block
+export * from './contract/worthwhile';
 
 // dept:e
 // append your entries inside your block

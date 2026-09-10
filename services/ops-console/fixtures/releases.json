@@ -15,7 +15,12 @@
         "publishedAt": 1724481600,
         "withdrawnAt": null,
         "createdAt": 1724395200,
-        "updatedAt": 1724481600
+        "updatedAt": 1724481600,
+        "sizeBytes": 48131464,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/macos/1.8.1.zip",
+        "minOsVersion": null
       },
       {
         "id": "rel-macos-180",
@@ -30,7 +35,12 @@
         "publishedAt": 1722667200,
         "withdrawnAt": null,
         "createdAt": 1722580800,
-        "updatedAt": 1722667200
+        "updatedAt": 1722667200,
+        "sizeBytes": 54363431,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/macos/1.8.0.zip",
+        "minOsVersion": null
       },
       {
         "id": "rel-macos-179",
@@ -45,7 +55,12 @@
         "publishedAt": 1720248000,
         "withdrawnAt": null,
         "createdAt": 1720161600,
-        "updatedAt": 1720248000
+        "updatedAt": 1720248000,
+        "sizeBytes": 53053247,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/macos/1.7.9.zip",
+        "minOsVersion": null
       },
       {
         "id": "rel-macos-190rc",
@@ -60,7 +75,12 @@
         "publishedAt": null,
         "withdrawnAt": null,
         "createdAt": 1724827200,
-        "updatedAt": 1725000000
+        "updatedAt": 1725000000,
+        "sizeBytes": null,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": null,
+        "minOsVersion": null
       },
       {
         "id": "rel-win-180",
@@ -75,7 +95,12 @@
         "publishedAt": 1723272000,
         "withdrawnAt": null,
         "createdAt": 1723185600,
-        "updatedAt": 1723272000
+        "updatedAt": 1723272000,
+        "sizeBytes": 71294004,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/windows/1.8.0.zip",
+        "minOsVersion": null
       },
       {
         "id": "rel-win-179",
@@ -90,7 +115,12 @@
         "publishedAt": 1720852800,
         "withdrawnAt": null,
         "createdAt": 1720766400,
-        "updatedAt": 1720852800
+        "updatedAt": 1720852800,
+        "sizeBytes": 73534820,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/windows/1.7.9.zip",
+        "minOsVersion": null
       },
       {
         "id": "rel-win-178",
@@ -105,7 +135,12 @@
         "publishedAt": 1718952000,
         "withdrawnAt": 1719297600,
         "createdAt": 1718865600,
-        "updatedAt": 1719297600
+        "updatedAt": 1719297600,
+        "sizeBytes": 68433107,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/windows/1.7.8.zip",
+        "minOsVersion": null
       }
     ],
     "nextCursor": null,
