@@ -257,6 +257,35 @@ describe('ops ingest hooks', () => {
     expect(status).toMatchObject({ last_fail_code: 'ETIMEDOUT', last_fail_node: 'Tokyo · Kite' });
   });
 
+  it('accepts attemptId on failures and window events without storing a new column', async () => {
+    const account = await seedAccount('attempt');
+    const fail = await api('telemetry/failures', json({
+      ts: Date.now(), stage: 'handshake', code: 'ETIMEDOUT', node: 'Tokyo · Kite',
+      appVersion: '0.0.72', osVersion: 'macOS 14.4', osArch: 'arm64',
+      attemptId: 'att-abc-001',
+    }, account.token));
+    expect(fail.status).toBe(202);
+    const tooLong = await api('telemetry/failures', json({
+      ts: Date.now(), stage: 'handshake', code: 'ETIMEDOUT', node: 'Tokyo · Kite',
+      appVersion: '0.0.72', osVersion: 'macOS 14.4', osArch: 'arm64',
+      attemptId: 'x'.repeat(65),
+    }, account.token));
+    expect(tooLong.status).toBe(400);
+
+    const body = telemetryWindow();
+    body.window.events = [
+      { ts: Date.now() - 30_000, kind: 'connectFail', node: 'Tokyo · Kite', stage: 'handshake', code: 'ETIMEDOUT', attemptId: 'att-win-1' },
+    ] as unknown as typeof body.window.events;
+    body.window.eventCount = 1;
+    const posted = await api('telemetry/windows', json(body, account.token));
+    expect(posted.status).toBe(201);
+    const stored = await db().prepare(
+      'SELECT payload_json FROM telemetry_windows WHERE user_id = ? ORDER BY received_at DESC LIMIT 1',
+    ).bind(account.userId).first<{ payload_json: string }>();
+    const payload = JSON.parse(stored?.payload_json ?? '{}') as { events: Array<{ attemptId?: string }> };
+    expect(payload.events[0]?.attemptId).toBe('att-win-1');
+  });
+
   it('POST diagnostics/logs parses a gzip fixture into traffic rows', async () => {
     const account = await seedAccount('logs');
     const t = Math.floor(Date.now() / 1000);

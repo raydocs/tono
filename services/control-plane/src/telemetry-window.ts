@@ -25,6 +25,7 @@ const BYTES_BY_ROUTE_MAX = 1_000_000_000_000_000;
 const telemetryEventStringKeys = [
   'kind', 'stage', 'error', 'node', 'action', 'reason', 'probe',
   'from', 'to', 'mode', 'reference', 'outcome', 'code',
+  'attemptId',
 ];
 const telemetryEventNumberKeys = [
   'ts', 'elapsedMs', 'delayMs', 'counter', 'restartCount', 'oldPid', 'newPid',
@@ -90,7 +91,7 @@ export function canonicalTelemetryWindow(value: unknown) {
     for (const key of telemetryEventStringKeys) {
       if (key === 'kind') continue;
       if (entry[key] === undefined || entry[key] === null) continue;
-      event[key] = str(entry[key], key, 0, 500);
+      event[key] = str(entry[key], key, 0, key === 'attemptId' ? 64 : 500);
     }
     for (const key of telemetryEventNumberKeys) {
       if (key === 'ts') continue;

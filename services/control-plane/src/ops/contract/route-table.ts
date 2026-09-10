@@ -40,6 +40,7 @@ import {
   assertJob,
   assertRelease,
 } from './operations';
+import { assertDigest, assertFollowupList } from './followups';
 import {
   assertAuditList,
   assertDirectCandidate,
@@ -97,6 +98,8 @@ export const NAMED_CHECKERS = {
   assertCustomerServicesList,
   assertIncidentList,
   assertIncidentDetail,
+  assertFollowupList,
+  assertDigest,
   assertJobList,
   assertReleaseList,
   assertAdoptionMatrix,
@@ -141,6 +144,7 @@ export const GET_ROUTE_TABLE: readonly GetRouteBinding[] = [
   { route: 'GET /api/v1/ops/customers/{id}/activity', checker: 'assertCustomerActivityList' },
   { route: 'GET /api/v1/ops/customers/{id}/destinations', checker: 'assertCustomerDestinationsList' },
   { route: 'GET /api/v1/ops/customers/{id}/services', checker: 'assertCustomerServicesList' },
+  { route: 'GET /api/v1/ops/customers/{id}/followups', checker: 'assertFollowupList' },
   { route: 'GET /api/v1/ops/incidents', checker: 'assertIncidentList' },
   { route: 'GET /api/v1/ops/incidents/{id}', checker: 'assertIncidentDetail' },
   { route: 'GET /api/v1/ops/jobs', checker: 'assertJobList' },
@@ -157,6 +161,8 @@ export const GET_ROUTE_TABLE: readonly GetRouteBinding[] = [
   { route: 'GET /api/v1/ops/alert-deliveries', checker: 'assertAlertDeliveryList' },
   { route: 'GET /api/v1/ops/audit', checker: 'assertAuditList' },
   { route: 'GET /api/v1/ops/system/health', checker: 'assertSystemHealth' },
+  { route: 'GET /api/v1/ops/followups', checker: 'assertFollowupList' },
+  { route: 'GET /api/v1/ops/digest', checker: 'assertDigest' },
 ];
 
 /** `<out>/<route-with-slashes-as-dashes>.json`, braces stripped so `{name}` is `name`. */

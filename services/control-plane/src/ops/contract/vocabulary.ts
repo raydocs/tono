@@ -88,6 +88,17 @@ export type Severity = (typeof SEVERITIES)[number];
 export const INCIDENT_STATUSES = ['open', 'acked', 'resolved'] as const;
 export type IncidentStatus = (typeof INCIDENT_STATUSES)[number];
 
+/** How an operator closed an incident. Not a recovery when `false_positive`. */
+export const INCIDENT_CLOSURES = ['verified', 'false_positive', 'manual'] as const;
+export type IncidentClosure = (typeof INCIDENT_CLOSURES)[number];
+
+/** Light service-record kinds: replied / waiting / callback / confirmed / note. */
+export const FOLLOWUP_KINDS = ['reply', 'await_customer', 'callback', 'verified', 'note'] as const;
+export type FollowupKind = (typeof FOLLOWUP_KINDS)[number];
+
+export const FOLLOWUP_SUBJECT_TYPES = ['user', 'incident', 'node'] as const;
+export type FollowupSubjectType = (typeof FOLLOWUP_SUBJECT_TYPES)[number];
+
 /** What an incident, chore or job is about. */
 export const SUBJECT_TYPES = ['node', 'user', 'home_exit', 'fleet'] as const;
 export type SubjectType = (typeof SUBJECT_TYPES)[number];
