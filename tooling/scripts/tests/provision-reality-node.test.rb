@@ -64,3 +64,29 @@ class MeasuredRealityFront < Minitest::Test
     refute_match(REFUSAL, stderr)
   end
 end
+
+class Hy2StaysOptIn < Minitest::Test
+  REALITY_REMOTE = File.expand_path("../remote/manage-tono-reality-node.sh", __dir__)
+  HY2_REMOTE = File.expand_path("../remote/manage-tono-hy2-node.sh", __dir__)
+
+  def test_dry_run_without_hy2_does_not_open_udp
+    source = File.read(SCRIPT)
+    remote = File.read(REALITY_REMOTE)
+    refute_match(/\bhysteria\b/i, remote)
+    refute_match(/ss -H -lun/, remote)
+    assert_match(/ss -H -ltn/, remote)
+    assert_match(/hy2: false,/, source)
+    assert_match(/UDP remains closed/, source)
+    refute_match(/manage-tono-hy2-node/, remote)
+  end
+
+  def test_hy2_remote_does_not_stop_or_rewrite_xray
+    hy2 = File.read(HY2_REMOTE)
+    refute_match(/systemctl (disable|stop) .*tono-xray/, hy2)
+    refute_match(%r{rm .*/opt/tono-xray}, hy2)
+    assert_match(/ss -H -lun/, hy2)
+    assert_match(/CERT_CN="www\.microsoft\.com"/, hy2)
+    assert_match(/subjectAltName=DNS:\$CERT_CN/, hy2)
+    assert_match(/This script must never stop, replace, or rewrite tono-xray/, hy2)
+  end
+end

@@ -24,6 +24,15 @@ XRAY_ASSETS = {
     sha256: "4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c",
   },
 }.freeze
+# Official hysteria app/v2.12.2. SHA-256 is the T0-verified linux-amd64 digest
+# from docs/ops/transport-hy2.md; aarch64 is not pinned here.
+HYSTERIA_VERSION = "v2.12.2"
+HYSTERIA_ASSETS = {
+  "x86_64" => {
+    name: "hysteria-linux-amd64",
+    sha256: "6493dfffd55b5883f64c76c63880ecc32988f0c568c9ca9014907877b4d55f94",
+  },
+}.freeze
 # The Reality front is measured, not picked. Every consumer of that measurement
 # reads the same file, so re-measuring cannot leave one of them behind.
 REALITY_FRONTS = JSON.parse(File.read(File.expand_path("reality-fronts.json", __dir__))).freeze
@@ -178,12 +187,30 @@ def verified_xray_binary(asset, temporary_directory)
   extracted
 end
 
-def upload_artifact(ssh_target, local_path, remote_path)
+def verified_hysteria_binary(asset, temporary_directory)
+  binary = File.join(temporary_directory, asset.fetch(:name))
+  url = "https://github.com/apernet/hysteria/releases/download/app/#{HYSTERIA_VERSION}/#{asset.fetch(:name)}"
+  downloaded = system(
+    "/usr/bin/curl",
+    "--fail", "--location", "--silent", "--show-error",
+    "--proto", "=https", "--tlsv1.2",
+    "--output", binary,
+    url,
+  )
+  fail!("Could not download the pinned official hysteria release.") unless downloaded
+  actual = Digest::SHA256.file(binary).hexdigest
+  fail!("The pinned hysteria binary failed SHA-256 verification.") unless actual == asset.fetch(:sha256)
+  fail!("The verified hysteria binary is empty.") unless File.size(binary).positive?
+  File.chmod(0o700, binary)
+  binary
+end
+
+def upload_artifact(ssh_target, local_path, remote_path, label: "Xray")
   success = system(
     "/usr/bin/scp", "-q", *SSH_OPTIONS,
     "--", local_path, "#{ssh_target}:#{remote_path}",
   )
-  fail!("Could not upload the verified Xray binary over SSH.") unless success
+  fail!("Could not upload the verified #{label} binary over SSH.") unless success
 end
 
 def remove_uploaded_artifact(ssh_target, remote_path)
@@ -213,6 +240,8 @@ end
 
 options = {
   port: 443,
+  hy2: false,
+  hy2_port: 443,
   target: DEFAULT_REALITY_TARGET,
   allow_unusable_servername: false,
   apply: false,
@@ -223,6 +252,8 @@ parser = OptionParser.new do |flags|
 
     Runs a read-only VPS preflight by default. --apply installs only after the
     plan succeeds, then performs an isolated authenticated Reality data-plane test.
+    --hy2 is a separate complement: it adds Hysteria2 UDP beside an existing
+    tono-xray TCP service and never stops or rewrites Reality. Default is TCP only.
   USAGE
   flags.on("--ssh ALIAS", "SSH config alias or user@host (known host key required)") { |value| options[:ssh] = value }
   flags.on("--name NAME", "Unique managed node display name") { |value| options[:name] = value }
@@ -231,6 +262,8 @@ parser = OptionParser.new do |flags|
   flags.on("--servername HOST", "Reality TLS target/servername (default: #{DEFAULT_REALITY_TARGET})") { |value| options[:target] = value }
   flags.on("--allow-unusable-servername", "Install a front measured as unusable in the main market") { options[:allow_unusable_servername] = true }
   flags.on("--port PORT", Integer, "Reality TCP port (default: 443)") { |value| options[:port] = value }
+  flags.on("--hy2", "Add Hysteria2 UDP beside existing Reality TCP; never the default") { options[:hy2] = true }
+  flags.on("--hy2-port PORT", Integer, "Hysteria2 UDP port (default: 443)") { |value| options[:hy2_port] = value }
   flags.on("--output PATH", "Private one-node YAML path (default: Tono Operations catalog.d)") { |value| options[:output] = value }
   flags.on("--apply", "Install, verify, and retain the node; publication remains a separate approval") { options[:apply] = true }
 end
@@ -241,6 +274,7 @@ begin
   ssh_target = valid_ssh_target!(options[:ssh])
   node_name = valid_node_name!(options[:name])
   fail!("--port must be between 1 and 65535.") unless (1..65_535).cover?(options[:port])
+  fail!("--hy2-port must be between 1 and 65535.") unless (1..65_535).cover?(options[:hy2_port])
   target = valid_hostname!(options[:target], "--servername")
   # The TLS 1.3 precheck below runs on the VPS and the data-plane test runs on
   # this machine, so neither ever stands where the customer does: a front that
@@ -263,94 +297,163 @@ begin
   end
   slug = node_name.downcase.gsub(/[^a-z0-9]+/, "-").gsub(/\A-|-\z/, "")
   slug = "node-#{SecureRandom.hex(4)}" if slug.empty?
+  output_name = options[:hy2] ? "#{slug}-hy2.yaml" : "#{slug}.yaml"
   default_output = File.join(
     Dir.home,
     "Library/Application Support/Tono/Operations/catalog.d",
-    "#{slug}.yaml",
+    output_name,
   )
   output_path = private_output_path!(options[:output] || default_output)
   repo_root = File.expand_path("../..", __dir__)
   remote_script_path = File.join(repo_root, "tooling/scripts/remote/manage-tono-reality-node.sh")
   remote_script = File.binread(remote_script_path)
+  hy2_script_path = File.join(repo_root, "tooling/scripts/remote/manage-tono-hy2-node.sh")
+  hy2_script = File.binread(hy2_script_path)
 
-  preflight = run_remote(ssh_target, remote_script, "preflight", [options[:port], target])
-  fail!("The selected TCP port is already in use; no changes were made.") if preflight["portInUse"]
-  fail!("This VPS already has a Tono Xray installation; use a reviewed rotation workflow.") if preflight["existingTono"]
-  fail!("The selected Reality target failed TLS 1.3 verification from the VPS.") unless preflight["targetTLS13"]
-  asset = XRAY_ASSETS[preflight["arch"]]
-  fail!("The VPS architecture is not supported by the pinned release.") unless asset
+  if options[:hy2]
+    preflight = run_remote(ssh_target, hy2_script, "preflight", [options[:hy2_port]])
+    fail!("This VPS has no active tono-xray; install Reality TCP first, then pass --hy2.") unless preflight["xrayActive"]
+    fail!("This VPS already has tono-hy2; use a reviewed rotation workflow.") if preflight["existingHy2"]
+    fail!("The selected UDP port is already in use; tono-xray was not changed.") if preflight["udpPortInUse"]
+    asset = HYSTERIA_ASSETS[preflight["arch"]]
+    fail!("The VPS architecture is not supported by the pinned hysteria release.") unless asset
 
-  puts("Read-only preflight passed for #{ssh_target}: #{preflight.fetch("os")} #{preflight.fetch("arch")}, TCP #{options[:port]} free.")
-  puts("Transport endpoint: #{server}:#{options[:port]}; Reality target: #{target}:443; expected final egress: #{expected_exit_ipv4 || "observe only"}.")
-  puts("Plan: install pinned Xray #{XRAY_VERSION}, create an unprivileged Reality service, then test authenticated DNS/HTTPS/egress through #{node_name}.")
-  puts("Firewall note: UFW is active; this tool will not alter firewall rules without separate approval.") if preflight["ufwActive"]
-  unless options[:apply]
-    puts("Dry run complete. Re-run with --apply after reviewing the host, target, endpoint, and firewall/provider rules.")
-    exit(0)
+    puts("Read-only hy2 preflight passed for #{ssh_target}: #{preflight.fetch("os")} #{preflight.fetch("arch")}.")
+    puts("Transport endpoint: #{server}:#{options[:hy2_port]}/udp beside existing Reality TCP #{options[:port]}.")
+    puts("Plan: install pinned hysteria #{HYSTERIA_VERSION} as tono-hy2, keep tono-xray running, issue a 10-year SAN cert, then record the fingerprint.")
+    puts("Firewall note: UFW is active; this tool will not alter firewall rules without separate approval.") if preflight["ufwActive"]
+    unless options[:apply]
+      puts("Dry run complete. Re-run with --hy2 --apply after reviewing the host and provider UDP rules.")
+      exit(0)
+    end
+  else
+    preflight = run_remote(ssh_target, remote_script, "preflight", [options[:port], target])
+    fail!("The selected TCP port is already in use; no changes were made.") if preflight["portInUse"]
+    fail!("This VPS already has a Tono Xray installation; use a reviewed rotation workflow.") if preflight["existingTono"]
+    fail!("The selected Reality target failed TLS 1.3 verification from the VPS.") unless preflight["targetTLS13"]
+    asset = XRAY_ASSETS[preflight["arch"]]
+    fail!("The VPS architecture is not supported by the pinned release.") unless asset
+
+    puts("Read-only preflight passed for #{ssh_target}: #{preflight.fetch("os")} #{preflight.fetch("arch")}, TCP #{options[:port]} free.")
+    puts("Transport endpoint: #{server}:#{options[:port]}; Reality target: #{target}:443; expected final egress: #{expected_exit_ipv4 || "observe only"}.")
+    puts("Plan: install pinned Xray #{XRAY_VERSION}, create an unprivileged Reality service, then test authenticated DNS/HTTPS/egress through #{node_name}.")
+    puts("UDP remains closed. Pass --hy2 to add Hysteria2 beside Reality TCP.")
+    puts("Firewall note: UFW is active; this tool will not alter firewall rules without separate approval.") if preflight["ufwActive"]
+    unless options[:apply]
+      puts("Dry run complete. Re-run with --apply after reviewing the host, target, endpoint, and firewall/provider rules.")
+      exit(0)
+    end
   end
 
   deployment = nil
   deployment_id = "#{Time.now.utc.strftime("%Y%m%dT%H%M%SZ")}-#{SecureRandom.hex(4)}"
   apply_started = false
   output_written = false
-  remote_artifact = "/tmp/tono-xray-artifact-#{SecureRandom.hex(12)}"
+  remote_artifact = if options[:hy2]
+    "/tmp/tono-hy2-artifact-#{SecureRandom.hex(12)}"
+  else
+    "/tmp/tono-xray-artifact-#{SecureRandom.hex(12)}"
+  end
   begin
-    Dir.mktmpdir("tono-xray-") do |temporary_directory|
-      File.chmod(0o700, temporary_directory)
-      binary = verified_xray_binary(asset, temporary_directory)
-      binary_sha256 = Digest::SHA256.file(binary).hexdigest
-      upload_artifact(ssh_target, binary, remote_artifact)
-      apply_started = true
-      deployment = run_remote(
-        ssh_target,
-        remote_script,
-        "apply",
-        [deployment_id, XRAY_VERSION, remote_artifact, binary_sha256, options[:port], target],
-      )
-    ensure
-      remove_uploaded_artifact(ssh_target, remote_artifact)
+    if options[:hy2]
+      Dir.mktmpdir("tono-hy2-") do |temporary_directory|
+        File.chmod(0o700, temporary_directory)
+        binary = verified_hysteria_binary(asset, temporary_directory)
+        binary_sha256 = Digest::SHA256.file(binary).hexdigest
+        upload_artifact(ssh_target, binary, remote_artifact, label: "hysteria")
+        apply_started = true
+        deployment = run_remote(
+          ssh_target,
+          hy2_script,
+          "apply",
+          [deployment_id, HYSTERIA_VERSION, remote_artifact, binary_sha256, options[:hy2_port]],
+        )
+      ensure
+        remove_uploaded_artifact(ssh_target, remote_artifact)
+      end
+
+      fail!("The VPS returned an invalid hy2 deployment identifier.") unless
+        deployment["deploymentId"].to_s.match?(/\A[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}\z/)
+      fail!("The VPS returned an invalid hy2 certificate fingerprint.") unless
+        deployment["fingerprint"].to_s.match?(/\A(?:[0-9A-F]{2}:){31}[0-9A-F]{2}\z/)
+      fail!("The VPS did not confirm tono-xray was left running.") unless deployment["xrayUntouched"] == true
+
+      document = {
+        "proxies" => [{
+          "name" => "#{node_name} · hy2",
+          "type" => "hysteria2",
+          "server" => server,
+          "port" => options[:hy2_port],
+          "password" => "{{TONO_CLIENT_UUID}}",
+          "sni" => "www.microsoft.com",
+          "fingerprint" => deployment.fetch("fingerprint").delete(":").downcase,
+          "skip-cert-verify" => false,
+        }],
+      }
+      write_private_yaml(output_path, document)
+      output_written = true
+      puts("Hysteria2 complement installed. tono-xray was not stopped.")
+      puts("Certificate fingerprint: #{deployment.fetch("fingerprint")}")
+      puts("Private hy2 catalog source saved with mode 0600 at #{output_path}.")
+      puts("The managed catalog was not published; publication requires a separate explicit approval.")
+    else
+      Dir.mktmpdir("tono-xray-") do |temporary_directory|
+        File.chmod(0o700, temporary_directory)
+        binary = verified_xray_binary(asset, temporary_directory)
+        binary_sha256 = Digest::SHA256.file(binary).hexdigest
+        upload_artifact(ssh_target, binary, remote_artifact)
+        apply_started = true
+        deployment = run_remote(
+          ssh_target,
+          remote_script,
+          "apply",
+          [deployment_id, XRAY_VERSION, remote_artifact, binary_sha256, options[:port], target],
+        )
+      ensure
+        remove_uploaded_artifact(ssh_target, remote_artifact)
+      end
+
+      fail!("The VPS returned an invalid deployment identifier.") unless
+        deployment["deploymentId"].to_s.match?(/\A[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}\z/)
+      fail!("The VPS returned an invalid VLESS UUID.") unless
+        deployment["uuid"].to_s.match?(/\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/)
+      fail!("The VPS returned an invalid Reality public key.") unless
+        deployment["publicKey"].to_s.match?(/\A[A-Za-z0-9_-]{43}\z/)
+      fail!("The VPS returned an invalid Reality short ID.") unless
+        deployment["shortId"].to_s.match?(/\A[0-9a-f]{16}\z/)
+
+      document = {
+        "proxies" => [{
+          "name" => node_name,
+          "type" => "vless",
+          "server" => server,
+          "port" => options[:port],
+          "uuid" => deployment.fetch("uuid"),
+          "network" => "tcp",
+          "tls" => true,
+          "udp" => true,
+          "servername" => target,
+          "client-fingerprint" => "chrome",
+          "flow" => "xtls-rprx-vision",
+          "reality-opts" => {
+            "public-key" => deployment.fetch("publicKey"),
+            "short-id" => deployment.fetch("shortId"),
+          },
+        }],
+      }
+      write_private_yaml(output_path, document)
+      output_written = true
+      verify_installation(repo_root, output_path, node_name, expected_exit_ipv4)
+      puts("Node installation and isolated authenticated data-plane verification passed.")
+      puts("Private catalog source saved with mode 0600 at #{output_path}.")
+      puts("The managed catalog was not published; publication requires a separate explicit approval.")
     end
-
-    fail!("The VPS returned an invalid deployment identifier.") unless
-      deployment["deploymentId"].to_s.match?(/\A[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}\z/)
-    fail!("The VPS returned an invalid VLESS UUID.") unless
-      deployment["uuid"].to_s.match?(/\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/)
-    fail!("The VPS returned an invalid Reality public key.") unless
-      deployment["publicKey"].to_s.match?(/\A[A-Za-z0-9_-]{43}\z/)
-    fail!("The VPS returned an invalid Reality short ID.") unless
-      deployment["shortId"].to_s.match?(/\A[0-9a-f]{16}\z/)
-
-    document = {
-      "proxies" => [{
-        "name" => node_name,
-        "type" => "vless",
-        "server" => server,
-        "port" => options[:port],
-        "uuid" => deployment.fetch("uuid"),
-        "network" => "tcp",
-        "tls" => true,
-        "udp" => true,
-        "servername" => target,
-        "client-fingerprint" => "chrome",
-        "flow" => "xtls-rprx-vision",
-        "reality-opts" => {
-          "public-key" => deployment.fetch("publicKey"),
-          "short-id" => deployment.fetch("shortId"),
-        },
-      }],
-    }
-    write_private_yaml(output_path, document)
-    output_written = true
-    verify_installation(repo_root, output_path, node_name, expected_exit_ipv4)
-    puts("Node installation and isolated authenticated data-plane verification passed.")
-    puts("Private catalog source saved with mode 0600 at #{output_path}.")
-    puts("The managed catalog was not published; publication requires a separate explicit approval.")
   rescue StandardError, Interrupt => error
     if apply_started
       begin
         result = run_remote(
           ssh_target,
-          remote_script,
+          options[:hy2] ? hy2_script : remote_script,
           "rollback",
           [deployment_id],
         )

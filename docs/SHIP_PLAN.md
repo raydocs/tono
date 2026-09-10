@@ -205,10 +205,10 @@
 **G2.5 节点侧 hysteria2 与 VLESS 共存** — Grok · M
 
 - 目标：provisioner 增加 hy2 角色，不拆现有 Reality TCP。
-- 文件：`tooling/scripts/provision-reality-node.rb`（现技能明确「不要为 Reality 开 UDP」——hy2 是**另一次**、显式的 `--hy2` 路径，默认不加）；systemd 单元、ufw 放行该 UDP 端口；证书 10 年自签，指纹写回 profile。
-- 密码派生：与 VLESS 相同占位，不要第二套用户密钥。
-- 唯一测试：provisioner dry-run 在「未传 `--hy2`」时仍然不开放 UDP（保持旧安全合同）。
-- 验收：两台选定机用这条路径补装后，VLESS TCP 仍通，hy2 UDP 仍通。
+- 文件：`tooling/scripts/provision-reality-node.rb`（现技能明确「不要为 Reality 开 UDP」——hy2 是**另一次**、显式的 `--hy2` 路径，默认不加）；systemd 单元、证书 10 年自签带 SAN，指纹写回私有 YAML。UFW 仍不擅自改。
+- 密码派生：目录块仍用 `{{TONO_CLIENT_UUID}}`。节点 `auth.password` 目前取现有 xray 的第一个 client UUID，**还不是**全量账户同步；舰队多用户 hy2 身份仍待 hub。不要对已有手工 hy2 的 Dedirock / 东京再跑 `--hy2 --apply`。
+- 唯一测试：provisioner dry-run 在「未传 `--hy2`」时仍然不开放 UDP（Reality 远程脚本无 UDP listen；默认 `hy2: false`）。
+- 本分支已落地 opt-in 补装路径。验收机仍待老板。
 
 **G2.6 Windows 准入 hy2** — Grok · M
 
