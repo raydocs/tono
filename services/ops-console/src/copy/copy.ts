@@ -17,6 +17,7 @@ import { settingsPublishCopy } from './settings-publish';
 import { customerCopy } from './customers';
 import { shellCopy } from './shell';
 import { todayCopy } from './today';
+import { worthwhileCopy } from './worthwhile';
 
 export const copy = {
   ...shellCopy,
@@ -26,6 +27,7 @@ export const copy = {
   settings: { ...settingsCopy, ...settingsPublishCopy },
   ...ledgerCopy,
   ...nodeDetailCopy,
+  ...worthwhileCopy,
 } as const;
 
 export type PageId = keyof typeof copy.pages;
