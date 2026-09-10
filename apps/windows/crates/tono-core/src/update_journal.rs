@@ -682,4 +682,69 @@ mod tests {
         assert_eq!(launched.phase, UpdateHandoffPhase::FirstLaunchMigration);
         fs::remove_dir_all(dir).unwrap();
     }
+
+    /// G3.1: App prepare → installer `--replace-runtime` → new process →
+    /// verified, using the owner APIs those processes call. A crash after
+    /// any earlier owner must not let `commit_verified_recovery` delete the file.
+    #[test]
+    fn prepare_installer_new_process_verified_crash_between_owners_never_commits() {
+        let dir = env::temp_dir().join(format!(
+            "tono-journal-owners-api-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let path = journal_path(&dir);
+        write_prepared(
+            &path,
+            &UpdateHandoffJournal::new("0.0.72", "0.0.73", 4, true, true),
+        )
+        .unwrap();
+        assert_eq!(
+            load(&path).unwrap().unwrap().phase,
+            UpdateHandoffPhase::UpdatePrepared
+        );
+        assert!(!commit_verified_recovery(&path, "0.0.73").unwrap());
+        assert_eq!(
+            load(&path).unwrap().unwrap().phase,
+            UpdateHandoffPhase::UpdatePrepared
+        );
+
+        for phase in [
+            UpdateHandoffPhase::ConnectionQuiescing,
+            UpdateHandoffPhase::CleanShutdownCompleted,
+            UpdateHandoffPhase::ProtectedHandoffRecorded,
+        ] {
+            advance_pending(&path, phase).unwrap();
+            assert_eq!(load(&path).unwrap().unwrap().phase, phase);
+            assert!(!commit_verified_recovery(&path, "0.0.73").unwrap());
+            assert_eq!(load(&path).unwrap().unwrap().phase, phase);
+            assert!(path.exists());
+        }
+
+        assert!(record_install_started(&path).unwrap());
+        assert_eq!(
+            load(&path).unwrap().unwrap().phase,
+            UpdateHandoffPhase::InstallStarted
+        );
+        assert!(!commit_verified_recovery(&path, "0.0.73").unwrap());
+        assert_eq!(
+            load(&path).unwrap().unwrap().phase,
+            UpdateHandoffPhase::InstallStarted
+        );
+
+        let launched = record_first_launch_migration(&path, "0.0.73")
+            .unwrap()
+            .unwrap();
+        assert_eq!(launched.phase, UpdateHandoffPhase::FirstLaunchMigration);
+        assert!(!commit_verified_recovery(&path, "0.0.73").unwrap());
+        assert_eq!(
+            load(&path).unwrap().unwrap().phase,
+            UpdateHandoffPhase::FirstLaunchMigration
+        );
+
+        advance_pending(&path, UpdateHandoffPhase::ProtectionResuming).unwrap();
+        assert!(commit_verified_recovery(&path, "0.0.73").unwrap());
+        assert!(!path.exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
 }

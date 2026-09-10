@@ -3,6 +3,24 @@
 //! Each phase is advanced only by the owner that completed the matching
 //! operation. `prepare` writes `UpdatePrepared` and nothing later; jumping
 //! to `ConnectionQuiescing` or `Committed` from here is an illegal skip.
+//!
+//! ```text
+//! phase × process (who may write the file)
+//! ────────────────────────────────────────────────────────────────
+//! UpdatePrepared              App `tono_prepare_update`
+//! ConnectionQuiescing         App, after it starts silent disconnect
+//! CleanShutdownCompleted      App, after Core/TUN stop + DNS restore
+//! ProtectedHandoffRecorded    App, only if kill switch stays armed
+//! InstallStarted              `tono-service-install.exe --replace-runtime`
+//!                             (NSIS); missing file is not an update
+//! FirstLaunchMigration        new App process, version == next
+//! ProtectionResuming         new App, if the previous process was protected
+//! Verified then Committed     new App `commit_verified_recovery` only
+//! Failed                      any owner on skip/persist failure; file stays
+//! ```
+//!
+//! macOS Sparkle has no NSIS helper, so `installHandler` still writes
+//! `InstallStarted` in-process after the quiesce hops.
 
 use std::path::PathBuf;
 

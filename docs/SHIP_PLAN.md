@@ -195,11 +195,12 @@
 - 背景：`managedCatalogYAML` 经 `catalogProxyUsesManagedIdentity` 拒绝没有 `uuid` 占位的块。hy2 必须用 `password: {{TONO_CLIENT_UUID}}`。
 - 文件：
   - `services/control-plane/src/catalog-yaml.ts`：`catalogProxyUsesManagedIdentity` 改为按 `type:` 分支——`vless` 保持现约束；`hysteria2` 要求恰好一个 `password` 占位、禁止 `skip-cert-verify: true`、禁止缺 `fingerprint`。`filterCatalogYamlForUser` 的占位替换已按全文 `{{TONO_CLIENT_UUID}}` 替换则 hy2 密码会一起被换；核对 `placeholderCount` 与发布工具的计数，改为「每个块一个占位」而不是「全文 uuid 个数」。
+  - `tooling/scripts/publish-managed-catalog.rb`：与 Worker 同一合同——vless 用 `uuid`；hysteria2 用 `password` + fingerprint、禁止 skip-cert-verify、名字带 ` · hy2`。**不要**把生产目录 PUT 成带 hy2 块，直到客户端准入合进 `main` 且老板指定灰度账号。
   - `catalogProxyName` / `splitManagedCatalogProxies`：识别后缀 ` · hy2`，基名 = 去掉该后缀。`retirementCatalogPlan` / `relistCatalogPlan` 同时处理基名与 hy2 块。
   - 新迁移 `0072_hy2_transport.sql`：`ops_node_profiles` 加可空 `hy2_port INTEGER`、`hy2_fingerprint TEXT`、`hy2_obfs_ref TEXT`；`connection_events` 加可空 `transport TEXT`；质量表加 `udp_ok`（列名以 `operations_quality_samples` 现结构为准，grep 后写）。
   - `migrations/README.md` 高水位 0072。
   - `docs/ops/api-contract.md` 目录节写命名约定；`NodeDetailDto.facts` 可选 `transports?: ('tcp'|'hy2')[]`、`hy2?: { port, udpOk }`——字段一律可选。
-- 唯一测试：`test/catalog-yaml.test.ts` 一个 `it`：含 vless + `Name · hy2` 的目录，对基名退役后两块都不在；hy2 块缺 fingerprint 发布 400。
+- 唯一测试：`test/catalog-yaml.test.ts` 一个 `it`：含 vless + `Name · hy2` 的目录，对基名退役后两块都不在；hy2 块缺 fingerprint 发布 400。发布脚本一个 hy2 源 dry-run/publish 通过，缺 fingerprint 或 skip-cert-verify 拒绝。
 - 验收：preview 库 apply 0072；生产部署仍走 `zsh tooling/scripts/deploy-control-plane-main.sh`，且必须在客户端能解析 hy2 之后才能往生产目录里塞块。
 
 **G2.5 节点侧 hysteria2 与 VLESS 共存** — Grok · M
@@ -269,14 +270,30 @@
   | Committed | **仅** Verified 之后且 durable save 成功，才允许删日记 |
 - Failed：任一跳相或持久化失败 → `Failed`，**文件留下**，UI 可提示「更新未完成，请手动断开后重装」。
 - macOS：`UpdateHandoffJournal.swift` 已有 `allowedNext` 与 XCTest 序列；核对 Sparkle 钩子是否同样跳相，缺哪段补哪段。两端相位名保持一致。
-- 唯一测试：Windows 集成测试重放 prepare→installer→new process→verified，断言磁盘上相位按表前进；每个相位注入崩溃，不得出现 Committed；失败文件仍在。macOS 已有 `UpdateHandoffJournalTests`，补「跳相被拒绝且文件还在」。
+- 唯一测试：Windows 集成测试重放 prepare→installer→new process→verified，断言磁盘上相位按表前进；每个相位注入崩溃，不得出现 Committed；失败文件仍在。`prepare_installer_new_process_verified_crash_between_owners_never_commits` 走 `write_prepared` / `record_install_started` / `record_first_launch_migration` / `commit_verified_recovery`，不是只调 `advance_pending`。macOS 已有 `UpdateHandoffJournalTests`，补「跳相被拒绝且文件还在」。
 - 验收：单元/集成绿。**真机 G3.3 之前不算过门。**
 
 **G3.2 安装器与 App 的所有权** — M
 
 - 目标：NSIS/`tono-service-install.exe --replace-runtime` 写入 `InstallStarted`；安装失败不调 `mark_committed`。App `tono_prepare_update` 停在 `ProtectedHandoffRecorded`（未保护则 `CleanShutdownCompleted`）。
 - 本分支已落地：helper 在替换事务入口写盘；找不到日记不发明日记。跨权限扫描 `%APPDATA%`、用户 `AppData\Roaming`、便携 `.config`。旧二进制读到未完成安装会记 `Failed`。
-- 验收：读安装器脚本与 App 启动路径，PR 说明里用一张序列图（相位 × 进程）列出谁写盘。没有这张图不合。
+- 相位 × 进程（谁写盘）：
+
+```
+UpdatePrepared              App tono_prepare_update
+ConnectionQuiescing         App，开始静默断开之后
+CleanShutdownCompleted      App，Core/TUN 已停、DNS 已还
+ProtectedHandoffRecorded    App，仅当 kill switch 保持武装
+InstallStarted              tono-service-install.exe --replace-runtime（NSIS）
+                            找不到日记不发明日记
+FirstLaunchMigration        新 App 进程，且版本 == next
+ProtectionResuming         新 App，上一进程受保护时
+Verified → Committed        仅新 App commit_verified_recovery
+Failed                      任一跳相或持久化失败；文件留下
+```
+
+macOS Sparkle 没有 NSIS，仍由 `installHandler` 在静默断开之后写 `InstallStarted`。
+- 验收：上表与安装器脚本、App 启动路径一致。真机 G3.3 之前不算过门。
 
 **G3.3 真机更新** — 老板 · M
 
