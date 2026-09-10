@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import type { JobDto } from '@contract';
 import { Action } from '@/components/ops/Action';
 import { DataTable, type DataColumn, type TableState } from '@/components/ops/DataTable';
-import { Empty } from '@/components/ops/Empty';
+import { EmptyLine } from '@/components/ops/Empty';
 import { Section } from '@/components/ops/Section';
 import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
@@ -59,7 +59,7 @@ export function NodeJobs({
   return (
     <Section title={copy.nodeSections.jobs}>
       {state === 'ready' && sorted.length === 0 ? (
-        <Empty message={copy.nodeNoJobs} />
+        <EmptyLine message={copy.nodeNoJobs} />
       ) : (
         <DataTable
           rows={sorted}

@@ -12,11 +12,16 @@ export const customerCopy = {
     suspended: '已停用',
     expired: '已到期',
   } as const,
+  /**
+   * Each fragment is the health word its rows carry, so clicking one gives a
+   * table where every row repeats the word that was just counted.
+   */
   customerCount: {
     all: (n: number) => `${n} 位客户`,
-    online: (n: number) => `${n} 位在线`,
+    ok: (n: number) => `${n} 位正常`,
     unreachable: (n: number) => `${n} 位连不上`,
   },
+  customerPlanNotWired: '服务使用、最低版本和到期还没有一位客户填过，先不占位置',
   platform: {
     macos: 'macOS',
     windows: 'Windows',

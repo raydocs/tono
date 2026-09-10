@@ -6,27 +6,33 @@ import { bucketFor } from './releases';
  * Every fragment of the 客户 count sentence, and the predicate behind it.
  *
  * R4 lives here: the sentence and the table call `selectCustomers` with the
- * same id, so "4 位在线" and the rows you get by clicking it cannot disagree.
+ * same id, so "4 位正常" and the rows you get by clicking it cannot disagree.
  */
-export const CUSTOMER_FILTERS = ['all', 'online', 'unreachable'] as const;
+export const CUSTOMER_FILTERS = ['all', 'ok', 'unreachable'] as const;
 
 export type CustomerFilterId = (typeof CUSTOMER_FILTERS)[number];
 export type CustomerFilter = CustomerFilterId | null;
 
 /**
- * Online means measured online. A customer whose client has never reported
- * has `asOfSec === null`, and counting that as "not online" would be a claim
- * nobody measured — it belongs to 未上报, which is a health word, not a count.
+ * The fragment and the row say the same word about the same customer.
+ *
+ * The count used to read the `connected` flag on its own, which is a
+ * different question from the one the health word answers: the word only says
+ * 正常 when the client is connected *and* its heartbeat is fresh, so a client
+ * that reported "connected" yesterday and has said nothing since counted in
+ * the sentence while its own row read 离线. Production said 5 位在线 over a
+ * table where no row agreed. The verdict the row is coloured by is the whole
+ * predicate now, for both.
  */
-function isOnline(row: CustomerSummaryDto): boolean {
-  return row.connected.value === true && row.connected.asOfSec !== null;
+function isWell(row: CustomerSummaryDto): boolean {
+  return row.verdict === 'ok';
 }
 
 export function selectCustomers(
   rows: readonly CustomerSummaryDto[],
   filter: CustomerFilter,
 ): CustomerSummaryDto[] {
-  if (filter === 'online') return rows.filter(isOnline);
+  if (filter === 'ok') return rows.filter(isWell);
   if (filter === 'unreachable') return rows.filter((row) => row.verdict === 'unreachable');
   return [...rows];
 }
@@ -36,9 +42,25 @@ export function customerCounts(
 ): Record<CustomerFilterId, number> {
   return {
     all: selectCustomers(rows, 'all').length,
-    online: selectCustomers(rows, 'online').length,
+    ok: selectCustomers(rows, 'ok').length,
     unreachable: selectCustomers(rows, 'unreachable').length,
   };
+}
+
+/**
+ * Whether the last three columns have anything in them anywhere.
+ *
+ * 服务使用, 最低版本 and 到期 come from three different places and on this
+ * fleet none of them is filled in, so the table carried three columns of
+ * dashes across the width the addresses needed. They hide as one group,
+ * because a table with two of the three still has a column of nothing in it,
+ * and they come back on their own the moment any row has an answer — the
+ * condition is the data, not a flag somebody has to remember to flip.
+ */
+export function planWired(rows: readonly CustomerSummaryDto[]): boolean {
+  return rows.some((row) => (
+    row.services.length > 0 || row.minAppVersion !== null || row.expiresAt !== null
+  ));
 }
 
 /**

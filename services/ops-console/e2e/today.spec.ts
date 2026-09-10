@@ -9,6 +9,13 @@ test.describe('today page', () => {
     // Two open incidents, and exactly one primary action per row.
     await expect(page.locator('.incident-row')).toHaveCount(2);
     await expect(page.locator('.incident-row .ops-action-primary')).toHaveCount(2);
+
+    // The primary is what moves the fault, by what broke; 认领 is beside it.
+    const blocked = page.locator('.incident-row').first();
+    await expect(blocked.getByRole('button', { name: '下架预览' })).toBeVisible();
+    await expect(blocked.getByRole('button', { name: '认领' })).toBeVisible();
+    await expect(page.locator('.incident-row').nth(1).getByRole('button', { name: '打开客户' }))
+      .toBeVisible();
     await expect(page).toHaveScreenshot('list.png');
   });
 
@@ -59,6 +66,27 @@ test.describe('today page', () => {
     await expect(page).toHaveScreenshot('drawer.png');
   });
 
+  /** The evidence is a measurement said out loud, never the engine's own key names. */
+  test('the drawer explains itself without printing what it is made of', async ({ page }) => {
+    await open(page, '/today?incident=inc-node-la');
+    const drawer = page.getByRole('dialog');
+    await expect(drawer).toContainText('大陆扫描：疑似被墙');
+    await expect(drawer).toContainText('联通回程丢包 10.4%');
+    await expect(drawer).toContainText('30 分钟内 31 次失败');
+    await expect(drawer).toContainText('负载 0.04，内存 12%');
+    for (const leak of ['blockStatus', 'fails30m', 'LIKELY_BLOCKED', '{', '}']) {
+      await expect(drawer, leak).not.toContainText(leak);
+    }
+  });
+
+  test('a blocked node leads with the unlisting it is heading for', async ({ page }) => {
+    await open(page, '/today');
+    await page.locator('.incident-row').first()
+      .getByRole('button', { name: '下架预览' }).click();
+    await expect(page).toHaveURL(/#\/nodes\/.+/);
+    await expect(page.getByRole('heading', { name: '这台机器' })).toBeVisible();
+  });
+
   test('the drawer survives a reload, because it lives in the URL', async ({ page }) => {
     await open(page, '/today?incident=inc-node-la');
     await expect(page.getByRole('dialog')).toBeVisible();
@@ -74,6 +102,7 @@ test.describe('today page', () => {
     const row = page.locator('.incident-row').first();
     await expect(row.getByRole('button', { name: '认领' })).toBeVisible();
     await row.getByRole('button', { name: '认领' }).click();
+    await settle(page);
     await expect(page.locator('.incident-row').first().getByRole('button', { name: '标记已处理' }))
       .toBeVisible();
     // Still open — an ack is a claim, not a fix.

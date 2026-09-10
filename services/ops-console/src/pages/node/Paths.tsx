@@ -1,5 +1,5 @@
 import type { CarrierKey, ForwardPathDto, Measured, ReturnPathDto } from '@contract';
-import { Empty } from '@/components/ops/Empty';
+import { EmptyLine } from '@/components/ops/Empty';
 import { Section } from '@/components/ops/Section';
 import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
@@ -58,7 +58,7 @@ function carrierName(carrier: CarrierKey): string {
 
 function ForwardTable({ rows, source }: { rows: readonly ForwardPathDto[]; source: string }) {
   const measuredRows = rows.filter((row) => row.attempts > 0);
-  if (measuredRows.length === 0) return <Empty message={copy.nodeNoForward} />;
+  if (measuredRows.length === 0) return <EmptyLine message={copy.nodeNoForward} />;
   return (
     <Frame
       heads={[
@@ -102,7 +102,7 @@ function ForwardTable({ rows, source }: { rows: readonly ForwardPathDto[]; sourc
 
 function ReturnTable({ rows, source }: { rows: readonly ReturnPathDto[]; source: string }) {
   const measuredRows = rows.filter((row) => row.samples > 0);
-  if (measuredRows.length === 0) return <Empty message={copy.nodeNoReturn} />;
+  if (measuredRows.length === 0) return <EmptyLine message={copy.nodeNoReturn} />;
   return (
     <Frame
       heads={[
