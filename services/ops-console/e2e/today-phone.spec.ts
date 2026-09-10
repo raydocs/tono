@@ -41,3 +41,33 @@ test('the drawer comes up from the bottom with its actions pinned there', async 
   expect(overflow).toBeLessThanOrEqual(0);
   await expect(page).toHaveScreenshot('drawer.png');
 });
+
+/**
+ * The whole three-in-the-morning path, one thumb: the list, the incident, and
+ * the press that ends it.
+ *
+ * The two assertions that matter are both about the fold. Every verb the sheet
+ * offers has to be whole on screen the moment it opens — a bar that needs a
+ * scroll first is a bar that gets missed at 03:00 — and the one that ends the
+ * incident still has to ask how it ended rather than writing a recovery
+ * nobody measured.
+ */
+test('the bar on the bottom edge can end the incident without a scroll', async ({ page }) => {
+  await open(page, '/today');
+
+  await page.locator('.incident-row').first().locator('p.text-row').click();
+  const sheet = page.getByRole('dialog');
+  await expect(sheet).toBeVisible();
+  await settle(page);
+
+  const close = sheet.getByRole('button', { name: '标记已处理' });
+  for (const button of [sheet.getByRole('button', { name: '认领' }), sheet.getByRole('button', { name: '静默 4 小时' }), close]) {
+    await expect(button).toBeInViewport({ ratio: 1 });
+    expect(Math.round((await button.boundingBox())!.height)).toBeGreaterThanOrEqual(44);
+  }
+
+  await close.click();
+  const closure = page.getByRole('dialog', { name: '这条事故怎么收尾' });
+  await expect(closure).toBeVisible();
+  await expect(closure.getByRole('radio')).toHaveCount(3);
+});

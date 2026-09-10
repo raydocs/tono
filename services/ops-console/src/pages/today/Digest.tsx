@@ -5,6 +5,7 @@ import { severityTone } from '@/lib/codes';
 import { goPage, openCustomer, openIncident, openNodePage } from '@/lib/hash-route';
 import { beforeNoon, capNight, formatLife, groupNight, type NightGroup } from '@/lib/handling';
 import type { Tone } from '@/components/ops/StatusWord';
+import { useIsPhone } from '@/lib/use-phone';
 import type { Resource } from '@/lib/use-resource';
 import { cn } from '@/lib/utils';
 
@@ -43,6 +44,7 @@ export function Digest({
   onShowResolved: () => void;
   onShowChores: () => void;
 }) {
+  const phone = useIsPhone();
   if (digest.status !== 'ready') return null;
   const { overnight, due } = digest.data;
   const night = overnight.resolved.length + overnight.opened.length;
@@ -59,10 +61,8 @@ export function Digest({
     );
   }
 
-  return (
-    <section className="flex flex-col gap-3 rounded-[12px] border border-[var(--hairline)] px-4 py-3">
-      <h2 className="text-micro text-[var(--muted-foreground)]">{copy.digestTitle}</h2>
-
+  const body = (
+    <div className="digest-body flex flex-col gap-3">
       <Line title={copy.digestNight}>
         {night === 0 ? (
           <span className="text-body text-[var(--muted-foreground)]">{copy.digestNightNone}</span>
@@ -109,6 +109,35 @@ export function Digest({
           </div>
         )}
       </Line>
+    </div>
+  );
+
+  /**
+   * On a phone the morning read folds shut.
+   *
+   * It is a paragraph of prose sitting on top of the list it summarises, and
+   * on a 390 px screen that paragraph is the whole first screen: the operator
+   * who opened the page from an alert at three in the morning has to scroll
+   * past yesterday to reach the thing that woke them. Nothing is dropped — the
+   * summary keeps the two counts that decide whether it is worth the tap, and
+   * everything inside is one tap away.
+   */
+  if (phone) {
+    return (
+      <details className="digest-fold rounded-[12px] border border-[var(--hairline)] px-4 py-3">
+        <summary className="text-micro text-[var(--muted-foreground)]">
+          <span>{copy.digestTitle}</span>
+          <span className="normal-case tracking-normal">{copy.digestFold(night, owed)}</span>
+        </summary>
+        {body}
+      </details>
+    );
+  }
+
+  return (
+    <section className="flex flex-col gap-3 rounded-[12px] border border-[var(--hairline)] px-4 py-3">
+      <h2 className="text-micro text-[var(--muted-foreground)]">{copy.digestTitle}</h2>
+      {body}
     </section>
   );
 }
@@ -159,7 +188,10 @@ function NightLine({ group }: { group: NightGroup }) {
         onClick={() => openIncident(group.lead.id)}
       >
         <span className={cn('ops-tag shrink-0', tone && `tone-${tone}`)}>{word}</span>
-        <span className="min-w-0 truncate text-body underline-offset-4 hover:underline">{title}</span>
+        {/* One line on a laptop, where there is room for one. On a phone the
+            ellipsis lands mid-name — "Los Angeles · Mes…" identifies nothing —
+            so the class is a hook the phone rules undo. */}
+        <span className="night-title min-w-0 truncate text-body underline-offset-4 hover:underline">{title}</span>
       </button>
       {group.flap === null ? null : (
         <FlapLine
