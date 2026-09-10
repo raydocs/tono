@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { ReleaseDto } from '@contract';
+import type { Platform, ReleaseDto, UpdateChannelDto } from '@contract';
 import {
   bucketFor,
   compareVersions,
   currentVersions,
+  isVerified,
   minSupportedVersions,
+  publishBlockReason,
   publishedVersions,
 } from './releases';
 
@@ -96,5 +98,62 @@ describe('what the release list says about a platform', () => {
     expect(minSupportedVersions(rows)).toEqual({});
     const withFloor = [...rows, release({ version: '1.8.2', minSupportedVersion: '1.8.0' })];
     expect(minSupportedVersions(withFloor)).toEqual({ macos: '1.8.0' });
+  });
+});
+
+describe('why a build cannot be published', () => {
+  const words = {
+    platform: { macos: 'macOS', windows: 'Windows', linux: 'Linux', android: 'Android', ios: 'iOS' } as Record<Platform, string>,
+    publishBlocked: {
+      unwired: (platform: string) => `${platform} has no updater`,
+      unverified: 'never checked',
+      unsigned: 'not signed',
+    },
+  };
+  const channel = (over: Partial<UpdateChannelDto> = {}): UpdateChannelDto => ({
+    platform: 'macos',
+    kind: 'sparkle',
+    feedPath: '/appcast.xml',
+    wired: true,
+    current: null,
+    ...over,
+  });
+  const ready = release({ publishedAt: null, verifiedAt: 1_700_000_000, signed: true });
+
+  it('lets a verified, signed build on a wired platform through', () => {
+    expect(publishBlockReason(ready, channel(), words)).toBeNull();
+  });
+
+  it('names the platform when it has no updater at all', () => {
+    const linux = release({ platform: 'linux', verifiedAt: 1_700_000_000, signed: true });
+    expect(publishBlockReason(linux, channel({ platform: 'linux', kind: null, feedPath: null, wired: false }), words))
+      .toBe('Linux has no updater');
+  });
+
+  it('a missing updater outranks everything else that is wrong with the row', () => {
+    const linux = release({ platform: 'linux' });
+    expect(publishBlockReason(linux, channel({ platform: 'linux', wired: false }), words))
+      .toBe('Linux has no updater');
+  });
+
+  it('refuses a build nothing has checked', () => {
+    expect(publishBlockReason(release({ verifiedAt: null, signed: true }), channel(), words))
+      .toBe('never checked');
+  });
+
+  it('refuses an unsigned build on a platform whose updater checks signatures', () => {
+    expect(publishBlockReason(release({ verifiedAt: 1_700_000_000, signed: false }), channel(), words))
+      .toBe('not signed');
+  });
+
+  it('a channel that has not loaded yet blocks nothing it does not know', () => {
+    expect(publishBlockReason(ready, null, words)).toBeNull();
+    // What the row itself says is still checked, loaded channel or not.
+    expect(publishBlockReason(release({ verifiedAt: null }), null, words)).toBe('never checked');
+  });
+
+  it('verified is the timestamp being there, not the signature', () => {
+    expect(isVerified(release({ verifiedAt: 1_700_000_000 }))).toBe(true);
+    expect(isVerified(release({ verifiedAt: null, signed: true }))).toBe(false);
   });
 });

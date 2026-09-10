@@ -9,7 +9,7 @@
         "version": "1.8.1",
         "build": "1810",
         "r2Key": "clients/macos/1.8.1.zip",
-        "sha256": null,
+        "sha256": "17900d9e207acad85cc340f54d41d272d7c6288c8da42cdd86961eb19970be6e",
         "notes": "Reality 拨号重试，修掉江苏移动握手超时",
         "minSupportedVersion": "1.8.0",
         "publishedAt": 1724481600,
@@ -17,10 +17,10 @@
         "createdAt": 1724395200,
         "updatedAt": 1724481600,
         "sizeBytes": 48131464,
-        "verifiedAt": null,
-        "signed": false,
+        "verifiedAt": 1724481540,
+        "signed": true,
         "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/macos/1.8.1.zip",
-        "minOsVersion": null
+        "minOsVersion": "26.3"
       },
       {
         "id": "rel-macos-180",
@@ -29,7 +29,7 @@
         "version": "1.8.0",
         "build": "1800",
         "r2Key": "clients/macos/1.8.0.zip",
-        "sha256": null,
+        "sha256": "a007d47b7b702183f5929c817197dd10c008e1dd6e321b8e68971d18496ebe39",
         "notes": "节点目录改为增量拉取",
         "minSupportedVersion": null,
         "publishedAt": 1722667200,
@@ -37,10 +37,10 @@
         "createdAt": 1722580800,
         "updatedAt": 1722667200,
         "sizeBytes": 54363431,
-        "verifiedAt": null,
-        "signed": false,
+        "verifiedAt": 1722667140,
+        "signed": true,
         "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/macos/1.8.0.zip",
-        "minOsVersion": null
+        "minOsVersion": "26.3"
       },
       {
         "id": "rel-macos-179",
@@ -49,7 +49,7 @@
         "version": "1.7.9",
         "build": "1790",
         "r2Key": "clients/macos/1.7.9.zip",
-        "sha256": null,
+        "sha256": "4c9038f95f77af49493533b67514a40ae15a7ee59dcec4e50e8978d1984ccfee",
         "notes": "掉线保护",
         "minSupportedVersion": null,
         "publishedAt": 1720248000,
@@ -57,10 +57,10 @@
         "createdAt": 1720161600,
         "updatedAt": 1720248000,
         "sizeBytes": 53053247,
-        "verifiedAt": null,
-        "signed": false,
+        "verifiedAt": 1720247940,
+        "signed": true,
         "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/macos/1.7.9.zip",
-        "minOsVersion": null
+        "minOsVersion": "26.3"
       },
       {
         "id": "rel-macos-190rc",
@@ -83,13 +83,33 @@
         "minOsVersion": null
       },
       {
+        "id": "rel-win-182",
+        "platform": "windows",
+        "channel": "stable",
+        "version": "1.8.2",
+        "build": "1820",
+        "r2Key": "clients/windows/1.8.2.zip",
+        "sha256": "055ef88ceb85916a2431ed1d67cb98dd0d6dce0eff98bb9fc6f12ef61d152c13",
+        "notes": "握手失败后换节点重试，等发布",
+        "minSupportedVersion": null,
+        "publishedAt": null,
+        "withdrawnAt": null,
+        "createdAt": 1724913600,
+        "updatedAt": 1724913600,
+        "sizeBytes": 70118400,
+        "verifiedAt": 1724914200,
+        "signed": true,
+        "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/windows/1.8.2.zip",
+        "minOsVersion": "10.0.19045"
+      },
+      {
         "id": "rel-win-180",
         "platform": "windows",
         "channel": "stable",
         "version": "1.8.0",
         "build": "1800",
         "r2Key": "clients/windows/1.8.0.zip",
-        "sha256": null,
+        "sha256": "fd63ec19801d9a8437a0093b472d0d76f18e663f3a949c46f9f5985046e1432f",
         "notes": "登录请求不再走隧道",
         "minSupportedVersion": null,
         "publishedAt": 1723272000,
@@ -97,10 +117,10 @@
         "createdAt": 1723185600,
         "updatedAt": 1723272000,
         "sizeBytes": 71294004,
-        "verifiedAt": null,
-        "signed": false,
+        "verifiedAt": 1723271940,
+        "signed": true,
         "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/windows/1.8.0.zip",
-        "minOsVersion": null
+        "minOsVersion": "10.0.19045"
       },
       {
         "id": "rel-win-179",
@@ -109,7 +129,7 @@
         "version": "1.7.9",
         "build": "1790",
         "r2Key": "clients/windows/1.7.9.zip",
-        "sha256": null,
+        "sha256": "aa73f367cdfa4630020ac0696d97e97eeea6e509822ee5567d5649384ffa864f",
         "notes": "服务器选择失败后自动重选",
         "minSupportedVersion": null,
         "publishedAt": 1720852800,
@@ -117,10 +137,10 @@
         "createdAt": 1720766400,
         "updatedAt": 1720852800,
         "sizeBytes": 73534820,
-        "verifiedAt": null,
-        "signed": false,
+        "verifiedAt": 1720852740,
+        "signed": true,
         "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/windows/1.7.9.zip",
-        "minOsVersion": null
+        "minOsVersion": "10.0.19045"
       },
       {
         "id": "rel-win-178",
@@ -129,7 +149,7 @@
         "version": "1.7.8",
         "build": "1780",
         "r2Key": "clients/windows/1.7.8.zip",
-        "sha256": null,
+        "sha256": "93aa66427e493dfa48841c7a9648a020176f33863f792f4f2ee1a360b508d0c2",
         "notes": "自动更新会卡在校验，已撤回",
         "minSupportedVersion": null,
         "publishedAt": 1718952000,
@@ -137,15 +157,15 @@
         "createdAt": 1718865600,
         "updatedAt": 1719297600,
         "sizeBytes": 68433107,
-        "verifiedAt": null,
-        "signed": false,
+        "verifiedAt": 1718951940,
+        "signed": true,
         "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/windows/1.7.8.zip",
-        "minOsVersion": null
+        "minOsVersion": "10.0.19045"
       }
     ],
     "nextCursor": null,
     "updatedAt": 1725000000,
-    "total": 7
+    "total": 8
   },
   "adoption": {
     "range": "30d",

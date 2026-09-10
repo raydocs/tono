@@ -29,7 +29,7 @@
         "version": "2.0.4",
         "build": null,
         "r2Key": "clients/macos/2.0.4.zip",
-        "sha256": null,
+        "sha256": "0ab817a3e35b4e61f5edbb7b1ace354d572e76c40351cec0bdc5cf679ae9c299",
         "notes": "macos 2.0.4",
         "minSupportedVersion": "2.0.1",
         "publishedAt": 1724222400,
@@ -37,10 +37,10 @@
         "createdAt": 1724136000,
         "updatedAt": 1724222400,
         "sizeBytes": 51885778,
-        "verifiedAt": null,
-        "signed": false,
+        "verifiedAt": 1724222340,
+        "signed": true,
         "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/macos/2.0.4.zip",
-        "minOsVersion": null
+        "minOsVersion": "26.3"
       },
       {
         "id": "rel-macos-203",
@@ -49,7 +49,7 @@
         "version": "2.0.3",
         "build": null,
         "r2Key": "clients/macos/2.0.3.zip",
-        "sha256": null,
+        "sha256": "df85d43abaf18521603c182ea095968d0a078a22292008b8fc85f8fcf25cd27b",
         "notes": "macos 2.0.3",
         "minSupportedVersion": null,
         "publishedAt": 1723444800,
@@ -57,10 +57,10 @@
         "createdAt": 1723358400,
         "updatedAt": 1723444800,
         "sizeBytes": 51647719,
-        "verifiedAt": null,
-        "signed": false,
+        "verifiedAt": 1723444740,
+        "signed": true,
         "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/macos/2.0.3.zip",
-        "minOsVersion": null
+        "minOsVersion": "26.3"
       },
       {
         "id": "rel-macos-202",
@@ -69,7 +69,7 @@
         "version": "2.0.2",
         "build": null,
         "r2Key": "clients/macos/2.0.2.zip",
-        "sha256": null,
+        "sha256": "01071290bb984fef862e1a6b8f7a7a41ce8782703179a8a43333c074e0949588",
         "notes": "macos 2.0.2",
         "minSupportedVersion": null,
         "publishedAt": 1722667200,
@@ -77,10 +77,10 @@
         "createdAt": 1722580800,
         "updatedAt": 1722667200,
         "sizeBytes": 46361160,
-        "verifiedAt": null,
-        "signed": false,
+        "verifiedAt": 1722667140,
+        "signed": true,
         "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/macos/2.0.2.zip",
-        "minOsVersion": null
+        "minOsVersion": "26.3"
       },
       {
         "id": "rel-macos-201",
@@ -89,7 +89,7 @@
         "version": "2.0.1",
         "build": null,
         "r2Key": "clients/macos/2.0.1.zip",
-        "sha256": null,
+        "sha256": "468c2803f06a50b25cd3d599627eb1cc93aa90da4e74079cb46298c7bfdbbee3",
         "notes": "macos 2.0.1",
         "minSupportedVersion": null,
         "publishedAt": 1721889600,
@@ -97,10 +97,10 @@
         "createdAt": 1721803200,
         "updatedAt": 1721889600,
         "sizeBytes": 47595997,
-        "verifiedAt": null,
-        "signed": false,
+        "verifiedAt": 1721889540,
+        "signed": true,
         "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/macos/2.0.1.zip",
-        "minOsVersion": null
+        "minOsVersion": "26.3"
       },
       {
         "id": "rel-macos-200",
@@ -109,7 +109,7 @@
         "version": "2.0.0",
         "build": null,
         "r2Key": "clients/macos/2.0.0.zip",
-        "sha256": null,
+        "sha256": "3e159ece63d3e1c86f16587e53a5c8c575e19b8a39f6c32c207b55ef833c62c1",
         "notes": "macos 2.0.0",
         "minSupportedVersion": null,
         "publishedAt": 1721112000,
@@ -117,10 +117,10 @@
         "createdAt": 1721025600,
         "updatedAt": 1721112000,
         "sizeBytes": 54943238,
-        "verifiedAt": null,
-        "signed": false,
+        "verifiedAt": 1721111940,
+        "signed": true,
         "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/macos/2.0.0.zip",
-        "minOsVersion": null
+        "minOsVersion": "26.3"
       },
       {
         "id": "rel-macos-197",
@@ -129,7 +129,7 @@
         "version": "1.9.7",
         "build": null,
         "r2Key": "clients/macos/1.9.7.zip",
-        "sha256": null,
+        "sha256": "1856f4d9ee88a6fa33e14dac63b59ae913fcee147a2c12080aa423020860950c",
         "notes": "macos 1.9.7",
         "minSupportedVersion": null,
         "publishedAt": 1720334400,
@@ -137,10 +137,10 @@
         "createdAt": 1720248000,
         "updatedAt": 1720334400,
         "sizeBytes": 53270463,
-        "verifiedAt": null,
-        "signed": false,
+        "verifiedAt": 1720334340,
+        "signed": true,
         "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/macos/1.9.7.zip",
-        "minOsVersion": null
+        "minOsVersion": "26.3"
       },
       {
         "id": "rel-windows-210",
@@ -169,7 +169,7 @@
         "version": "2.0.4",
         "build": null,
         "r2Key": "clients/windows/2.0.4.zip",
-        "sha256": null,
+        "sha256": "dc300dd802b1c80f84b2eb3d3eef73e54a5d0f06020bc7f849fceb34dc0796a4",
         "notes": "windows 2.0.4",
         "minSupportedVersion": "1.9.7",
         "publishedAt": 1724222400,
@@ -177,10 +177,10 @@
         "createdAt": 1724136000,
         "updatedAt": 1724222400,
         "sizeBytes": 73738890,
-        "verifiedAt": null,
-        "signed": false,
+        "verifiedAt": 1724222340,
+        "signed": true,
         "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/windows/2.0.4.zip",
-        "minOsVersion": null
+        "minOsVersion": "10.0.19045"
       },
       {
         "id": "rel-windows-202",
@@ -189,7 +189,7 @@
         "version": "2.0.2",
         "build": null,
         "r2Key": "clients/windows/2.0.2.zip",
-        "sha256": null,
+        "sha256": "c7d7bce7b8afd8c99db7d6405f8566c49313b91269a23bc462715d1698dac5da",
         "notes": "windows 2.0.2",
         "minSupportedVersion": null,
         "publishedAt": 1723444800,
@@ -197,10 +197,10 @@
         "createdAt": 1723358400,
         "updatedAt": 1723444800,
         "sizeBytes": 68819768,
-        "verifiedAt": null,
-        "signed": false,
+        "verifiedAt": 1723444740,
+        "signed": true,
         "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/windows/2.0.2.zip",
-        "minOsVersion": null
+        "minOsVersion": "10.0.19045"
       },
       {
         "id": "rel-windows-200",
@@ -209,7 +209,7 @@
         "version": "2.0.0",
         "build": null,
         "r2Key": "clients/windows/2.0.0.zip",
-        "sha256": null,
+        "sha256": "a072eb535a327ce0cafff8a299c60f3e2116b86beb48464a4413168970645947",
         "notes": "windows 2.0.0",
         "minSupportedVersion": null,
         "publishedAt": 1722667200,
@@ -217,10 +217,10 @@
         "createdAt": 1722580800,
         "updatedAt": 1722667200,
         "sizeBytes": 66262006,
-        "verifiedAt": null,
-        "signed": false,
+        "verifiedAt": 1722667140,
+        "signed": true,
         "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/windows/2.0.0.zip",
-        "minOsVersion": null
+        "minOsVersion": "10.0.19045"
       },
       {
         "id": "rel-windows-197",
@@ -229,7 +229,7 @@
         "version": "1.9.7",
         "build": null,
         "r2Key": "clients/windows/1.9.7.zip",
-        "sha256": null,
+        "sha256": "0bd3636df9f595c1ed9328dd97b000bdd294a1787beb221558a2b9b83cdbb0ca",
         "notes": "windows 1.9.7",
         "minSupportedVersion": null,
         "publishedAt": 1721889600,
@@ -237,10 +237,10 @@
         "createdAt": 1721803200,
         "updatedAt": 1721889600,
         "sizeBytes": 72713311,
-        "verifiedAt": null,
-        "signed": false,
+        "verifiedAt": 1721889540,
+        "signed": true,
         "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/windows/1.9.7.zip",
-        "minOsVersion": null
+        "minOsVersion": "10.0.19045"
       },
       {
         "id": "rel-windows-196",
@@ -249,7 +249,7 @@
         "version": "1.9.6",
         "build": null,
         "r2Key": "clients/windows/1.9.6.zip",
-        "sha256": null,
+        "sha256": "dbdb7c20d5031346bdc42371ec89b6ad4ebd2b85a1435d08227dc13aef67363f",
         "notes": "windows 1.9.6",
         "minSupportedVersion": null,
         "publishedAt": 1721112000,
@@ -257,10 +257,10 @@
         "createdAt": 1721025600,
         "updatedAt": 1721112000,
         "sizeBytes": 66439712,
-        "verifiedAt": null,
-        "signed": false,
+        "verifiedAt": 1721111940,
+        "signed": true,
         "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/windows/1.9.6.zip",
-        "minOsVersion": null
+        "minOsVersion": "10.0.19045"
       },
       {
         "id": "rel-linux-042",

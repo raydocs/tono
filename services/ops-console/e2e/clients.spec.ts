@@ -55,7 +55,7 @@ test.describe('clients page', () => {
     await row.getByRole('button', { name: '撤回' }).click();
 
     const dialog = page.getByRole('dialog');
-    await expect(dialog).toContainText('这只在后台把 1.8.1 标记为已撤回');
+    await expect(dialog).toContainText('1.8.1 会从客户端检查更新的地方消失');
     await dialog.getByRole('button', { name: '撤回' }).click();
 
     await expect(row).toContainText('已撤回');
@@ -72,6 +72,55 @@ test.describe('clients page', () => {
     await expect(dialog).toContainText('不会被停用');
     await dialog.getByRole('button', { name: '设最低支持版本' }).click();
     await expect(row).toContainText('1.8.0');
+  });
+
+  /**
+   * The three ways 发布 is a lie, each disabled with the reason in the tooltip.
+   *
+   * The Worker refuses all three too; what this holds is that the operator
+   * reads why before clicking, rather than after a dialog fails. A greyed
+   * button with no explanation is what makes people reload the page.
+   */
+  test('a platform with no updater cannot be published to', async ({ page }) => {
+    await open(page, '/clients', 'dense');
+    for (const [version, platform] of [
+      ['0.4.2', 'Linux'],
+      ['0.2.0', 'Android'],
+      ['0.1.1', 'iOS'],
+    ]) {
+      const row = page.locator('tbody tr').filter({ hasText: version }).first();
+      const publish = row.getByRole('button', { name: '发布' });
+      await expect(publish, version).toBeDisabled();
+      await expect(publish, version)
+        .toHaveAttribute('title', `${platform} 还没有自动更新，发布了客户端也收不到`);
+    }
+    // And the heading above the table says the same thing once, in words.
+    await expect(page.getByText('客户端还不会自动更新')).toHaveCount(3);
+  });
+
+  test('a build nothing has checked cannot be published', async ({ page }) => {
+    await open(page, '/clients');
+    const row = page.locator('tbody tr').filter({ hasText: '1.9.0-rc1' }).first();
+    await expect(row).toContainText('未校验');
+    const publish = row.getByRole('button', { name: '发布' });
+    await expect(publish).toBeDisabled();
+    await expect(publish)
+      .toHaveAttribute('title', '还没跟更新源上的文件核对过，先重新登记这个版本');
+  });
+
+  test('publishing says what the installed clients will do about it', async ({ page }, testInfo) => {
+    await open(page, '/clients', 'default', `publish-${testInfo.project.name}`);
+    const row = page.locator('tbody tr').filter({ hasText: '1.8.2' }).first();
+    await expect(row).toContainText('已校验');
+    await row.getByRole('button', { name: '发布' }).click();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('Windows 的客户端下次检查更新时就会看到 1.8.2');
+    await expect(dialog).toContainText('已经装好的旧版本不会被卸载');
+    await dialog.getByRole('button', { name: '发布' }).click();
+
+    // The row comes back from the server published, so 撤回 is what is left.
+    await expect(row.getByRole('button', { name: '撤回' })).toBeVisible();
   });
 
   test('a fleet with no releases says so instead of showing an empty grid', async ({ page }) => {

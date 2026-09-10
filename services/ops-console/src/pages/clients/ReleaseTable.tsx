@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Platform, ReleaseDto } from '@contract';
+import type { Platform, ReleaseDto, UpdateChannelDto } from '@contract';
 import { Action, ActionRow } from '@/components/ops/Action';
 import { ConfirmDialog } from '@/components/ops/ConfirmDialog';
 import { DataTable, type DataColumn } from '@/components/ops/DataTable';
@@ -7,8 +7,8 @@ import { LifecycleTag } from '@/components/ops/Chip';
 import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
 import { opsApi } from '@/lib/api';
-import { compareVersions } from '@/lib/releases';
-import { formatDate } from '@/lib/display';
+import { compareVersions, publishBlockReason } from '@/lib/releases';
+import { formatBytesMeasured, formatDate } from '@/lib/display';
 
 type Pending =
   | { kind: 'publish'; row: ReleaseDto }
@@ -27,10 +27,13 @@ type Pending =
 export function ReleaseTable({
   platform,
   releases,
+  channel,
   onChanged,
 }: {
   platform: Platform;
   releases: readonly ReleaseDto[];
+  /** This platform's update channel; null while it is still being fetched. */
+  channel: UpdateChannelDto | null;
   onChanged: () => void;
 }) {
   const [pending, setPending] = useState<Pending | null>(null);
@@ -69,7 +72,7 @@ export function ReleaseTable({
     <>
       <DataTable
         rows={rows}
-        columns={releaseColumns(ask)}
+        columns={releaseColumns(ask, channel)}
         getRowId={(row) => row.id}
         state={rows.length === 0 ? 'empty' : 'ready'}
       />
@@ -110,7 +113,28 @@ function consequence(pending: Pending | null, minVersion: string): string {
   return copy.releaseConfirm.setMin(minVersion.trim() || copy.missing);
 }
 
-function releaseColumns(ask: (next: Pending) => void): DataColumn<ReleaseDto>[] {
+/**
+ * What has been checked about the file behind a row.
+ *
+ * The digest and the size are the two things an operator can compare against
+ * the build they uploaded, so the checked word carries both rather than being a
+ * tick. Unchecked and unsigned are states of a row that exists, not
+ * measurements that are missing, so they are words rather than the em dash
+ * `Value` would render.
+ */
+function verification(row: ReleaseDto, channel: UpdateChannelDto | null): string {
+  if (row.verifiedAt == null) return copy.releaseVerified.unverified;
+  if (channel?.wired === true && row.signed !== true) return copy.releaseVerified.unsigned;
+  return copy.releaseVerified.checked(
+    (row.sha256 ?? '').slice(0, 8) || copy.missing,
+    formatBytesMeasured(row.sizeBytes),
+  );
+}
+
+function releaseColumns(
+  ask: (next: Pending) => void,
+  channel: UpdateChannelDto | null,
+): DataColumn<ReleaseDto>[] {
   return [
     {
       id: 'channel',
@@ -122,7 +146,7 @@ function releaseColumns(ask: (next: Pending) => void): DataColumn<ReleaseDto>[] 
     {
       id: 'version',
       header: copy.releaseColumns.version,
-      width: '176px',
+      width: '156px',
       mono: true,
       sortValue: (row) => row.version,
       cell: (row) => (
@@ -146,6 +170,20 @@ function releaseColumns(ask: (next: Pending) => void): DataColumn<ReleaseDto>[] 
           tier="body"
           mono
         />
+      ),
+    },
+    {
+      id: 'verified',
+      header: copy.releaseColumns.verified,
+      width: '228px',
+      mono: true,
+      sortValue: (row) => row.verifiedAt ?? 0,
+      cell: (row) => (
+        <span
+          className={row.verifiedAt == null ? 'text-body text-[var(--muted-foreground)]' : 'text-body'}
+        >
+          {verification(row, channel)}
+        </span>
       ),
     },
     {
@@ -175,12 +213,15 @@ function releaseColumns(ask: (next: Pending) => void): DataColumn<ReleaseDto>[] 
     {
       id: 'action',
       header: copy.releaseColumns.action,
-      width: '250px',
+      width: '228px',
       align: 'right',
       cell: (row) => (
         <ActionRow className="justify-end gap-1.5">
           {row.publishedAt === null ? (
-            <Action onClick={() => ask({ kind: 'publish', row })}>
+            <Action
+              reason={publishBlockReason(row, channel, copy)}
+              onClick={() => ask({ kind: 'publish', row })}
+            >
               {copy.releaseActions.publish}
             </Action>
           ) : null}
