@@ -7,7 +7,9 @@ import { beforeNoon, capNight, formatLife, groupNight, type NightGroup } from '@
 import type { Tone } from '@/components/ops/StatusWord';
 import { useIsPhone } from '@/lib/use-phone';
 import type { Resource } from '@/lib/use-resource';
+import { Worthwhile } from '../worthwhile/Worthwhile';
 import { cn } from '@/lib/utils';
+
 
 /**
  * The morning read: the three questions the review says a morning has to
@@ -109,7 +111,10 @@ export function Digest({
           </div>
         )}
       </Line>
+
+      <Worthwhile data={digest.data.worthwhile} />
     </div>
+
   );
 
   /**

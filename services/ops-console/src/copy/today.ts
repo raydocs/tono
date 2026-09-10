@@ -285,3 +285,6 @@ export const todayCopy = {
   commandInvites: '还没注册',
   commandIncidents: '事故',
 } as const;
+
+export { worthwhileCopy } from './worthwhile';
+

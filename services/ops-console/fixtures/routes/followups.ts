@@ -2,6 +2,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { nowSec } from '../../src/lib/clock';
 import { materializeOps } from '../../src/lib/ops-fixtures';
 import { readBody, refuse, sendJson } from './customers-store';
+import { worthwhileOf, type FixtureSet } from './worthwhile';
+
 
 /**
  * 跟进, 下次检查, 收尾, 早报 — the write half of the workbench, served by the
@@ -137,16 +139,6 @@ function overnightFrom(at: number): number {
   return startOfDay(at) - 6 * HOUR;
 }
 
-/**
- * Monday of the Asia/Shanghai week `at` falls in, `YYYY-MM-DD`. 1970-01-01 was
- * a Thursday, so an epoch day sits `(day + 3) % 7` days past its Monday.
- */
-function weekOf(at: number): string {
-  const dayIndex = Math.floor((at + 8 * HOUR) / (24 * HOUR));
-  const sinceMonday = ((dayIndex + 3) % 7 + 7) % 7;
-  return new Date((dayIndex - sinceMonday) * 24 * HOUR * 1_000).toISOString().slice(0, 10);
-}
-
 function listOf(rows: readonly Followup[]): unknown {
   return { items: [...rows], nextCursor: null, total: rows.length, updatedAt: nowSec() };
 }
@@ -272,7 +264,7 @@ function withHandling(row: Record<string, unknown>, store: Store): Record<string
   };
 }
 
-function digestOf(file: OpsFile | null, store: Store): unknown {
+function digestOf(file: OpsFile | null, store: Store, set: FixtureSet = 'default'): unknown {
   const at = nowSec();
   const since = overnightFrom(at);
   const rows = file === null ? [] : incidentsNow(file, store);
@@ -298,7 +290,7 @@ function digestOf(file: OpsFile | null, store: Store): unknown {
         (row) => typeof row.nextCheckAt === 'number' && row.nextCheckAt <= end,
       ),
     },
-    worthwhile: { weekOf: weekOf(at), computedAt: at, picks: [], considered: 0 },
+    worthwhile: worthwhileOf(set, at),
     updatedAt: at,
   };
 }
@@ -501,9 +493,10 @@ export function createFollowupFixtures() {
       file: withFlapping(options.incidents()),
     };
     if (parts[0] === 'digest' && parts.length === 1) {
-      sendJson(options.res, digestOf(context.file, context.store));
+      sendJson(options.res, digestOf(context.file, context.store, options.empty ? 'empty' : 'default'));
       return true;
     }
+
     if (parts[0] === 'followups') {
       return parts.length === 1 ? dueRoute(context) : patchRoute(context);
     }
