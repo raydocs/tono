@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  type IncidentDesire,
   HYSTERESIS,
   PATH_SEVERE_MS,
   PATH_WARN_MS,
@@ -136,10 +137,16 @@ describe('verdict precedence', () => {
     },
     { name: 'healthy is ok', over: {}, expected: 'ok' },
     {
-      name: 'quality snapshot older than 2h is unknown',
+      name: 'quality sweep older than a missed twelve-hour cycle (26h) is unknown',
       over: {},
       expected: 'unknown',
-      ctxOver: { qualitySweepAt: NOW - 2 * 3600 - 1 },
+      ctxOver: { qualitySweepAt: NOW - 26 * 3600 - 1 },
+    },
+    {
+      name: 'a nineteen-hour-old sweep is still the latest cycle, so healthy stays ok',
+      over: {},
+      expected: 'ok',
+      ctxOver: { qualitySweepAt: NOW - 19 * 3600 },
     },
     {
       name: 'agents snapshot older than 15min is unknown',
@@ -344,8 +351,18 @@ describe('maintenance and fleet collector', () => {
     expect(out.desires.filter((d) => d.kind !== 'fleet-collector-stale')).toEqual([]);
   });
 
-  it('raises fleet-collector-stale when either snapshot is older than 20 minutes', () => {
-    const out = evaluate(world({ qualitySweepAt: NOW - 21 * 60 }));
-    expect(out.desires.some((d) => d.kind === 'fleet-collector-stale' && d.severity === 'severe')).toBe(true);
+  it('raises fleet-collector-stale on a silent agent copy (20 min) or a missed sweep cycle (26 h)', () => {
+    const stale = (d: IncidentDesire) => d.kind === 'fleet-collector-stale' && d.severity === 'severe';
+    expect(evaluate(world({ agentsSnapshotAt: NOW - 21 * 60 })).desires.some(stale)).toBe(true);
+    expect(evaluate(world({ qualitySweepAt: NOW - 19 * 3600 })).desires.some(stale)).toBe(false);
+    expect(evaluate(world({ qualitySweepAt: NOW - 27 * 3600 })).desires.some(stale)).toBe(true);
+  });
+
+  it('a retired machine is expected to be unreachable and opens no incident', () => {
+    const out = evaluate(world({
+      nodes: [node({ name: 'Old · Box', ok: false, agentObservedAt: null, catalogListed: false, profileStatus: 'retired' })],
+    }));
+    expect(out.nodes[0].verdict).toBe('down');
+    expect(out.desires.filter((d) => d.subjectType === 'node')).toEqual([]);
   });
 });

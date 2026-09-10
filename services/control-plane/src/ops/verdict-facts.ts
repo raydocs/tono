@@ -226,14 +226,17 @@ async function loadLastOkAt(db: D1Database): Promise<Map<string, number>> {
   }
 }
 
-async function loadOccupancy(db: D1Database): Promise<Map<string, number>> {
+/** Who is on a node right now: a heartbeat within the last forty minutes, not a row that never aged out. */
+const OCCUPANCY_FRESH_SECONDS = 40 * 60;
+
+async function loadOccupancy(db: D1Database, nowSec: number): Promise<Map<string, number>> {
   try {
     const rows = await db.prepare(
       `SELECT selected_server AS node, COUNT(*) AS n
        FROM ops_customer_status
-       WHERE connected = 1 AND selected_server IS NOT NULL
+       WHERE connected = 1 AND selected_server IS NOT NULL AND last_seen_at >= ?
        GROUP BY selected_server`,
-    ).all<Row>();
+    ).bind(nowSec - OCCUPANCY_FRESH_SECONDS).all<Row>();
     return new Map((rows.results ?? []).map((row) => [String(row.node), Number(row.n) || 0]));
   } catch (error) {
     if (missingTable(error)) return new Map();
@@ -396,7 +399,7 @@ export async function buildVerdictInput(
     loadRollups(e.DB),
     loadErrorSpikes(e.DB, nowSec),
     loadLastOkAt(e.DB),
-    loadOccupancy(e.DB),
+    loadOccupancy(e.DB, nowSec),
     loadProfiles(e.DB),
     scope === 'none'
       ? Promise.resolve([] as CustomerVerdictInput[])
