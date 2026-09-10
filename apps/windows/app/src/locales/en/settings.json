@@ -22,11 +22,11 @@
       },
       "periodicTelemetry": {
         "label": "Share diagnostic timeline (optional)",
-        "description": "Off by default. If you turn it on, about every 20 minutes while signed in Tono uploads a short protection and network event summary so we can improve Claude stability in China, and reports a failed connection the moment it happens. No chat content, passwords, or node secrets."
+        "description": "Off by default. If you turn it on, about every 20 minutes while signed in Tono uploads a short protection and network event summary — including per-route byte totals and bytes at disconnect — so we can improve Claude stability in China, and reports a failed connection the moment it happens. No chat content, passwords, or node secrets."
       },
       "networkLogUpload": {
-        "label": "Upload the full traffic log (testing)",
-        "description": "Uploads the local diagnostic log itself, not a summary: the hostnames you connected to, the process that opened each connection, and which rule and route it matched. Credentials and URL queries are removed before anything is written. This is a larger disclosure than the diagnostic timeline above and is asked separately. Turning it off stops the next upload."
+        "label": "Upload the full traffic log",
+        "description": "On by default. Uploads the local diagnostic log: the hostnames you connected to, the process that opened each connection, the matched rule and route, per-route byte totals, and bytes at disconnect. You can turn this off here. No page content, passwords, or node secrets."
       }
     },
     "system": {

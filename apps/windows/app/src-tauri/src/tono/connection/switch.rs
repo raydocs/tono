@@ -12,9 +12,9 @@ use crate::tono::{
     audit::AuditEvent, catalog_sync, commands, connection_plan::guard_rejection_is_transient, state::TonoState,
 };
 use super::{
-    Attempt, BoxedTask, SampledConnections, attempt, fail_connect, seed_autostart_after_connect,
+    Attempt, BoxedTask, attempt, fail_connect, seed_autostart_after_connect,
 };
-use super::controller::{controller_client, controller_url, select_exit_group};
+use super::controller::{controller_client, controller_url, fetch_connections, select_exit_group};
 use super::endpoints::{proxy_endpoints_for, unique_proxy_endpoints};
 use super::probes::verify_tun_data_plane;
 use super::reconnect::schedule_reconnect;
@@ -305,18 +305,10 @@ pub(super) async fn close_connections_bound_to(state: &Arc<TonoState>, generatio
             None => return,
         }
     };
+    let Some(payload) = fetch_connections(&secret, port).await else {
+        return;
+    };
     let Ok(client) = controller_client(Duration::from_secs(2)) else {
-        return;
-    };
-    let Ok(response) = client
-        .get(controller_url(port, "/connections"))
-        .bearer_auth(&secret)
-        .send()
-        .await
-    else {
-        return;
-    };
-    let Ok(payload) = response.json::<SampledConnections>().await else {
         return;
     };
     for connection in payload.connections {

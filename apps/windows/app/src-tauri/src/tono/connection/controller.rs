@@ -168,6 +168,19 @@ pub(super) fn controller_url(port: u16, path: &str) -> String {
     format!("http://127.0.0.1:{port}{path}")
 }
 
+/// One GET `/connections`. Failures are swallowed: callers treat this as
+/// instrumentation and must not stall a connect or disconnect on it.
+pub(super) async fn fetch_connections(secret: &str, port: u16) -> Option<super::SampledConnections> {
+    let client = controller_client(Duration::from_secs(2)).ok()?;
+    let response = client
+        .get(controller_url(port, "/connections"))
+        .bearer_auth(secret)
+        .send()
+        .await
+        .ok()?;
+    response.json::<super::SampledConnections>().await.ok()
+}
+
 /// Activity close mutations are generation-bound and use the copied endpoint credentials. If a
 /// recovery replaces the controller after this check, the request still targets the old loopback
 /// port and can never close a connection on the new generation.

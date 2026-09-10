@@ -233,7 +233,7 @@ const GeneralCard = () => {
   )
 }
 
-const PrivacyCard = () => {
+export const PrivacyCard = () => {
   const { t } = useTranslation()
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)

@@ -10,7 +10,7 @@ pub(crate) const MAX_PROTECTED_ROUTE_SAMPLES: usize = 512;
 /// The subset of `/connections` this sampler reads. Deliberately not the full shape: every
 /// field here is one the audit record needs, and anything the controller adds later is
 /// ignored rather than a parse failure.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Deserialize)]
 pub(crate) struct SampledConnection {
     #[serde(default)]
     pub(crate) id: String,
@@ -22,6 +22,10 @@ pub(crate) struct SampledConnection {
     pub(crate) rule: String,
     #[serde(default, rename = "rulePayload")]
     pub(crate) rule_payload: String,
+    #[serde(default)]
+    pub(crate) upload: u64,
+    #[serde(default)]
+    pub(crate) download: u64,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -40,10 +44,14 @@ pub(crate) struct SampledMetadata {
     pub(crate) process_path: String,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Deserialize)]
 pub(crate) struct SampledConnections {
     #[serde(default)]
     pub(crate) connections: Vec<SampledConnection>,
+    #[serde(default, rename = "uploadTotal")]
+    pub(crate) upload_total: u64,
+    #[serde(default, rename = "downloadTotal")]
+    pub(crate) download_total: u64,
 }
 
 /// One destination worth recording, already deduplicated.

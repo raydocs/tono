@@ -373,8 +373,10 @@ pub(super) async fn run_stages(
         crate::tono::steps::complete_all(&mut inner.connect_steps, elapsed);
         inner.retry_attempt = 0;
         inner.next_retry_at_ms = None;
+        inner.connected_at = Some(std::time::Instant::now());
         commands::emit_status(app, &commands::status_of(&inner));
     }
+    state.route_ledger().lock().clear_connection_counters();
     let exit_delay_ms = state.lock().await.selected_exit_delay_ms();
     state.audit().log(AuditEvent::ConnectOk {
         node: node.name.clone(),

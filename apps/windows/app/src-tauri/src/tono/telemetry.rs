@@ -10,8 +10,8 @@ use std::{path::Path, sync::Arc, time::Duration};
 use serde_json::Value;
 use tauri::AppHandle;
 use tono_core::auth::{
-    ApiError, ConnectFailureReport, TELEMETRY_KIND_PERIODIC_WINDOW, TELEMETRY_SCHEMA_VERSION, TelemetryEvent,
-    TelemetryWindowReport,
+    ApiError, BytesByRoute, ConnectFailureReport, TELEMETRY_KIND_PERIODIC_WINDOW, TELEMETRY_SCHEMA_VERSION,
+    TelemetryEvent, TelemetryWindowReport,
 };
 
 use tono_logging::{Type, logging};
@@ -213,6 +213,9 @@ async fn upload_once(state: &Arc<TonoState>, generation: u64) -> Result<(), ApiE
     let event_count = report.event_count;
     match client.upload_telemetry_window(&report).await {
         Ok(_receipt) => {
+            // Advance the bytesByRoute baseline only after a 2xx so a failed
+            // window is retried with the same delta rather than losing those bytes.
+            state.route_ledger().lock().advance_baseline();
             state
                 .audit()
                 .log(AuditEvent::PeriodicTelemetryUploaded { event_count, bytes });
@@ -231,7 +234,7 @@ async fn build_window_report(state: &Arc<TonoState>) -> Result<TelemetryWindowRe
     let now_ms = epoch_ms();
     let start_ms = now_ms.saturating_sub(PERIODIC_TELEMETRY_LOOKBACK.as_millis() as i64);
     let log_path = state.audit().log_path().to_path_buf();
-    let (mut events, dropped) = tokio::task::spawn_blocking(move || collect_events(&log_path, start_ms, now_ms))
+    let (events, dropped) = tokio::task::spawn_blocking(move || collect_events(&log_path, start_ms, now_ms))
         .await
         .map_err(|err| err.to_string())??;
 
@@ -274,40 +277,8 @@ async fn build_window_report(state: &Arc<TonoState>) -> Result<TelemetryWindowRe
         )
     };
 
-    while !events.is_empty() {
-        let candidate = TelemetryWindowReport {
-            schema_version: TELEMETRY_SCHEMA_VERSION,
-            kind: TELEMETRY_KIND_PERIODIC_WINDOW.to_string(),
-            window_start_ms: start_ms,
-            window_end_ms: now_ms,
-            app_version: app_version.clone(),
-            os_version: os_version.clone(),
-            os_arch: std::env::consts::ARCH.to_string(),
-            ui_state: ui_state.clone(),
-            account_state: account_state.clone(),
-            selected_server: selected_server.clone(),
-            catalog_revision,
-            kill_switch_mode: kill_switch_mode.clone(),
-            kill_switch_wanted,
-            kill_switch_live,
-            dns_enabled: None,
-            exit_delay_ms,
-            exit_delay_at_ms,
-            tcp_delay_ms,
-            tcp_delay_at_ms,
-            platform: Some(PLATFORM.to_string()),
-            event_count: events.len() as u32,
-            events_dropped: dropped,
-            events: events.clone(),
-        };
-        let size = serde_json::to_vec(&candidate).map(|v| v.len()).unwrap_or(usize::MAX);
-        if size <= MAX_PAYLOAD_BYTES {
-            return Ok(candidate);
-        }
-        events.remove(0);
-    }
-
-    Ok(TelemetryWindowReport {
+    let bytes_by_route: Option<BytesByRoute> = Some(state.route_ledger().lock().window_bytes());
+    let template = TelemetryWindowReport {
         schema_version: TELEMETRY_SCHEMA_VERSION,
         kind: TELEMETRY_KIND_PERIODIC_WINDOW.to_string(),
         window_start_ms: start_ms,
@@ -328,10 +299,41 @@ async fn build_window_report(state: &Arc<TonoState>) -> Result<TelemetryWindowRe
         tcp_delay_ms,
         tcp_delay_at_ms,
         platform: Some(PLATFORM.to_string()),
+        bytes_by_route,
         event_count: 0,
         events_dropped: dropped,
         events: Vec::new(),
-    })
+    };
+    Ok(assemble_window(events, dropped, template))
+}
+
+/// Trim oldest events until the payload fits, then fall back to an empty
+/// event list. `bytes_by_route` (and the rest of `template`) survives both
+/// the trim loop and the empty fallback.
+fn assemble_window(
+    mut events: Vec<TelemetryEvent>,
+    dropped: u32,
+    template: TelemetryWindowReport,
+) -> TelemetryWindowReport {
+    while !events.is_empty() {
+        let candidate = TelemetryWindowReport {
+            event_count: events.len() as u32,
+            events_dropped: dropped,
+            events: events.clone(),
+            ..template.clone()
+        };
+        let size = serde_json::to_vec(&candidate).map(|v| v.len()).unwrap_or(usize::MAX);
+        if size <= MAX_PAYLOAD_BYTES {
+            return candidate;
+        }
+        events.remove(0);
+    }
+    TelemetryWindowReport {
+        event_count: 0,
+        events_dropped: dropped,
+        events: Vec::new(),
+        ..template
+    }
 }
 
 /// The stable `TONO_*` marker inside a connect error, or `UNKNOWN`. The Service
@@ -538,6 +540,8 @@ fn map_event(value: &Value, ts: i64, kind: &str) -> Option<TelemetryEvent> {
         endpoints: i64_field("endpoints"),
         event_count: i64_field("eventCount"),
         bytes: i64_field("bytes"),
+        bytes_up: i64_field("bytesUp"),
+        bytes_down: i64_field("bytesDown"),
         wanted: bool_field("wanted"),
         live: bool_field("live"),
     })
@@ -780,6 +784,99 @@ mod tests {
         assert!(!json.contains("private-node"));
         assert!(!json.contains("private-error"));
         assert!(!json.contains("private-probe"));
+    }
+
+    #[test]
+    fn collect_events_maps_disconnect_ok_bytes_and_elapsed() {
+        let dir = TempDir::new("disconnect-ok");
+        let path = dir.path().join("traffic-audit.jsonl");
+        let mut file = std::fs::File::create(&path).unwrap();
+        let now = epoch_ms();
+        writeln!(
+            file,
+            r#"{{"ts":{},"kind":"disconnectOk","elapsedMs":45000,"bytesUp":1234,"bytesDown":5678}}"#,
+            now - 100
+        )
+        .unwrap();
+        let (events, _) = collect_events(&path, now - 60_000, now).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, "disconnectOk");
+        assert_eq!(events[0].elapsed_ms, Some(45_000));
+        assert_eq!(events[0].bytes_up, Some(1234));
+        assert_eq!(events[0].bytes_down, Some(5678));
+    }
+
+    fn window_template(bytes_by_route: Option<BytesByRoute>) -> TelemetryWindowReport {
+        TelemetryWindowReport {
+            schema_version: TELEMETRY_SCHEMA_VERSION,
+            kind: TELEMETRY_KIND_PERIODIC_WINDOW.to_string(),
+            window_start_ms: 0,
+            window_end_ms: 1,
+            app_version: "0.0.72".to_string(),
+            os_version: "Windows 11".to_string(),
+            os_arch: "x86_64".to_string(),
+            ui_state: "connected".to_string(),
+            account_state: "ready".to_string(),
+            selected_server: None,
+            catalog_revision: None,
+            kill_switch_mode: None,
+            kill_switch_wanted: None,
+            kill_switch_live: None,
+            dns_enabled: None,
+            exit_delay_ms: None,
+            exit_delay_at_ms: None,
+            tcp_delay_ms: None,
+            tcp_delay_at_ms: None,
+            platform: Some(PLATFORM.to_string()),
+            bytes_by_route,
+            event_count: 0,
+            events_dropped: 0,
+            events: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn assemble_window_keeps_bytes_by_route_through_trim_and_empty_fallback() {
+        let bytes = BytesByRoute {
+            cloud: 11,
+            residential: 22,
+            direct: 33,
+        };
+        let bulky: TelemetryEvent = serde_json::from_value(serde_json::json!({
+            "ts": 1,
+            "kind": "connectFail",
+            "error": "x".repeat(8 * 1024),
+        }))
+        .unwrap();
+        // Seven 8 KiB events exceed MAX_PAYLOAD_BYTES (48 KiB), so the trim loop runs.
+        let events = vec![
+            bulky.clone(),
+            bulky.clone(),
+            bulky.clone(),
+            bulky.clone(),
+            bulky.clone(),
+            bulky.clone(),
+            bulky,
+        ];
+        let trimmed = assemble_window(events, 4, window_template(Some(bytes)));
+        assert!(
+            serde_json::to_vec(&trimmed).unwrap().len() <= MAX_PAYLOAD_BYTES,
+            "trim must produce a payload the Worker will accept"
+        );
+        assert_eq!(trimmed.bytes_by_route, Some(bytes));
+        let json = serde_json::to_value(&trimmed).unwrap();
+        assert_eq!(json["bytesByRoute"]["cloud"], 11);
+        assert_eq!(json["bytesByRoute"]["residential"], 22);
+        assert_eq!(json["bytesByRoute"]["direct"], 33);
+
+        let empty = assemble_window(Vec::new(), 9, window_template(Some(bytes)));
+        assert_eq!(empty.event_count, 0);
+        assert!(empty.events.is_empty());
+        assert_eq!(empty.events_dropped, 9);
+        assert_eq!(empty.bytes_by_route, Some(bytes));
+        let empty_json = serde_json::to_value(&empty).unwrap();
+        assert_eq!(empty_json["bytesByRoute"]["cloud"], 11);
+        assert_eq!(empty_json["bytesByRoute"]["direct"], 33);
     }
 }
 

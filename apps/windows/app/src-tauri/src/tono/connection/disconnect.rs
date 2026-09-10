@@ -12,6 +12,7 @@ use crate::tono::{audit::AuditEvent, commands, state::TonoState};
 #[cfg(not(windows))]
 use crate::tono::connection_plan::stop_core_before_release;
 use super::{BoxedTask, fail_connect};
+use super::controller::fetch_connections;
 
 /// UI budget for an explicit release. The ordered DNS → Core → WFP sequence runs in a detached
 /// reconciliation task, so reaching this budget stops waiting but never cancels a safety step.
@@ -146,7 +147,7 @@ pub(super) async fn run_explicit_release_sequence(state: &Arc<TonoState>, app: &
 /// sequence (DNS restore → core stop → owner-gated release, §6/C1).
 /// Idempotent while a disconnect is already in flight (L6).
 pub async fn disconnect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String> {
-    {
+    let (controller_secret, controller_port, connected_at) = {
         let mut inner = state.lock().await;
         if inner.fsm.status().is_disconnecting {
             return Ok(());
@@ -158,8 +159,26 @@ pub async fn disconnect(state: Arc<TonoState>, app: AppHandle) -> Result<(), Str
         }
         inner.fsm.begin_disconnect();
         commands::emit_status(&app, &commands::status_of(&inner));
-    }
+        (
+            inner.controller_secret.clone(),
+            inner.controller_port,
+            inner.connected_at,
+        )
+    };
     state.audit().log(AuditEvent::DisconnectBegin { cause: "user" });
+
+    // Sample before tearing the core down. A failed sample must not stall or
+    // fail the user's disconnect: elapsed/bytes stay None and we continue.
+    let elapsed_ms = connected_at.map(|at| at.elapsed().as_millis() as u64);
+    let sample = match (controller_secret.as_deref(), controller_port) {
+        (Some(secret), Some(port)) => fetch_connections(secret, port).await,
+        _ => None,
+    };
+    if let Some(payload) = sample.as_ref() {
+        state.route_ledger().lock().ingest(payload);
+    }
+    let bytes_up = sample.as_ref().map(|payload| payload.upload_total);
+    let bytes_down = sample.as_ref().map(|payload| payload.download_total);
 
     if let Err(err) = release_explicit(&state, &app).await {
         stay_armed_after_failed_release(&state, &app).await;
@@ -174,11 +193,18 @@ pub async fn disconnect(state: Arc<TonoState>, app: AppHandle) -> Result<(), Str
     inner.network_events_counter = None;
     inner.last_core_pid = None;
     inner.last_restart_count = None;
+    inner.connected_at = None;
     // F3: a user disconnect supersedes the backoff state.
     inner.retry_attempt = 0;
     inner.next_retry_at_ms = None;
     commands::emit_status(&app, &commands::status_of(&inner));
-    state.audit().log(AuditEvent::DisconnectOk);
+    drop(inner);
+    state.route_ledger().lock().clear_connection_counters();
+    state.audit().log(AuditEvent::DisconnectOk {
+        elapsed_ms,
+        bytes_up,
+        bytes_down,
+    });
     Ok(())
 }
 

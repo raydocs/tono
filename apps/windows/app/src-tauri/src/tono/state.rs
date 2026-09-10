@@ -265,6 +265,10 @@ pub struct TonoInner {
     pub connect_steps: Vec<crate::tono::steps::StepRecord>,
     /// When the currently-current step became current (per-step elapsed).
     pub step_started_at: Option<std::time::Instant>,
+    /// When the current session last reached ConnectOk. Used for disconnect
+    /// `elapsedMs` (time since that successful (re)connect, not the original
+    /// attempt). Cleared on a successful disconnect.
+    pub connected_at: Option<std::time::Instant>,
     /// F3: last connect failure details (stage key, sanitized error, when).
     pub failed_stage: Option<&'static str>,
     pub connect_error: Option<String>,
@@ -453,6 +457,10 @@ impl TonoInner {
 pub struct TonoState {
     inner: tokio::sync::Mutex<TonoInner>,
     audit: Arc<crate::tono::audit::Audit>,
+    /// Per-route byte ledger, locked independently of `inner` so the sampler
+    /// and the telemetry uploader never need the product mutex to ingest or
+    /// read a delta.
+    route_ledger: parking_lot::Mutex<crate::tono::route_ledger::RouteLedger>,
     /// Serializes login, periodic, and user-initiated catalog fetches for one account session.
     catalog_sync_operation: tokio::sync::Mutex<()>,
     release_operation: tokio::sync::Mutex<Option<Arc<ReleaseOperation>>>,
@@ -528,6 +536,7 @@ impl TonoState {
                 // fail-closed Service session must not fabricate a current Preparing step.
                 connect_steps: crate::tono::steps::pending_steps(),
                 step_started_at: None,
+                connected_at: None,
                 failed_stage: None,
                 connect_error: None,
                 connect_error_at_ms: None,
@@ -557,6 +566,7 @@ impl TonoState {
                 tasks: TaskRegistry::default(),
             }),
             audit,
+            route_ledger: parking_lot::Mutex::new(crate::tono::route_ledger::RouteLedger::default()),
             catalog_sync_operation: tokio::sync::Mutex::new(()),
             release_operation: tokio::sync::Mutex::new(None),
             privileged_transition: Arc::new(tokio::sync::RwLock::new(())),
@@ -567,6 +577,10 @@ impl TonoState {
 
     pub fn audit(&self) -> &crate::tono::audit::Audit {
         &self.audit
+    }
+
+    pub fn route_ledger(&self) -> &parking_lot::Mutex<crate::tono::route_ledger::RouteLedger> {
+        &self.route_ledger
     }
 
     pub async fn lock(&self) -> tokio::sync::MutexGuard<'_, TonoInner> {

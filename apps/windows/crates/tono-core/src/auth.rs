@@ -545,9 +545,24 @@ pub struct TelemetryEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bytes: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes_up: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes_down: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wanted: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub live: Option<bool>,
+}
+
+/// Bytes attributed to each route over one telemetry window (a delta since the
+/// previous successful upload, not a lifetime total). Keys are the only ones
+/// the Worker accepts: `cloud`, `residential`, `direct`.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BytesByRoute {
+    pub cloud: u64,
+    pub residential: u64,
+    pub direct: u64,
 }
 
 /// Whitelisted periodic timeline window body.
@@ -590,6 +605,10 @@ pub struct TelemetryWindowReport {
     /// for clients that predate the field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub platform: Option<String>,
+    /// Window delta of bytes by route. Omitted when the client has no ledger
+    /// snapshot. The Worker refuses any key other than `cloud`/`residential`/`direct`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes_by_route: Option<BytesByRoute>,
     pub event_count: u32,
     pub events_dropped: u32,
     pub events: Vec<TelemetryEvent>,
@@ -2624,6 +2643,7 @@ mod connect_failure_report_tests {
             tcp_delay_ms: None,
             tcp_delay_at_ms: None,
             platform: Some("windows".to_string()),
+            bytes_by_route: None,
             event_count: 0,
             events_dropped: 0,
             events: Vec::new(),
@@ -2632,5 +2652,85 @@ mod connect_failure_report_tests {
         assert_eq!(value["platform"], "windows");
         let unnamed = TelemetryWindowReport { platform: None, ..report };
         assert!(serde_json::to_value(&unnamed).unwrap().get("platform").is_none());
+    }
+
+    #[test]
+    fn a_disconnect_event_names_bytes_up_and_down_only_when_set() {
+        let event: TelemetryEvent = serde_json::from_value(serde_json::json!({
+            "ts": 1,
+            "kind": "disconnectOk",
+            "elapsedMs": 1500,
+            "bytesUp": 11,
+            "bytesDown": 22,
+        }))
+        .unwrap();
+        let value = serde_json::to_value(&event).unwrap();
+        assert_eq!(value["bytesUp"], 11);
+        assert_eq!(value["bytesDown"], 22);
+        assert_eq!(value["elapsedMs"], 1500);
+        let unnamed = TelemetryEvent {
+            bytes_up: None,
+            bytes_down: None,
+            elapsed_ms: None,
+            ..event
+        };
+        let omitted = serde_json::to_value(&unnamed).unwrap();
+        assert!(omitted.get("bytesUp").is_none());
+        assert!(omitted.get("bytesDown").is_none());
+        assert!(omitted.get("elapsedMs").is_none());
+    }
+
+    #[test]
+    fn a_window_names_bytes_by_route_only_when_set() {
+        let report = TelemetryWindowReport {
+            schema_version: TELEMETRY_SCHEMA_VERSION,
+            kind: TELEMETRY_KIND_PERIODIC_WINDOW.to_string(),
+            window_start_ms: 0,
+            window_end_ms: 1,
+            app_version: "0.0.73".to_string(),
+            os_version: "Windows 11".to_string(),
+            os_arch: "x86_64".to_string(),
+            ui_state: "connected".to_string(),
+            account_state: "ready".to_string(),
+            selected_server: None,
+            catalog_revision: None,
+            kill_switch_mode: None,
+            kill_switch_wanted: None,
+            kill_switch_live: None,
+            dns_enabled: None,
+            exit_delay_ms: None,
+            exit_delay_at_ms: None,
+            tcp_delay_ms: None,
+            tcp_delay_at_ms: None,
+            platform: Some("windows".to_string()),
+            bytes_by_route: Some(BytesByRoute {
+                cloud: 1,
+                residential: 2,
+                direct: 3,
+            }),
+            event_count: 0,
+            events_dropped: 0,
+            events: Vec::new(),
+        };
+        let value = serde_json::to_value(&report).unwrap();
+        let object = value["bytesByRoute"].as_object().expect("bytesByRoute object");
+        let accepted = ["cloud", "residential", "direct"];
+        assert_eq!(object.len(), 3);
+        for key in object.keys() {
+            assert!(accepted.contains(&key.as_str()), "unexpected key {key}");
+        }
+        assert_eq!(object["cloud"], 1);
+        assert_eq!(object["residential"], 2);
+        assert_eq!(object["direct"], 3);
+        let unnamed = TelemetryWindowReport {
+            bytes_by_route: None,
+            ..report
+        };
+        assert!(
+            serde_json::to_value(&unnamed)
+                .unwrap()
+                .get("bytesByRoute")
+                .is_none()
+        );
     }
 }
