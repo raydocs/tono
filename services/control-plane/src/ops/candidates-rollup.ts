@@ -36,6 +36,13 @@ async function runChunks(db: D1Database, statements: D1PreparedStatement[]): Pro
  * once. Domestic-ness is a JS predicate, so the domains are listed first and
  * filtered here; that keeps the write to one statement per domestic domain
  * rather than one per (user, day, domain).
+ *
+ * `INSERT OR IGNORE` means the deploy day itself can come out low: a segment
+ * that lands between deploy and this pass already wrote a (user, day, domain)
+ * row holding only its own bytes, and that key is then skipped here, so the
+ * pre-deploy part of that one day never arrives. Every earlier day is exact,
+ * and the short day ages out of the 30-day window on its own. Adding to the
+ * existing row instead would double-count it, which is the worse wrong answer.
  */
 async function backfillCandidateDaily(db: D1Database, nowSec: number): Promise<number> {
   if (await readCronState(db, BACKFILL_KEY) != null) return 0;
