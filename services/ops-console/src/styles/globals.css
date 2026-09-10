@@ -115,6 +115,19 @@
 .diff-add { background: hsl(var(--ok-bg)); color: hsl(var(--ok-fg)); }
 .diff-del { background: hsl(var(--sev-bg)); color: hsl(var(--sev-fg)); }
 
+/* The header's 数据源 capsule wears the tone of the weakest source. Grey is the
+   resting state — a source nobody has wired up yet is a gap, not an alarm — and
+   only 停了 / 不通 / 后台没响应 tint it. */
+.source-pill { border: 1px solid var(--hairline); }
+.source-pill.tone-unk { color: var(--muted-foreground); }
+.source-pill.tone-warn, .source-pill.tone-sev {
+  color: hsl(var(--tone-fg));
+  background: hsl(var(--tone-bg));
+  border-color: hsl(var(--tone-line) / 0.35);
+}
+/* The page stamp, once the shell has stopped hearing back. */
+.stamp-late { color: hsl(var(--warn-fg)); }
+
 /* A fragment of the page's count sentence: prose that is also a control. */
 .count-bit {
   border-bottom: 2px solid transparent;

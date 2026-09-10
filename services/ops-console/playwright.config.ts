@@ -9,7 +9,16 @@ import { defineConfig, devices } from '@playwright/test';
  */
 const FAKE_NOW = '1788895426'; // 2026-09-09 03:23:46 +08:00
 const TIMEZONE = 'Asia/Shanghai';
-const PORT = 5174;
+/**
+ * One port per checkout.
+ *
+ * `reuseExistingServer` means a dev server already on this port is used as is —
+ * which, with several git worktrees of this repository open at once, is
+ * somebody else's console: the suite then screenshots their branch, or fails
+ * with a refused connection the moment they restart it. Nothing renders the
+ * port, so a worktree can pick its own and the baselines still match.
+ */
+const PORT = Number(process.env.OPS_CONSOLE_PORT ?? 5174);
 
 const shared = {
   viewport: { width: 1440, height: 900 },
@@ -43,6 +52,6 @@ export default defineConfig({
     url: `http://localhost:${PORT}/ops2/`,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
-    env: { VITE_FAKE_NOW: FAKE_NOW, TZ: TIMEZONE },
+    env: { VITE_FAKE_NOW: FAKE_NOW, TZ: TIMEZONE, OPS_CONSOLE_PORT: String(PORT) },
   },
 });

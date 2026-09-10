@@ -1,13 +1,24 @@
 import { useEffect, useState } from 'react';
 import { opsApi, SessionExpiredError } from './api';
+import { nowSec } from './clock';
 import type { FleetDto, LiveDto } from './types';
 
 export type FleetState =
   | { status: 'loading' }
   | { status: 'error'; message: string; sessionExpired: boolean }
-  | { status: 'ready'; fleet: FleetDto; live: LiveDto | null };
+  | { status: 'ready'; fleet: FleetDto; live: LiveDto | null; fetchedAt: number };
 
-export function useFleet(): FleetState & { reload: () => void } {
+/**
+ * The legacy fleet read, kept for the facts no verdict carries — the address,
+ * the system, the ports, the hand-confirmed line tags — and for the chores on
+ * 今天. Health is not read from here any more: the engine judges, once, and
+ * both pages quote it (R4).
+ *
+ * `beat` is the shell's poll; a beat refreshes in place and a failed refresh
+ * keeps the last answer, exactly as `useResource` does, so the two shell reads
+ * age the same way.
+ */
+export function useFleet(beat = 0): FleetState & { reload: () => void } {
   const [state, setState] = useState<FleetState>({ status: 'loading' });
   const [tick, setTick] = useState(0);
 
@@ -24,31 +35,24 @@ export function useFleet(): FleetState & { reload: () => void } {
           if (error instanceof SessionExpiredError) throw error;
           live = null;
         }
-        if (!cancelled) setState({ status: 'ready', fleet, live });
+        if (!cancelled) setState({ status: 'ready', fleet, live, fetchedAt: nowSec() });
       } catch (error) {
         if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) return;
         const sessionExpired = error instanceof SessionExpiredError;
-        setState({
-          status: 'error',
-          message: error instanceof Error ? error.message : String(error),
-          sessionExpired,
-        });
+        setState((current) => (
+          current.status === 'ready' && !sessionExpired ? current : {
+            status: 'error',
+            message: error instanceof Error ? error.message : String(error),
+            sessionExpired,
+          }
+        ));
       }
     })();
     return () => {
       cancelled = true;
       ac.abort();
     };
-  }, [tick]);
+  }, [tick, beat]);
 
   return { ...state, reload: () => setTick((n) => n + 1) };
-}
-
-export function sourceStamp(fleet: FleetDto | null): { ok: boolean; at: number | null } {
-  if (!fleet?.sources) return { ok: false, at: null };
-  const values = Object.values(fleet.sources);
-  if (values.length === 0) return { ok: false, at: null };
-  const times = values.map((s) => s.updatedAt).filter((n): n is number => typeof n === 'number');
-  const ready = values.some((s) => s.state === 'ready');
-  return { ok: ready, at: times.length ? Math.max(...times) : null };
 }

@@ -1,36 +1,27 @@
 import { describe, expect, it } from 'vitest';
+import { NODE_HEALTH_WORDS, healthWordForVerdict, NODE_VERDICTS } from '@contract';
 import { copy } from '@/copy/copy';
-import { mapFleetHealth } from './health';
+import { HEALTH_WORDS } from './health';
 
-describe('mapFleetHealth', () => {
-  it('maps DOWN and EDGE_FAIL to 失联', () => {
-    expect(mapFleetHealth({ qualityStatus: 'DOWN', agentStatus: 'online' })).toBe(copy.health.lost);
-    expect(mapFleetHealth({ qualityStatus: 'EDGE_FAIL', agentStatus: 'online' })).toBe(copy.health.lost);
+/**
+ * The console no longer maps probe statuses to words — the engine does, and
+ * these hold the two lists to saying the same thing. A word the engine can emit
+ * that the console has no copy for would render as an empty status cell, and a
+ * word the console knows that the engine never emits is a filter nobody can
+ * reach.
+ */
+describe('the health vocabulary', () => {
+  it('is the contract list, in the contract order', () => {
+    expect([...HEALTH_WORDS]).toEqual([...NODE_HEALTH_WORDS]);
   });
 
-  it('maps LIKELY_BLOCKED to 被墙', () => {
-    expect(mapFleetHealth({ qualityStatus: 'LIKELY_BLOCKED', agentStatus: 'online' })).toBe(copy.health.blocked);
+  it('has copy for every word the engine can reach through a verdict', () => {
+    const reachable = new Set(NODE_VERDICTS.map((verdict) => healthWordForVerdict(verdict).word));
+    for (const word of reachable) expect(HEALTH_WORDS).toContain(word);
+    expect(reachable.size).toBe(HEALTH_WORDS.length);
   });
 
-  it('maps DEGRADED and stale agent to 劣化', () => {
-    expect(mapFleetHealth({ qualityStatus: 'DEGRADED', agentStatus: 'online' })).toBe(copy.health.degraded);
-    expect(mapFleetHealth({ qualityStatus: 'OK', agentStatus: 'stale' })).toBe(copy.health.degraded);
-  });
-
-  it('maps OK plus online agent to 正常', () => {
-    expect(mapFleetHealth({ qualityStatus: 'OK', agentStatus: 'online' })).toBe(copy.health.ok);
-    expect(mapFleetHealth({ qualityStatus: 'EDGE_OK', agentStatus: 'online' })).toBe(copy.health.ok);
-  });
-
-  it('maps unknown or unprobed to 未测', () => {
-    expect(mapFleetHealth({ qualityStatus: 'UNKNOWN', agentStatus: 'missing' })).toBe(copy.health.unmeasured);
-    expect(mapFleetHealth({ qualityStatus: 'UNPROBED', agentStatus: 'online' })).toBe(copy.health.unmeasured);
-    expect(mapFleetHealth({ qualityStatus: 'OK', agentStatus: 'missing' })).toBe(copy.health.unmeasured);
-  });
-
-  it('applies precedence 失联 > 被墙 > 劣化 > 正常 > 未测', () => {
-    expect(mapFleetHealth({ qualityStatus: 'DOWN', agentStatus: 'stale' })).toBe(copy.health.lost);
-    expect(mapFleetHealth({ qualityStatus: 'LIKELY_BLOCKED', agentStatus: 'stale' })).toBe(copy.health.blocked);
-    expect(mapFleetHealth({ qualityStatus: 'DEGRADED', agentStatus: 'online' })).toBe(copy.health.degraded);
+  it('names the five words the count sentence is written against', () => {
+    expect(Object.values(copy.health).sort()).toEqual([...NODE_HEALTH_WORDS].sort());
   });
 });
