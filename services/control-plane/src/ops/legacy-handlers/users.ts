@@ -14,6 +14,7 @@ import {
   publicHomeBinding,
   loadHomeBinding,
   upsertHomeBinding,
+  parseHomeLine,
 } from '../../home';
 import {
   PRODUCT_CLAUDE,
@@ -46,7 +47,7 @@ import {
   OPS_USERS_PAGE_LIMIT,
 } from '../reads';
 
-function optionalWechatId(value: unknown): string | null {
+export function optionalWechatId(value: unknown): string | null {
   if (value === undefined || value === null || value === '') return null;
   if (typeof value !== 'string') {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid wechatId');
@@ -200,6 +201,22 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
     'wechatId',
   ]);
   const address = email(b.email);
+  const wechatId = b.wechatId !== undefined ? optionalWechatId(b.wechatId) : undefined;
+  const notes = b.notes !== undefined ? optionalNotes(b.notes) : undefined;
+  const contact = b.contact !== undefined ? optionalNotes(b.contact, 'contact', 200) : undefined;
+  const openedAt = b.openedAt !== undefined ? optionalUnix(b.openedAt, 'openedAt') : undefined;
+  if (b.accountRef !== undefined && b.accountRef !== null && b.accountRef !== '') {
+    accountRefField(b.accountRef);
+  }
+  if (b.productAccountId !== undefined && b.productAccountId !== null && b.productAccountId !== '') {
+    str(b.productAccountId, 'productAccountId', 1, 100);
+  }
+  if (b.homeExitId !== undefined && b.homeExitId !== null && b.homeExitId !== '') {
+    str(b.homeExitId, 'homeExitId', 1, 100);
+  }
+  if (b.line !== undefined && b.line !== null && b.line !== '') {
+    parseHomeLine(b.line);
+  }
   const createdAt = now();
   await e.DB.prepare(
     'INSERT OR IGNORE INTO signup_allowlist(email, created_at) VALUES(?, ?)',
@@ -224,9 +241,9 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
            updated_at = ?
          WHERE id = ?`,
       ).bind(
-        b.notes !== undefined, optionalNotes(b.notes),
-        b.contact !== undefined, optionalNotes(b.contact, 'contact', 200),
-        b.wechatId !== undefined, optionalWechatId(b.wechatId),
+        b.notes !== undefined, notes ?? null,
+        b.contact !== undefined, contact ?? null,
+        b.wechatId !== undefined, wechatId ?? null,
         now(), user.id,
       ).run();
     }
@@ -260,8 +277,8 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
     if (b.accountRef) {
       account = await createAssignedProductAccount(
         e, String(user.id), accountRefField(b.accountRef),
-        optionalUnix(b.openedAt, 'openedAt') ?? now(),
-        optionalNotes(b.notes), actor.email,
+        openedAt ?? now(),
+        notes ?? null, actor.email,
       );
     } else if (b.productAccountId) {
       const pooled = await e.DB.prepare(
@@ -270,8 +287,8 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
       if (!pooled) throw new ApiError(404, 'NOT_FOUND', 'Product account not found');
       account = await createAssignedProductAccount(
         e, String(user.id), String(pooled.account_ref),
-        optionalUnix(b.openedAt, 'openedAt') ?? now(),
-        optionalNotes(b.notes), actor.email,
+        openedAt ?? now(),
+        notes ?? null, actor.email,
       );
     } else {
       account = await assignedProductForUser(e, String(user.id));
@@ -285,9 +302,9 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
          notes = CASE WHEN ? THEN ? ELSE notes END
        WHERE email = ?`,
     ).bind(
-      b.wechatId !== undefined, optionalWechatId(b.wechatId),
-      b.contact !== undefined, optionalNotes(b.contact, 'contact', 200),
-      b.notes !== undefined, optionalNotes(b.notes),
+      b.wechatId !== undefined, wechatId ?? null,
+      b.contact !== undefined, contact ?? null,
+      b.notes !== undefined, notes ?? null,
       address,
     ).run();
   }

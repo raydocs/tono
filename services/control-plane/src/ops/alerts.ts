@@ -110,15 +110,19 @@ export function ruleMatches(rule: AlertRule, t: IncidentTransition): boolean {
   return true;
 }
 
+export const DEFAULT_ALERT_ALLOWED_HOSTS = 'api.telegram.org,open.feishu.cn,hooks.slack.com';
+
 export function deliveryDedupeKey(
   ruleId: string,
   incidentDedupeKey: string,
   transition: IncidentPhase,
   openedAt: number,
+  severity: AlertSeverity,
 ): string {
   // openedAt is in the key so a reopen after resolve is a new delivery,
-  // while a double-fire of the same opening is not.
-  return `${ruleId}:${incidentDedupeKey}:${transition}:${openedAt}`;
+  // while a double-fire of the same opening is not. Severity is in the key
+  // so a later escalate (warn → severe) is not dropped by INSERT OR IGNORE.
+  return `${ruleId}:${incidentDedupeKey}:${transition}:${openedAt}:${severity}`;
 }
 
 export function backoffSeconds(attempts: number): number {
@@ -165,7 +169,7 @@ export async function planDeliveries(
     for (const t of transitions) {
       for (const rule of active) {
         if (!ruleMatches(rule, t)) continue;
-        const key = deliveryDedupeKey(rule.id, t.dedupeKey, t.transition, t.openedAt);
+        const key = deliveryDedupeKey(rule.id, t.dedupeKey, t.transition, t.openedAt, t.severity);
         const lastSent = stateAt.get(`${rule.id}\0${t.dedupeKey}`);
         // Cooldown is per incident, not per transition, so a flapping
         // open/close cannot mail the operator every few seconds.
@@ -381,7 +385,9 @@ export async function sendPending(
       errorText = clipError(error);
     }
 
-    const terminal = !ok && attempts >= MAX_ATTEMPTS;
+    const terminal = !ok && (
+      attempts >= MAX_ATTEMPTS || (errorText ?? '').includes('not allowlisted')
+    );
     const status = ok ? 'sent' : terminal ? 'failed' : 'pending';
     const nextAttempt = ok || terminal ? null : nowSec + backoffSeconds(attempts - 1);
     const statements: D1PreparedStatement[] = [

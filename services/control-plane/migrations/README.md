@@ -17,10 +17,10 @@ is the apply order:
 | `0018` | `0018_periodic_telemetry_windows.sql`, `0018_traffic_policy_signature.sql`, `0018_user_default_proxy.sql` |
 
 Do not collapse, renumber, or rewrite these to “fix” the prefixes. New
-schema changes continue from the highest existing number (`0055` at the
+schema changes continue from the highest existing number (`0057` at the
 time this note was written).
 
-## 0039–0055
+## 0039–0057
 
 Ops tables after the sequence was unique. Applied in numeric order:
 
@@ -41,3 +41,5 @@ Ops tables after the sequence was unique. Applied in numeric order:
 - `0053_ops_ledger.sql` — ledger entries, month close, daily FX rates
 - `0054_users_wechat_id.sql` — `users.wechat_id` for operator WeChat contact
 - `0055_signup_allowlist_profile.sql` — `signup_allowlist.wechat_id` / `contact` / `notes` for onboard-before-register
+- `0056_ops_first_connected_at.sql` — `ops_customer_status.first_connected_at` for the onboarding funnel
+- `0057_ops_probe_unreachable.sql` — `ops_node_status.verdict` CHECK adds `probe_unreachable`

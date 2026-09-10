@@ -18,12 +18,14 @@ import {
   type CustomerSummaryDto,
   type CustomerVerdict,
   type DestinationRowDto,
+  type FunnelStage,
   type Platform,
   type RouteKind,
   type ServiceFamily,
   type ServiceUsageDto,
 } from '../contract';
-import { customerFreshnessVerdict } from '../verdict-customers';
+import { funnelDays, loadFunnelFacts, stageSentence, type FunnelPerson } from '../funnel';
+import { customerFreshnessVerdict, neverUsedOverride } from '../verdict-customers';
 import { eventDto } from './nodes-data';
 import {
   Env,
@@ -67,16 +69,24 @@ function verdictFrom(
   user: Row,
   status: Awaited<ReturnType<typeof customerStatus>>,
   incident: OpenCustomerIncident | undefined,
+  stage: FunnelStage,
+  stageSinceAt: number,
   t: number,
 ): { verdict: CustomerVerdict; lifecycle: CustomerDetailDto['lifecycle']; reason: string | null } {
   const lifecycle = lifecycleOf(user, t);
-  if (incident) {
-    const mapped = INCIDENT_VERDICT[incident.kind];
-    if (mapped) return { verdict: mapped, lifecycle, reason: incident.title };
+  let verdict: CustomerVerdict = 'unreported';
+  let reason: string | null = null;
+  const mapped = incident ? INCIDENT_VERDICT[incident.kind] : undefined;
+  if (mapped) {
+    verdict = mapped;
+    reason = incident!.title;
+  } else {
+    const freshness = customerFreshnessVerdict(status?.lastSeenAt, t);
+    verdict = freshness !== 'fresh' ? freshness : (status?.connected ? 'ok' : 'offline');
   }
-  const freshness = customerFreshnessVerdict(status?.lastSeenAt, t);
-  if (freshness !== 'fresh') return { verdict: freshness, lifecycle, reason: null };
-  return { verdict: status?.connected ? 'ok' : 'offline', lifecycle, reason: null };
+  const override = neverUsedOverride(verdict, stage, stageSinceAt, t);
+  if (override) return { verdict: override.verdict, lifecycle, reason: override.reason };
+  return { verdict, lifecycle, reason };
 }
 
 function asFamily(value: string): ServiceFamily {
@@ -138,6 +148,7 @@ export async function getCustomers(req: Request, e: Env): Promise<Response> {
   }
   const t = now();
   const incidents = await openCustomerIncidents(e);
+  const funnel = await loadFunnelFacts(e.DB, t);
   const items: CustomerSummaryDto[] = [];
   for (const user of users) {
     const email = String(user.email);
@@ -149,7 +160,12 @@ export async function getCustomers(req: Request, e: Env): Promise<Response> {
     const updatedAt = Number(user.updated_at) || t;
     if (since != null && updatedAt < since) continue;
     const status = await customerStatus(e.DB, userId);
-    const { verdict, lifecycle, reason } = verdictFrom(user, status, incidents.get(userId), t);
+    const person = funnel.byUserId.get(userId);
+    const stage = person?.stage ?? 'registered';
+    const stageSinceAt = person?.stageSinceAt ?? (Number(user.created_at) || t);
+    const { verdict, lifecycle, reason } = verdictFrom(
+      user, status, incidents.get(userId), stage, stageSinceAt, t,
+    );
     const word = customerHealthWord(verdict);
     const platforms: Platform[] = [];
     const p = asPlatform(status?.platform);
@@ -169,6 +185,7 @@ export async function getCustomers(req: Request, e: Env): Promise<Response> {
       minAppVersion: status?.appVersion ?? null,
       expiresAt: nullInt(user.expires_at),
       lastSeenAt: status?.lastSeenAt ?? null,
+      stage, stageSinceAt, firstConnectedAt: person?.firstConnectedAt ?? null,
       updatedAt,
     });
   }
@@ -200,7 +217,12 @@ async function loadUser(e: Env, userId: string): Promise<Row> {
   return user;
 }
 
-function choresFor(user: Row, status: Awaited<ReturnType<typeof customerStatus>>, t: number): ChoreDto[] {
+function choresFor(
+  user: Row,
+  status: Awaited<ReturnType<typeof customerStatus>>,
+  t: number,
+  person: FunnelPerson | undefined,
+): ChoreDto[] {
   const chores: ChoreDto[] = [];
   const expiresAt = nullInt(user.expires_at);
   if (expiresAt != null && expiresAt - t < 7 * 86_400) {
@@ -224,6 +246,13 @@ function choresFor(user: Row, status: Awaited<ReturnType<typeof customerStatus>>
       summary: `客户端版本 ${status.appVersion}`, dueAt: null, createdAt: status.lastSeenAt ?? t,
     });
   }
+  if (person && person.stage !== 'connected' && t - person.stageSinceAt >= 3 * 86_400) {
+    chores.push({
+      id: `onboarding:${user.id}`, kind: 'onboarding',
+      summary: stageSentence(person.stage, funnelDays(t, person.stageSinceAt)),
+      dueAt: null, createdAt: person.stageSinceAt,
+    });
+  }
   return chores;
 }
 
@@ -233,7 +262,12 @@ export async function getCustomer(req: Request, e: Env, rawId: string): Promise<
   const t = now();
   const status = await customerStatus(e.DB, userId);
   const incidents = await openCustomerIncidents(e);
-  const { verdict, lifecycle, reason } = verdictFrom(user, status, incidents.get(userId), t);
+  const person = (await loadFunnelFacts(e.DB, t)).byUserId.get(userId);
+  const stage = person?.stage ?? 'registered';
+  const stageSinceAt = person?.stageSinceAt ?? (Number(user.created_at) || t);
+  const { verdict, lifecycle, reason } = verdictFrom(
+    user, status, incidents.get(userId), stage, stageSinceAt, t,
+  );
   const word = customerHealthWord(verdict);
   let devices: Row[] = [];
   try {
@@ -270,7 +304,7 @@ export async function getCustomer(req: Request, e: Env, rawId: string): Promise<
     verdict, health: word.word, tone: word.tone,
     reason, lifecycle, now: nowBlock,
     devices: devices.map((row) => deviceDto(row, liveById.get(String(row.id)), status)),
-    chores: choresFor(user, status, t),
+    chores: choresFor(user, status, t, person),
     billing: {
       plan: nullText(user.plan),
       deviceLimit: Number(user.device_limit ?? 2),
@@ -280,6 +314,7 @@ export async function getCustomer(req: Request, e: Env, rawId: string): Promise<
       firstEntitledAt: nullInt(user.first_entitled_at),
       createdAt: Number(user.created_at),
     },
+    stage, stageSinceAt, firstConnectedAt: person?.firstConnectedAt ?? null,
     updatedAt: Number(user.updated_at) || t,
   };
   return entityJson(e, req, dto, weakEtag([userId, dto.updatedAt]), assertCustomerDetail);

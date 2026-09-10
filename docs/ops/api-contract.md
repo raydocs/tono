@@ -28,14 +28,18 @@
 |---|---|
 | `GET nodes?cursor&limit&verdict&listed&since` | `ListDto<NodeSummaryDto>` |
 | `GET nodes/{name}` | `NodeDetailDto` |
+| `GET nodes/{name}/acceptance` | `NodeAcceptanceDto`（可售验收单：`items[]` + `sellable` + `blockers`） |
 | `GET nodes/{name}/history` | `ListDto<NodeHistoryEntryDto>` |
 | `GET nodes/{name}/connections` | `ListDto<ConnectionEventDto>` |
 | `GET nodes/{name}/errors?range` | `Measured<NodeErrorRowDto[]>` |
 | `GET nodes/{name}/bindings` | `NodeBindingsDto` |
-| `GET nodes/{name}/jobs`、`POST nodes/{name}/jobs` | `ListDto<JobDto>` / `JobDto` |
+| `GET nodes/{name}/retire-preview` | `RetireDependenciesDto`（`customersOnNode[]` 为近 40 分钟仍把该节点写在 `ops_customer_status` / `ops_device_status.selected_server` 上的客户；`defaultProxyBindings` 为 `user_home_bindings.default_proxy_name`；`exitTokenActive` / `lastRosterAt` 来自 `exit_nodes`） |
+| `GET nodes/{name}/jobs`、`POST nodes/{name}/jobs` | `ListDto<JobDto>` / `JobDto`。`type=catalog_relist` 先读验收单：不可售返 409 `NOT_SELLABLE`（body 带 `blockers`），除非 body 里带 `override: true` |
 | `PATCH nodes/{name}/profile` | `NodeDetailDto` |
-| `GET customers?cursor&limit&focus&q&since` | `ListDto<CustomerSummaryDto>`（`wechatId`。`q` 按 email 或 wechat_id 子串过滤，大小写不敏感；缺省/空 `q` 行为与原来相同） |
-| `GET customers/{id}` | `CustomerDetailDto`（`wechatId`、`contact`、`notes` 来自 `users`；`devices[]` 带每台设备的 live 字段：`connected`、`selectedServer`、`lastSeenAt`、`lastFailAt/Code/Node`，来自 `ops_device_status`） |
+| `GET customers?cursor&limit&focus&q&since` | `ListDto<CustomerSummaryDto>`（`wechatId`、`stage`、`stageSinceAt`、`firstConnectedAt`。`q` 按 email 或 wechat_id 子串过滤，大小写不敏感；缺省/空 `q` 行为与原来相同。从未连上过且原判定会是 `unreported`/`offline` 的人是 `never_used` / 还没用起来，不覆盖 `unreachable`/`unstable`/`ok`） |
+| `GET customers/{id}` | `CustomerDetailDto`（同上三字段；`wechatId`、`contact`、`notes` 来自 `users`；`devices[]` 带每台设备的 live 字段：`connected`、`selectedServer`、`lastSeenAt`、`lastFailAt/Code/Node`，来自 `ops_device_status`。卡住开通 ≥3 天时 `chores` 含 `onboarding:<userId>`） |
+| `GET customers/funnel` | `FunnelDto`：`stages[]` 含全部阶段（含 `connected`）的人数；`items[]` 是尚未 `connected` 的人，最近阶段变化在前。白名单未注册的人 `key` 为 `invite:<email>`。每请求 ≤20 条 D1 语句 |
+| `PATCH signup-allowlist/{email}` | `FunnelRowDto`。body `{ wechatId?, contact?, notes? }`，校验与 onboard 相同，`''`/null 清空。没有白名单行 404；已有 `users` 行 409 `ALREADY_REGISTERED`（改用 `PATCH users/{id}`）。审计 `allowlist.profile` |
 | `POST users/onboard` | 已注册写 `users.wechat_id/contact/notes`，`pendingProfile: false`；未注册把这三项写在 `signup_allowlist` 上，`pendingProfile: true`，首次注册带到 `users`。其余 legacy 响应字段不变 |
 | `GET customers/{id}/connections?deviceId=` | `ListDto<ConnectionEventDto>`（`deviceId` 可选，按设备过滤） |
 | `GET customers/{id}/activity?range` | `ListDto<ActivityHourDto>` |
@@ -59,20 +63,28 @@
 | `provider-accounts`（CRUD） | `ListDto<ProviderAccountDto>` / `ProviderAccountDto` |
 | `home-lines`（CRUD） | `ListDto<HomeLineDto>` / `HomeLineDto` |
 | `GET home-lines/{id}/usage?range` | `ListDto<HomeLineUsageDayDto>` |
-| `alert-rules`（CRUD）、`POST alert-rules/{id}/test` | `ListDto<AlertRuleDto>` / `AlertRuleDto` |
+| `alert-rules`（CRUD）、`POST alert-rules/{id}/test` | `ListDto<AlertRuleDto>` / `AlertRuleDto`。写入时校验 `target` 对 `ALERT_WEBHOOK_ALLOWED_HOSTS`（缺省 telegram/feishu/slack）；`minImpact`/`delaySeconds`(0..86400)/`cooldownSeconds`(0..604800) 须为非负整数；空 `secretRef` 400。`/test` 用与 cron 相同的白名单和 `ALERT_*` 密钥，投递去重键含 delivery id，不计入 `lastFiredAt` |
 | `GET alert-deliveries` | `ListDto<AlertDeliveryDto>` |
 | `GET audit?before&beforeId&limit&targetId&actorEmail` | `AuditListDto` (`{ entries, hasMore, nextBefore, nextBeforeId }`) |
 | `GET system/health` | `SystemHealthDto`（`backfill` 为 `BackfillHealthDto`，flatten/project 游标都追上后为 `null`） |
-| `GET ledger?month=` | `ListDto<LedgerEntryDto>`，最新在前。`month` 为 `YYYY-MM`，缺省当月 |
-| `POST ledger` | 201 `LedgerEntryDto`。body `{ kind, category, subjectType, subjectId?, amountMinor, currency?, month, paidAt?, note?, fxDate? }`。`currency` 可省略：`revenue`/`refund`/`credit` 缺省 `CNY`，`cost` 缺省 `USD`。收款三类必须是 `CNY`，否则 400 `VALIDATION_ERROR`「收款只收人民币」。`cnyMinor` 按 `fxDate`（缺省当天）已存汇率换算；非 CNY 且无汇率时 409 `FX_RATE_MISSING`。目标月已锁定则 409 `MONTH_CLOSED` |
+| `GET ledger?month=` | `ListDto<LedgerEntryDto>`，最新在前。`month` 为 `YYYY-MM`，缺省当月。游标推进 SQL `WHERE`，`total` 为 `COUNT(*)` |
+| `POST ledger` | 201 `LedgerEntryDto`。body `{ kind, category, subjectType, subjectId?, amountMinor, currency?, month, paidAt?, note?, fxDate? }`。`currency` 可省略：`revenue`/`refund`/`credit` 缺省 `CNY`，`cost` 缺省 `USD`。收款三类必须是 `CNY`，否则 400 `VALIDATION_ERROR`「收款只收人民币」。`amountMinor` ≤ 1e12；`month` 须在 `[2024-01, 当前月+24]`。`cnyMinor` 按 `fxDate`（缺省当天）已存汇率换算；非 CNY 且无汇率时 409 `FX_RATE_MISSING`。目标月已锁定则 409 `MONTH_CLOSED` |
 | `PATCH ledger/{id}` | `LedgerEntryDto`。只接受 `{ note?, paidAt?, subjectType?, subjectId? }`，不能改 `currency`；月已锁定 409 `MONTH_CLOSED` |
-| `POST ledger/{id}/reverse` | 201 `LedgerEntryDto`。在当前月写入一笔相反效果（`cnyMinor` 取反），`reverses` / 原行 `reversedBy` 互指。锁定月也允许——这就是冲正的意义 |
-| `GET months/{month}` | `MonthSummaryDto`。收入 = Σ(revenue+credit)−Σ(refund)；成本 = Σ cost；客户成本 = 名下 Claude/ChatGPT 账号成本 + 该月该节点/线路字节占比摊到的 server/home_line 成本。用量缺测或有字节无成本时 `pending: true` 且客户 `marginCnyMinor` 为 null |
+| `POST ledger/{id}/reverse` | 201 `LedgerEntryDto`。在当前月写入一笔相反效果（`cnyMinor` 取反），id 为 `reverse:<原 id>`，`reverses` / 原行 `reversedBy` 互指。当前月已锁定 409 `MONTH_CLOSED`；已冲正 409 `ALREADY_REVERSED` |
+| `GET months/{month}` | `MonthSummaryDto`。收入 = Σ(revenue+credit)−Σ(refund)；成本 = Σ cost；客户成本 = 名下 Claude/ChatGPT 账号成本 + 该月该节点/线路字节占比摊到的 server/home_line 成本。用量缺测或有字节无成本时 `pending: true` 且客户 `marginCnyMinor` 为 null。已关账时 `frozen: true`、`frozenAt` 为关账时刻，`revenueCnyMinor`/`costCnyMinor`/`marginCnyMinor`/`unreconciled` 取 `ops_month_close` 冻结值；客户与节点行仍按现算。未关账 `frozen: false`、`frozenAt: null` |
 | `POST months/{month}/close` | `MonthSummaryDto`。body `{ notes? }`。已锁定 409 `MONTH_CLOSED`，写入当时的汇总数字 |
-| `GET months/{month}/export.csv` | `text/csv; charset=utf-8`，UTF-8 BOM，一行一笔 + 合计行。不是 JSON，不进 GET 检查器表 |
+| `GET months/{month}/export.csv` | `text/csv; charset=utf-8`，UTF-8 BOM，一行一笔 + 合计行。合计 CNY 为收入+贷记−退款−成本；多币种时金额列留空。以 `= + - @`、tab、CR 开头的单元格前加 `'` 并加引号。不是 JSON，不进 GET 检查器表 |
 | `GET fx?day=&base=` | `FxRateDto`。返回该日或更早最近一条（自带 `day`）。`base=CNY` 时汇率 1、不查表。没有更早记录 409 `FX_RATE_MISSING` |
 
 `PATCH nodes/{name}/profile` 字段全可选（未知键 400）：`provider` ≤80、`providerAccountId`（须存在于 `provider_accounts` 或 null）、`region` ≤80、`lineTags` 最多 8×32、`port` 1..65535、`price` ≥0、`currency` 三字母、`billingCycle` 1..3660 天、`renewsAt`/`expiresAt` unix 秒、`notes` ≤2000、`quota` 为 `{ quotaBytes, cycleKind, cycleAnchorDay, counts }` 或 `null`（null 清周期）。无 profile 行时，节点只要在 catalog/status 里就会补一行。写 `ops_audit` `node.profile.update`。
+
+`GET nodes/{name}/acceptance` 是"新机器能不能卖"的一张单子，十二条，每条只由 Worker 已有的事实算出来：
+资料齐全（profile 的商家/价格/续费或到期/线路标签）、五处登记各算一条、大陆三网探测（中控机最近一轮，≤26 小时，且没有被墙判定）、
+客户去程（最近 7 天大陆运营商的 `connectOk`）、后台无报错（最近一天低于 10 条，且这台机器汇总过报错）、
+流量配额已设（额度与周期都在）、容量（在用人数；没有登记上限，所以永远是 `unknown`）、替代机器（同地区还有别的在售机器）。
+`state` 四态：`pass`／`fail`（测过、结果不行）／`unknown`（没测过）／`pending`（已经排队在测）。
+`sellable` 要求每条 `pass`，只有 `forward`（客户去程）与 `capacity`（容量）允许 `unknown` —— 这两条要真有客户才答得出。
+`blockers` 就是挡住上架的那几条的 `key`，`sellable === (blockers.length === 0)` 由检查器强制。
 
 公开（无 Access、无登录）`GET /api/v1/system/pulse` 返回 `{ ok, cronAgeSec, buildSha }`：`ok` 表示 cron 在 15 分钟内跑过；`cache-control: no-store`；按 IP 每小时 60 次。不含源名或其它内部细节。
 

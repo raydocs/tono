@@ -8,6 +8,7 @@ import { closeNodePage } from '@/lib/hash-route';
 import { usePrivacy } from '@/lib/privacy';
 import { useResource } from '@/lib/use-resource';
 import { Timeline } from './customer/Timeline';
+import { NodeAcceptance } from './node/Acceptance';
 import { NodeBindings, NodeFacts, NodeQuota } from './node/Facts';
 import { NodeErrors } from './node/Errors';
 import { NodeHeader } from './node/Header';
@@ -46,6 +47,7 @@ export default function NodeDetailPage({ name, customers }: {
   const privacy = usePrivacy();
   const [editing, setEditing] = useState(false);
   const detail = useResource(name, (signal) => nodeApi.detail(name, signal));
+  const acceptance = useResource(name, (signal) => nodeApi.acceptance(name, signal));
   const connections = useResource(name, (signal) => nodeApi.connections(name, signal));
   const jobs = useResource(name, (signal) => nodeApi.jobs(name, signal));
   const history = useResource(name, (signal) => nodeApi.history(name, signal));
@@ -67,8 +69,16 @@ export default function NodeDetailPage({ name, customers }: {
 
       <NodeHeader
         node={node}
-        onChanged={() => { detail.reload(); jobs.reload(); history.reload(); }}
+        sheet={acceptance}
+        onChanged={() => {
+          detail.reload();
+          acceptance.reload();
+          jobs.reload();
+          history.reload();
+        }}
       />
+
+      <NodeAcceptance sheet={acceptance} lifecycle={node.lifecycle} />
 
       <NodeFacts facts={node.facts} onEdit={() => setEditing(true)} />
       <NodeBindings bindings={node.bindings} />

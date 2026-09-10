@@ -10,6 +10,8 @@ export const customerCopy = {
   customerHealth: {
     unreachable: '连不上',
     unstable: '不稳',
+    // 开通了、从来没连上过。不是故障，所以从来不上事故色。
+    never_used: '还没用起来',
     unreported: '未上报',
     offline: '离线',
     ok: '正常',
@@ -27,6 +29,7 @@ export const customerCopy = {
     all: (n: number) => `${n} 位客户`,
     ok: (n: number) => `${n} 位正常`,
     unreachable: (n: number) => `${n} 位连不上`,
+    never_used: (n: number) => `${n} 位还没用起来`,
   },
   customerPlanNotWired: '服务使用、最低版本和到期还没有一位客户填过，先不占位置',
   platform: {
@@ -37,6 +40,49 @@ export const customerCopy = {
     ios: 'iOS',
   } as const,
   unreleased: '未发布',
+  /* ------------------------------------------------------------ 开通漏斗 */
+
+  /**
+   * 开通到用起来之间的五步，每一段的名字就是站在这一步的人还差什么。
+   *
+   * 最后一段"连上过"是好的那一头：点进去是已经用起来的人，前面四段才是这一页
+   * 每天早上要看的。
+   */
+  funnelCount: {
+    invited: (n: number) => `${n} 位开通了还没注册`,
+    registered: (n: number) => `${n} 位注册了还没装客户端`,
+    device_added: (n: number) => `${n} 位装了还没上报`,
+    reported: (n: number) => `${n} 位上报过还没连上`,
+    connected: (n: number) => `${n} 位连上过`,
+  },
+  /** 卡了多久的一句话。上报过的那一步没有天数：卡在哪一天说不清楚。 */
+  funnelLine: {
+    invited: (days: number) => `开通 ${days} 天还没注册`,
+    registered: (days: number) => `注册 ${days} 天还没装客户端`,
+    device_added: (days: number) => `装了 ${days} 天还没上报`,
+    reported: () => '上报过，还没连上过',
+    connected: () => '连上过',
+  },
+  /** 名单上的人还没有账号，所以只有一个中性的标，没有健康词。 */
+  inviteTag: '未注册',
+  inviteDrawerTitle: '还没注册的这一位',
+  inviteLead: '这个邮箱能登录了，但客户还没在客户端登录过，所以没有账号可看。',
+  inviteFields: {
+    wechatId: '微信号',
+    contact: '联系方式',
+    notes: '备注',
+    invitedAt: '开通时间',
+  } as const,
+  inviteSave: '保存',
+  inviteRevoke: '撤销开通',
+  inviteRevokeTitle: '撤销这次开通',
+  inviteRevokeBody: (email: string) => `${email} 会从允许登录的名单里去掉，之后再注册会被挡回去。`,
+  /** 待办上的一行：先说是谁，再说卡在哪一步。 */
+  onboardChore: (who: string, line: string) => `${who} ${line}`,
+  /** 名单上的人只有一个微信号可以找，所以复制按钮把整串真号放进剪贴板。 */
+  copyWechat: '复制微信号',
+  copiedWechat: '已复制',
+  firstConnectedAt: (ago: string, day: string) => `${ago} · ${day}`,
   customerColumns: {
     status: '状态',
     customer: '客户',
@@ -69,6 +115,7 @@ export const customerCopy = {
     billing: '账务与用量',
   } as const,
   now: {
+    stage: '开通进度',
     connected: '在连',
     node: '节点',
     since: '连了多久',
@@ -200,5 +247,6 @@ export const customerCopy = {
     quota: '额度',
     expires: '到期',
     since: '首次开通',
+    firstConnected: '第一次连上',
   } as const,
 } as const;

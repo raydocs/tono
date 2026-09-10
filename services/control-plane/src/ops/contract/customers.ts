@@ -5,6 +5,7 @@ import type {
   CustomerHealthWord,
   CustomerLifecycle,
   CustomerVerdict,
+  FunnelStage,
   Measured,
   Platform,
   RouteKind,
@@ -16,6 +17,7 @@ import {
   CUSTOMER_HEALTH_WORDS,
   CUSTOMER_LIFECYCLES,
   CUSTOMER_VERDICTS,
+  FUNNEL_STAGES,
   PLATFORMS,
   ROUTE_KINDS,
   SERVICE_FAMILIES,
@@ -191,6 +193,9 @@ export interface CustomerSummaryDto {
   minAppVersion: string | null;
   expiresAt: number | null;
   lastSeenAt: number | null;
+  stage: FunnelStage;
+  stageSinceAt: number;
+  firstConnectedAt: number | null;
   updatedAt: number;
 }
 
@@ -209,6 +214,9 @@ export interface CustomerDetailDto {
   devices: CustomerDeviceDto[];
   chores: ChoreDto[];
   billing: CustomerBillingDto;
+  stage: FunnelStage;
+  stageSinceAt: number;
+  firstConnectedAt: number | null;
   updatedAt: number;
 }
 
@@ -389,7 +397,7 @@ export function assertCustomerFailure(value: unknown, path = 'lastFailure'): Cus
 const CUSTOMER_SUMMARY_KEYS = [
   'userId', 'email', 'wechatId', 'verdict', 'health', 'tone', 'reason', 'lifecycle', 'deviceCount',
   'platforms', 'selectedServer', 'connected', 'lastFailure', 'usageBytes', 'quotaBytes', 'services',
-  'minAppVersion', 'expiresAt', 'lastSeenAt', 'updatedAt',
+  'minAppVersion', 'expiresAt', 'lastSeenAt', 'stage', 'stageSinceAt', 'firstConnectedAt', 'updatedAt',
 ];
 
 export function assertCustomerSummary(value: unknown, path = 'customerSummary'): CustomerSummaryDto {
@@ -416,13 +424,16 @@ export function assertCustomerSummary(value: unknown, path = 'customerSummary'):
     minAppVersion: optText(row, path, 'minAppVersion'),
     expiresAt: optInt(row, path, 'expiresAt'),
     lastSeenAt: optInt(row, path, 'lastSeenAt'),
+    stage: oneOf<FunnelStage>(row, path, 'stage', FUNNEL_STAGES),
+    stageSinceAt: int(row, path, 'stageSinceAt'),
+    firstConnectedAt: optInt(row, path, 'firstConnectedAt'),
     updatedAt: int(row, path, 'updatedAt'),
   };
 }
 
 const CUSTOMER_DETAIL_KEYS = [
   'userId', 'email', 'wechatId', 'contact', 'notes', 'verdict', 'health', 'tone', 'reason',
-  'lifecycle', 'now', 'devices', 'chores', 'billing', 'updatedAt',
+  'lifecycle', 'now', 'devices', 'chores', 'billing', 'stage', 'stageSinceAt', 'firstConnectedAt', 'updatedAt',
 ];
 
 export function assertCustomerDetail(value: unknown, path = 'customerDetail'): CustomerDetailDto {
@@ -442,6 +453,9 @@ export function assertCustomerDetail(value: unknown, path = 'customerDetail'): C
     devices: arrayOf(row, path, 'devices', assertCustomerDevice),
     chores: arrayOf(row, path, 'chores', assertChore),
     billing: assertCustomerBilling(row.billing, `${path}.billing`),
+    stage: oneOf<FunnelStage>(row, path, 'stage', FUNNEL_STAGES),
+    stageSinceAt: int(row, path, 'stageSinceAt'),
+    firstConnectedAt: optInt(row, path, 'firstConnectedAt'),
     updatedAt: int(row, path, 'updatedAt'),
   };
 }

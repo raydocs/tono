@@ -39,6 +39,13 @@ export function parseMonth(raw: string | null | undefined, fallback?: string): s
   if (value == null || !MONTH_RE.test(value)) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid month');
   }
+  const cap = new Date();
+  cap.setUTCDate(1);
+  cap.setUTCMonth(cap.getUTCMonth() + 24);
+  const maxMonth = cap.toISOString().slice(0, 7);
+  if (value < '2024-01' || value > maxMonth) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid month');
+  }
   return value;
 }
 

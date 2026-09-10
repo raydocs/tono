@@ -3,10 +3,13 @@ import {
   getNodes, getNode, getNodeBindings, getNodeHistory, getNodeConnections,
   getNodeErrors, getNodeJobs, postNodeJob, patchNodeProfile,
 } from './nodes';
+import { getNodeRetirePreview } from '../retire-dependencies';
+import { getNodeAcceptance } from './nodes-acceptance';
 import {
   getCustomers, getCustomer, getCustomerConnections, getCustomerActivity,
   getCustomerDestinations, getCustomerServices,
 } from './customers';
+import { getFunnel } from './funnel';
 import {
   getIncidents, getIncident, postIncidentAck, postIncidentSnooze,
   postIncidentResolve, postIncidentNotes, patchIncident,
@@ -38,14 +41,17 @@ import type { Actor } from './common';
 export const OPS_V1_ROUTES = [
   'GET /api/v1/ops/nodes',
   'GET /api/v1/ops/nodes/{name}',
+  'GET /api/v1/ops/nodes/{name}/acceptance',
   'GET /api/v1/ops/nodes/{name}/history',
   'GET /api/v1/ops/nodes/{name}/connections',
   'GET /api/v1/ops/nodes/{name}/errors',
   'GET /api/v1/ops/nodes/{name}/bindings',
   'GET /api/v1/ops/nodes/{name}/jobs',
+  'GET /api/v1/ops/nodes/{name}/retire-preview',
   'POST /api/v1/ops/nodes/{name}/jobs',
   'PATCH /api/v1/ops/nodes/{name}/profile',
   'GET /api/v1/ops/customers',
+  'GET /api/v1/ops/customers/funnel',
   'GET /api/v1/ops/customers/{id}',
   'GET /api/v1/ops/customers/{id}/connections',
   'GET /api/v1/ops/customers/{id}/activity',
@@ -108,15 +114,18 @@ type Handler = (req: Request, e: Env, actor: Actor, params: string[]) => Promise
 
 const ROUTES: Array<{ method: string; re: RegExp; handle: Handler }> = [
   { method: 'GET', re: /^\/api\/v1\/ops\/nodes$/, handle: (req, e) => getNodes(req, e) },
+  { method: 'GET', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/acceptance$/, handle: (req, e, _a, p) => getNodeAcceptance(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/history$/, handle: (req, e, _a, p) => getNodeHistory(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/connections$/, handle: (req, e, _a, p) => getNodeConnections(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/errors$/, handle: (req, e, _a, p) => getNodeErrors(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/bindings$/, handle: (req, e, _a, p) => getNodeBindings(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/jobs$/, handle: (req, e, _a, p) => getNodeJobs(req, e, p[0]) },
+  { method: 'GET', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/retire-preview$/, handle: (req, e, _a, p) => getNodeRetirePreview(req, e, p[0]) },
   { method: 'POST', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/jobs$/, handle: (req, e, a, p) => postNodeJob(req, e, p[0], a) },
   { method: 'PATCH', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/profile$/, handle: (req, e, a, p) => patchNodeProfile(req, e, p[0], a) },
   { method: 'GET', re: /^\/api\/v1\/ops\/nodes\/([^/]+)$/, handle: (req, e, _a, p) => getNode(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/customers$/, handle: (req, e) => getCustomers(req, e) },
+  { method: 'GET', re: /^\/api\/v1\/ops\/customers\/funnel$/, handle: (req, e) => getFunnel(req, e) },
   { method: 'GET', re: /^\/api\/v1\/ops\/customers\/([^/]+)\/connections$/, handle: (req, e, _a, p) => getCustomerConnections(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/customers\/([^/]+)\/activity$/, handle: (req, e, _a, p) => getCustomerActivity(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/customers\/([^/]+)\/destinations$/, handle: (req, e, _a, p) => getCustomerDestinations(req, e, p[0]) },

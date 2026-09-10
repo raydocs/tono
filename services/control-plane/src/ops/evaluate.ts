@@ -2,6 +2,7 @@
 // file is the only one that talks to the database.
 
 import {
+  NODE_VERDICTS,
   VERDICT_RULES_VERSION,
   type IncidentDesire,
   type NodePrior,
@@ -73,11 +74,9 @@ async function runBatches(db: D1Database, statements: D1PreparedStatement[]): Pr
 }
 
 function asVerdict(value: unknown, fallback: NodeVerdict): NodeVerdict {
-  if (
-    value === 'down' || value === 'blocked' || value === 'no_probe'
-    || value === 'degraded' || value === 'pressure' || value === 'unknown' || value === 'ok'
-  ) return value;
-  return fallback;
+  return (NODE_VERDICTS as readonly string[]).includes(value as string)
+    ? value as NodeVerdict
+    : fallback;
 }
 
 export async function loadPriorNodeStates(db: D1Database): Promise<Map<string, StoredNodeState>> {

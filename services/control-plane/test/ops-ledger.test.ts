@@ -6,8 +6,10 @@ import {
   assertLedgerEntry,
   assertList,
   assertMonthSummary,
+  type LedgerEntryDto,
 } from '../src/ops/contract';
 import { runOpsCron } from '../src/ops/cron';
+import { ledgerCsv } from '../src/ops/ledger';
 
 const ACCESS_TEAM_DOMAIN = 'test-team.cloudflareaccess.com';
 const ACCESS_AUDIENCE = 'test-access-audience-0001';
@@ -362,5 +364,181 @@ describe('ops ledger, month close, live FX', () => {
       "SELECT rate FROM ops_fx_rates WHERE day = ? AND base = 'USD'",
     ).bind(DAY()).first<{ rate: number }>();
     expect(Number(still?.rate)).toBe(7.2);
+  });
+
+  it('rejects reverse when the current month is closed', async () => {
+    const prev = shiftMonth(MONTH(), -1);
+    const created = await ops('ledger', json({
+      kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-1',
+      amountMinor: 800, currency: 'CNY', month: prev,
+    }));
+    expect(created.status).toBe(201);
+    const entry = assertLedgerEntry(await created.json());
+    expect((await ops(`months/${prev}/close`, json({ notes: 'lock prev' }))).status).toBe(200);
+    expect((await ops(`months/${MONTH()}/close`, json({ notes: 'lock now' }))).status).toBe(200);
+    const reversed = await ops(`ledger/${entry.id}/reverse`, json({ note: 'undo' }));
+    expect(reversed.status).toBe(409);
+    expect((await reversed.json() as { error: { code: string } }).error.code).toBe('MONTH_CLOSED');
+  });
+
+  it('rejects a concurrent second reverse', async () => {
+    const created = await ops('ledger', json({
+      kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-1',
+      amountMinor: 800, currency: 'CNY', month: MONTH(),
+    }));
+    expect(created.status).toBe(201);
+    const entry = assertLedgerEntry(await created.json());
+    const [a, b] = await Promise.all([
+      ops(`ledger/${entry.id}/reverse`, json({ note: 'one' })),
+      ops(`ledger/${entry.id}/reverse`, json({ note: 'two' })),
+    ]);
+    const statuses = [a.status, b.status].sort();
+    expect(statuses).toEqual([201, 409]);
+    const summary = assertMonthSummary(await (await ops(`months/${MONTH()}`)).json());
+    expect(summary.revenueCnyMinor).toBe(0);
+  });
+
+  it('returns 409 MONTH_CLOSED instead of 500 when two closes race', async () => {
+    const month = MONTH();
+    expect((await ops('ledger', json({
+      kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-1',
+      amountMinor: 100, currency: 'CNY', month,
+    }))).status).toBe(201);
+    const [a, b] = await Promise.all([
+      ops(`months/${month}/close`, json({ notes: 'a' })),
+      ops(`months/${month}/close`, json({ notes: 'b' })),
+    ]);
+    const statuses = [a.status, b.status].sort();
+    expect(statuses).toEqual([200, 409]);
+    const loser = a.status === 409 ? a : b;
+    expect((await loser.json() as { error: { code: string } }).error.code).toBe('MONTH_CLOSED');
+  });
+
+  it('serves frozen totals for a closed month after later metering arrives', async () => {
+    const month = MONTH();
+    await seedUser('u-a', 'a@example.com');
+    await seedCycle(NODE, month);
+    await seedBytes('u-a', NODE, month, 1_000_000_000);
+    expect((await ops('ledger', json({
+      kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-a',
+      amountMinor: 20000, currency: 'CNY', month,
+    }))).status).toBe(201);
+    expect((await ops('ledger', json({
+      kind: 'cost', category: 'server', subjectType: 'node', subjectId: NODE,
+      amountMinor: 4000, currency: 'CNY', month,
+    }))).status).toBe(201);
+    const closed = await ops(`months/${month}/close`, json({ notes: 'lock' }));
+    expect(closed.status).toBe(200);
+    const before = await closed.json() as {
+      frozen?: boolean; frozenAt?: number | null; unreconciled: number;
+      revenueCnyMinor: number; costCnyMinor: number; marginCnyMinor: number;
+      customers: { userId: string; marginCnyMinor: number | null }[];
+    };
+    expect(before.unreconciled).toBe(0);
+    await db().prepare(
+      `INSERT INTO customer_activity_hours(
+         user_id, device_id, hour_at, online_minutes, connected_minutes, bytes_up, bytes_down, node
+       ) VALUES('u-a', 'd-2', ?, 60, 60, ?, 0, 'un-costed-node')`,
+    ).bind(monthStart(month) + 7200, 2_000_000_000).run();
+    const after = await (await ops(`months/${month}`)).json() as {
+      frozen?: boolean; frozenAt?: number | null; unreconciled: number;
+      revenueCnyMinor: number; costCnyMinor: number; marginCnyMinor: number;
+      customers: { userId: string; marginCnyMinor: number | null; pending: boolean }[];
+    };
+    expect(after.frozen).toBe(true);
+    expect(typeof after.frozenAt).toBe('number');
+    expect(after.unreconciled).toBe(before.unreconciled);
+    expect(after.revenueCnyMinor).toBe(before.revenueCnyMinor);
+    expect(after.costCnyMinor).toBe(before.costCnyMinor);
+    expect(after.marginCnyMinor).toBe(before.marginCnyMinor);
+    expect(after.customers.find((row) => row.userId === 'u-a')?.pending).toBe(true);
+  });
+
+  it('paginates GET ledger in SQL and reports COUNT(*) as total', async () => {
+    const month = MONTH();
+    const t = tnow();
+    const day = DAY();
+    for (let i = 0; i < 501; i += 50) {
+      const chunk = Math.min(50, 501 - i);
+      const stmts = [];
+      for (let j = 0; j < chunk; j++) {
+        const k = i + j;
+        stmts.push(db().prepare(
+          `INSERT INTO ops_ledger_entries(
+             id, kind, category, subject_type, subject_id, amount_minor, currency,
+             fx_rate_to_cny, fx_date, cny_minor, month, paid_at, note,
+             reverses, reversed_by, created_by, created_at, updated_at
+           ) VALUES(?, 'revenue', 'plan', 'user', 'u-1', 1, 'CNY', 1, ?, 1, ?, NULL, NULL, NULL, NULL, 'op', ?, ?)`,
+        ).bind(`page-${k}`, day, month, t - k, t - k));
+      }
+      await db().batch(stmts);
+    }
+    const first = assertList(await (await ops(`ledger?month=${month}&limit=50`)).json(), assertLedgerEntry);
+    expect(first.total).toBe(501);
+    expect(first.items).toHaveLength(50);
+    expect(first.nextCursor).toBeTruthy();
+    const ids = new Set(first.items.map((row) => row.id));
+    let cursor = first.nextCursor;
+    while (cursor) {
+      const page = assertList(
+        await (await ops(`ledger?month=${month}&limit=50&cursor=${encodeURIComponent(cursor)}`)).json(),
+        assertLedgerEntry,
+      );
+      expect(page.total).toBe(501);
+      for (const row of page.items) ids.add(row.id);
+      cursor = page.nextCursor;
+    }
+    expect(ids.size).toBe(501);
+  });
+
+  it('rejects an oversized amountMinor and a month too far in the future', async () => {
+    const tooMuch = await ops('ledger', json({
+      kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-1',
+      amountMinor: 1e12 + 1, currency: 'CNY', month: MONTH(),
+    }));
+    expect(tooMuch.status).toBe(400);
+    const tooLate = await ops('ledger', json({
+      kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-1',
+      amountMinor: 100, currency: 'CNY', month: '2099-12',
+    }));
+    expect(tooLate.status).toBe(400);
+    const tooEarly = await ops('ledger', json({
+      kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-1',
+      amountMinor: 100, currency: 'CNY', month: '2023-12',
+    }));
+    expect(tooEarly.status).toBe(400);
+  });
+});
+
+function csvEntry(over: Partial<LedgerEntryDto>): LedgerEntryDto {
+  return {
+    id: 'e1', kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-1',
+    amountMinor: 100, currency: 'CNY', fxRateToCny: 1, fxDate: '2026-09-01',
+    cnyMinor: 100, month: '2026-09', paidAt: null, note: null, reverses: null,
+    reversedBy: null, createdBy: 'op', createdAt: 1_800_000_000, ...over,
+  };
+}
+
+describe('ledger csv', () => {
+  it('totals signed CNY and blanks mixed-currency amount', () => {
+    const csv = ledgerCsv([
+      csvEntry({ id: 'r', kind: 'revenue', amountMinor: 20000, currency: 'CNY', cnyMinor: 20000 }),
+      csvEntry({
+        id: 'c', kind: 'cost', category: 'server', subjectType: 'node', subjectId: 'n1',
+        amountMinor: 1000, currency: 'USD', fxRateToCny: 7.2, cnyMinor: 7200,
+      }),
+    ]);
+    const lines = csv.replace(/^\uFEFF/, '').trim().split(/\r\n/);
+    const total = lines[lines.length - 1].split(',');
+    expect(total[1]).toBe('total');
+    expect(total[5]).toBe('');
+    expect(Number(total[9])).toBe(20000 - 7200);
+  });
+
+  it('prefixes formula-like cells with a quote', () => {
+    const csv = ledgerCsv([csvEntry({ id: 'inj', note: '=1+1', subjectId: '+cmd' })]);
+    expect(csv).not.toMatch(/(?:^|,)=/m);
+    expect(csv).toContain("'=1+1");
+    expect(csv).toContain("'+cmd");
   });
 });

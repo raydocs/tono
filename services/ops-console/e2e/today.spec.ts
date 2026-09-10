@@ -52,6 +52,39 @@ test.describe('today page', () => {
     await expect(page.locator('.incident-row')).toHaveCount(0);
   });
 
+  /**
+   * 开通跟进 is the one chore about a person rather than a machine, so the row
+   * carries the handle to reach them on and a way into whatever page they
+   * have. The invited half comes from the funnel: nobody has a customer row to
+   * find them by, so this list is the only place they appear.
+   */
+  test('待办里有开通跟进，一行就能复制到微信号', async ({ page }) => {
+    await open(page, '/today');
+    await page.getByRole('tab', { name: /待办/ }).click();
+    await settle(page);
+
+    const chores = page.locator('li').filter({ hasText: '开通跟进' });
+    await expect(chores).toHaveCount(4);
+    const invited = chores.filter({ hasText: 'shu.qing@example.com' });
+    await expect(invited).toContainText('开通 6 天还没注册');
+    await expect(invited).toContainText('wx_shu_qing');
+    await expect(invited.getByRole('button', { name: '复制微信号', exact: true })).toBeEnabled();
+
+    // The tab count is the list itself, onboarding rows included (R4).
+    const all = await page.locator('li').filter({ has: page.locator('.ops-tag.tone-rem') }).count();
+    await expect(page.getByRole('tab', { name: /待办/ })).toContainText(String(all));
+  });
+
+  test('开通跟进 那一行点下去就是这个人', async ({ page }) => {
+    await open(page, '/today');
+    await page.getByRole('tab', { name: /待办/ }).click();
+    await settle(page);
+    await page.locator('li').filter({ hasText: 'shu.qing@example.com' }).first()
+      .getByText('开通 6 天还没注册').click();
+    await expect(page).toHaveURL(/invite=shu\.qing%40example\.com/);
+    await expect(page.getByRole('dialog')).toContainText('还没在客户端登录过');
+  });
+
   test('drawer', async ({ page }) => {
     await open(page, '/today');
     await page.locator('.incident-row').first().click();

@@ -7,9 +7,10 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command';
-import type { CustomerSummaryDto, IncidentDto, NodeSummaryDto } from '@contract';
+import type { CustomerSummaryDto, FunnelDto, IncidentDto, NodeSummaryDto } from '@contract';
 import { copy, type PageId } from '@/copy/copy';
-import { goPage, openCustomer, openIncident, openNode } from '@/lib/hash-route';
+import { invitesOf } from '@/lib/funnel';
+import { goPage, openCustomer, openIncident, openInvite, openNode } from '@/lib/hash-route';
 import { openIncidents } from '@/lib/incidents';
 import { usePrivacy } from '@/lib/privacy';
 
@@ -25,10 +26,12 @@ const PAGE_IDS = Object.keys(copy.pages) as PageId[];
 export function CommandPalette({
   nodes,
   customers,
+  funnel,
   incidents,
 }: {
   nodes: NodeSummaryDto[];
   customers: CustomerSummaryDto[];
+  funnel: FunnelDto | null;
   incidents: IncidentDto[];
 }) {
   const [open, setOpen] = useState(false);
@@ -99,6 +102,30 @@ export function CommandPalette({
               {customer.wechatId === null
                 ? privacy.email(customer.email)
                 : `${privacy.email(customer.email)} · ${privacy.wechat(customer.wechatId)}`}
+            </CommandItem>
+          ))}
+        </CommandGroup>
+        {/* Somebody who was opened and never registered has no customer row
+            and no page, and is exactly the person an operator is looking for
+            when they type a handle they wrote down this morning. Matched the
+            same way as a customer — the real handle, the shown address — and
+            landing on the drawer, which is all there is of them. */}
+        <CommandGroup heading={copy.commandInvites}>
+          {invitesOf(funnel).map((row) => (
+            <CommandItem
+              key={row.key}
+              value={[
+                privacy.privacy ? privacy.email(row.email) : row.email,
+                row.wechatId ?? '',
+              ].join(' ')}
+              onSelect={() => {
+                openInvite(row.email);
+                setOpen(false);
+              }}
+            >
+              {row.wechatId === null
+                ? privacy.email(row.email)
+                : `${privacy.email(row.email)} · ${privacy.wechat(row.wechatId)}`}
             </CommandItem>
           ))}
         </CommandGroup>

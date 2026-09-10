@@ -220,13 +220,15 @@ export async function loadMonthSummary(db: D1Database, month: string, nowSec: nu
     month,
     closedAt: closed ? Number(closed.closed_at) : null,
     closedBy: closed?.closed_by == null ? null : String(closed.closed_by),
-    revenueCnyMinor,
-    costCnyMinor,
-    marginCnyMinor: revenueCnyMinor - costCnyMinor,
+    revenueCnyMinor: closed ? Number(closed.revenue_cny_minor) : revenueCnyMinor,
+    costCnyMinor: closed ? Number(closed.cost_cny_minor) : costCnyMinor,
+    marginCnyMinor: closed ? Number(closed.margin_cny_minor) : revenueCnyMinor - costCnyMinor,
     byCategory,
     customers,
     nodes,
-    unreconciled,
+    unreconciled: closed ? Number(closed.unreconciled) : unreconciled,
+    frozen: Boolean(closed),
+    frozenAt: closed ? Number(closed.closed_at) : null,
     updatedAt,
   };
 }
@@ -238,18 +240,30 @@ const CSV_HEADERS = [
 ] as const;
 
 function csvCell(value: unknown): string {
-  const text = value == null ? '' : String(value);
+  let text = value == null ? '' : String(value);
+  if (/^[=+\-@\t\r]/.test(text)) {
+    text = `'${text}`;
+    return `"${text.replace(/"/g, '""')}"`;
+  }
   if (/[",\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
   return text;
+}
+
+function signedTotalCny(kind: string, cnyMinor: number): number {
+  if (kind === 'revenue' || kind === 'credit') return cnyMinor;
+  if (kind === 'refund' || kind === 'cost') return -cnyMinor;
+  return 0;
 }
 
 export function ledgerCsv(entries: LedgerEntryDto[]): string {
   const lines = [CSV_HEADERS.join(',')];
   let amount = 0;
   let cny = 0;
+  const currencies = new Set<string>();
   for (const entry of entries) {
     amount += entry.amountMinor;
-    cny += entry.cnyMinor;
+    cny += signedTotalCny(entry.kind, entry.cnyMinor);
+    currencies.add(entry.currency);
     lines.push([
       entry.id, entry.kind, entry.category, entry.subjectType, entry.subjectId,
       entry.amountMinor, entry.currency, entry.fxRateToCny, entry.fxDate, entry.cnyMinor,
@@ -258,7 +272,7 @@ export function ledgerCsv(entries: LedgerEntryDto[]): string {
     ].map(csvCell).join(','));
   }
   const total = [
-    '', 'total', '', '', '', amount, '', '', '', cny, '', '', '', '', '', '', '',
+    '', 'total', '', '', '', currencies.size === 1 ? amount : '', '', '', '', cny, '', '', '', '', '', '', '',
   ].map(csvCell).join(',');
   lines.push(total);
   return `\uFEFF${lines.join('\r\n')}`;

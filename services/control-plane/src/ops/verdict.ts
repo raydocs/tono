@@ -22,7 +22,7 @@ export {
   type HysteresisRule,
 } from './verdict-hysteresis';
 
-export const VERDICT_RULES_VERSION = 1;
+export const VERDICT_RULES_VERSION = 2;
 
 // The hub's mainland sweep is a twelve-hour SSH pass, so a sweep is not stale
 // until it has missed a whole cycle with margin; two hours read the fleet as
@@ -37,9 +37,11 @@ const PRESSURE_DISK = 0.95;
 const FAIL_ATTEMPTS = 10;
 const FAIL_RATIO = 0.3;
 const FAIL_USERS = 2;
+/** Heartbeat cadence × 2: a customer on a retiring node is still on it. */
+export const RETIRE_DRAIN_SECONDS = 40 * 60;
 
 export const NODE_VERDICTS = [
-  'down', 'blocked', 'no_probe', 'degraded', 'pressure', 'unknown', 'ok',
+  'down', 'blocked', 'no_probe', 'degraded', 'probe_unreachable', 'pressure', 'unknown', 'ok',
 ] as const;
 export type NodeVerdict = typeof NODE_VERDICTS[number];
 
@@ -50,6 +52,7 @@ export const VERDICT_LABELS: Record<NodeVerdict, string> = {
   blocked: '疑似被墙',
   no_probe: '无探针',
   degraded: '回程丢包',
+  probe_unreachable: '探测不通（机器在线）',
   pressure: '高负载',
   unknown: '路径未测',
   ok: '大陆正常',
@@ -97,7 +100,7 @@ export type NodeVerdictInput = {
   errorSpike: boolean;
 };
 
-export type CustomerFails30m = { attempts: number; failures: number };
+export type CustomerFails30m = { failures: number };
 
 export type CustomerVerdictInput = {
   userId: string;
@@ -123,6 +126,9 @@ export type VerdictInput = {
   qualitySweepAt: number | null;
   agentsSnapshotAt: number | null;
   maintenance: ReadonlySet<string>;
+  /** False when the managed catalog could not be decrypted or parsed. */
+  catalogAvailable?: boolean;
+  catalogErrorClass?: string | null;
 };
 
 export type IncidentSeverity = 'severe' | 'warn' | 'notice';
@@ -140,7 +146,7 @@ export type IncidentDesire = {
   parentDedupeKey?: string;
   impactCount: number;
   evidence: Record<string, unknown>;
-  suggestedJob?: 'catalog_retire';
+  suggestedJob?: 'catalog_retire' | 'node_probe';
   /**
    * Read back from the live table by a pass that did not evaluate this
    * subject. It keeps the incident alive and links children to it, and the
@@ -236,6 +242,7 @@ function reasonFor(verdict: NodeVerdict, cause: DegradedCause | null): string {
   if (verdict === 'down') return 'unreachable';
   if (verdict === 'blocked') return 'likely_blocked';
   if (verdict === 'no_probe') return 'agent_missing';
+  if (verdict === 'probe_unreachable') return '大陆探测不通，但机器在线；可能是入站挂了';
   if (verdict === 'pressure') return 'machine_pressure';
   if (verdict === 'unknown') return 'snapshot_stale';
   return 'ok';
@@ -244,18 +251,21 @@ function reasonFor(verdict: NodeVerdict, cause: DegradedCause | null): string {
 /** Raw precedence, first match. Down includes the agent-silent enter gate. */
 export function observedVerdict(node: NodeVerdictInput, ctx: SnapshotCtx): NodeVerdict {
   if (unreachable(node) && agentSilent(node.agentObservedAt, ctx.nowSec)) return 'down';
-  // The sweep says unreachable but Komari heard from the box within 15 minutes:
-  // the two sources disagree, and neither "正常" nor "失联" is honest until they
-  // agree again. Report it as unmeasured rather than letting it fall through.
-  if (unreachable(node)) return 'unknown';
   if (node.ok === true && node.blockStatus === 'LIKELY_BLOCKED') return 'blocked';
   if (node.catalogListed === true && node.agentObservedAt == null) return 'no_probe';
   if (degradedCause(node)) return 'degraded';
+  // Sweep unreachable, Komari heard from the box within 15 minutes: neither
+  // 正常 nor 失联 is honest. Customer-fail / error-spike evidence already won
+  // above; with none of that, say the sources disagree.
+  if (unreachable(node)) return 'probe_unreachable';
   if (pressureHit(node.machine)) return 'pressure';
   if (
     snapshotStale(ctx.qualitySweepAt, ctx.nowSec, QUALITY_STALE_SECONDS)
     || snapshotStale(ctx.agentsSnapshotAt, ctx.nowSec, AGENTS_STALE_SECONDS)
   ) return 'unknown';
+  if (node.ok == null && node.blockStatus == null) {
+    return node.catalogListed === true ? 'no_probe' : 'unknown';
+  }
   return 'ok';
 }
 
@@ -290,12 +300,13 @@ function nodeKind(verdict: NodeVerdict): string | null {
   if (verdict === 'degraded') return 'node-degraded';
   if (verdict === 'pressure') return 'node-pressure';
   if (verdict === 'no_probe') return 'node-no-probe';
+  if (verdict === 'probe_unreachable') return 'node-probe-unreachable';
   return null;
 }
 
 function nodeSeverity(verdict: NodeVerdict): IncidentSeverity | null {
   if (verdict === 'blocked' || verdict === 'down') return 'severe';
-  if (verdict === 'degraded' || verdict === 'pressure') return 'warn';
+  if (verdict === 'degraded' || verdict === 'pressure' || verdict === 'probe_unreachable') return 'warn';
   if (verdict === 'no_probe') return 'notice';
   return null;
 }
@@ -307,11 +318,16 @@ function evaluateNode(node: NodeVerdictInput, ctx: SnapshotCtx): NodeVerdictResu
   const previous = node.prior?.verdict ?? null;
   const changed = previous !== applied.verdict;
   const loss = lossyCarriers(node.carriers);
+  const uncovered = node.ok == null && node.blockStatus == null;
+  const reason = uncovered && node.agentObservedAt != null
+    && (applied.verdict === 'no_probe' || applied.verdict === 'unknown')
+    ? '大陆探测没有覆盖这台机器'
+    : reasonFor(applied.verdict, cause);
   return {
     name: node.name,
     verdict: applied.verdict,
     label: labelFor(applied.verdict, cause),
-    reason: reasonFor(applied.verdict, cause),
+    reason,
     qualityStatus: node.blockStatus,
     agentStatus: agentStatusAt(node.agentObservedAt, ctx.nowSec),
     catalogListed: node.catalogListed,
@@ -334,6 +350,7 @@ function evaluateNode(node: NodeVerdictInput, ctx: SnapshotCtx): NodeVerdictResu
       fails30m: node.fails30m,
       errorSpike: node.errorSpike,
       handshakeDistinctUsers: node.fails30m.handshakeDistinctUsers,
+      ...(uncovered ? { coverage: '大陆探测没有覆盖这台机器' } : {}),
     },
   };
 }
@@ -344,6 +361,11 @@ function desireForNode(node: NodeVerdictResult): IncidentDesire | null {
   if (!kind || !severity) return null;
   const occupancy = node.occupancy ?? 0;
   const retire = (node.verdict === 'blocked' || node.verdict === 'down') && node.catalogListed === true;
+  const suggestedJob = retire
+    ? 'catalog_retire' as const
+    : node.verdict === 'probe_unreachable'
+      ? 'node_probe' as const
+      : undefined;
   return {
     dedupeKey: `${kind}:${node.name}`,
     kind,
@@ -355,7 +377,7 @@ function desireForNode(node: NodeVerdictResult): IncidentDesire | null {
     cause: node.reason,
     impactCount: occupancy,
     evidence: { verdict: node.verdict, occupancy, catalogListed: node.catalogListed },
-    suggestedJob: retire ? 'catalog_retire' : undefined,
+    suggestedJob,
   };
 }
 
@@ -376,9 +398,41 @@ export function evaluate(input: VerdictInput): VerdictOutput {
   const retired = new Set(input.nodes.filter((n) => n.profileStatus === 'retired').map((n) => n.name));
   const desires: IncidentDesire[] = [];
   for (const node of nodes) {
-    if (input.maintenance.has(node.name) || retired.has(node.name)) continue;
+    if (retired.has(node.name)) {
+      const still = node.occupancy ?? 0;
+      if (still > 0) {
+        desires.push({
+          dedupeKey: `node:${node.name}:retire_pending`,
+          kind: 'retire_pending',
+          subjectType: 'node',
+          subjectId: node.name,
+          severity: 'notice',
+          title: clipTitle(`${still} 位客户仍在这台机器上`),
+          detail: node.name,
+          cause: 'retire_pending',
+          impactCount: still,
+          evidence: { occupancy: still, catalogListed: node.catalogListed },
+        });
+      }
+      continue;
+    }
+    if (input.maintenance.has(node.name)) continue;
     const desire = desireForNode(node);
     if (desire) desires.push(desire);
+  }
+  if (input.catalogAvailable === false) {
+    desires.push({
+      dedupeKey: 'fleet-catalog-unavailable',
+      kind: 'fleet-catalog-unavailable',
+      subjectType: 'fleet',
+      subjectId: 'catalog',
+      severity: 'severe',
+      title: '客户目录无法读取',
+      detail: '目录解密或解析失败；不能把机器当成未在售',
+      cause: 'catalog_unavailable',
+      impactCount: 0,
+      evidence: { catalogAvailable: false, errorClass: input.catalogErrorClass ?? 'unknown' },
+    });
   }
   if (collectorStale(ctx)) {
     desires.push({

@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { NodeErrorRowDto } from '@contract';
+import type { AcceptanceItemDto, AcceptanceState, NodeAcceptanceDto, NodeErrorRowDto } from '@contract';
 import { copy } from '@/copy/copy';
 import { nowSec } from './clock';
 import {
+  acceptanceTone,
   actionBlockReason,
   anchorDayOf,
+  blockerLabels,
   barSize,
   bytesToGb,
   canCancelJob,
@@ -15,6 +17,8 @@ import {
   gbToBytes,
   NODE_ACTIONS,
   numberOrNull,
+  orderedAcceptance,
+  overrideRelistAction,
   parseLineTags,
   reasonSentence,
   textOrNull,
@@ -34,43 +38,58 @@ const healthy: NodeActionSubject = {
   bindings: { komari: true },
 };
 
+/** A sheet built from its own items, the way both sides derive it. */
+function sheet(rows: Array<[string, AcceptanceState]>): NodeAcceptanceDto {
+  const soft = new Set(['forward', 'capacity']);
+  const items: AcceptanceItemDto[] = rows.map(([key, state]) => ({
+    key, label: `label-${key}`, state, evidence: null, asOfSec: null, source: 'profile',
+  }));
+  const blockers = items
+    .filter((item) => item.state !== 'pass' && !(item.state === 'unknown' && soft.has(item.key)))
+    .map((item) => item.key);
+  return { items, sellable: blockers.length === 0, blockers, asOfSec: null };
+}
+
+const SELLABLE = sheet([['profile', 'pass'], ['forward', 'unknown'], ['capacity', 'unknown']]);
+const BLOCKED = sheet([['profile', 'fail'], ['carriers', 'fail'], ['capacity', 'unknown']]);
+
 describe('what the action rail will let an operator do', () => {
   it('offers every action on a listed node the hub can reach', () => {
     for (const row of NODE_ACTIONS) {
       if (row.id === 'relist') continue;
-      expect(actionBlockReason(row, healthy), row.id).toBeNull();
+      expect(actionBlockReason(row, healthy, SELLABLE), row.id).toBeNull();
     }
   });
 
   it('refuses everything on a node that has already been retired', () => {
     const retired: NodeActionSubject = { ...healthy, lifecycle: 'retired' };
     for (const row of NODE_ACTIONS) {
-      expect(actionBlockReason(row, retired), row.id).toBe(copy.nodeActionBlocked.retired);
+      expect(actionBlockReason(row, retired, SELLABLE), row.id).toBe(copy.nodeActionBlocked.retired);
     }
   });
 
   it('refuses the machine-side work when the hub is not talking to the machine', () => {
     const lost: NodeActionSubject = { ...healthy, bindings: { komari: false } };
     for (const row of NODE_ACTIONS) {
-      const blocked = actionBlockReason(row, lost);
+      const blocked = actionBlockReason(row, lost, SELLABLE);
       expect(blocked === copy.nodeActionBlocked.hub, row.id).toBe(row.needsHub);
     }
   });
 
   it('will not unlist what is not listed, nor list what already is', () => {
     const unlisted: NodeActionSubject = { ...healthy, lifecycle: 'unlisted', catalogListed: false };
-    expect(actionBlockReason(action('unlist'), unlisted)).toBe(copy.nodeActionBlocked.notListed);
-    expect(actionBlockReason(action('relist'), unlisted)).toBeNull();
-    expect(actionBlockReason(action('relist'), healthy)).toBe(copy.nodeActionBlocked.alreadyListed);
+    expect(actionBlockReason(action('unlist'), unlisted, SELLABLE)).toBe(copy.nodeActionBlocked.notListed);
+    expect(actionBlockReason(action('relist'), unlisted, SELLABLE)).toBeNull();
+    expect(actionBlockReason(action('relist'), healthy, SELLABLE)).toBe(copy.nodeActionBlocked.alreadyListed);
   });
 
   /** R2 reaches the buttons: a listing nobody measured is not a listing of `false`. */
   it('says so rather than guessing when the listing is unknown', () => {
     const unknown: NodeActionSubject = { ...healthy, catalogListed: null };
     for (const id of ['unlist', 'relist', 'retire'] as const) {
-      expect(actionBlockReason(action(id), unknown), id).toBe(copy.nodeActionBlocked.unknownListing);
+      expect(actionBlockReason(action(id), unknown, SELLABLE), id).toBe(copy.nodeActionBlocked.unknownListing);
     }
-    expect(actionBlockReason(action('probe'), unknown)).toBeNull();
+    expect(actionBlockReason(action('probe'), unknown, SELLABLE)).toBeNull();
   });
 
   it('asks for the node name back before anything that changes the machine', () => {
@@ -215,5 +234,62 @@ describe('what the 这台机器 form sends back', () => {
     const march9 = Math.floor(new Date(2026, 2, 9).getTime() / 1_000);
     expect(anchorDayOf(march9)).toBe('9');
     expect(anchorDayOf(null)).toBe('1');
+  });
+});
+
+/**
+ * 上架 is the one action gated on a second document, and the sheet is the
+ * document. The three answers it can give are all different: the sheet says
+ * yes, the sheet says no and names what is missing, or the sheet has not come
+ * back — and the third must never read as the first.
+ */
+describe('the 可售验收单 and what it lets 上架 do', () => {
+  const unlisted: NodeActionSubject = { ...healthy, lifecycle: 'unlisted', catalogListed: false };
+
+  it('refuses 上架 with the blockers named, and waits rather than guessing', () => {
+    const refused = actionBlockReason(action('relist'), unlisted, BLOCKED);
+    expect(refused).toContain('2');
+    expect(refused).toContain('label-carriers');
+    expect(actionBlockReason(action('relist'), unlisted, null))
+      .toBe(copy.nodeActionBlocked.acceptanceUnread);
+    expect(actionBlockReason(action('relist'), unlisted, SELLABLE)).toBeNull();
+  });
+
+  it('leaves every other action alone whatever the sheet says', () => {
+    for (const row of NODE_ACTIONS) {
+      if (row.id === 'relist') continue;
+      expect(actionBlockReason(row, unlisted, BLOCKED), row.id)
+        .not.toBe(copy.nodeActionBlocked.acceptanceUnread);
+    }
+  });
+
+  it('reads the blockers back as the labels the sheet shows them under', () => {
+    expect(blockerLabels(BLOCKED)).toEqual(['label-profile', 'label-carriers']);
+    expect(blockerLabels(SELLABLE)).toEqual([]);
+  });
+
+  it('puts what is blocking 上架 first and keeps the rest in order', () => {
+    const mixed = sheet([
+      ['profile', 'pass'], ['carriers', 'fail'], ['quota', 'pass'], ['errors', 'pending'],
+    ]);
+    expect(orderedAcceptance(mixed).map((row) => row.key))
+      .toEqual(['carriers', 'errors', 'profile', 'quota']);
+  });
+
+  it('gives each state its own tone, and only the failing one an alarm', () => {
+    expect(acceptanceTone('fail')).toBe('sev');
+    expect(acceptanceTone('unknown')).toBe('unk');
+    expect(acceptanceTone('pending')).toBe('info');
+    expect(acceptanceTone('pass')).toBe('ok');
+  });
+
+  it('repeats the blockers in the 仍要上架 confirmation, and marks it an override', () => {
+    const override = overrideRelistAction(BLOCKED);
+    expect(override.override).toBe(true);
+    expect(override.jobType).toBe('catalog_relist');
+    expect(override.destructive).toBe(true);
+    expect(override.label).toBe(copy.nodeAcceptanceOverride);
+    expect(override.consequence).toContain('label-carriers');
+    expect(override.consequence).toContain(copy.nodeActionConsequence.relist);
   });
 });

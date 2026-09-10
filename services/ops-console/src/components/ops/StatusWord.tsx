@@ -24,6 +24,9 @@ const WORD_TONE: Record<AnyHealthWord, Tone> = {
   [copy.customerHealth.unreachable]: 'sev',
   [copy.customerHealth.unstable]: 'warn',
   [copy.customerHealth.unreported]: 'unk',
+  // Nothing has failed for somebody who never started, so the word that says
+  // so must not wear a fault's colour: it is a chore, and chores are never red.
+  [copy.customerHealth.never_used]: 'unk',
   // Offline was `info`, and a blue pill next to a red one reads as a second
   // severity. A customer who closed their laptop is not a state of the
   // system: it is the absence of one, which is what `unk` is for.

@@ -30,6 +30,9 @@
         "claude"
       ],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999970,
+      "firstConnectedAt": 1724999970,
       "expiresAt": 1727592000,
       "lastSeenAt": 1724999970,
       "updatedAt": 1724999970
@@ -60,6 +63,9 @@
       "quotaBytes": 107374182400,
       "services": [],
       "minAppVersion": null,
+      "stage": "registered",
+      "stageSinceAt": 1724999980,
+      "firstConnectedAt": null,
       "expiresAt": 1726209600,
       "lastSeenAt": null,
       "updatedAt": 1724999980
@@ -92,6 +98,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999999,
+      "firstConnectedAt": 1724999999,
       "expiresAt": null,
       "lastSeenAt": 1724999999,
       "updatedAt": 1724999999
@@ -124,6 +133,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999998,
+      "firstConnectedAt": 1724999998,
       "expiresAt": null,
       "lastSeenAt": 1724999998,
       "updatedAt": 1724999998
@@ -156,6 +168,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999997,
+      "firstConnectedAt": 1724999997,
       "expiresAt": null,
       "lastSeenAt": 1724999997,
       "updatedAt": 1724999997
@@ -188,6 +203,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999996,
+      "firstConnectedAt": 1724999996,
       "expiresAt": null,
       "lastSeenAt": 1724999996,
       "updatedAt": 1724999996
@@ -220,6 +238,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999995,
+      "firstConnectedAt": 1724999995,
       "expiresAt": null,
       "lastSeenAt": 1724999995,
       "updatedAt": 1724999995
@@ -252,6 +273,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999994,
+      "firstConnectedAt": 1724999994,
       "expiresAt": null,
       "lastSeenAt": 1724999994,
       "updatedAt": 1724999994
@@ -284,6 +308,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999993,
+      "firstConnectedAt": 1724999993,
       "expiresAt": null,
       "lastSeenAt": 1724999993,
       "updatedAt": 1724999993
@@ -316,6 +343,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999992,
+      "firstConnectedAt": 1724999992,
       "expiresAt": null,
       "lastSeenAt": 1724999992,
       "updatedAt": 1724999992
@@ -348,6 +378,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999991,
+      "firstConnectedAt": 1724999991,
       "expiresAt": null,
       "lastSeenAt": 1724999991,
       "updatedAt": 1724999991
@@ -380,6 +413,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999990,
+      "firstConnectedAt": 1724999990,
       "expiresAt": null,
       "lastSeenAt": 1724999990,
       "updatedAt": 1724999990
@@ -412,6 +448,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999989,
+      "firstConnectedAt": 1724999989,
       "expiresAt": null,
       "lastSeenAt": 1724999989,
       "updatedAt": 1724999989
@@ -444,6 +483,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999988,
+      "firstConnectedAt": 1724999988,
       "expiresAt": null,
       "lastSeenAt": 1724999988,
       "updatedAt": 1724999988
@@ -476,6 +518,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999987,
+      "firstConnectedAt": 1724999987,
       "expiresAt": null,
       "lastSeenAt": 1724999987,
       "updatedAt": 1724999987
@@ -508,6 +553,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999986,
+      "firstConnectedAt": 1724999986,
       "expiresAt": null,
       "lastSeenAt": 1724999986,
       "updatedAt": 1724999986
@@ -540,6 +588,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999985,
+      "firstConnectedAt": 1724999985,
       "expiresAt": null,
       "lastSeenAt": 1724999985,
       "updatedAt": 1724999985
@@ -572,6 +623,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999984,
+      "firstConnectedAt": 1724999984,
       "expiresAt": null,
       "lastSeenAt": 1724999984,
       "updatedAt": 1724999984
@@ -604,6 +658,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999983,
+      "firstConnectedAt": 1724999983,
       "expiresAt": null,
       "lastSeenAt": 1724999983,
       "updatedAt": 1724999983
@@ -636,6 +693,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999982,
+      "firstConnectedAt": 1724999982,
       "expiresAt": null,
       "lastSeenAt": 1724999982,
       "updatedAt": 1724999982
@@ -668,6 +728,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999981,
+      "firstConnectedAt": 1724999981,
       "expiresAt": null,
       "lastSeenAt": 1724999981,
       "updatedAt": 1724999981
@@ -700,6 +763,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999980,
+      "firstConnectedAt": 1724999980,
       "expiresAt": null,
       "lastSeenAt": 1724999980,
       "updatedAt": 1724999980
@@ -732,6 +798,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999979,
+      "firstConnectedAt": 1724999979,
       "expiresAt": null,
       "lastSeenAt": 1724999979,
       "updatedAt": 1724999979
@@ -764,6 +833,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999978,
+      "firstConnectedAt": 1724999978,
       "expiresAt": null,
       "lastSeenAt": 1724999978,
       "updatedAt": 1724999978
@@ -796,6 +868,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999977,
+      "firstConnectedAt": 1724999977,
       "expiresAt": null,
       "lastSeenAt": 1724999977,
       "updatedAt": 1724999977
@@ -828,6 +903,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999976,
+      "firstConnectedAt": 1724999976,
       "expiresAt": null,
       "lastSeenAt": 1724999976,
       "updatedAt": 1724999976
@@ -860,6 +938,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999975,
+      "firstConnectedAt": 1724999975,
       "expiresAt": null,
       "lastSeenAt": 1724999975,
       "updatedAt": 1724999975
@@ -892,6 +973,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999974,
+      "firstConnectedAt": 1724999974,
       "expiresAt": null,
       "lastSeenAt": 1724999974,
       "updatedAt": 1724999974
@@ -924,6 +1008,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999973,
+      "firstConnectedAt": 1724999973,
       "expiresAt": null,
       "lastSeenAt": 1724999973,
       "updatedAt": 1724999973
@@ -956,6 +1043,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999972,
+      "firstConnectedAt": 1724999972,
       "expiresAt": null,
       "lastSeenAt": 1724999972,
       "updatedAt": 1724999972
@@ -988,6 +1078,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999971,
+      "firstConnectedAt": 1724999971,
       "expiresAt": null,
       "lastSeenAt": 1724999971,
       "updatedAt": 1724999971
@@ -1020,6 +1113,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999970,
+      "firstConnectedAt": 1724999970,
       "expiresAt": null,
       "lastSeenAt": 1724999970,
       "updatedAt": 1724999970
@@ -1052,6 +1148,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999969,
+      "firstConnectedAt": 1724999969,
       "expiresAt": null,
       "lastSeenAt": 1724999969,
       "updatedAt": 1724999969
@@ -1084,6 +1183,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999968,
+      "firstConnectedAt": 1724999968,
       "expiresAt": null,
       "lastSeenAt": 1724999968,
       "updatedAt": 1724999968
@@ -1116,6 +1218,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999967,
+      "firstConnectedAt": 1724999967,
       "expiresAt": null,
       "lastSeenAt": 1724999967,
       "updatedAt": 1724999967
@@ -1148,6 +1253,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999966,
+      "firstConnectedAt": 1724999966,
       "expiresAt": null,
       "lastSeenAt": 1724999966,
       "updatedAt": 1724999966
@@ -1180,6 +1288,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999965,
+      "firstConnectedAt": 1724999965,
       "expiresAt": null,
       "lastSeenAt": 1724999965,
       "updatedAt": 1724999965
@@ -1212,6 +1323,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999964,
+      "firstConnectedAt": 1724999964,
       "expiresAt": null,
       "lastSeenAt": 1724999964,
       "updatedAt": 1724999964
@@ -1244,6 +1358,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999963,
+      "firstConnectedAt": 1724999963,
       "expiresAt": null,
       "lastSeenAt": 1724999963,
       "updatedAt": 1724999963
@@ -1276,6 +1393,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999962,
+      "firstConnectedAt": 1724999962,
       "expiresAt": null,
       "lastSeenAt": 1724999962,
       "updatedAt": 1724999962
@@ -1308,6 +1428,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999961,
+      "firstConnectedAt": 1724999961,
       "expiresAt": null,
       "lastSeenAt": 1724999961,
       "updatedAt": 1724999961
@@ -1340,6 +1463,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999960,
+      "firstConnectedAt": 1724999960,
       "expiresAt": null,
       "lastSeenAt": 1724999960,
       "updatedAt": 1724999960
@@ -1372,6 +1498,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999959,
+      "firstConnectedAt": 1724999959,
       "expiresAt": null,
       "lastSeenAt": 1724999959,
       "updatedAt": 1724999959
@@ -1404,6 +1533,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999958,
+      "firstConnectedAt": 1724999958,
       "expiresAt": null,
       "lastSeenAt": 1724999958,
       "updatedAt": 1724999958
@@ -1436,6 +1568,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999957,
+      "firstConnectedAt": 1724999957,
       "expiresAt": null,
       "lastSeenAt": 1724999957,
       "updatedAt": 1724999957
@@ -1468,6 +1603,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999956,
+      "firstConnectedAt": 1724999956,
       "expiresAt": null,
       "lastSeenAt": 1724999956,
       "updatedAt": 1724999956
@@ -1500,6 +1638,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999955,
+      "firstConnectedAt": 1724999955,
       "expiresAt": null,
       "lastSeenAt": 1724999955,
       "updatedAt": 1724999955
@@ -1532,6 +1673,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999954,
+      "firstConnectedAt": 1724999954,
       "expiresAt": null,
       "lastSeenAt": 1724999954,
       "updatedAt": 1724999954
@@ -1564,6 +1708,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999953,
+      "firstConnectedAt": 1724999953,
       "expiresAt": null,
       "lastSeenAt": 1724999953,
       "updatedAt": 1724999953
@@ -1596,6 +1743,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999952,
+      "firstConnectedAt": 1724999952,
       "expiresAt": null,
       "lastSeenAt": 1724999952,
       "updatedAt": 1724999952
@@ -1628,6 +1778,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999951,
+      "firstConnectedAt": 1724999951,
       "expiresAt": null,
       "lastSeenAt": 1724999951,
       "updatedAt": 1724999951
@@ -1660,6 +1813,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999950,
+      "firstConnectedAt": 1724999950,
       "expiresAt": null,
       "lastSeenAt": 1724999950,
       "updatedAt": 1724999950
@@ -1692,6 +1848,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999949,
+      "firstConnectedAt": 1724999949,
       "expiresAt": null,
       "lastSeenAt": 1724999949,
       "updatedAt": 1724999949
@@ -1724,6 +1883,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999948,
+      "firstConnectedAt": 1724999948,
       "expiresAt": null,
       "lastSeenAt": 1724999948,
       "updatedAt": 1724999948
@@ -1756,6 +1918,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999947,
+      "firstConnectedAt": 1724999947,
       "expiresAt": null,
       "lastSeenAt": 1724999947,
       "updatedAt": 1724999947
@@ -1788,6 +1953,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999946,
+      "firstConnectedAt": 1724999946,
       "expiresAt": null,
       "lastSeenAt": 1724999946,
       "updatedAt": 1724999946
@@ -1820,6 +1988,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999945,
+      "firstConnectedAt": 1724999945,
       "expiresAt": null,
       "lastSeenAt": 1724999945,
       "updatedAt": 1724999945
@@ -1852,6 +2023,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999944,
+      "firstConnectedAt": 1724999944,
       "expiresAt": null,
       "lastSeenAt": 1724999944,
       "updatedAt": 1724999944
@@ -1884,6 +2058,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999943,
+      "firstConnectedAt": 1724999943,
       "expiresAt": null,
       "lastSeenAt": 1724999943,
       "updatedAt": 1724999943
@@ -1916,6 +2093,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999942,
+      "firstConnectedAt": 1724999942,
       "expiresAt": null,
       "lastSeenAt": 1724999942,
       "updatedAt": 1724999942
@@ -1948,6 +2128,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999941,
+      "firstConnectedAt": 1724999941,
       "expiresAt": null,
       "lastSeenAt": 1724999941,
       "updatedAt": 1724999941
@@ -1980,6 +2163,9 @@
       "quotaBytes": 214748364800,
       "services": [],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999940,
+      "firstConnectedAt": 1724999940,
       "expiresAt": null,
       "lastSeenAt": 1724999940,
       "updatedAt": 1724999940
@@ -2010,6 +2196,9 @@
       "quotaBytes": null,
       "services": [],
       "minAppVersion": null,
+      "stage": "registered",
+      "stageSinceAt": 1724999990,
+      "firstConnectedAt": null,
       "expiresAt": 1724996400,
       "lastSeenAt": null,
       "updatedAt": 1724999990

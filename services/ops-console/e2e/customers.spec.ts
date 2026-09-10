@@ -145,6 +145,59 @@ test.describe('customers page', () => {
     await expect(found).not.toContainText('wx_wang_tao');
   });
 
+  /**
+   * 开通漏斗: the second sentence on the page, and the one an operator reads in
+   * the morning. R4 in the browser again — press a segment, and the rows you
+   * get are the people it just counted.
+   */
+  test('漏斗的每一段点下去，表里就是这一段数出来的人', async ({ page }) => {
+    await open(page, '/customers');
+    await expect(page.getByRole('button', { name: '2 位开通了还没注册' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '17 位连上过' })).toBeVisible();
+
+    const stuck = page.getByRole('button', { name: /位注册了还没装客户端$/ });
+    await stuck.click();
+    await settle(page);
+    const claimed = Number((await stuck.textContent())?.match(/\d+/)?.[0]);
+    const rows = page.locator('tbody tr');
+    expect(await rows.count()).toBe(claimed);
+    await expect(rows.first()).toContainText('还没用起来');
+
+    // The invited people are rows of the same table, with a neutral tag where
+    // a health word would be and their handle beside the address.
+    await page.getByRole('button', { name: /位开通了还没注册$/ }).click();
+    await settle(page);
+    await expect(page.locator('tbody tr')).toHaveCount(2);
+    const invited = page.locator('tbody tr').filter({ hasText: 'shu.qing@example.com' });
+    await expect(invited).toContainText('未注册');
+    await expect(invited).toContainText('wx_shu_qing');
+  });
+
+  /** 还没用起来 is a chore, not a fault: it never wears an incident's colour. */
+  test('还没用起来 从来不当事故上色', async ({ page }) => {
+    await open(page, '/customers');
+    await expect(page.getByRole('button', { name: '3 位还没用起来' })).toBeVisible();
+    const row = page.locator('tbody tr').filter({ hasText: 'sun.yan@example.com' });
+    await expect(row).toContainText('还没用起来');
+    await expect(row.locator('.tone-sev, .tone-warn')).toHaveCount(0);
+  });
+
+  /**
+   * Somebody who was opened and never registered has no 360 to open, so ⌘K
+   * lands on the only thing there is of them: the invite drawer.
+   */
+  test('⌘K 用微信号找得到名单上还没注册的人', async ({ page }) => {
+    await open(page, '/nodes');
+    await page.keyboard.press('Meta+k');
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('combobox').fill('wx_shu_qing');
+    const found = dialog.getByRole('option').first();
+    await expect(found).toContainText('shu.qing@example.com');
+    await found.click();
+    await expect(page).toHaveURL(/invite=shu\.qing%40example\.com/);
+    await expect(page.getByRole('dialog')).toContainText('开通 6 天还没注册');
+  });
+
   test('a row opens its own page, not a drawer', async ({ page }) => {
     await open(page, '/customers');
     await page.locator('tbody tr').first().click();

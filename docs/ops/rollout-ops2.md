@@ -19,7 +19,23 @@
 
 第八次 `b173c29`（迁移 0052：每设备一行状态，客户状态从设备汇总；`connection_events.attempt_id` 去重）。
 
+第九次 `aa240b8`（PR #128；迁移 0053 账目 / 月结 / 汇率，0054 `users.wechat_id`，0055 白名单行上的微信号/联系方式/备注）：收入、退款、补偿只记人民币，支出缺省美元；每日 `fx` 步骤从 frankfurter 拉汇率——没有当天汇率时非人民币条目会 409 `FX_RATE_MISSING`，这是设计而不是故障，等下一个 tick。开户早于客户注册时，微信号等先落在 `signup_allowlist`，首次登录自动带到 `users`。部署前备份 `backups/control-plane-d1/20260910T085207Z.sql.gz`。
+
+### 客户开通漏斗
+
+开通了但还没用起来的人现在出现在 `GET customers/funnel`：白名单未注册是 `invited`（带着开通时记下的微信号），注册未装客户端 / 装了未上报 / 上报过未连上分别是 `registered`、`device_added`、`reported`。他们不再只活在旧后台的白名单页，也不会在客户列表里被标成「未上报」——从未连上过的判定是「还没用起来」。已经连上过的人只计入 `connected`，不出现在卡住名单里。
+
 日常运营不再需要打开 `/ops/`：事故、节点上下线、目录发布、分流规则、家宽库存、客户开通与处置都在 `/ops2/`。还留在旧后台的只有节点 24 小时曲线、质量原文折叠、注册白名单页（见 `docs/ops/parity-audit.md` 第三波）。
+
+## 0.2 恢复演练结论（2026-09-10，详见 `docs/ops/restore-drill-2026-09-10.md`）
+
+今天的备份 `backups/control-plane-d1/20260910T085207Z.sql.gz` 能恢复、恢复后能当数据用（20 用户 / 27 设备 / 7533 遥测窗口，`quick_check` ok，外键零违例），导入 28 秒，全流程 wrangler 时间约 1.5 分钟。五条要记住的：
+
+1. 手工备份要按脚本命名（`%Y-%m-%dT%H:%M:%SZ.sql.gz`）并传 `.sha256` 旁文件，否则 `restore-control-plane-d1-preview.sh` 会拒绝；今天的旁文件已补传。
+2. **D1 不能关外键、不允许 `integrity_check`**：清空一个已有库要先删触发器、索引，再按依赖顺序（子表先）删表；完整性用 `PRAGMA quick_check` + `PRAGMA foreign_key_check`。仓库里还没有按依赖顺序的清库脚本——这是生产恢复的硬缺口（部门 E）。
+3. `d1 migrations apply` 需要 `--config`（本地 gitignored 的 `wrangler.preview.jsonc`），`d1 execute/export` 不带。
+4. 生产库的 `d1_migrations` 里有五条仓库里不存在的 0026–0030（早期编号被复用），对应的 `diagnostics_failure_index` 等四张表没有代码读写；从空库按 migrations 重建与从 dump 恢复会得到不同的库。要么补文件要么加一条迁移删表，让两条路径收敛。
+5. D1 之外没有备份：Worker 密钥（尤其 `CATALOG_ENCRYPTION_KEY` 与 `JWT_SECRET`）、R2 两个桶、DNS / 路由 / Access 应用、策略签名私钥都在恢复清单之外，且没有生产恢复流程。
 
 ## 1. 在 preview D1 上演练迁移
 

@@ -5,6 +5,12 @@ import { ApiError } from '../errors';
 import { type Env, id } from '../env';
 import { completeJob, leaseJobs, type NodeJob } from './jobs';
 import { operationsRetirePreview, relistFleetNode, retireFleetNode } from './reads/fleet';
+import {
+  finishDrainedRetires,
+  openOrReuseRetirePending,
+  retireDependencies,
+  revokeExitToken,
+} from './retire-dependencies';
 
 const SUMMARY_MAX = 500;
 
@@ -55,17 +61,38 @@ async function finish(
   await recordIncidentJob(e, job, nowSec, text);
 }
 
-async function executeCatalogRetire(e: Env, job: NodeJob): Promise<{ summary: string; resultJson: unknown }> {
+async function executeCatalogRetire(
+  e: Env,
+  job: NodeJob,
+  nowSec: number,
+): Promise<{ summary: string; resultJson: unknown }> {
   const reason = typeof job.params.reason === 'string' && job.params.reason.trim()
     ? job.params.reason.trim().slice(0, 500)
     : 'catalog_retire';
   const preview = await operationsRetirePreview(e, job.nodeName);
-  const result = await retireFleetNode(e, job.requestedBy, job.nodeName, {
-    expectedRevision: preview.expectedRevision,
-    confirmation: job.nodeName,
-    reason,
-  });
-  return { summary: `retired ${job.nodeName}`, resultJson: { revision: result.revision } };
+  let revision = preview.currentRevision;
+  if (preview.canRetire) {
+    const result = await retireFleetNode(e, job.requestedBy, job.nodeName, {
+      expectedRevision: preview.expectedRevision,
+      confirmation: job.nodeName,
+      reason,
+    }, undefined, nowSec);
+    revision = result.revision;
+  } else if (preview.changes.catalogEntryRemoved) {
+    throw new ApiError(422, 'RETIRE_UNSAFE', preview.warnings[0] ?? 'Node cannot be retired safely');
+  }
+  let deps = await retireDependencies(e, job.nodeName, nowSec);
+  const still = deps.customersOnNode.length;
+  if (still > 0) {
+    await openOrReuseRetirePending(e, job.nodeName, still, nowSec);
+    return {
+      summary: `retired ${job.nodeName}: ${still} 位客户仍在这台机器上`,
+      resultJson: { revision, ...deps },
+    };
+  }
+  await revokeExitToken(e, job.nodeName, job.requestedBy, nowSec);
+  deps = await retireDependencies(e, job.nodeName, nowSec);
+  return { summary: `retired ${job.nodeName}`, resultJson: { revision, ...deps } };
 }
 
 async function executeCatalogRelist(e: Env, job: NodeJob): Promise<{ summary: string; resultJson: unknown }> {
@@ -86,7 +113,7 @@ async function executeCatalogRelist(e: Env, job: NodeJob): Promise<{ summary: st
 async function executeOne(e: Env, job: NodeJob, leaseId: string, nowSec: number): Promise<void> {
   try {
     if (job.type === 'catalog_retire') {
-      const result = await executeCatalogRetire(e, job);
+      const result = await executeCatalogRetire(e, job, nowSec);
       await finish(e, job, leaseId, nowSec, true, result.summary, result.resultJson);
       return;
     }
@@ -112,6 +139,7 @@ export async function runWorkerJobs(e: Env, nowSec: number, max = 3): Promise<nu
     for (const job of claimed.jobs) {
       await executeOne(e, job, claimed.leaseId, nowSec);
     }
+    await finishDrainedRetires(e, 'system', nowSec);
     return claimed.jobs.length;
   } catch (error) {
     if (missingTable(error)) return 0;

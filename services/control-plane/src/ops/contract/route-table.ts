@@ -17,11 +17,13 @@ import {
   violation,
 } from './checkers';
 import {
+  assertNodeAcceptance,
   assertNodeBindings,
   assertNodeDetail,
   assertNodeErrorRow,
   assertNodeHistoryEntry,
   assertNodeSummary,
+  assertRetireDependencies,
 } from './nodes';
 import {
   assertActivityHour,
@@ -31,6 +33,7 @@ import {
   assertDestinationRow,
   assertServiceUsage,
 } from './customers';
+import { assertFunnel } from './funnel';
 import {
   assertAdoptionMatrix,
   assertAlertDelivery,
@@ -60,6 +63,7 @@ export const assertCustomerConnectionsList = (value: unknown) => assertList(valu
 export const assertCustomerActivityList = (value: unknown) => assertList(value, assertActivityHour);
 export const assertCustomerDestinationsList = (value: unknown) => assertList(value, assertDestinationRow);
 export const assertCustomerServicesList = (value: unknown) => assertList(value, assertServiceUsage);
+export { assertFunnel };
 export const assertIncidentList = (value: unknown) => assertList(value, assertIncident);
 export const assertJobList = (value: unknown) => assertList(value, assertJob);
 export const assertReleaseList = (value: unknown) => assertList(value, assertRelease);
@@ -86,17 +90,20 @@ export function assertNodeErrorsMeasured(value: unknown) {
 export const NAMED_CHECKERS = {
   assertNodeSummaryList,
   assertNodeDetail,
+  assertNodeAcceptance,
   assertNodeHistoryList,
   assertNodeConnectionsList,
   assertNodeErrorsMeasured,
   assertNodeBindings,
   assertNodeJobsList,
+  assertRetireDependencies,
   assertCustomerSummaryList,
   assertCustomerDetail,
   assertCustomerConnectionsList,
   assertCustomerActivityList,
   assertCustomerDestinationsList,
   assertCustomerServicesList,
+  assertFunnel,
   assertIncidentList,
   assertIncidentDetail,
   assertFollowupList,
@@ -139,12 +146,15 @@ export interface GetRouteBinding {
 export const GET_ROUTE_TABLE: readonly GetRouteBinding[] = [
   { route: 'GET /api/v1/ops/nodes', checker: 'assertNodeSummaryList' },
   { route: 'GET /api/v1/ops/nodes/{name}', checker: 'assertNodeDetail' },
+  { route: 'GET /api/v1/ops/nodes/{name}/acceptance', checker: 'assertNodeAcceptance' },
   { route: 'GET /api/v1/ops/nodes/{name}/history', checker: 'assertNodeHistoryList' },
   { route: 'GET /api/v1/ops/nodes/{name}/connections', checker: 'assertNodeConnectionsList' },
   { route: 'GET /api/v1/ops/nodes/{name}/errors', checker: 'assertNodeErrorsMeasured' },
   { route: 'GET /api/v1/ops/nodes/{name}/bindings', checker: 'assertNodeBindings' },
   { route: 'GET /api/v1/ops/nodes/{name}/jobs', checker: 'assertNodeJobsList' },
+  { route: 'GET /api/v1/ops/nodes/{name}/retire-preview', checker: 'assertRetireDependencies' },
   { route: 'GET /api/v1/ops/customers', checker: 'assertCustomerSummaryList' },
+  { route: 'GET /api/v1/ops/customers/funnel', checker: 'assertFunnel' },
   { route: 'GET /api/v1/ops/customers/{id}', checker: 'assertCustomerDetail' },
   { route: 'GET /api/v1/ops/customers/{id}/connections', checker: 'assertCustomerConnectionsList' },
   { route: 'GET /api/v1/ops/customers/{id}/activity', checker: 'assertCustomerActivityList' },

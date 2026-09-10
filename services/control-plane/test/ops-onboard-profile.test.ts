@@ -150,6 +150,18 @@ describe('ops onboard pending profile', () => {
     expect(detail.notes).toBe('vip drawer');
   });
 
+  it('does not allowlist an email when wechatId is too long', async () => {
+    const email = 'too-long-wechat@example.com';
+    const onboarded = await ops('users/onboard', json({
+      email, wechatId: 'a'.repeat(65),
+    }));
+    expect(onboarded.status).toBe(400);
+    const row = await db().prepare(
+      'SELECT email FROM signup_allowlist WHERE email = ?',
+    ).bind(email).first<{ email: string }>();
+    expect(row).toBeNull();
+  });
+
   it('onboards an already-registered user onto users with pendingProfile false', async () => {
     await seedUser('u-1', 'a@example.com');
     const onboarded = await ops('users/onboard', json({

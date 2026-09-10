@@ -59,7 +59,22 @@ export function customerColumns(
     {
       id: 'status',
       header: copy.customerColumns.status,
-      width: '64px',
+      /**
+       * 64 px fitted the three-character words and cut the five-character one
+       * a glyph short of itself, which is not a word — and the health word is
+       * the one thing on the row that has to be readable at a glance.
+       *
+       * The 30 px are paid for by the three columns that can spare them
+       * without losing a fact: 14 from the quota figure, which needs 62 px and
+       * had 76, and 8 each from the handle and the service list, both of which
+       * were already truncating with the whole value one hover away. Not a
+       * pixel comes out of the addresses: at 1440 that column sits exactly at
+       * its longest entry. The narrower padding here is the same argument —
+       * this cell is one short word, and its side air is worth less than a
+       * word that can be read.
+       */
+      width: '94px',
+      className: 'px-2',
       sortValue: (row) => row.health,
       cell: (row) => <StatusWord word={row.health} reason={row.reason} />,
     },
@@ -83,7 +98,7 @@ export function customerColumns(
       {
         id: 'wechat',
         header: copy.customerColumns.wechat,
-        width: '76px',
+        width: '68px',
         sortValue: (row: CustomerSummaryDto) => row.wechatId ?? '',
         cell: (row: CustomerSummaryDto) => <WechatCell id={row.wechatId} mask={wechat} />,
       },
@@ -114,7 +129,7 @@ export function customerColumns(
     {
       id: 'usage',
       header: copy.customerColumns.usage,
-      width: '100px',
+      width: '86px',
       align: 'right',
       mono: true,
       sortValue: (row) => row.usageBytes.value,
@@ -136,7 +151,7 @@ export function customerColumns(
       {
         id: 'services',
         header: copy.customerColumns.services,
-        width: '80px',
+        width: '72px',
         cell: (row: CustomerSummaryDto) => (
           row.services.length === 0
             ? <Value value={null} source={copy.sourceWord.telemetry} />

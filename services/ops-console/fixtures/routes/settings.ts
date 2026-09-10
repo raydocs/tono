@@ -538,7 +538,7 @@ export function createSettingsFixtures(rootDir: string) {
    * Claim the request, or hand it back. Returning `false` leaves the response
    * untouched so the caller's own 404 still describes the route.
    */
-  return function settingsFixtures(options: {
+  function settingsFixtures(options: {
     req: IncomingMessage;
     res: ServerResponse;
     route: string;
@@ -581,7 +581,26 @@ export function createSettingsFixtures(rootDir: string) {
       empty: options.empty,
       store,
     });
+  }
+
+  /**
+   * Take an address off the sign-up list from outside this module.
+   *
+   * 撤销开通 on the 客户 page sends the same DELETE this section does, and the
+   * funnel fixtures answer it — they own the invited row. This is the other
+   * half of that write: without it 注册白名单 would go on listing an address
+   * that can no longer sign up, and the two pages would disagree about who is
+   * allowed in.
+   */
+  settingsFixtures.removeAllowlisted = (session: string, empty: boolean, email: string): void => {
+    const store = storeFor(session, empty);
+    const at = store.allowlist.findIndex((row) => row.email === email);
+    if (at < 0) return;
+    store.allowlist.splice(at, 1);
+    note(store, 'allowlist.remove', 'signup_allowlist', email, email);
   };
+
+  return settingsFixtures;
 }
 
 /** The Worker masks on the way in; the fixture has to, or the drawer lies. */

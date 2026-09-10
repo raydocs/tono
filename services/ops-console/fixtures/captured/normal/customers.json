@@ -30,6 +30,9 @@
         "claude"
       ],
       "minAppVersion": "0.0.72",
+      "stage": "connected",
+      "stageSinceAt": 1724999918,
+      "firstConnectedAt": 1724999918,
       "expiresAt": 1727591948,
       "lastSeenAt": 1724999918,
       "updatedAt": 1724999918
@@ -60,6 +63,9 @@
       "quotaBytes": 107374182400,
       "services": [],
       "minAppVersion": null,
+      "stage": "registered",
+      "stageSinceAt": 1724999928,
+      "firstConnectedAt": null,
       "expiresAt": 1726209548,
       "lastSeenAt": null,
       "updatedAt": 1724999928
@@ -90,6 +96,9 @@
       "quotaBytes": null,
       "services": [],
       "minAppVersion": null,
+      "stage": "registered",
+      "stageSinceAt": 1724999938,
+      "firstConnectedAt": null,
       "expiresAt": 1724996348,
       "lastSeenAt": null,
       "updatedAt": 1724999938

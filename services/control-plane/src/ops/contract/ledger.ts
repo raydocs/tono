@@ -79,6 +79,8 @@ export interface MonthSummaryDto {
   customers: MonthCustomerDto[];
   nodes: MonthNodeDto[];
   unreconciled: number;
+  frozen: boolean;
+  frozenAt: number | null;
   updatedAt: number;
 }
 
@@ -160,7 +162,7 @@ function assertByCategory(value: unknown, path: string): MonthByCategory {
 
 const SUMMARY_KEYS = [
   'month', 'closedAt', 'closedBy', 'revenueCnyMinor', 'costCnyMinor', 'marginCnyMinor',
-  'byCategory', 'customers', 'nodes', 'unreconciled', 'updatedAt',
+  'byCategory', 'customers', 'nodes', 'unreconciled', 'frozen', 'frozenAt', 'updatedAt',
 ];
 
 export function assertMonthSummary(value: unknown, path = 'monthSummary'): MonthSummaryDto {
@@ -176,6 +178,8 @@ export function assertMonthSummary(value: unknown, path = 'monthSummary'): Month
     customers: arrayOf(row, path, 'customers', assertMonthCustomer),
     nodes: arrayOf(row, path, 'nodes', assertMonthNode),
     unreconciled: int(row, path, 'unreconciled'),
+    frozen: bool(row, path, 'frozen'),
+    frozenAt: optInt(row, path, 'frozenAt'),
     updatedAt: int(row, path, 'updatedAt'),
   };
 }
