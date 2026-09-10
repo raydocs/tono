@@ -33,6 +33,7 @@ import {
   postAlertRuleTest, getAlertDeliveries,
 } from './alerts';
 import { getSystemHealth } from './system';
+import { postReplay } from './replay';
 import {
   getFx, getLedger, getMonth, getMonthExport, patchLedger, postLedger, postLedgerReverse, postMonthClose,
 } from './ledger';
@@ -113,6 +114,7 @@ export const OPS_V1_ROUTES = [
 
   // dept:a
   // append your entries inside your block
+  'POST /api/v1/ops/replay',
 
   // dept:b
   // append your entries inside your block
@@ -202,6 +204,7 @@ const ROUTES: Array<{ method: string; re: RegExp; handle: Handler }> = [
 
   // dept:a
   // append your entries inside your block
+  { method: 'POST', re: /^\/api\/v1\/ops\/replay$/, handle: (req, e) => postReplay(req, e) },
 
   // dept:b
   // append your entries inside your block

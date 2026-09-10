@@ -4,6 +4,7 @@ import type {
   IncidentClosure,
   IncidentStatus,
   Measured,
+  NodeVerdict,
   Severity,
   SourceId,
   SubjectType,
@@ -12,6 +13,7 @@ import type {
 import {
   INCIDENT_CLOSURES,
   INCIDENT_STATUSES,
+  NODE_VERDICTS,
   SEVERITIES,
   SOURCE_IDS,
   SUBJECT_TYPES,
@@ -21,6 +23,7 @@ import type { ListDto } from './checkers';
 import {
   arrayOf,
   assertList,
+  bool,
   fields,
   int,
   oneOf,
@@ -173,5 +176,52 @@ export function assertIncidentDetail(value: unknown, path = 'incidentDetail'): I
     events: assertList(row.events, assertIncidentEvent, `${path}.events`),
     jobs: assertList(row.jobs, assertJob, `${path}.jobs`),
     deliveries: assertList(row.deliveries, assertAlertDelivery, `${path}.deliveries`),
+  };
+}
+
+/** One history row re-judged under the current rules, without hysteresis. */
+export interface ReplayRowDto {
+  at: number;
+  node: string;
+  wasVerdict: NodeVerdict;
+  nowVerdict: NodeVerdict;
+  wouldOpenKind: string | null;
+  wouldOpenSeverity: Severity | null;
+  differs: boolean;
+}
+
+export interface ReplayDto {
+  rulesVersion: number;
+  items: ReplayRowDto[];
+  skipped: number;
+  updatedAt: number;
+}
+
+const REPLAY_ROW_KEYS = [
+  'at', 'node', 'wasVerdict', 'nowVerdict', 'wouldOpenKind', 'wouldOpenSeverity', 'differs',
+];
+
+export function assertReplayRow(value: unknown, path = 'replayRow'): ReplayRowDto {
+  const row = fields(value, path, REPLAY_ROW_KEYS);
+  return {
+    at: int(row, path, 'at'),
+    node: text(row, path, 'node'),
+    wasVerdict: oneOf<NodeVerdict>(row, path, 'wasVerdict', NODE_VERDICTS),
+    nowVerdict: oneOf<NodeVerdict>(row, path, 'nowVerdict', NODE_VERDICTS),
+    wouldOpenKind: optText(row, path, 'wouldOpenKind'),
+    wouldOpenSeverity: optOneOf<Severity>(row, path, 'wouldOpenSeverity', SEVERITIES),
+    differs: bool(row, path, 'differs'),
+  };
+}
+
+const REPLAY_KEYS = ['rulesVersion', 'items', 'skipped', 'updatedAt'];
+
+export function assertReplay(value: unknown, path = 'replay'): ReplayDto {
+  const row = fields(value, path, REPLAY_KEYS);
+  return {
+    rulesVersion: int(row, path, 'rulesVersion'),
+    items: arrayOf(row, path, 'items', assertReplayRow),
+    skipped: int(row, path, 'skipped'),
+    updatedAt: int(row, path, 'updatedAt'),
   };
 }
