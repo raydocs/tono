@@ -37,6 +37,7 @@ export type CustomerStatus = {
   lastFailCode: string | null;
   lastFailNode: string | null;
   fails30m: number;
+  firstConnectedAt: number | null;
   updatedAt: number;
 };
 
@@ -86,6 +87,7 @@ function statusFromRow(row: Row): CustomerStatus {
     lastFailCode: text(row.last_fail_code),
     lastFailNode: text(row.last_fail_node),
     fails30m: finite(row.fails_30m) ?? 0,
+    firstConnectedAt: finite(row.first_connected_at),
     updatedAt: finite(row.updated_at) ?? 0,
   };
 }

@@ -703,6 +703,7 @@ describe('ops v1 api', () => {
       'POST /api/v1/ops/nodes/{name}/jobs',
       'PATCH /api/v1/ops/nodes/{name}/profile',
       'GET /api/v1/ops/customers',
+      'GET /api/v1/ops/customers/funnel',
       'GET /api/v1/ops/customers/{id}',
       'GET /api/v1/ops/customers/{id}/connections',
       'GET /api/v1/ops/customers/{id}/activity',

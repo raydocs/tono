@@ -31,6 +31,7 @@ import {
   assertDestinationRow,
   assertServiceUsage,
 } from './customers';
+import { assertFunnel } from './funnel';
 import {
   assertAdoptionMatrix,
   assertAlertDelivery,
@@ -60,6 +61,7 @@ export const assertCustomerConnectionsList = (value: unknown) => assertList(valu
 export const assertCustomerActivityList = (value: unknown) => assertList(value, assertActivityHour);
 export const assertCustomerDestinationsList = (value: unknown) => assertList(value, assertDestinationRow);
 export const assertCustomerServicesList = (value: unknown) => assertList(value, assertServiceUsage);
+export { assertFunnel };
 export const assertIncidentList = (value: unknown) => assertList(value, assertIncident);
 export const assertJobList = (value: unknown) => assertList(value, assertJob);
 export const assertReleaseList = (value: unknown) => assertList(value, assertRelease);
@@ -97,6 +99,7 @@ export const NAMED_CHECKERS = {
   assertCustomerActivityList,
   assertCustomerDestinationsList,
   assertCustomerServicesList,
+  assertFunnel,
   assertIncidentList,
   assertIncidentDetail,
   assertFollowupList,
@@ -145,6 +148,7 @@ export const GET_ROUTE_TABLE: readonly GetRouteBinding[] = [
   { route: 'GET /api/v1/ops/nodes/{name}/bindings', checker: 'assertNodeBindings' },
   { route: 'GET /api/v1/ops/nodes/{name}/jobs', checker: 'assertNodeJobsList' },
   { route: 'GET /api/v1/ops/customers', checker: 'assertCustomerSummaryList' },
+  { route: 'GET /api/v1/ops/customers/funnel', checker: 'assertFunnel' },
   { route: 'GET /api/v1/ops/customers/{id}', checker: 'assertCustomerDetail' },
   { route: 'GET /api/v1/ops/customers/{id}/connections', checker: 'assertCustomerConnectionsList' },
   { route: 'GET /api/v1/ops/customers/{id}/activity', checker: 'assertCustomerActivityList' },

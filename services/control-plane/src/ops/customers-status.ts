@@ -202,6 +202,7 @@ export async function applyWindowToStatus(
       lastFailAt: latestFail?.tsSec ?? null, lastFailCode: latestFail?.code ?? null,
       lastFailNode: latestFail?.node ?? null,
       fails30m: decayFails30m(Number(prev?.fails_30m) || 0, elapsed) + fails.length,
+      firstConnectedAt: connected === 1 ? nowSec : null,
       updatedAt: nowSec,
     });
   } catch (error) {

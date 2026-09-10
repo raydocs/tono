@@ -46,7 +46,7 @@ import {
   OPS_USERS_PAGE_LIMIT,
 } from '../reads';
 
-function optionalWechatId(value: unknown): string | null {
+export function optionalWechatId(value: unknown): string | null {
   if (value === undefined || value === null || value === '') return null;
   if (typeof value !== 'string') {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid wechatId');

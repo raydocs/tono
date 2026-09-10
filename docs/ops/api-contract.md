@@ -34,8 +34,10 @@
 | `GET nodes/{name}/bindings` | `NodeBindingsDto` |
 | `GET nodes/{name}/jobs`、`POST nodes/{name}/jobs` | `ListDto<JobDto>` / `JobDto` |
 | `PATCH nodes/{name}/profile` | `NodeDetailDto` |
-| `GET customers?cursor&limit&focus&q&since` | `ListDto<CustomerSummaryDto>`（`wechatId`。`q` 按 email 或 wechat_id 子串过滤，大小写不敏感；缺省/空 `q` 行为与原来相同） |
-| `GET customers/{id}` | `CustomerDetailDto`（`wechatId`、`contact`、`notes` 来自 `users`；`devices[]` 带每台设备的 live 字段：`connected`、`selectedServer`、`lastSeenAt`、`lastFailAt/Code/Node`，来自 `ops_device_status`） |
+| `GET customers?cursor&limit&focus&q&since` | `ListDto<CustomerSummaryDto>`（`wechatId`、`stage`、`stageSinceAt`、`firstConnectedAt`。`q` 按 email 或 wechat_id 子串过滤，大小写不敏感；缺省/空 `q` 行为与原来相同。从未连上过且原判定会是 `unreported`/`offline` 的人是 `never_used` / 还没用起来，不覆盖 `unreachable`/`unstable`/`ok`） |
+| `GET customers/{id}` | `CustomerDetailDto`（同上三字段；`wechatId`、`contact`、`notes` 来自 `users`；`devices[]` 带每台设备的 live 字段：`connected`、`selectedServer`、`lastSeenAt`、`lastFailAt/Code/Node`，来自 `ops_device_status`。卡住开通 ≥3 天时 `chores` 含 `onboarding:<userId>`） |
+| `GET customers/funnel` | `FunnelDto`：`stages[]` 含全部阶段（含 `connected`）的人数；`items[]` 是尚未 `connected` 的人，最近阶段变化在前。白名单未注册的人 `key` 为 `invite:<email>`。每请求 ≤20 条 D1 语句 |
+| `PATCH signup-allowlist/{email}` | `FunnelRowDto`。body `{ wechatId?, contact?, notes? }`，校验与 onboard 相同，`''`/null 清空。没有白名单行 404；已有 `users` 行 409 `ALREADY_REGISTERED`（改用 `PATCH users/{id}`）。审计 `allowlist.profile` |
 | `POST users/onboard` | 已注册写 `users.wechat_id/contact/notes`，`pendingProfile: false`；未注册把这三项写在 `signup_allowlist` 上，`pendingProfile: true`，首次注册带到 `users`。其余 legacy 响应字段不变 |
 | `GET customers/{id}/connections?deviceId=` | `ListDto<ConnectionEventDto>`（`deviceId` 可选，按设备过滤） |
 | `GET customers/{id}/activity?range` | `ListDto<ActivityHourDto>` |

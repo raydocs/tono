@@ -30,6 +30,7 @@ export * from './contract/vocabulary';
 export * from './contract/checkers';
 export * from './contract/nodes';
 export * from './contract/customers';
+export * from './contract/funnel';
 export * from './contract/operations';
 export * from './contract/followups';
 export * from './contract/assets';

@@ -91,6 +91,7 @@ export type CustomerWrite = {
   lastFailCode: string | null;
   lastFailNode: string | null;
   fails30m: number;
+  firstConnectedAt: number | null;
   updatedAt: number;
 };
 
@@ -103,8 +104,8 @@ export async function upsertCustomer(db: D1Database, row: CustomerWrite): Promis
        last_seen_at, last_window_id,
        edge_asn, edge_as_org, edge_country, edge_region,
        last_fail_at, last_fail_code, last_fail_node, fails_30m,
-       updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       updated_at, first_connected_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(user_id) DO UPDATE SET
        device_id = excluded.device_id,
        platform = excluded.platform,
@@ -129,7 +130,8 @@ export async function upsertCustomer(db: D1Database, row: CustomerWrite): Promis
        last_fail_code = COALESCE(excluded.last_fail_code, ops_customer_status.last_fail_code),
        last_fail_node = COALESCE(excluded.last_fail_node, ops_customer_status.last_fail_node),
        fails_30m = excluded.fails_30m,
-       updated_at = excluded.updated_at`,
+       updated_at = excluded.updated_at,
+       first_connected_at = COALESCE(ops_customer_status.first_connected_at, excluded.first_connected_at)`,
   ).bind(
     row.userId, row.deviceId, row.platform, row.appVersion, row.osVersion,
     row.uiState, row.connected, row.connectedSince,
@@ -137,7 +139,7 @@ export async function upsertCustomer(db: D1Database, row: CustomerWrite): Promis
     row.lastSeenAt, row.lastWindowId,
     row.edgeAsn, row.edgeAsOrg, row.edgeCountry, row.edgeRegion,
     row.lastFailAt, row.lastFailCode, row.lastFailNode, row.fails30m,
-    row.updatedAt,
+    row.updatedAt, row.connected === 1 ? row.firstConnectedAt : null,
   ).run();
 }
 
@@ -204,6 +206,7 @@ export async function writeCustomerFromDevices(
     lastFailCode: lastFail?.code ?? null,
     lastFailNode: lastFail?.node ?? null,
     fails30m,
+    firstConnectedAt: connectedRows.length > 0 ? nowSec : null,
     updatedAt: nowSec,
   });
 }

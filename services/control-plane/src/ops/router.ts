@@ -32,6 +32,7 @@ import {
 import {
   getOpsSignupAllowlist,
   deleteOpsSignupAllowlist,
+  patchOpsSignupAllowlist,
 } from './legacy-handlers/signup-allowlist';
 import { getOpsLive } from './legacy-handlers/live';
 import { getOpsMetrics } from './legacy-handlers/metrics';
@@ -150,6 +151,10 @@ export async function opsRoutes(
   // --- Product ops writes (same Access boundary; no ADMIN_API_TOKEN in browser) ---
   if (p === '/api/v1/ops/signup-allowlist' && m === 'DELETE') {
     return deleteOpsSignupAllowlist(req, e, actor);
+  }
+  mt = p.match(/^\/api\/v1\/ops\/signup-allowlist\/([^/]+)$/);
+  if (mt && m === 'PATCH') {
+    return patchOpsSignupAllowlist(req, e, actor, mt);
   }
   if (p === '/api/v1/ops/users/onboard' && m === 'POST') {
     return postOpsUserOnboard(req, e, actor, deps);
