@@ -83,13 +83,14 @@ function asVerdict(value: unknown, fallback: NodeVerdict): NodeVerdict {
 export async function loadPriorNodeStates(db: D1Database): Promise<Map<string, StoredNodeState>> {
   try {
     const rows = await db.prepare(
-      `SELECT node_name, verdict, candidate_verdict, candidate_streak, changed_at, last_customer_ok_at
+      `SELECT node_name, verdict, candidate_verdict, candidate_streak, candidate_since, changed_at, last_customer_ok_at
        FROM ops_node_status`,
     ).all<{
       node_name: string;
       verdict: string;
       candidate_verdict: string | null;
       candidate_streak: number;
+      candidate_since: number | null;
       changed_at: number;
       last_customer_ok_at: number | null;
     }>();
@@ -101,6 +102,7 @@ export async function loadPriorNodeStates(db: D1Database): Promise<Map<string, S
         verdict,
         candidateVerdict: asVerdict(row.candidate_verdict, verdict),
         candidateStreak: Number(row.candidate_streak) || 0,
+        candidateSince: row.candidate_since == null ? null : Number(row.candidate_since),
         changedAt: Number(row.changed_at) || 0,
         lastCustomerOkAt: row.last_customer_ok_at == null ? null : Number(row.last_customer_ok_at),
       });
@@ -123,9 +125,9 @@ export async function persistNodeStates(
       `INSERT INTO ops_node_status(
          node_name, verdict, label, reason, quality_status, agent_status,
          catalog_listed, occupancy, candidate_verdict, candidate_streak,
-         last_quality_sweep_at, last_customer_ok_at, rules_version,
+         candidate_since, last_quality_sweep_at, last_customer_ok_at, rules_version,
          evaluated_at, changed_at, evidence_json
-       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(node_name) DO UPDATE SET
          verdict = excluded.verdict,
          label = excluded.label,
@@ -136,6 +138,7 @@ export async function persistNodeStates(
          occupancy = excluded.occupancy,
          candidate_verdict = excluded.candidate_verdict,
          candidate_streak = excluded.candidate_streak,
+         candidate_since = excluded.candidate_since,
          last_quality_sweep_at = excluded.last_quality_sweep_at,
          last_customer_ok_at = excluded.last_customer_ok_at,
          rules_version = excluded.rules_version,
@@ -153,6 +156,7 @@ export async function persistNodeStates(
       node.occupancy,
       node.candidateVerdict,
       node.candidateStreak,
+      node.candidateSince,
       node.lastQualitySweepAt,
       node.lastCustomerOkAt,
       output.rulesVersion,
