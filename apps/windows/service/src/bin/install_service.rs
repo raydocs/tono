@@ -1206,6 +1206,121 @@ fn set_windows_service_on_demand(
         .context("failed to disable automatic start for an unrecovered executable pair")
 }
 
+const UPDATE_HANDOFF_FILE: &str = "update-handoff.json";
+const TONO_APP_IDS: &[&str] = &["com.raydocs.tono", "com.raydocs.tono.dev"];
+
+fn write_update_handoff_atomic(path: &Path, value: &serde_json::Value) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let payload = serde_json::to_vec_pretty(value)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    let temp = path.with_extension("json.tmp");
+    std::fs::write(&temp, &payload)?;
+    std::fs::rename(temp, path)?;
+    Ok(())
+}
+
+/// Installer-owned `InstallStarted`. Missing file is not an update; do not
+/// invent a journal. Failed evidence is left alone.
+///
+/// Phase strings are the camelCase serde names from
+/// `tono-core::update_journal::UpdateHandoffPhase`. This helper cannot depend
+/// on tono-core (separate workspace); keep the names in lockstep.
+fn record_install_started_on_journal(path: &Path) -> std::io::Result<bool> {
+    let data = match std::fs::read(path) {
+        Ok(data) => data,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    let mut value: serde_json::Value = serde_json::from_slice(&data)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    let phase = value
+        .get("phase")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if phase == "installStarted" {
+        return Ok(true);
+    }
+    if phase == "failed" {
+        return Ok(false);
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    if matches!(
+        phase.as_str(),
+        "cleanShutdownCompleted" | "protectedHandoffRecorded"
+    ) {
+        value["phase"] = serde_json::Value::String("installStarted".into());
+        value["updatedAtUnix"] = serde_json::Value::from(now);
+        write_update_handoff_atomic(path, &value)?;
+        return Ok(true);
+    }
+    value["phase"] = serde_json::Value::String("failed".into());
+    value["lastErrorCode"] = serde_json::Value::String("TONO_JOURNAL_ILLEGAL_PHASE".into());
+    value["lastErrorStage"] = serde_json::Value::String(format!("{phase}->installStarted"));
+    value["updatedAtUnix"] = serde_json::Value::from(now);
+    write_update_handoff_atomic(path, &value)?;
+    Ok(false)
+}
+
+fn update_handoff_journal_paths(app_target: Option<&Path>) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let mut push_home = |home: PathBuf| {
+        for id in TONO_APP_IDS {
+            let path = home.join(id).join(UPDATE_HANDOFF_FILE);
+            if !paths.contains(&path) {
+                paths.push(path);
+            }
+        }
+    };
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        push_home(PathBuf::from(appdata));
+    }
+    if let Some(profile) = std::env::var_os("USERPROFILE") {
+        push_home(PathBuf::from(profile).join("AppData").join("Roaming"));
+    }
+    if let Some(app_target) = app_target {
+        if let Some(dir) = app_target.parent() {
+            for id in TONO_APP_IDS {
+                let path = dir.join(".config").join(id).join(UPDATE_HANDOFF_FILE);
+                if !paths.contains(&path) {
+                    paths.push(path);
+                }
+            }
+        }
+    }
+    #[cfg(windows)]
+    if let Ok(drive) = std::env::var("SystemDrive") {
+        if let Ok(entries) = std::fs::read_dir(PathBuf::from(drive).join("Users")) {
+            for entry in entries.flatten() {
+                push_home(entry.path().join("AppData").join("Roaming"));
+            }
+        }
+    }
+    paths
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn record_install_started_for_installed_app(app_target: &Path) {
+    for path in update_handoff_journal_paths(Some(app_target)) {
+        match record_install_started_on_journal(&path) {
+            Ok(true) => eprintln!(
+                "tono-install: recorded update journal InstallStarted at {}",
+                path.display()
+            ),
+            Ok(false) => {}
+            Err(error) => eprintln!(
+                "tono-install: could not record InstallStarted at {}: {error}",
+                path.display()
+            ),
+        }
+    }
+}
+
 #[cfg(windows)]
 fn replace_existing_service_and_runtime(
     service: &platform_lib::service::Service,
@@ -1216,6 +1331,11 @@ fn replace_existing_service_and_runtime(
     app_candidate: InstalledBinaryCandidate,
 ) -> Result<(), Error> {
     use std::ffi::OsStr;
+
+    // G3.2: this process is the installer entry. Record before any binary swap
+    // so a later crash still leaves InstallStarted rather than a guessed phase
+    // written by the old App.
+    record_install_started_for_installed_app(&app_candidate.target);
 
     let was_active = stop_windows_service(service)?;
     let mut restart_on_failure = RestartServiceOnFailure::new(service, was_active);
@@ -2014,5 +2134,78 @@ mod tests {
             .expect("stale backup must block publication");
         assert!(format!("{error:#}").contains("previous runtime replacement"));
         assert_eq!(std::fs::read(&backup).unwrap(), b"recovery-evidence");
+    }
+
+    #[test]
+    fn replace_runtime_records_install_started_on_protected_handoff() {
+        let dir = std::env::temp_dir().join(format!(
+            "tono-install-journal-{}-{}",
+            std::process::id(),
+            "ok"
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("update-handoff.json");
+        std::fs::write(
+            &path,
+            r#"{
+  "schemaVersion": 1,
+  "phase": "protectedHandoffRecorded",
+  "previousAppVersion": "0.0.72",
+  "nextAppVersion": "0.0.73"
+}"#,
+        )
+        .unwrap();
+        assert!(record_install_started_on_journal(&path).unwrap());
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(value["phase"], "installStarted");
+        assert!(record_install_started_on_journal(&path).unwrap());
+        let again: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(again["phase"], "installStarted");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn replace_runtime_does_not_invent_or_skip_to_install_started() {
+        let missing = std::env::temp_dir().join(format!(
+            "tono-install-missing-handoff-{}.json",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&missing);
+        assert!(!record_install_started_on_journal(&missing).unwrap());
+        assert!(!missing.exists());
+
+        let dir = std::env::temp_dir().join(format!(
+            "tono-install-journal-{}-{}",
+            std::process::id(),
+            "skip"
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("update-handoff.json");
+        std::fs::write(
+            &path,
+            r#"{"schemaVersion":1,"phase":"updatePrepared","nextAppVersion":"0.0.73"}"#,
+        )
+        .unwrap();
+        assert!(!record_install_started_on_journal(&path).unwrap());
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(value["phase"], "failed");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn portable_update_journal_lives_next_to_the_gui() {
+        let dir = std::env::temp_dir().join(format!("tono-gui-home-{}", std::process::id()));
+        let app = dir.join("Tono.exe");
+        let paths = update_handoff_journal_paths(Some(&app));
+        assert!(paths.contains(
+            &dir.join(".config")
+                .join("com.raydocs.tono")
+                .join("update-handoff.json")
+        ));
     }
 }

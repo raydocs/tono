@@ -192,9 +192,8 @@ pub async fn tono_prepare_update(
     if keep_kill_switch {
         record(crate::tono::update_handoff::Phase::ProtectedHandoffRecorded)?;
     }
-    // Sparkle-equivalent: this process is about to invoke the installer and exit.
-    // G3.2 still moves the durable write into NSIS itself.
-    record(crate::tono::update_handoff::Phase::InstallStarted)?;
+    // InstallStarted is recorded by tono-service-install.exe --replace-runtime,
+    // not by guessing that the frontend is about to call install().
     Ok(())
 }
 

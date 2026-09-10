@@ -525,6 +525,9 @@ FunctionEnd
     ; and the GUI are staged, verifies the new Service + core before publishing the GUI, and restores
     ; all three before returning any failure. Never give nsExec a TerminateProcess timeout here—killing Rust during
     ; rollback would strand the stopped Service. Every SCM and IPC wait inside the helper is bounded.
+    ; `--replace-runtime` records InstallStarted on the per-user update journal
+    ; as soon as the replacement transaction starts. The App must not guess this
+    ; phase before UAC / this helper actually runs (issue #26 / G3.2).
     nsExec::ExecToLog '"$INSTDIR\resources\tono-service-install.exe" --replace-runtime'
   ${Else}
     ; Fresh-install Service repair does not own a live runtime transaction, so retain the outer

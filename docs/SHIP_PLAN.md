@@ -39,7 +39,7 @@
 
 - 客户端准入 hy2：Windows `admit_node` / `proxy_endpoint_of` 与 macOS `validatedOwnedNode` / Helper UDP 放行在本分支落地；合进 `main` 之前 App 仍吃不进托管 hy2 块。macOS `ConfigParser` 的 `hy2://` 仍是手工 URL。
 - 连接失败只换下一座城市（macOS `rotateCatalogExitAfterConnectFailure`），不换同一座城市的备用传输。自动切换（G2.8）不做，直到家宽三网证明。
-- Windows 更新日记：`update_handoff.rs` 的 `prepare` 不再跳到 `ConnectionQuiescing`；所有者按相位推进，`commit_verified_recovery` 才允许删日记。真机 G3.3 之前不算过门。安装器入口写 `InstallStarted` 仍待 G3.2。
+- Windows 更新日记：`prepare` 停在 `UpdatePrepared`；所有者按相位推进；`commit_verified_recovery` 才允许删日记。`--replace-runtime` 写 `InstallStarted`（App 不再猜）。真机 G3.3 之前不算过门。
 - 客户更新源：`services/control-plane/public/appcast.xml` 0.0.67；`public/windows/latest.json` 0.0.34。
 
 **已开、未合、这一发要用的分支**
@@ -274,7 +274,8 @@
 
 **G3.2 安装器与 App 的所有权** — M
 
-- 目标：NSIS/`tono_prepare_update`（`commands.rs` 附近）写入 `InstallStarted`；安装失败不调 `mark_committed`。
+- 目标：NSIS/`tono-service-install.exe --replace-runtime` 写入 `InstallStarted`；安装失败不调 `mark_committed`。App `tono_prepare_update` 停在 `ProtectedHandoffRecorded`（未保护则 `CleanShutdownCompleted`）。
+- 本分支已落地：helper 在替换事务入口写盘；找不到日记不发明日记。跨权限扫描 `%APPDATA%`、用户 `AppData\Roaming`、便携 `.config`。旧二进制读到未完成安装会记 `Failed`。
 - 验收：读安装器脚本与 App 启动路径，PR 说明里用一张序列图（相位 × 进程）列出谁写盘。没有这张图不合。
 
 **G3.3 真机更新** — 老板 · M
