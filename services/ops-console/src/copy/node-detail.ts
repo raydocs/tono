@@ -112,6 +112,7 @@ export const nodeDetailCopy = {
     blocked: '疑似被墙',
     no_probe: '没有探针',
     degraded: '回程丢包',
+    probe_unreachable: '探测不通',
     pressure: '高负载',
     unknown: '还没测到',
     ok: '大陆正常',
