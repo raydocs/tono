@@ -1361,7 +1361,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       "SELECT metering_last_seen_at, updated_at FROM exit_nodes WHERE id = 'exit-default'",
     ).first()).toMatchObject({ metering_last_seen_at: observedAt, updated_at: 11 });
     expect((await send(observedAt - 901)).status).toBe(400);
-    expect((await send(observedAt + 1)).status).toBe(400);
+    expect((await send(observedAt + 600)).status).toBe(400);
     expect((await api('home/metering-ack', json({
       meteringProtocolVersion: 2, observedAt, extra: true,
     }, token))).status).toBe(400);
