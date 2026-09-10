@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { type Env } from '../src/env';
 import { reconcileIncidents } from '../src/ops/evaluate';
 import { runCustomerVerdictPass, toAlertTransitions } from '../src/ops/verdict-run';
+import { buildVerdictInput } from '../src/ops/verdict-facts';
 import { type IncidentDesire } from '../src/ops/verdict';
 
 const db = () => (env as unknown as Env).DB;
@@ -50,5 +51,23 @@ describe('runCustomerVerdictPass', () => {
     expect(JSON.parse(after?.evidence_json ?? '{}')).toEqual({ sweep: 'LIKELY_BLOCKED' });
     expect(Number(after?.last_seen_at)).toBe(Number(before?.last_seen_at));
     expect(Number(after?.updated_at)).toBe(Number(before?.updated_at));
+  });
+});
+
+describe('buildVerdictInput', () => {
+  it('counts as occupants only customers heard from in the last forty minutes', async () => {
+    const insert = (userId: string, seen: number) => db().prepare(
+      `INSERT INTO ops_customer_status(user_id, connected, selected_server, last_seen_at, updated_at)
+       VALUES(?, 1, 'Tokyo · Fuji', ?, ?)`,
+    ).bind(userId, seen, NOW).run();
+    await db().prepare(
+      `INSERT INTO ops_node_profiles(id, catalog_name, status, created_at, updated_at)
+       VALUES('p-fuji', 'Tokyo · Fuji', 'active', ?, ?)`,
+    ).bind(NOW, NOW).run();
+    await insert('fresh', NOW - 5 * 60);
+    await insert('gone-for-a-month', NOW - 29 * 86_400);
+    const input = await buildVerdictInput(env as unknown as Env, NOW, 'all');
+    const fuji = input.nodes.find((n) => n.name === 'Tokyo · Fuji');
+    expect(fuji?.occupancy).toBe(1);
   });
 });

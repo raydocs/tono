@@ -14,7 +14,10 @@ export {
 export const VERDICT_RULES_VERSION = 1;
 
 const AGENT_SILENT_SECONDS = 15 * 60;
-const QUALITY_STALE_SECONDS = 2 * 3600;
+// The hub's mainland sweep is a twelve-hour SSH pass, so a sweep is not stale
+// until it has missed a whole cycle with margin; two hours read the fleet as
+// 未测 for ten of every twelve. The agent copy is minutes old, and stays so.
+const QUALITY_STALE_SECONDS = 26 * 3600;
 const AGENTS_STALE_SECONDS = 15 * 60;
 const COLLECTOR_STALE_SECONDS = 20 * 60;
 const CARRIER_LOSS_PCT = 10;
@@ -448,7 +451,7 @@ function desireForNode(node: NodeVerdictResult): IncidentDesire | null {
 }
 
 function collectorStale(ctx: SnapshotCtx): boolean {
-  return snapshotStale(ctx.qualitySweepAt, ctx.nowSec, COLLECTOR_STALE_SECONDS)
+  return snapshotStale(ctx.qualitySweepAt, ctx.nowSec, QUALITY_STALE_SECONDS)
     || snapshotStale(ctx.agentsSnapshotAt, ctx.nowSec, COLLECTOR_STALE_SECONDS);
 }
 
@@ -459,9 +462,12 @@ export function evaluate(input: VerdictInput): VerdictOutput {
     agentsSnapshotAt: input.agentsSnapshotAt,
   };
   const nodes = input.nodes.map((node) => evaluateNode(node, ctx));
+  // A retired machine is a lifecycle fact, not an incident: it is expected to
+  // be unreachable, and its verdict is still recorded for the node page.
+  const retired = new Set(input.nodes.filter((n) => n.profileStatus === 'retired').map((n) => n.name));
   const desires: IncidentDesire[] = [];
   for (const node of nodes) {
-    if (input.maintenance.has(node.name)) continue;
+    if (input.maintenance.has(node.name) || retired.has(node.name)) continue;
     const desire = desireForNode(node);
     if (desire) desires.push(desire);
   }
@@ -473,7 +479,7 @@ export function evaluate(input: VerdictInput): VerdictOutput {
       subjectId: 'collector',
       severity: 'severe',
       title: '采集器超过 20 分钟未上报',
-      detail: 'qualitySweepAt / agentsSnapshotAt 超过 20 分钟',
+      detail: '探针快照超过 20 分钟没更新，或大陆扫描超过 26 小时没跑',
       cause: 'collector_stale',
       impactCount: 0,
       evidence: { qualitySweepAt: ctx.qualitySweepAt, agentsSnapshotAt: ctx.agentsSnapshotAt },
