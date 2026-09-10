@@ -4,8 +4,9 @@ import { ConfirmDialog } from '@/components/ops/ConfirmDialog';
 import { DataTable, type DataColumn, type TableState } from '@/components/ops/DataTable';
 import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
-import { ledgerApi, type LedgerEntryDto } from '@/lib/api-ledger';
+import { MONTH_CLOSED, ledgerApi, type LedgerEntryDto } from '@/lib/api-ledger';
 import { formatDate } from '@/lib/display';
+import { refusalCode } from '@/lib/api-customer-actions';
 import { entryWords, formatAmount, formatCny, formatRate, monthWords, sortedEntries } from '@/lib/ledger';
 import { TextField } from './form';
 import { useWrite } from './use-write';
@@ -32,6 +33,7 @@ export function LedgerTable({
   message,
   locked,
   currentMonth,
+  currentLocked,
   nameOf,
   onChanged,
 }: {
@@ -42,6 +44,12 @@ export function LedgerTable({
   locked: boolean;
   /** Where a reversal lands — today's month, whichever month is on screen. */
   currentMonth: string;
+  /**
+   * Whether that month is locked, when the page can tell — it can only tell
+   * while it is looking at it. Reversing into a month that was locked out from
+   * under the page is refused by the hub, and the refusal has its own sentence.
+   */
+  currentLocked: boolean;
   nameOf: (row: LedgerEntryDto) => string;
   onChanged: () => void;
 }) {
@@ -56,6 +64,7 @@ export function LedgerTable({
   const columns = useMemo(() => entryColumns({
     nameOf,
     locked,
+    currentLocked,
     inMonth: (id) => here.has(id),
     onJump: setSelected,
     onEditNote: (row) => {
@@ -63,7 +72,7 @@ export function LedgerTable({
       setEditing(row);
     },
     onReverse: setReversing,
-  }), [nameOf, locked, here]);
+  }), [nameOf, locked, currentLocked, here]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -112,7 +121,12 @@ export function LedgerTable({
         onConfirm={() => {
           const row = reversing;
           if (!row) return;
-          void write.run(() => ledgerApi.reverse(row.id)).then((ok) => {
+          void write.run(() => ledgerApi.reverse(row.id).catch((error: unknown) => {
+            // The month the reversal lands in is not the month on screen, so
+            // this refusal has to say which month it is about.
+            if (refusalCode(error) === MONTH_CLOSED) throw new Error(words.reverseRefused);
+            throw error;
+          })).then((ok) => {
             if (ok) setReversing(null);
           });
         }}
@@ -124,6 +138,7 @@ export function LedgerTable({
 type Hooks = {
   nameOf: (row: LedgerEntryDto) => string;
   locked: boolean;
+  currentLocked: boolean;
   inMonth: (id: string) => boolean;
   onJump: (id: string) => void;
   onEditNote: (row: LedgerEntryDto) => void;
@@ -250,8 +265,18 @@ function CnyCell({ row }: { row: LedgerEntryDto }) {
   );
 }
 
+/**
+ * The two things that can still be done to a written entry, and the reason
+ * whichever of them cannot.
+ *
+ * They are stopped by different months. The note edit is refused by the month
+ * the entry is in — the one on screen. A reversal writes a new entry into the
+ * current month, so it is refused by that one, which on a past month's page is
+ * not the month being looked at at all.
+ */
 function ActionCell({ row, hooks }: { row: LedgerEntryDto; hooks: Hooks }) {
   const reversed = row.reversedBy !== null;
+  const noReverse = reversed ? words.reversed : hooks.currentLocked ? words.reverseLocked : null;
   return (
     <span className="flex items-center justify-end gap-1.5">
       <Action
@@ -260,10 +285,7 @@ function ActionCell({ row, hooks }: { row: LedgerEntryDto; hooks: Hooks }) {
       >
         {words.editNote}
       </Action>
-      <Action
-        reason={reversed ? words.reversed : null}
-        onClick={() => hooks.onReverse(row)}
-      >
+      <Action reason={noReverse} onClick={() => hooks.onReverse(row)}>
         {words.reverse}
       </Action>
     </span>

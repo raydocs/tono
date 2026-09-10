@@ -8,6 +8,8 @@ import type {
   LedgerEntryDto,
   LedgerKind,
   LedgerSubjectType,
+  MonthCustomerRow,
+  MonthNodeRow,
   MonthSummaryDto,
 } from '../../src/lib/api-ledger';
 
@@ -51,9 +53,30 @@ type Seed = {
   entries: SeedEntry[];
 };
 
+/**
+ * A month as it stood when it was signed off.
+ *
+ * The hub stores this beside the four totals, and for the same reason: the
+ * rows under a total keep moving after the close — metering backfills, a
+ * customer's share of a machine changes — and a closed month that recomputes
+ * them is a closed month that disagrees with what the operator agreed to. The
+ * fixture freezes the same six things the hub freezes, so a page tested here
+ * is tested against the rule the hub actually applies.
+ */
+type Frozen = {
+  closedAt: number;
+  closedBy: string;
+  revenueCnyMinor: number;
+  costCnyMinor: number;
+  marginCnyMinor: number;
+  unreconciled: number;
+  customers: MonthCustomerRow[];
+  nodes: MonthNodeRow[];
+};
+
 type Store = {
   entries: LedgerEntryDto[];
-  closed: Map<string, { closedAt: number; closedBy: string }>;
+  closed: Map<string, Frozen>;
 };
 
 type Request = {
@@ -256,22 +279,41 @@ export function createLedgerFixtures(rootDir: string) {
       };
     }).filter((row) => row.costCnyMinor !== 0 || row.pending);
 
+    const unreconciled = customers.filter((row) => row.pending).length
+      + nodes.filter((row) => row.pending).length;
+
     const shut = store.closed.get(month) ?? null;
     return {
       month,
       closedAt: shut?.closedAt ?? null,
       closedBy: shut?.closedBy ?? null,
-      revenueCnyMinor: revenue,
-      costCnyMinor: cost,
-      marginCnyMinor: revenue - cost,
+      revenueCnyMinor: shut ? shut.revenueCnyMinor : revenue,
+      costCnyMinor: shut ? shut.costCnyMinor : cost,
+      marginCnyMinor: shut ? shut.marginCnyMinor : revenue - cost,
       byCategory,
-      customers,
-      nodes,
-      unreconciled: customers.filter((row) => row.pending).length
-        + nodes.filter((row) => row.pending).length,
+      customers: shut ? shut.customers : customers,
+      nodes: shut ? shut.nodes : nodes,
+      unreconciled: shut ? shut.unreconciled : unreconciled,
+      frozen: shut !== null,
+      frozenAt: shut?.closedAt ?? null,
       reconciliation: { billsWithoutLedger: [], ledgerWithoutBill: [], asOfSec: nowSec() },
       unreconciledBills: 0,
       updatedAt: rows.reduce((newest, row) => Math.max(newest, row.createdAt), nowSec()),
+    };
+  }
+
+  /** What close writes down: the month as the operator saw it when they agreed. */
+  function freeze(store: Store, month: string, emails: Map<string, string>): Frozen {
+    const live = summarise(store, month, emails);
+    return {
+      closedAt: nowSec(),
+      closedBy: 'owner@example.test',
+      revenueCnyMinor: live.revenueCnyMinor,
+      costCnyMinor: live.costCnyMinor,
+      marginCnyMinor: live.marginCnyMinor,
+      unreconciled: live.unreconciled,
+      customers: live.customers,
+      nodes: live.nodes,
     };
   }
 
@@ -346,19 +388,31 @@ export function createLedgerFixtures(rootDir: string) {
     sendJson(res, row, 201);
   }
 
-  /** The reversal lands in the month it is made in, never in the month it undoes. */
+  /**
+   * The reversal lands in the month it is made in, never in the month it undoes
+   * — so the month that can refuse it is the current one, which may well not be
+   * the month on screen.
+   *
+   * Only the yuan figure flips sign. The original amount stays what was paid:
+   * the operator reconciles that column against an invoice, and an invoice for
+   * minus two hundred yuan does not exist.
+   */
   function reverse(store: Store, row: LedgerEntryDto, res: ServerResponse): void {
     if (row.reversedBy !== null) {
       sendRefusal(res, 409, 'ALREADY_REVERSED', '这一笔已经冲正过了');
       return;
     }
     const at = nowSec();
+    const month = monthOf(at);
+    if (store.closed.has(month)) {
+      sendRefusal(res, 409, 'MONTH_CLOSED', '这个月已经锁了');
+      return;
+    }
     const mirror: LedgerEntryDto = {
       ...row,
-      id: newId(),
-      amountMinor: -row.amountMinor,
+      id: `reverse:${row.id}`,
       cnyMinor: -row.cnyMinor,
-      month: monthOf(at),
+      month,
       paidAt: at,
       reverses: row.id,
       reversedBy: null,
@@ -446,7 +500,7 @@ export function createLedgerFixtures(rootDir: string) {
         sendRefusal(res, 409, 'MONTH_CLOSED', '这个月已经锁了');
         return true;
       }
-      store.closed.set(month, { closedAt: nowSec(), closedBy: 'owner@example.test' });
+      store.closed.set(month, freeze(store, month, emails));
       sendJson(res, summarise(store, month, emails));
       return true;
     }

@@ -148,14 +148,65 @@ test.describe('账目', () => {
     await original.getByRole('button', { name: '冲正', exact: true }).click();
 
     const dialog = page.getByRole('dialog');
-    await expect(dialog.getByText('冲正会在 2026 年 9 月 记一笔跟「客服号与短信」相反的账，原来那笔留着，标成已冲正。')).toBeVisible();
+    await expect(dialog.getByText('冲正会在 2026 年 9 月（按后台的月份算）记一笔跟「客服号与短信」相反的账，原来那笔留着，标成已冲正。')).toBeVisible();
     await dialog.getByRole('button', { name: '冲正', exact: true }).click();
 
     const both = page.getByRole('row').filter({ hasText: '客服号与短信' });
     await expect(both).toHaveCount(2);
     await expect(both.filter({ hasText: '已冲正' })).toHaveCount(1);
-    await expect(both.filter({ hasText: '冲正的是这笔' })).toHaveCount(1);
-    await expect(both.first()).toContainText('-¥200.00');
+    const mirror = both.filter({ hasText: '冲正的是这笔' });
+    await expect(mirror).toHaveCount(1);
+    // Only the yuan flips. The original amount is what an invoice says, and
+    // there is no invoice for minus two hundred yuan.
+    await expect(mirror.getByRole('cell').nth(4)).toHaveText('¥200.00');
+    await expect(mirror.getByRole('cell').nth(5)).toHaveText('-¥200.00');
+  });
+
+  /**
+   * A reversal is written into the current month, so locking that month stops
+   * it — and the page has to say so with the right month in the sentence, not
+   * the one on screen.
+   */
+  test('本月锁上之后，冲正也落不进来', async ({ page }, testInfo) => {
+    const session = `ledger-rev-locked-${testInfo.project.name}`;
+    await open(page, LEDGER, 'default', session);
+    await page.getByRole('button', { name: '锁定本月' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: '锁定', exact: true }).click();
+    await expect(page.getByText(/已锁定 · owner@example\.test/)).toBeVisible();
+
+    await expect(page.getByText('这个月已经锁了，改不了；冲正也落在这个月，得等下个月再冲。')).toBeVisible();
+    const reverse = page.getByRole('button', { name: '冲正', exact: true }).first();
+    await expect(reverse).toBeDisabled();
+    await expect(reverse).toHaveAttribute(
+      'title',
+      '本月（按后台的月份算）已经锁了，冲正落不进来，得等下个月。',
+    );
+
+    const refused = await page.request.post(
+      `/api/v1/ops/ledger/led_seed0001/reverse?session=${session}`,
+      { data: {} },
+    );
+    expect(refused.status()).toBe(409);
+    expect(await refused.json()).toMatchObject({ error: { code: 'MONTH_CLOSED' } });
+  });
+
+  /** The month locked out from under an open page: the hub's refusal, in words. */
+  test('页面开着的时候月份被锁上，冲正说得清为什么没记成', async ({ page }, testInfo) => {
+    const session = `ledger-rev-race-${testInfo.project.name}`;
+    await open(page, LEDGER, 'default', session);
+    const locked = await page.request.post(
+      `/api/v1/ops/months/2026-09/close?session=${session}`,
+      { data: {} },
+    );
+    expect(locked.status()).toBe(200);
+
+    const original = page.getByRole('row').filter({ hasText: '客服号与短信' });
+    await original.getByRole('button', { name: '冲正', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('button', { name: '冲正', exact: true }).click();
+    await expect(page.getByText(
+      '冲正落在本月（按后台的月份算），那个月已经锁上了，这一笔没记成，等下个月再冲。',
+    ).first()).toBeVisible();
   });
 
   test('客户 360 上写着这一个月他值多少', async ({ page }) => {
@@ -214,7 +265,13 @@ test.describe('账目', () => {
     await dialog.getByRole('button', { name: '锁定', exact: true }).click();
 
     await expect(page.getByText(/已锁定 · owner@example\.test/)).toBeVisible();
-    await expect(page.getByText('这个月已经锁了，只能冲正，不能改。')).toBeVisible();
+    await expect(page.getByText('这个月已经锁了，改不了；冲正也落在这个月，得等下个月再冲。')).toBeVisible();
+    // The count and the list under 待核对 are both read off the closed month,
+    // so the tag and the rows under it still say the same number afterwards.
+    await expect(page.getByText('3 项还没对上')).toBeVisible();
+    await expect(page.locator('a[href^="#/customers/"], a[href^="#/nodes/"]')).toHaveCount(3);
+    await expect(page.getByRole('link', { name: 'zhao.lei@example.com' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Seoul · Han' })).toBeVisible();
     await expect(page.getByRole('button', { name: '记一笔' })).toBeDisabled();
     await expect(page.getByRole('button', { name: '改备注' }).first()).toBeDisabled();
 

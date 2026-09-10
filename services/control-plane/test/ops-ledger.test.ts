@@ -321,9 +321,31 @@ describe('ops ledger, month close, live FX', () => {
     const text = new TextDecoder().decode(bytes.subarray(3));
     const lines = text.trim().split(/\r\n/);
     expect(lines[0]).toContain('amountMinor');
-    expect(lines[lines.length - 1]).toContain('total');
-    expect(lines[lines.length - 1]).toContain(',140,');
+    const total = lines[lines.length - 1].split(',');
+    expect(total[1]).toBe('total');
+    // 100 in, 40 out: 60, in yuan and in the original currency alike.
+    expect(Number(total[5])).toBe(60);
+    expect(Number(total[9])).toBe(60);
     expect(lines.length).toBe(4);
+  });
+
+  it('signs a refund down in both totals of the exported month', async () => {
+    const month = MONTH();
+    expect((await ops('ledger', json({
+      kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-1',
+      amountMinor: 10000, currency: 'CNY', month,
+    }))).status).toBe(201);
+    expect((await ops('ledger', json({
+      kind: 'refund', category: 'plan', subjectType: 'user', subjectId: 'u-1',
+      amountMinor: 3000, currency: 'CNY', month,
+    }))).status).toBe(201);
+    const res = await ops(`months/${month}/export.csv`);
+    expect(res.status).toBe(200);
+    const text = (await res.text()).replace(/^\uFEFF/, '');
+    const total = text.trim().split(/\r\n/).pop()!.split(',');
+    expect(total[1]).toBe('total');
+    expect(Number(total[5])).toBe(7000);
+    expect(Number(total[9])).toBe(7000);
   });
 
   it('GET fx returns a stored rate, an older fallback day, and CNY identity', async () => {
@@ -414,7 +436,7 @@ describe('ops ledger, month close, live FX', () => {
     expect((await loser.json() as { error: { code: string } }).error.code).toBe('MONTH_CLOSED');
   });
 
-  it('serves frozen totals for a closed month after later metering arrives', async () => {
+  it('serves frozen totals, customers and nodes for a closed month after later metering arrives', async () => {
     const month = MONTH();
     await seedUser('u-a', 'a@example.com');
     await seedCycle(NODE, month);
@@ -429,29 +451,54 @@ describe('ops ledger, month close, live FX', () => {
     }))).status).toBe(201);
     const closed = await ops(`months/${month}/close`, json({ notes: 'lock' }));
     expect(closed.status).toBe(200);
-    const before = await closed.json() as {
-      frozen?: boolean; frozenAt?: number | null; unreconciled: number;
-      revenueCnyMinor: number; costCnyMinor: number; marginCnyMinor: number;
-      customers: { userId: string; marginCnyMinor: number | null }[];
-    };
+    const before = assertMonthSummary(await closed.json());
     expect(before.unreconciled).toBe(0);
+    expect(before.frozenPartial).toBeUndefined();
     await db().prepare(
       `INSERT INTO customer_activity_hours(
          user_id, device_id, hour_at, online_minutes, connected_minutes, bytes_up, bytes_down, node
        ) VALUES('u-a', 'd-2', ?, 60, 60, ?, 0, 'un-costed-node')`,
     ).bind(monthStart(month) + 7200, 2_000_000_000).run();
-    const after = await (await ops(`months/${month}`)).json() as {
-      frozen?: boolean; frozenAt?: number | null; unreconciled: number;
-      revenueCnyMinor: number; costCnyMinor: number; marginCnyMinor: number;
-      customers: { userId: string; marginCnyMinor: number | null; pending: boolean }[];
-    };
+    const after = assertMonthSummary(await (await ops(`months/${month}`)).json());
     expect(after.frozen).toBe(true);
     expect(typeof after.frozenAt).toBe('number');
     expect(after.unreconciled).toBe(before.unreconciled);
     expect(after.revenueCnyMinor).toBe(before.revenueCnyMinor);
     expect(after.costCnyMinor).toBe(before.costCnyMinor);
     expect(after.marginCnyMinor).toBe(before.marginCnyMinor);
+    // The allocation and the ¥/GB are the numbers the operator signed off on,
+    // not a recomputation over rows that landed afterwards.
+    expect(after.customers).toEqual(before.customers);
+    expect(after.nodes).toEqual(before.nodes);
+    expect(after.customers.find((row) => row.userId === 'u-a')?.pending).toBe(false);
+    expect(after.frozenPartial).toBeUndefined();
+  });
+
+  it('answers a closed month with no snapshot from live rows and says frozenPartial', async () => {
+    const month = MONTH();
+    await seedUser('u-a', 'a@example.com');
+    await seedCycle(NODE, month);
+    await seedBytes('u-a', NODE, month, 1_000_000_000);
+    expect((await ops('ledger', json({
+      kind: 'cost', category: 'server', subjectType: 'node', subjectId: NODE,
+      amountMinor: 4000, currency: 'CNY', month,
+    }))).status).toBe(201);
+    expect((await ops(`months/${month}/close`, json({ notes: 'lock' }))).status).toBe(200);
+    // What a month closed before the snapshot column looks like on disk.
+    await db().prepare('UPDATE ops_month_close SET summary_json = NULL WHERE month = ?')
+      .bind(month).run();
+    await db().prepare(
+      `INSERT INTO customer_activity_hours(
+         user_id, device_id, hour_at, online_minutes, connected_minutes, bytes_up, bytes_down, node
+       ) VALUES('u-a', 'd-2', ?, 60, 60, ?, 0, 'un-costed-node')`,
+    ).bind(monthStart(month) + 7200, 2_000_000_000).run();
+    const after = assertMonthSummary(await (await ops(`months/${month}`)).json());
+    expect(after.frozen).toBe(true);
+    expect(after.frozenPartial).toBe(true);
     expect(after.customers.find((row) => row.userId === 'u-a')?.pending).toBe(true);
+    expect(after.nodes.some((row) => row.name === 'un-costed-node')).toBe(true);
+    // The count stays the one that was signed off; only the rows went live.
+    expect(after.unreconciled).toBe(0);
   });
 
   it('paginates GET ledger in SQL and reports COUNT(*) as total', async () => {
@@ -489,6 +536,27 @@ describe('ops ledger, month close, live FX', () => {
       cursor = page.nextCursor;
     }
     expect(ids.size).toBe(501);
+  });
+
+  it('walks past two entries written in the same second', async () => {
+    const month = MONTH();
+    const t = tnow();
+    const day = DAY();
+    await db().batch(['tie-a', 'tie-b'].map((entryId) => db().prepare(
+      `INSERT INTO ops_ledger_entries(
+         id, kind, category, subject_type, subject_id, amount_minor, currency,
+         fx_rate_to_cny, fx_date, cny_minor, month, paid_at, note,
+         reverses, reversed_by, created_by, created_at, updated_at
+       ) VALUES(?, 'revenue', 'plan', 'user', 'u-1', 1, 'CNY', 1, ?, 1, ?, NULL, NULL, NULL, NULL, 'op', ?, ?)`,
+    ).bind(entryId, day, month, t, t)));
+    const first = assertList(await (await ops(`ledger?month=${month}&limit=1`)).json(), assertLedgerEntry);
+    expect(first.items.map((row) => row.id)).toEqual(['tie-b']);
+    expect(first.nextCursor).toBeTruthy();
+    const second = assertList(
+      await (await ops(`ledger?month=${month}&limit=1&cursor=${encodeURIComponent(first.nextCursor!)}`)).json(),
+      assertLedgerEntry,
+    );
+    expect(second.items.map((row) => row.id)).toEqual(['tie-a']);
   });
 
   it('rejects an oversized amountMinor and a month too far in the future', async () => {
@@ -533,6 +601,17 @@ describe('ledger csv', () => {
     expect(total[1]).toBe('total');
     expect(total[5]).toBe('');
     expect(Number(total[9])).toBe(20000 - 7200);
+  });
+
+  it('leaves a negative amount as a number and still guards a formula in a note', () => {
+    const csv = ledgerCsv([
+      csvEntry({ id: 'rev', kind: 'revenue', amountMinor: 80000, cnyMinor: -80000, note: '=1+1' }),
+    ]);
+    const lines = csv.replace(/^\uFEFF/, '').trim().split(/\r\n/);
+    const row = lines[1].split(',');
+    expect(row[9]).toBe('-80000');
+    expect(lines[lines.length - 1].split(',')[9]).toBe('-80000');
+    expect(csv).toContain("'=1+1");
   });
 
   it('prefixes formula-like cells with a quote', () => {

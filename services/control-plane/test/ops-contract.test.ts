@@ -663,6 +663,7 @@ const CASES: Array<[string, (value: unknown, path?: string) => unknown, () => Re
     unreconciled: 0,
     frozen: false,
     frozenAt: null,
+    frozenPartial: true,
     reconciliation: { billsWithoutLedger: [], ledgerWithoutBill: [monthReconRow()], asOfSec: 1_757_000_000 },
     unreconciledBills: 1,
     updatedAt: 1_757_000_000,

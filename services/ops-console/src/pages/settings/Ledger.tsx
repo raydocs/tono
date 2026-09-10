@@ -58,6 +58,14 @@ export function Ledger() {
   const month0 = summary.status === 'ready' ? summary.data : null;
   const rows = entries.status === 'ready' ? entries.data.items : [];
   const locked = month0?.closedAt !== null && month0?.closedAt !== undefined;
+  /**
+   * A reversal is written into the current month, so it is that month's lock
+   * that stops one — and this page only reads one month at a time. While the
+   * month on screen *is* the current one the answer is here; otherwise the hub
+   * refuses the write and the table says so in words.
+   */
+  const current = monthOf(nowSec());
+  const currentLocked = month === current && locked;
 
   const emails = useMemo(() => {
     const map = new Map<string, string>();
@@ -134,7 +142,7 @@ export function Ledger() {
         title={words.entries}
         aside={locked ? (
           <span className="min-w-0 truncate text-micro normal-case tracking-normal text-[var(--muted-foreground)]">
-            {words.lockedNote}
+            {currentLocked ? words.lockedNoteCurrent : words.lockedNote}
           </span>
         ) : null}
       >
@@ -147,7 +155,8 @@ export function Ledger() {
               : rows.length === 0 ? 'empty' : 'ready'}
           message={entries.status === 'error' ? entries.message : undefined}
           locked={locked}
-          currentMonth={monthOf(nowSec())}
+          currentMonth={current}
+          currentLocked={currentLocked}
           nameOf={nameOf}
           onChanged={reload}
         />
@@ -163,7 +172,7 @@ export function Ledger() {
       <ConfirmDialog
         open={closing}
         title={words.closeTitle}
-        consequence={month0 === null ? '' : words.closeBody(
+        consequence={month0 === null ? '' : (month === current ? words.closeBodyCurrent : words.closeBody)(
           monthWords(month0.month),
           formatCny(month0.revenueCnyMinor) ?? copy.missing,
           formatCny(month0.costCnyMinor) ?? copy.missing,

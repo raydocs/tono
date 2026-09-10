@@ -86,6 +86,15 @@ export type MonthSummaryDto = {
   customers: MonthCustomerRow[];
   nodes: MonthNodeRow[];
   unreconciled: number;
+  /** Whether the month has been signed off. `closedAt` is the same fact, dated. */
+  frozen: boolean;
+  frozenAt: number | null;
+  /**
+   * Set only when a closed month has no stored snapshot behind it, so the
+   * customer and machine rows above are live and may already disagree with
+   * what was signed off. Absent is the normal case.
+   */
+  frozenPartial?: boolean;
   /** 月结对账：账单有台账没有 / 台账有账单没有。D2 填内容；现在恒为空。 */
   reconciliation?: MonthReconciliationDto;
   unreconciledBills?: number;
@@ -127,6 +136,17 @@ export const FX_RATE_MISSING = 'FX_RATE_MISSING';
  * rather than a message written for whoever is fixing the drift.
  */
 export const VALIDATION_ERROR = 'VALIDATION_ERROR';
+
+/**
+ * The month the write would land in is signed off.
+ *
+ * It arrives on two different writes and means two different things to the
+ * operator. On an edit it is the month on screen, and the page already says so
+ * in its own words. On a 冲正 it is the *current* month — the reversal never
+ * lands in the month it undoes — so a reversal can be refused while the month
+ * being looked at is wide open, and that refusal needs its own sentence.
+ */
+export const MONTH_CLOSED = 'MONTH_CLOSED';
 
 const path = (...parts: string[]) => parts.map(encodeURIComponent).join('/');
 

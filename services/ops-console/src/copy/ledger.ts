@@ -46,9 +46,20 @@ export const ledgerCopy = {
     closeTitle: '锁定本月',
     closeBody: (month: string, revenue: string, cost: string, margin: string, pending: string) =>
       `锁定 ${month} 之后这个月只能冲正，不能改。收入 ${revenue}，支出 ${cost}，毛利 ${margin}，${pending}。`,
+    /**
+     * Locking the month you are standing in is not the same promise.
+     *
+     * A reversal is written into the month it is made in, so "只能冲正" is true
+     * of a past month and false of this one: lock this one and the reversal has
+     * nowhere to land either.
+     */
+    closeBodyCurrent: (month: string, revenue: string, cost: string, margin: string, pending: string) =>
+      `锁定 ${month} 之后这个月就改不了了；冲正也落在这个月（按后台的月份算），锁上之后连冲正都得等下个月。`
+      + `收入 ${revenue}，支出 ${cost}，毛利 ${margin}，${pending}。`,
     closeConfirm: '锁定',
     closedAlready: '这个月已经锁了',
     lockedNote: '这个月已经锁了，只能冲正，不能改。',
+    lockedNoteCurrent: '这个月已经锁了，改不了；冲正也落在这个月，得等下个月再冲。',
     exportAction: '导出 CSV',
 
     /* ------------------------------------------------------------- 录入抽屉 */
@@ -128,9 +139,21 @@ export const ledgerCopy = {
     editNoteBody: '备注是这一笔还能改的唯一一样东西；金额、对象或者类目记错了，得冲正重记。',
     reverse: '冲正',
     reverseTitle: '冲正这一笔',
+    /**
+     * Which month the new entry lands in, and whose month that is.
+     *
+     * The console reads 本月 off the operator's own clock; the 后台 reads it off
+     * UTC, so on the first and the last day of a month the two can disagree by
+     * one. The sentence says whose answer wins rather than pretending they
+     * always match.
+     */
     reverseBody: (what: string, month: string) =>
-      `冲正会在 ${month} 记一笔跟「${what}」相反的账，原来那笔留着，标成已冲正。`,
+      `冲正会在 ${month}（按后台的月份算）记一笔跟「${what}」相反的账，原来那笔留着，标成已冲正。`,
     reverseConfirm: '冲正',
+    /** Why 冲正 is greyed out: the month it would land in is locked. */
+    reverseLocked: '本月（按后台的月份算）已经锁了，冲正落不进来，得等下个月。',
+    /** The same thing said by the 后台 after the month was locked mid-session. */
+    reverseRefused: '冲正落在本月（按后台的月份算），那个月已经锁上了，这一笔没记成，等下个月再冲。',
     reversed: '已冲正',
     reversedBy: '看冲正那笔',
     reverses: '冲正的是这笔',

@@ -470,3 +470,48 @@ years of now) turns a fat-finger into a 400 instead of a silently wrong book.
 
 Finding 5 is a close fourth and shares a fix window with 4 — both are about the engine calling a
 node's state more confidently than the evidence supports, in opposite directions.
+
+---
+
+## 转交 B
+
+Finding 13 was fixed for the *validation* failures — `optionalWechatId` and friends now run before
+the first write. The same shape survives on two later failure paths in the same handler, and both
+are in a B-owned file (`services/control-plane/src/ops/legacy-handlers/users.ts`), so D is handing
+them over rather than editing it.
+
+**Where.** `INSERT OR IGNORE INTO signup_allowlist` is still the first write of the request
+(`services/control-plane/src/ops/legacy-handlers/users.ts:222`), and for an already-registered
+address `exitClientUUID` mints an exit identity immediately after it (`:233`). Everything that can
+still refuse the request runs *after* both.
+
+**Repro A — an unknown `productAccountId`.**
+For an address already in `users`, `POST /api/v1/ops/users/onboard` with
+`{ "email": "<that address>", "productAccountId": "no-such-account" }`. The handler reaches the
+pooled-account branch, `SELECT account_ref FROM product_accounts WHERE id = ?` finds nothing, and
+it throws `404 NOT_FOUND` (`:287`). The operator sees a 404 and reads it as "nothing happened".
+On disk, `SELECT * FROM signup_allowlist WHERE email = ?` returns a row, and that user now has an
+exit identity minted at `:233`.
+
+**Repro B — a home line that will not assign.**
+For the same registered address, `POST /api/v1/ops/users/onboard` with
+`{ "email": "<that address>", "line": "<a line the assign refuses>" }`.
+`sharedAdministrativeResource(..., 'home-exits/assign', ...)` answers not-ok and the handler throws
+`HOME_ASSIGN_FAILED` (`:264`) — again after `:222` and `:233`. Same end state:
+a refusal to the operator, an allowlisted email and a minted exit identity on disk.
+
+**Expected.** A refused onboard leaves nothing behind: no `signup_allowlist` row for that address
+(unless one existed before the request), and no exit identity minted for that user. The operator
+retries with the right account id or the right line and the second attempt is the first write.
+
+**Proposed fix.** Resolve everything the request depends on before the first write — the pooled
+`product_accounts` row for `productAccountId`, and the home-line assign — and only then insert the
+allowlist row and mint the identity. Where the assign genuinely cannot be moved ahead of the write
+(it is a nested request), wrap the handler so a throw after `:222` compensates: delete the
+`signup_allowlist` row this request inserted (`INSERT OR IGNORE` means "this request inserted it"
+has to be read off `meta.changes`, not assumed) and drop the exit identity minted at `:233`.
+
+**Narrowest test (B's to write).** `POST /ops/users/onboard` for a registered address with
+`productAccountId: 'no-such-account'`; assert 404 **and** `SELECT * FROM signup_allowlist WHERE
+email = ?` returns no row **and** no exit identity exists for that user. The `HOME_ASSIGN_FAILED`
+path takes the same three assertions with a stubbed assign that refuses.
