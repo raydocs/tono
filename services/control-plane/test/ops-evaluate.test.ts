@@ -134,6 +134,16 @@ describe('persistNodeStates', () => {
     expect((await loadPriorNodeStates(db())).get('Tokyo · Test')?.verdict).toBe('pressure');
   });
 
+  it('persists probe_unreachable through the verdict CHECK', async () => {
+    await persistNodeStates(db(), output([nodeResult({
+      verdict: 'probe_unreachable',
+      label: '探测不通（机器在线）',
+      reason: '大陆探测不通，但机器在线；可能是入站挂了',
+      candidateVerdict: 'probe_unreachable',
+    })]), NOW);
+    expect((await loadPriorNodeStates(db())).get('Tokyo · Test')?.verdict).toBe('probe_unreachable');
+  });
+
   it('round-trips candidate_since through persist and load, and treats pre-0051 NULL as unset', async () => {
     const loss = { unicom: { lossPct: 12, latencyMs: 80, samples: 4 } };
     const pending = evaluate({
