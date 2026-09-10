@@ -294,7 +294,7 @@ function nodeDesireTitle(verdict: NodeVerdict, label: string, occupancy: number 
   return people ? `${label}，${people}` : label;
 }
 
-function nodeKind(verdict: NodeVerdict): string | null {
+export function nodeKind(verdict: NodeVerdict): string | null {
   if (verdict === 'blocked') return 'node-blocked';
   if (verdict === 'down') return 'node-down';
   if (verdict === 'degraded') return 'node-degraded';
@@ -304,7 +304,7 @@ function nodeKind(verdict: NodeVerdict): string | null {
   return null;
 }
 
-function nodeSeverity(verdict: NodeVerdict): IncidentSeverity | null {
+export function nodeSeverity(verdict: NodeVerdict): IncidentSeverity | null {
   if (verdict === 'blocked' || verdict === 'down') return 'severe';
   if (verdict === 'degraded' || verdict === 'pressure' || verdict === 'probe_unreachable') return 'warn';
   if (verdict === 'no_probe') return 'notice';
@@ -355,7 +355,7 @@ function evaluateNode(node: NodeVerdictInput, ctx: SnapshotCtx): NodeVerdictResu
   };
 }
 
-function desireForNode(node: NodeVerdictResult): IncidentDesire | null {
+export function desireForNode(node: NodeVerdictResult): IncidentDesire | null {
   const kind = nodeKind(node.verdict);
   const severity = nodeSeverity(node.verdict);
   if (!kind || !severity) return null;

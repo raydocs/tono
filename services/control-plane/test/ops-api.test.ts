@@ -849,6 +849,7 @@ describe('ops v1 api', () => {
       'POST /api/v1/ops/customers/{id}/followups',
       'GET /api/v1/ops/incidents',
       'GET /api/v1/ops/incidents/{id}',
+      'POST /api/v1/ops/replay',
       'POST /api/v1/ops/incidents/{id}/ack',
       'POST /api/v1/ops/incidents/{id}/snooze',
       'POST /api/v1/ops/incidents/{id}/resolve',
