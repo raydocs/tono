@@ -3,6 +3,7 @@ import { openSettings } from '@/lib/hash-route';
 import { resolveSection, SETTINGS_SECTIONS, type SettingsSection } from '@/lib/settings';
 import { cn } from '@/lib/utils';
 import { Alerts } from './settings/Alerts';
+import { Allowlist } from './settings/Allowlist';
 import { Audit } from './settings/Audit';
 import { Candidates } from './settings/Candidates';
 import { Catalog } from './settings/Catalog';
@@ -12,7 +13,7 @@ import { Policy } from './settings/Policy';
 import { Providers } from './settings/Providers';
 
 /**
- * The settings page: eight surfaces behind one rail.
+ * The settings page: nine surfaces behind one rail.
  *
  * Deliberately plain: no health words, no tones, no counts in the headline.
  * Nothing on this page is a measurement, and borrowing the incident page's
@@ -54,12 +55,13 @@ function Body({ section }: { section: SettingsSection }) {
   if (section === 'homelines') return <HomeLines />;
   if (section === 'providers') return <Providers />;
   if (section === 'candidates') return <Candidates />;
+  if (section === 'allowlist') return <Allowlist />;
   if (section === 'audit') return <Audit />;
   return <Alerts />;
 }
 
 /**
- * The eight names, and which one you are on.
+ * The nine names, and which one you are on.
  *
  * A rule on the left rather than a filled pill: the shell's nav already owns
  * the filled-pill idiom for pages, and reusing it one level down made the two

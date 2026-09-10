@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { nowSec } from '../../src/lib/clock';
 import { materializeOps } from '../../src/lib/ops-fixtures';
+import { metricsBody, qualityTextBody } from './node-legacy';
 
 /**
  * The 节点详情 endpoints, served by the fixture dev server.
@@ -155,8 +156,9 @@ function newJob(file: NodeFile, name: string, type: string): Job {
 
 /**
  * The whole node surface, in one call site: `nodes/{name}` and its five
- * sections, the two writes, and the legacy retire pair 退役 still runs on.
- * Returns false for anything it does not own, so the caller can carry on.
+ * sections, the two writes, the legacy retire pair 退役 still runs on, and the
+ * two pre-contract reads behind 机器负载 and 线路原文. Returns false for
+ * anything it does not own, so the caller can carry on.
  */
 export function serveNodeRoutes(options: {
   req: IncomingMessage;
@@ -170,12 +172,36 @@ export function serveNodeRoutes(options: {
   const parts = route.split('/').map(decodeURIComponent);
   const method = req.method ?? 'GET';
   const owned = (parts[0] === 'nodes' && parts.length >= 2)
+    || (parts[0] === 'metrics' && parts.length === 1)
     || (parts[0] === 'jobs' && parts.length === 3 && parts[2] === 'cancel')
-    || (parts[0] === 'fleet-nodes' && parts.length === 3 && (parts[2] === 'retire-preview' || parts[2] === 'retire'));
+    || (parts[0] === 'fleet-nodes' && parts.length === 3
+      && (parts[2] === 'retire-preview' || parts[2] === 'retire' || parts[2] === 'quality-text'));
   if (!owned) return false;
 
   if (set === 'error') {
     fail(res, 500, 'UPSTREAM', FIXTURE_ERROR);
+    return true;
+  }
+
+  // The two legacy reads answer straight from the generator: neither has a
+  // store behind it, and neither may go through the clock shift below — the
+  // samples are already stamped in the frozen present.
+  const query = new URLSearchParams(url.split('?')[1] ?? '');
+  if (parts[0] === 'metrics' || parts[2] === 'quality-text') {
+    if (method !== 'GET' && method !== 'HEAD') {
+      res.statusCode = 405;
+      res.end();
+      return true;
+    }
+    send(res, parts[0] === 'metrics'
+      ? metricsBody({
+        name: query.get('node'),
+        range: query.get('range'),
+        fields: query.get('fields'),
+        empty: set === 'empty',
+        nowUnix: nowSec(),
+      })
+      : qualityTextBody(parts[1], set === 'empty'));
     return true;
   }
 
@@ -196,7 +222,7 @@ export function serveNodeRoutes(options: {
     return true;
   }
 
-  const range = new URLSearchParams(url.split('?')[1] ?? '').get('range') ?? '7d';
+  const range = query.get('range') ?? '7d';
   const body = readFor(file, parts, name, range);
   if (body === null) {
     fail(res, 404, 'NOT_FOUND', route);
