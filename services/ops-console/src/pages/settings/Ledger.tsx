@@ -66,6 +66,9 @@ export function Ledger() {
    */
   const current = monthOf(nowSec());
   const currentLocked = month === current && locked;
+  // Locking the month you are standing in takes a reversal away too, so the
+  // dialog in front of it promises the thing it is actually about to do.
+  const closeBody = month === current ? words.closeBodyCurrent : words.closeBody;
 
   const emails = useMemo(() => {
     const map = new Map<string, string>();
@@ -172,7 +175,7 @@ export function Ledger() {
       <ConfirmDialog
         open={closing}
         title={words.closeTitle}
-        consequence={month0 === null ? '' : (month === current ? words.closeBodyCurrent : words.closeBody)(
+        consequence={month0 === null ? '' : closeBody(
           monthWords(month0.month),
           formatCny(month0.revenueCnyMinor) ?? copy.missing,
           formatCny(month0.costCnyMinor) ?? copy.missing,
