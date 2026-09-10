@@ -1,8 +1,9 @@
+import type { IncidentDto } from '@contract';
 import { copy } from '@/copy/copy';
-import type { DigestDto, DigestIncidentDto } from '@/lib/api-followups';
+import type { DigestDto } from '@/lib/api-followups';
 import { severityTone } from '@/lib/codes';
-import { goPage, openIncident } from '@/lib/hash-route';
-import { beforeNoon } from '@/lib/handling';
+import { goPage, openCustomer, openIncident, openNodePage } from '@/lib/hash-route';
+import { beforeNoon, capNight, formatLife, groupNight, type NightGroup } from '@/lib/handling';
 import type { Tone } from '@/components/ops/StatusWord';
 import type { Resource } from '@/lib/use-resource';
 import { cn } from '@/lib/utils';
@@ -20,12 +21,18 @@ import { cn } from '@/lib/utils';
  *
  * The overnight rows carry the closure word, so a rule that fired wrongly
  * reads as a false alarm here too, and is never counted as a repair.
+ *
+ * The night is grouped and capped. The morning the engine flapped it returned
+ * seventy-two rows and this block printed all of them, which is the same as
+ * printing none: one line per thing that happened, six lines a half, and the
+ * flapping itself said out loud rather than left to be counted.
  */
 export function Digest({
   digest,
   openCount,
   choresToday,
   onShowOpen,
+  onShowResolved,
   onShowChores,
 }: {
   digest: Resource<DigestDto>;
@@ -33,12 +40,15 @@ export function Digest({
   openCount: number;
   choresToday: number;
   onShowOpen: () => void;
+  onShowResolved: () => void;
   onShowChores: () => void;
 }) {
   if (digest.status !== 'ready') return null;
   const { overnight, due } = digest.data;
   const night = overnight.resolved.length + overnight.opened.length;
   if (night === 0 && !beforeNoon()) return null;
+  const ended = capNight(groupNight(overnight.resolved));
+  const running = capNight(groupNight(overnight.opened));
 
   const owed = due.followups.length + due.checks.length + choresToday;
   if (night === 0 && openCount === 0 && owed === 0) {
@@ -60,21 +70,18 @@ export function Digest({
           <div className="flex min-w-0 flex-col gap-1">
             {/* What ended carries how it ended and no colour — it is over.
                 What is still running carries how bad it is. */}
-            {overnight.resolved.map((row) => (
-              <NightRow
-                key={row.id}
-                row={row}
-                word={copy.incidentClosureWord[row.closure ?? 'verified']}
-              />
+            {ended.shown.map((group) => (
+              <NightLine key={group.key} group={group} />
             ))}
-            {overnight.opened.map((row) => (
-              <NightRow
-                key={row.id}
-                row={row}
-                word={copy.severity[row.severity]}
-                tone={severityTone(row.severity)}
-              />
+            {ended.hidden === 0 ? null : (
+              <MoreGroups count={ended.hidden} onClick={onShowResolved} />
+            )}
+            {running.shown.map((group) => (
+              <NightLine key={group.key} group={group} />
             ))}
+            {running.hidden === 0 ? null : (
+              <MoreGroups count={running.hidden} onClick={onShowOpen} />
+            )}
           </div>
         )}
       </Line>
@@ -124,30 +131,87 @@ function Jump({ onClick, children }: { onClick: () => void; children: React.Reac
 }
 
 /**
- * One overnight incident, and its own name as the link.
+ * One thing that happened overnight, however many times it happened.
  *
  * The word in front is how it ended for the ones that ended, and how bad it is
- * for the ones that have not — which is why the caller passes it rather than
- * the row deciding: a night's read that claims a recovery over a false alarm
- * is the same lie, one line further up the page.
+ * for the ones that have not — a night's read that claims a recovery over a
+ * false alarm is the same lie, one line further up the page. Where the group
+ * ended several different ways the words are counted one by one: nine repairs
+ * and one mistake is not the same night as ten repairs, and one word with one
+ * count after it would say it was.
  */
-function NightRow({
-  row,
-  word,
-  tone,
-}: {
-  row: DigestIncidentDto;
-  word: string;
-  tone?: Tone;
-}) {
+function NightLine({ group }: { group: NightGroup }) {
+  const ended = group.closures.length > 0;
+  const word = ended
+    ? copy.digestJoin(group.closures.map((row) => (
+      group.closures.length === 1
+        ? copy.incidentClosureWord[row.closure]
+        : copy.digestTimes(copy.incidentClosureWord[row.closure], row.count)
+    )))
+    : copy.severity[group.severity];
+  const tone: Tone | undefined = ended ? undefined : severityTone(group.severity);
+  const title = group.count === 1 ? group.lead.title : copy.digestTimes(group.lead.title, group.count);
+  return (
+    <div className="night-group flex min-w-0 flex-col gap-0.5">
+      <button
+        type="button"
+        className="flex min-w-0 items-baseline gap-2 text-left"
+        onClick={() => openIncident(group.lead.id)}
+      >
+        <span className={cn('ops-tag shrink-0', tone && `tone-${tone}`)}>{word}</span>
+        <span className="min-w-0 truncate text-body underline-offset-4 hover:underline">{title}</span>
+      </button>
+      {group.flap === null ? null : (
+        <FlapLine
+          row={group.lead}
+          text={copy.digestFlap(group.flap.times, formatLife(group.flap.shortest))}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * A rule firing on noise, said in one grey line under the thing it fired on.
+ *
+ * It goes to the subject's own page rather than to any one of the openings:
+ * the question a flapping machine raises is what is wrong with the machine,
+ * and the tenth sixty-second incident answers none of it.
+ */
+function FlapLine({ row, text }: { row: IncidentDto; text: string }) {
+  const go = subjectPage(row);
+  if (go === null) return <p className={FLAP_NOTE}>{text}</p>;
+  return (
+    <button type="button" className={`${FLAP_NOTE} underline-offset-4 hover:underline`} onClick={go}>
+      {text}
+    </button>
+  );
+}
+
+/**
+ * Indented and small, because it is a note about the line above it rather than
+ * a line of its own — the night has enough lines that read as equals already.
+ * Spelled out rather than merged, which would drop the size for the colour.
+ */
+const FLAP_NOTE = 'pl-3 text-left text-micro text-[var(--muted-foreground)]';
+
+function subjectPage(row: IncidentDto): (() => void) | null {
+  const id = row.subjectId;
+  if (id === null || id === '') return null;
+  if (row.subjectType === 'node') return () => openNodePage(id);
+  if (row.subjectType === 'user') return () => openCustomer(id);
+  return null;
+}
+
+/** The tail of a capped half: the rest are counted here and listed one tab away. */
+function MoreGroups({ count, onClick }: { count: number; onClick: () => void }) {
   return (
     <button
       type="button"
-      className="flex min-w-0 items-baseline gap-2 text-left"
-      onClick={() => openIncident(row.id)}
+      className="text-left text-body text-[var(--muted-foreground)] underline-offset-4 hover:underline"
+      onClick={onClick}
     >
-      <span className={cn('ops-tag shrink-0', tone && `tone-${tone}`)}>{word}</span>
-      <span className="min-w-0 truncate text-body underline-offset-4 hover:underline">{row.title}</span>
+      {copy.digestMoreGroups(count)}
     </button>
   );
 }

@@ -3,6 +3,12 @@
 // NODE_HEALTH_LABELS / fleetQualityStatus copy.
 
 import { customerDesires } from './verdict-customers';
+import {
+  AGENT_SILENT_SECONDS,
+  applyHysteresis,
+  agentSilent,
+  unreachable,
+} from './verdict-hysteresis';
 
 export {
   PATH_SEVERE_MS,
@@ -11,9 +17,13 @@ export {
   pathStreakOpen,
 } from './verdict-customers';
 
+export {
+  HYSTERESIS,
+  type HysteresisRule,
+} from './verdict-hysteresis';
+
 export const VERDICT_RULES_VERSION = 1;
 
-const AGENT_SILENT_SECONDS = 15 * 60;
 // The hub's mainland sweep is a twelve-hour SSH pass, so a sweep is not stale
 // until it has missed a whole cycle with margin; two hours read the fleet as
 // 未测 for ten of every twelve. The agent copy is minutes old, and stays so.
@@ -27,7 +37,6 @@ const PRESSURE_DISK = 0.95;
 const FAIL_ATTEMPTS = 10;
 const FAIL_RATIO = 0.3;
 const FAIL_USERS = 2;
-const HANDSHAKE_USERS = 2;
 
 export const NODE_VERDICTS = [
   'down', 'blocked', 'no_probe', 'degraded', 'pressure', 'unknown', 'ok',
@@ -54,30 +63,6 @@ const DEGRADED_LABELS = {
 
 export type DegradedCause = keyof typeof DEGRADED_LABELS;
 
-export type HysteresisRule = {
-  verdict: NodeVerdict;
-  enterStreak: number;
-  enterGate?: 'agent_silent_15m' | 'handshake_or_two';
-  exitStreak: number;
-  exitGate?: 'fresh_agent' | 'connect_ok_or_two_clean';
-};
-
-export const HYSTERESIS: readonly HysteresisRule[] = [
-  { verdict: 'down', enterStreak: 1, enterGate: 'agent_silent_15m', exitStreak: 1, exitGate: 'fresh_agent' },
-  { verdict: 'blocked', enterStreak: 2, enterGate: 'handshake_or_two', exitStreak: 2, exitGate: 'connect_ok_or_two_clean' },
-  { verdict: 'no_probe', enterStreak: 1, exitStreak: 1 },
-  { verdict: 'degraded', enterStreak: 2, exitStreak: 1 },
-  { verdict: 'pressure', enterStreak: 3, exitStreak: 1 },
-  { verdict: 'unknown', enterStreak: 1, exitStreak: 1 },
-  { verdict: 'ok', enterStreak: 1, exitStreak: 1 },
-];
-
-const RANK: Record<NodeVerdict, number> = {
-  down: 6, blocked: 5, no_probe: 4, degraded: 3, pressure: 2, unknown: 1, ok: 0,
-};
-
-const HYSTERESIS_BY = Object.fromEntries(HYSTERESIS.map((rule) => [rule.verdict, rule])) as Record<NodeVerdict, HysteresisRule>;
-
 export type CarrierSample = { lossPct: number | null; latencyMs: number | null; samples: number };
 export type CarrierMap = { unicom?: CarrierSample | null; telecom?: CarrierSample | null; mobile?: CarrierSample | null };
 
@@ -92,6 +77,7 @@ export type NodePrior = {
   verdict: NodeVerdict;
   candidateVerdict: NodeVerdict;
   candidateStreak: number;
+  candidateSince: number | null;
   changedAt: number;
 };
 
@@ -177,6 +163,7 @@ export type NodeVerdictResult = {
   occupancy: number | null;
   candidateVerdict: NodeVerdict;
   candidateStreak: number;
+  candidateSince: number | null;
   changed: boolean;
   previousVerdict: NodeVerdict | null;
   changedAt: number;
@@ -200,29 +187,13 @@ type SnapshotCtx = {
 
 const CARRIER_KEYS = ['unicom', 'telecom', 'mobile'] as const;
 
-function rule(verdict: NodeVerdict): HysteresisRule {
-  return HYSTERESIS_BY[verdict];
-}
-
 function snapshotStale(at: number | null, nowSec: number, maxAge: number): boolean {
   return at == null || nowSec - at > maxAge;
-}
-
-function agentSilent(observedAt: number | null, nowSec: number): boolean {
-  return observedAt == null || nowSec - observedAt > AGENT_SILENT_SECONDS;
-}
-
-function agentFresh(observedAt: number | null, nowSec: number): boolean {
-  return observedAt != null && nowSec - observedAt <= AGENT_SILENT_SECONDS;
 }
 
 export function agentStatusAt(observedAt: number | null, nowSec: number): AgentStatus {
   if (observedAt == null) return 'missing';
   return nowSec - observedAt > AGENT_SILENT_SECONDS ? 'stale' : 'online';
-}
-
-function unreachable(node: NodeVerdictInput): boolean {
-  return node.ok === false || node.blockStatus === 'DOWN' || node.blockStatus === 'EDGE_FAIL';
 }
 
 function lossyCarriers(carriers: CarrierMap | null): Array<{ key: string; lossPct: number }> {
@@ -288,69 +259,6 @@ export function observedVerdict(node: NodeVerdictInput, ctx: SnapshotCtx): NodeV
   return 'ok';
 }
 
-function canEnter(
-  target: NodeVerdict,
-  streak: number,
-  node: NodeVerdictInput,
-  ctx: SnapshotCtx,
-): boolean {
-  const spec = rule(target);
-  if (target === 'down') {
-    return unreachable(node) && agentSilent(node.agentObservedAt, ctx.nowSec) && streak >= spec.enterStreak;
-  }
-  if (target === 'blocked') {
-    if (streak >= spec.enterStreak) return true;
-    return streak >= 1 && node.fails30m.handshakeDistinctUsers >= HANDSHAKE_USERS;
-  }
-  return streak >= spec.enterStreak;
-}
-
-function canExit(
-  current: NodeVerdict,
-  cleanStreak: number,
-  node: NodeVerdictInput,
-  ctx: SnapshotCtx,
-): boolean {
-  const spec = rule(current);
-  if (current === 'down') return agentFresh(node.agentObservedAt, ctx.nowSec);
-  if (current === 'blocked') {
-    const okAfterSweep = node.lastCustomerOkAt != null
-      && ctx.qualitySweepAt != null
-      && node.lastCustomerOkAt >= ctx.qualitySweepAt;
-    if (cleanStreak >= 1 && okAfterSweep) return true;
-    return cleanStreak >= spec.exitStreak;
-  }
-  return cleanStreak >= spec.exitStreak;
-}
-
-function applyHysteresis(
-  observed: NodeVerdict,
-  node: NodeVerdictInput,
-  ctx: SnapshotCtx,
-): { verdict: NodeVerdict; candidateVerdict: NodeVerdict; candidateStreak: number } {
-  const prior = node.prior;
-  const committed = prior?.verdict ?? 'unknown';
-  if (observed === committed) {
-    return { verdict: committed, candidateVerdict: observed, candidateStreak: 0 };
-  }
-  const sameCandidate = prior?.candidateVerdict === observed;
-  const streak = sameCandidate ? prior.candidateStreak + 1 : 1;
-  if (RANK[observed] > RANK[committed]) {
-    if (canEnter(observed, streak, node, ctx)) {
-      return { verdict: observed, candidateVerdict: observed, candidateStreak: 0 };
-    }
-    return { verdict: committed, candidateVerdict: observed, candidateStreak: streak };
-  }
-  if (canExit(committed, streak, node, ctx)) {
-    if (canEnter(observed, streak, node, ctx)) {
-      return { verdict: observed, candidateVerdict: observed, candidateStreak: 0 };
-    }
-    // Sticky state cleared, but the replacement still needs its own enter streak.
-    return { verdict: 'unknown', candidateVerdict: observed, candidateStreak: streak };
-  }
-  return { verdict: committed, candidateVerdict: observed, candidateStreak: streak };
-}
-
 function clipTitle(value: string): string {
   return value.length <= 200 ? value : value.slice(0, 200);
 }
@@ -410,6 +318,7 @@ function evaluateNode(node: NodeVerdictInput, ctx: SnapshotCtx): NodeVerdictResu
     occupancy: node.occupancy,
     candidateVerdict: applied.candidateVerdict,
     candidateStreak: applied.candidateStreak,
+    candidateSince: applied.candidateSince,
     changed,
     previousVerdict: previous,
     changedAt: changed ? ctx.nowSec : (node.prior?.changedAt ?? ctx.nowSec),

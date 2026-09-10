@@ -149,6 +149,33 @@ export const todayCopy = {
   digestDueChecks: (n: number) => `到期复测 ${n} 个`,
   digestDueChores: (n: number) => `到期待办 ${n} 件`,
   digestNoDue: '今天没有到期的事',
+  /**
+   * A bad night is a grouped night.
+   *
+   * The same machine failing the same way nine times is one thing that
+   * happened nine times, not nine things: it gets one line and a count. When
+   * the nine did not all end the same way the words are counted one by one,
+   * because a night that ends 已恢复 ×8 · 误报 ×1 is not a night that ended
+   * 已恢复.
+   */
+  digestTimes: (what: string, n: number) => `${what} ×${n}`,
+  digestJoin: (parts: readonly string[]) => parts.join(' · '),
+  /**
+   * 抖动 is a fault of its own, and it is invisible one line at a time.
+   *
+   * Ten openings with minute-long lives is a rule firing on noise, and the
+   * operator has to be told so rather than left to count rows — which is what
+   * the block that printed thirty-nine lines asked of them.
+   */
+  digestFlap: (times: number, shortest: string) => `反复开关 ${times} 次，最短 ${shortest}，判定可能在抖动`,
+  digestLife: {
+    seconds: (n: number) => `${n} 秒`,
+    minutes: (n: number) => `${n} 分钟`,
+    hours: (n: number) => `${n} 小时`,
+    days: (n: number) => `${n} 天`,
+  },
+  /** The tail of a capped half: how many groups went unprinted, and where they are. */
+  digestMoreGroups: (n: number) => `还有 ${n} 组`,
   incidentEvent: {
     opened: '开始',
     escalated: '升级',

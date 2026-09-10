@@ -438,6 +438,7 @@ export async function buildVerdictInput(
           verdict: stored.verdict,
           candidateVerdict: stored.candidateVerdict,
           candidateStreak: stored.candidateStreak,
+          candidateSince: stored.candidateSince,
           changedAt: stored.changedAt,
         }
         : null,
