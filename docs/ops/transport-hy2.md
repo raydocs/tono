@@ -51,4 +51,28 @@
 | 联通 | 未测（家宽） | | 未装 hy2 | | 同上 |
 | 移动 | 未测（家宽） | | 未装 hy2 | | 同上 |
 
-家宽三网要老板在电信/联通/移动各走一次。在商家放行 UDP 之前，预期仍是 `blocked`。
+家宽三网要老板在电信/联通/移动各走一次。在商家放行 UDP 之前，Panstar 预期仍是 `blocked`。
+
+## Dedirock 对照（2026-09-10，`dedirock-727653400`）
+
+老板给的现成 Tono Reality 出口，用来证明「不是大陆 UDP 废了，是 Panstar 没放行」。口令不写在这里。
+
+| | |
+|---|---|
+| IPv4 | `198.12.84.154` |
+| 系统 | Ubuntu 22.04，2 GB / 30 GB |
+| 已有 | `tono-xray.service` TCP `:443`（PID 658，装 hy2 前后未换） |
+| 新加 | `tono-hy2.service` UDP `:443`，hysteria v2.12.2，`MemoryMax=80M`，RSS ~24 MB |
+| 证书 | `CN=www.microsoft.com` + SAN；指纹 `A4:A8:30:89:80:00:4C:8A:5C:DA:98:59:7B:87:98:66:71:F2:30:44:5D:F8:63:C2:3D:38:0F:01:2C:72:F9:09` |
+| OS 防火墙 | ufw inactive，iptables ACCEPT |
+
+杭州 `47.110.84.71`（只出站，ss-server 443/20000 未改）：
+
+| 探测 | 结果 |
+|---|---|
+| TCP 443（VLESS） | 145ms 通，装 hy2 之后仍通 |
+| 临时 UDP 36712 echo | 178ms 回包（商家入站 UDP 开着） |
+| hy2 握手 5 次 | **5/5**，经代理 TCP 到 `1.1.1.1:443` 约 145–149ms |
+| 经 hy2 到 `google.com:443` | **189ms 通**（直连 Google 仍超时） |
+
+结论：大陆 UDP 到这家美国机可用。Panstar 东京仍被商家入站 UDP 拦住。自动切换默认关，直到家宽三网对 **这台 Dedirock**（或放行后的 Panstar）再测一轮。生产目录暂不塞 hy2 块（客户端准入 G2.6/G2.7 未合）。
