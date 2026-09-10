@@ -44,6 +44,13 @@ In-tree customer feeds in this checkout (what a control-plane deploy of
 and Windows `public/windows/latest.json` at **0.0.34**. Do not infer a
 newer published installer from the source version.
 
+The first customer publication after 0.0.67 / 0.0.34 is gated by
+[SHIP_PLAN.md](SHIP_PLAN.md): Connected-means-usable, a next step on
+connect failure, a proven protected update journal, then feed promotion
+as **0.0.73**. Do not advance Sparkle or `windows-updates` while that
+plan's four gates are open. GitHub `v0.0.72` / `tono-macos-0.0.72-build72`
+tags are not those feeds.
+
 - `release/macos` contains the post-Build-62 product line. **Build 64 is the
   macOS rollback baseline**: the last-known-good Sparkle successor to 62
   (`Tono-macOS-0.0.64-build64.zip`) before later feature work. Keep this

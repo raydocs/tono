@@ -38,4 +38,6 @@ Windows stable installers use `v<version>` tags; legacy Windows prereleases use
 The maintained release lines are `release/macos` and `release/windows`;
 `main` is their reviewed integration point and the only production
 control-plane deployment source. See [release lines and immutable
-history](docs/RELEASE_LINES.md).
+history](docs/RELEASE_LINES.md). The next customer publication is gated
+by [the first-ship plan](docs/SHIP_PLAN.md); do not promote Sparkle or
+`windows-updates` while those four gates are open.
