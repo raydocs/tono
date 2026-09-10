@@ -260,6 +260,9 @@ export async function reconcileIncidents(
 
   for (const desire of ordered) {
     const existing = liveByKey.get(desire.dedupeKey);
+    // Carried from the live table by a pass that did not measure it: it stays
+    // open (it is in `desiredKeys`), and nothing about it is rewritten.
+    if (existing && desire.carried) continue;
     const parentId = parentIdFor(desire.parentDedupeKey, idByKey, resolving);
     const title = clip(desire.title, TITLE_MAX) || '事故';
     const detail = desire.detail == null ? null : clip(desire.detail, DETAIL_MAX);

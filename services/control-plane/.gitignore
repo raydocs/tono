@@ -8,3 +8,4 @@ wrangler.preview.admin.generated.jsonc
 dist/
 public/ops/
 public/ops2/
+wrangler.preview.jsonc

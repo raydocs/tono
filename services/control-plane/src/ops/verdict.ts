@@ -152,6 +152,13 @@ export type IncidentDesire = {
   impactCount: number;
   evidence: Record<string, unknown>;
   suggestedJob?: 'catalog_retire';
+  /**
+   * Read back from the live table by a pass that did not evaluate this
+   * subject. It keeps the incident alive and links children to it, and the
+   * reconciler leaves its row alone: a scoped pass must not rewrite evidence
+   * it never measured, nor touch every incident on every heartbeat.
+   */
+  carried?: boolean;
 };
 
 export type AgentStatus = 'online' | 'stale' | 'missing';

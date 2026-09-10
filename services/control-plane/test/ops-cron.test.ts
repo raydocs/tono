@@ -131,6 +131,21 @@ describe('runOpsCron', () => {
     expect(parsed.flatten.ms).toBe(report.flatten.ms);
   });
 
+  it('re-runs the daily rollup while yesterday is still settling, then stops', async () => {
+    const dayStart = Math.floor(NOW / 86_400) * 86_400;
+    await seedWindow(dayStart - 3_600);
+    const first = await runOpsCron(env as unknown as Env, dayStart + 600);
+    expect(first.daily).toMatchObject({ ok: true, ran: true });
+    const again = await runOpsCron(env as unknown as Env, dayStart + 1_200);
+    expect(again.daily).toMatchObject({ ok: true, ran: true });
+    const settled = await runOpsCron(env as unknown as Env, dayStart + 3 * 3_600);
+    expect(settled.daily).toMatchObject({ ok: true, ran: false });
+    const rolled = await db().prepare(
+      'SELECT COUNT(*) AS c FROM ops_connection_daily WHERE day_at = ?',
+    ).bind(dayStart - 86_400).first<{ c: number }>();
+    expect(Number(rolled?.c)).toBeGreaterThan(0);
+  });
+
   it('keeps running later steps when one step throws', async () => {
     await seedWindow();
     await seedAlertRule();

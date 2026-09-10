@@ -3,6 +3,7 @@
 
 import { type Env, type Row, now, id, str } from '../env';
 import { ApiError } from '../errors';
+import { DIAGNOSTICS_MAX_REPORTED_AT_MS } from '../diagnostics-limits';
 import { redactJobResult } from './jobs';
 import { rejectUnexpectedKeys, body } from '../request';
 import {
@@ -65,7 +66,22 @@ export async function afterTelemetryWindow(
   await swallow('ops telemetry flatten failed', () => flattenWindow(e.DB, row, edge));
   await swallow('ops telemetry status failed', () => applyWindowToStatus(e.DB, row, customerEdge, t));
   await swallow('ops telemetry hours failed', () => accrueActivityHours(e.DB, row, t));
-  await swallow('ops telemetry verdict failed', () => runCustomerVerdictPass(e, row.user_id, t));
+  await alertAfterCustomerPass(e, row.user_id, t, 'ops telemetry');
+}
+
+/**
+ * A customer's pass is where a customer incident opens, and an incident
+ * emits its 'open' transition exactly once. Dropping it here meant every
+ * user-subject alert rule was silent forever: the cron pass five minutes
+ * later found the incident already live and had nothing to announce.
+ */
+async function alertAfterCustomerPass(e: Env, userId: string, t: number, what: string): Promise<void> {
+  let transitions: Awaited<ReturnType<typeof runCustomerVerdictPass>>['transitions'] = [];
+  await swallow(`${what} verdict failed`, async () => {
+    transitions = (await runCustomerVerdictPass(e, userId, t)).transitions;
+  });
+  if (transitions.length === 0) return;
+  await swallow(`${what} alerts failed`, () => planAndSendAlerts(e, transitions, t));
 }
 
 export async function afterSnapshot(e: Env, nowSec: number): Promise<void> {
@@ -135,7 +151,8 @@ export async function ingestConnectFailure(
 ): Promise<Response> {
   const b = await body(req, 8 * 1024);
   rejectUnexpectedKeys(b, FAILURE_KEYS);
-  if (typeof b.ts !== 'number' || !Number.isSafeInteger(b.ts) || b.ts < 0) {
+  if (typeof b.ts !== 'number' || !Number.isSafeInteger(b.ts) || b.ts < 0
+      || b.ts > DIAGNOSTICS_MAX_REPORTED_AT_MS) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid ts');
   }
   const stage = str(b.stage, 'stage', 1, 40);
@@ -156,7 +173,9 @@ export async function ingestConnectFailure(
   const exitDelayMs = optionalInt(b.exitDelayMs, 'exitDelayMs');
   const errorText = failureError(b, cores);
   const t = now();
-  const atMs = b.ts >= 1_000_000_000_000 ? b.ts : b.ts * 1000;
+  // A client clock ahead of ours must not plant a failure that every
+  // "recent" window counts for a month: like flatten, cap at receipt time.
+  const atMs = Math.min(b.ts >= 1_000_000_000_000 ? b.ts : b.ts * 1000, t * 1000);
   const edge = edgeAttribution(requestCf(req), new Set());
   await e.DB.prepare(
     `INSERT INTO connection_events(
@@ -196,6 +215,6 @@ export async function ingestConnectFailure(
       console.error('ops failure status failed', clip(error));
     }
   }
-  await swallow('ops failure verdict failed', () => runCustomerVerdictPass(e, a.userId, t));
+  await alertAfterCustomerPass(e, a.userId, t, 'ops failure');
   return Response.json({ accepted: true }, { status: 202 });
 }

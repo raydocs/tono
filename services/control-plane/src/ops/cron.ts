@@ -15,6 +15,7 @@ import { planAndSendAlerts, runVerdictPass } from './verdict-run';
 
 const DAY = 86_400;
 const HOUR = 3_600;
+const DAILY_SETTLE_SECONDS = 2 * HOUR;
 const RETAIN_LIMIT = 500;
 
 export type OpsCronStep<T extends Record<string, unknown> = {}> = {
@@ -207,10 +208,16 @@ export async function runOpsCron(e: Env, nowSec: number): Promise<OpsCronReport>
   const daily = await step('daily', { ran: false }, async () => {
     const today = utcDay(nowSec);
     const previous = await lastRun(e.DB, 'daily');
-    if (previous != null && utcDay(previous) >= today) return { ran: false };
+    const ranToday = previous != null && utcDay(previous) >= today;
+    // Yesterday keeps arriving after midnight: the flatten backlog drains
+    // 200 windows a tick and a window may span six hours. Both rollups are
+    // upserts that recompute the day, so for the first two hours they run
+    // on every tick and the last one wins; after that, once is enough.
+    const settling = nowSec - today < DAILY_SETTLE_SECONDS;
+    if (ranToday && !settling) return { ran: false };
     const yesterday = today - DAY;
     await rollupConnectionDaily(e.DB, yesterday);
-    await rollupClientVersionsDaily(e.DB, yesterday);
+    await rollupClientVersionsDaily(e.DB, yesterday, ranToday);
     await markRun(e.DB, 'daily', nowSec);
     return { ran: true };
   });

@@ -169,6 +169,31 @@ describe('reconcileIncidents', () => {
     expect(gone).toMatchObject({ status: 'resolved', resolve_reason: 'cleared' });
   });
 
+  it('a carried desire keeps the live row alive without rewriting what it never measured', async () => {
+    const measured = desire({
+      dedupeKey: 'node-blocked:Tokyo · Test',
+      kind: 'node-blocked',
+      subjectId: 'Tokyo · Test',
+      severity: 'severe',
+      title: '被墙',
+      evidence: { sweep: 'LIKELY_BLOCKED', carriers: 3 },
+    });
+    await reconcileIncidents(db(), [measured], NOW);
+    const carried: IncidentDesire = { ...measured, evidence: {}, title: '被墙（读回）', carried: true };
+    const quiet = await reconcileIncidents(db(), [carried], NOW + 300);
+    expect(quiet).toEqual([]);
+    const row = await db().prepare(
+      'SELECT status, title, last_seen_at, evidence_json FROM ops_incidents WHERE dedupe_key = ?',
+    ).bind(measured.dedupeKey).first<{ status: string; title: string; last_seen_at: number; evidence_json: string }>();
+    expect(row?.status).toBe('open');
+    expect(row?.title).toBe('被墙');
+    expect(Number(row?.last_seen_at)).toBe(NOW);
+    expect(JSON.parse(row?.evidence_json ?? '{}')).toEqual({ sweep: 'LIKELY_BLOCKED', carriers: 3 });
+    // Without the carried desire the pass resolves it, as before.
+    const resolved = await reconcileIncidents(db(), [], NOW + 600);
+    expect(resolved.map((row) => row.transition)).toEqual(['resolve']);
+  });
+
   it('refuses a second live row with the same dedupe_key', async () => {
     await db().prepare(
       `INSERT INTO ops_incidents(

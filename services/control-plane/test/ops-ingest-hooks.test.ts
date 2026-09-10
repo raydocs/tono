@@ -3,7 +3,7 @@ import {
   env,
   waitOnExecutionContext,
 } from 'cloudflare:test';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { jwtSign } from '../src/crypto';
 import worker, { type Env } from '../src/index';
 import { enqueueJob } from '../src/ops/jobs';
@@ -167,6 +167,56 @@ describe('ops ingest hooks', () => {
     } finally {
       limits.RATE_LIMIT_TELEMETRY_USER_HOUR = undefined;
     }
+  });
+
+  it('a customer incident opened on a heartbeat reaches a user-subject alert rule', async () => {
+    const account = await seedAccount('alert');
+    const t = Math.floor(Date.now() / 1000);
+    await db().prepare(
+      `INSERT INTO ops_alert_rules(
+         id, name, enabled, match_kind, match_subject_type, match_subject_id,
+         min_severity, min_impact, fire_on, delay_seconds, cooldown_seconds,
+         channel, target, template, secret_ref, created_at, updated_at
+       ) VALUES(?, ?, 1, NULL, 'user', NULL, 'notice', 0, 'open', 0, 0,
+                'webhook', ?, 'slack', NULL, ?, ?)`,
+    ).bind('rule-user', 'customers', 'https://hooks.slack.com/services/test', t, t).run();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));
+    try {
+      const body = telemetryWindow();
+      const nowMs = Date.now();
+      body.window.events = [1, 2, 3].map((n) => ({
+        ts: nowMs - n * 60_000, kind: 'connectFail', node: 'Salt Lake City · Summit', stage: 'handshake', code: 'ETIMEDOUT',
+      })) as unknown as typeof body.window.events;
+      body.window.eventCount = 3;
+      const response = await api('telemetry/windows', json(body, account.token));
+      expect(response.status).toBe(201);
+      const incident = await db().prepare(
+        "SELECT id FROM ops_incidents WHERE dedupe_key = ? AND status <> 'resolved'",
+      ).bind(`customer-repeat-fail:${account.userId}`).first<{ id: string }>();
+      expect(incident?.id).toBeTruthy();
+      const delivery = await db().prepare(
+        'SELECT transition, status FROM ops_alert_deliveries WHERE incident_id = ?',
+      ).bind(incident?.id ?? '').first<{ transition: string; status: string }>();
+      expect(delivery?.transition).toBe('open');
+      expect(['sent', 'pending']).toContain(delivery?.status);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('a failure report cannot be dated past receipt or past the diagnostics clock bound', async () => {
+    const account = await seedAccount('clock');
+    const base = {
+      stage: 'handshake', code: 'ETIMEDOUT', node: 'Tokyo · Kite',
+      appVersion: '0.0.72', osVersion: 'macOS 14.4', osArch: 'arm64',
+    };
+    expect((await api('telemetry/failures', json({ ...base, ts: 9_007_199_254_740_991 }, account.token))).status).toBe(400);
+    const ahead = Date.now() + 36 * 3_600 * 1_000;
+    expect((await api('telemetry/failures', json({ ...base, ts: ahead }, account.token))).status).toBe(202);
+    const row = await db().prepare(
+      "SELECT at_ms, received_at FROM connection_events WHERE user_id = ? AND source = 'failure'",
+    ).bind(account.userId).first<{ at_ms: number; received_at: number }>();
+    expect(Number(row?.at_ms)).toBeLessThanOrEqual(Number(row?.received_at) * 1000);
   });
 
   it('POST telemetry/failures validates and records a connectFail', async () => {

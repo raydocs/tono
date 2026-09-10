@@ -24,6 +24,7 @@ const HANDSHAKE_SQL = `(stage IN ('handshake', 'dial', 'tls') OR lower(COALESCE(
 export type CustomerScope = 'all' | 'none' | { userId: string };
 
 type LiveIncidentRow = {
+  evidence_json?: string | null;
   id: string;
   dedupe_key: string;
   kind: string;
@@ -302,6 +303,18 @@ async function loadCustomerFacts(
   }
 }
 
+function parseEvidence(raw: unknown): Record<string, unknown> {
+  if (typeof raw !== 'string' || !raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 export async function liveDesires(
   db: D1Database,
   keep: (row: LiveIncidentRow) => boolean,
@@ -309,7 +322,7 @@ export async function liveDesires(
   try {
     const rows = await db.prepare(
       `SELECT id, dedupe_key, kind, subject_type, subject_id, severity, title, detail, cause,
-              parent_incident_id, impact_count
+              parent_incident_id, impact_count, evidence_json
        FROM ops_incidents WHERE status <> 'resolved'`,
     ).all<LiveIncidentRow>();
     const list = rows.results ?? [];
@@ -327,7 +340,8 @@ export async function liveDesires(
         ? byId.get(row.parent_incident_id)?.dedupe_key
         : undefined,
       impactCount: Number(row.impact_count) || 0,
-      evidence: {},
+      evidence: parseEvidence(row.evidence_json),
+      carried: true,
     }));
   } catch (error) {
     if (missingTable(error)) return [];
@@ -359,6 +373,19 @@ export async function buildVerdictInput(
   nowSec: number,
   scope: CustomerScope,
 ): Promise<VerdictInput> {
+  // One customer's pass runs on every heartbeat and never re-judges a node:
+  // it only needs that customer's facts. The fleet loads below are a dozen
+  // queries the telemetry POST would otherwise pay for nothing.
+  if (typeof scope === 'object') {
+    return {
+      nodes: [],
+      customers: await loadCustomerFacts(e.DB, nowSec, scope.userId),
+      nowSec,
+      qualitySweepAt: null,
+      agentsSnapshotAt: null,
+      maintenance: new Set(),
+    };
+  }
   const live = await loadOperationsLive(e);
   const [
     prior, catalog, fails, rollups, spikes, lastOk, occupancy, profiles, customers,
@@ -373,7 +400,7 @@ export async function buildVerdictInput(
     loadProfiles(e.DB),
     scope === 'none'
       ? Promise.resolve([] as CustomerVerdictInput[])
-      : loadCustomerFacts(e.DB, nowSec, typeof scope === 'object' ? scope.userId : undefined),
+      : loadCustomerFacts(e.DB, nowSec),
   ]);
   const quality = new Map((live.quality?.nodes ?? []).map((node) => [String(node.name), node]));
   const agents = new Map((live.agents ?? []).map((node) => [String(node.name), node]));

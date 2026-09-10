@@ -22,6 +22,9 @@ import {
   liveDesires,
   persistPathStreaks,
 } from './verdict-facts';
+import { customerDesires } from './verdict-customers';
+
+const ID_CHUNK = 90;
 
 function missingTable(error: unknown): boolean {
   return String(error).includes('no such table');
@@ -38,10 +41,17 @@ export async function toAlertTransitions(
   if (usable.length === 0) return [];
   try {
     const ids = [...new Set(usable.map((t) => t.incidentId))];
-    const rows = await db.prepare(
-      `SELECT * FROM ops_incidents WHERE id IN (${ids.map(() => '?').join(',')})`,
-    ).bind(...ids).all<Row>();
-    const byId = new Map((rows.results ?? []).map((row) => [String(row.id), row]));
+    // D1 caps bound parameters per statement; a fleet-wide outage can open
+    // more incidents than that in one pass, and the alerts for the largest
+    // outages are the ones that must not be lost.
+    const byId = new Map<string, Row>();
+    for (let i = 0; i < ids.length; i += ID_CHUNK) {
+      const chunk = ids.slice(i, i + ID_CHUNK);
+      const rows = await db.prepare(
+        `SELECT * FROM ops_incidents WHERE id IN (${chunk.map(() => '?').join(',')})`,
+      ).bind(...chunk).all<Row>();
+      for (const row of rows.results ?? []) byId.set(String(row.id), row);
+    }
     const out: AlertTransition[] = [];
     for (const t of usable) {
       const row = byId.get(t.incidentId);
@@ -131,6 +141,20 @@ export async function runVerdictPass(
   scope: CustomerScope = 'all',
 ): Promise<{ nodes: number; transitions: AlertTransition[] }> {
   const input = await buildVerdictInput(e, nowSec, scope);
+  if (typeof scope === 'object') {
+    // One customer, judged against the node incidents already on record;
+    // every other incident is carried through untouched.
+    const userId = scope.userId;
+    const carried = await liveDesires(
+      e.DB,
+      (row) => !(row.subject_type === 'user' && row.subject_id === userId),
+    );
+    const nodeDesires = carried.filter((d) => d.subjectType !== 'user');
+    const customers = customerDesires(input.customers, nowSec, nodeDesires, input.maintenance);
+    await persistPathStreaks(e.DB, customers.pathStreaks);
+    const raw = await reconcileIncidents(e.DB, [...customers.desires, ...carried], nowSec);
+    return { nodes: 0, transitions: await toAlertTransitions(e.DB, raw) };
+  }
   const output = evaluate(input);
   let desires = output.desires;
   if (scope === 'none') {
@@ -138,14 +162,8 @@ export async function runVerdictPass(
       ...output.desires.filter((d) => d.subjectType !== 'user'),
       ...await liveDesires(e.DB, (row) => row.subject_type === 'user'),
     ];
-  } else if (typeof scope === 'object') {
-    const userId = scope.userId;
-    desires = [
-      ...output.desires.filter((d) => d.subjectType === 'user' && d.subjectId === userId),
-      ...await liveDesires(e.DB, (row) => !(row.subject_type === 'user' && row.subject_id === userId)),
-    ];
   }
-  if (typeof scope !== 'object') await persistNodeStates(e.DB, output, nowSec);
+  await persistNodeStates(e.DB, output, nowSec);
   if (scope !== 'none') await persistPathStreaks(e.DB, output.pathStreaks);
   const raw = await reconcileIncidents(e.DB, desires, nowSec);
   return { nodes: output.nodes.length, transitions: await toAlertTransitions(e.DB, raw) };
