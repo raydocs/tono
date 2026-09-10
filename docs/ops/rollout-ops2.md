@@ -11,13 +11,23 @@
 
 ## 1. 在 preview D1 上演练迁移
 
+**已于 2026-09-10 做过一次**：备份 `backups/control-plane-d1/2026-09-10T00:07:11Z.sql.gz` 灌进 `tono-control-plane-ops-preview`（新建，id `12c01ca6-d170-4fcf-9ee1-062256562c46`），`migrations apply` 一次通过，26 张新表齐全，20 个用户 / 7482 个遥测窗口完好。
+
+两个要知道的事实：
+
+1. **生产库的迁移记录停在 0033。** `0034`–`0038`（设备出口凭证、审计加固、计量切换、回收重试）从来没在生产上应用过，只有 `revocation_jobs_pending` 这个索引名先存在。部署脚本会把 0034–0049 共 16 个一起应用；演练证明它们在生产数据上能干净跑完。其中 0035 加了 `sessions_require_eligible_device` 触发器、0037 加了阻止未配对计量切换的触发器——这是主干代码本来就期望的状态。
+2. **本地跑 `wrangler d1 export … --config wrangler.jsonc` 会报认证错误**（wrangler 4.129 的 profile 解析在带 `--config` 时落到默认账号），去掉 `--config` 就正常；夜间工作流用 API token，不受影响。手工备份时按 `tooling/scripts/backup-control-plane-d1.sh` 的步骤但不带 `--config`。
+
+重做演练（每次部署前）：
+
 ```sh
 cd services/control-plane
-npx wrangler d1 migrations list tono-control-plane-ops-preview --remote
-npx wrangler d1 migrations apply tono-control-plane-ops-preview --remote
+npx wrangler d1 export tono-control-plane --remote --output /tmp/prod.sql
+npx wrangler d1 execute tono-control-plane-ops-preview --remote --file /tmp/prod.sql -y --config wrangler.preview.jsonc
+npx wrangler d1 migrations apply tono-control-plane-ops-preview --remote --config wrangler.preview.jsonc
 ```
 
-预期：0039–0049 依次应用；随后 `npx wrangler d1 execute tono-control-plane-ops-preview --remote --command "SELECT name FROM sqlite_master WHERE name LIKE 'ops_%' OR name LIKE 'connection_%' ORDER BY 1"` 能看到全部新表。
+`wrangler.preview.jsonc` 是本地文件（已 gitignore），只绑定 preview 库。
 
 ## 2. 合并与部署
 
