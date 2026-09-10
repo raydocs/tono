@@ -162,48 +162,62 @@ function BillingDrawer({
     }
     if (contact.trim() !== '') patch.contact = contact.trim();
     if (notes.trim() !== '') patch.notes = notes.trim();
-    if (Object.keys(patch).length === 0) {
+    const changing = Object.keys(patch) as Array<keyof UserPatch>;
+    if (changing.length === 0) {
       setFault(copy.settings.savedNothing);
       return;
     }
     setFault(null);
-    void ask.run(() => customerApi.patchUser(userId, patch));
+    // The plan and the date are what the customer is paying for, so they go
+    // through the same gate as everything else here rather than saving on a
+    // click; the sentence names the fields that are about to move.
+    ask.ask({
+      title: copy.billingEdit,
+      consequence: copy.billingSaveBody(copy.billingChangeList(
+        changing.map((key) => copy.billingChangeWord[key as keyof typeof copy.billingChangeWord] ?? key),
+      )),
+      confirm: copy.settings.save,
+      run: () => customerApi.patchUser(userId, patch),
+    });
   }
 
   return (
-    <DetailDrawer open={open} title={copy.billingEdit} onClose={onClose}>
-      <p className="text-body text-[var(--muted-foreground)]">{copy.billingWriteOnly}</p>
-      <FieldGrid>
-        <SelectField
-          label={copy.billingFieldPlan}
-          hint={copy.billingPlanHint}
-          value={plan}
-          options={PLANS}
-          word={(option) => (option === '' ? copy.onboardPlanNone : copy.serviceName.claude)}
-          onChange={setPlan}
+    <>
+      <DetailDrawer open={open} title={copy.billingEdit} onClose={onClose}>
+        <p className="text-body text-[var(--muted-foreground)]">{copy.billingWriteOnly}</p>
+        <FieldGrid>
+          <SelectField
+            label={copy.billingFieldPlan}
+            hint={copy.billingPlanHint}
+            value={plan}
+            options={PLANS}
+            word={(option) => (option === '' ? copy.onboardPlanNone : copy.serviceName.claude)}
+            onChange={setPlan}
+          />
+          <TextField
+            label={copy.billingFieldExpires}
+            hint={copy.onboardHints.expiresAt}
+            value={date}
+            onChange={setDate}
+            type="date"
+            mono
+          />
+          <TextField
+            label={copy.billingFieldContact}
+            hint={copy.billingContactHint}
+            value={contact}
+            onChange={setContact}
+          />
+          <TextField label={copy.billingFieldNotes} value={notes} onChange={setNotes} />
+        </FieldGrid>
+        <FormFooter
+          pending={ask.pending}
+          error={fault ?? ask.error}
+          onSave={save}
+          onCancel={onClose}
         />
-        <TextField
-          label={copy.billingFieldExpires}
-          hint={copy.onboardHints.expiresAt}
-          value={date}
-          onChange={setDate}
-          type="date"
-          mono
-        />
-        <TextField
-          label={copy.billingFieldContact}
-          hint={copy.billingContactHint}
-          value={contact}
-          onChange={setContact}
-        />
-        <TextField label={copy.billingFieldNotes} value={notes} onChange={setNotes} />
-      </FieldGrid>
-      <FormFooter
-        pending={ask.pending}
-        error={fault ?? ask.error}
-        onSave={save}
-        onCancel={onClose}
-      />
-    </DetailDrawer>
+      </DetailDrawer>
+      {ask.dialog}
+    </>
   );
 }

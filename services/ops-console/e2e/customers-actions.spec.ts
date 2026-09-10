@@ -143,6 +143,26 @@ test.describe('客户写动作', () => {
     await expect(page.getByRole('dialog')).toHaveCount(0);
   });
 
+  test('改账务也要先说清楚改的是哪几项', async ({ page }, testInfo) => {
+    const session = fresh('billing', testInfo);
+    await open(page, '/customers/u-04', 'default', session);
+    await page.getByRole('button', { name: /账务与用量/ }).click();
+    await page.getByRole('button', { name: '改账务' }).click();
+
+    const drawer = page.getByRole('dialog');
+    await drawer.getByLabel('套餐').selectOption('claude_20x');
+    await drawer.getByLabel('联系方式').fill('wx: tao');
+    await drawer.getByRole('button', { name: '保存' }).click();
+
+    const ask = gate(page, /会改这位客户的/);
+    await expect(ask).toContainText('套餐');
+    await expect(ask).toContainText('联系方式');
+    await ask.getByRole('button', { name: '保存' }).click();
+
+    await settle(page);
+    await expect(page.getByText('claude_20x')).toBeVisible();
+  });
+
   test('头上四个按钮不再说接口未接入', async ({ page }) => {
     await open(page, '/customers/u-04');
     for (const label of ['发起远程诊断', '重发凭证', '改到期', '停用']) {

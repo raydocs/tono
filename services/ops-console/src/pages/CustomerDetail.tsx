@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import type { CustomerBillingDto, CustomerNowDto } from '@contract';
 import { Fact } from '@/components/ops/DetailDrawer';
@@ -15,7 +15,7 @@ import { formatDate, formatPercent, formatWhenAgo, splitBytes } from '@/lib/disp
 import { closeCustomer } from '@/lib/hash-route';
 import { usePrivacy } from '@/lib/privacy';
 import { shown } from '@/lib/sources';
-import { useResource } from '@/lib/use-resource';
+import { useResource, type Resource } from '@/lib/use-resource';
 import { measured, type Measured } from '@/components/ops/measured';
 import type { Tier } from '@/components/ops/Value';
 import { Billing } from './customer/Billing';
@@ -30,6 +30,44 @@ import { ServiceUsage } from './customer/Services';
 import { Timeline } from './customer/Timeline';
 
 const RANGE = '7d' as const;
+
+/**
+ * The last answer that arrived, kept on screen while the next one is fetched.
+ *
+ * Every write on this page refetches, and a refetch starts as `loading`. Left
+ * alone that empties the page for a moment: the sections unmount, the folds
+ * the operator had opened close, and the browser puts them back at the top —
+ * so queueing a diagnostic on the third device throws you away from the
+ * device you were looking at. Holding the previous read means the page keeps
+ * saying what it last knew until it knows something newer, which is also the
+ * more honest of the two: it was true a second ago, and blank was never true.
+ *
+ * `key` is the customer, so opening a second one does not show the first
+ * one's facts while its own read is in flight.
+ */
+function useSticky<T>(key: string, resource: Resource<T>): {
+  data: T | null;
+  loading: boolean;
+  message: string | null;
+} {
+  const [seen, setSeen] = useState<{ key: string; data: T } | null>(null);
+  useEffect(() => {
+    if (resource.status !== 'ready') return;
+    const fresh = resource.data;
+    setSeen((current) => (
+      current !== null && current.key === key && current.data === fresh
+        ? current
+        : { key, data: fresh }
+    ));
+  }, [key, resource]);
+  const kept = seen !== null && seen.key === key ? seen.data : null;
+  const data = resource.status === 'ready' ? resource.data : kept;
+  return {
+    data,
+    loading: data === null && resource.status === 'loading',
+    message: data === null && resource.status === 'error' ? resource.message : null,
+  };
+}
 
 export default function CustomerDetailPage({ userId }: { userId: string }) {
   const privacy = usePrivacy();
@@ -57,16 +95,20 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
     binding.reload();
   }, [detail, account, binding]);
 
-  if (detail.status !== 'ready') {
+  const customer = useSticky(userId, detail);
+  const accountSide = useSticky(userId, account);
+  const homeSide = useSticky(userId, binding);
+
+  const row = customer.data;
+  if (row === null) {
     return (
       <div className="page-wrap">
         <BackLink />
-        <Empty message={detail.status === 'loading' ? copy.loading : detail.message || copy.loadError} />
+        <Empty message={customer.loading ? copy.loading : customer.message || copy.loadError} />
       </div>
     );
   }
 
-  const row = detail.data;
   const events = connections.status === 'ready' ? connections.data.items : [];
 
   return (
@@ -141,24 +183,24 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
       <HomeLine
         userId={userId}
         email={privacy.email(row.email)}
-        binding={binding.status === 'ready' ? binding.data : null}
-        loading={binding.status === 'loading'}
-        message={binding.status === 'error' ? binding.message : null}
+        binding={homeSide.data ?? null}
+        loading={homeSide.loading}
+        message={homeSide.message}
         onChanged={refresh}
       />
 
       <ClaudeAccount
         userId={userId}
-        detail={account.status === 'ready' ? account.data : null}
-        loading={account.status === 'loading'}
-        message={account.status === 'error' ? account.message : null}
+        detail={accountSide.data}
+        loading={accountSide.loading}
+        message={accountSide.message}
         onChanged={refresh}
       />
 
       <Proof
-        detail={account.status === 'ready' ? account.data : null}
-        loading={account.status === 'loading'}
-        message={account.status === 'error' ? account.message : null}
+        detail={accountSide.data}
+        loading={accountSide.loading}
+        message={accountSide.message}
       />
 
       <FoldedSection title={copy.customerSections.chores} count={row.chores.length}>
