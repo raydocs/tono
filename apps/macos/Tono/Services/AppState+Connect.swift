@@ -73,7 +73,7 @@ extension AppState {
         ConnectionTelemetryBuffer.shared.record(
             "connectBegin",
             stage: ConnectionStage.preparing.rawValue,
-            node: selectedExit?.id,
+            node: selectedExit?.name,
             generation: Int(self.connectionCoordinator.protectionOperationGeneration)
         )
 
@@ -421,7 +421,7 @@ extension AppState {
                             "controllerExitAdvisory",
                             stage: ConnectionStage.checkingExit.rawValue,
                             error: advisory,
-                            node: selectedExit?.id,
+                            node: selectedExit?.name,
                             generation: Int(self.connectionCoordinator.protectionOperationGeneration)
                         )
                     }
@@ -506,7 +506,7 @@ extension AppState {
                     stage: failedStage.rawValue,
                     code: self.lastClassifiedFailure?.code ?? .unknownClassifiedFailure,
                     elapsedMs: totalDuration,
-                    node: selectedExit?.id,
+                    node: selectedExit?.name,
                     generation: Int(self.connectionCoordinator.protectionOperationGeneration),
                     error: error.localizedDescription,
                     // The core's own last words are what turn "handshake failed"
@@ -912,7 +912,7 @@ extension AppState {
             "connectOk",
             stage: ConnectionStage.verifyingTraffic.rawValue,
             delayMs: exitDelayMs,
-            node: selectedExitNode()?.id,
+            node: selectedExitNode()?.name,
             generation: Int(self.connectionCoordinator.protectionOperationGeneration)
         )
         do {
