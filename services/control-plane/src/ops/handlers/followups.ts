@@ -10,7 +10,8 @@ import {
   type FollowupSubjectType,
 } from '../contract';
 import { incidentDto } from './incidents';
-import { emptyWorthwhile, weeklyWorthwhile } from '../worthwhile';
+import { emptyWorthwhile, weeklyPicks, weeklyWorthwhile } from '../worthwhile';
+
 import {
   Actor,
   Env,
@@ -311,7 +312,12 @@ export async function getDigest(req: Request, e: Env): Promise<Response> {
   } catch (error) {
     if (!missingTable(error) && !String(error).includes('no such column')) throw error;
   }
-  digest = { ...digest, worthwhile: await weeklyWorthwhile(e.DB, t) };
+  try {
+    digest = { ...digest, worthwhile: await weeklyPicks(e.DB, t) };
+  } catch {
+    delete digest.worthwhile;
+  }
+
   const etag = weakEtag([day, digest.updatedAt, digest.open.length, digest.due.followups.length]);
   return entityJson(e, req, digest, etag, assertDigest);
 }

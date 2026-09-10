@@ -35,11 +35,14 @@ export function emptyWorthwhile(nowSec: number): WorthwhileDto {
   };
 }
 
+import { weeklyPicks } from './weekly-picks';
+
+export { weeklyPicks };
+
 /**
- * The week's ≤3 picks. Empty until D5 fills it in — deliberately without
- * touching the database, so the digest handler's statement budget is unchanged.
+ * The week's ≤3 picks.
  */
 export async function weeklyWorthwhile(db: D1Database, nowSec: number): Promise<WorthwhileDto> {
-  void db;
-  return emptyWorthwhile(nowSec);
+  return weeklyPicks(db, nowSec);
 }
+
