@@ -19,7 +19,7 @@ import {
   utcDateString,
   utcMonthString,
 } from '../fx';
-import { ledgerCsv, ledgerDto, loadMonthSummary, requireOpenMonth } from '../ledger';
+import { encodeMonthSnapshot, ledgerCsv, ledgerDto, loadMonthSummary, requireOpenMonth } from '../ledger';
 import {
   Actor,
   Env,
@@ -312,14 +312,17 @@ export async function postMonthClose(req: Request, e: Env, rawMonth: string, act
   if (existing) throw new ApiError(409, 'MONTH_CLOSED', `Month ${month} is already closed`);
   const t = now();
   const summary = await loadMonthSummary(e.DB, month, t);
+  // The four totals and, beside them, the two halves under them. A month whose
+  // snapshot does not fit stores `{ customers: [], nodes: [], partial: true }`
+  // and answers `frozenPartial` afterwards — an oversized month is still closed.
   const inserted = await e.DB.prepare(
     `INSERT OR IGNORE INTO ops_month_close(
        month, closed_at, closed_by, revenue_cny_minor, cost_cny_minor,
-       margin_cny_minor, unreconciled, notes
-     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+       margin_cny_minor, unreconciled, notes, summary_json
+     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(
     month, t, actor.email, summary.revenueCnyMinor, summary.costCnyMinor,
-    summary.marginCnyMinor, summary.unreconciled, notes,
+    summary.marginCnyMinor, summary.unreconciled, notes, encodeMonthSnapshot(summary),
   ).run();
   if (Number(inserted.meta.changes ?? 0) !== 1) {
     throw new ApiError(409, 'MONTH_CLOSED', `Month ${month} is already closed`);

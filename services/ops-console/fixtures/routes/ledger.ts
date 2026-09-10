@@ -346,19 +346,30 @@ export function createLedgerFixtures(rootDir: string) {
     sendJson(res, row, 201);
   }
 
-  /** The reversal lands in the month it is made in, never in the month it undoes. */
+  /**
+   * The reversal lands in the month it is made in, never in the month it undoes
+   * — so the month that can refuse it is the current one.
+   *
+   * Only the yuan figure flips sign. The original amount stays what was paid:
+   * the operator reconciles that column against an invoice, and an invoice for
+   * minus two hundred yuan does not exist.
+   */
   function reverse(store: Store, row: LedgerEntryDto, res: ServerResponse): void {
     if (row.reversedBy !== null) {
       sendRefusal(res, 409, 'ALREADY_REVERSED', '这一笔已经冲正过了');
       return;
     }
     const at = nowSec();
+    const month = monthOf(at);
+    if (store.closed.has(month)) {
+      sendRefusal(res, 409, 'MONTH_CLOSED', '这个月已经锁了');
+      return;
+    }
     const mirror: LedgerEntryDto = {
       ...row,
-      id: newId(),
-      amountMinor: -row.amountMinor,
+      id: `reverse:${row.id}`,
       cnyMinor: -row.cnyMinor,
-      month: monthOf(at),
+      month,
       paidAt: at,
       reverses: row.id,
       reversedBy: null,
