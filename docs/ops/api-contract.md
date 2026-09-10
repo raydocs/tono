@@ -95,6 +95,16 @@
 
 `GET audit` 由 shared-admin 先于 v1 dispatch 承接，信封是 `{ entries, hasMore, nextBefore, nextBeforeId }`，条目上 `actorType` / `actorRole` / `requestId` 可空。词表与库一致：`actor_type` 为 `access_admin|token_admin|collector|exit_node|system`，`actor_role` 为 `owner`；配额 `counts` 为 `in|out|in_out`、`level` 为 `ok|chore|warn|severe`（无配额时 `level: ok` 且 `quota: null`）；路由 `cloud|residential|direct|reject|unknown`；连接来源 `window|direct|diagnostics|failure`；告警 `fireOn` 为 `open|open_resolve`，投递 `transition` 另加 `test`；事故事件 `type` 为 `opened|escalated|deescalated|acked|snoozed|note|job|alert|resolved`；事故 `closure` 为 `verified|false_positive|manual`（可空）；跟进 `kind` 为 `reply|await_customer|callback|verified|note`，主体 `user|incident|node`；版本档 `current|behind_one|behind_more|unreported`。
 
+### 部门 A
+
+### 部门 B
+
+### 部门 C
+
+### 部门 D
+
+### 部门 E
+
 ## 加端点的规矩
 
 1. 先在 `src/ops/contract/` 里加 DTO 和 `assert*` 检查器（键白名单 + 类型守卫，不引 schema 库），并在 `test/ops-contract.test.ts` 加一条夹具与三种漂移用例（少键、多键、类型错）。
