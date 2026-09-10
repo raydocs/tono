@@ -415,4 +415,50 @@ describe('maintenance and fleet collector', () => {
     expect(out.nodes[0].verdict).toBe('down');
     expect(out.desires.filter((d) => d.subjectType === 'node')).toEqual([]);
   });
+
+  it.each([
+    {
+      name: 'retired with occupants opens retire_pending',
+      over: { profileStatus: 'retired' as const, catalogListed: false, occupancy: 2 },
+      want: 2,
+    },
+    {
+      name: 'retired empty closes (emits nothing)',
+      over: { profileStatus: 'retired' as const, catalogListed: false, occupancy: 0 },
+      want: 0,
+    },
+    {
+      name: 'listed active does not open retire_pending',
+      over: { profileStatus: 'active' as const, catalogListed: true, occupancy: 2 },
+      want: 0,
+    },
+    {
+      name: 'relist (active again) reopens nothing',
+      over: { profileStatus: 'active' as const, catalogListed: true, occupancy: 0 },
+      want: 0,
+    },
+  ])('$name', ({ over, want }) => {
+    const out = evaluate(world({
+      nodes: [node({
+        name: 'Old · Box',
+        ok: false,
+        agentObservedAt: null,
+        ...over,
+      })],
+    }));
+    const pending = out.desires.filter((d) => d.kind === 'retire_pending');
+    if (want === 0) {
+      expect(pending).toEqual([]);
+      return;
+    }
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({
+      dedupeKey: 'node:Old · Box:retire_pending',
+      kind: 'retire_pending',
+      subjectType: 'node',
+      subjectId: 'Old · Box',
+      severity: 'notice',
+      impactCount: want,
+    });
+  });
 });

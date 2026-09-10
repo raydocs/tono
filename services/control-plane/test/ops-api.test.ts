@@ -21,6 +21,7 @@ import {
   assertList,
   assertNodeBindings,
   assertNodeDetail,
+  assertRetireDependencies,
   assertNodeErrorRow,
   assertNodeHistoryEntry,
   assertNodeSummary,
@@ -168,6 +169,9 @@ describe('ops v1 api', () => {
     for (const row of errors.value) assertNodeErrorRow(row);
     assertNodeBindings(await (await ops(`nodes/${enc}/bindings`)).json());
     assertList(await (await ops(`nodes/${enc}/jobs`)).json(), assertJob);
+    const preview = assertRetireDependencies(await (await ops(`nodes/${enc}/retire-preview`)).json());
+    expect(preview.customersOnNode).toEqual([]);
+    expect(preview.exitTokenActive).toBe(false);
   });
 
   it('POST nodes/{name}/jobs requires confirmName for destructive types', async () => {
@@ -700,6 +704,7 @@ describe('ops v1 api', () => {
       'GET /api/v1/ops/nodes/{name}/errors',
       'GET /api/v1/ops/nodes/{name}/bindings',
       'GET /api/v1/ops/nodes/{name}/jobs',
+      'GET /api/v1/ops/nodes/{name}/retire-preview',
       'POST /api/v1/ops/nodes/{name}/jobs',
       'PATCH /api/v1/ops/nodes/{name}/profile',
       'GET /api/v1/ops/customers',

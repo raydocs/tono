@@ -33,6 +33,7 @@
 | `GET nodes/{name}/errors?range` | `Measured<NodeErrorRowDto[]>` |
 | `GET nodes/{name}/bindings` | `NodeBindingsDto` |
 | `GET nodes/{name}/jobs`、`POST nodes/{name}/jobs` | `ListDto<JobDto>` / `JobDto` |
+| `GET nodes/{name}/retire-preview` | `RetireDependenciesDto`（`customersOnNode[]` 为近 40 分钟仍把该节点写在 `ops_customer_status` / `ops_device_status.selected_server` 上的客户；`defaultProxyBindings` 为 `user_home_bindings.default_proxy_name`；`exitTokenActive` / `lastRosterAt` 来自 `exit_nodes`） |
 | `PATCH nodes/{name}/profile` | `NodeDetailDto` |
 | `GET customers?cursor&limit&focus&q&since` | `ListDto<CustomerSummaryDto>`（`wechatId`。`q` 按 email 或 wechat_id 子串过滤，大小写不敏感；缺省/空 `q` 行为与原来相同） |
 | `GET customers/{id}` | `CustomerDetailDto`（`wechatId`、`contact`、`notes` 来自 `users`；`devices[]` 带每台设备的 live 字段：`connected`、`selectedServer`、`lastSeenAt`、`lastFailAt/Code/Node`，来自 `ops_device_status`） |

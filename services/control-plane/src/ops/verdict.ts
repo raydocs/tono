@@ -37,6 +37,8 @@ const PRESSURE_DISK = 0.95;
 const FAIL_ATTEMPTS = 10;
 const FAIL_RATIO = 0.3;
 const FAIL_USERS = 2;
+/** Heartbeat cadence × 2: a customer on a retiring node is still on it. */
+export const RETIRE_DRAIN_SECONDS = 40 * 60;
 
 export const NODE_VERDICTS = [
   'down', 'blocked', 'no_probe', 'degraded', 'pressure', 'unknown', 'ok',
@@ -376,7 +378,25 @@ export function evaluate(input: VerdictInput): VerdictOutput {
   const retired = new Set(input.nodes.filter((n) => n.profileStatus === 'retired').map((n) => n.name));
   const desires: IncidentDesire[] = [];
   for (const node of nodes) {
-    if (input.maintenance.has(node.name) || retired.has(node.name)) continue;
+    if (retired.has(node.name)) {
+      const still = node.occupancy ?? 0;
+      if (still > 0) {
+        desires.push({
+          dedupeKey: `node:${node.name}:retire_pending`,
+          kind: 'retire_pending',
+          subjectType: 'node',
+          subjectId: node.name,
+          severity: 'notice',
+          title: clipTitle(`${still} 位客户仍在这台机器上`),
+          detail: node.name,
+          cause: 'retire_pending',
+          impactCount: still,
+          evidence: { occupancy: still, catalogListed: node.catalogListed },
+        });
+      }
+      continue;
+    }
+    if (input.maintenance.has(node.name)) continue;
     const desire = desireForNode(node);
     if (desire) desires.push(desire);
   }

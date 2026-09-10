@@ -29,6 +29,7 @@ import {
   operationsActivity,
   operationsNodeSelections,
 } from './activity';
+import { retireDependencies, revokeExitToken } from '../retire-dependencies';
 
 async function managedCatalogTemplate(e: Env) {
   const row = await e.DB.prepare(
@@ -192,7 +193,14 @@ export function fleetNodeName(raw: string): string {
   return name;
 }
 
-export async function retireFleetNode(e: Env, actorEmail: string, name: string, requestBody: Row, cache?: OpsRequestCache) {
+export async function retireFleetNode(
+  e: Env,
+  actorEmail: string,
+  name: string,
+  requestBody: Row,
+  cache?: OpsRequestCache,
+  nowSec = now(),
+) {
   rejectUnexpectedKeys(requestBody, ['expectedRevision', 'confirmation', 'reason']);
   if (!Number.isSafeInteger(requestBody.expectedRevision) || requestBody.expectedRevision < 0) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid expectedRevision');
@@ -209,6 +217,7 @@ export async function retireFleetNode(e: Env, actorEmail: string, name: string, 
   if (!preview.canRetire) {
     throw new ApiError(422, 'RETIRE_UNSAFE', preview.warnings[0] ?? 'Node cannot be retired safely');
   }
+  const dependencies = await retireDependencies(e, name, nowSec);
   const revision = preview.currentRevision + 1;
   const encrypted = await encryptCatalog(preview.nextYaml, requiredCatalogKey(e));
   const digest = await sha256(preview.nextYaml);
@@ -253,6 +262,9 @@ export async function retireFleetNode(e: Env, actorEmail: string, name: string, 
   if (!results[0].meta.changes) {
     throw new ApiError(409, 'CATALOG_CONFLICT', 'Managed catalog changed; preview retirement again');
   }
+  if (dependencies.customersOnNode.length === 0) {
+    await revokeExitToken(e, name, actorEmail, nowSec);
+  }
   const refreshed = await operationsFleetNodes(e, cache);
   return {
     node: refreshed.nodes.find((candidate) => candidate.name === name) ?? { ...preview.node, catalogListed: false },
@@ -262,6 +274,7 @@ export async function retireFleetNode(e: Env, actorEmail: string, name: string, 
     affectedUsers: preview.affectedUsers,
     changes: preview.changes,
     warnings: preview.warnings,
+    dependencies,
   };
 }
 

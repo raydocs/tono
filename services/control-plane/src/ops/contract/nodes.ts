@@ -100,6 +100,20 @@ export interface NodeBindingsDto {
   asOfSec: number | null;
 }
 
+/** Who still depends on a node that is about to leave the catalog. */
+export interface RetireCustomerOnNodeDto {
+  userId: string;
+  email: string;
+  lastSeenAt: number;
+}
+
+export interface RetireDependenciesDto {
+  customersOnNode: RetireCustomerOnNodeDto[];
+  defaultProxyBindings: number;
+  exitTokenActive: boolean;
+  lastRosterAt: number | null;
+}
+
 export interface NodeFactsDto {
   publicIp: string | null;
   os: string | null;
@@ -239,6 +253,31 @@ export function assertNodeQuota(value: unknown, path = 'quota'): NodeQuotaDto {
 }
 
 const BINDINGS_KEYS = ['catalog', 'exitToken', 'komari', 'identitySync', 'metering', 'asOfSec'];
+
+const RETIRE_CUSTOMER_KEYS = ['userId', 'email', 'lastSeenAt'];
+
+export function assertRetireCustomerOnNode(value: unknown, path = 'retireCustomer'): RetireCustomerOnNodeDto {
+  const row = fields(value, path, RETIRE_CUSTOMER_KEYS);
+  return {
+    userId: text(row, path, 'userId'),
+    email: text(row, path, 'email'),
+    lastSeenAt: int(row, path, 'lastSeenAt'),
+  };
+}
+
+const RETIRE_DEPENDENCIES_KEYS = [
+  'customersOnNode', 'defaultProxyBindings', 'exitTokenActive', 'lastRosterAt',
+];
+
+export function assertRetireDependencies(value: unknown, path = 'retireDependencies'): RetireDependenciesDto {
+  const row = fields(value, path, RETIRE_DEPENDENCIES_KEYS);
+  return {
+    customersOnNode: arrayOf(row, path, 'customersOnNode', assertRetireCustomerOnNode),
+    defaultProxyBindings: int(row, path, 'defaultProxyBindings'),
+    exitTokenActive: bool(row, path, 'exitTokenActive'),
+    lastRosterAt: optInt(row, path, 'lastRosterAt'),
+  };
+}
 
 export function assertNodeBindings(value: unknown, path = 'bindings'): NodeBindingsDto {
   const row = fields(value, path, BINDINGS_KEYS);

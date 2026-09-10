@@ -22,6 +22,7 @@ import {
   assertNodeErrorRow,
   assertNodeHistoryEntry,
   assertNodeSummary,
+  assertRetireDependencies,
 } from './nodes';
 import {
   assertActivityHour,
@@ -91,6 +92,7 @@ export const NAMED_CHECKERS = {
   assertNodeErrorsMeasured,
   assertNodeBindings,
   assertNodeJobsList,
+  assertRetireDependencies,
   assertCustomerSummaryList,
   assertCustomerDetail,
   assertCustomerConnectionsList,
@@ -144,6 +146,7 @@ export const GET_ROUTE_TABLE: readonly GetRouteBinding[] = [
   { route: 'GET /api/v1/ops/nodes/{name}/errors', checker: 'assertNodeErrorsMeasured' },
   { route: 'GET /api/v1/ops/nodes/{name}/bindings', checker: 'assertNodeBindings' },
   { route: 'GET /api/v1/ops/nodes/{name}/jobs', checker: 'assertNodeJobsList' },
+  { route: 'GET /api/v1/ops/nodes/{name}/retire-preview', checker: 'assertRetireDependencies' },
   { route: 'GET /api/v1/ops/customers', checker: 'assertCustomerSummaryList' },
   { route: 'GET /api/v1/ops/customers/{id}', checker: 'assertCustomerDetail' },
   { route: 'GET /api/v1/ops/customers/{id}/connections', checker: 'assertCustomerConnectionsList' },
