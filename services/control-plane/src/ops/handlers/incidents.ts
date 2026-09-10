@@ -1,7 +1,8 @@
 import { ApiError } from '../../errors';
-import { body } from '../../request';
+import { body, rejectUnexpectedKeys } from '../../request';
 import {
   DELIVERY_TRANSITIONS,
+  INCIDENT_CLOSURES,
   INCIDENT_EVENT_TYPES,
   INCIDENT_STATUSES,
   SEVERITIES,
@@ -10,6 +11,7 @@ import {
   assertIncidentDetail,
   type AlertDeliveryDto,
   type DeliveryTransition,
+  type IncidentClosure,
   type IncidentDetailDto,
   type IncidentDto,
   type IncidentEventDto,
@@ -60,6 +62,16 @@ function toneForSeverity(severity: string): Tone {
   if (severity === 'severe') return 'sev';
   if (severity === 'warn') return 'warn';
   return 'info';
+}
+
+function asClosure(value: unknown): IncidentClosure | null {
+  const text = nullText(value);
+  if (text && (INCIDENT_CLOSURES as readonly string[]).includes(text)) return text as IncidentClosure;
+  return null;
+}
+
+function shanghaiClock(sec: number): string {
+  return new Date((sec + 8 * 3600) * 1000).toISOString().replace('T', ' ').slice(0, 16);
 }
 
 function evidenceList(raw: unknown, asOf: number): IncidentDto['evidence'] {
@@ -115,6 +127,8 @@ export function incidentDto(row: Row): IncidentDto {
     ackedAt: nullInt(row.acked_at),
     snoozedUntil: nullInt(row.snoozed_until),
     resolvedAt: nullInt(row.resolved_at),
+    nextCheckAt: nullInt(row.next_check_at),
+    closure: asClosure(row.closure),
   };
 }
 
@@ -300,20 +314,46 @@ export async function postIncidentSnooze(req: Request, e: Env, rawId: string, ac
 export async function postIncidentResolve(req: Request, e: Env, rawId: string, actor: Actor): Promise<Response> {
   const incidentId = decodeName(rawId, 'id');
   await loadIncident(e, incidentId);
-  const t = now();
-  let note: string | null = null;
-  try {
-    const b = await body(req, 4 * 1024);
-    note = b.note == null ? null : String(b.note).slice(0, 1000);
-  } catch (error) {
-    if (!(error instanceof ApiError) || error.status !== 400) throw error;
+  const b = await body(req, 4 * 1024);
+  rejectUnexpectedKeys(b, ['closure', 'note']);
+  const closure = String(b.closure ?? '');
+  if (!(INCIDENT_CLOSURES as readonly string[]).includes(closure)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid closure');
   }
+  const note = b.note == null ? null : String(b.note).slice(0, 1000);
+  const t = now();
   await e.DB.prepare(
-    `UPDATE ops_incidents SET status = 'resolved', resolved_at = ?, resolve_reason = ?, updated_at = ?
+    `UPDATE ops_incidents
+     SET status = 'resolved', resolved_at = ?, resolve_reason = ?, closure = ?, updated_at = ?
      WHERE id = ?`,
-  ).bind(t, note, t, incidentId).run();
+  ).bind(t, note, closure, t, incidentId).run();
+  if (closure === 'false_positive') {
+    const falseNote = note && note.trim() ? `误报：${note.trim()}` : '误报';
+    await writeEvent(e, incidentId, 'note', actor.email, falseNote, t);
+  }
   await writeEvent(e, incidentId, 'resolved', actor.email, note, t);
-  await auditWrite(e, actor.email, 'incident.resolve', 'incident', incidentId, note ?? 'resolved');
+  await auditWrite(e, actor.email, 'incident.resolve', 'incident', incidentId, `${closure}${note ? `: ${note}` : ''}`);
+  const updated = incidentDto(await loadIncident(e, incidentId));
+  check(e, () => { assertIncident(updated); });
+  return jsonNoStore(updated);
+}
+
+export async function patchIncident(req: Request, e: Env, rawId: string, actor: Actor): Promise<Response> {
+  const incidentId = decodeName(rawId, 'id');
+  await loadIncident(e, incidentId);
+  const b = await body(req, 4 * 1024);
+  rejectUnexpectedKeys(b, ['nextCheckAt']);
+  if (typeof b.nextCheckAt !== 'number' || !Number.isSafeInteger(b.nextCheckAt)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid nextCheckAt');
+  }
+  const nextCheckAt = Number(b.nextCheckAt);
+  const t = now();
+  await e.DB.prepare(
+    'UPDATE ops_incidents SET next_check_at = ?, updated_at = ? WHERE id = ?',
+  ).bind(nextCheckAt, t, incidentId).run();
+  const clock = shanghaiClock(nextCheckAt);
+  await writeEvent(e, incidentId, 'note', actor.email, `下次检查 ${clock}`, t);
+  await auditWrite(e, actor.email, 'incident.next_check', 'incident', incidentId, `下次检查 ${clock}`);
   const updated = incidentDto(await loadIncident(e, incidentId));
   check(e, () => { assertIncident(updated); });
   return jsonNoStore(updated);

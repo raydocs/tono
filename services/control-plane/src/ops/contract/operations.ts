@@ -3,6 +3,7 @@
 import type {
   AlertChannel,
   AlertTemplate,
+  IncidentClosure,
   IncidentStatus,
   JobExecutor,
   JobStatus,
@@ -19,6 +20,7 @@ import type {
 import {
   ALERT_CHANNELS,
   ALERT_TEMPLATES,
+  INCIDENT_CLOSURES,
   INCIDENT_STATUSES,
   JOB_EXECUTORS,
   JOB_STATUSES,
@@ -41,6 +43,7 @@ import {
   int,
   oneOf,
   optInt,
+  optOneOf,
   optText,
   text,
   violation,
@@ -78,6 +81,9 @@ export interface IncidentDto {
   ackedAt: number | null;
   snoozedUntil: number | null;
   resolvedAt: number | null;
+  nextCheckAt: number | null;
+  /** Null until an operator closes it; engine recovery leaves this null. */
+  closure: IncidentClosure | null;
 }
 
 export const INCIDENT_EVENT_TYPES = [
@@ -243,6 +249,7 @@ const INCIDENT_KEYS = [
   'id', 'dedupeKey', 'kind', 'subjectType', 'subjectId', 'severity', 'status', 'tone',
   'title', 'summary', 'parentIncidentId', 'rulesVersion', 'impactCount', 'evidence',
   'openedAt', 'lastSeenAt', 'ackedAt', 'snoozedUntil', 'resolvedAt',
+  'nextCheckAt', 'closure',
 ];
 
 export function assertIncident(value: unknown, path = 'incident'): IncidentDto {
@@ -267,6 +274,8 @@ export function assertIncident(value: unknown, path = 'incident'): IncidentDto {
     ackedAt: optInt(row, path, 'ackedAt'),
     snoozedUntil: optInt(row, path, 'snoozedUntil'),
     resolvedAt: optInt(row, path, 'resolvedAt'),
+    nextCheckAt: optInt(row, path, 'nextCheckAt'),
+    closure: optOneOf<IncidentClosure>(row, path, 'closure', INCIDENT_CLOSURES),
   };
 }
 

@@ -40,9 +40,15 @@
 | `GET customers/{id}/activity?range` | `ListDto<ActivityHourDto>` |
 | `GET customers/{id}/destinations?range` | `ListDto<DestinationRowDto>` |
 | `GET customers/{id}/services?range` | `ListDto<ServiceUsageDto>` |
-| `GET incidents?status&severity&subjectType&since` | `ListDto<IncidentDto>` |
+| `GET incidents?status&severity&subjectType&since` | `ListDto<IncidentDto>`（`status=resolved` 含误报关闭；控制台再滤） |
 | `GET incidents/{id}` | `IncidentDetailDto` (`{ incident, events, jobs, deliveries }`) |
-| `POST incidents/{id}/ack\|snooze\|resolve\|notes` | `IncidentDto`。`snooze` 接受 `until`（epoch 秒）、`durationSec`，或控制台用的 `seconds`（1..7 天） |
+| `POST incidents/{id}/ack\|snooze\|resolve\|notes` | `IncidentDto`。`snooze` 接受 `until`（epoch 秒）、`durationSec`，或控制台用的 `seconds`（1..7 天）。`resolve` 必带 `closure`：`verified` / `false_positive` / `manual`，另可 `note`；`false_positive` 写事件 `note`「误报：…」，不计入恢复 |
+| `PATCH incidents/{id}` | `IncidentDto`。只接受 `{ nextCheckAt }`（epoch 秒），其它键 400；写 `next_check_at` 与事件 `note`「下次检查 \<time\>」 |
+| `GET customers/{id}/followups` | `ListDto<FollowupDto>`，最新在前 |
+| `POST customers/{id}/followups`、`POST incidents/{id}/followups` | 201 `FollowupDto`。body `{ kind, body, dueAt? }`，`kind` ∈ `reply\|await_customer\|callback\|verified\|note`，`body` ≤2000 |
+| `PATCH followups/{id}` | `FollowupDto`。`{ done?, body?, dueAt? }` |
+| `GET followups?due=today\|overdue\|open` | `ListDto<FollowupDto>`，所有主体，到期最早在前，最多 200；缺省 `due=open` |
+| `GET digest?day=YYYY-MM-DD` | `DigestDto`。缺省今天，按 Asia/Shanghai 日界。`overnight.resolved` 不含 `false_positive` |
 | `GET jobs?status&executor`、`POST jobs/{id}/cancel` | `ListDto<JobDto>` / `JobDto` |
 | `GET releases?platform&channel`、`POST releases`、`PATCH releases/{id}` | `ListDto<ReleaseDto>` / `ReleaseDto` |
 | `GET releases/adoption?range` | `AdoptionMatrixDto` |
@@ -61,10 +67,10 @@
 
 公开（无 Access、无登录）`GET /api/v1/system/pulse` 返回 `{ ok, cronAgeSec, buildSha }`：`ok` 表示 cron 在 15 分钟内跑过；`cache-control: no-store`；按 IP 每小时 60 次。不含源名或其它内部细节。
 
-采集侧（`/api/v1/ops-ingest/*`）与客户端侧（`/api/v1/telemetry/failures`）不归这份合同管，它们有各自的入站校验。
+采集侧（`/api/v1/ops-ingest/*`）与客户端侧（`/api/v1/telemetry/failures`）不归这份合同管，它们有各自的入站校验。`POST /api/v1/telemetry/failures` 与周期窗口事件（`telemetryEventStringKeys`）接受可选 `attemptId`（≤64 字）：**accepted, not yet used**——写入窗口 JSON 供以后投影去重，`connection_events` 无此列，失败即报不落库。
 现有 `/ops/dashboard|fleet-nodes|activity|live|users|metrics|usage-hours` 在切换前保持不动。
 
-`GET audit` 由 shared-admin 先于 v1 dispatch 承接，信封是 `{ entries, hasMore, nextBefore, nextBeforeId }`，条目上 `actorType` / `actorRole` / `requestId` 可空。词表与库一致：`actor_type` 为 `access_admin|token_admin|collector|exit_node|system`，`actor_role` 为 `owner`；配额 `counts` 为 `in|out|in_out`、`level` 为 `ok|chore|warn|severe`（无配额时 `level: ok` 且 `quota: null`）；路由 `cloud|residential|direct|reject|unknown`；连接来源 `window|direct|diagnostics|failure`；告警 `fireOn` 为 `open|open_resolve`，投递 `transition` 另加 `test`；事故事件 `type` 为 `opened|escalated|deescalated|acked|snoozed|note|job|alert|resolved`；版本档 `current|behind_one|behind_more|unreported`。
+`GET audit` 由 shared-admin 先于 v1 dispatch 承接，信封是 `{ entries, hasMore, nextBefore, nextBeforeId }`，条目上 `actorType` / `actorRole` / `requestId` 可空。词表与库一致：`actor_type` 为 `access_admin|token_admin|collector|exit_node|system`，`actor_role` 为 `owner`；配额 `counts` 为 `in|out|in_out`、`level` 为 `ok|chore|warn|severe`（无配额时 `level: ok` 且 `quota: null`）；路由 `cloud|residential|direct|reject|unknown`；连接来源 `window|direct|diagnostics|failure`；告警 `fireOn` 为 `open|open_resolve`，投递 `transition` 另加 `test`；事故事件 `type` 为 `opened|escalated|deescalated|acked|snoozed|note|job|alert|resolved`；事故 `closure` 为 `verified|false_positive|manual`（可空）；跟进 `kind` 为 `reply|await_customer|callback|verified|note`，主体 `user|incident|node`；版本档 `current|behind_one|behind_more|unreported`。
 
 ## 加端点的规矩
 

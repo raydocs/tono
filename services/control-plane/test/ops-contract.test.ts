@@ -19,6 +19,8 @@ import {
   assertHomeLine,
   assertHomeLineUsageDay,
   assertAuditList,
+  assertDigest,
+  assertFollowup,
   assertIncident,
   assertIncidentDetail,
   assertIncidentEvent,
@@ -258,6 +260,29 @@ const incident = () => ({
   ackedAt: null,
   snoozedUntil: null,
   resolvedAt: null,
+  nextCheckAt: null,
+  closure: null,
+});
+
+const followup = () => ({
+  id: 'fu-1',
+  subjectType: 'user' as const,
+  subjectId: 'u-1',
+  kind: 'reply' as const,
+  body: '已回复：请再试一次连接',
+  dueAt: 1_757_086_400,
+  doneAt: null,
+  createdBy: 'rw@drrki.com',
+  createdAt: 1_757_000_000,
+  updatedAt: 1_757_000_000,
+});
+
+const digest = () => ({
+  day: '2026-09-10',
+  overnight: { resolved: [incident()], opened: [] },
+  open: [incident()],
+  due: { followups: [followup()], checks: [] },
+  updatedAt: 1_757_000_100,
 });
 
 const connectionEvent = () => ({
@@ -349,6 +374,8 @@ const CASES: Array<[string, (value: unknown, path?: string) => unknown, () => Re
     lastSeenAt: 1_757_000_000,
   })],
   ['incident', assertIncident, incident],
+  ['followup', assertFollowup, followup],
+  ['digest', assertDigest, digest],
   ['incidentDetail', assertIncidentDetail, () => ({
     incident: incident(),
     events: {

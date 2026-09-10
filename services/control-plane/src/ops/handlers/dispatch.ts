@@ -9,8 +9,12 @@ import {
 } from './customers';
 import {
   getIncidents, getIncident, postIncidentAck, postIncidentSnooze,
-  postIncidentResolve, postIncidentNotes,
+  postIncidentResolve, postIncidentNotes, patchIncident,
 } from './incidents';
+import {
+  getCustomerFollowups, postCustomerFollowup, postIncidentFollowup,
+  patchFollowup, getFollowups, getDigest,
+} from './followups';
 import { getJobs, postJobCancel } from './jobs';
 import { getReleases, postRelease, patchRelease, getReleaseAdoption } from './releases';
 import {
@@ -44,12 +48,19 @@ export const OPS_V1_ROUTES = [
   'GET /api/v1/ops/customers/{id}/activity',
   'GET /api/v1/ops/customers/{id}/destinations',
   'GET /api/v1/ops/customers/{id}/services',
+  'GET /api/v1/ops/customers/{id}/followups',
+  'POST /api/v1/ops/customers/{id}/followups',
   'GET /api/v1/ops/incidents',
   'GET /api/v1/ops/incidents/{id}',
   'POST /api/v1/ops/incidents/{id}/ack',
   'POST /api/v1/ops/incidents/{id}/snooze',
   'POST /api/v1/ops/incidents/{id}/resolve',
   'POST /api/v1/ops/incidents/{id}/notes',
+  'POST /api/v1/ops/incidents/{id}/followups',
+  'PATCH /api/v1/ops/incidents/{id}',
+  'GET /api/v1/ops/followups',
+  'PATCH /api/v1/ops/followups/{id}',
+  'GET /api/v1/ops/digest',
   'GET /api/v1/ops/jobs',
   'POST /api/v1/ops/jobs/{id}/cancel',
   'GET /api/v1/ops/releases',
@@ -99,13 +110,20 @@ const ROUTES: Array<{ method: string; re: RegExp; handle: Handler }> = [
   { method: 'GET', re: /^\/api\/v1\/ops\/customers\/([^/]+)\/activity$/, handle: (req, e, _a, p) => getCustomerActivity(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/customers\/([^/]+)\/destinations$/, handle: (req, e, _a, p) => getCustomerDestinations(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/customers\/([^/]+)\/services$/, handle: (req, e, _a, p) => getCustomerServices(req, e, p[0]) },
+  { method: 'GET', re: /^\/api\/v1\/ops\/customers\/([^/]+)\/followups$/, handle: (req, e, _a, p) => getCustomerFollowups(req, e, p[0]) },
+  { method: 'POST', re: /^\/api\/v1\/ops\/customers\/([^/]+)\/followups$/, handle: (req, e, a, p) => postCustomerFollowup(req, e, p[0], a) },
   { method: 'GET', re: /^\/api\/v1\/ops\/customers\/([^/]+)$/, handle: (req, e, _a, p) => getCustomer(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/incidents$/, handle: (req, e) => getIncidents(req, e) },
   { method: 'POST', re: /^\/api\/v1\/ops\/incidents\/([^/]+)\/ack$/, handle: (req, e, a, p) => postIncidentAck(req, e, p[0], a) },
   { method: 'POST', re: /^\/api\/v1\/ops\/incidents\/([^/]+)\/snooze$/, handle: (req, e, a, p) => postIncidentSnooze(req, e, p[0], a) },
   { method: 'POST', re: /^\/api\/v1\/ops\/incidents\/([^/]+)\/resolve$/, handle: (req, e, a, p) => postIncidentResolve(req, e, p[0], a) },
   { method: 'POST', re: /^\/api\/v1\/ops\/incidents\/([^/]+)\/notes$/, handle: (req, e, a, p) => postIncidentNotes(req, e, p[0], a) },
+  { method: 'POST', re: /^\/api\/v1\/ops\/incidents\/([^/]+)\/followups$/, handle: (req, e, a, p) => postIncidentFollowup(req, e, p[0], a) },
+  { method: 'PATCH', re: /^\/api\/v1\/ops\/incidents\/([^/]+)$/, handle: (req, e, a, p) => patchIncident(req, e, p[0], a) },
   { method: 'GET', re: /^\/api\/v1\/ops\/incidents\/([^/]+)$/, handle: (req, e, _a, p) => getIncident(req, e, p[0]) },
+  { method: 'GET', re: /^\/api\/v1\/ops\/followups$/, handle: (req, e) => getFollowups(req, e) },
+  { method: 'PATCH', re: /^\/api\/v1\/ops\/followups\/([^/]+)$/, handle: (req, e, a, p) => patchFollowup(req, e, p[0], a) },
+  { method: 'GET', re: /^\/api\/v1\/ops\/digest$/, handle: (req, e) => getDigest(req, e) },
   { method: 'GET', re: /^\/api\/v1\/ops\/jobs$/, handle: (req, e) => getJobs(req, e) },
   { method: 'POST', re: /^\/api\/v1\/ops\/jobs\/([^/]+)\/cancel$/, handle: (req, e, a, p) => postJobCancel(req, e, p[0], a) },
   { method: 'GET', re: /^\/api\/v1\/ops\/releases\/adoption$/, handle: (req, e) => getReleaseAdoption(req, e) },

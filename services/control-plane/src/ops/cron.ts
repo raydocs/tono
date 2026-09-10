@@ -13,6 +13,7 @@ import { retainClientVersionDaily, rollupClientVersionsDaily } from './releases'
 import { retainHomeLineUsage } from './home-lines';
 import { retainTrafficDaily } from './traffic-parse';
 import { planAndSendAlerts, runVerdictPass } from './verdict-run';
+import { retainFollowups } from './handlers/followups';
 
 const DAY = 86_400;
 const HOUR = 3_600;
@@ -177,6 +178,7 @@ async function runRetention(db: D1Database, nowSec: number): Promise<void> {
   await retainLimited(db, 'ops_incident_events', 'at', nowSec - 180 * DAY);
   await retainLimited(db, 'ops_node_jobs', 'created_at', nowSec - 90 * DAY);
   await retainLimited(db, 'node_traffic_cycle_samples', 'at', nowSec - 60 * DAY);
+  await retainFollowups(db, nowSec, RETAIN_LIMIT);
 }
 
 export async function runOpsCron(e: Env, nowSec: number): Promise<OpsCronReport> {
