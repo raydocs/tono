@@ -152,6 +152,28 @@ describe('ops ingest hooks', () => {
     expect((await api('telemetry/windows', json(negative, account.token))).status).toBe(400);
   });
 
+  it('a disconnectOk event carries bytes in each direction, and nothing else is let through', async () => {
+    const account = await seedAccount('bytes');
+    const body = telemetryWindow();
+    const nowMs = Date.now();
+    body.window.events.push({ ts: nowMs - 1_000, kind: 'disconnectOk', elapsedMs: 29_000, bytesUp: 12_345, bytesDown: 987_654 } as never);
+    body.window.eventCount = 3;
+    const response = await api('telemetry/windows', json(body, account.token));
+    expect(response.status).toBe(201);
+    const stored = await db().prepare(
+      'SELECT payload_json FROM telemetry_windows WHERE user_id = ? ORDER BY received_at DESC LIMIT 1',
+    ).bind(account.userId).first<{ payload_json: string }>();
+    const close = JSON.parse(stored?.payload_json ?? '{}').events.find((e: { kind: string }) => e.kind === 'disconnectOk');
+    expect(close).toMatchObject({ elapsedMs: 29_000, bytesUp: 12_345, bytesDown: 987_654 });
+
+    const fractional = telemetryWindow();
+    fractional.window.events[1] = { ...fractional.window.events[1], bytesUp: 1.5 } as never;
+    expect((await api('telemetry/windows', json(fractional, account.token))).status).toBe(400);
+    const unknown = telemetryWindow();
+    unknown.window.events[1] = { ...unknown.window.events[1], bytesSideways: 1 } as never;
+    expect((await api('telemetry/windows', json(unknown, account.token))).status).toBe(400);
+  });
+
   it('failure reports spend their own rate-limit bucket, not the heartbeat one', async () => {
     const account = await seedAccount('bucket');
     const limits = env as unknown as Env;
