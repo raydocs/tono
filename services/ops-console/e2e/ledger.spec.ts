@@ -78,11 +78,65 @@ test.describe('账目', () => {
     await expect(row).toContainText('¥85.61');
   });
 
+  /**
+   * The currency is the kind's business, not the operator's. Money coming in
+   * only ever arrives in yuan, so those three kinds lock the field and say
+   * why; a bill opens on dollars because that is what the invoices are in, and
+   * stays changeable because some of them are not.
+   */
+  test('收款只收人民币，支出默认美元', async ({ page }, testInfo) => {
+    await open(page, LEDGER, 'default', `ledger-cny-${testInfo.project.name}`);
+    await page.getByRole('button', { name: '记一笔' }).click();
+
+    const drawer = page.getByRole('dialog');
+    const currency = drawer.getByLabel('币种');
+    await expect(currency).toHaveValue('CNY');
+    await expect(currency).toBeDisabled();
+    await expect(drawer.getByText('收款只收人民币')).toBeVisible();
+
+    await drawer.getByLabel('类型').selectOption({ value: 'cost' });
+    await expect(currency).toHaveValue('USD');
+    await expect(currency).toBeEnabled();
+    await expect(drawer.getByText('收款只收人民币')).toHaveCount(0);
+
+    // A currency the operator picked survives the trip through a locked kind;
+    // the dollar default only ever fills the field the lock left behind.
+    await currency.selectOption({ value: 'EUR' });
+    await drawer.getByLabel('类型').selectOption({ value: 'refund' });
+    await expect(currency).toHaveValue('CNY');
+    await drawer.getByLabel('类型').selectOption({ value: 'cost' });
+    await expect(currency).toHaveValue('USD');
+  });
+
+  /** The hub's half of the same rule, and the sentence it comes back as. */
+  test('收入记成外币，中间层也不收', async ({ page }, testInfo) => {
+    const session = `ledger-cny-refuse-${testInfo.project.name}`;
+    await open(page, LEDGER, 'default', session);
+    const refused = await page.request.post(`/api/v1/ops/ledger?session=${session}`, {
+      data: {
+        kind: 'revenue',
+        category: 'plan',
+        subjectType: 'user',
+        subjectId: 'u-01',
+        amountMinor: 12_800,
+        currency: 'USD',
+        month: '2026-09',
+        paidAt: null,
+        note: null,
+      },
+    });
+    expect(refused.status()).toBe(400);
+    expect(await refused.json()).toMatchObject({
+      error: { code: 'VALIDATION_ERROR', message: '收款只收人民币' },
+    });
+  });
+
   test('汇率还没拉到的那天，直接说出来', async ({ page }, testInfo) => {
     await open(page, LEDGER, 'default', `ledger-fx-${testInfo.project.name}`);
     await page.getByRole('button', { name: '记一笔' }).click();
 
     const drawer = page.getByRole('dialog');
+    await drawer.getByLabel('类型').selectOption({ value: 'cost' });
     await drawer.getByLabel('币种').selectOption({ value: 'USD' });
     await drawer.getByLabel('付款日').fill('2025-01-01');
     await expect(drawer.getByText('2025-01-01 的汇率还没拉到，等今天的汇率进来再记，或者换一个付款日。')).toBeVisible();

@@ -21,6 +21,18 @@ type Plan = '' | typeof CLAUDE_PLAN;
 
 const PLANS: readonly Plan[] = ['', CLAUDE_PLAN];
 
+/** The three fields only an operator ever sees, as the hub stores them. */
+export type Profile = {
+  wechatId: string | null;
+  contact: string | null;
+  notes: string | null;
+};
+
+/** A stored value in a text box: absent and empty are the same empty box. */
+function boxed(value: string | null): string {
+  return value ?? '';
+}
+
 /**
  * What the customer is on, until when, and the one number that can be ended.
  *
@@ -34,19 +46,22 @@ const PLANS: readonly Plan[] = ['', CLAUDE_PLAN];
  * move the baseline up to the reported figure. The sentence in front of the
  * button says so, because "clear" reads like an undo and this is not one.
  *
- * Contact and notes are write-only here, and the form says so. No read this
- * console is allowed to make returns them — the customer contract carries the
- * facts about connectivity, not the operator's own notes — so a field
- * pre-filled with nothing would be claiming the stored value is empty.
+ * The handle, the contact and the notes come back on the customer now, so the
+ * form is filled in with what is stored rather than warning that a blank means
+ * "leave it alone". That warning was true while nothing read them back; with
+ * the stored value in the box, a box the operator empties means the field is
+ * empty, and saving it clears what was there.
  */
 export function Billing({
   userId,
   billing,
+  profile,
   updatedAt,
   onChanged,
 }: {
   userId: string;
   billing: CustomerBillingDto;
+  profile: Profile;
   updatedAt: number;
   onChanged: () => void;
 }) {
@@ -110,6 +125,7 @@ export function Billing({
         open={editing}
         userId={userId}
         billing={billing}
+        profile={profile}
         onClose={() => setEditing(false)}
         onChanged={onChanged}
       />
@@ -158,12 +174,14 @@ function BillingDrawer({
   open,
   userId,
   billing,
+  profile,
   onClose,
   onChanged,
 }: {
   open: boolean;
   userId: string;
   billing: CustomerBillingDto;
+  profile: Profile;
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -173,6 +191,7 @@ function BillingDrawer({
   });
   const [plan, setPlan] = useState<Plan>('');
   const [date, setDate] = useState('');
+  const [wechat, setWechat] = useState('');
   const [contact, setContact] = useState('');
   const [notes, setNotes] = useState('');
   const [fault, setFault] = useState<string | null>(null);
@@ -181,10 +200,11 @@ function BillingDrawer({
     if (!open) return;
     setPlan(billing.plan === CLAUDE_PLAN ? CLAUDE_PLAN : '');
     setDate(toDateInput(billing.expiresAt));
-    setContact('');
-    setNotes('');
+    setWechat(boxed(profile.wechatId));
+    setContact(boxed(profile.contact));
+    setNotes(boxed(profile.notes));
     setFault(null);
-  }, [open, billing.plan, billing.expiresAt]);
+  }, [open, billing.plan, billing.expiresAt, profile.wechatId, profile.contact, profile.notes]);
 
   function save() {
     const patch: UserPatch = {};
@@ -204,8 +224,17 @@ function BillingDrawer({
         patch.expiresAt = seconds;
       }
     }
-    if (contact.trim() !== '') patch.contact = contact.trim();
-    if (notes.trim() !== '') patch.notes = notes.trim();
+    // Each of the three is sent only when it moved, and an emptied box clears
+    // the stored value rather than being read as "no opinion".
+    if (wechat.trim() !== boxed(profile.wechatId)) {
+      patch.wechatId = wechat.trim() === '' ? null : wechat.trim();
+    }
+    if (contact.trim() !== boxed(profile.contact)) {
+      patch.contact = contact.trim() === '' ? null : contact.trim();
+    }
+    if (notes.trim() !== boxed(profile.notes)) {
+      patch.notes = notes.trim() === '' ? null : notes.trim();
+    }
     const changing = Object.keys(patch) as Array<keyof UserPatch>;
     if (changing.length === 0) {
       setFault(copy.settings.savedNothing);
@@ -245,6 +274,12 @@ function BillingDrawer({
             onChange={setDate}
             type="date"
             mono
+          />
+          <TextField
+            label={copy.wechatField}
+            hint={copy.wechatNudge}
+            value={wechat}
+            onChange={setWechat}
           />
           <TextField
             label={copy.billingFieldContact}

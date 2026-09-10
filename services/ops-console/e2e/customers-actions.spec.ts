@@ -163,6 +163,74 @@ test.describe('客户写动作', () => {
     await expect(page.getByText('claude_20x')).toBeVisible();
   });
 
+  /**
+   * The handle is asked for at the one moment the operator is definitely
+   * talking to the customer, and it has to survive the two-step onboarding —
+   * the address is allow-listed on the first call and the record only exists
+   * on the second, which is exactly where a field quietly gets dropped.
+   */
+  test('开通时填的微信号，客户 360 头上就写着', async ({ page }, testInfo) => {
+    const session = fresh('onboard-wechat', testInfo);
+    await open(page, '/customers', 'default', session);
+    await page.getByRole('button', { name: '开通', exact: true }).click();
+
+    const drawer = page.getByRole('dialog');
+    await drawer.getByLabel('客户邮箱').fill('qin.shu@example.com');
+    await drawer.getByLabel('微信号').fill('wx_qin_shu');
+    await drawer.getByRole('button', { name: '开通', exact: true }).click();
+    await gate(page, /会进允许登录的名单/).getByRole('button', { name: '开通', exact: true }).click();
+    await expect(page.getByText('还没登录，请客户先用这个邮箱在客户端收验证码')).toBeVisible();
+
+    await page.getByRole('button', { name: '客户登录过了，再开通一次' }).click();
+    await gate(page, /会进允许登录的名单/).getByRole('button', { name: '开通', exact: true }).click();
+    await expect(page.getByText('已经在客户端登录过')).toBeVisible();
+    await page.getByRole('button', { name: '取消' }).click();
+
+    await settle(page);
+    const row = page.locator('tbody tr').filter({ hasText: 'qin.shu@example.com' });
+    await expect(row).toContainText('wx_qin_shu');
+    await row.click();
+    await expect(head(page)).toContainText('wx_qin_shu');
+  });
+
+  /** The 360 writes it, the list reads it: one value, both surfaces. */
+  test('改了微信号，客户列表那一列跟着变', async ({ page }, testInfo) => {
+    const session = fresh('wechat', testInfo);
+    await open(page, '/customers/u-01', 'default', session);
+    await expect(head(page)).toContainText('wx_chen_jie');
+    await page.getByRole('button', { name: /账务与用量/ }).click();
+    await page.getByRole('button', { name: '改账务' }).click();
+
+    const drawer = page.getByRole('dialog');
+    // The three operator-only fields read back now, so the form opens on what
+    // is stored rather than on three empty boxes.
+    await expect(drawer.getByLabel('微信号')).toHaveValue('wx_chen_jie');
+    await drawer.getByLabel('微信号').fill('chenjie_2026');
+    await drawer.getByRole('button', { name: '保存' }).click();
+
+    const ask = gate(page, /会改这位客户的/);
+    await expect(ask).toContainText('微信号');
+    await ask.getByRole('button', { name: '保存' }).click();
+
+    await settle(page);
+    await expect(head(page)).toContainText('chenjie_2026');
+
+    // The list belongs to the shell and is read once per load, so coming back
+    // to it from the 360 is a reload — which is also the only way to prove the
+    // hub kept the new handle rather than the page remembering it.
+    await open(page, '/customers', 'default', session);
+    await page.reload({ waitUntil: 'networkidle' });
+    await settle(page);
+    await expect(page.locator('tbody tr').filter({ hasText: 'chen.jie@example.com' }))
+      .toContainText('chenjie_2026');
+  });
+
+  /** A customer nobody took a handle from says so, rather than showing a dash. */
+  test('没留微信号的客户，头上写着找不到人', async ({ page }) => {
+    await open(page, '/customers/u-09');
+    await expect(head(page)).toContainText('没有微信号以后找不到人');
+  });
+
   test('头上四个按钮不再说接口未接入', async ({ page }) => {
     await open(page, '/customers/u-04');
     for (const label of ['发起远程诊断', '重发凭证', '改到期', '停用']) {

@@ -18,6 +18,7 @@ const PLANS: readonly Plan[] = ['', CLAUDE_PLAN];
 
 type Draft = {
   email: string;
+  wechatId: string;
   plan: Plan;
   expiresAt: string;
   line: string;
@@ -30,6 +31,7 @@ type Draft = {
 
 const BLANK: Draft = {
   email: '',
+  wechatId: '',
   plan: '',
   expiresAt: '',
   line: '',
@@ -93,6 +95,7 @@ export function OnboardDrawer({
 
   async function run(): Promise<void> {
     const input: OnboardInput = { email: draft.email.trim() };
+    if (draft.wechatId.trim() !== '') input.wechatId = draft.wechatId.trim();
     if (draft.line.trim() !== '') input.line = draft.line.trim();
     else if (draft.homeExitId !== '') input.homeExitId = draft.homeExitId;
     if (draft.accountRef.trim() !== '') input.accountRef = draft.accountRef.trim();
@@ -158,6 +161,12 @@ export function OnboardDrawer({
               set('email', value);
               setOutcome(null);
             }}
+          />
+          <TextField
+            label={copy.wechatField}
+            hint={copy.wechatNudge}
+            value={draft.wechatId}
+            onChange={(value) => set('wechatId', value)}
           />
           <SelectField
             label={copy.onboardFields.plan}

@@ -298,7 +298,16 @@ export function createLedgerFixtures(rootDir: string) {
   }
 
   function create(store: Store, body: Record<string, unknown>, res: ServerResponse): void {
-    const currency = String(body.currency ?? 'CNY');
+    const kind = (body.kind as LedgerKind) ?? 'cost';
+    // Money coming in is only ever yuan; a bill defaults to what the invoices
+    // are actually in. Both halves are the hub's rule, kept here so the
+    // drawer's locked field is tested against a server that enforces it rather
+    // than one that would have taken anything.
+    const currency = String(body.currency ?? (kind === 'cost' ? 'USD' : 'CNY'));
+    if (kind !== 'cost' && currency.toUpperCase() !== 'CNY') {
+      sendRefusal(res, 400, 'VALIDATION_ERROR', '收款只收人民币');
+      return;
+    }
     const paidAt = typeof body.paidAt === 'number' ? body.paidAt : null;
     const day = dayOf(paidAt ?? nowSec());
     const fx = rateFor(day, currency);
@@ -314,7 +323,7 @@ export function createLedgerFixtures(rootDir: string) {
     const amountMinor = Math.round(Number(body.amountMinor ?? 0));
     const row: LedgerEntryDto = {
       id: newId(),
-      kind: (body.kind as LedgerKind) ?? 'cost',
+      kind,
       category: (body.category as LedgerCategory) ?? 'other',
       subjectType: (body.subjectType as LedgerSubjectType) ?? 'fleet',
       subjectId: typeof body.subjectId === 'string' ? body.subjectId : null,

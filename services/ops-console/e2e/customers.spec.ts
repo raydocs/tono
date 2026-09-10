@@ -95,6 +95,56 @@ test.describe('customers page', () => {
     expect(table.clipped).toBeLessThanOrEqual(0);
   });
 
+  /**
+   * The handle sits beside the address because the two answer the same
+   * question — which person is this row — and it hides as a group the way the
+   * last three columns do, so a fleet where nobody gave one keeps its width.
+   */
+  test('微信号 has a column of its own, and the addresses still fit', async ({ page }) => {
+    await open(page, '/customers');
+    await expect(page.getByRole('columnheader', { name: '微信' })).toBeVisible();
+    await expect(page.locator('tbody tr').filter({ hasText: 'chen.jie@example.com' }))
+      .toContainText('wx_chen_jie');
+
+    const widest = await page.evaluate(() => {
+      const heads = [...document.querySelectorAll('thead th')]
+        .map((th) => ({ head: th.textContent ?? '', width: th.getBoundingClientRect().width }));
+      return heads.reduce((a, b) => (b.width > a.width ? b : a)).head;
+    });
+    expect(widest).toBe('客户');
+  });
+
+  /**
+   * ⌘K is where an operator lands who knows this person by their handle and
+   * not by the address they signed up with. It matches on the real id — that
+   * is what gets typed — and still prints it masked once privacy is on.
+   */
+  test('⌘K finds a customer by 微信号', async ({ page }) => {
+    await open(page, '/nodes');
+    await page.keyboard.press('Meta+k');
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('combobox').fill('wx_wang_tao');
+    const found = dialog.getByRole('option').first();
+    await expect(found).toContainText('wang.tao@example.com');
+    await found.click();
+    await expect(page).toHaveURL(/#\/customers\/u-04/);
+  });
+
+  test('⌘K still finds them by 微信号 with the addresses masked', async ({ page }) => {
+    await open(page, '/customers');
+    await page.getByRole('button', { name: '偏好' }).click();
+    await page.getByRole('menuitemcheckbox', { name: '隐私' }).click();
+    await settle(page);
+
+    await page.keyboard.press('Meta+k');
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('combobox').fill('wx_wang_tao');
+    const found = dialog.getByRole('option').first();
+    // Matched on the real handle, printed with its middle taken out.
+    await expect(found).toContainText('wx***ao');
+    await expect(found).not.toContainText('wx_wang_tao');
+  });
+
   test('a row opens its own page, not a drawer', async ({ page }) => {
     await open(page, '/customers');
     await page.locator('tbody tr').first().click();

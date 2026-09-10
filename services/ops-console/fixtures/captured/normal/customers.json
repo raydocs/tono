@@ -3,6 +3,7 @@
     {
       "userId": "id_5b6bdccf68a113fe",
       "email": "user2@example.test",
+      "wechatId": null,
       "verdict": "ok",
       "health": "正常",
       "tone": "ok",
@@ -36,6 +37,7 @@
     {
       "userId": "id_8e1683bf76af8037",
       "email": "user1@example.test",
+      "wechatId": null,
       "verdict": "unreported",
       "health": "未上报",
       "tone": "unk",
@@ -65,6 +67,7 @@
     {
       "userId": "id_4e5f351bb875c630",
       "email": "user3@example.test",
+      "wechatId": null,
       "verdict": "unreported",
       "health": "未上报",
       "tone": "unk",

@@ -78,20 +78,27 @@ export function CommandPalette({
             </CommandItem>
           ))}
         </CommandGroup>
-        {/* Searchable by the real address either way — masking the label
-            without masking the search value would leak it back on the first
-            keystroke. */}
+        {/* The address is matched exactly as it is shown — masking the label
+            while searching the real one would print it back on the first
+            keystroke. The WeChat id goes the other way: it is matched on the
+            real handle, because typing a handle you already know is the whole
+            reason to reach for ⌘K, and the row beside it still reads masked. */}
         <CommandGroup heading={copy.commandCustomers}>
           {customers.map((customer) => (
             <CommandItem
               key={customer.userId}
-              value={privacy.privacy ? privacy.email(customer.email) : customer.email}
+              value={[
+                privacy.privacy ? privacy.email(customer.email) : customer.email,
+                customer.wechatId ?? '',
+              ].join(' ')}
               onSelect={() => {
                 openCustomer(customer.userId);
                 setOpen(false);
               }}
             >
-              {privacy.email(customer.email)}
+              {customer.wechatId === null
+                ? privacy.email(customer.email)
+                : `${privacy.email(customer.email)} · ${privacy.wechat(customer.wechatId)}`}
             </CommandItem>
           ))}
         </CommandGroup>

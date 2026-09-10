@@ -80,6 +80,7 @@ export function SelectField<T extends string>({
   options,
   word,
   onChange,
+  disabled,
 }: {
   label: string;
   hint?: string;
@@ -87,12 +88,15 @@ export function SelectField<T extends string>({
   options: readonly T[];
   word: (option: T) => string;
   onChange: (value: T) => void;
+  /** A choice the answer has already been made for; the hint says by what. */
+  disabled?: boolean;
 }) {
   return (
     <Field label={label} hint={hint}>
       <select
-        className={CONTROL}
+        className={cn(CONTROL, disabled && 'text-[var(--muted-foreground)]')}
         value={value}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value as T)}
       >
         {options.map((option) => (

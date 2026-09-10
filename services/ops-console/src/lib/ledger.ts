@@ -1,7 +1,9 @@
 import { copy } from '@/copy/copy';
 import type {
   LedgerCategory,
+  LedgerCurrency,
   LedgerEntryDto,
+  LedgerKind,
   LedgerSubjectType,
   MonthCustomerRow,
   MonthNodeRow,
@@ -132,6 +134,32 @@ export function toCnyMinor(minor: number, currency: string, rate: number): numbe
   if (!Number.isFinite(rate) || rate <= 0) return null;
   if (currency.toUpperCase() === 'CNY') return Math.round(minor);
   return Math.round((minor / 10 ** decimalsOf(currency)) * rate * 100);
+}
+
+/* --------------------------------------------------------------- 币种 */
+
+/**
+ * Which currency an entry may be written in, decided by what kind it is.
+ *
+ * Money coming in only ever arrives in yuan — every customer pays in yuan, and
+ * a refund or a credit is that same payment going back — so those three kinds
+ * have no currency to choose and the hub refuses anything else with a 400. The
+ * bills are the other way round: servers, domains and the two AI accounts are
+ * invoiced in dollars, so a cost starts there and stays wherever the operator
+ * puts it.
+ */
+export function currencyLocked(kind: LedgerKind): boolean {
+  return kind !== 'cost';
+}
+
+/**
+ * The currency after a change of kind: yuan whenever the kind locks it, and
+ * dollars for a cost that was sitting on the locked default. A cost already in
+ * euros keeps its euros — the rule sets a starting point, not a preference.
+ */
+export function currencyFor(kind: LedgerKind, current: LedgerCurrency): LedgerCurrency {
+  if (currencyLocked(kind)) return 'CNY';
+  return current === 'CNY' ? 'USD' : current;
 }
 
 /** A rate reads to four places: a yen is worth 0.0489 of a yuan. */

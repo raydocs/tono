@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { MonthSummaryDto } from './api-ledger';
 import {
   categoryTotals,
+  currencyFor,
+  currencyLocked,
   customerRow,
   dayOf,
   formatAmount,
@@ -94,6 +96,27 @@ describe('money', () => {
     expect(formatRate(7.1)).toBe('7.1000');
     expect(formatPerGb(43)).toBe('¥0.43');
     expect(formatPerGb(null)).toBeNull();
+  });
+});
+
+describe('币种', () => {
+  it('locks the three kinds of money that only ever comes in as yuan', () => {
+    expect(currencyLocked('revenue')).toBe(true);
+    expect(currencyLocked('refund')).toBe(true);
+    expect(currencyLocked('credit')).toBe(true);
+    expect(currencyLocked('cost')).toBe(false);
+  });
+
+  it('forces yuan on the locked kinds whatever was chosen before', () => {
+    expect(currencyFor('revenue', 'USD')).toBe('CNY');
+    expect(currencyFor('refund', 'JPY')).toBe('CNY');
+    expect(currencyFor('credit', 'CNY')).toBe('CNY');
+  });
+
+  it('starts a bill in dollars but keeps a currency the operator picked', () => {
+    expect(currencyFor('cost', 'CNY')).toBe('USD');
+    expect(currencyFor('cost', 'EUR')).toBe('EUR');
+    expect(currencyFor('cost', 'USD')).toBe('USD');
   });
 });
 

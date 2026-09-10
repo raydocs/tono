@@ -234,6 +234,41 @@ function servicesFor(id, index, rng) {
   return pickN(rng, SERVICE_FAMILIES, count);
 }
 
+/**
+ * How the operator actually reaches these people.
+ *
+ * Most of them gave a WeChat id, which is why the console shows the column at
+ * all; every ninth one never did, so the list, the 360 header and ⌘K all have
+ * a customer with nothing there to be tested against. The handle is built off
+ * the address so a reader can tell at a glance which row it belongs to, and
+ * the dense set's very long addresses make correspondingly long handles — that
+ * column has to truncate rather than push the address column off the page.
+ */
+function wechatFor(index, email) {
+  if (index % 9 === 0) return null;
+  const local = String(email).split('@')[0].replace(/[^a-z0-9]+/g, '_');
+  return `wx_${local.slice(0, 24)}`;
+}
+
+/** A phone number for the few who left one, beside a note somebody wrote. */
+function contactFor(index) {
+  if (index % 4 !== 0) return null;
+  return `+86 138 ${String(1000 + index * 7)} ${String(2000 + index)}`;
+}
+
+const NOTE_LINES = [
+  '朋友介绍来的，续费从来不用催。',
+  '公司报销，发票抬头要开公司的。',
+  '只在晚上用，白天掉线不用管。',
+  '换过一次手机，旧设备还没退。',
+  '按季度付，下次提前一周提醒。',
+];
+
+function notesFor(index) {
+  if (index % 4 !== 0) return null;
+  return NOTE_LINES[(index / 4 - 1) % NOTE_LINES.length];
+}
+
 function expiresAtFor(id, index) {
   if (id === 'u-04') return CLOCK + 20 * DAY;
   if (id === 'u-05') return CLOCK + 4 * DAY;
@@ -1003,6 +1038,7 @@ function buildCustomer(index, overrides = {}) {
   const summary = {
     userId: spec.id,
     email: spec.email,
+    wechatId: wechatFor(index, spec.email),
     verdict: spec.verdict,
     health: spec.health,
     tone: spec.tone,
@@ -1025,6 +1061,9 @@ function buildCustomer(index, overrides = {}) {
   const detail = {
     userId: spec.id,
     email: spec.email,
+    wechatId: wechatFor(index, spec.email),
+    contact: contactFor(index),
+    notes: notesFor(index),
     verdict: spec.verdict,
     health: spec.health,
     tone: spec.tone,

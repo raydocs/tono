@@ -114,6 +114,17 @@ export type LedgerEntryInput = {
 /** The refusal the drawer has a sentence for: no rate for that day yet. */
 export const FX_RATE_MISSING = 'FX_RATE_MISSING';
 
+/**
+ * The hub's word for a field it will not take.
+ *
+ * `POST ledger` answers 400 with this when money coming in is written in
+ * anything but yuan. The drawer never sends one — the field is locked — so the
+ * only way it arrives is the two sides disagreeing about which kinds are
+ * yuan-only, and the operator is owed the sentence the field already carries
+ * rather than a message written for whoever is fixing the drift.
+ */
+export const VALIDATION_ERROR = 'VALIDATION_ERROR';
+
 const path = (...parts: string[]) => parts.map(encodeURIComponent).join('/');
 
 const asEntry = (value: unknown) => value as LedgerEntryDto;

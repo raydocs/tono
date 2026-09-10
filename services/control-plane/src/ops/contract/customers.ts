@@ -173,6 +173,15 @@ export interface CustomerFailureDto {
 export interface CustomerSummaryDto {
   userId: string;
   email: string;
+  /**
+   * The other name a customer answers to.
+   *
+   * The address is what the client logs in with; the WeChat id is what the
+   * operator actually reaches them on, so it travels with the row rather than
+   * only on the detail — a list you cannot find someone in by the handle you
+   * know them by is a list you have to open twenty pages of.
+   */
+  wechatId: string | null;
   verdict: CustomerVerdict;
   health: CustomerHealthWord;
   tone: Tone;
@@ -196,6 +205,10 @@ export interface CustomerSummaryDto {
 export interface CustomerDetailDto {
   userId: string;
   email: string;
+  wechatId: string | null;
+  /** How else to reach them, and whatever the operator wrote down about them. */
+  contact: string | null;
+  notes: string | null;
   verdict: CustomerVerdict;
   health: CustomerHealthWord;
   tone: Tone;
@@ -383,8 +396,8 @@ export function assertCustomerFailure(value: unknown, path = 'lastFailure'): Cus
 }
 
 const CUSTOMER_SUMMARY_KEYS = [
-  'userId', 'email', 'verdict', 'health', 'tone', 'reason', 'lifecycle', 'deviceCount', 'platforms',
-  'selectedServer', 'connected', 'lastFailure', 'usageBytes', 'quotaBytes', 'services',
+  'userId', 'email', 'wechatId', 'verdict', 'health', 'tone', 'reason', 'lifecycle', 'deviceCount',
+  'platforms', 'selectedServer', 'connected', 'lastFailure', 'usageBytes', 'quotaBytes', 'services',
   'minAppVersion', 'expiresAt', 'lastSeenAt', 'updatedAt',
 ];
 
@@ -393,6 +406,7 @@ export function assertCustomerSummary(value: unknown, path = 'customerSummary'):
   return {
     userId: text(row, path, 'userId'),
     email: text(row, path, 'email'),
+    wechatId: optText(row, path, 'wechatId'),
     verdict: oneOf<CustomerVerdict>(row, path, 'verdict', CUSTOMER_VERDICTS),
     health: oneOf<CustomerHealthWord>(row, path, 'health', CUSTOMER_HEALTH_WORDS),
     tone: oneOf<Tone>(row, path, 'tone', TONES),
@@ -416,8 +430,8 @@ export function assertCustomerSummary(value: unknown, path = 'customerSummary'):
 }
 
 const CUSTOMER_DETAIL_KEYS = [
-  'userId', 'email', 'verdict', 'health', 'tone', 'reason', 'lifecycle',
-  'now', 'devices', 'chores', 'billing', 'updatedAt',
+  'userId', 'email', 'wechatId', 'contact', 'notes', 'verdict', 'health', 'tone', 'reason',
+  'lifecycle', 'now', 'devices', 'chores', 'billing', 'updatedAt',
 ];
 
 export function assertCustomerDetail(value: unknown, path = 'customerDetail'): CustomerDetailDto {
@@ -425,6 +439,9 @@ export function assertCustomerDetail(value: unknown, path = 'customerDetail'): C
   return {
     userId: text(row, path, 'userId'),
     email: text(row, path, 'email'),
+    wechatId: optText(row, path, 'wechatId'),
+    contact: optText(row, path, 'contact'),
+    notes: optText(row, path, 'notes'),
     verdict: oneOf<CustomerVerdict>(row, path, 'verdict', CUSTOMER_VERDICTS),
     health: oneOf<CustomerHealthWord>(row, path, 'health', CUSTOMER_HEALTH_WORDS),
     tone: oneOf<Tone>(row, path, 'tone', TONES),

@@ -8,6 +8,7 @@ import {
   LEDGER_CATEGORIES,
   LEDGER_CURRENCIES,
   LEDGER_KINDS,
+  VALIDATION_ERROR,
   ledgerApi,
   type LedgerCategory,
   type LedgerCurrency,
@@ -16,6 +17,8 @@ import {
 import { settingsApi } from '@/lib/api-settings';
 import { nowSec } from '@/lib/clock';
 import {
+  currencyFor,
+  currencyLocked,
   dayOf,
   formatCny,
   formatRate,
@@ -48,6 +51,11 @@ type Choice = { id: string; label: string };
  * and its answer is the one that is stored — this is a preview, not a second
  * source of truth — but an operator about to write down 128 USD deserves to
  * see the ¥912 it is going to become while they can still change their mind.
+ *
+ * Which currencies are on offer is the kind's business, not the operator's:
+ * money coming in is only ever yuan, so those three kinds lock the field and
+ * say why, and a bill opens on dollars because that is what the invoices are
+ * in. `lib/ledger.ts` holds the rule and the test; the field only renders it.
  */
 export function LedgerDrawer({
   open,
@@ -97,7 +105,10 @@ export function LedgerDrawer({
           value={kind}
           options={LEDGER_KINDS}
           word={(option) => words.kind[option]}
-          onChange={setKind}
+          onChange={(next) => {
+            setKind(next);
+            setCurrency((held) => currencyFor(next, held));
+          }}
         />
         <SelectField
           label={words.fieldCategory}
@@ -133,9 +144,11 @@ export function LedgerDrawer({
           />
           <SelectField
             label={words.fieldCurrency}
+            hint={currencyLocked(kind) ? words.currencyCny : undefined}
             value={currency}
             options={LEDGER_CURRENCIES}
             word={(option) => option}
+            disabled={currencyLocked(kind)}
             onChange={setCurrency}
           />
         </div>
@@ -193,9 +206,18 @@ export function LedgerDrawer({
             },
             (error: unknown) => {
               setPending(false);
-              setFault(refusalCode(error) === FX_RATE_MISSING
-                ? words.fxMissing(paid)
-                : (error instanceof Error ? error.message : copy.actionFailed));
+              const code = refusalCode(error);
+              if (code === FX_RATE_MISSING) {
+                setFault(words.fxMissing(paid));
+                return;
+              }
+              // The hub turning down the currency says the same thing the
+              // locked field says, in the same words.
+              if (code === VALIDATION_ERROR && currencyLocked(kind)) {
+                setFault(words.currencyCny);
+                return;
+              }
+              setFault(error instanceof Error ? error.message : copy.actionFailed);
             },
           );
         }}
