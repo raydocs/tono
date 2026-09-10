@@ -4,11 +4,15 @@ import { QuotaBar } from '@/components/ops/QuotaGauge';
 import { StatusWord } from '@/components/ops/StatusWord';
 import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
+import type { FollowupDto } from '@/lib/api-followups';
 import { explainCode, stageWord } from '@/lib/codes';
 import { formatDate, formatPercent, formatWhenAgo, splitBytes } from '@/lib/display';
 import { shown } from '@/lib/sources';
 
 type Mask = (email: string) => string;
+
+/** The open followups by customer, or null while nobody in the fleet has one. */
+export type FollowupIndex = Map<string, FollowupDto> | null;
 
 /**
  * The address is the row's name, so it gets the width nothing else claims.
@@ -18,13 +22,24 @@ type Mask = (email: string) => string;
  * table rather than the 200 px that was clipping people's domains. The title
  * carries the whole address for the widths where even that is not enough, and
  * it is the masked one: the privacy toggle must not be undone by a hover.
+ *
+ * The fixed widths were re-cut when the followup column arrived, because the
+ * table had none to spare: at 1440 px the address column already sat at exactly
+ * the width its longest entry plus a lifecycle tag needs, so a ninth column
+ * would have clipped every address on the page. Each one below was measured
+ * against the widest thing it actually renders and given the slack that leaves
+ * — which hands the address column more room than it had before, not less.
  */
-export function customerColumns(mask: Mask, wired: boolean): DataColumn<CustomerSummaryDto>[] {
+export function customerColumns(
+  mask: Mask,
+  wired: boolean,
+  followups: FollowupIndex,
+): DataColumn<CustomerSummaryDto>[] {
   return [
     {
       id: 'status',
       header: copy.customerColumns.status,
-      width: '74px',
+      width: '64px',
       sortValue: (row) => row.health,
       cell: (row) => <StatusWord word={row.health} reason={row.reason} />,
     },
@@ -44,7 +59,7 @@ export function customerColumns(mask: Mask, wired: boolean): DataColumn<Customer
     {
       id: 'devices',
       header: copy.customerColumns.devices,
-      width: '52px',
+      width: '44px',
       align: 'right',
       mono: true,
       sortValue: (row) => row.deviceCount,
@@ -53,31 +68,43 @@ export function customerColumns(mask: Mask, wired: boolean): DataColumn<Customer
     {
       id: 'node',
       header: copy.customerColumns.node,
-      width: '124px',
+      width: '100px',
       sortValue: (row) => row.selectedServer ?? '',
       cell: (row) => <Value value={row.selectedServer} source={copy.sourceWord.catalog} />,
     },
     {
       id: 'failure',
       header: copy.customerColumns.failure,
-      width: '130px',
+      width: '118px',
       sortValue: (row) => row.lastFailure?.at ?? 0,
       cell: (row) => <FailureCell row={row} />,
     },
     {
       id: 'usage',
       header: copy.customerColumns.usage,
-      width: '112px',
+      width: '100px',
       align: 'right',
       mono: true,
       sortValue: (row) => row.usageBytes.value,
       cell: (row) => <UsageCell row={row} />,
     },
+    /* The same rule the last three columns follow: a column nobody has filled
+       in anywhere is a column of dashes across the width the addresses need,
+       so it stays away until the fleet has one open followup in it. */
+    ...(followups === null ? [] : [
+      {
+        id: 'followup',
+        header: copy.customerColumns.followup,
+        width: '88px',
+        sortValue: (row: CustomerSummaryDto) => followups.get(row.userId)?.dueAt ?? 0,
+        cell: (row: CustomerSummaryDto) => <FollowupCell row={followups.get(row.userId)} />,
+      },
+    ]),
     ...(wired ? [
       {
         id: 'services',
         header: copy.customerColumns.services,
-        width: '112px',
+        width: '100px',
         cell: (row: CustomerSummaryDto) => (
           row.services.length === 0
             ? <Value value={null} source={copy.sourceWord.telemetry} />
@@ -87,7 +114,7 @@ export function customerColumns(mask: Mask, wired: boolean): DataColumn<Customer
       {
         id: 'version',
         header: copy.customerColumns.minVersion,
-        width: '68px',
+        width: '56px',
         mono: true,
         sortValue: (row: CustomerSummaryDto) => row.minAppVersion ?? '',
         cell: (row: CustomerSummaryDto) => (
@@ -97,7 +124,7 @@ export function customerColumns(mask: Mask, wired: boolean): DataColumn<Customer
       {
         id: 'expires',
         header: copy.customerColumns.expires,
-        width: '92px',
+        width: '88px',
         align: 'right' as const,
         mono: true,
         sortValue: (row: CustomerSummaryDto) => row.expiresAt ?? 0,
@@ -203,6 +230,29 @@ function ServicesCell({ families }: { families: CustomerSummaryDto['services'] }
         {families.slice(0, SERVICES_SHOWN).map((f) => copy.serviceName[f]).join(' · ')}
       </span>
       {rest > 0 ? <span className="shrink-0 text-[var(--muted-foreground)]">+{rest}</span> : null}
+    </span>
+  );
+}
+
+/**
+ * What is still owed on this customer: what kind of thing it is, and when it
+ * was promised for.
+ *
+ * A followup with no date is not a gap in a measurement — it is a note
+ * somebody wrote without promising a day — so it shows its own word and stays
+ * quiet about the date. A customer with nothing open gets the em dash through
+ * `Value`, like every other absent fact on the page.
+ */
+function FollowupCell({ row }: { row: FollowupDto | undefined }) {
+  if (row === undefined) return <Value value={null} source={copy.followupSection} />;
+  return (
+    <span className="flex min-w-0 flex-col leading-tight" title={row.body}>
+      <span className="truncate text-body">{copy.followupKind[row.kind]}</span>
+      {row.dueAt === null ? null : (
+        <span className="truncate font-mono text-micro normal-case tracking-normal text-[var(--muted-foreground)]">
+          {formatDate(row.dueAt)}
+        </span>
+      )}
     </span>
   );
 }

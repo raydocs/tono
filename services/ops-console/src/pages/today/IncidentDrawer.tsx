@@ -15,15 +15,25 @@ import { usePrivacy } from '@/lib/privacy';
 import { sourceWord } from '@/lib/sources';
 import { useResource } from '@/lib/use-resource';
 import { cn } from '@/lib/utils';
+import { CloseDialog } from './CloseDialog';
+import { FollowupLog } from './Followups';
+import { Block, NextCheck, NextSteps, Recheck, Unconfirmed } from './Handling';
 import { IncidentPrimary } from './IncidentAction';
 
 /**
- * The incident drawer, addressable as `?incident=`.
+ * The incident handling card, addressable as `?incident=`.
  *
- * The three write actions do not touch local state: they POST, then reload
- * both this drawer and the list behind it. An optimistic tick that turns out
- * to be wrong is worse here than a half-second wait — the operator is looking
- * at this page precisely because they no longer trust what they were told.
+ * It was a report on an incident and is now the sheet an operator works
+ * through: what is known, who might be hurt and is not counted yet, what to do
+ * next and in what order, how to measure it again, when to come back, and what
+ * has already been done about it. The review's line was that the console could
+ * record a fault and not repair one; every block below exists because one step
+ * of the repair had nowhere to live.
+ *
+ * The write actions do not touch local state: they POST, then reload both this
+ * drawer and the list behind it. An optimistic tick that turns out to be wrong
+ * is worse here than a half-second wait — the operator is looking at this page
+ * precisely because they no longer trust what they were told.
  */
 export function IncidentDrawer({
   id,
@@ -37,19 +47,25 @@ export function IncidentDrawer({
   onChanged: () => void;
 }) {
   const privacy = usePrivacy();
-  const [note, setNote] = useState('');
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const [closing, setClosing] = useState(false);
+  /** Bumped by anything that writes a followup, so the log refetches itself. */
+  const [beat, setBeat] = useState(0);
   const detail = useResource(id, (signal) => opsApi.incident(id as string, signal));
+
+  function reload() {
+    detail.reload();
+    setBeat((n) => n + 1);
+    onChanged();
+  }
 
   async function run(action: () => Promise<unknown>) {
     setPending(true);
     setFailure(null);
     try {
       await action();
-      setNote('');
-      detail.reload();
-      onChanged();
+      reload();
     } catch (error) {
       setFailure(error instanceof Error ? error.message : copy.actionFailed);
     } finally {
@@ -61,17 +77,15 @@ export function IncidentDrawer({
   const children = id === null ? [] : childrenOf(incidents, id);
 
   /**
-   * The actions are the reason the drawer was opened, and on a phone they
-   * were four screens down past the timeline. Pinned to the bottom edge they
-   * are where the thumb already is, on every width.
+   * The bookkeeping verbs. The repair itself leads the next-steps block
+   * further up, beside the reasoning it belongs to; what is pinned to the
+   * bottom edge is
+   * claiming, silencing, and the one press that ends the incident — which now
+   * has to say how it ended before it will run.
    */
   const actions = !incident ? null : (
     <Block title={copy.incidentDrawer.actions}>
-      <ActionRow>
-        {/* The repair leads, and the three bookkeeping verbs follow it: a
-            drawer whose only coloured button marks the fault handled is a
-            drawer that rewards closing the tab. */}
-        <IncidentPrimary incident={incident} onChanged={() => { detail.reload(); onChanged(); }} />
+      <ActionRow className="pt-1">
         {incident.status === 'open' ? (
           <Action pending={pending} onClick={() => run(() => opsApi.ackIncident(incident.id))}>
             {copy.incidentPrimary.ack}
@@ -80,24 +94,10 @@ export function IncidentDrawer({
         <Action pending={pending} onClick={() => run(() => opsApi.snoozeIncident(incident.id))}>
           {copy.incidentPrimary.snooze}
         </Action>
-        <Action pending={pending} onClick={() => run(() => opsApi.resolveIncident(incident.id))}>
+        <Action primary pending={pending} onClick={() => setClosing(true)}>
           {copy.incidentPrimary.resolve}
         </Action>
       </ActionRow>
-      <div className="mt-2 flex gap-2">
-        <input
-          className="h-8 min-w-0 flex-1 rounded-[10px] border border-[var(--hairline)] bg-[var(--background)] px-3 text-body outline-none placeholder:text-[var(--muted-foreground)]"
-          placeholder={copy.incidentDrawer.notePrompt}
-          value={note}
-          onChange={(event) => setNote(event.target.value)}
-        />
-        <Action
-          pending={pending || note.trim() === ''}
-          onClick={() => run(() => opsApi.noteIncident(incident.id, note.trim()))}
-        >
-          {copy.incidentDrawer.noteSend}
-        </Action>
-      </div>
       {failure ? <p className="panel-error mt-2 rounded-[10px] px-3 py-2 text-body">{failure}</p> : null}
     </Block>
   );
@@ -113,17 +113,28 @@ export function IncidentDrawer({
         <Empty message={detail.status === 'error' ? detail.message : copy.loading} />
       ) : (
         <>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={cn('ops-tag tone-fg', `tone-${severityTone(incident.severity)}`)}>
-              {copy.severity[incident.severity]}
-            </span>
-            <span className="ops-tag">{subject(incident, customers, privacy.email)}</span>
-            <span className="text-micro text-[var(--muted-foreground)]">
-              {copy.incidentOpenFor}{' '}
-              <span className="font-mono normal-case tracking-normal">
-                {formatDurationSince(incident.openedAt)}
+          <div className="flex flex-col gap-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={cn('ops-tag tone-fg', `tone-${severityTone(incident.severity)}`)}>
+                {copy.severity[incident.severity]}
               </span>
-            </span>
+              <span className="ops-tag">{subject(incident, customers, privacy.email)}</span>
+              <span className="text-micro text-[var(--muted-foreground)]">
+                {copy.incidentOpenFor}{' '}
+                <span className="font-mono normal-case tracking-normal">
+                  {formatDurationSince(incident.openedAt)}
+                </span>
+              </span>
+            </div>
+            {/* The pair a verified recovery is judged on. A reading older
+                than the fault proves nothing, and the operator should not
+                have to work that out from two timestamps in two blocks. */}
+            <p className="text-micro normal-case tracking-normal text-[var(--muted-foreground)]">
+              {copy.incidentMeasuredAgainst(
+                formatWhenAgo(incident.lastSeenAt),
+                formatWhenAgo(incident.openedAt),
+              )}
+            </p>
           </div>
           {incident.summary ? <p className="text-body">{incident.summary}</p> : null}
 
@@ -141,6 +152,8 @@ export function IncidentDrawer({
               </p>
             ))}
           </Block>
+
+          <Unconfirmed incident={incident} incidents={incidents} customers={customers} />
 
           <Block title={copy.incidentDrawer.affected}>
             {children.length === 0 ? (
@@ -163,6 +176,19 @@ export function IncidentDrawer({
                 </button>
               );
             })}
+          </Block>
+
+          <NextSteps
+            incident={incident}
+            lead={<IncidentPrimary incident={incident} onChanged={reload} />}
+          />
+
+          <Recheck incident={incident} onChanged={reload} />
+
+          <NextCheck incident={incident} onChanged={reload} />
+
+          <Block title={copy.incidentDrawer.log}>
+            <FollowupLog incidentId={incident.id} beat={beat} />
           </Block>
 
           <Block title={copy.incidentDrawer.timeline}>
@@ -192,6 +218,12 @@ export function IncidentDrawer({
             ))}
           </Block>
 
+          <CloseDialog
+            incident={incident}
+            open={closing}
+            onClose={() => setClosing(false)}
+            onChanged={reload}
+          />
         </>
       )}
     </DetailDrawer>
@@ -204,15 +236,4 @@ function subject(
   mask: (email: string) => string,
 ): string {
   return incidentSubject(incident, customers, mask) ?? copy.missing;
-}
-
-function Block({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="flex flex-col">
-      <h3 className="mb-1 border-b border-[var(--hairline)] pb-1 text-micro text-[var(--muted-foreground)]">
-        {title}
-      </h3>
-      {children}
-    </section>
-  );
 }
