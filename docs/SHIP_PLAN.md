@@ -112,8 +112,8 @@
 
 **G1.1 用新包复测插件命名空间** — 老板 · S
 
-- 背景：源码已修（`PluginBuilder::new("tono-plugin-core")`），09-08 实机 FAIL 是旧包。`docs/WINDOWS_0_0_72_DEVICE_ACCEPTANCE.md` 仍是 qualification incomplete。G1.1 内部候选是 run [`34574027022`](https://github.com/raydocs/tono/actions/runs/34574027022)，installer SHA-256 `ae2e699c7b0263772e2d2fc6bde48ac0333dc5f1e256e909e3364c18de3d1e42`（源 `91060f1c`：Encrypted DNS 钉死 + 连接中不是取消 + TUN/系统 DNS 竞速）。不签名、不推更新源、版本仍 0.0.72。§7 旧包大按钮写「取消」，不要再装。**实机未装此包，G1.1 未过。**
-- 步骤：Tono **先断开**。在 Windows 上用 `docs/WINDOWS_0_0_72_DEVICE_ACCEPTANCE.md` §8 的 `gh run download` 或 nightly.link 拉包、核 SHA-256，再装。连接；Win10 必须过 `securingDNS`；仪表盘速率与 Activity 离开 controller retry。断开收回 DNS。
+- 背景：源码已修（`PluginBuilder::new("tono-plugin-core")`），09-08 实机 FAIL 是旧包。`docs/WINDOWS_0_0_72_DEVICE_ACCEPTANCE.md` 仍是 qualification incomplete。含 Encrypted DNS + 连接中 pill + TUN DNS 的包是 run [`34574027022`](https://github.com/raydocs/tono/actions/runs/34574027022) SHA `ae2e699c…`（§8）。**测备用 UDP 用 §9：** run [`34584323215`](https://github.com/raydocs/tono/actions/runs/34584323215)，installer SHA-256 `7bc7aaf9a4046ef7d4f9db3cd7da5f27cd43a26492b27f46661b2295b0b7ca8a`（源 `b40ff149`）。不签名、不推更新源、版本仍 0.0.72。§7 旧包大按钮写「取消」，不要再装。**实机未装 §8/§9，G1.1 未过。**
+- 步骤：Tono **先断开**。测 hy2 / 备用 UDP 用 §9 的 `gh run download` 或 nightly.link；只测 Encrypted DNS 也可用 §8。核 SHA-256，再装。连接；Win10 必须过 `securingDNS`；仪表盘速率与 Activity 离开 controller retry。断开收回 DNS。hy2 行要等 #145 部署且目录 `--append` 之后刷新才看得到。
 - 验收：该文档顶部 Status 改成「插件命名空间实机通过」，记下包哈希。仍 FAIL 则停在这里，不要开始 G2。
 
 **G1.2 健康会话不被瞬态读失败拆掉** — 接 PR #116 · M

@@ -224,7 +224,44 @@ Start-Process $setup.FullName
 
 Then: launch 0.0.72 → connect. Pill must stay **Connecting…**, not Cancel. `securingDNS` must pass; dashboard rate and Activity must leave controller retry; disconnect restores DNS. If it fails, copy diagnostics (need Failed stage + Error, not empty). Artifact retention is 7 days.
 
-## 9. Next candidate (Backup UDP column) — building
+## 9. Pending device candidate — Backup UDP column (2026-09-11)
 
-`b40ff149` adds the dedicated Backup UDP node group and `X-Tono-Accept: hy2`. Windows candidate workflow run `34584323215` was started by that push. **Do not install the §8 package if the goal is to show testers the Dedirock hy2 rows** — that NSIS predates the column. Wait for `34584323215` (or the artifact named `tono-windows-0.0.72-candidate-b40ff149…`) and record its SHA-256 here before any device pass. Still not a G1.1 pass until Win10 Encrypted DNS reaches Connected.
+Supersedes §8 when the goal is to show testers the Dedirock hy2 rows. §8 still applies if the only question is Encrypted DNS / connecting pill / TUN DNS, but that NSIS has no「备用 UDP」group and does not send `X-Tono-Accept: hy2`.
+
+Hosted candidate run: [`34584323215`](https://github.com/raydocs/tono/actions/runs/34584323215).
+Artifact `tono-windows-0.0.72-candidate-b40ff149e92ab7ef3220135501d73f75f5fa465d`.
+Source `b40ff149e92ab7ef3220135501d73f75f5fa465d`.
+Version **0.0.72**. `candidateOnly: true`. Not Authenticode signed. Not updater signed. Not a customer-channel package.
+
+Installer `Tono_0.0.72_x64-setup.exe` SHA-256 (matches downloaded bytes and `candidate-manifest.json`):
+
+```text
+7bc7aaf9a4046ef7d4f9db3cd7da5f27cd43a26492b27f46661b2295b0b7ca8a
+```
+
+Service `tono-service.exe` SHA-256 `84940c1b749d2d88334b14c2d879d9fcca11cc4f1a0f2f12a7248c41c80506af`.
+Core `tono-core-x86_64-pc-windows-msvc.exe` SHA-256 `1edfe5f8a12097e383b0ae3b89cabbdc09216eb88f00dd9bd6d7cb19d21c1daf`.
+
+**Not installed on the Win10 Encrypted DNS machine. Not a G1.1 pass.** This package contains everything in §8 plus the Backup UDP node group and `X-Tono-Accept: hy2` on catalog GET. Testers still will not see hy2 rows until Worker PR #145 is on `main`, production is deployed from that SHA, and the five Dedirock blocks are `--append`ed.
+
+Open without GitHub login:
+
+- Page: https://nightly.link/raydocs/tono/actions/runs/34584323215
+- Zip: https://nightly.link/raydocs/tono/actions/runs/34584323215/tono-windows-0.0.72-candidate-b40ff149e92ab7ef3220135501d73f75f5fa465d.zip
+
+On the Windows PC, with Tono **disconnected**:
+
+```powershell
+$dest = Join-Path $env:TEMP 'tono-candidate-34584323215'
+New-Item -ItemType Directory -Force $dest | Out-Null
+gh run download 34584323215 --repo raydocs/tono -n tono-windows-0.0.72-candidate-b40ff149e92ab7ef3220135501d73f75f5fa465d -D $dest
+$setup = Get-ChildItem $dest -Recurse -Filter Tono_0.0.72_x64-setup.exe | Select-Object -First 1
+$hash = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($hash -ne '7bc7aaf9a4046ef7d4f9db3cd7da5f27cd43a26492b27f46661b2295b0b7ca8a') {
+  throw "hash mismatch: $hash"
+}
+Start-Process $setup.FullName
+```
+
+Then: launch 0.0.72 → connect. Pill must stay **Connecting…**, not Cancel. `securingDNS` must pass; dashboard rate and Activity must leave controller retry; disconnect restores DNS. After the catalog PUT, refresh servers and look for the top「备用 UDP」group (city · codename · 备用通道). Artifact retention is 7 days.
 
