@@ -22,9 +22,6 @@ struct ActiveNodeCard: View {
         let parsed = ConfigParser.extractFlag(from: nodeName)
         let code = nodeRegionCode(flag: parsed.flag, name: parsed.cleanName)
         var parts: [String] = []
-        if ProxyNode.catalogBaseName(for: parsed.cleanName) != parsed.cleanName {
-            parts.append(String(localized: "Backup channel"))
-        }
         if let codename = nodeCityParts(cleanName).codename { parts.append(codename) }
         if let group = groupName { parts.append(group) }
         parts.append(code)
@@ -70,7 +67,7 @@ struct ActiveNodeCard: View {
                 HStack(spacing: 10) {
                     NodeRouteMark(size: 32, city: nodeCityParts(cleanName).city)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(nodeCityTitle(cleanName))
+                        Text(nodeRouteTitle(for: nodeName))
                             .font(.system(size: 13, weight: .semibold))
                             .fontWeight(.semibold)
                             .foregroundStyle(.primary)

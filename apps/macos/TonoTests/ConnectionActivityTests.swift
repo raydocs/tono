@@ -111,6 +111,15 @@ final class ConnectionActivityTests: XCTestCase {
         )
         XCTAssertTrue(ProxyNode.isHy2CatalogName("Tokyo · Sakura · hy2"))
         XCTAssertFalse(ProxyNode.isHy2CatalogName("Tokyo · Sakura"))
+        XCTAssertEqual(nodeRouteTitle(for: "Tokyo · Sakura"), nodeCityTitle("Tokyo · Sakura"))
+        XCTAssertEqual(
+            nodeRouteTitle(for: "Tokyo · Sakura · hy2"),
+            "\(nodeCityTitle("Tokyo · Sakura")) · \(String(localized: "Backup channel"))"
+        )
+        XCTAssertEqual(
+            nodeRouteTitle(for: "🇯🇵 Tokyo · Sakura · hy2"),
+            "\(nodeCityTitle("Tokyo · Sakura")) · \(String(localized: "Backup channel"))"
+        )
         XCTAssertFalse(
             ProxyNode.isCityFailoverCandidate("Tokyo · Sakura · hy2", after: "Tokyo · Sakura")
         )

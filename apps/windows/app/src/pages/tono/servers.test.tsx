@@ -215,7 +215,10 @@ it('lets the user pick the hy2 sibling and labels it as the backup channel', asy
   const backup = await screen.findByRole('button', {
     name: /Backup channel/,
   })
-  expect(backup.textContent).toContain('Backup channel')
+  expect(backup.textContent).toContain('Tokyo · Backup channel')
+  expect(
+    screen.getByRole('button', { name: /^Tokyo,/ }).textContent,
+  ).not.toContain('Tokyo · Backup channel')
   fireEvent.click(backup)
   await waitFor(() =>
     expect(selectServerMock).toHaveBeenCalledWith('Tokyo · Sakura · hy2'),

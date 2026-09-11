@@ -86,8 +86,10 @@ extension ProxiesView {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 7) {
                             // City first — the name users actually think in;
-                            // the codename only tells lines apart.
-                            Text(nodeCityTitle(node.displayName))
+                            // hy2 must say 备用通道 on this line, not only in
+                            // the tiny protocol chip, or Choose another route
+                            // shows two identical 东京 cards.
+                            Text(nodeRouteTitle(node))
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundStyle(.primary)
                                 .lineLimit(1)

@@ -249,6 +249,19 @@ func nodeCityTitle(_ displayName: String) -> String {
     return String(localized: String.LocalizationValue(city))
 }
 
+/// Settings / "choose another route" title: hy2 is "东京 · 备用通道", not a
+/// second card that looks identical to the TCP city.
+func nodeRouteTitle(for wireName: String) -> String {
+    let parsed = ConfigParser.extractFlag(from: wireName)
+    let city = nodeCityTitle(ProxyNode.displayName(for: parsed.cleanName))
+    guard ProxyNode.isHy2CatalogName(parsed.cleanName) else { return city }
+    return "\(city) · \(String(localized: "Backup channel"))"
+}
+
+func nodeRouteTitle(_ node: ProxyNode) -> String {
+    nodeRouteTitle(for: node.name)
+}
+
 private func cityGlyphShape(for city: String) -> AnyShape {
     switch city.lowercased() {
     case "los angeles", "san jose", "miami":
@@ -468,8 +481,8 @@ struct NodeCardView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack(spacing: 7) {
                                 // City first — the name users actually think
-                                // in; the codename only tells lines apart.
-                                Text(nodeCityTitle(node.displayName))
+                                // in; hy2 is "东京 · 备用通道" on this line.
+                                Text(nodeRouteTitle(node))
                                     .font(.system(size: 14, weight: .semibold))
                                     .foregroundStyle(.primary)
                                     .lineLimit(1)

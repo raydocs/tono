@@ -38,7 +38,6 @@ import {
 import {
   nodeCityLabel,
   nodeCityParts,
-  nodeCityTitleKey,
   nodeCode,
   nodeDisplayName,
   nodeProtocolKey,
@@ -742,10 +741,10 @@ const ServersPage = () => {
                         : server.selected
                           ? t('tono.node.activeServer')
                           : t('tono.nodes.readyToConnect')
-                  const cityKey = nodeCityTitleKey(server.name)
-                  const cityTitle = cityKey
-                    ? t(cityKey)
-                    : nodeDisplayName(server.name)
+                  // Same label as the tray / dashboard: hy2 is "Tokyo · Backup
+                  // channel", not a second identical 东京 card. Choose-another-route
+                  // after a handshake eof has to be distinguishable at a glance.
+                  const cityTitle = nodeCityLabel(server.name, t)
                   const latencyText = !available
                     ? t('tono.nodes.unavailable')
                     : endpointFailure === 'timeout'
