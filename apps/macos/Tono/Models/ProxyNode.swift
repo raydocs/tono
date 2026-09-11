@@ -149,6 +149,10 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
             ? String(localized: "Backup channel")
             : type.displayName
     }
+    var catalogTransport: String { type == .hysteria2 ? "hy2" : "tcp" }
+    static func catalogTransport(for rawName: String) -> String {
+        rawName.hasSuffix(hy2NameSuffix) ? "hy2" : "tcp"
+    }
     var ping: Int { latency }
 
     var latencyColor: LatencyLevel { LatencyLevel.level(for: latency, kind: .exit) }

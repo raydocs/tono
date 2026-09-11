@@ -262,6 +262,7 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle) -> Attempt {
 
     state.audit().log(AuditEvent::ConnectBegin {
         node: node.name.clone(),
+        transport: node.catalog_transport(),
     });
 
     // A residential Web guarantee requires Mihomo to see protected hostnames. Browser-owned DoH
@@ -402,7 +403,7 @@ async fn guard_snapshot(
 async fn fail_connect(state: &Arc<TonoState>, app: &AppHandle, err: String) -> String {
     logging!(error, Type::Service, "Tono: 连接事务失败: {err}");
     let observed = service::tono_kill_switch_status().await.ok();
-    let (plan, stage, action, armed) = {
+    let (plan, stage, action, armed, transport) = {
         let mut inner = state.lock().await;
         if let Some(status) = &observed {
             inner.kill_switch = Some(status.clone());
@@ -463,12 +464,17 @@ async fn fail_connect(state: &Arc<TonoState>, app: &AppHandle, err: String) -> S
         if plan.mark_armed {
             inner.retry_attempt += 1;
         }
-        (plan, stage, action, armed)
+        let transport = inner
+            .selected_node
+            .as_deref()
+            .map(tono_core::catalog_transport_of_name);
+        (plan, stage, action, armed, transport)
     };
     state.audit().log(AuditEvent::ConnectFail {
         stage: stage.map(commands::stage_key),
         error: err.clone(),
         action,
+        transport,
     });
     if plan.mark_armed {
         state

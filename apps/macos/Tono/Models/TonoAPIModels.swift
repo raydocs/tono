@@ -387,13 +387,14 @@ nonisolated struct TonoTelemetryEvent: Encodable, Sendable {
     var outcome: String? = nil
     var code: String? = nil
     var updateResume: Bool? = nil
+    var transport: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case ts, kind, stage, error, node, action, reason, probe, from, to, mode
         case reference, elapsedMs, delayMs, counter, restartCount, oldPid, newPid
         case revision, domains, media, webDomains, wechatTcp, webTcp, udp
         case endpoints, eventCount, bytes, wanted, live, generation, outcome
-        case code, updateResume
+        case code, updateResume, transport
     }
 
     func encode(to encoder: Encoder) throws {
@@ -432,6 +433,7 @@ nonisolated struct TonoTelemetryEvent: Encodable, Sendable {
         try container.encodeIfPresent(outcome, forKey: .outcome)
         try container.encodeIfPresent(code, forKey: .code)
         try container.encodeIfPresent(updateResume, forKey: .updateResume)
+        try container.encodeIfPresent(transport, forKey: .transport)
     }
 }
 
@@ -456,6 +458,7 @@ nonisolated struct TonoConnectFailureReport: Encodable, Sendable {
     var coreErrors: [String]? = nil
     var tcpDelayMs: Int64? = nil
     var exitDelayMs: Int64? = nil
+    var transport: String? = nil
 }
 
 nonisolated struct TonoConnectFailureReceipt: Decodable, Sendable {

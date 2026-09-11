@@ -375,6 +375,7 @@ pub(super) async fn run_stages(
     state.audit().log(AuditEvent::ConnectOk {
         node: node.name.clone(),
         elapsed_ms: started.elapsed().as_millis() as u64,
+        transport: node.catalog_transport(),
     });
     spawn_network_monitor(state, app).await;
     spawn_exit_identity_lookup(state, app, generation);

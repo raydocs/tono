@@ -232,7 +232,7 @@
 
 - 规则：先按现逻辑连基名 VLESS。`connectFail` 且 `stage ∈ {tcp, handshake}`（Windows 用 `connection/failure.rs` 与 stages 的稳定码；macOS 用 `lastConnectionFailure` / ConnectionStage），若目录存在 `基名 · hy2` 且本会话未试过 → 切到该块重连一次。成功则本会话钉在 hy2，UI 显示「备用通道」。两条都失败才走现有的换城市 failover（`rotateCatalogExitAfterConnectFailure`）。**换城市时对新城市重新从 TCP 开始。**
 - 设置：开关「连不上时自动尝试备用通道」。T0 全通 → 默认开；有运营商 blocked → 默认关。
-- 遥测：`connectBegin/Ok/Fail/nodeSwitch` 加 `transport: tcp|hy2`。Worker `telemetryEventStringKeys` 加 `transport`（`telemetry-window.ts`）；入库 `connection_events.transport`（0072）。
+- 遥测：`connectBegin/Ok/Fail/nodeSwitch` 加 `transport: tcp|hy2`。Worker `telemetryEventStringKeys` 加 `transport`（`telemetry-window.ts`）；入库 `connection_events.transport`（0072）。**本分支已收这条遥测并 flatten；自动切换（本节其余规则）仍不做。**
 - 文件（Windows）：`connection/stages.rs`、`connection/switch.rs`、`connection.rs` 外层 attempt。
 - 文件（macOS）：`AppState+Connect.swift`、`ConnectionCoordinator.swift`；不要把 hy2 试探做成又一次用户可见的「断开重连」闪烁。
 - 唯一测试：两端各一条——夹具目录两个块，第一次 TCP 失败，第二次调用的节点名以 ` · hy2` 结尾。Worker 一个 `it`：事件带 `transport=hy2` 写入。
@@ -240,7 +240,7 @@
 
 **G2.9 后台呈现（最小）** — S
 
-- 客户时间线显示通道；节点详情 `transports`。文案走 `services/ops-console/src/copy/customers.ts`。
+- 客户时间线显示通道；节点详情 `transports`。文案走 `services/ops-console/src/copy/customers.ts`。本分支：hy2 行显示「备用通道」；客户端 connect 事件带 `transport`，Worker 写入 `connection_events.transport`。
 - 不做 Playwright 新基线，除非现有 spec 因文案红了。
 - 验收：夹具或真数据里 hy2 行看得见「备用通道」，不是英文 `hysteria2`。
 

@@ -249,7 +249,8 @@ extension AccountSession {
             osArch: Self.osArch,
             coreErrors: notice.coreErrors.isEmpty ? nil : notice.coreErrors,
             tcpDelayMs: path.tcpDelayMs,
-            exitDelayMs: path.exitDelayMs
+            exitDelayMs: path.exitDelayMs,
+            transport: notice.transport
         )
         lastConnectFailureAt = Date()
         do {

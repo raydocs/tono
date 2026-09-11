@@ -74,7 +74,8 @@ extension AppState {
             "connectBegin",
             stage: ConnectionStage.preparing.rawValue,
             node: selectedExit?.name,
-            generation: Int(self.connectionCoordinator.protectionOperationGeneration)
+            generation: Int(self.connectionCoordinator.protectionOperationGeneration),
+            transport: selectedExit?.catalogTransport
         )
 
         let overlay = ConfigPipeline.OverlayConfig(
@@ -906,7 +907,8 @@ extension AppState {
             stage: ConnectionStage.verifyingTraffic.rawValue,
             delayMs: exitDelayMs,
             node: selectedExitNode()?.name,
-            generation: Int(self.connectionCoordinator.protectionOperationGeneration)
+            generation: Int(self.connectionCoordinator.protectionOperationGeneration),
+            transport: selectedExitNode()?.catalogTransport
         )
         do {
             if try UpdateHandoffStore.commitVerifiedRecovery(

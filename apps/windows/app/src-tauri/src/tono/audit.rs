@@ -101,6 +101,7 @@ pub enum AuditEvent {
     // protection
     ConnectBegin {
         node: String,
+        transport: &'static str,
     },
     Stage {
         stage: &'static str,
@@ -110,10 +111,13 @@ pub enum AuditEvent {
         stage: Option<&'static str>,
         error: String,
         action: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        transport: Option<&'static str>,
     },
     ConnectOk {
         node: String,
         elapsed_ms: u64,
+        transport: &'static str,
     },
     /// One destination the DIRECT overlay actually dialled, recorded once per distinct
     /// `(address, port, protocol)` per session.
@@ -168,6 +172,7 @@ pub enum AuditEvent {
     NodeSwitch {
         from: String,
         to: String,
+        transport: &'static str,
     },
     /// Connect proved the selected city dead; the next unused catalog city
     /// will be used on the fail-closed reconnect.
@@ -283,20 +288,26 @@ impl AuditEvent {
             RevokeDevice { id } => RevokeDevice { id: redact(&id) },
             SyncFail { error } => SyncFail { error: redact(&error) },
             SelectionVanished { node } => SelectionVanished { node: redact(&node) },
-            ConnectBegin { node } => ConnectBegin { node: redact(&node) },
-            ConnectFail { stage, error, action } => ConnectFail {
+            ConnectBegin { node, transport } => ConnectBegin {
+                node: redact(&node),
+                transport,
+            },
+            ConnectFail { stage, error, action, transport } => ConnectFail {
                 stage,
                 error: redact(&error),
                 action,
+                transport,
             },
-            ConnectOk { node, elapsed_ms } => ConnectOk {
+            ConnectOk { node, elapsed_ms, transport } => ConnectOk {
                 node: redact(&node),
                 elapsed_ms,
+                transport,
             },
             ReleaseFail { error } => ReleaseFail { error: redact(&error) },
-            NodeSwitch { from, to } => NodeSwitch {
+            NodeSwitch { from, to, transport } => NodeSwitch {
                 from: redact(&from),
                 to: redact(&to),
+                transport,
             },
             ConnectCatalogFailover { from, to } => ConnectCatalogFailover {
                 from: redact(&from),
@@ -895,15 +906,18 @@ mod tests {
             },
             AuditEvent::ConnectBegin {
                 node: "n token=abc".to_string(),
+                transport: "tcp",
             },
             AuditEvent::ConnectFail {
                 stage: None,
                 error: "token=abc".to_string(),
                 action: "fullRelease",
+                transport: None,
             },
             AuditEvent::ConnectOk {
                 node: "n token=abc".to_string(),
                 elapsed_ms: 1,
+                transport: "tcp",
             },
             AuditEvent::ReleaseFail {
                 error: "token=abc".to_string(),
@@ -911,6 +925,7 @@ mod tests {
             AuditEvent::NodeSwitch {
                 from: "a token=abc".to_string(),
                 to: "b token=abc".to_string(),
+                transport: "tcp",
             },
             AuditEvent::ConnectCatalogFailover {
                 from: "a token=abc".to_string(),

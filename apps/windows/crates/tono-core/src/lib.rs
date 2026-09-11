@@ -34,4 +34,7 @@ pub use update_journal::{
     UpdateHandoffJournal, UpdateHandoffPhase, commit_verified_recovery, record_install_started,
 };
 pub use credentials::{CredentialKey, CredentialStore};
-pub use node::{EXIT_GROUP_NAME, NodeProtocol, NodeRejection, ValidatedNode};
+pub use node::{
+    EXIT_GROUP_NAME, HY2_NAME_SUFFIX, NodeProtocol, NodeRejection, ValidatedNode,
+    catalog_transport_of_name,
+};

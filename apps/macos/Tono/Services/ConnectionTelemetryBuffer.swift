@@ -15,6 +15,7 @@ nonisolated struct ConnectFailureNotice: Sendable {
     let error: String?
     let node: String?
     let coreErrors: [String]
+    let transport: String?
 }
 
 nonisolated final class ConnectionTelemetryBuffer: @unchecked Sendable {
@@ -50,7 +51,8 @@ nonisolated final class ConnectionTelemetryBuffer: @unchecked Sendable {
         generation: Int? = nil,
         outcome: String? = nil,
         code: String? = nil,
-        updateResume: Bool? = nil
+        updateResume: Bool? = nil,
+        transport: String? = nil
     ) {
         let event = TonoTelemetryEvent(
             ts: Int64(Date().timeIntervalSince1970 * 1_000),
@@ -69,7 +71,10 @@ nonisolated final class ConnectionTelemetryBuffer: @unchecked Sendable {
             generation: generation.map { Int64($0) },
             outcome: outcome.map { String($0.prefix(40)) },
             code: code.map { String($0.prefix(64)) },
-            updateResume: updateResume
+            updateResume: updateResume,
+            transport: transport.flatMap { value in
+                value == "tcp" || value == "hy2" ? value : nil
+            }
         )
         lock.lock()
         events.append(event)
@@ -93,7 +98,8 @@ nonisolated final class ConnectionTelemetryBuffer: @unchecked Sendable {
         node: String? = nil,
         generation: Int? = nil,
         error: String? = nil,
-        coreErrors: [String] = []
+        coreErrors: [String] = [],
+        transport: String? = nil
     ) {
         record(
             "connectFail",
@@ -102,7 +108,8 @@ nonisolated final class ConnectionTelemetryBuffer: @unchecked Sendable {
             error: error,
             node: node,
             generation: generation,
-            code: code.rawValue
+            code: code.rawValue,
+            transport: transport ?? node.map { ProxyNode.catalogTransport(for: $0) }
         )
         let notice = ConnectFailureNotice(
             ts: Int64(Date().timeIntervalSince1970 * 1_000),
@@ -113,7 +120,9 @@ nonisolated final class ConnectionTelemetryBuffer: @unchecked Sendable {
             coreErrors: coreErrors
                 .filter { !$0.isEmpty }
                 .prefix(ConnectFailureNotice.maxCoreErrors)
-                .map { String($0.prefix(ConnectFailureNotice.maxCoreErrorChars)) }
+                .map { String($0.prefix(ConnectFailureNotice.maxCoreErrorChars)) },
+            transport: (transport ?? node.map { ProxyNode.catalogTransport(for: $0) })
+                .flatMap { value in value == "tcp" || value == "hy2" ? value : nil }
         )
         lock.lock()
         let sink = failureSink

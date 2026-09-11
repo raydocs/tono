@@ -439,6 +439,7 @@ fn map_event(value: &Value, ts: i64, kind: &str) -> Option<TelemetryEvent> {
         bytes: i64_field("bytes"),
         wanted: bool_field("wanted"),
         live: bool_field("live"),
+        transport: str_field("transport").filter(|value| value == "tcp" || value == "hy2"),
     })
 }
 
@@ -575,7 +576,7 @@ mod tests {
         writeln!(file, r#"{{"ts":{},"kind":"networkChange","counter":3}}"#, now - 500).unwrap();
         writeln!(
             file,
-            r#"{{"ts":{},"kind":"connectOk","node":"US","elapsedMs":1200}}"#,
+            r#"{{"ts":{},"kind":"connectOk","node":"Tokyo · Sakura · hy2","elapsedMs":1200,"transport":"hy2"}}"#,
             now - 100
         )
         .unwrap();
@@ -585,6 +586,7 @@ mod tests {
         assert!(events.iter().all(|e| e.kind != "signInOk"));
         assert_eq!(events[0].kind, "networkChange");
         assert_eq!(events[0].counter, Some(3));
+        assert_eq!(events[1].transport.as_deref(), Some("hy2"));
     }
 
     #[test]

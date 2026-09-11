@@ -35,6 +35,7 @@ final class ConnectionTelemetryBufferTests: XCTestCase {
         XCTAssertEqual(event.elapsedMs, 4_200)
         XCTAssertEqual(event.node, "anon-1")
         XCTAssertNil(event.error)
+        XCTAssertEqual(event.transport, "tcp")
     }
 
     /// The immediate report is only as useful as its bounds are honest: a core
@@ -78,7 +79,7 @@ final class ConnectionTelemetryBufferTests: XCTestCase {
     func testConnectFailureReportEncodesOnlyTheAcceptedKeys() throws {
         let accepted: Set<String> = [
             "ts", "stage", "code", "error", "node", "appVersion", "osVersion", "osArch",
-            "platform", "coreErrors", "tcpDelayMs", "exitDelayMs",
+            "platform", "coreErrors", "tcpDelayMs", "exitDelayMs", "transport",
         ]
         let report = TonoConnectFailureReport(
             ts: 1_725_000_000_000,
@@ -105,6 +106,21 @@ final class ConnectionTelemetryBufferTests: XCTestCase {
         buffer.record("connectOk", stage: "verifyingTraffic", delayMs: 183, node: "anon-1")
         let drained = buffer.drain()
         XCTAssertEqual(drained.events[0].delayMs, 183)
+    }
+
+    func testConnectHy2EventCarriesBackupTransport() {
+        let buffer = ConnectionTelemetryBuffer()
+        let hy2 = "Tokyo · Sakura · hy2"
+        buffer.record("connectBegin", node: hy2, transport: ProxyNode.catalogTransport(for: hy2))
+        buffer.recordConnectFailure(
+            stage: "handshake",
+            code: .coreExitUnreachable,
+            node: hy2
+        )
+        let drained = buffer.drain()
+        XCTAssertEqual(drained.events[0].transport, "hy2")
+        XCTAssertEqual(drained.events[1].kind, "connectFail")
+        XCTAssertEqual(drained.events[1].transport, "hy2")
     }
 }
 

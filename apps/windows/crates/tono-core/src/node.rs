@@ -168,6 +168,21 @@ impl ValidatedNode {
     pub fn is_hysteria2(&self) -> bool {
         self.protocol == NodeProtocol::Hysteria2
     }
+
+    pub fn catalog_transport(&self) -> &'static str {
+        catalog_transport_of_name(&self.name)
+    }
+}
+
+/// Same-node hy2 sibling. Must stay aligned with the catalog contract (` · hy2`).
+pub const HY2_NAME_SUFFIX: &str = " · hy2";
+
+pub fn catalog_transport_of_name(name: &str) -> &'static str {
+    if name.ends_with(HY2_NAME_SUFFIX) {
+        "hy2"
+    } else {
+        "tcp"
+    }
 }
 
 /// Raw shape of one catalog proxy entry. Unknown fields are tolerated here
@@ -629,6 +644,8 @@ fingerprint: "E3:AA:4A:74:5A:A9:05:39:AB:1A:49:3D:94:0E:EB:A7:B4:30:5B:75:16:AB:
     fn admits_hysteria2_and_rejects_skip_cert_verify() {
         let node = admit_yaml(passing_hy2_yaml()).unwrap();
         assert_eq!(node.protocol, NodeProtocol::Hysteria2);
+        assert_eq!(node.catalog_transport(), "hy2");
+        assert_eq!(catalog_transport_of_name("Tokyo · Sakura"), "tcp");
         assert_eq!(node.name, "🇺🇸 US Reality 01 · hy2");
         assert_eq!(node.server, Ipv4Addr::new(8, 8, 8, 8));
         assert_eq!(node.port, 443);

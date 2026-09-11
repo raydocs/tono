@@ -283,7 +283,11 @@ pub async fn tono_select_server(
         if action == connection::SelectAction::Switch
             && let Some(from) = previous
         {
-            state.audit().log(AuditEvent::NodeSwitch { from, to: name.clone() });
+            state.audit().log(AuditEvent::NodeSwitch {
+                from,
+                to: name.clone(),
+                transport: tono_core::catalog_transport_of_name(&name),
+            });
         }
         action
     };
