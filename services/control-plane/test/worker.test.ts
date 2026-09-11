@@ -5143,6 +5143,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(user.status).toBe('disabled');
   });
 
+  // Eight fetch+waitUntil hops (sign-in, confirm, re-enroll, second sign-in).
+  // After the rest of this file has run, miniflare+D1 can push that past Vitest's
+  // 5s default; CI then reports a timeout though the contract still holds.
   it('only lets the bound installation re-enroll its active device', async () => {
     const account = await createAccount('reenroll');
     resetMockInventory(account.device.id, account.enrollment.hostname);
@@ -5162,7 +5165,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(other.status).toBe(200);
     const otherAuth = await other.json() as any;
     expect((await api(`devices/${account.device.id}/enrollment`, json({}, otherAuth.accessToken))).status).toBe(404);
-  });
+  }, 15_000);
 
   it('does not issue a replacement enrollment while the prior identity revocation is pending', async () => {
     const account = await createAccount('reenroll-revoke-failure');
