@@ -80,6 +80,7 @@ npx --prefix services/control-plane wrangler d1 execute tono-control-plane-ops-p
 ```sh
 cd services/control-plane
 npx wrangler d1 export tono-control-plane --remote --output /tmp/prod.sql
+node ../../tooling/scripts/wipe-d1-in-order.mjs --apply --database tono-control-plane-ops-preview
 npx wrangler d1 execute tono-control-plane-ops-preview --remote --file /tmp/prod.sql -y --config wrangler.preview.jsonc
 npx wrangler d1 migrations apply tono-control-plane-ops-preview --remote --config wrangler.preview.jsonc
 ```
