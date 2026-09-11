@@ -166,3 +166,19 @@ Service `tono-service.exe` SHA-256 `fbc20f5959f7e917677ba7a1e2f11314301401b411b8
 Core `tono-core-x86_64-pc-windows-msvc.exe` SHA-256 `b636c18e27ff141ffb289b40b583be482680eb69d1cef46283008a479dd913e3`.
 
 **Not installed. Not a G1.1 pass.** Use this package on the Win10 Encrypted DNS machine (securingDNS / 5s fake-ip timeout) and on the Windows 11 G1.1 device. After transfer, re-hash with `Get-FileHash -Algorithm SHA256`. Do not disable SmartScreen. Do not publish.
+
+On the Windows PC, with Tono **disconnected** and GitHub CLI logged in:
+
+```powershell
+$dest = Join-Path $env:TEMP 'tono-candidate-34565734039'
+New-Item -ItemType Directory -Force $dest | Out-Null
+gh run download 34565734039 --repo raydocs/tono -n tono-windows-0.0.72-candidate-7e1938c743fcdebc05a28d63180fef2727c657ac -D $dest
+$setup = Get-ChildItem $dest -Recurse -Filter Tono_0.0.72_x64-setup.exe | Select-Object -First 1
+$hash = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($hash -ne '0a2d55b1eecddbe9975449f308fd84aa84144aceabee979853c0685fb0ffdfcb') {
+  throw "hash mismatch: $hash"
+}
+Start-Process $setup.FullName
+```
+
+Then: launch 0.0.72 → connect → `securingDNS` must pass; dashboard rate and Activity must leave controller retry; disconnect restores DNS. Artifact retention is 7 days.
