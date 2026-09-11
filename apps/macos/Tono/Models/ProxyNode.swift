@@ -149,9 +149,13 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
         selected: String,
         catalogNames: Set<String>
     ) -> String? {
-        guard !isHy2CatalogName(selected) else { return nil }
-        let hy2 = catalogBaseName(for: selected) + hy2NameSuffix
-        return catalogNames.contains(hy2) ? hy2 : nil
+        let selectedClean = ConfigParser.extractFlag(from: selected).cleanName
+        guard !isHy2CatalogName(selectedClean) else { return nil }
+        let selectedBase = catalogBaseName(for: selectedClean)
+        return catalogNames.first { name in
+            let clean = ConfigParser.extractFlag(from: name).cleanName
+            return isHy2CatalogName(clean) && catalogBaseName(for: clean) == selectedBase
+        }
     }
 
     static func displayName(for rawName: String) -> String {

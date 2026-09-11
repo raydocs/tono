@@ -14,6 +14,12 @@ const NODE_DISPLAY_NAMES: Record<string, string> = {
 /** Same-node backup transport. Folded into the basename for display. */
 export const HY2_NAME_SUFFIX = ' · hy2'
 
+/** Catalog YAML may prefix a regional-indicator flag; admission keeps it. */
+const LEADING_FLAG =
+  /^(?:\p{Regional_Indicator}{2}|\p{Extended_Pictographic})(?:\uFE0F|\u200D|\p{Extended_Pictographic}|\p{Regional_Indicator})*\s*/u
+
+const stripLeadingFlag = (wireName: string) => wireName.replace(LEADING_FLAG, '')
+
 export const isHy2CatalogName = (wireName: string) =>
   wireName.endsWith(HY2_NAME_SUFFIX)
 
@@ -25,6 +31,7 @@ export const catalogBaseName = (wireName: string) =>
 /**
  * Same-city hy2 sibling the user can pick by hand. Null when the selection
  * is already hy2 or the catalog has no ` · hy2` row for this city.
+ * Matches flag-prefixed and flag-stripped spellings of the same city.
  * G2.8 auto-switch stays off; this only names the row the failure card offers.
  */
 export const backupChannelName = (
@@ -32,8 +39,13 @@ export const backupChannelName = (
   serverNames: readonly string[],
 ): string | null => {
   if (!selected || isHy2CatalogName(selected)) return null
-  const hy2 = `${catalogBaseName(selected)}${HY2_NAME_SUFFIX}`
-  return serverNames.includes(hy2) ? hy2 : null
+  const selectedKey = stripLeadingFlag(catalogBaseName(selected))
+  const match = serverNames.find(
+    (name) =>
+      isHy2CatalogName(name) &&
+      stripLeadingFlag(catalogBaseName(name)) === selectedKey,
+  )
+  return match ?? null
 }
 
 export const nodeDisplayName = (wireName: string) => {

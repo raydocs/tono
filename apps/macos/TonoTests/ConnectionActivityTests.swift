@@ -71,6 +71,20 @@ final class ConnectionActivityTests: XCTestCase {
         )
         XCTAssertNil(ProxyNode.backupChannelName(selected: "Tokyo · Sakura · hy2", catalogNames: names))
         XCTAssertNil(ProxyNode.backupChannelName(selected: "Los Angeles · Sunset", catalogNames: names))
+        XCTAssertEqual(
+            ProxyNode.backupChannelName(
+                selected: "🇯🇵 Tokyo · Sakura",
+                catalogNames: names
+            ),
+            "Tokyo · Sakura · hy2"
+        )
+        XCTAssertEqual(
+            ProxyNode.backupChannelName(
+                selected: "Tokyo · Sakura",
+                catalogNames: ["🇯🇵 Tokyo · Sakura", "🇯🇵 Tokyo · Sakura · hy2"]
+            ),
+            "🇯🇵 Tokyo · Sakura · hy2"
+        )
         XCTAssertTrue(ProxyNode.isHy2CatalogName("Tokyo · Sakura · hy2"))
         XCTAssertFalse(ProxyNode.isHy2CatalogName("Tokyo · Sakura"))
     }

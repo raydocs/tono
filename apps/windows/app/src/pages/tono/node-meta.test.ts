@@ -106,6 +106,27 @@ describe('backupChannelName', () => {
     expect(backupChannelName(null, names)).toBeNull()
     expect(backupChannelName('Tokyo · Sakura', ['Tokyo · Sakura'])).toBeNull()
   })
+
+  it('matches a flag-prefixed city to the catalog hy2 row even when flags differ', () => {
+    expect(
+      backupChannelName('🇺🇸 US Reality 01', [
+        '🇺🇸 US Reality 01',
+        '🇺🇸 US Reality 01 · hy2',
+      ]),
+    ).toBe('🇺🇸 US Reality 01 · hy2')
+    expect(
+      backupChannelName('US Reality 01', [
+        '🇺🇸 US Reality 01',
+        '🇺🇸 US Reality 01 · hy2',
+      ]),
+    ).toBe('🇺🇸 US Reality 01 · hy2')
+    expect(
+      backupChannelName('🇺🇸 US Reality 01', [
+        'US Reality 01',
+        'US Reality 01 · hy2',
+      ]),
+    ).toBe('US Reality 01 · hy2')
+  })
 })
 
 describe('region labels', () => {

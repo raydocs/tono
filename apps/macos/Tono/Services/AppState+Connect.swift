@@ -1801,13 +1801,21 @@ extension AppState {
         scheduleProtectedReconnect(immediate: true)
     }
 
-    /// Same-city hy2 sibling after a TCP/exit failure. Nil unless the
-    /// classified failure is CORE_EXIT_UNREACHABLE and the catalog has ` · hy2`.
+    /// Same-city hy2 sibling. Offered while protected-offline unless the
+    /// classified failure is something hy2 cannot answer (DNS, helper, TUN).
+    /// Restart may have dropped the classified record; still name the sibling.
     func backupHy2SiblingName() -> String? {
-        guard lastClassifiedFailure?.code == .coreExitUnreachable else { return nil }
+        if let code = lastClassifiedFailure?.code {
+            switch code {
+            case .coreExitUnreachable, .unknownClassifiedFailure:
+                break
+            default:
+                return nil
+            }
+        }
         let selected = currentProxySelectionTarget() ?? activeNode?.name
         guard let selected else { return nil }
-        let names = Set(managedCatalogNodes.map(\.name))
+        let names = Set(importedExitNodes.map(\.name))
         return ProxyNode.backupChannelName(selected: selected, catalogNames: names)
     }
 
