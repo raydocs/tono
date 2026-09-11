@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../src/errors';
-import { managedCatalogYAML, retirementCatalogPlan } from '../src/catalog-yaml';
+import { managedCatalogYAML, retirementCatalogPlan, filterHy2CatalogForViewer, hy2CatalogEmailAllowlist } from '../src/catalog-yaml';
 
 function expectInvalidCatalog(yaml: string) {
   try {
@@ -86,5 +86,56 @@ describe('catalog hy2 contract', () => {
     expect(plan.yaml).not.toContain('Tokyo · Sakura');
     expect(plan.yaml).not.toContain(' · hy2');
     expect(plan.yaml.match(/\{\{TONO_CLIENT_UUID\}\}/g)).toHaveLength(1);
+  });
+
+  it('hides hy2 blocks and group members unless the viewer is on the gray list', () => {
+    const yaml = [
+      'proxies:',
+      '  - name: Tokyo · Sakura',
+      '    type: vless',
+      '    server: 203.0.113.60',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '  - name: Tokyo · Sakura · hy2',
+      '    type: hysteria2',
+      '    server: 203.0.113.60',
+      '    port: 443',
+      '    password: {{TONO_CLIENT_UUID}}',
+      '    sni: www.microsoft.com',
+      '    fingerprint: e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db',
+      '  - name: Tokyo · Fuji',
+      '    type: vless',
+      '    server: 203.0.113.61',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      'proxy-groups:',
+      '  - name: Tono-Exit',
+      '    type: select',
+      '    proxies:',
+      '      - Tokyo · Sakura',
+      '      - Tokyo · Sakura · hy2',
+      '      - Tokyo · Fuji',
+    ].join('\n') + '\n';
+    expect(filterHy2CatalogForViewer(yaml, true)).toBe(yaml);
+    const hidden = filterHy2CatalogForViewer(yaml, false);
+    expect(hidden).toContain('Tokyo · Sakura\n');
+    expect(hidden).toContain('Tokyo · Fuji');
+    expect(hidden).not.toContain(' · hy2');
+    expect(hidden).not.toContain('type: hysteria2');
+    expect(hidden).toContain('      - Tokyo · Sakura\n');
+    expect(hidden).toContain('      - Tokyo · Fuji');
+    const noHy2 = [
+      'proxies:',
+      '  - name: Tokyo · Sakura',
+      '    type: vless',
+      '    server: 203.0.113.60',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+    ].join('\n') + '\n';
+    expect(filterHy2CatalogForViewer(noHy2, false)).toBe(noHy2);
+    expect(hy2CatalogEmailAllowlist('')).toEqual(new Set());
+    expect(hy2CatalogEmailAllowlist(' Boss@Example.COM ,other')).toEqual(
+      new Set(['boss@example.com']),
+    );
   });
 });

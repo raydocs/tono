@@ -82,7 +82,7 @@
 2. Windows 11 真机：编 #138、跑 `cargo test`、装候选包、走 G1 与 G3 清单。云端 Linux agent 不能代替 WFP。
 3. macOS 真机：Developer ID、公证、Sparkle EdDSA、`tooling/scripts/verify-release-gate.sh /path/to/Tono.app`、Helper 安装。
 4. hy2 三网证明（T0）：在 **vm-Gk43AX**（东京 JP Plus，`45.8.173.206`）手工装 hysteria2，电信/联通/移动各 5 次握手 + 30 秒下载；同一套配置再在 **vm-nvLHV3**（洛杉矶，`144.225.255.38`）各测一轮。结果写 `docs/ops/transport-hy2.md`。不通就执行 §2.6 的降级，不要让 agent 猜。
-5. 内部账号灰度：`filterCatalogYamlForUser` 已有按用户过滤机制；指定哪些邮箱能看见 hy2 块。
+5. 内部账号灰度：客户目录默认剥掉 ` · hy2`。`HY2_CATALOG_EMAILS`（逗号分隔）里的邮箱才能看见。未设则谁也看不见 hy2。Ops/admin 明文目录不剥。改这个变量之后必须 bump catalog revision（Windows 把同 revision 不同 digest 当篡改）。**仍不要 PUT**，直到客户端准入合进 `main` 且老板把邮箱写进该变量。不要把真实邮箱写进仓库。
 6. 推 Sparkle / `windows-updates` / R2 `tono-releases`（G4）。
 7. 小范围朋友：从谁开始、看哪些失败率、何时扩大。
 
