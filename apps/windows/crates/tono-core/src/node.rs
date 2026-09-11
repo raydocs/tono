@@ -682,6 +682,31 @@ fingerprint: "E3:AA:4A:74:5A:A9:05:39:AB:1A:49:3D:94:0E:EB:A7:B4:30:5B:75:16:AB:
     }
 
     #[test]
+    fn admits_dedirock_hy2_catalog_block_shape() {
+        let node = admit_yaml(
+            r#"
+name: Buffalo · Niagara · hy2
+type: hysteria2
+server: 23.94.79.123
+port: 443
+password: "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d"
+sni: www.microsoft.com
+fingerprint: 1e5374a79bdb83b04c3d3c84722c03211d1c941c2de9f92431d2198ba7212cad
+skip-cert-verify: false
+"#,
+        )
+        .unwrap();
+        assert_eq!(node.protocol, NodeProtocol::Hysteria2);
+        assert_eq!(node.name, "Buffalo · Niagara · hy2");
+        assert_eq!(node.server, Ipv4Addr::new(23, 94, 79, 123));
+        assert_eq!(
+            node.tls_fingerprint.as_deref(),
+            Some("1e5374a79bdb83b04c3d3c84722c03211d1c941c2de9f92431d2198ba7212cad")
+        );
+        assert_eq!(catalog_base_name(&node.name), "Buffalo · Niagara");
+    }
+
+    #[test]
     fn rejects_non_vless_type() {
         let err = admit_yaml(&passing_yaml_with("type: vless", "type: trojan")).unwrap_err();
         assert_eq!(err, NodeRejection::NotVless);
