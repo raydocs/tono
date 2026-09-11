@@ -23,6 +23,7 @@ import {
   type TelemetryWindowInput,
 } from './customers-status';
 import { sniffPlatform, windowPlatform } from './platform';
+import { updateChangeReceiptClientAcks } from './change-receipts';
 
 export {
   sniffPlatform,
@@ -232,6 +233,7 @@ export async function projectBacklog(
            updated_at = excluded.updated_at`,
       ).bind(Number(last.received_at), String(last.id), nowSec).run();
     }
+    await updateChangeReceiptClientAcks(db);
     return { windows: processed, hours };
   } catch (error) {
     if (missingTable(error)) return { windows: 0, hours: 0 };

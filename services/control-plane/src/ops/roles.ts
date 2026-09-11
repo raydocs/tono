@@ -14,6 +14,7 @@ const ROUTE_ACTIONS: Record<OpsV1Route, OpsAction> = {
   'GET /api/v1/ops/nodes/{name}/jobs': 'nodes.read',
   'GET /api/v1/ops/nodes/{name}/acceptance': 'nodes.read',
   'GET /api/v1/ops/nodes/{name}/retire-preview': 'nodes.read',
+  'GET /api/v1/ops/nodes/{name}/receipts': 'nodes.read',
   'POST /api/v1/ops/nodes/{name}/jobs': 'nodes.jobs',
   'PATCH /api/v1/ops/nodes/{name}/profile': 'nodes.write',
   'GET /api/v1/ops/customers': 'customers.read',

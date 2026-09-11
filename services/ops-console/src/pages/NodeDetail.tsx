@@ -50,7 +50,7 @@ export default function NodeDetailPage({ name, customers }: {
   const acceptance = useResource(name, (signal) => nodeApi.acceptance(name, signal));
   const connections = useResource(name, (signal) => nodeApi.connections(name, signal));
   const jobs = useResource(name, (signal) => nodeApi.jobs(name, signal));
-  const history = useResource(name, (signal) => nodeApi.history(name, signal));
+  const receipts = useResource(name, (signal) => nodeApi.receipts(name, signal));
 
   if (detail.status !== 'ready') {
     return (
@@ -74,7 +74,7 @@ export default function NodeDetailPage({ name, customers }: {
           detail.reload();
           acceptance.reload();
           jobs.reload();
-          history.reload();
+          receipts.reload();
         }}
       />
 
@@ -110,9 +110,9 @@ export default function NodeDetailPage({ name, customers }: {
       />
 
       <NodeHistory
-        rows={history.status === 'ready' ? history.data.items : []}
-        state={history.status}
-        message={history.status === 'error' ? history.message : undefined}
+        rows={receipts.status === 'ready' ? receipts.data.items : []}
+        state={receipts.status}
+        message={receipts.status === 'error' ? receipts.message : undefined}
       />
 
       {/* The write lands on the profile, and the profile is half of the page's

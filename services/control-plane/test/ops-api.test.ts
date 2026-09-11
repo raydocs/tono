@@ -898,6 +898,7 @@ describe('ops v1 api', () => {
       'GET /api/v1/ops/nodes/{name}/bindings',
       'GET /api/v1/ops/nodes/{name}/jobs',
       'GET /api/v1/ops/nodes/{name}/retire-preview',
+      'GET /api/v1/ops/nodes/{name}/receipts',
       'POST /api/v1/ops/nodes/{name}/jobs',
       'PATCH /api/v1/ops/nodes/{name}/profile',
       'GET /api/v1/ops/customers',
