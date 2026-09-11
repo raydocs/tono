@@ -70,6 +70,15 @@ describe('catalog hy2 contract', () => {
     ].join('\n') + '\n';
     expectInvalidCatalog(skipVerify);
 
+    const skipVerifyUpper = [
+      'proxies:',
+      vless('Tokyo · Sakura', '203.0.113.60'),
+      hy2(fp, ['    skip-cert-verify: TRUE']),
+      vless('Tokyo · Fuji', '203.0.113.61'),
+      groups,
+    ].join('\n') + '\n';
+    expectInvalidCatalog(skipVerifyUpper);
+
     const yaml = [
       'proxies:',
       vless('Tokyo · Sakura', '203.0.113.60'),
@@ -113,7 +122,7 @@ describe('catalog hy2 contract', () => {
       '    type: select',
       '    proxies:',
       '      - Tokyo · Sakura',
-      '      - Tokyo · Sakura · hy2',
+      '      - "Tokyo · Sakura · hy2"',
       '      - Tokyo · Fuji',
     ].join('\n') + '\n';
     expect(filterHy2CatalogForViewer(yaml, true)).toBe(yaml);

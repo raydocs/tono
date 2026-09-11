@@ -369,8 +369,9 @@ class PublishManagedCatalogTest < Minitest::Test
   def test_publish_refuses_hy2_without_fingerprint_or_with_skip_cert_verify
     missing = HY2_SOURCE.sub("  fingerprint: #{HY2_FINGERPRINT}\n", "")
     skipped = HY2_SOURCE.sub("skip-cert-verify: false", "skip-cert-verify: true")
+    skipped_upper = HY2_SOURCE.sub("skip-cert-verify: false", "skip-cert-verify: TRUE")
     unnamed = HY2_SOURCE.sub("Tokyo Reality · hy2", "Tokyo Reality")
-    [missing, skipped, unnamed].each do |content|
+    [missing, skipped, skipped_upper, unnamed].each do |content|
       code, output, uploaded = run_publisher(["--publish", source("bad-hy2.yaml", content)])
       assert_equal(1, code, output)
       assert_match(/exactly one per-account identity placeholder/, output)
