@@ -296,6 +296,7 @@
     "unknownStage": "Unknown stage",
     "statusTitle": "This route did not pass the connection check",
     "statusBody": "Direct traffic is blocked while this connection is unavailable. Retry or restore normal Internet.",
+    "releasedFailureBody": "This city did not connect. Direct internet is available. Retry, choose another route, or try the backup channel if one is shown.",
     "protectionUnknownBody": "Tono cannot confirm network protection. Repair the service if prompted, or choose Restore Normal Internet.",
     "completedCount": "{{count}} completed",
     "technicalDetails": "Technical details",

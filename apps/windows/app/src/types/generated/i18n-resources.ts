@@ -1283,6 +1283,7 @@ export interface TranslationResources {
         copyFailed: string
         failedAt: string
         protectionUnknownBody: string
+        releasedFailureBody: string
         restore: string
         restoreConfirmMessage: string
         restoreConfirmTitle: string

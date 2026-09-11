@@ -1713,6 +1713,16 @@
         }
       }
     },
+    "Direct internet is available. Retry or choose another route.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "直连网络可用。可以立即重试，或选择其他线路。"
+          }
+        }
+      }
+    },
     "Direct traffic blocked": {
       "localizations": {
         "zh-Hans": {

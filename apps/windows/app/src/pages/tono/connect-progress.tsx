@@ -351,7 +351,13 @@ export const ConnectProgressCard = ({
               ? 'tono.pill.title.protectionUnknown' : 'tono.progress.statusTitle')}
           </div>
           <div style={{ fontSize: 13, lineHeight: 1.5, color: text.secondary }}>
-            {t(protectionConfirmed ? 'tono.progress.statusBody' : 'tono.progress.protectionUnknownBody')}
+            {t(
+              releasedFailure
+                ? 'tono.progress.releasedFailureBody'
+                : protectionConfirmed
+                  ? 'tono.progress.statusBody'
+                  : 'tono.progress.protectionUnknownBody',
+            )}
           </div>
         </div>
       )}

@@ -792,6 +792,7 @@ export const translationKeys = [
   'tono.progress.unknownStage',
   'tono.progress.statusTitle',
   'tono.progress.statusBody',
+  'tono.progress.releasedFailureBody',
   'tono.progress.protectionUnknownBody',
   'tono.progress.completedCount',
   'tono.progress.technicalDetails',

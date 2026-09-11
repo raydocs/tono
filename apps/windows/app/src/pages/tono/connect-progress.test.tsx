@@ -418,6 +418,17 @@ describe('ConnectProgressCard', () => {
       onChooseRoute,
     })
 
+    expect(
+      await screen.findByText(enTono.progress.releasedFailureBody),
+    ).toBeDefined()
+    expect(
+      screen.queryByText(enTono.progress.protectionUnknownBody),
+    ).toBeNull()
+    expect(screen.queryByText(enTono.progress.statusBody)).toBeNull()
+    expect(enTono.progress.releasedFailureBody).not.toMatch(
+      /blocked|Restore Normal Internet/i,
+    )
+
     fireEvent.click(await screen.findByTestId('tono-progress-retry'))
     await waitFor(() => expect(tonoConnectMock).toHaveBeenCalledTimes(1))
     expect(tonoRetryNowMock).not.toHaveBeenCalled()

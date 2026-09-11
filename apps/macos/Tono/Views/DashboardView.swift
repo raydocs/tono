@@ -515,12 +515,20 @@ private struct ConnectionProgressCard: View {
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 } else if let failure = appState.lastConnectionFailure {
-                    HStack(spacing: 4) {
-                        Text("Failed at")
-                        Text(LocalizedStringKey(failure.stage.rawValue))
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 4) {
+                            Text("Failed at")
+                            Text(LocalizedStringKey(failure.stage.rawValue))
+                        }
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        if !appState.isProtectionBlocked {
+                            Text("Direct internet is available. Retry or choose another route.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
                 } else {
                     Text("Direct traffic remains blocked while Tono waits to retry.")
                         .font(.system(size: 12))
