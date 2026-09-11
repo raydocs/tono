@@ -35,6 +35,7 @@
 - 控制面目录合同已接受同节点 hy2 块（`password: {{TONO_CLIENT_UUID}}` + fingerprint，禁止 skip-cert-verify；迁移 0072）。**生产目录仍不塞块**，直到客户端准入合入。
 - 杭州 `47.110.84.71` 只出站：东京 VLESS TCP 通；Dedirock hy2 UDP 握手 5/5 且经 hy2 到 Google 通。Panstar 东京入站 UDP 被商家拦住。自动切换默认关。客户目录默认剥掉 ` · hy2`（`HY2_CATALOG_EMAILS` 灰度）。**生产目录仍不塞块。**
 - **2026-09-11：** 杭州阿里云（非移动）打东京/Dedirock Reality dest SNI，拿到微软 `r.bing.com` 证书。出口没挂。「移动用不了」要用移动家宽测；东京 hy2 仍进不来，大陆 hy2 备用目前是 Dedirock。Dedirock 手工 hy2 原先是共享口令，目录 UUID 登不上；本分支改为 HTTP 鉴权吃全部 VLESS UUID。
+- **0.0.73 发布说明草稿**已写在 `apps/macos/release-notes/build73.md` 与 `apps/windows/release-notes/0.0.73.md`（含中文）：**本版备用通道仅手动。** 源码版本仍是 **0.0.72**。G1–G3 证据齐之前禁止升号、禁止改 appcast / `windows-updates`。
 
 **还没有的（这一发要补）**
 
