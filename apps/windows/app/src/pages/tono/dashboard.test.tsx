@@ -427,6 +427,25 @@ describe('dashboard claude residential route badge', () => {
     ).toBeDefined()
   })
 
+  it('hides the first-connect checklist after handshake eof so the next hand is visible', async () => {
+    mocks.status = makeStatus({ selectedServer: 'Tokyo · Sakura' })
+    mocks.tonoConnect.mockRejectedValue(
+      new Error(
+        'TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof [CORE_EXIT_UNREACHABLE]',
+      ),
+    )
+    renderDashboard()
+    expect(screen.getByText('First connect')).toBeDefined()
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Standby — Click to connect',
+      }),
+    )
+    await screen.findByRole('alert')
+    expect(screen.queryByText('First connect')).toBeNull()
+  })
+
   it('tells the customer to disconnect and reinstall when the update journal is Failed', () => {
     mocks.status = makeStatus({ updateIncomplete: true })
     renderDashboard()

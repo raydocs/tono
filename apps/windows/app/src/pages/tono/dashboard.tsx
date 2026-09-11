@@ -810,7 +810,7 @@ const DashboardPage = () => {
           </span>
         </div>
       )}
-      {/* Center stack — status chip → connect → node → (progress only when busy) */}
+      {/* Center stack — pill, then failure/backup, then idle checklist */}
       <div
         className="tono-dashboard__content"
         style={{
@@ -861,7 +861,17 @@ const DashboardPage = () => {
             {connectHint}
           </p>
         </div>
-        {!connected && uiState === 'notConnected' && (
+        {/* Failure + backup first. The first-connect checklist is idle-only —
+            after handshake eof it sat above Try backup channel and looked
+            like Encrypted DNS was the next hand. */}
+        <ConnectProgressCard
+          uiState={uiState}
+          protectionConfirmed={protectionConfirmed}
+          selectedServer={status?.selectedServer}
+          onRefreshStatus={mutateTonoStatus}
+          onChooseRoute={() => navigate('/servers')}
+        />
+        {!connected && uiState === 'notConnected' && !showActionError && (
           <ConnectChecklist dark={dark} />
         )}
         {/* Actionable error under the primary control — includes a switch-server
@@ -997,14 +1007,6 @@ const DashboardPage = () => {
             </div>
           </div>
         )}
-        {/* Progress card self-hides when idle and no uncleared failure record. */}
-        <ConnectProgressCard
-          uiState={uiState}
-          protectionConfirmed={protectionConfirmed}
-          selectedServer={status?.selectedServer}
-          onRefreshStatus={mutateTonoStatus}
-          onChooseRoute={() => navigate('/servers')}
-        />
         {status?.selectedServer && (
           <ActiveNodeCard
             serverName={status.selectedServer}
