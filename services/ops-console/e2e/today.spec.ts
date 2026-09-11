@@ -265,9 +265,10 @@ test.describe('早报', () => {
     await expect(digest.locator('.night-group')).toHaveCount(10);
     const more = digest.getByRole('button', { name: '还有 15 组' });
     await expect(more).toBeVisible();
-    // One screen at 1440×900, on the worst night the fixtures have.
+    // One screen at 1440×900, on the worst night the fixtures have. #140's
+    // dense 早报 landed at ~499px; keep the cap inside a laptop viewport.
     const box = await digest.boundingBox();
-    expect(box!.height).toBeLessThan(450);
+    expect(box!.height).toBeLessThan(520);
     await expect(page).toHaveScreenshot('digest-dense.png');
 
     await more.click();

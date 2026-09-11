@@ -9,6 +9,8 @@ import {
   relistCatalogPlan,
   retirementCatalogPlan,
   splitManagedCatalogProxies,
+  catalogBaseName,
+  catalogHy2Name,
 } from '../../catalog-yaml';
 import {
   type Env,
@@ -85,7 +87,7 @@ export async function operationsFleetNodes(e: Env, cache?: OpsRequestCache) {
   let catalogSource: Row;
   if (catalogResult.state === 'ready') {
     try {
-      catalogNames = new Set(splitManagedCatalogProxies(catalogResult.catalog.yaml).items.map((item) => item.name));
+      catalogNames = new Set(splitManagedCatalogProxies(catalogResult.catalog.yaml).items.map((item) => catalogBaseName(item.name)));
       catalogRevision = catalogResult.catalog.revision;
       catalogSource = { state: 'ready', revision: catalogRevision };
     } catch (error) {
@@ -291,6 +293,26 @@ function proxyBlockFromProfile(name: string, publicIp: string): string {
   ].join('\n');
 }
 
+function hy2FingerprintHex(raw: unknown): string | null {
+  const hex = String(raw ?? '').replace(/:/g, '').trim().toLowerCase();
+  return /^[0-9a-f]{64}$/.test(hex) ? hex : null;
+}
+
+/** Same-node hy2 block. SNI matches the provisioner default (`www.microsoft.com`). */
+function hy2BlockFromProfile(base: string, publicIp: string, fingerprint: string, port: number): string {
+  return [
+    `  - name: ${catalogHy2Name(base)}`,
+    '    type: hysteria2',
+    `    server: ${publicIp}`,
+    `    port: ${port}`,
+    `    password: ${CLIENT_UUID_PLACEHOLDER}`,
+    '    sni: www.microsoft.com',
+    `    fingerprint: ${fingerprint}`,
+    '    skip-cert-verify: false',
+    '',
+  ].join('\n');
+}
+
 export async function relistFleetNode(
   e: Env,
   actorEmail: string,
@@ -307,17 +329,36 @@ export async function relistFleetNode(
     throw new ApiError(409, 'CATALOG_CONFLICT', 'Managed catalog changed; preview relist again');
   }
   let block = typeof requestBody.block === 'string' ? requestBody.block : '';
+  const profile = await e.DB.prepare(
+    'SELECT public_ip, hy2_port, hy2_fingerprint FROM ops_node_profiles WHERE catalog_name = ?',
+  ).bind(name).first<Row>();
+  const ip = profile?.public_ip == null ? '' : String(profile.public_ip).trim();
   if (!block.trim()) {
-    const profile = await e.DB.prepare(
-      'SELECT public_ip FROM ops_node_profiles WHERE catalog_name = ?',
-    ).bind(name).first<Row>();
-    const ip = profile?.public_ip == null ? '' : String(profile.public_ip).trim();
     if (!ip) throw new ApiError(422, 'RELIST_NO_TEMPLATE', 'No stored catalog template for this node');
     block = proxyBlockFromProfile(name, ip);
   }
-  const plan = relistCatalogPlan(catalog.yaml, name, block);
+  let plan = relistCatalogPlan(catalog.yaml, name, block);
   if (!plan.safe) {
     throw new ApiError(422, 'RELIST_UNSAFE', plan.warnings[0] ?? 'Node cannot be relisted');
+  }
+  const fingerprint = hy2FingerprintHex(profile?.hy2_fingerprint);
+  if (fingerprint && ip) {
+    const hy2Port = Number(profile?.hy2_port);
+    const port = Number.isSafeInteger(hy2Port) && hy2Port > 0 && hy2Port <= 65535 ? hy2Port : 443;
+    const hy2Plan = relistCatalogPlan(
+      plan.yaml,
+      catalogHy2Name(name),
+      hy2BlockFromProfile(name, ip, fingerprint, port),
+    );
+    if (!hy2Plan.safe) {
+      throw new ApiError(422, 'RELIST_UNSAFE', hy2Plan.warnings[0] ?? 'Node cannot be relisted');
+    }
+    plan = {
+      yaml: hy2Plan.yaml,
+      alreadyListed: plan.alreadyListed && hy2Plan.alreadyListed,
+      warnings: hy2Plan.warnings,
+      safe: true,
+    };
   }
   const digest = await sha256(plan.yaml);
   const changedAt = now();

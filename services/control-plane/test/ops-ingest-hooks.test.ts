@@ -175,6 +175,42 @@ describe('ops ingest hooks', () => {
     expect((await api('telemetry/windows', json(unknown, account.token))).status).toBe(400);
   });
 
+  it('stores transport=hy2 on connect events and rejects any other value', async () => {
+    const account = await seedAccount('hy2');
+    const body = telemetryWindow();
+    const nowMs = Date.now();
+    body.window.events = [
+      { ts: nowMs - 20_000, kind: 'connectBegin', node: 'Tokyo · Sakura · hy2', transport: 'hy2' },
+      { ts: nowMs - 10_000, kind: 'connectOk', node: 'Tokyo · Sakura · hy2', transport: 'hy2', elapsedMs: 900 },
+    ] as unknown as typeof body.window.events;
+    body.window.eventCount = 2;
+    const response = await api('telemetry/windows', json(body, account.token));
+    expect(response.status).toBe(201);
+    const receipt = await response.json() as { id: string };
+    const rows = await db().prepare(
+      `SELECT kind, node, transport FROM connection_events WHERE window_id = ? ORDER BY kind`,
+    ).bind(receipt.id).all<{ kind: string; node: string; transport: string }>();
+    expect(rows.results).toEqual([
+      { kind: 'connectBegin', node: 'Tokyo · Sakura · hy2', transport: 'hy2' },
+      { kind: 'connectOk', node: 'Tokyo · Sakura · hy2', transport: 'hy2' },
+    ]);
+
+    const failure = await api('telemetry/failures', json({
+      ts: nowMs, stage: 'handshake', code: 'ETIMEDOUT', node: 'Tokyo · Sakura · hy2',
+      appVersion: '0.0.72', osVersion: 'Windows 11', osArch: 'x86_64', platform: 'windows',
+      transport: 'hy2',
+    }, account.token));
+    expect(failure.status).toBe(202);
+    const failRow = await db().prepare(
+      `SELECT transport FROM connection_events WHERE user_id = ? AND source = 'failure'`,
+    ).bind(account.userId).first<{ transport: string }>();
+    expect(failRow?.transport).toBe('hy2');
+
+    const bad = telemetryWindow();
+    bad.window.events[1] = { ...bad.window.events[1], transport: 'quic' } as never;
+    expect((await api('telemetry/windows', json(bad, account.token))).status).toBe(400);
+  });
+
   it('failure reports spend their own rate-limit bucket, not the heartbeat one', async () => {
     const account = await seedAccount('bucket');
     const limits = env as unknown as Env;

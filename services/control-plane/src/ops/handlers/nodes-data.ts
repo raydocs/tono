@@ -1,7 +1,7 @@
 import { decryptCatalog } from '../../crypto';
 import { requiredCatalogKey } from '../../env';
 import { ApiError } from '../../errors';
-import { splitManagedCatalogProxies } from '../../catalog-yaml';
+import { splitManagedCatalogProxies, catalogBaseName } from '../../catalog-yaml';
 import {
   healthWordForVerdict,
   NODE_VERDICTS,
@@ -138,6 +138,12 @@ export function factsFrom(profile: Row | null, agent: Row | null, fallbackAt: nu
     notes: nullText(profile?.notes),
     createdAt: createdAt > 0 ? createdAt : fallbackAt,
     updatedAt: updatedAt > 0 ? updatedAt : fallbackAt,
+    ...(nullInt(profile?.hy2_port) != null
+      ? {
+        transports: ['tcp', 'hy2'] as Array<'tcp' | 'hy2'>,
+        hy2: { port: nullInt(profile?.hy2_port), udpOk: null },
+      }
+      : {}),
   };
 }
 
@@ -154,7 +160,7 @@ export async function catalogNames(e: Env): Promise<Set<string> | null> {
     ).first<Row>();
     if (!row) return new Set();
     const yaml = await decryptCatalog(String(row.ciphertext), String(row.nonce), requiredCatalogKey(e));
-    return new Set(splitManagedCatalogProxies(yaml).items.map((item) => item.name));
+    return new Set(splitManagedCatalogProxies(yaml).items.map((item) => catalogBaseName(item.name)));
   } catch {
     return null;
   }
@@ -343,6 +349,7 @@ export function eventDto(row: Row): ConnectionEventDto {
     catalogRevision: nullInt(row.catalog_revision), edgeAsn: nullInt(row.edge_asn),
     edgeAsOrg: nullText(row.edge_as_org), edgeCountry: nullText(row.edge_country),
     edgeRegion: nullText(row.edge_region), edgeViaExit: Number(row.edge_via_exit) === 1,
+    ...(row.transport === 'tcp' || row.transport === 'hy2' ? { transport: row.transport } : {}),
   };
 }
 

@@ -1,0 +1,168 @@
+import { describe, expect, it } from 'vitest';
+import { ApiError } from '../src/errors';
+import { managedCatalogYAML, retirementCatalogPlan, relistCatalogPlan, filterHy2CatalogForViewer, hy2CatalogEmailAllowlist, requestAcceptsHy2Catalog } from '../src/catalog-yaml';
+
+function expectInvalidCatalog(yaml: string) {
+  try {
+    managedCatalogYAML(yaml);
+  } catch (error) {
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(400);
+    expect((error as ApiError).code).toBe('INVALID_CATALOG');
+    return;
+  }
+  throw new Error('expected INVALID_CATALOG');
+}
+
+describe('catalog hy2 contract', () => {
+  it('admits a same-node hy2 block, rejects one without fingerprint, and retires both with the base name', () => {
+    const vless = (name: string, ip: string) => [
+      `  - name: ${name}`,
+      '    type: vless',
+      `    server: ${ip}`,
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+    ].join('\n');
+    const hy2 = (fingerprint: string, extra: string[] = []) => [
+      '  - name: Tokyo · Sakura · hy2',
+      '    type: hysteria2',
+      '    server: 203.0.113.60',
+      '    port: 443',
+      '    password: {{TONO_CLIENT_UUID}}',
+      '    sni: www.microsoft.com',
+      `    fingerprint: ${fingerprint}`,
+      ...extra,
+    ].join('\n');
+    const groups = [
+      'proxy-groups:',
+      '  - name: Tono-Exit',
+      '    type: select',
+      '    proxies:',
+      '      - Tokyo · Sakura',
+      '      - Tokyo · Sakura · hy2',
+      '      - Tokyo · Fuji',
+      'rules:',
+      '  - MATCH,Tono-Exit',
+    ].join('\n');
+    const fp = 'e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db';
+    const missingFp = [
+      'proxies:',
+      vless('Tokyo · Sakura', '203.0.113.60'),
+      [
+        '  - name: Tokyo · Sakura · hy2',
+        '    type: hysteria2',
+        '    server: 203.0.113.60',
+        '    port: 443',
+        '    password: {{TONO_CLIENT_UUID}}',
+        '    sni: www.microsoft.com',
+      ].join('\n'),
+      vless('Tokyo · Fuji', '203.0.113.61'),
+      groups,
+    ].join('\n') + '\n';
+    expectInvalidCatalog(missingFp);
+
+    const skipVerify = [
+      'proxies:',
+      vless('Tokyo · Sakura', '203.0.113.60'),
+      hy2(fp, ['    skip-cert-verify: true']),
+      vless('Tokyo · Fuji', '203.0.113.61'),
+      groups,
+    ].join('\n') + '\n';
+    expectInvalidCatalog(skipVerify);
+
+    const skipVerifyUpper = [
+      'proxies:',
+      vless('Tokyo · Sakura', '203.0.113.60'),
+      hy2(fp, ['    skip-cert-verify: TRUE']),
+      vless('Tokyo · Fuji', '203.0.113.61'),
+      groups,
+    ].join('\n') + '\n';
+    expectInvalidCatalog(skipVerifyUpper);
+
+    const yaml = [
+      'proxies:',
+      vless('Tokyo · Sakura', '203.0.113.60'),
+      hy2(fp),
+      vless('Tokyo · Fuji', '203.0.113.61'),
+      groups,
+    ].join('\n') + '\n';
+    expect(managedCatalogYAML(yaml)).toBe(yaml);
+
+    const plan = retirementCatalogPlan(yaml, 'Tokyo · Sakura');
+    expect(plan.safe).toBe(true);
+    expect(plan.changes.catalogEntryRemoved).toBe(true);
+    expect(plan.yaml).toContain('Tokyo · Fuji');
+    expect(plan.yaml).not.toContain('Tokyo · Sakura');
+    expect(plan.yaml).not.toContain(' · hy2');
+    expect(plan.yaml.match(/\{\{TONO_CLIENT_UUID\}\}/g)).toHaveLength(1);
+
+    const relisted = relistCatalogPlan(plan.yaml, 'Tokyo · Sakura', `${vless('Tokyo · Sakura', '203.0.113.60')}\n`);
+    expect(relisted.safe).toBe(true);
+    const relistedHy2 = relistCatalogPlan(
+      relisted.yaml,
+      'Tokyo · Sakura · hy2',
+      `${hy2(fp)}\n`,
+    );
+    expect(relistedHy2.safe).toBe(true);
+    expect(relistedHy2.yaml).toContain('Tokyo · Sakura · hy2');
+    expect(relistedHy2.yaml).toContain('type: hysteria2');
+    expect(relistedHy2.yaml.match(/\{\{TONO_CLIENT_UUID\}\}/g)).toHaveLength(3);
+  });
+
+  it('hides hy2 blocks and group members unless the viewer is on the gray list', () => {
+    const yaml = [
+      'proxies:',
+      '  - name: Tokyo · Sakura',
+      '    type: vless',
+      '    server: 203.0.113.60',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '  - name: Tokyo · Sakura · hy2',
+      '    type: hysteria2',
+      '    server: 203.0.113.60',
+      '    port: 443',
+      '    password: {{TONO_CLIENT_UUID}}',
+      '    sni: www.microsoft.com',
+      '    fingerprint: e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db',
+      '  - name: Tokyo · Fuji',
+      '    type: vless',
+      '    server: 203.0.113.61',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      'proxy-groups:',
+      '  - name: Tono-Exit',
+      '    type: select',
+      '    proxies:',
+      '      - Tokyo · Sakura',
+      '      - "Tokyo · Sakura · hy2"',
+      '      - Tokyo · Fuji',
+    ].join('\n') + '\n';
+    expect(filterHy2CatalogForViewer(yaml, true)).toBe(yaml);
+    const hidden = filterHy2CatalogForViewer(yaml, false);
+    expect(hidden).toContain('Tokyo · Sakura\n');
+    expect(hidden).toContain('Tokyo · Fuji');
+    expect(hidden).not.toContain(' · hy2');
+    expect(hidden).not.toContain('type: hysteria2');
+    expect(hidden).toContain('      - Tokyo · Sakura\n');
+    expect(hidden).toContain('      - Tokyo · Fuji');
+    const noHy2 = [
+      'proxies:',
+      '  - name: Tokyo · Sakura',
+      '    type: vless',
+      '    server: 203.0.113.60',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+    ].join('\n') + '\n';
+    expect(filterHy2CatalogForViewer(noHy2, false)).toBe(noHy2);
+    expect(hy2CatalogEmailAllowlist('')).toEqual(new Set());
+    expect(hy2CatalogEmailAllowlist(' Boss@Example.COM ,other')).toEqual(
+      new Set(['boss@example.com']),
+    );
+    expect(requestAcceptsHy2Catalog(null)).toBe(false);
+    expect(requestAcceptsHy2Catalog('')).toBe(false);
+    expect(requestAcceptsHy2Catalog('hy2')).toBe(true);
+    expect(requestAcceptsHy2Catalog('HY2')).toBe(true);
+    expect(requestAcceptsHy2Catalog('hy2, other')).toBe(true);
+    expect(requestAcceptsHy2Catalog('other')).toBe(false);
+  });
+});

@@ -55,7 +55,7 @@ test.describe('clients page', () => {
     await row.getByRole('button', { name: '撤回' }).click();
 
     const dialog = page.getByRole('dialog');
-    await expect(dialog).toContainText('这只在后台把 1.8.1 标记为已撤回');
+    await expect(dialog).toContainText('1.8.1 会从客户端检查更新的地方消失');
     await dialog.getByRole('button', { name: '撤回' }).click();
 
     await expect(row).toContainText('已撤回');
