@@ -17,8 +17,9 @@ import {
 import { backupChannelName } from './node-meta'
 
 /**
- * Manual-only next hand after a TCP/handshake failure: the same-city hy2
- * sibling, if the catalog has one. Does not auto-switch (G2.8 stays off).
+ * Manual-only next hand when TCP is dead: the same-city hy2 sibling, if the
+ * catalog has one. Does not auto-switch (G2.8 stays off). Shown for handshake
+ * eof, and also when protected-offline has no leftover error (restart).
  */
 export function useManualBackupChannel(
   selectedServer: string | null | undefined,
@@ -30,7 +31,7 @@ export function useManualBackupChannel(
     queryFn: tonoServers,
     enabled: offline,
   })
-  const { data: progress } = useQuery({
+  const { data: progress, isPending: progressPending } = useQuery({
     queryKey: tonoConnectProgressQueryKey,
     queryFn: tonoConnectProgress,
     enabled: offline,
@@ -39,10 +40,14 @@ export function useManualBackupChannel(
     selectedServer,
     (servers ?? []).map((server) => server.name),
   )
-  const available =
-    offline &&
-    hy2Sibling != null &&
-    connectErrorSuggestsBackupChannel(progress?.error)
+  // Handshake eof is the usual case. After a restart the progress record may
+  // have no error left; still offer the sibling rather than only Retry TCP.
+  // DNS / service failures keep their own next hand.
+  const errorAllowsBackup =
+    progress?.error == null
+      ? !progressPending
+      : connectErrorSuggestsBackupChannel(progress.error)
+  const available = offline && hy2Sibling != null && errorAllowsBackup
 
   const selectAndRetry = useLockFn(async () => {
     if (!hy2Sibling) return

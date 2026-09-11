@@ -88,20 +88,22 @@ struct MenuBarView: View {
     @ViewBuilder
     private var primaryAction: some View {
         if appState.isProtectionBlocked, accountSession.state == .ready {
-            actionButton(
-                title: appState.protectedReconnectPausedForUserAction
-                    ? "Repair and reconnect"
-                    : "Retry now",
-                prominent: true
-            ) {
-                appState.retryProtectedConnectionNow()
-            }
-            .disabled(!canAct)
-            if appState.backupHy2SiblingName() != nil {
-                actionButton(title: "Try backup channel", prominent: true) {
-                    appState.tryBackupChannelManually()
+            VStack(spacing: 0) {
+                actionButton(
+                    title: appState.protectedReconnectPausedForUserAction
+                        ? "Repair and reconnect"
+                        : "Retry now",
+                    prominent: true
+                ) {
+                    appState.retryProtectedConnectionNow()
                 }
                 .disabled(!canAct)
+                if appState.backupHy2SiblingName() != nil {
+                    actionButton(title: "Try backup channel", prominent: true) {
+                        appState.tryBackupChannelManually()
+                    }
+                    .disabled(!canAct)
+                }
             }
         } else if appState.isConnected {
             actionButton(title: "Disconnect and restore internet", prominent: false) {

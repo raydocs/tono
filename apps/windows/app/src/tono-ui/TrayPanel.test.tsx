@@ -157,4 +157,22 @@ describe('TrayPanel backup channel', () => {
     expect(await screen.findByRole('button', { name: 'Retry' })).toBeDefined()
     expect(screen.queryByTestId('tono-tray-try-backup')).toBeNull()
   })
+
+  it('still offers the backup channel when protected-offline has no failure record', async () => {
+    mocks.tonoConnectProgress.mockResolvedValue({
+      steps: [],
+      totalElapsedMs: 0,
+      failedStage: null,
+      error: null,
+      retryAttempt: 0,
+      nextRetryAtMs: null,
+    })
+
+    render(<TrayPanel />, { wrapper: freshSWR })
+
+    expect(
+      await screen.findByRole('button', { name: 'Try backup channel' }),
+    ).toBeDefined()
+    expect(mocks.tonoSelectServer).not.toHaveBeenCalled()
+  })
 })

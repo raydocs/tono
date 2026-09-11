@@ -694,6 +694,36 @@ describe('ConnectProgressCard', () => {
       expect(tonoRetryNowMock).not.toHaveBeenCalled()
     })
 
+    it('does not offer the backup channel while progress is still loading', async () => {
+      tonoServersMock.mockResolvedValue(catalogWithHy2())
+      tonoConnectProgressMock.mockReturnValue(
+        new Promise<TonoConnectProgress>(() => {}),
+      )
+
+      renderCard({
+        uiState: 'protectedOffline',
+        selectedServer: tokyo,
+      })
+
+      await waitFor(() => expect(tonoConnectProgressMock).toHaveBeenCalled())
+      expect(screen.queryByTestId('tono-try-backup-channel')).toBeNull()
+    })
+
+    it('still offers the backup channel after a restart that left no failure record', async () => {
+      tonoServersMock.mockResolvedValue(catalogWithHy2())
+      tonoConnectProgressMock.mockResolvedValue(makeProgress({ error: null }))
+
+      renderCard({
+        uiState: 'protectedOffline',
+        selectedServer: tokyo,
+      })
+
+      expect(
+        await screen.findByRole('button', { name: 'Try backup channel' }),
+      ).toBeDefined()
+      expect(tonoSelectServerMock).not.toHaveBeenCalled()
+    })
+
     it('selects the hy2 sibling and retries only after the user clicks', async () => {
       tonoServersMock.mockResolvedValue(catalogWithHy2())
       tonoConnectProgressMock.mockResolvedValue(
