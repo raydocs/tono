@@ -101,6 +101,10 @@ export type NodeProfileInput = {
   expiresAt?: number | null;
   notes?: string | null;
   quota?: NodeQuotaInput | null;
+  capacityUsers?: number | null;
+  displayName?: string | null;
+  failureDomain?: string | null;
+  replaces?: string | null;
 };
 
 export const nodeApi = {

@@ -31,11 +31,15 @@ import { useWrite } from '../settings/use-write';
  * the same kind of fact: what the provider sold, not what the meter saw.
  */
 type Form = {
+  displayName: string;
   provider: string;
   providerAccountId: string;
   region: string;
+  failureDomain: string;
+  replaces: string;
   lineTags: string;
   port: string;
+  capacityUsers: string;
   price: string;
   currency: string;
   billingCycle: string;
@@ -55,11 +59,15 @@ function formOf(node: NodeDetailDto): Form {
   const facts = node.facts;
   const quota = node.quota.value;
   return {
+    displayName: node.displayName ?? '',
     provider: facts.provider ?? '',
     providerAccountId: facts.providerAccountId ?? ACCOUNT_NONE,
     region: facts.region ?? '',
+    failureDomain: node.failureDomain ?? '',
+    replaces: node.replaces ?? '',
     lineTags: facts.lineTags.join(' · '),
     port: facts.port === null ? '' : String(facts.port),
+    capacityUsers: facts.capacityUsers == null ? '' : String(facts.capacityUsers),
     price: facts.price === null ? '' : String(facts.price),
     currency: facts.currency ?? '',
     billingCycle: facts.billingCycle === null ? '' : String(facts.billingCycle),
@@ -84,11 +92,15 @@ function formOf(node: NodeDetailDto): Form {
  */
 function bodyOf(form: Form): NodeProfileInput {
   return {
+    displayName: textOrNull(form.displayName),
     provider: textOrNull(form.provider),
     providerAccountId: form.providerAccountId === ACCOUNT_NONE ? null : form.providerAccountId,
     region: textOrNull(form.region),
+    failureDomain: textOrNull(form.failureDomain),
+    replaces: textOrNull(form.replaces),
     lineTags: parseLineTags(form.lineTags),
     port: numberOrNull(form.port),
+    capacityUsers: numberOrNull(form.capacityUsers),
     price: numberOrNull(form.price),
     currency: textOrNull(form.currency),
     billingCycle: numberOrNull(form.billingCycle),
@@ -151,6 +163,12 @@ export function NodeProfileDrawer({
 
       <FieldGrid>
         <TextField
+          label={copy.nodeProfileFields.displayName}
+          hint={copy.nodeProfileHints.displayName}
+          value={form.displayName}
+          onChange={(value) => set('displayName', value)}
+        />
+        <TextField
           label={copy.nodeProfileFields.provider}
           value={form.provider}
           onChange={(value) => set('provider', value)}
@@ -168,6 +186,18 @@ export function NodeProfileDrawer({
           onChange={(value) => set('region', value)}
         />
         <TextField
+          label={copy.nodeProfileFields.failureDomain}
+          hint={copy.nodeProfileHints.failureDomain}
+          value={form.failureDomain}
+          onChange={(value) => set('failureDomain', value)}
+        />
+        <TextField
+          label={copy.nodeProfileFields.replaces}
+          hint={copy.nodeProfileHints.replaces}
+          value={form.replaces}
+          onChange={(value) => set('replaces', value)}
+        />
+        <TextField
           label={copy.nodeProfileFields.tags}
           hint={copy.nodeProfileHints.tags}
           value={form.lineTags}
@@ -178,6 +208,13 @@ export function NodeProfileDrawer({
           value={form.port}
           mono
           onChange={(value) => set('port', value)}
+        />
+        <TextField
+          label={copy.nodeProfileFields.capacity}
+          hint={copy.nodeProfileHints.capacity}
+          value={form.capacityUsers}
+          mono
+          onChange={(value) => set('capacityUsers', value)}
         />
         <TextField
           label={copy.nodeProfileFields.price}
