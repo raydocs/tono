@@ -5401,6 +5401,16 @@
         }
       }
     },
+    "The update did not finish. Disconnect, then reinstall Tono.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新未完成，请手动断开后重装"
+          }
+        }
+      }
+    },
     "The protected connection did not come back after the update. Reconnect to restore protection.": {
       "localizations": {
         "zh-Hans": {

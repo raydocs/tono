@@ -228,6 +228,7 @@
     "whatFailed": "失败原因",
     "copyDetails": "复制诊断信息",
     "catalogRequiresChoice": "当前节点已下线，请另选一个",
+    "updateIncomplete": "更新未完成，请手动断开后重装",
     "killSwitchError": "断网保护：{{message}}",
     "killSwitchErrorNote": "上次错误，可能已恢复。",
     "errors": {

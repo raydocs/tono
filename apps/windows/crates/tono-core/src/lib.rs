@@ -31,7 +31,8 @@ pub use protected_connectivity::{
     classify_post_lock,
 };
 pub use update_journal::{
-    UpdateHandoffJournal, UpdateHandoffPhase, commit_verified_recovery, record_install_started,
+    UpdateHandoffJournal, UpdateHandoffPhase, commit_verified_recovery, incomplete_from_phase,
+    record_install_started,
 };
 pub use credentials::{CredentialKey, CredentialStore};
 pub use node::{

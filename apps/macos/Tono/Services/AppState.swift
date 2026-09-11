@@ -77,6 +77,9 @@ final class AppState {
     var disconnectionStartedAt: Date?
     var completedConnectionStages: Set<ConnectionStage> = []
     var lastConnectionFailure: ConnectionFailure?
+    /// Failed update journal still on disk. Dashboard tells the customer to
+    /// disconnect and reinstall; a later connect must not hide this.
+    var updateIncomplete: Bool = UpdateHandoffStore.showsIncompleteUpdate()
     var isProtectedReconnectScheduled = false
     var protectedReconnectAttempt = 0
     var protectedReconnectNextAttemptAt: Date?

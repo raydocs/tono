@@ -242,6 +242,14 @@ enum UpdateHandoffStore {
         }
     }
 
+    static func showsIncompleteUpdate(at location: URL? = nil) -> Bool {
+        load(at: location)?.phase == .failed
+    }
+
+    static let incompleteUpdateCopy = String(
+        localized: "The update did not finish. Disconnect, then reinstall Tono."
+    )
+
     static func write(_ journal: UpdateHandoffJournal, at location: URL? = nil) throws {
         let url = location ?? fileURL
         try FileManager.default.createDirectory(

@@ -764,6 +764,29 @@ const DashboardPage = () => {
           </Link>
         </div>
       )}
+      {status?.updateIncomplete && (
+        <div
+          role="alert"
+          style={{
+            display: 'flex',
+            justifyContent: 'center',
+            marginBottom: 8,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 500,
+              color: TONO_COLORS.protectedOffline,
+              borderRadius: 10,
+              padding: '8px 12px',
+              background: hex(TONO_COLORS.protectedOffline, 0.12),
+            }}
+          >
+            {t('tono.dashboard.updateIncomplete')}
+          </div>
+        </div>
+      )}
       {status?.killSwitch?.last_error && (
         <div
           style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}

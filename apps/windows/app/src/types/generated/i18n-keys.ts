@@ -738,6 +738,7 @@ export const translationKeys = [
   'tono.dashboard.whatFailed',
   'tono.dashboard.copyDetails',
   'tono.dashboard.catalogRequiresChoice',
+  'tono.dashboard.updateIncomplete',
   'tono.dashboard.killSwitchError',
   'tono.dashboard.killSwitchErrorNote',
   'tono.dashboard.errors.serviceBusy',

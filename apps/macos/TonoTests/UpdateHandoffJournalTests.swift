@@ -278,6 +278,20 @@ final class UpdateHandoffJournalTests: XCTestCase {
         }
     }
 
+    func testFailedJournalSurfacesIncompleteUpdateCopyAndKeepsTheFile() throws {
+        try withStore { url in
+            try UpdateHandoffStore.write(fixture(phase: .failed), at: url)
+            XCTAssertTrue(UpdateHandoffStore.showsIncompleteUpdate(at: url))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+            XCTAssertEqual(
+                UpdateHandoffStore.incompleteUpdateCopy,
+                String(localized: "The update did not finish. Disconnect, then reinstall Tono.")
+            )
+        }
+        XCTAssertFalse(UpdateHandoffStore.showsIncompleteUpdate(at: FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-missing-update-handoff.json")))
+    }
+
     func testNoJournalDoesNotReportUpdateRecovery() throws {
         try withStore { url in
             XCTAssertFalse(try UpdateHandoffStore.commitVerifiedRecovery(

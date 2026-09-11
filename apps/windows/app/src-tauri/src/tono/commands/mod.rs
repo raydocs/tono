@@ -116,6 +116,10 @@ pub struct TonoStatus {
     pub claude_home_active: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub claude_home_host: Option<String>,
+    /// Failed update journal is still on disk. UI tells the customer to
+    /// disconnect and reinstall; a later connect must not hide this.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub update_incomplete: bool,
 }
 
 /// Last published immutable UI snapshot. The status command reads this without joining the large
@@ -282,6 +286,7 @@ pub(crate) fn status_of(inner: &TonoInner) -> TonoStatus {
         } else {
             None
         },
+        update_incomplete: crate::tono::update_handoff::incomplete(),
     }
 }
 

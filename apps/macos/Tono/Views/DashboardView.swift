@@ -21,6 +21,15 @@ struct DashboardView: View {
             VStack(spacing: 0) {
                 dashboardHeader
 
+                if appState.updateIncomplete {
+                    Text(UpdateHandoffStore.incompleteUpdateCopy)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(TonoStatus.blocked)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 12)
+                        .accessibilityIdentifier("updateIncompleteNotice")
+                }
+
                 // Center: ConnectPill + ActiveNodeCard
                 Spacer(minLength: 12)
 
@@ -108,6 +117,9 @@ struct DashboardView: View {
             if !connected {
                 appState.networkInfo = NetworkInfo()
             }
+        }
+        .onAppear {
+            appState.updateIncomplete = UpdateHandoffStore.showsIncompleteUpdate()
         }
     }
 

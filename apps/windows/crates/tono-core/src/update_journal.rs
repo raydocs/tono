@@ -246,6 +246,12 @@ pub fn fail_pending(path: &Path, code: &str, stage: &str) -> io::Result<()> {
     write_atomic(path, &journal)
 }
 
+/// Failed journals stay on disk. The customer UI uses this so a later
+/// connect cannot treat the update as finished.
+pub fn incomplete_from_phase(phase: Option<UpdateHandoffPhase>) -> bool {
+    phase == Some(UpdateHandoffPhase::Failed)
+}
+
 /// New process after a successful install. Only the binary whose version is
 /// the journal's `next_app_version` may enter `FirstLaunchMigration`. An old
 /// binary that is still running after `InstallStarted` (installer killed,
@@ -359,6 +365,18 @@ mod tests {
             assert_eq!(decoded.previous_app_version, "0.0.34");
             assert_eq!(decoded.next_app_version, "0.0.35");
         }
+    }
+
+    #[test]
+    fn failed_journal_is_the_only_incomplete_update() {
+        assert!(incomplete_from_phase(Some(UpdateHandoffPhase::Failed)));
+        assert!(!incomplete_from_phase(None));
+        assert!(!incomplete_from_phase(Some(
+            UpdateHandoffPhase::InstallStarted
+        )));
+        assert!(!incomplete_from_phase(Some(
+            UpdateHandoffPhase::UpdatePrepared
+        )));
     }
 
     #[test]

@@ -107,6 +107,8 @@ export interface TonoStatus {
   tcpDelayAtMs?: number | null
   claudeHomeActive?: boolean | null
   claudeHomeHost?: string | null
+  /** Failed update journal still on disk. Disconnect, then reinstall. */
+  updateIncomplete?: boolean
 }
 
 export const TONO_STATUS_EVENT = 'tono://status'

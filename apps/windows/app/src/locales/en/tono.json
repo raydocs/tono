@@ -228,6 +228,7 @@
     "whatFailed": "What failed",
     "copyDetails": "Copy details",
     "catalogRequiresChoice": "That node is gone — pick another",
+    "updateIncomplete": "The update did not finish. Disconnect, then reinstall Tono.",
     "killSwitchError": "Leak protection: {{message}}",
     "killSwitchErrorNote": "Last error — it may already be clear.",
     "errors": {

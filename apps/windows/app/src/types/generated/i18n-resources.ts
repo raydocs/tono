@@ -1111,6 +1111,7 @@ export interface TranslationResources {
         taglineConnected: string
         taglineIdle: string
         title: string
+        updateIncomplete: string
         viewProtectedRules: string
         whatFailed: string
       }

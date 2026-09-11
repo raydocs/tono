@@ -26,7 +26,7 @@ use std::path::PathBuf;
 
 use tono_core::update_journal::{
     self, UpdateHandoffJournal, UpdateHandoffPhase, advance_pending, commit_verified_recovery,
-    journal_path, load, record_first_launch_migration, write_prepared,
+    incomplete_from_phase, journal_path, load, record_first_launch_migration, write_prepared,
 };
 use tono_logging::{Type, logging};
 
@@ -50,6 +50,13 @@ pub fn load_pending() -> Option<UpdateHandoffJournal> {
             None
         }
     }
+}
+
+/// True when a Failed journal is still on disk. The file stays; the UI tells
+/// the customer to disconnect and reinstall rather than treating a later
+/// connect as proof the update finished.
+pub fn incomplete() -> bool {
+    incomplete_from_phase(load_pending().map(|journal| journal.phase))
 }
 
 pub fn save_prepared(journal: &UpdateHandoffJournal) -> std::io::Result<()> {

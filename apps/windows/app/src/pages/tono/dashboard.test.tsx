@@ -426,4 +426,12 @@ describe('dashboard claude residential route badge', () => {
       screen.getByText('Claude / AI Residential Protection Scope'),
     ).toBeDefined()
   })
+
+  it('tells the customer to disconnect and reinstall when the update journal is Failed', () => {
+    mocks.status = makeStatus({ updateIncomplete: true })
+    renderDashboard()
+    expect(
+      screen.getByRole('alert').textContent,
+    ).toBe('The update did not finish. Disconnect, then reinstall Tono.')
+  })
 })
