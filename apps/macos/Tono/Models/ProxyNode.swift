@@ -142,19 +142,33 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
         rawName.hasSuffix(hy2NameSuffix)
     }
 
-    /// Same-city hy2 sibling the user can pick by hand. Nil when the
-    /// selection is already hy2 or the catalog has no ` · hy2` row.
-    /// G2.8 auto-switch stays off; the failure card only names this row.
+    /// Manual next hand when TCP is dead. Prefer the same-city ` · hy2`
+    /// sibling; if this city has none, offer another city's hy2 (Tokyo UDP
+    /// is blocked at the provider, so the working China backup may live on
+    /// Dedirock). Already on hy2: offer a different city's hy2. Nil when
+    /// nothing remains to try. G2.8 auto-switch stays off.
     static func backupChannelName(
         selected: String,
         catalogNames: Set<String>
     ) -> String? {
         let selectedClean = ConfigParser.extractFlag(from: selected).cleanName
-        guard !isHy2CatalogName(selectedClean) else { return nil }
         let selectedBase = catalogBaseName(for: selectedClean)
-        return catalogNames.first { name in
-            let clean = ConfigParser.extractFlag(from: name).cleanName
-            return isHy2CatalogName(clean) && catalogBaseName(for: clean) == selectedBase
+        let hy2Rows = catalogNames.filter { name in
+            isHy2CatalogName(ConfigParser.extractFlag(from: name).cleanName)
+        }
+        guard !hy2Rows.isEmpty else { return nil }
+
+        if !isHy2CatalogName(selectedClean) {
+            if let sibling = hy2Rows.first(where: { name in
+                catalogBaseName(for: ConfigParser.extractFlag(from: name).cleanName) == selectedBase
+            }) {
+                return sibling
+            }
+            return hy2Rows.sorted().first
+        }
+
+        return hy2Rows.sorted().first { name in
+            catalogBaseName(for: ConfigParser.extractFlag(from: name).cleanName) != selectedBase
         }
     }
 

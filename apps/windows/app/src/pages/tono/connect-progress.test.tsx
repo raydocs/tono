@@ -774,6 +774,51 @@ describe('ConnectProgressCard', () => {
       await waitFor(() => expect(onRefreshStatus).toHaveBeenCalled())
     })
 
+    it('offers another city hy2 when this city has no sibling', async () => {
+      const dedirockHy2 = 'Los Angeles · Sunset · hy2'
+      tonoServersMock.mockResolvedValue([
+        {
+          name: tokyo,
+          server: '203.0.113.10',
+          port: 443,
+          selected: true,
+          available: true,
+        },
+        {
+          name: 'Los Angeles · Sunset',
+          server: '198.51.100.10',
+          port: 443,
+          selected: false,
+          available: true,
+        },
+        {
+          name: dedirockHy2,
+          server: '198.51.100.10',
+          port: 443,
+          selected: false,
+          available: true,
+        },
+      ])
+      tonoConnectProgressMock.mockResolvedValue(
+        makeProgress({ error: handshakeError }),
+      )
+
+      renderCard({
+        uiState: 'notConnected',
+        selectedServer: tokyo,
+      })
+
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Try backup channel' }),
+      )
+
+      await waitFor(() =>
+        expect(tonoSelectServerMock).toHaveBeenCalledWith(dedirockHy2),
+      )
+      await waitFor(() => expect(tonoConnectMock).toHaveBeenCalledTimes(1))
+      expect(tonoRetryNowMock).not.toHaveBeenCalled()
+    })
+
     it('does not offer the backup channel on idle Not Connected', async () => {
       tonoServersMock.mockResolvedValue(catalogWithHy2())
       tonoConnectProgressMock.mockResolvedValue(makeProgress({ error: null }))

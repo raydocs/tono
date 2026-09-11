@@ -29,23 +29,33 @@ export const catalogBaseName = (wireName: string) =>
     : wireName
 
 /**
- * Same-city hy2 sibling the user can pick by hand. Null when the selection
- * is already hy2 or the catalog has no ` · hy2` row for this city.
- * Matches flag-prefixed and flag-stripped spellings of the same city.
- * G2.8 auto-switch stays off; this only names the row the failure card offers.
+ * Manual next hand when TCP is dead. Prefer the same-city ` · hy2` sibling;
+ * if this city has none, offer another city's hy2 (Tokyo UDP is blocked at
+ * the provider, so the working China backup may be Dedirock). Already on
+ * hy2: offer a different city's hy2, not the same row again. Null when the
+ * catalog has no remaining hy2 to try. G2.8 auto-switch stays off.
  */
 export const backupChannelName = (
   selected: string | null | undefined,
   serverNames: readonly string[],
 ): string | null => {
-  if (!selected || isHy2CatalogName(selected)) return null
+  if (!selected) return null
   const selectedKey = stripLeadingFlag(catalogBaseName(selected))
-  const match = serverNames.find(
-    (name) =>
-      isHy2CatalogName(name) &&
-      stripLeadingFlag(catalogBaseName(name)) === selectedKey,
+  const hy2Rows = serverNames.filter(isHy2CatalogName)
+  if (hy2Rows.length === 0) return null
+
+  if (!isHy2CatalogName(selected)) {
+    const sibling = hy2Rows.find(
+      (name) => stripLeadingFlag(catalogBaseName(name)) === selectedKey,
+    )
+    return sibling ?? hy2Rows[0] ?? null
+  }
+
+  return (
+    hy2Rows.find(
+      (name) => stripLeadingFlag(catalogBaseName(name)) !== selectedKey,
+    ) ?? null
   )
-  return match ?? null
 }
 
 export const nodeDisplayName = (wireName: string) => {

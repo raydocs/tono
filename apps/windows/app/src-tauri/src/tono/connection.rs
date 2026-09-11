@@ -1739,8 +1739,9 @@ mod tests {
     #[test]
     fn select_action_reconnects_after_choice_cleared_in_blocked_state() {
         // M5/H1 variant: the vanished node's replacement picked in armed
-        // Protected Offline must schedule the reconnect even when the name
+        // Protected Offline must reconnect immediately even when the name
         // is unchanged (`changed == false`, `requires_choice == true`).
+        // `SelectAction::Reconnect` is Retry now (0s), not the 2s first rung.
         let blocked = ConnectionStatus {
             is_protection_blocked: true,
             ..ConnectionStatus::default()

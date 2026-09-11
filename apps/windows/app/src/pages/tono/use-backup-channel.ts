@@ -18,8 +18,8 @@ import {
 import { backupChannelName } from './node-meta'
 
 /**
- * Manual-only next hand when TCP is dead: the same-city hy2 sibling, if the
- * catalog has one. Does not auto-switch (G2.8 stays off).
+ * Manual-only next hand when TCP is dead: same-city hy2 if the catalog has
+ * it, otherwise another city's hy2. Does not auto-switch (G2.8 stays off).
  *
  * Shown in Protected Offline (including a restart that dropped the error),
  * and after a first-connect handshake eof that fully released protection —

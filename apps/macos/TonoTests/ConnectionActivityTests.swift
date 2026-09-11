@@ -70,7 +70,31 @@ final class ConnectionActivityTests: XCTestCase {
             "Tokyo · Sakura · hy2"
         )
         XCTAssertNil(ProxyNode.backupChannelName(selected: "Tokyo · Sakura · hy2", catalogNames: names))
-        XCTAssertNil(ProxyNode.backupChannelName(selected: "Los Angeles · Sunset", catalogNames: names))
+        // No sibling here, but Tokyo hy2 is still a remaining next hand.
+        XCTAssertEqual(
+            ProxyNode.backupChannelName(selected: "Los Angeles · Sunset", catalogNames: names),
+            "Tokyo · Sakura · hy2"
+        )
+        XCTAssertEqual(
+            ProxyNode.backupChannelName(
+                selected: "Tokyo · Sakura",
+                catalogNames: ["Tokyo · Sakura", "Los Angeles · Sunset", "Los Angeles · Sunset · hy2"]
+            ),
+            "Los Angeles · Sunset · hy2"
+        )
+        XCTAssertEqual(
+            ProxyNode.backupChannelName(
+                selected: "Tokyo · Sakura · hy2",
+                catalogNames: ["Tokyo · Sakura · hy2", "Los Angeles · Sunset · hy2"]
+            ),
+            "Los Angeles · Sunset · hy2"
+        )
+        XCTAssertNil(
+            ProxyNode.backupChannelName(
+                selected: "Tokyo · Sakura",
+                catalogNames: ["Tokyo · Sakura", "Los Angeles · Sunset"]
+            )
+        )
         XCTAssertEqual(
             ProxyNode.backupChannelName(
                 selected: "🇯🇵 Tokyo · Sakura",

@@ -92,7 +92,7 @@ describe('nodeCityParts', () => {
 })
 
 describe('backupChannelName', () => {
-  it('names the same-city hy2 sibling only when that row is in the catalog', () => {
+  it('names the same-city hy2 sibling when that row is in the catalog', () => {
     const names = [
       'Tokyo · Sakura',
       'Tokyo · Sakura · hy2',
@@ -102,9 +102,39 @@ describe('backupChannelName', () => {
       'Tokyo · Sakura · hy2',
     )
     expect(backupChannelName('Tokyo · Sakura · hy2', names)).toBeNull()
-    expect(backupChannelName('Los Angeles · Sunset', names)).toBeNull()
+    // No sibling here, but Tokyo hy2 is still a remaining next hand.
+    expect(backupChannelName('Los Angeles · Sunset', names)).toBe(
+      'Tokyo · Sakura · hy2',
+    )
     expect(backupChannelName(null, names)).toBeNull()
     expect(backupChannelName('Tokyo · Sakura', ['Tokyo · Sakura'])).toBeNull()
+  })
+
+  it('falls back to another city hy2 when this city has no sibling', () => {
+    const names = [
+      'Tokyo · Sakura',
+      'Los Angeles · Sunset',
+      'Los Angeles · Sunset · hy2',
+    ]
+    expect(backupChannelName('Tokyo · Sakura', names)).toBe(
+      'Los Angeles · Sunset · hy2',
+    )
+    expect(backupChannelName('Los Angeles · Sunset', names)).toBe(
+      'Los Angeles · Sunset · hy2',
+    )
+  })
+
+  it('offers a different city hy2 after the same-city backup already failed', () => {
+    const names = [
+      'Tokyo · Sakura · hy2',
+      'Los Angeles · Sunset · hy2',
+    ]
+    expect(backupChannelName('Tokyo · Sakura · hy2', names)).toBe(
+      'Los Angeles · Sunset · hy2',
+    )
+    expect(backupChannelName('Los Angeles · Sunset · hy2', names)).toBe(
+      'Tokyo · Sakura · hy2',
+    )
   })
 
   it('matches a flag-prefixed city to the catalog hy2 row even when flags differ', () => {
