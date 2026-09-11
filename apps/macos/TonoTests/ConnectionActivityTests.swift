@@ -128,6 +128,7 @@ final class ConnectionActivityTests: XCTestCase {
             "Los Angeles · Sunset · hy2"
         )
         XCTAssertTrue(ProxyNode.hy2UdpIsVendorBlocked("Tokyo · Sakura · hy2"))
+        XCTAssertFalse(ProxyNode.hy2UdpIsVendorBlocked("Tokyo · Sakura"))
         XCTAssertTrue(ProxyNode.hy2UdpIsVendorBlocked("JP-VLESS-Reality · hy2"))
         XCTAssertFalse(ProxyNode.hy2UdpIsVendorBlocked("Los Angeles · Sunset · hy2"))
         XCTAssertTrue(ProxyNode.isHy2CatalogName("Tokyo · Sakura · hy2"))
@@ -135,12 +136,18 @@ final class ConnectionActivityTests: XCTestCase {
         XCTAssertEqual(nodeRouteTitle(for: "Tokyo · Sakura"), nodeCityTitle("Tokyo · Sakura"))
         XCTAssertEqual(
             nodeRouteTitle(for: "Tokyo · Sakura · hy2"),
-            "\(nodeCityTitle("Tokyo · Sakura")) · \(String(localized: "Backup channel"))"
+            "\(nodeCityTitle("Tokyo · Sakura")) · Sakura · \(String(localized: "Backup channel"))"
         )
         XCTAssertEqual(
             nodeRouteTitle(for: "🇯🇵 Tokyo · Sakura · hy2"),
-            "\(nodeCityTitle("Tokyo · Sakura")) · \(String(localized: "Backup channel"))"
+            "\(nodeCityTitle("Tokyo · Sakura")) · Sakura · \(String(localized: "Backup channel"))"
         )
+        XCTAssertEqual(
+            nodeListRegionCode(flag: "", name: "Los Angeles · Sunset · hy2"),
+            udpBackupRegionCode
+        )
+        XCTAssertEqual(nodeListRegionCode(flag: "", name: "Los Angeles · Sunset"), "US")
+        XCTAssertEqual(nodeListRegionLabel(udpBackupRegionCode), String(localized: "Backup UDP"))
         XCTAssertFalse(
             ProxyNode.isCityFailoverCandidate("Tokyo · Sakura · hy2", after: "Tokyo · Sakura")
         )

@@ -12,6 +12,16 @@
         }
       }
     },
+    "Backup UDP": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "备用 UDP"
+          }
+        }
+      }
+    },
     "Try backup channel": {
       "localizations": {
         "zh-Hans": {

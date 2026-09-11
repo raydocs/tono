@@ -11,6 +11,8 @@ import {
   nodeCode,
   nodeProtocolKey,
   nodeRegion,
+  nodeListGroupKey,
+  UDP_BACKUP_GROUP,
 } from './node-meta'
 
 describe('nodeRegion', () => {
@@ -44,6 +46,9 @@ describe('nodeCode', () => {
     expect(nodeCode('US West 01')).toBe('US')
     expect(nodeCode('jp-west')).toBe('JP')
     expect(nodeCode('Paris · Seine')).toBe('GL')
+    expect(nodeListGroupKey('Los Angeles · Sunset · hy2')).toBe(UDP_BACKUP_GROUP)
+    expect(nodeListGroupKey('Los Angeles · Sunset')).toBe('US')
+    expect(nodeListGroupKey('Tokyo · Sakura · hy2')).toBe(UDP_BACKUP_GROUP)
   })
 })
 
@@ -84,10 +89,15 @@ describe('nodeCityParts', () => {
       'tono.nodes.protocol.vlessReality',
     )
     expect(nodeCityLabel('Tokyo · Sakura · hy2', (key) => `t:${key}`)).toBe(
-      't:tono.cities.tokyo · t:tono.nodes.protocol.backup',
+      't:tono.cities.tokyo · Sakura · t:tono.nodes.protocol.backup',
     )
     expect(nodeCityLabel('Tokyo · Sakura', (key) => `t:${key}`)).toBe(
       't:tono.cities.tokyo',
+    )
+    expect(
+      nodeCityLabel('US-VLESS-Reality · hy2', (key) => `t:${key}`),
+    ).toBe(
+      't:tono.cities.losAngeles · Grove · t:tono.nodes.protocol.backup',
     )
   })
 })
@@ -128,6 +138,7 @@ describe('backupChannelName', () => {
       'Los Angeles · Sunset · hy2',
     )
     expect(hy2UdpIsVendorBlocked('Tokyo · Sakura · hy2')).toBe(true)
+    expect(hy2UdpIsVendorBlocked('Tokyo · Sakura')).toBe(false)
     expect(hy2UdpIsVendorBlocked('JP-VLESS-Reality · hy2')).toBe(true)
     expect(hy2UdpIsVendorBlocked('Los Angeles · Sunset · hy2')).toBe(false)
   })
@@ -187,10 +198,10 @@ describe('region labels', () => {
     const en = (await import('@/locales/en/tono.json')).default
     // The chips render these; a missing entry silently falls back to the raw
     // ISO code, which is what shipped before.
-    for (const code of ['us', 'jp']) {
-      expect(zh.nodes.regions[code as 'us' | 'jp']).toBeTruthy()
-      expect(zh.nodes.regions[code as 'us' | 'jp']).not.toBe(code.toUpperCase())
-      expect(en.nodes.regions[code as 'us' | 'jp']).toBeTruthy()
+    for (const code of ['us', 'jp', 'udpBackup'] as const) {
+      expect(zh.nodes.regions[code]).toBeTruthy()
+      expect(zh.nodes.regions[code]).not.toBe(code.toUpperCase())
+      expect(en.nodes.regions[code]).toBeTruthy()
     }
   })
 })

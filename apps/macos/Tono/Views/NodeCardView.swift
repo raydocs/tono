@@ -48,6 +48,28 @@ func nodeRegionCode(flag: String, name: String) -> String {
     return "GL"
 }
 
+let udpBackupRegionCode = "udpBackup"
+
+func nodeListRegionCode(flag: String, name: String) -> String {
+    if ProxyNode.isHy2CatalogName(name) { return udpBackupRegionCode }
+    return nodeRegionCode(flag: flag, name: name)
+}
+
+func nodeListRegionLabel(_ code: String) -> String {
+    if code == udpBackupRegionCode {
+        return String(localized: "Backup UDP")
+    }
+    return code
+}
+
+func nodeListRegionSorted(_ codes: [String]) -> [String] {
+    codes.sorted { a, b in
+        if a == udpBackupRegionCode { return true }
+        if b == udpBackupRegionCode { return false }
+        return a < b
+    }
+}
+
 /// A source node fanning out to two exits, drawn on a 24×24 grid. Stroked as
 /// hairlines so the brand gradient reads as a network trace rather than a
 /// filled color block. Same glyph as the Windows `TonoNodeBadge` SVG.
@@ -249,13 +271,18 @@ func nodeCityTitle(_ displayName: String) -> String {
     return String(localized: String.LocalizationValue(city))
 }
 
-/// Settings / "choose another route" title: hy2 is "东京 · 备用通道", not a
-/// second card that looks identical to the TCP city.
+/// Settings / "choose another route" title: hy2 includes the codename so two
+/// same-city backups are not identical cards.
 func nodeRouteTitle(for wireName: String) -> String {
     let parsed = ConfigParser.extractFlag(from: wireName)
-    let city = nodeCityTitle(ProxyNode.displayName(for: parsed.cleanName))
+    let display = ProxyNode.displayName(for: parsed.cleanName)
+    let city = nodeCityTitle(display)
     guard ProxyNode.isHy2CatalogName(parsed.cleanName) else { return city }
-    return "\(city) · \(String(localized: "Backup channel"))"
+    let backup = String(localized: "Backup channel")
+    if let codename = nodeCityParts(display).codename, !codename.isEmpty {
+        return "\(city) · \(codename) · \(backup)"
+    }
+    return "\(city) · \(backup)"
 }
 
 func nodeRouteTitle(_ node: ProxyNode) -> String {

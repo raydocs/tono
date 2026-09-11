@@ -386,6 +386,7 @@
       "us": "United States",
       "jp": "Japan",
       "other": "Other regions",
+      "udpBackup": "Backup UDP",
       "unavailable": "Unavailable"
     }
   },

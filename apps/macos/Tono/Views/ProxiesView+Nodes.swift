@@ -5,9 +5,9 @@ extension ProxiesView {
         let allNodes = cloudNodes
         let localNodes = filteredNodes(from: allNodes)
         let grouped = Dictionary(grouping: localNodes) {
-            nodeRegionCode(flag: $0.flag, name: $0.name)
+            nodeListRegionCode(flag: $0.flag, name: $0.name)
         }
-        let regionCodes = grouped.keys.sorted()
+        let regionCodes = nodeListRegionSorted(Array(grouped.keys))
 
         return Group {
             if !localNodes.isEmpty {
@@ -272,7 +272,7 @@ extension ProxiesView {
 
     func regionHeader(_ code: String, count: Int) -> some View {
         HStack(spacing: 6) {
-            Label(code, systemImage: "globe")
+            Label(nodeListRegionLabel(code), systemImage: "globe")
                 .font(.system(size: 10, weight: .semibold, design: .rounded))
                 .kerning(0.8)
                 .foregroundStyle(.secondary)
@@ -527,7 +527,7 @@ extension ProxiesView {
         } label: {
             HStack(spacing: 4) {
                 if let code {
-                    Text(code)
+                    Text(nodeListRegionLabel(code))
                         .font(.system(size: 10, weight: .bold, design: .rounded))
                 } else {
                     Image(systemName: "square.grid.2x2")
@@ -553,7 +553,8 @@ extension ProxiesView {
 
         return nodes.filter { node in
             let matchesFilter = regionFilter == nil
-                || nodeRegionCode(flag: node.flag, name: node.name) == regionFilter
+                || nodeListRegionCode(flag: node.flag, name: node.name) == regionFilter
+            if ProxyNode.hy2UdpIsVendorBlocked(node.name) { return false }
 
             guard !query.isEmpty else { return matchesFilter }
             return matchesFilter

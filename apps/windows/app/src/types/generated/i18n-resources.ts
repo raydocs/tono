@@ -1238,6 +1238,7 @@ export interface TranslationResources {
           all: string
           jp: string
           other: string
+          udpBackup: string
           unavailable: string
           us: string
         }

@@ -210,18 +210,36 @@ it('lets the user pick the hy2 sibling and labels it as the backup channel', asy
       selected: false,
       available: true,
     },
+    {
+      name: 'Los Angeles · Sunset · hy2',
+      server: '198.51.100.10',
+      port: 443,
+      selected: false,
+      available: true,
+    },
+    {
+      name: 'Buffalo · Niagara · hy2',
+      server: '198.51.100.11',
+      port: 443,
+      selected: false,
+      available: true,
+    },
   ])
   renderPage()
-  const backup = await screen.findByRole('button', {
-    name: /Backup channel/,
-  })
-  expect(backup.textContent).toContain('Tokyo · Backup channel')
+  expect((await screen.findAllByText('Backup UDP')).length).toBeGreaterThan(1)
   expect(
-    screen.getByRole('button', { name: /^Tokyo,/ }).textContent,
-  ).not.toContain('Tokyo · Backup channel')
-  fireEvent.click(backup)
+    screen.queryByRole('button', { name: /Tokyo · Sakura · Backup channel/ }),
+  ).toBeNull()
+  const sunset = await screen.findByRole('button', {
+    name: /Los Angeles · Sunset · Backup channel/,
+  })
+  expect(sunset.textContent).toContain('Los Angeles · Sunset · Backup channel')
+  expect(
+    screen.getByRole('button', { name: /Buffalo · Niagara · Backup channel/ }),
+  ).toBeDefined()
+  fireEvent.click(sunset)
   await waitFor(() =>
-    expect(selectServerMock).toHaveBeenCalledWith('Tokyo · Sakura · hy2'),
+    expect(selectServerMock).toHaveBeenCalledWith('Los Angeles · Sunset · hy2'),
   )
   await waitFor(() => expect(connectMock).toHaveBeenCalledTimes(1))
 })

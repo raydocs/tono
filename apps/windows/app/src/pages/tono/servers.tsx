@@ -41,7 +41,11 @@ import {
   nodeCityParts,
   nodeCode,
   nodeDisplayName,
+  nodeListGroupKey,
   nodeProtocolKey,
+  hy2UdpIsVendorBlocked,
+  UDP_BACKUP_GROUP,
+  isHy2CatalogName,
 } from './node-meta'
 
 const catalogStatusQueryKey = ['tono', 'catalog-status'] as const
@@ -241,20 +245,31 @@ const ServersPage = () => {
         (parts.codename?.toLowerCase().includes(query) ?? false) ||
         t(nodeProtocolKey(server.name)).toLowerCase().includes(query)
       const matchesRegion =
-        !regionFilter || nodeCode(server.name) === regionFilter
+        !regionFilter || nodeListGroupKey(server.name) === regionFilter
+      if (hy2UdpIsVendorBlocked(server.name)) return false
       return matchesQuery && matchesRegion
     })
   }, [query, regionFilter, servers, t])
   const regionOptions = useMemo(() => {
-    return Array.from(
-      new Set((servers ?? []).map((server) => nodeCode(server.name))),
-    ).sort()
+    const codes = new Set<string>()
+    let hasUdp = false
+    for (const server of servers ?? []) {
+      if (hy2UdpIsVendorBlocked(server.name)) continue
+      if (isHy2CatalogName(server.name)) {
+        hasUdp = true
+        continue
+      }
+      codes.add(nodeCode(server.name))
+    }
+    const sorted = Array.from(codes).sort()
+    return hasUdp ? [UDP_BACKUP_GROUP, ...sorted] : sorted
   }, [servers])
   // zh already has 美国 / 日本 for these, but the chips and group headers
   // rendered the raw ISO code, so a Chinese customer read "US" and "JP" while
   // the translations sat unused. An unknown code falls back to itself.
   const regionLabel = useCallback(
     (code: string) => {
+      if (code === UDP_BACKUP_GROUP) return t('tono.nodes.regions.udpBackup')
       const key = `tono.nodes.regions.${code.toLowerCase()}`
       const translated = t(key)
       return translated === key ? code : translated
@@ -263,14 +278,25 @@ const ServersPage = () => {
   )
   const serverGroups = useMemo(() => {
     const usable = visibleServers.filter((server) => server.available !== false)
+    const udp = usable.filter((server) => isHy2CatalogName(server.name))
+    const tcp = usable.filter((server) => !isHy2CatalogName(server.name))
     const codes = Array.from(
-      new Set(usable.map((server) => nodeCode(server.name))),
+      new Set(tcp.map((server) => nodeCode(server.name))),
     ).sort()
     return [
+      ...(udp.length
+        ? [
+            {
+              key: UDP_BACKUP_GROUP,
+              label: t('tono.nodes.regions.udpBackup'),
+              servers: udp,
+            },
+          ]
+        : []),
       ...codes.map((code) => ({
         key: code,
         label: regionLabel(code),
-        servers: usable.filter((server) => nodeCode(server.name) === code),
+        servers: tcp.filter((server) => nodeCode(server.name) === code),
       })),
       {
         key: 'unavailable',
@@ -770,7 +796,7 @@ const ServersPage = () => {
                   const cardSummary = [
                     cityTitle,
                     t(nodeProtocolKey(server.name)),
-                    regionLabel(nodeCode(server.name)),
+                    regionLabel(nodeListGroupKey(server.name)),
                     latencyText,
                     cardStatus,
                   ].join(', ')

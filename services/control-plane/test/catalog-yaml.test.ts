@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../src/errors';
-import { managedCatalogYAML, retirementCatalogPlan, filterHy2CatalogForViewer, hy2CatalogEmailAllowlist } from '../src/catalog-yaml';
+import { managedCatalogYAML, retirementCatalogPlan, filterHy2CatalogForViewer, hy2CatalogEmailAllowlist, requestAcceptsHy2Catalog } from '../src/catalog-yaml';
 
 function expectInvalidCatalog(yaml: string) {
   try {
@@ -137,5 +137,11 @@ describe('catalog hy2 contract', () => {
     expect(hy2CatalogEmailAllowlist(' Boss@Example.COM ,other')).toEqual(
       new Set(['boss@example.com']),
     );
+    expect(requestAcceptsHy2Catalog(null)).toBe(false);
+    expect(requestAcceptsHy2Catalog('')).toBe(false);
+    expect(requestAcceptsHy2Catalog('hy2')).toBe(true);
+    expect(requestAcceptsHy2Catalog('HY2')).toBe(true);
+    expect(requestAcceptsHy2Catalog('hy2, other')).toBe(true);
+    expect(requestAcceptsHy2Catalog('other')).toBe(false);
   });
 });

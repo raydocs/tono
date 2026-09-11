@@ -1347,9 +1347,18 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
             bearer: bearer.map(str::to_string),
             json_body: body,
             binary_body: None,
-            headers: Vec::new(),
+            headers: catalog_accept_headers(path),
         };
         map_status(self.transport.send(request).await?)
+    }
+}
+
+fn catalog_accept_headers(path: &str) -> Vec<(String, String)> {
+    let trimmed = path.trim_start_matches('/');
+    if trimmed == endpoints::EXIT_CATALOG {
+        vec![("X-Tono-Accept".to_string(), "hy2".to_string())]
+    } else {
+        Vec::new()
     }
 }
 
@@ -2655,6 +2664,14 @@ mod tests {
         let catalog = client.exit_catalog().await.unwrap();
         assert_eq!(catalog.revision, 3);
         assert_eq!(catalog.updated_at, Some(42));
+        let catalog_request = _mock
+            .requests()
+            .into_iter()
+            .find(|request| request.url.ends_with("exit-catalog"))
+            .expect("catalog GET");
+        assert!(catalog_request.headers.iter().any(|(name, value)| {
+            name == "X-Tono-Accept" && value == "hy2"
+        }));
     }
 
     #[test]

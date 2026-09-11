@@ -44,6 +44,7 @@ import {
   publicManagedCatalog,
   exitCredentialRolloutPhase,
 } from './catalog';
+import { requestAcceptsHy2Catalog } from './catalog-yaml';
 import {
   exactKeys,
   publicTrafficPolicy,
@@ -2991,6 +2992,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       userId: a.userId,
       deviceId: a.deviceId,
       filterHomeExits: true,
+      acceptHy2: requestAcceptsHy2Catalog(req.headers.get('X-Tono-Accept')),
     }));
   }
 

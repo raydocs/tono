@@ -146,6 +146,7 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
     /// dead click; another city's hy2 (Dedirock) is the working China backup.
     static func hy2UdpIsVendorBlocked(_ rawName: String) -> Bool {
         let clean = ConfigParser.extractFlag(from: rawName).cleanName
+        guard isHy2CatalogName(clean) else { return false }
         let display = displayName(for: catalogBaseName(for: clean))
         let city = display.split(separator: "·", maxSplits: 1)
             .first?

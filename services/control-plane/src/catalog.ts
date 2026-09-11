@@ -174,8 +174,9 @@ async function userMaySeeHy2Catalog(e: Env, userId: string): Promise<boolean> {
 // Rotating HY2_CATALOG_EMAILS changes the served YAML (and therefore sha256)
 // for accounts that enter or leave the gray list. Bump the fleet revision
 // after that env change or Windows treats "same revision, new digest" as
-// tampering. Production still must not PUT hy2 blocks until the client on
-// main admits them.
+// tampering. Clients that send `X-Tono-Accept: hy2` also keep hy2 blocks;
+// old clients omit the header and still get them stripped. Production still
+// must not PUT hy2 blocks until a Worker with this filter is live.
 
 // The routing document is per-account server state that the fleet-wide catalog
 // revision does not describe: a rebind, a default-proxy change or a credential
@@ -209,7 +210,12 @@ export async function routingSha256(routing: CatalogRouting | undefined) {
  */
 export async function publicManagedCatalog(
   e: Env,
-  options?: { userId?: string; deviceId?: string | null; filterHomeExits?: boolean },
+  options?: {
+    userId?: string;
+    deviceId?: string | null;
+    filterHomeExits?: boolean;
+    acceptHy2?: boolean;
+  },
 ) {
   const row = await e.DB.prepare(
     'SELECT revision, ciphertext, nonce, content_sha256, updated_at FROM managed_exit_catalog WHERE singleton_id = 1',
@@ -253,7 +259,8 @@ export async function publicManagedCatalog(
     }
   }
   if (options?.userId) {
-    served = filterHy2CatalogForViewer(served, await userMaySeeHy2Catalog(e, options.userId));
+    const keepHy2 = Boolean(options.acceptHy2) || (await userMaySeeHy2Catalog(e, options.userId));
+    served = filterHy2CatalogForViewer(served, keepHy2);
   }
   return {
     revision,

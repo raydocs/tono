@@ -295,6 +295,14 @@ export function hy2CatalogEmailAllowlist(raw: string | undefined): Set<string> {
   );
 }
 
+/** New clients send `X-Tono-Accept: hy2`. Old clients omit it and still get hy2 stripped. */
+export function requestAcceptsHy2Catalog(header: string | null | undefined): boolean {
+  if (!header) return false;
+  return header
+    .split(',')
+    .some((part) => part.trim().toLowerCase() === 'hy2');
+}
+
 function placeholderCount(yaml: string): number {
   return yaml.split(CLIENT_UUID_PLACEHOLDER).length - 1;
 }

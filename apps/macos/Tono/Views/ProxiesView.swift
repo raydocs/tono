@@ -138,7 +138,11 @@ struct ProxiesView: View {
     /// region code that actually appears, so new regions show up without a
     /// code change. `nil` means no region filter.
     var regionOptions: [String] {
-        Array(Set(cloudNodes.map { nodeRegionCode(flag: $0.flag, name: $0.name) })).sorted()
+        nodeListRegionSorted(Array(Set(cloudNodes.compactMap { node in
+            ProxyNode.hy2UdpIsVendorBlocked(node.name)
+                ? nil
+                : nodeListRegionCode(flag: node.flag, name: node.name)
+        })))
     }
 
     var cloudNodes: [ProxyNode] {

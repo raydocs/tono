@@ -2846,6 +2846,14 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
         headers: { authorization: `Bearer ${hidden.accessToken}` },
       });
       expect((await stillHidden.json() as any).yaml).not.toContain('hysteria2');
+
+      const headerAdmit = await api('exit-catalog', {
+        headers: {
+          authorization: `Bearer ${hidden.accessToken}`,
+          'X-Tono-Accept': 'hy2',
+        },
+      });
+      expect((await headerAdmit.json() as any).yaml).toContain('type: hysteria2');
     } finally {
       (env as unknown as Env).HY2_CATALOG_EMAILS = previous;
     }

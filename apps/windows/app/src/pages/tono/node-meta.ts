@@ -34,6 +34,7 @@ export const catalogBaseName = (wireName: string) =>
  * off-box). Dedirock / other-city hy2 is the working next hand.
  */
 export const hy2UdpIsVendorBlocked = (wireName: string) => {
+  if (!isHy2CatalogName(wireName)) return false
   const display = nodeDisplayName(stripLeadingFlag(catalogBaseName(wireName)))
   return cityOf(display) === 'tokyo'
 }
@@ -134,6 +135,13 @@ export const nodeProtocolKey = (wireName: string): TranslationKey =>
       ? 'tono.nodes.protocol.vlessReality'
       : 'tono.nodes.protocol.cloud'
 
+/** Dedicated server-list group. hy2 does not sit under US/JP. */
+export const UDP_BACKUP_GROUP = 'udpBackup'
+
+/** List grouping: hy2 is its own column so testers can pick it by name. */
+export const nodeListGroupKey = (wireName: string) =>
+  isHy2CatalogName(wireName) ? UDP_BACKUP_GROUP : nodeCode(wireName)
+
 /** City the user thinks in, plus 「备用通道」 when this row is the hy2 sibling. */
 export const nodeCityLabel = (
   wireName: string,
@@ -141,9 +149,11 @@ export const nodeCityLabel = (
 ) => {
   const titleKey = nodeCityTitleKey(wireName)
   const city = titleKey ? t(titleKey) : nodeDisplayName(wireName)
-  return isHy2CatalogName(wireName)
-    ? `${city} · ${t('tono.nodes.protocol.backup')}`
-    : city
+  if (!isHy2CatalogName(wireName)) return city
+  const backup = t('tono.nodes.protocol.backup')
+  const codename = nodeCityParts(wireName).codename
+  if (!titleKey) return `${city} · ${backup}`
+  return codename ? `${city} · ${codename} · ${backup}` : `${city} · ${backup}`
 }
 
 export type NodeRegion = 'us' | 'jp' | 'other'

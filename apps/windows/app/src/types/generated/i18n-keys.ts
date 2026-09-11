@@ -871,6 +871,7 @@ export const translationKeys = [
   'tono.nodes.regions.us',
   'tono.nodes.regions.jp',
   'tono.nodes.regions.other',
+  'tono.nodes.regions.udpBackup',
   'tono.nodes.regions.unavailable',
   'tono.servers.title',
   'tono.servers.cloudGroup',

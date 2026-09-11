@@ -7,7 +7,7 @@ on:
       - 'stability/desktop-0.0.72-20260908'
       # Ship-plan Encrypted DNS + connecting-pill candidate for G1.1.
       # Path filter: touching this file (or windows-core.yml) starts a candidate.
-      # Rebuild 2026-09-11: Connecting… (not Cancel) and TUN/system DNS race.
+      # Rebuild 2026-09-11: Backup UDP column + catalog X-Tono-Accept: hy2.
       # Remove the extra branch after G1.1.
       - 'cursor/ship-plan-first-publish-d57f'
     paths:

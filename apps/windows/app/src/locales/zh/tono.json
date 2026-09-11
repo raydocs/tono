@@ -386,6 +386,7 @@
       "us": "美国",
       "jp": "日本",
       "other": "其他地区",
+      "udpBackup": "备用 UDP",
       "unavailable": "不可用"
     }
   },
