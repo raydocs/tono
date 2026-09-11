@@ -436,6 +436,68 @@ describe('ops v1 api', () => {
     expect(all.items.map((item) => item.userId).sort()).toEqual(['u-1', 'u-2']);
   });
 
+  it('GET customers?limit=50 pages 201 people in at most 20 statements', async () => {
+    for (let i = 0; i < 201; i += 25) {
+      const values: string[] = [];
+      const binds: unknown[] = [];
+      for (let j = i; j < Math.min(i + 25, 201); j++) {
+        const n = String(j).padStart(3, '0');
+        values.push('(?, ?, \'x\', \'y\', \'active\', 0, ?, ?)');
+        binds.push(`u-${n}`, `a${n}@example.com`, NOW, NOW);
+      }
+      await db().prepare(
+        `INSERT INTO users(id, email, password_hash, password_salt, status, usage_bytes, created_at, updated_at) VALUES ${values.join(',')}`,
+      ).bind(...binds).run();
+    }
+    const stmt = { prepare: 0, batch: 0 };
+    const counting = {
+      ...(env as unknown as Env),
+      DB: new Proxy((env as unknown as Env).DB, {
+        get(target, prop, receiver) {
+          if (prop === 'prepare') {
+            return (...args: Parameters<D1Database['prepare']>) => {
+              stmt.prepare += 1;
+              return target.prepare(...args);
+            };
+          }
+          if (prop === 'batch') {
+            return (...args: Parameters<D1Database['batch']>) => {
+              stmt.batch += 1;
+              return target.batch(...args);
+            };
+          }
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+        },
+      }),
+    };
+    const context = createExecutionContext();
+    const response = await worker.fetch(
+      new Request('https://test/api/v1/ops/customers?limit=50', {
+        headers: { 'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL) },
+      }),
+      counting,
+      context,
+    );
+    await waitOnExecutionContext(context);
+    expect(response.status).toBe(200);
+    const list = assertList(await response.json(), assertCustomerSummary);
+    expect(
+      stmt.prepare + stmt.batch,
+      `statements prepare=${stmt.prepare} batch=${stmt.batch}`,
+    ).toBeLessThanOrEqual(20);
+    expect(list.total).toBe(201);
+    expect(list.items).toHaveLength(50);
+    expect(list.items[0]?.email).toBe('a000@example.com');
+    expect(list.nextCursor).toEqual(expect.any(String));
+    const page2 = assertList(
+      await (await ops(`customers?limit=50&cursor=${encodeURIComponent(list.nextCursor!)}`)).json(),
+      assertCustomerSummary,
+    );
+    expect(page2.items[0]?.userId).toBe('u-050');
+    expect(page2.items[0]?.email).toBe('a050@example.com');
+  });
+
   it('contact and notes are readable on GET customers/{id} after PATCH', async () => {
     await seedUser();
     const patched = await ops('users/u-1', json({ contact: 'wechat-phone', notes: 'vip' }, 'PATCH'));

@@ -6,8 +6,23 @@ import { BLANK_ROUTE, goPage, readRoute, type OpsRoute } from '@/lib/hash-route'
 import { can, currentRole, firstAllowedPage, PAGE_REQUIRES } from '@/lib/roles';
 import { useBeat } from '@/lib/use-poll';
 import { useFleet } from '@/lib/use-fleet';
-import { newestFetch, useResource } from '@/lib/use-resource';
+import { newestFetch, useResource, type Resource } from '@/lib/use-resource';
+import type { ListDto } from '@contract';
 import { Shell } from './Shell';
+
+function asItems<T>(
+  list: Resource<ListDto<T>> & { reload: () => void },
+): Resource<T[]> & { reload: () => void } {
+  if (list.status === 'ready') {
+    return {
+      status: 'ready',
+      data: list.data.items,
+      fetchedAt: list.fetchedAt,
+      reload: list.reload,
+    };
+  }
+  return list as Resource<T[]> & { reload: () => void };
+}
 
 /**
  * One chunk per page. The nodes page alone pulls Recharts; loading that on
@@ -49,7 +64,8 @@ export function App() {
    * node fault, and Command-K searches both from anywhere. Two requests
    * on load beats four requests every time someone changes page.
    */
-  const customers = useResource('customers', async (signal) => (await opsApi.customers(signal)).items, beat);
+  const customerList = useResource('customers', (signal) => opsApi.customers(signal), beat);
+  const customers = asItems(customerList);
   /**
    * Who is not using it yet, and where each of them stopped. It is the fourth
    * shared read because three surfaces need the same answer: the customer
@@ -130,6 +146,7 @@ export function App() {
                   platform={route.platform}
                   bucket={route.bucket}
                   invite={route.invite}
+                  listCounts={customerList.status === 'ready' ? customerList.data.counts : undefined}
                 />
               )
           )

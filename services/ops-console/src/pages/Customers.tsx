@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type {
   AdoptionBucket,
+  CustomerListCounts,
   CustomerSummaryDto,
   FunnelDto,
   FunnelStage,
@@ -63,6 +64,7 @@ export default function CustomersPage({
   platform,
   bucket,
   invite,
+  listCounts,
 }: {
   /**
    * The shell owns this list, so onboarding a customer has to ask it to read
@@ -70,6 +72,8 @@ export default function CustomersPage({
    * cannot invent one that the hub has not confirmed.
    */
   customers: Resource<CustomerSummaryDto[]> & { reload: () => void };
+  /** Fleet-wide counts from the list envelope; the page falls back to this view. */
+  listCounts?: CustomerListCounts;
   /**
    * Everyone who has not connected yet. The list is the shell's, like the
    * customers themselves, because the daily page and Command-K read the same
@@ -94,7 +98,15 @@ export default function CustomersPage({
     () => (customers.status === 'ready' ? customers.data : []),
     [customers],
   );
-  const counts = useMemo(() => customerCounts(all), [all]);
+  const counts = useMemo(() => {
+    if (!listCounts) return customerCounts(all);
+    return {
+      all: Object.values(listCounts.byVerdict).reduce((sum, n) => sum + n, 0),
+      ok: listCounts.byVerdict.ok,
+      unreachable: listCounts.byVerdict.unreachable,
+      never_used: listCounts.byVerdict.never_used,
+    };
+  }, [all, listCounts]);
   const perPlatform = useMemo(() => platformCounts(all), [all]);
   const released = useMemo(() => releasedPlatforms(all), [all]);
   const published = useMemo(
@@ -127,7 +139,10 @@ export default function CustomersPage({
     [rows, invites, filter, platform, bucket],
   );
   /** The bar counts the whole fleet, the way the count sentence above it does. */
-  const perStage = useMemo(() => stageCounts(listRows(all, invites)), [all, invites]);
+  const perStage = useMemo(
+    () => (listCounts ? listCounts.byStage : stageCounts(listRows(all, invites))),
+    [all, invites, listCounts],
+  );
   const shown = useMemo(() => selectByStage(table, stage), [table, stage]);
   const picked = useMemo(
     () => shown.map((row) => row.customer).filter((row): row is CustomerSummaryDto => row !== null),

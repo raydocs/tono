@@ -104,6 +104,10 @@
 
 ### 部门 B
 
+| 路由 | 返回 |
+|---|---|
+| `GET customers` | 列表信封加可选 `counts?: { byVerdict: Record<CustomerVerdict, number>; byStage: Record<FunnelStage, number> }`（全量，各 1 条 GROUP BY；没有 `ops_customer_status` 行的用户按漏斗计入 `never_used`）。`total` 为带同一 `q`/`since` 条件的 `COUNT(*)`。分页在 SQL：`WHERE (email, id) > (?, ?)`，再按本页 `user_id IN (…)` 批量读状态 / 设备数 / 服务家族 / 漏斗事实。 |
+
 ### 部门 C
 
 ### 部门 D

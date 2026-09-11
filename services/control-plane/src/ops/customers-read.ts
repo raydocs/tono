@@ -180,3 +180,85 @@ export async function sessionsFor(
     throw error;
   }
 }
+
+const IN_CHUNK = 90;
+
+async function rowsByUserIds(
+  db: D1Database,
+  sqlFor: (placeholders: string) => string,
+  userIds: string[],
+  extraBinds: unknown[] = [],
+): Promise<Row[]> {
+  if (userIds.length === 0) return [];
+  const out: Row[] = [];
+  try {
+    for (let i = 0; i < userIds.length; i += IN_CHUNK) {
+      const chunk = userIds.slice(i, i + IN_CHUNK);
+      const placeholders = chunk.map(() => '?').join(',');
+      const rows = await db.prepare(sqlFor(placeholders)).bind(...chunk, ...extraBinds).all<Row>();
+      out.push(...(rows.results ?? []));
+    }
+  } catch (error) {
+    if (missingTable(error)) return [];
+    throw error;
+  }
+  return out;
+}
+
+export async function customerStatuses(
+  db: D1Database,
+  userIds: string[],
+): Promise<Map<string, CustomerStatus>> {
+  const byUser = new Map<string, CustomerStatus>();
+  const rows = await rowsByUserIds(
+    db,
+    (placeholders) => `SELECT * FROM ops_customer_status WHERE user_id IN (${placeholders})`,
+    userIds,
+  );
+  for (const row of rows) {
+    const status = statusFromRow(row);
+    byUser.set(status.userId, status);
+  }
+  return byUser;
+}
+
+export async function deviceCountsFor(
+  db: D1Database,
+  userIds: string[],
+): Promise<Map<string, number>> {
+  const byUser = new Map<string, number>();
+  const rows = await rowsByUserIds(
+    db,
+    (placeholders) =>
+      `SELECT user_id, COUNT(*) AS n FROM devices WHERE user_id IN (${placeholders}) GROUP BY user_id`,
+    userIds,
+  );
+  for (const row of rows) byUser.set(String(row.user_id), Number(row.n) || 0);
+  return byUser;
+}
+
+export async function servicesForUsers(
+  db: D1Database,
+  userIds: string[],
+  fromSec: number,
+): Promise<Map<string, string[]>> {
+  const byUser = new Map<string, string[]>();
+  const rows = await rowsByUserIds(
+    db,
+    (placeholders) =>
+      `SELECT DISTINCT user_id, family FROM service_usage_daily WHERE user_id IN (${placeholders}) AND day_at >= ?`,
+    userIds,
+    [fromSec],
+  );
+  for (const row of rows) {
+    const userId = String(row.user_id);
+    const family = String(row.family);
+    const list = byUser.get(userId);
+    if (list) {
+      if (!list.includes(family)) list.push(family);
+    } else {
+      byUser.set(userId, [family]);
+    }
+  }
+  return byUser;
+}

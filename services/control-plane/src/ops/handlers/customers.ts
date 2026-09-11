@@ -1,6 +1,7 @@
 import { ApiError } from '../../errors';
 import { sniffPlatform } from '../customers';
-import { activityHours, customerStatus } from '../customers-read';
+import { loadCustomerListCounts, loadCustomerPage } from '../customers-list';
+import { activityHours, customerStatus, customerStatuses, deviceCountsFor, servicesForUsers } from '../customers-read';
 import {
   SERVICE_FAMILIES,
   assertActivityHour,
@@ -93,21 +94,14 @@ function asFamily(value: string): ServiceFamily {
   return (SERVICE_FAMILIES as readonly string[]).includes(value) ? value as ServiceFamily : 'other';
 }
 
-async function servicesFor(e: Env, userId: string, fromSec: number): Promise<ServiceFamily[]> {
-  try {
-    const rows = await e.DB.prepare(
-      `SELECT DISTINCT family FROM service_usage_daily WHERE user_id = ? AND day_at >= ?`,
-    ).bind(userId, fromSec).all<Row>();
-    const out: ServiceFamily[] = [];
-    for (const row of rows.results ?? []) {
-      const family = asFamily(String(row.family));
-      if (!out.includes(family)) out.push(family);
-    }
-    return out;
-  } catch (error) {
-    if (!missingTable(error)) throw error;
-    return [];
+function familiesOf(values: string[] | undefined): ServiceFamily[] {
+  if (!values) return [];
+  const out: ServiceFamily[] = [];
+  for (const value of values) {
+    const family = asFamily(value);
+    if (!out.includes(family)) out.push(family);
   }
+  return out;
 }
 
 async function openCustomerIncidents(e: Env): Promise<Map<string, OpenCustomerIncident>> {
@@ -138,28 +132,22 @@ export async function getCustomers(req: Request, e: Env): Promise<Response> {
   const qRaw = url.searchParams.get('q');
   const q = qRaw == null || qRaw.trim() === '' ? null : qRaw.trim().toLowerCase();
   if (q != null && q.length > 200) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid q');
-  let users: Row[] = [];
-  try {
-    users = (await e.DB.prepare(
-      'SELECT * FROM users ORDER BY email ASC, id ASC',
-    ).all<Row>()).results ?? [];
-  } catch (error) {
-    if (!missingTable(error)) throw error;
-  }
   const t = now();
+  const filter = { q, since, nowSec: t };
+  const page = await loadCustomerPage(e.DB, filter, cursor, limit);
+  const userIds = page.users.map((user) => String(user.id));
   const incidents = await openCustomerIncidents(e);
-  const funnel = await loadFunnelFacts(e.DB, t);
+  const funnel = await loadFunnelFacts(e.DB, t, userIds);
+  const statusByUser = await customerStatuses(e.DB, userIds);
+  const deviceCountByUser = await deviceCountsFor(e.DB, userIds);
+  const servicesByUser = await servicesForUsers(e.DB, userIds, t - 30 * 86_400);
+  const counts = await loadCustomerListCounts(e.DB, filter);
   const items: CustomerSummaryDto[] = [];
-  for (const user of users) {
+  for (const user of page.users) {
     const email = String(user.email);
     const userId = String(user.id);
-    if (q && !email.toLowerCase().includes(q) && !(nullText(user.wechat_id) ?? '').toLowerCase().includes(q)) {
-      continue;
-    }
-    if (!afterCursor(cursor, email, userId, 'asc')) continue;
     const updatedAt = Number(user.updated_at) || t;
-    if (since != null && updatedAt < since) continue;
-    const status = await customerStatus(e.DB, userId);
+    const status = statusByUser.get(userId) ?? null;
     const person = funnel.byUserId.get(userId);
     const stage = person?.stage ?? 'registered';
     const stageSinceAt = person?.stageSinceAt ?? (Number(user.created_at) || t);
@@ -173,7 +161,7 @@ export async function getCustomers(req: Request, e: Env): Promise<Response> {
     items.push({
       userId, email, wechatId: nullText(user.wechat_id),
       verdict, health: word.word, tone: word.tone, reason,
-      lifecycle, deviceCount: 0, platforms,
+      lifecycle, deviceCount: deviceCountByUser.get(userId) ?? 0, platforms,
       selectedServer: status?.selectedServer ?? null,
       connected: measured(status?.connected === true, status?.lastSeenAt ?? null, 'telemetry'),
       lastFailure: status?.lastFailAt
@@ -181,7 +169,7 @@ export async function getCustomers(req: Request, e: Env): Promise<Response> {
         : null,
       usageBytes: measured(Number(user.usage_bytes ?? 0), updatedAt, 'manual'),
       quotaBytes: nullInt(user.quota_bytes),
-      services: await servicesFor(e, userId, t - 30 * 86_400),
+      services: familiesOf(servicesByUser.get(userId)),
       minAppVersion: status?.appVersion ?? null,
       expiresAt: nullInt(user.expires_at),
       lastSeenAt: status?.lastSeenAt ?? null,
@@ -189,25 +177,14 @@ export async function getCustomers(req: Request, e: Env): Promise<Response> {
       updatedAt,
     });
   }
-  // Fill device counts in one query.
-  try {
-    const counts = await e.DB.prepare(
-      `SELECT user_id, COUNT(*) AS n FROM devices GROUP BY user_id`,
-    ).all<Row>();
-    const byUser = new Map((counts.results ?? []).map((row) => [String(row.user_id), Number(row.n)]));
-    for (const item of items) item.deviceCount = byUser.get(item.userId) ?? 0;
-  } catch (error) {
-    if (!missingTable(error)) throw error;
-  }
-  const page = items.slice(0, limit + 1);
-  const sliced = page.length > limit ? page.slice(0, limit) : page;
+  const sliced = items.length > limit ? items.slice(0, limit) : items;
   const last = sliced[sliced.length - 1];
-  const nextCursor = page.length > limit && last ? encodeCursor(last.email, last.userId) : null;
+  const nextCursor = items.length > limit && last ? encodeCursor(last.email, last.userId) : null;
   const updatedAt = sliced.reduce((max, row) => Math.max(max, row.updatedAt), t);
   return listJson(
     e, req, sliced, nextCursor, updatedAt,
-    weakEtag([updatedAt, items.length, since]),
-    assertCustomerSummary, items.length,
+    weakEtag([updatedAt, page.total, since]),
+    assertCustomerSummary, page.total, counts,
   );
 }
 
