@@ -30,7 +30,7 @@
 
 - 两端登录、签名目录、VLESS Reality、TUN、系统保护、微信国内直连、Claude 家宽链、家宽不可用不再偷偷退回云出口。
 - macOS 失败即报已合（PR #119）。Windows 周期遥测骨架在 `apps/windows/app/src-tauri/src/tono/telemetry.rs`，`connectFail` 事件名已列入白名单。本分支失败当时 `POST telemetry/failures`（stage / 稳定 code / 当时的目录节点名），周期窗口仍带同一事件。**不是** #138 的 3.5 连接日志。
-- Windows 插件 IPC 命名空间源码已改为 `tono-plugin-core`（`crates/tono-plugin-core/src/lib.rs` 的 `PluginBuilder::new` 与 `app/tests/core-plugin-namespace.test.ts`）。**实机尚未用新包复测**，`docs/WINDOWS_0_0_72_DEVICE_ACCEPTANCE.md` 仍记着 FAIL。第一次连接的作业卡不再把「打开 Windows DNS 设置」当主按钮；仅当 Encrypted DNS 是强制模式时，连上后仍提示关掉它。保护期关掉 `EnableAutoDoh` 并加 NRPT 指向 `198.18.0.2`；系统 DNS 若仍超时，TUN 监听答了 fake-ip 就放行（Win10 卡在 `securingDNS` / `Windows system DNS A query exceeded 5s` 的 quick fix）。
+- Windows 插件 IPC 命名空间源码已改为 `tono-plugin-core`（`crates/tono-plugin-core/src/lib.rs` 的 `PluginBuilder::new` 与 `app/tests/core-plugin-namespace.test.ts`）。**实机尚未用新包复测**，`docs/WINDOWS_0_0_72_DEVICE_ACCEPTANCE.md` 仍记着 FAIL。第一次连接的作业卡不再把「打开 Windows DNS 设置」当主按钮；仅当 Encrypted DNS 是强制模式时，连上后仍提示关掉它。保护期关掉 `EnableAutoDoh`、把设置页里的按适配器 `DohFlags` 置 0，并加 NRPT 指向 `198.18.0.2`；系统 DNS 若仍超时，TUN 监听答了 fake-ip 就放行（Win10 卡在 `securingDNS` / `Windows system DNS A query exceeded 5s` 的 quick fix）。
 - 目录与保护已经按传输层区分端点：macOS `ConfigPipeline.DialEndpoint.transport`；Windows `ProxyEndpoint.protocol` 含 `Udp`。hy2 要接的是这两处，不是新造一套防火墙。
 - 控制面目录合同已接受同节点 hy2 块（`password: {{TONO_CLIENT_UUID}}` + fingerprint，禁止 skip-cert-verify；迁移 0072）。**生产目录仍不塞块**，直到客户端准入合入。
 - 杭州 `47.110.84.71` 只出站：东京 VLESS TCP 通；Dedirock hy2 UDP 握手 5/5 且经 hy2 到 Google 通。Panstar 东京入站 UDP 被商家拦住。自动切换默认关。客户目录默认剥掉 ` · hy2`（`HY2_CATALOG_EMAILS` 灰度）。**生产目录仍不塞块。**

@@ -55,9 +55,11 @@
 //! DoH templates send lookups over HTTPS to a public resolver. WFP then default-denies that
 //! path, so the App's `DnsQueryEx` waits out 5 s and connect dies in `securingDNS` even though
 //! TUN DNS at `198.18.0.2` answers in milliseconds. While protected we snapshot
-//! `EnableAutoDoh`, set it to 0, and install a catch-all NRPT rule to the TUN resolver;
-//! disconnect restores both. That does not widen WFP: queries still have to traverse the
-//! permitted TUN interface.
+//! `EnableAutoDoh`, set it to 0, zero per-adapter `DohFlags` under
+//! `InterfaceSpecificParameters\{guid}\DohInterfaceSettings\Doh{,6}\{server}`
+//! (the Settings UI "Encrypted only / preferred" path), and install a catch-all NRPT
+//! rule to the TUN resolver; disconnect restores all three. That does not widen WFP:
+//! queries still have to traverse the permitted TUN interface.
 //!
 //! **DNS-before-disarm invariant (identical to the macOS helper):** the kill switch may only
 //! disarm after DNS restore is *proven*; if restore cannot be proven, the disarm is refused
@@ -154,6 +156,22 @@ const SNAPSHOT_VERSION: u32 = 1;
 /// Sidecar next to `protected-dns.json`. Written *before* Encrypted DNS is
 /// mutated so a crash still has the user's `EnableAutoDoh` value to put back.
 const ENCRYPTED_DNS_CAPTURE_FILE: &str = "protected-secure-dns.json";
+/// Sidecar for per-adapter DoH templates (Settings → DNS encryption). Separate
+/// from the EnableAutoDoh file so a mid-session upgrade can still restore
+/// a DWORD capture written by an older build.
+#[cfg_attr(not(windows), allow(dead_code))]
+const INTERFACE_DOH_CAPTURE_FILE: &str = "protected-interface-doh.json";
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+const INTERFACE_DOH_CAPTURE_VERSION: u32 = 1;
+/// `DNS_DOH_SERVER_SETTINGS_ENABLE_AUTO`
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+const DNS_DOH_ENABLE_AUTO: u64 = 0x1;
+/// `DNS_DOH_SERVER_SETTINGS_ENABLE` (manual template).
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+const DNS_DOH_ENABLE: u64 = 0x2;
+/// `DNS_DOH_SERVER_SETTINGS_FALLBACK_TO_UDP`
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+const DNS_DOH_FALLBACK_TO_UDP: u64 = 0x4;
 /// `EnableAutoDoh` off. 2 is opportunistic (Win11 default), 3 is required.
 #[cfg_attr(not(any(windows, test)), allow(dead_code))]
 const ENABLE_AUTO_DOH_OFF: u32 = 0;
@@ -182,6 +200,74 @@ fn parse_encrypted_dns_capture(body: &str) -> Result<Option<u32>, String> {
         .parse::<u32>()
         .map(Some)
         .map_err(|error| format!("encrypted DNS capture is not a DWORD ({error})"))
+}
+
+/// Win10/11 Settings "Encrypted only" = DoH enabled and UDP fallback off.
+/// Encrypted-preferred still tries HTTPS first (the 5 s `securingDNS` hang).
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+fn interface_doh_is_enabled(flags: u64) -> bool {
+    flags & (DNS_DOH_ENABLE_AUTO | DNS_DOH_ENABLE) != 0
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn interface_doh_is_encrypted_only(flags: u64) -> bool {
+    interface_doh_is_enabled(flags) && flags & DNS_DOH_FALLBACK_TO_UDP == 0
+}
+
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct InterfaceDohCapture {
+    v: u32,
+    entries: Vec<InterfaceDohEntry>,
+}
+
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct InterfaceDohEntry {
+    guid: String,
+    family: String,
+    server: String,
+    flags: u64,
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn interface_doh_capture_path() -> PathBuf {
+    crate::service_paths()
+        .persistent_state_dir()
+        .join(INTERFACE_DOH_CAPTURE_FILE)
+}
+
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+fn format_interface_doh_capture(entries: &[InterfaceDohEntry]) -> Result<String, String> {
+    serde_json::to_string(&InterfaceDohCapture {
+        v: INTERFACE_DOH_CAPTURE_VERSION,
+        entries: entries.to_vec(),
+    })
+    .map_err(|error| format!("interface DoH capture could not be written ({error})"))
+}
+
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+fn parse_interface_doh_capture(body: &str) -> Result<Vec<InterfaceDohEntry>, String> {
+    let parsed: InterfaceDohCapture = serde_json::from_str(body)
+        .map_err(|error| format!("interface DoH capture is not JSON ({error})"))?;
+    if parsed.v != INTERFACE_DOH_CAPTURE_VERSION {
+        return Err(format!(
+            "interface DoH capture version {} is not {}",
+            parsed.v, INTERFACE_DOH_CAPTURE_VERSION
+        ));
+    }
+    for entry in &parsed.entries {
+        if entry.family != "Doh" && entry.family != "Doh6" {
+            return Err(format!(
+                "interface DoH capture family {} is not Doh or Doh6",
+                entry.family
+            ));
+        }
+        if entry.guid.is_empty() || entry.server.is_empty() {
+            return Err("interface DoH capture is missing guid or server".to_owned());
+        }
+    }
+    Ok(parsed.entries)
 }
 
 /// One adapter's original DNS values. `None` means the registry value was absent — the
