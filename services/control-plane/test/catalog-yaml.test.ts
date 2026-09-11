@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../src/errors';
-import { managedCatalogYAML, retirementCatalogPlan, filterHy2CatalogForViewer, hy2CatalogEmailAllowlist, requestAcceptsHy2Catalog } from '../src/catalog-yaml';
+import { managedCatalogYAML, retirementCatalogPlan, relistCatalogPlan, filterHy2CatalogForViewer, hy2CatalogEmailAllowlist, requestAcceptsHy2Catalog } from '../src/catalog-yaml';
 
 function expectInvalidCatalog(yaml: string) {
   try {
@@ -95,6 +95,18 @@ describe('catalog hy2 contract', () => {
     expect(plan.yaml).not.toContain('Tokyo · Sakura');
     expect(plan.yaml).not.toContain(' · hy2');
     expect(plan.yaml.match(/\{\{TONO_CLIENT_UUID\}\}/g)).toHaveLength(1);
+
+    const relisted = relistCatalogPlan(plan.yaml, 'Tokyo · Sakura', `${vless('Tokyo · Sakura', '203.0.113.60')}\n`);
+    expect(relisted.safe).toBe(true);
+    const relistedHy2 = relistCatalogPlan(
+      relisted.yaml,
+      'Tokyo · Sakura · hy2',
+      `${hy2(fp)}\n`,
+    );
+    expect(relistedHy2.safe).toBe(true);
+    expect(relistedHy2.yaml).toContain('Tokyo · Sakura · hy2');
+    expect(relistedHy2.yaml).toContain('type: hysteria2');
+    expect(relistedHy2.yaml.match(/\{\{TONO_CLIENT_UUID\}\}/g)).toHaveLength(3);
   });
 
   it('hides hy2 blocks and group members unless the viewer is on the gray list', () => {
