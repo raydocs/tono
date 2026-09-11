@@ -112,8 +112,8 @@
 
 **G1.1 用新包复测插件命名空间** — 老板 · S
 
-- 背景：源码已修（`PluginBuilder::new("tono-plugin-core")`），09-08 实机 FAIL 是旧包。`docs/WINDOWS_0_0_72_DEVICE_ACCEPTANCE.md` 仍是 qualification incomplete。本分支 Encrypted DNS 钉死（含设置页 `DohFlags`）已打进内部候选 run [`34565734039`](https://github.com/raydocs/tono/actions/runs/34565734039)，installer SHA-256 `0a2d55b1eecddbe9975449f308fd84aa84144aceabee979853c0685fb0ffdfcb`。不签名、不推更新源、版本仍 0.0.72。**实机未装，G1.1 未过。**
-- 步骤：Tono **先断开**。在 Windows 上用 `docs/WINDOWS_0_0_72_DEVICE_ACCEPTANCE.md` §7 的 `gh run download` 拉包、核 SHA-256，再装。连接；Win10 必须过 `securingDNS`；仪表盘速率与 Activity 离开 controller retry。断开收回 DNS。
+- 背景：源码已修（`PluginBuilder::new("tono-plugin-core")`），09-08 实机 FAIL 是旧包。`docs/WINDOWS_0_0_72_DEVICE_ACCEPTANCE.md` 仍是 qualification incomplete。G1.1 内部候选是 run [`34574027022`](https://github.com/raydocs/tono/actions/runs/34574027022)，installer SHA-256 `ae2e699c7b0263772e2d2fc6bde48ac0333dc5f1e256e909e3364c18de3d1e42`（源 `91060f1c`：Encrypted DNS 钉死 + 连接中不是取消 + TUN/系统 DNS 竞速）。不签名、不推更新源、版本仍 0.0.72。§7 旧包大按钮写「取消」，不要再装。**实机未装此包，G1.1 未过。**
+- 步骤：Tono **先断开**。在 Windows 上用 `docs/WINDOWS_0_0_72_DEVICE_ACCEPTANCE.md` §8 的 `gh run download` 或 nightly.link 拉包、核 SHA-256，再装。连接；Win10 必须过 `securingDNS`；仪表盘速率与 Activity 离开 controller retry。断开收回 DNS。
 - 验收：该文档顶部 Status 改成「插件命名空间实机通过」，记下包哈希。仍 FAIL 则停在这里，不要开始 G2。
 
 **G1.2 健康会话不被瞬态读失败拆掉** — 接 PR #116 · M

@@ -182,3 +182,45 @@ Start-Process $setup.FullName
 ```
 
 Then: launch 0.0.72 → connect → `securingDNS` must pass; dashboard rate and Activity must leave controller retry; disconnect restores DNS. Artifact retention is 7 days.
+
+## 8. Pending device candidate — Encrypted DNS + connecting pill + TUN DNS race (2026-09-11)
+
+Supersedes §7 for G1.1. The §7 package labelled the connecting pill **Cancel**; a click became standby plus "something went wrong" with no Failed stage, so Encrypted DNS was never reached.
+
+Hosted candidate run: [`34574027022`](https://github.com/raydocs/tono/actions/runs/34574027022).
+Artifact `tono-windows-0.0.72-candidate-91060f1ce5b7a349d074ee21075e33ffccfb1efc`.
+Source `91060f1ce5b7a349d074ee21075e33ffccfb1efc`.
+Version **0.0.72**. `candidateOnly: true`. Not Authenticode signed. Not updater signed. Not a customer-channel package.
+
+Installer `Tono_0.0.72_x64-setup.exe` SHA-256 (matches downloaded bytes and `candidate-manifest.json`):
+
+```text
+ae2e699c7b0263772e2d2fc6bde48ac0333dc5f1e256e909e3364c18de3d1e42
+```
+
+Service `tono-service.exe` SHA-256 `85ad6e6b9bd90f53ff1253f1b9091f21997cdd2d21ac69b40ccbb039374f6d3c`.
+Core `tono-core-x86_64-pc-windows-msvc.exe` SHA-256 `5dbe9cbcf2b6ffb9ac4d8c83b4ddd21bf117942de49d6a600105320bbe21126c`.
+
+**Not installed on the Win10 Encrypted DNS machine. Not a G1.1 pass.** This package contains: Encrypted DNS pin (`EnableAutoDoh` + per-adapter `DohFlags` + NRPT), connecting pill titled Connecting… (not Cancel), TUN DNS raced with system DNS. It does **not** prove that this Win10 will reach Connected.
+
+Open without GitHub login:
+
+- Page: https://nightly.link/raydocs/tono/actions/runs/34574027022
+- Zip: https://nightly.link/raydocs/tono/actions/runs/34574027022/tono-windows-0.0.72-candidate-91060f1ce5b7a349d074ee21075e33ffccfb1efc.zip
+
+On the Windows PC, with Tono **disconnected**:
+
+```powershell
+$dest = Join-Path $env:TEMP 'tono-candidate-34574027022'
+New-Item -ItemType Directory -Force $dest | Out-Null
+gh run download 34574027022 --repo raydocs/tono -n tono-windows-0.0.72-candidate-91060f1ce5b7a349d074ee21075e33ffccfb1efc -D $dest
+$setup = Get-ChildItem $dest -Recurse -Filter Tono_0.0.72_x64-setup.exe | Select-Object -First 1
+$hash = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($hash -ne 'ae2e699c7b0263772e2d2fc6bde48ac0333dc5f1e256e909e3364c18de3d1e42') {
+  throw "hash mismatch: $hash"
+}
+Start-Process $setup.FullName
+```
+
+Then: launch 0.0.72 → connect. Pill must stay **Connecting…**, not Cancel. `securingDNS` must pass; dashboard rate and Activity must leave controller retry; disconnect restores DNS. If it fails, copy diagnostics (need Failed stage + Error, not empty). Artifact retention is 7 days.
+
