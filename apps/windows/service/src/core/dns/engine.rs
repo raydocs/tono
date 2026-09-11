@@ -5,7 +5,7 @@ use super::{
 use anyhow::{Context as _, Result, bail};
 use std::ffi::CStr;
 use windows_sys::Win32::Foundation::{
-    ERROR_BUFFER_OVERFLOW, ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_NO_DATA,
+    ERROR_BUFFER_OVERFLOW, ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_NO_DATA, FILETIME,
 };
 use windows_sys::Win32::NetworkManagement::IpHelper::{
     GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_FRIENDLY_NAME,
@@ -173,10 +173,10 @@ fn enum_subkeys(subkey: &str) -> Result<Vec<String>> {
                 index,
                 buf.as_mut_ptr(),
                 &mut len,
+                std::ptr::null(),
+                std::ptr::null_mut::<u16>(),
                 std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
+                std::ptr::null_mut::<FILETIME>(),
             )
         };
         if status != 0 {
