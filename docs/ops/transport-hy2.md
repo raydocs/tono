@@ -154,4 +154,33 @@ dry-run：`{"xrayClients":43,"xrayPid":658,"xrayUntouched":true,"dryRun":true}`�
 
 本分支客户端把这五条 ` · hy2` 放在独立「备用 UDP」栏（城市 · 代号 · 备用通道）。新包目录 GET 带 `X-Tono-Accept: hy2`。五块私有 yaml 本地 `--dry-run` 已通过（5 个唯一名、各一个 `{{TONO_CLIENT_UUID}}`）。Windows 候选 NSIS run [`34584323215`](https://github.com/raydocs/tono/actions/runs/34584323215) 已出：`Tono_0.0.72_x64-setup.exe` SHA-256 `7bc7aaf9a4046ef7d4f9db3cd7da5f27cd43a26492b27f46661b2295b0b7ca8a`（源 `b40ff149`）。未装真机，不是 G1.1。
 
-**生产目录仍不 PUT。** 生产 Worker `GET /api/v1/health` 的 `buildSha` 仍是 `main` `2cef4eac`（第十四次控制面），没有 hy2 合同、也不会剥 ` · hy2`。`deploy-control-plane-main.sh` 只允许从已与 `origin/main` 对齐的 `main` 部署，**不要从功能分支直接打生产**。Worker-only PR **#145** 相对 `main` 只有控制面。顺序：合 #145 → 老板跑生产部署 → `--append` 五块。先 PUT 会让 Sparkle 0.0.67 / 旧 Windows 吃到 `type: hysteria2` 后 fail closed。G2.8 自动切换仍关。家宽三网未测。
+**生产目录仍不 PUT。** 生产 Worker `GET /api/v1/health` 的 `buildSha` 仍是 `main` `2cef4eac`（第十四次控制面），没有 hy2 合同、也不会剥 ` · hy2`。`deploy-control-plane-main.sh` 只允许从已与 `origin/main` 对齐的 `main` 部署，**不要从功能分支直接打生产**。Worker-only PR **#145** 相对 `main` 只有控制面，CI 已绿。顺序：合 #145 → 老板跑生产部署 → health 的 `buildSha` 对上 → `--append` 五块。先 PUT 会让 Sparkle 0.0.67 / 旧 Windows 吃到 `type: hysteria2` 后 fail closed。G2.8 自动切换仍关。家宽三网未测。
+
+### 部署之后怎么 append（口令不进仓库）
+
+文件必须是绝对路径、当前用户所有、mode `0600`。Grove 的 `name` 必须是 `US-VLESS-Reality · hy2`，才能和 TCP 基名折叠。指纹与上表相同，写成不带冒号的小写 hex。
+
+```sh
+# After GET /api/v1/health buildSha is the #145 merge commit, not 2cef4eac:
+umask 077
+dir=$(mktemp -d)
+chmod 700 "$dir"
+# write five 0600 yaml files into $dir (proxies: / name / type: hysteria2 /
+# server / port: 443 / password: "{{TONO_CLIENT_UUID}}" / sni: www.microsoft.com /
+# fingerprint / skip-cert-verify: false), then:
+ruby tooling/scripts/publish-managed-catalog.rb --dry-run "$dir"/*.yaml
+# only then:
+ruby tooling/scripts/publish-managed-catalog.rb --append "$dir"/*.yaml
+rm -rf "$dir"
+```
+
+五块的 `name` / `server` / `fingerprint`：
+
+| 文件名建议 | name | server | fingerprint |
+|---|---|---|---|
+| niagara.yaml | `Buffalo · Niagara · hy2` | `23.94.79.123` | `1e5374a79bdb83b04c3d3c84722c03211d1c941c2de9f92431d2198ba7212cad` |
+| erie.yaml | `Buffalo · Erie · hy2` | `198.46.140.254` | `4a66f10676ca881186be350d16b3f86cb36f9c896ef445a692d5cc0bc8b5b201` |
+| sunset.yaml | `Los Angeles · Sunset · hy2` | `192.236.205.232` | `0ff3ab6b1bec3a3766f88955a84064ae73ea4724cb4d8602780e06dfbceceeb7` |
+| mesa.yaml | `Los Angeles · Mesa · hy2` | `107.174.123.27` | `f59731347bf068d79f9d9e78c074e4686b981383a5c9029a5650e703e6afba41` |
+| grove.yaml | `US-VLESS-Reality · hy2` | `198.12.84.154` | `a4a8308980004c8a5cda98597b87986671f230445df863c23d380f012c72f909` |
+
