@@ -30,7 +30,7 @@
 
 - 两端登录、签名目录、VLESS Reality、TUN、系统保护、微信国内直连、Claude 家宽链、家宽不可用不再偷偷退回云出口。
 - macOS 失败即报已合（PR #119）。Windows 周期遥测骨架在 `apps/windows/app/src-tauri/src/tono/telemetry.rs`，`connectFail` 事件名已列入白名单。本分支失败当时 `POST telemetry/failures`（stage / 稳定 code / 当时的目录节点名），周期窗口仍带同一事件。**不是** #138 的 3.5 连接日志。
-- Windows 插件 IPC 命名空间源码已改为 `tono-plugin-core`（`crates/tono-plugin-core/src/lib.rs` 的 `PluginBuilder::new` 与 `app/tests/core-plugin-namespace.test.ts`）。**实机尚未用新包复测**，`docs/WINDOWS_0_0_72_DEVICE_ACCEPTANCE.md` 仍记着 FAIL。
+- Windows 插件 IPC 命名空间源码已改为 `tono-plugin-core`（`crates/tono-plugin-core/src/lib.rs` 的 `PluginBuilder::new` 与 `app/tests/core-plugin-namespace.test.ts`）。**实机尚未用新包复测**，`docs/WINDOWS_0_0_72_DEVICE_ACCEPTANCE.md` 仍记着 FAIL。第一次连接的作业卡不再把「打开 Windows DNS 设置」当主按钮；仅当 Encrypted DNS 是强制模式时，连上后仍提示关掉它（连上但网页打不开的常见原因）。
 - 目录与保护已经按传输层区分端点：macOS `ConfigPipeline.DialEndpoint.transport`；Windows `ProxyEndpoint.protocol` 含 `Udp`。hy2 要接的是这两处，不是新造一套防火墙。
 - 控制面目录合同已接受同节点 hy2 块（`password: {{TONO_CLIENT_UUID}}` + fingerprint，禁止 skip-cert-verify；迁移 0072）。**生产目录仍不塞块**，直到客户端准入合入。
 - 杭州 `47.110.84.71` 只出站：东京 VLESS TCP 通；Dedirock hy2 UDP 握手 5/5 且经 hy2 到 Google 通。Panstar 东京入站 UDP 被商家拦住。自动切换默认关。客户目录默认剥掉 ` · hy2`（`HY2_CATALOG_EMAILS` 灰度）。**生产目录仍不塞块。**
@@ -42,7 +42,7 @@
 **还没有的（这一发要补）**
 
 - 客户端准入 hy2：Windows `admit_node` / `proxy_endpoint_of` 与 macOS `validatedOwnedNode` / Helper UDP 放行在本分支落地；合进 `main` 之前 App 仍吃不进托管 hy2 块。macOS `ConfigParser` 的 `hy2://` 仍是手工 URL。
-- 连接失败只换下一座城市（macOS `rotateCatalogExitAfterConnectFailure`），不自动换同一座城市的备用传输。G2.8 自动切换不做，直到家宽三网证明。失败卡片已提供手选「试用备用通道」。
+- 连接失败不再自动换城（macOS live 路径已关 `CORE_EXIT_UNREACHABLE` 换城，与 Windows 一致）。不自动换同一座城市的备用传输。G2.8 自动切换不做，直到家宽三网证明。失败卡片已提供手选「试用备用通道」；目录同时有东京 hy2 和其它城 hy2 时，点备用会跳过东京（入站 UDP 被商家拦）。
 - Windows 更新日记：`prepare` 停在 `UpdatePrepared`；所有者按相位推进；`commit_verified_recovery` 才允许删日记。`--replace-runtime` 写 `InstallStarted`（App 不再猜）。真机 G3.3 之前不算过门。
 - 客户更新源：`services/control-plane/public/appcast.xml` 0.0.67；`public/windows/latest.json` 0.0.34。
 

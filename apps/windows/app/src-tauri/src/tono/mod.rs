@@ -15,6 +15,7 @@ mod connection_plan;
 mod connection_routes;
 pub mod credentials;
 pub mod diagnostics;
+pub(crate) mod encrypted_dns;
 mod integration_profile;
 pub mod policy_sync;
 pub mod protected_probe;

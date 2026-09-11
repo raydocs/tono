@@ -138,6 +138,7 @@ mod app_init {
             cmd::open_logs_dir,
             cmd::open_core_dir,
             cmd::open_windows_dns_settings,
+            cmd::tono_encrypted_dns_overrides,
             cmd::restart_app,
             tono::commands::quit::tono_prepare_update,
             cmd::get_runtime_state,

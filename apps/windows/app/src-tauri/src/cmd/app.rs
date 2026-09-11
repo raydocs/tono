@@ -33,6 +33,12 @@ pub async fn open_core_dir() -> CmdResult<()> {
     open_detached(core_dir.as_os_str().to_owned()).await
 }
 
+/// True when Windows Encrypted DNS can ignore the adapter DNS Tono wrote.
+#[tauri::command]
+pub async fn tono_encrypted_dns_overrides() -> bool {
+    crate::tono::encrypted_dns::encrypted_dns_overrides_adapter()
+}
+
 /// Open Windows Network & internet so Encrypted DNS can be turned off.
 #[tauri::command]
 pub async fn open_windows_dns_settings() -> CmdResult<()> {

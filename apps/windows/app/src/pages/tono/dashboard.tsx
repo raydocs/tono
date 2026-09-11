@@ -5,6 +5,7 @@ import { Link, useNavigate } from 'react-router'
 
 import { useTonoStatus } from '@/hooks/use-tono'
 import { useTrafficData } from '@/hooks/use-traffic-data'
+import { tonoEncryptedDnsOverrides } from '@/services/cmds'
 import { showNotice } from '@/services/notice-service'
 import { useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
@@ -59,10 +60,17 @@ const hex = (color: string, alpha: number) =>
 
 const CHECKLIST_STORAGE_KEY = 'tono.connectChecklistDismissed'
 const catalogStatusQueryKey = ['tono', 'catalog-status'] as const
+const encryptedDnsQueryKey = ['tono', 'encrypted-dns'] as const
 /** Ignore a cancel click this long after entering connecting (macOS parity). */
 const CANCEL_GRACE_MS = 1200
 
-const ConnectChecklist = ({ dark }: { dark: boolean }) => {
+const ConnectChecklist = ({
+  dark,
+  encryptedDnsOverrides,
+}: {
+  dark: boolean
+  encryptedDnsOverrides: boolean
+}) => {
   const { t } = useTranslation()
   const text = tonoText(dark)
   const [dismissed, setDismissed] = useState(() => {
@@ -132,9 +140,11 @@ const ConnectChecklist = ({ dark }: { dark: boolean }) => {
           </li>
         ))}
       </ol>
-      <div style={{ marginTop: 10 }}>
-        <OpenDnsSettingsButton />
-      </div>
+      {encryptedDnsOverrides ? (
+        <div style={{ marginTop: 10 }}>
+          <OpenDnsSettingsButton accent />
+        </div>
+      ) : null}
     </GlassCard>
   )
 }
@@ -476,6 +486,11 @@ const DashboardPage = () => {
     queryFn: tonoCatalogStatus,
     refetchInterval: 30_000,
   })
+  const { data: encryptedDnsOverrides } = useQuery({
+    queryKey: encryptedDnsQueryKey,
+    queryFn: tonoEncryptedDnsOverrides,
+    refetchInterval: 15_000,
+  })
   const [actionError, setActionError] = useState<DashboardActionError | null>(
     null,
   )
@@ -532,6 +547,14 @@ const DashboardPage = () => {
   const protectionConfirmed = hasLiveProtection(status)
   const uiState = status?.uiState ?? 'notConnected'
   const connected = uiState === 'connected'
+  useEffect(() => {
+    if (!connected) return
+    try {
+      window.localStorage.setItem(CHECKLIST_STORAGE_KEY, '1')
+    } catch {
+      /* ignore quota */
+    }
+  }, [connected])
   const connectingSinceRef = useRef<number | null>(null)
   const connecting = uiState === 'connecting'
   useEffect(() => {
@@ -884,7 +907,30 @@ const DashboardPage = () => {
         {!connected &&
           uiState === 'notConnected' &&
           actionError == null && (
-          <ConnectChecklist dark={dark} />
+          <ConnectChecklist
+            dark={dark}
+            encryptedDnsOverrides={encryptedDnsOverrides === true}
+          />
+        )}
+        {connected && encryptedDnsOverrides === true && (
+          <GlassCard
+            radius="var(--tono-radius-card)"
+            padding={14}
+            role="status"
+            style={{ width: 520, maxWidth: '100%' }}
+          >
+            <p
+              style={{
+                margin: '0 0 10px',
+                fontSize: 12,
+                lineHeight: 1.5,
+                color: text.secondary,
+              }}
+            >
+              {t('tono.dashboard.encryptedDnsHint')}
+            </p>
+            <OpenDnsSettingsButton accent />
+          </GlassCard>
         )}
         {/* Actionable error under the primary control — includes a switch-server
             path when the exit itself is the likely problem. */}

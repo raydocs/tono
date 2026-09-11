@@ -12,6 +12,11 @@ export async function openWindowsDnsSettings() {
   return invoke<void>('open_windows_dns_settings')
 }
 
+/** True when Win11 Encrypted DNS can ignore Tono's adapter DNS after connect. */
+export async function tonoEncryptedDnsOverrides() {
+  return invoke<boolean>('tono_encrypted_dns_overrides')
+}
+
 export async function restartApp() {
   return invoke<void>('restart_app')
 }

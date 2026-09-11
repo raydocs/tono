@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import enShared from '@/locales/en/shared.json'
 import enTono from '@/locales/en/tono.json'
+import { removeCacheData } from '@/services/query-client'
 import type { TonoStatus } from '@/services/tono'
 
 const mocks = vi.hoisted(() => ({
@@ -24,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   trafficLive: false,
   traffic: undefined as { up: number; down: number } | undefined,
   refreshGetClashTraffic: vi.fn(),
+  encryptedDnsOverrides: false,
 }))
 
 vi.mock('@/hooks/use-tono', () => ({
@@ -41,7 +43,10 @@ vi.mock('@/hooks/use-traffic-data', () => ({
   }),
 }))
 
-vi.mock('@/services/states', () => ({ useThemeMode: () => 'light' }))
+vi.mock('@/services/cmds', () => ({
+  tonoEncryptedDnsOverrides: async () => mocks.encryptedDnsOverrides,
+  openWindowsDnsSettings: async () => {},
+}))
 
 vi.mock('@/services/tono', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/services/tono')>()),
@@ -89,9 +94,19 @@ beforeEach(() => {
   mocks.trafficLive = false
   mocks.traffic = undefined
   mocks.refreshGetClashTraffic.mockReset()
+  mocks.encryptedDnsOverrides = false
+  try {
+    window.localStorage.removeItem('tono.connectChecklistDismissed')
+  } catch {
+    /* ignore */
+  }
 })
 
-afterEach(() => cleanup())
+afterEach(async () => {
+  cleanup()
+  await removeCacheData(['tono', 'encrypted-dns'])
+  await removeCacheData(['tono', 'catalog-status'])
+})
 
 describe('dashboard action-error ownership', () => {
   it('does not claim protection when startup has no Service barrier evidence', () => {
@@ -446,6 +461,38 @@ describe('dashboard claude residential route badge', () => {
     // Progress card owns Retry / Choose route. This box used to say
     // switching cities will not help, which hid the next hand.
     expect(screen.queryByTestId('tono-action-error-message')).toBeNull()
+  })
+
+  it('does not put Open Windows DNS settings on the idle first-connect card', async () => {
+    renderDashboard()
+    expect(await screen.findByText('First connect')).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Open Windows DNS settings' })).toBeNull()
+  })
+
+  it('opens DNS settings from the idle card only when Encrypted DNS overrides adapter DNS', async () => {
+    mocks.encryptedDnsOverrides = true
+    renderDashboard()
+    expect(
+      await screen.findByRole('button', { name: 'Open Windows DNS settings' }),
+    ).toBeDefined()
+  })
+
+  it('keeps the Encrypted DNS next hand after connect when Windows still overrides DNS', async () => {
+    mocks.encryptedDnsOverrides = true
+    mocks.status = makeStatus({
+      uiState: 'connected',
+      selectedServer: 'Tokyo · Sakura',
+    })
+    renderDashboard()
+    expect(
+      await screen.findByText(
+        'Pages failing? Settings → Network & internet → DNS: turn Encrypted DNS off, then reconnect.',
+      ),
+    ).toBeDefined()
+    expect(
+      screen.getByRole('button', { name: 'Open Windows DNS settings' }),
+    ).toBeDefined()
+    expect(screen.queryByText('First connect')).toBeNull()
   })
 
   it('tells the customer to disconnect and reinstall when the update journal is Failed', () => {
