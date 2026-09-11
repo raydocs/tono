@@ -107,6 +107,7 @@
 | 路由 | 返回 |
 |---|---|
 | `GET customers` | 列表信封加可选 `counts?: { byVerdict: Record<CustomerVerdict, number>; byStage: Record<FunnelStage, number> }`（全量，各 1 条 GROUP BY；没有 `ops_customer_status` 行的用户按漏斗计入 `never_used`）。`total` 为带同一 `q`/`since` 条件的 `COUNT(*)`。分页在 SQL：`WHERE (email, id) > (?, ?)`，再按本页 `user_id IN (…)` 批量读状态 / 设备数 / 服务家族 / 漏斗事实。 |
+| `GET customers/{id}` | 可选 `logWindows?: { id, openedBy, openedAt, expiresAt, reads }[]`。开 / 读 / 关写 `ops_audit` `diagnostics.window.open\|read\|close`（target 为用户 id，summary 为窗口 id 与对象 key）；cron `retention` 把 `expires_at < now` 的窗口关掉并审计 `close(expired)` |
 
 ### 部门 C
 

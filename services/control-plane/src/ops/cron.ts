@@ -15,6 +15,7 @@ import { retainTrafficDaily } from './traffic-parse';
 import { rollupDirectCandidates30d } from './candidates-rollup';
 import { planAndSendAlerts, runVerdictPass } from './verdict-run';
 import { retainFollowups } from './handlers/followups';
+import { closeExpiredLogWindows } from './shared-admin/diagnostics-logs';
 import { fetchAndStoreFxRates } from './fx';
 
 const DAY = 86_400;
@@ -48,6 +49,7 @@ export const OPS_CRON_STEPS = [
   // append your entries inside your block
 
   // dept:b
+  // retention closes expired diagnostics_log_access rows (closeExpiredLogWindows)
   // append your entries inside your block
 
   // dept:c
@@ -197,6 +199,7 @@ async function runRetention(db: D1Database, nowSec: number): Promise<void> {
   await retainLimited(db, 'ops_node_jobs', 'created_at', nowSec - 90 * DAY);
   await retainLimited(db, 'node_traffic_cycle_samples', 'at', nowSec - 60 * DAY);
   await retainFollowups(db, nowSec, RETAIN_LIMIT);
+  await closeExpiredLogWindows(db, nowSec, RETAIN_LIMIT);
 }
 
 export async function runOpsCron(e: Env, nowSec: number): Promise<OpsCronReport> {

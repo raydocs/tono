@@ -3754,56 +3754,6 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         ).all<Row>();
       return Response.json({ windows: q.results.map(publicTelemetryWindow) });
     }
-    if (p === '/api/v1/admin/diagnostics/logs' && m === 'GET') {
-      const url = new URL(req.url);
-      const userId = url.searchParams.get('userId');
-      const limitRaw = url.searchParams.get('limit');
-      const limit = limitRaw === null
-        ? 200
-        : Math.min(Math.max(Number(limitRaw) || 0, 1), 1000);
-      const rows = userId
-        ? await e.DB.prepare(
-          `SELECT * FROM diagnostics_log_objects WHERE user_id = ?
-             ORDER BY received_at DESC LIMIT ?`,
-        ).bind(userId, limit).all<Row>()
-        : await e.DB.prepare(
-          `SELECT * FROM diagnostics_log_objects
-             ORDER BY received_at DESC LIMIT ?`,
-        ).bind(limit).all<Row>();
-      return Response.json({
-        segments: rows.results.map((row) => ({
-          id: String(row.id),
-          userId: String(row.user_id),
-          deviceId: row.device_id == null ? undefined : String(row.device_id),
-          sessionId: String(row.session_id),
-          sequence: Number(row.sequence),
-          byteSize: Number(row.byte_size),
-          lineCount: Number(row.line_count),
-          receivedAt: Number(row.received_at),
-          clientVersion: String(row.client_version),
-          osVersion: String(row.os_version),
-        })),
-      });
-    }
-    mt = p.match(/^\/api\/v1\/admin\/diagnostics\/logs\/([^/]+)$/);
-    if (mt && m === 'GET') {
-      const row = await e.DB.prepare(
-        'SELECT r2_key, session_id, sequence FROM diagnostics_log_objects WHERE id = ?',
-      ).bind(mt[1]).first<Row>();
-      if (!row) throw new ApiError(404, 'NOT_FOUND', 'Log segment not found');
-      const object = await e.DIAGNOSTICS_LOGS.get(String(row.r2_key));
-      // The index outlives a bucket lifecycle rule or a partial retention
-      // sweep, so a missing object is an expected 404 rather than a 500.
-      if (!object) throw new ApiError(404, 'NOT_FOUND', 'Log segment payload is gone');
-      const name = `${row.session_id}-${String(row.sequence).padStart(7, '0')}.jsonl.gz`;
-      return new Response(object.body, {
-        headers: {
-          'content-type': 'application/gzip',
-          'content-disposition': `attachment; filename="${name}"`,
-          'cache-control': 'no-store',
-        },
-      });
-    }
     if (p === '/api/v1/admin/signup-allowlist' && m === 'GET') {
       const q = await e.DB.prepare(
         'SELECT email, created_at FROM signup_allowlist ORDER BY created_at DESC, email ASC',
