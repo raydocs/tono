@@ -98,7 +98,7 @@ struct MenuBarView: View {
                     appState.retryProtectedConnectionNow()
                 }
                 .disabled(!canAct)
-                if appState.backupHy2SiblingName() != nil {
+                if appState.shouldOfferManualBackupChannel() {
                     actionButton(title: "Try backup channel", prominent: true) {
                         appState.tryBackupChannelManually()
                     }
@@ -117,10 +117,18 @@ struct MenuBarView: View {
             ) {}
             .disabled(true)
         } else {
-            actionButton(title: "Connect", prominent: true) {
-                appState.connect()
+            VStack(spacing: 0) {
+                actionButton(title: "Connect", prominent: true) {
+                    appState.connect()
+                }
+                .disabled(!canAct)
+                if appState.shouldOfferManualBackupChannel() {
+                    actionButton(title: "Try backup channel", prominent: true) {
+                        appState.tryBackupChannelManually()
+                    }
+                    .disabled(!canAct)
+                }
             }
-            .disabled(!canAct)
         }
     }
 

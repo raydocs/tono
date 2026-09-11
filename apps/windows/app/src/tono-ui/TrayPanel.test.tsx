@@ -140,6 +140,24 @@ describe('TrayPanel backup channel', () => {
       expect(mocks.tonoSelectServer).toHaveBeenCalledWith(tokyoHy2),
     )
     await waitFor(() => expect(mocks.tonoRetryNow).toHaveBeenCalledTimes(1))
+    expect(mocks.tonoConnect).not.toHaveBeenCalled()
+  })
+
+  it('connects through hy2 after a first-connect handshake eof that released protection', async () => {
+    mocks.status = makeStatus({
+      uiState: 'notConnected',
+      protectionBlocked: false,
+    })
+    render(<TrayPanel />, { wrapper: freshSWR })
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Try backup channel' }),
+    )
+    await waitFor(() =>
+      expect(mocks.tonoSelectServer).toHaveBeenCalledWith(tokyoHy2),
+    )
+    await waitFor(() => expect(mocks.tonoConnect).toHaveBeenCalledTimes(1))
+    expect(mocks.tonoRetryNow).not.toHaveBeenCalled()
   })
 
   it('does not offer the backup channel for a DNS failure', async () => {

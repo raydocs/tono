@@ -30,6 +30,7 @@ import type {
 const {
   tonoConnectProgressMock,
   tonoRetryNowMock,
+  tonoConnectMock,
   tonoDisconnectMock,
   tonoDiagnosticsReportMock,
   tonoUploadDiagnosticsMock,
@@ -41,6 +42,7 @@ const {
 } = vi.hoisted(() => ({
   tonoConnectProgressMock: vi.fn(),
   tonoRetryNowMock: vi.fn(),
+  tonoConnectMock: vi.fn(),
   tonoDisconnectMock: vi.fn(),
   tonoDiagnosticsReportMock: vi.fn(),
   tonoUploadDiagnosticsMock: vi.fn(),
@@ -58,6 +60,7 @@ vi.mock('@/services/tono', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/services/tono')>()),
   tonoConnectProgress: tonoConnectProgressMock,
   tonoRetryNow: tonoRetryNowMock,
+  tonoConnect: tonoConnectMock,
   tonoDisconnect: tonoDisconnectMock,
   tonoDiagnosticsReport: tonoDiagnosticsReportMock,
   tonoUploadDiagnostics: tonoUploadDiagnosticsMock,
@@ -172,6 +175,7 @@ const stubClipboard = () => {
 beforeEach(() => {
   tonoConnectProgressMock.mockReset()
   tonoRetryNowMock.mockReset().mockResolvedValue(undefined)
+  tonoConnectMock.mockReset().mockResolvedValue(undefined)
   tonoDisconnectMock.mockReset().mockResolvedValue(undefined)
   tonoDiagnosticsReportMock.mockReset().mockResolvedValue(makeReport())
   tonoUploadDiagnosticsMock.mockReset().mockResolvedValue({
@@ -743,7 +747,44 @@ describe('ConnectProgressCard', () => {
         expect(tonoSelectServerMock).toHaveBeenCalledWith(tokyoHy2),
       )
       await waitFor(() => expect(tonoRetryNowMock).toHaveBeenCalledTimes(1))
+      expect(tonoConnectMock).not.toHaveBeenCalled()
       await waitFor(() => expect(onRefreshStatus).toHaveBeenCalled())
+    })
+
+    it('offers Try backup channel after a first-connect handshake eof that released protection', async () => {
+      tonoServersMock.mockResolvedValue(catalogWithHy2())
+      tonoConnectProgressMock.mockResolvedValue(
+        makeProgress({ error: handshakeError }),
+      )
+
+      const { onRefreshStatus } = renderCard({
+        uiState: 'notConnected',
+        selectedServer: tokyo,
+      })
+
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Try backup channel' }),
+      )
+
+      await waitFor(() =>
+        expect(tonoSelectServerMock).toHaveBeenCalledWith(tokyoHy2),
+      )
+      await waitFor(() => expect(tonoConnectMock).toHaveBeenCalledTimes(1))
+      expect(tonoRetryNowMock).not.toHaveBeenCalled()
+      await waitFor(() => expect(onRefreshStatus).toHaveBeenCalled())
+    })
+
+    it('does not offer the backup channel on idle Not Connected', async () => {
+      tonoServersMock.mockResolvedValue(catalogWithHy2())
+      tonoConnectProgressMock.mockResolvedValue(makeProgress({ error: null }))
+
+      renderCard({
+        uiState: 'notConnected',
+        selectedServer: tokyo,
+      })
+
+      await waitFor(() => expect(tonoConnectProgressMock).toHaveBeenCalled())
+      expect(screen.queryByTestId('tono-try-backup-channel')).toBeNull()
     })
 
     it('does not offer the backup channel for a DNS failure even when hy2 exists', async () => {

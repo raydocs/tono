@@ -665,13 +665,19 @@ private struct ConnectionProgressCard: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
 
-                if appState.backupHy2SiblingName() != nil {
+                if appState.shouldOfferManualBackupChannel() {
                     Button("Try backup channel") {
                         appState.tryBackupChannelManually()
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
+            } else if appState.shouldOfferManualBackupChannel() {
+                Button("Try backup channel") {
+                    appState.tryBackupChannelManually()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
 
             Spacer()

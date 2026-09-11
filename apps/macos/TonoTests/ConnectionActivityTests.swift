@@ -105,6 +105,36 @@ final class ConnectionActivityTests: XCTestCase {
                 after: "Tokyo · Sakura"
             )
         )
+        XCTAssertTrue(
+            ManualBackupChannelOffer.shouldShow(
+                hasSibling: true,
+                protectionBlocked: false,
+                connecting: false,
+                connected: false,
+                disconnecting: false,
+                hasFailureRecord: true
+            )
+        )
+        XCTAssertFalse(
+            ManualBackupChannelOffer.shouldShow(
+                hasSibling: true,
+                protectionBlocked: false,
+                connecting: false,
+                connected: false,
+                disconnecting: false,
+                hasFailureRecord: false
+            )
+        )
+        XCTAssertTrue(
+            ManualBackupChannelOffer.shouldShow(
+                hasSibling: true,
+                protectionBlocked: true,
+                connecting: false,
+                connected: false,
+                disconnecting: false,
+                hasFailureRecord: false
+            )
+        )
     }
 
     private func fixture(

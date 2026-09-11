@@ -1804,6 +1804,8 @@ extension AppState {
     /// Same-city hy2 sibling. Offered while protected-offline unless the
     /// classified failure is something hy2 cannot answer (DNS, helper, TUN).
     /// Restart may have dropped the classified record; still name the sibling.
+    /// A first-connect handshake eof fully releases protection, so the
+    /// dashboard must still offer this next hand while disconnected.
     func backupHy2SiblingName() -> String? {
         if let code = lastClassifiedFailure?.code {
             switch code {
@@ -1819,12 +1821,43 @@ extension AppState {
         return ProxyNode.backupChannelName(selected: selected, catalogNames: names)
     }
 
+    func shouldOfferManualBackupChannel() -> Bool {
+        ManualBackupChannelOffer.shouldShow(
+            hasSibling: backupHy2SiblingName() != nil,
+            protectionBlocked: isProtectionBlocked,
+            connecting: isConnecting,
+            connected: isConnected,
+            disconnecting: isDisconnecting,
+            hasFailureRecord: lastConnectionFailure != nil || lastClassifiedFailure != nil
+        )
+    }
+
     /// User-tapped next hand. Does not run on its own (G2.8 stays off).
     func tryBackupChannelManually() {
         guard let backup = backupHy2SiblingName() else { return }
         guard applyProxySelection(backup) else { return }
         persistProxySelection(backup)
-        retryProtectedConnectionNow()
+        if isProtectionBlocked {
+            retryProtectedConnectionNow()
+        } else {
+            connect()
+        }
     }
 
+}
+
+enum ManualBackupChannelOffer {
+    /// Protected Offline (including restart), or a released first-connect
+    /// handshake failure. Idle disconnected must not show the button.
+    static func shouldShow(
+        hasSibling: Bool,
+        protectionBlocked: Bool,
+        connecting: Bool,
+        connected: Bool,
+        disconnecting: Bool,
+        hasFailureRecord: Bool
+    ) -> Bool {
+        guard hasSibling, !connecting, !connected, !disconnecting else { return false }
+        return protectionBlocked || hasFailureRecord
+    }
 }
