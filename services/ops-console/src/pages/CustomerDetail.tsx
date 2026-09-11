@@ -220,6 +220,7 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
         detail={accountSide.data}
         loading={accountSide.loading}
         message={accountSide.message}
+        logWindows={row.logWindows}
       />
 
       <FoldedSection title={copy.customerSections.chores} count={row.chores.length}>

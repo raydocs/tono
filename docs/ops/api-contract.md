@@ -104,6 +104,10 @@
 
 ### 部门 B
 
+| 路由 | 返回 |
+|---|---|
+| `GET customers/{id}` | 可选 `logWindows?: { id, openedBy, openedAt, expiresAt, reads }[]`。开 / 读 / 关写 `ops_audit` `diagnostics.window.open\|read\|close`（target 为用户 id，summary 为窗口 id 与对象 key）；cron `retention` 把 `expires_at < now` 的窗口关掉并审计 `close(expired)` |
+
 ### 部门 C
 
 ### 部门 D

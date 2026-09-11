@@ -25,6 +25,7 @@ import {
   type ServiceUsageDto,
 } from '../contract';
 import { funnelDays, loadFunnelFacts, stageSentence, type FunnelPerson } from '../funnel';
+import { loadLogWindows } from '../shared-admin/diagnostics-logs';
 import { customerFreshnessVerdict, neverUsedOverride } from '../verdict-customers';
 import { eventDto } from './nodes-data';
 import {
@@ -298,6 +299,7 @@ export async function getCustomer(req: Request, e: Env, rawId: string): Promise<
     asn: status?.edgeAsn ?? null,
     region: status?.edgeRegion ?? null,
   };
+  const logWindows = await loadLogWindows(e.DB, userId);
   const dto: CustomerDetailDto = {
     userId, email: String(user.email),
     wechatId: nullText(user.wechat_id), contact: nullText(user.contact), notes: nullText(user.notes),
@@ -316,6 +318,7 @@ export async function getCustomer(req: Request, e: Env, rawId: string): Promise<
     },
     stage, stageSinceAt, firstConnectedAt: person?.firstConnectedAt ?? null,
     updatedAt: Number(user.updated_at) || t,
+    logWindows,
   };
   return entityJson(e, req, dto, weakEtag([userId, dto.updatedAt]), assertCustomerDetail);
 }
