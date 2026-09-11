@@ -802,8 +802,10 @@ final class AppState {
         catalogFailoverAttemptTarget = nil
     }
 
-    /// After a China connect that proved the selected city dead, move to the
-    /// next unused catalog exit before the fail-closed reconnect fires.
+    /// Next unused catalog city for a failover sweep. Not called on the live
+    /// `CORE_EXIT_UNREACHABLE` path: that TLS close repeats on every city from
+    /// China, and hopping only moved the picker. `CatalogCityFailover` keeps
+    /// it off until G2.8 has home-broadband proof.
     @discardableResult
     func rotateCatalogExitAfterConnectFailure() -> Bool {
         let catalog = managedCatalogNodes

@@ -5401,12 +5401,12 @@
         }
       }
     },
-    "The current node could not complete a protected check. Choose another node, or reconnect to try again.": {
+    "This city could not complete a protected connection. Retry, choose another route, or try the backup channel if one is shown.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "当前节点无法完成受保护验证。请换一个节点，或重新连接再试一次。"
+            "value": "这座城市没有完成受保护连接。请重试或换线路；若有备用通道也可以试用。"
           }
         }
       }

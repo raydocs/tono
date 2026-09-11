@@ -538,7 +538,9 @@ extension AppState {
                     } else {
                         environmentalFailure = false
                     }
-                    if self.lastClassifiedFailure?.code == .coreExitUnreachable {
+                    if CatalogCityFailover.shouldRotate(
+                        after: self.lastClassifiedFailure?.code
+                    ) {
                         _ = self.rotateCatalogExitAfterConnectFailure()
                     }
                     if environmentalFailure {
@@ -1846,6 +1848,17 @@ extension AppState {
         }
     }
 
+}
+
+enum CatalogCityFailover {
+    /// Live connect used to hop cities on `CORE_EXIT_UNREACHABLE`. From China
+    /// that is the same TLS close on every city, so the picker jumped and the
+    /// backup-channel button never sat on a stable city. Windows already left
+    /// `rotate_catalog_exit_after_failure` off the live path. Keep this off
+    /// until G2.8 has home-broadband proof.
+    static func shouldRotate(after _: ProtectedFailureCode?) -> Bool {
+        false
+    }
 }
 
 enum IdleCatalogSelect {

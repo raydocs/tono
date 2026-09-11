@@ -192,6 +192,13 @@ final class ConnectionActivityTests: XCTestCase {
                 hasFailureRecord: true
             )
         )
+        XCTAssertFalse(CatalogCityFailover.shouldRotate(after: .coreExitUnreachable))
+        XCTAssertFalse(CatalogCityFailover.shouldRotate(after: .unknownClassifiedFailure))
+        XCTAssertFalse(CatalogCityFailover.shouldRotate(after: nil))
+        XCTAssertTrue(
+            ProtectedFailureCode.coreExitUnreachable.userMessage
+                .localizedCaseInsensitiveContains("backup")
+        )
         XCTAssertTrue(IdleCatalogSelect.shouldConnect(connected: false, protectionBlocked: false))
         XCTAssertFalse(IdleCatalogSelect.shouldConnect(connected: false, protectionBlocked: true))
         XCTAssertFalse(IdleCatalogSelect.shouldConnect(connected: true, protectionBlocked: false))

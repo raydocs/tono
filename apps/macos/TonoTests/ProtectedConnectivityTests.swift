@@ -542,6 +542,7 @@ final class ProtectedConnectivityTests: XCTestCase {
         XCTAssertFalse(shown.localizedCaseInsensitiveContains("tls"))
         XCTAssertFalse(shown.localizedCaseInsensitiveContains("handshake"))
         XCTAssertFalse(shown.localizedCaseInsensitiveContains("eof"))
+        XCTAssertTrue(shown.localizedCaseInsensitiveContains("backup"))
         XCTAssertTrue(classified.copyableDetail.contains("CORE_EXIT_UNREACHABLE"))
         XCTAssertTrue(classified.copyableDetail.contains("checkingExit"))
 
