@@ -260,7 +260,7 @@ export const TrayPanel = () => {
                 className="tono-tray-pick"
                 disabled={!server.available && !active}
                 onClick={() => {
-                  if (active) {
+                  if (active && !idleSelectShouldConnect(uiState)) {
                     setPicking(false)
                     return
                   }

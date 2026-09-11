@@ -186,6 +186,33 @@ describe('TrayPanel backup channel', () => {
     expect(mocks.tonoRetryNow).not.toHaveBeenCalled()
   })
 
+  it('connects when tapping the already selected city in the tray while disconnected', async () => {
+    mocks.status = makeStatus({
+      uiState: 'notConnected',
+      protectionBlocked: false,
+    })
+    mocks.tonoConnectProgress.mockResolvedValue({
+      steps: [],
+      totalElapsedMs: 0,
+      failedStage: null,
+      error: null,
+      retryAttempt: 0,
+      nextRetryAtMs: null,
+    })
+    render(<TrayPanel />, { wrapper: freshSWR })
+
+    fireEvent.click(screen.getByTitle('Switch node'))
+    const current = await waitFor(() => {
+      const row = document.querySelector('.tono-tray-pick')
+      if (!(row instanceof HTMLElement)) throw new Error('missing tray pick')
+      return row
+    })
+    fireEvent.click(current)
+    await waitFor(() => expect(mocks.tonoConnect).toHaveBeenCalledTimes(1))
+    expect(mocks.tonoSelectServer).toHaveBeenCalledWith(tokyo)
+    expect(mocks.tonoRetryNow).not.toHaveBeenCalled()
+  })
+
   it('does not offer the backup channel for a DNS failure', async () => {
     mocks.tonoConnectProgress.mockResolvedValue({
       steps: [],

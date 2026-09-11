@@ -222,3 +222,26 @@ it('lets the user pick the hy2 sibling and labels it as the backup channel', asy
   )
   await waitFor(() => expect(connectMock).toHaveBeenCalledTimes(1))
 })
+
+it('connects when tapping the already selected city while disconnected', async () => {
+  serversMock.mockResolvedValue([
+    {
+      name: 'Tokyo · Sakura',
+      server: '203.0.113.10',
+      port: 443,
+      selected: true,
+      available: true,
+    },
+    {
+      name: 'Los Angeles · Sunset',
+      server: '198.51.100.10',
+      port: 443,
+      selected: false,
+      available: true,
+    },
+  ])
+  renderPage()
+  fireEvent.click(await screen.findByRole('button', { name: /Tokyo/ }))
+  await waitFor(() => expect(connectMock).toHaveBeenCalledTimes(1))
+  expect(selectServerMock).not.toHaveBeenCalled()
+})

@@ -111,9 +111,26 @@ const ServersPage = () => {
 
   const handleSelect = useLockFn(
     async (name: string, selected: boolean, available: boolean) => {
-      if (selected) return
       if (!available) {
         setSelectError(t('tono.nodes.unavailableHint'))
+        return
+      }
+      // Same-city reselect is a no-op while a tunnel is up. After a released
+      // handshake eof the card is still selected and says Connecting; a tap
+      // must Connect, matching macOS selectNode. Otherwise Choose another
+      // route lands here and the failed city looks dead.
+      if (selected) {
+        if (!idleSelectShouldConnect(status?.uiState)) return
+        setSelectError(null)
+        setSwitchingName(name)
+        try {
+          await tonoConnect()
+          await mutateTonoStatus()
+        } catch (error) {
+          setSelectError(formatTonoActionError(error, t))
+        } finally {
+          setSwitchingName(null)
+        }
         return
       }
       setSelectError(null)
