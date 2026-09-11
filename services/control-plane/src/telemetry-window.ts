@@ -25,7 +25,7 @@ const BYTES_BY_ROUTE_MAX = 1_000_000_000_000_000;
 const telemetryEventStringKeys = [
   'kind', 'stage', 'error', 'node', 'action', 'reason', 'probe',
   'from', 'to', 'mode', 'reference', 'outcome', 'code',
-  'attemptId',
+  'attemptId', 'transport',
 ];
 const telemetryEventNumberKeys = [
   'ts', 'elapsedMs', 'delayMs', 'counter', 'restartCount', 'oldPid', 'newPid',
@@ -110,6 +110,9 @@ export function canonicalTelemetryWindow(value: unknown) {
         throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${key}`);
       }
       event[key] = entry[key];
+    }
+    if (event.transport !== undefined && event.transport !== 'tcp' && event.transport !== 'hy2') {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid transport');
     }
     return event;
   });

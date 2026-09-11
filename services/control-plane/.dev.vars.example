@@ -9,3 +9,7 @@ CATALOG_ENCRYPTION_KEY="generate-32-random-bytes-and-encode-as-base64url"
 # Operations console intentionally remains disabled until all three values below
 # are supplied from a real Cloudflare Access application configuration:
 # ACCESS_TEAM_DOMAIN, ACCESS_AUD, ACCESS_ADMIN_EMAILS
+# Optional. Comma-separated customer emails that may see ` · hy2` catalog
+# blocks. Unset or empty: every authenticated catalog fetch strips hy2.
+# After changing this, bump the managed catalog revision.
+# HY2_CATALOG_EMAILS=""

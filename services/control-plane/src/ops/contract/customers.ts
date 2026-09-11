@@ -79,6 +79,8 @@ export interface ConnectionEventDto {
   edgeCountry: string | null;
   edgeRegion: string | null;
   edgeViaExit: boolean;
+  /** Present when the client reported the attempt's transport. */
+  transport?: 'tcp' | 'hy2' | null;
 }
 
 /** One hour of one customer: 在线 / 已连接 heat bar plus bytes. */
@@ -224,6 +226,7 @@ const EVENT_KEYS = [
   'id', 'atMs', 'receivedAt', 'source', 'userId', 'deviceId', 'platform', 'appVersion', 'osVersion',
   'kind', 'node', 'stage', 'outcome', 'code', 'error', 'elapsedMs', 'delayMs', 'tcpDelayMs',
   'exitDelayMs', 'catalogRevision', 'edgeAsn', 'edgeAsOrg', 'edgeCountry', 'edgeRegion', 'edgeViaExit',
+  'transport',
 ];
 
 export function assertConnectionEvent(value: unknown, path = 'connectionEvent'): ConnectionEventDto {
@@ -254,6 +257,7 @@ export function assertConnectionEvent(value: unknown, path = 'connectionEvent'):
     edgeCountry: optText(row, path, 'edgeCountry'),
     edgeRegion: optText(row, path, 'edgeRegion'),
     edgeViaExit: bool(row, path, 'edgeViaExit'),
+    ...(row.transport === undefined ? {} : { transport: optOneOf(row, path, 'transport', ['tcp', 'hy2'] as const) }),
   };
 }
 

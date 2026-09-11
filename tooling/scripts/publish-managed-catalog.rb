@@ -12,6 +12,7 @@ require "yaml"
 CONTROL_PLANE_ORIGIN = "https://api.afk.ccwu.cc"
 KEYCHAIN_SERVICE = "com.raydocs.tono.staging.admin-api-token"
 CLIENT_UUID_PLACEHOLDER = "{{TONO_CLIENT_UUID}}"
+HY2_NAME_SUFFIX = " · hy2"
 CATALOG_ITEM_INDENT = 2
 MAXIMUM_YAML_BYTES = 1024 * 1024
 MAXIMUM_RESPONSE_BYTES = 2 * 1024 * 1024
@@ -53,15 +54,70 @@ def placeholder_count(text)
   text.scan(CLIENT_UUID_PLACEHOLDER).length
 end
 
-def managed_identity_block?(block)
-  uuid_keys = block.scan(/^\s*(?:-\s*)?uuid\s*:/).length +
-              block.scan(/[{,]\s*uuid\s*:/).length
-  return false unless uuid_keys == 1
+def catalog_proxy_type(block)
+  block.split("\n").each do |line|
+    flow = line.match(/[{,]\s*type\s*:\s*(?:"([^"]+)"|'([^']+)'|([^\s,}]+))/)
+    return (flow[1] || flow[2] || flow[3]).to_s.strip if flow
+    match = line.match(/^\s*(?:-\s+)?type:\s*(?:"([^"]+)"|'([^']+)'|([^\s#]+))/)
+    return (match[1] || match[2] || match[3]).to_s.strip if match
+  end
+  "vless"
+end
 
+def catalog_proxy_name(block)
+  block.split("\n").each do |line|
+    flow = line.match(/[{,]\s*name\s*:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^,}]+))/)
+    if flow
+      raw = (flow[1] || flow[2] || flow[3]).to_s.strip
+      return raw.gsub(/\\(["'\\])/, '\1')
+    end
+    match = line.match(/^\s*(?:-\s+)?name:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s#"'][^#]*?))\s*(?:#.*)?$/)
+    next unless match
+    raw = (match[1] || match[2] || match[3]).to_s
+    return raw.gsub(/\\(["'\\])/, '\1')
+  end
+  nil
+end
+
+def catalog_field_keys(block, field)
+  block.scan(/^\s*(?:-\s*)?#{field}\s*:/).length +
+    block.scan(/[{,]\s*#{field}\s*:/).length
+end
+
+def catalog_field_is_placeholder?(block, field)
+  return false unless catalog_field_keys(block, field) == 1
   placeholder = Regexp.escape(CLIENT_UUID_PLACEHOLDER)
   scalar = /(?:["']#{placeholder}["']|#{placeholder})/
-  block.match?(/^\s*(?:-\s*)?uuid\s*:\s*#{scalar}\s*(?:#.*)?$/) ||
-    block.match?(/[{,]\s*uuid\s*:\s*#{scalar}\s*(?=[,}])/)
+  block.match?(/^\s*(?:-\s*)?#{field}\s*:\s*#{scalar}\s*(?:#.*)?$/) ||
+    block.match?(/[{,]\s*#{field}\s*:\s*#{scalar}\s*(?=[,}])/)
+end
+
+def catalog_has_fingerprint?(block)
+  line = block.match(/^\s*(?:-\s*)?fingerprint\s*:\s*(.+?)\s*(?:#.*)?$/)
+  flow = block.match(/[{,]\s*fingerprint\s*:\s*([^,}]+)/)
+  raw = (line ? line[1] : flow ? flow[1] : "").to_s.strip.gsub(/\A["']|["']\z/, "")
+  !raw.empty? && !raw.include?("TONO_CLIENT_UUID")
+end
+
+def catalog_skips_cert_verify?(block)
+  block.match?(/skip-cert-verify\s*:\s*(?:true|True|yes)\b/)
+end
+
+# Same contract as control-plane `catalogProxyUsesManagedIdentity`:
+# vless uses uuid; hysteria2 uses password + fingerprint, never skip-cert-verify.
+def managed_identity_block?(block)
+  type = catalog_proxy_type(block)
+  name = catalog_proxy_name(block)
+  if type == "hysteria2"
+    return false if name.nil? || !name.end_with?(HY2_NAME_SUFFIX) || name.length <= HY2_NAME_SUFFIX.length
+    return false unless catalog_field_keys(block, "uuid").zero?
+    return catalog_field_is_placeholder?(block, "password") &&
+           catalog_has_fingerprint?(block) &&
+           !catalog_skips_cert_verify?(block)
+  end
+  return false unless type == "vless"
+  return false if name&.end_with?(HY2_NAME_SUFFIX)
+  catalog_field_is_placeholder?(block, "uuid")
 end
 
 # Parses a throwaway copy purely to read structure. Nothing this returns is ever
@@ -192,7 +248,7 @@ ARGV.each do |path|
   fail!("Every catalog source must contain a proxies list this tool can edit as text.") if source.nil?
   fail!("A catalog source's proxies list does not match its parsed node count.") unless
     source[:blocks].length == nodes.length
-  fail!("Every managed node must have exactly one per-account uuid placeholder.") unless
+  fail!("Every managed node must have exactly one per-account identity placeholder (uuid for vless, password for hysteria2).") unless
     source[:blocks].all? { |block| managed_identity_block?(block) }
   names.concat(nodes.map { |node| node.is_a?(Hash) ? node["name"] : nil })
   added_placeholders += source[:blocks].sum { |block| placeholder_count(block) }
@@ -275,7 +331,7 @@ if mode == :append
   fail!("The current managed catalog has no proxies list this tool can edit as text; refusing to append.") if current.nil?
   fail!("The current managed catalog's proxies list does not match its parsed node count; refusing to append.") unless
     current[:blocks].length == current_proxies.length
-  fail!("The current managed catalog has a node without exactly one per-account uuid placeholder; refusing to append.") unless
+  fail!("The current managed catalog has a node without exactly one per-account identity placeholder; refusing to append.") unless
     current[:blocks].all? { |block| managed_identity_block?(block) }
   kept_placeholders = current[:blocks].sum { |block| placeholder_count(block) }
   appended_blocks = incoming_blocks.map do |block|
@@ -310,7 +366,7 @@ unless outgoing_placeholders == expected_placeholders
 end
 outgoing = split_catalog(yaml)
 unless outgoing && outgoing[:blocks].all? { |block| managed_identity_block?(block) }
-  fail!("Refusing to publish: every managed node must keep exactly one per-account uuid placeholder.")
+  fail!("Refusing to publish: every managed node must keep exactly one per-account identity placeholder (uuid for vless, password for hysteria2).")
 end
 
 result = request(

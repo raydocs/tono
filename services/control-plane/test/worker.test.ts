@@ -2801,6 +2801,67 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await utf8Oversized.json() as any).error.code).toBe('INVALID_CATALOG');
   });
 
+  it('strips hy2 catalog blocks unless the account email is gray-listed', async () => {
+    const yaml = `proxies:
+  - name: Tokyo · Sakura
+    type: vless
+    server: 8.8.8.8
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+    tls: true
+  - name: Tokyo · Sakura · hy2
+    type: hysteria2
+    server: 8.8.8.8
+    port: 443
+    password: {{TONO_CLIENT_UUID}}
+    sni: www.microsoft.com
+    fingerprint: e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db
+`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+
+    const hidden = await createAccount('hy2-hidden');
+    const hiddenFetched = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${hidden.accessToken}` },
+    });
+    expect(hiddenFetched.status).toBe(200);
+    const hiddenBody = await hiddenFetched.json() as any;
+    expect(hiddenBody.yaml).toContain('Tokyo · Sakura');
+    expect(hiddenBody.yaml).not.toContain(' · hy2');
+    expect(hiddenBody.yaml).not.toContain('hysteria2');
+
+    const allowed = await createAccount('hy2-allowed');
+    const previous = (env as unknown as Env).HY2_CATALOG_EMAILS;
+    try {
+      (env as unknown as Env).HY2_CATALOG_EMAILS = allowed.email;
+      const allowedFetched = await api('exit-catalog', {
+        headers: { authorization: `Bearer ${allowed.accessToken}` },
+      });
+      expect(allowedFetched.status).toBe(200);
+      const allowedBody = await allowedFetched.json() as any;
+      expect(allowedBody.yaml).toContain('type: hysteria2');
+      expect(allowedBody.yaml).toContain('Tokyo · Sakura · hy2');
+      expect(allowedBody.yaml).not.toContain('TONO_CLIENT_UUID');
+
+      const stillHidden = await api('exit-catalog', {
+        headers: { authorization: `Bearer ${hidden.accessToken}` },
+      });
+      expect((await stillHidden.json() as any).yaml).not.toContain('hysteria2');
+
+      const headerAdmit = await api('exit-catalog', {
+        headers: {
+          authorization: `Bearer ${hidden.accessToken}`,
+          'X-Tono-Accept': 'hy2',
+        },
+      });
+      expect((await headerAdmit.json() as any).yaml).toContain('type: hysteria2');
+    } finally {
+      (env as unknown as Env).HY2_CATALOG_EMAILS = previous;
+    }
+
+    const adminFetched = await admin('exit-catalog', undefined, 'GET');
+    expect((await adminFetched.json() as any).yaml).toContain('type: hysteria2');
+  });
+
   it('binds one home exit per user and filters that proxy from other catalogs', async () => {
     const yaml = `proxies:
   - name: "Shared JP"
@@ -5090,6 +5151,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(user.status).toBe('disabled');
   });
 
+  // Eight fetch+waitUntil hops (sign-in, confirm, re-enroll, second sign-in).
+  // After the rest of this file has run, miniflare+D1 can push that past Vitest's
+  // 5s default; CI then reports a timeout though the contract still holds.
   it('only lets the bound installation re-enroll its active device', async () => {
     const account = await createAccount('reenroll');
     resetMockInventory(account.device.id, account.enrollment.hostname);
@@ -5109,7 +5173,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(other.status).toBe(200);
     const otherAuth = await other.json() as any;
     expect((await api(`devices/${account.device.id}/enrollment`, json({}, otherAuth.accessToken))).status).toBe(404);
-  });
+  }, 15_000);
 
   it('does not issue a replacement enrollment while the prior identity revocation is pending', async () => {
     const account = await createAccount('reenroll-revoke-failure');

@@ -67,6 +67,12 @@ export interface Env {
   // Comma-separated hostnames sendPending may POST to. Unset uses the
   // telegram / feishu / slack defaults in runOpsCron.
   ALERT_WEBHOOK_ALLOWED_HOSTS?: string;
+  // Comma-separated customer emails that may receive ` · hy2` catalog blocks.
+  // Unset or empty: every authenticated catalog fetch strips hy2. Ops/admin
+  // plaintext catalogs are unfiltered. Do not PUT hy2 until the client on
+  // main admits it and this list is set. After changing this value, bump the
+  // catalog revision (same-revision digest change looks like tampering).
+  HY2_CATALOG_EMAILS?: string;
   ALERT_TELEGRAM_BOT_TOKEN?: string;
   // '0' skips audit-log traffic parse on ingest. Unset / any other value parses.
   OPS_TRAFFIC_PARSE?: string;

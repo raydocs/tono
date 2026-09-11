@@ -228,7 +228,7 @@ class PublishManagedCatalogTest < Minitest::Test
     invalid_sources.each do |name, content|
       code, output, uploaded = run_publisher(["--publish", source(name, content)])
       assert_equal(1, code, output)
-      assert_match(/exactly one per-account uuid placeholder/, output)
+      assert_match(/exactly one per-account identity placeholder/, output)
       assert_nil(uploaded)
     end
   end
@@ -316,5 +316,65 @@ class PublishManagedCatalogTest < Minitest::Test
     assert_equal(2, CURRENT_CATALOG.scan(PLACEHOLDER).length)
     assert_equal(0, dumped.scan(PLACEHOLDER).length)
     assert_match(/^\s+uuid:\s*$/, dumped)
+  end
+
+  HY2_FINGERPRINT = "e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db"
+  HY2_SOURCE = <<~YAML
+    proxies:
+    - name: Tokyo Reality · hy2
+      type: hysteria2
+      server: 203.0.113.11
+      port: 443
+      password: #{PLACEHOLDER}
+      sni: www.microsoft.com
+      fingerprint: #{HY2_FINGERPRINT}
+      skip-cert-verify: false
+  YAML
+
+  def test_dry_run_accepts_a_hy2_password_placeholder
+    code, output, uploaded = run_publisher(["--dry-run", source("hy2.yaml", HY2_SOURCE)])
+    assert_equal(0, code, output)
+    assert_match(/Validated 1 uniquely named incoming nodes carrying 1 per-account identity placeholders/, output)
+    assert_nil(uploaded)
+  end
+
+  def test_publish_keeps_hy2_password_and_fingerprint_verbatim
+    code, output, uploaded = run_publisher(["--publish", source("hy2.yaml", HY2_SOURCE)])
+    assert_equal(0, code, output)
+    yaml = uploaded.fetch("yaml")
+    assert_equal(1, yaml.scan(PLACEHOLDER).length)
+    assert_includes(yaml, "password: #{PLACEHOLDER}")
+    assert_includes(yaml, "fingerprint: #{HY2_FINGERPRINT}")
+    refute_includes(yaml, "uuid:")
+    assert_equal(["Tokyo Reality · hy2"], YAML.safe_load(yaml).fetch("proxies").map { |node| node["name"] })
+  end
+
+  def test_append_hy2_sibling_next_to_the_vless_base_name
+    code, output, uploaded = run_publisher(
+      ["--append", source("hy2.yaml", HY2_SOURCE)],
+      current: CURRENT_CATALOG,
+      revision: 12
+    )
+    assert_equal(0, code, output)
+    yaml = uploaded.fetch("yaml")
+    assert(yaml.start_with?(CURRENT_CATALOG), "the deployed catalog text was rewritten instead of spliced")
+    assert_equal(3, yaml.scan(PLACEHOLDER).length)
+    assert_includes(yaml, "password: #{PLACEHOLDER}")
+    assert_equal(
+      ["Los Angeles · Pacific", "Tokyo Reality", "Tokyo Reality · hy2"],
+      YAML.safe_load(yaml).fetch("proxies").map { |node| node["name"] }
+    )
+  end
+
+  def test_publish_refuses_hy2_without_fingerprint_or_with_skip_cert_verify
+    missing = HY2_SOURCE.sub("  fingerprint: #{HY2_FINGERPRINT}\n", "")
+    skipped = HY2_SOURCE.sub("skip-cert-verify: false", "skip-cert-verify: true")
+    unnamed = HY2_SOURCE.sub("Tokyo Reality · hy2", "Tokyo Reality")
+    [missing, skipped, unnamed].each do |content|
+      code, output, uploaded = run_publisher(["--publish", source("bad-hy2.yaml", content)])
+      assert_equal(1, code, output)
+      assert_match(/exactly one per-account identity placeholder/, output)
+      assert_nil(uploaded)
+    end
   end
 end
