@@ -10,6 +10,19 @@
     }
 
     #[test]
+    fn encrypted_dns_capture_round_trips_absent_and_dword() {
+        assert_eq!(format_encrypted_dns_capture(None), "absent\n");
+        assert_eq!(format_encrypted_dns_capture(Some(2)), "2\n");
+        assert_eq!(parse_encrypted_dns_capture("absent\n").unwrap(), None);
+        assert_eq!(parse_encrypted_dns_capture("3").unwrap(), Some(3));
+        assert_eq!(
+            parse_encrypted_dns_capture("0\n").unwrap(),
+            Some(ENABLE_AUTO_DOH_OFF)
+        );
+        assert!(parse_encrypted_dns_capture("nope").is_err());
+    }
+
+    #[test]
     fn name_server_lists_tolerate_messy_registry_values() {
         assert_eq!(
             parse_name_server_list(" 1.1.1.1 , ,8.8.8.8, "),

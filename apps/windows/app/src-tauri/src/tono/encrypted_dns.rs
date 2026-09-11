@@ -3,7 +3,9 @@
 //! the TUN resolver, while Chrome / Win11 "Encrypted only" talks DoH to a
 //! public resolver that WFP then blocks. Connect looks up; pages do not.
 //!
-//! This module is read-only. It never changes DNS policy.
+//! This module is read-only. It never changes DNS policy. The Service turns
+//! `EnableAutoDoh` off and installs an NRPT catch-all for the connected
+//! session; this detector is the UI banner if that pin has not taken.
 
 /// `EnableAutoDoh`: 0 off, 2 opportunistic (Win11 default), 3 required.
 const ENABLE_AUTO_DOH_REQUIRED: u32 = 3;

@@ -51,6 +51,14 @@
 //! record of the round could not be persisted): then there is nothing to restore, nothing to
 //! reconcile, and nothing truthful to report.
 //!
+//! **Encrypted DNS is pinned off for the session.** Win10/11 Encrypted DNS and per-adapter
+//! DoH templates send lookups over HTTPS to a public resolver. WFP then default-denies that
+//! path, so the App's `DnsQueryEx` waits out 5 s and connect dies in `securingDNS` even though
+//! TUN DNS at `198.18.0.2` answers in milliseconds. While protected we snapshot
+//! `EnableAutoDoh`, set it to 0, and install a catch-all NRPT rule to the TUN resolver;
+//! disconnect restores both. That does not widen WFP: queries still have to traverse the
+//! permitted TUN interface.
+//!
 //! **DNS-before-disarm invariant (identical to the macOS helper):** the kill switch may only
 //! disarm after DNS restore is *proven*; if restore cannot be proven, the disarm is refused
 //! and the block stays armed. See `windows_kill_switch::disarm_unlocked`.
@@ -143,6 +151,38 @@ pub(crate) const NO_NAME_SERVERS: &str = "";
 /// import it, so the two spellings are kept in sync by hand.
 const TUN_ADAPTER_NAME: &str = "Tono";
 const SNAPSHOT_VERSION: u32 = 1;
+/// Sidecar next to `protected-dns.json`. Written *before* Encrypted DNS is
+/// mutated so a crash still has the user's `EnableAutoDoh` value to put back.
+const ENCRYPTED_DNS_CAPTURE_FILE: &str = "protected-secure-dns.json";
+/// `EnableAutoDoh` off. 2 is opportunistic (Win11 default), 3 is required.
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+const ENABLE_AUTO_DOH_OFF: u32 = 0;
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn encrypted_dns_capture_path() -> PathBuf {
+    crate::service_paths()
+        .persistent_state_dir()
+        .join(ENCRYPTED_DNS_CAPTURE_FILE)
+}
+
+/// File body: a decimal DWORD, or `absent` when the value was not set.
+fn format_encrypted_dns_capture(enable_auto_doh: Option<u32>) -> String {
+    match enable_auto_doh {
+        Some(value) => format!("{value}\n"),
+        None => "absent\n".to_owned(),
+    }
+}
+
+fn parse_encrypted_dns_capture(body: &str) -> Result<Option<u32>, String> {
+    let trimmed = body.trim();
+    if trimmed == "absent" {
+        return Ok(None);
+    }
+    trimmed
+        .parse::<u32>()
+        .map(Some)
+        .map_err(|error| format!("encrypted DNS capture is not a DWORD ({error})"))
+}
 
 /// One adapter's original DNS values. `None` means the registry value was absent — the
 /// typical DHCP state — and restore must delete rather than rewrite it.
@@ -202,8 +242,9 @@ static DNS_LAST_ERROR: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(Non
 // the core and recreating WinTUN every few seconds. A change *we* just made is not a change to
 // the machine's networking underneath us, so it must not be published as one.
 //
-// The window is opened by the two functions that actually write ([`engine_apply_protected`] and
-// [`engine_apply_snapshot`]) and by nothing else. It deliberately does **not** cover the
+// The window is opened by the functions that actually write ([`engine_apply_protected`],
+// [`engine_apply_snapshot`], [`engine_suppress_encrypted_dns`] and
+// [`engine_restore_encrypted_dns`]) and by nothing else. It deliberately does **not** cover the
 // enumeration, the read-back or the cache flush, which are reads and are also the slowest part
 // of an `enable` round: keeping them outside is what keeps the window narrow enough that a
 // genuine change is very unlikely to land entirely inside it.
@@ -580,6 +621,9 @@ async fn heal_orphaned_protected_dns_without_snapshot(
                 "dns: orphaned-DNS heal apply failed ({error:#}); will re-check adapters"
             );
         }
+    }
+    if let Err(error) = engine_restore_encrypted_dns().await {
+        tracing::warn!("dns: encrypted DNS restore after orphaned-DNS heal failed: {error:#}");
     }
     if let Err(error) = engine_flush_cache().await {
         tracing::warn!("dns: cache flush after orphaned-DNS heal failed: {error:#}");
@@ -1635,6 +1679,40 @@ async fn engine_flush_cache() -> Result<()> {
     }
 }
 
+async fn engine_suppress_encrypted_dns() -> Result<()> {
+    let _self_write = SelfWriteWindow::open();
+    #[cfg(all(windows, not(feature = "test")))]
+    {
+        return bounded_dns_call(
+            DNS_APPLY_TIMEOUT,
+            "suppress encrypted DNS",
+            engine::suppress_encrypted_dns,
+        )
+        .await;
+    }
+    #[cfg(not(all(windows, not(feature = "test"))))]
+    {
+        Ok(())
+    }
+}
+
+async fn engine_restore_encrypted_dns() -> Result<()> {
+    let _self_write = SelfWriteWindow::open();
+    #[cfg(all(windows, not(feature = "test")))]
+    {
+        return bounded_dns_call(
+            DNS_APPLY_TIMEOUT,
+            "restore encrypted DNS",
+            engine::restore_encrypted_dns,
+        )
+        .await;
+    }
+    #[cfg(not(all(windows, not(feature = "test"))))]
+    {
+        Ok(())
+    }
+}
+
 // --- Facade ---
 
 /// Whether the state machine runs on this build (real service on Windows; stubbed engine
@@ -1766,7 +1844,11 @@ async fn recover_unreadable_snapshot(reason: &str) -> Result<()> {
              snapshot"
         ),
     )
-    .await
+    .await?;
+    if let Err(error) = engine_restore_encrypted_dns().await {
+        tracing::warn!("dns: encrypted DNS restore after unreadable snapshot failed: {error:#}");
+    }
+    Ok(())
 }
 
 /// Snapshot → set protected DNS → verify. Idempotent: a second call while protected keeps the
@@ -1860,6 +1942,11 @@ async fn enable_unlocked(trigger: EnableTrigger) -> Result<DnsProtectionStatus> 
         // Protection is complete and nothing is outstanding: retire any note from an earlier
         // round so the reconciler is not kept awake by evidence that no longer holds.
         clear_unverified_note();
+        // Adapters may already be on 198.18.0.2 from an older build that did not pin
+        // Encrypted DNS off. Do that here or Win10/11 DoH still times out fake-ip.
+        if let Err(error) = engine_suppress_encrypted_dns().await {
+            tracing::warn!("dns: encrypted DNS suppress on already-protected adapters failed: {error:#}");
+        }
         return status_unlocked().await;
     }
     // `Some(note)` = applied, but at least one adapter could not be verified — a *success* that
@@ -1923,11 +2010,12 @@ async fn enable_unlocked(trigger: EnableTrigger) -> Result<DnsProtectionStatus> 
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(note);
     }
-    // Loopback is applied (verified or recorded as unverified): flush the resolver cache
-    // best-effort. Real-IP answers cached before the switch are otherwise served without
-    // consulting the loopback core, so the fake-ip readiness probe never sees a 198.18/16 answer
-    // until the entries expire. A failed flush must not fail enable — DNS protection itself is
-    // already in place.
+    // Loopback is applied (verified or recorded as unverified): pin Encrypted DNS off so
+    // the App's fake-ip probe (and Chrome using system DNS) hit 198.18.0.2 instead of a
+    // DoH resolver that WFP then blocks. Then flush so cached public A records die.
+    if let Err(error) = engine_suppress_encrypted_dns().await {
+        tracing::warn!("dns: encrypted DNS suppress after enable failed: {error:#}");
+    }
     if let Err(error) = engine_flush_cache().await {
         tracing::warn!("DNS cache flush after enable failed: {error:#}");
     }
@@ -2076,11 +2164,13 @@ pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(note);
     }
-    // The restore is proven (or degraded-accepted on registry evidence): flush the resolver
-    // cache unconditionally. Fake-ip (198.18/16) answers and negative cache entries collected
-    // while DNS pointed at the loopback core would otherwise outlive the disconnect (see
-    // `engine::flush_resolver_cache`) — and after a degraded acceptance the flush is the one
-    // thing that still nudges the running resolver.
+    // The restore is proven (or degraded-accepted on registry evidence): put Encrypted DNS
+    // back, drop our NRPT rule, then flush. NRPT left pointing at a stopped core is as
+    // dead as adapter DNS left on 198.18.0.2; a failure here is logged and retried next
+    // disconnect rather than undeleting the adapter snapshot.
+    if let Err(error) = engine_restore_encrypted_dns().await {
+        tracing::error!("dns: encrypted DNS restore after adapter restore failed: {error:#}");
+    }
     if let Err(error) = engine_flush_cache().await {
         tracing::warn!("DNS cache flush after restore failed: {error:#}");
     }
@@ -2257,6 +2347,9 @@ pub(crate) async fn restore_for_uninstall() -> Result<UninstallDnsRestore> {
             .await
             {
                 tracing::warn!("dns: the superseded snapshot could not be set aside: {error:#}");
+            }
+            if let Err(error) = engine_restore_encrypted_dns().await {
+                tracing::warn!("dns: encrypted DNS restore after the DHCP fallback failed: {error:#}");
             }
             if let Err(error) = engine_flush_cache().await {
                 tracing::warn!("DNS cache flush after the DHCP fallback failed: {error:#}");

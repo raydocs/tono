@@ -354,6 +354,12 @@ pub fn is_fake_ip(addr: IpAddr) -> bool {
 /// §6.7: an ordinary system lookup must return a fake-ip address. On Windows, use the DNS Client
 /// API directly with cache bypass and true cancellation; this keeps all three propagation retries
 /// useful instead of accumulating uncancellable `getaddrinfo` work.
+///
+/// Encrypted DNS / DoH is the common real-machine failure: the system query never reaches
+/// `198.18.0.2` because it left over HTTPS and WFP blocked it. The service pins DoH off and
+/// installs an NRPT catch-all for the session; if that has not taken yet, an explicit query to
+/// the TUN listener is the same path apps will use once NRPT is in force, so it unblocks
+/// connect instead of looping in `securingDNS` for 16 s.
 pub(super) async fn verify_fake_ip() -> Result<(), String> {
     let mut last = String::from("no answer");
     for attempt in 0..VERIFY_ATTEMPTS {
@@ -384,6 +390,21 @@ pub(super) async fn verify_fake_ip() -> Result<(), String> {
             }
             Err(err) => last = err,
         }
+        #[cfg(windows)]
+        {
+            match crate::tono::protected_probe::query_protected_a(FAKE_IP_LOOKUP_HOST).await {
+                Ok(ip) if tun_dns_proves_fake_ip(Ok(ip)) => {
+                    logging!(
+                        warn,
+                        Type::Service,
+                        "Tono: system DNS did not return fake-ip ({last}); TUN DNS at 198.18.0.2 did, so Encrypted DNS was bypassing the adapter"
+                    );
+                    return Ok(());
+                }
+                Ok(ip) => last = format!("{last}; TUN DNS returned {ip}, not fake-ip"),
+                Err(err) => last = format!("{last}; TUN DNS: {err}"),
+            }
+        }
         if attempt + 1 < VERIFY_ATTEMPTS {
             tokio::time::sleep(VERIFY_RETRY_INTERVAL).await;
         }
@@ -391,8 +412,14 @@ pub(super) async fn verify_fake_ip() -> Result<(), String> {
     Err(fake_ip_verification_error(&last))
 }
 
+pub(super) fn tun_dns_proves_fake_ip(tun: Result<std::net::Ipv4Addr, &str>) -> bool {
+    tun.ok().is_some_and(|ip| is_fake_ip(IpAddr::V4(ip)))
+}
+
 pub(super) fn fake_ip_verification_error(last: &str) -> String {
-    if last.contains("no fake-ip in") {
+    let tun_dead = last.contains("TUN DNS:");
+    let os_bypassed = last.contains("no fake-ip in") || last.contains("exceeded");
+    if os_bypassed && !tun_dead {
         format!(
             "fake-ip verification failed: {last}. Windows Encrypted DNS (DNS over HTTPS) may still be overriding 127.0.0.1. Turn Encrypted DNS off in Settings → Network & internet → Ethernet/Wi-Fi → DNS, then reconnect."
         )

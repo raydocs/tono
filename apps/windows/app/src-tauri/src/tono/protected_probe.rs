@@ -262,7 +262,7 @@ fn failed(
     }
 }
 
-async fn query_protected_a(host: &str) -> Result<Ipv4Addr, String> {
+pub(crate) async fn query_protected_a(host: &str) -> Result<Ipv4Addr, String> {
     let id = 0x544f;
     let query = build_dns_a_query(host, id);
     let socket = UdpSocket::bind("0.0.0.0:0")

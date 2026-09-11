@@ -268,6 +268,13 @@ describe('connectErrorSuggestsServerSwitch', () => {
         ),
       ),
     ).toBe(true)
+    expect(
+      isEncryptedDnsFailure(
+        new Error(
+          'fake-ip verification failed: Windows system DNS A query exceeded 5s. Windows Encrypted DNS (DNS over HTTPS) may still be overriding 127.0.0.1',
+        ),
+      ),
+    ).toBe(true)
     expect(isEncryptedDnsFailure(new Error('node unreachable'))).toBe(false)
   })
 
