@@ -442,8 +442,10 @@ describe('dashboard claude residential route badge', () => {
         name: 'Standby — Click to connect',
       }),
     )
-    await screen.findByRole('alert')
-    expect(screen.queryByText('First connect')).toBeNull()
+    await waitFor(() => expect(screen.queryByText('First connect')).toBeNull())
+    // Progress card owns Retry / Choose route. This box used to say
+    // switching cities will not help, which hid the next hand.
+    expect(screen.queryByTestId('tono-action-error-message')).toBeNull()
   })
 
   it('tells the customer to disconnect and reinstall when the update journal is Failed', () => {

@@ -242,7 +242,7 @@
       "nodeUnreachable": "This node is unreachable. Retry or switch.",
       "tunDataPlaneBroken": "The node answered, but Windows is not carrying the tunnel's traffic. Switching cities will not help — restart the PC and connect again, then send diagnostics to support if it persists.",
       "tunIngressBroken": "The node answered, but no traffic on this PC could enter the tunnel. Another VPN or security tool is usually holding the network — close it, then connect again.",
-      "protectedHttpsFailed": "The protected connection could not complete. If every server fails the same way, switching cities will not help — send diagnostics to support.",
+      "protectedHttpsFailed": "This city could not complete a protected connection. Retry, choose another route, or try the backup channel if one is shown. If every city fails the same way, send diagnostics.",
       "coreUnpinned": "This copy of Tono is missing its integrity check. Install the latest Tono — reinstalling the same copy will not help.",
       "coreMismatch": "This copy of Tono does not match its core. Install the latest Tono.",
       "dnsPortBusy": "Another proxy (e.g. Clash Verge, CFW) is running and occupying the network. Please exit it completely from the system tray and try again.",

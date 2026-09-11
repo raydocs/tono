@@ -9,6 +9,7 @@ import { showNotice } from '@/services/notice-service'
 import { useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
 import {
+  connectErrorSuggestsBackupChannel,
   connectErrorSuggestsServerSwitch,
   connectRejectionNeedsServerChoice,
   formatTonoActionError,
@@ -458,6 +459,8 @@ interface DashboardActionError {
   retry: 'connect' | 'disconnect' | 'retryNow'
   suggestsSwitch: boolean
   encryptedDns: boolean
+  /** Handshake eof / unreachable: the progress card owns Retry + next hand. */
+  progressOwns: boolean
 }
 
 const DashboardPage = () => {
@@ -540,8 +543,12 @@ const DashboardPage = () => {
     uiState === 'protectedOffline'
   // Connect/protected-offline failures belong on the progress card. Showing
   // them here as well triples the same error (action box + steps + details).
+  // A released handshake eof is also notConnected: the progress card now has
+  // Retry / Choose route, and this box used to contradict it ("switching
+  // cities will not help").
   const showActionError =
     actionError != null &&
+    !actionError.progressOwns &&
     uiState !== 'protectedOffline' &&
     uiState !== 'connecting'
 
@@ -641,6 +648,7 @@ const DashboardPage = () => {
         retry,
         suggestsSwitch: connectErrorSuggestsServerSwitch(error),
         encryptedDns: isEncryptedDnsFailure(error),
+        progressOwns: connectErrorSuggestsBackupChannel(error),
       })
     }
   })
@@ -659,6 +667,7 @@ const DashboardPage = () => {
         retry: 'disconnect',
         suggestsSwitch: false,
         encryptedDns: false,
+        progressOwns: false,
       })
     }
   })
@@ -676,6 +685,7 @@ const DashboardPage = () => {
         retry: 'retryNow',
         suggestsSwitch: connectErrorSuggestsServerSwitch(error),
         encryptedDns: isEncryptedDnsFailure(error),
+        progressOwns: connectErrorSuggestsBackupChannel(error),
       })
     }
   })
@@ -871,7 +881,9 @@ const DashboardPage = () => {
           onRefreshStatus={mutateTonoStatus}
           onChooseRoute={() => navigate('/servers')}
         />
-        {!connected && uiState === 'notConnected' && !showActionError && (
+        {!connected &&
+          uiState === 'notConnected' &&
+          actionError == null && (
           <ConnectChecklist dark={dark} />
         )}
         {/* Actionable error under the primary control — includes a switch-server
