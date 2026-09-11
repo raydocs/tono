@@ -148,3 +148,21 @@ independently checked through the native driver and OS. No real crash injection,
 adapter interruption, reboot, broad packet capture, signing or connected upgrade
 was performed. Apps-view domain search is a separately reproduced defect with
 local regression coverage; its next rebuilt package still needs verification.
+
+## 7. Pending device candidate — Encrypted DNS pin (2026-09-11)
+
+Hosted candidate run: [`34565734039`](https://github.com/raydocs/tono/actions/runs/34565734039).
+Artifact `tono-windows-0.0.72-candidate-7e1938c743fcdebc05a28d63180fef2727c657ac`.
+Source `7e1938c743fcdebc05a28d63180fef2727c657ac` (includes per-adapter `DohFlags` pin `cb609da4`).
+Version **0.0.72**. `candidateOnly: true`. Not Authenticode signed. Not updater signed. Not a customer-channel package.
+
+Installer `Tono_0.0.72_x64-setup.exe` SHA-256:
+
+```text
+0a2d55b1eecddbe9975449f308fd84aa84144aceabee979853c0685fb0ffdfcb
+```
+
+Service `tono-service.exe` SHA-256 `fbc20f5959f7e917677ba7a1e2f11314301401b411b8c53f2acc74731e3e0f70`.
+Core `tono-core-x86_64-pc-windows-msvc.exe` SHA-256 `b636c18e27ff141ffb289b40b583be482680eb69d1cef46283008a479dd913e3`.
+
+**Not installed. Not a G1.1 pass.** Use this package on the Win10 Encrypted DNS machine (securingDNS / 5s fake-ip timeout) and on the Windows 11 G1.1 device. After transfer, re-hash with `Get-FileHash -Algorithm SHA256`. Do not disable SmartScreen. Do not publish.
