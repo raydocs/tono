@@ -142,10 +142,26 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
         rawName.hasSuffix(hy2NameSuffix)
     }
 
+    /// Panstar Tokyo inbound UDP is vendor-blocked. Same-city hy2 there is a
+    /// dead click; another city's hy2 (Dedirock) is the working China backup.
+    static func hy2UdpIsVendorBlocked(_ rawName: String) -> Bool {
+        let clean = ConfigParser.extractFlag(from: rawName).cleanName
+        let display = displayName(for: catalogBaseName(for: clean))
+        let city = display.split(separator: "·", maxSplits: 1)
+            .first?
+            .trimmingCharacters(in: .whitespaces)
+            .lowercased()
+        return city == "tokyo"
+    }
+
+    private static func preferReachableHy2(_ rows: [String]) -> String? {
+        let ordered = rows.sorted()
+        return ordered.first { !hy2UdpIsVendorBlocked($0) } ?? ordered.first
+    }
+
     /// Manual next hand when TCP is dead. Prefer the same-city ` · hy2`
-    /// sibling; if this city has none, offer another city's hy2 (Tokyo UDP
-    /// is blocked at the provider, so the working China backup may live on
-    /// Dedirock). Already on hy2: offer a different city's hy2. Nil when
+    /// sibling unless that sibling's UDP is vendor-blocked; then another
+    /// city's hy2. Already on hy2: offer a different city's hy2. Nil when
     /// nothing remains to try. G2.8 auto-switch stays off.
     static func backupChannelName(
         selected: String,
@@ -161,15 +177,15 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
         if !isHy2CatalogName(selectedClean) {
             if let sibling = hy2Rows.first(where: { name in
                 catalogBaseName(for: ConfigParser.extractFlag(from: name).cleanName) == selectedBase
-            }) {
+            }), !hy2UdpIsVendorBlocked(sibling) {
                 return sibling
             }
-            return hy2Rows.sorted().first
+            return preferReachableHy2(Array(hy2Rows))
         }
 
-        return hy2Rows.sorted().first { name in
+        return preferReachableHy2(hy2Rows.filter { name in
             catalogBaseName(for: ConfigParser.extractFlag(from: name).cleanName) != selectedBase
-        }
+        })
     }
 
     /// Cities city-failover may land on. hy2 is a same-city backup, not

@@ -109,6 +109,27 @@ final class ConnectionActivityTests: XCTestCase {
             ),
             "🇯🇵 Tokyo · Sakura · hy2"
         )
+        let bothCities: Set<String> = [
+            "Tokyo · Sakura",
+            "Tokyo · Sakura · hy2",
+            "Los Angeles · Sunset",
+            "Los Angeles · Sunset · hy2",
+        ]
+        XCTAssertEqual(
+            ProxyNode.backupChannelName(selected: "Tokyo · Sakura", catalogNames: bothCities),
+            "Los Angeles · Sunset · hy2"
+        )
+        XCTAssertEqual(
+            ProxyNode.backupChannelName(selected: "Los Angeles · Sunset", catalogNames: bothCities),
+            "Los Angeles · Sunset · hy2"
+        )
+        XCTAssertEqual(
+            ProxyNode.backupChannelName(selected: "JP-VLESS-Reality", catalogNames: bothCities),
+            "Los Angeles · Sunset · hy2"
+        )
+        XCTAssertTrue(ProxyNode.hy2UdpIsVendorBlocked("Tokyo · Sakura · hy2"))
+        XCTAssertTrue(ProxyNode.hy2UdpIsVendorBlocked("JP-VLESS-Reality · hy2"))
+        XCTAssertFalse(ProxyNode.hy2UdpIsVendorBlocked("Los Angeles · Sunset · hy2"))
         XCTAssertTrue(ProxyNode.isHy2CatalogName("Tokyo · Sakura · hy2"))
         XCTAssertFalse(ProxyNode.isHy2CatalogName("Tokyo · Sakura"))
         XCTAssertEqual(nodeRouteTitle(for: "Tokyo · Sakura"), nodeCityTitle("Tokyo · Sakura"))

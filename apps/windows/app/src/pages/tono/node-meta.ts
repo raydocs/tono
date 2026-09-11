@@ -29,11 +29,23 @@ export const catalogBaseName = (wireName: string) =>
     : wireName
 
 /**
- * Manual next hand when TCP is dead. Prefer the same-city ` · hy2` sibling;
- * if this city has none, offer another city's hy2 (Tokyo UDP is blocked at
- * the provider, so the working China backup may be Dedirock). Already on
- * hy2: offer a different city's hy2, not the same row again. Null when the
- * catalog has no remaining hy2 to try. G2.8 auto-switch stays off.
+ * Panstar Tokyo inbound UDP is vendor-blocked. Offering that city's hy2 as
+ * the first backup is a dead click from China (and from everywhere else
+ * off-box). Dedirock / other-city hy2 is the working next hand.
+ */
+export const hy2UdpIsVendorBlocked = (wireName: string) => {
+  const display = nodeDisplayName(stripLeadingFlag(catalogBaseName(wireName)))
+  return cityOf(display) === 'tokyo'
+}
+
+const preferReachableHy2 = (rows: readonly string[]) =>
+  rows.find((name) => !hy2UdpIsVendorBlocked(name)) ?? rows[0] ?? null
+
+/**
+ * Manual next hand when TCP is dead. Prefer the same-city ` · hy2` sibling
+ * unless that sibling's UDP is vendor-blocked; then another city's hy2.
+ * Already on hy2: offer a different city's hy2. Null when nothing remains.
+ * G2.8 auto-switch stays off.
  */
 export const backupChannelName = (
   selected: string | null | undefined,
@@ -48,13 +60,14 @@ export const backupChannelName = (
     const sibling = hy2Rows.find(
       (name) => stripLeadingFlag(catalogBaseName(name)) === selectedKey,
     )
-    return sibling ?? hy2Rows[0] ?? null
+    if (sibling && !hy2UdpIsVendorBlocked(sibling)) return sibling
+    return preferReachableHy2(hy2Rows)
   }
 
-  return (
-    hy2Rows.find(
+  return preferReachableHy2(
+    hy2Rows.filter(
       (name) => stripLeadingFlag(catalogBaseName(name)) !== selectedKey,
-    ) ?? null
+    ),
   )
 }
 

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   backupChannelName,
   catalogBaseName,
+  hy2UdpIsVendorBlocked,
   isHy2CatalogName,
   nodeCityLabel,
   nodeCityParts,
@@ -108,6 +109,27 @@ describe('backupChannelName', () => {
     )
     expect(backupChannelName(null, names)).toBeNull()
     expect(backupChannelName('Tokyo · Sakura', ['Tokyo · Sakura'])).toBeNull()
+  })
+
+  it('skips Tokyo hy2 when another city hy2 exists, because Panstar UDP is blocked', () => {
+    const names = [
+      'Tokyo · Sakura',
+      'Tokyo · Sakura · hy2',
+      'Los Angeles · Sunset',
+      'Los Angeles · Sunset · hy2',
+    ]
+    expect(backupChannelName('Tokyo · Sakura', names)).toBe(
+      'Los Angeles · Sunset · hy2',
+    )
+    expect(backupChannelName('Los Angeles · Sunset', names)).toBe(
+      'Los Angeles · Sunset · hy2',
+    )
+    expect(backupChannelName('JP-VLESS-Reality', names)).toBe(
+      'Los Angeles · Sunset · hy2',
+    )
+    expect(hy2UdpIsVendorBlocked('Tokyo · Sakura · hy2')).toBe(true)
+    expect(hy2UdpIsVendorBlocked('JP-VLESS-Reality · hy2')).toBe(true)
+    expect(hy2UdpIsVendorBlocked('Los Angeles · Sunset · hy2')).toBe(false)
   })
 
   it('falls back to another city hy2 when this city has no sibling', () => {
