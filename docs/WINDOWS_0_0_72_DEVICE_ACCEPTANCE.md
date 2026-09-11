@@ -265,3 +265,44 @@ Start-Process $setup.FullName
 
 Then: launch 0.0.72 → connect. Pill must stay **Connecting…**, not Cancel. `securingDNS` must pass; dashboard rate and Activity must leave controller retry; disconnect restores DNS. After the catalog PUT, refresh servers and look for the top「备用 UDP」group (city · codename · 备用通道). Artifact retention is 7 days.
 
+## 10. Pending device candidate — hy2 UDP allowed (2026-09-11)
+
+Supersedes §9 for hy2 / 备用 UDP. §9 still has `AND,((NETWORK,UDP)),REJECT` on the selected node, so a Dedirock hy2 row can appear and still fail closed. Source `3abe64b6` races loopback DNS with TUN and omits that UDP reject when the selected node is hysteria2.
+
+Hosted candidate run: [`34599676962`](https://github.com/raydocs/tono/actions/runs/34599676962).
+Artifact `tono-windows-0.0.72-candidate-3abe64b658429199bce1a660f4dc55a794a12c79`.
+Source `3abe64b658429199bce1a660f4dc55a794a12c79`.
+Version **0.0.72**. `candidateOnly: true`. Not Authenticode signed. Not updater signed. Not a customer-channel package.
+
+Installer `Tono_0.0.72_x64-setup.exe` SHA-256 (matches downloaded bytes and `candidate-manifest.json`):
+
+```text
+2af3f3b1894fd5b5d12b9507df723d0f8a87715d91fd1b1bb4fb8809d31ba674
+```
+
+Service `tono-service.exe` SHA-256 `30b0ebfd4d10ec92e3446a29c4eebcccfa1d6e3022057fe1cfe295acc53bc9e3`.
+Core `tono-core-x86_64-pc-windows-msvc.exe` SHA-256 `f7e6bd6092095b5fbcfaddf004337c1db189d6673133ca7bcf67b622fbe42dd3`.
+
+**Not installed on a device. Not a G1.1 pass.** Production Worker is `7c38521c` (#145). Testers still will not see hy2 rows until the five Dedirock blocks are `--append`ed.
+
+Open without GitHub login:
+
+- Page: https://nightly.link/raydocs/tono/actions/runs/34599676962
+- Zip: https://nightly.link/raydocs/tono/actions/runs/34599676962/tono-windows-0.0.72-candidate-3abe64b658429199bce1a660f4dc55a794a12c79.zip
+
+On the Windows PC, with Tono **disconnected**:
+
+```powershell
+$dest = Join-Path $env:TEMP 'tono-candidate-34599676962'
+New-Item -ItemType Directory -Force $dest | Out-Null
+gh run download 34599676962 --repo raydocs/tono -n tono-windows-0.0.72-candidate-3abe64b658429199bce1a660f4dc55a794a12c79 -D $dest
+$setup = Get-ChildItem $dest -Recurse -Filter Tono_0.0.72_x64-setup.exe | Select-Object -First 1
+$hash = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($hash -ne '2af3f3b1894fd5b5d12b9507df723d0f8a87715d91fd1b1bb4fb8809d31ba674') {
+  throw "hash mismatch: $hash"
+}
+Start-Process $setup.FullName
+```
+
+Then: launch 0.0.72 → connect. Pill must stay **Connecting…**, not Cancel. `securingDNS` must pass; dashboard rate and Activity must leave controller retry; disconnect restores DNS. After `--append`, refresh and use the top「备用 UDP」group. Artifact retention is 7 days.
+
