@@ -5,6 +5,8 @@ const MAX_CLOSED_CONNS_NUM = 500
 const MAX_ACTIVE_CONNS_NUM = 2_000
 const CONNECTION_UPDATE_THROTTLE_MS = 500
 const CONNECTION_RECONNECT_DELAY_MS = 1_000
+/** Hung `connect_connections()` must not pin `connectionConnecting` forever. */
+export const CONNECT_TIMEOUT_MS = 10_000
 
 type ConnectionMetadata = IConnectionsItem['metadata']
 type ConnectionListener = () => void
@@ -40,6 +42,9 @@ let connectionConnecting = false
 /** True after the live core has delivered at least one connections frame. */
 let connectionFeedLive = false
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+let connectWatchdog: ReturnType<typeof setTimeout> | null = null
+let connectEpoch = 0
+let connectStartedAt = 0
 let flushTimer: ReturnType<typeof setTimeout> | null = null
 let pendingMessageData: string | null = null
 let lastFlushAt = 0
@@ -267,6 +272,19 @@ const clearReconnectTimer = () => {
   reconnectTimer = null
 }
 
+const clearConnectWatchdog = () => {
+  if (!connectWatchdog) return
+  window.clearTimeout(connectWatchdog)
+  connectWatchdog = null
+}
+
+const supersedeInFlightConnect = () => {
+  connectEpoch += 1
+  connectionConnecting = false
+  connectStartedAt = 0
+  clearConnectWatchdog()
+}
+
 const closeConnectionSocket = async () => {
   const socket = connectionSocket
   connectionSocket = null
@@ -295,16 +313,35 @@ async function reconnectConnectionSocket() {
 }
 
 async function connectConnectionSocket() {
-  if (connectionSocket || connectionConnecting) return
+  if (connectionSocket) return
   if (!hasConnectionSubscribers()) return
+  if (
+    connectionConnecting &&
+    Date.now() - connectStartedAt < CONNECT_TIMEOUT_MS
+  ) {
+    return
+  }
 
   clearReconnectTimer()
   connectionConnecting = true
+  connectStartedAt = Date.now()
+  const attempt = ++connectEpoch
   const targetGeneration = connectionGeneration
+  clearConnectWatchdog()
+  // connect_connections() can hang on a half-open handshake. Activity's
+  // 4s refresh calls reconnect, which no-ops while connecting is stuck —
+  // the same freeze G1.1 saw after Connected. Traffic already has this
+  // watchdog; connections must too.
+  connectWatchdog = window.setTimeout(() => {
+    if (attempt !== connectEpoch || connectionSocket) return
+    supersedeInFlightConnect()
+    scheduleReconnect()
+  }, CONNECT_TIMEOUT_MS)
 
   try {
     const socket = await MihomoWebSocket.connect_connections()
     if (
+      attempt !== connectEpoch ||
       !hasConnectionSubscribers() ||
       targetGeneration !== connectionGeneration
     ) {
@@ -312,6 +349,7 @@ async function connectConnectionSocket() {
       return
     }
     connectionSocket = socket
+    clearConnectWatchdog()
     socket.addListener((message) => {
       if (connectionSocket !== socket) return
       if (targetGeneration !== connectionGeneration) return
@@ -324,14 +362,19 @@ async function connectConnectionSocket() {
       enqueueConnectionMessage(message.data)
     })
   } catch {
-    scheduleReconnect()
+    if (attempt === connectEpoch) {
+      scheduleReconnect()
+    }
   } finally {
-    connectionConnecting = false
-    if (
-      targetGeneration !== connectionGeneration &&
-      hasConnectionSubscribers()
-    ) {
-      void connectConnectionSocket()
+    if (attempt === connectEpoch) {
+      connectionConnecting = false
+      clearConnectWatchdog()
+      if (
+        targetGeneration !== connectionGeneration &&
+        hasConnectionSubscribers()
+      ) {
+        void connectConnectionSocket()
+      }
     }
   }
 }
@@ -344,6 +387,7 @@ const stopConnectionMonitorIfIdle = () => {
   if (hasConnectionSubscribers()) return
 
   clearReconnectTimer()
+  supersedeInFlightConnect()
   pendingMessageData = null
   if (flushTimer) {
     window.clearTimeout(flushTimer)
@@ -376,6 +420,10 @@ const selectConnectionGeneration = (generation?: number) => {
     window.clearTimeout(flushTimer)
     flushTimer = null
   }
+  // Drop a hung connect against the previous controller. Otherwise
+  // `connectionConnecting` stays true and the new generation never opens.
+  clearReconnectTimer()
+  supersedeInFlightConnect()
   // The socket captures its controller endpoint at open time. Force a new one after Tono has
   // configured this generation's random loopback port and secret; stale listeners are also
   // generation-guarded above in case close races an incoming frame.
