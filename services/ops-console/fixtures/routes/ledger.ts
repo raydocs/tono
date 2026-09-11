@@ -395,7 +395,7 @@ export function createLedgerFixtures(rootDir: string) {
 
   return function ledgerFixtures(options: Request): boolean {
     const parts = options.route.split('/').map(decodeURIComponent);
-    if (parts[0] !== 'ledger' && parts[0] !== 'months' && parts[0] !== 'fx') return false;
+    if (parts[0] !== 'ledger' && parts[0] !== 'months' && parts[0] !== 'fx' && parts[0] !== 'slo') return false;
     const { req, res } = options;
     const query = new URLSearchParams(options.url.split('?')[1] ?? '');
     const store = storeFor(options.session, options.empty);
@@ -430,6 +430,67 @@ export function createLedgerFixtures(rootDir: string) {
         return true;
       }
       return false;
+    }
+
+    if (parts[0] === 'slo' && method === 'GET') {
+      const now = nowSec();
+      const today = Math.floor(now / 86_400) * 86_400;
+      const sampleItems = [
+        {
+          dayAt: today - 86_400,
+          platform: 'macos',
+          carrier: 'telecom',
+          node: 'Tokyo · Fuji',
+          attempts: 240,
+          successes: 238,
+          p50Ms: 42,
+          verifiedOutageMin: 0,
+          unmeasuredMin: 0,
+          rulesVersion: 2,
+        },
+        {
+          dayAt: today - 86_400,
+          platform: 'windows',
+          carrier: 'unicom',
+          node: 'Tokyo · Fuji',
+          attempts: 180,
+          successes: 176,
+          p50Ms: 55,
+          verifiedOutageMin: 0,
+          unmeasuredMin: 0,
+          rulesVersion: 2,
+        },
+        {
+          dayAt: today - 2 * 86_400,
+          platform: 'macos',
+          carrier: 'mobile',
+          node: 'Tokyo · Fuji',
+          attempts: 150,
+          successes: 145,
+          p50Ms: 68,
+          verifiedOutageMin: 15,
+          unmeasuredMin: 60,
+          rulesVersion: 2,
+        },
+      ];
+      const items = options.empty ? [] : sampleItems;
+      const totalAttempts = items.reduce((s, r) => s + r.attempts, 0);
+      const totalSuccesses = items.reduce((s, r) => s + r.successes, 0);
+      const summary = {
+        successRate: totalAttempts > 0 ? Number((totalSuccesses / totalAttempts).toFixed(4)) : null,
+        p50Ms: items.length > 0 ? 50 : null,
+        verifiedOutageMin: items.length > 0 ? 15 : 0,
+        unmeasuredMin: items.length > 0 ? 60 : 0,
+        coverage: items.length > 0 ? 0.98 : 1,
+      };
+      sendJson(res, {
+        items,
+        summary,
+        nextCursor: null,
+        total: items.length,
+        updatedAt: now,
+      });
+      return true;
     }
 
     if (parts[0] === 'ledger') {
