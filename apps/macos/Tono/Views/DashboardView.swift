@@ -665,12 +665,9 @@ private struct ConnectionProgressCard: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
 
-                if appState.lastClassifiedFailure?.code == .coreExitUnreachable,
-                   let backup = backupChannelTarget {
+                if appState.backupHy2SiblingName() != nil {
                     Button("Try backup channel") {
-                        guard appState.applyProxySelection(backup) else { return }
-                        appState.persistProxySelection(backup)
-                        appState.retryProtectedConnectionNow()
+                        appState.tryBackupChannelManually()
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -690,14 +687,6 @@ private struct ConnectionProgressCard: View {
                 .foregroundStyle(.secondary)
             }
         }
-    }
-
-    private var backupChannelTarget: String? {
-        let selected = appState.currentProxySelectionTarget()
-            ?? appState.activeNode?.name
-        guard let selected else { return nil }
-        let names = Set(appState.managedCatalogNodes.map(\.name))
-        return ProxyNode.backupChannelName(selected: selected, catalogNames: names)
     }
 
     private func elapsedSeconds(since date: Date, now: Date) -> Int {

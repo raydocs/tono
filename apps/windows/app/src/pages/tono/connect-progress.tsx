@@ -2,15 +2,11 @@ import { useLockFn } from 'ahooks'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import {
-  tonoConnectProgressQueryKey,
-  tonoServersQueryKey,
-} from '@/hooks/use-tono'
+import { tonoConnectProgressQueryKey } from '@/hooks/use-tono'
 import { showNotice } from '@/services/notice-service'
 import { useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
 import {
-  connectErrorSuggestsBackupChannel,
   describeTonoActionError,
   formatTonoActionError,
   isEncryptedDnsFailure,
@@ -20,8 +16,6 @@ import {
   tonoConnectProgress,
   tonoDiagnosticsReport,
   tonoRetryNow,
-  tonoSelectServer,
-  tonoServers,
   tonoUploadDiagnostics,
   type TonoConnectStep,
   type TonoUiState,
@@ -34,7 +28,7 @@ import { TonoConfirmDialog } from '@/tono-ui/TonoAccountCard'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 import { useReleaseProtection } from '@/tono-ui/useReleaseProtection'
 
-import { backupChannelName } from './node-meta'
+import { useManualBackupChannel } from './use-backup-channel'
 
 /**
  * The connect-progress card (Mac Build 29 parity): the eight FSM stages with
@@ -173,11 +167,10 @@ export const ConnectProgressCard = ({
 
   const active = uiState === 'connecting' || uiState === 'protectedOffline'
   const progress = useConnectProgress(active)
-  const { data: servers } = useQuery({
-    queryKey: tonoServersQueryKey,
-    queryFn: tonoServers,
-    enabled: uiState === 'protectedOffline',
-  })
+  const { available: showBackupAction, selectAndRetry } = useManualBackupChannel(
+    selectedServer,
+    uiState,
+  )
 
   const [retryError, setRetryError] = useState<string | null>(null)
   const [retrying, setRetrying] = useState(false)
@@ -210,22 +203,11 @@ export const ConnectProgressCard = ({
     }
   })
 
-  const hy2Sibling = backupChannelName(
-    selectedServer,
-    (servers ?? []).map((server) => server.name),
-  )
-  const showBackupAction =
-    uiState === 'protectedOffline' &&
-    hy2Sibling != null &&
-    connectErrorSuggestsBackupChannel(progress?.error)
-
   const handleTryBackupChannel = useLockFn(async () => {
-    if (!hy2Sibling) return
     setRetrying(true)
     setRetryError(null)
     try {
-      await tonoSelectServer(hy2Sibling)
-      await tonoRetryNow()
+      await selectAndRetry()
       await onRefreshStatus()
     } catch (error) {
       setRetryError(formatTonoActionError(error, t))

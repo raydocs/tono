@@ -97,6 +97,12 @@ struct MenuBarView: View {
                 appState.retryProtectedConnectionNow()
             }
             .disabled(!canAct)
+            if appState.backupHy2SiblingName() != nil {
+                actionButton(title: "Try backup channel", prominent: true) {
+                    appState.tryBackupChannelManually()
+                }
+                .disabled(!canAct)
+            }
         } else if appState.isConnected {
             actionButton(title: "Disconnect and restore internet", prominent: false) {
                 appState.disconnect(releaseKillSwitch: true)

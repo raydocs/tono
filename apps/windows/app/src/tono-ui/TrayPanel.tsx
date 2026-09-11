@@ -16,6 +16,7 @@ import {
   nodeCityParts,
   nodeCode,
 } from '@/pages/tono/node-meta'
+import { useManualBackupChannel } from '@/pages/tono/use-backup-channel'
 import { useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
 import {
@@ -103,6 +104,10 @@ export const TrayPanel = () => {
   const [down, downUnit] = parseTraffic(traffic?.down ?? 0)
   const [actionError, setActionError] = useState<string | null>(null)
   const [picking, setPicking] = useState(false)
+  const { available: backupAvailable, selectAndRetry } = useManualBackupChannel(
+    serverName,
+    uiState,
+  )
 
   const { data: servers } = useQuery({
     queryKey: tonoServersQueryKey,
@@ -118,6 +123,17 @@ export const TrayPanel = () => {
       if (action === 'connect') await tonoConnect()
       else if (action === 'disconnect') await tonoDisconnect()
       else await tonoRetryNow()
+      await mutateTonoStatus()
+    } catch (error) {
+      setActionError(formatTonoActionError(error, t))
+    }
+  })
+
+  const tryBackup = useLockFn(async () => {
+    setPicking(false)
+    setActionError(null)
+    try {
+      await selectAndRetry()
       await mutateTonoStatus()
     } catch (error) {
       setActionError(formatTonoActionError(error, t))
@@ -312,6 +328,23 @@ export const TrayPanel = () => {
         <div className="tono-tray-error" role="alert" title={actionError}>
           {actionError}
         </div>
+      )}
+
+      {backupAvailable && (
+        <button
+          type="button"
+          data-testid="tono-tray-try-backup"
+          onClick={() => void tryBackup()}
+          className="tono-tray-action"
+          style={{
+            flexShrink: 0,
+            cursor: 'pointer',
+            background: TONO_COLORS.accent,
+          }}
+        >
+          <TonoIcon name="refresh" size={14} />
+          {t('tono.progress.tryBackupChannel')}
+        </button>
       )}
 
       <button

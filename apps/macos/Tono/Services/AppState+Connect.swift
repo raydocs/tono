@@ -1801,4 +1801,22 @@ extension AppState {
         scheduleProtectedReconnect(immediate: true)
     }
 
+    /// Same-city hy2 sibling after a TCP/exit failure. Nil unless the
+    /// classified failure is CORE_EXIT_UNREACHABLE and the catalog has ` · hy2`.
+    func backupHy2SiblingName() -> String? {
+        guard lastClassifiedFailure?.code == .coreExitUnreachable else { return nil }
+        let selected = currentProxySelectionTarget() ?? activeNode?.name
+        guard let selected else { return nil }
+        let names = Set(managedCatalogNodes.map(\.name))
+        return ProxyNode.backupChannelName(selected: selected, catalogNames: names)
+    }
+
+    /// User-tapped next hand. Does not run on its own (G2.8 stays off).
+    func tryBackupChannelManually() {
+        guard let backup = backupHy2SiblingName() else { return }
+        guard applyProxySelection(backup) else { return }
+        persistProxySelection(backup)
+        retryProtectedConnectionNow()
+    }
+
 }
