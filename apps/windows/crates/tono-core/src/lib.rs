@@ -37,5 +37,5 @@ pub use update_journal::{
 pub use credentials::{CredentialKey, CredentialStore};
 pub use node::{
     EXIT_GROUP_NAME, HY2_NAME_SUFFIX, NodeProtocol, NodeRejection, ValidatedNode,
-    catalog_transport_of_name,
+    catalog_base_name, catalog_transport_of_name, is_hy2_catalog_name,
 };

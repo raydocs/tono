@@ -87,6 +87,24 @@ final class ConnectionActivityTests: XCTestCase {
         )
         XCTAssertTrue(ProxyNode.isHy2CatalogName("Tokyo · Sakura · hy2"))
         XCTAssertFalse(ProxyNode.isHy2CatalogName("Tokyo · Sakura"))
+        XCTAssertFalse(
+            ProxyNode.isCityFailoverCandidate("Tokyo · Sakura · hy2", after: "Tokyo · Sakura")
+        )
+        XCTAssertFalse(
+            ProxyNode.isCityFailoverCandidate("Tokyo · Sakura", after: "Tokyo · Sakura · hy2")
+        )
+        XCTAssertTrue(
+            ProxyNode.isCityFailoverCandidate("Buffalo · Niagara", after: "Tokyo · Sakura")
+        )
+        XCTAssertTrue(
+            ProxyNode.isCityFailoverCandidate("Buffalo · Niagara", after: "Tokyo · Sakura · hy2")
+        )
+        XCTAssertFalse(
+            ProxyNode.isCityFailoverCandidate(
+                "🇯🇵 Tokyo · Sakura · hy2",
+                after: "Tokyo · Sakura"
+            )
+        )
     }
 
     private func fixture(

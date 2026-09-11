@@ -38,6 +38,17 @@ final class NodeSwitchTests: XCTestCase {
         ])
     }
 
+    func testPreferredCloudExitSkipsHy2SiblingListedFirst() {
+        let hy2 = Fixture.hy2Node()
+        let tcp = Fixture.realityNode()
+        let preferred = ConfigPipeline.preferredCloudExit(
+            in: [hy2, tcp],
+            named: "US-VLESS-Reality"
+        )
+        XCTAssertEqual(preferred?.name, "US-VLESS-Reality")
+        XCTAssertEqual(preferred?.type, .vless)
+    }
+
     func testDrainClosesOnlyConnectionsBoundToThePreviousExit() {
         let stale = fixtureConnection(
             id: "old-1",

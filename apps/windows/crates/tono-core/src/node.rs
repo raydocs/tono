@@ -177,8 +177,17 @@ impl ValidatedNode {
 /// Same-node hy2 sibling. Must stay aligned with the catalog contract (` · hy2`).
 pub const HY2_NAME_SUFFIX: &str = " · hy2";
 
+pub fn is_hy2_catalog_name(name: &str) -> bool {
+    name.ends_with(HY2_NAME_SUFFIX)
+}
+
+/// Display/city identity: the VLESS row, or the same row with ` · hy2` stripped.
+pub fn catalog_base_name(name: &str) -> &str {
+    name.strip_suffix(HY2_NAME_SUFFIX).unwrap_or(name)
+}
+
 pub fn catalog_transport_of_name(name: &str) -> &'static str {
-    if name.ends_with(HY2_NAME_SUFFIX) {
+    if is_hy2_catalog_name(name) {
         "hy2"
     } else {
         "tcp"
@@ -645,6 +654,8 @@ fingerprint: "E3:AA:4A:74:5A:A9:05:39:AB:1A:49:3D:94:0E:EB:A7:B4:30:5B:75:16:AB:
         let node = admit_yaml(passing_hy2_yaml()).unwrap();
         assert_eq!(node.protocol, NodeProtocol::Hysteria2);
         assert_eq!(node.catalog_transport(), "hy2");
+        assert!(is_hy2_catalog_name("Tokyo · Sakura · hy2"));
+        assert_eq!(catalog_base_name("Tokyo · Sakura · hy2"), "Tokyo · Sakura");
         assert_eq!(catalog_transport_of_name("Tokyo · Sakura"), "tcp");
         assert_eq!(node.name, "🇺🇸 US Reality 01 · hy2");
         assert_eq!(node.server, Ipv4Addr::new(8, 8, 8, 8));

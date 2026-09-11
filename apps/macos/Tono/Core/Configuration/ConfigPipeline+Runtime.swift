@@ -45,9 +45,10 @@ extension ConfigPipeline {
         in nodes: [ProxyNode],
         named preferredName: String
     ) -> ProxyNode? {
-        guard !nodes.isEmpty else { return nil }
+        let primaries = nodes.filter { !ProxyNode.isHy2CatalogName($0.name) }
+        guard !primaries.isEmpty else { return nil }
         let preferredCompact = compactCloudExitName(preferredName)
-        if let exact = nodes.first(where: {
+        if let exact = primaries.first(where: {
             compactCloudExitName($0.name) == preferredCompact
                 || compactCloudExitName($0.id) == preferredCompact
         }) {
@@ -62,7 +63,7 @@ extension ConfigPipeline {
             || preferredWords.contains("JAPANESE")
         let wantsReality = preferredWords.contains("REALITY")
         if wantsUS || wantsJP,
-           let regional = nodes.first(where: { node in
+           let regional = primaries.first(where: { node in
                let words = cloudExitWords(node.name)
                let isUS = node.flag == "🇺🇸"
                    || words.contains("US")
@@ -76,7 +77,7 @@ extension ConfigPipeline {
            }) {
             return regional
         }
-        return nodes.first
+        return primaries.first
     }
 
     static func orderedCloudExits(

@@ -158,6 +158,16 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
         }
     }
 
+    /// Cities city-failover may land on. hy2 is a same-city backup, not
+    /// another city, so a TCP failure must not auto-switch onto it.
+    static func isCityFailoverCandidate(_ rawName: String, after current: String?) -> Bool {
+        let clean = ConfigParser.extractFlag(from: rawName).cleanName
+        guard !isHy2CatalogName(clean) else { return false }
+        guard let current else { return true }
+        let currentClean = ConfigParser.extractFlag(from: current).cleanName
+        return catalogBaseName(for: clean) != catalogBaseName(for: currentClean)
+    }
+
     static func displayName(for rawName: String) -> String {
         let base = catalogBaseName(for: rawName)
         return cityNames[base] ?? base

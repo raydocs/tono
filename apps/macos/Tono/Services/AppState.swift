@@ -739,15 +739,15 @@ final class AppState {
             let rotated = Array(catalog.dropFirst(currentIndex + 1))
                 + Array(catalog.prefix(currentIndex + 1))
             return rotated.first(where: { node in
-                node.id != current.id && !proxyTarget(node.name, matches: current.name)
+                ProxyNode.isCityFailoverCandidate(node.name, after: current.name)
             })
         }
         if let preferred = defaultCloudExitNode(),
-           current.map({ $0.id != preferred.id && !proxyTarget(preferred.name, matches: $0.name) }) ?? true {
+           ProxyNode.isCityFailoverCandidate(preferred.name, after: current?.name) {
             return preferred
         }
         return catalog.first(where: { node in
-            current.map { $0.id != node.id && !proxyTarget(node.name, matches: $0.name) } ?? true
+            ProxyNode.isCityFailoverCandidate(node.name, after: current?.name)
         })
     }
 

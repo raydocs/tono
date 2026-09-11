@@ -138,8 +138,9 @@ pub async fn tono_test_available_servers(
         let nodes = inner
             .nodes
             .iter()
-            .filter(|node| !catalog_sync::is_exit_blocked(&node.name))
-            .map(|node| (node.name.clone(), SocketAddr::new(node.server.into(), node.port)))
+            .filter_map(|node| {
+                catalog_sync::tcp_probe_socket(node).map(|address| (node.name.clone(), address))
+            })
             .collect::<Vec<_>>();
         inner.server_test_generation = inner.server_test_generation.wrapping_add(1);
         let generation = inner.server_test_generation;
