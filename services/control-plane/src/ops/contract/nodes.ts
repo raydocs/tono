@@ -117,6 +117,8 @@ export interface NodeFactsDto {
   notes: string | null;
   createdAt: number;
   updatedAt: number;
+  /** Typed-in ceiling; absent means the 容量 line stays unknown. */
+  capacityUsers?: number;
 }
 
 export interface NodeOccupantDto {
@@ -170,6 +172,12 @@ export interface NodeSummaryDto {
   choreCount: number;
   incidentCount: number;
   updatedAt: number;
+  /** Stable id; catalog_name stays the join key on every other table. */
+  nodeId?: string;
+  /** UI-only; never written to catalog_name / node_name. */
+  displayName?: string;
+  failureDomain?: string;
+  replaces?: string;
 }
 
 export interface NodeDetailDto {
@@ -190,6 +198,10 @@ export interface NodeDetailDto {
   jobs: JobDto[];
   history: NodeHistoryEntryDto[];
   updatedAt: number;
+  nodeId?: string;
+  displayName?: string;
+  failureDomain?: string;
+  replaces?: string;
 }
 
 const FORWARD_KEYS = ['carrier', 'successRate', 'medianTcpMs', 'topFailure', 'attempts', 'users'];
@@ -255,6 +267,7 @@ export function assertNodeBindings(value: unknown, path = 'bindings'): NodeBindi
 const FACTS_KEYS = [
   'publicIp', 'os', 'region', 'provider', 'providerAccountId', 'lineTags', 'port',
   'price', 'currency', 'billingCycle', 'renewsAt', 'expiresAt', 'notes', 'createdAt', 'updatedAt',
+  'capacityUsers',
 ];
 
 export function assertNodeFacts(value: unknown, path = 'facts'): NodeFactsDto {
@@ -275,6 +288,9 @@ export function assertNodeFacts(value: unknown, path = 'facts'): NodeFactsDto {
     notes: optText(row, path, 'notes'),
     createdAt: int(row, path, 'createdAt'),
     updatedAt: int(row, path, 'updatedAt'),
+    ...(row.capacityUsers === undefined || row.capacityUsers === null
+      ? {}
+      : { capacityUsers: optInt(row, path, 'capacityUsers') as number }),
   };
 }
 
@@ -324,7 +340,25 @@ const SUMMARY_KEYS = [
   'name', 'verdict', 'health', 'tone', 'reason', 'lifecycle', 'catalogListed',
   'region', 'provider', 'occupancy', 'quota', 'forwardWorst', 'returnWorst',
   'renewsAt', 'expiresAt', 'choreCount', 'incidentCount', 'updatedAt',
+  'nodeId', 'displayName', 'failureDomain', 'replaces',
 ];
+
+function optionalIdentity(row: Record<string, unknown>, path: string): {
+  nodeId?: string; displayName?: string; failureDomain?: string; replaces?: string;
+} {
+  return {
+    ...(row.nodeId === undefined || row.nodeId === null ? {} : { nodeId: optText(row, path, 'nodeId') as string }),
+    ...(row.displayName === undefined || row.displayName === null
+      ? {}
+      : { displayName: optText(row, path, 'displayName') as string }),
+    ...(row.failureDomain === undefined || row.failureDomain === null
+      ? {}
+      : { failureDomain: optText(row, path, 'failureDomain') as string }),
+    ...(row.replaces === undefined || row.replaces === null
+      ? {}
+      : { replaces: optText(row, path, 'replaces') as string }),
+  };
+}
 
 export function assertNodeSummary(value: unknown, path = 'nodeSummary'): NodeSummaryDto {
   const row = fields(value, path, SUMMARY_KEYS);
@@ -347,6 +381,7 @@ export function assertNodeSummary(value: unknown, path = 'nodeSummary'): NodeSum
     choreCount: int(row, path, 'choreCount'),
     incidentCount: int(row, path, 'incidentCount'),
     updatedAt: int(row, path, 'updatedAt'),
+    ...optionalIdentity(row, path),
   };
 }
 
@@ -354,6 +389,7 @@ const DETAIL_KEYS = [
   'name', 'verdict', 'health', 'tone', 'reason', 'lifecycle', 'catalogListed',
   'facts', 'bindings', 'forwardPath', 'returnPath', 'occupancy', 'quota',
   'recentErrors', 'jobs', 'history', 'updatedAt',
+  'nodeId', 'displayName', 'failureDomain', 'replaces',
 ];
 
 export function assertNodeDetail(value: unknown, path = 'nodeDetail'): NodeDetailDto {
@@ -376,5 +412,6 @@ export function assertNodeDetail(value: unknown, path = 'nodeDetail'): NodeDetai
     jobs: arrayOf(row, path, 'jobs', assertJob),
     history: arrayOf(row, path, 'history', assertNodeHistoryEntry),
     updatedAt: int(row, path, 'updatedAt'),
+    ...optionalIdentity(row, path),
   };
 }

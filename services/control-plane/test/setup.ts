@@ -35,6 +35,7 @@ beforeEach(async () => {
   await env.DB.prepare('DELETE FROM ops_node_status_history').run();
   await env.DB.prepare('DELETE FROM ops_node_status').run();
   await env.DB.prepare('DELETE FROM ops_node_profiles').run();
+  await env.DB.prepare('DELETE FROM ops_node_identity').run();
   await env.DB.prepare('DELETE FROM node_traffic_cycle_samples').run();
   await env.DB.prepare('DELETE FROM node_traffic_cycles').run();
   await env.DB.prepare('DELETE FROM node_error_daily').run();

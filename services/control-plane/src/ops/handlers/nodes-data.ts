@@ -122,6 +122,7 @@ function parseLineTags(raw: unknown): string[] {
 export function factsFrom(profile: Row | null, agent: Row | null, fallbackAt: number): NodeFactsDto {
   const createdAt = nullInt(profile?.created_at) ?? fallbackAt;
   const updatedAt = nullInt(profile?.updated_at) ?? createdAt;
+  const capacityUsers = nullInt(profile?.capacity_users);
   return {
     publicIp: nullText(profile?.public_ip) ?? nullText(agent?.publicIp) ?? nullText(agent?.host),
     os: nullText(profile?.os) ?? nullText(agent?.os),
@@ -138,6 +139,7 @@ export function factsFrom(profile: Row | null, agent: Row | null, fallbackAt: nu
     notes: nullText(profile?.notes),
     createdAt: createdAt > 0 ? createdAt : fallbackAt,
     updatedAt: updatedAt > 0 ? updatedAt : fallbackAt,
+    ...(capacityUsers != null ? { capacityUsers } : {}),
   };
 }
 

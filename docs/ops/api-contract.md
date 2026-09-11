@@ -111,6 +111,12 @@
 
 ### 部门 C
 
+| 路由 | 返回 |
+|---|---|
+| `GET nodes` / `GET nodes/{name}` | 可选 `nodeId`、`displayName`、`failureDomain`、`replaces`。展示名只影响 UI；`catalog_name` / `node_name` 仍是所有表的键 |
+| `GET nodes/{name}` | `facts.capacityUsers?`：资料里登记的可坐人数。有值时验收单 `capacity`：占用 < 容量为 pass，否则 fail；无值仍 unknown |
+| `PATCH nodes/{name}/profile` | 加可选 `capacityUsers`（正整数）、`displayName`（≤60）、`failureDomain`（≤60，建议 `商家/机房`）、`replaces`（必须是已有 catalog_name，不能是自己） |
+
 ### 部门 D
 
 | 路由 | 返回 |

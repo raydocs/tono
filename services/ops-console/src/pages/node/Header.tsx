@@ -34,9 +34,10 @@ export function NodeHeader({ node, sheet, onChanged }: {
       <div className="flex flex-wrap items-start gap-x-6 gap-y-3">
         <div className="flex min-w-0 flex-col gap-2">
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="min-w-0 text-verdict">{node.name}</h1>
+            <h1 className="min-w-0 text-verdict">{node.displayName ?? node.name}</h1>
             <StatusWord word={node.health} reason={why} />
           </div>
+          <p className="text-body text-[var(--muted-foreground)]">{node.name}</p>
           <div className="flex flex-wrap items-center gap-2">
             <span className="ops-tag">{copy.nodeLifecycle[node.lifecycle]}</span>
             <span className="ops-tag">{listing}</span>

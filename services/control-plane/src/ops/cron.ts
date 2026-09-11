@@ -17,6 +17,7 @@ import { planAndSendAlerts, runVerdictPass } from './verdict-run';
 import { retainFollowups } from './handlers/followups';
 import { closeExpiredLogWindows } from './shared-admin/diagnostics-logs';
 import { fetchAndStoreFxRates } from './fx';
+import { ensureNodeIdentities } from './node-identity';
 
 const DAY = 86_400;
 const HOUR = 3_600;
@@ -53,7 +54,7 @@ export const OPS_CRON_STEPS = [
   // append your entries inside your block
 
   // dept:c
-  // append your entries inside your block
+  // identity backfill runs inside the existing project step (ensureNodeIdentities)
 
   // dept:d
   // append your entries inside your block
@@ -204,7 +205,11 @@ async function runRetention(db: D1Database, nowSec: number): Promise<void> {
 
 export async function runOpsCron(e: Env, nowSec: number): Promise<OpsCronReport> {
   const flatten = await step('flatten', { windows: 0, rows: 0 }, () => flattenBacklog(e.DB, nowSec, FLATTEN_WINDOWS_PER_TICK));
-  const project = await step('project', { windows: 0, hours: 0 }, () => projectBacklog(e.DB, nowSec, PROJECT_BACKLOG_LIMIT));
+  const project = await step('project', { windows: 0, hours: 0 }, async () => {
+    const result = await projectBacklog(e.DB, nowSec, PROJECT_BACKLOG_LIMIT);
+    await ensureNodeIdentities(e, nowSec);
+    return result;
+  });
 
   let alertTransitions: Awaited<ReturnType<typeof runVerdictPass>>['transitions'] = [];
   const verdicts = await step('verdicts', { nodes: 0, transitions: 0 }, async () => {

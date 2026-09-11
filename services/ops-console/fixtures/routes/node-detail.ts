@@ -309,7 +309,9 @@ function readFor(file: NodeFile, parts: string[], name: string, range: string, s
 const PROFILE_KEYS = new Set([
   'provider', 'providerAccountId', 'region', 'lineTags', 'port', 'price',
   'currency', 'billingCycle', 'renewsAt', 'expiresAt', 'notes', 'quota',
+  'capacityUsers', 'displayName', 'failureDomain', 'replaces',
 ]);
+const DETAIL_KEYS = new Set(['displayName', 'failureDomain', 'replaces']);
 
 const DATE_KEYS = new Set(['renewsAt', 'expiresAt']);
 
@@ -365,8 +367,14 @@ async function handleProfile(
       facts[key] = at === null ? null : at - back;
       continue;
     }
-    if (key === 'port' || key === 'billingCycle') {
+    if (key === 'port' || key === 'billingCycle' || key === 'capacityUsers') {
       facts[key] = nullableInt(value);
+      continue;
+    }
+    if (DETAIL_KEYS.has(key)) {
+      const text = value === null || value === '' ? undefined : String(value);
+      if (text === undefined) delete file.detail[key];
+      else file.detail[key] = text;
       continue;
     }
     if (key === 'price') {
