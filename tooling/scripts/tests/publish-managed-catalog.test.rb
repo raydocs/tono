@@ -14,6 +14,7 @@ require "tmpdir"
 require "yaml"
 
 SCRIPT = File.expand_path("../publish-managed-catalog.rb", __dir__)
+WRITE_DEDIROCK = File.expand_path("../write-dedirock-hy2-catalog-sources.rb", __dir__)
 MARKER = "\nmode = :dry_run\n"
 PLACEHOLDER = "{{TONO_CLIENT_UUID}}"
 
@@ -132,6 +133,16 @@ class PublishManagedCatalogTest < Minitest::Test
     _, status = Process.waitpid2(pid)
     uploaded = File.exist?(put) ? JSON.parse(File.binread(put).force_encoding(Encoding::UTF_8)) : nil
     [status.exitstatus, output, uploaded]
+  end
+
+  def run_writer(*arguments)
+    reader, writer = IO.pipe
+    pid = Process.spawn(RbConfig.ruby, WRITE_DEDIROCK, *arguments, out: writer, err: writer)
+    writer.close
+    output = reader.read.force_encoding(Encoding::UTF_8)
+    reader.close
+    _, status = Process.waitpid2(pid)
+    [status.exitstatus, output]
   end
 
   def test_dry_run_reports_the_placeholders_it_found
@@ -377,5 +388,90 @@ class PublishManagedCatalogTest < Minitest::Test
       assert_match(/exactly one per-account identity placeholder/, output)
       assert_nil(uploaded)
     end
+  end
+
+  DEDIROCK_HY2 = [
+    ["niagara.yaml", "Buffalo · Niagara · hy2", "23.94.79.123",
+     "1e5374a79bdb83b04c3d3c84722c03211d1c941c2de9f92431d2198ba7212cad"],
+    ["erie.yaml", "Buffalo · Erie · hy2", "198.46.140.254",
+     "4a66f10676ca881186be350d16b3f86cb36f9c896ef445a692d5cc0bc8b5b201"],
+    ["sunset.yaml", "Los Angeles · Sunset · hy2", "192.236.205.232",
+     "0ff3ab6b1bec3a3766f88955a84064ae73ea4724cb4d8602780e06dfbceceeb7"],
+    ["mesa.yaml", "Los Angeles · Mesa · hy2", "107.174.123.27",
+     "f59731347bf068d79f9d9e78c074e4686b981383a5c9029a5650e703e6afba41"],
+    ["grove.yaml", "US-VLESS-Reality · hy2", "198.12.84.154",
+     "a4a8308980004c8a5cda98597b87986671f230445df863c23d380f012c72f909"],
+  ].freeze
+
+  def test_dedirock_hy2_writer_refuses_relative_and_nonempty
+    code, output = run_writer("relative-dir")
+    assert_equal(1, code, output)
+    assert_match(/absolute path/, output)
+
+    occupied = File.join(@directory, "occupied")
+    Dir.mkdir(occupied, 0o700)
+    File.binwrite(File.join(occupied, "stale.yaml"), "stale")
+    code, output = run_writer(occupied)
+    assert_equal(1, code, output)
+    assert_match(/must be empty/, output)
+  end
+
+  def test_dedirock_hy2_sources_dry_run
+    dir = File.join(@directory, "dedirock-hy2")
+    code, output = run_writer(dir)
+    assert_equal(0, code, output)
+    assert_match(/Wrote 5 hy2 sources/, output)
+    assert_includes(output, "--dry-run #{dir}/*.yaml")
+    assert_includes(output, "--append #{dir}/*.yaml")
+    assert_match(/buildSha is not 2cef4eac/, output)
+    refute_match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i, output)
+
+    assert_equal(0o700, File.stat(dir).mode & 0o777)
+    files = DEDIROCK_HY2.map(&:first)
+    assert_equal(files.sort, Dir.children(dir).sort)
+
+    sources = files.map { |name| File.join(dir, name) }
+    sources.each_with_index do |path, index|
+      stat = File.lstat(path)
+      assert(stat.file? && !stat.symlink?)
+      assert_equal(Process.uid, stat.uid)
+      assert_equal(0, stat.mode & 0o077)
+      expected_name, expected_server, expected_fingerprint = DEDIROCK_HY2.fetch(index).drop(1)
+      node = YAML.safe_load(File.binread(path)).fetch("proxies").fetch(0)
+      assert_equal(expected_name, node.fetch("name"))
+      assert_equal("hysteria2", node.fetch("type"))
+      assert_equal(expected_server, node.fetch("server"))
+      assert_equal(443, node.fetch("port"))
+      assert_equal(PLACEHOLDER, node.fetch("password"))
+      assert_equal("www.microsoft.com", node.fetch("sni"))
+      assert_equal(expected_fingerprint, node.fetch("fingerprint"))
+      assert_equal(false, node.fetch("skip-cert-verify"))
+      text = File.binread(path).force_encoding(Encoding::UTF_8)
+      assert_includes(text, "password: \"#{PLACEHOLDER}\"")
+      refute_match(/^\s*uuid:/, text)
+    end
+
+    grove = YAML.safe_load(File.binread(File.join(dir, "grove.yaml"))).fetch("proxies").fetch(0)
+    assert_equal("US-VLESS-Reality · hy2", grove.fetch("name"))
+
+    code, output, uploaded = run_publisher(["--dry-run", *sources])
+    assert_equal(0, code, output)
+    assert_match(/Validated 5 uniquely named incoming nodes carrying 5 per-account identity placeholders/, output)
+    assert_nil(uploaded)
+
+    code, output, uploaded = run_publisher(["--append", *sources], current: CURRENT_CATALOG, revision: 12)
+    assert_equal(0, code, output)
+    yaml = uploaded.fetch("yaml")
+    assert(yaml.start_with?(CURRENT_CATALOG), "the deployed catalog text was rewritten instead of spliced")
+    names = YAML.safe_load(yaml).fetch("proxies").map { |node| node["name"] }
+    assert_equal(
+      ["Los Angeles · Pacific", "Tokyo Reality"] + DEDIROCK_HY2.map { |row| row[1] },
+      names
+    )
+    assert_equal(7, yaml.scan(PLACEHOLDER).length)
+    DEDIROCK_HY2.each do |_file, _name, _server, fingerprint|
+      assert_includes(yaml, "fingerprint: #{fingerprint}")
+    end
+    refute_includes(yaml, "skip-cert-verify: true")
   end
 end

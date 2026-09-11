@@ -10,7 +10,8 @@ name: Services CI
 #
 # The ops-contract job also holds the fixture generator to a byte-for-byte copy of
 # the committed JSON, and runs every tooling/scripts/tests/*.test.mjs so a new
-# script test is not a change that CI never sees.
+# script test is not a change that CI never sees. Catalog publisher / hy2 source
+# writer tests are Ruby and run in the same job.
 #
 # Migrations are applied to an empty local D1 and then applied again: a file that
 # cannot run from scratch, or that is not idempotent, is a restore that will not
@@ -40,6 +41,9 @@ on:
       - tooling/scripts/check-migration-numbers.mjs
       - tooling/scripts/check-ops-budgets.mjs
       - tooling/scripts/tests/*.test.mjs
+      - tooling/scripts/publish-managed-catalog.rb
+      - tooling/scripts/write-dedirock-hy2-catalog-sources.rb
+      - tooling/scripts/tests/publish-managed-catalog.test.rb
       - .github/workflows/services-ci.yml
   # Every branch, not just the default one. This repository is a fork, and no
   # `pull_request` event has ever produced a run here — PR #1 merged without one.
@@ -60,6 +64,9 @@ on:
       - tooling/scripts/check-migration-numbers.mjs
       - tooling/scripts/check-ops-budgets.mjs
       - tooling/scripts/tests/*.test.mjs
+      - tooling/scripts/publish-managed-catalog.rb
+      - tooling/scripts/write-dedirock-hy2-catalog-sources.rb
+      - tooling/scripts/tests/publish-managed-catalog.test.rb
       - .github/workflows/services-ci.yml
 
 permissions:
@@ -190,6 +197,9 @@ jobs:
         # The glob is every *.test.mjs so a future script test is covered
         # without editing this step.
         run: node --test "tooling/scripts/tests/*.test.mjs"
+
+      - name: Catalog publisher tests
+        run: ruby tooling/scripts/tests/publish-managed-catalog.test.rb
 
       - name: Build the console
         # npm run build ends in check-budgets.mjs, so a bundle that blows the
