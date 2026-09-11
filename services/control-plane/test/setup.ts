@@ -41,6 +41,7 @@ beforeEach(async () => {
   await env.DB.prepare('DELETE FROM connection_events').run();
   await env.DB.prepare('DELETE FROM ops_flatten_cursor').run();
   await env.DB.prepare('DELETE FROM ops_connection_daily').run();
+  await env.DB.prepare('DELETE FROM ops_daily_slo').run();
   await env.DB.prepare('DELETE FROM traffic_destination_daily').run();
   await env.DB.prepare('DELETE FROM ops_traffic_segments').run();
   await env.DB.prepare('DELETE FROM service_usage_daily').run();

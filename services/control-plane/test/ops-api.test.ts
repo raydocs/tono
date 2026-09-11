@@ -898,6 +898,7 @@ describe('ops v1 api', () => {
       'POST /api/v1/ops/months/{month}/close',
       'GET /api/v1/ops/months/{month}/export.csv',
       'GET /api/v1/ops/fx',
+      'GET /api/v1/ops/slo',
     ];
     expect([...OPS_V1_ROUTES].sort()).toEqual([...tested].sort());
   });

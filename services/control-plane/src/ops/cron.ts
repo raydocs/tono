@@ -16,6 +16,7 @@ import { rollupDirectCandidates30d } from './candidates-rollup';
 import { planAndSendAlerts, runVerdictPass } from './verdict-run';
 import { retainFollowups } from './handlers/followups';
 import { fetchAndStoreFxRates } from './fx';
+import { rollupDailySlo } from './slo-rollup';
 
 const DAY = 86_400;
 const HOUR = 3_600;
@@ -194,6 +195,7 @@ async function runRetention(db: D1Database, nowSec: number): Promise<void> {
   await retainHomeLineUsage(db, nowSec, 400, RETAIN_LIMIT);
   await retainClientVersionDaily(db, nowSec, 400, RETAIN_LIMIT);
   await retainLimited(db, 'ops_incident_events', 'at', nowSec - 180 * DAY);
+  await retainLimited(db, 'ops_daily_slo', 'day_at', nowSec - 400 * DAY);
   await retainLimited(db, 'ops_node_jobs', 'created_at', nowSec - 90 * DAY);
   await retainLimited(db, 'node_traffic_cycle_samples', 'at', nowSec - 60 * DAY);
   await retainFollowups(db, nowSec, RETAIN_LIMIT);
@@ -242,6 +244,7 @@ export async function runOpsCron(e: Env, nowSec: number): Promise<OpsCronReport>
     await rollupConnectionDaily(e.DB, yesterday);
     await rollupClientVersionsDaily(e.DB, yesterday, ranToday);
     await rollupDirectCandidates30d(e.DB, nowSec).catch((error) => console.error('ops cron: direct-candidate rollup failed', error));
+    await rollupDailySlo(e.DB, yesterday);
     await markRun(e.DB, 'daily', nowSec);
     return { ran: true };
   });

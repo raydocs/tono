@@ -101,6 +101,7 @@
 |---|---|
 | `GET system/health` | 可选 `coverage`：`CoverageDto`（`nodesListed`；`nodesSweptFresh` = 目录节点大陆扫描行 ≤26h；`nodesWithAgent` = 目录节点 agent 样本 ≤15min；`customersActive`；`customersReportedFresh` = `ops_customer_status.last_seen_at` ≤40min；`asOfSec`）。不改变 `ok` |
 | `POST replay` | `ReplayDto { rulesVersion, items: ReplayRowDto[], skipped, updatedAt }`。Body `{ since, until?, node? }`（unix 秒）。只读：用当前 `VERDICT_RULES_VERSION` 重判 `ops_node_status_history.evidence_json`，不走迟滞。上限 2000 行；缺证据 / 截断计入 `skipped`。`ReplayRowDto { at, node, wasVerdict, nowVerdict, wouldOpenKind, wouldOpenSeverity, differs }` |
+| `GET slo` | `SloResponseDto { items: SloRowDto[], summary: SloSummaryDto, nextCursor, total, updatedAt }`。Query `?range=7d|30d&platform&carrier&node`。`SloRowDto { dayAt, platform, carrier, node, attempts, successes, p50Ms, verifiedOutageMin, unmeasuredMin, rulesVersion }`，`summary { successRate, p50Ms, verifiedOutageMin, unmeasuredMin, coverage }`。 |
 
 ### 部门 B
 

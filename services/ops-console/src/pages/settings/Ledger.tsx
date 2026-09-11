@@ -22,6 +22,7 @@ import {
 import { useResource } from '@/lib/use-resource';
 import { LedgerDrawer } from './LedgerDrawer';
 import { LedgerRecon } from './LedgerRecon';
+import { LedgerSlo } from './LedgerSlo';
 import { LedgerTable } from './LedgerTable';
 import { Toolbar } from './form';
 import { useWrite } from './use-write';
@@ -130,6 +131,9 @@ export function Ledger() {
           </Section>
           <Section title={words.recon}>
             <LedgerRecon summary={month0} />
+          </Section>
+          <Section title={words.slo}>
+            <LedgerSlo />
           </Section>
         </>
       )}

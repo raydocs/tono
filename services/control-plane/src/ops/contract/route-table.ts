@@ -47,6 +47,7 @@ import {
 import { assertAuditList } from './audit';
 import { assertSystemHealth } from './system';
 import { assertFxRate, assertLedgerEntryList, assertMonthSummary } from './ledger';
+import { assertSloResponse } from './slo';
 
 export const assertNodeSummaryList = (value: unknown) => assertList(value, assertNodeSummary);
 export const assertNodeHistoryList = (value: unknown) => assertList(value, assertNodeHistoryEntry);
@@ -121,6 +122,7 @@ export const NAMED_CHECKERS = {
   assertLedgerEntryList,
   assertMonthSummary,
   assertFxRate,
+  assertSloResponse,
 } as const;
 
 export const CHECKER_BY_NAME = NAMED_CHECKERS;
@@ -181,6 +183,7 @@ export const GET_ROUTE_TABLE: readonly GetRouteBinding[] = [
 
   // dept:a
   // append your entries inside your block
+  { route: 'GET /api/v1/ops/slo', checker: 'assertSloResponse' },
 
   // dept:b
   // append your entries inside your block
