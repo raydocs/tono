@@ -1305,6 +1305,7 @@ export interface TranslationResources {
         switchRoute: string
         technicalDetails: string
         total: string
+        tryBackupChannel: string
         tryBadge: string
         unknownStage: string
         upload: {

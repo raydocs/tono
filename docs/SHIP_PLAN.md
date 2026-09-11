@@ -37,11 +37,12 @@
 - **2026-09-11：** 杭州阿里云（非移动）打东京/Dedirock Reality dest SNI，拿到微软 `r.bing.com` 证书。出口没挂。「移动用不了」要用移动家宽测；东京 hy2 仍进不来，大陆 hy2 备用目前是 Dedirock。Dedirock 手工 hy2 原先是共享口令，目录 UUID 登不上；本分支改为 HTTP 鉴权吃全部 VLESS UUID。
 - **0.0.73 发布说明草稿**已写在 `apps/macos/release-notes/build73.md` 与 `apps/windows/release-notes/0.0.73.md`（含中文）：**本版备用通道仅手动。** 源码版本仍是 **0.0.72**。G1–G3 证据齐之前禁止升号、禁止改 appcast / `windows-updates`。
 - **G3.1 Failed 日记：** 两端仪表盘在日记为 Failed 时提示「更新未完成，请手动断开后重装」；文件留下。真机 G3.3 之前仍不算过门。
+- **G2 手选备用通道：** 握手 eof / `CORE_EXIT_UNREACHABLE` 时，失败卡片在目录有同城 ` · hy2` 时提供「试用备用通道」；用户点击才切到 hy2 并重试。G2.8 自动切换仍关。生产目录仍不塞块。
 
 **还没有的（这一发要补）**
 
 - 客户端准入 hy2：Windows `admit_node` / `proxy_endpoint_of` 与 macOS `validatedOwnedNode` / Helper UDP 放行在本分支落地；合进 `main` 之前 App 仍吃不进托管 hy2 块。macOS `ConfigParser` 的 `hy2://` 仍是手工 URL。
-- 连接失败只换下一座城市（macOS `rotateCatalogExitAfterConnectFailure`），不换同一座城市的备用传输。自动切换（G2.8）不做，直到家宽三网证明。
+- 连接失败只换下一座城市（macOS `rotateCatalogExitAfterConnectFailure`），不自动换同一座城市的备用传输。G2.8 自动切换不做，直到家宽三网证明。失败卡片已提供手选「试用备用通道」。
 - Windows 更新日记：`prepare` 停在 `UpdatePrepared`；所有者按相位推进；`commit_verified_recovery` 才允许删日记。`--replace-runtime` 写 `InstallStarted`（App 不再猜）。真机 G3.3 之前不算过门。
 - 客户更新源：`services/control-plane/public/appcast.xml` 0.0.67；`public/windows/latest.json` 0.0.34。
 

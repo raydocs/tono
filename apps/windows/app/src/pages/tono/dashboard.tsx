@@ -1001,6 +1001,7 @@ const DashboardPage = () => {
         <ConnectProgressCard
           uiState={uiState}
           protectionConfirmed={protectionConfirmed}
+          selectedServer={status?.selectedServer}
           onRefreshStatus={mutateTonoStatus}
           onChooseRoute={() => navigate('/servers')}
         />

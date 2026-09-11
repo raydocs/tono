@@ -2,11 +2,15 @@ import { useLockFn } from 'ahooks'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { tonoConnectProgressQueryKey } from '@/hooks/use-tono'
+import {
+  tonoConnectProgressQueryKey,
+  tonoServersQueryKey,
+} from '@/hooks/use-tono'
 import { showNotice } from '@/services/notice-service'
 import { useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
 import {
+  connectErrorSuggestsBackupChannel,
   describeTonoActionError,
   formatTonoActionError,
   isEncryptedDnsFailure,
@@ -16,6 +20,8 @@ import {
   tonoConnectProgress,
   tonoDiagnosticsReport,
   tonoRetryNow,
+  tonoSelectServer,
+  tonoServers,
   tonoUploadDiagnostics,
   type TonoConnectStep,
   type TonoUiState,
@@ -27,6 +33,8 @@ import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
 import { TonoConfirmDialog } from '@/tono-ui/TonoAccountCard'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 import { useReleaseProtection } from '@/tono-ui/useReleaseProtection'
+
+import { backupChannelName } from './node-meta'
 
 /**
  * The connect-progress card (Mac Build 29 parity): the eight FSM stages with
@@ -138,6 +146,7 @@ const StepIcon = ({ state }: { state: TonoConnectStep['state'] }) => {
 interface ConnectProgressCardProps {
   uiState: TonoUiState
   protectionConfirmed?: boolean
+  selectedServer?: string | null
   onRefreshStatus: () => Promise<unknown>
   onChooseRoute?: () => void
 }
@@ -154,6 +163,7 @@ type UploadPhase = 'idle' | 'confirming' | 'uploading' | 'sent'
 export const ConnectProgressCard = ({
   uiState,
   protectionConfirmed = false,
+  selectedServer = null,
   onRefreshStatus,
   onChooseRoute,
 }: ConnectProgressCardProps) => {
@@ -163,6 +173,11 @@ export const ConnectProgressCard = ({
 
   const active = uiState === 'connecting' || uiState === 'protectedOffline'
   const progress = useConnectProgress(active)
+  const { data: servers } = useQuery({
+    queryKey: tonoServersQueryKey,
+    queryFn: tonoServers,
+    enabled: uiState === 'protectedOffline',
+  })
 
   const [retryError, setRetryError] = useState<string | null>(null)
   const [retrying, setRetrying] = useState(false)
@@ -186,6 +201,30 @@ export const ConnectProgressCard = ({
     setRetrying(true)
     setRetryError(null)
     try {
+      await tonoRetryNow()
+      await onRefreshStatus()
+    } catch (error) {
+      setRetryError(formatTonoActionError(error, t))
+    } finally {
+      setRetrying(false)
+    }
+  })
+
+  const hy2Sibling = backupChannelName(
+    selectedServer,
+    (servers ?? []).map((server) => server.name),
+  )
+  const showBackupAction =
+    uiState === 'protectedOffline' &&
+    hy2Sibling != null &&
+    connectErrorSuggestsBackupChannel(progress?.error)
+
+  const handleTryBackupChannel = useLockFn(async () => {
+    if (!hy2Sibling) return
+    setRetrying(true)
+    setRetryError(null)
+    try {
+      await tonoSelectServer(hy2Sibling)
       await tonoRetryNow()
       await onRefreshStatus()
     } catch (error) {
@@ -553,6 +592,30 @@ export const ConnectProgressCard = ({
             )}
           </div>
         )}
+      {showBackupAction && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            marginTop: 14,
+          }}
+        >
+          <button
+            type="button"
+            className="tono-button tono-action"
+            data-testid="tono-try-backup-channel"
+            onClick={handleTryBackupChannel}
+            disabled={retrying}
+            style={{
+              padding: '7px 13px',
+              fontSize: 12,
+            }}
+          >
+            {retrying ? '…' : t('tono.progress.tryBackupChannel')}
+          </button>
+        </div>
+      )}
       {retryError && (
         <div
           role="alert"

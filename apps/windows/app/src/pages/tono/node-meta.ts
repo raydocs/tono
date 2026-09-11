@@ -22,6 +22,20 @@ export const catalogBaseName = (wireName: string) =>
     ? wireName.slice(0, -HY2_NAME_SUFFIX.length)
     : wireName
 
+/**
+ * Same-city hy2 sibling the user can pick by hand. Null when the selection
+ * is already hy2 or the catalog has no ` · hy2` row for this city.
+ * G2.8 auto-switch stays off; this only names the row the failure card offers.
+ */
+export const backupChannelName = (
+  selected: string | null | undefined,
+  serverNames: readonly string[],
+): string | null => {
+  if (!selected || isHy2CatalogName(selected)) return null
+  const hy2 = `${catalogBaseName(selected)}${HY2_NAME_SUFFIX}`
+  return serverNames.includes(hy2) ? hy2 : null
+}
+
 export const nodeDisplayName = (wireName: string) => {
   const base = catalogBaseName(wireName)
   return NODE_DISPLAY_NAMES[base] ?? base

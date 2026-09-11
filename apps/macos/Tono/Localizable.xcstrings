@@ -12,6 +12,16 @@
         }
       }
     },
+    "Try backup channel": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "试用备用通道"
+          }
+        }
+      }
+    },
     "Connected means protected.": {
       "localizations": {
         "zh-Hans": {

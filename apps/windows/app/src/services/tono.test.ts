@@ -9,6 +9,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: listenMock }))
 
 import {
+  connectErrorSuggestsBackupChannel,
   connectErrorSuggestsServerSwitch,
   connectRejectionNeedsServerChoice,
   describeTonoActionError,
@@ -279,6 +280,32 @@ describe('connectErrorSuggestsServerSwitch', () => {
         (key) => `translated:${key}`,
       ),
     ).toBe('translated:tono.dashboard.errors.browserDnsPreflight')
+  })
+})
+
+describe('connectErrorSuggestsBackupChannel', () => {
+  it('offers the backup channel for handshake eof and unreachable exits', () => {
+    for (const error of [
+      new Error(
+        'TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof [CORE_EXIT_UNREACHABLE]',
+      ),
+      new Error('CORE_EXIT_UNREACHABLE: dial timeout'),
+      new Error('TONO_NODE_OR_CORE_UNREACHABLE: all probes failed'),
+      'this server is currently unavailable (network blocked)',
+    ]) {
+      expect(connectErrorSuggestsBackupChannel(error)).toBe(true)
+    }
+  })
+
+  it('does not offer the backup channel for service, account, or DNS failures', () => {
+    for (const error of [
+      new Error('TONO_SERVICE_BUSY: repair pending'),
+      new Error('not signed in'),
+      new Error('dns probe failed: exit refused'),
+      undefined,
+    ]) {
+      expect(connectErrorSuggestsBackupChannel(error)).toBe(false)
+    }
   })
 })
 

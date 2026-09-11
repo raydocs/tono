@@ -13,7 +13,10 @@ import { initReactI18next } from 'react-i18next'
 import { SWRConfig } from 'swr'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { tonoConnectProgressQueryKey } from '@/hooks/use-tono'
+import {
+  tonoConnectProgressQueryKey,
+  tonoServersQueryKey,
+} from '@/hooks/use-tono'
 import enShared from '@/locales/en/shared.json'
 import enTono from '@/locales/en/tono.json'
 import { removeCacheData } from '@/services/query-client'
@@ -21,6 +24,7 @@ import type {
   TonoConnectProgress,
   TonoConnectStep,
   TonoDiagnosticsReport,
+  TonoServer,
 } from '@/services/tono'
 
 const {
@@ -29,6 +33,8 @@ const {
   tonoDisconnectMock,
   tonoDiagnosticsReportMock,
   tonoUploadDiagnosticsMock,
+  tonoServersMock,
+  tonoSelectServerMock,
   subscribeTonoStatusMock,
   noticeSuccess,
   noticeError,
@@ -38,6 +44,8 @@ const {
   tonoDisconnectMock: vi.fn(),
   tonoDiagnosticsReportMock: vi.fn(),
   tonoUploadDiagnosticsMock: vi.fn(),
+  tonoServersMock: vi.fn(),
+  tonoSelectServerMock: vi.fn(),
   subscribeTonoStatusMock: vi.fn((_handler: unknown) => () => {}),
   noticeSuccess: vi.fn(),
   noticeError: vi.fn(),
@@ -53,6 +61,8 @@ vi.mock('@/services/tono', async (importOriginal) => ({
   tonoDisconnect: tonoDisconnectMock,
   tonoDiagnosticsReport: tonoDiagnosticsReportMock,
   tonoUploadDiagnostics: tonoUploadDiagnosticsMock,
+  tonoServers: tonoServersMock,
+  tonoSelectServer: tonoSelectServerMock,
   subscribeTonoStatus: subscribeTonoStatusMock,
   TONO_STATUS_EVENT: 'tono://status',
 }))
@@ -168,6 +178,8 @@ beforeEach(() => {
     referenceCode: 'TON-4F2K-9QX1',
     receivedAt: 1712345678,
   })
+  tonoServersMock.mockReset().mockResolvedValue([])
+  tonoSelectServerMock.mockReset().mockResolvedValue(undefined)
   subscribeTonoStatusMock.mockReset()
   subscribeTonoStatusMock.mockImplementation(() => () => {})
   noticeSuccess.mockReset()
@@ -177,6 +189,7 @@ beforeEach(() => {
 afterEach(async () => {
   cleanup()
   await removeCacheData(tonoConnectProgressQueryKey)
+  await removeCacheData(tonoServersQueryKey)
 })
 
 describe('ConnectProgressCard', () => {
@@ -635,5 +648,88 @@ describe('ConnectProgressCard', () => {
         ).toBeDefined()
       },
     )
+  })
+
+  describe('manual backup channel', () => {
+    const tokyo = 'Tokyo · Sakura'
+    const tokyoHy2 = 'Tokyo · Sakura · hy2'
+    const handshakeError =
+      'TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof [CORE_EXIT_UNREACHABLE]'
+
+    const catalogWithHy2 = (): TonoServer[] => [
+      {
+        name: tokyo,
+        server: '203.0.113.10',
+        port: 443,
+        selected: true,
+        available: true,
+      },
+      {
+        name: tokyoHy2,
+        server: '203.0.113.10',
+        port: 443,
+        selected: false,
+        available: true,
+      },
+    ]
+
+    it('offers Try backup channel on handshake eof when the city has a hy2 sibling', async () => {
+      tonoServersMock.mockResolvedValue(catalogWithHy2())
+      tonoConnectProgressMock.mockResolvedValue(
+        makeProgress({ error: handshakeError }),
+      )
+
+      renderCard({
+        uiState: 'protectedOffline',
+        selectedServer: tokyo,
+      })
+
+      expect(
+        await screen.findByRole('button', { name: 'Try backup channel' }),
+      ).toBeDefined()
+      expect(screen.getByTestId('tono-try-backup-channel').textContent).not.toMatch(
+        /automatic/i,
+      )
+      expect(tonoSelectServerMock).not.toHaveBeenCalled()
+      expect(tonoRetryNowMock).not.toHaveBeenCalled()
+    })
+
+    it('selects the hy2 sibling and retries only after the user clicks', async () => {
+      tonoServersMock.mockResolvedValue(catalogWithHy2())
+      tonoConnectProgressMock.mockResolvedValue(
+        makeProgress({ error: handshakeError }),
+      )
+
+      const { onRefreshStatus } = renderCard({
+        uiState: 'protectedOffline',
+        selectedServer: tokyo,
+      })
+
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Try backup channel' }),
+      )
+
+      await waitFor(() =>
+        expect(tonoSelectServerMock).toHaveBeenCalledWith(tokyoHy2),
+      )
+      await waitFor(() => expect(tonoRetryNowMock).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(onRefreshStatus).toHaveBeenCalled())
+    })
+
+    it('does not offer the backup channel for a DNS failure even when hy2 exists', async () => {
+      tonoServersMock.mockResolvedValue(catalogWithHy2())
+      tonoConnectProgressMock.mockResolvedValue(
+        makeProgress({ error: 'dns probe failed: exit refused' }),
+      )
+
+      renderCard({
+        uiState: 'protectedOffline',
+        selectedServer: tokyo,
+      })
+
+      await screen.findByRole('button', { name: 'Restore Normal Internet' })
+      expect(screen.queryByTestId('tono-try-backup-channel')).toBeNull()
+      expect(tonoSelectServerMock).not.toHaveBeenCalled()
+    })
   })
 })

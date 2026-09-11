@@ -138,6 +138,22 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
         return String(rawName.dropLast(hy2NameSuffix.count))
     }
 
+    static func isHy2CatalogName(_ rawName: String) -> Bool {
+        rawName.hasSuffix(hy2NameSuffix)
+    }
+
+    /// Same-city hy2 sibling the user can pick by hand. Nil when the
+    /// selection is already hy2 or the catalog has no ` · hy2` row.
+    /// G2.8 auto-switch stays off; the failure card only names this row.
+    static func backupChannelName(
+        selected: String,
+        catalogNames: Set<String>
+    ) -> String? {
+        guard !isHy2CatalogName(selected) else { return nil }
+        let hy2 = catalogBaseName(for: selected) + hy2NameSuffix
+        return catalogNames.contains(hy2) ? hy2 : nil
+    }
+
     static func displayName(for rawName: String) -> String {
         let base = catalogBaseName(for: rawName)
         return cityNames[base] ?? base

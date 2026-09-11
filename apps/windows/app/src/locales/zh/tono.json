@@ -300,6 +300,7 @@
     "completedCount": "已完成 {{count}} 项",
     "technicalDetails": "技术详情",
     "switchRoute": "选择其他线路",
+    "tryBackupChannel": "试用备用通道",
     "retryIn": "第 {{n}} 次重试将于 {{seconds}} 秒后发起",
     "retrying": "正在重试…",
     "retryNow": "立即重试",

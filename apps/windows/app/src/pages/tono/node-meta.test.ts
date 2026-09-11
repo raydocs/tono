@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  backupChannelName,
   catalogBaseName,
   isHy2CatalogName,
   nodeCityLabel,
@@ -87,6 +88,23 @@ describe('nodeCityParts', () => {
     expect(nodeCityLabel('Tokyo · Sakura', (key) => `t:${key}`)).toBe(
       't:tono.cities.tokyo',
     )
+  })
+})
+
+describe('backupChannelName', () => {
+  it('names the same-city hy2 sibling only when that row is in the catalog', () => {
+    const names = [
+      'Tokyo · Sakura',
+      'Tokyo · Sakura · hy2',
+      'Los Angeles · Sunset',
+    ]
+    expect(backupChannelName('Tokyo · Sakura', names)).toBe(
+      'Tokyo · Sakura · hy2',
+    )
+    expect(backupChannelName('Tokyo · Sakura · hy2', names)).toBeNull()
+    expect(backupChannelName('Los Angeles · Sunset', names)).toBeNull()
+    expect(backupChannelName(null, names)).toBeNull()
+    expect(backupChannelName('Tokyo · Sakura', ['Tokyo · Sakura'])).toBeNull()
   })
 })
 

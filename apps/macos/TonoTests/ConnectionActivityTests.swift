@@ -60,6 +60,19 @@ final class ConnectionActivityTests: XCTestCase {
         XCTAssertEqual(hy2.displayName, "Tokyo · Sakura")
         XCTAssertEqual(hy2.protocolType, String(localized: "Backup channel"))
         XCTAssertNotEqual(hy2.protocolType, "Hysteria2")
+        let names: Set<String> = [
+            "Tokyo · Sakura",
+            "Tokyo · Sakura · hy2",
+            "Los Angeles · Sunset",
+        ]
+        XCTAssertEqual(
+            ProxyNode.backupChannelName(selected: "Tokyo · Sakura", catalogNames: names),
+            "Tokyo · Sakura · hy2"
+        )
+        XCTAssertNil(ProxyNode.backupChannelName(selected: "Tokyo · Sakura · hy2", catalogNames: names))
+        XCTAssertNil(ProxyNode.backupChannelName(selected: "Los Angeles · Sunset", catalogNames: names))
+        XCTAssertTrue(ProxyNode.isHy2CatalogName("Tokyo · Sakura · hy2"))
+        XCTAssertFalse(ProxyNode.isHy2CatalogName("Tokyo · Sakura"))
     }
 
     private func fixture(

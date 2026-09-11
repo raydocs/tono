@@ -796,6 +796,7 @@ export const translationKeys = [
   'tono.progress.completedCount',
   'tono.progress.technicalDetails',
   'tono.progress.switchRoute',
+  'tono.progress.tryBackupChannel',
   'tono.progress.retryIn',
   'tono.progress.retrying',
   'tono.progress.retryNow',

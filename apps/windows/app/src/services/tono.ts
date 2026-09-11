@@ -351,6 +351,24 @@ export const connectErrorSuggestsServerSwitch = (error: unknown): boolean => {
   )
 }
 
+/**
+ * True when the same TLS/exit failure is worth trying the city's hy2 sibling.
+ * Handshake eof is the mobile-DPI case: another TCP city will not help, the
+ * backup channel might. Does not turn auto-switch on (G2.8 stays off).
+ */
+export const connectErrorSuggestsBackupChannel = (error: unknown): boolean => {
+  const raw = error instanceof Error ? error.message : String(error ?? '')
+  if (!raw) return false
+  if (/tls handshake eof/i.test(raw)) return true
+  if (raw.includes('CORE_EXIT_UNREACHABLE')) return true
+  if (raw.includes('TONO_NODE_OR_CORE_UNREACHABLE')) return true
+  const lower = raw.toLowerCase()
+  return (
+    lower.includes('node or core unreachable') ||
+    lower.includes('network blocked')
+  )
+}
+
 const call = <T>(command: string, args?: Record<string, unknown>): Promise<T> =>
   invoke<T>(command, args).catch((error: unknown) => {
     throw toError(error)

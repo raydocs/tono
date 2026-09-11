@@ -300,6 +300,7 @@
     "completedCount": "{{count}} completed",
     "technicalDetails": "Technical details",
     "switchRoute": "Choose another route",
+    "tryBackupChannel": "Try backup channel",
     "retryIn": "Retry {{n}} in {{seconds}}s",
     "retrying": "Retrying…",
     "retryNow": "Retry Now",
