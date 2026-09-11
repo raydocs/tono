@@ -112,3 +112,50 @@ impl StageFailure {
         StageFailure::Error(map_wfp_engine_error(&text).unwrap_or(text))
     }
 }
+
+/// First `TONO_*` / `CORE_*` token in a diagnostic string. The periodic
+/// telemetry window copies this onto `connectFail.code` so the customer
+/// timeline has a stable code, not just the prose error.
+pub(super) fn stable_error_code(raw: &str) -> Option<&str> {
+    for (index, _) in raw.match_indices(|ch: char| ch == 'T' || ch == 'C') {
+        let slice = &raw[index..];
+        let prefix_len = if slice.starts_with("TONO_") {
+            5
+        } else if slice.starts_with("CORE_") {
+            5
+        } else {
+            continue;
+        };
+        let rest = &slice[prefix_len..];
+        let extra = rest
+            .chars()
+            .take_while(|ch| matches!(ch, 'A'..='Z' | '0'..='9' | '_'))
+            .map(char::len_utf8)
+            .sum::<usize>();
+        if extra == 0 {
+            continue;
+        }
+        return Some(&slice[..prefix_len + extra]);
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::stable_error_code;
+
+    #[test]
+    fn stable_error_code_picks_the_first_tono_or_core_token() {
+        assert_eq!(
+            stable_error_code(
+                "TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof [CORE_EXIT_UNREACHABLE]"
+            ),
+            Some("TONO_NODE_OR_CORE_UNREACHABLE")
+        );
+        assert_eq!(
+            stable_error_code("dial failed CORE_EXIT_UNREACHABLE"),
+            Some("CORE_EXIT_UNREACHABLE")
+        );
+        assert_eq!(stable_error_code("tls handshake eof"), None);
+    }
+}

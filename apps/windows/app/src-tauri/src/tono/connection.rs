@@ -475,6 +475,7 @@ async fn fail_connect(state: &Arc<TonoState>, app: &AppHandle, err: String) -> S
         error: err.clone(),
         action,
         transport,
+        code: failure::stable_error_code(&err).map(str::to_owned),
     });
     if plan.mark_armed {
         state

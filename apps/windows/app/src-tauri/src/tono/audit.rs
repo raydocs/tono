@@ -113,6 +113,10 @@ pub enum AuditEvent {
         action: &'static str,
         #[serde(skip_serializing_if = "Option::is_none")]
         transport: Option<&'static str>,
+        /// First `TONO_*` / `CORE_*` token, so the customer timeline has a
+        /// stable code even before the next periodic window upload.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        code: Option<String>,
     },
     ConnectOk {
         node: String,
@@ -292,11 +296,12 @@ impl AuditEvent {
                 node: redact(&node),
                 transport,
             },
-            ConnectFail { stage, error, action, transport } => ConnectFail {
+            ConnectFail { stage, error, action, transport, code } => ConnectFail {
                 stage,
                 error: redact(&error),
                 action,
                 transport,
+                code,
             },
             ConnectOk { node, elapsed_ms, transport } => ConnectOk {
                 node: redact(&node),
@@ -913,6 +918,7 @@ mod tests {
                 error: "token=abc".to_string(),
                 action: "fullRelease",
                 transport: None,
+                code: None,
             },
             AuditEvent::ConnectOk {
                 node: "n token=abc".to_string(),
