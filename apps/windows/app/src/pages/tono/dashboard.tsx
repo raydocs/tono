@@ -916,10 +916,10 @@ const DashboardPage = () => {
           <GlassCard
             radius="var(--tono-radius-card)"
             padding={14}
-            role="status"
             style={{ width: 520, maxWidth: '100%' }}
           >
             <p
+              role="status"
               style={{
                 margin: '0 0 10px',
                 fontSize: 12,
