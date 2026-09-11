@@ -112,8 +112,8 @@
 
 **G1.1 用新包复测插件命名空间** — 老板 · S
 
-- 背景：源码已修（`PluginBuilder::new("tono-plugin-core")`），09-08 实机 FAIL 是旧包。`docs/WINDOWS_0_0_72_DEVICE_ACCEPTANCE.md` 仍是 qualification incomplete。
-- 步骤：按该文档 §3 打候选包；断开状态下从当前已装版升级；连接；看仪表盘速率与 Activity 是否离开 controller retry。
+- 背景：源码已修（`PluginBuilder::new("tono-plugin-core")`），09-08 实机 FAIL 是旧包。`docs/WINDOWS_0_0_72_DEVICE_ACCEPTANCE.md` 仍是 qualification incomplete。本分支 Encrypted DNS 钉死（含设置页 `DohFlags`）也要打进同一份候选。`windows-candidate.yml` 在本分支改工作流文件时会打一份内部 NSIS（不签名、不推更新源、版本仍 0.0.72）。
+- 步骤：按该文档 §3 打候选包；断开状态下从当前已装版升级；连接；看仪表盘速率与 Activity 是否离开 controller retry。Win10 Encrypted DNS 机也要用这份包过 `securingDNS`。
 - 验收：该文档顶部 Status 改成「插件命名空间实机通过」，记下包哈希。仍 FAIL 则停在这里，不要开始 G2。
 
 **G1.2 健康会话不被瞬态读失败拆掉** — 接 PR #116 · M
