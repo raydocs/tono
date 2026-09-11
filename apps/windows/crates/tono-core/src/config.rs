@@ -1039,7 +1039,13 @@ fn runtime_value(
     // STUN, …). Reject all non-pinned UDP instead: whitelisted WeChat media
     // already matched its pins above, everything else must fail over to TCP
     // rather than leave the machine. Revisit when nodes speak UoT.
-    rules.push("AND,((NETWORK,UDP)),REJECT".to_string());
+    let is_hy2 = nodes
+        .iter()
+        .find(|node| node.name == selected)
+        .is_some_and(|node| node.is_hysteria2());
+    if !is_hy2 {
+        rules.push("AND,((NETWORK,UDP)),REJECT".to_string());
+    }
     rules.push(RULES[RULES.len() - 1].to_string());
     put(
         &mut root,
@@ -2549,6 +2555,40 @@ reality-opts:
                 .map(String::as_str)
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn hysteria2_selected_node_omits_udp_reject_rule() {
+        let yaml = r#"
+name: "Buffalo · Niagara · hy2"
+type: hysteria2
+server: 23.94.79.123
+port: 443
+password: "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d"
+sni: "www.microsoft.com"
+fingerprint: "1e5374a79bdb83b04c3d3c84722c03211d1c941c2de9f92431d2198ba7212cad"
+"#;
+        let hy2_node = admit_node(&serde_yaml_ng::from_str(yaml).unwrap()).unwrap();
+        let nodes = vec![hy2_node];
+        let runtime = build_owned_runtime_with_ports(
+            &nodes,
+            "Buffalo · Niagara · hy2",
+            "test-secret",
+            None,
+            None,
+            None,
+            RuntimePorts::default(),
+        )
+        .unwrap();
+        let value = parsed(&runtime);
+        let rules: Vec<&str> = get(&value, &["rules"])
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|rule| rule.as_str().unwrap())
+            .collect();
+        assert!(!rules.contains(&"AND,((NETWORK,UDP)),REJECT"));
+        assert_eq!(rules, [RULES[0], RULES[1], RULES[2]]);
     }
 
 }

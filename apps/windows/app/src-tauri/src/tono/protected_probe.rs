@@ -10,8 +10,12 @@ use once_cell::sync::Lazy;
 use reqwest::redirect::Policy;
 use tokio::net::UdpSocket;
 
-const PROTECTED_DNS: SocketAddr = SocketAddr::V4(std::net::SocketAddrV4::new(
+pub const PROTECTED_DNS: SocketAddr = SocketAddr::V4(std::net::SocketAddrV4::new(
     Ipv4Addr::new(198, 18, 0, 2),
+    53,
+));
+pub const LOOPBACK_DNS: SocketAddr = SocketAddr::V4(std::net::SocketAddrV4::new(
+    Ipv4Addr::new(127, 0, 0, 1),
     53,
 ));
 const DNS_TIMEOUT: Duration = Duration::from_secs(2);
@@ -262,14 +266,17 @@ fn failed(
     }
 }
 
-pub(crate) async fn query_protected_a(host: &str) -> Result<Ipv4Addr, String> {
+pub(crate) async fn query_dns_endpoint(
+    endpoint: SocketAddr,
+    host: &str,
+) -> Result<Ipv4Addr, String> {
     let id = 0x544f;
     let query = build_dns_a_query(host, id);
     let socket = UdpSocket::bind("0.0.0.0:0")
         .await
         .map_err(|error| format!("dns bind: {error}"))?;
     socket
-        .connect(PROTECTED_DNS)
+        .connect(endpoint)
         .await
         .map_err(|error| format!("dns connect: {error}"))?;
     socket
@@ -286,6 +293,44 @@ pub(crate) async fn query_protected_a(host: &str) -> Result<Ipv4Addr, String> {
         .into_iter()
         .find(|ip| is_fake_ip(IpAddr::V4(*ip)))
         .ok_or_else(|| "protected listener did not return a fake-ip".to_string())
+}
+
+pub(crate) async fn query_protected_a(host: &str) -> Result<Ipv4Addr, String> {
+    let loopback = query_dns_endpoint(LOOPBACK_DNS, host);
+    let tun = query_dns_endpoint(PROTECTED_DNS, host);
+    tokio::pin!(loopback);
+    tokio::pin!(tun);
+    let mut loopback_res = None;
+    let mut tun_res = None;
+    loop {
+        if let Some(Ok(ip)) = loopback_res {
+            return Ok(ip);
+        }
+        if let Some(Ok(ip)) = tun_res {
+            return Ok(ip);
+        }
+        if loopback_res.is_some() && tun_res.is_some() {
+            let last = match (loopback_res.unwrap(), tun_res.unwrap()) {
+                (Err(e1), Err(e2)) => format!("loopback DNS: {e1}; TUN DNS: {e2}"),
+                _ => "dns query failed".to_string(),
+            };
+            return Err(last);
+        }
+        tokio::select! {
+            res = &mut loopback, if loopback_res.is_none() => {
+                if let Ok(ip) = res {
+                    return Ok(ip);
+                }
+                loopback_res = Some(res);
+            }
+            res = &mut tun, if tun_res.is_none() => {
+                if let Ok(ip) = res {
+                    return Ok(ip);
+                }
+                tun_res = Some(res);
+            }
+        }
+    }
 }
 
 async fn probe_one(

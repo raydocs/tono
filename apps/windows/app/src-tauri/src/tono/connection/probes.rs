@@ -373,7 +373,7 @@ pub(super) async fn verify_fake_ip() -> Result<(), String> {
                 logging!(
                     warn,
                     Type::Service,
-                    "Tono: TUN DNS at 198.18.0.2 returned fake-ip before system DNS; Encrypted DNS was likely bypassing the adapter"
+                    "Tono: protected DNS returned fake-ip before system DNS; Encrypted DNS was likely bypassing the adapter"
                 );
                 return Ok(());
             }
@@ -471,7 +471,7 @@ pub(super) fn tun_dns_proves_fake_ip(tun: Result<std::net::Ipv4Addr, &str>) -> b
 }
 
 pub(super) fn fake_ip_verification_error(last: &str) -> String {
-    let tun_dead = last.contains("TUN DNS:");
+    let tun_dead = last.contains("TUN DNS:") || last.contains("loopback DNS:");
     let os_bypassed = last.contains("no fake-ip in") || last.contains("exceeded");
     if os_bypassed && !tun_dead {
         format!(
