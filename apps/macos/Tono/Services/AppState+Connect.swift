@@ -1879,3 +1879,17 @@ enum ManualBackupChannelOffer {
         return protectionBlocked || hasFailureRecord
     }
 }
+
+enum ReleasedConnectFailureActions {
+    /// First-connect handshake eof fully releases protection. Retry must call
+    /// Connect (not protected retry) and still offer another route, even when
+    /// the catalog has no hy2 sibling.
+    static func shouldOfferRetryAndRoute(
+        protectionBlocked: Bool,
+        connecting: Bool,
+        disconnecting: Bool,
+        hasFailureRecord: Bool
+    ) -> Bool {
+        hasFailureRecord && !protectionBlocked && !connecting && !disconnecting
+    }
+}

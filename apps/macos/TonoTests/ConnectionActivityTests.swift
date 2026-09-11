@@ -159,6 +159,30 @@ final class ConnectionActivityTests: XCTestCase {
                 hasFailureRecord: false
             )
         )
+        XCTAssertTrue(
+            ReleasedConnectFailureActions.shouldOfferRetryAndRoute(
+                protectionBlocked: false,
+                connecting: false,
+                disconnecting: false,
+                hasFailureRecord: true
+            )
+        )
+        XCTAssertFalse(
+            ReleasedConnectFailureActions.shouldOfferRetryAndRoute(
+                protectionBlocked: false,
+                connecting: false,
+                disconnecting: false,
+                hasFailureRecord: false
+            )
+        )
+        XCTAssertFalse(
+            ReleasedConnectFailureActions.shouldOfferRetryAndRoute(
+                protectionBlocked: true,
+                connecting: false,
+                disconnecting: false,
+                hasFailureRecord: true
+            )
+        )
         XCTAssertTrue(IdleCatalogSelect.shouldConnect(connected: false, protectionBlocked: false))
         XCTAssertFalse(IdleCatalogSelect.shouldConnect(connected: false, protectionBlocked: true))
         XCTAssertFalse(IdleCatalogSelect.shouldConnect(connected: true, protectionBlocked: false))

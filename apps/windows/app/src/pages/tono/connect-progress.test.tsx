@@ -401,7 +401,40 @@ describe('ConnectProgressCard', () => {
     fireEvent.click(retryButton)
 
     await waitFor(() => expect(tonoRetryNowMock).toHaveBeenCalledTimes(1))
+    expect(tonoConnectMock).not.toHaveBeenCalled()
     await waitFor(() => expect(onRefreshStatus).toHaveBeenCalled())
+  })
+
+  it('offers Retry Now via connect after a released handshake eof', async () => {
+    tonoConnectProgressMock.mockResolvedValue(
+      makeProgress({
+        error:
+          'TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof [CORE_EXIT_UNREACHABLE]',
+      }),
+    )
+    const onChooseRoute = vi.fn()
+    const { onRefreshStatus } = renderCard({
+      uiState: 'notConnected',
+      onChooseRoute,
+    })
+
+    fireEvent.click(await screen.findByTestId('tono-progress-retry'))
+    await waitFor(() => expect(tonoConnectMock).toHaveBeenCalledTimes(1))
+    expect(tonoRetryNowMock).not.toHaveBeenCalled()
+    await waitFor(() => expect(onRefreshStatus).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByTestId('tono-progress-switch-route'))
+    expect(onChooseRoute).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not offer Retry Now on idle Not Connected', async () => {
+    tonoConnectProgressMock.mockResolvedValue(makeProgress({ error: null }))
+
+    renderCard({ uiState: 'notConnected', onChooseRoute: vi.fn() })
+
+    await waitFor(() => expect(tonoConnectProgressMock).toHaveBeenCalled())
+    expect(screen.queryByTestId('tono-progress-retry')).toBeNull()
+    expect(screen.queryByTestId('tono-progress-switch-route')).toBeNull()
   })
 
   it('restores normal internet through the confirm dialog', async () => {

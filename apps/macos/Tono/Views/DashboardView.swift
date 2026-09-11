@@ -672,6 +672,32 @@ private struct ConnectionProgressCard: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
+            } else if ReleasedConnectFailureActions.shouldOfferRetryAndRoute(
+                protectionBlocked: appState.isProtectionBlocked,
+                connecting: appState.isConnecting,
+                disconnecting: appState.isDisconnecting,
+                hasFailureRecord: appState.lastConnectionFailure != nil
+            ) {
+                Button("Retry now") {
+                    appState.connect()
+                }
+                .buttonStyle(GateProminentButtonStyle())
+                .controlSize(.small)
+                .disabled(!appState.isTonoReady || appState.isDisconnecting)
+
+                Button("Choose another route") {
+                    appState.selectedPage = .proxies
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                if appState.shouldOfferManualBackupChannel() {
+                    Button("Try backup channel") {
+                        appState.tryBackupChannelManually()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
             } else if appState.shouldOfferManualBackupChannel() {
                 Button("Try backup channel") {
                     appState.tryBackupChannelManually()
