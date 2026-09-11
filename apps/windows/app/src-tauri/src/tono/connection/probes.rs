@@ -358,51 +358,49 @@ pub fn is_fake_ip(addr: IpAddr) -> bool {
 /// Encrypted DNS / DoH is the common real-machine failure: the system query never reaches
 /// `198.18.0.2` because it left over HTTPS and WFP blocked it. The service pins DoH off and
 /// installs an NRPT catch-all for the session; if that has not taken yet, an explicit query to
-/// the TUN listener is the same path apps will use once NRPT is in force, so it unblocks
-/// connect instead of looping in `securingDNS` for 16 s.
+/// the TUN listener is the same path apps will use once NRPT is in force.
+///
+/// System DNS and TUN race: the first fake-ip wins. Waiting for a 2–5 s system timeout
+/// *then* asking TUN is how Win10 Encrypted DNS turned a live listener into a Proton-unlike
+/// pause, then `securingDNS` auto-fail.
 pub(super) async fn verify_fake_ip() -> Result<(), String> {
     let mut last = String::from("no answer");
     for attempt in 0..VERIFY_ATTEMPTS {
         let lookup_timeout = fake_ip_attempt_timeout(attempt);
         #[cfg(windows)]
-        let lookup = crate::tono::windows_dns::query_a(FAKE_IP_LOOKUP_HOST, lookup_timeout)
-            .await
-            .map(|addrs| addrs.into_iter().map(IpAddr::V4).collect::<Vec<_>>());
-        #[cfg(not(windows))]
-        let lookup = tokio::time::timeout(
-            lookup_timeout,
-            tokio::net::lookup_host((FAKE_IP_LOOKUP_HOST, 443)),
-        )
-        .await
-        .map_err(|_| format!("system DNS lookup exceeded {lookup_timeout:?}"))
-        .and_then(|result| {
-            result
-                .map(|addrs| addrs.map(|addr| addr.ip()).collect::<Vec<_>>())
-                .map_err(|e| e.to_string())
-        });
-
-        match lookup {
-            Ok(addrs) => {
-                if addrs.iter().copied().any(is_fake_ip) {
-                    return Ok(());
-                }
-                last = format!("no fake-ip in {addrs:?}");
+        match verify_fake_ip_windows_attempt(lookup_timeout).await {
+            Ok("tun") => {
+                logging!(
+                    warn,
+                    Type::Service,
+                    "Tono: TUN DNS at 198.18.0.2 returned fake-ip before system DNS; Encrypted DNS was likely bypassing the adapter"
+                );
+                return Ok(());
             }
+            Ok(_) => return Ok(()),
             Err(err) => last = err,
         }
-        #[cfg(windows)]
+        #[cfg(not(windows))]
         {
-            match crate::tono::protected_probe::query_protected_a(FAKE_IP_LOOKUP_HOST).await {
-                Ok(ip) if tun_dns_proves_fake_ip(Ok(ip)) => {
-                    logging!(
-                        warn,
-                        Type::Service,
-                        "Tono: system DNS did not return fake-ip ({last}); TUN DNS at 198.18.0.2 did, so Encrypted DNS was bypassing the adapter"
-                    );
-                    return Ok(());
+            let lookup = tokio::time::timeout(
+                lookup_timeout,
+                tokio::net::lookup_host((FAKE_IP_LOOKUP_HOST, 443)),
+            )
+            .await
+            .map_err(|_| format!("system DNS lookup exceeded {lookup_timeout:?}"))
+            .and_then(|result| {
+                result
+                    .map(|addrs| addrs.map(|addr| addr.ip()).collect::<Vec<_>>())
+                    .map_err(|e| e.to_string())
+            });
+            match lookup {
+                Ok(addrs) => {
+                    if addrs.iter().copied().any(is_fake_ip) {
+                        return Ok(());
+                    }
+                    last = format!("no fake-ip in {addrs:?}");
                 }
-                Ok(ip) => last = format!("{last}; TUN DNS returned {ip}, not fake-ip"),
-                Err(err) => last = format!("{last}; TUN DNS: {err}"),
+                Err(err) => last = err,
             }
         }
         if attempt + 1 < VERIFY_ATTEMPTS {
@@ -410,6 +408,62 @@ pub(super) async fn verify_fake_ip() -> Result<(), String> {
         }
     }
     Err(fake_ip_verification_error(&last))
+}
+
+/// First fake-ip from either source wins. `None` = still waiting.
+pub(super) fn fake_ip_race_state(
+    system: Option<&Result<Vec<std::net::Ipv4Addr>, String>>,
+    tun: Option<&Result<std::net::Ipv4Addr, String>>,
+) -> Option<Result<&'static str, String>> {
+    if let Some(Ok(addrs)) = system {
+        if addrs.iter().copied().any(|ip| is_fake_ip(IpAddr::V4(ip))) {
+            return Some(Ok("system"));
+        }
+    }
+    if let Some(Ok(ip)) = tun {
+        if is_fake_ip(IpAddr::V4(*ip)) {
+            return Some(Ok("tun"));
+        }
+    }
+    match (system, tun) {
+        (Some(system), Some(tun)) => {
+            let mut last = match system {
+                Ok(addrs) => format!("no fake-ip in {addrs:?}"),
+                Err(err) => err.clone(),
+            };
+            last = match tun {
+                Ok(ip) => format!("{last}; TUN DNS returned {ip}, not fake-ip"),
+                Err(err) => format!("{last}; TUN DNS: {err}"),
+            };
+            Some(Err(last))
+        }
+        _ => None,
+    }
+}
+
+#[cfg(windows)]
+async fn verify_fake_ip_windows_attempt(
+    lookup_timeout: Duration,
+) -> Result<&'static str, String> {
+    let system = crate::tono::windows_dns::query_a(FAKE_IP_LOOKUP_HOST, lookup_timeout);
+    let tun = crate::tono::protected_probe::query_protected_a(FAKE_IP_LOOKUP_HOST);
+    tokio::pin!(system);
+    tokio::pin!(tun);
+    let mut system_res = None;
+    let mut tun_res = None;
+    loop {
+        if let Some(outcome) = fake_ip_race_state(system_res.as_ref(), tun_res.as_ref()) {
+            return outcome;
+        }
+        tokio::select! {
+            res = &mut system, if system_res.is_none() => {
+                system_res = Some(res);
+            }
+            res = &mut tun, if tun_res.is_none() => {
+                tun_res = Some(res);
+            }
+        }
+    }
 }
 
 pub(super) fn tun_dns_proves_fake_ip(tun: Result<std::net::Ipv4Addr, &str>) -> bool {

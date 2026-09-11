@@ -114,7 +114,7 @@ use probes::{
     fake_ip_verification_error, format_tun_probe_failures, tun_probe_stagger, verify_tun_data_plane,
 };
 #[cfg(test)]
-use probes::tun_dns_proves_fake_ip;
+use probes::{fake_ip_race_state, tun_dns_proves_fake_ip};
 pub use probes::{is_fake_ip, test_current_server, verify_lock_retry_window};
 
 pub use disconnect::{disconnect, release_explicit};
@@ -1048,7 +1048,7 @@ mod tests {
         use super::{
             NODE_OR_CORE_UNREACHABLE_PREFIX, TUN_DATA_PLANE_BROKEN_PREFIX, TUN_INGRESS_BROKEN_PREFIX,
             classify_exhausted_data_plane, connect_failure_is_dead_exit, fake_ip_verification_error,
-            tun_dns_proves_fake_ip,
+            fake_ip_race_state, tun_dns_proves_fake_ip,
         };
 
         let tun = "all real TUN probes timed out".to_string();
@@ -1090,6 +1090,27 @@ mod tests {
         assert!(tun_dns_proves_fake_ip(Ok(std::net::Ipv4Addr::new(198, 18, 0, 7))));
         assert!(!tun_dns_proves_fake_ip(Ok(std::net::Ipv4Addr::new(1, 1, 1, 1))));
         assert!(!tun_dns_proves_fake_ip(Err("timeout")));
+
+        let fake = std::net::Ipv4Addr::new(198, 18, 0, 7);
+        let public = std::net::Ipv4Addr::new(1, 1, 1, 1);
+        assert_eq!(
+            fake_ip_race_state(Some(&Ok(vec![fake])), None),
+            Some(Ok("system"))
+        );
+        assert_eq!(
+            fake_ip_race_state(None, Some(&Ok(fake))),
+            Some(Ok("tun"))
+        );
+        assert_eq!(
+            fake_ip_race_state(Some(&Err("exceeded 2s".into())), None),
+            None,
+            "TUN can still prove without waiting out the system timeout"
+        );
+        assert!(
+            fake_ip_race_state(Some(&Ok(vec![public])), Some(&Err("timeout".into())))
+                .unwrap()
+                .is_err()
+        );
     }
 
     #[test]

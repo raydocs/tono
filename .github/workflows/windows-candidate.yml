@@ -5,9 +5,10 @@ on:
   push:
     branches:
       - 'stability/desktop-0.0.72-20260908'
-      # Ship-plan Encrypted DNS candidate for G1.1. Path filter keeps this from
-      # rebuilding on every app commit; touching this file (or windows-core.yml)
-      # is what starts a candidate. Remove the extra branch after G1.1.
+      # Ship-plan Encrypted DNS + connecting-pill candidate for G1.1.
+      # Path filter: touching this file (or windows-core.yml) starts a candidate.
+      # Rebuild 2026-09-11: Connecting… (not Cancel) and TUN/system DNS race.
+      # Remove the extra branch after G1.1.
       - 'cursor/ship-plan-first-publish-d57f'
     paths:
       - .github/workflows/windows-candidate.yml

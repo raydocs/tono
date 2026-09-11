@@ -131,3 +131,5 @@ dry-run：`{"xrayClients":43,"xrayPid":658,"xrayUntouched":true,"dryRun":true}`�
 同日稍后再探（仍只出站、未改杭州业务、未动 `tono-xray`）：杭州 `ss-server` PID 548 仍占 TCP/UDP 443，PID 7129 仍占 TCP/UDP 20000。东京 TCP 40–54ms；SNI `www.bing.com` TLS 1.3 证书仍是微软 `CN=r.bing.com`。东京 hy2 证书 `/opt/tono-hy2/tls/cert.pem` 仍是 `CN=www.microsoft.com` / `DNS:www.microsoft.com`；`tono-xray` PID **285119**；`tono-hy2` active、`tono-hy2-auth` inactive。Dedirock `tono-xray` PID **658**、`tono-hy2-auth` active。杭州经 Dedirock hy2 ping `1.1.1.1:443` **151ms 通**；探测目录已删。
 
 东京不要跑 `--apply`：入站 UDP 仍被商家拦，改鉴权也测不出客户路径。生产目录仍不 PUT hy2 块。家宽移动还没走 Dedirock hy2。
+
+**复检（2026-09-11，本云端美国，无杭州 SSH）：** 东京 / Dedirock TCP 443 通；SNI `www.bing.com` 仍是微软 `CN=r.bing.com`；错误 SNI `www.microsoft.com` 仍是 `tlsv1 alert internal error`。两台 UDP 443 仍超时。hy2 证书 SAN 仍是 provisioner 的 `DNS:www.microsoft.com`；从外网打不到 UDP，握手无法在本云确认。未改国内机、未动 `tono-xray`。
