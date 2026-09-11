@@ -152,6 +152,17 @@ dry-run：`{"xrayClients":43,"xrayPid":658,"xrayUntouched":true,"dryRun":true}`�
 
 再探（仍只出站、`ss-server` PID **548** / **7129** 未换）：东京 TCP 443 **69ms**；SNI `www.bing.com` 仍是 TLS 1.3 `CN=r.bing.com`；UDP 443 仍超时。Niagara `23.94.79.123` hy2 证书仍是 `CN=www.microsoft.com` / `DNS:www.microsoft.com`，指纹 `1e5374a79bdb83b04c3d3c84722c03211d1c941c2de9f92431d2198ba7212cad`；`hysteria ping` `1.1.1.1:443` 与 `google.com:443` 均为 **EXIT 0**；该机 `tono-xray` PID **335056** 未换。探测目录已删。
 
+上面五台 `hysteria ping` 用的是官方客户端 + **`tls.ca` 证书文件**，不是 App 运行时那块 `fingerprint`。同日再用客户端形状从杭州打 Niagara（官方 Meta **v1.19.30**，`type: hysteria2` + `sni: www.microsoft.com` + 64 hex `fingerprint`，**不写** `skip-cert-verify`；mixed-port 仅 `127.0.0.1:17890`）：
+
+| 从杭州 | 结果 |
+|---|---|
+| 直连 `https://www.google.com/generate_204` | 超时（exit 28） |
+| 经 Niagara hy2 同一 URL | **HTTP 204**，0.99s；Cloudflare trace `ip=23.94.79.123` `loc=US` `colo=BUF` |
+| 同一块去掉 `fingerprint` | 握手 `x509: certificate signed by unknown authority` |
+| `fingerprint` 换成全 `f` | 握手 `certificate fingerprints do not match` |
+
+杭州 `ss-server` PID **548** / **7129** 未换；Niagara `tono-xray` PID **335056**、`tono-hy2` PID **2675546** 未换；证书仍是 `CN=www.microsoft.com` / `DNS:www.microsoft.com`。探测目录（含 mihomo 二进制与 yaml）已删。同日东京 TCP 443 仍是 TLS 1.3 微软 `CN=r.bing.com`。官方 hysteria v2.9.3 在 `insecure: false` 时**不会**把 `pinSHA256` 当成替代 CA 校验，不能拿它当 App 形状。
+
 本分支客户端把这五条 ` · hy2` 放在独立「备用 UDP」栏（城市 · 代号 · 备用通道）。新包目录 GET 带 `X-Tono-Accept: hy2`。五块私有 yaml 本地 `--dry-run` 已通过（5 个唯一名、各一个 `{{TONO_CLIENT_UUID}}`）。Windows 候选 NSIS run [`34584323215`](https://github.com/raydocs/tono/actions/runs/34584323215) 已出：`Tono_0.0.72_x64-setup.exe` SHA-256 `7bc7aaf9a4046ef7d4f9db3cd7da5f27cd43a26492b27f46661b2295b0b7ca8a`（源 `b40ff149`）。未装真机，不是 G1.1。
 
 **生产目录仍不 PUT。** 生产 Worker `GET /api/v1/health` 的 `buildSha` 仍是 `main` `2cef4eac`（第十四次控制面），没有 hy2 合同、也不会剥 ` · hy2`。`deploy-control-plane-main.sh` 只允许从已与 `origin/main` 对齐的 `main` 部署，**不要从功能分支直接打生产**。Worker-only PR **#145** 相对 `main` 只有控制面，另带 `write-dedirock-hy2-catalog-sources.rb`（不联网、stdout 只有 dry-run/append 命令）。顺序：合 #145 → 老板跑生产部署 → health 的 `buildSha` 对上 → `--append` 五块。先 PUT 会让 Sparkle 0.0.67 / 旧 Windows 吃到 `type: hysteria2` 后 fail closed。G2.8 自动切换仍关。家宽三网未测。
