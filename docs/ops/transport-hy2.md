@@ -163,9 +163,9 @@ dry-run：`{"xrayClients":43,"xrayPid":658,"xrayUntouched":true,"dryRun":true}`�
 
 杭州 `ss-server` PID **548** / **7129** 未换；Niagara `tono-xray` PID **335056**、`tono-hy2` PID **2675546** 未换；证书仍是 `CN=www.microsoft.com` / `DNS:www.microsoft.com`。探测目录（含 mihomo 二进制与 yaml）已删。同日东京 TCP 443 仍是 TLS 1.3 微软 `CN=r.bing.com`。官方 hysteria v2.9.3 在 `insecure: false` 时**不会**把 `pinSHA256` 当成替代 CA 校验，不能拿它当 App 形状。
 
-本分支客户端把这五条 ` · hy2` 放在独立「备用 UDP」栏（城市 · 代号 · 备用通道）。新包目录 GET 带 `X-Tono-Accept: hy2`。五块私有 yaml 本地 `--dry-run` 已通过（5 个唯一名、各一个 `{{TONO_CLIENT_UUID}}`）。Windows 候选 NSIS run [`34584323215`](https://github.com/raydocs/tono/actions/runs/34584323215) 已出：`Tono_0.0.72_x64-setup.exe` SHA-256 `7bc7aaf9a4046ef7d4f9db3cd7da5f27cd43a26492b27f46661b2295b0b7ca8a`（源 `b40ff149`）。未装真机，不是 G1.1。
+本分支客户端把这五条 ` · hy2` 放在独立「备用 UDP」栏（城市 · 代号 · 备用通道）。新包目录 GET 带 `X-Tono-Accept: hy2`。五块私有 yaml 本地 `--dry-run` 已通过（5 个唯一名、各一个 `{{TONO_CLIENT_UUID}}`）。测 hy2 的 Windows 候选是 §10：run [`34599676962`](https://github.com/raydocs/tono/actions/runs/34599676962)，installer SHA-256 `2af3f3b1894fd5b5d12b9507df723d0f8a87715d91fd1b1bb4fb8809d31ba674`（源 `3abe64b6`，选中 hy2 时不再 REJECT UDP）。§9 `7bc7aaf9…` 不要再装。未装真机，不是 G1.1。
 
-**生产目录仍不 PUT。** 生产 Worker `GET /api/v1/health` 的 `buildSha` 仍是 `main` `2cef4eac`（第十四次控制面），没有 hy2 合同、也不会剥 ` · hy2`。`deploy-control-plane-main.sh` 只允许从已与 `origin/main` 对齐的 `main` 部署，**不要从功能分支直接打生产**。Worker-only PR **#145** 相对 `main` 只有控制面，另带 `write-dedirock-hy2-catalog-sources.rb`（不联网、stdout 只有 dry-run/append 命令）。顺序：合 #145 → 老板跑生产部署 → health 的 `buildSha` 对上 → `--append` 五块。先 PUT 会让 Sparkle 0.0.67 / 旧 Windows 吃到 `type: hysteria2` 后 fail closed。G2.8 自动切换仍关。家宽三网未测。
+**生产 Worker 已是 `7c38521c`（#145）。目录还没 `--append`。** 旧包无 `X-Tono-Accept: hy2` 时仍被剥。`write-dedirock-hy2-catalog-sources.rb` 写出五块后 `--dry-run` / `--append`。G2.8 自动切换仍关。家宽三网未测。
 
 ### 部署之后怎么 append（口令不进仓库）
 
