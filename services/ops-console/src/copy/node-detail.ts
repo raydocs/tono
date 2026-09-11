@@ -207,6 +207,7 @@ export const nodeDetailCopy = {
   nodeNoJobs: '还没有给这台机器派过活',
 
   nodeNoHistory: '还没有变更记录',
+  nodeNoReceipts: '没有变更记录',
   nodeHistoryNoReason: '没写原因',
 
   nodeActions: {

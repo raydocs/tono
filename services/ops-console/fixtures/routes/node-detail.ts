@@ -295,6 +295,28 @@ function readFor(file: NodeFile, parts: string[], name: string, range: string, s
   if (section === 'acceptance') return sheetFor(name, set);
   if (section === 'connections') return file.connections;
   if (section === 'history') return file.history;
+  if (section === 'receipts') {
+    return {
+      items: [
+        {
+          id: 'rcpt-fixture-1',
+          kind: 'catalog_retire',
+          subjectType: 'node',
+          subjectId: name,
+          incidentId: 'inc-node-la',
+          jobId: 'job-retire-1',
+          before: { revision: 48, listed: [name] },
+          after: { revision: 49 },
+          clientAcks: 12,
+          rollbackOf: null,
+          actor: 'operator@example.com',
+          at: file.clock - 900,
+        },
+      ],
+      nextCursor: null,
+      updatedAt: file.clock,
+    };
+  }
   if (section === 'jobs') return file.jobs;
   if (section === 'bindings') return file.detail.bindings;
   // `?range=` is honoured rather than ignored: 最近 30 天 is the only reason

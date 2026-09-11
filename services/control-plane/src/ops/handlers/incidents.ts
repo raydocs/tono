@@ -22,6 +22,7 @@ import {
   type Tone,
 } from '../contract';
 import { listJobs } from '../jobs';
+import { loadReceiptsForIncident } from '../change-receipts';
 import { jobDto } from './nodes-data';
 import {
   Actor,
@@ -248,6 +249,8 @@ export async function getIncident(req: Request, e: Env, rawId: string): Promise<
   const deliveriesList = {
     items: deliveries.map(deliveryDto), nextCursor: null as string | null, updatedAt: t, total: deliveries.length,
   };
+  const receipts = await loadReceiptsForIncident(e.DB, incidentId);
+  incident.receipts = receipts;
   const detail: IncidentDetailDto = { incident, events: eventsList, jobs: jobsList, deliveries: deliveriesList };
   const etag = weakEtag([incidentId, Number(row.updated_at), events.length, jobItems.length]);
   return entityJson(e, req, detail, etag, assertIncidentDetail);

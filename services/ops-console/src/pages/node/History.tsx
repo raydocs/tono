@@ -1,23 +1,21 @@
-import type { NodeHistoryEntryDto } from '@contract';
+import type { ChangeReceiptDto } from '@contract';
 import { EmptyLine } from '@/components/ops/Empty';
 import { FoldedSection } from '@/components/ops/Section';
-import { StatusWord } from '@/components/ops/StatusWord';
 import { copy } from '@/copy/copy';
 import { formatWhen, formatWhenAgo } from '@/lib/display';
-import { reasonSentence } from '@/lib/node-detail';
+import { receiptDetail } from '@/lib/receipts';
 
 /**
- * Only the moments the health word changed, so the row count is the number
- * of times this machine actually went wrong. Newest first, each line carrying
- * the sentence that justified the change — and nothing about which set of
- * rules produced it, which is the console's business and not the operator's.
+ * Change receipts for this machine: retires, relists, synchronisations, and
+ * service restarts. Newest first, each line carrying the action taken and
+ * the revision or acknowledgement count that confirmed it.
  */
 export function NodeHistory({
   rows,
   state,
   message,
 }: {
-  rows: readonly NodeHistoryEntryDto[];
+  rows: readonly ChangeReceiptDto[];
   state: 'loading' | 'error' | 'ready';
   message?: string;
 }) {
@@ -28,12 +26,12 @@ export function NodeHistory({
       {state !== 'ready' ? (
         <EmptyLine message={state === 'loading' ? copy.loading : message || copy.loadError} />
       ) : sorted.length === 0 ? (
-        <EmptyLine message={copy.nodeNoHistory} />
+        <EmptyLine message={copy.nodeNoReceipts} />
       ) : (
         <ul className="flex flex-col">
           {sorted.map((row) => (
             <li
-              key={row.at}
+              key={row.id}
               className="flex items-baseline gap-3 border-b border-[var(--hairline)] py-2 last:border-b-0"
             >
               <span
@@ -42,9 +40,11 @@ export function NodeHistory({
               >
                 {formatWhenAgo(row.at)}
               </span>
-              <StatusWord word={row.health} className="shrink-0" />
+              <span className="shrink-0 text-body">
+                {copy.receiptAction[row.kind as keyof typeof copy.receiptAction] ?? copy.receipt}
+              </span>
               <span className="min-w-0 truncate text-body text-[var(--muted-foreground)]">
-                {whyOf(row)}
+                {receiptDetail(row) || (row.actor ?? '')}
               </span>
             </li>
           ))}
@@ -54,12 +54,3 @@ export function NodeHistory({
   );
 }
 
-/**
- * The line beside the word. A row that recovered gets none: the word is the
- * whole story, and the engine's reason for it is the token `ok`.
- */
-function whyOf(row: NodeHistoryEntryDto): string | null {
-  const why = reasonSentence(row.verdict, row.reason);
-  if (why) return why;
-  return row.verdict === 'ok' ? null : copy.nodeHistoryNoReason;
-}

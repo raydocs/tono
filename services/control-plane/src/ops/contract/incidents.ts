@@ -37,6 +37,8 @@ import type { JobDto } from './jobs';
 import { assertJob } from './jobs';
 import type { AlertDeliveryDto } from './alerts';
 import { assertAlertDelivery } from './alerts';
+import type { ChangeReceiptDto } from './receipts';
+import { assertChangeReceipt } from './receipts';
 
 /**
  * One labelled measurement backing an incident — the 凭什么 line (R7).
@@ -73,6 +75,7 @@ export interface IncidentDto {
   nextCheckAt: number | null;
   /** Null until an operator closes it; engine recovery leaves this null. */
   closure: IncidentClosure | null;
+  receipts?: ChangeReceiptDto[];
 }
 
 export const INCIDENT_EVENT_TYPES = [
@@ -123,11 +126,14 @@ const INCIDENT_KEYS = [
   'id', 'dedupeKey', 'kind', 'subjectType', 'subjectId', 'severity', 'status', 'tone',
   'title', 'summary', 'parentIncidentId', 'rulesVersion', 'impactCount', 'evidence',
   'openedAt', 'lastSeenAt', 'ackedAt', 'snoozedUntil', 'resolvedAt',
-  'nextCheckAt', 'closure',
+  'nextCheckAt', 'closure', 'receipts',
 ];
 
 export function assertIncident(value: unknown, path = 'incident'): IncidentDto {
   const row = fields(value, path, INCIDENT_KEYS);
+  const receipts = row.receipts === undefined
+    ? undefined
+    : arrayOf(row, path, 'receipts', assertChangeReceipt);
   return {
     id: text(row, path, 'id'),
     dedupeKey: text(row, path, 'dedupeKey'),
@@ -150,6 +156,7 @@ export function assertIncident(value: unknown, path = 'incident'): IncidentDto {
     resolvedAt: optInt(row, path, 'resolvedAt'),
     nextCheckAt: optInt(row, path, 'nextCheckAt'),
     closure: optOneOf<IncidentClosure>(row, path, 'closure', INCIDENT_CLOSURES),
+    ...(receipts === undefined ? {} : { receipts }),
   };
 }
 
