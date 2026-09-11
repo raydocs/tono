@@ -170,6 +170,36 @@ describe('backupChannelName', () => {
     )
   })
 
+  it('hands China testers a Dedirock hy2, never Tokyo, including Grove wire names', () => {
+    const fleet = [
+      'JP-VLESS-Reality',
+      'Buffalo · Niagara',
+      'Buffalo · Niagara · hy2',
+      'Buffalo · Erie',
+      'Buffalo · Erie · hy2',
+      'Los Angeles · Sunset',
+      'Los Angeles · Sunset · hy2',
+      'Los Angeles · Mesa',
+      'Los Angeles · Mesa · hy2',
+      'US-VLESS-Reality',
+      'US-VLESS-Reality · hy2',
+    ]
+    expect(hy2UdpIsVendorBlocked('US-VLESS-Reality · hy2')).toBe(false)
+    expect(hy2UdpIsVendorBlocked('Buffalo · Niagara · hy2')).toBe(false)
+    expect(hy2UdpIsVendorBlocked('Los Angeles · Mesa · hy2')).toBe(false)
+    expect(backupChannelName('US-VLESS-Reality', fleet)).toBe(
+      'US-VLESS-Reality · hy2',
+    )
+    expect(backupChannelName('Los Angeles · Sunset', fleet)).toBe(
+      'Los Angeles · Sunset · hy2',
+    )
+    expect(backupChannelName('JP-VLESS-Reality', fleet)).toBe(
+      'Buffalo · Niagara · hy2',
+    )
+    expect(nodeListGroupKey('US-VLESS-Reality · hy2')).toBe(UDP_BACKUP_GROUP)
+    expect(nodeListGroupKey('Buffalo · Niagara · hy2')).toBe(UDP_BACKUP_GROUP)
+  })
+
   it('matches a flag-prefixed city to the catalog hy2 row even when flags differ', () => {
     expect(
       backupChannelName('🇺🇸 US Reality 01', [

@@ -127,6 +127,28 @@ final class ConnectionActivityTests: XCTestCase {
             ProxyNode.backupChannelName(selected: "JP-VLESS-Reality", catalogNames: bothCities),
             "Los Angeles · Sunset · hy2"
         )
+        let dedirockFleet: Set<String> = [
+            "JP-VLESS-Reality",
+            "Buffalo · Niagara", "Buffalo · Niagara · hy2",
+            "Buffalo · Erie", "Buffalo · Erie · hy2",
+            "Los Angeles · Sunset", "Los Angeles · Sunset · hy2",
+            "Los Angeles · Mesa", "Los Angeles · Mesa · hy2",
+            "US-VLESS-Reality", "US-VLESS-Reality · hy2",
+        ]
+        XCTAssertFalse(ProxyNode.hy2UdpIsVendorBlocked("US-VLESS-Reality · hy2"))
+        XCTAssertFalse(ProxyNode.hy2UdpIsVendorBlocked("Buffalo · Niagara · hy2"))
+        XCTAssertEqual(
+            ProxyNode.backupChannelName(selected: "US-VLESS-Reality", catalogNames: dedirockFleet),
+            "US-VLESS-Reality · hy2"
+        )
+        let tokyoHand = ProxyNode.backupChannelName(
+            selected: "JP-VLESS-Reality",
+            catalogNames: dedirockFleet
+        )
+        XCTAssertNotNil(tokyoHand)
+        XCTAssertFalse(ProxyNode.hy2UdpIsVendorBlocked(tokyoHand!))
+        XCTAssertTrue(ProxyNode.isHy2CatalogName(tokyoHand!))
+        XCTAssertNotEqual(tokyoHand, "JP-VLESS-Reality · hy2")
         XCTAssertTrue(ProxyNode.hy2UdpIsVendorBlocked("Tokyo · Sakura · hy2"))
         XCTAssertFalse(ProxyNode.hy2UdpIsVendorBlocked("Tokyo · Sakura"))
         XCTAssertTrue(ProxyNode.hy2UdpIsVendorBlocked("JP-VLESS-Reality · hy2"))
