@@ -150,4 +150,6 @@ dry-run：`{"xrayClients":43,"xrayPid":658,"xrayUntouched":true,"dryRun":true}`�
 
 同日杭州复检东京 `45.8.173.206`：TCP 443 五次 70–96ms；SNI `www.bing.com` 仍是微软 `CN=r.bing.com`；入站 UDP 443 仍超时。Panstar 工单 **#529**（待处理）。东京不要 `--hy2-sync-identities --apply`。
 
-本分支客户端把这五条 ` · hy2` 放在独立「备用 UDP」栏（城市 · 代号 · 备用通道）。新包目录 GET 带 `X-Tono-Accept: hy2`。**生产目录仍不 PUT**：`main` Worker 还不会剥 hy2，先 PUT 会把旧包打挂。G2.8 自动切换仍关。家宽三网未测。
+本分支客户端把这五条 ` · hy2` 放在独立「备用 UDP」栏（城市 · 代号 · 备用通道）。新包目录 GET 带 `X-Tono-Accept: hy2`。五块私有 yaml 本地 `--dry-run` 已通过（5 个唯一名、各一个 `{{TONO_CLIENT_UUID}}`）。
+
+**生产目录仍不 PUT。** 生产 Worker `GET /api/v1/health` 的 `buildSha` 仍是 `main` `2cef4eac`（第十四次控制面），没有 hy2 合同、也不会剥 ` · hy2`。`deploy-control-plane-main.sh` 只允许从已与 `origin/main` 对齐的 `main` 部署，**不要从本功能分支直接打生产**。顺序：把本分支的 Worker（hy2 合同 + `filterHy2CatalogForViewer` + `X-Tono-Accept`）合进 `main` → 老板跑生产部署 → `--append` 五块。先 PUT 会让 Sparkle 0.0.67 / 旧 Windows 吃到 `type: hysteria2` 后 fail closed。G2.8 自动切换仍关。家宽三网未测。
