@@ -1109,6 +1109,7 @@ export interface TranslationResources {
         }
         subtitle: string
         taglineConnected: string
+        taglineConnecting: string
         taglineIdle: string
         title: string
         updateIncomplete: string

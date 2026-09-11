@@ -41,10 +41,12 @@ const STATE_SPECS: Record<TonoUiState, StateSpec> = {
     color: TONO_COLORS.accent,
     glowOpacity: 0.26,
     glowScale: 1.03,
-    titleKey: 'shared.actions.cancel',
+    // Not Cancel: Windows StartClash can take seconds, and a labeled cancel
+    // control is how a live attempt became 待机 + "something went wrong".
+    titleKey: 'tono.pill.title.connecting',
     titleColored: true,
     indicator: 'spinner',
-    disabled: false,
+    disabled: true,
   },
   connected: {
     color: TONO_COLORS.connected,
@@ -119,11 +121,7 @@ export const ConnectPill = ({
 
   const handleClick = () => {
     if (spec.disabled) return
-    if (
-      uiState === 'connecting' ||
-      uiState === 'connected' ||
-      uiState === 'protectedOffline'
-    ) {
+    if (uiState === 'connected' || uiState === 'protectedOffline') {
       onDisconnect()
     } else {
       onConnect()

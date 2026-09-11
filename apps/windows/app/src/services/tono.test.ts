@@ -16,6 +16,7 @@ import {
   formatTonoActionError,
   formatTonoDiagnostics,
   isEncryptedDnsFailure,
+  isSupersededConnectRejection,
   stableTonoErrorCode,
   subscribeTonoStatus,
   tonoAuditEnabled,
@@ -169,6 +170,27 @@ describe('connectRejectionNeedsServerChoice', () => {
       expect(connectRejectionNeedsServerChoice(new Error(message))).toBe(false)
     }
     expect(connectRejectionNeedsServerChoice(undefined)).toBe(false)
+  })
+})
+
+describe('isSupersededConnectRejection', () => {
+  it('matches overlapping or cancelled connect IPC, not a failed attempt', () => {
+    for (const message of [
+      'connection superseded by a newer transition',
+      'already connecting',
+      'a connection transition is already in flight',
+    ]) {
+      expect(isSupersededConnectRejection(new Error(message))).toBe(true)
+    }
+  })
+
+  it('leaves real connect failures on the error path', () => {
+    expect(
+      isSupersededConnectRejection(
+        new Error('TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof'),
+      ),
+    ).toBe(false)
+    expect(isSupersededConnectRejection(undefined)).toBe(false)
   })
 })
 

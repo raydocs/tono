@@ -323,6 +323,22 @@ export const stableTonoErrorCode = (
 }
 
 /**
+ * Connect IPC rejections that are not a failed attempt: a newer click won,
+ * or this call overlapped an attempt that is still running. The dashboard
+ * must stay on the live connecting state — not flash "something went wrong".
+ */
+export const isSupersededConnectRejection = (error: unknown): boolean => {
+  const raw = (
+    error instanceof Error ? error.message : String(error ?? '')
+  ).toLowerCase()
+  return (
+    raw.includes('connection superseded by a newer transition') ||
+    raw === 'already connecting' ||
+    raw.includes('a connection transition is already in flight')
+  )
+}
+
+/**
  * Whether a connect rejection means "no usable server is selected" — the
  * guard strings from the backend's `guard_snapshot` (no selection, selection
  * gone from the catalog, catalog not yet available). The dashboard answers

@@ -1,5 +1,5 @@
 import { useLockFn } from 'ahooks'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router'
 
@@ -13,9 +13,11 @@ import {
   connectErrorSuggestsBackupChannel,
   connectErrorSuggestsServerSwitch,
   connectRejectionNeedsServerChoice,
+  describeTonoActionError,
   formatTonoActionError,
-  isEncryptedDnsFailure,
   formatTonoDiagnostics,
+  isEncryptedDnsFailure,
+  isSupersededConnectRejection,
   tonoCatalogStatus,
   tonoConnect,
   tonoDiagnosticsReport,
@@ -61,9 +63,6 @@ const hex = (color: string, alpha: number) =>
 const CHECKLIST_STORAGE_KEY = 'tono.connectChecklistDismissed'
 const catalogStatusQueryKey = ['tono', 'catalog-status'] as const
 const encryptedDnsQueryKey = ['tono', 'encrypted-dns'] as const
-/** Ignore a cancel click this long after entering connecting (macOS parity). */
-const CANCEL_GRACE_MS = 1200
-
 const ConnectChecklist = ({
   dark,
   encryptedDnsOverrides,
@@ -466,6 +465,8 @@ const InfoItem = ({
 
 interface DashboardActionError {
   message: string
+  /** Unmapped backend text; shown under the localized fallback. */
+  detail?: string
   retry: 'connect' | 'disconnect' | 'retryNow'
   suggestsSwitch: boolean
   encryptedDns: boolean
@@ -555,11 +556,6 @@ const DashboardPage = () => {
       /* ignore quota */
     }
   }, [connected])
-  const connectingSinceRef = useRef<number | null>(null)
-  const connecting = uiState === 'connecting'
-  useEffect(() => {
-    connectingSinceRef.current = connecting ? Date.now() : null
-  }, [connecting])
   const busy =
     uiState === 'connecting' ||
     uiState === 'disconnecting' ||
@@ -652,6 +648,13 @@ const DashboardPage = () => {
         navigate('/servers')
         return
       }
+      // A second connect IPC, or a disconnect that won the generation, is not
+      // a failed attempt. Showing unknownAction here is how a slow StartClash
+      // became a red "something went wrong" card with no Failed stage.
+      if (isSupersededConnectRejection(error)) {
+        await mutateTonoStatus()
+        return
+      }
       // `tono_connect` returns only after fail_connect and reconnect scheduling.
       // Read that settled backend snapshot now and store the retry owner with
       // the error; a later status push must not change which command Retry uses.
@@ -666,8 +669,10 @@ const DashboardPage = () => {
         // fallback when the authoritative local status read itself failed.
         if (status?.uiState === 'protectedOffline') retry = 'retryNow'
       }
+      const described = describeTonoActionError(error, t)
       setActionError({
-        message: formatTonoActionError(error, t),
+        message: described.message,
+        detail: described.detail,
         retry,
         suggestsSwitch: connectErrorSuggestsServerSwitch(error),
         encryptedDns: isEncryptedDnsFailure(error),
@@ -731,13 +736,18 @@ const DashboardPage = () => {
 
   const [up, upUnit] = parseTraffic(traffic?.up ?? 0)
   const [down, downUnit] = parseTraffic(traffic?.down ?? 0)
-  const connectHint = uiState === 'protectedOffline' && !protectionConfirmed
-    ? t('tono.progress.protectionUnknownBody')
-    : connected
-      ? status?.directOverlay === 'skipped'
-        ? t('tono.dashboard.directSkipped')
-        : t('tono.dashboard.directOn')
-      : t('tono.dashboard.taglineIdle')
+  const connectHint =
+    uiState === 'connecting'
+      ? t('tono.dashboard.taglineConnecting')
+      : uiState === 'disconnecting'
+        ? t('tono.pill.subtitle.restoringAccess')
+        : uiState === 'protectedOffline' && !protectionConfirmed
+          ? t('tono.progress.protectionUnknownBody')
+          : connected
+            ? status?.directOverlay === 'skipped'
+              ? t('tono.dashboard.directSkipped')
+              : t('tono.dashboard.directOn')
+            : t('tono.dashboard.taglineIdle')
   const selectedCity = status?.selectedServer
     ? nodeCityLabel(status.selectedServer, t)
     : t('tono.dashboard.noServer')
@@ -866,14 +876,6 @@ const DashboardPage = () => {
             stage={status?.stage}
             onConnect={handleConnect}
             onDisconnect={() => {
-              if (uiState === 'connecting') {
-                const since = connectingSinceRef.current
-                if (since == null || Date.now() - since < CANCEL_GRACE_MS) {
-                  return
-                }
-                void handleDisconnect()
-                return
-              }
               if (uiState === 'protectedOffline') {
                 requestRelease()
               } else {
@@ -976,6 +978,23 @@ const DashboardPage = () => {
             >
               {actionError.message}
             </span>
+            {actionError.detail && (
+              <span
+                data-testid="tono-action-error-detail"
+                style={{
+                  fontSize: 12,
+                  fontWeight: 500,
+                  lineHeight: 1.45,
+                  color: text.secondary,
+                  textAlign: 'center',
+                  maxWidth: '100%',
+                  overflowWrap: 'anywhere',
+                  fontFamily: TONO_MONO_STACK,
+                }}
+              >
+                {actionError.detail}
+              </span>
+            )}
             <div
               style={{
                 display: 'flex',

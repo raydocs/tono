@@ -336,37 +336,65 @@ describe('dashboard action-error ownership', () => {
   })
 })
 
-describe('dashboard cancel while connecting', () => {
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  it('ignores a pill click inside the 1.2s grace and disconnects after it', async () => {
-    vi.useFakeTimers()
+describe('dashboard connecting pill', () => {
+  it('keeps connecting as connecting: not a cancel control, no idle tagline', () => {
     mocks.status = makeStatus({
       uiState: 'connecting',
       selectedServer: 'US West 1',
-      stage: 'lockingTraffic',
+      stage: 'startingKillSwitch',
     })
     renderDashboard()
 
-    const pill = screen.getByRole('button', { name: /^Cancel/ })
-    expect((pill as HTMLButtonElement).disabled).toBe(false)
-    expect(pill.getAttribute('aria-disabled')).toBeNull()
+    const pill = screen.getByRole('button', { name: /^Connecting/ })
+    expect(screen.queryByRole('button', { name: /^Cancel/ })).toBeNull()
+    expect(pill.getAttribute('aria-disabled')).toBe('true')
+    expect(
+      screen.getByText('Turning on protection. This usually takes a few seconds.'),
+    ).toBeDefined()
+    expect(screen.queryByText('Pick a node, then connect.')).toBeNull()
 
     fireEvent.click(pill)
     expect(mocks.tonoDisconnect).not.toHaveBeenCalled()
+    expect(mocks.tonoConnect).not.toHaveBeenCalled()
+  })
 
-    await vi.advanceTimersByTimeAsync(1199)
-    fireEvent.click(pill)
-    expect(mocks.tonoDisconnect).not.toHaveBeenCalled()
-    expect(screen.queryByRole('dialog')).toBeNull()
+  it('does not turn a superseded connect IPC into a fake failure card', async () => {
+    mocks.status = makeStatus({ selectedServer: 'US West 1' })
+    mocks.tonoConnect.mockRejectedValue(
+      new Error('connection superseded by a newer transition'),
+    )
+    renderDashboard()
 
-    await vi.advanceTimersByTimeAsync(1)
-    fireEvent.click(pill)
-    await Promise.resolve()
-    expect(mocks.tonoDisconnect).toHaveBeenCalledTimes(1)
-    expect(screen.queryByRole('dialog')).toBeNull()
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Standby — Click to connect',
+      }),
+    )
+    await waitFor(() => expect(mocks.tonoConnect).toHaveBeenCalled())
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByTestId('tono-action-error-message')).toBeNull()
+  })
+
+  it('shows unmapped backend detail under the localized fallback', async () => {
+    mocks.status = makeStatus({ selectedServer: 'US West 1' })
+    mocks.tonoConnect.mockRejectedValue(
+      new Error('sc.exe start TonoService failed: os error 10061'),
+    )
+    renderDashboard()
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Standby — Click to connect',
+      }),
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId('tono-action-error-message').textContent).toBe(
+        'Something went wrong. Details are below; copy them for support.',
+      ),
+    )
+    expect(screen.getByTestId('tono-action-error-detail').textContent).toBe(
+      'sc.exe start TonoService failed: os error 10061',
+    )
   })
 })
 

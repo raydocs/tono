@@ -201,6 +201,7 @@
       "blocked": "阻断"
     },
     "taglineIdle": "选好节点，点连接。",
+    "taglineConnecting": "正在启用保护，通常只要几秒。",
     "taglineConnected": "流量已保护；断线不会漏 IP。",
     "directOn": "微信等国内软件直连；Claude / ChatGPT / Cursor 走家里宽带；其余走隧道。",
     "directSkipped": "国内直连未开，微信也走隧道。Claude / ChatGPT / Cursor 仍走家里宽带。",

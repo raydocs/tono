@@ -9,6 +9,7 @@ import { useThemeMode } from '@/services/states'
 import {
   formatTonoActionError,
   idleSelectShouldConnect,
+  isSupersededConnectRejection,
   tonoCancelServerTests,
   tonoCatalogStatus,
   tonoConnect,
@@ -126,7 +127,9 @@ const ServersPage = () => {
           await tonoConnect()
           await mutateTonoStatus()
         } catch (error) {
-          setSelectError(formatTonoActionError(error, t))
+          if (!isSupersededConnectRejection(error)) {
+            setSelectError(formatTonoActionError(error, t))
+          }
         } finally {
           setSwitchingName(null)
         }
@@ -148,7 +151,9 @@ const ServersPage = () => {
           }),
         )
       } catch (error) {
-        setSelectError(formatTonoActionError(error, t))
+        if (!isSupersededConnectRejection(error)) {
+          setSelectError(formatTonoActionError(error, t))
+        }
       } finally {
         setSwitchingName(null)
       }
