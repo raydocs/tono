@@ -198,7 +198,12 @@ function catalogHasFingerprint(block: string): boolean {
 }
 
 function catalogSkipsCertVerify(block: string): boolean {
-  return /skip-cert-verify\s*:\s*(?:true|True|yes)\b/.test(block);
+  const match = block.match(
+    /skip-cert-verify\s*:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s,#}]+))/,
+  );
+  if (!match) return false;
+  const raw = (match[1] ?? match[2] ?? match[3] ?? '').trim().toLowerCase();
+  return raw !== 'false' && raw !== 'no' && raw !== 'off' && raw !== 'n';
 }
 
 /**
@@ -265,20 +270,19 @@ export function filterHy2CatalogForViewer(yaml: string, keepHy2: boolean): strin
   let next = `${prefix}${body}${suffix}`;
   if (!next.endsWith('\n')) next += '\n';
   const names = dropped.map((item) => item.name);
-  const aliasPattern = names.map(escapeRegExp).join('|');
-  const memberLine = new RegExp(`^([ \\t]+)-[ \\t]+(?:${aliasPattern})[ \\t]*(?:#.*)?$`);
-  let inGroups = false;
+  const memberLine = catalogProxyMemberLine(names);
+  let inLists = false;
   const keptLines: string[] = [];
   for (const line of next.split('\n')) {
-    if (/^proxy-groups\s*:/.test(line)) {
-      inGroups = true;
+    if (/^(?:proxy-groups|rules)\s*:/.test(line)) {
+      inLists = true;
       keptLines.push(line);
       continue;
     }
-    if (inGroups && line.trim() && !/^\s/.test(line) && !line.trimStart().startsWith('#')) {
-      inGroups = false;
+    if (inLists && line.trim() && !/^\s/.test(line) && !line.trimStart().startsWith('#')) {
+      inLists = false;
     }
-    if (inGroups && memberLine.test(line)) continue;
+    if (inLists && memberLine.test(line)) continue;
     keptLines.push(line);
   }
   next = keptLines.join('\n');
@@ -309,6 +313,13 @@ function placeholderCount(yaml: string): number {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function catalogProxyMemberLine(names: string[]): RegExp {
+  const aliasPattern = names.map(escapeRegExp).join('|');
+  return new RegExp(
+    `^([ \\t]+)-[ \\t]+(?:${aliasPattern}|["'](?:${aliasPattern})["'])[ \\t]*(?:#.*)?$`,
+  );
 }
 
 function catalogGroupName(line: string): string | null {
@@ -432,8 +443,8 @@ export function retirementCatalogPlan(yaml: string, name: string): {
     if (!next.endsWith('\n')) next += '\n';
   }
 
+  const memberLine = catalogProxyMemberLine([...aliases]);
   const aliasPattern = [...aliases].map(escapeRegExp).join('|');
-  const memberLine = new RegExp(`^([ \\t]+)-[ \\t]+(?:${aliasPattern})[ \\t]*(?:#.*)?$`);
   const groupsChanged: string[] = [];
   let inGroups = false;
   let currentGroup: string | null = null;

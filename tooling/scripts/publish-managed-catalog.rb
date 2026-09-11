@@ -100,7 +100,10 @@ def catalog_has_fingerprint?(block)
 end
 
 def catalog_skips_cert_verify?(block)
-  block.match?(/skip-cert-verify\s*:\s*(?:true|True|yes)\b/)
+  match = block.match(/skip-cert-verify\s*:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s,#}]+))/)
+  return false unless match
+  raw = (match[1] || match[2] || match[3]).to_s.strip.downcase
+  raw != "false" && raw != "no" && raw != "off" && raw != "n"
 end
 
 # Same contract as control-plane `catalogProxyUsesManagedIdentity`:
