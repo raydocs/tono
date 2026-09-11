@@ -438,6 +438,43 @@ describe('ConnectProgressCard', () => {
     expect(onChooseRoute).toHaveBeenCalledTimes(1)
   })
 
+  it('puts Encrypted DNS as the next hand and hides switch-route on a fake-ip timeout', async () => {
+    tonoConnectProgressMock.mockResolvedValue(
+      makeProgress({
+        steps: [
+          step('preparing', 'completed', 1200),
+          step('securingDNS', 'failed', 16000),
+        ],
+        failedStage: 'securingDNS',
+        error:
+          'fake-ip verification failed: Windows system DNS A query exceeded 5s. Windows Encrypted DNS (DNS over HTTPS) may still be overriding 127.0.0.1. Turn Encrypted DNS off',
+        retryAttempt: 2,
+        nextRetryAtMs: Date.now() + 4000,
+      }),
+    )
+    renderCard({
+      uiState: 'protectedOffline',
+      protectionConfirmed: true,
+      onChooseRoute: vi.fn(),
+    })
+
+    expect(
+      await screen.findByText('Windows Encrypted DNS is blocking the connection'),
+    ).toBeDefined()
+    expect(
+      screen.getByText(
+        /Switching cities will not help. Open Windows DNS settings/,
+      ),
+    ).toBeDefined()
+    expect(
+      screen.getByRole('button', { name: 'Open Windows DNS settings' }),
+    ).toBeDefined()
+    expect(screen.queryByTestId('tono-progress-switch-route')).toBeNull()
+    expect(
+      screen.queryByText('This route did not pass the connection check'),
+    ).toBeNull()
+  })
+
   it('does not offer Retry Now on idle Not Connected', async () => {
     tonoConnectProgressMock.mockResolvedValue(makeProgress({ error: null }))
 

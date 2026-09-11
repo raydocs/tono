@@ -1281,6 +1281,8 @@ export interface TranslationResources {
         copied: string
         copyDetails: string
         copyFailed: string
+        encryptedDnsBody: string
+        encryptedDnsTitle: string
         failedAt: string
         protectionUnknownBody: string
         releasedFailureBody: string

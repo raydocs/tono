@@ -347,18 +347,30 @@ export const ConnectProgressCard = ({
               marginBottom: 6,
             }}
           >
-            {t(uiState === 'protectedOffline' && !protectionConfirmed
-              ? 'tono.pill.title.protectionUnknown' : 'tono.progress.statusTitle')}
+            {t(
+              isEncryptedDnsFailure(progress?.error)
+                ? 'tono.progress.encryptedDnsTitle'
+                : uiState === 'protectedOffline' && !protectionConfirmed
+                  ? 'tono.pill.title.protectionUnknown'
+                  : 'tono.progress.statusTitle',
+            )}
           </div>
           <div style={{ fontSize: 13, lineHeight: 1.5, color: text.secondary }}>
             {t(
-              releasedFailure
-                ? 'tono.progress.releasedFailureBody'
-                : protectionConfirmed
-                  ? 'tono.progress.statusBody'
-                  : 'tono.progress.protectionUnknownBody',
+              isEncryptedDnsFailure(progress?.error)
+                ? 'tono.progress.encryptedDnsBody'
+                : releasedFailure
+                  ? 'tono.progress.releasedFailureBody'
+                  : protectionConfirmed
+                    ? 'tono.progress.statusBody'
+                    : 'tono.progress.protectionUnknownBody',
             )}
           </div>
+          {isEncryptedDnsFailure(progress?.error) && (
+            <div style={{ marginTop: 10 }}>
+              <OpenDnsSettingsButton accent />
+            </div>
+          )}
         </div>
       )}
 
@@ -531,11 +543,6 @@ export const ConnectProgressCard = ({
           >
             {progressError.detail ?? progressError.message}
           </pre>
-          {isEncryptedDnsFailure(progress?.error) && (
-            <div style={{ marginTop: 10 }}>
-              <OpenDnsSettingsButton accent />
-            </div>
-          )}
         </details>
       )}
 
@@ -582,7 +589,7 @@ export const ConnectProgressCard = ({
             >
               {retrying ? '…' : t('tono.progress.retryNow')}
             </button>
-            {onChooseRoute && (
+            {onChooseRoute && !isEncryptedDnsFailure(progress?.error) && (
               <button
                 type="button"
                 className="tono-button"

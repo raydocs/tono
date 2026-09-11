@@ -296,6 +296,8 @@
     "unknownStage": "Unknown stage",
     "statusTitle": "This route did not pass the connection check",
     "statusBody": "Direct traffic is blocked while this connection is unavailable. Retry or restore normal Internet.",
+    "encryptedDnsTitle": "Windows Encrypted DNS is blocking the connection",
+    "encryptedDnsBody": "Switching cities will not help. Open Windows DNS settings, turn Encrypted DNS off, then reconnect. You can also restore normal Internet first.",
     "releasedFailureBody": "This city did not connect. Direct internet is available. Retry, choose another route, or try the backup channel if one is shown.",
     "protectionUnknownBody": "Tono cannot confirm network protection. Repair the service if prompted, or choose Restore Normal Internet.",
     "completedCount": "{{count}} completed",

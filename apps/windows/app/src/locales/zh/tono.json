@@ -296,6 +296,8 @@
     "unknownStage": "未知阶段",
     "statusTitle": "当前线路未通过检查",
     "statusBody": "当前连接不可用，直连流量仍被拦截。可以重试，或恢复正常网络。",
+    "encryptedDnsTitle": "Windows 加密 DNS 拦住了连接",
+    "encryptedDnsBody": "换线路没用。打开 Windows DNS 设置，关掉「加密 DNS」，再连接。也可以先恢复正常网络。",
     "releasedFailureBody": "这座城市没有连上。直连网络可用。可以立即重试、选择其他线路；若有备用通道也可以试用。",
     "protectionUnknownBody": "Tono 无法确认网络保护状态。如有提示，请修复服务；也可以选择「恢复正常网络」。",
     "completedCount": "已完成 {{count}} 项",
