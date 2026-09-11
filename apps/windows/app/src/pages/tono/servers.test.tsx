@@ -16,10 +16,11 @@ import enShared from '@/locales/en/shared.json'
 import enTono from '@/locales/en/tono.json'
 import type { TonoServer } from '@/services/tono'
 
-const { serversMock, selectServerMock, mutateTonoStatusMock } = vi.hoisted(
+const { serversMock, selectServerMock, connectMock, mutateTonoStatusMock } = vi.hoisted(
   () => ({
     serversMock: vi.fn(),
     selectServerMock: vi.fn(),
+    connectMock: vi.fn(),
     mutateTonoStatusMock: vi.fn(),
   }),
 )
@@ -27,6 +28,7 @@ vi.mock('@/services/tono', async (original) => ({
   ...(await original<typeof import('@/services/tono')>()),
   tonoServers: serversMock,
   tonoSelectServer: selectServerMock,
+  tonoConnect: connectMock,
   tonoCatalogStatus: async () => ({
     revision: null,
     nodeCount: 0,
@@ -55,6 +57,7 @@ void i18n.use(initReactI18next).init({
 beforeEach(() => {
   vi.clearAllMocks()
   selectServerMock.mockResolvedValue(undefined)
+  connectMock.mockResolvedValue(undefined)
   mutateTonoStatusMock.mockResolvedValue(undefined)
 })
 afterEach(cleanup)
@@ -217,4 +220,5 @@ it('lets the user pick the hy2 sibling and labels it as the backup channel', asy
   await waitFor(() =>
     expect(selectServerMock).toHaveBeenCalledWith('Tokyo · Sakura · hy2'),
   )
+  await waitFor(() => expect(connectMock).toHaveBeenCalledTimes(1))
 })

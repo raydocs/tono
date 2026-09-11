@@ -1848,6 +1848,22 @@ extension AppState {
 
 }
 
+enum IdleCatalogSelect {
+    /// Idle disconnected: picking a city (including hy2) is Connect.
+    static func shouldConnect(
+        connected: Bool,
+        protectionBlocked: Bool,
+        connecting: Bool = false
+    ) -> Bool {
+        !connected && !protectionBlocked && !connecting
+    }
+
+    /// Protected Offline: picking a city retries in place, same as Retry now.
+    static func shouldRetryProtected(connected: Bool, protectionBlocked: Bool) -> Bool {
+        !connected && protectionBlocked
+    }
+}
+
 enum ManualBackupChannelOffer {
     /// Protected Offline (including restart), or a released first-connect
     /// handshake failure. Idle disconnected must not show the button.

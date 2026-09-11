@@ -23,6 +23,10 @@ export type TonoUiState =
   | 'protectedOffline'
   | 'disconnecting'
 
+/** Idle disconnected: picking a city (including hy2) is Connect, not a silent selection. Protected Offline reconnects inside `tonoSelectServer`. */
+export const idleSelectShouldConnect = (uiState: TonoUiState | undefined) =>
+  uiState === 'notConnected'
+
 export interface TonoSignInChallenge {
   challengeId: string
   expiresIn: number

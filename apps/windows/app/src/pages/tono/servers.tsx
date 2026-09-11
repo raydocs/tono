@@ -8,8 +8,10 @@ import { useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
 import {
   formatTonoActionError,
+  idleSelectShouldConnect,
   tonoCancelServerTests,
   tonoCatalogStatus,
+  tonoConnect,
   tonoRefreshCatalog,
   tonoSelectServer,
   tonoServers,
@@ -118,6 +120,9 @@ const ServersPage = () => {
       setSwitchingName(name)
       try {
         await tonoSelectServer(name)
+        // First-connect handshake eof fully releases protection, so select
+        // is UpdateOnly. The card already says Connecting; actually connect.
+        if (idleSelectShouldConnect(status?.uiState)) await tonoConnect()
         await Promise.all([mutateServers(), mutateTonoStatus()])
         // Announce the localized city the card shows, not the raw wire name —
         // otherwise the toast says "Tokyo · Dawn" over a card labelled 东京.

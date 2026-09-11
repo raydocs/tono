@@ -21,6 +21,7 @@ import { useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
 import {
   formatTonoActionError,
+  idleSelectShouldConnect,
   tonoConnect,
   tonoDisconnect,
   tonoRetryNow,
@@ -144,6 +145,7 @@ export const TrayPanel = () => {
     setActionError(null)
     try {
       await tonoSelectServer(name)
+      if (idleSelectShouldConnect(uiState)) await tonoConnect()
       await mutateTonoStatus()
       setPicking(false)
     } catch (error) {

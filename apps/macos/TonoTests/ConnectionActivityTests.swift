@@ -159,6 +159,25 @@ final class ConnectionActivityTests: XCTestCase {
                 hasFailureRecord: false
             )
         )
+        XCTAssertTrue(IdleCatalogSelect.shouldConnect(connected: false, protectionBlocked: false))
+        XCTAssertFalse(IdleCatalogSelect.shouldConnect(connected: false, protectionBlocked: true))
+        XCTAssertFalse(IdleCatalogSelect.shouldConnect(connected: true, protectionBlocked: false))
+        XCTAssertFalse(
+            IdleCatalogSelect.shouldConnect(
+                connected: false,
+                protectionBlocked: false,
+                connecting: true
+            )
+        )
+        XCTAssertTrue(
+            IdleCatalogSelect.shouldRetryProtected(connected: false, protectionBlocked: true)
+        )
+        XCTAssertFalse(
+            IdleCatalogSelect.shouldRetryProtected(connected: false, protectionBlocked: false)
+        )
+        XCTAssertFalse(
+            IdleCatalogSelect.shouldRetryProtected(connected: true, protectionBlocked: true)
+        )
     }
 
     private func fixture(

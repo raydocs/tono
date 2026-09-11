@@ -160,6 +160,32 @@ describe('TrayPanel backup channel', () => {
     expect(mocks.tonoRetryNow).not.toHaveBeenCalled()
   })
 
+  it('connects when picking a hy2 row from the tray list while disconnected', async () => {
+    mocks.status = makeStatus({
+      uiState: 'notConnected',
+      protectionBlocked: false,
+    })
+    mocks.tonoConnectProgress.mockResolvedValue({
+      steps: [],
+      totalElapsedMs: 0,
+      failedStage: null,
+      error: null,
+      retryAttempt: 0,
+      nextRetryAtMs: null,
+    })
+    render(<TrayPanel />, { wrapper: freshSWR })
+
+    fireEvent.click(screen.getByTitle('Switch node'))
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Backup channel/ }),
+    )
+    await waitFor(() =>
+      expect(mocks.tonoSelectServer).toHaveBeenCalledWith(tokyoHy2),
+    )
+    await waitFor(() => expect(mocks.tonoConnect).toHaveBeenCalledTimes(1))
+    expect(mocks.tonoRetryNow).not.toHaveBeenCalled()
+  })
+
   it('does not offer the backup channel for a DNS failure', async () => {
     mocks.tonoConnectProgress.mockResolvedValue({
       steps: [],
