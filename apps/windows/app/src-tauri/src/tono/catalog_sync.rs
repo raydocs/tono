@@ -117,7 +117,7 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
     let client = { state.lock().await.client.clone() };
     let response = client.exit_catalog().await.map_err(|err| err.to_string())?;
 
-    let selection_vanished = {
+    let (selection_vanished, home_changed) = {
         let mut inner = state.lock().await;
         if inner.sign_in_generation != auth_generation {
             return Ok(());
@@ -150,11 +150,18 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
         if let Some(snapshot) = snapshot {
             commands::emit_status(app, &snapshot);
         }
-        vanished
+        let home_changed = installed && !connection::same_residential_route(
+            state.lock().await.applied_routing.as_ref(), response.routing.as_ref(),
+        );
+        (vanished, home_changed)
     };
 
     if selection_vanished && state.lock().await.sign_in_generation == auth_generation {
         connection::selected_node_vanished(state.clone(), app.clone()).await;
+    } else if home_changed && state.lock().await.sign_in_generation == auth_generation {
+        connection::handle_network_change(
+            state, app, crate::tono::connection_health::RecoveryReason::HomeRoutingChanged,
+        ).await;
     }
     Ok(())
 }
@@ -584,6 +591,7 @@ mod tests {
             client_fingerprint: None,
             reality_public_key: "0123456789abcdef0123456789abcdef0123456789a".to_string(),
             reality_short_id: "0123456789abcdef".to_string(),
+            hysteria2: None,
         }
     }
 
@@ -878,7 +886,7 @@ mod tests {
             ..Default::default()
         });
         let err = install_and_persist(&accepted.tracker, &cache, &rejected).unwrap_err();
-        assert_eq!(err, CatalogError::InvalidResponse);
+        assert_eq!(err, CatalogError::LegacyResidentialRoute);
         assert_eq!(accepted.tracker.current_revision(), 5);
         assert_eq!(std::fs::read(cache.path()).unwrap(), verified_bytes);
         assert_eq!(cache.load().unwrap().response.revision, 5);

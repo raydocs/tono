@@ -168,6 +168,8 @@ pub async fn disconnect(state: Arc<TonoState>, app: AppHandle) -> Result<(), Str
 
     let mut inner = state.lock().await;
     inner.fsm.finish_disconnect();
+    inner.applied_exit_transport = None;
+    inner.applied_nodes.clear();
     inner.controller_secret = None;
     inner.controller_port = None;
     inner.kill_switch = None;

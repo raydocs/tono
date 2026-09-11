@@ -750,6 +750,10 @@ pub struct ApiClient<T: HttpTransport, S: CredentialStore> {
     refresh_lock: tokio::sync::Mutex<()>,
 }
 
+/// Opaque, single-use telemetry request with a pinned account credential. Never log or persist it.
+/// The caller rechecks its account generation after preparation, without holding a UI lock over I/O.
+pub struct PreparedTelemetryUpload(ApiRequest);
+
 impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
     pub fn new(base_url: &str, transport: T, credentials: Arc<S>) -> Result<Self, ApiError> {
         Ok(Self {
@@ -973,6 +977,34 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         if receipt.id.trim().is_empty() {
             return Err(ApiError::InvalidResponse);
         }
+        Ok(receipt)
+    }
+
+    pub async fn prepare_telemetry_window_upload(
+        &self,
+        window: &TelemetryWindowReport,
+    ) -> Result<PreparedTelemetryUpload, ApiError> {
+        if window.kind != TELEMETRY_KIND_PERIODIC_WINDOW || window.event_count as usize != window.events.len() {
+            return Err(ApiError::InvalidInput("invalid telemetry window".into()));
+        }
+        let body = serde_json::to_string(&TelemetryWindowRequest { window }).map_err(|_| ApiError::InvalidResponse)?;
+        let (token, _) = self.current_access_token().await?;
+        Ok(PreparedTelemetryUpload(ApiRequest {
+            method: HttpMethod::Post,
+            url: format!("{}/{API_PREFIX}{}", self.base_url, endpoints::TELEMETRY_WINDOWS),
+            bearer: Some(token), json_body: Some(body), binary_body: None, headers: Vec::new(),
+        }))
+    }
+
+    /// Deliberately no credential refresh/replay: it could otherwise adopt a different account
+    /// between an outbox's generation check and sending its old account's observations.
+    pub async fn send_prepared_telemetry_window(
+        &self,
+        prepared: PreparedTelemetryUpload,
+    ) -> Result<TelemetryWindowReceipt, ApiError> {
+        let response = map_status(self.transport.send(prepared.0).await?)?;
+        let receipt: TelemetryWindowReceipt = decode_json(&response)?;
+        if receipt.id.trim().is_empty() { return Err(ApiError::InvalidResponse); }
         Ok(receipt)
     }
 
@@ -1401,6 +1433,43 @@ mod tests {
         let mock = MockTransport::new(handler);
         let client = ApiClient::new(DEFAULT_BASE_URL, mock.clone(), store.clone()).unwrap();
         (client, mock, store)
+    }
+
+    fn automatic_test_window() -> TelemetryWindowReport {
+        serde_json::from_value(serde_json::json!({
+            "schemaVersion":1,"kind":"periodic_window","windowStartMs":1,"windowEndMs":1,
+            "appVersion":"0.0.72","osVersion":"Windows","osArch":"x86_64",
+            "uiState":"connected","accountState":"ready","eventCount":0,"eventsDropped":0,"events":[]
+        })).unwrap()
+    }
+
+    #[tokio::test]
+    async fn prepared_telemetry_does_not_adopt_another_accounts_token() {
+        let (client, mock, _) = test_client(|request| {
+            assert_eq!(request.bearer.as_deref(), Some("test-account-a-access"));
+            json(201, r#"{"id":"test-receipt","receivedAt":1}"#)
+        });
+        client.adopt(&auth_response("test-account-a-access", None)).await.unwrap();
+        let prepared = client.prepare_telemetry_window_upload(&automatic_test_window()).await.unwrap();
+        client.adopt(&auth_response("test-account-b-access", None)).await.unwrap();
+        client.send_prepared_telemetry_window(prepared).await.unwrap();
+        assert_eq!(mock.count_to("telemetry/windows"), 1);
+        assert_eq!(mock.count_to("auth/refresh"), 0);
+    }
+
+    #[tokio::test]
+    async fn prepared_telemetry_401_cannot_refresh_into_a_new_account() {
+        let (client, mock, store) = test_client(|request| {
+            assert!(request.url.ends_with("telemetry/windows"));
+            assert_eq!(request.bearer.as_deref(), Some("test-account-a-access"));
+            json(401, r#"{"error":{"message":"expired"}}"#)
+        });
+        client.adopt(&auth_response("test-account-a-access", None)).await.unwrap();
+        let prepared = client.prepare_telemetry_window_upload(&automatic_test_window()).await.unwrap();
+        store.set_refresh_token("test-account-b-refresh").unwrap();
+        client.adopt(&auth_response("test-account-b-access", None)).await.unwrap();
+        assert_eq!(client.send_prepared_telemetry_window(prepared).await.unwrap_err(), ApiError::Unauthorized);
+        assert_eq!(mock.count_to("auth/refresh"), 0);
     }
 
     fn auth_response(access: &str, refresh: Option<&str>) -> AuthResponse {

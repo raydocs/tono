@@ -5,7 +5,7 @@ pub mod structure;
 pub use structure::{
     AuthenticatedRequest, AuthenticatedSessionRequest, BootstrapPins, ClashConfig, CoreConfig,
     DirectRuntimeReloadResult, DnsProtectionStatus, FinalizeDirectRuntimeReloadRequest,
-    KillSwitchConfig, KillSwitchLockRequest, KillSwitchStatus, KillSwitchStatusMode,
+    KillSwitchConfig, ProtectionCommitRequest, ProtectionProof, KillSwitchLockRequest, KillSwitchStatus, KillSwitchStatusMode,
     MacosKillSwitchConfig, MacosKillSwitchMode, MacosProxyConfig, LEGACY_OWNER_TOKEN_FILE_NAME,
     OWNER_TOKEN_FILE_NAME,
     OwnerCredentials, OwnerIdentity, OwnerSessionHandle, OwnerSessionProof, ProtocolInfo,
@@ -40,6 +40,8 @@ mod legacy_cleanup;
 #[cfg(feature = "standalone")]
 mod logger;
 #[cfg(feature = "standalone")]
+mod local_timing;
+#[cfg(feature = "standalone")]
 mod macos_kill_switch;
 #[cfg(feature = "standalone")]
 mod maintenance;
@@ -57,6 +59,8 @@ mod process;
 mod proxy;
 #[cfg(feature = "standalone")]
 mod reconcile;
+#[cfg(feature = "standalone")]
+mod readiness;
 #[cfg(feature = "standalone")]
 mod repair;
 #[cfg(feature = "standalone")]

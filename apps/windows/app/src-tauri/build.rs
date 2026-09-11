@@ -1,4 +1,50 @@
+#[path = "../../build_support/connection_fingerprint.rs"]
+mod connection_fingerprint;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    connection_fingerprint::emit("TONO_APP_CONNECTION_SOURCE", &[
+        "build.rs",
+        "../../build_support/connection_fingerprint.rs",
+        "../../crates/tono-core/src/config.rs",
+        "../../crates/tono-core/src/node.rs",
+        "../../crates/tono-core/src/node/hysteria2.rs",
+        "../../crates/tono-core/src/auth.rs",
+        "../../crates/tono-core/src/connection.rs",
+        "src/core/service/mod.rs",
+        "src/tono/mod.rs",
+        "src/tono/state.rs",
+        "src/tono/exit_transport.rs",
+        "src/tono/commands/catalog.rs",
+        "src/tono/commands/account.rs",
+        "src/tono/commands/diagnostics.rs",
+        "src/tono/connection/disconnect.rs",
+        "src/tono/connection/endpoints.rs",
+        "src/tono/connection_health.rs",
+        "src/tono/connection_plan.rs",
+        "src/tono/connection_evidence.rs",
+        "src/tono/route_diagnostics.rs",
+        "src/tono/diagnostics.rs",
+        "src/tono/diagnostic_contract.rs",
+        "src/tono/audit.rs",
+        "src/tono/telemetry.rs",
+        "src/tono/automatic_diagnostics.rs",
+        "src/tono/automatic_diagnostics/model.rs",
+        "src/tono/automatic_diagnostics/outbox.rs",
+        "src/tono/connection.rs",
+        "src/tono/connection/stages.rs",
+        "src/tono/connection/cleanup.rs",
+        "src/tono/connection/probes.rs",
+        "src/tono/connection/admission_repair.rs",
+        "src/tono/connection/direct.rs",
+        "src/tono/connection/monitor.rs",
+        "src/tono/connection/switch.rs",
+        "src/tono/connection/reconnect.rs",
+        "src/tono/connection/transaction.rs",
+        "src/tono/connection/failure.rs",
+        "src/tono/connection/controller.rs",
+        "src/tono/connection/physical_route.rs",
+        "src/tono/windows_dns.rs",
+    ])?;
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
         && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc")
     {

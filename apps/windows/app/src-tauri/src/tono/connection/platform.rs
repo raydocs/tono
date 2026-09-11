@@ -202,25 +202,7 @@ pub(super) fn utf16_field(field: &[u16]) -> String {
 /// used to choose a physical interface for optional DIRECT outbounds; it never disables or
 /// removes the matching adapter. Tono's Wintun adapter is included so it cannot become the
 /// physical DIRECT interface during a race with route installation.
-pub(super) fn is_virtual_uplink_description(description: &str) -> bool {
-    const MARKERS: &[&str] = &[
-        "vmware",
-        "vmnet",
-        "virtualbox",
-        "vboxnet",
-        "hyper-v",
-        "hyperv",
-        "vethernet",
-        "wintun",
-        "tono",
-        "wsl",
-        "docker",
-        "loopback",
-        "tap-windows",
-    ];
-    let lowered = description.to_lowercase();
-    MARKERS.iter().any(|marker| lowered.contains(marker))
-}
+pub(super) use super::physical_route::is_virtual_uplink_description;
 
 /// Open the redacted copy with the per-user DACL the rest of Tono's private files get.
 ///

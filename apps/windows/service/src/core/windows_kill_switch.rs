@@ -51,6 +51,11 @@ struct IntentRecord {
     /// `None` is a legacy record: Locked migrated as verified, earlier phases as stale.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     verified: Option<bool>,
+    /// User-session commitment survives replacement of the current Core. An
+    /// interrupted re-admit must never become an auto-releasable first attempt.
+    /// Missing on older records: migrate from their existing verified semantics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    protection_committed: Option<bool>,
     tunnel_interface: String,
     /// Staged core binary path the `ALE_APP_ID` permit is resolved from.
     app_path: String,
@@ -68,6 +73,10 @@ struct IntentRecord {
 }
 
 impl IntentRecord {
+    fn protection_committed(&self) -> bool {
+        self.protection_committed.unwrap_or_else(|| self.is_verified())
+    }
+
     fn is_verified(&self) -> bool {
         self.verified
             .unwrap_or(self.mode == KillSwitchStatusMode::Locked)
@@ -185,6 +194,10 @@ static TEST_PERSIST_FAILURE: AtomicBool = AtomicBool::new(false);
 #[cfg(test)]
 static TEST_INSTALL_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
 #[cfg(test)]
+static TEST_VERIFY_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
+#[cfg(test)]
+static TEST_VERIFY_DRIFT_ONCE: AtomicBool = AtomicBool::new(false);
+#[cfg(test)]
 static TEST_PERSIST_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
 static NEXT_DIRECT_RELOAD_ID: AtomicU64 = AtomicU64::new(1);
 /// Longer than the App's absolute connect transaction: while this bracket expires the physical
@@ -218,7 +231,7 @@ const WATCHDOG_PERIOD: std::time::Duration = std::time::Duration::from_secs(1);
 /// how long a **successful** tick can legitimately take.
 ///
 /// One refresh interval is `WATCHDOG_PERIOD` (1 s) plus the verify itself, which is one
-/// `FwpmFilterGetByKey0` RPC to BFE per expected filter — 30-60 round trips. This module
+/// exact provider-scoped enumeration against BFE. This module
 /// already declares how slow that is allowed to get while still being a success:
 /// `WFP_SLOW_CALL` (2 s) is "pathological but reportable", not "failed"; the failure budget is
 /// `WFP_CALL_TIMEOUT` (25 s). At the old 1.5 s the cache expired *before* a merely slow tick
@@ -385,6 +398,7 @@ fn disarmed_tombstone() -> IntentRecord {
         wanted: false,
         mode: KillSwitchStatusMode::Blocked,
         verified: Some(false),
+        protection_committed: None,
         tunnel_interface: String::new(),
         app_path: String::new(),
         endpoints: Vec::new(),
@@ -540,6 +554,7 @@ fn rule_config_for(armed: &Armed, current_core: Option<CoreInstance>) -> RuleCon
             .intent
             .api_host_ips
             .iter()
+            .filter(|_| !armed.intent.protection_committed())
             .filter_map(|ip| ip.parse::<IpAddr>().ok())
             .collect(),
         tun_luid,
@@ -941,6 +956,17 @@ async fn verify_live_unlocked_for(armed: &Armed, current_core: Option<CoreInstan
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
         let _ = expected;
+        #[cfg(test)]
+        {
+            TEST_VERIFY_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
+            if TEST_VERIFY_DRIFT_ONCE.swap(false, Ordering::Relaxed)
+                || TEST_INSTALL_FAILURE.load(Ordering::Relaxed)
+                || TEST_AMBIGUOUS_INSTALL_FAILURE.load(Ordering::Relaxed)
+            {
+                note_verify(false);
+                bail!("simulated exact WFP readback failure");
+            }
+        }
         TUNNEL_PERMIT_RENDERED.store(tunnel_permit_expected, Ordering::Relaxed);
         Ok(())
     }
@@ -1097,15 +1123,19 @@ pub(crate) async fn arm_bootstrap(
     }
     let api_host_ips = admit_api_host_ips(&config.bootstrap_api_hosts);
     let _operation = WFP_OPERATION.lock().await;
-    // A new StartClash is a new admit. Inheriting `verified` from the previous
-    // node left fail_connect treating TUN failure as KeepBlocking (protected
-    // offline, domestic DNS dead). In-place reconnect still fail-closes via the
-    // App FSM `protection_committed` latch; MarkVerified runs again after TUN.
+    // Runtime admission is fresh, but an established user session must survive
+    // this Core replacement even if the Service restarts before MarkVerified.
+    let protection_committed = armed_guard().as_ref().is_some_and(|previous| {
+        previous.intent.wanted
+            && previous.intent.owner_key.as_deref() == Some(owner_key)
+            && previous.intent.protection_committed()
+    });
     let armed = Armed {
         intent: IntentRecord {
             wanted: true,
             mode: KillSwitchStatusMode::Bootstrap,
             verified: Some(false),
+            protection_committed: Some(protection_committed),
             tunnel_interface: config.tunnel_interface.trim().to_owned(),
             app_path: app_path.to_owned(),
             endpoints: config.proxy_endpoints.clone(),
@@ -1127,29 +1157,78 @@ pub(crate) async fn arm_bootstrap(
     record_outcome(install_unlocked(&armed).await)
 }
 
-/// Commit the full app verification barrier for the active logical session.
+/// Legacy callers still get an empty response, but never bypass the fresh proof.
 pub(crate) async fn mark_verified(owner_key: &str) -> Result<()> {
+    verify_and_commit_unbound(owner_key, None, 0).await.map(|_| ())
+}
+
+pub(crate) async fn verify_and_commit(
+    owner_key: &str, expected: &crate::ProtectionCommitRequest, session_generation: u64,
+) -> Result<crate::ProtectionProof> {
+    verify_and_commit_unbound(owner_key, Some(CoreInstance {
+        pid: expected.core_pid, generation: expected.core_generation,
+    }), session_generation).await
+}
+
+async fn verify_and_commit_unbound(owner_key: &str, expected: Option<CoreInstance>, session_generation: u64)
+    -> Result<crate::ProtectionProof>
+{
     ensure_supported()?;
     let _operation = WFP_OPERATION.lock().await;
-    let mut armed = ARMED
-        .lock()
-        .unwrap()
-        .clone()
-        .context("kill switch is not armed")?;
-    if armed.intent.owner_key.as_deref() != Some(owner_key) {
-        bail!("kill switch belongs to a different owner");
-    }
-    if armed.intent.mode != KillSwitchStatusMode::Locked {
+    let mut armed = armed_guard().clone().context("kill switch is not armed")?;
+    if armed.intent.owner_key.as_deref() != Some(owner_key) { bail!("kill switch belongs to a different owner"); }
+    if !armed.intent.wanted || armed.intent.mode != KillSwitchStatusMode::Locked {
         bail!("kill switch must be locked before verification");
     }
-    if armed.intent.is_verified() && armed.intent.verified == Some(true) {
-        return Ok(());
+    let core = current_core_instance_authoritative().await.context("core unavailable before protection commit")?;
+    if expected.is_some_and(|expected| expected != core) || armed.core_instance != Some(core) {
+        bail!("core identity changed before protection commit");
     }
-    armed.intent.verified = Some(true);
-    armed.intent.updated_at = now_unix();
-    atomic_write(&intent_path(), &serde_json::to_vec_pretty(&armed.intent)?).await?;
-    *armed_guard() = Some(armed);
-    Ok(())
+    let proof: Result<()> = async {
+        prove_current_tunnel_luid(&armed).await?;
+        if tunnel_permit_luid(&armed, Some(core)).is_none() { bail!("no current tunnel permit"); }
+        if let Some(reason) = direct_reload_invalidation_reason(&armed, Some(core), armed.tun_luid, std::time::Instant::now()) {
+            bail!(reason);
+        }
+        if !(armed.intent.is_verified() && armed.intent.protection_committed() && armed.intent.verified == Some(true)) {
+            // The App already passed native DNS + fake-ip. Persist its decision to
+            // KEEP protection before issuing the final fresh receipt. A crash or
+            // subsequent failed proof restores Blocked, never an uncommitted release.
+            // Do disk I/O BEFORE the exact read so slow fsync cannot age the receipt.
+            armed.intent.verified = Some(true);
+            armed.intent.protection_committed = Some(true);
+            armed.intent.updated_at = now_unix();
+            atomic_write(&intent_path(), &serde_json::to_vec_pretty(&armed.intent)?).await?;
+            *armed_guard() = Some(armed.clone());
+        }
+        // Every call, including an idempotent retry, reads the actual exact kernel set.
+        verify_live_unlocked_for(&armed, Some(core)).await?;
+        prove_current_tunnel_luid(&armed).await?;
+        if current_core_instance_authoritative().await != Some(core) { bail!("core changed during protection proof"); }
+        if let Some(reason) = direct_reload_invalidation_reason(&armed, Some(core), armed.tun_luid, std::time::Instant::now()) {
+            bail!(reason);
+        }
+        Ok(())
+    }.await;
+    if let Err(error) = proof {
+        note_verify(false);
+        // An unexpected physical permit is not merely a diagnostic failure. Attempt
+        // exact Blocked immediately; retain the established commitment on failure.
+        let retract = transition_direct_to_blocked_unlocked(armed, current_core_instance_for_direct_security(), None).await;
+        return Err(error.context(if retract.is_ok() { "protection proof failed; traffic Blocked" }
+            else { "protection proof failed; Blocked reconciliation also failed" }));
+    }
+    note_verify(true);
+    *last_error_guard() = None;
+    Ok(crate::ProtectionProof {
+        session_generation, core_pid: core.pid, core_generation: core.generation,
+        tunnel_luid: armed.tun_luid.context("missing proved tunnel")?,
+        kill_switch: KillSwitchStatus {
+            wanted: true, verified: true, live: true, mode: KillSwitchStatusMode::Locked,
+            tunnel_permit_rendered: true, endpoints: armed.intent.endpoints.clone(),
+            direct_endpoint_digest: crate::direct_endpoint_digest(&armed.direct_endpoints).map_err(anyhow::Error::msg)?, last_error: None,
+        },
+    })
 }
 
 /// Replace the live Reality destination permits without stopping the core.
@@ -1225,6 +1304,9 @@ pub(crate) fn authorize_write_for(
     }
 }
 
+#[cfg(test)]
+static TEST_CURRENT_TUN_LUID: AtomicU64 = AtomicU64::new(0);
+
 async fn resolve_luid(name: &str) -> Result<u64> {
     #[cfg(all(windows, not(feature = "test")))]
     {
@@ -1237,7 +1319,10 @@ async fn resolve_luid(name: &str) -> Result<u64> {
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
         let _ = name;
-        Ok(0)
+        #[cfg(test)]
+        { Ok(TEST_CURRENT_TUN_LUID.load(Ordering::Relaxed)) }
+        #[cfg(not(test))]
+        { Ok(0) }
     }
 }
 
@@ -1487,9 +1572,8 @@ async fn transition_direct_to_blocked_unlocked(
 ) -> Result<()> {
     let mut retry_state = armed.clone();
     let mut blocked = armed;
-    // Protected Offline's recovery channel must include addresses learned
-    // after StartClash. The HTTP client already pins them; without this
-    // union WFP would still only permit the connect-time set.
+    // Preserve learned pins for future control-plane use; a committed Blocked
+    // policy never renders them as a physical permit.
     apply_learned_bootstrap_pins(&mut blocked.intent);
     blocked.direct_endpoints.clear();
     blocked.direct_reload = next_lease;
@@ -1504,7 +1588,19 @@ async fn transition_direct_to_blocked_unlocked(
     // permits. Serialization is captured separately for the same reason — both proofs are always
     // attempted.
     let encoded = serde_json::to_vec_pretty(&blocked.intent);
-    let install = install_unlocked_for(&blocked, current_core).await;
+    // Repeated stop/start barriers often ask for this identical Blocked set.
+    // Reuse only after a NEW exact kernel readback under WFP_OPERATION, never
+    // an in-memory/TTL receipt. Drift or unreadable state falls back to install.
+    let unchanged = retry_state.intent.mode == KillSwitchStatusMode::Blocked
+        && retry_state.direct_endpoints.is_empty() && retry_state.tun_luid.is_none()
+        && wfp_model::expected_filters(&rule_config_rendering(&retry_state, current_core)) == wfp_model::expected_filters(&rule_config_rendering(&blocked, current_core));
+    let install = if unchanged && verify_live_unlocked_for(&blocked, current_core).await.is_ok() {
+        note_verify(true);
+        tracing::debug!("wfp: repeated Blocked barrier proved live without reinstall");
+        Ok(())
+    } else {
+        install_unlocked_for(&blocked, current_core).await
+    };
     let persist = match encoded {
         Ok(encoded) => atomic_write(&intent_path(), &encoded).await,
         Err(error) => Err(error.into()),
@@ -1944,16 +2040,16 @@ pub(crate) async fn retract_direct_before_core_replacement() -> Result<()> {
     let Some(armed) = armed_guard().clone() else {
         return Ok(());
     };
-    // Even an empty volatile receipt is not proof that live WFP is empty: session filters survive
-    // a Service-process restart while BFE remains running, and startup's first exact install may
-    // have failed. Always overwrite the provider set before allowing the same App-ID path to run.
+    // Empty volatile state alone is not proof: session filters survive Service
+    // restart. The transition either proves the exact set in BFE NOW or repairs it
+    // before the same App-ID path may run. No cached proof crosses this barrier.
     transition_direct_to_blocked_unlocked(armed, None, None)
         .await
         .context("could not prove exact Blocked WFP before replacing Core; replacement is refused")
 }
 
-/// Disconnected-but-armed ("Protected Offline"): floor + endpoint/DNS rules stay, the API
-/// recovery channel re-opens, the tunnel permit is gone.
+/// Protected Offline retains the floor and core endpoint; TUN and machine-wide API
+/// permits are absent. Only explicit release can retire the protection commitment.
 async fn restrict_bootstrap_unlocked() -> Result<()> {
     let armed = armed_guard().clone().context("kill switch is not armed")?;
     let current_core = current_core_instance().await;
@@ -2120,6 +2216,7 @@ fn emergency_armed() -> Armed {
             wanted: true,
             mode: KillSwitchStatusMode::Blocked,
             verified: Some(true),
+            protection_committed: None,
             tunnel_interface: String::new(),
             app_path: String::new(),
             endpoints: Vec::new(),
@@ -2464,7 +2561,7 @@ pub async fn retire_unverified_on_service_start() -> Result<bool> {
     let Some(armed) = armed_guard().clone() else {
         return Ok(false);
     };
-    if armed.intent.is_verified() {
+    if armed.intent.protection_committed() {
         return Ok(false);
     }
 
@@ -2710,6 +2807,7 @@ pub async fn emergency_disarm_windows_kill_switch() -> Result<()> {
         wanted: false,
         mode: KillSwitchStatusMode::Blocked,
         verified: Some(false),
+        protection_committed: None,
         tunnel_interface: String::new(),
         app_path: String::new(),
         endpoints: Vec::new(),
@@ -2842,7 +2940,9 @@ pub(crate) async fn status() -> KillSwitchStatus {
     };
     KillSwitchStatus {
         wanted: armed.intent.wanted,
-        verified: armed.intent.is_verified(),
+        // Wire `verified` is the logical session commitment, not permission to
+        // skip the current Core's Locked/live/TUN/DNS admission checks.
+        verified: armed.intent.protection_committed(),
         live,
         mode: armed.intent.mode,
         // What the last render decided, not what a render right now would decide: this is a
@@ -2953,6 +3053,7 @@ mod tests {
             // Existing tests use this as an established-session fixture; migration behavior is
             // covered separately with JSON that omits the field.
             verified: Some(true),
+            protection_committed: None,
             tunnel_interface: "Tono".to_owned(),
             app_path: "/opt/tono/mihomo".to_owned(),
             endpoints: test_config().proxy_endpoints,
@@ -2984,9 +3085,25 @@ mod tests {
         locked_direct_test_session().await?;
         mark_verified("owner-alice").await?;
         arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
-        assert!(ARMED.lock().unwrap().as_ref().unwrap().intent.is_verified());
+        {
+            let armed = armed_guard();
+            let intent = &armed.as_ref().unwrap().intent;
+            assert!(!intent.is_verified(), "new Core still needs local admission");
+            assert!(intent.protection_committed());
+            assert!(rule_config_for(armed.as_ref().unwrap(), None).api_host_ips.is_empty(),
+                "a committed re-admit must not reopen a machine-wide API permit");
+        }
+        // Simulate a Service restart during re-admission; a second restart must
+        // not turn the now-Blocked record into an initial-attempt release either.
+        *armed_guard() = None;
+        restore_on_service_start().await?;
+        assert!(!retire_unverified_on_service_start().await?);
+        *armed_guard() = None;
+        restore_on_service_start().await?;
+        assert!(!retire_unverified_on_service_start().await?);
+        assert!(status().await.verified);
         arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-bob").await?;
-        assert!(!ARMED.lock().unwrap().as_ref().unwrap().intent.is_verified());
+        assert!(!armed_guard().as_ref().unwrap().intent.protection_committed());
         cleanup().await;
         Ok(())
     }
@@ -3004,6 +3121,66 @@ mod tests {
         mark_verified("owner-alice").await?;
         mark_verified("owner-alice").await?;
         assert!(ARMED.lock().unwrap().as_ref().unwrap().intent.is_verified());
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn fresh_commit_rechecks_idempotent_requests_and_blocks_drift() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4242, 1))).await;
+        lock(None).await?;
+        let expected = crate::ProtectionCommitRequest { core_pid: 4242, core_generation: 1 };
+        let before = TEST_VERIFY_ATTEMPTS.load(Ordering::Relaxed);
+        let receipt = verify_and_commit("owner-alice", &expected, 17).await?;
+        assert_eq!((receipt.session_generation, receipt.core_pid, receipt.core_generation), (17, 4242, 1));
+        assert!(receipt.kill_switch.live && receipt.kill_switch.verified && receipt.kill_switch.tunnel_permit_rendered);
+        let writes = TEST_PERSIST_ATTEMPTS.load(Ordering::Relaxed);
+        verify_and_commit("owner-alice", &expected, 17).await?;
+        assert_eq!(TEST_VERIFY_ATTEMPTS.load(Ordering::Relaxed) - before, 2);
+        assert_eq!(TEST_PERSIST_ATTEMPTS.load(Ordering::Relaxed), writes, "idempotence skips only the duplicate disk write");
+        TEST_VERIFY_DRIFT_ONCE.store(true, Ordering::Relaxed);
+        assert!(verify_and_commit("owner-alice", &expected, 17).await.is_err());
+        let status = status().await;
+        assert_eq!(status.mode, KillSwitchStatusMode::Blocked);
+        assert!(status.verified, "drift must not revoke the logical protection commitment");
+        assert!(!status.tunnel_permit_rendered);
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn fresh_commit_rejects_a_core_replaced_since_fake_ip_and_wrong_owner() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4242, 1))).await;
+        lock(None).await?;
+        let expected = crate::ProtectionCommitRequest { core_pid: 4242, core_generation: 1 };
+        assert!(verify_and_commit("other-owner", &expected, 17).await.is_err());
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4242, 2))).await;
+        assert!(verify_and_commit("owner-alice", &expected, 17).await.is_err());
+        assert!(!armed_guard().as_ref().unwrap().intent.protection_committed());
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn same_pid_tun_recreation_cannot_receive_a_fresh_commit_receipt() -> Result<()> {
+        struct Reset;
+        impl Drop for Reset { fn drop(&mut self) { TEST_CURRENT_TUN_LUID.store(0, Ordering::Relaxed); } }
+        let _reset = Reset;
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4242, 1))).await;
+        lock(None).await?;
+        TEST_CURRENT_TUN_LUID.store(55, Ordering::Relaxed);
+        let expected = crate::ProtectionCommitRequest { core_pid: 4242, core_generation: 1 };
+        assert!(verify_and_commit("owner-alice", &expected, 17).await.is_err());
+        assert_eq!(status().await.mode, KillSwitchStatusMode::Blocked);
         cleanup().await;
         Ok(())
     }
@@ -3032,6 +3209,8 @@ mod tests {
         TEST_AMBIGUOUS_INSTALL_FAILURE.store(false, Ordering::Relaxed);
         TEST_PERSIST_ATTEMPTS.store(0, Ordering::Relaxed);
         TEST_INSTALL_ATTEMPTS.store(0, Ordering::Relaxed);
+        TEST_VERIFY_ATTEMPTS.store(0, Ordering::Relaxed);
+        TEST_VERIFY_DRIFT_ONCE.store(false, Ordering::Relaxed);
         crate::core::dns::test_hooks::set_live_dns_on_loopback(false);
         crate::core::manager::set_running_core_identity_for_kill_switch_tests(None).await;
         *ARMED.lock().unwrap() = None;
@@ -3049,6 +3228,25 @@ mod tests {
                 Err(error) => panic!("test cleanup failed: {error}"),
             }
         }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn repeated_blocked_barrier_reads_live_set_without_reinstall_and_repairs_drift() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        retract_direct_before_core_replacement().await?;
+        TEST_INSTALL_ATTEMPTS.store(0, Ordering::Relaxed);
+        TEST_VERIFY_ATTEMPTS.store(0, Ordering::Relaxed);
+        retract_direct_before_core_replacement().await?;
+        assert_eq!(TEST_INSTALL_ATTEMPTS.load(Ordering::Relaxed), 0);
+        assert_eq!(TEST_VERIFY_ATTEMPTS.load(Ordering::Relaxed), 1);
+        TEST_VERIFY_DRIFT_ONCE.store(true, Ordering::Relaxed);
+        retract_direct_before_core_replacement().await?;
+        assert_eq!(TEST_INSTALL_ATTEMPTS.load(Ordering::Relaxed), 1, "kernel drift must be repaired, never cached away");
+        assert_eq!(TEST_VERIFY_ATTEMPTS.load(Ordering::Relaxed), 2);
+        cleanup().await;
+        Ok(())
     }
 
     #[tokio::test]
@@ -3615,6 +3813,7 @@ mod tests {
             wanted: true,
             mode: KillSwitchStatusMode::Locked,
             verified: Some(true),
+            protection_committed: None,
             tunnel_interface: "Tono".to_owned(),
             app_path: r"C:\Program Files\Tono\verge-mihomo.exe".to_owned(),
             endpoints: Vec::new(),
@@ -4453,12 +4652,11 @@ mod tests {
         );
 
         TEST_INSTALL_ATTEMPTS.store(0, Ordering::Relaxed);
+        TEST_VERIFY_ATTEMPTS.store(0, Ordering::Relaxed);
         retract_direct_before_core_replacement().await?;
-        assert_eq!(
-            TEST_INSTALL_ATTEMPTS.load(Ordering::Relaxed),
-            1,
-            "empty memory is not proof after a Service restart; ARMED must overwrite live WFP"
-        );
+        assert_eq!(TEST_INSTALL_ATTEMPTS.load(Ordering::Relaxed), 0);
+        assert_eq!(TEST_VERIFY_ATTEMPTS.load(Ordering::Relaxed), 1,
+            "empty memory is not proof; the same Blocked set still needs new exact kernel readback");
         cleanup().await;
         Ok(())
     }

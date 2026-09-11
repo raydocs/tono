@@ -40,26 +40,7 @@ describe('ConnectPill five states', () => {
     expect(screen.queryByText('tono.pill.title.connectedUnverified')).toBeNull()
   })
 
-  it('degraded connected without exit proof offers restore', () => {
-    const onConnect = vi.fn()
-    const onDisconnect = vi.fn()
-    render(
-      <ConnectPill
-        uiState="connected"
-        protectionConfirmed
-        exitVerified={false}
-        onConnect={onConnect}
-        onDisconnect={onDisconnect}
-      />,
-    )
-    expect(screen.getByText('tono.pill.title.connectedUnverified')).toBeDefined()
-    expect(screen.getByText('tono.pill.subtitle.connectedUnverified')).toBeDefined()
-    expect(screen.queryByText('tono.pill.subtitle.tapToRestore')).toBeNull()
-    fireEvent.click(pillButton())
-    expect(onDisconnect).toHaveBeenCalledTimes(1)
-  })
-
-  it('names the recommended catalog node when the exit is unverified', () => {
+  it('connected stays Connected even when exitVerified is false', () => {
     const onDisconnect = vi.fn()
     render(
       <ConnectPill
@@ -71,8 +52,11 @@ describe('ConnectPill five states', () => {
         onDisconnect={onDisconnect}
       />,
     )
-    expect(screen.getByText('tono.pill.subtitle.connectedUnverifiedNamed')).toBeDefined()
+    expect(screen.getByText('tono.pill.title.connected')).toBeDefined()
+    expect(screen.getByText('tono.pill.subtitle.tapToDisconnect')).toBeDefined()
+    expect(screen.queryByText('tono.pill.title.connectedUnverified')).toBeNull()
     expect(screen.queryByText('tono.pill.subtitle.connectedUnverified')).toBeNull()
+    expect(screen.queryByText('tono.pill.subtitle.connectedUnverifiedNamed')).toBeNull()
     fireEvent.click(pillButton())
     expect(onDisconnect).toHaveBeenCalledTimes(1)
   })

@@ -5,16 +5,20 @@
 //! modules are peeled.
 
 pub mod audit;
+mod automatic_diagnostics;
 pub mod bootstrap;
 mod browser_dns;
 pub mod catalog_sync;
 pub mod commands;
 pub mod connection;
+mod connection_evidence;
+mod route_diagnostics;
 mod connection_health;
 mod connection_plan;
 mod connection_routes;
 pub mod credentials;
 pub mod diagnostics;
+mod diagnostic_contract;
 mod integration_profile;
 pub mod policy_sync;
 pub mod protected_probe;
@@ -24,6 +28,7 @@ pub mod steps;
 pub mod log_upload;
 pub mod telemetry;
 pub mod transport;
+pub mod exit_transport;
 pub mod update_handoff;
 #[cfg(windows)]
 mod windows_dns;

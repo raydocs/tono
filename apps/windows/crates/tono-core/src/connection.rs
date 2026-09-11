@@ -3,7 +3,7 @@
 //! Pure logic only: stages, UI state derivation, reconnect backoff, and the
 //! failure decision table. Failures before admit (including after WFP is
 //! armed) FullRelease. After protection is committed at admit — together with
-//! exit HTTPS proof — the session stays fail-closed until explicit Disconnect,
+//! local WFP and system DNS proof — the session stays fail-closed until explicit Disconnect,
 //! Sign Out, or Quit. Reconnect reads that commit latch.
 
 use std::time::Duration;
@@ -271,10 +271,10 @@ impl ConnectionFsm {
         self.mark_protection_committed();
     }
 
-    /// A user connect to a different node is a new admit. Keep WFP armed if it
-    /// already is; drop the previous node's commit so a TUN failure FullReleases.
+    /// A different exit needs fresh runtime admission, not a new user protection
+    /// session. Once committed, only explicit release may clear that commitment.
+    /// In particular a failed cold switch or retry after a hot switch stays blocked.
     pub fn begin_fresh_admit(&mut self) {
-        self.protection_committed = false;
         self.exit_verified = false;
     }
 
@@ -618,18 +618,21 @@ mod tests {
     }
 
     #[test]
-    fn switching_nodes_clears_the_previous_admit() {
+    fn switching_nodes_preserves_the_user_protection_commitment() {
         let mut fsm = ConnectionFsm::new();
         fsm.begin_connect();
         fsm.mark_kill_switch_armed();
         fsm.mark_protection_committed();
         fsm.mark_exit_verified();
+        fsm.connect_succeeded().unwrap();
+        fsm.tunnel_died();
+        fsm.begin_connect();
         fsm.begin_fresh_admit();
-        assert!(!fsm.protection_committed());
+        assert!(fsm.protection_committed());
         assert!(!fsm.exit_verified());
         assert!(fsm.kill_switch_armed());
-        assert_eq!(fsm.connect_failed(), FailureAction::FullRelease);
-        assert_eq!(fsm.status().ui_state(), UiState::NotConnected);
+        assert_eq!(fsm.connect_failed(), FailureAction::KeepBlockingAndReconnect);
+        assert_eq!(fsm.status().ui_state(), UiState::ProtectedOffline);
     }
 
     #[test]

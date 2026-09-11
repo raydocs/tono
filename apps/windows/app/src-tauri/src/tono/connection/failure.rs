@@ -77,6 +77,8 @@ pub fn map_service_ready_error(err: &anyhow::Error) -> String {
 /// retried: each attempt is a full Service lifecycle IPC (up to 65 s), and blind retries
 /// after a transport timeout can also race a still-running lock on the Service side.
 pub fn is_retryable_lock_error(message: &str) -> bool {
+    // The new Service already spent the full event-assisted readiness window.
+    if message.contains("TONO_TUN_WAIT_EXHAUSTED") { return false; }
     let lower = message.to_lowercase();
     // Primary: ConvertInterfaceAliasToLuid failed because the adapter is not registered yet.
     if lower.contains("did not resolve to a luid") {

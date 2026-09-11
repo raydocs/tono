@@ -94,6 +94,17 @@ pub async fn tono_audit_log_path(state: tauri::State<'_, Arc<TonoState>>) -> Res
 
 // ---- Diagnostics (user-initiated upload) ----
 
+/// Separate, enum-only automatic incident channel. Raw-log/timeline consent is unchanged.
+#[tauri::command]
+pub async fn tono_automatic_diagnostics_enabled(state: tauri::State<'_, Arc<TonoState>>) -> Result<bool, String> {
+    Ok(state.audit().automatic_diagnostics_enabled())
+}
+
+#[tauri::command]
+pub async fn tono_set_automatic_diagnostics_enabled(state: tauri::State<'_, Arc<TonoState>>, enabled: bool) -> Result<(), String> {
+    state.audit().set_automatic_diagnostics_enabled(enabled)
+}
+
 /// How long a single environment probe (Service protocol, DNS status) may
 /// take before the report simply records "unknown" for it. Assembling
 /// diagnostics must never hang the very UI the user reached for when
@@ -156,11 +167,19 @@ async fn collect_diagnostics_report(
     if let Some(secret) = &inner.controller_secret {
         known_secrets.push(secret.clone());
     }
-    for node in &inner.nodes {
+    for node in inner.nodes.iter().chain(&inner.applied_nodes) {
         known_secrets.push(node.uuid.clone());
         known_secrets.push(node.reality_public_key.clone());
         known_secrets.push(node.reality_short_id.clone());
         known_secrets.push(node.server.to_string());
+        if let Some(endpoint) = &node.hysteria2 {
+            known_secrets.extend(endpoint.diagnostic_secrets().map(str::to_owned));
+        }
+    }
+    for routing in [inner.routing.as_ref(), inner.applied_routing.as_ref()].into_iter().flatten() {
+        if let Some(home) = &routing.home_socks5 {
+            known_secrets.extend([home.host.clone(), home.username.clone(), home.password.clone()]);
+        }
     }
     if let Ok(Some(token)) = inner.credentials.refresh_token() {
         known_secrets.push(token);
@@ -178,6 +197,7 @@ async fn collect_diagnostics_report(
         dns: dns.as_ref(),
         failed_stage: inner.failed_stage,
         connect_error: inner.connect_error.as_deref(),
+        failure_evidence: inner.failure_evidence.as_ref(),
         overlay_skip: inner.optional_direct_skip.as_deref(),
         retry_attempt: inner.retry_attempt,
         steps: &steps,

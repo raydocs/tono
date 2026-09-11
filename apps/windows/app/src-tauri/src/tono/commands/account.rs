@@ -313,6 +313,8 @@ pub async fn tono_sign_out(state: tauri::State<'_, Arc<TonoState>>, app: AppHand
         return Err("sign-out was superseded by a newer authentication action".to_string());
     }
     inner.fsm.sign_out_or_quit();
+    inner.applied_exit_transport = None;
+    inner.applied_nodes.clear();
     inner.account = None;
     inner.account_state = AccountState::SignedOut;
     inner.challenge_id = None;

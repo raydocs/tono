@@ -13,9 +13,9 @@ use crate::tono::{
     audit::{self, AuditEvent},
     bootstrap, commands, signed_apps,
     connection_health::{
-        CoreSample, HealthLegs, NetworkChangeOutcome, classify_core_sample, connection_loop_continues,
-        core_change_fires, health_threshold_reached, kill_switch_unhealthy, monitor_requires_reconnect,
-        network_change_uses_probe_veto, network_event_fires, protected_dns_unhealthy,
+        CoreSample, HealthLegs, NetworkChangeOutcome, RecoveryReason, adapter_noise_keeps_session,
+        classify_core_sample, connection_loop_continues, core_change_fires, kill_switch_unhealthy,
+        monitor_requires_reconnect, network_event_fires, protected_dns_unhealthy,
     },
     connection_plan::{guard_rejection_is_transient, reconnect_allowed},
     state::TonoState,
@@ -28,44 +28,11 @@ use super::{
 use super::direct::dns_query_a;
 use super::reconnect::schedule_reconnect;
 use super::controller::{CONTROLLER_HTTP_TIMEOUT, controller_client, controller_url};
-use super::probes::{probe_exit_once, verify_tun_data_plane};
+use super::probes::probe_exit_once;
+use super::physical_route::{RepairBudget, RouteEvent, RouteTracker, observe_route};
 
-/// `lookup_host` delegates to the OS resolver and has no Tokio timeout of its own. Bound every
-/// lookup so a broken adapter/resolver cannot strand Connecting forever.
-pub(super) const DNS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(2);
-
-/// network_events poll cadence while Connected.
+/// Connected-lifetime observation cadence, unchanged by the local deduplication.
 pub(super) const NETWORK_MONITOR_INTERVAL: Duration = Duration::from_secs(2);
-
-/// F2: exit-probe cadence while Connected (the Mac "9.17 h fake-green"
-/// lesson — a silent tunnel must be caught by probing, not by watching).
-pub(super) const EXIT_PROBE_INTERVAL: Duration = Duration::from_secs(120);
-
-/// How long a successful data-plane proof stands in for the next network-change event.
-///
-/// The event-driven probe below exists to tell a real network change apart from Tono's own
-/// asynchronous WinTUN/route callbacks, and that reasoning is unchanged. What was missing is a
-/// ceiling on how often it may run: the monitor ticks every
-/// [`NETWORK_MONITOR_INTERVAL`], and on a machine whose adapters churn — a "network optimiser",
-/// a second VPN, a flapping driver — Windows reports a new counter on nearly every tick. One
-/// customer's audit log shows thirty-five events in four minutes, each starting a fresh
-/// multi-origin HTTPS proof whose own budget is several seconds, so the probes overlapped and
-/// piled up on a client that was otherwise healthy. Inside this window a proof that already
-/// succeeded is reused; outside it the probe runs exactly as before. Detection is not weakened:
-/// the periodic probe, the kill-switch leg, the DNS leg and the core-identity leg are all
-/// untouched, and a burst that follows a genuine break still fails the first probe.
-pub(super) const NETWORK_EVENT_PROBE_COOLDOWN: Duration = Duration::from_secs(15);
-
-/// How long a recovered-in-place verdict stands before the same standing failure may fire the
-/// monitor again.
-///
-/// A leg that stays unhealthy while the tunnel keeps carrying traffic — a Service that never
-/// answers again, a wedged WFP — reaches [`HEALTH_FAILURE_THRESHOLD`] two ticks after every
-/// re-seed, and every firing costs a warn line, an audit record and a three-origin HTTPS proof.
-/// Unbounded that runs for the life of the session and rotates the audit file, erasing the record
-/// of the very failure it is reporting. Inside this window the last proof still stands; a core
-/// restart or a failed data-plane proof is fresh evidence and is never held back by it.
-pub(super) const IN_PLACE_RECOVERY_COOLDOWN: Duration = Duration::from_secs(120);
 
 /// The connected-lifetime monitor's tick source (H7). `Delay` re-bases the schedule after a slow
 /// tick, so every threshold in [`HealthLegs`] counts genuinely *separate* observations spaced by
@@ -79,9 +46,9 @@ pub(super) fn monitor_interval() -> tokio::time::Interval {
 
 /// Remember control-plane addresses only from the protected resolver.
 ///
-/// `bootstrap_hosts` still uses the system resolver so a first connect can
-/// widen WFP for this session, but those answers must not be persisted: a
-/// poisoned physical DNS would otherwise become tomorrow's recovery pin.
+/// First connect uses compiled and Service-owned learned pins. Fresh answers
+/// are learned here through the protected resolver, never persisted from an
+/// unprotected physical-DNS lookup.
 ///
 /// Runs once immediately, then every 15 minutes while this generation stays
 /// connected, so a rotated anycast edge is learned without waiting for the
@@ -265,7 +232,12 @@ pub(super) async fn spawn_control_plane_pin_refresh(
                             error: redacted,
                         });
                         if !connection_loop_continues(
-                            handle_network_change_inner(&task_state, &task_app, false).await,
+                            handle_network_change_inner(
+                                &task_state,
+                                &task_app,
+                                RecoveryReason::BrowserDnsFailed,
+                            )
+                            .await,
                         ) {
                             return;
                         }
@@ -277,7 +249,14 @@ pub(super) async fn spawn_control_plane_pin_refresh(
                         continue;
                     }
                     if signed_wechat_paths_require_reconnect(&task_state, generation).await {
-                        if !connection_loop_continues(handle_network_change(&task_state, &task_app).await) {
+                        if !connection_loop_continues(
+                            handle_network_change(
+                                &task_state,
+                                &task_app,
+                                RecoveryReason::DirectAppPathsChanged,
+                            )
+                            .await,
+                        ) {
                             return;
                         }
                         // Recovered in place: no reconnect ran, so the applied path set cannot
@@ -532,122 +511,37 @@ pub(super) async fn spawn_network_monitor(state: &Arc<TonoState>, app: &AppHandl
     inner.tasks.network_monitor = Some(handle);
 }
 
-/// F2 leg 2: periodically repeat the same authoritative multi-origin real App request used at
-/// Connect. The controller delay API is deliberately excluded: under `unified-delay` it is a
-/// doubled measurement and persistent 504s on distant Reality exits do not prove user traffic is
-/// dead. A single public origin is likewise insufficient: every independent TLS target must fail
-/// before this leg reports failure.
-pub(super) async fn periodic_data_plane_probe_failed(state: &Arc<TonoState>) -> bool {
-    match verify_tun_data_plane().await {
-        Ok(()) => false,
-        Err(err) => {
-            state.audit().log(AuditEvent::HealthProbeFail {
-                probe: "tunDataPlane",
-                error: err,
-            });
-            true
-        }
-    }
-}
-
-/// Whether the in-place recovery hold may still stand in for a teardown the Service leg asked
-/// for. The cooldown bounds how long that hold runs; this is what it is held *on*: a data-plane
-/// proof, taken fresh unless one is still inside [`NETWORK_EVENT_PROBE_COOLDOWN`] — without that
-/// reuse a Service that never answers again would probe every other tick for the whole session.
-pub(super) async fn in_place_hold_still_proven(
-    state: &Arc<TonoState>,
-    app: &AppHandle,
-    legs: &mut HealthLegs,
-    last_proof: &mut Option<std::time::Instant>,
-) -> bool {
-    if last_proof.is_some_and(|at| at.elapsed() < NETWORK_EVENT_PROBE_COOLDOWN) {
-        return true;
-    }
-    let failed = periodic_data_plane_probe_failed(state).await;
-    *last_proof = if failed { None } else { Some(std::time::Instant::now()) };
-    legs.observe_probe(failed);
-    apply_exit_probe_result(state, app, failed, legs.probe).await;
-    !failed
-}
-
-/// Promote a successful probe to `exit_verified`, or degrade after sustained
-/// failure. One blip must not flip the pill; `HEALTH_FAILURE_THRESHOLD`
-/// consecutive failures (already counted on `HealthLegs.probe`) do.
-async fn apply_exit_probe_result(
-    state: &Arc<TonoState>,
-    app: &AppHandle,
-    failed: bool,
-    consecutive_probe_failures: u32,
-) {
-    let mut inner = state.lock().await;
-    if !inner.fsm.status().is_connected {
-        return;
-    }
-    inner.exit_probe_pending = false;
-    if !failed {
-        let was_unverified = !inner.fsm.exit_verified();
-        inner.fsm.mark_exit_verified();
-        inner.unverified_since = None;
-        inner.last_unverified_probe_delay = None;
-        inner.suggested_server = None;
-        if was_unverified {
-            commands::emit_status(app, &commands::status_of(&inner));
-        }
-        return;
-    }
-    if inner.fsm.exit_verified() {
-        if health_threshold_reached(consecutive_probe_failures) {
-            inner.fsm.clear_exit_verified();
-            inner.unverified_since = Some(std::time::Instant::now());
-            inner.last_unverified_probe_delay = None;
-            inner.suggested_server = inner.isp_org.as_deref().and_then(|org| {
-                crate::tono::catalog_sync::recommend_exit_for_isp(
-                    org,
-                    &inner.nodes,
-                    inner.selected_node.as_deref(),
-                )
-            });
-            commands::emit_status(app, &commands::status_of(&inner));
-        }
-        return;
-    }
-    let elapsed = inner
-        .unverified_since
-        .map(|at| at.elapsed())
-        .unwrap_or(Duration::ZERO);
-    let wait = tono_core::next_unverified_probe_delay(
-        elapsed,
-        inner.last_unverified_probe_delay,
-    );
-    inner.last_unverified_probe_delay = Some(wait);
-}
-
 pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) {
     // H7: `Delay`, never the default `Burst` — see `HEALTH_FAILURE_THRESHOLD`.
     let mut interval = monitor_interval();
     interval.tick().await;
     let mut legs = HealthLegs::default();
     let mut missing_core_samples = 0_u32;
-    let mut last_probe = std::time::Instant::now();
-    // The last successful data-plane proof taken outside the periodic cadence, `None` until the
-    // first one so the first network change after connect is always probed rather than inheriting
-    // the connect-time verdict. The service-unreachable hold below reads and writes it too: a
-    // proof is a proof whichever path paid for it, and reusing it inside
-    // [`NETWORK_EVENT_PROBE_COOLDOWN`] is what keeps the hold from probing every other tick.
-    let mut last_event_probe_ok: Option<std::time::Instant> = None;
-    // The last recovered-in-place verdict, so a leg that stays failed while the tunnel keeps
-    // working re-proves the data plane at the exit-probe cadence rather than every two ticks.
-    let mut last_in_place_recovery: Option<std::time::Instant> = None;
+    let generation = state.lock().await.connect_generation;
+    let mut service_unconfirmed = false;
+    let mut local_repairs = RepairBudget::default();
+    let mut route_repairs = RepairBudget::default();
+    let mut route_tracker = RouteTracker::default();
+    let mut route_dirty = false;
+    let mut last_route_probe: Option<std::time::Instant> = None;
+    let service_session = service::active_service_session().ok();
 
     loop {
         interval.tick().await;
         {
             let inner = state.lock().await;
-            if !inner.fsm.status().is_connected {
+            if inner.connect_generation != generation
+                || inner.fsm.status().is_disconnecting
+                || inner.fsm.status().is_connecting
+                || (!inner.fsm.status().is_connected && !service_unconfirmed)
+            {
                 return;
             }
         }
-        let snapshot = match service::tono_service_status_snapshot().await {
+        let (service_result, dns_result) = tokio::join!(
+            service::tono_service_status_snapshot(), service::tono_protected_dns_status(),
+        );
+        let snapshot = match service_result {
             Ok(snapshot) => snapshot,
             Err(error) => {
                 // A dead/unreachable Service is not a neutral sample: it is one failed
@@ -661,32 +555,21 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
                     probe: "service",
                     error: error.to_string(),
                 });
-                if legs.invalid() {
-                    // A Service that never answers again reaches the threshold two ticks after
-                    // every re-seed; the cooldown is what stops that firing for the whole session.
-                    if last_in_place_recovery.is_some_and(|at| at.elapsed() < IN_PLACE_RECOVERY_COOLDOWN) {
-                        // Re-seed the one leg this poll observed. Wiping the whole record threw
-                        // away kill-switch, protected-DNS and probe counts that a failed Service
-                        // poll never contradicted — and nothing re-observes those legs for as
-                        // long as the Service stays unreachable, so they were lost, not deferred.
-                        legs.observe_service_ok();
-                        // Elapsed time on its own is not evidence: this path continues before
-                        // the periodic probe below, so nothing watches the tunnel while the hold
-                        // runs.
-                        if in_place_hold_still_proven(&state, &app, &mut legs, &mut last_event_probe_ok).await {
-                            continue;
-                        }
-                    }
-                    if !connection_loop_continues(handle_network_change(&state, &app).await) {
+                if legs.invalid() && !service_unconfirmed {
+                    let mut inner = state.lock().await;
+                    if inner.connect_generation != generation || inner.fsm.status().is_disconnecting {
                         return;
                     }
-                    // The TUN proof succeeded: the Service was merely unreachable — an SCM
-                    // recovery restart, or the updater replacing the runtime — while the tunnel
-                    // it had already locked kept carrying traffic. Re-seed the legs (a failed
-                    // poll observed nothing else, so a stale counter here would fire again on
-                    // the very next tick) and keep monitoring this same session.
-                    last_in_place_recovery = Some(std::time::Instant::now());
-                    legs = HealthLegs::default();
+                    // IPC is an observation failure, not evidence that mihomo died.
+                    // Withdraw the green claim, retain the persistent WFP floor and core,
+                    // and keep polling. No HTTPS proof, StopClash or elapsed-time proof.
+                    inner.fsm.tunnel_died();
+                    if let Some(ks) = &mut inner.kill_switch {
+                        ks.live = false;
+                    }
+                    service_unconfirmed = true;
+                    commands::emit_status(&app, &commands::status_of(&inner));
+                    state.audit().log(AuditEvent::ProtectedOffline { reason: "serviceUnconfirmed" });
                 }
                 continue;
             }
@@ -699,43 +582,18 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
         // DNS health is checked independently of netmon. The first network event is used only
         // to seed the counter (to ignore our own connect-time interface churn), so an adapter
         // arriving in that narrow window would otherwise remain external-DNS until another event.
-        let protected_dns = service::tono_protected_dns_status().await.ok();
+        let protected_dns = dns_result.ok();
         legs.observe_protected_dns(protected_dns_unhealthy(protected_dns.as_ref()));
 
-        // F2 leg 2: periodic real App data-plane probe through the tunnel.
-        // Unverified sessions use a short doubling ladder, then the 120 s cadence.
-        // Probe failures mark exit health only — they do not tear the tunnel down.
-        let due = {
-            let inner = state.lock().await;
-            if !inner.fsm.exit_verified() {
-                let elapsed = inner
-                    .unverified_since
-                    .map(|at| at.elapsed())
-                    .unwrap_or(Duration::ZERO);
-                let wait = tono_core::next_unverified_probe_delay(
-                    elapsed,
-                    inner.last_unverified_probe_delay,
-                );
-                last_probe.elapsed() >= wait
-            } else {
-                last_probe.elapsed() >= EXIT_PROBE_INTERVAL
-            }
-        };
-        if due {
-            last_probe = std::time::Instant::now();
-            let failed = periodic_data_plane_probe_failed(&state).await;
-            legs.observe_probe(failed);
-            apply_exit_probe_result(&state, &app, failed, legs.probe).await;
-            if !failed {
-                last_event_probe_ok = Some(std::time::Instant::now());
-            }
-        }
         let health_invalid = legs.invalid();
         let protection_invalid = legs.protection_invalid();
 
         let (invalidate, network_changed, core_changed, kill_switch_snapshot, service_events) = {
             let mut inner = state.lock().await;
 
+            if inner.connect_generation != generation || inner.fsm.status().is_disconnecting {
+                return;
+            }
             // L3: surface kill switch changes as they are observed.
             let kill_switch_changed = snapshot.kill_switch.is_some() && inner.kill_switch != snapshot.kill_switch;
             if let Some(kill_switch) = &snapshot.kill_switch {
@@ -815,101 +673,274 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
             commands::emit_status(&app, &status);
         }
 
-        // IP Helper delivers Tono's own WinTUN/route and DNS-reconciliation callbacks
-        // asynchronously. A callback can therefore land after the Service write window and
-        // after this monitor seeded its counter, producing the old connectOk -> networkChange ->
-        // reconnect loop. Do not trust the event either way: under the still-locked barrier,
-        // repeat the same multi-origin HTTPS proof that admitted Connected. Success proves the
-        // current tunnel still carries user traffic; failure corroborates the event and keeps the
-        // existing fail-closed reconnect. Core identity and protection-leg failures remain
-        // unconditional. Unverified sessions skip the probe veto: those probes fail for the
-        // life of the session and would reconnect on every hotspot / Wi-Fi flap.
-        let exit_verified = state.lock().await.fsm.exit_verified();
-        let event_probe_failed = if invalidate
-            && network_changed
-            && !core_changed
-            && !health_invalid
-            && network_change_uses_probe_veto(exit_verified)
+        // Notifications are hints, not transitions. Pending changes are sampled
+        // again even without a second notification; a slow periodic sample covers
+        // a missed IP Helper callback. This never delays initial Connected.
+        if network_changed || route_tracker.pending()
+            || last_route_probe.is_none_or(|at| at.elapsed() >= Duration::from_secs(15))
         {
-            let recently_proven = last_event_probe_ok
-                .is_some_and(|at| at.elapsed() < NETWORK_EVENT_PROBE_COOLDOWN);
-            if recently_proven {
-                logging!(
-                    info,
-                    Type::Service,
-                    "Tono: another Windows network change inside the proof window; reusing the last data-plane proof instead of probing again"
-                );
-                false
-            } else {
-                let failed = periodic_data_plane_probe_failed(&state).await;
-                last_event_probe_ok = if failed {
-                    None
-                } else {
-                    Some(std::time::Instant::now())
-                };
-                if !failed {
-                    apply_exit_probe_result(&state, &app, false, 0).await;
-                }
-                failed
+            let observation = observe_route(route_tracker.current()).await;
+            last_route_probe = Some(std::time::Instant::now());
+            if route_tracker.observe(observation) == RouteEvent::Changed {
+                route_dirty = true;
+                route_repairs.reset();
+                logging!(info, Type::Service, "Tono: physical route changed; reconciling local protection without replacing Core");
             }
-        } else {
-            false
-        };
-        if invalidate && network_changed && !core_changed && !health_invalid && !event_probe_failed {
-            if exit_verified {
-                logging!(
-                    info,
-                    Type::Service,
-                    "Tono: Windows reported a network change, but the locked TUN data plane remains healthy; keeping Connected"
-                );
-                legs.observe_probe(false);
-            } else {
-                logging!(
-                    info,
-                    Type::Service,
-                    "Tono: Windows reported a network change while the exit is unverified; keeping Connected without a probe veto"
-                );
-            }
-            let generation = state.lock().await.connect_generation;
-            let _ = refresh_control_plane_pins_once(&state, generation).await;
         }
-        if monitor_requires_reconnect(invalidate, core_changed, health_invalid, event_probe_failed) {
-            // A Service transport outage may reuse a recent proof in the branch
-            // above. A successful Service snapshot that explicitly says WFP or
-            // protected DNS is broken may not: HTTPS can still work while the
-            // fail-closed boundary is absent. Force that case through repair;
-            // ordinary network hints and exit-probe failures may still be
-            // contradicted by a fresh in-place data-plane proof.
-            if !connection_loop_continues(
-                handle_network_change_inner(&state, &app, !protection_invalid).await,
-            ) {
+
+        let exit_changed = {
+            let inner = state.lock().await;
+            !crate::tono::exit_transport::applied_matches(&inner)
+        };
+        if exit_changed {
+            if !connection_loop_continues(handle_network_change_inner(
+                &state, &app, RecoveryReason::ExitConfigurationChanged,
+            ).await) { return; }
+            continue;
+        }
+        let home_changed = {
+            let inner = state.lock().await;
+            !super::same_residential_route(inner.routing.as_ref(), inner.applied_routing.as_ref())
+        };
+        if home_changed {
+            if !connection_loop_continues(handle_network_change_inner(
+                &state, &app, RecoveryReason::HomeRoutingChanged,
+            ).await) { return; }
+            continue;
+        }
+
+        if protection_invalid && !core_changed {
+            {
+                let mut inner = state.lock().await;
+                if inner.connect_generation != generation || inner.fsm.status().is_disconnecting { return; }
+                inner.fsm.tunnel_died();
+                service_unconfirmed = true;
+                commands::emit_status(&app, &commands::status_of(&inner));
+            }
+            // Repair rate is bounded, not lifetime: a third failure must not strand
+            // the same core forever. Keep observing and retry slowly while offline;
+            // never feed standing DNS failure into StopClash loops.
+            if local_repairs.ready(std::time::Instant::now()) && let Some(session) = service_session.clone() {
+                local_repairs.attempted(std::time::Instant::now());
+                if let Ok(proof) = repair_local_protection(
+                    &state, generation, session.clone(), snapshot.core_pid, snapshot.core_generation,
+                    kill_switch_unhealthy(snapshot.kill_switch.as_ref()),
+                ).await {
+                    if accept_recovery_proof(&state, &app, generation, &session, snapshot.core_pid,
+                        snapshot.core_generation, proof).await {
+                        service_unconfirmed = false;
+                        route_dirty = false;
+                        local_repairs.reset();
+                        route_repairs.reset();
+                        legs = HealthLegs::default();
+                    }
+                }
+            }
+            continue;
+        }
+
+        if route_dirty && !core_changed && !health_invalid
+            && route_repairs.ready(std::time::Instant::now())
+            && let Some(session) = service_session.clone()
+        {
+            route_repairs.attempted(std::time::Instant::now());
+            // The owned runtime already uses auto-route/auto-detect-interface; do
+            // not restart or reload WinTUN for a physical route change. New DNS
+            // adapters are reconciled, with the same local fake-ip gate as admission.
+            let result = repair_local_protection(&state, generation, session.clone(),
+                snapshot.core_pid, snapshot.core_generation, false).await;
+            if let Ok(proof) = result {
+                if accept_recovery_proof(&state, &app, generation, &session, snapshot.core_pid,
+                    snapshot.core_generation, proof).await {
+                    route_dirty = false;
+                    service_unconfirmed = false;
+                    route_repairs.reset();
+                    local_repairs.reset();
+                }
+            }
+            if route_dirty {
+                let mut inner = state.lock().await;
+                if inner.connect_generation != generation || inner.fsm.status().is_disconnecting { return; }
+                inner.fsm.tunnel_died();
+                service_unconfirmed = true;
+                commands::emit_status(&app, &commands::status_of(&inner));
+            }
+        }
+
+        if service_unconfirmed && !core_changed && !route_dirty
+            && snapshot.core_pid.is_some()
+            && !kill_switch_unhealthy(snapshot.kill_switch.as_ref())
+            && !protected_dns_unhealthy(protected_dns.as_ref())
+            && local_repairs.ready(std::time::Instant::now())
+        {
+            // Same captured core, one fake-ip and one fresh Service receipt. The
+            // receipt is consumed now, never carried into a later monitor tick.
+            if let Some(session) = service_session.as_ref() {
+                local_repairs.attempted(std::time::Instant::now());
+                // /dns/status is an observation cache, not this round's native
+                // admission proof. The idempotent enable freshly proves DNS too.
+                if let Ok(proof) = repair_local_protection(&state, generation, session.clone(),
+                    snapshot.core_pid, snapshot.core_generation, false).await {
+                    if accept_recovery_proof(&state, &app, generation, session, snapshot.core_pid,
+                        snapshot.core_generation, proof).await {
+                        service_unconfirmed = false;
+                        local_repairs.reset();
+                    }
+                }
+            }
+        }
+        // Adapter noise alone keeps Connected. Same-core KS/DNS failures were
+        // handled in place above; core/session changes still require rebuild.
+        // Third-party HTTPS is not consulted.
+        if !route_dirty && !route_tracker.pending()
+            && adapter_noise_keeps_session(invalidate, network_changed, core_changed, health_invalid)
+        {
+            logging!(
+                info,
+                Type::Service,
+                "Tono: Windows reported a network change; core and protection unchanged, keeping Connected"
+            );
+        }
+        if monitor_requires_reconnect(invalidate, core_changed, health_invalid) {
+            let reason = if core_changed {
+                RecoveryReason::CoreOrTunIdentity
+            } else if protection_invalid {
+                RecoveryReason::ProtectionFailed
+            } else {
+                RecoveryReason::ServiceUnreachable
+            };
+            if !connection_loop_continues(handle_network_change_inner(&state, &app, reason).await) {
                 return;
             }
-            // Nothing was torn down, so this monitor still owns the live session. Re-seed the
-            // legs against the fresh TUN proof rather than leaving the counters that fired.
-            last_in_place_recovery = Some(std::time::Instant::now());
             legs = HealthLegs::default();
         }
     }
 }
 
-/// Network adapter change / sleep-wake / core restart / policy behavior
-/// change (§6, M4, Build 28): invalidate Connected first, keep WFP armed
-/// (restrict to bootstrap), rerun the full transaction.
-///
-/// The verdict is for the caller's own loop, not for the tunnel:
-/// [`NetworkChangeOutcome::RecoveredInPlace`] means nothing was torn down and the caller is
-/// still running inside the session it started in (see [`connection_loop_continues`]).
-pub(crate) async fn handle_network_change(state: &Arc<TonoState>, app: &AppHandle) -> NetworkChangeOutcome {
-    handle_network_change_inner(state, app, true).await
+/// Repair only local protection on the captured runtime; never start/stop a core.
+/// Cancellation cannot let a late DNS/WFP write cross an explicit release.
+async fn repair_local_protection(
+    state: &Arc<TonoState>,
+    generation: u64,
+    session: tono_service_protocol::OwnerSessionProof,
+    expected_pid: Option<u32>,
+    expected_core_generation: u32,
+    relock: bool,
+) -> Result<tono_service_protocol::ProtectionProof, String> {
+    if !state.try_begin_recovery() { return Err("recovery already running".into()); }
+    let started = std::time::Instant::now();
+    let task_state = Arc::clone(state);
+    let task = tokio::spawn(async move {
+        let state = task_state;
+        struct RecoveryGuard(Arc<TonoState>);
+        impl Drop for RecoveryGuard {
+            fn drop(&mut self) { self.0.end_recovery(); }
+        }
+        let _recovery = RecoveryGuard(Arc::clone(&state));
+        let _mutation = state.begin_connect_mutation().await;
+        if state.lock().await.connect_generation != generation { return Err("stale recovery".into()); }
+        let before = service::tono_service_status_snapshot().await.map_err(|e| e.to_string())?;
+        if expected_pid.is_none() || before.core_pid != expected_pid
+            || before.core_generation != expected_core_generation
+            || before.active_generation != Some(session.generation)
+        { return Err("core identity changed before local repair".into()); }
+        if relock {
+            super::controller::lock_kill_switch_with_retries(&session).await?;
+        } else {
+            // DNS-only drift and physical route changes do not reinstall a proven
+            // TUN permit. A fresh owner/core/Locked proof is mandatory instead.
+            super::direct::prove_service_reload_mode(
+                &before, &session, tono_service_protocol::KillSwitchStatusMode::Locked,
+            )?;
+        }
+        if state.lock().await.connect_generation != generation { return Err("stale recovery".into()); }
+        let dns = service::tono_enable_protected_dns_for_session(&session).await.map_err(|e| e.to_string())?;
+        if protected_dns_unhealthy(Some(&dns)) { return Err("local DNS proof failed".into()); }
+        // Complete all proof inside this round, then hand the owned receipt to
+        // the caller exactly once. No second fake-ip/status loop is necessary.
+        prove_recovered_runtime(&state, generation, &session, expected_pid, expected_core_generation).await
+    });
+    let result = task.await.map_err(|_| "local repair task failed".to_owned())?;
+    state.audit().log(AuditEvent::LocalStep {
+        generation, step: "local protection repair", elapsed_ms: started.elapsed().as_millis() as u64,
+        outcome: if result.is_ok() { "completed" } else { "failed" },
+    });
+    result
+}
+
+/// The caller has a native DNS proof from this round. Bind fake-ip to the
+/// captured core and commit only after Service freshly verifies that same core.
+async fn prove_recovered_runtime(state: &Arc<TonoState>, generation: u64,
+    session: &tono_service_protocol::OwnerSessionProof, expected_pid: Option<u32>, expected_core_generation: u32,
+) -> Result<tono_service_protocol::ProtectionProof, String> {
+    let pid = expected_pid.ok_or("missing recovery Core")?;
+    if state.lock().await.connect_generation != generation { return Err("stale recovery".into()); }
+    super::probes::verify_fake_ip().await?;
+    let cancellation = {
+        let inner = state.lock().await;
+        if inner.connect_generation != generation { return Err("stale recovery".into()); }
+        inner.connect_cancellation.clone()
+    };
+    service::tono_verify_and_commit_protection(session, pid, expected_core_generation, &cancellation)
+        .await.map_err(|error| error.to_string())
+}
+
+/// Consumes one same-round proof. No timers, cached success, or old routing can
+/// restore green. A healthy route handover keeps its existing Connected state.
+async fn accept_recovery_proof(state: &Arc<TonoState>, app: &AppHandle, generation: u64,
+    session: &tono_service_protocol::OwnerSessionProof, expected_pid: Option<u32>, expected_core_generation: u32,
+    proof: tono_service_protocol::ProtectionProof,
+) -> bool {
+    if !expected_pid.is_some_and(|pid| service::protection_proof_matches(
+        &proof, session.generation, pid, expected_core_generation)) { return false; }
+    let mut inner = state.lock().await;
+    if inner.connect_generation != generation || inner.fsm.status().is_disconnecting
+        || !crate::tono::exit_transport::applied_matches(&inner)
+        || !super::same_residential_route(inner.routing.as_ref(), inner.applied_routing.as_ref()) { return false; }
+    inner.kill_switch = Some(proof.kill_switch);
+    if !inner.fsm.status().is_connected {
+        inner.fsm.begin_connect();
+        if inner.fsm.connect_succeeded().is_err() { return false; }
+        commands::emit_status(app, &commands::status_of(&inner));
+    }
+    true
+}
+
+/// Coarse recovery for core/session identity or applied-routing changes. Adapter noise
+/// and same-core local protection repair stay in the monitor above, outside this path.
+/// Keep WFP armed throughout any rebuild. The outcome controls whether this observer
+/// continues; `Deferred` retains it while another single-flight recovery owns mutation.
+pub(crate) async fn handle_network_change(
+    state: &Arc<TonoState>,
+    app: &AppHandle,
+    reason: RecoveryReason,
+) -> NetworkChangeOutcome {
+    handle_network_change_inner(state, app, reason).await
 }
 
 pub(super) async fn handle_network_change_inner(
     state: &Arc<TonoState>,
     app: &AppHandle,
-    allow_in_place: bool,
+    reason: RecoveryReason,
 ) -> NetworkChangeOutcome {
-    logging!(warn, Type::Service, "Tono: 检测到网络或核心变化，失效 Connected 并重连");
+    if !state.try_begin_recovery() {
+        logging!(
+            info,
+            Type::Service,
+            "Tono: 恢复任务已在进行，合并本次事件 ({})",
+            reason.audit_reason()
+        );
+        return NetworkChangeOutcome::Deferred;
+    }
+    struct RecoveryGuard<'a>(&'a TonoState);
+    impl Drop for RecoveryGuard<'_> {
+        fn drop(&mut self) {
+            self.0.end_recovery();
+        }
+    }
+    let _recovery_guard = RecoveryGuard(state.as_ref());
+
+    logging!(warn, Type::Service, "{}", reason.log_line());
     // Captured under the same guard as the `is_connected` check, because that check is the
     // *entry* condition and everything below it runs across awaits. This helper is reached from
     // two callers and only one of them is connection-scoped: the cloud-policy sync runs inside
@@ -921,30 +952,20 @@ pub(super) async fn handle_network_change_inner(
     // The netmon caller was protected only by accident, by `abort_network_monitor()` landing at
     // its next await; now both are protected on purpose.
     let generation = {
-        let mut inner = state.lock().await;
+        let inner = state.lock().await;
         // `is_disconnecting` is redundant now that `begin_disconnect` clears
         // `is_connected`, and it is written out anyway: this guard is the one
         // that has to say "not while a release is in flight" out loud, because
         // the generation captured below is the disconnect's own once one has
         // started, and the exit guard then compares a value to itself.
         let status = inner.fsm.status();
-        if !status.is_connected || status.is_disconnecting {
+        if (!status.is_connected && !status.is_protection_blocked)
+            || status.is_connecting || status.is_disconnecting
+        {
             return NetworkChangeOutcome::Handled;
         }
         inner.connect_generation
     };
-    // Prefer an in-place proof while the core is still the same process.
-    // Sleep/Wi-Fi flaps used to stop the core unconditionally, then burn the
-    // first reconnect on "DNS 53 busy" because the just-killed listener was
-    // the one we needed.
-    if allow_in_place && verify_tun_data_plane().await.is_ok() {
-        logging!(
-            info,
-            Type::Service,
-            "Tono: network change recovered in place; core was not restarted"
-        );
-        return NetworkChangeOutcome::RecoveredInPlace;
-    }
     {
         let mut inner = state.lock().await;
         if inner.connect_generation != generation || inner.fsm.status().is_disconnecting {
@@ -954,9 +975,22 @@ pub(super) async fn handle_network_change_inner(
         commands::emit_status(&app, &commands::status_of(&inner));
     }
     state.audit().log(AuditEvent::ProtectedOffline {
-        reason: "networkChange",
+        reason: reason.audit_reason(),
     });
+    let mutation = state.begin_connect_mutation().await;
+    {
+        let inner = state.lock().await;
+        if inner.connect_generation != generation || inner.fsm.status().is_disconnecting {
+            return NetworkChangeOutcome::Handled;
+        }
+    }
     let _ = service::tono_restrict_bootstrap().await;
+    {
+        let inner = state.lock().await;
+        if inner.connect_generation != generation || inner.fsm.status().is_disconnecting {
+            return NetworkChangeOutcome::Handled;
+        }
+    }
     // Stop the core before re-attempting, like both sibling teardowns (`switch_selected_node`,
     // `selected_node_vanished`). `restrict_bootstrap` only rewrites WFP; it leaves mihomo
     // running, and mihomo owns loopback:53 for the whole session — the very port `run_stages`'
@@ -965,6 +999,7 @@ pub(super) async fn handle_network_change_inner(
     // counter and showed a DNS error, and only then stopped the core on the way out.
     // `false` = keep blocking: the core goes down, the barrier stays armed.
     let _ = service::tono_stop_core(false).await;
+    drop(mutation);
     // Immediately before re-entering the transaction, and deliberately not earlier: a disconnect
     // bumps the generation as its very first act (`invalidate_connection(true)`, before any
     // IPC), so any release that will complete has already bumped by the time this reads. A moved
@@ -976,20 +1011,22 @@ pub(super) async fn handle_network_change_inner(
             logging!(
                 info,
                 Type::Service,
-                "Tono: 网络变化重连已被更新的连接代际取代，交由其所有者处理"
+                "Tono: 恢复已被更新的连接代际取代，交由其所有者处理 ({})",
+                reason.audit_reason()
             );
             return NetworkChangeOutcome::Handled;
         }
     }
     match attempt(state, app).await {
-        Attempt::Failed(err) => {
-            let _ = fail_connect(state, app, err).await;
-            schedule_reconnect(state, app).await;
+        Attempt::Failed { error, generation } => {
+            if fail_connect(state, app, error, generation).await.is_some() {
+                schedule_reconnect(state, app).await;
+            }
         }
         // A transient guard (a release still reconciling, a transition still finishing) is not a
         // verdict — without a reschedule the machine sits blocked with nothing left to retry.
-        Attempt::GuardRejected(reason) if guard_rejection_is_transient(&reason) => {
-            logging!(info, Type::Service, "Tono: 重连被暂态守卫拒绝，稍后重试: {reason}");
+        Attempt::GuardRejected(rejection) if guard_rejection_is_transient(&rejection) => {
+            logging!(info, Type::Service, "Tono: 重连被暂态守卫拒绝，稍后重试: {rejection}");
             schedule_reconnect(state, app).await;
         }
         Attempt::Connected => seed_autostart_after_connect(),
@@ -1012,20 +1049,28 @@ pub(super) async fn refresh_control_plane_pins_from_service(state: &TonoState) {
     }
 }
 
-/// F1: merge the pinned bootstrap IPs with the live resolution of the API
-/// host (best-effort — a failed lookup just yields the pins alone).
+/// F1: connection uses the compiled and already learned public IPv4 pins.
+/// Node endpoints are admitted literals; no API DNS refresh is required to arm
+/// WFP/start the tunnel. The existing post-Connected pin task refreshes via TUN.
 pub(super) async fn bootstrap_hosts() -> Vec<String> {
-    let dynamic: Vec<String> =
-        match tokio::time::timeout(DNS_LOOKUP_TIMEOUT, tokio::net::lookup_host((bootstrap::API_HOST, 443))).await {
-            Ok(Ok(addrs)) => addrs.map(|addr| addr.ip().to_string()).collect(),
-            Ok(Err(_)) | Err(_) => Vec::new(),
-        };
-    bootstrap::merge_bootstrap_hosts(&dynamic)
+    bootstrap::merge_bootstrap_hosts(&[])
 }
 
 #[cfg(test)]
 mod tests {
     use super::asn_org_from_ipapi;
+
+    #[tokio::test]
+    async fn bootstrap_pin_preparation_needs_no_external_resolver() {
+        let pins = super::bootstrap_hosts().await;
+        for ip in crate::tono::bootstrap::pinned_bootstrap_ips() {
+            assert!(pins.contains(&ip.to_string()));
+        }
+        assert!(pins.iter().all(|ip| ip.parse::<std::net::Ipv4Addr>().is_ok_and(tono_core::node::is_public_ipv4)));
+        let source = include_str!("monitor.rs");
+        let function = source.split("pub(super) async fn bootstrap_hosts()").nth(1).unwrap().split("#[cfg(test)]").next().unwrap();
+        assert!(!function.contains("lookup_host"));
+    }
 
     #[test]
     fn isp_org_comes_from_ipapi_without_storing_an_address() {
@@ -1037,5 +1082,23 @@ mod tests {
             asn_org_from_ipapi(&json).as_deref(),
             Some("AS56046 China Mobile")
         );
+    }
+}
+
+#[cfg(test)]
+mod recovery_receipt_tests {
+    #[test]
+    fn repair_proof_has_one_fake_ip_gate_and_is_consumed_in_the_same_round() {
+        let source = include_str!("monitor.rs");
+        let repair = source.split("async fn repair_local_protection(").nth(1).unwrap()
+            .split("/// Coarse recovery").next().unwrap();
+        assert_eq!(repair.matches("verify_fake_ip().await").count(), 1);
+        assert!(repair.contains("tono_verify_and_commit_protection"));
+        assert!(!repair.contains("tono_kill_switch_status()"));
+        let route = source.split("if route_dirty && !core_changed").nth(1).unwrap()
+            .split("// Adapter noise alone keeps Connected.").next().unwrap();
+        assert!(!route.contains("verify_fake_ip().await"));
+        assert!(route.contains("accept_recovery_proof"));
+        assert!(route.contains("service_unconfirmed = false"));
     }
 }

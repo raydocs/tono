@@ -1,0 +1,237 @@
+{
+  "schemaVersion": 1,
+  "kind": "periodic_window",
+  "windowStartMs": 1789063800000,
+  "windowEndMs": 1789063800000,
+  "appVersion": "0.0.72",
+  "osVersion": "Windows",
+  "osArch": "aarch64",
+  "uiState": "notConnected",
+  "accountState": "ready",
+  "selectedServer": "Los Angeles · Mesa",
+  "eventCount": 22,
+  "eventsDropped": 0,
+  "events": [
+    {
+      "ts": 1789063800000,
+      "kind": "autoConnectionSources",
+      "node": "Los Angeles · Mesa",
+      "action": "571ade0a5c1f6c47",
+      "mode": "notConnected",
+      "reference": "NTq5ssgLyBiR_Op_",
+      "outcome": "unknown",
+      "generation": 2
+    },
+    {
+      "ts": 1789063800000,
+      "kind": "autoConnectionFact",
+      "node": "Los Angeles · Mesa",
+      "mode": "notConnected",
+      "reference": "NTq5ssgLyBiR_Op_",
+      "outcome": "reportedFailure",
+      "code": "appFailure",
+      "generation": 2
+    },
+    {
+      "ts": 1789063800000,
+      "kind": "autoConnectionFact",
+      "node": "Los Angeles · Mesa",
+      "mode": "notConnected",
+      "reference": "NTq5ssgLyBiR_Op_",
+      "outcome": "notObserved",
+      "code": "remoteReachability",
+      "generation": 2
+    },
+    {
+      "ts": 1789063800000,
+      "kind": "autoConnectionFact",
+      "node": "Los Angeles · Mesa",
+      "mode": "notConnected",
+      "reference": "NTq5ssgLyBiR_Op_",
+      "code": "homeConfigured",
+      "generation": 2,
+      "live": false
+    },
+    {
+      "ts": 1789063800000,
+      "kind": "autoConnectionFact",
+      "node": "Los Angeles · Mesa",
+      "mode": "notConnected",
+      "reference": "NTq5ssgLyBiR_Op_",
+      "code": "homeAppliedMatches",
+      "generation": 2,
+      "live": true
+    },
+    {
+      "ts": 1789063800000,
+      "kind": "autoConnectionFact",
+      "node": "Los Angeles · Mesa",
+      "mode": "notConnected",
+      "reference": "NTq5ssgLyBiR_Op_",
+      "outcome": "hysteria2Udp",
+      "code": "requestedTransport",
+      "generation": 2
+    },
+    {
+      "ts": 1789063800000,
+      "kind": "autoConnectionFact",
+      "node": "Los Angeles · Mesa",
+      "mode": "notConnected",
+      "reference": "NTq5ssgLyBiR_Op_",
+      "outcome": "realityTcp",
+      "code": "appliedTransport",
+      "generation": 2
+    },
+    {
+      "ts": 1789063800000,
+      "kind": "autoConnectionFact",
+      "node": "Los Angeles · Mesa",
+      "mode": "notConnected",
+      "reference": "NTq5ssgLyBiR_Op_",
+      "code": "optionalDirectEnabled",
+      "generation": 2,
+      "live": false
+    },
+    {
+      "ts": 1789063800000,
+      "kind": "autoConnectionFact",
+      "node": "Los Angeles · Mesa",
+      "mode": "notConnected",
+      "reference": "NTq5ssgLyBiR_Op_",
+      "code": "retryAttempt",
+      "counter": 1,
+      "generation": 2
+    },
+    {
+      "ts": 1789063800000,
+      "kind": "autoConnectionFact",
+      "node": "Los Angeles · Mesa",
+      "mode": "notConnected",
+      "reference": "NTq5ssgLyBiR_Op_",
+      "code": "attemptElapsedMs",
+      "counter": 1334,
+      "generation": 2
+    },
+    {
+      "ts": 1789063800000,
+      "kind": "autoConnectionFact",
+      "node": "Los Angeles · Mesa",
+      "mode": "notConnected",
+      "reference": "NTq5ssgLyBiR_Op_",
+      "code": "captureTimedOut",
+      "generation": 2,
+      "live": true
+    },
+    {
+      "ts": 1789063800000,
+      "kind": "autoConnectionFact",
+      "node": "Los Angeles · Mesa",
+      "mode": "notConnected",
+      "reference": "NTq5ssgLyBiR_Op_",
+      "code": "captureConsistent",
+      "generation": 2,
+      "live": false
+    },
+    {
+      "ts": 1789063800000,
+      "kind": "autoConnectionStep",
+      "stage": "preparing",
+      "node": "Los Angeles · Mesa",
+      "mode": "notConnected",
+      "reference": "NTq5ssgLyBiR_Op_",
+      "outcome": "completed",
+      "elapsedMs": 100,
+      "generation": 2
+    },
+    {
+      "ts": 1789063800000,
+      "kind": "autoConnectionStep",
+      "stage": "preparingService",
+      "node": "Los Angeles · Mesa",
+      "mode": "notConnected",
+      "reference": "NTq5ssgLyBiR_Op_",
+      "outcome": "failed",
+      "elapsedMs": 1234,
+      "generation": 2
+    },
+    {
+      "ts": 1789063800000,
+      "kind": "autoConnectionStep",
+      "stage": "startingKillSwitch",
+      "node": "Los Angeles · Mesa",
+      "mode": "notConnected",
+      "reference": "NTq5ssgLyBiR_Op_",
+      "outcome": "pending",
+      "generation": 2
+    },
+    {
+      "ts": 1789063800000,
+      "kind": "autoConnectionStep",
+      "stage": "startingTunnel",
+      "node": "Los Angeles · Mesa",
+      "mode": "notConnected",
+      "reference": "NTq5ssgLyBiR_Op_",
+      "outcome": "pending",
+      "generation": 2
+    },
+    {
+      "ts": 1789063800000,
+      "kind": "autoConnectionStep",
+      "stage": "lockingTraffic",
+      "node": "Los Angeles · Mesa",
+      "mode": "notConnected",
+      "reference": "NTq5ssgLyBiR_Op_",
+      "outcome": "pending",
+      "generation": 2
+    },
+    {
+      "ts": 1789063800000,
+      "kind": "autoConnectionStep",
+      "stage": "applyingCloudPolicy",
+      "node": "Los Angeles · Mesa",
+      "mode": "notConnected",
+      "reference": "NTq5ssgLyBiR_Op_",
+      "outcome": "pending",
+      "generation": 2
+    },
+    {
+      "ts": 1789063800000,
+      "kind": "autoConnectionStep",
+      "stage": "securingDNS",
+      "node": "Los Angeles · Mesa",
+      "mode": "notConnected",
+      "reference": "NTq5ssgLyBiR_Op_",
+      "outcome": "pending",
+      "generation": 2
+    },
+    {
+      "ts": 1789063800000,
+      "kind": "autoConnectionStep",
+      "stage": "checkingExit",
+      "node": "Los Angeles · Mesa",
+      "mode": "notConnected",
+      "reference": "NTq5ssgLyBiR_Op_",
+      "outcome": "pending",
+      "generation": 2
+    },
+    {
+      "ts": 1789063800000,
+      "kind": "autoConnectionStep",
+      "stage": "verifyingTraffic",
+      "node": "Los Angeles · Mesa",
+      "mode": "notConnected",
+      "reference": "NTq5ssgLyBiR_Op_",
+      "outcome": "pending",
+      "generation": 2
+    },
+    {
+      "ts": 1789063800000,
+      "kind": "autoConnectionFailure",
+      "node": "Los Angeles · Mesa",
+      "mode": "notConnected",
+      "reference": "NTq5ssgLyBiR_Op_",
+      "code": "serviceUnavailable",
+      "generation": 2
+    }
+  ]
+}

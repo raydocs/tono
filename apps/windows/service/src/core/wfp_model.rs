@@ -53,6 +53,34 @@ pub const TONO_WFP_SUBLAYER_KEY: Guid = Guid::from_u128(0x2f7c9d42_8b3e_4a6c_9d5
 #[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
 pub const TONO_WFP_SUBLAYER_WEIGHT: u16 = 1000;
 
+/// Freshly read foundation metadata, never a process-local "already installed" cache.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FoundationObject {
+    Missing,
+    Current,
+    Stale,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FoundationPlan {
+    Reuse,
+    CreateMissing,
+    Rebuild,
+}
+
+impl FoundationPlan {
+    pub(crate) fn from_objects(provider: FoundationObject, sublayer: FoundationObject) -> Self {
+        use FoundationObject::{Current, Missing, Stale};
+        match (provider, sublayer) {
+            (Current, Current) => Self::Reuse,
+            (Missing, Missing) | (Current, Missing) => Self::CreateMissing,
+            // A stale service binding/weight cannot be fixed by Add(ALREADY_EXISTS).
+            // A sublayer claiming a missing provider is inconsistent too: never adopt it.
+            (Stale, _) | (_, Stale) | (Missing, Current) => Self::Rebuild,
+        }
+    }
+}
+
 /// Hard permits: floor loopback, mihomo endpoint, tunnel interface.
 pub const WEIGHT_HARD_PERMIT: u64 = 8;
 /// Infrastructure permits: floor DHCP/NDP, bootstrap API channel.
@@ -169,6 +197,20 @@ pub struct FilterSpec {
     /// Only the intent floor's condition-free block-all set is persistent — Proton's rule
     /// that persistence is reserved for condition-free blocking.
     pub persistent: bool,
+}
+
+/// Metadata already returned by the native enumeration; reading it needs no extra WFP RPC.
+#[derive(Debug, Clone)]
+pub(crate) struct InstalledFilter {
+    pub key: Guid,
+    pub sublayer: Guid,
+    pub disabled: bool,
+}
+
+impl InstalledFilter {
+    pub(crate) fn usable(&self) -> bool {
+        !self.disabled && self.sublayer == TONO_WFP_SUBLAYER_KEY
+    }
 }
 
 /// The protection state the rule set is a function of.
@@ -510,9 +552,9 @@ pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
         }
     }
 
-    // C: the bounded bootstrap API channel. Open in bootstrap, retracted at lock, and open
-    // again in blocked mode as the recovery channel.
-    if config.mode != KillSwitchStatusMode::Locked {
+    // C: initial bootstrap only. Never reopen a machine-wide shared-CDN permit
+    // in Protected Offline. Committed re-admits also supply an empty API set.
+    if config.mode == KillSwitchStatusMode::Bootstrap {
         // One permit per pinned address per reachable port. The address set is what bounds
         // this channel; the port was never doing security work, and pinning it to 443 alone
         // meant the client could not use the alternate HTTPS ports the same Cloudflare zone
@@ -696,6 +738,14 @@ pub fn expected_filters(config: &RuleConfig) -> Vec<FilterSpec> {
     filters
 }
 
+/// Exact-set readback detects missing rules AND stale permits; one provider
+/// enumeration suffices, without an extra GetByKey RPC for every expected rule.
+pub(crate) fn filter_key_difference(current: &[Guid], expected: &[Guid]) -> (usize, usize) {
+    let current = current.iter().copied().collect::<std::collections::BTreeSet<_>>();
+    let expected = expected.iter().copied().collect::<std::collections::BTreeSet<_>>();
+    (expected.difference(&current).count(), current.difference(&expected).count())
+}
+
 /// The shared reserved-range table: whether an IP is public unicast, usable for either a
 /// bootstrap API host or a proxy endpoint. Documentation ranges (192.0.2.0/24 etc.) are
 /// accepted — they are not local; the point is to keep these channels off
@@ -734,6 +784,22 @@ pub fn is_public_unreserved(ip: &IpAddr) -> bool {
 /// Whether an IP may serve as a bootstrap API channel endpoint. Same table as endpoints.
 pub fn is_public_api_ip(ip: &IpAddr) -> bool {
     is_public_unreserved(ip)
+}
+
+/// A key belonging to a disabled/misbound rule is NOT evidence that its desired rule is live.
+/// The native executor deletes/re-adds these keys in the same transaction as the policy delta.
+pub(crate) fn repair_diff(current: &[InstalledFilter], desired: &[FilterSpec]) -> ChangePlan {
+    let keys = current.iter().map(|info| info.key).collect::<Vec<_>>();
+    let mut plan = diff(&keys, desired);
+    for spec in desired {
+        if current
+            .iter()
+            .any(|info| info.key == spec.key && !info.usable())
+        {
+            plan.install.push(spec.clone());
+        }
+    }
+    plan
 }
 
 /// Bounded, deduplicated, public-only API host IP set, ready to be written into WFP.
@@ -804,6 +870,123 @@ mod tests {
         filters
             .iter()
             .any(|filter| filter.conditions.contains(probe))
+    }
+
+    #[test]
+    fn foundation_reuse_requires_both_fresh_current_objects() {
+        use FoundationObject::{Current, Missing, Stale};
+        for provider in [Missing, Current, Stale] {
+            for sublayer in [Missing, Current, Stale] {
+                let plan = FoundationPlan::from_objects(provider, sublayer);
+                assert_eq!(
+                    plan == FoundationPlan::Reuse,
+                    provider == Current && sublayer == Current
+                );
+                if provider == Stale || sublayer == Stale {
+                    assert_eq!(plan, FoundationPlan::Rebuild);
+                }
+            }
+        }
+        assert_eq!(
+            FoundationPlan::from_objects(Missing, Missing),
+            FoundationPlan::CreateMissing
+        );
+        assert_eq!(
+            FoundationPlan::from_objects(Current, Missing),
+            FoundationPlan::CreateMissing
+        );
+        assert_eq!(
+            FoundationPlan::from_objects(Missing, Current),
+            FoundationPlan::Rebuild
+        );
+    }
+
+    #[test]
+    fn native_foundation_replacement_and_filter_install_share_one_transaction() {
+        let source = include_str!("wfp/mod.rs");
+        assert!(source.contains("mod real_engine_tests;"));
+        let apply = source
+            .split("fn apply_plan(")
+            .nth(1)
+            .unwrap()
+            .split("fn verify_by_key(")
+            .next()
+            .unwrap();
+        let begin = apply.find("transaction(engine,").unwrap();
+        assert!(apply.find("rebuild_foundation(engine)?").unwrap() > begin);
+        assert!(apply.find("add_filter(engine, spec, blob)?").unwrap() > begin);
+        assert!(!apply.contains("emergency_disarm"));
+        let verify = source
+            .split("fn verify_by_key(")
+            .nth(1)
+            .unwrap()
+            .split("pub(crate) fn install(")
+            .next()
+            .unwrap();
+        assert!(verify.contains("read_transaction(engine,"));
+        assert!(verify.contains("!info.usable()"));
+        assert!(verify.contains("require_exact_filter_keys"));
+    }
+
+    #[test]
+    fn disabled_or_wrong_sublayer_keys_are_recreated_not_adopted() {
+        let desired = expected_filters(&config(KillSwitchStatusMode::Blocked));
+        let mut current = desired
+            .iter()
+            .map(|spec| InstalledFilter {
+                key: spec.key,
+                sublayer: TONO_WFP_SUBLAYER_KEY,
+                disabled: false,
+            })
+            .collect::<Vec<_>>();
+        assert!(repair_diff(&current, &desired).install.is_empty());
+        current[0].disabled = true;
+        current[1].sublayer = Guid::from_u128(7);
+        assert!(!current[0].usable());
+        assert!(!current[1].usable());
+        let repaired = repair_diff(&current, &desired);
+        assert_eq!(repaired.install, desired[..2]);
+        assert!(repaired.remove.is_empty());
+    }
+
+    #[test]
+    fn repair_diff_keeps_missing_floor_and_stale_permit_removal() {
+        let desired = expected_filters(&config(KillSwitchStatusMode::Blocked));
+        let mut current = desired[1..]
+            .iter()
+            .map(|spec| InstalledFilter {
+                key: spec.key,
+                sublayer: TONO_WFP_SUBLAYER_KEY,
+                disabled: false,
+            })
+            .collect::<Vec<_>>();
+        let stale = Guid::from_u128(123);
+        current.push(InstalledFilter {
+            key: stale,
+            sublayer: TONO_WFP_SUBLAYER_KEY,
+            disabled: true,
+        });
+        let plan = repair_diff(&current, &desired);
+        assert_eq!(plan.install, desired[..1]);
+        assert_eq!(plan.remove, vec![stale]);
+    }
+
+    #[test]
+    fn exact_enumeration_rejects_missing_floor_and_stale_permits() {
+        let locked = expected_filters(&config(KillSwitchStatusMode::Locked));
+        let keys = locked.iter().map(|rule| rule.key).collect::<Vec<_>>();
+        assert_eq!(filter_key_difference(&keys, &keys), (0, 0));
+        assert_eq!(filter_key_difference(&keys[1..], &keys), (1, 0));
+        let blocked = expected_filters(&config(KillSwitchStatusMode::Blocked));
+        let blocked_keys = blocked.iter().map(|rule| rule.key).collect::<Vec<_>>();
+        let (missing, stale) = filter_key_difference(&keys, &blocked_keys);
+        assert_eq!(missing, 0);
+        assert!(stale > 0, "the old TUN permit must invalidate Blocked proof");
+        let bootstrap = expected_filters(&config(KillSwitchStatusMode::Bootstrap));
+        let mut with_api = blocked_keys.clone();
+        with_api.extend(bootstrap.iter().map(|rule| rule.key));
+        assert!(filter_key_difference(&with_api, &blocked_keys).1 > 0,
+            "shared API escape permits must not survive Blocked readback");
     }
 
     #[test]
@@ -898,9 +1081,9 @@ mod tests {
     }
 
     #[test]
-    fn blocked_keeps_api_recovery_channel_without_tunnel() {
+    fn blocked_retracts_machine_wide_api_channel_and_tunnel() {
         let filters = expected_filters(&config(KillSwitchStatusMode::Blocked));
-        assert!(filters.iter().any(|filter| {
+        assert!(!filters.iter().any(|filter| {
             filter.action == FilterAction::Permit
                 && filter.weight == WEIGHT_INFRA_PERMIT
                 && filter.conditions.contains(&Condition::RemotePort(443))
@@ -1638,7 +1821,7 @@ mod tests {
     }
 
     #[test]
-    fn arbitration_api_channel_open_in_bootstrap_and_blocked_retracted_in_locked() {
+    fn arbitration_api_channel_only_open_in_initial_bootstrap() {
         let packet = packet(LayerKind::AleAuthConnectV4, IpProtocol::Tcp, "1.1.1.1", 443);
         assert_eq!(
             arbitrate(
@@ -1652,7 +1835,7 @@ mod tests {
                 &expected_filters(&config(KillSwitchStatusMode::Blocked)),
                 &packet
             ),
-            FilterAction::Permit
+            FilterAction::Block
         );
         assert_eq!(
             arbitrate(
@@ -1891,6 +2074,33 @@ mod tests {
             !without.iter().any(|filter| filter.name.contains("DIRECT")),
             "no direct endpoints configured, no DIRECT permits"
         );
+    }
+
+    #[test]
+    fn hysteria2_carrier_is_an_exact_core_only_udp_tuple_not_a_udp_escape() {
+        for mode in [KillSwitchStatusMode::Bootstrap, KillSwitchStatusMode::Locked, KillSwitchStatusMode::Blocked] {
+            let mut config = config(mode);
+            config.endpoints = vec![ProxyEndpoint {
+                ip: "8.8.8.8".into(), port: 8443, protocol: ProxyProtocol::Udp,
+            }];
+            let filters = expected_filters(&config);
+            let mut exact = packet(LayerKind::AleAuthConnectV4, IpProtocol::Udp, "8.8.8.8", 8443);
+            assert_eq!(arbitrate(&filters, &exact), FilterAction::Block, "not a system-wide permit");
+            exact.app_id_matches = true;
+            assert_eq!(arbitrate(&filters, &exact), FilterAction::Permit);
+            for (layer, protocol, ip, port) in [
+                (LayerKind::AleAuthConnectV4, IpProtocol::Tcp, "8.8.8.8", 8443),
+                (LayerKind::AleAuthConnectV4, IpProtocol::Udp, "8.8.8.8", 8444),
+                (LayerKind::AleAuthConnectV4, IpProtocol::Udp, "8.8.4.4", 8443),
+                (LayerKind::AleAuthConnectV4, IpProtocol::Udp, "8.8.8.8", 53),
+                (LayerKind::AleAuthConnectV6, IpProtocol::Udp, "2001:4860:4860::8888", 8443),
+                (LayerKind::AleAuthConnectV6, IpProtocol::Tcp, "2001:4860:4860::8888", 443),
+            ] {
+                let mut wrong = packet(layer, protocol, ip, port);
+                wrong.app_id_matches = true;
+                assert_eq!(arbitrate(&filters, &wrong), FilterAction::Block, "tuple/IPv6/DNS must stay closed");
+            }
+        }
     }
 
     #[test]

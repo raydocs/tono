@@ -1,4 +1,5 @@
 use crate::core::auth::{AuthenticatedOwner, ServiceError};
+use crate::core::local_timing;
 use crate::core::paths::ensure_owner_state_directory;
 use crate::{
     ClashConfig, CoreConfig, RuntimeBundle, ServiceErrorCode, WriterConfig, mihomo_ipc_path,
@@ -250,14 +251,19 @@ pub(crate) async fn prepare_runtime(
     owner: &AuthenticatedOwner,
     bundle: &RuntimeBundle,
 ) -> Result<PreparedRuntime, ServiceError> {
-    let core_path = validate_core_path(owner, &bundle.core_path)?;
-    let owner_paths = ensure_owner_state_directory(&owner.identity)
+    let core_path = local_timing::result("runtime.validate_core_image", async {
+        validate_core_path(owner, &bundle.core_path)
+    }).await?;
+    let owner_paths = local_timing::result("runtime.secure_owner_state", async {
+        ensure_owner_state_directory(&owner.identity)
+    }).await
         .map_err(|error| invalid_asset(format!("failed to secure owner state root: {error:#}")))?;
     let owner_root = owner_paths.root();
-    crate::core::maintenance::persist_owner_identity(&owner.identity, owner_root)
+    local_timing::result("runtime.persist_owner_identity",
+        crate::core::maintenance::persist_owner_identity(&owner.identity, owner_root))
         .await
         .map_err(|error| invalid_asset(format!("failed to persist owner identity: {error:#}")))?;
-    prepare_owner_ipc_directory(owner).await?;
+    local_timing::result("runtime.prepare_owner_ipc", prepare_owner_ipc_directory(owner)).await?;
 
     let logs = owner_paths.logs_dir();
     tokio::fs::create_dir_all(&logs)
@@ -269,7 +275,7 @@ pub(crate) async fn prepare_runtime(
         ..Default::default()
     };
 
-    let runtime = ensure_runtime_generation(owner_root).await?;
+    let runtime = local_timing::result("runtime.secure_generation", ensure_runtime_generation(owner_root)).await?;
     let mut prepared = PreparedRuntime {
         clash_config: ClashConfig {
             core_config: CoreConfig {
@@ -285,10 +291,11 @@ pub(crate) async fn prepare_runtime(
         },
         runtime: runtime.clone(),
         stale_runtime_paths: Vec::new(),
-        plan: plan_runtime_refresh(owner, bundle, &core_path, &runtime).await?,
+        plan: local_timing::result("runtime.plan_refresh", plan_runtime_refresh(owner, bundle, &core_path, &runtime)).await?,
         yaml: bundle.yaml.clone(),
     };
-    prepared.stale_runtime_paths = snapshot_stale_runtime_directories(owner_root, &runtime).await;
+    prepared.stale_runtime_paths = local_timing::returned("runtime.scan_legacy_generations",
+        snapshot_stale_runtime_directories(owner_root, &runtime)).await;
     Ok(prepared)
 }
 

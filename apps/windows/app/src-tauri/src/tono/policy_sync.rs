@@ -95,7 +95,11 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
                     media: policy.media_endpoints.len(),
                     web_domains: policy.web_domains.len(),
                 });
-                changed && (inner.fsm.status().is_connected || inner.fsm.status().is_connecting)
+                // This document configures the optional DIRECT overlay, not the
+                // catalog's residential chain. A disabled overlay cannot change
+                // the running full-tunnel policy and must not restart its Core.
+                changed && connection::optional_direct_enabled()
+                    && (inner.fsm.status().is_connected || inner.fsm.status().is_connecting)
             }
             Ok((tracker, None)) => {
                 inner.policy_tracker = tracker;
@@ -109,7 +113,12 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
     drop(policy_update);
 
     if behavior_changed && state.lock().await.sign_in_generation == auth_generation {
-        connection::handle_network_change(state, app).await;
+        connection::handle_network_change(
+            state,
+            app,
+            connection::RecoveryReason::RoutingPolicyChanged,
+        )
+        .await;
     }
     Ok(())
 }

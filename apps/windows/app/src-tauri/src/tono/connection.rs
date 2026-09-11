@@ -26,6 +26,8 @@ mod reconnect;
 mod switch;
 mod direct;
 mod platform;
+mod physical_route;
+mod admission_repair;
 
 // Compatibility surface for existing command and test callers. The transaction
 // and error modules do not import this orchestration facade.
@@ -76,9 +78,10 @@ use crate::{
 
 pub use crate::tono::connection_health::{
     CORE_MISSING_SUSTAINED_SAMPLES, CoreSample, HEALTH_FAILURE_THRESHOLD, HealthLegs, NETWORK_EVENT_DEBOUNCE,
-    NetworkChangeOutcome, classify_core_sample, connection_loop_continues, core_change_fires,
-    health_threshold_reached, kill_switch_unhealthy, monitor_requires_reconnect, network_change_uses_probe_veto,
-    network_event_fires, protected_dns_unhealthy, startup_resume_guards_hold, startup_runtime_is_resume_candidate,
+    NetworkChangeOutcome, RecoveryReason, adapter_noise_keeps_session, classify_core_sample,
+    connection_loop_continues, core_change_fires, health_threshold_reached, kill_switch_unhealthy,
+    monitor_requires_reconnect, network_event_fires, protected_dns_unhealthy, recovery_end,
+    recovery_try_begin, startup_resume_guards_hold, startup_runtime_is_resume_candidate,
     unique_adapter_dns_apply_failed,
 };
 pub use crate::tono::connection_plan::{
@@ -99,21 +102,21 @@ use cleanup::{ensure_fresh, retire_timed_out_generation};
 use controller::{
     CONTROLLER_HTTP_TIMEOUT, CONTROLLER_READY_TIMEOUT, LOCK_ATTEMPTS, LOCK_RETRY_INTERVAL,
     classify_bfe_state, controller_client, controller_url, dns_listener_conflict_message, ensure_service_ready,
-    lock_kill_switch_with_retries, select_exit_group, wait_controller,
+    lock_kill_switch_with_retries, wait_controller,
 };
+#[cfg(test)]
+use controller::select_exit_group;
 pub use controller::close_owned_controller_connection;
-use endpoints::proxy_endpoints_for;
 pub use endpoints::{proxy_endpoint_of, unique_proxy_endpoints};
-use monitor::{IN_PLACE_RECOVERY_COOLDOWN, NETWORK_MONITOR_INTERVAL, monitor_interval, wechat_paths_changed};
+use monitor::{NETWORK_MONITOR_INTERVAL, monitor_interval, wechat_paths_changed};
 pub(crate) use monitor::handle_network_change;
 #[cfg(test)]
-use probes::EXIT_PROBE_ADVISORY_BUDGET;
+use probes::{EXIT_PROBE_ADVISORY_BUDGET, format_tun_probe_failures, tun_probe_stagger};
 use probes::{
     EXIT_PROBE_CLIENT_TIMEOUT, EXIT_PROBE_CORE_TIMEOUT_MS, FAKE_IP_LOOKUP_TIMEOUT, PostLockVerification,
     TUN_DATA_PLANE_CONNECT_TIMEOUT, TUN_DATA_PLANE_PROBES, TUN_DATA_PLANE_TIMEOUT, TUN_PROBE_STAGGER,
     VERIFY_LOCK_ATTEMPTS, classify_exhausted_data_plane, classify_post_lock_verification,
     connect_failure_is_dead_exit, fake_ip_attempt_timeout, fake_ip_verification_error,
-    format_tun_probe_failures, tun_probe_stagger, verify_tun_data_plane,
 };
 pub use probes::{is_fake_ip, test_current_server, verify_lock_retry_window};
 
@@ -165,7 +168,7 @@ enum Attempt {
     /// selection, suspended). No failure handling applies.
     GuardRejected(String),
     /// The transaction ran (or reached the service checks) and failed.
-    Failed(String),
+    Failed { error: String, generation: u64 },
     /// The connect generation moved under us (disconnect / sign-out / node
     /// switch / catalog teardown). Exit without touching the FSM, the core,
     /// or the UI: the flow that bumped the generation owns the cleanup.
@@ -209,8 +212,10 @@ pub async fn connect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String
         }
         Attempt::GuardRejected(err) => Err(err),
         Attempt::Stale => Err("connection superseded by a newer transition".to_string()),
-        Attempt::Failed(err) => {
-            let err = fail_connect(&state, &app, err).await;
+        Attempt::Failed { error, generation } => {
+            let Some(err) = fail_connect(&state, &app, error, generation).await else {
+                return Err("connection superseded by a newer transition".to_string());
+            };
             schedule_reconnect(&state, &app).await;
             Err(err)
         }
@@ -225,11 +230,11 @@ fn attempt<'a>(state: &'a Arc<TonoState>, app: &'a AppHandle) -> BoxedAttempt<'a
 }
 
 async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle) -> Attempt {
-    let (node, nodes, routing, generation, cancellation) = match guard_snapshot(state).await {
+    let (node, nodes, routing, transport, generation, cancellation) = match guard_snapshot(state).await {
         Ok(snapshot) => snapshot,
         Err(err) => return Attempt::GuardRejected(err),
     };
-    let transaction = ConnectTransaction::new(cancellation);
+    let transaction = ConnectTransaction::new(cancellation).observed_by(state, generation);
     // L5: the clock starts at the top of the attempt, so even a
     // service-readiness failure leaves no orphan ConnectFail.
     let started = std::time::Instant::now();
@@ -255,6 +260,8 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle) -> Attempt {
         inner.step_started_at = Some(started);
         inner.failed_stage = None;
         inner.connect_error = None;
+        inner.attempt_evidence = crate::tono::connection_evidence::AttemptEvidence::begin(generation);
+        inner.failure_evidence = None;
         inner.connect_error_at_ms = None;
         inner.next_retry_at_ms = None;
         inner.optional_direct_active = false;
@@ -293,7 +300,8 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle) -> Attempt {
         {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
-                return Attempt::Failed(format!("{BROWSER_DNS_PREFLIGHT_PREFIX}: {error}"));
+                return attempt_from_stage_failure(state, generation,
+                    StageFailure::Error(format!("{BROWSER_DNS_PREFLIGHT_PREFIX}: {error}"))).await;
             }
             Err(failure) => return attempt_from_stage_failure(state, generation, failure).await,
         }
@@ -305,7 +313,7 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle) -> Attempt {
             // The kill switch may already be armed from a previous session, so this is a
             // transaction failure, not a guard rejection. `fail_connect` runs the decision
             // table and (pre-arm) releases the FSM cleanly.
-            return Attempt::Failed(err);
+            return attempt_from_stage_failure(state, generation, StageFailure::Error(err)).await;
         }
         Err(failure) => return attempt_from_stage_failure(state, generation, failure).await,
     }
@@ -315,14 +323,9 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle) -> Attempt {
         let _ = crate::core::sysopt::Sysopt::global().reset_sysproxy().await;
     }
 
-    match run_stages(state, app, &node, &nodes, routing.as_ref(), generation, started, &transaction).await {
+    match run_stages(state, app, &node, &nodes, routing.as_ref(), transport, generation, started, &transaction).await {
         Ok(()) => Attempt::Connected,
-        Err(StageFailure::Stale) => Attempt::Stale,
-        Err(StageFailure::TimedOut(err)) => {
-            retire_timed_out_generation(state, generation).await;
-            Attempt::Failed(err)
-        }
-        Err(StageFailure::Error(err)) => Attempt::Failed(err),
+        Err(failure) => attempt_from_stage_failure(state, generation, failure).await,
     }
 }
 
@@ -330,11 +333,26 @@ async fn attempt_from_stage_failure(state: &Arc<TonoState>, generation: u64, fai
     match failure {
         StageFailure::Stale => Attempt::Stale,
         StageFailure::TimedOut(error) => {
-            retire_timed_out_generation(state, generation).await;
-            Attempt::Failed(error)
+            match retire_timed_out_generation(state, generation).await {
+                Some(generation) => Attempt::Failed { error, generation },
+                None => Attempt::Stale,
+            }
         }
-        StageFailure::Error(error) => Attempt::Failed(error),
+        StageFailure::Error(error) => {
+            let mut inner = state.lock().await;
+            if inner.connect_generation != generation { return Attempt::Stale; }
+            freeze_attempt_failure(&mut inner);
+            Attempt::Failed { error, generation }
+        }
     }
+}
+
+fn freeze_attempt_failure(inner: &mut crate::tono::state::TonoInner) {
+    let stage = inner.fsm.status().stage.map(commands::stage_key);
+    let committed = inner.fsm.protection_committed();
+    inner.failure_evidence = Some(inner.attempt_evidence.freeze(
+        commands::epoch_millis(), stage, committed, None,
+    ));
 }
 
 
@@ -344,7 +362,7 @@ async fn attempt_from_stage_failure(state: &Arc<TonoState>, generation: u64, fai
 /// transaction is in flight. Pure read — no state changes.
 async fn guard_snapshot(
     state: &Arc<TonoState>,
-) -> Result<(ValidatedNode, Vec<ValidatedNode>, Option<tono_core::CatalogRouting>, u64, CancellationToken), String> {
+) -> Result<(ValidatedNode, Vec<ValidatedNode>, Option<tono_core::CatalogRouting>, tono_core::node::ExitTransport, u64, CancellationToken), String> {
     if state.release_in_progress().await {
         return Err(format!(
             "{RELEASE_RECONCILING_PREFIX}: network protection release is still reconciling; wait before reconnecting"
@@ -376,10 +394,12 @@ async fn guard_snapshot(
         .find(|node| node.name == selected)
         .cloned()
         .ok_or_else(|| "the selected server is not in the catalog".to_string())?;
+    node.transport_port(inner.exit_transport).map_err(|error| error.to_string())?;
     Ok((
         node,
         inner.nodes.clone(),
         inner.routing.clone(),
+        inner.exit_transport,
         inner.connect_generation,
         inner.connect_cancellation.clone(),
     ))
@@ -410,12 +430,24 @@ async fn guard_snapshot(
 /// The §6 failure decision table, executing [`plan_failure`]. After arm:
 /// stop the core, keep blocking (restrict to the bootstrap channel),
 /// Protected Offline. Before arm: full release.
-async fn fail_connect(state: &Arc<TonoState>, app: &AppHandle, err: String) -> String {
+async fn fail_connect(state: &Arc<TonoState>, app: &AppHandle, err: String, failure_generation: u64) -> Option<String> {
+    // Pin the failure to its caller's generation, not whatever generation exists after the
+    // failed future returns. A Disconnect/switch between dispatch and this read owns cleanup.
+    if state.lock().await.connect_generation != failure_generation { return None; }
     logging!(error, Type::Service, "Tono: 连接事务失败: {err}");
     let err = crate::tono::audit::strip_ipv4(&err);
     let observed = service::tono_kill_switch_status().await.ok();
     let (plan, stage, action, armed, step_elapsed, err) = {
         let mut inner = state.lock().await;
+        if inner.connect_generation != failure_generation {
+            // A newer Disconnect/switch owns cleanup; old failure evidence cannot overwrite it.
+            return None;
+        }
+        // The attempt froze observations before this RPC (and before timeout retirement can
+        // trigger late DNS compensation). Keep the handler's later WFP read separately.
+        if let (Some(evidence), Some(status)) = (&mut inner.failure_evidence, &observed) {
+            evidence.note_handler_wfp(commands::epoch_millis(), status);
+        }
         if let Some(status) = &observed {
             inner.kill_switch = Some(status.clone());
         }
@@ -517,7 +549,7 @@ async fn fail_connect(state: &Arc<TonoState>, app: &AppHandle, err: String) -> S
 
     let inner = state.lock().await;
     commands::emit_status(app, &commands::status_of(&inner));
-    err
+    Some(err)
 }
 
 
@@ -683,7 +715,6 @@ mod tests {
         CONNECT_TRANSACTION_TIMEOUT, CONTROLLER_READY_TIMEOUT, CORE_MISSING_SUSTAINED_SAMPLES,
         ControllerDirectRuleProof, CoreSample, EXIT_PROBE_ADVISORY_BUDGET, EXIT_PROBE_CLIENT_TIMEOUT,
         EXIT_PROBE_CORE_TIMEOUT_MS, EXPLICIT_RELEASE_TIMEOUT, FailurePlan, HEALTH_FAILURE_THRESHOLD, HealthLegs,
-        IN_PLACE_RECOVERY_COOLDOWN,
         LOCK_ATTEMPTS, LOCK_RETRY_INTERVAL, MAX_DIRECT_ENDPOINTS, NETWORK_EVENT_DEBOUNCE, NETWORK_MONITOR_INTERVAL,
         RELEASE_RECONCILING_PREFIX, SERVICE_BUSY_PREFIX,
         NetworkChangeOutcome, SERVICE_LIFECYCLE_TIMEOUT, SERVICE_TOO_OLD_PREFIX, SelectAction,
@@ -696,8 +727,9 @@ mod tests {
         core_change_fires,
         dns_listener_conflict_message, expected_controller_direct_rules, format_tun_probe_failures, guard_rejection_is_transient,
         health_threshold_reached, is_fake_ip, is_retryable_lock_error, kill_switch_unhealthy, map_service_ready_error,
-        map_wfp_engine_error, monitor_interval, monitor_requires_reconnect, network_change_uses_probe_veto,
-        network_event_fires, plan_failure, session_verified_for_failure,
+        map_wfp_engine_error, monitor_interval, monitor_requires_reconnect, adapter_noise_keeps_session,
+        network_event_fires, plan_failure, session_verified_for_failure, RecoveryReason,
+        recovery_end, recovery_try_begin,
         protected_dns_unhealthy, prove_service_endpoint_digest, prove_service_reload_mode, proxy_endpoint_of,
         unique_adapter_dns_apply_failed,
         unique_proxy_endpoints,
@@ -727,6 +759,47 @@ mod tests {
         assert!(message.contains("TCP: tcp address already in use"));
         assert!(message.contains("UDP: udp address already in use"));
         assert!(message.contains("Another DNS or proxy process"));
+    }
+
+    #[test]
+    fn failure_dispatch_carries_its_owner_and_freezes_before_cleanup() {
+        let source = include_str!("connection.rs").split("mod tests {").next().unwrap();
+        let fail = source.split("async fn fail_connect(").nth(1).unwrap();
+        let guard = "inner.connect_generation != failure_generation";
+        assert!(fail.contains("state.lock().await.connect_generation != failure_generation"));
+        assert!(fail.find(guard).unwrap() < fail.find("evidence.note_handler_wfp(").unwrap());
+        assert!(fail.find("evidence.note_handler_wfp(").unwrap() < fail.find("release_explicit(state, app)").unwrap());
+        assert!(!fail.contains("inner.attempt_evidence.freeze("));
+        assert!(source.contains("freeze_attempt_failure(&mut inner)"));
+        assert!(!fail.contains("let failure_generation ="));
+        assert!(source.contains("None => Attempt::Stale"));
+        for caller in [source, include_str!("connection/reconnect.rs"), include_str!("connection/switch.rs")] {
+            assert!(caller.contains("fail_connect(&state, &app, error, generation)"));
+        }
+        assert!(include_str!("connection/monitor.rs").contains("fail_connect(state, app, error, generation)"));
+        let cleanup = include_str!("connection/cleanup.rs");
+        let retirement = cleanup.split("/// The generation guard").next().unwrap();
+        assert!(retirement.contains("return None"));
+        assert!(retirement.contains("Some(inner.connect_generation)"));
+        assert!(retirement.find("freeze_attempt_failure(&mut inner)").unwrap()
+            < retirement.find("inner.retire_connection_generation(").unwrap());
+    }
+
+    #[test]
+    fn route_observation_is_off_admission_and_dns_repair_still_requires_fresh_commit() {
+        let stages = include_str!("connection/stages.rs");
+        let observer = stages.split("let route_state =").nth(1).unwrap().split("// Advisory only:").next().unwrap();
+        assert!(observer.contains("let route_node = node.server"));
+        assert!(observer.contains("tokio::spawn(async move"));
+        assert!(observer.contains("inner.connect_generation == generation"));
+        for forbidden in ["transaction.wait", "fsm.", "home_socks5", "return Err", "tono_stop_core"] {
+            assert!(!observer.contains(forbidden), "{forbidden}");
+        }
+        let native = stages.find("enable_dns_cancellation_safe(state, generation").unwrap();
+        let fake_ip = stages.find("verify_fake_ip_with_repair(||").unwrap();
+        let fresh = stages.find("commit_protection_cancellation_safe(state, generation").unwrap();
+        let green = stages.find("inner.fsm.connect_succeeded()").unwrap();
+        assert!(native < fake_ip && fake_ip < fresh && fresh < green);
     }
 
     // ---- H7: the monitor's tick source must never collapse its thresholds ----
@@ -802,15 +875,7 @@ mod tests {
         assert!(!legs.invalid());
         // A real teardown still ends the loop: the new session brings its own monitor.
         assert!(!connection_loop_continues(NetworkChangeOutcome::Handled));
-        // A leg that never recovers reaches the threshold again two ticks after every re-seed,
-        // and each firing costs a three-origin HTTPS proof and an audit record. The cooldown is
-        // what keeps a permanently unreachable Service from re-proving the data plane for the
-        // whole session and rotating the audit file away.
-        assert!(
-            IN_PLACE_RECOVERY_COOLDOWN
-                > NETWORK_MONITOR_INTERVAL * (HEALTH_FAILURE_THRESHOLD + 1),
-            "the cooldown must outlast the threshold it is bounding"
-        );
+
     }
 
     #[test]
@@ -927,52 +992,61 @@ mod tests {
     }
 
     #[test]
-    fn a_network_notification_needs_data_plane_corroboration() {
+    fn a_network_notification_does_not_consult_third_party_https() {
         assert!(
-            !monitor_requires_reconnect(true, false, false, false),
-            "a healthy locked tunnel must survive a delayed notification from its own setup"
+            !monitor_requires_reconnect(true, false, false),
+            "adapter noise alone must not rebuild a healthy locked tunnel"
         );
         assert!(
-            monitor_requires_reconnect(true, false, false, true),
-            "a failed real data-plane probe corroborates the network event"
+            adapter_noise_keeps_session(true, true, false, false),
+            "a counter bump with unchanged core and protection keeps the session"
         );
         assert!(
-            monitor_requires_reconnect(true, true, false, false),
+            !adapter_noise_keeps_session(true, true, true, false),
+            "a changed core is not adapter noise"
+        );
+        assert!(
+            monitor_requires_reconnect(true, true, false),
             "a changed Core identity always rebuilds the connection"
         );
         assert!(
-            monitor_requires_reconnect(false, false, true, false),
+            monitor_requires_reconnect(false, false, true),
             "independent health failure remains fail-closed without a network event"
         );
         assert!(
-            !monitor_requires_reconnect(false, false, false, true),
-            "an event-only probe result has no meaning when debounce did not emit an event"
+            monitor_requires_reconnect(false, true, false),
+            "a genuine core identity change must not be swallowed by NIC debounce"
         );
-        assert!(
-            network_change_uses_probe_veto(true),
-            "a verified session still corroborates adapter events with a data-plane probe"
-        );
-        assert!(
-            !network_change_uses_probe_veto(false),
-            "an unverified session must not use a probe that will fail forever"
-        );
-        assert!(
-            !monitor_requires_reconnect(
-                true,
-                false,
-                false,
-                network_change_uses_probe_veto(false) && true
-            ),
-            "a hotspot / Wi-Fi flap on an unverified session must not force reconnect"
-        );
-        assert!(
-            monitor_requires_reconnect(true, true, false, false),
-            "a changed Core identity still rebuilds even while the exit is unverified"
-        );
-        assert!(
-            monitor_requires_reconnect(false, false, true, false),
-            "a broken protection or Service leg still rebuilds while unverified"
-        );
+    }
+
+    #[test]
+    fn recovery_reasons_are_distinct_and_do_not_share_a_network_change_label() {
+        let reasons = [
+            RecoveryReason::CoreOrTunIdentity,
+            RecoveryReason::ProtectionFailed,
+            RecoveryReason::ServiceUnreachable,
+            RecoveryReason::RoutingPolicyChanged,
+            RecoveryReason::HomeRoutingChanged,
+            RecoveryReason::ExitConfigurationChanged,
+            RecoveryReason::DirectAppPathsChanged,
+            RecoveryReason::BrowserDnsFailed,
+        ];
+        let mut labels = std::collections::BTreeSet::new();
+        for reason in reasons {
+            assert_ne!(reason.audit_reason(), "networkChange");
+            assert!(!reason.log_line().contains("切网重连"));
+            assert!(labels.insert(reason.audit_reason()), "duplicate audit reason");
+        }
+    }
+
+    #[test]
+    fn recovery_is_single_flight() {
+        use std::sync::atomic::AtomicBool;
+        let flag = AtomicBool::new(false);
+        assert!(recovery_try_begin(&flag));
+        assert!(!recovery_try_begin(&flag), "a second recovery must merge");
+        recovery_end(&flag);
+        assert!(recovery_try_begin(&flag), "a finished recovery can start again");
     }
 
     // ---- V1/H1: verify_locked must not decide on one sample of a decaying cache ----
@@ -1243,10 +1317,10 @@ mod tests {
     #[test]
     fn connect_budget_covers_a_cold_first_connect() {
         let accounted: u64 = CONNECT_BUDGET_LEGS.iter().map(|(_, secs)| secs).sum();
-        assert_eq!(accounted, 142, "the table in the doc comment must stay in sync");
+        assert_eq!(accounted, 229, "the reference accounting must stay in sync");
         assert!(
             Duration::from_secs(accounted) <= CONNECT_TRANSACTION_TIMEOUT,
-            "the accounted cold-connect worst case ({accounted} s) must fit the budget"
+            "single-pass reference accounting ({accounted} s) must fit the shared budget"
         );
         // The legs whose budgets are constants here must match those constants.
         let leg = |name: &str| {
@@ -1259,8 +1333,8 @@ mod tests {
         assert!(leg("controller readiness") >= CONTROLLER_READY_TIMEOUT);
         assert!(leg("lock ladder") >= LOCK_RETRY_INTERVAL * LOCK_ATTEMPTS);
         assert!(
-            leg("lock verify") >= verify_lock_retry_window(),
-            "the Connected gate must still outlive the decaying WFP liveness cache"
+            leg("fresh WFP proof and commit") >= SERVICE_LIFECYCLE_TIMEOUT,
+            "fresh proof/commit retains the existing IPC budget, not a cached-status timer"
         );
         assert!(
             leg("fake-ip verification") > Duration::ZERO,
@@ -1300,12 +1374,62 @@ mod tests {
             "admit must not call the health TUN race"
         );
         assert!(
-            stages.contains("verify_fake_ip()"),
+            !stages.contains("mark_exit_verified()"),
+            "admit must not claim the exit is verified without a data-plane sample"
+        );
+        assert!(
+            stages.contains("verify_fake_ip_with_repair("),
             "DNS leak rejection (fake-ip) stays on the Connected gate"
         );
         assert!(
-            stages.contains("verify_locked()"),
-            "real-IP leak rejection (WFP lock) stays on the Connected gate"
+            stages.contains("commit_protection_cancellation_safe(") && !stages.contains("verify_locked()"),
+            "fresh Service WFP verification/commit, not cached polling, stays on the Connected gate"
+        );
+        assert!(
+            stages.contains("protectionReady"),
+            "ConnectOk.outcome must name local protection, not a third-party exam"
+        );
+        assert!(
+            stages.contains("exit_probe_pending = false"),
+            "admit must not queue a three-origin make-up exam"
+        );
+        let probes = include_str!("connection/probes.rs");
+        assert!(
+            probes.contains("tunnel_permit_rendered"),
+            "admit lock verify must require the TUN permit, matching runtime health"
+        );
+        let switch = include_str!("connection/switch.rs");
+        assert!(
+            !switch.contains("verify_tun_data_plane"),
+            "node switch must not reconnect because gstatic/Cloudflare/Apple failed"
+        );
+        assert!(
+            switch.contains("selector rollback unconfirmed"),
+            "a failed selector write must confirm rollback before telling the UI it restored"
+        );
+        let direct = include_str!("connection/direct.rs");
+        assert!(
+            !direct.contains("verify_tun_data_plane"),
+            "optional DIRECT must not use third-party TLS as the commit/rollback gate"
+        );
+        let monitor = include_str!("connection/monitor.rs");
+        assert!(
+            !monitor.contains("verify_tun_data_plane"),
+            "the connected-lifetime monitor must not await third-party TUN HTTPS"
+        );
+        let controller = include_str!("connection/controller.rs");
+        assert!(
+            controller.contains("selector readback"),
+            "selector PUT must be followed by a GET now readback"
+        );
+        let health = include_str!("connection_health.rs");
+        assert!(
+            !health.contains("event_probe_failed"),
+            "probe failure must not be an input to the reconnect combinator"
+        );
+        assert!(
+            !health.contains("network_change_uses_probe_veto"),
+            "the probe-veto switch must not remain as a dead re-arm path"
         );
     }
 
@@ -1360,6 +1484,7 @@ mod tests {
             client_fingerprint: None,
             reality_public_key: "0123456789abcdef0123456789abcdef0123456789a".to_string(),
             reality_short_id: "0123456789abcdef".to_string(),
+            hysteria2: None,
         }
     }
 
@@ -2191,13 +2316,79 @@ mod tests {
 
     #[test]
     fn windows_direct_policy_does_not_replace_the_proven_full_tunnel_runtime() {
-        // The gate ships enabled. What must stay true is the invariant this test was named for:
-        // the DIRECT bracket only ever narrows an already-proven full-tunnel runtime — begin is
-        // rejected unless the Service first proves Locked with the exact empty DIRECT set, and
-        // every failure after begin reconciles back to that exact Blocked set.
+        // The overlay is off this ship: reconcile_direct_reload_failure still asks the Service
+        // for Blocked, which is not a restore of this session's full-tunnel config. Keep the
+        // main tunnel and home split; do not install the overlay until rollback is real.
         assert!(
-            WINDOWS_OPTIONAL_DIRECT_ENABLED,
-            "0.0.24 ships the WeChat DIRECT split; the fail-closed bracket above is its guard"
+            !WINDOWS_OPTIONAL_DIRECT_ENABLED,
+            "optional DIRECT stays disabled until restore-to-full-tunnel is real"
+        );
+        let direct = include_str!("connection/direct.rs");
+        assert!(
+            !direct.contains("rolled back to full tunnel"),
+            "must not claim a Blocked reconcile restored the full-tunnel runtime"
+        );
+    }
+
+    async fn serve_controller_once(
+        listener: &tokio::net::TcpListener,
+        status: u16,
+        reason: &str,
+        body: &str,
+    ) {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        loop {
+            let mut chunk = [0_u8; 1024];
+            let read = stream.read(&mut chunk).await.unwrap();
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&chunk[..read]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let response = format!(
+            "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        stream.write_all(response.as_bytes()).await.unwrap();
+        stream.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn select_exit_group_confirms_controller_now() {
+        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let wanted = "Los Angeles · Mesa";
+        let body = format!(r#"{{"now":"{wanted}","all":["{wanted}"]}}"#);
+        let server = tokio::spawn(async move {
+            serve_controller_once(&listener, 204, "No Content", "").await;
+            serve_controller_once(&listener, 200, "OK", &body).await;
+        });
+        super::select_exit_group("test-secret", port, wanted)
+            .await
+            .expect("PUT plus matching GET now must succeed");
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn select_exit_group_rejects_a_mismatched_now() {
+        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            serve_controller_once(&listener, 204, "No Content", "").await;
+            serve_controller_once(&listener, 200, "OK", r#"{"now":"Tokyo · Fuji","all":["Tokyo · Fuji"]}"#).await;
+        });
+        let error = super::select_exit_group("test-secret", port, "Los Angeles · Mesa")
+            .await
+            .expect_err("a GET now that is not the written name must fail");
+        server.await.unwrap();
+        assert!(
+            error.contains("selector now="),
+            "readback mismatch must name the live selector, got {error}"
         );
     }
 
@@ -3258,5 +3449,69 @@ mod tests {
             .expect_err("a partial WFP permit set must never be emitted");
 
         assert!(error.contains("257 unique endpoints"));
+    }
+}
+
+/// Effective policy gate shared with account-scoped policy sync.
+pub(crate) const fn optional_direct_enabled() -> bool {
+    WINDOWS_OPTIONAL_DIRECT_ENABLED
+}
+
+/// Default selection hints do not alter an already selected exit. Residential
+/// assignment changes do; compare credentials too, without logging them.
+pub(crate) fn same_residential_route(
+    left: Option<&tono_core::CatalogRouting>,
+    right: Option<&tono_core::CatalogRouting>,
+) -> bool {
+    left.and_then(|r| r.home_socks5.as_ref()) == right.and_then(|r| r.home_socks5.as_ref())
+        && left.and_then(|r| r.home_proxy.as_ref()) == right.and_then(|r| r.home_proxy.as_ref())
+}
+
+#[cfg(test)]
+mod residential_contract_tests {
+    use super::*;
+
+    #[test]
+    fn default_selection_hint_is_not_a_residential_policy_change() {
+        let route = tono_core::CatalogRouting { default_proxy: Some("another-exit".into()), ..Default::default() };
+        assert!(same_residential_route(None, Some(&route)));
+    }
+
+    #[test]
+    fn assignment_removal_and_credential_rotation_are_effective_changes() {
+        let mut route = tono_core::CatalogRouting::default();
+        route.home_socks5 = Some(tono_core::CatalogHomeSocks5 {
+            host: "home.example.invalid".into(), port: 1080,
+            username: "fixture".into(), password: "fixture-a".into(),
+        });
+        assert!(!same_residential_route(None, Some(&route)));
+        assert!(!same_residential_route(Some(&route), None));
+        let mut rotated = route.clone();
+        rotated.home_socks5.as_mut().unwrap().password = "fixture-b".into();
+        assert!(!same_residential_route(Some(&route), Some(&rotated)));
+        assert!(same_residential_route(Some(&route), Some(&route)));
+    }
+
+    #[test]
+    fn downloaded_home_is_not_the_ui_applied_claim() {
+        let source = include_str!("commands/mod.rs");
+        let active = source.split("claude_home_active: if").nth(1).unwrap().split("exit_verified:").next().unwrap();
+        assert!(active.contains("inner.applied_routing"));
+        assert!(!active.contains("inner.routing"));
+    }
+
+    #[test]
+    fn local_repair_and_ipc_failure_never_stop_the_core() {
+        let source = include_str!("connection/monitor.rs");
+        let local = source.split("async fn repair_local_protection(").nth(1).unwrap()
+            .split_once("pub(crate) async fn handle_network_change(").expect("local repair boundary").0;
+        assert!(!local.contains("tono_stop_core("));
+        assert!(!local.contains("attempt("));
+        let poll = source.split("let snapshot = match service_result").nth(1).unwrap()
+            .split("legs.observe_service_ok();").next().unwrap();
+        assert!(poll.contains("inner.fsm.tunnel_died()"));
+        assert!(!poll.contains("handle_network_change("));
+        assert!(!poll.contains("tono_stop_core("));
+        assert!(connection_loop_continues(NetworkChangeOutcome::Deferred));
     }
 }

@@ -8,17 +8,20 @@ use tono_logging::{Type, logging};
 use tono_service_protocol::{KillSwitchConfig, OwnerSessionProof, RuntimeBundle};
 
 use crate::core::service;
-use crate::tono::connection_health::unique_adapter_dns_apply_failed;
+use crate::tono::connection_health::{unique_adapter_dns_apply_failed, protected_dns_unhealthy};
 use crate::tono::connection_plan::stale_exit_needs_release;
 use crate::tono::state::TonoState;
 
 use super::failure::StageFailure;
 
-pub(super) async fn retire_timed_out_generation(state: &Arc<TonoState>, generation: u64) {
+pub(super) async fn retire_timed_out_generation(state: &Arc<TonoState>, generation: u64) -> Option<u64> {
     let mut inner = state.lock().await;
     if inner.connect_generation != generation {
-        return;
+        return None;
     }
+    // Freeze before cancelling the old generation: late mutation compensation may itself
+    // restore DNS/release while the failure handler is still waiting on its status read.
+    super::freeze_attempt_failure(&mut inner);
     // A first attempt may release a late unverified arm. A previously verified protected
     // reconnect keeps the barrier, matching the normal failure decision table.
     let release_late_commit = !inner.fsm.session_verified();
@@ -26,6 +29,9 @@ pub(super) async fn retire_timed_out_generation(state: &Arc<TonoState>, generati
     // task (reconnect loop / monitor re-entry / switch), and aborting the registry here would
     // kill the caller before `fail_connect` + `schedule_reconnect` run, stranding Connecting.
     inner.retire_connection_generation(release_late_commit);
+    // Only this retirement transfers failure cleanup to the newly issued generation. If an
+    // explicit transition won first, the caller must return Stale rather than adopt its owner.
+    Some(inner.connect_generation)
 }
 
 /// The generation guard used between the long I/O steps.
@@ -83,11 +89,17 @@ pub(super) async fn enable_dns_cancellation_safe(
         let status = service::tono_enable_protected_dns_for_session(&service_session)
             .await
             .map_err(StageFailure::error)?;
-        if unique_adapter_dns_apply_failed(&status) {
+        {
+            let mut inner = task_state.lock().await;
+            if inner.connect_generation == generation {
+                inner.attempt_evidence.dns(generation, crate::tono::commands::epoch_millis(), &status);
+            }
+        }
+        if unique_adapter_dns_apply_failed(&status) || protected_dns_unhealthy(Some(&status)) {
             return Err(StageFailure::error(
                 status
                     .last_error
-                    .unwrap_or_else(|| "TONO_DNS_UNVERIFIED: unique adapter live apply failed".into()),
+                    .unwrap_or_else(|| "TONO_DNS_UNVERIFIED: active adapter DNS protection is not proven".into()),
             ));
         }
         if task_state.lock().await.connect_generation != generation {
@@ -97,6 +109,33 @@ pub(super) async fn enable_dns_cancellation_safe(
     });
     task.await
         .map_err(|error| StageFailure::error(format!("DNS reconciliation task failed: {error}")))?
+}
+
+/// Cross the possible durable-commit boundary conservatively. No green state is
+/// published here. A cancelled/lost reply must not schedule FullRelease while the
+/// Service may be committing; explicit Disconnect still owns release normally.
+pub(super) async fn commit_protection_cancellation_safe(
+    state: &Arc<TonoState>, generation: u64, session: OwnerSessionProof,
+    expected: tono_service_protocol::ProtectionCommitRequest,
+) -> Result<tono_service_protocol::ProtectionProof, StageFailure> {
+    let mutation_guard = state.begin_connect_mutation().await;
+    let cancellation = {
+        let mut inner = state.lock().await;
+        if inner.connect_generation != generation { return Err(StageFailure::Stale); }
+        // Called only after native DNS + system fake-ip and the lock operation.
+        // Commitment is conservative before dispatch; Connected still requires the receipt.
+        inner.fsm.mark_protection_committed();
+        inner.connect_cancellation.clone()
+    };
+    let task_state = Arc::clone(state);
+    let task = tokio::spawn(async move {
+        let _mutation_guard = mutation_guard;
+        let proof = service::tono_verify_and_commit_protection(&session, expected.core_pid, expected.core_generation, &cancellation)
+            .await.map_err(StageFailure::error)?;
+        if task_state.lock().await.connect_generation != generation { return Err(StageFailure::Stale); }
+        Ok(proof)
+    });
+    task.await.map_err(|error| StageFailure::error(format!("protection commit task failed: {error}")))?
 }
 
 /// A stale exit past a committed StartClash (H-1): the IPC cannot be

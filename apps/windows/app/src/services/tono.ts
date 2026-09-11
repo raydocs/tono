@@ -430,6 +430,16 @@ export const tonoCloseAllConnections = (controllerGeneration: number) =>
 
 export const tonoRetryRestore = () => call<void>('tono_retry_restore')
 
+export type TonoExitTransport = 'realityTcp' | 'hysteria2Udp'
+export interface TonoTransportSetting {
+  selected: TonoExitTransport
+  udpAvailable: boolean
+  changeAllowed: boolean
+}
+export const tonoExitTransport = () => call<TonoTransportSetting>('tono_exit_transport')
+export const tonoSetExitTransport = (transport: TonoExitTransport) =>
+  call<TonoTransportSetting>('tono_set_exit_transport', { transport })
+
 export const tonoAuditEnabled = () => call<boolean>('tono_audit_enabled')
 
 export const tonoSetAuditEnabled = (enabled: boolean) =>
@@ -437,6 +447,12 @@ export const tonoSetAuditEnabled = (enabled: boolean) =>
 
 export const tonoPeriodicTelemetryEnabled = () =>
   call<boolean>('tono_periodic_telemetry_enabled')
+
+export const tonoAutomaticDiagnosticsEnabled = () =>
+  call<boolean>('tono_automatic_diagnostics_enabled')
+
+export const tonoSetAutomaticDiagnosticsEnabled = (enabled: boolean) =>
+  call<void>('tono_set_automatic_diagnostics_enabled', { enabled })
 
 export const tonoSetPeriodicTelemetryEnabled = (enabled: boolean) =>
   call<void>('tono_set_periodic_telemetry_enabled', { enabled })

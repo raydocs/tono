@@ -66,7 +66,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             }
             ok_json(status)
         })
-        .post(IpcCommand::LockKillSwitch.as_ref(), |ctx| async move {
+        .post(IpcCommand::LockKillSwitch.as_ref(), |ctx| local_timing::in_trace("lock_kill_switch", async move {
             trace!("Received LockKillSwitch command");
             let (request, owner) = match authenticate_request::<
                 AuthenticatedSessionRequest<KillSwitchLockRequest>,
@@ -76,24 +76,23 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 ControlFlow::Continue(authenticated) => authenticated,
                 ControlFlow::Break(response) => return response,
             };
-            // The second phase of the arm is part of the connect flow, so it is session-gated
-            // like the other mid-session mutations.
-            let _lifecycle_guard = match enter_owner_lifecycle(
-                &owner,
-                OwnerLifecycleGate::ActiveSession(&request.session),
-            )
-            .await
-            {
-                ControlFlow::Continue(guard) => guard,
-                ControlFlow::Break(response) => return response,
-            };
             let _operation_guard =
                 OperationGuard::begin(ServiceOperationKind::LockKillSwitch, IPC_HANDLER_TIMEOUT);
-            match windows_kill_switch::lock(request.payload.tunnel_interface.as_deref()).await {
+            let attempt = || async {
+                // Release the lifecycle lock between checks: Disconnect can retire
+                // the session while TUN is absent. Never reuse an earlier authorization.
+                let _lifecycle_guard = local_timing::returned("lock.owner_lifecycle_queue", OWNER_LIFECYCLE_LOCK.lock()).await;
+                require_active_session(&owner, &request.session).await?;
+                local_timing::result("lock.native_attempt", windows_kill_switch::lock(request.payload.tunnel_interface.as_deref())).await
+            };
+            let result = if request.payload.wait_for_tun {
+                local_timing::result("lock.tun_readiness_window", crate::core::readiness::lock_when_ready(attempt)).await
+            } else { attempt().await };
+            match result {
                 Ok(()) => ok_empty("Kill switch locked"),
                 Err(error) => service_unavailable(format!("Failed to lock kill switch: {error:#}")),
             }
-        })
+        }))
         .post(IpcCommand::BeginDirectRuntimeReload.as_ref(), |ctx| async move {
             let (request, owner) =
                 match authenticate_request::<AuthenticatedSessionRequest<()>>(&ctx).await {
@@ -281,7 +280,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
         .post(IpcCommand::MarkKillSwitchVerified.as_ref(), |ctx| async move {
             trace!("Received MarkKillSwitchVerified command");
             let (request, owner) =
-                match authenticate_request::<AuthenticatedSessionRequest<()>>(&ctx).await {
+                match authenticate_request::<AuthenticatedSessionRequest<Option<crate::ProtectionCommitRequest>>>(&ctx).await {
                     ControlFlow::Continue(authenticated) => authenticated,
                     ControlFlow::Break(response) => return response,
                 };
@@ -298,11 +297,16 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 ServiceOperationKind::VerifyKillSwitch,
                 IPC_HANDLER_TIMEOUT,
             );
-            match windows_kill_switch::mark_verified(&owner.key).await {
-                Ok(()) => ok_empty("Kill switch session marked verified"),
-                Err(error) => service_unavailable(format!(
-                    "Failed to mark kill switch session verified: {error:#}"
-                )),
+            if let Some(expected) = request.payload.as_ref() {
+                match windows_kill_switch::verify_and_commit(&owner.key, expected, request.session.generation).await {
+                    Ok(proof) => ok_json(proof),
+                    Err(error) => service_unavailable(format!("Fresh protection commit refused: {error:#}")),
+                }
+            } else {
+                match windows_kill_switch::mark_verified(&owner.key).await {
+                    Ok(()) => ok_empty("Kill switch session marked verified"),
+                    Err(error) => service_unavailable(format!("Failed to mark kill switch session verified: {error:#}")),
+                }
             }
         })
         .post(IpcCommand::RestrictKillSwitchBootstrap.as_ref(), |ctx| async move {
@@ -399,7 +403,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             }
             release_kill_switch_for_platform().await
         })
-        .post(IpcCommand::EnableProtectedDns.as_ref(), |ctx| async move {
+        .post(IpcCommand::EnableProtectedDns.as_ref(), |ctx| local_timing::in_trace("enable_protected_dns", async move {
             trace!("Received EnableProtectedDns command");
             let (request, owner) =
                 match authenticate_request::<AuthenticatedSessionRequest<()>>(&ctx).await {
@@ -417,11 +421,12 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             };
             let _operation_guard =
                 OperationGuard::begin(ServiceOperationKind::EnableDns, IPC_HANDLER_TIMEOUT);
-            match dns::enable().await {
+            match local_timing::result_with_verdict("dns.apply_and_native_readback", dns::enable(),
+                |status| status.enabled && status.snapshot_present && status.adapters > 0 && status.last_error.is_none()).await {
                 Ok(status) => ok_json(status),
                 Err(error) => service_unavailable(format!("Failed to enable protected DNS: {error:#}")),
             }
-        })
+        }))
         .post(IpcCommand::RestoreProtectedDns.as_ref(), |ctx| async move {
             trace!("Received RestoreProtectedDns command");
             let (_request, owner) =
@@ -484,7 +489,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 Err(error) => service_unavailable(format!("Failed to persist bootstrap pins: {error:#}")),
             }
         })
-        .post(IpcCommand::PrepareCoreStart.as_ref(), |ctx| async move {
+        .post(IpcCommand::PrepareCoreStart.as_ref(), |ctx| local_timing::in_trace("prepare_core_start", async move {
             trace!("Received PrepareCoreStart command");
             let (_request, owner) =
                 match authenticate_request::<AuthenticatedRequest<()>>(&ctx).await {
@@ -504,7 +509,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             // the shared proof requires a quiescent snapshot. A fully verified active runtime may
             // keep serving DNS until StartClash replaces it; every weaker supervised runtime must
             // be stopped now or it blocks the App's fixed-port bind before StartClash is reached.
-            let snapshot = match service_status_snapshot(&owner).await {
+            let snapshot = match local_timing::result("prepare.existing_runtime_snapshot", service_status_snapshot(&owner)).await {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
                     return service_unavailable(format!(
@@ -512,26 +517,23 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     ));
                 }
             };
-            let dns_status = dns::status().await;
+            let dns_status = local_timing::returned("prepare.existing_native_dns", dns::status()).await;
             let preserve_supervised_core =
                 is_protected_startup_replacement_candidate(&snapshot, &dns_status);
             let _operation_guard = OperationGuard::begin(
                 ServiceOperationKind::PrepareCoreStart,
                 IPC_HANDLER_TIMEOUT,
             );
-            match CORE_MANAGER
-                .lock()
-                .await
-                .prepare_start(preserve_supervised_core)
-                .await
+            match local_timing::returned("prepare.core_manager_queue", CORE_MANAGER.lock()).await
+                .prepare_start(preserve_supervised_core).await
             {
                 Ok(terminated) => ok_json(terminated),
                 Err(error) => service_unavailable(format!(
                     "Failed to reconcile Tono Core before DNS preflight: {error:#}"
                 )),
             }
-        })
-        .post(IpcCommand::StartClash.as_ref(), |ctx| async move {
+        }))
+        .post(IpcCommand::StartClash.as_ref(), |ctx| local_timing::in_trace("start_clash", async move {
             trace!("Received StartClash command");
             let (request, owner) =
                 match authenticate_request::<AuthenticatedRequest<StartClashRequest>>(&ctx).await {
@@ -570,13 +572,13 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 };
             let _operation_guard =
                 OperationGuard::begin(ServiceOperationKind::StartCore, IPC_HANDLER_TIMEOUT);
-            let previous_owner = match load_active_owner().await {
+            let previous_owner = match local_timing::result("start.load_previous_owner", load_active_owner()).await {
                 Ok(owner) => owner,
                 Err(error) => {
                     return service_unavailable(format!("Failed to load active owner: {error}"));
                 }
             };
-            let prepared_runtime = match prepare_runtime(&owner, &start_request.runtime).await {
+            let prepared_runtime = match local_timing::result("start.validate_runtime", prepare_runtime(&owner, &start_request.runtime)).await {
                 Ok(prepared) => prepared,
                 Err(error) => return service_error(error),
             };
@@ -596,7 +598,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             if let Some(kill_switch) = start_request.windows_kill_switch.as_ref() {
                 let core_path = prepared_runtime.clash_config().core_config.core_path.clone();
                 if let Err(error) =
-                    windows_kill_switch::arm_bootstrap(kill_switch, &core_path, &owner.key).await
+                    local_timing::result("start.wfp_bootstrap", windows_kill_switch::arm_bootstrap(kill_switch, &core_path, &owner.key)).await
                 {
                     return service_unavailable(format!(
                         "Failed to arm Windows kill switch: {error:#}"
@@ -675,7 +677,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 },
                 proxy_outcome,
             })
-        })
+        }))
         .get(IpcCommand::GetClashLogs.as_ref(), |ctx| async move {
             trace!("Received GetClashLogs command");
             let (_request, owner) =

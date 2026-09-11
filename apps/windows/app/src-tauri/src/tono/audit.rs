@@ -64,6 +64,14 @@ impl AuditRecord {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum AuditEvent {
+    /// Monotonic duration of a local await, including parallel child legs.
+    /// `completed` means the await returned, not that its nested result succeeded.
+    LocalStep {
+        generation: u64,
+        step: &'static str,
+        elapsed_ms: u64,
+        outcome: &'static str,
+    },
     // account
     SignInStart {
         email: String,
@@ -480,6 +488,14 @@ fn default_true() -> bool {
 struct SettingsFile {
     #[serde(default = "default_true")]
     audit_enabled: bool,
+    /// Fixed-vocabulary connection diagnostics, not the raw audit timeline. Visible opt-out.
+    /// This separate flag must never enable the legacy hostname/process-bearing log uploader.
+    #[serde(default = "default_true")]
+    automatic_diagnostics_enabled: bool,
+    /// Durable opt-out barrier: old queues remain ineligible even if deletion fails or the
+    /// process exits before the background cleanup, followed by a later opt-in.
+    #[serde(default)]
+    automatic_diagnostics_epoch: u64,
     /// Default OFF: short diagnostic timelines still create durable D1 rows
     /// and therefore require an explicit opt-in.
     #[serde(default)]
@@ -503,6 +519,8 @@ impl Default for SettingsFile {
     fn default() -> Self {
         Self {
             audit_enabled: true,
+            automatic_diagnostics_enabled: true,
+            automatic_diagnostics_epoch: 0,
             periodic_telemetry_enabled: false,
             periodic_telemetry_default_v2: true,
             network_log_upload_enabled: false,
@@ -511,7 +529,14 @@ impl Default for SettingsFile {
     }
 }
 
+static SETTINGS_IO: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 fn load_settings(dir: &Path) -> SettingsFile {
+    let _guard = SETTINGS_IO.lock();
+    load_settings_unlocked(dir)
+}
+
+fn load_settings_unlocked(dir: &Path) -> SettingsFile {
     let mut settings = std::fs::read_to_string(dir.join(SETTINGS_FILE_NAME))
         .ok()
         .and_then(|body| serde_json::from_str::<SettingsFile>(&body).ok())
@@ -564,20 +589,25 @@ fn save_settings(dir: &Path, settings: &SettingsFile) -> Result<()> {
     result
 }
 
-fn save_audit_enabled(dir: &Path, enabled: bool) -> Result<()> {
-    let mut settings = load_settings(dir);
+fn save_audit_enabled(dir: &Path, enabled: bool) -> Result<u64> {
+    let _guard = SETTINGS_IO.lock();
+    let mut settings = load_settings_unlocked(dir);
     settings.audit_enabled = enabled;
-    save_settings(dir, &settings)
+    if !enabled { settings.automatic_diagnostics_epoch = settings.automatic_diagnostics_epoch.saturating_add(1); }
+    save_settings(dir, &settings)?;
+    Ok(settings.automatic_diagnostics_epoch)
 }
 
 fn save_periodic_telemetry_enabled(dir: &Path, enabled: bool) -> Result<()> {
-    let mut settings = load_settings(dir);
+    let _guard = SETTINGS_IO.lock();
+    let mut settings = load_settings_unlocked(dir);
     settings.periodic_telemetry_enabled = enabled;
     save_settings(dir, &settings)
 }
 
 fn save_network_log_upload_enabled(dir: &Path, enabled: bool) -> Result<()> {
-    let mut settings = load_settings(dir);
+    let _guard = SETTINGS_IO.lock();
+    let mut settings = load_settings_unlocked(dir);
     settings.network_log_upload_enabled = enabled;
     save_settings(dir, &settings)
 }
@@ -592,6 +622,8 @@ pub struct Audit {
     writer: parking_lot::Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     enabled: AtomicBool,
     periodic_telemetry_enabled: AtomicBool,
+    automatic_diagnostics_enabled: AtomicBool,
+    automatic_diagnostics_epoch: AtomicU64,
     /// Set by the quit path: permanently silences logging and blocks the
     /// self-heal respawn (L1's "closed is not dead" distinction).
     closed: AtomicBool,
@@ -614,6 +646,8 @@ impl Audit {
             writer: parking_lot::Mutex::new(None),
             enabled: AtomicBool::new(settings.audit_enabled),
             periodic_telemetry_enabled: AtomicBool::new(settings.periodic_telemetry_enabled),
+            automatic_diagnostics_enabled: AtomicBool::new(settings.automatic_diagnostics_enabled),
+            automatic_diagnostics_epoch: AtomicU64::new(settings.automatic_diagnostics_epoch),
             closed: AtomicBool::new(false),
             self_heal: true,
             dropped: AtomicU64::new(0),
@@ -634,6 +668,8 @@ impl Audit {
             writer: parking_lot::Mutex::new(None),
             enabled: AtomicBool::new(enabled),
             periodic_telemetry_enabled: AtomicBool::new(false),
+            automatic_diagnostics_enabled: AtomicBool::new(false),
+            automatic_diagnostics_epoch: AtomicU64::new(0),
             closed: AtomicBool::new(false),
             self_heal: false,
             dropped: AtomicU64::new(0),
@@ -666,8 +702,33 @@ impl Audit {
         self.enabled.load(Ordering::Acquire)
     }
 
+    pub(crate) fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::Acquire)
+    }
+
     pub fn periodic_telemetry_enabled(&self) -> bool {
         self.periodic_telemetry_enabled.load(Ordering::Acquire)
+    }
+
+    pub fn automatic_diagnostics_enabled(&self) -> bool {
+        self.automatic_diagnostics_enabled.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn automatic_diagnostics_epoch(&self) -> u64 {
+        self.automatic_diagnostics_epoch.load(Ordering::Acquire)
+    }
+
+    pub fn set_automatic_diagnostics_enabled(&self, enabled: bool) -> Result<(), String> {
+        let _guard = SETTINGS_IO.lock();
+        let mut settings = load_settings_unlocked(&self.settings_dir);
+        settings.automatic_diagnostics_enabled = enabled;
+        if !enabled { settings.automatic_diagnostics_epoch = settings.automatic_diagnostics_epoch.saturating_add(1); }
+        save_settings(&self.settings_dir, &settings).map_err(|_| "Could not save diagnostic preference".to_owned())?;
+        self.automatic_diagnostics_epoch.fetch_max(settings.automatic_diagnostics_epoch, Ordering::AcqRel);
+        self.automatic_diagnostics_enabled.store(enabled, Ordering::Release);
+        if enabled { crate::tono::automatic_diagnostics::wake(); }
+        else { crate::tono::automatic_diagnostics::request_purge(); }
+        Ok(())
     }
 
     pub fn log_path(&self) -> &Path {
@@ -692,6 +753,11 @@ impl Audit {
         if !self.enabled() || self.closed.load(Ordering::Acquire) {
             return;
         }
+        if matches!(&event, AuditEvent::ConnectOk { .. } | AuditEvent::ConnectFail { .. }
+            | AuditEvent::ProtectedOffline { .. } | AuditEvent::DisconnectOk { .. }
+            | AuditEvent::CoreRestart { .. } | AuditEvent::NodeSwitch { .. }) {
+            crate::tono::automatic_diagnostics::wake();
+        }
         self.ensure_writer();
         self.record(event);
     }
@@ -714,8 +780,10 @@ impl Audit {
         if self.enabled() == enabled {
             return Ok(());
         }
-        save_audit_enabled(&self.settings_dir, enabled).map_err(|err| err.to_string())?;
+        let epoch = save_audit_enabled(&self.settings_dir, enabled).map_err(|err| err.to_string())?;
+        self.automatic_diagnostics_epoch.fetch_max(epoch, Ordering::AcqRel);
         self.enabled.store(enabled, Ordering::Release);
+        if !enabled { crate::tono::automatic_diagnostics::request_purge(); }
         if enabled {
             self.record(AuditEvent::AuditEnabled);
         } else {
@@ -768,6 +836,7 @@ impl Audit {
     /// task handle from `take_writer`.
     pub fn close_sender(&self) {
         self.closed.store(true, Ordering::Release);
+        crate::tono::automatic_diagnostics::wake();
         self.sender.lock().take();
     }
 
@@ -926,7 +995,7 @@ mod tests {
             AuditEvent::ConnectOk {
                 node: "n token=abc".to_string(),
                 elapsed_ms: 1,
-                outcome: "verified",
+                outcome: "protectionReady",
             },
             AuditEvent::ReleaseFail {
                 error: "token=abc".to_string(),
@@ -1117,5 +1186,44 @@ mod tests {
             periodic_telemetry_enabled_from_settings(legacy.path()),
             "a post-migration explicit opt-in must survive every later load"
         );
+    }
+
+    #[test]
+    fn automatic_diagnostics_defaults_on_without_enabling_raw_or_legacy_uploads() {
+        let dir = TempDir::new("automatic-diagnostics");
+        let settings = super::load_settings(dir.path());
+        assert!(settings.automatic_diagnostics_enabled);
+        assert!(!settings.periodic_telemetry_enabled);
+        assert!(!settings.network_log_upload_enabled);
+        let (sender, _) = tokio::sync::mpsc::channel(1);
+        let audit = Audit::for_test(sender, dir.path(), true);
+        audit.set_automatic_diagnostics_enabled(false).unwrap();
+        assert!(!super::load_settings(dir.path()).automatic_diagnostics_enabled);
+        let opted_out_epoch = super::load_settings(dir.path()).automatic_diagnostics_epoch;
+        assert!(opted_out_epoch > 0);
+        audit.set_automatic_diagnostics_enabled(true).unwrap();
+        let settings = super::load_settings(dir.path());
+        assert_eq!(settings.automatic_diagnostics_epoch, opted_out_epoch);
+        assert!(settings.automatic_diagnostics_enabled);
+        assert!(!settings.network_log_upload_enabled);
+        assert!(!settings.periodic_telemetry_enabled);
+    }
+
+    #[test]
+    fn concurrent_privacy_settings_preserve_opt_out_and_quit_does_not_rewrite_it() {
+        let dir = TempDir::new("automatic-concurrent-settings");
+        let (sender, _) = tokio::sync::mpsc::channel(1);
+        let audit = Audit::for_test(sender, dir.path(), true);
+        std::thread::scope(|scope| {
+            scope.spawn(|| audit.set_automatic_diagnostics_enabled(false).unwrap());
+            scope.spawn(|| audit.set_periodic_telemetry_enabled(true).unwrap());
+        });
+        let settings = super::load_settings(dir.path());
+        assert!(!settings.automatic_diagnostics_enabled);
+        assert!(settings.periodic_telemetry_enabled);
+        assert!(!settings.network_log_upload_enabled);
+        audit.close_sender();
+        assert!(audit.is_closed());
+        assert!(!super::load_settings(dir.path()).automatic_diagnostics_enabled);
     }
 }

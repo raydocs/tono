@@ -248,8 +248,8 @@ pub(super) async fn reconnect_loop(state: Arc<TonoState>, app: AppHandle, first_
                     }
                 }
             }
-            Attempt::Failed(err) => {
-                let err = fail_connect(&state, &app, err).await;
+            Attempt::Failed { error, generation } => {
+                if fail_connect(&state, &app, error, generation).await.is_none() { return; }
                 let (next, spent) = {
                     let mut inner = state.lock().await;
                     let next = if inner.catalog_requires_choice {

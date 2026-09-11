@@ -954,9 +954,8 @@
         parse_snapshot(&bytes).map_err(|reason| anyhow::anyhow!(reason))
     }
 
-    /// The note is the whole point of the demotion: it has to name the adapters, the read-back,
-    /// and why an unverifiable configuration is still not a leak — and it must stay silent when
-    /// there is nothing to say.
+    /// Diagnostics name the failed adapters and read-back, without claiming that
+    /// unproven DNS is safe or that fake-ip can replace the native admission proof.
     #[test]
     fn the_unverified_note_names_the_adapters_and_the_read_back() {
         assert_eq!(
@@ -981,9 +980,13 @@
         assert!(note.contains("{A}") && note.contains("{B}"), "{note}");
         assert!(note.contains("read-back=not-protected"), "{note}");
         assert!(
-            note.contains("WFP default-denies physical DNS") && note.contains("fake-ip"),
-            "the note has to explain why this is not a leak and where the real proof is: {note}"
+            note.contains("requires fresh native DNS proof")
+                && note.contains("system fake-ip gate")
+                && note.contains("WFP protection must be verified separately"),
+            "the note must keep native DNS, fake-ip and WFP as separate required proofs: {note}"
         );
+
+        assert!(!note.contains("not a leak") && !note.contains("continues to the fake-ip probe"), "{note}");
 
         let unreadable = unverified_note(&[], 2, LoopbackReadBack::Unavailable)
             .expect("a read-back that could not be run is its own state, not a pass");

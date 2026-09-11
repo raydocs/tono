@@ -42,13 +42,10 @@ pub struct ExitCatalogResponse {
     pub routing: Option<CatalogRouting>,
 }
 
-/// Split-routing directives from `GET exit-catalog`: `homeProxy` names the
-/// user's bound home-broadband node (Claude traffic exits there),
-/// `defaultProxy` the admin-designated fallback exit. `homeSocks5` is the
-/// cloud-assigned residential exit variant: full upstream credentials served
-/// only inside the bound user's own catalog. When both `homeSocks5` and
-/// `homeProxy` are present, `homeSocks5` takes precedence (see
-/// [`sanitize_routing`]).
+/// Split-routing directives from `GET exit-catalog`. Residential routing uses
+/// only `homeSocks5`, chained through the selected VPS. `homeProxy` remains
+/// deserializable solely so legacy assignments are explicitly rejected before
+/// cache/tracker mutation, never silently converted to cloud-only routing.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CatalogRouting {
     #[serde(rename = "homeProxy", default, skip_serializing_if = "Option::is_none")]
@@ -155,18 +152,15 @@ fn keep_socks5(
 /// sanitizer's lossy projection as an ordinary cloud-only catalog.
 pub(crate) fn validate_residential_routing(
     routing: &CatalogRouting,
-    nodes: &[ValidatedNode],
+    _nodes: &[ValidatedNode],
 ) -> Result<(), CatalogError> {
-    if routing.home_socks5.is_some() {
-        if keep_socks5(&routing.home_socks5, &mut Vec::new()).is_none() {
-            return Err(CatalogError::InvalidResponse);
-        }
-    } else if let Some(name) = &routing.home_proxy {
-        if name.is_empty() || name.chars().count() > MAX_ROUTING_NAME_CHARS
-            || !nodes.iter().any(|node| &node.name == name)
-        {
-            return Err(CatalogError::InvalidResponse);
-        }
+    if routing.home_proxy.is_some() {
+        return Err(CatalogError::LegacyResidentialRoute);
+    }
+    if routing.home_socks5.is_some()
+        && keep_socks5(&routing.home_socks5, &mut Vec::new()).is_none()
+    {
+        return Err(CatalogError::InvalidResponse);
     }
     Ok(())
 }
@@ -179,6 +173,8 @@ pub fn catalog_digest(yaml: &str) -> String {
 /// Why a catalog (or its cache) was rejected.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum CatalogError {
+    #[error("legacy homeProxy assignment is unsupported; migrate the account to homeSocks5")]
+    LegacyResidentialRoute,
     /// Any contract violation that maps to the API client's
     /// `invalidResponse` (§1/§3).
     #[error("catalog response is invalid")]
@@ -788,7 +784,7 @@ mod tests {
             default_proxy: None,
             home_socks5: None,
         });
-        assert_eq!(validate_catalog(&catalog), Err(CatalogError::InvalidResponse));
+        assert_eq!(validate_catalog(&catalog), Err(CatalogError::LegacyResidentialRoute));
     }
 
     #[test]
@@ -801,7 +797,7 @@ mod tests {
             default_proxy: None,
             home_socks5: Some(upstream),
         });
-        assert_eq!(validate_catalog(&catalog), Err(CatalogError::InvalidResponse));
+        assert_eq!(validate_catalog(&catalog), Err(CatalogError::LegacyResidentialRoute));
     }
 
     // ---- homeSocks5 routing directive ----

@@ -483,6 +483,9 @@
     },
     "general": {
       "title": "General",
+      "transport": "Connection protocol",
+      "transportHint": "Changes only the carrier to the selected VPS. Home routing and protection stay the same. Disconnect before changing.",
+      "transportUnavailable": "This server does not offer UDP yet. Use TCP; Tono will not switch servers automatically.",
       "launchAtStartup": "Launch at Startup",
       "launchAtStartupHint": "Turned on after the first successful connect. You can turn it off.",
       "language": "Interface Language"

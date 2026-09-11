@@ -133,6 +133,8 @@ mod imp {
     }
 
     fn raw_notify(kind: &str, notification_type: MIB_NOTIFICATION_TYPE) {
+        // Readiness hints are not product invalidations: do not debounce/suppress them.
+        crate::core::readiness::note_interface_hint();
         // Our own DNS write, echoed back at us. Counted for diagnostics, never published: the
         // product layer answers a published event with a full teardown + reconnect, and the
         // reconnect writes DNS again. Note what is *not* done here — `PENDING_RAW` is left

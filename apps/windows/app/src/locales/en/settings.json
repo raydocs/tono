@@ -24,6 +24,10 @@
         "label": "Share diagnostic timeline (optional)",
         "description": "Off by default. If you turn it on, about every 20 minutes while signed in Tono uploads a short protection and network event summary so we can improve Claude stability in China. No chat content, passwords, or node secrets."
       },
+      "automaticDiagnostics": {
+        "label": "Automatic connection diagnostics",
+        "description": "On by default, without per-report confirmation. Sends account-linked build fingerprints, connection-stage timings, protection and route states, and Core error categories/counts—not visited URLs, IPs, process names, raw logs or credentials. Offline summaries are queued locally (24 reports, 7 days) and retried with rate limits when connectivity returns. You can disable this; disabling local auditing also stops it."
+      },
       "networkLogUpload": {
         "label": "Upload the full traffic log (testing)",
         "description": "Uploads the local diagnostic log itself, not a summary: the hostnames you connected to, the process that opened each connection, and which rule and route it matched. Credentials and URL queries are removed before anything is written. This is a larger disclosure than the diagnostic timeline above and is asked separately. Turning it off stops the next upload."

@@ -297,6 +297,23 @@ pub(crate) async fn get_clash_log_snapshot_by_service() -> Result<String> {
     Ok(String::from_utf8_lossy(&content).into_owned())
 }
 
+/// Bounded in-memory Core log ring for the local enum-only diagnostic classifier.
+/// Unlike the interactive log helper, an observation error must NEVER recover or displace an owner.
+/// Raw lines remain in this process and are never passed to the automatic upload payload.
+pub(crate) async fn tono_core_log_ring_readonly() -> Result<(Vec<String>, u32)> {
+    let credentials = current_owner_credentials()?;
+    let response = tono_service_protocol::get_clash_logs(&credentials).await?;
+    if response.code != 0 {
+        bail!("Core log observation unavailable");
+    }
+    let input = response.data.context("Core log observation missing")?;
+    let total = input.len();
+    let lines: Vec<_> = input.into_iter().take(100).filter(|line| line.len() <= 4096)
+        .map(|line| line.to_string()).collect();
+    let skipped = total.saturating_sub(lines.len()).min(u32::MAX as usize) as u32;
+    Ok((lines, skipped))
+}
+
 /// 通过服务停止core
 pub(super) async fn stop_core_by_service(release_kill_switch: bool) -> Result<()> {
     logging!(info, Type::Service, "通过服务停止核心 (IPC)");
@@ -558,6 +575,7 @@ pub(crate) async fn tono_probe_kill_switch_release_support() -> Result<Option<St
                 && tono_service_protocol::ProtocolInfo::supports_kill_switch_release(info)
                 && tono_service_protocol::ProtocolInfo::supports_kill_switch_verification(info)
                 && tono_service_protocol::ProtocolInfo::supports_direct_runtime_reload(info)
+                && info.fresh_protection_proof
         });
     if supported {
         return Ok(None);
@@ -573,7 +591,7 @@ pub(crate) async fn tono_probe_kill_switch_release_support() -> Result<Option<St
         // The version handshake is acceptable, so what failed is one of the kill-switch
         // capability bits: an in-epoch Service that predates them.
         crate::core::runstate::ServiceVersionCheck::Ready => {
-            "Service does not expose the Windows kill-switch arm/lock/release/verify/DIRECT-reload operations"
+            "Service does not expose fresh protection proof or required kill-switch operations; repair the installed Service"
                 .to_owned()
         }
     };
@@ -685,8 +703,15 @@ fn advanced_tono_generation(generation_before: Option<Option<u64>>, generation_a
 }
 
 async fn adopt_tono_service_session(generation: u64, proposed_session_token: String) {
-    let supports_runtime_staging = probe_runtime_staging_support().await;
-    let supports_direct_runtime_reload = probe_direct_runtime_reload_support().await;
+    // Both capabilities come from the same Service instance/version reply.
+    // Do not serialize two identical named-pipe round trips before TUN lock.
+    let protocol = tono_service_protocol::get_version().await.ok()
+        .filter(|response| response.code == 0)
+        .and_then(|response| response.data);
+    let supports_runtime_staging = protocol.as_ref()
+        .is_some_and(tono_service_protocol::ProtocolInfo::supports_runtime_staging);
+    let supports_direct_runtime_reload = protocol.as_ref()
+        .is_some_and(tono_service_protocol::ProtocolInfo::supports_direct_runtime_reload);
     *ACTIVE_SERVICE_SESSION.lock() = Some(ActiveServiceSession {
         proof: OwnerSessionProof {
             generation,
@@ -924,7 +949,7 @@ pub(crate) async fn tono_lock_kill_switch_for_session(session: &OwnerSessionProo
     let response = tono_service_protocol::lock_kill_switch(
         &credentials,
         session,
-        KillSwitchLockRequest { tunnel_interface: None },
+        KillSwitchLockRequest { tunnel_interface: None, wait_for_tun: true },
     )
     .await
     .context("无法连接到Tono Service")?;
@@ -934,46 +959,48 @@ pub(crate) async fn tono_lock_kill_switch_for_session(session: &OwnerSessionProo
     Ok(())
 }
 
-pub(crate) async fn tono_mark_kill_switch_verified_for_session(session: &OwnerSessionProof) -> Result<()> {
+/// Final admission/recovery evidence: retry a lost response by re-proving, never
+/// by promoting the general cached status to a fresh proof.
+pub(crate) async fn tono_verify_and_commit_protection(
+    session: &OwnerSessionProof, core_pid: u32, core_generation: u32,
+    cancellation: &tokio_util::sync::CancellationToken,
+) -> Result<tono_service_protocol::ProtectionProof> {
     let credentials = current_owner_credentials()?;
-    let mut last_transport_error = None;
+    let mut last = None;
     for attempt in 1..=MARK_VERIFIED_ATTEMPTS {
-        match tono_service_protocol::mark_kill_switch_verified(&credentials, session).await {
+        if cancellation.is_cancelled() { bail!("stale protection commit generation"); }
+        let request = tono_service_protocol::ProtectionCommitRequest { core_pid, core_generation };
+        match tono_service_protocol::verify_and_commit_protection(&credentials, session, request).await {
             Ok(response) => {
-                if response.code > 0 {
-                    bail!(response.message);
+                if response.code != 0 { bail!(response.message); }
+                let proof = response.data.context("TONO_SERVICE_TOO_OLD: Service did not return fresh protection proof; repair Service")?;
+                if !protection_proof_matches(&proof, session.generation, core_pid, core_generation) {
+                    bail!("Service protection proof does not match this session/Core");
                 }
-                return Ok(());
+                return Ok(proof);
             }
-            Err(error) => {
-                last_transport_error = Some(error);
-
-                // The response may be the only thing that was lost. A fully locked, live,
-                // verified read-back proves the idempotent mutation committed and is stronger
-                // evidence than replaying it blindly.
-                if let Ok(status_response) = tono_service_protocol::get_kill_switch_status(&credentials).await
-                    && status_response.code == 0
-                    && status_response.data.as_ref().is_some_and(mark_verified_committed)
-                {
-                    logging!(
-                        warn,
-                        Type::Service,
-                        "Tono: MarkVerified response was lost, but Service status proves it committed"
-                    );
-                    return Ok(());
-                }
-            }
+            Err(error) => last = Some(error),
         }
-
-        if attempt < MARK_VERIFIED_ATTEMPTS {
-            tokio::time::sleep(MARK_VERIFIED_RETRY_DELAY).await;
-        }
+        // Finish the current mutation even if cancelled, but never start another
+        // late retry or keep Disconnect behind several obsolete IPC budgets.
+        if attempt < MARK_VERIFIED_ATTEMPTS && !wait_to_retry_proof(cancellation).await { break; }
     }
+    Err(last.context("missing protection commit response")?).context("TONO_PROTECTION_COMMIT_UNCERTAIN")
+}
 
-    match last_transport_error {
-        Some(error) => Err(error).context("无法连接到Tono Service"),
-        None => bail!("MarkVerified retry loop completed without a response"),
+async fn wait_to_retry_proof(cancellation: &tokio_util::sync::CancellationToken) -> bool {
+    tokio::select! {
+        biased;
+        _ = cancellation.cancelled() => false,
+        _ = tokio::time::sleep(MARK_VERIFIED_RETRY_DELAY) => !cancellation.is_cancelled(),
     }
+}
+
+pub(crate) fn protection_proof_matches(proof: &tono_service_protocol::ProtectionProof,
+    session_generation: u64, core_pid: u32, core_generation: u32) -> bool {
+    proof.tunnel_luid != 0 && core_pid != 0
+        && proof.session_generation == session_generation && proof.core_pid == core_pid
+        && proof.core_generation == core_generation && mark_verified_committed(&proof.kill_switch)
 }
 
 fn mark_verified_committed(status: &KillSwitchStatus) -> bool {
@@ -982,6 +1009,7 @@ fn mark_verified_committed(status: &KillSwitchStatus) -> bool {
         && status.live
         && status.mode == KillSwitchStatusMode::Locked
         && status.tunnel_permit_rendered
+        && status.last_error.is_none()
 }
 
 /// `POST /kill-switch/restrict-bootstrap`: keep blocking, reopen only the API recovery channel.
@@ -1382,3 +1410,40 @@ pub static SERVICE_MANAGER: ServiceManager = ServiceManager;
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, reason = "tests assert by panicking")]
 mod tests;
+
+#[cfg(test)]
+mod fresh_proof_tests {
+    use super::*;
+    #[tokio::test]
+    async fn cancellation_prevents_another_proof_retry_without_waiting_out_backoff() {
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        cancellation.cancel();
+        assert!(!wait_to_retry_proof(&cancellation).await);
+    }
+    #[test]
+    fn proof_requires_same_session_core_tun_and_every_protection_bit() {
+        let proof = tono_service_protocol::ProtectionProof {
+            session_generation: 7, core_pid: 42, core_generation: 9, tunnel_luid: 12,
+            kill_switch: KillSwitchStatus { wanted: true, verified: true, live: true,
+                mode: KillSwitchStatusMode::Locked, tunnel_permit_rendered: true,
+                endpoints: vec![], direct_endpoint_digest: String::new(), last_error: None },
+        };
+        assert!(protection_proof_matches(&proof, 7, 42, 9));
+        for identity in [(8, 42, 9), (7, 43, 9), (7, 42, 10)] {
+            assert!(!protection_proof_matches(&proof, identity.0, identity.1, identity.2));
+        }
+        for flag in 0..7 {
+            let mut invalid = proof.clone();
+            match flag {
+                0 => invalid.tunnel_luid = 0,
+                1 => invalid.kill_switch.wanted = false,
+                2 => invalid.kill_switch.verified = false,
+                3 => invalid.kill_switch.live = false,
+                4 => invalid.kill_switch.tunnel_permit_rendered = false,
+                5 => invalid.kill_switch.mode = KillSwitchStatusMode::Blocked,
+                _ => invalid.kill_switch.last_error = Some("unproven".into()),
+            }
+            assert!(!protection_proof_matches(&invalid, 7, 42, 9));
+        }
+    }
+}

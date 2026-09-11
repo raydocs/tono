@@ -2,13 +2,11 @@
 //!
 //! # Why this exists
 //!
-//! When a connect fails, the kill switch usually has the machine fully
-//! network-blocked — but the WFP bootstrap policy deliberately keeps the
-//! pinned API host IPs reachable on TCP/443 as a control-plane recovery
-//! channel (`tono::bootstrap`), and the app's API client is pinned to those
-//! same addresses (`tono::transport`). So an upload over the ordinary Tono
-//! API transport succeeds *precisely* when the user has no other
-//! connectivity, which is when the report is worth having.
+//! A failed connect may already have cleaned up by the time the user opens this report. Keep
+//! typed pre-cleanup observations separate from the later status, without collecting secrets.
+//! Copy remains local. Upload uses the ordinary Tono API transport and can fail while a
+//! committed session is blocked: diagnostics never opens a physical API exception to bypass
+//! the barrier. First-admission Bootstrap allowances are not a committed-session escape hatch.
 //!
 //! # Privacy posture (non-negotiable — this is a VPN)
 //!
@@ -238,6 +236,7 @@ pub struct DiagnosticsSources<'a> {
     pub dns: Option<&'a DnsProtectionStatus>,
     pub failed_stage: Option<&'a str>,
     pub connect_error: Option<&'a str>,
+    pub(crate) failure_evidence: Option<&'a super::connection_evidence::FailureEvidence>,
     pub overlay_skip: Option<&'a str>,
     pub retry_attempt: u32,
     pub steps: &'a [StepRecord],
@@ -276,6 +275,22 @@ pub fn build_report(sources: &DiagnosticsSources<'_>) -> DiagnosticsReport {
         .filter(|_| sources.connect_error.is_none())
         .map(|reason| format!("overlay skipped: {reason}"));
     let error_source = sources.connect_error.or(overlay_error.as_deref());
+    // Keep the existing upload schema/allow-list: attach bounded, typed pre-cleanup evidence
+    // to the diagnostic error only. Never change the FSM error used for retry classification.
+    let evidence_error = sources.connect_error.and_then(|error| sources.failure_evidence.map(|evidence| {
+        format!("{}\nOriginal error: {}", evidence.render(), scrub_text_with(error, known))
+    }));
+    let error_source = evidence_error.as_deref().or(error_source);
+    let error = scrub_opt_text(error_source, known).map(|message| {
+        let Some(original) = sources.connect_error else { return message; };
+        // Diagnostic-only metadata lives in the existing bounded error field, not in the FSM
+        // error or a widened upload schema. Reserve space so a long original cannot hide it.
+        let metadata = scrub_text_with(&super::diagnostic_contract::render(original, sources.service_protocol), known);
+        let budget = MAX_TEXT_LEN.saturating_sub(metadata.chars().count() + 2);
+        let mut message_prefix: String = message.chars().take(budget).collect();
+        if message.chars().count() > budget { message_prefix.push('…'); }
+        format!("{message_prefix}\n{metadata}")
+    });
 
     DiagnosticsReport {
         schema_version: DIAGNOSTICS_SCHEMA_VERSION,
@@ -304,7 +319,7 @@ pub fn build_report(sources: &DiagnosticsSources<'_>) -> DiagnosticsReport {
             .dns
             .and_then(|status| scrub_opt_text(status.last_error.as_deref(), known)),
         failed_stage: sources.failed_stage.map(str::to_string),
-        error: scrub_opt_text(error_source, known),
+        error,
         retry_attempt: sources.retry_attempt,
         total_elapsed_ms,
         steps,
@@ -474,6 +489,7 @@ mod tests {
                 dns: Some(&self.dns),
                 failed_stage: Some("securingDNS"),
                 connect_error: Some(&self.connect_error),
+                failure_evidence: None,
                 overlay_skip: None,
                 retry_attempt: 2,
                 steps: &self.steps,
@@ -502,6 +518,70 @@ mod tests {
             step_keys.sort_unstable();
             assert_eq!(step_keys, ["elapsedMs", "key", "state"]);
         }
+    }
+
+    #[test]
+    fn pre_cleanup_evidence_survives_current_inactive_status_without_expanding_the_payload() {
+        let fixture = Fixture::new(&[]);
+        let mut evidence = super::super::connection_evidence::AttemptEvidence::begin(7);
+        evidence.dns(7, 1_712_345_678_800, &DnsProtectionStatus {
+            enabled: true, adapters: 2, last_error: None, snapshot_present: true,
+        });
+        let frozen = evidence.freeze(1_712_345_678_900, Some("securingDNS"), false, None);
+        let mut sources = fixture.sources();
+        sources.failure_evidence = Some(&frozen);
+        let report = build_report(&sources);
+        assert_eq!(report.dns_enabled, Some(false)); // Status collected after cleanup.
+        let error = report.error.as_deref().unwrap();
+        assert!(error.contains("before cleanup (last observations, NOT packet proof)"));
+        assert!(error.contains("capturedAtMs: 1712345678900"));
+        assert!(error.contains("nativeApplyReply@1712345678800"));
+        assert!(error.contains("enabled=true adapters=2"));
+        assert!(error.contains("Core: not observed"));
+        assert!(error.contains("Original error: core start failed:"));
+        assert!(error.chars().count() <= MAX_TEXT_LEN + 1);
+        let value = serde_json::to_value(&report).unwrap();
+        let mut keys: Vec<_> = value.as_object().unwrap().keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ALLOWED_KEYS);
+        let serialized = serde_json::to_string(&report).unwrap();
+        for secret in SECRETS { assert!(!serialized.contains(secret)); }
+        assert_eq!(sources.connect_error, Some(fixture.connect_error.as_str()));
+    }
+
+    #[test]
+    fn evidence_error_remains_bounded_and_is_not_reported_as_a_new_failure() {
+        let fixture = Fixture::new(&[]);
+        let frozen = super::super::connection_evidence::AttemptEvidence::begin(7)
+            .freeze(100, None, false, None);
+        let long_error = "read failed; ".repeat(MAX_TEXT_LEN);
+        let mut sources = fixture.sources();
+        sources.failure_evidence = Some(&frozen);
+        sources.connect_error = Some(&long_error);
+        let report = build_report(&sources);
+        let error = report.error.unwrap();
+        assert!(error.chars().count() <= MAX_TEXT_LEN + 1);
+        assert!(error.contains("Connection source IDs"));
+        assert!(error.contains("Later Service fresh-proof capability: supported"));
+        sources.connect_error = None;
+        assert_eq!(build_report(&sources).error, None);
+    }
+
+    #[test]
+    fn failure_class_and_source_ids_are_report_only_with_unknown_for_an_old_service() {
+        let mut fixture = Fixture::new(&[]);
+        fixture.connect_error = "fake-ip verification failed: no answer".into();
+        fixture.protocol.connection_source_fingerprint = None;
+        fixture.protocol.fresh_protection_proof = false;
+        let report = build_report(&fixture.sources());
+        let error = report.error.unwrap();
+        assert!(error.starts_with("fake-ip verification failed: no answer"));
+        assert!(error.contains("Failure class: dnsFakeIpUnproven"));
+        assert!(error.contains("Service: unknown"));
+        assert!(error.contains("capability: missing"));
+        assert!(!fixture.connect_error.contains("Connection source"));
+        assert_eq!(report.app_version, "0.0.3");
+        assert_eq!(report.service_build, Some(fixture.protocol.build_version.clone()));
     }
 
     #[test]

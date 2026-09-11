@@ -1,4 +1,4 @@
-//! Fake-IP, post-lock, and TUN/data-plane proofs used by the connect stage sequence.
+//! System fake-ip admission and explicit/advisory diagnostics. Third-party HTTPS is not a gate.
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -19,7 +19,8 @@ use super::failure::{
 /// §6.8 exit probe target.
 pub(super) const EXIT_PROBE_URL: &str = "https://www.gstatic.com/generate_204";
 
-/// §6.8: the probe also proves fake-ip DNS via this lookup.
+/// Only a name for the protected system DNS lookup: expect a synthetic address, not a Google
+/// response. No Google TLS/HTTP request or remote reachability result participates in admission.
 pub(super) const FAKE_IP_LOOKUP_HOST: &str = "www.gstatic.com";
 
 /// §6.7 DNS verification retry count.
@@ -178,40 +179,106 @@ pub fn is_fake_ip(addr: IpAddr) -> bool {
 /// API directly with cache bypass and true cancellation; this keeps all three propagation retries
 /// useful instead of accumulating uncancellable `getaddrinfo` work.
 pub(super) async fn verify_fake_ip() -> Result<(), String> {
-    let mut last = String::from("no answer");
-    for attempt in 0..VERIFY_ATTEMPTS {
-        let lookup_timeout = fake_ip_attempt_timeout(attempt);
-        #[cfg(windows)]
-        let lookup = crate::tono::windows_dns::query_a(FAKE_IP_LOOKUP_HOST, lookup_timeout)
-            .await
-            .map(|addrs| addrs.into_iter().map(IpAddr::V4).collect::<Vec<_>>());
-        #[cfg(not(windows))]
-        let lookup = tokio::time::timeout(
-            lookup_timeout,
-            tokio::net::lookup_host((FAKE_IP_LOOKUP_HOST, 443)),
-        )
+    fake_ip_sequence(|attempt| query_fake_ip_once(attempt, false), || async { Ok(()) })
         .await
-        .map_err(|_| format!("system DNS lookup exceeded {lookup_timeout:?}"))
-        .and_then(|result| {
-            result
-                .map(|addrs| addrs.map(|addr| addr.ip()).collect::<Vec<_>>())
-                .map_err(|e| e.to_string())
-        });
+        .map_err(|error| match error {
+            super::failure::StageFailure::Error(message)
+            | super::failure::StageFailure::TimedOut(message) => message,
+            super::failure::StageFailure::Stale => "DNS verification superseded".to_owned(),
+        })
+}
 
-        match lookup {
-            Ok(addrs) => {
-                if addrs.iter().copied().any(is_fake_ip) {
-                    return Ok(());
-                }
-                last = format!("no fake-ip in {addrs:?}");
-            }
-            Err(err) => last = err,
-        }
+struct FakeIpFailure {
+    detail: String,
+    may_reapply_dns: bool,
+}
+
+/// Preserve the original three query attempts and per-query budgets. Admission may insert ONE
+/// native DNS refresh between them; monitoring uses a no-op and retains its existing behavior.
+/// Unknown errors, access/auth failures and unsettled native cancellation never authorize repair.
+pub(super) async fn verify_fake_ip_with_repair<F, Fut>(
+    repair: F,
+) -> Result<(), super::failure::StageFailure>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<(), super::failure::StageFailure>>,
+{
+    fake_ip_sequence(|attempt| query_fake_ip_once(attempt, true), repair).await
+}
+
+async fn fake_ip_sequence<Q, Query, F, Repair>(
+    mut query: Q,
+    mut repair: F,
+) -> Result<(), super::failure::StageFailure>
+where
+    Q: FnMut(u32) -> Query,
+    Query: std::future::Future<Output = Result<(), FakeIpFailure>>,
+    F: FnMut() -> Repair,
+    Repair: std::future::Future<Output = Result<(), super::failure::StageFailure>>,
+{
+    let mut last = String::from("no answer");
+    let mut repaired = false;
+    for attempt in 0..VERIFY_ATTEMPTS {
+        let failure = match query(attempt).await {
+            Ok(()) => return Ok(()),
+            Err(failure) => failure,
+        };
+        last = failure.detail;
         if attempt + 1 < VERIFY_ATTEMPTS {
+            if failure.may_reapply_dns && !repaired {
+                repaired = true;
+                repair().await?;
+            }
             tokio::time::sleep(VERIFY_RETRY_INTERVAL).await;
         }
     }
-    Err(fake_ip_verification_error(&last))
+    Err(super::failure::StageFailure::error(
+        fake_ip_verification_error(&last),
+    ))
+}
+
+async fn query_fake_ip_once(attempt: u32, admission: bool) -> Result<(), FakeIpFailure> {
+    let lookup_timeout = fake_ip_attempt_timeout(attempt);
+    #[cfg(windows)]
+    let lookup = if admission && attempt == 0 {
+        crate::tono::windows_dns::query_fake_a_fresh(FAKE_IP_LOOKUP_HOST, lookup_timeout).await
+    } else {
+        crate::tono::windows_dns::query_a(FAKE_IP_LOOKUP_HOST, lookup_timeout).await
+    }
+        .map(|addrs| addrs.into_iter().map(IpAddr::V4).collect::<Vec<_>>());
+    #[cfg(not(windows))]
+    let _ = admission;
+    #[cfg(not(windows))]
+    let lookup = tokio::time::timeout(
+        lookup_timeout,
+        tokio::net::lookup_host((FAKE_IP_LOOKUP_HOST, 443)),
+    )
+    .await
+    .map_err(|_| format!("system DNS lookup exceeded {lookup_timeout:?}"))
+    .and_then(|result| {
+        result
+            .map(|addrs| addrs.map(|addr| addr.ip()).collect::<Vec<_>>())
+            .map_err(|error| error.to_string())
+    });
+    match lookup {
+        Ok(addrs) if !addrs.is_empty() && addrs.iter().copied().all(is_fake_ip) => Ok(()),
+        Ok(addrs) => Err(FakeIpFailure {
+            detail: format!("no fake-ip in {addrs:?}"),
+            may_reapply_dns: true,
+        }),
+        Err(detail) => Err(FakeIpFailure {
+            may_reapply_dns: settled_dns_propagation_error(&detail),
+            detail,
+        }),
+    }
+}
+
+fn settled_dns_propagation_error(detail: &str) -> bool {
+    // Only strings produced by our DNS wrapper, not a broad contains("timeout") classifier.
+    (detail.starts_with("Windows system DNS A query exceeded ")
+        && !detail.contains("cancellation did not settle"))
+        || detail == "Windows system DNS A query returned no A records"
+        || detail.starts_with("system DNS lookup exceeded ")
 }
 
 pub(super) fn fake_ip_verification_error(last: &str) -> String {
@@ -307,23 +374,24 @@ pub fn verify_lock_retry_window() -> Duration {
     VERIFY_LOCK_RETRY_INTERVAL * (VERIFY_LOCK_ATTEMPTS.saturating_sub(1))
 }
 
-/// §6.9: the kill switch must be wanted, verified live, and fully locked.
-///
-/// V1/H1: bounded retry, never a single shot. `live` is not a live query on Windows — it is a
-/// ~1.5 s-decaying cache refreshed by a 1 s loop — so a slow-but-successful verify reads
-/// `live: false`. Retrying only re-*reads*: nothing but a `wanted && live && Locked` answer
-/// passes, so the fail-closed verdict is unchanged, it is merely no longer decided by one sample.
+/// Legacy read-only status sampler, NOT used by admission/recovery. It reads
+/// the watchdog's bounded observation cache; it cannot issue a fresh proof.
+/// Admission now uses the session-bound Service verify-and-commit reply.
 pub(super) async fn verify_locked() -> Result<KillSwitchStatus, String> {
     let mut last = String::from("no answer");
     for attempt in 0..VERIFY_LOCK_ATTEMPTS {
         match service::tono_kill_switch_status().await {
             Ok(status) => {
-                if status.wanted && status.live && status.mode == KillSwitchStatusMode::Locked {
+                if status.wanted
+                    && status.live
+                    && status.mode == KillSwitchStatusMode::Locked
+                    && status.tunnel_permit_rendered
+                {
                     return Ok(status);
                 }
                 last = format!(
-                    "kill switch not locked (wanted={}, live={}, mode={:?})",
-                    status.wanted, status.live, status.mode
+                    "kill switch not locked (wanted={}, live={}, mode={:?}, tunnel_permit_rendered={})",
+                    status.wanted, status.live, status.mode, status.tunnel_permit_rendered
                 );
             }
             Err(err) => last = err.to_string(),
@@ -441,5 +509,200 @@ mod tests {
         let token = classify_tcp_connect_error("connection reset by peer 203.0.113.9:443");
         assert!(!token.contains("203.0.113"));
         assert!(!token.contains(':'));
+    }
+}
+
+/// Capture identity BEFORE fake-ip, not a claim that cached WFP status is admission
+/// proof. Final Service commit rechecks this identity and the actual kernel set.
+pub(super) fn capture_admission_core(snapshot: &tono_service_protocol::ServiceStatusSnapshot,
+    session: &tono_service_protocol::OwnerSessionProof) -> Result<tono_service_protocol::ProtectionCommitRequest, String> {
+    if !snapshot.is_active || snapshot.active_generation != Some(session.generation)
+        || snapshot.service_state != tono_service_protocol::ServiceLifecycleState::Running
+        || !snapshot.desired_core_should_be_running || snapshot.desired_state_unknown {
+        return Err("Service/Core ownership is not settled before fake-ip".into());
+    }
+    Ok(tono_service_protocol::ProtectionCommitRequest {
+        core_pid: snapshot.core_pid.filter(|pid| *pid != 0).ok_or("Core missing before fake-ip")?,
+        core_generation: snapshot.core_generation,
+    })
+}
+
+#[cfg(test)]
+mod admission_dns_tests {
+    use super::super::failure::StageFailure;
+    use super::*;
+    use std::cell::Cell;
+
+    #[tokio::test(start_paused = true)]
+    async fn propagation_repair_uses_remaining_attempts_and_happens_once() {
+        let queries = Cell::new(0);
+        let repairs = Cell::new(0);
+        fake_ip_sequence(
+            |_| {
+                let attempt = queries.get();
+                queries.set(attempt + 1);
+                async move {
+                    if attempt == 2 {
+                        Ok(())
+                    } else {
+                        Err(FakeIpFailure {
+                            detail: "not propagated".into(),
+                            may_reapply_dns: true,
+                        })
+                    }
+                }
+            },
+            || {
+                repairs.set(repairs.get() + 1);
+                async { Ok(()) }
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(queries.get(), VERIFY_ATTEMPTS);
+        assert_eq!(repairs.get(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn healthy_first_answer_does_no_repair_and_failed_proof_never_succeeds() {
+        let repairs = Cell::new(0);
+        fake_ip_sequence(
+            |_| async { Ok(()) },
+            || {
+                repairs.set(1);
+                async { Ok(()) }
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(repairs.get(), 0);
+        let queries = Cell::new(0);
+        let result = fake_ip_sequence(
+            |_| {
+                queries.set(queries.get() + 1);
+                async {
+                    Err(FakeIpFailure {
+                        detail: "no fake-ip".into(),
+                        may_reapply_dns: true,
+                    })
+                }
+            },
+            || {
+                repairs.set(repairs.get() + 1);
+                async { Ok(()) }
+            },
+        )
+        .await;
+        assert!(matches!(result, Err(StageFailure::Error(_))));
+        assert_eq!(queries.get(), VERIFY_ATTEMPTS);
+        assert_eq!(repairs.get(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stale_repair_stops_before_another_dns_query() {
+        let queries = Cell::new(0);
+        let result = fake_ip_sequence(
+            |_| {
+                queries.set(queries.get() + 1);
+                async {
+                    Err(FakeIpFailure {
+                        detail: "not propagated".into(),
+                        may_reapply_dns: true,
+                    })
+                }
+            },
+            || async { Err(StageFailure::Stale) },
+        )
+        .await;
+        assert!(matches!(result, Err(StageFailure::Stale)));
+        assert_eq!(queries.get(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn repair_shares_cancellation_and_the_attempts_original_deadline() {
+        use super::super::transaction::{CONNECT_TRANSACTION_TIMEOUT, ConnectTransaction};
+        use tokio_util::sync::CancellationToken;
+        for cancel in [false, true] {
+            let cancellation = CancellationToken::new();
+            let transaction = ConnectTransaction::new(cancellation.clone());
+            tokio::time::advance(CONNECT_TRANSACTION_TIMEOUT - Duration::from_secs(1)).await;
+            let started = tokio::time::Instant::now();
+            let queries = Cell::new(0);
+            let result = transaction
+                .wait(
+                    "system fake-ip",
+                    fake_ip_sequence(
+                        |_| {
+                            queries.set(queries.get() + 1);
+                            async {
+                                Err(FakeIpFailure {
+                                    detail: "not propagated".into(),
+                                    may_reapply_dns: true,
+                                })
+                            }
+                        },
+                        || {
+                            if cancel {
+                                cancellation.cancel();
+                            }
+                            std::future::pending::<Result<(), StageFailure>>()
+                        },
+                    ),
+                )
+                .await;
+            assert_eq!(queries.get(), 1);
+            if cancel {
+                assert!(matches!(result, Err(StageFailure::Stale)));
+                assert_eq!(started.elapsed(), Duration::ZERO);
+            } else {
+                assert!(matches!(result, Err(StageFailure::TimedOut(_))));
+                assert_eq!(started.elapsed(), Duration::from_secs(1));
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn unknown_query_errors_keep_original_retries_without_an_optional_mutation() {
+        let queries = Cell::new(0);
+        let repairs = Cell::new(0);
+        let result = fake_ip_sequence(
+            |_| {
+                queries.set(queries.get() + 1);
+                async {
+                    Err(FakeIpFailure {
+                        detail: "access denied".into(),
+                        may_reapply_dns: false,
+                    })
+                }
+            },
+            || {
+                repairs.set(repairs.get() + 1);
+                async { Ok(()) }
+            },
+        )
+        .await;
+        assert!(matches!(result, Err(StageFailure::Error(_))));
+        assert_eq!(queries.get(), VERIFY_ATTEMPTS);
+        assert_eq!(repairs.get(), 0);
+    }
+
+    #[test]
+    fn arbitrary_transport_errors_and_unsettled_native_work_do_not_authorize_refresh() {
+        assert!(settled_dns_propagation_error(
+            "Windows system DNS A query exceeded 2s"
+        ));
+        assert!(settled_dns_propagation_error(
+            "Windows system DNS A query returned no A records"
+        ));
+        for error in [
+            "access denied",
+            "owner mismatch",
+            "RPC timeout",
+            "authentication timeout",
+            "Windows system DNS A query failed with status 5: Access denied",
+            "Windows system DNS A query exceeded 2s and cancellation did not settle",
+        ] {
+            assert!(!settled_dns_propagation_error(error), "{error}");
+        }
     }
 }

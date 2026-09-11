@@ -38,6 +38,12 @@ impl ProtocolVersion {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProtocolInfo {
+    /// Diagnostic source identifier only. Older Services omit it; never an admission condition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection_source_fingerprint: Option<String>,
+    /// Additive capability: missing on an older installed Service means false.
+    #[serde(default)]
+    pub fresh_protection_proof: bool,
     pub build_version: String,
     pub protocol: ProtocolVersion,
     pub min_client_revision: u16,
@@ -46,6 +52,8 @@ pub struct ProtocolInfo {
 impl ProtocolInfo {
     pub fn current() -> Self {
         Self {
+            connection_source_fingerprint: Some(crate::CONNECTION_SOURCE_FINGERPRINT.to_owned()),
+            fresh_protection_proof: true,
             build_version: crate::VERSION.to_owned(),
             protocol: ProtocolVersion::current(),
             min_client_revision: crate::MIN_SUPPORTED_CLIENT_REVISION,
@@ -444,8 +452,29 @@ pub struct KillSwitchStatus {
 /// `POST /kill-switch/lock` payload. `None` locks the interface named at arm time.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KillSwitchLockRequest {
+    /// Opt-in event-assisted Service wait. Old clients retain one-shot behavior.
+    #[serde(default)]
+    pub wait_for_tun: bool,
     #[serde(default)]
     pub tunnel_interface: Option<String>,
+}
+
+/// Opt-in payload on MarkVerified. Legacy null payload keeps the empty reply.
+/// The expected identity was observed BEFORE the App's system fake-ip query.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProtectionCommitRequest {
+    pub core_pid: u32,
+    pub core_generation: u32,
+}
+
+/// Fresh exact WFP verification and durable commit, not a status-cache receipt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProtectionProof {
+    pub session_generation: u64,
+    pub core_pid: u32,
+    pub core_generation: u32,
+    pub tunnel_luid: u64,
+    pub kill_switch: KillSwitchStatus,
 }
 
 /// `GET /dns/status` response.
@@ -1153,5 +1182,34 @@ mod tests {
                 .bytes()
                 .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
         );
+    }
+}
+
+#[cfg(test)]
+mod fresh_proof_wire_tests {
+    use super::*;
+    #[test]
+    fn old_service_capability_is_false_and_legacy_requests_remain_parseable() {
+        let mut info = serde_json::to_value(ProtocolInfo::current()).unwrap();
+        info.as_object_mut().unwrap().remove("fresh_protection_proof");
+        assert!(!serde_json::from_value::<ProtocolInfo>(info).unwrap().fresh_protection_proof);
+        let lock: KillSwitchLockRequest = serde_json::from_str(r#"{"tunnel_interface":null}"#).unwrap();
+        assert!(!lock.wait_for_tun);
+        assert!(serde_json::from_str::<Option<ProtectionCommitRequest>>("null").unwrap().is_none());
+        assert!(serde_json::from_str::<Option<ProtectionCommitRequest>>(r#"{"core_pid":42,"core_generation":9}"#).unwrap().is_some());
+    }
+
+    #[test]
+    fn diagnostic_source_is_optional_and_never_changes_compatibility_or_versions() {
+        let current = ProtocolInfo::current();
+        let mut wire = serde_json::to_value(&current).unwrap();
+        wire.as_object_mut().unwrap().remove("connection_source_fingerprint");
+        let older: ProtocolInfo = serde_json::from_value(wire).unwrap();
+        assert!(older.connection_source_fingerprint.is_none());
+        assert_eq!(older.build_version, current.build_version);
+        assert_eq!(older.protocol, current.protocol);
+        assert_eq!(older.supports_client(ProtocolVersion::current(), crate::MIN_REQUIRED_SERVICE_REVISION),
+            current.supports_client(ProtocolVersion::current(), crate::MIN_REQUIRED_SERVICE_REVISION));
+        assert_eq!(current.connection_source_fingerprint.as_deref(), Some(crate::CONNECTION_SOURCE_FINGERPRINT));
     }
 }

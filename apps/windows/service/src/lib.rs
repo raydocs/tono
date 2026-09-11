@@ -1,6 +1,10 @@
 mod channel;
 mod core;
 
+/// Diagnostic-only fingerprint of explicitly listed connection sources at build time.
+/// Not a signature, compatibility gate, executable digest or proof of the applied runtime.
+pub const CONNECTION_SOURCE_FINGERPRINT: &str = env!("TONO_SERVICE_CONNECTION_SOURCE");
+
 #[cfg(feature = "client")]
 mod client;
 
@@ -12,7 +16,7 @@ pub use channel::{
 pub use core::{
     AuthenticatedRequest, AuthenticatedSessionRequest, BootstrapPins, ClashConfig, CoreConfig,
     DirectRuntimeReloadResult, DnsProtectionStatus, FinalizeDirectRuntimeReloadRequest, IpcCommand,
-    KillSwitchConfig, KillSwitchLockRequest, KillSwitchStatus, KillSwitchStatusMode,
+    KillSwitchConfig, ProtectionCommitRequest, ProtectionProof, KillSwitchLockRequest, KillSwitchStatus, KillSwitchStatusMode,
     MacosKillSwitchConfig, MacosKillSwitchMode, MacosProxyConfig, LEGACY_OWNER_TOKEN_FILE_NAME,
     OWNER_TOKEN_FILE_NAME,
     OwnerCredentials, OwnerIdentity, OwnerSessionHandle, OwnerSessionProof, ProtocolInfo,

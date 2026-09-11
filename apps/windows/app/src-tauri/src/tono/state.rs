@@ -10,7 +10,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, Mutex as StdMutex, PoisonError,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 
@@ -193,11 +193,18 @@ pub struct TonoInner {
     /// Nodes of the currently installed, fully validated catalog.
     pub nodes: Vec<ValidatedNode>,
     pub selected_node: Option<String>,
+    pub exit_transport: tono_core::node::ExitTransport,
+    pub applied_exit_transport: Option<tono_core::node::ExitTransport>,
+    /// The actual selector graph, not a later catalog download. Used by hot
+    /// switch to derive old/new WFP tuples from the runtime that owns the Core.
+    pub applied_nodes: Vec<ValidatedNode>,
     /// Split-routing directives of the installed catalog, already sanitized
     /// against `nodes` (`homeProxy` = Claude→catalog home exit, `homeSocks5`
     /// = Claude→chained residential upstream, `defaultProxy` = admin fallback
     /// exit). `None` for unbound users.
     pub routing: Option<tono_core::CatalogRouting>,
+    /// Routing actually loaded by the admitted runtime, never a downloaded catalog claim.
+    pub applied_routing: Option<tono_core::CatalogRouting>,
     /// The selected node vanished from a newer catalog: auto-reconnect stays
     /// blocked until the user picks a surviving node (§3).
     pub catalog_requires_choice: bool,
@@ -268,6 +275,8 @@ pub struct TonoInner {
     /// F3: last connect failure details (stage key, sanitized error, when).
     pub failed_stage: Option<&'static str>,
     pub connect_error: Option<String>,
+    pub(crate) attempt_evidence: super::connection_evidence::AttemptEvidence,
+    pub(crate) failure_evidence: Option<super::connection_evidence::FailureEvidence>,
     pub connect_error_at_ms: Option<i64>,
     /// F3: retry bookkeeping — failed attempts so far and the scheduled
     /// reconnect deadline (epoch millis).
@@ -300,8 +309,8 @@ pub struct TonoInner {
     pub isp_org: Option<String>,
     /// Catalog display name recommended after a connect fail. Never auto-selected.
     pub suggested_server: Option<String>,
-    /// Node that last passed admit. A user connect to any other name is a
-    /// fresh admit and must not inherit the previous commit latch.
+    /// Exit last applied and locally admitted in this user protection session.
+    /// Switching exits does not retire the session's protection commitment.
     pub last_admitted_node: Option<String>,
     /// Last successful HTTP generate_204 through the selected exit. Display and
     /// heartbeat only — never a connection verdict.
@@ -465,6 +474,8 @@ pub struct TonoState {
     /// activation transaction retains an owned reader through its final proof.
     policy_activation: Arc<tokio::sync::RwLock<()>>,
     next_release_id: AtomicU64,
+    /// One connected-lifetime recovery at a time. NIC bursts merge into it.
+    recovery_in_flight: AtomicBool,
 }
 
 impl TonoState {
@@ -490,6 +501,7 @@ impl TonoState {
         // §8 audit: JSONL under `tono/logs`, toggle from `tono/settings.json`.
         let audit = crate::tono::audit::Audit::new(&catalog_dir.join("logs"), &catalog_dir);
 
+        let exit_transport = super::exit_transport::load(&catalog_dir);
         Ok(Self {
             inner: tokio::sync::Mutex::new(TonoInner {
                 client,
@@ -505,7 +517,11 @@ impl TonoState {
                 catalog_dir,
                 nodes: Vec::new(),
                 selected_node: None,
+                exit_transport,
+                applied_exit_transport: None,
+                applied_nodes: Vec::new(),
                 routing: None,
+                applied_routing: None,
                 catalog_requires_choice: false,
                 catalog_last_synced_at_ms: None,
                 catalog_sync_error: None,
@@ -530,6 +546,8 @@ impl TonoState {
                 step_started_at: None,
                 failed_stage: None,
                 connect_error: None,
+                attempt_evidence: super::connection_evidence::AttemptEvidence::default(),
+                failure_evidence: None,
                 connect_error_at_ms: None,
                 retry_attempt: 0,
                 next_retry_at_ms: None,
@@ -562,11 +580,20 @@ impl TonoState {
             privileged_transition: Arc::new(tokio::sync::RwLock::new(())),
             policy_activation: Arc::new(tokio::sync::RwLock::new(())),
             next_release_id: AtomicU64::new(1),
+            recovery_in_flight: AtomicBool::new(false),
         })
     }
 
     pub fn audit(&self) -> &crate::tono::audit::Audit {
         &self.audit
+    }
+
+    pub fn try_begin_recovery(&self) -> bool {
+        crate::tono::connection_health::recovery_try_begin(&self.recovery_in_flight)
+    }
+
+    pub fn end_recovery(&self) {
+        crate::tono::connection_health::recovery_end(&self.recovery_in_flight)
     }
 
     pub async fn lock(&self) -> tokio::sync::MutexGuard<'_, TonoInner> {

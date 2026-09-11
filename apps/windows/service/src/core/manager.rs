@@ -1,5 +1,6 @@
 use crate::core::ClashConfig;
 use crate::core::logger::{get_writer, set_or_update_writer};
+use crate::core::local_timing;
 use crate::core::process::{process_identity, terminate_process};
 use crate::core::reconcile::ensure_startup_reconciled;
 use crate::core::runtime::{
@@ -397,6 +398,12 @@ const fn prepare_start_core_action(
     }
 }
 
+/// PID zero alone does not mean stopped: a watchdog can be between respawns,
+/// or a failed termination can still own a child. Used only under CORE_MANAGER.
+const fn replacement_stop_required(pid: u32, config: bool, shutdown: bool, watchdog: bool, failed_child: bool) -> bool {
+    pid != 0 || config || shutdown || watchdog || failed_child
+}
+
 pub struct CoreManager {
     running_pid: Arc<AtomicU32>,
     running_config: Mutex<Option<ClashConfig>>,
@@ -564,7 +571,7 @@ impl CoreManager {
     /// process name alone, so a third-party DNS server or user-installed Mihomo is still reported
     /// to the App and never killed.
     pub async fn prepare_start(&self, preserve_supervised_core: bool) -> Result<u32> {
-        ensure_startup_reconciled().await?;
+        local_timing::result("prepare.startup_reconcile", ensure_startup_reconciled()).await?;
         let action = prepare_start_core_action(
             self.running_pid.load(Ordering::Acquire),
             !cfg!(windows) || preserve_supervised_core,
@@ -589,7 +596,8 @@ impl CoreManager {
             PrepareStartCoreAction::Preserve(pid) => vec![pid],
             PrepareStartCoreAction::NoCore | PrepareStartCoreAction::Stop(_) => Vec::new(),
         };
-        let swept = crate::core::process::sweep_orphan_core_processes(&exempt, preserve_existing)
+        let swept = local_timing::result("prepare.orphan_process_sweep",
+            crate::core::process::sweep_orphan_core_processes(&exempt, preserve_existing))
             .await
             .context("orphaned core sweep failed before core start")?;
         Ok(reconciled.saturating_add(swept))
@@ -602,7 +610,7 @@ impl CoreManager {
         // The next block replaces the supervised child under this same manager lock, so preserve
         // it across this final process-table sweep. The earlier PrepareCoreStart route already
         // stopped an unprotected child before the App's DNS bind proof.
-        self.prepare_start(true).await?;
+        local_timing::result("core.final_prepare", self.prepare_start(true)).await?;
         set_core_lifecycle_state(ServiceLifecycleState::Starting);
         if self.running_pid.load(Ordering::Relaxed) != 0 {
             info!("Core is already running, stopping existing instance");
@@ -626,7 +634,8 @@ impl CoreManager {
         // the lifecycle back and, crucially, returns before `Command::spawn`.
         #[cfg(windows)]
         if let Err(error) =
-            crate::core::windows_kill_switch::retract_direct_before_core_replacement().await
+            local_timing::result("core.retract_volatile_permits",
+                crate::core::windows_kill_switch::retract_direct_before_core_replacement()).await
         {
             set_core_lifecycle_state(ServiceLifecycleState::Running);
             return Err(error.context("refusing to spawn Core while DIRECT retraction is unproven"));
@@ -635,18 +644,20 @@ impl CoreManager {
         // Failures below that leave no live core roll the lifecycle back to Running, the same
         // settled state a stop reports: a start that has already failed must not keep
         // reporting Starting forever.
-        if let Err(error) = prepare_core_ipc_socket(&config.core_config.core_ipc_path, &owner) {
+        if let Err(error) = local_timing::result("core.prepare_ipc", async {
+            prepare_core_ipc_socket(&config.core_config.core_ipc_path, &owner)
+        }).await {
             set_core_lifecycle_state(ServiceLifecycleState::Running);
             return Err(error);
         }
         let args = core_args(&config);
 
-        let mut child_guard = match run_with_logging(
+        let mut child_guard = match local_timing::result("core.spawn", run_with_logging(
             &config.core_config.core_path,
             &args,
             &config.log_config,
             &owner,
-        )
+        ))
         .await
         {
             Ok(child_guard) => child_guard,
@@ -657,11 +668,11 @@ impl CoreManager {
         };
         let child_pid = child_guard.id();
 
-        if let Err(error) = secure_core_ipc_socket(
+        if let Err(error) = local_timing::result("core.secure_ipc", secure_core_ipc_socket(
             config.core_config.core_ipc_path.clone(),
             owner.clone(),
             child_pid,
-        )
+        ))
         .await
         {
             if let Err(kill_error) = child_guard.kill_now().await {
@@ -692,7 +703,8 @@ impl CoreManager {
         }
 
         if let Err(record_error) =
-            write_runtime_record_for_config(child_pid, &config, "after start").await
+            local_timing::result("core.persist_runtime_record",
+                write_runtime_record_for_config(child_pid, &config, "after start")).await
         {
             if let Err(kill_error) = child_guard.kill_now().await {
                 let now_secs = unix_timestamp_secs();
@@ -719,10 +731,29 @@ impl CoreManager {
         let pid = child_pid.context("spawned core did not expose a process ID after start")?;
         publish_core_identity(&self.running_pid, pid);
 
-        self.start_watchdog(child_guard, config, owner).await;
+        local_timing::returned("core.start_watchdog", self.start_watchdog(child_guard, config, owner)).await;
         set_core_lifecycle_state(ServiceLifecycleState::Running);
 
         Ok(())
+    }
+
+    /// Cold start has nothing to stop. Skip only empty manager bookkeeping;
+    /// start_core still sweeps orphans and proves exact Blocked WFP before spawn.
+    /// This is NOT the explicit stop/release API and does not weaken either.
+    pub(super) async fn stop_core_for_replacement(&self) -> Result<()> {
+        let required = replacement_stop_required(
+            self.running_pid.load(Ordering::Acquire),
+            self.running_config.lock().await.is_some(),
+            self.watchdog_shutdown.lock().await.is_some(),
+            self.watchdog_handle.lock().await.is_some(),
+            self.failed_child.lock().await.is_some(),
+        );
+        if required {
+            self.stop_core().await
+        } else {
+            tracing::debug!("core: cold replacement has no supervised child to stop");
+            Ok(())
+        }
     }
 
     pub async fn stop_core(&self) -> Result<()> {
@@ -1790,5 +1821,25 @@ mod windows_pipe_tests {
         assert!(sddl.contains(";;;BA)"));
         assert!(!sddl.contains(";;;WD)"));
         assert!(!sddl.contains(";;;AU)"));
+    }
+}
+
+#[cfg(test)]
+mod replacement_stop_tests {
+    use super::*;
+    #[test]
+    fn every_supervision_receipt_requires_a_real_stop() {
+        assert!(!replacement_stop_required(0, false, false, false, false));
+        assert!(replacement_stop_required(1, false, false, false, false));
+        for flags in 1..16_u8 {
+            assert!(replacement_stop_required(0, flags & 1 != 0, flags & 2 != 0, flags & 4 != 0, flags & 8 != 0));
+        }
+    }
+    #[tokio::test]
+    async fn empty_replacement_is_a_noop() {
+        let manager = CoreManager::new();
+        manager.stop_core_for_replacement().await.unwrap();
+        assert_eq!(manager.running_pid.load(Ordering::Acquire), 0);
+        assert!(manager.running_config.lock().await.is_none());
     }
 }

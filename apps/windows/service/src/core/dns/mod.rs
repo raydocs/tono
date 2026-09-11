@@ -29,27 +29,14 @@
 //! protected/loopback value everywhere on the proof path, because adapters left that way by an
 //! older build must not read as restored.
 //!
-//! **The enable-time read-back is evidence, not a gate.** Applying protected DNS is a *write*;
-//! proving it from Windows is not reliably possible. The registry stores "static, no servers"
-//! and "use DHCP" identically (which is why the IPv6 leg of the read-back was already removed),
-//! and the live apply used to run through PowerShell/CIM/netsh, which fails on real machines for
-//! reasons that have nothing to do with whether DNS works: pseudo-adapters, constrained language
-//! mode, EDR hooks, a damaged WMI repository. Gating `enable` on that weak proof killed connects
-//! on machines whose DNS was fine — the last one bailed with "protected DNS could not be verified
-//! on every active adapter" at 1.1 s, *before* the strong proof ever ran. So `enable` now
-//! **records** what it could not verify (per-adapter live-apply failures in the snapshot and in
-//! [`LIVE_APPLY_FAILURES`]; the whole round in `DNS_LAST_ERROR` and therefore in the status
-//! payload, behind [`DNS_PROTECTION_UNVERIFIED_PREFIX`]) and returns success, so the connect
-//! reaches the proof that is actually direct: `verify_fake_ip` in the App resolves a name through
-//! the OS and demands an answer in `198.18/16`. Nothing is traded away by demoting the weak
-//! proof, because WFP default-denies DNS on the physical interfaces while its verified-TUN
-//! permit admits the `198.18.0.2` path: a machine whose DNS configuration cannot be verified
-//! cannot leak, it can only fail to resolve — and failing to resolve is exactly what the
-//! fake-ip probe catches, with the recorded note in the status payload to say why. What stays a
-//! hard failure of `enable` is the case where **no per-adapter
-//! outcome exists at all** (the adapter enumeration or the apply batch itself errored, or the
-//! record of the round could not be persisted): then there is nothing to restore, nothing to
-//! reconcile, and nothing truthful to report.
+//! **Fresh native read-back is an admission gate.** Protected DNS is enabled only when
+//! durable originals exist, at least one adapter is active, and native IPv4/IPv6 settings
+//! (including profile overrides) prove protection on every active adapter. Registry values
+//! and historical apply-success flags alone cannot prove this. The App requires that status
+//! before system fake-ip can admit Connected; fake-ip never overrides unproven native DNS.
+//! Per-adapter failures remain durable for reconciliation. An IPC success only means that
+//! the operation returned a status, not that its `enabled` field is true. WFP is a separate
+//! mandatory protection leg; this DNS module cannot by itself declare that no leak exists.
 //!
 //! **DNS-before-disarm invariant (identical to the macOS helper):** the kill switch may only
 //! disarm after DNS restore is *proven*; if restore cannot be proven, the disarm is refused
@@ -164,7 +151,7 @@ pub(crate) struct AdapterDnsSnapshot {
     pub ipv4_profile_name_server: Option<String>,
     pub ipv6_name_server: Option<String>,
     pub ipv6_profile_name_server: Option<String>,
-    /// The last CIM live-apply for this adapter failed, so the running resolver cannot be
+    /// The last native live-apply for this adapter failed, so the running resolver cannot be
     /// trusted to match the registry until a retry succeeds. Recorded in memory and in the
     /// snapshot file. It forces the protected-DNS write to be replayed on the next enable
     /// ([`needs_loopback_replay`]) and it is why the restore proof insists on live evidence —
@@ -657,7 +644,7 @@ fn is_tono_dns_value(value: Option<&str>) -> bool {
 /// No longer a gate on the protect path — the registry stores "no servers" and "use DHCP"
 /// identically, so this can never prove the state it names. Kept because it still documents
 /// the intended shape and is asserted by tests; the enable-time verification requires only
-/// IPv4 loopback (see `engine::all_loopback`).
+/// native IPv4 and IPv6 resolver readback (see `engine::all_loopback`).
 #[cfg_attr(not(test), allow(dead_code))]
 fn is_protected_v6_value(value: Option<&str>) -> bool {
     let Some(value) = value else {
@@ -728,13 +715,10 @@ const UNVERIFIED_NAMED_ADAPTERS: usize = 4;
 
 /// Compose the note for an `enable` round that applied protected DNS but could not prove it.
 ///
-/// `None` means the round is clean — every adapter's live apply succeeded and the read-back
-/// either confirmed the state or was never attempted (a build with no engine). Everything else
-/// produces a note that is deliberately *not* an error: it rides in `DNS_LAST_ERROR` and
-/// therefore in the status payload on an otherwise successful enable, so that when the connect
-/// later dies in `verify_fake_ip` with "system DNS lookup exceeded 5s" the diagnostics report and
-/// the service log already name the real cause. It also states why this is not a leak, because
-/// the next person to read it will ask.
+/// This diagnostic records apply failures or contradicted read-back. It is not admission
+/// evidence: `protection_status_from_proof` still requires a current native proof even if
+/// no note exists (including a test build with no engine). The App must reject unproven
+/// DNS before its system fake-ip gate, and must separately prove WFP protection.
 fn unverified_note(failed: &[String], total: usize, read_back: LoopbackReadBack) -> Option<String> {
     if failed.is_empty()
         && matches!(
@@ -760,12 +744,9 @@ fn unverified_note(failed: &[String], total: usize, read_back: LoopbackReadBack)
     Some(format!(
         "{DNS_PROTECTION_UNVERIFIED_PREFIX}: protected DNS ({PROTECTED_DNS_V4}) was applied but could not be verified \
          on {} of {total} adapter(s) — live apply failed on: {adapters}; read-back={}. \
-         Protection was NOT abandoned and this is not a leak: WFP default-denies physical DNS \
-         on both address families and permits the verified TUN interface, so an adapter whose \
-         configuration cannot be verified can only fail to resolve, never bypass the tunnel. The connect \
-         continues to the fake-ip probe, which resolves a name through the OS and proves the \
-         answering resolver directly; if that probe fails (\"system DNS lookup exceeded\"), this \
-         is the reason. Automatic reconciliation keeps retrying these adapters.",
+         Connected requires fresh native DNS proof on every active adapter, followed by the \
+         system fake-ip gate; an IPC success is not that proof. WFP protection must be verified \
+         separately. Automatic reconciliation keeps retrying these adapters.",
         failed.len(),
         read_back_label(read_back)
     ))
@@ -1200,11 +1181,9 @@ pub(crate) const DNS_SNAPSHOT_MISSING_PREFIX: &str = "TONO_DNS_SNAPSHOT_MISSING"
 /// failed operation.
 pub(crate) const DNS_RESTORE_DEGRADED_PREFIX: &str = "TONO_DNS_RESTORE_DEGRADED";
 
-/// Stable, App-mappable marker for "protected DNS was applied, but the apply or its read-back
-/// could not be verified on every adapter". Like [`DNS_RESTORE_DEGRADED_PREFIX`] it rides in
-/// `last_error` on an otherwise **successful** operation, so the App must treat it as a warning
-/// to surface (and to put in the diagnostics report), never as a failed enable. It is the
-/// explanation the user gets when the connect subsequently fails in the fake-ip probe.
+/// Stable marker for an unverified protected-DNS apply/read-back. A returned status is not
+/// an admission success: the App must reject unproven native DNS even when the IPC call
+/// itself succeeded. Do not treat this like the degraded-restore warning above.
 pub(crate) const DNS_PROTECTION_UNVERIFIED_PREFIX: &str = "TONO_DNS_UNVERIFIED";
 
 /// Budget for one *reading* DNS engine call (registry sweep + `GetAdaptersAddresses`). A
@@ -1213,15 +1192,11 @@ pub(crate) const DNS_PROTECTION_UNVERIFIED_PREFIX: &str = "TONO_DNS_UNVERIFIED";
 /// surrounding `IPC_HANDLER_TIMEOUT` = 60 s more than half its budget to answer the client.
 #[cfg(all(windows, not(feature = "test")))]
 const DNS_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(25);
-/// Budget for a *mutating* call (protected-DNS apply / snapshot restore). Longer than the reading
-/// budget on purpose: this path already contains two internally bounded PowerShell batches
-/// (2 × `engine::POWERSHELL_TIMEOUT` = 20 s) plus the registry sweep, and an outer bound below
-/// its own inner bound would report a merely slow machine as wedged and refuse a restore that
-/// was still making progress. It stays below `windows_kill_switch::DNS_RESTORE_TIMEOUT` = 40 s
-/// so that a wedged DNS engine is named by *this* module's marker instead of being swallowed by
-/// the cross-module bound, and because the first expiry latches the in-flight claim, one handler
-/// can stall for at most one budget no matter how many engine calls its path makes (`enable`
-/// makes up to six).
+/// Budget for native protected-DNS apply / snapshot restore (registry and per-family
+/// `SetInterfaceDnsSettings`). No PowerShell/CIM batches run on this path. Preserve the
+/// existing bound below `windows_kill_switch::DNS_RESTORE_TIMEOUT` = 40 s: a wedged engine
+/// must be named here, not hidden by the cross-module timeout. The worker keeps its claim
+/// until it really returns, so timeout cannot permit overlapping native mutations.
 #[cfg(all(windows, not(feature = "test")))]
 const DNS_APPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 /// Budget for the best-effort cache flush: `LoadLibraryW("dnsapi.dll")` + a `DnsFlushResolver
@@ -1231,9 +1206,8 @@ const DNS_APPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30
 /// the next operation from piling a second thread onto a wedged Dnscache.
 #[cfg(all(windows, not(feature = "test")))]
 const DNS_FLUSH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
-/// Anything slower than this is already pathological. Set above a PowerShell cold start
-/// (~1 s), which the mutating path legitimately pays, so the warning means "degrading", not
-/// "busy".
+/// Diagnostic threshold for slow native calls, not an admission timeout. Crossing it
+/// records degraded local performance without skipping or weakening the native proof.
 #[cfg(any(all(windows, not(feature = "test")), test))]
 const DNS_SLOW_CALL: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -1842,6 +1816,7 @@ async fn enable_unlocked(trigger: EnableTrigger) -> Result<DnsProtectionStatus> 
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(error.into()),
     };
+    let persisted_snapshot = existing.clone();
     let existing = existing
         .map(|snapshot| with_live_failures(&snapshot, &LIVE_APPLY_FAILURES.lock().unwrap()));
     let snapshot_present = existing.is_some();
@@ -1882,86 +1857,74 @@ async fn enable_unlocked(trigger: EnableTrigger) -> Result<DnsProtectionStatus> 
     let live_apply_failed = snapshot
         .adapters
         .iter()
-        .any(|adapter| adapter.live_apply_failed);
+        .any(|adapter| adapter.live_apply_failed && active_adapters.iter()
+            .any(|active| active.interface_guid == adapter.interface_guid));
     // Snapshot first, even on an otherwise idempotent replay: `snapshot` may now include adapters
     // that appeared after the first enable, and any later failure must retain their originals.
-    atomic_write(&snapshot_path(), &serde_json::to_vec_pretty(&snapshot)?).await?;
+    persist_snapshot_delta(persisted_snapshot.as_ref(), &snapshot).await?;
     if !needs_loopback_replay(snapshot_present, all_loopback, live_apply_failed) {
         // Protection is complete and nothing is outstanding: retire any note from an earlier
         // round so the reconciler is not kept awake by evidence that no longer holds.
-        clear_unverified_note();
-        return status_unlocked().await;
+        // An explicit fresh native proof also retires an earlier hard engine
+        // error; otherwise healthy DNS could remain offline forever on stale text.
+        *DNS_LAST_ERROR.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        // This invocation already read the durable originals and proved every
+        // active adapter natively. Do not repeat both reads to build the reply.
+        let status = protection_status_from_proof(true, active_adapters.len(), all_loopback,
+            DNS_LAST_ERROR.lock().unwrap().clone());
+        publish_status(&status);
+        return Ok(status);
     }
-    // `Some(note)` = applied, but at least one adapter could not be verified — a *success* that
-    // must be recorded, not a failure (see the module docs). `Err` is reserved for the round
-    // that produced no per-adapter outcome at all.
-    let outcome: Result<Option<String>> = async {
-        // Hard failure #1: the batch could not be run, so not one adapter was touched and there
-        // is no result to record. `?` on purpose — with nothing applied there is nothing to
-        // restore and nothing for the watchdog to reconcile, and a status that claimed
-        // "protected" would be a lie. A wedged engine (`DNS_ENGINE_WEDGED_PREFIX`) surfaces here.
+    let outcome: Result<DnsProtectionStatus> = async {
+        let before_apply = snapshot.clone();
         let live = engine_apply_protected(&snapshot.adapters).await?;
         note_apply_round(live.iter().any(|(_, ok)| !ok));
         note_live_results(&mut snapshot, &live);
-        // Hard failure #2: the record of the round could not be persisted. Persist both failures
-        // and successful retries — otherwise a recovered adapter keeps its old
-        // `live_apply_failed` bit on disk and every later enable unnecessarily replays DNS, and
-        // (since the demotion) an unpersisted failure is a failure the restore proof and the
-        // reconciler would never learn about.
-        atomic_write(&snapshot_path(), &serde_json::to_vec_pretty(&snapshot)?).await?;
-        let failed = live
-            .iter()
-            .filter(|(_, ok)| !ok)
-            .map(|(guid, _)| guid.clone())
-            .collect::<Vec<_>>();
-        // Everything from here down is evidence, never a gate. The read-back is indirect (the
-        // registry cannot even express the protected IPv6 state) and fails for environmental
-        // reasons; the direct proof is the App's fake-ip probe, which runs seconds later in the
-        // same connect transaction. Both outcomes — and a read that could not be performed at
-        // all — are recorded and reported instead of aborting the connect.
-        let read_back = if ENGINE_LIVE {
-            match collect_dns_adapters().await {
-                Ok(active_after_apply) => match engine_all_loopback(&active_after_apply).await {
-                    Ok(true) => LoopbackReadBack::Verified,
-                    Ok(false) => LoopbackReadBack::Contradicted,
-                    Err(error) => {
-                        tracing::warn!(
-                            "dns: the protected-DNS read-back could not be run: {error:#}"
-                        );
-                        LoopbackReadBack::Unavailable
-                    }
-                },
-                Err(error) => {
-                    tracing::warn!("dns: adapters could not be re-read after the apply: {error:#}");
-                    LoopbackReadBack::Unavailable
-                }
-            }
-        } else {
-            LoopbackReadBack::NotAttempted
-        };
-        Ok(unverified_note(&failed, live.len(), read_back))
-    }
-    .await;
-    let unverified = record_outcome(outcome)?;
-    if let Some(note) = unverified {
-        // `record_outcome` cleared `last_error` on the way through: this round *succeeded* for
-        // the caller, but it must never be silent — put the note back so it reaches the status
-        // payload (`status_unlocked` reads `DNS_LAST_ERROR`), the App's diagnostics report and
-        // the service log. It is also what `needs_reconcile` keys on.
+        // A fully successful first apply does not change the original snapshot.
+        // Persist failures/cleared failure bits, but do not fsync the same file twice.
+        persist_snapshot_delta(Some(&before_apply), &snapshot).await?;
+        let failed = live.iter().filter(|(_, ok)| !ok).map(|(guid, _)| guid.clone()).collect::<Vec<_>>();
+        if let Err(error) = engine_flush_cache().await {
+            tracing::warn!("DNS cache flush after enable failed: {error:#}");
+        }
+        // ONE fresh post-apply/native readback, after cache flush. This is both
+        // admission evidence and the returned status, not a cached success flag.
+        let current = if ENGINE_LIVE { collect_dns_adapters().await? } else { snapshot.adapters.clone() };
+        let protected = ENGINE_LIVE && engine_all_loopback(&current).await?;
+        let read_back = if !ENGINE_LIVE { LoopbackReadBack::NotAttempted }
+            else if protected { LoopbackReadBack::Verified } else { LoopbackReadBack::Contradicted };
+        let note = unverified_note(&failed, live.len(), read_back);
+        Ok(protection_status_from_proof(true, current.len(), protected, note))
+    }.await;
+    let status = record_outcome(outcome)?;
+    if let Some(note) = &status.last_error {
         tracing::warn!("dns: {note}");
-        *DNS_LAST_ERROR
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(note);
+        *DNS_LAST_ERROR.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(note.clone());
     }
-    // Loopback is applied (verified or recorded as unverified): flush the resolver cache
-    // best-effort. Real-IP answers cached before the switch are otherwise served without
-    // consulting the loopback core, so the fake-ip readiness probe never sees a 198.18/16 answer
-    // until the entries expire. A failed flush must not fail enable — DNS protection itself is
-    // already in place.
-    if let Err(error) = engine_flush_cache().await {
-        tracing::warn!("DNS cache flush after enable failed: {error:#}");
+    publish_status(&status);
+    Ok(status)
+}
+
+/// Only compare to an original read or successful write from THIS operation.
+/// This is disk-write deduplication, never a substitute for native DNS proof.
+async fn persist_snapshot_delta(previous: Option<&DnsSnapshot>, next: &DnsSnapshot) -> Result<()> {
+    if snapshot_write_required(previous, next) {
+        atomic_write(&snapshot_path(), &serde_json::to_vec_pretty(next)?).await?;
+        tracing::debug!("dns: persisted changed restoration snapshot");
     }
-    status_unlocked().await
+    Ok(())
+}
+
+fn snapshot_write_required(previous: Option<&DnsSnapshot>, next: &DnsSnapshot) -> bool {
+    previous != Some(next)
+}
+
+fn protection_status_from_proof(snapshot_present: bool, active_adapters: usize, native_protected: bool, last_error: Option<String>) -> DnsProtectionStatus {
+    let enabled = snapshot_present && active_adapters > 0 && native_protected;
+    DnsProtectionStatus {
+        enabled, snapshot_present, adapters: active_adapters as u32,
+        last_error: last_error.filter(|error| !(enabled && error.contains("TONO_DNS_UNVERIFIED"))),
+    }
 }
 
 /// Restore every adapter from the snapshot, prove it by registry read-back *and* by a live read
@@ -2509,24 +2472,16 @@ async fn status_unlocked() -> Result<DnsProtectionStatus> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(error.into()),
     };
-    let enabled = match snapshot.as_ref() {
-        Some(_snapshot) if ENGINE_LIVE => {
-            // Include adapters that appeared since the last enable. Checking only saved GUIDs can
-            // report a false healthy state while a fresh adapter still uses an external resolver.
-            let current = collect_dns_adapters().await?;
-            engine_all_loopback(&current).await?
-        }
-        Some(snapshot) => engine_all_loopback(&snapshot.adapters).await?,
-        None => false,
+    let current = match snapshot.as_ref() {
+        Some(_) if ENGINE_LIVE => collect_dns_adapters().await?,
+        Some(snapshot) => snapshot.adapters.clone(),
+        None => Vec::new(),
     };
-    let status = DnsProtectionStatus {
-        enabled,
-        snapshot_present: snapshot.is_some(),
-        adapters: snapshot
-            .as_ref()
-            .map_or(0, |snapshot| snapshot.adapters.len() as u32),
-        last_error: DNS_LAST_ERROR.lock().unwrap().clone(),
-    };
+    // The native engine proves the live resolver lists on both families, including
+    // adapters arriving after enable. Historical backup entries are not live adapters.
+    let protected = snapshot.is_some() && !current.is_empty() && engine_all_loopback(&current).await?;
+    let status = protection_status_from_proof(snapshot.is_some(), current.len(), protected,
+        DNS_LAST_ERROR.lock().unwrap().clone());
     publish_status(&status);
     Ok(status)
 }
@@ -2561,3 +2516,34 @@ mod engine;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod admission_delta_tests {
+    use super::*;
+    fn snapshot() -> DnsSnapshot {
+        DnsSnapshot { version: SNAPSHOT_VERSION, taken_at: 1,
+            adapters: vec![AdapterDnsSnapshot { interface_guid: "fixture".into(), ..Default::default() }] }
+    }
+    #[test]
+    fn only_new_originals_or_changed_apply_receipts_need_another_disk_write() {
+        let saved = snapshot();
+        assert!(snapshot_write_required(None, &saved));
+        assert!(!snapshot_write_required(Some(&saved), &saved));
+        let mut failed = saved.clone(); failed.adapters[0].live_apply_failed = true;
+        assert!(snapshot_write_required(Some(&saved), &failed));
+        assert!(snapshot_write_required(Some(&failed), &saved));
+        let mut added = saved.clone();
+        added.adapters.push(AdapterDnsSnapshot { interface_guid: "new-adapter".into(), ..Default::default() });
+        assert!(snapshot_write_required(Some(&saved), &added));
+    }
+    #[test]
+    fn reused_readback_still_requires_snapshot_active_adapters_and_native_proof() {
+        for (snapshot, adapters, native) in [(false, 1, true), (true, 0, true), (true, 1, false)] {
+            assert!(!protection_status_from_proof(snapshot, adapters, native, None).enabled);
+        }
+        let healthy = protection_status_from_proof(true, 1, true, Some("TONO_DNS_UNVERIFIED: old warning".into()));
+        assert!(healthy.enabled); assert!(healthy.last_error.is_none());
+        let failed = protection_status_from_proof(true, 2, false, Some("TONO_DNS_UNVERIFIED: active failure".into()));
+        assert!(!failed.enabled); assert!(failed.last_error.is_some()); assert_eq!(failed.adapters, 2);
+    }
+}

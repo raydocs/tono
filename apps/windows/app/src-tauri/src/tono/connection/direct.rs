@@ -5,7 +5,7 @@ use std::time::Duration;
 use tauri::AppHandle;
 use tono_core::{
     EXIT_GROUP_NAME,
-    config::{self, RuntimePorts, build_owned_runtime_with_ports},
+    config::{self, RuntimePorts},
     node::ValidatedNode,
 };
 use tono_logging::{Type, logging};
@@ -28,7 +28,6 @@ use super::controller::{
 use super::controller_error_detail;
 use super::failure::StageFailure;
 use super::platform::write_redacted_copy;
-use super::probes::verify_tun_data_plane;
 
 /// The WFP model has a hard endpoint budget. The runtime DIRECT plan and its permits must be
 /// generated from the same complete set; silently truncating only the permits creates selective
@@ -114,12 +113,10 @@ pub(super) async fn direct_lease_heartbeat_loop(state: Arc<TonoState>, generatio
 /// 3. Health failure (WFP / protected DNS / core / data-plane) stays fail-closed: block and
 ///    reconnect; never fall open to the real NIC for Claude.
 ///
-/// Release gate for the rev-10 fail-closed hot-reload path below. Enabled since 0.0.24: the
-/// generation-mismatch defect that made `applyingCloudPolicy` fail deterministically is fixed in
-/// `prove_service_reload_mode` (the desired-state proof binds the owner session generation, not
-/// the unrelated per-owner write counter). On-device packet capture still gates any further
-/// widening of the DIRECT set.
-pub(super) const WINDOWS_OPTIONAL_DIRECT_ENABLED: bool = true;
+/// Optional DIRECT remains disabled for this release. The fail-closed hot-reload
+/// machinery is retained, but on-device packet capture must gate enabling or widening
+/// any physical-interface exception; this is not the AI residential routing switch.
+pub(super) const WINDOWS_OPTIONAL_DIRECT_ENABLED: bool = false;
 
 /// Maximum resolved addresses kept per policy domain (Mac parity).
 pub(super) const MAX_ADDRESSES_PER_DOMAIN: usize = 8;
@@ -300,6 +297,7 @@ pub(super) fn spawn_optional_direct_after_connected(
     nodes: Vec<ValidatedNode>,
     home_node: Option<ValidatedNode>,
     home_socks5: Option<tono_core::CatalogHomeSocks5>,
+    transport: tono_core::node::ExitTransport,
     secret: String,
     controller_port: u16,
     mixed_port: u16,
@@ -320,6 +318,7 @@ pub(super) fn spawn_optional_direct_after_connected(
             &nodes,
             home_node.as_ref(),
             home_socks5.as_ref(),
+            transport,
             generation,
             &secret,
             controller_port,
@@ -365,7 +364,7 @@ pub(super) fn spawn_optional_direct_after_connected(
                 logging!(
                     warn,
                     Type::Service,
-                    "Tono: optional DIRECT commit rolled back to full tunnel: {error:?}"
+                    "Tono: optional DIRECT commit failed; overlay not installed: {error:?}"
                 );
             }
         }
@@ -378,6 +377,7 @@ pub(super) async fn apply_cloud_policy(
     nodes: &[ValidatedNode],
     home_node: Option<&ValidatedNode>,
     home_socks5: Option<&tono_core::CatalogHomeSocks5>,
+    transport: tono_core::node::ExitTransport,
     generation: u64,
     original_secret: &str,
     controller_port: u16,
@@ -489,7 +489,7 @@ pub(super) async fn apply_cloud_policy(
     // Build the staged bundle before the irreversible bracket. The controller secret and ports
     // stay byte-identical: this is an in-place reload, not a replacement Core generation.
     ensure_fresh(state, generation).await?;
-    let runtime = match build_owned_runtime_with_ports(
+    let runtime = match tono_core::config::build_owned_runtime_with_transport(
         nodes,
         &node.name,
         original_secret,
@@ -500,6 +500,7 @@ pub(super) async fn apply_cloud_policy(
             mixed_port,
             controller_port,
         },
+        transport,
     ) {
         Ok(runtime) => runtime,
         Err(error) => {
@@ -1298,7 +1299,6 @@ pub(super) async fn commit_direct_policy_cancellation_safe(
             )
             .await
             .map_err(StageFailure::error)?;
-            verify_tun_data_plane().await.map_err(StageFailure::error)?;
             ensure_fresh(&task_state, generation).await?;
 
             let finalized = service::tono_finalize_direct_runtime_reload(

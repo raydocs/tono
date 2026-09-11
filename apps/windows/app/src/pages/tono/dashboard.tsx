@@ -807,9 +807,7 @@ const DashboardPage = () => {
           <ConnectPill
             uiState={uiState}
             protectionConfirmed={protectionConfirmed}
-            exitVerified={status?.exitVerified !== false}
             stage={status?.stage}
-            suggestedServer={status?.suggestedServer}
             onConnect={handleConnect}
             onDisconnect={() => {
               if (uiState === 'connecting') {

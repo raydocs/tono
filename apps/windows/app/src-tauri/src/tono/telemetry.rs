@@ -1,8 +1,8 @@
-//! Periodic diagnostic timeline upload (testing default-on).
+//! Optional periodic diagnostic timeline upload (default-off).
 //!
 //! Every ~20 minutes while signed in, ship a short redacted audit window to
 //! the control plane so operators can reconstruct network anomalies before
-//! Claude bans. Users can disable this in Settings. Failures never touch the
+//! support investigations. Users can opt in in Settings. Failures never touch the
 //! connect / kill-switch path.
 
 use std::{path::Path, sync::Arc, time::Duration};
@@ -113,6 +113,7 @@ const INCLUDE_KINDS: &[&str] = &[
 
 /// Start the periodic uploader for one authenticated session.
 pub(crate) async fn spawn_periodic_for_auth_generation(state: &Arc<TonoState>, _app: &AppHandle, generation: u64) {
+    super::automatic_diagnostics::spawn_once(state);
     let task_state = state.clone();
     let handle = AsyncHandler::spawn(move || async move {
         let mut consecutive_not_found = 0_u32;

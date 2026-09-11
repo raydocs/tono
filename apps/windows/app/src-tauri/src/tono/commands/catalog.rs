@@ -129,6 +129,9 @@ pub async fn tono_test_available_servers(
         if !matches!(inner.account_state, AccountState::Ready) {
             return Err("sign in before testing servers".to_string());
         }
+        if inner.exit_transport == tono_core::node::ExitTransport::Hysteria2Udp {
+            return Err("TCP server tests do not measure UDP; connect and test the current server instead".to_string());
+        }
         if inner.fsm.status().is_connected || inner.fsm.status().is_connecting || inner.fsm.kill_switch_armed() {
             return Err("disconnect before testing all servers".to_string());
         }
@@ -208,6 +211,9 @@ pub async fn tono_select_server(
         let mut inner = state.lock().await;
         if !inner.nodes.iter().any(|node| node.name == name) {
             return Err("unknown server".to_string());
+        }
+        if !inner.nodes.iter().any(|node| node.name == name && node.supports_transport(inner.exit_transport)) {
+            return Err(tono_core::NodeRejection::TransportUnavailable.to_string());
         }
         if catalog_sync::is_exit_blocked(&name) {
             return Err("this server is currently unavailable (network blocked)".to_string());

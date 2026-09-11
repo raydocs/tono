@@ -542,6 +542,7 @@ fn get_family_dns(interface: GUID, ipv6: bool) -> Result<Option<Vec<String>>> {
     let mut settings = DNS_INTERFACE_SETTINGS {
         Version: DNS_INTERFACE_SETTINGS_VERSION1,
         Flags: u64::from(DNS_SETTING_NAMESERVER)
+            | u64::from(DNS_SETTING_PROFILE_NAMESERVER)
             | if ipv6 { u64::from(DNS_SETTING_IPV6) } else { 0 },
         ..Default::default()
     };
@@ -554,7 +555,8 @@ fn get_family_dns(interface: GUID, ipv6: bool) -> Result<Option<Vec<String>>> {
         return Err(std::io::Error::from_raw_os_error(status as i32))
             .context("GetInterfaceDnsSettings failed");
     }
-    let servers = pwstr_list(settings.NameServer);
+    let profile = pwstr_list(settings.ProfileNameServer);
+    let servers = if profile.is_empty() { pwstr_list(settings.NameServer) } else { profile };
     // SAFETY: `settings` came from a successful GetInterfaceDnsSettings.
     unsafe { FreeInterfaceDnsSettings(&mut settings) };
     Ok(Some(servers))
@@ -734,15 +736,18 @@ pub(super) fn apply_protected_set(guids: &[String]) -> Result<Vec<(String, bool)
         .filter(|guid| !active.contains_key(&guid.to_ascii_uppercase()))
         .map(|guid| (guid.clone(), true))
         .collect::<Vec<_>>();
-    let entries = guids
-        .iter()
-        .filter_map(|guid| {
-            active
-                .get(&guid.to_ascii_uppercase())
-                .map(|adapter| (guid, adapter))
-        })
-        .map(|(guid, adapter)| apply_protected(guid, adapter))
-        .collect::<Result<Vec<_>>>()?;
+    let mut entries = Vec::new();
+    for guid in guids {
+        let Some(adapter) = active.get(&guid.to_ascii_uppercase()) else { continue; };
+        // A delta replay touches only changed/unproven adapters. Reuse requires
+        // fresh native readback of BOTH families, never a saved success flag.
+        if protected_adapter_is_live(guid, adapter).unwrap_or(false) {
+            results.push((guid.clone(), true));
+        } else {
+            entries.push(apply_protected(guid, adapter)?);
+        }
+    }
+    tracing::debug!(requested = guids.len(), rewritten = entries.len(), "dns: native-proof delta replay");
     results.extend(live_apply_with_retry(entries, ApplyMode::Protect));
     Ok(results)
 }
@@ -826,28 +831,38 @@ pub(super) fn any_loopback(guids: &[String]) -> Result<bool> {
 /// question: IPv4 must be on the TUN resolver, while IPv6 must have **no servers at
 /// all** — that is what the protect path writes, and reading it as drift would have the
 /// watchdog rewrite the registry every two seconds for ever.
+fn protected_adapter_is_live(guid: &str, active: &ActiveAdapter) -> Result<bool> {
+    let adapter = read_adapter(guid, None)?;
+    if active.ipv4_index != 0
+        && (!is_protected_v4_value(adapter.ipv4_name_server.as_deref())
+            || (adapter.ipv4_profile_name_server.is_some()
+                && !is_protected_v4_value(adapter.ipv4_profile_name_server.as_deref())))
+    {
+        return Ok(false);
+    }
+    let interface = parse_interface_guid(guid)?;
+    let expected_v4 = vec![super::PROTECTED_DNS_V4.to_owned()];
+    for (ipv6, index, want) in [
+        (false, active.ipv4_index, expected_v4.as_slice()),
+        (true, active.ipv6_index, &[][..]),
+    ] {
+        if index == 0 { continue; }
+        let have = get_family_dns(interface, ipv6)?;
+        if !super::live_family_matches(index, have.as_deref(), Some(want), false, &[]) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 pub(super) fn all_loopback(guids: &[String]) -> Result<bool> {
+    let active = active_adapter_map()?;
     for guid in guids {
-        let adapter = read_adapter(guid, None)?;
-        // Each present family must be fully protected — NameServer and, when set,
-        // ProfileNameServer (which overrides NameServer for the active profile). An absent
-        // family is skipped, matching the apply side.
-        if key_exists(&v4_key(guid))?
-            && (!is_protected_v4_value(adapter.ipv4_name_server.as_deref())
-                || (adapter.ipv4_profile_name_server.is_some()
-                    && !is_protected_v4_value(adapter.ipv4_profile_name_server.as_deref())))
+        if let Some(adapter) = active.get(&guid.to_ascii_uppercase())
+            && !protected_adapter_is_live(guid, adapter)?
         {
             return Ok(false);
         }
-        // IPv6 is deliberately NOT a gate here. The protected v6 state is "no servers",
-        // and Windows stores that the same way it stores "use DHCP" — an absent or empty
-        // `NameServer` — so the registry cannot tell the two apart and a read-back can
-        // never prove it. Making it a gate is what turned a machine with a perfectly good
-        // v4 TUN resolver into `Failed to enable protected DNS`. It is also
-        // unnecessary: v6 DNS to a physical resolver is blocked by the weight-6 v6 DNS
-        // filter and the v6 block-all, so an unprovable v6 state is a resolution failure
-        // at worst, never a leak, and the fake-ip probe proves the resolver that answers.
-        // Clearing v6 stays best-effort on the apply side.
     }
     Ok(true)
 }

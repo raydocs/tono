@@ -755,6 +755,10 @@ export interface TranslationResources {
             label: string
             pathLabel: string
           }
+          automaticDiagnostics: {
+            description: string
+            label: string
+          }
           networkLogUpload: {
             description: string
             label: string
@@ -1368,6 +1372,9 @@ export interface TranslationResources {
           launchAtStartup: string
           launchAtStartupHint: string
           title: string
+          transport: string
+          transportHint: string
+          transportUnavailable: string
         }
         preferences: {
           title: string

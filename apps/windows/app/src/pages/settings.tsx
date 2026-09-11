@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import type { DialogRef } from '@/components/base'
 import { UpdateViewer } from '@/components/setting/mods/update-viewer'
 import { useI18n } from '@/hooks/use-i18n'
+import { useTonoStatus } from '@/hooks/use-tono'
 import { useTonoPreferences } from '@/hooks/use-tono-preferences'
 import { useUpdate } from '@/hooks/use-update'
 import { resolveLanguage, supportedLanguages } from '@/services/i18n'
@@ -15,12 +16,17 @@ import {
   tonoAuditEnabled,
   tonoAuditLogPath,
   tonoPeriodicTelemetryEnabled,
+  tonoAutomaticDiagnosticsEnabled,
+  tonoSetAutomaticDiagnosticsEnabled,
   tonoSetAuditEnabled,
   tonoSetPeriodicTelemetryEnabled,
   tonoNetworkLogUploadEnabled,
   tonoSetNetworkLogUploadEnabled,
   formatTonoActionError,
   TONO_BUILD_ID,
+  tonoExitTransport,
+  tonoSetExitTransport,
+  type TonoExitTransport,
 } from '@/services/tono'
 import { TONO_UPDATES_CONFIGURED } from '@/services/update'
 import { GlassCard } from '@/tono-ui/GlassCard'
@@ -32,6 +38,7 @@ import { TonoToggle } from '@/tono-ui/TonoToggle'
 import { version } from '@root/package.json'
 
 const tonoAuditEnabledQueryKey = ['tonoAuditEnabled'] as const
+const tonoAutomaticDiagnosticsEnabledQueryKey = ['tonoAutomaticDiagnosticsEnabled'] as const
 const tonoAuditLogPathQueryKey = ['tonoAuditLogPath'] as const
 const tonoPeriodicTelemetryEnabledQueryKey = [
   'tonoPeriodicTelemetryEnabled',
@@ -131,6 +138,20 @@ const GeneralCard = () => {
     useTonoPreferences()
   const { switchLanguage } = useI18n()
   const themeMode = preferences?.theme_mode ?? 'system'
+  const { status } = useTonoStatus()
+  const transportQueryKey = ['tonoExitTransport', status?.selectedServer, status?.catalogRevision, status?.uiState] as const
+  const { data: transportSetting } = useQuery({
+    queryKey: transportQueryKey,
+    queryFn: tonoExitTransport,
+  })
+  const handleTransport = useLockFn(async (transport: TonoExitTransport) => {
+    try {
+      const updated = await tonoSetExitTransport(transport)
+      setCacheData(transportQueryKey, updated)
+    } catch (error) {
+      showNotice.error(formatTonoActionError(error, t))
+    }
+  })
 
   const handleAutostart = useLockFn(async (value: boolean) => {
     const previous = preferences?.enable_auto_launch ?? false
@@ -182,6 +203,35 @@ const GeneralCard = () => {
           onChange={(value) => void handleAutostart(value)}
           label={t('tono.settings.general.launchAtStartup')}
         />
+      </Row>
+      <Row
+        label={t('tono.settings.general.transport')}
+        subtitle={transportSetting?.udpAvailable
+          ? t('tono.settings.general.transportHint')
+          : t('tono.settings.general.transportUnavailable')}
+      >
+        <span className="tono-segmented">
+          {(['realityTcp', 'hysteria2Udp'] as const).map((transport) => {
+            const active = transportSetting?.selected === transport
+            return (
+              <button
+                key={transport}
+                type="button"
+                className="tono-link"
+                aria-pressed={active}
+                disabled={!transportSetting?.changeAllowed || active
+                  || (transport === 'hysteria2Udp' && !transportSetting.udpAvailable)}
+                onClick={() => void handleTransport(transport)}
+                style={{ padding: '6px 10px', fontSize: 11,
+                  fontWeight: active ? 600 : 400,
+                  color: active ? '#fff' : text.secondary,
+                  background: active ? TONO_COLORS.accent : 'transparent' }}
+              >
+                {transport === 'realityTcp' ? 'TCP / REALITY' : 'UDP / Hysteria2'}
+              </button>
+            )
+          })}
+        </span>
       </Row>
       <Row label={t('tono.settings.general.language')}>
         <span className="tono-segmented">
@@ -249,6 +299,10 @@ const PrivacyCard = () => {
     queryKey: tonoPeriodicTelemetryEnabledQueryKey,
     queryFn: tonoPeriodicTelemetryEnabled,
   })
+  const { data: automaticDiagnosticsEnabled } = useQuery({
+    queryKey: tonoAutomaticDiagnosticsEnabledQueryKey,
+    queryFn: tonoAutomaticDiagnosticsEnabled,
+  })
   const { data: networkLogUploadEnabled } = useQuery({
     queryKey: tonoNetworkLogUploadEnabledQueryKey,
     queryFn: tonoNetworkLogUploadEnabled,
@@ -273,6 +327,17 @@ const PrivacyCard = () => {
       await tonoSetPeriodicTelemetryEnabled(value)
     } catch (error) {
       setCacheData(tonoPeriodicTelemetryEnabledQueryKey, previous)
+      showNotice.error(formatTonoActionError(error, t))
+    }
+  })
+
+  const handleAutomaticDiagnostics = useLockFn(async (value: boolean) => {
+    const previous = automaticDiagnosticsEnabled ?? true
+    setCacheData(tonoAutomaticDiagnosticsEnabledQueryKey, value)
+    try {
+      await tonoSetAutomaticDiagnosticsEnabled(value)
+    } catch (error) {
+      setCacheData(tonoAutomaticDiagnosticsEnabledQueryKey, previous)
       showNotice.error(formatTonoActionError(error, t))
     }
   })
@@ -324,6 +389,16 @@ const PrivacyCard = () => {
           checked={periodicTelemetryEnabled ?? false}
           onChange={(value) => void handlePeriodicTelemetry(value)}
           label={t('settings.sections.tono.periodicTelemetry.label')}
+        />
+      </Row>
+      <Row
+        label={t('settings.sections.tono.automaticDiagnostics.label')}
+        subtitle={t('settings.sections.tono.automaticDiagnostics.description')}
+      >
+        <TonoToggle
+          checked={automaticDiagnosticsEnabled ?? true}
+          onChange={(value) => void handleAutomaticDiagnostics(value)}
+          label={t('settings.sections.tono.automaticDiagnostics.label')}
         />
       </Row>
       <Row

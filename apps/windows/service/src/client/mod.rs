@@ -19,7 +19,7 @@ mod windows_identity;
 use crate::{
     AuthenticatedRequest, AuthenticatedSessionRequest, BootstrapPins, DirectRuntimeReloadResult,
     DnsProtectionStatus, FinalizeDirectRuntimeReloadRequest, IPC_AUTH_EXPECT, IPC_PATH, IpcCommand,
-    KillSwitchLockRequest, KillSwitchStatus, MacosProxyConfig,
+    ProtectionCommitRequest, ProtectionProof, KillSwitchLockRequest, KillSwitchStatus, MacosProxyConfig,
     OwnerCredentials, OwnerSessionProof, ProtocolInfo, ProtocolVersion, ProxyApplyOutcome,
     RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, ReplaceProxyEndpointsRequest,
     RuntimeBundle,
@@ -29,19 +29,11 @@ use crate::{
 
 static CLIENT_CONFIG: Lazy<Arc<RwLock<Option<IpcConfig>>>> =
     Lazy::new(|| Arc::new(RwLock::new(None)));
-/// Keep every Service IPC call off the application's Tauri runtime, and — the part that actually
-/// froze the app — keep the synchronous half of a connect off *any* runtime worker.
-/// `kode-bridge` opens the Windows named pipe and verifies the server process inline, in the
-/// middle of its async connect path and not through `spawn_blocking`. A Service parked inside a
-/// WFP/BFE kernel call parks whichever thread polls that future for as long as the wedge lasts,
-/// and a `tokio::time::timeout` wrapped around it can never fire, because the future never
-/// yields. Adding workers only bought more threads to lose.
-///
-/// Requests therefore run on this runtime's *blocking* pool (see [`run_ipc_request`]); its
-/// workers now only ever await a `JoinHandle`, so two are enough. `max_blocking_threads` bounds
-/// the damage of a Service that never answers: a parked blocking thread cannot be cancelled, so
-/// the cap is the ceiling on how many can be lost before further calls simply queue and fail on
-/// their own guard — degraded and visible, never a frozen application.
+/// Keep complete Service calls off the application's Tauri runtime. The vendor now awaits
+/// bounded native pipe-open workers, while this outer blocking pool also isolates any other
+/// synchronous work in serialization/platform glue. A guarded JoinHandle keeps a wedged call
+/// from starving UI workers. Requests and native connects both retain their existing caps;
+/// neither a cached client nor an unverified pooled pipe escapes this boundary.
 static IPC_RUNTIME: Lazy<std::result::Result<tokio::runtime::Runtime, String>> = Lazy::new(|| {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -74,13 +66,11 @@ const READ_REQUEST_ATTEMPTS: usize = 2;
 /// A mutating request is never replayed after an ambiguous transport failure. The Service may
 /// already have committed it even when its response was lost.
 const MUTATING_REQUEST_ATTEMPTS: usize = 1;
-/// A route's own timeout only begins to apply once the transport is connected; the connect
-/// itself is synchronous on Windows and outside every timeout. `kode-bridge` can repeat it at
-/// two levels (its own connect loop and its request retry executor), and a protected call makes
-/// two requests — the magic probe and the route — so a call performs at most
-/// `2 * READ_REQUEST_ATTEMPTS * READ_REQUEST_ATTEMPTS` server verifications. Each is capped by
-/// the verifier's own Service Control Manager deadline (see `windows_identity`), so this is the
-/// head-room a guard adds on top of the route timeout to cover that phase.
+/// Keep the existing outer head-room for IPC queueing, pipe-busy retries and bounded SCM
+/// verification. Windows business calls no longer send a separate Magic request: their actual
+/// request opens and verifies its own pipe before sending. The vendor now awaits its isolated
+/// native connect worker, so its request timeout can also fire during connection establishment.
+/// Removing redundant I/O is not a reason to shorten either timeout budget.
 const CONNECT_PHASE_BUDGET: Duration = Duration::from_secs(30);
 
 /// The out-of-band deadline for one whole call.
@@ -126,10 +116,10 @@ where
 /// Drive one complete IPC request — connect, verify, send, decode — on a blocking thread.
 ///
 /// The request is built and awaited on a private current-thread runtime owned by that thread,
-/// so the connect `kode-bridge` performs synchronously inside its async path can only ever park
-/// this one thread, never a shared worker. Everything the request owns — client, pool, any
-/// half-built connection — belongs to that runtime and is dropped with it, so a call that gives
-/// up on its guard cannot hand a partially verified connection to a later one.
+/// and any synchronous glue can only park this isolated thread, never an application worker.
+/// Everything the request owns — client, pool, any half-built connection — belongs to that
+/// runtime and is dropped with it, so a guard timeout cannot hand a partially verified
+/// connection to a later call. Native connect workers are separately bounded in the vendor.
 async fn run_ipc_request<T, F, Fut>(guard: Duration, request: F) -> Result<T>
 where
     F: FnOnce() -> Fut + Send + 'static,
@@ -256,7 +246,7 @@ where
     // kode-bridge retries transport errors by default. That is useful for reads, but unsafe for
     // lifecycle writes: a response can be lost after the Service committed, and an automatic
     // retry would execute the mutation again. Product-level callers own any deliberate retry.
-    let client = connect_with_max_retries(Some(verb.max_attempts())).await?;
+    let client = transport_client(Some(verb.max_attempts()), TransportUse::Request).await?;
     let body = match session {
         None => AuthenticatedRequest {
             credentials: credentials.clone(),
@@ -310,11 +300,28 @@ pub async fn set_config(config: Option<IpcConfig>) {
     *guard = config;
 }
 
-/// Build a verified transport. Callers must already be inside [`run_ipc_request`]: on Windows
-/// the pipe open and the server verification below happen synchronously inside `kode-bridge`,
-/// so this may only ever run on a blocking thread. It is not exported for that reason — a
-/// client handed out to an arbitrary runtime would carry that hazard with it.
-async fn connect_with_max_retries(max_retries: Option<usize>) -> Result<IpcHttpClient> {
+#[derive(Clone, Copy)]
+enum TransportUse {
+    Request,
+    Liveness,
+}
+
+impl TransportUse {
+    const fn needs_magic(self, windows: bool) -> bool {
+        // Windows verifies the actual connected pipe for EVERY request; an earlier Magic
+        // proves nothing about that later pipe. Unix retains its existing probe behavior.
+        matches!(self, Self::Liveness) || !windows
+    }
+}
+
+/// Build a transport whose actual Windows sends verify the connected pipe's PID against SCM.
+/// Production callers keep transport ownership inside [`run_ipc_request`]. No verified client
+/// or connected pipe is cached across requests; the vendor disables its unverified pool when
+/// the server verifier is configured.
+async fn transport_client(
+    max_retries: Option<usize>,
+    purpose: TransportUse,
+) -> Result<IpcHttpClient> {
     debug!("Connecting to IPC at {}", IPC_PATH);
 
     #[cfg(unix)]
@@ -347,26 +354,15 @@ async fn connect_with_max_retries(max_retries: Option<usize>) -> Result<IpcHttpC
         },
     )?;
 
-    // Explicitly budgeted, not left to `default_timeout`.
-    //
-    // This handshake is where the connect actually happens: `CreateFileW` on the pipe, the
-    // `ERROR_PIPE_BUSY` retry loop, and `windows_identity::verify_registered_service_process_id`,
-    // which queries the SCM about the process on the other end under its own 3 s fail-closed
-    // deadline. `call_guard` already reserves `CONNECT_PHASE_BUDGET` on top of every route
-    // timeout for exactly this phase — but the request itself fell through to the App's
-    // `IpcConfig::default_timeout`, 150 ms, a value chosen for a startup polling loop. The
-    // reserved head-room could never be spent, so a connect slower than 150 ms failed the
-    // handshake and the route was never sent.
-    //
-    // Mutating verbs get `MUTATING_REQUEST_ATTEMPTS = 1`, so that single miss is the whole
-    // call: kill-switch release, restrict-bootstrap, dns/restore and clash/stop are the
-    // routes that broke first, and they are the ones that must work when the Service is
-    // parked inside a BFE call — which is the exact condition the SCM deadline exists for,
-    // and the condition in which the machine has no network and the UI cannot leave
-    // Protected Offline.
-    //
-    // The ceiling is a backstop, not a wait: the verifier fails closed at 3 s and the
-    // pipe-busy loop caps at 10 x 50 ms, so a real failure still returns in about 3.5 s.
+    if purpose.needs_magic(cfg!(windows)) {
+        probe_liveness(&client).await?;
+    }
+    Ok(client)
+}
+
+async fn probe_liveness(client: &IpcHttpClient) -> Result<()> {
+    // Pure liveness callers still need an actual, verified request. Keep the original connect
+    // budget: constructing a client is not evidence that the Service is reachable.
     if let Err(e) = client
         .get(IpcCommand::Magic.as_ref())
         .header(IPC_AUTH_HEADER_KEY, IPC_AUTH_EXPECT)
@@ -377,19 +373,14 @@ async fn connect_with_max_retries(max_retries: Option<usize>) -> Result<IpcHttpC
         warn!("Failed to connect to IPC server: {}", e);
         return Err(anyhow::anyhow!("Failed to connect to IPC server: {}", e));
     }
-
-    Ok(client)
+    Ok(())
 }
 
-/// Liveness probe: prove a verified transport can be built, and drop it again.
-///
-/// The client itself is deliberately never handed out (see [`connect_with_max_retries`]) — on
-/// Windows its connect is synchronous, so a client living on an arbitrary runtime would carry
-/// that hazard with it. Building and dropping one inside [`run_ipc_request`] answers "is the
-/// Service reachable" without exporting the hazard.
+/// Liveness-only probe. Unlike a business call, this MUST send Magic rather than merely build
+/// a client. The verified transport is then dropped inside the isolated request runtime.
 pub async fn connect() -> Result<()> {
     run_ipc_request(call_guard(Some(STATUS_TIMEOUT)), || async {
-        connect_with_max_retries(Some(READ_REQUEST_ATTEMPTS))
+        transport_client(Some(READ_REQUEST_ATTEMPTS), TransportUse::Liveness)
             .await
             .map(drop)
     })
@@ -399,11 +390,11 @@ pub async fn connect() -> Result<()> {
 /// Integration-test transport for the `/__test/*` routes, which have no typed wrapper.
 ///
 /// Test-gated on purpose: this hands out the client the production API deliberately does not,
-/// and it is sound only because the integration suite runs on unix sockets where the connect is
-/// not synchronous. It must never become reachable from a shipping build.
+/// with the suite's own non-production endpoints. It must never become reachable from a
+/// shipping build; production clients remain inside the isolated request runtime.
 #[cfg(feature = "test")]
 pub async fn test_client() -> Result<IpcHttpClient> {
-    connect_with_max_retries(Some(READ_REQUEST_ATTEMPTS)).await
+    transport_client(Some(READ_REQUEST_ATTEMPTS), TransportUse::Liveness).await
 }
 
 pub async fn get_version() -> Result<Response<ProtocolInfo>> {
@@ -413,10 +404,11 @@ pub async fn get_version() -> Result<Response<ProtocolInfo>> {
 async fn get_version_inner() -> Result<Response<ProtocolInfo>> {
     // Startup retry/backoff belongs to `RunState::await_ready`; keep each probe bounded so it
     // cannot monopolize the isolated IPC runtime.
-    let client = connect_with_max_retries(Some(READ_REQUEST_ATTEMPTS)).await?;
+    let client = transport_client(Some(READ_REQUEST_ATTEMPTS), TransportUse::Request).await?;
     let response = client
         .get(IpcCommand::GetVersion.as_ref())
         .header(IPC_AUTH_HEADER_KEY, IPC_AUTH_EXPECT)
+        .timeout(STATUS_TIMEOUT)
         .send()
         .await?
         .json::<Response<ProtocolInfo>>()?;
@@ -574,6 +566,15 @@ pub async fn mark_kill_switch_verified(
         Some(LIFECYCLE_TIMEOUT),
     )
     .await
+}
+
+/// Fresh proof opt-in. Old Services reject the non-null payload; never accept their
+/// legacy empty reply or a cached status as a substitute for this receipt.
+pub async fn verify_and_commit_protection(
+    credentials: &OwnerCredentials, session: &OwnerSessionProof, request: ProtectionCommitRequest,
+) -> Result<Response<ProtectionProof>> {
+    protected_call(Verb::Post, IpcCommand::MarkKillSwitchVerified, credentials,
+        Some(session), Some(request), Some(LIFECYCLE_TIMEOUT)).await
 }
 
 /// `POST /kill-switch/restrict-bootstrap`: drop back to block-all plus the bounded bootstrap
@@ -858,14 +859,49 @@ pub async fn set_system_proxy(
 mod retry_safety_tests {
     use super::{
         CONNECT_PHASE_BUDGET, LIFECYCLE_TIMEOUT, LOG_FETCH_TIMEOUT, MUTATING_REQUEST_ATTEMPTS,
-        READ_REQUEST_ATTEMPTS, STATUS_TIMEOUT, Verb, call_guard, run_blocking, run_ipc_request,
-        run_with_deadline,
+        READ_REQUEST_ATTEMPTS, STATUS_TIMEOUT, TransportUse, Verb, call_guard, run_blocking,
+        run_ipc_request, run_with_deadline,
     };
     use std::sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     };
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn windows_business_calls_skip_only_the_redundant_magic_request() {
+        assert!(!TransportUse::Request.needs_magic(true));
+        assert!(TransportUse::Liveness.needs_magic(true));
+        assert!(TransportUse::Request.needs_magic(false));
+        assert!(TransportUse::Liveness.needs_magic(false));
+    }
+
+    #[test]
+    fn windows_request_transport_keeps_its_actual_pipe_verifier() {
+        let source = include_str!("mod.rs");
+        let transport = source
+            .split("async fn transport_client(")
+            .nth(1)
+            .unwrap()
+            .split("async fn probe_liveness(")
+            .next()
+            .unwrap();
+        assert!(transport.contains("#[cfg(all(windows, not(feature = \"test\")))]"));
+        assert!(transport.contains("windows_server_pid_verifier: Some("));
+        assert!(transport.contains("windows_identity::verify_registered_service_process_id"));
+        assert!(transport.contains("purpose.needs_magic(cfg!(windows))"));
+        let route = source
+            .split("async fn protected_call_inner<")
+            .nth(1)
+            .unwrap()
+            .split("#[derive(Debug, Clone)]")
+            .next()
+            .unwrap();
+        assert!(route.contains("TransportUse::Request"));
+        assert!(route.contains("let request = protected("));
+        assert!(route.contains(".json_body(&body)"));
+        assert!(!route.contains("IpcCommand::Magic"));
+    }
 
     #[test]
     fn only_reads_are_safe_for_automatic_transport_retry() {
@@ -889,9 +925,8 @@ mod retry_safety_tests {
 
     #[test]
     fn a_guard_always_outwaits_the_timeout_the_request_carries() {
-        // The guard is a backstop for the window in which the request's own timeout cannot be
-        // enforced — the synchronous connect. It must never be the thing that gives up first on
-        // a mutating call the Service is still executing normally.
+        // Keep guard head-room even now that native connect yields. Queueing or synchronous
+        // glue must not cause a shorter effective mutation budget after removing Magic.
         assert!(call_guard(Some(LIFECYCLE_TIMEOUT)) > LIFECYCLE_TIMEOUT);
         assert!(call_guard(Some(STATUS_TIMEOUT)) > STATUS_TIMEOUT);
         assert!(call_guard(None) > LIFECYCLE_TIMEOUT);

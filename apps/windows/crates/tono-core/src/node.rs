@@ -3,13 +3,18 @@
 //! A catalog node is usable only if every rule holds: VLESS over TLS with
 //! Reality, a valid UUID, `xtls-rprx-vision` flow (when present), TCP
 //! carrier (when present), no skip-cert-verify, and a public IPv4 literal
-//! server. Only whitelisted fields survive into [`ValidatedNode`]; every
-//! other byte of server YAML is discarded.
+//! server. An optional, closed `tono-hysteria2` extension adds a verified-TLS
+//! UDP carrier on that same VPS; VLESS remains the backward-compatible primary.
+//! Only whitelisted fields survive into [`ValidatedNode`]; every other byte of
+//! server YAML is discarded (unknown fields inside the extension are rejected).
 
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::net::Ipv4Addr;
 use thiserror::Error;
+
+mod hysteria2;
+pub use hysteria2::{ExitTransport, Hysteria2Endpoint};
 
 /// Name of the single select group in the owned runtime (§5).
 pub const EXIT_GROUP_NAME: &str = "Tono-Exit";
@@ -75,6 +80,10 @@ pub enum NodeRejection {
     BadPort,
     #[error("server must be a public IPv4 literal")]
     ServerNotPublicIpv4,
+    #[error("invalid tono-hysteria2 endpoint (fixed UDP port, verified TLS and bounded credentials required)")]
+    BadHysteria2,
+    #[error("the selected server does not offer Hysteria2 UDP; select TCP or a UDP-capable server")]
+    TransportUnavailable,
     #[error("catalog holds more than {MAX_CATALOG_NODES} nodes")]
     TooManyNodes,
     #[error("node name is duplicated or reserved: {0}")]
@@ -99,6 +108,8 @@ pub struct ValidatedNode {
     pub client_fingerprint: Option<String>,
     pub reality_public_key: String,
     pub reality_short_id: String,
+    /// Optional first-hop alternative on this same VPS. Never a residential hop.
+    pub hysteria2: Option<Hysteria2Endpoint>,
 }
 
 impl ValidatedNode {
@@ -293,6 +304,7 @@ pub fn admit_node(value: &serde_yaml_ng::Value) -> Result<ValidatedNode, NodeRej
         client_fingerprint,
         reality_public_key: public_key.to_string(),
         reality_short_id: short_id.to_string(),
+        hysteria2: hysteria2::admit(value.get("tono-hysteria2"))?,
     })
 }
 

@@ -483,6 +483,9 @@
     },
     "general": {
       "title": "通用",
+      "transport": "连接协议",
+      "transportHint": "只改变到所选 VPS 的传输；家宽分流与保护不变。请先断开再更改。",
+      "transportUnavailable": "所选节点尚未提供 UDP 入口，继续使用 TCP；不会自动换节点。",
       "launchAtStartup": "开机自启",
       "launchAtStartupHint": "第一次连上后会打开，可随时关掉。",
       "language": "界面语言"

@@ -11,7 +11,7 @@ use serde_yaml_ng::{Mapping, Value};
 use thiserror::Error;
 
 use crate::catalog::CatalogHomeSocks5;
-use crate::node::{EXIT_GROUP_NAME, NodeRejection, ValidatedNode, validate_node_set};
+use crate::node::{EXIT_GROUP_NAME, ExitTransport, NodeRejection, ValidatedNode, validate_node_set};
 
 pub const MIXED_PORT: u16 = 28990;
 pub const EXTERNAL_CONTROLLER: &str = "127.0.0.1:9090";
@@ -482,17 +482,10 @@ pub fn build_owned_runtime(
 /// Build the owned runtime with listeners chosen for this connection generation. This removes
 /// the fixed 7890/9090 collision without allowing cloud/user configuration to choose a bind.
 ///
-/// `home_proxy` is the catalog's verified `homeProxy` routing directive: when it names one of
-/// `nodes`, Claude processes and the Claude/Anthropic domains exit through a dedicated
-/// `Tono-Claude-Home` group holding that node alone, and the node's address joins the TUN
-/// route exclusions so Mihomo's second Reality socket stays out of the tunnel. A name not in
-/// `nodes` (stale caller) is rejected rather than silently changing the final egress.
-///
-/// `home_socks5` is the catalog's verified `homeSocks5` directive and takes precedence over
-/// `home_proxy` (mirroring [`crate::catalog::sanitize_routing`]): the group then holds a
-/// chained SOCKS5 outbound that dials the residential upstream through the user's selected
-/// node (`dialer-proxy: Tono-Exit`). The upstream stays inside the tunnel, so it joins
-/// neither the TUN route exclusions nor the WFP permit set.
+/// `home_proxy` is retained only to reject legacy assignments explicitly.
+/// `home_socks5` emits one SOCKS5 outbound with `dialer-proxy: Tono-Exit`.
+/// Only specified AI TCP traffic uses it; other traffic stays on the selected
+/// VPS. The residential upstream never joins TUN exclusions or WFP permits.
 pub fn build_owned_runtime_with_ports(
     nodes: &[ValidatedNode],
     selected: &str,
@@ -501,6 +494,22 @@ pub fn build_owned_runtime_with_ports(
     home_proxy: Option<&str>,
     home_socks5: Option<&CatalogHomeSocks5>,
     ports: RuntimePorts,
+) -> Result<OwnedRuntime, ConfigError> {
+    build_owned_runtime_with_transport(nodes, selected, secret, direct, home_proxy, home_socks5, ports, ExitTransport::RealityTcp)
+}
+
+/// First-hop carrier only. All routing, protected DNS and residential-chain rules
+/// are identical across transports. Unsupported selections fail explicitly;
+/// unsupported *other* nodes are not offered by this runtime's select group.
+pub fn build_owned_runtime_with_transport(
+    nodes: &[ValidatedNode],
+    selected: &str,
+    secret: &str,
+    direct: Option<&DirectPlan>,
+    home_proxy: Option<&str>,
+    home_socks5: Option<&CatalogHomeSocks5>,
+    ports: RuntimePorts,
+    transport: ExitTransport,
 ) -> Result<OwnedRuntime, ConfigError> {
     if ports.controller_port == 0 {
         return Err(ConfigError::RuntimePorts(
@@ -518,6 +527,7 @@ pub fn build_owned_runtime_with_ports(
         .iter()
         .find(|node| node.name == selected)
         .ok_or_else(|| ConfigError::MissingSelection(selected.to_string()))?;
+    selected_node.transport_port(transport)?;
     crate::catalog::validate_residential_routing(
         &crate::catalog::CatalogRouting {
             home_proxy: home_proxy.map(str::to_owned),
@@ -526,19 +536,7 @@ pub fn build_owned_runtime_with_ports(
         },
         nodes,
     ).map_err(|_| ConfigError::ResidentialRouteUnavailable)?;
-    // `home_socks5` wins over `home_proxy`: a catalog home node is ignored
-    // while a chained residential upstream is in force.
-    let home_node = if home_socks5.is_some() {
-        None
-    } else {
-        home_proxy.and_then(|name| nodes.iter().find(|node| node.name == name))
-    };
-    let mut route_exclusions = vec![format!("{}/32", selected_node.server)];
-    if let Some(home) = home_node
-        && home.server != selected_node.server
-    {
-        route_exclusions.push(format!("{}/32", home.server));
-    }
+    let route_exclusions = vec![format!("{}/32", selected_node.server)];
 
     if let Some(plan) = direct {
         DirectPlan::validate_physical_interface(&plan.physical_interface)?;
@@ -562,16 +560,18 @@ pub fn build_owned_runtime_with_ports(
         }
     }
 
+    let transport_nodes: Vec<_> = nodes.iter()
+        .filter(|node| node.supports_transport(transport)).collect();
     let yaml = serde_yaml_ng::to_string(&runtime_value(
-        nodes,
+        &transport_nodes,
         selected,
         secret,
         &route_exclusions,
         direct,
-        home_node,
         home_socks5,
         ports,
-    ))
+        transport,
+    )?)
     .map_err(|err| ConfigError::Node(NodeRejection::Malformed(err.to_string())))?;
     Ok(OwnedRuntime {
         yaml: quote_block_sequence_scalars_with_flow_indicators(&yaml),
@@ -627,7 +627,8 @@ impl OwnedRuntime {
     }
 }
 
-/// Blank the top-level `secret` key. Returns the input unchanged if it is
+/// Blank the top-level `secret` and Hysteria2 authentication/obfuscation secrets.
+/// Returns the input unchanged if it is
 /// not a YAML mapping (never the case for [`build_owned_runtime`] output).
 pub fn redact_secret(runtime_yaml: &str) -> String {
     let Ok(mut value) = serde_yaml_ng::from_str::<Value>(runtime_yaml) else {
@@ -637,6 +638,15 @@ pub fn redact_secret(runtime_yaml: &str) -> String {
         let key = Value::String("secret".to_string());
         if mapping.contains_key(&key) {
             mapping.insert(key, Value::String(String::new()));
+        }
+        if let Some(proxies) = mapping.get_mut(Value::String("proxies".into())).and_then(Value::as_sequence_mut) {
+            for proxy in proxies {
+                if proxy.get("type").and_then(Value::as_str) == Some("hysteria2") {
+                    for key in ["password", "obfs-password"] {
+                        if let Some(value) = proxy.get_mut(key) { *value = Value::String(String::new()); }
+                    }
+                }
+            }
         }
     }
     let yaml = serde_yaml_ng::to_string(&value).unwrap_or_else(|_| runtime_yaml.to_string());
@@ -689,15 +699,15 @@ fn home_socks5_outbound(socks5: &CatalogHomeSocks5) -> Value {
 }
 
 fn runtime_value(
-    nodes: &[ValidatedNode],
+    nodes: &[&ValidatedNode],
     selected: &str,
     secret: &str,
     route_exclusions: &[String],
     direct: Option<&DirectPlan>,
-    home: Option<&ValidatedNode>,
     home_socks5: Option<&CatalogHomeSocks5>,
     ports: RuntimePorts,
-) -> Value {
+    transport: ExitTransport,
+) -> Result<Value, NodeRejection> {
     let mut root = Mapping::new();
     // Extra listeners stay disabled (macOS owned-runtime parity); the only
     // ingress is the mixed port below, bound locally.
@@ -820,8 +830,8 @@ fn runtime_value(
     // parity; honored where the core build supports it).
     put(&mut tun, "disable-icmp-forwarding", Value::Bool(true));
     put(&mut tun, "dns-hijack", strings(&["any:53", "tcp://any:53"]));
-    // Keeps Mihomo's own Reality sockets out of the tunnel: the selected
-    // node's address, plus the home node's when split routing is in force.
+    // Only the selected VPS carrier is excluded; the residential SOCKS5 hop
+    // always traverses that VPS and never gains a physical route exception.
     put(
         &mut tun,
         "route-exclude-address",
@@ -831,8 +841,8 @@ fn runtime_value(
 
     let mut proxies: Vec<Value> = nodes
         .iter()
-        .map(|node| Value::Mapping(node.to_runtime_mapping()))
-        .collect();
+        .map(|node| node.to_runtime_mapping_for(transport).map(Value::Mapping))
+        .collect::<Result<_, _>>()?;
     if let Some(socks5) = home_socks5 {
         proxies.push(home_socks5_outbound(socks5));
     }
@@ -892,19 +902,6 @@ fn runtime_value(
             Value::Sequence(vec![string(HOME_SOCKS5_OUTBOUND_NAME)]),
         );
         groups.push(Value::Mapping(home_group));
-    } else if let Some(home) = home {
-        // Claude split routing: a dedicated group holding exactly the bound
-        // home-broadband node, so the Claude rules below cannot follow the
-        // user's Tono-Exit selection.
-        let mut home_group = Mapping::new();
-        put(&mut home_group, "name", string(CLAUDE_HOME_GROUP_NAME));
-        put(&mut home_group, "type", string("select"));
-        put(
-            &mut home_group,
-            "proxies",
-            Value::Sequence(vec![string(&home.name)]),
-        );
-        groups.push(Value::Mapping(home_group));
     }
     put(&mut root, "proxy-groups", Value::Sequence(groups));
 
@@ -913,7 +910,7 @@ fn runtime_value(
         .iter()
         .map(|rule| rule.to_string())
         .collect();
-    if home.is_some() || home_socks5.is_some() {
+    if home_socks5.is_some() {
         // TCP-scoped on purpose: these pins sit ahead of the UDP REJECT row,
         // and a network-agnostic Claude pin would swallow UDP into a group
         // that cannot carry it (Vision) — Mihomo's fallback for that is a
@@ -1046,12 +1043,9 @@ fn runtime_value(
             }
         }
     }
-    // Every node is VLESS+Vision today, and Vision cannot carry UDP — Mihomo
-    // marks the exit group "UDP is not supported" and *falls back to a
-    // ruleless DIRECT dial*, leaking the physical egress (QUIC, Discord
-    // STUN, …). Reject all non-pinned UDP instead: whitelisted WeChat media
-    // already matched its pins above, everything else must fail over to TCP
-    // rather than leave the machine. Revisit when nodes speak UoT.
+    // Payload UDP policy stays unchanged even with a QUIC first-hop carrier.
+    // Reviewed media pins already matched above; AI UDP must never bypass the
+    // TCP-only residential hop, nor may unsupported UDP fall through to DIRECT.
     rules.push("AND,((NETWORK,UDP)),REJECT".to_string());
     rules.push(RULES[RULES.len() - 1].to_string());
     put(
@@ -1059,7 +1053,7 @@ fn runtime_value(
         "rules",
         Value::Sequence(rules.iter().map(|rule| string(rule)).collect()),
     );
-    Value::Mapping(root)
+    Ok(Value::Mapping(root))
 }
 
 #[cfg(test)]
@@ -1121,7 +1115,6 @@ reality-opts:
         // Claude/CDN/browser rows unattributed; cloud-only `off` never looks up.
         for runtime in [
             build(),
-            build_with_home(Some("US Reality 01")),
             build_with_home_socks5(Some(&home_socks5())),
         ] {
             assert_eq!(
@@ -1778,8 +1771,8 @@ reality-opts:
             "JP Reality 02",
             "test-secret",
             Some(&plan),
-            Some("US Reality 01"),
             None,
+            Some(&home_socks5()),
             RuntimePorts::default(),
         )
         .expect("home runtime");
@@ -1804,7 +1797,7 @@ reality-opts:
             .iter()
             .map(|entry| entry.as_str().unwrap())
             .collect();
-        assert_eq!(home_choices, ["US Reality 01"]);
+        assert_eq!(home_choices, [HOME_SOCKS5_OUTBOUND_NAME]);
 
         // Without the signed native path discovery there is no address-free
         // WFP permit, so the same suffix remains tunnelled.
@@ -1936,7 +1929,7 @@ reality-opts:
 
     #[test]
     fn process_path_regex_rules_are_quoted_yaml_scalars() {
-        let runtime = build_with_home(Some("US Reality 01"));
+        let runtime = build_with_home_socks5(Some(&home_socks5()));
         let yaml = runtime.yaml();
         let mut saw_path_regex = false;
         for line in yaml.lines() {
@@ -2355,6 +2348,98 @@ reality-opts:
         }
     }
 
+    fn dual_transport_nodes() -> Vec<ValidatedNode> {
+        three_nodes().into_iter().map(|node| {
+            let mut value = Value::Mapping(node.to_runtime_mapping());
+            value["tono-hysteria2"] = serde_yaml_ng::from_str(
+                "port: 8443\npassword: synthetic-hy2-auth\nsni: udp.example.com\nobfs-password: synthetic-hy2-obfs\n",
+            ).unwrap();
+            admit_node(&value).unwrap()
+        }).collect()
+    }
+
+    #[test]
+    fn hysteria2_is_only_a_first_hop_change_with_or_without_home_and_direct() {
+        let nodes = dual_transport_nodes();
+        for home in [None, Some(home_socks5())] {
+            for direct in [None, Some(direct_plan())] {
+                let make = |transport| build_owned_runtime_with_transport(&nodes, "JP Reality 02", "synthetic-controller",
+                    direct.as_ref(), None, home.as_ref(), RuntimePorts::default(), transport).unwrap();
+                let tcp = parsed(&make(ExitTransport::RealityTcp));
+                let udp = parsed(&make(ExitTransport::Hysteria2Udp));
+                for (key, value) in tcp.as_mapping().unwrap() {
+                    if key.as_str() != Some("proxies") { assert_eq!(value, &udp[key], "only carrier proxies may change"); }
+                }
+                let tcp_proxies = tcp["proxies"].as_sequence().unwrap();
+                let udp_proxies = udp["proxies"].as_sequence().unwrap();
+                assert_eq!(tcp_proxies.len(), udp_proxies.len());
+                for (tcp, udp) in tcp_proxies.iter().zip(udp_proxies) {
+                    if tcp["type"].as_str() != Some("vless") { assert_eq!(tcp, udp); continue; }
+                    assert_eq!(udp["type"].as_str(), Some("hysteria2"));
+                    assert_eq!(tcp["name"], udp["name"]);
+                    assert_eq!(tcp["server"], udp["server"]);
+                    assert_eq!(udp["port"].as_u64(), Some(8443));
+                    assert_eq!(udp["skip-cert-verify"], Value::Bool(false));
+                    assert!(udp.get("ports").is_none() && udp.get("dialer-proxy").is_none());
+                }
+                // Generic app UDP remains rejected; QUIC here is a *carrier*, not
+                // permission for AI UDP to escape its TCP-only SOCKS5 chain.
+                let rules = udp["rules"].as_sequence().unwrap();
+                assert_eq!(rules[rules.len() - 2].as_str(), Some("AND,((NETWORK,UDP)),REJECT"));
+                let redacted = make(ExitTransport::Hysteria2Udp).redacted_yaml();
+                for secret in ["synthetic-controller", "synthetic-hy2-auth", "synthetic-hy2-obfs"] {
+                    assert!(!redacted.contains(secret));
+                }
+                // Optional offline parser fixture, synthetic credentials only.
+                // The operator runs `mihomo -t`, never starts this TUN on macOS.
+                if let Some(dir) = std::env::var_os("TONO_HYSTERIA2_RUNTIME_TEST_DIR") {
+                    let path = std::path::Path::new(&dir).join(format!("home-{}-direct-{}.yaml", home.is_some(), direct.is_some()));
+                    std::fs::write(path, make(ExitTransport::Hysteria2Udp).yaml()).unwrap();
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn adding_udp_descriptor_does_not_change_default_tcp_runtime() {
+        assert_eq!(build_owned_runtime(&three_nodes(), "JP Reality 02", "s", None).unwrap().yaml(),
+            build_owned_runtime(&dual_transport_nodes(), "JP Reality 02", "s", None).unwrap().yaml());
+    }
+
+    #[test]
+    fn unsupported_udp_selection_is_not_silently_tcp_and_group_has_no_tcp_fallbacks() {
+        let mut nodes = dual_transport_nodes();
+        let missing = nodes[0].name.clone();
+        nodes[0].hysteria2 = None;
+        let build = |name| build_owned_runtime_with_transport(&nodes, name, "s", None, None, None,
+            RuntimePorts::default(), ExitTransport::Hysteria2Udp);
+        assert_eq!(build(&missing).unwrap_err(), ConfigError::Node(NodeRejection::TransportUnavailable));
+        let runtime = parsed(&build("JP Reality 02").unwrap());
+        assert!(runtime["proxies"].as_sequence().unwrap().iter().all(|p| p["type"].as_str() == Some("hysteria2")));
+        assert!(!runtime["proxy-groups"][0]["proxies"].as_sequence().unwrap().iter().any(|p| p.as_str() == Some(&missing)));
+    }
+
+    #[test]
+    fn malformed_residential_assignment_also_fails_closed_over_udp() {
+        let mut home = home_socks5(); home.password.clear();
+        for legacy in [None, Some("US Reality 01")] {
+            assert_eq!(build_owned_runtime_with_transport(&dual_transport_nodes(), "JP Reality 02", "s", None,
+                legacy, Some(&home), RuntimePorts::default(), ExitTransport::Hysteria2Udp).unwrap_err(),
+                ConfigError::ResidentialRouteUnavailable);
+        }
+    }
+
+    #[test]
+    fn inactive_carrier_rotation_does_not_force_active_session_replacement() {
+        let old = dual_transport_nodes().remove(0);
+        let mut updated = old.clone(); updated.hysteria2 = None;
+        assert!(old.same_transport_endpoint(&updated, ExitTransport::RealityTcp));
+        assert!(!old.same_transport_endpoint(&updated, ExitTransport::Hysteria2Udp));
+        let mut updated = old.clone(); updated.uuid = "00000000-0000-4000-8000-000000000001".into();
+        assert!(old.same_transport_endpoint(&updated, ExitTransport::Hysteria2Udp));
+        assert!(!old.same_transport_endpoint(&updated, ExitTransport::RealityTcp));
+    }
+
     #[test]
     fn no_home_build_is_byte_identical_to_the_plain_build() {
         assert_eq!(build_with_home(None).yaml(), build().yaml());
@@ -2375,95 +2460,15 @@ reality-opts:
     }
 
     #[test]
-    fn home_build_adds_the_dedicated_group_rules_and_route_exclusion() {
-        let value = parsed(&build_with_home(Some("US Reality 01")));
-        assert_eq!(get(&value, &["find-process-mode"]).as_str(), Some("always"));
-
-        let groups = get(&value, &["proxy-groups"]).as_sequence().unwrap();
-        assert_eq!(groups.len(), 2);
-        assert_eq!(groups[0][string("name")].as_str(), Some("Tono-Exit"));
-        let exit_choices: Vec<&str> = groups[0][string("proxies")]
-            .as_sequence()
-            .unwrap()
-            .iter()
-            .map(|entry| entry.as_str().unwrap())
-            .collect();
-        assert_eq!(exit_choices, ["JP Reality 02", "US Reality 01", "SG Reality 03"]);
-        assert_eq!(groups[1][string("name")].as_str(), Some("Tono-Claude-Home"));
-        assert_eq!(groups[1][string("type")].as_str(), Some("select"));
-        let home_choices: Vec<&str> = groups[1][string("proxies")]
-            .as_sequence()
-            .unwrap()
-            .iter()
-            .map(|entry| entry.as_str().unwrap())
-            .collect();
-        assert_eq!(home_choices, ["US Reality 01"]);
-
-        let rules: Vec<&str> = get(&value, &["rules"])
-            .as_sequence()
-            .unwrap()
-            .iter()
-            .map(|rule| rule.as_str().unwrap())
-            .collect();
-        assert_eq!(
-            rules,
-            expected_home_only_rules()
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>()
-        );
-
-        // Both Reality sockets stay out of the tunnel: selected (1.1.1.1)
-        // first, then the home node (8.8.8.8).
-        assert_eq!(
-            get(&value, &["tun", "route-exclude-address"])
-                .as_sequence()
-                .unwrap(),
-            &vec![string("1.1.1.1/32"), string("8.8.8.8/32")]
-        );
-    }
-
-    #[test]
-    fn home_equal_to_the_selected_node_adds_no_second_route_exclusion() {
-        let value = parsed(&build_with_home(Some("JP Reality 02")));
-        let groups = get(&value, &["proxy-groups"]).as_sequence().unwrap();
-        assert_eq!(groups.len(), 2, "the dedicated group still exists");
-        assert_eq!(
-            get(&value, &["tun", "route-exclude-address"])
-                .as_sequence()
-                .unwrap(),
-            &vec![string("1.1.1.1/32")]
-        );
-    }
-
-    #[test]
-    fn home_build_with_direct_plan_replaces_the_bare_process_pins() {
-        let runtime = build_owned_runtime_with_ports(
-            &three_nodes(),
-            "JP Reality 02",
-            "test-secret",
-            Some(&direct_plan()),
-            Some("US Reality 01"),
-            None,
-            RuntimePorts::default(),
-        )
-        .unwrap();
-        let value = parsed(&runtime);
-        let rules: Vec<&str> = get(&value, &["rules"])
-            .as_sequence()
-            .unwrap()
-            .iter()
-            .map(|rule| rule.as_str().unwrap())
-            .collect();
-        // The home pins take the bare PROCESS-NAME slot, ahead of the DIRECT
-        // pins; no Claude rule may keep targeting Tono-Exit.
-        assert_eq!(
-            rules,
-            expected_home_with_direct_rules()
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>()
-        );
+    fn legacy_home_proxy_is_rejected_even_if_the_node_exists() {
+        for selected in ["JP Reality 02", "US Reality 01"] {
+            for direct in [None, Some(direct_plan())] {
+                assert_eq!(build_owned_runtime_with_ports(
+                    &three_nodes(), selected, "s", direct.as_ref(),
+                    Some("US Reality 01"), None, RuntimePorts::default(),
+                ).unwrap_err(), ConfigError::ResidentialRouteUnavailable);
+            }
+        }
     }
 
     // ---- Claude→residential SOCKS5 split routing ----
@@ -2544,34 +2549,11 @@ reality-opts:
     }
 
     #[test]
-    fn home_socks5_takes_precedence_over_home_proxy() {
-        let socks5 = home_socks5();
-        let runtime = build_owned_runtime_with_ports(
-            &three_nodes(),
-            "JP Reality 02",
-            "test-secret",
-            None,
-            Some("US Reality 01"),
-            Some(&socks5),
-            RuntimePorts::default(),
-        )
-        .unwrap();
-        let value = parsed(&runtime);
-        let groups = get(&value, &["proxy-groups"]).as_sequence().unwrap();
-        let home_choices: Vec<&str> = groups[1][string("proxies")]
-            .as_sequence()
-            .unwrap()
-            .iter()
-            .map(|entry| entry.as_str().unwrap())
-            .collect();
-        assert_eq!(home_choices, [HOME_SOCKS5_OUTBOUND_NAME]);
-        // The ignored catalog home node (8.8.8.8) earns no route exclusion.
-        assert_eq!(
-            get(&value, &["tun", "route-exclude-address"])
-                .as_sequence()
-                .unwrap(),
-            &vec![string("1.1.1.1/32")]
-        );
+    fn mixed_legacy_and_socks_assignment_is_rejected_not_arbitrated() {
+        assert_eq!(build_owned_runtime_with_ports(
+            &three_nodes(), "JP Reality 02", "s", None, Some("US Reality 01"),
+            Some(&home_socks5()), RuntimePorts::default(),
+        ).unwrap_err(), ConfigError::ResidentialRouteUnavailable);
     }
 
     #[test]

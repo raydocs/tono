@@ -9,6 +9,7 @@ use crate::core::desired::{
 };
 use crate::core::legacy_cleanup::cleanup_legacy_owner_files;
 use crate::core::logger::set_or_update_writer;
+use crate::core::local_timing;
 use crate::core::macos_kill_switch;
 use crate::core::manager::{CORE_MANAGER, LOGGER_MANAGER};
 use crate::core::operation::OperationGuard;
@@ -65,8 +66,8 @@ const IPC_SHUTDOWN_DONE_TIMEOUT: Duration = Duration::from_secs(5);
 /// a bound. The real bounds are the per-call timeouts inside the subsystems (DNS/WFP engine calls,
 /// the authentication probe, the atomic replace, the cleanup walk).
 ///
-/// It is generous because the work behind one step is: DNS enable/restore walk every adapter and
-/// fire a (possibly cold-start) PowerShell CIM call per adapter, with one retry each.
+/// Native DNS, WFP, process and SCM work have their own implementation budgets. This advertised
+/// window neither describes the old PowerShell/CIM ladder nor measures a healthy connect.
 const IPC_HANDLER_TIMEOUT: Duration = Duration::from_secs(60);
 /// Bounds for the rotation numbers in a client-supplied [`WriterConfig`].
 ///
@@ -82,7 +83,8 @@ const MAX_LOG_FILES: usize = 32;
 /// [`OperationGuard`] while detached `spawn_blocking` work (WFP transactions, PowerShell DNS
 /// mutation) keeps running, letting a later privileged mutation interleave with it. Kept far
 /// above the worst bounded handler path so the transport never cancels a mutating handler;
-/// the per-step [`IPC_HANDLER_TIMEOUT`] budgets stay the real bound. The client's
+/// subsystem-specific timeouts remain authoritative; [`IPC_HANDLER_TIMEOUT`] is only a status
+/// hint, not a cancellation timer. The client's
 /// `LIFECYCLE_TIMEOUT` (65s) may now expire while a handler still runs — that is the
 /// already-supported lost-response case repaired late via session generations, and strictly
 /// safer than dropping a handler mid-transaction.
@@ -115,7 +117,7 @@ trait OwnerProxyTransition {
 async fn owner_proxy_transition(
     transition: &mut impl OwnerProxyTransition,
 ) -> std::result::Result<(ActiveOwnerState, crate::ProxyApplyOutcome), ServiceError> {
-    if let Err(clear_error) = transition.clear_previous_proxy().await {
+    if let Err(clear_error) = local_timing::result("transition.clear_proxy", transition.clear_previous_proxy()).await {
         let compensation = transition.compensate_direct().await;
         let message = match compensation {
             Ok(()) => format!("Failed to clear the previous owner's proxy: {clear_error:#}"),
@@ -126,18 +128,18 @@ async fn owner_proxy_transition(
         return Err(ServiceError::proxy_clear_failed(message));
     }
 
-    if let Err(stop_error) = transition.stop_previous_core().await {
+    if let Err(stop_error) = local_timing::result("transition.retire_previous", transition.stop_previous_core()).await {
         return Err(ServiceError::owner_switch_failed(format!(
             "Failed to stop the previous owner core: {stop_error:#}"
         )));
     }
-    transition.start_new_core().await.map_err(|error| {
+    local_timing::result("transition.start_new", transition.start_new_core()).await.map_err(|error| {
         ServiceError::owner_switch_failed(format!("Failed to start owner core: {error:#}"))
     })?;
-    let active = transition.commit_new_owner().await.map_err(|error| {
+    let active = local_timing::result("transition.commit_owner", transition.commit_new_owner()).await.map_err(|error| {
         ServiceError::owner_switch_failed(format!("Failed to commit owner state: {error:#}"))
     })?;
-    let proxy_outcome = transition.apply_new_proxy().await.map_err(|error| {
+    let proxy_outcome = local_timing::result("transition.apply_proxy", transition.apply_new_proxy()).await.map_err(|error| {
         ServiceError::proxy_apply_failed(format!("Failed to apply owner proxy: {error:#}"))
     })?;
     Ok((active, proxy_outcome))
@@ -161,13 +163,16 @@ impl OwnerProxyTransition for StartOwnerTransition<'_> {
     }
 
     async fn stop_previous_core(&mut self) -> AnyResult<()> {
-        CORE_MANAGER.lock().await.stop_core().await?;
+        {
+            let manager = local_timing::returned("retire.core_manager_queue", CORE_MANAGER.lock()).await;
+            local_timing::result("retire.stop_core", manager.stop_core_for_replacement()).await?;
+        }
         if let Some(previous_owner) = self.previous_owner.as_ref() {
-            persist_owner_core_stopped_by_key(&previous_owner.owner_key)
+            local_timing::result("retire.persist_stopped", persist_owner_core_stopped_by_key(&previous_owner.owner_key))
                 .await
                 .context("failed to persist the previous owner stopped state")?;
         }
-        clear_active_owner()
+        local_timing::result("retire.clear_active_owner", clear_active_owner())
             .await
             .context("failed to clear the previous active owner")?;
         Ok(())
@@ -182,11 +187,10 @@ impl OwnerProxyTransition for StartOwnerTransition<'_> {
         // Only now, with the previous core stopped, is the generation safe to rewrite: it is the
         // same directory that core was running in. Planning happened before anything was stopped,
         // so a bundle the service refuses still costs no outage.
-        prepared
-            .materialize()
+        local_timing::result("start.materialize_runtime", prepared.materialize())
             .await
             .context("failed to materialize the runtime generation")?;
-        let core_manager = CORE_MANAGER.lock().await;
+        let core_manager = local_timing::returned("start.core_manager_queue", CORE_MANAGER.lock()).await;
         let start_result = core_manager
             .start_core(clash_config, self.owner.identity.clone())
             .await;
@@ -212,10 +216,10 @@ impl OwnerProxyTransition for StartOwnerTransition<'_> {
             .as_ref()
             .context("prepared runtime is unavailable during owner commit")?
             .clash_config();
-        if let Err(error) = persist_owner_core_started(self.owner, clash_config).await {
+        if let Err(error) = local_timing::result("commit.persist_running", persist_owner_core_started(self.owner, clash_config)).await {
             return self.rollback_commit_failure(error).await;
         }
-        match commit_active_owner_session(self.owner, self.proposed_session_token).await {
+        match local_timing::result("commit.persist_active_session", commit_active_owner_session(self.owner, self.proposed_session_token)).await {
             Ok(active) => {
                 self.prepared_runtime
                     .take()
@@ -744,7 +748,7 @@ where
         Ok(request) => request,
         Err(error) => return ControlFlow::Break(bad_request(format!("Invalid JSON: {error}"))),
     };
-    let owner = match authenticate_owner_off_runtime(ctx, request.credentials()).await {
+    let owner = match local_timing::result("request.authenticate_owner", authenticate_owner_off_runtime(ctx, request.credentials())).await {
         Ok(owner) => owner,
         Err(error) => return ControlFlow::Break(service_error(error)),
     };
@@ -777,7 +781,7 @@ async fn enter_owner_lifecycle(
     owner: &AuthenticatedOwner,
     gate: OwnerLifecycleGate<'_>,
 ) -> ControlFlow<Result<HttpResponse>, MutexGuard<'static, ()>> {
-    let lifecycle_guard = OWNER_LIFECYCLE_LOCK.lock().await;
+    let lifecycle_guard = local_timing::returned("request.owner_lifecycle_queue", OWNER_LIFECYCLE_LOCK.lock()).await;
     let gated = match gate {
         OwnerLifecycleGate::Unchecked => Ok(()),
         OwnerLifecycleGate::ArmedPolicyOwner => {

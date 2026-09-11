@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use tauri::AppHandle;
 use tono_core::{
-    config::{self, build_owned_runtime_with_ports, generate_controller_secret},
+    config::{self, build_owned_runtime_with_transport, generate_controller_secret},
     connection::ConnectStage,
     node::ValidatedNode,
 };
@@ -13,19 +13,19 @@ use tono_logging::{Type, logging};
 use tono_service_protocol::{KillSwitchConfig, RuntimeBundle};
 
 use super::cleanup::{
-    enable_dns_cancellation_safe, ensure_fresh, stale_after_arm, stale_after_dns, start_core_cancellation_safe,
+    commit_protection_cancellation_safe, enable_dns_cancellation_safe, ensure_fresh, stale_after_arm, stale_after_dns, start_core_cancellation_safe,
 };
 use super::controller::{
     allocate_runtime_ports, configure_owned_controller_for_ui, lock_kill_switch_with_retries, preflight_bfe,
-    preflight_dns_listener, wait_controller,
+    admit_dns_listener, preflight_dns_listener, wait_controller,
 };
-use super::endpoints::proxy_endpoint_of;
+use super::endpoints::proxy_endpoints_for;
 use super::monitor::{
     bootstrap_hosts, refresh_control_plane_pins_from_service, spawn_advisory_exit_delay,
     spawn_control_plane_pin_refresh, spawn_exit_identity_lookup, spawn_isp_lookup,
     spawn_network_monitor,
 };
-use super::probes::{verify_fake_ip, verify_locked};
+use super::probes::{capture_admission_core, verify_fake_ip_with_repair};
 use super::status::set_stage;
 use super::direct::{CapturedTrafficPolicy, WINDOWS_OPTIONAL_DIRECT_ENABLED, spawn_optional_direct_after_connected};
 use super::platform::{detect_physical_interface, write_redacted_copy};
@@ -45,31 +45,19 @@ pub(super) async fn run_stages(
     node: &ValidatedNode,
     nodes: &[ValidatedNode],
     routing: Option<&tono_core::CatalogRouting>,
+    transport: tono_core::node::ExitTransport,
     generation: u64,
     started: std::time::Instant,
     transaction: &ConnectTransaction,
 ) -> Result<(), StageFailure> {
-    // §6.2: proxy endpoints (public IPv4/port/TCP) from the selected node;
-    // the bootstrap API hosts are the only control-plane recovery channel.
-    // When the catalog binds a home-broadband exit, its endpoint joins the
-    // WFP permit set — otherwise the kill switch would block Mihomo's dial
-    // to the very node the Claude split-routing rules point at. A homeSocks5
-    // upstream is dialed through the tunnel (dialer-proxy), so it never
-    // joins this permit set.
+    // Only the selected VPS receives a physical endpoint permit. The residential
+    // SOCKS5 hop is dialed through Tono-Exit, never through a second physical socket.
     let home_socks5 = routing.and_then(|routing| routing.home_socks5.as_ref());
-    let home_node = if home_socks5.is_some() {
-        None
-    } else {
-        routing
-            .and_then(|routing| routing.home_proxy.as_deref())
-            .and_then(|name| nodes.iter().find(|entry| entry.name == name))
-    };
-    let mut proxy_endpoints = vec![proxy_endpoint_of(node)];
-    if let Some(home) = home_node
-        && (home.server != node.server || home.port != node.port)
-    {
-        proxy_endpoints.push(proxy_endpoint_of(home));
+    let legacy_home = routing.and_then(|routing| routing.home_proxy.as_deref());
+    if legacy_home.is_some() {
+        return Err(StageFailure::error("旧 homeProxy 家宽配置不受支持，请迁移到 homeSocks5"));
     }
+    let proxy_endpoints = proxy_endpoints_for(node, transport).map_err(StageFailure::error)?;
 
     transaction.check("preparing service")?;
     set_stage(state, app, ConnectStage::PreparingService, generation, false, started).await?;
@@ -115,10 +103,9 @@ pub(super) async fn run_stages(
     // The preparation probes are independent of each other and all read-only /
     // cancellation-safe (the two port binds are released immediately; the core-path query is a
     // read IPC), so they run concurrently under one transaction wait instead of paying their
-    // worst cases back to back (the bootstrap DNS lookup alone budgets 2 s):
-    //  - F1: pinned bootstrap IPs merged with the live resolution — the WFP bootstrap permit
-    //    must not depend on the system resolver once blocking starts, and the app's own API
-    //    client is pinned to the same addresses (see `tono::bootstrap` / `tono::transport`).
+    // worst cases back to back:
+    //  - F1: compiled + Service-owned learned bootstrap pins, without an external
+    //    resolver wait. Fresh API DNS is advisory after Connected, through the tunnel.
     //  - The physical egress interface, still strictly before the first Core start (above).
     //  - Fresh loopback controller and diagnostic mixed-proxy ports eliminate collisions with
     //    another proxy or stale fixed listeners. The mixed listener is never a connection proof
@@ -133,14 +120,15 @@ pub(super) async fn run_stages(
         physical_interface_probe,
         runtime_ports,
         dns_preflight,
-        active_runtime_resume,
         core_path,
         bfe_preflight,
     ) = transaction
         .wait("preparing service", async {
-            refresh_control_plane_pins_from_service(state).await;
             tokio::join!(
-                bootstrap_hosts(),
+                transaction.wait("bootstrap pin adoption", async {
+                    refresh_control_plane_pins_from_service(state).await;
+                    bootstrap_hosts().await
+                }),
                 async {
                     if needs_physical_interface {
                         Some(detect_physical_interface().await)
@@ -149,30 +137,21 @@ pub(super) async fn run_stages(
                     }
                 },
                 allocate_runtime_ports(),
-                preflight_dns_listener(),
-                active_runtime_resume_status(),
+                transaction.wait("DNS listener ownership", admit_dns_listener(
+                    preflight_dns_listener(), async { active_runtime_resume_status().await.is_some() },
+                )),
                 service::tono_core_binary_path(),
                 preflight_bfe(),
             )
         })
         .await?;
+    let bootstrap_api_hosts = bootstrap_api_hosts?;
     let runtime_ports = runtime_ports.map_err(StageFailure::error)?;
     bfe_preflight.map_err(StageFailure::error)?;
     let controller_port = runtime_ports.controller_port;
     let mixed_port = runtime_ports.mixed_port;
-    if let Err(error) = dns_preflight {
-        if active_runtime_resume.is_some() {
-            // The old, strongly proven same-owner Core is expected to own TCP/UDP loopback:53.
-            // StartClash first re-arms WFP and then replaces that Core under the Service lifecycle
-            // gate, so bypassing this one availability probe creates no direct-traffic window.
-            logging!(
-                info,
-                Type::Service,
-                "Tono: authenticated active runtime owns protected DNS; admitting fail-closed startup replacement ({error})"
-            );
-        } else {
-            return Err(StageFailure::error(error));
-        }
+    if dns_preflight?.map_err(StageFailure::error)? {
+        logging!(info, Type::Service, "Tono: protected owner retains DNS listener until fail-closed Core replacement");
     }
     let core_path = core_path.map_err(StageFailure::error)?;
     let physical_interface = match physical_interface_probe {
@@ -202,28 +181,17 @@ pub(super) async fn run_stages(
     // §5: the owned runtime carries a fresh random controller secret; only
     // the redacted copy may touch disk.
     let secret = generate_controller_secret();
-    let runtime = build_owned_runtime_with_ports(
+    let runtime = build_owned_runtime_with_transport(
         nodes,
         &node.name,
         &secret,
         None,
-        home_node.map(|home| home.name.as_str()),
+        None,
         home_socks5,
         runtime_ports,
+        transport,
     )
     .map_err(StageFailure::error)?;
-    // Under the transaction like every other stage on this path. `apply_cloud_policy`'s copy is
-    // already covered because that whole stage runs inside a `wait`; this one was the only
-    // uncovered await in `run_stages`, and an %APPDATA% redirected to an offline share parks it
-    // where the `CONNECT_TRANSACTION_TIMEOUT` budget cannot reach — Connecting forever, every retry then rejected as
-    // "already connecting". The write itself never fails the connect (see `write_redacted_copy`),
-    // so this wait only trips when the budget was already spent.
-    transaction
-        .wait(
-            "writing redacted runtime copy",
-            write_redacted_copy(state, &runtime.redacted_yaml()),
-        )
-        .await?;
     let bundle = RuntimeBundle {
         yaml: runtime.yaml().to_string(),
         assets: Vec::new(),
@@ -278,13 +246,25 @@ pub(super) async fn run_stages(
     let (controller_ready, lock_ready) = transaction
         .wait("controller readiness and lock", async {
             tokio::join!(
-                wait_controller(&secret, controller_port),
-                lock_kill_switch_with_retries(&service_session),
+                transaction.wait("controller ready", wait_controller(&secret, controller_port)),
+                transaction.wait("WFP lock and TUN permit", lock_kill_switch_with_retries(&service_session)),
             )
         })
         .await?;
-    controller_ready.map_err(StageFailure::error)?;
-    lock_ready.map_err(StageFailure::error)?;
+    controller_ready?.map_err(StageFailure::error)?;
+    lock_ready?.map_err(StageFailure::error)?;
+
+    // Observation only: no await on the green-light path, no route mutation or verdict.
+    // Evidence closes before failure cleanup, so a late native answer cannot rewrite history.
+    let route_state = Arc::clone(state);
+    let route_node = node.server;
+    tokio::spawn(async move {
+        let observation = crate::tono::route_diagnostics::observe(route_node, config::TUN_DEVICE_NAME).await;
+        let mut inner = route_state.lock().await;
+        if inner.connect_generation == generation {
+            inner.attempt_evidence.routes(generation, commands::epoch_millis(), observation);
+        }
+    });
 
     // Advisory only: `/delay` is display RTT, never the Connected verdict.
     spawn_advisory_exit_delay(state, app, generation);
@@ -294,36 +274,38 @@ pub(super) async fn run_stages(
     // Connected gate is Proton-shaped: WFP lock (no real-IP leak) + fake-ip DNS
     // (no resolver leak). Third-party TUN HTTPS (gstatic / Cloudflare / Apple)
     // is not on this clock — the user opening a site is the usability check.
-    // Lock or DNS failure FullReleases; Google TLS failure must not.
+    // Only an uncommitted first-admit failure may release. Committed sessions stay blocked.
     set_stage(state, app, ConnectStage::SecuringDns, generation, true, started).await?;
-    let (dns_and_fake_ip, lock_status) = transaction
-        .wait("protected DNS, fake-ip, and lock verify", async {
-            tokio::join!(
-                async {
-                    enable_dns_cancellation_safe(state, generation, service_session.clone())
-                        .await?;
-                    if state.lock().await.connect_generation != generation {
-                        return Err(stale_after_dns(state, generation).await);
-                    }
-                    verify_fake_ip().await.map_err(StageFailure::error)
-                },
-                async { verify_locked().await.map_err(StageFailure::error) },
-            )
-        })
-        .await?;
-    dns_and_fake_ip?;
-    let mut kill_status = lock_status?;
-
-    ensure_fresh(state, generation).await?;
-
-    transaction
-        .wait(
-            "committing protection session",
-            service::tono_mark_kill_switch_verified_for_session(&service_session),
+    let (dns_ready, before_fake_ip) = transaction.wait("DNS proof and Core identity", async {
+        tokio::join!(
+            transaction.wait("DNS live apply and readback", enable_dns_cancellation_safe(state, generation, service_session.clone())),
+            transaction.wait("Core identity before fake-ip", service::tono_service_status_snapshot()),
         )
-        .await?
-        .map_err(StageFailure::error)?;
-    kill_status.verified = true;
+    }).await?;
+    dns_ready??;
+    let snapshot = before_fake_ip?.map_err(StageFailure::error)?;
+    {
+        let mut inner = state.lock().await;
+        if inner.connect_generation == generation {
+            inner.attempt_evidence.service(generation, commands::epoch_millis(), &snapshot);
+        }
+    }
+    let expected = capture_admission_core(&snapshot, &service_session).map_err(StageFailure::error)?;
+    ensure_fresh(state, generation).await?;
+    transaction.wait("system fake-ip", verify_fake_ip_with_repair(|| {
+        super::admission_repair::refresh_dns_once(state, generation, &service_session, &expected, routing, transaction)
+    })).await??;
+    ensure_fresh(state, generation).await?;
+    let proof = transaction.wait("fresh WFP proof and protection commit",
+        commit_protection_cancellation_safe(state, generation, service_session.clone(), expected),
+    ).await??;
+    {
+        let mut inner = state.lock().await;
+        if inner.connect_generation == generation {
+            inner.attempt_evidence.proof(generation, commands::epoch_millis(), &proof);
+        }
+    }
+    let kill_status = proof.kill_switch;
 
     // The Tono runtime owns a fresh HTTP controller port and secret on every connection. The
     // dashboard reuses the Mihomo plugin's traffic WebSocket, so point that plugin at this
@@ -341,7 +323,21 @@ pub(super) async fn run_stages(
         inner.kill_switch = Some(kill_status);
         inner.controller_generation = inner.controller_generation.wrapping_add(1);
         inner.fsm.mark_protection_committed();
-        inner.fsm.mark_exit_verified();
+        // The Service commit has succeeded, so even a concurrent policy mismatch
+        // must keep blocking. Never publish Connected for a superseded home route.
+        if !super::same_residential_route(inner.routing.as_ref(), routing) {
+            return Err(StageFailure::error("家宽分流配置在连接过程中变化，保持保护并重新应用"));
+        }
+        if inner.exit_transport != transport || !inner.nodes.iter().any(|current|
+            node.same_transport_endpoint(current, transport)) {
+            return Err(StageFailure::error("VPS 传输配置在连接过程中变化，保持保护并重新应用"));
+        }
+        inner.applied_routing = routing.cloned();
+        inner.applied_exit_transport = Some(transport);
+        inner.applied_nodes = nodes.iter().filter(|node| node.supports_transport(transport)).cloned().collect();
+        // Protection is committed. Exit usability is advisory: third-party TUN
+        // HTTPS must not be claimed verified here, or a later flap re-arms a
+        // teardown veto on gstatic/Cloudflare/Apple.
         inner.last_admitted_node = Some(node.name.clone());
         inner.fsm.connect_succeeded().map_err(StageFailure::error)?;
         inner.unverified_since = None;
@@ -378,23 +374,27 @@ pub(super) async fn run_stages(
     state.audit().log(AuditEvent::ConnectOk {
         node: node.name.clone(),
         elapsed_ms: started.elapsed().as_millis() as u64,
-        outcome: "verified",
+        outcome: "protectionReady",
+    });
+    let copy_state = Arc::clone(state);
+    let redacted = runtime.redacted_yaml();
+    crate::process::AsyncHandler::spawn(move || async move {
+        if copy_state.lock().await.connect_generation == generation {
+            write_redacted_copy(&copy_state, &redacted).await;
+        }
     });
     spawn_network_monitor(state, app).await;
     spawn_exit_identity_lookup(state, app, generation);
-    let residential_target = if home_socks5.is_some() {
-        Some(config::HOME_SOCKS5_OUTBOUND_NAME.to_owned())
-    } else {
-        home_node.map(|home| home.name.clone())
-    };
+    let residential_target = home_socks5.map(|_| config::HOME_SOCKS5_OUTBOUND_NAME.to_owned());
     spawn_control_plane_pin_refresh(state, app, generation, residential_target).await;
     spawn_optional_direct_after_connected(
         state,
         app,
         node.clone(),
         nodes.to_vec(),
-        home_node.cloned(),
+        None,
         home_socks5.cloned(),
+        transport,
         secret,
         controller_port,
         mixed_port,

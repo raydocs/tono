@@ -138,17 +138,29 @@ pub(super) async fn select_exit_group(secret: &str, port: u16, name: &str) -> Re
     let client = controller_client(Duration::from_secs(3))?;
     let url = controller_url(port, &format!("/proxies/{EXIT_GROUP_NAME}"));
     let response = client
-        .put(url)
+        .put(&url)
         .bearer_auth(secret)
         .json(&serde_json::json!({ "name": name }))
         .send()
         .await
         .map_err(|error| format!("selector request failed: {error}"))?;
-    if response.status().is_success() {
-        Ok(())
-    } else {
-        Err(format!("selector returned {}", response.status()))
+    if !response.status().is_success() {
+        return Err(format!("selector returned {}", response.status()));
     }
+    let body: serde_json::Value = client
+        .get(&url)
+        .bearer_auth(secret)
+        .send()
+        .await
+        .map_err(|error| format!("selector readback failed: {error}"))?
+        .json()
+        .await
+        .map_err(|error| format!("selector readback json: {error}"))?;
+    let now = body.get("now").and_then(|value| value.as_str()).unwrap_or("");
+    if now != name {
+        return Err(format!("selector now={now:?} wanted {name:?}"));
+    }
+    Ok(())
 }
 
 /// The controller HTTP client. C2: the total timeout is per call site, because one of them (the
@@ -389,4 +401,37 @@ pub(super) async fn lock_kill_switch_with_retries(session: &OwnerSessionProof) -
         }
     }
     Err(format!("kill switch lock failed (TUN adapter not ready?): {last}"))
+}
+
+/// Both inputs are read-only and cancellation-safe. A proven protected owner may
+/// keep port 53 until replacement; do not wait for that known conflict to time out.
+pub(super) async fn admit_dns_listener<D, R>(preflight: D, resume: R) -> Result<bool, String>
+where D: std::future::Future<Output = Result<(), String>>,
+      R: std::future::Future<Output = bool>,
+{
+    tokio::pin!(preflight, resume);
+    tokio::select! {
+        result = &mut preflight => match result {
+            Ok(()) => Ok(false),
+            Err(error) => if resume.await { Ok(true) } else { Err(error) },
+        },
+        protected_owner = &mut resume => {
+            if protected_owner { Ok(true) } else { preflight.await.map(|()| false) }
+        }
+    }
+}
+
+#[cfg(test)]
+mod dns_admission_tests {
+    use super::*;
+    #[tokio::test]
+    async fn known_owner_does_not_wait_for_occupied_port_and_free_port_does_not_wait_for_owner() {
+        assert_eq!(admit_dns_listener(std::future::pending(), async { true }).await, Ok(true));
+        assert_eq!(admit_dns_listener(async { Ok(()) }, std::future::pending()).await, Ok(false));
+    }
+    #[tokio::test]
+    async fn unproven_owner_never_bypasses_port_conflict() {
+        assert!(admit_dns_listener(async { Err("occupied".into()) }, async { false }).await.is_err());
+        assert_eq!(admit_dns_listener(async { Err("occupied".into()) }, async { true }).await, Ok(true));
+    }
 }

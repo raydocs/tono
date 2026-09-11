@@ -11,8 +11,9 @@
 //! another provider, sublayer, or any Windows Defender Firewall policy.
 
 use crate::core::wfp_model::{
-    self as model, Condition, FilterAction, FilterSpec, Guid, LayerKind, TONO_WFP_PROVIDER_KEY,
-    TONO_WFP_SUBLAYER_KEY, TONO_WFP_SUBLAYER_WEIGHT,
+    self as model, Condition, FilterAction, FilterSpec, FoundationObject, FoundationPlan, Guid,
+    InstalledFilter, LayerKind, TONO_WFP_PROVIDER_KEY, TONO_WFP_SUBLAYER_KEY,
+    TONO_WFP_SUBLAYER_WEIGHT,
 };
 use anyhow::{Context as _, Result, anyhow, bail};
 use std::ffi::c_void;
@@ -25,21 +26,26 @@ use windows_sys::Win32::NetworkManagement::WindowsFilteringPlatform::{
     FWP_ACTION_BLOCK, FWP_ACTION_PERMIT, FWP_BYTE_BLOB, FWP_BYTE_BLOB_TYPE,
     FWP_CONDITION_FLAG_IS_APPCONTAINER_LOOPBACK, FWP_CONDITION_FLAG_IS_NON_APPCONTAINER_LOOPBACK,
     FWP_CONDITION_VALUE0, FWP_CONDITION_VALUE0_0, FWP_MATCH_EQUAL, FWP_MATCH_FLAGS_ANY_SET,
+    FWP_FILTER_ENUM_FLAG_INCLUDE_BOOTTIME, FWP_FILTER_ENUM_FLAG_INCLUDE_DISABLED,
+    FWP_FILTER_ENUM_OVERLAPPING,
     FWP_MATCH_RANGE, FWP_RANGE_TYPE, FWP_RANGE0, FWP_UINT8, FWP_UINT16, FWP_UINT32, FWP_UINT64,
     FWP_V4_ADDR_AND_MASK, FWP_V4_ADDR_MASK, FWP_V6_ADDR_AND_MASK, FWP_V6_ADDR_MASK, FWP_VALUE0,
     FWP_VALUE0_0, FWPM_ACTION0, FWPM_CONDITION_ALE_APP_ID, FWPM_CONDITION_FLAGS,
     FWPM_CONDITION_IP_LOCAL_INTERFACE, FWPM_CONDITION_IP_LOCAL_PORT, FWPM_CONDITION_IP_PROTOCOL,
     FWPM_CONDITION_IP_REMOTE_ADDRESS, FWPM_CONDITION_IP_REMOTE_PORT, FWPM_DISPLAY_DATA0,
-    FWPM_FILTER_CONDITION0, FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT, FWPM_FILTER_FLAG_PERSISTENT,
-    FWPM_FILTER0, FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_CONNECT_V6,
-    FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6, FWPM_PROVIDER_FLAG_PERSISTENT, FWPM_PROVIDER0,
-    FWPM_SUBLAYER_FLAG_PERSISTENT, FWPM_SUBLAYER0, FwpmEngineClose0, FwpmEngineOpen0,
-    FwpmFilterAdd0, FwpmFilterCreateEnumHandle0, FwpmFilterDeleteByKey0,
-    FwpmFilterDestroyEnumHandle0, FwpmFilterEnum0, FwpmFilterGetByKey0, FwpmFreeMemory0,
-    FwpmGetAppIdFromFileName0, FwpmProviderAdd0, FwpmProviderDeleteByKey0, FwpmProviderGetByKey0,
-    FwpmSubLayerAdd0, FwpmSubLayerCreateEnumHandle0, FwpmSubLayerDeleteByKey0,
-    FwpmSubLayerDestroyEnumHandle0, FwpmSubLayerEnum0, FwpmSubLayerGetByKey0,
-    FwpmTransactionAbort0, FwpmTransactionBegin0, FwpmTransactionCommit0,
+    FWPM_FILTER_CONDITION0, FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT, FWPM_FILTER_FLAG_DISABLED,
+    FWPM_FILTER_FLAG_PERSISTENT, FWPM_FILTER0, FWPM_FILTER_ENUM_TEMPLATE0, FWPM_LAYER0,
+    FWPM_LAYER_ALE_AUTH_CONNECT_V4,
+    FWPM_LAYER_ALE_AUTH_CONNECT_V6, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6,
+    FWPM_PROVIDER_FLAG_DISABLED, FWPM_PROVIDER_FLAG_PERSISTENT, FWPM_PROVIDER0,
+    FWPM_SUBLAYER_FLAG_PERSISTENT, FWPM_SUBLAYER0, FWPM_TXN_READ_ONLY, FwpmEngineClose0,
+    FwpmEngineOpen0, FwpmFilterAdd0, FwpmFilterCreateEnumHandle0, FwpmFilterDeleteByKey0,
+    FwpmFilterDestroyEnumHandle0, FwpmFilterEnum0, FwpmFreeMemory0, FwpmGetAppIdFromFileName0,
+    FwpmLayerCreateEnumHandle0, FwpmLayerDestroyEnumHandle0, FwpmLayerEnum0,
+    FwpmProviderAdd0, FwpmProviderDeleteByKey0, FwpmProviderGetByKey0, FwpmSubLayerAdd0,
+    FwpmSubLayerCreateEnumHandle0, FwpmSubLayerDeleteByKey0, FwpmSubLayerDestroyEnumHandle0,
+    FwpmSubLayerEnum0, FwpmSubLayerGetByKey0, FwpmTransactionAbort0, FwpmTransactionBegin0,
+    FwpmTransactionCommit0,
 };
 use windows_sys::core::GUID;
 
@@ -172,9 +178,21 @@ impl Drop for Engine {
 /// Run `body` inside one WFP transaction: every multi-filter change commits atomically or not
 /// at all.
 fn transaction<T>(engine: &Engine, body: impl FnOnce(&Engine) -> Result<T>) -> Result<T> {
-    // SAFETY: valid engine handle; flags 0 = read/write transaction.
+    transaction_with_flags(engine, 0, body)
+}
+
+fn read_transaction<T>(engine: &Engine, body: impl FnOnce(&Engine) -> Result<T>) -> Result<T> {
+    transaction_with_flags(engine, FWPM_TXN_READ_ONLY, body)
+}
+
+fn transaction_with_flags<T>(
+    engine: &Engine,
+    flags: u32,
+    body: impl FnOnce(&Engine) -> Result<T>,
+) -> Result<T> {
+    // SAFETY: valid engine handle; caller selects read-only or read/write transaction.
     check(
-        unsafe { FwpmTransactionBegin0(engine.0, 0) },
+        unsafe { FwpmTransactionBegin0(engine.0, flags) },
         "FwpmTransactionBegin0",
     )?;
     match body(engine) {
@@ -200,16 +218,106 @@ fn transaction<T>(engine: &Engine, body: impl FnOnce(&Engine) -> Result<T>) -> R
     }
 }
 
-fn ensure_provider_and_sublayer(engine: &Engine) -> Result<()> {
-    transaction(engine, |engine| {
-        add_provider(engine)?;
-        add_sublayer(engine)
-    })
+/// Return-owned WFP metadata is read on EVERY call. Existing objects skip management writes
+/// only if persistent, correctly bound and active. Add(ALREADY_EXISTS) cannot repair metadata.
+fn foundation_plan(engine: &Engine) -> Result<FoundationPlan> {
+    let key = to_sys(TONO_WFP_PROVIDER_KEY);
+    let mut provider: *mut FWPM_PROVIDER0 = std::ptr::null_mut();
+    // SAFETY: valid engine handle and out-pointer; allocation is freed below.
+    let status = unsafe { FwpmProviderGetByKey0(engine.0, &key, &mut provider) };
+    let provider_state = if status == FWP_E_PROVIDER_NOT_FOUND {
+        FoundationObject::Missing
+    } else {
+        check(status, "FwpmProviderGetByKey0")?;
+        // SAFETY: non-null successful WFP result contains valid, NUL-terminated serviceName.
+        let current = unsafe { provider.as_ref() }.is_some_and(|provider| {
+            from_sys(provider.providerKey) == TONO_WFP_PROVIDER_KEY
+                && provider.flags & FWPM_PROVIDER_FLAG_PERSISTENT != 0
+                && provider.flags & FWPM_PROVIDER_FLAG_DISABLED == 0
+                && unsafe { wide_equals(provider.serviceName, crate::WINDOWS_SERVICE_NAME) }
+        });
+        // SAFETY: engine-owned allocation, no references escape this scope.
+        unsafe { free_block(provider) };
+        if current {
+            FoundationObject::Current
+        } else {
+            FoundationObject::Stale
+        }
+    };
+    let key = to_sys(TONO_WFP_SUBLAYER_KEY);
+    let mut sublayer: *mut FWPM_SUBLAYER0 = std::ptr::null_mut();
+    // SAFETY: valid engine handle and out-pointer; allocation is freed below.
+    let status = unsafe { FwpmSubLayerGetByKey0(engine.0, &key, &mut sublayer) };
+    let sublayer_state = if status == FWP_E_SUBLAYER_NOT_FOUND {
+        FoundationObject::Missing
+    } else {
+        check(status, "FwpmSubLayerGetByKey0")?;
+        // SAFETY: pointers within a successful result stay valid until its allocation is freed.
+        let current = unsafe { sublayer.as_ref() }.is_some_and(|sublayer| {
+            from_sys(sublayer.subLayerKey) == TONO_WFP_SUBLAYER_KEY
+                && sublayer.flags & FWPM_SUBLAYER_FLAG_PERSISTENT != 0
+                && sublayer.weight == TONO_WFP_SUBLAYER_WEIGHT
+                && unsafe { sublayer.providerKey.as_ref() }
+                    .is_some_and(|key| from_sys(*key) == TONO_WFP_PROVIDER_KEY)
+        });
+        // SAFETY: engine-owned allocation, no references escape this scope.
+        unsafe { free_block(sublayer) };
+        if current {
+            FoundationObject::Current
+        } else {
+            FoundationObject::Stale
+        }
+    };
+    Ok(FoundationPlan::from_objects(provider_state, sublayer_state))
+}
+
+/// SAFETY: value is null or points to a valid NUL-terminated UTF-16 string. Stop on the first
+/// mismatch/NUL and read no more than expected's length + terminator; never log the string.
+unsafe fn wide_equals(value: *const u16, expected: &str) -> bool {
+    if value.is_null() {
+        return false;
+    }
+    for (index, unit) in expected
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .enumerate()
+    {
+        // SAFETY: the caller supplies a terminated string; an earlier NUL would have returned.
+        if unsafe { *value.add(index) } != unit {
+            return false;
+        }
+    }
+    true
+}
+
+/// Called ONLY inside the same write transaction that restores the complete expected policy.
+/// Never commit an intermediate empty provider: metadata migration cannot open a traffic gap.
+fn rebuild_foundation(engine: &Engine) -> Result<()> {
+    for filter in enumerate_our_filters_in_transaction(engine)? {
+        delete_filter_if_exists(engine, filter.key)?;
+    }
+    for key in enumerate_our_sublayer_keys(engine)? {
+        let sys = to_sys(key);
+        // SAFETY: valid engine and key; only Tono-owned sublayers were enumerated.
+        check(
+            unsafe { FwpmSubLayerDeleteByKey0(engine.0, &sys) },
+            "FwpmSubLayerDeleteByKey0 (rebind)",
+        )?;
+    }
+    let key = to_sys(TONO_WFP_PROVIDER_KEY);
+    // SAFETY: valid engine/key; dependent Tono objects were removed within this transaction.
+    let status = unsafe { FwpmProviderDeleteByKey0(engine.0, &key) };
+    if status != FWP_E_PROVIDER_NOT_FOUND {
+        check(status, "FwpmProviderDeleteByKey0 (rebind)")?;
+    }
+    add_provider(engine)?;
+    add_sublayer(engine)
 }
 
 fn add_provider(engine: &Engine) -> Result<()> {
     let name = wide("Tono");
     let description = wide("Tono kill switch provider");
+    let service_name = wide(crate::WINDOWS_SERVICE_NAME);
     let provider = FWPM_PROVIDER0 {
         providerKey: to_sys(TONO_WFP_PROVIDER_KEY),
         displayData: FWPM_DISPLAY_DATA0 {
@@ -217,6 +325,9 @@ fn add_provider(engine: &Engine) -> Result<()> {
             description: description.as_ptr().cast_mut(),
         },
         flags: FWPM_PROVIDER_FLAG_PERSISTENT,
+        // Persistent filters without an AutoStart service binding are disabled by BFE at boot.
+        // https://learn.microsoft.com/windows/win32/api/fwpmtypes/ns-fwpmtypes-fwpm_filter0
+        serviceName: service_name.as_ptr().cast_mut(),
         ..Default::default()
     };
     // SAFETY: `provider` and the wide strings it points to outlive the call; no security
@@ -587,70 +698,157 @@ impl EnumBudget {
     }
 }
 
-/// A Tono filter found in the engine: its key and the sublayer it lives in (needed by the
-/// legacy sweep, which must empty a foreign sublayer before deleting it).
-struct FilterInfo {
-    key: Guid,
-    sublayer: Guid,
-}
-
-/// Every Tono-provider filter currently installed — any layer, any sublayer. The enum
-/// template is NULL (every filter in the engine) and provider scoping happens in userspace,
-/// so a rule left by an older build on a layer or in a sublayer the current model no longer
-/// uses is still found for reconciliation and the emergency sweep. No other provider's
-/// objects are ever collected.
+/// Every Tono-provider filter, including legacy layers/sublayers and disabled/boot-time rules.
+/// Enumerate the LIVE layer catalog, not the three layers in today's policy model. BFE then
+/// filters each layer by provider before marshalling large unrelated third-party filters.
+/// GUID_NULL is NOT an all-layer filter template (Windows returns LAYER_NOT_FOUND).
+/// All layer/filter enumerators share one transaction: independent snapshots must not hide a
+/// filter moved between layers during the scan. No layer catalog or filter result is cached.
 ///
 /// Bounded by [`EnumBudget`] and all-or-nothing: callers diff against this list and delete what
 /// is missing from it, so a partial answer is returned as an error, never as a short `Vec`.
-fn enumerate_our_filters(engine: &Engine) -> Result<Vec<FilterInfo>> {
+fn enumerate_our_filters(engine: &Engine) -> Result<Vec<InstalledFilter>> {
+    read_transaction(engine, enumerate_our_filters_in_transaction)
+}
+
+/// Caller already owns a read or write transaction (verification / atomic foundation repair).
+fn enumerate_our_filters_in_transaction(engine: &Engine) -> Result<Vec<InstalledFilter>> {
+    // A new installation has no provider yet; provider-scoped enum templates must not turn
+    // that legitimate empty set into PROVIDER_NOT_FOUND. This is a fresh read in the SAME
+    // transaction, not an "installed once" cache. WFP cannot retain dependent filters after
+    // their provider is deleted.
+    if !provider_exists(engine)? { return Ok(Vec::new()); }
+    let mut budget = EnumBudget::new("Tono all-layer filter enumeration");
+    let layers = enumerate_layer_keys(engine, &mut budget)?;
+    let mut provider = to_sys(TONO_WFP_PROVIDER_KEY);
+    let mut filters = Vec::new();
+    for layer in layers {
+        let template = provider_filter_template(&mut provider, layer);
+        filters.extend(enumerate_filter_template(engine, Some(&template), &mut budget)?);
+    }
+    Ok(filters)
+}
+
+fn provider_filter_template(provider: &mut GUID, layer: GUID) -> FWPM_FILTER_ENUM_TEMPLATE0 {
+    FWPM_FILTER_ENUM_TEMPLATE0 {
+        providerKey: provider,
+        layerKey: layer,
+        enumType: FWP_FILTER_ENUM_OVERLAPPING,
+        flags: FWP_FILTER_ENUM_FLAG_INCLUDE_BOOTTIME | FWP_FILTER_ENUM_FLAG_INCLUDE_DISABLED,
+        // Zero conditions match every filter; do not accidentally restrict the action to PERMIT
+        // or hide stale callouts. No sublayer restriction, including legacy sublayers.
+        actionMask: u32::MAX,
+        ..Default::default()
+    }
+}
+
+fn enumerate_layer_keys(engine: &Engine, budget: &mut EnumBudget) -> Result<Vec<GUID>> {
+    let mut handle = std::ptr::null_mut();
+    // SAFETY: valid engine/out-pointer; NULL enumerates the complete live layer catalog.
+    check(unsafe { FwpmLayerCreateEnumHandle0(engine.0, std::ptr::null(), &mut handle) },
+        "FwpmLayerCreateEnumHandle0")?;
+    let result = (|| -> Result<Vec<GUID>> {
+        let mut layers = Vec::new();
+        loop {
+            let mut entries: *mut *mut FWPM_LAYER0 = std::ptr::null_mut();
+            let mut returned = 0;
+            // SAFETY: engine/enum handles and out-pointers remain valid through this call.
+            let status = unsafe { FwpmLayerEnum0(engine.0, handle, 128, &mut entries, &mut returned) };
+            let page = (|| -> Result<()> {
+                check(status, "FwpmLayerEnum0")?;
+                budget.charge(returned)?;
+                validate_enum_page(entries.is_null(), returned, 128)?;
+                for index in 0..returned as usize {
+                    // SAFETY: validated non-null array of `returned` pointers from the engine.
+                    let layer = unsafe { *entries.add(index) };
+                    if layer.is_null() { bail!("WFP layer enumeration returned a null object"); }
+                    // SAFETY: the page owns this non-null layer until free_block below.
+                    layers.push(unsafe { (*layer).layerKey });
+                }
+                Ok(())
+            })();
+            // SAFETY: engine-owned page (or NULL), including errors and the terminating page.
+            unsafe { free_block(entries) };
+            page?;
+            if returned == 0 { break; }
+        }
+        if layers.is_empty() { bail!("WFP layer catalog is unexpectedly empty"); }
+        Ok(layers)
+    })();
+    // SAFETY: the valid enum handle is destroyed on success and every error path.
+    let destroyed = unsafe { FwpmLayerDestroyEnumHandle0(engine.0, handle) };
+    let layers = result?;
+    check(destroyed, "FwpmLayerDestroyEnumHandle0")?;
+    Ok(layers)
+}
+
+fn validate_enum_page(null_entries: bool, returned: u32, requested: u32) -> Result<()> {
+    if returned > requested || (returned != 0 && null_entries) {
+        bail!("WFP enumeration returned an invalid page");
+    }
+    Ok(())
+}
+
+fn enumerate_filter_template(
+    engine: &Engine,
+    template: Option<&FWPM_FILTER_ENUM_TEMPLATE0>,
+    budget: &mut EnumBudget,
+) -> Result<Vec<InstalledFilter>> {
     let mut filters = Vec::new();
     let mut enum_handle = std::ptr::null_mut();
-    // SAFETY: valid engine handle; NULL template enumerates all filters in the engine.
-    let status =
-        unsafe { FwpmFilterCreateEnumHandle0(engine.0, std::ptr::null(), &mut enum_handle) };
+    // SAFETY: template, provider GUID and engine outlive this synchronous enumeration.
+    let status = unsafe { FwpmFilterCreateEnumHandle0(
+        engine.0, template.map_or(std::ptr::null(), std::ptr::from_ref), &mut enum_handle,
+    ) };
     check(status, "FwpmFilterCreateEnumHandle0")?;
     let result = (|| -> Result<()> {
-        let mut budget = EnumBudget::new("FwpmFilterEnum0 (Tono filter enumeration)");
         loop {
             let mut entries: *mut *mut FWPM_FILTER0 = std::ptr::null_mut();
             let mut returned = 0_u32;
             // SAFETY: valid handles; `entries`/`returned` are valid out-pointers.
             let status =
                 unsafe { FwpmFilterEnum0(engine.0, enum_handle, 128, &mut entries, &mut returned) };
-            check(status, "FwpmFilterEnum0")?;
-            if returned == 0 {
-                // Free the empty page too: the zero-count call is how *every* enumeration
-                // ends, so skipping it would leak one engine allocation per install, residual
-                // check and legacy sweep. `free_block` ignores a null pointer.
-                // SAFETY: `entries` is null or the engine-allocated array from the call above.
-                unsafe { free_block(entries) };
-                break;
-            }
-            for index in 0..returned as isize {
-                // SAFETY: `entries` points to an array of `returned` pointers owned by the
-                // engine allocation freed below.
-                let filter = unsafe { *entries.offset(index) };
-                if filter.is_null() {
-                    continue;
+            let page = (|| -> Result<()> {
+                check(status, "FwpmFilterEnum0")?;
+                budget.charge(returned)?;
+                validate_enum_page(entries.is_null(), returned, 128)?;
+                if returned == 0 {
+                    return Ok(());
                 }
-                // SAFETY: non-null element of the enumerated array; `providerKey` is either
-                // null (providerless filters) or a valid GUID pointer for the call duration.
-                let (key, provider, sublayer) = unsafe {
-                    let filter = &*filter;
-                    let provider =
-                        (!filter.providerKey.is_null()).then(|| from_sys(*filter.providerKey));
-                    (filter.filterKey, provider, filter.subLayerKey)
-                };
-                if provider == Some(TONO_WFP_PROVIDER_KEY) {
-                    filters.push(FilterInfo {
-                        key: from_sys(key),
-                        sublayer: from_sys(sublayer),
-                    });
+                for index in 0..returned as isize {
+                    // SAFETY: `entries` points to an array of `returned` pointers owned by the
+                    // engine allocation freed below.
+                    let filter = unsafe { *entries.offset(index) };
+                    if filter.is_null() {
+                        bail!("WFP filter enumeration returned a null object");
+                    }
+                    // SAFETY: non-null element of the enumerated array; `providerKey` is either
+                    // null (providerless filters) or a valid GUID pointer for the call duration.
+                    let (key, provider, sublayer, disabled) = unsafe {
+                        let filter = &*filter;
+                        let provider =
+                            (!filter.providerKey.is_null()).then(|| from_sys(*filter.providerKey));
+                        (
+                            filter.filterKey,
+                            provider,
+                            filter.subLayerKey,
+                            filter.flags & FWPM_FILTER_FLAG_DISABLED != 0,
+                        )
+                    };
+                    if provider == Some(TONO_WFP_PROVIDER_KEY) {
+                        filters.push(InstalledFilter {
+                            key: from_sys(key),
+                            sublayer: from_sys(sublayer),
+                            disabled,
+                        });
+                    }
                 }
-            }
+                Ok(())
+            })();
             // SAFETY: `entries` is the engine-allocated array from the call above.
             unsafe { free_block(entries) };
-            budget.charge(returned)?;
+            page?;
+            if returned == 0 { break; }
         }
         Ok(())
     })();
@@ -669,19 +867,8 @@ fn enumerate_our_filter_keys(engine: &Engine) -> Result<Vec<Guid>> {
 }
 
 fn require_exact_filter_keys(current: &[Guid], expected: &[Guid]) -> Result<()> {
-    let current = current
-        .iter()
-        .copied()
-        .collect::<std::collections::BTreeSet<_>>();
-    let expected = expected
-        .iter()
-        .copied()
-        .collect::<std::collections::BTreeSet<_>>();
-    if current == expected {
-        return Ok(());
-    }
-    let missing = expected.difference(&current).count();
-    let unexpected = current.difference(&expected).count();
+    let (missing, unexpected) = model::filter_key_difference(current, expected);
+    if missing == 0 && unexpected == 0 { return Ok(()); }
     bail!(
         "kill-switch provider filter set is not exact ({missing} missing, {unexpected} unexpected)"
     )
@@ -798,13 +985,36 @@ fn provider_exists(engine: &Engine) -> Result<bool> {
     ))
 }
 
-fn apply_plan(engine: &Engine, plan: &model::ChangePlan, app_id: Option<&AppId>) -> Result<()> {
+fn apply_plan(
+    engine: &Engine,
+    foundation: FoundationPlan,
+    plan: &model::ChangePlan,
+    unusable: &[Guid],
+    app_id: Option<&AppId>,
+) -> Result<()> {
+    // An empty diff still reaches the exact live verification in `install`.
+    // Do not open an empty BFE write transaction for repeated identical policies.
+    if foundation == FoundationPlan::Reuse && plan.install.is_empty() && plan.remove.is_empty() {
+        return Ok(());
+    }
     transaction(engine, |engine| {
-        // Installs strictly before removes (the plan's ordering contract): a new endpoint
-        // permit is committed together with the old one's removal, so the switch is atomic
-        // and never passes through a direct-traffic window.
+        match foundation {
+            FoundationPlan::Reuse => {}
+            FoundationPlan::CreateMissing => {
+                add_provider(engine)?;
+                add_sublayer(engine)?;
+            }
+            FoundationPlan::Rebuild => rebuild_foundation(engine)?,
+        }
+        // Ordinary endpoint changes install before removing stale keys. Metadata/disabled-rule
+        // repair must first delete the conflicting object, but ALL replacements share this
+        // atomic transaction: no intermediate empty/partially rebuilt policy can be committed.
         let blob = app_id.map_or(std::ptr::null_mut(), AppId::ptr);
         for spec in &plan.install {
+            if unusable.contains(&spec.key) {
+                // Recreate disabled/misbound rules atomically; Add(ALREADY_EXISTS) is not repair.
+                delete_filter_if_exists(engine, spec.key)?;
+            }
             add_filter(engine, spec, blob)?;
         }
         for key in &plan.remove {
@@ -815,59 +1025,60 @@ fn apply_plan(engine: &Engine, plan: &model::ChangePlan, app_id: Option<&AppId>)
 }
 
 fn verify_by_key(engine: &Engine, expected: &[FilterSpec]) -> Result<()> {
-    for key in [TONO_WFP_PROVIDER_KEY, TONO_WFP_SUBLAYER_KEY] {
-        let sys = to_sys(key);
-        if key == TONO_WFP_PROVIDER_KEY {
-            let mut provider = std::ptr::null_mut();
-            // SAFETY: valid engine handle; valid out-pointer.
-            let status = unsafe { FwpmProviderGetByKey0(engine.0, &sys, &mut provider) };
-            if status != 0 {
-                bail!("kill-switch provider missing: WFP error {status:#010x}");
-            }
-            // SAFETY: engine-allocated on success.
-            unsafe { free_block(provider) };
-        } else {
-            let mut sublayer = std::ptr::null_mut();
-            // SAFETY: valid engine handle; valid out-pointer.
-            let status = unsafe { FwpmSubLayerGetByKey0(engine.0, &sys, &mut sublayer) };
-            if status != 0 {
-                bail!("kill-switch sublayer missing: WFP error {status:#010x}");
-            }
-            // SAFETY: engine-allocated on success.
-            unsafe { free_block(sublayer) };
+    // WFP enumerators are snapshots, not live views. Metadata + enum creation + all pages share
+    // one explicit read-only transaction; no cached status or per-key redundant lookups.
+    // https://learn.microsoft.com/windows/win32/api/fwpmu/nf-fwpmu-fwpmfiltercreateenumhandle0
+    read_transaction(engine, |engine| {
+        if foundation_plan(engine)? != FoundationPlan::Reuse {
+            bail!("kill-switch provider/sublayer metadata is missing, disabled or stale");
         }
-    }
-    for spec in expected {
-        let key = to_sys(spec.key);
-        let mut filter = std::ptr::null_mut();
-        // SAFETY: valid engine handle; valid out-pointer.
-        let status = unsafe { FwpmFilterGetByKey0(engine.0, &key, &mut filter) };
-        if status != 0 {
-            bail!(
-                "expected kill-switch filter missing ({}): WFP error {status:#010x}",
-                spec.name
-            );
+        let current = enumerate_our_filters_in_transaction(engine)?;
+        if current.iter().any(|info| !info.usable()) {
+            bail!("kill-switch has a disabled or wrong-sublayer filter");
         }
-        // SAFETY: engine-allocated on success.
-        unsafe { free_block(filter) };
-    }
-    // Presence-only verification is not enough for a fail-closed mode transition: if the new
-    // Blocked set exists beside one stale DIRECT or tunnel permit, every expected-key lookup
-    // succeeds while the physical escape path remains live. Enumerate all objects carrying the
-    // Tono provider key and require exact set equality before publishing `live`.
-    let current = enumerate_our_filter_keys(engine)?;
-    let expected_keys = expected.iter().map(|spec| spec.key).collect::<Vec<_>>();
-    require_exact_filter_keys(&current, &expected_keys)?;
-    Ok(())
+        let current_keys = current.iter().map(|info| info.key).collect::<Vec<_>>();
+        let expected_keys = expected.iter().map(|spec| spec.key).collect::<Vec<_>>();
+        require_exact_filter_keys(&current_keys, &expected_keys)
+    })
+}
+
+fn timed_wfp_step<T>(step: &'static str, work: impl FnOnce() -> Result<T>) -> Result<T> {
+    let started = std::time::Instant::now();
+    let result = work();
+    tracing::info!(
+        step,
+        elapsed_us = started.elapsed().as_micros() as u64,
+        ok = result.is_ok(),
+        "wfp: local step"
+    );
+    result
 }
 
 /// Install exactly `expected`: ensure provider + sublayer, add missing filters, remove stale
 /// ones (single transaction), then verify every expected object by key.
 pub(crate) fn install(expected: &[FilterSpec], app_path: &str) -> Result<()> {
-    let engine = Engine::open()?;
-    ensure_provider_and_sublayer(&engine)?;
-    let current = enumerate_our_filter_keys(&engine)?;
-    let plan = model::diff(&current, expected);
+    let engine = timed_wfp_step("engine_open", Engine::open)?;
+    let foundation = timed_wfp_step("foundation_read", || foundation_plan(&engine))?;
+    let current = if foundation != FoundationPlan::Rebuild {
+        timed_wfp_step("filter_enumeration", || enumerate_our_filters(&engine))?
+    } else {
+        // Rebuild replaces all Tono objects in one transaction; missing-object repair still
+        // enumerates so legacy-sublayer filters cannot hide behind a missing current sublayer.
+        Vec::new()
+    };
+    let unusable = current
+        .iter()
+        .filter(|info| !info.usable())
+        .map(|info| info.key)
+        .collect::<Vec<_>>();
+    let plan = model::repair_diff(&current, expected);
+    tracing::debug!(
+        ?foundation,
+        expected = expected.len(),
+        added = plan.install.len(),
+        removed = plan.remove.len(),
+        "wfp: exact policy delta"
+    );
 
     let needs_app_id = plan
         .install
@@ -879,7 +1090,7 @@ pub(crate) fn install(expected: &[FilterSpec], app_path: &str) -> Result<()> {
         // `apply_plan` a null blob makes `build_condition` bail *inside* the transaction, which
         // aborts the whole commit — the block-all floor included — and leaves the machine fully
         // open while the intent still says wanted. Collapse it into the error case here.
-        match AppId::resolve(app_path).and_then(|resolved| {
+        match timed_wfp_step("app_id", || AppId::resolve(app_path)).and_then(|resolved| {
             resolved.context("no staged core path is recorded for the app-scoped permit")
         }) {
             Ok(app_id) => Some(app_id),
@@ -896,7 +1107,9 @@ pub(crate) fn install(expected: &[FilterSpec], app_path: &str) -> Result<()> {
                         .collect(),
                     remove: plan.remove.clone(),
                 };
-                apply_plan(&engine, &without_app_rules, None)?;
+                timed_wfp_step("policy_write_closed", || {
+                    apply_plan(&engine, foundation, &without_app_rules, &unusable, None)
+                })?;
                 return Err(error).context(
                     "installed the block without the core endpoint permit; traffic stays blocked",
                 );
@@ -906,17 +1119,16 @@ pub(crate) fn install(expected: &[FilterSpec], app_path: &str) -> Result<()> {
         None
     };
 
-    apply_plan(&engine, &plan, app_id.as_ref())?;
-    verify_by_key(&engine, expected)
+    timed_wfp_step("policy_write", || {
+        apply_plan(&engine, foundation, &plan, &unusable, app_id.as_ref())
+    })?;
+    timed_wfp_step("exact_readback", || verify_by_key(&engine, expected))
 }
 
 /// Verify the provider, sublayer, every expected filter, and the absence of any unexpected
 /// provider-scoped filter.
 pub(crate) fn verify(expected: &[FilterSpec]) -> Result<()> {
     let engine = Engine::open()?;
-    if !provider_exists(&engine)? {
-        bail!("kill-switch provider is not installed");
-    }
     verify_by_key(&engine, expected)
 }
 
@@ -1058,5 +1270,27 @@ fn validate_tunnel_luid(luid: u64) -> Result<()> {
 
 #[cfg(test)]
 mod tests;
+
 #[cfg(test)]
 mod real_engine_tests;
+
+#[cfg(test)]
+mod metadata_tests {
+    use super::{wide, wide_equals};
+
+    #[test]
+    fn service_binding_comparison_rejects_null_short_long_and_different_names() {
+        let expected = crate::WINDOWS_SERVICE_NAME;
+        // SAFETY: null is an explicitly supported input.
+        assert!(!unsafe { wide_equals(std::ptr::null(), expected) });
+        for name in ["", "T", "unregistered-service"] {
+            let value = wide(name);
+            // SAFETY: each value is NUL-terminated and lives through the call.
+            assert!(!unsafe { wide_equals(value.as_ptr(), expected) });
+        }
+        let value = wide(expected);
+        assert!(unsafe { wide_equals(value.as_ptr(), expected) });
+        let longer = wide(&format!("{expected}-suffix"));
+        assert!(!unsafe { wide_equals(longer.as_ptr(), expected) });
+    }
+}

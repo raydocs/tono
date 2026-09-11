@@ -1,5 +1,6 @@
 //! Connected-lifetime health classification for the Windows connect monitor.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use tono_service_protocol::{
@@ -156,27 +157,89 @@ pub fn network_event_fires(changed: bool, since_last_event: Option<Duration>) ->
 
 /// A Windows route/interface notification is only a hint: WinTUN creation, protected-DNS
 /// reconciliation, and their delayed IP Helper callbacks can all arrive after Connect has
-/// already committed. Keep the fail-closed response for a changed Core identity or a failed
-/// health leg, but require a fresh locked data-plane failure before a notification by itself
-/// tears down a tunnel that is still carrying authenticated HTTPS traffic.
-///
-/// Callers must not pass a probe failure for an unverified session
-/// ([`network_change_uses_probe_veto`]): those third-party probes fail for the
-/// life of the session and would reconnect on every adapter flap.
+/// already committed. Adapter noise alone must not rebuild. Core identity change or a
+/// failed KS/DNS/Service health leg still rebuilds. Third-party TUN HTTPS is not an input.
 pub fn monitor_requires_reconnect(
-    event_invalidated: bool,
+    _event_invalidated: bool,
     core_changed: bool,
     health_invalid: bool,
-    event_probe_failed: bool,
 ) -> bool {
-    health_invalid || (event_invalidated && (core_changed || event_probe_failed))
+    health_invalid || core_changed
 }
 
-/// Whether a network-change data-plane probe may corroborate a teardown.
-/// Unverified sessions fail those probes for the whole session; using them as
-/// a veto reconnects on every Wi-Fi jitter or hotspot switch.
-pub const fn network_change_uses_probe_veto(exit_verified: bool) -> bool {
-    exit_verified
+/// Windows reported a network-event counter bump, but the core identity and
+/// KS/DNS/Service legs are unchanged. Keep the current session.
+pub const fn adapter_noise_keeps_session(
+    event_invalidated: bool,
+    network_changed: bool,
+    core_changed: bool,
+    health_invalid: bool,
+) -> bool {
+    event_invalidated && network_changed && !core_changed && !health_invalid
+}
+
+/// Why a connected-lifetime path is asking to recover. Callers must not share
+/// one "network change reconnect" label: a policy apply is not a NIC flap,
+/// and a dead Service is not proof that the tunnel should be torn down by HTTPS.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecoveryReason {
+    /// Core pid/restart or TUN identity changed. Keep the lock; rebuild under it.
+    CoreOrTunIdentity,
+    /// WFP or protected DNS is explicitly unhealthy. Repair immediately.
+    ProtectionFailed,
+    /// Service IPC stayed unreachable after the in-place hold. Repair; do not
+    /// release the lock; HTTPS success is not a substitute for a live snapshot.
+    ServiceUnreachable,
+    /// Cloud routing policy actually changed. Apply and read back; do not skip
+    /// because the old tunnel can still fetch a website.
+    RoutingPolicyChanged,
+    /// Residential assignment changed; downloaded does not mean applied.
+    HomeRoutingChanged,
+    /// The applied selected first-hop endpoint differs from the signed catalog.
+    ExitConfigurationChanged,
+    /// Signed WeChat / reviewed-app path set changed.
+    DirectAppPathsChanged,
+    /// Residential browser Secure DNS proof failed.
+    BrowserDnsFailed,
+}
+
+impl RecoveryReason {
+    pub const fn audit_reason(self) -> &'static str {
+        match self {
+            Self::CoreOrTunIdentity => "coreOrTunIdentity",
+            Self::ProtectionFailed => "protectionFailed",
+            Self::ServiceUnreachable => "serviceUnreachable",
+            Self::RoutingPolicyChanged => "routingPolicyChanged",
+            Self::HomeRoutingChanged => "homeRoutingChanged",
+            Self::ExitConfigurationChanged => "exitConfigurationChanged",
+            Self::DirectAppPathsChanged => "directAppPathsChanged",
+            Self::BrowserDnsFailed => "browserDnsFailed",
+        }
+    }
+
+    pub const fn log_line(self) -> &'static str {
+        match self {
+            Self::CoreOrTunIdentity => "Tono: 核心或 TUN 身份变化，保持封锁并受控重建",
+            Self::ProtectionFailed => "Tono: WFP 或 DNS 保护失效，立即进入保护修复",
+            Self::ServiceUnreachable => "Tono: Service 无法观测，进入修复且不释放封锁",
+            Self::RoutingPolicyChanged => "Tono: 路由策略已变化，应用并读回新配置",
+            Self::HomeRoutingChanged => "Tono: 家宽分流配置变化，保持封锁并应用新配置",
+            Self::ExitConfigurationChanged => "Tono: VPS 传输配置变化，保持封锁并应用新配置",
+            Self::DirectAppPathsChanged => "Tono: 直连应用路径变化，受控重建",
+            Self::BrowserDnsFailed => "Tono: 家宽浏览器 DNS 校验失败，限制流量并重建",
+        }
+    }
+}
+
+/// One recovery task at a time. A second caller that loses the CAS merges
+/// into the in-flight recovery (NIC bursts, overlapping policy ticks).
+pub fn recovery_try_begin(flag: &AtomicBool) -> bool {
+    flag.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+}
+
+pub fn recovery_end(flag: &AtomicBool) {
+    flag.store(false, Ordering::Release)
 }
 
 /// What one [`handle_network_change`] call did to the session.
@@ -185,21 +248,17 @@ pub enum NetworkChangeOutcome {
     /// The locked TUN still carried traffic, so the core was never stopped and this session —
     /// generation, tasks and all — is the same one that was Connected before the event.
     RecoveredInPlace,
+    /// Another recovery owns mutation; keep observing dirty state rather than lose the loop.
+    Deferred,
     /// The session was torn down, handed to a newer generation, or was never this caller's to
     /// act on. Nothing connection-scoped survives it.
     Handled,
 }
 
-/// Whether a connection-scoped loop keeps running after one [`handle_network_change`] call.
-///
-/// Only the recovered-in-place verdict leaves the loop's own session alive, and its callers
-/// used to treat every call as terminal. One such event — roughly four seconds of Service IPC
-/// unavailability while mihomo and WFP are untouched, which an SCM recovery restart or the
-/// updater's replace-runtime step produces — therefore ended the connection-phase health
-/// monitor for the rest of the session, and nothing restarts it before the next connect. With
-/// it went the 120 s exit probe, the one leg that notices a dead exit behind a live tunnel.
+/// A merged event does not retire this observer. Generation/FSM checks decide
+/// whether a newer session owns it on the next tick.
 pub const fn connection_loop_continues(outcome: NetworkChangeOutcome) -> bool {
-    matches!(outcome, NetworkChangeOutcome::RecoveredInPlace)
+    matches!(outcome, NetworkChangeOutcome::RecoveredInPlace | NetworkChangeOutcome::Deferred)
 }
 
 /// F2: while Connected, the barrier must be wanted, live, fully locked, and actually
@@ -253,7 +312,7 @@ fn dns_error_is_a_failure(last_error: Option<&str>) -> bool {
 /// The Service status deliberately includes adapters that appeared after the original snapshot,
 /// closing the first-netmon-sample race and covering a failed Windows notification registration.
 /// Win11 Home often has one adapter. If that unique adapter's live apply
-/// failed, fake-ip probes (which talk to 198.18.0.2 directly) can still pass
+/// failed, a system fake-ip query through another resolver path can still pass
 /// while Chrome/WeChat cannot resolve. That is not a usable connect.
 pub fn unique_adapter_dns_apply_failed(status: &DnsProtectionStatus) -> bool {
     status.adapters == 1

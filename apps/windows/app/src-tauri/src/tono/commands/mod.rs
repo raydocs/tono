@@ -282,16 +282,15 @@ pub(crate) fn status_of(inner: &TonoInner) -> TonoStatus {
         tcp_delay_ms: inner.selected_tcp_delay_ms(),
         tcp_delay_at_ms: inner.selected_tcp_delay_at_ms(),
         claude_home_active: if status.is_connected {
-            Some(inner.routing.as_ref().map_or(false, |r| r.home_socks5.is_some() || r.home_proxy.is_some()))
+            Some(inner.applied_routing.as_ref().is_some_and(|r| r.home_socks5.is_some()))
         } else {
             None
         },
         exit_verified: inner.fsm.exit_verified(),
         exit_probe_pending: inner.exit_probe_pending,
         claude_home_host: if status.is_connected {
-            inner.routing.as_ref().and_then(|r| {
+            inner.applied_routing.as_ref().and_then(|r| {
                 r.home_socks5.as_ref().map(|s| s.host.clone())
-                    .or_else(|| r.home_proxy.clone())
             })
         } else {
             None

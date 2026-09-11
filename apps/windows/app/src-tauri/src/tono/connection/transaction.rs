@@ -6,42 +6,32 @@ use tokio_util::sync::CancellationToken;
 
 use super::failure::StageFailure;
 
-/// C4 — 120 s did not cover a real cold first connect. It was sized while the DNS stage still
-/// failed fast; once DNS starts *succeeding* (10–30 s of PowerShell) the sum crosses 120 s right
-/// at the exit check, and a timeout there lands on the same no-retry path C3 describes. The
-/// accounting below is per-leg worst case, machine-checked by `CONNECT_BUDGET_LEGS`:
+/// Reference budgets for ONE pass through the local admission path (seconds).
+/// This is not an elapsed-time prediction or a sum of all retry worst cases:
+/// controller/TUN and preparation legs overlap; retries share the unchanged
+/// transaction deadline below. These bounds must never be lowered to fake speed.
 ///
-/// | leg                                                    | worst |
-/// |--------------------------------------------------------|-------|
-/// | service readiness probe                                  |   3 s |
-/// | StartClash #1 — cold WinTUN install + WFP arm             |  60 s | Service handler budget
-/// | controller readiness (`CONTROLLER_READY_TIMEOUT`)         |  15 s |
-/// | lock ladder (`LOCK_ATTEMPTS` × `LOCK_RETRY_INTERVAL`)     |  10 s |
-/// | securingDNS — PowerShell/CIM live apply (shipped Service) |  30 s |
-/// | fake-ip verification (3 × (5 s + 0.5 s), cancellable)     |  16 s |
-/// | lock verify (4 samples of the decaying WFP cache)         |   3 s |
-/// | MarkVerified commit IPC                                   |   5 s |
-/// | **total**                                                 | 142 s |
-///
-/// Controller `/delay` and third-party TUN HTTPS (gstatic / Cloudflare / Apple)
-/// are not on this clock. Optional DIRECT resolution runs after Connected.
+/// Service readiness 3; StartClash 60; controller 15; TUN fallback waits 10;
+/// native DNS 30; fake-ip 16; fresh WFP proof + commit IPC 95 (65 route + 30
+/// transport guard). Reference sum: 229. There is no cached-status polling leg
+/// or third-party TUN HTTPS on admission anymore.
 pub(super) const CONNECT_TRANSACTION_TIMEOUT: Duration = Duration::from_secs(240);
-/// The accounting table above, machine-checked by `connect_budget_covers_a_cold_first_connect`.
+/// Reference accounting above, machine-checked without changing any runtime timeout.
 #[cfg(test)]
-pub(super) const CONNECT_BUDGET_LEGS: [(&str, u64); 8] = [
+pub(super) const CONNECT_BUDGET_LEGS: [(&str, u64); 7] = [
     ("service readiness", 3),
     ("StartClash #1 (cold WinTUN + WFP arm)", 60),
     ("controller readiness", 15),
     ("lock ladder", 10),
     ("securingDNS", 30),
     ("fake-ip verification", 16),
-    ("lock verify", 3),
-    ("MarkVerified commit", 5),
+    ("fresh WFP proof and commit", 95),
 ];
 #[derive(Clone)]
 pub(super) struct ConnectTransaction {
     deadline: tokio::time::Instant,
     cancellation: CancellationToken,
+    observer: Option<(std::sync::Weak<crate::tono::state::TonoState>, u64)>,
 }
 
 impl ConnectTransaction {
@@ -49,7 +39,13 @@ impl ConnectTransaction {
         Self {
             deadline: tokio::time::Instant::now() + CONNECT_TRANSACTION_TIMEOUT,
             cancellation,
+            observer: None,
         }
+    }
+
+    pub(super) fn observed_by(mut self, state: &std::sync::Arc<crate::tono::state::TonoState>, generation: u64) -> Self {
+        self.observer = Some((std::sync::Arc::downgrade(state), generation));
+        self
     }
 
     pub(super) fn check(&self, stage: &'static str) -> Result<(), StageFailure> {
@@ -70,7 +66,8 @@ impl ConnectTransaction {
         future: impl Future<Output = T>,
     ) -> Result<T, StageFailure> {
         self.check(stage)?;
-        tokio::select! {
+        let started = tokio::time::Instant::now();
+        let result = tokio::select! {
             biased;
             _ = self.cancellation.cancelled() => Err(StageFailure::Stale),
             result = tokio::time::timeout_at(self.deadline, future) => result.map_err(|_| {
@@ -78,7 +75,22 @@ impl ConnectTransaction {
                     "connection transaction exceeded {CONNECT_TRANSACTION_TIMEOUT:?} during {stage}"
                 ))
             }),
+        };
+        if let Some((state, generation)) = &self.observer
+            && let Some(state) = state.upgrade()
+        {
+            state.audit().log(crate::tono::audit::AuditEvent::LocalStep {
+                generation: *generation,
+                step: stage,
+                elapsed_ms: started.elapsed().as_millis() as u64,
+                outcome: match &result {
+                    Ok(_) => "completed",
+                    Err(StageFailure::Stale) => "cancelled",
+                    Err(_) => "timedOut",
+                },
+            });
         }
+        result
     }
 }
 
