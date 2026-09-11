@@ -29,7 +29,7 @@
 **已经真的有的**
 
 - 两端登录、签名目录、VLESS Reality、TUN、系统保护、微信国内直连、Claude 家宽链、家宽不可用不再偷偷退回云出口。
-- macOS 失败即报已合（PR #119）。Windows 周期遥测骨架在 `apps/windows/app/src-tauri/src/tono/telemetry.rs`，`connectFail` 事件名已列入白名单。
+- macOS 失败即报已合（PR #119）。Windows 周期遥测骨架在 `apps/windows/app/src-tauri/src/tono/telemetry.rs`，`connectFail` 事件名已列入白名单。本分支失败当时 `POST telemetry/failures`（stage / 稳定 code / 当时的目录节点名），周期窗口仍带同一事件。**不是** #138 的 3.5 连接日志。
 - Windows 插件 IPC 命名空间源码已改为 `tono-plugin-core`（`crates/tono-plugin-core/src/lib.rs` 的 `PluginBuilder::new` 与 `app/tests/core-plugin-namespace.test.ts`）。**实机尚未用新包复测**，`docs/WINDOWS_0_0_72_DEVICE_ACCEPTANCE.md` 仍记着 FAIL。
 - 目录与保护已经按传输层区分端点：macOS `ConfigPipeline.DialEndpoint.transport`；Windows `ProxyEndpoint.protocol` 含 `Udp`。hy2 要接的是这两处，不是新造一套防火墙。
 - 控制面目录合同已接受同节点 hy2 块（`password: {{TONO_CLIENT_UUID}}` + fingerprint，禁止 skip-cert-verify；迁移 0072）。**生产目录仍不塞块**，直到客户端准入合入。
@@ -173,8 +173,9 @@
 **G2.2 合 Windows 1.5+3.5** — PR #138 · M
 
 - 目标：Windows 客户的 `connectFail` 带阶段与代码，出现在 `GET customers/{id}/connections`；断开带字节。
+- 本分支已落地 **1.5**：`connectFail` 立刻 POST 已有的 `telemetry/failures`（node + stage + 稳定 code），不合并 #138 的 3.5 连接日志 / `bytesByRoute`。断开带字节仍等 B0 后合 #138。
 - 步骤：Windows 机器 rebase 到含 G1 修复的 `main`；`cargo test`；打包；一次故意连错节点或断网，确认时间线有失败。
-- 唯一测试：已有 3.5 分支测试保持绿；不要为合入再写套。
+- 唯一测试：tono-core `connect_failure_report_serializes_only_the_accepted_keys`；已有 3.5 分支测试保持绿。
 - 验收：同一账号 Windows 失败与 macOS 失败在客户 360 时间线格式一致（阶段、代码、节点名用目录名不是设备 id，macOS 已由 PR #123 保证）。
 
 **G2.3 失败文案对客户可读** — S

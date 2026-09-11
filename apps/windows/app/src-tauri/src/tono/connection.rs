@@ -403,7 +403,7 @@ async fn guard_snapshot(
 async fn fail_connect(state: &Arc<TonoState>, app: &AppHandle, err: String) -> String {
     logging!(error, Type::Service, "Tono: 连接事务失败: {err}");
     let observed = service::tono_kill_switch_status().await.ok();
-    let (plan, stage, action, armed, transport) = {
+    let (plan, stage, action, armed, transport, node) = {
         let mut inner = state.lock().await;
         if let Some(status) = &observed {
             inner.kill_switch = Some(status.clone());
@@ -464,19 +464,30 @@ async fn fail_connect(state: &Arc<TonoState>, app: &AppHandle, err: String) -> S
         if plan.mark_armed {
             inner.retry_attempt += 1;
         }
+        let node = inner.selected_node.clone();
         let transport = inner
             .selected_node
             .as_deref()
             .map(tono_core::catalog_transport_of_name);
-        (plan, stage, action, armed, transport)
+        (plan, stage, action, armed, transport, node)
     };
+    let code = failure::stable_error_code(&err).map(str::to_owned);
     state.audit().log(AuditEvent::ConnectFail {
         stage: stage.map(commands::stage_key),
         error: err.clone(),
         action,
         transport,
-        code: failure::stable_error_code(&err).map(str::to_owned),
+        code: code.clone(),
+        node: node.clone(),
     });
+    crate::tono::telemetry::spawn_connect_failure_report(
+        state,
+        stage.map(commands::stage_key),
+        &err,
+        node,
+        transport,
+        code.as_deref(),
+    );
     if plan.mark_armed {
         state
             .audit()

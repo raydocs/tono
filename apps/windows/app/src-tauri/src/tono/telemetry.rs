@@ -2,15 +2,17 @@
 //!
 //! Every ~20 minutes while signed in, ship a short redacted audit window to
 //! the control plane so operators can reconstruct network anomalies before
-//! Claude bans. Users can disable this in Settings. Failures never touch the
-//! connect / kill-switch path.
+//! Claude bans. Users can disable this in Settings. A connectFail also posts
+//! immediately to `telemetry/failures` (same consent, not the 3.5 log).
+//! Failures never touch the connect / kill-switch path.
 
 use std::{path::Path, sync::Arc, time::Duration};
 
 use serde_json::Value;
 use tauri::AppHandle;
 use tono_core::auth::{
-    ApiError, TELEMETRY_KIND_PERIODIC_WINDOW, TELEMETRY_SCHEMA_VERSION, TelemetryEvent, TelemetryWindowReport,
+    ApiError, ConnectFailureReport, TELEMETRY_KIND_PERIODIC_WINDOW, TELEMETRY_SCHEMA_VERSION,
+    UNKNOWN_CLASSIFIED_FAILURE, TelemetryEvent, TelemetryWindowReport,
 };
 
 use tono_logging::{Type, logging};
@@ -172,6 +174,81 @@ pub(crate) async fn spawn_periodic_for_auth_generation(state: &Arc<TonoState>, _
     if inner.sign_in_generation != generation {
         handle.abort();
     }
+}
+
+/// Best-effort `POST telemetry/failures` for one connectFail. Never blocks
+/// connect / kill-switch, and never retries a timeout. Uses the same consent
+/// as the periodic window — this is not the 3.5 raw connection log.
+pub(crate) fn spawn_connect_failure_report(
+    state: &Arc<TonoState>,
+    stage: Option<&'static str>,
+    error: &str,
+    node: Option<String>,
+    transport: Option<&'static str>,
+    code: Option<&str>,
+) {
+    if !state.audit().periodic_telemetry_enabled() || !state.audit().enabled() {
+        return;
+    }
+    let Some(node) = node.filter(|name| !name.trim().is_empty()) else {
+        return;
+    };
+    let stage = stage.unwrap_or("unknown").to_string();
+    let code = code
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(UNKNOWN_CLASSIFIED_FAILURE)
+        .to_string();
+    let error = {
+        let clipped: String = redact(error).chars().take(200).collect();
+        (!clipped.is_empty()).then_some(clipped)
+    };
+    let transport = transport
+        .filter(|value| *value == "tcp" || *value == "hy2")
+        .map(str::to_string);
+    let task_state = state.clone();
+    AsyncHandler::spawn(move || async move {
+        let (client, generation, tcp_delay_ms, exit_delay_ms) = {
+            let inner = task_state.lock().await;
+            if matches!(
+                inner.account_state,
+                crate::tono::state::AccountState::SignedOut | crate::tono::state::AccountState::Restoring
+            ) {
+                return;
+            }
+            (
+                inner.client.clone(),
+                inner.sign_in_generation,
+                inner.selected_tcp_delay_ms().map(|ms| ms as i64),
+                inner.selected_exit_delay_ms().map(|ms| ms as i64),
+            )
+        };
+        let os_version = AsyncHandler::spawn_blocking(|| tauri_plugin_tono_sysinfo::os_long_version())
+            .await
+            .unwrap_or_else(|_| "Unknown".to_string());
+        {
+            let inner = task_state.lock().await;
+            if inner.sign_in_generation != generation {
+                return;
+            }
+        }
+        let report = ConnectFailureReport {
+            ts: epoch_ms(),
+            stage,
+            code,
+            error,
+            node,
+            app_version: env!("CARGO_PKG_VERSION").to_string(),
+            os_version,
+            os_arch: std::env::consts::ARCH.to_string(),
+            platform: "windows".to_string(),
+            core_errors: None,
+            tcp_delay_ms,
+            exit_delay_ms,
+            transport,
+        };
+        let _ = client.upload_connect_failure(&report).await;
+    });
 }
 
 /// Probe whether the account session behind a `NotFound` upload is still
@@ -587,6 +664,27 @@ mod tests {
         assert_eq!(events[0].kind, "networkChange");
         assert_eq!(events[0].counter, Some(3));
         assert_eq!(events[1].transport.as_deref(), Some("hy2"));
+    }
+
+    #[test]
+    fn collect_events_copies_connect_fail_node_and_code() {
+        let dir = TempDir::new("connect-fail");
+        let path = dir.path().join("traffic-audit.jsonl");
+        let mut file = std::fs::File::create(&path).unwrap();
+        let now = epoch_ms();
+        writeln!(
+            file,
+            r#"{{"ts":{},"kind":"connectFail","stage":"checkingExit","error":"TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof","action":"fullRelease","transport":"tcp","code":"TONO_NODE_OR_CORE_UNREACHABLE","node":"Tokyo · Sakura"}}"#,
+            now - 100
+        )
+        .unwrap();
+        let (events, _) = collect_events(&path, now - 60_000, now).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, "connectFail");
+        assert_eq!(events[0].stage.as_deref(), Some("checkingExit"));
+        assert_eq!(events[0].code.as_deref(), Some("TONO_NODE_OR_CORE_UNREACHABLE"));
+        assert_eq!(events[0].node.as_deref(), Some("Tokyo · Sakura"));
+        assert_eq!(events[0].transport.as_deref(), Some("tcp"));
     }
 
     #[test]

@@ -113,9 +113,9 @@ impl StageFailure {
     }
 }
 
-/// First `TONO_*` / `CORE_*` token in a diagnostic string. The periodic
-/// telemetry window copies this onto `connectFail.code` so the customer
-/// timeline has a stable code, not just the prose error.
+/// First `TONO_*` / `CORE_*` token in a diagnostic string. The connectFail
+/// event and the immediate `telemetry/failures` POST copy this onto `code`
+/// so the customer timeline has a stable token, not just the prose error.
 pub(super) fn stable_error_code(raw: &str) -> Option<&str> {
     for (index, _) in raw.match_indices(|ch: char| ch == 'T' || ch == 'C') {
         let slice = &raw[index..];

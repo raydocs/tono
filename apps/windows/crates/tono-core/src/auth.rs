@@ -40,6 +40,10 @@ pub mod endpoints {
     pub const DIAGNOSTICS_REPORTS: &str = "diagnostics/reports";
     /// Periodic testing timeline windows (client default-on, user-disableable).
     pub const TELEMETRY_WINDOWS: &str = "telemetry/windows";
+    /// One classified connect failure, posted the moment it happens. This is
+    /// not the 3.5 raw connection log: the body is the same `connectFail`
+    /// shape the periodic window already carries (stage, code, node).
+    pub const TELEMETRY_FAILURES: &str = "telemetry/failures";
     /// Raw audit-log segments for the test programme. Unlike
     /// [`DIAGNOSTICS_REPORTS`] this carries hostnames, process paths and routes,
     /// so it is gated on its own product toggle and its own disclosure.
@@ -594,6 +598,92 @@ pub struct TelemetryWindowReport {
 
 pub const TELEMETRY_SCHEMA_VERSION: u32 = 1;
 pub const TELEMETRY_KIND_PERIODIC_WINDOW: &str = "periodic_window";
+/// Fallback `code` when the diagnostic string has no `TONO_*` / `CORE_*`
+/// token. Matches macOS `ProtectedFailureCode.unknownClassifiedFailure`.
+pub const UNKNOWN_CLASSIFIED_FAILURE: &str = "UNKNOWN_CLASSIFIED_FAILURE";
+
+/// One failed connect attempt, in the shape `telemetry/failures` accepts.
+/// Posted the moment it happens so the customer timeline does not wait for
+/// the next periodic window. Optionals that were not set stay off the wire.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectFailureReport {
+    pub ts: i64,
+    pub stage: String,
+    pub code: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub node: String,
+    pub app_version: String,
+    pub os_version: String,
+    pub os_arch: String,
+    pub platform: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub core_errors: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tcp_delay_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_delay_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transport: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectFailureReceipt {
+    pub accepted: bool,
+}
+
+fn clip_chars(value: &str, max: usize) -> String {
+    value.chars().take(max).collect()
+}
+
+impl ConnectFailureReport {
+    /// Clip and drop fields the Worker would 400, without inventing keys.
+    pub fn for_wire(&self) -> Result<Self, ApiError> {
+        let stage = clip_chars(self.stage.trim(), 40);
+        let code = clip_chars(self.code.trim(), 80);
+        let node = clip_chars(self.node.trim(), 120);
+        if stage.is_empty() || code.is_empty() || node.is_empty() {
+            return Err(ApiError::InvalidInput(
+                "connect failure report needs stage, code, and node".to_string(),
+            ));
+        }
+        let error = self.error.as_ref().and_then(|value| {
+            let clipped = clip_chars(value.trim(), 200);
+            (!clipped.is_empty()).then_some(clipped)
+        });
+        let core_errors = self.core_errors.as_ref().and_then(|lines| {
+            let clipped: Vec<String> = lines
+                .iter()
+                .filter(|line| !line.is_empty())
+                .take(20)
+                .map(|line| clip_chars(line, 200))
+                .filter(|line| !line.is_empty())
+                .collect();
+            (!clipped.is_empty()).then_some(clipped)
+        });
+        let transport = self.transport.as_deref().and_then(|value| match value {
+            "tcp" | "hy2" => Some(value.to_string()),
+            _ => None,
+        });
+        Ok(Self {
+            ts: self.ts,
+            stage,
+            code,
+            error,
+            node,
+            app_version: clip_chars(&self.app_version, 40),
+            os_version: clip_chars(&self.os_version, 80),
+            os_arch: clip_chars(&self.os_arch, 32),
+            platform: clip_chars(&self.platform, 20),
+            core_errors,
+            tcp_delay_ms: self.tcp_delay_ms,
+            exit_delay_ms: self.exit_delay_ms,
+            transport,
+        })
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 struct TelemetryWindowRequest<'a> {
@@ -976,6 +1066,20 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
             return Err(ApiError::InvalidResponse);
         }
         Ok(receipt)
+    }
+
+    /// `POST telemetry/failures`: one classified connectFail, the moment it
+    /// happens. Same consent as the periodic window. A timeout is never resent.
+    pub async fn upload_connect_failure(
+        &self,
+        report: &ConnectFailureReport,
+    ) -> Result<ConnectFailureReceipt, ApiError> {
+        let prepared = report.for_wire()?;
+        let body = serde_json::to_string(&prepared).map_err(|_| ApiError::InvalidResponse)?;
+        let response = self
+            .authorized(HttpMethod::Post, endpoints::TELEMETRY_FAILURES, Some(body))
+            .await?;
+        decode_json(&response)
     }
 
     /// `POST diagnostics/logs`: upload one gzip segment of the local audit log.
@@ -2368,6 +2472,114 @@ mod tests {
         let mut step_keys: Vec<&str> = step.keys().map(String::as_str).collect();
         step_keys.sort_unstable();
         assert_eq!(step_keys, ["elapsedMs", "key", "state"]);
+    }
+
+    fn sample_connect_failure() -> ConnectFailureReport {
+        ConnectFailureReport {
+            ts: 1_725_000_000_000,
+            stage: "checkingExit".to_string(),
+            code: "CORE_EXIT_UNREACHABLE".to_string(),
+            error: None,
+            node: "Tokyo · Sakura".to_string(),
+            app_version: "0.0.72".to_string(),
+            os_version: "Windows 11 Pro".to_string(),
+            os_arch: "x86_64".to_string(),
+            platform: "windows".to_string(),
+            core_errors: Some(vec!["dial tcp: i/o timeout".to_string()]),
+            tcp_delay_ms: None,
+            exit_delay_ms: None,
+            transport: Some("tcp".to_string()),
+        }
+    }
+
+    #[test]
+    fn connect_failure_report_serializes_only_the_accepted_keys() {
+        let accepted = [
+            "ts", "stage", "code", "error", "node", "appVersion", "osVersion", "osArch",
+            "platform", "coreErrors", "tcpDelayMs", "exitDelayMs", "transport",
+        ];
+        let value = serde_json::to_value(sample_connect_failure()).unwrap();
+        let keys: Vec<&str> = value.as_object().unwrap().keys().map(String::as_str).collect();
+        assert!(keys.iter().all(|key| accepted.contains(key)), "{keys:?}");
+        assert_eq!(value["platform"], "windows");
+        assert!(value.get("error").is_none());
+        assert!(value.get("tcpDelayMs").is_none());
+        assert_eq!(value["coreErrors"][0], "dial tcp: i/o timeout");
+        assert_eq!(value["transport"], "tcp");
+    }
+
+    #[test]
+    fn connect_failure_report_drops_an_invalid_transport_and_clips_core_errors() {
+        let mut report = sample_connect_failure();
+        report.transport = Some("quic".to_string());
+        report.core_errors = Some(
+            (0..25)
+                .map(|_| "x".repeat(400))
+                .chain(std::iter::once(String::new()))
+                .collect(),
+        );
+        let prepared = report.for_wire().unwrap();
+        assert!(prepared.transport.is_none());
+        assert_eq!(prepared.core_errors.as_ref().unwrap().len(), 20);
+        assert!(prepared
+            .core_errors
+            .as_ref()
+            .unwrap()
+            .iter()
+            .all(|line| line.chars().count() == 200));
+    }
+
+    #[tokio::test]
+    async fn connect_failure_posts_the_unwrapped_body() {
+        let (client, mock, store) = test_client(|request| {
+            assert!(request.url.ends_with("api/v1/telemetry/failures"));
+            assert_eq!(request.method, HttpMethod::Post);
+            let body: serde_json::Value =
+                serde_json::from_str(request.json_body.as_deref().unwrap()).unwrap();
+            assert!(body.get("report").is_none());
+            assert_eq!(body["kind"], serde_json::Value::Null);
+            assert_eq!(body["stage"], "checkingExit");
+            assert_eq!(body["code"], "CORE_EXIT_UNREACHABLE");
+            assert_eq!(body["node"], "Tokyo · Sakura");
+            json(202, r#"{"accepted":true}"#)
+        });
+        store.set_refresh_token("r0").unwrap();
+        client
+            .adopt(&auth_response("access-1", None))
+            .await
+            .unwrap();
+        let receipt = client
+            .upload_connect_failure(&sample_connect_failure())
+            .await
+            .unwrap();
+        assert!(receipt.accepted);
+        assert_eq!(mock.count_to("telemetry/failures"), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn connect_failure_upload_never_retries_a_timeout() {
+        let (client, mock, store) = test_client(|_| {
+            Err(ApiError::Transport {
+                kind: TransportKind::Timeout,
+                message: "timeout".to_string(),
+            })
+        });
+        store.set_refresh_token("r0").unwrap();
+        client
+            .adopt(&auth_response("access-1", None))
+            .await
+            .unwrap();
+        assert!(
+            client
+                .upload_connect_failure(&sample_connect_failure())
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            mock.count_to("telemetry/failures"),
+            1,
+            "a possibly-delivered failure must never be sent twice"
+        );
     }
 
     #[tokio::test]

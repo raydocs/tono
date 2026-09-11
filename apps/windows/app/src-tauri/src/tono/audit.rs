@@ -117,6 +117,11 @@ pub enum AuditEvent {
         /// stable code even before the next periodic window upload.
         #[serde(skip_serializing_if = "Option::is_none")]
         code: Option<String>,
+        /// Catalog display name at the moment of failure. Flattening would
+        /// otherwise attribute the row to whatever `selectedServer` is at
+        /// upload time.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        node: Option<String>,
     },
     ConnectOk {
         node: String,
@@ -296,12 +301,13 @@ impl AuditEvent {
                 node: redact(&node),
                 transport,
             },
-            ConnectFail { stage, error, action, transport, code } => ConnectFail {
+            ConnectFail { stage, error, action, transport, code, node } => ConnectFail {
                 stage,
                 error: redact(&error),
                 action,
                 transport,
                 code,
+                node: node.as_deref().map(redact),
             },
             ConnectOk { node, elapsed_ms, transport } => ConnectOk {
                 node: redact(&node),
@@ -919,6 +925,7 @@ mod tests {
                 action: "fullRelease",
                 transport: None,
                 code: None,
+                node: Some("n token=abc".to_string()),
             },
             AuditEvent::ConnectOk {
                 node: "n token=abc".to_string(),
