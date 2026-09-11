@@ -224,3 +224,7 @@ Start-Process $setup.FullName
 
 Then: launch 0.0.72 → connect. Pill must stay **Connecting…**, not Cancel. `securingDNS` must pass; dashboard rate and Activity must leave controller retry; disconnect restores DNS. If it fails, copy diagnostics (need Failed stage + Error, not empty). Artifact retention is 7 days.
 
+## 9. Next candidate (Backup UDP column) — building
+
+`b40ff149` adds the dedicated Backup UDP node group and `X-Tono-Accept: hy2`. Windows candidate workflow run `34584323215` was started by that push. **Do not install the §8 package if the goal is to show testers the Dedirock hy2 rows** — that NSIS predates the column. Wait for `34584323215` (or the artifact named `tono-windows-0.0.72-candidate-b40ff149…`) and record its SHA-256 here before any device pass. Still not a G1.1 pass until Win10 Encrypted DNS reaches Connected.
+

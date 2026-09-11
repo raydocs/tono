@@ -133,3 +133,21 @@ dry-run：`{"xrayClients":43,"xrayPid":658,"xrayUntouched":true,"dryRun":true}`�
 东京不要跑 `--apply`：入站 UDP 仍被商家拦，改鉴权也测不出客户路径。生产目录仍不 PUT hy2 块。家宽移动还没走 Dedirock hy2。
 
 **复检（2026-09-11，本云端美国，无杭州 SSH）：** 东京 / Dedirock TCP 443 通；SNI `www.bing.com` 仍是微软 `CN=r.bing.com`；错误 SNI `www.microsoft.com` 仍是 `tlsv1 alert internal error`。两台 UDP 443 仍超时。hy2 证书 SAN 仍是 provisioner 的 `DNS:www.microsoft.com`；从外网打不到 UDP，握手无法在本云确认。未改国内机、未动 `tono-xray`。
+
+## Dedirock 五台 hy2（2026-09-11，给用户手选测）
+
+四台新机 `--hy2 --apply` + `--hy2-sync-identities --apply`；Grove（`198.12.84.154`）原先就有，未再 `--hy2 --apply`。证书均为 `CN=www.microsoft.com` + `SAN DNS:www.microsoft.com`。UFW inactive。口令不写在这里。
+
+| 目录基名 | IPv4 | xray PID（未换） | hy2 指纹（SHA-256） |
+|---|---|---|---|
+| Buffalo · Niagara | `23.94.79.123` | 335056 | `1E:53:74:A7:9B:DB:83:B0:4C:3D:3C:84:72:2C:03:21:1D:1C:94:1C:2D:E9:F9:24:31:D2:19:8B:A7:21:2C:AD` |
+| Buffalo · Erie | `198.46.140.254` | 305356 | `4A:66:F1:06:76:CA:88:11:86:BE:35:0D:16:B3:F8:6C:B3:6F:9C:89:6E:F4:45:A6:92:D5:CC:0B:C8:B5:B2:01` |
+| Los Angeles · Sunset | `192.236.205.232` | 130727 | `0F:F3:AB:6B:1B:EC:3A:37:66:F8:89:55:A8:40:64:AE:73:EA:47:24:CB:4D:86:02:78:0E:06:DF:BC:EC:EE:B7` |
+| Los Angeles · Mesa | `107.174.123.27` | 137255 | `F5:97:31:34:7B:F0:68:D7:9F:9D:9E:78:C0:74:E4:68:6B:98:13:83:A5:C9:02:9A:56:50:E7:03:E6:AF:BA:41` |
+| Los Angeles · Grove（`US-VLESS-Reality`） | `198.12.84.154` | 658 | `A4:A8:30:89:80:00:4C:8A:5C:DA:98:59:7B:87:98:66:71:F2:30:44:5D:F8:63:C2:3D:38:0F:01:2C:72:F9:09` |
+
+杭州 `47.110.84.71` 只出站（`ss-server` PID **548** / **7129** 未换）：五台 `hysteria ping 1.1.1.1:443` 与 `google.com:443` 均为 **EXIT 0**。探测文件用完已删。xray PID 探测前后未换。
+
+同日杭州复检东京 `45.8.173.206`：TCP 443 五次 70–96ms；SNI `www.bing.com` 仍是微软 `CN=r.bing.com`；入站 UDP 443 仍超时。Panstar 工单 **#529**（待处理）。东京不要 `--hy2-sync-identities --apply`。
+
+本分支客户端把这五条 ` · hy2` 放在独立「备用 UDP」栏（城市 · 代号 · 备用通道）。新包目录 GET 带 `X-Tono-Accept: hy2`。**生产目录仍不 PUT**：`main` Worker 还不会剥 hy2，先 PUT 会把旧包打挂。G2.8 自动切换仍关。家宽三网未测。
