@@ -5,6 +5,7 @@ import {
   filterCatalogYamlForUser,
   filterHy2CatalogForViewer,
   hy2CatalogEmailAllowlist,
+  requestAcceptsHy2Catalog,
 } from './catalog-yaml';
 import { ApiError } from './errors';
 
@@ -215,6 +216,7 @@ export async function publicManagedCatalog(
     deviceId?: string | null;
     filterHomeExits?: boolean;
     acceptHy2?: boolean;
+    hy2AcceptHeader?: string | null;
   },
 ) {
   const row = await e.DB.prepare(
@@ -259,7 +261,9 @@ export async function publicManagedCatalog(
     }
   }
   if (options?.userId) {
-    const keepHy2 = Boolean(options.acceptHy2) || (await userMaySeeHy2Catalog(e, options.userId));
+    const keepHy2 = Boolean(options.acceptHy2)
+      || requestAcceptsHy2Catalog(options.hy2AcceptHeader)
+      || (await userMaySeeHy2Catalog(e, options.userId));
     served = filterHy2CatalogForViewer(served, keepHy2);
   }
   return {
