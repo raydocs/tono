@@ -7,10 +7,10 @@ nonisolated struct TrafficData: Sendable {
     let down: Int64
 }
 
-// MARK: - Clash WebSocket Manager
+// MARK: - Core WebSocket Manager
 
 @MainActor
-final class ClashWebSocket {
+final class CoreWebSocket {
     private let baseURL: URL
     private let secret: String
     private var trafficTask: URLSessionWebSocketTask?
