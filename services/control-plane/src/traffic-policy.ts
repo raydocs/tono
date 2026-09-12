@@ -124,6 +124,9 @@ export function canonicalTrafficPolicy(value: unknown, trusted = false): Traffic
     'pushplus.plus', 'baostock.com', 'sse.com.cn', 'szse.cn', 'zoom.us',
     'zoom.com',
     'zoomgov.com', 'oray.com', 'sunlogin.com', 'edu.cn',
+    'taobao.com', 'tmall.com', 'alipay.com', 'alicdn.com',
+    'jd.com', 'douyin.com', 'weibo.com', 'meituan.com',
+    'dianping.com', 'pinduoduo.com', 'amap.com',
   ];
   const allowedWebExactHosts = ['ykimg.alicdn.com'];
   // NARROWING THESE LISTS IS A BREAKING OPERATION. `publicTrafficPolicy` runs the
@@ -162,6 +165,9 @@ export function canonicalTrafficPolicy(value: unknown, trusted = false): Traffic
     'cninfo.com.cn', 'ccxe.com.cn', 'pushplus.plus', 'baostock.com',
     'sse.com.cn', 'szse.cn', 'zoom.us', 'zoom.com', 'zoomgov.com', 'oray.com',
     'sunlogin.com', 'edu.cn', '163.com', 'netease.com', '126.net',
+    'taobao.com', 'tmall.com', 'alipay.com', 'alicdn.com',
+    'jd.com', 'douyin.com', 'weibo.com', 'meituan.com',
+    'dianping.com', 'pinduoduo.com', 'amap.com',
   ];
   const protectedSuffixes = [
     'anthropic.com', 'claude.ai', 'claude.com', 'claude.app', 'claude.site',

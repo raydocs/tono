@@ -57,6 +57,9 @@ extension ConfigPipeline {
         "pushplus.plus", "baostock.com", "sse.com.cn", "szse.cn",
         "zoom.us", "zoom.com", "zoomgov.com", "oray.com", "sunlogin.com",
         "edu.cn", "163.com", "netease.com", "126.net",
+        "taobao.com", "tmall.com", "alipay.com", "alicdn.com",
+        "jd.com", "douyin.com", "weibo.com", "meituan.com",
+        "dianping.com", "pinduoduo.com", "amap.com",
     ]
 
     /// Exact host families that may be placed in the application-direct

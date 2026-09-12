@@ -116,6 +116,20 @@ pub const ALLOWED_WEB_DOMAIN_SUFFIXES: &[&str] = &[
     "oray.com",
     "sunlogin.com",
     "edu.cn",
+    "163.com",
+    "netease.com",
+    "126.net",
+    "taobao.com",
+    "tmall.com",
+    "alipay.com",
+    "alicdn.com",
+    "jd.com",
+    "douyin.com",
+    "weibo.com",
+    "meituan.com",
+    "dianping.com",
+    "pinduoduo.com",
+    "amap.com",
 ];
 
 /// Domain suffixes allowed for DIRECT routing (Mac
@@ -882,7 +896,10 @@ mod tests {
         );
         assert!(is_allowed_direct_suffix("dingtalk.com"));
         assert!(is_allowed_direct_suffix("feishu.cn"));
+        assert!(is_allowed_direct_suffix("taobao.com"));
+        assert!(is_allowed_direct_suffix("douyin.com"));
         assert!(!is_allowed_direct_suffix("snssdk.com"));
+        assert!(!is_allowed_direct_suffix("googleapis.com"));
         assert!(!is_allowed_direct_suffix("evil-dingtalk.com"));
     }
 

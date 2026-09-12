@@ -4339,6 +4339,23 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     }
   });
 
+  it('admits product China web suffixes as directSuffixes', async () => {
+    const preview = await admin('traffic-policy', {
+      policy: {
+        version: 3,
+        domains: [],
+        mediaEndpoints: [],
+        webDomains: [],
+        directSuffixes: [
+          { host: 'taobao.com', ports: [80, 443] },
+          { host: 'douyin.com', ports: [443] },
+        ],
+      },
+      dryRun: true,
+    }, 'PUT');
+    expect(preview.status).toBe(200);
+  });
+
   it('clears a stored signature when an unsigned policy replaces a signed one', async () => {
     // Otherwise the old signature ships alongside new bytes and every client
     // that verifies rejects the whole policy — managed direct routing off,

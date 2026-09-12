@@ -414,9 +414,26 @@ final class CoreRouteClassificationTests: XCTestCase {
         XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(
             "dingtalk.com"
         ))
+        XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(
+            "taobao.com"
+        ))
+        XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(
+            "douyin.com"
+        ))
         XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectSuffix(
             "snssdk.com"
         ))
+        XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectSuffix(
+            "googleapis.com"
+        ))
+        XCTAssertTrue(
+            ConfigPipeline.ManagedDirectRuntimePolicy.productWebDirectSuffixes
+                .contains(where: { $0.host == "taobao.com" })
+        )
+        XCTAssertFalse(
+            ConfigPipeline.ManagedDirectRuntimePolicy.productWebDirectSuffixes
+                .contains(where: { $0.host == "snssdk.com" })
+        )
         XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectDomain(
             "evil-dingtalk.com"
         ))
