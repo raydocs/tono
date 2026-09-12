@@ -326,8 +326,16 @@ pub(crate) async fn stage_runtime(
         // The manifest may already be in place while `config.yaml` is not, which would leave it
         // claiming a remote cache belongs to a url the running core is not using. Discarding it
         // costs the next staging its skips and its cache reuse; keeping it risks a cache that no
-        // staging will ever discard again.
-        if let Err(discard) = remove_staged_file(&generation.join(MANIFEST_FILE_NAME)).await {
+        // later staging will ever discard again. That trade is only safe when the commit is
+        // provably uncommitted: a timeout detaches the rename, so `config.yaml` may already be the
+        // new bytes on disk (and the rename's own target may be the manifest path, when the
+        // manifest write is the one that timed out), and the manifest is the only surviving record
+        // tying those bytes to the bundle. Deleting it then races the in-flight rename and orphans
+        // a configuration the next restart would silently honor — the very divergence this
+        // rollback exists to prevent.
+        if replace_provably_did_not_commit(&error)
+            && let Err(discard) = remove_staged_file(&generation.join(MANIFEST_FILE_NAME)).await
+        {
             tracing::warn!(
                 error = %discard,
                 "Left a manifest behind that describes an uncommitted configuration"
@@ -444,17 +452,50 @@ pub(super) async fn remove_staged_file(path: &Path) -> std::io::Result<()> {
     .await
 }
 
-/// Put `staged` in place of `destination`, cleaning up the temporary on any failure.
+/// Whether an `Err` from [`crate::core::atomic_file::replace`] is proof the rename did not
+/// commit.
+///
+/// Every arm but one is proof. The `MoveFileExW` arm returns `last_os_error()` only once the
+/// syscall is done, so the rename either committed or failed before the caller saw the error; the
+/// `JoinError` (panic) arm fires when the `spawn_blocking` closure panicked, and that closure
+/// does nothing after `MoveFileExW` returns, so a panic means the syscall did not return success.
+/// Only the timeout arm is unproven: `tokio::time::timeout` drops the `JoinHandle`, which
+/// *detaches* the `spawn_blocking` task rather than aborting it, so a `MoveFileExW` that has not
+/// yet returned may still commit the rename after the caller has observed `Err(TimedOut)`. Reading
+/// that arm as "destination untouched" — and reclaiming the staged source it moved, or discarding
+/// a manifest describing the destination it targeted — races the in-flight rename and can orphan a
+/// destination the detached task goes on to commit.
+fn replace_provably_did_not_commit(error: &std::io::Error) -> bool {
+    error.kind() != std::io::ErrorKind::TimedOut
+}
+
+/// Reclaim the staged temporary when the rename is provably finished, and leave it behind when
+/// the outcome is unproven.
+///
+/// On `Ok` the rename consumed the source, so there is nothing to reclaim. On a provable failure
+/// ([`replace_provably_did_not_commit`]) the source is safe to unlink, and reclaiming it keeps a
+/// stranded temporary out of the generation. On a timeout the detached rename may still be
+/// holding — or about to hold — the source path, so the temporary is left in place as a bounded,
+/// housekeeping-visible leak rather than unlinked under an in-flight `MoveFileExW`.
+async fn reclaim_staged_temp(staged: &Path, result: &std::io::Result<()>) {
+    if let Err(error) = result
+        && replace_provably_did_not_commit(error)
+    {
+        let _ = tokio::fs::remove_file(staged).await;
+    }
+}
+
+/// Put `staged` in place of `destination`, reclaiming the temporary unless the rename is unproven.
 ///
 /// Replace rather than overwrite: a rename detaches the handles the running core holds on the
 /// previous file instead of writing underneath them, so a core mid-read sees one file or the
-/// other and never a half-written one.
+/// other and never a half-written one. On Windows the rename runs on a blocking worker behind a
+/// deadline; a timeout abandons the wait, not the rename, so its temporary is left behind rather
+/// than unlinked under an in-flight `MoveFileExW`.
 async fn replace_staged_file(staged: &Path, destination: &Path) -> std::io::Result<()> {
     let result =
         while_the_core_lets_go(|| crate::core::atomic_file::replace(staged, destination)).await;
-    if result.is_err() {
-        let _ = tokio::fs::remove_file(staged).await;
-    }
+    reclaim_staged_temp(staged, &result).await;
     result
 }
 
@@ -867,5 +908,131 @@ mod tests {
         let plan = plan_stage(&previous, &[], &[]);
 
         assert_eq!(plan.hygiene_deletes, ["a.yaml", "z.yaml"]);
+    }
+
+    // --- the atomic-replace timeout is unproven, not "did not commit" ---
+
+    fn err_of(kind: std::io::ErrorKind) -> std::io::Error {
+        std::io::Error::new(kind, "synthetic")
+    }
+
+    async fn staging_temp_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "tono-staging-{label}-{}-{}",
+            std::process::id(),
+            STAGING_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn only_a_timeout_may_still_be_committing_every_other_error_proofably_did_not() {
+        // The MoveFileExW and JoinError arms provably did not commit; only the deadline arm is
+        // unproven, so it is the one error kind that must not be read as "destination untouched".
+        assert!(
+            !replace_provably_did_not_commit(&err_of(std::io::ErrorKind::TimedOut)),
+            "a timeout detaches the rename, so it may still commit afterwards"
+        );
+        for kind in [
+            std::io::ErrorKind::NotFound,
+            std::io::ErrorKind::PermissionDenied,
+            std::io::ErrorKind::AlreadyExists,
+            std::io::ErrorKind::Interrupted,
+            std::io::ErrorKind::UnexpectedEof,
+            std::io::ErrorKind::BrokenPipe,
+            std::io::ErrorKind::Other,
+            std::io::ErrorKind::NotADirectory,
+            std::io::ErrorKind::IsADirectory,
+        ] {
+            assert!(
+                replace_provably_did_not_commit(&err_of(kind)),
+                "{kind:?} provably did not commit and must stay safe to reclaim"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_timeout_leaves_the_staged_temp_behind_for_the_detached_rename() {
+        // The fix: a `TimedOut` is unproven, so the staged source must survive — unlinking it races
+        // a `MoveFileExW` that may still be holding (or about to hold) that very path.
+        let dir = staging_temp_dir("timeout-leave").await;
+        let staged = dir.join(".config.yaml.staging-1-0");
+        std::fs::write(&staged, b"new").unwrap();
+        let unproven: std::io::Result<()> = Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "atomic replace did not complete before its deadline",
+        ));
+        reclaim_staged_temp(&staged, &unproven).await;
+        assert!(
+            staged.exists(),
+            "a timed-out rename may still commit, so its source must not be unlinked"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn a_provable_failure_reclaims_the_staged_temp() {
+        // No regression: an error that provably did not commit still reclaims the temporary — the
+        // behaviour every non-timeout arm had before this fix.
+        let dir = staging_temp_dir("provable-reclaim").await;
+        let staged = dir.join(".config.yaml.staging-1-0");
+        std::fs::write(&staged, b"new").unwrap();
+        let provable: std::io::Result<()> = Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "source vanished",
+        ));
+        reclaim_staged_temp(&staged, &provable).await;
+        assert!(
+            !staged.exists(),
+            "a provable commit failure must still reclaim its temporary"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn a_successful_rename_leaves_nothing_for_reclaim_to_unlink() {
+        // On `Ok` the rename consumed the source, so reclaim must not touch it. Its presence proves
+        // reclaim neither unlinks nor recreates on success.
+        let dir = staging_temp_dir("ok-leave").await;
+        let staged = dir.join(".config.yaml.staging-1-0");
+        std::fs::write(&staged, b"new").unwrap();
+        reclaim_staged_temp(&staged, &Ok(())).await;
+        assert!(
+            staged.exists(),
+            "reclaim must not unlink a temporary after a successful rename"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn replace_staged_file_still_reclaims_a_temp_that_failed_provably() {
+        // End-to-end on the real path: a non-timeout rename failure (here, into a directory that
+        // does not exist) must still reclaim its staged temporary, preserving the pre-fix behaviour
+        // for every error the rename provably did not commit.
+        let dir = staging_temp_dir("real-fail").await;
+        let staged = dir.join(".state.json.staging-1-0");
+        std::fs::write(&staged, b"new").unwrap();
+        let missing_destination = dir.join("no/such/dir/destination");
+
+        let result = replace_staged_file(&staged, &missing_destination).await;
+
+        assert!(
+            result.is_err(),
+            "renaming into a missing directory must fail"
+        );
+        assert!(
+            result.unwrap_err().kind() != std::io::ErrorKind::TimedOut,
+            "the host-platform failure must not be misclassified as a timeout"
+        );
+        assert!(
+            !missing_destination.exists(),
+            "the rename must not have committed into a nonexistent directory"
+        );
+        assert!(
+            !staged.exists(),
+            "a provable failure must reclaim the staged temporary rather than leave it to leak"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
