@@ -161,6 +161,10 @@ pub const ALLOWED_WEB_DOMAIN_SUFFIXES: &[&str] = &[
     "xylink.com",
     "zhumu.me",
     "quanshi.com",
+    "zhihu.com",
+    "zhimg.com",
+    "goofish.com",
+    "1688.com",
 ];
 
 /// Domain suffixes allowed for DIRECT routing (Mac
@@ -935,6 +939,9 @@ mod tests {
         assert!(is_allowed_direct_suffix("kugou.com"));
         assert!(is_allowed_direct_suffix("ximalaya.com"));
         assert!(is_allowed_direct_suffix("xylink.com"));
+        assert!(is_allowed_direct_suffix("zhihu.com"));
+        assert!(is_allowed_direct_suffix("goofish.com"));
+        assert!(!is_allowed_direct_suffix("alibaba.com"));
         assert!(!is_allowed_direct_suffix("snssdk.com"));
         assert!(!is_allowed_direct_suffix("googleapis.com"));
         assert!(!is_allowed_direct_suffix("evil-dingtalk.com"));

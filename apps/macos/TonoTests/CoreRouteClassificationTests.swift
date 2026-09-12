@@ -438,6 +438,12 @@ final class CoreRouteClassificationTests: XCTestCase {
         XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(
             "xylink.com"
         ))
+        XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(
+            "zhihu.com"
+        ))
+        XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(
+            "goofish.com"
+        ))
         XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectSuffix(
             "snssdk.com"
         ))

@@ -68,6 +68,7 @@ extension ConfigPipeline {
         "kugou.com", "kgimg.com", "kuwo.cn", "migu.cn",
         "ximalaya.com", "qingting.fm", "lizhi.fm",
         "xylink.com", "zhumu.me", "quanshi.com",
+        "zhihu.com", "zhimg.com", "goofish.com", "1688.com",
     ]
 
     /// Exact host families that may be placed in the application-direct

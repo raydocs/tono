@@ -4354,6 +4354,8 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
           { host: 'voovmeeting.com', ports: [443] },
           { host: 'kugou.com', ports: [443] },
           { host: 'xylink.com', ports: [443] },
+          { host: 'zhihu.com', ports: [443] },
+          { host: 'goofish.com', ports: [443] },
         ],
       },
       dryRun: true,
