@@ -1,4 +1,4 @@
-import type { ClashMode } from "./ClashMode";
+import type { CoreMode } from "./CoreMode";
 import type { FindProcessMode } from "./FindProcessMode";
 import type { GeoXUrl } from "./GeoXUrl";
 import type { LogLevel } from "./LogLevel";
@@ -23,7 +23,7 @@ export type BaseConfig = {
     bindAddress: string;
     inboundTfo: boolean;
     inboundMptcp: boolean;
-    mode: ClashMode;
+    mode: CoreMode;
     unifiedDelay: boolean;
     logLevel: LogLevel;
     ipv6: boolean;

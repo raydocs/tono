@@ -87,7 +87,7 @@ mod app_init {
             .plugin(
                 tono_plugin_core::Builder::new()
                     .protocol(tono_plugin_core::models::Protocol::LocalSocket)
-                    .socket_path(crate::config::IClashTemp::guard_external_controller_ipc())
+                    .socket_path(crate::config::IRuntimeTemp::guard_external_controller_ipc())
                     .build(),
             );
 

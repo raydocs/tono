@@ -1,4 +1,4 @@
-use super::{IClashTemp, TonoPreferences};
+use super::{IRuntimeTemp, TonoPreferences};
 use crate::{
     core::{handle::Handle, tray},
     process::AsyncHandler,
@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::OnceCell;
 
 pub struct Config {
-    clash_config: Draft<IClashTemp>,
+    runtime_config: Draft<IRuntimeTemp>,
     preferences: Draft<TonoPreferences>,
 }
 
@@ -22,15 +22,15 @@ impl Config {
         CONFIG
             .get_or_init(|| async {
                 Self {
-                    clash_config: Draft::new(IClashTemp::new().await),
+                    runtime_config: Draft::new(IRuntimeTemp::new().await),
                     preferences: Draft::new(TonoPreferences::new().await),
                 }
             })
             .await
     }
 
-    pub async fn clash() -> Draft<IClashTemp> {
-        Self::global().await.clash_config.clone()
+    pub async fn runtime() -> Draft<IRuntimeTemp> {
+        Self::global().await.runtime_config.clone()
     }
 
     pub async fn preferences() -> Draft<TonoPreferences> {
