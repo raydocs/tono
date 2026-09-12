@@ -134,19 +134,18 @@ export const createSharedSubscriptionEntry = (
     connectStartedAt = Date.now()
     const attempt = ++connectEpoch
     clearConnectWatchdog()
-    // connect() can hang forever on a half-open handshake. The tray flyout
-    // has no other caller that re-enters connectWs, so this watchdog is the
-    // only automatic recovery.
-    entry.connectWatchdog = setTimeout(() => {
-      if (attempt !== connectEpoch || entry.closed || entry.ws) return
-      connectEpoch += 1
-      entry.connecting = false
-      entry.connectWatchdog = null
-      clearReconnectTimer()
-      if (!entry.closed) {
-        entry.reconnectTimer = setTimeout(entry.connectWs, nextReconnectDelay())
+    // Watchdog: a connect() that never settles (half-open WS handshake) would
+    // wedge the entry on the first-call path — nothing else re-enters
+    // connectWs(). Supersede it after CONNECT_TIMEOUT_MS; cleared in `finally`
+    // so a prompt settle never triggers a spurious supersede.
+    const watchdog = setTimeout(() => {
+      if (attempt === connectEpoch && entry.connecting && !entry.closed) {
+        ++connectEpoch
+        entry.connecting = false
+        void entry.connectWs()
       }
     }, CONNECT_TIMEOUT_MS)
+    entry.connectWatchdog = watchdog
     try {
       const ws = await connect()
       if (attempt !== connectEpoch || entry.closed) {
@@ -201,6 +200,7 @@ export const createSharedSubscriptionEntry = (
         }
       }
     } finally {
+      clearTimeout(watchdog)
       if (attempt === connectEpoch) {
         clearConnectWatchdog()
         entry.connecting = false

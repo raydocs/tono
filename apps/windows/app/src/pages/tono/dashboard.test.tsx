@@ -235,7 +235,7 @@ describe('dashboard action-error ownership', () => {
     expect(mocks.tonoRetryNow).not.toHaveBeenCalled()
   })
 
-  it('drops a stale retry-now banner after protection is released', async () => {
+  it('clears the stale protected-offline retry error after releasing back to notConnected', async () => {
     mocks.status = makeStatus({ selectedServer: 'US West 1' })
     mocks.mutateTonoStatus.mockResolvedValue({
       data: makeStatus({
@@ -249,14 +249,23 @@ describe('dashboard action-error ownership', () => {
     )
     const view = renderDashboard()
 
+    // A connect failure that arms the fail-closed barrier records a `retryNow`
+    // owner so "Try again" drives `tono_retry_now` while blocked.
     fireEvent.click(
-      screen.getByRole('button', {
-        name: 'Standby — Click to connect',
-      }),
+      screen.getByRole('button', { name: 'Standby — Click to connect' }),
     )
     await waitFor(() => expect(mocks.tonoConnect).toHaveBeenCalled())
+    await waitFor(() => expect(mocks.mutateTonoStatus).toHaveBeenCalled())
 
+    // The machine is now protected offline; the action error is hidden there.
     mocks.status = makeStatus({
+      killSwitch: {
+        wanted: true,
+        live: true,
+        mode: 'blocked',
+        endpoints: [],
+        last_error: null,
+      },
       uiState: 'protectedOffline',
       selectedServer: 'US West 1',
       protectionBlocked: true,
@@ -266,8 +275,24 @@ describe('dashboard action-error ownership', () => {
         <DashboardPage />
       </MemoryRouter>,
     )
-    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByTestId('tono-action-error-message')).toBeNull()
 
+    // The user releases the barrier via the pill confirm dialog — the path that
+    // bypasses `handleDisconnect` and therefore never cleared the error itself.
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Protected, not connected — Click to restore internet',
+      }),
+    )
+    mocks.mutateTonoStatus.mockResolvedValue({
+      data: makeStatus({ selectedServer: 'US West 1' }),
+    })
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Restore Normal Internet' }),
+    )
+    await waitFor(() => expect(mocks.tonoDisconnect).toHaveBeenCalled())
+
+    // Back in a clean notConnected state after the release.
     mocks.status = makeStatus({ selectedServer: 'US West 1' })
     view.rerender(
       <MemoryRouter>
@@ -275,13 +300,24 @@ describe('dashboard action-error ownership', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+    // The stale `retryNow` error must not resurface: `tono_retry_now` is a
+    // silent no-op from notConnected, so "Try again" would misfire. The primary
+    // Standby pill remains the reconnect control and must fire `tono_connect`.
+    await waitFor(() => {
+      expect(screen.queryByTestId('tono-action-error-message')).toBeNull()
+      expect(screen.queryByRole('alert')).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+    })
+    expect(
+      screen.getByRole('button', { name: 'Standby — Click to connect' }),
+    ).toBeDefined()
+
+    mocks.tonoConnect.mockReset().mockResolvedValue(undefined)
+    mocks.tonoRetryNow.mockReset()
     fireEvent.click(
-      screen.getByRole('button', {
-        name: 'Standby — Click to connect',
-      }),
+      screen.getByRole('button', { name: 'Standby — Click to connect' }),
     )
-    await waitFor(() => expect(mocks.tonoConnect).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(mocks.tonoConnect).toHaveBeenCalledTimes(1))
     expect(mocks.tonoRetryNow).not.toHaveBeenCalled()
   })
 
