@@ -127,6 +127,11 @@ export function canonicalTrafficPolicy(value: unknown, trusted = false): Traffic
     'taobao.com', 'tmall.com', 'alipay.com', 'alicdn.com',
     'jd.com', 'douyin.com', 'weibo.com', 'meituan.com',
     'dianping.com', 'pinduoduo.com', 'amap.com',
+    'douyu.com', 'huya.com', 'kuaishou.com', 'yximgs.com', 'yy.com',
+    'ixigua.com', 'mgtv.com', 'acfun.cn', 'sohu.com', '1905.com',
+    'miguvideo.com', 'wps.cn', 'kdocs.cn', 'yuque.com',
+    'voovmeeting.com', 'teambition.com', 'shimo.im', 'lanhuapp.com',
+    '12306.cn', 'zhipin.com', '51job.com',
   ];
   const allowedWebExactHosts = ['ykimg.alicdn.com'];
   // NARROWING THESE LISTS IS A BREAKING OPERATION. `publicTrafficPolicy` runs the
@@ -168,6 +173,11 @@ export function canonicalTrafficPolicy(value: unknown, trusted = false): Traffic
     'taobao.com', 'tmall.com', 'alipay.com', 'alicdn.com',
     'jd.com', 'douyin.com', 'weibo.com', 'meituan.com',
     'dianping.com', 'pinduoduo.com', 'amap.com',
+    'douyu.com', 'huya.com', 'kuaishou.com', 'yximgs.com', 'yy.com',
+    'ixigua.com', 'mgtv.com', 'acfun.cn', 'sohu.com', '1905.com',
+    'miguvideo.com', 'wps.cn', 'kdocs.cn', 'yuque.com',
+    'voovmeeting.com', 'teambition.com', 'shimo.im', 'lanhuapp.com',
+    '12306.cn', 'zhipin.com', '51job.com',
   ];
   const protectedSuffixes = [
     'anthropic.com', 'claude.ai', 'claude.com', 'claude.app', 'claude.site',

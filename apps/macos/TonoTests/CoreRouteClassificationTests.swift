@@ -420,6 +420,15 @@ final class CoreRouteClassificationTests: XCTestCase {
         XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(
             "douyin.com"
         ))
+        XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(
+            "huya.com"
+        ))
+        XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(
+            "wps.cn"
+        ))
+        XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(
+            "voovmeeting.com"
+        ))
         XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectSuffix(
             "snssdk.com"
         ))
@@ -429,6 +438,14 @@ final class CoreRouteClassificationTests: XCTestCase {
         XCTAssertTrue(
             ConfigPipeline.ManagedDirectRuntimePolicy.productWebDirectSuffixes
                 .contains(where: { $0.host == "taobao.com" })
+        )
+        XCTAssertTrue(
+            ConfigPipeline.ManagedDirectRuntimePolicy.productWebDirectSuffixes
+                .contains(where: { $0.host == "huya.com" })
+        )
+        XCTAssertTrue(
+            ConfigPipeline.ManagedDirectRuntimePolicy.productWebDirectSuffixes
+                .contains(where: { $0.host == "voovmeeting.com" })
         )
         XCTAssertFalse(
             ConfigPipeline.ManagedDirectRuntimePolicy.productWebDirectSuffixes

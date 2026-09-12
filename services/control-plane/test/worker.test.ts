@@ -4349,6 +4349,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
         directSuffixes: [
           { host: 'taobao.com', ports: [80, 443] },
           { host: 'douyin.com', ports: [443] },
+          { host: 'huya.com', ports: [443] },
+          { host: 'wps.cn', ports: [443] },
+          { host: 'voovmeeting.com', ports: [443] },
         ],
       },
       dryRun: true,

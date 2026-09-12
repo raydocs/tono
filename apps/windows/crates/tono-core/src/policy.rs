@@ -130,6 +130,27 @@ pub const ALLOWED_WEB_DOMAIN_SUFFIXES: &[&str] = &[
     "dianping.com",
     "pinduoduo.com",
     "amap.com",
+    "douyu.com",
+    "huya.com",
+    "kuaishou.com",
+    "yximgs.com",
+    "yy.com",
+    "ixigua.com",
+    "mgtv.com",
+    "acfun.cn",
+    "sohu.com",
+    "1905.com",
+    "miguvideo.com",
+    "wps.cn",
+    "kdocs.cn",
+    "yuque.com",
+    "voovmeeting.com",
+    "teambition.com",
+    "shimo.im",
+    "lanhuapp.com",
+    "12306.cn",
+    "zhipin.com",
+    "51job.com",
 ];
 
 /// Domain suffixes allowed for DIRECT routing (Mac
@@ -898,6 +919,9 @@ mod tests {
         assert!(is_allowed_direct_suffix("feishu.cn"));
         assert!(is_allowed_direct_suffix("taobao.com"));
         assert!(is_allowed_direct_suffix("douyin.com"));
+        assert!(is_allowed_direct_suffix("huya.com"));
+        assert!(is_allowed_direct_suffix("wps.cn"));
+        assert!(is_allowed_direct_suffix("voovmeeting.com"));
         assert!(!is_allowed_direct_suffix("snssdk.com"));
         assert!(!is_allowed_direct_suffix("googleapis.com"));
         assert!(!is_allowed_direct_suffix("evil-dingtalk.com"));

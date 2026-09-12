@@ -60,6 +60,11 @@ extension ConfigPipeline {
         "taobao.com", "tmall.com", "alipay.com", "alicdn.com",
         "jd.com", "douyin.com", "weibo.com", "meituan.com",
         "dianping.com", "pinduoduo.com", "amap.com",
+        "douyu.com", "huya.com", "kuaishou.com", "yximgs.com", "yy.com",
+        "ixigua.com", "mgtv.com", "acfun.cn", "sohu.com", "1905.com",
+        "miguvideo.com", "wps.cn", "kdocs.cn", "yuque.com",
+        "voovmeeting.com", "teambition.com", "shimo.im", "lanhuapp.com",
+        "12306.cn", "zhipin.com", "51job.com",
     ]
 
     /// Exact host families that may be placed in the application-direct
