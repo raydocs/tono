@@ -214,6 +214,23 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
     static func catalogTransport(for rawName: String) -> String {
         rawName.hasSuffix(hy2NameSuffix) ? "hy2" : "tcp"
     }
+    /// Dial identity of a live session. Catalog growth (a new city) must not
+    /// match this; a dest/SNI/credential change on the connected node must.
+    func liveSessionIdentity(matches other: ProxyNode) -> Bool {
+        name == other.name
+            && type == other.type
+            && server == other.server
+            && port == other.port
+            && uuid == other.uuid
+            && password == other.password
+            && sni == other.sni
+            && realityPublicKey == other.realityPublicKey
+            && realityShortId == other.realityShortId
+            && tlsFingerprint == other.tlsFingerprint
+            && flow == other.flow
+            && network == other.network
+    }
+
     var ping: Int { latency }
 
     var latencyColor: LatencyLevel { LatencyLevel.level(for: latency, kind: .exit) }
@@ -223,5 +240,21 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
         case username, password, uuid, cipher, udp
         case sni, skipCertVerify, network, wsPath, wsHost, grpcServiceName, tls, alterId
         case flow, clientFingerprint, tlsFingerprint, realityPublicKey, realityShortId
+    }
+}
+
+/// Whether a connected session must reload Mihomo after a catalog install.
+enum CatalogLiveSession {
+    /// Skip the reload when the selected exit's dial identity is unchanged
+    /// and residential routing did not move. Adding or renaming other cities
+    /// is not a reason to close every connection.
+    static func shouldReload(
+        previousSelected: ProxyNode?,
+        nextSelected: ProxyNode?,
+        routingChanged: Bool
+    ) -> Bool {
+        if routingChanged { return true }
+        guard let previousSelected, let nextSelected else { return true }
+        return !previousSelected.liveSessionIdentity(matches: nextSelected)
     }
 }

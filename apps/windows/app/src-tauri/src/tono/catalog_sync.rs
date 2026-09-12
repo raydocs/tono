@@ -64,13 +64,18 @@ fn sanitized_routing(
 
 /// If the selected node is not in the current catalog, flag that the user
 /// must choose again; auto-reconnect stays blocked until then (§3).
+/// Growing the catalog does not tear a live session down.
 fn enforce_selection_survival(inner: &mut TonoInner) {
     let Some(selected) = &inner.selected_node else {
         return;
     };
-    if !inner.nodes.iter().any(|node| &node.name == selected) {
+    if !selected_exit_still_present(selected, &inner.nodes) {
         inner.catalog_requires_choice = true;
     }
+}
+
+fn selected_exit_still_present(selected: &str, nodes: &[ValidatedNode]) -> bool {
+    nodes.iter().any(|node| node.name == selected)
 }
 
 /// What a successful [`install_and_persist`] produced.
@@ -698,6 +703,13 @@ mod tests {
             default_usable_exit(&[hy2("Alpha · hy2"), node("Zulu · TCP")], None).as_deref(),
             Some("Zulu · TCP")
         );
+    }
+
+    #[test]
+    fn adding_another_city_keeps_the_selected_exit() {
+        let nodes = vec![node("Los Angeles · Canyon"), node("Los Angeles · Westwood")];
+        assert!(selected_exit_still_present("Los Angeles · Canyon", &nodes));
+        assert!(!selected_exit_still_present("Los Angeles · Mesa", &nodes));
     }
 
     #[test]
