@@ -704,15 +704,7 @@ pub(super) fn command_output_with_timeout(
 
 #[cfg(windows)]
 fn decode_windows_command_output(bytes: &[u8]) -> String {
-    if bytes.chunks_exact(2).any(|pair| pair[1] == 0) {
-        let units: Vec<u16> = bytes
-            .chunks_exact(2)
-            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
-            .collect();
-        String::from_utf16_lossy(&units)
-    } else {
-        String::from_utf8_lossy(bytes).into_owned()
-    }
+    decode_windows_console_bytes(bytes)
 }
 
 #[cfg(windows)]
@@ -1282,4 +1274,37 @@ pub async fn tono_clear_terminal_proxy_env() -> Result<(), String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+fn decode_windows_console_bytes(bytes: &[u8]) -> String {
+    let bytes = if bytes.starts_with(&[0xFF, 0xFE]) {
+        &bytes[2..]
+    } else if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        &bytes[3..]
+    } else {
+        bytes
+    };
+    if bytes.len() >= 2 && bytes.chunks_exact(2).any(|pair| pair[1] == 0) {
+        let units: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        String::from_utf16_lossy(&units)
+    } else {
+        String::from_utf8_lossy(bytes).into_owned()
+    }
+}
+
+#[cfg(test)]
+mod decode_windows_console_bytes_tests {
+    use super::decode_windows_console_bytes;
+
+    #[test]
+    fn strips_utf16_le_bom_from_wsl_list_output() {
+        let mut bytes = vec![0xFF, 0xFE];
+        for unit in "Ubuntu".encode_utf16() {
+            bytes.extend_from_slice(&unit.to_le_bytes());
+        }
+        assert_eq!(decode_windows_console_bytes(&bytes).trim(), "Ubuntu");
+    }
 }

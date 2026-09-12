@@ -69,6 +69,13 @@ const renderPage = () =>
     </SWRConfig>,
   )
 
+it('does not claim the node list is synced before the first catalog sync', async () => {
+  serversMock.mockResolvedValue([])
+  renderPage()
+  expect(await screen.findByText('No servers available')).toBeDefined()
+  expect(screen.queryByText('Node list synced')).toBeNull()
+})
+
 it('does not claim an empty list while the first server read is pending', async () => {
   let resolve!: (servers: TonoServer[]) => void
   serversMock.mockReturnValue(
