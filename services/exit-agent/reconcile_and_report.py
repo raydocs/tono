@@ -56,6 +56,7 @@ import socket
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -267,6 +268,44 @@ def run_xray(binary: Path, arguments: list[str]) -> subprocess.CompletedProcess[
         timeout=30,
         check=False,
     )
+
+
+def add_inbound_user(
+    binary: Path, command: str, address: str, tag: str, label: str, client_uuid: str,
+) -> subprocess.CompletedProcess[str]:
+    """Install one VLESS identity. Xray 26+ `adu` takes an inbound JSON snippet."""
+    if command != "adu":
+        return run_xray(binary, [
+            "api", command, f"--server={address}",
+            f"--tag={tag}", f"--email={label}", f"--uuid={client_uuid}",
+        ])
+    snippet = {
+        "inbounds": [{
+            "tag": tag,
+            "protocol": "vless",
+            "listen": "127.0.0.1",
+            "port": 1,
+            "settings": {
+                "decryption": "none",
+                "clients": [{
+                    "email": label,
+                    "id": client_uuid,
+                    "flow": "xtls-rprx-vision",
+                }],
+            },
+        }],
+    }
+    fd, path = tempfile.mkstemp(prefix="tono-adu-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w") as handle:
+            json.dump(snippet, handle)
+        os.chmod(path, 0o600)
+        return run_xray(binary, ["api", "adu", f"--server={address}", path])
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 def supported_api_commands(binary: Path) -> set[str]:
@@ -669,16 +708,19 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
     for label, client_uuid in sorted(wanted.items()):
         if listed is not None and label in listed:
             continue
-        result = run_xray(binary, [
-            "api", commands["add_user"], f"--server={address}",
-            f"--tag={tag}", f"--email={label}", f"--uuid={client_uuid}",
-        ])
+        result = add_inbound_user(
+            binary, commands["add_user"], address, tag, label, client_uuid,
+        )
         # Already-present is success, not failure: two agents on one timer, or a
         # retry after a lost response, must not turn into an error loop. It is
         # not an addition either, or every round would report the whole roster.
-        if result.returncode != 0 and "already exists" not in (result.stderr or "").lower():
+        # Xray 26 `adu` prints "already exists" on stdout and may still exit 0.
+        output = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
+        if "already exists" in output:
+            pass
+        elif result.returncode != 0:
             raise Refusal(f"adding {label} failed: {result.stderr.strip() or result.returncode}")
-        if result.returncode == 0:
+        else:
             added += 1
         if known_installed is not None:
             known_installed.add(label)

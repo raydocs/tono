@@ -877,10 +877,13 @@ class MultipleExits(unittest.TestCase):
 class ReconcileSafety(unittest.TestCase):
     def setUp(self) -> None:
         self.calls: list[list[str]] = []
-        self.result = type("Result", (), {"returncode": 0, "stderr": ""})
+        self.adu_docs: list[dict] = []
+        self.result = type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})
 
         def fake_run(_binary, arguments):
             self.calls.append(arguments)
+            if "adu" in arguments:
+                self.adu_docs.append(json.loads(Path(arguments[-1]).read_text()))
             return self.result
 
         patcher = patch.object(agent, "run_xray", fake_run)
@@ -966,9 +969,10 @@ class ReconcileSafety(unittest.TestCase):
         self.assertEqual(installed, {new_label})
         self.assertIn(f"--email={old_label}", self.calls[0])
         self.assertIn("rmu", self.calls[0])
-        self.assertIn(f"--email={new_label}", self.calls[1])
-        self.assertIn(f"--uuid={new_uuid}", self.calls[1])
         self.assertIn("adu", self.calls[1])
+        self.assertEqual(self.adu_docs[0]["inbounds"][0]["tag"], "tono-vless")
+        self.assertEqual(self.adu_docs[0]["inbounds"][0]["settings"]["clients"][0]["email"], new_label)
+        self.assertEqual(self.adu_docs[0]["inbounds"][0]["settings"]["clients"][0]["id"], new_uuid)
 
     def test_only_this_agent_s_own_namespace_is_ever_removed(self) -> None:
         added, removed, _ = self.reconcile(
@@ -989,14 +993,16 @@ class ReconcileSafety(unittest.TestCase):
         )
         additions = [call for call in self.calls if "adu" in call]
         self.assertEqual(len(additions), 1)
-        self.assertIn("--email=u:usr_1", additions[0])
-        self.assertIn("--uuid=11111111-1111-4111-8111-111111111111", additions[0])
+        self.assertNotIn("--email=u:usr_1", additions[0])
+        client = self.adu_docs[0]["inbounds"][0]["settings"]["clients"][0]
+        self.assertEqual(client["email"], "u:usr_1")
+        self.assertEqual(client["id"], "11111111-1111-4111-8111-111111111111")
 
     def test_a_client_already_present_is_not_counted_as_an_addition(self) -> None:
         # Adds are attempted whenever the node cannot be asked what it holds,
         # because clients added over the API do not survive a restart. Counting
         # them would print the whole roster as added on every run.
-        self.result = type("Result", (), {"returncode": 1, "stderr": "User already exists."})
+        self.result = type("Result", (), {"returncode": 1, "stdout": "", "stderr": "User already exists."})
         added, removed, _ = self.reconcile(
             [{"userId": "usr_1", "clientUUID": "11111111-1111-4111-8111-111111111111"}],
             None,
