@@ -253,7 +253,8 @@ extension KillSwitchManager {
         //    number rather than an inference. Read from the armed set captured in
         //    step 1.
         if let labelText = armedLabels {
-            for expected in ["tono-loopback", "tono-tunnel", "tono-control", "tono-exit",
+            for expected in ["tono-loopback", "tono-continuity", "tono-mdns", "tono-linklocal",
+                             "tono-tunnel", "tono-control", "tono-exit",
                              "tono-bundle", "tono-block"] {
                 check("labels-report-\(expected)", labelText.contains(expected))
             }
@@ -561,6 +562,11 @@ extension KillSwitchManager {
                 "pass out quick inet proto udp to 8.8.8.8 port 8000 user root keep state (if-bound)",
                 "pass in quick on lo0 all keep state (if-bound)",
                 "pass out quick on lo0 all keep state (if-bound)",
+                "pass in quick on awdl0 all keep state (if-bound)",
+                "pass out quick on awdl0 all keep state (if-bound)",
+                "to 224.0.0.251 port 5353",
+                "to ff02::fb port 5353",
+                "to fe80::/10",
                 "block drop out quick all",
             ]
             let forbidden = [
@@ -606,7 +612,10 @@ extension KillSwitchManager {
             ]
             let cloudForbidden = [
                 "pass in quick on en",
-                "proto udp",
+                "pass out quick on en",
+                // Continuity emits mDNS UDP; a VLESS-only session still must
+                // not inherit an extra UDP *exit* permit.
+                "to 8.8.4.4 port 443",
                 // A session that did not ask for it must not inherit the permit.
                 "port { 80, 443, 8000, 8080 }",
             ]

@@ -69,6 +69,25 @@ extension KillSwitchManager {
             "pass in quick on lo0 all keep state (if-bound) label \"tono-loopback\"",
             "pass out quick on lo0 all keep state (if-bound) label \"tono-loopback\"",
         ]
+        // Only while a TUN is up. Emergency fail-closed has no tunnel and
+        // must not keep Sidecar/clipboard as a side channel.
+        if !state.tunnelInterfaces.isEmpty {
+            lines.append(
+                "pass in quick on awdl0 all keep state (if-bound) label \"tono-continuity\""
+            )
+            lines.append(
+                "pass out quick on awdl0 all keep state (if-bound) label \"tono-continuity\""
+            )
+            lines.append(
+                "pass out quick inet proto udp to 224.0.0.251 port 5353 keep state (if-bound) label \"tono-mdns\""
+            )
+            lines.append(
+                "pass out quick inet6 proto udp to ff02::fb port 5353 keep state (if-bound) label \"tono-mdns\""
+            )
+            lines.append(
+                "pass out quick inet6 to fe80::/10 keep state (if-bound) label \"tono-linklocal\""
+            )
+        }
         for interface in state.tunnelInterfaces.sorted() {
             // Host packets leave through the TUN while proxied replies return
             // through it. Keep both directions explicit: macOS PF can otherwise

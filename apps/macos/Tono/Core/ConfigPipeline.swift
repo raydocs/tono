@@ -114,6 +114,20 @@ nonisolated struct ConfigPipeline {
             DirectDomainSuffix(host: "aliyuncs.com", ports: [80, 443]),
             DirectDomainSuffix(host: "edu.cn", ports: [80, 443]),
             DirectDomainSuffix(host: "weixinbridge.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "bilibili.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "taobao.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "tmall.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "alipay.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "alicdn.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "jd.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "douyin.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "163.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "netease.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "weibo.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "meituan.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "dianping.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "pinduoduo.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "amap.com", ports: [80, 443]),
         ]
 
         var effectiveWebDomainSuffixes: [DirectDomainSuffix] {
@@ -166,6 +180,16 @@ nonisolated struct ConfigPipeline {
 
     static let homeNodeName = "Home-US"
     static let exitGroupName = "Tono-Exit"
+    /// Link-local and multicast must not hit the global UDP reject or MATCH
+    /// exit. These prefixes cannot reach the public internet.
+    static let appleContinuityDirectRules = """
+      - IP-CIDR,224.0.0.0/4,DIRECT,no-resolve
+      - IP-CIDR,169.254.0.0/16,DIRECT,no-resolve
+      - IP-CIDR6,ff00::/8,DIRECT,no-resolve
+      - IP-CIDR6,fe80::/10,DIRECT,no-resolve
+      - AND,((NETWORK,UDP),(DST-PORT,5353)),DIRECT
+
+    """
     static let claudeHomeGroupName = "Tono-Claude-Home"
     static let homeResidentialProxyName = "Tono-Home-Residential"
     static let directProxyName = "Tono-China-Direct"

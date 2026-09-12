@@ -82,7 +82,11 @@ nonisolated enum HelperProtocolVersion {
     /// - 3.15.0 → 3.16.0: proxy endpoints may be UDP (hy2 on the same public
     ///   IPv4/port as VLESS TCP). A 3.15.0 daemon rejects `transport: udp` and
     ///   would leave the backup path fail-closed even after the GUI admits it.
-    static let current = "3.16.0"
+    /// - 3.16.0 → 3.17.0: PF permits Apple Continuity on `awdl0`, mDNS 5353 to
+    ///   the link-local multicast groups, and IPv6 link-local unicast. Without
+    ///   this bump a 3.16.0 daemon keeps dropping Universal Clipboard and
+    ///   Sidecar while the GUI thinks the helper is current.
+    static let current = "3.17.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
