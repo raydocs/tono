@@ -151,6 +151,16 @@ pub const ALLOWED_WEB_DOMAIN_SUFFIXES: &[&str] = &[
     "12306.cn",
     "zhipin.com",
     "51job.com",
+    "kugou.com",
+    "kgimg.com",
+    "kuwo.cn",
+    "migu.cn",
+    "ximalaya.com",
+    "qingting.fm",
+    "lizhi.fm",
+    "xylink.com",
+    "zhumu.me",
+    "quanshi.com",
 ];
 
 /// Domain suffixes allowed for DIRECT routing (Mac
@@ -922,6 +932,9 @@ mod tests {
         assert!(is_allowed_direct_suffix("huya.com"));
         assert!(is_allowed_direct_suffix("wps.cn"));
         assert!(is_allowed_direct_suffix("voovmeeting.com"));
+        assert!(is_allowed_direct_suffix("kugou.com"));
+        assert!(is_allowed_direct_suffix("ximalaya.com"));
+        assert!(is_allowed_direct_suffix("xylink.com"));
         assert!(!is_allowed_direct_suffix("snssdk.com"));
         assert!(!is_allowed_direct_suffix("googleapis.com"));
         assert!(!is_allowed_direct_suffix("evil-dingtalk.com"));

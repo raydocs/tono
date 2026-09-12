@@ -29,7 +29,7 @@ pub const WEB_DIRECT_GROUP_NAME: &str = "Tono-China-Web-Direct";
 /// (`zoom.us` and similar stay tunnelled). The China-site suffixes below are
 /// product-direct: any process, TCP 80/443, same staged-core port permit as
 /// Bilibili.
-pub const ADDRESS_FREE_WEB_SUFFIXES: [&str; 37] = [
+pub const ADDRESS_FREE_WEB_SUFFIXES: [&str; 45] = [
     "bilibili.com",
     "biliapi.net",
     "bilivideo.com",
@@ -67,10 +67,18 @@ pub const ADDRESS_FREE_WEB_SUFFIXES: [&str; 37] = [
     "voovmeeting.com",
     "12306.cn",
     "yximgs.com",
+    "kugou.com",
+    "kuwo.cn",
+    "migu.cn",
+    "ximalaya.com",
+    "qingting.fm",
+    "xylink.com",
+    "zhumu.me",
+    "quanshi.com",
 ];
 /// Always attached to a native-app DIRECT plan, even if the published policy
 /// omitted them. Unidentified helpers and browsers hit these trees.
-pub const ALWAYS_ADDRESS_FREE_WEB_SUFFIXES: [&str; 33] = [
+pub const ALWAYS_ADDRESS_FREE_WEB_SUFFIXES: [&str; 41] = [
     "qq.com",
     "baidu.com",
     "aliyuncs.com",
@@ -104,6 +112,14 @@ pub const ALWAYS_ADDRESS_FREE_WEB_SUFFIXES: [&str; 33] = [
     "yuque.com",
     "voovmeeting.com",
     "12306.cn",
+    "kugou.com",
+    "kuwo.cn",
+    "migu.cn",
+    "ximalaya.com",
+    "qingting.fm",
+    "xylink.com",
+    "zhumu.me",
+    "quanshi.com",
 ];
 
 pub fn is_address_free_web_suffix(host: &str) -> bool {

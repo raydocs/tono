@@ -142,6 +142,14 @@ nonisolated struct ConfigPipeline {
             DirectDomainSuffix(host: "yuque.com", ports: [80, 443]),
             DirectDomainSuffix(host: "voovmeeting.com", ports: [80, 443]),
             DirectDomainSuffix(host: "12306.cn", ports: [80, 443]),
+            DirectDomainSuffix(host: "kugou.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "kuwo.cn", ports: [80, 443]),
+            DirectDomainSuffix(host: "migu.cn", ports: [80, 443]),
+            DirectDomainSuffix(host: "ximalaya.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "qingting.fm", ports: [80, 443]),
+            DirectDomainSuffix(host: "xylink.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "zhumu.me", ports: [80, 443]),
+            DirectDomainSuffix(host: "quanshi.com", ports: [80, 443]),
         ]
 
         var effectiveWebDomainSuffixes: [DirectDomainSuffix] {
