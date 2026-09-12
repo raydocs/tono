@@ -11,7 +11,7 @@ import {
 
 const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000]
 const RECONNECT_JITTER = 0.2
-const CONNECT_TIMEOUT_MS = 10_000
+export const CONNECT_TIMEOUT_MS = 10_000
 
 interface SharedSubscriptionOwner {
   handleMessage: (data: string) => void
@@ -124,6 +124,17 @@ export const createSharedSubscriptionEntry = (
     entry.connecting = true
     connectStartedAt = Date.now()
     const attempt = ++connectEpoch
+    // Watchdog: a connect() that never settles (half-open WS handshake) would
+    // wedge the entry on the first-call path — nothing else re-enters
+    // connectWs(). Supersede it after CONNECT_TIMEOUT_MS; cleared in `finally`
+    // so a prompt settle never triggers a spurious supersede.
+    const watchdog = setTimeout(() => {
+      if (attempt === connectEpoch && entry.connecting && !entry.closed) {
+        ++connectEpoch
+        entry.connecting = false
+        void entry.connectWs()
+      }
+    }, CONNECT_TIMEOUT_MS)
     try {
       const ws = await connect()
       if (attempt !== connectEpoch || entry.closed) {
@@ -178,6 +189,7 @@ export const createSharedSubscriptionEntry = (
         }
       }
     } finally {
+      clearTimeout(watchdog)
       if (attempt === connectEpoch) {
         entry.connecting = false
       }
