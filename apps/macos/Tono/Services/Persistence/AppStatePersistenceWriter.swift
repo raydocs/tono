@@ -8,7 +8,7 @@ actor AppStatePersistenceWriter {
     func save(
         regions: [ProxyRegion],
         rules: [RuleItem],
-        config: ClashConfig
+        config: RuntimeConfig
     ) {
         let storage = ConfigStorage.shared
         storage.saveProxyRegions(regions)

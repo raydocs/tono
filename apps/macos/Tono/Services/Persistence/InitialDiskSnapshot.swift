@@ -5,5 +5,5 @@ nonisolated struct InitialDiskSnapshot: Sendable {
     let rules: [RuleItem]
     let cachedCatalog: ManagedExitCatalogCache?
     let cachedTrafficPolicy: ManagedTrafficPolicyCache?
-    let config: ClashConfig?
+    let config: RuntimeConfig?
 }

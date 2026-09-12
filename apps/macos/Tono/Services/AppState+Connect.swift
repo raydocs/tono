@@ -944,7 +944,7 @@ extension AppState {
         // Start WebSocket streams
         trafficFeedLive = false
         connectionsFeedLive = false
-        let ws = ClashWebSocket(port: port, secret: config.secret)
+        let ws = CoreWebSocket(port: port, secret: config.secret)
         webSocket = ws
 
         ws.onTraffic = { [weak self] traffic in

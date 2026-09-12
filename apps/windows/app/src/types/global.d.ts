@@ -217,13 +217,13 @@ interface IConnectionSetting {
  * Some interface for command
  */
 
-interface IClashInfo {
+interface IRuntimeInfo {
   // status: string;
-  mixed_port?: number // clash mixed port
-  socks_port?: number // clash socks port
-  redir_port?: number // clash redir port
-  tproxy_port?: number // clash tproxy port
-  port?: number // clash http port
+  mixed_port?: number // core mixed port
+  socks_port?: number // core socks port
+  redir_port?: number // core redir port
+  tproxy_port?: number // core tproxy port
+  port?: number // core http port
   server?: string // external-controller
   secret?: string
 }

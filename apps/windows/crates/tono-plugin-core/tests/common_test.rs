@@ -1,5 +1,5 @@
 use serde_json::json;
-use tono_plugin_core::{Error, Result, models::ClashMode};
+use tono_plugin_core::{Error, Result, models::CoreMode};
 
 mod common;
 
@@ -40,7 +40,7 @@ async fn mihomo_common_patch_base_config() -> Result<()> {
     let origin_mode = base_config.mode.clone();
     println!("before changed mode: {}", base_config.mode);
 
-    let next_mode = ClashMode::Global;
+    let next_mode = CoreMode::Global;
     let body = json!({ "mode": next_mode });
     mihomo.patch_base_config(&body).await?;
     base_config = mihomo.get_base_config().await?;

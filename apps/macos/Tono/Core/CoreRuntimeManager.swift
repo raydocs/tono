@@ -22,7 +22,7 @@ private actor RuntimeConfigWriter {
     }
 }
 
-// MARK: - Clash Manager
+// MARK: - Core Runtime Manager
 
 @Observable
 final class CoreRuntimeManager {
@@ -209,7 +209,7 @@ final class CoreRuntimeManager {
     }
 }
 
-// MARK: - Clash Error
+// MARK: - Core Runtime Error
 
 enum CoreRuntimeError: LocalizedError {
     case binaryNotFound

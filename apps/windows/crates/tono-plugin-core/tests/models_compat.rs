@@ -294,7 +294,7 @@ fn deserialize_base_config_tolerates_missing_fields() {
         "mode": "global",
         "tun": { "stack": "gVisor" },
     }));
-    assert!(matches!(cfg.mode, tono_plugin_core::models::ClashMode::Global));
+    assert!(matches!(cfg.mode, tono_plugin_core::models::CoreMode::Global));
     assert!(matches!(cfg.tun.stack, TunStack::Gvisor));
     // 缺失的标量字段回退默认值
     assert_eq!(cfg.port, 0);

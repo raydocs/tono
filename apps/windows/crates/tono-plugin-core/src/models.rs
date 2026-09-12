@@ -102,7 +102,7 @@ pub struct BaseConfig {
     pub bind_address: String,
     pub inbound_tfo: bool,
     pub inbound_mptcp: bool,
-    pub mode: ClashMode,
+    pub mode: CoreMode,
     pub unified_delay: bool,
     pub log_level: LogLevel,
     pub ipv6: bool,
@@ -519,24 +519,24 @@ impl Display for CoreUpdaterChannel {
     }
 }
 
-/// clash mode enum
+/// core routing mode
 #[derive(Debug, Clone, Serialize, Deserialize, TS, PartialEq, Eq, Default)]
 #[ts(export)]
 #[serde(rename_all = "lowercase")]
-pub enum ClashMode {
+pub enum CoreMode {
     #[default]
     Rule,
     Global,
     Direct,
 }
 
-impl Display for ClashMode {
+impl Display for CoreMode {
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ClashMode::Rule => write!(f, "rule"),
-            ClashMode::Global => write!(f, "global"),
-            ClashMode::Direct => write!(f, "direct"),
+            CoreMode::Rule => write!(f, "rule"),
+            CoreMode::Global => write!(f, "global"),
+            CoreMode::Direct => write!(f, "direct"),
         }
     }
 }

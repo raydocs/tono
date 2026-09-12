@@ -1,6 +1,6 @@
 export * from "./BaseConfig";
 export * from "./BrutalOption";
-export * from "./ClashMode";
+export * from "./CoreMode";
 export * from "./Connection";
 export * from "./ConnectionMetaData";
 export * from "./Connections";
