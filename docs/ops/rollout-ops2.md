@@ -35,7 +35,7 @@
 
 第十三次 `1ea1286d`（PR #139；迁移 0070 删四张孤儿表、0071 `ops_exit_asns`，均先在 preview 演练）：角色门（`OPS_ROLES` 未设时一律 owner）、入口预算、CI 分片、按依赖序清库脚本 `tooling/scripts/wipe-d1-in-order.mjs`、生产恢复文档、24 小时滚动采用率。部署前备份 `2026-09-10T12:42:24Z.sql.gz`（带 `.sha256`）。部署后 `sqlite_master` 无孤儿表。
 
-## 0.2 恢复演练结论（2026-09-10，详见 `docs/ops/restore-drill-2026-09-10.md`）
+## 0.2 恢复演练结论（2026-09-10，详见 `docs/archive/ops/restore-drill-2026-09-10.md`）
 
 今天的备份 `backups/control-plane-d1/20260910T085207Z.sql.gz` 能恢复、恢复后能当数据用（20 用户 / 27 设备 / 7533 遥测窗口，`quick_check` ok，外键零违例），导入 28 秒，全流程 wrangler 时间约 1.5 分钟。五条要记住的：
 
