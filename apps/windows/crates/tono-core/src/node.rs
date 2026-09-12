@@ -1043,6 +1043,12 @@ skip-cert-verify: false
             "198.17.0.1",
             "198.20.0.1",
             "223.255.255.255",
+            // The rest of 192.0.0.0/16 is ARIN-administered public space; only
+            // 192.0.0.0/24 and 192.0.2.0/24 are special-use. Pins parity with the
+            // macOS client and the control plane, which gate the third octet.
+            "192.0.3.5",
+            "192.0.31.5",
+            "192.0.123.5",
         ] {
             assert!(
                 admit_yaml(&passing_yaml_with(

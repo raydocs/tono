@@ -3893,6 +3893,11 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       { ...policy, domains: [{ host: 'api.anthropic.com', ports: [443] }] },
       { ...policy, domains: [{ host: 'res.wx.qq.com', ports: [22] }] },
       { ...policy, mediaEndpoints: [{ address: '10.0.0.1', ports: [443] }] },
+      { ...policy, mediaEndpoints: [{ address: '192.0.0.9', ports: [443] }] },
+      { ...policy, mediaEndpoints: [{ address: '192.0.2.1', ports: [443] }] },
+      { ...policy, mediaEndpoints: [{ address: '192.88.99.1', ports: [443] }] },
+      { ...policy, tcpEndpoints: [{ address: '192.0.0.9', ports: [443] }] },
+      { ...policy, tcpEndpoints: [{ address: '192.0.2.1', ports: [443] }] },
       { ...policy, mediaEndpoints: [{ address: '43.146.27.0/24', ports: [443] }] },
       { ...policy, mediaEndpoints: [{ address: '43.146.27.999', ports: [443] }] },
       { ...policy, mediaEndpoints: [{ address: '43.146.27.17', ports: [80] }] },
@@ -3921,6 +3926,59 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       expect(response.status).toBe(400);
       expect((await response.json() as any).error.code).toBe('VALIDATION_ERROR');
     }
+  });
+
+  // 192.0.0.0/16 contains exactly two IANA special-use /24s — 192.0.0.0/24
+  // (IETF Protocol Assignments) and 192.0.2.0/24 (TEST-NET-1) — that both
+  // clients reject. Every other /24 is ARIN-administered public Internet
+  // space that both clients route direct, so the control plane must admit
+  // it. The admission gate (`isPublicIPv4` in canonicalTrafficPolicy) runs on
+  // both the mediaEndpoints and tcpEndpoints canonicalisers and is not
+  // relaxed by `trusted` (a signature vouches for authorship, not for the IP
+  // allowlist), so `dryRun` exercises it without storing or touching
+  // revisions. Both clients gate the third octet; this pins the control
+  // plane to the same boundary.
+  it('admits public IPv4 in the rest of 192.0.0.0/16 and rejects only the special-use /24s', async () => {
+    const empty = (address: string, media: boolean) => ({
+      version: 4 as const,
+      domains: [],
+      mediaEndpoints: media ? [{ address, ports: [443] }] : [],
+      webDomains: [],
+      directSuffixes: [],
+      tcpEndpoints: media ? [] : [{ address, ports: [443] }],
+    });
+    // The two non-routable /24s (and the 6to4 relay anycast) stay rejected on
+    // both admission gates — regression guards for the special-use carve-outs.
+    for (const address of ['192.0.0.9', '192.0.2.1', '192.88.99.1']) {
+      const mediaReject = await admin('traffic-policy', { dryRun: true, policy: empty(address, true) }, 'PUT');
+      expect(mediaReject.status).toBe(400);
+      expect((await mediaReject.json() as any).error.code).toBe('VALIDATION_ERROR');
+      const tcpReject = await admin('traffic-policy', { dryRun: true, policy: empty(address, false) }, 'PUT');
+      expect(tcpReject.status).toBe(400);
+      expect((await tcpReject.json() as any).error.code).toBe('VALIDATION_ERROR');
+    }
+    // The remaining 254 /24s of 192.0.0.0/16 are public and pass the dry-run
+    // admission gate on both mediaEndpoints and tcpEndpoints. Previously the
+    // over-broad `a === 192 && b === 0` term rejected all of them.
+    for (const address of ['192.0.3.5', '192.0.31.5', '192.0.123.5']) {
+      const mediaOK = await admin('traffic-policy', { dryRun: true, policy: empty(address, true) }, 'PUT');
+      expect(mediaOK.status).toBe(200);
+      expect((await mediaOK.json() as any).dryRun).toBe(true);
+      const tcpOK = await admin('traffic-policy', { dryRun: true, policy: empty(address, false) }, 'PUT');
+      expect(tcpOK.status).toBe(200);
+      expect((await tcpOK.json() as any).dryRun).toBe(true);
+    }
+    // The public boundary publishes through the normal admin write path and
+    // is served back verbatim by publicTrafficPolicy — the realized impact
+    // was that this PUT returned 400 VALIDATION_ERROR before the fix.
+    const published = await admin('traffic-policy', {
+      policy: empty('192.0.3.5', true),
+      expectedRevision: 0,
+    }, 'PUT');
+    expect(published.status).toBe(200);
+    const served = await (await admin('traffic-policy', undefined, 'GET')).json() as any;
+    expect(served.revision).toBe(1);
+    expect(JSON.parse(served.json).mediaEndpoints).toEqual([{ address: '192.0.3.5', ports: [443] }]);
   });
 
   // Private half of the test-only keypair whose public half is bound as
