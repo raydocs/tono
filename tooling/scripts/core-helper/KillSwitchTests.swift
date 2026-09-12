@@ -562,11 +562,6 @@ extension KillSwitchManager {
                 "pass out quick inet proto udp to 8.8.8.8 port 8000 user root keep state (if-bound)",
                 "pass in quick on lo0 all keep state (if-bound)",
                 "pass out quick on lo0 all keep state (if-bound)",
-                "pass in quick on awdl0 all keep state (if-bound)",
-                "pass out quick on awdl0 all keep state (if-bound)",
-                "to 224.0.0.251 port 5353",
-                "to ff02::fb port 5353",
-                "to fe80::/10",
                 "block drop out quick all",
             ]
             let forbidden = [
@@ -595,6 +590,17 @@ extension KillSwitchManager {
             ]
             let ruleShapesHold = required.allSatisfy(rules.contains)
                 && !forbidden.contains(where: rules.contains)
+            // Continuity is TUN-scoped: empty tunnelInterfaces (this `state`)
+            // must not keep Sidecar as a side channel; a live utun must.
+            let continuityNeedles = [
+                "pass in quick on awdl0 all keep state (if-bound)",
+                "pass out quick on awdl0 all keep state (if-bound)",
+                "to 224.0.0.251 port 5353",
+                "to ff02::fb port 5353",
+                "to fe80::/10",
+            ]
+            let continuityOffWithoutTunnel = !continuityNeedles.contains(where: rules.contains)
+            let continuityOnWithTunnel = continuityNeedles.allSatisfy(cloudRules.contains)
             // Whole-string equality, so the class labels belong here too: this is
             // the one assertion that pins the emergency ruleset exactly, and it is
             // what caught the label change before it shipped.
@@ -656,6 +662,8 @@ extension KillSwitchManager {
                 pfParses = armed && bootstrap
             }
             return ruleShapesHold
+                && continuityOffWithoutTunnel
+                && continuityOnWithTunnel
                 && emergencyRules == emergencyExpected
                 && cloudShapesHold
                 && pfParses
