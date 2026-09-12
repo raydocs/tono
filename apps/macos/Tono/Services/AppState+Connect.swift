@@ -617,6 +617,23 @@ extension AppState {
                 "was_connected": String(isConnected),
             ]
         )
+        // Recorded here, at the top, because everything it reports is gone by
+        // the time the teardown below returns: `trafficStats` is replaced with
+        // a fresh one and `isConnected` goes false further down, and the
+        // release branch clears `connectionStartedAt`. Guarded on `isConnected`
+        // as well as the start date so a health-driven disconnect followed by
+        // the user's own "Restore internet" — which reaches this function a
+        // second time with the start date still set — cannot bank a second,
+        // empty session.
+        if isConnected, let sessionStartedAt = connectionStartedAt {
+            ConnectionTelemetryBuffer.shared.record(
+                "disconnectOk",
+                elapsedMs: max(0, Int(Date().timeIntervalSince(sessionStartedAt) * 1_000)),
+                node: selectedExitNode()?.name,
+                bytesUp: trafficStats.totalUpload,
+                bytesDown: trafficStats.totalDownload
+            )
+        }
         let protectionMayBeActive = isProtectionBlocked
             || isConnected
             || isConnecting

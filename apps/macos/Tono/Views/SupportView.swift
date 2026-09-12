@@ -10,7 +10,7 @@ struct SupportView: View {
     @AppStorage(
         SettingsKey.networkLogUploadEnabled,
         store: AppProfile.defaults
-    ) private var networkLogUploadEnabled = false
+    ) private var networkLogUploadEnabled = SettingsKey.networkLogUploadDefault
 
     @State private var probe: RuntimeProbe?
     @State private var terminalEnvReport: TerminalProxyReport?

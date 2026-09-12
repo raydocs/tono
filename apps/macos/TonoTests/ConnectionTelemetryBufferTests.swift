@@ -106,6 +106,26 @@ final class ConnectionTelemetryBufferTests: XCTestCase {
         let drained = buffer.drain()
         XCTAssertEqual(drained.events[0].delayMs, 183)
     }
+
+    /// The Worker refuses a window carrying a key it does not expect, and a
+    /// JSON `null` is not an integer. An event with no byte totals — which is
+    /// every event but this one — must therefore carry no byte keys at all.
+    func testOnlyAnEventWithByteTotalsPutsByteKeysOnTheWire() throws {
+        let buffer = ConnectionTelemetryBuffer()
+        buffer.record("connectOk", stage: "verifyingTraffic", node: "anon-5")
+        buffer.record("disconnectOk", elapsedMs: 1_000, node: "anon-5", bytesUp: 7, bytesDown: 8)
+        let drained = buffer.drain()
+
+        let data = try TonoCoding.encoder().encode(drained.events)
+        let encoded = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        )
+        XCTAssertEqual(encoded.count, 2)
+        XCTAssertFalse(Set(encoded[0].keys).contains("bytesUp"), "\(encoded[0].keys)")
+        XCTAssertFalse(Set(encoded[0].keys).contains("bytesDown"), "\(encoded[0].keys)")
+        XCTAssertEqual((encoded[1]["bytesUp"] as? NSNumber)?.int64Value, 7)
+        XCTAssertEqual((encoded[1]["bytesDown"] as? NSNumber)?.int64Value, 8)
+    }
 }
 
 /// XCTest expectations run the sink on the caller's thread; the box just
