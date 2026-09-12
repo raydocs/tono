@@ -3722,6 +3722,172 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(closedRow.homeBinding).toBeNull();
   });
 
+  it('does not retire the currently-assigned account when a replacement accountRef clashes (atomicity)', async () => {
+    const accessHeaders = {
+      'content-type': 'application/json',
+      'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+    };
+    const owner = await createAccount('claude-replace-atomic-owner');
+    const other = await createAccount('claude-replace-atomic-other');
+    const bannedUser = await createAccount('claude-replace-atomic-banned');
+    const retiredUser = await createAccount('claude-replace-atomic-retired');
+
+    const ownerOpened = await api('ops/product-accounts', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ userId: owner.user.id, accountRef: 'acct-owner@example.com' }),
+    });
+    expect(ownerOpened.status).toBe(201);
+    const ownerAccountId = (await ownerOpened.json() as any).account.id;
+
+    const otherOpened = await api('ops/product-accounts', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ userId: other.user.id, accountRef: 'acct-shared@example.com' }),
+    });
+    expect(otherOpened.status).toBe(201);
+
+    const bannedOpened = await api('ops/product-accounts', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ userId: bannedUser.user.id, accountRef: 'acct-banned@example.com' }),
+    });
+    expect(bannedOpened.status).toBe(201);
+    const bannedAccountId = (await bannedOpened.json() as any).account.id;
+    const bannedRow = await api(`ops/product-accounts/${bannedAccountId}/ban`, {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ detail: 'model ban' }),
+    });
+    expect(bannedRow.status).toBe(200);
+    expect((await bannedRow.json() as any).account.status).toBe('banned');
+
+    const retiredOpened = await api('ops/product-accounts', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ userId: retiredUser.user.id, accountRef: 'acct-retired@example.com' }),
+    });
+    expect(retiredOpened.status).toBe(201);
+    const retiredAccountId = (await retiredOpened.json() as any).account.id;
+    const retiredReplace = await api(`ops/product-accounts/${retiredAccountId}/replace`, {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ accountRef: 'acct-retired-next@example.com' }),
+    });
+    expect(retiredReplace.status).toBe(200);
+    expect((await retiredReplace.json() as any).previous.status).toBe('retired');
+
+    const snapshot = async () => {
+      const detail = await operations(`users/${owner.user.id}/detail`);
+      const detailBody = (await detail.json() as any);
+      const account = (detailBody.product.accounts as any[]).find((a) => a.id === ownerAccountId);
+      return {
+        status: account?.status,
+        closeReason: account?.closeReason ?? null,
+        closedAt: account?.closedAt ?? null,
+        assigned: (detailBody.product.accounts as any[]).find((a) => a.status === 'assigned'),
+        replaceCount: detailBody.product.replaceCount as number,
+        replacedEvents: (detailBody.product.events as any[])
+          .filter((ev) => ev.type === 'replaced' && ev.accountId === ownerAccountId).length,
+      };
+    };
+
+    const before = await snapshot();
+    expect(before.status).toBe('assigned');
+    expect(before.assigned.accountRef).toBe('acct-owner@example.com');
+    expect(before.replaceCount).toBe(0);
+
+    const attemptRef = (ref: string) => api(`ops/product-accounts/${ownerAccountId}/replace`, {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ accountRef: ref }),
+    });
+
+    for (const clashingRef of [
+      'acct-shared@example.com',
+      'acct-banned@example.com',
+      'acct-retired@example.com',
+      'acct-owner@example.com',
+    ]) {
+      const attempt = await attemptRef(clashingRef);
+      expect(attempt.status).toBe(409);
+      expect((await attempt.json() as any).error.code).toBe('ACCOUNT_REF_IN_USE');
+      const after = await snapshot();
+      expect(after.status).toBe('assigned');
+      expect(after.closeReason).toBeNull();
+      expect(after.closedAt).toBeNull();
+      expect(after.assigned).toBeDefined();
+      expect(after.assigned.accountRef).toBe('acct-owner@example.com');
+      expect(after.replaceCount).toBe(0);
+      expect(after.replacedEvents).toBe(0);
+    }
+
+    const retry = await api(`ops/product-accounts/${ownerAccountId}/replace`, {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ accountRef: 'acct-owner-next@example.com' }),
+    });
+    expect(retry.status).toBe(200);
+    const retryBody = (await retry.json() as any);
+    expect(retryBody.previous.status).toBe('retired');
+    expect(retryBody.previous.id).toBe(ownerAccountId);
+    expect(retryBody.account.accountRef).toBe('acct-owner-next@example.com');
+    expect(retryBody.account.status).toBe('assigned');
+    expect(retryBody.account.userId).toBe(owner.user.id);
+
+    const finalSnapshot = await snapshot();
+    expect(finalSnapshot.status).toBe('retired');
+    const newAssigned = (await operations(`users/${owner.user.id}/detail`).then((r) => r.json()) as any)
+      .product.accounts.find((a: any) => a.status === 'assigned');
+    expect(newAssigned.accountRef).toBe('acct-owner-next@example.com');
+    expect((await operations(`users/${owner.user.id}/detail`).then((r) => r.json()) as any).product.replaceCount).toBe(1);
+  });
+
+  it('replaceProductAccount converts a pooled account to assigned for the user', async () => {
+    const accessHeaders = {
+      'content-type': 'application/json',
+      'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+    };
+    const owner = await createAccount('claude-replace-pooled-owner');
+
+    const opened = await api('ops/product-accounts', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ userId: owner.user.id, accountRef: 'acct-pooled-one@example.com' }),
+    });
+    expect(opened.status).toBe(201);
+    const openedBody = (await opened.json() as any);
+    const ownerAccountId = openedBody.account.id;
+
+    const pooled = await api('ops/product-accounts', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ accountRef: 'acct-pooled-two@example.com' }),
+    });
+    expect(pooled.status).toBe(201);
+    expect((await pooled.json() as any).account.status).toBe('pooled');
+
+    const replace = await api(`ops/product-accounts/${ownerAccountId}/replace`, {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ accountRef: 'acct-pooled-two@example.com' }),
+    });
+    expect(replace.status).toBe(200);
+    const replaceBody = (await replace.json() as any);
+    expect(replaceBody.previous.status).toBe('retired');
+    expect(replaceBody.account.accountRef).toBe('acct-pooled-two@example.com');
+    expect(replaceBody.account.status).toBe('assigned');
+    expect(replaceBody.account.userId).toBe(owner.user.id);
+
+    const detail = await operations(`users/${owner.user.id}/detail`);
+    const detailBody = (await detail.json() as any);
+    const accounts = detailBody.product.accounts as any[];
+    expect(accounts.filter((a) => a.accountRef === 'acct-pooled-two@example.com')).toHaveLength(1);
+    expect(accounts.find((a) => a.accountRef === 'acct-pooled-two@example.com').status).toBe('assigned');
+    expect(accounts.filter((a) => a.status === 'assigned')).toHaveLength(1);
+    expect(detailBody.product.replaceCount).toBe(1);
+  });
+
   it('stores a node billing profile and reports who is on a named node', async () => {
     const accessHeaders = {
       'content-type': 'application/json',
