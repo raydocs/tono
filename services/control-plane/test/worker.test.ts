@@ -4441,6 +4441,100 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(identity.user_id).toBe(account.user.id);
   });
 
+  it('completes a valid OIDC verify even when concurrent failures exhaust attempts (TOCTOU)', async () => {
+    // The OIDC verify handler must reserve an attempt slot *before* the
+    // network-bound verifyOidcIdToken and consume without re-checking the
+    // attempts budget, so a valid token that already reserved a slot still
+    // completes when concurrent garbage-token failures push attempts to
+    // max_attempts during the verification I/O window. Production config
+    // allows 5 verifies per challenge (RATE_LIMIT_OIDC_VERIFY_CHALLENGE default
+    // 5) while max_attempts is 3; the shared test config narrows the limiter
+    // to 3, which coincidentally equals max_attempts and masks the race (the
+    // third attacker is throttled before bumping attempts). Restore the
+    // production default so three concurrent failures actually exhaust the
+    // budget while a valid verify is in flight.
+    const originalChallengeLimit = (env as unknown as Env).RATE_LIMIT_OIDC_VERIFY_CHALLENGE;
+    (env as unknown as Env).RATE_LIMIT_OIDC_VERIFY_CHALLENGE = '5';
+    try {
+      const email = `google-toctou-${++sequence}@example.com`;
+      const challengeResponse = await api('auth/oidc/challenge', json({
+        provider: 'google',
+        deviceName: 'TOCTOU Mac',
+        installationId: 'toctou-installation',
+      }));
+      expect(challengeResponse.status).toBe(200);
+      const challenge = await challengeResponse.json() as any;
+      const validToken = await oidcToken('google', challenge.nonce, {
+        subject: 'google-toctou-subject',
+        email,
+      });
+
+      // Park the victim inside verifyOidcIdToken's signature check. The victim
+      // has already passed JWT parsing and reached crypto.subtle.verify;
+      // garbage attacker tokens ('x'.repeat(101)) fail the 3-part split before
+      // signature verification, so only the victim parks. This models the
+      // network I/O window of verifyOidcIdToken without depending on JWKS
+      // cache state.
+      const realVerify = crypto.subtle.verify.bind(crypto.subtle);
+      let releaseVerify!: () => void;
+      let notifyParked!: () => void;
+      const parked = new Promise<void>((resolve) => { notifyParked = resolve; });
+      const gate = new Promise<void>((resolve) => { releaseVerify = resolve; });
+      let firstCall = true;
+      const verifySpy = vi.spyOn(crypto.subtle, 'verify').mockImplementation(
+        async (algorithm: any, key: any, signature: any, data: any) => {
+          if (firstCall) {
+            firstCall = false;
+            notifyParked();
+            await gate;
+          }
+          return realVerify(algorithm, key, signature, data);
+        },
+      );
+
+      try {
+        const victimPromise = api('auth/oidc/verify', json({
+          provider: 'google',
+          challengeId: challenge.challengeId,
+          idToken: validToken,
+        }));
+        await parked;
+
+        const attackerResponses = await Promise.all(Array.from({ length: 3 }, () =>
+          api('auth/oidc/verify', json({
+            provider: 'google',
+            challengeId: challenge.challengeId,
+            idToken: 'x'.repeat(101),
+          })),
+        ));
+        expect(attackerResponses.map((response) => response.status).sort())
+          .toEqual([401, 401, 401]);
+
+        releaseVerify();
+        const victimResponse = await victimPromise;
+        expect(victimResponse.status).toBe(200);
+        expect((await victimResponse.json() as any).user.email).toBe(email);
+
+        const row = await env.DB.prepare(
+          'SELECT attempts, consumed_at FROM auth_challenges WHERE id = ?',
+        ).bind(challenge.challengeId).first<any>();
+        expect(row.attempts).toBe(3);
+        expect(row.consumed_at).not.toBeNull();
+
+        // Replay of the now-consumed challenge must still fail (no bypass).
+        expect((await api('auth/oidc/verify', json({
+          provider: 'google',
+          challengeId: challenge.challengeId,
+          idToken: validToken,
+        }))).status).toBe(401);
+      } finally {
+        verifySpy.mockRestore();
+      }
+    } finally {
+      (env as unknown as Env).RATE_LIMIT_OIDC_VERIFY_CHALLENGE = originalChallengeLimit;
+    }
+  });
+
   it('redeems, confirms, logs in without duplicating an installation, rotates refresh, and limits devices', async () => {
     const first = await createAccount('lifecycle');
     resetMockInventory(first.device.id, first.enrollment.hostname);
