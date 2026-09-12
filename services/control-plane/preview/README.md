@@ -163,6 +163,8 @@ npx wrangler d1 execute tono-control-plane-ops-preview --remote \
 ```
 
 There is no migration rollback for a preview database: if an isolated preview
-schema is unusable, delete and recreate **only its own** D1/R2/Workers/Access
-resources after explicit approval. Never remove the rollup writer fence from a
-shared database as a recovery action.
+schema is unusable, clear the preview D1 in place with
+`tooling/scripts/wipe-d1-in-order.mjs` (recreating it changes its `database_id`
+and forces re-rendering the local config), and delete and recreate **only its
+own** R2/Workers/Access resources after explicit approval. Never remove the
+rollup writer fence from a shared database as a recovery action.
