@@ -106,6 +106,7 @@ pub(super) async fn read_owner_sample() -> OwnerSample {
     OwnerSample::Status {
         is_active: status.is_active,
         desired_core_should_be_running: status.desired_core_should_be_running,
+        desired_state_unknown: status.desired_state_unknown,
         service_state: status.service_state,
         core_pid: status.core_pid,
     }
