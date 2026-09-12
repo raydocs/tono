@@ -144,6 +144,9 @@ def private_output_path!(path)
   expanded
 end
 
+CLIENT_UUID_PLACEHOLDER = "{{TONO_CLIENT_UUID}}"
+TEST_VLESS_UUID = /[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i
+
 def write_private_yaml(path, document)
   parent = File.dirname(path)
   FileUtils.mkdir_p(parent, mode: 0o700)
@@ -151,6 +154,29 @@ def write_private_yaml(path, document)
   temporary = "#{path}.new-#{SecureRandom.hex(8)}"
   File.open(temporary, File::WRONLY | File::CREAT | File::EXCL, 0o600) do |file|
     file.write(YAML.dump(document).sub(/\A---\s*\n/, ""))
+    file.flush
+    file.fsync
+  end
+  File.rename(temporary, path)
+ensure
+  File.delete(temporary) if defined?(temporary) && temporary && File.exist?(temporary)
+end
+
+# Isolated data-plane tests need the VPS's bootstrap UUID. The publisher
+# refuses a real UUID: that would put every customer on one shared credential.
+# Replace it textually — YAML.dump treats "{{TONO_CLIENT_UUID}}" as a mapping.
+def rewrite_vless_uuid_to_placeholder!(path)
+  content = File.binread(path).force_encoding(Encoding::UTF_8)
+  fail!("The private catalog source is not valid UTF-8.") unless content.valid_encoding?
+  pattern = /^(\s*uuid:\s*)(?:["']#{TEST_VLESS_UUID}["']|#{TEST_VLESS_UUID})(\s*(?:\#.*)?)$/i
+  fail!("The private catalog source must contain exactly one test UUID to replace.") unless
+    content.scan(pattern).length == 1
+  replaced = content.sub(pattern, "\\1#{CLIENT_UUID_PLACEHOLDER}\\2")
+  fail!("The rewritten catalog source must carry exactly one per-account identity placeholder.") unless
+    replaced.scan(CLIENT_UUID_PLACEHOLDER).length == 1
+  temporary = "#{path}.placeholder-#{SecureRandom.hex(8)}"
+  File.open(temporary, File::WRONLY | File::CREAT | File::EXCL, 0o600) do |file|
+    file.write(replaced)
     file.flush
     file.fsync
   end
@@ -231,11 +257,13 @@ def verify_installation(repo_root, output_path, node_name, expected_ipv4)
       node_name,
       *([expected_ipv4].compact),
     ],
-    [RbConfig.ruby, File.join(repo_root, "tooling/scripts/publish-managed-catalog.rb"), "--dry-run", output_path],
   ]
   checks.each do |command|
     fail!("Post-install verification failed: #{File.basename(command.first)}") unless system(*command)
   end
+  rewrite_vless_uuid_to_placeholder!(output_path)
+  publish = [RbConfig.ruby, File.join(repo_root, "tooling/scripts/publish-managed-catalog.rb"), "--dry-run", output_path]
+  fail!("Post-install verification failed: #{File.basename(publish[1])}") unless system(*publish)
 end
 
 options = {
@@ -272,6 +300,7 @@ parser = OptionParser.new do |flags|
   flags.on("--apply", "Install, verify, and retain the node; publication remains a separate approval") { options[:apply] = true }
 end
 
+if $PROGRAM_NAME == __FILE__
 begin
   parser.parse!(ARGV)
   fail!(parser.banner) unless ARGV.empty?
@@ -505,4 +534,5 @@ begin
 rescue ProvisionError, OptionParser::ParseError => error
   warn(error.message)
   exit(1)
+end
 end

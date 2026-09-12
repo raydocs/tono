@@ -7,10 +7,12 @@
 # is required: the refusal is raised before the first SSH call, and the override
 # is only asserted not to raise it.
 
+require "fileutils"
 require "json"
 require "minitest/autorun"
 require "open3"
 require "rbconfig"
+require "tmpdir"
 
 SCRIPT = File.expand_path("../provision-reality-node.rb", __dir__)
 FRONTS = JSON.parse(File.read(File.expand_path("../reality-fronts.json", __dir__))).freeze
@@ -107,5 +109,50 @@ class Hy2StaysOptIn < Minitest::Test
     assert_match(/this path never rewrites tono-hy2\.service/, hy2)
     refute_match(/private_output_path!.*hy2_sync/, source)
     assert_match(/Identity sync never writes a catalog source/, source)
+  end
+end
+
+class CatalogPlaceholderAfterIsolatedTest < Minitest::Test
+  PUBLISHER = File.expand_path("../publish-managed-catalog.rb", SCRIPT)
+
+  def setup
+    load SCRIPT unless defined?(rewrite_vless_uuid_to_placeholder!)
+    @directory = Dir.mktmpdir("provision-placeholder")
+    File.chmod(0o700, @directory)
+  end
+
+  def teardown
+    FileUtils.remove_entry(@directory)
+  end
+
+  def test_rewritten_private_source_is_a_valid_catalog_append_source
+    path = File.join(@directory, "westwood.yaml")
+    write_private_yaml(path, {
+      "proxies" => [{
+        "name" => "Los Angeles · Westwood",
+        "type" => "vless",
+        "server" => "203.0.113.12",
+        "port" => 443,
+        "uuid" => "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+        "network" => "tcp",
+        "tls" => true,
+        "udp" => true,
+        "servername" => "www.ucla.edu",
+        "client-fingerprint" => "chrome",
+        "flow" => "xtls-rprx-vision",
+        "reality-opts" => {
+          "public-key" => "C" * 43,
+          "short-id" => "0123456701234567",
+        },
+      }],
+    })
+    refute_includes(File.binread(path), CLIENT_UUID_PLACEHOLDER)
+    rewrite_vless_uuid_to_placeholder!(path)
+    rewritten = File.binread(path).force_encoding(Encoding::UTF_8)
+    assert_includes(rewritten, "uuid: #{CLIENT_UUID_PLACEHOLDER}")
+    refute_match(/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/, rewritten)
+    stdout, stderr, status = Open3.capture3(RbConfig.ruby, PUBLISHER, "--dry-run", path)
+    assert_predicate(status, :success?, stdout + stderr)
+    assert_match(/1 per-account identity placeholders/, stdout)
   end
 end
