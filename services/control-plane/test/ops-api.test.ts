@@ -801,6 +801,22 @@ describe('ops v1 api', () => {
     expect(caught.backfill).toBeNull();
   });
 
+  it('judges the quality source on the sweep window rather than a fast heartbeat', async () => {
+    const t = Math.floor(Date.now() / 1000);
+    await db().prepare(
+      `INSERT INTO operations_live_snapshot(singleton_id, quality_updated_at, updated_at)
+       VALUES(1, ?, ?)`,
+    ).bind(t - 12 * 3600, t).run();
+    const due = assertSystemHealth(await (await ops('system/health')).json());
+    expect(due.sources.find((s) => s.source === 'collector')?.state).toBe('ready');
+    await db().prepare(
+      'UPDATE operations_live_snapshot SET quality_updated_at = ? WHERE singleton_id = 1',
+    ).bind(t - 26 * 3600 - 1).run();
+    const stale = assertSystemHealth(await (await ops('system/health')).json());
+    expect(stale.sources.find((s) => s.source === 'collector')?.state).toBe('stale');
+    expect(stale.ok).toBe(false);
+  });
+
   it('system/health reports coverage counts', async () => {
     await seedUser();
     await db().prepare(

@@ -128,6 +128,10 @@ See [RELEASE_LINES.md](RELEASE_LINES.md).
 Shipped names: `Tono.app`, `Tono.exe`, `tono-core-helper`, `tono-core`,
 `TonoService`, `TonoPreferences`, events `tono://…`, errors `TONO_ERROR:`.
 
-Ops is `https://admin.afk.ccwu.cc/ops/` (Cloudflare Access). Token CLI is
+Ops uses `https://admin.afk.ccwu.cc/ops2/` (Cloudflare Access), built from
+`services/ops-console/`. The old `/ops/` UI is still served for compatibility;
+ops2 still imports `services/control-plane/admin/src/lib/` through
+`@legacy-lib`, so that directory is not dead code. Both use the same Worker
+and `/api/v1/ops/*` management API. Token CLI is
 `/api/v1/admin/*`. The API host 404s `/`, `/index.html`, `/admin.js`, and
 `/style.css`; those legacy token-admin files are not in the tree.
