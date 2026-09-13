@@ -59,7 +59,7 @@ def csv_write(path, rows):
         return
     fields = list(dict.fromkeys(key for row in rows for key in row))
     with path.open("w", newline="") as output:
-        writer = csv.DictWriter(output, fieldnames=fields)
+        writer = csv.DictWriter(output, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 
