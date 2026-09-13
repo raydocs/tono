@@ -1,0 +1,88 @@
+{
+  "status": "BUILT",
+  "repository_baseline": "1d00b581dffdd98e84821c8789eb0c46b7a21bed",
+  "upstream_commit": "ac017cdd246ce8bd547653d927e7bf77d7ee73d5",
+  "version": "v1.19.30-tono-gvisor-adaptive.1",
+  "go": "go1.27.1",
+  "GOOS": "linux",
+  "GOARCH": "amd64",
+  "GOAMD64": "v2",
+  "CGO_ENABLED": "0",
+  "build_tags": [
+    "with_gvisor"
+  ],
+  "commands": [
+    [
+      "git",
+      "init",
+      "-q",
+      "/tmp/tono-stage-a-20260913/build-02/mihomo"
+    ],
+    [
+      "git",
+      "fetch",
+      "--quiet",
+      "--depth=1",
+      "https://github.com/MetaCubeX/mihomo.git",
+      "ac017cdd246ce8bd547653d927e7bf77d7ee73d5"
+    ],
+    [
+      "git",
+      "checkout",
+      "--quiet",
+      "--detach",
+      "FETCH_HEAD"
+    ],
+    [
+      "/tmp/tono-stage-a-20260913/go/bin/go",
+      "mod",
+      "download",
+      "github.com/metacubex/sing-tun@v0.4.22"
+    ],
+    [
+      "patch",
+      "--batch",
+      "--fuzz=0",
+      "-p1",
+      "-i",
+      "/home/user/workspace/tono-stage-a-20260913/tooling/scripts/mihomo-adaptive/gvisor-adaptive-buffer.patch"
+    ],
+    [
+      "/tmp/tono-stage-a-20260913/go/bin/go",
+      "test",
+      "-mod=readonly",
+      "-tags",
+      "with_gvisor",
+      "-run",
+      "^TestTonoAdaptiveGVisorTCPBuffers$",
+      "-count=1",
+      "."
+    ],
+    [
+      "/tmp/tono-stage-a-20260913/go/bin/go",
+      "mod",
+      "edit",
+      "-replace=github.com/metacubex/sing-tun=/tmp/tono-stage-a-20260913/build-02/sing-tun"
+    ],
+    [
+      "/tmp/tono-stage-a-20260913/go/bin/go",
+      "build",
+      "-mod=readonly",
+      "-tags",
+      "with_gvisor",
+      "-trimpath",
+      "-ldflags",
+      "-X github.com/metacubex/mihomo/constant.Version=v1.19.30-tono-gvisor-adaptive.1 -X github.com/metacubex/mihomo/constant.BuildTime=2026-09-13T00:00:00Z -w -s -buildid=",
+      "-o",
+      "/tmp/tono-stage-a-20260913/build-02/mihomo-tono-linux-amd64",
+      "."
+    ]
+  ],
+  "patch_sha256": "f33ee290cc979b739505777761b87f7933441e6bc94d0fc98bb75b42477f005b",
+  "upstream_go_mod_sha256": "944b5c26fc12aec517a436d9204f034b513269b46ee66b900ba0855c9b53e9f3",
+  "upstream_go_sum_sha256": "39e3b062203a576c15c217de36a0e82589e0deedd2225363554214bebbc7cdbf",
+  "sing_tun_sum": "h1:6ARRJ2BIFD1u4r/DTMNcxaNuGyimfXEeUyD4iFJRaZs=",
+  "binary_sha256": "c685870dc7b97014ac2044013cdbe83d8fedbf9da238b9f59dc64c12933d88a4",
+  "version_output": "Mihomo Meta v1.19.30-tono-gvisor-adaptive.1 linux amd64 with go1.27.1 2026-09-13T00:00:00Z\nUse tags: with_gvisor\n",
+  "ldflags": "-X github.com/metacubex/mihomo/constant.Version=v1.19.30-tono-gvisor-adaptive.1 -X github.com/metacubex/mihomo/constant.BuildTime=2026-09-13T00:00:00Z -w -s -buildid="
+}

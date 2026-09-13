@@ -1,0 +1,102 @@
+[
+  {
+    "name": "veth_create_remove",
+    "status": "PASS",
+    "exit_code": 0,
+    "evidence": [
+      {
+        "command": [
+          "/usr/sbin/ip",
+          "link",
+          "add",
+          "alight-02",
+          "type",
+          "veth",
+          "peer",
+          "name",
+          "blight-02"
+        ],
+        "exit_code": 0,
+        "status": "PASS",
+        "elapsed_ms": 2.516016,
+        "stdout": "",
+        "stderr": ""
+      },
+      {
+        "command": [
+          "/usr/sbin/ip",
+          "link",
+          "set",
+          "alight-02",
+          "up"
+        ],
+        "exit_code": 0,
+        "status": "PASS",
+        "elapsed_ms": 1.700474,
+        "stdout": "",
+        "stderr": ""
+      },
+      {
+        "command": [
+          "/usr/sbin/ip",
+          "link",
+          "set",
+          "blight-02",
+          "up"
+        ],
+        "exit_code": 0,
+        "status": "PASS",
+        "elapsed_ms": 1.842697,
+        "stdout": "",
+        "stderr": ""
+      }
+    ],
+    "elapsed_ms": 25.806073
+  },
+  {
+    "name": "netem_install_remove",
+    "status": "FAIL",
+    "exit_code": 1,
+    "evidence": "RuntimeError('{\"command\": [\"/usr/sbin/tc\", \"qdisc\", \"add\", \"dev\", \"alight-02\", \"root\", \"netem\", \"delay\", \"20ms\", \"limit\", \"100\"], \"exit_code\": 2, \"status\": \"FAIL\", \"elapsed_ms\": 2.182266, \"stdout\": \"\", \"stderr\": \"Error: Specified qdisc kind is unknown.\\\\n\"}')",
+    "elapsed_ms": 48.009964
+  },
+  {
+    "name": "tun_bidirectional_io",
+    "status": "PASS",
+    "exit_code": 0,
+    "evidence": {
+      "ioctl": "TUNSETIFF IFF_TUN|IFF_NO_PI",
+      "payload_verified": true,
+      "kernel_to_fd_ms": [
+        0.055346,
+        0.008013,
+        0.00532
+      ],
+      "scope": "synthetic kernel/fd echo, not a product stack test"
+    },
+    "elapsed_ms": 43.610824
+  },
+  {
+    "name": "raw_tcp_udp_local",
+    "status": "PASS",
+    "exit_code": 0,
+    "evidence": "TCP and UDP payloads verified against owned loopback servers in isolated namespace",
+    "elapsed_ms": 0.252
+  },
+  {
+    "name": "packet_capture",
+    "status": "PASS",
+    "exit_code": 0,
+    "evidence": {
+      "packets": 1,
+      "sha256": "8476c98675af744f9dcf85ccf7bc7c2491e5d9fed5c20c09d1e475682545ed24"
+    },
+    "elapsed_ms": 1058.170804
+  },
+  {
+    "name": "external_authorized_tcp_udp",
+    "status": "NOT_TESTED",
+    "exit_code": null,
+    "evidence": "No separately authorized external test endpoint supplied"
+  }
+]
