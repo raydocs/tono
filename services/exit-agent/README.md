@@ -37,7 +37,10 @@ second cumulative ledger.
 The roster cycle is ordered deliberately:
 
 1. Fetch and validate the roster.
-2. Fully reconcile Xray and read counters from one stable Xray process.
+2. If hy2 is installed, atomically replace its HTTP auth allowlist with exactly
+   the verified roster, including an empty roster. Then fully reconcile Xray and
+   read counters from one stable Xray process. Neither transport can be skipped
+   while claiming a complete roster ACK.
 3. POST the roster's `observedAt` to `/api/v1/home/roster-ack` with the same
    bearer token.
 4. Persist and deliver usage state.
@@ -82,3 +85,43 @@ Run the regression suite with:
 ```bash
 python3 services/exit-agent/test_reconcile_and_report.py
 ```
+
+## hy2 roster ownership (G2)
+
+An installed `/opt/tono-hy2/` opts the node into roster enforcement for hy2.
+The agent replaces `auth-allow.sha256` (owner preserved, checker group preserved,
+mode 0640) before Xray reconciliation and the roster ACK. Only current Tono-issued
+`clientUUID` hashes are included; no static Xray clients or shared probe password
+are unioned back in. Empty means deny every new authentication. A failed fetch
+is **not** an empty roster; unavailable control plane keeps the last known list.
+A missing/unwritable allowlist on an installed node is an error, not readiness.
+VLESS-only nodes without that directory are unchanged.
+
+The first line `# tono-exit-agent roster v1` marks the new writer. After handover,
+`--hy2-sync-identities` refuses to overwrite it from static configuration. Use the
+normal verified roster cycle instead. Existing shared-password probes may stop
+working; use a dedicated entitled test account, never restore the stale password.
+
+**Deployment is a separate, approved node operation.** Before handover:
+
+1. Inspect the actual agent/checker units, runtime user, source ID, timer and
+   filesystem restrictions. Back up their code/unit/env/state. Do not expose
+   node tokens or client UUIDs. Pause the agent timer and wait for its current
+   cycle to finish so bootstrap and the new writer cannot overlap.
+2. Upgrade/restart the auth checker with the current helper **before** the new
+   agent publishes its first marked list. Its `ReadOnlyPaths` must bind the
+   `/opt/tono-hy2` directory, not the individual allowlist inode; an atomic rename
+   must remain visible inside the checker's mount namespace.
+3. Deploy the agent with write access to the allowlist directory (including
+   temporary-file creation and rename); the installed directory/file owner must
+   match its effective UID. Run one roster cycle with the existing node token,
+   then resume its timer. Do not alter the Xray config/process or customer catalog.
+4. On the target Linux host, verify new authentication, removal, empty roster,
+   and write failure without a false ACK, using isolated test identities. The
+   local HTTP regression is not a real systemd/Hysteria acceptance test.
+
+This sync changes subsequent authentication decisions. It does not claim to kick
+already-established QUIC sessions or provide hy2 usage accounting. Existing
+sessions, real client handshakes and transport acceptance still require node
+validation before publication. A rollback must not restore an obsolete allowlist;
+keep the last verified list or disable the unpublished hy2 transport instead.
