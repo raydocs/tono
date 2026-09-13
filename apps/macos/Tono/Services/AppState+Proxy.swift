@@ -76,17 +76,27 @@ extension AppState {
                 "to": nodeName,
             ]
         )
+        let switchGeneration = connectionCoordinator.protectionOperationGeneration
         connectionCoordinator.nodeSwitchTask = Task { [weak self] in
             guard let self else { return }
             defer {
                 self.switchingNodeId = nil
-                self.startPendingConfigReloadIfPossible()
+                if self.connectionCoordinator.protectionOperationGeneration == switchGeneration {
+                    self.startPendingConfigReloadIfPossible()
+                }
             }
             guard let api else { return }
+            @MainActor func checkSwitchCurrent() throws {
+                try Task.checkCancellation()
+                guard self.connectionCoordinator.protectionOperationGeneration == switchGeneration else {
+                    throw CancellationError()
+                }
+            }
             // Until a verified selector has an exact endpoint set, a failed arm/rollback
             // cannot be treated as an ordinary UI error over a still-Connected session.
             var protectionTransitionInFlight = false
             do {
+                try checkSwitchCurrent()
                 let previousName = self.proxyService.activeNodeName
                 let previousNode = previousName.flatMap { self.localProxyNode(matching: $0) }
                 let previousEndpoints = self.currentProxyEndpoints()
@@ -100,17 +110,17 @@ extension AppState {
                 // selector back without restoring that PF permit.
                 protectionTransitionInFlight = true
                 try await self.armSwitchKillSwitch(proxyEndpoints: transitionEndpoints)
-                try Task.checkCancellation()
+                try checkSwitchCurrent()
                 ConnectionTelemetryBuffer.shared.record(
                     "switchBegin",
                     node: desiredNode?.id,
-                    generation: Int(self.connectionCoordinator.protectionOperationGeneration)
+                    generation: Int(switchGeneration)
                 )
                 try await api.selectProxy(
                     group: ConfigPipeline.exitGroupName,
                     proxy: nodeName
                 )
-                try Task.checkCancellation()
+                try checkSwitchCurrent()
                 // Prove the new exit before tearing leftover sockets on the
                 // previous destination. Closing everything first dumped the
                 // session onto an unverified node.
@@ -122,15 +132,16 @@ extension AppState {
                         )
                     },
                     mixedPort: self.config.mixedPort,
-                    generation: self.connectionCoordinator.protectionOperationGeneration,
+                    generation: switchGeneration,
                     rounds: 1
                 )
-                try Task.checkCancellation()
+                try checkSwitchCurrent()
                 if case .failed = switchVerdict, let previousName {
                     try await api.selectProxy(
                         group: ConfigPipeline.exitGroupName,
                         proxy: previousName
                     )
+                    try checkSwitchCurrent()
                     let rollback = await self.verifyProtectedConnection(
                         controllerTask: Task {
                             await self.advisoryControllerExitProbe(
@@ -139,15 +150,17 @@ extension AppState {
                             )
                         },
                         mixedPort: self.config.mixedPort,
-                        generation: self.connectionCoordinator.protectionOperationGeneration,
+                        generation: switchGeneration,
                         rounds: 1
                     )
+                    try checkSwitchCurrent()
                     ConnectionTelemetryBuffer.shared.record(
                         "switchRollback",
                         node: desiredNode?.id,
-                        generation: Int(self.connectionCoordinator.protectionOperationGeneration)
+                        generation: Int(switchGeneration)
                     )
                     try await self.armSwitchKillSwitch(proxyEndpoints: previousEndpoints)
+                    try checkSwitchCurrent()
                     if case .failed(let failure) = rollback {
                         self.lastClassifiedFailure = failure
                         self.isRecoveringProtectedConnection = true
@@ -164,6 +177,7 @@ extension AppState {
                 }
                 await self.closeConnectionsBoundToExit(previousName, using: api)
                 guard await self.connectionCoordinator.finishNodeSwitch(
+                    generation: switchGeneration,
                     converge: { try await self.armSwitchKillSwitch(proxyEndpoints: nextEndpoints) },
                     commit: { self.rememberSwitchedNode(desiredNode, name: nodeName) },
                     recover: { error in
@@ -172,12 +186,12 @@ extension AppState {
                 ) else { return }
                 protectionTransitionInFlight = false
                 await proxyService.refresh()
-                try Task.checkCancellation()
+                try checkSwitchCurrent()
                 ConnectionTelemetryBuffer.shared.record(
                     "switchOk",
                     elapsedMs: max(0, Int(Date().timeIntervalSince(switchStartedAt) * 1_000)),
                     node: desiredNode?.id,
-                    generation: Int(self.connectionCoordinator.protectionOperationGeneration)
+                    generation: Int(switchGeneration)
                 )
                 LocalTrafficAudit.shared.recordEvent(
                     "node_switch_succeeded",
@@ -204,7 +218,8 @@ extension AppState {
                 // URLSession reports cancellation as URLError.cancelled rather
                 // than CancellationError. An intentional disconnect must not
                 // be converted into an automatic protected reconnect.
-                guard !Task.isCancelled, !isDisconnecting else { return }
+                guard !Task.isCancelled, !isDisconnecting,
+                      self.connectionCoordinator.protectionOperationGeneration == switchGeneration else { return }
                 LocalTrafficAudit.shared.recordEvent(
                     "node_switch_failed",
                     details: [

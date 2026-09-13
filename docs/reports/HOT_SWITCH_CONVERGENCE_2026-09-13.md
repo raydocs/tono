@@ -22,6 +22,11 @@ fail-open or an installed-device fault reproduction.
   The final completion boundary checks cancellation and protection generation.
   Recovery synchronously queues the existing disconnect owner; it does not await
   teardown from inside the switch task which teardown itself must drain.
+- Pre-merge review found a real wake scheduling gap: wake increments generation
+  before its queued disconnect cancels the switch. Sampling generation only at
+  finalization can adopt that newer owner. The switch now captures generation at
+  dispatch, carries it through both probes and checks it after awaits and before
+  recovery/finalization. A retired finalization cannot start another arm operation.
 - Adjacent Windows defect: the selection command saves the requested node before
   dispatch, but rollback previously restored only memory/UI. The next launch could
   silently reselect the failed node. Rollback now restores the existing selection
@@ -33,22 +38,26 @@ One Windows regression covers failed endpoint convergence through the production
 completion boundary and real connection FSM. Its injected recovery must run and
 leave non-Connected, blocked protection with verified-session retry eligibility.
 One macOS XCTest covers final-arm failure and a retired completion using the real
-coordinator boundary. One additional Windows file regression proves rollback is
-the selection read on next launch.
+coordinator boundary. A separate macOS regression covers generation invalidation
+before finalization, without relying on task cancellation. One additional Windows
+file regression proves rollback is the selection read on next launch.
 
 These tests inject the final operation; they do **not** install an endpoint union,
 perform real selector/probe I/O, invoke an installed helper or inspect PF/WFP.
 
 - Mac-hosted Windows App workspace: `cargo +1.98.1 test --offline --locked
   -p tono-windows --features clippy --lib` — **479 passed, 0 failed**.
-- macOS coordinator target — **11 passed**; full `Tono` XCTest scheme —
-  **287 executed, 1 existing opt-in skip, 0 failures**.
+- macOS full `Tono` XCTest scheme — **288 executed, 1 existing opt-in skip,
+  0 failures**, including all **12** coordinator tests.
 - Mutation checks: accepting a failed endpoint commit makes the Windows and
   macOS regressions fail; omitting the selection-file restore makes the file
   regression fail. All mutations were restored before the final full suites.
+- The additional wake-generation regression fails with late generation sampling
+  (three assertion failures) and passes after requiring the dispatch generation.
 
 Local logs: `/tmp/tono-hot-switch-20260913/{windows-full,macos-full,
 windows-mutation,macos-mutation,windows-selection-mutation}.log`.
+Post-review macOS logs: `macos-generation-before.log`, `macos-final-full.log`.
 Native CI must pass before merge. No host routing, DNS, firewall, installed helper,
 production service or customer update source was changed to run these checks.
 
