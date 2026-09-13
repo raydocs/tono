@@ -83,6 +83,9 @@ extension AppState {
                 self.startPendingConfigReloadIfPossible()
             }
             guard let api else { return }
+            // Until a verified selector has an exact endpoint set, a failed arm/rollback
+            // cannot be treated as an ordinary UI error over a still-Connected session.
+            var protectionTransitionInFlight = false
             do {
                 let previousName = self.proxyService.activeNodeName
                 let previousNode = previousName.flatMap { self.localProxyNode(matching: $0) }
@@ -95,6 +98,7 @@ extension AppState {
                 // Old ∪ new first. Arming only the new destination blocked the
                 // still-selected old exit; a failed switch then rolled the
                 // selector back without restoring that PF permit.
+                protectionTransitionInFlight = true
                 try await self.armSwitchKillSwitch(proxyEndpoints: transitionEndpoints)
                 try Task.checkCancellation()
                 ConnectionTelemetryBuffer.shared.record(
@@ -149,6 +153,7 @@ extension AppState {
                         self.isRecoveringProtectedConnection = true
                         throw CoreControllerError.protectionFailed(failure.userMessage)
                     }
+                    protectionTransitionInFlight = false
                     throw CoreControllerError.protectionFailed(
                         String(localized: "New server failed verification. Switched back to the previous one.")
                     )
@@ -158,13 +163,16 @@ extension AppState {
                     throw CoreControllerError.protectionFailed(failure.userMessage)
                 }
                 await self.closeConnectionsBoundToExit(previousName, using: api)
-                try await self.armSwitchKillSwitch(proxyEndpoints: nextEndpoints)
+                guard await self.connectionCoordinator.finishNodeSwitch(
+                    converge: { try await self.armSwitchKillSwitch(proxyEndpoints: nextEndpoints) },
+                    commit: { self.rememberSwitchedNode(desiredNode, name: nodeName) },
+                    recover: { error in
+                        self.recoverFailedNodeSwitch(desiredNode, name: nodeName, error: error)
+                    }
+                ) else { return }
+                protectionTransitionInFlight = false
                 await proxyService.refresh()
-                selectedNodeId = desiredNode?.id ?? ConfigPipeline.homeNodeName
-                activeNode = desiredNode
-                proxyService.activeGroupName = ConfigPipeline.exitGroupName
-                proxyService.activeNodeName = nodeName
-                persistProxySelection(nodeName)
+                try Task.checkCancellation()
                 ConnectionTelemetryBuffer.shared.record(
                     "switchOk",
                     elapsedMs: max(0, Int(Date().timeIntervalSince(switchStartedAt) * 1_000)),
@@ -207,16 +215,35 @@ extension AppState {
                         "error": error.localizedDescription,
                     ]
                 )
-                if isRecoveringProtectedConnection {
-                    disconnect(releaseKillSwitch: false)
-                    errorMessage = lastClassifiedFailure?.userMessage
-                        ?? error.localizedDescription
-                    scheduleProtectedReconnect()
+                if protectionTransitionInFlight || isRecoveringProtectedConnection {
+                    recoverFailedNodeSwitch(desiredNode, name: nodeName, error: error)
                 } else {
                     errorMessage = error.localizedDescription
                 }
             }
         }
+    }
+
+    private func recoverFailedNodeSwitch(_ node: ProxyNode?, name: String, error: Error) {
+        // Preserve the requested intent, but never claim the transition completed. The existing
+        // disconnect owner withdraws Connected synchronously and drains this switch task before
+        // touching Core/PF. The reconnect loop waits for that teardown and never disarms.
+        rememberSwitchedNode(node, name: name)
+        disconnect(releaseKillSwitch: false)
+        errorMessage = error.localizedDescription
+        LocalTrafficAudit.shared.recordEvent(
+            "node_switch_protection_convergence_failed",
+            details: ["error": error.localizedDescription]
+        )
+        scheduleProtectedReconnect()
+    }
+
+    private func rememberSwitchedNode(_ node: ProxyNode?, name: String) {
+        selectedNodeId = node?.id ?? ConfigPipeline.homeNodeName
+        activeNode = node
+        proxyService.activeGroupName = ConfigPipeline.exitGroupName
+        proxyService.activeNodeName = name
+        persistProxySelection(name)
     }
 
     func selectProxyTarget(_ target: String, inGroup groupName: String) {

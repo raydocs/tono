@@ -8,6 +8,30 @@ final class ConnectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(ProtectedReconnectSchedule.networkChangeKickCooldown, 30)
     }
 
+    func testFinalEndpointFailureRecoversWithoutCommittingOrOverridingANewerOwner() async {
+        enum ArmFailure: Error { case injected }
+        let coordinator = ConnectionCoordinator()
+        var events: [String] = ["union", "selector", "probe"]
+        let completed = await coordinator.finishNodeSwitch(converge: {
+            events.append("new-only")
+            throw ArmFailure.injected
+        }, commit: {
+            events.append("connected")
+        }, recover: { _ in
+            events.append("protected-recovery")
+        })
+        XCTAssertFalse(completed)
+        XCTAssertEqual(events, ["union", "selector", "probe", "new-only", "protected-recovery"])
+
+        // A completed IPC from an older generation must not repaint or restart after release.
+        let retired = await coordinator.finishNodeSwitch(converge: {
+            coordinator.bumpGeneration()
+            throw ArmFailure.injected
+        }, commit: { XCTFail("retired switch cannot commit") },
+           recover: { _ in XCTFail("newer owner controls recovery") })
+        XCTAssertFalse(retired)
+    }
+
     func testCoordinatorOwnsGenerationAndStartsAtZero() {
         let coordinator = ConnectionCoordinator()
         XCTAssertEqual(coordinator.protectionOperationGeneration, 0)
