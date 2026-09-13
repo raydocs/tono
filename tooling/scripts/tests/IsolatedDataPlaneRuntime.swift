@@ -52,14 +52,17 @@ struct IsolatedDataPlaneRuntime {
 
         let source = try String(contentsOf: input, encoding: .utf8)
         let parsed = ConfigParser.parseSubscription(source)
-            .filter { $0.type == .vless }
+            .filter { $0.type == .vless || $0.type == .hysteria2 }
         let nodes = try ConfigPipeline.validatedOwnedNodes(parsed)
         guard !nodes.isEmpty,
-              let selected = ConfigPipeline.preferredCloudExit(
+              // An explicit transport test must not silently choose the TCP
+              // default: preferredCloudExit intentionally excludes hy2.
+              let selected = nodes.first(where: { $0.name == preferredNode })
+                ?? ConfigPipeline.preferredCloudExit(
                 in: nodes,
                 named: preferredNode
               ) else {
-            throw TestFailure("no validated Reality exit is available")
+            throw TestFailure("no validated Tono exit is available")
         }
 
         let overlay = ConfigPipeline.OverlayConfig(
