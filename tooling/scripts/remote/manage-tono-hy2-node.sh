@@ -17,7 +17,6 @@ AUTH_SERVICE_NAME="tono-hy2-auth.service"
 AUTH_SERVICE_PATH="/etc/systemd/system/$AUTH_SERVICE_NAME"
 INSTALL_ROOT="/opt/tono-hy2"
 SERVICE_USER="tono-hy2"
-CERT_CN="www.microsoft.com"
 AUTH_HTTP_URL="http://127.0.0.1:18765/auth"
 AUTH_HTTP_PY="$INSTALL_ROOT/auth-http.py"
 AUTH_ALLOWLIST="$INSTALL_ROOT/auth-allow.sha256"
@@ -37,6 +36,11 @@ require_command() {
 
 validate_port() {
   [[ $1 =~ ^[0-9]+$ ]] && ((10#$1 >= 1 && 10#$1 <= 65535)) || fail "invalid UDP port"
+}
+
+validate_servername() {
+  [[ ${#1} -le 253 && $1 == *.* && $1 =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ && $1 != *..* ]] ||
+    fail "invalid certificate/SNI server name"
 }
 
 platform() {
@@ -416,11 +420,15 @@ apply_deployment() {
   local artifact=${3:-}
   local expected_sha256=${4:-}
   local port=${5:-}
+  # One validated input owns certificate SAN, masquerade and the client SNI.
+  # Never silently fall back to a different (formerly Microsoft) host.
+  local CERT_CN=${6:-}
   [[ $deployment_id =~ ^[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}$ ]] || fail "invalid deployment identifier"
   [[ $version =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "invalid pinned hysteria version"
   [[ $artifact =~ ^/tmp/tono-hy2-artifact-[a-f0-9]{24}$ ]] || fail "invalid uploaded artifact path"
   [[ $expected_sha256 =~ ^[a-f0-9]{64}$ ]] || fail "invalid artifact digest"
   validate_port "$port"
+  validate_servername "$CERT_CN"
   platform
   for command_name in awk chmod chown getent groupadd grep install ln mv openssl python3 readlink seq sha256sum ss systemctl useradd; do
     require_command "$command_name"

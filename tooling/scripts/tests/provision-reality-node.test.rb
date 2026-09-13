@@ -87,9 +87,20 @@ class Hy2StaysOptIn < Minitest::Test
     refute_match(/systemctl (disable|stop) .*tono-xray/, hy2)
     refute_match(%r{rm .*/opt/tono-xray}, hy2)
     assert_match(/ss -H -lun/, hy2)
-    assert_match(/CERT_CN="www\.microsoft\.com"/, hy2)
     assert_match(/subjectAltName=DNS:\$CERT_CN/, hy2)
     assert_match(/This script must never stop, replace, or rewrite tono-xray/, hy2)
+  end
+
+  def test_hy2_uses_the_requested_front_for_the_certificate_and_client_sni
+    source = File.read(SCRIPT)
+    hy2 = File.read(HY2_REMOTE)
+    assert_includes(source, 'options[:hy2_port], target]')
+    assert_includes(source, '"sni" => target')
+    assert_includes(hy2, 'local CERT_CN=${6:-}')
+    assert_includes(hy2, 'validate_servername "$CERT_CN"')
+    assert_includes(hy2, 'subjectAltName=DNS:$CERT_CN')
+    assert_includes(hy2, 'url: https://$CERT_CN/')
+    refute_includes(hy2, 'www.microsoft.com')
   end
 
   def test_hy2_auth_is_http_over_every_xray_uuid_not_the_first_password
