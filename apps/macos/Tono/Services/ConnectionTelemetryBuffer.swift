@@ -23,8 +23,17 @@ nonisolated final class ConnectionTelemetryBuffer: @unchecked Sendable {
     static let capacity = 128
 
     private let lock = NSLock()
-    private var events: [TonoTelemetryEvent] = []
-    private var dropped = 0
+    private var events: [(sequence: UInt64, event: TonoTelemetryEvent)] = []
+    private var sequence: UInt64 = 0
+    private var acknowledgedThrough: UInt64 = 0
+    private var epoch: UInt64 = 0
+
+    struct Snapshot: Sendable {
+        let events: [TonoTelemetryEvent]
+        let dropped: Int
+        fileprivate let through: UInt64
+        fileprivate let epoch: UInt64
+    }
     private var failureSink: (@Sendable (ConnectFailureNotice) -> Void)?
 
     /// Who hears about a connect failure as it happens. One sink; the account
@@ -81,11 +90,11 @@ nonisolated final class ConnectionTelemetryBuffer: @unchecked Sendable {
             }
         )
         lock.lock()
-        events.append(event)
+        sequence += 1
+        events.append((sequence, event))
         if events.count > Self.capacity {
             let overflow = events.count - Self.capacity
             events.removeFirst(overflow)
-            dropped += overflow
         }
         lock.unlock()
     }
@@ -134,13 +143,37 @@ nonisolated final class ConnectionTelemetryBuffer: @unchecked Sendable {
         sink?(notice)
     }
 
+    /// Keep events available to retry (and to the termination audit) until a
+    /// successful upload acknowledges exactly this bounded snapshot.
+    func snapshot() -> Snapshot {
+        lock.lock()
+        defer { lock.unlock() }
+        return snapshotLocked()
+    }
+
+    private func snapshotLocked() -> Snapshot {
+        let first = events.first?.sequence ?? (sequence + 1)
+        return Snapshot(events: events.map(\.event),
+                        dropped: Int(min(1_000_000, first - acknowledgedThrough - 1)),
+                        through: sequence, epoch: epoch)
+    }
+
+    func acknowledge(_ snapshot: Snapshot) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard snapshot.epoch == epoch, snapshot.through >= acknowledgedThrough else { return }
+        acknowledgedThrough = snapshot.through
+        events.removeAll { $0.sequence <= snapshot.through }
+    }
+
+    /// Explicit ownership/consent boundaries invalidate outstanding receipts.
     func drain() -> (events: [TonoTelemetryEvent], dropped: Int) {
         lock.lock()
-        let snapshot = events
-        let snapshotDropped = dropped
+        defer { lock.unlock() }
+        let snapshot = snapshotLocked()
         events.removeAll(keepingCapacity: true)
-        dropped = 0
-        lock.unlock()
-        return (snapshot, snapshotDropped)
+        acknowledgedThrough = sequence
+        epoch &+= 1
+        return (snapshot.events, snapshot.dropped)
     }
 }

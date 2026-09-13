@@ -96,6 +96,7 @@ final class AccountSession {
     /// refused or failed upload carries its bytes into the following window
     /// exactly once instead of losing them.
     var routeTelemetryCursor = AppTrafficLedger.TelemetryCursor()
+    @ObservationIgnored var periodicTelemetryConsent: () -> Bool = { AccountSession.isPeriodicTelemetryEnabled }
     /// When a connect failure was last reported. For a quarter of an hour after
     /// it the next window may come at five minutes instead of eighteen, so
     /// whether the retry worked is visible before the regular cadence shows it.

@@ -13,6 +13,18 @@ final class ConnectionTelemetryBufferTests: XCTestCase {
         XCTAssertNil(drained.events[0].error)
         let empty = buffer.drain()
         XCTAssertTrue(empty.events.isEmpty)
+        buffer.record("oldAccount")
+        let retired = buffer.snapshot()
+        _ = buffer.drain()
+        for _ in 0..<(ConnectionTelemetryBuffer.capacity + 2) { buffer.record("newAccount") }
+        buffer.acknowledge(retired)
+        let retained = buffer.snapshot()
+        XCTAssertEqual(retained.events.count, ConnectionTelemetryBuffer.capacity)
+        XCTAssertEqual(retained.dropped, 2)
+        buffer.record("newerEvent") // Evict one in-flight event that the receipt actually stores.
+        buffer.acknowledge(retained)
+        XCTAssertEqual(buffer.snapshot().events.map(\.kind), ["newerEvent"])
+        XCTAssertEqual(buffer.snapshot().dropped, 0)
     }
 
     /// A classified failure is only useful if the code travels with it. Without
