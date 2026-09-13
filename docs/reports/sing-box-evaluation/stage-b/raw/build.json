@@ -1,0 +1,52 @@
+{
+  "status": "BUILT",
+  "commit": "93fff5954390367dd456cad3cbd79be54f8b941f",
+  "sing_tun": "v0.9.4-0.20260912075549-869f0a4d76af",
+  "tags": "with_gvisor,with_quic,with_utls,with_clash_api",
+  "version_label": "1.14.0-alpha.0-experiment.93fff595",
+  "note": "Synthetic version label; identity is the commit and module graph",
+  "commands": [
+    {
+      "command": [
+        "env",
+        "GOTOOLCHAIN=local",
+        "CGO_ENABLED=0",
+        "GOOS=linux",
+        "GOARCH=amd64",
+        "GOAMD64=v2",
+        "GOMAXPROCS=4",
+        "GOFLAGS=",
+        "/tmp/tono-stage-a-20260913/go/bin/go",
+        "-C",
+        "/tmp/tono-stage-b-20260913/sing-box",
+        "build",
+        "-mod=readonly",
+        "-trimpath",
+        "-tags",
+        "with_gvisor,with_quic,with_utls,with_clash_api",
+        "-ldflags",
+        "-X github.com/sagernet/sing-box/constant.Version=1.14.0-alpha.0-experiment.93fff595 -w -s -buildid=",
+        "-o",
+        "/tmp/tono-stage-b-20260913/build-01/sing-box-linux-amd64",
+        "./cmd/sing-box"
+      ],
+      "exit_code": 0,
+      "status": "PASS",
+      "elapsed_ms": 23635.510969
+    }
+  ],
+  "go_mod_sha256": "c8a55d750ff56af8e097478b7ce88f10224f406041e73002ef89e4c8ade5769b",
+  "go_sum_sha256": "121265484ad99c79970266e5896eba82ff660c2921624225afa316e408f6d38e",
+  "build_environment": {
+    "GOTOOLCHAIN": "local",
+    "CGO_ENABLED": "0",
+    "GOOS": "linux",
+    "GOARCH": "amd64",
+    "GOAMD64": "v2",
+    "GOMAXPROCS": "4",
+    "GOFLAGS": ""
+  },
+  "binary_sha256": "cd2ba002e1282da29674107cc503285dc8fa7026bf01fcc40d314bc10ab749df",
+  "ldflags": "-X github.com/sagernet/sing-box/constant.Version=1.14.0-alpha.0-experiment.93fff595 -w -s -buildid=",
+  "version_output": "sing-box version 1.14.0-alpha.0-experiment.93fff595\n\nEnvironment: go1.27.1 linux/amd64\nTags: with_gvisor,with_quic,with_utls,with_clash_api\nRevision: 93fff5954390367dd456cad3cbd79be54f8b941f\nCGO: disabled\n"
+}

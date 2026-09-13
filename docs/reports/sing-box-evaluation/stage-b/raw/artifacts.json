@@ -1,0 +1,424 @@
+{
+  "artifact_root": "/tmp/tono-stage-b-20260913",
+  "measured_tools_commit": "d5e69746f89c566c69bcbdf63ee74a7cf77f1f71",
+  "supplemental_cleanup_check_utc": "2026-09-13T21:32:59.581585+00:00",
+  "supplemental_cleanup_command": [
+    "sudo",
+    "-n",
+    "lsns",
+    "-t",
+    "net",
+    "-n",
+    "-o",
+    "NS"
+  ],
+  "supplemental_cleanup_exit": 0,
+  "root_visible_namespaces": [
+    "4026531840"
+  ],
+  "all_recorded_run_namespaces_gone": true,
+  "host_network_checks": [
+    {
+      "run_id": "measure-01",
+      "host_network_unchanged": true
+    },
+    {
+      "run_id": "parity-01",
+      "host_network_unchanged": true
+    },
+    {
+      "run_id": "parity-02",
+      "host_network_unchanged": true
+    },
+    {
+      "run_id": "parity-03",
+      "host_network_unchanged": true
+    },
+    {
+      "run_id": "parity-04",
+      "host_network_unchanged": true
+    },
+    {
+      "run_id": "parity-05",
+      "host_network_unchanged": true
+    }
+  ],
+  "proc_cpu": {
+    "before": "cpu  72552 0 23371 4494559 5170 0 1240 348 0 0",
+    "after": "cpu  75579 0 25445 4531925 5172 0 1723 360 0 0"
+  },
+  "cgroup": {
+    "before": {
+      "/sys/fs/cgroup/amp.slice/amp-workload.slice/cpu.max": "max 100000\n",
+      "/sys/fs/cgroup/amp.slice/amp-workload.slice/cpu.stat": "usage_usec 780988500\nuser_usec 640652889\nsystem_usec 140335610\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0\n",
+      "/sys/fs/cgroup/amp.slice/amp-workload.slice/memory.max": "15032385536\n"
+    },
+    "after": {
+      "/sys/fs/cgroup/amp.slice/amp-workload.slice/cpu.max": "max 100000\n",
+      "/sys/fs/cgroup/amp.slice/amp-workload.slice/cpu.stat": "usage_usec 858105090\nuser_usec 688540785\nsystem_usec 169564304\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0\n",
+      "/sys/fs/cgroup/amp.slice/amp-workload.slice/memory.max": "15032385536\n"
+    }
+  },
+  "artifacts": [
+    {
+      "path": "/tmp/tono-stage-b-20260913/build-01/build-info.txt",
+      "sha256": "0fc6f1e85b455dd54dd94755d0eb4416d237de4e1b8369d2e9af9bc2dee199bc",
+      "bytes": 8012
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/build-01/build.log",
+      "sha256": "743ee492a27d399ae3b24e7712c415983c7da8f8e00c2f7606ee23dee3e081f2",
+      "bytes": 4080
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/build-01/manifest.json",
+      "sha256": "9848e722d65a12fb466b34416cf46340b22e35dfd78a5a1e6300bca4ad2ce9b0",
+      "bytes": 1935
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-01/execution.json",
+      "sha256": "94be7f82734a4786067ad95f352bf2f891d87692d04450e363752f5f89e34123",
+      "bytes": 758
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-01/fixture.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-01/holder.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-01/host-network.json",
+      "sha256": "2b14a20e878f2ef6d51535fdaed3f8cf0f7194086083c82d221ff3524ebe2b86",
+      "bytes": 5413
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-01/parity-mihomo.log",
+      "sha256": "6e7ebb75227e01c96186e8e386da2fcf5b4d1abeaebab6e1e4bfab1cef96dbe5",
+      "bytes": 2976
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-01/results.json",
+      "sha256": "c2d1d0c9bc40d4d667edfec8b381ec64cce7bd794e71746fafd9ee8ac6e4093b",
+      "bytes": 8726
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-01/server.log",
+      "sha256": "98429e9c17bed2d6752a541adc85d3ede728b2e8eb702a7672c74f2b6653387c",
+      "bytes": 56
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-02/execution.json",
+      "sha256": "1d9646d4e3fc500a8bde8a2f7f017e9c4049b9e1897199f0d8c652fd7aa0a990",
+      "bytes": 758
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-02/fixture.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-02/holder.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-02/host-network.json",
+      "sha256": "2b14a20e878f2ef6d51535fdaed3f8cf0f7194086083c82d221ff3524ebe2b86",
+      "bytes": 5413
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-02/parity-mihomo.log",
+      "sha256": "cfa92c123618e058b9d49ab4ca2fe76d93a21d83c52a19a82df4e0f925f21b2f",
+      "bytes": 466
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-02/results.json",
+      "sha256": "7e0dffdd8581ab559d45cc882ece305384036ba6a8bfdf3dd54167682e13dea7",
+      "bytes": 12991
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-02/server.log",
+      "sha256": "98429e9c17bed2d6752a541adc85d3ede728b2e8eb702a7672c74f2b6653387c",
+      "bytes": 56
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-03/execution.json",
+      "sha256": "1618e3383673442b91ea54b17d1284a508ba5b371a13eebf7c651012323508d0",
+      "bytes": 759
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-03/fixture.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-03/holder.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-03/host-network.json",
+      "sha256": "2b14a20e878f2ef6d51535fdaed3f8cf0f7194086083c82d221ff3524ebe2b86",
+      "bytes": 5413
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-03/mihomo-wrong-ca.log",
+      "sha256": "442bc487e838fee932883385b582285643ed8e2f0241efa607ff7584c42fed89",
+      "bytes": 2976
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-03/mihomo-wrong-reality.log",
+      "sha256": "59b8333c4b575f334bc8f85ce2b71103a800e26861bd83805c8b416ac46cbe83",
+      "bytes": 2338
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-03/mihomo-wrong-sni.log",
+      "sha256": "a828965a47c752548ce43e9d644856119db4ffc47dd24799b8e3d03c4aaaf4b1",
+      "bytes": 3216
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-03/parity-gvisor.log",
+      "sha256": "7e949dfe74b10c3da437b57ddf1fb45528f98cb39ec350723dc04785b4049982",
+      "bytes": 374
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-03/parity-mihomo.log",
+      "sha256": "17adafb1e82710fd8c2f33598d7392a59738695b9b70c53b2132066e42094aef",
+      "bytes": 387
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-03/results.json",
+      "sha256": "cc4e36248c9cce314ed9fc7a80a55b82895c2a736e36f0263b2819eab2d686ca",
+      "bytes": 20754
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-03/server.log",
+      "sha256": "653ca5a03f9a50d2efcf8e786bd559132d8382c6fa8fb471a08cfd2d0b5ce354",
+      "bytes": 1636
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-04/execution.json",
+      "sha256": "4720793f9ad7d803549b15162a80dad90eb69d3a3591f2844222afbedd8ef025",
+      "bytes": 758
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-04/fixture.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-04/holder.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-04/host-network.json",
+      "sha256": "2b14a20e878f2ef6d51535fdaed3f8cf0f7194086083c82d221ff3524ebe2b86",
+      "bytes": 5413
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-04/mihomo-wrong-ca.log",
+      "sha256": "c9b5b5c0645f96b49460e57e19f00116cd93388795557167dfa8191a9c1f0c51",
+      "bytes": 2975
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-04/mihomo-wrong-reality.log",
+      "sha256": "fde7b422417728d9c7a4bd023c8c726928ae1039552b83356fb0b365b17f8982",
+      "bytes": 2338
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-04/mihomo-wrong-sni.log",
+      "sha256": "8e45bc54d96a33d34b0b95da42a2f1fbb7284666a615286afca5632a810e8a79",
+      "bytes": 3215
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-04/parity-gvisor.log",
+      "sha256": "aa71c117120db2562e7dd239020388964d5a1b3924dea91ac6142061ac91c222",
+      "bytes": 494
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-04/parity-mihomo.log",
+      "sha256": "c2babc59ba3ec4d6c1b340039c875a1a142226bd4e9106b99bbf33918319aae0",
+      "bytes": 387
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-04/results.json",
+      "sha256": "10cd0e91d7354cbcc223ad724ab7668329934298e0bb4facebbef060a1281c93",
+      "bytes": 21350
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-04/server.log",
+      "sha256": "057c31763e1f73e8bdcc09474247eb810f62bf0773d066e155ad9c769336786a",
+      "bytes": 1631
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-05/execution.json",
+      "sha256": "5369e67dce872c15d010e61b4ae70200cb0f4f3d84b33237b20733d190270eb7",
+      "bytes": 759
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-05/fixture.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-05/go-wrong-ca.log",
+      "sha256": "96f46a808644d9c86f7d824586a63d3a9905ce27821b7ffb6fa15822cbcde0fb",
+      "bytes": 616
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-05/go-wrong-reality.log",
+      "sha256": "15ae4746ea50fcd8a4f521c84481c427b87ccac25744ddc2355e5b38c79d5a56",
+      "bytes": 536
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-05/go-wrong-sni.log",
+      "sha256": "9e73a653d15049be369824dd69dc270999d81d71cfd9d85b0d69b56fe6abd76e",
+      "bytes": 641
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-05/gvisor-wrong-ca.log",
+      "sha256": "f2341a3a19d115e83f486aade43f3085301ed5edfcfab563e70f67ef037ed0b8",
+      "bytes": 616
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-05/gvisor-wrong-reality.log",
+      "sha256": "b5718042b07d5359336e2bb64f93666615f5e5b45a042e04215e18f2b92a961c",
+      "bytes": 537
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-05/gvisor-wrong-sni.log",
+      "sha256": "b5f7b60ae70c55ae87692eec0b88ba5a5d42a6a2af6ba4d23c79bb572651721f",
+      "bytes": 639
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-05/holder.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-05/host-network.json",
+      "sha256": "2b14a20e878f2ef6d51535fdaed3f8cf0f7194086083c82d221ff3524ebe2b86",
+      "bytes": 5413
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-05/mihomo-wrong-ca.log",
+      "sha256": "335724ddb0ba7d42fd031c4de4a78bd7a2f2caf6eb9afa44bd1bad720c396f6c",
+      "bytes": 2725
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-05/mihomo-wrong-reality.log",
+      "sha256": "32ae00ed5f619c918fe61e36311546412a60d8f8398bba2a4c1d26e6c8ca1432",
+      "bytes": 2545
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-05/mihomo-wrong-sni.log",
+      "sha256": "cadeeeb221edc25bebfe0f360ca5f74eaf9e0ccf081c142e840eabc3e4636b70",
+      "bytes": 2941
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-05/parity-go.log",
+      "sha256": "6ceb020ccab30dbe77be4c0fae9016e2b387409b7bb3148c6e0e48d5273938ee",
+      "bytes": 536
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-05/parity-gvisor.log",
+      "sha256": "6ceb020ccab30dbe77be4c0fae9016e2b387409b7bb3148c6e0e48d5273938ee",
+      "bytes": 536
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-05/parity-mihomo.log",
+      "sha256": "b9cfb928f2e05e99a4f6c1f5592aab56c052cd9873f2cf5342b3ca7dfc6a3e99",
+      "bytes": 387
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-05/results.json",
+      "sha256": "eca503affd20b59406beb92991ef2f2bf8aa80c98fd7289c694eb0d20fdc4e6e",
+      "bytes": 41375
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/parity-05/server.log",
+      "sha256": "b3cc260bedcf17f2538d38095bf5fa4f8919ce0804bddf764a2c2e9660b1e8de",
+      "bytes": 2162
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/measure-01/execution.json",
+      "sha256": "6e94f7a5174860af10f47853f451013b22148f57c972183ce304c97e12a4a7e0",
+      "bytes": 761
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/measure-01/fixture.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/measure-01/holder.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/measure-01/host-network.json",
+      "sha256": "2b14a20e878f2ef6d51535fdaed3f8cf0f7194086083c82d221ff3524ebe2b86",
+      "bytes": 5413
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/measure-01/results.json",
+      "sha256": "5431262162b61aff6fecbd22b4fd13d71a46622444d80c586b1163a922acf3e3",
+      "bytes": 766398
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/measure-01/round-1-go.log",
+      "sha256": "7e949dfe74b10c3da437b57ddf1fb45528f98cb39ec350723dc04785b4049982",
+      "bytes": 374
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/measure-01/round-1-gvisor.log",
+      "sha256": "7e949dfe74b10c3da437b57ddf1fb45528f98cb39ec350723dc04785b4049982",
+      "bytes": 374
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/measure-01/round-1-mihomo.log",
+      "sha256": "b89b0ca36c872db3adce5851fa6e113dd8bea09e88668692c24700c55b3af2fa",
+      "bytes": 466
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/measure-01/round-2-go.log",
+      "sha256": "7e949dfe74b10c3da437b57ddf1fb45528f98cb39ec350723dc04785b4049982",
+      "bytes": 374
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/measure-01/round-2-gvisor.log",
+      "sha256": "7e949dfe74b10c3da437b57ddf1fb45528f98cb39ec350723dc04785b4049982",
+      "bytes": 374
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/measure-01/round-2-mihomo.log",
+      "sha256": "38a92650008ef622cb3f28c3fde4d2668ee2e94c41a1ce8bc2f057f95695e194",
+      "bytes": 466
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/measure-01/round-3-go.log",
+      "sha256": "7e949dfe74b10c3da437b57ddf1fb45528f98cb39ec350723dc04785b4049982",
+      "bytes": 374
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/measure-01/round-3-gvisor.log",
+      "sha256": "7e949dfe74b10c3da437b57ddf1fb45528f98cb39ec350723dc04785b4049982",
+      "bytes": 374
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/measure-01/round-3-mihomo.log",
+      "sha256": "c0b24fa94a8a1b7dbea5d41775909375ea0f6233c845ccca7e2ea70d08908168",
+      "bytes": 466
+    },
+    {
+      "path": "/tmp/tono-stage-b-20260913/measure-01/server.log",
+      "sha256": "98429e9c17bed2d6752a541adc85d3ede728b2e8eb702a7672c74f2b6653387c",
+      "bytes": 56
+    }
+  ]
+}

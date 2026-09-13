@@ -30,7 +30,7 @@ def main():
             resources.append(resource)
     fields = sorted({key for row in rows for key in row})
     with (args.output / "samples.csv").open("w") as file:
-        writer = csv.DictWriter(file, fields)
+        writer = csv.DictWriter(file, fields, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
     for candidate in ["mihomo", "gvisor", "go"]:

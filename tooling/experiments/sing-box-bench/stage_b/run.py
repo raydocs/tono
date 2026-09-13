@@ -367,7 +367,8 @@ def main():
     ensure(before == after, "host network snapshot changed")
     if (output / "results.json").exists():
         result = json.loads((output / "results.json").read_text())
-        live = run(["lsns", "-t", "net", "-n", "-o", "NS"])
+        # Unprivileged lsns can hide root-owned leftovers; inspect with the owner's privilege.
+        live = run(["sudo", "-n", "lsns", "-t", "net", "-n", "-o", "NS"])
         gone = all(ns.split("[")[1].rstrip("]") not in live.split() for ns in result.get("namespaces", []))
         write(output / "cleanup.json", {"namespaces_gone": gone, "live_namespace_ids": live.split()})
         ensure(gone, "owned namespaces remain")

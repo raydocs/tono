@@ -1,0 +1,148 @@
+[
+  {
+    "run_id": "parity-01",
+    "status": "FAIL",
+    "error": "RuntimeError('parity check failed: mihomo/TUN-port-18081')",
+    "tool_sha256": {
+      "configs.py": "090d1a364d4fdd74dbd79a56c3ca67f6844767bd8a8d7f6634d0d4d15ee9ca26",
+      "workload.py": "0bdf063b64e9be3eb6d70f26f6fd53287616ee7956a1b194e49752035a5ee97a",
+      "run.py": "6c625a634662f4a71f90d536b90bb6bd7207e609a7d034f418f932708db881bb"
+    },
+    "last_check": {
+      "candidate": "mihomo",
+      "name": "TUN-port-18081",
+      "status": "FAIL",
+      "evidence": {
+        "status": "FAIL",
+        "port": 18081,
+        "requested_bytes": 4096,
+        "start_ns": 5087209330912,
+        "received_bytes": 0,
+        "ttfb_ms": 2900.185893,
+        "kernel_connect_ms": 0.381177,
+        "error": "ValueError('missing/oversized HTTP header')",
+        "end_ns": 5090109623993,
+        "elapsed_ms": 2900.293081,
+        "worker_exit_code": 1
+      }
+    }
+  },
+  {
+    "run_id": "parity-02",
+    "status": "FAIL",
+    "error": "RuntimeError('controller unavailable')",
+    "tool_sha256": {
+      "configs.py": "9768eb43c50d03327717ba274816bd087b716c82d9086f6e187870d32731d12f",
+      "workload.py": "a82acddab0c8c3e37fd9f6aa08fa3d42573810004726f20c04999aef341dd800",
+      "run.py": "a8c3f85b3d9a192dfbf5ecd798efb2fa6e4565f5e5f4c8a07af34a0ff6f54b28"
+    },
+    "last_check": {
+      "candidate": "mihomo",
+      "name": "default-reject",
+      "status": "PASS",
+      "evidence": {
+        "status": "FAIL",
+        "port": 18082,
+        "requested_bytes": 4096,
+        "start_ns": 5175281129987,
+        "received_bytes": 0,
+        "ttfb_ms": null,
+        "kernel_connect_ms": 0.416681,
+        "error": "ValueError('missing/oversized HTTP header')",
+        "end_ns": 5175282101331,
+        "elapsed_ms": 0.971344,
+        "worker_exit_code": 1
+      }
+    }
+  },
+  {
+    "run_id": "parity-03",
+    "status": "FAIL",
+    "error": "RuntimeError('parity check failed: gvisor/fake-IP-to-origin')",
+    "tool_sha256": {
+      "configs.py": "56bcc475f1b84bcf876684847aed0bea6d21b9a5c7e848661f12f48b969c51d8",
+      "workload.py": "f4cdc9148d7f753e27359895636ce26a1b71bcc252123e2b378313938f65565c",
+      "run.py": "2b0901f8b0474ca002feea258d6b87a214ca8d04d9c22dcfed1bcc03069e5e06"
+    },
+    "last_check": {
+      "candidate": "gvisor",
+      "name": "fake-IP-to-origin",
+      "status": "FAIL",
+      "evidence": {
+        "status": "TIMEOUT",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5356240234868,
+        "received_bytes": 0,
+        "ttfb_ms": null,
+        "kernel_connect_ms": 0.495185,
+        "error": "TimeoutError('timed out')",
+        "end_ns": 5361246024981,
+        "elapsed_ms": 5005.790113,
+        "worker_exit_code": 1
+      }
+    }
+  },
+  {
+    "run_id": "parity-04",
+    "status": "FAIL",
+    "error": "JSONDecodeError('Expecting value: line 1 column 1 (char 0)')",
+    "tool_sha256": {
+      "configs.py": "34f2dd8034264a331b5da1e49b496c5aad43375fdc701f63dba4675d13120b85",
+      "workload.py": "f4cdc9148d7f753e27359895636ce26a1b71bcc252123e2b378313938f65565c",
+      "run.py": "fb0b457cd1b03dbfaeece5cbaf94f97330bb1a617a34ca498076962c7b35f1a1"
+    },
+    "last_check": {
+      "candidate": "gvisor",
+      "name": "two-live-outbounds",
+      "status": "PASS",
+      "evidence": {
+        "flows": [
+          {
+            "chains": [
+              "reality"
+            ],
+            "port": "18080"
+          },
+          {
+            "chains": [
+              "hy2"
+            ],
+            "port": "18081"
+          }
+        ],
+        "requests": {
+          "case": "proof",
+          "samples": [
+            {
+              "status": "PASS",
+              "port": 18080,
+              "requested_bytes": 4096,
+              "start_ns": 5529998812262,
+              "received_bytes": 4096,
+              "ttfb_ms": 404.211214,
+              "kernel_connect_ms": 2.97136,
+              "http_status": 200,
+              "end_ns": 5530403092957,
+              "elapsed_ms": 404.280695
+            },
+            {
+              "status": "PASS",
+              "port": 18081,
+              "requested_bytes": 4096,
+              "start_ns": 5529999036426,
+              "received_bytes": 4096,
+              "ttfb_ms": 402.436538,
+              "kernel_connect_ms": 0.367971,
+              "http_status": 200,
+              "end_ns": 5530401544899,
+              "elapsed_ms": 402.508473
+            }
+          ],
+          "status": "PASS",
+          "worker_exit_code": 0
+        }
+      }
+    }
+  }
+]

@@ -1,15 +1,17 @@
 """Harness checks, not native Tono regression tests. Run in an isolated namespace."""
 import argparse
-import copy
+import csv
 import http.server
 import json
 from pathlib import Path
+import sys
 import tempfile
 import threading
 import unittest
 from unittest.mock import patch
 
 import run
+import summarize
 from configs import client_config
 from workload import HTTP, request
 
@@ -65,6 +67,28 @@ class StageBTests(unittest.TestCase):
             result = json.loads((Path(directory) / "results.json").read_text())
             self.assertEqual(result["status"], "FAIL")
             self.assertFalse(result["gate_passed"])
+
+    def test_summary_keeps_failed_and_timed_out_samples_in_denominator(self):
+        with tempfile.TemporaryDirectory(prefix="tono-b-export-test-") as directory:
+            path = Path(directory)
+            data = {"run_id": "synthetic", "status": "FAIL", "clock_ticks_per_second": 100,
+                    "rounds": [{"candidate": "go", "round": 1, "cases": [], "samples": [
+                        {"case": "bulk", "port": 18081, "status": "PASS", "received_bytes": 4000,
+                         "elapsed_ms": 2, "ttfb_ms": 1},
+                        {"case": "bulk", "port": 18081, "status": "TIMEOUT", "received_bytes": 1000,
+                         "elapsed_ms": 10, "ttfb_ms": None},
+                        {"case": "bulk", "port": 18081, "status": "FAIL", "received_bytes": 0,
+                         "elapsed_ms": 1, "ttfb_ms": None}]}]}
+            source = path / "input.json"
+            source.write_text(json.dumps(data))
+            with patch.object(sys, "argv", ["summarize.py", str(source), str(path / "export")]), \
+                    patch("builtins.print"):
+                summarize.main()
+            result = json.loads((path / "export/summary.json").read_text())["round_case_summary"][0]
+            self.assertEqual((result["n"], result["successes"], result["timeouts"], result["failures"]), (3, 1, 1, 1))
+            self.assertAlmostEqual(result["payload_mbps_including_failed_attempt_time"], 40 / 13)
+            with (path / "export/samples.csv").open() as file:
+                self.assertEqual(len(list(csv.DictReader(file))), 3)
 
 
 if __name__ == "__main__":

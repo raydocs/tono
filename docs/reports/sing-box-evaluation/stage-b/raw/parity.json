@@ -1,0 +1,1343 @@
+{
+  "run_id": "parity-05",
+  "mode": "parity",
+  "status": "PASS",
+  "gate_passed": true,
+  "binary_sha256": {
+    "mihomo": "c685870dc7b97014ac2044013cdbe83d8fedbf9da238b9f59dc64c12933d88a4",
+    "sing_box": "cd2ba002e1282da29674107cc503285dc8fa7026bf01fcc40d314bc10ab749df"
+  },
+  "tool_sha256": {
+    "configs.py": "a40ceee65ae1ff09f53d8d3dd245d8b2814b8bbc52b771886372a046c80ecb7a",
+    "workload.py": "43cf47d4032844b7a73eaa48e35b7b2720c75fe57a844bae94ec0c716b8a9bf6",
+    "run.py": "2f315ec356fb5fbf69c8b1e7baa4b712869570648e0e648fd96c44ba2f75e88f"
+  },
+  "clock_ticks_per_second": 100,
+  "namespaces": [
+    "net:[4026532096]",
+    "net:[4026532198]"
+  ],
+  "topology": {
+    "link": "veth same host, MTU 1500, no netem, no default routes",
+    "client_cpus": [
+      0,
+      1
+    ],
+    "server_cpus": [
+      2,
+      3
+    ],
+    "load_cpus": [
+      4,
+      5
+    ],
+    "fixture_cpus": [
+      6,
+      7
+    ],
+    "GOMAXPROCS": 2
+  },
+  "config_hashes": {
+    "parity-mihomo": "e478eac71f9d1b554d997acc1cdb8c88f382839fb2fd0acf14e2507b859cec27",
+    "mihomo-wrong-sni": "27aa635854a440a80d133d67162e775975c8f95f78bc2a10c882656803532f28",
+    "mihomo-wrong-ca": "e478eac71f9d1b554d997acc1cdb8c88f382839fb2fd0acf14e2507b859cec27",
+    "mihomo-wrong-reality": "8e74308a7a6a06a65cceb88d4576df5f42dd5622f67e38cab04846cb0dfff6ab",
+    "parity-gvisor": "4d83bc33bc2b40e219a9f1e7384adba1a7ba4594ef588938d62287625c6703a7",
+    "gvisor-wrong-sni": "522026d266879963167532c007dfab0195ab2f9b47d5d2846919ed7a61975ca4",
+    "gvisor-wrong-ca": "e56b7076b26136fdd7a7726340b09a4bd82c207c33bf98ba356f2270e7936d84",
+    "gvisor-wrong-reality": "fd6d864430837c1bb954a53dbf2d82c6afcb8e2a2f7b1c28836206c457e907e1",
+    "parity-go": "9fa7321c9fe2811e484a9de2ef3ad1e164524745714b7cb03ceadfe968dddf04",
+    "go-wrong-sni": "ae8bea22de829802483428d3571018242844b8153c6ec384197beb5fd94d921a",
+    "go-wrong-ca": "fd564ee9abde3b8ed127cd86fc4c5032d991aea6f92b8a347f9c25518a121ec1",
+    "go-wrong-reality": "246d025119459420ce921eedd5297dd2d5d0f5c55f4766df22a5681d07549923"
+  },
+  "checks": [
+    {
+      "candidate": "mihomo",
+      "name": "TUN-port-18080",
+      "status": "PASS",
+      "evidence": {
+        "status": "PASS",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5656963254566,
+        "received_bytes": 4096,
+        "ttfb_ms": 6.818033,
+        "kernel_connect_ms": 0.472009,
+        "http_status": 200,
+        "end_ns": 5656970218225,
+        "elapsed_ms": 6.963659,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "mihomo",
+      "name": "TUN-port-18081",
+      "status": "PASS",
+      "evidence": {
+        "status": "PASS",
+        "port": 18081,
+        "requested_bytes": 4096,
+        "start_ns": 5657041989856,
+        "received_bytes": 4096,
+        "ttfb_ms": 5.881991,
+        "kernel_connect_ms": 0.412809,
+        "http_status": 200,
+        "end_ns": 5657047918199,
+        "elapsed_ms": 5.928343,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "mihomo",
+      "name": "kernel-route-is-TUN",
+      "status": "PASS",
+      "evidence": [
+        {
+          "dst": "203.0.113.10",
+          "dev": "bench-tun",
+          "prefsrc": "198.18.0.1",
+          "flags": [],
+          "uid": 0,
+          "cache": []
+        }
+      ]
+    },
+    {
+      "candidate": "mihomo",
+      "name": "two-live-outbounds",
+      "status": "PASS",
+      "evidence": {
+        "flows": [
+          {
+            "chains": [
+              "hy2"
+            ],
+            "port": "18081"
+          },
+          {
+            "chains": [
+              "reality"
+            ],
+            "port": "18080"
+          }
+        ],
+        "requests": {
+          "case": "proof",
+          "samples": [
+            {
+              "status": "PASS",
+              "port": 18080,
+              "requested_bytes": 4096,
+              "start_ns": 5657127086278,
+              "received_bytes": 4096,
+              "ttfb_ms": 404.141989,
+              "kernel_connect_ms": 0.605886,
+              "http_status": 200,
+              "end_ns": 5657531290399,
+              "elapsed_ms": 404.204121
+            },
+            {
+              "status": "PASS",
+              "port": 18081,
+              "requested_bytes": 4096,
+              "start_ns": 5657127290015,
+              "received_bytes": 4096,
+              "ttfb_ms": 402.866843,
+              "kernel_connect_ms": 0.338369,
+              "http_status": 200,
+              "end_ns": 5657530232942,
+              "elapsed_ms": 402.942927
+            }
+          ],
+          "status": "PASS",
+          "worker_exit_code": 0
+        }
+      }
+    },
+    {
+      "candidate": "mihomo",
+      "name": "DNS-A-UDP",
+      "status": "PASS",
+      "evidence": {
+        "name": "reality.bench.test",
+        "qtype": 1,
+        "tcp": false,
+        "addresses": [
+          "198.18.0.4"
+        ],
+        "rcode": 0,
+        "ttls": [
+          1
+        ],
+        "elapsed_ms": 0.473654,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "mihomo",
+      "name": "fake-IP-to-origin",
+      "status": "PASS",
+      "evidence": {
+        "status": "PASS",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5657680078962,
+        "received_bytes": 4096,
+        "ttfb_ms": 5.158335,
+        "kernel_connect_ms": 0.425035,
+        "http_status": 200,
+        "end_ns": 5657685361038,
+        "elapsed_ms": 5.282076,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "mihomo",
+      "name": "DNS-A-TCP",
+      "status": "PASS",
+      "evidence": {
+        "name": "reality.bench.test",
+        "qtype": 1,
+        "tcp": true,
+        "addresses": [
+          "198.18.0.4"
+        ],
+        "rcode": 0,
+        "ttls": [
+          1
+        ],
+        "elapsed_ms": 0.923465,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "mihomo",
+      "name": "fake-IP-to-origin",
+      "status": "PASS",
+      "evidence": {
+        "status": "PASS",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5657835978585,
+        "received_bytes": 4096,
+        "ttfb_ms": 4.30128,
+        "kernel_connect_ms": 0.361698,
+        "http_status": 200,
+        "end_ns": 5657840390592,
+        "elapsed_ms": 4.412007,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "mihomo",
+      "name": "IPv6-no-AAAA",
+      "status": "PASS",
+      "evidence": {
+        "name": "hy2.bench.test",
+        "qtype": 28,
+        "tcp": false,
+        "addresses": [],
+        "rcode": 0,
+        "ttls": [],
+        "elapsed_ms": 0.420273,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "mihomo",
+      "name": "domain-reject-precedes-port-allow",
+      "status": "PASS",
+      "evidence": {
+        "status": "FAIL",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5658095561424,
+        "received_bytes": 0,
+        "ttfb_ms": null,
+        "kernel_connect_ms": 0.54302,
+        "error": "ValueError('missing/oversized HTTP header')",
+        "end_ns": 5658096498446,
+        "elapsed_ms": 0.937022,
+        "worker_exit_code": 1
+      }
+    },
+    {
+      "candidate": "mihomo",
+      "name": "http-503",
+      "status": "PASS",
+      "evidence": {
+        "status": "FAIL",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5658172434864,
+        "received_bytes": 0,
+        "ttfb_ms": 4.687806,
+        "kernel_connect_ms": 0.542517,
+        "http_status": 503,
+        "error": "ValueError('HTTP 503')",
+        "end_ns": 5658177167738,
+        "elapsed_ms": 4.732874,
+        "worker_exit_code": 1
+      }
+    },
+    {
+      "candidate": "mihomo",
+      "name": "deadline",
+      "status": "PASS",
+      "evidence": {
+        "status": "TIMEOUT",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5658266725697,
+        "received_bytes": 0,
+        "ttfb_ms": null,
+        "kernel_connect_ms": 0.488835,
+        "error": "TimeoutError('timed out')",
+        "end_ns": 5658317615240,
+        "elapsed_ms": 50.889543,
+        "worker_exit_code": 1
+      }
+    },
+    {
+      "candidate": "mihomo",
+      "name": "default-reject",
+      "status": "PASS",
+      "evidence": {
+        "status": "FAIL",
+        "port": 18082,
+        "requested_bytes": 4096,
+        "start_ns": 5658401462990,
+        "received_bytes": 0,
+        "ttfb_ms": null,
+        "kernel_connect_ms": 0.48186,
+        "error": "ValueError('missing/oversized HTTP header')",
+        "end_ns": 5658402391415,
+        "elapsed_ms": 0.928425,
+        "worker_exit_code": 1
+      }
+    },
+    {
+      "candidate": "mihomo",
+      "name": "real-reload-changes-route",
+      "status": "PASS",
+      "evidence": {
+        "status": "PASS",
+        "port": 18082,
+        "requested_bytes": 4096,
+        "start_ns": 5658593508614,
+        "received_bytes": 4096,
+        "ttfb_ms": 4.793526,
+        "kernel_connect_ms": 0.442817,
+        "http_status": 200,
+        "end_ns": 5658598407832,
+        "elapsed_ms": 4.899218,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "mihomo",
+      "name": "reload-interface-evidence",
+      "status": "PASS",
+      "evidence": {
+        "before_ifindex": 3,
+        "after_ifindex": 3
+      }
+    },
+    {
+      "candidate": "mihomo",
+      "name": "crash-no-direct-origin-path",
+      "status": "PASS",
+      "evidence": {
+        "status": "FAIL",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5658718558943,
+        "received_bytes": 0,
+        "ttfb_ms": null,
+        "error": "OSError(101, 'Network is unreachable')",
+        "end_ns": 5658718619928,
+        "elapsed_ms": 0.060985,
+        "worker_exit_code": 1
+      }
+    },
+    {
+      "candidate": "mihomo",
+      "name": "wrong-sni",
+      "status": "PASS",
+      "evidence": {
+        "status": "TIMEOUT",
+        "port": 18081,
+        "requested_bytes": 4096,
+        "start_ns": 5658894312273,
+        "received_bytes": 0,
+        "ttfb_ms": null,
+        "kernel_connect_ms": 0.67075,
+        "error": "TimeoutError('timed out')",
+        "end_ns": 5660897270517,
+        "elapsed_ms": 2002.958244,
+        "worker_exit_code": 1
+      }
+    },
+    {
+      "candidate": "mihomo",
+      "name": "wrong-sni-unaffected-transport",
+      "status": "PASS",
+      "evidence": {
+        "status": "PASS",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5660971462010,
+        "received_bytes": 4096,
+        "ttfb_ms": 4.69422,
+        "kernel_connect_ms": 0.470386,
+        "http_status": 200,
+        "end_ns": 5660976440948,
+        "elapsed_ms": 4.978938,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "mihomo",
+      "name": "wrong-ca",
+      "status": "PASS",
+      "evidence": {
+        "status": "TIMEOUT",
+        "port": 18081,
+        "requested_bytes": 4096,
+        "start_ns": 5661186491551,
+        "received_bytes": 0,
+        "ttfb_ms": null,
+        "kernel_connect_ms": 0.600729,
+        "error": "TimeoutError('timed out')",
+        "end_ns": 5663189811501,
+        "elapsed_ms": 2003.31995,
+        "worker_exit_code": 1
+      }
+    },
+    {
+      "candidate": "mihomo",
+      "name": "wrong-ca-unaffected-transport",
+      "status": "PASS",
+      "evidence": {
+        "status": "PASS",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5663271822354,
+        "received_bytes": 4096,
+        "ttfb_ms": 5.691873,
+        "kernel_connect_ms": 0.718406,
+        "http_status": 200,
+        "end_ns": 5663277692216,
+        "elapsed_ms": 5.869862,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "mihomo",
+      "name": "wrong-reality",
+      "status": "PASS",
+      "evidence": {
+        "status": "FAIL",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5663518924952,
+        "received_bytes": 0,
+        "ttfb_ms": null,
+        "kernel_connect_ms": 0.517388,
+        "error": "ValueError('missing/oversized HTTP header')",
+        "end_ns": 5665484823647,
+        "elapsed_ms": 1965.898695,
+        "worker_exit_code": 1
+      }
+    },
+    {
+      "candidate": "mihomo",
+      "name": "wrong-reality-unaffected-transport",
+      "status": "PASS",
+      "evidence": {
+        "status": "PASS",
+        "port": 18081,
+        "requested_bytes": 4096,
+        "start_ns": 5665557753036,
+        "received_bytes": 4096,
+        "ttfb_ms": 5.522095,
+        "kernel_connect_ms": 0.470463,
+        "http_status": 200,
+        "end_ns": 5665563342003,
+        "elapsed_ms": 5.588967,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "gvisor",
+      "name": "TUN-port-18080",
+      "status": "PASS",
+      "evidence": {
+        "status": "PASS",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5665765950933,
+        "received_bytes": 4096,
+        "ttfb_ms": 4.645046,
+        "kernel_connect_ms": 3.335982,
+        "http_status": 200,
+        "end_ns": 5665770757293,
+        "elapsed_ms": 4.80636,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "gvisor",
+      "name": "TUN-port-18081",
+      "status": "PASS",
+      "evidence": {
+        "status": "PASS",
+        "port": 18081,
+        "requested_bytes": 4096,
+        "start_ns": 5665843091469,
+        "received_bytes": 4096,
+        "ttfb_ms": 5.27969,
+        "kernel_connect_ms": 3.732212,
+        "http_status": 200,
+        "end_ns": 5665848416734,
+        "elapsed_ms": 5.325265,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "gvisor",
+      "name": "kernel-route-is-TUN",
+      "status": "PASS",
+      "evidence": [
+        {
+          "dst": "203.0.113.10",
+          "dev": "bench-tun",
+          "prefsrc": "198.18.0.1",
+          "flags": [],
+          "uid": 0,
+          "cache": []
+        }
+      ]
+    },
+    {
+      "candidate": "gvisor",
+      "name": "two-live-outbounds",
+      "status": "PASS",
+      "evidence": {
+        "flows": [
+          {
+            "chains": [
+              "hy2"
+            ],
+            "port": "18081"
+          },
+          {
+            "chains": [
+              "reality"
+            ],
+            "port": "18080"
+          }
+        ],
+        "requests": {
+          "case": "proof",
+          "samples": [
+            {
+              "status": "PASS",
+              "port": 18080,
+              "requested_bytes": 4096,
+              "start_ns": 5665927396151,
+              "received_bytes": 4096,
+              "ttfb_ms": 405.965387,
+              "kernel_connect_ms": 3.259905,
+              "http_status": 200,
+              "end_ns": 5666333427757,
+              "elapsed_ms": 406.031606
+            },
+            {
+              "status": "PASS",
+              "port": 18081,
+              "requested_bytes": 4096,
+              "start_ns": 5665927580034,
+              "received_bytes": 4096,
+              "ttfb_ms": 402.714807,
+              "kernel_connect_ms": 0.363642,
+              "http_status": 200,
+              "end_ns": 5666330424781,
+              "elapsed_ms": 402.844747
+            }
+          ],
+          "status": "PASS",
+          "worker_exit_code": 0
+        }
+      }
+    },
+    {
+      "candidate": "gvisor",
+      "name": "DNS-A-UDP",
+      "status": "PASS",
+      "evidence": {
+        "name": "reality.bench.test",
+        "qtype": 1,
+        "tcp": false,
+        "addresses": [
+          "198.18.0.2"
+        ],
+        "rcode": 0,
+        "ttls": [
+          600
+        ],
+        "elapsed_ms": 0.461989,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "gvisor",
+      "name": "fake-IP-to-origin",
+      "status": "PASS",
+      "evidence": {
+        "status": "PASS",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5666489398239,
+        "received_bytes": 4096,
+        "ttfb_ms": 4.74298,
+        "kernel_connect_ms": 3.492001,
+        "http_status": 200,
+        "end_ns": 5666494287533,
+        "elapsed_ms": 4.889294,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "gvisor",
+      "name": "DNS-A-TCP",
+      "status": "PASS",
+      "evidence": {
+        "name": "reality.bench.test",
+        "qtype": 1,
+        "tcp": true,
+        "addresses": [
+          "198.18.0.2"
+        ],
+        "rcode": 0,
+        "ttls": [
+          600
+        ],
+        "elapsed_ms": 1.050516,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "gvisor",
+      "name": "fake-IP-to-origin",
+      "status": "PASS",
+      "evidence": {
+        "status": "PASS",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5666677440337,
+        "received_bytes": 4096,
+        "ttfb_ms": 4.547453,
+        "kernel_connect_ms": 3.250968,
+        "http_status": 200,
+        "end_ns": 5666682048785,
+        "elapsed_ms": 4.608448,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "gvisor",
+      "name": "IPv6-no-AAAA",
+      "status": "PASS",
+      "evidence": {
+        "name": "hy2.bench.test",
+        "qtype": 28,
+        "tcp": false,
+        "addresses": [],
+        "rcode": 0,
+        "ttls": [],
+        "elapsed_ms": 0.387712,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "gvisor",
+      "name": "domain-reject-precedes-port-allow",
+      "status": "PASS",
+      "evidence": {
+        "status": "FAIL",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5666943119562,
+        "received_bytes": 0,
+        "ttfb_ms": null,
+        "error": "OSError(101, 'Network is unreachable')",
+        "end_ns": 5666943230611,
+        "elapsed_ms": 0.111049,
+        "worker_exit_code": 1
+      }
+    },
+    {
+      "candidate": "gvisor",
+      "name": "http-503",
+      "status": "PASS",
+      "evidence": {
+        "status": "FAIL",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5667024104227,
+        "received_bytes": 0,
+        "ttfb_ms": 4.290685,
+        "kernel_connect_ms": 3.152108,
+        "http_status": 503,
+        "error": "ValueError('HTTP 503')",
+        "end_ns": 5667028427566,
+        "elapsed_ms": 4.323339,
+        "worker_exit_code": 1
+      }
+    },
+    {
+      "candidate": "gvisor",
+      "name": "deadline",
+      "status": "PASS",
+      "evidence": {
+        "status": "TIMEOUT",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5667101801780,
+        "received_bytes": 0,
+        "ttfb_ms": null,
+        "kernel_connect_ms": 3.212183,
+        "error": "TimeoutError('timed out')",
+        "end_ns": 5667152270876,
+        "elapsed_ms": 50.469096,
+        "worker_exit_code": 1
+      }
+    },
+    {
+      "candidate": "gvisor",
+      "name": "default-reject",
+      "status": "PASS",
+      "evidence": {
+        "status": "FAIL",
+        "port": 18082,
+        "requested_bytes": 4096,
+        "start_ns": 5667231608927,
+        "received_bytes": 0,
+        "ttfb_ms": null,
+        "error": "ConnectionRefusedError(111, 'Connection refused')",
+        "end_ns": 5667232117324,
+        "elapsed_ms": 0.508397,
+        "worker_exit_code": 1
+      }
+    },
+    {
+      "candidate": "gvisor",
+      "name": "Clash-PUT-is-no-op",
+      "status": "PASS",
+      "evidence": {
+        "api": {
+          "status": 204,
+          "body": ""
+        },
+        "request": {
+          "status": "FAIL",
+          "port": 18082,
+          "requested_bytes": 4096,
+          "start_ns": 5667407215924,
+          "received_bytes": 0,
+          "ttfb_ms": null,
+          "error": "ConnectionRefusedError(111, 'Connection refused')",
+          "end_ns": 5667407741978,
+          "elapsed_ms": 0.526054,
+          "worker_exit_code": 1
+        }
+      }
+    },
+    {
+      "candidate": "gvisor",
+      "name": "real-reload-changes-route",
+      "status": "PASS",
+      "evidence": {
+        "status": "PASS",
+        "port": 18082,
+        "requested_bytes": 4096,
+        "start_ns": 5667615327133,
+        "received_bytes": 4096,
+        "ttfb_ms": 4.312228,
+        "kernel_connect_ms": 3.075569,
+        "http_status": 200,
+        "end_ns": 5667619712772,
+        "elapsed_ms": 4.385639,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "gvisor",
+      "name": "reload-interface-evidence",
+      "status": "PASS",
+      "evidence": {
+        "before_ifindex": 7,
+        "after_ifindex": 8
+      }
+    },
+    {
+      "candidate": "gvisor",
+      "name": "crash-no-direct-origin-path",
+      "status": "PASS",
+      "evidence": {
+        "status": "FAIL",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5667746959407,
+        "received_bytes": 0,
+        "ttfb_ms": null,
+        "error": "OSError(101, 'Network is unreachable')",
+        "end_ns": 5667747022417,
+        "elapsed_ms": 0.06301,
+        "worker_exit_code": 1
+      }
+    },
+    {
+      "candidate": "gvisor",
+      "name": "wrong-sni",
+      "status": "PASS",
+      "evidence": {
+        "status": "FAIL",
+        "port": 18081,
+        "requested_bytes": 4096,
+        "start_ns": 5667936405978,
+        "received_bytes": 0,
+        "ttfb_ms": null,
+        "error": "ConnectionRefusedError(111, 'Connection refused')",
+        "end_ns": 5667939285846,
+        "elapsed_ms": 2.879868,
+        "worker_exit_code": 1
+      }
+    },
+    {
+      "candidate": "gvisor",
+      "name": "wrong-sni-unaffected-transport",
+      "status": "PASS",
+      "evidence": {
+        "status": "PASS",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5668022605557,
+        "received_bytes": 4096,
+        "ttfb_ms": 4.121192,
+        "kernel_connect_ms": 3.039468,
+        "http_status": 200,
+        "end_ns": 5668026941778,
+        "elapsed_ms": 4.336221,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "gvisor",
+      "name": "wrong-ca",
+      "status": "PASS",
+      "evidence": {
+        "status": "FAIL",
+        "port": 18081,
+        "requested_bytes": 4096,
+        "start_ns": 5668269641507,
+        "received_bytes": 0,
+        "ttfb_ms": null,
+        "error": "ConnectionRefusedError(111, 'Connection refused')",
+        "end_ns": 5668273178545,
+        "elapsed_ms": 3.537038,
+        "worker_exit_code": 1
+      }
+    },
+    {
+      "candidate": "gvisor",
+      "name": "wrong-ca-unaffected-transport",
+      "status": "PASS",
+      "evidence": {
+        "status": "PASS",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5668349268217,
+        "received_bytes": 4096,
+        "ttfb_ms": 4.492439,
+        "kernel_connect_ms": 3.27296,
+        "http_status": 200,
+        "end_ns": 5668353880844,
+        "elapsed_ms": 4.612627,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "gvisor",
+      "name": "wrong-reality",
+      "status": "PASS",
+      "evidence": {
+        "status": "FAIL",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5668586988793,
+        "received_bytes": 0,
+        "ttfb_ms": null,
+        "error": "ConnectionRefusedError(111, 'Connection refused')",
+        "end_ns": 5668598564597,
+        "elapsed_ms": 11.575804,
+        "worker_exit_code": 1
+      }
+    },
+    {
+      "candidate": "gvisor",
+      "name": "wrong-reality-unaffected-transport",
+      "status": "PASS",
+      "evidence": {
+        "status": "PASS",
+        "port": 18081,
+        "requested_bytes": 4096,
+        "start_ns": 5668670512478,
+        "received_bytes": 4096,
+        "ttfb_ms": 4.890361,
+        "kernel_connect_ms": 3.382404,
+        "http_status": 200,
+        "end_ns": 5668675440909,
+        "elapsed_ms": 4.928431,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "go",
+      "name": "TUN-port-18080",
+      "status": "PASS",
+      "evidence": {
+        "status": "PASS",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5668919042464,
+        "received_bytes": 4096,
+        "ttfb_ms": 4.726201,
+        "kernel_connect_ms": 3.525223,
+        "http_status": 200,
+        "end_ns": 5668923931545,
+        "elapsed_ms": 4.889081,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "go",
+      "name": "TUN-port-18081",
+      "status": "PASS",
+      "evidence": {
+        "status": "PASS",
+        "port": 18081,
+        "requested_bytes": 4096,
+        "start_ns": 5668999919912,
+        "received_bytes": 4096,
+        "ttfb_ms": 4.687876,
+        "kernel_connect_ms": 3.351434,
+        "http_status": 200,
+        "end_ns": 5669004643179,
+        "elapsed_ms": 4.723267,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "go",
+      "name": "kernel-route-is-TUN",
+      "status": "PASS",
+      "evidence": [
+        {
+          "dst": "203.0.113.10",
+          "dev": "bench-tun",
+          "prefsrc": "198.18.0.1",
+          "flags": [],
+          "uid": 0,
+          "cache": []
+        }
+      ]
+    },
+    {
+      "candidate": "go",
+      "name": "two-live-outbounds",
+      "status": "PASS",
+      "evidence": {
+        "flows": [
+          {
+            "chains": [
+              "reality"
+            ],
+            "port": "18080"
+          },
+          {
+            "chains": [
+              "hy2"
+            ],
+            "port": "18081"
+          }
+        ],
+        "requests": {
+          "case": "proof",
+          "samples": [
+            {
+              "status": "PASS",
+              "port": 18080,
+              "requested_bytes": 4096,
+              "start_ns": 5669088263482,
+              "received_bytes": 4096,
+              "ttfb_ms": 403.736765,
+              "kernel_connect_ms": 2.589315,
+              "http_status": 200,
+              "end_ns": 5669492265469,
+              "elapsed_ms": 404.001987
+            },
+            {
+              "status": "PASS",
+              "port": 18081,
+              "requested_bytes": 4096,
+              "start_ns": 5669088529519,
+              "received_bytes": 4096,
+              "ttfb_ms": 402.246853,
+              "kernel_connect_ms": 0.516765,
+              "http_status": 200,
+              "end_ns": 5669490913712,
+              "elapsed_ms": 402.384193
+            }
+          ],
+          "status": "PASS",
+          "worker_exit_code": 0
+        }
+      }
+    },
+    {
+      "candidate": "go",
+      "name": "DNS-A-UDP",
+      "status": "PASS",
+      "evidence": {
+        "name": "reality.bench.test",
+        "qtype": 1,
+        "tcp": false,
+        "addresses": [
+          "198.18.0.2"
+        ],
+        "rcode": 0,
+        "ttls": [
+          600
+        ],
+        "elapsed_ms": 0.520621,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "go",
+      "name": "fake-IP-to-origin",
+      "status": "PASS",
+      "evidence": {
+        "status": "PASS",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5669645832869,
+        "received_bytes": 4096,
+        "ttfb_ms": 4.306009,
+        "kernel_connect_ms": 3.177173,
+        "http_status": 200,
+        "end_ns": 5669650182198,
+        "elapsed_ms": 4.349329,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "go",
+      "name": "DNS-A-TCP",
+      "status": "PASS",
+      "evidence": {
+        "name": "reality.bench.test",
+        "qtype": 1,
+        "tcp": true,
+        "addresses": [
+          "198.18.0.2"
+        ],
+        "rcode": 0,
+        "ttls": [
+          600
+        ],
+        "elapsed_ms": 0.870399,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "go",
+      "name": "fake-IP-to-origin",
+      "status": "PASS",
+      "evidence": {
+        "status": "PASS",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5669809680500,
+        "received_bytes": 4096,
+        "ttfb_ms": 3.907051,
+        "kernel_connect_ms": 2.853102,
+        "http_status": 200,
+        "end_ns": 5669813690281,
+        "elapsed_ms": 4.009781,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "go",
+      "name": "IPv6-no-AAAA",
+      "status": "PASS",
+      "evidence": {
+        "name": "hy2.bench.test",
+        "qtype": 28,
+        "tcp": false,
+        "addresses": [],
+        "rcode": 0,
+        "ttls": [],
+        "elapsed_ms": 0.475315,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "go",
+      "name": "domain-reject-precedes-port-allow",
+      "status": "PASS",
+      "evidence": {
+        "status": "FAIL",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5670042552494,
+        "received_bytes": 0,
+        "ttfb_ms": null,
+        "error": "OSError(101, 'Network is unreachable')",
+        "end_ns": 5670042615601,
+        "elapsed_ms": 0.063107,
+        "worker_exit_code": 1
+      }
+    },
+    {
+      "candidate": "go",
+      "name": "http-503",
+      "status": "PASS",
+      "evidence": {
+        "status": "FAIL",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5670120965400,
+        "received_bytes": 0,
+        "ttfb_ms": 3.607406,
+        "kernel_connect_ms": 2.709987,
+        "http_status": 503,
+        "error": "ValueError('HTTP 503')",
+        "end_ns": 5670124609546,
+        "elapsed_ms": 3.644146,
+        "worker_exit_code": 1
+      }
+    },
+    {
+      "candidate": "go",
+      "name": "deadline",
+      "status": "PASS",
+      "evidence": {
+        "status": "TIMEOUT",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5670203430808,
+        "received_bytes": 0,
+        "ttfb_ms": null,
+        "kernel_connect_ms": 3.180051,
+        "error": "TimeoutError('timed out')",
+        "end_ns": 5670253890881,
+        "elapsed_ms": 50.460073,
+        "worker_exit_code": 1
+      }
+    },
+    {
+      "candidate": "go",
+      "name": "default-reject",
+      "status": "PASS",
+      "evidence": {
+        "status": "FAIL",
+        "port": 18082,
+        "requested_bytes": 4096,
+        "start_ns": 5670331092661,
+        "received_bytes": 0,
+        "ttfb_ms": null,
+        "error": "ConnectionRefusedError(111, 'Connection refused')",
+        "end_ns": 5670331451702,
+        "elapsed_ms": 0.359041,
+        "worker_exit_code": 1
+      }
+    },
+    {
+      "candidate": "go",
+      "name": "Clash-PUT-is-no-op",
+      "status": "PASS",
+      "evidence": {
+        "api": {
+          "status": 204,
+          "body": ""
+        },
+        "request": {
+          "status": "FAIL",
+          "port": 18082,
+          "requested_bytes": 4096,
+          "start_ns": 5670498310638,
+          "received_bytes": 0,
+          "ttfb_ms": null,
+          "error": "ConnectionRefusedError(111, 'Connection refused')",
+          "end_ns": 5670498701075,
+          "elapsed_ms": 0.390437,
+          "worker_exit_code": 1
+        }
+      }
+    },
+    {
+      "candidate": "go",
+      "name": "real-reload-changes-route",
+      "status": "PASS",
+      "evidence": {
+        "status": "PASS",
+        "port": 18082,
+        "requested_bytes": 4096,
+        "start_ns": 5670671731785,
+        "received_bytes": 4096,
+        "ttfb_ms": 4.235658,
+        "kernel_connect_ms": 3.0967,
+        "http_status": 200,
+        "end_ns": 5670676168754,
+        "elapsed_ms": 4.436969,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "go",
+      "name": "reload-interface-evidence",
+      "status": "PASS",
+      "evidence": {
+        "before_ifindex": 12,
+        "after_ifindex": 13
+      }
+    },
+    {
+      "candidate": "go",
+      "name": "crash-no-direct-origin-path",
+      "status": "PASS",
+      "evidence": {
+        "status": "FAIL",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5670798504208,
+        "received_bytes": 0,
+        "ttfb_ms": null,
+        "error": "OSError(101, 'Network is unreachable')",
+        "end_ns": 5670798564733,
+        "elapsed_ms": 0.060525,
+        "worker_exit_code": 1
+      }
+    },
+    {
+      "candidate": "go",
+      "name": "wrong-sni",
+      "status": "PASS",
+      "evidence": {
+        "status": "FAIL",
+        "port": 18081,
+        "requested_bytes": 4096,
+        "start_ns": 5670963515615,
+        "received_bytes": 0,
+        "ttfb_ms": null,
+        "error": "ConnectionRefusedError(111, 'Connection refused')",
+        "end_ns": 5670966646443,
+        "elapsed_ms": 3.130828,
+        "worker_exit_code": 1
+      }
+    },
+    {
+      "candidate": "go",
+      "name": "wrong-sni-unaffected-transport",
+      "status": "PASS",
+      "evidence": {
+        "status": "PASS",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5671044409113,
+        "received_bytes": 4096,
+        "ttfb_ms": 4.815552,
+        "kernel_connect_ms": 3.393059,
+        "http_status": 200,
+        "end_ns": 5671049359957,
+        "elapsed_ms": 4.950844,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "go",
+      "name": "wrong-ca",
+      "status": "PASS",
+      "evidence": {
+        "status": "FAIL",
+        "port": 18081,
+        "requested_bytes": 4096,
+        "start_ns": 5671318518556,
+        "received_bytes": 0,
+        "ttfb_ms": null,
+        "error": "ConnectionRefusedError(111, 'Connection refused')",
+        "end_ns": 5671321497000,
+        "elapsed_ms": 2.978444,
+        "worker_exit_code": 1
+      }
+    },
+    {
+      "candidate": "go",
+      "name": "wrong-ca-unaffected-transport",
+      "status": "PASS",
+      "evidence": {
+        "status": "PASS",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5671398185197,
+        "received_bytes": 4096,
+        "ttfb_ms": 4.22677,
+        "kernel_connect_ms": 3.156942,
+        "http_status": 200,
+        "end_ns": 5671402478421,
+        "elapsed_ms": 4.293224,
+        "worker_exit_code": 0
+      }
+    },
+    {
+      "candidate": "go",
+      "name": "wrong-reality",
+      "status": "PASS",
+      "evidence": {
+        "status": "FAIL",
+        "port": 18080,
+        "requested_bytes": 4096,
+        "start_ns": 5671609681885,
+        "received_bytes": 0,
+        "ttfb_ms": null,
+        "error": "ConnectionRefusedError(111, 'Connection refused')",
+        "end_ns": 5671621782258,
+        "elapsed_ms": 12.100373,
+        "worker_exit_code": 1
+      }
+    },
+    {
+      "candidate": "go",
+      "name": "wrong-reality-unaffected-transport",
+      "status": "PASS",
+      "evidence": {
+        "status": "PASS",
+        "port": 18081,
+        "requested_bytes": 4096,
+        "start_ns": 5671697398969,
+        "received_bytes": 4096,
+        "ttfb_ms": 4.461073,
+        "kernel_connect_ms": 3.154176,
+        "http_status": 200,
+        "end_ns": 5671701892251,
+        "elapsed_ms": 4.493282,
+        "worker_exit_code": 0
+      }
+    }
+  ]
+}
