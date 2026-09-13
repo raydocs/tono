@@ -72,6 +72,29 @@ final class ConnectionCoordinator {
         return task
     }
 
+    /// Final PF convergence is part of switch completion, not best-effort cleanup.
+    /// A retired/cancelled switch leaves recovery to the newer teardown owner.
+    func finishNodeSwitch(
+        generation: UInt64,
+        converge: () async throws -> Void,
+        commit: () -> Void,
+        recover: (Error) -> Void
+    ) async -> Bool {
+        guard !Task.isCancelled, protectionOperationGeneration == generation else { return false }
+        do {
+            try Task.checkCancellation()
+            try await converge()
+            try Task.checkCancellation()
+        } catch {
+            guard !Task.isCancelled, protectionOperationGeneration == generation else { return false }
+            recover(error)
+            return false
+        }
+        guard protectionOperationGeneration == generation else { return false }
+        commit()
+        return true
+    }
+
     func bumpGeneration() {
         protectionOperationGeneration &+= 1
         cancelDeferredConnect()

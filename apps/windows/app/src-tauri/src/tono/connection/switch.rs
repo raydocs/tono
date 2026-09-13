@@ -115,10 +115,24 @@ pub(super) async fn restore_selected_node(
     if inner.selected_node.as_deref() == Some(previous_name) {
         return;
     }
-    inner.selected_node = Some(previous_name.to_string());
+    let catalog_dir = inner.catalog_dir.clone();
+    if let Err(error) = restore_selection_value(&mut inner.selected_node, &catalog_dir, previous_name) {
+        logging!(warn, Type::Service, "Tono: could not persist rolled-back selection: {error:#}");
+    }
     let status = commands::status_of(&inner);
     drop(inner);
     commands::emit_status(app, &status);
+}
+
+fn restore_selection_value(
+    selected: &mut Option<String>,
+    catalog_dir: &std::path::Path,
+    previous_name: &str,
+) -> anyhow::Result<()> {
+    *selected = Some(previous_name.to_string());
+    // The selection command persisted the requested node before dispatch. A proved rollback
+    // must restore that file too, or next launch silently retries the rejected new node.
+    crate::tono::state::save_selection(catalog_dir, previous_name)
 }
 
 pub async fn switch_selected_node(
@@ -228,37 +242,57 @@ pub async fn switch_selected_node(
             Type::Service,
             "Tono: new exit failed protected probe ({error}); rolling back"
         );
-        if !previous_name.is_empty() {
-            let _ = select_exit_group(&secret, port, &previous_name).await;
-        }
-        let rollback_ok = verify_tun_data_plane().await.is_ok();
-        let _ = service::tono_replace_proxy_endpoints(&session, old_endpoints.clone()).await;
-        restore_selected_node(&state, &app, generation, &previous_name).await;
-        if !rollback_ok {
-            let mut inner = state.lock().await;
-            if inner.connect_generation != generation {
-                return;
+        // A working probe alone cannot prove rollback: the selector and exact old-only
+        // permissions must both have committed. Preserve the requested choice if either fails.
+        let rollback = async {
+            if previous_name.is_empty() {
+                anyhow::bail!("previous exit is unavailable for rollback");
             }
-            inner.fsm.tunnel_died();
-            commands::emit_status(&app, &commands::status_of(&inner));
-            drop(inner);
-            schedule_reconnect(&state, &app).await;
+            anyhow::ensure!(state.lock().await.connect_generation == generation, "switch retired");
+            select_exit_group(&secret, port, &previous_name).await.map_err(anyhow::Error::msg)?;
+            verify_tun_data_plane().await.map_err(anyhow::Error::msg)?;
+            anyhow::ensure!(state.lock().await.connect_generation == generation, "switch retired");
+            service::tono_replace_proxy_endpoints(&session, old_endpoints.clone()).await?;
+            Ok(())
+        };
+        if converge_or_recover(
+            rollback,
+            cold_switch_selected_node(Arc::clone(&state), app.clone(), generation),
+        ).await {
+            restore_selected_node(&state, &app, generation, &previous_name).await;
         }
         return;
     }
 
     close_connections_bound_to(&state, generation, &previous_name).await;
-    if let Err(error) = service::tono_replace_proxy_endpoints(&session, new_endpoints).await {
-        logging!(
-            warn,
-            Type::Service,
-            "Tono: could not shrink WFP to the new exit ({error:#}); leaving old∪new permits"
-        );
+    if state.lock().await.connect_generation != generation {
+        return;
+    }
+    if !converge_or_recover(
+        service::tono_replace_proxy_endpoints(&session, new_endpoints),
+        cold_switch_selected_node(Arc::clone(&state), app.clone(), generation),
+    ).await {
+        return;
     }
     let inner = state.lock().await;
     if inner.connect_generation == generation {
         commands::emit_status(&app, &commands::status_of(&inner));
     }
+}
+
+/// The verified selector is not a completed switch until the exact endpoint set commits.
+/// Both forward convergence and rollback use this boundary. The recovery future is lazy:
+/// only failure enters the existing generation-checked, keep-armed cold-switch owner.
+async fn converge_or_recover(
+    convergence: impl std::future::Future<Output = anyhow::Result<()>>,
+    recovery: impl std::future::Future<Output = ()>,
+) -> bool {
+    if let Err(error) = convergence.await {
+        logging!(warn, Type::Service, "Tono: switch protection did not converge ({error:#}); recovering with WFP armed");
+        recovery.await;
+        return false;
+    }
+    true
 }
 
 pub(super) async fn cold_switch_selected_node(state: Arc<TonoState>, app: AppHandle, generation: u64) {
@@ -341,5 +375,46 @@ pub(super) async fn close_connections_bound_to(state: &Arc<TonoState>, generatio
             .bearer_auth(&secret)
             .send()
             .await;
+    }
+}
+
+#[cfg(test)]
+mod convergence_tests {
+    use super::converge_or_recover;
+    use tono_core::connection::ConnectionFsm;
+
+    #[test]
+    fn verified_rollback_restores_the_selection_used_on_next_launch() {
+        let directory = std::env::temp_dir().join(format!("tono-switch-selection-{}", nanoid::nanoid!()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let _cleanup = scopeguard::guard(directory.clone(), |path| { let _ = std::fs::remove_dir_all(path); });
+        crate::tono::state::save_selection(&directory, "new-exit").unwrap();
+        let mut selected = Some("new-exit".to_string());
+        super::restore_selection_value(&mut selected, &directory, "old-exit").unwrap();
+        assert_eq!(selected.as_deref(), Some("old-exit"));
+        assert_eq!(crate::tono::state::load_selection(&directory).as_deref(), Some("old-exit"));
+    }
+
+    #[tokio::test]
+    async fn failed_exact_endpoint_commit_recovers_instead_of_completing_the_switch() {
+        let mut fsm = ConnectionFsm::new();
+        fsm.begin_connect();
+        fsm.mark_kill_switch_armed();
+        fsm.mark_session_verified();
+        fsm.connect_succeeded().unwrap();
+        let mut recovery_ran = false;
+        // Union/selector/probe have succeeded; only the final Service replacement fails.
+        let completed = converge_or_recover(
+            async { anyhow::bail!("injected final endpoint replacement failure") },
+            async {
+                recovery_ran = true;
+                fsm.tunnel_died();
+            },
+        ).await;
+        assert!(!completed, "no caller may publish switch completion");
+        assert!(recovery_ran);
+        assert!(!fsm.status().is_connected);
+        assert!(fsm.status().is_protection_blocked);
+        assert!(fsm.session_verified(), "retain the protected reconnect eligibility");
     }
 }

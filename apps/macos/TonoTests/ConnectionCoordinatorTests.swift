@@ -8,6 +8,45 @@ final class ConnectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(ProtectedReconnectSchedule.networkChangeKickCooldown, 30)
     }
 
+    func testFinalEndpointFailureRecoversWithoutCommittingOrOverridingANewerOwner() async {
+        enum ArmFailure: Error { case injected }
+        let coordinator = ConnectionCoordinator()
+        var events: [String] = ["union", "selector", "probe"]
+        let completed = await coordinator.finishNodeSwitch(generation: coordinator.protectionOperationGeneration, converge: {
+            events.append("new-only")
+            throw ArmFailure.injected
+        }, commit: {
+            events.append("connected")
+        }, recover: { _ in
+            events.append("protected-recovery")
+        })
+        XCTAssertFalse(completed)
+        XCTAssertEqual(events, ["union", "selector", "probe", "new-only", "protected-recovery"])
+
+        // A completed IPC from an older generation must not repaint or restart after release.
+        let retired = await coordinator.finishNodeSwitch(generation: coordinator.protectionOperationGeneration, converge: {
+            coordinator.bumpGeneration()
+            throw ArmFailure.injected
+        }, commit: { XCTFail("retired switch cannot commit") },
+           recover: { _ in XCTFail("newer owner controls recovery") })
+        XCTAssertFalse(retired)
+    }
+
+    func testRetiredNodeSwitchCannotAdoptTheGenerationBumpedBeforeFinalization() async {
+        let coordinator = ConnectionCoordinator()
+        let switchGeneration = coordinator.protectionOperationGeneration
+        // Wake invalidates the owner before its queued disconnect cancels the old task.
+        coordinator.bumpGeneration()
+        let completed = await coordinator.finishNodeSwitch(generation: switchGeneration, converge: {
+            XCTFail("retired switch must not start another privileged operation")
+        }, commit: {
+            XCTFail("retired switch must not adopt the wake generation")
+        }, recover: { _ in
+            XCTFail("retired switch must not replace the wake recovery intent")
+        })
+        XCTAssertFalse(completed)
+    }
+
     func testCoordinatorOwnsGenerationAndStartsAtZero() {
         let coordinator = ConnectionCoordinator()
         XCTAssertEqual(coordinator.protectionOperationGeneration, 0)
