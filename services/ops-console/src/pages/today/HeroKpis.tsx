@@ -14,12 +14,15 @@ export function HeroKpis({
   due,
   swept,
   listed,
+  sweptTone,
 }: {
   open: number | null;
   impacted: number | null;
   due: number | null;
   swept: number | null;
   listed: number | null;
+  /** Follows the coverage line: partly unmeasured stays grey, never green. */
+  sweptTone: 'ok' | 'unk';
 }) {
   const sweptText = swept === null || listed === null ? null : `${swept}/${listed}`;
   return (
@@ -42,7 +45,7 @@ export function HeroKpis({
       <Kpi
         label={copy.todayKpi.swept}
         value={sweptText}
-        tone={sweptText === null ? 'unk' : 'ok'}
+        tone={sweptText === null ? 'unk' : sweptTone}
       />
     </div>
   );

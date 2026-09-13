@@ -39,6 +39,7 @@ export default function TodayPage({
   health,
   releases,
   nodes,
+  fleetReady,
   selected,
   onChanged,
 }: {
@@ -49,6 +50,10 @@ export default function TodayPage({
   health: Resource<SystemHealthDto>;
   releases: Resource<ReleaseDto[]>;
   nodes: FleetNodeDto[];
+  /** Whether the fleet read behind `nodes` landed: fleet chores are part of
+      the due-today number, so without this the hero would print a partial sum
+      as if it were the whole day. */
+  fleetReady: boolean;
   selected: string | null;
   onChanged: () => void;
 }) {
@@ -118,7 +123,7 @@ export default function TodayPage({
     && releases.status === 'ready';
   const kpiOpen = incidentsReady ? open.length : null;
   const kpiImpacted = incidentsReady ? impactedCustomers(all) : null;
-  const kpiDue = choresReady && digest.status === 'ready'
+  const kpiDue = choresReady && fleetReady && digest.status === 'ready'
     ? choresDueToday(chores).length
       + digest.data.due.followups.length
       + digest.data.due.checks.length
@@ -163,6 +168,7 @@ export default function TodayPage({
           due={kpiDue}
           swept={swept === null || swept === undefined ? null : swept.nodesSweptFresh}
           listed={swept === null || swept === undefined ? null : swept.nodesListed}
+          sweptTone={swept === null || swept === undefined || coverage?.tone === 'unk' ? 'unk' : 'ok'}
         />
       </section>
 

@@ -70,6 +70,13 @@
   border-top: 1px solid var(--hairline);
 }
 
+/* In the dark theme the KPI block must read as part of the hero card, not as
+ * a recess cut into it: a faint lift instead of a sunken well. */
+.dark .today-kpis {
+  background: rgb(255 255 255 / 0.03);
+  border-color: rgb(255 255 255 / 0.07);
+}
+
 .today-kpi-label {
   display: flex;
   align-items: center;
@@ -101,8 +108,17 @@
 .today-main {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   min-width: 0;
+}
+
+/* Card titles carry the rail: one strong line per card, then quiet labels. */
+.today-page .today-digest > h2,
+.today-page .today-worthwhile-card .worthwhile > h3 {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--foreground);
 }
 
 .today-list-wrap {
@@ -147,7 +163,7 @@
   max-width: 100%;
   overflow-x: auto;
   scrollbar-width: none;
-  padding: 4px;
+  padding: 3px;
   border: 1px solid var(--hairline);
   border-radius: 999px;
   background: var(--surface);
@@ -166,7 +182,7 @@
   flex: none;
   display: inline-flex;
   align-items: center;
-  padding: 8px 16px 9px;
+  padding: 7px 14px 8px;
   border: 0;
   border-radius: 999px;
   white-space: nowrap;
@@ -314,6 +330,13 @@
 /* ------------------------------------------------------------------ phone */
 
 @media (max-width: 1023px) {
+  /* The workbench first: tabs and actions precede the morning read below the
+   * desktop breakpoint, so the first primary action stays on the first phone
+   * screen. DOM order is unchanged; the desktop grid places explicitly. */
+  .today-main {
+    order: -1;
+  }
+
   .today-hero {
     grid-template-columns: minmax(0, 1fr);
     gap: 18px;
