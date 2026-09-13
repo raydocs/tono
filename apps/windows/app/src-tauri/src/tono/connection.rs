@@ -77,7 +77,8 @@ use crate::{
 pub use crate::tono::connection_health::{
     CORE_MISSING_SUSTAINED_SAMPLES, CoreSample, HEALTH_FAILURE_THRESHOLD, HealthLegs, NETWORK_EVENT_DEBOUNCE,
     NetworkChangeOutcome, classify_core_sample, connection_loop_continues, core_change_fires,
-    health_threshold_reached, kill_switch_unhealthy, monitor_requires_reconnect, network_event_fires,
+    health_threshold_reached, kill_switch_unhealthy, kill_switch_unhealthy_for_monitor,
+    monitor_requires_reconnect, network_event_fires, owned_direct_reload_in_flight,
     protected_dns_unhealthy, startup_resume_guards_hold, startup_runtime_is_resume_candidate,
 };
 pub use crate::tono::connection_plan::{
@@ -103,7 +104,9 @@ pub use controller::close_owned_controller_connection;
 use endpoints::proxy_endpoints_for;
 pub use endpoints::{proxy_endpoint_of, unique_proxy_endpoints};
 use monitor::{IN_PLACE_RECOVERY_COOLDOWN, NETWORK_MONITOR_INTERVAL, monitor_interval, wechat_paths_changed};
-pub(crate) use monitor::handle_network_change;
+pub(crate) use monitor::{
+    handle_network_change, handle_policy_behavior_change, policy_behavior_change_allows_in_place_recovery,
+};
 #[cfg(test)]
 use probes::EXIT_PROBE_ADVISORY_BUDGET;
 use probes::{
@@ -259,6 +262,7 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle) -> Attempt {
         inner.next_retry_at_ms = None;
         inner.optional_direct_active = false;
         inner.optional_direct_skip = None;
+        inner.direct_reload_until = None;
         commands::emit_status(app, &commands::status_of(&inner));
     }
 
@@ -694,7 +698,9 @@ mod tests {
         collect_ipv4_literals, connection_loop_continues, controller_direct_graph_is_active, controller_error_detail,
         core_change_fires,
         dns_listener_conflict_message, expected_controller_direct_rules, format_tun_probe_failures, guard_rejection_is_transient,
-        health_threshold_reached, is_fake_ip, is_retryable_lock_error, kill_switch_unhealthy, map_service_ready_error,
+        health_threshold_reached, is_fake_ip, is_retryable_lock_error, kill_switch_unhealthy,
+        kill_switch_unhealthy_for_monitor, map_service_ready_error, owned_direct_reload_in_flight,
+        policy_behavior_change_allows_in_place_recovery,
         map_wfp_engine_error, monitor_interval, monitor_requires_reconnect, network_event_fires, plan_failure,
         protected_dns_unhealthy, prove_service_endpoint_digest, prove_service_reload_mode, proxy_endpoint_of,
         unique_proxy_endpoints,
@@ -1945,6 +1951,30 @@ mod tests {
             kill_switch_unhealthy(Some(&orphaned_permit)),
             "a Locked session whose tunnel permit was retracted is not a healthy tunnel"
         );
+
+        let blocked = KillSwitchStatus {
+            mode: KillSwitchStatusMode::Blocked,
+            tunnel_permit_rendered: false,
+            ..healthy.clone()
+        };
+        assert!(kill_switch_unhealthy(Some(&blocked)));
+        assert!(
+            !kill_switch_unhealthy_for_monitor(Some(&blocked), true),
+            "this session's own DIRECT bracket is expected to be Blocked"
+        );
+        assert!(kill_switch_unhealthy_for_monitor(Some(&blocked), false));
+        let now = std::time::Instant::now();
+        assert!(owned_direct_reload_in_flight(
+            Some((7, now + std::time::Duration::from_secs(60))),
+            7,
+            now
+        ));
+        assert!(!owned_direct_reload_in_flight(
+            Some((7, now + std::time::Duration::from_secs(60))),
+            8,
+            now
+        ));
+        assert!(!policy_behavior_change_allows_in_place_recovery());
     }
 
     #[test]

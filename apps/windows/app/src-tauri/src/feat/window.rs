@@ -23,8 +23,10 @@ pub struct CleanupResult {
     pub core_stopped: bool,
 }
 
-const fn should_abort_exit_after_cleanup(core_stopped: bool) -> bool {
-    !core_stopped
+const fn should_abort_exit_after_cleanup(core_stopped: bool, user_confirmed_protected_exit: bool) -> bool {
+    // "Quit/Restart anyway" already accepted a still-armed barrier. A later Service-stop
+    // failure must not veto that decision or invent a disarm.
+    !core_stopped && !user_confirmed_protected_exit
 }
 
 async fn run_exit_cleanup_transition<Stop, StopFuture, Ancillary, AncillaryFuture>(
@@ -113,6 +115,7 @@ pub async fn restart_app() {
     logging!(debug, Type::System, "启动重启应用流程");
     // 设置退出标志
     handle::Handle::global().set_is_exiting();
+    let mut confirmed_protected_exit = false;
 
     // Tono: restart releases the kill switch like quit does (§6, P0-8). The click-level wait is
     // the same 8 s budget as interactive Quit: `set_is_exiting` already dropped frontend events,
@@ -134,6 +137,7 @@ pub async fn restart_app() {
             handle::Handle::notice_message("app_restart::core_stop_failed", "");
             return;
         }
+        confirmed_protected_exit = true;
         logging!(
             warn,
             Type::Service,
@@ -153,7 +157,7 @@ pub async fn restart_app() {
         if cleanup_result.all_success { 0 } else { 1 }
     );
 
-    if !cleanup_result.core_stopped {
+    if should_abort_exit_after_cleanup(cleanup_result.core_stopped, confirmed_protected_exit) {
         handle::Handle::global().clear_is_exiting();
         handle::Handle::notice_message("app_restart::core_stop_failed", "");
         return;
@@ -263,6 +267,7 @@ pub async fn quit() -> tono_signal::ShutdownOutcome {
     #[cfg(windows)]
     let tono_protected_at_quit =
         crate::tono::commands::quit_protection_active(handle::Handle::app_handle()).await;
+    let mut confirmed_protected_exit = false;
 
     // Tono: this is the sole owner of the preventable explicit-Quit release (§6). Session-ending
     // exits use their separate best-effort path in `RunEvent::Exit`.
@@ -283,6 +288,7 @@ pub async fn quit() -> tono_signal::ShutdownOutcome {
             handle::Handle::notice_message("app_quit::core_stop_failed", "");
             return tono_signal::ShutdownOutcome::Canceled;
         }
+        confirmed_protected_exit = true;
         logging!(
             warn,
             Type::Service,
@@ -302,7 +308,7 @@ pub async fn quit() -> tono_signal::ShutdownOutcome {
         if cleanup_result.all_success { 0 } else { 1 }
     );
 
-    if should_abort_exit_after_cleanup(cleanup_result.core_stopped) {
+    if should_abort_exit_after_cleanup(cleanup_result.core_stopped, confirmed_protected_exit) {
         handle::Handle::global().clear_is_exiting();
         surface_cancelled_quit().await;
         handle::Handle::notice_message("app_quit::core_stop_failed", "");
@@ -459,8 +465,17 @@ mod tests {
 
     #[test]
     fn exit_aborts_when_controlled_core_stop_fails() {
-        assert!(should_abort_exit_after_cleanup(false));
-        assert!(!should_abort_exit_after_cleanup(true));
+        assert!(should_abort_exit_after_cleanup(false, false));
+        assert!(!should_abort_exit_after_cleanup(true, false));
+    }
+
+    #[test]
+    fn confirmed_quit_commits_when_service_stop_fails() {
+        assert!(
+            !should_abort_exit_after_cleanup(false, true),
+            "Quit anyway already accepted a still-armed barrier"
+        );
+        assert!(!should_abort_exit_after_cleanup(true, true));
     }
 
     #[test]

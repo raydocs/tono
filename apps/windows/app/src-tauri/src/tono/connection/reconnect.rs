@@ -55,7 +55,7 @@ pub async fn retry_reconnect_now(state: &Arc<TonoState>, app: &AppHandle) {
         inner.catalog_requires_choice,
         inner.fsm.status(),
         inner.fsm.kill_switch_armed(),
-    ) || !inner.fsm.reconnect_permitted_now()
+    ) || !inner.fsm.explicit_retry_permitted_now()
     {
         return;
     }
