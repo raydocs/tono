@@ -100,6 +100,8 @@ extension AccountSession {
     }
 
     func periodicTelemetrySettingChanged() {
+        routeTelemetryCursor.reset(to: routeSplitConsumer())
+        _ = ConnectionTelemetryBuffer.shared.drain()
         updatePeriodicTelemetry()
     }
 
@@ -111,6 +113,10 @@ extension AccountSession {
     /// than "this device is online" and more than any other Privacy row on the
     /// Settings screen describes.
     func updatePeriodicTelemetry() {
+        routeTelemetryCursor.setEnabled(
+            state == .ready && user != nil && Self.isPeriodicTelemetryEnabled,
+            current: routeSplitConsumer()
+        )
         guard state == .ready, !systemSleeping, user != nil,
               Self.isPeriodicTelemetryEnabled else {
             periodicTelemetryTask?.cancel()
@@ -167,6 +173,17 @@ extension AccountSession {
         }
         let osArch = Self.osArch
         let path = pathLatencyConsumer()
+        // Snapshotted before the post, not read again after it: the ledger
+        // keeps moving while the request is in flight, and advancing the
+        // baseline to a later value than the one that was actually reported
+        // would drop whatever arrived in between.
+        let routeSplit = routeSplitConsumer()
+        let routeEpoch = routeTelemetryCursor.epoch
+        let accountRevision = accountReadRevision
+        let bytesByRoute = AppTrafficLedger.windowDelta(
+            from: routeTelemetryCursor.baseline,
+            to: routeSplit
+        )
         let window = TonoTelemetryWindowReport(
             schemaVersion: 1,
             kind: "periodic_window",
@@ -189,13 +206,23 @@ extension AccountSession {
             tcpDelayMs: path.tcpDelayMs,
             exitDelayAtMs: path.exitDelayAtMs,
             tcpDelayAtMs: path.tcpDelayAtMs,
+            // Sent on every window, zeros included: a missing object has to
+            // stay readable as "an older client", not as "no traffic".
+            bytesByRoute: bytesByRoute,
             eventCount: drained.events.count,
             eventsDropped: drained.dropped,
             events: drained.events
         )
         do {
             _ = try await api.uploadTelemetryWindow(window)
+            // Only a window the Worker accepted may move the baseline. A
+            // failure leaves it where it was, so the next window reports the
+            // same bytes plus whatever came after — counted once, in a window
+            // that then spans longer than the 22 minutes it claims.
+            guard !Task.isCancelled, accountReadRevision == accountRevision else { return }
+            routeTelemetryCursor.acknowledge(routeSplit, epoch: routeEpoch)
         } catch TonoAPIClient.APIError.unauthorized {
+            guard !Task.isCancelled, accountReadRevision == accountRevision else { return }
             await fail(
                 TonoAPIClient.APIError.unauthorized,
                 signsOutOnUnauthorized: true
@@ -508,6 +535,12 @@ extension AccountSession {
 
     func clearAccount() {
         invalidateAccountReads()
+        // Re-anchor on the way out: the ledger's counter outlives the account,
+        // so without this the first window of the next account to sign in here
+        // would carry the previous account's unreported tail.
+        routeTelemetryCursor.setEnabled(false, current: routeSplitConsumer())
+        routeTelemetryCursor.reset(to: routeSplitConsumer())
+        _ = ConnectionTelemetryBuffer.shared.drain()
         // Managed exits carry this account's own client identity, so they are
         // dropped here rather than being left for the next account to connect
         // with. Idempotent: the logout and account-loss paths already purged.
