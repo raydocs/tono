@@ -80,6 +80,8 @@ REJECTED_STATUSES = frozenset({400, 409, 413, 422})
 MAX_SAFE_INTEGER = (1 << 53) - 1
 MAX_RESPONSE_BYTES = 512 * 1024
 STATE_MODE = 0o600
+HY2_AUTH_ALLOWLIST = Path("/opt/tono-hy2/auth-allow.sha256")
+HY2_ROSTER_MARKER = "# tono-exit-agent roster v1"
 # Label written by enable-tono-exit-metering.sh for the credential every
 # current client still holds. Removing it would drop the fleet.
 LEGACY_CLIENT_EMAIL = "shared-legacy"
@@ -917,6 +919,57 @@ def reconcile_and_read_stable(
     raise AssertionError("bounded xray reconciliation loop did not return")
 
 
+def sync_hy2_roster(roster: list[dict[str, str]]) -> bool:
+    """Replace an installed hy2 checker's list from this verified roster only.
+
+    No hy2 directory means a VLESS-only node, which is unchanged. An installed
+    but broken/read-only path is an error, never a successful reconciliation.
+    Empty is a valid revocation result, not permission to retain static users.
+    Caller holds agent_run_lock and has verified the roster's node identity.
+    """
+    path = HY2_AUTH_ALLOWLIST
+    try:
+        directory = path.parent.lstat()
+    except FileNotFoundError:
+        return False
+    if (not stat.S_ISDIR(directory.st_mode) or directory.st_uid != os.geteuid()
+            or directory.st_mode & 0o022):
+        raise Refusal("hy2 auth directory is not privately service-owned")
+    try:
+        info = path.lstat()
+    except FileNotFoundError as error:
+        raise Refusal("hy2 is installed but its auth allowlist is missing") from error
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+            or info.st_nlink != 1 or info.st_mode & 0o022):
+        raise Refusal("hy2 auth allowlist is not a service-owned regular file")
+    digests = sorted({hashlib.sha256(entry["clientUUID"].encode()).hexdigest() for entry in roster})
+    body = (HY2_ROSTER_MARKER + "\n" + "".join(digest + "\n" for digest in digests)).encode()
+    temporary: str | None = None
+    try:
+        # Same-directory replacement: a reader sees either complete roster,
+        # never a partially truncated list. Preserve the checker's read group.
+        descriptor, temporary = tempfile.mkstemp(prefix=".auth-allow-", dir=path.parent)
+        with os.fdopen(descriptor, "wb") as output:
+            os.fchown(output.fileno(), info.st_uid, info.st_gid)
+            os.fchmod(output.fileno(), 0o640)
+            output.write(body)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+        temporary = None
+        directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except OSError as error:
+        raise Refusal(f"hy2 roster could not be published: {error}") from error
+    finally:
+        if temporary is not None:
+            os.unlink(temporary)
+    return True
+
+
 def run_once(path: Path) -> None:
     base = api_base()
     token = env("TONO_HOME_AGENT_TOKEN")
@@ -954,6 +1007,9 @@ def run_once(path: Path) -> None:
         if not retire_override
         else retire_override in ("1", "true", "yes")
     )
+    # Revocations must reach hy2 even if the following Xray reconciliation
+    # fails. Never ACK the roster unless both installed transports were updated.
+    sync_hy2_roster(roster)
     remembered = state.get("installedClients")
     added, removed, installed, counters, settled_marker = reconcile_and_read_stable(
         binary, commands, address, tag, roster,
