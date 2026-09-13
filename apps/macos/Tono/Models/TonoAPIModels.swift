@@ -320,6 +320,7 @@ nonisolated struct TonoTelemetryWindowReport: Encodable, Sendable {
     /// Bytes attributed to each route over this window — a delta since the
     /// window that was last accepted, not a lifetime total.
     var bytesByRoute: TonoBytesByRoute? = nil
+    var routeBytesInterval: TonoRouteBytesInterval? = nil
     let eventCount: Int
     let eventsDropped: Int
     let events: [TonoTelemetryEvent]
@@ -329,7 +330,7 @@ nonisolated struct TonoTelemetryWindowReport: Encodable, Sendable {
         case osArch, uiState, accountState, selectedServer, catalogRevision
         case killSwitchMode, killSwitchWanted, killSwitchLive, dnsEnabled
         case exitDelayMs, tcpDelayMs, exitDelayAtMs, tcpDelayAtMs, platform
-        case bytesByRoute
+        case bytesByRoute, routeBytesInterval
         case eventCount, eventsDropped, events
     }
 
@@ -356,6 +357,7 @@ nonisolated struct TonoTelemetryWindowReport: Encodable, Sendable {
         if let tcpDelayAtMs { try container.encode(tcpDelayAtMs, forKey: .tcpDelayAtMs) }
         if let platform { try container.encode(platform, forKey: .platform) }
         if let bytesByRoute { try container.encode(bytesByRoute, forKey: .bytesByRoute) }
+        if let routeBytesInterval { try container.encode(routeBytesInterval, forKey: .routeBytesInterval) }
         try container.encode(eventCount, forKey: .eventCount)
         try container.encode(eventsDropped, forKey: .eventsDropped)
         try container.encode(events, forKey: .events)
@@ -492,6 +494,7 @@ nonisolated struct TonoPathLatency: Sendable {
 nonisolated struct TonoTelemetryWindowReceipt: Decodable, Sendable {
     let id: String
     let receivedAt: Int?
+    let routeBytesIntervalVersion: Int?
 }
 
 nonisolated enum TonoDeviceActionName: String, Codable, Sendable {

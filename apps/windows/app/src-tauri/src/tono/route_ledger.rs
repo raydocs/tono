@@ -14,7 +14,7 @@
 use std::collections::{HashMap, HashSet};
 
 use tono_core::EXIT_GROUP_NAME;
-use tono_core::auth::BytesByRoute;
+use tono_core::auth::{BytesByRoute, RouteBytesInterval};
 use tono_core::config::{CLAUDE_HOME_GROUP_NAME, DIRECT_GROUP_NAME, HOME_SOCKS5_OUTBOUND_NAME, WEB_DIRECT_GROUP_NAME};
 
 use crate::tono::connection_routes::SampledConnections;
@@ -67,6 +67,8 @@ pub struct RouteLedger {
     /// window body is `overall.saturating_sub(baseline)`.
     baseline: BytesByRoute,
     baseline_epoch: u64,
+    baseline_at_ms: Option<i64>,
+    interval_supported: bool,
 }
 
 impl RouteLedger {
@@ -87,9 +89,15 @@ impl RouteLedger {
         }
     }
 
-    /// Advance the window baseline. Call only after a 2xx upload.
+    /// Start a fresh consent/account boundary, excluding earlier traffic.
     pub fn advance_baseline(&mut self) {
+        self.advance_baseline_at(super::telemetry::epoch_ms());
+    }
+
+    fn advance_baseline_at(&mut self, now_ms: i64) {
         self.baseline = self.overall;
+        self.baseline_at_ms = Some(now_ms);
+        self.interval_supported = false;
         self.baseline_epoch = self.baseline_epoch.wrapping_add(1);
     }
 
@@ -97,10 +105,38 @@ impl RouteLedger {
         self.baseline_epoch
     }
 
-    /// Acknowledge exactly the snapshot sent, not bytes sampled during HTTP await.
-    pub fn acknowledge_snapshot(&mut self, uploaded: BytesByRoute, epoch: u64) {
+    pub fn interval_at(&self, now_ms: i64) -> Option<RouteBytesInterval> {
+        let start_ms = self.baseline_at_ms?;
+        // A clock rollback must not send an inverted range or discard bytes.
+        (self.interval_supported && start_ms <= now_ms).then_some(RouteBytesInterval {
+            start_ms,
+            end_ms: now_ms,
+        })
+    }
+
+    /// Acknowledge the exact totals AND timestamp sent. An event-only capability
+    /// probe must not consume any bytes, even when the server accepts it.
+    pub fn acknowledge_snapshot(
+        &mut self,
+        uploaded: BytesByRoute,
+        epoch: u64,
+        interval: Option<RouteBytesInterval>,
+        interval_version: Option<u32>,
+    ) {
         if self.baseline_epoch == epoch {
-            self.baseline = uploaded;
+            if let Some(interval) = interval {
+                self.baseline = uploaded;
+                self.baseline_at_ms = Some(interval.end_ms);
+            }
+            self.interval_supported = interval_version == Some(1);
+            self.baseline_epoch = self.baseline_epoch.wrapping_add(1);
+        }
+    }
+
+    /// Re-negotiate on the next cadence if an older Worker rejects the field.
+    pub fn forget_interval_support(&mut self, epoch: u64) {
+        if self.baseline_epoch == epoch {
+            self.interval_supported = false;
             self.baseline_epoch = self.baseline_epoch.wrapping_add(1);
         }
     }
@@ -245,11 +281,67 @@ mod tests {
         ledger.ingest(&sample(vec![conn("a", &["Tono Cloud"], 200, 0)]));
         let (uploaded, epoch) = (ledger.overall(), ledger.baseline_epoch());
         ledger.ingest(&sample(vec![conn("a", &["Tono Cloud"], 250, 0)]));
-        ledger.acknowledge_snapshot(uploaded, epoch);
+        ledger.acknowledge_snapshot(
+            uploaded,
+            epoch,
+            Some(RouteBytesInterval { start_ms: 0, end_ms: 1 }),
+            Some(1),
+        );
         assert_eq!(ledger.window_bytes().cloud, 50);
         ledger.advance_baseline();
-        ledger.acknowledge_snapshot(uploaded, epoch);
+        ledger.acknowledge_snapshot(
+            uploaded,
+            epoch,
+            Some(RouteBytesInterval { start_ms: 0, end_ms: 1 }),
+            Some(1),
+        );
         assert_eq!(ledger.window_bytes().cloud, 0);
+    }
+
+    #[test]
+    fn route_interval_survives_failed_uploads_and_legacy_capability_receipts() {
+        let mut ledger = RouteLedger::default();
+        ledger.advance_baseline_at(1_000);
+        ledger.overall.cloud = 100;
+        assert_eq!(ledger.interval_at(2_000), None);
+        ledger.acknowledge_snapshot(ledger.overall(), ledger.baseline_epoch(), None, None);
+        assert_eq!(ledger.window_bytes().cloud, 100);
+        assert_eq!(ledger.interval_at(2_000), None);
+        ledger.acknowledge_snapshot(ledger.overall(), ledger.baseline_epoch(), None, Some(1));
+        let first = ledger.interval_at(20 * 60_000).unwrap();
+        assert_eq!(first.start_ms, 1_000);
+        ledger.acknowledge_snapshot(ledger.overall(), ledger.baseline_epoch(), Some(first), Some(1));
+        ledger.overall.cloud = 200;
+        // No receipt for the failed window: retain the last acknowledged start.
+        let failed = ledger.interval_at(40 * 60_000).unwrap();
+        ledger.overall.cloud = 300;
+        let recovery = ledger.interval_at(8 * 60 * 60_000).unwrap();
+        assert_eq!(recovery.start_ms, failed.start_ms);
+        assert_eq!(recovery.start_ms, first.end_ms);
+        assert_eq!(ledger.window_bytes().cloud, 200);
+        let (uploaded, epoch) = (ledger.overall(), ledger.baseline_epoch());
+        ledger.overall.cloud = 350;
+        ledger.acknowledge_snapshot(uploaded, epoch, Some(recovery), Some(1));
+        assert_eq!(ledger.window_bytes().cloud, 50);
+        assert_eq!(
+            ledger.interval_at(recovery.end_ms + 1).unwrap().start_ms,
+            recovery.end_ms
+        );
+        assert_eq!(ledger.interval_at(recovery.end_ms - 1), None);
+        ledger.forget_interval_support(ledger.baseline_epoch());
+        assert_eq!(ledger.interval_at(recovery.end_ms + 1), None);
+        ledger.acknowledge_snapshot(uploaded, epoch, Some(first), Some(1));
+        assert_eq!(
+            ledger.interval_at(recovery.end_ms + 1),
+            None,
+            "retired receipt cannot restore support"
+        );
+        ledger.acknowledge_snapshot(ledger.overall(), ledger.baseline_epoch(), None, Some(1));
+        assert_eq!(ledger.window_bytes().cloud, 50);
+        assert_eq!(
+            ledger.interval_at(recovery.end_ms + 1).unwrap().start_ms,
+            recovery.end_ms
+        );
     }
 
     #[test]

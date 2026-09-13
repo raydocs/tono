@@ -3140,7 +3140,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       window_start_ms: parsed.windowStartMs,
       window_end_ms: parsed.windowEndMs,
     });
-    return Response.json(stored, { status: 201 });
+    return Response.json({ ...stored, routeBytesIntervalVersion: 1 }, { status: 201 });
   }
 
   if (p === '/api/v1/telemetry/failures' && m === 'POST') {

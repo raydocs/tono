@@ -91,21 +91,49 @@ final class AppTrafficLedger {
         private(set) var baseline = RouteSplit()
         private(set) var epoch: UInt64 = 0
         private(set) var enabled = false
+        private(set) var baselineAtMs: Int64?
+        private var intervalSupported = false
 
-        mutating func setEnabled(_ value: Bool, current: RouteSplit) {
+        mutating func setEnabled(
+            _ value: Bool, current: RouteSplit,
+            atMs: Int64 = Int64(Date().timeIntervalSince1970 * 1_000)
+        ) {
             guard value != enabled else { return }
             enabled = value
-            reset(to: current)
+            reset(to: current, atMs: atMs)
         }
 
-        mutating func reset(to current: RouteSplit) {
+        mutating func reset(to current: RouteSplit, atMs: Int64 = Int64(Date().timeIntervalSince1970 * 1_000)) {
             baseline = current
+            baselineAtMs = atMs
+            intervalSupported = false
             epoch &+= 1
         }
 
-        mutating func acknowledge(_ uploaded: RouteSplit, epoch expected: UInt64) {
+        func interval(endingAt nowMs: Int64) -> TonoRouteBytesInterval? {
+            guard enabled, intervalSupported, let baselineAtMs, baselineAtMs <= nowMs else { return nil }
+            return TonoRouteBytesInterval(startMs: baselineAtMs, endMs: nowMs)
+        }
+
+        mutating func acknowledge(
+            _ uploaded: RouteSplit, epoch expected: UInt64,
+            interval: TonoRouteBytesInterval?, intervalVersion: Int?
+        ) {
             guard enabled, epoch == expected else { return }
-            baseline = uploaded
+            // A legacy/event-only receipt confirms no byte interval. Keep both
+            // the totals and start time until a supporting Worker receives them.
+            if let interval {
+                baseline = uploaded
+                baselineAtMs = interval.endMs
+            }
+            intervalSupported = intervalVersion == 1
+            epoch &+= 1
+        }
+
+        mutating func forgetIntervalSupport(epoch expected: UInt64) {
+            guard enabled, epoch == expected else { return }
+            intervalSupported = false
+            epoch &+= 1
         }
     }
 
