@@ -285,6 +285,18 @@ pub fn record_first_launch_migration(
         )?;
         return load(path);
     }
+    // Startup/account restore may re-enter after a crash or retry. These phases
+    // already contain first-launch evidence; retain it rather than requesting
+    // an illegal backwards hop. Version validation above still applies, and
+    // this read-only path neither verifies a connection nor commits the update.
+    if matches!(
+        journal.phase,
+        UpdateHandoffPhase::FirstLaunchMigration
+            | UpdateHandoffPhase::ProtectionResuming
+            | UpdateHandoffPhase::Verified
+    ) {
+        return Ok(Some(journal));
+    }
     advance_pending(path, UpdateHandoffPhase::FirstLaunchMigration)?;
     load(path)
 }
@@ -575,6 +587,52 @@ mod tests {
             journal.last_error_code.as_deref(),
             Some("TONO_JOURNAL_ILLEGAL_PHASE")
         );
+    }
+
+    #[test]
+    fn first_launch_reentry_preserves_durable_recovery_progress() {
+        let dir = env::temp_dir().join(format!("tono-journal-reentry-{}", std::process::id()));
+        let path = journal_path(&dir);
+        let mut journal = UpdateHandoffJournal::new("0.0.72", "0.0.73", 7, true, true);
+        journal.phase = UpdateHandoffPhase::InstallStarted;
+        write_atomic(&path, &journal).unwrap();
+        record_first_launch_migration(&path, "0.0.73").unwrap();
+        advance_pending(&path, UpdateHandoffPhase::ProtectionResuming).unwrap();
+
+        // Account restore can be retried, or the new process can crash before
+        // verifying its connection. Re-entry is not a backwards transition.
+        let resuming = fs::read(&path).unwrap();
+        let resumed = record_first_launch_migration(&path, "0.0.73")
+            .unwrap()
+            .unwrap();
+        assert_eq!(resumed.phase, UpdateHandoffPhase::ProtectionResuming);
+        assert_eq!(fs::read(&path).unwrap(), resuming);
+        assert!(resumed.keep_kill_switch_armed);
+
+        // A crash after the verifier's durable write must also retain evidence;
+        // only the separate commit owner can remove it.
+        advance_pending(&path, UpdateHandoffPhase::Verified).unwrap();
+        let verified = fs::read(&path).unwrap();
+        assert_eq!(
+            record_first_launch_migration(&path, "0.0.73")
+                .unwrap()
+                .unwrap()
+                .phase,
+            UpdateHandoffPhase::Verified
+        );
+        assert_eq!(fs::read(&path).unwrap(), verified);
+
+        // Preserving progress must never authorize the predecessor binary.
+        let wrong = record_first_launch_migration(&path, "0.0.72")
+            .unwrap()
+            .unwrap();
+        assert_eq!(wrong.phase, UpdateHandoffPhase::Failed);
+        assert_eq!(
+            wrong.last_error_code.as_deref(),
+            Some("TONO_UPDATE_INSTALL_ABORTED")
+        );
+        assert!(!commit_verified_recovery(&path, "0.0.73").unwrap());
+        fs::remove_dir_all(dir).unwrap();
     }
 
     const PROTECTED_OWNERS: [UpdateHandoffPhase; 7] = [

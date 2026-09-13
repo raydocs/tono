@@ -23,6 +23,9 @@ enum RuntimeCleanup {
         errorStage: String? = nil
     ) {
         guard let journal = UpdateHandoffStore.load() else { return }
+        // A relaunch still performs live cleanup/recovery below, but must not
+        // downgrade the verifier's durable receipt. Fresh verification owns commit.
+        if phase == .protectionResuming && journal.phase == .verified { return }
         try? UpdateHandoffStore.write(journal.advancing(
             to: phase,
             errorCode: errorCode?.rawValue,

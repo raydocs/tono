@@ -361,4 +361,36 @@ final class UpdateHandoffJournalTests: XCTestCase {
         }
     }
 
+    func testFirstLaunchReentryPreservesDurableRecoveryProgress() throws {
+        try withStore { url in
+            try UpdateHandoffStore.write(fixture(phase: .installStarted), at: url)
+            let first = try XCTUnwrap(try UpdateHandoffStore.recordFirstLaunchMigration(
+                currentAppVersion: "0.0.68", at: url))
+            try UpdateHandoffStore.write(first.advancing(to: .protectionResuming), at: url)
+
+            let resuming = try Data(contentsOf: url)
+            let resumed = try XCTUnwrap(try UpdateHandoffStore.recordFirstLaunchMigration(
+                currentAppVersion: "0.0.68", at: url))
+            XCTAssertEqual(resumed.phase, .protectionResuming)
+            XCTAssertFalse(resumed.refusedIllegalTransition)
+            XCTAssertEqual(try Data(contentsOf: url), resuming)
+            XCTAssertTrue(resumed.keepKillSwitchArmed)
+
+            try UpdateHandoffStore.write(resumed.advancing(to: .verified), at: url)
+            let verified = try Data(contentsOf: url)
+            let reentered = try XCTUnwrap(try UpdateHandoffStore.recordFirstLaunchMigration(
+                currentAppVersion: "0.0.68", at: url))
+            XCTAssertEqual(reentered.phase, .verified)
+            XCTAssertFalse(reentered.refusedIllegalTransition)
+            XCTAssertEqual(try Data(contentsOf: url), verified)
+
+            let wrong = try XCTUnwrap(try UpdateHandoffStore.recordFirstLaunchMigration(
+                currentAppVersion: "0.0.67", at: url))
+            XCTAssertEqual(wrong.phase, .failed)
+            XCTAssertEqual(wrong.lastErrorCode, "TONO_UPDATE_INSTALL_ABORTED")
+            XCTAssertFalse(try UpdateHandoffStore.commitVerifiedRecovery(
+                currentAppVersion: "0.0.68", at: url))
+        }
+    }
+
 }
