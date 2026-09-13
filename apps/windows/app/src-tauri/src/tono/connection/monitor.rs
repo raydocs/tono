@@ -344,18 +344,24 @@ pub(super) async fn refresh_control_plane_pins_once(state: &Arc<TonoState>, gene
     }
     bootstrap::remember_control_plane_addresses(&learned);
     bootstrap::persist_learned_pins_to_service().await;
-    let inner = state.lock().await;
-    if inner.connect_generation != generation {
-        return false;
-    }
-    if let Err(error) = inner.client.transport().refresh_control_plane_pins().await {
+    let client = {
+        let inner = state.lock().await;
+        if inner.connect_generation != generation {
+            return false;
+        }
+        Arc::clone(&inner.client)
+    };
+    if let Err(error) = client.transport().refresh_control_plane_pins().await {
         logging!(
             warn,
             Type::Service,
             "Tono: failed to refresh control-plane HTTP pins: {error:#}"
         );
     }
-    true
+    // Refresh only publishes DNS pins on the captured transport. A newer connection owns
+    // lifecycle state, so a retired monitor must not keep its periodic loop alive.
+    let inner = state.lock().await;
+    inner.connect_generation == generation && inner.fsm.status().is_connected
 }
 
 pub(super) fn wechat_paths_changed(applied: Option<&[String]>, discovered: &[String]) -> bool {
@@ -880,8 +886,8 @@ pub(super) async fn handle_network_change_inner(
 
 pub(super) async fn refresh_control_plane_pins_from_service(state: &TonoState) {
     bootstrap::hydrate_learned_pins_from_service().await;
-    let inner = state.lock().await;
-    if let Err(error) = inner.client.transport().refresh_control_plane_pins().await {
+    let client = { Arc::clone(&state.lock().await.client) };
+    if let Err(error) = client.transport().refresh_control_plane_pins().await {
         logging!(
             warn,
             Type::Service,
