@@ -22,7 +22,7 @@
 //! macOS Sparkle has no NSIS helper, so `installHandler` still writes
 //! `InstallStarted` in-process after the quiesce hops.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tono_core::update_journal::{
     self, UpdateHandoffJournal, UpdateHandoffPhase, advance_pending, commit_verified_recovery,
@@ -52,11 +52,17 @@ pub fn load_pending() -> Option<UpdateHandoffJournal> {
     }
 }
 
-/// True when a Failed journal is still on disk. The file stays; the UI tells
-/// the customer to disconnect and reinstall rather than treating a later
-/// connect as proof the update finished.
+/// Failed or unreadable/expired evidence must stay visible. Failure to load a
+/// journal is not proof that no update is pending; it must not clear the warning.
 pub fn incomplete() -> bool {
-    incomplete_from_phase(load_pending().map(|journal| journal.phase))
+    incomplete_at(&current_path())
+}
+
+fn incomplete_at(path: &Path) -> bool {
+    match load(path) {
+        Ok(journal) => incomplete_from_phase(journal.map(|journal| journal.phase)),
+        Err(_) => true,
+    }
 }
 
 pub fn save_prepared(journal: &UpdateHandoffJournal) -> std::io::Result<()> {
@@ -126,5 +132,29 @@ mod tests {
         assert_eq!(journal.next_app_version, "0.0.73");
         assert!(journal.was_connected);
         assert!(journal.keep_kill_switch_armed);
+    }
+
+    #[test]
+    fn unreadable_or_expired_update_evidence_remains_visible_without_being_erased() {
+        let dir = scopeguard::guard(
+            std::env::temp_dir().join(format!("tono-update-evidence-{}", nanoid::nanoid!())),
+            |path| { let _ = std::fs::remove_dir_all(path); },
+        );
+        std::fs::create_dir_all(&*dir).unwrap();
+        let path = journal_path(&dir);
+        assert!(!incomplete_at(&path));
+        let corrupt = br#"{"phase":"installStarted","truncated": "#;
+        std::fs::write(&path, corrupt).unwrap();
+        assert!(incomplete_at(&path), "corruption is not proof of no pending update");
+        assert_eq!(std::fs::read(&path).unwrap(), corrupt);
+        let mut journal = prepare("0.0.72", "0.0.73", 9, true, true);
+        journal.phase = UpdateHandoffPhase::InstallStarted;
+        journal.expires_at_unix = 1;
+        update_journal::write_atomic(&path, &journal).unwrap();
+        let expired = std::fs::read(&path).unwrap();
+        assert!(incomplete_at(&path));
+        assert_eq!(std::fs::read(&path).unwrap(), expired);
+        update_journal::write_atomic(&path, &prepare("0.0.72", "0.0.73", 9, true, true)).unwrap();
+        assert!(!incomplete_at(&path), "an active valid update is not a failed update");
     }
 }

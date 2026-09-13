@@ -175,6 +175,27 @@ final class UpdateHandoffJournalTests: XCTestCase {
         try body(directory.appendingPathComponent("update-handoff.json"))
     }
 
+    func testUnreadableOrExpiredEvidenceStillShowsAnIncompleteUpdateWithoutErasingIt() throws {
+        try withStore { url in
+            XCTAssertFalse(UpdateHandoffStore.showsIncompleteUpdate(at: url))
+            let corrupt = Data(#"{"phase":"installStarted","truncated": "#.utf8)
+            try corrupt.write(to: url)
+            XCTAssertTrue(UpdateHandoffStore.showsIncompleteUpdate(at: url))
+            XCTAssertEqual(try Data(contentsOf: url), corrupt)
+            var journal = fixture(phase: .installStarted)
+            journal.expiresAt = Date().addingTimeInterval(-60)
+            try UpdateHandoffStore.write(journal, at: url)
+            let expired = try Data(contentsOf: url)
+            XCTAssertTrue(UpdateHandoffStore.showsIncompleteUpdate(at: url))
+            XCTAssertEqual(try Data(contentsOf: url), expired)
+            try UpdateHandoffStore.write(fixture(phase: .updatePrepared), at: url)
+            XCTAssertFalse(UpdateHandoffStore.showsIncompleteUpdate(at: url))
+            journal.phase = .committed
+            try UpdateHandoffStore.write(journal, at: url)
+            XCTAssertFalse(UpdateHandoffStore.showsIncompleteUpdate(at: url))
+        }
+    }
+
     func testExpiredJournalRetainsExactEvidence() throws {
         try withStore { url in
             var journal = fixture(phase: .failed)

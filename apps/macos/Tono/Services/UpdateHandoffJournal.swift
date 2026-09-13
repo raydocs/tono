@@ -243,7 +243,21 @@ enum UpdateHandoffStore {
     }
 
     static func showsIncompleteUpdate(at location: URL? = nil) -> Bool {
-        load(at: location)?.phase == .failed
+        // Resume eligibility and the presence of unresolved evidence are not
+        // the same question. Reading status must not hide or erase a corrupt,
+        // unsupported or expired journal just because `load` cannot resume it.
+        do {
+            let data = try Data(contentsOf: location ?? fileURL)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let journal = try decoder.decode(UpdateHandoffJournal.self, from: data)
+            if journal.phase == .committed || journal.phase == .idle { return false }
+            return journal.phase == .failed || journal.isExpired
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile {
+            return false
+        } catch {
+            return true
+        }
     }
 
     static let incompleteUpdateCopy = String(
