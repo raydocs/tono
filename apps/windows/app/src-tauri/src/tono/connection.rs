@@ -2677,24 +2677,15 @@ mod tests {
         );
         // UDP: only (9.0.0.20, 443|8000).
         assert_eq!(plan.udp_wechat_rules.len(), 2);
-        // Bilibili from policy plus always-on China suffixes; zoom stays off.
-        assert_eq!(
-            plan.web_suffix_rules,
-            vec![
-                ("aliyuncs.com".to_string(), 80),
-                ("aliyuncs.com".to_string(), 443),
-                ("baidu.com".to_string(), 80),
-                ("baidu.com".to_string(), 443),
-                ("bilibili.com".to_string(), 80),
-                ("bilibili.com".to_string(), 443),
-                ("edu.cn".to_string(), 80),
-                ("edu.cn".to_string(), 443),
-                ("qq.com".to_string(), 80),
-                ("qq.com".to_string(), 443),
-                ("weixinbridge.com".to_string(), 80),
-                ("weixinbridge.com".to_string(), 443),
-            ]
-        );
+        // Policy suffixes are unioned with the reviewed built-ins, sorted and deduplicated.
+        let mut expected_suffixes: Vec<_> = tono_core::config::ALWAYS_ADDRESS_FREE_WEB_SUFFIXES
+            .iter().flat_map(|suffix| [80, 443].map(|port| (suffix.to_string(), port))).collect();
+        expected_suffixes.extend([("bilibili.com".to_string(), 80), ("bilibili.com".to_string(), 443),
+            ("baidu.com".to_string(), 80), ("baidu.com".to_string(), 443)]);
+        expected_suffixes.sort_unstable();
+        expected_suffixes.dedup();
+        assert_eq!(plan.web_suffix_rules, expected_suffixes);
+        assert!(!plan.web_suffix_rules.iter().any(|(host, _)| host == "zoom.us"));
         // hosts carry both WeChat domains and the exact web domain.
         assert_eq!(plan.hosts.len(), 5);
         assert!(plan.hosts.iter().all(|(_, ip)| ip != "203.0.113.7"));
