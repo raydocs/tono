@@ -364,6 +364,13 @@ enum UpdateHandoffStore {
             try write(journal, at: url)
             return journal
         }
+        // Relaunch/retry can revisit startup after recovery has already begun.
+        // Keep the durable progress byte-for-byte instead of recording a refused
+        // backwards hop. This does not verify protection or commit the update.
+        if journal.phase == .firstLaunchMigration || journal.phase == .protectionResuming
+            || journal.phase == .verified {
+            return journal
+        }
         journal = journal.advancing(to: .firstLaunchMigration)
         try write(journal, at: url)
         return journal
