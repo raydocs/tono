@@ -34,3 +34,10 @@ by clean installs. Neither initial failure was misreported as a passing test.
 No Worker deploy, remote D1, production data change, customer update-feed
 promotion or kernel upgrade. Incompatible major upgrades remain deferred;
 closing their grouped PRs means replaced/split, not that those majors were merged.
+
+Integration note: the first push CI reached tooling tests and exposed the
+pre-existing Sparkle signature-word false refusal (run 34782084206), while the
+PR merge run's corresponding job passed. Rather than retry until green, this
+branch includes the narrow G3 correction from #173 and reruns CI with that fix.
+Merge #173 first so the final dependency PR remains dependency-only. The original
+red evidence is retained in SPARKLE_SIGNATURE_HEURISTIC_2026-09-13.md.
