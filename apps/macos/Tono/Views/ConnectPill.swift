@@ -190,10 +190,7 @@ struct ConnectPill: View {
 
     private var nodeDisplay: String? {
         guard let nodeName, !nodeName.isEmpty else { return nil }
-        let clean = ProxyNode.displayName(
-            for: ConfigParser.extractFlag(from: nodeName).cleanName
-        )
-        return nodeCityTitle(clean)
+        return nodeRouteTitle(for: nodeName)
     }
 
     private var contextText: String {

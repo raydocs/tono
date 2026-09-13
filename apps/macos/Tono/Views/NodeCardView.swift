@@ -48,6 +48,28 @@ func nodeRegionCode(flag: String, name: String) -> String {
     return "GL"
 }
 
+let udpBackupRegionCode = "udpBackup"
+
+func nodeListRegionCode(flag: String, name: String) -> String {
+    if ProxyNode.isHy2CatalogName(name) { return udpBackupRegionCode }
+    return nodeRegionCode(flag: flag, name: name)
+}
+
+func nodeListRegionLabel(_ code: String) -> String {
+    if code == udpBackupRegionCode {
+        return String(localized: "Backup UDP")
+    }
+    return code
+}
+
+func nodeListRegionSorted(_ codes: [String]) -> [String] {
+    codes.sorted { a, b in
+        if a == udpBackupRegionCode { return true }
+        if b == udpBackupRegionCode { return false }
+        return a < b
+    }
+}
+
 /// A source node fanning out to two exits, drawn on a 24×24 grid. Stroked as
 /// hairlines so the brand gradient reads as a network trace rather than a
 /// filled color block. Same glyph as the Windows `TonoNodeBadge` SVG.
@@ -247,6 +269,24 @@ func nodeCityParts(_ displayName: String) -> (city: String, codename: String?) {
 func nodeCityTitle(_ displayName: String) -> String {
     let city = nodeCityParts(displayName).city
     return String(localized: String.LocalizationValue(city))
+}
+
+/// Settings / "choose another route" title: hy2 includes the codename so two
+/// same-city backups are not identical cards.
+func nodeRouteTitle(for wireName: String) -> String {
+    let parsed = ConfigParser.extractFlag(from: wireName)
+    let display = ProxyNode.displayName(for: parsed.cleanName)
+    let city = nodeCityTitle(display)
+    guard ProxyNode.isHy2CatalogName(parsed.cleanName) else { return city }
+    let backup = String(localized: "Backup channel")
+    if let codename = nodeCityParts(display).codename, !codename.isEmpty {
+        return "\(city) · \(codename) · \(backup)"
+    }
+    return "\(city) · \(backup)"
+}
+
+func nodeRouteTitle(_ node: ProxyNode) -> String {
+    nodeRouteTitle(for: node.name)
 }
 
 private func cityGlyphShape(for city: String) -> AnyShape {
@@ -468,8 +508,8 @@ struct NodeCardView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack(spacing: 7) {
                                 // City first — the name users actually think
-                                // in; the codename only tells lines apart.
-                                Text(nodeCityTitle(node.displayName))
+                                // in; hy2 is "东京 · 备用通道" on this line.
+                                Text(nodeRouteTitle(node))
                                     .font(.system(size: 14, weight: .semibold))
                                     .foregroundStyle(.primary)
                                     .lineLimit(1)

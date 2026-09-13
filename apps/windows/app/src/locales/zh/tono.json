@@ -169,6 +169,7 @@
       "connecting": "连接中…",
       "connected": "已连接",
       "protectedOffline": "保护中，未连上",
+      "protectionUnknown": "保护状态未确认",
       "disconnecting": "断开中…"
     },
     "subtitle": {
@@ -200,6 +201,7 @@
       "blocked": "阻断"
     },
     "taglineIdle": "选好节点，点连接。",
+    "taglineConnecting": "正在启用保护，通常只要几秒。",
     "taglineConnected": "流量已保护；断线不会漏 IP。",
     "directOn": "微信等国内软件直连；Claude / ChatGPT / Cursor 走家里宽带；其余走隧道。",
     "directSkipped": "国内直连未开，微信也走隧道。Claude / ChatGPT / Cursor 仍走家里宽带。",
@@ -227,6 +229,7 @@
     "whatFailed": "失败原因",
     "copyDetails": "复制诊断信息",
     "catalogRequiresChoice": "当前节点已下线，请另选一个",
+    "updateIncomplete": "更新未完成，请手动断开后重装",
     "killSwitchError": "断网保护：{{message}}",
     "killSwitchErrorNote": "上次错误，可能已恢复。",
     "errors": {
@@ -240,7 +243,7 @@
       "nodeUnreachable": "连不上这个节点。请重试或换节点。",
       "tunDataPlaneBroken": "节点是通的，但 Windows 没有转发隧道流量。换节点没用——请重启电脑后再连；若还是这样，请发诊断。",
       "tunIngressBroken": "节点是通的，但本机流量进不了隧道。通常是别的 VPN 或安全软件占住了网络，请先关掉再连。",
-      "protectedHttpsFailed": "受保护的 HTTPS 失败。多个节点都这样时，换节点没用，请发诊断。",
+      "protectedHttpsFailed": "这座城市没有完成受保护连接。请重试或换线路；若有备用通道也可以试用。每个节点都一样时再发诊断。",
       "coreUnpinned": "此安装缺少内核校验，请安装最新版。",
       "coreMismatch": "内核与安装不匹配，请安装最新版。",
       "dnsPortBusy": "检测到其他代理软件（如 Clash Verge、CFW 等）正在运行并占用了系统网络。请在系统托盘彻底退出其他代理后再连接。",
@@ -293,10 +296,15 @@
     "failedAt": "失败于 {{stage}}",
     "unknownStage": "未知阶段",
     "statusTitle": "当前线路未通过检查",
-    "statusBody": "已拦住直连，正在换线重试。",
+    "statusBody": "当前连接不可用，直连流量仍被拦截。可以重试，或恢复正常网络。",
+    "encryptedDnsTitle": "Windows 加密 DNS 拦住了连接",
+    "encryptedDnsBody": "换线路没用。打开 Windows DNS 设置，关掉「加密 DNS」，再连接。也可以先恢复正常网络。",
+    "releasedFailureBody": "这座城市没有连上。直连网络可用。可以立即重试、选择其他线路；若有备用通道也可以试用。",
+    "protectionUnknownBody": "Tono 无法确认网络保护状态。如有提示，请修复服务；也可以选择「恢复正常网络」。",
     "completedCount": "已完成 {{count}} 项",
     "technicalDetails": "技术详情",
     "switchRoute": "选择其他线路",
+    "tryBackupChannel": "试用备用通道",
     "retryIn": "第 {{n}} 次重试将于 {{seconds}} 秒后发起",
     "retrying": "正在重试…",
     "retryNow": "立即重试",
@@ -368,11 +376,17 @@
     "waitingForSync": "等待首次同步",
     "verifiedSyncHint": "每 5 分钟自动同步。断开时可测全部节点。",
     "catalogError": "最近一次刷新失败：{{error}}",
+    "protocol": {
+      "backup": "备用通道",
+      "vlessReality": "VLESS · Reality",
+      "cloud": "Tono Cloud"
+    },
     "regions": {
       "all": "全部",
       "us": "美国",
       "jp": "日本",
       "other": "其他地区",
+      "udpBackup": "备用 UDP",
       "unavailable": "不可用"
     }
   },

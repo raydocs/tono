@@ -291,6 +291,9 @@ pub struct TonoInner {
     /// was not installed on an otherwise successful connect.
     pub optional_direct_active: bool,
     pub optional_direct_skip: Option<String>,
+    /// Own DIRECT fail-closed bracket: `(connect_generation, deadline)`. While live, Blocked
+    /// without a TUN permit is expected and must not tear the session down.
+    pub direct_reload_until: Option<(u64, std::time::Instant)>,
     /// Display-only exit identity from the last successful lookup.
     pub exit_ip: Option<String>,
     pub exit_org: Option<String>,
@@ -525,6 +528,7 @@ impl TonoState {
                 applied_wechat_path_regexes: None,
                 optional_direct_active: false,
                 optional_direct_skip: None,
+                direct_reload_until: None,
                 exit_ip: None,
                 exit_org: None,
                 exit_location: None,

@@ -1109,8 +1109,10 @@ export interface TranslationResources {
         }
         subtitle: string
         taglineConnected: string
+        taglineConnecting: string
         taglineIdle: string
         title: string
+        updateIncomplete: string
         viewProtectedRules: string
         whatFailed: string
       }
@@ -1223,6 +1225,11 @@ export interface TranslationResources {
         exitLatencySlow: string
         lastSynced: string
         noMatches: string
+        protocol: {
+          backup: string
+          cloud: string
+          vlessReality: string
+        }
         readyToConnect: string
         refresh: string
         refreshing: string
@@ -1231,6 +1238,7 @@ export interface TranslationResources {
           all: string
           jp: string
           other: string
+          udpBackup: string
           unavailable: string
           us: string
         }
@@ -1267,6 +1275,7 @@ export interface TranslationResources {
           disconnecting: string
           notConnected: string
           protectedOffline: string
+          protectionUnknown: string
         }
       }
       progress: {
@@ -1274,7 +1283,11 @@ export interface TranslationResources {
         copied: string
         copyDetails: string
         copyFailed: string
+        encryptedDnsBody: string
+        encryptedDnsTitle: string
         failedAt: string
+        protectionUnknownBody: string
+        releasedFailureBody: string
         restore: string
         restoreConfirmMessage: string
         restoreConfirmTitle: string
@@ -1297,6 +1310,7 @@ export interface TranslationResources {
         switchRoute: string
         technicalDetails: string
         total: string
+        tryBackupChannel: string
         tryBadge: string
         unknownStage: string
         upload: {

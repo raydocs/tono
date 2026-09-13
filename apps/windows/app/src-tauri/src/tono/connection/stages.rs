@@ -344,7 +344,7 @@ pub(super) async fn run_stages(
         inner.controller_generation = inner.controller_generation.wrapping_add(1);
         inner.fsm.mark_session_verified();
         inner.fsm.connect_succeeded().map_err(StageFailure::error)?;
-        crate::tono::update_handoff::mark_committed();
+        crate::tono::update_handoff::commit_if_verified(env!("CARGO_PKG_VERSION"));
         inner.exit_ip = None;
         inner.exit_org = None;
         inner.exit_location = None;
@@ -375,6 +375,7 @@ pub(super) async fn run_stages(
     state.audit().log(AuditEvent::ConnectOk {
         node: node.name.clone(),
         elapsed_ms: started.elapsed().as_millis() as u64,
+        transport: node.catalog_transport(),
     });
     spawn_network_monitor(state, app).await;
     spawn_exit_identity_lookup(state, app, generation);

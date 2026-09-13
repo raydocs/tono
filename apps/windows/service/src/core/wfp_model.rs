@@ -759,29 +759,6 @@ pub struct ChangePlan {
     pub remove: Vec<Guid>,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PlanStep {
-    Install(FilterSpec),
-    Remove(Guid),
-}
-
-impl ChangePlan {
-    /// Installs strictly before removes. When the endpoint changes, the new permit must be
-    /// live before the old one is deleted — the core's selector moves only after the new WFP
-    /// permit exists, so a switch never opens a direct window (Proton's ordering lesson).
-    /// Teardown is the mirror: permits leave before any floor rule would be touched.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub fn ordered_steps(&self) -> Vec<PlanStep> {
-        self.install
-            .iter()
-            .cloned()
-            .map(PlanStep::Install)
-            .chain(self.remove.iter().copied().map(PlanStep::Remove))
-            .collect()
-    }
-}
-
 #[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
 pub fn diff(current_keys: &[Guid], desired: &[FilterSpec]) -> ChangePlan {
     let install = desired
@@ -1059,19 +1036,6 @@ mod tests {
         assert!(plan.install.contains(&new_permit));
         assert!(plan.remove.contains(&old_permit));
 
-        let steps = plan.ordered_steps();
-        let install_at = steps
-            .iter()
-            .position(|step| *step == PlanStep::Install(new_permit.clone()))
-            .unwrap();
-        let remove_at = steps
-            .iter()
-            .position(|step| *step == PlanStep::Remove(old_permit))
-            .unwrap();
-        assert!(
-            install_at < remove_at,
-            "the new endpoint permit must be live before the old one is removed"
-        );
         assert!(
             plan.remove
                 .iter()

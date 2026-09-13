@@ -109,14 +109,14 @@ nonisolated struct TonoExitCatalogHomeSocks5: Codable, Sendable, Equatable {
         self.password = password
     }
 
-    /// Keep a malformed optional routing directive from rejecting the whole
-    /// verified catalog. Validation happens again before runtime generation.
+    /// A present residential directive is an egress requirement. Malformed
+    /// credentials cannot be decoded as an absent route and sent via cloud.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        host = (try? container.decode(String.self, forKey: .host)) ?? ""
-        port = (try? container.decode(Int.self, forKey: .port)) ?? 0
-        username = (try? container.decode(String.self, forKey: .username)) ?? ""
-        password = (try? container.decode(String.self, forKey: .password)) ?? ""
+        host = try container.decode(String.self, forKey: .host)
+        port = try container.decode(Int.self, forKey: .port)
+        username = try container.decode(String.self, forKey: .username)
+        password = try container.decode(String.self, forKey: .password)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -139,13 +139,13 @@ nonisolated struct TonoExitCatalogRouting: Codable, Sendable, Equatable {
         self.homeSocks5 = homeSocks5
     }
 
-    /// Routing is additive server input. Ignore malformed individual fields
-    /// while allowing revision/YAML integrity validation to continue.
+    /// An invalid default selection hint may be ignored; an invalid declared
+    /// home route may not. Absence still supports ordinary cloud-only users.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        homeProxy = try? container.decodeIfPresent(String.self, forKey: .homeProxy)
+        homeProxy = try container.decodeIfPresent(String.self, forKey: .homeProxy)
         defaultProxy = try? container.decodeIfPresent(String.self, forKey: .defaultProxy)
-        homeSocks5 = try? container.decodeIfPresent(
+        homeSocks5 = try container.decodeIfPresent(
             TonoExitCatalogHomeSocks5.self,
             forKey: .homeSocks5
         )
@@ -168,7 +168,7 @@ nonisolated struct TonoExitCatalogResponse: Codable, Sendable, Equatable {
         yaml = try container.decode(String.self, forKey: .yaml)
         sha256 = try container.decode(String.self, forKey: .sha256)
         updatedAt = try container.decodeIfPresent(Int.self, forKey: .updatedAt)
-        routing = try? container.decodeIfPresent(
+        routing = try container.decodeIfPresent(
             TonoExitCatalogRouting.self,
             forKey: .routing
         )
@@ -310,6 +310,8 @@ nonisolated struct TonoTelemetryWindowReport: Encodable, Sendable {
     var tcpDelayMs: Int64? = nil
     var exitDelayAtMs: Int64? = nil
     var tcpDelayAtMs: Int64? = nil
+    /// Named rather than guessed from `osVersion` on the Worker: the guess is for clients that predate the field.
+    var platform: String? = "macos"
     let eventCount: Int
     let eventsDropped: Int
     let events: [TonoTelemetryEvent]
@@ -318,7 +320,7 @@ nonisolated struct TonoTelemetryWindowReport: Encodable, Sendable {
         case schemaVersion, kind, windowStartMs, windowEndMs, appVersion, osVersion
         case osArch, uiState, accountState, selectedServer, catalogRevision
         case killSwitchMode, killSwitchWanted, killSwitchLive, dnsEnabled
-        case exitDelayMs, tcpDelayMs, exitDelayAtMs, tcpDelayAtMs
+        case exitDelayMs, tcpDelayMs, exitDelayAtMs, tcpDelayAtMs, platform
         case eventCount, eventsDropped, events
     }
 
@@ -343,6 +345,7 @@ nonisolated struct TonoTelemetryWindowReport: Encodable, Sendable {
         if let tcpDelayMs { try container.encode(tcpDelayMs, forKey: .tcpDelayMs) }
         if let exitDelayAtMs { try container.encode(exitDelayAtMs, forKey: .exitDelayAtMs) }
         if let tcpDelayAtMs { try container.encode(tcpDelayAtMs, forKey: .tcpDelayAtMs) }
+        if let platform { try container.encode(platform, forKey: .platform) }
         try container.encode(eventCount, forKey: .eventCount)
         try container.encode(eventsDropped, forKey: .eventsDropped)
         try container.encode(events, forKey: .events)
@@ -384,13 +387,14 @@ nonisolated struct TonoTelemetryEvent: Encodable, Sendable {
     var outcome: String? = nil
     var code: String? = nil
     var updateResume: Bool? = nil
+    var transport: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case ts, kind, stage, error, node, action, reason, probe, from, to, mode
         case reference, elapsedMs, delayMs, counter, restartCount, oldPid, newPid
         case revision, domains, media, webDomains, wechatTcp, webTcp, udp
         case endpoints, eventCount, bytes, wanted, live, generation, outcome
-        case code, updateResume
+        case code, updateResume, transport
     }
 
     func encode(to encoder: Encoder) throws {
@@ -429,11 +433,36 @@ nonisolated struct TonoTelemetryEvent: Encodable, Sendable {
         try container.encodeIfPresent(outcome, forKey: .outcome)
         try container.encodeIfPresent(code, forKey: .code)
         try container.encodeIfPresent(updateResume, forKey: .updateResume)
+        try container.encodeIfPresent(transport, forKey: .transport)
     }
 }
 
 nonisolated struct TonoTelemetryWindowRequest: Encodable, Sendable {
     let window: TonoTelemetryWindowReport
+}
+
+/// One failed connect attempt, sent the moment it happens, in the shape
+/// `telemetry/failures` accepts. The window would carry the same event twenty
+/// minutes later; the operator asking "why can't this person connect" needs it
+/// now. Nothing here is typed by a person, and the Worker bounds every field.
+nonisolated struct TonoConnectFailureReport: Encodable, Sendable {
+    let ts: Int64
+    let stage: String
+    let code: String
+    var error: String? = nil
+    let node: String
+    let appVersion: String
+    let osVersion: String
+    let osArch: String
+    var platform: String = "macos"
+    var coreErrors: [String]? = nil
+    var tcpDelayMs: Int64? = nil
+    var exitDelayMs: Int64? = nil
+    var transport: String? = nil
+}
+
+nonisolated struct TonoConnectFailureReceipt: Decodable, Sendable {
+    let accepted: Bool
 }
 
 nonisolated struct TonoPathLatency: Sendable {

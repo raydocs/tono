@@ -77,7 +77,8 @@ generation owner or privileged operation order. Do not merge `app/crates/` into
 remain separate; shared dependencies must be tested in each consumer workspace.
 
 Leftover Clash Verge UI (Monaco, subscription editors) stays until a
-screen is proven unreachable. `LEGACY_*` on-disk cleanup stays.
+screen is proven unreachable. `LEGACY_*` on-disk cleanup stays. Inventory:
+[archive/reports/CLASH_VERGE_LEFTOVER.md](archive/reports/CLASH_VERGE_LEFTOVER.md).
 
 ### Sequence
 

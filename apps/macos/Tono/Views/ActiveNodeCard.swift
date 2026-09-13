@@ -67,7 +67,7 @@ struct ActiveNodeCard: View {
                 HStack(spacing: 10) {
                     NodeRouteMark(size: 32, city: nodeCityParts(cleanName).city)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(nodeCityTitle(cleanName))
+                        Text(nodeRouteTitle(for: nodeName))
                             .font(.system(size: 13, weight: .semibold))
                             .fontWeight(.semibold)
                             .foregroundStyle(.primary)

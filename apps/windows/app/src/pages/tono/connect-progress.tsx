@@ -13,6 +13,7 @@ import {
   formatTonoDiagnostics,
   formatTonoElapsed,
   subscribeTonoStatus,
+  tonoConnect,
   tonoConnectProgress,
   tonoDiagnosticsReport,
   tonoRetryNow,
@@ -28,12 +29,15 @@ import { TonoConfirmDialog } from '@/tono-ui/TonoAccountCard'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 import { useReleaseProtection } from '@/tono-ui/useReleaseProtection'
 
+import { useManualBackupChannel } from './use-backup-channel'
+
 /**
  * The connect-progress card (Mac Build 29 parity): the eight FSM stages with
- * per-stage state and elapsed time, retry countdown + Retry Now, the
- * standalone Restore Normal Internet escape hatch, and Copy details for
- * diagnostics. Visible while connecting / protectedOffline, or whenever an
- * uncleared failure record exists.
+ * per-stage state and elapsed time, retry countdown + Retry Now (Connect
+ * after a released handshake eof), the standalone Restore Normal Internet
+ * escape hatch, and Copy details for diagnostics. Visible while connecting /
+ * protectedOffline, whenever an uncleared failure record exists, or when
+ * a manual hy2 backup is offered.
  */
 
 const hex = (color: string, alpha: number) =>
@@ -137,6 +141,8 @@ const StepIcon = ({ state }: { state: TonoConnectStep['state'] }) => {
 
 interface ConnectProgressCardProps {
   uiState: TonoUiState
+  protectionConfirmed?: boolean
+  selectedServer?: string | null
   onRefreshStatus: () => Promise<unknown>
   onChooseRoute?: () => void
 }
@@ -152,6 +158,8 @@ type UploadPhase = 'idle' | 'confirming' | 'uploading' | 'sent'
 
 export const ConnectProgressCard = ({
   uiState,
+  protectionConfirmed = false,
+  selectedServer = null,
   onRefreshStatus,
   onChooseRoute,
 }: ConnectProgressCardProps) => {
@@ -161,6 +169,10 @@ export const ConnectProgressCard = ({
 
   const active = uiState === 'connecting' || uiState === 'protectedOffline'
   const progress = useConnectProgress(active)
+  const { available: showBackupAction, selectAndRetry } = useManualBackupChannel(
+    selectedServer,
+    uiState,
+  )
 
   const [retryError, setRetryError] = useState<string | null>(null)
   const [retrying, setRetrying] = useState(false)
@@ -184,7 +196,24 @@ export const ConnectProgressCard = ({
     setRetrying(true)
     setRetryError(null)
     try {
-      await tonoRetryNow()
+      // Protected Offline owns a scheduled reconnect; tono_retry_now cancels
+      // that timer. A first-connect handshake eof fully releases protection
+      // (notConnected) — retry_now is a silent no-op there, so Connect.
+      if (uiState === 'protectedOffline') await tonoRetryNow()
+      else await tonoConnect()
+      await onRefreshStatus()
+    } catch (error) {
+      setRetryError(formatTonoActionError(error, t))
+    } finally {
+      setRetrying(false)
+    }
+  })
+
+  const handleTryBackupChannel = useLockFn(async () => {
+    setRetrying(true)
+    setRetryError(null)
+    try {
+      await selectAndRetry()
       await onRefreshStatus()
     } catch (error) {
       setRetryError(formatTonoActionError(error, t))
@@ -250,7 +279,13 @@ export const ConnectProgressCard = ({
     (uiState === 'connecting' ||
       progress.error != null ||
       progress.nextRetryAtMs != null)
-  const visible = uiState === 'protectedOffline' || showProgress
+  // Handshake eof FullRelease is notConnected. Production catalogs may have
+  // no hy2, so Retry / Choose route on this card is the next hand — do not
+  // wait for a backup sibling before showing the card.
+  const releasedFailure =
+    uiState === 'notConnected' && progress?.error != null
+  const visible =
+    uiState === 'protectedOffline' || showProgress || showBackupAction
   if (!visible) {
     return null
   }
@@ -312,11 +347,30 @@ export const ConnectProgressCard = ({
               marginBottom: 6,
             }}
           >
-            {t('tono.progress.statusTitle')}
+            {t(
+              isEncryptedDnsFailure(progress?.error)
+                ? 'tono.progress.encryptedDnsTitle'
+                : uiState === 'protectedOffline' && !protectionConfirmed
+                  ? 'tono.pill.title.protectionUnknown'
+                  : 'tono.progress.statusTitle',
+            )}
           </div>
           <div style={{ fontSize: 13, lineHeight: 1.5, color: text.secondary }}>
-            {t('tono.progress.statusBody')}
+            {t(
+              isEncryptedDnsFailure(progress?.error)
+                ? 'tono.progress.encryptedDnsBody'
+                : releasedFailure
+                  ? 'tono.progress.releasedFailureBody'
+                  : protectionConfirmed
+                    ? 'tono.progress.statusBody'
+                    : 'tono.progress.protectionUnknownBody',
+            )}
           </div>
+          {isEncryptedDnsFailure(progress?.error) && (
+            <div style={{ marginTop: 10 }}>
+              <OpenDnsSettingsButton accent />
+            </div>
+          )}
         </div>
       )}
 
@@ -489,18 +543,16 @@ export const ConnectProgressCard = ({
           >
             {progressError.detail ?? progressError.message}
           </pre>
-          {isEncryptedDnsFailure(progress?.error) && (
-            <div style={{ marginTop: 10 }}>
-              <OpenDnsSettingsButton accent />
-            </div>
-          )}
         </details>
       )}
 
-      {/* Retry countdown + actions */}
-      {uiState === 'protectedOffline' &&
+      {/* Retry countdown + actions. Protected Offline uses the scheduled
+          reconnect; a released first-connect failure must still offer Retry
+          (Connect) and Choose route even when the catalog has no hy2. */}
+      {((uiState === 'protectedOffline' &&
         progress != null &&
-        nextRetryAtMs != null && (
+        nextRetryAtMs != null) ||
+        releasedFailure) && (
           <div
             style={{
               display: 'flex',
@@ -509,20 +561,25 @@ export const ConnectProgressCard = ({
               marginTop: 14,
             }}
           >
-            <span
-              data-testid="tono-retry-countdown"
-              style={{ flex: 1, fontSize: 11, color: text.secondary }}
-            >
-              {remainSec != null && remainSec > 0
-                ? t('tono.progress.retryIn', {
-                    n: progress.retryAttempt + 1,
-                    seconds: remainSec,
-                  })
-                : t('tono.progress.retrying')}
-            </span>
+            {uiState === 'protectedOffline' && nextRetryAtMs != null ? (
+              <span
+                data-testid="tono-retry-countdown"
+                style={{ flex: 1, fontSize: 11, color: text.secondary }}
+              >
+                {remainSec != null && remainSec > 0
+                  ? t('tono.progress.retryIn', {
+                      n: (progress?.retryAttempt ?? 0) + 1,
+                      seconds: remainSec,
+                    })
+                  : t('tono.progress.retrying')}
+              </span>
+            ) : (
+              <span style={{ flex: 1 }} />
+            )}
             <button
               type="button"
               className="tono-button tono-action"
+              data-testid="tono-progress-retry"
               onClick={handleRetryNow}
               disabled={retrying}
               style={{
@@ -532,10 +589,11 @@ export const ConnectProgressCard = ({
             >
               {retrying ? '…' : t('tono.progress.retryNow')}
             </button>
-            {onChooseRoute && (
+            {onChooseRoute && !isEncryptedDnsFailure(progress?.error) && (
               <button
                 type="button"
                 className="tono-button"
+                data-testid="tono-progress-switch-route"
                 onClick={onChooseRoute}
                 style={{
                   padding: '7px 13px',
@@ -550,6 +608,30 @@ export const ConnectProgressCard = ({
             )}
           </div>
         )}
+      {showBackupAction && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            marginTop: 14,
+          }}
+        >
+          <button
+            type="button"
+            className="tono-button tono-action"
+            data-testid="tono-try-backup-channel"
+            onClick={handleTryBackupChannel}
+            disabled={retrying}
+            style={{
+              padding: '7px 13px',
+              fontSize: 12,
+            }}
+          >
+            {retrying ? '…' : t('tono.progress.tryBackupChannel')}
+          </button>
+        </div>
+      )}
       {retryError && (
         <div
           role="alert"

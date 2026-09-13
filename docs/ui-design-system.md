@@ -85,7 +85,7 @@ macOS 与 Windows 客户端共用的视觉与交互约定。改任何 UI 之前�
 ## 6. 按钮
 
 - **玻璃容器上禁止 `.borderedProminent`**——在 glassEffect / 非激活窗口下会渲染成
-  无底白字（实机验证过的坑）。主按钮用自绘实心样式：accent 底 + 白字 +
+  无底白字（实机验证过的坑）。主按钮用自绘渐变样式：`actionGradient` 底 + 白字 +
   disabled 0.45 透明度（参考 `GateProminentButtonStyle`）。
 - 按压反馈：scale 0.98、0.1s，尊重 reduceMotion（macOS `ConnectPillPressStyle`，
   Windows `.tono-pill:active`）。

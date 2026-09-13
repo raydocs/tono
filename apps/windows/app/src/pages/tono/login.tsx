@@ -91,6 +91,8 @@ const LoginPage = () => {
     setEmail(trimmed)
     setSending(true)
     setError(null)
+    setSuspendedDismissed(false)
+    setVerifySuspended(false)
     try {
       await tonoSignInStart(trimmed)
       setSentAck(true)

@@ -1,0 +1,15 @@
+{
+  "items": [
+    {
+      "dayAt": 1724961633,
+      "family": "claude",
+      "route": "cloud",
+      "bytes": 4096,
+      "sessions": 3,
+      "lastSeenAt": 1724999877
+    }
+  ],
+  "nextCursor": null,
+  "updatedAt": 1724961633,
+  "total": 1
+}

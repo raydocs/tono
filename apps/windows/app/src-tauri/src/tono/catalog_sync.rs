@@ -41,8 +41,8 @@ pub fn seed_from_cache(inner: &mut TonoInner) {
 }
 
 /// Sanitize the catalog's split-routing directives against the admitted
-/// nodes, warning on every dropped name. A bad directive never fails the
-/// sync — the catalog itself was already fully verified.
+/// nodes, warning on dropped selection hints. Catalog/cache admission has
+/// already rejected any unusable declared home hop before this projection.
 fn sanitized_routing(
     routing: Option<&tono_core::CatalogRouting>,
     nodes: &[ValidatedNode],
@@ -64,13 +64,18 @@ fn sanitized_routing(
 
 /// If the selected node is not in the current catalog, flag that the user
 /// must choose again; auto-reconnect stays blocked until then (§3).
+/// Growing the catalog does not tear a live session down.
 fn enforce_selection_survival(inner: &mut TonoInner) {
     let Some(selected) = &inner.selected_node else {
         return;
     };
-    if !inner.nodes.iter().any(|node| &node.name == selected) {
+    if !selected_exit_still_present(selected, &inner.nodes) {
         inner.catalog_requires_choice = true;
     }
+}
+
+fn selected_exit_still_present(selected: &str, nodes: &[ValidatedNode]) -> bool {
+    nodes.iter().any(|node| node.name == selected)
 }
 
 /// What a successful [`install_and_persist`] produced.
@@ -320,6 +325,8 @@ fn node_named<'a>(nodes: &'a [ValidatedNode], name: &str) -> Option<&'a Validate
 }
 
 /// Next unused signed catalog city. Legacy leftover names are never kept.
+/// hy2 is a same-city backup, not another city: city failover must not land
+/// on it (G2.8 stays off until T0). The failure card still offers it by hand.
 pub fn next_catalog_exit(
     current: Option<&str>,
     nodes: &[ValidatedNode],
@@ -327,12 +334,15 @@ pub fn next_catalog_exit(
 ) -> Option<String> {
     let names = sort_server_names(nodes);
     names.into_iter().find(|name| {
-        if is_exit_blocked(name) || tried.contains(name) {
+        if is_exit_blocked(name) || tried.contains(name) || tono_core::is_hy2_catalog_name(name) {
             return false;
         }
         match current {
             None => true,
-            Some(current) => !names_equivalent(name, current),
+            Some(current) => !names_equivalent(
+                tono_core::catalog_base_name(name),
+                tono_core::catalog_base_name(current),
+            ),
         }
     })
 }
@@ -372,7 +382,20 @@ pub fn default_usable_exit(nodes: &[ValidatedNode], default_proxy: Option<&str>)
             return Some(node.name.clone());
         }
     }
-    sort_server_names(nodes).into_iter().find(|name| !is_exit_blocked(name))
+    sort_server_names(nodes)
+        .into_iter()
+        .find(|name| !is_exit_blocked(name) && !tono_core::is_hy2_catalog_name(name))
+        .or_else(|| sort_server_names(nodes).into_iter().find(|name| !is_exit_blocked(name)))
+}
+
+/// Direct TCP connect tests prove a VLESS listener. hy2 shares the same
+/// IPv4:port over UDP, so a TCP probe would light Tokyo hy2 green while the
+/// vendor still drops inbound UDP.
+pub fn tcp_probe_socket(node: &ValidatedNode) -> Option<std::net::SocketAddr> {
+    if is_exit_blocked(&node.name) || node.is_hysteria2() {
+        return None;
+    }
+    Some(std::net::SocketAddr::new(node.server.into(), node.port))
 }
 
 /// If selection is missing or points at a blocked exit, move the user to a usable default
@@ -479,13 +502,13 @@ mod tests {
     use super::{
         default_usable_exit, install_and_persist, is_exit_blocked, is_legacy_wire_name,
         names_equivalent, next_catalog_exit, region_rank, replacement_for_selection,
-        sort_server_names,
+        selected_exit_still_present, sort_server_names, tcp_probe_socket,
     };
     use std::collections::BTreeSet;
     use std::net::Ipv4Addr;
     use std::path::{Path, PathBuf};
     use tono_core::catalog::{CatalogCache, catalog_digest};
-    use tono_core::node::ValidatedNode;
+    use tono_core::node::{NodeProtocol, ValidatedNode};
     use tono_core::{CatalogError, CatalogTracker, ExitCatalogResponse};
 
     fn node(name: &str) -> ValidatedNode {
@@ -499,6 +522,24 @@ mod tests {
             client_fingerprint: None,
             reality_public_key: "0123456789abcdef0123456789abcdef0123456789a".to_string(),
             reality_short_id: "0123456789abcdef".to_string(),
+            protocol: NodeProtocol::VlessReality,
+            tls_fingerprint: None,
+        }
+    }
+
+    fn hy2(name: &str) -> ValidatedNode {
+        ValidatedNode {
+            name: name.to_string(),
+            server: Ipv4Addr::new(8, 8, 8, 8),
+            port: 443,
+            uuid: "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d".to_string(),
+            servername: "www.microsoft.com".to_string(),
+            flow: None,
+            client_fingerprint: None,
+            reality_public_key: String::new(),
+            reality_short_id: String::new(),
+            protocol: NodeProtocol::Hysteria2,
+            tls_fingerprint: Some("e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db".to_string()),
         }
     }
 
@@ -641,6 +682,37 @@ mod tests {
     }
 
     #[test]
+    fn catalog_failover_skips_hy2_sibling() {
+        let nodes = vec![
+            node("Salt Lake City · Summit"),
+            hy2("Salt Lake City · Summit · hy2"),
+            node("Buffalo · Niagara"),
+        ];
+        let tried = BTreeSet::new();
+        assert_eq!(
+            next_catalog_exit(Some("Salt Lake City · Summit"), &nodes, &tried).as_deref(),
+            Some("Buffalo · Niagara")
+        );
+        assert_eq!(
+            next_catalog_exit(Some("Salt Lake City · Summit · hy2"), &nodes, &tried).as_deref(),
+            Some("Buffalo · Niagara")
+        );
+        assert!(tcp_probe_socket(&node("Tokyo · Sakura")).is_some());
+        assert!(tcp_probe_socket(&hy2("Tokyo · Sakura · hy2")).is_none());
+        assert_eq!(
+            default_usable_exit(&[hy2("Alpha · hy2"), node("Zulu · TCP")], None).as_deref(),
+            Some("Zulu · TCP")
+        );
+    }
+
+    #[test]
+    fn adding_another_city_keeps_the_selected_exit() {
+        let nodes = vec![node("Los Angeles · Canyon"), node("Los Angeles · Westwood")];
+        assert!(selected_exit_still_present("Los Angeles · Canyon", &nodes));
+        assert!(!selected_exit_still_present("Los Angeles · Mesa", &nodes));
+    }
+
+    #[test]
     fn server_sort_is_case_insensitive_within_groups() {
         let nodes = vec![node("us beta"), node("US Alpha")];
         assert_eq!(sort_server_names(&nodes), vec!["US Alpha", "us beta"]);
@@ -747,6 +819,31 @@ mod tests {
         let effect = install_and_persist(&effect.tracker, &cache, &catalog(3)).unwrap();
         assert!(!effect.installed, "same revision + digest is idempotent");
         assert_eq!(effect.tracker.current_revision(), 3);
+    }
+
+    #[test]
+    fn invalid_home_keeps_verified_cache_and_tracker_unchanged() {
+        let dir = TempDir::new("persist-invalid-home");
+        let cache = CatalogCache::new(dir.path(), Box::new(NoopCheck));
+        let accepted = install_and_persist(&CatalogTracker::new(), &cache, &catalog(5)).unwrap();
+        let verified_bytes = std::fs::read(cache.path()).unwrap();
+
+        let mut rejected = catalog(6);
+        rejected.routing = Some(tono_core::CatalogRouting {
+            home_proxy: Some("missing required residential node".into()),
+            ..Default::default()
+        });
+        let err = install_and_persist(&accepted.tracker, &cache, &rejected).unwrap_err();
+        assert_eq!(err, CatalogError::InvalidResponse);
+        assert_eq!(accepted.tracker.current_revision(), 5);
+        assert_eq!(std::fs::read(cache.path()).unwrap(), verified_bytes);
+        assert_eq!(cache.load().unwrap().response.revision, 5);
+
+        // A corrected redelivery is still installable; rejection did not
+        // consume the next revision or poison the previous verified cache.
+        let corrected = install_and_persist(&accepted.tracker, &cache, &catalog(6)).unwrap();
+        assert!(corrected.installed);
+        assert_eq!(corrected.tracker.current_revision(), 6);
     }
 
     #[test]

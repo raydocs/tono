@@ -47,14 +47,23 @@ export default defineConfig({
           RATE_LIMIT_OIDC_VERIFY_CHALLENGE: '3',
         },
         d1Databases: { DB: 'test-db' },
-        // Local in-memory R2 for the raw-log pipeline, so the upload path is
-        // exercised against a real bucket API rather than a stub.
-        r2Buckets: ['DIAGNOSTICS_LOGS'],
+        // Local in-memory R2 for the raw-log pipeline and release downloads,
+        // so upload and download verification are exercised against a real bucket API.
+        r2Buckets: ['DIAGNOSTICS_LOGS', 'RELEASES'],
       },
     }),
   ],
   test: {
     maxWorkers: 1,
     setupFiles: ['./test/setup.ts'],
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/cjs/**',
+      '**/.{idea,git,cache,output,temp}/**',
+      // The beforeunload-guard component test needs a real DOM (jsdom) that the
+      // Workers pool cannot provide. Run it via `vitest.admin.config.ts`.
+      'admin/src/pages/ControlPage.test.tsx',
+    ],
   },
 });

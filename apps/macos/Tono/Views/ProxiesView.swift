@@ -75,13 +75,12 @@ struct ProxiesView: View {
             // user switch; only announce a real node-to-node change.
             guard oldValue != nil, let newValue, oldValue != newValue else { return }
             let nodes = appState.proxyRegions.flatMap(\.nodes)
-            let displayName = nodes.first { $0.id == newValue || $0.name == newValue }?.displayName
-                ?? ProxyNode.displayName(for: newValue)
-            // Announce the same localized city the card shows. Passing the raw
-            // catalog name made the toast say "Tokyo · Fuji" over a card
-            // labelled 东京.
+            let wireName = nodes.first { $0.id == newValue || $0.name == newValue }?.name
+                ?? newValue
+            // Announce the same localized city the card shows, including
+            // 备用通道 when the user picked the hy2 sibling.
             ToastCenter.shared.show(
-                String(localized: "Switched to \(nodeCityTitle(displayName))"),
+                String(localized: "Switched to \(nodeRouteTitle(for: wireName))"),
                 systemImage: "checkmark.circle.fill"
             )
         }
@@ -139,7 +138,11 @@ struct ProxiesView: View {
     /// region code that actually appears, so new regions show up without a
     /// code change. `nil` means no region filter.
     var regionOptions: [String] {
-        Array(Set(cloudNodes.map { nodeRegionCode(flag: $0.flag, name: $0.name) })).sorted()
+        nodeListRegionSorted(Array(Set(cloudNodes.compactMap { node in
+            ProxyNode.hy2UdpIsVendorBlocked(node.name)
+                ? nil
+                : nodeListRegionCode(flag: node.flag, name: node.name)
+        })))
     }
 
     var cloudNodes: [ProxyNode] {

@@ -29,7 +29,7 @@ pub const WEB_DIRECT_GROUP_NAME: &str = "Tono-China-Web-Direct";
 /// (`zoom.us` and similar stay tunnelled). The China-site suffixes below are
 /// product-direct: any process, TCP 80/443, same staged-core port permit as
 /// Bilibili.
-pub const ADDRESS_FREE_WEB_SUFFIXES: [&str; 9] = [
+pub const ADDRESS_FREE_WEB_SUFFIXES: [&str; 49] = [
     "bilibili.com",
     "biliapi.net",
     "bilivideo.com",
@@ -39,33 +39,100 @@ pub const ADDRESS_FREE_WEB_SUFFIXES: [&str; 9] = [
     "aliyuncs.com",
     "edu.cn",
     "weixinbridge.com",
+    "taobao.com",
+    "tmall.com",
+    "alipay.com",
+    "alicdn.com",
+    "jd.com",
+    "douyin.com",
+    "163.com",
+    "netease.com",
+    "weibo.com",
+    "meituan.com",
+    "dianping.com",
+    "pinduoduo.com",
+    "amap.com",
+    "douyu.com",
+    "huya.com",
+    "kuaishou.com",
+    "yy.com",
+    "ixigua.com",
+    "iqiyi.com",
+    "youku.com",
+    "mgtv.com",
+    "xiaohongshu.com",
+    "wps.cn",
+    "kdocs.cn",
+    "yuque.com",
+    "voovmeeting.com",
+    "12306.cn",
+    "yximgs.com",
+    "kugou.com",
+    "kuwo.cn",
+    "migu.cn",
+    "ximalaya.com",
+    "qingting.fm",
+    "xylink.com",
+    "zhumu.me",
+    "quanshi.com",
+    "zhihu.com",
+    "zhimg.com",
+    "goofish.com",
+    "1688.com",
 ];
 /// Always attached to a native-app DIRECT plan, even if the published policy
 /// omitted them. Unidentified helpers and browsers hit these trees.
-pub const ALWAYS_ADDRESS_FREE_WEB_SUFFIXES: [&str; 5] = [
+pub const ALWAYS_ADDRESS_FREE_WEB_SUFFIXES: [&str; 45] = [
     "qq.com",
     "baidu.com",
     "aliyuncs.com",
     "edu.cn",
     "weixinbridge.com",
+    "bilibili.com",
+    "taobao.com",
+    "tmall.com",
+    "alipay.com",
+    "alicdn.com",
+    "jd.com",
+    "douyin.com",
+    "163.com",
+    "netease.com",
+    "weibo.com",
+    "meituan.com",
+    "dianping.com",
+    "pinduoduo.com",
+    "amap.com",
+    "douyu.com",
+    "huya.com",
+    "kuaishou.com",
+    "yy.com",
+    "ixigua.com",
+    "iqiyi.com",
+    "youku.com",
+    "mgtv.com",
+    "xiaohongshu.com",
+    "wps.cn",
+    "kdocs.cn",
+    "yuque.com",
+    "voovmeeting.com",
+    "12306.cn",
+    "kugou.com",
+    "kuwo.cn",
+    "migu.cn",
+    "ximalaya.com",
+    "qingting.fm",
+    "xylink.com",
+    "zhumu.me",
+    "quanshi.com",
+    "zhihu.com",
+    "zhimg.com",
+    "goofish.com",
+    "1688.com",
 ];
 
 pub fn is_address_free_web_suffix(host: &str) -> bool {
     ADDRESS_FREE_WEB_SUFFIXES.contains(&host)
 }
-/// Reviewed WeChat product executables. Keep this list narrow: WFP remains
-/// the exact IP:port security boundary for each generated DIRECT rule.
-pub const WECHAT_PROCESS_NAMES: [&str; 9] = [
-    "WeChat.exe",
-    "Weixin.exe",
-    "xwechat.exe",
-    "WeChatAppEx.exe",
-    "WeChatPlayer.exe",
-    "WeixinPlay.exe",
-    "WeChatApp.exe",
-    "WeixinApp.exe",
-    "WeChatBrowser.exe",
-];
 /// Main and known helper executables for the three reviewed China-office
 /// clients. These names are used only alongside exact cloud-approved media
 /// IP/port tuples; TCP raw-IP traffic uses the signature-verified path regexes
@@ -152,7 +219,7 @@ pub const HOME_SOCKS5_OUTBOUND_NAME: &str = "Tono-Home-Residential";
 /// the desktop apps. `google.com`, `googleapis.com`, and `gstatic.com`
 /// stay out: they are shared by Search, YouTube, Gmail, and Tono's own
 /// exit probe. Gemini is pinned by its product hostnames instead.
-pub const CLAUDE_HOME_DOMAINS: [&str; 50] = [
+pub const CLAUDE_HOME_DOMAINS: [&str; 55] = [
     "anthropic.com",
     "claude.ai",
     "claude.com",
@@ -176,9 +243,14 @@ pub const CLAUDE_HOME_DOMAINS: [&str; 50] = [
     "browser-intake-datadoghq.eu",
     "browser-intake-ddog-gov.com",
     "datadoghq.com",
+    "statsig.com",
     "statsigapi.net",
     "featuregates.org",
     "growthbook.io",
+    "stripe.com",
+    "stripecdn.com",
+    "link.com",
+    "hcaptcha.com",
     "stripe.network",
     // Claude Code install/update dependencies and Claude Desktop essential
     // telemetry. Keep these exact suffixes rather than routing node.exe: npm
@@ -232,6 +304,8 @@ pub const RULES: [&str; 3] = [
 pub enum ConfigError {
     #[error("selected node is not in the catalog: {0}")]
     MissingSelection(String),
+    #[error("the required residential route is unavailable or invalid")]
+    ResidentialRouteUnavailable,
     #[error("node set rejected: {0}")]
     Node(#[from] NodeRejection),
     #[error("direct plan rejected: {0}")]
@@ -485,7 +559,7 @@ pub fn build_owned_runtime(
 /// `nodes`, Claude processes and the Claude/Anthropic domains exit through a dedicated
 /// `Tono-Claude-Home` group holding that node alone, and the node's address joins the TUN
 /// route exclusions so Mihomo's second Reality socket stays out of the tunnel. A name not in
-/// `nodes` (stale caller) degrades to the unsplit runtime instead of failing the connect.
+/// `nodes` (stale caller) is rejected rather than silently changing the final egress.
 ///
 /// `home_socks5` is the catalog's verified `homeSocks5` directive and takes precedence over
 /// `home_proxy` (mirroring [`crate::catalog::sanitize_routing`]): the group then holds a
@@ -517,6 +591,14 @@ pub fn build_owned_runtime_with_ports(
         .iter()
         .find(|node| node.name == selected)
         .ok_or_else(|| ConfigError::MissingSelection(selected.to_string()))?;
+    crate::catalog::validate_residential_routing(
+        &crate::catalog::CatalogRouting {
+            home_proxy: home_proxy.map(str::to_owned),
+            default_proxy: None,
+            home_socks5: home_socks5.cloned(),
+        },
+        nodes,
+    ).map_err(|_| ConfigError::ResidentialRouteUnavailable)?;
     // `home_socks5` wins over `home_proxy`: a catalog home node is ignored
     // while a chained residential upstream is in force.
     let home_node = if home_socks5.is_some() {
@@ -719,12 +801,12 @@ fn runtime_value(
     // exit). Connect no longer treats `/delay` as the data-plane verdict, so
     // the doubled request cannot stall the fail-closed TUN check.
     put(&mut root, "unified-delay", Value::Bool(true));
-    let process_lookup = home.is_some() || home_socks5.is_some() || direct.is_some();
-    put(
-        &mut root,
-        "find-process-mode",
-        string(if process_lookup { "strict" } else { "off" }),
-    );
+    // Activity is an all-application view, not just a view of PROCESS rules.
+    // `strict` may skip lookup when an earlier destination rule matched (notably
+    // Claude residential traffic), and `off` loses every cloud-only attribution.
+    // Ask the local desktop core to look up every flow. Lookup can still fail:
+    // never infer an application from a hostname or promise complete coverage.
+    put(&mut root, "find-process-mode", string("always"));
     let mut profile = Mapping::new();
     // Never let a stale cache.db choice resurrect an old selection.
     put(&mut profile, "store-selected", Value::Bool(false));
@@ -1037,7 +1119,13 @@ fn runtime_value(
     // STUN, …). Reject all non-pinned UDP instead: whitelisted WeChat media
     // already matched its pins above, everything else must fail over to TCP
     // rather than leave the machine. Revisit when nodes speak UoT.
-    rules.push("AND,((NETWORK,UDP)),REJECT".to_string());
+    let is_hy2 = nodes
+        .iter()
+        .find(|node| node.name == selected)
+        .is_some_and(|node| node.is_hysteria2());
+    if !is_hy2 {
+        rules.push("AND,((NETWORK,UDP)),REJECT".to_string());
+    }
     rules.push(RULES[RULES.len() - 1].to_string());
     put(
         &mut root,
@@ -1101,6 +1189,22 @@ reality-opts:
     }
 
     #[test]
+    fn activity_process_attribution_is_requested_for_every_owned_route_mode() {
+        // Destination rules can match before PROCESS rules. `strict` then leaves
+        // Claude/CDN/browser rows unattributed; cloud-only `off` never looks up.
+        for runtime in [
+            build(),
+            build_with_home(Some("US Reality 01")),
+            build_with_home_socks5(Some(&home_socks5())),
+        ] {
+            assert_eq!(
+                get(&parsed(&runtime), &["find-process-mode"]).as_str(),
+                Some("always"),
+            );
+        }
+    }
+
+    #[test]
     fn forces_top_level_control_values() {
         let value = parsed(&build());
         assert_eq!(get(&value, &["mixed-port"]).as_i64(), Some(28990));
@@ -1110,7 +1214,7 @@ reality-opts:
         assert_eq!(get(&value, &["mode"]).as_str(), Some("rule"));
         assert_eq!(get(&value, &["log-level"]).as_str(), Some("warning"));
         assert_eq!(get(&value, &["unified-delay"]).as_bool(), Some(true));
-        assert_eq!(get(&value, &["find-process-mode"]).as_str(), Some("off"));
+        assert_eq!(get(&value, &["find-process-mode"]).as_str(), Some("always"));
         assert_eq!(
             get(&value, &["profile", "store-selected"]).as_bool(),
             Some(false)
@@ -1928,6 +2032,7 @@ reality-opts:
     #[test]
     fn home_domains_cover_reviewed_assistants_without_google_at_large() {
         for required in [
+            "stripe.com", "stripecdn.com", "link.com", "hcaptcha.com", "statsig.com",
             "openai.com",
             "chatgpt.com",
             "anthropic.com",
@@ -2290,16 +2395,23 @@ reality-opts:
     }
 
     #[test]
-    fn unknown_home_name_degrades_to_the_unsplit_runtime() {
-        // A stale caller must never produce a group pointing nowhere, and a
-        // control-plane hiccup must not block the whole connect.
-        assert_eq!(build_with_home(Some("No Such Node")).yaml(), build().yaml());
+    fn unknown_home_name_is_refused_instead_of_generating_a_cloud_runtime() {
+        assert_eq!(build_owned_runtime_with_ports(
+            &three_nodes(), "JP Reality 02", "s", None, Some("No Such Node"),
+            None, RuntimePorts::default(),
+        ).unwrap_err(), ConfigError::ResidentialRouteUnavailable);
+        let mut upstream = home_socks5();
+        upstream.password.clear();
+        assert_eq!(build_owned_runtime_with_ports(
+            &three_nodes(), "JP Reality 02", "s", None, Some("US Reality 01"),
+            Some(&upstream), RuntimePorts::default(),
+        ).unwrap_err(), ConfigError::ResidentialRouteUnavailable);
     }
 
     #[test]
     fn home_build_adds_the_dedicated_group_rules_and_route_exclusion() {
         let value = parsed(&build_with_home(Some("US Reality 01")));
-        assert_eq!(get(&value, &["find-process-mode"]).as_str(), Some("strict"));
+        assert_eq!(get(&value, &["find-process-mode"]).as_str(), Some("always"));
 
         let groups = get(&value, &["proxy-groups"]).as_sequence().unwrap();
         assert_eq!(groups.len(), 2);
@@ -2523,6 +2635,40 @@ reality-opts:
                 .map(String::as_str)
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn hysteria2_selected_node_omits_udp_reject_rule() {
+        let yaml = r#"
+name: "Buffalo · Niagara · hy2"
+type: hysteria2
+server: 23.94.79.123
+port: 443
+password: "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d"
+sni: "www.microsoft.com"
+fingerprint: "1e5374a79bdb83b04c3d3c84722c03211d1c941c2de9f92431d2198ba7212cad"
+"#;
+        let hy2_node = admit_node(&serde_yaml_ng::from_str(yaml).unwrap()).unwrap();
+        let nodes = vec![hy2_node];
+        let runtime = build_owned_runtime_with_ports(
+            &nodes,
+            "Buffalo · Niagara · hy2",
+            "test-secret",
+            None,
+            None,
+            None,
+            RuntimePorts::default(),
+        )
+        .unwrap();
+        let value = parsed(&runtime);
+        let rules: Vec<&str> = get(&value, &["rules"])
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|rule| rule.as_str().unwrap())
+            .collect();
+        assert!(!rules.contains(&"AND,((NETWORK,UDP)),REJECT"));
+        assert_eq!(rules, [RULES[0], RULES[1], RULES[2]]);
     }
 
 }

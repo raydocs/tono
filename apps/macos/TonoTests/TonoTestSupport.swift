@@ -28,6 +28,25 @@ enum Fixture {
         return node
     }
 
+    static let hy2Fingerprint =
+        "e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db"
+
+    static func hy2Node(
+        name: String = "US-VLESS-Reality · hy2",
+        id: String = "us-hy2",
+        server: String = "203.0.114.7",
+        port: Int = 443,
+        password: String = "00000000-0000-4000-8000-000000000001",
+        sni: String = "exit.example.com",
+        flag: String = "🇺🇸"
+    ) -> ProxyNode {
+        var node = ProxyNode(id: id, flag: flag, name: name, type: .hysteria2, server: server, port: port)
+        node.password = password
+        node.sni = sni
+        node.tlsFingerprint = hy2Fingerprint
+        return node
+    }
+
     static func overlay(
         mixedPort: Int = 7890,
         selectedNodeName: String,

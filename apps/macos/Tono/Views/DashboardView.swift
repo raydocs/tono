@@ -21,6 +21,15 @@ struct DashboardView: View {
             VStack(spacing: 0) {
                 dashboardHeader
 
+                if appState.updateIncomplete {
+                    Text(UpdateHandoffStore.incompleteUpdateCopy)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(TonoStatus.blocked)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 12)
+                        .accessibilityIdentifier("updateIncompleteNotice")
+                }
+
                 // Center: ConnectPill + ActiveNodeCard
                 Spacer(minLength: 12)
 
@@ -108,6 +117,9 @@ struct DashboardView: View {
             if !connected {
                 appState.networkInfo = NetworkInfo()
             }
+        }
+        .onAppear {
+            appState.updateIncomplete = UpdateHandoffStore.showsIncompleteUpdate()
         }
     }
 
@@ -503,12 +515,20 @@ private struct ConnectionProgressCard: View {
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 } else if let failure = appState.lastConnectionFailure {
-                    HStack(spacing: 4) {
-                        Text("Failed at")
-                        Text(LocalizedStringKey(failure.stage.rawValue))
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 4) {
+                            Text("Failed at")
+                            Text(LocalizedStringKey(failure.stage.rawValue))
+                        }
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        if !appState.isProtectionBlocked {
+                            Text("Direct internet is available. Retry or choose another route.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
                 } else {
                     Text("Direct traffic remains blocked while Tono waits to retry.")
                         .font(.system(size: 12))
@@ -652,6 +672,46 @@ private struct ConnectionProgressCard: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+
+                if appState.shouldOfferManualBackupChannel() {
+                    Button("Try backup channel") {
+                        appState.tryBackupChannelManually()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            } else if ReleasedConnectFailureActions.shouldOfferRetryAndRoute(
+                protectionBlocked: appState.isProtectionBlocked,
+                connecting: appState.isConnecting,
+                disconnecting: appState.isDisconnecting,
+                hasFailureRecord: appState.lastConnectionFailure != nil
+            ) {
+                Button("Retry now") {
+                    appState.connect()
+                }
+                .buttonStyle(GateProminentButtonStyle())
+                .controlSize(.small)
+                .disabled(!appState.isTonoReady || appState.isDisconnecting)
+
+                Button("Choose another route") {
+                    appState.selectedPage = .proxies
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                if appState.shouldOfferManualBackupChannel() {
+                    Button("Try backup channel") {
+                        appState.tryBackupChannelManually()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            } else if appState.shouldOfferManualBackupChannel() {
+                Button("Try backup channel") {
+                    appState.tryBackupChannelManually()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
 
             Spacer()
@@ -683,14 +743,19 @@ private struct ConnectionProgressCard: View {
         let server = appState.activeNode?.name
             ?? appState.proxyService.activeNodeName
             ?? "unknown"
-        let classified = appState.lastClassifiedFailure?.copyableDetail ?? "none"
+        let classified = appState.lastClassifiedFailure
+        let code = classified?.code.rawValue ?? "none"
+        let stage = classified?.stage ?? failure.stage.rawValue
+        let classifiedDetail = classified?.copyableDetail ?? "none"
         let summary = """
         Tono connection report
         Build: \(build)
         Server: \(server)
+        Code: \(code)
+        Stage: \(stage)
         Failed step: \(failure.stage.rawValue)
         Error: \(failure.message)
-        Classified: \(classified)
+        Classified: \(classifiedDetail)
         Retry attempt: \(appState.protectedReconnectAttempt)
         Kill Switch: \(KillSwitchService.isArmed ? "active" : "inactive")
         Recovery command (last resort, restores normal internet):

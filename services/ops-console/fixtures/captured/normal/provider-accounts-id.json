@@ -1,0 +1,14 @@
+{
+  "id": "id_7374b605dca3b5b3",
+  "provider": "bandwagon",
+  "label": "Preview VPS",
+  "cloudKind": "vps",
+  "loginEmailMasked": "b***@example.test",
+  "billingUrl": "https://billing.example.test/preview",
+  "balanceHint": null,
+  "renewNotes": null,
+  "secretRef": null,
+  "nodeCount": 0,
+  "createdAt": 1724135948,
+  "updatedAt": 1724999918
+}

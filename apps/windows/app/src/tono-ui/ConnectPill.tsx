@@ -41,10 +41,12 @@ const STATE_SPECS: Record<TonoUiState, StateSpec> = {
     color: TONO_COLORS.accent,
     glowOpacity: 0.26,
     glowScale: 1.03,
-    titleKey: 'shared.actions.cancel',
+    // Not Cancel: Windows StartClash can take seconds, and a labeled cancel
+    // control is how a live attempt became 待机 + "something went wrong".
+    titleKey: 'tono.pill.title.connecting',
     titleColored: true,
     indicator: 'spinner',
-    disabled: false,
+    disabled: true,
   },
   connected: {
     color: TONO_COLORS.connected,
@@ -83,6 +85,7 @@ const hex = (color: string, alpha: number) =>
 
 interface ConnectPillProps {
   uiState: TonoUiState
+  protectionConfirmed?: boolean
   /** Connect FSM stage key (`startingKillSwitch`). Translated in the pill. */
   stage?: string | null
   onConnect: () => void
@@ -91,6 +94,7 @@ interface ConnectPillProps {
 
 export const ConnectPill = ({
   uiState,
+  protectionConfirmed = false,
   stage,
   onConnect,
   onDisconnect,
@@ -99,6 +103,9 @@ export const ConnectPill = ({
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
   const spec = STATE_SPECS[uiState]
+  const titleKey = uiState === 'protectedOffline' && !protectionConfirmed
+    ? 'tono.pill.title.protectionUnknown'
+    : spec.titleKey
   const stageKey = stage ? CONNECT_STAGE_LABEL_KEYS[stage] : undefined
 
   const subtitle =
@@ -114,11 +121,7 @@ export const ConnectPill = ({
 
   const handleClick = () => {
     if (spec.disabled) return
-    if (
-      uiState === 'connecting' ||
-      uiState === 'connected' ||
-      uiState === 'protectedOffline'
-    ) {
+    if (uiState === 'connected' || uiState === 'protectedOffline') {
       onDisconnect()
     } else {
       onConnect()
@@ -134,7 +137,7 @@ export const ConnectPill = ({
       className="tono-pill"
       aria-disabled={spec.disabled || undefined}
       onClick={handleClick}
-      aria-label={`${t(spec.titleKey)} — ${subtitle}`}
+      aria-label={`${t(titleKey)} — ${subtitle}`}
       style={{
         position: 'relative',
         display: 'flex',
@@ -210,7 +213,7 @@ export const ConnectPill = ({
             transition: `color ${transition}`,
           }}
         >
-          {t(spec.titleKey)}
+          {t(titleKey)}
         </span>
         <span
           style={{

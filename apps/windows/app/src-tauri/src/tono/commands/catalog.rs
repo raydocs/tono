@@ -138,8 +138,9 @@ pub async fn tono_test_available_servers(
         let nodes = inner
             .nodes
             .iter()
-            .filter(|node| !catalog_sync::is_exit_blocked(&node.name))
-            .map(|node| (node.name.clone(), SocketAddr::new(node.server.into(), node.port)))
+            .filter_map(|node| {
+                catalog_sync::tcp_probe_socket(node).map(|address| (node.name.clone(), address))
+            })
             .collect::<Vec<_>>();
         inner.server_test_generation = inner.server_test_generation.wrapping_add(1);
         let generation = inner.server_test_generation;
@@ -250,10 +251,11 @@ pub async fn tono_select_server(
             inner.invalidate_connection(false);
             // Picking a city is the same evidence "Retry now" carries: someone is at the
             // machine and has just chosen a different exit. A spent ladder left
-            // `schedule_reconnect` below with no rung to hand out, so it logged and returned
+            // `retry_reconnect_now` below with no permission to run, so it returned
             // while this command still persisted the selection and reported success — the UI
-            // confirmed a switch nothing had attempted. The unattended `reconnect_loop` is
-            // bounded by the budget it consumes, not by this reset.
+            // confirmed a switch nothing had attempted. Reset here so a spent ladder
+            // still has budget. The unattended `reconnect_loop` is bounded by the
+            // budget it consumes, not by this reset.
             inner.fsm.reset_reconnect_backoff();
         }
         let generation = inner.connect_generation;
@@ -283,7 +285,11 @@ pub async fn tono_select_server(
         if action == connection::SelectAction::Switch
             && let Some(from) = previous
         {
-            state.audit().log(AuditEvent::NodeSwitch { from, to: name.clone() });
+            state.audit().log(AuditEvent::NodeSwitch {
+                from,
+                to: name.clone(),
+                transport: tono_core::catalog_transport_of_name(&name),
+            });
         }
         action
     };
@@ -292,7 +298,10 @@ pub async fn tono_select_server(
         // Already spawned and registered above, under the guard.
         connection::SelectAction::Switch => {}
         connection::SelectAction::Reconnect => {
-            connection::schedule_reconnect(&state, &app).await;
+            // Not `schedule_reconnect`: that waits the first 2s rung. Picking a
+            // city (including the hy2 backup) is an explicit user action, same
+            // as Retry now — connect immediately.
+            connection::retry_reconnect_now(&state, &app).await;
         }
         connection::SelectAction::Noop | connection::SelectAction::UpdateOnly => {}
     }

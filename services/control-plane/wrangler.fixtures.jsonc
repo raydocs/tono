@@ -1,0 +1,42 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tono-control-plane-fixtures",
+  "main": "preview/fixtures-entry.ts",
+  "compatibility_date": "2026-08-22",
+  "workers_dev": true,
+  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": true },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "tono-control-plane",
+    "database_id": "caf9b9fb-b4d5-498d-a1ad-7d5cdbb4237c",
+    "migrations_dir": "migrations"
+  }],
+  "r2_buckets": [{
+    "binding": "DIAGNOSTICS_LOGS", "bucket_name": "tono-diagnostics-logs"
+  }, {
+    "binding": "RELEASES", "bucket_name": "tono-releases"
+  }],
+  "vars": {
+    "ALLOWED_ORIGIN": "http://127.0.0.1:8787",
+    "TRAFFIC_POLICY_PUBLIC_KEY": "Sf2burVHXZWzYikU0FlC+N64BeRZJxJe8XaneblmTkM=",
+    "TAILSCALE_TAILNET": "Tcw8bpg2c621CNTRL",
+    "TAILSCALE_ENROLLMENT_ENABLED": "false",
+    "ACCESS_TOKEN_TTL_SECONDS": "86400",
+    "REFRESH_TOKEN_TTL_SECONDS": "2592000",
+    "PENDING_DEVICE_TTL_SECONDS": "1800",
+    "EMAIL_FROM": "Tono Fixtures <login@example.test>",
+    "APPLE_CLIENT_ID": "com.raydocs.tono",
+    "GOOGLE_CLIENT_ID": "",
+    "DIRECT_SIGNUP_ALLOWLIST": "@example.test",
+    "JWT_SECRET": "fixture-jwt-secret-with-at-least-32-characters",
+    "ADMIN_API_TOKEN": "fixture-admin-token-with-at-least-32-ch",
+    "HOME_AGENT_TOKEN": "fixture-home-token-with-at-least-32-ch",
+    "TAILSCALE_OAUTH_CLIENT_ID": "fixture",
+    "TAILSCALE_OAUTH_CLIENT_SECRET": "fixture-tailscale-secret-with-32-chars",
+    "RESEND_API_KEY": "re_fixture-key-with-at-least-32-chars",
+    "CATALOG_ENCRYPTION_KEY": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+    "ACCESS_TEAM_DOMAIN": "test-team.cloudflareaccess.com",
+    "ACCESS_AUD": "test-access-audience-0001",
+    "ACCESS_ADMIN_EMAILS": "operator@example.com"
+  }
+}

@@ -74,7 +74,7 @@ struct MenuBarView: View {
         let name = appState.activeNode?.name ?? appState.proxyService.activeNodeName ?? ""
         guard !name.isEmpty else { return String(localized: "No server selected") }
         let (flag, clean) = ConfigParser.extractFlag(from: name)
-        return "\(ProxyNode.displayName(for: clean)) · \(nodeRegionCode(flag: flag, name: clean))"
+        return "\(nodeRouteTitle(for: name)) · \(nodeRegionCode(flag: flag, name: clean))"
     }
 
     private var busy: Bool {
@@ -88,15 +88,23 @@ struct MenuBarView: View {
     @ViewBuilder
     private var primaryAction: some View {
         if appState.isProtectionBlocked, accountSession.state == .ready {
-            actionButton(
-                title: appState.protectedReconnectPausedForUserAction
-                    ? "Repair and reconnect"
-                    : "Retry now",
-                prominent: true
-            ) {
-                appState.retryProtectedConnectionNow()
+            VStack(spacing: 0) {
+                actionButton(
+                    title: appState.protectedReconnectPausedForUserAction
+                        ? "Repair and reconnect"
+                        : "Retry now",
+                    prominent: true
+                ) {
+                    appState.retryProtectedConnectionNow()
+                }
+                .disabled(!canAct)
+                if appState.shouldOfferManualBackupChannel() {
+                    actionButton(title: "Try backup channel", prominent: true) {
+                        appState.tryBackupChannelManually()
+                    }
+                    .disabled(!canAct)
+                }
             }
-            .disabled(!canAct)
         } else if appState.isConnected {
             actionButton(title: "Disconnect and restore internet", prominent: false) {
                 appState.disconnect(releaseKillSwitch: true)
@@ -109,10 +117,18 @@ struct MenuBarView: View {
             ) {}
             .disabled(true)
         } else {
-            actionButton(title: "Connect", prominent: true) {
-                appState.connect()
+            VStack(spacing: 0) {
+                actionButton(title: "Connect", prominent: true) {
+                    appState.connect()
+                }
+                .disabled(!canAct)
+                if appState.shouldOfferManualBackupChannel() {
+                    actionButton(title: "Try backup channel", prominent: true) {
+                        appState.tryBackupChannelManually()
+                    }
+                    .disabled(!canAct)
+                }
             }
-            .disabled(!canAct)
         }
     }
 

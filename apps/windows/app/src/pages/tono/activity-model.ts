@@ -105,7 +105,9 @@ export const isWeChatActivityProcess = (
 const ACTIVITY_FAMILY_STEMS: Record<string, string> = {
   cursor: 'Cursor',
   code: 'Code',
-  claude: 'ClaudeCode',
+  // Desktop and the native CLI both use Claude.exe on Windows. The basename
+  // alone cannot prove which one owns the flow; never label Desktop as Code.
+  claude: 'Claude',
   chatgpt: 'ChatGPT',
   grok: 'Grok',
   chrome: 'Chrome',
@@ -144,6 +146,11 @@ export const classifyActivityRoute = (
   // Tono direct groups (mirrors DIRECT_GROUP_NAME/WEB_DIRECT_GROUP_NAME in tono-core config.rs)
   // terminate on the physical interface — that IS a direct route, not a proxy hop.
   const hops = connection.chains.map((hop) => hop.trim())
+  // An empty chain is an unrecognized shape, not a proxied one. macOS routeClass
+  // guards `chains.isEmpty` alongside DIRECT and the direct groups before its
+  // `.tunnel` fallthrough; match that here so a transient empty-chain frame (or
+  // a connection Mihomo reports with no chain) is badged direct, not proxied.
+  if (hops.length === 0) return 'direct'
   const terminal = hops[0]
   if (terminal === 'REJECT' || terminal === 'REJECT-DROP') return 'rejected'
   if (
@@ -198,6 +205,7 @@ export const toActivityRow = (connection: IConnectionsItem): ActivityRow => {
     (metadata.process || metadata.processPath || '').split(/[\\/]/).pop() || '',
     100,
   )
+  const familyAliases = process === WECHAT_ACTIVITY_PROCESS ? 'wechat weixin 微信' : ''
   return {
     id: connection.id,
     process: process || '—',
@@ -206,7 +214,7 @@ export const toActivityRow = (connection: IConnectionsItem): ActivityRow => {
     route,
     rule,
     searchText:
-      `${process} ${originalProcess} wechat weixin 微信 ${target} ${protocol} ${rule}`.toLowerCase(),
+      `${process} ${originalProcess} ${familyAliases} ${target} ${protocol} ${rule}`.toLowerCase(),
   }
 }
 
@@ -217,7 +225,6 @@ export interface ActivityAppRow {
   home: number
   proxied: number
   rejected: number
-  local: number
   searchText: string
 }
 
@@ -225,7 +232,18 @@ export const aggregateActivityApps = (
   rows: ActivityRow[],
 ): ActivityAppRow[] => {
   const byProcess = new Map<string, ActivityAppRow>()
+  // App search has the same advertised domain/protocol/rule surface as connection search.
+  // Retain only the already-sanitized presentation terms, deduplicated per process.
+  const searchTerms = new Map<string, Set<string>>()
   for (const row of rows) {
+    // Loopback rows (`route: 'local'`) are pure DNS noise the apps split bar never
+    // visualises — the connections list view hides them too (`row.route !== 'local'`).
+    // Counting them here would inflate `total` past `direct + home + proxied + rejected`
+    // and let local-only apps show up as ghost rows with empty bars. Pre-aggregation
+    // filtering is intentionally only `route !== 'local'`: the route filter and search
+    // query still apply solely at `visibleApps`/`visibleRows`, preserving the apps-view
+    // invariant that an app's total is independent of the selected route filter.
+    if (row.route === 'local') continue
     const current = byProcess.get(row.process) ?? {
       process: row.process,
       total: 0,
@@ -233,12 +251,17 @@ export const aggregateActivityApps = (
       home: 0,
       proxied: 0,
       rejected: 0,
-      local: 0,
       searchText: row.process.toLowerCase(),
     }
+    const terms = searchTerms.get(row.process) ?? new Set<string>()
+    terms.add(row.searchText)
+    searchTerms.set(row.process, terms)
     current.total += 1
     current[row.route] += 1
     byProcess.set(row.process, current)
+  }
+  for (const row of byProcess.values()) {
+    row.searchText = [row.searchText, ...(searchTerms.get(row.process) ?? [])].join(' ')
   }
   return [...byProcess.values()].sort((left, right) => {
     if (right.total !== left.total) return right.total - left.total

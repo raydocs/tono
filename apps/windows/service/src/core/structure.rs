@@ -803,21 +803,6 @@ pub trait JsonConvert: Serialize + for<'de> Deserialize<'de> {
     fn to_json_value(&self) -> Result<Value, serde_json::Error> {
         serde_json::to_value(self)
     }
-
-    // /// 从 JSON Value 转换
-    // fn from_json_value(value: Value) -> Result<Self, serde_json::Error> {
-    //     serde_json::from_value(value)
-    // }
-
-    // /// 序列化为 JSON 字符串
-    // fn to_json_string(&self) -> Result<String, serde_json::Error> {
-    //     serde_json::to_string(self)
-    // }
-
-    // /// 从 JSON 字符串转换
-    // fn from_json_string(json: &str) -> Result<Self, serde_json::Error> {
-    //     serde_json::from_str(json)
-    // }
 }
 #[cfg(feature = "client")]
 impl<T> JsonConvert for T where T: Serialize + for<'de> Deserialize<'de> {}

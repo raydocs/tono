@@ -34,6 +34,7 @@ actor ManagedCatalogProcessor {
             preferredName: AppProfile.defaultCloudExitName
         )
         _ = try ConfigPipeline.validatedOwnedNodes(nodes + customNodes)
+        try ConfigPipeline.validateRequiredResidentialRouting(catalog.routing, nodes: nodes)
 
         return nodes
     }

@@ -169,6 +169,7 @@
       "connecting": "Connecting…",
       "connected": "Connected",
       "protectedOffline": "Protected, not connected",
+      "protectionUnknown": "Protection not verified",
       "disconnecting": "Disconnecting…"
     },
     "subtitle": {
@@ -200,6 +201,7 @@
       "blocked": "Blocked"
     },
     "taglineIdle": "Pick a node, then connect.",
+    "taglineConnecting": "Turning on protection. This usually takes a few seconds.",
     "taglineConnected": "Traffic is protected. A drop will not leak your IP.",
     "directOn": "WeChat and other China apps go direct. Claude, ChatGPT, and Cursor use home broadband. Everything else uses the tunnel.",
     "directSkipped": "China-direct is off. WeChat uses the tunnel. Claude, ChatGPT, and Cursor still use home broadband.",
@@ -227,6 +229,7 @@
     "whatFailed": "What failed",
     "copyDetails": "Copy details",
     "catalogRequiresChoice": "That node is gone — pick another",
+    "updateIncomplete": "The update did not finish. Disconnect, then reinstall Tono.",
     "killSwitchError": "Leak protection: {{message}}",
     "killSwitchErrorNote": "Last error — it may already be clear.",
     "errors": {
@@ -240,7 +243,7 @@
       "nodeUnreachable": "This node is unreachable. Retry or switch.",
       "tunDataPlaneBroken": "The node answered, but Windows is not carrying the tunnel's traffic. Switching cities will not help — restart the PC and connect again, then send diagnostics to support if it persists.",
       "tunIngressBroken": "The node answered, but no traffic on this PC could enter the tunnel. Another VPN or security tool is usually holding the network — close it, then connect again.",
-      "protectedHttpsFailed": "The protected connection could not complete. If every server fails the same way, switching cities will not help — send diagnostics to support.",
+      "protectedHttpsFailed": "This city could not complete a protected connection. Retry, choose another route, or try the backup channel if one is shown. If every city fails the same way, send diagnostics.",
       "coreUnpinned": "This copy of Tono is missing its integrity check. Install the latest Tono — reinstalling the same copy will not help.",
       "coreMismatch": "This copy of Tono does not match its core. Install the latest Tono.",
       "dnsPortBusy": "Another proxy (e.g. Clash Verge, CFW) is running and occupying the network. Please exit it completely from the system tray and try again.",
@@ -293,10 +296,15 @@
     "failedAt": "Failed at {{stage}}",
     "unknownStage": "Unknown stage",
     "statusTitle": "This route did not pass the connection check",
-    "statusBody": "Tono is blocking a direct leak. It will switch to a working route and retry.",
+    "statusBody": "Direct traffic is blocked while this connection is unavailable. Retry or restore normal Internet.",
+    "encryptedDnsTitle": "Windows Encrypted DNS is blocking the connection",
+    "encryptedDnsBody": "Switching cities will not help. Open Windows DNS settings, turn Encrypted DNS off, then reconnect. You can also restore normal Internet first.",
+    "releasedFailureBody": "This city did not connect. Direct internet is available. Retry, choose another route, or try the backup channel if one is shown.",
+    "protectionUnknownBody": "Tono cannot confirm network protection. Repair the service if prompted, or choose Restore Normal Internet.",
     "completedCount": "{{count}} completed",
     "technicalDetails": "Technical details",
     "switchRoute": "Choose another route",
+    "tryBackupChannel": "Try backup channel",
     "retryIn": "Retry {{n}} in {{seconds}}s",
     "retrying": "Retrying…",
     "retryNow": "Retry Now",
@@ -368,11 +376,17 @@
     "waitingForSync": "Waiting for first sync",
     "verifiedSyncHint": "Automatic sync runs every 5 minutes. Invalid updates never replace the last verified copy. Test All is available while disconnected.",
     "catalogError": "Latest refresh failed: {{error}}",
+    "protocol": {
+      "backup": "Backup channel",
+      "vlessReality": "VLESS · Reality",
+      "cloud": "Tono Cloud"
+    },
     "regions": {
       "all": "All",
       "us": "United States",
       "jp": "Japan",
       "other": "Other regions",
+      "udpBackup": "Backup UDP",
       "unavailable": "Unavailable"
     }
   },

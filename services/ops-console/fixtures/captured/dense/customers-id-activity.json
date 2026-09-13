@@ -1,0 +1,17 @@
+{
+  "items": [
+    {
+      "hourAt": 1724997633,
+      "onlineMinutes": 50,
+      "connectedMinutes": 40,
+      "bytesUp": 1024,
+      "bytesDown": 8192,
+      "node": "Preview Tokyo",
+      "platform": "macos",
+      "appVersion": "0.0.72"
+    }
+  ],
+  "nextCursor": null,
+  "updatedAt": 1724997633,
+  "total": 1
+}

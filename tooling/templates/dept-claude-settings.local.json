@@ -1,0 +1,25 @@
+{
+  "_comment": "Copy to <dept worktree>/.claude/settings.local.json (gitignored). Department manager sessions do not deploy, do not touch secrets, do not write to production D1, do not push to the integration branches, and do not kill by pattern. Rules are prefix matches; both the bare and the npx spellings are listed.",
+  "permissions": {
+    "deny": [
+      "Bash(wrangler deploy:*)",
+      "Bash(npx wrangler deploy:*)",
+      "Bash(wrangler secret:*)",
+      "Bash(npx wrangler secret:*)",
+      "Bash(wrangler d1 execute tono-control-plane:*)",
+      "Bash(npx wrangler d1 execute tono-control-plane:*)",
+      "Bash(wrangler d1 export tono-control-plane:*)",
+      "Bash(npx wrangler d1 export tono-control-plane:*)",
+      "Bash(wrangler d1 migrations apply tono-control-plane:*)",
+      "Bash(npx wrangler d1 migrations apply tono-control-plane:*)",
+      "Bash(wrangler d1 delete:*)",
+      "Bash(npx wrangler d1 delete:*)",
+      "Bash(git push origin main:*)",
+      "Bash(git push origin ops/platform:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(pkill -f:*)",
+      "Bash(killall:*)"
+    ]
+  }
+}

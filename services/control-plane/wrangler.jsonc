@@ -31,6 +31,9 @@
     ]
     // Optional: OPS_COLLECTOR_TOKEN — VPS collector PUT /api/v1/ops-ingest/snapshot.
     // Unset keeps /ops/live on the legacy ops/quality host fetch.
+    // Optional: HY2_CATALOG_EMAILS — comma-separated customer emails that may
+    // receive ` · hy2` blocks. Unset = strip hy2 from every authenticated catalog.
+    // After changing it, bump the catalog revision. Still do not PUT hy2.
   },
   "d1_databases": [{
     "binding": "DB", "database_name": "tono-control-plane",

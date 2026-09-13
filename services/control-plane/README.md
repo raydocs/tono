@@ -212,7 +212,9 @@ OAuth client 只授予上述 scopes；tailnet policy 中声明标签所有者并
   家庭绑定（迁移 `0018`）时，响应额外带 `routing:{homeProxy,defaultProxy?}`：
   `homeProxy` 是绑定的 active 家庭节点 proxyName，`defaultProxy` 是绑定写入时
   登记的非家庭默认 VPS proxyName（未设置则省略）；客户端据此把 Claude 流量路由到
-  家宽、其余流量走默认 VPS。未绑定用户与管理员全量响应不含 `routing` 字段。
+  家宽、其余流量走默认 VPS。已绑定但 `home_exits.status` 非 `active`（被禁用
+  或缺失）时返回 `503 CATALOG_UNAVAILABLE`；未绑定用户与管理员全量响应不含
+  `routing` 字段。
   客户端必须验证摘要、
   节点策略和本地 anti-rollback，不能把源 YAML 的 TUN/DNS/rules/controller
   直接交给 Mihomo。

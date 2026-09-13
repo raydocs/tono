@@ -201,38 +201,62 @@ nonisolated enum ProtectedConnectivityVerifier {
         expectedStatus: Int,
         timeout: TimeInterval
     ) async -> (status: Int?, category: ProbeFailureCategory, detail: String) {
-        // CONNECT 200 means Mihomo opened TCP to the origin through the
-        // selected exit. That is the mixed-path diagnostic; it does not
-        // require a second TLS hop and does not ask the system resolver.
-        _ = path
-        guard let port = NWEndpoint.Port(rawValue: UInt16(clamping: max(1, proxyPort))) else {
-            return (nil, .unknown, "invalid mixed port")
+        // A local CONNECT 200 only acknowledges the proxy request. Mihomo can
+        // emit it before DNS/Reality/origin TLS succeeds; it must never be
+        // promoted to an origin's expected status (or blame TUN for a dead exit).
+        guard (1...65535).contains(proxyPort),
+              let url = URL(string: "https://\(host)\(path)"),
+              url.host == host else {
+            return (nil, .unknown, "invalid mixed probe endpoint")
         }
-        let parameters = NWParameters.tcp
-        parameters.preferNoProxies = true
-        let connection = NWConnection(
-            host: NWEndpoint.Host("127.0.0.1"),
-            port: port,
-            using: parameters
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.connectionProxyDictionary = [
+            "HTTPSEnable": 1,
+            "HTTPSProxy": "127.0.0.1",
+            "HTTPSPort": proxyPort,
+        ]
+        configuration.timeoutIntervalForRequest = timeout
+        configuration.timeoutIntervalForResource = timeout
+        configuration.waitsForConnectivity = false
+        configuration.urlCache = nil
+        configuration.httpCookieStorage = nil
+        configuration.urlCredentialStorage = nil
+        let session = URLSession(
+            configuration: configuration,
+            delegate: MixedProbeNoRedirectDelegate(),
+            delegateQueue: nil
         )
-        let request = Data(
-            "CONNECT \(host):443 HTTP/1.1\r\nHost: \(host):443\r\nProxy-Connection: keep-alive\r\n\r\n".utf8
-        )
-        let header = await transactHTTP(
-            connection: connection,
-            request: request,
-            timeout: timeout
-        )
-        switch header {
-        case .cancelled:
-            return (nil, .cancelled, "cancelled")
-        case .failed(let category, let detail):
-            return (nil, category, detail)
-        case .response(let status, let preamble):
-            if status == 200 {
-                return (expectedStatus, .success, "mixed connect 200")
+        defer { session.invalidateAndCancel() }
+        do {
+            // Keep default certificate/hostname validation. The explicit proxy
+            // handles origin DNS; no system resolver or direct fallback is used.
+            // Read only headers so an unexpected origin cannot stream a body
+            // without bound. Redirects are a failure, not a different origin.
+            let (_, response) = try await session.bytes(from: url)
+            guard let response = response as? HTTPURLResponse else {
+                return (nil, .http, "mixed probe returned a non-HTTP response")
             }
-            return (status, .http, preamble)
+            let status = response.statusCode
+            return status == expectedStatus
+                ? (status, .success, "mixed HTTPS verified")
+                : (status, .http, "mixed HTTPS status \(status), expected \(expectedStatus)")
+        } catch {
+            if Task.isCancelled { return (nil, .cancelled, "cancelled") }
+            let error = error as NSError
+            let category: ProbeFailureCategory
+            switch error.code {
+            case NSURLErrorCancelled: category = .cancelled
+            case NSURLErrorTimedOut: category = .timeout
+            case NSURLErrorCannotFindHost, NSURLErrorDNSLookupFailed: category = .dns
+            case NSURLErrorSecureConnectionFailed, NSURLErrorServerCertificateHasBadDate,
+                 NSURLErrorServerCertificateUntrusted, NSURLErrorServerCertificateHasUnknownRoot,
+                 NSURLErrorServerCertificateNotYetValid, NSURLErrorClientCertificateRejected,
+                 NSURLErrorClientCertificateRequired: category = .tls
+            case NSURLErrorCannotConnectToHost, NSURLErrorNetworkConnectionLost: category = .tcp
+            default: category = .unknown
+            }
+            // Do not persist URLSession's nested userInfo (URLs/credentials).
+            return (nil, category, "mixed HTTPS failed: \(error.domain) \(error.code)")
         }
     }
 
@@ -433,5 +457,17 @@ private final class OnceResume<Value>: @unchecked Sendable {
         guard value == nil else { return false }
         value = next
         return true
+    }
+}
+
+nonisolated private final class MixedProbeNoRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 }

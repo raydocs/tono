@@ -106,7 +106,7 @@ pub(super) fn unknown_protection_message(reason: &str) -> String {
 /// process obtains a new Service session/controller; weaker evidence continues to wait for the
 /// user and is never promoted directly to Connected.
 pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
-    let _ = crate::tono::update_handoff::begin_first_launch_migration();
+    let _ = crate::tono::update_handoff::begin_first_launch_migration(env!("CARGO_PKG_VERSION"));
     let restore_deadline = tokio::time::Instant::now() + RESTORE_TRANSACTION_TIMEOUT;
     let generation = {
         let mut inner = state.lock().await;
@@ -260,6 +260,13 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
                 emit_status(&app, &status_of(&inner));
             }
             if !info.suspended {
+                if crate::tono::update_handoff::load_pending()
+                    .is_some_and(|journal| journal.keep_kill_switch_armed)
+                {
+                    let _ = crate::tono::update_handoff::record_owner_phase(
+                        crate::tono::update_handoff::Phase::ProtectionResuming,
+                    );
+                }
                 match tokio::time::timeout_at(
                     restore_deadline,
                     catalog_sync::sync_with_retries_for_auth_generation(&state, &app, generation),
@@ -303,7 +310,7 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
                 if crate::tono::update_handoff::load_pending()
                     .is_some_and(|journal| !journal.was_connected)
                 {
-                    crate::tono::update_handoff::mark_committed();
+                    crate::tono::update_handoff::commit_if_verified(env!("CARGO_PKG_VERSION"));
                 }
                 crate::tono::telemetry::spawn_periodic_for_auth_generation(&state, &app, generation)
                     .await;

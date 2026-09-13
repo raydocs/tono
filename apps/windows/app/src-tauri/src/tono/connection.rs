@@ -77,7 +77,8 @@ use crate::{
 pub use crate::tono::connection_health::{
     CORE_MISSING_SUSTAINED_SAMPLES, CoreSample, HEALTH_FAILURE_THRESHOLD, HealthLegs, NETWORK_EVENT_DEBOUNCE,
     NetworkChangeOutcome, classify_core_sample, connection_loop_continues, core_change_fires,
-    health_threshold_reached, kill_switch_unhealthy, monitor_requires_reconnect, network_event_fires,
+    health_threshold_reached, kill_switch_unhealthy, kill_switch_unhealthy_for_monitor,
+    monitor_requires_reconnect, network_event_fires, owned_direct_reload_in_flight,
     protected_dns_unhealthy, startup_resume_guards_hold, startup_runtime_is_resume_candidate,
 };
 pub use crate::tono::connection_plan::{
@@ -89,7 +90,7 @@ pub use crate::tono::connection_plan::stop_core_before_release;
 pub(crate) use crate::tono::connection_routes::{
     ANTHROPIC_DESTINATIONS, MAX_DIRECT_SAMPLES, MAX_PROTECTED_ROUTE_SAMPLES,
     ProtectedDestination, ProtectedRoute, ProtectedRouteAggregate, SampledConnections,
-    TELEMETRY_DESTINATIONS, TURNSTILE_DESTINATIONS, UPDATE_DESTINATIONS, classify_protected_route,
+    PAYMENT_DESTINATIONS, TELEMETRY_DESTINATIONS, TURNSTILE_DESTINATIONS, UPDATE_DESTINATIONS, classify_protected_route,
     new_direct_samples, observe_protected_routes, protected_destination,
 };
 
@@ -103,7 +104,9 @@ pub use controller::close_owned_controller_connection;
 use endpoints::proxy_endpoints_for;
 pub use endpoints::{proxy_endpoint_of, unique_proxy_endpoints};
 use monitor::{IN_PLACE_RECOVERY_COOLDOWN, NETWORK_MONITOR_INTERVAL, monitor_interval, wechat_paths_changed};
-pub(crate) use monitor::handle_network_change;
+pub(crate) use monitor::{
+    handle_network_change, handle_policy_behavior_change, policy_behavior_change_allows_in_place_recovery,
+};
 #[cfg(test)]
 use probes::EXIT_PROBE_ADVISORY_BUDGET;
 use probes::{
@@ -113,6 +116,8 @@ use probes::{
     classify_post_lock_verification, connect_failure_is_dead_exit, fake_ip_attempt_timeout,
     fake_ip_verification_error, format_tun_probe_failures, tun_probe_stagger, verify_tun_data_plane,
 };
+#[cfg(test)]
+use probes::{fake_ip_race_state, tun_dns_proves_fake_ip};
 pub use probes::{is_fake_ip, test_current_server, verify_lock_retry_window};
 
 pub use disconnect::{disconnect, release_explicit};
@@ -257,11 +262,13 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle) -> Attempt {
         inner.next_retry_at_ms = None;
         inner.optional_direct_active = false;
         inner.optional_direct_skip = None;
+        inner.direct_reload_until = None;
         commands::emit_status(app, &commands::status_of(&inner));
     }
 
     state.audit().log(AuditEvent::ConnectBegin {
         node: node.name.clone(),
+        transport: node.catalog_transport(),
     });
 
     // A residential Web guarantee requires Mihomo to see protected hostnames. Browser-owned DoH
@@ -402,7 +409,7 @@ async fn guard_snapshot(
 async fn fail_connect(state: &Arc<TonoState>, app: &AppHandle, err: String) -> String {
     logging!(error, Type::Service, "Tono: 连接事务失败: {err}");
     let observed = service::tono_kill_switch_status().await.ok();
-    let (plan, stage, action, armed) = {
+    let (plan, stage, action, armed, transport, node) = {
         let mut inner = state.lock().await;
         if let Some(status) = &observed {
             inner.kill_switch = Some(status.clone());
@@ -463,13 +470,30 @@ async fn fail_connect(state: &Arc<TonoState>, app: &AppHandle, err: String) -> S
         if plan.mark_armed {
             inner.retry_attempt += 1;
         }
-        (plan, stage, action, armed)
+        let node = inner.selected_node.clone();
+        let transport = inner
+            .selected_node
+            .as_deref()
+            .map(tono_core::catalog_transport_of_name);
+        (plan, stage, action, armed, transport, node)
     };
+    let code = failure::stable_error_code(&err).map(str::to_owned);
     state.audit().log(AuditEvent::ConnectFail {
         stage: stage.map(commands::stage_key),
         error: err.clone(),
         action,
+        transport,
+        code: code.clone(),
+        node: node.clone(),
     });
+    crate::tono::telemetry::spawn_connect_failure_report(
+        state,
+        stage.map(commands::stage_key),
+        &err,
+        node,
+        transport,
+        code.as_deref(),
+    );
     if plan.mark_armed {
         state
             .audit()
@@ -674,7 +698,9 @@ mod tests {
         collect_ipv4_literals, connection_loop_continues, controller_direct_graph_is_active, controller_error_detail,
         core_change_fires,
         dns_listener_conflict_message, expected_controller_direct_rules, format_tun_probe_failures, guard_rejection_is_transient,
-        health_threshold_reached, is_fake_ip, is_retryable_lock_error, kill_switch_unhealthy, map_service_ready_error,
+        health_threshold_reached, is_fake_ip, is_retryable_lock_error, kill_switch_unhealthy,
+        kill_switch_unhealthy_for_monitor, map_service_ready_error, owned_direct_reload_in_flight,
+        policy_behavior_change_allows_in_place_recovery,
         map_wfp_engine_error, monitor_interval, monitor_requires_reconnect, network_event_fires, plan_failure,
         protected_dns_unhealthy, prove_service_endpoint_digest, prove_service_reload_mode, proxy_endpoint_of,
         unique_proxy_endpoints,
@@ -692,7 +718,10 @@ mod tests {
         collections::BTreeSet,
         net::{IpAddr, Ipv4Addr, Ipv6Addr},
     };
-    use tono_core::{connection::ConnectionStatus, node::ValidatedNode};
+    use tono_core::{
+        connection::ConnectionStatus,
+        node::{NodeProtocol, ValidatedNode},
+    };
 
     #[test]
     fn dns_listener_conflict_reports_both_socket_owners_consistently() {
@@ -1025,6 +1054,7 @@ mod tests {
         use super::{
             NODE_OR_CORE_UNREACHABLE_PREFIX, TUN_DATA_PLANE_BROKEN_PREFIX, TUN_INGRESS_BROKEN_PREFIX,
             classify_exhausted_data_plane, connect_failure_is_dead_exit, fake_ip_verification_error,
+            fake_ip_race_state, tun_dns_proves_fake_ip,
         };
 
         let tun = "all real TUN probes timed out".to_string();
@@ -1054,7 +1084,38 @@ mod tests {
                 .contains("Encrypted DNS")
         );
         assert!(
+            fake_ip_verification_error("Windows system DNS A query exceeded 5s")
+                .contains("Encrypted DNS")
+        );
+        assert!(
             !fake_ip_verification_error("Windows DNS worker failed").contains("Encrypted DNS")
+        );
+        assert!(
+            !fake_ip_verification_error("exceeded 5s; TUN DNS: timeout").contains("Encrypted DNS")
+        );
+        assert!(tun_dns_proves_fake_ip(Ok(std::net::Ipv4Addr::new(198, 18, 0, 7))));
+        assert!(!tun_dns_proves_fake_ip(Ok(std::net::Ipv4Addr::new(1, 1, 1, 1))));
+        assert!(!tun_dns_proves_fake_ip(Err("timeout")));
+
+        let fake = std::net::Ipv4Addr::new(198, 18, 0, 7);
+        let public = std::net::Ipv4Addr::new(1, 1, 1, 1);
+        assert_eq!(
+            fake_ip_race_state(Some(&Ok(vec![fake])), None),
+            Some(Ok("system"))
+        );
+        assert_eq!(
+            fake_ip_race_state(None, Some(&Ok(fake))),
+            Some(Ok("tun"))
+        );
+        assert_eq!(
+            fake_ip_race_state(Some(&Err("exceeded 2s".into())), None),
+            None,
+            "TUN can still prove without waiting out the system timeout"
+        );
+        assert!(
+            fake_ip_race_state(Some(&Ok(vec![public])), Some(&Err("timeout".into())))
+                .unwrap()
+                .is_err()
         );
     }
 
@@ -1246,6 +1307,26 @@ mod tests {
             client_fingerprint: None,
             reality_public_key: "0123456789abcdef0123456789abcdef0123456789a".to_string(),
             reality_short_id: "0123456789abcdef".to_string(),
+            protocol: NodeProtocol::VlessReality,
+            tls_fingerprint: None,
+        }
+    }
+
+    fn hy2_node() -> ValidatedNode {
+        ValidatedNode {
+            name: "US Reality 01 · hy2".to_string(),
+            server: Ipv4Addr::new(203, 0, 113, 7),
+            port: 8443,
+            uuid: "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d".to_string(),
+            servername: "www.microsoft.com".to_string(),
+            flow: None,
+            client_fingerprint: None,
+            reality_public_key: String::new(),
+            reality_short_id: String::new(),
+            protocol: NodeProtocol::Hysteria2,
+            tls_fingerprint: Some(
+                "e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db".to_string(),
+            ),
         }
     }
 
@@ -1502,6 +1583,14 @@ mod tests {
     }
 
     #[test]
+    fn hy2_proxy_endpoint_is_udp() {
+        let endpoint = proxy_endpoint_of(&hy2_node());
+        assert_eq!(endpoint.ip, "203.0.113.7");
+        assert_eq!(endpoint.port, 8443);
+        assert_eq!(endpoint.protocol, tono_service_protocol::ProxyProtocol::Udp);
+    }
+
+    #[test]
     fn fake_ip_range_is_198_18_slash_16() {
         assert!(is_fake_ip(IpAddr::V4(Ipv4Addr::new(198, 18, 0, 1))));
         assert!(is_fake_ip(IpAddr::V4(Ipv4Addr::new(198, 18, 255, 254))));
@@ -1690,8 +1779,9 @@ mod tests {
     #[test]
     fn select_action_reconnects_after_choice_cleared_in_blocked_state() {
         // M5/H1 variant: the vanished node's replacement picked in armed
-        // Protected Offline must schedule the reconnect even when the name
+        // Protected Offline must reconnect immediately even when the name
         // is unchanged (`changed == false`, `requires_choice == true`).
+        // `SelectAction::Reconnect` is Retry now (0s), not the 2s first rung.
         let blocked = ConnectionStatus {
             is_protection_blocked: true,
             ..ConnectionStatus::default()
@@ -1861,6 +1951,30 @@ mod tests {
             kill_switch_unhealthy(Some(&orphaned_permit)),
             "a Locked session whose tunnel permit was retracted is not a healthy tunnel"
         );
+
+        let blocked = KillSwitchStatus {
+            mode: KillSwitchStatusMode::Blocked,
+            tunnel_permit_rendered: false,
+            ..healthy.clone()
+        };
+        assert!(kill_switch_unhealthy(Some(&blocked)));
+        assert!(
+            !kill_switch_unhealthy_for_monitor(Some(&blocked), true),
+            "this session's own DIRECT bracket is expected to be Blocked"
+        );
+        assert!(kill_switch_unhealthy_for_monitor(Some(&blocked), false));
+        let now = std::time::Instant::now();
+        assert!(owned_direct_reload_in_flight(
+            Some((7, now + std::time::Duration::from_secs(60))),
+            7,
+            now
+        ));
+        assert!(!owned_direct_reload_in_flight(
+            Some((7, now + std::time::Duration::from_secs(60))),
+            8,
+            now
+        ));
+        assert!(!policy_behavior_change_allows_in_place_recovery());
     }
 
     #[test]
@@ -2956,6 +3070,7 @@ mod tests {
         for destination in [
             super::ANTHROPIC_DESTINATIONS,
             super::TURNSTILE_DESTINATIONS,
+            super::PAYMENT_DESTINATIONS,
             super::UPDATE_DESTINATIONS,
             super::TELEMETRY_DESTINATIONS,
         ]

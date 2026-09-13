@@ -19,6 +19,7 @@ const renderPill = (uiState: TonoUiState, stage?: string | null) => {
   render(
     <ConnectPill
       uiState={uiState}
+      protectionConfirmed
       stage={stage}
       onConnect={onConnect}
       onDisconnect={onDisconnect}
@@ -44,17 +45,18 @@ describe('ConnectPill five states', () => {
     expect(onDisconnect).not.toHaveBeenCalled()
   })
 
-  it('connecting: cancel title, translated stage subtitle, clickable and calls onDisconnect', () => {
+  it('connecting: connecting title, translated stage subtitle, not a cancel control', () => {
     const { onConnect, onDisconnect } = renderPill(
       'connecting',
       'lockingTraffic',
     )
 
-    expect(screen.getByText('shared.actions.cancel')).toBeDefined()
+    expect(screen.getByText('tono.pill.title.connecting')).toBeDefined()
+    expect(screen.queryByText('shared.actions.cancel')).toBeNull()
     expect(screen.getByText('tono.progress.steps.lockingTraffic')).toBeDefined()
     const button = pillButton() as HTMLButtonElement
     expect(button.disabled).toBe(false)
-    expect(button.getAttribute('aria-disabled')).toBeNull()
+    expect(button.getAttribute('aria-disabled')).toBe('true')
     const stage = screen.getByText('tono.progress.steps.lockingTraffic')
     expect(stage.getAttribute('aria-live')).toBe('polite')
     expect(stage.className).toContain('tono-text-in')
@@ -62,7 +64,7 @@ describe('ConnectPill five states', () => {
     expect(document.activeElement).toBe(button)
 
     fireEvent.click(button)
-    expect(onDisconnect).toHaveBeenCalledTimes(1)
+    expect(onDisconnect).not.toHaveBeenCalled()
     expect(onConnect).not.toHaveBeenCalled()
   })
 
@@ -91,6 +93,17 @@ describe('ConnectPill five states', () => {
     expect(screen.getByText('tono.pill.subtitle.tapToRestore')).toBeDefined()
     expect((pillButton() as HTMLButtonElement).disabled).toBe(false)
 
+    fireEvent.click(pillButton())
+    expect(onDisconnect).toHaveBeenCalledTimes(1)
+    expect(onConnect).not.toHaveBeenCalled()
+  })
+
+  it('unknown protection retains the restore action without claiming a live barrier', () => {
+    const onConnect = vi.fn()
+    const onDisconnect = vi.fn()
+    render(<ConnectPill uiState="protectedOffline" onConnect={onConnect} onDisconnect={onDisconnect} />)
+    expect(screen.getByText('tono.pill.title.protectionUnknown')).toBeDefined()
+    expect(screen.queryByText('tono.pill.title.protectedOffline')).toBeNull()
     fireEvent.click(pillButton())
     expect(onDisconnect).toHaveBeenCalledTimes(1)
     expect(onConnect).not.toHaveBeenCalled()

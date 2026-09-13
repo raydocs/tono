@@ -1,0 +1,120 @@
+{
+  "live": {
+    "fetchedAt": 1788950367,
+    "agents": [
+      {
+        "name": "Preview Tokyo",
+        "os": "linux",
+        "arch": "x64",
+        "cpuName": "Synthetic CPU",
+        "cpu": 22,
+        "memTotal": 2147483648,
+        "memUsed": 805306368,
+        "diskTotal": 42949672960,
+        "diskUsed": 8589934592,
+        "netIn": 42949672960,
+        "netOut": 8589934592,
+        "uptime": 864000,
+        "cpuCores": 2,
+        "load1": 0.4,
+        "load5": 0.3,
+        "load15": 0.2,
+        "swapTotal": 0,
+        "swapUsed": 0,
+        "tcpConnections": 42,
+        "processes": 120,
+        "observedAt": 1788950367,
+        "price": null,
+        "currency": null,
+        "billingCycle": null,
+        "expiredAt": null,
+        "trafficLimit": null,
+        "trafficLimitType": null,
+        "carriers": null
+      },
+      {
+        "name": "Preview Seoul",
+        "os": "linux",
+        "arch": "x64",
+        "cpuName": "Synthetic CPU",
+        "cpu": 93,
+        "memTotal": 2147483648,
+        "memUsed": 1932735283,
+        "diskTotal": 42949672960,
+        "diskUsed": 38654705664,
+        "netIn": 68719476736,
+        "netOut": 17179869184,
+        "uptime": 172800,
+        "cpuCores": 2,
+        "load1": 3.8,
+        "load5": 2.9,
+        "load15": 2.2,
+        "swapTotal": 536870912,
+        "swapUsed": 268435456,
+        "tcpConnections": 390,
+        "processes": 260,
+        "observedAt": 1788950367,
+        "price": null,
+        "currency": null,
+        "billingCycle": null,
+        "expiredAt": null,
+        "trafficLimit": null,
+        "trafficLimitType": null,
+        "carriers": null
+      }
+    ],
+    "agentsError": null,
+    "agentsReceivedAt": 1788950367,
+    "quality": {
+      "updatedAt": null,
+      "updatedAtIso": null,
+      "cnAgentsConfigured": null,
+      "nodes": [
+        {
+          "name": "Preview Tokyo",
+          "host": "tokyo-preview.example.test",
+          "publicIp": "203.0.113.11",
+          "ok": true,
+          "quality": "ok",
+          "riskKeywords": [],
+          "routeKeywords": [
+            "synthetic"
+          ],
+          "block": {
+            "status": "OK",
+            "label": "Synthetic healthy",
+            "rule": null,
+            "mainland": null,
+            "asiaEdge": null,
+            "overseas": null
+          },
+          "riskSignals": [],
+          "exposure": null
+        },
+        {
+          "name": "Preview Seoul",
+          "host": "seoul-preview.example.test",
+          "publicIp": "203.0.113.30",
+          "ok": false,
+          "quality": "poor",
+          "riskKeywords": [
+            "synthetic"
+          ],
+          "routeKeywords": [],
+          "block": {
+            "status": "LIKELY_BLOCKED",
+            "label": "Synthetic incident",
+            "rule": null,
+            "mainland": null,
+            "asiaEdge": null,
+            "overseas": null
+          },
+          "riskSignals": [],
+          "exposure": null
+        }
+      ]
+    },
+    "qualityError": null,
+    "qualityReceivedAt": 1788950367
+  }
+}

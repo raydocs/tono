@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import enShared from '@/locales/en/shared.json'
 import enTono from '@/locales/en/tono.json'
+import { removeCacheData } from '@/services/query-client'
 import type { TonoStatus } from '@/services/tono'
 
 const mocks = vi.hoisted(() => ({
@@ -24,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   trafficLive: false,
   traffic: undefined as { up: number; down: number } | undefined,
   refreshGetClashTraffic: vi.fn(),
+  encryptedDnsOverrides: false,
 }))
 
 vi.mock('@/hooks/use-tono', () => ({
@@ -41,7 +43,10 @@ vi.mock('@/hooks/use-traffic-data', () => ({
   }),
 }))
 
-vi.mock('@/services/states', () => ({ useThemeMode: () => 'light' }))
+vi.mock('@/services/cmds', () => ({
+  tonoEncryptedDnsOverrides: async () => mocks.encryptedDnsOverrides,
+  openWindowsDnsSettings: async () => {},
+}))
 
 vi.mock('@/services/tono', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/services/tono')>()),
@@ -89,11 +94,30 @@ beforeEach(() => {
   mocks.trafficLive = false
   mocks.traffic = undefined
   mocks.refreshGetClashTraffic.mockReset()
+  mocks.encryptedDnsOverrides = false
+  try {
+    window.localStorage.removeItem('tono.connectChecklistDismissed')
+  } catch {
+    /* ignore */
+  }
 })
 
-afterEach(() => cleanup())
+afterEach(async () => {
+  cleanup()
+  await removeCacheData(['tono', 'encrypted-dns'])
+  await removeCacheData(['tono', 'catalog-status'])
+})
 
 describe('dashboard action-error ownership', () => {
+  it('does not claim protection when startup has no Service barrier evidence', () => {
+    mocks.status = makeStatus({ uiState: 'protectedOffline', protectionBlocked: true })
+    renderDashboard()
+    expect(screen.getByRole('button', {
+      name: 'Protection not verified — Click to restore internet',
+    })).toBeDefined()
+    expect(screen.queryByText('Protected, not connected')).toBeNull()
+  })
+
   it('retries a failed disconnect with disconnect and never offers a server switch', async () => {
     mocks.status = makeStatus({
       uiState: 'connected',
@@ -119,6 +143,7 @@ describe('dashboard action-error ownership', () => {
 
   it('will not release fail-closed protection from the pill without a confirmation', async () => {
     mocks.status = makeStatus({
+      killSwitch: { wanted: true, live: true, mode: 'blocked', endpoints: [], last_error: null },
       uiState: 'protectedOffline',
       selectedServer: 'US West 1',
       protectionBlocked: true,
@@ -210,6 +235,92 @@ describe('dashboard action-error ownership', () => {
     expect(mocks.tonoRetryNow).not.toHaveBeenCalled()
   })
 
+  it('clears the stale protected-offline retry error after releasing back to notConnected', async () => {
+    mocks.status = makeStatus({ selectedServer: 'US West 1' })
+    mocks.mutateTonoStatus.mockResolvedValue({
+      data: makeStatus({
+        uiState: 'protectedOffline',
+        selectedServer: 'US West 1',
+        protectionBlocked: true,
+      }),
+    })
+    mocks.tonoConnect.mockRejectedValue(
+      new Error('TONO_NODE_OR_CORE_UNREACHABLE: all probes failed'),
+    )
+    const view = renderDashboard()
+
+    // A connect failure that arms the fail-closed barrier records a `retryNow`
+    // owner so "Try again" drives `tono_retry_now` while blocked.
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Standby — Click to connect' }),
+    )
+    await waitFor(() => expect(mocks.tonoConnect).toHaveBeenCalled())
+    await waitFor(() => expect(mocks.mutateTonoStatus).toHaveBeenCalled())
+
+    // The machine is now protected offline; the action error is hidden there.
+    mocks.status = makeStatus({
+      killSwitch: {
+        wanted: true,
+        live: true,
+        mode: 'blocked',
+        endpoints: [],
+        last_error: null,
+      },
+      uiState: 'protectedOffline',
+      selectedServer: 'US West 1',
+      protectionBlocked: true,
+    })
+    view.rerender(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    )
+    expect(screen.queryByTestId('tono-action-error-message')).toBeNull()
+
+    // The user releases the barrier via the pill confirm dialog — the path that
+    // bypasses `handleDisconnect` and therefore never cleared the error itself.
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Protected, not connected — Click to restore internet',
+      }),
+    )
+    mocks.mutateTonoStatus.mockResolvedValue({
+      data: makeStatus({ selectedServer: 'US West 1' }),
+    })
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Restore Normal Internet' }),
+    )
+    await waitFor(() => expect(mocks.tonoDisconnect).toHaveBeenCalled())
+
+    // Back in a clean notConnected state after the release.
+    mocks.status = makeStatus({ selectedServer: 'US West 1' })
+    view.rerender(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    )
+
+    // The stale `retryNow` error must not resurface: `tono_retry_now` is a
+    // silent no-op from notConnected, so "Try again" would misfire. The primary
+    // Standby pill remains the reconnect control and must fire `tono_connect`.
+    await waitFor(() => {
+      expect(screen.queryByTestId('tono-action-error-message')).toBeNull()
+      expect(screen.queryByRole('alert')).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+    })
+    expect(
+      screen.getByRole('button', { name: 'Standby — Click to connect' }),
+    ).toBeDefined()
+
+    mocks.tonoConnect.mockReset().mockResolvedValue(undefined)
+    mocks.tonoRetryNow.mockReset()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Standby — Click to connect' }),
+    )
+    await waitFor(() => expect(mocks.tonoConnect).toHaveBeenCalledTimes(1))
+    expect(mocks.tonoRetryNow).not.toHaveBeenCalled()
+  })
+
   it('keeps long action errors inside the narrow dashboard content area', async () => {
     mocks.status = makeStatus({ selectedServer: 'US West 1' })
     mocks.tonoConnect.mockRejectedValue(
@@ -261,37 +372,65 @@ describe('dashboard action-error ownership', () => {
   })
 })
 
-describe('dashboard cancel while connecting', () => {
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  it('ignores a pill click inside the 1.2s grace and disconnects after it', async () => {
-    vi.useFakeTimers()
+describe('dashboard connecting pill', () => {
+  it('keeps connecting as connecting: not a cancel control, no idle tagline', () => {
     mocks.status = makeStatus({
       uiState: 'connecting',
       selectedServer: 'US West 1',
-      stage: 'lockingTraffic',
+      stage: 'startingKillSwitch',
     })
     renderDashboard()
 
-    const pill = screen.getByRole('button', { name: /^Cancel/ })
-    expect((pill as HTMLButtonElement).disabled).toBe(false)
-    expect(pill.getAttribute('aria-disabled')).toBeNull()
+    const pill = screen.getByRole('button', { name: /^Connecting/ })
+    expect(screen.queryByRole('button', { name: /^Cancel/ })).toBeNull()
+    expect(pill.getAttribute('aria-disabled')).toBe('true')
+    expect(
+      screen.getByText('Turning on protection. This usually takes a few seconds.'),
+    ).toBeDefined()
+    expect(screen.queryByText('Pick a node, then connect.')).toBeNull()
 
     fireEvent.click(pill)
     expect(mocks.tonoDisconnect).not.toHaveBeenCalled()
+    expect(mocks.tonoConnect).not.toHaveBeenCalled()
+  })
 
-    await vi.advanceTimersByTimeAsync(1199)
-    fireEvent.click(pill)
-    expect(mocks.tonoDisconnect).not.toHaveBeenCalled()
-    expect(screen.queryByRole('dialog')).toBeNull()
+  it('does not turn a superseded connect IPC into a fake failure card', async () => {
+    mocks.status = makeStatus({ selectedServer: 'US West 1' })
+    mocks.tonoConnect.mockRejectedValue(
+      new Error('connection superseded by a newer transition'),
+    )
+    renderDashboard()
 
-    await vi.advanceTimersByTimeAsync(1)
-    fireEvent.click(pill)
-    await Promise.resolve()
-    expect(mocks.tonoDisconnect).toHaveBeenCalledTimes(1)
-    expect(screen.queryByRole('dialog')).toBeNull()
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Standby — Click to connect',
+      }),
+    )
+    await waitFor(() => expect(mocks.tonoConnect).toHaveBeenCalled())
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByTestId('tono-action-error-message')).toBeNull()
+  })
+
+  it('shows unmapped backend detail under the localized fallback', async () => {
+    mocks.status = makeStatus({ selectedServer: 'US West 1' })
+    mocks.tonoConnect.mockRejectedValue(
+      new Error('sc.exe start TonoService failed: os error 10061'),
+    )
+    renderDashboard()
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Standby — Click to connect',
+      }),
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId('tono-action-error-message').textContent).toBe(
+        'Something went wrong. Details are below; copy them for support.',
+      ),
+    )
+    expect(screen.getByTestId('tono-action-error-detail').textContent).toBe(
+      'sc.exe start TonoService failed: os error 10061',
+    )
   })
 })
 
@@ -365,5 +504,66 @@ describe('dashboard claude residential route badge', () => {
     expect(
       screen.getByText('Claude / AI Residential Protection Scope'),
     ).toBeDefined()
+  })
+
+  it('hides the first-connect checklist after handshake eof so the next hand is visible', async () => {
+    mocks.status = makeStatus({ selectedServer: 'Tokyo · Sakura' })
+    mocks.tonoConnect.mockRejectedValue(
+      new Error(
+        'TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof [CORE_EXIT_UNREACHABLE]',
+      ),
+    )
+    renderDashboard()
+    expect(screen.getByText('First connect')).toBeDefined()
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Standby — Click to connect',
+      }),
+    )
+    await waitFor(() => expect(screen.queryByText('First connect')).toBeNull())
+    // Progress card owns Retry / Choose route. This box used to say
+    // switching cities will not help, which hid the next hand.
+    expect(screen.queryByTestId('tono-action-error-message')).toBeNull()
+  })
+
+  it('does not put Open Windows DNS settings on the idle first-connect card', async () => {
+    renderDashboard()
+    expect(await screen.findByText('First connect')).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Open Windows DNS settings' })).toBeNull()
+  })
+
+  it('opens DNS settings from the idle card only when Encrypted DNS overrides adapter DNS', async () => {
+    mocks.encryptedDnsOverrides = true
+    renderDashboard()
+    expect(
+      await screen.findByRole('button', { name: 'Open Windows DNS settings' }),
+    ).toBeDefined()
+  })
+
+  it('keeps the Encrypted DNS next hand after connect when Windows still overrides DNS', async () => {
+    mocks.encryptedDnsOverrides = true
+    mocks.status = makeStatus({
+      uiState: 'connected',
+      selectedServer: 'Tokyo · Sakura',
+    })
+    renderDashboard()
+    expect(
+      await screen.findByText(
+        'Pages failing? Settings → Network & internet → DNS: turn Encrypted DNS off, then reconnect.',
+      ),
+    ).toBeDefined()
+    expect(
+      screen.getByRole('button', { name: 'Open Windows DNS settings' }),
+    ).toBeDefined()
+    expect(screen.queryByText('First connect')).toBeNull()
+  })
+
+  it('tells the customer to disconnect and reinstall when the update journal is Failed', () => {
+    mocks.status = makeStatus({ updateIncomplete: true })
+    renderDashboard()
+    expect(
+      screen.getByRole('alert').textContent,
+    ).toBe('The update did not finish. Disconnect, then reinstall Tono.')
   })
 })

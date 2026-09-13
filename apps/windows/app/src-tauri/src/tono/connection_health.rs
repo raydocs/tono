@@ -217,6 +217,31 @@ pub fn kill_switch_unhealthy(status: Option<&KillSwitchStatus>) -> bool {
     }
 }
 
+/// This session's own DIRECT fail-closed bracket retracts the TUN permit and sets Blocked.
+/// That is expected until the reload deadline; it is not an external failure.
+pub fn owned_direct_reload_in_flight(
+    reload_until: Option<(u64, std::time::Instant)>,
+    connect_generation: u64,
+    now: std::time::Instant,
+) -> bool {
+    reload_until.is_some_and(|(generation, until)| generation == connect_generation && now < until)
+}
+
+pub fn kill_switch_unhealthy_for_monitor(
+    status: Option<&KillSwitchStatus>,
+    owned_direct_reload: bool,
+) -> bool {
+    if owned_direct_reload
+        && let Some(status) = status
+        && status.wanted
+        && status.live
+        && status.mode == KillSwitchStatusMode::Blocked
+    {
+        return false;
+    }
+    kill_switch_unhealthy(status)
+}
+
 /// Stable Service markers that ride in `last_error` on an operation that SUCCEEDED. They are
 /// warnings about what could not be proven, not reports of a broken tunnel, and the health
 /// monitor must not tear a live connection down for them.

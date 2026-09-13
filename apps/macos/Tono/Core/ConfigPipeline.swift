@@ -114,6 +114,46 @@ nonisolated struct ConfigPipeline {
             DirectDomainSuffix(host: "aliyuncs.com", ports: [80, 443]),
             DirectDomainSuffix(host: "edu.cn", ports: [80, 443]),
             DirectDomainSuffix(host: "weixinbridge.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "bilibili.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "taobao.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "tmall.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "alipay.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "alicdn.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "jd.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "douyin.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "163.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "netease.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "weibo.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "meituan.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "dianping.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "pinduoduo.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "amap.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "douyu.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "huya.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "kuaishou.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "yy.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "ixigua.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "iqiyi.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "youku.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "mgtv.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "xiaohongshu.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "wps.cn", ports: [80, 443]),
+            DirectDomainSuffix(host: "kdocs.cn", ports: [80, 443]),
+            DirectDomainSuffix(host: "yuque.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "voovmeeting.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "12306.cn", ports: [80, 443]),
+            DirectDomainSuffix(host: "kugou.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "kuwo.cn", ports: [80, 443]),
+            DirectDomainSuffix(host: "migu.cn", ports: [80, 443]),
+            DirectDomainSuffix(host: "ximalaya.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "qingting.fm", ports: [80, 443]),
+            DirectDomainSuffix(host: "xylink.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "zhumu.me", ports: [80, 443]),
+            DirectDomainSuffix(host: "quanshi.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "zhihu.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "zhimg.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "goofish.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "1688.com", ports: [80, 443]),
         ]
 
         var effectiveWebDomainSuffixes: [DirectDomainSuffix] {
@@ -166,6 +206,16 @@ nonisolated struct ConfigPipeline {
 
     static let homeNodeName = "Home-US"
     static let exitGroupName = "Tono-Exit"
+    /// Link-local and multicast must not hit the global UDP reject or MATCH
+    /// exit. These prefixes cannot reach the public internet.
+    static let appleContinuityDirectRules = """
+      - IP-CIDR,224.0.0.0/4,DIRECT,no-resolve
+      - IP-CIDR,169.254.0.0/16,DIRECT,no-resolve
+      - IP-CIDR6,ff00::/8,DIRECT,no-resolve
+      - IP-CIDR6,fe80::/10,DIRECT,no-resolve
+      - AND,((NETWORK,UDP),(DST-PORT,5353)),DIRECT
+
+    """
     static let claudeHomeGroupName = "Tono-Claude-Home"
     static let homeResidentialProxyName = "Tono-Home-Residential"
     static let directProxyName = "Tono-China-Direct"
@@ -225,10 +275,11 @@ nonisolated struct ConfigPipeline {
     /// Grok, and `google.com` / `googleapis.com` / `gstatic.com` at large.
     /// Gemini is pinned by its product hostnames so Search, YouTube, and
     /// Tono's own home-group probe stay off the residential hop.
-    /// Only first-party provider domains belong here, plus the exact install,
-    /// update and telemetry hosts in Anthropic's published network requirements.
+    /// Reviewed provider, install, telemetry and payment dependencies belong
+    /// here. Shared payment hosts intentionally retain the same residential
+    /// identity across browsers; unrelated infrastructure is not swept in.
     /// Shared infrastructure the public AI rule lists bundle in — auth0,
-    /// stripe.com, statsig.com, segment, cloudflare.net, googleapis.com at
+    /// segment, cloudflare.net, googleapis.com at
     /// large, and gstatic.com — is used by
     /// thousands of unrelated apps, so routing it here would push ordinary
     /// traffic onto a consumer uplink. `gstatic.com` would be actively harmful:
@@ -261,11 +312,12 @@ nonisolated struct ConfigPipeline {
         "browser-intake-datadoghq.eu",
         "browser-intake-ddog-gov.com",
         "datadoghq.com",
-        "statsigapi.net",
+        "statsig.com", "statsigapi.net",
         "featuregates.org",
         "growthbook.io",
-        // Stripe Fraud Telemetry (Radar)
-        "stripe.network",
+        // Payments, Link, CDN and challenge dependencies intentionally share
+        // the residential identity across every browser (not just Radar).
+        "stripe.com", "stripecdn.com", "link.com", "hcaptcha.com", "stripe.network",
         // Claude Code install/update dependencies and Claude Desktop essential
         // telemetry. Exact suffixes avoid sending every node process, Google
         // API or GitHub request over the residential hop.

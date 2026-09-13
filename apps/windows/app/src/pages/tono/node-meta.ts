@@ -11,8 +11,71 @@ const NODE_DISPLAY_NAMES: Record<string, string> = {
   'JP-VLESS-Reality': 'Tokyo · Dawn',
 }
 
-export const nodeDisplayName = (wireName: string) =>
-  NODE_DISPLAY_NAMES[wireName] ?? wireName
+/** Same-node backup transport. Folded into the basename for display. */
+export const HY2_NAME_SUFFIX = ' · hy2'
+
+/** Catalog YAML may prefix a regional-indicator flag; admission keeps it. */
+const LEADING_FLAG =
+  /^(?:\p{Regional_Indicator}{2}|\p{Extended_Pictographic})(?:\uFE0F|\u200D|\p{Extended_Pictographic}|\p{Regional_Indicator})*\s*/u
+
+const stripLeadingFlag = (wireName: string) => wireName.replace(LEADING_FLAG, '')
+
+export const isHy2CatalogName = (wireName: string) =>
+  wireName.endsWith(HY2_NAME_SUFFIX)
+
+export const catalogBaseName = (wireName: string) =>
+  isHy2CatalogName(wireName)
+    ? wireName.slice(0, -HY2_NAME_SUFFIX.length)
+    : wireName
+
+/**
+ * Panstar Tokyo inbound UDP is vendor-blocked. Offering that city's hy2 as
+ * the first backup is a dead click from China (and from everywhere else
+ * off-box). Dedirock / other-city hy2 is the working next hand.
+ */
+export const hy2UdpIsVendorBlocked = (wireName: string) => {
+  if (!isHy2CatalogName(wireName)) return false
+  const display = nodeDisplayName(stripLeadingFlag(catalogBaseName(wireName)))
+  return cityOf(display) === 'tokyo'
+}
+
+const preferReachableHy2 = (rows: readonly string[]) =>
+  rows.find((name) => !hy2UdpIsVendorBlocked(name)) ?? rows[0] ?? null
+
+/**
+ * Manual next hand when TCP is dead. Prefer the same-city ` · hy2` sibling
+ * unless that sibling's UDP is vendor-blocked; then another city's hy2.
+ * Already on hy2: offer a different city's hy2. Null when nothing remains.
+ * G2.8 auto-switch stays off.
+ */
+export const backupChannelName = (
+  selected: string | null | undefined,
+  serverNames: readonly string[],
+): string | null => {
+  if (!selected) return null
+  const selectedKey = stripLeadingFlag(catalogBaseName(selected))
+  const hy2Rows = serverNames.filter(isHy2CatalogName)
+  if (hy2Rows.length === 0) return null
+
+  if (!isHy2CatalogName(selected)) {
+    const sibling = hy2Rows.find(
+      (name) => stripLeadingFlag(catalogBaseName(name)) === selectedKey,
+    )
+    if (sibling && !hy2UdpIsVendorBlocked(sibling)) return sibling
+    return preferReachableHy2(hy2Rows)
+  }
+
+  return preferReachableHy2(
+    hy2Rows.filter(
+      (name) => stripLeadingFlag(catalogBaseName(name)) !== selectedKey,
+    ),
+  )
+}
+
+export const nodeDisplayName = (wireName: string) => {
+  const base = catalogBaseName(wireName)
+  return NODE_DISPLAY_NAMES[base] ?? base
+}
 
 const CITY_CODES: Record<string, string> = {
   'los angeles': 'US',
@@ -65,8 +128,33 @@ export const nodeCode = (wireName: string) => {
   return 'GL'
 }
 
-export const nodeProtocol = (wireName: string) =>
-  /vless/i.test(wireName) ? 'VLESS · Reality' : 'Tono Cloud'
+export const nodeProtocolKey = (wireName: string): TranslationKey =>
+  isHy2CatalogName(wireName)
+    ? 'tono.nodes.protocol.backup'
+    : /vless/i.test(catalogBaseName(wireName))
+      ? 'tono.nodes.protocol.vlessReality'
+      : 'tono.nodes.protocol.cloud'
+
+/** Dedicated server-list group. hy2 does not sit under US/JP. */
+export const UDP_BACKUP_GROUP = 'udpBackup'
+
+/** List grouping: hy2 is its own column so testers can pick it by name. */
+export const nodeListGroupKey = (wireName: string) =>
+  isHy2CatalogName(wireName) ? UDP_BACKUP_GROUP : nodeCode(wireName)
+
+/** City the user thinks in, plus 「备用通道」 when this row is the hy2 sibling. */
+export const nodeCityLabel = (
+  wireName: string,
+  t: (key: TranslationKey) => string,
+) => {
+  const titleKey = nodeCityTitleKey(wireName)
+  const city = titleKey ? t(titleKey) : nodeDisplayName(wireName)
+  if (!isHy2CatalogName(wireName)) return city
+  const backup = t('tono.nodes.protocol.backup')
+  const codename = nodeCityParts(wireName).codename
+  if (!titleKey) return `${city} · ${backup}`
+  return codename ? `${city} · ${codename} · ${backup}` : `${city} · ${backup}`
+}
 
 export type NodeRegion = 'us' | 'jp' | 'other'
 

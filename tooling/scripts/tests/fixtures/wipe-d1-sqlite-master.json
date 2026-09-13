@@ -1,0 +1,160 @@
+[
+  {
+    "results": [
+      {
+        "type": "table",
+        "name": "_cf_KV",
+        "tbl_name": "_cf_KV",
+        "sql": "CREATE TABLE _cf_KV (\n        key TEXT PRIMARY KEY,\n        value BLOB\n      ) WITHOUT ROWID"
+      },
+      {
+        "type": "table",
+        "name": "sqlite_sequence",
+        "tbl_name": "sqlite_sequence",
+        "sql": "CREATE TABLE sqlite_sequence(name,seq)"
+      },
+      {
+        "type": "table",
+        "name": "d1_migrations",
+        "tbl_name": "d1_migrations",
+        "sql": "CREATE TABLE d1_migrations(\nid         INTEGER PRIMARY KEY AUTOINCREMENT,\nname       TEXT UNIQUE,\napplied_at TIMESTAMP\n)"
+      },
+      {
+        "type": "table",
+        "name": "users",
+        "tbl_name": "users",
+        "sql": "CREATE TABLE users (\n  id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE COLLATE NOCASE,\n  password_hash TEXT NOT NULL, password_salt TEXT NOT NULL,\n  status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','disabled')),\n  quota_bytes INTEGER, usage_bytes INTEGER NOT NULL DEFAULT 0,\n  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL\n)"
+      },
+      {
+        "type": "table",
+        "name": "devices",
+        "tbl_name": "devices",
+        "sql": "CREATE TABLE devices (\n  id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n  installation_id TEXT NOT NULL, name TEXT NOT NULL,\n  status TEXT NOT NULL CHECK(status IN ('pending','active','revoked')),\n  pending_expires_at INTEGER, tailscale_node_id TEXT, tailscale_ips TEXT,\n  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,\n  UNIQUE(user_id, installation_id)\n)"
+      },
+      {
+        "type": "trigger",
+        "name": "devices_max_two_insert",
+        "tbl_name": "devices",
+        "sql": "CREATE TRIGGER devices_max_two_insert BEFORE INSERT ON devices\nWHEN NEW.status IN ('pending','active') AND\n (SELECT COUNT(*) FROM devices WHERE user_id=NEW.user_id AND status IN ('pending','active')) >= 2\nBEGIN SELECT RAISE(ABORT, 'DEVICE_LIMIT'); END"
+      },
+      {
+        "type": "trigger",
+        "name": "devices_max_two_update",
+        "tbl_name": "devices",
+        "sql": "CREATE TRIGGER devices_max_two_update BEFORE UPDATE OF status ON devices\nWHEN NEW.status IN ('pending','active') AND OLD.status NOT IN ('pending','active') AND\n (SELECT COUNT(*) FROM devices WHERE user_id=NEW.user_id AND status IN ('pending','active')) >= 2\nBEGIN SELECT RAISE(ABORT, 'DEVICE_LIMIT'); END"
+      },
+      {
+        "type": "table",
+        "name": "sessions",
+        "tbl_name": "sessions",
+        "sql": "CREATE TABLE sessions (\n  id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n  refresh_hash TEXT NOT NULL UNIQUE, expires_at INTEGER NOT NULL, revoked_at INTEGER,\n  created_at INTEGER NOT NULL,\n  device_id TEXT REFERENCES devices(id) ON DELETE CASCADE\n)"
+      },
+      {
+        "type": "index",
+        "name": "devices_user_status",
+        "tbl_name": "devices",
+        "sql": "CREATE INDEX devices_user_status ON devices(user_id,status)"
+      },
+      {
+        "type": "index",
+        "name": "sessions_hash",
+        "tbl_name": "sessions",
+        "sql": "CREATE INDEX sessions_hash ON sessions(refresh_hash)"
+      },
+      {
+        "type": "index",
+        "name": "sessions_device",
+        "tbl_name": "sessions",
+        "sql": "CREATE INDEX sessions_device ON sessions(device_id, revoked_at)"
+      },
+      {
+        "type": "index",
+        "name": "sqlite_autoindex_users_1",
+        "tbl_name": "users",
+        "sql": null
+      },
+      {
+        "type": "table",
+        "name": "exit_nodes",
+        "tbl_name": "exit_nodes",
+        "sql": "CREATE TABLE exit_nodes (\n  id TEXT PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 64),\n  name TEXT NOT NULL UNIQUE CHECK(length(name) BETWEEN 1 AND 100),\n  token_hash TEXT NOT NULL UNIQUE CHECK(length(token_hash) = 43),\n  status TEXT NOT NULL DEFAULT 'active'\n    CHECK(status IN ('active', 'disabled')),\n  last_roster_at INTEGER NOT NULL DEFAULT 0,\n  created_at INTEGER NOT NULL,\n  updated_at INTEGER NOT NULL\n)"
+      },
+      {
+        "type": "index",
+        "name": "exit_nodes_status_roster",
+        "tbl_name": "exit_nodes",
+        "sql": "CREATE INDEX exit_nodes_status_roster\n  ON exit_nodes(status, last_roster_at)"
+      },
+      {
+        "type": "table",
+        "name": "ops_node_status",
+        "tbl_name": "ops_node_status",
+        "sql": "CREATE TABLE ops_node_status (\n  node_name TEXT PRIMARY KEY,\n  verdict TEXT NOT NULL CHECK(verdict IN ('down','blocked','no_probe','degraded','pressure','unknown','ok')),\n  label TEXT NOT NULL, reason TEXT, quality_status TEXT,\n  agent_status TEXT CHECK(agent_status IS NULL OR agent_status IN ('online','stale','missing')),\n  catalog_listed INTEGER, occupancy INTEGER,\n  candidate_verdict TEXT, candidate_streak INTEGER NOT NULL DEFAULT 0,\n  last_quality_sweep_at INTEGER, last_customer_ok_at INTEGER,\n  rules_version INTEGER NOT NULL, evaluated_at INTEGER NOT NULL, changed_at INTEGER NOT NULL,\n  evidence_json TEXT CHECK(evidence_json IS NULL OR length(evidence_json) <= 4096)\n)"
+      },
+      {
+        "type": "table",
+        "name": "ops_node_status_history",
+        "tbl_name": "ops_node_status_history",
+        "sql": "CREATE TABLE ops_node_status_history (\n  id TEXT PRIMARY KEY, node_name TEXT NOT NULL, at INTEGER NOT NULL,\n  from_verdict TEXT, to_verdict TEXT NOT NULL, reason TEXT, rules_version INTEGER NOT NULL,\n  evidence_json TEXT CHECK(evidence_json IS NULL OR length(evidence_json) <= 4096)\n)"
+      },
+      {
+        "type": "index",
+        "name": "ops_node_status_history_node",
+        "tbl_name": "ops_node_status_history",
+        "sql": "CREATE INDEX ops_node_status_history_node ON ops_node_status_history(node_name, at DESC, id DESC)"
+      },
+      {
+        "type": "index",
+        "name": "ops_node_status_history_at",
+        "tbl_name": "ops_node_status_history",
+        "sql": "CREATE INDEX ops_node_status_history_at   ON ops_node_status_history(at DESC, id DESC)"
+      },
+      {
+        "type": "table",
+        "name": "ops_incidents",
+        "tbl_name": "ops_incidents",
+        "sql": "CREATE TABLE ops_incidents (\n  id TEXT PRIMARY KEY, dedupe_key TEXT NOT NULL, kind TEXT NOT NULL,\n  subject_type TEXT NOT NULL CHECK(subject_type IN ('node','user','home_exit','fleet')),\n  subject_id TEXT NOT NULL,\n  severity TEXT NOT NULL CHECK(severity IN ('severe','warn','notice')),\n  status TEXT NOT NULL CHECK(status IN ('open','acked','resolved')),\n  title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200),\n  detail TEXT CHECK(detail IS NULL OR length(detail) <= 1000),\n  cause TEXT, parent_incident_id TEXT REFERENCES ops_incidents(id) ON DELETE SET NULL,\n  rules_version INTEGER NOT NULL, opened_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL,\n  acked_at INTEGER, acked_by TEXT, snoozed_until INTEGER, resolved_at INTEGER, resolve_reason TEXT,\n  impact_count INTEGER NOT NULL DEFAULT 0,\n  evidence_json TEXT CHECK(evidence_json IS NULL OR length(evidence_json) <= 4096),\n  updated_at INTEGER NOT NULL\n)"
+      },
+      {
+        "type": "index",
+        "name": "ops_incidents_live_unique",
+        "tbl_name": "ops_incidents",
+        "sql": "CREATE UNIQUE INDEX ops_incidents_live_unique ON ops_incidents(dedupe_key) WHERE status <> 'resolved'"
+      },
+      {
+        "type": "index",
+        "name": "ops_incidents_board",
+        "tbl_name": "ops_incidents",
+        "sql": "CREATE INDEX ops_incidents_board   ON ops_incidents(status, severity, opened_at DESC)"
+      },
+      {
+        "type": "index",
+        "name": "ops_incidents_subject",
+        "tbl_name": "ops_incidents",
+        "sql": "CREATE INDEX ops_incidents_subject ON ops_incidents(subject_type, subject_id, opened_at DESC)"
+      },
+      {
+        "type": "index",
+        "name": "ops_incidents_changed",
+        "tbl_name": "ops_incidents",
+        "sql": "CREATE INDEX ops_incidents_changed ON ops_incidents(updated_at DESC, id DESC)"
+      },
+      {
+        "type": "table",
+        "name": "ops_incident_events",
+        "tbl_name": "ops_incident_events",
+        "sql": "CREATE TABLE ops_incident_events (\n  id TEXT PRIMARY KEY, incident_id TEXT NOT NULL REFERENCES ops_incidents(id) ON DELETE CASCADE,\n  at INTEGER NOT NULL,\n  type TEXT NOT NULL CHECK(type IN ('opened','escalated','deescalated','acked','snoozed','note','job','alert','resolved')),\n  actor TEXT, detail TEXT CHECK(detail IS NULL OR length(detail) <= 1000),\n  data_json TEXT CHECK(data_json IS NULL OR length(data_json) <= 4096)\n)"
+      },
+      {
+        "type": "index",
+        "name": "ops_incident_events_incident",
+        "tbl_name": "ops_incident_events",
+        "sql": "CREATE INDEX ops_incident_events_incident ON ops_incident_events(incident_id, at DESC, id DESC)"
+      }
+    ],
+    "success": true,
+    "meta": {
+      "duration": 1
+    }
+  }
+]

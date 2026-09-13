@@ -2,6 +2,36 @@
   "sourceLanguage": "en",
   "strings": {
     "": {},
+    "Backup channel": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "备用通道"
+          }
+        }
+      }
+    },
+    "Backup UDP": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "备用 UDP"
+          }
+        }
+      }
+    },
+    "Try backup channel": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "试用备用通道"
+          }
+        }
+      }
+    },
     "Connected means protected.": {
       "localizations": {
         "zh-Hans": {
@@ -1693,6 +1723,16 @@
         }
       }
     },
+    "Direct internet is available. Retry or choose another route.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "直连网络可用。可以立即重试，或选择其他线路。"
+          }
+        }
+      }
+    },
     "Direct traffic blocked": {
       "localizations": {
         "zh-Hans": {
@@ -3174,16 +3214,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "离线"
-          }
-        }
-      }
-    },
-    "Off by default. When enabled, about every 20 minutes share protection status, the selected server and recent connection events with Tono support": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "默认关闭。主动开启后，大约每 20 分钟向 Tono 支持团队分享保护状态、所选节点和最近的连接事件"
           }
         }
       }
@@ -5381,12 +5411,12 @@
         }
       }
     },
-    "The current node could not complete a protected check. Choose another node, or reconnect to try again.": {
+    "This city could not complete a protected connection. Retry, choose another route, or try the backup channel if one is shown.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "当前节点无法完成受保护验证。请换一个节点，或重新连接再试一次。"
+            "value": "这座城市没有完成受保护连接。请重试或换线路；若有备用通道也可以试用。"
           }
         }
       }
@@ -5397,6 +5427,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "网络组件协议不匹配，需要先完成组件修复。"
+          }
+        }
+      }
+    },
+    "The update did not finish. Disconnect, then reinstall Tono.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新未完成，请手动断开后重装"
           }
         }
       }
@@ -6993,6 +7033,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "VS Code 工作区设置"
+          }
+        }
+      }
+    },
+    "Off by default. When enabled, about every 20 minutes share protection status, the selected server and recent connection events with Tono support, and report a failed connection the moment it happens": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "默认关闭。主动开启后，大约每 20 分钟向 Tono 支持团队分享保护状态、所选节点和最近的连接事件，并在连接失败时立即上报一次"
           }
         }
       }

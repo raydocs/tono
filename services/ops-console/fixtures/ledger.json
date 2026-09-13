@@ -1,0 +1,530 @@
+{
+  "fx": {
+    "USD": 7.1342,
+    "EUR": 7.7821,
+    "GBP": 9.0455,
+    "JPY": 0.0489,
+    "HKD": 0.9142
+  },
+  "fxSource": "frankfurter",
+  "pendingCustomers": [
+    "u-05",
+    "u-12"
+  ],
+  "customerCosts": [
+    {
+      "userId": "u-01",
+      "cnyMinor": 3240
+    },
+    {
+      "userId": "u-02",
+      "cnyMinor": 2980
+    },
+    {
+      "userId": "u-03",
+      "cnyMinor": 1120
+    },
+    {
+      "userId": "u-04",
+      "cnyMinor": 15260
+    },
+    {
+      "userId": "u-05",
+      "cnyMinor": 2650
+    },
+    {
+      "userId": "u-06",
+      "cnyMinor": 2410
+    },
+    {
+      "userId": "u-07",
+      "cnyMinor": 3880
+    },
+    {
+      "userId": "u-08",
+      "cnyMinor": 2060
+    },
+    {
+      "userId": "u-09",
+      "cnyMinor": 4530
+    },
+    {
+      "userId": "u-10",
+      "cnyMinor": 1870
+    },
+    {
+      "userId": "u-11",
+      "cnyMinor": 990
+    },
+    {
+      "userId": "u-12",
+      "cnyMinor": 3390
+    },
+    {
+      "userId": "u-13",
+      "cnyMinor": 2240
+    },
+    {
+      "userId": "u-14",
+      "cnyMinor": 3010
+    },
+    {
+      "userId": "u-15",
+      "cnyMinor": 5120
+    },
+    {
+      "userId": "u-16",
+      "cnyMinor": 1640
+    },
+    {
+      "userId": "u-17",
+      "cnyMinor": 880
+    },
+    {
+      "userId": "u-18",
+      "cnyMinor": 2770
+    },
+    {
+      "userId": "u-19",
+      "cnyMinor": 1450
+    },
+    {
+      "userId": "u-20",
+      "cnyMinor": 2190
+    }
+  ],
+  "nodes": [
+    {
+      "name": "Tokyo · Fuji",
+      "bytes": 862214684672,
+      "pending": false
+    },
+    {
+      "name": "Los Angeles · Mesa",
+      "bytes": 317827579904,
+      "pending": false
+    },
+    {
+      "name": "Singapore · Harbour（新加坡海港 · 大陆直连 · CMIN2）",
+      "bytes": 656056254464,
+      "pending": false
+    },
+    {
+      "name": "Hong Kong · Victoria",
+      "bytes": 356482285568,
+      "pending": false
+    },
+    {
+      "name": "Seoul · Han",
+      "bytes": null,
+      "pending": true
+    },
+    {
+      "name": "London · Thames",
+      "bytes": 94489280512,
+      "pending": false
+    }
+  ],
+  "entries": [
+    {
+      "kind": "revenue",
+      "category": "plan",
+      "subjectType": "user",
+      "subjectId": "u-01",
+      "amount": "128.00",
+      "currency": "CNY",
+      "day": 1,
+      "note": "月付"
+    },
+    {
+      "kind": "revenue",
+      "category": "plan",
+      "subjectType": "user",
+      "subjectId": "u-02",
+      "amount": "128.00",
+      "currency": "CNY",
+      "day": 1,
+      "note": "月付"
+    },
+    {
+      "kind": "revenue",
+      "category": "plan",
+      "subjectType": "user",
+      "subjectId": "u-03",
+      "amount": "128.00",
+      "currency": "CNY",
+      "day": 2,
+      "note": "月付"
+    },
+    {
+      "kind": "revenue",
+      "category": "plan",
+      "subjectType": "user",
+      "subjectId": "u-04",
+      "amount": "168.00",
+      "currency": "CNY",
+      "day": 2,
+      "note": "月付"
+    },
+    {
+      "kind": "revenue",
+      "category": "plan",
+      "subjectType": "user",
+      "subjectId": "u-05",
+      "amount": "128.00",
+      "currency": "CNY",
+      "day": 3,
+      "note": "月付"
+    },
+    {
+      "kind": "revenue",
+      "category": "plan",
+      "subjectType": "user",
+      "subjectId": "u-06",
+      "amount": "88.00",
+      "currency": "CNY",
+      "day": 3,
+      "note": "月付"
+    },
+    {
+      "kind": "revenue",
+      "category": "plan",
+      "subjectType": "user",
+      "subjectId": "u-07",
+      "amount": "128.00",
+      "currency": "CNY",
+      "day": 4,
+      "note": "月付"
+    },
+    {
+      "kind": "revenue",
+      "category": "plan",
+      "subjectType": "user",
+      "subjectId": "u-08",
+      "amount": "128.00",
+      "currency": "CNY",
+      "day": 5,
+      "note": "月付"
+    },
+    {
+      "kind": "revenue",
+      "category": "plan",
+      "subjectType": "user",
+      "subjectId": "u-09",
+      "amount": "168.00",
+      "currency": "CNY",
+      "day": 5,
+      "note": "月付"
+    },
+    {
+      "kind": "revenue",
+      "category": "plan",
+      "subjectType": "user",
+      "subjectId": "u-10",
+      "amount": "128.00",
+      "currency": "CNY",
+      "day": 6,
+      "note": "月付"
+    },
+    {
+      "kind": "revenue",
+      "category": "plan",
+      "subjectType": "user",
+      "subjectId": "u-11",
+      "amount": "88.00",
+      "currency": "CNY",
+      "day": 7,
+      "note": "月付"
+    },
+    {
+      "kind": "revenue",
+      "category": "plan",
+      "subjectType": "user",
+      "subjectId": "u-12",
+      "amount": "128.00",
+      "currency": "CNY",
+      "day": 8,
+      "note": "月付"
+    },
+    {
+      "kind": "revenue",
+      "category": "plan",
+      "subjectType": "user",
+      "subjectId": "u-13",
+      "amount": "128.00",
+      "currency": "CNY",
+      "day": 8,
+      "note": "月付"
+    },
+    {
+      "kind": "revenue",
+      "category": "plan",
+      "subjectType": "user",
+      "subjectId": "u-14",
+      "amount": "128.00",
+      "currency": "CNY",
+      "day": 9,
+      "note": "月付"
+    },
+    {
+      "kind": "revenue",
+      "category": "plan",
+      "subjectType": "user",
+      "subjectId": "u-15",
+      "amount": "168.00",
+      "currency": "CNY",
+      "day": 9,
+      "note": "月付"
+    },
+    {
+      "kind": "revenue",
+      "category": "plan",
+      "subjectType": "user",
+      "subjectId": "u-16",
+      "amount": "128.00",
+      "currency": "CNY",
+      "day": 9,
+      "note": "月付"
+    },
+    {
+      "kind": "revenue",
+      "category": "plan",
+      "subjectType": "user",
+      "subjectId": "u-17",
+      "amount": "88.00",
+      "currency": "CNY",
+      "day": 9,
+      "note": "月付"
+    },
+    {
+      "kind": "revenue",
+      "category": "plan",
+      "subjectType": "user",
+      "subjectId": "u-18",
+      "amount": "128.00",
+      "currency": "CNY",
+      "day": 9,
+      "note": "月付"
+    },
+    {
+      "kind": "revenue",
+      "category": "plan",
+      "subjectType": "user",
+      "subjectId": "u-19",
+      "amount": "128.00",
+      "currency": "CNY",
+      "day": 9,
+      "note": "月付"
+    },
+    {
+      "kind": "revenue",
+      "category": "plan",
+      "subjectType": "user",
+      "subjectId": "u-20",
+      "amount": "128.00",
+      "currency": "CNY",
+      "day": 9,
+      "note": "月付"
+    },
+    {
+      "kind": "refund",
+      "category": "plan",
+      "subjectType": "user",
+      "subjectId": "u-03",
+      "amount": "128.00",
+      "currency": "CNY",
+      "day": 6,
+      "note": "重复扣款退回"
+    },
+    {
+      "kind": "credit",
+      "category": "plan",
+      "subjectType": "user",
+      "subjectId": "u-07",
+      "amount": "30.00",
+      "currency": "CNY",
+      "day": 7,
+      "note": "节点被墙三天的补偿"
+    },
+    {
+      "kind": "cost",
+      "category": "server",
+      "subjectType": "node",
+      "subjectId": "Tokyo · Fuji",
+      "amount": "12.00",
+      "currency": "USD",
+      "day": 2,
+      "note": "月租"
+    },
+    {
+      "kind": "cost",
+      "category": "server",
+      "subjectType": "node",
+      "subjectId": "Los Angeles · Mesa",
+      "amount": "8.50",
+      "currency": "USD",
+      "day": 3,
+      "note": "月租"
+    },
+    {
+      "kind": "cost",
+      "category": "server",
+      "subjectType": "node",
+      "subjectId": "Singapore · Harbour（新加坡海港 · 大陆直连 · CMIN2）",
+      "amount": "15.00",
+      "currency": "USD",
+      "day": 4,
+      "note": "月租"
+    },
+    {
+      "kind": "cost",
+      "category": "server",
+      "subjectType": "node",
+      "subjectId": "Hong Kong · Victoria",
+      "amount": "9.90",
+      "currency": "USD",
+      "day": 5,
+      "note": "月租"
+    },
+    {
+      "kind": "cost",
+      "category": "server",
+      "subjectType": "node",
+      "subjectId": "Seoul · Han",
+      "amount": "7.20",
+      "currency": "USD",
+      "day": 6,
+      "note": "月租"
+    },
+    {
+      "kind": "cost",
+      "category": "server",
+      "subjectType": "node",
+      "subjectId": "London · Thames",
+      "amount": "6.00",
+      "currency": "GBP",
+      "day": 7,
+      "note": "月租"
+    },
+    {
+      "kind": "cost",
+      "category": "home_line",
+      "subjectType": "home_exit",
+      "subjectId": "id_91319de650a8077a",
+      "amount": "59.00",
+      "currency": "CNY",
+      "day": 2,
+      "note": "家宽月费"
+    },
+    {
+      "kind": "cost",
+      "category": "home_line",
+      "subjectType": "home_exit",
+      "subjectId": "id_91319de650a8077a",
+      "amount": "20.00",
+      "currency": "CNY",
+      "day": 8,
+      "note": "超出套餐的流量"
+    },
+    {
+      "kind": "cost",
+      "category": "domain",
+      "subjectType": "fleet",
+      "subjectId": null,
+      "amount": "12.00",
+      "currency": "USD",
+      "day": 3,
+      "note": "主域名续费"
+    },
+    {
+      "kind": "cost",
+      "category": "domain",
+      "subjectType": "fleet",
+      "subjectId": null,
+      "amount": "9.00",
+      "currency": "USD",
+      "day": 3,
+      "note": "备用域名续费"
+    },
+    {
+      "kind": "cost",
+      "category": "control_plane",
+      "subjectType": "fleet",
+      "subjectId": null,
+      "amount": "5.00",
+      "currency": "USD",
+      "day": 1,
+      "note": "控制面"
+    },
+    {
+      "kind": "cost",
+      "category": "control_plane",
+      "subjectType": "fleet",
+      "subjectId": null,
+      "amount": "25.00",
+      "currency": "USD",
+      "day": 1,
+      "note": "对象存储与日志"
+    },
+    {
+      "kind": "cost",
+      "category": "claude_account",
+      "subjectType": "account",
+      "subjectId": "acct_fixture_01",
+      "amount": "20.00",
+      "currency": "USD",
+      "day": 4,
+      "note": "月费"
+    },
+    {
+      "kind": "cost",
+      "category": "claude_account",
+      "subjectType": "account",
+      "subjectId": "acct_fixture_02",
+      "amount": "20.00",
+      "currency": "USD",
+      "day": 4,
+      "note": "月费"
+    },
+    {
+      "kind": "cost",
+      "category": "claude_account",
+      "subjectType": "account",
+      "subjectId": "acct_fixture_03",
+      "amount": "20.00",
+      "currency": "USD",
+      "day": 4,
+      "note": "月费"
+    },
+    {
+      "kind": "cost",
+      "category": "chatgpt_account",
+      "subjectType": "account",
+      "subjectId": "acct_fixture_02",
+      "amount": "20.00",
+      "currency": "USD",
+      "day": 5,
+      "note": "月费"
+    },
+    {
+      "kind": "cost",
+      "category": "chatgpt_account",
+      "subjectType": "account",
+      "subjectId": "acct_fixture_03",
+      "amount": "3000",
+      "currency": "JPY",
+      "day": 5,
+      "note": "日区订阅"
+    },
+    {
+      "kind": "cost",
+      "category": "other",
+      "subjectType": "fleet",
+      "subjectId": null,
+      "amount": "200.00",
+      "currency": "CNY",
+      "day": 6,
+      "note": "客服号与短信"
+    }
+  ]
+}

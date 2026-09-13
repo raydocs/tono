@@ -1,0 +1,2215 @@
+{
+  "items": [
+    {
+      "name": "Amsterdam · Amstel（阿姆斯特丹阿姆斯特尔 · 大陆直连 · CN2）",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": "大陆正常",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Amsterdam",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999984,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999955
+    },
+    {
+      "name": "Ashburn · Potomac（阿什本波托马克 · 大陆直连 · CMIN2）",
+      "verdict": "blocked",
+      "health": "被墙",
+      "tone": "sev",
+      "reason": "密集夹具合成状态",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Ashburn",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 2,
+        "asOfSec": 1724999988,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999959
+    },
+    {
+      "name": "Auckland · Waitemata（奥克兰怀提马塔 · 大陆直连 · CN2GIA）",
+      "verdict": "unknown",
+      "health": "未测",
+      "tone": "unk",
+      "reason": "密集夹具合成状态",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Auckland",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999965,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999936
+    },
+    {
+      "name": "Bangkok · Chao Phraya（曼谷湄南 · 大陆直连 · CMIN2）",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": "大陆正常",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Bangkok",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999971,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999942
+    },
+    {
+      "name": "Cairo · Nile（开罗尼罗 · 大陆直连 · CMIN2）",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": "大陆正常",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Cairo",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999957,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999928
+    },
+    {
+      "name": "Chicago · Loop（芝加哥环线 · 大陆直连 · CN2GIA）",
+      "verdict": "degraded",
+      "health": "劣化",
+      "tone": "warn",
+      "reason": "密集夹具合成状态",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Chicago",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 2,
+        "asOfSec": 1724999989,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 1,
+      "updatedAt": 1724999960
+    },
+    {
+      "name": "Dallas · Trinity（达拉斯三一 · 大陆直连 · 9929）",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": "大陆正常",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Dallas",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 2,
+        "asOfSec": 1724999990,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 1,
+      "updatedAt": 1724999961
+    },
+    {
+      "name": "Delhi · Yamuna（德里亚穆纳 · 大陆直连 · CN2GIA）",
+      "verdict": "unknown",
+      "health": "未测",
+      "tone": "unk",
+      "reason": "密集夹具合成状态",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Delhi",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999972,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999943
+    },
+    {
+      "name": "Dubai · Creek（迪拜河 · 大陆直连 · CMIN2）",
+      "verdict": "blocked",
+      "health": "被墙",
+      "tone": "sev",
+      "reason": "密集夹具合成状态",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Dubai",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999974,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999945
+    },
+    {
+      "name": "Frankfurt · Main（法兰克福美因 · 大陆直连 · CMIN2）",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": "大陆正常",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Frankfurt",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 2,
+        "asOfSec": 1724999985,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999956
+    },
+    {
+      "name": "Helsinki · Baltic（赫尔辛基波罗的海 · 大陆直连 · CN2）",
+      "verdict": "pressure",
+      "health": "劣化",
+      "tone": "warn",
+      "reason": "密集夹具合成状态",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Helsinki",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999980,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999951
+    },
+    {
+      "name": "Hong Kong · Victoria（香港维多利亚 · 大陆直连 · CN2GIA）",
+      "verdict": "blocked",
+      "health": "被墙",
+      "tone": "sev",
+      "reason": "密集夹具合成状态",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Hong Kong",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 2,
+        "asOfSec": 1724999995,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 1,
+      "updatedAt": 1724999966
+    },
+    {
+      "name": "Istanbul · Bosphorus（伊斯坦布尔博斯普鲁斯 · 大陆直连 · CN2GIA）",
+      "verdict": "degraded",
+      "health": "劣化",
+      "tone": "warn",
+      "reason": "密集夹具合成状态",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Istanbul",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999975,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999946
+    },
+    {
+      "name": "Jakarta · Ciliwung（雅加达芝利翁 · 大陆直连 · CN2）",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": "大陆正常",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Jakarta",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999970,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999941
+    },
+    {
+      "name": "Johannesburg · Highveld（约翰内斯堡高地 · 大陆直连 · CN2GIA）",
+      "verdict": "unknown",
+      "health": "未测",
+      "tone": "unk",
+      "reason": "密集夹具合成状态",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Johannesburg",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999958,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999929
+    },
+    {
+      "name": "Kuala Lumpur · Klang（吉隆坡巴生 · 大陆直连 · CN2GIA）",
+      "verdict": "degraded",
+      "health": "劣化",
+      "tone": "warn",
+      "reason": "密集夹具合成状态",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Kuala Lumpur",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999968,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999939
+    },
+    {
+      "name": "London · Thames（伦敦泰晤士 · 大陆直连 · CN2GIA）",
+      "verdict": "unknown",
+      "health": "未测",
+      "tone": "unk",
+      "reason": "密集夹具合成状态",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "London",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 2,
+        "asOfSec": 1724999986,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999957
+    },
+    {
+      "name": "Los Angeles · Echo（洛杉矶回声 · 大陆直连 · CN2GIA）",
+      "verdict": "unknown",
+      "health": "未测",
+      "tone": "unk",
+      "reason": "密集夹具合成状态",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Los Angeles",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 2,
+        "asOfSec": 1724999993,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 1,
+      "updatedAt": 1724999964
+    },
+    {
+      "name": "Madrid · Manzanares（马德里曼萨纳雷斯 · 大陆直连 · CMIN2）",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": "大陆正常",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Madrid",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999978,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999949
+    },
+    {
+      "name": "Manila · Pasig（马尼拉帕西格 · 大陆直连 · 9929）",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": "大陆正常",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Manila",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999969,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999940
+    },
+    {
+      "name": "Melbourne · Yarra（墨尔本亚拉 · 大陆直连 · CN2）",
+      "verdict": "pressure",
+      "health": "劣化",
+      "tone": "warn",
+      "reason": "密集夹具合成状态",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Melbourne",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999966,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999937
+    },
+    {
+      "name": "Mexico City · Chapultepec（墨西哥城查普尔特佩克 · 大陆直连 · CMIN2）",
+      "verdict": "blocked",
+      "health": "被墙",
+      "tone": "sev",
+      "reason": "密集夹具合成状态",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Mexico City",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999960,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999931
+    },
+    {
+      "name": "Miami · Biscayne（迈阿密比斯坎 · 大陆直连 · CN2）",
+      "verdict": "pressure",
+      "health": "劣化",
+      "tone": "warn",
+      "reason": "密集夹具合成状态",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Miami",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 2,
+        "asOfSec": 1724999987,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999958
+    },
+    {
+      "name": "Milan · Naviglio（米兰纳维利 · 大陆直连 · CN2）",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": "大陆正常",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Milan",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999977,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999948
+    },
+    {
+      "name": "Montreal · Saint Laurent（蒙特利尔圣劳伦斯 · 大陆直连 · 9929）",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": "大陆正常",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Montreal",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999962,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999933
+    },
+    {
+      "name": "Mumbai · Harbour（孟买海港 · 大陆直连 · CN2）",
+      "verdict": "pressure",
+      "health": "劣化",
+      "tone": "warn",
+      "reason": "密集夹具合成状态",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Mumbai",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999973,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999944
+    },
+    {
+      "name": "Osaka · Umeda（大阪梅田 · 大陆直连 · CN2）",
+      "verdict": "degraded",
+      "health": "劣化",
+      "tone": "warn",
+      "reason": "密集夹具合成状态",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Osaka",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 2,
+        "asOfSec": 1724999996,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999967
+    },
+    {
+      "name": "Paris · Seine（巴黎塞纳 · 大陆直连 · 9929）",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": "大陆正常",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Paris",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999983,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999954
+    },
+    {
+      "name": "Preview Catalog-only",
+      "verdict": "unknown",
+      "health": "未测",
+      "tone": "unk",
+      "reason": null,
+      "lifecycle": "retired",
+      "catalogListed": false,
+      "region": null,
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 0,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999970
+    },
+    {
+      "name": "Preview Seoul",
+      "verdict": "unknown",
+      "health": "未测",
+      "tone": "unk",
+      "reason": null,
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": null,
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 0,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": 536870912000,
+          "used": 0,
+          "pct": 0,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": 1723790400,
+          "cycleEnd": 1726382400,
+          "counts": "in_out"
+        },
+        "asOfSec": 1725000000,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": 1725000000,
+        "source": "komari"
+      },
+      "renewsAt": 1725172800,
+      "expiresAt": null,
+      "choreCount": 4,
+      "incidentCount": 1,
+      "updatedAt": 1724999970
+    },
+    {
+      "name": "Preview Tokyo",
+      "verdict": "unknown",
+      "health": "未测",
+      "tone": "unk",
+      "reason": null,
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": null,
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999970,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": 1099511627776,
+          "used": 0,
+          "pct": 0,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": 1723790400,
+          "cycleEnd": 1726382400,
+          "counts": "in_out"
+        },
+        "asOfSec": 1725000000,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": 1725000000,
+        "source": "komari"
+      },
+      "renewsAt": 1725864000,
+      "expiresAt": null,
+      "choreCount": 4,
+      "incidentCount": 0,
+      "updatedAt": 1724999970
+    },
+    {
+      "name": "Riyadh · Wadi（利雅得谷地 · 大陆直连 · 9929）",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": "大陆正常",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Riyadh",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999955,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999926
+    },
+    {
+      "name": "San Jose · Mission（圣何塞使命 · 大陆直连 · CMIN2）",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": "大陆正常",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "San Jose",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 2,
+        "asOfSec": 1724999992,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999963
+    },
+    {
+      "name": "Santiago · Mapocho（圣地亚哥马波乔 · 大陆直连 · CN2）",
+      "verdict": "pressure",
+      "health": "劣化",
+      "tone": "warn",
+      "reason": "密集夹具合成状态",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Santiago",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999959,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999930
+    },
+    {
+      "name": "Sao Paulo · Pinheiros（圣保罗皮涅伊罗斯 · 大陆直连 · CN2GIA）",
+      "verdict": "degraded",
+      "health": "劣化",
+      "tone": "warn",
+      "reason": "密集夹具合成状态",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Sao Paulo",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999961,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999932
+    },
+    {
+      "name": "Seattle · Rainier（西雅图雷尼尔 · 大陆直连 · CN2）",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": "大陆正常",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Seattle",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 2,
+        "asOfSec": 1724999991,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 1,
+      "updatedAt": 1724999962
+    },
+    {
+      "name": "Seoul · Han（首尔汉江 · 大陆直连 · CMIN2）",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": "大陆正常",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Seoul",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 2,
+        "asOfSec": 1724999997,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 1,
+      "updatedAt": 1724999968
+    },
+    {
+      "name": "Singapore · Harbour（新加坡海港 · 大陆直连 · CMIN2）",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": "大陆正常",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Singapore",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 2,
+        "asOfSec": 1724999999,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 1,
+      "updatedAt": 1724999970
+    },
+    {
+      "name": "Stockholm · Malaren（斯德哥尔摩梅拉伦 · 大陆直连 · CMIN2）",
+      "verdict": "blocked",
+      "health": "被墙",
+      "tone": "sev",
+      "reason": "密集夹具合成状态",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Stockholm",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999981,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999952
+    },
+    {
+      "name": "Sydney · Harbour（悉尼海港 · 大陆直连 · CMIN2）",
+      "verdict": "blocked",
+      "health": "被墙",
+      "tone": "sev",
+      "reason": "密集夹具合成状态",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Sydney",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999967,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999938
+    },
+    {
+      "name": "Taipei · Daan（台北大安 · 大陆直连 · CN2）",
+      "verdict": "pressure",
+      "health": "劣化",
+      "tone": "warn",
+      "reason": "密集夹具合成状态",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Taipei",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 2,
+        "asOfSec": 1724999994,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 1,
+      "updatedAt": 1724999965
+    },
+    {
+      "name": "Tel Aviv · Yarkon（特拉维夫雅孔 · 大陆直连 · CN2）",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": "大陆正常",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Tel Aviv",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999956,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999927
+    },
+    {
+      "name": "Tokyo · Shibuya（东京涩谷 · 大陆直连 · CN2GIA）",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": "大陆正常",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Tokyo",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 2,
+        "asOfSec": 1724999998,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 1,
+      "updatedAt": 1724999969
+    },
+    {
+      "name": "Toronto · Ontario（多伦多安大略 · 大陆直连 · CMIN2）",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": "大陆正常",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Toronto",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999964,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999935
+    },
+    {
+      "name": "Vancouver · Burrard（温哥华布勒 · 大陆直连 · CN2）",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": "大陆正常",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Vancouver",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999963,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999934
+    },
+    {
+      "name": "Vienna · Danube（维也纳多瑙 · 大陆直连 · 9929）",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": "大陆正常",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Vienna",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999976,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999947
+    },
+    {
+      "name": "Warsaw · Vistula（华沙维斯瓦 · 大陆直连 · CN2GIA）",
+      "verdict": "unknown",
+      "health": "未测",
+      "tone": "unk",
+      "reason": "密集夹具合成状态",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Warsaw",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999979,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999950
+    },
+    {
+      "name": "Zurich · Limmat（苏黎世利马特 · 大陆直连 · CN2GIA）",
+      "verdict": "degraded",
+      "health": "劣化",
+      "tone": "warn",
+      "reason": "密集夹具合成状态",
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": "Zurich",
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999982,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999953
+    }
+  ],
+  "nextCursor": null,
+  "updatedAt": 1725000000,
+  "total": 48
+}

@@ -44,10 +44,22 @@ extension AppState {
             activeNode = desiredNode
             proxyService.activeNodeName = nodeName
             persistProxySelection(nodeName)
-            if catalogSelectionRequiresChoice {
-                catalogSelectionRequiresChoice = false
-                autoConnectRequested = true
-                attemptAutomaticConnect()
+            catalogSelectionRequiresChoice = false
+            // First-connect handshake eof fully releases protection, so a
+            // tap on the server list used to persist only. The card already
+            // feels like Connect; actually connect. Protected Offline retries
+            // in place, same as Retry now / Try backup channel.
+            if IdleCatalogSelect.shouldRetryProtected(
+                connected: false,
+                protectionBlocked: isProtectionBlocked
+            ) {
+                retryProtectedConnectionNow()
+            } else if IdleCatalogSelect.shouldConnect(
+                connected: false,
+                protectionBlocked: isProtectionBlocked,
+                connecting: isConnecting
+            ) {
+                connect()
             }
             return
         }

@@ -701,6 +701,42 @@ async fn adopt_tono_service_session(generation: u64, proposed_session_token: Str
     CoreManager::global().core_started(RunningMode::Service);
 }
 
+/// After `cancel_owner_monitors()`, every non-Ok stop must either restart the watchdog or
+/// run owner-loss recovery. A transport `Err` that just `?`s leaves `RunningMode::Service`
+/// stale and "Quit anyway" then aborts because `stop_core` still routes through the Service.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum StopCoreWatchdogAction {
+    RestartMonitor,
+    RecoverDisplaced,
+}
+
+pub(super) fn watchdog_action_after_tono_stop_failure(
+    transport_failed: bool,
+    response_code: Option<u16>,
+) -> StopCoreWatchdogAction {
+    if transport_failed {
+        return StopCoreWatchdogAction::RestartMonitor;
+    }
+    match response_code {
+        Some(code)
+            if code == tono_service_protocol::ServiceErrorCode::NotActive as u16
+                || code == tono_service_protocol::ServiceErrorCode::StaleOwnerSession as u16 =>
+        {
+            StopCoreWatchdogAction::RecoverDisplaced
+        }
+        _ => StopCoreWatchdogAction::RestartMonitor,
+    }
+}
+
+async fn restore_owner_watchdog_after_failed_stop(action: StopCoreWatchdogAction) {
+    match action {
+        StopCoreWatchdogAction::RestartMonitor => start_owner_monitor(),
+        StopCoreWatchdogAction::RecoverDisplaced => {
+            recover_after_owner_loss_while_locked(OwnerRecoveryReason::Displaced).await;
+        }
+    }
+}
+
 /// Stop the Tono core, always speaking the rev 5 stop options.
 ///
 /// `release_kill_switch = false` keeps the WFP policy armed (fail-closed reconnect path);
@@ -713,26 +749,49 @@ pub(crate) async fn tono_stop_core(release_kill_switch: bool) -> Result<()> {
     );
     cancel_owner_monitors();
 
-    let credentials = current_owner_credentials()?;
-    let session = active_service_session()?;
-    let response = tono_service_protocol::stop_clash_with_options(
+    let credentials = match current_owner_credentials() {
+        Ok(credentials) => credentials,
+        Err(error) => {
+            restore_owner_watchdog_after_failed_stop(watchdog_action_after_tono_stop_failure(
+                true, None,
+            ))
+            .await;
+            return Err(error);
+        }
+    };
+    let session = match active_service_session() {
+        Ok(session) => session,
+        Err(error) => {
+            restore_owner_watchdog_after_failed_stop(watchdog_action_after_tono_stop_failure(
+                true, None,
+            ))
+            .await;
+            return Err(error);
+        }
+    };
+    let response = match tono_service_protocol::stop_clash_with_options(
         &credentials,
         &session,
         StopClashOptions { release_kill_switch },
     )
     .await
-    .context("无法连接到Tono Service")?;
+    {
+        Ok(response) => response,
+        Err(error) => {
+            restore_owner_watchdog_after_failed_stop(watchdog_action_after_tono_stop_failure(
+                true, None,
+            ))
+            .await;
+            return Err(error).context("无法连接到Tono Service");
+        }
+    };
 
     if response.code > 0 {
-        if matches!(
-            response.code,
-            code if code == tono_service_protocol::ServiceErrorCode::NotActive as u16
-                || code == tono_service_protocol::ServiceErrorCode::StaleOwnerSession as u16
-        ) {
-            recover_after_owner_loss_while_locked(OwnerRecoveryReason::Displaced).await;
-        } else {
-            start_owner_monitor();
-        }
+        restore_owner_watchdog_after_failed_stop(watchdog_action_after_tono_stop_failure(
+            false,
+            Some(response.code),
+        ))
+        .await;
         let err_msg = response.message;
         logging!(error, Type::Service, "Tono: 停止核心失败: {}", err_msg);
         bail!(err_msg);

@@ -88,6 +88,13 @@ final class AccountSession {
     var appRoutingResearchTask: Task<Void, Never>?
     var periodicTelemetryTask: Task<Void, Never>?
     var lastPeriodicTelemetryAt: Date?
+    /// When a connect failure was last reported. For a quarter of an hour after
+    /// it the next window may come at five minutes instead of eighteen, so
+    /// whether the retry worked is visible before the regular cadence shows it.
+    var lastConnectFailureAt: Date?
+    var earlyTelemetryTask: Task<Void, Never>?
+    static let telemetrySpacingAfterFailure: TimeInterval = 5 * 60
+    static let telemetryFailureFollowUpWindow: TimeInterval = 15 * 60
     /// Slightly under the 20-minute cadence so an on-time window is never
     /// dropped by clock jitter, and comfortably inside the six-an-hour budget.
     static let periodicTelemetryMinimumSpacing: TimeInterval = 18 * 60
@@ -219,5 +226,6 @@ final class AccountSession {
         self.appRoutingResearchActivationConsumer =
             appRoutingResearchActivationConsumer
         self.pathLatencyConsumer = pathLatencyConsumer
+        installConnectFailureReporting()
     }
 }

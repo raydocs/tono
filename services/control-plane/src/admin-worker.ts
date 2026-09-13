@@ -46,6 +46,8 @@ export default {
       url.pathname === '/' ||
       url.pathname === '/ops' ||
       url.pathname.startsWith('/ops/') ||
+      url.pathname === '/ops2' ||
+      url.pathname.startsWith('/ops2/') ||
       url.pathname.startsWith('/api/v1/ops/');
     if (!allowed) return unavailable();
 
@@ -59,11 +61,11 @@ export default {
     // or sharing the obvious URL for a page actually gets. Send them to the
     // page they meant instead. A segment containing a dot is a real file
     // (`index.html`, `assets/index-*.js`) and is left alone.
-    const deepLink = /^\/ops\/([A-Za-z0-9_-]+)\/?$/.exec(url.pathname);
+    const deepLink = /^\/(ops2?)\/([A-Za-z0-9_-]+)\/?$/.exec(url.pathname);
     if (deepLink) {
       return new Response(null, {
         status: 302,
-        headers: { ...closedHeaders, location: `/ops/#/${deepLink[1]}` },
+        headers: { ...closedHeaders, location: `/${deepLink[1]}/#/${deepLink[2]}` },
       });
     }
 

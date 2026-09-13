@@ -1,0 +1,130 @@
+{
+  "name": "Preview Catalog-only",
+  "verdict": "unknown",
+  "health": "未测",
+  "tone": "unk",
+  "reason": null,
+  "lifecycle": "retired",
+  "catalogListed": false,
+  "facts": {
+    "publicIp": "203.0.113.1",
+    "os": null,
+    "region": null,
+    "provider": "synthetic",
+    "providerAccountId": null,
+    "lineTags": [],
+    "port": null,
+    "price": null,
+    "currency": null,
+    "billingCycle": null,
+    "renewsAt": null,
+    "expiresAt": null,
+    "notes": "Synthetic union-only profile",
+    "createdAt": 1722407948,
+    "updatedAt": 1724999918
+  },
+  "bindings": {
+    "catalog": false,
+    "exitToken": false,
+    "komari": false,
+    "identitySync": false,
+    "metering": false,
+    "asOfSec": null
+  },
+  "forwardPath": {
+    "value": [
+      {
+        "carrier": "unicom",
+        "successRate": null,
+        "medianTcpMs": null,
+        "topFailure": null,
+        "attempts": 0,
+        "users": 0
+      },
+      {
+        "carrier": "telecom",
+        "successRate": null,
+        "medianTcpMs": null,
+        "topFailure": null,
+        "attempts": 0,
+        "users": 0
+      },
+      {
+        "carrier": "mobile",
+        "successRate": null,
+        "medianTcpMs": null,
+        "topFailure": null,
+        "attempts": 0,
+        "users": 0
+      },
+      {
+        "carrier": "other",
+        "successRate": null,
+        "medianTcpMs": null,
+        "topFailure": null,
+        "attempts": 0,
+        "users": 0
+      }
+    ],
+    "asOfSec": null,
+    "source": "telemetry"
+  },
+  "returnPath": {
+    "value": [
+      {
+        "carrier": "unicom",
+        "latencyMs": null,
+        "lossPct": null,
+        "samples": 0
+      },
+      {
+        "carrier": "telecom",
+        "latencyMs": null,
+        "lossPct": null,
+        "samples": 0
+      },
+      {
+        "carrier": "mobile",
+        "latencyMs": null,
+        "lossPct": null,
+        "samples": 0
+      },
+      {
+        "carrier": "other",
+        "latencyMs": null,
+        "lossPct": null,
+        "samples": 0
+      }
+    ],
+    "asOfSec": null,
+    "source": "komari"
+  },
+  "occupancy": {
+    "value": [],
+    "asOfSec": null,
+    "source": "telemetry"
+  },
+  "quota": {
+    "value": {
+      "quota": null,
+      "used": null,
+      "pct": null,
+      "projectedExhaustAt": null,
+      "level": "ok",
+      "cycleKind": "manual",
+      "cycleStart": null,
+      "cycleEnd": null,
+      "counts": "in_out"
+    },
+    "asOfSec": null,
+    "source": "profile"
+  },
+  "recentErrors": {
+    "value": [],
+    "asOfSec": null,
+    "source": "jobs"
+  },
+  "jobs": [],
+  "history": [],
+  "updatedAt": 1724999918
+}

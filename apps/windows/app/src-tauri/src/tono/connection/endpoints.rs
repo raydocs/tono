@@ -3,12 +3,17 @@
 use tono_core::node::ValidatedNode;
 use tono_service_protocol::{ProxyEndpoint, ProxyProtocol};
 
-/// §6.2 endpoint derivation: the selected node's public IPv4/port over TCP.
+/// §6.2 endpoint derivation: VLESS is TCP; hy2 is that same IPv4/port over UDP.
+/// Selecting a VLESS node does not pre-permit a sibling hy2 block.
 pub fn proxy_endpoint_of(node: &ValidatedNode) -> ProxyEndpoint {
     ProxyEndpoint {
         ip: node.server.to_string(),
         port: node.port,
-        protocol: ProxyProtocol::Tcp,
+        protocol: if node.is_hysteria2() {
+            ProxyProtocol::Udp
+        } else {
+            ProxyProtocol::Tcp
+        },
     }
 }
 

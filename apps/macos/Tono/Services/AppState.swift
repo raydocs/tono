@@ -77,6 +77,9 @@ final class AppState {
     var disconnectionStartedAt: Date?
     var completedConnectionStages: Set<ConnectionStage> = []
     var lastConnectionFailure: ConnectionFailure?
+    /// Failed update journal still on disk. Dashboard tells the customer to
+    /// disconnect and reinstall; a later connect must not hide this.
+    var updateIncomplete: Bool = UpdateHandoffStore.showsIncompleteUpdate()
     var isProtectedReconnectScheduled = false
     var protectedReconnectAttempt = 0
     var protectedReconnectNextAttemptAt: Date?
@@ -237,8 +240,8 @@ final class AppState {
     let persistenceWriter = AppStatePersistenceWriter()
     var persistenceTask: Task<Void, Never>?
 
-    // Clash config
-    var config: ClashConfig = ClashConfig()
+    // Runtime config
+    var config: RuntimeConfig = RuntimeConfig()
 
     // Core components
     let coreRuntime = CoreRuntimeManager()
@@ -247,7 +250,7 @@ final class AppState {
     let proxyService = ProxyService()
     private let providerRuleLoader = ProviderRuleLoader()
     var coreController: CoreControllerClient?
-    var webSocket: ClashWebSocket?
+    var webSocket: CoreWebSocket?
     /// Digest of the config the running core actually loaded, as opposed to the
     /// last one written to disk. A rewrite that reproduces these bytes has
     /// nothing to reload, and the reload is what closes every open connection.
@@ -736,15 +739,15 @@ final class AppState {
             let rotated = Array(catalog.dropFirst(currentIndex + 1))
                 + Array(catalog.prefix(currentIndex + 1))
             return rotated.first(where: { node in
-                node.id != current.id && !proxyTarget(node.name, matches: current.name)
+                ProxyNode.isCityFailoverCandidate(node.name, after: current.name)
             })
         }
         if let preferred = defaultCloudExitNode(),
-           current.map({ $0.id != preferred.id && !proxyTarget(preferred.name, matches: $0.name) }) ?? true {
+           ProxyNode.isCityFailoverCandidate(preferred.name, after: current?.name) {
             return preferred
         }
         return catalog.first(where: { node in
-            current.map { $0.id != node.id && !proxyTarget(node.name, matches: $0.name) } ?? true
+            ProxyNode.isCityFailoverCandidate(node.name, after: current?.name)
         })
     }
 
@@ -799,8 +802,10 @@ final class AppState {
         catalogFailoverAttemptTarget = nil
     }
 
-    /// After a China connect that proved the selected city dead, move to the
-    /// next unused catalog exit before the fail-closed reconnect fires.
+    /// Next unused catalog city for a failover sweep. Not called on the live
+    /// `CORE_EXIT_UNREACHABLE` path: that TLS close repeats on every city from
+    /// China, and hopping only moved the picker. `CatalogCityFailover` keeps
+    /// it off until G2.8 has home-broadband proof.
     @discardableResult
     func rotateCatalogExitAfterConnectFailure() -> Bool {
         let catalog = managedCatalogNodes

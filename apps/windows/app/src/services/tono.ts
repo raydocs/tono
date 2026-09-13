@@ -23,6 +23,10 @@ export type TonoUiState =
   | 'protectedOffline'
   | 'disconnecting'
 
+/** Idle disconnected: picking a city (including hy2) is Connect, not a silent selection. Protected Offline reconnects inside `tonoSelectServer`. */
+export const idleSelectShouldConnect = (uiState: TonoUiState | undefined) =>
+  uiState === 'notConnected'
+
 export interface TonoSignInChallenge {
   challengeId: string
   expiresIn: number
@@ -107,6 +111,8 @@ export interface TonoStatus {
   tcpDelayAtMs?: number | null
   claudeHomeActive?: boolean | null
   claudeHomeHost?: string | null
+  /** Failed update journal still on disk. Disconnect, then reinstall. */
+  updateIncomplete?: boolean
 }
 
 export const TONO_STATUS_EVENT = 'tono://status'
@@ -259,6 +265,9 @@ const mappedTonoActionErrorKey = (raw: string): string | null => {
   ) {
     return 'tono.dashboard.errors.protectedHttpsFailed'
   }
+  if (raw.includes('CORE_EXIT_UNREACHABLE')) {
+    return 'tono.dashboard.errors.nodeUnreachable'
+  }
   for (const { prefix, key } of STABLE_ERROR_KEYS) {
     if (raw.startsWith(prefix) || raw.includes(`${prefix}:`)) {
       return key
@@ -305,6 +314,30 @@ export const formatTonoActionError = (
   t?: (key: string) => string,
 ): string => describeTonoActionError(error, t).message
 
+/** First stable `TONO_*` / `CORE_*` token in a diagnostic string, for Copy details. */
+export const stableTonoErrorCode = (
+  raw: string | null | undefined,
+): string | null => {
+  if (!raw) return null
+  return raw.match(/\b((?:TONO|CORE)_[A-Z0-9_]+)\b/)?.[1] ?? null
+}
+
+/**
+ * Connect IPC rejections that are not a failed attempt: a newer click won,
+ * or this call overlapped an attempt that is still running. The dashboard
+ * must stay on the live connecting state — not flash "something went wrong".
+ */
+export const isSupersededConnectRejection = (error: unknown): boolean => {
+  const raw = (
+    error instanceof Error ? error.message : String(error ?? '')
+  ).toLowerCase()
+  return (
+    raw.includes('connection superseded by a newer transition') ||
+    raw === 'already connecting' ||
+    raw.includes('a connection transition is already in flight')
+  )
+}
+
 /**
  * Whether a connect rejection means "no usable server is selected" — the
  * guard strings from the backend's `guard_snapshot` (no selection, selection
@@ -335,6 +368,24 @@ export const connectErrorSuggestsServerSwitch = (error: unknown): boolean => {
     raw.includes('TONO_NODE_OR_CORE_UNREACHABLE') ||
     raw.toLowerCase().includes('node or core unreachable') ||
     raw.toLowerCase().includes('network blocked')
+  )
+}
+
+/**
+ * True when the same TLS/exit failure is worth trying the city's hy2 sibling.
+ * Handshake eof is the mobile-DPI case: another TCP city will not help, the
+ * backup channel might. Does not turn auto-switch on (G2.8 stays off).
+ */
+export const connectErrorSuggestsBackupChannel = (error: unknown): boolean => {
+  const raw = error instanceof Error ? error.message : String(error ?? '')
+  if (!raw) return false
+  if (/tls handshake eof/i.test(raw)) return true
+  if (raw.includes('CORE_EXIT_UNREACHABLE')) return true
+  if (raw.includes('TONO_NODE_OR_CORE_UNREACHABLE')) return true
+  const lower = raw.toLowerCase()
+  return (
+    lower.includes('node or core unreachable') ||
+    lower.includes('network blocked')
   )
 }
 
@@ -560,6 +611,7 @@ export const formatTonoDiagnostics = (
         : '(none)'
     }`,
     `Failed stage: ${report.failedStage ?? '(none)'}`,
+    `Error code: ${stableTonoErrorCode(report.error) ?? '(none)'}`,
     `Error: ${report.error ?? '(none)'}`,
     `Retry attempt: ${report.retryAttempt}`,
     `Total elapsed: ${

@@ -737,6 +737,40 @@ describe('customer path incidents', () => {
 });
 
 describe('ops node union and incident ranking', () => {
+  const retiredInput = () => ({
+    nowMs: 1_700_000_000_000,
+    catalogYaml: 'proxies:\n  - name: "Active"\n    type: vless\n',
+    catalogSource: 'ready' as const,
+    qualityNodes: [qualityNode('Retired')],
+    agents: [agent({ name: 'Retired' })],
+    profiles: [{ catalogName: 'Retired', status: 'retired' } as NodeProfileDto],
+    profileSource: 'ready' as const,
+    activity: [] as ActivityUserDto[],
+    activitySource: 'ready' as const,
+  });
+
+  it('does not resurrect a retired unlisted node from stale agent or quality records', () => {
+    const nodes = assembleOpsNodes(retiredInput());
+    expect(nodes.map((node) => node.name)).toEqual(['Active']);
+    expect(incidentsFromWorld({ nodes, people: [], catalogRevision: 44, nowSec: 1_700_000_000 })
+      .some((incident) => incident.node === 'Retired')).toBe(false);
+  });
+
+  it('keeps retired records visible when catalog or occupancy cannot establish safe exclusion', () => {
+    const base = retiredInput();
+    const cases: Parameters<typeof assembleOpsNodes>[0][] = [
+      { ...base, catalogSource: 'unavailable' },
+      { ...base, catalogYaml: null },
+      { ...base, profileSource: 'unavailable' },
+      { ...base, activitySource: 'unavailable' },
+      { ...base, catalogYaml: 'proxies:\n  - name: "Retired"\n    type: vless\n' },
+      { ...base, activity: [activity({ selectedServer: 'Retired', online: true })] },
+    ];
+    for (const input of cases) {
+      expect(assembleOpsNodes(input).some((node) => node.name === 'Retired')).toBe(true);
+    }
+  });
+
   it('keeps catalog-only and agent-only machines in the grid', () => {
     const nodes = assembleOpsNodes({
       nowMs: 1_700_000_000_000,

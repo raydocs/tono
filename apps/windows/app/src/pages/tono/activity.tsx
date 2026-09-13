@@ -24,7 +24,7 @@ import {
   toActivityRow,
 } from './activity-model'
 
-type ActivityFilter = 'all' | ActivityRoute
+type ActivityFilter = 'all' | Exclude<ActivityRoute, 'local'>
 type ActivityView = 'apps' | 'connections'
 
 const MAX_ACTIVITY_CONNECTIONS = 2_000

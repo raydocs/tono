@@ -41,7 +41,7 @@ nonisolated final class ConfigStorage: @unchecked Sendable {
 
     // MARK: - Config
 
-    func saveConfig(_ config: ClashConfig) {
+    func saveConfig(_ config: RuntimeConfig) {
         var persisted = config
         // The local controller credential is per-process and must never survive
         // a restart or be exposed in the preferences file.
@@ -52,9 +52,9 @@ nonisolated final class ConfigStorage: @unchecked Sendable {
         try? writeSensitive(data, to: configFilePath)
     }
 
-    func loadConfig() -> ClashConfig? {
+    func loadConfig() -> RuntimeConfig? {
         guard let data = try? Data(contentsOf: configFilePath) else { return nil }
-        return try? JSONDecoder().decode(ClashConfig.self, from: data)
+        return try? JSONDecoder().decode(RuntimeConfig.self, from: data)
     }
 
     // MARK: - Proxy Regions

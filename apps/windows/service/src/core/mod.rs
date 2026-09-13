@@ -113,9 +113,7 @@ pub use maintenance::cleanup_stale_owner_state;
 #[cfg(all(feature = "standalone", feature = "test"))]
 pub use manager::{CoreWatchdogTestConfig, set_core_watchdog_config_for_tests};
 #[cfg(all(feature = "standalone", windows))]
-pub use netmon::{
-    note_power_event, recent_events as recent_network_events, start as start_network_monitor,
-};
+pub use netmon::{note_power_event, start as start_network_monitor};
 #[cfg(feature = "standalone")]
 pub use owner::{ServiceOwnerGuard, acquire_service_owner};
 #[cfg(feature = "standalone")]

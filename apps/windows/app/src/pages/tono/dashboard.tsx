@@ -1,19 +1,23 @@
 import { useLockFn } from 'ahooks'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router'
 
 import { useTonoStatus } from '@/hooks/use-tono'
 import { useTrafficData } from '@/hooks/use-traffic-data'
+import { tonoEncryptedDnsOverrides } from '@/services/cmds'
 import { showNotice } from '@/services/notice-service'
 import { useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
 import {
+  connectErrorSuggestsBackupChannel,
   connectErrorSuggestsServerSwitch,
   connectRejectionNeedsServerChoice,
+  describeTonoActionError,
   formatTonoActionError,
-  isEncryptedDnsFailure,
   formatTonoDiagnostics,
+  isEncryptedDnsFailure,
+  isSupersededConnectRejection,
   tonoCatalogStatus,
   tonoConnect,
   tonoDiagnosticsReport,
@@ -25,6 +29,7 @@ import { ConnectPill } from '@/tono-ui/ConnectPill'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import { OpenDnsSettingsButton } from '@/tono-ui/OpenDnsSettingsButton'
 import { PageHeader } from '@/tono-ui/PageHeader'
+import { hasLiveProtection } from '@/tono-ui/protection-evidence'
 import {
   TONO_COLORS,
   TONO_MONO_STACK,
@@ -44,10 +49,9 @@ import {
   readNodeLatency,
 } from './node-latency'
 import {
+  nodeCityLabel,
   nodeCityParts,
-  nodeCityTitleKey,
   nodeCode,
-  nodeDisplayName,
 } from './node-meta'
 
 const hex = (color: string, alpha: number) =>
@@ -58,10 +62,14 @@ const hex = (color: string, alpha: number) =>
 
 const CHECKLIST_STORAGE_KEY = 'tono.connectChecklistDismissed'
 const catalogStatusQueryKey = ['tono', 'catalog-status'] as const
-/** Ignore a cancel click this long after entering connecting (macOS parity). */
-const CANCEL_GRACE_MS = 1200
-
-const ConnectChecklist = ({ dark }: { dark: boolean }) => {
+const encryptedDnsQueryKey = ['tono', 'encrypted-dns'] as const
+const ConnectChecklist = ({
+  dark,
+  encryptedDnsOverrides,
+}: {
+  dark: boolean
+  encryptedDnsOverrides: boolean
+}) => {
   const { t } = useTranslation()
   const text = tonoText(dark)
   const [dismissed, setDismissed] = useState(() => {
@@ -131,9 +139,11 @@ const ConnectChecklist = ({ dark }: { dark: boolean }) => {
           </li>
         ))}
       </ol>
-      <div style={{ marginTop: 10 }}>
-        <OpenDnsSettingsButton />
-      </div>
+      {encryptedDnsOverrides ? (
+        <div style={{ marginTop: 10 }}>
+          <OpenDnsSettingsButton accent />
+        </div>
+      ) : null}
     </GlassCard>
   )
 }
@@ -281,9 +291,7 @@ const ActiveNodeCard = ({
                 whiteSpace: 'nowrap',
               }}
             >
-              {nodeCityTitleKey(serverName)
-                ? t(nodeCityTitleKey(serverName)!)
-                : nodeDisplayName(serverName)}
+              {nodeCityLabel(serverName, t)}
             </span>
             <span style={{ fontSize: 11, color: text.tertiary }}>
               {nodeCityParts(serverName).codename
@@ -457,9 +465,13 @@ const InfoItem = ({
 
 interface DashboardActionError {
   message: string
+  /** Unmapped backend text; shown under the localized fallback. */
+  detail?: string
   retry: 'connect' | 'disconnect' | 'retryNow'
   suggestsSwitch: boolean
   encryptedDns: boolean
+  /** Handshake eof / unreachable: the progress card owns Retry + next hand. */
+  progressOwns: boolean
 }
 
 const DashboardPage = () => {
@@ -474,6 +486,11 @@ const DashboardPage = () => {
     queryKey: catalogStatusQueryKey,
     queryFn: tonoCatalogStatus,
     refetchInterval: 30_000,
+  })
+  const { data: encryptedDnsOverrides } = useQuery({
+    queryKey: encryptedDnsQueryKey,
+    queryFn: tonoEncryptedDnsOverrides,
+    refetchInterval: 15_000,
   })
   const [actionError, setActionError] = useState<DashboardActionError | null>(
     null,
@@ -528,21 +545,29 @@ const DashboardPage = () => {
     }
   })
 
+  const protectionConfirmed = hasLiveProtection(status)
   const uiState = status?.uiState ?? 'notConnected'
   const connected = uiState === 'connected'
-  const connectingSinceRef = useRef<number | null>(null)
-  const connecting = uiState === 'connecting'
   useEffect(() => {
-    connectingSinceRef.current = connecting ? Date.now() : null
-  }, [connecting])
+    if (!connected) return
+    try {
+      window.localStorage.setItem(CHECKLIST_STORAGE_KEY, '1')
+    } catch {
+      /* ignore quota */
+    }
+  }, [connected])
   const busy =
     uiState === 'connecting' ||
     uiState === 'disconnecting' ||
     uiState === 'protectedOffline'
   // Connect/protected-offline failures belong on the progress card. Showing
   // them here as well triples the same error (action box + steps + details).
+  // A released handshake eof is also notConnected: the progress card now has
+  // Retry / Choose route, and this box used to contradict it ("switching
+  // cities will not help").
   const showActionError =
     actionError != null &&
+    !actionError.progressOwns &&
     uiState !== 'protectedOffline' &&
     uiState !== 'connecting'
 
@@ -551,10 +576,28 @@ const DashboardPage = () => {
   // error during render when that authoritative status arrives; the guarded
   // update runs once and avoids an extra effect render. A failed Disconnect is
   // deliberately retained because the status correctly remains connected.
+  // Releasing protection back to idle must also drop retryNow: that command
+  // is a silent no-op once the backend is no longer ProtectedOffline.
   if (
-    uiState === 'connected' &&
     actionError &&
-    actionError.retry !== 'disconnect'
+    ((uiState === 'connected' && actionError.retry !== 'disconnect') ||
+      (uiState === 'notConnected' && actionError.retry === 'retryNow'))
+  ) {
+    setActionError(null)
+  }
+  // A protected-offline retry record is owned by `tono_retry_now`, which is a
+  // silent no-op once the user has released the fail-closed barrier and landed
+  // back in a clean notConnected state (the kill switch is disarmed and
+  // protection is no longer blocked, so `reconnect_allowed` is false). The
+  // release path goes through `useReleaseProtection` rather than
+  // `handleDisconnect`, so it does not clear `actionError`; retire the stale
+  // record here so "Try again" does not resurface and misfire. Scoped to
+  // `retry === 'retryNow'` — `retry === 'connect'` records are deliberately
+  // shown in notConnected so the user can retry the ordinary connect.
+  if (
+    uiState === 'notConnected' &&
+    actionError &&
+    actionError.retry === 'retryNow'
   ) {
     setActionError(null)
   }
@@ -621,6 +664,13 @@ const DashboardPage = () => {
         navigate('/servers')
         return
       }
+      // A second connect IPC, or a disconnect that won the generation, is not
+      // a failed attempt. Showing unknownAction here is how a slow StartClash
+      // became a red "something went wrong" card with no Failed stage.
+      if (isSupersededConnectRejection(error)) {
+        await mutateTonoStatus()
+        return
+      }
       // `tono_connect` returns only after fail_connect and reconnect scheduling.
       // Read that settled backend snapshot now and store the retry owner with
       // the error; a later status push must not change which command Retry uses.
@@ -635,11 +685,14 @@ const DashboardPage = () => {
         // fallback when the authoritative local status read itself failed.
         if (status?.uiState === 'protectedOffline') retry = 'retryNow'
       }
+      const described = describeTonoActionError(error, t)
       setActionError({
-        message: formatTonoActionError(error, t),
+        message: described.message,
+        detail: described.detail,
         retry,
         suggestsSwitch: connectErrorSuggestsServerSwitch(error),
         encryptedDns: isEncryptedDnsFailure(error),
+        progressOwns: connectErrorSuggestsBackupChannel(error),
       })
     }
   })
@@ -658,6 +711,7 @@ const DashboardPage = () => {
         retry: 'disconnect',
         suggestsSwitch: false,
         encryptedDns: false,
+        progressOwns: false,
       })
     }
   })
@@ -675,6 +729,7 @@ const DashboardPage = () => {
         retry: 'retryNow',
         suggestsSwitch: connectErrorSuggestsServerSwitch(error),
         encryptedDns: isEncryptedDnsFailure(error),
+        progressOwns: connectErrorSuggestsBackupChannel(error),
       })
     }
   })
@@ -683,24 +738,34 @@ const DashboardPage = () => {
     if (!actionError) return
     if (actionError.retry === 'disconnect') {
       void handleDisconnect()
-    } else if (actionError.retry === 'retryNow') {
+    } else if (
+      actionError.retry === 'retryNow' &&
+      uiState === 'protectedOffline'
+    ) {
       void handleRetryNow()
     } else {
+      // Idle again: protected-offline retry has no object. Connect, don't
+      // call tono_retry_now (that command is a silent no-op off that state).
       void handleConnect()
     }
   }
 
   const [up, upUnit] = parseTraffic(traffic?.up ?? 0)
   const [down, downUnit] = parseTraffic(traffic?.down ?? 0)
-  const connectHint = connected
-    ? status?.directOverlay === 'skipped'
-      ? t('tono.dashboard.directSkipped')
-      : t('tono.dashboard.directOn')
-    : t('tono.dashboard.taglineIdle')
+  const connectHint =
+    uiState === 'connecting'
+      ? t('tono.dashboard.taglineConnecting')
+      : uiState === 'disconnecting'
+        ? t('tono.pill.subtitle.restoringAccess')
+        : uiState === 'protectedOffline' && !protectionConfirmed
+          ? t('tono.progress.protectionUnknownBody')
+          : connected
+            ? status?.directOverlay === 'skipped'
+              ? t('tono.dashboard.directSkipped')
+              : t('tono.dashboard.directOn')
+            : t('tono.dashboard.taglineIdle')
   const selectedCity = status?.selectedServer
-    ? nodeCityTitleKey(status.selectedServer)
-      ? t(nodeCityTitleKey(status.selectedServer)!)
-      : nodeDisplayName(status.selectedServer)
+    ? nodeCityLabel(status.selectedServer, t)
     : t('tono.dashboard.noServer')
   const protectionValue = selectedCity
   const protectionDetail = connectHint
@@ -758,6 +823,29 @@ const DashboardPage = () => {
           </Link>
         </div>
       )}
+      {status?.updateIncomplete && (
+        <div
+          role="alert"
+          style={{
+            display: 'flex',
+            justifyContent: 'center',
+            marginBottom: 8,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 500,
+              color: TONO_COLORS.protectedOffline,
+              borderRadius: 10,
+              padding: '8px 12px',
+              background: hex(TONO_COLORS.protectedOffline, 0.12),
+            }}
+          >
+            {t('tono.dashboard.updateIncomplete')}
+          </div>
+        </div>
+      )}
       {status?.killSwitch?.last_error && (
         <div
           style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}
@@ -781,7 +869,7 @@ const DashboardPage = () => {
           </span>
         </div>
       )}
-      {/* Center stack — status chip → connect → node → (progress only when busy) */}
+      {/* Center stack — pill, then failure/backup, then idle checklist */}
       <div
         className="tono-dashboard__content"
         style={{
@@ -800,17 +888,10 @@ const DashboardPage = () => {
         <div>
           <ConnectPill
             uiState={uiState}
+            protectionConfirmed={protectionConfirmed}
             stage={status?.stage}
             onConnect={handleConnect}
             onDisconnect={() => {
-              if (uiState === 'connecting') {
-                const since = connectingSinceRef.current
-                if (since == null || Date.now() - since < CANCEL_GRACE_MS) {
-                  return
-                }
-                void handleDisconnect()
-                return
-              }
               if (uiState === 'protectedOffline') {
                 requestRelease()
               } else {
@@ -831,8 +912,43 @@ const DashboardPage = () => {
             {connectHint}
           </p>
         </div>
-        {!connected && uiState === 'notConnected' && (
-          <ConnectChecklist dark={dark} />
+        {/* Failure + backup first. The first-connect checklist is idle-only —
+            after handshake eof it sat above Try backup channel and looked
+            like Encrypted DNS was the next hand. */}
+        <ConnectProgressCard
+          uiState={uiState}
+          protectionConfirmed={protectionConfirmed}
+          selectedServer={status?.selectedServer}
+          onRefreshStatus={mutateTonoStatus}
+          onChooseRoute={() => navigate('/servers')}
+        />
+        {!connected &&
+          uiState === 'notConnected' &&
+          actionError == null && (
+          <ConnectChecklist
+            dark={dark}
+            encryptedDnsOverrides={encryptedDnsOverrides === true}
+          />
+        )}
+        {connected && encryptedDnsOverrides === true && (
+          <GlassCard
+            radius="var(--tono-radius-card)"
+            padding={14}
+            style={{ width: 520, maxWidth: '100%' }}
+          >
+            <p
+              role="status"
+              style={{
+                margin: '0 0 10px',
+                fontSize: 12,
+                lineHeight: 1.5,
+                color: text.secondary,
+              }}
+            >
+              {t('tono.dashboard.encryptedDnsHint')}
+            </p>
+            <OpenDnsSettingsButton accent />
+          </GlassCard>
         )}
         {/* Actionable error under the primary control — includes a switch-server
             path when the exit itself is the likely problem. */}
@@ -878,6 +994,23 @@ const DashboardPage = () => {
             >
               {actionError.message}
             </span>
+            {actionError.detail && (
+              <span
+                data-testid="tono-action-error-detail"
+                style={{
+                  fontSize: 12,
+                  fontWeight: 500,
+                  lineHeight: 1.45,
+                  color: text.secondary,
+                  textAlign: 'center',
+                  maxWidth: '100%',
+                  overflowWrap: 'anywhere',
+                  fontFamily: TONO_MONO_STACK,
+                }}
+              >
+                {actionError.detail}
+              </span>
+            )}
             <div
               style={{
                 display: 'flex',
@@ -967,12 +1100,6 @@ const DashboardPage = () => {
             </div>
           </div>
         )}
-        {/* Progress card self-hides when idle and no uncleared failure record. */}
-        <ConnectProgressCard
-          uiState={uiState}
-          onRefreshStatus={mutateTonoStatus}
-          onChooseRoute={() => navigate('/servers')}
-        />
         {status?.selectedServer && (
           <ActiveNodeCard
             serverName={status.selectedServer}

@@ -116,6 +116,55 @@ pub const ALLOWED_WEB_DOMAIN_SUFFIXES: &[&str] = &[
     "oray.com",
     "sunlogin.com",
     "edu.cn",
+    "163.com",
+    "netease.com",
+    "126.net",
+    "taobao.com",
+    "tmall.com",
+    "alipay.com",
+    "alicdn.com",
+    "jd.com",
+    "douyin.com",
+    "weibo.com",
+    "meituan.com",
+    "dianping.com",
+    "pinduoduo.com",
+    "amap.com",
+    "douyu.com",
+    "huya.com",
+    "kuaishou.com",
+    "yximgs.com",
+    "yy.com",
+    "ixigua.com",
+    "mgtv.com",
+    "acfun.cn",
+    "sohu.com",
+    "1905.com",
+    "miguvideo.com",
+    "wps.cn",
+    "kdocs.cn",
+    "yuque.com",
+    "voovmeeting.com",
+    "teambition.com",
+    "shimo.im",
+    "lanhuapp.com",
+    "12306.cn",
+    "zhipin.com",
+    "51job.com",
+    "kugou.com",
+    "kgimg.com",
+    "kuwo.cn",
+    "migu.cn",
+    "ximalaya.com",
+    "qingting.fm",
+    "lizhi.fm",
+    "xylink.com",
+    "zhumu.me",
+    "quanshi.com",
+    "zhihu.com",
+    "zhimg.com",
+    "goofish.com",
+    "1688.com",
 ];
 
 /// Domain suffixes allowed for DIRECT routing (Mac
@@ -235,6 +284,10 @@ const PROTECTED_DIRECT_SUFFIXES: &[&str] = &[
     "statsigapi.net",
     "featuregates.org",
     "growthbook.io",
+    "stripe.com",
+    "stripecdn.com",
+    "link.com",
+    "hcaptcha.com",
     "stripe.network",
     "storage.googleapis.com",
     "registry.npmjs.org",
@@ -878,7 +931,19 @@ mod tests {
         );
         assert!(is_allowed_direct_suffix("dingtalk.com"));
         assert!(is_allowed_direct_suffix("feishu.cn"));
+        assert!(is_allowed_direct_suffix("taobao.com"));
+        assert!(is_allowed_direct_suffix("douyin.com"));
+        assert!(is_allowed_direct_suffix("huya.com"));
+        assert!(is_allowed_direct_suffix("wps.cn"));
+        assert!(is_allowed_direct_suffix("voovmeeting.com"));
+        assert!(is_allowed_direct_suffix("kugou.com"));
+        assert!(is_allowed_direct_suffix("ximalaya.com"));
+        assert!(is_allowed_direct_suffix("xylink.com"));
+        assert!(is_allowed_direct_suffix("zhihu.com"));
+        assert!(is_allowed_direct_suffix("goofish.com"));
+        assert!(!is_allowed_direct_suffix("alibaba.com"));
         assert!(!is_allowed_direct_suffix("snssdk.com"));
+        assert!(!is_allowed_direct_suffix("googleapis.com"));
         assert!(!is_allowed_direct_suffix("evil-dingtalk.com"));
     }
 
@@ -954,6 +1019,8 @@ mod tests {
             "cdn.claudeusercontent.com",
             "challenges.cloudflare.com",
             "events.statsig.com",
+            "js.stripe.com", "checkout.stripe.com", "a.stripecdn.com",
+            "checkout.link.com", "newassets.hcaptcha.com",
             "browser-intake-us5.datadoghq.com",
             "sentry.io",
             "Baidu.com",
@@ -1019,6 +1086,8 @@ mod tests {
             "cdn.claudeusercontent.com",
             "challenges.cloudflare.com",
             "events.statsig.com",
+            "js.stripe.com", "checkout.stripe.com", "a.stripecdn.com",
+            "checkout.link.com", "newassets.hcaptcha.com",
             "browser-intake-us5.datadoghq.com",
             "sentry.io",
             "tono.app",

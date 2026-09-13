@@ -23,8 +23,10 @@ pub struct CleanupResult {
     pub core_stopped: bool,
 }
 
-const fn should_abort_exit_after_cleanup(core_stopped: bool) -> bool {
-    !core_stopped
+const fn should_abort_exit_after_cleanup(core_stopped: bool, user_confirmed_protected_exit: bool) -> bool {
+    // "Quit/Restart anyway" already accepted a still-armed barrier. A later Service-stop
+    // failure must not veto that decision or invent a disarm.
+    !core_stopped && !user_confirmed_protected_exit
 }
 
 async fn run_exit_cleanup_transition<Stop, StopFuture, Ancillary, AncillaryFuture>(
@@ -113,17 +115,34 @@ pub async fn restart_app() {
     logging!(debug, Type::System, "启动重启应用流程");
     // 设置退出标志
     handle::Handle::global().set_is_exiting();
+    let mut confirmed_protected_exit = false;
 
-    // Tono: restart releases the kill switch like quit does (§6, P0-8).
-    if let Err(error) = crate::tono::commands::quit_release(handle::Handle::app_handle().clone()).await {
+    // Tono: restart releases the kill switch like quit does (§6, P0-8). The click-level wait is
+    // the same 8 s budget as interactive Quit: `set_is_exiting` already dropped frontend events,
+    // so an unbounded await is a silent freeze. The native dialog bypasses that channel.
+    let release = tokio::time::timeout(
+        INTERACTIVE_QUIT_RELEASE_BUDGET,
+        crate::tono::commands::quit_release(handle::Handle::app_handle().clone()),
+    )
+    .await;
+    if let Some(error) = interactive_release_wait_error(release) {
         logging!(
             error,
             Type::Service,
-            "Tono: 无法证明重启前已恢复网络保护，取消重启: {error}"
+            "Tono: 无法证明重启前已恢复网络保护: {error}"
         );
-        handle::Handle::global().clear_is_exiting();
-        handle::Handle::notice_message("app_restart::core_stop_failed", "");
-        return;
+        if !ask_to_restart_without_release(&error).await {
+            handle::Handle::global().clear_is_exiting();
+            surface_cancelled_quit().await;
+            handle::Handle::notice_message("app_restart::core_stop_failed", "");
+            return;
+        }
+        confirmed_protected_exit = true;
+        logging!(
+            warn,
+            Type::Service,
+            "Tono: 用户选择在保护仍然生效的情况下重启；WFP 屏障保持封锁状态"
+        );
     }
 
     Config::apply_all_and_save_file().await;
@@ -138,7 +157,7 @@ pub async fn restart_app() {
         if cleanup_result.all_success { 0 } else { 1 }
     );
 
-    if !cleanup_result.core_stopped {
+    if should_abort_exit_after_cleanup(cleanup_result.core_stopped, confirmed_protected_exit) {
         handle::Handle::global().clear_is_exiting();
         handle::Handle::notice_message("app_restart::core_stop_failed", "");
         return;
@@ -162,13 +181,26 @@ async fn surface_cancelled_quit() {
     );
 }
 
-/// Interactive Quit's own budget for *proving* the release.
+/// Interactive Quit and Restart's own budget for *proving* the release.
 ///
 /// The release operation keeps its own 30 s reconciliation deadline and this wait never cancels
 /// it — the worker is detached and single-flight. What this bounds is the click: waiting half a
 /// minute with no window and no feedback is indistinguishable from the freeze this whole review
-/// is about.
+/// is about. Restart Tono uses the same bound: `set_is_exiting` suppresses frontend events, so
+/// an unbounded wait is a silent freeze on the RestoringSessionScreen.
 const INTERACTIVE_QUIT_RELEASE_BUDGET: Duration = Duration::from_secs(8);
+
+/// Map a bounded `quit_release` wait into an optional error. A timeout is unproven, never success:
+/// abandoning the wait does not abandon the release (single-flight), but the click must not hang.
+fn interactive_release_wait_error<E>(wait: Result<Result<(), String>, E>) -> Option<String> {
+    match wait {
+        Ok(Ok(())) => None,
+        Ok(Err(error)) => Some(error),
+        Err(_) => Some(format!(
+            "The release did not finish within {INTERACTIVE_QUIT_RELEASE_BUDGET:?}; the Tono Service may still be working on it."
+        )),
+    }
+}
 
 /// Ask whether to exit while network protection is still armed.
 ///
@@ -200,6 +232,30 @@ async fn ask_to_quit_without_release(error: &str) -> bool {
     rx.await.unwrap_or(false)
 }
 
+/// Same fail-closed choice as Quit, for the RestoringSessionScreen "Restart Tono" button.
+/// `notice_message` cannot reach the frontend while `is_exiting` is set, so this has to be a
+/// native dialog — the same reason Quit cannot use a toast here.
+async fn ask_to_restart_without_release(error: &str) -> bool {
+    use tauri_plugin_dialog::{DialogExt as _, MessageDialogButtons, MessageDialogKind};
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    handle::Handle::app_handle()
+        .dialog()
+        .message(format!(
+            "Tono could not confirm that network protection was released.\n\n{error}\n\nThis machine stays protected: no traffic leaves it while protection is armed. If you restart now it stays that way — start Tono again and disconnect, or run `tono-service.exe --emergency-disarm` as Administrator from the Tono installation folder.\n\nRestart anyway?"
+        ))
+        .title("Network protection is still active")
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Restart anyway".to_owned(),
+            "Stay open".to_owned(),
+        ))
+        .kind(MessageDialogKind::Warning)
+        .show(move |confirmed| {
+            let _ = tx.send(confirmed);
+        });
+    rx.await.unwrap_or(false)
+}
+
 pub async fn quit() -> tono_signal::ShutdownOutcome {
     logging!(debug, Type::System, "启动退出流程");
     // 设置退出标志
@@ -211,6 +267,7 @@ pub async fn quit() -> tono_signal::ShutdownOutcome {
     #[cfg(windows)]
     let tono_protected_at_quit =
         crate::tono::commands::quit_protection_active(handle::Handle::app_handle()).await;
+    let mut confirmed_protected_exit = false;
 
     // Tono: this is the sole owner of the preventable explicit-Quit release (§6). Session-ending
     // exits use their separate best-effort path in `RunEvent::Exit`.
@@ -219,16 +276,7 @@ pub async fn quit() -> tono_signal::ShutdownOutcome {
         crate::tono::commands::quit_release(handle::Handle::app_handle().clone()),
     )
     .await;
-    let release_error = match release {
-        Ok(Ok(())) => None,
-        Ok(Err(error)) => Some(error),
-        // Abandoning the wait does not abandon the release: the operation is detached and
-        // single-flight, so it keeps reconciling while the user answers.
-        Err(_elapsed) => Some(format!(
-            "The release did not finish within {INTERACTIVE_QUIT_RELEASE_BUDGET:?}; the Tono Service may still be working on it."
-        )),
-    };
-    if let Some(error) = release_error {
+    if let Some(error) = interactive_release_wait_error(release) {
         logging!(error, Type::Service, "Tono: 无法证明退出前已恢复网络保护: {error}");
         if !ask_to_quit_without_release(&error).await {
             handle::Handle::global().clear_is_exiting();
@@ -240,6 +288,7 @@ pub async fn quit() -> tono_signal::ShutdownOutcome {
             handle::Handle::notice_message("app_quit::core_stop_failed", "");
             return tono_signal::ShutdownOutcome::Canceled;
         }
+        confirmed_protected_exit = true;
         logging!(
             warn,
             Type::Service,
@@ -259,7 +308,7 @@ pub async fn quit() -> tono_signal::ShutdownOutcome {
         if cleanup_result.all_success { 0 } else { 1 }
     );
 
-    if should_abort_exit_after_cleanup(cleanup_result.core_stopped) {
+    if should_abort_exit_after_cleanup(cleanup_result.core_stopped, confirmed_protected_exit) {
         handle::Handle::global().clear_is_exiting();
         surface_cancelled_quit().await;
         handle::Handle::notice_message("app_quit::core_stop_failed", "");
@@ -385,8 +434,11 @@ pub async fn hide() {
 #[cfg(test)]
 mod tests {
     use super::{
-        run_interactive_cleanup_transition, run_session_ending_cleanup_transition, should_abort_exit_after_cleanup,
+        interactive_release_wait_error, run_interactive_cleanup_transition,
+        run_session_ending_cleanup_transition, should_abort_exit_after_cleanup,
+        INTERACTIVE_QUIT_RELEASE_BUDGET,
     };
+    use tokio::time::Duration;
     use parking_lot::Mutex;
     use std::{
         future::pending,
@@ -413,8 +465,32 @@ mod tests {
 
     #[test]
     fn exit_aborts_when_controlled_core_stop_fails() {
-        assert!(should_abort_exit_after_cleanup(false));
-        assert!(!should_abort_exit_after_cleanup(true));
+        assert!(should_abort_exit_after_cleanup(false, false));
+        assert!(!should_abort_exit_after_cleanup(true, false));
+    }
+
+    #[test]
+    fn confirmed_quit_commits_when_service_stop_fails() {
+        assert!(
+            !should_abort_exit_after_cleanup(false, true),
+            "Quit anyway already accepted a still-armed barrier"
+        );
+        assert!(!should_abort_exit_after_cleanup(true, true));
+    }
+
+    #[test]
+    fn restart_release_wait_is_bounded_like_quit() {
+        assert_eq!(INTERACTIVE_QUIT_RELEASE_BUDGET, Duration::from_secs(8));
+        assert!(interactive_release_wait_error::<()>(Ok(Ok(()))).is_none());
+        assert_eq!(
+            interactive_release_wait_error::<()>(Ok(Err("ipc down".into()))).as_deref(),
+            Some("ipc down")
+        );
+        let timed_out = interactive_release_wait_error::<()>(Err(())).expect("timeout is unproven");
+        assert!(
+            timed_out.contains("8s"),
+            "the click-level message must name the budget, got {timed_out}"
+        );
     }
 
     #[tokio::test]

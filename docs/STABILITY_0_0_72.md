@@ -459,3 +459,210 @@ This closes false completion/deletion at the Mac connection/store boundary, not
 the entire upgrade lifecycle. Preparation/install ownership, new-attempt
 archival, signed installation and power-loss/device acceptance remain separate;
 the incomplete Windows phase-owner sequence in #26 is not changed by this fix.
+
+
+## Physical Windows upgrade checkpoint (2026-09-08)
+
+Normal verified release-line merges reached main `a7f4544`; its macOS CI
+`34207994027`, Windows CI `34207993895` and Services CI `34207993703` all passed.
+No publication, signing, tag, feed or production deployment was performed.
+
+The owner-authorized Windows 11 build 26200 disconnected upgrade from 0.0.41 to
+0.0.72 succeeded with the previously documented candidate hash: installer exit 0,
+exact Core/active Service identities, running Service, unchanged DNS, preserved
+configuration, successful interactive launch and no reboot. Connect reached the
+connected UI and a new HTTPS egress request succeeded. Explicit disconnect stopped
+Core and restored baseline DNS/direct access. This does not qualify every protected
+route, connected update, or crash-time no-leak property.
+
+Real hardware also exposed a **release blocker** missed by component CI: traffic
+and Activity remained in controller retry. Cargo `links = "tono-plugin-core"`
+generates that ACL namespace, while the plugin registered `mihomo` and the guest
+package invoked `plugin:mihomo|...`. The correction aligns runtime/guest/generated
+ESM+CJS invocation names with existing capabilities; no capability is broadened.
+Four new namespace contracts failed before correction; all 97 packaging checks
+and 204 frontend tests (including three actual packaged guest invocation checks)
+pass locally after correction. **Physical verification of a rebuilt package is
+still pending**, as are the protected update lifecycle #26 and remaining device gates.
+See [the device runbook](WINDOWS_0_0_72_DEVICE_ACCEPTANCE.md). Raw owner-device
+network evidence and backups remain private and must not be uploaded to this public repo.
+
+### Device QA harness correction
+
+Preparing native device diagnostics exposed another stale de-fork name: the Core
+fault injector accepted only process names containing `mihomo`, so it refused the
+shipped `tono-core` process and its snapshots omitted that process. It now accepts
+only the exact shipped/legacy Core names, obtains a fresh authenticated Service
+PID instead of reusing the baseline PID, and stops the validated process object.
+Fourteen mocked fault-targeting cases passed in native Windows PowerShell; the old
+function failed that regression. No real process was killed by those tests. CI
+executes the same non-privileged fixture and tracks both harness/test paths.
+The native driver was separately built with Rust 1.98.1 and read-only diagnosis
+confirmed the first explicit disconnect cleared desired Core/protection ownership.
+This evidence is not a live Core crash, Service crash or adapter-flap qualification.
+
+
+### Rebuilt Windows candidate: real telemetry and reconnect verified
+
+Candidate run `34209929299`, source `20bb37f6b0e1d377ebcd9a4ee34585061c138635`,
+passed both jobs; Windows CI `34209929130` passed all four jobs. The owner-authorized
+same-version repair installed SHA-256
+`7cbc7d4b573756c429624467dff17f7a18c4df1021fdda445718d6e2016d4197`.
+Installer exit was zero, without reboot or silent GUI launch. The installed GUI
+matched the independently extracted NSIS `Tono.exe.next` SHA-256
+`454609e7c1fb20a877803dc1e6c44582959c5e7c42672627765b3b8d57fee908`; Core,
+Service and both privileged helpers also matched that candidate manifest.
+
+On the physical Windows host, live dashboard rates and Activity populated. A
+controlled, certificate-verified HTTPS/TLS connection appeared in the live
+Connections view with its expected process, destination, TUN/TCP and route. Two
+connect cycles used different Service-owned Core PIDs; each reported wanted/live/
+verified locked protection and passed the protected DNS probe. Each explicit
+disconnect stopped Core, cleared desired runtime/protection ownership, restored
+the pre-upgrade DNS baseline and allowed direct HTTPS again. Private evidence is
+retained under `artifacts/stability-0072/windows-device/plugin-fix-*`.
+
+This closes the namespace blocker for these exact installed bytes. It does not
+qualify crash-time leaks, all policy routes, browser/profile behavior, connected
+update lifecycle #26, signing or owner-Mac privileged installation. The harness
+follow-up `fd15e46` separately passed Windows CI `34211103544` and macOS CI
+`34211103561`.
+
+Real-device testing also found that Activity's default Apps view ignored domain,
+protocol and rule queries even though Connections could find them. The app
+aggregation now retains deduplicated, already-sanitized connection search terms,
+without altering app/route totals. WeChat aliases are no longer attached to every
+unrelated connection. Three new tests failed before correction; the focused
+suite passes 14 tests, the full frontend suite passes 207, and typecheck passes.
+A rebuilt package's physical search verification remains pending.
+
+
+### Cold launch: do not present unknown protection as a proven barrier
+
+Physical 20bb37f follow-up reproduced a separate UI defect: normal unprotected
+Quit stopped GUI/Core and the Service; a later interactive launch correctly
+reported the Service was stopped, but simultaneously claimed direct traffic was
+blocked and an automatic route retry was happening. The backend deliberately
+keeps an unknown barrier conservatively armed so recovery remains possible; that
+FSM intent is not proof of live filtering.
+
+Dashboard pill/hint, progress copy and tray label now require both `wanted` and
+`live` Service evidence before claiming the offline barrier is active. Missing
+evidence displays “Protection not verified” with repair/recovery guidance. The
+confirmed-barrier copy no longer invents a scheduled retry. The FSM, Service/WFP
+policy, IPC schema, release action and confirmation guard are unchanged.
+Two UI tests failed before correction; full frontend verification now passes
+**216 tests**, typecheck, production Web build and targeted strict ESLint.
+A ROG Grok 4.6/high no-tools read-only review found no concrete defect in the
+supplied correction; this is advisory, not physical acceptance.
+
+Search commit `2bed18a` passed all four Windows CI jobs in `34215119628`. Its
+installer-only run `34215118955` was deliberately cancelled while building, so
+one replacement candidate can include both physical-UI fixes; cancellation is
+not a CI failure or successful artifact. The new installed-byte tests remain due.
+
+The current-source Mac local report `20260908T102800Z/report.json` passes version
+regressions, version gate, policy contract, the Mac umbrella, unsigned Release
+and nonprivileged Helper self-test, with unchanged source fingerprints. The
+umbrella retains six explicit privileged/data-plane skips. A separate read-only
+execution of the verbatim production browser scanner on this Mac returned clear
+for Chrome and Edge (one persisted preference store), without logging browser
+contents or altering preferences/DNS. This is not the signed-app connection or
+post-connect browser-change qualification required by #17/#42. Noninteractive
+root is unavailable; no privileged Mac test or helper installation was attempted.
+
+### b489ea1 physical UI follow-up and payment-dependency route audit
+
+Candidate `b489ea1687a88e763ef05e224b5e234a80f6ba68` passed Windows CI
+`34216891023` and candidate build `34216890531`. Its exact unsigned candidate
+installer (SHA-256 `832b076d5f2dc2cd6a1db193b82361767ee13a2186d9e939750a7aac35a68555`)
+installed successfully on the owner-authorized Windows device, without reboot.
+Installed GUI/Core/Service hashes matched the candidate manifest at installation.
+Physical Apps/Connections case-insensitive domain search, nonmatching search, and
+cold-launch unknown-protection copy in both the main window and tray passed.
+Normal Repair followed by reconnect again proved live/verified locked protection
+and protected DNS. The later unprivileged Service hash read was denied by its ACL;
+that is not evidence that the executable disappeared. Final cleanup and the next
+candidate's installed-byte checks remain separate requirements.
+
+The owner's subsequent **metadata-only** routing audit found an actual dependency
+gap, not merely an empty Activity table. On b489ea1, controlled certificate-verified
+TLS connections to `js.stripe.com`, `link.com` and `hcaptcha.com` appeared on the
+cloud route, while `m.stripe.network` appeared on the residential route. Claude
+Desktop's challenge requests could already use the residential PROCESS rule,
+which did not cover the same dependency reached by an arbitrary browser. One
+`a.stripecdn.com` baseline handshake timed out; it is not recorded as a successful
+connection. No payment, account login, request body, cookies or browser history
+were submitted or collected. Private device artifacts remain ignored under
+`artifacts/stability-0072/windows-device/traffic-audit/`.
+
+Corrections under verification:
+
+- Add `stripe.com`, `stripecdn.com`, `link.com`, `hcaptcha.com`, and the previously
+  DIRECT-protected-but-not-home-routed `statsig.com` to both desktop residential
+  destination lists. Payment dependencies are an intentional shared-domain
+  exception, independent of the application/browser. Unknown traffic keeps its
+  existing default; no geographic-IP heuristic or global home fallback is added.
+- Keep the Mac/Windows/control-plane protected-DIRECT lists equal, so even a
+  signed policy cannot move payment dependencies onto the physical interface.
+- Include these dependencies in local protected-route observation. Windows emits
+  a bounded `PAYMENT` category without uploading raw hosts, processes or secrets.
+- Request process attribution for every owned Windows runtime, rather than only
+  when a PROCESS rule needs it. This is not a guarantee that lookup always works.
+  Preserve process-only DIRECT evidence and enforce the 512-sample cap *inside*
+  each batch. Activity no longer guesses that every `Claude.exe` is Claude Code.
+
+Source rationale: [Stripe's domain requirements](https://docs.stripe.com/ips),
+[Stripe's Link integration security guidance](https://github.com/stripe/ai/blob/main/skills/stripe-best-practices/references/security.md),
+and [Mihomo process lookup modes](https://github.com/MetaCubeX/Meta-Docs/blob/main/docs/config/general.en.md).
+The residential selector remains single-member; the cloud dialer is transport for
+the residential SOCKS hop, not a permitted final-egress fallback. Existing generated
+runtime tests enforce that distinction. New physical candidate routing proof is
+still required. This is not exhaustive qualification for custom payment domains,
+bank-hosted 3DS redirects, encrypted unnamed browser flows, connections shorter
+than sampling intervals, crash-time leaks or protected update lifecycle #26.
+The proposed per-browser expansion was stopped following the owner's clarification;
+Comet/Tabbit read-only reconnaissance did not change browser settings or product
+browser support.
+
+Local correction checks: 219 portable core tests, 425 Mac-hosted App library
+tests, 216 frontend tests, 329 Worker tests, frontend/Worker typechecks, policy
+parity, and all 12 nonprivileged Mac umbrella suites pass. Six privileged/data-
+plane Mac checks remain explicitly skipped. Hosted Windows, macOS and Services CI
+for `3c7aafd` pass; new installed-byte payment-route verification is still pending.
+
+### Reject an unusable declared home hop instead of silently becoming cloud-only
+
+The dependency audit exposed a second, independent fail-open-at-the-routing-layer
+path. Windows catalog sanitization and direct runtime calls could discard an
+unknown home node or invalid preferred SOCKS upstream. macOS also swallowed
+malformed residential wire fields and persisted a candidate before validating
+its routing. The control plane filtered disabled assigned homes out of its
+binding query, making an unavailable assignment look like a legitimate unbind.
+These are final-egress identity failures even when TUN/firewall protection remains
+active; “inside the tunnel” alone is not residential qualification.
+
+The correction rejects an explicit unusable home requirement at catalog/cache
+admission and runtime generation. Mac admission validates before cache persistence;
+its wire decoder rejects malformed home objects while retaining optional default
+selection-hint tolerance. A valid preferred SOCKS hop still wins over a secondary
+home-node name. Windows cache load/store/tracker installation share the same
+residential admission check. The backend returns a generic 503 for disabled or
+missing assigned homes; a genuinely unbound user and an explicit binding deletion
+still receive the existing cloud-only behavior. No production binding, credential,
+network configuration or control-plane deployment was changed during these tests.
+
+Before correction, two Rust admission cases failed, five malformed Mac wire
+fixtures decoded without throwing, a generated Mac runtime silently lost a required
+home, and the inactive-home API test returned success. Corrected local checks pass:
+220 portable core tests, 426 Mac-hosted App library tests, 329 Worker tests plus
+typecheck, and all 12 nonprivileged Mac umbrella suites (six explicit skips).
+The new Mac XCTest admission cases are pure decoding/configuration tests, without
+account, cache, network or privileged-helper operations. Hosted CI, candidate
+installation and protected real-device routing qualification remain required.
+
+The App regression additionally proves rejection preserves the prior verified cache
+bytes and tracker revision, and accepts a corrected redelivery at the next revision.
+An independent tool-free Grok 4.6 high-effort review found no changed-symbol
+regression (advisory only); stale-cache behavior and physical failure qualification
+are not inferred from that review. The unsigned local Mac Release build passes.

@@ -143,7 +143,12 @@ actor TonoAPIClient {
     func me() async throws -> TonoMeResponse { try await authorizedRequest("me", method: "GET") }
     func devices() async throws -> TonoDevicesResponse { try await authorizedRequest("devices", method: "GET") }
     func exitCatalog() async throws -> TonoExitCatalogResponse {
-        try await authorizedRequest("exit-catalog", method: "GET")
+        try await authorizedRequest(
+            "exit-catalog",
+            method: "GET",
+            bodyData: nil,
+            additionalHeaders: ["X-Tono-Accept": "hy2"]
+        )
     }
     func trafficPolicy() async throws -> TonoTrafficPolicyResponse {
         try await authorizedRequest("traffic-policy", method: "GET")
@@ -205,6 +210,12 @@ actor TonoAPIClient {
             method: "POST",
             body: TonoTelemetryWindowRequest(window: window)
         )
+    }
+
+    func reportConnectFailure(
+        _ report: TonoConnectFailureReport
+    ) async throws -> TonoConnectFailureReceipt {
+        try await authorizedRequest("telemetry/failures", method: "POST", body: report)
     }
 
     func submitDeviceActionResult(id: String, result: TonoDeviceActionResult) async throws {

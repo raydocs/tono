@@ -804,3 +804,30 @@ test('portable partition keeps only the allowlist', () => {
     'unset_dns.sh',
   ])
 })
+
+// Tauri derives the ACL namespace from the plugin's Cargo `links` metadata,
+// NOT PluginBuilder::new. Renaming the crate while keeping the old runtime
+// name compiles and installs, but every renderer IPC is denied at runtime.
+const corePluginRoot = new URL('../../crates/tono-plugin-core/', import.meta.url)
+const corePluginManifest = readFileSync(new URL('Cargo.toml', corePluginRoot), 'utf8')
+const corePluginAclName = corePluginManifest.match(/^links = "([^"]+)"/m)[1]
+  .replace(/^tauri-plugin-/, '')
+
+test('Core plugin runtime registration matches its generated ACL namespace', () => {
+  const source = readFileSync(new URL('src/lib.rs', corePluginRoot), 'utf8')
+  const runtimeName = source.match(/PluginBuilder::new\("([^"]+)"\)/)[1]
+  assert.equal(runtimeName, corePluginAclName)
+  const capability = JSON.parse(readFileSync(
+    new URL('../src-tauri/capabilities/desktop.json', import.meta.url), 'utf8',
+  ))
+  assert.ok(capability.permissions.includes(`${runtimeName}:default`))
+})
+
+for (const entrypoint of ['guest-js/index.ts', 'dist-js/index.js', 'dist-js/index.cjs']) {
+  test(`Core plugin ${entrypoint} invokes the namespace granted by desktop ACL`, () => {
+    const source = readFileSync(new URL(entrypoint, corePluginRoot), 'utf8')
+    const namespaces = [...source.matchAll(/plugin:([^|\s]+)\|/g)].map((m) => m[1])
+    assert.ok(namespaces.length >= 30, 'must inspect the full renderer command surface')
+    assert.deepEqual([...new Set(namespaces)], [corePluginAclName])
+  })
+}

@@ -17,5 +17,35 @@ is the apply order:
 | `0018` | `0018_periodic_telemetry_windows.sql`, `0018_traffic_policy_signature.sql`, `0018_user_default_proxy.sql` |
 
 Do not collapse, renumber, or rewrite these to “fix” the prefixes. New
-schema changes continue from the highest existing number (`0038` at the
+schema changes continue from the highest existing number (`0072` at the
 time this note was written).
+
+## 0039–0072
+
+Ops tables after the sequence was unique. Applied in numeric order:
+
+- `0039_ops_connection_events.sql` — flattened connection events, flatten cursor, daily rollup
+- `0040_ops_verdicts_and_incidents.sql` — node verdicts, status history, incidents
+- `0041_ops_alerts.sql` — alert rules, cooldown state, delivery outbox
+- `0042_ops_node_jobs.sql` — operator-asked node jobs
+- `0043_client_releases.sql` — client release registry and version-adoption rollup
+- `0044_ops_customer_projections.sql` — customer status, activity hours, sessions
+- `0045_ops_traffic_destinations.sql` — destination/service-family rollups and direct candidates
+- `0046_ops_assets_and_quota.sql` — provider accounts, traffic cycles, daily errors
+- `0047_ops_home_lines.sql` — residential line commercial attributes and metering
+- `0048_ops_cron_state.sql` — cron watermarks and customer path-slow hysteresis
+- `0049_ops_cron_report.sql` — last cron report payload on `ops_cron_state`
+- `0050_ops_followups.sql` — follow-ups, incident `next_check_at` / `closure`
+- `0051_ops_candidate_since.sql` — `ops_node_status.candidate_since` for time-based hysteresis
+- `0052_ops_device_status.sql` — per-device status; `connection_events.attempt_id` + unique (user, attempt)
+- `0053_ops_ledger.sql` — ledger entries, month close, daily FX rates
+- `0054_users_wechat_id.sql` — `users.wechat_id` for operator WeChat contact
+- `0055_signup_allowlist_profile.sql` — `signup_allowlist.wechat_id` / `contact` / `notes` for onboard-before-register
+- `0056_ops_first_connected_at.sql` — `ops_customer_status.first_connected_at` for the onboarding funnel
+- `0057_ops_probe_unreachable.sql` — `ops_node_status.verdict` CHECK adds `probe_unreachable`
+- `0067_ops_counting_semantics.sql` — per-device daily versions, direct-candidate daily rows, parsed segment ledger
+- `0068_client_releases_update_source.sql` — `client_releases` gains `signature` / `min_os_version` / `verified_at` / `object_etag`
+- `0069_ops_month_close_snapshot.sql` — `ops_month_close.summary_json` freezes customer and node rows at close
+- `0070_drop_orphan_diagnostics_and_destination_tables.sql` — drops four tables no code reads (numbers 0026–0030 were reused long ago)
+- `0071_ops_exit_asns.sql` — known exit ASNs so edge attribution can tell tunnel uploads from customer networks
+- `0072_hy2_transport.sql` — optional hy2 columns on node profiles, connection events, and quality samples

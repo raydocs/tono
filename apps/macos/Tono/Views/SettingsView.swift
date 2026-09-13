@@ -198,7 +198,7 @@ struct SettingsView: View {
 
             SettingToggleRow(
                 label: "Protection snapshot",
-                subtitle: "Off by default. When enabled, about every 20 minutes share protection status, the selected server and recent connection events with Tono support",
+                subtitle: "Off by default. When enabled, about every 20 minutes share protection status, the selected server and recent connection events with Tono support, and report a failed connection the moment it happens",
                 isOn: $periodicTelemetryEnabled
             )
             .onChange(of: periodicTelemetryEnabled) { _, _ in

@@ -1,0 +1,84 @@
+{
+  "month": "2026-09",
+  "closedAt": null,
+  "closedBy": null,
+  "revenueCnyMinor": 0,
+  "costCnyMinor": 0,
+  "marginCnyMinor": 0,
+  "byCategory": {
+    "plan": 0,
+    "server": 0,
+    "home_line": 0,
+    "domain": 0,
+    "control_plane": 0,
+    "claude_account": 0,
+    "chatgpt_account": 0,
+    "other": 0
+  },
+  "customers": [
+    {
+      "userId": "id_5b6bdccf68a113fe",
+      "email": "user2@example.test",
+      "revenueCnyMinor": 0,
+      "costCnyMinor": 0,
+      "marginCnyMinor": null,
+      "pending": true
+    }
+  ],
+  "nodes": [
+    {
+      "name": "Preview Tokyo",
+      "costCnyMinor": 0,
+      "bytes": 9216,
+      "cnyPerGbMinor": null,
+      "pending": true
+    }
+  ],
+  "unreconciled": 2,
+  "frozen": false,
+  "frozenAt": null,
+  "reconciliation": {
+    "billsWithoutLedger": [
+      {
+        "subjectType": "account",
+        "subjectId": "product-preview-alpha",
+        "label": "preview-account-alpha",
+        "category": "claude_account",
+        "ownerUserId": "id_5b6bdccf68a113fe",
+        "expectedMinor": null,
+        "expectedCurrency": null,
+        "ledgerCnyMinor": null,
+        "entryIds": [],
+        "reason": "no_price"
+      },
+      {
+        "subjectType": "node",
+        "subjectId": "Preview Seoul",
+        "label": "Preview Seoul",
+        "category": "server",
+        "ownerUserId": null,
+        "expectedMinor": 500,
+        "expectedCurrency": "USD",
+        "ledgerCnyMinor": null,
+        "entryIds": [],
+        "reason": "no_ledger"
+      },
+      {
+        "subjectType": "node",
+        "subjectId": "Preview Tokyo",
+        "label": "Preview Tokyo",
+        "category": "server",
+        "ownerUserId": null,
+        "expectedMinor": 500,
+        "expectedCurrency": "USD",
+        "ledgerCnyMinor": null,
+        "entryIds": [],
+        "reason": "no_ledger"
+      }
+    ],
+    "ledgerWithoutBill": [],
+    "asOfSec": 1725000000
+  },
+  "unreconciledBills": 3,
+  "updatedAt": 1725000000
+}

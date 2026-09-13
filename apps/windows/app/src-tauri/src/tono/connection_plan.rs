@@ -137,8 +137,9 @@ pub enum SelectAction {
     UpdateOnly,
     /// Derive the §6 node-switch transaction.
     Switch,
-    /// Schedule a protected reconnect (M5: also when a vanished node's
-    /// replacement was just picked, i.e. `requires_choice` cleared).
+    /// Immediate protected reconnect, same as Retry now (M5: also when a
+    /// vanished node's replacement was just picked, i.e. `requires_choice`
+    /// cleared). Must not take the 2s first rung of `schedule_reconnect`.
     Reconnect,
 }
 

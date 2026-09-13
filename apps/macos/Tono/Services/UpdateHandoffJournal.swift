@@ -242,6 +242,14 @@ enum UpdateHandoffStore {
         }
     }
 
+    static func showsIncompleteUpdate(at location: URL? = nil) -> Bool {
+        load(at: location)?.phase == .failed
+    }
+
+    static let incompleteUpdateCopy = String(
+        localized: "The update did not finish. Disconnect, then reinstall Tono."
+    )
+
     static func write(_ journal: UpdateHandoffJournal, at location: URL? = nil) throws {
         let url = location ?? fileURL
         try FileManager.default.createDirectory(
@@ -293,5 +301,28 @@ enum UpdateHandoffStore {
         try save(journal, url)
         try FileManager.default.removeItem(at: url)
         return true
+    }
+
+    /// New process after a successful install. Only the binary whose version
+    /// is the journal's `nextAppVersion` may enter `firstLaunchMigration`.
+    static func recordFirstLaunchMigration(
+        currentAppVersion: String,
+        at location: URL? = nil
+    ) throws -> UpdateHandoffJournal? {
+        let url = location ?? fileURL
+        guard var journal = load(at: url) else { return nil }
+        if journal.phase == .failed { return journal }
+        if journal.nextAppVersion != currentAppVersion {
+            journal = journal.advancing(
+                to: .failed,
+                errorCode: "TONO_UPDATE_INSTALL_ABORTED",
+                errorStage: "\(journal.phase.rawValue)->firstLaunchMigration"
+            )
+            try write(journal, at: url)
+            return journal
+        }
+        journal = journal.advancing(to: .firstLaunchMigration)
+        try write(journal, at: url)
+        return journal
     }
 }

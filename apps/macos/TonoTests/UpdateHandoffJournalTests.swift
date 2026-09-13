@@ -134,6 +134,21 @@ final class UpdateHandoffJournalTests: XCTestCase {
         }
     }
 
+    func testSkippedPhaseIsRefusedAndJournalFileRemains() throws {
+        try withStore { url in
+            try UpdateHandoffStore.write(fixture(phase: .connectionQuiescing), at: url)
+            let journal = try XCTUnwrap(UpdateHandoffStore.load(at: url))
+            let refused = journal.advancing(to: .firstLaunchMigration)
+            XCTAssertEqual(refused.phase, .connectionQuiescing)
+            XCTAssertTrue(refused.refusedIllegalTransition)
+            try UpdateHandoffStore.write(refused, at: url)
+            let loaded = try XCTUnwrap(UpdateHandoffStore.load(at: url))
+            XCTAssertEqual(loaded.phase, .connectionQuiescing)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+            XCTAssertEqual(loaded.lastErrorCode, UpdateHandoffJournal.illegalPhaseErrorCode)
+        }
+    }
+
     func testExpiredJournalIsNotResumedAsSuccess() {
         let journal = UpdateHandoffJournal(
             phase: .protectionResuming,
@@ -263,11 +278,45 @@ final class UpdateHandoffJournalTests: XCTestCase {
         }
     }
 
+    func testFailedJournalSurfacesIncompleteUpdateCopyAndKeepsTheFile() throws {
+        try withStore { url in
+            try UpdateHandoffStore.write(fixture(phase: .failed), at: url)
+            XCTAssertTrue(UpdateHandoffStore.showsIncompleteUpdate(at: url))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+            XCTAssertEqual(
+                UpdateHandoffStore.incompleteUpdateCopy,
+                String(localized: "The update did not finish. Disconnect, then reinstall Tono.")
+            )
+        }
+        XCTAssertFalse(UpdateHandoffStore.showsIncompleteUpdate(at: FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-missing-update-handoff.json")))
+    }
+
     func testNoJournalDoesNotReportUpdateRecovery() throws {
         try withStore { url in
             XCTAssertFalse(try UpdateHandoffStore.commitVerifiedRecovery(
                 currentAppVersion: "0.0.68", at: url))
             XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        }
+    }
+
+    func testOldBinaryAfterInstallStartedFailsAndKeepsTheFile() throws {
+        try withStore { url in
+            try UpdateHandoffStore.write(fixture(phase: .installStarted), at: url)
+            let loaded = try XCTUnwrap(try UpdateHandoffStore.recordFirstLaunchMigration(
+                currentAppVersion: "0.0.67", at: url))
+            XCTAssertEqual(loaded.phase, .failed)
+            XCTAssertEqual(loaded.lastErrorCode, "TONO_UPDATE_INSTALL_ABORTED")
+            XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        }
+    }
+
+    func testNewBinaryRecordsFirstLaunchFromInstallStarted() throws {
+        try withStore { url in
+            try UpdateHandoffStore.write(fixture(phase: .installStarted), at: url)
+            let loaded = try XCTUnwrap(try UpdateHandoffStore.recordFirstLaunchMigration(
+                currentAppVersion: "0.0.68", at: url))
+            XCTAssertEqual(loaded.phase, .firstLaunchMigration)
         }
     }
 

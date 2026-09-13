@@ -73,8 +73,9 @@ extension AppState {
         ConnectionTelemetryBuffer.shared.record(
             "connectBegin",
             stage: ConnectionStage.preparing.rawValue,
-            node: selectedExit?.id,
-            generation: Int(self.connectionCoordinator.protectionOperationGeneration)
+            node: selectedExit?.name,
+            generation: Int(self.connectionCoordinator.protectionOperationGeneration),
+            transport: selectedExit?.catalogTransport
         )
 
         let overlay = ConfigPipeline.OverlayConfig(
@@ -421,7 +422,7 @@ extension AppState {
                             "controllerExitAdvisory",
                             stage: ConnectionStage.checkingExit.rawValue,
                             error: advisory,
-                            node: selectedExit?.id,
+                            node: selectedExit?.name,
                             generation: Int(self.connectionCoordinator.protectionOperationGeneration)
                         )
                     }
@@ -506,28 +507,25 @@ extension AppState {
                     stage: failedStage.rawValue,
                     code: self.lastClassifiedFailure?.code ?? .unknownClassifiedFailure,
                     elapsedMs: totalDuration,
-                    node: selectedExit?.id,
-                    generation: Int(self.connectionCoordinator.protectionOperationGeneration)
+                    node: selectedExit?.name,
+                    generation: Int(self.connectionCoordinator.protectionOperationGeneration),
+                    error: error.localizedDescription,
+                    // The core's own last words are what turn "handshake failed"
+                    // into a dial error an operator can act on.
+                    coreErrors: [status.lastError].compactMap { $0 }
                 )
                 await MainActor.run {
                     // An explicit Disconnect/Quit can cancel while the status
                     // request is in flight. Never let this stale failure path
                     // re-arm protection after the user released it.
                     guard !Task.isCancelled else { return }
-                    let failureMessage: String
-                    if let diagnostic = status.lastError, !diagnostic.isEmpty {
-                        failureMessage = String(
-                            localized: "Core startup failed: \(diagnostic)"
-                        )
-                    } else if !status.running {
-                        failureMessage = String(
-                            localized: "Protection startup failed: \(error.localizedDescription)"
-                        )
-                    } else {
-                        failureMessage = String(
-                            localized: "Connection check failed: \(error.localizedDescription)"
-                        )
-                    }
+                    // Keep Core lastError / localizedDescription on the audit
+                    // and the copyable classified detail. The dashboard must
+                    // not interpolate them — handshake eof used to land as
+                    // English debug on the main card.
+                    let failureMessage = ConnectionFailurePresentation.userFacingMessage(
+                        classified: self.lastClassifiedFailure
+                    )
                     // Deterministic failures repeat verbatim; a fourth try of
                     // three identical same-stage outcomes will not differ.
                     // Environmental failures (no network service while Wi-Fi
@@ -540,7 +538,9 @@ extension AppState {
                     } else {
                         environmentalFailure = false
                     }
-                    if self.lastClassifiedFailure?.code == .coreExitUnreachable {
+                    if CatalogCityFailover.shouldRotate(
+                        after: self.lastClassifiedFailure?.code
+                    ) {
                         _ = self.rotateCatalogExitAfterConnectFailure()
                     }
                     if environmentalFailure {
@@ -898,11 +898,19 @@ extension AppState {
         isRecoveringProtectedConnection = false
         isProxyDegraded = proxyFailed
         healthCounters = ProtectedHealthCounters()
+        // The exit delay measured on the way in, so the customer timeline can
+        // say how far away this node was at the moment it connected.
+        let activeName = proxyService.activeNodeName ?? activeNode?.name
+        let exitDelayMs = proxyService.lastExitSample.flatMap { sample in
+            sample.node == activeName && sample.ms > 0 ? sample.ms : nil
+        }
         ConnectionTelemetryBuffer.shared.record(
             "connectOk",
             stage: ConnectionStage.verifyingTraffic.rawValue,
-            node: selectedExitNode()?.id,
-            generation: Int(self.connectionCoordinator.protectionOperationGeneration)
+            delayMs: exitDelayMs,
+            node: selectedExitNode()?.name,
+            generation: Int(self.connectionCoordinator.protectionOperationGeneration),
+            transport: selectedExitNode()?.catalogTransport
         )
         do {
             if try UpdateHandoffStore.commitVerifiedRecovery(
@@ -936,7 +944,7 @@ extension AppState {
         // Start WebSocket streams
         trafficFeedLive = false
         connectionsFeedLive = false
-        let ws = ClashWebSocket(port: port, secret: config.secret)
+        let ws = CoreWebSocket(port: port, secret: config.secret)
         webSocket = ws
 
         ws.onTraffic = { [weak self] traffic in
@@ -1795,4 +1803,106 @@ extension AppState {
         scheduleProtectedReconnect(immediate: true)
     }
 
+    /// Catalog hy2 the user can pick by hand. Prefer same-city; otherwise
+    /// another city (Tokyo UDP is blocked, so China may need Dedirock).
+    /// Offered while protected-offline unless the classified failure is
+    /// something hy2 cannot answer (DNS, helper, TUN). Restart may have
+    /// dropped the classified record; still name the row. A first-connect
+    /// handshake eof fully releases protection, so the dashboard must still
+    /// offer this next hand while disconnected.
+    func backupHy2SiblingName() -> String? {
+        if let code = lastClassifiedFailure?.code {
+            switch code {
+            case .coreExitUnreachable, .unknownClassifiedFailure:
+                break
+            default:
+                return nil
+            }
+        }
+        let selected = currentProxySelectionTarget() ?? activeNode?.name
+        guard let selected else { return nil }
+        let names = Set(importedExitNodes.map(\.name))
+        return ProxyNode.backupChannelName(selected: selected, catalogNames: names)
+    }
+
+    func shouldOfferManualBackupChannel() -> Bool {
+        ManualBackupChannelOffer.shouldShow(
+            hasSibling: backupHy2SiblingName() != nil,
+            protectionBlocked: isProtectionBlocked,
+            connecting: isConnecting,
+            connected: isConnected,
+            disconnecting: isDisconnecting,
+            hasFailureRecord: lastConnectionFailure != nil || lastClassifiedFailure != nil
+        )
+    }
+
+    /// User-tapped next hand. Does not run on its own (G2.8 stays off).
+    func tryBackupChannelManually() {
+        guard let backup = backupHy2SiblingName() else { return }
+        guard applyProxySelection(backup) else { return }
+        persistProxySelection(backup)
+        if isProtectionBlocked {
+            retryProtectedConnectionNow()
+        } else {
+            connect()
+        }
+    }
+
+}
+
+enum CatalogCityFailover {
+    /// Live connect used to hop cities on `CORE_EXIT_UNREACHABLE`. From China
+    /// that is the same TLS close on every city, so the picker jumped and the
+    /// backup-channel button never sat on a stable city. Windows already left
+    /// `rotate_catalog_exit_after_failure` off the live path. Keep this off
+    /// until G2.8 has home-broadband proof.
+    static func shouldRotate(after _: ProtectedFailureCode?) -> Bool {
+        false
+    }
+}
+
+enum IdleCatalogSelect {
+    /// Idle disconnected: picking a city (including hy2) is Connect.
+    static func shouldConnect(
+        connected: Bool,
+        protectionBlocked: Bool,
+        connecting: Bool = false
+    ) -> Bool {
+        !connected && !protectionBlocked && !connecting
+    }
+
+    /// Protected Offline: picking a city retries in place, same as Retry now.
+    static func shouldRetryProtected(connected: Bool, protectionBlocked: Bool) -> Bool {
+        !connected && protectionBlocked
+    }
+}
+
+enum ManualBackupChannelOffer {
+    /// Protected Offline (including restart), or a released first-connect
+    /// handshake failure. Idle disconnected must not show the button.
+    static func shouldShow(
+        hasSibling: Bool,
+        protectionBlocked: Bool,
+        connecting: Bool,
+        connected: Bool,
+        disconnecting: Bool,
+        hasFailureRecord: Bool
+    ) -> Bool {
+        guard hasSibling, !connecting, !connected, !disconnecting else { return false }
+        return protectionBlocked || hasFailureRecord
+    }
+}
+
+enum ReleasedConnectFailureActions {
+    /// First-connect handshake eof fully releases protection. Retry must call
+    /// Connect (not protected retry) and still offer another route, even when
+    /// the catalog has no hy2 sibling.
+    static func shouldOfferRetryAndRoute(
+        protectionBlocked: Bool,
+        connecting: Bool,
+        disconnecting: Bool,
+        hasFailureRecord: Bool
+    ) -> Bool {
+        hasFailureRecord && !protectionBlocked && !connecting && !disconnecting
+    }
 }
