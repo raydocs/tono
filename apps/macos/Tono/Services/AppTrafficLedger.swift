@@ -1,17 +1,5 @@
 import Foundation
 
-/// Bytes attributed to each route over one telemetry window, in the exact shape
-/// `telemetry/windows` accepts: three optional integer keys and nothing else —
-/// any other key is refused with a 400 that drops the whole window.
-///
-/// Declared beside the ledger rather than with the other wire types so the
-/// standalone ledger test can compile `windowDelta` without the app's models.
-nonisolated struct TonoBytesByRoute: Encodable, Equatable, Sendable {
-    let cloud: Int64
-    let residential: Int64
-    let direct: Int64
-}
-
 /// Per-application traffic totals, split by which path the bytes took.
 ///
 /// Mihomo reports only *live* connections, and a connection's byte counters

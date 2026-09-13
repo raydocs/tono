@@ -55,6 +55,7 @@ actor DiagnosticsLogUploader {
     private var sequence = 0
     private var cursor: Cursor
     private var sweepTask: Task<Void, Never>?
+    private var uploadEpoch: UInt64 = 0
     private var consecutiveFailures = 0
     private var unreadableBackupSweeps = 0
     /// How long to keep believing a rotated file's tail will become readable.
@@ -103,6 +104,7 @@ actor DiagnosticsLogUploader {
     }
 
     func stop() {
+        uploadEpoch &+= 1
         sweepTask?.cancel()
         sweepTask = nil
     }
@@ -178,18 +180,19 @@ actor DiagnosticsLogUploader {
     /// unsent bytes.
     @discardableResult
     func sweep() async -> SweepOutcome {
-        guard isEnabled() else { return .disabled }
+        guard isEnabled(), !Task.isCancelled else { return .disabled }
+        let epoch = uploadEpoch
         var uploaded = false
         // A rotation moved the bytes we were reading into `.1`. Finish that tail
         // first: the alternative is losing exactly the window where the log was
         // busiest, which is the window worth having.
-        while let pending = pendingBackupSegment() {
-            if let failure = await send(pending) { return .failed(failure) }
+        while uploadPermitted(epoch: epoch), let pending = pendingBackupSegment() {
+            if let failure = await send(pending, epoch: epoch) { return .failed(failure) }
             uploaded = true
             if pending.remainingBytes == 0 { break }
         }
-        while let segment = pendingCurrentSegment() {
-            if let failure = await send(segment) { return .failed(failure) }
+        while uploadPermitted(epoch: epoch), let segment = pendingCurrentSegment() {
+            if let failure = await send(segment, epoch: epoch) { return .failed(failure) }
             uploaded = true
             if segment.remainingBytes == 0 { break }
             // Yield so a multi-megabyte catch-up does not pin a performance core
@@ -208,7 +211,12 @@ actor DiagnosticsLogUploader {
 
     /// Returns nil on success, or the failure description for the caller to
     /// report. The cursor is only advanced once the segment is accepted.
-    private func send(_ segment: Segment) async -> String? {
+    private func uploadPermitted(epoch: UInt64) -> Bool {
+        epoch == uploadEpoch && !Task.isCancelled && isEnabled()
+    }
+
+    private func send(_ segment: Segment, epoch: UInt64) async -> String? {
+        guard uploadPermitted(epoch: epoch) else { return "Log upload was cancelled." }
         do {
             try await upload(
                 segment.payload,
@@ -219,11 +227,15 @@ actor DiagnosticsLogUploader {
                 osVersion
             )
         } catch {
+            guard uploadPermitted(epoch: epoch) else { return "Log upload was cancelled." }
             consecutiveFailures += 1
             logger.error("log segment upload failed: \(String(describing: error), privacy: .public)")
             return (error as? LocalizedError)?.errorDescription
                 ?? error.localizedDescription
         }
+        // Actor reentrancy lets sign-out abandon the tail while HTTP is in flight.
+        // A late success must not rewind that account boundary or send another chunk.
+        guard uploadPermitted(epoch: epoch) else { return "Log upload was cancelled." }
         consecutiveFailures = 0
         sequence += 1
         cursor = segment.nextCursor

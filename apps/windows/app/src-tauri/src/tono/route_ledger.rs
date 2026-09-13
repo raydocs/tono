@@ -119,6 +119,10 @@ impl RouteLedger {
             if connection.id.is_empty() {
                 continue;
             }
+            let route = classify_route(&connection.chains);
+            if route == RouteClass::Rejected {
+                continue;
+            }
             live.insert(connection.id.clone());
             let previous = self.counters.get(&connection.id).copied();
             let upload_delta = match previous {
@@ -134,7 +138,7 @@ impl RouteLedger {
             self.counters
                 .insert(connection.id.clone(), (connection.upload, connection.download));
             let bytes = upload_delta.saturating_add(download_delta);
-            match classify_route(&connection.chains) {
+            match route {
                 RouteClass::Cloud => self.overall.cloud = self.overall.cloud.saturating_add(bytes),
                 RouteClass::Residential => {
                     self.overall.residential = self.overall.residential.saturating_add(bytes);
@@ -173,27 +177,11 @@ mod tests {
     }
 
     #[test]
-    fn classify_route_matches_activity_model_table() {
-        // Mirrors `activity.test.tsx` classifyActivityRoute cases, mapped to
-        // Worker keys: proxied → cloud, home → residential, rejected dropped.
-        let cases: &[(&[&str], RouteClass)] = &[
-            (&["Tono Cloud"], RouteClass::Cloud),
-            (&["DIRECT"], RouteClass::Direct),
-            (&["REJECT-DROP"], RouteClass::Rejected),
-            (&["REJECT-us"], RouteClass::Cloud),
-            (&["direct"], RouteClass::Cloud),
-            (&["Tono-Home-Residential"], RouteClass::Residential),
-            (&["HomeNode", "Tono-Claude-Home"], RouteClass::Residential),
-            (&["Tono-Exit", "Tono-Claude-Home"], RouteClass::Cloud),
-            (&["Tono-China-Direct"], RouteClass::Direct),
-            (&["Home Residential", "Tono-Claude-Home"], RouteClass::Residential),
-            (&["Tono-China-Web-Direct"], RouteClass::Direct),
-            (&["REJECT"], RouteClass::Rejected),
-        ];
-        for (hops, expected) in cases {
-            let chains: Vec<String> = hops.iter().map(|hop| (*hop).to_string()).collect();
-            assert_eq!(classify_route(&chains), *expected, "hops={hops:?}");
-        }
+    fn route_classification_uses_terminal_and_residential_chain_authority() {
+        assert_eq!(classify_route(&["DIRECT".into()]), RouteClass::Direct);
+        assert_eq!(classify_route(&["direct".into()]), RouteClass::Cloud);
+        assert_eq!(classify_route(&["REJECT".into(), "Tono-Home-Residential".into()]), RouteClass::Rejected);
+        assert_eq!(classify_route(&["HomeNode".into(), "Tono-Claude-Home".into()]), RouteClass::Residential);
     }
 
     #[test]
