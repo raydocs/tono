@@ -185,7 +185,8 @@ actor TonoAPIClient {
         sequence: Int,
         lineCount: Int,
         clientVersion: String,
-        osVersion: String
+        osVersion: String,
+        requestIsCurrent: (@Sendable () -> Bool)? = nil
     ) async throws -> TonoDiagnosticsLogSegmentResponse {
         let receipt: TonoDiagnosticsLogSegmentResponse = try await authorizedRequest(
             "diagnostics/logs",
@@ -198,7 +199,8 @@ actor TonoAPIClient {
                 "X-Tono-Log-Lines": String(lineCount),
                 "X-Tono-Log-Client-Version": clientVersion,
                 "X-Tono-Log-Os-Version": osVersion,
-            ]
+            ],
+            requestIsCurrent: requestIsCurrent
         )
         guard receipt.wasStored else {
             throw APIError.server(

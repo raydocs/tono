@@ -141,6 +141,7 @@ pub async fn tono_sign_in_start(
     let (client, installation_id, generation) = {
         let mut inner = state.lock().await;
         inner.sign_in_generation = inner.sign_in_generation.wrapping_add(1);
+        state.audit().abandon_log_upload_owner();
         (
             inner.client.clone(),
             inner.installation_id.clone(),
@@ -265,6 +266,7 @@ pub async fn tono_sign_out(state: tauri::State<'_, Arc<TonoState>>, app: AppHand
         let mut inner = state.lock().await;
         inner.invalidate_connection(true);
         inner.sign_in_generation = inner.sign_in_generation.wrapping_add(1);
+        state.audit().abandon_log_upload_owner();
         inner.tasks.abort_catalog_sync();
         inner.cancel_server_tests();
         (inner.client.clone(), inner.sign_in_generation)

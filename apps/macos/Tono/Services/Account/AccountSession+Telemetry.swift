@@ -69,9 +69,15 @@ extension AccountSession {
             }
             return
         }
-        if diagnosticsLogUploader == nil {
+        guard let user,
+              let scope = DiagnosticsLogOwnership.shared.activate(owner: user.id) else { return }
+        if diagnosticsLogUploader?.scopeID != scope {
+            if let previous = diagnosticsLogUploader { Task { await previous.stop() } }
             let api = self.api
             diagnosticsLogUploader = DiagnosticsLogUploader(
+                scopeID: scope,
+                ownership: .shared,
+                isEnabled: { DiagnosticsLogOwnership.shared.isCurrent(scope) },
                 upload: { payload, sessionID, sequence, lineCount, clientVersion, osVersion in
                     _ = try await api.uploadDiagnosticsLogSegment(
                         payload: payload,
@@ -79,7 +85,8 @@ extension AccountSession {
                         sequence: sequence,
                         lineCount: lineCount,
                         clientVersion: clientVersion,
-                        osVersion: osVersion
+                        osVersion: osVersion,
+                        requestIsCurrent: { DiagnosticsLogOwnership.shared.isCurrent(scope) }
                     )
                 }
             )
@@ -90,12 +97,14 @@ extension AccountSession {
     }
 
     func abandonDiagnosticsLogUploader() async {
+        DiagnosticsLogOwnership.shared.abandon()
         guard let uploader = diagnosticsLogUploader else { return }
         await uploader.abandonUnsentForAccountSwitch()
         diagnosticsLogUploader = nil
     }
 
     func networkLogUploadSettingChanged() {
+        DiagnosticsLogOwnership.shared.consentChanged()
         updateDiagnosticsLogUploading()
     }
 
@@ -309,6 +318,8 @@ extension AccountSession {
     /// "the run finished" left a failed upload indistinguishable from a sent one.
     @discardableResult
     func uploadDiagnosticsLogNow() async -> DiagnosticsLogUploader.SweepOutcome {
+        guard state == .ready, !systemSleeping, user != nil,
+              LocalTrafficAudit.isEnabled, SettingsKey.isNetworkLogUploadEnabled() else { return .disabled }
         updateDiagnosticsLogUploading()
         // `updateDiagnosticsLogUploading` only builds the uploader once the
         // account, sleep and consent preconditions hold. A nil one is therefore
@@ -534,6 +545,7 @@ extension AccountSession {
     }
 
     func clearAccount() {
+        DiagnosticsLogOwnership.shared.abandon()
         invalidateAccountReads()
         // Re-anchor on the way out: the ledger's counter outlives the account,
         // so without this the first window of the next account to sign in here

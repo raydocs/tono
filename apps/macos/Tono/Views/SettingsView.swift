@@ -235,7 +235,12 @@ struct SettingsView: View {
                 subtitle: "On by default for new installations; existing choices are kept. Uploads hostnames you connected to, the process that opened each connection, and the matched rule and route. Never page content, passwords or node secrets. Turn it off here.",
                 isOn: Binding(
                     get: { networkLogUploadEnabled },
-                    set: { SettingsKey.setNetworkLogUploadEnabled($0) }
+                    set: {
+                        SettingsKey.setNetworkLogUploadEnabled($0)
+                        // Revoke synchronously, even if SwiftUI coalesces a
+                        // rapid off/on into a single onChange notification.
+                        accountSession.networkLogUploadSettingChanged()
+                    }
                 )
             )
             .onChange(of: networkLogUploadEnabled) { _, _ in
@@ -253,6 +258,7 @@ struct SettingsView: View {
             )
             .onChange(of: localTrafficAuditEnabled) { _, enabled in
                 appState.setLocalTrafficAuditEnabled(enabled)
+                accountSession.updateDiagnosticsLogUploading()
             }
 
             settingDivider

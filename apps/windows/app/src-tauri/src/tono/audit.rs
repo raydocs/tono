@@ -44,6 +44,9 @@ const CHANNEL_CAPACITY: usize = 256;
 #[derive(Debug, Clone, Serialize)]
 pub struct AuditRecord {
     pub ts: i64,
+    /// Captured before queuing: a late disk write cannot acquire a new owner.
+    #[serde(rename = "_uploadScope", skip_serializing_if = "Option::is_none")]
+    pub upload_scope: Option<String>,
     #[serde(flatten)]
     pub event: AuditEvent,
 }
@@ -54,7 +57,7 @@ impl AuditRecord {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|duration| duration.as_millis() as i64)
             .unwrap_or(0);
-        Self { ts, event }
+        Self { ts, event, upload_scope: None }
     }
 }
 
@@ -523,7 +526,32 @@ struct SettingsFile {
     /// Older clients never wrote this marker; its absence is not consent.
     #[serde(default)]
     network_log_upload_user_chosen: bool,
+    #[serde(default)]
+    network_log_upload_scope: Option<PersistedUploadScope>,
 }
+
+#[derive(Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct PersistedUploadScope {
+    owner: String,
+    id: String,
+}
+
+#[derive(Clone)]
+pub(crate) struct LogUploadScope {
+    pub id: String,
+    pub cancelled: tokio_util::sync::CancellationToken,
+}
+
+#[derive(Default)]
+struct UploadOwner {
+    owner: Option<String>,
+    scope: Option<LogUploadScope>,
+}
+
+// Serialize all settings read/modify/write operations, including migration.
+// Otherwise a telemetry toggle can resurrect a revoked upload scope.
+static SETTINGS_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 
 impl Default for SettingsFile {
     fn default() -> Self {
@@ -535,11 +563,17 @@ impl Default for SettingsFile {
             network_log_default_v2: true,
             network_log_default_v3: true,
             network_log_upload_user_chosen: false,
+            network_log_upload_scope: None,
         }
     }
 }
 
 fn load_settings(dir: &Path) -> SettingsFile {
+    let _guard = SETTINGS_LOCK.lock();
+    load_settings_locked(dir)
+}
+
+fn load_settings_locked(dir: &Path) -> SettingsFile {
     let mut settings = match std::fs::read_to_string(dir.join(SETTINGS_FILE_NAME)) {
         Ok(body) => match serde_json::from_str::<SettingsFile>(&body) {
             Ok(settings) => settings,
@@ -600,20 +634,25 @@ fn save_settings(dir: &Path, settings: &SettingsFile) -> Result<()> {
 }
 
 fn save_audit_enabled(dir: &Path, enabled: bool) -> Result<()> {
-    let mut settings = load_settings(dir);
+    let _guard = SETTINGS_LOCK.lock();
+    let mut settings = load_settings_locked(dir);
     settings.audit_enabled = enabled;
+    if !enabled { settings.network_log_upload_scope = None; }
     save_settings(dir, &settings)
 }
 
 fn save_periodic_telemetry_enabled(dir: &Path, enabled: bool) -> Result<()> {
-    let mut settings = load_settings(dir);
+    let _guard = SETTINGS_LOCK.lock();
+    let mut settings = load_settings_locked(dir);
     settings.periodic_telemetry_enabled = enabled;
     save_settings(dir, &settings)
 }
 
 fn save_network_log_upload_enabled(dir: &Path, enabled: bool) -> Result<()> {
-    let mut settings = load_settings(dir);
+    let _guard = SETTINGS_LOCK.lock();
+    let mut settings = load_settings_locked(dir);
     settings.network_log_upload_enabled = enabled;
+    if !enabled { settings.network_log_upload_scope = None; }
     settings.network_log_upload_user_chosen = true;
     save_settings(dir, &settings)
 }
@@ -624,6 +663,7 @@ fn save_network_log_upload_enabled(dir: &Path, enabled: bool) -> Result<()> {
 /// channel feeding the writer task. The writer self-heals when its task
 /// died unexpectedly (L1); after `close_sender` (quit) it never revives.
 pub struct Audit {
+    upload_owner: parking_lot::Mutex<UploadOwner>,
     sender: parking_lot::Mutex<Option<tokio::sync::mpsc::Sender<AuditRecord>>>,
     writer: parking_lot::Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     enabled: AtomicBool,
@@ -646,6 +686,7 @@ impl Audit {
     pub fn new(logs_dir: &Path, settings_dir: &Path) -> Arc<Self> {
         let settings = load_settings(settings_dir);
         let audit = Arc::new(Self {
+            upload_owner: parking_lot::Mutex::new(UploadOwner::default()),
             sender: parking_lot::Mutex::new(None),
             writer: parking_lot::Mutex::new(None),
             enabled: AtomicBool::new(settings.audit_enabled),
@@ -666,6 +707,7 @@ impl Audit {
     #[cfg(test)]
     pub fn for_test(sender: tokio::sync::mpsc::Sender<AuditRecord>, settings_dir: &Path, enabled: bool) -> Arc<Self> {
         Arc::new(Self {
+            upload_owner: parking_lot::Mutex::new(UploadOwner::default()),
             sender: parking_lot::Mutex::new(Some(sender)),
             writer: parking_lot::Mutex::new(None),
             enabled: AtomicBool::new(enabled),
@@ -718,6 +760,63 @@ impl Audit {
         network_log_upload_enabled_from_settings(&self.settings_dir)
     }
 
+    /// Only a verified account can own future records. Startup/legacy records
+    /// without a scope are retained locally, never silently attributed at upload.
+    pub(crate) fn activate_log_upload_owner(&self, account: &str) {
+        let mut owner = self.upload_owner.lock();
+        owner.owner = Some(account.to_string());
+        self.refresh_upload_scope(&mut owner);
+    }
+
+    pub(crate) fn abandon_log_upload_owner(&self) {
+        let mut owner = self.upload_owner.lock();
+        owner.owner = None;
+        self.refresh_upload_scope(&mut owner);
+    }
+
+    fn refresh_upload_scope(&self, owner: &mut UploadOwner) {
+        let _settings_guard = SETTINGS_LOCK.lock();
+        let mut settings = load_settings_locked(&self.settings_dir);
+        let desired = owner.owner.as_ref().filter(|_| {
+            self.enabled() && settings.network_log_upload_enabled
+        }).map(|account| {
+            settings.network_log_upload_scope.as_ref()
+                .filter(|saved| saved.owner == *account)
+                .cloned()
+                .unwrap_or_else(|| PersistedUploadScope {
+                    owner: account.clone(), id: tono_core::auth::new_installation_id(),
+                })
+        });
+        let changed = settings.network_log_upload_scope != desired;
+        settings.network_log_upload_scope = desired.clone();
+        // A failed durable boundary must not grant any new upload authority.
+        // A no-op must not rewrite an unreadable/malformed settings file.
+        let desired = if !changed || save_settings(&self.settings_dir, &settings).is_ok() { desired } else { None };
+        let same = owner.scope.as_ref().zip(desired.as_ref())
+            .is_some_and(|(current, wanted)| current.id == wanted.id);
+        if !same {
+            if let Some(previous) = owner.scope.take() { previous.cancelled.cancel(); }
+            owner.scope = desired.map(|saved| LogUploadScope {
+                id: saved.id, cancelled: tokio_util::sync::CancellationToken::new(),
+            });
+        }
+    }
+
+    pub(crate) fn log_upload_scope(&self) -> Option<LogUploadScope> {
+        self.upload_owner.lock().scope.clone()
+    }
+
+    /// Linearize cursor acknowledgement with consent/owner changes. The caller
+    /// also holds the app account-generation lock; never acquire it from here.
+    pub(crate) fn with_log_upload_scope<R>(&self, scope: &LogUploadScope, action: impl FnOnce() -> R) -> Option<R> {
+        let owner = self.upload_owner.lock();
+        if scope.cancelled.is_cancelled() || !self.enabled() || !self.network_log_upload_enabled()
+            || !owner.scope.as_ref().is_some_and(|current| current.id == scope.id) {
+            return None;
+        }
+        Some(action())
+    }
+
     pub fn dropped_count(&self) -> u64 {
         self.dropped.load(Ordering::Relaxed)
     }
@@ -735,9 +834,12 @@ impl Audit {
     /// Bypasses the toggle — used only for the lifecycle markers
     /// (`auditDisabled` must land as the last line before silence).
     fn record(&self, event: AuditEvent) {
+        let owner = self.upload_owner.lock();
+        let mut record = AuditRecord::now(event.redacted());
+        record.upload_scope = owner.scope.as_ref().map(|scope| scope.id.clone());
         let sender = self.sender.lock();
         if let Some(sender) = sender.as_ref()
-            && sender.try_send(AuditRecord::now(event.redacted())).is_err()
+            && sender.try_send(record).is_err()
         {
             self.dropped.fetch_add(1, Ordering::Relaxed);
         }
@@ -750,8 +852,11 @@ impl Audit {
         if self.enabled() == enabled {
             return Ok(());
         }
+        let mut owner = self.upload_owner.lock();
         save_audit_enabled(&self.settings_dir, enabled).map_err(|err| err.to_string())?;
         self.enabled.store(enabled, Ordering::Release);
+        self.refresh_upload_scope(&mut owner);
+        drop(owner);
         if enabled {
             self.record(AuditEvent::AuditEnabled);
         } else {
@@ -782,8 +887,11 @@ impl Audit {
     /// `network_log_upload_user_chosen` so a later default flip cannot override
     /// an explicit confirmation of the current value.
     pub fn set_network_log_upload_enabled(&self, enabled: bool) -> Result<(), String> {
+        let mut owner = self.upload_owner.lock();
         let previous = self.network_log_upload_enabled();
         save_network_log_upload_enabled(&self.settings_dir, enabled).map_err(|err| err.to_string())?;
+        self.refresh_upload_scope(&mut owner);
+        drop(owner);
         if previous == enabled {
             return Ok(());
         }
@@ -800,6 +908,9 @@ impl Audit {
     /// task handle from `take_writer`.
     pub fn close_sender(&self) {
         self.closed.store(true, Ordering::Release);
+        // Stop in-flight requests, but retain the same-owner durable scope so
+        // the next authenticated launch can catch up its own offline records.
+        if let Some(scope) = self.upload_owner.lock().scope.take() { scope.cancelled.cancel(); }
         self.sender.lock().take();
     }
 
@@ -840,6 +951,40 @@ mod tests {
     }
 
     // ---- redaction: one case per pattern group ----
+
+    #[tokio::test]
+    async fn queued_records_keep_their_original_upload_owner() {
+        let dir = TempDir::new("upload-scope");
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(8);
+        let audit = Audit::for_test(sender, dir.path(), true);
+        audit.activate_log_upload_owner("account-a");
+        let first = audit.log_upload_scope().unwrap();
+        audit.log(AuditEvent::NetworkChange { counter: 1 });
+        audit.activate_log_upload_owner("account-b");
+        let second = audit.log_upload_scope().unwrap();
+        audit.log(AuditEvent::NetworkChange { counter: 2 });
+        assert!(first.cancelled.is_cancelled());
+        assert_ne!(first.id, second.id);
+        assert_eq!(receiver.recv().await.unwrap().upload_scope, Some(first.id));
+        assert_eq!(receiver.recv().await.unwrap().upload_scope, Some(second.id));
+    }
+
+    #[tokio::test]
+    async fn revoked_upload_scope_cannot_ack_and_reenable_uses_a_new_scope() {
+        let dir = TempDir::new("upload-scope");
+        let (sender, _receiver) = tokio::sync::mpsc::channel(8);
+        let audit = Audit::for_test(sender, dir.path(), true);
+        audit.activate_log_upload_owner("account-a");
+        let pending = audit.log_upload_scope().unwrap();
+        audit.set_network_log_upload_enabled(false).unwrap();
+        assert!(pending.cancelled.is_cancelled());
+        let mut advanced = false;
+        assert!(audit.with_log_upload_scope(&pending, || advanced = true).is_none());
+        assert!(!advanced);
+        audit.set_network_log_upload_enabled(true).unwrap();
+        assert_ne!(audit.log_upload_scope().unwrap().id, pending.id);
+        assert!(audit.with_log_upload_scope(&pending, || ()).is_none());
+    }
 
     #[test]
     fn redact_authorization_header() {

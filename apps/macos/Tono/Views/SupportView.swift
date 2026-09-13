@@ -498,6 +498,8 @@ struct SupportView: View {
             String(localized: "Sent. The newest log segment is with Tono support.")
         case .idle:
             String(localized: "Nothing to send — the log has not advanced since the last upload.")
+        case .busy:
+            String(localized: "A log upload is already in progress. Please wait for it to finish.")
         case .disabled:
             String(localized: "Nothing was sent: log upload is off in Settings › Privacy.")
         case let .failed(reason):
@@ -509,7 +511,7 @@ struct SupportView: View {
         _ outcome: DiagnosticsLogUploader.SweepOutcome
     ) -> Bool {
         switch outcome {
-        case .uploaded, .idle: false
+        case .uploaded, .idle, .busy: false
         case .disabled, .failed: true
         }
     }

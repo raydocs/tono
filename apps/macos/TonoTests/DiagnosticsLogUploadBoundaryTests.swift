@@ -23,6 +23,24 @@ final class DiagnosticsLogUploadBoundaryTests: XCTestCase {
         func accept() { response?.resume(); response = nil }
     }
 
+    func testManualSweepDoesNotReenterAnInFlightUpload() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let log = directory.appendingPathComponent("audit.jsonl")
+        try Data("{\"a\":1}\n".utf8).write(to: log)
+        let gate = UploadGate()
+        let uploader = DiagnosticsLogUploader(auditLogURL: log, isEnabled: { true }) {
+            _, _, _, _, _, _ in await gate.upload()
+        }
+        let first = Task { await uploader.sweep() }
+        await gate.waitUntilEntered()
+        let overlapping = await uploader.sweep()
+        await gate.accept()
+        _ = await first.value
+        guard case .busy = overlapping else { return XCTFail("overlapping sweep was not refused") }
+    }
+
     func testLateAcknowledgementCannotRewindAnAccountSwitchBoundary() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("tono-log-boundary-\(UUID().uuidString)")

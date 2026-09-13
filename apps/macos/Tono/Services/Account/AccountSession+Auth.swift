@@ -575,6 +575,7 @@ extension AccountSession {
     }
 
     private func performAuthentication(_ operation: @MainActor () async throws -> TonoAuthResponse) async {
+        await abandonDiagnosticsLogUploader()
         state = .authenticating
         // A failed revoke from the device-limit list belongs to the attempt
         // that raised it, not to the one starting here.

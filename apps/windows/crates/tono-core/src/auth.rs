@@ -1127,6 +1127,22 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         &self,
         segment: DiagnosticsLogSegment<'_>,
     ) -> Result<DiagnosticsLogReceipt, ApiError> {
+        let identity = self.diagnostics_log_identity().await;
+        self.upload_diagnostics_log_segment_for_identity(segment, identity).await
+    }
+
+    /// Capture while the app's account-generation lock still owns the payload.
+    /// Refreshing this same account does not change its identity epoch.
+    pub async fn diagnostics_log_identity(&self) -> u64 {
+        self.state.lock().await.identity_epoch
+    }
+
+    pub async fn upload_diagnostics_log_segment_for_identity(
+        &self,
+        segment: DiagnosticsLogSegment<'_>,
+        identity: u64,
+    ) -> Result<DiagnosticsLogReceipt, ApiError> {
+        self.ensure_log_identity(identity).await?;
         if segment.gzip.len() < 2 || segment.gzip[0] != 0x1f || segment.gzip[1] != 0x8b {
             return Err(ApiError::InvalidInput(
                 "diagnostics log segment must be gzip".to_string(),
@@ -1169,6 +1185,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
                     bytes: segment.gzip.to_vec(),
                 },
                 headers,
+                identity,
             )
             .await?;
         let receipt: DiagnosticsLogReceipt = decode_json(&response)?;
@@ -1273,8 +1290,9 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         path: &str,
         body: BinaryBody,
         headers: Vec<(String, String)>,
+        identity_epoch: u64,
     ) -> Result<Vec<u8>, ApiError> {
-        let identity_epoch = self.state.lock().await.identity_epoch;
+        self.ensure_log_identity(identity_epoch).await?;
         let (token, epoch) = self.current_access_token().await?;
         self.ensure_log_identity(identity_epoch).await?;
         let build = |bearer: &str| ApiRequest {
@@ -1686,6 +1704,19 @@ mod tests {
             .await;
         assert!(matches!(result, Err(ApiError::Server { status: 200, message }) if message.contains("did not store")));
         assert_eq!(mock.count_to("diagnostics/logs"), 1);
+    }
+
+    #[tokio::test]
+    async fn a_log_bound_to_a_replaced_identity_is_not_dispatched() {
+        let (client, mock, _store) = test_client(|_| panic!("old log must not reach transport"));
+        client.adopt(&auth_response("old-access", Some("old-refresh"))).await.unwrap();
+        let identity = client.diagnostics_log_identity().await;
+        client.adopt(&auth_response("new-access", Some("new-refresh"))).await.unwrap();
+        let result = client.upload_diagnostics_log_segment_for_identity(
+            log_segment(&[0x1f, 0x8b, 0x08], "old-session"), identity,
+        ).await;
+        assert_eq!(result, Err(ApiError::Unauthorized));
+        assert!(mock.requests().is_empty());
     }
 
     #[tokio::test]
