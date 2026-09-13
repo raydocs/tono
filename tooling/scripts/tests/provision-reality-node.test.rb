@@ -71,6 +71,22 @@ class Hy2StaysOptIn < Minitest::Test
   REALITY_REMOTE = File.expand_path("../remote/manage-tono-reality-node.sh", __dir__)
   HY2_REMOTE = File.expand_path("../remote/manage-tono-hy2-node.sh", __dir__)
 
+  def test_debian11_complement_requires_the_supported_systemd_runtime
+    # Source only function definitions: no SSH, service mutation, or host OS reads.
+    functions = File.read(HY2_REMOTE).split("\nmode=${1:-}").first
+    mocks = <<~BASH
+      systemctl() { printf 'systemd %s\\n' "$TEST_SYSTEMD_VERSION"; }
+      python3() { return 0; }
+      openssl() { printf '%s\\n' '-addext'; }
+      require_debian11_runtime
+    BASH
+    _, error, valid = Open3.capture3({"TEST_SYSTEMD_VERSION" => "247"}, "bash", stdin_data: functions + "\n" + mocks)
+    assert_predicate(valid, :success?, error)
+    _, error, old = Open3.capture3({"TEST_SYSTEMD_VERSION" => "246"}, "bash", stdin_data: functions + "\n" + mocks)
+    refute_predicate(old, :success?)
+    assert_match(/requires systemd 247/, error)
+  end
+
   def test_dry_run_without_hy2_does_not_open_udp
     source = File.read(SCRIPT)
     remote = File.read(REALITY_REMOTE)

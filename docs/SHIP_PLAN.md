@@ -109,7 +109,7 @@
   2. **vm-nvLHV3** — 洛杉矶 LAXPre Nano，`144.225.255.38`，Debian 12，1C/1024MB，流量几乎空（约 0.09%）。另一条大洲路径，同一商家，用来区分「GFW 拦 UDP」和「这一家机房不给 UDP」。
 - 不选：JP Lite（不是三网直连、5GB 盘、18 天到期）；Ubuntu 26.04 / Debian 11（provisioner 合同外）；洛杉矶用量最高的那台（约 54 GB，先别在忙机上做实验）。目录名以控制面 `catalog_name` 为准，机队表只有实例名。
 - T0 不通的运营商不做自动切换。SSH 口令只留在 Notion / 钥匙串，**不准进仓库、不准进本文件**。
-- 2026-09-13 测试机补充：老板指定当前 Panstar 账号的洛杉矶 `vm-jPZp8D`（#7012，`144.225.255.114`）。仅此实例的 IPv4 入站 UDP 443 已在 ego-lite 放行并确认 Synced；实际 Debian 11，现有 Xray TCP 443 保持运行。hy2 选 `www.ucla.edu`，尚未安装、尚未发布目录；不能套用 Debian 12/13 自动安装通过的结论。
+- 2026-09-13 测试机补充：老板指定当前 Panstar 账号的洛杉矶 `vm-jPZp8D`（#7012，`144.225.255.114`）。仅此实例 IPv4 入站 UDP 443 经 ego-lite 放行并确认 Synced。Debian 11 经能力与官方二进制实测后已补装 hy2 v2.12.2，SAN/SNI/masquerade 为 `www.ucla.edu`；现有 Xray PID/配置均未改。隔离客户端 DNS、Google/YouTube、5/5 新进程握手、32 秒下载与错误 pin 拒绝通过。现行目录 r54 的 Marina VLESS front 为 Chapman，19→20 条追加 dry-run 通过但**未发布**：hy2 身份快照尚不跟随实时 roster 增删，先关闭该授权缺口。详见[审计证据](reports/RELEASE_READINESS_2026-09-13.md#panstar-7012-单机测试)。
 - 验收：A/B 均已有决定；#137/#138 仍须关闭本轮审计阻塞及完成真机验收。新测试机不替代家宽三网 T0。
 
 ---
