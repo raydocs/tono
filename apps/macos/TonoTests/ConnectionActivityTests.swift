@@ -245,9 +245,9 @@ final class ConnectionActivityTests: XCTestCase {
         XCTAssertFalse(CatalogCityFailover.shouldRotate(after: .coreExitUnreachable))
         XCTAssertFalse(CatalogCityFailover.shouldRotate(after: .unknownClassifiedFailure))
         XCTAssertFalse(CatalogCityFailover.shouldRotate(after: nil))
-        XCTAssertTrue(
-            ProtectedFailureCode.coreExitUnreachable.userMessage
-                .localizedCaseInsensitiveContains("backup")
+        XCTAssertEqual(
+            ProtectedFailureCode.coreExitUnreachable.userMessage,
+            String(localized: "This city could not complete a protected connection. Retry, choose another route, or try the backup channel if one is shown.")
         )
         XCTAssertTrue(IdleCatalogSelect.shouldConnect(connected: false, protectionBlocked: false))
         XCTAssertFalse(IdleCatalogSelect.shouldConnect(connected: false, protectionBlocked: true))

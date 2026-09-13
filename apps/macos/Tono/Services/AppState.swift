@@ -375,14 +375,8 @@ final class AppState {
     /// Quiesce connect/health/switch work before a Sparkle install. PF stays
     /// armed until cleanup proves DNS + core stop, or the journal records a
     /// fail-closed handoff.
-    func prepareForSoftwareUpdate(nextVersion: String) async -> UpdateHandoffJournal {
-        connectionCoordinator.bumpGeneration()
-        connectionCoordinator.coreMonitorTask?.cancel()
-        connectionCoordinator.nodeSwitchTask?.cancel()
-        connectionCoordinator.protectedReconnectTask?.cancel()
-        connectionCoordinator.connectTask?.cancel()
-        isProtectedReconnectScheduled = false
-        var journal = UpdateHandoffJournal(
+    func prepareForSoftwareUpdate(nextVersion: String) async throws -> UpdateHandoffJournal {
+        let journal = UpdateHandoffJournal(
             phase: .updatePrepared,
             previousAppVersion: Bundle.main.object(
                 forInfoDictionaryKey: "CFBundleShortVersionString"
@@ -398,24 +392,47 @@ final class AppState {
             catalogRevision: nil,
             connectionGeneration: connectionCoordinator.protectionOperationGeneration
         )
-        // Each hop has to start from the phase actually reached. Advancing the
-        // written value and then advancing the original again skips a step,
-        // and a skipped step is refused: the journal then records an illegal
-        // transition rather than the clean shutdown that did happen, and every
-        // later hop inherits the wrong phase.
-        journal = journal.advancing(to: .connectionQuiescing)
-        try? UpdateHandoffStore.write(journal)
-        if isConnected || isConnecting {
-            await disconnectAndWait(releaseKillSwitch: false)
+        let runtimeMayOwnNetwork = journal.keepKillSwitchArmed
+            || coreRuntime.isRunning
+            || AppProfile.defaults.bool(forKey: SettingsKey.didStartCore)
+            || HelperManager.hasInstalledHelperArtifact
+        let needsDisconnect = journal.keepKillSwitchArmed || coreRuntime.isRunning
+            || AppProfile.defaults.bool(forKey: SettingsKey.didStartCore)
+            || isDisconnecting || connectionCoordinator.configReloadTask != nil
+        let requestGeneration = connectionCoordinator.protectionOperationGeneration
+        return try await UpdatePreparation.run(journal) {
+            guard self.connectionCoordinator.protectionOperationGeneration == requestGeneration else {
+                throw CancellationError()
+            }
+            // Do not disturb a healthy connection until the new journal is
+            // durable. A failed archive/write must leave its monitors running.
+            self.connectionCoordinator.bumpGeneration()
+            self.connectionCoordinator.coreMonitorTask?.cancel()
+            self.connectionCoordinator.nodeSwitchTask?.cancel()
+            self.connectionCoordinator.protectedReconnectTask?.cancel()
+            self.connectionCoordinator.connectTask?.cancel()
+            self.isProtectedReconnectScheduled = false
+            // Protected Offline and pending reloads need the same task drain as
+            // Connected. A pristine install must not arm PF just to update.
+            if needsDisconnect {
+                self.disconnect(releaseKillSwitch: false)
+            }
+            let generation = self.connectionCoordinator.protectionOperationGeneration
+            await self.finishPendingDisconnect()
+            guard self.connectionCoordinator.protectionOperationGeneration == generation else {
+                throw CancellationError()
+            }
+            if runtimeMayOwnNetwork {
+                try await PrivilegedRuntimeCoordinator.shared.prepareForSoftwareUpdate(
+                    keepKillSwitchArmed: journal.keepKillSwitchArmed
+                )
+            }
+            guard self.connectionCoordinator.protectionOperationGeneration == generation else {
+                throw CancellationError()
+            }
+            try Task.checkCancellation()
+            self.isProtectionBlocked = journal.keepKillSwitchArmed
         }
-        journal = journal.advancing(to: .cleanShutdownCompleted)
-        try? UpdateHandoffStore.write(journal)
-        return journal
-    }
-
-    func markProtectedUpdateHandoff(_ journal: UpdateHandoffJournal) {
-        let next = journal.advancing(to: .protectedHandoffRecorded)
-        try? UpdateHandoffStore.write(next)
     }
 
     func prepareForSystemSleep() {

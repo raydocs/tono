@@ -40,6 +40,30 @@ actor PrivilegedRuntimeCoordinator {
         try HelperManager.stopCore()
     }
 
+    /// One non-reentrant helper transaction: no new arm/start can interleave
+    /// between the stop, DNS restore, and final protection observation.
+    func prepareForSoftwareUpdate(keepKillSwitchArmed: Bool) throws {
+        if keepKillSwitchArmed {
+            try KillSwitchService.restrictToBootstrap()
+        }
+        try HelperManager.stopCore()
+        let core = HelperManager.coreStatus()
+        guard core.verified, !core.running else {
+            throw CoreRuntimeError.startFailed("Update preparation could not prove that Core stopped.")
+        }
+        guard try HelperManager.restoreProtectedDNSIfConfigured() else {
+            throw CoreRuntimeError.startFailed("Update preparation requires a helper with protected DNS recovery.")
+        }
+        try disableSystemProxyIfNeeded()
+        let protection = try HelperManager.killSwitchStatus()
+        guard UpdatePreparation.protectionMatches(
+            keepKillSwitchArmed: keepKillSwitchArmed,
+            armed: protection.armed, wanted: protection.wanted, live: protection.live
+        ) else {
+            throw CoreRuntimeError.startFailed("Update preparation could not verify the expected protection state.")
+        }
+    }
+
     func syncCoreConfig(configDirectory: String, configSHA256: String) throws -> String {
         try HelperManager.syncCoreConfig(
             configDir: configDirectory,

@@ -264,6 +264,25 @@ enum UpdateHandoffStore {
         localized: "The update did not finish. Disconnect, then reinstall Tono."
     )
 
+    static func writePrepared(_ journal: UpdateHandoffJournal, at url: URL) throws {
+        let previous: Data?
+        do {
+            previous = try Data(contentsOf: url)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile {
+            previous = nil
+        }
+        if let previous {
+            let history = url.deletingPathExtension().appendingPathExtension("history")
+            try FileManager.default.createDirectory(at: history, withIntermediateDirectories: true)
+            let archive = history.appendingPathComponent("\(UUID().uuidString).json")
+            try previous.write(to: archive, options: .atomic)
+            let handle = try FileHandle(forWritingTo: archive)
+            defer { try? handle.close() }
+            try handle.synchronize()
+        }
+        try write(journal, at: url)
+    }
+
     static func write(_ journal: UpdateHandoffJournal, at location: URL? = nil) throws {
         let url = location ?? fileURL
         try FileManager.default.createDirectory(
