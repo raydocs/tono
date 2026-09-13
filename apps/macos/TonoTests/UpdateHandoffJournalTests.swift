@@ -50,10 +50,13 @@ final class UpdateHandoffJournalTests: XCTestCase {
 
     private func assertSequenceAdvances(
         _ sequence: [UpdateHandoffPhase],
+        protected: Bool = true,
         file: StaticString = #filePath,
         line: UInt = #line
     ) throws {
         var journal = fixture(phase: .idle)
+        journal.wasConnected = protected
+        journal.keepKillSwitchArmed = protected
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         let decoder = JSONDecoder()
@@ -73,7 +76,7 @@ final class UpdateHandoffJournalTests: XCTestCase {
             XCTAssertEqual(decoded.previousAppVersion, "0.0.67", file: file, line: line)
             XCTAssertEqual(decoded.nextAppVersion, "0.0.68", file: file, line: line)
             XCTAssertEqual(decoded.connectionGeneration, 7, file: file, line: line)
-            XCTAssertTrue(decoded.keepKillSwitchArmed, file: file, line: line)
+            XCTAssertEqual(decoded.keepKillSwitchArmed, protected, file: file, line: line)
         }
     }
 
@@ -82,7 +85,24 @@ final class UpdateHandoffJournalTests: XCTestCase {
     }
 
     func testUnprotectedUpdateSequenceAdvancesAndRemainsDecodable() throws {
-        try assertSequenceAdvances(Self.unprotectedUpdateSequence)
+        try assertSequenceAdvances(Self.unprotectedUpdateSequence, protected: false)
+    }
+
+    func testProtectedOfflineUpdateCannotTakeUnprotectedPhaseShortcuts() {
+        var journal = fixture(phase: .cleanShutdownCompleted)
+        journal.wasConnected = false
+        XCTAssertFalse(journal.canAdvance(to: .installStarted))
+        let refusedInstall = journal.advancing(to: .installStarted)
+        XCTAssertEqual(refusedInstall.phase, .cleanShutdownCompleted)
+        XCTAssertTrue(refusedInstall.refusedIllegalTransition)
+        XCTAssertTrue(refusedInstall.canAdvance(to: .protectedHandoffRecorded))
+
+        journal.phase = .firstLaunchMigration
+        XCTAssertFalse(journal.canAdvance(to: .verified))
+        let refusedVerification = journal.advancing(to: .verified)
+        XCTAssertEqual(refusedVerification.phase, .firstLaunchMigration)
+        XCTAssertTrue(refusedVerification.refusedIllegalTransition)
+        XCTAssertTrue(refusedVerification.canAdvance(to: .protectionResuming))
     }
 
     /// Refusing a transition used to rewrite the phase to `failed`, which made

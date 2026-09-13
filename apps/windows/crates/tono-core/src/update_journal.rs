@@ -103,7 +103,18 @@ impl UpdateHandoffJournal {
     }
 
     pub fn advance(&mut self, phase: UpdateHandoffPhase) {
-        if !Self::allowed_next(self.phase, phase) {
+        // These two edges exist only for an update that has no matching
+        // protection obligation. Phase topology alone cannot authorize them.
+        let protection_allows = match (self.phase, phase) {
+            (UpdateHandoffPhase::CleanShutdownCompleted, UpdateHandoffPhase::InstallStarted) => {
+                !self.keep_kill_switch_armed
+            }
+            (UpdateHandoffPhase::FirstLaunchMigration, UpdateHandoffPhase::Verified) => {
+                !self.was_connected && !self.keep_kill_switch_armed
+            }
+            _ => true,
+        };
+        if !Self::allowed_next(self.phase, phase) || !protection_allows {
             self.last_error_code = Some("TONO_JOURNAL_ILLEGAL_PHASE".into());
             self.last_error_stage = Some(format!("{:?}->{:?}", self.phase, phase));
             self.phase = UpdateHandoffPhase::Failed;
@@ -343,6 +354,26 @@ fn unix_now() -> u64 {
 mod tests {
     use super::*;
     use std::env;
+
+    #[test]
+    fn protected_update_cannot_take_unprotected_phase_shortcuts() {
+        let dir = env::temp_dir().join(format!("tono-protected-phase-{}", uuid::Uuid::new_v4()));
+        let path = journal_path(&dir);
+        // Protected Offline is not Connected, but still owns a barrier.
+        let mut journal = UpdateHandoffJournal::new("0.0.72", "0.0.73", 3, false, true);
+        journal.phase = UpdateHandoffPhase::CleanShutdownCompleted;
+        write_atomic(&path, &journal).unwrap();
+        assert!(record_install_started(&path).is_err(), "a protected install needs the handoff phase");
+        assert_eq!(load(&path).unwrap().unwrap().phase, UpdateHandoffPhase::Failed);
+
+        journal.phase = UpdateHandoffPhase::FirstLaunchMigration;
+        write_atomic(&path, &journal).unwrap();
+        assert!(advance_pending(&path, UpdateHandoffPhase::Verified).is_err(), "protected recovery cannot be skipped");
+        let failed = fs::read(&path).unwrap();
+        assert!(!commit_verified_recovery(&path, "0.0.73").unwrap());
+        assert_eq!(fs::read(&path).unwrap(), failed, "a refused shortcut must retain failure evidence");
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn every_phase_round_trips() {
