@@ -180,6 +180,23 @@ test('refuses a lower short version even when the build advances', () => {
   )
 })
 
+test('verifies a real signature whose Base64 happens to contain a placeholder word', () => {
+  // Fixed synthetic archive/public key/signature; no signing private key or production data.
+  const publicKey = 'Xw2KsMVLgsanK/neLll3XNNf1xA/5i0sF64l6NH+LJw='
+  const signature = '0q50Lffvv/M4gdjLmIudXqwBQb9B08c0V+B94SXxPvmpkvkFakEJmviTZkVleXlqjo4W3GmuM9tNjr5SO1iHBA=='
+  const archive = Buffer.from('UEsDBFRvbm8gc3ludGhldGljIHNpZ25pbmcgcmVncmVzc2lvbiAyNDY2OA==', 'base64')
+  assert.match(signature, /fake/i)
+  const signedInput = {
+    infoPlistXml: INFO_PLIST.replace(PUBLIC_ED_KEY, publicKey),
+    edSignature: signature,
+    enclosureBytes: archive,
+  }
+  const result = buildAppcastUpdate(input(signedInput))
+  assert.equal(parseFeedItems(result.feedXml)[0].edSignature, signature)
+  // Recognizing the shape must never replace the existing cryptographic verification.
+  refusal({ ...signedInput, enclosureBytes: OTHER_ENCLOSURE }, /does not verify over/)
+})
+
 test('refuses a placeholder signature', () => {
   refusal({ edSignature: 'PLACEHOLDER_SPARKLE_SIGNATURE' }, /looks like a placeholder/)
 })

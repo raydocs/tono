@@ -336,7 +336,10 @@ export function validateEdSignature(value, options = {}) {
   if (/\s/.test(signature)) {
     refuse('sparkle:edSignature must be a single Base64 token with no whitespace')
   }
-  if (PLACEHOLDER_SIGNATURE.test(signature)) {
+  // A genuine 64-byte signature can randomly encode words such as "fake" or "xxxx".
+  // Text heuristics only diagnose non-signature input; canonical decoding and the mandatory
+  // verification against the archive and embedded public key remain the authority below.
+  if (!/^[A-Za-z0-9+/]{86}==$/.test(signature) && PLACEHOLDER_SIGNATURE.test(signature)) {
     refuse(`sparkle:edSignature looks like a placeholder, not a Sparkle signature: ${signature}`)
   }
   const decoded = decodeStrictBase64(signature, 'sparkle:edSignature')
