@@ -42,7 +42,8 @@ final class AccountSessionRequestTests: XCTestCase {
     private func fixture(
         catalogConsumer: @escaping @MainActor (TonoExitCatalogResponse) async throws -> Void = { _ in },
         trafficPolicyConsumer: @escaping @MainActor (TonoTrafficPolicyResponse) async throws -> Int = { $0.revision },
-        cloudFallbackConsumer: @escaping @MainActor (Bool) throws -> Void = { _ in }
+        cloudFallbackConsumer: @escaping @MainActor (Bool) throws -> Void = { _ in },
+        routeSplitConsumer: @escaping @MainActor () -> AppTrafficLedger.RouteSplit = { .init() }
     ) -> (AccountSession, URLSession, String, AsyncStream<HeldAccountProtocol>) {
         let host = "\(UUID().uuidString.lowercased()).invalid"
         let (requests, continuation) = AsyncStream<HeldAccountProtocol>.makeStream()
@@ -51,7 +52,7 @@ final class AccountSessionRequestTests: XCTestCase {
         config.protocolClasses = [HeldAccountProtocol.self]
         let transport = URLSession(configuration: config)
         let api = TonoAPIClient(baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport)
-        let account = AccountSession(api: api, keychain: testKeychain(host), sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, catalogConsumer: catalogConsumer, trafficPolicyConsumer: trafficPolicyConsumer, cloudFallbackConsumer: cloudFallbackConsumer)
+        let account = AccountSession(api: api, keychain: testKeychain(host), sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, catalogConsumer: catalogConsumer, trafficPolicyConsumer: trafficPolicyConsumer, cloudFallbackConsumer: cloudFallbackConsumer, routeSplitConsumer: routeSplitConsumer)
         account.state = .signedOut
         return (account, transport, host, requests)
     }
@@ -209,6 +210,77 @@ final class AccountSessionRequestTests: XCTestCase {
         accepted.respond(status: 201, body: #"{"id":"stored-window","receivedAt":1}"#)
         await retry.value
         XCTAssertEqual(buffer.drain().events.map(\.kind), ["disconnectOk"])
+    }
+
+    func testRouteByteIntervalNegotiatesSupportAndPreservesFailedAndInFlightBytes() async throws {
+        var totals = AppTrafficLedger.RouteSplit(direct: 200)
+        let (account, transport, host, requests) = fixture(routeSplitConsumer: { totals })
+        defer {
+            transport.invalidateAndCancel(); HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            _ = ConnectionTelemetryBuffer.shared.drain()
+        }
+        try await adoptTestAccount(account)
+        account.periodicTelemetryConsent = { true }
+        let startMs = Int64(Date().timeIntervalSince1970 * 1_000) - 8 * 60 * 60 * 1_000
+        account.routeTelemetryCursor.setEnabled(true, current: .init(direct: 100), atMs: startMs)
+
+        func begin() async throws -> (Task<Void, Never>, HeldAccountProtocol, [String: Any]) {
+            account.lastPeriodicTelemetryAt = nil
+            let task = Task { await account.uploadPeriodicTelemetryWindow() }
+            let request = try await nextRequest(requests)
+            var data = request.request.httpBody ?? Data()
+            if let stream = request.request.httpBodyStream {
+                stream.open(); defer { stream.close() }
+                var bytes = [UInt8](repeating: 0, count: 4096)
+                while stream.hasBytesAvailable {
+                    let count = stream.read(&bytes, maxLength: bytes.count)
+                    guard count > 0 else { break }
+                    data.append(contentsOf: bytes.prefix(count))
+                }
+            }
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            return (task, request, try XCTUnwrap(json["window"] as? [String: Any]))
+        }
+
+        let (legacyTask, legacy, legacyWindow) = try await begin()
+        XCTAssertNil(legacyWindow["bytesByRoute"])
+        XCTAssertNil(legacyWindow["routeBytesInterval"])
+        legacy.respond(status: 201, body: #"{"id":"legacy"}"#)
+        await legacyTask.value
+        let (probeTask, probe, probeWindow) = try await begin()
+        XCTAssertNil(probeWindow["bytesByRoute"])
+        probe.respond(status: 201, body: #"{"id":"supported","routeBytesIntervalVersion":1}"#)
+        await probeTask.value
+        XCTAssertEqual(account.routeTelemetryCursor.baseline.direct, 100)
+
+        let (failedTask, failed, failedWindow) = try await begin()
+        XCTAssertEqual((failedWindow["bytesByRoute"] as? [String: Int64])?["direct"], 100)
+        failed.respond(status: 503, body: #"{"error":{"message":"offline"}}"#)
+        await failedTask.value
+        totals.direct = 300
+        let (retryTask, retry, window) = try await begin()
+        let interval = try XCTUnwrap(window["routeBytesInterval"] as? [String: Int64])
+        XCTAssertEqual(interval["startMs"], startMs)
+        XCTAssertEqual(interval["endMs"], window["windowEndMs"] as? Int64)
+        XCTAssertGreaterThan(try XCTUnwrap(window["windowStartMs"] as? Int64), startMs)
+        XCTAssertEqual((window["bytesByRoute"] as? [String: Int64])?["direct"], 200)
+        totals.direct = 350
+        retry.respond(status: 201, body: #"{"id":"recovered","routeBytesIntervalVersion":1}"#)
+        await retryTask.value
+        XCTAssertEqual(account.routeTelemetryCursor.baseline.direct, 300)
+        XCTAssertEqual(account.routeTelemetryCursor.baselineAtMs, interval["endMs"])
+        let (rollbackTask, rollback, rollbackWindow) = try await begin()
+        XCTAssertEqual((rollbackWindow["bytesByRoute"] as? [String: Int64])?["direct"], 50)
+        rollback.respond(status: 400, body: #"{"error":{"message":"unknown field"}}"#)
+        await rollbackTask.value
+        let (renegotiateTask, renegotiate, renegotiateWindow) = try await begin()
+        XCTAssertNil(renegotiateWindow["bytesByRoute"])
+        XCTAssertNil(renegotiateWindow["routeBytesInterval"])
+        renegotiate.respond(status: 201, body: #"{"id":"legacy-again"}"#)
+        await renegotiateTask.value
+        XCTAssertEqual(account.routeTelemetryCursor.baseline.direct, 300)
+        XCTAssertEqual(account.routeTelemetryCursor.baselineAtMs, interval["endMs"])
     }
 
     func testNoStoreLogReceiptReportsFailureAndRetainsTheUploadCursor() async throws {

@@ -570,6 +570,14 @@ pub struct BytesByRoute {
     pub direct: u64,
 }
 
+/// Coverage of the route counters, independent of the short event lookback.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RouteBytesInterval {
+    pub start_ms: i64,
+    pub end_ms: i64,
+}
+
 /// Whitelisted periodic timeline window body.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -614,6 +622,8 @@ pub struct TelemetryWindowReport {
     /// snapshot. The Worker refuses any key other than `cloud`/`residential`/`direct`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bytes_by_route: Option<BytesByRoute>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route_bytes_interval: Option<RouteBytesInterval>,
     pub event_count: u32,
     pub events_dropped: u32,
     pub events: Vec<TelemetryEvent>,
@@ -719,6 +729,8 @@ pub struct TelemetryWindowReceipt {
     pub id: String,
     #[serde(default, deserialize_with = "de_opt_epoch")]
     pub received_at: Option<i64>,
+    #[serde(default)]
+    pub route_bytes_interval_version: Option<u32>,
 }
 
 /// Server error envelope `{error:{message,code}}` (§1).
@@ -2901,6 +2913,7 @@ mod connect_failure_report_tests {
             tcp_delay_at_ms: None,
             platform: Some("windows".to_string()),
             bytes_by_route: None,
+            route_bytes_interval: None,
             event_count: 0,
             events_dropped: 0,
             events: Vec::new(),
@@ -2965,11 +2978,13 @@ mod connect_failure_report_tests {
                 residential: 2,
                 direct: 3,
             }),
+            route_bytes_interval: Some(RouteBytesInterval { start_ms: 0, end_ms: 1 }),
             event_count: 0,
             events_dropped: 0,
             events: Vec::new(),
         };
         let value = serde_json::to_value(&report).unwrap();
+        assert_eq!(value["routeBytesInterval"], serde_json::json!({ "startMs": 0, "endMs": 1 }));
         let object = value["bytesByRoute"].as_object().expect("bytesByRoute object");
         let accepted = ["cloud", "residential", "direct"];
         assert_eq!(object.len(), 3);
@@ -2981,6 +2996,7 @@ mod connect_failure_report_tests {
         assert_eq!(object["direct"], 3);
         let unnamed = TelemetryWindowReport {
             bytes_by_route: None,
+            route_bytes_interval: None,
             ..report
         };
         assert!(
