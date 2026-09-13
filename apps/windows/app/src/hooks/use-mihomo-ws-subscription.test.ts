@@ -144,12 +144,14 @@ describe('shared Mihomo WebSocket recovery', () => {
     expect(connect).toHaveBeenCalledTimes(1)
     expect(entry.ws).toBeNull()
 
-    await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS)
+    await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS - 1)
     expect(connect).toHaveBeenCalledTimes(1)
-    expect(entry.connecting).toBe(false)
+    expect(entry.connecting).toBe(true)
 
-    await vi.runOnlyPendingTimersAsync()
+    // The watchdog starts the replacement immediately at its deadline.
+    await vi.advanceTimersByTimeAsync(1)
     expect(connect).toHaveBeenCalledTimes(2)
+    expect(entry.connecting).toBe(false)
     expect(entry.ws).toBe(second)
 
     resolveFirst(first)
