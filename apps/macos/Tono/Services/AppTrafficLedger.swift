@@ -98,12 +98,6 @@ final class AppTrafficLedger {
     /// so the subtraction is always the honest answer.
     private(set) var cumulative = RouteSplit()
 
-    var sessionBytes: (upload: Int64, download: Int64) {
-        apps.reduce((upload: 0, download: 0)) {
-            ($0.upload + $1.upload, $0.download + $1.download)
-        }
-    }
-
     /// Consent/account boundaries and HTTP acknowledgements must use the same snapshot.
     struct TelemetryCursor {
         private(set) var baseline = RouteSplit()

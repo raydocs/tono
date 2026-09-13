@@ -4174,7 +4174,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     version: 4,
     domains: [],
     mediaEndpoints: [],
-    webDomains: [{ host: 'www.dianping.com', ports: [443] }],
+    webDomains: [{ host: 'www.policy-signature-fixture.example.net', ports: [443] }],
     directSuffixes: [],
     tcpEndpoints: [],
   };
@@ -4188,8 +4188,8 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       domains: [],
       mediaEndpoints: [],
       webDomains: [
-        { ports: [443], host: 'www.dianping.com' },
-        { host: 'shop.dianping.com', ports: [443] },
+        { ports: [443], host: 'www.policy-signature-fixture.example.net' },
+        { host: 'shop.policy-signature-fixture.example.net', ports: [443] },
       ],
       directSuffixes: [],
       tcpEndpoints: [],
@@ -4203,7 +4203,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     // Canonical, and demonstrably not what was submitted.
     expect(previewed.json).not.toBe(JSON.stringify(submitted));
     expect(JSON.parse(previewed.json).webDomains.map((d: any) => d.host))
-      .toEqual(['shop.dianping.com', 'www.dianping.com']);
+      .toEqual(['shop.policy-signature-fixture.example.net', 'www.policy-signature-fixture.example.net']);
     // A dry run stores nothing.
     expect((await (await admin('traffic-policy', undefined, 'GET')).json() as any).revision).toBe(0);
 
@@ -4225,7 +4225,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const delivered = await fetched.json() as any;
     expect(delivered.signature).toBe(body.signature);
     expect(JSON.parse(delivered.json).webDomains.map((d: any) => d.host))
-      .toEqual(['shop.dianping.com', 'www.dianping.com']);
+      .toEqual(['shop.policy-signature-fixture.example.net', 'www.policy-signature-fixture.example.net']);
   });
 
   it('refuses an unlisted host that arrives without a valid signature', async () => {

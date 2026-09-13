@@ -626,8 +626,9 @@ extension AppState {
                 "disconnectOk",
                 elapsedMs: max(0, Int(Date().timeIntervalSince(sessionStartedAt) * 1_000)),
                 node: selectedExitNode()?.name,
-                bytesUp: appTrafficLedger.sessionBytes.upload,
-                bytesDown: appTrafficLedger.sessionBytes.download
+                // Mihomo's top-level counters are cumulative, not the sum of live flows.
+                bytesUp: trafficStats.totalUpload,
+                bytesDown: trafficStats.totalDownload
             )
         }
         let protectionMayBeActive = isProtectionBlocked

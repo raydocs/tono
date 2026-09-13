@@ -171,7 +171,14 @@ pub enum AuditEvent {
     DisconnectBegin {
         cause: &'static str,
     },
-    DisconnectOk,
+    DisconnectOk {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        elapsed_ms: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bytes_up: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bytes_down: Option<u64>,
+    },
     ReleaseFail {
         error: String,
     },
@@ -486,27 +493,36 @@ fn default_true() -> bool {
     true
 }
 
+/// One-line revert point for the network-log-upload default. Flip to `false`
+/// if the owner decides this must not stay default-on.
+pub const NETWORK_LOG_UPLOAD_DEFAULT: bool = true;
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct SettingsFile {
     #[serde(default = "default_true")]
     audit_enabled: bool,
     /// Default OFF: short diagnostic timelines still create durable D1 rows
-    /// and therefore require an explicit opt-in.
+    /// and therefore require an explicit opt-in. Unchanged by the v3 log-upload flip.
     #[serde(default)]
     periodic_telemetry_enabled: bool,
     /// One-shot migration from the former default-on policy. New defaults set
     /// this immediately; an old settings file lacks it and is reset once.
     #[serde(default)]
     periodic_telemetry_default_v2: bool,
-    /// Default OFF: uploads the audit log itself, which carries hostnames,
-    /// process names and routes. Kept off by default to protect user privacy
-    /// and eliminate continuous D1/R2 storage consumption.
+    /// Uploads the audit log itself (hostnames, process names, routes, byte
+    /// totals). Default follows [`NETWORK_LOG_UPLOAD_DEFAULT`].
     #[serde(default)]
     network_log_upload_enabled: bool,
-    /// Migration flag: ensures existing installations that previously inherited
-    /// default-on are transitioned to default-off unless explicitly re-enabled.
+    /// Legacy migration marker; stored choices must survive the new default.
     #[serde(default)]
     network_log_default_v2: bool,
+    /// v3 records adoption without overriding legacy opt-outs.
+    #[serde(default)]
+    network_log_default_v3: bool,
+    /// Set when the user (or a later setter call) actually toggles the switch.
+    /// Older clients never wrote this marker; its absence is not consent.
+    #[serde(default)]
+    network_log_upload_user_chosen: bool,
 }
 
 impl Default for SettingsFile {
@@ -515,26 +531,35 @@ impl Default for SettingsFile {
             audit_enabled: true,
             periodic_telemetry_enabled: false,
             periodic_telemetry_default_v2: true,
-            network_log_upload_enabled: false,
+            network_log_upload_enabled: NETWORK_LOG_UPLOAD_DEFAULT,
             network_log_default_v2: true,
+            network_log_default_v3: true,
+            network_log_upload_user_chosen: false,
         }
     }
 }
 
 fn load_settings(dir: &Path) -> SettingsFile {
-    let mut settings = std::fs::read_to_string(dir.join(SETTINGS_FILE_NAME))
-        .ok()
-        .and_then(|body| serde_json::from_str::<SettingsFile>(&body).ok())
-        .unwrap_or_default();
+    let mut settings = match std::fs::read_to_string(dir.join(SETTINGS_FILE_NAME)) {
+        Ok(body) => match serde_json::from_str::<SettingsFile>(&body) {
+            Ok(settings) => settings,
+            Err(_) => return SettingsFile { network_log_upload_enabled: false, ..SettingsFile::default() },
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => SettingsFile::default(),
+        Err(_) => return SettingsFile { network_log_upload_enabled: false, ..SettingsFile::default() },
+    };
     let mut migrated = false;
     if !settings.network_log_default_v2 {
-        settings.network_log_upload_enabled = false;
         settings.network_log_default_v2 = true;
         migrated = true;
     }
     if !settings.periodic_telemetry_default_v2 {
         settings.periodic_telemetry_enabled = false;
         settings.periodic_telemetry_default_v2 = true;
+        migrated = true;
+    }
+    if !settings.network_log_default_v3 {
+        settings.network_log_default_v3 = true;
         migrated = true;
     }
     if migrated {
@@ -554,8 +579,8 @@ pub fn periodic_telemetry_enabled_from_settings(dir: &Path) -> bool {
     load_settings(dir).periodic_telemetry_enabled
 }
 
-/// Default OFF: network log upload is off by default to avoid streaming
-/// telemetry to D1/R2 continuously; uploaded on demand for diagnostics.
+/// Default follows [`NETWORK_LOG_UPLOAD_DEFAULT`]. v2 wrote false for every
+/// existing install; v3 flips those users once unless they have since chosen.
 pub fn network_log_upload_enabled_from_settings(dir: &Path) -> bool {
     load_settings(dir).network_log_upload_enabled
 }
@@ -589,6 +614,7 @@ fn save_periodic_telemetry_enabled(dir: &Path, enabled: bool) -> Result<()> {
 fn save_network_log_upload_enabled(dir: &Path, enabled: bool) -> Result<()> {
     let mut settings = load_settings(dir);
     settings.network_log_upload_enabled = enabled;
+    settings.network_log_upload_user_chosen = true;
     save_settings(dir, &settings)
 }
 
@@ -752,19 +778,15 @@ impl Audit {
 
     /// Toggle the upload of the raw audit log.
     ///
-    /// This is the larger disclosure of the two and needs its own answer: the
-    /// periodic telemetry window carries counts and states, while this sends the
-    /// log itself — the hostnames connected to, the process that opened each
-    /// connection, and which rule and route it matched. The flag, the gate in
-    /// `log_upload::sweep` and the reader above all existed; the half that lets
-    /// a person say no did not, so it was permanently on. The reader's own note
-    /// — "a stale one would keep sending after the user switched it off" — was
-    /// written for a switch that had never been built.
+    /// Default follows [`NETWORK_LOG_UPLOAD_DEFAULT`]. Always persist
+    /// `network_log_upload_user_chosen` so a later default flip cannot override
+    /// an explicit confirmation of the current value.
     pub fn set_network_log_upload_enabled(&self, enabled: bool) -> Result<(), String> {
-        if self.network_log_upload_enabled() == enabled {
+        let previous = self.network_log_upload_enabled();
+        save_network_log_upload_enabled(&self.settings_dir, enabled).map_err(|err| err.to_string())?;
+        if previous == enabled {
             return Ok(());
         }
-        save_network_log_upload_enabled(&self.settings_dir, enabled).map_err(|err| err.to_string())?;
         if enabled {
             self.record(AuditEvent::NetworkLogUploadEnabled);
         } else {
@@ -790,7 +812,8 @@ impl Audit {
 mod tests {
     use super::{
         Audit, AuditEvent, AuditRecord, MAX_AUDIT_FILE_BYTES, RotatingWriter, audit_enabled_from_settings,
-        periodic_telemetry_enabled_from_settings, redact, save_periodic_telemetry_enabled,
+        network_log_upload_enabled_from_settings, periodic_telemetry_enabled_from_settings, redact,
+        save_network_log_upload_enabled, save_periodic_telemetry_enabled,
     };
     use std::path::{Path, PathBuf};
 
@@ -1121,6 +1144,88 @@ mod tests {
         assert!(
             periodic_telemetry_enabled_from_settings(legacy.path()),
             "a post-migration explicit opt-in must survive every later load"
+        );
+    }
+
+    #[test]
+    fn network_log_upload_fresh_file_follows_default_and_snapshot_stays_off() {
+        let fresh = TempDir::new("nlog-fresh");
+        assert!(
+            network_log_upload_enabled_from_settings(fresh.path()),
+            "a new installation must follow NETWORK_LOG_UPLOAD_DEFAULT (currently on)"
+        );
+        assert!(
+            !periodic_telemetry_enabled_from_settings(fresh.path()),
+            "the periodic snapshot default must stay off"
+        );
+    }
+
+    #[test]
+    fn unreadable_network_log_preference_does_not_enable_upload_or_overwrite_evidence() {
+        let dir = TempDir::new("nlog-corrupt");
+        let path = dir.path().join(super::SETTINGS_FILE_NAME);
+        std::fs::write(&path, b"{broken").unwrap();
+        assert!(!network_log_upload_enabled_from_settings(dir.path()));
+        assert_eq!(std::fs::read(&path).unwrap(), b"{broken");
+    }
+
+    #[test]
+    fn network_log_upload_preserves_legacy_opt_out_without_a_chosen_marker() {
+        let legacy = TempDir::new("nlog-v2");
+        std::fs::write(
+            legacy.path().join(super::SETTINGS_FILE_NAME),
+            r#"{"audit_enabled":true,"periodic_telemetry_enabled":false,"periodic_telemetry_default_v2":true,"network_log_upload_enabled":false,"network_log_default_v2":true}"#,
+        )
+        .unwrap();
+        assert!(
+            !network_log_upload_enabled_from_settings(legacy.path()),
+            "a legacy opt-out must not be mistaken for absence of consent"
+        );
+        let migrated: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(legacy.path().join(super::SETTINGS_FILE_NAME)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(migrated["network_log_upload_enabled"], false);
+        assert_eq!(migrated["network_log_default_v3"], true);
+        assert_eq!(migrated["network_log_upload_user_chosen"], false);
+        assert_eq!(migrated["periodic_telemetry_enabled"], false);
+    }
+
+    #[test]
+    fn network_log_upload_v3_user_chosen_false_stays_off() {
+        let chosen = TempDir::new("nlog-chosen");
+        std::fs::write(
+            chosen.path().join(super::SETTINGS_FILE_NAME),
+            r#"{"audit_enabled":true,"network_log_upload_enabled":false,"network_log_default_v2":true,"network_log_default_v3":true,"network_log_upload_user_chosen":true}"#,
+        )
+        .unwrap();
+        assert!(
+            !network_log_upload_enabled_from_settings(chosen.path()),
+            "an explicit off after v3 must not be flipped again"
+        );
+        let body: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(chosen.path().join(super::SETTINGS_FILE_NAME)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body["network_log_upload_enabled"], false);
+        assert_eq!(body["network_log_upload_user_chosen"], true);
+    }
+
+    #[test]
+    fn network_log_upload_setter_marks_user_chosen_and_the_choice_sticks() {
+        let dir = TempDir::new("nlog-set");
+        assert!(network_log_upload_enabled_from_settings(dir.path()));
+        save_network_log_upload_enabled(dir.path(), false).unwrap();
+        assert!(!network_log_upload_enabled_from_settings(dir.path()));
+        let body: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join(super::SETTINGS_FILE_NAME)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body["network_log_upload_user_chosen"], true);
+        assert_eq!(body["network_log_upload_enabled"], false);
+        assert!(
+            !network_log_upload_enabled_from_settings(dir.path()),
+            "a post-v3 explicit off must survive every later load"
         );
     }
 }

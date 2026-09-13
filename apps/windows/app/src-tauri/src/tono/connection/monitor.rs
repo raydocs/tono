@@ -23,12 +23,12 @@ use crate::tono::{
 };
 use super::{
     Attempt, BoxedTask, MAX_DIRECT_SAMPLES, MAX_PROTECTED_ROUTE_SAMPLES, ProtectedRouteAggregate,
-    SampledConnections, attempt, fail_connect, kill_switch_mode_key, new_direct_samples,
-    observe_protected_routes, seed_autostart_after_connect,
+    attempt, fail_connect, kill_switch_mode_key, new_direct_samples, observe_protected_routes,
+    seed_autostart_after_connect,
 };
 use super::direct::dns_query_a;
 use super::reconnect::schedule_reconnect;
-use super::controller::{CONTROLLER_HTTP_TIMEOUT, controller_client, controller_url};
+use super::controller::{CONTROLLER_HTTP_TIMEOUT, controller_client, controller_url, fetch_connections};
 use super::probes::{verify_locked, verify_tun_data_plane};
 
 /// `lookup_host` delegates to the OS resolver and has no Tokio timeout of its own. Bound every
@@ -107,12 +107,13 @@ pub(super) const BROWSER_DNS_RECHECK_INTERVAL: Duration = Duration::from_secs(60
 /// first minute of a session rather than one line per connection.
 pub(super) const DIRECT_SAMPLE_INTERVAL: Duration = Duration::from_secs(60);
 
-/// Upper bound on distinct destinations recorded in one session. WeChat's CDN rotates, so a
-/// Read the controller once, record DIRECT diagnostics, and update protected-route evidence.
+/// Read the controller once, ingest the route ledger, record DIRECT diagnostics, and update
+/// protected-route evidence.
 ///
-/// Returns `false` when the caller should stop sampling — a superseded generation, or every
-/// applicable cap reached. Every other failure is swallowed: this is instrumentation, and a
-/// controller that is briefly unreachable must never disturb a working tunnel.
+/// Returns `false` only when the generation is superseded or the session is no longer
+/// connected. Caps still bound the DirectDial / protected-route evidence branches, but the
+/// ledger keeps sampling for the rest of the session — otherwise bytesByRoute would freeze
+/// once 512 DIRECT destinations had been seen.
 pub(super) async fn sample_connections_once(
     state: &Arc<TonoState>,
     generation: u64,
@@ -121,11 +122,6 @@ pub(super) async fn sample_connections_once(
     protected_seen: &mut std::collections::HashSet<u64>,
     protected_aggregate: &mut ProtectedRouteAggregate,
 ) -> bool {
-    let direct_active = direct_seen.len() < MAX_DIRECT_SAMPLES;
-    let protected_active = residential_target.is_some() && protected_seen.len() < MAX_PROTECTED_ROUTE_SAMPLES;
-    if !direct_active && !protected_active {
-        return false;
-    }
     let (secret, port) = {
         let inner = state.lock().await;
         // `connect_generation`, matching the sibling arms of this task. The first version
@@ -140,21 +136,12 @@ pub(super) async fn sample_connections_once(
             None => return true,
         }
     };
-    let Ok(client) = controller_client(Duration::from_secs(2)) else {
+    let Some(payload) = fetch_connections(&secret, port).await else {
         return true;
     };
-    let Ok(response) = client
-        .get(controller_url(port, "/connections"))
-        .bearer_auth(secret)
-        .send()
-        .await
-    else {
-        return true;
-    };
-    let Ok(payload) = response.json::<SampledConnections>().await else {
-        return true;
-    };
+    state.route_ledger().lock().ingest(&payload);
 
+    let direct_active = direct_seen.len() < MAX_DIRECT_SAMPLES;
     if direct_active {
         for sample in new_direct_samples(&payload, direct_seen) {
             state.audit().log(crate::tono::audit::AuditEvent::DirectDial {
@@ -204,8 +191,7 @@ pub(super) async fn sample_connections_once(
         });
     }
 
-    direct_seen.len() < MAX_DIRECT_SAMPLES
-        || residential_target.is_some() && protected_seen.len() < MAX_PROTECTED_ROUTE_SAMPLES
+    true
 }
 
 pub(super) async fn spawn_control_plane_pin_refresh(
@@ -685,7 +671,7 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
         // repeat the same multi-origin HTTPS proof that admitted Connected. Success proves the
         // current tunnel still carries user traffic; failure corroborates the event and keeps the
         // existing fail-closed reconnect. Core identity and health failures remain unconditional.
-        let event_probe_failed = if invalidate && network_changed && !core_changed && !health_invalid {
+        let event_probe_failed = if invalidate && network_changed && !core_changed && !health_invalid && !owned_direct_reload {
             let recently_proven = last_event_probe_ok
                 .is_some_and(|at| at.elapsed() < NETWORK_EVENT_PROBE_COOLDOWN);
             if recently_proven {
@@ -707,7 +693,13 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
         } else {
             false
         };
-        if invalidate && network_changed && !core_changed && !health_invalid && !event_probe_failed {
+        // A reload can start while the HTTPS request is awaiting its result. Re-read its
+        // bounded owner marker before treating that expected blocked probe as a dead tunnel.
+        let owned_direct_reload = {
+            let inner = state.lock().await;
+            owned_direct_reload_in_flight(inner.direct_reload_until, inner.connect_generation, std::time::Instant::now())
+        };
+        if invalidate && network_changed && !core_changed && !health_invalid && !event_probe_failed && !owned_direct_reload {
             logging!(
                 info,
                 Type::Service,
@@ -717,7 +709,7 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
             let generation = state.lock().await.connect_generation;
             let _ = refresh_control_plane_pins_once(&state, generation).await;
         }
-        if monitor_requires_reconnect(invalidate, core_changed, health_invalid, event_probe_failed) {
+        if monitor_requires_reconnect(invalidate, core_changed, health_invalid, event_probe_failed, owned_direct_reload) {
             // A Service transport outage may reuse a recent proof in the branch
             // above. A successful Service snapshot that explicitly says WFP or
             // protected DNS is broken may not: HTTPS can still work while the
