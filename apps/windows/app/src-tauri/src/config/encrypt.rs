@@ -82,14 +82,37 @@ where
         let encrypted_opt: Option<String> = Option::deserialize(deserializer)?;
 
         match encrypted_opt {
-            Some(encrypted) if !encrypted.is_empty() => {
-                let decrypted_string = decrypt_data(&encrypted).map_err(serde::de::Error::custom)?;
-                serde_json::from_str(&decrypted_string).map_err(serde::de::Error::custom)
-            }
+            Some(encrypted) if !encrypted.is_empty() => Ok(decode_encrypted_value(&encrypted)),
             _ => Ok(T::default()),
         }
     } else {
         T::deserialize(deserializer)
+    }
+}
+
+/// Open a stored encrypted field. Ciphertext that cannot be opened is treated as a present
+/// legacy/plain value so the rest of the preferences document still loads and the P0-10
+/// sanitizer can null only the dangerous field instead of replacing the whole file.
+fn decode_encrypted_value<T>(encrypted: &str) -> T
+where
+    T: for<'de> Deserialize<'de> + Default,
+{
+    match decrypt_data(encrypted) {
+        Ok(plain) => serde_json::from_str(&plain).unwrap_or_default(),
+        Err(_) => decode_undecryptable_field(encrypted),
+    }
+}
+
+fn decode_undecryptable_field<T>(raw: &str) -> T
+where
+    T: for<'de> Deserialize<'de> + Default,
+{
+    if let Ok(value) = serde_json::from_str(raw) {
+        return value;
+    }
+    match serde_json::to_string(raw) {
+        Ok(quoted) => serde_json::from_str(&quoted).unwrap_or_default(),
+        Err(_) => T::default(),
     }
 }
 
@@ -103,4 +126,15 @@ where
 
 fn is_encryption_active() -> bool {
     ENCRYPTION_ACTIVE.try_with(|c| c.get()).unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_undecryptable_field;
+
+    #[test]
+    fn a_plaintext_webdav_value_loads_as_present_so_the_sanitizer_can_clear_it() {
+        let url: Option<String> = decode_undecryptable_field("https://dav.example.com");
+        assert_eq!(url.as_deref(), Some("https://dav.example.com"));
+    }
 }

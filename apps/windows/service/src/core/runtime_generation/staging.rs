@@ -209,7 +209,7 @@ pub(super) fn declared_remote_providers(
 /// Which core instance is running, and what it was started with.
 ///
 /// One acquisition of `CORE_MANAGER`, sealed inside one function, is the whole point of this
-/// existing. `stage_runtime` samples the running core twice and the manager lock is a
+/// existing. `stage_runtime` samples the running core three times and the manager lock is a
 /// non-reentrant `tokio::sync::Mutex`, so the two samples are only safe while no guard from the
 /// first is still standing at the second. Spelled inline that safety is incidental — it rests on
 /// where the compiler drops a scrutinee's temporary, which edition 2024 already moved once (an
@@ -222,6 +222,17 @@ pub(super) fn declared_remote_providers(
 /// `OWNER_LIFECYCLE_LOCK` only, and the handler that invokes it takes the manager lock nowhere.
 async fn running_core_instance() -> Option<(CoreInstanceId, ClashConfig)> {
     CORE_MANAGER.lock().await.running_core_config().await
+}
+
+/// The core running now is not the one this staging plan was built against. Used before and
+/// after commit: the pre-commit sample cannot cover the two-write window, and a restart inside
+/// that window can re-fetch a just-deleted cache from the old url while the new manifest records
+/// the new one.
+pub(super) fn core_restarted_since_plan(
+    planned: CoreInstanceId,
+    running: Option<CoreInstanceId>,
+) -> bool {
+    running != Some(planned)
 }
 
 /// Make the generation the core is running in match `bundle`, or decline and change nothing.
@@ -313,7 +324,10 @@ pub(crate) async fn stage_runtime(
     // generation from nothing. The comparison is on the whole instance rather than its pid: a
     // Windows pid can be handed back out inside this window, and a restart that came back wearing
     // the sampled pid is exactly the case that must not pass.
-    if running_core_instance().await.map(|(instance, _)| instance) != Some(core_instance) {
+    if core_restarted_since_plan(
+        core_instance,
+        running_core_instance().await.map(|(instance, _)| instance),
+    ) {
         return Ok(StageRuntimeOutcome::RestartRequired {
             reason: StageRejection::CoreRestarted,
         });
@@ -345,6 +359,26 @@ pub(crate) async fn stage_runtime(
             reason: StageRejection::RuntimeUnwritable {
                 detail: format!("failed to commit the staged configuration: {error}"),
             },
+        });
+    }
+
+    // The pre-commit identity check cannot cover this window: commit is two non-atomic writes.
+    // A watchdog restart that landed between them may have re-fetched the just-deleted cache
+    // from the old url. The just-written manifest would then claim the new url for those bytes,
+    // and every later staging would skip the delete. Discard the manifest so the next plan has
+    // no proof and re-deletes the cache.
+    if core_restarted_since_plan(
+        core_instance,
+        running_core_instance().await.map(|(instance, _)| instance),
+    ) {
+        if let Err(discard) = remove_staged_file(&generation.join(MANIFEST_FILE_NAME)).await {
+            tracing::warn!(
+                error = %discard,
+                "Left a manifest behind that may describe a provenance that never happened"
+            );
+        }
+        return Ok(StageRuntimeOutcome::RestartRequired {
+            reason: StageRejection::CoreRestarted,
         });
     }
 
@@ -845,6 +879,42 @@ mod tests {
 
         assert_eq!(plan.copies.len(), 1);
         assert!(plan.skipped.is_empty());
+    }
+
+    #[test]
+    fn a_restart_during_commit_must_discard_the_manifest_so_the_cache_is_redeleted() {
+        let planned = CoreInstanceId {
+            pid: 11,
+            generation: 3,
+        };
+        assert!(core_restarted_since_plan(
+            planned,
+            Some(CoreInstanceId {
+                pid: 12,
+                generation: 4
+            })
+        ));
+        assert!(!core_restarted_since_plan(planned, Some(planned)));
+
+        // Keeping the new-url record is the poison: the next staging skips the delete.
+        let poisoned = manifest(&[], &[("rules/ads.yaml", "https://new.example/ads.yaml")]);
+        let kept = plan_stage(
+            &poisoned,
+            &[],
+            &[remote("rules/ads.yaml", "https://new.example/ads.yaml")],
+        );
+        assert!(
+            kept.required_deletes.is_empty(),
+            "a matching poisoned record would skip the delete forever"
+        );
+
+        // Discarding the manifest (the post-commit rollback) makes the cache unproven.
+        let after_discard = plan_stage(
+            &RuntimeManifest::default(),
+            &[],
+            &[remote("rules/ads.yaml", "https://new.example/ads.yaml")],
+        );
+        assert_eq!(after_discard.required_deletes, ["rules/ads.yaml"]);
     }
 
     #[test]

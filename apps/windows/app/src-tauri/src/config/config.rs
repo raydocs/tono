@@ -58,10 +58,10 @@ impl Config {
     // 仅在应用退出、重启、关机监听事件启用
     pub async fn apply_all_and_save_file() {
         logging!(info, Type::Config, "save all draft data");
-        let save_clash_task = AsyncHandler::spawn(|| async {
-            let clash = Self::clash().await;
-            clash.apply();
-            logging_error!(Type::Config, clash.data_arc().save_config().await);
+        let save_runtime_task = AsyncHandler::spawn(|| async {
+            let runtime = Self::runtime().await;
+            runtime.apply();
+            logging_error!(Type::Config, runtime.data_arc().save_config().await);
         });
 
         let save_preferences_task = AsyncHandler::spawn(|| async {
@@ -70,7 +70,7 @@ impl Config {
             logging_error!(Type::Config, prefs.data_arc().save_file().await);
         });
 
-        let _ = tokio::join!(save_clash_task, save_preferences_task);
+        let _ = tokio::join!(save_runtime_task, save_preferences_task);
         logging!(info, Type::Config, "save all draft data finished");
     }
 }

@@ -467,6 +467,7 @@ fn is_untrusted_user_profile_reviewed_tree(
                 || after_name.starts_with(r"appdata\local\programs\dingtalk")
                 || after_name.starts_with(r"appdata\local\programs\dingding")
                 || after_name.starts_with(r"appdata\local\dingtalk")
+                || after_name.starts_with(r"appdata\local\dingding")
         }
         ReviewedDirectProduct::Feishu => {
             after_name.starts_with(r"appdata\local\bytedance\")
@@ -1148,6 +1149,29 @@ mod tests {
             r"C:\Users\a\Documents\Feishu Files\Feishu.exe"
         )
         .is_none());
+    }
+
+    #[test]
+    fn localappdata_dingding_install_gets_a_tree_prefix() {
+        // `%LOCALAPPDATA%\DingDing` is an official layout tail and a discovery root. Without the
+        // matching untrusted-tree allow-list entry it was demoted to ExactFile, so helper
+        // binaries next to DingTalk.exe missed the reviewed-DIRECT grant.
+        let dingding = regex_for_verified_dingtalk_exe(
+            r"C:\Users\a\AppData\Local\DingDing\DingTalk.exe",
+        )
+        .unwrap();
+        assert!(
+            dingding.starts_with('^') && !dingding.ends_with('$'),
+            "expected AnchoredPrefix, got {dingding}"
+        );
+        let dingtalk = regex_for_verified_dingtalk_exe(
+            r"C:\Users\a\AppData\Local\DingTalk\DingTalk.exe",
+        )
+        .unwrap();
+        assert!(
+            dingtalk.starts_with('^') && !dingtalk.ends_with('$'),
+            "expected AnchoredPrefix, got {dingtalk}"
+        );
     }
 
     #[test]
