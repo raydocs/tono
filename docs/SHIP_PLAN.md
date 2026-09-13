@@ -8,8 +8,8 @@
 **这一发的产品版本号是 0.0.73。** 0.0.72 的 GitHub 标签已经存在且未进更新源；门 1–3 的代码合入 `main` 时仍可停留在 0.0.72，冻结提交再升到 0.0.73 再打标签、再推源。
 
 **2026-09-13 集成审计：** B0 已确认新安装的原始网络日志默认开启，保留已有关闭值。
-#137/#138 已在集成分支解决冲突，但尚未合入 `main`；账户/授权 scope、未存储回执、
-不可变重试及 Windows 文件身份轮转已补回归，不能只凭本地单测过门。
+#137/#138 已随 #147 普通合入 `main` `c318d5b1`；账户/授权 scope、未存储回执、
+不可变重试及 Windows 文件身份轮转已补回归。合并 head 的 30 项 CI 全绿，但不等于真机发布门已过。
 证据与未决项见 [本轮审计](reports/RELEASE_READINESS_2026-09-13.md) 与
 [续修记录](reports/RELEASE_FIXES_2026-09-13.md)。
 #157 已合 main `d7578ff5`：DNS 失败与 Protected Offline 更新重试的清理漏洞、hy2 实时 roster 写入已补窄回归并过原生 CI。
@@ -54,12 +54,12 @@
 - Windows 更新日记：`prepare` 停在 `UpdatePrepared`；所有者按相位推进；`commit_verified_recovery` 才允许删日记。`--replace-runtime` 写 `InstallStarted`（App 不再猜）。真机 G3.3 之前不算过门。
 - 客户更新源：`services/control-plane/public/appcast.xml` 0.0.67；`public/windows/latest.json` 0.0.34。
 
-**已开、未合、这一发要用的分支**
+**本轮客户端分支（#137/#138 已随 #147 合并）**
 
 | PR / 分支 | 内容 | 合入条件 |
 |---|---|---|
-| #137 `client/macos-phase-3.5` | 连接日志上传、断开字节、`bytesByRoute`、隐私文案 | B0 默认开已确认；先关闭本轮日志审计阻塞，再验真实采集回执 |
-| #138 `client/windows-phase-3.5`（叠在 `client/windows-phase-1.5` 上） | 同上 + Windows 1.5 失败即报 | Windows 机器 `cargo test` + 打包；#137 口径必须一致 |
+| #137 `client/macos-phase-3.5` | 连接日志上传、断开字节、`bytesByRoute`、隐私文案 | 已合 main；默认开与已知日志安全修复经 CI 验证，真实采集回执仍需验收 |
+| #138 `client/windows-phase-3.5`（叠在 `client/windows-phase-1.5` 上） | 同上 + Windows 1.5 失败即报 | 已合 main；原生 App 464 tests 通过，内部打包与实机验收不等于客户发布 |
 | #116 | 瞬态 desired-state 读失败不拆健康 Core | G1 |
 | #117 | Owner monitor 把可读的 `NotActive` 当传输失败 | G1 |
 | 更早的 `client/windows-connection-contract` | 被 1.5/3.5 叠住 | 不要单独合，随 #138 |
@@ -113,7 +113,8 @@
 - 不选：JP Lite（不是三网直连、5GB 盘、18 天到期）；Ubuntu 26.04 / Debian 11（provisioner 合同外）；洛杉矶用量最高的那台（约 54 GB，先别在忙机上做实验）。目录名以控制面 `catalog_name` 为准，机队表只有实例名。
 - T0 不通的运营商不做自动切换。SSH 口令只留在 Notion / 钥匙串，**不准进仓库、不准进本文件**。
 - 2026-09-13 测试机补充：老板指定当前 Panstar 账号的洛杉矶 `vm-jPZp8D`（#7012，`144.225.255.114`）。仅此实例 IPv4 入站 UDP 443 经 ego-lite 放行并确认 Synced。Debian 11 经能力与官方二进制实测后已补装 hy2 v2.12.2，SAN/SNI/masquerade 为 `www.ucla.edu`；现有 Xray PID/配置均未改。隔离客户端 DNS、Google/YouTube、5/5 新进程握手、32 秒下载与错误 pin 拒绝通过。现行目录 r54 的 Marina VLESS front 为 Chapman，19→20 条追加 dry-run 通过但**未发布**：hy2 身份快照尚不跟随实时 roster 增删，先关闭该授权缺口。详见[审计证据](reports/RELEASE_READINESS_2026-09-13.md#panstar-7012-单机测试)。
-- 验收：A/B 均已有决定；#137/#138 仍须关闭本轮审计阻塞及完成真机验收。新测试机不替代家宽三网 T0。
+- 验收：A/B 均已有决定；#137/#138 代码审计修复已随 #147 合并，仍须完成真实采集与真机验收。新测试机不替代家宽三网 T0。
+- 2026-09-13 上线预检补充：Marina 的 hy2 / auth / VLESS 仍运行，Xray PID 未变；现场没有 exit-agent/timer，控制面也没有 Marina agent 注册。为避免把 G2 修复变成 #4/#5 计量迁移，使用显式 `--hy2-roster-only` 模式，只同步鉴权名单，不改 Xray、不写 usage、不发整节点 ACK。注册与节点修改单独获得批准后执行；预检不是部署成功。
 
 ---
 
