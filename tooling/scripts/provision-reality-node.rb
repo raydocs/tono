@@ -290,7 +290,7 @@ parser = OptionParser.new do |flags|
   flags.on("--name NAME", "Unique managed node display name") { |value| options[:name] = value }
   flags.on("--server HOST", "Public IPv4/DNS endpoint; defaults to ssh -G hostname") { |value| options[:server] = value }
   flags.on("--expected-exit-ipv4 IP", "Require the final proxied egress to equal this IPv4") { |value| options[:expected_exit_ipv4] = value }
-  flags.on("--servername HOST", "Reality TLS target/servername (default: #{DEFAULT_REALITY_TARGET})") { |value| options[:target] = value }
+  flags.on("--servername HOST", "Reality front or hy2 certificate/SNI/masquerade host (default: #{DEFAULT_REALITY_TARGET})") { |value| options[:target] = value }
   flags.on("--allow-unusable-servername", "Install a front measured as unusable in the main market") { options[:allow_unusable_servername] = true }
   flags.on("--port PORT", Integer, "Reality TCP port (default: 443)") { |value| options[:port] = value }
   flags.on("--hy2", "Add Hysteria2 UDP beside existing Reality TCP; never the default") { options[:hy2] = true }
@@ -376,7 +376,7 @@ begin
 
     puts("Read-only hy2 preflight passed for #{ssh_target}: #{preflight.fetch("os")} #{preflight.fetch("arch")}.")
     puts("Transport endpoint: #{server}:#{options[:hy2_port]}/udp beside existing Reality TCP #{options[:port]}.")
-    puts("Plan: install pinned hysteria #{HYSTERIA_VERSION} as tono-hy2, keep tono-xray running, issue a 10-year SAN cert, then record the fingerprint.")
+    puts("Plan: install pinned hysteria #{HYSTERIA_VERSION} as tono-hy2, keep tono-xray running, issue a pinned SAN cert for #{target}, and use the same host for SNI and masquerade.")
     puts("Firewall note: UFW is active; this tool will not alter firewall rules without separate approval.") if preflight["ufwActive"]
     unless options[:apply]
       puts("Dry run complete. Re-run with --hy2 --apply after reviewing the host and provider UDP rules.")
@@ -422,7 +422,7 @@ begin
           ssh_target,
           hy2_script,
           "apply",
-          [deployment_id, HYSTERIA_VERSION, remote_artifact, binary_sha256, options[:hy2_port]],
+          [deployment_id, HYSTERIA_VERSION, remote_artifact, binary_sha256, options[:hy2_port], target],
         )
       ensure
         remove_uploaded_artifact(ssh_target, remote_artifact)
@@ -441,7 +441,7 @@ begin
           "server" => server,
           "port" => options[:hy2_port],
           "password" => "{{TONO_CLIENT_UUID}}",
-          "sni" => "www.microsoft.com",
+          "sni" => target,
           "fingerprint" => deployment.fetch("fingerprint").delete(":").downcase,
           "skip-cert-verify" => false,
         }],

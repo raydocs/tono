@@ -164,8 +164,9 @@ pub fn monitor_requires_reconnect(
     core_changed: bool,
     health_invalid: bool,
     event_probe_failed: bool,
+    owned_direct_reload: bool,
 ) -> bool {
-    health_invalid || (event_invalidated && (core_changed || event_probe_failed))
+    health_invalid || (event_invalidated && (core_changed || (event_probe_failed && !owned_direct_reload)))
 }
 
 /// What one [`handle_network_change`] call did to the session.

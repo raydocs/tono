@@ -29,7 +29,17 @@
 - 集成工作树 Windows App workspace：473 / 473；DNS 错误和 Protected Offline 重试各一个窄回归。
 - exit-agent Python：80 / 80，包含实际 loopback HTTP 鉴权与原子替换、替换失败、ACK 拒绝、静态同步拒绝。
 - provisioner Ruby：11 tests / 150 assertions，0 failure；remote helper `bash -n` 通过。
-- 独立 PR 会在 main 基线上另跑 CI；不将集成工作树的测试数冒充独立 PR 或实机结果。
+- main 独立 PR [#157](https://github.com/raydocs/tono/pull/157) / `b5c09818`：本地 App workspace 452 / 452；Python 80 / 80；Ruby 11 tests / 150 assertions。原生 CI 结果见 PR 检查与验收评论，不将可移植测试数冒充实机结果。
+
+## 原生 CI 与合并
+
+[#157](https://github.com/raydocs/tono/pull/157) 已普通合入 main `d7578ff5`，审查 head 为 `b5c09818`；30 个检查全部 SUCCESS（含 push / PR 重复检查）。
+
+- [Windows CI](https://github.com/raydocs/tono/actions/runs/34753994077)：App **443 tests**；两项新更新回归均运行通过。Service 生命周期与 real filtering engine 检查通过。
+- [macOS CI](https://github.com/raydocs/tono/actions/runs/34753970347)：**269 tests、1 个既有 skip、0 failure**。
+- [Services CI](https://github.com/raydocs/tono/actions/runs/34753994310)：通过，含 exit-agent **80 tests**。
+
+以上是独立 PR 的原生 CI，不是旧版已安装设备更新或客户网络验收。集成 #147 的后续 head 单独检查，不借用本次成功状态。
 
 ## 没有扩大为重构的风险
 

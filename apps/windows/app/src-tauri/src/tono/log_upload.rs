@@ -7,17 +7,9 @@
 //! own setting rather than on the timeline toggle, whose payload carries no
 //! hostnames at all.
 //!
-//! The hard part is the cursor, not the upload. `audit::RotatingWriter` rotates
-//! at 10 MiB into `traffic-audit.1.jsonl`, so a byte offset alone is wrong in
-//! both directions: after a rotation it either re-uploads a whole file (the new
-//! one is shorter than the stored offset) or silently abandons the tail that was
-//! never sent. Rotation is detected by the live file being *shorter* than the
-//! cursor, and the missed tail is then read from the backup.
-//!
-//! That test is sound rather than merely convenient: a rotation makes the live
-//! file start at zero, and it would have to grow past the old offset — up to
-//! 10 MiB — inside one sweep interval for the check to miss. The log writes a
-//! few megabytes an hour, so that margin is three orders of magnitude.
+//! Cursors use the opened file's identity, not its length. Each receipt key
+//! retains immutable bytes until acknowledged. Only records tagged by the
+//! current authenticated account/consent scope are eligible for upload.
 
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -49,32 +41,28 @@ const CURSOR_FILE_NAME: &str = "traffic-audit.upload-cursor.json";
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 struct Cursor {
-    /// Byte offset into the live log that has been accepted by the server.
-    offset: u64,
-    /// Offset within the backup file still to send, set when a rotation is
-    /// observed and cleared once the tail has gone.
     #[serde(default)]
-    backup_offset: Option<u64>,
+    scope: String,
+    #[serde(default)]
+    file_id: Option<String>,
+    offset: u64,
 }
 
 impl Cursor {
     fn load(path: &Path) -> Self {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|body| serde_json::from_str(&body).ok())
-            .unwrap_or_default()
+        std::fs::read_to_string(path).ok()
+            .and_then(|body| serde_json::from_str(&body).ok()).unwrap_or_default()
     }
 
     fn save(&self, path: &Path) {
         if let Ok(body) = serde_json::to_string(self) {
-            // Best effort: a lost cursor costs one replayed segment, which the
-            // server answers from its index rather than storing twice.
+            // A lost cursor may replay data under a fresh process session. Do
+            // not claim server deduplication across different receipt keys.
             let _ = crate::tono::state::write_private_file(path, body.as_bytes());
         }
     }
 }
 
-/// One segment ready to send.
 struct Segment {
     gzip: Vec<u8>,
     line_count: u32,
@@ -82,213 +70,225 @@ struct Segment {
     remaining: u64,
 }
 
-/// Compresses `raw`, refusing rather than truncating if it exceeds the server's
-/// cap so the caller can retry with a smaller read.
+struct PendingSegment {
+    segment: Segment,
+    next_cursor: Cursor,
+}
+
+/// Receipt identity and bytes live together across failed sweeps. Replacing a
+/// scope creates a new queue/session, never reuses a key for a different body.
+struct UploadQueue {
+    log_path: PathBuf,
+    cursor_path: PathBuf,
+    cursor: Cursor,
+    session_id: String,
+    sequence: u32,
+    pending: Option<PendingSegment>,
+}
+
+impl UploadQueue {
+    fn new(log_path: PathBuf, scope: &str) -> Self {
+        let cursor_path = log_path.with_file_name(CURSOR_FILE_NAME);
+        let saved = Cursor::load(&cursor_path);
+        let cursor = if saved.scope == scope { saved } else {
+            Cursor { scope: scope.to_string(), ..Cursor::default() }
+        };
+        Self { log_path, cursor_path, cursor,
+            session_id: tono_core::auth::new_installation_id(), sequence: 0, pending: None }
+    }
+
+    fn prepare(&mut self) -> Option<&PendingSegment> {
+        if self.pending.is_none() {
+            self.pending = self.read_next();
+        }
+        self.pending.as_ref()
+    }
+
+    fn read_next(&self) -> Option<PendingSegment> {
+        let live = std::fs::File::open(&self.log_path).ok();
+        let backup = std::fs::File::open(self.log_path.with_file_name(AUDIT_BACKUP_FILE_NAME)).ok();
+        // Open before inspecting: rename/rotation cannot swap bytes between the
+        // identity check and the read. Finish the matching backup before live.
+        let matched = backup.as_ref().filter(|file| {
+            file_identity(file).as_ref() == self.cursor.file_id.as_ref()
+                && self.cursor.file_id.is_some()
+        });
+        let file = match matched {
+            Some(file) if file.metadata().ok()?.len() > self.cursor.offset => file,
+            _ => live.as_ref()?,
+        };
+        let id = file_identity(file)?;
+        let size = file.metadata().ok()?.len();
+        let offset = if self.cursor.file_id.as_ref() == Some(&id) && size >= self.cursor.offset {
+            self.cursor.offset
+        } else { 0 };
+        let segment = read_open_segment(file, offset, Some(&self.cursor.scope))?;
+        let next_cursor = Cursor { scope: self.cursor.scope.clone(), file_id: Some(id),
+            offset: offset + segment.consumed };
+        Some(PendingSegment { segment, next_cursor })
+    }
+
+    fn acknowledge(&mut self) {
+        if let Some(pending) = self.pending.take() {
+            if pending.segment.line_count > 0 {
+                // Never wrap or saturate into a previously used receipt key.
+                if let Some(next) = self.sequence.checked_add(1) { self.sequence = next; }
+                else { self.session_id = tono_core::auth::new_installation_id(); self.sequence = 0; }
+            }
+            self.cursor = pending.next_cursor;
+            self.cursor.save(&self.cursor_path);
+        }
+    }
+}
+
+#[cfg(unix)]
+fn file_identity(file: &std::fs::File) -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = file.metadata().ok()?;
+    Some(format!("{}:{}", meta.dev(), meta.ino()))
+}
+
+#[cfg(windows)]
+fn file_identity(file: &std::fs::File) -> Option<String> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileInformationByHandleEx, FileIdInfo, FILE_ID_INFO,
+    };
+    let mut info: FILE_ID_INFO = unsafe { std::mem::zeroed() };
+    let ok = unsafe {
+        GetFileInformationByHandleEx(file.as_raw_handle(), FileIdInfo,
+            (&mut info as *mut FILE_ID_INFO).cast(), std::mem::size_of::<FILE_ID_INFO>() as u32)
+    };
+    if ok == 0 { return None; }
+    Some(format!("{}:{:02x?}", info.VolumeSerialNumber, info.FileId.Identifier))
+}
+
 fn gzip_within_limit(raw: &[u8]) -> Option<Vec<u8>> {
     let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
     encoder.write_all(raw).ok()?;
     let bytes = encoder.finish().ok()?;
-    if bytes.len() > MAX_DIAGNOSTICS_LOG_SEGMENT_BYTES {
-        return None;
-    }
-    Some(bytes)
+    (bytes.len() <= MAX_DIAGNOSTICS_LOG_SEGMENT_BYTES).then_some(bytes)
 }
 
-/// Reads up to a chunk from `offset`, trimmed to the last complete line so a
-/// segment is always whole JSONL records.
-fn read_segment(path: &Path, offset: u64) -> Option<Segment> {
-    let size = std::fs::metadata(path).ok()?.len();
-    if size <= offset {
-        return None;
-    }
+/// None is used only by the low-level unfiltered reader tests. Production must
+/// supply an authenticated scope: legacy/unattributed records remain local.
+fn read_open_segment(mut file: &std::fs::File, offset: u64, scope: Option<&str>) -> Option<Segment> {
+    let size = file.metadata().ok()?.len();
+    if size <= offset { return None; }
     let mut chunk = READ_CHUNK_BYTES;
     while chunk >= 64 * 1024 {
-        let mut file = std::fs::File::open(path).ok()?;
         file.seek(SeekFrom::Start(offset)).ok()?;
         let mut raw = vec![0_u8; chunk.min((size - offset) as usize)];
         let read = file.read(&mut raw).ok()?;
         raw.truncate(read);
-        if raw.is_empty() {
-            return None;
-        }
-        // A partial trailing line means the writer is mid-append. Send only what
-        // is complete; the remainder arrives on the next sweep.
         let end = raw.iter().rposition(|b| *b == b'\n')? + 1;
         raw.truncate(end);
-        if let Some(gzip) = gzip_within_limit(&raw) {
-            let consumed = raw.len() as u64;
-            return Some(Segment {
-                gzip,
-                line_count: raw.iter().filter(|b| **b == b'\n').count() as u32,
-                consumed,
-                remaining: size - (offset + consumed),
-            });
+        let selected = match scope {
+            None => raw.clone(),
+            Some(scope) => raw.split_inclusive(|b| *b == b'\n').filter(|line| {
+                serde_json::from_slice::<serde_json::Value>(line).ok()
+                    .is_some_and(|record| record.get("_uploadScope").and_then(|v| v.as_str()) == Some(scope))
+            }).flatten().copied().collect::<Vec<_>>(),
+        };
+        if let Some(gzip) = gzip_within_limit(&selected) {
+            return Some(Segment { gzip, line_count: selected.iter().filter(|b| **b == b'\n').count() as u32,
+                consumed: end as u64, remaining: size - offset - end as u64 });
         }
-        // Unusually dense window: halve and retry rather than sending something
-        // the server will refuse with 413.
         chunk /= 2;
     }
     None
 }
 
-/// Starts the sweep loop for one sign-in generation.
+#[cfg(test)]
+fn read_segment(path: &Path, offset: u64) -> Option<Segment> {
+    read_open_segment(&std::fs::File::open(path).ok()?, offset, None)
+}
+
 pub(crate) async fn spawn_periodic_for_auth_generation(
-    state: &Arc<TonoState>,
-    _app: &AppHandle,
-    generation: u64,
+    state: &Arc<TonoState>, _app: &AppHandle, generation: u64,
 ) {
+    let (client, identity, account) = {
+        let inner = state.lock().await;
+        if inner.sign_in_generation != generation { return; }
+        let Some(account) = inner.account.as_ref() else { return; };
+        state.audit().activate_log_upload_owner(&account.id);
+        (inner.client.clone(), inner.client.diagnostics_log_identity().await, account.id.clone())
+    };
     let task_state = state.clone();
     let handle = AsyncHandler::spawn(move || async move {
         tokio::time::sleep(FIRST_DELAY).await;
-        // Fresh per loop, so a relaunch starting again at sequence 0 under a new
-        // session identifier can never collide with the previous run: the server
-        // keys uniqueness on (account, session, sequence).
-        // Reuses the installation-id generator rather than adding a uuid
-        // dependency for one line; it produces the same shape and is already
-        // screened against the grammar the server accepts.
-        let session_id = tono_core::auth::new_installation_id();
-        let mut sequence = 0_u32;
+        let mut queue: Option<UploadQueue> = None;
         let mut failures = 0_u32;
         loop {
             {
                 let inner = task_state.lock().await;
-                if inner.sign_in_generation != generation {
-                    return;
-                }
-                if matches!(
-                    inner.account_state,
-                    crate::tono::state::AccountState::SignedOut
-                        | crate::tono::state::AccountState::Restoring
-                ) {
-                    return;
-                }
+                if inner.sign_in_generation != generation
+                    || inner.account.as_ref().map(|user| &user.id) != Some(&account) { return; }
             }
-            match sweep(&task_state, generation, &session_id, &mut sequence).await {
-                Ok(()) => failures = 0,
-                Err(_) => failures = failures.saturating_add(1),
-            }
-            // Backoff that tops out: a device offline for a day should still
-            // upload promptly on return, and the log keeps rotating whether or
-            // not the server is reachable.
-            let delay = SWEEP_INTERVAL * 2_u32.pow(failures.min(3));
-            tokio::time::sleep(delay.min(SWEEP_INTERVAL * 8)).await;
+            let result = match task_state.audit().log_upload_scope() {
+                Some(scope) => {
+                    if queue.as_ref().map(|q| &q.cursor.scope) != Some(&scope.id) {
+                        queue = Some(UploadQueue::new(task_state.audit().log_path().to_path_buf(), &scope.id));
+                    }
+                    sweep(&task_state, generation, &client, identity, &scope, queue.as_mut().unwrap()).await
+                }
+                None => { queue = None; Ok(()) }
+            };
+            failures = if result.is_ok() { 0 } else { failures.saturating_add(1) };
+            tokio::time::sleep(SWEEP_INTERVAL * 2_u32.pow(failures.min(3))).await;
         }
     });
-    // Same disposal as the telemetry loop: a generation that was superseded
-    // while this task was being spawned must not leave a second uploader running
-    // against a session that no longer owns the cursor.
-    let inner = state.lock().await;
-    if inner.sign_in_generation != generation {
-        handle.abort();
-    }
+    if state.lock().await.sign_in_generation != generation { handle.abort(); }
 }
 
-/// One pass: the rotated tail first, then every complete line still on the live
-/// file. Returns on the first failure so the cursor never advances past bytes
-/// the server has not accepted.
 async fn sweep(
-    state: &Arc<TonoState>,
-    generation: u64,
-    session_id: &str,
-    sequence: &mut u32,
+    state: &Arc<TonoState>, generation: u64,
+    client: &crate::tono::state::TonoApiClient, identity: u64,
+    scope: &crate::tono::audit::LogUploadScope, queue: &mut UploadQueue,
 ) -> Result<(), ApiError> {
-    if !state.audit().enabled() || !state.audit().network_log_upload_enabled() {
-        return Ok(());
-    }
-    let log_path = state.audit().log_path().to_path_buf();
-    let cursor_path = log_path.with_file_name(CURSOR_FILE_NAME);
-    let backup_path = log_path.with_file_name(AUDIT_BACKUP_FILE_NAME);
-    let mut cursor = Cursor::load(&cursor_path);
-
-    // Rotation: the live file is shorter than what has already been accepted, so
-    // the bytes between the cursor and the old end now live in the backup.
-    let live_size = std::fs::metadata(&log_path).map(|m| m.len()).unwrap_or(0);
-    if live_size < cursor.offset {
-        cursor.backup_offset = Some(cursor.offset);
-        cursor.offset = 0;
-        cursor.save(&cursor_path);
-    }
-
-    let client = {
-        let inner = state.lock().await;
-        if inner.sign_in_generation != generation {
-            return Ok(());
-        }
-        inner.client.clone()
-    };
-    let client_version = env!("CARGO_PKG_VERSION");
-    let os_version = os_version_string();
-
-    if let Some(backup_offset) = cursor.backup_offset {
-        match read_segment(&backup_path, backup_offset) {
-            Some(segment) => {
-                send(state, &client, session_id, sequence, &segment, client_version, &os_version)
-                    .await?;
-                cursor.backup_offset = if segment.remaining == 0 {
-                    None
-                } else {
-                    Some(backup_offset + segment.consumed)
-                };
-                cursor.save(&cursor_path);
-            }
-            // Nothing readable there: the backup is gone or already drained.
-            // Give up on it rather than blocking the live file behind it.
-            None => {
-                cursor.backup_offset = None;
-                cursor.save(&cursor_path);
-            }
-        }
-    }
-
     loop {
-        let Some(segment) = read_segment(&log_path, cursor.offset) else {
-            return Ok(());
-        };
-        send(state, &client, session_id, sequence, &segment, client_version, &os_version).await?;
-        cursor.offset += segment.consumed;
-        cursor.save(&cursor_path);
-        if segment.remaining == 0 {
-            return Ok(());
+        {
+            let inner = state.lock().await;
+            if inner.sign_in_generation != generation
+                || state.audit().with_log_upload_scope(scope, || ()).is_none() { return Ok(()); }
         }
-        tokio::time::sleep(Duration::from_millis(80)).await;
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn send(
-    state: &Arc<TonoState>,
-    client: &crate::tono::state::TonoApiClient,
-    session_id: &str,
-    sequence: &mut u32,
-    segment: &Segment,
-    client_version: &str,
-    os_version: &str,
-) -> Result<(), ApiError> {
-    let result = client
-        .upload_diagnostics_log_segment(DiagnosticsLogSegment {
-            session_id,
-            sequence: *sequence,
-            line_count: segment.line_count,
-            client_version,
-            os_version,
-            gzip: &segment.gzip,
-        })
-        .await;
-    match result {
-        Ok(_) => {
-            state.audit().log(AuditEvent::NetworkLogSegmentUploaded {
-                sequence: *sequence,
-                line_count: segment.line_count,
-                bytes: segment.gzip.len() as u32,
-            });
-            *sequence = sequence.saturating_add(1);
-            Ok(())
+        if queue.prepare().is_none() { return Ok(()); }
+        let segment = &queue.pending.as_ref().unwrap().segment;
+        if segment.line_count > 0 {
+            let os_version = os_version_string();
+            // A revoked consent/owner cancels catch-up, including the awaited
+            // HTTP future; it cannot recall bytes already accepted by a server.
+            let result = tokio::select! {
+                biased;
+                _ = scope.cancelled.cancelled() => return Ok(()),
+                result = client.upload_diagnostics_log_segment_for_identity(DiagnosticsLogSegment {
+                    session_id: &queue.session_id, sequence: queue.sequence,
+                    line_count: segment.line_count, client_version: env!("CARGO_PKG_VERSION"),
+                    os_version: &os_version, gzip: &segment.gzip,
+                }, identity) => result,
+            };
+            if let Err(err) = result {
+                state.audit().log(AuditEvent::NetworkLogSegmentUploadFail { error: err.to_string() });
+                return Err(err);
+            }
         }
-        Err(err) => {
-            state.audit().log(AuditEvent::NetworkLogSegmentUploadFail {
-                error: err.to_string(),
-            });
-            Err(err)
+        let event = (segment.line_count > 0).then(|| AuditEvent::NetworkLogSegmentUploaded {
+            sequence: queue.sequence, line_count: segment.line_count, bytes: segment.gzip.len() as u32,
+        });
+        let drained = segment.remaining == 0;
+        let is_live = queue.pending.as_ref().unwrap().next_cursor.file_id ==
+            std::fs::File::open(&queue.log_path).ok().as_ref().and_then(file_identity);
+        {
+            let inner = state.lock().await;
+            if inner.sign_in_generation != generation
+                || state.audit().with_log_upload_scope(scope, || queue.acknowledge()).is_none() { return Ok(()); }
+        }
+        if let Some(event) = event { state.audit().log(event); }
+        if drained && is_live { return Ok(()); }
+        tokio::select! {
+            biased;
+            _ = scope.cancelled.cancelled() => return Ok(()),
+            _ = tokio::time::sleep(Duration::from_millis(80)) => {}
         }
     }
 }
@@ -393,30 +393,61 @@ mod tests {
     }
 
     #[test]
-    fn rotation_is_detected_by_the_live_file_being_shorter_than_the_cursor() {
+    fn rotation_to_a_longer_live_file_still_drains_the_backup() {
         let dir = Dir::new("rotate");
         let live = dir.join("traffic-audit.jsonl");
         let backup = dir.join(AUDIT_BACKUP_FILE_NAME);
-        let old: String = (1..=30).map(line).collect();
-        std::fs::write(&backup, &old).unwrap();
-        std::fs::write(&live, (100..=104).map(line).collect::<String>()).unwrap();
+        let scoped = |n| format!("{{\"_uploadScope\":\"owner-a\",\"n\":{n}}}\n");
+        std::fs::write(&live, scoped(1)).unwrap();
+        let mut queue = UploadQueue::new(live.clone(), "owner-a");
+        assert_eq!(queue.prepare().unwrap().segment.line_count, 1);
+        queue.acknowledge();
+        std::fs::OpenOptions::new().append(true).open(&live).unwrap().write_all(scoped(2).as_bytes()).unwrap();
+        std::fs::rename(&live, &backup).unwrap();
+        std::fs::write(&live, (100..=120).map(scoped).collect::<String>()).unwrap();
+        assert!(std::fs::metadata(&live).unwrap().len() > queue.cursor.offset);
+        assert!(gunzip(&queue.prepare().unwrap().segment.gzip).contains("\"n\":2}"));
+        queue.acknowledge();
+        let fresh = gunzip(&queue.prepare().unwrap().segment.gzip);
+        assert!(fresh.contains("\"n\":100}"));
+        assert!(!fresh.contains("\"n\":2}"));
+    }
 
-        // Cursor recorded ten lines of the file that has since become the backup.
-        let consumed_before_rotation = (1..=10).map(line).collect::<String>().len() as u64;
-        let live_size = std::fs::metadata(&live).unwrap().len();
-        assert!(
-            live_size < old.len() as u64,
-            "test premise: the rotated file must be longer than the fresh one",
-        );
+    #[test]
+    fn lost_receipt_retries_immutable_bytes_after_log_growth() {
+        let dir = Dir::new("retry");
+        let live = dir.join("traffic-audit.jsonl");
+        let first = "{\"_uploadScope\":\"a\",\"n\":1}\n";
+        std::fs::write(&live, first).unwrap();
+        let mut queue = UploadQueue::new(live.clone(), "a");
+        let sent = queue.prepare().unwrap().segment.gzip.clone();
+        let session = queue.session_id.clone();
+        // The server stored these bytes but its response was lost: no ack.
+        std::fs::OpenOptions::new().append(true).open(&live).unwrap()
+            .write_all(b"{\"_uploadScope\":\"a\",\"n\":2}\n").unwrap();
+        assert_eq!(queue.prepare().unwrap().segment.gzip, sent);
+        assert_eq!(queue.sequence, 0);
+        assert_eq!(queue.session_id, session);
+        queue.acknowledge();
+        assert_ne!(queue.prepare().unwrap().segment.gzip, sent);
+        assert_eq!(queue.sequence, 1);
+    }
 
-        // The unsent tail of the backup is recoverable from that offset...
-        let tail = read_segment(&backup, consumed_before_rotation).expect("backup tail");
-        let tail_text = gunzip(&tail.gzip);
-        assert!(tail_text.contains("\"n\":30,"), "lost the rotated tail");
-        assert!(!tail_text.contains("\"n\":1,"), "re-sent pre-rotation lines");
-        // ...and the live file is read from zero, not from the stale offset.
-        let fresh = read_segment(&live, 0).expect("live segment");
-        assert!(gunzip(&fresh.gzip).contains("\"n\":104,"));
+    #[test]
+    fn unowned_and_previous_account_records_are_not_uploaded() {
+        let dir = Dir::new("scope");
+        let live = dir.join("traffic-audit.jsonl");
+        std::fs::write(&live, concat!(
+            "{\"host\":\"legacy.example\"}\n",
+            "{\"_uploadScope\":\"old\",\"host\":\"old.example\"}\n",
+            "{\"_uploadScope\":\"new\",\"host\":\"new.example\"}\n",
+        )).unwrap();
+        let mut queue = UploadQueue::new(live.clone(), "new");
+        let segment = &queue.prepare().unwrap().segment;
+        assert_eq!(segment.line_count, 1);
+        assert_eq!(gunzip(&segment.gzip), "{\"_uploadScope\":\"new\",\"host\":\"new.example\"}\n");
+        queue.acknowledge();
+        assert_eq!(queue.cursor.offset, std::fs::metadata(live).unwrap().len());
     }
 
     #[test]
@@ -450,14 +481,14 @@ mod tests {
     fn a_cursor_round_trips_and_a_corrupt_one_reads_as_the_beginning() {
         let dir = Dir::new("cursor-io");
         let path = dir.join(CURSOR_FILE_NAME);
-        Cursor { offset: 4096, backup_offset: Some(17) }.save(&path);
+        Cursor { offset: 4096, file_id: Some("file-a".into()), scope: "a".into() }.save(&path);
         let loaded = Cursor::load(&path);
         assert_eq!(loaded.offset, 4096);
-        assert_eq!(loaded.backup_offset, Some(17));
+        assert_eq!(loaded.file_id.as_deref(), Some("file-a"));
 
         std::fs::write(&path, b"{not json").unwrap();
         let recovered = Cursor::load(&path);
         assert_eq!(recovered.offset, 0);
-        assert_eq!(recovered.backup_offset, None);
+        assert_eq!(recovered.file_id, None);
     }
 }

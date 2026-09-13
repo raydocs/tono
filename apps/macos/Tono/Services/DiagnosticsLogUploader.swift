@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import OSLog
 import zlib
 
@@ -47,14 +48,21 @@ actor DiagnosticsLogUploader {
         _ osVersion: String
     ) async throws -> Void
     private let isEnabled: @Sendable () -> Bool
+    nonisolated let scopeID: String?
+    private let ownership: DiagnosticsLogOwnership?
 
     /// Fresh per process. Server-side uniqueness is (account, session, sequence),
     /// so a relaunch starting over at sequence 0 under a new session can never
     /// collide with the previous run's segments.
-    private let sessionID = UUID().uuidString
+    private var sessionID = UUID().uuidString
     private var sequence = 0
     private var cursor: Cursor
+    // One receipt key must always refer to the same compressed bytes and range,
+    // even when the server stored them but the response never reached us.
+    private var pendingSegment: Segment?
+    private var sweepInProgress = false
     private var sweepTask: Task<Void, Never>?
+    private var uploadEpoch: UInt64 = 0
     private var consecutiveFailures = 0
     private var unreadableBackupSweeps = 0
     /// How long to keep believing a rotated file's tail will become readable.
@@ -67,6 +75,7 @@ actor DiagnosticsLogUploader {
         /// `nil` until the first sweep sees a log file at all.
         var inode: UInt64?
         var offset: UInt64
+        var scopeID: String? = nil
         static let empty = Cursor(inode: nil, offset: 0)
     }
 
@@ -75,6 +84,8 @@ actor DiagnosticsLogUploader {
         clientVersion: String = Bundle.main
             .object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0",
         osVersion: String = DiagnosticsLogUploader.compactOperatingSystemVersion(),
+        scopeID: String? = nil,
+        ownership: DiagnosticsLogOwnership? = nil,
         isEnabled: @escaping @Sendable () -> Bool = {
             SettingsKey.isNetworkLogUploadEnabled()
         },
@@ -87,8 +98,11 @@ actor DiagnosticsLogUploader {
         self.clientVersion = Self.asciiHeader(clientVersion, maxLength: 40)
         self.osVersion = Self.asciiHeader(osVersion, maxLength: 80)
         self.isEnabled = isEnabled
+        self.scopeID = scopeID
+        self.ownership = ownership
         self.upload = upload
-        self.cursor = Self.loadCursor(from: cursorURL) ?? .empty
+        let saved = Self.loadCursor(from: cursorURL)
+        self.cursor = saved?.scopeID == scopeID ? (saved ?? .empty) : .empty
     }
 
     func start() {
@@ -103,6 +117,7 @@ actor DiagnosticsLogUploader {
     }
 
     func stop() {
+        uploadEpoch &+= 1
         sweepTask?.cancel()
         sweepTask = nil
     }
@@ -114,6 +129,9 @@ actor DiagnosticsLogUploader {
         stop()
         let size = (try? fileManager.attributesOfItem(atPath: auditLogURL.path)[.size]
             as? NSNumber)?.uint64Value ?? 0
+        pendingSegment = nil
+        sessionID = UUID().uuidString
+        sequence = 0
         cursor = Cursor(inode: inode(of: auditLogURL), offset: size)
         persistCursor()
         consecutiveFailures = 0
@@ -143,6 +161,7 @@ actor DiagnosticsLogUploader {
         /// that shows the outcome must not offer "nothing new" as the reason a
         /// disabled pipeline sent nothing.
         case disabled
+        case busy
         case idle
         case uploaded
         /// Carries the failure description so the manual upload can name why the
@@ -165,7 +184,7 @@ actor DiagnosticsLogUploader {
         }
         switch outcome {
         case .disabled, .idle: return Self.idleIntervalSeconds
-        case .uploaded: return Self.sweepIntervalSeconds
+        case .uploaded, .busy: return Self.sweepIntervalSeconds
         // Unreachable while `consecutiveFailures` drives the branch above; kept
         // so the sweep's own vocabulary stays honest about what happened.
         case .failed: return Self.sweepIntervalSeconds
@@ -178,22 +197,27 @@ actor DiagnosticsLogUploader {
     /// unsent bytes.
     @discardableResult
     func sweep() async -> SweepOutcome {
-        guard isEnabled() else { return .disabled }
+        guard isEnabled(), !Task.isCancelled else { return .disabled }
+        guard !sweepInProgress else { return .busy }
+        sweepInProgress = true
+        defer { sweepInProgress = false }
+        let epoch = uploadEpoch
         var uploaded = false
-        // A rotation moved the bytes we were reading into `.1`. Finish that tail
-        // first: the alternative is losing exactly the window where the log was
-        // busiest, which is the window worth having.
-        while let pending = pendingBackupSegment() {
-            if let failure = await send(pending) { return .failed(failure) }
-            uploaded = true
-            if pending.remainingBytes == 0 { break }
-        }
-        while let segment = pendingCurrentSegment() {
-            if let failure = await send(segment) { return .failed(failure) }
-            uploaded = true
-            if segment.remainingBytes == 0 { break }
-            // Yield so a multi-megabyte catch-up does not pin a performance core
-            // through gzip of every remaining chunk.
+        while uploadPermitted(epoch: epoch) {
+            if pendingSegment == nil {
+                pendingSegment = pendingBackupSegment() ?? pendingCurrentSegment()
+            }
+            guard let segment = pendingSegment else { break }
+            if segment.lineCount == 0 {
+                // Consumed local bytes, but no records belonged to this scope.
+                pendingSegment = nil
+                cursor = segment.nextCursor
+                persistCursor()
+            } else {
+                if let failure = await send(segment, epoch: epoch) { return .failed(failure) }
+                uploaded = true
+            }
+            if segment.remainingBytes == 0 && !segment.continuesInLiveFile { break }
             try? await Task.sleep(for: .milliseconds(80))
         }
         return uploaded ? .uploaded : .idle
@@ -204,11 +228,17 @@ actor DiagnosticsLogUploader {
         let lineCount: Int
         let nextCursor: Cursor
         let remainingBytes: UInt64
+        var continuesInLiveFile = false
     }
 
     /// Returns nil on success, or the failure description for the caller to
     /// report. The cursor is only advanced once the segment is accepted.
-    private func send(_ segment: Segment) async -> String? {
+    private func uploadPermitted(epoch: UInt64) -> Bool {
+        epoch == uploadEpoch && !Task.isCancelled && isEnabled()
+    }
+
+    private func send(_ segment: Segment, epoch: UInt64) async -> String? {
+        guard uploadPermitted(epoch: epoch) else { return "Log upload was cancelled." }
         do {
             try await upload(
                 segment.payload,
@@ -219,13 +249,18 @@ actor DiagnosticsLogUploader {
                 osVersion
             )
         } catch {
+            guard uploadPermitted(epoch: epoch) else { return "Log upload was cancelled." }
             consecutiveFailures += 1
             logger.error("log segment upload failed: \(String(describing: error), privacy: .public)")
             return (error as? LocalizedError)?.errorDescription
                 ?? error.localizedDescription
         }
+        // Actor reentrancy lets sign-out abandon the tail while HTTP is in flight.
+        // A late success must not rewind that account boundary or send another chunk.
+        guard uploadPermitted(epoch: epoch) else { return "Log upload was cancelled." }
         consecutiveFailures = 0
         sequence += 1
+        pendingSegment = nil
         cursor = segment.nextCursor
         persistCursor()
         return nil
@@ -271,7 +306,7 @@ actor DiagnosticsLogUploader {
             // cursor cannot leave a backup on its own and `pendingCurrentSegment`
             // refuses to run while it points at one, so retrying forever is not
             // "keep trying": it is the upload silently stopping for good.
-            let segment = readSegment(from: backup, offset: cursor.offset)
+            let segment = readSegment(from: backup, offset: cursor.offset, expectedInode: recorded)
             guard let segment else {
                 unreadableBackupSweeps += 1
                 if unreadableBackupSweeps >= Self.unreadableBackupSweepLimit {
@@ -292,7 +327,8 @@ actor DiagnosticsLogUploader {
                 nextCursor: exhausted
                     ? Cursor(inode: inode(of: auditLogURL), offset: 0)
                     : Cursor(inode: recorded, offset: segment.nextOffset),
-                remainingBytes: segment.remainingBytes
+                remainingBytes: segment.remainingBytes,
+                continuesInLiveFile: exhausted
             )
         }
         // The recorded inode is neither the live file nor a surviving backup:
@@ -313,7 +349,7 @@ actor DiagnosticsLogUploader {
         }
         // First run, or the file was replaced while we had no unsent bytes.
         let offset = cursor.inode == live ? cursor.offset : 0
-        guard let read = readSegment(from: auditLogURL, offset: offset) else { return nil }
+        guard let read = readSegment(from: auditLogURL, offset: offset, expectedInode: live) else { return nil }
         return Segment(
             payload: read.payload,
             lineCount: read.lineCount,
@@ -350,11 +386,14 @@ actor DiagnosticsLogUploader {
     /// Reads up to one chunk from `offset`, trimmed to the last complete line so
     /// a segment is always whole JSONL records, then gzips it. Returns nil when
     /// there is nothing complete to send yet.
-    private func readSegment(from url: URL, offset: UInt64) -> Read? {
+    private func readSegment(from url: URL, offset: UInt64, expectedInode: UInt64) -> Read? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
-        let size = (try? fileManager.attributesOfItem(atPath: url.path)[.size] as? NSNumber)??
-            .uint64Value ?? 0
+        // Measure the opened file, not a path that may now name a fresh rotation.
+        var info = stat()
+        guard fstat(handle.fileDescriptor, &info) == 0, info.st_size >= 0,
+              UInt64(info.st_ino) == expectedInode else { return nil }
+        let size = UInt64(info.st_size)
         guard size > offset else { return nil }
         do {
             try handle.seek(toOffset: offset)
@@ -381,12 +420,25 @@ actor DiagnosticsLogUploader {
             // what is complete; the remainder arrives in the next sweep.
             guard let lastNewline = raw.lastIndex(of: 0x0A) else { return nil }
             let complete = raw[raw.startIndex...lastNewline]
-            guard let payload = Self.gzip(Data(complete)) else { return nil }
+            let eligible: Data
+            if let scopeID {
+                eligible = complete.split(separator: 0x0A).reduce(into: Data()) { output, line in
+                    guard let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+                          object["_uploadScope"] as? String == scopeID else { return }
+                    output.append(contentsOf: line)
+                    output.append(0x0A)
+                }
+            } else {
+                // Unscoped construction is used by low-level reader tests;
+                // AccountSession always supplies authenticated ownership.
+                eligible = Data(complete)
+            }
+            guard let payload = Self.gzip(eligible) else { return nil }
             if payload.count <= Self.compressedLimitBytes {
                 let consumed = UInt64(complete.count)
                 return Read(
                     payload: payload,
-                    lineCount: complete.reduce(into: 0) { total, byte in
+                    lineCount: eligible.reduce(into: 0) { total, byte in
                         if byte == 0x0A { total += 1 }
                     },
                     nextOffset: offset + consumed,
@@ -416,7 +468,16 @@ actor DiagnosticsLogUploader {
     }
 
     private func persistCursor() {
+        cursor.scopeID = scopeID
         guard let data = try? JSONEncoder().encode(cursor) else { return }
+        if let scopeID, let ownership {
+            _ = ownership.withCurrent(scopeID) { writeCursor(data) }
+        } else {
+            writeCursor(data)
+        }
+    }
+
+    private func writeCursor(_ data: Data) {
         // 0600 like the log itself. The cursor is not sensitive, but it lives in
         // the same directory and inheriting the weaker default would be noise in
         // any later audit of that directory's permissions.

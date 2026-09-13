@@ -294,6 +294,71 @@ struct AppTrafficLedgerTests {
         check("reset clears everything",
               split.apps.isEmpty && split.overall.total == 0)
 
+        // --- window delta -------------------------------------------------
+        // What a telemetry window owes: the bytes since the last accepted one.
+        // The mapping is the part that is silent when wrong — the wire has no
+        // `tunnel` or `blocked` key, so a mis-mapped class either lands in the
+        // wrong column or takes the whole window down with a 400.
+        let previousWindow = AppTrafficLedger.RouteSplit(
+            direct: 25, residential: 50, tunnel: 100, blocked: 10
+        )
+        let currentWindow = AppTrafficLedger.RouteSplit(
+            direct: 25, residential: 55, tunnel: 500, blocked: 1_010
+        )
+        let delta = AppTrafficLedger.windowDelta(
+            from: previousWindow, to: currentWindow
+        )
+        check("tunnel bytes are what the wire calls cloud",
+              delta.cloud == 400, "got \(delta.cloud)")
+        check("residential keeps its own column",
+              delta.residential == 5, "got \(delta.residential)")
+        check("a route with no new bytes reports zero, not the total",
+              delta.direct == 0, "got \(delta.direct)")
+        let encodedDelta = try! JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(delta)
+        ) as! [String: Any]
+        check("the wire carries exactly cloud, residential and direct",
+              Set(encodedDelta.keys) == ["cloud", "residential", "direct"],
+              "got \(encodedDelta.keys.sorted())")
+        check("blocked bytes are dropped, not folded into another route",
+              (encodedDelta["cloud"] as? NSNumber)?.int64Value == 400
+                  && (encodedDelta["direct"] as? NSNumber)?.int64Value == 0)
+
+        // A baseline from another counter would otherwise report a negative,
+        // which the Worker refuses — taking every event in the window with it.
+        let backwards = AppTrafficLedger.windowDelta(
+            from: currentWindow, to: previousWindow
+        )
+        check("a baseline ahead of the current total clamps to zero",
+              backwards.cloud == 0 && backwards.residential == 0
+                  && backwards.direct == 0)
+
+        // --- the counter a window is taken against --------------------------
+        // reset() runs on every disconnect. If the telemetry counter went with
+        // it, a reconnect inside a window would make the delta negative and up
+        // to twenty minutes of traffic would silently vanish.
+        let reconnected = AppTrafficLedger()
+        reconnected.ingest([
+            connection("first", process: "Chrome", up: 10, down: 20,
+                       chains: ["US-VLESS-Reality", "Tono-Exit"]),
+        ])
+        let baseline = reconnected.cumulative
+        reconnected.reset()
+        reconnected.ingest([
+            connection("second", process: "Chrome", up: 1, down: 2, chains: ["DIRECT"]),
+        ])
+        check("reset clears the session view",
+              reconnected.overall.total == 3, "got \(reconnected.overall.total)")
+        check("reset leaves the telemetry counter alone",
+              reconnected.cumulative.total == 33,
+              "got \(reconnected.cumulative.total)")
+        let acrossReset = AppTrafficLedger.windowDelta(
+            from: baseline, to: reconnected.cumulative
+        )
+        check("a reconnect mid-window neither loses nor negates bytes",
+              acrossReset.direct == 3 && acrossReset.cloud == 0,
+              "got direct \(acrossReset.direct) cloud \(acrossReset.cloud)")
+
         print(failures == 0 ? "\nall ledger checks passed" : "\n\(failures) FAILED")
         exit(failures == 0 ? 0 : 1)
     }

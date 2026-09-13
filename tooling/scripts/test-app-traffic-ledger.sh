@@ -16,6 +16,7 @@ trap 'rm -rf "$test_dir"' EXIT
 DEVELOPER_DIR="$tono_developer_dir" /usr/bin/xcrun swiftc \
   -O \
   -module-cache-path "$test_dir/module-cache" \
+  "$repo_root/apps/macos/Tono/Models/TonoBytesByRoute.swift" \
   "$repo_root/apps/macos/Tono/Services/AppTrafficLedger.swift" \
   "$repo_root/tooling/scripts/tests/AppTrafficLedgerTests.swift" \
   -o "$test_dir/ledger-tests"
