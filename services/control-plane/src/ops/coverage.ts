@@ -3,11 +3,11 @@
 
 import { decryptCatalog } from '../crypto';
 import { type Env, requiredCatalogKey } from '../env';
-import { splitManagedCatalogProxies } from '../catalog-yaml';
+import { catalogBaseName, splitManagedCatalogProxies } from '../catalog-yaml';
 import type { CoverageDto } from './contract';
 import { loadOperationsLive } from './live';
+import { QUALITY_SWEEP_FRESH_SECONDS } from './freshness';
 
-const SWEEP_FRESH_SEC = 26 * 3600;
 const AGENT_FRESH_SEC = 15 * 60;
 const REPORT_FRESH_SEC = 40 * 60;
 
@@ -31,12 +31,12 @@ export async function coverageOf(e: Env, nowSec: number): Promise<CoverageDto | 
     try {
       if (catalog) {
         const yaml = await decryptCatalog(String(catalog.ciphertext), String(catalog.nonce), requiredCatalogKey(e));
-        listed = new Set(splitManagedCatalogProxies(yaml).items.map((item) => item.name));
+        listed = new Set(splitManagedCatalogProxies(yaml).items.map((item) => catalogBaseName(item.name)));
       }
     } catch { /* catalog unread: listed stays empty */ }
     const sweepAt = live.quality?.updatedAt ?? live.qualityReceivedAt;
-    const swept = sweepAt != null && nowSec - sweepAt <= SWEEP_FRESH_SEC
-      ? new Set((live.quality?.nodes ?? []).map((node) => String(node.name)))
+    const swept = sweepAt != null && nowSec - sweepAt <= QUALITY_SWEEP_FRESH_SECONDS
+      ? new Set((live.quality?.nodes ?? []).map((node) => catalogBaseName(String(node.name))))
       : new Set<string>();
     const withAgent = new Set(
       (live.agents ?? [])
@@ -44,7 +44,7 @@ export async function coverageOf(e: Env, nowSec: number): Promise<CoverageDto | 
           const at = Number(node.observedAt);
           return Number.isFinite(at) && at > 0 && nowSec - at <= AGENT_FRESH_SEC;
         })
-        .map((node) => String(node.name)),
+        .map((node) => catalogBaseName(String(node.name))),
     );
     return {
       nodesListed: listed.size,

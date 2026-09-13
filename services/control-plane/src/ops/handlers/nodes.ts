@@ -1,4 +1,5 @@
 import { str } from '../../env';
+import { catalogBaseName } from '../../catalog-yaml';
 import { ApiError } from '../../errors';
 import { body, rejectUnexpectedKeys } from '../../request';
 import {
@@ -101,7 +102,10 @@ export async function getNodes(req: Request, e: Env): Promise<Response> {
   }
   const t = now();
   const items: NodeSummaryDto[] = [];
-  for (const name of allNames) {
+  // Older verdict passes persisted transport aliases as machines. Keep their
+  // historical rows, but never surface them as extra nodes or copy their
+  // missing-probe verdict onto the base node.
+  for (const name of new Set([...allNames].map(catalogBaseName))) {
     const status = statusBy.get(name) ?? null;
     const profile = profileBy.get(name) ?? null;
     const catalogListed = names

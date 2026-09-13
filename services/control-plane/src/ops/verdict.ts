@@ -1,3 +1,4 @@
+import { QUALITY_SWEEP_FRESH_SECONDS } from './freshness';
 // Pure fleet verdict. No I/O and no clock: every gate reads nowSec so a test
 // can walk hysteresis tick by tick. Labels for down/blocked/ok match today's
 // NODE_HEALTH_LABELS / fleetQualityStatus copy.
@@ -27,7 +28,6 @@ export const VERDICT_RULES_VERSION = 2;
 // The hub's mainland sweep is a twelve-hour SSH pass, so a sweep is not stale
 // until it has missed a whole cycle with margin; two hours read the fleet as
 // 未测 for ten of every twelve. The agent copy is minutes old, and stays so.
-const QUALITY_STALE_SECONDS = 26 * 3600;
 const AGENTS_STALE_SECONDS = 15 * 60;
 const COLLECTOR_STALE_SECONDS = 20 * 60;
 const CARRIER_LOSS_PCT = 10;
@@ -260,7 +260,7 @@ export function observedVerdict(node: NodeVerdictInput, ctx: SnapshotCtx): NodeV
   if (unreachable(node)) return 'probe_unreachable';
   if (pressureHit(node.machine)) return 'pressure';
   if (
-    snapshotStale(ctx.qualitySweepAt, ctx.nowSec, QUALITY_STALE_SECONDS)
+    snapshotStale(ctx.qualitySweepAt, ctx.nowSec, QUALITY_SWEEP_FRESH_SECONDS)
     || snapshotStale(ctx.agentsSnapshotAt, ctx.nowSec, AGENTS_STALE_SECONDS)
   ) return 'unknown';
   if (node.ok == null && node.blockStatus == null) {
@@ -382,7 +382,7 @@ export function desireForNode(node: NodeVerdictResult): IncidentDesire | null {
 }
 
 function collectorStale(ctx: SnapshotCtx): boolean {
-  return snapshotStale(ctx.qualitySweepAt, ctx.nowSec, QUALITY_STALE_SECONDS)
+  return snapshotStale(ctx.qualitySweepAt, ctx.nowSec, QUALITY_SWEEP_FRESH_SECONDS)
     || snapshotStale(ctx.agentsSnapshotAt, ctx.nowSec, COLLECTOR_STALE_SECONDS);
 }
 
