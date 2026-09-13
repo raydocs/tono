@@ -95,7 +95,39 @@ pub fn begin_first_launch_migration(current_app_version: &str) -> Option<UpdateH
 /// New process: only a verified recovery (or an unprotected first launch that
 /// has already migrated) may commit. Persistence failure leaves the file.
 pub fn commit_if_verified(current_app_version: &str) -> bool {
-    match commit_verified_recovery(&current_path(), current_app_version) {
+    report_commit(commit_verified_recovery(&current_path(), current_app_version))
+}
+
+/// Account/catalog restoration does not verify a tunnel. It may finish only
+/// an update that never required protection, with an affirmative Service
+/// observation that no barrier remains. Protected recovery commits in stages.
+pub fn commit_after_account_restore(
+    current_app_version: &str,
+    protection_proven_absent: bool,
+) -> bool {
+    report_commit(commit_after_account_restore_at(
+        &current_path(),
+        current_app_version,
+        protection_proven_absent,
+    ))
+}
+
+fn commit_after_account_restore_at(
+    path: &Path,
+    current_app_version: &str,
+    protection_proven_absent: bool,
+) -> std::io::Result<bool> {
+    let Some(journal) = load(path)? else {
+        return Ok(false);
+    };
+    if journal.was_connected || journal.keep_kill_switch_armed || !protection_proven_absent {
+        return Ok(false);
+    }
+    commit_verified_recovery(path, current_app_version)
+}
+
+fn report_commit(result: std::io::Result<bool>) -> bool {
+    match result {
         Ok(committed) => committed,
         Err(error) => {
             logging!(
@@ -132,6 +164,34 @@ mod tests {
         assert_eq!(journal.next_app_version, "0.0.73");
         assert!(journal.was_connected);
         assert!(journal.keep_kill_switch_armed);
+    }
+
+    #[test]
+    fn account_restore_cannot_verify_a_previously_armed_update() {
+        let dir = scopeguard::guard(
+            std::env::temp_dir().join(format!("tono-update-restore-{}", nanoid::nanoid!())),
+            |path| { let _ = std::fs::remove_dir_all(path); },
+        );
+        let path = journal_path(&dir);
+        // Updating from Protected Offline is not Connected, but still needs
+        // a freshly verified protected connection before the journal can commit.
+        let mut journal = prepare("0.0.72", "0.0.73", 9, false, true);
+        journal.phase = UpdateHandoffPhase::ProtectionResuming;
+        update_journal::write_atomic(&path, &journal).unwrap();
+        let protected = std::fs::read(&path).unwrap();
+        assert!(!commit_after_account_restore_at(&path, "0.0.73", true).unwrap());
+        assert_eq!(std::fs::read(&path).unwrap(), protected);
+        assert!(commit_verified_recovery(&path, "0.0.73").unwrap());
+        assert!(!path.exists());
+
+        journal = prepare("0.0.72", "0.0.73", 10, false, false);
+        journal.phase = UpdateHandoffPhase::FirstLaunchMigration;
+        update_journal::write_atomic(&path, &journal).unwrap();
+        let unprotected = std::fs::read(&path).unwrap();
+        assert!(!commit_after_account_restore_at(&path, "0.0.73", false).unwrap());
+        assert_eq!(std::fs::read(&path).unwrap(), unprotected);
+        assert!(commit_after_account_restore_at(&path, "0.0.73", true).unwrap());
+        assert!(!path.exists());
     }
 
     #[test]

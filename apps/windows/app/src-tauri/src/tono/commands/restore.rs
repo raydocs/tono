@@ -308,11 +308,12 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
                 // current-owner runtime, then schedule the ordinary fully verified replacement;
                 // the restore task does not await that potentially long connection transaction.
                 connection::schedule_startup_resume_if_proven(&state, &app, generation).await;
-                if crate::tono::update_handoff::load_pending()
-                    .is_some_and(|journal| !journal.was_connected)
-                {
-                    crate::tono::update_handoff::commit_if_verified(env!("CARGO_PKG_VERSION"));
-                }
+                // Protected Offline was not Connected, but its update still
+                // needs verification by the new connection, not just me().
+                crate::tono::update_handoff::commit_after_account_restore(
+                    env!("CARGO_PKG_VERSION"),
+                    matches!(protection, StoredProtection::ProvenAbsent),
+                );
                 crate::tono::telemetry::spawn_periodic_for_auth_generation(&state, &app, generation)
                     .await;
                 crate::tono::log_upload::spawn_periodic_for_auth_generation(
