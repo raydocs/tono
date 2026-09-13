@@ -28,13 +28,13 @@
 macOS xcresult：`Test-Tono-2026.09.13_04-23-37--0600.xcresult`。
 Windows 上 `FileIdInfo` / WFP 分支仍需 native CI 和真机；本地可移植测试不是实机证明。
 
-## 仍阻止客户 release
+## 未完成项与客户发布门
 
 1. G1：Windows 连接、仪表盘/Activity、断开 DNS 回收，以及 macOS 新 Helper 的真机验收未完成。
 2. G2：日志服务端采集授权窗口的真实存储/读取未验；不移除 `stored:false` 授权门。
-3. G3 / #26：更新准备的 Core/DNS 后置条件、受保护交接所有权仍有缺口；Windows/macOS 旧版升级实机未验。
-4. hy2 的实时 roster 新增/撤销/空名单尚未同步到 HTTP 鉴权；Marina 仍不发布目录；自动切换保持关闭。
-5. route-byte 失败累计区间与固定 22 分钟 windowStart 不一致；Servers 提示完成过早；DIRECT reload 暂时仍显示 Connected。这些尚未修复，不能混写为零 bug。
+3. G3 / #26：DNS 失败误记清理成功、Protected Offline 更新跳过清理已由 #157 窄修；真实 Core/DNS 后置条件和跨进程交接仍须 Windows/macOS 旧版升级验收。
+4. hy2 的实时 roster 新增/撤销/空名单已补代码与实际 loopback HTTP 回归（#157）；尚未部署节点并验证真实 systemd / Hysteria，Marina 仍不发布目录，自动切换保持关闭。
+5. **P2，不自动升格为发布阻断：** route-byte 失败累计区间与固定 22 分钟 windowStart 不一致；Servers 提示完成过早；DIRECT reload 暂时仍显示 Connected。这些尚未修复，不能混写为零 bug。
 
 可以跑 CI 和构建**内部候选安装包**，但不升 0.0.73、不改 appcast、不推 windows-updates、不发布客户 release。
 #137/#138 随 #147 集成，不单独重复合入；#26/#80 保持打开。
@@ -45,3 +45,12 @@ Windows 上 `FileIdInfo` / WFP 分支仍需 native CI 和真机；本地可移�
 `49e8b2bb` 的 Services CI 通过；macOS 全套 280 tests（1 skip）发现新增 busy 提示漏了中文翻译，已补 `Localizable.xcstrings`，不跳过本地化覆盖测试。对应本地账户/归属/本地化专项 **58 / 58** 通过。
 同时把归属激活提前到身份验证成功、首次目录/运行时请求之前，避免最需要诊断的首次连接失败落成无归属记录；Windows App **471 / 471** 再次通过。
 首个内部 Windows candidate 已主动取消，避免提供旧 SHA 安装包；新 SHA 重新跑 CI / candidate，仍不发布客户版本。
+
+
+## 确定缺陷窄修（#157）
+
+DNS 恢复失败不再写 CleanShutdownCompleted / ProtectedHandoffRecorded；失败后的 Protected Offline 更新重试不再跳过 Core / DNS 清理。hy2 鉴权名单跟随已验证 roster，新增、撤销和空名单同路径处理，写失败不 ACK，静态同步不能覆盖 agent-managed 名单。
+
+独立 PR **#157 已合 main `d7578ff5`**；30 项 CI 检查通过，Windows 原生 App 443 tests，Service / WFP 检查通过，macOS 269 tests（1 skip），exit-agent 80 tests。详细边界与证据见 [窄修记录](NARROW_G2_G3_FIXES_2026-09-13.md)。
+
+旧集成 head `a99b29be` 的内部 Windows candidate [34752141440](https://github.com/raydocs/tono/actions/runs/34752141440) 已成功，但**不包含 #157**，不作为本轮最终安装机验收包；后续候选必须核对新的集成 SHA。线上节点未部署，客户更新源未改，#147 仍等待真实日志存储/读取及客户端验收。

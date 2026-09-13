@@ -12,6 +12,8 @@
 不可变重试及 Windows 文件身份轮转已补回归，不能只凭本地单测过门。
 证据与未决项见 [本轮审计](reports/RELEASE_READINESS_2026-09-13.md) 与
 [续修记录](reports/RELEASE_FIXES_2026-09-13.md)。
+#157 已合 main `d7578ff5`：DNS 失败与 Protected Offline 更新重试的清理漏洞、hy2 实时 roster 写入已补窄回归并过原生 CI。
+节点部署、真实日志存储/读取与安装机验收仍未完成；不据此关闭 G1–G3。见[窄修证据](reports/NARROW_G2_G3_FIXES_2026-09-13.md)。
 
 ---
 
