@@ -250,6 +250,7 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
                 if inner.sign_in_generation != generation {
                     return;
                 }
+                state.audit().activate_log_upload_owner(&me.user.id);
                 inner.account = Some(me.user);
                 inner.account_state = if info.suspended {
                     AccountState::Suspended

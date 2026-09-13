@@ -167,6 +167,51 @@ final class AccountSessionRequestTests: XCTestCase {
         account.state = .ready
     }
 
+    func testNoStoreLogReceiptReportsFailureAndRetainsTheUploadCursor() async throws {
+        let (account, transport, host, requests) = fixture()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer {
+            transport.invalidateAndCancel()
+            HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let log = directory.appendingPathComponent("audit.jsonl")
+        try Data("{\"a\":1}\n".utf8).write(to: log)
+        try await adoptTestAccount(account)
+        let api = account.api
+        let uploader = DiagnosticsLogUploader(
+            auditLogURL: log,
+            isEnabled: { true },
+            upload: { payload, session, sequence, lines, version, os in
+                _ = try await api.uploadDiagnosticsLogSegment(
+                    payload: payload, sessionID: session, sequence: sequence,
+                    lineCount: lines, clientVersion: version, osVersion: os
+                )
+            }
+        )
+        let first = Task { await uploader.sweep() }
+        let declined = try await nextRequest(requests)
+        XCTAssertEqual(declined.request.url?.path, "/api/v1/diagnostics/logs")
+        declined.respond(status: 200, body: #"{"segment":{"id":"not-stored","receivedAt":1},"stored":false,"reason":"not_enabled"}"#)
+        guard case .failed = await first.value else {
+            return XCTFail("HTTP success without storage must not be shown as uploaded")
+        }
+        let retry = Task { await uploader.sweep() }
+        let accepted = try await nextRequest(requests)
+        XCTAssertEqual(accepted.request.value(forHTTPHeaderField: "X-Tono-Log-Sequence"), declined.request.value(forHTTPHeaderField: "X-Tono-Log-Sequence"))
+        XCTAssertEqual(accepted.request.value(forHTTPHeaderField: "X-Tono-Log-Lines"), "1")
+        // Stored receipts from older deployments have no `stored` field.
+        accepted.respond(status: 201, body: #"{"segment":{"id":"stored-segment","receivedAt":2}}"#)
+        guard case .uploaded = await retry.value else {
+            return XCTFail("the declined segment must remain available for retry")
+        }
+        guard case .idle = await uploader.sweep() else {
+            return XCTFail("only the stored receipt may consume the segment")
+        }
+    }
+
     func testLateEntitlementFailureDoesNotSuspendSignedOutAccount() async throws {
         let (account, transport, host, requests) = fixture()
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }

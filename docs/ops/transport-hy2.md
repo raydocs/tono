@@ -1,5 +1,26 @@
 # Hysteria2 三网证明（T0）
 
+## 2026-09-13 补充：Panstar Marina 单机已通，仍非家宽三网证明
+
+用户另指定 `vm-jPZp8D` / #7012 / `144.225.255.114`（目录基名 `Los Angeles · Marina`）。
+ego-lite 只增加 IPv4 入站 UDP 443，防火墙保持 Enabled / Synced，原规则不变。
+实际 Debian 11；原拒绝来自安装器平台名单，不是二进制不兼容。hy2 补装路径现增加
+systemd ≥247 / Python ≥3.9 / OpenSSL SAN / 已校验二进制可执行性检查，未扩大 Reality 安装范围。
+
+- Hysteria v2.12.2，部署 ID `20260913T080226Z-727a8909`，非 root 服务 UDP 443。
+- SAN/SNI/masquerade：`www.ucla.edu`，证书钉扎，不跳过 TLS 验证；未更换其它节点证书。
+- 43 个既有身份全部认证成功、随机身份拒绝；Xray PID 707990 和配置 SHA 全程不变。
+- 产品生成的隔离 Mihomo 配置：fake-IP DNS、Google/YouTube、出口 IP 校验通过；5/5 独立握手，
+  错误 pin 拒绝；持续下载 8 MiB / 31.99 秒 / HTTP 200；服务零重启。
+- 这只是当前运维 Mac 的外部路径，不可填成电信/联通/移动家宽结论。自动切换仍关。
+- 官方目录只读 r54 / 19 条，19→20 条追加 dry-run 通过，**未 PUT**。当前 hy2 授权表是静态
+  身份快照；实时 roster 新增/撤销/清空尚未同步。修完该安全边界再提交目录发布审批。
+
+完整证据、凭据清理及回滚见[本轮审计](../reports/RELEASE_READINESS_2026-09-13.md#panstar-7012-单机测试)。
+下文是 9 月 10–11 日历史试验，平台“不选”与“目录仍不塞块”不能覆盖上述新实测或当前 r54。
+
+---
+
 选定节点（2026-09-10，Panstar 机队）。口令不写在这里。
 
 | 角色 | 实例 | 产品 | IPv4 | 系统 | 为什么选它 |
@@ -191,4 +212,3 @@ rm -rf "$dir"
 | sunset.yaml | `Los Angeles · Sunset · hy2` | `192.236.205.232` | `0ff3ab6b1bec3a3766f88955a84064ae73ea4724cb4d8602780e06dfbceceeb7` |
 | mesa.yaml | `Los Angeles · Mesa · hy2` | `107.174.123.27` | `f59731347bf068d79f9d9e78c074e4686b981383a5c9029a5650e703e6afba41` |
 | grove.yaml | `US-VLESS-Reality · hy2` | `198.12.84.154` | `a4a8308980004c8a5cda98597b87986671f230445df863c23d380f012c72f909` |
-
