@@ -395,10 +395,8 @@ pub async fn restore_session_guarded(app: AppHandle, state: Arc<TonoState>) {
 
     load_credentials(&state).await;
     crate::tono::bootstrap::hydrate_learned_pins_from_service().await;
-    {
-        let inner = state.lock().await;
-        let _ = inner.client.transport().refresh_control_plane_pins().await;
-    }
+    let client = { Arc::clone(&state.lock().await.client) };
+    let _ = client.transport().refresh_control_plane_pins().await;
     let outcome = std::panic::AssertUnwindSafe(restore_session(app.clone(), state.clone()))
         .catch_unwind()
         .await;

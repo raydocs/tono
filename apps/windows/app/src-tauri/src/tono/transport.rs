@@ -453,7 +453,9 @@ impl HttpTransport for TonoTransport {
         }
 
         let pinned = {
-            let client = self.client.read().await;
+            // Each attempt keeps its own pool/pin snapshot. Publishing fresh pins must not
+            // wait for a slow response, nor cancel or replay an already delivered request.
+            let client = self.client.read().await.clone();
             self.attempt(&client, &request).await
         };
         let Err(ApiError::Transport { kind, message }) = pinned else {
@@ -510,6 +512,52 @@ mod tests {
         should_retry_transport,
     };
 
+
+    /// A pending response owns a client snapshot, not the lock used to publish new pins.
+    #[tokio::test]
+    async fn pin_refresh_finishes_before_an_in_flight_http_response() {
+        use std::sync::Arc;
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let transport = Arc::new(TonoTransport::new().unwrap());
+        let request = tokio::spawn({
+            let transport = Arc::clone(&transport);
+            async move {
+                transport.send(ApiRequest {
+                    method: HttpMethod::Get,
+                    url: format!("http://{address}/"),
+                    bearer: None,
+                    json_body: None,
+                    binary_body: None,
+                    headers: Vec::new(),
+                }).await
+            }
+        });
+        let mut stream = tokio::time::timeout(Duration::from_secs(2), async {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut header = Vec::new();
+            while !header.ends_with(b"\r\n\r\n") {
+                header.push(stream.read_u8().await.unwrap());
+                assert!(header.len() < 4096);
+            }
+            stream
+        }).await.expect("the real HTTP attempt must reach the fixture");
+        assert!(!request.is_finished(), "the fixture has not sent a response");
+
+        tokio::time::timeout(Duration::from_secs(2), transport.refresh_control_plane_pins())
+            .await
+            .expect("pin publication must not wait for unrelated HTTP I/O")
+            .expect("rebuild pinned client");
+        assert!(!request.is_finished(), "refresh must not cancel the old request");
+        stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi")
+            .await.unwrap();
+        let response = tokio::time::timeout(Duration::from_secs(2), request)
+            .await.unwrap().unwrap().unwrap();
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, b"hi");
+    }
 
     /// Whether something in the network path accepts a connection to an address
     /// that must not be reachable.
