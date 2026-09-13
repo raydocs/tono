@@ -7,6 +7,14 @@
 
 **这一发的产品版本号是 0.0.73。** 0.0.72 的 GitHub 标签已经存在且未进更新源；门 1–3 的代码合入 `main` 时仍可停留在 0.0.72，冻结提交再升到 0.0.73 再打标签、再推源。
 
+**2026-09-13 集成审计：** B0 已确认新安装的原始网络日志默认开启，保留已有关闭值。
+#137/#138 已随 #147 普通合入 `main` `c318d5b1`；账户/授权 scope、未存储回执、
+不可变重试及 Windows 文件身份轮转已补回归。合并 head 的 30 项 CI 全绿，但不等于真机发布门已过。
+证据与未决项见 [本轮审计](reports/RELEASE_READINESS_2026-09-13.md) 与
+[续修记录](reports/RELEASE_FIXES_2026-09-13.md)。
+#157 已合 main `d7578ff5`：DNS 失败与 Protected Offline 更新重试的清理漏洞、hy2 实时 roster 写入已补窄回归并过原生 CI。
+节点部署、真实日志存储/读取与安装机验收仍未完成；不据此关闭 G1–G3。见[窄修证据](reports/NARROW_G2_G3_FIXES_2026-09-13.md)。
+
 ---
 
 ## 0. 一句话与四条门
@@ -46,12 +54,12 @@
 - Windows 更新日记：`prepare` 停在 `UpdatePrepared`；所有者按相位推进；`commit_verified_recovery` 才允许删日记。`--replace-runtime` 写 `InstallStarted`（App 不再猜）。真机 G3.3 之前不算过门。
 - 客户更新源：`services/control-plane/public/appcast.xml` 0.0.67；`public/windows/latest.json` 0.0.34。
 
-**已开、未合、这一发要用的分支**
+**本轮客户端分支（#137/#138 已随 #147 合并）**
 
 | PR / 分支 | 内容 | 合入条件 |
 |---|---|---|
-| #137 `client/macos-phase-3.5` | 连接日志上传、断开字节、`bytesByRoute`、隐私文案 | 老板拍板「默认开还是关」后本机看一眼；Worker 合同已在 #135 |
-| #138 `client/windows-phase-3.5`（叠在 `client/windows-phase-1.5` 上） | 同上 + Windows 1.5 失败即报 | Windows 机器 `cargo test` + 打包；#137 口径必须一致 |
+| #137 `client/macos-phase-3.5` | 连接日志上传、断开字节、`bytesByRoute`、隐私文案 | 已合 main；默认开与已知日志安全修复经 CI 验证，真实采集回执仍需验收 |
+| #138 `client/windows-phase-3.5`（叠在 `client/windows-phase-1.5` 上） | 同上 + Windows 1.5 失败即报 | 已合 main；原生 App 464 tests 通过，内部打包与实机验收不等于客户发布 |
 | #116 | 瞬态 desired-state 读失败不拆健康 Core | G1 |
 | #117 | Owner monitor 把可读的 `NotActive` 当传输失败 | G1 |
 | 更早的 `client/windows-connection-contract` | 被 1.5/3.5 叠住 | 不要单独合，随 #138 |
@@ -81,7 +89,7 @@
 
 ## 3. 只有老板能做的（agent 遇到就停）
 
-1. 拍板连接日志「默认开还是关」（B0）。不拍板，#137/#138 不准合。
+1. B0 连接日志新安装默认开已于 2026-09-13 确认；已有关闭值不覆盖。服务端设备采集授权窗口不因此自动取消。
 2. Windows 11 真机：编 #138、跑 `cargo test`、装候选包、走 G1 与 G3 清单。云端 Linux agent 不能代替 WFP。
 3. macOS 真机：Developer ID、公证、Sparkle EdDSA、`tooling/scripts/verify-release-gate.sh /path/to/Tono.app`、Helper 安装。
 4. hy2 三网证明（T0）：在 **vm-Gk43AX**（东京 JP Plus，`45.8.173.206`）手工装 hysteria2，电信/联通/移动各 5 次握手 + 30 秒下载；同一套配置再在 **vm-nvLHV3**（洛杉矶，`144.225.255.38`）各测一轮。结果写 `docs/ops/transport-hy2.md`。不通就执行 §2.6 的降级，不要让 agent 猜。
@@ -98,13 +106,15 @@
 ### B0 · 冻结口径（先做，否则 3.5 与 hy2 会打架）— 老板 · S
 
 - 目标：两个决定写进本文件本节，作为后续 PR 的前提。
-- 决定 A：连接日志默认开 / 关。开 → #137/#138 按现状合，发布说明写「可在设置关闭」。关 → 两 PR 把默认改成关再合，隐私文案跟着改。**尚未拍。**
+- 决定 A：**默认开启（老板于 2026-09-13 确认）**，用于排查国内网络不稳定与掉线。#137/#138 必须先修复审查发现并通过验证；新安装默认开，已有明确或无法区分来源的关闭值保留，设置可关闭。原始网络日志与默认关闭的保护快照独立授权，文案不得混淆。
 - 决定 B：hy2 目标节点。**已拍（2026-09-10，Panstar 机队表）：**
   1. **vm-Gk43AX** — 东京 JP Plus Nano，`45.8.173.206`，Debian 13，1C/512MB，流量几乎空（约 0.15%）。三网直连线路，用来证明大陆 UDP。
   2. **vm-nvLHV3** — 洛杉矶 LAXPre Nano，`144.225.255.38`，Debian 12，1C/1024MB，流量几乎空（约 0.09%）。另一条大洲路径，同一商家，用来区分「GFW 拦 UDP」和「这一家机房不给 UDP」。
 - 不选：JP Lite（不是三网直连、5GB 盘、18 天到期）；Ubuntu 26.04 / Debian 11（provisioner 合同外）；洛杉矶用量最高的那台（约 54 GB，先别在忙机上做实验）。目录名以控制面 `catalog_name` 为准，机队表只有实例名。
 - T0 不通的运营商不做自动切换。SSH 口令只留在 Notion / 钥匙串，**不准进仓库、不准进本文件**。
-- 验收：决定 B 已写。决定 A 仍空时，#137/#138 仍不准合；T0 / G2.5 可以按上面两台开工。
+- 2026-09-13 测试机补充：老板指定当前 Panstar 账号的洛杉矶 `vm-jPZp8D`（#7012，`144.225.255.114`）。仅此实例 IPv4 入站 UDP 443 经 ego-lite 放行并确认 Synced。Debian 11 经能力与官方二进制实测后已补装 hy2 v2.12.2，SAN/SNI/masquerade 为 `www.ucla.edu`；现有 Xray PID/配置均未改。隔离客户端 DNS、Google/YouTube、5/5 新进程握手、32 秒下载与错误 pin 拒绝通过。现行目录 r54 的 Marina VLESS front 为 Chapman，19→20 条追加 dry-run 通过但**未发布**：hy2 身份快照尚不跟随实时 roster 增删，先关闭该授权缺口。详见[审计证据](reports/RELEASE_READINESS_2026-09-13.md#panstar-7012-单机测试)。
+- 验收：A/B 均已有决定；#137/#138 代码审计修复已随 #147 合并，仍须完成真实采集与真机验收。新测试机不替代家宽三网 T0。
+- 2026-09-13 上线预检补充：Marina 的 hy2 / auth / VLESS 仍运行，Xray PID 未变；现场没有 exit-agent/timer，控制面也没有 Marina agent 注册。为避免把 G2 修复变成 #4/#5 计量迁移，使用显式 `--hy2-roster-only` 模式，只同步鉴权名单，不改 Xray、不写 usage、不发整节点 ACK。注册与节点修改单独获得批准后执行；预检不是部署成功。
 
 ---
 

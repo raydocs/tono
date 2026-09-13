@@ -548,11 +548,26 @@ pub struct TelemetryEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bytes: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes_up: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes_down: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wanted: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub live: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transport: Option<String>,
+}
+
+/// Bytes attributed to each route over one telemetry window (a delta since the
+/// previous successful upload, not a lifetime total). Keys are the only ones
+/// the Worker accepts: `cloud`, `residential`, `direct`.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BytesByRoute {
+    pub cloud: u64,
+    pub residential: u64,
+    pub direct: u64,
 }
 
 /// Whitelisted periodic timeline window body.
@@ -591,6 +606,14 @@ pub struct TelemetryWindowReport {
     pub tcp_delay_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tcp_delay_at_ms: Option<i64>,
+    /// Named rather than guessed from `os_version` on the Worker; the guess is
+    /// for clients that predate the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<String>,
+    /// Window delta of bytes by route. Omitted when the client has no ledger
+    /// snapshot. The Worker refuses any key other than `cloud`/`residential`/`direct`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes_by_route: Option<BytesByRoute>,
     pub event_count: u32,
     pub events_dropped: u32,
     pub events: Vec<TelemetryEvent>,
@@ -742,6 +765,9 @@ pub struct DiagnosticsLogSegment<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct DiagnosticsLogReceipt {
     pub segment: DiagnosticsLogReceiptSegment,
+    /// Older stored receipts omit this field. An explicit no-store response is
+    /// not an acknowledgement, even though its HTTP status is successful.
+    pub stored: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -829,6 +855,9 @@ struct AuthState {
     /// Bumped on every successful refresh so a waiter can tell a fresh
     /// token from the one its request failed with.
     epoch: u64,
+    /// Unlike token refresh, adopt/logout invalidate raw-log ownership. Never
+    /// replay the previous account's payload using a replacement account token.
+    identity_epoch: u64,
 }
 
 /// Account API client (§1): Bearer injection, one refresh-and-retry on 401,
@@ -867,6 +896,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         state.access_token = Some(auth.access_token.clone());
         state.access_token_expiry = access_token_expiry_unix(&auth.access_token);
         state.epoch += 1;
+        state.identity_epoch = state.identity_epoch.wrapping_add(1);
         Ok(())
     }
 
@@ -1097,6 +1127,22 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         &self,
         segment: DiagnosticsLogSegment<'_>,
     ) -> Result<DiagnosticsLogReceipt, ApiError> {
+        let identity = self.diagnostics_log_identity().await;
+        self.upload_diagnostics_log_segment_for_identity(segment, identity).await
+    }
+
+    /// Capture while the app's account-generation lock still owns the payload.
+    /// Refreshing this same account does not change its identity epoch.
+    pub async fn diagnostics_log_identity(&self) -> u64 {
+        self.state.lock().await.identity_epoch
+    }
+
+    pub async fn upload_diagnostics_log_segment_for_identity(
+        &self,
+        segment: DiagnosticsLogSegment<'_>,
+        identity: u64,
+    ) -> Result<DiagnosticsLogReceipt, ApiError> {
+        self.ensure_log_identity(identity).await?;
         if segment.gzip.len() < 2 || segment.gzip[0] != 0x1f || segment.gzip[1] != 0x8b {
             return Err(ApiError::InvalidInput(
                 "diagnostics log segment must be gzip".to_string(),
@@ -1139,11 +1185,20 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
                     bytes: segment.gzip.to_vec(),
                 },
                 headers,
+                identity,
             )
             .await?;
         let receipt: DiagnosticsLogReceipt = decode_json(&response)?;
         if receipt.segment.id.trim().is_empty() {
             return Err(ApiError::InvalidResponse);
+        }
+        if receipt.stored == Some(false) || receipt.segment.id == "not-stored" {
+            return Err(ApiError::Server {
+                // The diagnostics no-store contract is HTTP 200, not a
+                // transport/authentication failure that should refresh tokens.
+                status: 200,
+                message: "Tono did not store this network log. Check the device's diagnostic collection authorization.".to_string(),
+            });
         }
         Ok(receipt)
     }
@@ -1160,6 +1215,10 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
 
     /// Best-effort server logout, then local token wipe (§2).
     pub async fn logout(&self) {
+        {
+            let mut state = self.state.lock().await;
+            state.identity_epoch = state.identity_epoch.wrapping_add(1);
+        }
         // Gate on "a session exists", not on "an access token is cached". A process that
         // never completed an authorized call — offline at startup, or a refresh that failed
         // on transport — holds a valid refresh token and no access token, and the old gate
@@ -1231,8 +1290,11 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         path: &str,
         body: BinaryBody,
         headers: Vec<(String, String)>,
+        identity_epoch: u64,
     ) -> Result<Vec<u8>, ApiError> {
+        self.ensure_log_identity(identity_epoch).await?;
         let (token, epoch) = self.current_access_token().await?;
+        self.ensure_log_identity(identity_epoch).await?;
         let build = |bearer: &str| ApiRequest {
             method: HttpMethod::Post,
             url: format!("{}/{API_PREFIX}{path}", self.base_url),
@@ -1241,7 +1303,9 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
             binary_body: Some(body.clone()),
             headers: headers.clone(),
         };
-        match map_status(self.transport.send(build(&token)).await?) {
+        let result = map_status(self.transport.send(build(&token)).await?);
+        self.ensure_log_identity(identity_epoch).await?;
+        match result {
             Err(ApiError::Unauthorized) => {
                 let mut state = self.state.lock().await;
                 if state.epoch == epoch {
@@ -1250,10 +1314,20 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
                 }
                 drop(state);
                 let renewed = self.refresh_access_token(epoch).await?;
-                map_status(self.transport.send(build(&renewed)).await?)
+                self.ensure_log_identity(identity_epoch).await?;
+                let replay = map_status(self.transport.send(build(&renewed)).await?);
+                self.ensure_log_identity(identity_epoch).await?;
+                replay
             }
             result => result,
         }
+    }
+
+    async fn ensure_log_identity(&self, expected: u64) -> Result<(), ApiError> {
+        if self.state.lock().await.identity_epoch != expected {
+            return Err(ApiError::Unauthorized);
+        }
+        Ok(())
     }
 
     /// Concurrent refreshes coalesce: the first caller through
@@ -1617,6 +1691,70 @@ mod tests {
         assert_eq!(headers.get("X-Tono-Log-Lines").unwrap(), "42");
         assert_eq!(headers.get("X-Tono-Log-Client-Version").unwrap(), "0.0.30");
         assert_eq!(headers.get("X-Tono-Log-Os-Version").unwrap(), "Windows 11 26100");
+    }
+
+    #[tokio::test]
+    async fn an_http_success_without_log_storage_is_not_an_acknowledgement() {
+        let (client, mock, _store) = test_client(|_| {
+            json(200, r#"{"segment":{"id":"not-stored","receivedAt":1786500000},"stored":false,"reason":"not_enabled"}"#)
+        });
+        client.adopt(&auth_response("access", Some("refresh"))).await.unwrap();
+        let result = client
+            .upload_diagnostics_log_segment(log_segment(&[0x1f, 0x8b, 0x08], "no-store"))
+            .await;
+        assert!(matches!(result, Err(ApiError::Server { status: 200, message }) if message.contains("did not store")));
+        assert_eq!(mock.count_to("diagnostics/logs"), 1);
+    }
+
+    #[tokio::test]
+    async fn a_log_bound_to_a_replaced_identity_is_not_dispatched() {
+        let (client, mock, _store) = test_client(|_| panic!("old log must not reach transport"));
+        client.adopt(&auth_response("old-access", Some("old-refresh"))).await.unwrap();
+        let identity = client.diagnostics_log_identity().await;
+        client.adopt(&auth_response("new-access", Some("new-refresh"))).await.unwrap();
+        let result = client.upload_diagnostics_log_segment_for_identity(
+            log_segment(&[0x1f, 0x8b, 0x08], "old-session"), identity,
+        ).await;
+        assert_eq!(result, Err(ApiError::Unauthorized));
+        assert!(mock.requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_late_log_401_is_not_replayed_with_the_replacement_accounts_token() {
+        #[derive(Default)]
+        struct HeldLog {
+            started: tokio::sync::Notify,
+            release: tokio::sync::Notify,
+            requests: Mutex<Vec<ApiRequest>>,
+        }
+        #[async_trait]
+        impl HttpTransport for HeldLog {
+            async fn send(&self, request: ApiRequest) -> Result<ApiResponse, ApiError> {
+                self.requests.lock().unwrap().push(request);
+                self.started.notify_one();
+                self.release.notified().await;
+                json(401, "{}")
+            }
+        }
+        let transport = Arc::new(HeldLog::default());
+        let client = Arc::new(ApiClient::new(
+            "https://api.example.test", transport.clone(), Arc::new(MemoryCredentialStore::new()),
+        ).unwrap());
+        client.adopt(&auth_response("old-access", Some("old-refresh"))).await.unwrap();
+        let upload_client = client.clone();
+        let upload = tokio::spawn(async move {
+            upload_client.upload_diagnostics_log_segment(log_segment(&[0x1f, 0x8b, 0x08], "old-session")).await
+        });
+        tokio::time::timeout(Duration::from_secs(2), transport.started.notified()).await.unwrap();
+        let mut replacement = auth_response("replacement-access", Some("replacement-refresh"));
+        replacement.user.id = "replacement-account".to_string();
+        client.adopt(&replacement).await.unwrap();
+        transport.release.notify_one();
+        let result = tokio::time::timeout(Duration::from_secs(2), upload).await.unwrap().unwrap();
+        assert_eq!(result, Err(ApiError::Unauthorized));
+        let sent = transport.requests.lock().unwrap();
+        assert_eq!(sent.len(), 1, "previous account's raw log must never be replayed");
+        assert_eq!(sent[0].bearer.as_deref(), Some("old-access"));
     }
 
     #[tokio::test]
@@ -2732,5 +2870,124 @@ mod tests {
             "stale refresh must not overwrite the new session"
         );
         assert_eq!(mock.count_to("auth/refresh"), 1);
+    }
+}
+
+#[cfg(test)]
+mod connect_failure_report_tests {
+    use super::*;
+
+    #[test]
+    fn a_window_names_its_platform_only_when_set() {
+        let report = TelemetryWindowReport {
+            schema_version: TELEMETRY_SCHEMA_VERSION,
+            kind: TELEMETRY_KIND_PERIODIC_WINDOW.to_string(),
+            window_start_ms: 0,
+            window_end_ms: 1,
+            app_version: "0.0.73".to_string(),
+            os_version: "Windows 11".to_string(),
+            os_arch: "x86_64".to_string(),
+            ui_state: "connected".to_string(),
+            account_state: "ready".to_string(),
+            selected_server: None,
+            catalog_revision: None,
+            kill_switch_mode: None,
+            kill_switch_wanted: None,
+            kill_switch_live: None,
+            dns_enabled: None,
+            exit_delay_ms: None,
+            exit_delay_at_ms: None,
+            tcp_delay_ms: None,
+            tcp_delay_at_ms: None,
+            platform: Some("windows".to_string()),
+            bytes_by_route: None,
+            event_count: 0,
+            events_dropped: 0,
+            events: Vec::new(),
+        };
+        let value = serde_json::to_value(&report).unwrap();
+        assert_eq!(value["platform"], "windows");
+        let unnamed = TelemetryWindowReport { platform: None, ..report };
+        assert!(serde_json::to_value(&unnamed).unwrap().get("platform").is_none());
+    }
+
+    #[test]
+    fn a_disconnect_event_names_bytes_up_and_down_only_when_set() {
+        let event: TelemetryEvent = serde_json::from_value(serde_json::json!({
+            "ts": 1,
+            "kind": "disconnectOk",
+            "elapsedMs": 1500,
+            "bytesUp": 11,
+            "bytesDown": 22,
+        }))
+        .unwrap();
+        let value = serde_json::to_value(&event).unwrap();
+        assert_eq!(value["bytesUp"], 11);
+        assert_eq!(value["bytesDown"], 22);
+        assert_eq!(value["elapsedMs"], 1500);
+        let unnamed = TelemetryEvent {
+            bytes_up: None,
+            bytes_down: None,
+            elapsed_ms: None,
+            ..event
+        };
+        let omitted = serde_json::to_value(&unnamed).unwrap();
+        assert!(omitted.get("bytesUp").is_none());
+        assert!(omitted.get("bytesDown").is_none());
+        assert!(omitted.get("elapsedMs").is_none());
+    }
+
+    #[test]
+    fn a_window_names_bytes_by_route_only_when_set() {
+        let report = TelemetryWindowReport {
+            schema_version: TELEMETRY_SCHEMA_VERSION,
+            kind: TELEMETRY_KIND_PERIODIC_WINDOW.to_string(),
+            window_start_ms: 0,
+            window_end_ms: 1,
+            app_version: "0.0.73".to_string(),
+            os_version: "Windows 11".to_string(),
+            os_arch: "x86_64".to_string(),
+            ui_state: "connected".to_string(),
+            account_state: "ready".to_string(),
+            selected_server: None,
+            catalog_revision: None,
+            kill_switch_mode: None,
+            kill_switch_wanted: None,
+            kill_switch_live: None,
+            dns_enabled: None,
+            exit_delay_ms: None,
+            exit_delay_at_ms: None,
+            tcp_delay_ms: None,
+            tcp_delay_at_ms: None,
+            platform: Some("windows".to_string()),
+            bytes_by_route: Some(BytesByRoute {
+                cloud: 1,
+                residential: 2,
+                direct: 3,
+            }),
+            event_count: 0,
+            events_dropped: 0,
+            events: Vec::new(),
+        };
+        let value = serde_json::to_value(&report).unwrap();
+        let object = value["bytesByRoute"].as_object().expect("bytesByRoute object");
+        let accepted = ["cloud", "residential", "direct"];
+        assert_eq!(object.len(), 3);
+        for key in object.keys() {
+            assert!(accepted.contains(&key.as_str()), "unexpected key {key}");
+        }
+        assert_eq!(object["cloud"], 1);
+        assert_eq!(object["residential"], 2);
+        assert_eq!(object["direct"], 3);
+        let unnamed = TelemetryWindowReport {
+            bytes_by_route: None,
+            ..report
+        };
+        assert!(
+            serde_json::to_value(&unnamed)
+                .unwrap()
+                .get("bytesByRoute")
+                .is_none()
+        );
     }
 }

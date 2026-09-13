@@ -30,14 +30,44 @@ enum SettingsKey {
         "networkLogUploadEnabled"
     nonisolated static let networkLogDefaultV2Applied =
         "networkLogDefaultV2Applied"
+    nonisolated static let networkLogDefaultV3Applied =
+        "networkLogDefaultV3Applied"
+    /// Explicit choices made by new clients; older clients did not write this key.
+    nonisolated static let networkLogUploadUserChosen =
+        "networkLogUploadUserChosen"
 
-    nonisolated static func isNetworkLogUploadEnabled() -> Bool {
-        if !AppProfile.defaults.bool(forKey: networkLogDefaultV2Applied) {
-            AppProfile.defaults.set(false, forKey: networkLogUploadEnabled)
-            AppProfile.defaults.set(true, forKey: networkLogDefaultV2Applied)
-            return false
+    /// Default for installations with no stored preference, never an opt-out override.
+    nonisolated static let networkLogUploadDefault = true
+
+    /// Whether the raw audit log may be uploaded.
+    ///
+    /// A legacy stored false may be an explicit opt-out. Absence of the new
+    /// user-chosen marker cannot prove otherwise, so preserve every stored choice.
+    ///
+    /// `defaults` is injectable so a test can exercise the migrations without
+    /// writing into the running user's real preferences.
+    nonisolated static func isNetworkLogUploadEnabled(
+        defaults: UserDefaults = AppProfile.defaults
+    ) -> Bool {
+        if defaults.object(forKey: networkLogUploadEnabled) == nil {
+            defaults.set(networkLogUploadDefault, forKey: networkLogUploadEnabled)
         }
-        return AppProfile.defaults.bool(forKey: networkLogUploadEnabled)
+        defaults.set(true, forKey: networkLogDefaultV2Applied)
+        defaults.set(true, forKey: networkLogDefaultV3Applied)
+        return defaults.bool(forKey: networkLogUploadEnabled)
+    }
+
+    /// The only write the Settings switch may make.
+    ///
+    /// Deliberately not reachable from an `onChange` on the stored value: the
+    /// v3 migration writes that key while Settings can be on screen, AppStorage
+    /// republishes it, and the flip would be recorded as the user's own choice.
+    nonisolated static func setNetworkLogUploadEnabled(
+        _ enabled: Bool,
+        defaults: UserDefaults = AppProfile.defaults
+    ) {
+        defaults.set(enabled, forKey: networkLogUploadEnabled)
+        defaults.set(true, forKey: networkLogUploadUserChosen)
     }
     /// Whether a crash from the previous run may be named in the diagnostic
     /// snapshot this client already sends every twenty minutes.

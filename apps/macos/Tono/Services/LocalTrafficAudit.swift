@@ -181,11 +181,14 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
             enabled,
             forKey: SettingsKey.localTrafficAuditEnabled
         )
+        DiagnosticsLogOwnership.shared.consentChanged()
+        let uploadScope = DiagnosticsLogOwnership.shared.currentScope()
         queue.async { [self] in
             enqueue(
                 kind: enabled ? "audit_enabled" : "audit_disabled",
                 fields: [:],
-                force: true
+                force: true,
+                uploadScope: uploadScope
             )
             if !enabled {
                 flushPending()
@@ -322,10 +325,11 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
 
     func recordEvent(_ event: String, details: [String: String] = [:]) {
         guard Self.isEnabled else { return }
+        let uploadScope = DiagnosticsLogOwnership.shared.currentScope()
         queue.async { [self] in
             var fields = details
             fields["event"] = event
-            enqueue(kind: "protection_event", fields: fields)
+            enqueue(kind: "protection_event", fields: fields, uploadScope: uploadScope)
         }
     }
 
@@ -461,6 +465,7 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
         let values = entries.map {
             CoreAuditEntry(level: $0.level, message: $0.message)
         }
+        let uploadScope = DiagnosticsLogOwnership.shared.currentScope()
         queue.async { [self] in
             for entry in values {
                 let routeClassification = Self.classifyCoreRouteLog(entry.message)
@@ -507,7 +512,8 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
                             "event": "managed_direct_group_failed_over",
                             "group": group,
                             "route": String(entry.message.suffix(160)),
-                        ]
+                        ],
+                        uploadScope: uploadScope
                     )
                 }
                 let network = entry.message.first == "["
@@ -520,7 +526,8 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
                         "message": entry.message,
                         "network": network,
                         "route_classification": routeClassification,
-                    ]
+                    ],
+                    uploadScope: uploadScope
                 )
             }
         }
@@ -535,6 +542,7 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
         let researchEnabled = Self.isClaudeTrafficResearchEnabled
         let appResearchEnabled = AppRoutingResearch.isCollectionActive
         guard localAuditEnabled || researchEnabled || appResearchEnabled else { return }
+        let uploadScope = DiagnosticsLogOwnership.shared.currentScope()
         queue.async { [self] in
             guard residentialContext == residentialRouteContext else { return }
             if appResearchEnabled && AppRoutingResearch.isCollectionActive {
@@ -645,7 +653,8 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
                         } ?? "none",
                         "runtime_config_digest":
                             residentialContext?.runtimeConfigDigest ?? "none",
-                    ]
+                    ],
+                    uploadScope: uploadScope
                 )
             }
         }

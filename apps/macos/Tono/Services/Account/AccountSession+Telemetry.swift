@@ -69,9 +69,15 @@ extension AccountSession {
             }
             return
         }
-        if diagnosticsLogUploader == nil {
+        guard let user,
+              let scope = DiagnosticsLogOwnership.shared.activate(owner: user.id) else { return }
+        if diagnosticsLogUploader?.scopeID != scope {
+            if let previous = diagnosticsLogUploader { Task { await previous.stop() } }
             let api = self.api
             diagnosticsLogUploader = DiagnosticsLogUploader(
+                scopeID: scope,
+                ownership: .shared,
+                isEnabled: { DiagnosticsLogOwnership.shared.isCurrent(scope) },
                 upload: { payload, sessionID, sequence, lineCount, clientVersion, osVersion in
                     _ = try await api.uploadDiagnosticsLogSegment(
                         payload: payload,
@@ -79,7 +85,8 @@ extension AccountSession {
                         sequence: sequence,
                         lineCount: lineCount,
                         clientVersion: clientVersion,
-                        osVersion: osVersion
+                        osVersion: osVersion,
+                        requestIsCurrent: { DiagnosticsLogOwnership.shared.isCurrent(scope) }
                     )
                 }
             )
@@ -90,16 +97,20 @@ extension AccountSession {
     }
 
     func abandonDiagnosticsLogUploader() async {
+        DiagnosticsLogOwnership.shared.abandon()
         guard let uploader = diagnosticsLogUploader else { return }
         await uploader.abandonUnsentForAccountSwitch()
         diagnosticsLogUploader = nil
     }
 
     func networkLogUploadSettingChanged() {
+        DiagnosticsLogOwnership.shared.consentChanged()
         updateDiagnosticsLogUploading()
     }
 
     func periodicTelemetrySettingChanged() {
+        routeTelemetryCursor.reset(to: routeSplitConsumer())
+        _ = ConnectionTelemetryBuffer.shared.drain()
         updatePeriodicTelemetry()
     }
 
@@ -111,6 +122,10 @@ extension AccountSession {
     /// than "this device is online" and more than any other Privacy row on the
     /// Settings screen describes.
     func updatePeriodicTelemetry() {
+        routeTelemetryCursor.setEnabled(
+            state == .ready && user != nil && Self.isPeriodicTelemetryEnabled,
+            current: routeSplitConsumer()
+        )
         guard state == .ready, !systemSleeping, user != nil,
               Self.isPeriodicTelemetryEnabled else {
             periodicTelemetryTask?.cancel()
@@ -167,6 +182,17 @@ extension AccountSession {
         }
         let osArch = Self.osArch
         let path = pathLatencyConsumer()
+        // Snapshotted before the post, not read again after it: the ledger
+        // keeps moving while the request is in flight, and advancing the
+        // baseline to a later value than the one that was actually reported
+        // would drop whatever arrived in between.
+        let routeSplit = routeSplitConsumer()
+        let routeEpoch = routeTelemetryCursor.epoch
+        let accountRevision = accountReadRevision
+        let bytesByRoute = AppTrafficLedger.windowDelta(
+            from: routeTelemetryCursor.baseline,
+            to: routeSplit
+        )
         let window = TonoTelemetryWindowReport(
             schemaVersion: 1,
             kind: "periodic_window",
@@ -189,13 +215,23 @@ extension AccountSession {
             tcpDelayMs: path.tcpDelayMs,
             exitDelayAtMs: path.exitDelayAtMs,
             tcpDelayAtMs: path.tcpDelayAtMs,
+            // Sent on every window, zeros included: a missing object has to
+            // stay readable as "an older client", not as "no traffic".
+            bytesByRoute: bytesByRoute,
             eventCount: drained.events.count,
             eventsDropped: drained.dropped,
             events: drained.events
         )
         do {
             _ = try await api.uploadTelemetryWindow(window)
+            // Only a window the Worker accepted may move the baseline. A
+            // failure leaves it where it was, so the next window reports the
+            // same bytes plus whatever came after — counted once, in a window
+            // that then spans longer than the 22 minutes it claims.
+            guard !Task.isCancelled, accountReadRevision == accountRevision else { return }
+            routeTelemetryCursor.acknowledge(routeSplit, epoch: routeEpoch)
         } catch TonoAPIClient.APIError.unauthorized {
+            guard !Task.isCancelled, accountReadRevision == accountRevision else { return }
             await fail(
                 TonoAPIClient.APIError.unauthorized,
                 signsOutOnUnauthorized: true
@@ -282,6 +318,8 @@ extension AccountSession {
     /// "the run finished" left a failed upload indistinguishable from a sent one.
     @discardableResult
     func uploadDiagnosticsLogNow() async -> DiagnosticsLogUploader.SweepOutcome {
+        guard state == .ready, !systemSleeping, user != nil,
+              LocalTrafficAudit.isEnabled, SettingsKey.isNetworkLogUploadEnabled() else { return .disabled }
         updateDiagnosticsLogUploading()
         // `updateDiagnosticsLogUploading` only builds the uploader once the
         // account, sleep and consent preconditions hold. A nil one is therefore
@@ -507,7 +545,14 @@ extension AccountSession {
     }
 
     func clearAccount() {
+        DiagnosticsLogOwnership.shared.abandon()
         invalidateAccountReads()
+        // Re-anchor on the way out: the ledger's counter outlives the account,
+        // so without this the first window of the next account to sign in here
+        // would carry the previous account's unreported tail.
+        routeTelemetryCursor.setEnabled(false, current: routeSplitConsumer())
+        routeTelemetryCursor.reset(to: routeSplitConsumer())
+        _ = ConnectionTelemetryBuffer.shared.drain()
         // Managed exits carry this account's own client identity, so they are
         // dropped here rather than being left for the next account to connect
         // with. Idempotent: the logout and account-loss paths already purged.
