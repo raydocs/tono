@@ -184,7 +184,17 @@ nonisolated struct UpdateHandoffJournal: Codable, Equatable, Sendable {
     }
 
     func canAdvance(to phase: UpdateHandoffPhase) -> Bool {
-        Self.allowedNext(self.phase, phase)
+        guard Self.allowedNext(self.phase, phase) else { return false }
+        // The shortcut edges belong only to updates with no matching protection
+        // obligation; Protected Offline is not an unprotected update.
+        switch (self.phase, phase) {
+        case (.cleanShutdownCompleted, .installStarted):
+            return !keepKillSwitchArmed
+        case (.firstLaunchMigration, .verified):
+            return !wasConnected && !keepKillSwitchArmed
+        default:
+            return true
+        }
     }
 
     /// True when the last advance was refused rather than recording a real
@@ -199,7 +209,7 @@ nonisolated struct UpdateHandoffJournal: Codable, Equatable, Sendable {
     /// the rest of the handoff and persisted a state the update never reached.
     func advancing(to phase: UpdateHandoffPhase, errorCode: String? = nil, errorStage: String? = nil) -> UpdateHandoffJournal {
         var next = self
-        if Self.allowedNext(self.phase, phase) {
+        if canAdvance(to: phase) {
             next.phase = phase
             next.lastErrorCode = errorCode
             next.lastErrorStage = errorStage

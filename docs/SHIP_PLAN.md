@@ -79,7 +79,7 @@
 
 1. **四条门是发布门，不是愿望清单。** 任何 PR 说明必须写它服务 G1–G4 的哪一条；写不上来的不合进这一发的集成分支。
 2. **禁止提前推客户源。** 在 G1–G3 证据齐之前，不得改 `public/appcast.xml`、不得推 `windows-updates`、不得把 GitHub release 从 prerelease 改成客户频道。`tooling/scripts/release-macos.sh` 与 Windows 发布脚本只打内部候选。
-3. **版本。** 门 1–3 的开发提交保持 0.0.72。冻结提交一次性改：`apps/macos/Tono.xcodeproj/project.pbxproj` 的 `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`、`apps/windows/app/package.json`、`apps/windows/app/src-tauri/Cargo.toml`，以及 `python3 tooling/scripts/verify-desktop-version.py --expected-version 0.0.73`。夹具里的 `0.0.72` 示例不必全改，那是演示数据。
+3. **版本。** 门 1–3 的开发提交保持 0.0.72。冻结提交一次性改：`apps/macos/Tono.xcodeproj/project.pbxproj` 的 `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`、`apps/windows/app/package.json`、`apps/windows/app/src-tauri/Cargo.toml`，以及 `python3 tooling/scripts/verify-desktop-version.py --expected 0.0.73`。夹具里的 `0.0.72` 示例不必全改，那是演示数据。
 4. **目录合同。** 托管目录仍然只有 Tono 签发的出口。hy2 是同一节点的第二块，名字后缀 ` · hy2`（中间是空格+间隔号+空格）。展示名、判定、退役都折叠到基名。禁止为 hy2 另开一套节点身份。
 5. **保护面不得放宽。** hy2 只把 **那一个** `(IPv4, hy2_port, UDP)` 放进 PF/WFP 允许集；禁止 `skip-cert-verify`；禁止非公开 IPv4；Windows `admit_node` 与 macOS `validatedOwnedNode` 只**增** hy2 分支，不删 VLESS Reality 约束。
 6. **hy2 自动切换的前提是三网 UDP 证明。** 任一运营商完全不通 → 目录仍可带块，客户端只提供手动选择，开关默认关，发布说明写「本版备用通道仅手动」。禁止在未证明时做自动切换。
@@ -329,7 +329,7 @@ macOS Sparkle 没有 NSIS，仍由 `installHandler` 在静默断开之后写 `In
 
 - 升版本号（§2.3）。写 `apps/macos/release-notes/build73.md` 与 `apps/windows/release-notes/0.0.73.md`，中英或中文与现有系列一致。
 - 发布说明必须包含：已知局限（无手机/Linux；Windows 可能 SmartScreen；hy2 自动或仅手动，引用 `transport-hy2.md`；睡眠恢复若未认证就写未认证）。**不要**承诺银行 3DS / 全部 Secure DNS。
-- 跑 `verify-desktop-version.py --expected-version 0.0.73` 与稳定性脚本。
+- 跑 `verify-desktop-version.py --expected 0.0.73` 与稳定性脚本。
 
 **G4.2 内部设备** — 老板 · S
 

@@ -1250,10 +1250,12 @@ fn record_install_started_on_journal(path: &Path) -> std::io::Result<bool> {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0);
-    if matches!(
-        phase.as_str(),
-        "cleanShutdownCompleted" | "protectedHandoffRecorded"
-    ) {
+    // Only an explicitly unprotected update may omit the handoff phase.
+    // Missing/malformed protection metadata is not evidence that WFP is absent.
+    let can_start = phase == "protectedHandoffRecorded"
+        || (phase == "cleanShutdownCompleted"
+            && value.get("keepKillSwitchArmed").and_then(serde_json::Value::as_bool) == Some(false));
+    if can_start {
         value["phase"] = serde_json::Value::String("installStarted".into());
         value["updatedAtUnix"] = serde_json::Value::from(now);
         write_update_handoff_atomic(path, &value)?;
@@ -2168,6 +2170,35 @@ mod tests {
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(again["phase"], "installStarted");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn installer_cannot_skip_a_required_or_unknown_protected_handoff() {
+        let dir = std::env::temp_dir().join(format!("tono-install-protected-shortcut-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("update-handoff.json");
+        let mut value = serde_json::json!({
+            "schemaVersion": 1,
+            "phase": "cleanShutdownCompleted",
+            "nextAppVersion": "0.0.73",
+            "wasConnected": false,
+            "keepKillSwitchArmed": true
+        });
+        write_update_handoff_atomic(&path, &value).unwrap();
+        assert!(!record_install_started_on_journal(&path).unwrap());
+        let failed: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(failed["phase"], "failed");
+        assert_eq!(failed["lastErrorCode"], "TONO_JOURNAL_ILLEGAL_PHASE");
+
+        // An incomplete legacy journal is not affirmative evidence of no protection.
+        value.as_object_mut().unwrap().remove("keepKillSwitchArmed");
+        write_update_handoff_atomic(&path, &value).unwrap();
+        assert!(!record_install_started_on_journal(&path).unwrap());
+
+        value["keepKillSwitchArmed"] = serde_json::Value::Bool(false);
+        write_update_handoff_atomic(&path, &value).unwrap();
+        assert!(record_install_started_on_journal(&path).unwrap(), "genuinely unprotected installs still work");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
