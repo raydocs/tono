@@ -24,7 +24,7 @@ import { usePrivacy } from '@/lib/privacy';
 export function ChoreList({ rows }: { rows: readonly Chore[] }) {
   if (rows.length === 0) return <Empty message={copy.noChores} />;
   return (
-    <ul className="flex flex-col">
+    <ul className="today-chore-list flex flex-col">
       {rows.map((chore) => (
         <ChoreRow key={chore.id} chore={chore} />
       ))}

@@ -87,6 +87,9 @@
   --tone-bg: var(--unk-bg);
 
   --radius: 10px;
+
+  --shadow-card: 0 1px 2px rgb(20 20 19 / 0.05), 0 8px 24px rgb(20 20 19 / 0.06);
+  --shadow-card-lg: 0 2px 4px rgb(20 20 19 / 0.05), 0 16px 40px rgb(20 20 19 / 0.09);
 }
 
 .dark {
@@ -117,6 +120,9 @@
   --unk-fg: 216 16% 72%;
   --unk-line: 216 12% 50%;
   --unk-bg: 220 16% 24% / 0.55;
+
+  --shadow-card: 0 1px 0 rgb(255 255 255 / 0.05), 0 16px 40px rgb(0 0 0 / 0.45);
+  --shadow-card-lg: 0 1px 0 rgb(255 255 255 / 0.06), 0 24px 56px rgb(0 0 0 / 0.5);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
