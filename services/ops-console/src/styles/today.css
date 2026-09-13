@@ -159,6 +159,7 @@
 .today-page .today-tabs {
   display: inline-flex;
   align-items: center;
+  align-self: flex-start;
   gap: 2px;
   max-width: 100%;
   overflow-x: auto;
@@ -304,6 +305,12 @@
   border-top: 1px solid var(--hairline);
 }
 
+.today-page .worthwhile-row + .worthwhile-row {
+  margin-top: 4px;
+  padding-top: 9px;
+  border-top: 1px solid var(--hairline);
+}
+
 .today-page .today-worthwhile-card {
   padding: 14px 16px;
   border-radius: var(--today-radius);
@@ -330,13 +337,6 @@
 /* ------------------------------------------------------------------ phone */
 
 @media (max-width: 1023px) {
-  /* The workbench first: tabs and actions precede the morning read below the
-   * desktop breakpoint, so the first primary action stays on the first phone
-   * screen. DOM order is unchanged; the desktop grid places explicitly. */
-  .today-main {
-    order: -1;
-  }
-
   .today-hero {
     grid-template-columns: minmax(0, 1fr);
     gap: 18px;

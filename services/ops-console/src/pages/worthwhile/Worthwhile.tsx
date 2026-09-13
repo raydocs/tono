@@ -23,17 +23,19 @@ export function Worthwhile({ data }: { data: WorthwhileDto | undefined }) {
 
 function Pick({ pick, label }: { pick: WorthwhilePickDto; label: string }) {
   return (
-    <div className="worthwhile-row flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+    <div className="worthwhile-row flex min-w-0 flex-col gap-1 py-1">
       <span className="min-w-0 text-body">{sentenceOf(pick, label)}</span>
-      <span className="text-micro text-[var(--muted-foreground)]">{payoffText(pick.payoff)}</span>
-      <span className="ops-tag shrink-0">{confidenceWord(pick.confidence)}</span>
-      <button
-        type="button"
-        className="shrink-0 text-body underline-offset-4 hover:underline"
-        onClick={() => go(pick)}
-      >
-        {copy.worthwhileGo}
-      </button>
+      <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="text-micro text-[var(--muted-foreground)]">{payoffText(pick.payoff)}</span>
+        <span className="ops-tag shrink-0">{confidenceWord(pick.confidence)}</span>
+        <button
+          type="button"
+          className="ml-auto shrink-0 text-body underline-offset-4 hover:underline"
+          onClick={() => go(pick)}
+        >
+          {copy.worthwhileGo}
+        </button>
+      </span>
     </div>
   );
 }
