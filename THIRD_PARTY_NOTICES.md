@@ -18,8 +18,9 @@ contributors and is distributed under the BSD 3-Clause License. The complete
 license is available in the pinned source at `LICENSE` and at
 <https://github.com/tailscale/tailscale/blob/main/LICENSE>.
 
-No binary is committed by this integration. Build both executables from the
-pinned, verified source, then codesign them with the same team used for the app
+Prebuilt sidecar resources in this repository are generated from the pinned,
+verified source. Rebuild both executables together with a pin update, then
+codesign them with the same team used for the app
 before signing/archiving the outer app. Hardened-runtime, entitlement and
 notarization validation must include both nested executables. Tono runs them as
 an unprivileged app child; it is separate from Tono's root Mihomo helper.
