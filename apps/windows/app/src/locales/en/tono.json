@@ -357,7 +357,7 @@
     "refresh": "Refresh",
     "refreshing": "Refreshing…",
     "refreshSuccess": "Cloud servers are up to date.",
-    "switchedTo": "Switched to {{name}}",
+    "switchRequested": "Switch to {{name}} requested",
     "cloudServers": "Cloud nodes",
     "empty": "No servers available",
     "timeout": "Timeout",

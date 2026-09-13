@@ -16,12 +16,14 @@ import enShared from '@/locales/en/shared.json'
 import enTono from '@/locales/en/tono.json'
 import type { TonoServer } from '@/services/tono'
 
-const { serversMock, selectServerMock, connectMock, mutateTonoStatusMock } = vi.hoisted(
+const { serversMock, selectServerMock, connectMock, mutateTonoStatusMock, toastMock, uiStateMock } = vi.hoisted(
   () => ({
     serversMock: vi.fn(),
     selectServerMock: vi.fn(),
     connectMock: vi.fn(),
     mutateTonoStatusMock: vi.fn(),
+    toastMock: vi.fn(),
+    uiStateMock: vi.fn(),
   }),
 )
 vi.mock('@/services/tono', async (original) => ({
@@ -41,11 +43,11 @@ vi.mock('@/services/states', () => ({ useThemeMode: () => 'dark' }))
 vi.mock('@/hooks/use-tono', () => ({
   tonoServersQueryKey: ['tono', 'servers'],
   useTonoStatus: () => ({
-    status: { uiState: 'notConnected', accountState: 'ready' },
+    status: { uiState: uiStateMock(), accountState: 'ready' },
     mutateTonoStatus: mutateTonoStatusMock,
   }),
 }))
-vi.mock('@/tono-ui/tono-toast-context', () => ({ useTonoToast: () => vi.fn() }))
+vi.mock('@/tono-ui/tono-toast-context', () => ({ useTonoToast: () => toastMock }))
 
 import ServersPage from './servers'
 
@@ -59,6 +61,7 @@ beforeEach(() => {
   selectServerMock.mockResolvedValue(undefined)
   connectMock.mockResolvedValue(undefined)
   mutateTonoStatusMock.mockResolvedValue(undefined)
+  uiStateMock.mockReturnValue('notConnected')
 })
 afterEach(cleanup)
 
@@ -199,6 +202,19 @@ it('shows an in-flight spinner on the chosen card and disables the others until 
     expect(screen.queryByText('Connecting')).toBeNull()
     expect((east as HTMLButtonElement).disabled).toBe(false)
   })
+})
+
+it('acknowledges a dispatched switch without claiming the new exit is connected', async () => {
+  uiStateMock.mockReturnValue('connected')
+  serversMock.mockResolvedValue([
+    { name: 'Tokyo · Sakura', server: 'a.test', port: 443, selected: true, available: true },
+    { name: 'Los Angeles · Sunset', server: 'b.test', port: 443, selected: false, available: true },
+  ])
+  renderPage()
+  fireEvent.click(await screen.findByRole('button', { name: /Los Angeles/ }))
+  await waitFor(() => expect(toastMock).toHaveBeenCalledWith('Switch to Los Angeles requested'))
+  expect(selectServerMock).toHaveBeenCalledWith('Los Angeles · Sunset')
+  expect(connectMock).not.toHaveBeenCalled()
 })
 
 it('lets the user pick the hy2 sibling and labels it as the backup channel', async () => {

@@ -147,10 +147,11 @@ const ServersPage = () => {
         // is UpdateOnly. The card already says Connecting; actually connect.
         if (idleSelectShouldConnect(status?.uiState)) await tonoConnect()
         await Promise.all([mutateServers(), mutateTonoStatus()])
+        // Select acknowledges dispatch; a hot/cold switch may still be running.
         // Announce the localized city the card shows, not the raw wire name —
         // otherwise the toast says "Tokyo · Dawn" over a card labelled 东京.
         showToast(
-          t('tono.nodes.switchedTo', {
+          t('tono.nodes.switchRequested', {
             name: nodeCityLabel(name, t),
           }),
         )
