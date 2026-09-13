@@ -357,7 +357,7 @@
     "refresh": "刷新",
     "refreshing": "正在刷新…",
     "refreshSuccess": "节点列表已是最新。",
-    "switchedTo": "已切换到 {{name}}",
+    "switchRequested": "已请求切换到 {{name}}",
     "cloudServers": "云端节点",
     "empty": "暂无可用节点",
     "timeout": "超时",

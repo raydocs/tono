@@ -1244,7 +1244,7 @@ export interface TranslationResources {
         }
         search: string
         subtitle: string
-        switchedTo: string
+        switchRequested: string
         tcpLatency: string
         tcpLatencySlow: string
         testAll: string
