@@ -505,6 +505,9 @@ Function CheckVCRuntime64
 FunctionEnd
 
 
+; Keep in sync with service/src/bin/install_service/update_journal.rs.
+!define TONO_JOURNAL_GATE_REJECTED_EXIT_CODE 76
+
 !macro StartVergeService
   ; The per-machine installer is already elevated, so create/repair the Service here instead
   ; of forcing the first Connect through a second UAC prompt. The helper also waits for the
@@ -549,6 +552,12 @@ FunctionEnd
       Goto serviceInstallAttempt
     ${EndIf}
     Abort "A ${PRODUCTNAME} Service repair is still in progress. Wait for it to finish (or reboot Windows), then run this installer again."
+  ${ElseIf} $0 == ${TONO_JOURNAL_GATE_REJECTED_EXIT_CODE}
+    ; This refusal happens before the helper changes the runtime/Service. Never
+    ; retry it as a transient file lock: a rejected phase may now be Failed,
+    ; which a second invocation would interpret as a manual repair, not a handoff.
+    StrCpy $ServiceInstallAttempted 0
+    Abort "Tono update handoff could not be verified or saved. Service/runtime replacement was refused. Reopen Tono and prepare the update again; journal evidence was kept."
   ${ElseIf} $0 != "0"
     ; A generic helper failure during an upgrade is most often a transient lock held by the
     ; running Service/core (file-in-use, SCM stop race, IPC readiness window) — customers hit
