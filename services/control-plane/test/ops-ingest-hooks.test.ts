@@ -153,6 +153,34 @@ describe('ops ingest hooks', () => {
     expect((await api('telemetry/windows', json(negative, account.token))).status).toBe(400);
   });
 
+  it('keeps a retried route-byte interval separate from the heartbeat window and advertises support', async () => {
+    const account = await seedAccount('route-interval');
+    const body = telemetryWindow();
+    const window = body.window as Record<string, unknown>;
+    const interval = { startMs: body.window.windowEndMs - 8 * 60 * 60 * 1000, endMs: body.window.windowEndMs };
+    window.bytesByRoute = { cloud: 1500, residential: 0, direct: 42 };
+    window.routeBytesInterval = interval;
+    const response = await api('telemetry/windows', json(body, account.token));
+    expect(response.status).toBe(201);
+    const receipt = await response.json() as { id: string; routeBytesIntervalVersion: number };
+    expect(receipt.routeBytesIntervalVersion).toBe(1);
+    const stored = await db().prepare('SELECT payload_json FROM telemetry_windows WHERE id = ?')
+      .bind(receipt.id).first<{ payload_json: string }>();
+    expect(JSON.parse(stored?.payload_json ?? '{}')).toMatchObject({
+      windowStartMs: body.window.windowStartMs, windowEndMs: body.window.windowEndMs,
+      routeBytesInterval: interval, bytesByRoute: window.bytesByRoute,
+    });
+    window.routeBytesInterval = { startMs: interval.endMs + 1, endMs: interval.endMs };
+    expect((await api('telemetry/windows', json(body, account.token))).status).toBe(400);
+    window.routeBytesInterval = interval;
+    delete window.bytesByRoute;
+    expect((await api('telemetry/windows', json(body, account.token))).status).toBe(400);
+    delete window.routeBytesInterval;
+    const legacy = await api('telemetry/windows', json(body, account.token));
+    expect(legacy.status).toBe(201);
+    expect(await legacy.json()).toMatchObject({ routeBytesIntervalVersion: 1 });
+  });
+
   it('a disconnectOk event carries bytes in each direction, and nothing else is let through', async () => {
     const account = await seedAccount('bytes');
     const body = telemetryWindow();

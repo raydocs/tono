@@ -12,7 +12,7 @@ use serde_json::Value;
 use tauri::AppHandle;
 use tono_core::auth::{
     ApiError, BytesByRoute, ConnectFailureReport, TELEMETRY_KIND_PERIODIC_WINDOW, TELEMETRY_SCHEMA_VERSION,
-    UNKNOWN_CLASSIFIED_FAILURE, TelemetryEvent, TelemetryWindowReport,
+    TelemetryEvent, TelemetryWindowReport, UNKNOWN_CLASSIFIED_FAILURE,
 };
 
 use tono_logging::{Type, logging};
@@ -297,20 +297,29 @@ async fn upload_once(state: &Arc<TonoState>, generation: u64) -> Result<(), ApiE
     let bytes = serde_json::to_vec(&report).map(|v| v.len()).unwrap_or(0) as u32;
     let event_count = report.event_count;
     match client.upload_telemetry_window(&report).await {
-        Ok(_receipt) => {
-            // Advance the bytesByRoute baseline only after a 2xx so a failed
-            // window is retried with the same delta rather than losing those bytes.
+        Ok(receipt) => {
             let inner = state.lock().await;
             if inner.sign_in_generation != generation || !state.audit().periodic_telemetry_enabled() {
                 return Ok(());
             }
-            state.route_ledger().lock().acknowledge_snapshot(uploaded_totals, baseline_epoch);
+            state.route_ledger().lock().acknowledge_snapshot(
+                uploaded_totals,
+                baseline_epoch,
+                report.route_bytes_interval,
+                receipt.route_bytes_interval_version,
+            );
             state
                 .audit()
                 .log(AuditEvent::PeriodicTelemetryUploaded { event_count, bytes });
             Ok(())
         }
         Err(err) => {
+            if matches!(err, ApiError::Server { status: 400, .. }) && report.route_bytes_interval.is_some() {
+                let inner = state.lock().await;
+                if inner.sign_in_generation == generation && state.audit().periodic_telemetry_enabled() {
+                    state.route_ledger().lock().forget_interval_support(baseline_epoch);
+                }
+            }
             state
                 .audit()
                 .log(AuditEvent::PeriodicTelemetryUploadFail { error: err.to_string() });
@@ -320,7 +329,19 @@ async fn upload_once(state: &Arc<TonoState>, generation: u64) -> Result<(), ApiE
 }
 
 async fn build_window_report(state: &Arc<TonoState>) -> Result<(TelemetryWindowReport, BytesByRoute, u64), String> {
-    let now_ms = epoch_ms();
+    // Capture counters and their end time together, before any HTTP/IO await.
+    let (now_ms, bytes_by_route, route_bytes_interval, uploaded_totals, baseline_epoch) = {
+        let ledger = state.route_ledger().lock();
+        let now_ms = epoch_ms();
+        let interval = ledger.interval_at(now_ms);
+        (
+            now_ms,
+            interval.map(|_| ledger.window_bytes()),
+            interval,
+            ledger.overall(),
+            ledger.baseline_epoch(),
+        )
+    };
     let start_ms = now_ms.saturating_sub(PERIODIC_TELEMETRY_LOOKBACK.as_millis() as i64);
     let log_path = state.audit().log_path().to_path_buf();
     let (events, dropped) = tokio::task::spawn_blocking(move || collect_events(&log_path, start_ms, now_ms))
@@ -366,10 +387,6 @@ async fn build_window_report(state: &Arc<TonoState>) -> Result<(TelemetryWindowR
         )
     };
 
-    let (bytes_by_route, uploaded_totals, baseline_epoch) = {
-        let ledger = state.route_ledger().lock();
-        (Some(ledger.window_bytes()), ledger.overall(), ledger.baseline_epoch())
-    };
     let template = TelemetryWindowReport {
         schema_version: TELEMETRY_SCHEMA_VERSION,
         kind: TELEMETRY_KIND_PERIODIC_WINDOW.to_string(),
@@ -392,11 +409,16 @@ async fn build_window_report(state: &Arc<TonoState>) -> Result<(TelemetryWindowR
         tcp_delay_at_ms,
         platform: Some("windows".to_string()),
         bytes_by_route,
+        route_bytes_interval,
         event_count: 0,
         events_dropped: dropped,
         events: Vec::new(),
     };
-    Ok((assemble_window(events, dropped, template), uploaded_totals, baseline_epoch))
+    Ok((
+        assemble_window(events, dropped, template),
+        uploaded_totals,
+        baseline_epoch,
+    ))
 }
 
 /// Trim oldest events until the payload fits, then fall back to an empty
@@ -428,7 +450,7 @@ fn assemble_window(
     }
 }
 
-fn epoch_ms() -> i64 {
+pub(super) fn epoch_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
@@ -825,6 +847,7 @@ mod tests {
             tcp_delay_at_ms: None,
             platform: Some("windows".to_string()),
             bytes_by_route,
+            route_bytes_interval: None,
             event_count: 0,
             events_dropped: 0,
             events: Vec::new(),

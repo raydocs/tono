@@ -167,7 +167,6 @@ extension AccountSession {
         lastPeriodicTelemetryAt = now
         let pendingEvents = ConnectionTelemetryBuffer.shared.snapshot()
         let snapshot = diagnosticSnapshotConsumer()
-        let nowMs = Int64(now.timeIntervalSince1970 * 1_000)
         let uiState: String
         if snapshot.connected {
             uiState = "connected"
@@ -187,12 +186,13 @@ extension AccountSession {
         // baseline to a later value than the one that was actually reported
         // would drop whatever arrived in between.
         let routeSplit = routeSplitConsumer()
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1_000)
+        let routeInterval = routeTelemetryCursor.interval(endingAt: nowMs)
         let routeEpoch = routeTelemetryCursor.epoch
         let accountRevision = accountReadRevision
-        let bytesByRoute = AppTrafficLedger.windowDelta(
-            from: routeTelemetryCursor.baseline,
-            to: routeSplit
-        )
+        let bytesByRoute = routeInterval.map { _ in
+            AppTrafficLedger.windowDelta(from: routeTelemetryCursor.baseline, to: routeSplit)
+        }
         let window = TonoTelemetryWindowReport(
             schemaVersion: 1,
             kind: "periodic_window",
@@ -215,23 +215,28 @@ extension AccountSession {
             tcpDelayMs: path.tcpDelayMs,
             exitDelayAtMs: path.exitDelayAtMs,
             tcpDelayAtMs: path.tcpDelayAtMs,
-            // Sent on every window, zeros included: a missing object has to
-            // stay readable as "an older client", not as "no traffic".
+            // Omit both until the Worker advertises interval support. Old
+            // Workers reject unknown keys; their heartbeat must keep working.
             bytesByRoute: bytesByRoute,
+            routeBytesInterval: routeInterval,
             eventCount: pendingEvents.events.count,
             eventsDropped: pendingEvents.dropped,
             events: pendingEvents.events
         )
         do {
-            _ = try await api.uploadTelemetryWindow(window)
-            // Only a window the Worker accepted may move the baseline. A
-            // failure leaves it where it was, so the next window reports the
-            // same bytes plus whatever came after — counted once, in a window
-            // that then spans longer than the 22 minutes it claims.
+            let receipt = try await api.uploadTelemetryWindow(window)
             guard !Task.isCancelled, accountReadRevision == accountRevision,
-                  periodicTelemetryConsent() else { return }
+                  periodicTelemetryConsent(),
+                  !receipt.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             ConnectionTelemetryBuffer.shared.acknowledge(pendingEvents)
-            routeTelemetryCursor.acknowledge(routeSplit, epoch: routeEpoch)
+            routeTelemetryCursor.acknowledge(
+                routeSplit, epoch: routeEpoch, interval: routeInterval,
+                intervalVersion: receipt.routeBytesIntervalVersion
+            )
+        } catch TonoAPIClient.APIError.server(status: 400, message: _) {
+            guard !Task.isCancelled, accountReadRevision == accountRevision,
+                  periodicTelemetryConsent(), routeInterval != nil else { return }
+            routeTelemetryCursor.forgetIntervalSupport(epoch: routeEpoch)
         } catch TonoAPIClient.APIError.unauthorized {
             guard !Task.isCancelled, accountReadRevision == accountRevision else { return }
             await fail(
