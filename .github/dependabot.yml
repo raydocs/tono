@@ -15,6 +15,19 @@ updates:
         patterns: ["*"]
     labels: [dependencies, control-plane]
 
+  # ops2 is built from this package, not from control-plane/admin. Keep its
+  # lockfile under the same weekly coverage as the Worker and clients.
+  - package-ecosystem: npm
+    directory: /services/ops-console
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Shanghai
+    groups:
+      ops-console:
+        patterns: ["*"]
+
   - package-ecosystem: npm
     directory: /apps/windows/app
     schedule:
