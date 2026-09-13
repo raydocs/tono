@@ -5673,6 +5673,16 @@
         }
       }
     },
+    "Tono did not store this network log. Check the device's diagnostic collection authorization.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 未保存此网络日志。请检查此设备的诊断采集授权。"
+          }
+        }
+      }
+    },
     "Tono does not expose the protected route to LAN clients.": {
       "localizations": {
         "zh-Hans": {

@@ -187,7 +187,7 @@ actor TonoAPIClient {
         clientVersion: String,
         osVersion: String
     ) async throws -> TonoDiagnosticsLogSegmentResponse {
-        try await authorizedRequest(
+        let receipt: TonoDiagnosticsLogSegmentResponse = try await authorizedRequest(
             "diagnostics/logs",
             method: "POST",
             bodyData: payload,
@@ -200,6 +200,13 @@ actor TonoAPIClient {
                 "X-Tono-Log-Os-Version": osVersion,
             ]
         )
+        guard receipt.wasStored else {
+            throw APIError.server(
+                status: 200,
+                message: String(localized: "Tono did not store this network log. Check the device's diagnostic collection authorization.")
+            )
+        }
+        return receipt
     }
 
     func uploadTelemetryWindow(

@@ -765,6 +765,9 @@ pub struct DiagnosticsLogSegment<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct DiagnosticsLogReceipt {
     pub segment: DiagnosticsLogReceiptSegment,
+    /// Older stored receipts omit this field. An explicit no-store response is
+    /// not an acknowledgement, even though its HTTP status is successful.
+    pub stored: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -852,6 +855,9 @@ struct AuthState {
     /// Bumped on every successful refresh so a waiter can tell a fresh
     /// token from the one its request failed with.
     epoch: u64,
+    /// Unlike token refresh, adopt/logout invalidate raw-log ownership. Never
+    /// replay the previous account's payload using a replacement account token.
+    identity_epoch: u64,
 }
 
 /// Account API client (§1): Bearer injection, one refresh-and-retry on 401,
@@ -890,6 +896,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         state.access_token = Some(auth.access_token.clone());
         state.access_token_expiry = access_token_expiry_unix(&auth.access_token);
         state.epoch += 1;
+        state.identity_epoch = state.identity_epoch.wrapping_add(1);
         Ok(())
     }
 
@@ -1168,6 +1175,14 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         if receipt.segment.id.trim().is_empty() {
             return Err(ApiError::InvalidResponse);
         }
+        if receipt.stored == Some(false) || receipt.segment.id == "not-stored" {
+            return Err(ApiError::Server {
+                // The diagnostics no-store contract is HTTP 200, not a
+                // transport/authentication failure that should refresh tokens.
+                status: 200,
+                message: "Tono did not store this network log. Check the device's diagnostic collection authorization.".to_string(),
+            });
+        }
         Ok(receipt)
     }
 
@@ -1183,6 +1198,10 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
 
     /// Best-effort server logout, then local token wipe (§2).
     pub async fn logout(&self) {
+        {
+            let mut state = self.state.lock().await;
+            state.identity_epoch = state.identity_epoch.wrapping_add(1);
+        }
         // Gate on "a session exists", not on "an access token is cached". A process that
         // never completed an authorized call — offline at startup, or a refresh that failed
         // on transport — holds a valid refresh token and no access token, and the old gate
@@ -1255,7 +1274,9 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         body: BinaryBody,
         headers: Vec<(String, String)>,
     ) -> Result<Vec<u8>, ApiError> {
+        let identity_epoch = self.state.lock().await.identity_epoch;
         let (token, epoch) = self.current_access_token().await?;
+        self.ensure_log_identity(identity_epoch).await?;
         let build = |bearer: &str| ApiRequest {
             method: HttpMethod::Post,
             url: format!("{}/{API_PREFIX}{path}", self.base_url),
@@ -1264,7 +1285,9 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
             binary_body: Some(body.clone()),
             headers: headers.clone(),
         };
-        match map_status(self.transport.send(build(&token)).await?) {
+        let result = map_status(self.transport.send(build(&token)).await?);
+        self.ensure_log_identity(identity_epoch).await?;
+        match result {
             Err(ApiError::Unauthorized) => {
                 let mut state = self.state.lock().await;
                 if state.epoch == epoch {
@@ -1273,10 +1296,20 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
                 }
                 drop(state);
                 let renewed = self.refresh_access_token(epoch).await?;
-                map_status(self.transport.send(build(&renewed)).await?)
+                self.ensure_log_identity(identity_epoch).await?;
+                let replay = map_status(self.transport.send(build(&renewed)).await?);
+                self.ensure_log_identity(identity_epoch).await?;
+                replay
             }
             result => result,
         }
+    }
+
+    async fn ensure_log_identity(&self, expected: u64) -> Result<(), ApiError> {
+        if self.state.lock().await.identity_epoch != expected {
+            return Err(ApiError::Unauthorized);
+        }
+        Ok(())
     }
 
     /// Concurrent refreshes coalesce: the first caller through
@@ -1640,6 +1673,57 @@ mod tests {
         assert_eq!(headers.get("X-Tono-Log-Lines").unwrap(), "42");
         assert_eq!(headers.get("X-Tono-Log-Client-Version").unwrap(), "0.0.30");
         assert_eq!(headers.get("X-Tono-Log-Os-Version").unwrap(), "Windows 11 26100");
+    }
+
+    #[tokio::test]
+    async fn an_http_success_without_log_storage_is_not_an_acknowledgement() {
+        let (client, mock, _store) = test_client(|_| {
+            json(200, r#"{"segment":{"id":"not-stored","receivedAt":1786500000},"stored":false,"reason":"not_enabled"}"#)
+        });
+        client.adopt(&auth_response("access", Some("refresh"))).await.unwrap();
+        let result = client
+            .upload_diagnostics_log_segment(log_segment(&[0x1f, 0x8b, 0x08], "no-store"))
+            .await;
+        assert!(matches!(result, Err(ApiError::Server { status: 200, message }) if message.contains("did not store")));
+        assert_eq!(mock.count_to("diagnostics/logs"), 1);
+    }
+
+    #[tokio::test]
+    async fn a_late_log_401_is_not_replayed_with_the_replacement_accounts_token() {
+        #[derive(Default)]
+        struct HeldLog {
+            started: tokio::sync::Notify,
+            release: tokio::sync::Notify,
+            requests: Mutex<Vec<ApiRequest>>,
+        }
+        #[async_trait]
+        impl HttpTransport for HeldLog {
+            async fn send(&self, request: ApiRequest) -> Result<ApiResponse, ApiError> {
+                self.requests.lock().unwrap().push(request);
+                self.started.notify_one();
+                self.release.notified().await;
+                json(401, "{}")
+            }
+        }
+        let transport = Arc::new(HeldLog::default());
+        let client = Arc::new(ApiClient::new(
+            "https://api.example.test", transport.clone(), Arc::new(MemoryCredentialStore::new()),
+        ).unwrap());
+        client.adopt(&auth_response("old-access", Some("old-refresh"))).await.unwrap();
+        let upload_client = client.clone();
+        let upload = tokio::spawn(async move {
+            upload_client.upload_diagnostics_log_segment(log_segment(&[0x1f, 0x8b, 0x08], "old-session")).await
+        });
+        tokio::time::timeout(Duration::from_secs(2), transport.started.notified()).await.unwrap();
+        let mut replacement = auth_response("replacement-access", Some("replacement-refresh"));
+        replacement.user.id = "replacement-account".to_string();
+        client.adopt(&replacement).await.unwrap();
+        transport.release.notify_one();
+        let result = tokio::time::timeout(Duration::from_secs(2), upload).await.unwrap().unwrap();
+        assert_eq!(result, Err(ApiError::Unauthorized));
+        let sent = transport.requests.lock().unwrap();
+        assert_eq!(sent.len(), 1, "previous account's raw log must never be replayed");
+        assert_eq!(sent[0].bearer.as_deref(), Some("old-access"));
     }
 
     #[tokio::test]
