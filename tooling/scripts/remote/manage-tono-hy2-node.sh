@@ -134,7 +134,14 @@ print(f"COUNT {len(seen)} {sum(1 for s in secrets if len(s) == 36)}", file=sys.s
 PY
 }
 
+refuse_managed_allowlist_sync() {
+  if [[ -f $AUTH_ALLOWLIST ]] && grep -Fxq '# tono-exit-agent roster v1' "$AUTH_ALLOWLIST"; then
+    fail "hy2 identities are owned by exit-agent; run its verified roster cycle, not static identity sync"
+  fi
+}
+
 write_allowlist() {
+  refuse_managed_allowlist_sync
   local tmp hashes count
   tmp=$(mktemp)
   hashes=$(collect_auth_secrets 2>"$tmp") || fail "could not read xray identities for hy2"
@@ -288,7 +295,8 @@ PrivateDevices=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadOnlyPaths=$AUTH_ALLOWLIST $AUTH_HTTP_PY
+# Bind the directory, not the allowlist inode: exit-agent replaces it atomically.
+ReadOnlyPaths=$INSTALL_ROOT
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictRealtime=true
 IPAddressAllow=127.0.0.1/32 ::1/128
@@ -325,6 +333,7 @@ sync_identities() {
   done
   xray_is_active || fail "tono-xray must stay running; hy2 identity sync does not replace Reality"
   hy2_is_installed || fail "tono-hy2 is not installed"
+  refuse_managed_allowlist_sync
   local conf
   conf=$(hy2_config_path) || fail "tono-hy2 config is missing"
   local xray_pid
@@ -348,7 +357,8 @@ sync_identities() {
   local count
   count=$(write_allowlist)
   systemctl daemon-reload
-  systemctl enable --now "$AUTH_SERVICE_NAME" >/dev/null 2>&1
+  systemctl enable "$AUTH_SERVICE_NAME" >/dev/null 2>&1
+  systemctl restart "$AUTH_SERVICE_NAME" >/dev/null
   wait_localhost_tcp 18765 "hy2 auth checker"
   if ! patch_hy2_config_http_auth "$conf"; then
     mv -f "$backup" "$conf"
