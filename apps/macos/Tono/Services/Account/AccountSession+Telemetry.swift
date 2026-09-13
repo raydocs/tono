@@ -150,7 +150,7 @@ extension AccountSession {
     func uploadPeriodicTelemetryWindow() async {
         // The switch can be turned off while this task is parked on its sleep,
         // and the cancellation only lands at the next suspension point.
-        guard Self.isPeriodicTelemetryEnabled else { return }
+        guard periodicTelemetryConsent() else { return }
         // A sleep cancels the timer and a wake starts a fresh one, so the task
         // being new is not evidence that a window is due. Hold the cadence
         // across restarts rather than spending the hourly budget on them.
@@ -165,7 +165,7 @@ extension AccountSession {
             return
         }
         lastPeriodicTelemetryAt = now
-        let drained = ConnectionTelemetryBuffer.shared.drain()
+        let pendingEvents = ConnectionTelemetryBuffer.shared.snapshot()
         let snapshot = diagnosticSnapshotConsumer()
         let nowMs = Int64(now.timeIntervalSince1970 * 1_000)
         let uiState: String
@@ -218,9 +218,9 @@ extension AccountSession {
             // Sent on every window, zeros included: a missing object has to
             // stay readable as "an older client", not as "no traffic".
             bytesByRoute: bytesByRoute,
-            eventCount: drained.events.count,
-            eventsDropped: drained.dropped,
-            events: drained.events
+            eventCount: pendingEvents.events.count,
+            eventsDropped: pendingEvents.dropped,
+            events: pendingEvents.events
         )
         do {
             _ = try await api.uploadTelemetryWindow(window)
@@ -228,7 +228,9 @@ extension AccountSession {
             // failure leaves it where it was, so the next window reports the
             // same bytes plus whatever came after — counted once, in a window
             // that then spans longer than the 22 minutes it claims.
-            guard !Task.isCancelled, accountReadRevision == accountRevision else { return }
+            guard !Task.isCancelled, accountReadRevision == accountRevision,
+                  periodicTelemetryConsent() else { return }
+            ConnectionTelemetryBuffer.shared.acknowledge(pendingEvents)
             routeTelemetryCursor.acknowledge(routeSplit, epoch: routeEpoch)
         } catch TonoAPIClient.APIError.unauthorized {
             guard !Task.isCancelled, accountReadRevision == accountRevision else { return }

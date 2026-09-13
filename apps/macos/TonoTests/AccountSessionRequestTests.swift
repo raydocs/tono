@@ -167,6 +167,50 @@ final class AccountSessionRequestTests: XCTestCase {
         account.state = .ready
     }
 
+    func testFailedPeriodicUploadRetainsEventsUntilOwnedSnapshotIsAcknowledged() async throws {
+        let (account, transport, host, requests) = fixture()
+        let buffer = ConnectionTelemetryBuffer.shared
+        _ = buffer.drain()
+        defer {
+            transport.invalidateAndCancel(); HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            _ = buffer.drain()
+        }
+        try await adoptTestAccount(account)
+        account.periodicTelemetryConsent = { true }
+        buffer.record("connectBegin")
+        let first = Task { await account.uploadPeriodicTelemetryWindow() }
+        let failed = try await nextRequest(requests)
+        buffer.record("connectOk")
+        failed.respond(status: 503, body: #"{"error":{"message":"offline"}}"#)
+        await first.value
+        account.lastPeriodicTelemetryAt = nil
+        let retry = Task { await account.uploadPeriodicTelemetryWindow() }
+        let accepted = try await nextRequest(requests)
+        let request = accepted.request
+        let data: Data
+        if let body = request.httpBody { data = body }
+        else {
+            let stream = try XCTUnwrap(request.httpBodyStream)
+            stream.open(); defer { stream.close() }
+            var body = Data(); var bytes = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&bytes, maxLength: bytes.count)
+                guard count > 0 else { break }
+                body.append(contentsOf: bytes.prefix(count))
+            }
+            data = body
+        }
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let window = try XCTUnwrap(json["window"] as? [String: Any])
+        let events = try XCTUnwrap(window["events"] as? [[String: Any]])
+        XCTAssertEqual(events.compactMap { $0["kind"] as? String }, ["connectBegin", "connectOk"])
+        buffer.record("disconnectOk")
+        accepted.respond(status: 201, body: #"{"id":"stored-window","receivedAt":1}"#)
+        await retry.value
+        XCTAssertEqual(buffer.drain().events.map(\.kind), ["disconnectOk"])
+    }
+
     func testNoStoreLogReceiptReportsFailureAndRetainsTheUploadCursor() async throws {
         let (account, transport, host, requests) = fixture()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
