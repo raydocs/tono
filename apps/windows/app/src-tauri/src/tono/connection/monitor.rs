@@ -107,6 +107,21 @@ pub(super) const BROWSER_DNS_RECHECK_INTERVAL: Duration = Duration::from_secs(60
 /// first minute of a session rather than one line per connection.
 pub(super) const DIRECT_SAMPLE_INTERVAL: Duration = Duration::from_secs(60);
 
+fn sample_commit_is_current(expected: (u64, u64), current: (u64, u64), connected: bool) -> bool {
+    connected && expected == current
+}
+
+#[cfg(test)]
+mod sample_commit_tests {
+    #[test]
+    fn a_replaced_controller_cannot_commit_a_late_sample_in_the_same_connection() {
+        let started = (7, 12);
+        assert!(super::sample_commit_is_current(started, started, true));
+        // In-place controller replacement need not change the connect generation.
+        assert!(!super::sample_commit_is_current(started, (7, 13), true));
+    }
+}
+
 /// Read the controller once, ingest the route ledger, record DIRECT diagnostics, and update
 /// protected-route evidence.
 ///
@@ -122,7 +137,7 @@ pub(super) async fn sample_connections_once(
     protected_seen: &mut std::collections::HashSet<u64>,
     protected_aggregate: &mut ProtectedRouteAggregate,
 ) -> bool {
-    let (secret, port) = {
+    let (secret, port, controller_generation) = {
         let inner = state.lock().await;
         // `connect_generation`, matching the sibling arms of this task. The first version
         // compared `controller_generation` — a different counter, bumped per controller setup —
@@ -132,13 +147,26 @@ pub(super) async fn sample_connections_once(
             return false;
         }
         match inner.controller_secret.clone().zip(inner.controller_port) {
-            Some(pair) => pair,
+            Some((secret, port)) => (secret, port, inner.controller_generation),
             None => return true,
         }
     };
     let Some(payload) = fetch_connections(&secret, port).await else {
         return true;
     };
+    // Fetching can outlive a disconnect, account switch, or controller rebuild.
+    // Hold the product guard through the synchronous commit (never through HTTP)
+    // so that neither the ledger nor diagnostic events enter a newer session.
+    let inner = state.lock().await;
+    if !sample_commit_is_current(
+        (generation, controller_generation),
+        (inner.connect_generation, inner.controller_generation),
+        inner.fsm.status().is_connected,
+    ) {
+        // A same-session controller rebuild discards this response, not future
+        // sampling: the next tick must capture the replacement controller.
+        return inner.connect_generation == generation && inner.fsm.status().is_connected;
+    }
     state.route_ledger().lock().ingest(&payload);
 
     let direct_active = direct_seen.len() < MAX_DIRECT_SAMPLES;
@@ -191,6 +219,7 @@ pub(super) async fn sample_connections_once(
         });
     }
 
+    drop(inner);
     true
 }
 
