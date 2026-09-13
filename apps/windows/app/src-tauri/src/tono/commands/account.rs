@@ -218,6 +218,9 @@ pub async fn tono_sign_in_verify(
         client.adopt(&auth).await.map_err(|err| err.to_string())?;
         inner.challenge_id = None;
         inner.account = Some(auth.user.clone());
+        // Attribute the first catalog/connect failures too, not only records
+        // produced after the periodic uploader eventually starts.
+        state.audit().activate_log_upload_owner(&auth.user.id);
         inner.catalog_last_synced_at_ms = None;
         inner.catalog_sync_error = None;
         inner.account_state = if info.suspended {

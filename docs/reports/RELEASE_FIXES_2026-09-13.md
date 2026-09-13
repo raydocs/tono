@@ -39,3 +39,9 @@ Windows 上 `FileIdInfo` / WFP 分支仍需 native CI 和真机；本地可移�
 可以跑 CI 和构建**内部候选安装包**，但不升 0.0.73、不改 appcast、不推 windows-updates、不发布客户 release。
 #137/#138 随 #147 集成，不单独重复合入；#26/#80 保持打开。
 #65/#146 与 #148–#151 已在 main；新一轮 #152–#156 不因“依赖更新”直接放行，尤其 #153 的 Vitest/pool 兼容性仍需处理。
+
+## 首轮 CI 纠正
+
+`49e8b2bb` 的 Services CI 通过；macOS 全套 280 tests（1 skip）发现新增 busy 提示漏了中文翻译，已补 `Localizable.xcstrings`，不跳过本地化覆盖测试。对应本地账户/归属/本地化专项 **58 / 58** 通过。
+同时把归属激活提前到身份验证成功、首次目录/运行时请求之前，避免最需要诊断的首次连接失败落成无归属记录；Windows App **471 / 471** 再次通过。
+首个内部 Windows candidate 已主动取消，避免提供旧 SHA 安装包；新 SHA 重新跑 CI / candidate，仍不发布客户版本。

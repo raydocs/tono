@@ -66,6 +66,7 @@ extension AccountSession {
                 // the first-screen critical path.
                 let restoredUser = try await api.me().user
                 user = restoredUser
+                DiagnosticsLogOwnership.shared.activate(owner: restoredUser.id)
                 ManagedExitCatalogOwnership.adopt(restoredUser.id)
                 guard restoredUser.suspended != true else {
                     pauseAppRoutingResearch()
@@ -87,6 +88,7 @@ extension AccountSession {
                 devicesResponse.devices
             )
             user = restoredUser
+            DiagnosticsLogOwnership.shared.activate(owner: restoredUser.id)
             devices = restoredDevices
             ManagedExitCatalogOwnership.adopt(restoredUser.id)
             guard user?.suspended != true else {
@@ -587,6 +589,7 @@ extension AccountSession {
             try Task.checkCancellation()
             emailChallenge = nil
             user = response.user
+            DiagnosticsLogOwnership.shared.activate(owner: response.user.id)
             device = response.device
             // Before any transport can select an exit, so nothing published for
             // the previous account is reachable by this one.

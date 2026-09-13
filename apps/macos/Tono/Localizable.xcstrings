@@ -2,6 +2,16 @@
   "sourceLanguage": "en",
   "strings": {
     "": {},
+    "A log upload is already in progress. Please wait for it to finish.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "日志正在上传，请等待当前上传完成。"
+          }
+        }
+      }
+    },
     "Backup channel": {
       "localizations": {
         "zh-Hans": {
