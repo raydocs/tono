@@ -76,6 +76,38 @@ final class AppTrafficLedger {
     /// Sum over every tracked process, so the header card does not have to
     /// re-add the table on each update.
     private(set) var overall = RouteSplit()
+    /// The same split, but never cleared.
+    ///
+    /// `overall` is per-session on purpose: `reset()` empties it so Activity
+    /// starts fresh on each connect. Telemetry needs the opposite. A window
+    /// reports the bytes since the window before it, which is a subtraction,
+    /// and a reset between the two would make every component negative and
+    /// throw away up to twenty minutes of traffic. This counter only goes up,
+    /// so the subtraction is always the honest answer.
+    private(set) var cumulative = RouteSplit()
+
+    /// Consent/account boundaries and HTTP acknowledgements must use the same snapshot.
+    struct TelemetryCursor {
+        private(set) var baseline = RouteSplit()
+        private(set) var epoch: UInt64 = 0
+        private(set) var enabled = false
+
+        mutating func setEnabled(_ value: Bool, current: RouteSplit) {
+            guard value != enabled else { return }
+            enabled = value
+            reset(to: current)
+        }
+
+        mutating func reset(to current: RouteSplit) {
+            baseline = current
+            epoch &+= 1
+        }
+
+        mutating func acknowledge(_ uploaded: RouteSplit, epoch expected: UInt64) {
+            guard enabled, epoch == expected else { return }
+            baseline = uploaded
+        }
+    }
 
     private var totals: [String: AppTotals] = [:]
     /// Last counters seen per live connection id, so a delta can be taken.
@@ -84,12 +116,35 @@ final class AppTrafficLedger {
     /// catalog home SOCKS host is the important one; built-in DNS is always on.
     private var extraInfrastructureDestinations: Set<String> = []
 
+    /// Clears the per-session view. `cumulative` deliberately survives — see
+    /// its declaration; a reset here must not look like traffic going backwards
+    /// to the window that reports it.
     func reset() {
         totals = [:]
         counters = [:]
         apps = []
         overall = RouteSplit()
         startedAt = Date()
+    }
+
+    /// What one telemetry window should report: the bytes that accrued since
+    /// the previous accepted window.
+    ///
+    /// `tunnel` is what the control plane calls `cloud`. `blocked` bytes never
+    /// left the machine, so there is no route to attribute them to and they are
+    /// dropped rather than folded into another class. The clamp is a guard, not
+    /// a routine correction: `cumulative` only grows, so a negative component
+    /// would mean the baseline came from some other counter, and reporting a
+    /// negative would be refused by the Worker and drop the whole window.
+    static func windowDelta(
+        from previous: RouteSplit,
+        to current: RouteSplit
+    ) -> TonoBytesByRoute {
+        TonoBytesByRoute(
+            cloud: max(0, current.tunnel - previous.tunnel),
+            residential: max(0, current.residential - previous.residential),
+            direct: max(0, current.direct - previous.direct)
+        )
     }
 
     func setInfrastructureDestinations(_ hosts: Set<String>) {
@@ -126,6 +181,7 @@ final class AppTrafficLedger {
             let routeClass = Self.routeClass(for: connection)
             entry.split.add(uploadDelta + downloadDelta, to: routeClass)
             overall.add(uploadDelta + downloadDelta, to: routeClass)
+            cumulative.add(uploadDelta + downloadDelta, to: routeClass)
             totals[key] = entry
         }
         // Closed connections: their bytes are already banked, so only the cursor

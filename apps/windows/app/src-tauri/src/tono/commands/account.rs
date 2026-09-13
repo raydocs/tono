@@ -141,6 +141,7 @@ pub async fn tono_sign_in_start(
     let (client, installation_id, generation) = {
         let mut inner = state.lock().await;
         inner.sign_in_generation = inner.sign_in_generation.wrapping_add(1);
+        state.audit().abandon_log_upload_owner();
         (
             inner.client.clone(),
             inner.installation_id.clone(),
@@ -217,6 +218,9 @@ pub async fn tono_sign_in_verify(
         client.adopt(&auth).await.map_err(|err| err.to_string())?;
         inner.challenge_id = None;
         inner.account = Some(auth.user.clone());
+        // Attribute the first catalog/connect failures too, not only records
+        // produced after the periodic uploader eventually starts.
+        state.audit().activate_log_upload_owner(&auth.user.id);
         inner.catalog_last_synced_at_ms = None;
         inner.catalog_sync_error = None;
         inner.account_state = if info.suspended {
@@ -265,6 +269,7 @@ pub async fn tono_sign_out(state: tauri::State<'_, Arc<TonoState>>, app: AppHand
         let mut inner = state.lock().await;
         inner.invalidate_connection(true);
         inner.sign_in_generation = inner.sign_in_generation.wrapping_add(1);
+        state.audit().abandon_log_upload_owner();
         inner.tasks.abort_catalog_sync();
         inner.cancel_server_tests();
         (inner.client.clone(), inner.sign_in_generation)

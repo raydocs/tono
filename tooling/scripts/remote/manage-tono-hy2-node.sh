@@ -17,7 +17,6 @@ AUTH_SERVICE_NAME="tono-hy2-auth.service"
 AUTH_SERVICE_PATH="/etc/systemd/system/$AUTH_SERVICE_NAME"
 INSTALL_ROOT="/opt/tono-hy2"
 SERVICE_USER="tono-hy2"
-CERT_CN="www.microsoft.com"
 AUTH_HTTP_URL="http://127.0.0.1:18765/auth"
 AUTH_HTTP_PY="$INSTALL_ROOT/auth-http.py"
 AUTH_ALLOWLIST="$INSTALL_ROOT/auth-allow.sha256"
@@ -39,13 +38,32 @@ validate_port() {
   [[ $1 =~ ^[0-9]+$ ]] && ((10#$1 >= 1 && 10#$1 <= 65535)) || fail "invalid UDP port"
 }
 
+validate_servername() {
+  [[ ${#1} -le 253 && $1 == *.* && $1 =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ && $1 != *..* ]] ||
+    fail "invalid certificate/SNI server name"
+}
+
+require_debian11_runtime() {
+  # Only the hy2 complement supports this legacy image, not fresh Reality
+  # provisioning. Verify the facilities used by the hardened units/certificate.
+  local systemd_version
+  systemd_version=$(systemctl --version | awk 'NR == 1 {print $2}')
+  [[ $systemd_version =~ ^[0-9]+$ ]] && ((systemd_version >= 247)) ||
+    fail "Debian 11 hy2 requires systemd 247 or newer"
+  python3 -c 'import sys; sys.exit(sys.version_info < (3, 9))' ||
+    fail "Debian 11 hy2 requires Python 3.9 or newer"
+  openssl req -help 2>&1 | grep -- '-addext' >/dev/null ||
+    fail "Debian 11 hy2 requires OpenSSL certificate SAN support"
+}
+
 platform() {
   [[ -r /etc/os-release ]] || fail "missing /etc/os-release"
   # shellcheck disable=SC1091
   . /etc/os-release
   case "${ID:-}:${VERSION_ID:-}" in
     ubuntu:22.04|ubuntu:24.04|debian:12|debian:13) ;;
-    *) fail "only Ubuntu 22.04/24.04 and Debian 12/13 are supported" ;;
+    debian:11) require_debian11_runtime ;;
+    *) fail "only Ubuntu 22.04/24.04 and Debian 11/12/13 are supported for the hy2 complement" ;;
   esac
   case "$(uname -m)" in
     x86_64|aarch64) ;;
@@ -116,7 +134,14 @@ print(f"COUNT {len(seen)} {sum(1 for s in secrets if len(s) == 36)}", file=sys.s
 PY
 }
 
+refuse_managed_allowlist_sync() {
+  if [[ -f $AUTH_ALLOWLIST ]] && grep -Fxq '# tono-exit-agent roster v1' "$AUTH_ALLOWLIST"; then
+    fail "hy2 identities are owned by exit-agent; run its verified roster cycle, not static identity sync"
+  fi
+}
+
 write_allowlist() {
+  refuse_managed_allowlist_sync
   local tmp hashes count
   tmp=$(mktemp)
   hashes=$(collect_auth_secrets 2>"$tmp") || fail "could not read xray identities for hy2"
@@ -270,7 +295,8 @@ PrivateDevices=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadOnlyPaths=$AUTH_ALLOWLIST $AUTH_HTTP_PY
+# Bind the directory, not the allowlist inode: exit-agent replaces it atomically.
+ReadOnlyPaths=$INSTALL_ROOT
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictRealtime=true
 IPAddressAllow=127.0.0.1/32 ::1/128
@@ -307,6 +333,7 @@ sync_identities() {
   done
   xray_is_active || fail "tono-xray must stay running; hy2 identity sync does not replace Reality"
   hy2_is_installed || fail "tono-hy2 is not installed"
+  refuse_managed_allowlist_sync
   local conf
   conf=$(hy2_config_path) || fail "tono-hy2 config is missing"
   local xray_pid
@@ -330,7 +357,8 @@ sync_identities() {
   local count
   count=$(write_allowlist)
   systemctl daemon-reload
-  systemctl enable --now "$AUTH_SERVICE_NAME" >/dev/null 2>&1
+  systemctl enable "$AUTH_SERVICE_NAME" >/dev/null 2>&1
+  systemctl restart "$AUTH_SERVICE_NAME" >/dev/null
   wait_localhost_tcp 18765 "hy2 auth checker"
   if ! patch_hy2_config_http_auth "$conf"; then
     mv -f "$backup" "$conf"
@@ -416,11 +444,15 @@ apply_deployment() {
   local artifact=${3:-}
   local expected_sha256=${4:-}
   local port=${5:-}
+  # One validated input owns certificate SAN, masquerade and the client SNI.
+  # Never silently fall back to a different (formerly Microsoft) host.
+  local CERT_CN=${6:-}
   [[ $deployment_id =~ ^[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}$ ]] || fail "invalid deployment identifier"
   [[ $version =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "invalid pinned hysteria version"
   [[ $artifact =~ ^/tmp/tono-hy2-artifact-[a-f0-9]{24}$ ]] || fail "invalid uploaded artifact path"
   [[ $expected_sha256 =~ ^[a-f0-9]{64}$ ]] || fail "invalid artifact digest"
   validate_port "$port"
+  validate_servername "$CERT_CN"
   platform
   for command_name in awk chmod chown getent groupadd grep install ln mv openssl python3 readlink seq sha256sum ss systemctl useradd; do
     require_command "$command_name"
@@ -428,10 +460,15 @@ apply_deployment() {
   xray_is_active || fail "tono-xray must stay running; hy2 is a complement"
   [[ -f $artifact && ! -L $artifact ]] || fail "uploaded hysteria artifact is not a regular file"
   [[ $(sha256sum "$artifact" | awk '{ print $1 }') == "$expected_sha256" ]] || fail "uploaded hysteria artifact digest mismatch"
+  "$artifact" version >/dev/null 2>&1 || fail "verified hysteria binary cannot run on this host"
   [[ ! -e $SERVICE_PATH && ! -e $INSTALL_ROOT/current && ! -f $INSTALL_ROOT/config.yaml ]] || fail "an existing tono-hy2 installation requires an explicit rotation workflow"
   ! udp_port_in_use "$port" || fail "the selected UDP port is already in use"
+  [[ ! -e $AUTH_SERVICE_PATH && ! -e $AUTH_ALLOWLIST ]] || fail "an existing hy2 auth installation requires a reviewed recovery"
+  ! ss -H -ltn 'sport = :18765' | grep -q . || fail "the hy2 auth port is already in use"
 
-  local release committed=0
+  local release committed=0 xray_pid_before xray_digest_before
+  xray_pid_before=$(systemctl show "$XRAY_SERVICE" -p MainPID --value)
+  xray_digest_before=$(sha256sum "$XRAY_CONFIG" | awk '{print $1}')
   release="$INSTALL_ROOT/releases/$deployment_id"
 
   cleanup_apply() {
@@ -555,6 +592,8 @@ EOF
   done
   [[ $ready == true ]] || fail "hysteria2 did not become active and listen on the selected UDP port"
   systemctl is-active --quiet "$XRAY_SERVICE" || fail "tono-xray stopped during hy2 install; aborting"
+  [[ $(systemctl show "$XRAY_SERVICE" -p MainPID --value) == "$xray_pid_before" ]] || fail "tono-xray pid changed during hy2 install"
+  [[ $(sha256sum "$XRAY_CONFIG" | awk '{print $1}') == "$xray_digest_before" ]] || fail "tono-xray config changed during hy2 install"
 
   committed=1
   rm -f "$artifact"
