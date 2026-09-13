@@ -416,7 +416,9 @@ const ServersPage = () => {
                   count: catalog?.nodeCount ?? (servers ?? []).length,
                 })}
                 {' · '}
-                {t('tono.nodes.catalogSynced')}
+                {catalog?.lastSyncedAtMs
+                  ? t('tono.nodes.catalogSynced')
+                  : t('tono.nodes.waitingForSync')}
               </div>
               <div
                 style={{
@@ -426,14 +428,16 @@ const ServersPage = () => {
                   lineHeight: 1.45,
                 }}
               >
-                {catalog?.lastSyncedAtMs
-                  ? t('tono.nodes.lastSynced', {
+                {catalog?.lastSyncedAtMs ? (
+                  <>
+                    {t('tono.nodes.lastSynced', {
                       time: dayjs(catalog.lastSyncedAtMs).format(
                         'YYYY-MM-DD HH:mm',
                       ),
-                    })
-                  : t('tono.nodes.waitingForSync')}
-                {' · '}
+                    })}
+                    {' · '}
+                  </>
+                ) : null}
                 <span style={{ fontFamily: TONO_MONO_STACK }}>
                   v{catalog?.revision ?? '—'}
                 </span>

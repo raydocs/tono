@@ -205,9 +205,15 @@ pub async fn switch_selected_node(
         return;
     };
     if let Err(error) = select_exit_group(&secret, port, &next_name).await {
-        logging!(warn, Type::Service, "Tono: selector switch failed: {error}");
+        logging!(
+            warn,
+            Type::Service,
+            "Tono: selector switch failed ({error}); falling back to cold switch"
+        );
         let _ = service::tono_replace_proxy_endpoints(&session, old_endpoints).await;
-        restore_selected_node(&state, &app, generation, &previous_name).await;
+        // Keep the user's new selection. A catalog-grown node is missing from the live
+        // controller; rebuilding the runtime with WFP still armed is the only way to admit it.
+        cold_switch_selected_node(state, app, generation).await;
         return;
     }
     if state.lock().await.connect_generation != generation {

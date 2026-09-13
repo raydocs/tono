@@ -1,7 +1,7 @@
 //! Tono product layer: account session, exit catalog, and the connect
 //! transaction, built on the portable `tono-core` crate and the Service IPC
 //! client in `core::service`. Tono pages are the only UI. Leftover Clash Verge
-//! engine-room (sidecar manager, IClashTemp) is still compiled until those
+//! engine-room (sidecar manager, IRuntimeTemp) is still compiled until those
 //! modules are peeled.
 
 pub mod audit;

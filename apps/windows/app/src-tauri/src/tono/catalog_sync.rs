@@ -502,7 +502,7 @@ mod tests {
     use super::{
         default_usable_exit, install_and_persist, is_exit_blocked, is_legacy_wire_name,
         names_equivalent, next_catalog_exit, region_rank, replacement_for_selection,
-        sort_server_names, tcp_probe_socket,
+        selected_exit_still_present, sort_server_names, tcp_probe_socket,
     };
     use std::collections::BTreeSet;
     use std::net::Ipv4Addr;

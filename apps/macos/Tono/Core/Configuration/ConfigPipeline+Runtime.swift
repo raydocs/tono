@@ -838,6 +838,7 @@ extension ConfigPipeline {
                 }
             }
         }
+        yaml += appleContinuityDirectRules
         yaml += "  - AND,((NETWORK,UDP)),REJECT\n"
         yaml += """
           - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve

@@ -14,7 +14,8 @@ use crate::tono::{
     bootstrap, commands, signed_apps,
     connection_health::{
         CoreSample, HealthLegs, NetworkChangeOutcome, classify_core_sample, connection_loop_continues,
-        core_change_fires, health_threshold_reached, kill_switch_unhealthy, monitor_requires_reconnect,
+        core_change_fires, health_threshold_reached, kill_switch_unhealthy_for_monitor,
+        monitor_requires_reconnect, owned_direct_reload_in_flight,
         network_event_fires, protected_dns_unhealthy,
     },
     connection_plan::{guard_rejection_is_transient, reconnect_allowed},
@@ -512,12 +513,17 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
     let mut last_in_place_recovery: Option<std::time::Instant> = None;
     loop {
         interval.tick().await;
-        {
+        let owned_direct_reload = {
             let inner = state.lock().await;
             if !inner.fsm.status().is_connected {
                 return;
             }
-        }
+            owned_direct_reload_in_flight(
+                inner.direct_reload_until,
+                inner.connect_generation,
+                std::time::Instant::now(),
+            )
+        };
         let snapshot = match service::tono_service_status_snapshot().await {
             Ok(snapshot) => snapshot,
             Err(error) => {
@@ -565,7 +571,10 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
         legs.observe_service_ok();
 
         // F2 leg 1: kill-switch completeness every tick.
-        legs.observe_kill_switch(kill_switch_unhealthy(snapshot.kill_switch.as_ref()));
+        legs.observe_kill_switch(kill_switch_unhealthy_for_monitor(
+            snapshot.kill_switch.as_ref(),
+            owned_direct_reload,
+        ));
 
         // DNS health is checked independently of netmon. The first network event is used only
         // to seed the counter (to ignore our own connect-time interface churn), so an adapter
@@ -576,7 +585,13 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
         // F2 leg 2: periodic real App data-plane probe through the tunnel.
         if last_probe.elapsed() >= EXIT_PROBE_INTERVAL {
             last_probe = std::time::Instant::now();
-            legs.observe_probe(periodic_data_plane_probe_failed(&state).await);
+            if owned_direct_reload {
+                // TUN permit is retracted for this session's own reload; a failed probe is not
+                // evidence the tunnel died.
+                legs.observe_probe(false);
+            } else {
+                legs.observe_probe(periodic_data_plane_probe_failed(&state).await);
+            }
         }
         let health_invalid = legs.invalid();
         let protection_invalid = legs.protection_invalid();
@@ -731,6 +746,19 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
 /// still running inside the session it started in (see [`connection_loop_continues`]).
 pub(crate) async fn handle_network_change(state: &Arc<TonoState>, app: &AppHandle) -> NetworkChangeOutcome {
     handle_network_change_inner(state, app, true).await
+}
+
+/// A signed traffic-policy document changed behavior. Sleep/Wi-Fi in-place recovery does not
+/// apply: old DIRECT grants and their lease heartbeat would otherwise survive a TUN probe.
+pub(crate) async fn handle_policy_behavior_change(
+    state: &Arc<TonoState>,
+    app: &AppHandle,
+) -> NetworkChangeOutcome {
+    handle_network_change_inner(state, app, policy_behavior_change_allows_in_place_recovery()).await
+}
+
+pub(crate) const fn policy_behavior_change_allows_in_place_recovery() -> bool {
+    false
 }
 
 pub(super) async fn handle_network_change_inner(

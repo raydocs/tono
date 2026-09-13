@@ -13,9 +13,9 @@ use std::{
 };
 
 #[derive(Default, Debug, Clone)]
-pub struct IClashTemp(pub Mapping);
+pub struct IRuntimeTemp(pub Mapping);
 
-impl IClashTemp {
+impl IRuntimeTemp {
     pub async fn new() -> Self {
         let clash_path_result = dirs::clash_path();
         let map_result = if let Ok(path) = clash_path_result {
@@ -177,10 +177,10 @@ impl IClashTemp {
         Self::guard_port(&self.0)
     }
 
-    pub fn get_client_info(&self) -> ClashInfo {
+    pub fn get_client_info(&self) -> RuntimeInfo {
         let config = &self.0;
 
-        ClashInfo {
+        RuntimeInfo {
             mixed_port: Self::guard_mixed_port(config),
             socks_port: Self::guard_socks_port(config),
             port: Self::guard_port(config),
@@ -352,29 +352,29 @@ impl IClashTemp {
 }
 
 #[derive(Default, Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-pub struct ClashInfo {
-    /// clash core port
+pub struct RuntimeInfo {
+    /// core mixed port
     pub mixed_port: u16,
     pub socks_port: u16,
     pub port: u16,
     /// same as `external-controller`
     pub server: String,
-    /// clash secret
+    /// controller secret
     pub secret: Option<String>,
 }
 
 #[test]
-fn test_clash_info() {
-    fn get_case<T: Into<Value>, D: Into<Value>>(mp: T, ec: D) -> ClashInfo {
+fn test_runtime_info() {
+    fn get_case<T: Into<Value>, D: Into<Value>>(mp: T, ec: D) -> RuntimeInfo {
         let mut map = Mapping::new();
         map.insert("mixed-port".into(), mp.into());
         map.insert("external-controller".into(), ec.into());
 
-        IClashTemp(IClashTemp::guard(map)).get_client_info()
+        IRuntimeTemp(IRuntimeTemp::guard(map)).get_client_info()
     }
 
-    fn get_result<S: Into<String>>(port: u16, server: S) -> ClashInfo {
-        ClashInfo {
+    fn get_result<S: Into<String>>(port: u16, server: S) -> RuntimeInfo {
+        RuntimeInfo {
             mixed_port: port,
             socks_port: 7898,
             port: 7899,
@@ -384,7 +384,7 @@ fn test_clash_info() {
     }
 
     assert_eq!(
-        IClashTemp(IClashTemp::guard(Mapping::new())).get_client_info(),
+        IRuntimeTemp(IRuntimeTemp::guard(Mapping::new())).get_client_info(),
         get_result(17970, "127.0.0.1:9097")
     );
 
@@ -421,7 +421,7 @@ fn guard_overrides_leftover_clash_runtime_knobs() {
     );
     map.insert("external-controller-cors".into(), cors_map.into());
 
-    let guarded = IClashTemp::guard(map);
+    let guarded = IRuntimeTemp::guard(map);
     assert_eq!(guarded.get("ipv6").and_then(Value::as_bool), Some(false));
     assert_eq!(
         guarded.get("unified-delay").and_then(Value::as_bool),

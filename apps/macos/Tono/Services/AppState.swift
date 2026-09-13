@@ -240,8 +240,8 @@ final class AppState {
     let persistenceWriter = AppStatePersistenceWriter()
     var persistenceTask: Task<Void, Never>?
 
-    // Clash config
-    var config: ClashConfig = ClashConfig()
+    // Runtime config
+    var config: RuntimeConfig = RuntimeConfig()
 
     // Core components
     let coreRuntime = CoreRuntimeManager()
@@ -250,7 +250,7 @@ final class AppState {
     let proxyService = ProxyService()
     private let providerRuleLoader = ProviderRuleLoader()
     var coreController: CoreControllerClient?
-    var webSocket: ClashWebSocket?
+    var webSocket: CoreWebSocket?
     /// Digest of the config the running core actually loaded, as opposed to the
     /// last one written to disk. A rewrite that reproduces these bytes has
     /// nothing to reload, and the reload is what closes every open connection.

@@ -16,9 +16,9 @@ export const useLayoutEvents = (
       revalidateKeys([
         'getProxyView',
         'getVersion',
-        'getClashConfig',
-        'getClashInfo',
-        'getClashMode',
+        'getCoreConfig',
+        'getRuntimeInfo',
+        'getCoreMode',
         'getRuntimeConfig',
         'getRules',
         'getRuleProviders',

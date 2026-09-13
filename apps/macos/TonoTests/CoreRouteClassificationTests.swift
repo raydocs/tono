@@ -414,9 +414,66 @@ final class CoreRouteClassificationTests: XCTestCase {
         XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(
             "dingtalk.com"
         ))
+        XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(
+            "taobao.com"
+        ))
+        XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(
+            "douyin.com"
+        ))
+        XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(
+            "huya.com"
+        ))
+        XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(
+            "wps.cn"
+        ))
+        XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(
+            "voovmeeting.com"
+        ))
+        XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(
+            "kugou.com"
+        ))
+        XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(
+            "ximalaya.com"
+        ))
+        XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(
+            "xylink.com"
+        ))
+        XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(
+            "zhihu.com"
+        ))
+        XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(
+            "goofish.com"
+        ))
         XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectSuffix(
             "snssdk.com"
         ))
+        XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectSuffix(
+            "googleapis.com"
+        ))
+        XCTAssertTrue(
+            ConfigPipeline.ManagedDirectRuntimePolicy.productWebDirectSuffixes
+                .contains(where: { $0.host == "taobao.com" })
+        )
+        XCTAssertTrue(
+            ConfigPipeline.ManagedDirectRuntimePolicy.productWebDirectSuffixes
+                .contains(where: { $0.host == "huya.com" })
+        )
+        XCTAssertTrue(
+            ConfigPipeline.ManagedDirectRuntimePolicy.productWebDirectSuffixes
+                .contains(where: { $0.host == "voovmeeting.com" })
+        )
+        XCTAssertTrue(
+            ConfigPipeline.ManagedDirectRuntimePolicy.productWebDirectSuffixes
+                .contains(where: { $0.host == "kugou.com" })
+        )
+        XCTAssertTrue(
+            ConfigPipeline.ManagedDirectRuntimePolicy.productWebDirectSuffixes
+                .contains(where: { $0.host == "xylink.com" })
+        )
+        XCTAssertFalse(
+            ConfigPipeline.ManagedDirectRuntimePolicy.productWebDirectSuffixes
+                .contains(where: { $0.host == "snssdk.com" })
+        )
         XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectDomain(
             "evil-dingtalk.com"
         ))
