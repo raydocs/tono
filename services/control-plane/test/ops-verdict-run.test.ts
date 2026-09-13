@@ -1,8 +1,11 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { type Env } from '../src/env';
+import { encryptCatalog, sha256 } from '../src/crypto';
+import { coverageOf } from '../src/ops/coverage';
+import { getNodes } from '../src/ops/handlers/nodes';
 import { reconcileIncidents } from '../src/ops/evaluate';
-import { runCustomerVerdictPass, toAlertTransitions } from '../src/ops/verdict-run';
+import { runCustomerVerdictPass, runNodeVerdictPass, toAlertTransitions } from '../src/ops/verdict-run';
 import { buildVerdictInput } from '../src/ops/verdict-facts';
 import { type IncidentDesire } from '../src/ops/verdict';
 
@@ -55,6 +58,53 @@ describe('runCustomerVerdictPass', () => {
 });
 
 describe('buildVerdictInput', () => {
+  it('counts a same-node hy2 block once and retires its phantom no-probe incident', async () => {
+    const e = env as unknown as Env;
+    const name = 'Tokyo · Kite';
+    const backup = `${name} · hy2`;
+    const yaml = `proxies:
+  - name: ${name}
+    type: vless
+    server: 9.0.0.1
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+  - name: ${backup}
+    type: hysteria2
+    server: 9.0.0.1
+    port: 443
+    password: {{TONO_CLIENT_UUID}}
+    sni: www.ucla.edu
+    fingerprint: ${'a'.repeat(64)}
+`;
+    const encrypted = await encryptCatalog(yaml, e.CATALOG_ENCRYPTION_KEY!);
+    await db().prepare(
+      `INSERT INTO managed_exit_catalog(singleton_id, revision, ciphertext, nonce, content_sha256, updated_at)
+       VALUES(1, 1, ?, ?, ?, ?)`,
+    ).bind(encrypted.ciphertext, encrypted.nonce, await sha256(yaml), NOW).run();
+    // Old deployments persisted a second machine and an incident for this alias.
+    await db().prepare(
+      `INSERT INTO ops_node_status(node_name, verdict, label, reason, rules_version, evaluated_at, changed_at)
+       VALUES(?, 'unknown', '待确认', '在售但没有探针', 2, ?, ?)`,
+    ).bind(backup, NOW, NOW).run();
+    await reconcileIncidents(db(), [{
+      ...nodeDesire(backup), kind: 'node-no-probe', dedupeKey: `node-no-probe:${backup}`,
+      severity: 'notice', cause: 'unknown', impactCount: 0,
+    }], NOW);
+
+    expect((await buildVerdictInput(e, NOW, 'none')).nodes.map((n) => n.name)).toEqual([name]);
+    expect((await coverageOf(e, NOW))?.nodesListed).toBe(1);
+    await runNodeVerdictPass(e, NOW + 120);
+    const list = await (await getNodes(new Request('https://test/api/v1/ops/nodes'), e)).json() as { items: { name: string }[] };
+    expect(list.items.map((n) => n.name)).toEqual([name]);
+    expect(await db().prepare(
+      "SELECT COUNT(*) AS n FROM ops_incidents WHERE subject_id = ? AND status <> 'resolved'",
+    ).bind(backup).first('n')).toBe(0);
+    // The base still lacks a probe: folding a transport must not assert UDP health.
+    expect(await db().prepare(
+      "SELECT COUNT(*) AS n FROM ops_incidents WHERE subject_id = ? AND kind = 'node-no-probe' AND status <> 'resolved'",
+    ).bind(name).first('n')).toBe(1);
+  });
+
   it('counts as occupants only customers heard from in the last forty minutes', async () => {
     const insert = (userId: string, seen: number) => db().prepare(
       `INSERT INTO ops_customer_status(user_id, connected, selected_server, last_seen_at, updated_at)
