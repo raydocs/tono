@@ -125,3 +125,25 @@ already-established QUIC sessions or provide hy2 usage accounting. Existing
 sessions, real client handshakes and transport acceptance still require node
 validation before publication. A rollback must not restore an obsolete allowlist;
 keep the last verified list or disable the unpublished hy2 transport instead.
+
+
+### Existing hy2 nodes without an exit-agent (G2 only)
+
+Use `python3 reconcile_and_report.py --hy2-roster-only` when the node has a
+working hy2 transport but has not joined the VLESS/metering agent rollout.
+It requires an explicit `TONO_SOURCE_ID` and that same node's token, validates
+the authenticated roster identity, and uses the same atomic hy2 writer and
+single-flight lock. Empty roster still denies all new authentication.
+
+This mode **does not call Xray, read/write the usage state, report usage, or
+send roster/metering ACKs**. Adding hy2 auth enforcement must not silently
+migrate VLESS accounting or claim the whole node is reconciled. The control
+plane's node-wide readiness timestamp therefore does not become green from
+this mode; inspect the timer's success and actual auth results instead.
+
+Register the existing catalog node name/source ID, not a second ` · hy2`
+node identity. Do not borrow or rotate another node's token. Give the timer
+only write access to `/opt/tono-hy2` and its lock directory; keep its credential
+file root-owned mode 0600. The existing checker-directory binding/restart
+preflight above still applies. Registration and node deployment require the
+operator's explicit approval; neither publishes a catalog or changes a feed.

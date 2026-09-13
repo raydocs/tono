@@ -46,6 +46,7 @@ working meter reporting zero.
 from __future__ import annotations
 
 from contextlib import contextmanager
+import argparse
 import errno
 import fcntl
 import hashlib
@@ -970,6 +971,26 @@ def sync_hy2_roster(roster: list[dict[str, str]]) -> bool:
     return True
 
 
+
+def run_hy2_roster_once() -> None:
+    """Enforce hy2 only; never opt a VLESS node into a metering migration.
+
+    No node-wide ACK is sent: this mode cannot prove Xray reconciliation or
+    metering readiness. The node-specific token and explicit source must agree.
+    """
+    base = api_base()
+    token = env("TONO_HOME_AGENT_TOKEN")
+    expected = env("TONO_SOURCE_ID")
+    if not SOURCE_ID_PATTERN.fullmatch(expected):
+        raise Refusal("hy2-only sync requires an explicit valid TONO_SOURCE_ID")
+    node_id, observed_at, roster, _ = fetch_roster(base, token)
+    if node_id != expected:
+        raise Refusal("hy2 roster node identity does not match TONO_SOURCE_ID")
+    if not sync_hy2_roster(roster):
+        raise Refusal("hy2-only sync requires an installed auth checker")
+    print(f"hy2 roster applied: observedAt={observed_at}, identities={len(roster)}; no node-wide ACK or usage report")
+
+
 def run_once(path: Path) -> None:
     base = api_base()
     token = env("TONO_HOME_AGENT_TOKEN")
@@ -1113,15 +1134,22 @@ def run_once(path: Path) -> None:
     print(f"reported usage for {delivered} accounts as {source}, dropped {dropped}")
 
 
-def main() -> None:
+def main(*, hy2_roster_only: bool = False) -> None:
     path = state_path()
     with agent_run_lock(path):
-        run_once(path)
+        if hy2_roster_only:
+            run_hy2_roster_once()
+        else:
+            run_once(path)
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--hy2-roster-only", action="store_true",
+                        help="sync installed hy2 auth only; no Xray changes, usage, or node-wide ACK")
+    args = parser.parse_args()
     try:
-        main()
+        main(hy2_roster_only=args.hy2_roster_only)
     except Refusal as refusal:
         print(f"refusing: {refusal}", file=sys.stderr)
         raise SystemExit(1)

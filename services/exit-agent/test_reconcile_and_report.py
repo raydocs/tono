@@ -636,6 +636,43 @@ class Hy2RosterAuthorization(unittest.TestCase):
         self.remote = (Path(__file__).resolve().parents[2] /
                        "tooling/scripts/remote/manage-tono-hy2-node.sh").read_text()
 
+    def test_hy2_only_mode_preserves_metering_state_and_never_claims_node_readiness(self):
+        state_path = self.path.parent / "state.json"
+        original = b'{"sourceId":"unchanged-billing-source","pendingReports":[{"retained":true}]}'
+        state_path.write_bytes(original)
+        identity = "11111111-1111-4111-8111-111111111111"
+        with patch.dict(agent.os.environ, {
+            "TONO_API_BASE": "https://api.example.com",
+            "TONO_HOME_AGENT_TOKEN": "test-node-token",
+            "TONO_SOURCE_ID": "los-angeles-marina",
+            "TONO_AGENT_STATE": str(state_path),
+        }), patch.object(agent, "fetch_roster", return_value=(
+            "los-angeles-marina", 1700000000, [{"clientUUID": identity}], False,
+        )), patch.object(agent, "run_once") as full_cycle, \
+                patch.object(agent, "run_xray") as xray, \
+                patch.object(agent, "acknowledge_roster") as roster_ack, \
+                patch.object(agent, "acknowledge_metering") as metering_ack:
+            agent.main(hy2_roster_only=True)
+        full_cycle.assert_not_called()
+        xray.assert_not_called()
+        roster_ack.assert_not_called()
+        metering_ack.assert_not_called()
+        self.assertEqual(state_path.read_bytes(), original)
+        self.assertIn(agent.hashlib.sha256(identity.encode()).hexdigest(), self.path.read_text())
+
+    def test_hy2_only_mode_refuses_another_nodes_roster_before_changing_auth(self):
+        original = self.path.read_bytes()
+        with patch.dict(agent.os.environ, {
+            "TONO_API_BASE": "https://api.example.com",
+            "TONO_HOME_AGENT_TOKEN": "test-node-token",
+            "TONO_SOURCE_ID": "los-angeles-marina",
+        }), patch.object(agent, "fetch_roster", return_value=(
+            "another-node", 1700000000, [], False,
+        )):
+            with self.assertRaisesRegex(agent.Refusal, "node identity"):
+                agent.run_hy2_roster_once()
+        self.assertEqual(self.path.read_bytes(), original)
+
     def test_live_http_checker_observes_add_revoke_and_empty_roster_without_restart(self):
         # Execute the actual embedded checker, not a duplicate auth implementation.
         code = self.remote.split('cat >"$AUTH_HTTP_PY" <<\'PY\'\n', 1)[1].split("\nPY\n", 1)[0]
