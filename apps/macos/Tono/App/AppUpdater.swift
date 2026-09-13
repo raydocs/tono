@@ -44,6 +44,7 @@ final class AppUpdater: ObservableObject {
 final class TonoSparkleDelegate: NSObject, SPUUpdaterDelegate {
     weak var appState: AppState?
     private var installPrepared = false
+    private var installPreparationFailed = false
 
     func updater(
         _ updater: SPUUpdater,
@@ -53,21 +54,57 @@ final class TonoSparkleDelegate: NSObject, SPUUpdaterDelegate {
         guard !installPrepared else { return false }
         Task { @MainActor in
             let version = item.displayVersionString
-            if let appState {
-                let journal = await appState.prepareForSoftwareUpdate(nextVersion: version)
-                await appState.finishPendingDisconnect()
-                if KillSwitchService.isArmed {
-                    appState.markProtectedUpdateHandoff(journal)
+            await self.prepareInstallation(prepare: {
+                guard let appState = self.appState else {
+                    throw CoreRuntimeError.startFailed("Update preparation requires the application state.")
                 }
-            }
-            if var recorded = UpdateHandoffStore.load() {
-                recorded = recorded.advancing(to: .installStarted)
-                try? UpdateHandoffStore.write(recorded)
-            }
-            self.installPrepared = true
-            installHandler()
+                let journal = try await appState.prepareForSoftwareUpdate(nextVersion: version)
+                let recorded = journal.advancing(to: .installStarted)
+                do {
+                    try UpdateHandoffStore.write(recorded)
+                } catch {
+                    try? UpdateHandoffStore.write(journal.advancing(
+                        to: .failed,
+                        errorCode: "TONO_UPDATE_PREPARATION_FAILED",
+                        errorStage: "installEntry"
+                    ))
+                    throw error
+                }
+            }, installHandler: installHandler)
         }
         return true
+    }
+
+    func prepareInstallation(
+        prepare: () async throws -> Void,
+        installHandler: () -> Void
+    ) async {
+        do {
+            try await prepare()
+            installPrepared = true
+        } catch {
+            installPreparationFailed = true
+            appState?.updateIncomplete = true
+            appState?.errorMessage = UpdateHandoffStore.incompleteUpdateCopy
+                + " " + error.localizedDescription
+        }
+        // Sparkle 2.9.6 rechecks updaterShouldRelaunchApplication *before*
+        // continuing installation. On failure resume only to reach that veto;
+        // keeping the block forever would strand the update cycle and Retry.
+        installHandler()
+    }
+
+    func updaterShouldRelaunchApplication(_ updater: SPUUpdater) -> Bool {
+        !installPreparationFailed
+    }
+
+    func updater(
+        _ updater: SPUUpdater,
+        didFinishUpdateCycleFor updateCheck: SPUUpdateCheck,
+        error: Error?
+    ) {
+        installPrepared = false
+        installPreparationFailed = false
     }
 }
 
