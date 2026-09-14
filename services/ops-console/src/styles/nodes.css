@@ -25,6 +25,13 @@
   text-wrap: balance;
 }
 
+/* The summary leads with trouble: alarmed fragments read at full weight,
+ * healthy and unmeasured ones stay quiet. Tones and counts are untouched. */
+.nodes-hero .count-bit.tone-sev,
+.nodes-hero .count-bit.tone-warn {
+  font-weight: 600;
+}
+
 .nodes-hero-note {
   margin-top: 8px;
 }
@@ -53,6 +60,15 @@
 .nodes-view-switch .ops-view-btn {
   border: 0;
   box-shadow: none;
+}
+
+/* The quiet half stays legible in both themes instead of sinking to a whisper. */
+.nodes-view-switch .ops-view-btn:not([aria-pressed="true"]) {
+  color: color-mix(in srgb, var(--foreground) 68%, transparent);
+}
+
+.nodes-view-switch .ops-view-btn:not([aria-pressed="true"]):hover {
+  color: var(--foreground);
 }
 
 @media (min-width: 641px) {
