@@ -18,6 +18,7 @@ import {
   type CandidateFilter,
 } from '@/lib/settings';
 import { useResource } from '@/lib/use-resource';
+import '@/styles/settings-publish.css';
 import { DraftDialog } from './DraftDialog';
 import { Toolbar } from './form';
 import { useWrite } from './use-write';
@@ -65,7 +66,7 @@ export function Candidates() {
   }
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="settings-candidates flex flex-col gap-8">
       <div className="flex flex-col gap-3">
         <Toolbar
           aside={(
@@ -95,6 +96,7 @@ export function Candidates() {
           state={state}
           emptyMessage={words.empty}
           errorMessage={candidates.status === 'error' ? candidates.message : undefined}
+          className="settings-candidates-table"
         />
       </div>
 

@@ -1,0 +1,36 @@
+/* Settings publishing: catalog, policy, candidates.
+ *
+ * Every rule carries `.settings-page` plus its own page hook — floors and
+ * targets derived here must not leak into the ledger or the asset pages.
+ * The editors themselves (Editor.tsx, use-document, DraftDialog) are
+ * frozen: their surfaces already scroll inside their own boxes, so this
+ * file only floors the two tables and sizes thumb targets. No loads,
+ * drafts, conflicts, rehearsals, decisions or copy move. */
+
+/* History: version 132 + nodes 88 + at 168 = 388 fixed; the digest keeps
+   160 of its own behind its full-text title. */
+.settings-page .settings-catalog .settings-history-table table {
+  min-width: 548px;
+}
+
+/* Candidates: 80 + 92 + 100 + 96 + 160 = 528 fixed; the domain keeps 200
+   and never collapses — a zero-width domain with the text in the DOM is
+   the failure this floor exists to prevent. */
+.settings-page .settings-candidates .settings-candidates-table table {
+  min-width: 728px;
+}
+
+@media (max-width: 640px) {
+  /* Edit / rehearse / publish / accept / reject are thumb targets on a
+     phone, sized locally — the shared Action, the chips' shared shape
+     and the portaled dialogs are untouched. */
+  .settings-page .settings-catalog .ops-action,
+  .settings-page .settings-policy .ops-action,
+  .settings-page .settings-candidates .ops-action {
+    min-height: 44px;
+  }
+
+  .settings-page .settings-candidates .ops-chip {
+    min-height: 44px;
+  }
+}

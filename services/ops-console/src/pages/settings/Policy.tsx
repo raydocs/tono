@@ -21,6 +21,7 @@ import {
 } from './Editor';
 import { TextField } from './form';
 import { useDocument } from './use-document';
+import '@/styles/settings-publish.css';
 
 const words = copy.settings.policy;
 
@@ -135,7 +136,7 @@ export function Policy() {
   }
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="settings-policy flex flex-col gap-8">
       <div className="flex flex-col gap-3">
         <DocumentMeta
           version={words.online(online.revision)}

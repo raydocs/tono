@@ -17,6 +17,7 @@ import {
   NoticePanel,
 } from './Editor';
 import { useDocument } from './use-document';
+import '@/styles/settings-publish.css';
 
 const words = copy.settings.catalog;
 
@@ -81,7 +82,7 @@ export function Catalog() {
   }
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="settings-catalog flex flex-col gap-8">
       <div className="flex flex-col gap-3">
         <DocumentMeta
           version={words.online(online.revision)}
@@ -188,6 +189,7 @@ function History() {
       state={state}
       emptyMessage={words.historyEmpty}
       errorMessage={history.status === 'error' ? history.message : undefined}
+      className="settings-history-table"
     />
   );
 }
