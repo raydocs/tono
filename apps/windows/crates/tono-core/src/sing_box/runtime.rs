@@ -176,19 +176,16 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
         }
         let outbound = match node.protocol {
             NodeProtocol::Hysteria2 => {
-                // A DER digest cannot be converted into a public-key digest.
-                if node.tls_fingerprint.is_some() {
-                    if node.name == selected.name
-                        || home.is_some_and(|h| h.name == node.name)
-                        || input.required_capabilities.iter().any(|r| r == "hy2")
-                    {
-                        return Err(UnsupportedCertificatePin);
-                    }
-                    unavailable_nodes.push(index);
-                    continue;
+                // Existing admission requires DER pin for EVERY HY2 node.
+                // Do not weaken it to manufacture a CA-only product path.
+                if node.name == selected.name
+                    || home.is_some_and(|h| h.name == node.name)
+                    || input.required_capabilities.iter().any(|r| r == "hy2")
+                {
+                    return Err(UnsupportedCertificatePin);
                 }
-                json!({"type":"hysteria2", "tag":node.name, "server":node.server, "server_port":node.port,
-                    "password":node.uuid, "tls":{"enabled":true,"server_name":node.servername}})
+                unavailable_nodes.push(index);
+                continue;
             }
             NodeProtocol::VlessReality => {
                 if node.client_fingerprint.as_deref() != Some("chrome") {
@@ -571,17 +568,12 @@ mod tests {
     }
 
     #[test]
-    fn hy2_ca_maps_udp_but_der_pin_never_becomes_spki_or_disappears_silently() {
+    fn hy2_der_pin_never_becomes_spki_or_disappears_silently() {
         let mut nodes = nodes();
         let hy2 = node::admit_node(&serde_yaml_ng::to_value(json!({"name":"Fixture Alpha · hy2","type":"hysteria2",
-            "server":"8.8.4.4","port":8444,"password":"11111111-1111-4111-8111-111111111111","sni":"hy2.example"})).unwrap()).unwrap();
+            "server":"8.8.4.4","port":8444,"password":"11111111-1111-4111-8111-111111111111","sni":"hy2.example","fingerprint":"ab".repeat(32)})).unwrap()).unwrap();
         nodes.push(hy2);
         let routing = CatalogRouting::default();
-        let mut request = input(&nodes, &routing);
-        request.selected = "Fixture Alpha · hy2";
-        let runtime = build_runtime(request).unwrap();
-        assert_eq!(runtime.dial_endpoints()[0].transport, Transport::Udp);
-        nodes[2].tls_fingerprint = Some("ab".repeat(32));
         let mut request = input(&nodes, &routing);
         request.selected = "Fixture Alpha · hy2";
         assert_eq!(
@@ -597,6 +589,11 @@ mod tests {
         assert_eq!(
             build_runtime(request).unwrap_err(),
             SingBoxError::UnsupportedCertificatePin
+        );
+        nodes[2].tls_fingerprint = None;
+        assert_eq!(
+            build_runtime(input(&nodes, &routing)).unwrap_err(),
+            SingBoxError::InvalidNode
         );
     }
 }
