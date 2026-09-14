@@ -13,14 +13,12 @@ pub use core::{
     AuthenticatedRequest, AuthenticatedSessionRequest, BootstrapPins, ClashConfig, CoreConfig,
     DirectRuntimeReloadResult, DnsProtectionStatus, FinalizeDirectRuntimeReloadRequest, IpcCommand,
     KillSwitchConfig, KillSwitchLockRequest, KillSwitchStatus, KillSwitchStatusMode,
-    MacosKillSwitchConfig, MacosKillSwitchMode, MacosProxyConfig, LEGACY_OWNER_TOKEN_FILE_NAME,
-    OWNER_TOKEN_FILE_NAME,
-    OwnerCredentials, OwnerIdentity, OwnerSessionHandle, OwnerSessionProof, ProtocolInfo,
-    ProtocolVersion, ProxyApplyOutcome, ProxyEndpoint, ProxyProtocol, RemoteProvider,
-    RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, ReplaceProxyEndpointsRequest,
-    RuntimeAsset, RuntimeBundle,
-    LEGACY_SERVICE_PROTOCOL_HEADER, SERVICE_PROTOCOL_HEADER, SESSION_TOKEN_HEX_LEN,
-    ServiceErrorCode, ServiceLifecycleState,
+    LEGACY_OWNER_TOKEN_FILE_NAME, LEGACY_SERVICE_PROTOCOL_HEADER, MacosKillSwitchConfig,
+    MacosKillSwitchMode, MacosProxyConfig, OWNER_TOKEN_FILE_NAME, OwnerCredentials, OwnerIdentity,
+    OwnerSessionHandle, OwnerSessionProof, ProtocolInfo, ProtocolVersion, ProxyApplyOutcome,
+    ProxyEndpoint, ProxyProtocol, RemoteProvider, RenewDirectRuntimeReloadRequest,
+    ReplaceDirectEndpointsRequest, ReplaceProxyEndpointsRequest, RuntimeAsset, RuntimeBundle,
+    SERVICE_PROTOCOL_HEADER, SESSION_TOKEN_HEX_LEN, ServiceErrorCode, ServiceLifecycleState,
     ServiceOperationKind, ServiceOperationSnapshot, ServiceStatusSnapshot, StageRejection,
     StageRuntimeOutcome, StartClashRequest, StartClashResult, StopClashOptions, StopClashPayload,
     WriterConfig, canonical_direct_endpoints, direct_endpoint_digest,
@@ -126,12 +124,14 @@ pub const PROTOCOL_EPOCH: u16 = 2;
 /// Revision 15 adds `/kill-switch/proxy-endpoints` so a live node switch can widen or
 /// shrink the Reality destination permit without restarting the core. MIN_REQUIRED stays 14:
 /// an older Service is still fail-closed; the App falls back to a cold switch.
-pub const PROTOCOL_REVISION: u16 = 15;
+/// Revision 16 replaces the runtime wire payload with explicit sing-box JSON and
+/// Windows process-owned loopback control. No legacy YAML payload is admitted.
+pub const PROTOCOL_REVISION: u16 = 16;
 /// Revisions 7 through 12 are wire/behaviour incompatible with older peers. Reject a mismatch at
 /// the protocol probe rather than failing later during a required mutation. Revision 13 is
 /// additive: a revision-12 client may still pair.
-pub const MIN_SUPPORTED_CLIENT_REVISION: u16 = 12;
-pub const MIN_REQUIRED_SERVICE_REVISION: u16 = 14;
+pub const MIN_SUPPORTED_CLIENT_REVISION: u16 = 16;
+pub const MIN_REQUIRED_SERVICE_REVISION: u16 = 16;
 
 /// Ports the staged core may reach directly on the physical NIC while a DIRECT plan is live.
 ///

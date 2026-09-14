@@ -249,6 +249,11 @@ pub(crate) async fn stage_runtime(
     owner: &AuthenticatedOwner,
     bundle: &RuntimeBundle,
 ) -> Result<StageRuntimeOutcome, ServiceError> {
+    if cfg!(all(windows, not(feature = "test"))) {
+        return Err(super::assets::invalid_asset(
+            "TONO_SINGBOX_RESTART_REQUIRED: live configuration staging is forbidden; use protected StartClash replacement",
+        ));
+    }
     let Some((core_instance, running)) = running_core_instance().await else {
         return Ok(StageRuntimeOutcome::RestartRequired {
             reason: StageRejection::CoreNotRunning,
@@ -334,8 +339,13 @@ pub(crate) async fn stage_runtime(
     }
 
     let config_path = PathBuf::from(&running.core_config.config_path);
-    if let Err(error) =
-        commit_staged_config(&generation, &config_path, &bundle.yaml, &plan.manifest).await
+    if let Err(error) = commit_staged_config(
+        &generation,
+        &config_path,
+        &bundle.runtime_json,
+        &plan.manifest,
+    )
+    .await
     {
         // The manifest may already be in place while `config.yaml` is not, which would leave it
         // claiming a remote cache belongs to a url the running core is not using. Discarding it

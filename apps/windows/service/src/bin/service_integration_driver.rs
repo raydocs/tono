@@ -1,6 +1,9 @@
 #![cfg(feature = "client")]
 
 use anyhow::Context as _;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+use tokio::time::sleep;
 #[cfg(feature = "test")]
 use tono_service_protocol::test_owner_credentials;
 use tono_service_protocol::{
@@ -10,9 +13,6 @@ use tono_service_protocol::{
 };
 #[cfg(not(feature = "test"))]
 use tono_service_protocol::{OWNER_TOKEN_FILE_NAME, OwnerCredentials, OwnerIdentity};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
-use tokio::time::sleep;
 
 const IPC_READY_TIMEOUT: Duration = Duration::from_secs(20);
 const IPC_PROBE_INTERVAL: Duration = Duration::from_millis(250);
@@ -251,7 +251,7 @@ async fn wait_protocol_ready() -> anyhow::Result<()> {
 async fn start_flow() -> anyhow::Result<()> {
     wait_ipc_ready().await?;
     let config = RuntimeBundle {
-        yaml: "mode: rule\n".to_string(),
+        runtime_json: "mode: rule\n".to_string(),
         assets: vec![],
         remote_providers: Vec::new(),
         core_path: mock_binary_path()?,

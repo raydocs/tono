@@ -5,6 +5,12 @@ mod common;
 #[cfg(test)]
 mod tests {
     use anyhow::{Context, Result};
+    use serial_test::serial;
+    use std::path::PathBuf;
+    use std::process::{Child, Command, ExitStatus};
+    use std::time::{Duration, Instant};
+    use tokio::sync::oneshot;
+    use tokio::time::sleep;
     #[cfg(unix)]
     use tono_service_protocol::acquire_service_owner;
     use tono_service_protocol::{
@@ -14,12 +20,6 @@ mod tests {
         set_core_watchdog_config_for_tests, start_clash, stop_clash, stop_ipc_server,
         write_core_runtime_record_for_tests,
     };
-    use serial_test::serial;
-    use std::path::PathBuf;
-    use std::process::{Child, Command, ExitStatus};
-    use std::time::{Duration, Instant};
-    use tokio::sync::oneshot;
-    use tokio::time::sleep;
 
     use crate::common;
 
@@ -270,7 +270,7 @@ mod tests {
             .data
             .map_or(0, |status| status.restart_count);
         let runtime_bundle = RuntimeBundle {
-            yaml: "mode: rule\n".to_string(),
+            runtime_json: "mode: rule\n".to_string(),
             assets: vec![],
             remote_providers: Vec::new(),
             core_path: crash_binary.to_string_lossy().to_string(),

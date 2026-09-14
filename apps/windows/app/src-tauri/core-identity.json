@@ -1,10 +1,18 @@
 {
-  "tonoCoreVersion": "v1.19.30-tono-gvisor-adaptive.1",
-  "mihomoUpstreamTag": "v1.19.30",
-  "upstreamCommit": "ac017cdd246ce8bd547653d927e7bf77d7ee73d5",
-  "tonoPatchRevision": "gvisor-adaptive.1",
+  "engine": "sing-box",
+  "tonoCoreVersion": "1.15.0-alpha.3-tono-m1.1",
+  "upstreamTag": "v1.15.0-alpha.3",
+  "upstreamCommit": "93fff5954390367dd456cad3cbd79be54f8b941f",
+  "publishedAt": "2026-09-13T14:02:08Z",
+  "releaseUrl": "https://github.com/SagerNet/sing-box/releases/tag/v1.15.0-alpha.3",
+  "patches": [],
   "goVersion": "go1.27.1",
-  "buildTags": ["with_gvisor"],
-  "singTun": "v0.4.22",
-  "tcpBufferBytes": { "min": 4096, "default": 32768, "max": 131072 }
+  "goAMD64": "v2",
+  "cgoEnabled": false,
+  "buildTags": ["with_gvisor", "with_quic", "with_utls", "with_clash_api"],
+  "singTun": "v0.9.4-0.20260912075549-869f0a4d76af",
+  "goModSha256": "c8a55d750ff56af8e097478b7ce88f10224f406041e73002ef89e4c8ade5769b",
+  "goSumSha256": "121265484ad99c79970266e5896eba82ff660c2921624225afa316e408f6d38e",
+  "binarySha256": "9fa8e825a697ccea2beed17d8766af947084041173df4d80b622e2bf730d544f",
+  "buildManifestSha256": "2f5642f51c03a620f870c069239ad8b35d93e123903765da430e62070e00f757"
 }

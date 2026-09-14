@@ -5,9 +5,10 @@
 use std::sync::Arc;
 use tauri::AppHandle;
 use tono_core::{
-    config::{self, build_owned_runtime_with_ports, generate_controller_secret},
+    config::{self, generate_controller_secret},
     connection::ConnectStage,
     node::ValidatedNode,
+    sing_box::{RuntimeInput, build_runtime},
 };
 use tono_logging::{Type, logging};
 use tono_service_protocol::{KillSwitchConfig, RuntimeBundle};
@@ -19,16 +20,19 @@ use super::controller::{
     allocate_runtime_ports, configure_owned_controller_for_ui, lock_kill_switch_with_retries, preflight_bfe,
     preflight_dns_listener, wait_controller,
 };
+use super::direct::{
+    CapturedTrafficPolicy, apply_cloud_policy, clear_direct_reload_in_flight, commit_direct_policy_cancellation_safe,
+    spawn_direct_lease_heartbeat,
+};
 use super::endpoints::proxy_endpoint_of;
 use super::monitor::{
     bootstrap_hosts, refresh_control_plane_pins_from_service, spawn_control_plane_pin_refresh,
     spawn_exit_identity_lookup, spawn_network_monitor,
 };
-use super::probes::{verify_fake_ip, verify_post_lock};
-use super::status::set_stage;
-use super::direct::{CapturedTrafficPolicy, WINDOWS_OPTIONAL_DIRECT_ENABLED, spawn_optional_direct_after_connected};
 use super::platform::{detect_physical_interface, write_redacted_copy};
+use super::probes::{verify_fake_ip, verify_post_lock};
 use super::reconnect::active_runtime_resume_status;
+use super::status::set_stage;
 use super::{failure::StageFailure, transaction::ConnectTransaction};
 use crate::{
     core::service,
@@ -101,8 +105,12 @@ pub(super) async fn run_stages(
             document,
         })
     };
-    let needs_physical_interface = WINDOWS_OPTIONAL_DIRECT_ENABLED
-        && traffic_policy.as_ref().is_some_and(|policy| {
+    if traffic_policy.is_none() {
+        return Err(StageFailure::error(
+            "TONO_SINGBOX_UNTRUSTED_POLICY: current policy is required",
+        ));
+    }
+    let needs_physical_interface = traffic_policy.as_ref().is_some_and(|policy| {
             !policy.document.domains.is_empty()
                 || !policy.document.media_endpoints.is_empty()
                 || !policy.document.web_domains.is_empty()
@@ -199,16 +207,21 @@ pub(super) async fn run_stages(
     // §5: the owned runtime carries a fresh random controller secret; only
     // the redacted copy may touch disk.
     let secret = generate_controller_secret();
-    let runtime = build_owned_runtime_with_ports(
+    let runtime = build_runtime(RuntimeInput {
         nodes,
-        &node.name,
-        &secret,
-        None,
-        home_node.map(|home| home.name.as_str()),
-        home_socks5,
-        runtime_ports,
-    )
+        selected: &node.name,
+        controller_secret: &secret,
+        direct_plan: None,
+        routing: &routing.cloned().unwrap_or_default(),
+        platform: "windows-amd64-v2",
+        ports: runtime_ports,
+        required_capabilities: &["tun".into(), "dns-proxied".into(), "clash-api".into()],
+        home_process_names: &config::HOME_PROCESS_NAMES.map(String::from),
+        home_process_path_regexes: &config::home_process_path_regexes(),
+        direct_process_names: &config::REVIEWED_DIRECT_PROCESS_NAMES.map(String::from),
+    })
     .map_err(StageFailure::error)?;
+    let proxy_endpoints = super::endpoints::compiled_endpoints(runtime.dial_endpoints());
     // Under the transaction like every other stage on this path. `apply_cloud_policy`'s copy is
     // already covered because that whole stage runs inside a `wait`; this one was the only
     // uncovered await in `run_stages`, and an %APPDATA% redirected to an offline share parks it
@@ -218,11 +231,11 @@ pub(super) async fn run_stages(
     transaction
         .wait(
             "writing redacted runtime copy",
-            write_redacted_copy(state, &runtime.redacted_yaml()),
+            write_redacted_copy(state, &runtime.redacted_json()),
         )
         .await?;
     let bundle = RuntimeBundle {
-        yaml: runtime.yaml().to_string(),
+        runtime_json: runtime.runtime_json().to_string(),
         assets: Vec::new(),
         remote_providers: Vec::new(),
         core_path: core_path.to_string_lossy().into_owned(),
@@ -265,7 +278,7 @@ pub(super) async fn run_stages(
     // Pin every later session-gated mutation to the owner generation created by this StartClash.
     // A stale detached operation must never consult the mutable global and accidentally adopt a
     // node switch's replacement session.
-    let service_session = service::active_service_session().map_err(StageFailure::error)?;
+    let mut service_session = service::active_service_session().map_err(StageFailure::error)?;
 
     // §6.4 + §6.5: the controller bind and the WinTUN LUID appear independently
     // after StartClash. Waiting for them in series paid the lock ladder on
@@ -315,6 +328,55 @@ pub(super) async fn run_stages(
     )
     .await?;
 
+    let snapshot = service::tono_service_status_snapshot()
+        .await
+        .map_err(StageFailure::error)?;
+    if snapshot.active_generation != Some(service_session.generation)
+        || snapshot.runtime_sha256.as_deref() != Some(runtime.runtime_sha256())
+    {
+        return Err(StageFailure::error("TONO_SINGBOX_RUNTIME_IDENTITY_UNPROVEN"));
+    }
+    // Necessary DIRECT policy is part of admission, not a background optimization.
+    // A failure cannot publish Connected with a silently different routing policy.
+    let pending = transaction
+        .wait(
+            "applying DIRECT policy",
+            apply_cloud_policy(
+                state,
+                node,
+                nodes,
+                home_node,
+                home_socks5,
+                generation,
+                &secret,
+                controller_port,
+                mixed_port,
+                traffic_policy,
+                physical_interface,
+                &service_session,
+            ),
+        )
+        .await??;
+    let mut direct_heartbeat = None;
+    if let Some(pending) = pending {
+        service_session = pending.session.clone();
+        transaction
+            .wait(
+                "reasserting protected DNS after Core replacement",
+                enable_dns_cancellation_safe(state, generation, service_session.clone()),
+            )
+            .await??;
+        let (status, heartbeat) = transaction
+            .wait(
+                "committing DIRECT policy",
+                commit_direct_policy_cancellation_safe(state, generation, pending),
+            )
+            .await??;
+        kill_status = status;
+        direct_heartbeat = Some(heartbeat);
+        clear_direct_reload_in_flight(state, generation).await;
+    }
+
     // The durable logical-session latch is committed only after every existing check and a
     // final generation guard. A failure remains an ordinary connect failure.
     ensure_fresh(state, generation).await?;
@@ -344,6 +406,8 @@ pub(super) async fn run_stages(
         inner.controller_generation = inner.controller_generation.wrapping_add(1);
         inner.fsm.mark_session_verified();
         inner.fsm.connect_succeeded().map_err(StageFailure::error)?;
+        inner.optional_direct_active = direct_heartbeat.is_some();
+        inner.optional_direct_skip = None;
         crate::tono::update_handoff::commit_if_verified(env!("CARGO_PKG_VERSION"));
         inner.exit_ip = None;
         inner.exit_org = None;
@@ -387,20 +451,8 @@ pub(super) async fn run_stages(
         home_node.map(|home| home.name.clone())
     };
     spawn_control_plane_pin_refresh(state, app, generation, residential_target).await;
-    spawn_optional_direct_after_connected(
-        state,
-        app,
-        node.clone(),
-        nodes.to_vec(),
-        home_node.cloned(),
-        home_socks5.cloned(),
-        secret,
-        controller_port,
-        mixed_port,
-        generation,
-        traffic_policy,
-        physical_interface,
-        service_session,
-    );
+    if let Some(heartbeat) = direct_heartbeat {
+        spawn_direct_lease_heartbeat(state, generation, heartbeat).await;
+    }
     Ok(())
 }

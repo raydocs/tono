@@ -30,7 +30,7 @@ pub struct FailurePlan {
     pub restrict_bootstrap: bool,
 }
 
-pub fn plan_failure(armed: bool, session_verified: bool, was_disconnecting: bool) -> FailurePlan {
+pub fn plan_failure(armed: bool, _session_verified: bool, was_disconnecting: bool) -> FailurePlan {
     if was_disconnecting {
         // A disconnect is in flight and owns the release sequence end to
         // end; the failing transaction must not double it.
@@ -39,7 +39,7 @@ pub fn plan_failure(armed: bool, session_verified: bool, was_disconnecting: bool
             stop_core: None,
             restrict_bootstrap: false,
         }
-    } else if armed && session_verified {
+    } else if armed {
         FailurePlan {
             mark_armed: true,
             stop_core: Some(false),
@@ -111,11 +111,7 @@ pub fn retry_now_is_noop(status: &ConnectionStatus) -> bool {
 /// or transaction exists. Two racing attempts calling this back-to-back
 /// produce exactly one `true` — the observable proof that only one of them
 /// enters `run_stages`.
-pub fn single_flight_begin(
-    fsm: &mut ConnectionFsm,
-    current_generation: u64,
-    captured_generation: u64,
-) -> bool {
+pub fn single_flight_begin(fsm: &mut ConnectionFsm, current_generation: u64, captured_generation: u64) -> bool {
     if current_generation != captured_generation {
         return false;
     }

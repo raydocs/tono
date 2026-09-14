@@ -1,9 +1,9 @@
 //! Physical interface detection and the non-critical redacted runtime copy.
 
+use crate::tono::state::TonoState;
 use std::sync::Arc;
 use std::time::Duration;
 use tono_logging::{Type, logging};
-use crate::tono::state::TonoState;
 
 /// One absolute budget covers service readiness, the cold Core start, controller/DNS
 /// verification, fail-closed cloud-policy hot reload, locking, and the post-lock verification
@@ -67,9 +67,8 @@ pub(super) async fn detect_physical_interface_route_command() -> Result<String, 
 #[cfg(windows)]
 pub(super) fn detect_physical_interface_windows() -> Result<String, String> {
     use windows_sys::Win32::NetworkManagement::IpHelper::{
-        GetBestRoute2, GetIfEntry2, IF_TYPE_ETHERNET_CSMACD, IF_TYPE_IEEE80211,
-        IF_TYPE_PROP_VIRTUAL, IF_TYPE_TUNNEL, MIB_IF_ROW2, MIB_IF_TYPE_LOOPBACK,
-        MIB_IPFORWARD_ROW2,
+        GetBestRoute2, GetIfEntry2, IF_TYPE_ETHERNET_CSMACD, IF_TYPE_IEEE80211, IF_TYPE_PROP_VIRTUAL, IF_TYPE_TUNNEL,
+        MIB_IF_ROW2, MIB_IF_TYPE_LOOPBACK, MIB_IPFORWARD_ROW2,
     };
     use windows_sys::Win32::Networking::WinSock::{AF_INET, IN_ADDR, SOCKADDR_INET};
 
@@ -108,9 +107,7 @@ pub(super) fn detect_physical_interface_windows() -> Result<String, String> {
     let mut rejected = Vec::new();
     for luid in candidates {
         let mut interface = MIB_IF_ROW2 {
-            InterfaceLuid: windows_sys::Win32::NetworkManagement::Ndis::NET_LUID_LH {
-                Value: luid,
-            },
+            InterfaceLuid: windows_sys::Win32::NetworkManagement::Ndis::NET_LUID_LH { Value: luid },
             ..Default::default()
         };
         // SAFETY: `interface` is initialized and the LUID came from IP Helper.
@@ -157,9 +154,7 @@ pub(super) fn detect_physical_interface_windows() -> Result<String, String> {
 /// metric order so the caller can reject virtual adapters without disabling them.
 #[cfg(windows)]
 pub(super) fn default_route_interface_luids() -> Result<Vec<u64>, String> {
-    use windows_sys::Win32::NetworkManagement::IpHelper::{
-        FreeMibTable, GetIpForwardTable2, MIB_IPFORWARD_TABLE2,
-    };
+    use windows_sys::Win32::NetworkManagement::IpHelper::{FreeMibTable, GetIpForwardTable2, MIB_IPFORWARD_TABLE2};
     use windows_sys::Win32::Networking::WinSock::AF_INET;
 
     let mut table: *mut MIB_IPFORWARD_TABLE2 = std::ptr::null_mut();
@@ -256,7 +251,7 @@ pub(super) fn open_private_redacted_copy(path: &std::path::Path) -> std::io::Res
 /// the log instead, and the timeout is reported separately from a write error so a stalled
 /// redirected AppData is diagnosable rather than looking like a permissions problem.
 pub(super) async fn write_redacted_copy(state: &Arc<TonoState>, redacted: &str) {
-    let path = { state.lock().await.catalog_dir.join("owned-runtime.redacted.yaml") };
+    let path = { state.lock().await.catalog_dir.join("owned-runtime.redacted.json") };
     let write = tokio::task::spawn_blocking({
         let redacted = redacted.to_string();
         move || -> std::io::Result<()> {

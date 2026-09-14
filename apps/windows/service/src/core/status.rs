@@ -55,6 +55,17 @@ pub async fn service_status_snapshot(owner: &AuthenticatedOwner) -> Result<Servi
     #[cfg(not(windows))]
     let network_events = crate::core::structure::NetworkEventsStatus::default();
     let (snapshot_generation, active_operation) = crate::core::operation::snapshot();
+    let runtime_sha256 = match crate::core::runtime::read_core_runtime_record().await {
+        Ok(Some(record)) if core_pid == Some(record.pid) && is_active => {
+            (crate::core::process::process_identity(record.pid)
+                .ok()
+                .flatten()
+                == Some(record.identity))
+            .then_some(record.runtime_sha256)
+            .flatten()
+        }
+        _ => None,
+    };
     Ok(ServiceStatusSnapshot {
         snapshot_generation,
         active_operation,
@@ -62,6 +73,7 @@ pub async fn service_status_snapshot(owner: &AuthenticatedOwner) -> Result<Servi
         active_generation,
         service_state,
         core_pid,
+        runtime_sha256,
         core_generation: core.as_ref().map_or(0, |core| core.core_generation),
         core_started_at: core.as_ref().and_then(|core| core.core_started_at),
         last_core_exit_reason: core

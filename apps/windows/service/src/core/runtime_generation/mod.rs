@@ -19,9 +19,11 @@ mod authenticode;
 /// is checked on every platform's test run.
 #[cfg(any(windows, test))]
 mod core_integrity;
+#[cfg(windows)]
+pub(crate) use core_integrity::verify_core_binary;
 mod staging;
 
-pub(crate) use assets::{PreparedRuntime, prepare_runtime};
 #[cfg(windows)]
 pub(crate) use assets::is_installed_core_image_path;
+pub(crate) use assets::{PreparedRuntime, prepare_runtime};
 pub(crate) use staging::stage_runtime;

@@ -180,8 +180,9 @@ pub struct RemoteProvider {
 /// "Complete" is load-bearing: staging decides what to delete by subtracting this declaration
 /// from what is on disk, so anything omitted here is something staging cannot reason about.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RuntimeBundle {
-    pub yaml: String,
+    pub runtime_json: String,
     pub assets: Vec<RuntimeAsset>,
     /// Absent on the wire from clients older than revision 2; an empty list simply means
     /// staging cannot distinguish a reusable cache from a stale one and keeps neither.
@@ -693,6 +694,9 @@ pub struct ServiceStatusSnapshot {
     pub active_generation: Option<u64>,
     pub service_state: ServiceLifecycleState,
     pub core_pid: Option<u32>,
+    /// Exact JSON bytes recorded at start, only exposed for the currently owned PID.
+    #[serde(default)]
+    pub runtime_sha256: Option<String>,
     /// Monotonic Core process-instance identity within one Service process. Unlike
     /// `restart_count`, this changes for every publication, including an ordinary app-driven
     /// replacement, and is sampled atomically with `core_pid` by the Service.
@@ -818,7 +822,7 @@ mod tests {
     fn service_250_contract_round_trips_owner_session_and_proxy() {
         let request = StartClashRequest {
             runtime: RuntimeBundle {
-                yaml: "mode: rule\n".to_owned(),
+                runtime_json: "{}".to_owned(),
                 assets: Vec::new(),
                 remote_providers: Vec::new(),
                 core_path: "/tmp/mihomo".to_owned(),
@@ -839,14 +843,13 @@ mod tests {
     }
 
     #[test]
-    fn legacy_start_and_stop_payloads_remain_compatible() {
+    fn legacy_yaml_runtime_is_rejected_before_start() {
         let old_start = serde_json::json!({
             "runtime": { "yaml": "", "assets": [], "core_path": "/mihomo" },
             "proposed_session_token": "11".repeat(32),
             "macos_proxy": null
         });
-        let decoded: StartClashRequest = serde_json::from_value(old_start).unwrap();
-        assert_eq!(decoded.kill_switch, None);
+        assert!(serde_json::from_value::<StartClashRequest>(old_start).is_err());
     }
 
     /// Fail-closed wire default: disarming machine-wide protection needs an explicit request.
@@ -1026,7 +1029,7 @@ mod tests {
         use super::{KillSwitchConfig, KillSwitchStatus, KillSwitchStatusMode, ProxyProtocol};
 
         let old_start = serde_json::json!({
-            "runtime": { "yaml": "", "assets": [], "core_path": "/mihomo" },
+            "runtime": { "runtime_json": "{}", "assets": [], "core_path": "/mihomo" },
             "proposed_session_token": "11".repeat(32),
             "macos_proxy": null,
             "kill_switch": null

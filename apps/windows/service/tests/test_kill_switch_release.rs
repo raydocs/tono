@@ -3,6 +3,7 @@
 mod common;
 
 use anyhow::{Context as _, Result};
+use serial_test::serial;
 use tono_service_protocol::{
     OwnerCredentials, OwnerSessionProof, RuntimeBundle, ServiceErrorCode, StartClashRequest,
     StopClashOptions, get_kill_switch_status as client_get_kill_switch_status,
@@ -13,7 +14,6 @@ use tono_service_protocol::{
     start_clash as client_start_clash, stop_clash_with_options as client_stop_clash_with_options,
     stop_ipc_server,
 };
-use serial_test::serial;
 
 fn runtime_bundle() -> Result<RuntimeBundle> {
     let mock_binary = common::test_bin_path("mock_binary");
@@ -22,7 +22,7 @@ fn runtime_bundle() -> Result<RuntimeBundle> {
         "missing mock_binary at {mock_binary:?}"
     );
     Ok(RuntimeBundle {
-        yaml: "mode: rule\n".to_string(),
+        runtime_json: "mode: rule\n".to_string(),
         assets: vec![],
         remote_providers: Vec::new(),
         core_path: mock_binary.to_string_lossy().into_owned(),

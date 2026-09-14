@@ -1,13 +1,6 @@
 //! Domain Tauri commands. Wire names stay unchanged.
 
-use std::{net::SocketAddr, sync::Arc, time::Duration};
-use tauri::{AppHandle, Manager as _};
-use tono_logging::{Type, logging};
-use tono_core::{
-    auth::{ApiError, DEFAULT_DEVICE_LIMIT, User, normalize_installation_id},
-    connection::{ConnectStage, UiState},
-    credentials::{CredentialKey, CredentialStore as _},
-};
+use super::*;
 use crate::{
     core::service,
     process::AsyncHandler,
@@ -18,7 +11,14 @@ use crate::{
         state::{AccountState, TonoInner, TonoState},
     },
 };
-use super::*;
+use std::{net::SocketAddr, sync::Arc, time::Duration};
+use tauri::{AppHandle, Manager as _};
+use tono_core::{
+    auth::{ApiError, DEFAULT_DEVICE_LIMIT, User, normalize_installation_id},
+    connection::{ConnectStage, UiState},
+    credentials::{CredentialKey, CredentialStore as _},
+};
+use tono_logging::{Type, logging};
 
 /// Servers from the validated catalog, US/JP first, with the selection flag.
 #[tauri::command]
@@ -37,7 +37,8 @@ pub async fn tono_servers(state: tauri::State<'_, Arc<TonoState>>) -> Result<Vec
                     server: node.server.to_string(),
                     port: node.port,
                     selected: inner.selected_node.as_deref() == Some(node.name.as_str()),
-                    available: !catalog_sync::is_exit_blocked(&node.name),
+                    available: !catalog_sync::is_exit_blocked(&node.name)
+                        && !(node.is_hysteria2() && node.tls_fingerprint.is_some()),
                 })
         })
         .collect())
@@ -138,9 +139,7 @@ pub async fn tono_test_available_servers(
         let nodes = inner
             .nodes
             .iter()
-            .filter_map(|node| {
-                catalog_sync::tcp_probe_socket(node).map(|address| (node.name.clone(), address))
-            })
+            .filter_map(|node| catalog_sync::tcp_probe_socket(node).map(|address| (node.name.clone(), address)))
             .collect::<Vec<_>>();
         inner.server_test_generation = inner.server_test_generation.wrapping_add(1);
         let generation = inner.server_test_generation;
@@ -209,6 +208,13 @@ pub async fn tono_select_server(
         let mut inner = state.lock().await;
         if !inner.nodes.iter().any(|node| node.name == name) {
             return Err("unknown server".to_string());
+        }
+        if inner
+            .nodes
+            .iter()
+            .any(|node| node.name == name && node.is_hysteria2() && node.tls_fingerprint.is_some())
+        {
+            return Err("TONO_SINGBOX_UNSUPPORTED_HY2_DER_PIN: this server is unavailable; certificate pin enforcement is not supported by the pinned core".to_string());
         }
         if catalog_sync::is_exit_blocked(&name) {
             return Err("this server is currently unavailable (network blocked)".to_string());
@@ -311,9 +317,6 @@ pub async fn tono_select_server(
 /// Execute a fresh controller delay probe through the selected exit. This is intentionally
 /// available only while Connected; cached legacy delay history is not presented as a new test.
 #[tauri::command]
-pub async fn tono_test_current_server(
-    state: tauri::State<'_, Arc<TonoState>>,
-    app: AppHandle,
-) -> Result<u64, String> {
+pub async fn tono_test_current_server(state: tauri::State<'_, Arc<TonoState>>, app: AppHandle) -> Result<u64, String> {
     connection::test_current_server(state.inner(), &app).await
 }

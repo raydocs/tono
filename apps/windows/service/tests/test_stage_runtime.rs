@@ -10,16 +10,16 @@
 mod common;
 
 use anyhow::{Context as _, Result};
+use serial_test::serial;
+use std::path::{Path, PathBuf};
+#[cfg(windows)]
+use std::time::{Duration, Instant};
 use tono_service_protocol::{
     OwnerCredentials, OwnerSessionProof, RemoteProvider, RuntimeAsset, RuntimeBundle,
     ServiceErrorCode, StageRejection, StageRuntimeOutcome, StartClashRequest, get_status,
     run_ipc_server, service_paths, stage_runtime, start_clash, stop_clash, stop_ipc_server,
     test_owner_credentials,
 };
-use serial_test::serial;
-use std::path::{Path, PathBuf};
-#[cfg(windows)]
-use std::time::{Duration, Instant};
 
 /// An owner whose application root is canonical, since that is what the service authenticates
 /// against and what every declared asset source is then required to sit below.
@@ -45,7 +45,7 @@ fn sole_generation(credentials: &OwnerCredentials) -> Result<PathBuf> {
 
 fn bundle(app_root: &Path, yaml: &str) -> RuntimeBundle {
     RuntimeBundle {
-        yaml: yaml.to_owned(),
+        runtime_json: yaml.to_owned(),
         assets: Vec::new(),
         remote_providers: Vec::new(),
         core_path: app_root
@@ -137,7 +137,7 @@ impl RunningCore {
 
     fn staged_config(&self) -> Result<String> {
         Ok(std::fs::read_to_string(
-            self.generation.join("config.yaml"),
+            self.generation.join("config.json"),
         )?)
     }
 
@@ -181,7 +181,7 @@ async fn staging_replaces_the_configuration_and_leaves_the_core_running() -> Res
         };
         assert_eq!(
             Path::new(&config_path),
-            core.generation.join("config.yaml"),
+            core.generation.join("config.json"),
             "staging must write into the generation the core is already running in"
         );
         assert_eq!(core.staged_config()?, "mode: global\n");

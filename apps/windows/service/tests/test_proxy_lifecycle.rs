@@ -3,13 +3,14 @@
 mod common;
 
 use anyhow::{Context as _, Result};
+use serde::Deserialize;
+use serial_test::serial;
 use tono_service_protocol::{
     AuthenticatedRequest, IpcCommand, MacosProxyConfig, OwnerSessionProof, RuntimeBundle,
     ServiceErrorCode, ServiceOperationKind, StartClashRequest, StartClashResult, get_status,
-    prepare_core_start, run_ipc_server, set_system_proxy, start_clash, stop_clash, stop_ipc_server, test_client,
+    prepare_core_start, run_ipc_server, set_system_proxy, start_clash, stop_clash, stop_ipc_server,
+    test_client,
 };
-use serde::Deserialize;
-use serial_test::serial;
 
 #[derive(Debug, Deserialize)]
 struct WireResponse<T> {
@@ -60,7 +61,7 @@ async fn client_uses_versioned_session_aware_proxy_lifecycle() -> Result<()> {
     assert_eq!(preparation.code, 0, "{}", preparation.message);
     assert_eq!(preparation.data, Some(0));
     let bundle = RuntimeBundle {
-        yaml: "mode: rule\n".to_owned(),
+        runtime_json: "mode: rule\n".to_owned(),
         assets: vec![],
         remote_providers: Vec::new(),
         core_path: common::test_bin_path("mock_binary")
@@ -102,7 +103,7 @@ async fn client_uses_versioned_session_aware_proxy_lifecycle() -> Result<()> {
         credentials,
         payload: StartClashRequest {
             runtime: RuntimeBundle {
-                yaml: "mode: rule\n".to_owned(),
+                runtime_json: "mode: rule\n".to_owned(),
                 assets: vec![],
                 remote_providers: Vec::new(),
                 core_path: common::test_bin_path("mock_binary")
@@ -147,7 +148,7 @@ async fn owner_b_cannot_overtake_owner_a_proxy_operation() -> Result<()> {
         97_002,
     )?;
     let bundle = RuntimeBundle {
-        yaml: "mode: rule\n".to_owned(),
+        runtime_json: "mode: rule\n".to_owned(),
         assets: vec![],
         remote_providers: Vec::new(),
         core_path: common::test_bin_path("mock_binary")
