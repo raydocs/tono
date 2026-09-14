@@ -20,6 +20,7 @@ import {
   pendingNodes,
 } from '@/lib/ledger';
 import { useResource } from '@/lib/use-resource';
+import '@/styles/settings-ledger.css';
 import { LedgerDrawer } from './LedgerDrawer';
 import { LedgerRecon } from './LedgerRecon';
 import { LedgerTable } from './LedgerTable';
@@ -71,7 +72,7 @@ export function Ledger() {
   }, [emails]);
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="settings-ledger flex flex-col gap-8">
       <div className="flex flex-col gap-4">
         <Toolbar
           aside={(
@@ -218,7 +219,7 @@ function Totals({ summary }: { summary: MonthSummaryDto }) {
   const cell = (value: number) => measured<number | null>(value, at, words.source);
   const money = (value: number) => ({ number: formatCny(value) ?? copy.missing });
   return (
-    <div className="grid gap-6 border-y border-[var(--hairline)] py-4 sm:grid-cols-3">
+    <div className="settings-ledger-totals grid gap-6 py-4 sm:grid-cols-3">
       <MetricCard label={words.revenue} value={cell(summary.revenueCnyMinor)} format={money} />
       <MetricCard label={words.cost} value={cell(summary.costCnyMinor)} format={money} />
       <MetricCard label={words.margin} value={cell(summary.marginCnyMinor)} format={money} />
