@@ -1,16 +1,48 @@
-/* Shell rail prototype: a floating capsule, not an attached sidebar.
+/* Shell prototype: floating capsules on a quiet canvas.
  *
- * Scoped under `.shell-rail` throughout. The header, the pages and the global
- * `.nav-item` definition are untouched — this file only styles the new rail
- * markup in Shell.tsx. Icons stay monochrome; the active state is a circle in
- * a quiet accent wash so the one solid accent on a page remains the primary
- * action. The Chinese name lives in the accessible name always and becomes
- * visible on hover or keyboard focus. */
+ * Scoped under `.shell-root / .shell-rail / .shell-frame` throughout. Routes,
+ * roles, header controls and pages are untouched — this file only recomposes
+ * the chrome around them. Icons stay monochrome; the live page is a solid
+ * circle. The Chinese name is always the accessible name and becomes visible
+ * on hover or keyboard focus. */
+
+.shell-root {
+  gap: 12px;
+  padding: 12px;
+}
+
+/* The outer card the pages sit in; the rail floats outside it on the canvas,
+ * like the reference. No overflow clipping here: clipped ancestors break the
+ * sticky aux column on Today. */
+.shell-frame {
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 28px;
+  box-shadow: var(--shadow-card-lg);
+}
+
+.dark .shell-frame {
+  border-color: rgb(255 255 255 / 0.07);
+  box-shadow: var(--shadow-card-lg), inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+/* The header keeps its DOM and controls; only the bar styling lifts off so
+ * the pills on it (search, source, avatar) read as floating controls. */
+.shell-frame .shell-header {
+  background: transparent;
+  border-bottom: 0;
+}
 
 .shell-rail {
+  position: relative;
+  z-index: 5;
   flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   width: 96px;
-  padding: 16px 0 16px 16px;
+  padding: 4px 0 4px 4px;
   background: transparent;
   border: 0;
 }
@@ -33,6 +65,11 @@
   box-shadow: var(--shadow-card-lg), inset 0 1px 0 rgb(255 255 255 / 0.06);
 }
 
+.rail-brandbox {
+  padding: 8px;
+  border-radius: 999px;
+}
+
 .rail-brand {
   display: flex;
   align-items: center;
@@ -40,20 +77,11 @@
   flex: none;
   width: 40px;
   height: 40px;
-  margin-bottom: 4px;
   border-radius: 999px;
   background: var(--accent);
   color: #ffffff;
   font-size: 13px;
   font-weight: 600;
-}
-
-.rail-sep {
-  flex: none;
-  width: 24px;
-  height: 1px;
-  margin: 2px 0;
-  background: var(--hairline);
 }
 
 .rail-nav {
@@ -73,7 +101,7 @@
   height: 48px;
   border-radius: 999px;
   color: var(--muted-foreground);
-  transition: background 150ms ease, color 150ms ease, transform 150ms ease;
+  transition: background 150ms ease, color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
 }
 
 .rail-link:hover {
@@ -83,8 +111,9 @@
 }
 
 .rail-link[aria-current="page"] {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+  box-shadow: 0 6px 16px rgb(91 76 245 / 0.35);
 }
 
 .rail-link:focus-visible {
@@ -129,16 +158,32 @@
 }
 
 @media (max-width: 959px) {
-  /* A floating bottom capsule instead of a squeezed sidebar: five 48 px
-   * targets with room around them, in normal reading order after nothing —
-   * the rail stays first in the DOM on every width. It sits under the Radix
-   * overlay so an open sheet covers it rather than fighting it. */
+  .shell-root {
+    padding: 0;
+  }
+
+  .shell-frame {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .dark .shell-frame {
+    border: 0;
+    box-shadow: none;
+  }
+
+  /* Two floating pills along the bottom edge — brand and pages — instead of
+   * a squeezed sidebar. It sits under the Radix overlay so an open sheet
+   * covers it rather than fighting it. */
   .shell-rail {
     position: fixed;
     z-index: 30;
-    left: 16px;
-    right: 16px;
-    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    left: 12px;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    flex-direction: row;
+    gap: 8px;
     width: auto;
     padding: 0;
   }
@@ -151,27 +196,27 @@
     border-radius: 999px;
   }
 
-  .rail-nav {
-    flex-direction: row;
-    gap: 2px;
+  .rail-brandbox {
+    flex: none;
+    padding: 6px;
   }
 
   .rail-brand {
     width: 36px;
     height: 36px;
-    margin-bottom: 0;
     font-size: 12px;
   }
 
-  .rail-sep {
-    width: 1px;
-    height: 24px;
-    margin: 0 2px;
+  .rail-nav {
+    flex: 1 1 auto;
+    flex-direction: row;
+    justify-content: space-evenly;
+    gap: 2px;
   }
 
   .rail-link {
-    width: 48px;
-    height: 48px;
+    width: 44px;
+    height: 44px;
   }
 
   .rail-link:hover {

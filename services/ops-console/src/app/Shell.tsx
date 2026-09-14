@@ -84,15 +84,17 @@ export function Shell({
   );
 
   return (
-    <div className="flex min-h-screen bg-[var(--background)] text-[var(--foreground)]">
-      {/* A floating capsule in whitespace, not an attached full-height
-          sidebar. Icons stay monochrome; the live one is a circle in a quiet
-          accent wash. The Chinese name is always the accessible name and
-          becomes visible on hover or keyboard focus. */}
+    <div className="shell-root flex min-h-screen bg-[var(--background)] text-[var(--foreground)]">
+      {/* Floating capsules in whitespace, not an attached full-height
+          sidebar: one for the brand, one for the pages. Icons stay
+          monochrome; the live one is a solid circle. The Chinese name is
+          always the accessible name and becomes visible on hover or keyboard
+          focus. */}
       <aside className="shell-rail" aria-label={copy.brand}>
-        <div className="rail-float">
+        <div className="rail-float rail-brandbox">
           <span className="rail-brand" title={copy.brand} aria-hidden>T</span>
-          <span className="rail-sep" aria-hidden />
+        </div>
+        <div className="rail-float">
           <nav className="rail-nav" aria-label={copy.brand}>
             {NAV.filter((item) => can(item.requires, role)).map((item) => {
               const Icon = item.icon;
@@ -119,8 +121,8 @@ export function Shell({
         </div>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 items-center gap-3 border-b border-[var(--hairline)] bg-[var(--surface)] px-4 min-[960px]:px-6">
+      <div className="shell-frame flex min-w-0 flex-1 flex-col">
+        <header className="shell-header flex h-14 items-center gap-3 border-b border-[var(--hairline)] bg-[var(--surface)] px-4 min-[960px]:px-6">
           <h1 className="text-page mr-auto truncate">{copy.pages[route.page]}</h1>
           <SearchBox />
           <SourcePill sources={sources} behind={consoleBehind(fetchedAt)} />
