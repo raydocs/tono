@@ -7,6 +7,7 @@ import { copy } from '@/copy/copy';
 import { usePrivacy } from '@/lib/privacy';
 import { hubApi, type HomeExit } from '@/lib/settings-legacy';
 import { useResource } from '@/lib/use-resource';
+import '@/styles/settings-assets.css';
 import { HomeExitDrawer } from './HomeExitDrawer';
 import { ImportDialog } from './ImportDialog';
 import { Toolbar } from './form';
@@ -87,7 +88,7 @@ export function HomeInventory() {
   const removingBound = removing === null ? 0 : bound.get(removing.id) ?? removing.bindCount ?? 0;
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="settings-homeinventory flex flex-col gap-8">
       <div className="flex flex-col gap-3">
         <Toolbar
           aside={(
@@ -111,6 +112,7 @@ export function HomeInventory() {
           state={state}
           emptyMessage={words.empty}
           errorMessage={exits.status === 'error' ? exits.message : undefined}
+          className="settings-inventory-table"
         />
       </div>
 
