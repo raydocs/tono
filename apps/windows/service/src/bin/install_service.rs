@@ -1211,7 +1211,10 @@ fn set_windows_service_on_demand(
 const UPDATE_HANDOFF_FILE: &str = "update-handoff.json";
 const TONO_APP_IDS: &[&str] = &["com.raydocs.tono", "com.raydocs.tono.dev"];
 
-fn update_handoff_journal_paths(app_target: Option<&Path>) -> Vec<PathBuf> {
+fn update_handoff_journal_paths(
+    app_target: Option<&Path>,
+    users_root: Option<&Path>,
+) -> std::io::Result<Vec<PathBuf>> {
     let mut paths = Vec::new();
     fn push_home(paths: &mut Vec<PathBuf>, home: PathBuf) {
         for id in TONO_APP_IDS {
@@ -1240,20 +1243,29 @@ fn update_handoff_journal_paths(app_target: Option<&Path>) -> Vec<PathBuf> {
             }
         }
     }
-    #[cfg(windows)]
-    if let Ok(drive) = std::env::var("SystemDrive") {
-        if let Ok(entries) = std::fs::read_dir(PathBuf::from(drive).join("Users")) {
-            for entry in entries.flatten() {
-                push_home(&mut paths, entry.path().join("AppData").join("Roaming"));
-            }
+    if let Some(users_root) = users_root {
+        // An incomplete candidate set cannot establish an unambiguous handoff.
+        // Propagate both opening and per-entry errors to the non-retryable gate.
+        for entry in std::fs::read_dir(users_root)? {
+            push_home(&mut paths, entry?.path().join("AppData").join("Roaming"));
         }
     }
-    paths
+    Ok(paths)
 }
 
 #[cfg_attr(not(windows), allow(dead_code))]
 fn record_install_started_for_installed_app(app_target: &Path) -> std::io::Result<()> {
-    installer_journal::record_install_started_for_paths(&update_handoff_journal_paths(Some(app_target)))
+    #[cfg(windows)]
+    let users_root = Some(
+        PathBuf::from(std::env::var_os("SystemDrive").ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "SystemDrive unavailable for journal discovery")
+        })?)
+        .join("Users"),
+    );
+    #[cfg(not(windows))]
+    let users_root: Option<PathBuf> = None;
+    let paths = update_handoff_journal_paths(Some(app_target), users_root.as_deref())?;
+    installer_journal::record_install_started_for_paths(&paths)
 }
 
 #[cfg(windows)]
@@ -2081,11 +2093,29 @@ mod tests {
     fn portable_update_journal_lives_next_to_the_gui() {
         let dir = std::env::temp_dir().join(format!("tono-gui-home-{}", std::process::id()));
         let app = dir.join("Tono.exe");
-        let paths = update_handoff_journal_paths(Some(&app));
+        let paths = update_handoff_journal_paths(Some(&app), None).unwrap();
         assert!(paths.contains(
             &dir.join(".config")
                 .join("com.raydocs.tono")
                 .join("update-handoff.json")
         ));
+    }
+
+    #[test]
+    fn incomplete_profile_discovery_cannot_authorize_an_installer_handoff() {
+        let dir = std::env::temp_dir().join(format!("tono-profile-discovery-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let users = dir.join("Users");
+        // A non-directory deterministically fails enumeration even as Orb root.
+        std::fs::write(&users, b"unavailable profile directory").unwrap();
+        assert!(update_handoff_journal_paths(None, Some(&users)).is_err());
+        assert_eq!(std::fs::read(&users).unwrap(), b"unavailable profile directory");
+        std::fs::remove_file(&users).unwrap();
+        assert!(update_handoff_journal_paths(None, Some(&users)).is_err());
+
+        std::fs::create_dir_all(users.join("initiator")).unwrap();
+        let paths = update_handoff_journal_paths(None, Some(&users)).unwrap();
+        assert!(paths.contains(&users.join("initiator/AppData/Roaming/com.raydocs.tono/update-handoff.json")));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
