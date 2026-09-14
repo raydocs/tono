@@ -1,5 +1,10 @@
 # M1 build and offline certification tooling
 
+Product integration now uses [the v2 shared contract](product-contract.md),
+[release/resource identity](release.json), and [JSON template](runtime-template.json).
+The builder pins and frozen M0 fixtures below remain unchanged. New JSON rules
+do not require a different core build; native application remains a separate gate.
+
 This package owns only CONTRACT §6's build/authentication-boundary work. It
 supports SHIP_PLAN G1/G2 evidence without closing a gate. The only baseline is
 [M0 7f64978c](https://github.com/raydocs/tono/commit/7f64978c5d9d5b8551e0b81f7247cb5a630ebf56).
