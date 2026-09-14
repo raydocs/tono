@@ -16,6 +16,7 @@ pub mod node;
 pub mod policy;
 pub mod policy_signature;
 pub mod protected_connectivity;
+pub mod sing_box;
 pub mod update_journal;
 
 pub use catalog::{
