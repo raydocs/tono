@@ -351,6 +351,17 @@ impl ConnectionFsm {
             && !self.status.is_connecting
     }
 
+    /// Explicit Retry from Protected Offline. Auto-reconnect still requires
+    /// [`Self::reconnect_permitted_now`] (a verified session). A first-connect
+    /// that armed and then failed its initial release has no verified latch,
+    /// but the tray Retry button is enabled and must actually start an attempt.
+    pub fn explicit_retry_permitted_now(&self) -> bool {
+        self.status.is_protection_blocked
+            && !self.status.is_connected
+            && !self.status.is_disconnecting
+            && !self.status.is_connecting
+    }
+
     /// Delay before the next protected reconnect attempt, consuming one step of
     /// the ladder. Handed out only while [`Self::reconnect_permitted_now`], and
     /// only while the ladder still has budget.
@@ -731,6 +742,18 @@ mod tests {
         fsm.begin_disconnect();
         assert!(!fsm.reconnect_permitted_now());
         assert_eq!(fsm.next_reconnect_delay(), None);
+    }
+
+    #[test]
+    fn explicit_retry_from_unverified_protected_offline_starts_attempt() {
+        let mut fsm = ConnectionFsm::new();
+        fsm.begin_connect();
+        fsm.mark_kill_switch_armed();
+        fsm.initial_release_failed();
+        assert!(fsm.kill_switch_armed());
+        assert!(!fsm.session_verified());
+        assert!(!fsm.reconnect_permitted_now());
+        assert!(fsm.explicit_retry_permitted_now());
     }
 
     #[test]

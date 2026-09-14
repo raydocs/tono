@@ -1,5 +1,5 @@
 import { RuleTester } from 'eslint';
-import tsParser from '@typescript-eslint/parser';
+import { parser as tsParser } from 'typescript-eslint';
 import { describe, it } from 'vitest';
 import noImplementationNoteCopy from '../tools/eslint-rules/no-implementation-note-copy.js';
 import noNumberWithoutFreshness from '../tools/eslint-rules/no-number-without-freshness.js';

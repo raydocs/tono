@@ -1,10 +1,10 @@
 use super::{
     MARK_VERIFIED_ATTEMPTS, SERVICE_REPAIR_RETRY_BACKOFF, ServiceHealth, ServiceStatus,
-    advanced_tono_generation, capture_generation_before,
+    StopCoreWatchdogAction, advanced_tono_generation, capture_generation_before,
     claim_owner_recovery_generation, forget_failed_service_repair, generate_service_session_token,
     macos_install_shell, mark_service_unavailable_after_owner_loss, mark_verified_committed,
     owner_recovery_policy, record_service_repair, service_core_path_for, service_repair_is_worth_prompting,
-    session_matches_status,
+    session_matches_status, watchdog_action_after_tono_stop_failure,
 };
 #[cfg(unix)]
 use super::{service_core_path_for_with_publisher, service_tool_path_for};
@@ -319,6 +319,21 @@ fn development_service_core_replaces_final_symlink_without_following_it() -> any
     assert_eq!(std::fs::read(&selected)?, b"selected core");
     assert_eq!(std::fs::read(&symlink_target)?, b"target bytes");
     Ok(())
+}
+
+#[test]
+fn a_stop_core_transport_error_must_restart_the_owner_watchdog() {
+    assert_eq!(
+        watchdog_action_after_tono_stop_failure(true, None),
+        StopCoreWatchdogAction::RestartMonitor
+    );
+    assert_eq!(
+        watchdog_action_after_tono_stop_failure(
+            false,
+            Some(tono_service_protocol::ServiceErrorCode::NotActive as u16)
+        ),
+        StopCoreWatchdogAction::RecoverDisplaced
+    );
 }
 
 #[test]

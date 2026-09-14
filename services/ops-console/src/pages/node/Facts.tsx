@@ -59,6 +59,18 @@ export function NodeFacts({ facts, onEdit }: { facts: NodeFactsDto; onEdit: () =
         <Fact label={copy.nodeFacts.renew} measured={when(facts.renewsAt, at)} />
         <Fact label={copy.nodeFacts.expires} measured={when(facts.expiresAt, at)} />
         <Fact label={copy.nodeFacts.notes} measured={say(facts.notes)} />
+        <Fact
+          label={copy.nodeFacts.transports}
+          measured={say(
+            facts.transports && facts.transports.length > 0
+              ? facts.transports
+                  .map((entry) =>
+                    entry === 'hy2' ? copy.transportWord.hy2 : copy.transportWord.tcp,
+                  )
+                  .join(' · ')
+              : null,
+          )}
+        />
       </div>
     </Section>
   );

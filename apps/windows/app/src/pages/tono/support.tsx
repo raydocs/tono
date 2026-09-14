@@ -24,7 +24,7 @@ import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
 import { TonoConfirmDialog } from '@/tono-ui/TonoAccountCard'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 
-import { nodeCityTitleKey, nodeDisplayName } from './node-meta'
+import { nodeCityLabel } from './node-meta'
 
 const hex = (color: string, alpha: number) =>
   `${color}${Math.round(alpha * 255)
@@ -326,9 +326,7 @@ const SupportPage = () => {
             label={t('tono.support.summary.node')}
             value={
               report?.selectedServer
-                ? nodeCityTitleKey(report.selectedServer)
-                  ? t(nodeCityTitleKey(report.selectedServer)!)
-                  : nodeDisplayName(report.selectedServer)
+                ? nodeCityLabel(report.selectedServer, t)
                 : '—'
             }
           />

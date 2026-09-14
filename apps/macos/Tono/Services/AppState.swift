@@ -77,6 +77,9 @@ final class AppState {
     var disconnectionStartedAt: Date?
     var completedConnectionStages: Set<ConnectionStage> = []
     var lastConnectionFailure: ConnectionFailure?
+    /// Failed update journal still on disk. Dashboard tells the customer to
+    /// disconnect and reinstall; a later connect must not hide this.
+    var updateIncomplete: Bool = UpdateHandoffStore.showsIncompleteUpdate()
     var isProtectedReconnectScheduled = false
     var protectedReconnectAttempt = 0
     var protectedReconnectNextAttemptAt: Date?
@@ -237,8 +240,8 @@ final class AppState {
     let persistenceWriter = AppStatePersistenceWriter()
     var persistenceTask: Task<Void, Never>?
 
-    // Clash config
-    var config: ClashConfig = ClashConfig()
+    // Runtime config
+    var config: RuntimeConfig = RuntimeConfig()
 
     // Core components
     let coreRuntime = CoreRuntimeManager()
@@ -247,7 +250,7 @@ final class AppState {
     let proxyService = ProxyService()
     private let providerRuleLoader = ProviderRuleLoader()
     var coreController: CoreControllerClient?
-    var webSocket: ClashWebSocket?
+    var webSocket: CoreWebSocket?
     /// Digest of the config the running core actually loaded, as opposed to the
     /// last one written to disk. A rewrite that reproduces these bytes has
     /// nothing to reload, and the reload is what closes every open connection.
@@ -372,14 +375,8 @@ final class AppState {
     /// Quiesce connect/health/switch work before a Sparkle install. PF stays
     /// armed until cleanup proves DNS + core stop, or the journal records a
     /// fail-closed handoff.
-    func prepareForSoftwareUpdate(nextVersion: String) async -> UpdateHandoffJournal {
-        connectionCoordinator.bumpGeneration()
-        connectionCoordinator.coreMonitorTask?.cancel()
-        connectionCoordinator.nodeSwitchTask?.cancel()
-        connectionCoordinator.protectedReconnectTask?.cancel()
-        connectionCoordinator.connectTask?.cancel()
-        isProtectedReconnectScheduled = false
-        var journal = UpdateHandoffJournal(
+    func prepareForSoftwareUpdate(nextVersion: String) async throws -> UpdateHandoffJournal {
+        let journal = UpdateHandoffJournal(
             phase: .updatePrepared,
             previousAppVersion: Bundle.main.object(
                 forInfoDictionaryKey: "CFBundleShortVersionString"
@@ -395,24 +392,47 @@ final class AppState {
             catalogRevision: nil,
             connectionGeneration: connectionCoordinator.protectionOperationGeneration
         )
-        // Each hop has to start from the phase actually reached. Advancing the
-        // written value and then advancing the original again skips a step,
-        // and a skipped step is refused: the journal then records an illegal
-        // transition rather than the clean shutdown that did happen, and every
-        // later hop inherits the wrong phase.
-        journal = journal.advancing(to: .connectionQuiescing)
-        try? UpdateHandoffStore.write(journal)
-        if isConnected || isConnecting {
-            await disconnectAndWait(releaseKillSwitch: false)
+        let runtimeMayOwnNetwork = journal.keepKillSwitchArmed
+            || coreRuntime.isRunning
+            || AppProfile.defaults.bool(forKey: SettingsKey.didStartCore)
+            || HelperManager.hasInstalledHelperArtifact
+        let needsDisconnect = journal.keepKillSwitchArmed || coreRuntime.isRunning
+            || AppProfile.defaults.bool(forKey: SettingsKey.didStartCore)
+            || isDisconnecting || connectionCoordinator.configReloadTask != nil
+        let requestGeneration = connectionCoordinator.protectionOperationGeneration
+        return try await UpdatePreparation.run(journal) {
+            guard self.connectionCoordinator.protectionOperationGeneration == requestGeneration else {
+                throw CancellationError()
+            }
+            // Do not disturb a healthy connection until the new journal is
+            // durable. A failed archive/write must leave its monitors running.
+            self.connectionCoordinator.bumpGeneration()
+            self.connectionCoordinator.coreMonitorTask?.cancel()
+            self.connectionCoordinator.nodeSwitchTask?.cancel()
+            self.connectionCoordinator.protectedReconnectTask?.cancel()
+            self.connectionCoordinator.connectTask?.cancel()
+            self.isProtectedReconnectScheduled = false
+            // Protected Offline and pending reloads need the same task drain as
+            // Connected. A pristine install must not arm PF just to update.
+            if needsDisconnect {
+                self.disconnect(releaseKillSwitch: false)
+            }
+            let generation = self.connectionCoordinator.protectionOperationGeneration
+            await self.finishPendingDisconnect()
+            guard self.connectionCoordinator.protectionOperationGeneration == generation else {
+                throw CancellationError()
+            }
+            if runtimeMayOwnNetwork {
+                try await PrivilegedRuntimeCoordinator.shared.prepareForSoftwareUpdate(
+                    keepKillSwitchArmed: journal.keepKillSwitchArmed
+                )
+            }
+            guard self.connectionCoordinator.protectionOperationGeneration == generation else {
+                throw CancellationError()
+            }
+            try Task.checkCancellation()
+            self.isProtectionBlocked = journal.keepKillSwitchArmed
         }
-        journal = journal.advancing(to: .cleanShutdownCompleted)
-        try? UpdateHandoffStore.write(journal)
-        return journal
-    }
-
-    func markProtectedUpdateHandoff(_ journal: UpdateHandoffJournal) {
-        let next = journal.advancing(to: .protectedHandoffRecorded)
-        try? UpdateHandoffStore.write(next)
     }
 
     func prepareForSystemSleep() {
@@ -736,15 +756,15 @@ final class AppState {
             let rotated = Array(catalog.dropFirst(currentIndex + 1))
                 + Array(catalog.prefix(currentIndex + 1))
             return rotated.first(where: { node in
-                node.id != current.id && !proxyTarget(node.name, matches: current.name)
+                ProxyNode.isCityFailoverCandidate(node.name, after: current.name)
             })
         }
         if let preferred = defaultCloudExitNode(),
-           current.map({ $0.id != preferred.id && !proxyTarget(preferred.name, matches: $0.name) }) ?? true {
+           ProxyNode.isCityFailoverCandidate(preferred.name, after: current?.name) {
             return preferred
         }
         return catalog.first(where: { node in
-            current.map { $0.id != node.id && !proxyTarget(node.name, matches: $0.name) } ?? true
+            ProxyNode.isCityFailoverCandidate(node.name, after: current?.name)
         })
     }
 
@@ -799,8 +819,10 @@ final class AppState {
         catalogFailoverAttemptTarget = nil
     }
 
-    /// After a China connect that proved the selected city dead, move to the
-    /// next unused catalog exit before the fail-closed reconnect fires.
+    /// Next unused catalog city for a failover sweep. Not called on the live
+    /// `CORE_EXIT_UNREACHABLE` path: that TLS close repeats on every city from
+    /// China, and hopping only moved the picker. `CatalogCityFailover` keeps
+    /// it off until G2.8 has home-broadband proof.
     @discardableResult
     func rotateCatalogExitAfterConnectFailure() -> Bool {
         let catalog = managedCatalogNodes

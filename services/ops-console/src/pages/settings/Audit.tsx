@@ -65,7 +65,7 @@ export function Audit() {
     : state;
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="settings-audit flex flex-col gap-3">
       <Toolbar
         aside={targetId ? <Action onClick={() => setTargetId(null)}>{words.clearFilter}</Action> : null}
       >
@@ -86,10 +86,11 @@ export function Audit() {
         state={tableState}
         emptyMessage={words.empty}
         errorMessage={message ?? undefined}
+        className="settings-audit-table"
       />
       {cursor === null ? null : (
         <div className="flex justify-center">
-          <Action pending={more} onClick={() => { void load(cursor, true); }}>
+          <Action pending={more} onClick={() => { void load(cursor, true); }} className="settings-more">
             {more ? words.loadingMore : words.more}
           </Action>
         </div>

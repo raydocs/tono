@@ -5,9 +5,9 @@ extension ProxiesView {
         let allNodes = cloudNodes
         let localNodes = filteredNodes(from: allNodes)
         let grouped = Dictionary(grouping: localNodes) {
-            nodeRegionCode(flag: $0.flag, name: $0.name)
+            nodeListRegionCode(flag: $0.flag, name: $0.name)
         }
-        let regionCodes = grouped.keys.sorted()
+        let regionCodes = nodeListRegionSorted(Array(grouped.keys))
 
         return Group {
             if !localNodes.isEmpty {
@@ -86,8 +86,10 @@ extension ProxiesView {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 7) {
                             // City first — the name users actually think in;
-                            // the codename only tells lines apart.
-                            Text(nodeCityTitle(node.displayName))
+                            // hy2 must say 备用通道 on this line, not only in
+                            // the tiny protocol chip, or Choose another route
+                            // shows two identical 东京 cards.
+                            Text(nodeRouteTitle(node))
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundStyle(.primary)
                                 .lineLimit(1)
@@ -270,7 +272,7 @@ extension ProxiesView {
 
     func regionHeader(_ code: String, count: Int) -> some View {
         HStack(spacing: 6) {
-            Label(code, systemImage: "globe")
+            Label(nodeListRegionLabel(code), systemImage: "globe")
                 .font(.system(size: 10, weight: .semibold, design: .rounded))
                 .kerning(0.8)
                 .foregroundStyle(.secondary)
@@ -525,7 +527,7 @@ extension ProxiesView {
         } label: {
             HStack(spacing: 4) {
                 if let code {
-                    Text(code)
+                    Text(nodeListRegionLabel(code))
                         .font(.system(size: 10, weight: .bold, design: .rounded))
                 } else {
                     Image(systemName: "square.grid.2x2")
@@ -551,7 +553,8 @@ extension ProxiesView {
 
         return nodes.filter { node in
             let matchesFilter = regionFilter == nil
-                || nodeRegionCode(flag: node.flag, name: node.name) == regionFilter
+                || nodeListRegionCode(flag: node.flag, name: node.name) == regionFilter
+            if ProxyNode.hy2UdpIsVendorBlocked(node.name) { return false }
 
             guard !query.isEmpty else { return matchesFilter }
             return matchesFilter

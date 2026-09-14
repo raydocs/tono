@@ -265,6 +265,12 @@ pub struct TonoInner {
     pub connect_steps: Vec<crate::tono::steps::StepRecord>,
     /// When the currently-current step became current (per-step elapsed).
     pub step_started_at: Option<std::time::Instant>,
+    /// When the current session last reached ConnectOk. Used for disconnect
+    /// `elapsedMs` (time since that successful (re)connect, not the original
+    /// attempt). Cleared when a new connect attempt starts (so a disconnect
+    /// while Connecting cannot inherit hours from a previous session) and on
+    /// a successful disconnect.
+    pub connected_at: Option<std::time::Instant>,
     /// F3: last connect failure details (stage key, sanitized error, when).
     pub failed_stage: Option<&'static str>,
     pub connect_error: Option<String>,
@@ -291,6 +297,9 @@ pub struct TonoInner {
     /// was not installed on an otherwise successful connect.
     pub optional_direct_active: bool,
     pub optional_direct_skip: Option<String>,
+    /// Own DIRECT fail-closed bracket: `(connect_generation, deadline)`. While live, Blocked
+    /// without a TUN permit is expected and must not tear the session down.
+    pub direct_reload_until: Option<(u64, std::time::Instant)>,
     /// Display-only exit identity from the last successful lookup.
     pub exit_ip: Option<String>,
     pub exit_org: Option<String>,
@@ -439,6 +448,10 @@ impl TonoInner {
 pub struct TonoState {
     inner: tokio::sync::Mutex<TonoInner>,
     audit: Arc<crate::tono::audit::Audit>,
+    /// Per-route byte ledger, locked independently of `inner` so the sampler
+    /// and the telemetry uploader never need the product mutex to ingest or
+    /// read a delta.
+    route_ledger: parking_lot::Mutex<crate::tono::route_ledger::RouteLedger>,
     /// Serializes login, periodic, and user-initiated catalog fetches for one account session.
     catalog_sync_operation: tokio::sync::Mutex<()>,
     release_operation: tokio::sync::Mutex<Option<Arc<ReleaseOperation>>>,
@@ -514,6 +527,7 @@ impl TonoState {
                 // fail-closed Service session must not fabricate a current Preparing step.
                 connect_steps: crate::tono::steps::pending_steps(),
                 step_started_at: None,
+                connected_at: None,
                 failed_stage: None,
                 connect_error: None,
                 connect_error_at_ms: None,
@@ -525,6 +539,7 @@ impl TonoState {
                 applied_wechat_path_regexes: None,
                 optional_direct_active: false,
                 optional_direct_skip: None,
+                direct_reload_until: None,
                 exit_ip: None,
                 exit_org: None,
                 exit_location: None,
@@ -537,6 +552,7 @@ impl TonoState {
                 tasks: TaskRegistry::default(),
             }),
             audit,
+            route_ledger: parking_lot::Mutex::new(crate::tono::route_ledger::RouteLedger::default()),
             catalog_sync_operation: tokio::sync::Mutex::new(()),
             release_operation: tokio::sync::Mutex::new(None),
             privileged_transition: Arc::new(tokio::sync::RwLock::new(())),
@@ -547,6 +563,10 @@ impl TonoState {
 
     pub fn audit(&self) -> &crate::tono::audit::Audit {
         &self.audit
+    }
+
+    pub fn route_ledger(&self) -> &parking_lot::Mutex<crate::tono::route_ledger::RouteLedger> {
+        &self.route_ledger
     }
 
     pub async fn lock(&self) -> tokio::sync::MutexGuard<'_, TonoInner> {

@@ -1307,7 +1307,7 @@ struct MultiExitPolicyTests {
     /// verify is refused rather than downgraded, and no signature ever lets a
     /// protected host leave the tunnel.
     private static func verifyPolicySignatureContract() throws {
-        let json = #"{"version":4,"domains":[],"mediaEndpoints":[],"webDomains":[{"host":"www.dianping.com","ports":[443]}],"directSuffixes":[],"tcpEndpoints":[]}"#
+        let json = #"{"version":4,"domains":[],"mediaEndpoints":[],"webDomains":[{"host":"www.policy-signature-fixture.example.net","ports":[443]}],"directSuffixes":[],"tcpEndpoints":[]}"#
         let signer = Curve25519.Signing.PrivateKey()
         let publicKey = signer.publicKey.rawRepresentation.base64EncodedString()
         let sign = { (message: String) -> String in
@@ -1365,7 +1365,7 @@ struct MultiExitPolicyTests {
         }
 
         // What a signature buys: a host on no allowlist becomes routable.
-        for host in ["www.dianping.com", "static.dianping.com"] {
+        for host in ["www.policy-signature-fixture.example.net", "static.policy-signature-fixture.example.net"] {
             guard (try? ConfigPipeline.validatedWebDirectDomain(host)) == nil else {
                 throw TestFailure("\(host) is on an allowlist, so it proves nothing about trust")
             }
@@ -1373,9 +1373,9 @@ struct MultiExitPolicyTests {
                 throw TestFailure("a trusted policy could not carry \(host)")
             }
         }
-        guard try ConfigPipeline.validatedManagedDirectSuffix("dianping.com", trusted: true)
-                == "dianping.com",
-              (try? ConfigPipeline.validatedManagedDirectSuffix("dianping.com")) == nil else {
+        guard try ConfigPipeline.validatedManagedDirectSuffix("policy-signature-fixture.example.net", trusted: true)
+                == "policy-signature-fixture.example.net",
+              (try? ConfigPipeline.validatedManagedDirectSuffix("policy-signature-fixture.example.net")) == nil else {
             throw TestFailure("trust did not open the suffix path, or the allowlist never closed it")
         }
 
@@ -1387,24 +1387,24 @@ struct MultiExitPolicyTests {
             domainPins: [],
             webDomainPins: [
                 .init(
-                    host: "www.dianping.com",
+                    host: "www.policy-signature-fixture.example.net",
                     addresses: ["9.9.9.9"],
                     ports: [443]
                 ),
             ],
             webDomainSuffixes: [
-                .init(host: "dianping.com", ports: [80, 443]),
+                .init(host: "policy-signature-fixture.example.net", ports: [80, 443]),
             ],
             mediaEndpoints: [],
-            directResolverHosts: ["www.dianping.com"],
+            directResolverHosts: ["www.policy-signature-fixture.example.net"],
             trusted: true
         )
         guard let validatedRuntime = try ConfigPipeline.validatedManagedDirectPolicy(
             signedRuntime
         ), validatedRuntime.trusted,
-              validatedRuntime.webDomainPins.map(\.host) == ["www.dianping.com"],
-              validatedRuntime.webDomainSuffixes.map(\.host) == ["dianping.com"],
-              validatedRuntime.directResolverHosts == ["www.dianping.com"] else {
+              validatedRuntime.webDomainPins.map(\.host) == ["www.policy-signature-fixture.example.net"],
+              validatedRuntime.webDomainSuffixes.map(\.host) == ["policy-signature-fixture.example.net"],
+              validatedRuntime.directResolverHosts == ["www.policy-signature-fixture.example.net"] else {
             throw TestFailure("a signed new hostname lost trust during runtime validation")
         }
 
@@ -1456,8 +1456,8 @@ struct MultiExitPolicyTests {
         // Syntax is still enforced under trust: a signature attests to authorship,
         // not to the document being well formed. Before trust existed the
         // allowlist was the only thing rejecting these.
-        for malformed in ["*.dianping.com", "dianping", "-dianping.com",
-                          "a..b.com", "http://dianping.com", "dianping.com:443",
+        for malformed in ["*.policy-signature-fixture.example.net", "dianping", "-policy-signature-fixture.example.net",
+                          "a..b.com", "http://policy-signature-fixture.example.net", "policy-signature-fixture.example.net:443",
                           "dian ping.com", "xn--"] {
             guard (try? ConfigPipeline.validatedWebDirectDomain(malformed, trusted: true)) == nil else {
                 throw TestFailure("a trusted policy carried the malformed host \(malformed)")
@@ -1468,8 +1468,8 @@ struct MultiExitPolicyTests {
         // when validation returns the host unchanged, which a normalised value
         // never does. Pinned here because removing that comparison would make
         // these entries route under a name the policy did not publish.
-        guard try ConfigPipeline.validatedWebDirectDomain("dianping.com.", trusted: true)
-                == "dianping.com" else {
+        guard try ConfigPipeline.validatedWebDirectDomain("policy-signature-fixture.example.net.", trusted: true)
+                == "policy-signature-fixture.example.net" else {
             throw TestFailure("a trailing dot is expected to normalise, not to be rejected")
         }
 

@@ -30,6 +30,10 @@ spec = importlib.util.spec_from_file_location(
 agent = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 spec.loader.exec_module(agent)
+# Mocked run_once cycles must never touch a real node's installed hy2 list.
+_no_hy2 = tempfile.TemporaryDirectory(prefix="tono-tests-no-hy2-")
+unittest.addModuleCleanup(_no_hy2.cleanup)
+agent.HY2_AUTH_ALLOWLIST = Path(_no_hy2.name) / "not-installed" / "auth-allow.sha256"
 
 
 def fresh_state() -> dict:
@@ -509,6 +513,7 @@ class RosterControlSignals(unittest.TestCase):
         ack_error: Exception | None = None,
         reconcile_error: Exception | None = None,
         inventory_known: bool = True,
+        hy2_error: Exception | None = None,
     ):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -538,9 +543,10 @@ class RosterControlSignals(unittest.TestCase):
                  return_value=reconcile_result,
                  side_effect=reconcile_error,
              ) as reconcile, \
+             patch.object(agent, "sync_hy2_roster", side_effect=hy2_error), \
              patch.object(agent, "acknowledge_roster", side_effect=ack_error) as acknowledge, \
              patch.object(agent, "acknowledge_metering"):
-            if ack_error or reconcile_error or not inventory_known:
+            if ack_error or reconcile_error or hy2_error or not inventory_known:
                 with self.assertRaises(agent.Refusal):
                     agent.run_once(path)
             else:
@@ -571,6 +577,14 @@ class RosterControlSignals(unittest.TestCase):
             reconcile_error=agent.Refusal("xray reconcile failed"),
         )
         acknowledge.assert_not_called()
+
+    def test_a_failed_hy2_publish_is_never_acknowledged(self) -> None:
+        path, reconcile, acknowledge = self.run_round(
+            server_retire=False, hy2_error=agent.Refusal("injected hy2 write failure"),
+        )
+        reconcile.assert_not_called()
+        acknowledge.assert_not_called()
+        self.assertFalse(path.exists())
 
     def test_an_unverifiable_live_client_inventory_is_never_acknowledged(self) -> None:
         path, _, acknowledge = self.run_round(
@@ -607,6 +621,120 @@ class RosterControlSignals(unittest.TestCase):
                 agent.run_once(path)
         reconcile.assert_not_called()
         self.assertEqual(json.loads(path.read_text(encoding="utf-8")), state)
+
+
+class Hy2RosterAuthorization(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.path = Path(directory.name) / "auth-allow.sha256"
+        self.path.write_text("bootstrap-must-not-survive\n", encoding="utf-8")
+        self.path.chmod(0o640)
+        patcher = patch.object(agent, "HY2_AUTH_ALLOWLIST", self.path)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.remote = (Path(__file__).resolve().parents[2] /
+                       "tooling/scripts/remote/manage-tono-hy2-node.sh").read_text()
+
+    def test_hy2_only_mode_preserves_metering_state_and_never_claims_node_readiness(self):
+        state_path = self.path.parent / "state.json"
+        original = b'{"sourceId":"unchanged-billing-source","pendingReports":[{"retained":true}]}'
+        state_path.write_bytes(original)
+        identity = "11111111-1111-4111-8111-111111111111"
+        with patch.dict(agent.os.environ, {
+            "TONO_API_BASE": "https://api.example.com",
+            "TONO_HOME_AGENT_TOKEN": "test-node-token",
+            "TONO_SOURCE_ID": "los-angeles-marina",
+            "TONO_AGENT_STATE": str(state_path),
+        }), patch.object(agent, "fetch_roster", return_value=(
+            "los-angeles-marina", 1700000000, [{"clientUUID": identity}], False,
+        )), patch.object(agent, "run_once") as full_cycle, \
+                patch.object(agent, "run_xray") as xray, \
+                patch.object(agent, "acknowledge_roster") as roster_ack, \
+                patch.object(agent, "acknowledge_metering") as metering_ack:
+            agent.main(hy2_roster_only=True)
+        full_cycle.assert_not_called()
+        xray.assert_not_called()
+        roster_ack.assert_not_called()
+        metering_ack.assert_not_called()
+        self.assertEqual(state_path.read_bytes(), original)
+        self.assertIn(agent.hashlib.sha256(identity.encode()).hexdigest(), self.path.read_text())
+
+    def test_hy2_only_mode_refuses_another_nodes_roster_before_changing_auth(self):
+        original = self.path.read_bytes()
+        with patch.dict(agent.os.environ, {
+            "TONO_API_BASE": "https://api.example.com",
+            "TONO_HOME_AGENT_TOKEN": "test-node-token",
+            "TONO_SOURCE_ID": "los-angeles-marina",
+        }), patch.object(agent, "fetch_roster", return_value=(
+            "another-node", 1700000000, [], False,
+        )):
+            with self.assertRaisesRegex(agent.Refusal, "node identity"):
+                agent.run_hy2_roster_once()
+        self.assertEqual(self.path.read_bytes(), original)
+
+    def test_live_http_checker_observes_add_revoke_and_empty_roster_without_restart(self):
+        # Execute the actual embedded checker, not a duplicate auth implementation.
+        code = self.remote.split('cat >"$AUTH_HTTP_PY" <<\'PY\'\n', 1)[1].split("\nPY\n", 1)[0]
+        checker = {"__name__": "hy2_auth_under_test"}
+        exec(compile(code, "hy2-auth-http.py", "exec"), checker)
+        checker["ALLOW"] = self.path
+        server = ThreadingHTTPServer(("127.0.0.1", 0), checker["Handler"])
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+
+        def accepts(identity):
+            request = agent.urllib.request.Request(
+                f"http://127.0.0.1:{server.server_port}/auth",
+                data=json.dumps({"auth": identity}).encode(),
+                headers={"Content-Type": "application/json"}, method="POST",
+            )
+            with agent.urllib.request.urlopen(request, timeout=2) as response:
+                return json.loads(response.read())["ok"]
+
+        first = "11111111-1111-4111-8111-111111111111"
+        replacement = "22222222-2222-4222-8222-222222222222"
+        agent.sync_hy2_roster([{"clientUUID": first}])
+        self.assertTrue(accepts(first))
+        self.assertFalse(accepts(replacement))
+        first_inode = self.path.stat().st_ino
+        agent.sync_hy2_roster([{"clientUUID": replacement}])
+        self.assertNotEqual(first_inode, self.path.stat().st_ino)
+        self.assertFalse(accepts(first))
+        self.assertTrue(accepts(replacement))
+        agent.sync_hy2_roster([])
+        self.assertFalse(accepts(first))
+        self.assertFalse(accepts(replacement))
+        self.assertEqual(self.path.read_text(), agent.HY2_ROSTER_MARKER + "\n")
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o640)
+        # Single-file namespace binds would pin the old inode on a real node.
+        self.assertIn("ReadOnlyPaths=$INSTALL_ROOT\n", self.remote)
+        self.assertNotIn("ReadOnlyPaths=$AUTH_ALLOWLIST", self.remote)
+
+    def test_failed_atomic_publish_preserves_the_previous_complete_list(self):
+        before = self.path.read_bytes()
+        with patch.object(agent.os, "replace", side_effect=OSError("injected rename failure")):
+            with self.assertRaisesRegex(agent.Refusal, "could not be published"):
+                agent.sync_hy2_roster([])
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(list(self.path.parent.glob(".auth-allow-*")), [])
+
+    def test_static_sync_cannot_restore_credentials_after_managed_empty_revocation(self):
+        agent.sync_hy2_roster([])
+        start = self.remote.index("refuse_managed_allowlist_sync() {")
+        end = self.remote.index("\n}\n", start) + 3
+        # Only the pure guard is executed; no SSH/systemd/Xray operation runs.
+        result = agent.subprocess.run([
+            "bash", "-c",
+            'fail() { printf "%s\n" "$*" >&2; exit 1; }; ' +
+            self.remote[start:end] + '\nAUTH_ALLOWLIST="$1"; refuse_managed_allowlist_sync',
+            "guard-test", str(self.path),
+        ], capture_output=True, text=True, timeout=3)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("owned by exit-agent", result.stderr)
+        self.assertEqual(self.path.read_text(), agent.HY2_ROSTER_MARKER + "\n")
 
 
 class Labels(unittest.TestCase):
@@ -877,10 +1005,13 @@ class MultipleExits(unittest.TestCase):
 class ReconcileSafety(unittest.TestCase):
     def setUp(self) -> None:
         self.calls: list[list[str]] = []
-        self.result = type("Result", (), {"returncode": 0, "stderr": ""})
+        self.adu_docs: list[dict] = []
+        self.result = type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})
 
         def fake_run(_binary, arguments):
             self.calls.append(arguments)
+            if "adu" in arguments:
+                self.adu_docs.append(json.loads(Path(arguments[-1]).read_text()))
             return self.result
 
         patcher = patch.object(agent, "run_xray", fake_run)
@@ -966,9 +1097,10 @@ class ReconcileSafety(unittest.TestCase):
         self.assertEqual(installed, {new_label})
         self.assertIn(f"--email={old_label}", self.calls[0])
         self.assertIn("rmu", self.calls[0])
-        self.assertIn(f"--email={new_label}", self.calls[1])
-        self.assertIn(f"--uuid={new_uuid}", self.calls[1])
         self.assertIn("adu", self.calls[1])
+        self.assertEqual(self.adu_docs[0]["inbounds"][0]["tag"], "tono-vless")
+        self.assertEqual(self.adu_docs[0]["inbounds"][0]["settings"]["clients"][0]["email"], new_label)
+        self.assertEqual(self.adu_docs[0]["inbounds"][0]["settings"]["clients"][0]["id"], new_uuid)
 
     def test_only_this_agent_s_own_namespace_is_ever_removed(self) -> None:
         added, removed, _ = self.reconcile(
@@ -989,14 +1121,16 @@ class ReconcileSafety(unittest.TestCase):
         )
         additions = [call for call in self.calls if "adu" in call]
         self.assertEqual(len(additions), 1)
-        self.assertIn("--email=u:usr_1", additions[0])
-        self.assertIn("--uuid=11111111-1111-4111-8111-111111111111", additions[0])
+        self.assertNotIn("--email=u:usr_1", additions[0])
+        client = self.adu_docs[0]["inbounds"][0]["settings"]["clients"][0]
+        self.assertEqual(client["email"], "u:usr_1")
+        self.assertEqual(client["id"], "11111111-1111-4111-8111-111111111111")
 
     def test_a_client_already_present_is_not_counted_as_an_addition(self) -> None:
         # Adds are attempted whenever the node cannot be asked what it holds,
         # because clients added over the API do not survive a restart. Counting
         # them would print the whole roster as added on every run.
-        self.result = type("Result", (), {"returncode": 1, "stderr": "User already exists."})
+        self.result = type("Result", (), {"returncode": 1, "stdout": "", "stderr": "User already exists."})
         added, removed, _ = self.reconcile(
             [{"userId": "usr_1", "clientUUID": "11111111-1111-4111-8111-111111111111"}],
             None,

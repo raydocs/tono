@@ -205,4 +205,41 @@ describe('login request exclusion', () => {
     await act(async () => finishRefresh())
     expect(resend.disabled).toBe(false)
   })
+
+  it('shows the suspended banner again after the user changes email', async () => {
+    mocks.verify.mockResolvedValue({ suspended: true })
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    )
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: 'person@example.com' },
+    })
+    await act(async () =>
+      fireEvent.click(screen.getByRole('button', { name: 'Send code' })),
+    )
+    await act(async () => vi.advanceTimersByTime(2000))
+    await act(async () =>
+      fireEvent.change(screen.getByLabelText('6-digit code'), {
+        target: { value: '123456' },
+      }),
+    )
+    expect(screen.getByText('Account paused')).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Use another email' }))
+    expect(screen.queryByText('Account paused')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: 'other@example.com' },
+    })
+    await act(async () =>
+      fireEvent.click(screen.getByRole('button', { name: 'Send code' })),
+    )
+    await act(async () => vi.advanceTimersByTime(2000))
+    await act(async () =>
+      fireEvent.change(screen.getByLabelText('6-digit code'), {
+        target: { value: '654321' },
+      }),
+    )
+    expect(screen.getByText('Account paused')).toBeDefined()
+  })
 })

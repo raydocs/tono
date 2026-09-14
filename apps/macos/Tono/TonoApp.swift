@@ -83,7 +83,8 @@ struct TonoApp: App {
                     exitDelayMs: Int64(sample.ms),
                     exitDelayAtMs: Int64(sample.at.timeIntervalSince1970 * 1_000)
                 )
-            }
+            },
+            routeSplitConsumer: { appState.appTrafficLedger.cumulative }
         ))
         // CRITICAL: Purge saved window frames BEFORE SwiftUI's scene management
         // reads them. SwiftUI reads NSWindow Frame / NSSplitView Subview Frames

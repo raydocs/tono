@@ -2801,6 +2801,67 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await utf8Oversized.json() as any).error.code).toBe('INVALID_CATALOG');
   });
 
+  it('strips hy2 catalog blocks unless the account email is gray-listed', async () => {
+    const yaml = `proxies:
+  - name: Tokyo · Sakura
+    type: vless
+    server: 8.8.8.8
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+    tls: true
+  - name: Tokyo · Sakura · hy2
+    type: hysteria2
+    server: 8.8.8.8
+    port: 443
+    password: {{TONO_CLIENT_UUID}}
+    sni: www.microsoft.com
+    fingerprint: e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db
+`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+
+    const hidden = await createAccount('hy2-hidden');
+    const hiddenFetched = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${hidden.accessToken}` },
+    });
+    expect(hiddenFetched.status).toBe(200);
+    const hiddenBody = await hiddenFetched.json() as any;
+    expect(hiddenBody.yaml).toContain('Tokyo · Sakura');
+    expect(hiddenBody.yaml).not.toContain(' · hy2');
+    expect(hiddenBody.yaml).not.toContain('hysteria2');
+
+    const allowed = await createAccount('hy2-allowed');
+    const previous = (env as unknown as Env).HY2_CATALOG_EMAILS;
+    try {
+      (env as unknown as Env).HY2_CATALOG_EMAILS = allowed.email;
+      const allowedFetched = await api('exit-catalog', {
+        headers: { authorization: `Bearer ${allowed.accessToken}` },
+      });
+      expect(allowedFetched.status).toBe(200);
+      const allowedBody = await allowedFetched.json() as any;
+      expect(allowedBody.yaml).toContain('type: hysteria2');
+      expect(allowedBody.yaml).toContain('Tokyo · Sakura · hy2');
+      expect(allowedBody.yaml).not.toContain('TONO_CLIENT_UUID');
+
+      const stillHidden = await api('exit-catalog', {
+        headers: { authorization: `Bearer ${hidden.accessToken}` },
+      });
+      expect((await stillHidden.json() as any).yaml).not.toContain('hysteria2');
+
+      const headerAdmit = await api('exit-catalog', {
+        headers: {
+          authorization: `Bearer ${hidden.accessToken}`,
+          'X-Tono-Accept': 'hy2',
+        },
+      });
+      expect((await headerAdmit.json() as any).yaml).toContain('type: hysteria2');
+    } finally {
+      (env as unknown as Env).HY2_CATALOG_EMAILS = previous;
+    }
+
+    const adminFetched = await admin('exit-catalog', undefined, 'GET');
+    expect((await adminFetched.json() as any).yaml).toContain('type: hysteria2');
+  });
+
   it('binds one home exit per user and filters that proxy from other catalogs', async () => {
     const yaml = `proxies:
   - name: "Shared JP"
@@ -3661,6 +3722,172 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(closedRow.homeBinding).toBeNull();
   });
 
+  it('does not retire the currently-assigned account when a replacement accountRef clashes (atomicity)', async () => {
+    const accessHeaders = {
+      'content-type': 'application/json',
+      'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+    };
+    const owner = await createAccount('claude-replace-atomic-owner');
+    const other = await createAccount('claude-replace-atomic-other');
+    const bannedUser = await createAccount('claude-replace-atomic-banned');
+    const retiredUser = await createAccount('claude-replace-atomic-retired');
+
+    const ownerOpened = await api('ops/product-accounts', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ userId: owner.user.id, accountRef: 'acct-owner@example.com' }),
+    });
+    expect(ownerOpened.status).toBe(201);
+    const ownerAccountId = (await ownerOpened.json() as any).account.id;
+
+    const otherOpened = await api('ops/product-accounts', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ userId: other.user.id, accountRef: 'acct-shared@example.com' }),
+    });
+    expect(otherOpened.status).toBe(201);
+
+    const bannedOpened = await api('ops/product-accounts', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ userId: bannedUser.user.id, accountRef: 'acct-banned@example.com' }),
+    });
+    expect(bannedOpened.status).toBe(201);
+    const bannedAccountId = (await bannedOpened.json() as any).account.id;
+    const bannedRow = await api(`ops/product-accounts/${bannedAccountId}/ban`, {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ detail: 'model ban' }),
+    });
+    expect(bannedRow.status).toBe(200);
+    expect((await bannedRow.json() as any).account.status).toBe('banned');
+
+    const retiredOpened = await api('ops/product-accounts', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ userId: retiredUser.user.id, accountRef: 'acct-retired@example.com' }),
+    });
+    expect(retiredOpened.status).toBe(201);
+    const retiredAccountId = (await retiredOpened.json() as any).account.id;
+    const retiredReplace = await api(`ops/product-accounts/${retiredAccountId}/replace`, {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ accountRef: 'acct-retired-next@example.com' }),
+    });
+    expect(retiredReplace.status).toBe(200);
+    expect((await retiredReplace.json() as any).previous.status).toBe('retired');
+
+    const snapshot = async () => {
+      const detail = await operations(`users/${owner.user.id}/detail`);
+      const detailBody = (await detail.json() as any);
+      const account = (detailBody.product.accounts as any[]).find((a) => a.id === ownerAccountId);
+      return {
+        status: account?.status,
+        closeReason: account?.closeReason ?? null,
+        closedAt: account?.closedAt ?? null,
+        assigned: (detailBody.product.accounts as any[]).find((a) => a.status === 'assigned'),
+        replaceCount: detailBody.product.replaceCount as number,
+        replacedEvents: (detailBody.product.events as any[])
+          .filter((ev) => ev.type === 'replaced' && ev.accountId === ownerAccountId).length,
+      };
+    };
+
+    const before = await snapshot();
+    expect(before.status).toBe('assigned');
+    expect(before.assigned.accountRef).toBe('acct-owner@example.com');
+    expect(before.replaceCount).toBe(0);
+
+    const attemptRef = (ref: string) => api(`ops/product-accounts/${ownerAccountId}/replace`, {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ accountRef: ref }),
+    });
+
+    for (const clashingRef of [
+      'acct-shared@example.com',
+      'acct-banned@example.com',
+      'acct-retired@example.com',
+      'acct-owner@example.com',
+    ]) {
+      const attempt = await attemptRef(clashingRef);
+      expect(attempt.status).toBe(409);
+      expect((await attempt.json() as any).error.code).toBe('ACCOUNT_REF_IN_USE');
+      const after = await snapshot();
+      expect(after.status).toBe('assigned');
+      expect(after.closeReason).toBeNull();
+      expect(after.closedAt).toBeNull();
+      expect(after.assigned).toBeDefined();
+      expect(after.assigned.accountRef).toBe('acct-owner@example.com');
+      expect(after.replaceCount).toBe(0);
+      expect(after.replacedEvents).toBe(0);
+    }
+
+    const retry = await api(`ops/product-accounts/${ownerAccountId}/replace`, {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ accountRef: 'acct-owner-next@example.com' }),
+    });
+    expect(retry.status).toBe(200);
+    const retryBody = (await retry.json() as any);
+    expect(retryBody.previous.status).toBe('retired');
+    expect(retryBody.previous.id).toBe(ownerAccountId);
+    expect(retryBody.account.accountRef).toBe('acct-owner-next@example.com');
+    expect(retryBody.account.status).toBe('assigned');
+    expect(retryBody.account.userId).toBe(owner.user.id);
+
+    const finalSnapshot = await snapshot();
+    expect(finalSnapshot.status).toBe('retired');
+    const newAssigned = (await operations(`users/${owner.user.id}/detail`).then((r) => r.json()) as any)
+      .product.accounts.find((a: any) => a.status === 'assigned');
+    expect(newAssigned.accountRef).toBe('acct-owner-next@example.com');
+    expect((await operations(`users/${owner.user.id}/detail`).then((r) => r.json()) as any).product.replaceCount).toBe(1);
+  });
+
+  it('replaceProductAccount converts a pooled account to assigned for the user', async () => {
+    const accessHeaders = {
+      'content-type': 'application/json',
+      'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+    };
+    const owner = await createAccount('claude-replace-pooled-owner');
+
+    const opened = await api('ops/product-accounts', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ userId: owner.user.id, accountRef: 'acct-pooled-one@example.com' }),
+    });
+    expect(opened.status).toBe(201);
+    const openedBody = (await opened.json() as any);
+    const ownerAccountId = openedBody.account.id;
+
+    const pooled = await api('ops/product-accounts', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ accountRef: 'acct-pooled-two@example.com' }),
+    });
+    expect(pooled.status).toBe(201);
+    expect((await pooled.json() as any).account.status).toBe('pooled');
+
+    const replace = await api(`ops/product-accounts/${ownerAccountId}/replace`, {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ accountRef: 'acct-pooled-two@example.com' }),
+    });
+    expect(replace.status).toBe(200);
+    const replaceBody = (await replace.json() as any);
+    expect(replaceBody.previous.status).toBe('retired');
+    expect(replaceBody.account.accountRef).toBe('acct-pooled-two@example.com');
+    expect(replaceBody.account.status).toBe('assigned');
+    expect(replaceBody.account.userId).toBe(owner.user.id);
+
+    const detail = await operations(`users/${owner.user.id}/detail`);
+    const detailBody = (await detail.json() as any);
+    const accounts = detailBody.product.accounts as any[];
+    expect(accounts.filter((a) => a.accountRef === 'acct-pooled-two@example.com')).toHaveLength(1);
+    expect(accounts.find((a) => a.accountRef === 'acct-pooled-two@example.com').status).toBe('assigned');
+    expect(accounts.filter((a) => a.status === 'assigned')).toHaveLength(1);
+    expect(detailBody.product.replaceCount).toBe(1);
+  });
+
   it('stores a node billing profile and reports who is on a named node', async () => {
     const accessHeaders = {
       'content-type': 'application/json',
@@ -3832,6 +4059,11 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       { ...policy, domains: [{ host: 'api.anthropic.com', ports: [443] }] },
       { ...policy, domains: [{ host: 'res.wx.qq.com', ports: [22] }] },
       { ...policy, mediaEndpoints: [{ address: '10.0.0.1', ports: [443] }] },
+      { ...policy, mediaEndpoints: [{ address: '192.0.0.9', ports: [443] }] },
+      { ...policy, mediaEndpoints: [{ address: '192.0.2.1', ports: [443] }] },
+      { ...policy, mediaEndpoints: [{ address: '192.88.99.1', ports: [443] }] },
+      { ...policy, tcpEndpoints: [{ address: '192.0.0.9', ports: [443] }] },
+      { ...policy, tcpEndpoints: [{ address: '192.0.2.1', ports: [443] }] },
       { ...policy, mediaEndpoints: [{ address: '43.146.27.0/24', ports: [443] }] },
       { ...policy, mediaEndpoints: [{ address: '43.146.27.999', ports: [443] }] },
       { ...policy, mediaEndpoints: [{ address: '43.146.27.17', ports: [80] }] },
@@ -3862,6 +4094,59 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     }
   });
 
+  // 192.0.0.0/16 contains exactly two IANA special-use /24s — 192.0.0.0/24
+  // (IETF Protocol Assignments) and 192.0.2.0/24 (TEST-NET-1) — that both
+  // clients reject. Every other /24 is ARIN-administered public Internet
+  // space that both clients route direct, so the control plane must admit
+  // it. The admission gate (`isPublicIPv4` in canonicalTrafficPolicy) runs on
+  // both the mediaEndpoints and tcpEndpoints canonicalisers and is not
+  // relaxed by `trusted` (a signature vouches for authorship, not for the IP
+  // allowlist), so `dryRun` exercises it without storing or touching
+  // revisions. Both clients gate the third octet; this pins the control
+  // plane to the same boundary.
+  it('admits public IPv4 in the rest of 192.0.0.0/16 and rejects only the special-use /24s', async () => {
+    const empty = (address: string, media: boolean) => ({
+      version: 4 as const,
+      domains: [],
+      mediaEndpoints: media ? [{ address, ports: [443] }] : [],
+      webDomains: [],
+      directSuffixes: [],
+      tcpEndpoints: media ? [] : [{ address, ports: [443] }],
+    });
+    // The two non-routable /24s (and the 6to4 relay anycast) stay rejected on
+    // both admission gates — regression guards for the special-use carve-outs.
+    for (const address of ['192.0.0.9', '192.0.2.1', '192.88.99.1']) {
+      const mediaReject = await admin('traffic-policy', { dryRun: true, policy: empty(address, true) }, 'PUT');
+      expect(mediaReject.status).toBe(400);
+      expect((await mediaReject.json() as any).error.code).toBe('VALIDATION_ERROR');
+      const tcpReject = await admin('traffic-policy', { dryRun: true, policy: empty(address, false) }, 'PUT');
+      expect(tcpReject.status).toBe(400);
+      expect((await tcpReject.json() as any).error.code).toBe('VALIDATION_ERROR');
+    }
+    // The remaining 254 /24s of 192.0.0.0/16 are public and pass the dry-run
+    // admission gate on both mediaEndpoints and tcpEndpoints. Previously the
+    // over-broad `a === 192 && b === 0` term rejected all of them.
+    for (const address of ['192.0.3.5', '192.0.31.5', '192.0.123.5']) {
+      const mediaOK = await admin('traffic-policy', { dryRun: true, policy: empty(address, true) }, 'PUT');
+      expect(mediaOK.status).toBe(200);
+      expect((await mediaOK.json() as any).dryRun).toBe(true);
+      const tcpOK = await admin('traffic-policy', { dryRun: true, policy: empty(address, false) }, 'PUT');
+      expect(tcpOK.status).toBe(200);
+      expect((await tcpOK.json() as any).dryRun).toBe(true);
+    }
+    // The public boundary publishes through the normal admin write path and
+    // is served back verbatim by publicTrafficPolicy — the realized impact
+    // was that this PUT returned 400 VALIDATION_ERROR before the fix.
+    const published = await admin('traffic-policy', {
+      policy: empty('192.0.3.5', true),
+      expectedRevision: 0,
+    }, 'PUT');
+    expect(published.status).toBe(200);
+    const served = await (await admin('traffic-policy', undefined, 'GET')).json() as any;
+    expect(served.revision).toBe(1);
+    expect(JSON.parse(served.json).mediaEndpoints).toEqual([{ address: '192.0.3.5', ports: [443] }]);
+  });
+
   // Private half of the test-only keypair whose public half is bound as
   // TRAFFIC_POLICY_PUBLIC_KEY in vitest.config.ts. Signing here rather than
   // pasting fixed signatures means these tests still hold if the canonical byte
@@ -3889,7 +4174,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     version: 4,
     domains: [],
     mediaEndpoints: [],
-    webDomains: [{ host: 'www.dianping.com', ports: [443] }],
+    webDomains: [{ host: 'www.policy-signature-fixture.example.net', ports: [443] }],
     directSuffixes: [],
     tcpEndpoints: [],
   };
@@ -3903,8 +4188,8 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       domains: [],
       mediaEndpoints: [],
       webDomains: [
-        { ports: [443], host: 'www.dianping.com' },
-        { host: 'shop.dianping.com', ports: [443] },
+        { ports: [443], host: 'www.policy-signature-fixture.example.net' },
+        { host: 'shop.policy-signature-fixture.example.net', ports: [443] },
       ],
       directSuffixes: [],
       tcpEndpoints: [],
@@ -3918,7 +4203,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     // Canonical, and demonstrably not what was submitted.
     expect(previewed.json).not.toBe(JSON.stringify(submitted));
     expect(JSON.parse(previewed.json).webDomains.map((d: any) => d.host))
-      .toEqual(['shop.dianping.com', 'www.dianping.com']);
+      .toEqual(['shop.policy-signature-fixture.example.net', 'www.policy-signature-fixture.example.net']);
     // A dry run stores nothing.
     expect((await (await admin('traffic-policy', undefined, 'GET')).json() as any).revision).toBe(0);
 
@@ -3940,7 +4225,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const delivered = await fetched.json() as any;
     expect(delivered.signature).toBe(body.signature);
     expect(JSON.parse(delivered.json).webDomains.map((d: any) => d.host))
-      .toEqual(['shop.dianping.com', 'www.dianping.com']);
+      .toEqual(['shop.policy-signature-fixture.example.net', 'www.policy-signature-fixture.example.net']);
   });
 
   it('refuses an unlisted host that arrives without a valid signature', async () => {
@@ -4052,6 +4337,30 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       const preview = await admin('traffic-policy', { policy: attempt, dryRun: true }, 'PUT');
       expect(preview.status, `directSuffixes/${host}`).toBe(400);
     }
+  });
+
+  it('admits product China web suffixes as directSuffixes', async () => {
+    const preview = await admin('traffic-policy', {
+      policy: {
+        version: 3,
+        domains: [],
+        mediaEndpoints: [],
+        webDomains: [],
+        directSuffixes: [
+          { host: 'taobao.com', ports: [80, 443] },
+          { host: 'douyin.com', ports: [443] },
+          { host: 'huya.com', ports: [443] },
+          { host: 'wps.cn', ports: [443] },
+          { host: 'voovmeeting.com', ports: [443] },
+          { host: 'kugou.com', ports: [443] },
+          { host: 'xylink.com', ports: [443] },
+          { host: 'zhihu.com', ports: [443] },
+          { host: 'goofish.com', ports: [443] },
+        ],
+      },
+      dryRun: true,
+    }, 'PUT');
+    expect(preview.status).toBe(200);
   });
 
   it('clears a stored signature when an unsigned policy replaces a signed one', async () => {
@@ -4378,6 +4687,100 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       "SELECT user_id FROM auth_identities WHERE provider = 'apple' AND subject = ?",
     ).bind('apple-linked-subject').first<any>();
     expect(identity.user_id).toBe(account.user.id);
+  });
+
+  it('completes a valid OIDC verify even when concurrent failures exhaust attempts (TOCTOU)', async () => {
+    // The OIDC verify handler must reserve an attempt slot *before* the
+    // network-bound verifyOidcIdToken and consume without re-checking the
+    // attempts budget, so a valid token that already reserved a slot still
+    // completes when concurrent garbage-token failures push attempts to
+    // max_attempts during the verification I/O window. Production config
+    // allows 5 verifies per challenge (RATE_LIMIT_OIDC_VERIFY_CHALLENGE default
+    // 5) while max_attempts is 3; the shared test config narrows the limiter
+    // to 3, which coincidentally equals max_attempts and masks the race (the
+    // third attacker is throttled before bumping attempts). Restore the
+    // production default so three concurrent failures actually exhaust the
+    // budget while a valid verify is in flight.
+    const originalChallengeLimit = (env as unknown as Env).RATE_LIMIT_OIDC_VERIFY_CHALLENGE;
+    (env as unknown as Env).RATE_LIMIT_OIDC_VERIFY_CHALLENGE = '5';
+    try {
+      const email = `google-toctou-${++sequence}@example.com`;
+      const challengeResponse = await api('auth/oidc/challenge', json({
+        provider: 'google',
+        deviceName: 'TOCTOU Mac',
+        installationId: 'toctou-installation',
+      }));
+      expect(challengeResponse.status).toBe(200);
+      const challenge = await challengeResponse.json() as any;
+      const validToken = await oidcToken('google', challenge.nonce, {
+        subject: 'google-toctou-subject',
+        email,
+      });
+
+      // Park the victim inside verifyOidcIdToken's signature check. The victim
+      // has already passed JWT parsing and reached crypto.subtle.verify;
+      // garbage attacker tokens ('x'.repeat(101)) fail the 3-part split before
+      // signature verification, so only the victim parks. This models the
+      // network I/O window of verifyOidcIdToken without depending on JWKS
+      // cache state.
+      const realVerify = crypto.subtle.verify.bind(crypto.subtle);
+      let releaseVerify!: () => void;
+      let notifyParked!: () => void;
+      const parked = new Promise<void>((resolve) => { notifyParked = resolve; });
+      const gate = new Promise<void>((resolve) => { releaseVerify = resolve; });
+      let firstCall = true;
+      const verifySpy = vi.spyOn(crypto.subtle, 'verify').mockImplementation(
+        async (algorithm: any, key: any, signature: any, data: any) => {
+          if (firstCall) {
+            firstCall = false;
+            notifyParked();
+            await gate;
+          }
+          return realVerify(algorithm, key, signature, data);
+        },
+      );
+
+      try {
+        const victimPromise = api('auth/oidc/verify', json({
+          provider: 'google',
+          challengeId: challenge.challengeId,
+          idToken: validToken,
+        }));
+        await parked;
+
+        const attackerResponses = await Promise.all(Array.from({ length: 3 }, () =>
+          api('auth/oidc/verify', json({
+            provider: 'google',
+            challengeId: challenge.challengeId,
+            idToken: 'x'.repeat(101),
+          })),
+        ));
+        expect(attackerResponses.map((response) => response.status).sort())
+          .toEqual([401, 401, 401]);
+
+        releaseVerify();
+        const victimResponse = await victimPromise;
+        expect(victimResponse.status).toBe(200);
+        expect((await victimResponse.json() as any).user.email).toBe(email);
+
+        const row = await env.DB.prepare(
+          'SELECT attempts, consumed_at FROM auth_challenges WHERE id = ?',
+        ).bind(challenge.challengeId).first<any>();
+        expect(row.attempts).toBe(3);
+        expect(row.consumed_at).not.toBeNull();
+
+        // Replay of the now-consumed challenge must still fail (no bypass).
+        expect((await api('auth/oidc/verify', json({
+          provider: 'google',
+          challengeId: challenge.challengeId,
+          idToken: validToken,
+        }))).status).toBe(401);
+      } finally {
+        verifySpy.mockRestore();
+      }
+    } finally {
+      (env as unknown as Env).RATE_LIMIT_OIDC_VERIFY_CHALLENGE = originalChallengeLimit;
+    }
   });
 
   it('redeems, confirms, logs in without duplicating an installation, rotates refresh, and limits devices', async () => {
@@ -5090,6 +5493,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(user.status).toBe('disabled');
   });
 
+  // Eight fetch+waitUntil hops (sign-in, confirm, re-enroll, second sign-in).
+  // After the rest of this file has run, miniflare+D1 can push that past Vitest's
+  // 5s default; CI then reports a timeout though the contract still holds.
   it('only lets the bound installation re-enroll its active device', async () => {
     const account = await createAccount('reenroll');
     resetMockInventory(account.device.id, account.enrollment.hostname);
@@ -5109,7 +5515,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(other.status).toBe(200);
     const otherAuth = await other.json() as any;
     expect((await api(`devices/${account.device.id}/enrollment`, json({}, otherAuth.accessToken))).status).toBe(404);
-  });
+  }, 15_000);
 
   it('does not issue a replacement enrollment while the prior identity revocation is pending', async () => {
     const account = await createAccount('reenroll-revoke-failure');
@@ -7305,6 +7711,157 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(plan.safe).toBe(false);
     expect(plan.yaml).toContain('Tokyo · Sakura');
     expect(plan.warnings.some((warning) => warning.includes('清空代理组'))).toBe(true);
+  });
+
+  it('allows retirement when a flow-style proxy-group list keeps another member', () => {
+    // Reproduction 1 from the bug report: the group is written `proxies: [A]`
+    // (flow style) and does not reference the retired node, so retirement must
+    // not be blocked by the block-style-only emptiness latch.
+    const yaml = [
+      'proxies:',
+      '  - name: Tokyo · Sakura',
+      '    type: vless',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '  - name: Tokyo · Fuji',
+      '    type: vless',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      'proxy-groups:',
+      '  - name: Tono-Exit',
+      '    type: select',
+      '    proxies: [Tokyo · Fuji]',
+      'rules:',
+      '  - MATCH,Tono-Exit',
+    ].join('\n') + '\n';
+    const plan = retirementCatalogPlan(yaml, 'Tokyo · Sakura');
+    expect(plan.safe).toBe(true);
+    expect(plan.changes.catalogEntryRemoved).toBe(true);
+    // The group never referenced Sakura, so no proxy-group rewrite is recorded.
+    expect(plan.changes.proxyGroupReferencesRemoved).toEqual([]);
+    expect(plan.warnings).toEqual([]);
+    expect(plan.yaml).not.toContain('Tokyo · Sakura');
+    expect(plan.yaml).toContain('Tokyo · Fuji');
+    // The flow-style group survives intact with its single remaining member.
+    expect(plan.yaml).toContain('proxies: [Tokyo · Fuji]');
+    expect(plan.yaml.match(/\{\{TONO_CLIENT_UUID\}\}/g)).toHaveLength(1);
+  });
+
+  it('strips a retired node from a flow-style proxy-group list and stays safe', () => {
+    // Reproduction 2 from the bug report: the flow-style list references the
+    // retired node, so the member-line remover must rewrite the inline array
+    // (not leave a dangling ref) and the latch must see the surviving member.
+    const yaml = [
+      'proxies:',
+      '  - name: Tokyo · Sakura',
+      '    type: vless',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '  - name: Tokyo · Fuji',
+      '    type: vless',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      'proxy-groups:',
+      '  - name: Tono-Exit',
+      '    type: select',
+      '    proxies: [Tokyo · Sakura, Tokyo · Fuji]',
+      'rules:',
+      '  - MATCH,Tono-Exit',
+    ].join('\n') + '\n';
+    const plan = retirementCatalogPlan(yaml, 'Tokyo · Sakura');
+    expect(plan.safe).toBe(true);
+    expect(plan.changes.proxyGroupReferencesRemoved).toEqual(['Tono-Exit']);
+    expect(plan.yaml).not.toContain('Tokyo · Sakura');
+    expect(plan.yaml).toContain('Tokyo · Fuji');
+    // The flow array is rewritten in place rather than leaving a dangling ref.
+    expect(plan.yaml).toContain('proxies: [Tokyo · Fuji]');
+    expect(plan.yaml).not.toContain('proxies: [Tokyo · Sakura');
+    expect(plan.yaml.match(/\{\{TONO_CLIENT_UUID\}\}/g)).toHaveLength(1);
+  });
+
+  it('refuses retirement that would empty a flow-style proxy-group list', () => {
+    // The safety latch must still fire when removing the only flow-style
+    // member would actually empty the group — fixing the latch must not turn
+    // a genuinely unsafe retire into a safe one.
+    const yaml = [
+      'proxies:',
+      '  - name: Tokyo · Sakura',
+      '    type: vless',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '  - name: Tokyo · Fuji',
+      '    type: vless',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      'proxy-groups:',
+      '  - name: Tono-Exit',
+      '    type: select',
+      '    proxies: [Tokyo · Sakura]',
+      'rules:',
+      '  - MATCH,Tono-Exit',
+    ].join('\n') + '\n';
+    const plan = retirementCatalogPlan(yaml, 'Tokyo · Sakura');
+    expect(plan.safe).toBe(false);
+    // safe === false returns the original catalog untouched.
+    expect(plan.yaml).toBe(yaml);
+    expect(plan.yaml).toContain('Tokyo · Sakura');
+    expect(plan.warnings.some((w) => w.includes('退役会清空代理组 Tono-Exit'))).toBe(true);
+  });
+
+  it('retires a fleet node whose exit group uses a flow-style member list over HTTP', async () => {
+    // End-to-end: the publish path accepts flow-style proxy-group catalogs, and
+    // the retire path must not turn that into a permanent 422 RETIRE_UNSAFE.
+    const accessHeaders = async () => ({
+      'content-type': 'application/json',
+      'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+    });
+    const yaml = [
+      'proxies:',
+      '  - name: Tokyo · Sakura',
+      '    type: vless',
+      '    server: 203.0.113.60',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '  - name: Tokyo · Fuji',
+      '    type: vless',
+      '    server: 203.0.113.61',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      'proxy-groups:',
+      '  - name: Tono-Exit',
+      '    type: select',
+      '    proxies: [Tokyo · Sakura, Tokyo · Fuji]',
+      'rules:',
+      '  - MATCH,Tono-Exit',
+    ].join('\n') + '\n';
+    const putCatalog = await api('ops/exit-catalog', {
+      method: 'PUT',
+      headers: await accessHeaders(),
+      body: JSON.stringify({ yaml, expectedRevision: 0 }),
+    });
+    expect(putCatalog.status).toBe(200);
+    expect((await putCatalog.json() as any).revision).toBe(1);
+
+    const sakura = encodeURIComponent('Tokyo · Sakura');
+    const previewResponse = await operations(`fleet-nodes/${sakura}/retire-preview`);
+    expect(previewResponse.status).toBe(200);
+    const preview = await previewResponse.json() as any;
+    expect(preview.canRetire).toBe(true);
+    expect(preview.warnings).toEqual([]);
+    expect(preview.changes.proxyGroupReferencesRemoved).toEqual(['Tono-Exit']);
+
+    const retired = await accessHeaders().then((base) => api(`ops/fleet-nodes/${sakura}/retire`, {
+      method: 'POST',
+      headers: base,
+      body: JSON.stringify({ expectedRevision: preview.expectedRevision, confirmation: 'Tokyo · Sakura', reason: '机房到期' }),
+    }));
+    expect(retired.status).toBe(200);
+    const outcome = await retired.json() as any;
+    expect(outcome.node.catalogListed).toBe(false);
+
+    const served = await api('ops/exit-catalog', {
+      method: 'GET',
+      headers: await accessHeaders(),
+    });
+    const servedBody = await served.json() as any;
+    expect(servedBody.yaml).not.toContain('Tokyo · Sakura');
+    expect(servedBody.yaml).toContain('Tokyo · Fuji');
+    // The flow-style member list is rewritten in place, not dropped to block style.
+    expect(servedBody.yaml).toContain('proxies: [Tokyo · Fuji]');
   });
 
   it('previews and retires a fleet node over HTTP, leaving an audit row', async () => {

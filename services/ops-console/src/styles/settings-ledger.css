@@ -1,0 +1,46 @@
+/* Settings ledger: one month of money, checkable.
+ *
+ * Every rule carries `.settings-page .settings-ledger` plus its block hook.
+ * The three totals keep their Measured sources and formatCny; the entries
+ * table keeps its eight columns, sorting, reversal pairs and dialogs. No
+ * amounts, rates, locks, exports or copy move. */
+
+/* The month in three numbers, seated as one compact card rather than three
+   bare figures on the page canvas. */
+.settings-page .settings-ledger .settings-ledger-totals {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 16px;
+  box-shadow: var(--shadow-card);
+  padding: 18px 20px;
+}
+
+.dark .settings-page .settings-ledger .settings-ledger-totals {
+  border-color: rgb(255 255 255 / 0.07);
+  box-shadow: var(--shadow-card), inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+/* Eight columns, seven fixed: 104 + 84 + 92 + 108 + 104 + 120 + 146 = 758.
+   The object keeps 200 of its own behind its full-text title; the table
+   scrolls inside its own box and the page never does. Not 1020, not 1048. */
+.settings-page .settings-ledger .settings-ledger-table table {
+  min-width: 958px;
+}
+
+@media (max-width: 640px) {
+  .settings-page .settings-ledger .settings-ledger-totals {
+    padding: 16px;
+    border-radius: 14px;
+  }
+
+  /* Month switch, record/export/lock and the row edits are thumb targets
+     on a phone, sized locally — the shared Action, the select's desktop
+     height and the portaled drawer/dialogs are untouched. */
+  .settings-page .settings-ledger .ops-action {
+    min-height: 44px;
+  }
+
+  .settings-page .settings-ledger select {
+    min-height: 44px;
+  }
+}

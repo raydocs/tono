@@ -40,6 +40,10 @@ pub mod endpoints {
     pub const DIAGNOSTICS_REPORTS: &str = "diagnostics/reports";
     /// Periodic testing timeline windows (client default-on, user-disableable).
     pub const TELEMETRY_WINDOWS: &str = "telemetry/windows";
+    /// One classified connect failure, posted the moment it happens. This is
+    /// not the 3.5 raw connection log: the body is the same `connectFail`
+    /// shape the periodic window already carries (stage, code, node).
+    pub const TELEMETRY_FAILURES: &str = "telemetry/failures";
     /// Raw audit-log segments for the test programme. Unlike
     /// [`DIAGNOSTICS_REPORTS`] this carries hostnames, process paths and routes,
     /// so it is gated on its own product toggle and its own disclosure.
@@ -544,9 +548,34 @@ pub struct TelemetryEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bytes: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes_up: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes_down: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wanted: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub live: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport: Option<String>,
+}
+
+/// Bytes attributed to each route over one telemetry window (a delta since the
+/// previous successful upload, not a lifetime total). Keys are the only ones
+/// the Worker accepts: `cloud`, `residential`, `direct`.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BytesByRoute {
+    pub cloud: u64,
+    pub residential: u64,
+    pub direct: u64,
+}
+
+/// Coverage of the route counters, independent of the short event lookback.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RouteBytesInterval {
+    pub start_ms: i64,
+    pub end_ms: i64,
 }
 
 /// Whitelisted periodic timeline window body.
@@ -585,6 +614,16 @@ pub struct TelemetryWindowReport {
     pub tcp_delay_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tcp_delay_at_ms: Option<i64>,
+    /// Named rather than guessed from `os_version` on the Worker; the guess is
+    /// for clients that predate the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<String>,
+    /// Window delta of bytes by route. Omitted when the client has no ledger
+    /// snapshot. The Worker refuses any key other than `cloud`/`residential`/`direct`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes_by_route: Option<BytesByRoute>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route_bytes_interval: Option<RouteBytesInterval>,
     pub event_count: u32,
     pub events_dropped: u32,
     pub events: Vec<TelemetryEvent>,
@@ -592,6 +631,92 @@ pub struct TelemetryWindowReport {
 
 pub const TELEMETRY_SCHEMA_VERSION: u32 = 1;
 pub const TELEMETRY_KIND_PERIODIC_WINDOW: &str = "periodic_window";
+/// Fallback `code` when the diagnostic string has no `TONO_*` / `CORE_*`
+/// token. Matches macOS `ProtectedFailureCode.unknownClassifiedFailure`.
+pub const UNKNOWN_CLASSIFIED_FAILURE: &str = "UNKNOWN_CLASSIFIED_FAILURE";
+
+/// One failed connect attempt, in the shape `telemetry/failures` accepts.
+/// Posted the moment it happens so the customer timeline does not wait for
+/// the next periodic window. Optionals that were not set stay off the wire.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectFailureReport {
+    pub ts: i64,
+    pub stage: String,
+    pub code: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub node: String,
+    pub app_version: String,
+    pub os_version: String,
+    pub os_arch: String,
+    pub platform: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub core_errors: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tcp_delay_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_delay_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transport: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectFailureReceipt {
+    pub accepted: bool,
+}
+
+fn clip_chars(value: &str, max: usize) -> String {
+    value.chars().take(max).collect()
+}
+
+impl ConnectFailureReport {
+    /// Clip and drop fields the Worker would 400, without inventing keys.
+    pub fn for_wire(&self) -> Result<Self, ApiError> {
+        let stage = clip_chars(self.stage.trim(), 40);
+        let code = clip_chars(self.code.trim(), 80);
+        let node = clip_chars(self.node.trim(), 120);
+        if stage.is_empty() || code.is_empty() || node.is_empty() {
+            return Err(ApiError::InvalidInput(
+                "connect failure report needs stage, code, and node".to_string(),
+            ));
+        }
+        let error = self.error.as_ref().and_then(|value| {
+            let clipped = clip_chars(value.trim(), 200);
+            (!clipped.is_empty()).then_some(clipped)
+        });
+        let core_errors = self.core_errors.as_ref().and_then(|lines| {
+            let clipped: Vec<String> = lines
+                .iter()
+                .filter(|line| !line.is_empty())
+                .take(20)
+                .map(|line| clip_chars(line, 200))
+                .filter(|line| !line.is_empty())
+                .collect();
+            (!clipped.is_empty()).then_some(clipped)
+        });
+        let transport = self.transport.as_deref().and_then(|value| match value {
+            "tcp" | "hy2" => Some(value.to_string()),
+            _ => None,
+        });
+        Ok(Self {
+            ts: self.ts,
+            stage,
+            code,
+            error,
+            node,
+            app_version: clip_chars(&self.app_version, 40),
+            os_version: clip_chars(&self.os_version, 80),
+            os_arch: clip_chars(&self.os_arch, 32),
+            platform: clip_chars(&self.platform, 20),
+            core_errors,
+            tcp_delay_ms: self.tcp_delay_ms,
+            exit_delay_ms: self.exit_delay_ms,
+            transport,
+        })
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 struct TelemetryWindowRequest<'a> {
@@ -604,6 +729,8 @@ pub struct TelemetryWindowReceipt {
     pub id: String,
     #[serde(default, deserialize_with = "de_opt_epoch")]
     pub received_at: Option<i64>,
+    #[serde(default)]
+    pub route_bytes_interval_version: Option<u32>,
 }
 
 /// Server error envelope `{error:{message,code}}` (§1).
@@ -650,6 +777,9 @@ pub struct DiagnosticsLogSegment<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct DiagnosticsLogReceipt {
     pub segment: DiagnosticsLogReceiptSegment,
+    /// Older stored receipts omit this field. An explicit no-store response is
+    /// not an acknowledgement, even though its HTTP status is successful.
+    pub stored: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -737,6 +867,9 @@ struct AuthState {
     /// Bumped on every successful refresh so a waiter can tell a fresh
     /// token from the one its request failed with.
     epoch: u64,
+    /// Unlike token refresh, adopt/logout invalidate raw-log ownership. Never
+    /// replay the previous account's payload using a replacement account token.
+    identity_epoch: u64,
 }
 
 /// Account API client (§1): Bearer injection, one refresh-and-retry on 401,
@@ -775,6 +908,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         state.access_token = Some(auth.access_token.clone());
         state.access_token_expiry = access_token_expiry_unix(&auth.access_token);
         state.epoch += 1;
+        state.identity_epoch = state.identity_epoch.wrapping_add(1);
         Ok(())
     }
 
@@ -976,6 +1110,20 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         Ok(receipt)
     }
 
+    /// `POST telemetry/failures`: one classified connectFail, the moment it
+    /// happens. Same consent as the periodic window. A timeout is never resent.
+    pub async fn upload_connect_failure(
+        &self,
+        report: &ConnectFailureReport,
+    ) -> Result<ConnectFailureReceipt, ApiError> {
+        let prepared = report.for_wire()?;
+        let body = serde_json::to_string(&prepared).map_err(|_| ApiError::InvalidResponse)?;
+        let response = self
+            .authorized(HttpMethod::Post, endpoints::TELEMETRY_FAILURES, Some(body))
+            .await?;
+        decode_json(&response)
+    }
+
     /// `POST diagnostics/logs`: upload one gzip segment of the local audit log.
     ///
     /// The body is compressed bytes rather than JSON, because these are the
@@ -991,6 +1139,22 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         &self,
         segment: DiagnosticsLogSegment<'_>,
     ) -> Result<DiagnosticsLogReceipt, ApiError> {
+        let identity = self.diagnostics_log_identity().await;
+        self.upload_diagnostics_log_segment_for_identity(segment, identity).await
+    }
+
+    /// Capture while the app's account-generation lock still owns the payload.
+    /// Refreshing this same account does not change its identity epoch.
+    pub async fn diagnostics_log_identity(&self) -> u64 {
+        self.state.lock().await.identity_epoch
+    }
+
+    pub async fn upload_diagnostics_log_segment_for_identity(
+        &self,
+        segment: DiagnosticsLogSegment<'_>,
+        identity: u64,
+    ) -> Result<DiagnosticsLogReceipt, ApiError> {
+        self.ensure_log_identity(identity).await?;
         if segment.gzip.len() < 2 || segment.gzip[0] != 0x1f || segment.gzip[1] != 0x8b {
             return Err(ApiError::InvalidInput(
                 "diagnostics log segment must be gzip".to_string(),
@@ -1033,11 +1197,20 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
                     bytes: segment.gzip.to_vec(),
                 },
                 headers,
+                identity,
             )
             .await?;
         let receipt: DiagnosticsLogReceipt = decode_json(&response)?;
         if receipt.segment.id.trim().is_empty() {
             return Err(ApiError::InvalidResponse);
+        }
+        if receipt.stored == Some(false) || receipt.segment.id == "not-stored" {
+            return Err(ApiError::Server {
+                // The diagnostics no-store contract is HTTP 200, not a
+                // transport/authentication failure that should refresh tokens.
+                status: 200,
+                message: "Tono did not store this network log. Check the device's diagnostic collection authorization.".to_string(),
+            });
         }
         Ok(receipt)
     }
@@ -1054,6 +1227,10 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
 
     /// Best-effort server logout, then local token wipe (§2).
     pub async fn logout(&self) {
+        {
+            let mut state = self.state.lock().await;
+            state.identity_epoch = state.identity_epoch.wrapping_add(1);
+        }
         // Gate on "a session exists", not on "an access token is cached". A process that
         // never completed an authorized call — offline at startup, or a refresh that failed
         // on transport — holds a valid refresh token and no access token, and the old gate
@@ -1125,8 +1302,11 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         path: &str,
         body: BinaryBody,
         headers: Vec<(String, String)>,
+        identity_epoch: u64,
     ) -> Result<Vec<u8>, ApiError> {
+        self.ensure_log_identity(identity_epoch).await?;
         let (token, epoch) = self.current_access_token().await?;
+        self.ensure_log_identity(identity_epoch).await?;
         let build = |bearer: &str| ApiRequest {
             method: HttpMethod::Post,
             url: format!("{}/{API_PREFIX}{path}", self.base_url),
@@ -1135,7 +1315,9 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
             binary_body: Some(body.clone()),
             headers: headers.clone(),
         };
-        match map_status(self.transport.send(build(&token)).await?) {
+        let result = map_status(self.transport.send(build(&token)).await?);
+        self.ensure_log_identity(identity_epoch).await?;
+        match result {
             Err(ApiError::Unauthorized) => {
                 let mut state = self.state.lock().await;
                 if state.epoch == epoch {
@@ -1144,10 +1326,20 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
                 }
                 drop(state);
                 let renewed = self.refresh_access_token(epoch).await?;
-                map_status(self.transport.send(build(&renewed)).await?)
+                self.ensure_log_identity(identity_epoch).await?;
+                let replay = map_status(self.transport.send(build(&renewed)).await?);
+                self.ensure_log_identity(identity_epoch).await?;
+                replay
             }
             result => result,
         }
+    }
+
+    async fn ensure_log_identity(&self, expected: u64) -> Result<(), ApiError> {
+        if self.state.lock().await.identity_epoch != expected {
+            return Err(ApiError::Unauthorized);
+        }
+        Ok(())
     }
 
     /// Concurrent refreshes coalesce: the first caller through
@@ -1241,9 +1433,18 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
             bearer: bearer.map(str::to_string),
             json_body: body,
             binary_body: None,
-            headers: Vec::new(),
+            headers: catalog_accept_headers(path),
         };
         map_status(self.transport.send(request).await?)
+    }
+}
+
+fn catalog_accept_headers(path: &str) -> Vec<(String, String)> {
+    let trimmed = path.trim_start_matches('/');
+    if trimmed == endpoints::EXIT_CATALOG {
+        vec![("X-Tono-Accept".to_string(), "hy2".to_string())]
+    } else {
+        Vec::new()
     }
 }
 
@@ -1502,6 +1703,70 @@ mod tests {
         assert_eq!(headers.get("X-Tono-Log-Lines").unwrap(), "42");
         assert_eq!(headers.get("X-Tono-Log-Client-Version").unwrap(), "0.0.30");
         assert_eq!(headers.get("X-Tono-Log-Os-Version").unwrap(), "Windows 11 26100");
+    }
+
+    #[tokio::test]
+    async fn an_http_success_without_log_storage_is_not_an_acknowledgement() {
+        let (client, mock, _store) = test_client(|_| {
+            json(200, r#"{"segment":{"id":"not-stored","receivedAt":1786500000},"stored":false,"reason":"not_enabled"}"#)
+        });
+        client.adopt(&auth_response("access", Some("refresh"))).await.unwrap();
+        let result = client
+            .upload_diagnostics_log_segment(log_segment(&[0x1f, 0x8b, 0x08], "no-store"))
+            .await;
+        assert!(matches!(result, Err(ApiError::Server { status: 200, message }) if message.contains("did not store")));
+        assert_eq!(mock.count_to("diagnostics/logs"), 1);
+    }
+
+    #[tokio::test]
+    async fn a_log_bound_to_a_replaced_identity_is_not_dispatched() {
+        let (client, mock, _store) = test_client(|_| panic!("old log must not reach transport"));
+        client.adopt(&auth_response("old-access", Some("old-refresh"))).await.unwrap();
+        let identity = client.diagnostics_log_identity().await;
+        client.adopt(&auth_response("new-access", Some("new-refresh"))).await.unwrap();
+        let result = client.upload_diagnostics_log_segment_for_identity(
+            log_segment(&[0x1f, 0x8b, 0x08], "old-session"), identity,
+        ).await;
+        assert_eq!(result, Err(ApiError::Unauthorized));
+        assert!(mock.requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_late_log_401_is_not_replayed_with_the_replacement_accounts_token() {
+        #[derive(Default)]
+        struct HeldLog {
+            started: tokio::sync::Notify,
+            release: tokio::sync::Notify,
+            requests: Mutex<Vec<ApiRequest>>,
+        }
+        #[async_trait]
+        impl HttpTransport for HeldLog {
+            async fn send(&self, request: ApiRequest) -> Result<ApiResponse, ApiError> {
+                self.requests.lock().unwrap().push(request);
+                self.started.notify_one();
+                self.release.notified().await;
+                json(401, "{}")
+            }
+        }
+        let transport = Arc::new(HeldLog::default());
+        let client = Arc::new(ApiClient::new(
+            "https://api.example.test", transport.clone(), Arc::new(MemoryCredentialStore::new()),
+        ).unwrap());
+        client.adopt(&auth_response("old-access", Some("old-refresh"))).await.unwrap();
+        let upload_client = client.clone();
+        let upload = tokio::spawn(async move {
+            upload_client.upload_diagnostics_log_segment(log_segment(&[0x1f, 0x8b, 0x08], "old-session")).await
+        });
+        tokio::time::timeout(Duration::from_secs(2), transport.started.notified()).await.unwrap();
+        let mut replacement = auth_response("replacement-access", Some("replacement-refresh"));
+        replacement.user.id = "replacement-account".to_string();
+        client.adopt(&replacement).await.unwrap();
+        transport.release.notify_one();
+        let result = tokio::time::timeout(Duration::from_secs(2), upload).await.unwrap().unwrap();
+        assert_eq!(result, Err(ApiError::Unauthorized));
+        let sent = transport.requests.lock().unwrap();
+        assert_eq!(sent.len(), 1, "previous account's raw log must never be replayed");
+        assert_eq!(sent[0].bearer.as_deref(), Some("old-access"));
     }
 
     #[tokio::test]
@@ -2368,6 +2633,114 @@ mod tests {
         assert_eq!(step_keys, ["elapsedMs", "key", "state"]);
     }
 
+    fn sample_connect_failure() -> ConnectFailureReport {
+        ConnectFailureReport {
+            ts: 1_725_000_000_000,
+            stage: "checkingExit".to_string(),
+            code: "CORE_EXIT_UNREACHABLE".to_string(),
+            error: None,
+            node: "Tokyo · Sakura".to_string(),
+            app_version: "0.0.72".to_string(),
+            os_version: "Windows 11 Pro".to_string(),
+            os_arch: "x86_64".to_string(),
+            platform: "windows".to_string(),
+            core_errors: Some(vec!["dial tcp: i/o timeout".to_string()]),
+            tcp_delay_ms: None,
+            exit_delay_ms: None,
+            transport: Some("tcp".to_string()),
+        }
+    }
+
+    #[test]
+    fn connect_failure_report_serializes_only_the_accepted_keys() {
+        let accepted = [
+            "ts", "stage", "code", "error", "node", "appVersion", "osVersion", "osArch",
+            "platform", "coreErrors", "tcpDelayMs", "exitDelayMs", "transport",
+        ];
+        let value = serde_json::to_value(sample_connect_failure()).unwrap();
+        let keys: Vec<&str> = value.as_object().unwrap().keys().map(String::as_str).collect();
+        assert!(keys.iter().all(|key| accepted.contains(key)), "{keys:?}");
+        assert_eq!(value["platform"], "windows");
+        assert!(value.get("error").is_none());
+        assert!(value.get("tcpDelayMs").is_none());
+        assert_eq!(value["coreErrors"][0], "dial tcp: i/o timeout");
+        assert_eq!(value["transport"], "tcp");
+    }
+
+    #[test]
+    fn connect_failure_report_drops_an_invalid_transport_and_clips_core_errors() {
+        let mut report = sample_connect_failure();
+        report.transport = Some("quic".to_string());
+        report.core_errors = Some(
+            (0..25)
+                .map(|_| "x".repeat(400))
+                .chain(std::iter::once(String::new()))
+                .collect(),
+        );
+        let prepared = report.for_wire().unwrap();
+        assert!(prepared.transport.is_none());
+        assert_eq!(prepared.core_errors.as_ref().unwrap().len(), 20);
+        assert!(prepared
+            .core_errors
+            .as_ref()
+            .unwrap()
+            .iter()
+            .all(|line| line.chars().count() == 200));
+    }
+
+    #[tokio::test]
+    async fn connect_failure_posts_the_unwrapped_body() {
+        let (client, mock, store) = test_client(|request| {
+            assert!(request.url.ends_with("api/v1/telemetry/failures"));
+            assert_eq!(request.method, HttpMethod::Post);
+            let body: serde_json::Value =
+                serde_json::from_str(request.json_body.as_deref().unwrap()).unwrap();
+            assert!(body.get("report").is_none());
+            assert_eq!(body["kind"], serde_json::Value::Null);
+            assert_eq!(body["stage"], "checkingExit");
+            assert_eq!(body["code"], "CORE_EXIT_UNREACHABLE");
+            assert_eq!(body["node"], "Tokyo · Sakura");
+            json(202, r#"{"accepted":true}"#)
+        });
+        store.set_refresh_token("r0").unwrap();
+        client
+            .adopt(&auth_response("access-1", None))
+            .await
+            .unwrap();
+        let receipt = client
+            .upload_connect_failure(&sample_connect_failure())
+            .await
+            .unwrap();
+        assert!(receipt.accepted);
+        assert_eq!(mock.count_to("telemetry/failures"), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn connect_failure_upload_never_retries_a_timeout() {
+        let (client, mock, store) = test_client(|_| {
+            Err(ApiError::Transport {
+                kind: TransportKind::Timeout,
+                message: "timeout".to_string(),
+            })
+        });
+        store.set_refresh_token("r0").unwrap();
+        client
+            .adopt(&auth_response("access-1", None))
+            .await
+            .unwrap();
+        assert!(
+            client
+                .upload_connect_failure(&sample_connect_failure())
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            mock.count_to("telemetry/failures"),
+            1,
+            "a possibly-delivered failure must never be sent twice"
+        );
+    }
+
     #[tokio::test]
     async fn revoke_device_validates_uuid() {
         let (client, mock, _store) = test_client(|_| unreachable!());
@@ -2441,6 +2814,14 @@ mod tests {
         let catalog = client.exit_catalog().await.unwrap();
         assert_eq!(catalog.revision, 3);
         assert_eq!(catalog.updated_at, Some(42));
+        let catalog_request = _mock
+            .requests()
+            .into_iter()
+            .find(|request| request.url.ends_with("exit-catalog"))
+            .expect("catalog GET");
+        assert!(catalog_request.headers.iter().any(|(name, value)| {
+            name == "X-Tono-Accept" && value == "hy2"
+        }));
     }
 
     #[test]
@@ -2501,5 +2882,128 @@ mod tests {
             "stale refresh must not overwrite the new session"
         );
         assert_eq!(mock.count_to("auth/refresh"), 1);
+    }
+}
+
+#[cfg(test)]
+mod connect_failure_report_tests {
+    use super::*;
+
+    #[test]
+    fn a_window_names_its_platform_only_when_set() {
+        let report = TelemetryWindowReport {
+            schema_version: TELEMETRY_SCHEMA_VERSION,
+            kind: TELEMETRY_KIND_PERIODIC_WINDOW.to_string(),
+            window_start_ms: 0,
+            window_end_ms: 1,
+            app_version: "0.0.73".to_string(),
+            os_version: "Windows 11".to_string(),
+            os_arch: "x86_64".to_string(),
+            ui_state: "connected".to_string(),
+            account_state: "ready".to_string(),
+            selected_server: None,
+            catalog_revision: None,
+            kill_switch_mode: None,
+            kill_switch_wanted: None,
+            kill_switch_live: None,
+            dns_enabled: None,
+            exit_delay_ms: None,
+            exit_delay_at_ms: None,
+            tcp_delay_ms: None,
+            tcp_delay_at_ms: None,
+            platform: Some("windows".to_string()),
+            bytes_by_route: None,
+            route_bytes_interval: None,
+            event_count: 0,
+            events_dropped: 0,
+            events: Vec::new(),
+        };
+        let value = serde_json::to_value(&report).unwrap();
+        assert_eq!(value["platform"], "windows");
+        let unnamed = TelemetryWindowReport { platform: None, ..report };
+        assert!(serde_json::to_value(&unnamed).unwrap().get("platform").is_none());
+    }
+
+    #[test]
+    fn a_disconnect_event_names_bytes_up_and_down_only_when_set() {
+        let event: TelemetryEvent = serde_json::from_value(serde_json::json!({
+            "ts": 1,
+            "kind": "disconnectOk",
+            "elapsedMs": 1500,
+            "bytesUp": 11,
+            "bytesDown": 22,
+        }))
+        .unwrap();
+        let value = serde_json::to_value(&event).unwrap();
+        assert_eq!(value["bytesUp"], 11);
+        assert_eq!(value["bytesDown"], 22);
+        assert_eq!(value["elapsedMs"], 1500);
+        let unnamed = TelemetryEvent {
+            bytes_up: None,
+            bytes_down: None,
+            elapsed_ms: None,
+            ..event
+        };
+        let omitted = serde_json::to_value(&unnamed).unwrap();
+        assert!(omitted.get("bytesUp").is_none());
+        assert!(omitted.get("bytesDown").is_none());
+        assert!(omitted.get("elapsedMs").is_none());
+    }
+
+    #[test]
+    fn a_window_names_bytes_by_route_only_when_set() {
+        let report = TelemetryWindowReport {
+            schema_version: TELEMETRY_SCHEMA_VERSION,
+            kind: TELEMETRY_KIND_PERIODIC_WINDOW.to_string(),
+            window_start_ms: 0,
+            window_end_ms: 1,
+            app_version: "0.0.73".to_string(),
+            os_version: "Windows 11".to_string(),
+            os_arch: "x86_64".to_string(),
+            ui_state: "connected".to_string(),
+            account_state: "ready".to_string(),
+            selected_server: None,
+            catalog_revision: None,
+            kill_switch_mode: None,
+            kill_switch_wanted: None,
+            kill_switch_live: None,
+            dns_enabled: None,
+            exit_delay_ms: None,
+            exit_delay_at_ms: None,
+            tcp_delay_ms: None,
+            tcp_delay_at_ms: None,
+            platform: Some("windows".to_string()),
+            bytes_by_route: Some(BytesByRoute {
+                cloud: 1,
+                residential: 2,
+                direct: 3,
+            }),
+            route_bytes_interval: Some(RouteBytesInterval { start_ms: 0, end_ms: 1 }),
+            event_count: 0,
+            events_dropped: 0,
+            events: Vec::new(),
+        };
+        let value = serde_json::to_value(&report).unwrap();
+        assert_eq!(value["routeBytesInterval"], serde_json::json!({ "startMs": 0, "endMs": 1 }));
+        let object = value["bytesByRoute"].as_object().expect("bytesByRoute object");
+        let accepted = ["cloud", "residential", "direct"];
+        assert_eq!(object.len(), 3);
+        for key in object.keys() {
+            assert!(accepted.contains(&key.as_str()), "unexpected key {key}");
+        }
+        assert_eq!(object["cloud"], 1);
+        assert_eq!(object["residential"], 2);
+        assert_eq!(object["direct"], 3);
+        let unnamed = TelemetryWindowReport {
+            bytes_by_route: None,
+            route_bytes_interval: None,
+            ..report
+        };
+        assert!(
+            serde_json::to_value(&unnamed)
+                .unwrap()
+                .get("bytesByRoute")
+                .is_none()
+        );
     }
 }

@@ -56,7 +56,7 @@ export const useTrafficData = (options?: {
     // localStorage date left the dashboard subscribed to a dead 9090 socket.
     buildSubscriptKey: (date) =>
       enabled && generation != null && generation > 0
-        ? `getClashTraffic-${generation}-${date}`
+        ? `getCoreTraffic-${generation}-${date}`
         : null,
     fallbackData: FALLBACK_TRAFFIC,
     connect: () => MihomoWebSocket.connect_traffic(),

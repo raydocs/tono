@@ -62,6 +62,7 @@ export const ledgerCopy = {
       `锁定 ${month} 之后这个月只能冲正，不能改。收入 ${revenue}，支出 ${cost}，毛利 ${margin}，${pending}。`,
     closeConfirm: '锁定',
     closedAlready: '这个月已经锁了',
+    closeWaiting: '汇总还没读到',
     lockedNote: '这个月已经锁了，只能冲正，不能改。',
     exportAction: '导出 CSV',
 

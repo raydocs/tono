@@ -1,7 +1,10 @@
 import type { MihomoWebSocket } from 'tono-plugin-core-api'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { createSharedSubscriptionEntry } from './use-mihomo-ws-subscription'
+import {
+  CONNECT_TIMEOUT_MS,
+  createSharedSubscriptionEntry,
+} from './use-mihomo-ws-subscription'
 
 const socket = (close = vi.fn(async () => {})) =>
   ({
@@ -115,5 +118,46 @@ describe('shared Mihomo WebSocket recovery', () => {
 
     expect(connect).toHaveBeenCalledTimes(2)
     expect(entry.ws).toBe(second)
+  })
+
+  it('abandons a hung connect after CONNECT_TIMEOUT_MS and reconnects', async () => {
+    vi.useFakeTimers()
+    const first = socket()
+    const second = socket()
+    let resolveFirst!: (ws: MihomoWebSocket) => void
+    const connect = vi
+      .fn<() => Promise<MihomoWebSocket>>()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve
+          }),
+      )
+      .mockResolvedValueOnce(second)
+    const entry = createSharedSubscriptionEntry(connect)
+    entry.owners.add({
+      handleMessage: vi.fn(),
+      isMounted: () => true,
+    })
+
+    const hung = entry.connectWs()
+    expect(connect).toHaveBeenCalledTimes(1)
+    expect(entry.ws).toBeNull()
+
+    await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS - 1)
+    expect(connect).toHaveBeenCalledTimes(1)
+    expect(entry.connecting).toBe(true)
+
+    // The watchdog starts the replacement immediately at its deadline.
+    await vi.advanceTimersByTimeAsync(1)
+    expect(connect).toHaveBeenCalledTimes(2)
+    expect(entry.connecting).toBe(false)
+    expect(entry.ws).toBe(second)
+
+    resolveFirst(first)
+    await hung
+    expect(first.close).toHaveBeenCalledOnce()
+    expect(entry.ws).toBe(second)
+    expect(second.close).not.toHaveBeenCalled()
   })
 })

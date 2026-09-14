@@ -10,7 +10,7 @@ struct SupportView: View {
     @AppStorage(
         SettingsKey.networkLogUploadEnabled,
         store: AppProfile.defaults
-    ) private var networkLogUploadEnabled = false
+    ) private var networkLogUploadEnabled = SettingsKey.networkLogUploadDefault
 
     @State private var probe: RuntimeProbe?
     @State private var terminalEnvReport: TerminalProxyReport?
@@ -498,6 +498,8 @@ struct SupportView: View {
             String(localized: "Sent. The newest log segment is with Tono support.")
         case .idle:
             String(localized: "Nothing to send — the log has not advanced since the last upload.")
+        case .busy:
+            String(localized: "A log upload is already in progress. Please wait for it to finish.")
         case .disabled:
             String(localized: "Nothing was sent: log upload is off in Settings › Privacy.")
         case let .failed(reason):
@@ -509,7 +511,7 @@ struct SupportView: View {
         _ outcome: DiagnosticsLogUploader.SweepOutcome
     ) -> Bool {
         switch outcome {
-        case .uploaded, .idle: false
+        case .uploaded, .idle, .busy: false
         case .disabled, .failed: true
         }
     }
@@ -803,11 +805,18 @@ struct SupportView: View {
     /// Support asks for both whenever a route misbehaves, and the only copy of
     /// either was a stored value nothing rendered or copied.
     private var supplementalReportLines: [String] {
-        guard let accountSession else { return [] }
-        var lines = [
+        var lines: [String] = []
+        if let classified = appState.lastClassifiedFailure {
+            lines.append("connectionFailureCode: \(classified.code.rawValue)")
+            lines.append("connectionFailureStage: \(classified.stage)")
+        } else if let failure = appState.lastConnectionFailure {
+            lines.append("connectionFailureStage: \(failure.stage.rawValue)")
+        }
+        guard let accountSession else { return lines }
+        lines.append(
             "trafficPolicyRevision: "
-                + (accountSession.trafficPolicyRevision.map { "\($0)" } ?? "none"),
-        ]
+                + (accountSession.trafficPolicyRevision.map { "\($0)" } ?? "none")
+        )
         if let failure = accountSession.catalogFailureMessage {
             lines.append("catalogFailure: \(failure)")
         }

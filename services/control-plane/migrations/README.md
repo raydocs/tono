@@ -17,10 +17,10 @@ is the apply order:
 | `0018` | `0018_periodic_telemetry_windows.sql`, `0018_traffic_policy_signature.sql`, `0018_user_default_proxy.sql` |
 
 Do not collapse, renumber, or rewrite these to “fix” the prefixes. New
-schema changes continue from the highest existing number (`0071` at the
+schema changes continue from the highest existing number (`0072` at the
 time this note was written).
 
-## 0039–0071
+## 0039–0072
 
 Ops tables after the sequence was unique. Applied in numeric order:
 
@@ -48,3 +48,4 @@ Ops tables after the sequence was unique. Applied in numeric order:
 - `0069_ops_month_close_snapshot.sql` — `ops_month_close.summary_json` freezes customer and node rows at close
 - `0070_drop_orphan_diagnostics_and_destination_tables.sql` — drops four tables no code reads (numbers 0026–0030 were reused long ago)
 - `0071_ops_exit_asns.sql` — known exit ASNs so edge attribution can tell tunnel uploads from customer networks
+- `0072_hy2_transport.sql` — optional hy2 columns on node profiles, connection events, and quality samples

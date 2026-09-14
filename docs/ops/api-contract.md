@@ -78,6 +78,11 @@
 
 `PATCH nodes/{name}/profile` 字段全可选（未知键 400）：`provider` ≤80、`providerAccountId`（须存在于 `provider_accounts` 或 null）、`region` ≤80、`lineTags` 最多 8×32、`port` 1..65535、`price` ≥0、`currency` 三字母、`billingCycle` 1..3660 天、`renewsAt`/`expiresAt` unix 秒、`notes` ≤2000、`quota` 为 `{ quotaBytes, cycleKind, cycleAnchorDay, counts }` 或 `null`（null 清周期）。无 profile 行时，节点只要在 catalog/status 里就会补一行。写 `ops_audit` `node.profile.update`。
 
+### 托管目录命名（hy2）
+
+托管目录仍然只有 Tono 签发的出口。Hysteria2 是同一节点的第二块，名字后缀 ` · hy2`（空格+间隔号+空格）。展示、判定、退役都折到基名：退役 `Tokyo · Sakura` 会同时拿掉 `Tokyo · Sakura · hy2`。VLESS 块仍是恰好一个 `uuid: {{TONO_CLIENT_UUID}}`；hy2 块是 `type: hysteria2`、恰好一个 `password: {{TONO_CLIENT_UUID}}`、必须有 `fingerprint`、禁止 `skip-cert-verify: true`。`NodeDetailDto.facts` 可选 `transports?: ('tcp'|'hy2')[]`、`hy2?: { port, udpOk }`；`ConnectionEventDto.transport` 可选 `'tcp'|'hy2'`。没有 hy2 时这些键不出现，旧夹具继续过。
+
+
 `GET nodes/{name}/acceptance` 是"新机器能不能卖"的一张单子，十二条，每条只由 Worker 已有的事实算出来：
 资料齐全（profile 的商家/价格/续费或到期/线路标签）、五处登记各算一条、大陆三网探测（中控机最近一轮，≤26 小时，且没有被墙判定）、
 客户去程（最近 7 天大陆运营商的 `connectOk`）、后台无报错（最近一天低于 10 条，且这台机器汇总过报错）、

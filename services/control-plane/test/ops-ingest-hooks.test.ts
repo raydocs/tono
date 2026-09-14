@@ -153,6 +153,34 @@ describe('ops ingest hooks', () => {
     expect((await api('telemetry/windows', json(negative, account.token))).status).toBe(400);
   });
 
+  it('keeps a retried route-byte interval separate from the heartbeat window and advertises support', async () => {
+    const account = await seedAccount('route-interval');
+    const body = telemetryWindow();
+    const window = body.window as Record<string, unknown>;
+    const interval = { startMs: body.window.windowEndMs - 8 * 60 * 60 * 1000, endMs: body.window.windowEndMs };
+    window.bytesByRoute = { cloud: 1500, residential: 0, direct: 42 };
+    window.routeBytesInterval = interval;
+    const response = await api('telemetry/windows', json(body, account.token));
+    expect(response.status).toBe(201);
+    const receipt = await response.json() as { id: string; routeBytesIntervalVersion: number };
+    expect(receipt.routeBytesIntervalVersion).toBe(1);
+    const stored = await db().prepare('SELECT payload_json FROM telemetry_windows WHERE id = ?')
+      .bind(receipt.id).first<{ payload_json: string }>();
+    expect(JSON.parse(stored?.payload_json ?? '{}')).toMatchObject({
+      windowStartMs: body.window.windowStartMs, windowEndMs: body.window.windowEndMs,
+      routeBytesInterval: interval, bytesByRoute: window.bytesByRoute,
+    });
+    window.routeBytesInterval = { startMs: interval.endMs + 1, endMs: interval.endMs };
+    expect((await api('telemetry/windows', json(body, account.token))).status).toBe(400);
+    window.routeBytesInterval = interval;
+    delete window.bytesByRoute;
+    expect((await api('telemetry/windows', json(body, account.token))).status).toBe(400);
+    delete window.routeBytesInterval;
+    const legacy = await api('telemetry/windows', json(body, account.token));
+    expect(legacy.status).toBe(201);
+    expect(await legacy.json()).toMatchObject({ routeBytesIntervalVersion: 1 });
+  });
+
   it('a disconnectOk event carries bytes in each direction, and nothing else is let through', async () => {
     const account = await seedAccount('bytes');
     const body = telemetryWindow();
@@ -173,6 +201,42 @@ describe('ops ingest hooks', () => {
     const unknown = telemetryWindow();
     unknown.window.events[1] = { ...unknown.window.events[1], bytesSideways: 1 } as never;
     expect((await api('telemetry/windows', json(unknown, account.token))).status).toBe(400);
+  });
+
+  it('stores transport=hy2 on connect events and rejects any other value', async () => {
+    const account = await seedAccount('hy2');
+    const body = telemetryWindow();
+    const nowMs = Date.now();
+    body.window.events = [
+      { ts: nowMs - 20_000, kind: 'connectBegin', node: 'Tokyo · Sakura · hy2', transport: 'hy2' },
+      { ts: nowMs - 10_000, kind: 'connectOk', node: 'Tokyo · Sakura · hy2', transport: 'hy2', elapsedMs: 900 },
+    ] as unknown as typeof body.window.events;
+    body.window.eventCount = 2;
+    const response = await api('telemetry/windows', json(body, account.token));
+    expect(response.status).toBe(201);
+    const receipt = await response.json() as { id: string };
+    const rows = await db().prepare(
+      `SELECT kind, node, transport FROM connection_events WHERE window_id = ? ORDER BY kind`,
+    ).bind(receipt.id).all<{ kind: string; node: string; transport: string }>();
+    expect(rows.results).toEqual([
+      { kind: 'connectBegin', node: 'Tokyo · Sakura · hy2', transport: 'hy2' },
+      { kind: 'connectOk', node: 'Tokyo · Sakura · hy2', transport: 'hy2' },
+    ]);
+
+    const failure = await api('telemetry/failures', json({
+      ts: nowMs, stage: 'handshake', code: 'ETIMEDOUT', node: 'Tokyo · Sakura · hy2',
+      appVersion: '0.0.72', osVersion: 'Windows 11', osArch: 'x86_64', platform: 'windows',
+      transport: 'hy2',
+    }, account.token));
+    expect(failure.status).toBe(202);
+    const failRow = await db().prepare(
+      `SELECT transport FROM connection_events WHERE user_id = ? AND source = 'failure'`,
+    ).bind(account.userId).first<{ transport: string }>();
+    expect(failRow?.transport).toBe('hy2');
+
+    const bad = telemetryWindow();
+    bad.window.events[1] = { ...bad.window.events[1], transport: 'quic' } as never;
+    expect((await api('telemetry/windows', json(bad, account.token))).status).toBe(400);
   });
 
   it('failure reports spend their own rate-limit bucket, not the heartbeat one', async () => {

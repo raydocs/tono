@@ -9,11 +9,15 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: listenMock }))
 
 import {
+  connectErrorSuggestsBackupChannel,
   connectErrorSuggestsServerSwitch,
   connectRejectionNeedsServerChoice,
   describeTonoActionError,
   formatTonoActionError,
+  formatTonoDiagnostics,
   isEncryptedDnsFailure,
+  isSupersededConnectRejection,
+  stableTonoErrorCode,
   subscribeTonoStatus,
   tonoAuditEnabled,
   tonoAuditLogPath,
@@ -24,6 +28,7 @@ import {
   tonoRefreshCatalog,
   tonoSetAuditEnabled,
   tonoTestAvailableServers,
+  type TonoDiagnosticsReport,
   type TonoStatus,
 } from './tono'
 
@@ -168,6 +173,27 @@ describe('connectRejectionNeedsServerChoice', () => {
   })
 })
 
+describe('isSupersededConnectRejection', () => {
+  it('matches overlapping or cancelled connect IPC, not a failed attempt', () => {
+    for (const message of [
+      'connection superseded by a newer transition',
+      'already connecting',
+      'a connection transition is already in flight',
+    ]) {
+      expect(isSupersededConnectRejection(new Error(message))).toBe(true)
+    }
+  })
+
+  it('leaves real connect failures on the error path', () => {
+    expect(
+      isSupersededConnectRejection(
+        new Error('TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof'),
+      ),
+    ).toBe(false)
+    expect(isSupersededConnectRejection(undefined)).toBe(false)
+  })
+})
+
 describe('connectErrorSuggestsServerSwitch', () => {
   it('recognizes blocked or unreachable exit failures', () => {
     for (const error of [
@@ -205,6 +231,16 @@ describe('connectErrorSuggestsServerSwitch', () => {
     expect(connectErrorSuggestsServerSwitch(error)).toBe(false)
     expect(formatTonoActionError(error, (key) => `translated:${key}`)).toBe(
       'translated:tono.dashboard.errors.protectedHttpsFailed',
+    )
+  })
+
+  it('maps a bare CORE_EXIT_UNREACHABLE token without leaking handshake debug', () => {
+    const error = new Error('CORE_EXIT_UNREACHABLE: dial timeout')
+    expect(
+      formatTonoActionError(error, (key) => `translated:${key}`),
+    ).toBe('translated:tono.dashboard.errors.nodeUnreachable')
+    expect(formatTonoActionError(error, (key) => `translated:${key}`)).not.toContain(
+      'dial timeout',
     )
   })
 
@@ -254,6 +290,13 @@ describe('connectErrorSuggestsServerSwitch', () => {
         ),
       ),
     ).toBe(true)
+    expect(
+      isEncryptedDnsFailure(
+        new Error(
+          'fake-ip verification failed: Windows system DNS A query exceeded 5s. Windows Encrypted DNS (DNS over HTTPS) may still be overriding 127.0.0.1',
+        ),
+      ),
+    ).toBe(true)
     expect(isEncryptedDnsFailure(new Error('node unreachable'))).toBe(false)
   })
 
@@ -266,6 +309,32 @@ describe('connectErrorSuggestsServerSwitch', () => {
         (key) => `translated:${key}`,
       ),
     ).toBe('translated:tono.dashboard.errors.browserDnsPreflight')
+  })
+})
+
+describe('connectErrorSuggestsBackupChannel', () => {
+  it('offers the backup channel for handshake eof and unreachable exits', () => {
+    for (const error of [
+      new Error(
+        'TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof [CORE_EXIT_UNREACHABLE]',
+      ),
+      new Error('CORE_EXIT_UNREACHABLE: dial timeout'),
+      new Error('TONO_NODE_OR_CORE_UNREACHABLE: all probes failed'),
+      'this server is currently unavailable (network blocked)',
+    ]) {
+      expect(connectErrorSuggestsBackupChannel(error)).toBe(true)
+    }
+  })
+
+  it('does not offer the backup channel for service, account, or DNS failures', () => {
+    for (const error of [
+      new Error('TONO_SERVICE_BUSY: repair pending'),
+      new Error('not signed in'),
+      new Error('dns probe failed: exit refused'),
+      undefined,
+    ]) {
+      expect(connectErrorSuggestsBackupChannel(error)).toBe(false)
+    }
   })
 })
 
@@ -300,5 +369,60 @@ describe('describeTonoActionError', () => {
     const raw = 'os error 10061'
     expect(describeTonoActionError(raw)).toEqual({ message: raw })
     expect(formatTonoActionError(raw)).toBe(raw)
+  })
+})
+
+describe('stable diagnostic copy', () => {
+  const report = (
+    overrides: Partial<TonoDiagnosticsReport> = {},
+  ): TonoDiagnosticsReport => ({
+    schemaVersion: 1,
+    reportedAtMs: 0,
+    appVersion: '0.0.72',
+    osVersion: 'Windows 11',
+    osArch: 'x86_64',
+    serviceProtocol: '2.9',
+    serviceBuild: null,
+    uiState: 'notConnected',
+    accountState: 'ready',
+    selectedServer: 'Tokyo 1',
+    catalogRevision: 1,
+    killSwitchMode: 'blocked',
+    killSwitchWanted: true,
+    killSwitchLive: true,
+    killSwitchLastError: null,
+    dnsEnabled: true,
+    dnsLastError: null,
+    failedStage: 'checkingExit',
+    error:
+      'TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof [CORE_EXIT_UNREACHABLE]',
+    retryAttempt: 1,
+    totalElapsedMs: 1200,
+    steps: [],
+    virtualAdapters: [],
+    auditLogPath: 'audit.jsonl',
+    serviceLogPath: 'service.log',
+    ...overrides,
+  })
+
+  it('extracts the stable code for Copy details without using it as the UI sentence', () => {
+    const error =
+      'TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof [CORE_EXIT_UNREACHABLE]'
+    expect(stableTonoErrorCode(error)).toBe('TONO_NODE_OR_CORE_UNREACHABLE')
+    expect(
+      formatTonoActionError(new Error(error), (key) => `translated:${key}`),
+    ).toBe('translated:tono.dashboard.errors.protectedHttpsFailed')
+
+    const copied = formatTonoDiagnostics(report())
+    expect(copied).toContain('Failed stage: checkingExit')
+    expect(copied).toContain('Error code: TONO_NODE_OR_CORE_UNREACHABLE')
+    expect(copied).toContain(`Error: ${error}`)
+  })
+
+  it('prints (none) when the report has no stable code', () => {
+    expect(stableTonoErrorCode('dns probe failed')).toBeNull()
+    expect(
+      formatTonoDiagnostics(report({ error: 'dns probe failed' })),
+    ).toContain('Error code: (none)')
   })
 })

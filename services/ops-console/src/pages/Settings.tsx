@@ -2,6 +2,7 @@ import { copy } from '@/copy/copy';
 import { openSettings } from '@/lib/hash-route';
 import { resolveSection, SETTINGS_SECTIONS, type SettingsSection } from '@/lib/settings';
 import { cn } from '@/lib/utils';
+import '@/styles/settings.css';
 import { Alerts } from './settings/Alerts';
 import { Allowlist } from './settings/Allowlist';
 import { Audit } from './settings/Audit';
@@ -32,11 +33,11 @@ export default function SettingsPage({ section }: { section: string | null }) {
   const active = resolveSection(section);
 
   return (
-    <div className="page-wrap">
-      <div className="flex flex-col gap-6 min-[900px]:flex-row min-[900px]:gap-10">
+    <div className="page-wrap settings-page">
+      <div className="settings-layout flex flex-col gap-6 min-[900px]:flex-row min-[900px]:gap-10">
         <Rail active={active} />
         <div className="flex min-w-0 flex-1 flex-col gap-6">
-          <header className="flex flex-col gap-1">
+          <header className="settings-hero flex flex-col gap-1">
             <h2 className="text-page">{copy.settings.sections[active]}</h2>
             <p className="text-body text-[var(--muted-foreground)]">
               {copy.settings.sectionLead[active]}
@@ -73,7 +74,7 @@ function Rail({ active }: { active: SettingsSection }) {
   return (
     <nav
       aria-label={copy.pages.settings}
-      className="flex shrink-0 flex-wrap gap-x-4 gap-y-1 border-b border-[var(--hairline)] pb-3 min-[900px]:w-[132px] min-[900px]:flex-col min-[900px]:gap-0 min-[900px]:border-b-0 min-[900px]:border-l min-[900px]:border-[var(--hairline)] min-[900px]:pb-0"
+      className="settings-rail flex shrink-0 flex-wrap gap-x-4 gap-y-1 border-b border-[var(--hairline)] pb-3 min-[900px]:w-[132px] min-[900px]:flex-col min-[900px]:gap-0 min-[900px]:border-b-0 min-[900px]:border-l min-[900px]:border-[var(--hairline)] min-[900px]:pb-0"
     >
       {SETTINGS_SECTIONS.map((id) => (
         <a

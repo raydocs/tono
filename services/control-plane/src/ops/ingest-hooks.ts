@@ -27,7 +27,7 @@ const CORE_ERROR_CHARS = 200;
 const FAILURE_KEYS = [
   'ts', 'stage', 'code', 'error', 'node', 'appVersion', 'osVersion', 'osArch',
   'platform', 'coreErrors', 'tcpDelayMs', 'exitDelayMs',
-  'attemptId',
+  'attemptId', 'transport',
 ];
 const PLATFORMS = new Set(['windows', 'macos', 'linux', 'android', 'ios']);
 
@@ -233,6 +233,13 @@ export async function ingestConnectFailure(
   if (b.attemptId !== undefined && b.attemptId !== null) {
     attemptId = str(b.attemptId, 'attemptId', 1, 64);
   }
+  let transport: string | null = null;
+  if (b.transport !== undefined && b.transport !== null) {
+    transport = str(b.transport, 'transport', 1, 8);
+    if (transport !== 'tcp' && transport !== 'hy2') {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid transport');
+    }
+  }
   const errorText = failureError(b, cores);
   const t = now();
   // A client clock ahead of ours must not plant a failure that every
@@ -245,9 +252,10 @@ export async function ingestConnectFailure(
        platform, app_version, os_version, os_arch,
        kind, node, stage, outcome, code, error,
        elapsed_ms, delay_ms, exit_delay_ms, tcp_delay_ms, catalog_revision,
-       edge_asn, edge_as_org, edge_country, edge_region, edge_via_exit, attempt_id
+       edge_asn, edge_as_org, edge_country, edge_region, edge_via_exit, attempt_id,
+       transport
      ) VALUES(?, ?, ?, 'failure', NULL, ?, ?, ?, ?, ?, ?, 'connectFail', ?, ?, NULL, ?, ?,
-              NULL, NULL, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
+              NULL, NULL, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(
     id(), atMs, t, a.userId, a.deviceId,
     platform, appVersion, osVersion, osArch,
@@ -255,6 +263,7 @@ export async function ingestConnectFailure(
     exitDelayMs, tcpDelayMs,
     edge.edge_asn, edge.edge_as_org, edge.edge_country, edge.edge_region, edge.edge_via_exit,
     attemptId,
+    transport,
   ).run();
   if (Number(inserted.meta.changes ?? 0) > 0) {
     await swallow('ops failure status failed', () => applyFailureToStatus(e.DB, {

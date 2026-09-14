@@ -16,17 +16,21 @@ import enShared from '@/locales/en/shared.json'
 import enTono from '@/locales/en/tono.json'
 import type { TonoServer } from '@/services/tono'
 
-const { serversMock, selectServerMock, mutateTonoStatusMock } = vi.hoisted(
+const { serversMock, selectServerMock, connectMock, mutateTonoStatusMock, toastMock, uiStateMock } = vi.hoisted(
   () => ({
     serversMock: vi.fn(),
     selectServerMock: vi.fn(),
+    connectMock: vi.fn(),
     mutateTonoStatusMock: vi.fn(),
+    toastMock: vi.fn(),
+    uiStateMock: vi.fn(),
   }),
 )
 vi.mock('@/services/tono', async (original) => ({
   ...(await original<typeof import('@/services/tono')>()),
   tonoServers: serversMock,
   tonoSelectServer: selectServerMock,
+  tonoConnect: connectMock,
   tonoCatalogStatus: async () => ({
     revision: null,
     nodeCount: 0,
@@ -39,11 +43,11 @@ vi.mock('@/services/states', () => ({ useThemeMode: () => 'dark' }))
 vi.mock('@/hooks/use-tono', () => ({
   tonoServersQueryKey: ['tono', 'servers'],
   useTonoStatus: () => ({
-    status: { uiState: 'notConnected', accountState: 'ready' },
+    status: { uiState: uiStateMock(), accountState: 'ready' },
     mutateTonoStatus: mutateTonoStatusMock,
   }),
 }))
-vi.mock('@/tono-ui/tono-toast-context', () => ({ useTonoToast: () => vi.fn() }))
+vi.mock('@/tono-ui/tono-toast-context', () => ({ useTonoToast: () => toastMock }))
 
 import ServersPage from './servers'
 
@@ -55,7 +59,9 @@ void i18n.use(initReactI18next).init({
 beforeEach(() => {
   vi.clearAllMocks()
   selectServerMock.mockResolvedValue(undefined)
+  connectMock.mockResolvedValue(undefined)
   mutateTonoStatusMock.mockResolvedValue(undefined)
+  uiStateMock.mockReturnValue('notConnected')
 })
 afterEach(cleanup)
 
@@ -65,6 +71,13 @@ const renderPage = () =>
       <ServersPage />
     </SWRConfig>,
   )
+
+it('does not claim the node list is synced before the first catalog sync', async () => {
+  serversMock.mockResolvedValue([])
+  renderPage()
+  expect(await screen.findByText('No servers available')).toBeDefined()
+  expect(screen.queryByText('Node list synced')).toBeNull()
+})
 
 it('does not claim an empty list while the first server read is pending', async () => {
   let resolve!: (servers: TonoServer[]) => void
@@ -189,4 +202,90 @@ it('shows an in-flight spinner on the chosen card and disables the others until 
     expect(screen.queryByText('Connecting')).toBeNull()
     expect((east as HTMLButtonElement).disabled).toBe(false)
   })
+})
+
+it('acknowledges a dispatched switch without claiming the new exit is connected', async () => {
+  uiStateMock.mockReturnValue('connected')
+  serversMock.mockResolvedValue([
+    { name: 'Tokyo · Sakura', server: 'a.test', port: 443, selected: true, available: true },
+    { name: 'Los Angeles · Sunset', server: 'b.test', port: 443, selected: false, available: true },
+  ])
+  renderPage()
+  fireEvent.click(await screen.findByRole('button', { name: /Los Angeles/ }))
+  await waitFor(() => expect(toastMock).toHaveBeenCalledWith('Switch to Los Angeles requested'))
+  expect(selectServerMock).toHaveBeenCalledWith('Los Angeles · Sunset')
+  expect(connectMock).not.toHaveBeenCalled()
+})
+
+it('lets the user pick the hy2 sibling and labels it as the backup channel', async () => {
+  serversMock.mockResolvedValue([
+    {
+      name: 'Tokyo · Sakura',
+      server: '203.0.113.10',
+      port: 443,
+      selected: true,
+      available: true,
+    },
+    {
+      name: 'Tokyo · Sakura · hy2',
+      server: '203.0.113.10',
+      port: 443,
+      selected: false,
+      available: true,
+    },
+    {
+      name: 'Los Angeles · Sunset · hy2',
+      server: '198.51.100.10',
+      port: 443,
+      selected: false,
+      available: true,
+    },
+    {
+      name: 'Buffalo · Niagara · hy2',
+      server: '198.51.100.11',
+      port: 443,
+      selected: false,
+      available: true,
+    },
+  ])
+  renderPage()
+  expect((await screen.findAllByText('Backup UDP')).length).toBeGreaterThan(1)
+  expect(
+    screen.queryByRole('button', { name: /Tokyo · Sakura · Backup channel/ }),
+  ).toBeNull()
+  const sunset = await screen.findByRole('button', {
+    name: /Los Angeles · Sunset · Backup channel/,
+  })
+  expect(sunset.textContent).toContain('Los Angeles · Sunset · Backup channel')
+  expect(
+    screen.getByRole('button', { name: /Buffalo · Niagara · Backup channel/ }),
+  ).toBeDefined()
+  fireEvent.click(sunset)
+  await waitFor(() =>
+    expect(selectServerMock).toHaveBeenCalledWith('Los Angeles · Sunset · hy2'),
+  )
+  await waitFor(() => expect(connectMock).toHaveBeenCalledTimes(1))
+})
+
+it('connects when tapping the already selected city while disconnected', async () => {
+  serversMock.mockResolvedValue([
+    {
+      name: 'Tokyo · Sakura',
+      server: '203.0.113.10',
+      port: 443,
+      selected: true,
+      available: true,
+    },
+    {
+      name: 'Los Angeles · Sunset',
+      server: '198.51.100.10',
+      port: 443,
+      selected: false,
+      available: true,
+    },
+  ])
+  renderPage()
+  fireEvent.click(await screen.findByRole('button', { name: /Tokyo/ }))
+  await waitFor(() => expect(connectMock).toHaveBeenCalledTimes(1))
+  expect(selectServerMock).not.toHaveBeenCalled()
 })

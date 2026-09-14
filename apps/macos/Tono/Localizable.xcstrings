@@ -2,6 +2,46 @@
   "sourceLanguage": "en",
   "strings": {
     "": {},
+    "A log upload is already in progress. Please wait for it to finish.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "日志正在上传，请等待当前上传完成。"
+          }
+        }
+      }
+    },
+    "Backup channel": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "备用通道"
+          }
+        }
+      }
+    },
+    "Backup UDP": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "备用 UDP"
+          }
+        }
+      }
+    },
+    "Try backup channel": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "试用备用通道"
+          }
+        }
+      }
+    },
     "Connected means protected.": {
       "localizations": {
         "zh-Hans": {
@@ -252,12 +292,12 @@
         }
       }
     },
-    "Uploads hostnames you connected to, the process that opened each connection, and the matched rule and route": {
+    "On by default for new installations; existing choices are kept. Uploads hostnames you connected to, the process that opened each connection, and the matched rule and route. Never page content, passwords or node secrets. Turn it off here.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "会上传你连过的主机名、发起连接的进程，以及匹配的规则和线路"
+            "value": "新安装默认开启，保留已有选择。会上传你连过的主机名、发起连接的进程、匹配的规则和线路。不含网页内容、密码或节点密钥。可在这里关闭。"
           }
         }
       }
@@ -1689,6 +1729,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "直连"
+          }
+        }
+      }
+    },
+    "Direct internet is available. Retry or choose another route.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "直连网络可用。可以立即重试，或选择其他线路。"
           }
         }
       }
@@ -5371,12 +5421,12 @@
         }
       }
     },
-    "The current node could not complete a protected check. Choose another node, or reconnect to try again.": {
+    "This city could not complete a protected connection. Retry, choose another route, or try the backup channel if one is shown.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "当前节点无法完成受保护验证。请换一个节点，或重新连接再试一次。"
+            "value": "这座城市没有完成受保护连接。请重试或换线路；若有备用通道也可以试用。"
           }
         }
       }
@@ -5387,6 +5437,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "网络组件协议不匹配，需要先完成组件修复。"
+          }
+        }
+      }
+    },
+    "The update did not finish. Disconnect, then reinstall Tono.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新未完成，请手动断开后重装"
           }
         }
       }
@@ -5619,6 +5679,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tono 无法解除上一次会话遗留的保护状态。请运行文档中的 sudo 紧急解除命令，然后重新打开 Tono。%@"
+          }
+        }
+      }
+    },
+    "Tono did not store this network log. Check the device's diagnostic collection authorization.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 未保存此网络日志。请检查此设备的诊断采集授权。"
           }
         }
       }
@@ -6987,12 +7057,12 @@
         }
       }
     },
-    "Off by default. When enabled, about every 20 minutes share protection status, the selected server and recent connection events with Tono support, and report a failed connection the moment it happens": {
+    "Off by default. When enabled, about every 20 minutes share protection status, the selected server, per-route byte totals and recent connection events (including the bytes moved when a connection ends) with Tono support, and report a failed connection the moment it happens": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "默认关闭。主动开启后，大约每 20 分钟向 Tono 支持团队分享保护状态、所选节点和最近的连接事件，并在连接失败时立即上报一次"
+            "value": "默认关闭。主动开启后，大约每 20 分钟向 Tono 支持团队分享保护状态、所选节点、各线路的流量小计和最近的连接事件（包含每次断开连接时的字节数），并在连接失败时立即上报一次"
           }
         }
       }

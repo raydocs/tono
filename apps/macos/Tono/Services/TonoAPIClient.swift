@@ -143,7 +143,12 @@ actor TonoAPIClient {
     func me() async throws -> TonoMeResponse { try await authorizedRequest("me", method: "GET") }
     func devices() async throws -> TonoDevicesResponse { try await authorizedRequest("devices", method: "GET") }
     func exitCatalog() async throws -> TonoExitCatalogResponse {
-        try await authorizedRequest("exit-catalog", method: "GET")
+        try await authorizedRequest(
+            "exit-catalog",
+            method: "GET",
+            bodyData: nil,
+            additionalHeaders: ["X-Tono-Accept": "hy2"]
+        )
     }
     func trafficPolicy() async throws -> TonoTrafficPolicyResponse {
         try await authorizedRequest("traffic-policy", method: "GET")
@@ -180,9 +185,10 @@ actor TonoAPIClient {
         sequence: Int,
         lineCount: Int,
         clientVersion: String,
-        osVersion: String
+        osVersion: String,
+        requestIsCurrent: (@Sendable () -> Bool)? = nil
     ) async throws -> TonoDiagnosticsLogSegmentResponse {
-        try await authorizedRequest(
+        let receipt: TonoDiagnosticsLogSegmentResponse = try await authorizedRequest(
             "diagnostics/logs",
             method: "POST",
             bodyData: payload,
@@ -193,8 +199,16 @@ actor TonoAPIClient {
                 "X-Tono-Log-Lines": String(lineCount),
                 "X-Tono-Log-Client-Version": clientVersion,
                 "X-Tono-Log-Os-Version": osVersion,
-            ]
+            ],
+            requestIsCurrent: requestIsCurrent
         )
+        guard receipt.wasStored else {
+            throw APIError.server(
+                status: 200,
+                message: String(localized: "Tono did not store this network log. Check the device's diagnostic collection authorization.")
+            )
+        }
+        return receipt
     }
 
     func uploadTelemetryWindow(

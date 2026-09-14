@@ -1,3 +1,4 @@
+import { QUALITY_SWEEP_FRESH_SECONDS } from '../freshness';
 import { envInt } from '../../env';
 import { CONTRACT_VERSION, SOURCE_IDS, assertSystemHealth, type BackfillHealthDto, type CronStepsHealthDto, type SourceHealthDto, type SourceId, type SourceState, type SystemHealthDto } from '../contract';
 import { coverageOf } from '../coverage';
@@ -18,7 +19,7 @@ import {
 const TELEMETRY_RETENTION_DEFAULT = 30 * 86_400;
 
 const STALE: Record<SourceId, number> = {
-  collector: 20 * 60,
+  collector: QUALITY_SWEEP_FRESH_SECONDS,
   komari: 15 * 60,
   telemetry: 40 * 60,
   catalog: 24 * 3600,

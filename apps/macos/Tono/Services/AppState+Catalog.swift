@@ -112,6 +112,7 @@ extension AppState {
         }
 
         let previousSelection = currentProxySelectionTarget()
+        let previousRoutingToken = managedCatalogRoutingToken
         let previousCloudNodes = proxyRegions
             .filter { $0.id != "custom" }
             .flatMap(\.nodes)
@@ -196,7 +197,25 @@ extension AppState {
 
         guard allowRuntimeTransition else { return }
         if isConnected {
-            applyManagedCatalogToRuntime()
+            let previousSelected = previousCloudNodes.first {
+                proxyTarget($0.name, matches: previousSelection ?? "")
+            }
+            let nextSelected = nodes.first {
+                proxyTarget($0.name, matches: previousSelection ?? "")
+            }
+            let routingChanged = previousRoutingToken != routingToken
+            if CatalogLiveSession.shouldReload(
+                previousSelected: previousSelected,
+                nextSelected: nextSelected,
+                routingChanged: routingChanged
+            ) {
+                applyManagedCatalogToRuntime()
+            } else {
+                LocalTrafficAudit.shared.recordEvent(
+                    "managed_catalog_apply_skipped_selected_unchanged",
+                    details: ["revision": String(catalog.revision)]
+                )
+            }
         } else if isConnecting {
             managedCatalogReloadPending = true
         }

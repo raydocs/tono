@@ -51,6 +51,7 @@ export const nodeDetailCopy = {
     renew: '续费',
     expires: '到期',
     notes: '备注',
+    transports: '通道',
   } as const,
   nodeAccountLink: '看这个商家账号',
   nodePrice: (money: string, cycle: string) => `${money} / ${cycle}`,

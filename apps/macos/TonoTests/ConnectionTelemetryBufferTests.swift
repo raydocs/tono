@@ -13,6 +13,18 @@ final class ConnectionTelemetryBufferTests: XCTestCase {
         XCTAssertNil(drained.events[0].error)
         let empty = buffer.drain()
         XCTAssertTrue(empty.events.isEmpty)
+        buffer.record("oldAccount")
+        let retired = buffer.snapshot()
+        _ = buffer.drain()
+        for _ in 0..<(ConnectionTelemetryBuffer.capacity + 2) { buffer.record("newAccount") }
+        buffer.acknowledge(retired)
+        let retained = buffer.snapshot()
+        XCTAssertEqual(retained.events.count, ConnectionTelemetryBuffer.capacity)
+        XCTAssertEqual(retained.dropped, 2)
+        buffer.record("newerEvent") // Evict one in-flight event that the receipt actually stores.
+        buffer.acknowledge(retained)
+        XCTAssertEqual(buffer.snapshot().events.map(\.kind), ["newerEvent"])
+        XCTAssertEqual(buffer.snapshot().dropped, 0)
     }
 
     /// A classified failure is only useful if the code travels with it. Without
@@ -35,6 +47,7 @@ final class ConnectionTelemetryBufferTests: XCTestCase {
         XCTAssertEqual(event.elapsedMs, 4_200)
         XCTAssertEqual(event.node, "anon-1")
         XCTAssertNil(event.error)
+        XCTAssertEqual(event.transport, "tcp")
     }
 
     /// The immediate report is only as useful as its bounds are honest: a core
@@ -78,7 +91,7 @@ final class ConnectionTelemetryBufferTests: XCTestCase {
     func testConnectFailureReportEncodesOnlyTheAcceptedKeys() throws {
         let accepted: Set<String> = [
             "ts", "stage", "code", "error", "node", "appVersion", "osVersion", "osArch",
-            "platform", "coreErrors", "tcpDelayMs", "exitDelayMs",
+            "platform", "coreErrors", "tcpDelayMs", "exitDelayMs", "transport",
         ]
         let report = TonoConnectFailureReport(
             ts: 1_725_000_000_000,
@@ -105,6 +118,41 @@ final class ConnectionTelemetryBufferTests: XCTestCase {
         buffer.record("connectOk", stage: "verifyingTraffic", delayMs: 183, node: "anon-1")
         let drained = buffer.drain()
         XCTAssertEqual(drained.events[0].delayMs, 183)
+    }
+
+    func testConnectHy2EventCarriesBackupTransport() {
+        let buffer = ConnectionTelemetryBuffer()
+        let hy2 = "Tokyo · Sakura · hy2"
+        buffer.record("connectBegin", node: hy2, transport: ProxyNode.catalogTransport(for: hy2))
+        buffer.recordConnectFailure(
+            stage: "handshake",
+            code: .coreExitUnreachable,
+            node: hy2
+        )
+        let drained = buffer.drain()
+        XCTAssertEqual(drained.events[0].transport, "hy2")
+        XCTAssertEqual(drained.events[1].kind, "connectFail")
+        XCTAssertEqual(drained.events[1].transport, "hy2")
+    }
+
+    /// The Worker refuses a window carrying a key it does not expect, and a
+    /// JSON `null` is not an integer. An event with no byte totals — which is
+    /// every event but this one — must therefore carry no byte keys at all.
+    func testOnlyAnEventWithByteTotalsPutsByteKeysOnTheWire() throws {
+        let buffer = ConnectionTelemetryBuffer()
+        buffer.record("connectOk", stage: "verifyingTraffic", node: "anon-5")
+        buffer.record("disconnectOk", elapsedMs: 1_000, node: "anon-5", bytesUp: 7, bytesDown: 8)
+        let drained = buffer.drain()
+
+        let data = try TonoCoding.encoder().encode(drained.events)
+        let encoded = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        )
+        XCTAssertEqual(encoded.count, 2)
+        XCTAssertFalse(Set(encoded[0].keys).contains("bytesUp"), "\(encoded[0].keys)")
+        XCTAssertFalse(Set(encoded[0].keys).contains("bytesDown"), "\(encoded[0].keys)")
+        XCTAssertEqual((encoded[1]["bytesUp"] as? NSNumber)?.int64Value, 7)
+        XCTAssertEqual((encoded[1]["bytesDown"] as? NSNumber)?.int64Value, 8)
     }
 }
 

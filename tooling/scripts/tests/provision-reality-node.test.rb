@@ -7,10 +7,12 @@
 # is required: the refusal is raised before the first SSH call, and the override
 # is only asserted not to raise it.
 
+require "fileutils"
 require "json"
 require "minitest/autorun"
 require "open3"
 require "rbconfig"
+require "tmpdir"
 
 SCRIPT = File.expand_path("../provision-reality-node.rb", __dir__)
 FRONTS = JSON.parse(File.read(File.expand_path("../reality-fronts.json", __dir__))).freeze
@@ -62,5 +64,122 @@ class MeasuredRealityFront < Minitest::Test
   def test_the_refusal_is_overridable
     _, stderr, _ = provision("--servername", "www.cloudflare.com", "--allow-unusable-servername")
     refute_match(REFUSAL, stderr)
+  end
+end
+
+class Hy2StaysOptIn < Minitest::Test
+  REALITY_REMOTE = File.expand_path("../remote/manage-tono-reality-node.sh", __dir__)
+  HY2_REMOTE = File.expand_path("../remote/manage-tono-hy2-node.sh", __dir__)
+
+  def test_debian11_complement_requires_the_supported_systemd_runtime
+    # Source only function definitions: no SSH, service mutation, or host OS reads.
+    functions = File.read(HY2_REMOTE).split("\nmode=${1:-}").first
+    mocks = <<~BASH
+      systemctl() { printf 'systemd %s\\n' "$TEST_SYSTEMD_VERSION"; }
+      python3() { return 0; }
+      openssl() { printf '%s\\n' '-addext'; }
+      require_debian11_runtime
+    BASH
+    _, error, valid = Open3.capture3({"TEST_SYSTEMD_VERSION" => "247"}, "bash", stdin_data: functions + "\n" + mocks)
+    assert_predicate(valid, :success?, error)
+    _, error, old = Open3.capture3({"TEST_SYSTEMD_VERSION" => "246"}, "bash", stdin_data: functions + "\n" + mocks)
+    refute_predicate(old, :success?)
+    assert_match(/requires systemd 247/, error)
+  end
+
+  def test_dry_run_without_hy2_does_not_open_udp
+    source = File.read(SCRIPT)
+    remote = File.read(REALITY_REMOTE)
+    refute_match(/\bhysteria\b/i, remote)
+    refute_match(/ss -H -lun/, remote)
+    assert_match(/ss -H -ltn/, remote)
+    assert_match(/hy2: false,/, source)
+    assert_match(/UDP remains closed/, source)
+    refute_match(/manage-tono-hy2-node/, remote)
+  end
+
+  def test_hy2_remote_does_not_stop_or_rewrite_xray
+    hy2 = File.read(HY2_REMOTE)
+    refute_match(/systemctl (disable|stop) .*tono-xray/, hy2)
+    refute_match(%r{rm .*/opt/tono-xray}, hy2)
+    assert_match(/ss -H -lun/, hy2)
+    assert_match(/subjectAltName=DNS:\$CERT_CN/, hy2)
+    assert_match(/This script must never stop, replace, or rewrite tono-xray/, hy2)
+  end
+
+  def test_hy2_uses_the_requested_front_for_the_certificate_and_client_sni
+    source = File.read(SCRIPT)
+    hy2 = File.read(HY2_REMOTE)
+    assert_includes(source, 'options[:hy2_port], target]')
+    assert_includes(source, '"sni" => target')
+    assert_includes(hy2, 'local CERT_CN=${6:-}')
+    assert_includes(hy2, 'validate_servername "$CERT_CN"')
+    assert_includes(hy2, 'subjectAltName=DNS:$CERT_CN')
+    assert_includes(hy2, 'url: https://$CERT_CN/')
+    refute_includes(hy2, 'www.microsoft.com')
+  end
+
+  def test_hy2_auth_is_http_over_every_xray_uuid_not_the_first_password
+    hy2 = File.read(HY2_REMOTE)
+    source = File.read(SCRIPT)
+    refute_match(/clients\[0\]\["id"\]/, hy2)
+    refute_match(/password: \$password/, hy2)
+    assert_match(/type: http/, hy2)
+    assert_match(/sync-identities/, hy2)
+    refute_match(/type: command/, hy2)
+    assert_match(/127\.0\.0\.1:18765/, hy2)
+    assert_match(/hy2_sync_identities/, source)
+    assert_match(/--hy2-sync-identities/, source)
+    assert_match(/wait_localhost_tcp 18765/, hy2)
+    assert_match(/pre-http-auth/, hy2)
+    assert_match(/knownUuidAccepted/, hy2)
+    assert_match(/this path never rewrites tono-hy2\.service/, hy2)
+    refute_match(/private_output_path!.*hy2_sync/, source)
+    assert_match(/Identity sync never writes a catalog source/, source)
+  end
+end
+
+class CatalogPlaceholderAfterIsolatedTest < Minitest::Test
+  PUBLISHER = File.expand_path("../publish-managed-catalog.rb", SCRIPT)
+
+  def setup
+    load SCRIPT unless defined?(rewrite_vless_uuid_to_placeholder!)
+    @directory = Dir.mktmpdir("provision-placeholder")
+    File.chmod(0o700, @directory)
+  end
+
+  def teardown
+    FileUtils.remove_entry(@directory)
+  end
+
+  def test_rewritten_private_source_is_a_valid_catalog_append_source
+    path = File.join(@directory, "westwood.yaml")
+    write_private_yaml(path, {
+      "proxies" => [{
+        "name" => "Los Angeles · Westwood",
+        "type" => "vless",
+        "server" => "203.0.113.12",
+        "port" => 443,
+        "uuid" => "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+        "network" => "tcp",
+        "tls" => true,
+        "udp" => true,
+        "servername" => "www.ucla.edu",
+        "client-fingerprint" => "chrome",
+        "flow" => "xtls-rprx-vision",
+        "reality-opts" => {
+          "public-key" => "C" * 43,
+          "short-id" => "0123456701234567",
+        },
+      }],
+    })
+    refute_includes(File.binread(path), CLIENT_UUID_PLACEHOLDER)
+    rewrite_vless_uuid_to_placeholder!(path)
+    rewritten = File.binread(path).force_encoding(Encoding::UTF_8)
+    assert_includes(rewritten, "uuid: #{CLIENT_UUID_PLACEHOLDER}")
+    refute_match(/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/, rewritten)
+    stdout, stderr, status = Open3.capture3(RbConfig.ruby, PUBLISHER, "--dry-run", path)
+    assert_predicate(status, :success?, stdout + stderr)
+    assert_match(/1 per-account identity placeholders/, stdout)
   end
 end

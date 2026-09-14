@@ -15,6 +15,7 @@ nonisolated struct ConnectFailureNotice: Sendable {
     let error: String?
     let node: String?
     let coreErrors: [String]
+    let transport: String?
 }
 
 nonisolated final class ConnectionTelemetryBuffer: @unchecked Sendable {
@@ -22,8 +23,17 @@ nonisolated final class ConnectionTelemetryBuffer: @unchecked Sendable {
     static let capacity = 128
 
     private let lock = NSLock()
-    private var events: [TonoTelemetryEvent] = []
-    private var dropped = 0
+    private var events: [(sequence: UInt64, event: TonoTelemetryEvent)] = []
+    private var sequence: UInt64 = 0
+    private var acknowledgedThrough: UInt64 = 0
+    private var epoch: UInt64 = 0
+
+    struct Snapshot: Sendable {
+        let events: [TonoTelemetryEvent]
+        let dropped: Int
+        fileprivate let through: UInt64
+        fileprivate let epoch: UInt64
+    }
     private var failureSink: (@Sendable (ConnectFailureNotice) -> Void)?
 
     /// Who hears about a connect failure as it happens. One sink; the account
@@ -47,10 +57,13 @@ nonisolated final class ConnectionTelemetryBuffer: @unchecked Sendable {
         mode: String? = nil,
         counter: Int? = nil,
         revision: Int? = nil,
+        bytesUp: Int64? = nil,
+        bytesDown: Int64? = nil,
         generation: Int? = nil,
         outcome: String? = nil,
         code: String? = nil,
-        updateResume: Bool? = nil
+        updateResume: Bool? = nil,
+        transport: String? = nil
     ) {
         let event = TonoTelemetryEvent(
             ts: Int64(Date().timeIntervalSince1970 * 1_000),
@@ -66,17 +79,22 @@ nonisolated final class ConnectionTelemetryBuffer: @unchecked Sendable {
             delayMs: delayMs.map { Int64($0) },
             counter: counter.map { Int64($0) },
             revision: revision.map { Int64($0) },
+            bytesUp: bytesUp,
+            bytesDown: bytesDown,
             generation: generation.map { Int64($0) },
             outcome: outcome.map { String($0.prefix(40)) },
             code: code.map { String($0.prefix(64)) },
-            updateResume: updateResume
+            updateResume: updateResume,
+            transport: transport.flatMap { value in
+                value == "tcp" || value == "hy2" ? value : nil
+            }
         )
         lock.lock()
-        events.append(event)
+        sequence += 1
+        events.append((sequence, event))
         if events.count > Self.capacity {
             let overflow = events.count - Self.capacity
             events.removeFirst(overflow)
-            dropped += overflow
         }
         lock.unlock()
     }
@@ -93,7 +111,8 @@ nonisolated final class ConnectionTelemetryBuffer: @unchecked Sendable {
         node: String? = nil,
         generation: Int? = nil,
         error: String? = nil,
-        coreErrors: [String] = []
+        coreErrors: [String] = [],
+        transport: String? = nil
     ) {
         record(
             "connectFail",
@@ -102,7 +121,8 @@ nonisolated final class ConnectionTelemetryBuffer: @unchecked Sendable {
             error: error,
             node: node,
             generation: generation,
-            code: code.rawValue
+            code: code.rawValue,
+            transport: transport ?? node.map { ProxyNode.catalogTransport(for: $0) }
         )
         let notice = ConnectFailureNotice(
             ts: Int64(Date().timeIntervalSince1970 * 1_000),
@@ -113,7 +133,9 @@ nonisolated final class ConnectionTelemetryBuffer: @unchecked Sendable {
             coreErrors: coreErrors
                 .filter { !$0.isEmpty }
                 .prefix(ConnectFailureNotice.maxCoreErrors)
-                .map { String($0.prefix(ConnectFailureNotice.maxCoreErrorChars)) }
+                .map { String($0.prefix(ConnectFailureNotice.maxCoreErrorChars)) },
+            transport: (transport ?? node.map { ProxyNode.catalogTransport(for: $0) })
+                .flatMap { value in value == "tcp" || value == "hy2" ? value : nil }
         )
         lock.lock()
         let sink = failureSink
@@ -121,13 +143,37 @@ nonisolated final class ConnectionTelemetryBuffer: @unchecked Sendable {
         sink?(notice)
     }
 
+    /// Keep events available to retry (and to the termination audit) until a
+    /// successful upload acknowledges exactly this bounded snapshot.
+    func snapshot() -> Snapshot {
+        lock.lock()
+        defer { lock.unlock() }
+        return snapshotLocked()
+    }
+
+    private func snapshotLocked() -> Snapshot {
+        let first = events.first?.sequence ?? (sequence + 1)
+        return Snapshot(events: events.map(\.event),
+                        dropped: Int(min(1_000_000, first - acknowledgedThrough - 1)),
+                        through: sequence, epoch: epoch)
+    }
+
+    func acknowledge(_ snapshot: Snapshot) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard snapshot.epoch == epoch, snapshot.through >= acknowledgedThrough else { return }
+        acknowledgedThrough = snapshot.through
+        events.removeAll { $0.sequence <= snapshot.through }
+    }
+
+    /// Explicit ownership/consent boundaries invalidate outstanding receipts.
     func drain() -> (events: [TonoTelemetryEvent], dropped: Int) {
         lock.lock()
-        let snapshot = events
-        let snapshotDropped = dropped
+        defer { lock.unlock() }
+        let snapshot = snapshotLocked()
         events.removeAll(keepingCapacity: true)
-        dropped = 0
-        lock.unlock()
-        return (snapshot, snapshotDropped)
+        acknowledgedThrough = sequence
+        epoch &+= 1
+        return (snapshot.events, snapshot.dropped)
     }
 }

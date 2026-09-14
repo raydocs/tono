@@ -48,7 +48,9 @@ pub async fn tono_set_periodic_telemetry_enabled(
     state: tauri::State<'_, Arc<TonoState>>,
     enabled: bool,
 ) -> Result<(), String> {
-    state.audit().set_periodic_telemetry_enabled(enabled)
+    state.audit().set_periodic_telemetry_enabled(enabled)?;
+    state.route_ledger().lock().advance_baseline();
+    Ok(())
 }
 
 /// Whether the raw audit log is uploaded.

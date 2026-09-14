@@ -1,4 +1,4 @@
-use super::{IClashTemp, TonoPreferences};
+use super::{IRuntimeTemp, TonoPreferences};
 use crate::{
     core::{handle::Handle, tray},
     process::AsyncHandler,
@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::OnceCell;
 
 pub struct Config {
-    clash_config: Draft<IClashTemp>,
+    runtime_config: Draft<IRuntimeTemp>,
     preferences: Draft<TonoPreferences>,
 }
 
@@ -22,15 +22,15 @@ impl Config {
         CONFIG
             .get_or_init(|| async {
                 Self {
-                    clash_config: Draft::new(IClashTemp::new().await),
+                    runtime_config: Draft::new(IRuntimeTemp::new().await),
                     preferences: Draft::new(TonoPreferences::new().await),
                 }
             })
             .await
     }
 
-    pub async fn clash() -> Draft<IClashTemp> {
-        Self::global().await.clash_config.clone()
+    pub async fn runtime() -> Draft<IRuntimeTemp> {
+        Self::global().await.runtime_config.clone()
     }
 
     pub async fn preferences() -> Draft<TonoPreferences> {
@@ -58,10 +58,10 @@ impl Config {
     // 仅在应用退出、重启、关机监听事件启用
     pub async fn apply_all_and_save_file() {
         logging!(info, Type::Config, "save all draft data");
-        let save_clash_task = AsyncHandler::spawn(|| async {
-            let clash = Self::clash().await;
-            clash.apply();
-            logging_error!(Type::Config, clash.data_arc().save_config().await);
+        let save_runtime_task = AsyncHandler::spawn(|| async {
+            let runtime = Self::runtime().await;
+            runtime.apply();
+            logging_error!(Type::Config, runtime.data_arc().save_config().await);
         });
 
         let save_preferences_task = AsyncHandler::spawn(|| async {
@@ -70,7 +70,7 @@ impl Config {
             logging_error!(Type::Config, prefs.data_arc().save_file().await);
         });
 
-        let _ = tokio::join!(save_clash_task, save_preferences_task);
+        let _ = tokio::join!(save_runtime_task, save_preferences_task);
         logging!(info, Type::Config, "save all draft data finished");
     }
 }

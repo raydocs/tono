@@ -56,5 +56,14 @@ export default defineConfig({
   test: {
     maxWorkers: 1,
     setupFiles: ['./test/setup.ts'],
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/cjs/**',
+      '**/.{idea,git,cache,output,temp}/**',
+      // The beforeunload-guard component test needs a real DOM (jsdom) that the
+      // Workers pool cannot provide. Run it via `vitest.admin.config.ts`.
+      'admin/src/pages/ControlPage.test.tsx',
+    ],
   },
 });

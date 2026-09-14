@@ -28,7 +28,7 @@ nonisolated enum ProtectedFailureCode: String, CaseIterable, Sendable {
         case .coreControllerUnavailable:
             return String(localized: "Part of the protected connection is temporarily unavailable. If your traffic still looks normal, the connection will stay up.")
         case .coreExitUnreachable:
-            return String(localized: "The current node could not complete a protected check. Choose another node, or reconnect to try again.")
+            return String(localized: "This city could not complete a protected connection. Retry, choose another route, or try the backup channel if one is shown.")
         case .networkEnvironmentOffline:
             // Looked up rather than written in place: a physical-link
             // observation is what produces this code, and it reaches the
@@ -120,6 +120,15 @@ nonisolated struct ProtectedFailure: Equatable, Sendable {
             probes.isEmpty ? nil : "probes=\(probes)",
             detail,
         ].compactMap { $0 }.joined(separator: " | ")
+    }
+}
+
+/// What the customer-facing surfaces may show. Core/system diagnostics stay on
+/// the copyable report — interpolating them into the dashboard is G2.3's
+/// English-debug failure.
+nonisolated enum ConnectionFailurePresentation {
+    static func userFacingMessage(classified: ProtectedFailure?) -> String {
+        classified?.userMessage ?? ProtectedFailureCode.unknownClassifiedFailure.userMessage
     }
 }
 

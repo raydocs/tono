@@ -15,6 +15,7 @@ import { copy } from '@/copy/copy';
 import { opsApi } from '@/lib/api';
 import { releasedPlatformSet } from '@/lib/releases';
 import { newestFetch, useResource, type Resource } from '@/lib/use-resource';
+import '@/styles/clients.css';
 import { AdoptionMatrix } from './clients/AdoptionMatrix';
 import { ReleaseTable } from './clients/ReleaseTable';
 
@@ -57,8 +58,8 @@ export default function ClientsPage({
   const totals = adoption.status === 'ready' ? bucketTotals(adoption.data) : null;
 
   return (
-    <div className="page-wrap">
-      <div className="page-head">
+    <div className="page-wrap clients-page">
+      <div className="clients-hero">
         {totals === null ? (
           <p className="text-verdict text-[var(--muted-foreground)]">
             {adoption.status === 'loading' ? copy.loading : copy.loadError}

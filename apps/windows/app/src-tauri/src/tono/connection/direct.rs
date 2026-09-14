@@ -60,6 +60,9 @@ pub(super) async fn direct_lease_heartbeat_loop(state: Arc<TonoState>, generatio
             if inner.connect_generation != generation || !inner.fsm.status().is_connected {
                 return;
             }
+            if inner.policy_tracker.current_digest() != Some(heartbeat.policy_digest.as_str()) {
+                return;
+            }
         }
         let renewal = match service::tono_renew_direct_runtime_reload(
             &heartbeat.session,
@@ -145,6 +148,22 @@ pub(super) const DIRECT_CONFIG_RELOAD_RETRY_DELAY: Duration = Duration::from_mil
 
 pub(super) const DIRECT_CONFIG_RELOAD_TIMEOUT: Duration = Duration::from_secs(60);
 
+async fn mark_direct_reload_in_flight(state: &Arc<TonoState>, generation: u64) {
+    let mut inner = state.lock().await;
+    if inner.connect_generation != generation {
+        return;
+    }
+    inner.direct_reload_until = Some((generation, std::time::Instant::now() + DIRECT_CONFIG_RELOAD_TIMEOUT));
+}
+
+async fn clear_direct_reload_in_flight(state: &Arc<TonoState>, generation: u64) {
+    let mut inner = state.lock().await;
+    if inner.connect_generation != generation {
+        return;
+    }
+    inner.direct_reload_until = None;
+}
+
 /// Must stay comfortably below the Service's 60-second committed lease. A dedicated task keeps
 /// renewal independent of the health monitor's potentially slow public data-plane probes.
 pub(super) const DIRECT_LEASE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
@@ -169,6 +188,7 @@ pub(super) struct DirectLeaseHeartbeat {
     session: OwnerSessionProof,
     reload_id: u64,
     endpoint_digest: String,
+    policy_digest: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -332,6 +352,7 @@ pub(super) fn spawn_optional_direct_after_connected(
         {
             Ok(pending) => pending,
             Err(error) => {
+                clear_direct_reload_in_flight(&state, generation).await;
                 logging!(
                     warn,
                     Type::Service,
@@ -341,14 +362,17 @@ pub(super) fn spawn_optional_direct_after_connected(
             }
         };
         let Some(pending) = pending else {
+            clear_direct_reload_in_flight(&state, generation).await;
             return;
         };
         if state.lock().await.connect_generation != generation {
+            clear_direct_reload_in_flight(&state, generation).await;
             return;
         }
         let wechat_paths = pending.wechat_process_path_regexes.clone();
         match commit_direct_policy_cancellation_safe(&state, generation, pending).await {
             Ok((status, heartbeat)) => {
+                clear_direct_reload_in_flight(&state, generation).await;
                 let mut inner = state.lock().await;
                 if inner.connect_generation != generation || !inner.fsm.status().is_connected {
                     return;
@@ -362,6 +386,7 @@ pub(super) fn spawn_optional_direct_after_connected(
                 spawn_direct_lease_heartbeat(&state, generation, heartbeat).await;
             }
             Err(error) => {
+                clear_direct_reload_in_flight(&state, generation).await;
                 logging!(
                     warn,
                     Type::Service,
@@ -1085,6 +1110,7 @@ pub(super) async fn activate_direct_runtime_cancellation_safe(
             // later exit must therefore reconcile to an exact Blocked set; failures above this
             // line have not touched the proven full-tunnel runtime and must not tear it down here.
             begin_attempted = true;
+            mark_direct_reload_in_flight(&task_state, generation).await;
             let begin = service::tono_begin_direct_runtime_reload(&session)
                 .await
                 .map_err(StageFailure::error)?;
@@ -1335,6 +1361,7 @@ pub(super) async fn commit_direct_policy_cancellation_safe(
                     session: pending.session.clone(),
                     reload_id: pending.reload_id,
                     endpoint_digest: pending.endpoint_digest.clone(),
+                    policy_digest: pending.policy.digest.clone(),
                 },
             ))
         }

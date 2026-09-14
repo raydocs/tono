@@ -145,6 +145,11 @@ export const customerCopy = {
     client: '平台与版本',
     carrier: '运营商',
   } as const,
+  /** Channel on a connection row. hy2 is the same-node backup, never the English type name. */
+  transportWord: {
+    tcp: '主通道',
+    hy2: '备用通道',
+  } as const,
   daySummary: (ok: number, fail: number, switched: number) => `${ok} 次连上 · ${fail} 次失败 · ${switched} 次换节点`,
   /** The upload went through the tunnel, so the carrier on it is the exit's. */
   carrierViaExit: '这条上报走的是隧道，看到的是出口的运营商',
@@ -171,6 +176,11 @@ export const customerCopy = {
     tls: '加密',
     catalog: '取节点',
     probe: '探测',
+    checkingexit: '验证出口',
+    verifyingtraffic: '验证流量',
+    securingdns: '保护 DNS',
+    startingtunnel: '建立隧道',
+    lockingtraffic: '锁定流量',
   } as const,
   codeWord: {
     ECONNREFUSED: '对方端口没人应答',
@@ -180,6 +190,12 @@ export const customerCopy = {
     REALITY_AUTH_FAIL: '身份校验没通过',
     CATALOG_STALE: '客户端手里的节点单子太旧',
     DNS_FAIL: '域名解析失败',
+    CORE_EXIT_UNREACHABLE: '当前节点和核心都没通过验证',
+    TONO_NODE_OR_CORE_UNREACHABLE: '当前节点和核心都没通过验证',
+    UNKNOWN_CLASSIFIED_FAILURE: '受保护连接失败，已记下诊断',
+    TUN_ROUTE_UNAVAILABLE: '流量没能进入隧道',
+    PROTECTED_DNS_NOT_READY: '系统 DNS 还没进入保护路径',
+    NETWORK_ENVIRONMENT_OFFLINE: '当前网络不可用',
     UNKNOWN: '客户端没说原因',
   } as const,
 

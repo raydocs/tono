@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { operationsApi, type ActivityUserDto } from '../api';
 import { useRefresh, useResource } from '../hooks';
 import { personMatchesFocus, type OpsPersonView } from '../lib/ops-views';
+import { cohortBarVisible, bannerStaleAfterRepopulate } from '../lib/cohort-bar';
 import { useOpsWorld } from '../ops-context';
 import { useOpsRoute } from '../lib/route';
 import { formatOpsHash, parseOpsHash } from '../lib/hash';
@@ -180,7 +181,20 @@ function CohortActions({
     ? people.filter((person) => (devicesByUser.get(person.userId) ?? []).length > 0)
     : people.filter((person) => person.user != null);
 
-  if (targets.length === 0) return null;
+  const prevTargetsCount = useRef(targets.length);
+  useEffect(() => {
+    if (bannerStaleAfterRepopulate(prevTargetsCount.current, targets.length)) {
+      setOk(null);
+      setError(null);
+    }
+    prevTargetsCount.current = targets.length;
+  }, [targets.length]);
+
+  // The bar outlives an empty cohort while an outcome banner (ok/error) is
+  // showing, so a fully successful expiring renewal keeps its success banner
+  // after the next users.reload() empties the filter. Retire that banner when
+  // a fresh cohort repopulates the drained bar (see ../lib/cohort-bar).
+  if (!cohortBarVisible(targets.length, ok, error)) return null;
 
   // One person failing must not stop the rest; each failure is named so the
   // operator knows exactly who still needs a hand.
@@ -208,7 +222,7 @@ function CohortActions({
       {ask.dialog}
       <Banner message={ok} tone="ok" />
       <Banner message={error} tone="error" />
-      {focus === 'catalog' ? (
+      {targets.length > 0 && (focus === 'catalog' ? (
         <button
           type="button"
           className="btn btn-outline btn-sm"
@@ -244,7 +258,7 @@ function CohortActions({
             ),
           )}
         >给这 {targets.length} 位续 30 天</button>
-      )}
+      ))}
     </div>
   );
 }

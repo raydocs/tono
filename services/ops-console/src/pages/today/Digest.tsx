@@ -57,7 +57,7 @@ export function Digest({
   const owed = due.followups.length + due.checks.length + choresToday;
   if (night === 0 && openCount === 0 && owed === 0) {
     return (
-      <section className="rounded-[12px] border border-[var(--hairline)] px-4 py-3">
+      <section className="today-digest rounded-[12px] border border-[var(--hairline)] px-4 py-3">
         <p className="text-body">{copy.digestQuiet}</p>
       </section>
     );
@@ -111,10 +111,21 @@ export function Digest({
           </div>
         )}
       </Line>
-
-      <Worthwhile data={digest.data.worthwhile} />
     </div>
 
+  );
+
+  /**
+   * The weekly picks live in their own card under the morning read rather than
+   * inside it: they are a different cadence (week vs night), and the digest
+   * keeps the capped one-screen budget the night content was given. Content,
+   * order and handlers are unchanged — only the container moved. On a phone it
+   * stays folded inside the morning read so the list keeps the first screen.
+   */
+  const picks = digest.data.worthwhile === undefined ? null : (
+    <section className="today-worthwhile-card" aria-label={copy.worthwhileTitle}>
+      <Worthwhile data={digest.data.worthwhile} />
+    </section>
   );
 
   /**
@@ -135,21 +146,27 @@ export function Digest({
           <span className="normal-case tracking-normal">{copy.digestFold(night, owed)}</span>
         </summary>
         {body}
+        {digest.data.worthwhile === undefined ? null : (
+          <Worthwhile data={digest.data.worthwhile} />
+        )}
       </details>
     );
   }
 
   return (
-    <section className="flex flex-col gap-3 rounded-[12px] border border-[var(--hairline)] px-4 py-3">
-      <h2 className="text-micro text-[var(--muted-foreground)]">{copy.digestTitle}</h2>
-      {body}
-    </section>
+    <>
+      <section className="today-digest flex flex-col gap-3 rounded-[12px] border border-[var(--hairline)] px-4 py-3">
+        <h2 className="text-micro text-[var(--muted-foreground)]">{copy.digestTitle}</h2>
+        {body}
+      </section>
+      {picks}
+    </>
   );
 }
 
 function Line({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+    <div className="today-digest-block flex flex-wrap items-baseline gap-x-3 gap-y-1">
       <span className="w-20 shrink-0 text-micro text-[var(--muted-foreground)]">{title}</span>
       <div className="min-w-0 flex-1">{children}</div>
     </div>
@@ -186,7 +203,7 @@ function NightLine({ group }: { group: NightGroup }) {
   const tone: Tone | undefined = ended ? undefined : severityTone(group.severity);
   const title = group.count === 1 ? group.lead.title : copy.digestTimes(group.lead.title, group.count);
   return (
-    <div className="night-group flex min-w-0 flex-col gap-0.5">
+    <div className="night-group today-night-row flex min-w-0 flex-col gap-0.5">
       <button
         type="button"
         className="flex min-w-0 items-baseline gap-2 text-left"

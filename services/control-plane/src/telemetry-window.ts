@@ -15,17 +15,17 @@ const telemetryWindowKeys = [
   'killSwitchMode', 'killSwitchWanted', 'killSwitchLive',
   'dnsEnabled', 'exitDelayMs', 'tcpDelayMs', 'exitDelayAtMs', 'tcpDelayAtMs',
   'eventCount', 'eventsDropped', 'events',
-  'platform', 'bytesByRoute',
+  'platform', 'bytesByRoute', 'routeBytesInterval',
 ];
 
-/** Bytes the client itself attributed to each route over the window. */
+/** Diagnostic deltas, not billing. Legacy clients omit their independent interval. */
 const BYTES_BY_ROUTE_KEYS = ['cloud', 'residential', 'direct'];
 const BYTES_BY_ROUTE_MAX = 1_000_000_000_000_000;
 
 const telemetryEventStringKeys = [
   'kind', 'stage', 'error', 'node', 'action', 'reason', 'probe',
   'from', 'to', 'mode', 'reference', 'outcome', 'code',
-  'attemptId',
+  'attemptId', 'transport',
 ];
 const telemetryEventNumberKeys = [
   'ts', 'elapsedMs', 'delayMs', 'counter', 'restartCount', 'oldPid', 'newPid',
@@ -111,6 +111,9 @@ export function canonicalTelemetryWindow(value: unknown) {
       }
       event[key] = entry[key];
     }
+    if (event.transport !== undefined && event.transport !== 'tcp' && event.transport !== 'hy2') {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid transport');
+    }
     return event;
   });
 
@@ -164,6 +167,20 @@ export function canonicalTelemetryWindow(value: unknown) {
       if (bytes !== undefined) routes[key] = bytes;
     }
     window.bytesByRoute = routes;
+  }
+  if (source.routeBytesInterval !== undefined && source.routeBytesInterval !== null) {
+    if (window.bytesByRoute === undefined) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Route interval requires bytesByRoute');
+    }
+    rejectUnexpectedKeys(source.routeBytesInterval, ['startMs', 'endMs']);
+    const startMs = diagnosticsInt(source.routeBytesInterval, 'startMs', 0, TELEMETRY_MAX_REPORTED_AT_MS, false)!;
+    const endMs = diagnosticsInt(source.routeBytesInterval, 'endMs', 0, TELEMETRY_MAX_REPORTED_AT_MS, false)!;
+    if (startMs > endMs || endMs > windowEndMs) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid route-byte interval');
+    }
+    // A failed upload can extend these cumulative counters beyond six hours.
+    // Do not expand the event window or infer online time from this interval.
+    window.routeBytesInterval = { startMs, endMs };
   }
 
   const json = JSON.stringify(window);

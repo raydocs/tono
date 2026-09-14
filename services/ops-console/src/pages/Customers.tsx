@@ -39,6 +39,7 @@ import { usePrivacy } from '@/lib/privacy';
 import { publishedVersions } from '@/lib/releases';
 import { cn } from '@/lib/utils';
 import { newestFetch, useResource, type Resource } from '@/lib/use-resource';
+import '@/styles/customers.css';
 import type { Tone } from '@/components/ops/StatusWord';
 import { useCohort } from './customer/Cohort';
 import { customerColumns } from './customer/columns';
@@ -186,47 +187,50 @@ export default function CustomersPage({
         : 'ready';
 
   return (
-    <div className="page-wrap">
+    <div className="page-wrap customers-page">
       <div className="page-head">
-        {/* The sentence the page is built around, and the one button that
-            adds a row to it. */}
-        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
-          {customers.status === 'ready' ? (
-            <p className="text-verdict">
-              {CUSTOMER_FILTERS.map((id, index) => (
-                <span key={id}>
-                  {index === 0 ? null : <span className="mx-2 text-[var(--muted-foreground)]">·</span>}
-                  <button
-                    type="button"
-                    aria-pressed={filter === id}
-                    className={cn('count-bit', `tone-${FRAGMENT_TONE[id]}`)}
-                    onClick={() => setFilter((current) => (current === id ? null : id))}
-                  >
-                    <CountText values={[counts[id]]} render={(values) => copy.customerCount[id](values[0])} />
-                  </button>
-                </span>
-              ))}
-            </p>
-          ) : (
-            <p className="text-verdict text-[var(--muted-foreground)]">
-              {customers.status === 'loading' ? copy.loading : copy.loadError}
-            </p>
-          )}
-          <div className="ml-auto shrink-0">
-            <Action primary onClick={() => setOnboarding(true)}>{copy.onboard}</Action>
+        <section className="customers-hero" aria-label={copy.pages.customers}>
+          {/* The sentence the page is built around, and the one button that
+              adds a row to it. */}
+          <div className="customers-hero-row">
+            {customers.status === 'ready' ? (
+              <p className="text-verdict">
+                {CUSTOMER_FILTERS.map((id, index) => (
+                  <span key={id}>
+                    {index === 0 ? null : <span className="mx-2 text-[var(--muted-foreground)]">·</span>}
+                    <button
+                      type="button"
+                      aria-pressed={filter === id}
+                      className={cn('count-bit', `tone-${FRAGMENT_TONE[id]}`)}
+                      onClick={() => setFilter((current) => (current === id ? null : id))}
+                    >
+                      <CountText values={[counts[id]]} render={(values) => copy.customerCount[id](values[0])} />
+                    </button>
+                  </span>
+                ))}
+              </p>
+            ) : (
+              <p className="text-verdict text-[var(--muted-foreground)]">
+                {customers.status === 'loading' ? copy.loading : copy.loadError}
+              </p>
+            )}
+            <div className="ml-auto shrink-0">
+              <Action primary onClick={() => setOnboarding(true)}>{copy.onboard}</Action>
+            </div>
           </div>
-        </div>
 
-        <PageNote
-          fetchedAt={newestFetch(customers, health)}
-          backfill={health.status === 'ready' ? health.data.backfill : null}
-        />
+          <PageNote
+            className="customers-hero-note"
+            fetchedAt={newestFetch(customers, health)}
+            backfill={health.status === 'ready' ? health.data.backfill : null}
+          />
 
-        {/* The fleet page's rule for a column nobody has filled in yet: drop
-            it, and say once, quietly, what is missing. */}
-        {customers.status === 'ready' && all.length > 0 && !wired ? (
-          <p className="text-body text-[var(--muted-foreground)]">{copy.customerPlanNotWired}</p>
-        ) : null}
+          {/* The fleet page's rule for a column nobody has filled in yet: drop
+              it, and say once, quietly, what is missing. */}
+          {customers.status === 'ready' && all.length > 0 && !wired ? (
+            <p className="text-body text-[var(--muted-foreground)]">{copy.customerPlanNotWired}</p>
+          ) : null}
+        </section>
 
         {/* All five platforms, always. The ones nothing has shipped for say so. */}
         <div className="toolbar-row">
@@ -279,6 +283,11 @@ export default function CustomersPage({
         rows={shown}
         columns={columns}
         getRowId={(row) => row.key}
+        /* The address column is the only flexible one: below the fixed
+           columns' total it collapses to zero and no scroll can bring it
+           back. A local floor keeps identities readable on a phone while the
+           container keeps the sideways scroll. */
+        className="[&>table]:min-w-[1020px]"
         onRowClick={(row) => (row.customer === null
           ? openInvite(row.invite.email)
           : openCustomer(row.customer.userId))}

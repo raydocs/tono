@@ -207,6 +207,14 @@ describe('the reply draft', () => {
     const text = replyDraft({ who: 'a@b.c', failure: stale, incident: null, spare: null });
     expect(text).toContain(copy.replyQuestion.CATALOG_STALE);
   });
+
+  it('explains the Windows handshake taxonomy instead of 客户端没说原因', () => {
+    expect(explainCode('CORE_EXIT_UNREACHABLE')).toBe(copy.codeWord.CORE_EXIT_UNREACHABLE);
+    expect(explainCode('TONO_NODE_OR_CORE_UNREACHABLE')).toBe(
+      copy.codeWord.TONO_NODE_OR_CORE_UNREACHABLE,
+    );
+    expect(explainCode('CORE_EXIT_UNREACHABLE')).not.toBe(copy.codeWord.UNKNOWN);
+  });
 });
 
 describe('the followup column', () => {

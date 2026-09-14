@@ -44,6 +44,9 @@ const CHANNEL_CAPACITY: usize = 256;
 #[derive(Debug, Clone, Serialize)]
 pub struct AuditRecord {
     pub ts: i64,
+    /// Captured before queuing: a late disk write cannot acquire a new owner.
+    #[serde(rename = "_uploadScope", skip_serializing_if = "Option::is_none")]
+    pub upload_scope: Option<String>,
     #[serde(flatten)]
     pub event: AuditEvent,
 }
@@ -54,7 +57,7 @@ impl AuditRecord {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|duration| duration.as_millis() as i64)
             .unwrap_or(0);
-        Self { ts, event }
+        Self { ts, event, upload_scope: None }
     }
 }
 
@@ -101,6 +104,7 @@ pub enum AuditEvent {
     // protection
     ConnectBegin {
         node: String,
+        transport: &'static str,
     },
     Stage {
         stage: &'static str,
@@ -110,10 +114,22 @@ pub enum AuditEvent {
         stage: Option<&'static str>,
         error: String,
         action: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        transport: Option<&'static str>,
+        /// First `TONO_*` / `CORE_*` token, so the customer timeline has a
+        /// stable code even before the next periodic window upload.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        code: Option<String>,
+        /// Catalog display name at the moment of failure. Flattening would
+        /// otherwise attribute the row to whatever `selectedServer` is at
+        /// upload time.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        node: Option<String>,
     },
     ConnectOk {
         node: String,
         elapsed_ms: u64,
+        transport: &'static str,
     },
     /// One destination the DIRECT overlay actually dialled, recorded once per distinct
     /// `(address, port, protocol)` per session.
@@ -158,7 +174,14 @@ pub enum AuditEvent {
     DisconnectBegin {
         cause: &'static str,
     },
-    DisconnectOk,
+    DisconnectOk {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        elapsed_ms: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bytes_up: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bytes_down: Option<u64>,
+    },
     ReleaseFail {
         error: String,
     },
@@ -168,6 +191,7 @@ pub enum AuditEvent {
     NodeSwitch {
         from: String,
         to: String,
+        transport: &'static str,
     },
     /// Connect proved the selected city dead; the next unused catalog city
     /// will be used on the fail-closed reconnect.
@@ -283,20 +307,28 @@ impl AuditEvent {
             RevokeDevice { id } => RevokeDevice { id: redact(&id) },
             SyncFail { error } => SyncFail { error: redact(&error) },
             SelectionVanished { node } => SelectionVanished { node: redact(&node) },
-            ConnectBegin { node } => ConnectBegin { node: redact(&node) },
-            ConnectFail { stage, error, action } => ConnectFail {
+            ConnectBegin { node, transport } => ConnectBegin {
+                node: redact(&node),
+                transport,
+            },
+            ConnectFail { stage, error, action, transport, code, node } => ConnectFail {
                 stage,
                 error: redact(&error),
                 action,
+                transport,
+                code,
+                node: node.as_deref().map(redact),
             },
-            ConnectOk { node, elapsed_ms } => ConnectOk {
+            ConnectOk { node, elapsed_ms, transport } => ConnectOk {
                 node: redact(&node),
                 elapsed_ms,
+                transport,
             },
             ReleaseFail { error } => ReleaseFail { error: redact(&error) },
-            NodeSwitch { from, to } => NodeSwitch {
+            NodeSwitch { from, to, transport } => NodeSwitch {
                 from: redact(&from),
                 to: redact(&to),
+                transport,
             },
             ConnectCatalogFailover { from, to } => ConnectCatalogFailover {
                 from: redact(&from),
@@ -464,28 +496,62 @@ fn default_true() -> bool {
     true
 }
 
+/// One-line revert point for the network-log-upload default. Flip to `false`
+/// if the owner decides this must not stay default-on.
+pub const NETWORK_LOG_UPLOAD_DEFAULT: bool = true;
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct SettingsFile {
     #[serde(default = "default_true")]
     audit_enabled: bool,
     /// Default OFF: short diagnostic timelines still create durable D1 rows
-    /// and therefore require an explicit opt-in.
+    /// and therefore require an explicit opt-in. Unchanged by the v3 log-upload flip.
     #[serde(default)]
     periodic_telemetry_enabled: bool,
     /// One-shot migration from the former default-on policy. New defaults set
     /// this immediately; an old settings file lacks it and is reset once.
     #[serde(default)]
     periodic_telemetry_default_v2: bool,
-    /// Default OFF: uploads the audit log itself, which carries hostnames,
-    /// process names and routes. Kept off by default to protect user privacy
-    /// and eliminate continuous D1/R2 storage consumption.
+    /// Uploads the audit log itself (hostnames, process names, routes, byte
+    /// totals). Default follows [`NETWORK_LOG_UPLOAD_DEFAULT`].
     #[serde(default)]
     network_log_upload_enabled: bool,
-    /// Migration flag: ensures existing installations that previously inherited
-    /// default-on are transitioned to default-off unless explicitly re-enabled.
+    /// Legacy migration marker; stored choices must survive the new default.
     #[serde(default)]
     network_log_default_v2: bool,
+    /// v3 records adoption without overriding legacy opt-outs.
+    #[serde(default)]
+    network_log_default_v3: bool,
+    /// Set when the user (or a later setter call) actually toggles the switch.
+    /// Older clients never wrote this marker; its absence is not consent.
+    #[serde(default)]
+    network_log_upload_user_chosen: bool,
+    #[serde(default)]
+    network_log_upload_scope: Option<PersistedUploadScope>,
 }
+
+#[derive(Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct PersistedUploadScope {
+    owner: String,
+    id: String,
+}
+
+#[derive(Clone)]
+pub(crate) struct LogUploadScope {
+    pub id: String,
+    pub cancelled: tokio_util::sync::CancellationToken,
+}
+
+#[derive(Default)]
+struct UploadOwner {
+    owner: Option<String>,
+    scope: Option<LogUploadScope>,
+}
+
+// Serialize all settings read/modify/write operations, including migration.
+// Otherwise a telemetry toggle can resurrect a revoked upload scope.
+static SETTINGS_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 
 impl Default for SettingsFile {
     fn default() -> Self {
@@ -493,26 +559,41 @@ impl Default for SettingsFile {
             audit_enabled: true,
             periodic_telemetry_enabled: false,
             periodic_telemetry_default_v2: true,
-            network_log_upload_enabled: false,
+            network_log_upload_enabled: NETWORK_LOG_UPLOAD_DEFAULT,
             network_log_default_v2: true,
+            network_log_default_v3: true,
+            network_log_upload_user_chosen: false,
+            network_log_upload_scope: None,
         }
     }
 }
 
 fn load_settings(dir: &Path) -> SettingsFile {
-    let mut settings = std::fs::read_to_string(dir.join(SETTINGS_FILE_NAME))
-        .ok()
-        .and_then(|body| serde_json::from_str::<SettingsFile>(&body).ok())
-        .unwrap_or_default();
+    let _guard = SETTINGS_LOCK.lock();
+    load_settings_locked(dir)
+}
+
+fn load_settings_locked(dir: &Path) -> SettingsFile {
+    let mut settings = match std::fs::read_to_string(dir.join(SETTINGS_FILE_NAME)) {
+        Ok(body) => match serde_json::from_str::<SettingsFile>(&body) {
+            Ok(settings) => settings,
+            Err(_) => return SettingsFile { network_log_upload_enabled: false, ..SettingsFile::default() },
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => SettingsFile::default(),
+        Err(_) => return SettingsFile { network_log_upload_enabled: false, ..SettingsFile::default() },
+    };
     let mut migrated = false;
     if !settings.network_log_default_v2 {
-        settings.network_log_upload_enabled = false;
         settings.network_log_default_v2 = true;
         migrated = true;
     }
     if !settings.periodic_telemetry_default_v2 {
         settings.periodic_telemetry_enabled = false;
         settings.periodic_telemetry_default_v2 = true;
+        migrated = true;
+    }
+    if !settings.network_log_default_v3 {
+        settings.network_log_default_v3 = true;
         migrated = true;
     }
     if migrated {
@@ -532,8 +613,8 @@ pub fn periodic_telemetry_enabled_from_settings(dir: &Path) -> bool {
     load_settings(dir).periodic_telemetry_enabled
 }
 
-/// Default OFF: network log upload is off by default to avoid streaming
-/// telemetry to D1/R2 continuously; uploaded on demand for diagnostics.
+/// Default follows [`NETWORK_LOG_UPLOAD_DEFAULT`]. v2 wrote false for every
+/// existing install; v3 flips those users once unless they have since chosen.
 pub fn network_log_upload_enabled_from_settings(dir: &Path) -> bool {
     load_settings(dir).network_log_upload_enabled
 }
@@ -553,20 +634,26 @@ fn save_settings(dir: &Path, settings: &SettingsFile) -> Result<()> {
 }
 
 fn save_audit_enabled(dir: &Path, enabled: bool) -> Result<()> {
-    let mut settings = load_settings(dir);
+    let _guard = SETTINGS_LOCK.lock();
+    let mut settings = load_settings_locked(dir);
     settings.audit_enabled = enabled;
+    if !enabled { settings.network_log_upload_scope = None; }
     save_settings(dir, &settings)
 }
 
 fn save_periodic_telemetry_enabled(dir: &Path, enabled: bool) -> Result<()> {
-    let mut settings = load_settings(dir);
+    let _guard = SETTINGS_LOCK.lock();
+    let mut settings = load_settings_locked(dir);
     settings.periodic_telemetry_enabled = enabled;
     save_settings(dir, &settings)
 }
 
 fn save_network_log_upload_enabled(dir: &Path, enabled: bool) -> Result<()> {
-    let mut settings = load_settings(dir);
+    let _guard = SETTINGS_LOCK.lock();
+    let mut settings = load_settings_locked(dir);
     settings.network_log_upload_enabled = enabled;
+    if !enabled { settings.network_log_upload_scope = None; }
+    settings.network_log_upload_user_chosen = true;
     save_settings(dir, &settings)
 }
 
@@ -576,6 +663,7 @@ fn save_network_log_upload_enabled(dir: &Path, enabled: bool) -> Result<()> {
 /// channel feeding the writer task. The writer self-heals when its task
 /// died unexpectedly (L1); after `close_sender` (quit) it never revives.
 pub struct Audit {
+    upload_owner: parking_lot::Mutex<UploadOwner>,
     sender: parking_lot::Mutex<Option<tokio::sync::mpsc::Sender<AuditRecord>>>,
     writer: parking_lot::Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     enabled: AtomicBool,
@@ -598,6 +686,7 @@ impl Audit {
     pub fn new(logs_dir: &Path, settings_dir: &Path) -> Arc<Self> {
         let settings = load_settings(settings_dir);
         let audit = Arc::new(Self {
+            upload_owner: parking_lot::Mutex::new(UploadOwner::default()),
             sender: parking_lot::Mutex::new(None),
             writer: parking_lot::Mutex::new(None),
             enabled: AtomicBool::new(settings.audit_enabled),
@@ -618,6 +707,7 @@ impl Audit {
     #[cfg(test)]
     pub fn for_test(sender: tokio::sync::mpsc::Sender<AuditRecord>, settings_dir: &Path, enabled: bool) -> Arc<Self> {
         Arc::new(Self {
+            upload_owner: parking_lot::Mutex::new(UploadOwner::default()),
             sender: parking_lot::Mutex::new(Some(sender)),
             writer: parking_lot::Mutex::new(None),
             enabled: AtomicBool::new(enabled),
@@ -670,6 +760,63 @@ impl Audit {
         network_log_upload_enabled_from_settings(&self.settings_dir)
     }
 
+    /// Only a verified account can own future records. Startup/legacy records
+    /// without a scope are retained locally, never silently attributed at upload.
+    pub(crate) fn activate_log_upload_owner(&self, account: &str) {
+        let mut owner = self.upload_owner.lock();
+        owner.owner = Some(account.to_string());
+        self.refresh_upload_scope(&mut owner);
+    }
+
+    pub(crate) fn abandon_log_upload_owner(&self) {
+        let mut owner = self.upload_owner.lock();
+        owner.owner = None;
+        self.refresh_upload_scope(&mut owner);
+    }
+
+    fn refresh_upload_scope(&self, owner: &mut UploadOwner) {
+        let _settings_guard = SETTINGS_LOCK.lock();
+        let mut settings = load_settings_locked(&self.settings_dir);
+        let desired = owner.owner.as_ref().filter(|_| {
+            self.enabled() && settings.network_log_upload_enabled
+        }).map(|account| {
+            settings.network_log_upload_scope.as_ref()
+                .filter(|saved| saved.owner == *account)
+                .cloned()
+                .unwrap_or_else(|| PersistedUploadScope {
+                    owner: account.clone(), id: tono_core::auth::new_installation_id(),
+                })
+        });
+        let changed = settings.network_log_upload_scope != desired;
+        settings.network_log_upload_scope = desired.clone();
+        // A failed durable boundary must not grant any new upload authority.
+        // A no-op must not rewrite an unreadable/malformed settings file.
+        let desired = if !changed || save_settings(&self.settings_dir, &settings).is_ok() { desired } else { None };
+        let same = owner.scope.as_ref().zip(desired.as_ref())
+            .is_some_and(|(current, wanted)| current.id == wanted.id);
+        if !same {
+            if let Some(previous) = owner.scope.take() { previous.cancelled.cancel(); }
+            owner.scope = desired.map(|saved| LogUploadScope {
+                id: saved.id, cancelled: tokio_util::sync::CancellationToken::new(),
+            });
+        }
+    }
+
+    pub(crate) fn log_upload_scope(&self) -> Option<LogUploadScope> {
+        self.upload_owner.lock().scope.clone()
+    }
+
+    /// Linearize cursor acknowledgement with consent/owner changes. The caller
+    /// also holds the app account-generation lock; never acquire it from here.
+    pub(crate) fn with_log_upload_scope<R>(&self, scope: &LogUploadScope, action: impl FnOnce() -> R) -> Option<R> {
+        let owner = self.upload_owner.lock();
+        if scope.cancelled.is_cancelled() || !self.enabled() || !self.network_log_upload_enabled()
+            || !owner.scope.as_ref().is_some_and(|current| current.id == scope.id) {
+            return None;
+        }
+        Some(action())
+    }
+
     pub fn dropped_count(&self) -> u64 {
         self.dropped.load(Ordering::Relaxed)
     }
@@ -687,9 +834,12 @@ impl Audit {
     /// Bypasses the toggle — used only for the lifecycle markers
     /// (`auditDisabled` must land as the last line before silence).
     fn record(&self, event: AuditEvent) {
+        let owner = self.upload_owner.lock();
+        let mut record = AuditRecord::now(event.redacted());
+        record.upload_scope = owner.scope.as_ref().map(|scope| scope.id.clone());
         let sender = self.sender.lock();
         if let Some(sender) = sender.as_ref()
-            && sender.try_send(AuditRecord::now(event.redacted())).is_err()
+            && sender.try_send(record).is_err()
         {
             self.dropped.fetch_add(1, Ordering::Relaxed);
         }
@@ -702,8 +852,11 @@ impl Audit {
         if self.enabled() == enabled {
             return Ok(());
         }
+        let mut owner = self.upload_owner.lock();
         save_audit_enabled(&self.settings_dir, enabled).map_err(|err| err.to_string())?;
         self.enabled.store(enabled, Ordering::Release);
+        self.refresh_upload_scope(&mut owner);
+        drop(owner);
         if enabled {
             self.record(AuditEvent::AuditEnabled);
         } else {
@@ -730,19 +883,18 @@ impl Audit {
 
     /// Toggle the upload of the raw audit log.
     ///
-    /// This is the larger disclosure of the two and needs its own answer: the
-    /// periodic telemetry window carries counts and states, while this sends the
-    /// log itself — the hostnames connected to, the process that opened each
-    /// connection, and which rule and route it matched. The flag, the gate in
-    /// `log_upload::sweep` and the reader above all existed; the half that lets
-    /// a person say no did not, so it was permanently on. The reader's own note
-    /// — "a stale one would keep sending after the user switched it off" — was
-    /// written for a switch that had never been built.
+    /// Default follows [`NETWORK_LOG_UPLOAD_DEFAULT`]. Always persist
+    /// `network_log_upload_user_chosen` so a later default flip cannot override
+    /// an explicit confirmation of the current value.
     pub fn set_network_log_upload_enabled(&self, enabled: bool) -> Result<(), String> {
-        if self.network_log_upload_enabled() == enabled {
+        let mut owner = self.upload_owner.lock();
+        let previous = self.network_log_upload_enabled();
+        save_network_log_upload_enabled(&self.settings_dir, enabled).map_err(|err| err.to_string())?;
+        self.refresh_upload_scope(&mut owner);
+        drop(owner);
+        if previous == enabled {
             return Ok(());
         }
-        save_network_log_upload_enabled(&self.settings_dir, enabled).map_err(|err| err.to_string())?;
         if enabled {
             self.record(AuditEvent::NetworkLogUploadEnabled);
         } else {
@@ -756,6 +908,9 @@ impl Audit {
     /// task handle from `take_writer`.
     pub fn close_sender(&self) {
         self.closed.store(true, Ordering::Release);
+        // Stop in-flight requests, but retain the same-owner durable scope so
+        // the next authenticated launch can catch up its own offline records.
+        if let Some(scope) = self.upload_owner.lock().scope.take() { scope.cancelled.cancel(); }
         self.sender.lock().take();
     }
 
@@ -768,7 +923,8 @@ impl Audit {
 mod tests {
     use super::{
         Audit, AuditEvent, AuditRecord, MAX_AUDIT_FILE_BYTES, RotatingWriter, audit_enabled_from_settings,
-        periodic_telemetry_enabled_from_settings, redact, save_periodic_telemetry_enabled,
+        network_log_upload_enabled_from_settings, periodic_telemetry_enabled_from_settings, redact,
+        save_network_log_upload_enabled, save_periodic_telemetry_enabled,
     };
     use std::path::{Path, PathBuf};
 
@@ -795,6 +951,40 @@ mod tests {
     }
 
     // ---- redaction: one case per pattern group ----
+
+    #[tokio::test]
+    async fn queued_records_keep_their_original_upload_owner() {
+        let dir = TempDir::new("upload-scope");
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(8);
+        let audit = Audit::for_test(sender, dir.path(), true);
+        audit.activate_log_upload_owner("account-a");
+        let first = audit.log_upload_scope().unwrap();
+        audit.log(AuditEvent::NetworkChange { counter: 1 });
+        audit.activate_log_upload_owner("account-b");
+        let second = audit.log_upload_scope().unwrap();
+        audit.log(AuditEvent::NetworkChange { counter: 2 });
+        assert!(first.cancelled.is_cancelled());
+        assert_ne!(first.id, second.id);
+        assert_eq!(receiver.recv().await.unwrap().upload_scope, Some(first.id));
+        assert_eq!(receiver.recv().await.unwrap().upload_scope, Some(second.id));
+    }
+
+    #[tokio::test]
+    async fn revoked_upload_scope_cannot_ack_and_reenable_uses_a_new_scope() {
+        let dir = TempDir::new("upload-scope");
+        let (sender, _receiver) = tokio::sync::mpsc::channel(8);
+        let audit = Audit::for_test(sender, dir.path(), true);
+        audit.activate_log_upload_owner("account-a");
+        let pending = audit.log_upload_scope().unwrap();
+        audit.set_network_log_upload_enabled(false).unwrap();
+        assert!(pending.cancelled.is_cancelled());
+        let mut advanced = false;
+        assert!(audit.with_log_upload_scope(&pending, || advanced = true).is_none());
+        assert!(!advanced);
+        audit.set_network_log_upload_enabled(true).unwrap();
+        assert_ne!(audit.log_upload_scope().unwrap().id, pending.id);
+        assert!(audit.with_log_upload_scope(&pending, || ()).is_none());
+    }
 
     #[test]
     fn redact_authorization_header() {
@@ -895,15 +1085,20 @@ mod tests {
             },
             AuditEvent::ConnectBegin {
                 node: "n token=abc".to_string(),
+                transport: "tcp",
             },
             AuditEvent::ConnectFail {
                 stage: None,
                 error: "token=abc".to_string(),
                 action: "fullRelease",
+                transport: None,
+                code: None,
+                node: Some("n token=abc".to_string()),
             },
             AuditEvent::ConnectOk {
                 node: "n token=abc".to_string(),
                 elapsed_ms: 1,
+                transport: "tcp",
             },
             AuditEvent::ReleaseFail {
                 error: "token=abc".to_string(),
@@ -911,6 +1106,7 @@ mod tests {
             AuditEvent::NodeSwitch {
                 from: "a token=abc".to_string(),
                 to: "b token=abc".to_string(),
+                transport: "tcp",
             },
             AuditEvent::ConnectCatalogFailover {
                 from: "a token=abc".to_string(),
@@ -1093,6 +1289,88 @@ mod tests {
         assert!(
             periodic_telemetry_enabled_from_settings(legacy.path()),
             "a post-migration explicit opt-in must survive every later load"
+        );
+    }
+
+    #[test]
+    fn network_log_upload_fresh_file_follows_default_and_snapshot_stays_off() {
+        let fresh = TempDir::new("nlog-fresh");
+        assert!(
+            network_log_upload_enabled_from_settings(fresh.path()),
+            "a new installation must follow NETWORK_LOG_UPLOAD_DEFAULT (currently on)"
+        );
+        assert!(
+            !periodic_telemetry_enabled_from_settings(fresh.path()),
+            "the periodic snapshot default must stay off"
+        );
+    }
+
+    #[test]
+    fn unreadable_network_log_preference_does_not_enable_upload_or_overwrite_evidence() {
+        let dir = TempDir::new("nlog-corrupt");
+        let path = dir.path().join(super::SETTINGS_FILE_NAME);
+        std::fs::write(&path, b"{broken").unwrap();
+        assert!(!network_log_upload_enabled_from_settings(dir.path()));
+        assert_eq!(std::fs::read(&path).unwrap(), b"{broken");
+    }
+
+    #[test]
+    fn network_log_upload_preserves_legacy_opt_out_without_a_chosen_marker() {
+        let legacy = TempDir::new("nlog-v2");
+        std::fs::write(
+            legacy.path().join(super::SETTINGS_FILE_NAME),
+            r#"{"audit_enabled":true,"periodic_telemetry_enabled":false,"periodic_telemetry_default_v2":true,"network_log_upload_enabled":false,"network_log_default_v2":true}"#,
+        )
+        .unwrap();
+        assert!(
+            !network_log_upload_enabled_from_settings(legacy.path()),
+            "a legacy opt-out must not be mistaken for absence of consent"
+        );
+        let migrated: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(legacy.path().join(super::SETTINGS_FILE_NAME)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(migrated["network_log_upload_enabled"], false);
+        assert_eq!(migrated["network_log_default_v3"], true);
+        assert_eq!(migrated["network_log_upload_user_chosen"], false);
+        assert_eq!(migrated["periodic_telemetry_enabled"], false);
+    }
+
+    #[test]
+    fn network_log_upload_v3_user_chosen_false_stays_off() {
+        let chosen = TempDir::new("nlog-chosen");
+        std::fs::write(
+            chosen.path().join(super::SETTINGS_FILE_NAME),
+            r#"{"audit_enabled":true,"network_log_upload_enabled":false,"network_log_default_v2":true,"network_log_default_v3":true,"network_log_upload_user_chosen":true}"#,
+        )
+        .unwrap();
+        assert!(
+            !network_log_upload_enabled_from_settings(chosen.path()),
+            "an explicit off after v3 must not be flipped again"
+        );
+        let body: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(chosen.path().join(super::SETTINGS_FILE_NAME)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body["network_log_upload_enabled"], false);
+        assert_eq!(body["network_log_upload_user_chosen"], true);
+    }
+
+    #[test]
+    fn network_log_upload_setter_marks_user_chosen_and_the_choice_sticks() {
+        let dir = TempDir::new("nlog-set");
+        assert!(network_log_upload_enabled_from_settings(dir.path()));
+        save_network_log_upload_enabled(dir.path(), false).unwrap();
+        assert!(!network_log_upload_enabled_from_settings(dir.path()));
+        let body: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join(super::SETTINGS_FILE_NAME)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body["network_log_upload_user_chosen"], true);
+        assert_eq!(body["network_log_upload_enabled"], false);
+        assert!(
+            !network_log_upload_enabled_from_settings(dir.path()),
+            "a post-v3 explicit off must survive every later load"
         );
     }
 }

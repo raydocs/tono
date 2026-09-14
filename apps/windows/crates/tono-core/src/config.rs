@@ -29,7 +29,7 @@ pub const WEB_DIRECT_GROUP_NAME: &str = "Tono-China-Web-Direct";
 /// (`zoom.us` and similar stay tunnelled). The China-site suffixes below are
 /// product-direct: any process, TCP 80/443, same staged-core port permit as
 /// Bilibili.
-pub const ADDRESS_FREE_WEB_SUFFIXES: [&str; 9] = [
+pub const ADDRESS_FREE_WEB_SUFFIXES: [&str; 49] = [
     "bilibili.com",
     "biliapi.net",
     "bilivideo.com",
@@ -39,15 +39,95 @@ pub const ADDRESS_FREE_WEB_SUFFIXES: [&str; 9] = [
     "aliyuncs.com",
     "edu.cn",
     "weixinbridge.com",
+    "taobao.com",
+    "tmall.com",
+    "alipay.com",
+    "alicdn.com",
+    "jd.com",
+    "douyin.com",
+    "163.com",
+    "netease.com",
+    "weibo.com",
+    "meituan.com",
+    "dianping.com",
+    "pinduoduo.com",
+    "amap.com",
+    "douyu.com",
+    "huya.com",
+    "kuaishou.com",
+    "yy.com",
+    "ixigua.com",
+    "iqiyi.com",
+    "youku.com",
+    "mgtv.com",
+    "xiaohongshu.com",
+    "wps.cn",
+    "kdocs.cn",
+    "yuque.com",
+    "voovmeeting.com",
+    "12306.cn",
+    "yximgs.com",
+    "kugou.com",
+    "kuwo.cn",
+    "migu.cn",
+    "ximalaya.com",
+    "qingting.fm",
+    "xylink.com",
+    "zhumu.me",
+    "quanshi.com",
+    "zhihu.com",
+    "zhimg.com",
+    "goofish.com",
+    "1688.com",
 ];
 /// Always attached to a native-app DIRECT plan, even if the published policy
 /// omitted them. Unidentified helpers and browsers hit these trees.
-pub const ALWAYS_ADDRESS_FREE_WEB_SUFFIXES: [&str; 5] = [
+pub const ALWAYS_ADDRESS_FREE_WEB_SUFFIXES: [&str; 45] = [
     "qq.com",
     "baidu.com",
     "aliyuncs.com",
     "edu.cn",
     "weixinbridge.com",
+    "bilibili.com",
+    "taobao.com",
+    "tmall.com",
+    "alipay.com",
+    "alicdn.com",
+    "jd.com",
+    "douyin.com",
+    "163.com",
+    "netease.com",
+    "weibo.com",
+    "meituan.com",
+    "dianping.com",
+    "pinduoduo.com",
+    "amap.com",
+    "douyu.com",
+    "huya.com",
+    "kuaishou.com",
+    "yy.com",
+    "ixigua.com",
+    "iqiyi.com",
+    "youku.com",
+    "mgtv.com",
+    "xiaohongshu.com",
+    "wps.cn",
+    "kdocs.cn",
+    "yuque.com",
+    "voovmeeting.com",
+    "12306.cn",
+    "kugou.com",
+    "kuwo.cn",
+    "migu.cn",
+    "ximalaya.com",
+    "qingting.fm",
+    "xylink.com",
+    "zhumu.me",
+    "quanshi.com",
+    "zhihu.com",
+    "zhimg.com",
+    "goofish.com",
+    "1688.com",
 ];
 
 pub fn is_address_free_web_suffix(host: &str) -> bool {
@@ -1039,7 +1119,13 @@ fn runtime_value(
     // STUN, …). Reject all non-pinned UDP instead: whitelisted WeChat media
     // already matched its pins above, everything else must fail over to TCP
     // rather than leave the machine. Revisit when nodes speak UoT.
-    rules.push("AND,((NETWORK,UDP)),REJECT".to_string());
+    let is_hy2 = nodes
+        .iter()
+        .find(|node| node.name == selected)
+        .is_some_and(|node| node.is_hysteria2());
+    if !is_hy2 {
+        rules.push("AND,((NETWORK,UDP)),REJECT".to_string());
+    }
     rules.push(RULES[RULES.len() - 1].to_string());
     put(
         &mut root,
@@ -2549,6 +2635,40 @@ reality-opts:
                 .map(String::as_str)
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn hysteria2_selected_node_omits_udp_reject_rule() {
+        let yaml = r#"
+name: "Buffalo · Niagara · hy2"
+type: hysteria2
+server: 23.94.79.123
+port: 443
+password: "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d"
+sni: "www.microsoft.com"
+fingerprint: "1e5374a79bdb83b04c3d3c84722c03211d1c941c2de9f92431d2198ba7212cad"
+"#;
+        let hy2_node = admit_node(&serde_yaml_ng::from_str(yaml).unwrap()).unwrap();
+        let nodes = vec![hy2_node];
+        let runtime = build_owned_runtime_with_ports(
+            &nodes,
+            "Buffalo · Niagara · hy2",
+            "test-secret",
+            None,
+            None,
+            None,
+            RuntimePorts::default(),
+        )
+        .unwrap();
+        let value = parsed(&runtime);
+        let rules: Vec<&str> = get(&value, &["rules"])
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|rule| rule.as_str().unwrap())
+            .collect();
+        assert!(!rules.contains(&"AND,((NETWORK,UDP)),REJECT"));
+        assert_eq!(rules, [RULES[0], RULES[1], RULES[2]]);
     }
 
 }

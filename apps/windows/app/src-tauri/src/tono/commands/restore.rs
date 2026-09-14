@@ -106,7 +106,7 @@ pub(super) fn unknown_protection_message(reason: &str) -> String {
 /// process obtains a new Service session/controller; weaker evidence continues to wait for the
 /// user and is never promoted directly to Connected.
 pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
-    let _ = crate::tono::update_handoff::begin_first_launch_migration();
+    let _ = crate::tono::update_handoff::begin_first_launch_migration(env!("CARGO_PKG_VERSION"));
     let restore_deadline = tokio::time::Instant::now() + RESTORE_TRANSACTION_TIMEOUT;
     let generation = {
         let mut inner = state.lock().await;
@@ -250,6 +250,7 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
                 if inner.sign_in_generation != generation {
                     return;
                 }
+                state.audit().activate_log_upload_owner(&me.user.id);
                 inner.account = Some(me.user);
                 inner.account_state = if info.suspended {
                     AccountState::Suspended
@@ -260,6 +261,13 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
                 emit_status(&app, &status_of(&inner));
             }
             if !info.suspended {
+                if crate::tono::update_handoff::load_pending()
+                    .is_some_and(|journal| journal.keep_kill_switch_armed)
+                {
+                    let _ = crate::tono::update_handoff::record_owner_phase(
+                        crate::tono::update_handoff::Phase::ProtectionResuming,
+                    );
+                }
                 match tokio::time::timeout_at(
                     restore_deadline,
                     catalog_sync::sync_with_retries_for_auth_generation(&state, &app, generation),
@@ -300,11 +308,12 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
                 // current-owner runtime, then schedule the ordinary fully verified replacement;
                 // the restore task does not await that potentially long connection transaction.
                 connection::schedule_startup_resume_if_proven(&state, &app, generation).await;
-                if crate::tono::update_handoff::load_pending()
-                    .is_some_and(|journal| !journal.was_connected)
-                {
-                    crate::tono::update_handoff::mark_committed();
-                }
+                // Protected Offline was not Connected, but its update still
+                // needs verification by the new connection, not just me().
+                crate::tono::update_handoff::commit_after_account_restore(
+                    env!("CARGO_PKG_VERSION"),
+                    matches!(protection, StoredProtection::ProvenAbsent),
+                );
                 crate::tono::telemetry::spawn_periodic_for_auth_generation(&state, &app, generation)
                     .await;
                 crate::tono::log_upload::spawn_periodic_for_auth_generation(
@@ -386,10 +395,8 @@ pub async fn restore_session_guarded(app: AppHandle, state: Arc<TonoState>) {
 
     load_credentials(&state).await;
     crate::tono::bootstrap::hydrate_learned_pins_from_service().await;
-    {
-        let inner = state.lock().await;
-        let _ = inner.client.transport().refresh_control_plane_pins().await;
-    }
+    let client = { Arc::clone(&state.lock().await.client) };
+    let _ = client.transport().refresh_control_plane_pins().await;
     let outcome = std::panic::AssertUnwindSafe(restore_session(app.clone(), state.clone()))
         .catch_unwind()
         .await;

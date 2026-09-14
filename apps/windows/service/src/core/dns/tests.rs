@@ -10,6 +10,49 @@
     }
 
     #[test]
+    fn encrypted_dns_capture_round_trips_absent_and_dword() {
+        assert_eq!(format_encrypted_dns_capture(None), "absent\n");
+        assert_eq!(format_encrypted_dns_capture(Some(2)), "2\n");
+        assert_eq!(parse_encrypted_dns_capture("absent\n").unwrap(), None);
+        assert_eq!(parse_encrypted_dns_capture("3").unwrap(), Some(3));
+        assert_eq!(
+            parse_encrypted_dns_capture("0\n").unwrap(),
+            Some(ENABLE_AUTO_DOH_OFF)
+        );
+        assert!(parse_encrypted_dns_capture("nope").is_err());
+    }
+
+    #[test]
+    fn settings_encrypted_only_is_do_h_without_udp_fallback() {
+        assert!(interface_doh_is_encrypted_only(DNS_DOH_ENABLE));
+        assert!(interface_doh_is_encrypted_only(DNS_DOH_ENABLE_AUTO));
+        assert!(!interface_doh_is_encrypted_only(
+            DNS_DOH_ENABLE | DNS_DOH_FALLBACK_TO_UDP
+        ));
+        assert!(!interface_doh_is_encrypted_only(0));
+        assert!(interface_doh_is_enabled(
+            DNS_DOH_ENABLE_AUTO | DNS_DOH_FALLBACK_TO_UDP
+        ));
+    }
+
+    #[test]
+    fn interface_doh_capture_round_trips_and_rejects_junk() {
+        let entries = vec![InterfaceDohEntry {
+            guid: "{8f3c2b91-4a6e-4d17-9c1a-198018000002}".to_owned(),
+            family: "Doh".to_owned(),
+            server: "1.1.1.1".to_owned(),
+            flags: DNS_DOH_ENABLE,
+        }];
+        let body = format_interface_doh_capture(&entries).unwrap();
+        assert_eq!(parse_interface_doh_capture(&body).unwrap(), entries);
+        assert!(parse_interface_doh_capture("[]").is_err());
+        assert!(parse_interface_doh_capture(
+            r#"{"v":1,"entries":[{"guid":"x","family":"tcp","server":"1.1.1.1","flags":2}]}"#
+        )
+        .is_err());
+    }
+
+    #[test]
     fn name_server_lists_tolerate_messy_registry_values() {
         assert_eq!(
             parse_name_server_list(" 1.1.1.1 , ,8.8.8.8, "),

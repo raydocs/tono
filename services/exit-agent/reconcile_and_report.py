@@ -46,6 +46,7 @@ working meter reporting zero.
 from __future__ import annotations
 
 from contextlib import contextmanager
+import argparse
 import errno
 import fcntl
 import hashlib
@@ -56,6 +57,7 @@ import socket
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -79,6 +81,8 @@ REJECTED_STATUSES = frozenset({400, 409, 413, 422})
 MAX_SAFE_INTEGER = (1 << 53) - 1
 MAX_RESPONSE_BYTES = 512 * 1024
 STATE_MODE = 0o600
+HY2_AUTH_ALLOWLIST = Path("/opt/tono-hy2/auth-allow.sha256")
+HY2_ROSTER_MARKER = "# tono-exit-agent roster v1"
 # Label written by enable-tono-exit-metering.sh for the credential every
 # current client still holds. Removing it would drop the fleet.
 LEGACY_CLIENT_EMAIL = "shared-legacy"
@@ -267,6 +271,44 @@ def run_xray(binary: Path, arguments: list[str]) -> subprocess.CompletedProcess[
         timeout=30,
         check=False,
     )
+
+
+def add_inbound_user(
+    binary: Path, command: str, address: str, tag: str, label: str, client_uuid: str,
+) -> subprocess.CompletedProcess[str]:
+    """Install one VLESS identity. Xray 26+ `adu` takes an inbound JSON snippet."""
+    if command != "adu":
+        return run_xray(binary, [
+            "api", command, f"--server={address}",
+            f"--tag={tag}", f"--email={label}", f"--uuid={client_uuid}",
+        ])
+    snippet = {
+        "inbounds": [{
+            "tag": tag,
+            "protocol": "vless",
+            "listen": "127.0.0.1",
+            "port": 1,
+            "settings": {
+                "decryption": "none",
+                "clients": [{
+                    "email": label,
+                    "id": client_uuid,
+                    "flow": "xtls-rprx-vision",
+                }],
+            },
+        }],
+    }
+    fd, path = tempfile.mkstemp(prefix="tono-adu-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w") as handle:
+            json.dump(snippet, handle)
+        os.chmod(path, 0o600)
+        return run_xray(binary, ["api", "adu", f"--server={address}", path])
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 def supported_api_commands(binary: Path) -> set[str]:
@@ -669,16 +711,19 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
     for label, client_uuid in sorted(wanted.items()):
         if listed is not None and label in listed:
             continue
-        result = run_xray(binary, [
-            "api", commands["add_user"], f"--server={address}",
-            f"--tag={tag}", f"--email={label}", f"--uuid={client_uuid}",
-        ])
+        result = add_inbound_user(
+            binary, commands["add_user"], address, tag, label, client_uuid,
+        )
         # Already-present is success, not failure: two agents on one timer, or a
         # retry after a lost response, must not turn into an error loop. It is
         # not an addition either, or every round would report the whole roster.
-        if result.returncode != 0 and "already exists" not in (result.stderr or "").lower():
+        # Xray 26 `adu` prints "already exists" on stdout and may still exit 0.
+        output = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
+        if "already exists" in output:
+            pass
+        elif result.returncode != 0:
             raise Refusal(f"adding {label} failed: {result.stderr.strip() or result.returncode}")
-        if result.returncode == 0:
+        else:
             added += 1
         if known_installed is not None:
             known_installed.add(label)
@@ -875,6 +920,77 @@ def reconcile_and_read_stable(
     raise AssertionError("bounded xray reconciliation loop did not return")
 
 
+def sync_hy2_roster(roster: list[dict[str, str]]) -> bool:
+    """Replace an installed hy2 checker's list from this verified roster only.
+
+    No hy2 directory means a VLESS-only node, which is unchanged. An installed
+    but broken/read-only path is an error, never a successful reconciliation.
+    Empty is a valid revocation result, not permission to retain static users.
+    Caller holds agent_run_lock and has verified the roster's node identity.
+    """
+    path = HY2_AUTH_ALLOWLIST
+    try:
+        directory = path.parent.lstat()
+    except FileNotFoundError:
+        return False
+    if (not stat.S_ISDIR(directory.st_mode) or directory.st_uid != os.geteuid()
+            or directory.st_mode & 0o022):
+        raise Refusal("hy2 auth directory is not privately service-owned")
+    try:
+        info = path.lstat()
+    except FileNotFoundError as error:
+        raise Refusal("hy2 is installed but its auth allowlist is missing") from error
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+            or info.st_nlink != 1 or info.st_mode & 0o022):
+        raise Refusal("hy2 auth allowlist is not a service-owned regular file")
+    digests = sorted({hashlib.sha256(entry["clientUUID"].encode()).hexdigest() for entry in roster})
+    body = (HY2_ROSTER_MARKER + "\n" + "".join(digest + "\n" for digest in digests)).encode()
+    temporary: str | None = None
+    try:
+        # Same-directory replacement: a reader sees either complete roster,
+        # never a partially truncated list. Preserve the checker's read group.
+        descriptor, temporary = tempfile.mkstemp(prefix=".auth-allow-", dir=path.parent)
+        with os.fdopen(descriptor, "wb") as output:
+            os.fchown(output.fileno(), info.st_uid, info.st_gid)
+            os.fchmod(output.fileno(), 0o640)
+            output.write(body)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+        temporary = None
+        directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except OSError as error:
+        raise Refusal(f"hy2 roster could not be published: {error}") from error
+    finally:
+        if temporary is not None:
+            os.unlink(temporary)
+    return True
+
+
+
+def run_hy2_roster_once() -> None:
+    """Enforce hy2 only; never opt a VLESS node into a metering migration.
+
+    No node-wide ACK is sent: this mode cannot prove Xray reconciliation or
+    metering readiness. The node-specific token and explicit source must agree.
+    """
+    base = api_base()
+    token = env("TONO_HOME_AGENT_TOKEN")
+    expected = env("TONO_SOURCE_ID")
+    if not SOURCE_ID_PATTERN.fullmatch(expected):
+        raise Refusal("hy2-only sync requires an explicit valid TONO_SOURCE_ID")
+    node_id, observed_at, roster, _ = fetch_roster(base, token)
+    if node_id != expected:
+        raise Refusal("hy2 roster node identity does not match TONO_SOURCE_ID")
+    if not sync_hy2_roster(roster):
+        raise Refusal("hy2-only sync requires an installed auth checker")
+    print(f"hy2 roster applied: observedAt={observed_at}, identities={len(roster)}; no node-wide ACK or usage report")
+
+
 def run_once(path: Path) -> None:
     base = api_base()
     token = env("TONO_HOME_AGENT_TOKEN")
@@ -912,6 +1028,9 @@ def run_once(path: Path) -> None:
         if not retire_override
         else retire_override in ("1", "true", "yes")
     )
+    # Revocations must reach hy2 even if the following Xray reconciliation
+    # fails. Never ACK the roster unless both installed transports were updated.
+    sync_hy2_roster(roster)
     remembered = state.get("installedClients")
     added, removed, installed, counters, settled_marker = reconcile_and_read_stable(
         binary, commands, address, tag, roster,
@@ -1015,15 +1134,22 @@ def run_once(path: Path) -> None:
     print(f"reported usage for {delivered} accounts as {source}, dropped {dropped}")
 
 
-def main() -> None:
+def main(*, hy2_roster_only: bool = False) -> None:
     path = state_path()
     with agent_run_lock(path):
-        run_once(path)
+        if hy2_roster_only:
+            run_hy2_roster_once()
+        else:
+            run_once(path)
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--hy2-roster-only", action="store_true",
+                        help="sync installed hy2 auth only; no Xray changes, usage, or node-wide ACK")
+    args = parser.parse_args()
     try:
-        main()
+        main(hy2_roster_only=args.hy2_roster_only)
     except Refusal as refusal:
         print(f"refusing: {refusal}", file=sys.stderr)
         raise SystemExit(1)

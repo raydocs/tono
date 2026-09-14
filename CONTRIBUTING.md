@@ -11,15 +11,18 @@ tono/
 │   └── windows/               Tauri GUI, Service, WFP; Linux desktop packaging
 ├── services/
 │   ├── control-plane/         Cloudflare Worker, static assets, and D1 schema
+│   ├── ops-console/           Operator console
 │   ├── exit-agent/            VPS Xray roster + metering
 │   └── home-agent/            Home exit-node usage reporter
 ├── ops-panel/                 SSH quality collector
 ├── tooling/scripts/           Shared build, release, test, and operations tools
-├── docs/                      Architecture, release lines, archived handoffs
+├── docs/                      Product, architecture, ship, ops; archive for handoffs
 └── .agents/                   Repository-specific automation guidance
 ```
 
-See [`docs/architecture.md`](docs/architecture.md) for the system map.
+See [`docs/README.md`](docs/README.md) for the document map and
+[`docs/architecture.md`](docs/architecture.md) for the system map.
+Agents: [`AGENTS.md`](AGENTS.md).
 Ubuntu desktop and a `tono` CLI share the same privileged service; that
 Linux product line is not shipped yet.
 

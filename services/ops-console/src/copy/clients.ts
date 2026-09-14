@@ -58,7 +58,7 @@ export const clientCopy = {
     publish: (platform: string, version: string) =>
       `${platform} 的客户端下次检查更新时就会看到 ${version}，并开始自动升级到它。已经装好的旧版本不会被卸载。`,
     withdraw: (version: string) =>
-      `${version} 会从客户端检查更新的地方消失，上一个已发布的版本重新变成最新版。已经升到 ${version} 的客户端不会被退回去。`,
+      `这只在后台把 ${version} 标记为已撤回，不会修改客户端更新源。已经升到 ${version} 的客户端不会被退回去。`,
     setMin: (version: string) =>
       `低于 ${version} 的客户端会被列进"版本过旧"待办，不会被停用。`,
     minPrompt: '最低支持版本',

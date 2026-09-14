@@ -14,7 +14,8 @@ use crate::tono::{
     bootstrap, commands, signed_apps,
     connection_health::{
         CoreSample, HealthLegs, NetworkChangeOutcome, classify_core_sample, connection_loop_continues,
-        core_change_fires, health_threshold_reached, kill_switch_unhealthy, monitor_requires_reconnect,
+        core_change_fires, health_threshold_reached, kill_switch_unhealthy_for_monitor,
+        monitor_requires_reconnect, owned_direct_reload_in_flight,
         network_event_fires, protected_dns_unhealthy,
     },
     connection_plan::{guard_rejection_is_transient, reconnect_allowed},
@@ -22,12 +23,12 @@ use crate::tono::{
 };
 use super::{
     Attempt, BoxedTask, MAX_DIRECT_SAMPLES, MAX_PROTECTED_ROUTE_SAMPLES, ProtectedRouteAggregate,
-    SampledConnections, attempt, fail_connect, kill_switch_mode_key, new_direct_samples,
-    observe_protected_routes, seed_autostart_after_connect,
+    attempt, fail_connect, kill_switch_mode_key, new_direct_samples, observe_protected_routes,
+    seed_autostart_after_connect,
 };
 use super::direct::dns_query_a;
 use super::reconnect::schedule_reconnect;
-use super::controller::{CONTROLLER_HTTP_TIMEOUT, controller_client, controller_url};
+use super::controller::{CONTROLLER_HTTP_TIMEOUT, controller_client, controller_url, fetch_connections};
 use super::probes::{verify_locked, verify_tun_data_plane};
 
 /// `lookup_host` delegates to the OS resolver and has no Tokio timeout of its own. Bound every
@@ -106,12 +107,28 @@ pub(super) const BROWSER_DNS_RECHECK_INTERVAL: Duration = Duration::from_secs(60
 /// first minute of a session rather than one line per connection.
 pub(super) const DIRECT_SAMPLE_INTERVAL: Duration = Duration::from_secs(60);
 
-/// Upper bound on distinct destinations recorded in one session. WeChat's CDN rotates, so a
-/// Read the controller once, record DIRECT diagnostics, and update protected-route evidence.
+fn sample_commit_is_current(expected: (u64, u64), current: (u64, u64), connected: bool) -> bool {
+    connected && expected == current
+}
+
+#[cfg(test)]
+mod sample_commit_tests {
+    #[test]
+    fn a_replaced_controller_cannot_commit_a_late_sample_in_the_same_connection() {
+        let started = (7, 12);
+        assert!(super::sample_commit_is_current(started, started, true));
+        // In-place controller replacement need not change the connect generation.
+        assert!(!super::sample_commit_is_current(started, (7, 13), true));
+    }
+}
+
+/// Read the controller once, ingest the route ledger, record DIRECT diagnostics, and update
+/// protected-route evidence.
 ///
-/// Returns `false` when the caller should stop sampling — a superseded generation, or every
-/// applicable cap reached. Every other failure is swallowed: this is instrumentation, and a
-/// controller that is briefly unreachable must never disturb a working tunnel.
+/// Returns `false` only when the generation is superseded or the session is no longer
+/// connected. Caps still bound the DirectDial / protected-route evidence branches, but the
+/// ledger keeps sampling for the rest of the session — otherwise bytesByRoute would freeze
+/// once 512 DIRECT destinations had been seen.
 pub(super) async fn sample_connections_once(
     state: &Arc<TonoState>,
     generation: u64,
@@ -120,12 +137,7 @@ pub(super) async fn sample_connections_once(
     protected_seen: &mut std::collections::HashSet<u64>,
     protected_aggregate: &mut ProtectedRouteAggregate,
 ) -> bool {
-    let direct_active = direct_seen.len() < MAX_DIRECT_SAMPLES;
-    let protected_active = residential_target.is_some() && protected_seen.len() < MAX_PROTECTED_ROUTE_SAMPLES;
-    if !direct_active && !protected_active {
-        return false;
-    }
-    let (secret, port) = {
+    let (secret, port, controller_generation) = {
         let inner = state.lock().await;
         // `connect_generation`, matching the sibling arms of this task. The first version
         // compared `controller_generation` — a different counter, bumped per controller setup —
@@ -135,25 +147,29 @@ pub(super) async fn sample_connections_once(
             return false;
         }
         match inner.controller_secret.clone().zip(inner.controller_port) {
-            Some(pair) => pair,
+            Some((secret, port)) => (secret, port, inner.controller_generation),
             None => return true,
         }
     };
-    let Ok(client) = controller_client(Duration::from_secs(2)) else {
+    let Some(payload) = fetch_connections(&secret, port).await else {
         return true;
     };
-    let Ok(response) = client
-        .get(controller_url(port, "/connections"))
-        .bearer_auth(secret)
-        .send()
-        .await
-    else {
-        return true;
-    };
-    let Ok(payload) = response.json::<SampledConnections>().await else {
-        return true;
-    };
+    // Fetching can outlive a disconnect, account switch, or controller rebuild.
+    // Hold the product guard through the synchronous commit (never through HTTP)
+    // so that neither the ledger nor diagnostic events enter a newer session.
+    let inner = state.lock().await;
+    if !sample_commit_is_current(
+        (generation, controller_generation),
+        (inner.connect_generation, inner.controller_generation),
+        inner.fsm.status().is_connected,
+    ) {
+        // A same-session controller rebuild discards this response, not future
+        // sampling: the next tick must capture the replacement controller.
+        return inner.connect_generation == generation && inner.fsm.status().is_connected;
+    }
+    state.route_ledger().lock().ingest(&payload);
 
+    let direct_active = direct_seen.len() < MAX_DIRECT_SAMPLES;
     if direct_active {
         for sample in new_direct_samples(&payload, direct_seen) {
             state.audit().log(crate::tono::audit::AuditEvent::DirectDial {
@@ -203,8 +219,8 @@ pub(super) async fn sample_connections_once(
         });
     }
 
-    direct_seen.len() < MAX_DIRECT_SAMPLES
-        || residential_target.is_some() && protected_seen.len() < MAX_PROTECTED_ROUTE_SAMPLES
+    drop(inner);
+    true
 }
 
 pub(super) async fn spawn_control_plane_pin_refresh(
@@ -328,18 +344,24 @@ pub(super) async fn refresh_control_plane_pins_once(state: &Arc<TonoState>, gene
     }
     bootstrap::remember_control_plane_addresses(&learned);
     bootstrap::persist_learned_pins_to_service().await;
-    let inner = state.lock().await;
-    if inner.connect_generation != generation {
-        return false;
-    }
-    if let Err(error) = inner.client.transport().refresh_control_plane_pins().await {
+    let client = {
+        let inner = state.lock().await;
+        if inner.connect_generation != generation {
+            return false;
+        }
+        Arc::clone(&inner.client)
+    };
+    if let Err(error) = client.transport().refresh_control_plane_pins().await {
         logging!(
             warn,
             Type::Service,
             "Tono: failed to refresh control-plane HTTP pins: {error:#}"
         );
     }
-    true
+    // Refresh only publishes DNS pins on the captured transport. A newer connection owns
+    // lifecycle state, so a retired monitor must not keep its periodic loop alive.
+    let inner = state.lock().await;
+    inner.connect_generation == generation && inner.fsm.status().is_connected
 }
 
 pub(super) fn wechat_paths_changed(applied: Option<&[String]>, discovered: &[String]) -> bool {
@@ -512,12 +534,17 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
     let mut last_in_place_recovery: Option<std::time::Instant> = None;
     loop {
         interval.tick().await;
-        {
+        let owned_direct_reload = {
             let inner = state.lock().await;
             if !inner.fsm.status().is_connected {
                 return;
             }
-        }
+            owned_direct_reload_in_flight(
+                inner.direct_reload_until,
+                inner.connect_generation,
+                std::time::Instant::now(),
+            )
+        };
         let snapshot = match service::tono_service_status_snapshot().await {
             Ok(snapshot) => snapshot,
             Err(error) => {
@@ -565,7 +592,10 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
         legs.observe_service_ok();
 
         // F2 leg 1: kill-switch completeness every tick.
-        legs.observe_kill_switch(kill_switch_unhealthy(snapshot.kill_switch.as_ref()));
+        legs.observe_kill_switch(kill_switch_unhealthy_for_monitor(
+            snapshot.kill_switch.as_ref(),
+            owned_direct_reload,
+        ));
 
         // DNS health is checked independently of netmon. The first network event is used only
         // to seed the counter (to ignore our own connect-time interface churn), so an adapter
@@ -576,7 +606,13 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
         // F2 leg 2: periodic real App data-plane probe through the tunnel.
         if last_probe.elapsed() >= EXIT_PROBE_INTERVAL {
             last_probe = std::time::Instant::now();
-            legs.observe_probe(periodic_data_plane_probe_failed(&state).await);
+            if owned_direct_reload {
+                // TUN permit is retracted for this session's own reload; a failed probe is not
+                // evidence the tunnel died.
+                legs.observe_probe(false);
+            } else {
+                legs.observe_probe(periodic_data_plane_probe_failed(&state).await);
+            }
         }
         let health_invalid = legs.invalid();
         let protection_invalid = legs.protection_invalid();
@@ -670,7 +706,7 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
         // repeat the same multi-origin HTTPS proof that admitted Connected. Success proves the
         // current tunnel still carries user traffic; failure corroborates the event and keeps the
         // existing fail-closed reconnect. Core identity and health failures remain unconditional.
-        let event_probe_failed = if invalidate && network_changed && !core_changed && !health_invalid {
+        let event_probe_failed = if invalidate && network_changed && !core_changed && !health_invalid && !owned_direct_reload {
             let recently_proven = last_event_probe_ok
                 .is_some_and(|at| at.elapsed() < NETWORK_EVENT_PROBE_COOLDOWN);
             if recently_proven {
@@ -692,7 +728,13 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
         } else {
             false
         };
-        if invalidate && network_changed && !core_changed && !health_invalid && !event_probe_failed {
+        // A reload can start while the HTTPS request is awaiting its result. Re-read its
+        // bounded owner marker before treating that expected blocked probe as a dead tunnel.
+        let owned_direct_reload = {
+            let inner = state.lock().await;
+            owned_direct_reload_in_flight(inner.direct_reload_until, inner.connect_generation, std::time::Instant::now())
+        };
+        if invalidate && network_changed && !core_changed && !health_invalid && !event_probe_failed && !owned_direct_reload {
             logging!(
                 info,
                 Type::Service,
@@ -702,7 +744,7 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
             let generation = state.lock().await.connect_generation;
             let _ = refresh_control_plane_pins_once(&state, generation).await;
         }
-        if monitor_requires_reconnect(invalidate, core_changed, health_invalid, event_probe_failed) {
+        if monitor_requires_reconnect(invalidate, core_changed, health_invalid, event_probe_failed, owned_direct_reload) {
             // A Service transport outage may reuse a recent proof in the branch
             // above. A successful Service snapshot that explicitly says WFP or
             // protected DNS is broken may not: HTTPS can still work while the
@@ -731,6 +773,19 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
 /// still running inside the session it started in (see [`connection_loop_continues`]).
 pub(crate) async fn handle_network_change(state: &Arc<TonoState>, app: &AppHandle) -> NetworkChangeOutcome {
     handle_network_change_inner(state, app, true).await
+}
+
+/// A signed traffic-policy document changed behavior. Sleep/Wi-Fi in-place recovery does not
+/// apply: old DIRECT grants and their lease heartbeat would otherwise survive a TUN probe.
+pub(crate) async fn handle_policy_behavior_change(
+    state: &Arc<TonoState>,
+    app: &AppHandle,
+) -> NetworkChangeOutcome {
+    handle_network_change_inner(state, app, policy_behavior_change_allows_in_place_recovery()).await
+}
+
+pub(crate) const fn policy_behavior_change_allows_in_place_recovery() -> bool {
+    false
 }
 
 pub(super) async fn handle_network_change_inner(
@@ -831,8 +886,8 @@ pub(super) async fn handle_network_change_inner(
 
 pub(super) async fn refresh_control_plane_pins_from_service(state: &TonoState) {
     bootstrap::hydrate_learned_pins_from_service().await;
-    let inner = state.lock().await;
-    if let Err(error) = inner.client.transport().refresh_control_plane_pins().await {
+    let client = { Arc::clone(&state.lock().await.client) };
+    if let Err(error) = client.transport().refresh_control_plane_pins().await {
         logging!(
             warn,
             Type::Service,

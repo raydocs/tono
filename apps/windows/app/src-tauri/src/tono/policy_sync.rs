@@ -109,7 +109,9 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
     drop(policy_update);
 
     if behavior_changed && state.lock().await.sign_in_generation == auth_generation {
-        connection::handle_network_change(state, app).await;
+        // Not `handle_network_change`: that path may recover in place on a live HTTPS probe
+        // and leave revoked DIRECT tuples + the old lease heartbeat in place forever.
+        connection::handle_policy_behavior_change(state, app).await;
     }
     Ok(())
 }

@@ -164,8 +164,9 @@ pub fn monitor_requires_reconnect(
     core_changed: bool,
     health_invalid: bool,
     event_probe_failed: bool,
+    owned_direct_reload: bool,
 ) -> bool {
-    health_invalid || (event_invalidated && (core_changed || event_probe_failed))
+    health_invalid || (event_invalidated && (core_changed || (event_probe_failed && !owned_direct_reload)))
 }
 
 /// What one [`handle_network_change`] call did to the session.
@@ -215,6 +216,31 @@ pub fn kill_switch_unhealthy(status: Option<&KillSwitchStatus>) -> bool {
             && status.tunnel_permit_rendered),
         None => true,
     }
+}
+
+/// This session's own DIRECT fail-closed bracket retracts the TUN permit and sets Blocked.
+/// That is expected until the reload deadline; it is not an external failure.
+pub fn owned_direct_reload_in_flight(
+    reload_until: Option<(u64, std::time::Instant)>,
+    connect_generation: u64,
+    now: std::time::Instant,
+) -> bool {
+    reload_until.is_some_and(|(generation, until)| generation == connect_generation && now < until)
+}
+
+pub fn kill_switch_unhealthy_for_monitor(
+    status: Option<&KillSwitchStatus>,
+    owned_direct_reload: bool,
+) -> bool {
+    if owned_direct_reload
+        && let Some(status) = status
+        && status.wanted
+        && status.live
+        && status.mode == KillSwitchStatusMode::Blocked
+    {
+        return false;
+    }
+    kill_switch_unhealthy(status)
 }
 
 /// Stable Service markers that ride in `last_error` on an operation that SUCCEEDED. They are

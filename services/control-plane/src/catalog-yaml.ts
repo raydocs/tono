@@ -2,6 +2,17 @@ import { ApiError } from './errors';
 
 export const CLIENT_UUID_PLACEHOLDER = '{{TONO_CLIENT_UUID}}';
 
+/** Same-node backup block. Middle is space + interpunct + space. Folded onto the VLESS base name. */
+export const HY2_NAME_SUFFIX = ' · hy2';
+
+export function catalogBaseName(name: string): string {
+  return name.endsWith(HY2_NAME_SUFFIX) ? name.slice(0, -HY2_NAME_SUFFIX.length) : name;
+}
+
+export function catalogHy2Name(base: string): string {
+  return `${catalogBaseName(base)}${HY2_NAME_SUFFIX}`;
+}
+
 type RetireChanges = {
   catalogEntryRemoved: boolean;
   proxyGroupReferencesRemoved: string[];
@@ -46,7 +57,7 @@ export function managedCatalogYAML(value: unknown): string {
     throw new ApiError(
       400,
       'INVALID_CATALOG',
-      `Every catalog proxy must have exactly one uuid set to ${CLIENT_UUID_PLACEHOLDER}`,
+      `Every catalog proxy must carry exactly one ${CLIENT_UUID_PLACEHOLDER} identity (uuid for vless, password for hysteria2)`,
     );
   }
   return yaml;
@@ -149,23 +160,70 @@ export function splitManagedCatalogProxies(yaml: string): {
   };
 }
 
-/** A proxy block has exactly one UUID key and it carries the account placeholder. */
-export function catalogProxyUsesManagedIdentity(block: string): boolean {
-  const uuidKeys = [
-    ...block.matchAll(/^\s*(?:-\s*)?uuid\s*:/gm),
-    ...block.matchAll(/[{,]\s*uuid\s*:/g),
-  ];
-  if (uuidKeys.length !== 1) return false;
+function catalogProxyType(block: string): string {
+  for (const line of block.split(/\r?\n/)) {
+    const flow = line.match(/[{,]\s*type\s*:\s*(?:"([^"]+)"|'([^']+)'|([^\s,}]+))/);
+    if (flow) return (flow[1] ?? flow[2] ?? flow[3] ?? '').trim();
+    const match = line.match(/^\s*(?:-\s+)?type:\s*(?:"([^"]+)"|'([^']+)'|([^\s#]+))/);
+    if (match) return (match[1] ?? match[2] ?? match[3] ?? '').trim();
+  }
+  return 'vless';
+}
 
+function catalogFieldKeys(block: string, field: 'uuid' | 'password'): number {
+  return [
+    ...block.matchAll(new RegExp(String.raw`^\s*(?:-\s*)?${field}\s*:`, 'gm')),
+    ...block.matchAll(new RegExp(String.raw`[{,]\s*${field}\s*:`, 'g')),
+  ].length;
+}
+
+function catalogFieldIsPlaceholder(block: string, field: 'uuid' | 'password'): boolean {
+  if (catalogFieldKeys(block, field) !== 1) return false;
   const placeholder = String.raw`(?:["']\{\{TONO_CLIENT_UUID\}\}["']|\{\{TONO_CLIENT_UUID\}\})`;
   const blockValue = new RegExp(
-    String.raw`^\s*(?:-\s*)?uuid\s*:\s*${placeholder}\s*(?:#.*)?$`,
+    String.raw`^\s*(?:-\s*)?${field}\s*:\s*${placeholder}\s*(?:#.*)?$`,
     'm',
   );
   const flowValue = new RegExp(
-    String.raw`[{,]\s*uuid\s*:\s*${placeholder}\s*(?=[,}])`,
+    String.raw`[{,]\s*${field}\s*:\s*${placeholder}\s*(?=[,}])`,
   );
   return blockValue.test(block) || flowValue.test(block);
+}
+
+function catalogHasFingerprint(block: string): boolean {
+  const line = block.match(/^\s*(?:-\s*)?fingerprint\s*:\s*(.+?)\s*(?:#.*)?$/m);
+  const flow = block.match(/[{,]\s*fingerprint\s*:\s*([^,}]+)/);
+  const raw = (line?.[1] ?? flow?.[1] ?? '').trim().replace(/^["']|["']$/g, '');
+  return raw.length > 0 && !raw.includes('TONO_CLIENT_UUID');
+}
+
+function catalogSkipsCertVerify(block: string): boolean {
+  const match = block.match(
+    /skip-cert-verify\s*:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s,#}]+))/,
+  );
+  if (!match) return false;
+  const raw = (match[1] ?? match[2] ?? match[3] ?? '').trim().toLowerCase();
+  return raw !== 'false' && raw !== 'no' && raw !== 'off' && raw !== 'n';
+}
+
+/**
+ * A proxy block has exactly one managed identity placeholder.
+ * VLESS: `uuid: {{TONO_CLIENT_UUID}}`. Hysteria2: `password: {{TONO_CLIENT_UUID}}`,
+ * a certificate fingerprint, no `skip-cert-verify: true`, and a ` · hy2` name.
+ */
+export function catalogProxyUsesManagedIdentity(block: string): boolean {
+  const type = catalogProxyType(block);
+  const name = catalogProxyName(block);
+  if (type === 'hysteria2') {
+    if (!name || !name.endsWith(HY2_NAME_SUFFIX) || catalogBaseName(name).length === 0) return false;
+    if (catalogFieldKeys(block, 'uuid') !== 0) return false;
+    return catalogFieldIsPlaceholder(block, 'password')
+      && catalogHasFingerprint(block)
+      && !catalogSkipsCertVerify(block);
+  }
+  if (type !== 'vless') return false;
+  if (name?.endsWith(HY2_NAME_SUFFIX)) return false;
+  return catalogFieldIsPlaceholder(block, 'uuid');
 }
 
 /**
@@ -193,6 +251,62 @@ export function filterCatalogYamlForUser(
   return joined.endsWith('\n') ? joined : `${joined}\n`;
 }
 
+/**
+ * Same-node hy2 is opt-in. Old clients cannot admit `type: hysteria2`; serving
+ * those blocks to everyone would fail closed. Keep them only for the gray list.
+ * Never YAML-parse: the identity placeholder is legal flow-mapping syntax.
+ */
+export function filterHy2CatalogForViewer(yaml: string, keepHy2: boolean): string {
+  if (keepHy2 || !yaml.includes(HY2_NAME_SUFFIX)) return yaml;
+  const { prefix, items, suffix } = splitManagedCatalogProxies(yaml);
+  const dropped = items.filter((item) => item.name.endsWith(HY2_NAME_SUFFIX));
+  if (dropped.length === 0) return yaml;
+  const kept = items.filter((item) => !item.name.endsWith(HY2_NAME_SUFFIX));
+  if (kept.length === 0) {
+    const empty = 'proxies: []\n';
+    return suffix.trim() ? `${empty}${suffix.startsWith('\n') ? suffix.slice(1) : suffix}` : empty;
+  }
+  const body = kept.map((item) => item.block.replace(/\s+$/, '')).join('\n') + '\n';
+  let next = `${prefix}${body}${suffix}`;
+  if (!next.endsWith('\n')) next += '\n';
+  const names = dropped.map((item) => item.name);
+  const memberLine = catalogProxyMemberLine(names);
+  let inLists = false;
+  const keptLines: string[] = [];
+  for (const line of next.split('\n')) {
+    if (/^(?:proxy-groups|rules)\s*:/.test(line)) {
+      inLists = true;
+      keptLines.push(line);
+      continue;
+    }
+    if (inLists && line.trim() && !/^\s/.test(line) && !line.trimStart().startsWith('#')) {
+      inLists = false;
+    }
+    if (inLists && memberLine.test(line)) continue;
+    keptLines.push(line);
+  }
+  next = keptLines.join('\n');
+  if (yaml.endsWith('\n') && !next.endsWith('\n')) next += '\n';
+  return next;
+}
+
+export function hy2CatalogEmailAllowlist(raw: string | undefined): Set<string> {
+  return new Set(
+    (raw ?? '')
+      .split(',')
+      .map((entry) => entry.trim().toLowerCase())
+      .filter((entry) => entry.includes('@')),
+  );
+}
+
+/** New clients send `X-Tono-Accept: hy2`. Old clients omit it and still get hy2 stripped. */
+export function requestAcceptsHy2Catalog(header: string | null | undefined): boolean {
+  if (!header) return false;
+  return header
+    .split(',')
+    .some((part) => part.trim().toLowerCase() === 'hy2');
+}
+
 function placeholderCount(yaml: string): number {
   return yaml.split(CLIENT_UUID_PLACEHOLDER).length - 1;
 }
@@ -201,12 +315,109 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function catalogProxyMemberLine(names: string[]): RegExp {
+  const aliasPattern = names.map(escapeRegExp).join('|');
+  return new RegExp(
+    `^([ \\t]+)-[ \\t]+(?:${aliasPattern}|["'](?:${aliasPattern})["'])[ \\t]*(?:#.*)?$`,
+  );
+}
+
 function catalogGroupName(line: string): string | null {
   const match = line.match(
     /^\s*(?:-\s+)?name:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s#"'][^#]*?))\s*(?:#.*)?$/,
   );
   if (!match) return null;
   return (match[1] ?? match[2] ?? match[3] ?? '').trim() || null;
+}
+
+/**
+ * Find the bounds of the first single-line YAML flow sequence `[...]` in
+ * `value`, respecting nested `[...]`/`{...}` and quoted strings. Returns
+ * `null` when `value` has no complete flow array on a single line.
+ */
+function findFlowArrayBounds(value: string): { start: number; end: number } | null {
+  const start = value.indexOf('[');
+  if (start < 0) return null;
+  let depth = 0;
+  let inStr: '"' | "'" | null = null;
+  for (let i = start; i < value.length; i++) {
+    const ch = value[i];
+    if (inStr) {
+      if (ch === '\\') { i++; continue; }
+      if (ch === inStr) inStr = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { inStr = ch; continue; }
+    if (ch === '[' || ch === '{') depth++;
+    else if (ch === ']' || ch === '}') {
+      depth--;
+      if (depth === 0 && ch === ']') return { start, end: i };
+    }
+  }
+  return null;
+}
+
+/**
+ * Parse a single-line YAML flow sequence `[A, B, C]` into its raw member
+ * tokens (each token keeps its original quoting) plus the index of the
+ * closing `]`. Returns `null` when `value` has no complete single-line flow
+ * array, so callers can fall back to block-style handling.
+ */
+function parseFlowArrayMembers(value: string): { tokens: string[]; end: number } | null {
+  const bounds = findFlowArrayBounds(value);
+  if (!bounds) return null;
+  const inner = value.slice(bounds.start + 1, bounds.end);
+  const tokens: string[] = [];
+  let depth = 0;
+  let inStr: '"' | "'" | null = null;
+  let tokenStart = 0;
+  for (let i = 0; i <= inner.length; i++) {
+    const ch = i < inner.length ? inner[i] : ',';
+    if (inStr) {
+      if (ch === '\\') { i++; continue; }
+      if (ch === inStr) inStr = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { inStr = ch; continue; }
+    if (ch === '[' || ch === '{') depth++;
+    else if (ch === ']' || ch === '}') depth--;
+    else if (ch === ',' && depth === 0) {
+      const token = inner.slice(tokenStart, i).trim();
+      if (token !== '') tokens.push(token);
+      tokenStart = i + 1;
+    }
+  }
+  return { tokens, end: bounds.end };
+}
+
+/** Unquote a single flow scalar (`"a"`/`'a'` -> `a`) for member comparison. */
+function unquoteFlowScalar(token: string): string {
+  if (
+    token.length >= 2 &&
+    ((token[0] === '"' && token[token.length - 1] === '"') ||
+      (token[0] === "'" && token[token.length - 1] === "'"))
+  ) {
+    return token.slice(1, -1).replace(/\\(["'\\])/g, '$1');
+  }
+  return token;
+}
+
+/**
+ * If `line` is a `proxies:` key under `proxy-groups:` carrying a single-line
+ * flow array that lists `name` as a member, return the line with that member
+ * removed (preserving the surviving members' original quoting). Otherwise
+ * return `null` so the caller keeps the line unchanged.
+ */
+function removeNameFromFlowArrayMemberLine(line: string, name: string): string | null {
+  const keyMatch = line.match(/^(\s*proxies\s*:\s*)(.*)$/);
+  if (!keyMatch) return null;
+  const head = keyMatch[1];
+  const rest = keyMatch[2];
+  const flow = parseFlowArrayMembers(rest);
+  if (!flow) return null;
+  const survivors = flow.tokens.filter((token) => unquoteFlowScalar(token) !== name);
+  if (survivors.length === flow.tokens.length) return null;
+  return `${head}[${survivors.join(', ')}]${rest.slice(flow.end + 1)}`;
 }
 
 function emptyProxyGroupNames(yaml: string): string[] {
@@ -238,8 +449,18 @@ function emptyProxyGroupNames(yaml: string): string[] {
       continue;
     }
     if (/^\s+proxies\s*:/.test(line)) {
-      awaitingMembers = true;
-      members = 0;
+      const flow = parseFlowArrayMembers(line.slice(line.indexOf(':') + 1));
+      if (flow) {
+        // Flow-style inline array (`proxies: [A, B]`): members live entirely on
+        // this same line, so decide emptiness now instead of awaiting
+        // subsequent block-style `  - ` member lines.
+        finish();
+        if (flow.tokens.length === 0 && group) empty.push(group);
+      } else {
+        // Empty value or block-style list: count following `  - ` member lines.
+        awaitingMembers = true;
+        members = 0;
+      }
       continue;
     }
     if (awaitingMembers) {
@@ -281,16 +502,30 @@ export function retirementCatalogPlan(yaml: string, name: string): {
       safe: false,
     };
   }
-  const matches = items.filter((item) => item.name === name);
-  if (matches.length > 1) {
+  const seenNames = new Set<string>();
+  for (const item of items) {
+    if (seenNames.has(item.name)) {
+      return {
+        yaml,
+        changes: { catalogEntryRemoved: false, proxyGroupReferencesRemoved: [], profileMarkedRetired: false },
+        warnings: ['目录中存在多个同名节点，拒绝自动退役。'],
+        safe: false,
+      };
+    }
+    seenNames.add(item.name);
+  }
+  const base = catalogBaseName(name);
+  const aliases = new Set([base, catalogHy2Name(base)]);
+  const matches = items.filter((item) => aliases.has(item.name));
+  if (matches.length === 0) {
     return {
       yaml,
       changes: { catalogEntryRemoved: false, proxyGroupReferencesRemoved: [], profileMarkedRetired: false },
-      warnings: ['目录中存在多个同名节点，拒绝自动退役。'],
+      warnings: [],
       safe: false,
     };
   }
-  if (matches.length === 1 && items.length <= 1) {
+  if (items.length - matches.length < 1) {
     return {
       yaml,
       changes: { catalogEntryRemoved: true, proxyGroupReferencesRemoved: [], profileMarkedRetired: false },
@@ -299,16 +534,17 @@ export function retirementCatalogPlan(yaml: string, name: string): {
     };
   }
 
-  const placeholdersRemoved = matches.length === 1 ? placeholderCount(matches[0].block) : 0;
+  const placeholdersRemoved = matches.reduce((sum, item) => sum + placeholderCount(item.block), 0);
   let next = yaml;
-  if (matches.length === 1) {
-    const kept = items.filter((item) => item.name !== name);
+  if (matches.length > 0) {
+    const kept = items.filter((item) => !aliases.has(item.name));
     const body = kept.map((item) => item.block.replace(/\s+$/, '')).join('\n') + '\n';
     next = `${prefix}${body}${suffix}`;
     if (!next.endsWith('\n')) next += '\n';
   }
 
-  const memberLine = new RegExp(`^([ \\t]+)-[ \\t]+${escapeRegExp(name)}[ \\t]*(?:#.*)?$`);
+  const memberLine = catalogProxyMemberLine([...aliases]);
+  const aliasPattern = [...aliases].map(escapeRegExp).join('|');
   const groupsChanged: string[] = [];
   let inGroups = false;
   let currentGroup: string | null = null;
@@ -330,13 +566,20 @@ export function retirementCatalogPlan(yaml: string, name: string): {
         if (!groupsChanged.includes(groupName)) groupsChanged.push(groupName);
         continue;
       }
+      const rewritten = removeNameFromFlowArrayMemberLine(line, name);
+      if (rewritten !== null) {
+        const groupName = currentGroup ?? '未命名';
+        if (!groupsChanged.includes(groupName)) groupsChanged.push(groupName);
+        keptLines.push(rewritten);
+        continue;
+      }
     }
     keptLines.push(line);
   }
   next = keptLines.join('\n');
   if (yaml.endsWith('\n') && !next.endsWith('\n')) next += '\n';
 
-  const ruleTarget = new RegExp(`,\\s*${escapeRegExp(name)}\\s*(?:,\\s*no-resolve)?\\s*$`, 'i');
+  const ruleTarget = new RegExp(`,\\s*(?:${aliasPattern})\\s*(?:,\\s*no-resolve)?\\s*$`, 'i');
   let inRules = false;
   for (const line of next.split('\n')) {
     if (/^rules\s*:/.test(line)) {
@@ -369,7 +612,7 @@ export function retirementCatalogPlan(yaml: string, name: string): {
     || warning.includes('占位符')
     || warning.startsWith('退役会清空')
   ));
-  const safe = matches.length === 1 && !blocked;
+  const safe = matches.length >= 1 && !blocked;
   if (safe) {
     try {
       next = managedCatalogYAML(next);
@@ -387,7 +630,7 @@ export function retirementCatalogPlan(yaml: string, name: string): {
   return {
     yaml: safe ? next : yaml,
     changes: {
-      catalogEntryRemoved: matches.length === 1,
+      catalogEntryRemoved: matches.length > 0,
       proxyGroupReferencesRemoved: groupsChanged,
       profileMarkedRetired: false,
     },

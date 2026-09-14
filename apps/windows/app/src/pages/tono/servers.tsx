@@ -8,8 +8,11 @@ import { useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
 import {
   formatTonoActionError,
+  idleSelectShouldConnect,
+  isSupersededConnectRejection,
   tonoCancelServerTests,
   tonoCatalogStatus,
+  tonoConnect,
   tonoRefreshCatalog,
   tonoSelectServer,
   tonoServers,
@@ -34,11 +37,15 @@ import {
   readNodeLatency,
 } from './node-latency'
 import {
+  nodeCityLabel,
   nodeCityParts,
-  nodeCityTitleKey,
   nodeCode,
   nodeDisplayName,
-  nodeProtocol,
+  nodeListGroupKey,
+  nodeProtocolKey,
+  hy2UdpIsVendorBlocked,
+  UDP_BACKUP_GROUP,
+  isHy2CatalogName,
 } from './node-meta'
 
 const catalogStatusQueryKey = ['tono', 'catalog-status'] as const
@@ -108,26 +115,50 @@ const ServersPage = () => {
 
   const handleSelect = useLockFn(
     async (name: string, selected: boolean, available: boolean) => {
-      if (selected) return
       if (!available) {
         setSelectError(t('tono.nodes.unavailableHint'))
+        return
+      }
+      // Same-city reselect is a no-op while a tunnel is up. After a released
+      // handshake eof the card is still selected and says Connecting; a tap
+      // must Connect, matching macOS selectNode. Otherwise Choose another
+      // route lands here and the failed city looks dead.
+      if (selected) {
+        if (!idleSelectShouldConnect(status?.uiState)) return
+        setSelectError(null)
+        setSwitchingName(name)
+        try {
+          await tonoConnect()
+          await mutateTonoStatus()
+        } catch (error) {
+          if (!isSupersededConnectRejection(error)) {
+            setSelectError(formatTonoActionError(error, t))
+          }
+        } finally {
+          setSwitchingName(null)
+        }
         return
       }
       setSelectError(null)
       setSwitchingName(name)
       try {
         await tonoSelectServer(name)
+        // First-connect handshake eof fully releases protection, so select
+        // is UpdateOnly. The card already says Connecting; actually connect.
+        if (idleSelectShouldConnect(status?.uiState)) await tonoConnect()
         await Promise.all([mutateServers(), mutateTonoStatus()])
+        // Select acknowledges dispatch; a hot/cold switch may still be running.
         // Announce the localized city the card shows, not the raw wire name —
         // otherwise the toast says "Tokyo · Dawn" over a card labelled 东京.
-        const cityKey = nodeCityTitleKey(name)
         showToast(
-          t('tono.nodes.switchedTo', {
-            name: cityKey ? t(cityKey) : nodeDisplayName(name),
+          t('tono.nodes.switchRequested', {
+            name: nodeCityLabel(name, t),
           }),
         )
       } catch (error) {
-        setSelectError(formatTonoActionError(error, t))
+        if (!isSupersededConnectRejection(error)) {
+          setSelectError(formatTonoActionError(error, t))
+        }
       } finally {
         setSwitchingName(null)
       }
@@ -212,22 +243,34 @@ const ServersPage = () => {
         display.toLowerCase().includes(query) ||
         server.name.toLowerCase().includes(query) ||
         parts.city.toLowerCase().includes(query) ||
-        (parts.codename?.toLowerCase().includes(query) ?? false)
+        (parts.codename?.toLowerCase().includes(query) ?? false) ||
+        t(nodeProtocolKey(server.name)).toLowerCase().includes(query)
       const matchesRegion =
-        !regionFilter || nodeCode(server.name) === regionFilter
+        !regionFilter || nodeListGroupKey(server.name) === regionFilter
+      if (hy2UdpIsVendorBlocked(server.name)) return false
       return matchesQuery && matchesRegion
     })
-  }, [query, regionFilter, servers])
+  }, [query, regionFilter, servers, t])
   const regionOptions = useMemo(() => {
-    return Array.from(
-      new Set((servers ?? []).map((server) => nodeCode(server.name))),
-    ).sort()
+    const codes = new Set<string>()
+    let hasUdp = false
+    for (const server of servers ?? []) {
+      if (hy2UdpIsVendorBlocked(server.name)) continue
+      if (isHy2CatalogName(server.name)) {
+        hasUdp = true
+        continue
+      }
+      codes.add(nodeCode(server.name))
+    }
+    const sorted = Array.from(codes).sort()
+    return hasUdp ? [UDP_BACKUP_GROUP, ...sorted] : sorted
   }, [servers])
   // zh already has 美国 / 日本 for these, but the chips and group headers
   // rendered the raw ISO code, so a Chinese customer read "US" and "JP" while
   // the translations sat unused. An unknown code falls back to itself.
   const regionLabel = useCallback(
     (code: string) => {
+      if (code === UDP_BACKUP_GROUP) return t('tono.nodes.regions.udpBackup')
       const key = `tono.nodes.regions.${code.toLowerCase()}`
       const translated = t(key)
       return translated === key ? code : translated
@@ -236,14 +279,25 @@ const ServersPage = () => {
   )
   const serverGroups = useMemo(() => {
     const usable = visibleServers.filter((server) => server.available !== false)
+    const udp = usable.filter((server) => isHy2CatalogName(server.name))
+    const tcp = usable.filter((server) => !isHy2CatalogName(server.name))
     const codes = Array.from(
-      new Set(usable.map((server) => nodeCode(server.name))),
+      new Set(tcp.map((server) => nodeCode(server.name))),
     ).sort()
     return [
+      ...(udp.length
+        ? [
+            {
+              key: UDP_BACKUP_GROUP,
+              label: t('tono.nodes.regions.udpBackup'),
+              servers: udp,
+            },
+          ]
+        : []),
       ...codes.map((code) => ({
         key: code,
         label: regionLabel(code),
-        servers: usable.filter((server) => nodeCode(server.name) === code),
+        servers: tcp.filter((server) => nodeCode(server.name) === code),
       })),
       {
         key: 'unavailable',
@@ -363,7 +417,9 @@ const ServersPage = () => {
                   count: catalog?.nodeCount ?? (servers ?? []).length,
                 })}
                 {' · '}
-                {t('tono.nodes.catalogSynced')}
+                {catalog?.lastSyncedAtMs
+                  ? t('tono.nodes.catalogSynced')
+                  : t('tono.nodes.waitingForSync')}
               </div>
               <div
                 style={{
@@ -373,14 +429,16 @@ const ServersPage = () => {
                   lineHeight: 1.45,
                 }}
               >
-                {catalog?.lastSyncedAtMs
-                  ? t('tono.nodes.lastSynced', {
+                {catalog?.lastSyncedAtMs ? (
+                  <>
+                    {t('tono.nodes.lastSynced', {
                       time: dayjs(catalog.lastSyncedAtMs).format(
                         'YYYY-MM-DD HH:mm',
                       ),
-                    })
-                  : t('tono.nodes.waitingForSync')}
-                {' · '}
+                    })}
+                    {' · '}
+                  </>
+                ) : null}
                 <span style={{ fontFamily: TONO_MONO_STACK }}>
                   v{catalog?.revision ?? '—'}
                 </span>
@@ -719,10 +777,10 @@ const ServersPage = () => {
                         : server.selected
                           ? t('tono.node.activeServer')
                           : t('tono.nodes.readyToConnect')
-                  const cityKey = nodeCityTitleKey(server.name)
-                  const cityTitle = cityKey
-                    ? t(cityKey)
-                    : nodeDisplayName(server.name)
+                  // Same label as the tray / dashboard: hy2 is "Tokyo · Backup
+                  // channel", not a second identical 东京 card. Choose-another-route
+                  // after a handshake eof has to be distinguishable at a glance.
+                  const cityTitle = nodeCityLabel(server.name, t)
                   const latencyText = !available
                     ? t('tono.nodes.unavailable')
                     : endpointFailure === 'timeout'
@@ -742,7 +800,8 @@ const ServersPage = () => {
                   // has the same summary (localNodeAccessibilitySummary).
                   const cardSummary = [
                     cityTitle,
-                    regionLabel(nodeCode(server.name)),
+                    t(nodeProtocolKey(server.name)),
+                    regionLabel(nodeListGroupKey(server.name)),
                     latencyText,
                     cardStatus,
                   ].join(', ')
@@ -988,7 +1047,7 @@ const ServersPage = () => {
                               letterSpacing: 0.2,
                             }}
                           >
-                            {nodeProtocol(server.name)}
+                            {t(nodeProtocolKey(server.name))}
                           </span>
                         </span>
                       </span>

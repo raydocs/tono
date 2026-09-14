@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router'
 
 import { useTonoStatus } from '@/hooks/use-tono'
+import { useManualBackupChannel } from '@/pages/tono/use-backup-channel'
 import { useThemeMode } from '@/services/states'
 import { formatTonoActionError, tonoRetryNow } from '@/services/tono'
 import { TONO_COLORS, tonoText } from '@/tono-ui/theme'
@@ -24,11 +25,24 @@ export const ProtectedOfflineBanner = () => {
   const { status, mutateTonoStatus } = useTonoStatus()
   const { requestRelease, dialog: releaseDialog } =
     useReleaseProtection(mutateTonoStatus)
+  const { available: backupAvailable, selectAndRetry } = useManualBackupChannel(
+    status?.selectedServer,
+    status?.uiState,
+  )
   // Retry used to fail into console.warn only, so pressing 重试 while the
   // Service was unavailable looked like a dead button. TrayPanel already
   // surfaces the same formatted error; this matches it. Restore goes through
   // the shared confirm so a mis-click cannot drop fail-closed protection.
   const [actionError, setActionError] = useState<string | null>(null)
+  const tryBackup = useLockFn(async () => {
+    setActionError(null)
+    try {
+      await selectAndRetry()
+      await mutateTonoStatus()
+    } catch (error) {
+      setActionError(formatTonoActionError(error, t))
+    }
+  })
   const retry = useLockFn(async () => {
     setActionError(null)
     try {
@@ -118,6 +132,21 @@ export const ProtectedOfflineBanner = () => {
               )}
             </span>
             <span style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {backupAvailable && (
+                <button
+                  type="button"
+                  className="tono-button"
+                  data-testid="tono-banner-try-backup"
+                  onClick={() => void tryBackup()}
+                  style={{
+                    ...button,
+                    color: '#fff',
+                    background: TONO_COLORS.accent,
+                  }}
+                >
+                  {t('tono.progress.tryBackupChannel')}
+                </button>
+              )}
               <button
                 type="button"
                 className="tono-button"

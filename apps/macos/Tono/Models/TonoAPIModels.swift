@@ -278,15 +278,20 @@ nonisolated struct TonoAppRoutingResearchResponse: Codable, Sendable {
     let receivedAt: Int
 }
 
-/// Receipt for one uploaded audit-log segment. The server answers a replay with
-/// the identifier of the segment already stored, so the client advances its
-/// cursor on both 200 and 201 and never needs to tell the two apart.
+/// HTTP 200 can acknowledge a stored replay OR decline storage. Only the former
+/// may advance the uploader's cursor. Older stored receipts omit `stored`.
 nonisolated struct TonoDiagnosticsLogSegmentResponse: Codable, Sendable {
     nonisolated struct Segment: Codable, Sendable {
         let id: String
         let receivedAt: Int
     }
     let segment: Segment
+    let stored: Bool?
+
+    var wasStored: Bool {
+        stored != false && !segment.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && segment.id != "not-stored"
+    }
 }
 
 /// Periodic ops heartbeat. Same wire shape as Windows `telemetry/windows`.
@@ -312,6 +317,10 @@ nonisolated struct TonoTelemetryWindowReport: Encodable, Sendable {
     var tcpDelayAtMs: Int64? = nil
     /// Named rather than guessed from `osVersion` on the Worker: the guess is for clients that predate the field.
     var platform: String? = "macos"
+    /// Bytes attributed to each route over this window — a delta since the
+    /// window that was last accepted, not a lifetime total.
+    var bytesByRoute: TonoBytesByRoute? = nil
+    var routeBytesInterval: TonoRouteBytesInterval? = nil
     let eventCount: Int
     let eventsDropped: Int
     let events: [TonoTelemetryEvent]
@@ -321,6 +330,7 @@ nonisolated struct TonoTelemetryWindowReport: Encodable, Sendable {
         case osArch, uiState, accountState, selectedServer, catalogRevision
         case killSwitchMode, killSwitchWanted, killSwitchLive, dnsEnabled
         case exitDelayMs, tcpDelayMs, exitDelayAtMs, tcpDelayAtMs, platform
+        case bytesByRoute, routeBytesInterval
         case eventCount, eventsDropped, events
     }
 
@@ -346,6 +356,8 @@ nonisolated struct TonoTelemetryWindowReport: Encodable, Sendable {
         if let exitDelayAtMs { try container.encode(exitDelayAtMs, forKey: .exitDelayAtMs) }
         if let tcpDelayAtMs { try container.encode(tcpDelayAtMs, forKey: .tcpDelayAtMs) }
         if let platform { try container.encode(platform, forKey: .platform) }
+        if let bytesByRoute { try container.encode(bytesByRoute, forKey: .bytesByRoute) }
+        if let routeBytesInterval { try container.encode(routeBytesInterval, forKey: .routeBytesInterval) }
         try container.encode(eventCount, forKey: .eventCount)
         try container.encode(eventsDropped, forKey: .eventsDropped)
         try container.encode(events, forKey: .events)
@@ -381,19 +393,25 @@ nonisolated struct TonoTelemetryEvent: Encodable, Sendable {
     var endpoints: Int64? = nil
     var eventCount: Int64? = nil
     var bytes: Int64? = nil
+    /// Session totals in each direction at the moment a connection closed.
+    /// Separate from `bytes`, which counts one thing on other event kinds.
+    var bytesUp: Int64? = nil
+    var bytesDown: Int64? = nil
     var wanted: Bool? = nil
     var live: Bool? = nil
     var generation: Int64? = nil
     var outcome: String? = nil
     var code: String? = nil
     var updateResume: Bool? = nil
+    var transport: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case ts, kind, stage, error, node, action, reason, probe, from, to, mode
         case reference, elapsedMs, delayMs, counter, restartCount, oldPid, newPid
         case revision, domains, media, webDomains, wechatTcp, webTcp, udp
-        case endpoints, eventCount, bytes, wanted, live, generation, outcome
-        case code, updateResume
+        case endpoints, eventCount, bytes, bytesUp, bytesDown
+        case wanted, live, generation, outcome
+        case code, updateResume, transport
     }
 
     func encode(to encoder: Encoder) throws {
@@ -426,12 +444,15 @@ nonisolated struct TonoTelemetryEvent: Encodable, Sendable {
         try container.encodeIfPresent(endpoints, forKey: .endpoints)
         try container.encodeIfPresent(eventCount, forKey: .eventCount)
         try container.encodeIfPresent(bytes, forKey: .bytes)
+        try container.encodeIfPresent(bytesUp, forKey: .bytesUp)
+        try container.encodeIfPresent(bytesDown, forKey: .bytesDown)
         try container.encodeIfPresent(wanted, forKey: .wanted)
         try container.encodeIfPresent(live, forKey: .live)
         try container.encodeIfPresent(generation, forKey: .generation)
         try container.encodeIfPresent(outcome, forKey: .outcome)
         try container.encodeIfPresent(code, forKey: .code)
         try container.encodeIfPresent(updateResume, forKey: .updateResume)
+        try container.encodeIfPresent(transport, forKey: .transport)
     }
 }
 
@@ -456,6 +477,7 @@ nonisolated struct TonoConnectFailureReport: Encodable, Sendable {
     var coreErrors: [String]? = nil
     var tcpDelayMs: Int64? = nil
     var exitDelayMs: Int64? = nil
+    var transport: String? = nil
 }
 
 nonisolated struct TonoConnectFailureReceipt: Decodable, Sendable {
@@ -472,6 +494,7 @@ nonisolated struct TonoPathLatency: Sendable {
 nonisolated struct TonoTelemetryWindowReceipt: Decodable, Sendable {
     let id: String
     let receivedAt: Int?
+    let routeBytesIntervalVersion: Int?
 }
 
 nonisolated enum TonoDeviceActionName: String, Codable, Sendable {

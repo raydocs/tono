@@ -37,6 +37,7 @@ import {
   optText,
   text,
   textList,
+  violation,
 } from './checkers';
 
 /**
@@ -119,6 +120,9 @@ export interface NodeFactsDto {
   updatedAt: number;
   /** Typed-in ceiling; absent means the 容量 line stays unknown. */
   capacityUsers?: number;
+  /** Present when the catalog carries a same-node Hysteria2 block. */
+  transports?: Array<'tcp' | 'hy2'>;
+  hy2?: { port: number | null; udpOk: boolean | null };
 }
 
 export interface NodeOccupantDto {
@@ -268,11 +272,12 @@ const FACTS_KEYS = [
   'publicIp', 'os', 'region', 'provider', 'providerAccountId', 'lineTags', 'port',
   'price', 'currency', 'billingCycle', 'renewsAt', 'expiresAt', 'notes', 'createdAt', 'updatedAt',
   'capacityUsers',
+  'transports', 'hy2',
 ];
 
 export function assertNodeFacts(value: unknown, path = 'facts'): NodeFactsDto {
   const row = fields(value, path, FACTS_KEYS);
-  return {
+  const facts: NodeFactsDto = {
     publicIp: optText(row, path, 'publicIp'),
     os: optText(row, path, 'os'),
     region: optText(row, path, 'region'),
@@ -292,6 +297,25 @@ export function assertNodeFacts(value: unknown, path = 'facts'): NodeFactsDto {
       ? {}
       : { capacityUsers: optInt(row, path, 'capacityUsers') as number }),
   };
+  if (row.transports !== undefined) {
+    if (!Array.isArray(row.transports)) violation(`${path}.transports`);
+    facts.transports = (row.transports as unknown[]).map((entry, index) => {
+      if (entry !== 'tcp' && entry !== 'hy2') violation(`${path}.transports[${index}]`);
+      return entry;
+    });
+  }
+  if (row.hy2 !== undefined) {
+    if (row.hy2 === null) {
+      facts.hy2 = { port: null, udpOk: null };
+    } else {
+      const hy2 = fields(row.hy2, `${path}.hy2`, ['port', 'udpOk']);
+      facts.hy2 = {
+        port: optInt(hy2, `${path}.hy2`, 'port'),
+        udpOk: optBool(hy2, `${path}.hy2`, 'udpOk'),
+      };
+    }
+  }
+  return facts;
 }
 
 const OCCUPANT_KEYS = ['userId', 'email', 'deviceId', 'platform', 'appVersion', 'online', 'lastSeenAt'];

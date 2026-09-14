@@ -131,6 +131,7 @@ function Row({ row, who }: { row: ConnectionEventDto; who?: (userId: string) => 
       <span className={cn('tone-fg text-body', `tone-${eventTone(row.kind)}`)}>{eventWord(row.kind)}</span>
       <span className="truncate text-body" title={subject ?? undefined}>
         {subject ?? copy.missing}
+        {row.transport === 'hy2' ? ` · ${copy.transportWord.hy2}` : ''}
       </span>
       <span className="text-body text-[var(--muted-foreground)]">
         {stageWord(row.stage) ?? copy.missing}

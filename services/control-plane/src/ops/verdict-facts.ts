@@ -3,7 +3,7 @@
 
 import { decryptCatalog } from '../crypto';
 import { type Env, type Row, requiredCatalogKey } from '../env';
-import { splitManagedCatalogProxies } from '../catalog-yaml';
+import { catalogBaseName, splitManagedCatalogProxies } from '../catalog-yaml';
 import { loadPriorNodeStates } from './evaluate';
 import { loadOperationsLive } from './live';
 import {
@@ -82,7 +82,7 @@ async function catalogNameSet(e: Env): Promise<CatalogFact> {
     if (!row) return { names: new Set(), available: true, errorClass: null };
     const yaml = await decryptCatalog(String(row.ciphertext), String(row.nonce), requiredCatalogKey(e));
     return {
-      names: new Set(splitManagedCatalogProxies(yaml).items.map((item) => item.name)),
+      names: new Set(splitManagedCatalogProxies(yaml).items.map((item) => catalogBaseName(item.name))),
       available: true,
       errorClass: null,
     };
@@ -438,7 +438,7 @@ export async function buildVerdictInput(
     ...agents.keys(),
     ...(catalog.names ?? []),
     ...profiles.keys(),
-  ]);
+  ].map(catalogBaseName));
   const nodes: NodeVerdictInput[] = [...names].sort().map((name) => {
     const q = quality.get(name);
     const agent = agents.get(name);

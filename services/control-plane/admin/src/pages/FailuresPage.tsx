@@ -6,6 +6,7 @@ import { useOpsRoute } from '../lib/route';
 import { useOpsWorld } from '../ops-context';
 import { usePrivacy } from '../privacy';
 import { DataHealth, FilterChips, GlassCard, Unavailable } from '../ui';
+import { reloadAfterFailuresNodeChange } from './failures-reload';
 import { NodeDrawer } from './monitor/NodeDrawer';
 import { CustomerDrawer } from './users/CustomerDrawer';
 import { PersonRow } from './users/PersonRow';
@@ -237,7 +238,7 @@ export function FailuresPage() {
         metrics={world.metrics.snapshotKey === '24h' && world.metrics.state === 'ready' ? world.metrics.data : null}
         focus={route.focus}
         onClose={closeDrawer}
-        onChanged={() => { world.live.reload(); world.fleet.reload(); }}
+        onChanged={() => reloadAfterFailuresNodeChange(world)}
       />
       <CustomerDrawer
         person={selectedPerson}

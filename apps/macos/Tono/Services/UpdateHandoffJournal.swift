@@ -184,7 +184,17 @@ nonisolated struct UpdateHandoffJournal: Codable, Equatable, Sendable {
     }
 
     func canAdvance(to phase: UpdateHandoffPhase) -> Bool {
-        Self.allowedNext(self.phase, phase)
+        guard Self.allowedNext(self.phase, phase) else { return false }
+        // The shortcut edges belong only to updates with no matching protection
+        // obligation; Protected Offline is not an unprotected update.
+        switch (self.phase, phase) {
+        case (.cleanShutdownCompleted, .installStarted):
+            return !keepKillSwitchArmed
+        case (.firstLaunchMigration, .verified):
+            return !wasConnected && !keepKillSwitchArmed
+        default:
+            return true
+        }
     }
 
     /// True when the last advance was refused rather than recording a real
@@ -199,7 +209,7 @@ nonisolated struct UpdateHandoffJournal: Codable, Equatable, Sendable {
     /// the rest of the handoff and persisted a state the update never reached.
     func advancing(to phase: UpdateHandoffPhase, errorCode: String? = nil, errorStage: String? = nil) -> UpdateHandoffJournal {
         var next = self
-        if Self.allowedNext(self.phase, phase) {
+        if canAdvance(to: phase) {
             next.phase = phase
             next.lastErrorCode = errorCode
             next.lastErrorStage = errorStage
@@ -240,6 +250,47 @@ enum UpdateHandoffStore {
         } catch {
             return nil
         }
+    }
+
+    static func showsIncompleteUpdate(at location: URL? = nil) -> Bool {
+        // Resume eligibility and the presence of unresolved evidence are not
+        // the same question. Reading status must not hide or erase a corrupt,
+        // unsupported or expired journal just because `load` cannot resume it.
+        do {
+            let data = try Data(contentsOf: location ?? fileURL)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let journal = try decoder.decode(UpdateHandoffJournal.self, from: data)
+            if journal.phase == .committed || journal.phase == .idle { return false }
+            return journal.phase == .failed || journal.isExpired
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile {
+            return false
+        } catch {
+            return true
+        }
+    }
+
+    static let incompleteUpdateCopy = String(
+        localized: "The update did not finish. Disconnect, then reinstall Tono."
+    )
+
+    static func writePrepared(_ journal: UpdateHandoffJournal, at url: URL) throws {
+        let previous: Data?
+        do {
+            previous = try Data(contentsOf: url)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile {
+            previous = nil
+        }
+        if let previous {
+            let history = url.deletingPathExtension().appendingPathExtension("history")
+            try FileManager.default.createDirectory(at: history, withIntermediateDirectories: true)
+            let archive = history.appendingPathComponent("\(UUID().uuidString).json")
+            try previous.write(to: archive, options: .atomic)
+            let handle = try FileHandle(forWritingTo: archive)
+            defer { try? handle.close() }
+            try handle.synchronize()
+        }
+        try write(journal, at: url)
     }
 
     static func write(_ journal: UpdateHandoffJournal, at location: URL? = nil) throws {
@@ -293,5 +344,28 @@ enum UpdateHandoffStore {
         try save(journal, url)
         try FileManager.default.removeItem(at: url)
         return true
+    }
+
+    /// New process after a successful install. Only the binary whose version
+    /// is the journal's `nextAppVersion` may enter `firstLaunchMigration`.
+    static func recordFirstLaunchMigration(
+        currentAppVersion: String,
+        at location: URL? = nil
+    ) throws -> UpdateHandoffJournal? {
+        let url = location ?? fileURL
+        guard var journal = load(at: url) else { return nil }
+        if journal.phase == .failed { return journal }
+        if journal.nextAppVersion != currentAppVersion {
+            journal = journal.advancing(
+                to: .failed,
+                errorCode: "TONO_UPDATE_INSTALL_ABORTED",
+                errorStage: "\(journal.phase.rawValue)->firstLaunchMigration"
+            )
+            try write(journal, at: url)
+            return journal
+        }
+        journal = journal.advancing(to: .firstLaunchMigration)
+        try write(journal, at: url)
+        return journal
     }
 }

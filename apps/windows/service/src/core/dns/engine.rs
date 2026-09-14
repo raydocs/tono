@@ -5,7 +5,7 @@ use super::{
 use anyhow::{Context as _, Result, bail};
 use std::ffi::CStr;
 use windows_sys::Win32::Foundation::{
-    ERROR_BUFFER_OVERFLOW, ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_NO_DATA,
+    ERROR_BUFFER_OVERFLOW, ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_NO_DATA, FILETIME,
 };
 use windows_sys::Win32::NetworkManagement::IpHelper::{
     GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_FRIENDLY_NAME,
@@ -13,8 +13,9 @@ use windows_sys::Win32::NetworkManagement::IpHelper::{
 };
 use windows_sys::Win32::Networking::WinSock::AF_UNSPEC;
 use windows_sys::Win32::System::Registry::{
-    HKEY, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY, KEY_WRITE, REG_SZ, RegCloseKey,
-    RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
+    HKEY, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY, KEY_WRITE, REG_DWORD, REG_MULTI_SZ,
+    REG_QWORD, REG_SZ, RegCloseKey, RegCreateKeyExW, RegDeleteKeyW, RegDeleteValueW, RegEnumKeyExW,
+    RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
 };
 
 const TCPIP4_INTERFACES: &str =
@@ -154,6 +155,195 @@ fn delete_value(subkey: &str, value: &str) -> Result<()> {
         return Err(std::io::Error::from_raw_os_error(status as i32))
             .with_context(|| format!("failed to delete registry value {subkey}\\{value}"));
     }
+    Ok(())
+}
+
+fn enum_subkeys(subkey: &str) -> Result<Vec<String>> {
+    let Some(key) = RegKey::open(subkey, false)? else {
+        return Ok(Vec::new());
+    };
+    let mut names = Vec::new();
+    for index in 0_u32..64 {
+        let mut buf = [0_u16; 256];
+        let mut len = buf.len() as u32;
+        // SAFETY: `buf` is the name out-buffer; `len` is its capacity in characters.
+        let status = unsafe {
+            RegEnumKeyExW(
+                key.0,
+                index,
+                buf.as_mut_ptr(),
+                &mut len,
+                std::ptr::null(),
+                std::ptr::null_mut::<u16>(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut::<FILETIME>(),
+            )
+        };
+        if status != 0 {
+            // ERROR_NO_MORE_ITEMS
+            if status == 259 {
+                break;
+            }
+            return Err(std::io::Error::from_raw_os_error(status as i32)).with_context(|| {
+                format!("failed to enumerate registry subkeys of {subkey}")
+            });
+        }
+        names.push(String::from_utf16_lossy(&buf[..len as usize]));
+    }
+    Ok(names)
+}
+
+fn read_flags(subkey: &str, value: &str) -> Result<Option<u64>> {
+    let Some(key) = RegKey::open(subkey, false)? else {
+        return Ok(None);
+    };
+    let value_wide = super_wide(value);
+    let mut data = 0_u64;
+    let mut size = 8_u32;
+    let mut kind = 0_u32;
+    // SAFETY: valid key handle; `data` is an 8-byte out-buffer covering QWORD and DWORD.
+    let status = unsafe {
+        RegQueryValueExW(
+            key.0,
+            value_wide.as_ptr(),
+            std::ptr::null(),
+            &mut kind,
+            std::ptr::from_mut(&mut data).cast(),
+            &mut size,
+        )
+    };
+    if status == ERROR_FILE_NOT_FOUND {
+        return Ok(None);
+    }
+    if status != 0 {
+        return Err(std::io::Error::from_raw_os_error(status as i32))
+            .with_context(|| format!("failed to read registry integer {subkey}\\{value}"));
+    }
+    match kind {
+        REG_QWORD if size >= 8 => Ok(Some(data)),
+        REG_DWORD if size >= 4 => Ok(Some(u64::from(data as u32))),
+        _ => Ok(None),
+    }
+}
+
+fn write_qword(subkey: &str, value: &str, data: u64) -> Result<()> {
+    let Some(key) = RegKey::open(subkey, true)? else {
+        return Ok(());
+    };
+    let value_wide = super_wide(value);
+    let bytes = data.to_le_bytes();
+    // SAFETY: `bytes` is a live 8-byte QWORD buffer.
+    let status = unsafe {
+        RegSetValueExW(
+            key.0,
+            value_wide.as_ptr(),
+            0,
+            REG_QWORD,
+            bytes.as_ptr(),
+            bytes.len() as u32,
+        )
+    };
+    if status != 0 {
+        return Err(std::io::Error::from_raw_os_error(status as i32))
+            .with_context(|| format!("failed to write registry QWORD {subkey}\\{value}"));
+    }
+    Ok(())
+}
+
+fn interface_doh_key(guid: &str, family: &str, server: &str) -> String {
+    format!(r"{INTERFACE_DOH_ROOT}\{guid}\DohInterfaceSettings\{family}\{server}")
+}
+
+fn collect_interface_doh() -> Result<Vec<super::InterfaceDohEntry>> {
+    let mut entries = Vec::new();
+    for guid in enum_subkeys(INTERFACE_DOH_ROOT)? {
+        for family in ["Doh", "Doh6"] {
+            let family_key =
+                format!(r"{INTERFACE_DOH_ROOT}\{guid}\DohInterfaceSettings\{family}");
+            for server in enum_subkeys(&family_key)? {
+                let key = interface_doh_key(&guid, family, &server);
+                let Some(flags) = read_flags(&key, DOH_FLAGS)? else {
+                    continue;
+                };
+                if !super::interface_doh_is_enabled(flags) {
+                    continue;
+                }
+                entries.push(super::InterfaceDohEntry {
+                    guid: guid.clone(),
+                    family: family.to_owned(),
+                    server,
+                    flags,
+                });
+            }
+        }
+    }
+    Ok(entries)
+}
+
+fn write_interface_doh_capture(entries: &[super::InterfaceDohEntry]) -> Result<()> {
+    let path = super::interface_doh_capture_path();
+    if path.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let body = super::format_interface_doh_capture(entries).map_err(|error| anyhow::anyhow!(error))?;
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, body).with_context(|| format!("failed to write {}", tmp.display()))?;
+    std::fs::rename(&tmp, &path)
+        .with_context(|| format!("failed to persist {}", path.display()))?;
+    Ok(())
+}
+
+fn read_interface_doh_capture() -> Result<Option<Vec<super::InterfaceDohEntry>>> {
+    let path = super::interface_doh_capture_path();
+    match std::fs::read_to_string(&path) {
+        Ok(body) => Ok(Some(
+            super::parse_interface_doh_capture(&body).map_err(|error| anyhow::anyhow!(error))?,
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).with_context(|| format!("failed to read {}", path.display())),
+    }
+}
+
+fn delete_interface_doh_capture() -> Result<()> {
+    let path = super::interface_doh_capture_path();
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).with_context(|| format!("failed to delete {}", path.display())),
+    }
+}
+
+fn suppress_interface_doh() -> Result<()> {
+    let current = collect_interface_doh()?;
+    if read_interface_doh_capture()?.is_none() {
+        write_interface_doh_capture(&current)?;
+    }
+    for entry in current {
+        write_qword(
+            &interface_doh_key(&entry.guid, &entry.family, &entry.server),
+            DOH_FLAGS,
+            0,
+        )?;
+    }
+    Ok(())
+}
+
+fn restore_interface_doh() -> Result<()> {
+    let Some(entries) = read_interface_doh_capture()? else {
+        return Ok(());
+    };
+    for entry in entries {
+        write_qword(
+            &interface_doh_key(&entry.guid, &entry.family, &entry.server),
+            DOH_FLAGS,
+            entry.flags,
+        )?;
+    }
+    delete_interface_doh_capture()?;
     Ok(())
 }
 
@@ -883,3 +1073,226 @@ pub(super) fn all_loopback(guids: &[String]) -> Result<bool> {
     }
     Ok(true)
 }
+
+const DNSCACHE_PARAMETERS: &str =
+    r"SYSTEM\CurrentControlSet\Services\Dnscache\Parameters";
+const ENABLE_AUTO_DOH: &str = "EnableAutoDoh";
+/// Settings UI Encrypted DNS lives here, not on `EnableAutoDoh`.
+const INTERFACE_DOH_ROOT: &str =
+    r"SYSTEM\CurrentControlSet\Services\Dnscache\InterfaceSpecificParameters";
+const DOH_FLAGS: &str = "DohFlags";
+/// Catch-all NRPT rule owned by this session. Deleted on restore; never touches
+/// anyone else's DnsPolicyConfig keys.
+const NRPT_ROOT: &str =
+    r"SYSTEM\CurrentControlSet\Services\Dnscache\Parameters\DnsPolicyConfig";
+const NRPT_RULE_GUID: &str = "{8f3c2b91-4a6e-4d17-9c1a-198018000002}";
+/// Generic DNS servers only (`DA_NRPT_CONFIG_DNS`).
+const NRPT_CONFIG_DNS: u32 = 0x8;
+const NRPT_VERSION: u32 = 2;
+
+fn read_dword(subkey: &str, value: &str) -> Result<Option<u32>> {
+    let Some(key) = RegKey::open(subkey, false)? else {
+        return Ok(None);
+    };
+    let value_wide = super_wide(value);
+    let mut data = 0_u32;
+    let mut size = 4_u32;
+    let mut kind = 0_u32;
+    // SAFETY: valid key handle; `data` is a 4-byte DWORD out-buffer.
+    let status = unsafe {
+        RegQueryValueExW(
+            key.0,
+            value_wide.as_ptr(),
+            std::ptr::null(),
+            &mut kind,
+            std::ptr::from_mut(&mut data).cast(),
+            &mut size,
+        )
+    };
+    if status == ERROR_FILE_NOT_FOUND {
+        return Ok(None);
+    }
+    if status != 0 {
+        return Err(std::io::Error::from_raw_os_error(status as i32))
+            .with_context(|| format!("failed to read registry DWORD {subkey}\\{value}"));
+    }
+    Ok(Some(data))
+}
+
+fn write_dword(subkey: &str, value: &str, data: u32) -> Result<()> {
+    let Some(key) = RegKey::open(subkey, true)? else {
+        bail!("registry key {subkey} does not exist");
+    };
+    let value_wide = super_wide(value);
+    let bytes = data.to_le_bytes();
+    // SAFETY: `bytes` is a live 4-byte DWORD buffer.
+    let status = unsafe {
+        RegSetValueExW(
+            key.0,
+            value_wide.as_ptr(),
+            0,
+            REG_DWORD,
+            bytes.as_ptr(),
+            bytes.len() as u32,
+        )
+    };
+    if status != 0 {
+        return Err(std::io::Error::from_raw_os_error(status as i32))
+            .with_context(|| format!("failed to write registry DWORD {subkey}\\{value}"));
+    }
+    Ok(())
+}
+
+fn write_multi_sz(subkey: &str, value: &str, entries: &[&str]) -> Result<()> {
+    let Some(key) = RegKey::open(subkey, true)? else {
+        bail!("registry key {subkey} does not exist");
+    };
+    let value_wide = super_wide(value);
+    let mut wide = Vec::new();
+    for entry in entries {
+        wide.extend(entry.encode_utf16());
+        wide.push(0);
+    }
+    wide.push(0);
+    // SAFETY: `wide` is a double-NUL-terminated MULTI_SZ buffer.
+    let status = unsafe {
+        RegSetValueExW(
+            key.0,
+            value_wide.as_ptr(),
+            0,
+            REG_MULTI_SZ,
+            wide.as_ptr().cast(),
+            (wide.len() * 2) as u32,
+        )
+    };
+    if status != 0 {
+        return Err(std::io::Error::from_raw_os_error(status as i32))
+            .with_context(|| format!("failed to write registry MULTI_SZ {subkey}\\{value}"));
+    }
+    Ok(())
+}
+
+fn create_key(subkey: &str) -> Result<RegKey> {
+    let wide = super_wide(subkey);
+    let mut handle = std::ptr::null_mut();
+    let mut disposition = 0_u32;
+    // SAFETY: NUL-terminated key path; `handle` and `disposition` are valid out-pointers.
+    let status = unsafe {
+        RegCreateKeyExW(
+            HKEY_LOCAL_MACHINE,
+            wide.as_ptr(),
+            0,
+            std::ptr::null(),
+            0,
+            KEY_WOW64_64KEY | KEY_WRITE | KEY_READ,
+            std::ptr::null(),
+            &mut handle,
+            &mut disposition,
+        )
+    };
+    if status != 0 {
+        return Err(std::io::Error::from_raw_os_error(status as i32))
+            .with_context(|| format!("failed to create registry key {subkey}"));
+    }
+    Ok(RegKey(handle))
+}
+
+fn delete_key(subkey: &str) -> Result<()> {
+    let wide = super_wide(subkey);
+    // SAFETY: NUL-terminated key path under HKLM.
+    let status = unsafe { RegDeleteKeyW(HKEY_LOCAL_MACHINE, wide.as_ptr()) };
+    if status != 0 && status != ERROR_FILE_NOT_FOUND {
+        return Err(std::io::Error::from_raw_os_error(status as i32))
+            .with_context(|| format!("failed to delete registry key {subkey}"));
+    }
+    Ok(())
+}
+
+fn write_capture_file(enable_auto_doh: Option<u32>) -> Result<()> {
+    let path = super::encrypted_dns_capture_path();
+    if path.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, super::format_encrypted_dns_capture(enable_auto_doh))
+        .with_context(|| format!("failed to write {}", tmp.display()))?;
+    std::fs::rename(&tmp, &path)
+        .with_context(|| format!("failed to persist {}", path.display()))?;
+    Ok(())
+}
+
+fn read_capture_file() -> Result<Option<Option<u32>>> {
+    let path = super::encrypted_dns_capture_path();
+    match std::fs::read_to_string(&path) {
+        Ok(body) => Ok(Some(
+            super::parse_encrypted_dns_capture(&body).map_err(|error| anyhow::anyhow!(error))?,
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).with_context(|| format!("failed to read {}", path.display())),
+    }
+}
+
+fn delete_capture_file() -> Result<()> {
+    let path = super::encrypted_dns_capture_path();
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).with_context(|| format!("failed to delete {}", path.display())),
+    }
+}
+
+fn nrpt_rule_key() -> String {
+    format!(r"{NRPT_ROOT}\{NRPT_RULE_GUID}")
+}
+
+fn install_nrpt() -> Result<()> {
+    let _root = create_key(NRPT_ROOT)?;
+    drop(_root);
+    let key = nrpt_rule_key();
+    let _rule = create_key(&key)?;
+    drop(_rule);
+    write_multi_sz(&key, "Name", &["."])?;
+    write_dword(&key, "Version", NRPT_VERSION)?;
+    write_dword(&key, "ConfigOptions", NRPT_CONFIG_DNS)?;
+    write_sz(&key, "GenericDNSServers", super::PROTECTED_DNS_V4)?;
+    Ok(())
+}
+
+/// Snapshot Encrypted DNS, turn DoH off, and force the DNS Client through TUN DNS.
+pub(super) fn suppress_encrypted_dns() -> Result<()> {
+    if read_capture_file()?.is_none() {
+        write_capture_file(read_dword(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH)?)?;
+    }
+    write_dword(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH, super::ENABLE_AUTO_DOH_OFF)?;
+    if let Err(error) = suppress_interface_doh() {
+        tracing::warn!("dns: per-adapter Encrypted DNS pin failed: {error:#}");
+    }
+    install_nrpt().context("failed to install the Tono NRPT catch-all")?;
+    Ok(())
+}
+
+/// Put `EnableAutoDoh` back, restore per-adapter DoH flags, and delete our NRPT rule.
+/// Idempotent when no capture exists.
+pub(super) fn restore_encrypted_dns() -> Result<()> {
+    if let Err(error) = delete_key(&nrpt_rule_key()) {
+        tracing::error!("dns: Tono NRPT rule could not be removed: {error:#}");
+        return Err(error);
+    }
+    if let Some(saved) = read_capture_file()? {
+        match saved {
+            Some(value) => write_dword(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH, value)?,
+            None => delete_value(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH)?,
+        }
+    }
+    delete_capture_file()?;
+    if let Err(error) = restore_interface_doh() {
+        tracing::error!("dns: per-adapter Encrypted DNS restore failed: {error:#}");
+        return Err(error);
+    }
+    Ok(())
+}
+

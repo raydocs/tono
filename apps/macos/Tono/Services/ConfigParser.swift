@@ -437,7 +437,13 @@ nonisolated struct ConfigParser {
         node.wsHost = dict["ws-opts.headers.Host"] ?? dict["ws-opts.headers.host"] ?? dict["ws-host"]
         node.grpcServiceName = dict["grpc-opts.grpc-service-name"] ?? dict["grpc-service-name"]
         node.flow = dict["flow"]
-        node.clientFingerprint = dict["client-fingerprint"] ?? dict["fingerprint"]
+        if type == .hysteria2 {
+            // hy2 `fingerprint` is the leaf-cert SHA-256 pin, not uTLS.
+            node.tlsFingerprint = dict["fingerprint"]
+            node.clientFingerprint = dict["client-fingerprint"]
+        } else {
+            node.clientFingerprint = dict["client-fingerprint"] ?? dict["fingerprint"]
+        }
         node.realityPublicKey = dict["reality-opts.public-key"] ?? dict["reality-public-key"]
         node.realityShortId = dict["reality-opts.short-id"] ?? dict["reality-short-id"]
         return node

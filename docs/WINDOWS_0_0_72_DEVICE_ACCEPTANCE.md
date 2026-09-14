@@ -148,3 +148,161 @@ independently checked through the native driver and OS. No real crash injection,
 adapter interruption, reboot, broad packet capture, signing or connected upgrade
 was performed. Apps-view domain search is a separately reproduced defect with
 local regression coverage; its next rebuilt package still needs verification.
+
+## 7. Pending device candidate — Encrypted DNS pin (2026-09-11)
+
+Hosted candidate run: [`34565734039`](https://github.com/raydocs/tono/actions/runs/34565734039).
+Artifact `tono-windows-0.0.72-candidate-7e1938c743fcdebc05a28d63180fef2727c657ac`.
+Source `7e1938c743fcdebc05a28d63180fef2727c657ac` (includes per-adapter `DohFlags` pin `cb609da4`).
+Version **0.0.72**. `candidateOnly: true`. Not Authenticode signed. Not updater signed. Not a customer-channel package.
+
+Installer `Tono_0.0.72_x64-setup.exe` SHA-256:
+
+```text
+0a2d55b1eecddbe9975449f308fd84aa84144aceabee979853c0685fb0ffdfcb
+```
+
+Service `tono-service.exe` SHA-256 `fbc20f5959f7e917677ba7a1e2f11314301401b411b8c53f2acc74731e3e0f70`.
+Core `tono-core-x86_64-pc-windows-msvc.exe` SHA-256 `b636c18e27ff141ffb289b40b583be482680eb69d1cef46283008a479dd913e3`.
+
+**Not installed. Not a G1.1 pass.** Use this package on the Win10 Encrypted DNS machine (securingDNS / 5s fake-ip timeout) and on the Windows 11 G1.1 device. After transfer, re-hash with `Get-FileHash -Algorithm SHA256`. Do not disable SmartScreen. Do not publish.
+
+On the Windows PC, with Tono **disconnected** and GitHub CLI logged in:
+
+```powershell
+$dest = Join-Path $env:TEMP 'tono-candidate-34565734039'
+New-Item -ItemType Directory -Force $dest | Out-Null
+gh run download 34565734039 --repo raydocs/tono -n tono-windows-0.0.72-candidate-7e1938c743fcdebc05a28d63180fef2727c657ac -D $dest
+$setup = Get-ChildItem $dest -Recurse -Filter Tono_0.0.72_x64-setup.exe | Select-Object -First 1
+$hash = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($hash -ne '0a2d55b1eecddbe9975449f308fd84aa84144aceabee979853c0685fb0ffdfcb') {
+  throw "hash mismatch: $hash"
+}
+Start-Process $setup.FullName
+```
+
+Then: launch 0.0.72 → connect → `securingDNS` must pass; dashboard rate and Activity must leave controller retry; disconnect restores DNS. Artifact retention is 7 days.
+
+## 8. Pending device candidate — Encrypted DNS + connecting pill + TUN DNS race (2026-09-11)
+
+Supersedes §7 for G1.1. The §7 package labelled the connecting pill **Cancel**; a click became standby plus "something went wrong" with no Failed stage, so Encrypted DNS was never reached.
+
+Hosted candidate run: [`34574027022`](https://github.com/raydocs/tono/actions/runs/34574027022).
+Artifact `tono-windows-0.0.72-candidate-91060f1ce5b7a349d074ee21075e33ffccfb1efc`.
+Source `91060f1ce5b7a349d074ee21075e33ffccfb1efc`.
+Version **0.0.72**. `candidateOnly: true`. Not Authenticode signed. Not updater signed. Not a customer-channel package.
+
+Installer `Tono_0.0.72_x64-setup.exe` SHA-256 (matches downloaded bytes and `candidate-manifest.json`):
+
+```text
+ae2e699c7b0263772e2d2fc6bde48ac0333dc5f1e256e909e3364c18de3d1e42
+```
+
+Service `tono-service.exe` SHA-256 `85ad6e6b9bd90f53ff1253f1b9091f21997cdd2d21ac69b40ccbb039374f6d3c`.
+Core `tono-core-x86_64-pc-windows-msvc.exe` SHA-256 `5dbe9cbcf2b6ffb9ac4d8c83b4ddd21bf117942de49d6a600105320bbe21126c`.
+
+**Not installed on the Win10 Encrypted DNS machine. Not a G1.1 pass.** This package contains: Encrypted DNS pin (`EnableAutoDoh` + per-adapter `DohFlags` + NRPT), connecting pill titled Connecting… (not Cancel), TUN DNS raced with system DNS. It does **not** prove that this Win10 will reach Connected.
+
+Open without GitHub login:
+
+- Page: https://nightly.link/raydocs/tono/actions/runs/34574027022
+- Zip: https://nightly.link/raydocs/tono/actions/runs/34574027022/tono-windows-0.0.72-candidate-91060f1ce5b7a349d074ee21075e33ffccfb1efc.zip
+
+On the Windows PC, with Tono **disconnected**:
+
+```powershell
+$dest = Join-Path $env:TEMP 'tono-candidate-34574027022'
+New-Item -ItemType Directory -Force $dest | Out-Null
+gh run download 34574027022 --repo raydocs/tono -n tono-windows-0.0.72-candidate-91060f1ce5b7a349d074ee21075e33ffccfb1efc -D $dest
+$setup = Get-ChildItem $dest -Recurse -Filter Tono_0.0.72_x64-setup.exe | Select-Object -First 1
+$hash = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($hash -ne 'ae2e699c7b0263772e2d2fc6bde48ac0333dc5f1e256e909e3364c18de3d1e42') {
+  throw "hash mismatch: $hash"
+}
+Start-Process $setup.FullName
+```
+
+Then: launch 0.0.72 → connect. Pill must stay **Connecting…**, not Cancel. `securingDNS` must pass; dashboard rate and Activity must leave controller retry; disconnect restores DNS. If it fails, copy diagnostics (need Failed stage + Error, not empty). Artifact retention is 7 days.
+
+## 9. Pending device candidate — Backup UDP column (2026-09-11)
+
+Supersedes §8 when the goal is to show testers the Dedirock hy2 rows. §8 still applies if the only question is Encrypted DNS / connecting pill / TUN DNS, but that NSIS has no「备用 UDP」group and does not send `X-Tono-Accept: hy2`.
+
+Hosted candidate run: [`34584323215`](https://github.com/raydocs/tono/actions/runs/34584323215).
+Artifact `tono-windows-0.0.72-candidate-b40ff149e92ab7ef3220135501d73f75f5fa465d`.
+Source `b40ff149e92ab7ef3220135501d73f75f5fa465d`.
+Version **0.0.72**. `candidateOnly: true`. Not Authenticode signed. Not updater signed. Not a customer-channel package.
+
+Installer `Tono_0.0.72_x64-setup.exe` SHA-256 (matches downloaded bytes and `candidate-manifest.json`):
+
+```text
+7bc7aaf9a4046ef7d4f9db3cd7da5f27cd43a26492b27f46661b2295b0b7ca8a
+```
+
+Service `tono-service.exe` SHA-256 `84940c1b749d2d88334b14c2d879d9fcca11cc4f1a0f2f12a7248c41c80506af`.
+Core `tono-core-x86_64-pc-windows-msvc.exe` SHA-256 `1edfe5f8a12097e383b0ae3b89cabbdc09216eb88f00dd9bd6d7cb19d21c1daf`.
+
+**Not installed on the Win10 Encrypted DNS machine. Not a G1.1 pass.** This package contains everything in §8 plus the Backup UDP node group and `X-Tono-Accept: hy2` on catalog GET. Testers still will not see hy2 rows until Worker PR #145 is on `main`, production is deployed from that SHA, and the five Dedirock blocks are `--append`ed.
+
+Open without GitHub login:
+
+- Page: https://nightly.link/raydocs/tono/actions/runs/34584323215
+- Zip: https://nightly.link/raydocs/tono/actions/runs/34584323215/tono-windows-0.0.72-candidate-b40ff149e92ab7ef3220135501d73f75f5fa465d.zip
+
+On the Windows PC, with Tono **disconnected**:
+
+```powershell
+$dest = Join-Path $env:TEMP 'tono-candidate-34584323215'
+New-Item -ItemType Directory -Force $dest | Out-Null
+gh run download 34584323215 --repo raydocs/tono -n tono-windows-0.0.72-candidate-b40ff149e92ab7ef3220135501d73f75f5fa465d -D $dest
+$setup = Get-ChildItem $dest -Recurse -Filter Tono_0.0.72_x64-setup.exe | Select-Object -First 1
+$hash = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($hash -ne '7bc7aaf9a4046ef7d4f9db3cd7da5f27cd43a26492b27f46661b2295b0b7ca8a') {
+  throw "hash mismatch: $hash"
+}
+Start-Process $setup.FullName
+```
+
+Then: launch 0.0.72 → connect. Pill must stay **Connecting…**, not Cancel. `securingDNS` must pass; dashboard rate and Activity must leave controller retry; disconnect restores DNS. After the catalog PUT, refresh servers and look for the top「备用 UDP」group (city · codename · 备用通道). Artifact retention is 7 days.
+
+## 10. Pending device candidate — hy2 UDP allowed (2026-09-11)
+
+Supersedes §9 for hy2 / 备用 UDP. §9 still has `AND,((NETWORK,UDP)),REJECT` on the selected node, so a Dedirock hy2 row can appear and still fail closed. Source `3abe64b6` races loopback DNS with TUN and omits that UDP reject when the selected node is hysteria2.
+
+Hosted candidate run: [`34599676962`](https://github.com/raydocs/tono/actions/runs/34599676962).
+Artifact `tono-windows-0.0.72-candidate-3abe64b658429199bce1a660f4dc55a794a12c79`.
+Source `3abe64b658429199bce1a660f4dc55a794a12c79`.
+Version **0.0.72**. `candidateOnly: true`. Not Authenticode signed. Not updater signed. Not a customer-channel package.
+
+Installer `Tono_0.0.72_x64-setup.exe` SHA-256 (matches downloaded bytes and `candidate-manifest.json`):
+
+```text
+2af3f3b1894fd5b5d12b9507df723d0f8a87715d91fd1b1bb4fb8809d31ba674
+```
+
+Service `tono-service.exe` SHA-256 `30b0ebfd4d10ec92e3446a29c4eebcccfa1d6e3022057fe1cfe295acc53bc9e3`.
+Core `tono-core-x86_64-pc-windows-msvc.exe` SHA-256 `f7e6bd6092095b5fbcfaddf004337c1db189d6673133ca7bcf67b622fbe42dd3`.
+
+**Not installed on a device. Not a G1.1 pass.** Production Worker is `7c38521c` (#145). Testers still will not see hy2 rows until the five Dedirock blocks are `--append`ed.
+
+Open without GitHub login:
+
+- Page: https://nightly.link/raydocs/tono/actions/runs/34599676962
+- Zip: https://nightly.link/raydocs/tono/actions/runs/34599676962/tono-windows-0.0.72-candidate-3abe64b658429199bce1a660f4dc55a794a12c79.zip
+
+On the Windows PC, with Tono **disconnected**:
+
+```powershell
+$dest = Join-Path $env:TEMP 'tono-candidate-34599676962'
+New-Item -ItemType Directory -Force $dest | Out-Null
+gh run download 34599676962 --repo raydocs/tono -n tono-windows-0.0.72-candidate-3abe64b658429199bce1a660f4dc55a794a12c79 -D $dest
+$setup = Get-ChildItem $dest -Recurse -Filter Tono_0.0.72_x64-setup.exe | Select-Object -First 1
+$hash = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($hash -ne '2af3f3b1894fd5b5d12b9507df723d0f8a87715d91fd1b1bb4fb8809d31ba674') {
+  throw "hash mismatch: $hash"
+}
+Start-Process $setup.FullName
+```
+
+Then: launch 0.0.72 → connect. Pill must stay **Connecting…**, not Cancel. `securingDNS` must pass; dashboard rate and Activity must leave controller retry; disconnect restores DNS. After `--append`, refresh and use the top「备用 UDP」group. Artifact retention is 7 days.
+

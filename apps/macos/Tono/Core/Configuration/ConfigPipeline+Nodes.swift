@@ -10,8 +10,9 @@ extension ConfigPipeline {
     static func dialEndpoints(for node: ProxyNode?) throws -> [DialEndpoint] {
         guard let node else { return [] }
         let validated = try validatedOwnedNode(node)
+        let transport = validated.type == .hysteria2 ? "udp" : "tcp"
         return [
-            .init(host: validated.server, port: UInt16(validated.port), transport: "tcp"),
+            .init(host: validated.server, port: UInt16(validated.port), transport: transport),
         ]
     }
 
@@ -151,6 +152,9 @@ extension ConfigPipeline {
     }
 
     static func validatedOwnedNode(_ node: ProxyNode) throws -> ProxyNode {
+        if node.type == .hysteria2 {
+            return try validatedOwnedHysteria2(node)
+        }
         var value = node
         // Protected multi-exit mode deliberately starts with one audited
         // contract: VLESS over authenticated TLS/Reality and a TCP carrier.
@@ -213,6 +217,60 @@ extension ConfigPipeline {
         return value
     }
 
+    /// Same-node backup transport: Hysteria2 with a pinned leaf cert.
+    /// Password is the managed UUID; TLS identity is `fingerprint`, never
+    /// `skip-cert-verify`.
+    static func validatedOwnedHysteria2(_ node: ProxyNode) throws -> ProxyNode {
+        var value = node
+        value.name = try safeScalar(node.name, maximum: 128, field: node.name)
+        value.server = try normalizedServerAddress(node.server, field: node.name)
+        guard (1...65_535).contains(node.port), node.skipCertVerify != true else {
+            throw TonoInjectionError.unsafeNode(node.name)
+        }
+        value.password = try optionalScalar(node.password, maximum: 128, field: node.name)
+        value.sni = try optionalHost(node.sni, field: node.name)
+        value.username = nil
+        value.uuid = nil
+        value.cipher = nil
+        value.flow = nil
+        value.clientFingerprint = nil
+        value.realityPublicKey = nil
+        value.realityShortId = nil
+        value.wsHost = nil
+        value.wsPath = nil
+        value.grpcServiceName = nil
+        value.tls = nil
+        if let network = node.network?.lowercased(), network != "udp" {
+            throw TonoInjectionError.unsafeNode(node.name)
+        }
+        value.network = node.network?.lowercased()
+        guard let password = value.password,
+              password.count == 36,
+              UUID(uuidString: password) != nil,
+              value.sni != nil,
+              let fingerprint = normalizedSHA256Fingerprint(node.tlsFingerprint)
+        else {
+            throw TonoInjectionError.unsafeNode(node.name)
+        }
+        value.tlsFingerprint = fingerprint
+        return value
+    }
+
+    static func normalizedSHA256Fingerprint(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let hex = raw
+            .filter { $0 != ":" }
+            .lowercased()
+        guard hex.count == 64,
+              hex.unicodeScalars.allSatisfy({
+                  CharacterSet(charactersIn: "0123456789abcdef").contains($0)
+              })
+        else {
+            return nil
+        }
+        return hex
+    }
+
     static func ownedNodeYAML(_ node: ProxyNode) throws -> String {
         let value = try validatedOwnedNode(node)
         var yaml = """
@@ -226,6 +284,12 @@ extension ConfigPipeline {
         func append(_ key: String, _ scalar: String?) {
             guard let scalar, !scalar.isEmpty else { return }
             yaml += "    \(key): \"\(yamlScalar(scalar))\"\n"
+        }
+        if value.type == .hysteria2 {
+            append("password", value.password)
+            append("sni", value.sni)
+            append("fingerprint", value.tlsFingerprint)
+            return yaml
         }
         append("username", value.username)
         append("password", value.password)

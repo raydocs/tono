@@ -12,15 +12,16 @@ import {
   readNodeLatency,
 } from '@/pages/tono/node-latency'
 import {
+  nodeCityLabel,
   nodeCityParts,
-  nodeCityTitleKey,
   nodeCode,
-  nodeDisplayName,
 } from '@/pages/tono/node-meta'
+import { useManualBackupChannel } from '@/pages/tono/use-backup-channel'
 import { useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
 import {
   formatTonoActionError,
+  idleSelectShouldConnect,
   tonoConnect,
   tonoDisconnect,
   tonoRetryNow,
@@ -87,11 +88,8 @@ export const TrayPanel = () => {
   const action = actionFor(uiState)
   const busy = action == null
   const serverName = status?.selectedServer
-  const cityKey = serverName ? nodeCityTitleKey(serverName) : null
   const city = serverName
-    ? cityKey
-      ? t(cityKey)
-      : nodeDisplayName(serverName)
+    ? nodeCityLabel(serverName, t)
     : t('tono.tray.noServer')
   const cityParts = serverName ? nodeCityParts(serverName) : null
   const region = serverName ? nodeCode(serverName) : null
@@ -107,6 +105,10 @@ export const TrayPanel = () => {
   const [down, downUnit] = parseTraffic(traffic?.down ?? 0)
   const [actionError, setActionError] = useState<string | null>(null)
   const [picking, setPicking] = useState(false)
+  const { available: backupAvailable, selectAndRetry } = useManualBackupChannel(
+    serverName,
+    uiState,
+  )
 
   const { data: servers } = useQuery({
     queryKey: tonoServersQueryKey,
@@ -128,10 +130,22 @@ export const TrayPanel = () => {
     }
   })
 
+  const tryBackup = useLockFn(async () => {
+    setPicking(false)
+    setActionError(null)
+    try {
+      await selectAndRetry()
+      await mutateTonoStatus()
+    } catch (error) {
+      setActionError(formatTonoActionError(error, t))
+    }
+  })
+
   const pickServer = useLockFn(async (name: string) => {
     setActionError(null)
     try {
       await tonoSelectServer(name)
+      if (idleSelectShouldConnect(uiState)) await tonoConnect()
       await mutateTonoStatus()
       setPicking(false)
     } catch (error) {
@@ -237,8 +251,7 @@ export const TrayPanel = () => {
       {picking && (
         <div className="tono-tray-picker">
           {(servers ?? []).map((server) => {
-            const key = nodeCityTitleKey(server.name)
-            const label = key ? t(key) : nodeDisplayName(server.name)
+            const label = nodeCityLabel(server.name, t)
             const active = server.selected || server.name === serverName
             return (
               <button
@@ -247,7 +260,7 @@ export const TrayPanel = () => {
                 className="tono-tray-pick"
                 disabled={!server.available && !active}
                 onClick={() => {
-                  if (active) {
+                  if (active && !idleSelectShouldConnect(uiState)) {
                     setPicking(false)
                     return
                   }
@@ -317,6 +330,23 @@ export const TrayPanel = () => {
         <div className="tono-tray-error" role="alert" title={actionError}>
           {actionError}
         </div>
+      )}
+
+      {backupAvailable && (
+        <button
+          type="button"
+          data-testid="tono-tray-try-backup"
+          onClick={() => void tryBackup()}
+          className="tono-tray-action"
+          style={{
+            flexShrink: 0,
+            cursor: 'pointer',
+            background: TONO_COLORS.accent,
+          }}
+        >
+          <TonoIcon name="refresh" size={14} />
+          {t('tono.progress.tryBackupChannel')}
+        </button>
       )}
 
       <button

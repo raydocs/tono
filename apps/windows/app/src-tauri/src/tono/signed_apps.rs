@@ -466,15 +466,24 @@ fn is_untrusted_user_profile_reviewed_tree(
                 || after_name.starts_with(r"appdata\roaming\alibaba\")
                 || after_name.starts_with(r"appdata\local\programs\dingtalk")
                 || after_name.starts_with(r"appdata\local\programs\dingding")
+                || after_name.starts_with(r"appdata\roaming\programs\dingtalk")
+                || after_name.starts_with(r"appdata\roaming\programs\dingding")
                 || after_name.starts_with(r"appdata\local\dingtalk")
+                || after_name.starts_with(r"appdata\local\dingding")
+                || after_name.starts_with(r"appdata\roaming\dingtalk")
+                || after_name.starts_with(r"appdata\roaming\dingding")
         }
         ReviewedDirectProduct::Feishu => {
             after_name.starts_with(r"appdata\local\bytedance\")
                 || after_name.starts_with(r"appdata\roaming\bytedance\")
                 || after_name.starts_with(r"appdata\local\programs\feishu")
                 || after_name.starts_with(r"appdata\local\programs\lark")
+                || after_name.starts_with(r"appdata\roaming\programs\feishu")
+                || after_name.starts_with(r"appdata\roaming\programs\lark")
                 || after_name.starts_with(r"appdata\local\feishu")
                 || after_name.starts_with(r"appdata\local\lark")
+                || after_name.starts_with(r"appdata\roaming\feishu")
+                || after_name.starts_with(r"appdata\roaming\lark")
         }
     };
     !official_appdata
@@ -1148,6 +1157,59 @@ mod tests {
             r"C:\Users\a\Documents\Feishu Files\Feishu.exe"
         )
         .is_none());
+    }
+
+    #[test]
+    fn roaming_dingding_install_gets_a_tree_prefix() {
+        // Discovery also probes %APPDATA%\DingDing. Without the matching Roaming allow-list
+        // entry the official tail was still classified as an untrusted user-profile tree.
+        let dingding = regex_for_verified_dingtalk_exe(
+            r"C:\Users\a\AppData\Roaming\DingDing\DingTalk.exe",
+        )
+        .unwrap();
+        assert!(
+            dingding.starts_with('^') && !dingding.ends_with('$'),
+            "expected AnchoredPrefix, got {dingding}"
+        );
+        let dingtalk = regex_for_verified_dingtalk_exe(
+            r"C:\Users\a\AppData\Roaming\DingTalk\DingTalk.exe",
+        )
+        .unwrap();
+        assert!(
+            dingtalk.starts_with('^') && !dingtalk.ends_with('$'),
+            "expected AnchoredPrefix, got {dingtalk}"
+        );
+        let feishu = regex_for_verified_feishu_exe(
+            r"C:\Users\a\AppData\Roaming\Feishu\Feishu.exe",
+        )
+        .unwrap();
+        assert!(
+            feishu.starts_with('^') && !feishu.ends_with('$'),
+            "expected AnchoredPrefix, got {feishu}"
+        );
+    }
+
+    #[test]
+    fn localappdata_dingding_install_gets_a_tree_prefix() {
+        // `%LOCALAPPDATA%\DingDing` is an official layout tail and a discovery root. Without the
+        // matching untrusted-tree allow-list entry it was demoted to ExactFile, so helper
+        // binaries next to DingTalk.exe missed the reviewed-DIRECT grant.
+        let dingding = regex_for_verified_dingtalk_exe(
+            r"C:\Users\a\AppData\Local\DingDing\DingTalk.exe",
+        )
+        .unwrap();
+        assert!(
+            dingding.starts_with('^') && !dingding.ends_with('$'),
+            "expected AnchoredPrefix, got {dingding}"
+        );
+        let dingtalk = regex_for_verified_dingtalk_exe(
+            r"C:\Users\a\AppData\Local\DingTalk\DingTalk.exe",
+        )
+        .unwrap();
+        assert!(
+            dingtalk.starts_with('^') && !dingtalk.ends_with('$'),
+            "expected AnchoredPrefix, got {dingtalk}"
+        );
     }
 
     #[test]

@@ -1,8 +1,8 @@
 import Foundation
 
-// MARK: - Clash Configuration
+// MARK: - Runtime Configuration
 
-nonisolated struct ClashConfig: Codable, Sendable {
+nonisolated struct RuntimeConfig: Codable, Sendable {
     var port: Int = 28990
     var socksPort: Int = 28991
     var mixedPort: Int = 28990

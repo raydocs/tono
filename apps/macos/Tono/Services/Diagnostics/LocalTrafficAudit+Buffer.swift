@@ -14,7 +14,8 @@ extension LocalTrafficAudit {
     func enqueue(
         kind: String,
         fields: [String: String],
-        force: Bool = false
+        force: Bool = false,
+        uploadScope: String? = nil
     ) {
         guard force || Self.isEnabled else { return }
         var object: [String: Any] = [
@@ -26,6 +27,7 @@ extension LocalTrafficAudit {
         for (key, value) in fields {
             object[key] = Self.sanitize(value)
         }
+        if let uploadScope { object["_uploadScope"] = uploadScope }
         guard var data = try? JSONSerialization.data(
             withJSONObject: object,
             options: [.sortedKeys]

@@ -99,16 +99,21 @@ describe('ops nodes identity', () => {
   it('PATCH identity fields round-trip and status stays keyed by catalog_name', async () => {
     await seedNode(NODE);
     await seedNode(OTHER);
+    await db().prepare('UPDATE ops_node_profiles SET hy2_port = 443 WHERE catalog_name = ?').bind(NODE).run();
     const res = await ops(`nodes/${encodeURIComponent(NODE)}/profile`, json({
       displayName: '富士',
       failureDomain: 'Bandwagon/Tokyo',
       replaces: OTHER,
+      capacityUsers: 17,
     }, 'PATCH'));
     expect(res.status).toBe(200);
     const detail = assertNodeDetail(await res.json());
     expect(detail.displayName).toBe('富士');
     expect(detail.failureDomain).toBe('Bandwagon/Tokyo');
     expect(detail.replaces).toBe(OTHER);
+    expect(detail.facts.capacityUsers).toBe(17);
+    expect(detail.facts.transports).toEqual(['tcp', 'hy2']);
+    expect(detail.facts.hy2).toEqual({ port: 443, udpOk: null });
     const status = await db().prepare(
       'SELECT node_name, verdict FROM ops_node_status WHERE node_name = ?',
     ).bind(NODE).first<{ node_name: string; verdict: string }>();

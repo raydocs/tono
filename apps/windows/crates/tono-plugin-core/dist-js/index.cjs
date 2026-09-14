@@ -159,7 +159,7 @@ async function getProxies() {
  */
 async function getProxyByName(proxyName) {
     return await core.invoke("plugin:tono-plugin-core|get_proxy_by_name", {
-        proxiesName: proxyName,
+        proxyName,
     });
 }
 /**
