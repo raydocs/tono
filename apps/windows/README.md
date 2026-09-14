@@ -337,9 +337,17 @@ SECURITY.md security invariants and disclosure
 
 ## Development
 
+**Execution location:** use the Windows worker or existing GitHub-hosted CI
+for native compilation and tests. Worker onboarding is not yet qualified;
+see [build and test execution](../../docs/BUILD_AND_TEST.md). The maintainer's
+MacBook is for editing and frontend preview, not the default cross-compilation
+host. Follow [app contribution notes](app/CONTRIBUTING.md) for frontend-only
+commands. Native GUI/service and disruptive QA need separate authorization.
+
 Windows 10 22H2 / Windows 11, x64 and ARM64.
 
-- Rust stable (MSVC toolchain), Node.js LTS + pnpm
+- Source-pinned Rust (MSVC toolchain), Node.js and the app's pinned pnpm;
+  match the current workflow and lockfiles instead of upgrading to “latest”
 - Tauri 2.x prerequisites (WebView2, VS C++ build tools)
 - A Windows VM or machine with second NIC/Wi-Fi for the network-change
   matrix, plus packet capture (Wireshark/`pktmon`) for leak verification

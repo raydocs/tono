@@ -56,6 +56,9 @@ workspaces stay separate.
 ## Verification
 
 Run the smallest check that covers the tree you touched.
+**Choose its execution host before running it.** The maintainer's MacBook is
+the editing/review machine, not the default native build worker. See
+[build and test execution](docs/BUILD_AND_TEST.md).
 
 | Tree | Check |
 |---|---|
@@ -64,6 +67,26 @@ Run the smallest check that covers the tree you touched.
 | `services/control-plane` | `npm test` / the matching `test/*.test.ts` |
 | `services/ops-console` | vitest for the file; Playwright only for a page flow you changed |
 | Docs-only | No test run |
+
+### Execution location (owner decision, 2026-09-14)
+
+- MacBook: editing, review, fixtures, focused frontend/Worker checks and
+  inspecting downloaded candidate apps. Do not automatically run `xcodebuild`,
+  `swift build/test`, native `cargo build/test/check/clippy`, Tauri dev/build,
+  Core builds or release packaging here. These commands recreate large caches.
+- Mac Studio is **no longer a residential exit**. Its intended role is macOS
+  build/test; the Windows machine's intended role is Windows build/test.
+  Neither role proves runner registration, toolchain readiness or qualification.
+  Do not provision an exit or reuse an address/tag from an archived handoff.
+- Until remote workers are qualified, use the existing GitHub-hosted checks.
+  If an exact check cannot run remotely, report it as not run and request a
+  bounded local exception; do not silently fall back to MacBook compilation or
+  call an untested change verified. Match evidence to the exact tested SHA.
+- Public PR code must not run directly on the persistent home machines. Keep
+  privileged network/installer tests separate from ordinary build jobs, and
+  retain the disposable-host guard on the Windows candidate-install smoke.
+- Do not install toolchains, sync build caches, remove active worktrees or
+  delete retained evidence merely to make the default local command work.
 
 Do not run `wrangler deploy`, `wrangler secret`, or `d1 * --remote` unless the
 user asked to deploy.

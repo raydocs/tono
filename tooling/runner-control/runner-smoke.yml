@@ -1,0 +1,73 @@
+# TEMPLATE: copy only to the reviewed private control repository's
+# .github/workflows/runner-smoke.yml. Never register home runners on public Tono.
+# This is reachability/inventory, NOT native build or release qualification.
+name: Native runner connectivity
+
+'on':
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Dedicated worker to inspect (no build or network mutation)
+        required: true
+        type: choice
+        options:
+          - macos
+          - windows
+
+permissions: {}
+
+concurrency:
+  group: native-runner-connectivity-${{ inputs.platform }}
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.event.repository.private == true &&
+      github.ref == 'refs/heads/main' && inputs.platform == 'macos'
+    runs-on: [self-hosted, macOS, tono-build-macos]
+    timeout-minutes: 5
+    steps:
+      - name: Read-only machine inventory (no source checkout)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'Scope: runner connectivity only; build/test/signing NOT qualified'
+          test "$(uname -s)" = Darwin
+          sw_vers
+          uname -m
+          df -h .
+          for tool in xcodebuild git node pnpm rustc cargo go; do
+            if command -v "$tool" >/dev/null 2>&1; then
+              printf '%s: present (version not checked)\n' "$tool"
+            else
+              printf '%s: missing\n' "$tool"
+            fi
+          done
+
+  windows:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.event.repository.private == true &&
+      github.ref == 'refs/heads/main' && inputs.platform == 'windows'
+    runs-on: [self-hosted, Windows, tono-build-windows]
+    timeout-minutes: 5
+    steps:
+      - name: Read-only machine inventory (no source checkout)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Write-Output 'Scope: runner connectivity only; build/test/signing NOT qualified'
+          if ($env:OS -ne 'Windows_NT') { throw 'Expected Windows' }
+          Get-CimInstance Win32_OperatingSystem |
+            Select-Object Caption, Version, OSArchitecture | Format-List
+          Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' |
+            Select-Object DeviceID, Size, FreeSpace | Format-Table
+          foreach ($tool in @('git', 'node', 'pnpm', 'rustc', 'cargo', 'go')) {
+            if (Get-Command $tool -ErrorAction SilentlyContinue) {
+              Write-Output "${tool}: present (version not checked)"
+            } else {
+              Write-Output "${tool}: missing"
+            }
+          }

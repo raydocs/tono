@@ -104,6 +104,17 @@ Kill switch on Linux is nftables (not yet implemented). Until it exists, the
 service refuses `StartClash` on Linux rather than connecting without a
 barrier. No unprivileged sidecar product path.
 
+## Development machines are not data-plane roles
+
+Mac Studio no longer serves as a residential exit (owner confirmed 2026-09-14).
+Its intended role is macOS build/test, alongside a Windows build/test machine;
+MacBook is the editing/review endpoint. These are execution-policy decisions,
+not evidence that runners are installed or native acceptance has passed.
+
+See [build and test execution](BUILD_AND_TEST.md) for current onboarding status,
+public-PR isolation, privileged test boundaries and cache lifecycle. Do not
+recreate an exit from a machine address or tag in an archived handoff.
+
 ## Release lines
 
 | Ref | Owns | Publishes |

@@ -1,56 +1,78 @@
 # Tono
 
-Cloud-managed VPN. Sign in, get a per-device exit catalog and a signed traffic
-policy, connect through VLESS Reality. The control plane is not on the data
-plane. Both clients fail closed at the OS packet layer (PF on macOS, WFP on
-Windows).
+Cloud-managed VPN for macOS and Windows. Sign in, receive a Tono-issued exit
+catalog and signed traffic policy, then connect directly to the selected exit.
+The Cloudflare Worker manages accounts and configuration; it does **not** relay
+the user's traffic.
 
-This is Tono's own product, not a Clash Verge or LiquidClash reskin. Leftover
-upgrade names exist only to stop old processes; they are not the product
-identity.
+## Product and protection
 
-![Tono dashboard](docs/screenshots/dashboard.jpg)
+- **macOS:** SwiftUI app with a privileged helper for PF, DNS and Core lifecycle.
+- **Windows:** Tauri app with a privileged service for WFP, DNS and Core lifecycle.
+- **Transports:** VLESS Reality and catalog-authorized Hysteria 2. Availability
+  depends on the issued node configuration, not merely client support.
+- **Protection:** OS-level fail-closed enforcement; no unprivileged sidecar
+  fallback and no certificate-verification bypass.
+- **Operations:** ops2 is the operator console, separate from the customer apps.
 
-macOS (SwiftUI + privileged helper) and Windows (Tauri + LocalSystem service)
-share one account, one catalog, and one device list. Ubuntu desktop and a
-`tono` CLI are planned on the same privileged service; they are not shipped.
+The current product Core is Tono's patched Mihomo. The sing-box/Go/gVisor
+comparisons are experiments, **not a completed migration or release approval**.
+Ubuntu desktop and the `tono` CLI are planned, not shipped products.
+
+Tono is its own product. Reused components and license obligations are recorded
+in [third-party notices](THIRD_PARTY_NOTICES.md); old privileged upgrade names
+remain compatibility details, not the product identity.
+
+## Start here
+
+| Reader | Entry point |
+|---|---|
+| Contributor | [Contribution workflow](CONTRIBUTING.md) |
+| Developer / build operator | [Build and test execution](docs/BUILD_AND_TEST.md) |
+| Architecture reviewer | [System map](docs/architecture.md) |
+| Release reviewer | [Ship gates](docs/SHIP_PLAN.md) and [release lines](docs/RELEASE_LINES.md) |
+| Ops developer | [Ops plan](docs/ops/plan-2026-09-11.md) and [console](services/ops-console/README.md) |
+| Coding agent | [Agent instructions](AGENTS.md) |
+| Further documentation | [Document map](docs/README.md) |
+
+## Development: edit locally, build on the right host
+
+The maintainer's **MacBook is the editing and review machine**, not a second
+macOS-and-Windows build farm. Native compilation, large test suites and
+packaging belong on build workers; frontend fixtures and focused lightweight
+checks can stay local.
+
+The intended dedicated workers are **Mac Studio for macOS** and a **Windows
+machine for Windows**. Mac Studio no longer serves as a residential exit.
+Worker onboarding is tracked in the [execution guide](docs/BUILD_AND_TEST.md);
+do not interpret this target layout as proof that self-hosted runners are live.
+Existing GitHub-hosted CI remains in place while they are qualified.
+
+This is a public repository. Untrusted PRs stay on isolated GitHub-hosted
+runners, not persistent home machines with access to private networks or keys.
+Native PF/WFP/DNS and installer qualification is a separate, controlled lane.
+
+## Repository
 
 | Directory | Purpose |
-|-----------|---------|
-| [`apps/macos/`](./apps/macos/) | macOS client (SwiftUI + privileged helper) |
-| [`apps/windows/`](./apps/windows/) | Windows client (Tauri + Service + WFP); Linux desktop packaging |
-| [`services/control-plane/`](./services/control-plane/) | Cloudflare Worker, static assets, and D1 migrations |
-| [`services/ops-console/`](./services/ops-console/) | Operator console |
-| [`services/exit-agent/`](./services/exit-agent/) | VPS Xray roster + metering |
-| [`services/home-agent/`](./services/home-agent/) | Home exit-node usage reporter |
-| [`ops-panel/`](./ops-panel/) | SSH quality collector |
-| [`tooling/scripts/`](./tooling/scripts/) | Build, release, test, and operations tooling |
-| [`docs/`](./docs/) | [Document map](docs/README.md) — architecture, ship plan, ops, archive |
+|---|---|
+| [`apps/macos/`](apps/macos/) | SwiftUI client and privileged helper |
+| [`apps/windows/`](apps/windows/) | Tauri app, service and portable Rust crates |
+| [`services/control-plane/`](services/control-plane/) | Cloudflare Worker, D1 and static assets |
+| [`services/ops-console/`](services/ops-console/) | Operator UI |
+| [`services/exit-agent/`](services/exit-agent/) | VPS roster and metering |
+| [`services/home-agent/`](services/home-agent/) | Residential-exit usage reporter; not a Mac Studio assignment |
+| [`ops-panel/`](ops-panel/) | SSH quality collector |
+| [`tooling/scripts/`](tooling/scripts/) | Build, test, release and operations tooling |
 
-See [architecture](docs/architecture.md) for the system map. Agents: start at
-[AGENTS.md](./AGENTS.md).
+## Releases and evidence
 
-## Windows quick start
+A GitHub tag, a candidate installer or a green build is **not** proof of a
+customer-channel release. The next customer publication is governed by
+[SHIP_PLAN](docs/SHIP_PLAN.md); open protection and upgrade gates remain open
+until the required evidence exists. Ops UI polish is not a customer ship gate.
 
-```powershell
-cd apps/windows
-# see apps/windows/README.md and tooling/scripts/build-windows-release.ps1
-```
-
-## macOS quick start
-
-Open `apps/macos/Tono.xcodeproj` in Xcode. App sources live in
-`apps/macos/Tono/`.
-
-## Releases
-
-Windows stable installers use `v<version>` tags; legacy Windows prereleases use
-`tono-windows-*` tags. Future macOS releases use
-`tono-macos-<version>-build<build>` tags.
-
-The maintained release lines are `release/macos` and `release/windows`;
-`main` is their reviewed integration point and the only production
-control-plane deployment source. See [release lines and immutable
-history](docs/RELEASE_LINES.md). The next customer publication is gated
-by [the first-ship plan](docs/SHIP_PLAN.md); do not promote Sparkle or
-`windows-updates` while those four gates are open.
+`release/macos` and `release/windows` own their platform release lines. `main`
+is the reviewed integration point and the only production Worker source.
+Sparkle and `windows-updates` promotion remains an explicit, gated operation;
+moving builds to another machine does not authorize publication.

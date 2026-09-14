@@ -152,6 +152,10 @@ Windows 用 `tono-ui/tokens/motion.css` 的同名 token，并依赖 `tono.css` �
 
 ## 10. 验证命令
 
+执行位置遵守 [BUILD_AND_TEST.md](BUILD_AND_TEST.md)：下面的 macOS 原生测试
+在构建机或现有 GitHub runner 上跑，不默认在维护者 MacBook 上重新编译。
+Windows 前端窄检查可以本地运行；浏览器预览不代替原生 IPC / WFP 验收。
+
 ```bash
 # macOS（勿用 /Applications/Tono.app 验证——那是独立安装副本）
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test \
