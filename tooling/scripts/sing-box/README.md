@@ -93,12 +93,112 @@ Operational failures return exit 1 and `{"ok":false,"error":"TONO_SINGBOX_…"}`
 Timeout has its own `TONO_SINGBOX_TIMEOUT` code, never success. CLI syntax errors
 are argparse usage errors (exit 2). There is no retry after failure.
 
-## Evidence required before this work can leave Draft
+## Executed M1 evidence — 2026-09-14
 
-The Python tests use synthetic build info/mock compiler operations and local
-subprocess watchdog controls. They must never be presented as actual Go builds
-or sing-box checks. Run the three pinned builds, independent manifest/binary
-verification and the real bounded positive/negative checks with approved inputs.
-Attach exact tested Tono SHA, binary hashes and transferable artifacts to the
-coordinator's handoff. Without those artifacts, downstream native emitter core
-checks remain blocked. No change here authorizes M2 or a production invocation.
+The following builds and checks ran in a Linux x86_64 Orb using tooling commit
+[39c33288e47f4debf0da63c9371d5c9a8504bcfa](https://github.com/raydocs/tono/commit/39c33288e47f4debf0da63c9371d5c9a8504bcfa).
+This follow-up changes documentation only; it does not change the tested scripts.
+No source, toolchain, candidate, reference or dependency pin was substituted.
+
+### Inputs were authenticated before extraction
+
+The M0 owner supplied retained files through Amp `download_thread_file` from
+[the M0 thread](https://ampcode.com/threads/T-01a09b11-ffa7-7182-9dee-0aec721381a6),
+prefix `.amp/m0-retained-transfer-20260914/`, into new directory
+`/tmp/tono-m0-inputs`. All 11 entries in `SHA256SUMS` passed. Independently supplied
+hashes also matched before tar extraction:
+
+| Input | SHA-256 |
+|---|---|
+| Go1.27.1 linux/amd64 archive | `63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445` |
+| Clean sing-box Git export | `4033e34c4e637a9f8b6f124879aac9cd5e6e6634752c457e79bf8085e027cd34` |
+| Retained historical Linux core | `cd2ba002e1282da29674107cc503285dc8fa7026bf01fcc40d314bc10ab749df` |
+
+Archive members were checked for absolute/traversing paths and restricted to
+regular files/directories. Restored Git HEAD matched M0's upstream commit,
+working tree was clean, go.mod/go.sum matched candidate hashes, and `go version`
+returned `go version go1.27.1 linux/amd64`.
+
+The first offline build correctly refused the absent module cache:
+`TONO_SINGBOX_COMMAND_REJECTED`, with no output manifest. Direct diagnosis was
+`filippo.io/age@v1.3.1: module lookup disabled by GOPROXY=off`. A separately
+bounded, approved cache-preparation command succeeded in the pinned source:
+
+```sh
+timeout --signal=TERM --kill-after=2s 240s env -i HOME="$HOME" \
+  PATH=/tmp/tono-m0-inputs/go/bin:/usr/bin:/bin GOENV=off GOWORK=off \
+  GOTOOLCHAIN=local GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org \
+  GOFLAGS=-mod=readonly GOTELEMETRY=off \
+  /tmp/tono-m0-inputs/go/bin/go mod download
+```
+
+Both module-file hashes and the clean source state were rechecked unchanged.
+The build script still runs offline (`GOPROXY=off`), including `go mod verify`;
+cache preparation did not introduce automatic network fallback into it.
+
+### Three new M1 artifacts have distinct identities
+
+All three `build` and subsequent `verify` commands returned exit 0. Each used
+`--source /tmp/tono-m0-inputs/sing-box-source`,
+`--go /tmp/tono-m0-inputs/go/bin/go` and the commands documented above.
+Output directories were `/tmp/tono-m1-linux-r1`, `/tmp/tono-m1-darwin-r1`, and
+`/tmp/tono-m1-windows-r1`. Verification used each independently retained manifest
+digest below. Go build info matched pinned revision, clean source, Go, CGO,
+tags, module graph and target. `file` independently identified ELF x86-64,
+Mach-O arm64 and PE32+ x86-64 respectively. Neither the macOS nor the Windows
+binary was executed.
+
+| Target | Binary SHA-256 | Manifest SHA-256 |
+|---|---|---|
+| linux-amd64-v2 | `120b91c702a2b3d15ce09ca5ce850d5e8880ca65a4017950df91cadd276eabd2` | `ab39c6c4d5147844faaccb6a32189c090948bc06f5202c63bd33d8db757ab1e1` |
+| darwin-arm64 | `6c86720c7baf60057ad9ea05b64149939d29a37397e93599563de0db5677baae` | `c765b9d2cc7d1cb31debd9bc699cb906bdd495e0cde08f401527879ac7eb394a` |
+| windows-amd64-v2 | `9fa8e825a697ccea2beed17d8766af947084041173df4d80b622e2bf730d544f` | `2f5642f51c03a620f870c069239ad8b35d93e123903765da430e62070e00f757` |
+
+These use M1's frozen linker label, not the retained historical banner. Passing
+the retained binary to `verify` with the new Linux manifest returned exit 1,
+`TONO_SINGBOX_HASH_MISMATCH`; the historical artifact cannot be relabeled as M1.
+
+### Actual bounded parser checks passed, without connection claims
+
+The new Linux artifact passed the package's `check` command with its verified
+manifest and the complete frozen reference. Both platform shapes returned 0;
+the invalid Reality key returned 1 with the required `invalid public_key`
+diagnostic. Only the redacted receipt survived staging cleanup:
+`/tmp/tono-m1-linux-check-r1/check.json`, SHA-256
+`4c36c49e02797526ba7b8b98668c84f538b0bb4be08052c0fb14ccac15268493`.
+
+| Actual runtime bytes | SHA-256 | Result |
+|---|---|---|
+| Windows shape | `85723e709aef8b6925a2aca6c150805bcec0c824308fb61a7d85c61f9bfa712e` | check exit 0 |
+| macOS shape | `1c7451f41f594331ef34e984ce85057524b96c6cab876ffd5a073f08f019aca3` | check exit 0 |
+
+The retained core was separately authenticated against its M0 hash/build-info
+and passed the same two shapes and invalid-key negative control; those results
+are historical-core checks, not new-build evidence. A separate 0.1-second
+watchdog around 5-second sleep returned 124 as expected, never success.
+
+The Python command above still reports **17 tests / OK**. Those unit tests
+deliberately mock compiler/build-info/parser calls; only the checks described
+in this section are actual core execution. `sh -n` and diff whitespace checks
+also pass. At the tested tooling commit, macOS CI runs
+[34851329925](https://github.com/raydocs/tono/actions/runs/34851329925) and
+[34851336055](https://github.com/raydocs/tono/actions/runs/34851336055) each completed
+all three jobs successfully. That existing CI is not sing-box native acceptance.
+
+### Transfer and remaining boundaries
+
+The new binaries/manifests were copied, not installed, into this build thread's
+untracked transfer directory. Use `download_thread_file` from
+[the build thread](https://ampcode.com/threads/T-01a0a020-b40e-701d-8c3c-1b88cd829e81),
+with prefix `.amp/m1-build-transfer-20260914/<target>/`. Each target contains
+`manifest.json` and `sing-box` (`sing-box.exe` for Windows); Linux also contains
+`check.json`. Create a fresh external destination, verify the hashes above,
+and set executable permission only when needed for a bounded Linux check.
+This is a valid executor-backed cross-thread transfer, not a permanent public
+attachment. Download before the source Orb is archived. No binary is committed.
+
+The missing-input/new-build blocker is resolved. Downstream Swift/Rust emitter
+checks remain their owners' responsibility and are not inferred from reference
+checks. No native DNS/PF/WFP, network handshake, Connected, installer/update,
+M2 candidate or performance evidence was produced. No `run`, production change,
+signing, deployment, merge or publication occurred; M2 still requires review.
