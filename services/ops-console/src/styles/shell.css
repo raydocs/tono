@@ -47,6 +47,18 @@
   border: 0;
 }
 
+@media (min-width: 960px) {
+  /* Long pages (node detail, ledger, audit) scroll past a static rail. Pin
+   * it to the frame instead so navigation stays reachable without changing
+   * DOM order or tab order. */
+  .shell-rail {
+    position: sticky;
+    top: 12px;
+    align-self: flex-start;
+    max-height: calc(100vh - 24px);
+  }
+}
+
 .rail-float {
   display: flex;
   flex-direction: column;
