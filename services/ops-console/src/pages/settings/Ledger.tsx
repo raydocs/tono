@@ -48,10 +48,20 @@ export function Ledger() {
   const [month, setMonth] = useState(() => monthOf(nowSec()));
   const [adding, setAdding] = useState(false);
   const [closing, setClosing] = useState(false);
+  /**
+   * A same-month write retires the summary on screen. The nonce rides the
+   * summary key so the next read starts from loading instead of vouching
+   * for the old figures while the refetch is in flight — and lands in
+   * error rather than stale-ready when the refetch fails. Either way the
+   * lock guards below see no valid summary until a fresh one arrives.
+   */
+  const [summaryNonce, setSummaryNonce] = useState(0);
 
-  const summary = useResource(`ledger-month-${month}`, (signal) => ledgerApi.month(month, signal));
+  const summary = useResource(`ledger-month-${month}#${summaryNonce}`, (signal) => ledgerApi.month(month, signal));
   const entries = useResource(`ledger-entries-${month}`, (signal) => ledgerApi.entries(month, signal));
   const reload = useCallback(() => {
+    setClosing(false);
+    setSummaryNonce((n) => n + 1);
     summary.reload();
     entries.reload();
   }, [summary, entries]);
