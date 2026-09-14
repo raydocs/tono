@@ -144,6 +144,7 @@ export function App() {
                     health={health}
                     releases={releases}
                     nodes={legacyNodes}
+                    fleetReady={fleet.status === 'ready'}
                     selected={route.incident}
                     onChanged={incidents.reload}
                   />

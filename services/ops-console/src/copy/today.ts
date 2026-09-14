@@ -17,6 +17,12 @@ export const todayCopy = {
     chores: '待办',
   } as const,
   tabCount: (n: number) => `${n}`,
+  todayKpi: {
+    open: '进行中',
+    impacted: '影响客户',
+    due: '今日到期',
+    swept: '节点已测',
+  } as const,
   severity: {
     severe: '严重',
     warn: '注意',

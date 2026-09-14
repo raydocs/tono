@@ -1,0 +1,377 @@
+/* Today prototype: the reference-grade visual layer for the ops workbench.
+ *
+ * Scoped under `.today-page` throughout — nothing here touches the global
+ * `.ops-tab / .incident-row / .raised` definitions other pages rely on. The
+ * desktop card treatment lives behind `min-width` queries so the phone keeps
+ * the audited 390 px behavior (folded digest, 44 px targets, no sideways
+ * scroll). Tones come from tokens.css; this file only composes them. */
+
+.today-page {
+  --today-radius: 20px;
+  --today-radius-sm: 14px;
+}
+
+/* ---------------------------------------------------------- hero card */
+
+.today-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 28px;
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--today-radius);
+  box-shadow: var(--shadow-card-lg);
+  padding: 28px 30px;
+}
+
+.dark .today-hero {
+  border-color: rgb(255 255 255 / 0.07);
+  box-shadow: var(--shadow-card-lg), inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+.today-hero-eyebrow {
+  display: block;
+  margin-bottom: 10px;
+  max-width: 62ch;
+}
+
+.today-page .text-verdict {
+  text-wrap: balance;
+  max-width: 18ch;
+}
+
+.today-hero-note {
+  margin-top: 10px;
+}
+
+/* The four numbers, in the page's own calibers: open incidents, impacted
+ * customers, things due today, nodes swept. Unknown renders as a dash —
+ * never as a zero doing an impression of calm. */
+.today-kpis {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: var(--background);
+  border: 1px solid var(--hairline);
+  border-radius: var(--today-radius-sm);
+  overflow: hidden;
+}
+
+.today-kpi {
+  min-width: 0;
+  padding: 16px 18px 14px;
+}
+
+.today-kpi:nth-child(odd) {
+  border-right: 1px solid var(--hairline);
+}
+
+.today-kpi:nth-child(n + 3) {
+  border-top: 1px solid var(--hairline);
+}
+
+/* In the dark theme the KPI block must read as part of the hero card, not as
+ * a recess cut into it: a faint lift instead of a sunken well. */
+.dark .today-kpis {
+  background: rgb(255 255 255 / 0.03);
+  border-color: rgb(255 255 255 / 0.07);
+}
+
+.today-kpi-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.today-kpi-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: hsl(var(--tone-line));
+}
+
+.today-kpi-value {
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 30px;
+  font-weight: 550;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.today-kpi-sub {
+  margin-top: 2px;
+}
+
+.today-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Card titles carry the rail: one strong line per card, then quiet labels. */
+.today-page .today-digest > h2,
+.today-page .today-worthwhile-card .worthwhile > h3 {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--foreground);
+}
+
+.today-list-wrap {
+  min-width: 0;
+}
+
+/* ----------------------------------------------- content grid: main + aux */
+
+.today-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+@media (min-width: 1024px) {
+  .today-grid {
+    grid-template-columns: minmax(0, 1fr) 348px;
+  }
+
+  .today-main {
+    grid-column: 1;
+    grid-row: 1;
+    min-width: 0;
+  }
+
+  .today-aux {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+    position: sticky;
+    top: 16px;
+  }
+}
+
+/* --------------------------------------------------- capsule tabs (scoped) */
+
+.today-page .today-tabs {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 2px;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 3px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.today-page .today-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.dark .today-page .today-tabs {
+  border-color: rgb(255 255 255 / 0.07);
+}
+
+.today-page .today-tabs .ops-tab {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 14px 8px;
+  border: 0;
+  border-radius: 999px;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+}
+
+.today-page .today-tabs .ops-tab:hover {
+  color: var(--foreground);
+}
+
+.today-page .today-tabs .ops-tab[aria-selected="true"] {
+  background: var(--background);
+  color: var(--foreground);
+  font-weight: 500;
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.dark .today-page .today-tabs .ops-tab[aria-selected="true"] {
+  background: rgb(255 255 255 / 0.07);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+}
+
+.today-page .today-tabs .ops-tab-rem[aria-selected="true"] {
+  box-shadow: inset 0 0 0 1px hsl(var(--rem-line) / 0.5);
+}
+
+/* --------------------------------------- incident + chore cards (desktop) */
+
+.today-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+@media (min-width: 641px) {
+  .today-page .incident-row {
+    gap: 14px;
+    padding: 16px 18px;
+    border: 1px solid var(--hairline);
+    border-radius: 16px;
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+    transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+  }
+
+  .today-page .incident-row:last-child {
+    border-bottom: 1px solid var(--hairline);
+  }
+
+  .today-page .incident-row:hover {
+    background: var(--surface);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-card-lg);
+  }
+
+  .dark .today-page .incident-row {
+    border-color: rgb(255 255 255 / 0.07);
+    box-shadow: var(--shadow-card), inset 0 1px 0 rgb(255 255 255 / 0.05);
+  }
+
+  .today-page .incident-row .sev-rail {
+    width: 4px;
+  }
+
+  .today-page .today-chore-list > li {
+    margin-bottom: 8px;
+    padding: 12px 14px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--today-radius-sm);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  .today-page .today-chore-list > li:last-child {
+    margin-bottom: 0;
+  }
+
+  .dark .today-page .today-chore-list > li {
+    border-color: rgb(255 255 255 / 0.07);
+  }
+}
+
+/* ------------------------------------------------------- digest aux card */
+
+.today-page .today-digest {
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: var(--today-radius);
+  background: var(--surface);
+  border-color: var(--hairline);
+  box-shadow: var(--shadow-card-lg);
+}
+
+.dark .today-page .today-digest {
+  border-color: rgb(255 255 255 / 0.07);
+  box-shadow: var(--shadow-card-lg), inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+.today-page .digest-fold {
+  border-radius: var(--today-radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.today-page .digest-body {
+  gap: 8px;
+}
+
+.today-aux {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.today-digest-block + .today-digest-block,
+.today-page details .worthwhile {
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline);
+}
+
+.today-page .worthwhile-row + .worthwhile-row {
+  margin-top: 4px;
+  padding-top: 9px;
+  border-top: 1px solid var(--hairline);
+}
+
+.today-page .today-worthwhile-card {
+  padding: 14px 16px;
+  border-radius: var(--today-radius);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--shadow-card-lg);
+}
+
+.dark .today-page .today-worthwhile-card {
+  border-color: rgb(255 255 255 / 0.07);
+  box-shadow: var(--shadow-card-lg), inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+.today-page .today-night-row {
+  padding: 1px 8px;
+  margin: 0 -8px;
+  border-radius: 8px;
+}
+
+.today-page .today-night-row:hover {
+  background: var(--background);
+}
+
+/* ------------------------------------------------------------------ phone */
+
+@media (max-width: 1023px) {
+  .today-hero {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+    padding: 20px;
+  }
+
+  .today-kpi {
+    padding: 12px 14px 10px;
+  }
+
+  .today-kpi-value {
+    font-size: 22px;
+  }
+}
+
+@media (max-width: 640px) {
+  .today-hero {
+    padding: 18px 16px;
+    border-radius: 18px;
+  }
+
+  .today-page .text-verdict {
+    font-size: 23px;
+  }
+
+  .today-page .today-tabs {
+    max-width: 100%;
+  }
+
+  .today-page .today-tabs .ops-tab {
+    min-height: 44px;
+  }
+
+  .today-page .today-digest {
+    padding: 16px;
+    border-radius: 18px;
+  }
+}
