@@ -41,7 +41,7 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  width: 96px;
+  width: 72px;
   padding: 4px 0 4px 4px;
   background: transparent;
   border: 0;
@@ -196,9 +196,20 @@
     border-radius: 999px;
   }
 
+  /* The brand keeps a fixed width; the nav capsule takes the rest. Without
+   * this the brand inherits the 100% capsule width and pushes every entry
+   * off-viewport while scrollWidth stays 0, which no overflow assertion can
+   * catch — only measuring each entry's box does. */
   .rail-brandbox {
     flex: none;
+    width: auto;
     padding: 6px;
+  }
+
+  .rail-navbox {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: auto;
   }
 
   .rail-brand {

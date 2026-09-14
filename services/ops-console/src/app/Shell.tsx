@@ -94,7 +94,7 @@ export function Shell({
         <div className="rail-float rail-brandbox">
           <span className="rail-brand" title={copy.brand} aria-hidden>T</span>
         </div>
-        <div className="rail-float">
+        <div className="rail-float rail-navbox">
           <nav className="rail-nav" aria-label={copy.brand}>
             {NAV.filter((item) => can(item.requires, role)).map((item) => {
               const Icon = item.icon;
