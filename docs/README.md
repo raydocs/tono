@@ -2,6 +2,18 @@
 
 Start here. Dated handoffs and one-off reviews live in [archive/](archive/).
 
+## Development and execution
+
+| Doc | What it owns |
+|---|---|
+| [BUILD_AND_TEST.md](BUILD_AND_TEST.md) | GitHub-hosted CI, MacBook lightweight work, native-device acceptance and cache retention |
+| [../CONTRIBUTING.md](../CONTRIBUTING.md) | Contributor workflow and verification evidence |
+| [../AGENTS.md](../AGENTS.md) | Coding-agent rules; choose an execution host before compiling |
+
+Mac Studio no longer serves as a residential exit (owner confirmed 2026-09-14).
+Routine builds use GitHub-hosted runners; native-device acceptance remains separate.
+Use the execution guide's dated status, not old handoff machine assignments.
+
 ## Product
 
 | Doc | What it is |

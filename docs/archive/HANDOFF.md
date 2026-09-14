@@ -2,6 +2,13 @@
 
 > Historical handoff. Current layout and names: [architecture.md](../architecture.md).
 
+> **Superseded machine role — 2026-09-14:** the owner confirmed Mac Studio
+> no longer serves as a residential exit. Routine CI is GitHub-hosted; the
+> Studio is a native acceptance device, not a required runner. The July exit address, tags and
+> home-agent TODOs below are retained only as historical evidence, not current
+> instructions. Do not restore that exit role. Follow
+> [BUILD_AND_TEST.md](../BUILD_AND_TEST.md) and [SHIP_PLAN.md](../SHIP_PLAN.md).
+
 Last reviewed: 2026-07-29 (build 3 r4 catalog retry and diagnostics)
 
 ## Read this first
@@ -11,9 +18,11 @@ commit, or PR has been created. A staging-only Worker/D1 deployment now exists
 at `tono-control-plane-staging.xwwelsamqg.workers.dev`; its secrets are stored
 only in Cloudflare and the local macOS Keychain. The repository ACL artifact is
 applied to the `ruiruiwan2019@gmail.com` staging tailnet. The designated Mac
-Studio is online, tagged `tag:exit-home`, allowed as an exit node, and configured
-in `TonoExitNode`. No privileged helper has been installed. Preserve all
-existing user changes.
+Studio was, at that July snapshot, online, tagged `tag:exit-home`, allowed as an
+exit node, and configured in `TonoExitNode`; that role is now retired. The
+remaining installation/worktree claims in this paragraph describe the same
+historical snapshot, not current machine state. No privileged helper had been
+installed at that time.
 
 The Worker state machine and client fail-closed paths are substantially
 hardened, but this is **not a production-ready release**. The remaining
@@ -275,9 +284,10 @@ container is not separately notarized; use the ZIP for testing.
 - The ACL policy artifact was saved in the staging tailnet and its policy tests
   passed. A legacy unredeemed invitation may remain in staging, but the current
   test-stage authentication path neither reads nor consumes invitations.
-- The home Mac Studio (`100.115.160.62`) is connected, advertises Exit Node,
-  reports UDP connectivity, is owned by `tag:exit-home`, and its route is
-  allowed. The staging app configuration points to that Tailscale IP.
+- Historical July result (role retired): the home Mac Studio (`100.115.160.62`)
+  was connected, advertised Exit Node, reported UDP connectivity, was owned
+  by `tag:exit-home`, and had its route allowed. The staging app configuration
+  pointed to that Tailscale IP. This is not a current build-worker address.
 - Resend accepted a real staging OTP send. The smoke challenge was immediately
   invalidated afterward, so both device slots remain unused.
 - Apple Developer Team `YY57758GS7` has an explicit `com.raydocs.tono` App ID
@@ -308,6 +318,9 @@ signing/notarization pipeline worked, not as a distributable build.
 
 ## Residual ship blockers
 
+Historical July backlog only. Current release gates live in SHIP_PLAN; the
+Mac Studio home-exit/reporter tasks below must not be resumed on that machine.
+
 1. **Privileged install/lifecycle validation:** caller identity, native PF
    management, root-owned runtime, and config-content binding are implemented.
    The current installer is still an administrator-approved LaunchDaemon path,
@@ -323,7 +336,7 @@ signing/notarization pipeline worked, not as a distributable build.
    tailnet can host a real device, but a Tono-enrolled client has not exercised
    the three-ID/public-key confirm contract. Run enroll → confirm → exit-IP →
    revoke, including concurrent confirm and API outage recovery.
-4. **Live home-exit traffic:** the Mac Studio is online, tagged, advertised, and
+4. **Live home-exit traffic (superseded):** at that snapshot the Mac Studio was online, tagged, advertised, and
    approved, but a Tono client has not yet proved its public traffic exits
    through the home public IP or that the policy remains correct during failure.
 5. **Managed catalog live multi-exit traffic:** migration `0010`, the catalog
@@ -333,7 +346,7 @@ signing/notarization pipeline worked, not as a distributable build.
    fetch, VLESS handshakes, observed US/Japan exit IPs, safe live switching,
    revision sync, and fail-closed selected-node deletion while PF admits only
    the selected root/TCP endpoint.
-6. **Usage attribution deployment:** server-verified public-key mapping,
+6. **Usage attribution deployment (historical machine assignment):** server-verified public-key mapping,
    stable-ID audit metadata, and per-peer counter accumulation are implemented
    and tested, but the new Worker inventory route is not deployed and the
    reporter is not installed on the Mac Studio. Verify real exit traffic

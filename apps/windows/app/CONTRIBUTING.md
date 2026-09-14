@@ -1,136 +1,51 @@
-# CONTRIBUTING
+# Contributing to the Tono Windows app
 
-Thank you for your interest in contributing to **Clash Verge Rev**! This guide provides instructions to help you set up your development environment and start contributing effectively.
+This is Tono's app workspace, not the upstream Clash Verge Rev contributor
+entry point. Upstream license/attribution remains intact; Tono's product,
+service and release boundaries are defined by the repository.
 
-## Internationalization (i18n)
+Read [root CONTRIBUTING](../../../CONTRIBUTING.md),
+[AGENTS](../../../AGENTS.md), [execution policy](../../../docs/BUILD_AND_TEST.md)
+and [Windows development](../README.md#development) first.
 
-We welcome translations and improvements to existing locales. For details on contributing translations, please see [CONTRIBUTING_i18n.md](docs/CONTRIBUTING_i18n.md).
+## Frontend-only checks
 
-## Development Setup
+Use the package-manager version pinned in `package.json` and its lockfile.
+From `apps/windows/app`, install only when frontend work needs dependencies:
 
-Before contributing, you need to set up your development environment. Follow the steps below carefully.
-
-### Prerequisites
-
-1. **Install Rust and Node.js**  
-   Our project requires both Rust and Node.js. Follow the official installation instructions [here](https://tauri.app/start/prerequisites/).
-
-### Windows Users
-
-> [!NOTE]  
-> **Windows ARM users must also install [LLVM](https://github.com/llvm/llvm-project/releases) (including clang) and set the corresponding environment variables.**  
-> The `ring` crate depends on `clang` when building on Windows ARM.
-
-Additional steps for Windows:
-
-- Ensure Rust and Node.js are added to your system `PATH`.
-
-- Install the GNU `patch` tool.
-
-- Use the MSVC toolchain for Rust:
-
-```bash
-rustup target add x86_64-pc-windows-msvc
-rustup set default-host x86_64-pc-windows-msvc
-```
-
-### Install Node.js Package Manager
-
-Enable `corepack`:
-
-```bash
-corepack enable
-```
-
-### Install Project Dependencies
-
-Node.js dependencies:
-
-```bash
-pnpm install
-```
-
-Ubuntu-only system packages:
-
-```bash
-sudo apt-get install -y libxslt1.1 libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
-```
-
-### Download the Mihomo Core Binary (Automatic)
-
-```bash
-pnpm run prebuild
-pnpm run prebuild --force  # Re-download and overwrite Mihomo core and service binaries
-```
-
-### Run the Development Server
-
-```bash
-pnpm dev           # Standard
-pnpm dev:diff      # If an app instance already exists
-pnpm dev:tauri     # Run Tauri development mode
-```
-
-### Build the Project
-
-Standard build:
-
-```bash
-pnpm build
-```
-
-Fast build for testing:
-
-```bash
-pnpm build:fast
-```
-
-### Clean Build
-
-```bash
-pnpm clean
-```
-
-### Portable Version (Windows Only)
-
-```bash
-pnpm portable
-```
-
-## Contributing Your Changes
-
-### Before Committing
-
-**Code quality checks:**
-
-```bash
-# Rust backend
-cargo clippy-all
-# Frontend
+```sh
+pnpm install --frozen-lockfile
+pnpm typecheck
 pnpm lint
+pnpm test -- <changed-behavior.test.ts>
+pnpm web:dev
 ```
 
-**Code formatting:**
+The test filename is a placeholder for the narrow test you changed. Browser
+preview does not verify Tauri IPC, service authorization, WFP or DNS. Preserve
+existing i18n keys and run the project's `pnpm i18n:types` when changing locale
+keys. Do not use a broad auto-fix/format command on unrelated files.
 
-```bash
-# Rust backend
-cargo fmt
-# Frontend
-pnpm format
-```
+## Native execution
 
-### Signing your commit
+- Use the existing GitHub-hosted `windows-2025` CI for routine native checks;
+  Windows device acceptance is separate. The maintainer's MacBook does not
+  default to native Rust checks, Tauri dev/build or Core downloads.
+- Match the checked-in Rust toolchain and CI's MSVC/SDK setup. Do not replace
+  toolchain defaults globally or upgrade dependencies to bootstrap a review.
+- App, Service and portable-core Cargo workspaces are separate. Run the narrow
+  check in the relevant workspace with its actual CI prerequisites.
+- `pnpm dev` and `pnpm dev:tauri` invoke native development. `pnpm dev:service`
+  changes service installation and is not frontend setup. No sidecar fallback
+  is accepted for Tono's product protection path.
+- `pnpm prebuild` resolves native artifacts; `--force` replaces them. Do not
+  run it on the editing laptop merely to make a browser preview work.
+- A cache reset is a reviewed, inactive-directory cleanup; there is no
+  `pnpm clean` script in this workspace. Do not invent a destructive substitute.
 
-Signed commits are required to verify authorship and ensure your contributions can be merged. Reference signing-commits [here](https://docs.github.com/en/authentication/managing-commit-signature-verification/signing-commits).
+## Review evidence
 
-### Submitting Your Changes
-
-1. Fork the repository.
-
-2. Create a new branch for your feature or bug fix.
-
-3. Commit your changes with clear messages and make sure it's signed.
-
-4. Push your branch and submit a pull request.
-
-We appreciate your contributions and look forward to your participation!
+Name the ship gate/ops task, exact source SHA, execution host, commands and
+actual results. Distinguish unavailable native checks from passed ones; do not
+count compiled-out or zero-test suites as coverage. Refer to the root workflow
+for privacy, release approval and preserving other contributors' changes.
