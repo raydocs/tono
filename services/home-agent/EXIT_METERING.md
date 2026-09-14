@@ -255,6 +255,10 @@ It must fence late legacy writes and define new-user, reset, missing-source and
 retry semantics before enabling live cutover. Neither MAX/SUM nor collector
 silence proves that pairing. See #4 for acceptance criteria.
 
+The [September 14 evidence review](../../docs/ops/metering-boundary-evidence-2026-09-14.md)
+traces both reporters, the missing legacy sender, Tailscale counter-generation
+limits (#5), and the D1/D3/D5 WIP disposition. It does not authorize rollout.
+
 The sequence below describes the previous protocol for reference, **not an
 executable legacy migration after `0037`**. A future handoff must replace it.
 Apply migrations in order with the matching Worker; reverting only the Worker
