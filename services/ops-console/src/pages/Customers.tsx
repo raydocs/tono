@@ -268,6 +268,11 @@ export default function CustomersPage({
         rows={shown}
         columns={columns}
         getRowId={(row) => row.key}
+        /* The address column is the only flexible one: below the fixed
+           columns' total it collapses to zero and no scroll can bring it
+           back. A local floor keeps identities readable on a phone while the
+           container keeps the sideways scroll. */
+        className="[&>table]:min-w-[1020px]"
         onRowClick={(row) => (row.customer === null
           ? openInvite(row.invite.email)
           : openCustomer(row.customer.userId))}
