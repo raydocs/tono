@@ -79,7 +79,10 @@ export function Candidates() {
             <Chip
               key={id}
               active={filter === id}
-              count={counts[id]}
+              /* Unknown is not zero: while the list is still loading or has
+                 failed, the chips carry no number at all rather than five
+                 zeroes beside an error. Ready-but-empty keeps its real 0. */
+              count={candidates.status === 'ready' ? counts[id] : null}
               onClick={() => setFilter(id)}
             >
               {id === 'all' ? words.all : words.status[id]}
