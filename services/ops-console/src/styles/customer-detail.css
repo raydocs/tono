@@ -1,0 +1,83 @@
+/* Customer 360: who this is and what to do, first.
+ *
+ * Scoped under `.customer-detail-page`. The hero card carries identity,
+ * status, deadlines and the header actions; the main column reads the
+ * connection story (now, draft, followups, timeline, activity, destinations,
+ * services, carriers, devices); the aux card holds the account side
+ * (home line, Claude account, proof, chores, billing). DOM order is the
+ * reading order, so the phone keeps it and the desktop grid places
+ * explicitly. No section is reworded, refetched or reordered. */
+
+.customer-hero-card {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 20px;
+  box-shadow: var(--shadow-card-lg);
+  padding: 22px 24px;
+}
+
+.dark .customer-hero-card {
+  border-color: rgb(255 255 255 / 0.07);
+  box-shadow: var(--shadow-card-lg), inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+.customer-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.customer-main {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  min-width: 0;
+}
+
+.customer-aux-card {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 20px;
+  box-shadow: var(--shadow-card-lg);
+  padding: 18px;
+}
+
+.dark .customer-aux-card {
+  border-color: rgb(255 255 255 / 0.07);
+  box-shadow: var(--shadow-card-lg), inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+@media (min-width: 1100px) {
+  .customer-grid {
+    grid-template-columns: minmax(0, 1fr) 360px;
+  }
+
+  .customer-main {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .customer-aux-card {
+    grid-column: 2;
+    grid-row: 1;
+    position: sticky;
+    top: 16px;
+  }
+}
+
+@media (max-width: 640px) {
+  .customer-hero-card {
+    padding: 18px 16px;
+    border-radius: 18px;
+  }
+
+  .customer-aux-card {
+    padding: 16px;
+    border-radius: 18px;
+  }
+}
