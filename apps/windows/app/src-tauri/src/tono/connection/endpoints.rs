@@ -3,6 +3,21 @@
 use tono_core::node::ValidatedNode;
 use tono_service_protocol::{ProxyEndpoint, ProxyProtocol};
 
+/// Preserve the compiler's transport as part of each exact WFP tuple.
+pub(super) fn compiled_endpoints(endpoints: &[tono_core::sing_box::DialEndpoint]) -> Vec<ProxyEndpoint> {
+    endpoints
+        .iter()
+        .map(|endpoint| ProxyEndpoint {
+            ip: endpoint.host.to_string(),
+            port: endpoint.port,
+            protocol: match endpoint.transport {
+                tono_core::sing_box::Transport::Tcp => ProxyProtocol::Tcp,
+                tono_core::sing_box::Transport::Udp => ProxyProtocol::Udp,
+            },
+        })
+        .collect()
+}
+
 /// §6.2 endpoint derivation: VLESS is TCP; hy2 is that same IPv4/port over UDP.
 /// Selecting a VLESS node does not pre-permit a sibling hy2 block.
 pub fn proxy_endpoint_of(node: &ValidatedNode) -> ProxyEndpoint {
@@ -43,9 +58,7 @@ pub fn unique_proxy_endpoints(endpoints: Vec<ProxyEndpoint>) -> Vec<ProxyEndpoin
     let mut unique = Vec::new();
     for endpoint in endpoints {
         if !unique.iter().any(|existing: &ProxyEndpoint| {
-            existing.ip == endpoint.ip
-                && existing.port == endpoint.port
-                && existing.protocol == endpoint.protocol
+            existing.ip == endpoint.ip && existing.port == endpoint.port && existing.protocol == endpoint.protocol
         }) {
             unique.push(endpoint);
         }

@@ -12,8 +12,6 @@ use tono_core::connection::ConnectStage;
 use tono_logging::{Type, logging};
 use tono_service_protocol::{KillSwitchStatus, KillSwitchStatusMode};
 
-use crate::core::service;
-use crate::tono::{audit::{self, AuditEvent}, state::TonoState};
 use super::cleanup::stale_after_arm;
 use super::controller::{
     CONTROLLER_HTTP_TIMEOUT, CONTROLLER_READY_TIMEOUT, VERSION_POLL_ATTEMPTS, VERSION_POLL_FAST_ATTEMPTS,
@@ -21,10 +19,15 @@ use super::controller::{
 };
 use super::controller_error_detail;
 use super::failure::{
-    NODE_OR_CORE_UNREACHABLE_PREFIX, TUN_DATA_PLANE_BROKEN_PREFIX, TUN_INGRESS_BROKEN_PREFIX, StageFailure,
+    NODE_OR_CORE_UNREACHABLE_PREFIX, StageFailure, TUN_DATA_PLANE_BROKEN_PREFIX, TUN_INGRESS_BROKEN_PREFIX,
 };
 use super::status::set_stage;
 use super::transaction::ConnectTransaction;
+use crate::core::service;
+use crate::tono::{
+    audit::{self, AuditEvent},
+    state::TonoState,
+};
 
 /// §6.8 exit probe target.
 pub(super) const EXIT_PROBE_URL: &str = "https://www.gstatic.com/generate_204";
@@ -343,10 +346,10 @@ pub(super) fn classify_exhausted_data_plane(
     format!("{body} [{}]", code.as_str())
 }
 
-/// fake-ip range check (§5: 198.18.0.0/16).
+/// sing-box fake-IP space is disjoint from the TUN/DNS /30.
 pub fn is_fake_ip(addr: IpAddr) -> bool {
     match addr {
-        IpAddr::V4(v4) => v4.octets()[0] == 198 && v4.octets()[1] == 18,
+        IpAddr::V4(v4) => v4.octets()[0] == 198 && v4.octets()[1] == 19,
         IpAddr::V6(_) => false,
     }
 }
@@ -382,10 +385,7 @@ pub(super) async fn verify_fake_ip() -> Result<(), String> {
         }
         #[cfg(not(windows))]
         {
-            let lookup = tokio::time::timeout(
-                lookup_timeout,
-                tokio::net::lookup_host((FAKE_IP_LOOKUP_HOST, 443)),
-            )
+            let lookup = tokio::time::timeout(lookup_timeout, tokio::net::lookup_host((FAKE_IP_LOOKUP_HOST, 443)))
             .await
             .map_err(|_| format!("system DNS lookup exceeded {lookup_timeout:?}"))
             .and_then(|result| {
@@ -442,9 +442,7 @@ pub(super) fn fake_ip_race_state(
 }
 
 #[cfg(windows)]
-async fn verify_fake_ip_windows_attempt(
-    lookup_timeout: Duration,
-) -> Result<&'static str, String> {
+async fn verify_fake_ip_windows_attempt(lookup_timeout: Duration) -> Result<&'static str, String> {
     let system = crate::tono::windows_dns::query_a(FAKE_IP_LOOKUP_HOST, lookup_timeout);
     let tun = crate::tono::protected_probe::query_protected_a(FAKE_IP_LOOKUP_HOST);
     tokio::pin!(system);

@@ -815,7 +815,7 @@ async function assertWindowsPackagingConfig() {
 async function resolvePinnedWindowsCore() {
   const binary = path.join(SIDECAR_DIR, `tono-core-${SIDECAR_HOST}.exe`)
   if (!fs.existsSync(binary)) {
-    throw new Error('Pinned Windows Core is missing. Build with tooling/scripts/build-mihomo-adaptive.sh --install-adaptive-windows or download the same-commit windows-core CI artifact; upstream latest is not a substitute.')
+    throw new Error('Pinned Windows sing-box Core is missing. Download the same-commit windows-core CI artifact built by tooling/scripts/build-sing-box.sh; upstream stock binaries are not a substitute.')
   }
   if (process.platform !== 'win32') {
     throw new Error('Verify Windows prebuild on Windows; use build-windows-release.sh for cross-compilation.')

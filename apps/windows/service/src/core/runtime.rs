@@ -9,6 +9,8 @@ pub(super) struct CoreRuntimeRecord {
     pub(super) pid: u32,
     pub(super) ipc_path: String,
     pub(super) identity: ProcessIdentity,
+    #[serde(default)]
+    pub(super) runtime_sha256: Option<String>,
 }
 
 pub(super) async fn write_core_runtime_record(record: &CoreRuntimeRecord) -> Result<()> {
@@ -51,6 +53,7 @@ pub async fn write_core_runtime_record_for_tests(pid: u32, ipc_path: String) -> 
         pid,
         ipc_path,
         identity,
+        runtime_sha256: None,
     })
     .await
 }
@@ -84,6 +87,21 @@ pub(super) async fn remove_core_runtime_record() {
 }
 
 pub(super) async fn is_core_socket_reachable(path: &str) -> bool {
+    #[cfg(windows)]
+    if let Some(address) = path.strip_prefix("tcp://") {
+        let Ok(address) = address.parse::<std::net::SocketAddrV4>() else {
+            return false;
+        };
+        if *address.ip() != std::net::Ipv4Addr::LOCALHOST {
+            return false;
+        }
+        return tokio::time::timeout(
+            Duration::from_millis(300),
+            tokio::net::TcpStream::connect(address),
+        )
+        .await
+        .is_ok_and(|result| result.is_ok());
+    }
     #[cfg(unix)]
     {
         tokio::time::timeout(

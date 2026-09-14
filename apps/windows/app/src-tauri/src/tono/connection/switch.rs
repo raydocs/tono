@@ -1,23 +1,21 @@
 //! Selected-exit switch and vanish. Generation bump stays with the parent connect owner.
 
+use super::controller::{controller_client, controller_url, fetch_connections, select_exit_group};
+use super::endpoints::{proxy_endpoints_for, unique_proxy_endpoints};
+use super::probes::verify_tun_data_plane;
+use super::reconnect::schedule_reconnect;
+use super::{Attempt, BoxedTask, attempt, fail_connect, seed_autostart_after_connect};
+use crate::core::service;
+use crate::process::AsyncHandler;
+use crate::tono::{
+    audit::AuditEvent, catalog_sync, commands, connection_plan::guard_rejection_is_transient, state::TonoState,
+};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::AppHandle;
 use tono_core::EXIT_GROUP_NAME;
 use tono_logging::{Type, logging};
 use tono_plugin_core::{MihomoExt as _, models::Protocol};
-use crate::core::service;
-use crate::process::AsyncHandler;
-use crate::tono::{
-    audit::AuditEvent, catalog_sync, commands, connection_plan::guard_rejection_is_transient, state::TonoState,
-};
-use super::{
-    Attempt, BoxedTask, attempt, fail_connect, seed_autostart_after_connect,
-};
-use super::controller::{controller_client, controller_url, fetch_connections, select_exit_group};
-use super::endpoints::{proxy_endpoints_for, unique_proxy_endpoints};
-use super::probes::verify_tun_data_plane;
-use super::reconnect::schedule_reconnect;
 
 /// §3: the selected node vanished from a new catalog while a tunnel was up —
 /// stop the core, keep the kill switch armed, and wait for the user to pick
@@ -117,7 +115,11 @@ pub(super) async fn restore_selected_node(
     }
     let catalog_dir = inner.catalog_dir.clone();
     if let Err(error) = restore_selection_value(&mut inner.selected_node, &catalog_dir, previous_name) {
-        logging!(warn, Type::Service, "Tono: could not persist rolled-back selection: {error:#}");
+        logging!(
+            warn,
+            Type::Service,
+            "Tono: could not persist rolled-back selection: {error:#}"
+        );
     }
     let status = commands::status_of(&inner);
     drop(inner);
@@ -136,6 +138,19 @@ fn restore_selection_value(
 }
 
 pub async fn switch_selected_node(
+    state: Arc<TonoState>,
+    app: AppHandle,
+    generation: u64,
+    _previous_name: String,
+    _next_name: String,
+) {
+    // Selection is compiled into the sing-box JSON. Every switch is a protected
+    // stop/start transaction; no selector mutation, rollback dial, or fallback.
+    cold_switch_selected_node(state, app, generation).await;
+}
+
+#[cfg(test)]
+async fn legacy_switch_selected_node(
     state: Arc<TonoState>,
     app: AppHandle,
     generation: u64,
@@ -159,11 +174,7 @@ pub async fn switch_selected_node(
             }
             return;
         }
-        let previous = inner
-            .nodes
-            .iter()
-            .find(|node| node.name == previous_name)
-            .cloned();
+        let previous = inner.nodes.iter().find(|node| node.name == previous_name).cloned();
         let next = inner.nodes.iter().find(|node| node.name == next_name).cloned();
         let routing = inner.routing.clone();
         let nodes = inner.nodes.clone();
@@ -249,7 +260,9 @@ pub async fn switch_selected_node(
                 anyhow::bail!("previous exit is unavailable for rollback");
             }
             anyhow::ensure!(state.lock().await.connect_generation == generation, "switch retired");
-            select_exit_group(&secret, port, &previous_name).await.map_err(anyhow::Error::msg)?;
+            select_exit_group(&secret, port, &previous_name)
+                .await
+                .map_err(anyhow::Error::msg)?;
             verify_tun_data_plane().await.map_err(anyhow::Error::msg)?;
             anyhow::ensure!(state.lock().await.connect_generation == generation, "switch retired");
             service::tono_replace_proxy_endpoints(&session, old_endpoints.clone()).await?;
@@ -258,7 +271,9 @@ pub async fn switch_selected_node(
         if converge_or_recover(
             rollback,
             cold_switch_selected_node(Arc::clone(&state), app.clone(), generation),
-        ).await {
+        )
+        .await
+        {
             restore_selected_node(&state, &app, generation, &previous_name).await;
         }
         return;
@@ -271,7 +286,9 @@ pub async fn switch_selected_node(
     if !converge_or_recover(
         service::tono_replace_proxy_endpoints(&session, new_endpoints),
         cold_switch_selected_node(Arc::clone(&state), app.clone(), generation),
-    ).await {
+    )
+    .await
+    {
         return;
     }
     let inner = state.lock().await;
@@ -288,7 +305,11 @@ async fn converge_or_recover(
     recovery: impl std::future::Future<Output = ()>,
 ) -> bool {
     if let Err(error) = convergence.await {
-        logging!(warn, Type::Service, "Tono: switch protection did not converge ({error:#}); recovering with WFP armed");
+        logging!(
+            warn,
+            Type::Service,
+            "Tono: switch protection did not converge ({error:#}); recovering with WFP armed"
+        );
         recovery.await;
         return false;
     }
@@ -352,11 +373,7 @@ pub(super) async fn close_connections_bound_to(state: &Arc<TonoState>, generatio
         return;
     };
     for connection in payload.connections {
-        if !connection
-            .chains
-            .iter()
-            .any(|hop| hop.eq_ignore_ascii_case(exit_name))
-        {
+        if !connection.chains.iter().any(|hop| hop.eq_ignore_ascii_case(exit_name)) {
             continue;
         }
         if connection.id.is_empty() {
@@ -370,11 +387,7 @@ pub(super) async fn close_connections_bound_to(state: &Arc<TonoState>, generatio
                 segments.push(&connection.id);
             });
         }
-        let _ = client
-            .delete(url)
-            .bearer_auth(&secret)
-            .send()
-            .await;
+        let _ = client.delete(url).bearer_auth(&secret).send().await;
     }
 }
 
@@ -387,12 +400,17 @@ mod convergence_tests {
     fn verified_rollback_restores_the_selection_used_on_next_launch() {
         let directory = std::env::temp_dir().join(format!("tono-switch-selection-{}", nanoid::nanoid!()));
         std::fs::create_dir_all(&directory).unwrap();
-        let _cleanup = scopeguard::guard(directory.clone(), |path| { let _ = std::fs::remove_dir_all(path); });
+        let _cleanup = scopeguard::guard(directory.clone(), |path| {
+            let _ = std::fs::remove_dir_all(path);
+        });
         crate::tono::state::save_selection(&directory, "new-exit").unwrap();
         let mut selected = Some("new-exit".to_string());
         super::restore_selection_value(&mut selected, &directory, "old-exit").unwrap();
         assert_eq!(selected.as_deref(), Some("old-exit"));
-        assert_eq!(crate::tono::state::load_selection(&directory).as_deref(), Some("old-exit"));
+        assert_eq!(
+            crate::tono::state::load_selection(&directory).as_deref(),
+            Some("old-exit")
+        );
     }
 
     #[tokio::test]
@@ -410,7 +428,8 @@ mod convergence_tests {
                 recovery_ran = true;
                 fsm.tunnel_died();
             },
-        ).await;
+        )
+        .await;
         assert!(!completed, "no caller may publish switch completion");
         assert!(recovery_ran);
         assert!(!fsm.status().is_connected);
