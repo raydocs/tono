@@ -161,7 +161,7 @@ async fn mark_direct_reload_in_flight(state: &Arc<TonoState>, generation: u64) {
     inner.direct_reload_until = Some((generation, std::time::Instant::now() + DIRECT_CONFIG_RELOAD_TIMEOUT));
 }
 
-async fn clear_direct_reload_in_flight(state: &Arc<TonoState>, generation: u64) {
+pub(super) async fn clear_direct_reload_in_flight(state: &Arc<TonoState>, generation: u64) {
     let mut inner = state.lock().await;
     if inner.connect_generation != generation {
         return;
