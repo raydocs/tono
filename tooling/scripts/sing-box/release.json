@@ -1,0 +1,50 @@
+{
+  "schema_version": 2,
+  "scope": "integration-draft-not-native-qualified",
+  "engine": "sing-box",
+  "version": "1.15.0-alpha.3",
+  "upstream_commit": "93fff5954390367dd456cad3cbd79be54f8b941f",
+  "official_release": "https://github.com/SagerNet/sing-box/releases/tag/v1.15.0-alpha.3",
+  "published_at": "2026-09-13T14:02:08Z",
+  "checked_on": "2026-09-14",
+  "independent_checks": ["shared-owner GitHub releases API and tag ref", "Windows-owner GitHub releases API and tag ref, reported by Puck"],
+  "build_candidate": "../../../docs/reports/sing-box-evaluation/migration-m0/candidate.json",
+  "build_candidate_sha256": "9e50077ea88adcaf17c8b6c8344868f651ce4af9b576135669a8de02c2f101de",
+  "go_minimum": "1.25.5",
+  "go_version": "go1.27.1",
+  "cgo_enabled": "0",
+  "tags": ["with_gvisor", "with_quic", "with_utls", "with_clash_api"],
+  "patches": [],
+  "go_mod_sha256": "c8a55d750ff56af8e097478b7ce88f10224f406041e73002ef89e4c8ade5769b",
+  "go_sum_sha256": "121265484ad99c79970266e5896eba82ff660c2921624225afa316e408f6d38e",
+  "banner": "1.15.0-alpha.3-tono-m1.1",
+  "runtime_template": "runtime-template.json",
+  "check_argv": ["check", "-c", "<owned-runtime.json>"],
+  "run_argv": ["run", "-D", "<owned-generation-directory>", "-c", "<owned-runtime.json>"],
+  "reload": "protected-stop-start",
+  "post_replay": false,
+  "automatic_fallback": false,
+  "targets": {
+    "macos-arm64": {"build_target": "darwin-arm64", "binary": "sing-box", "binary_sha256": "6c86720c7baf60057ad9ea05b64149939d29a37397e93599563de0db5677baae", "manifest_sha256": "c765b9d2cc7d1cb31debd9bc699cb906bdd495e0cde08f401527879ac7eb394a", "tun_interface": "utun199"},
+    "windows-amd64-v2": {"build_target": "windows-amd64-v2", "binary": "sing-box.exe", "binary_sha256": "9fa8e825a697ccea2beed17d8766af947084041173df4d80b622e2bf730d544f", "manifest_sha256": "2f5642f51c03a620f870c069239ad8b35d93e123903765da430e62070e00f757", "tun_interface": "Tono"},
+    "linux-amd64-v2": {"build_target": "linux-amd64-v2", "binary": "sing-box", "binary_sha256": "120b91c702a2b3d15ce09ca5ce850d5e8880ca65a4017950df91cadd276eabd2", "manifest_sha256": "ab39c6c4d5147844faaccb6a32189c090948bc06f5202c63bd33d8db757ab1e1", "purpose": "offline check only"}
+  },
+  "capabilities": {
+    "reality-tcp": "supported",
+    "hy2": "CA-only; DER-pinned nodes reject",
+    "direct": "owner-admitted plan and native lease required",
+    "home": "fixed home node or SOCKS5 detour through selected exit",
+    "dns-proxied": "single proxied DoH with pinned hosts and fake IPv4",
+    "tun": "native DNS/PF/WFP ownership; stack field forbidden",
+    "clash-api": "authenticated observation; not application receipts",
+    "dns-redundancy": "unsupported",
+    "hy2-der-pin": "unsupported",
+    "unknown": "reject"
+  },
+  "official_download_evidence_only": {
+    "note": "Downloaded and hashed by shared owner; not the selected Tono builds above. Go1.26.8, amd64-v1; Darwin CGO=1, Linux/Windows CGO=0; broader upstream tags.",
+    "darwin-arm64": {"archive_sha256": "1ea2d1e7cc067ffaeb432af837e920d6b496e82e9181322b262fdef07aaf5f0e", "binary_sha256": "1ee174b9c60a39943671e8947a4995f9ecc49322b1acf8381906eff2d4c572ad"},
+    "linux-amd64": {"archive_sha256": "cf7bf13d593290b2ef4b995c0754fbad3b1f904e9ec61ac5c4315e84c2a3c1ae", "binary_sha256": "2f4a208668918e7cd3866d1638c9306069d0de3f428eaabd3f68c1f21ba10ae1"},
+    "windows-amd64": {"archive_sha256": "09c7b7834b962a05de4bf000ca8cebd67945839446c63038748c7c59413ce01c", "binary_sha256": "3edf77753630cdf55a5d9b1a0efde8f716a226e2c15b2562b03d06027a81b4d3"}
+  }
+}

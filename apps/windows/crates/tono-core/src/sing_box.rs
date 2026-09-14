@@ -26,6 +26,9 @@ use sha2::{Digest, Sha256};
 use std::{collections::BTreeSet, fmt, net::SocketAddrV4};
 use thiserror::Error;
 
+mod runtime;
+pub use runtime::{DialEndpoint, OwnedSingBoxRuntime, RuntimeInput, Transport, build_runtime};
+
 pub const PROFILE: &str = "reality-tcp-no-special-routing-v1";
 const MAX_BYTES: usize = 8 * 1024 * 1024;
 
@@ -46,6 +49,8 @@ pub enum SingBoxError {
     UnsupportedFingerprint,
     #[error("TONO_SINGBOX_INVALID_CONTROL")]
     InvalidControl,
+    #[error("TONO_SINGBOX_UNSUPPORTED_CERTIFICATE_PIN")]
+    UnsupportedCertificatePin,
 }
 
 /// Explicitly synthetic data, not deserializable from a product/IPC request.
