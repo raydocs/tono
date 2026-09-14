@@ -114,7 +114,8 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
     };
     for capability in input.required_capabilities {
         match capability.as_str() {
-            "reality-tcp" | "hy2" | "dns-proxied" | "tun" | "clash-api" => (),
+            "reality-tcp" | "dns-proxied" | "tun" | "clash-api" => (),
+            "hy2" => return Err(UnsupportedCertificatePin),
             "direct" if input.direct_plan.is_some() => (),
             "home" if input.routing.home_proxy.is_some() || input.routing.home_socks5.is_some() => {
                 ()
@@ -570,6 +571,14 @@ mod tests {
     #[test]
     fn hy2_der_pin_never_becomes_spki_or_disappears_silently() {
         let mut nodes = nodes();
+        let routing = CatalogRouting::default();
+        let required = ["hy2".into()];
+        let mut request = input(&nodes, &routing);
+        request.required_capabilities = &required;
+        assert_eq!(
+            build_runtime(request).unwrap_err(),
+            SingBoxError::UnsupportedCertificatePin
+        );
         let hy2 = node::admit_node(&serde_yaml_ng::to_value(json!({"name":"Fixture Alpha · hy2","type":"hysteria2",
             "server":"8.8.4.4","port":8444,"password":"11111111-1111-4111-8111-111111111111","sni":"hy2.example","fingerprint":"ab".repeat(32)})).unwrap()).unwrap();
         nodes.push(hy2);
