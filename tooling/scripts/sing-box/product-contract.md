@@ -89,7 +89,7 @@ after all platform callers have migrated; this PR does not break main callers.
 | Capability | v2 mapping / invariant |
 |---|---|
 | Reality TCP | `vless`, TLS Reality + explicit uTLS chrome, optional vision; re-admit all nodes |
-| HY2 without pin | `hysteria2`, password, ordinary Go TLS SNI/CA verification; outer dial UDP |
+| HY2 without pin | upstream can parse CA-only TLS, but Tono admission requires DER pin; **not a product-supported path** |
 | HY2 DER pin | **refuse** `TONO_SINGBOX_UNSUPPORTED_CERTIFICATE_PIN`; never map DER to SPKI |
 | DIRECT exact | logical AND: network, domain, IP /32, port; concrete `direct` outbound with `bind_interface` |
 | DIRECT native | signature-admitted anchored `process_path_regex` AND reviewed TCP ports; no name-only TCP escape |
@@ -143,6 +143,10 @@ catalog. An equivalent solution requires a separately built DER verifier in the
 actual QUIC TLS backend and same-key-leaf/name/time regression checks. Stock
 binaries cannot consume an invented DER field. Thus pinned HY2 remains an
 explicit implementation blocker, not a silently removed pin or converted hash.
+`node::admit_hysteria2` requires `fingerprint` even for a CA-signed node, so no
+CA-only Tono draft is permitted. The first hosted Rust run caught a synthetic
+test that incorrectly assumed otherwise; the correction preserves admission
+and tests that removing a pin rejects even an unselected node.
 
 `required_capabilities` accepts `reality-tcp`, `hy2`, `direct`, `home`,
 `dns-proxied`, `tun`, `clash-api`. `hy2` still validates each node's actual

@@ -31,7 +31,7 @@
   },
   "capabilities": {
     "reality-tcp": "supported",
-    "hy2": "CA-only; DER-pinned nodes reject",
+    "hy2": "unavailable: Tono admission requires DER pin; selected/home/required rejects, unselected reported unavailable",
     "direct": "owner-admitted plan and native lease required",
     "home": "fixed home node or SOCKS5 detour through selected exit",
     "dns-proxied": "single proxied DoH with pinned hosts and fake IPv4",
