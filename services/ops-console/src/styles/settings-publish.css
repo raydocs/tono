@@ -20,6 +20,20 @@
   min-width: 728px;
 }
 
+/* The policy meta row carries the online stamp plus up to four actions in
+   one flex row whose action end is shrink-0 and nowrap. On a 320 px screen
+   the group alone is wider than the content box and pushes 发布 off the
+   edge. Scoped to this wrapper only, the group may wrap and shrink with
+   the box; the buttons themselves keep their size and 44 px height. */
+.settings-page .settings-policy .settings-policy-meta div.ml-auto {
+  flex-wrap: wrap;
+  flex-shrink: 1;
+  justify-content: flex-end;
+  min-width: 0;
+  max-width: 100%;
+  row-gap: 8px;
+}
+
 @media (max-width: 640px) {
   /* Edit / rehearse / publish / accept / reject are thumb targets on a
      phone, sized locally — the shared Action, the chips' shared shape
