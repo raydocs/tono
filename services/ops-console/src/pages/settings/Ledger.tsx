@@ -102,7 +102,11 @@ export function Ledger() {
           )}
         >
           <MonthPicker month={month} onChange={setMonth} />
-          {month0 === null ? null : <span>{words.entryCount(rows.length)}</span>}
+          {/* The count belongs to the entries read, not the summary: while
+              the entries are still loading or have failed, no number here —
+              a 0 would read as an empty month. Ready-but-empty keeps its
+              real 0. */}
+          {entries.status === 'ready' ? <span>{words.entryCount(rows.length)}</span> : null}
           {month0?.closedAt ? (
             <span className="ops-tag">
               {words.closedBy(month0.closedBy ?? copy.missing, formatWhen(month0.closedAt))}
