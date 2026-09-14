@@ -26,6 +26,7 @@ import type {
   SystemHealthDto,
 } from '@contract';
 import { can, currentRole, PAGE_REQUIRES, type OpsAction } from '@/lib/roles';
+import '@/styles/shell.css';
 import { CommandPalette } from './CommandPalette';
 import { Enter } from './Enter';
 
@@ -84,41 +85,38 @@ export function Shell({
 
   return (
     <div className="flex min-h-screen bg-[var(--background)] text-[var(--foreground)]">
-      {/* Below 960 the rail keeps the icons and drops the words: a 208 px
-          sidebar leaves nothing for the page on a 390 px screen. */}
-      <aside className="flex w-14 shrink-0 flex-col border-r border-[var(--hairline)] bg-[var(--surface)] min-[960px]:w-52">
-        <div className="flex items-center gap-2 border-b border-[var(--hairline)] px-3 py-4 min-[960px]:px-5">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] bg-[var(--accent)] text-[11px] font-medium text-white">T</span>
-          <div className="hidden min-[960px]:block">
-            <div className="text-row leading-none">{copy.brand}</div>
-            <div className="text-micro text-[var(--muted-foreground)]">{copy.brandSub}</div>
-          </div>
+      {/* A floating capsule in whitespace, not an attached full-height
+          sidebar. Icons stay monochrome; the live one is a circle in a quiet
+          accent wash. The Chinese name is always the accessible name and
+          becomes visible on hover or keyboard focus. */}
+      <aside className="shell-rail" aria-label={copy.brand}>
+        <div className="rail-float">
+          <span className="rail-brand" title={copy.brand} aria-hidden>T</span>
+          <span className="rail-sep" aria-hidden />
+          <nav className="rail-nav" aria-label={copy.brand}>
+            {NAV.filter((item) => can(item.requires, role)).map((item) => {
+              const Icon = item.icon;
+              const active = route.page === item.id;
+              return (
+                <a
+                  key={item.id}
+                  href={`#/${item.id}`}
+                  aria-current={active ? 'page' : undefined}
+                  aria-label={copy.pages[item.id]}
+                  title={copy.pages[item.id]}
+                  className="rail-link"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    goPage(item.id);
+                  }}
+                >
+                  <Icon size={18} strokeWidth={1.75} className="shrink-0" />
+                  <span className="rail-tip" aria-hidden>{copy.pages[item.id]}</span>
+                </a>
+              );
+            })}
+          </nav>
         </div>
-        <nav className="flex flex-1 flex-col gap-0.5 p-2" aria-label={copy.brand}>
-          {NAV.filter((item) => can(item.requires, role)).map((item) => {
-            const Icon = item.icon;
-            const active = route.page === item.id;
-            return (
-              <a
-                key={item.id}
-                href={`#/${item.id}`}
-                aria-current={active ? 'page' : undefined}
-                title={copy.pages[item.id]}
-                className={cn(
-                  'nav-item flex items-center gap-2 rounded-[10px] px-2.5 py-2 text-body transition-transform duration-150 min-[960px]:px-3',
-                  active ? 'bg-[var(--background)] font-medium' : 'text-[var(--muted-foreground)] hover:-translate-y-px',
-                )}
-                onClick={(event) => {
-                  event.preventDefault();
-                  goPage(item.id);
-                }}
-              >
-                <Icon size={16} strokeWidth={1.75} className="shrink-0" />
-                <span className="hidden min-[960px]:inline">{copy.pages[item.id]}</span>
-              </a>
-            );
-          })}
-        </nav>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -142,7 +140,7 @@ export function Shell({
           </div>
         ) : null}
 
-        <main className="flex-1">
+        <main className="shell-main flex-1">
           <Enter>
             {children}
           </Enter>
