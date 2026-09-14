@@ -7,20 +7,21 @@ gate or an ops task; a visual ops improvement is not a customer release gate.
 ## Choose the execution host first
 
 Follow [build and test execution](docs/BUILD_AND_TEST.md). The maintainer's
-MacBook is for editing/review and focused lightweight checks. Native macOS
-builds belong on the Mac Studio worker, and Windows builds on the Windows
-worker **once onboarded**. Existing GitHub-hosted CI remains available in the
-meantime; do not silently compile locally when a remote worker is unavailable.
+MacBook is for editing/review and focused lightweight checks. Routine native
+builds use the existing GitHub-hosted `macos-26` and `windows-2025` jobs.
+Mac Studio and the Windows machine are for separately approved native
+acceptance, not prerequisites for CI. Do not silently compile on the MacBook
+when a hosted check is unavailable.
 
 External contributors may use their own prepared native development machine
-or the project's hosted CI. Unreviewed changes are not routed to the maintainer's
-persistent home workers merely because the source repository is now private.
+or the project's hosted CI. This repository is public; unreviewed PR code must
+not run on persistent home machines or receive publication/signing secrets.
 
 ## Development entry points
 
 | Area | Entry point / boundary |
 |---|---|
-| macOS | `apps/macos/Tono.xcodeproj`; open/build on the designated native worker, with the SDK required by `.github/workflows/macos-ci.yml`. |
+| macOS | `apps/macos/Tono.xcodeproj`; use hosted CI or an explicitly approved native development machine, with the SDK required by `.github/workflows/macos-ci.yml`. |
 | Windows | [Platform development](apps/windows/README.md#development) and [app checks](apps/windows/app/CONTRIBUTING.md). Preserve separate App, Service and portable-core workspaces. |
 | Windows frontend only | In `apps/windows/app`, use `pnpm web:dev`, not `pnpm dev` (which starts native Tauri development). Browser preview is not IPC/Service qualification. |
 | Ops console | [Console README](services/ops-console/README.md); use fixtures and an isolated port. |

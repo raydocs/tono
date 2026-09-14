@@ -8,14 +8,14 @@ agree on.
 ## Choose the execution host first
 
 Follow [build and test execution](../../docs/BUILD_AND_TEST.md). Native build,
-test and packaging scripts run on designated workers or the existing hosted
-CI, not automatically on the maintainer's MacBook. A script named `local` runs
+test and packaging scripts normally run on the existing GitHub-hosted CI,
+not automatically on the maintainer's MacBook. A script named `local` runs
 on its caller's machine; it is not an instruction to compile on this laptop.
 `build-macos-local-verify.sh --install` also replaces an installed app and is
 not a read-only check. Do not run it merely to review UI or docs.
 
 The host-local slot below prevents some concurrent work; it neither dispatches
-to remote workers nor authorizes privileged tests. Persistent-worker migration
+to remote workers nor authorizes privileged tests. Native-device acceptance
 must not remove the disposable-host guard on the Windows installer smoke.
 
 ## with-slot.sh — one machine, several agents

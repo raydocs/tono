@@ -74,19 +74,20 @@ the editing/review machine, not the default native build worker. See
   inspecting downloaded candidate apps. Do not automatically run `xcodebuild`,
   `swift build/test`, native `cargo build/test/check/clippy`, Tauri dev/build,
   Core builds or release packaging here. These commands recreate large caches.
-- Mac Studio is **no longer a residential exit**. Its intended role is macOS
-  build/test; the Windows machine's intended role is Windows build/test.
-  Neither role proves runner registration, toolchain readiness or qualification.
-  Do not provision an exit or reuse an address/tag from an archived handoff.
-- Until remote workers are qualified, use the existing GitHub-hosted checks.
-  If an exact check cannot run remotely, report it as not run and request a
+- Routine CI stays on GitHub-hosted `macos-26`, `windows-2025` and
+  `ubuntu-24.04`; the repository is public. Do not replace fixed OS labels with
+  `latest` or register persistent home runners as part of ordinary CI work.
+  `tono-build` remains retired.
+- Mac Studio is **no longer a residential exit**. It and the Windows machine
+  are native acceptance devices. Do not provision an exit or reuse an address
+  or tag from an archived handoff. Device access does not prove qualification.
+- If an exact check cannot run remotely, report it as not run and request a
   bounded local exception; do not silently fall back to MacBook compilation or
   call an untested change verified. Match evidence to the exact tested SHA.
-- Register workers directly to private `raydocs/tono`; `tono-build` is retired.
-  Private visibility does not make PR code trusted. Run only reviewed, pinned
-  source on persistent workers; keep untrusted changes hosted and privileged
-  network/installer tests separate. Retain the disposable-host guard on the
-  Windows candidate-install smoke. Never mass-replace existing `runs-on` labels.
+- Public PR code must not gain persistent-machine or signing privileges.
+  Keep privileged network/installer acceptance separate. Retain the
+  disposable-host guard on the Windows candidate-install smoke; hosted
+  Windows Server CI is not Windows 11 device acceptance.
 - Do not install toolchains, sync build caches, remove active worktrees or
   delete retained evidence merely to make the default local command work.
 

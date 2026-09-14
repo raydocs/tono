@@ -28,9 +28,9 @@ keys. Do not use a broad auto-fix/format command on unrelated files.
 
 ## Native execution
 
-- Use the designated Windows build worker once onboarded; existing hosted CI
-  remains the interim path. The maintainer's MacBook does not default to native
-  Rust checks, Tauri dev/build or Core downloads.
+- Use the existing GitHub-hosted `windows-2025` CI for routine native checks;
+  Windows device acceptance is separate. The maintainer's MacBook does not
+  default to native Rust checks, Tauri dev/build or Core downloads.
 - Match the checked-in Rust toolchain and CI's MSVC/SDK setup. Do not replace
   toolchain defaults globally or upgrade dependencies to bootstrap a review.
 - App, Service and portable-core Cargo workspaces are separate. Run the narrow

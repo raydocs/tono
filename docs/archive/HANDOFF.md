@@ -3,8 +3,8 @@
 > Historical handoff. Current layout and names: [architecture.md](../architecture.md).
 
 > **Superseded machine role — 2026-09-14:** the owner confirmed Mac Studio
-> no longer serves as a residential exit. Its intended role is macOS build/test;
-> runner readiness has not yet been qualified. The July exit address, tags and
+> no longer serves as a residential exit. Routine CI is GitHub-hosted; the
+> Studio is a native acceptance device, not a required runner. The July exit address, tags and
 > home-agent TODOs below are retained only as historical evidence, not current
 > instructions. Do not restore that exit role. Follow
 > [BUILD_AND_TEST.md](../BUILD_AND_TEST.md) and [SHIP_PLAN.md](../SHIP_PLAN.md).

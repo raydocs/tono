@@ -3,61 +3,64 @@
 Status date: **2026-09-14**. Supports SHIP_PLAN G1 native behavior and G3
 protected-update qualification; this policy does not close either gate.
 
-## Current facts and pending work
+## Owner decision and current facts
 
 | Item | Evidence / decision |
 |---|---|
-| Mac Studio residential-exit role | Owner confirmed retired on 2026-09-14. Do not restore it from the July handoff. |
-| MacBook | Editing, review, fixtures and focused lightweight checks; native builds are remote-first. |
-| Mac Studio / Windows machine | Intended native build/test workers. Access, hardware, tools and desktop sessions still need inspection. |
-| GitHub | Owner-authorized conversion of `raydocs/tono` to **private** verified on 2026-09-14. Register repository-scoped workers directly here; current count is 0. |
-| Retired controller | `raydocs/tono-build` Actions disabled and repository archived on 2026-09-14 after confirming 0 runners and 0 runs. It is retained for rollback, not an active dispatch path. |
-| Protection readback | On 2026-09-14 `main` reported `protected: false`; the three release environments listed no required-reviewer rules. The Windows environments restrict branches to `release/windows`. This is observed state, not evidence that private conversion caused it. Re-qualify before signing/publication. |
-| Existing CI | macOS uses `macos-26`, native Windows uses `windows-2025`, portable/web jobs also use Linux. Unchanged. |
-| Dedicated-worker cutover | Not qualified. No registration, installation or remote build has been performed by this change. |
+| Repository | `raydocs/tono` is **public** again by explicit owner decision; API and anonymous browser access verified on 2026-09-14. |
+| Routine CI | GitHub-hosted `macos-26`, `windows-2025`, and `ubuntu-24.04` for portable/web jobs. Existing workflows retain these labels. |
+| MacBook | Editing, review, fixtures, focused frontend/Worker checks and downloaded candidates; no default native compilation. |
+| Mac Studio / Windows machine | Native acceptance devices, not required CI workers. Mac Studio's residential-exit role is retired. |
+| Self-hosted runners | Not required or registered by this change. No home-machine dispatcher or connectivity workflow is introduced. |
+| Retired controller | `raydocs/tono-build` remains private, archived, and Actions-disabled; do not register or dispatch there. |
+| Publication safeguards | The earlier 2026-09-14 API readback showed main unprotected and no required-reviewer rules in release environments. This does not establish current enforcement or prove visibility caused it. Re-qualify before signing/publication. |
 
-The current workflow files, source/lockfiles and exact-run evidence are the
-truth. Do not copy old addresses, tags, credentials or machine state from an
-[archived handoff](archive/README.md) into runner setup.
+This decision supersedes the earlier same-day proposal to register both home
+machines directly to private Tono. Do not follow that obsolete onboarding
+proposal or machine addresses in an [archived handoff](archive/README.md).
 
 ## Execution lanes
 
 | Lane | Host | Boundary |
 |---|---|---|
-| Edit / review | MacBook | Git, docs, fixtures, targeted frontend/Worker checks, browser review, remote logs and downloaded candidates. |
-| Unreviewed changes / ordinary CI | GitHub-hosted disposable runner | Existing checks stay hosted during onboarding; private visibility alone does not authorize home-worker execution. |
-| Reviewed native build | Mac Studio / Windows, after onboarding | Compile, non-disruptive tests, candidate packaging; not automatic installation or publication. |
-| System qualification | Recoverable native test environment | GUI, PF/WFP, DNS, crashes, install/upgrade/uninstall and adapter/sleep transitions; explicitly authorized scenarios. |
-| Signing / publication | Separately gated release workflow | Existing workflow files unchanged; review/branch protections need qualification. SHIP_PLAN remains authoritative. |
+| Edit / review | MacBook | Git, docs, fixtures, focused frontend/Worker checks, browser review, remote logs and downloaded candidates. |
+| Routine build / automated checks | GitHub-hosted runner | Source/toolchain pins and exact-SHA evidence; no implicit installer execution or customer publication. |
+| Native acceptance | Recoverable Mac/Windows device | GUI, PF/WFP, DNS, crashes, install/upgrade/uninstall, adapters and sleep; separately authorized scenarios. |
+| Signing / publication | Separately gated release workflow | Match reviewed source/artifacts; SHIP_PLAN and release-line safeguards remain authoritative. |
 
-MacBook may smoke-test a downloaded candidate without rebuilding it. Mac Studio
-does not prove portable Wi-Fi/hinge/sleep behavior. VM results are not physical
-adapter or physical-device sleep qualification.
+A hosted job can run native tests but does not replace installed-device
+acceptance. `windows-2025` is Windows Server, not Windows 11; hosted Windows
+runs with UAC disabled. Mac Studio does not prove laptop Wi-Fi/hinge/sleep
+behavior. Record tested OS, architecture and scenario rather than claiming
+all Mac/Windows devices are qualified.
 
-**No silent local fallback:** `cargo check`/Clippy also compile. Tauri
-`pnpm dev`, `pnpm dev:tauri`, `pnpm build`, Core builds, Swift builds and
-`xcodebuild` are not lightweight checks. Do not run them on the maintainer's
-MacBook without a bounded owner-approved exception. Report unavailable remote
-checks as not run; never substitute an unrelated green run.
+**No silent local fallback:** `cargo check`/Clippy compile too. Tauri native
+dev/build, Core builds, Swift builds and `xcodebuild` are not lightweight
+checks. Do not run them on the maintainer's MacBook without a bounded
+owner-approved exception. Missing remote evidence stays not run.
 
 Windows frontend-only work can use `pnpm web:dev`; ops uses
-`npm run dev:fixtures`. Install only the relevant workspace's dependencies.
-Browser preview does not prove IPC, native service behavior or protection.
+`npm run dev:fixtures`. Install only relevant workspace dependencies.
+Browser preview does not prove IPC, Service behavior or protection.
 Docs-only edits require no product test suite or compiler.
 
-## Interim path: existing GitHub-hosted CI
+## Reproducible hosted CI, not floating OS upgrades
 
-1. Record the exact source SHA. Remote `main` cannot verify uncommitted edits.
-2. Prepare only intended changes on a review branch. Push/open a PR only when
-   authorized, without adding another agent's dirty files.
+`macos-latest` and `windows-latest` migrate to newer GitHub images over time.
+Use the current fixed OS labels and review major-version upgrades separately.
+Fixed OS labels still receive software updates: retain checked-in Rust/Go/Node
+pins and inspect/select the Xcode/SDK version required by the workflow. The
+macOS app currently needs the macOS 26 SDK.
+
+1. Record the exact source SHA; remote main cannot verify uncommitted edits.
+2. Push intended changes on a review branch only when authorized; do not add
+   another agent's dirty files or broaden artifact scope.
 3. Use current path-filtered CI. macOS and Windows CI also support manual
    dispatch on an authorized remote ref when the required check is missing.
-4. Verify the run's actual `headSha`, event, workflow and jobs. A branch can
-   advance while queued; distinguish a PR merge SHA from its source head.
-5. Download only needed artifacts/logs. Ordinary CI does not necessarily upload
-   an installable app. Candidate/release jobs have separate contracts.
-
-Read-only inspection commands (replace the angle-bracket placeholders):
+4. Verify each run's head SHA, event, workflow and jobs. A branch can advance
+   while queued; distinguish a PR merge SHA from its source head.
+5. Download only needed artifacts/logs. Ordinary CI does not necessarily
+   produce an installable app; candidate/release workflows are separate.
 
 ```sh
 git status --short
@@ -69,113 +72,50 @@ gh run view <run-id> --repo raydocs/tono --log-failed
 ```
 
 Skipped jobs, compiled-out tests and zero-test runs are not qualification.
+GitHub standard hosted runner usage is free for public repositories; larger
+runners are paid. Manage artifact/cache retention and do not infer that every
+GitHub-hosted resource is free.
 
-## Dedicated workers: onboarding sequence
+## Public repository and privileged boundaries
 
-### 1. Inspect, do not install or change networking yet
-
-Record privately: access alias, OS/build, architecture, CPU/RAM, free disk,
-tools, existing workloads, desktop-session availability and independent
-recovery access. Keep addresses, credentials and registration tokens out of Git.
-
-- Mac: match current CI's Xcode/macOS SDK. The app currently requires the
-  macOS 26 SDK. Inspect `xcodebuild -version`, SDKs and test destinations rather
-  than assuming the old Mac Studio signing/Xcode setup still applies.
-- Windows: inspect architecture, MSVC/Windows SDK, Rust and WebView2. Use
-  checked-in toolchain/package-manager pins and lockfiles, not “latest”. Keep
-  App, Service and portable-core workspaces separate. x64 is not ARM64 coverage.
-- Signing readiness is separate; ordinary jobs do not acquire release keys.
-
-### 2. Establish the trust boundary before registering
-
-Register repository-scoped runners directly to **private `raydocs/tono`**.
-The owner chose the simpler single-repository layout; the separate `tono-build`
-controller is retired. Do not enable its Actions or register machines there.
-See [registration and read-only smoke](../tooling/runners/README.md).
-
-Only dispatch reviewed workflows from trusted refs for explicitly approved
-source SHAs. The initial connectivity workflow is manual, private-repository
-and main-only; it performs no source checkout. Native builds remain pending.
-Existing hosted CI is not mass-migrated to self-hosted labels: some jobs touch
-real WFP or installers and require a different safety boundary.
-
-A clean checkout, separate OS account or private visibility does not sandbox
-arbitrary PR code. Source build scripts are executable too. Control collaborator
-permissions, review workflow changes and confirm branch/environment protection
-availability after the visibility change. Do not assume a public-repository
-protection feature is still enforced under the current private-repository plan.
-[GitHub security guidance](https://docs.github.com/en/actions/reference/security/secure-use#hardening-for-self-hosted-runners).
-
-Do not execute arbitrary fork workflows, shell-command inputs, mutable branch
-substitutions or shared untrusted caches. Begin native-build qualification with
-a reviewed main SHA, not an arbitrary PR. No signing or protection-mutation
-permission follows from runner registration.
-
-Use minimum token permissions and least-privilege build accounts. Keep private
-network/production access and signing keys away from ordinary jobs. Prefer a
-disposable VM/environment where stronger isolation is needed. Re-registering a
-runner or checking out a clean tree does not reset a compromised OS.
-
-### 3. Qualify before cutover
-
-1. Register one machine at a time, run the read-only connectivity inventory,
-   and verify host/architecture. It does not compile, install or certify tools.
-2. Add a reviewed native-build workflow, one job per host initially. Run an
-   unsigned build and narrow non-disruptive regression from an exact source SHA.
-3. Repeat from a warm cache and prove changed source is rebuilt. Record peak
-   disk, time, test count, toolchain and artifact hashes.
-4. Upload scoped artifacts plus a manifest: source SHA, executing workflow
-   revision, platform/architecture, toolchain, signature status, checks and
-   SHA256. Never upload runner homes, private keys or whole worktrees.
-5. Verify failures, timeouts, unavailable hosts and safe cache cleanup. No
-   automatic MacBook fallback and no queued-job-as-pass reporting.
-6. Make this the normal reviewed native-build path only after both workers
-   pass. Preserve hosted checks for unreviewed changes and protected release workflows.
-
-Do not copy MacBook node_modules, target, DerivedData or keychains to bootstrap
-a worker. Reproduce inputs from source/lockfiles and reviewed immutable artifacts.
-
-## Native qualification stays separate
-
-Mac Studio's retired exit role removes that old dependency, not the need for
-permission before changing its installed app, PF/DNS, protection or rebooting.
-
-- GUI tests need a verified interactive desktop and permissions, not merely
-  a background service or SSH session. Keep build jobs separate.
-- Run one disruptive scenario per host. Record app/Core/helper/service hashes,
-  initial protection/DNS, observations and post-test recovery state.
-- Recovery must not depend on the VPN being tested. A failed cleanup
-  quarantines the host from new jobs; never automatically disarm protection to
-  reconnect CI. A killed job may skip final cleanup, so startup must detect
-  unresolved state before accepting another job.
-- `test-windows-candidate-install.ps1` deliberately rejects local/persistent
-  workers. **Keep its guard** and hosted execution. Native installed-machine
-  acceptance uses the separately reviewed [Windows QA path](WINDOWS_0_0_72_DEVICE_ACCEPTANCE.md).
-- XCTest/Rust green does not close #171 endpoint fault injection or #26
-  protected-update acceptance. Follow [SHIP_PLAN](SHIP_PLAN.md).
+- No persistent home runner registration is part of this plan. A future
+  exception needs an explicit owner decision and a separate trust review.
+- Public PR code must not acquire signing credentials or a persistent machine's
+  local/network privileges. Do not execute PR source in a privileged
+  `pull_request_target` workflow.
+- Keep workflow token permissions minimal. Check release environment admission,
+  reviewers and branch restrictions before signing or promotion; visibility
+  alone is not a security boundary.
+- The Windows candidate-install smoke intentionally rejects persistent/local
+  workers. Preserve that disposable-host guard; use the separately reviewed
+  [Windows acceptance path](WINDOWS_0_0_72_DEVICE_ACCEPTANCE.md) for real devices.
+- System tests need out-of-band recovery and pre/post-state evidence. Restore
+  PF/WFP, DNS, proxies, services and adapters; do not treat cleanup as release
+  acceptance or run disruptive checks on an active customer connection.
+- #171 endpoint fault injection and #26 installed-update replay stay open until
+  their actual evidence is accepted under [SHIP_PLAN](SHIP_PLAN.md).
 
 ## Disk and evidence lifecycle
 
-- Use worker-owned cache roots, not a new `/tmp/tono-*` build for every turn.
-  Serialize shared cache writers or isolate concurrent jobs.
-- Cache compatibility includes OS, architecture, toolchain, workspace and
-  relevant build configuration/lockfiles. Separate trusted/untrusted producers
-  and signed/unsigned artifact boundaries.
-- Set volume budgets and free-space thresholds after measuring a clean build's
-  peak use. Evict only inactive caches by age/size; prevent new jobs before disk
-  exhaustion instead of deleting a running job's target.
-- Keep candidate manifests, unresolved failure evidence and ship-gate evidence
-  outside disposable caches. Set retention and redact private logs; a merged
-  branch alone is not permission to delete its evidence.
-- After remote checks/artifact retrieval work, clear idle MacBook build caches
-  with a logged whitelist. Preserve dirty worktrees, unpushed commits, source,
-  active fixtures and needed evidence. Do not blanket-clean `/tmp/tono*`.
-- Removing Xcode/SDKs/toolchains is a separate owner decision, not cache cleanup.
+- Prefer hosted builds to new `/tmp/tono-*` native build trees on MacBook.
+  Only download the candidate/logs needed for the current review.
+- Cache keys include OS, architecture, toolchain, workspace and relevant
+  lockfiles/configuration. Separate trusted/untrusted producers and
+  signed/unsigned artifacts.
+- Evict only inactive caches with a measured whitelist. Preserve dirty
+  worktrees, unpushed commits, local configuration and unresolved evidence.
+  Never blanket-clean `/tmp/tono*` or a running job's target.
+- Keep candidate manifests and ship-gate evidence outside disposable caches;
+  redact logs before attaching them to this public repository.
+- Toolchain/Xcode removal is a separate owner decision, not cache cleanup.
 
-## Documentation ownership
+## Official references
 
-This guide owns execution policy, machine-role corrections and cutover status.
-README is the repository overview; CONTRIBUTING and AGENTS point here. Update the
-dated status with actual worker evidence, not intended roles. Archived reports
-keep their historic results with superseding notices. This migration does not
-authorize appcast/update-channel promotion or production deployment.
+- [Runner images and latest migration](https://github.com/actions/runner-images)
+- [Hosted runner environments and privileges](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
+- [Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
+- [Self-hosted runner security](https://docs.github.com/en/actions/reference/security/secure-use#hardening-for-self-hosted-runners)
+
+README is the entry point; this guide owns execution policy. Archived reports
+retain historical evidence with superseding notices. None of this authorizes
+production deployment, a version bump or customer update-channel promotion.

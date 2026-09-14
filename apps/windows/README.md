@@ -45,7 +45,7 @@ The normal developer build does not configure an updater endpoint.
 
 The `windows-updates/latest.json` branch remains a legacy compatibility and
 audit path: builds before 0.0.33 used its raw GitHub URL. Before making this
-source repository private, audit remaining legacy clients and public GitHub
+source repository private in a future change, audit remaining legacy clients and public GitHub
 release-note links; do not infer that the current Worker/R2 path requires a
 public source repository. This is a documentation correction, not a feed change.
 
@@ -88,7 +88,7 @@ can otherwise modify its own workflow definition before dispatch.
 These are required safeguards, not a claim that every control is configured.
 On 2026-09-14 the API showed both Windows environments restricted to
 `release/windows`, but neither listed a required-reviewer rule. Re-qualify
-publication permissions before any release; private visibility is not approval.
+publication permissions before any release; repository visibility is not approval.
 
 Never commit the private key. Losing or rotating it without a signed migration
 release prevents already-installed clients from accepting future updates.
@@ -349,9 +349,9 @@ SECURITY.md security invariants and disclosure
 
 ## Development
 
-**Execution location:** use the Windows worker or existing GitHub-hosted CI
-for native compilation and tests. Worker onboarding is not yet qualified;
-see [build and test execution](../../docs/BUILD_AND_TEST.md). The maintainer's
+**Execution location:** routine native compilation and tests use GitHub-hosted
+`windows-2025`; the owner's Windows machine handles separately approved native
+acceptance. See [build and test execution](../../docs/BUILD_AND_TEST.md). The maintainer's
 MacBook is for editing and frontend preview, not the default cross-compilation
 host. Follow [app contribution notes](app/CONTRIBUTING.md) for frontend-only
 commands. Native GUI/service and disruptive QA need separate authorization.

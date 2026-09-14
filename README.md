@@ -42,17 +42,20 @@ macOS-and-Windows build farm. Native compilation, large test suites and
 packaging belong on build workers; frontend fixtures and focused lightweight
 checks can stay local.
 
-The intended dedicated workers are **Mac Studio for macOS** and a **Windows
-machine for Windows**. Mac Studio no longer serves as a residential exit.
-Worker onboarding is tracked in the [execution guide](docs/BUILD_AND_TEST.md);
-do not interpret this target layout as proof that self-hosted runners are live.
-Existing GitHub-hosted CI remains in place while they are qualified.
+This repository is **public**. Routine builds and automated checks use GitHub's
+standard hosted runners: `macos-26`, `windows-2025` and `ubuntu-24.04` for
+portable/web work. Fixed OS labels avoid implicit major-version migrations;
+checked-in toolchain pins still matter. Do not replace them with `latest`
+without a reviewed compatibility change.
 
-This repository is **private**. Register the native workers directly to
-`raydocs/tono`; a separate build-control repository is not required. Private
-visibility is not permission to execute unreviewed code on persistent machines:
-keep untrusted changes on isolated hosted workers, and keep signing and native
-PF/WFP/DNS/installer qualification in separately controlled lanes.
+**Mac Studio and the Windows machine are native acceptance devices**, not
+required CI workers. Mac Studio no longer serves as a residential exit. Keep
+GUI, PF/WFP, DNS, sleep and installed-update qualification separate from build
+success, and signing/publication behind the existing ship gates.
+
+No self-hosted registration is required. The former `tono-build` repository is
+retired. See the [execution guide](docs/BUILD_AND_TEST.md) for trust boundaries,
+exact-SHA evidence and cache policy.
 
 ## Repository
 
