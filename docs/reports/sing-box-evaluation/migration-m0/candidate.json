@@ -1,0 +1,50 @@
+{
+  "contract_version": 1,
+  "profile": "reality-tcp-no-special-routing-v1",
+  "engine": "sing-box",
+  "source": {
+    "repository": "https://github.com/SagerNet/sing-box",
+    "tag": "v1.15.0-alpha.3",
+    "commit": "93fff5954390367dd456cad3cbd79be54f8b941f",
+    "go_mod_sha256": "c8a55d750ff56af8e097478b7ce88f10224f406041e73002ef89e4c8ade5769b",
+    "go_sum_sha256": "121265484ad99c79970266e5896eba82ff660c2921624225afa316e408f6d38e",
+    "sing_tun": "v0.9.4-0.20260912075549-869f0a4d76af",
+    "patches": []
+  },
+  "build": {
+    "go_version": "go1.27.1",
+    "gotoolchain": "local",
+    "cgo_enabled": "0",
+    "tags": ["with_gvisor", "with_quic", "with_utls", "with_clash_api"],
+    "args": ["-mod=readonly", "-trimpath"],
+    "ldflags": "-X github.com/sagernet/sing-box/constant.Version=1.15.0-alpha.3-tono-m1.1 -w -s -buildid=",
+    "entrypoint": "./cmd/sing-box",
+    "targets": [
+      {"goos": "linux", "goarch": "amd64", "goamd64": "v2", "purpose": "offline validation only"},
+      {"goos": "darwin", "goarch": "arm64", "purpose": "unsigned candidate input; native qualification required"},
+      {"goos": "windows", "goarch": "amd64", "goamd64": "v2", "purpose": "unsigned candidate input; native qualification required"}
+    ]
+  },
+  "runtime": {
+    "stack": "go",
+    "emit_stack_field": false,
+    "tun_address": "198.18.0.1/30",
+    "virtual_dns_address": "198.18.0.2",
+    "fake_ipv4_range": "198.19.0.0/16",
+    "dns_listen": "127.0.0.1:53",
+    "dns_mode": "disabled",
+    "auto_route": true,
+    "strict_route": false,
+    "mtu": 1500,
+    "multi_queue": false,
+    "proxy_mux": false,
+    "persistent_cache": false,
+    "ipv6": false
+  },
+  "retained_check_binary": {
+    "sha256": "cd2ba002e1282da29674107cc503285dc8fa7026bf01fcc40d314bc10ab749df",
+    "reported_version": "1.14.0-alpha.0-experiment.93fff595",
+    "note": "Existing B binary: same pinned commit and modules, historical synthetic banner. Not a new M1/native artifact or customer version."
+  },
+  "m1_artifacts": []
+}
