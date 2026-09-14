@@ -1,0 +1,16 @@
+{
+  "status": "blocked-no-approved-ios-artifact",
+  "engine": "sing-box",
+  "version": "1.15.0-alpha.3",
+  "upstream_commit": "93fff5954390367dd456cad3cbd79be54f8b941f",
+  "go_version": "go1.27.1",
+  "cgo_enabled": "0",
+  "tags": ["with_gvisor", "with_quic", "with_utls", "with_clash_api"],
+  "patches": [],
+  "go_mod_sha256": "c8a55d750ff56af8e097478b7ce88f10224f406041e73002ef89e4c8ade5769b",
+  "go_sum_sha256": "121265484ad99c79970266e5896eba82ff660c2921624225afa316e408f6d38e",
+  "ios_artifact_sha256": null,
+  "ios_abi": null,
+  "constraint": "Upstream libbox Objective-C binding requires a separately approved cgo-enabled Apple build identity. Desktop CGO=0 artifacts cannot be relabeled or launched in an iOS extension.",
+  "shared_contract_reviewed": "https://github.com/raydocs/tono/pull/202"
+}

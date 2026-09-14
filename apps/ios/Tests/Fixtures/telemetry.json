@@ -1,0 +1,17 @@
+{
+  "window": {
+    "schemaVersion": 1,
+    "kind": "periodic_window",
+    "windowStartMs": 120000,
+    "windowEndMs": 120000,
+    "appVersion": "0.1.0",
+    "osVersion": "iOS 26.0",
+    "osArch": "arm64",
+    "platform": "ios",
+    "uiState": "actionRequired",
+    "accountState": "signedIn",
+    "eventCount": 1,
+    "eventsDropped": 0,
+    "events": [{ "ts": 120000, "kind": "admissionRefused", "to": "actionRequired", "elapsedMs": 0, "code": "coreUnavailable" }]
+  }
+}
