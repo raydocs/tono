@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Action } from '@/components/ops/Action';
 import { ConfirmDialog } from '@/components/ops/ConfirmDialog';
 import { EmptyLine } from '@/components/ops/Empty';
@@ -60,6 +60,24 @@ export function Ledger() {
   const month0 = summary.status === 'ready' ? summary.data : null;
   const rows = entries.status === 'ready' ? entries.data.items : [];
   const locked = month0?.closedAt !== null && month0?.closedAt !== undefined;
+  /**
+   * Locking agrees to a specific set of numbers, so it needs a live summary
+   * for the month on screen — not a failed read, not last month's answer
+   * left over while the new one loads, and not a month that has since
+   * locked. Both the button and the confirm check this; the button alone
+   * cannot stop a dialog that is already open.
+   */
+  const summaryValid = month0 !== null && month0.month === month && !locked;
+
+  /**
+   * An open confirm that loses its premise closes instead of firing into
+   * the new state: switching months or a refetch that locks the month must
+   * not lock the wrong month or lock with no figures. Recovery never
+   * reopens it — the operator asks again on purpose.
+   */
+  useEffect(() => {
+    if (closing && !summaryValid) setClosing(false);
+  }, [closing, summaryValid]);
 
   const emails = useMemo(() => {
     const map = new Map<string, string>();
@@ -93,8 +111,9 @@ export function Ledger() {
                 {words.exportAction}
               </a>
               <Action
-                reason={locked ? words.closedAlready : null}
-                onClick={() => setClosing(true)}
+                reason={locked ? words.closedAlready : !summaryValid ? words.closeWaiting : null}
+                pending={write.pending}
+                onClick={() => { if (summaryValid && !write.pending) setClosing(true); }}
               >
                 {words.closeAction}
               </Action>
@@ -184,6 +203,10 @@ export function Ledger() {
         failure={write.error}
         onCancel={() => setClosing(false)}
         onConfirm={() => {
+          if (!summaryValid || write.pending) {
+            setClosing(false);
+            return;
+          }
           void write.run(() => ledgerApi.close(month)).then((ok) => {
             if (ok) setClosing(false);
           });
