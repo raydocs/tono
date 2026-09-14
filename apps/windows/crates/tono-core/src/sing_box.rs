@@ -374,7 +374,10 @@ pub fn build_synthetic_offline_draft(
     if runtime_json.len() > MAX_BYTES {
         return Err(InvalidNode);
     }
-    let runtime_sha256 = format!("{:x}", Sha256::digest(runtime_json.as_bytes()));
+    let runtime_sha256 = Sha256::digest(runtime_json.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
     Ok(SingBoxRuntimeDraft {
         runtime_json,
         runtime_sha256,
@@ -464,10 +467,17 @@ mod tests {
             &["9.9.9.9:8443".parse::<SocketAddrV4>().unwrap()]
         );
         assert_eq!(draft.generation(), u64::MAX);
-        // Independent digest encoding (not the emitter's hex formatting).
-        let bytes = Sha256::digest(draft.runtime_json().as_bytes());
-        let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-        assert_eq!(draft.runtime_sha256(), hex);
+        // Bind the exact offline-check bytes, not just structural equivalence.
+        // Independently computed with Python hashlib from the frozen handwritten
+        // reference (sorted keys, compact separators, UTF-8, no trailing newline).
+        assert_eq!(
+            draft.runtime_json(),
+            fixture.reference["windows_runtime"].to_string()
+        );
+        assert_eq!(
+            draft.runtime_sha256(),
+            "2228ce18d533dabee7937bdd65ad1d92268c5b666082cbc9c5e8104e3fb0bc0b"
+        );
         assert!(!draft.runtime_json().starts_with('\u{feff}'));
     }
 
@@ -671,5 +681,10 @@ mod tests {
         let mut expected = fixture.reference["windows_runtime"].clone();
         expected["inbounds"].as_array_mut().unwrap().remove(2);
         assert_eq!(actual, expected);
+        assert_eq!(draft.runtime_json(), expected.to_string());
+        assert_eq!(
+            draft.runtime_sha256(),
+            "3eb3e31df8a9006d93c5fbbdb3910276391563640449f793a3e0503e08458cfa"
+        );
     }
 }
