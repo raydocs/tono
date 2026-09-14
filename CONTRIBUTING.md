@@ -13,8 +13,8 @@ worker **once onboarded**. Existing GitHub-hosted CI remains available in the
 meantime; do not silently compile locally when a remote worker is unavailable.
 
 External contributors may use their own prepared native development machine
-or the project's hosted CI. Public PRs are not routed to the maintainer's
-persistent home workers.
+or the project's hosted CI. Unreviewed changes are not routed to the maintainer's
+persistent home workers merely because the source repository is now private.
 
 ## Development entry points
 

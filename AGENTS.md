@@ -82,9 +82,11 @@ the editing/review machine, not the default native build worker. See
   If an exact check cannot run remotely, report it as not run and request a
   bounded local exception; do not silently fall back to MacBook compilation or
   call an untested change verified. Match evidence to the exact tested SHA.
-- Public PR code must not run directly on the persistent home machines. Keep
-  privileged network/installer tests separate from ordinary build jobs, and
-  retain the disposable-host guard on the Windows candidate-install smoke.
+- Register workers directly to private `raydocs/tono`; `tono-build` is retired.
+  Private visibility does not make PR code trusted. Run only reviewed, pinned
+  source on persistent workers; keep untrusted changes hosted and privileged
+  network/installer tests separate. Retain the disposable-host guard on the
+  Windows candidate-install smoke. Never mass-replace existing `runs-on` labels.
 - Do not install toolchains, sync build caches, remove active worktrees or
   delete retained evidence merely to make the default local command work.
 

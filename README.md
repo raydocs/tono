@@ -48,9 +48,11 @@ Worker onboarding is tracked in the [execution guide](docs/BUILD_AND_TEST.md);
 do not interpret this target layout as proof that self-hosted runners are live.
 Existing GitHub-hosted CI remains in place while they are qualified.
 
-This is a public repository. Untrusted PRs stay on isolated GitHub-hosted
-runners, not persistent home machines with access to private networks or keys.
-Native PF/WFP/DNS and installer qualification is a separate, controlled lane.
+This repository is **private**. Register the native workers directly to
+`raydocs/tono`; a separate build-control repository is not required. Private
+visibility is not permission to execute unreviewed code on persistent machines:
+keep untrusted changes on isolated hosted workers, and keep signing and native
+PF/WFP/DNS/installer qualification in separately controlled lanes.
 
 ## Repository
 

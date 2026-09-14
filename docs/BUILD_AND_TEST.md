@@ -10,8 +10,9 @@ protected-update qualification; this policy does not close either gate.
 | Mac Studio residential-exit role | Owner confirmed retired on 2026-09-14. Do not restore it from the July handoff. |
 | MacBook | Editing, review, fixtures and focused lightweight checks; native builds are remote-first. |
 | Mac Studio / Windows machine | Intended native build/test workers. Access, hardware, tools and desktop sessions still need inspection. |
-| GitHub | `raydocs/tono` is public; repository runner API returned `total_count: 0` on 2026-09-14. This says nothing about unrelated registrations. |
-| Private controller | `raydocs/tono-build` created private on 2026-09-14; default workflow token is read-only and PR-approval permission is disabled. No runners registered yet. |
+| GitHub | Owner-authorized conversion of `raydocs/tono` to **private** verified on 2026-09-14. Register repository-scoped workers directly here; current count is 0. |
+| Retired controller | `raydocs/tono-build` Actions disabled and repository archived on 2026-09-14 after confirming 0 runners and 0 runs. It is retained for rollback, not an active dispatch path. |
+| Protection readback | On 2026-09-14 `main` reported `protected: false`; the three release environments listed no required-reviewer rules. The Windows environments restrict branches to `release/windows`. This is observed state, not evidence that private conversion caused it. Re-qualify before signing/publication. |
 | Existing CI | macOS uses `macos-26`, native Windows uses `windows-2025`, portable/web jobs also use Linux. Unchanged. |
 | Dedicated-worker cutover | Not qualified. No registration, installation or remote build has been performed by this change. |
 
@@ -24,10 +25,10 @@ truth. Do not copy old addresses, tags, credentials or machine state from an
 | Lane | Host | Boundary |
 |---|---|---|
 | Edit / review | MacBook | Git, docs, fixtures, targeted frontend/Worker checks, browser review, remote logs and downloaded candidates. |
-| Public PR | GitHub-hosted disposable runner | Existing CI; no access to persistent home workers. |
+| Unreviewed changes / ordinary CI | GitHub-hosted disposable runner | Existing checks stay hosted during onboarding; private visibility alone does not authorize home-worker execution. |
 | Reviewed native build | Mac Studio / Windows, after onboarding | Compile, non-disruptive tests, candidate packaging; not automatic installation or publication. |
 | System qualification | Recoverable native test environment | GUI, PF/WFP, DNS, crashes, install/upgrade/uninstall and adapter/sleep transitions; explicitly authorized scenarios. |
-| Signing / publication | Existing protected release workflow | Separate credentials and approvals; SHIP_PLAN remains authoritative. |
+| Signing / publication | Separately gated release workflow | Existing workflow files unchanged; review/branch protections need qualification. SHIP_PLAN remains authoritative. |
 
 MacBook may smoke-test a downloaded candidate without rebuilding it. Mac Studio
 does not prove portable Wi-Fi/hinge/sleep behavior. VM results are not physical
@@ -87,23 +88,28 @@ recovery access. Keep addresses, credentials and registration tokens out of Git.
 
 ### 2. Establish the trust boundary before registering
 
-Do **not** replace the public repository's `runs-on` with home-worker labels.
-An approval label, separate OS user or clean checkout does not sandbox arbitrary
-PR code. GitHub recommends private repositories for self-hosted workers and
-warns that untrusted code can compromise persistent workers even in private
-repositories. [Official security guidance](https://docs.github.com/en/actions/reference/security/secure-use#hardening-for-self-hosted-runners).
+Register repository-scoped runners directly to **private `raydocs/tono`**.
+The owner chose the simpler single-repository layout; the separate `tono-build`
+controller is retired. Do not enable its Actions or register machines there.
+See [registration and read-only smoke](../tooling/runners/README.md).
 
-The private build-control repository is `raydocs/tono-build`, created for this
-purpose. Keep access maintainer-only and protect/review its default branch;
-branch-protection enforcement has not yet been qualified. **Machine registration
-and native-build qualification are pending.** Public PR CI stays hosted.
-Use the [registration instructions and read-only smoke template](../tooling/runner-control/README.md).
+Only dispatch reviewed workflows from trusted refs for explicitly approved
+source SHAs. The initial connectivity workflow is manual, private-repository
+and main-only; it performs no source checkout. Native builds remain pending.
+Existing hosted CI is not mass-migrated to self-hosted labels: some jobs touch
+real WFP or installers and require a different safety boundary.
 
-Only dispatch reviewed workflows for explicitly approved source SHAs from
-`raydocs/tono`. Source build scripts are executable code too; private registration
-alone does not make them trusted. Do not execute arbitrary fork workflows,
-shell-command inputs, mutable branch substitutions or shared untrusted caches.
-Start source-build qualification with a reviewed main SHA, not an arbitrary PR.
+A clean checkout, separate OS account or private visibility does not sandbox
+arbitrary PR code. Source build scripts are executable too. Control collaborator
+permissions, review workflow changes and confirm branch/environment protection
+availability after the visibility change. Do not assume a public-repository
+protection feature is still enforced under the current private-repository plan.
+[GitHub security guidance](https://docs.github.com/en/actions/reference/security/secure-use#hardening-for-self-hosted-runners).
+
+Do not execute arbitrary fork workflows, shell-command inputs, mutable branch
+substitutions or shared untrusted caches. Begin native-build qualification with
+a reviewed main SHA, not an arbitrary PR. No signing or protection-mutation
+permission follows from runner registration.
 
 Use minimum token permissions and least-privilege build accounts. Keep private
 network/production access and signing keys away from ordinary jobs. Prefer a
@@ -118,13 +124,13 @@ runner or checking out a clean tree does not reset a compromised OS.
    unsigned build and narrow non-disruptive regression from an exact source SHA.
 3. Repeat from a warm cache and prove changed source is rebuilt. Record peak
    disk, time, test count, toolchain and artifact hashes.
-4. Upload scoped artifacts plus a manifest: source SHA, control-workflow
+4. Upload scoped artifacts plus a manifest: source SHA, executing workflow
    revision, platform/architecture, toolchain, signature status, checks and
    SHA256. Never upload runner homes, private keys or whole worktrees.
 5. Verify failures, timeouts, unavailable hosts and safe cache cleanup. No
    automatic MacBook fallback and no queued-job-as-pass reporting.
 6. Make this the normal reviewed native-build path only after both workers
-   pass. Preserve hosted public PR checks and protected release workflows.
+   pass. Preserve hosted checks for unreviewed changes and protected release workflows.
 
 Do not copy MacBook node_modules, target, DerivedData or keychains to bootstrap
 a worker. Reproduce inputs from source/lockfiles and reviewed immutable artifacts.
@@ -169,7 +175,7 @@ permission before changing its installed app, PF/DNS, protection or rebooting.
 ## Documentation ownership
 
 This guide owns execution policy, machine-role corrections and cutover status.
-README is the public overview; CONTRIBUTING and AGENTS point here. Update the
+README is the repository overview; CONTRIBUTING and AGENTS point here. Update the
 dated status with actual worker evidence, not intended roles. Archived reports
 keep their historic results with superseding notices. This migration does not
 authorize appcast/update-channel promotion or production deployment.

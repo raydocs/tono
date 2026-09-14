@@ -1,6 +1,6 @@
-# TEMPLATE: copy only to the reviewed private control repository's
-# .github/workflows/runner-smoke.yml. Never register home runners on public Tono.
-# This is reachability/inventory, NOT native build or release qualification.
+# Manual connectivity/inventory on the owner-authorized private Tono repo.
+# No source checkout, build, signing or network/installer mutation.
+# Private visibility alone never authorizes arbitrary PR code on these machines.
 name: Native runner connectivity
 
 'on':
@@ -23,6 +23,7 @@ concurrency:
 jobs:
   macos:
     if: >-
+      github.repository == 'raydocs/tono' &&
       github.event_name == 'workflow_dispatch' &&
       github.event.repository.private == true &&
       github.ref == 'refs/heads/main' && inputs.platform == 'macos'
@@ -48,6 +49,7 @@ jobs:
 
   windows:
     if: >-
+      github.repository == 'raydocs/tono' &&
       github.event_name == 'workflow_dispatch' &&
       github.event.repository.private == true &&
       github.ref == 'refs/heads/main' && inputs.platform == 'windows'
