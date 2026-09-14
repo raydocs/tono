@@ -1,0 +1,6 @@
+File: mihomo-tono-linux-amd64
+Type: cpu
+Time: 2026-09-13 23:58:37 UTC
+Duration: 32s, Total samples = 0
+Showing nodes accounting for 0, 0% of 0 total
+      flat  flat%   sum%        cum   cum%

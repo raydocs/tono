@@ -1,0 +1,47 @@
+File: sing-box-linux-amd64
+Type: cpu
+Time: 2026-09-14 00:01:18 UTC
+Duration: 32s, Total samples = 230ms ( 0.72%)
+Showing nodes accounting for 80ms, 34.78% of 230ms total
+Showing top 40 nodes out of 168
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%       90ms 39.13%  github.com/sagernet/sing-box/route.(*ConnectionManager).connectionCopy
+         0     0%     0%       90ms 39.13%  github.com/sagernet/sing/common/bufio.CopyWithIncreateBuffer
+         0     0%     0%       80ms 34.78%  github.com/sagernet/gvisor/pkg/tcpip/link/fdbased.(*endpoint).WritePackets
+         0     0%     0%       80ms 34.78%  github.com/sagernet/gvisor/pkg/tcpip/link/fdbased.(*endpoint).sendBatch
+         0     0%     0%       80ms 34.78%  github.com/sagernet/gvisor/pkg/tcpip/link/fdbased.(*endpoint).writePacket
+         0     0%     0%       80ms 34.78%  github.com/sagernet/gvisor/pkg/tcpip/network/ipv4.(*endpoint).WritePacket
+         0     0%     0%       80ms 34.78%  github.com/sagernet/gvisor/pkg/tcpip/network/ipv4.(*endpoint).writePacket
+         0     0%     0%       80ms 34.78%  github.com/sagernet/gvisor/pkg/tcpip/network/ipv4.(*endpoint).writePacketPostRouting
+         0     0%     0%       80ms 34.78%  github.com/sagernet/gvisor/pkg/tcpip/stack.(*Route).WritePacket
+         0     0%     0%       80ms 34.78%  github.com/sagernet/gvisor/pkg/tcpip/stack.(*delegatingQueueingDiscipline).WritePacket
+         0     0%     0%       80ms 34.78%  github.com/sagernet/gvisor/pkg/tcpip/stack.(*nic).WritePacket
+         0     0%     0%       80ms 34.78%  github.com/sagernet/gvisor/pkg/tcpip/stack.(*nic).writePacket
+         0     0%     0%       80ms 34.78%  github.com/sagernet/gvisor/pkg/tcpip/stack.(*nic).writeRawPacket
+         0     0%     0%       80ms 34.78%  github.com/sagernet/gvisor/pkg/tcpip/transport/tcp.(*Endpoint).Write
+         0     0%     0%       80ms 34.78%  github.com/sagernet/gvisor/pkg/tcpip/transport/tcp.(*Endpoint).sendRaw
+         0     0%     0%       80ms 34.78%  github.com/sagernet/gvisor/pkg/tcpip/transport/tcp.(*Endpoint).sendTCP
+         0     0%     0%       80ms 34.78%  github.com/sagernet/gvisor/pkg/tcpip/transport/tcp.(*sender).maybeSendSegment
+         0     0%     0%       80ms 34.78%  github.com/sagernet/gvisor/pkg/tcpip/transport/tcp.(*sender).sendData
+         0     0%     0%       80ms 34.78%  github.com/sagernet/gvisor/pkg/tcpip/transport/tcp.(*sender).sendSegment
+         0     0%     0%       80ms 34.78%  github.com/sagernet/gvisor/pkg/tcpip/transport/tcp.(*sender).sendSegmentFromPacketBuffer
+         0     0%     0%       80ms 34.78%  github.com/sagernet/gvisor/pkg/tcpip/transport/tcp.sendTCP
+         0     0%     0%       80ms 34.78%  github.com/sagernet/sing-tun.(*gTCPConn).Write
+         0     0%     0%       80ms 34.78%  github.com/sagernet/sing/common/bufio.(*ExtendedWriterWrapper).WriteBuffer
+         0     0%     0%       80ms 34.78%  github.com/sagernet/sing/common/bufio.CopyWithCounters
+         0     0%     0%       80ms 34.78%  github.com/sagernet/sing/common/bufio.copyExtended
+         0     0%     0%       80ms 34.78%  github.com/sagernet/sing/common/bufio.copyExtendedWithPool
+      80ms 34.78% 34.78%       80ms 34.78%  internal/runtime/syscall/linux.Syscall6
+         0     0% 34.78%       70ms 30.43%  github.com/sagernet/gvisor/pkg/rawfile.NonBlockingWriteIovec
+         0     0% 34.78%       70ms 30.43%  github.com/sagernet/gvisor/pkg/tcpip/transport/tcp.(*Endpoint).sendData
+         0     0% 34.78%       70ms 30.43%  syscall.RawSyscall
+         0     0% 34.78%       70ms 30.43%  syscall.RawSyscall6
+         0     0% 34.78%       60ms 26.09%  github.com/sagernet/sing-box/common/dialer.DialSerialNetwork
+         0     0% 34.78%       60ms 26.09%  github.com/sagernet/sing-box/protocol/tun.(*Inbound).NewConnectionEx
+         0     0% 34.78%       60ms 26.09%  github.com/sagernet/sing-box/protocol/vless.(*Outbound).DialContext
+         0     0% 34.78%       60ms 26.09%  github.com/sagernet/sing-box/protocol/vless.(*vlessDialer).DialContext
+         0     0% 34.78%       60ms 26.09%  github.com/sagernet/sing-box/route.(*ConnectionManager).NewConnection
+         0     0% 34.78%       60ms 26.09%  github.com/sagernet/sing-box/route.(*Router).RouteConnectionEx
+         0     0% 34.78%       60ms 26.09%  github.com/sagernet/sing-box/route.(*Router).routeConnection
+         0     0% 34.78%       50ms 21.74%  github.com/sagernet/sing-box/common/tls.(*RealityClientConfig).ClientHandshake
+         0     0% 34.78%       50ms 21.74%  github.com/sagernet/sing-box/common/tls.(*defaultDialer).DialTLSContext

@@ -24,6 +24,18 @@ Normal 使用 warning/warn 日志。Profile 使用相同内核二进制；A 为�
 需要 log-level=debug，B/C 加 `experimental.debug.listen=127.0.0.1:19092`。
 诊断端口仅在封闭 namespace 内；诊断数据不合并进正常 CPU 数字。
 
+性能执行前冻结工具提交为
+[c7ae8467](https://github.com/raydocs/tono/commit/c7ae8467747d04fb8664dbd367f38aee83dac08a)。
+B3 workload 二进制 SHA-256 为
+`a5395c609cc47761cdad1c1066230334fab3ff873c9c5e1d02a50322f4f73331`，
+源码 SHA-256 为 `7f323e1266e54af899a1c0132a38693ab37a56c008a36c0b7667c2ebaf173b50`。
+复用 B2 burst worker SHA-256
+`b83bb784e86589d60acd071f93226934a3ba50e1a57bdc6164f37ec1889cd3d5`。
+工具编译参数：`GOTOOLCHAIN=local GO111MODULE=off CGO_ENABLED=0 GOOS=linux
+GOARCH=amd64 GOAMD64=v2 GOMAXPROCS=2`，`go build -trimpath -ldflags '-s -w -buildid='`。
+每批执行前核对二进制、工具源码及 smoke 的哈希；后加的离线 exporter 不参与负载。
+完整构建/自测输出见 `raw/build.json`；逐实例配置/执行源码哈希见 `raw/measure-*.json`。
+
 ## 运行前计算的完整应用预算
 
 `run_b3.py budget`：**226,905,088 bytes = 216.3935546875 MiB < 256 MiB**。

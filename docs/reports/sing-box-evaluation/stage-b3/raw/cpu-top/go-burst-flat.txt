@@ -1,0 +1,47 @@
+File: sing-box-linux-amd64
+Type: cpu
+Time: 2026-09-14 00:02:54 UTC
+Duration: 32.01s, Total samples = 110ms ( 0.34%)
+Showing nodes accounting for 110ms, 100% of 110ms total
+Showing top 40 nodes out of 108
+      flat  flat%   sum%        cum   cum%
+      50ms 45.45% 45.45%       50ms 45.45%  internal/runtime/syscall/linux.Syscall6
+      20ms 18.18% 63.64%       20ms 18.18%  runtime.futex
+      20ms 18.18% 81.82%       20ms 18.18%  runtime.scanblock
+      10ms  9.09% 90.91%       10ms  9.09%  crypto/internal/fips140/edwards25519/field.feMul
+      10ms  9.09%   100%       10ms  9.09%  runtime.netpollclose
+         0     0%   100%       10ms  9.09%  _.goready.func1
+         0     0%   100%       10ms  9.09%  crypto/ecdh.(*x25519Curve).GenerateKey
+         0     0%   100%       10ms  9.09%  crypto/ecdh.(*x25519Curve).NewPrivateKey
+         0     0%   100%       10ms  9.09%  crypto/ecdh.x25519ScalarMult
+         0     0%   100%       10ms  9.09%  crypto/internal/fips140/edwards25519/field.(*Element).Multiply (inline)
+         0     0%   100%       10ms  9.09%  github.com/metacubex/utls.(*Conn).write
+         0     0%   100%       10ms  9.09%  github.com/metacubex/utls.(*Conn).writeHandshakeRecord
+         0     0%   100%       10ms  9.09%  github.com/metacubex/utls.(*Conn).writeRecordLocked
+         0     0%   100%       10ms  9.09%  github.com/metacubex/utls.(*GREASEEncryptedClientHelloExtension).Len
+         0     0%   100%       10ms  9.09%  github.com/metacubex/utls.(*GREASEEncryptedClientHelloExtension).init
+         0     0%   100%       10ms  9.09%  github.com/metacubex/utls.(*GREASEEncryptedClientHelloExtension).init.func1
+         0     0%   100%       10ms  9.09%  github.com/metacubex/utls.(*GREASEEncryptedClientHelloExtension).writeToUConn
+         0     0%   100%       10ms  9.09%  github.com/metacubex/utls.(*UConn).ApplyConfig (inline)
+         0     0%   100%       10ms  9.09%  github.com/metacubex/utls.(*UConn).BuildHandshakeState (inline)
+         0     0%   100%       10ms  9.09%  github.com/metacubex/utls.(*UConn).HandshakeContext (inline)
+         0     0%   100%       10ms  9.09%  github.com/metacubex/utls.(*UConn).MarshalClientHelloNoECH
+         0     0%   100%       10ms  9.09%  github.com/metacubex/utls.(*UConn).buildHandshakeState
+         0     0%   100%       10ms  9.09%  github.com/metacubex/utls.(*UConn).clientHandshake
+         0     0%   100%       10ms  9.09%  github.com/metacubex/utls.(*UConn).handshakeContext
+         0     0%   100%       10ms  9.09%  github.com/metacubex/utls/internal/hpke.(*dhKEM).Encap
+         0     0%   100%       10ms  9.09%  github.com/metacubex/utls/internal/hpke.SetupSender
+         0     0%   100%       20ms 18.18%  github.com/sagernet/sing-box/common/dialer.DialSerialNetwork
+         0     0%   100%       20ms 18.18%  github.com/sagernet/sing-box/common/tls.(*RealityClientConfig).ClientHandshake
+         0     0%   100%       20ms 18.18%  github.com/sagernet/sing-box/common/tls.(*defaultDialer).DialTLSContext
+         0     0%   100%       20ms 18.18%  github.com/sagernet/sing-box/common/tls.(*defaultDialer).dialContext
+         0     0%   100%       20ms 18.18%  github.com/sagernet/sing-box/protocol/tun.(*Inbound).NewConnectionEx
+         0     0%   100%       20ms 18.18%  github.com/sagernet/sing-box/protocol/vless.(*Outbound).DialContext
+         0     0%   100%       20ms 18.18%  github.com/sagernet/sing-box/protocol/vless.(*vlessDialer).DialContext
+         0     0%   100%       20ms 18.18%  github.com/sagernet/sing-box/route.(*ConnectionManager).NewConnection
+         0     0%   100%       40ms 36.36%  github.com/sagernet/sing-box/route.(*ConnectionManager).connectionCopy
+         0     0%   100%       20ms 18.18%  github.com/sagernet/sing-box/route.(*Router).RouteConnectionEx
+         0     0%   100%       20ms 18.18%  github.com/sagernet/sing-box/route.(*Router).routeConnection
+         0     0%   100%       10ms  9.09%  github.com/sagernet/sing-tun.(*GoConn).WriteBuffer
+         0     0%   100%       10ms  9.09%  github.com/sagernet/sing-tun.(*GoConn).armRetransmitIfIdle
+         0     0%   100%       10ms  9.09%  github.com/sagernet/sing-tun.(*GoConn).finishTransmit

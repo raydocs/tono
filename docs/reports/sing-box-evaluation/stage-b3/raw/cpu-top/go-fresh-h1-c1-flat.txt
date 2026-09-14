@@ -1,0 +1,47 @@
+File: sing-box-linux-amd64
+Type: cpu
+Time: 2026-09-14 00:02:22 UTC
+Duration: 32s, Total samples = 90ms ( 0.28%)
+Showing nodes accounting for 90ms, 100% of 90ms total
+Showing top 40 nodes out of 51
+      flat  flat%   sum%        cum   cum%
+      30ms 33.33% 33.33%       30ms 33.33%  internal/runtime/syscall/linux.Syscall6
+      10ms 11.11% 44.44%       30ms 33.33%  github.com/sagernet/sing-tun.(*GoConn).transmitFrame
+      10ms 11.11% 55.56%       10ms 11.11%  github.com/sagernet/sing-tun.(*goWheel).advance
+      10ms 11.11% 66.67%       10ms 11.11%  github.com/sagernet/sing-tun/gtcpip/header.TCP.Encode
+      10ms 11.11% 77.78%       10ms 11.11%  internal/runtime/atomic.(*Uint32).CompareAndSwap (inline)
+      10ms 11.11% 88.89%       10ms 11.11%  runtime.chanrecv
+      10ms 11.11%   100%       10ms 11.11%  runtime.futex
+         0     0%   100%       50ms 55.56%  github.com/sagernet/sing-box/route.(*ConnectionManager).connectionCopy
+         0     0%   100%       40ms 44.44%  github.com/sagernet/sing-tun.(*GoConn).WriteBuffer
+         0     0%   100%       10ms 11.11%  github.com/sagernet/sing-tun.(*GoConn).buildContiguousFrame
+         0     0%   100%       10ms 11.11%  github.com/sagernet/sing-tun.(*GoConn).encodeHeaders
+         0     0%   100%       30ms 33.33%  github.com/sagernet/sing-tun.(*GoConn).publishBuffered
+         0     0%   100%       30ms 33.33%  github.com/sagernet/sing-tun.(*GoConn).transmitInline
+         0     0%   100%       30ms 33.33%  github.com/sagernet/sing-tun.(*GoConn).transmitLoop
+         0     0%   100%       10ms 11.11%  github.com/sagernet/sing-tun.(*goEngine).park
+         0     0%   100%       10ms 11.11%  github.com/sagernet/sing-tun.(*goEngine).processBurst
+         0     0%   100%       30ms 33.33%  github.com/sagernet/sing-tun.(*goEngine).run
+         0     0%   100%       10ms 11.11%  github.com/sagernet/sing-tun.(*goLinuxIO).readBurst
+         0     0%   100%       10ms 11.11%  github.com/sagernet/sing-tun.(*goLinuxIO).transmitFrame
+         0     0%   100%       10ms 11.11%  github.com/sagernet/sing-tun.(*goLinuxIO).wait
+         0     0%   100%       10ms 11.11%  github.com/sagernet/sing-tun.(*goLinuxIO).writeData
+         0     0%   100%       10ms 11.11%  github.com/sagernet/sing-vmess/vless.(*VisionConn).Read
+         0     0%   100%       10ms 11.11%  github.com/sagernet/sing/common/bufio.(*ExtendedReaderWrapper).ReadBuffer
+         0     0%   100%       50ms 55.56%  github.com/sagernet/sing/common/bufio.CopyWithCounters
+         0     0%   100%       50ms 55.56%  github.com/sagernet/sing/common/bufio.CopyWithIncreateBuffer
+         0     0%   100%       50ms 55.56%  github.com/sagernet/sing/common/bufio.copyExtended
+         0     0%   100%       50ms 55.56%  github.com/sagernet/sing/common/bufio.copyExtendedWithPool
+         0     0%   100%       10ms 11.11%  golang.org/x/sys/unix.EpollWait
+         0     0%   100%       10ms 11.11%  internal/poll.(*FD).Read
+         0     0%   100%       10ms 11.11%  internal/poll.ignoringEINTRIO (inline)
+         0     0%   100%       10ms 11.11%  internal/runtime/syscall/linux.EpollWait
+         0     0%   100%       10ms 11.11%  net.(*conn).Read
+         0     0%   100%       10ms 11.11%  net.(*netFD).Read
+         0     0%   100%       20ms 22.22%  runtime.entersyscall
+         0     0%   100%       10ms 11.11%  runtime.entersyscallWakeSysmon
+         0     0%   100%       10ms 11.11%  runtime.findRunnable
+         0     0%   100%       10ms 11.11%  runtime.futexwakeup
+         0     0%   100%       10ms 11.11%  runtime.mcall
+         0     0%   100%       10ms 11.11%  runtime.netpoll
+         0     0%   100%       10ms 11.11%  runtime.notewakeup

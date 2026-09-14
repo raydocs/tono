@@ -1,0 +1,47 @@
+File: mihomo-tono-linux-amd64
+Type: cpu
+Time: 2026-09-13 23:59:41 UTC
+Duration: 32s, Total samples = 320ms (    1%)
+Showing nodes accounting for 100ms, 31.25% of 320ms total
+Showing top 40 nodes out of 178
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%      130ms 40.62%  github.com/metacubex/gvisor/pkg/tcpip/transport/tcp.(*sender).sendData
+      10ms  3.12%  3.12%      120ms 37.50%  github.com/metacubex/gvisor/pkg/tcpip/transport/tcp.(*Endpoint).sendRaw
+         0     0%  3.12%      120ms 37.50%  github.com/metacubex/gvisor/pkg/tcpip/transport/tcp.(*sender).maybeSendSegment
+         0     0%  3.12%      120ms 37.50%  github.com/metacubex/gvisor/pkg/tcpip/transport/tcp.(*sender).sendSegment
+         0     0%  3.12%      120ms 37.50%  github.com/metacubex/gvisor/pkg/tcpip/transport/tcp.(*sender).sendSegmentFromPacketBuffer
+         0     0%  3.12%      110ms 34.38%  github.com/metacubex/mihomo/common/net.Relay.func2
+         0     0%  3.12%      110ms 34.38%  github.com/metacubex/sing/common/bufio.Copy
+         0     0%  3.12%      110ms 34.38%  github.com/metacubex/sing/common/bufio.CopyExtended
+         0     0%  3.12%      110ms 34.38%  github.com/metacubex/sing/common/bufio.copyWaitWithPool
+         0     0%  3.12%      100ms 31.25%  github.com/metacubex/gvisor/pkg/tcpip/adapters/gonet.(*TCPConn).Write
+         0     0%  3.12%      100ms 31.25%  github.com/metacubex/gvisor/pkg/tcpip/network/ipv4.(*endpoint).WritePacket
+         0     0%  3.12%      100ms 31.25%  github.com/metacubex/gvisor/pkg/tcpip/network/ipv4.(*endpoint).writePacket
+         0     0%  3.12%      100ms 31.25%  github.com/metacubex/gvisor/pkg/tcpip/stack.(*Route).WritePacket
+         0     0%  3.12%      100ms 31.25%  github.com/metacubex/gvisor/pkg/tcpip/transport/tcp.(*Endpoint).sendTCP
+         0     0%  3.12%      100ms 31.25%  github.com/metacubex/gvisor/pkg/tcpip/transport/tcp.sendTCP
+         0     0%  3.12%      100ms 31.25%  github.com/metacubex/sing/common/bufio.(*ExtendedWriterWrapper).WriteBuffer
+         0     0%  3.12%       90ms 28.12%  github.com/metacubex/gvisor/pkg/tcpip/network/ipv4.(*endpoint).writePacketPostRouting
+         0     0%  3.12%       90ms 28.12%  github.com/metacubex/gvisor/pkg/tcpip/transport/tcp.(*Endpoint).Write
+         0     0%  3.12%       90ms 28.12%  github.com/metacubex/gvisor/pkg/tcpip/transport/tcp.(*Endpoint).sendData
+         0     0%  3.12%       80ms 25.00%  github.com/metacubex/gvisor/pkg/tcpip/stack.(*nic).WritePacket
+         0     0%  3.12%       80ms 25.00%  github.com/metacubex/gvisor/pkg/tcpip/stack.(*nic).writePacket
+         0     0%  3.12%       80ms 25.00%  github.com/metacubex/gvisor/pkg/tcpip/stack.(*nic).writeRawPacket
+      80ms 25.00% 28.12%       80ms 25.00%  internal/runtime/syscall/linux.Syscall6
+         0     0% 28.12%       80ms 25.00%  syscall.RawSyscall6
+         0     0% 28.12%       70ms 21.88%  github.com/metacubex/gvisor/pkg/tcpip/link/fdbased.(*endpoint).WritePackets
+         0     0% 28.12%       70ms 21.88%  github.com/metacubex/gvisor/pkg/tcpip/link/fdbased.(*endpoint).sendBatch
+         0     0% 28.12%       70ms 21.88%  github.com/metacubex/gvisor/pkg/tcpip/link/fdbased.(*endpoint).writePacket
+         0     0% 28.12%       70ms 21.88%  github.com/metacubex/gvisor/pkg/tcpip/stack.(*delegatingQueueingDiscipline).WritePacket
+      10ms  3.12% 31.25%       60ms 18.75%  github.com/metacubex/gvisor/pkg/buffer.newChunk
+         0     0% 31.25%       60ms 18.75%  github.com/metacubex/gvisor/pkg/rawfile.NonBlockingWriteIovec
+         0     0% 31.25%       60ms 18.75%  github.com/metacubex/gvisor/pkg/tcpip/transport/tcp.(*Endpoint).handleSegmentLocked
+         0     0% 31.25%       60ms 18.75%  github.com/metacubex/gvisor/pkg/tcpip/transport/tcp.(*Endpoint).handleSegmentsLocked
+         0     0% 31.25%       60ms 18.75%  github.com/metacubex/gvisor/pkg/tcpip/transport/tcp.(*processor).start
+         0     0% 31.25%       60ms 18.75%  github.com/metacubex/gvisor/pkg/tcpip/transport/tcp.handleConnected
+         0     0% 31.25%       60ms 18.75%  github.com/metacubex/mihomo/listener/sing.(*ListenerHandler).NewConnection
+         0     0% 31.25%       60ms 18.75%  github.com/metacubex/mihomo/listener/sing_tun.(*ListenerHandler).NewConnection
+         0     0% 31.25%       60ms 18.75%  github.com/metacubex/sing-tun.(*TCPForwarder).Forward.func2
+         0     0% 31.25%       60ms 18.75%  syscall.RawSyscall
+         0     0% 31.25%       50ms 15.62%  github.com/metacubex/gvisor/pkg/buffer.NewView
+         0     0% 31.25%       50ms 15.62%  github.com/metacubex/gvisor/pkg/buffer.NewViewSize

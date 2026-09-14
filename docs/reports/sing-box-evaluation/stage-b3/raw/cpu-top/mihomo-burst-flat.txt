@@ -1,0 +1,47 @@
+File: mihomo-tono-linux-amd64
+Type: cpu
+Time: 2026-09-13 23:59:41 UTC
+Duration: 32s, Total samples = 320ms (    1%)
+Showing nodes accounting for 320ms, 100% of 320ms total
+Showing top 40 nodes out of 178
+      flat  flat%   sum%        cum   cum%
+      80ms 25.00% 25.00%       80ms 25.00%  internal/runtime/syscall/linux.Syscall6
+      30ms  9.38% 34.38%       30ms  9.38%  runtime.memclrNoHeapPointers
+      20ms  6.25% 40.62%       20ms  6.25%  runtime.memmove
+      10ms  3.12% 43.75%       10ms  3.12%  crypto/internal/fips140/edwards25519/field.(*Element).Add
+      10ms  3.12% 46.88%       10ms  3.12%  crypto/internal/fips140/edwards25519/field.feMul
+      10ms  3.12% 50.00%       10ms  3.12%  crypto/internal/fips140/edwards25519/field.mul (inline)
+      10ms  3.12% 53.12%       10ms  3.12%  github.com/metacubex/gvisor/pkg/atomicbitops.(*Int64).Add (inline)
+      10ms  3.12% 56.25%       10ms  3.12%  github.com/metacubex/gvisor/pkg/buffer.getChunkPool
+      10ms  3.12% 59.38%       60ms 18.75%  github.com/metacubex/gvisor/pkg/buffer.newChunk
+      10ms  3.12% 62.50%       10ms  3.12%  github.com/metacubex/gvisor/pkg/sync.(*CrossGoroutineRWMutex).RUnlock
+      10ms  3.12% 65.62%       10ms  3.12%  github.com/metacubex/gvisor/pkg/tcpip.(*MultiCounterStat).IncrementBy (inline)
+      10ms  3.12% 68.75%       50ms 15.62%  github.com/metacubex/gvisor/pkg/tcpip/stack.(*PacketBuffer).headerView
+      10ms  3.12% 71.88%      120ms 37.50%  github.com/metacubex/gvisor/pkg/tcpip/transport/tcp.(*Endpoint).sendRaw
+      10ms  3.12% 75.00%       10ms  3.12%  github.com/metacubex/utls/internal/mlkem.sampleNTT
+      10ms  3.12% 78.12%       10ms  3.12%  internal/sync.(*Mutex).Unlock
+      10ms  3.12% 81.25%       10ms  3.12%  runtime.chanrecv
+      10ms  3.12% 84.38%       10ms  3.12%  runtime.getGCMask
+      10ms  3.12% 87.50%       10ms  3.12%  runtime.pcvalue
+      10ms  3.12% 90.62%       10ms  3.12%  runtime.tryDeferToSpanScan
+      10ms  3.12% 93.75%       20ms  6.25%  sync.(*Pool).Get
+      10ms  3.12% 96.88%       10ms  3.12%  sync.(*Pool).pin
+      10ms  3.12%   100%       10ms  3.12%  time.(*Time).addSec
+         0     0%   100%       10ms  3.12%  crypto/ecdh.(*PrivateKey).ECDH
+         0     0%   100%       20ms  6.25%  crypto/ecdh.(*x25519Curve).GenerateKey
+         0     0%   100%       20ms  6.25%  crypto/ecdh.(*x25519Curve).NewPrivateKey
+         0     0%   100%       10ms  3.12%  crypto/ecdh.(*x25519Curve).ecdh
+         0     0%   100%       30ms  9.38%  crypto/ecdh.x25519ScalarMult
+         0     0%   100%       10ms  3.12%  crypto/internal/fips140/edwards25519/field.(*Element).Multiply (inline)
+         0     0%   100%       10ms  3.12%  crypto/internal/fips140/edwards25519/field.(*Element).Square (inline)
+         0     0%   100%       10ms  3.12%  crypto/internal/fips140/edwards25519/field.feSquare
+         0     0%   100%       40ms 12.50%  github.com/metacubex/gvisor/pkg/buffer.(*Buffer).PullUp
+         0     0%   100%       10ms  3.12%  github.com/metacubex/gvisor/pkg/buffer.(*Buffer).SubApply
+         0     0%   100%       20ms  6.25%  github.com/metacubex/gvisor/pkg/buffer.(*View).Release
+         0     0%   100%       40ms 12.50%  github.com/metacubex/gvisor/pkg/buffer.(*chunk).Clone (inline)
+         0     0%   100%       10ms  3.12%  github.com/metacubex/gvisor/pkg/buffer.(*chunk).DecRef (inline)
+         0     0%   100%       10ms  3.12%  github.com/metacubex/gvisor/pkg/buffer.(*chunkRefs).DecRef
+         0     0%   100%       50ms 15.62%  github.com/metacubex/gvisor/pkg/buffer.NewView
+         0     0%   100%       50ms 15.62%  github.com/metacubex/gvisor/pkg/buffer.NewViewSize
+         0     0%   100%       10ms  3.12%  github.com/metacubex/gvisor/pkg/buffer.init.1.func1
+         0     0%   100%       30ms  9.38%  github.com/metacubex/gvisor/pkg/common.ClearArray[go.shape.[]uint8,go.shape.uint8] (inline)

@@ -1,0 +1,102 @@
+[
+  {
+    "run_id": "smoke-01",
+    "files": [
+      {
+        "path": "/tmp/tono-stage-b3-20260913/smoke-01/results.json",
+        "sha256": "642904e1713bf75fdb7c8b5eada2c734ccc3d5e48abc0a36d7ba7a14ce8fdbb0",
+        "bytes": 255840
+      },
+      {
+        "path": "/tmp/tono-stage-b3-20260913/smoke-01/execution.json",
+        "sha256": "7519afb23e7b6ad652cfc6dbb341426b1f2e21f00763efd61ad124e61b86dd66",
+        "bytes": 831
+      },
+      {
+        "path": "/tmp/tono-stage-b3-20260913/smoke-01/cleanup.json",
+        "sha256": "25b8036e44b321deb032501f60dcfd56e291f28e139edb7862f1f23bda64b9a8",
+        "bytes": 66
+      },
+      {
+        "path": "/tmp/tono-stage-b3-20260913/smoke-01/host-network.json",
+        "sha256": "cb79a03e1d295a31a493e638a769d94091f9da0b50d9fb308fb42478e53d2a3e",
+        "bytes": 5346
+      }
+    ]
+  },
+  {
+    "run_id": "measure-01",
+    "files": [
+      {
+        "path": "/tmp/tono-stage-b3-20260913/measure-01/results.json",
+        "sha256": "a2542575b64ad64d642ef2f5b239ea13c10e18176b89d5fe6b158786a6f8b003",
+        "bytes": 4511115
+      },
+      {
+        "path": "/tmp/tono-stage-b3-20260913/measure-01/execution.json",
+        "sha256": "d164bc855f71f75f1039479e4d53978b8d4cf53a3fb066d74139df6c7d79c49c",
+        "bytes": 2709
+      },
+      {
+        "path": "/tmp/tono-stage-b3-20260913/measure-01/cleanup.json",
+        "sha256": "25b8036e44b321deb032501f60dcfd56e291f28e139edb7862f1f23bda64b9a8",
+        "bytes": 66
+      },
+      {
+        "path": "/tmp/tono-stage-b3-20260913/measure-01/host-network.json",
+        "sha256": "cb79a03e1d295a31a493e638a769d94091f9da0b50d9fb308fb42478e53d2a3e",
+        "bytes": 5346
+      }
+    ]
+  },
+  {
+    "run_id": "measure-02",
+    "files": [
+      {
+        "path": "/tmp/tono-stage-b3-20260913/measure-02/results.json",
+        "sha256": "a3cbebdb314fd8c74da5950cad96eeeb032635e235e2a40f06f6847781fb78a4",
+        "bytes": 3998526
+      },
+      {
+        "path": "/tmp/tono-stage-b3-20260913/measure-02/execution.json",
+        "sha256": "fcc5696f45fbe6144c107d39c1eca10d5035cebe647b8ea24917d83be690ec85",
+        "bytes": 2207
+      },
+      {
+        "path": "/tmp/tono-stage-b3-20260913/measure-02/cleanup.json",
+        "sha256": "25b8036e44b321deb032501f60dcfd56e291f28e139edb7862f1f23bda64b9a8",
+        "bytes": 66
+      },
+      {
+        "path": "/tmp/tono-stage-b3-20260913/measure-02/host-network.json",
+        "sha256": "cb79a03e1d295a31a493e638a769d94091f9da0b50d9fb308fb42478e53d2a3e",
+        "bytes": 5346
+      }
+    ]
+  },
+  {
+    "run_id": "profile-01",
+    "files": [
+      {
+        "path": "/tmp/tono-stage-b3-20260913/profile-01/results.json",
+        "sha256": "3103dbf128fb1ce5c1bea46cd2d5a8fcd3a529195c79e6eee8e8d6c5eb35de97",
+        "bytes": 477830
+      },
+      {
+        "path": "/tmp/tono-stage-b3-20260913/profile-01/execution.json",
+        "sha256": "801834c7b925448aa7cb4699fee85fd970db3aba20945c2244d97ee02be3362d",
+        "bytes": 1487
+      },
+      {
+        "path": "/tmp/tono-stage-b3-20260913/profile-01/cleanup.json",
+        "sha256": "25b8036e44b321deb032501f60dcfd56e291f28e139edb7862f1f23bda64b9a8",
+        "bytes": 66
+      },
+      {
+        "path": "/tmp/tono-stage-b3-20260913/profile-01/host-network.json",
+        "sha256": "cb79a03e1d295a31a493e638a769d94091f9da0b50d9fb308fb42478e53d2a3e",
+        "bytes": 5346
+      }
+    ]
+  }
+]

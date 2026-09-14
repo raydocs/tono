@@ -1,0 +1,47 @@
+File: sing-box-linux-amd64
+Type: cpu
+Time: 2026-09-14 00:00:46 UTC
+Duration: 32s, Total samples = 90ms ( 0.28%)
+Showing nodes accounting for 90ms, 100% of 90ms total
+Showing top 40 nodes out of 53
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%       60ms 66.67%  runtime.findRunnable
+         0     0%     0%       60ms 66.67%  runtime.mcall
+         0     0%     0%       60ms 66.67%  runtime.schedule
+      10ms 11.11% 11.11%       50ms 55.56%  internal/runtime/syscall/linux.EpollWait
+      50ms 55.56% 66.67%       50ms 55.56%  internal/runtime/syscall/linux.Syscall6
+         0     0% 66.67%       50ms 55.56%  runtime.netpoll
+         0     0% 66.67%       50ms 55.56%  runtime.park_m
+         0     0% 66.67%       20ms 22.22%  github.com/sagernet/sing-box/route.(*ConnectionManager).connectionCopy
+         0     0% 66.67%       20ms 22.22%  github.com/sagernet/sing/common/bufio.CopyWithCounters
+         0     0% 66.67%       20ms 22.22%  github.com/sagernet/sing/common/bufio.CopyWithIncreateBuffer
+         0     0% 66.67%       20ms 22.22%  github.com/sagernet/sing/common/bufio.copyExtended
+      10ms 11.11% 77.78%       20ms 22.22%  github.com/sagernet/sing/common/bufio.copyExtendedWithPool
+         0     0% 77.78%       10ms 11.11%  github.com/sagernet/netlink.(*Handle).RouteListFiltered
+         0     0% 77.78%       10ms 11.11%  github.com/sagernet/netlink.(*Handle).routeHandle
+         0     0% 77.78%       10ms 11.11%  github.com/sagernet/netlink.RouteListFiltered (inline)
+         0     0% 77.78%       10ms 11.11%  github.com/sagernet/netlink/nl.(*NetlinkRequest).Execute
+         0     0% 77.78%       10ms 11.11%  github.com/sagernet/netlink/nl.getNetlinkSocket
+         0     0% 77.78%       10ms 11.11%  github.com/sagernet/sing-tun.(*defaultInterfaceMonitor).checkUpdate
+         0     0% 77.78%       10ms 11.11%  github.com/sagernet/sing-tun.(*defaultInterfaceMonitor).postCheckUpdate
+         0     0% 77.78%       10ms 11.11%  github.com/sagernet/sing-vmess/vless.(*VisionConn).Read
+         0     0% 77.78%       10ms 11.11%  github.com/sagernet/sing/common/bufio.(*ExtendedReaderWrapper).ReadBuffer
+         0     0% 77.78%       10ms 11.11%  internal/poll.(*FD).Init
+         0     0% 77.78%       10ms 11.11%  internal/poll.(*FD).Read
+         0     0% 77.78%       10ms 11.11%  internal/poll.(*pollDesc).init
+         0     0% 77.78%       10ms 11.11%  internal/poll.ignoringEINTRIO (inline)
+         0     0% 77.78%       10ms 11.11%  internal/poll.runtime_pollOpen
+         0     0% 77.78%       10ms 11.11%  internal/runtime/syscall/linux.EpollCtl (inline)
+         0     0% 77.78%       10ms 11.11%  net.(*conn).Read
+         0     0% 77.78%       10ms 11.11%  net.(*netFD).Read
+         0     0% 77.78%       10ms 11.11%  os.NewFile (inline)
+         0     0% 77.78%       10ms 11.11%  os.newFile
+         0     0% 77.78%       10ms 11.11%  os.newFileFromNewFile
+         0     0% 77.78%       10ms 11.11%  runtime.(*timer).unlockAndRun
+         0     0% 77.78%       10ms 11.11%  runtime.(*timers).check
+         0     0% 77.78%       10ms 11.11%  runtime.(*timers).run
+         0     0% 77.78%       10ms 11.11%  runtime.entersyscall
+         0     0% 77.78%       10ms 11.11%  runtime.entersyscallWakeSysmon
+      10ms 11.11% 88.89%       10ms 11.11%  runtime.findfunc
+      10ms 11.11%   100%       10ms 11.11%  runtime.futex
+         0     0%   100%       10ms 11.11%  runtime.futexwakeup

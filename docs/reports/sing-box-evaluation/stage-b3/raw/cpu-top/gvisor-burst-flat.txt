@@ -1,0 +1,47 @@
+File: sing-box-linux-amd64
+Type: cpu
+Time: 2026-09-14 00:01:18 UTC
+Duration: 32s, Total samples = 230ms ( 0.72%)
+Showing nodes accounting for 230ms, 100% of 230ms total
+Showing top 40 nodes out of 168
+      flat  flat%   sum%        cum   cum%
+      80ms 34.78% 34.78%       80ms 34.78%  internal/runtime/syscall/linux.Syscall6
+      10ms  4.35% 39.13%       10ms  4.35%  crypto/internal/fips140/aes/gcm.newGCM
+      10ms  4.35% 43.48%       10ms  4.35%  crypto/internal/fips140/edwards25519/field.addMul38 (inline)
+      10ms  4.35% 47.83%       10ms  4.35%  crypto/internal/fips140/edwards25519/field.feMul
+      10ms  4.35% 52.17%       20ms  8.70%  crypto/internal/fips140/edwards25519/field.feSquare
+      10ms  4.35% 56.52%       10ms  4.35%  github.com/sagernet/gvisor/pkg/atomicbitops.(*Int64).Add
+      10ms  4.35% 60.87%       10ms  4.35%  github.com/sagernet/gvisor/pkg/tcpip.(*MultiCounterStat).Increment
+      10ms  4.35% 65.22%       10ms  4.35%  github.com/sagernet/gvisor/pkg/tcpip/stack.(*nic).deliverTransportPacket
+      10ms  4.35% 69.57%       10ms  4.35%  github.com/sagernet/gvisor/pkg/tcpip/transport/tcp.(*segmentQueue).empty
+      10ms  4.35% 73.91%       10ms  4.35%  internal/poll.(*fdMutex).rwlock
+      10ms  4.35% 78.26%       10ms  4.35%  runtime.futex
+      10ms  4.35% 82.61%       10ms  4.35%  runtime.mallocgcSmallScanNoHeaderSC5
+      10ms  4.35% 86.96%       10ms  4.35%  runtime.memclrNoHeapPointers
+      10ms  4.35% 91.30%       10ms  4.35%  runtime.typePointers.nextFast
+      10ms  4.35% 95.65%       10ms  4.35%  runtime.write1
+      10ms  4.35%   100%       10ms  4.35%  sync.(*poolChain).pushHead
+         0     0%   100%       10ms  4.35%  _.goready.func1
+         0     0%   100%       10ms  4.35%  bufio.(*Writer).ReadFrom
+         0     0%   100%       10ms  4.35%  crypto/cipher.NewGCM
+         0     0%   100%       10ms  4.35%  crypto/cipher.newGCM
+         0     0%   100%       20ms  8.70%  crypto/ecdh.(*PrivateKey).ECDH
+         0     0%   100%       10ms  4.35%  crypto/ecdh.(*x25519Curve).GenerateKey
+         0     0%   100%       10ms  4.35%  crypto/ecdh.(*x25519Curve).NewPrivateKey
+         0     0%   100%       20ms  8.70%  crypto/ecdh.(*x25519Curve).ecdh
+         0     0%   100%       30ms 13.04%  crypto/ecdh.x25519ScalarMult
+         0     0%   100%       10ms  4.35%  crypto/internal/fips140/aes/gcm.New (inline)
+         0     0%   100%       10ms  4.35%  crypto/internal/fips140/edwards25519/field.(*Element).Multiply (inline)
+         0     0%   100%       20ms  8.70%  crypto/internal/fips140/edwards25519/field.(*Element).Square (inline)
+         0     0%   100%       20ms  8.70%  github.com/metacubex/utls.(*GREASEEncryptedClientHelloExtension).Len
+         0     0%   100%       20ms  8.70%  github.com/metacubex/utls.(*GREASEEncryptedClientHelloExtension).init
+         0     0%   100%       20ms  8.70%  github.com/metacubex/utls.(*GREASEEncryptedClientHelloExtension).init.func1
+         0     0%   100%       20ms  8.70%  github.com/metacubex/utls.(*GREASEEncryptedClientHelloExtension).writeToUConn
+         0     0%   100%       10ms  4.35%  github.com/metacubex/utls.(*SNIExtension).Read
+         0     0%   100%       20ms  8.70%  github.com/metacubex/utls.(*UConn).ApplyConfig (inline)
+         0     0%   100%       30ms 13.04%  github.com/metacubex/utls.(*UConn).BuildHandshakeState (inline)
+         0     0%   100%       30ms 13.04%  github.com/metacubex/utls.(*UConn).HandshakeContext
+         0     0%   100%       10ms  4.35%  github.com/metacubex/utls.(*UConn).MarshalClientHello
+         0     0%   100%       30ms 13.04%  github.com/metacubex/utls.(*UConn).MarshalClientHelloNoECH
+         0     0%   100%       30ms 13.04%  github.com/metacubex/utls.(*UConn).buildHandshakeState
+         0     0%   100%       20ms  8.70%  github.com/metacubex/utls.(*UConn).clientHandshake

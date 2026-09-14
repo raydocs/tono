@@ -1,0 +1,47 @@
+File: mihomo-tono-linux-amd64
+Type: cpu
+Time: 2026-09-13 23:59:09 UTC
+Duration: 32s, Total samples = 120ms ( 0.37%)
+Showing nodes accounting for 120ms, 100% of 120ms total
+Showing top 40 nodes out of 63
+      flat  flat%   sum%        cum   cum%
+      70ms 58.33% 58.33%       70ms 58.33%  internal/runtime/syscall/linux.Syscall6
+      10ms  8.33% 66.67%       10ms  8.33%  github.com/metacubex/gvisor/pkg/tcpip/checksum.calculateChecksum
+      10ms  8.33% 75.00%       10ms  8.33%  github.com/metacubex/gvisor/pkg/tcpip/network/ipv4.(*endpoint).handleValidatedPacket
+      10ms  8.33% 83.33%       10ms  8.33%  runtime.(*gcControllerState).releaseNextGCMarkWorker
+      10ms  8.33% 91.67%       10ms  8.33%  runtime.(*randomEnum).next
+      10ms  8.33%   100%       20ms 16.67%  runtime.netpoll
+         0     0%   100%       10ms  8.33%  github.com/metacubex/gvisor/pkg/buffer.(*Buffer).Checksum
+         0     0%   100%       10ms  8.33%  github.com/metacubex/gvisor/pkg/rawfile.BlockingReadvUntilStopped
+         0     0%   100%       30ms 25.00%  github.com/metacubex/gvisor/pkg/rawfile.NonBlockingWriteIovec
+         0     0%   100%       40ms 33.33%  github.com/metacubex/gvisor/pkg/tcpip/adapters/gonet.(*TCPConn).Write
+         0     0%   100%       10ms  8.33%  github.com/metacubex/gvisor/pkg/tcpip/checksum.(*Checksumer).Add (inline)
+         0     0%   100%       10ms  8.33%  github.com/metacubex/gvisor/pkg/tcpip/link/fdbased.(*endpoint).Attach.func1
+         0     0%   100%       30ms 25.00%  github.com/metacubex/gvisor/pkg/tcpip/link/fdbased.(*endpoint).WritePackets
+         0     0%   100%       10ms  8.33%  github.com/metacubex/gvisor/pkg/tcpip/link/fdbased.(*endpoint).dispatchLoop
+         0     0%   100%       30ms 25.00%  github.com/metacubex/gvisor/pkg/tcpip/link/fdbased.(*endpoint).sendBatch
+         0     0%   100%       30ms 25.00%  github.com/metacubex/gvisor/pkg/tcpip/link/fdbased.(*endpoint).writePacket
+         0     0%   100%       10ms  8.33%  github.com/metacubex/gvisor/pkg/tcpip/link/fdbased.(*processor).deliverPackets
+         0     0%   100%       10ms  8.33%  github.com/metacubex/gvisor/pkg/tcpip/link/fdbased.(*processor).start
+         0     0%   100%       10ms  8.33%  github.com/metacubex/gvisor/pkg/tcpip/link/fdbased.(*readVDispatcher).dispatch
+         0     0%   100%       10ms  8.33%  github.com/metacubex/gvisor/pkg/tcpip/network/ipv4.(*endpoint).HandlePacket
+         0     0%   100%       30ms 25.00%  github.com/metacubex/gvisor/pkg/tcpip/network/ipv4.(*endpoint).WritePacket
+         0     0%   100%       30ms 25.00%  github.com/metacubex/gvisor/pkg/tcpip/network/ipv4.(*endpoint).writePacket
+         0     0%   100%       30ms 25.00%  github.com/metacubex/gvisor/pkg/tcpip/network/ipv4.(*endpoint).writePacketPostRouting
+         0     0%   100%       30ms 25.00%  github.com/metacubex/gvisor/pkg/tcpip/stack.(*Route).WritePacket
+         0     0%   100%       30ms 25.00%  github.com/metacubex/gvisor/pkg/tcpip/stack.(*delegatingQueueingDiscipline).WritePacket
+         0     0%   100%       10ms  8.33%  github.com/metacubex/gvisor/pkg/tcpip/stack.(*nic).DeliverNetworkPacket
+         0     0%   100%       30ms 25.00%  github.com/metacubex/gvisor/pkg/tcpip/stack.(*nic).WritePacket
+         0     0%   100%       30ms 25.00%  github.com/metacubex/gvisor/pkg/tcpip/stack.(*nic).writePacket
+         0     0%   100%       30ms 25.00%  github.com/metacubex/gvisor/pkg/tcpip/stack.(*nic).writeRawPacket
+         0     0%   100%       10ms  8.33%  github.com/metacubex/gvisor/pkg/tcpip/stack.PacketData.Checksum (inline)
+         0     0%   100%       10ms  8.33%  github.com/metacubex/gvisor/pkg/tcpip/stack/gro.(*GRO).Enqueue
+         0     0%   100%       10ms  8.33%  github.com/metacubex/gvisor/pkg/tcpip/stack/gro.(*GRO).handlePacket (inline)
+         0     0%   100%       40ms 33.33%  github.com/metacubex/gvisor/pkg/tcpip/transport/tcp.(*Endpoint).Write
+         0     0%   100%       40ms 33.33%  github.com/metacubex/gvisor/pkg/tcpip/transport/tcp.(*Endpoint).sendData
+         0     0%   100%       40ms 33.33%  github.com/metacubex/gvisor/pkg/tcpip/transport/tcp.(*Endpoint).sendRaw
+         0     0%   100%       40ms 33.33%  github.com/metacubex/gvisor/pkg/tcpip/transport/tcp.(*Endpoint).sendTCP
+         0     0%   100%       40ms 33.33%  github.com/metacubex/gvisor/pkg/tcpip/transport/tcp.(*sender).maybeSendSegment
+         0     0%   100%       40ms 33.33%  github.com/metacubex/gvisor/pkg/tcpip/transport/tcp.(*sender).sendData
+         0     0%   100%       40ms 33.33%  github.com/metacubex/gvisor/pkg/tcpip/transport/tcp.(*sender).sendSegment
+         0     0%   100%       40ms 33.33%  github.com/metacubex/gvisor/pkg/tcpip/transport/tcp.(*sender).sendSegmentFromPacketBuffer
