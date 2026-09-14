@@ -415,6 +415,30 @@ class ReporterTests(unittest.TestCase):
         # stable-one advanced by 25; stable-two reset and contributed its new 10.
         self.assertEqual(second, {"user-one": 1_185})
 
+    def test_status_without_generation_cannot_distinguish_reset_above_watermark(self) -> None:
+        # Issue #5 evidence, NOT a successful reset-acceptance test. Both
+        # histories supply exactly the same persisted state and status input.
+        # Replace this witness with reset acceptance when a proven counter
+        # generation/retirement snapshot becomes part of the input contract.
+        state = {
+            "totals": {"user-one": 1_000},
+            "pendingReports": [],
+            "peerCounters": {
+                "stable-one": {"userId": "user-one", "lastRawBytes": 1_000},
+            },
+        }
+        observed = reporter.attribute_peer_counters(
+            state,
+            {"public-one": "user-one"},
+            {"user-one": 1_000},
+            {"stable-one": ("public-one", 1_500)},
+        )
+        # No reset: 1,000 old + 500 new. Recreated peer: 1,000 old + 1,500
+        # new, even assuming no unobserved bytes before the peer was retired.
+        self.assertEqual(observed, {"user-one": 1_500})
+        self.assertNotEqual(observed, {"user-one": 2_500})
+        self.assertEqual(2_500 - observed["user-one"], 1_000)
+
     def test_server_source_baseline_does_not_rebill_raw_counters_after_state_loss(self) -> None:
         state = {
             "totals": {},

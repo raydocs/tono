@@ -36,6 +36,45 @@ test.describe('today page', () => {
     await expect(page.locator('.ops-tag.tone-rem').first()).toBeVisible();
   });
 
+  test('a missing customers read cannot publish partial chores as complete totals', async ({ page }) => {
+    let fail!: () => void;
+    const pending = new Promise<void>((resolve) => { fail = resolve; });
+    const customers = /\/api\/v1\/ops\/customers(?:\?|$)/;
+    await page.route(customers, async (route) => {
+      await pending;
+      await route.fulfill({ status: 503, json: { error: { code: 'UPSTREAM', message: 'unavailable' } } });
+    });
+    await page.goto('/ops2/?session=partial-182#/today', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByText('现在 2 个事故，影响 5 位客户')).toBeVisible();
+    const tab = page.getByRole('tab', { name: /待办/ });
+    await tab.click();
+    const failed = page.waitForResponse((response) => customers.test(response.url()) && response.status() === 503);
+    try {
+      await expect(tab).toHaveText('待办—');
+      await expect(page.locator('.today-list-wrap')).toContainText('待办数据未齐，暂时无法确认总数');
+      await expect(page.locator('.today-digest')).toContainText('待办数据未齐，暂时无法确认总数');
+    } finally {
+      fail();
+    }
+    await failed;
+    await expect(tab).toHaveText('待办—');
+    await expect(page.locator('.today-list-wrap')).toContainText('待办数据未齐，暂时无法确认总数');
+    await expect(page.locator('.today-chore-list')).toHaveCount(0);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.locator('.digest-fold summary')).toContainText('今天待办数据未齐');
+    await page.locator('.digest-fold summary').click();
+    await expect(page.locator('.digest-fold')).not.toContainText('到期待办 1 件');
+
+    await page.unroute(customers);
+    await page.reload();
+    await expect(tab).toHaveText('待办32');
+    await tab.click();
+    await expect(page.locator('.today-chore-list > li')).toHaveCount(32);
+    await page.locator('.digest-fold summary').click();
+    await expect(page.locator('.digest-fold')).toContainText('到期待办 5 件');
+    await expect(page.locator('.digest-fold summary')).toContainText('今天 6 件');
+  });
+
   /**
    * The floor on the newest macOS release is 1.8.0, and five customers are
    * still on 1.7.9 — so the chore exists now that the release data does. It is
