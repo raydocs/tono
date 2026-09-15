@@ -40,7 +40,8 @@ workspaces stay separate.
 ## Hard rules
 
 1. **No customer-channel publish** until SHIP_PLAN G1–G3 have evidence. Do not
-   edit `services/control-plane/public/appcast.xml` or push `windows-updates`
+   edit `services/control-plane/public/appcast.xml` or
+   `services/control-plane/public/windows/latest.json`, or push `windows-updates`
    for a ship. Internal tags only.
 2. **Protection must not loosen.** Fail-closed at PF / WFP. No
    `skip-cert-verify`. No unprivileged sidecar path.
