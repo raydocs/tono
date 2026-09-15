@@ -18,6 +18,7 @@ import {
   monthWords,
   pendingCustomers,
   pendingNodes,
+  reversalMonth,
 } from '@/lib/ledger';
 import { useResource } from '@/lib/use-resource';
 import '@/styles/settings-ledger.css';
@@ -48,10 +49,22 @@ export function Ledger() {
   const [month, setMonth] = useState(() => monthOf(nowSec()));
   const [adding, setAdding] = useState(false);
   const [closing, setClosing] = useState(false);
+  const currentMonth = reversalMonth(nowSec());
+  const [targetRevision, setTargetRevision] = useState(0);
 
   const summary = useResource(`ledger-month-${month}`, (signal) => ledgerApi.month(month, signal));
   const entries = useResource(`ledger-entries-${month}`, (signal) => ledgerApi.entries(month, signal));
+  // Invalidate the target after writes: a failed refresh must not retain a
+  // previously open month as permission to reverse, even when viewing history.
+  const target = useResource(`ledger-target-${currentMonth}-${targetRevision}`, async (signal) => ({
+    ...await ledgerApi.month(currentMonth, signal), revision: targetRevision,
+  }));
+  const targetMonth = target.status === 'ready' && target.data.month === currentMonth
+    && target.data.revision === targetRevision ? target.data : null;
+  const reverseReason = targetMonth?.closedAt === null ? null
+    : typeof targetMonth?.closedAt === 'number' ? words.reverseLocked : words.reverseWaiting;
   const reload = useCallback(() => {
+    setTargetRevision((revision) => revision + 1);
     summary.reload();
     entries.reload();
   }, [summary, entries]);
@@ -175,7 +188,8 @@ export function Ledger() {
               : rows.length === 0 ? 'empty' : 'ready'}
           message={entries.status === 'error' ? entries.message : undefined}
           locked={locked}
-          currentMonth={monthOf(nowSec())}
+          currentMonth={currentMonth}
+          reverseReason={reverseReason}
           nameOf={nameOf}
           onChanged={reload}
         />
@@ -197,6 +211,7 @@ export function Ledger() {
           formatCny(month0.costCnyMinor) ?? copy.missing,
           formatCny(month0.marginCnyMinor) ?? copy.missing,
           month0.unreconciled === 0 ? words.pendingNone : words.pendingCount(month0.unreconciled),
+          month0.month === currentMonth,
         )}
         confirm={words.closeConfirm}
         pending={write.pending}

@@ -18,6 +18,7 @@ import {
   nodeRow,
   parseAmountMinor,
   pendingCustomers,
+  reversalMonth,
   shiftMonth,
   sortedEntries,
   subjectTypeFor,
@@ -34,6 +35,11 @@ describe('months', () => {
   it('reads the month and the day off the local clock', () => {
     expect(monthOf(LOCAL_NOON)).toBe('2026-09');
     expect(dayOf(LOCAL_NOON)).toBe('2026-09-09');
+  });
+
+  it('posts reversals across the UTC boundary even while Denver is still in September', () => {
+    expect(reversalMonth(Date.parse('2026-09-30T17:59:59-06:00') / 1_000)).toBe('2026-09');
+    expect(reversalMonth(Date.parse('2026-09-30T18:00:00-06:00') / 1_000)).toBe('2026-10');
   });
 
   it('steps across a year boundary in both directions', () => {
