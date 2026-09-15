@@ -35,7 +35,19 @@ private struct LoginView: View {
                 Text("A quieter connection.").font(.largeTitle.weight(.medium))
                 Text("Sign in with your Tono account.").foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 16) {
-                    if model.challenge == nil {
+                    if let recovery = model.accountRecovery {
+                        Text(recovery == .finishSignOut
+                             ? "Sign-out cleanup is pending. Unlock this device and retry. Your previous account will not be restored."
+                             : "Tono needs to check your saved session before signing you in. Check your connection and retry.")
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("login.recovery")
+                        ActionButton(title: recovery == .finishSignOut ? "Retry sign-out cleanup" : "Retry saved sign-in",
+                                     symbol: "arrow.clockwise", prominent: true) {
+                            Task { await model.retryAccountRecovery() }
+                        }
+                        .disabled(model.busy)
+                        .accessibilityIdentifier("login.retry")
+                    } else if model.challenge == nil {
                         TextField("Email address", text: $email)
                             .textContentType(.emailAddress).keyboardType(.emailAddress)
                             .textInputAutocapitalization(.never).autocorrectionDisabled()

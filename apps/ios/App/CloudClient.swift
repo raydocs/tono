@@ -10,15 +10,18 @@ private final class NoRedirect: NSObject, URLSessionTaskDelegate, @unchecked Sen
 @MainActor
 final class CloudClient {
     private let vault: any CredentialVault
+    private let logoutIntent: LogoutIntentStore
     private let session: URLSession
     private(set) var credentials: CloudSession?
+    private(set) var logoutPending = false
     private var epoch = UUID()
     private var refresh: Task<Void, Error>?
     private var needsPersistence = false
-    private var sessionInvalidated = false
 
-    init(vault: (any CredentialVault)? = nil, configuration: URLSessionConfiguration = .ephemeral) {
+    init(vault: (any CredentialVault)? = nil, configuration: URLSessionConfiguration = .ephemeral,
+         logoutIntent: LogoutIntentStore = LogoutIntentStore()) {
         self.vault = vault ?? KeychainVault()
+        self.logoutIntent = logoutIntent
         let config = configuration
         config.httpCookieStorage = nil
         config.urlCache = nil
@@ -29,7 +32,9 @@ final class CloudClient {
     }
 
     func restore() throws -> CloudSession? {
-        guard !sessionInvalidated else { return nil }
+        if try finishPendingLogout() { return nil }
+        // A retry must not reload an older token pair after a rotated-token write failed.
+        if let credentials { return credentials }
         guard let data = try vault.read("session") else { return nil }
         let value = try JSONDecoder().decode(CloudSession.self, from: data)
         credentials = value
@@ -37,12 +42,14 @@ final class CloudClient {
     }
 
     func start(email: String) async throws -> EmailChallenge {
-        try await decode("auth/email/start", body: [
+        _ = try finishPendingLogout()
+        return try await decode("auth/email/start", body: [
             "email": email, "deviceName": "Tono for iOS", "installationId": try vault.installationID(),
         ], authorized: false)
     }
 
     func verify(challenge: String, code: String) async throws -> CloudSession {
+        _ = try finishPendingLogout()
         let generation = epoch
         let result: AuthEnvelope = try await decode("auth/email/verify", body: [
             "challengeId": challenge, "code": code,
@@ -51,7 +58,6 @@ final class CloudClient {
         credentials = result.auth
         needsPersistence = true
         try persist()
-        sessionInvalidated = false
         return result.auth
     }
 
@@ -82,15 +88,28 @@ final class CloudClient {
     }
 
     func signOut() throws {
+        // Record intent BEFORE deleting credentials or reporting a local logout.
+        // If this write fails, callers must leave explicit sign-out retry reachable.
+        try logoutIntent.mark()
+        logoutPending = true
+        _ = try finishPendingLogout()
+    }
+
+    private func finishPendingLogout() throws -> Bool {
+        if !logoutPending {
+            guard try logoutIntent.isPending() else { return false }
+        }
+        logoutPending = true
         epoch = UUID()
         refresh?.cancel()
         refresh = nil
-        // Clear memory even if Keychain deletion fails; never restore this session in-process.
-        // Deletion failure still reaches the UI and must be retried after unlock.
-        sessionInvalidated = true
         credentials = nil
         needsPersistence = false
+        // Keep the marker across failures/relaunches; clear it only AFTER deletion.
         try vault.remove("session")
+        try logoutIntent.clear()
+        logoutPending = false
+        return true
     }
 
     private func persist() throws {

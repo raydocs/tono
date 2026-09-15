@@ -57,8 +57,22 @@ Reviewed open [shared #202](https://github.com/raydocs/tono/pull/202),
   protection receipts, deletes the Keychain session and returns navigation to
   sign-in. Offline/transport errors and 5xx preserve the session. If Keychain
   deletion fails, memory/navigation still clear and a storage warning is shown;
-  this process cannot restore that session. After unlock/relaunch, any remaining
-  stored session must pass `/me` again and a terminal response retries deletion.
+  an atomic, non-secret `Application Support/Account/logout-pending` marker
+  prevents **all subsequent launches** from restoring it, even if `/me` would
+  still accept the token. This app-private marker is not in Keychain or the App
+  Group and contains no account identity or credentials. Restoration retries
+  deletion before reading credentials; the signed-out screen also offers
+  **Retry sign-out cleanup**. Only successful Keychain deletion permits marker
+  removal and new email authentication. Unreadable marker storage blocks restore.
+  If recording the marker itself fails during explicit sign-out, logout is not
+  reported complete: the account remains visible with a storage error and Sign
+  out stays reachable. The already completed pause remains in force. Terminal
+  auth loss still removes authenticated navigation and exposes cleanup retry.
+  This covers app relaunch/client recreation, not deletion of the app container.
+  Cold-start transient `/me` failure exposes **Retry saved sign-in** rather than
+  ordinary email login. Retry keeps the retained (or newly rotated in-memory)
+  token pair; `user` stays nil until `/me` succeeds. No cached identity is treated
+  as authorized, no background retry loop or new email authentication is required.
   This does not claim system-level traffic blocking or revoke remote sessions.
 - `GET devices`, `DELETE devices/{id}` use current server device limits. Self
   removal is rejected; old-device removal needs explicit confirmation. The row,
@@ -232,9 +246,13 @@ core refusal, Worker digest/tamper/signature boundaries, malformed home credenti
 auth decoding, duplicate device removal labels, diagnostic minimization and wire
 shaping. `AppModelTests` adds nonrecursive opt-out persistence/clearing, restored
 session invalid refresh versus offline/503, deletion failure without memory revival,
-and Minimal pause/stale-only zero-request versus recent-failure upload. It uses
-the real CloudClient with URLProtocol interception, an in-memory vault and a stub
-tunnel; it never contacts the API, Keychain or system VPN manager. `TonoUITests` checks labelled preview and
+explicit valid-session logout with failed deletion across client/model recreation
+and eventual cleanup, cold-start offline → 503 → successful `/me` retry using the
+same token without new authentication, and Minimal pause/stale-only zero-request
+versus recent-failure upload. It uses the real CloudClient with URLProtocol
+interception, an in-memory vault, a real temporary logout-marker directory and a
+stub tunnel; it never contacts the API, Keychain or system VPN manager.
+`TonoUITests` checks labelled preview and
 location interaction, retaining a screenshot. These tests were **not executed**
 in the Orb; neither Swift nor Xcode nor an Apple Simulator is installed. No
 native screenshot/performance/Network Extension/TestFlight proof exists. A
@@ -279,7 +297,7 @@ xcodebuild -project apps/ios/Tono.xcodeproj -scheme Tono \
 Both test targets must execute a nonzero count, not skip. If the same blocker
 survives two focused corrections, retain evidence and stop rather than cycling
 full builds. Simulator success still does not prove NetworkExtension or On Demand.
-There are currently **21 XCTest methods and one UI test**. Confirm all four
+There are currently **23 XCTest methods and one UI test**. Confirm all six
 AppModel regressions, both Worker digest tests and the late-failure receipt test
 appear in the xcresult; a source scan is not their execution. Leave
 `TONO_PREVIEW_STATE` unset for unit tests (the UI test sets its own launch value).
@@ -318,7 +336,16 @@ visual-only and never evidence of encrypted traffic.
    Minimal pause/Send must make no telemetry request, whereas a recent failed
    Connect/Send must send one redacted failure. After session revocation/invalid
    refresh, expect sign-in and no old devices/location/history; offline/503 must
-   not sign out. With duplicate device names, inspect wrapping at accessibility
+   not sign out. Exercise a cold launch offline, dismiss the error, restore
+   connectivity, then select **Retry saved sign-in**: no Home/cached email before
+   `/me` succeeds and no verification code needed. The native mocked regressions
+   inject failed Keychain deletion, retain valid credentials and recreate the
+   client/model against the same on-disk marker. Run them by their exact names:
+   `AppModelTests/testExplicitLogoutSurvivesClientRecreationUntilDeletionCompletes`
+   and `AppModelTests/testColdStartRetriesTransientRestoreWithoutNewAuthentication`.
+   Inspect the pending-cleanup retry screen with VoiceOver/Dynamic Type; after
+   cleanup succeeds it must return to email login, never the old account.
+   With duplicate device names, inspect wrapping at accessibility
    Dynamic Type and VoiceOver removal labels/confirmation against each full ID;
    cancel before deletion unless that exact test-device removal is authorized.
    Current expected Connect result is **Action Required**, no installed reconnect

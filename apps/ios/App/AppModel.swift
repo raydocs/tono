@@ -3,12 +3,15 @@ import Observation
 
 @MainActor @Observable
 final class AppModel {
+    enum AccountRecovery: Equatable { case restoreSession, finishSignOut }
+
     private let cloud: CloudClient
     private let tunnel: any TunnelControlling
     private let preferences: UserDefaults?
     private(set) var machine = ProtectionMachine()
     private(set) var user: CloudUser?
     private(set) var devices: [CloudDevice] = []
+    private(set) var accountRecovery: AccountRecovery? = .restoreSession
     private(set) var busy = false
     var notice: String?
     var challenge: EmailChallenge?
@@ -50,11 +53,28 @@ final class AppModel {
     }
 
     func restore() async {
-        guard !isPreview else { return }
+        guard !isPreview, !busy, user == nil else { return }
         await perform {
-            guard try cloud.restore() != nil else { return }
+            accountRecovery = .restoreSession
+            guard try cloud.restore() != nil else {
+                accountRecovery = nil
+                return
+            }
             user = try await cloud.me()
+            accountRecovery = nil // cached identity never substitutes for a successful /me
             if paused { machine.pause() } else { machine.fail(.coreUnavailable) }
+        }
+    }
+
+    func retryAccountRecovery() async {
+        switch accountRecovery {
+        case .restoreSession: await restore()
+        case .finishSignOut:
+            await perform {
+                try cloud.signOut()
+                clearAccountState()
+            }
+        case nil: return
         }
     }
 
@@ -73,6 +93,7 @@ final class AppModel {
             guard let challenge, let expiry = challengeExpires, expiry > .now else { throw Blocker.invalidCode }
             let result = try await cloud.verify(challenge: challenge.challengeId, code: code)
             user = result.user
+            accountRecovery = nil
             self.challenge = nil
             challengeExpires = nil
             machine.fail(.coreUnavailable)
@@ -131,17 +152,18 @@ final class AppModel {
     func signOut() async {
         await perform {
             try await tunnel.pause()
-            clearAccountState()
             machine.pause()
             paused = true
             preferences?.set(true, forKey: "paused")
             try cloud.signOut()
+            clearAccountState()
         }
     }
 
     private func clearAccountState() {
         user = nil
         devices = []
+        accountRecovery = nil
         challenge = nil
         challengeExpires = nil
         selectedLocation = nil
@@ -180,10 +202,18 @@ final class AppModel {
                 machine.fail(.sessionExpired)
                 notice = blocker.message // terminal auth loss is never a silent upload failure
                 do { try cloud.signOut() }
-                catch { notice = Blocker.sessionExpired.message + " " + Blocker.keychainUnavailable.message }
+                catch {
+                    accountRecovery = .finishSignOut
+                    notice = Blocker.sessionExpired.message + " " + Blocker.keychainUnavailable.message
+                }
                 return // do not retain account-scoped telemetry after authentication loss
             }
             if showErrors { notice = blocker.message }
+            if cloud.logoutPending {
+                clearAccountState()
+                accountRecovery = .finishSignOut
+                return
+            }
             if machine.state == .connecting { machine.fail(blocker) }
             diagnostics.append(.init(kind: .admissionRefused, state: machine.state, blocker: blocker,
                                      elapsedSeconds: Int(Date.now.timeIntervalSince(started))), policy: diagnosticPolicy)

@@ -93,8 +93,95 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.user)
         XCTAssertEqual(FixtureHTTP.script.requests.count, 3) // no in-process revival
         vault.failRemoval = false
-        try cloud.signOut() // retry after unlock
+        XCTAssertEqual(model.accountRecovery, .finishSignOut)
+        await model.retryAccountRecovery() // same action exposed on the signed-out screen
         XCTAssertNil(try vault.read("session"))
+        XCTAssertNil(model.accountRecovery)
+    }
+
+    @MainActor func testExplicitLogoutSurvivesClientRecreationUntilDeletionCompletes() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let vault = MemoryVault()
+        let firstCloud = client(vault: vault, logoutDirectory: directory)
+        let first = AppModel(cloud: firstCloud, tunnel: StubTunnel(), preferences: nil)
+        FixtureHTTP.script.reset([.init(body: Self.me)])
+        await first.restore() // server accepts this retained session
+        XCTAssertEqual(first.user?.id, "fixture-user")
+        // A regular file blocks creation of the intent directory: no durable intent,
+        // so explicit logout must report failure and keep its retry reachable.
+        try Data([0]).write(to: directory)
+        await first.signOut()
+        XCTAssertEqual(first.user?.id, "fixture-user")
+        XCTAssertNotNil(firstCloud.credentials)
+        XCTAssertNotNil(try vault.read("session"))
+        XCTAssertEqual(first.notice, Blocker.keychainUnavailable.message)
+        try FileManager.default.removeItem(at: directory)
+        vault.failRemoval = true
+        await first.signOut()
+        XCTAssertNil(first.user)
+        XCTAssertNil(firstCloud.credentials)
+        XCTAssertEqual(first.accountRecovery, .finishSignOut)
+        XCTAssertNotNil(try vault.read("session"))
+        XCTAssertTrue(try LogoutIntentStore(directory: directory).isPending())
+
+        // Fresh client/model/store, same OS-persisted vault and directory. The server
+        // would STILL accept /me: a memory-only latch or invalid-token fixture cannot pass.
+        let secondCloud = client(vault: vault, logoutDirectory: directory)
+        let second = AppModel(cloud: secondCloud, tunnel: StubTunnel(), preferences: nil)
+        FixtureHTTP.script.reset([.init(body: Self.me)])
+        await second.restore()
+        XCTAssertNil(second.user)
+        XCTAssertNil(secondCloud.credentials)
+        XCTAssertEqual(second.accountRecovery, .finishSignOut)
+        XCTAssertTrue(FixtureHTTP.script.requests.isEmpty)
+        await second.sendCode(email: "fixture@example.invalid")
+        XCTAssertTrue(FixtureHTTP.script.requests.isEmpty) // pending deletion also gates new auth
+        XCTAssertTrue(try LogoutIntentStore(directory: directory).isPending())
+
+        vault.failRemoval = false
+        await second.retryAccountRecovery()
+        XCTAssertNil(try vault.read("session"))
+        XCTAssertFalse(try LogoutIntentStore(directory: directory).isPending())
+        XCTAssertNil(second.accountRecovery)
+        XCTAssertNil(second.user)
+        XCTAssertTrue(FixtureHTTP.script.requests.isEmpty)
+        let third = AppModel(cloud: client(vault: vault, logoutDirectory: directory), tunnel: StubTunnel(), preferences: nil)
+        await third.restore()
+        XCTAssertNil(third.user)
+        XCTAssertNil(third.accountRecovery) // ordinary email login, not a stranded cleanup screen
+        XCTAssertTrue(FixtureHTTP.script.requests.isEmpty)
+        FixtureHTTP.script.reset([.init(body: #"{"challengeId":"new-challenge","expiresIn":60}"#)])
+        await third.sendCode(email: "fixture@example.invalid")
+        XCTAssertEqual(third.challenge?.challengeId, "new-challenge")
+        XCTAssertEqual(FixtureHTTP.script.requests.map(\.path), ["/api/v1/auth/email/start"])
+    }
+
+    @MainActor func testColdStartRetriesTransientRestoreWithoutNewAuthentication() async throws {
+        let vault = MemoryVault()
+        let retained = try XCTUnwrap(vault.read("session"))
+        let cloud = client(vault: vault)
+        let model = AppModel(cloud: cloud, tunnel: StubTunnel(), preferences: nil)
+        FixtureHTTP.script.reset([
+            .init(error: URLError(.notConnectedToInternet)), .init(status: 503), .init(body: Self.me),
+        ])
+        await model.restore() // initial cold start, never previously authorized in this process
+        XCTAssertNil(model.user)
+        XCTAssertNil(model.challenge)
+        XCTAssertEqual(model.accountRecovery, .restoreSession)
+        XCTAssertEqual(cloud.credentials?.accessToken, "fixture-access")
+        XCTAssertEqual(try vault.read("session"), retained)
+        await model.retryAccountRecovery() // online, service still temporarily unavailable
+        XCTAssertNil(model.user)
+        XCTAssertEqual(model.accountRecovery, .restoreSession)
+        XCTAssertEqual(try vault.read("session"), retained)
+        await model.retryAccountRecovery()
+        XCTAssertEqual(model.user?.id, "fixture-user")
+        XCTAssertNil(model.accountRecovery)
+        XCTAssertNil(model.challenge)
+        XCTAssertEqual(try vault.read("session"), retained)
+        XCTAssertEqual(FixtureHTTP.script.requests.map(\.path), ["/api/v1/me", "/api/v1/me", "/api/v1/me"])
+        XCTAssertEqual(FixtureHTTP.script.requests.map(\.authorization),
+                       ["Bearer fixture-access", "Bearer fixture-access", "Bearer fixture-access"])
     }
 
     @MainActor func testMinimalSuccessfulPauseMakesNoRequestButRecentFailureUploads() async throws {
@@ -132,10 +219,16 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(model.diagnostics.events.isEmpty)
     }
 
-    @MainActor private func client(vault: MemoryVault) -> CloudClient {
+    @MainActor private func client(vault: MemoryVault, logoutDirectory: URL? = nil) -> CloudClient {
+        let directory = logoutDirectory ?? FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        addTeardownBlock {
+            if FileManager.default.fileExists(atPath: directory.path) {
+                try FileManager.default.removeItem(at: directory)
+            }
+        }
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [FixtureHTTP.self]
-        return CloudClient(vault: vault, configuration: config)
+        return CloudClient(vault: vault, configuration: config, logoutIntent: LogoutIntentStore(directory: directory))
     }
 
     private static let me = #"{"user":{"id":"fixture-user","email":"fixture@example.invalid","deviceLimit":3}}"#
@@ -144,7 +237,7 @@ final class AppModelTests: XCTestCase {
 
 @MainActor private final class MemoryVault: CredentialVault {
     var failRemoval = false
-    private var session: Data? = Data(#"{"accessToken":"fixture-access","refreshToken":"fixture-invalid-refresh","user":{"id":"fixture-user","email":"fixture@example.invalid"}}"#.utf8)
+    private var session: Data? = Data(#"{"accessToken":"fixture-access","refreshToken":"fixture-refresh","user":{"id":"fixture-user","email":"fixture@example.invalid"}}"#.utf8)
     func read(_ account: String) throws -> Data? { account == "session" ? session : nil }
     func write(_ data: Data, account: String) throws { session = data }
     func remove(_ account: String) throws {
@@ -172,6 +265,7 @@ private final class HTTPScript: @unchecked Sendable {
         let path: String
         let method: String?
         let body: Data
+        let authorization: String?
     }
     private let lock = NSLock()
     private var steps: [Step] = []
@@ -196,7 +290,8 @@ private final class HTTPScript: @unchecked Sendable {
             }
         }
         lock.lock(); defer { lock.unlock() }
-        recorded.append(.init(path: request.url?.path ?? "", method: request.httpMethod, body: body))
+        recorded.append(.init(path: request.url?.path ?? "", method: request.httpMethod, body: body,
+                              authorization: request.value(forHTTPHeaderField: "Authorization")))
         return steps.isEmpty ? Step(error: URLError(.badServerResponse)) : steps.removeFirst()
     }
 }
