@@ -204,19 +204,21 @@ test.describe('账目', () => {
     await expect(page.getByRole('row').filter({ hasText: 'wang.tao@example.com' })).toHaveCount(2);
   });
 
-  test('锁定之后只能冲正，改不了', async ({ page }, testInfo) => {
+  test('锁定当前 UTC 月之后不能再接收冲正', async ({ page }, testInfo) => {
     const session = `ledger-close-${testInfo.project.name}`;
     await open(page, LEDGER, 'default', session);
     await page.getByRole('button', { name: '锁定本月' }).click();
 
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByText(/收入 ¥2,402\.00，支出 ¥1,789\.80，毛利 ¥612\.20，3 项还没对上。/)).toBeVisible();
+    await expect(dialog).toContainText('这也是当前 UTC 月，锁定后本月不能再接收冲正。');
     await dialog.getByRole('button', { name: '锁定', exact: true }).click();
 
     await expect(page.getByText(/已锁定 · owner@example\.test/)).toBeVisible();
-    await expect(page.getByText('这个月已经锁了，只能冲正，不能改。')).toBeVisible();
+    await expect(page.getByText('这个月已经锁了，不能改；冲正只能记入未锁定的当前 UTC 月。')).toBeVisible();
     await expect(page.getByRole('button', { name: '记一笔' })).toBeDisabled();
     await expect(page.getByRole('button', { name: '改备注' }).first()).toBeDisabled();
+    await expect(page.getByRole('button', { name: '冲正', exact: true }).first()).toBeDisabled();
 
     // The button being disabled is the console's half; the hub refusing the
     // write is the half that actually protects a closed month.
@@ -228,5 +230,50 @@ test.describe('账目', () => {
     expect(await refused.json()).toMatchObject({
       error: { code: 'MONTH_CLOSED', message: '这个月已经锁了，只能冲正，不能改' },
     });
+  });
+
+  test('historical reversals need known-open target state and explain a late lock', async ({ page }, testInfo) => {
+    const session = `ledger-target-${testInfo.project.name}`;
+    const target = '**/api/v1/ops/months/2026-09?*';
+    await page.route(target, (route) => route.fulfill({ status: 503, body: 'unavailable' }));
+    await open(page, LEDGER, 'default', session);
+    await expect(page.getByText('40 笔')).toBeVisible();
+    await expect(page.getByRole('button', { name: '锁定本月' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: '冲正', exact: true }).first()).toBeDisabled();
+
+    await page.unroute(target);
+    await page.reload();
+    await settle(page);
+    const created = await page.request.post(`/api/v1/ops/ledger?session=${session}`, {
+      data: { kind: 'cost', category: 'other', subjectType: 'fleet', subjectId: null,
+        amountMinor: 12345, currency: 'CNY', month: '2026-08', paidAt: null, note: '历史月冲正测试' },
+    });
+    expect(created.ok()).toBe(true);
+    await page.getByRole('combobox', { name: '月份', exact: true }).selectOption('2026-08');
+    const original = page.getByRole('row').filter({ hasText: '历史月冲正测试' });
+    await expect(original).toBeVisible();
+    await page.getByRole('button', { name: '锁定本月' }).click();
+    await expect(page.getByRole('dialog')).toContainText('冲正只能记入未锁定的当前 UTC 月。');
+    await page.getByRole('dialog').getByRole('button', { name: '锁定', exact: true }).click();
+    await expect(original.getByRole('button', { name: '改备注' })).toBeDisabled();
+    await expect(original.getByRole('button', { name: '冲正', exact: true })).toBeEnabled();
+    await original.getByRole('button', { name: '冲正', exact: true }).click();
+    await expect(page.getByRole('dialog')).toContainText('冲正会在 2026 年 9 月');
+
+    // Another operator locks the target after our read. The backend remains
+    // authoritative; even a failed follow-up read must revoke the old permission.
+    const closed = await page.request.post(`/api/v1/ops/months/2026-09/close?session=${session}`);
+    expect(closed.ok()).toBe(true);
+    await page.route(target, (route) => route.fulfill({ status: 503, body: 'unavailable' }));
+    await page.getByRole('dialog').getByRole('button', { name: '冲正', exact: true }).click();
+    await expect(page.getByRole('alert')).toHaveText('当前 UTC 月已锁定，冲正未写入；请等下一个未锁定的 UTC 月再试。');
+    await expect(original.getByRole('button', { name: '冲正', exact: true })).toBeDisabled();
+    await expect(original).not.toContainText('已冲正');
+
+    await page.unroute(target);
+    await page.reload();
+    await settle(page);
+    await page.getByRole('combobox', { name: '月份', exact: true }).selectOption('2026-08');
+    await expect(original.getByRole('button', { name: '冲正', exact: true })).toBeDisabled();
   });
 });
