@@ -27,6 +27,7 @@ struct KeychainVault: CredentialVault {
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }
+        if status == errSecDecode && account == "session" { throw Blocker.savedSessionCorrupt }
         guard status == errSecSuccess, let data = result as? Data else { throw Blocker.keychainUnavailable }
         return data
     }

@@ -10,18 +10,18 @@ private final class NoRedirect: NSObject, URLSessionTaskDelegate, @unchecked Sen
 @MainActor
 final class CloudClient {
     private let vault: any CredentialVault
-    private let logoutIntent: LogoutIntentStore
+    private let logoutIntent: any LogoutIntentStoring
     private let session: URLSession
     private(set) var credentials: CloudSession?
-    private(set) var logoutPending = false
+    var logoutPending: Bool { logoutIntent.processBlocked }
     private var epoch = UUID()
     private var refresh: Task<Void, Error>?
     private var needsPersistence = false
 
     init(vault: (any CredentialVault)? = nil, configuration: URLSessionConfiguration = .ephemeral,
-         logoutIntent: LogoutIntentStore = LogoutIntentStore()) {
+         logoutIntent: (any LogoutIntentStoring)? = nil) {
         self.vault = vault ?? KeychainVault()
-        self.logoutIntent = logoutIntent
+        self.logoutIntent = logoutIntent ?? LogoutIntentStore()
         let config = configuration
         config.httpCookieStorage = nil
         config.urlCache = nil
@@ -36,9 +36,11 @@ final class CloudClient {
         // A retry must not reload an older token pair after a rotated-token write failed.
         if let credentials { return credentials }
         guard let data = try vault.read("session") else { return nil }
-        let value = try JSONDecoder().decode(CloudSession.self, from: data)
-        credentials = value
-        return value
+        do {
+            let value = try JSONDecoder().decode(CloudSession.self, from: data)
+            credentials = value
+            return value
+        } catch is DecodingError { throw Blocker.savedSessionCorrupt }
     }
 
     func start(email: String) async throws -> EmailChallenge {
@@ -90,25 +92,43 @@ final class CloudClient {
     func signOut() throws {
         // Record intent BEFORE deleting credentials or reporting a local logout.
         // If this write fails, callers must leave explicit sign-out retry reachable.
-        try logoutIntent.mark()
-        logoutPending = true
+        if !(try logoutIntent.isPending()) { try logoutIntent.mark() }
+        invalidateSession()
         _ = try finishPendingLogout()
     }
 
-    private func finishPendingLogout() throws -> Bool {
-        if !logoutPending {
-            guard try logoutIntent.isPending() else { return false }
-        }
-        logoutPending = true
+    func invalidateTerminalSession() throws {
+        // Terminal auth loss cannot depend on a successful filesystem operation.
+        invalidateSession()
+        _ = try finishPendingLogout()
+    }
+
+    private func invalidateSession() {
+        logoutIntent.processBlocked = true
         epoch = UUID()
         refresh?.cancel()
         refresh = nil
         credentials = nil
         needsPersistence = false
+    }
+
+    func finishPendingLogout() throws -> Bool {
+        do {
+            let durable = try logoutIntent.isPending()
+            guard durable || logoutPending else { return false }
+            invalidateSession()
+            // Reuse durable intent. A retry must not require another successful write.
+            if !durable { try logoutIntent.mark() }
+        } catch {
+            // With known in-process intent, attempt credential deletion even when
+            // marker storage fails. Keep the fence and surface the persistence error.
+            if logoutPending { try? vault.remove("session") }
+            throw error
+        }
         // Keep the marker across failures/relaunches; clear it only AFTER deletion.
         try vault.remove("session")
         try logoutIntent.clear()
-        logoutPending = false
+        logoutIntent.processBlocked = false
         return true
     }
 
@@ -145,6 +165,7 @@ final class CloudClient {
 
     private func request(_ path: String, method: String = "GET", body: Data? = nil,
                          authorized: Bool = true, retried: Bool = false) async throws -> Data {
+        guard !logoutPending else { throw Blocker.sessionExpired }
         let generation = epoch
         // Brand is ninx.app. The current account service origin is deliberately unchanged.
         guard let raw = Bundle.main.object(forInfoDictionaryKey: "TonoAPIBaseURL") as? String,
@@ -168,7 +189,7 @@ final class CloudClient {
             guard data.count < 10_485_760 else { throw Blocker.serviceUnavailable }
             data.append(byte)
         }
-        guard generation == epoch else { throw Blocker.sessionExpired }
+        guard generation == epoch, !logoutPending else { throw Blocker.sessionExpired }
         if response.statusCode == 401 && authorized && !retried {
             try await rotate()
             // Only replay reads. DELETE and telemetry POST require explicit user/next-window retry.

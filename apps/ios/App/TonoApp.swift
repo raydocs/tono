@@ -2,8 +2,18 @@ import SwiftUI
 
 @main
 struct TonoApp: App {
-    @State private var model = AppModel()
+    @State private var model: AppModel
     @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["TONO_ACCOUNT_FIXTURE"] == "malformed-session" {
+            _model = State(initialValue: AccountRecoveryFixture.makeModel())
+            return
+        }
+        #endif
+        _model = State(initialValue: AppModel())
+    }
 
     var body: some Scene {
         WindowGroup {

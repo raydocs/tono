@@ -57,22 +57,35 @@ Reviewed open [shared #202](https://github.com/raydocs/tono/pull/202),
   protection receipts, deletes the Keychain session and returns navigation to
   sign-in. Offline/transport errors and 5xx preserve the session. If Keychain
   deletion fails, memory/navigation still clear and a storage warning is shown;
-  an atomic, non-secret `Application Support/Account/logout-pending` marker
-  prevents **all subsequent launches** from restoring it, even if `/me` would
-  still accept the token. This app-private marker is not in Keychain or the App
+  a successfully written atomic, non-secret
+  `Application Support/Account/logout-pending` marker prevents subsequent launches
+  from restoring it, even if `/me` would still accept the token.
+  This app-private marker is not in Keychain or the App
   Group and contains no account identity or credentials. Restoration retries
   deletion before reading credentials; the signed-out screen also offers
   **Retry sign-out cleanup**. Only successful Keychain deletion permits marker
-  removal and new email authentication. Unreadable marker storage blocks restore.
+  removal and new email authentication. Cleanup reuses an existing marker without
+  rewriting it; read/clear failures keep recovery reachable and block restoration.
   If recording the marker itself fails during explicit sign-out, logout is not
   reported complete: the account remains visible with a storage error and Sign
   out stays reachable. The already completed pause remains in force. Terminal
-  auth loss still removes authenticated navigation and exposes cleanup retry.
-  This covers app relaunch/client recreation, not deletion of the app container.
+  auth loss instead invalidates the epoch, cancels refresh and clears credentials
+  **before any storage operation**, then attempts deletion even if marker storage
+  fails. A non-secret process-wide fence keyed by marker path blocks fresh clients
+  in that process until cleanup succeeds. Marker errors remain visible even when
+  fallback deletion succeeds. **If both marker persistence and Keychain deletion
+  fail, a full process restart cannot be guaranteed safe**: no durable change has
+  succeeded. The UI says cleanup is incomplete and asks for retry before closing;
+  it never promises durable logout in that state. A process fence is not evidence
+  of protection across process death or app-container deletion.
   Cold-start transient `/me` failure exposes **Retry saved sign-in** rather than
   ordinary email login. Retry keeps the retained (or newly rotated in-memory)
   token pair; `user` stays nil until `/me` succeeds. No cached identity is treated
   as authorized, no background retry loop or new email authentication is required.
+  Permanent saved-session JSON decoding failure or Keychain `errSecDecode` instead
+  exposes **Forget saved sign-in**. Forget uses the same write-ahead cleanup path;
+  failed deletion transitions to cleanup retry, then ordinary email login only
+  after cleanup. Transient Keychain unavailability remains retryable, not corruption.
   This does not claim system-level traffic blocking or revoke remote sessions.
 - `GET devices`, `DELETE devices/{id}` use current server device limits. Self
   removal is rejected; old-device removal needs explicit confirmation. The row,
@@ -248,12 +261,18 @@ shaping. `AppModelTests` adds nonrecursive opt-out persistence/clearing, restore
 session invalid refresh versus offline/503, deletion failure without memory revival,
 explicit valid-session logout with failed deletion across client/model recreation
 and eventual cleanup, cold-start offline → 503 → successful `/me` retry using the
-same token without new authentication, and Minimal pause/stale-only zero-request
-versus recent-failure upload. It uses the real CloudClient with URLProtocol
-interception, an in-memory vault, a real temporary logout-marker directory and a
-stub tunnel; it never contacts the API, Keychain or system VPN manager.
-`TonoUITests` checks labelled preview and
-location interaction, retaining a screenshot. These tests were **not executed**
+same token without new authentication, terminal marker-write failure with a
+process fence across client/store recreation and fallback deletion, durable-marker
+reuse through read/clear errors, malformed-session forget/recreation/recovery,
+and Minimal pause/stale-only zero-request versus recent-failure upload. It uses
+the real CloudClient with URLProtocol interception, an in-memory vault, a real
+temporary logout-marker directory (with injectable marker-operation failures)
+and a stub tunnel; it never contacts the API, Keychain or system VPN manager.
+`TonoUITests` checks labelled preview/location interaction and the reachable
+malformed-session → Forget → failed deletion → Retry cleanup → email-login flow.
+The latter uses `TONO_ACCOUNT_FIXTURE=malformed-session`, **DEBUG-only**, with
+isolated dependencies and all outbound requests rejected, not the preview model.
+These tests were **not executed**
 in the Orb; neither Swift nor Xcode nor an Apple Simulator is installed. No
 native screenshot/performance/Network Extension/TestFlight proof exists. A
 generated design reference is not a rendered-app screenshot.
@@ -297,10 +316,24 @@ xcodebuild -project apps/ios/Tono.xcodeproj -scheme Tono \
 Both test targets must execute a nonzero count, not skip. If the same blocker
 survives two focused corrections, retain evidence and stop rather than cycling
 full builds. Simulator success still does not prove NetworkExtension or On Demand.
-There are currently **23 XCTest methods and one UI test**. Confirm all six
+There are currently **26 XCTest methods and two UI tests**. Confirm all nine
 AppModel regressions, both Worker digest tests and the late-failure receipt test
 appear in the xcresult; a source scan is not their execution. Leave
-`TONO_PREVIEW_STATE` unset for unit tests (the UI test sets its own launch value).
+`TONO_PREVIEW_STATE` and `TONO_ACCOUNT_FIXTURE` unset for unit tests (UI tests set
+their own launch values). In particular, require these newly added tests:
+
+- `AppModelTests/testTerminalMarkerFailureFencesRecreationAndStillAttemptsCredentialDeletion`
+- `AppModelTests/testDurableCleanupRetryNeverRewritesIntentAndRetainsItThroughReadAndClearFailures`
+- `AppModelTests/testMalformedColdStartCanForgetSessionThroughPendingCleanupAndRecreation`
+- `CompanionUITests/testMalformedSessionExposesForgetThenCleanupRetryThenEmailLogin`
+
+For manual recovery-screen inspection in DEBUG, set only
+`TONO_ACCOUNT_FIXTURE=malformed-session`. Dismiss the corruption alert, select
+**Forget saved sign-in**, dismiss the injected deletion-error alert, then select
+**Retry sign-out cleanup**. Email login must become reachable, Home must never
+appear, and the fixture must make no real account/Keychain/VPN changes. Inspect
+VoiceOver focus and accessibility Dynamic Type on both recovery states. Unset the
+fixture variable before any real-account acceptance; Release ignores it.
 
 For visual review, open `apps/ios/Tono.xcodeproj`, scheme Tono → Run → Arguments,
 set `TONO_PREVIEW_STATE` to `ready`, `connecting`, `protected`, `recovering`,

@@ -99,6 +99,131 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.accountRecovery)
     }
 
+    @MainActor func testTerminalMarkerFailureFencesRecreationAndStillAttemptsCredentialDeletion() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let intent = FaultingLogoutIntent(directory: directory)
+        let vault = MemoryVault()
+        let cloud = client(vault: vault, logoutDirectory: directory, logoutIntent: intent)
+        let model = AppModel(cloud: cloud, tunnel: StubTunnel(), preferences: nil)
+        FixtureHTTP.script.reset([
+            .init(body: Self.me), .init(status: 401),
+            .init(status: 401, body: #"{"error":{"code":"INVALID_REFRESH_TOKEN"}}"#),
+        ])
+        await model.restore()
+        XCTAssertNotNil(model.user)
+        intent.failMark = true
+        vault.failRemoval = true
+        await model.refreshDevices()
+        XCTAssertNil(model.user)
+        XCTAssertNil(cloud.credentials)
+        XCTAssertTrue(cloud.logoutPending)
+        XCTAssertEqual(model.accountRecovery, .finishSignOut)
+        XCTAssertTrue(model.notice?.contains("cleanup is incomplete") == true)
+        XCTAssertNotNil(try vault.read("session"))
+        XCTAssertFalse(try intent.isPending()) // do not confuse the process fence with durable intent
+        XCTAssertEqual(vault.removals, 1) // marker failure must not skip attempted credential deletion
+
+        // New model, client AND marker-store instance. Server would accept the
+        // retained bytes; neither restore nor direct authenticated calls may use them.
+        let nextIntent = FaultingLogoutIntent(directory: directory)
+        nextIntent.failMark = true
+        let nextCloud = client(vault: vault, logoutDirectory: directory, logoutIntent: nextIntent)
+        let next = AppModel(cloud: nextCloud, tunnel: StubTunnel(), preferences: nil)
+        FixtureHTTP.script.reset([.init(body: Self.me)])
+        await next.restore()
+        XCTAssertNil(next.user)
+        XCTAssertNil(nextCloud.credentials)
+        XCTAssertEqual(next.accountRecovery, .finishSignOut)
+        do { _ = try await cloud.me(); XCTFail("Terminally invalidated credentials were usable") }
+        catch { XCTAssertEqual(error as? Blocker, .sessionExpired) }
+        XCTAssertTrue(FixtureHTTP.script.requests.isEmpty)
+
+        vault.failRemoval = false // marker writes STILL fail; fallback deletion can now succeed
+        await next.retryAccountRecovery()
+        XCTAssertNil(try vault.read("session"))
+        XCTAssertEqual(next.accountRecovery, .finishSignOut) // bookkeeping failure is not hidden
+        XCTAssertFalse(try nextIntent.isPending())
+        nextIntent.processBlocked = false // simulate loss of all volatile state at process termination
+        let cold = AppModel(cloud: client(vault: vault, logoutDirectory: directory),
+                            tunnel: StubTunnel(), preferences: nil)
+        await cold.restore()
+        XCTAssertNil(cold.user)
+        XCTAssertNil(cold.accountRecovery)
+        XCTAssertTrue(FixtureHTTP.script.requests.isEmpty) // successful deletion protects a later launch
+    }
+
+    @MainActor func testDurableCleanupRetryNeverRewritesIntentAndRetainsItThroughReadAndClearFailures() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let intent = FaultingLogoutIntent(directory: directory)
+        let vault = MemoryVault()
+        let model = AppModel(cloud: client(vault: vault, logoutDirectory: directory, logoutIntent: intent),
+                             tunnel: StubTunnel(), preferences: nil)
+        FixtureHTTP.script.reset([.init(body: Self.me)])
+        await model.restore()
+        vault.failRemoval = true
+        await model.signOut()
+        XCTAssertEqual(model.accountRecovery, .finishSignOut)
+        XCTAssertTrue(try intent.isPending())
+        XCTAssertEqual(intent.marks, 1)
+
+        intent.failMark = true // a rewrite would fail, but the existing durable intent is sufficient
+        vault.failRemoval = false
+        intent.failClear = true
+        await model.retryAccountRecovery()
+        XCTAssertNil(try vault.read("session"))
+        XCTAssertTrue(try intent.isPending()) // failed marker removal must continue blocking new auth
+        XCTAssertEqual(model.accountRecovery, .finishSignOut)
+        XCTAssertEqual(intent.marks, 1)
+        intent.failRead = true
+        await model.retryAccountRecovery()
+        XCTAssertNil(model.user)
+        XCTAssertEqual(model.accountRecovery, .finishSignOut)
+        intent.failRead = false
+        XCTAssertTrue(try intent.isPending())
+        intent.failClear = false
+        await model.retryAccountRecovery()
+        XCTAssertNil(model.user)
+        XCTAssertNil(model.accountRecovery)
+        XCTAssertFalse(try intent.isPending())
+        XCTAssertFalse(intent.processBlocked)
+        XCTAssertEqual(intent.marks, 1)
+        XCTAssertEqual(FixtureHTTP.script.requests.map(\.path), ["/api/v1/me"])
+    }
+
+    @MainActor func testMalformedColdStartCanForgetSessionThroughPendingCleanupAndRecreation() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let vault = MemoryVault()
+        try vault.write(Data("{}".utf8), account: "session")
+        let model = AppModel(cloud: client(vault: vault, logoutDirectory: directory),
+                             tunnel: StubTunnel(), preferences: nil)
+        FixtureHTTP.script.reset([.init(body: Self.me)])
+        await model.restore()
+        XCTAssertNil(model.user)
+        XCTAssertEqual(model.accountRecovery, .forgetSavedSession) // not the offline/503 retry loop
+        XCTAssertEqual(model.notice, Blocker.savedSessionCorrupt.message)
+        XCTAssertTrue(FixtureHTTP.script.requests.isEmpty)
+        vault.failRemoval = true
+        await model.retryAccountRecovery() // the visible Forget saved sign-in action
+        XCTAssertEqual(model.accountRecovery, .finishSignOut)
+        XCTAssertTrue(try LogoutIntentStore(directory: directory).isPending())
+        LogoutIntentStore(directory: directory).processBlocked = false // cold-process simulation
+        let next = AppModel(cloud: client(vault: vault, logoutDirectory: directory),
+                            tunnel: StubTunnel(), preferences: nil)
+        await next.restore()
+        XCTAssertEqual(next.accountRecovery, .finishSignOut) // honors intent before decoding old bytes
+        XCTAssertNil(next.user)
+        vault.failRemoval = false
+        await next.retryAccountRecovery()
+        XCTAssertNil(try vault.read("session"))
+        XCTAssertNil(next.accountRecovery)
+        XCTAssertFalse(try LogoutIntentStore(directory: directory).isPending())
+        XCTAssertTrue(FixtureHTTP.script.requests.isEmpty)
+        FixtureHTTP.script.reset([.init(body: #"{"challengeId":"new-challenge","expiresIn":60}"#)])
+        await next.sendCode(email: "fixture@example.invalid")
+        XCTAssertEqual(next.challenge?.challengeId, "new-challenge")
+        XCTAssertEqual(FixtureHTTP.script.requests.map(\.path), ["/api/v1/auth/email/start"])
+    }
+
     @MainActor func testExplicitLogoutSurvivesClientRecreationUntilDeletionCompletes() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let vault = MemoryVault()
@@ -124,8 +249,10 @@ final class AppModelTests: XCTestCase {
         XCTAssertNotNil(try vault.read("session"))
         XCTAssertTrue(try LogoutIntentStore(directory: directory).isPending())
 
-        // Fresh client/model/store, same OS-persisted vault and directory. The server
+        // Discard the volatile fence, then create a fresh client/model/store against
+        // the same retained vault and directory (cold-process simulation). The server
         // would STILL accept /me: a memory-only latch or invalid-token fixture cannot pass.
+        LogoutIntentStore(directory: directory).processBlocked = false
         let secondCloud = client(vault: vault, logoutDirectory: directory)
         let second = AppModel(cloud: secondCloud, tunnel: StubTunnel(), preferences: nil)
         FixtureHTTP.script.reset([.init(body: Self.me)])
@@ -219,16 +346,19 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(model.diagnostics.events.isEmpty)
     }
 
-    @MainActor private func client(vault: MemoryVault, logoutDirectory: URL? = nil) -> CloudClient {
+    @MainActor private func client(vault: MemoryVault, logoutDirectory: URL? = nil,
+                                   logoutIntent: (any LogoutIntentStoring)? = nil) -> CloudClient {
         let directory = logoutDirectory ?? FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         addTeardownBlock {
+            await MainActor.run { LogoutIntentStore(directory: directory).processBlocked = false }
             if FileManager.default.fileExists(atPath: directory.path) {
                 try FileManager.default.removeItem(at: directory)
             }
         }
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [FixtureHTTP.self]
-        return CloudClient(vault: vault, configuration: config, logoutIntent: LogoutIntentStore(directory: directory))
+        return CloudClient(vault: vault, configuration: config,
+                           logoutIntent: logoutIntent ?? LogoutIntentStore(directory: directory))
     }
 
     private static let me = #"{"user":{"id":"fixture-user","email":"fixture@example.invalid","deviceLimit":3}}"#
@@ -237,14 +367,42 @@ final class AppModelTests: XCTestCase {
 
 @MainActor private final class MemoryVault: CredentialVault {
     var failRemoval = false
+    private(set) var removals = 0
     private var session: Data? = Data(#"{"accessToken":"fixture-access","refreshToken":"fixture-refresh","user":{"id":"fixture-user","email":"fixture@example.invalid"}}"#.utf8)
     func read(_ account: String) throws -> Data? { account == "session" ? session : nil }
     func write(_ data: Data, account: String) throws { session = data }
     func remove(_ account: String) throws {
+        removals += 1
         if failRemoval { throw Blocker.keychainUnavailable }
         session = nil
     }
     func installationID() throws -> String { "fixture-installation" }
+}
+
+@MainActor private final class FaultingLogoutIntent: LogoutIntentStoring {
+    let store: LogoutIntentStore
+    var failMark = false
+    var failRead = false
+    var failClear = false
+    private(set) var marks = 0
+    init(directory: URL) { store = LogoutIntentStore(directory: directory) }
+    var processBlocked: Bool {
+        get { store.processBlocked }
+        set { store.processBlocked = newValue }
+    }
+    func isPending() throws -> Bool {
+        if failRead { throw Blocker.keychainUnavailable }
+        return try store.isPending()
+    }
+    func mark() throws {
+        marks += 1
+        if failMark { throw Blocker.keychainUnavailable }
+        try store.mark()
+    }
+    func clear() throws {
+        if failClear { throw Blocker.keychainUnavailable }
+        try store.clear()
+    }
 }
 
 @MainActor private final class StubTunnel: TunnelControlling {

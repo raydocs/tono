@@ -36,12 +36,10 @@ private struct LoginView: View {
                 Text("Sign in with your Tono account.").foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 16) {
                     if let recovery = model.accountRecovery {
-                        Text(recovery == .finishSignOut
-                             ? "Sign-out cleanup is pending. Unlock this device and retry. Your previous account will not be restored."
-                             : "Tono needs to check your saved session before signing you in. Check your connection and retry.")
+                        Text(recovery.message)
                             .foregroundStyle(.secondary)
                             .accessibilityIdentifier("login.recovery")
-                        ActionButton(title: recovery == .finishSignOut ? "Retry sign-out cleanup" : "Retry saved sign-in",
+                        ActionButton(title: recovery.actionTitle,
                                      symbol: "arrow.clockwise", prominent: true) {
                             Task { await model.retryAccountRecovery() }
                         }

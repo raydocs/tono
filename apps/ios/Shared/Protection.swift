@@ -30,6 +30,7 @@ enum Blocker: String, Codable, Error, Sendable {
     case coreUnavailable, catalogAdapterUnavailable, unsupportedPolicy
     case invalidPolicy, artifactMismatch, sessionExpired, serviceUnavailable
     case deviceLimit, invalidCode, keychainUnavailable, tunnelUnavailable
+    case savedSessionCorrupt
 
     var message: String {
         switch self {
@@ -43,6 +44,7 @@ enum Blocker: String, Codable, Error, Sendable {
         case .deviceLimit: "Your device allowance is full. Remove an old device from an already signed-in Tono app, then request a new code."
         case .invalidCode: "This code is invalid or expired. Request a new code."
         case .keychainUnavailable: "Secure storage is unavailable. Unlock this device and try again."
+        case .savedSessionCorrupt: "Your saved sign-in is damaged. Forget it, then sign in again."
         case .tunnelUnavailable: "The VPN configuration could not be updated. Protection status is unknown."
         }
     }

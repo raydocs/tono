@@ -3,7 +3,25 @@ import Observation
 
 @MainActor @Observable
 final class AppModel {
-    enum AccountRecovery: Equatable { case restoreSession, finishSignOut }
+    enum AccountRecovery: Equatable {
+        case restoreSession, finishSignOut, forgetSavedSession
+
+        var message: String {
+            switch self {
+            case .restoreSession: "Tono needs to check your saved session before signing you in. Check your connection and retry."
+            case .finishSignOut: "Sign-out cleanup is incomplete. Unlock this device and retry before closing Tono."
+            case .forgetSavedSession: "Your saved sign-in cannot be read. Forget it to sign in again with your email."
+            }
+        }
+
+        var actionTitle: String {
+            switch self {
+            case .restoreSession: "Retry saved sign-in"
+            case .finishSignOut: "Retry sign-out cleanup"
+            case .forgetSavedSession: "Forget saved sign-in"
+            }
+        }
+    }
 
     private let cloud: CloudClient
     private let tunnel: any TunnelControlling
@@ -70,6 +88,11 @@ final class AppModel {
         switch accountRecovery {
         case .restoreSession: await restore()
         case .finishSignOut:
+            await perform {
+                _ = try cloud.finishPendingLogout()
+                clearAccountState()
+            }
+        case .forgetSavedSession:
             await perform {
                 try cloud.signOut()
                 clearAccountState()
@@ -201,10 +224,11 @@ final class AppModel {
                 clearAccountState() // RootView changes identity and exposes sign-in.
                 machine.fail(.sessionExpired)
                 notice = blocker.message // terminal auth loss is never a silent upload failure
-                do { try cloud.signOut() }
+                do { try cloud.invalidateTerminalSession() }
                 catch {
                     accountRecovery = .finishSignOut
                     notice = Blocker.sessionExpired.message + " " + Blocker.keychainUnavailable.message
+                        + " " + AccountRecovery.finishSignOut.message
                 }
                 return // do not retain account-scoped telemetry after authentication loss
             }
@@ -212,6 +236,12 @@ final class AppModel {
             if cloud.logoutPending {
                 clearAccountState()
                 accountRecovery = .finishSignOut
+                return
+            }
+            if blocker == .savedSessionCorrupt {
+                clearAccountState()
+                accountRecovery = .forgetSavedSession
+                machine.fail(blocker)
                 return
             }
             if machine.state == .connecting { machine.fail(blocker) }
