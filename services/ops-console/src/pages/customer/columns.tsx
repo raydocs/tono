@@ -172,6 +172,7 @@ export function customerColumns(
         id: 'expires',
         header: copy.customerColumns.expires,
         width: '88px',
+        className: 'px-1',
         align: 'right' as const,
         mono: true,
         sortValue: (row: CustomerSummaryDto) => row.expiresAt ?? 0,
@@ -180,6 +181,7 @@ export function customerColumns(
             value={row.expiresAt === null ? null : formatDate(row.expiresAt)}
             source={copy.sourceWord.profile}
             mono
+            tier="body"
           />
         ),
       },
