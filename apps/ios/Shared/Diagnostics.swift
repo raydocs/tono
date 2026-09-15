@@ -42,7 +42,7 @@ struct DiagnosticBuffer {
     private(set) var dropped = 0
 
     mutating func append(_ event: DiagnosticEvent, policy: DiagnosticPolicy) {
-        guard policy != .off else { return }
+        guard policy != .off, policy == .comprehensive || event.blocker != nil else { return }
         if events.count == 128 { events.removeFirst(); dropped += 1 }
         events.append(event)
     }

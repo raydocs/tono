@@ -11,6 +11,9 @@ struct CloudDevice: Codable, Identifiable, Sendable {
     let name: String
     let current: Bool?
     let status: String?
+
+    // Full server ID avoids collisions even when installs share names or ID prefixes.
+    var removalLabel: String { "Remove \(name), device \(id)" }
 }
 
 struct CloudSession: Codable, Sendable {

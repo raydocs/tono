@@ -211,7 +211,7 @@ private struct ProtectionSettings: View {
                     .disabled(model.busy || model.isPreview)
             }
             Section("Diagnostics") {
-                Picker("Collection", selection: $model.diagnosticPolicy) {
+                Picker("Collection", selection: Binding(get: { model.diagnosticPolicy }, set: model.setDiagnosticPolicy)) {
                     if model.distribution == "testflight" {
                         Text("Comprehensive · TestFlight").tag(DiagnosticPolicy.comprehensive)
                     }
@@ -254,10 +254,15 @@ private struct DevicesView: View {
                     VStack(alignment: .leading) {
                         Text(device.name).privacySensitive()
                         Text(device.current == true ? "This device" : device.status ?? "Registered").font(.caption).foregroundStyle(.secondary)
+                        Text("Device ID: \(device.id)")
+                            .font(.caption).foregroundStyle(.secondary).privacySensitive()
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer()
                     if device.current != true {
-                        Button("Remove", role: .destructive) { removal = device }.disabled(model.busy)
+                        Button("Remove", role: .destructive) { removal = device }
+                            .accessibilityLabel(device.removalLabel)
+                            .disabled(model.busy)
                     }
                 }
             }
@@ -265,7 +270,7 @@ private struct DevicesView: View {
         }
         .navigationTitle("Devices").task { await model.refreshDevices() }
         .refreshable { await model.refreshDevices() }
-        .confirmationDialog("Remove this device?", isPresented: Binding(get: { removal != nil }, set: { if !$0 { removal = nil } }), titleVisibility: .visible) {
+        .confirmationDialog(removal.map { $0.removalLabel + "?" } ?? "Remove device?", isPresented: Binding(get: { removal != nil }, set: { if !$0 { removal = nil } }), titleVisibility: .visible) {
             Button("Remove device", role: .destructive) {
                 if let device = removal { Task { await model.removeDevice(device) } }
                 removal = nil

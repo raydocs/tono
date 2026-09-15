@@ -2,7 +2,13 @@ import Foundation
 import NetworkExtension
 
 @MainActor
-final class TunnelController {
+protocol TunnelControlling {
+    func start(generation: UUID, onDemand: Bool) async throws
+    func pause() async throws
+}
+
+@MainActor
+final class TunnelController: TunnelControlling {
     static func configuration(onDemand: Bool) -> NETunnelProviderManager {
         let manager = NETunnelProviderManager()
         let proto = NETunnelProviderProtocol()
@@ -10,7 +16,11 @@ final class TunnelController {
         proto.serverAddress = "Tono managed protection"
         proto.includeAllNetworks = true
         proto.excludeLocalNetworks = false
-        proto.enforceRoutes = true
+        proto.excludeAPNs = false
+        proto.excludeCellularServices = false
+        // Apple applies enforceRoutes only when includeAllNetworks is false.
+        // Unavoidable system exclusions still exist; see README before activation.
+        proto.enforceRoutes = false
         proto.disconnectOnSleep = false
         proto.providerConfiguration = ["version": TunnelContract.protocolVersion]
         manager.protocolConfiguration = proto

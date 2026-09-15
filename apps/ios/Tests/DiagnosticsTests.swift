@@ -32,8 +32,8 @@ final class DiagnosticsTests: XCTestCase {
         var buffer = DiagnosticBuffer()
         buffer.append(.init(kind: .admissionRefused, state: .actionRequired, blocker: .coreUnavailable,
                             now: Date(timeIntervalSince1970: 70)), policy: .comprehensive)
-        let data = try TelemetryPayload.encode(buffer.report(policy: .comprehensive), state: .actionRequired,
-                                               now: Date(timeIntervalSince1970: 125))
+        let data = try XCTUnwrap(TelemetryPayload.encode(buffer.report(policy: .comprehensive), state: .actionRequired,
+                                                         now: Date(timeIntervalSince1970: 125)))
         let root = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         let window = try XCTUnwrap(root["window"] as? [String: Any])
         XCTAssertEqual(window["windowEndMs"] as? Int, 120000)

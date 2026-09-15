@@ -16,6 +16,31 @@ final class ProtectionTests: XCTestCase {
         XCTAssertEqual(machine.state, .paused)
     }
 
+    func testFailedGenerationCannotBeRevivedByLateProtectedReceipt() {
+        var machine = ProtectionMachine()
+        let failedGeneration = machine.begin()
+        machine.fail(.invalidPolicy)
+        XCTAssertNotEqual(machine.generation, failedGeneration)
+        machine.receive(.init(version: 1, generation: failedGeneration, observedAt: .now, state: .protected,
+                              blocker: nil, routesInstalled: true, dnsInstalled: true,
+                              coreRunning: true, probeSucceeded: true))
+        XCTAssertEqual(machine.state, .actionRequired)
+        XCTAssertEqual(machine.blocker, .invalidPolicy)
+        let retry = machine.begin()
+        machine.receive(.init(version: 1, generation: retry, observedAt: .now, state: .protected,
+                              blocker: nil, routesInstalled: true, dnsInstalled: true,
+                              coreRunning: true, probeSucceeded: true))
+        XCTAssertEqual(machine.state, .protected) // rejecting all receipts would be wrong too
+        machine.receive(.init(version: 1, generation: retry, observedAt: .now, state: .actionRequired,
+                              blocker: .invalidPolicy, routesInstalled: false, dnsInstalled: false,
+                              coreRunning: false, probeSucceeded: false))
+        machine.receive(.init(version: 1, generation: retry, observedAt: .now, state: .protected,
+                              blocker: nil, routesInstalled: true, dnsInstalled: true,
+                              coreRunning: true, probeSucceeded: true))
+        XCTAssertEqual(machine.state, .actionRequired)
+        XCTAssertEqual(machine.blocker, .invalidPolicy)
+    }
+
     func testConnectedWithoutDNSReceiptIsNotProtected() {
         var machine = ProtectionMachine()
         let generation = machine.begin()
@@ -69,7 +94,9 @@ final class ProtectionTests: XCTestCase {
         XCTAssertTrue(manager.onDemandRules?.first is NEOnDemandRuleConnect)
         XCTAssertTrue(proto.includeAllNetworks)
         XCTAssertFalse(proto.excludeLocalNetworks)
-        XCTAssertTrue(proto.enforceRoutes)
+        XCTAssertFalse(proto.excludeAPNs)
+        XCTAssertFalse(proto.excludeCellularServices)
+        XCTAssertFalse(proto.enforceRoutes) // applies only when includeAllNetworks is false
         XCTAssertFalse(proto.disconnectOnSleep)
         XCTAssertEqual(proto.providerBundleIdentifier, "com.ninx.tono.PacketTunnel")
     }

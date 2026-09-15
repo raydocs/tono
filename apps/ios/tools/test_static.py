@@ -1,4 +1,5 @@
 """Portable contract/static checks. These do not compile or execute Swift."""
+import base64
 import hashlib
 import json
 import plistlib
@@ -27,6 +28,11 @@ class IOSStaticContracts(unittest.TestCase):
             if name == "PacketTunnel":
                 self.assertFalse(any(p.startswith("App/") for p in paths))
                 self.assertIn("Shared/Protection.swift", paths)
+            if name == "TonoTests":
+                self.assertIn("Tests/AppModelTests.swift", paths)
+                resources = next(objects[p] for p in target["buildPhases"] if objects[p]["isa"] == "PBXResourcesBuildPhase")
+                resource_paths = [objects[objects[f]["fileRef"]]["path"] for f in resources["files"]]
+                self.assertIn("Tests/Fixtures/admission.json", resource_paths)
             for config in objects[target["buildConfigurationList"]]["buildConfigurations"]:
                 settings = objects[config]["buildSettings"]
                 if objects[config]["name"] == "Release":
@@ -77,12 +83,14 @@ class IOSStaticContracts(unittest.TestCase):
         self.assertIn(f'"{key}"', mac)
         context = re.search(r'static let context = "([^"]+)"', swift).group(1)
         self.assertIn(f'"{context}"', mac)
-        fixture = re.search(r'let json = #"(\{"revision":7,.*?)"#', (ROOT / "Tests/AdmissionTests.swift").read_text()).group(1)
-        catalog = json.loads(fixture)
-        self.assertEqual(hashlib.sha256(catalog["yaml"].encode()).hexdigest(), catalog["sha256"])
+        fixture = json.loads((ROOT / "Tests/Fixtures/admission.json").read_text())
+        for envelope, field in ((fixture["catalog"], "yaml"), (fixture["policy"], "json")):
+            digest = base64.urlsafe_b64encode(hashlib.sha256(envelope[field].encode()).digest()).decode().rstrip("=")
+            self.assertEqual(digest, envelope["sha256"])
 
     def test_absent_core_cannot_install_profile_or_complete_tunnel_start(self):
         controller = (ROOT / "App/TunnelController.swift").read_text()
+        controller = controller.split("final class TunnelController", 1)[1]
         start = controller.split("func start(", 1)[1].split("func pause()", 1)[0]
         self.assertIn("try SingBoxIdentity.requireEmbeddedCore()", start)
         self.assertNotIn("saveToPreferences", start)

@@ -12,7 +12,7 @@ deployment, release line or customer update feed is changed.
 | Native project | `Tono.xcodeproj`, App + embedded PacketTunnel + unit/UI test targets | Xcode compile/run has not been performed in the Linux Orb |
 | Interface | Login, six-state Home, locations, devices, protection settings, hidden technical diagnostics; light/dark system colors and Dynamic Type | Native render, VoiceOver, keyboard, compact/landscape/iPad review |
 | Quiet Field | Stable particle identities, spring-interpolated alignment, continuous phase; paused clock for Reduce Motion/low power/offscreen; no Canvas while inactive/backgrounded | Instruments/real-device motion and energy evidence |
-| Account | Existing email start/verify, rotating refresh, `/me`, device list and confirmed removal, Keychain session | Native/mock transport tests and approved test-account E2E; no live account writes were performed |
+| Account | Existing email start/verify, rotating refresh, `/me`, device list and confirmed removal, Keychain session | Execute native mocked-HTTP regressions and approved test-account E2E; no live account writes were performed |
 | Locations | Managed-only unavailable state; DEBUG-only selectable fixtures | Catalog admission/parser and stable node identity adapter; no live locations or persisted manual node selection yet |
 | Routing | Internal ordered residential failover model, sticky backup, manual pin refusal, explicit entry-fallback grant, required-home block | Not a new wire schema and not connected to runtime; existing cloud routing supplies no ordered backup/fallback grant |
 | On Demand | Default-on preference; strict profile factory; pause disables/saves/reloads profile before stopping | Profile install/start intentionally gated **before** system mutation; background protection is unavailable |
@@ -24,7 +24,9 @@ tunnel is fail-closed *admission*, not evidence of a system-wide traffic barrier
 Do not describe a failed start as blocking device traffic. The UI never derives
 Protected from a start call or `NEVPNStatus.connected`; the model requires
 current-generation, fresh route/DNS/core/probe receipts. That receipt path is not
-yet attached to a running engine. A future integration must also withdraw
+yet attached to a running engine. Failures invalidate the generation, including
+extension Action Required receipts; late successes cannot revive that attempt.
+A future integration must also withdraw
 Protected on receipt expiry, revocation, invalid policy, path loss and core exit.
 
 ## Current contracts were inspected, not replaced
@@ -50,13 +52,26 @@ Reviewed open [shared #202](https://github.com/raydocs/tono/pull/202),
   Refresh is single-flight; only GETs replay after a 401. POST/DELETE never replay
   automatically. Local sign-out removes the stored session after pausing; it
   does not remotely revoke the installation or other sessions.
+  Terminal `sessionExpired` (including `401 INVALID_REFRESH_TOKEN`) clears user,
+  devices, challenge, selected location, diagnostics and credentials, invalidates
+  protection receipts, deletes the Keychain session and returns navigation to
+  sign-in. Offline/transport errors and 5xx preserve the session. If Keychain
+  deletion fails, memory/navigation still clear and a storage warning is shown;
+  this process cannot restore that session. After unlock/relaunch, any remaining
+  stored session must pass `/me` again and a terminal response retries deletion.
+  This does not claim system-level traffic blocking or revoke remote sessions.
 - `GET devices`, `DELETE devices/{id}` use current server device limits. Self
-  removal is rejected; old-device removal needs explicit confirmation.
+  removal is rejected; old-device removal needs explicit confirmation. The row,
+  confirmation and removal accessibility label include the full server device ID
+  to distinguish duplicate names even if their ID prefixes collide. IDs are
+  account metadata displayed locally, not uploaded as diagnostic events.
 - `GET exit-catalog` still returns `{revision,yaml,sha256,routing}` with
   `homeProxy`, `defaultProxy`, `homeSocks5`. HY2 is requested via `X-Tono-Accept`.
   YAML is an opaque **Tono-issued** value, not user-imported config. The digest
   verifier refuses to produce a node/runtime without the missing complete raw
   routing + catalog admission adapter. Do not enable it by dropping unknown keys.
+  Both catalog and policy `sha256` are **unpadded base64url**, from Worker
+  `src/crypto.ts`, not lowercase hex. Signatures use standard base64 instead.
 - `GET traffic-policy` uses the existing Ed25519 public key and exact
   `tono-traffic-policy-v1\n` signed-byte prefix. Unsigned/bad-signature policies
   refuse; desktop DIRECT/process semantics and unknown policy fields refuse.
@@ -109,6 +124,29 @@ forbidden. Reality and Reality→home also remain unavailable until the core and
 catalog/platform adapters exist. Ordered backups and direct-entry fallback need
 an authoritative cloud grant; `homeSocks5` alone is not such a grant.
 
+## Apple traffic coverage is explicit, not an all-packets guarantee
+
+The **uninstalled** profile factory sets `includeAllNetworks=true`,
+`excludeLocalNetworks=false`, `excludeAPNs=false` and
+`excludeCellularServices=false`: no optional local/APNs/cellular-service bypass.
+Apple defaults the latter two exclusions to true; this draft overrides them.
+`enforceRoutes=false` is deliberate: Apple applies that route-scoping mechanism
+only when `includeAllNetworks=false`, so enabling both is not extra protection.
+
+Apple still excludes network control traffic (such as DHCP), captive portal
+negotiation, cellular-only services (such as VoLTE), and companion-device
+communication. Tono cannot promise that every device packet enters the tunnel.
+Before profile activation, qualify APNs delivery, Wi-Fi Calling/MMS/voicemail,
+captivity, IPv4/IPv6 and Wi-Fi/cellular handover on a dedicated device; document
+which unavoidable exclusions are observable. If an account's policy requires
+coverage Apple cannot provide, refuse admission rather than silently exclude it.
+This factory change installs nothing and is not Network Extension evidence.
+
+Apple references: [includeAllNetworks](https://developer.apple.com/documentation/networkextension/nevpnprotocol/includeallnetworks),
+[excludeAPNs](https://developer.apple.com/documentation/networkextension/nevpnprotocol/excludeapns),
+[excludeCellularServices](https://developer.apple.com/documentation/networkextension/nevpnprotocol/excludecellularservices),
+[enforceRoutes](https://developer.apple.com/documentation/networkextension/nevpnprotocol/enforceroutes).
+
 ## Diagnostics and production policy
 
 Comprehensive means all **allowlisted** app events, not every byte available on
@@ -127,10 +165,41 @@ technical diagnostics. No anonymous fallback, `/diagnostics/logs`, background
 task registration or per-packet logging. A receipt is required before clearing
 the buffer; stale/clock-skewed events are dropped rather than re-timestamped.
 Toggle changes clear pending history. Off disables collection/upload. Minimal
-keeps failures only and omits duration fields. A `TONO_DISTRIBUTION=production`
+filters successful events at collection, omits duration fields, and sends nothing
+unless at least one retained failure falls within the last six hours. Empty or
+stale-only buffers cannot send metadata-only windows. The picker uses an explicit
+nonrecursive normalized/persisted setter, not self-assignment in an observation
+hook. A `TONO_DISTRIBUTION=production`
 build caps even a stored Comprehensive preference at Minimal; unknown/missing
 distribution also defaults to Minimal. The shipped project currently explicitly
 uses `testflight`. App Store privacy declarations need owner review before upload.
+
+### Ops timeline integration remains deferred
+
+Validator acceptance is **not** timeline/status compatibility. Current
+`services/control-plane/src/ops/flatten.ts` only flattens `FLATTEN_KINDS`, which
+exclude `stateChanged`, `admissionRefused`, `accountRequest`, `pauseRequested`.
+`ops/customers-status.ts` treats only `uiState=connected` as connected and counts
+`connectFail`, not generic account errors. Current iOS windows can be retained
+but must not be used to qualify connection history, failure rates or live status.
+
+Before runtime/ops qualification, add operation-specific iOS events and test
+these mappings together with the ops owners (no backend changes in this PR):
+
+| iOS event context | Required ops mapping / constraint |
+|---|---|
+| Actual start attempt (`stateChanged` to Connecting today) | `connectBegin` with an attempt identity; not every state change |
+| Start admission/core failure | `connectFail` for that attempt; current `admissionRefused` also includes account/upload errors and **cannot** be globally renamed |
+| Account/catalog sync failure | `syncFail` if its semantics match; never inflate connection-failure counts |
+| Authenticated, fresh Protected receipt | `connectOk` and `uiState=connected` only after runtime qualification; never from preview or NEVPNStatus alone |
+| Successful disable/save/stop confirmation | `disconnectOk`; `pauseRequested` alone is not stop evidence |
+
+Acceptance must prove an admitted failure window creates a `connection_events`
+row/timeline entry and updates failure status, while an account failure does not;
+test state transitions and duplicate-window ingestion too. The present fixture
+checker exercises only intake validation, deliberately not these unimplemented
+contracts. This is a blocker for claiming ops compatibility, not permission to
+activate the absent core or publish TestFlight.
 
 ## Executable Orb checks
 
@@ -145,16 +214,27 @@ git diff --check
 
 The first two require Python 3.10+ only. The Node check uses the repository's
 already installed control-plane `esbuild` dependency to execute the actual
-Worker telemetry validator, with no server, account or network request. If absent,
+Worker telemetry validator and SHA-256 function, with no server, account or network request. If absent,
 prepare that workspace's locked dependencies using its standard `npm ci` workflow.
-The fixture is handwritten: this is **not** Swift emitted-byte or native evidence.
+The telemetry fixture is handwritten. `Tests/Fixtures/admission.json` is produced
+by the Worker function using `node apps/ios/tools/check-cloud-contract.mjs
+--write-digest-fixtures` (one command); ordinary runs compare without rewriting.
+Swift tests load the same bundled fixture. There is no production-key-signed
+positive policy fixture: the tests check digest compatibility and unsigned/bad
+signature rejection, without adding a trust-key override. These Orb checks are
+**not** Swift emitted-byte, signature-success, native or ops-timeline evidence.
 The project generator is deterministic; run it without `--check` only after
 adding/removing native sources. No XcodeGen, remote packages or script build phases.
 
 Native `TonoTests` cover generation/pause, incomplete/stale protection receipts,
 ordered backup/home-required/manual fallback boundaries, strict On Demand profile,
-core refusal, unsigned-policy refusal, malformed home credentials, auth decoding,
-diagnostic minimization and wire shaping. `TonoUITests` checks labelled preview and
+core refusal, Worker digest/tamper/signature boundaries, malformed home credentials,
+auth decoding, duplicate device removal labels, diagnostic minimization and wire
+shaping. `AppModelTests` adds nonrecursive opt-out persistence/clearing, restored
+session invalid refresh versus offline/503, deletion failure without memory revival,
+and Minimal pause/stale-only zero-request versus recent-failure upload. It uses
+the real CloudClient with URLProtocol interception, an in-memory vault and a stub
+tunnel; it never contacts the API, Keychain or system VPN manager. `TonoUITests` checks labelled preview and
 location interaction, retaining a screenshot. These tests were **not executed**
 in the Orb; neither Swift nor Xcode nor an Apple Simulator is installed. No
 native screenshot/performance/Network Extension/TestFlight proof exists. A
@@ -199,6 +279,10 @@ xcodebuild -project apps/ios/Tono.xcodeproj -scheme Tono \
 Both test targets must execute a nonzero count, not skip. If the same blocker
 survives two focused corrections, retain evidence and stop rather than cycling
 full builds. Simulator success still does not prove NetworkExtension or On Demand.
+There are currently **21 XCTest methods and one UI test**. Confirm all four
+AppModel regressions, both Worker digest tests and the late-failure receipt test
+appear in the xcresult; a source scan is not their execution. Leave
+`TONO_PREVIEW_STATE` unset for unit tests (the UI test sets its own launch value).
 
 For visual review, open `apps/ios/Tono.xcodeproj`, scheme Tono → Run → Arguments,
 set `TONO_PREVIEW_STATE` to `ready`, `connecting`, `protected`, `recovering`,
@@ -230,6 +314,13 @@ visual-only and never evidence of encrypted traffic.
    With an explicitly approved test account exercise email delivery, wrong/expired
    code, login at the device allowance, device rotation/list/removal, relaunch,
    token expiry, offline recovery, Keychain failure, local sign-out and revocation.
+   In particular: Comprehensive → Off must clear events and survive relaunch;
+   Minimal pause/Send must make no telemetry request, whereas a recent failed
+   Connect/Send must send one redacted failure. After session revocation/invalid
+   refresh, expect sign-in and no old devices/location/history; offline/503 must
+   not sign out. With duplicate device names, inspect wrapping at accessibility
+   Dynamic Type and VoiceOver removal labels/confirmation against each full ID;
+   cancel before deletion unless that exact test-device removal is authorized.
    Current expected Connect result is **Action Required**, no installed reconnect
    loop and no claim that traffic is blocked. Keep existing VPNs untouched.
 3. **After**, not before, resolving the core/policy gates: inspect signed app and

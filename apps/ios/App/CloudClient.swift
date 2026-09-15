@@ -9,15 +9,17 @@ private final class NoRedirect: NSObject, URLSessionTaskDelegate, @unchecked Sen
 
 @MainActor
 final class CloudClient {
-    private let vault = KeychainVault()
+    private let vault: any CredentialVault
     private let session: URLSession
     private(set) var credentials: CloudSession?
     private var epoch = UUID()
     private var refresh: Task<Void, Error>?
     private var needsPersistence = false
+    private var sessionInvalidated = false
 
-    init() {
-        let config = URLSessionConfiguration.ephemeral
+    init(vault: (any CredentialVault)? = nil, configuration: URLSessionConfiguration = .ephemeral) {
+        self.vault = vault ?? KeychainVault()
+        let config = configuration
         config.httpCookieStorage = nil
         config.urlCache = nil
         config.httpShouldSetCookies = false
@@ -27,6 +29,7 @@ final class CloudClient {
     }
 
     func restore() throws -> CloudSession? {
+        guard !sessionInvalidated else { return nil }
         guard let data = try vault.read("session") else { return nil }
         let value = try JSONDecoder().decode(CloudSession.self, from: data)
         credentials = value
@@ -48,6 +51,7 @@ final class CloudClient {
         credentials = result.auth
         needsPersistence = true
         try persist()
+        sessionInvalidated = false
         return result.auth
     }
 
@@ -81,10 +85,12 @@ final class CloudClient {
         epoch = UUID()
         refresh?.cancel()
         refresh = nil
-        // Delete first: failure must be visible rather than silently restoring next launch.
-        try vault.remove("session")
+        // Clear memory even if Keychain deletion fails; never restore this session in-process.
+        // Deletion failure still reaches the UI and must be retried after unlock.
+        sessionInvalidated = true
         credentials = nil
         needsPersistence = false
+        try vault.remove("session")
     }
 
     private func persist() throws {

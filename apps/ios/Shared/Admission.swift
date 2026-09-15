@@ -40,7 +40,11 @@ enum PolicyAdmission {
     }
 
     static func digest(_ bytes: Data) -> String {
-        SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+        // services/control-plane/src/crypto.ts sha256: unpadded base64url, not hex.
+        Data(SHA256.hash(data: bytes)).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
     }
 }
 

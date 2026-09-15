@@ -62,10 +62,15 @@ struct ProtectionMachine: Sendable {
     }
 
     mutating func receive(_ receipt: TunnelReceipt, now: Date = .now) {
-        guard receipt.version == TunnelReceipt.version,
+        guard [.connecting, .protected, .recovering].contains(state),
+              receipt.version == TunnelReceipt.version,
               receipt.generation == generation,
               receipt.observedAt <= now,
               now.timeIntervalSince(receipt.observedAt) <= 10 else { return }
+        if receipt.state == .actionRequired {
+            fail(receipt.blocker ?? .tunnelUnavailable)
+            return
+        }
         if receipt.state == .protected {
             guard receipt.routesInstalled, receipt.dnsInstalled, receipt.coreRunning,
                   receipt.probeSucceeded else {
@@ -77,7 +82,11 @@ struct ProtectionMachine: Sendable {
         blocker = receipt.blocker
     }
 
-    mutating func fail(_ reason: Blocker) { state = .actionRequired; blocker = reason }
+    mutating func fail(_ reason: Blocker) {
+        generation = UUID() // a failed attempt cannot be revived by a queued success
+        state = .actionRequired
+        blocker = reason
+    }
     mutating func pause() {
         generation = UUID() // invalidates queued start/probe callbacks
         state = .paused

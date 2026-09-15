@@ -47,7 +47,7 @@ def generate():
         return obj(f"{name}/configs", "XCConfigurationList", buildConfigurations=entries,
                    defaultConfigurationIsVisible=0, defaultConfigurationName="Release")
 
-    files = sorted(p.relative_to(ROOT).as_posix() for folder in ("App", "Shared", "PacketTunnel", "Tests", "UITests", "Configuration")
+    files = sorted(p.relative_to(ROOT).as_posix() for folder in ("App", "Shared", "PacketTunnel", "Tests", "Tests/Fixtures", "UITests", "Configuration")
                    for p in (ROOT / folder).glob("*") if p.is_file())
     refs = {}
     for path in files:
@@ -79,6 +79,9 @@ def generate():
         resource_files = []
         if name in ("Tono", "PacketTunnel"):
             resource_files.append(obj(f"{name}/privacy", "PBXBuildFile", fileRef=refs["Configuration/PrivacyInfo.xcprivacy"]))
+        if name == "TonoTests":
+            resource_files.extend(obj(f"{name}/resource/{p}", "PBXBuildFile", fileRef=refs[p])
+                                  for p in files if p.startswith("Tests/Fixtures/") and p.endswith(".json"))
         resources = obj(f"{name}/resources", "PBXResourcesBuildPhase", buildActionMask=2147483647, files=resource_files, runOnlyForDeploymentPostprocessing=0)
         frameworks = obj(f"{name}/frameworks", "PBXFrameworksBuildPhase", buildActionMask=2147483647, files=[], runOnlyForDeploymentPostprocessing=0)
         phases = [sources, frameworks, resources]

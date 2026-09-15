@@ -3,9 +3,9 @@ import Observation
 
 @MainActor @Observable
 final class AppModel {
-    private let cloud = CloudClient()
-    private let tunnel = TunnelController()
-    private let preferences = UserDefaults(suiteName: TunnelContract.appGroup)
+    private let cloud: CloudClient
+    private let tunnel: any TunnelControlling
+    private let preferences: UserDefaults?
     private(set) var machine = ProtectionMachine()
     private(set) var user: CloudUser?
     private(set) var devices: [CloudDevice] = []
@@ -14,14 +14,8 @@ final class AppModel {
     var challenge: EmailChallenge?
     var challengeExpires: Date?
     var diagnostics = DiagnosticBuffer()
-    let distribution = Bundle.main.object(forInfoDictionaryKey: "TonoDistribution") as? String
-    var diagnosticPolicy: DiagnosticPolicy {
-        didSet {
-            diagnosticPolicy = .resolve(diagnosticPolicy, distribution: distribution)
-            preferences?.set(diagnosticPolicy.rawValue, forKey: "diagnosticPolicy")
-            diagnostics.clear() // do not retain comprehensive history after opt-down
-        }
-    }
+    let distribution: String?
+    private(set) var diagnosticPolicy: DiagnosticPolicy
     private(set) var onDemand: Bool
     private(set) var paused: Bool
     private(set) var selectedLocation: String?
@@ -30,18 +24,29 @@ final class AppModel {
     var state: ProtectionState { previewState ?? machine.state }
     var locationTitle: String { selectedLocation ?? "Automatic" }
 
-    init() {
-        let defaults = UserDefaults(suiteName: TunnelContract.appGroup)
+    init(cloud: CloudClient? = nil, tunnel: (any TunnelControlling)? = nil,
+         preferences defaults: UserDefaults? = UserDefaults(suiteName: TunnelContract.appGroup),
+         distribution: String? = Bundle.main.object(forInfoDictionaryKey: "TonoDistribution") as? String) {
+        self.cloud = cloud ?? CloudClient()
+        self.tunnel = tunnel ?? TunnelController()
+        self.preferences = defaults
+        self.distribution = distribution
         onDemand = defaults?.object(forKey: "onDemand") as? Bool ?? true
         paused = defaults?.bool(forKey: "paused") ?? false
         selectedLocation = defaults?.string(forKey: "selectedLocation")
         let stored = defaults?.string(forKey: "diagnosticPolicy").flatMap(DiagnosticPolicy.init(rawValue:))
         // Production is a ceiling, including upgrades from a comprehensive TestFlight setting.
-        diagnosticPolicy = .resolve(stored, distribution: Bundle.main.object(forInfoDictionaryKey: "TonoDistribution") as? String)
+        diagnosticPolicy = .resolve(stored, distribution: distribution)
         #if DEBUG
         if let value = ProcessInfo.processInfo.environment["TONO_PREVIEW_STATE"],
            let state = ProtectionState(rawValue: value) { previewState = state }
         #endif
+    }
+
+    func setDiagnosticPolicy(_ requested: DiagnosticPolicy) {
+        diagnosticPolicy = .resolve(requested, distribution: distribution)
+        preferences?.set(diagnosticPolicy.rawValue, forKey: "diagnosticPolicy")
+        diagnostics.clear() // do not retain comprehensive history after opt-down
     }
 
     func restore() async {
@@ -126,23 +131,30 @@ final class AppModel {
     func signOut() async {
         await perform {
             try await tunnel.pause()
-            try cloud.signOut()
-            user = nil
-            devices = []
-            selectedLocation = nil
-            preferences?.removeObject(forKey: "selectedLocation")
-            diagnostics.clear()
+            clearAccountState()
             machine.pause()
             paused = true
             preferences?.set(true, forKey: "paused")
+            try cloud.signOut()
         }
+    }
+
+    private func clearAccountState() {
+        user = nil
+        devices = []
+        challenge = nil
+        challengeExpires = nil
+        selectedLocation = nil
+        preferences?.removeObject(forKey: "selectedLocation")
+        diagnostics.clear()
     }
 
     func uploadDiagnostics(userInitiated: Bool = true) async {
         guard !isPreview, !busy, user != nil, diagnosticPolicy != .off, !diagnostics.events.isEmpty else { return }
         await perform(showErrors: userInitiated) {
             let report = diagnostics.report(policy: diagnosticPolicy)
-            try await cloud.upload(TelemetryPayload.encode(report, state: state))
+            guard let payload = try TelemetryPayload.encode(report, state: state) else { return }
+            try await cloud.upload(payload)
             diagnostics.clear()
             if userInitiated { notice = "Diagnostics received by Tono." }
         }
@@ -163,6 +175,14 @@ final class AppModel {
         catch is CancellationError { return }
         catch {
             let blocker = error as? Blocker ?? .serviceUnavailable
+            if blocker == .sessionExpired {
+                clearAccountState() // RootView changes identity and exposes sign-in.
+                machine.fail(.sessionExpired)
+                notice = blocker.message // terminal auth loss is never a silent upload failure
+                do { try cloud.signOut() }
+                catch { notice = Blocker.sessionExpired.message + " " + Blocker.keychainUnavailable.message }
+                return // do not retain account-scoped telemetry after authentication loss
+            }
             if showErrors { notice = blocker.message }
             if machine.state == .connecting { machine.fail(blocker) }
             diagnostics.append(.init(kind: .admissionRefused, state: machine.state, blocker: blocker,
@@ -173,10 +193,12 @@ final class AppModel {
 
 enum TelemetryPayload {
     /// Maps only allowlisted local values into the EXISTING /telemetry/windows contract.
-    static func encode(_ report: DiagnosticReport, state: ProtectionState, now: Date = .now) throws -> Data {
+    static func encode(_ report: DiagnosticReport, state: ProtectionState, now: Date = .now) throws -> Data? {
         let timestamp = Int64(max(0, now.timeIntervalSince1970) / 60) * 60_000
         // Drop stale/clock-skewed samples, never relabel their time as the upload time.
         let recent = report.events.filter { $0.observedAtMs <= timestamp && $0.observedAtMs >= timestamp - 21_600_000 }
+        guard report.policy != .off, !recent.isEmpty,
+              report.policy == .comprehensive || recent.contains(where: { $0.blocker != nil }) else { return nil }
         let events: [[String: Any]] = recent.map { event in
             var result: [String: Any] = ["ts": event.observedAtMs, "kind": event.kind.rawValue,
                                          "to": event.state.rawValue]

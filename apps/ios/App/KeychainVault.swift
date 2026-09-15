@@ -1,10 +1,18 @@
 import Foundation
 import Security
 
+@MainActor
+protocol CredentialVault {
+    func read(_ account: String) throws -> Data?
+    func write(_ data: Data, account: String) throws
+    func remove(_ account: String) throws
+    func installationID() throws -> String
+}
+
 /// App-only credentials. App Group contains no tokens or raw catalog/policy.
 /// AfterFirstUnlockThisDeviceOnly permits future locked-device extension access
 /// only after a separately approved keychain-access-group design; no sync/backup.
-struct KeychainVault {
+struct KeychainVault: CredentialVault {
     private func query(_ account: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: "com.ninx.tono.account",
