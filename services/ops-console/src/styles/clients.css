@@ -1,0 +1,86 @@
+/* Clients: who is behind, and what to ship next.
+ *
+ * Everything here is scoped under `.clients-page`. The hero card seats the
+ * adoption sentence beside its freshness note; the version matrix is the
+ * page's visual core (five platforms × four buckets, every released number
+ * a link into the filtered customer list); each shipped platform keeps its
+ * headed release block. No counts, links, filters, writes or copy move —
+ * this file only seats them. */
+
+/* ------------------------------------------------------------ hero card */
+
+.clients-page .clients-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 20px;
+  box-shadow: var(--shadow-card-lg);
+  padding: 22px 24px;
+}
+
+.dark .clients-page .clients-hero {
+  border-color: rgb(255 255 255 / 0.07);
+  box-shadow: var(--shadow-card-lg), inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+/* The sentence is the page: balance it so the second line is not one
+   stranded bucket. */
+.clients-page .clients-hero .text-verdict {
+  text-wrap: balance;
+}
+
+/* ------------------------------------------------------ version matrix */
+
+/* The matrix scrolls inside its own box on narrow screens; the floor keeps
+   the bucket headers from collapsing into vertical text. */
+.clients-page .clients-matrix table {
+  min-width: 600px;
+}
+
+/* Released numbers are the page's working figures: tabular so a column of
+   them reads down its last digit. */
+.clients-page .clients-matrix tbody td:not(:first-child) {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A dotted underline says "try clicking"; the focus ring says where you
+   are when you get there by keyboard. */
+.clients-page .clients-matrix td a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+/* ------------------------------------------------------ release tables */
+
+/* The fixed columns add up to 920 px. Without a floor the flexible notes
+   column takes whatever is left, which in any container under ~920 px is
+   nothing — the notes then read as blank while the DOM still holds the
+   text, which is why the page-level overflow check never caught it. The
+   floor (920 + 128 readable for notes) keeps the column on screen behind
+   the DataTable's own inner scroll; the page itself never scrolls. */
+.clients-page .clients-release-table table {
+  min-width: 1048px;
+}
+
+@media (max-width: 640px) {
+  .clients-page .clients-hero {
+    padding: 18px 16px;
+    border-radius: 18px;
+  }
+
+  /* 44 px targets, sized locally — the shared controls are untouched. */
+  .clients-page .clients-matrix td a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .clients-page .clients-release-table .ops-action {
+    min-height: 44px;
+  }
+}

@@ -7,6 +7,7 @@ import { nodeApi } from '@/lib/api-node';
 import { closeNodePage } from '@/lib/hash-route';
 import { usePrivacy } from '@/lib/privacy';
 import { useResource } from '@/lib/use-resource';
+import '@/styles/node-detail.css';
 import { Timeline } from './customer/Timeline';
 import { NodeAcceptance } from './node/Acceptance';
 import { NodeBindings, NodeFacts, NodeQuota } from './node/Facts';
@@ -64,56 +65,68 @@ export default function NodeDetailPage({ name, customers }: {
   const node = detail.data;
 
   return (
-    <div className="page-wrap">
+    <div className="page-wrap node-detail-page">
       <BackLink />
 
-      <NodeHeader
-        node={node}
-        sheet={acceptance}
-        onChanged={() => {
-          detail.reload();
-          acceptance.reload();
-          jobs.reload();
-          history.reload();
-        }}
-      />
+      <section className="node-hero-card" aria-label={node.name}>
+        <NodeHeader
+          node={node}
+          sheet={acceptance}
+          onChanged={() => {
+            detail.reload();
+            acceptance.reload();
+            jobs.reload();
+            history.reload();
+          }}
+        />
+      </section>
 
       <NodeAcceptance sheet={acceptance} lifecycle={node.lifecycle} />
 
-      <NodeFacts facts={node.facts} onEdit={() => setEditing(true)} />
-      <NodeBindings bindings={node.bindings} />
-      <NodeQuota quota={node.quota} name={name} />
-      <NodeLoad name={name} />
-      <NodePaths forward={node.forwardPath} back={node.returnPath} />
-      <NodeQualityText name={name} />
-      <NodeOccupants occupancy={node.occupancy} />
-      <NodeErrors name={name} recent={node.recentErrors} />
+      {/* Evidence reads down the main column; the narrow reference sections
+          sit aside. DOM order is unchanged, so the phone keeps the question
+          order and the desktop grid places explicitly. */}
+      <div className="node-detail-grid">
+        <div className="node-aux-card">
+          <NodeFacts facts={node.facts} onEdit={() => setEditing(true)} />
+          <NodeBindings bindings={node.bindings} />
+          <NodeQuota quota={node.quota} name={name} />
+        </div>
 
-      <Timeline
-        title={copy.nodeSections.connections}
-        emptyMessage={copy.nodeNoConnections}
-        events={connections.status === 'ready' ? connections.data.items : []}
-        who={(userId) => {
-          const hit = node.occupancy.value.find((row) => row.userId === userId)
-            ?? customers.find((row) => row.userId === userId);
-          return hit ? privacy.email(hit.email) : null;
-        }}
-        state={connections.status}
-        message={connections.status === 'error' ? connections.message : undefined}
-      />
+        <div className="node-detail-main">
+          <NodePaths forward={node.forwardPath} back={node.returnPath} />
+          <NodeLoad name={name} />
+          <NodeQualityText name={name} />
+          <NodeOccupants occupancy={node.occupancy} />
+          <NodeErrors name={name} recent={node.recentErrors} />
 
-      <NodeJobs
-        rows={jobs.status === 'ready' ? jobs.data.items : []}
-        state={jobs.status}
-        message={jobs.status === 'error' ? jobs.message : undefined}
-        onChanged={jobs.reload}
-      />
+          <Timeline
+            title={copy.nodeSections.connections}
+            emptyMessage={copy.nodeNoConnections}
+            events={connections.status === 'ready' ? connections.data.items : []}
+            who={(userId) => {
+              const hit = node.occupancy.value.find((row) => row.userId === userId)
+                ?? customers.find((row) => row.userId === userId);
+              return hit ? privacy.email(hit.email) : null;
+            }}
+            state={connections.status}
+            message={connections.status === 'error' ? connections.message : undefined}
+          />
 
-      <NodeHistory
-        rows={history.status === 'ready' ? history.data.items : []}
-        state={history.status}
-        message={history.status === 'error' ? history.message : undefined}
-      />
+          <NodeJobs
+            rows={jobs.status === 'ready' ? jobs.data.items : []}
+            state={jobs.status}
+            message={jobs.status === 'error' ? jobs.message : undefined}
+            onChanged={jobs.reload}
+          />
+
+          <NodeHistory
+            rows={history.status === 'ready' ? history.data.items : []}
+            state={history.status}
+            message={history.status === 'error' ? history.message : undefined}
+          />
+        </div>
+      </div>
 
       {/* The write lands on the profile, and the profile is half of the page's
           own facts and the whole of its quota — so the page re-reads rather

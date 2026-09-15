@@ -18,6 +18,7 @@ import {
   type CandidateFilter,
 } from '@/lib/settings';
 import { useResource } from '@/lib/use-resource';
+import '@/styles/settings-publish.css';
 import { DraftDialog } from './DraftDialog';
 import { Toolbar } from './form';
 import { useWrite } from './use-write';
@@ -65,7 +66,7 @@ export function Candidates() {
   }
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="settings-candidates flex flex-col gap-8">
       <div className="flex flex-col gap-3">
         <Toolbar
           aside={(
@@ -78,7 +79,10 @@ export function Candidates() {
             <Chip
               key={id}
               active={filter === id}
-              count={counts[id]}
+              /* Unknown is not zero: while the list is still loading or has
+                 failed, the chips carry no number at all rather than five
+                 zeroes beside an error. Ready-but-empty keeps its real 0. */
+              count={candidates.status === 'ready' ? counts[id] : null}
               onClick={() => setFilter(id)}
             >
               {id === 'all' ? words.all : words.status[id]}
@@ -95,6 +99,7 @@ export function Candidates() {
           state={state}
           emptyMessage={words.empty}
           errorMessage={candidates.status === 'error' ? candidates.message : undefined}
+          className="settings-candidates-table"
         />
       </div>
 

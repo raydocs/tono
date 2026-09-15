@@ -1,0 +1,96 @@
+/* Customer 360: who this is and what to do, first.
+ *
+ * Everything here is scoped under `.customer-detail-page`. The hero card
+ * carries identity, status, deadlines and the header actions; the main column
+ * reads the connection story; the aux card holds the account side. DOM order
+ * is the reading order, so the phone keeps it and the desktop grid places
+ * explicitly. No section is reworded, refetched or reordered. */
+
+.customer-detail-page .customer-hero-card {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 20px;
+  box-shadow: var(--shadow-card-lg);
+  padding: 22px 24px;
+}
+
+.dark .customer-detail-page .customer-hero-card {
+  border-color: rgb(255 255 255 / 0.07);
+  box-shadow: var(--shadow-card-lg), inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+.customer-detail-page .customer-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.customer-detail-page .customer-main {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  min-width: 0;
+}
+
+.customer-detail-page .customer-aux-card {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 20px;
+  box-shadow: var(--shadow-card-lg);
+  padding: 18px;
+}
+
+.dark .customer-detail-page .customer-aux-card {
+  border-color: rgb(255 255 255 / 0.07);
+  box-shadow: var(--shadow-card-lg), inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+/* The aux card adapts to its container, not to the viewport: a 360 px card
+ * on a wide screen must not run the two-column fact layout, or long values
+ * (a home-line address) push past the card edge. Single column here at every
+ * width; the hero strip stays viewport-responsive. */
+.customer-detail-page .customer-aux-card .grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Facts shrink and wrap inside the aux card instead of overflowing it.
+ * Nothing is clipped: overlong values break rather than hide. */
+.customer-detail-page .customer-aux-card .font-mono {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 1100px) {
+  .customer-detail-page .customer-grid {
+    grid-template-columns: minmax(0, 1fr) 360px;
+  }
+
+  .customer-detail-page .customer-main {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .customer-detail-page .customer-aux-card {
+    grid-column: 2;
+    grid-row: 1;
+    position: sticky;
+    top: 16px;
+  }
+}
+
+@media (max-width: 640px) {
+  .customer-detail-page .customer-hero-card {
+    padding: 18px 16px;
+    border-radius: 18px;
+  }
+
+  .customer-detail-page .customer-aux-card {
+    padding: 16px;
+    border-radius: 18px;
+  }
+}
