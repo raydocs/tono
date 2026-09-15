@@ -97,6 +97,10 @@ not a claim that the Apple linker/Swift importer has executed.
   health withdraws Protected without terminalizing that generation; genuinely
   failed/paused generations remain fenced. Extension failure cancels the tunnel;
   OS reconnect may retry but must pass fresh admission.
+  Within an app-model instance, failed, paused and superseded generations cannot
+  reattach. Reobserving the current live generation preserves its receipt replay
+  floor and health state; only a previously unseen authorized generation starts
+  a fresh observation window. These fences are not a persisted revocation list.
   App relaunch reattaches to an authorized generation without trusting cached
   Protected state. Missing/mismatched embedded identity refuses before install.
 

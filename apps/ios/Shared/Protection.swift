@@ -56,8 +56,10 @@ struct ProtectionMachine: Sendable {
     private(set) var state: ProtectionState = .ready
     private(set) var blocker: Blocker?
     private var lastObservation: Date?
+    private var retiredGenerations: Set<UUID> = []
 
     mutating func begin() -> UUID {
+        retiredGenerations.insert(generation)
         generation = UUID()
         state = .connecting
         blocker = nil
@@ -65,12 +67,21 @@ struct ProtectionMachine: Sendable {
         return generation
     }
 
-    /// Reattach to a persisted authorized attempt, without trusting NEVPNStatus.
-    mutating func observeExisting(_ generation: UUID) {
+    /// The caller verifies grant ownership. Only a previously unseen generation
+    /// may attach afresh; reobservation must preserve the receipt replay floor.
+    @discardableResult
+    mutating func observeExisting(_ generation: UUID) -> Bool {
+        guard !retiredGenerations.contains(generation) else { return false }
+        if generation == self.generation {
+            return [.connecting, .protected, .recovering].contains(state)
+        }
+        // Returning to a superseded generation must not reset its replay floor.
+        retiredGenerations.insert(self.generation)
         self.generation = generation
         state = .recovering
         blocker = nil
         lastObservation = nil
+        return true
     }
 
     mutating func receive(_ receipt: TunnelReceipt, now: Date = .now) {
@@ -111,12 +122,14 @@ struct ProtectionMachine: Sendable {
     }
 
     mutating func fail(_ reason: Blocker) {
+        retiredGenerations.insert(generation)
         generation = UUID() // a failed attempt cannot be revived by a queued success
         state = .actionRequired
         blocker = reason
         lastObservation = nil
     }
     mutating func pause() {
+        retiredGenerations.insert(generation)
         generation = UUID() // invalidates queued start/probe callbacks
         state = .paused
         blocker = nil

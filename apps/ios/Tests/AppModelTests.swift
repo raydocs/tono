@@ -36,16 +36,62 @@ final class AppModelTests: XCTestCase {
         FixtureHTTP.script.reset([.init(body: Self.me)])
         await model.restore()
         let generation = UUID()
+        let observed = Date.now.addingTimeInterval(-2)
         tunnel.active = generation
+        let firstReceipt = TunnelReceipt(version: 1, generation: generation, observedAt: observed,
+            state: .protected, blocker: nil, routesInstalled: true, dnsInstalled: true,
+            coreRunning: true, probeSucceeded: true)
+        tunnel.receipt = firstReceipt
+        await model.connect()
+        XCTAssertEqual(model.machine.generation, generation)
+        XCTAssertEqual(model.state, .protected)
+        tunnel.receipt = .init(version: 1, generation: generation, observedAt: observed.addingTimeInterval(1),
+            state: .recovering, blocker: .tunnelUnavailable, routesInstalled: false, dnsInstalled: false,
+            coreRunning: true, probeSucceeded: false)
+        model.expireProtectionReceipt()
+        XCTAssertEqual(model.state, .recovering)
+        tunnel.receipt = firstReceipt // still fresh enough, but below the replay floor
+        await model.connect()
+        XCTAssertEqual(model.state, .recovering)
+        XCTAssertEqual(model.machine.blocker, .tunnelUnavailable)
         tunnel.receipt = .init(version: 1, generation: generation, observedAt: .now,
             state: .protected, blocker: nil, routesInstalled: true, dnsInstalled: true,
             coreRunning: true, probeSucceeded: true)
         await model.connect()
-        XCTAssertEqual(model.machine.generation, generation)
         XCTAssertEqual(model.state, .protected)
         XCTAssertEqual(tunnel.starts, 0)
         XCTAssertEqual(tunnel.pauses, 0)
         XCTAssertTrue(tunnel.grantPresent)
+    }
+
+    @MainActor func testFailedAttemptCannotReattachThroughActiveConnectAndQueuedSuccess() async throws {
+        let tunnel = StubTunnel()
+        tunnel.startError = nil
+        tunnel.holdObservation = true
+        let model = AppModel(cloud: client(vault: MemoryVault()), tunnel: tunnel, preferences: nil)
+        FixtureHTTP.script.reset([.init(body: Self.me), .init(status: 503)])
+        await model.restore()
+        await model.connect()
+        XCTAssertEqual(model.state, .connecting)
+        let failed = model.machine.generation
+        model.expireProtectionReceipt()
+        let queued = try XCTUnwrap(tunnel.pendingObservation)
+        let receipt = TunnelReceipt(version: 1, generation: failed, observedAt: .now,
+            state: .protected, blocker: nil, routesInstalled: true, dnsInstalled: true,
+            coreRunning: true, probeSucceeded: true)
+        await model.refreshDevices() // generic operation failure terminalizes Connecting
+        XCTAssertEqual(model.state, .actionRequired)
+        let fenced = model.machine.generation
+        XCTAssertNotEqual(fenced, failed)
+        XCTAssertEqual(tunnel.active, failed) // the provider did not stop with the UI failure
+        await model.connect()
+        queued(receipt) // queued before failure, still within the freshness window
+        XCTAssertEqual(model.state, .actionRequired)
+        XCTAssertEqual(model.machine.generation, fenced)
+        XCTAssertEqual(model.machine.blocker, .serviceUnavailable)
+        XCTAssertEqual(tunnel.observations, 1) // refused reattachment did not request another receipt
+        XCTAssertEqual(tunnel.starts, 1)
+        XCTAssertEqual(tunnel.pauses, 0)
     }
 
     @MainActor func testComprehensiveToOffPersistsAndClearsAtModelBoundary() throws {
@@ -459,11 +505,20 @@ final class AppModelTests: XCTestCase {
     var profileEnabled = true
     var active: UUID?
     var receipt: TunnelReceipt?
+    var startError: Blocker? = .coreUnavailable
+    var holdObservation = false
+    var pendingObservation: ((TunnelReceipt?) -> Void)?
+    private(set) var observations = 0
     func activeGeneration() async throws -> UUID? { active }
-    func observe(generation: UUID, completion: @escaping (TunnelReceipt?) -> Void) { completion(receipt) }
+    func observe(generation: UUID, completion: @escaping (TunnelReceipt?) -> Void) {
+        observations += 1
+        if holdObservation { pendingObservation = completion }
+        else { completion(receipt) }
+    }
     func start(generation: UUID, onDemand: Bool, selected: String) async throws {
         starts += 1
-        throw Blocker.coreUnavailable
+        if let startError { throw startError }
+        active = generation
     }
     func pause() async throws {
         pauses += 1

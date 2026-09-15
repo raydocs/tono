@@ -16,7 +16,7 @@ final class ProtectionTests: XCTestCase {
     func testPersistedAttemptRequiresFreshExtensionEvidenceAfterRelaunch() {
         var machine = ProtectionMachine()
         let generation = UUID()
-        machine.observeExisting(generation)
+        XCTAssertTrue(machine.observeExisting(generation))
         XCTAssertEqual(machine.state, .recovering)
         machine.receive(.init(version: 1, generation: UUID(), observedAt: .now, state: .protected,
             blocker: nil, routesInstalled: true, dnsInstalled: true, coreRunning: true, probeSucceeded: true))
@@ -24,6 +24,11 @@ final class ProtectionTests: XCTestCase {
         machine.receive(.init(version: 1, generation: generation, observedAt: .now, state: .protected,
             blocker: nil, routesInstalled: true, dnsInstalled: true, coreRunning: true, probeSucceeded: true))
         XCTAssertEqual(machine.state, .protected)
+        let replacement = UUID()
+        XCTAssertTrue(machine.observeExisting(replacement))
+        XCTAssertFalse(machine.observeExisting(generation))
+        XCTAssertEqual(machine.generation, replacement)
+        XCTAssertEqual(machine.state, .recovering)
     }
 
     func testLateProtectedReceiptCannotUndoPause() {
@@ -35,6 +40,7 @@ final class ProtectionTests: XCTestCase {
         machine.receive(receipt)
         XCTAssertEqual(machine.state, .protected)
         machine.pause()
+        XCTAssertFalse(machine.observeExisting(generation))
         machine.receive(receipt)
         XCTAssertEqual(machine.state, .paused)
     }
@@ -44,12 +50,15 @@ final class ProtectionTests: XCTestCase {
         let failedGeneration = machine.begin()
         machine.fail(.invalidPolicy)
         XCTAssertNotEqual(machine.generation, failedGeneration)
+        XCTAssertFalse(machine.observeExisting(failedGeneration))
         machine.receive(.init(version: 1, generation: failedGeneration, observedAt: .now, state: .protected,
                               blocker: nil, routesInstalled: true, dnsInstalled: true,
                               coreRunning: true, probeSucceeded: true))
         XCTAssertEqual(machine.state, .actionRequired)
         XCTAssertEqual(machine.blocker, .invalidPolicy)
         let retry = machine.begin()
+        XCTAssertFalse(machine.observeExisting(failedGeneration))
+        XCTAssertEqual(machine.generation, retry)
         machine.receive(.init(version: 1, generation: retry, observedAt: .now, state: .protected,
                               blocker: nil, routesInstalled: true, dnsInstalled: true,
                               coreRunning: true, probeSucceeded: true))
@@ -97,6 +106,8 @@ final class ProtectionTests: XCTestCase {
         machine.expire(now: now.addingTimeInterval(10.001))
         XCTAssertEqual(machine.state, .recovering)
         XCTAssertEqual(machine.generation, generation)
+        XCTAssertTrue(machine.observeExisting(generation))
+        XCTAssertEqual(machine.blocker, .tunnelUnavailable)
         machine.receive(receipt, now: now.addingTimeInterval(11))
         XCTAssertEqual(machine.state, .recovering) // replay cannot refresh evidence
         machine.receive(.init(version: 1, generation: generation, observedAt: now.addingTimeInterval(11),

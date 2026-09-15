@@ -92,7 +92,7 @@ final class AppModel {
                     try SingBoxIdentity.requireEmbeddedCore()
                     let grant = try TunnelVault().grant()
                     guard grant.accountID == user?.id else { throw Blocker.sessionExpired }
-                    machine.observeExisting(grant.generation)
+                    guard machine.observeExisting(grant.generation) else { throw Blocker.tunnelUnavailable }
                 } catch { machine.fail(error as? Blocker ?? .tunnelUnavailable) }
             }
         }
@@ -133,7 +133,7 @@ final class AppModel {
         guard !isPreview else { return }
         await perform {
             if let existing = try await tunnel.activeGeneration() {
-                machine.observeExisting(existing)
+                guard machine.observeExisting(existing) else { throw Blocker.tunnelUnavailable }
                 expireProtectionReceipt()
                 return // reobserve existing authorization, never replace its grant
             }
