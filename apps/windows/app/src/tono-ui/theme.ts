@@ -37,8 +37,6 @@ export const tonoAccent = (dark: boolean) =>
 
 /** SwiftUI .easeOut(0.22) — used for every ConnectPill color/glow transition. */
 export const TONO_EASE = 'cubic-bezier(0.25, 0.1, 0.25, 1)'
-/** SwiftUI .spring(0.5, bounce 0.15) — page-level state switches. */
-export const TONO_SPRING = 'cubic-bezier(0.34, 1.3, 0.64, 1)'
 
 export const TONO_FONT_STACK =
   '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif'
@@ -88,16 +86,6 @@ export const getGlassTransparency = (): number => {
     // storage unavailable — fall through to default
   }
   return GLASS_DEFAULT
-}
-
-export const setGlassTransparency = (value: number) => {
-  const clamped = Math.min(100, Math.max(0, Math.round(value)))
-  try {
-    window.localStorage.setItem(GLASS_STORAGE_KEY, String(clamped))
-  } catch {
-    // storage unavailable — the in-memory event still updates this session
-  }
-  window.dispatchEvent(new CustomEvent(GLASS_EVENT))
 }
 
 const subscribeGlass = (onChange: () => void) => {
