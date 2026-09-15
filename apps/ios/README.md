@@ -2,8 +2,107 @@
 
 iOS/iPadOS **26+**, SwiftUI, native Liquid Glass, `ninx.app`. This is G1/G2
 new-platform integration work, **not a qualified VPN or TestFlight release**.
-Only `apps/ios` changes. No existing platform, backend, workflow, signing account,
+Implementation stays in `apps/ios`; a separate hosted-CI workflow is prepared.
+No existing platform, backend, signing account,
 deployment, release line or customer update feed is changed.
+
+## September 15 runtime continuation: source-tested, still blocked before start
+
+Verified current `origin/main` and PR #204's requested starting head
+[`200c8ac`](https://github.com/raydocs/tono/commit/200c8ac994431fff34a1c6cbfc7bd6feb5d849e0),
+and inspected shared #202 at
+[`c1bf504`](https://github.com/raydocs/tono/commit/c1bf5049b25d9a27bd35afac2d8a58f9dc16f115).
+Main was already an ancestor. The shared contract has **not** approved a mobile
+ABI, extra tags, linker flags, patches or a replacement CGO identity.
+
+`Runtime/` now contains a real Go admission/compiler package, staged into a clean
+pinned sing-box module for source tests. It is **not linked to the Swift app**:
+
+- Complete catalog/policy response bytes; bounded decoding; exact JSON keys,
+  required fields, duplicate-key/alias rejection; Worker base64url digests and
+  production Ed25519 signature context. Tests use a private test-only signer;
+  the exported compiler cannot replace the production trust key.
+- Public IPv4 endpoint, UUID, Reality key/short-ID, TLS and name admission;
+  same-node HY2 identity and mandatory DER-pin validation, even when unselected.
+  Selected HY2 refuses with `TONO_IOS_DER_BACKEND_UNAVAILABLE`; unselected HY2
+  names are explicitly returned as unavailable. No SPKI substitution.
+- Manual pin wins over the cloud default; a missing pin/default refuses rather
+  than selecting a different node. Cloud YAML DNS/rules never become runtime.
+- Actual sing-box JSON emission and parser/constructor tests: proxied DoH,
+  inbound-scoped fake IPv4, empty AAAA, dual-family TUN capture intent, IPv6
+  reject, DNS interception before generic UDP rejection. No `stack`, controller,
+  local DNS fallback, direct outbound or persistent core cache.
+- Caller-supplied account/device-scoped revision watermarks reject rollback and
+  same-revision equivocation, including changes to otherwise-unhashed routing.
+  These values are **not yet persisted or integrated with extension credentials**.
+  A revision is not a freshness lease; the existing policy has no signed expiry.
+- Home/DIRECT/process rules, new routing fields and unsupported fingerprints
+  refuse explicitly. Ordered home fallback still lacks a cloud grant; endpoint
+  presence alone does not authorize it. No home support is claimed.
+
+The Swift receipt model now expires Protected after ten seconds without fresh
+health (and on backward clock movement), rejects replayed observations, and
+invalidates the failed generation before any late success. The foreground app
+checks expiry immediately on re-entry and once per second while actually
+Protected; previews do not run the check. This is state-machine logic, **not**
+proof of a running extension, packet blocking or automatic crash recovery.
+
+### Exact mobile build blockers, verified in source and by a real link attempt
+
+1. **CGO/ABI:** pinned gomobile builds Apple slices with `-buildmode=c-archive`
+   and Objective-C/cgo bindings. Desktop CGO=0/no-patch identity does not describe
+   such a framework. `core-requirement.json` remains unchanged, with no approved
+   iOS hash or ABI. No stock framework is accepted by placing it in the bundle.
+2. **Linker:** Go 1.27.1 / CGO=0 / the four tags can compile the Linux libbox
+   archive, but linking actual `libbox.CheckConfig` fails:
+   `experimental/libbox/internal/oomprofile: invalid reference to runtime/pprof.parseProcSelfMaps`.
+   The upstream FFI manifest uses `-checklinkname=0`; adding it is a new build
+   identity, not a harmless retry. The failure is retained, not hidden by flags.
+3. **Public packet flow:** `libbox.PlatformInterface.OpenTun` returns an FD;
+   `service.go` queries its interface name and duplicates it. More importantly,
+   pinned sing-tun `stack_go_io_darwin.go` requires `*NativeTun`, detaches its
+   runtime poller and accesses the raw descriptor. A custom `io.ReadWriter` or
+   socketpair pump cannot satisfy the default stack merely by changing libbox.
+   Upstream's private KVC/FD scan is not adopted. A public NEPacketTunnelFlow path
+   requires reviewed changes in **both** libbox and sing-tun, or explicit approval
+   of the upstream descriptor integration. No fake packet adapter is installed.
+4. **DER:** stock HY2 TLS pins SHA256 of SPKI, not the catalog's leaf DER.
+   A reviewed patch must reach the actual QUIC TLS backend and prove same-key,
+   different-leaf rejection, name/time semantics and every admitted TLS engine.
+   The compiler cannot invent a DER JSON option that stock bytes do not read.
+
+Sources are the exact pinned `experimental/libbox/{platform,service}.go`,
+`experimental/libbox/internal/oomprofile/linkname.go`,
+`experimental/libbox/ffi.json`, `common/tls/std_client.go`,
+gomobile `v0.1.12` `cmd/gomobile/bind_iosapp.go`, and sing-tun
+`v0.9.4-0.20260912075549-869f0a4d76af` `stack_go_io_darwin.go`.
+The upstream Makefile installs gomobile v0.1.13, while go.mod pins v0.1.12;
+the FFI version command also uses `@latest`. Neither is a reproducible Tono
+build recipe without reconciliation. Do not run those defaults as approved bytes.
+
+### Reproduce the Orb checks without an Apple SDK
+
+Supply a clean checkout of the pinned upstream commit and an existing Go1.27.1
+Linux/amd64 toolchain. Populate that checkout's checksum-locked cache once with
+`GOTOOLCHAIN=local GOWORK=off GOENV=off go mod download`. Then:
+
+```sh
+python3 apps/ios/tools/check-runtime.py \
+  --source /path/to/clean/pinned-sing-box --go /path/to/go1.27.1/bin/go \
+  --receipt /new/path/runtime-receipt.json --probe-libbox
+```
+
+This checks commit/module/toolchain identity, stages only the iOS Go sources,
+compiles with module downloads disabled, runs five Go regressions against the
+actual core parser, builds libbox's Linux archive twice and records hashes.
+`--probe-libbox` additionally links actual libbox and **exits 2 on link failure**
+after writing successful source evidence plus the linker diagnostic. Omitting
+it tests source/parser only, not libbox linking. No upstream source is patched.
+The approved pin remains unchanged. The downloaded Orb toolchain archive was
+SHA256 `63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445`.
+Native Xcode/SDK, NEPacketTunnelFlow, socket escape, App Group credential IPC,
+On Demand activation, signed resources, memory/energy and device acceptance
+remain **not executed / not implemented**, not inferred from these tests.
 
 ## What is implemented, and what is deliberately unavailable
 
@@ -26,8 +125,8 @@ Protected from a start call or `NEVPNStatus.connected`; the model requires
 current-generation, fresh route/DNS/core/probe receipts. That receipt path is not
 yet attached to a running engine. Failures invalidate the generation, including
 extension Action Required receipts; late successes cannot revive that attempt.
-A future integration must also withdraw
-Protected on receipt expiry, revocation, invalid policy, path loss and core exit.
+Foreground receipt expiry is implemented; a future integration must also attach
+revocation, invalid policy, path loss and core-exit signals to this state machine.
 
 ## Current contracts were inspected, not replaced
 
@@ -316,7 +415,7 @@ xcodebuild -project apps/ios/Tono.xcodeproj -scheme Tono \
 Both test targets must execute a nonzero count, not skip. If the same blocker
 survives two focused corrections, retain evidence and stop rather than cycling
 full builds. Simulator success still does not prove NetworkExtension or On Demand.
-There are currently **26 XCTest methods and two UI tests**. Confirm all nine
+There are currently **27 XCTest methods and two UI tests**. Confirm all nine
 AppModel regressions, both Worker digest tests and the late-failure receipt test
 appear in the xcresult; a source scan is not their execution. Leave
 `TONO_PREVIEW_STATE` and `TONO_ACCOUNT_FIXTURE` unset for unit tests (UI tests set
@@ -401,7 +500,11 @@ visual-only and never evidence of encrypted traffic.
    upgrading a Comprehensive preference yields Minimal and that Off stays Off.
    Review actual redacted payloads privately. No customer data in public PR logs.
 
-No workflow was added: current path filters do not run iOS tests. Native CI is
-**not run**, not green/pending by inference. A future authorized CI addition
-belongs on GitHub-hosted `macos-26`, without persistent-machine or signing access
-for public PRs. Do not dispatch the macOS desktop workflow as iOS evidence.
+A separate `ios-ci.yml` is prepared for GitHub-hosted `macos-26` Simulator
+Debug unit/UI tests and Release compilation, plus `ubuntu-24.04` portable Go
+compiler tests. It has read-only repository permissions, no signing or persistent
+device access, no runtime/SDK downloads and no release output. Check the PR's
+delivery status: a workflow-permission rejection can leave this commit local.
+Native CI is **not run** until an actual uploaded workflow run proves otherwise;
+neither the workflow source nor the Linux archive qualifies an Apple build.
+Do not dispatch the macOS desktop workflow as iOS evidence.

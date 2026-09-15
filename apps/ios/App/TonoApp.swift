@@ -20,6 +20,14 @@ struct TonoApp: App {
             RootView(model: model)
                 .tint(.teal)
                 .task { await model.restore() }
+                .task(id: scenePhase == .active && model.state == .protected && !model.isPreview) {
+                    guard scenePhase == .active, !model.isPreview else { return }
+                    // Revalidate immediately after foregrounding, before waiting.
+                    while !Task.isCancelled && model.state == .protected {
+                        model.expireProtectionReceipt()
+                        do { try await Task.sleep(for: .seconds(1)) } catch { return }
+                    }
+                }
                 .task(id: scenePhase) {
                     guard scenePhase == .active else { return }
                     // Foreground only for this draft. No claim of extension/background upload.

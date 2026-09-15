@@ -55,19 +55,23 @@ struct ProtectionMachine: Sendable {
     private(set) var generation = UUID()
     private(set) var state: ProtectionState = .ready
     private(set) var blocker: Blocker?
+    private var lastObservation: Date?
 
     mutating func begin() -> UUID {
         generation = UUID()
         state = .connecting
         blocker = nil
+        lastObservation = nil
         return generation
     }
 
     mutating func receive(_ receipt: TunnelReceipt, now: Date = .now) {
+        expire(now: now)
         guard [.connecting, .protected, .recovering].contains(state),
               receipt.version == TunnelReceipt.version,
               receipt.generation == generation,
               receipt.observedAt <= now,
+              lastObservation.map({ receipt.observedAt > $0 }) ?? true,
               now.timeIntervalSince(receipt.observedAt) <= 10 else { return }
         if receipt.state == .actionRequired {
             fail(receipt.blocker ?? .tunnelUnavailable)
@@ -75,24 +79,37 @@ struct ProtectionMachine: Sendable {
         }
         if receipt.state == .protected {
             guard receipt.routesInstalled, receipt.dnsInstalled, receipt.coreRunning,
-                  receipt.probeSucceeded else {
+                  receipt.probeSucceeded, receipt.blocker == nil else {
                 fail(.tunnelUnavailable)
                 return
             }
         }
+        lastObservation = receipt.observedAt
         state = receipt.state
         blocker = receipt.blocker
+    }
+
+    /// A silent extension exit must withdraw Protected even without another IPC
+    /// message. Clock rollback also invalidates wall-clock receipts. Native code
+    /// must call this on foreground entry and while displaying runtime health.
+    mutating func expire(now: Date = .now) {
+        guard state == .protected, let observed = lastObservation else { return }
+        if observed > now || now.timeIntervalSince(observed) > 10 {
+            fail(.tunnelUnavailable)
+        }
     }
 
     mutating func fail(_ reason: Blocker) {
         generation = UUID() // a failed attempt cannot be revived by a queued success
         state = .actionRequired
         blocker = reason
+        lastObservation = nil
     }
     mutating func pause() {
         generation = UUID() // invalidates queued start/probe callbacks
         state = .paused
         blocker = nil
+        lastObservation = nil
     }
 }
 

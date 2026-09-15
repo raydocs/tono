@@ -60,6 +60,32 @@ final class ProtectionTests: XCTestCase {
         XCTAssertEqual(machine.state, .connecting)
     }
 
+    func testSilentExitExpiresHealthAndReplayCannotExtendOrReviveIt() {
+        var machine = ProtectionMachine()
+        let generation = machine.begin()
+        let now = Date(timeIntervalSince1970: 100)
+        let receipt = TunnelReceipt(version: 1, generation: generation, observedAt: now,
+                                    state: .protected, blocker: nil, routesInstalled: true,
+                                    dnsInstalled: true, coreRunning: true, probeSucceeded: true)
+        machine.receive(receipt, now: now)
+        machine.receive(receipt, now: now.addingTimeInterval(9))
+        machine.expire(now: now.addingTimeInterval(10))
+        XCTAssertEqual(machine.state, .protected)
+        machine.expire(now: now.addingTimeInterval(10.001))
+        XCTAssertEqual(machine.state, .actionRequired)
+        XCTAssertNotEqual(machine.generation, generation)
+        machine.receive(.init(version: 1, generation: generation, observedAt: now.addingTimeInterval(11),
+                              state: .protected, blocker: nil, routesInstalled: true, dnsInstalled: true,
+                              coreRunning: true, probeSucceeded: true), now: now.addingTimeInterval(11))
+        XCTAssertEqual(machine.state, .actionRequired)
+        let retry = machine.begin()
+        machine.receive(.init(version: 1, generation: retry, observedAt: now, state: .protected,
+                              blocker: nil, routesInstalled: true, dnsInstalled: true,
+                              coreRunning: true, probeSucceeded: true), now: now)
+        machine.expire(now: now.addingTimeInterval(-1))
+        XCTAssertEqual(machine.state, .actionRequired) // clock rollback cannot extend trust
+    }
+
     func testAutomaticKeepsOrderedBackupAndRequiredHomeBlocksEntry() {
         var plan = ResidentialRoutePlan(selection: .automatic, orderedHomes: ["home-b", "home-a"],
                                         allowsEntryFallback: true, requiresHome: true)

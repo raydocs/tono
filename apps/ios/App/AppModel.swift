@@ -133,6 +133,11 @@ final class AppModel {
         }
     }
 
+    func expireProtectionReceipt() {
+        guard !isPreview else { return }
+        machine.expire()
+    }
+
     func pause() async {
         guard !isPreview else { return }
         await perform {
