@@ -1,0 +1,106 @@
+Actual Worker public catalog/policy producers serialized for Go admission
+=== RUN   TestEmittedRealityConfigUsesActualCoreParserAndManualSelection
+--- PASS: TestEmittedRealityConfigUsesActualCoreParserAndManualSelection (0.01s)
+=== RUN   TestHY2CannotLoseDERPinOrBecomeAnotherIdentity
+--- PASS: TestHY2CannotLoseDERPinOrBecomeAnotherIdentity (0.00s)
+=== RUN   TestSignedPolicyRollbackEquivocationAndUnsupportedRules
+--- PASS: TestSignedPolicyRollbackEquivocationAndUnsupportedRules (0.00s)
+=== RUN   TestRawRoutingCannotHideHomeFallbackOrEquivocation
+--- PASS: TestRawRoutingCannotHideHomeFallbackOrEquivocation (0.00s)
+=== RUN   TestAmbiguousAndUnsafeCatalogCannotReachRuntime
+--- PASS: TestAmbiguousAndUnsafeCatalogCannotReachRuntime (0.00s)
+=== RUN   TestWorkerProducerEnvelopesReachRuntimeWithoutInventedDefault
+--- PASS: TestWorkerProducerEnvelopesReachRuntimeWithoutInventedDefault (0.00s)
+=== RUN   TestNodeSecurityFieldsCannotDisappear
+--- PASS: TestNodeSecurityFieldsCannotDisappear (0.00s)
+=== RUN   TestProxiedRealDNSKeepsCachedDestinationAcrossRenewalAndProcessRestart
+--- PASS: TestProxiedRealDNSKeepsCachedDestinationAcrossRenewalAndProcessRestart (0.04s)
+PASS
+ok  	github.com/sagernet/sing-box/experimental/tonoios	0.072s
+=== RUN   TestMobilePersistedReceiptAndExpiredAdmission
+--- PASS: TestMobilePersistedReceiptAndExpiredAdmission (0.00s)
+PASS
+ok  	github.com/sagernet/sing-box/experimental/tonomobile	0.011s
+=== RUN   TestTonoPacketFlowDNSAndShutdown
+--- PASS: TestTonoPacketFlowDNSAndShutdown (0.01s)
+PASS
+ok  	github.com/sagernet/sing-box/experimental/libbox	0.016s
+=== RUN   TestExactLeafPinRejectsSameKeyReplacement
+--- PASS: TestExactLeafPinRejectsSameKeyReplacement (0.01s)
+PASS
+ok  	github.com/sagernet/sing-box/common/tls	0.017s
+{
+  "source_identity": "9f9c3cdd8b605f4c3046d10f82078f92d3eadf4c5788cd43af452cf92e618fb1",
+  "inputs": {
+    "Mobile/mobile.go": "46645737ba4288f98e0fa63286217add217bc6a7f1c3b0d7fc784a299df9477f",
+    "Mobile/mobile_test.go": "09b7ac2125302e1b0506e09ffa9ad086c4a4b5a7e964be83a8b262c18dadffb3",
+    "Runtime/admission.go": "eea0a9492745c051e5180b3ac4506fe58b1b81c1833eef915c78be7d8e5553c6",
+    "Runtime/config.go": "dd8992ab8c9cdf8164dadfdcd2ad32fb961a4f13cd53cec9f0fcca15895c87d3",
+    "Runtime/config_test.go": "264f8ebb360d449c7e89de5d1154243fd64587f87bd62078ed00ccad07551c06",
+    "Runtime/dns_restart_test.go": "ef37b1423ff6dc71bec78b52d5c29664f73cc551241ddace1e65693616daea2e",
+    "tools/build-mobile.py": "4619791d6845e1a34be95587ab78bab85963b72efe3f9c9de8bdb9be3ef864ab",
+    "tools/worker-runtime-fixture.mjs": "da49ba2f07a337e389e8e844140233f86d837608ca01f1dd0004e965d07fc1a9",
+    "Mobile/ABI/Tonomobile.objc.h": "70aa5e978519890938fdcf44ef59451ee92db962a1f28c67e2c6adc81f367b47"
+  },
+  "pins": {
+    "status": "mobile-source-integrated-apple-qualification-required",
+    "engine": "sing-box",
+    "version": "1.15.0-alpha.3",
+    "upstream_commit": "93fff5954390367dd456cad3cbd79be54f8b941f",
+    "go_version": "go1.27.1",
+    "cgo_enabled": "0",
+    "tags": [
+      "with_gvisor",
+      "with_quic",
+      "with_utls",
+      "with_clash_api"
+    ],
+    "patches": [],
+    "go_mod_sha256": "c8a55d750ff56af8e097478b7ce88f10224f406041e73002ef89e4c8ade5769b",
+    "go_sum_sha256": "121265484ad99c79970266e5896eba82ff660c2921624225afa316e408f6d38e",
+    "ios_artifact_sha256": null,
+    "ios_abi": "tonomobile-v1",
+    "mobile": {
+      "cgo_enabled": "1",
+      "extra_tags": [
+        "tono_mobile"
+      ],
+      "gomobile": "v0.1.12",
+      "gomobile_commit": "b2c30f47825831593d6980af8191527490f9c968",
+      "sing_tun_commit": "869f0a4d76af32b9ad8cdfa821aee35489d650db",
+      "deployment_target": "26.0",
+      "targets": "ios/arm64,iossimulator/arm64",
+      "backend": "public-packet-flow-gvisor",
+      "patches": {
+        "sing-box-mobile.patch": "97520d1c7f451ce1a9bd9b53e689083626e0f924e46fb2840e4c74168108f83e",
+        "sing-tun-packet-flow.patch": "ad494ea9a46044f981a0fea9fda8506df331c3c54721535f859776a2263f3c7d"
+      }
+    },
+    "constraint": "Top-level pins remain the desktop contract. Mobile is an explicitly distinct patched CGO1 Apple identity; each SDK build must record exact SDK, source, header and slice hashes. No stock substitution or linker safety override.",
+    "shared_contract_reviewed": "https://github.com/raydocs/tono/pull/202"
+  },
+  "host": "go version go1.27.1 linux/amd64",
+  "apple": null,
+  "identity": "c6180da756794e0898b9d1488de4157fd724c8f62d47b3521f381f9391d7ca2b",
+  "worker_fixture_sha256": "b2b1d2de088d9511fbafb617c8d7053cc962c7cd326086e9582be40ea864381c",
+  "patched_go_mod_sha256": "222c86990d03179baa96a192cea06eb5cf37453bfe53ab6c00ba1bad7388ddf5",
+  "abi_sha256": "70aa5e978519890938fdcf44ef59451ee92db962a1f28c67e2c6adc81f367b47",
+  "host_link_sha256": "b2f50e46ac4c46c21cf646b44b57b6d51a2290d2a6b8079977d07941e5aaf40a",
+  "auxiliary": {
+    "Tonomobile.objc.h": "70aa5e978519890938fdcf44ef59451ee92db962a1f28c67e2c6adc81f367b47",
+    "go.mod.lock": "222c86990d03179baa96a192cea06eb5cf37453bfe53ab6c00ba1bad7388ddf5",
+    "go.sum.lock": "121265484ad99c79970266e5896eba82ff660c2921624225afa316e408f6d38e",
+    "gomobile-LICENSE.txt": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067",
+    "host-link-probe": "b2f50e46ac4c46c21cf646b44b57b6d51a2290d2a6b8079977d07941e5aaf40a",
+    "sing-box-LICENSE.txt": "650d5e3b99a446fb38e820fa87a49562e0c79eab868fff58618ac487a58e554c",
+    "sing-tun-LICENSE.txt": "2f02b7486bcfa90d115c71a20437f3906b6fd5bef81c5dc0efd341399e89d0fd"
+  },
+  "checks": [
+    "linked packet-flow DNS and close",
+    "actual QUIC leaf DER negatives",
+    "catalog/parser admission",
+    "Objective-C ABI generation",
+    "linked identity execution",
+    "repeat host binary hash"
+  ]
+}

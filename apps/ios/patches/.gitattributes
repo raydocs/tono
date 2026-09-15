@@ -1,0 +1,3 @@
+# Unified-diff context prefixes are data, not source indentation. The builder
+# checks the actual added source with git apply --whitespace=error-all.
+*.patch whitespace=-blank-at-eol,-space-before-tab
