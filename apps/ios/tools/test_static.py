@@ -100,6 +100,8 @@ class IOSStaticContracts(unittest.TestCase):
         self.assertIn("try SingBoxIdentity.requireEmbeddedCore()", start)
         self.assertLess(start.index("requireEmbeddedCore()"), start.index("saveToPreferences"))
         self.assertLess(start.index("TunnelVault().grant()"), start.index("startVPNTunnel"))
+        self.assertLess(start.index("guard manager.connection.status"), start.index("cloud.stageTunnel"))
+        self.assertLess(start.index("Self.disable(manager)"), start.index("cloud.stageTunnel"))
         provider = (ROOT / "PacketTunnel/PacketTunnelProvider.swift").read_text()
         start = provider.split("override func startTunnel", 1)[1].split("override func stopTunnel", 1)[0]
         self.assertIn("try SingBoxIdentity.requireEmbeddedCore()", start)
@@ -109,6 +111,9 @@ class IOSStaticContracts(unittest.TestCase):
         self.assertNotIn("value(forKey:", provider)
         pause = controller.split("func pause()", 1)[1]
         self.assertLess(pause.index("saveToPreferences"), pause.index("stopVPNTunnel"))
+        self.assertIn("catch { failure = error }", pause)
+        cloud = (ROOT / "App/CloudClient.swift").read_text()
+        self.assertLess(cloud.index("guard tunnelQuiesced"), cloud.index("try logoutIntent.clear()"))
 
     def test_privacy_declaration_and_no_credential_group_storage(self):
         with (ROOT / "Configuration/PrivacyInfo.xcprivacy").open("rb") as f:

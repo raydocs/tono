@@ -62,6 +62,7 @@ def build(args):
     sources = sorted([*(ROOT / "Runtime").glob("*.go"), *(ROOT / "Mobile").glob("*.go")])
     inputs = {str(p.relative_to(ROOT)): sha(p) for p in sources}
     inputs["tools/build-mobile.py"] = sha(Path(__file__))
+    inputs["tools/worker-runtime-fixture.mjs"] = sha(ROOT / "tools/worker-runtime-fixture.mjs")
     inputs["Mobile/ABI/Tonomobile.objc.h"] = sha(ROOT / "Mobile/ABI/Tonomobile.objc.h")
     for name, expected in mobile["patches"].items():
         require(sha(ROOT / "patches" / name) == expected, "patch digest mismatch: " + name)
@@ -82,22 +83,28 @@ def build(args):
         archive(args.tun_source, tun, mobile["sing_tun_commit"])
         for name in ("go.mod", "go.sum"):
             require(sha(stage / name) == pins[name.replace(".", "_") + "_sha256"], "upstream module graph mismatch")
-        run(["git", "apply", "--check", ROOT / "patches/sing-box-mobile.patch"], stage)
+        run(["git", "apply", "--check", "--whitespace=error-all", ROOT / "patches/sing-box-mobile.patch"], stage)
         run(["git", "apply", ROOT / "patches/sing-box-mobile.patch"], stage)
-        run(["git", "apply", "--check", ROOT / "patches/sing-tun-packet-flow.patch"], tun)
+        run(["git", "apply", "--check", "--whitespace=error-all", ROOT / "patches/sing-tun-packet-flow.patch"], tun)
         run(["git", "apply", ROOT / "patches/sing-tun-packet-flow.patch"], tun)
         for folder, name in (("Runtime", "tonoios"), ("Mobile", "tonomobile")):
             target = stage / "experimental" / name
             target.mkdir()
             for path in (ROOT / folder).glob("*.go"):
                 shutil.copyfile(path, target / path.name)
+        node = shutil.which("node")
+        require(node is not None, "Node24.18.0 and lockfile-installed Worker dependencies required")
+        require(output([node, "--version"], ROOT) == "v24.18.0", "fixture Node version mismatch")
+        fixture = stage / "experimental/tonoios/worker-envelope.json"
+        run([node, ROOT / "tools/worker-runtime-fixture.mjs", fixture], ROOT)
+        receipt["worker_fixture_sha256"] = sha(fixture)
         run([args.go, "mod", "edit", "-replace", "github.com/sagernet/sing-tun=../tun"], stage)
         patched_mod = sha(stage / "go.mod")
         receipt["patched_go_mod_sha256"] = patched_mod
         tags = ",".join(pins["tags"] + mobile["extra_tags"])
         flags = ["-mod=readonly", "-trimpath", "-tags", tags]
         run([args.go, "test", *flags, "-count=1", "-v", "./experimental/tonoios", "./experimental/tonomobile",
-             "./experimental/libbox", "./common/tls", "-run", "TestEmitted|TestHY2|TestSigned|TestRaw|TestAmbiguous|TestTono|TestExact|TestMobile"], stage)
+             "./experimental/libbox", "./common/tls", "-run", "TestEmitted|TestHY2|TestSigned|TestRaw|TestAmbiguous|TestTono|TestExact|TestMobile|TestWorker|TestNode|TestProxied"], stage)
         tools = Path(tmp) / "tools"
         tools.mkdir()
         env["PATH"] = str(tools) + os.pathsep + env["PATH"]

@@ -35,7 +35,7 @@ final class CloudClient {
     }
 
     func restore() throws -> CloudSession? {
-        if try finishPendingLogout() { return nil }
+        try requireNoPendingLogout()
         // A retry must not reload an older token pair after a rotated-token write failed.
         if let credentials { return credentials }
         guard let data = try vault.read("session") else { return nil }
@@ -47,14 +47,14 @@ final class CloudClient {
     }
 
     func start(email: String) async throws -> EmailChallenge {
-        _ = try finishPendingLogout()
+        try requireNoPendingLogout()
         return try await decode("auth/email/start", body: [
             "email": email, "deviceName": "Tono for iOS", "installationId": try vault.installationID(),
         ], authorized: false)
     }
 
     func verify(challenge: String, code: String) async throws -> CloudSession {
-        _ = try finishPendingLogout()
+        try requireNoPendingLogout()
         let generation = epoch
         let result: AuthEnvelope = try await decode("auth/email/verify", body: [
             "challengeId": challenge, "code": code,
@@ -93,8 +93,9 @@ final class CloudClient {
         guard let credentials, let deviceID = credentials.device?.id else { throw Blocker.sessionExpired }
         let old = try TunnelVault().watermark(scope: credentials.user.id + ":" + deviceID)
         var error: NSError?
-        guard let admission = TonomobilePrepare(catalog, policy, "", old, &error), error == nil else { throw Blocker.unsupportedPolicy }
-        return try JSONDecoder().decode([String].self, from: Data(admission.locations().utf8))
+        let result: String? = TonomobileLocations(catalog, policy, old, &error)
+        guard let result, error == nil else { throw Blocker.unsupportedPolicy }
+        return try JSONDecoder().decode([String].self, from: Data(result.utf8))
         #else
         throw Blocker.coreUnavailable
         #endif
@@ -129,18 +130,28 @@ final class CloudClient {
         guard !receipt.id.isEmpty else { throw Blocker.serviceUnavailable }
     }
 
-    func signOut() throws {
+    func beginLogout() throws {
         // Record intent BEFORE deleting credentials or reporting a local logout.
         // If this write fails, callers must leave explicit sign-out retry reachable.
         if !(try logoutIntent.isPending()) { try logoutIntent.mark() }
         invalidateSession()
-        _ = try finishPendingLogout()
     }
 
-    func invalidateTerminalSession() throws {
+    func invalidateTerminalSession() {
         // Terminal auth loss cannot depend on a successful filesystem operation.
         invalidateSession()
-        _ = try finishPendingLogout()
+    }
+
+    func needsLogoutCleanup() throws -> Bool {
+        if try logoutIntent.isPending() || logoutPending {
+            invalidateSession()
+            return true
+        }
+        return false
+    }
+
+    private func requireNoPendingLogout() throws {
+        if try needsLogoutCleanup() { throw Blocker.keychainUnavailable }
     }
 
     private func invalidateSession() {
@@ -152,7 +163,7 @@ final class CloudClient {
         needsPersistence = false
     }
 
-    func finishPendingLogout() throws -> Bool {
+    func finishPendingLogout(tunnelQuiesced: Bool) throws -> Bool {
         do {
             let durable = try logoutIntent.isPending()
             guard durable || logoutPending else { return false }
@@ -167,6 +178,7 @@ final class CloudClient {
         }
         // Keep the marker across failures/relaunches; clear it only AFTER deletion.
         try vault.remove("session")
+        guard tunnelQuiesced else { throw Blocker.tunnelUnavailable }
         try logoutIntent.clear()
         logoutIntent.processBlocked = false
         return true

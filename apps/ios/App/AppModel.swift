@@ -76,8 +76,12 @@ final class AppModel {
         guard !isPreview, !busy, user == nil else { return }
         await perform {
             accountRecovery = .restoreSession
+            if try cloud.needsLogoutCleanup() {
+                try await forgetAccount()
+                return
+            }
             guard try cloud.restore() != nil else {
-                accountRecovery = nil
+                try await forgetAccount() // no app session may leave an orphan shared grant
                 return
             }
             user = try await cloud.me()
@@ -97,16 +101,8 @@ final class AppModel {
     func retryAccountRecovery() async {
         switch accountRecovery {
         case .restoreSession: await restore()
-        case .finishSignOut:
-            await perform {
-                _ = try cloud.finishPendingLogout()
-                clearAccountState()
-            }
-        case .forgetSavedSession:
-            await perform {
-                try cloud.signOut()
-                clearAccountState()
-            }
+        case .finishSignOut, .forgetSavedSession:
+            await perform { try await forgetAccount() }
         case nil: return
         }
     }
@@ -136,6 +132,11 @@ final class AppModel {
     func connect() async {
         guard !isPreview else { return }
         await perform {
+            if let existing = try await tunnel.activeGeneration() {
+                machine.observeExisting(existing)
+                expireProtectionReceipt()
+                return // reobserve existing authorization, never replace its grant
+            }
             let generation = machine.begin()
             diagnostics.append(.init(kind: .stateChanged, state: .connecting), policy: diagnosticPolicy)
             try await tunnel.start(generation: generation, onDemand: onDemand, selected: selectedLocation ?? "")
@@ -208,14 +209,24 @@ final class AppModel {
     }
 
     func signOut() async {
-        await perform {
+        await perform { try await forgetAccount() }
+    }
+
+    private func forgetAccount(terminal: Bool = false) async throws {
+        if terminal { cloud.invalidateTerminalSession() }
+        var intentError: Error?
+        do { try cloud.beginLogout() } catch { intentError = error }
+        var quiesced = false
+        do {
             try await tunnel.pause()
-            machine.pause()
-            paused = true
-            preferences?.set(true, forKey: "paused")
-            try cloud.signOut()
-            clearAccountState()
-        }
+            quiesced = true
+        } catch { /* still delete app credentials; retain durable cleanup intent */ }
+        machine.pause()
+        paused = true
+        preferences?.set(true, forKey: "paused")
+        if let intentError, !cloud.logoutPending { throw intentError }
+        _ = try cloud.finishPendingLogout(tunnelQuiesced: quiesced)
+        clearAccountState()
     }
 
     private func clearAccountState() {
@@ -257,16 +268,15 @@ final class AppModel {
         catch {
             let blocker = error as? Blocker ?? .serviceUnavailable
             if blocker == .sessionExpired {
-                try? await tunnel.pause() // invalidate the extension grant, not only app memory
                 clearAccountState() // RootView changes identity and exposes sign-in.
-                machine.fail(.sessionExpired)
                 notice = blocker.message // terminal auth loss is never a silent upload failure
-                do { try cloud.invalidateTerminalSession() }
+                do { try await forgetAccount(terminal: true) }
                 catch {
                     accountRecovery = .finishSignOut
                     notice = Blocker.sessionExpired.message + " " + Blocker.keychainUnavailable.message
                         + " " + AccountRecovery.finishSignOut.message
                 }
+                machine.fail(.sessionExpired)
                 return // do not retain account-scoped telemetry after authentication loss
             }
             if showErrors { notice = blocker.message }

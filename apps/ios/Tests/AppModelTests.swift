@@ -2,6 +2,52 @@ import XCTest
 @testable import Tono
 
 final class AppModelTests: XCTestCase {
+    @MainActor func testForgetRetainsDurableCleanupUntilSharedGrantRevokeRetrySucceeds() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let vault = MemoryVault()
+        try vault.write(Data("{}".utf8), account: "session")
+        let tunnel = StubTunnel()
+        tunnel.failRevoke = true
+        let cloud = client(vault: vault, logoutDirectory: directory)
+        let model = AppModel(cloud: cloud, tunnel: tunnel, preferences: nil)
+        FixtureHTTP.script.reset([])
+        await model.restore()
+        XCTAssertEqual(model.accountRecovery, .forgetSavedSession)
+        await model.retryAccountRecovery()
+        XCTAssertFalse(tunnel.profileEnabled) // attempted even though revoke failed
+        XCTAssertTrue(tunnel.grantPresent)
+        XCTAssertNil(try vault.read("session"))
+        XCTAssertTrue(try LogoutIntentStore(directory: directory).isPending())
+        XCTAssertEqual(model.accountRecovery, .finishSignOut)
+        XCTAssertTrue(cloud.logoutPending)
+        tunnel.failRevoke = false
+        await model.retryAccountRecovery()
+        XCTAssertFalse(tunnel.grantPresent)
+        XCTAssertEqual(tunnel.pauses, 2)
+        XCTAssertFalse(try LogoutIntentStore(directory: directory).isPending())
+        XCTAssertNil(model.accountRecovery)
+        XCTAssertFalse(cloud.logoutPending)
+        XCTAssertTrue(FixtureHTTP.script.requests.isEmpty)
+    }
+
+    @MainActor func testConnectReobservesAlreadyActiveTunnelWithoutReplacingGrant() async throws {
+        let tunnel = StubTunnel()
+        let model = AppModel(cloud: client(vault: MemoryVault()), tunnel: tunnel, preferences: nil)
+        FixtureHTTP.script.reset([.init(body: Self.me)])
+        await model.restore()
+        let generation = UUID()
+        tunnel.active = generation
+        tunnel.receipt = .init(version: 1, generation: generation, observedAt: .now,
+            state: .protected, blocker: nil, routesInstalled: true, dnsInstalled: true,
+            coreRunning: true, probeSucceeded: true)
+        await model.connect()
+        XCTAssertEqual(model.machine.generation, generation)
+        XCTAssertEqual(model.state, .protected)
+        XCTAssertEqual(tunnel.starts, 0)
+        XCTAssertEqual(tunnel.pauses, 0)
+        XCTAssertTrue(tunnel.grantPresent)
+    }
+
     @MainActor func testComprehensiveToOffPersistsAndClearsAtModelBoundary() throws {
         let name = "TonoTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
@@ -407,8 +453,24 @@ final class AppModelTests: XCTestCase {
 
 @MainActor private final class StubTunnel: TunnelControlling {
     private(set) var pauses = 0
-    func start(generation: UUID, onDemand: Bool, selected: String) async throws { throw Blocker.coreUnavailable }
-    func pause() async throws { pauses += 1 }
+    private(set) var starts = 0
+    var failRevoke = false
+    var grantPresent = true
+    var profileEnabled = true
+    var active: UUID?
+    var receipt: TunnelReceipt?
+    func activeGeneration() async throws -> UUID? { active }
+    func observe(generation: UUID, completion: @escaping (TunnelReceipt?) -> Void) { completion(receipt) }
+    func start(generation: UUID, onDemand: Bool, selected: String) async throws {
+        starts += 1
+        throw Blocker.coreUnavailable
+    }
+    func pause() async throws {
+        pauses += 1
+        profileEnabled = false
+        if failRevoke { throw Blocker.keychainUnavailable }
+        grantPresent = false
+    }
 }
 
 // Intercepts ALL URLs for these test-only sessions, including unexpected requests.

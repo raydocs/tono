@@ -32,7 +32,26 @@ func Compile(catalog, policy []byte, selected string, previous *Watermark) (*Dra
 	return compile(catalog, policy, selected, previous, ed25519.PublicKey(key))
 }
 
-func compile(catalog, policy []byte, selected string, previous *Watermark, key ed25519.PublicKey) (*Draft, error) {
+type Inventory struct {
+	nodes       []node
+	defaultNode string
+	watermark   Watermark
+}
+
+func (i *Inventory) Locations() []string {
+	names := make([]string, 0, len(i.nodes))
+	for _, n := range i.nodes {
+		names = append(names, n.Name)
+	}
+	return names
+}
+
+func Discover(catalog, policy []byte, previous *Watermark) (*Inventory, error) {
+	key, _ := base64.StdEncoding.DecodeString(policyKey)
+	return discover(catalog, policy, previous, ed25519.PublicKey(key))
+}
+
+func discover(catalog, policy []byte, previous *Watermark, key ed25519.PublicKey) (*Inventory, error) {
 	var oldCatalog, oldPolicy *Revision
 	if previous != nil {
 		oldCatalog, oldPolicy = &previous.Catalog, &previous.Policy
@@ -45,6 +64,15 @@ func compile(catalog, policy []byte, selected string, previous *Watermark, key e
 	if err != nil {
 		return nil, err
 	}
+	return &Inventory{nodes, defaultNode, Watermark{catalogRevision, policyRevision}}, nil
+}
+
+func compile(catalog, policy []byte, selected string, previous *Watermark, key ed25519.PublicKey) (*Draft, error) {
+	inventory, err := discover(catalog, policy, previous, key)
+	if err != nil {
+		return nil, err
+	}
+	nodes, defaultNode := inventory.nodes, inventory.defaultNode
 	if selected == "" {
 		selected = defaultNode
 	}
@@ -81,13 +109,11 @@ func compile(catalog, policy []byte, selected string, previous *Watermark, key e
 		"log": object{"disabled": true},
 		"dns": object{
 			"servers": []any{
-				object{"type": "fakeip", "tag": "Tono-FakeIP", "inet4_range": "198.19.0.0/16"},
 				object{"type": "https", "tag": "Tono-DoH", "server": "1.1.1.1", "server_port": 443,
 					"path": "/dns-query", "tls": object{"enabled": true, "server_name": "1.1.1.1"}, "detour": "Tono-Exit"},
 			},
 			"rules": []any{
 				object{"query_type": []string{"AAAA"}, "action": "predefined", "rcode": "NOERROR"},
-				object{"inbound": []string{"Tono-TUN"}, "query_type": []string{"A"}, "action": "route", "server": "Tono-FakeIP"},
 			}, "final": "Tono-DoH", "strategy": "ipv4_only",
 		},
 		// IPv6 is CAPTURED and rejected, not left outside the tunnel. The native
@@ -100,6 +126,9 @@ func compile(catalog, policy []byte, selected string, previous *Watermark, key e
 			"rules": []any{
 				object{"ip_version": 6, "action": "reject"},
 				object{"port": []int{53}, "action": "hijack-dns"},
+				// Old app DNS caches can outlive an upgrade from the FakeIP build.
+				// Never forward those synthetic destinations as real proxy targets.
+				object{"ip_cidr": []string{"198.18.0.0/15"}, "action": "reject"},
 				object{"network": "udp", "action": "reject"},
 			}},
 	}
@@ -107,5 +136,5 @@ func compile(catalog, policy []byte, selected string, previous *Watermark, key e
 	if err != nil {
 		return nil, ErrCatalog
 	}
-	return &Draft{string(encoded), Watermark{catalogRevision, policyRevision}, unavailable, locations}, nil
+	return &Draft{string(encoded), inventory.watermark, unavailable, locations}, nil
 }

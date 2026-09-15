@@ -5,6 +5,8 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -67,7 +69,12 @@ rules: [MATCH,DIRECT]
 `
 
 func catalogFixture(yaml, routing string, revision int64) []byte {
-	encoded, _ := json.Marshal(catalogEnvelope{revision, yaml, digest([]byte(yaml)), json.RawMessage(routing)})
+	var route struct {
+		Default string `json:"defaultProxy"`
+	}
+	_ = json.Unmarshal([]byte(routing), &route)
+	encoded, _ := json.Marshal(catalogEnvelope{Revision: revision, YAML: yaml, SHA256: digest([]byte(yaml)),
+		UpdatedAt: 1700000000, RoutingSHA256: digest([]byte("\n" + route.Default + "\n")), Routing: json.RawMessage(routing)})
 	return encoded
 }
 
@@ -75,7 +82,8 @@ func signedPolicy(content string, revision int64) ([]byte, ed25519.PublicKey) {
 	// Test-only deterministic key. The public Compile API has no key override.
 	private := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
 	signature := ed25519.Sign(private, []byte(policyContext+content))
-	encoded, _ := json.Marshal(policyEnvelope{revision, content, digest([]byte(content)), base64.StdEncoding.EncodeToString(signature)})
+	encoded, _ := json.Marshal(policyEnvelope{Revision: revision, JSON: content, SHA256: digest([]byte(content)),
+		Signature: base64.StdEncoding.EncodeToString(signature), UpdatedAt: 1700000001})
 	return encoded, private.Public().(ed25519.PublicKey)
 }
 
@@ -108,11 +116,11 @@ func TestEmittedRealityConfigUsesActualCoreParserAndManualSelection(t *testing.T
 	}
 	rules := config["route"].(map[string]any)["rules"].([]any)
 	if rules[0].(map[string]any)["ip_version"] != float64(6) || rules[0].(map[string]any)["action"] != "reject" ||
-		rules[1].(map[string]any)["action"] != "hijack-dns" || rules[2].(map[string]any)["network"] != "udp" {
+		rules[1].(map[string]any)["action"] != "hijack-dns" || rules[3].(map[string]any)["network"] != "udp" {
 		t.Fatal("IPv6/DNS/UDP ordering")
 	}
 	dns := config["dns"].(map[string]any)
-	if dns["servers"].([]any)[1].(map[string]any)["detour"] != "Tono-Exit" {
+	if dns["servers"].([]any)[0].(map[string]any)["detour"] != "Tono-Exit" {
 		t.Fatal("DNS outside proxy")
 	}
 	if strings.Contains(draft.Configuration(), "malicious.invalid") || strings.Contains(draft.Configuration(), "DIRECT") {
@@ -246,5 +254,88 @@ func TestAmbiguousAndUnsafeCatalogCannotReachRuntime(t *testing.T) {
 	alias := fixtureYAML + "extra: &ref [a,b]\nagain: *ref\n"
 	if _, err := compile(catalogFixture(alias, `{}`, 7), policy, "Entry A", nil, key); err != ErrCatalog {
 		t.Fatal("YAML alias accepted", err)
+	}
+}
+
+func TestWorkerProducerEnvelopesReachRuntimeWithoutInventedDefault(t *testing.T) {
+	data, err := os.ReadFile("worker-envelope.json")
+	if err != nil {
+		t.Fatal("run the actual Worker fixture producer before Go tests", err)
+	}
+	var fixture struct{ Catalog, Policy json.RawMessage }
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	_, key := signedPolicy(emptyPolicy, 4)
+	inventory, err := discover(fixture.Catalog, fixture.Policy, nil, key)
+	if err != nil {
+		t.Fatal("real producer rejected", err)
+	}
+	if !reflect.DeepEqual(inventory.Locations(), []string{"Entry B", "Entry A", "Entry B · hy2"}) {
+		t.Fatal("inventory lost nodes")
+	}
+	if _, err := compile(fixture.Catalog, fixture.Policy, "", nil, key); err != ErrSelection {
+		t.Fatal("invented automatic authority", err)
+	}
+	draft, err := compile(fixture.Catalog, fixture.Policy, "Entry A", nil, key)
+	if err != nil {
+		t.Fatal("manual selection from no-default catalog failed", err)
+	}
+	if err := checkConfig(draft.Configuration()); err != nil {
+		t.Fatal(err)
+	}
+	badTimestamp := strings.Replace(string(fixture.Policy), `"updatedAt":1700000001`, `"updatedAt":null`, 1)
+	if _, err := discover(fixture.Catalog, []byte(badTimestamp), nil, key); err != ErrPolicy {
+		t.Fatal("null timestamp admitted")
+	}
+	missingTimestamp := strings.Replace(string(fixture.Catalog), `"updatedAt":1700000000,`, "", 1)
+	if _, err := discover([]byte(missingTimestamp), fixture.Policy, nil, key); err != ErrCatalog {
+		t.Fatal("missing timestamp admitted")
+	}
+	var catalog map[string]any
+	_ = json.Unmarshal(fixture.Catalog, &catalog)
+	catalog["routing"] = map[string]string{"defaultProxy": "Entry B"}
+	changed, _ := json.Marshal(catalog)
+	if _, err := discover(changed, fixture.Policy, nil, key); err != ErrCatalog {
+		t.Fatal("routing digest not checked")
+	}
+	catalog["routingSha256"] = digest([]byte("\nEntry B\n"))
+	changed, _ = json.Marshal(catalog)
+	previous := draft.Watermark()
+	if _, err := discover(changed, fixture.Policy, &previous, key); err != ErrCatalog {
+		t.Fatal("raw-routing equivocation not bound")
+	}
+	catalog["futureSecurity"] = true
+	changed, _ = json.Marshal(catalog)
+	if _, err := discover(changed, fixture.Policy, nil, key); err != ErrCatalog {
+		t.Fatal("unknown envelope field dropped")
+	}
+	if _, err := Discover(fixture.Catalog, fixture.Policy, nil); err != ErrPolicy {
+		t.Fatal("fixture signing key accepted by production discovery")
+	}
+}
+
+func TestNodeSecurityFieldsCannotDisappear(t *testing.T) {
+	policy, key := signedPolicy(emptyPolicy, 4)
+	dialer := strings.Replace(fixtureYAML, "    type: vless", "    type: vless\n    dialer-proxy: Required-Home", 1)
+	if _, err := compile(catalogFixture(dialer, `{}`, 7), policy, "Entry A", nil, key); err == nil {
+		t.Fatal("unselected dialer-proxy dropped")
+	}
+	alpn := strings.Replace(fixtureYAML, "    type: hysteria2", "    type: hysteria2\n    alpn: [private-transport]", 1)
+	if _, err := compile(catalogFixture(alpn, `{}`, 7), policy, "Entry A", nil, key); err == nil {
+		t.Fatal("HY2 ALPN dropped")
+	}
+	ca := strings.Replace(fixtureYAML, "    type: vless", "    type: vless\n    ca-str: required-private-ca", 1)
+	if _, err := compile(catalogFixture(ca, `{}`, 7), policy, "Entry A", nil, key); err == nil {
+		t.Fatal("CA override dropped")
+	}
+	nested := strings.Replace(fixtureYAML, "    reality-opts:", "    reality-opts:\n      unsupported-verifier: true", 1)
+	if _, err := compile(catalogFixture(nested, `{}`, 7), policy, "Entry A", nil, key); err == nil {
+		t.Fatal("nested security option dropped")
+	}
+	metadata := strings.Replace(fixtureYAML, "    type: vless", "    type: vless\n    icon: https://example.invalid/icon.png", 1)
+	draft, err := compile(catalogFixture(metadata, `{}`, 7), policy, "Entry A", nil, key)
+	if err != nil || strings.Contains(draft.Configuration(), "icon.png") {
+		t.Fatal("harmless icon not isolated", err)
 	}
 }

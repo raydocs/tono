@@ -83,7 +83,7 @@ final class ProtectionTests: XCTestCase {
         XCTAssertEqual(machine.state, .connecting)
     }
 
-    func testSilentExitExpiresHealthAndReplayCannotExtendOrReviveIt() {
+    func testForegroundExpiryWithdrawsHealthButFreshObservationCanReattach() {
         var machine = ProtectionMachine()
         let generation = machine.begin()
         let now = Date(timeIntervalSince1970: 100)
@@ -95,18 +95,20 @@ final class ProtectionTests: XCTestCase {
         machine.expire(now: now.addingTimeInterval(10))
         XCTAssertEqual(machine.state, .protected)
         machine.expire(now: now.addingTimeInterval(10.001))
-        XCTAssertEqual(machine.state, .actionRequired)
-        XCTAssertNotEqual(machine.generation, generation)
+        XCTAssertEqual(machine.state, .recovering)
+        XCTAssertEqual(machine.generation, generation)
+        machine.receive(receipt, now: now.addingTimeInterval(11))
+        XCTAssertEqual(machine.state, .recovering) // replay cannot refresh evidence
         machine.receive(.init(version: 1, generation: generation, observedAt: now.addingTimeInterval(11),
                               state: .protected, blocker: nil, routesInstalled: true, dnsInstalled: true,
                               coreRunning: true, probeSucceeded: true), now: now.addingTimeInterval(11))
-        XCTAssertEqual(machine.state, .actionRequired)
+        XCTAssertEqual(machine.state, .protected) // same authorized tunnel after foreground
         let retry = machine.begin()
         machine.receive(.init(version: 1, generation: retry, observedAt: now, state: .protected,
                               blocker: nil, routesInstalled: true, dnsInstalled: true,
                               coreRunning: true, probeSucceeded: true), now: now)
         machine.expire(now: now.addingTimeInterval(-1))
-        XCTAssertEqual(machine.state, .actionRequired) // clock rollback cannot extend trust
+        XCTAssertEqual(machine.state, .recovering) // clock rollback withdraws trust
     }
 
     func testAutomaticKeepsOrderedBackupAndRequiredHomeBlocksEntry() {

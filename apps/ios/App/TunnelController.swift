@@ -4,11 +4,13 @@ import NetworkExtension
 @MainActor
 protocol TunnelControlling {
     func start(generation: UUID, onDemand: Bool, selected: String) async throws
+    func activeGeneration() async throws -> UUID?
     func pause() async throws
     func observe(generation: UUID, completion: @escaping (TunnelReceipt?) -> Void)
 }
 
 extension TunnelControlling {
+    func activeGeneration() async throws -> UUID? { nil }
     func observe(generation: UUID, completion: @escaping (TunnelReceipt?) -> Void) { completion(nil) }
 }
 
@@ -45,8 +47,6 @@ final class TunnelController: TunnelControlling {
     func start(generation: UUID, onDemand: Bool, selected: String = "") async throws {
         // Before touching system preferences, not after installing a reconnect loop.
         try SingBoxIdentity.requireEmbeddedCore()
-        try await cloud.stageTunnel(generation: generation, selected: selected)
-        guard try TunnelVault().grant().generation == generation else { throw Blocker.sessionExpired }
         let existing = try await NETunnelProviderManager.loadAllFromPreferences().filter {
             ($0.protocolConfiguration as? NETunnelProviderProtocol)?.providerBundleIdentifier == TunnelContract.providerBundleID
         }
@@ -56,6 +56,10 @@ final class TunnelController: TunnelControlling {
         guard manager.connection.status == .disconnected || manager.connection.status == .invalid else {
             throw Blocker.tunnelUnavailable
         }
+        // Fence On Demand before awaiting cloud I/O or replacing shared credentials.
+        if !existing.isEmpty { try await Self.disable(manager) }
+        try await cloud.stageTunnel(generation: generation, selected: selected)
+        guard try TunnelVault().grant().generation == generation else { throw Blocker.sessionExpired }
         manager.protocolConfiguration = template.protocolConfiguration
         manager.onDemandRules = template.onDemandRules
         manager.isOnDemandEnabled = onDemand
@@ -64,6 +68,18 @@ final class TunnelController: TunnelControlling {
         try await manager.saveToPreferences()
         try await manager.loadFromPreferences()
         try manager.connection.startVPNTunnel()
+    }
+
+    func activeGeneration() async throws -> UUID? {
+        let managers = try await NETunnelProviderManager.loadAllFromPreferences().filter {
+            ($0.protocolConfiguration as? NETunnelProviderProtocol)?.providerBundleIdentifier == TunnelContract.providerBundleID
+        }
+        guard managers.count <= 1 else { throw Blocker.tunnelUnavailable }
+        guard let manager = managers.first,
+              manager.connection.status != .disconnected, manager.connection.status != .invalid else { return nil }
+        let grant = try TunnelVault().grant()
+        guard grant.accountID == cloud.credentials?.user.id else { throw Blocker.sessionExpired }
+        return grant.generation
     }
 
     func observe(generation: UUID, completion: @escaping (TunnelReceipt?) -> Void) {
@@ -84,24 +100,37 @@ final class TunnelController: TunnelControlling {
     }
 
     func pause() async throws {
-        try TunnelVault().revoke() // fence On Demand even if preference persistence fails
+        var failure: Error?
+        do { try TunnelVault().revoke() } catch { failure = error }
+        // Even a failed Keychain revoke must attempt to disable/stop every profile.
         let managers = try await NETunnelProviderManager.loadAllFromPreferences()
         for manager in managers where
             (manager.protocolConfiguration as? NETunnelProviderProtocol)?.providerBundleIdentifier == TunnelContract.providerBundleID {
-            // Save disable BEFORE stop; otherwise On Demand can reconnect during pause.
-            manager.isOnDemandEnabled = false
-            manager.isEnabled = false
+            do { try await Self.disable(manager) } catch { failure = failure ?? error }
+        }
+        if let failure { throw failure }
+    }
+
+    private static func disable(_ manager: NETunnelProviderManager) async throws {
+        // Save disable BEFORE stop; otherwise On Demand can reconnect during pause.
+        manager.isOnDemandEnabled = false
+        manager.isEnabled = false
+        do {
             try await manager.saveToPreferences()
             try await manager.loadFromPreferences()
             guard !manager.isOnDemandEnabled, !manager.isEnabled else { throw Blocker.tunnelUnavailable }
+        } catch {
+            // Best effort even if persistence fails. Cleanup must remain pending.
             manager.connection.stopVPNTunnel()
-            for _ in 0..<30 {
-                if manager.connection.status == .disconnected || manager.connection.status == .invalid { break }
-                try await Task.sleep(for: .milliseconds(100))
-            }
-            guard manager.connection.status == .disconnected || manager.connection.status == .invalid else {
-                throw Blocker.tunnelUnavailable
-            }
+            throw error
+        }
+        manager.connection.stopVPNTunnel()
+        for _ in 0..<30 {
+            if manager.connection.status == .disconnected || manager.connection.status == .invalid { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        guard manager.connection.status == .disconnected || manager.connection.status == .invalid else {
+            throw Blocker.tunnelUnavailable
         }
     }
 }

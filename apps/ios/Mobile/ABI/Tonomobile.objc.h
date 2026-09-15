@@ -39,6 +39,11 @@
 
 FOUNDATION_EXPORT NSString* _Nonnull TonomobileIdentity(void);
 
+/**
+ * Discovery admits all bytes without choosing a route or creating a session.
+ */
+FOUNDATION_EXPORT NSString* _Nonnull TonomobileLocations(NSData* _Nullable catalog, NSData* _Nullable policy, NSString* _Nullable previous, NSError* _Nullable* _Nullable error);
+
 FOUNDATION_EXPORT TonomobileAdmission* _Nullable TonomobilePrepare(NSData* _Nullable catalog, NSData* _Nullable policy, NSString* _Nullable selected, NSString* _Nullable previous, NSError* _Nullable* _Nullable error);
 
 #endif

@@ -15,6 +15,7 @@ import (
 	"net/netip"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -35,10 +36,12 @@ const policyKey = "Sf2burVHXZWzYikU0FlC+N64BeRZJxJe8XaneblmTkM="
 const policyContext = "tono-traffic-policy-v1\n"
 
 type catalogEnvelope struct {
-	Revision int64           `json:"revision"`
-	YAML     string          `json:"yaml"`
-	SHA256   string          `json:"sha256"`
-	Routing  json.RawMessage `json:"routing,omitempty"`
+	Revision      int64           `json:"revision"`
+	YAML          string          `json:"yaml"`
+	SHA256        string          `json:"sha256"`
+	UpdatedAt     int64           `json:"updatedAt"`
+	RoutingSHA256 string          `json:"routingSha256"`
+	Routing       json.RawMessage `json:"routing,omitempty"`
 }
 
 type policyEnvelope struct {
@@ -46,6 +49,7 @@ type policyEnvelope struct {
 	JSON      string `json:"json"`
 	SHA256    string `json:"sha256"`
 	Signature string `json:"signature"`
+	UpdatedAt int64  `json:"updatedAt"`
 }
 
 // Revision receipts are scoped to the authenticated account AND installation.
@@ -197,6 +201,7 @@ func verifyRevision(revision int64, hash string, previous *Revision) bool {
 func admitPolicy(raw []byte, previous *Revision, key ed25519.PublicKey) (Revision, error) {
 	var envelope policyEnvelope
 	if len(raw) > 2<<20 || strictJSON(raw, &envelope) != nil || len(envelope.JSON) > 1<<20 ||
+		envelope.UpdatedAt < 0 || envelope.UpdatedAt > 1<<53-1 ||
 		digest([]byte(envelope.JSON)) != envelope.SHA256 ||
 		!verifyRevision(envelope.Revision, envelope.SHA256, previous) {
 		return Revision{}, ErrPolicy
@@ -318,9 +323,58 @@ func validateYAML(n *yaml.Node, depth int) error {
 	return nil
 }
 
+// Cloud top-level DNS/rules are intentionally not imported. Node-level security
+// and transport requirements, however, must never disappear during decoding.
+func (n *node) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind != yaml.MappingNode {
+		return ErrCatalog
+	}
+	var kind string
+	for i := 0; i < len(value.Content); i += 2 {
+		if value.Content[i].Value == "type" {
+			kind = value.Content[i+1].Value
+		}
+	}
+	common := " name type server port sni servername network skip-cert-verify "
+	protocol := ""
+	switch kind {
+	case "vless":
+		protocol = " uuid tls flow reality-opts client-fingerprint "
+	case "hysteria2":
+		protocol = " password fingerprint "
+	default:
+		return ErrCapability
+	}
+	for i := 0; i < len(value.Content); i += 2 {
+		key, field := value.Content[i].Value, value.Content[i+1]
+		if key == "icon" { // display-only metadata; never enters the runtime
+			if field.Kind != yaml.ScalarNode || field.Tag != "!!str" {
+				return ErrCatalog
+			}
+			continue
+		}
+		if !slices.Contains(strings.Fields(common+protocol), key) {
+			return ErrCapability
+		}
+		if key == "reality-opts" {
+			if field.Kind != yaml.MappingNode {
+				return ErrCatalog
+			}
+			for j := 0; j < len(field.Content); j += 2 {
+				if field.Content[j].Value != "public-key" && field.Content[j].Value != "short-id" {
+					return ErrCapability
+				}
+			}
+		}
+	}
+	type plain node
+	return value.Decode((*plain)(n))
+}
+
 func admitCatalog(raw []byte, previous *Revision) ([]node, string, Revision, error) {
 	var envelope catalogEnvelope
 	if len(raw) > 10<<20 || strictJSON(raw, &envelope) != nil || len(envelope.YAML) > 8<<20 ||
+		envelope.UpdatedAt < 0 || envelope.UpdatedAt > 1<<53-1 ||
 		digest([]byte(envelope.YAML)) != envelope.SHA256 {
 		return nil, "", Revision{}, ErrCatalog
 	}
@@ -342,6 +396,11 @@ func admitCatalog(raw []byte, previous *Revision) ([]node, string, Revision, err
 	// Neither a home endpoint nor an absent list grants ordered/fallback routing.
 	if routing.Home != "" || len(routing.SOCKS) != 0 && string(routing.SOCKS) != "null" {
 		return nil, "", Revision{}, ErrCapability
+	}
+	// Match the actual Worker routingSha256 producer for the admitted no-home
+	// subset. Retain raw routing above as well: this digest is not a signature.
+	if digest([]byte("\n"+routing.Default+"\n")) != envelope.RoutingSHA256 {
+		return nil, "", Revision{}, ErrCatalog
 	}
 	decoder := yaml.NewDecoder(strings.NewReader(envelope.YAML))
 	var document yaml.Node

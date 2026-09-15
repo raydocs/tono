@@ -103,7 +103,10 @@ struct ProtectionMachine: Sendable {
     mutating func expire(now: Date = .now) {
         guard state == .protected, let observed = lastObservation else { return }
         if observed > now || now.timeIntervalSince(observed) > 10 {
-            fail(.tunnelUnavailable)
+            // Foreground after suspension is missing evidence, not proof of a
+            // failed tunnel. Preserve generation and replay fence for reobservation.
+            state = .recovering
+            blocker = .tunnelUnavailable
         }
     }
 

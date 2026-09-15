@@ -15,6 +15,12 @@ The owner authorized a distinct Apple build and minimal upstream patches.
 `tono_mobile`, Apple CGO1/c-archive, gomobile v0.1.12, arm64 device + simulator.
 The shared desktop PR #202 is not relabeled as an Apple artifact.
 
+The follow-up review fixes are source-tested against complete, freshly generated
+Worker envelopes (`updatedAt` and per-account `routingSha256` included), not
+hand-trimmed wire fixtures. Catalog discovery is independent of connection
+selection. Node-specific transport/TLS allowlists reject unknown requirements;
+only explicit display metadata (`icon`) may be ignored.
+
 All upstream changes are auditable, hash-locked patches in `patches/`:
 
 - **Linker:** mobile excludes the optional raw OOM-profile writer that imported
@@ -48,13 +54,17 @@ not a claim that the Apple linker/Swift importer has executed.
   Ed25519 signature key/context; public IPv4 endpoints and Reality identity checks.
   HY2 must share its VLESS node's address and account credential and retain DER.
 - Raw cloud YAML DNS/rules never become runtime. The emitted config uses proxy
-  DoH, inbound fake IPv4, empty AAAA, dual-family capture, IPv6 rejection, DNS
+  DoH with real IPv4 answers, empty AAAA, dual-family capture, IPv6 rejection, DNS
   interception before generic UDP rejection. There is no host DNS fallback,
   controller listener, arbitrary imported config or persistent core cache.
+  No volatile FakeIP mapping can reassign cached application addresses on renewal
+  or process restart. Legacy synthetic destinations in `198.18.0.0/15` refuse
+  (after DNS interception); an upgrade may require application DNS-cache expiry.
 - Manual selection is persisted metadata. It overrides the explicit cloud
   default; disappearance/failure never selects another city. The managed list
-  is exposed only after complete admission. Changing selection pauses first;
-  the user connects again. Automatic requires an explicit cloud default.
+  is exposed after complete admission even without a cloud default. Changing
+  selection pauses first; the user connects again. Automatic still requires an
+  explicit cloud default; inventory visibility does not grant fallback authority.
 - The app-only refresh token never enters the App Group or extension. A separate
   `$(AppIdentifierPrefix)com.ninx.tono.tunnel` Keychain group grants only the
   access token, account/device scope, generation and selected node. The extension
@@ -65,7 +75,7 @@ not a claim that the Apple linker/Swift importer has executed.
   mismatched accounts, stale local grants, unavailable storage or unsupported
   policy. Bounded streaming avoids an unbounded URLSession body in NE memory.
 - Account/device watermarks persist **before** network settings/core startup.
-  Rollback, same-revision changed bytes (including unhashed routing), corrupted
+  Rollback, same-revision changed bytes (including raw routing), corrupted
   and duplicate receipts refuse. Logout retains anti-rollback history but deletes
   the grant. A revision is not a signed expiration time.
 - Renewal currently closes/recreates the core every 120 seconds after fresh
@@ -79,8 +89,14 @@ not a claim that the Apple linker/Swift importer has executed.
   no older than ten seconds. No promotion from NEVPNStatus alone. Queue epochs
   fence old output/probe callbacks; at most one NE read is pending across reloads.
 - On Demand saves/reloads the strict profile, then starts. Pause deletes the
-  extension grant and disables/saves/reloads the profile before stop. Extension
-  failure cancels the tunnel; OS reconnect may retry but must pass fresh admission.
+  extension grant and disables/saves/reloads the profile before stop. A failed
+  grant revoke still attempts profile disable/stop. Forget, cleanup retry and
+  terminal auth loss retain durable logout intent until both credential domains
+  and profile quiescence complete. An active manager is inspected before grant
+  replacement; Connect reobserves its authorized generation. Missing foreground
+  health withdraws Protected without terminalizing that generation; genuinely
+  failed/paused generations remain fenced. Extension failure cancels the tunnel;
+  OS reconnect may retry but must pass fresh admission.
   App relaunch reattaches to an authorized generation without trusting cached
   Protected state. Missing/mismatched embedded identity refuses before install.
 
@@ -90,12 +106,17 @@ refuse. Current cloud routing has no ordered backup list or entry-fallback grant
 the standalone residential state-machine tests are not runtime home support.
 An expired extension access token requires reopening the app for refresh; the
 extension cannot refresh indefinitely with the current least-privilege grant.
+The provider owns one live session at a time; concurrent libbox instances and
+seamless in-process handoff are not qualified. Do not infer multi-instance safety
+from the sequential renewal/restart tests.
 These are genuine remaining functional limits, not Apple execution evidence and
 not reasons to silently drop policy or share refresh credentials.
 
 ## Reproduce all portable checks
 
-Use clean exact sing-box and sing-tun checkouts and Go1.27.1. Populate the
+Use clean exact sing-box and sing-tun checkouts, Go1.27.1 and Node24.18.0. Install
+Worker test dependencies with `npm --prefix services/control-plane ci` from its
+lockfile before either the portable or Apple build. Populate the
 checksum-locked module cache with `go mod download` in sing-box first. The Orb's
 verified Linux Go archive SHA256 was
 `63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445`.
@@ -114,6 +135,13 @@ The builder archives clean refs, checks module/patch hashes, applies patches onl
 to a disposable stage, runs real parser, packet-flow, QUIC and receipt/expiry
 tests, generates/compares Objective-C ABI, links and executes a libbox-dependent
 binary and compares repeat-build hashes. Dependencies cannot download or float.
+Unified-diff context whitespace is preserved verbatim in the upstream patches;
+path-scoped Git attributes distinguish it from source whitespace, while the
+builder checks actual source additions with `git apply --whitespace=error-all`.
+The real Worker producers encrypt/decrypt disposable rows and serialize complete
+envelopes into the Go test stage. A packet-level regression uses local TLS DoH
+through a SOCKS witness and verifies cached TCP destinations across recreation
+and a fresh subprocess, including rejection of legacy synthetic addresses.
 It writes source/toolchain/ABI/output identity and license/module receipts.
 `check-runtime.py` forwards to these stronger checks; `--tun-source` is now required
 and linking is mandatory. No test is replaced with a stock archive-only success.
@@ -126,7 +154,8 @@ review/build channel. A self-declared manifest is not provenance or signing.
 Linux tests do **not** execute Swift, Apple SDK compilation/linking, NE routing,
 Keychain entitlements, On Demand, native UI/VoiceOver, or device memory/energy.
 No native screenshot is available; preview art is not a rendered-app check.
-The XCTest/UI tests remain necessary. The separate CI workflow previously failed
+The XCTest/UI tests include failed shared-grant revoke/retry, active Connect and
+foreground reattachment and remain unexecuted here. The separate CI workflow failed
 upload for missing GitHub `workflows` permission; use the latest preserved patch,
 not the old archive-only recipe. Existing Services CI is not iOS evidence.
 

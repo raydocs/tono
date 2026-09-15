@@ -24,7 +24,7 @@ def verify(directory, expected, require_apple):
     if value["pins"] != json.loads((ROOT / "Configuration/core-requirement.json").read_text()):
         raise SystemExit("source pins changed")
     sources = {str(p.relative_to(ROOT)) for folder in ("Runtime", "Mobile") for p in (ROOT / folder).glob("*.go")}
-    sources.update(["tools/build-mobile.py", "Mobile/ABI/Tonomobile.objc.h"])
+    sources.update(["tools/build-mobile.py", "tools/worker-runtime-fixture.mjs", "Mobile/ABI/Tonomobile.objc.h"])
     if set(value["inputs"]) != sources:
         raise SystemExit("source inventory mismatch")
     for name, expected in value["inputs"].items():

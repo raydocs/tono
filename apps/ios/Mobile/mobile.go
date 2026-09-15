@@ -34,14 +34,35 @@ func (a *Admission) Locations() string {
 	return string(b)
 }
 
-func Prepare(catalog, policy []byte, selected, previous string) (*Admission, error) {
-	var watermark *tonoios.Watermark
+func decodePrevious(previous string) (*tonoios.Watermark, error) {
 	if previous != "" {
-		var err error
-		watermark, err = tonoios.DecodeWatermark([]byte(previous))
+		watermark, err := tonoios.DecodeWatermark([]byte(previous))
 		if err != nil {
 			return nil, errors.New("TONO_WATERMARK_INVALID")
 		}
+		return watermark, nil
+	}
+	return nil, nil
+}
+
+// Discovery admits all bytes without choosing a route or creating a session.
+func Locations(catalog, policy []byte, previous string) (string, error) {
+	watermark, err := decodePrevious(previous)
+	if err != nil {
+		return "", err
+	}
+	inventory, err := tonoios.Discover(catalog, policy, watermark)
+	if err != nil {
+		return "", err
+	}
+	data, err := json.Marshal(inventory.Locations())
+	return string(data), err
+}
+
+func Prepare(catalog, policy []byte, selected, previous string) (*Admission, error) {
+	watermark, err := decodePrevious(previous)
+	if err != nil {
+		return nil, err
 	}
 	draft, err := tonoios.Compile(catalog, policy, selected, watermark)
 	if err != nil {
