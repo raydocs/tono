@@ -26,7 +26,7 @@ export function AdoptionMatrix({ matrix }: { matrix: AdoptionMatrixDto }) {
   }
 
   return (
-    <div className="raised overflow-x-auto rounded-[10px] bg-[var(--surface)]">
+    <div className="clients-matrix raised overflow-x-auto rounded-[10px] bg-[var(--surface)]">
       <table className="w-full table-fixed border-collapse text-body">
         <thead className="data-head bg-[var(--surface)]">
           <tr className="data-row border-b border-[var(--hairline)]">

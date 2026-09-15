@@ -1,0 +1,40 @@
+/* Settings assets and accounts: stock, lines, vendors, allowlist.
+ *
+ * Every rule carries `.settings-page` plus its own page hook — a floor
+ * derived for the stock table must not resize the ledger or the catalog.
+ * Tables scroll inside their own box; floors are derived per table from
+ * the fixed columns plus a readable width for the flexible identity
+ * column, never copied from another page's number. No loads, writes,
+ * filters, drawers or copy move. */
+
+/* Stock: address 176 + status 72 + probe 96 + bound 112 + actions 148 =
+   604 fixed; the line name keeps 180 of its own. */
+.settings-page .settings-homeinventory .settings-inventory-table table {
+  min-width: 784px;
+}
+
+/* Assets: 64 + 132 + 124 + 100 + 110 + 92 = 622 fixed; the line keeps 180. */
+.settings-page .settings-homelines .settings-homelines-table table {
+  min-width: 802px;
+}
+
+/* Vendors: 132 + 96 + 168 + 92 + 76 = 564 fixed; the label keeps 160. */
+.settings-page .settings-providers .settings-providers-table table {
+  min-width: 724px;
+}
+
+/* Allowlist: 132 + 84 = 216 fixed; the address keeps 200. */
+.settings-page .settings-allowlist .settings-allowlist-table table {
+  min-width: 416px;
+}
+
+@media (max-width: 640px) {
+  /* Row and toolbar actions are thumb targets on a phone, sized locally —
+     the shared Action and the portaled drawers are untouched. */
+  .settings-page .settings-homeinventory .ops-action,
+  .settings-page .settings-homelines .ops-action,
+  .settings-page .settings-providers .ops-action,
+  .settings-page .settings-allowlist .ops-action {
+    min-height: 44px;
+  }
+}

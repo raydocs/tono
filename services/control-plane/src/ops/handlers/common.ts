@@ -20,7 +20,7 @@ import {
   type Measured,
   type OpsRole,
 } from '../contract';
-import { assertList } from '../contract';
+import { assertList, type CustomerListCounts } from '../contract';
 
 export const PAGE = { default: 50, max: 200 };
 export const TOKEN_FRESH_SEC = 15 * 60;
@@ -124,10 +124,11 @@ export function listJson<T>(
   etag: string,
   itemChecker: (value: unknown, path?: string) => T,
   total?: number,
+  counts?: CustomerListCounts,
 ): Response {
   const hit = notModified(req, etag);
   if (hit) return hit;
-  const body = listEnvelope(items, nextCursor, updatedAt, total);
+  const body = listEnvelope(items, nextCursor, updatedAt, total, counts);
   check(e, () => {
     assertList(body, itemChecker);
   });

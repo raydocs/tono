@@ -78,6 +78,7 @@ export function LedgerTable({
         state={state}
         emptyMessage={words.empty}
         errorMessage={message}
+        className="settings-ledger-table"
       />
 
       <ConfirmDialog

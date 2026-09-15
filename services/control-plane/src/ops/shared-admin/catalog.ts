@@ -21,6 +21,7 @@ import {
   recordProductEvent,
   assignedProductForUser,
 } from '../../product-account';
+import { writeChangeReceipt } from '../change-receipts';
 import { rejectUnexpectedKeys, body, email } from '../../request';
 
 export async function catalogResource(
@@ -134,6 +135,15 @@ export async function catalogResource(
       String(revision),
       `published r${currentRevision} → r${revision} (${digest.slice(0, 16)})`,
     );
+    await writeChangeReceipt(e.DB, {
+      kind: 'catalog_publish',
+      subjectType: 'catalog',
+      subjectId: 'managed_exit_catalog',
+      before: { revision: currentRevision },
+      after: { revision, sha256: digest },
+      actor: actorEmail ?? null,
+      at: t,
+    });
     return Response.json({ revision, sha256: digest, updatedAt: t });
   }
   return null;

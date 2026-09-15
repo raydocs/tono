@@ -15,6 +15,7 @@ import {
   loadHomeBinding,
   upsertHomeBinding,
   parseHomeLine,
+  findSocks5Home,
 } from '../../home';
 import {
   PRODUCT_CLAUDE,
@@ -209,19 +210,40 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
     accountRefField(b.accountRef);
   }
   if (b.productAccountId !== undefined && b.productAccountId !== null && b.productAccountId !== '') {
-    str(b.productAccountId, 'productAccountId', 1, 100);
+    const productAccountId = str(b.productAccountId, 'productAccountId', 1, 100);
+    const pooled = await e.DB.prepare(
+      'SELECT id FROM product_accounts WHERE id = ?',
+    ).bind(productAccountId).first<Row>();
+    if (!pooled) throw new ApiError(404, 'NOT_FOUND', 'Product account not found');
   }
   if (b.homeExitId !== undefined && b.homeExitId !== null && b.homeExitId !== '') {
-    str(b.homeExitId, 'homeExitId', 1, 100);
+    const homeExitId = str(b.homeExitId, 'homeExitId', 1, 100);
+    const home = await e.DB.prepare(
+      'SELECT id FROM home_exits WHERE id = ?',
+    ).bind(homeExitId).first<Row>();
+    if (!home) {
+      throw new ApiError(400, 'HOME_ASSIGN_FAILED', 'Could not assign the pasted home line');
+    }
   }
-  if (b.line !== undefined && b.line !== null && b.line !== '') {
-    parseHomeLine(b.line);
+  const parsedLine = b.line !== undefined && b.line !== null && b.line !== ''
+    ? parseHomeLine(b.line)
+    : null;
+  const user = await e.DB.prepare('SELECT * FROM users WHERE email = ?').bind(address).first<Row>();
+  if (parsedLine) {
+    const home = await findSocks5Home(e, parsedLine.host, parsedLine.port, parsedLine.username);
+    if (home) {
+      const owner = await e.DB.prepare(
+        'SELECT user_id FROM user_home_bindings WHERE home_exit_id = ?',
+      ).bind(home.id).first<Row>();
+      if (owner && (!user || String(owner.user_id) !== String(user.id))) {
+        throw new ApiError(400, 'HOME_ASSIGN_FAILED', 'Could not assign the pasted home line');
+      }
+    }
   }
   const createdAt = now();
   await e.DB.prepare(
     'INSERT OR IGNORE INTO signup_allowlist(email, created_at) VALUES(?, ?)',
   ).bind(address, createdAt).run();
-  const user = await e.DB.prepare('SELECT * FROM users WHERE email = ?').bind(address).first<Row>();
   const incomplete: string[] = [];
   if (!user) incomplete.push('user_not_registered');
   const storeProfile = b.notes !== undefined || b.contact !== undefined || b.wechatId !== undefined;

@@ -9,6 +9,7 @@ import { formatBytesMeasured, formatDate } from '@/lib/display';
 import { cycleWord } from '@/lib/settings';
 import { shown } from '@/lib/sources';
 import { useResource } from '@/lib/use-resource';
+import '@/styles/settings-assets.css';
 import { HomeLineDrawer } from './HomeLineDrawer';
 import { ConfirmDialog, Toolbar } from './form';
 import { useWrite } from './use-write';
@@ -44,7 +45,7 @@ export function HomeLines() {
       : rows.length === 0 ? 'empty' : 'ready';
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="settings-homelines flex flex-col gap-8">
       <div className="flex flex-col gap-3">
         <Toolbar aside={<Action primary onClick={() => setEditing('new')}>{words.newLine}</Action>}>
           {lines.status === 'ready' ? <span>{words.count(rows.length)}</span> : null}
@@ -60,6 +61,7 @@ export function HomeLines() {
           state={state}
           emptyMessage={words.empty}
           errorMessage={lines.status === 'error' ? lines.message : undefined}
+          className="settings-homelines-table"
         />
       </div>
 

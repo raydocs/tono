@@ -209,6 +209,20 @@ export const todayCopy = {
     alert: '推送',
     resolved: '已恢复',
   } as const,
+  receipt: '回执',
+  receiptAction: {
+    catalog_retire: '下架了',
+    catalog_relist: '已重新上架',
+    catalog_publish: '已发布目录',
+    policy_publish: '已发布分流',
+    identity_sync: '已同步身份',
+    xray_restart: '已重启服务',
+  } as const,
+  receiptCatalogRev: (from: number, to: number) => `目录 ${from} → ${to}`,
+  receiptPolicyRev: (from: number, to: number) => `分流 ${from} → ${to}`,
+  receiptClientAcks: (count: number) => `${count} 位客户端已刷新`,
+  receiptSentence: (action: string, revText?: string | null, acksText?: string | null) =>
+    [action, revText, acksText].filter(Boolean).join(' · '),
   deliveryStatus: {
     pending: '待发',
     sent: '已发',

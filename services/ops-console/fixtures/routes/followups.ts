@@ -257,10 +257,27 @@ function incidentsNow(file: OpsFile, store: Store): Array<Record<string, unknown
 
 function withHandling(row: Record<string, unknown>, store: Store): Record<string, unknown> {
   const found = store.handling.get(String(row.id));
+  const receipts = row.receipts ?? (String(row.id) === 'inc-node-la' ? [
+    {
+      id: 'rcpt-inc-1',
+      kind: 'catalog_retire',
+      subjectType: 'node',
+      subjectId: 'Tokyo · Kite',
+      incidentId: String(row.id),
+      jobId: 'job-retire-1',
+      before: { revision: 48, listed: ['Tokyo · Kite'] },
+      after: { revision: 49 },
+      clientAcks: 12,
+      rollbackOf: null,
+      actor: 'operator@example.com',
+      at: (typeof row.openedAt === 'number' ? row.openedAt : nowSec()) + 60,
+    },
+  ] : undefined);
   return {
     ...row,
     closure: found?.closure ?? null,
     nextCheckAt: found?.nextCheckAt ?? null,
+    ...(receipts ? { receipts } : {}),
   };
 }
 

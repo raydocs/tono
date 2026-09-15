@@ -4,7 +4,9 @@
 import { ApiError } from '../errors';
 import { type Env, id } from '../env';
 import { completeJob, leaseJobs, type NodeJob } from './jobs';
-import { operationsRetirePreview, relistFleetNode, retireFleetNode } from './reads/fleet';
+import { managedCatalogTemplate, operationsRetirePreview, relistFleetNode, retireFleetNode } from './reads/fleet';
+import { splitManagedCatalogProxies } from '../catalog-yaml';
+import { writeChangeReceipt } from './change-receipts';
 import {
   finishDrainedRetires,
   openOrReuseRetirePending,
@@ -71,6 +73,8 @@ async function executeCatalogRetire(
     : 'catalog_retire';
   const preview = await operationsRetirePreview(e, job.nodeName);
   let revision = preview.currentRevision;
+  const catalogTemplate = await managedCatalogTemplate(e);
+  const listedBefore = splitManagedCatalogProxies(catalogTemplate.yaml).items.map((i) => i.name);
   if (preview.canRetire) {
     const result = await retireFleetNode(e, job.requestedBy, job.nodeName, {
       expectedRevision: preview.expectedRevision,
@@ -78,6 +82,17 @@ async function executeCatalogRetire(
       reason,
     }, undefined, nowSec);
     revision = result.revision;
+    await writeChangeReceipt(e.DB, {
+      kind: 'catalog_retire',
+      subjectType: 'node',
+      subjectId: job.nodeName,
+      incidentId: job.incidentId,
+      jobId: job.id,
+      before: { revision: preview.currentRevision, listed: listedBefore },
+      after: { revision },
+      actor: job.requestedBy,
+      at: nowSec,
+    });
   } else if (preview.changes.catalogEntryRemoved) {
     throw new ApiError(422, 'RETIRE_UNSAFE', preview.warnings[0] ?? 'Node cannot be retired safely');
   }
@@ -100,10 +115,24 @@ async function executeCatalogRelist(e: Env, job: NodeJob): Promise<{ summary: st
   const expectedRevision = Number.isSafeInteger(job.params.expectedRevision)
     ? Number(job.params.expectedRevision)
     : undefined;
+  const catalogTemplate = await managedCatalogTemplate(e);
+  const listedBefore = splitManagedCatalogProxies(catalogTemplate.yaml).items.map((i) => i.name);
   const result = await relistFleetNode(e, job.requestedBy, job.nodeName, {
     ...(expectedRevision != null ? { expectedRevision } : {}),
     ...(block ? { block } : {}),
   });
+  if (!result.alreadyListed) {
+    await writeChangeReceipt(e.DB, {
+      kind: 'catalog_relist',
+      subjectType: 'node',
+      subjectId: job.nodeName,
+      incidentId: job.incidentId,
+      jobId: job.id,
+      before: { revision: result.previousRevision, listed: listedBefore },
+      after: { revision: result.revision },
+      actor: job.requestedBy,
+    });
+  }
   return {
     summary: result.alreadyListed ? `already listed ${job.nodeName}` : `relisted ${job.nodeName}`,
     resultJson: { revision: result.revision, alreadyListed: result.alreadyListed },

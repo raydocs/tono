@@ -15,7 +15,10 @@ import { retainTrafficDaily } from './traffic-parse';
 import { rollupDirectCandidates30d } from './candidates-rollup';
 import { planAndSendAlerts, runVerdictPass } from './verdict-run';
 import { retainFollowups } from './handlers/followups';
+import { closeExpiredLogWindows } from './shared-admin/diagnostics-logs';
 import { fetchAndStoreFxRates } from './fx';
+import { ensureNodeIdentities } from './node-identity';
+import { rollupDailySlo } from './slo-rollup';
 
 const DAY = 86_400;
 const HOUR = 3_600;
@@ -48,10 +51,11 @@ export const OPS_CRON_STEPS = [
   // append your entries inside your block
 
   // dept:b
+  // retention closes expired diagnostics_log_access rows (closeExpiredLogWindows)
   // append your entries inside your block
 
   // dept:c
-  // append your entries inside your block
+  // identity backfill runs inside the existing project step (ensureNodeIdentities)
 
   // dept:d
   // append your entries inside your block
@@ -194,14 +198,20 @@ async function runRetention(db: D1Database, nowSec: number): Promise<void> {
   await retainHomeLineUsage(db, nowSec, 400, RETAIN_LIMIT);
   await retainClientVersionDaily(db, nowSec, 400, RETAIN_LIMIT);
   await retainLimited(db, 'ops_incident_events', 'at', nowSec - 180 * DAY);
+  await retainLimited(db, 'ops_daily_slo', 'day_at', nowSec - 400 * DAY);
   await retainLimited(db, 'ops_node_jobs', 'created_at', nowSec - 90 * DAY);
   await retainLimited(db, 'node_traffic_cycle_samples', 'at', nowSec - 60 * DAY);
   await retainFollowups(db, nowSec, RETAIN_LIMIT);
+  await closeExpiredLogWindows(db, nowSec, RETAIN_LIMIT);
 }
 
 export async function runOpsCron(e: Env, nowSec: number): Promise<OpsCronReport> {
   const flatten = await step('flatten', { windows: 0, rows: 0 }, () => flattenBacklog(e.DB, nowSec, FLATTEN_WINDOWS_PER_TICK));
-  const project = await step('project', { windows: 0, hours: 0 }, () => projectBacklog(e.DB, nowSec, PROJECT_BACKLOG_LIMIT));
+  const project = await step('project', { windows: 0, hours: 0 }, async () => {
+    const result = await projectBacklog(e.DB, nowSec, PROJECT_BACKLOG_LIMIT);
+    await ensureNodeIdentities(e, nowSec);
+    return result;
+  });
 
   let alertTransitions: Awaited<ReturnType<typeof runVerdictPass>>['transitions'] = [];
   const verdicts = await step('verdicts', { nodes: 0, transitions: 0 }, async () => {
@@ -242,6 +252,7 @@ export async function runOpsCron(e: Env, nowSec: number): Promise<OpsCronReport>
     await rollupConnectionDaily(e.DB, yesterday);
     await rollupClientVersionsDaily(e.DB, yesterday, ranToday);
     await rollupDirectCandidates30d(e.DB, nowSec).catch((error) => console.error('ops cron: direct-candidate rollup failed', error));
+    await rollupDailySlo(e.DB, yesterday);
     await markRun(e.DB, 'daily', nowSec);
     return { ran: true };
   });

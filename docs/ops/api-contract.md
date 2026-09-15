@@ -106,10 +106,23 @@
 |---|---|
 | `GET system/health` | 可选 `coverage`：`CoverageDto`（`nodesListed`；`nodesSweptFresh` = 目录节点大陆扫描行 ≤26h；`nodesWithAgent` = 目录节点 agent 样本 ≤15min；`customersActive`；`customersReportedFresh` = `ops_customer_status.last_seen_at` ≤40min；`asOfSec`）。不改变 `ok` |
 | `POST replay` | `ReplayDto { rulesVersion, items: ReplayRowDto[], skipped, updatedAt }`。Body `{ since, until?, node? }`（unix 秒）。只读：用当前 `VERDICT_RULES_VERSION` 重判 `ops_node_status_history.evidence_json`，不走迟滞。上限 2000 行；缺证据 / 截断计入 `skipped`。`ReplayRowDto { at, node, wasVerdict, nowVerdict, wouldOpenKind, wouldOpenSeverity, differs }` |
+| `GET nodes/{name}/receipts?limit=` | `ListDto<ChangeReceiptDto>`。按时间倒序。`ChangeReceiptDto { id, kind, subjectType, subjectId, incidentId, jobId, before: unknown, after: unknown, clientAcks: number, rollbackOf, actor, at }` |
+| `GET slo` | `SloResponseDto { items: SloRowDto[], summary: SloSummaryDto, nextCursor, total, updatedAt }`。Query `?range=7d|30d&platform&carrier&node`。`SloRowDto { dayAt, platform, carrier, node, attempts, successes, p50Ms, verifiedOutageMin, unmeasuredMin, rulesVersion }`，`summary { successRate, p50Ms, verifiedOutageMin, unmeasuredMin, coverage }`。 |
 
 ### 部门 B
 
+| 路由 | 返回 |
+|---|---|
+| `GET customers` | 列表信封加可选 `counts?: { byVerdict: Record<CustomerVerdict, number>; byStage: Record<FunnelStage, number> }`（全量，各 1 条 GROUP BY；没有 `ops_customer_status` 行的用户按漏斗计入 `never_used`）。`total` 为带同一 `q`/`since` 条件的 `COUNT(*)`。分页在 SQL：`WHERE (email, id) > (?, ?)`，再按本页 `user_id IN (…)` 批量读状态 / 设备数 / 服务家族 / 漏斗事实。 |
+| `GET customers/{id}` | 可选 `logWindows?: { id, openedBy, openedAt, expiresAt, reads }[]`。开 / 读 / 关写 `ops_audit` `diagnostics.window.open\|read\|close`（target 为用户 id，summary 为窗口 id 与对象 key）；cron `retention` 把 `expires_at < now` 的窗口关掉并审计 `close(expired)` |
+
 ### 部门 C
+
+| 路由 | 返回 |
+|---|---|
+| `GET nodes` / `GET nodes/{name}` | 可选 `nodeId`、`displayName`、`failureDomain`、`replaces`。展示名只影响 UI；`catalog_name` / `node_name` 仍是所有表的键 |
+| `GET nodes/{name}` | `facts.capacityUsers?`：资料里登记的可坐人数。有值时验收单 `capacity`：占用 < 容量为 pass，否则 fail；无值仍 unknown |
+| `PATCH nodes/{name}/profile` | 加可选 `capacityUsers`（正整数）、`displayName`（≤60）、`failureDomain`（≤60，建议 `商家/机房`）、`replaces`（必须是已有 catalog_name，不能是自己） |
 
 ### 部门 D
 

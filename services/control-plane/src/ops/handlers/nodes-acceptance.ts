@@ -159,7 +159,7 @@ export async function nodeAcceptance(
     forwardItem(forward),
     errorsItem(errors.rows, jobs.digestAt, t),
     quotaItem(quota.dto, quota.asOf),
-    capacityItem(occ),
+    capacityItem(occ, facts.capacityUsers ?? null),
     standbyItem(facts.region, catalog.siblings, catalog.names, t),
   ];
 

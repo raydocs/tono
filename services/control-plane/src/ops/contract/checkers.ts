@@ -20,8 +20,8 @@
 // stray `import type { Env }` would drag the whole Worker into a browser build.
 
 import { ApiError } from '../../errors';
-import type { Measured, SourceId } from './vocabulary';
-import { SOURCE_IDS } from './vocabulary';
+import type { CustomerVerdict, FunnelStage, Measured, SourceId } from './vocabulary';
+import { CUSTOMER_VERDICTS, FUNNEL_STAGES, SOURCE_IDS } from './vocabulary';
 
 /** Every drift looks the same from outside: 500, and which field lied. */
 export function violation(field: string): never {
@@ -206,12 +206,42 @@ export function measuredArray<T>(item: (value: unknown, path: string) => T) {
   };
 }
 
+/** Fleet-wide counts on `GET customers`. Absent on every other list. */
+export interface CustomerListCounts {
+  byVerdict: Record<CustomerVerdict, number>;
+  byStage: Record<FunnelStage, number>;
+}
+
 /** The list envelope every collection endpoint returns. */
 export interface ListDto<T> {
   items: T[];
   nextCursor: string | null;
   total?: number;
   updatedAt: number;
+  counts?: CustomerListCounts;
+}
+
+function assertCountRecord<T extends string>(
+  value: unknown,
+  path: string,
+  keys: readonly T[],
+): Record<T, number> {
+  const row = fields(value, path, keys);
+  const out = {} as Record<T, number>;
+  for (const key of keys) {
+    const n = int(row, path, key);
+    if (n < 0) violation(`${path}.${key}`);
+    out[key] = n;
+  }
+  return out;
+}
+
+export function assertCustomerListCounts(value: unknown, path = 'counts'): CustomerListCounts {
+  const row = fields(value, path, ['byVerdict', 'byStage']);
+  return {
+    byVerdict: assertCountRecord<CustomerVerdict>(row.byVerdict, `${path}.byVerdict`, CUSTOMER_VERDICTS),
+    byStage: assertCountRecord<FunnelStage>(row.byStage, `${path}.byStage`, FUNNEL_STAGES),
+  };
 }
 
 /**
@@ -220,14 +250,15 @@ export interface ListDto<T> {
  * `total` is optional because a few endpoints cannot count cheaply, but when
  * present it must be a real count — an absent key and a `null` mean different
  * things to the console ("we don't count this" vs. drift), so `null` is
- * rejected.
+ * rejected. `counts` is the same kind of optional: only `GET customers` sends
+ * it, and every other list omits the key.
  */
 export function assertList<T>(
   value: unknown,
   itemChecker: (value: unknown, path?: string) => T,
   path = 'list',
 ): ListDto<T> {
-  const row = fields(value, path, ['items', 'nextCursor', 'total', 'updatedAt']);
+  const row = fields(value, path, ['items', 'nextCursor', 'total', 'updatedAt', 'counts']);
   const items = arrayOf(row, path, 'items', (entry, at) => itemChecker(entry, at));
   const envelope: ListDto<T> = {
     items,
@@ -235,5 +266,6 @@ export function assertList<T>(
     updatedAt: int(row, path, 'updatedAt'),
   };
   if ('total' in row) envelope.total = int(row, path, 'total');
+  if ('counts' in row) envelope.counts = assertCustomerListCounts(row.counts, `${path}.counts`);
   return envelope;
 }

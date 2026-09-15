@@ -9,6 +9,7 @@ import { copy } from '@/copy/copy';
 import { settingsApi, type ProviderAccountInput } from '@/lib/api-settings';
 import { formatCount } from '@/lib/display';
 import { useResource } from '@/lib/use-resource';
+import '@/styles/settings-assets.css';
 import { ConfirmDialog, FieldGrid, FormFooter, SelectField, TextField, Toolbar } from './form';
 import { useWrite } from './use-write';
 
@@ -61,7 +62,7 @@ export function Providers() {
       : rows.length === 0 ? 'empty' : 'ready';
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="settings-providers flex flex-col gap-8">
       <div className="flex flex-col gap-3">
         <Toolbar aside={<Action primary onClick={() => setEditing('new')}>{words.newAccount}</Action>}>
           {accounts.status === 'ready' ? <span>{words.count(rows.length)}</span> : null}
@@ -77,6 +78,7 @@ export function Providers() {
           state={state}
           emptyMessage={words.empty}
           errorMessage={accounts.status === 'error' ? accounts.message : undefined}
+          className="settings-providers-table"
         />
       </div>
 

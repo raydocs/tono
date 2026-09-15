@@ -14,6 +14,7 @@ import {
 import {
   writeOpsAudit,
 } from '../../product-account';
+import { writeChangeReceipt } from '../change-receipts';
 import {
   canonicalTrafficPolicy,
   publicTrafficPolicy,
@@ -105,6 +106,15 @@ export async function trafficPolicyResource(
       String(revision),
       `published r${currentRevision} → r${revision} (${digest.slice(0, 16)})`,
     );
+    await writeChangeReceipt(e.DB, {
+      kind: 'policy_publish',
+      subjectType: 'policy',
+      subjectId: 'managed_traffic_policy',
+      before: { revision: currentRevision },
+      after: { revision, sha256: digest },
+      actor: actorEmail ?? null,
+      at: t,
+    });
     return Response.json({
       revision, json, sha256: digest, updatedAt: t,
       ...(signature ? { signature } : {}),

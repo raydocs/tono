@@ -273,20 +273,31 @@ export function quotaItem(quota: NodeQuotaDto, asOf: number | null): AcceptanceI
 /**
  * How much room is left on the machine.
  *
- * Nothing writes down what this box can hold — there is no ceiling on the
- * profile — so the honest answer is `unknown` with the live count beside it,
- * never a green tick derived from a number nobody has ever set. It is one of
- * the two items that may stay unknown and still let a node be sold.
+ * A typed-in ceiling is the only number that can turn this green or red:
+ * occupancy below it is `pass`, occupancy at or above it is `fail`. No
+ * ceiling still means `unknown` with the live count beside it — one of the
+ * two items that may stay unknown and still let a node be sold.
  */
-export function capacityItem(occ: { rows: NodeOccupantDto[]; asOf: number | null }): AcceptanceItemDto {
+export function capacityItem(
+  occ: { rows: NodeOccupantDto[]; asOf: number | null },
+  capacity: number | null = null,
+): AcceptanceItemDto {
   const key = 'capacity';
   const label = '容量';
+  const n = occ.rows.length;
+  if (capacity != null) {
+    const state = n < capacity ? 'pass' : 'fail';
+    const evidence = state === 'pass'
+      ? `现在 ${n} 人在用，坐得下 ${capacity} 人`
+      : `现在 ${n} 人在用，坐不下 ${capacity} 人`;
+    return item(key, label, state, evidence, occ.asOf, 'profile');
+  }
   if (occ.asOf === null) {
     return item(key, label, 'unknown', '还没登记这台机器坐得下多少人，现在也没测到有人在用', null, 'profile');
   }
   return item(
     key, label, 'unknown',
-    `现在 ${occ.rows.length} 人在用，但还没登记这台机器坐得下多少人`,
+    `现在 ${n} 人在用，但还没登记这台机器坐得下多少人`,
     occ.asOf, 'profile',
   );
 }

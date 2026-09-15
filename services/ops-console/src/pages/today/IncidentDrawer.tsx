@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { CustomerSummaryDto, IncidentDto } from '@contract';
+import type { ChangeReceiptDto, CustomerSummaryDto, IncidentDto, IncidentEventDto } from '@contract';
 import { Action, ActionRow } from '@/components/ops/Action';
 import { DetailDrawer } from '@/components/ops/DetailDrawer';
 import { Empty } from '@/components/ops/Empty';
@@ -12,6 +12,7 @@ import { formatDurationSince, formatWhen, formatWhenAgo } from '@/lib/display';
 import { closeIncident, openCustomer } from '@/lib/hash-route';
 import { childrenOf, evidenceSentence, incidentSubject } from '@/lib/incidents';
 import { usePrivacy } from '@/lib/privacy';
+import { receiptSentence } from '@/lib/receipts';
 import { sourceWord } from '@/lib/sources';
 import { useIsPhone } from '@/lib/use-phone';
 import { useResource } from '@/lib/use-resource';
@@ -202,14 +203,14 @@ export function IncidentDrawer({
           </Block>
 
           <Block title={copy.incidentDrawer.timeline}>
-            {detail.data.events.items.map((row) => (
+            {timelineRows(detail.data.events.items, incident.receipts).map((row) => (
               <div key={row.id} className="flex items-baseline gap-3 py-1">
                 <span className="w-24 shrink-0 font-mono text-micro text-[var(--muted-foreground)]" title={formatWhen(row.at)}>
                   {formatWhenAgo(row.at)}
                 </span>
-                <span className="shrink-0 text-body">{copy.incidentEvent[row.type]}</span>
+                <span className="shrink-0 text-body">{row.label}</span>
                 <span className="min-w-0 truncate text-body text-[var(--muted-foreground)]">
-                  {row.note ?? row.actor ?? ''}
+                  {row.detail}
                 </span>
               </div>
             ))}
@@ -247,3 +248,29 @@ function subject(
 ): string {
   return incidentSubject(incident, customers, mask) ?? copy.missing;
 }
+
+type TimelineRow = { id: string; at: number; label: string; detail: string };
+
+function timelineRows(
+  events: readonly IncidentEventDto[],
+  receipts?: readonly ChangeReceiptDto[],
+): TimelineRow[] {
+  const rows: TimelineRow[] = events.map((ev) => ({
+    id: ev.id,
+    at: ev.at,
+    label: copy.incidentEvent[ev.type] ?? ev.type,
+    detail: ev.note ?? ev.actor ?? '',
+  }));
+  if (receipts) {
+    for (const r of receipts) {
+      rows.push({
+        id: `rcpt-${r.id}`,
+        at: r.at,
+        label: copy.receipt,
+        detail: receiptSentence(r),
+      });
+    }
+  }
+  return rows.sort((a, b) => b.at - a.at);
+}
+

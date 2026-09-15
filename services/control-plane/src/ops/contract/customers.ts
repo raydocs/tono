@@ -201,6 +201,14 @@ export interface CustomerSummaryDto {
   updatedAt: number;
 }
 
+export interface LogWindowDto {
+  id: string;
+  openedBy: string | null;
+  openedAt: number;
+  expiresAt: number;
+  reads: number;
+}
+
 export interface CustomerDetailDto {
   userId: string;
   email: string;
@@ -220,6 +228,7 @@ export interface CustomerDetailDto {
   stageSinceAt: number;
   firstConnectedAt: number | null;
   updatedAt: number;
+  logWindows?: LogWindowDto[];
 }
 
 const EVENT_KEYS = [
@@ -435,9 +444,23 @@ export function assertCustomerSummary(value: unknown, path = 'customerSummary'):
   };
 }
 
+const LOG_WINDOW_KEYS = ['id', 'openedBy', 'openedAt', 'expiresAt', 'reads'];
+
+export function assertLogWindow(value: unknown, path = 'logWindow'): LogWindowDto {
+  const row = fields(value, path, LOG_WINDOW_KEYS);
+  return {
+    id: text(row, path, 'id'),
+    openedBy: optText(row, path, 'openedBy'),
+    openedAt: int(row, path, 'openedAt'),
+    expiresAt: int(row, path, 'expiresAt'),
+    reads: int(row, path, 'reads'),
+  };
+}
+
 const CUSTOMER_DETAIL_KEYS = [
   'userId', 'email', 'wechatId', 'contact', 'notes', 'verdict', 'health', 'tone', 'reason',
   'lifecycle', 'now', 'devices', 'chores', 'billing', 'stage', 'stageSinceAt', 'firstConnectedAt', 'updatedAt',
+  'logWindows',
 ];
 
 export function assertCustomerDetail(value: unknown, path = 'customerDetail'): CustomerDetailDto {
@@ -461,5 +484,8 @@ export function assertCustomerDetail(value: unknown, path = 'customerDetail'): C
     stageSinceAt: int(row, path, 'stageSinceAt'),
     firstConnectedAt: optInt(row, path, 'firstConnectedAt'),
     updatedAt: int(row, path, 'updatedAt'),
+    ...(row.logWindows === undefined
+      ? {}
+      : { logWindows: arrayOf(row, path, 'logWindows', assertLogWindow) }),
   };
 }
