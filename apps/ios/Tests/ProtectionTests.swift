@@ -3,6 +3,29 @@ import NetworkExtension
 @testable import Tono
 
 final class ProtectionTests: XCTestCase {
+    func testStoredWatermarkCannotTreatCorruptionAsFirstUse() throws {
+        XCTAssertEqual(try TunnelVault.decodeWatermark(nil), "")
+        XCTAssertThrowsError(try TunnelVault.decodeWatermark(Data()))
+        XCTAssertThrowsError(try TunnelVault.decodeWatermark(Data([0xff])))
+        XCTAssertThrowsError(try TunnelVault.decodeWatermark(Data(repeating: 32, count: 4097)))
+        let bytes = Data("{\"catalog\":{\"number\":7}}".utf8)
+        // Preserve bytes for Go's strict semantic admission; Swift never repairs them.
+        XCTAssertEqual(try TunnelVault.decodeWatermark(bytes), String(data: bytes, encoding: .utf8))
+    }
+
+    func testPersistedAttemptRequiresFreshExtensionEvidenceAfterRelaunch() {
+        var machine = ProtectionMachine()
+        let generation = UUID()
+        machine.observeExisting(generation)
+        XCTAssertEqual(machine.state, .recovering)
+        machine.receive(.init(version: 1, generation: UUID(), observedAt: .now, state: .protected,
+            blocker: nil, routesInstalled: true, dnsInstalled: true, coreRunning: true, probeSucceeded: true))
+        XCTAssertEqual(machine.state, .recovering)
+        machine.receive(.init(version: 1, generation: generation, observedAt: .now, state: .protected,
+            blocker: nil, routesInstalled: true, dnsInstalled: true, coreRunning: true, probeSucceeded: true))
+        XCTAssertEqual(machine.state, .protected)
+    }
+
     func testLateProtectedReceiptCannotUndoPause() {
         var machine = ProtectionMachine()
         let generation = machine.begin()
@@ -127,10 +150,16 @@ final class ProtectionTests: XCTestCase {
         XCTAssertEqual(proto.providerBundleIdentifier, "com.ninx.tono.PacketTunnel")
     }
 
+    #if canImport(Tonomobile)
+    func testLinkedCoreMatchesBundledBuildIdentity() {
+        XCTAssertNoThrow(try SingBoxIdentity.requireEmbeddedCore())
+    }
+    #else
     @MainActor func testMissingCoreRefusesBeforeInstallingProfile() async {
         do {
             try await TunnelController().start(generation: UUID(), onDemand: true)
             XCTFail("Missing core must not start")
         } catch { XCTAssertEqual(error as? Blocker, .coreUnavailable) }
     }
+    #endif
 }

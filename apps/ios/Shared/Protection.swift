@@ -65,6 +65,14 @@ struct ProtectionMachine: Sendable {
         return generation
     }
 
+    /// Reattach to a persisted authorized attempt, without trusting NEVPNStatus.
+    mutating func observeExisting(_ generation: UUID) {
+        self.generation = generation
+        state = .recovering
+        blocker = nil
+        lastObservation = nil
+    }
+
     mutating func receive(_ receipt: TunnelReceipt, now: Date = .now) {
         expire(now: now)
         guard [.connecting, .protected, .recovering].contains(state),

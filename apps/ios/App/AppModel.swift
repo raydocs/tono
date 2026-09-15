@@ -29,6 +29,7 @@ final class AppModel {
     private(set) var machine = ProtectionMachine()
     private(set) var user: CloudUser?
     private(set) var devices: [CloudDevice] = []
+    private(set) var locations: [String] = []
     private(set) var accountRecovery: AccountRecovery? = .restoreSession
     private(set) var busy = false
     var notice: String?
@@ -48,8 +49,9 @@ final class AppModel {
     init(cloud: CloudClient? = nil, tunnel: (any TunnelControlling)? = nil,
          preferences defaults: UserDefaults? = UserDefaults(suiteName: TunnelContract.appGroup),
          distribution: String? = Bundle.main.object(forInfoDictionaryKey: "TonoDistribution") as? String) {
-        self.cloud = cloud ?? CloudClient()
-        self.tunnel = tunnel ?? TunnelController()
+        let client = cloud ?? CloudClient()
+        self.cloud = client
+        self.tunnel = tunnel ?? TunnelController(cloud: client)
         self.preferences = defaults
         self.distribution = distribution
         onDemand = defaults?.object(forKey: "onDemand") as? Bool ?? true
@@ -80,7 +82,15 @@ final class AppModel {
             }
             user = try await cloud.me()
             accountRecovery = nil // cached identity never substitutes for a successful /me
-            if paused { machine.pause() } else { machine.fail(.coreUnavailable) }
+            if paused { machine.pause() }
+            else {
+                do {
+                    try SingBoxIdentity.requireEmbeddedCore()
+                    let grant = try TunnelVault().grant()
+                    guard grant.accountID == user?.id else { throw Blocker.sessionExpired }
+                    machine.observeExisting(grant.generation)
+                } catch { machine.fail(error as? Blocker ?? .tunnelUnavailable) }
+            }
         }
     }
 
@@ -128,14 +138,23 @@ final class AppModel {
         await perform {
             let generation = machine.begin()
             diagnostics.append(.init(kind: .stateChanged, state: .connecting), policy: diagnosticPolicy)
-            try await tunnel.start(generation: generation, onDemand: onDemand)
-            // A future implementation must observe current extension receipts, not set Protected here.
+            try await tunnel.start(generation: generation, onDemand: onDemand, selected: selectedLocation ?? "")
+            // Only independently observed extension receipts establish Protected.
         }
     }
 
     func expireProtectionReceipt() {
         guard !isPreview else { return }
         machine.expire()
+        guard [.connecting, .protected, .recovering].contains(machine.state) else { return }
+        tunnel.observe(generation: machine.generation) { [weak self] receipt in
+            guard let self, let receipt else { return }
+            self.machine.receive(receipt)
+            if self.machine.state == .protected {
+                self.paused = false
+                self.preferences?.set(false, forKey: "paused")
+            }
+        }
     }
 
     func pause() async {
@@ -158,10 +177,21 @@ final class AppModel {
     func refreshLocations() async {
         guard !isPreview else { return }
         await perform {
-            let policy = try await cloud.policy()
-            _ = try PolicyAdmission.verify(policy, previousRevision: nil)
-            let catalog = try await cloud.catalog()
-            try PolicyAdmission.verifyCatalog(catalog)
+            locations = []
+            locations = try await cloud.locations()
+        }
+    }
+
+    func selectLocation(_ name: String?) async {
+        guard !isPreview, name == nil || locations.contains(name!) else { return }
+        await perform {
+            try await tunnel.pause()
+            machine.pause()
+            paused = true
+            preferences?.set(true, forKey: "paused")
+            selectedLocation = name
+            if let name { preferences?.set(name, forKey: "selectedLocation") }
+            else { preferences?.removeObject(forKey: "selectedLocation") }
         }
     }
 
@@ -191,6 +221,7 @@ final class AppModel {
     private func clearAccountState() {
         user = nil
         devices = []
+        locations = []
         accountRecovery = nil
         challenge = nil
         challengeExpires = nil
@@ -226,6 +257,7 @@ final class AppModel {
         catch {
             let blocker = error as? Blocker ?? .serviceUnavailable
             if blocker == .sessionExpired {
+                try? await tunnel.pause() // invalidate the extension grant, not only app memory
                 clearAccountState() // RootView changes identity and exposes sign-in.
                 machine.fail(.sessionExpired)
                 notice = blocker.message // terminal auth loss is never a silent upload failure

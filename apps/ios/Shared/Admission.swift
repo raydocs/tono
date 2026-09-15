@@ -1,5 +1,8 @@
 import CryptoKit
 import Foundation
+#if canImport(Tonomobile)
+import Tonomobile
+#endif
 
 enum PolicyAdmission {
     static let publicKey = "Sf2burVHXZWzYikU0FlC+N64BeRZJxJe8XaneblmTkM="
@@ -23,7 +26,7 @@ enum PolicyAdmission {
             throw Blocker.unsupportedPolicy
         }
         let policy = try JSONDecoder().decode(TrafficPolicy.self, from: data)
-        guard (1...3).contains(policy.version) else { throw Blocker.unsupportedPolicy }
+        guard (1...4).contains(policy.version) else { throw Blocker.unsupportedPolicy }
         // iOS cannot reproduce desktop process-identity DIRECT leases. Never strip them.
         guard policy.domains.isEmpty, policy.mediaEndpoints.isEmpty,
               (policy.tcpEndpoints ?? []).isEmpty, (policy.webDomains ?? []).isEmpty,
@@ -56,8 +59,14 @@ enum SingBoxIdentity {
     static let tags = ["with_gvisor", "with_quic", "with_utls", "with_clash_api"]
 
     static func requireEmbeddedCore() throws {
-        // There is no approved iOS artifact hash/ABI under this build identity.
-        // Never substitute Darwin CLI bytes or accept a self-declared manifest.
+        #if canImport(Tonomobile)
+        // Set only by the pinned artifact's generated xcconfig. Build tooling
+        // hashes the framework before Xcode; code signing seals the final image.
+        guard let identity = Bundle.main.object(forInfoDictionaryKey: "TonoMobileIdentity") as? String,
+              identity.count == 64, identity.allSatisfy({ $0.isHexDigit }),
+              TonomobileIdentity() == identity else { throw Blocker.artifactMismatch }
+        #else
         throw Blocker.coreUnavailable
+        #endif
     }
 }

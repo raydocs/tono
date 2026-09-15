@@ -1,0 +1,21 @@
+diff --git a/stack.go b/stack.go
+index 8e17419..cda3fba 100644
+--- a/stack.go
++++ b/stack.go
+@@ -47,6 +47,16 @@ func NewStack(
+ 	stack string,
+ 	options StackOptions,
+ ) (Stack, error) {
++	// Public packet-flow platforms own an explicit userspace backend rather than
++	// pretending to be NativeTun. Native descriptor-backed paths remain unchanged.
++	if factory, ok := options.Tun.(interface {
++		NewStack(StackOptions) (Stack, error)
++	}); ok {
++		if stack != "" {
++			return nil, E.New("packet-flow stack override is not allowed")
++		}
++		return factory.NewStack(options)
++	}
+ 	switch stack {
+ 	case "", "go":
+ 		return NewGo(options), nil

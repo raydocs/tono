@@ -15,4 +15,6 @@
     <key>UISupportedInterfaceOrientations~ipad</key><array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationPortraitUpsideDown</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
     <key>TonoAPIBaseURL</key><string>https://api.afk.ccwu.cc</string>
     <key>TonoDistribution</key><string>$(TONO_DISTRIBUTION)</string>
+    <key>TonoMobileIdentity</key><string>$(TONO_MOBILE_IDENTITY)</string>
+    <key>TonoTunnelKeychainGroup</key><string>$(AppIdentifierPrefix)com.ninx.tono.tunnel</string>
 </dict></plist>

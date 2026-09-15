@@ -99,8 +99,8 @@ func TestEmittedRealityConfigUsesActualCoreParserAndManualSelection(t *testing.T
 	if outbound["server"] != "1.0.0.1" || outbound["server_port"] != float64(443) || outbound["flow"] != "xtls-rprx-vision" {
 		t.Fatal("manual pin replaced by default")
 	}
-	if len(draft.UnavailableNodes()) != 1 || draft.UnavailableNodes()[0] != "Entry B · hy2" {
-		t.Fatal("HY2 availability hidden")
+	if len(draft.UnavailableNodes()) != 0 {
+		t.Fatal("patched HY2 unexpectedly unavailable")
 	}
 	inbound := config["inbounds"].([]any)[0].(map[string]any)
 	if _, exists := inbound["stack"]; exists || len(inbound["address"].([]any)) != 2 {
@@ -134,8 +134,22 @@ func TestEmittedRealityConfigUsesActualCoreParserAndManualSelection(t *testing.T
 func TestHY2CannotLoseDERPinOrBecomeAnotherIdentity(t *testing.T) {
 	policy, key := signedPolicy(emptyPolicy, 4)
 	catalog := catalogFixture(fixtureYAML, `{"defaultProxy":"Entry B · hy2"}`, 7)
-	if _, err := compile(catalog, policy, "", nil, key); err != ErrPin {
-		t.Fatal("DER silently substituted", err)
+	draft, err := compile(catalog, policy, "", nil, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := checkConfig(draft.Configuration()); err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]any
+	if err := json.Unmarshal([]byte(draft.Configuration()), &config); err != nil {
+		t.Fatal(err)
+	}
+	outbound := config["outbounds"].([]any)[0].(map[string]any)
+	tls := outbound["tls"].(map[string]any)
+	pin, err := base64.StdEncoding.DecodeString(tls["certificate_leaf_sha256"].(string))
+	if err != nil || len(pin) != 32 || pin[0] != 0xaa || tls["engine"] != "go" || tls["insecure"] != nil || tls["certificate_public_key_sha256"] != nil {
+		t.Fatal("DER silently substituted")
 	}
 	withoutPin := strings.Replace(fixtureYAML, "    fingerprint: "+strings.Repeat("a", 64)+"\n", "", 1)
 	if _, err := compile(catalogFixture(withoutPin, `{"defaultProxy":"Entry A"}`, 8), policy, "", nil, key); err != ErrCatalog {

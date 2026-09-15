@@ -20,10 +20,10 @@ struct TonoApp: App {
             RootView(model: model)
                 .tint(.teal)
                 .task { await model.restore() }
-                .task(id: scenePhase == .active && model.state == .protected && !model.isPreview) {
+                .task(id: scenePhase == .active && [.connecting, .protected, .recovering].contains(model.state) && !model.isPreview) {
                     guard scenePhase == .active, !model.isPreview else { return }
                     // Revalidate immediately after foregrounding, before waiting.
-                    while !Task.isCancelled && model.state == .protected {
+                    while !Task.isCancelled && [.connecting, .protected, .recovering].contains(model.state) {
                         model.expireProtectionReceipt()
                         do { try await Task.sleep(for: .seconds(1)) } catch { return }
                     }

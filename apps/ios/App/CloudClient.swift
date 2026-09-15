@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(Tonomobile)
+import Tonomobile
+#endif
 
 private final class NoRedirect: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     func urlSession(_ session: URLSession, task: URLSessionTask,
@@ -81,6 +84,43 @@ final class CloudClient {
 
     func catalog() async throws -> CatalogEnvelope { try await decode("exit-catalog") }
     func policy() async throws -> PolicyEnvelope { try await decode("traffic-policy") }
+
+    func locations() async throws -> [String] {
+        try SingBoxIdentity.requireEmbeddedCore()
+        #if canImport(Tonomobile)
+        let catalog = try await request("exit-catalog")
+        let policy = try await request("traffic-policy")
+        guard let credentials, let deviceID = credentials.device?.id else { throw Blocker.sessionExpired }
+        let old = try TunnelVault().watermark(scope: credentials.user.id + ":" + deviceID)
+        var error: NSError?
+        guard let admission = TonomobilePrepare(catalog, policy, "", old, &error), error == nil else { throw Blocker.unsupportedPolicy }
+        return try JSONDecoder().decode([String].self, from: Data(admission.locations().utf8))
+        #else
+        throw Blocker.coreUnavailable
+        #endif
+    }
+
+    func stageTunnel(generation: UUID, selected: String) async throws {
+        try SingBoxIdentity.requireEmbeddedCore()
+        #if canImport(Tonomobile)
+        let identity = try await me() // rotates app-only refresh token if needed
+        let catalog = try await request("exit-catalog")
+        let policy = try await request("traffic-policy")
+        guard let credentials, identity.id == credentials.user.id,
+              let deviceID = credentials.device?.id else { throw Blocker.sessionExpired }
+        let grant = TunnelGrant(accountID: identity.id, deviceID: deviceID,
+            accessToken: credentials.accessToken, selected: selected, generation: generation, issuedAt: .now)
+        let old = try TunnelVault().watermark(scope: grant.scope)
+        var error: NSError?
+        guard TonomobilePrepare(catalog, policy, selected, old, &error) != nil, error == nil else {
+            throw Blocker.unsupportedPolicy
+        }
+        // Preflight only. The extension independently refetches and persists receipts.
+        try TunnelVault().write(JSONEncoder().encode(grant), account: "grant")
+        #else
+        throw Blocker.coreUnavailable
+        #endif
+    }
 
     func upload(_ data: Data) async throws {
         let bytes = try await request("telemetry/windows", method: "POST", body: data)

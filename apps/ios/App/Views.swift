@@ -187,6 +187,17 @@ private struct LocationsView: View {
                     }
                 }
                 #endif
+            } else if !model.locations.isEmpty {
+                Section("Managed locations") {
+                    Button("Automatic") { Task { await model.selectLocation(nil) } }
+                    ForEach(model.locations, id: \.self) { name in
+                        Button { Task { await model.selectLocation(name) } } label: {
+                            HStack { Text(name); Spacer(); if model.selectedLocation == name { Image(systemName: "checkmark") } }
+                        }.privacySensitive()
+                    }
+                    Text("Changing location pauses protection. Connect again to use it; a failed pin never chooses another location.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }.disabled(model.busy)
             } else {
                 Section {
                     ContentUnavailableView("Locations unavailable", systemImage: "location.slash",
@@ -194,7 +205,7 @@ private struct LocationsView: View {
                     Button("Refresh managed locations") { Task { await model.refreshLocations() } }.disabled(model.busy)
                 }
             }
-        }.navigationTitle("Location")
+        }.navigationTitle("Location").task { await model.refreshLocations() }
     }
 }
 

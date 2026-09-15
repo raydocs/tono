@@ -51,13 +51,37 @@ type policyEnvelope struct {
 // Revision receipts are scoped to the authenticated account AND installation.
 // Persist them in protected storage before admitting a start, not in preferences.
 type Revision struct {
-	Number int64
-	Digest string
+	Number int64  `json:"number"`
+	Digest string `json:"digest"`
 }
 
 type Watermark struct {
-	Catalog Revision
-	Policy  Revision
+	Catalog Revision `json:"catalog"`
+	Policy  Revision `json:"policy"`
+}
+
+// Empty/malformed persisted data is not a first-install receipt. Only absence
+// of the keychain item permits nil; partial, duplicate and unknown fields fail.
+func DecodeWatermark(data []byte) (*Watermark, error) {
+	var value Watermark
+	if len(data) > 4096 || strictJSON(data, &value) != nil {
+		return nil, ErrPolicy
+	}
+	var fields map[string]json.RawMessage
+	_ = json.Unmarshal(data, &fields)
+	for _, name := range []string{"catalog", "policy"} {
+		var revision Revision
+		if strictJSON(fields[name], &revision) != nil {
+			return nil, ErrPolicy
+		}
+	}
+	for _, revision := range []Revision{value.Catalog, value.Policy} {
+		hash, err := base64.RawURLEncoding.Strict().DecodeString(revision.Digest)
+		if err != nil || len(hash) != 32 || revision.Number < 0 {
+			return nil, ErrPolicy
+		}
+	}
+	return &value, nil
 }
 
 type node struct {
@@ -189,7 +213,7 @@ func admitPolicy(raw []byte, previous *Revision, key ed25519.PublicKey) (Revisio
 		Web      []json.RawMessage `json:"webDomains,omitempty"`
 		Suffixes []json.RawMessage `json:"directSuffixes,omitempty"`
 	}
-	if strictJSON([]byte(envelope.JSON), &policy) != nil || policy.Version < 1 || policy.Version > 3 ||
+	if strictJSON([]byte(envelope.JSON), &policy) != nil || policy.Version < 1 || policy.Version > 4 ||
 		policy.Domains == nil || policy.Media == nil {
 		return Revision{}, ErrPolicy
 	}

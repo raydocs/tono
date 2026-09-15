@@ -1,5 +1,5 @@
 {
-  "status": "blocked-no-approved-ios-artifact",
+  "status": "mobile-source-integrated-apple-qualification-required",
   "engine": "sing-box",
   "version": "1.15.0-alpha.3",
   "upstream_commit": "93fff5954390367dd456cad3cbd79be54f8b941f",
@@ -10,7 +10,21 @@
   "go_mod_sha256": "c8a55d750ff56af8e097478b7ce88f10224f406041e73002ef89e4c8ade5769b",
   "go_sum_sha256": "121265484ad99c79970266e5896eba82ff660c2921624225afa316e408f6d38e",
   "ios_artifact_sha256": null,
-  "ios_abi": null,
-  "constraint": "Upstream libbox Objective-C binding requires a separately approved cgo-enabled Apple build identity. Desktop CGO=0 artifacts cannot be relabeled or launched in an iOS extension.",
+  "ios_abi": "tonomobile-v1",
+  "mobile": {
+    "cgo_enabled": "1",
+    "extra_tags": ["tono_mobile"],
+    "gomobile": "v0.1.12",
+    "gomobile_commit": "b2c30f47825831593d6980af8191527490f9c968",
+    "sing_tun_commit": "869f0a4d76af32b9ad8cdfa821aee35489d650db",
+    "deployment_target": "26.0",
+    "targets": "ios/arm64,iossimulator/arm64",
+    "backend": "public-packet-flow-gvisor",
+    "patches": {
+      "sing-box-mobile.patch": "97520d1c7f451ce1a9bd9b53e689083626e0f924e46fb2840e4c74168108f83e",
+      "sing-tun-packet-flow.patch": "ad494ea9a46044f981a0fea9fda8506df331c3c54721535f859776a2263f3c7d"
+    }
+  },
+  "constraint": "Top-level pins remain the desktop contract. Mobile is an explicitly distinct patched CGO1 Apple identity; each SDK build must record exact SDK, source, header and slice hashes. No stock substitution or linker safety override.",
   "shared_contract_reviewed": "https://github.com/raydocs/tono/pull/202"
 }

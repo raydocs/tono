@@ -3,7 +3,9 @@ package tonoios
 import (
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"strings"
 )
 
 // Draft contains sensitive runtime bytes. Never serialize this object to logs,
@@ -13,11 +15,13 @@ type Draft struct {
 	configuration string
 	watermark     Watermark
 	unavailable   []string
+	locations     []string
 }
 
 func (d *Draft) Configuration() string      { return d.configuration }
 func (d *Draft) Watermark() Watermark       { return d.watermark }
 func (d *Draft) UnavailableNodes() []string { return append([]string(nil), d.unavailable...) }
+func (d *Draft) Locations() []string        { return append([]string(nil), d.locations...) }
 
 // Compile consumes complete HTTPS response bytes, not a reconstructed routing
 // subset. Previous must belong to the same authenticated account/installation.
@@ -47,19 +51,15 @@ func compile(catalog, policy []byte, selected string, previous *Watermark, key e
 	// A missing/default-unavailable node is not permission to pick another city.
 	var chosen *node
 	var unavailable []string
+	var locations []string
 	for i := range nodes {
-		if nodes[i].Kind == "hysteria2" {
-			unavailable = append(unavailable, nodes[i].Name)
-		}
+		locations = append(locations, nodes[i].Name)
 		if nodes[i].Name == selected {
 			chosen = &nodes[i]
 		}
 	}
 	if chosen == nil {
 		return nil, ErrSelection
-	}
-	if chosen.Kind == "hysteria2" {
-		return nil, ErrPin
 	}
 
 	type object = map[string]any
@@ -69,6 +69,13 @@ func compile(catalog, policy []byte, selected string, previous *Watermark, key e
 			"reality": object{"enabled": true, "public_key": chosen.Reality.PublicKey, "short_id": chosen.Reality.ShortID}}}
 	if chosen.Flow != "" {
 		outbound["flow"] = chosen.Flow
+	}
+	if chosen.Kind == "hysteria2" {
+		pin, _ := hex.DecodeString(strings.ReplaceAll(chosen.Fingerprint, ":", ""))
+		outbound = object{"type": "hysteria2", "tag": "Tono-Exit", "server": chosen.Server,
+			"server_port": chosen.Port, "password": chosen.Password,
+			"tls": object{"enabled": true, "engine": "go", "server_name": chosen.ServerName,
+				"certificate_leaf_sha256": pin}}
 	}
 	config := object{
 		"log": object{"disabled": true},
@@ -100,5 +107,5 @@ func compile(catalog, policy []byte, selected string, previous *Watermark, key e
 	if err != nil {
 		return nil, ErrCatalog
 	}
-	return &Draft{string(encoded), Watermark{catalogRevision, policyRevision}, unavailable}, nil
+	return &Draft{string(encoded), Watermark{catalogRevision, policyRevision}, unavailable, locations}, nil
 }

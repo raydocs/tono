@@ -53,7 +53,7 @@ def generate():
     for path in files:
         extension = Path(path).suffix
         kind = {".swift": "sourcecode.swift", ".plist": "text.plist.xml", ".entitlements": "text.plist.entitlements",
-                ".xcprivacy": "text.xml", ".json": "text.json"}[extension]
+                ".xcprivacy": "text.xml", ".json": "text.json", ".txt": "text"}[extension]
         refs[path] = obj(path, "PBXFileReference", path=path, sourceTree="SOURCE_ROOT", lastKnownFileType=kind)
 
     definitions = {
@@ -79,6 +79,8 @@ def generate():
         resource_files = []
         if name in ("Tono", "PacketTunnel"):
             resource_files.append(obj(f"{name}/privacy", "PBXBuildFile", fileRef=refs["Configuration/PrivacyInfo.xcprivacy"]))
+            resource_files.append(obj(f"{name}/licenses", "PBXBuildFile", fileRef=refs["Configuration/Mobile-Licenses.txt"]))
+            resource_files.append(obj(f"{name}/core-requirement", "PBXBuildFile", fileRef=refs["Configuration/core-requirement.json"]))
         if name == "TonoTests":
             resource_files.extend(obj(f"{name}/resource/{p}", "PBXBuildFile", fileRef=refs[p])
                                   for p in files if p.startswith("Tests/Fixtures/") and p.endswith(".json"))

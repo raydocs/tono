@@ -407,7 +407,7 @@ final class AppModelTests: XCTestCase {
 
 @MainActor private final class StubTunnel: TunnelControlling {
     private(set) var pauses = 0
-    func start(generation: UUID, onDemand: Bool) async throws { throw Blocker.coreUnavailable }
+    func start(generation: UUID, onDemand: Bool, selected: String) async throws { throw Blocker.coreUnavailable }
     func pause() async throws { pauses += 1 }
 }
 

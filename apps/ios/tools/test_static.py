@@ -50,7 +50,9 @@ class IOSStaticContracts(unittest.TestCase):
             app = plistlib.load(f)
         with (ROOT / "Configuration/PacketTunnel.entitlements").open("rb") as f:
             extension = plistlib.load(f)
-        self.assertEqual(app, extension)
+        self.assertEqual(app["com.apple.security.application-groups"], extension["com.apple.security.application-groups"])
+        self.assertEqual(extension["keychain-access-groups"], ["$(AppIdentifierPrefix)com.ninx.tono.tunnel"])
+        self.assertNotIn("$(AppIdentifierPrefix)com.ninx.tono", extension["keychain-access-groups"])
         self.assertEqual(app["com.apple.security.application-groups"], ["group.com.ninx.tono"])
         self.assertEqual(app["com.apple.developer.networking.networkextension"], ["packet-tunnel-provider"])
         _, objects = generate()
@@ -69,7 +71,10 @@ class IOSStaticContracts(unittest.TestCase):
         for key in ("patches", "go_mod_sha256", "go_sum_sha256"):
             self.assertEqual(requirement[key], candidate["source"][key])
         self.assertIsNone(requirement["ios_artifact_sha256"])
-        self.assertIsNone(requirement["ios_abi"])
+        self.assertEqual(requirement["ios_abi"], "tonomobile-v1")
+        self.assertEqual(requirement["mobile"]["cgo_enabled"], "1")
+        for name, digest in requirement["mobile"]["patches"].items():
+            self.assertEqual(hashlib.sha256((ROOT / "patches" / name).read_bytes()).hexdigest(), digest)
         swift = (ROOT / "Shared/Admission.swift").read_text()
         self.assertIn(requirement["upstream_commit"], swift)
         self.assertIn(requirement["go_version"], swift)
@@ -93,13 +98,15 @@ class IOSStaticContracts(unittest.TestCase):
         controller = controller.split("final class TunnelController", 1)[1]
         start = controller.split("func start(", 1)[1].split("func pause()", 1)[0]
         self.assertIn("try SingBoxIdentity.requireEmbeddedCore()", start)
-        self.assertNotIn("saveToPreferences", start)
-        self.assertNotIn("startVPNTunnel", start)
+        self.assertLess(start.index("requireEmbeddedCore()"), start.index("saveToPreferences"))
+        self.assertLess(start.index("TunnelVault().grant()"), start.index("startVPNTunnel"))
         provider = (ROOT / "PacketTunnel/PacketTunnelProvider.swift").read_text()
         start = provider.split("override func startTunnel", 1)[1].split("override func stopTunnel", 1)[0]
-        self.assertIn("completionHandler(NSError", start)
-        self.assertNotIn("completionHandler(nil)", start)
-        self.assertNotIn("setTunnelNetworkSettings", provider)
+        self.assertIn("try SingBoxIdentity.requireEmbeddedCore()", start)
+        self.assertIn("#else\n                throw Blocker.coreUnavailable", start)
+        self.assertIn("packetFlow.readPackets", provider)
+        self.assertIn("packetFlow.writePackets", provider)
+        self.assertNotIn("value(forKey:", provider)
         pause = controller.split("func pause()", 1)[1]
         self.assertLess(pause.index("saveToPreferences"), pause.index("stopVPNTunnel"))
 

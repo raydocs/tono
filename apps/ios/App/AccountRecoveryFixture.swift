@@ -31,7 +31,7 @@ enum AccountRecoveryFixture {
 }
 
 @MainActor private final class FixtureTunnel: TunnelControlling {
-    func start(generation: UUID, onDemand: Bool) async throws { throw Blocker.coreUnavailable }
+    func start(generation: UUID, onDemand: Bool, selected: String) async throws { throw Blocker.coreUnavailable }
     func pause() async throws {}
 }
 
