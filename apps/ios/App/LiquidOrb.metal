@@ -38,7 +38,9 @@ float orbWarp(float2 p, float t) {
 }
 
 [[ stitchable ]] half4 liquidOrb(float2 position, half4 color, float time, float alignment, float2 size) {
-    float2 uv = (position - size * 0.5) / size.y;
+    // position arrives top-left origin (UIKit space): flip Y so +Y is up and
+    // the key light truly falls from the top-left like the rest of the app.
+    float2 uv = float2(position.x - size.x * 0.5, size.y * 0.5 - position.y) / size.y;
     float2 c = float2(0.0, 0.015);
     float R = 0.46;
     float d = length(uv - c);
@@ -56,7 +58,11 @@ float orbWarp(float2 p, float t) {
     float mx = orbWarp(p + float2(0.09, 0.0), time);
     float my = orbWarp(p + float2(0.0, 0.09), time);
     float ridge = pow(1.0 - abs(sin(m * 6.0 + dot(q, float2(1.4, -0.6)) * 1.2)), 8.0);
-    N.xy += float2(mx - m, my - m) * 3.2;
+    // Living ripples at every state, calmer when unprotected: Ready keeps
+    // about half energy, Protected runs full. Paused/actionRequired freeze
+    // via the QuietField clock, not via this gate.
+    float energy = 0.45 + 0.55 * alignment;
+    N.xy += float2(mx - m, my - m) * (3.2 * energy);
     N = normalize(N);
     float3 L1 = normalize(float3(-0.45, 0.75, 0.62));
     float3 L2 = normalize(float3(0.65, -0.25, 0.45));
@@ -67,10 +73,13 @@ float orbWarp(float2 p, float t) {
     col += float3(0.65, 0.78, 1.0) * pow(max(dot(N, normalize(L2 + V)), 0.0), 14.0) * 0.5;
     col += float3(1.0) * pow(max(dot(N, normalize(L1 + V)), 0.0), 120.0) * 1.6;
     col += float3(1.0) * pow(max(dot(N, normalize(L1 + V)), 0.0), 8.0) * 0.28;
-    col += float3(0.92, 0.96, 1.0) * ridge * (0.18 + 0.82 * dif) * 0.9;
+    col += float3(0.92, 0.96, 1.0) * (ridge * energy) * (0.18 + 0.82 * dif) * 0.9;
     float fr = pow(1.0 - max(N.z, 0.0), 2.5);
     col += float3(0.55, 0.66, 1.0) * fr * 0.85;
     col *= mix(0.72, 1.06, smoothstep(-1.0, 0.7, N.y));
     col = mix(col * 0.85, col, 0.35 + 0.65 * alignment);
-    return half4(half3(col), half(alpha * color.a));
+    // The compositor expects premultiplied output: scale RGB by the effective
+    // alpha or the antialiased rim fringes white.
+    half outAlpha = half(alpha * color.a);
+    return half4(half3(col) * outAlpha, outAlpha);
 }

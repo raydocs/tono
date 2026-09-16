@@ -148,6 +148,7 @@ struct HomeView: View {
             .frame(maxWidth: 540).frame(maxWidth: .infinity)
         }
         .background(TonoBrand.ground.ignoresSafeArea())
+        .navigationTitle("Tono")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -177,43 +178,46 @@ private struct PowerButton: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        ZStack {
+        Button(action: action) {
+            Image(systemName: "power")
+                .font(.system(size: 64, weight: .semibold))
+                .foregroundStyle(on ? .white : Color.secondary)
+                .frame(width: 188, height: 188)
+                .background {
+                    Circle().fill(
+                        on ? AnyShapeStyle(RadialGradient(
+                            colors: [TonoBrand.powerTop, TonoBrand.powerMid, TonoBrand.powerDeep],
+                            center: UnitPoint(x: 0.35, y: 0.28),
+                            startRadius: 10, endRadius: 120))
+                        : AnyShapeStyle(Color(uiColor: .secondarySystemBackground)))
+                }
+                .overlay {
+                    if on {
+                        Circle().fill(LinearGradient(
+                            colors: [.white.opacity(reduceTransparency ? 0 : 0.35), .white.opacity(0)],
+                            startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.45)))
+                    }
+                }
+                .shadow(color: on ? TonoBrand.powerMid.opacity(0.5) : .black.opacity(0.12),
+                        radius: on ? 32 : 12, y: on ? 15 : 8)
+        }
+        // Halo lives in .background so the 264pt glow never enters layout:
+        // the control footprint stays 188pt and the chip below cannot jump.
+        .background {
             if on && !reduceTransparency {
                 Circle()
                     .fill(.radialGradient(
                         Gradient(colors: [TonoBrand.halo.opacity(0.48), TonoBrand.halo.opacity(0)]),
                         center: .center, startRadius: 44, endRadius: 132))
                     .frame(width: 264, height: 264)
+                    .allowsHitTesting(false)
             }
-            Button(action: action) {
-                Image(systemName: "power")
-                    .font(.system(size: 64, weight: .semibold))
-                    .foregroundStyle(on ? .white : Color.secondary)
-                    .frame(width: 188, height: 188)
-                    .background {
-                        Circle().fill(
-                            on ? AnyShapeStyle(RadialGradient(
-                                colors: [TonoBrand.powerTop, TonoBrand.powerMid, TonoBrand.powerDeep],
-                                center: UnitPoint(x: 0.35, y: 0.28),
-                                startRadius: 10, endRadius: 120))
-                            : AnyShapeStyle(Color(uiColor: .secondarySystemBackground)))
-                    }
-                    .overlay {
-                        if on {
-                            Circle().fill(LinearGradient(
-                                colors: [.white.opacity(reduceTransparency ? 0 : 0.35), .white.opacity(0)],
-                                startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.45)))
-                        }
-                    }
-                    .shadow(color: on ? TonoBrand.powerMid.opacity(0.5) : .black.opacity(0.12),
-                            radius: on ? 32 : 12, y: on ? 15 : 8)
-            }
-            .buttonStyle(PressScaleStyle())
-            .disabled(!enabled)
-            .opacity(enabled ? 1 : 0.6)
-            .accessibilityIdentifier("home.action")
-            .accessibilityLabel(label)
         }
+        .buttonStyle(PressScaleStyle())
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.6)
+        .accessibilityIdentifier("home.action")
+        .accessibilityLabel(label)
         .padding(.vertical, 8)
     }
 }
@@ -404,7 +408,7 @@ private struct CTAButton: View {
             HStack(spacing: 10) {
                 if busy { ProgressView().tint(.white) }
                 Text(title).fontWeight(.semibold)
-                if !busy { Image(systemName: "arrow.right") }
+                if !busy { Image(systemName: "arrow.right").accessibilityHidden(true) }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
@@ -428,12 +432,13 @@ private struct CTAButton: View {
     }
 }
 
-/// Subtle press shrink for the glossy controls (plain style gives none).
+/// Press shrink per the house motion spec (scale 0.98, frozen under Reduce Motion).
 private struct PressScaleStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.95 : 1)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: configuration.isPressed)
+            .scaleEffect(reduceMotion ? 1 : (configuration.isPressed ? 0.98 : 1))
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: configuration.isPressed)
     }
 }
 

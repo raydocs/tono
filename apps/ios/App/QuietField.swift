@@ -50,8 +50,7 @@ struct QuietField: View {
                             .position(center)
                         OrbFieldCanvas(alignment: alignment, time: time,
                                        opaque: reduceTransparency, quiet: lowPower,
-                                       center: center, radius: diameter / 2,
-                                       bounds: proxy.size)
+                                       center: center, radius: diameter / 2)
                     }
                 }
             } else { Color.clear } // no rendering while inactive, including app switcher
@@ -111,7 +110,6 @@ private struct OrbFieldCanvas: View, Animatable {
     let quiet: Bool
     let center: CGPoint
     let radius: CGFloat
-    let bounds: CGSize
     var animatableData: Double {
         get { alignment }
         set { alignment = newValue }
@@ -132,7 +130,7 @@ private struct OrbFieldCanvas: View, Animatable {
                 let count = LiquidOrb.moteCount(lowPower: quiet)
                 for index in 0..<count {
                     let seed = Double(index)
-                    let orbit = radius * (1.15 + 0.30 * ((seed * 0.618034).truncatingRemainder(dividingBy: 1)))
+                    let orbit = radius * (1.05 + 0.20 * ((seed * 0.618034).truncatingRemainder(dividingBy: 1)))
                     let speed = (index.isMultiple(of: 2) ? 1.0 : -1.0) * (0.12 + 0.05 * seed.truncatingRemainder(dividingBy: 3))
                     // The clock freezes rather than resetting phase on pause/Reduce Motion.
                     // Alignment changes only geometry, never the accumulated phase.
