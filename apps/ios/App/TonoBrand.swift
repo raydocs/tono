@@ -8,7 +8,7 @@ enum TonoBrand {
         light: UIColor(red: 0x74 / 255, green: 0x57 / 255, blue: 0xF5 / 255, alpha: 1),
         dark: UIColor(red: 0xAB / 255, green: 0x9E / 255, blue: 0xFF / 255, alpha: 1)
     )
-    /// App ground: airy light `#FAFBFE`→`#EDF0F8`, night `#17172E`→`#101024`.
+    /// App ground: airy light `#F3F4FC`→`#EDF0F8`, night `#17172E`→`#101024`.
     static let ground = LinearGradient(
         colors: [dynamic(light: .init(red: 0xF3 / 255, green: 0xF4 / 255, blue: 0xFC / 255, alpha: 1), dark: .init(red: 0x17 / 255, green: 0x17 / 255, blue: 0x2E / 255, alpha: 1)),
                  dynamic(light: .init(red: 0xED / 255, green: 0xF0 / 255, blue: 0xF8 / 255, alpha: 1), dark: .init(red: 0x10 / 255, green: 0x10 / 255, blue: 0x24 / 255, alpha: 1))],

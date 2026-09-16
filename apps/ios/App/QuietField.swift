@@ -15,6 +15,12 @@ enum LiquidOrb {
 
     /// Orbiting-mote budget. Low Power halves it; Reduce Transparency draws rings only.
     static func moteCount(lowPower: Bool) -> Int { lowPower ? 24 : 48 }
+
+    /// Mote phase accumulates from time alone. Alignment must never rescale
+    /// history, or a long run would snap backward on state change.
+    static func moteAngle(seed: Double, time: TimeInterval, speed: Double) -> Double {
+        seed * 2.39996 + time * speed
+    }
 }
 
 /// Liquid orb hero + orbiting motes. The sphere is a Metal stitchable shader
@@ -101,8 +107,8 @@ private struct OrbSphere: View, Animatable {
     }
 }
 
-/// Halo + orbiting motes around the shader sphere. Reduce Transparency shows
-/// rings only (motes and halo skipped, sphere stays solid).
+/// Halo + orbiting motes around the shader sphere. Reduce Transparency
+/// skips motes and halo; the shader sphere stays solid.
 private struct OrbFieldCanvas: View, Animatable {
     var alignment: Double
     let time: TimeInterval
@@ -132,9 +138,9 @@ private struct OrbFieldCanvas: View, Animatable {
                     let seed = Double(index)
                     let orbit = radius * (1.05 + 0.20 * ((seed * 0.618034).truncatingRemainder(dividingBy: 1)))
                     let speed = (index.isMultiple(of: 2) ? 1.0 : -1.0) * (0.12 + 0.05 * seed.truncatingRemainder(dividingBy: 3))
-                    // The clock freezes rather than resetting phase on pause/Reduce Motion.
-                    // Alignment changes only geometry, never the accumulated phase.
-                    let angle = seed * 2.39996 + time * speed * (0.5 + alignment)
+                    // Phase comes from the frozen-or-running clock only; a state
+                    // change morphs geometry and alpha, never historic angle.
+                    let angle = LiquidOrb.moteAngle(seed: seed, time: time, speed: speed)
                     let dotR = index.isMultiple(of: 5) ? 2.2 : 1.4
                     let origin = CGPoint(x: cx + cos(angle) * orbit - dotR,
                                          y: cy + sin(angle) * orbit * 0.94 - dotR)

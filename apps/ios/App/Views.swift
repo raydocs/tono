@@ -129,6 +129,10 @@ struct HomeView: View {
                             label: actionTitle) {
                     if shouldPause { showPause = true } else { Task { await model.connect() } }
                 }
+                // Visual verb next to the icon-only control; the button
+                // already carries the VoiceOver label.
+                Text(actionTitle).font(.footnote).foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
                 NavigationLink(destination: LocationsView(model: model)) {
                     HStack(spacing: 10) {
                         Image(systemName: "globe")
@@ -239,27 +243,35 @@ private struct LocationsView: View {
         List {
             Section {
                 Label("Automatic", systemImage: "location")
-                Text("Your chosen location stays pinned. Automatic can keep a working backup instead of moving you back unexpectedly.")
+                Text("Your chosen location stays pinned. Automatic uses Tono's default for your account.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
             if model.isPreview {
                 #if DEBUG
                 Section("Preview locations · not live") {
-                    Button("Automatic") { model.selectPreviewLocation(nil) }
+                    Button { model.selectPreviewLocation(nil) } label: {
+                        HStack { Text("Automatic"); Spacer(); if model.selectedLocation == nil { Image(systemName: "checkmark") } }
+                    }
+                    .accessibilityAddTraits(model.selectedLocation == nil ? .isSelected : [])
                     ForEach(["Netherlands", "Japan", "United States"], id: \.self) { name in
                         Button { model.selectPreviewLocation(name) } label: {
                             HStack { Text(name); Spacer(); if model.selectedLocation == name { Image(systemName: "checkmark") } }
                         }
+                        .accessibilityAddTraits(model.selectedLocation == name ? .isSelected : [])
                     }
                 }
                 #endif
             } else if !model.locations.isEmpty {
                 Section("Managed locations") {
-                    Button("Automatic") { Task { await model.selectLocation(nil) } }
+                    Button { Task { await model.selectLocation(nil) } } label: {
+                        HStack { Text("Automatic"); Spacer(); if model.selectedLocation == nil { Image(systemName: "checkmark") } }
+                    }
+                    .accessibilityAddTraits(model.selectedLocation == nil ? .isSelected : [])
                     ForEach(model.locations, id: \.self) { name in
                         Button { Task { await model.selectLocation(name) } } label: {
                             HStack { Text(name); Spacer(); if model.selectedLocation == name { Image(systemName: "checkmark") } }
                         }.privacySensitive()
+                            .accessibilityAddTraits(model.selectedLocation == name ? .isSelected : [])
                     }
                     Text("Changing location pauses protection. Connect again to use it; a failed pin never chooses another location.")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -405,23 +417,32 @@ private struct CTAButton: View {
     @Environment(\.isEnabled) private var isEnabled
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
-                if busy { ProgressView().tint(.white) }
+            ZStack {
                 Text(title).fontWeight(.semibold)
-                if !busy { Image(systemName: "arrow.right").accessibilityHidden(true) }
+                HStack {
+                    Spacer()
+                    Group {
+                        if busy { ProgressView().tint(.white) }
+                        else { Image(systemName: "arrow.right").accessibilityHidden(true) }
+                    }
+                    .frame(width: 22, alignment: .trailing)
+                }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
+            .padding(.horizontal, 20)
             .background {
-                Capsule().fill(RadialGradient(
-                    colors: [TonoBrand.powerTop, TonoBrand.powerMid, TonoBrand.powerDeep],
-                    center: UnitPoint(x: 0.5, y: 0.2), startRadius: 8, endRadius: 160))
+                // Deep indigo under the text for contrast; gloss stays clear
+                // of the title zone.
+                Capsule().fill(LinearGradient(
+                    colors: [TonoBrand.powerMid, TonoBrand.powerDeep],
+                    startPoint: .top, endPoint: .bottom))
             }
             .overlay {
                 if !reduceTransparency {
                     Capsule().fill(LinearGradient(
-                        colors: [.white.opacity(0.3), .white.opacity(0)],
-                        startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.4)))
+                        colors: [.white.opacity(0.22), .white.opacity(0)],
+                        startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.3)))
                 }
             }
         }

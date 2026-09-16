@@ -163,6 +163,13 @@ final class ProtectionTests: XCTestCase {
         XCTAssertEqual(proto.providerBundleIdentifier, "com.ninx.tono.PacketTunnel")
     }
 
+    func testMotePhaseIgnoresAlignmentAfterLongRun() {
+        // No alignment parameter exists: a 10-minute run must not snap when
+        // Protected falls back to Paused.
+        let expected = 1.0 * 2.39996 + 600 * 0.12
+        XCTAssertEqual(LiquidOrb.moteAngle(seed: 1, time: 600, speed: 0.12), expected, accuracy: 1e-9)
+    }
+
     func testLiquidOrbPreservesStateAlignmentAndMoteBudgets() {
         XCTAssertEqual(LiquidOrb.target(for: .protected), 1.0, accuracy: 1e-9)
         XCTAssertEqual(LiquidOrb.target(for: .connecting), 0.55, accuracy: 1e-9)
