@@ -178,7 +178,9 @@ struct HomeView: View {
     private var actionTitle: String { shouldPause ? "Pause" : model.state == .paused ? "Resume protection" : "Connect" }
 }
 
-/// Glossy indigo power control. On = luminous ramp + halo; off/preview = quiet gray.
+/// Glossy indigo power control. On = luminous ramp + halo. Off but available
+/// (Ready, Paused) = tinted disc with a 1pt accent edge, so it reads as a
+/// control rather than a disabled one. Disabled/preview = quiet gray.
 private struct PowerButton: View {
     let on: Bool
     let enabled: Bool
@@ -190,21 +192,18 @@ private struct PowerButton: View {
         Button(action: action) {
             Image(systemName: "power")
                 .font(.system(size: 64, weight: .semibold))
-                .foregroundStyle(on ? .white : Color.secondary)
+                .foregroundStyle(glyph)
                 .frame(width: 188, height: 188)
-                .background {
-                    Circle().fill(
-                        on ? AnyShapeStyle(RadialGradient(
-                            colors: [TonoBrand.powerTop, TonoBrand.powerMid, TonoBrand.powerDeep],
-                            center: UnitPoint(x: 0.35, y: 0.28),
-                            startRadius: 10, endRadius: 120))
-                        : AnyShapeStyle(Color(uiColor: .secondarySystemBackground)))
-                }
+                .background { Circle().fill(fill) }
                 .overlay {
                     if on {
                         Circle().fill(LinearGradient(
                             colors: [.white.opacity(reduceTransparency ? 0 : 0.35), .white.opacity(0)],
                             startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.45)))
+                    } else if enabled {
+                        // The 10% tint alone is ~1.1:1 against the ground; the
+                        // edge is what gives the tap target a boundary.
+                        Circle().strokeBorder(TonoBrand.accent.opacity(0.35), lineWidth: 1)
                     }
                 }
                 .shadow(color: on ? TonoBrand.powerMid.opacity(0.5) : .black.opacity(0.12),
@@ -227,6 +226,21 @@ private struct PowerButton: View {
         .opacity(enabled ? 1 : 0.6)
         .accessibilityIdentifier("home.action")
         .accessibilityLabel(label)
+    }
+
+    private var glyph: Color { on ? .white : enabled ? TonoBrand.accent : .secondary }
+
+    private var fill: AnyShapeStyle {
+        if on {
+            AnyShapeStyle(RadialGradient(
+                colors: [TonoBrand.powerTop, TonoBrand.powerMid, TonoBrand.powerDeep],
+                center: UnitPoint(x: 0.35, y: 0.28),
+                startRadius: 10, endRadius: 120))
+        } else if enabled {
+            AnyShapeStyle(TonoBrand.accent.opacity(0.10))
+        } else {
+            AnyShapeStyle(Color(uiColor: .secondarySystemBackground))
+        }
     }
 }
 
@@ -506,5 +520,18 @@ private struct PreviewControls: View {
     let model = AppModel()
     model.preview(.paused)
     return RootView(model: model)
+}
+
+// Component-only preview. App previews keep the power control gray and
+// disabled; this is the only way to inspect the on / ready styles without
+// touching that contract or a VPN. Actions are no-ops.
+#Preview("PowerButton · on / ready / disabled") {
+    VStack(spacing: 40) {
+        PowerButton(on: true, enabled: true, label: "Pause") {}
+        PowerButton(on: false, enabled: true, label: "Connect") {}
+        PowerButton(on: false, enabled: false, label: "Connect") {}
+    }
+    .padding(48)
+    .background(TonoBrand.ground.ignoresSafeArea())
 }
 #endif
