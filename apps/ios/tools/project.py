@@ -53,7 +53,7 @@ def generate():
     for path in files:
         extension = Path(path).suffix
         kind = {".swift": "sourcecode.swift", ".plist": "text.plist.xml", ".entitlements": "text.plist.entitlements",
-                ".xcprivacy": "text.xml", ".json": "text.json", ".txt": "text"}[extension]
+                ".xcprivacy": "text.xml", ".json": "text.json", ".txt": "text", ".metal": "sourcecode.metal"}[extension]
         refs[path] = obj(path, "PBXFileReference", path=path, sourceTree="SOURCE_ROOT", lastKnownFileType=kind)
 
     definitions = {
@@ -74,7 +74,7 @@ def generate():
     targets = []
     for name, (kind, _, prefixes, bundle) in definitions.items():
         source_files = [obj(f"{name}/build/{p}", "PBXBuildFile", fileRef=refs[p])
-                        for p in files if p.endswith(".swift") and any(p.startswith(prefix) for prefix in prefixes)]
+                        for p in files if p.endswith((".swift", ".metal")) and any(p.startswith(prefix) for prefix in prefixes)]
         sources = obj(f"{name}/sources", "PBXSourcesBuildPhase", buildActionMask=2147483647, files=source_files, runOnlyForDeploymentPostprocessing=0)
         resource_files = []
         if name in ("Tono", "PacketTunnel"):

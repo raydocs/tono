@@ -163,6 +163,17 @@ final class ProtectionTests: XCTestCase {
         XCTAssertEqual(proto.providerBundleIdentifier, "com.ninx.tono.PacketTunnel")
     }
 
+    func testLiquidOrbPreservesStateAlignmentAndMoteBudgets() {
+        XCTAssertEqual(LiquidOrb.target(for: .protected), 1.0, accuracy: 1e-9)
+        XCTAssertEqual(LiquidOrb.target(for: .connecting), 0.55, accuracy: 1e-9)
+        XCTAssertEqual(LiquidOrb.target(for: .recovering), 0.35, accuracy: 1e-9)
+        XCTAssertEqual(LiquidOrb.target(for: .ready), 0.15, accuracy: 1e-9)
+        XCTAssertEqual(LiquidOrb.target(for: .paused), 0.0, accuracy: 1e-9)
+        XCTAssertEqual(LiquidOrb.target(for: .actionRequired), 0.0, accuracy: 1e-9)
+        XCTAssertEqual(LiquidOrb.moteCount(lowPower: false), 48)
+        XCTAssertEqual(LiquidOrb.moteCount(lowPower: true), 24)
+    }
+
     #if canImport(Tonomobile)
     func testLinkedCoreMatchesBundledBuildIdentity() {
         XCTAssertNoThrow(try SingBoxIdentity.requireEmbeddedCore())

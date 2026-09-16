@@ -30,8 +30,13 @@ private struct LoginView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                Image(systemName: "sparkle").font(.largeTitle).foregroundStyle(.teal).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 20) {
+                HStack(spacing: 2) {
+                    Text("T").font(.largeTitle.weight(.bold))
+                    Circle().stroke(lineWidth: 5).frame(width: 26, height: 26)
+                }
+                .accessibilityHidden(true)
+                .padding(.top, 32)
                 Text("A quieter connection.").font(.largeTitle.weight(.medium))
                 Text("Sign in with your Tono account.").foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 16) {
@@ -39,8 +44,7 @@ private struct LoginView: View {
                         Text(recovery.message)
                             .foregroundStyle(.secondary)
                             .accessibilityIdentifier("login.recovery")
-                        ActionButton(title: recovery.actionTitle,
-                                     symbol: "arrow.clockwise", prominent: true) {
+                        CTAButton(title: recovery.actionTitle, busy: model.busy) {
                             Task { await model.retryAccountRecovery() }
                         }
                         .disabled(model.busy)
@@ -50,7 +54,7 @@ private struct LoginView: View {
                             .textContentType(.emailAddress).keyboardType(.emailAddress)
                             .textInputAutocapitalization(.never).autocorrectionDisabled()
                             .textFieldStyle(.roundedBorder).accessibilityIdentifier("login.email")
-                        ActionButton(title: "Send verification code", symbol: "arrow.right", prominent: true) {
+                        CTAButton(title: "Send code", busy: model.busy) {
                             Task { await model.sendCode(email: email) }
                         }
                         .disabled(model.busy || !email.contains("@"))
@@ -61,7 +65,7 @@ private struct LoginView: View {
                             .textFieldStyle(.roundedBorder).focused($focusCode)
                             .accessibilityIdentifier("login.code")
                             .onChange(of: code) { code = String(code.filter { $0.isASCII && $0.isNumber }.prefix(6)) }
-                        ActionButton(title: "Continue", symbol: "arrow.right", prominent: true) {
+                        CTAButton(title: "Continue", busy: model.busy) {
                             let value = code
                             code = ""
                             Task { await model.verifyCode(value) }
@@ -71,20 +75,18 @@ private struct LoginView: View {
                             code = ""; model.challenge = nil; model.challengeExpires = nil
                         }.disabled(model.busy)
                     }
-                    if model.busy { ProgressView().accessibilityLabel("Contacting Tono") }
                 }
-                Text("Signing in uses your current device allowance. If it is full, Tono may replace your least recently active device.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                Text("During TestFlight, comprehensive diagnostics are on by default. Only structured app states, failure codes and coarse timing leave this device—never your browsing content or credentials. Change this in Protection settings.")
+                Text("Signing in uses this device's place in your allowance.")
                     .font(.footnote).foregroundStyle(.secondary)
                 Link("ninx.app", destination: URL(string: "https://ninx.app")!)
                 #if DEBUG
                 Button("Preview interface · no VPN") { model.preview(.ready) }
                     .font(.footnote).disabled(model.busy)
                 #endif
-            }.padding(28).frame(maxWidth: 540)
+            }.padding(24).frame(maxWidth: 540)
                 .frame(maxWidth: .infinity)
         }
+        .background(TonoBrand.ground.ignoresSafeArea())
         .navigationTitle("Tono")
         .onChange(of: model.challenge?.challengeId) { focusCode = model.challenge != nil }
     }
@@ -98,15 +100,15 @@ struct HomeView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 28) {
+            VStack(spacing: 20) {
                 if model.isPreview {
                     Label("Interface preview · no VPN", systemImage: "eye")
                         .font(.footnote).foregroundStyle(.secondary)
                         .accessibilityIdentifier("preview.banner")
                 }
                 QuietField(state: model.state)
-                    .frame(height: typeSize.isAccessibilitySize ? 100 : 220)
-                VStack(spacing: 12) {
+                    .frame(height: typeSize.isAccessibilitySize ? 140 : 330)
+                VStack(spacing: 8) {
                     Text(model.state.title).font(.largeTitle.weight(.medium))
                         .contentTransition(.numericText())
                         .accessibilityIdentifier("home.state")
@@ -122,49 +124,109 @@ struct HomeView: View {
                         .multilineTextAlignment(.center)
                     NavigationLink("Review protection", destination: ProtectionSettings(model: model))
                 }
-                ActionButton(title: actionTitle, symbol: shouldPause ? "pause.fill" : "arrow.right", prominent: !shouldPause) {
+                PowerButton(on: shouldPause && !model.isPreview,
+                            enabled: !model.busy && !model.isPreview,
+                            label: actionTitle) {
                     if shouldPause { showPause = true } else { Task { await model.connect() } }
                 }
-                .disabled(model.busy || model.isPreview)
-                .accessibilityIdentifier("home.action")
                 NavigationLink(destination: LocationsView(model: model)) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "location")
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(model.locationTitle)
-                            Text(model.isPreview ? (model.selectedLocation == nil ? "Netherlands" : "Pinned location") : "Managed by Tono")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
+                    HStack(spacing: 10) {
+                        Image(systemName: "globe")
+                        Text(model.locationTitle)
                         Image(systemName: "chevron.right").font(.caption)
-                    }.padding(20)
+                    }
+                    .padding(.horizontal, 22).padding(.vertical, 14)
                 }
                 .buttonStyle(.plain)
-                .modifier(CompanionSurface())
+                .modifier(LocationChip())
                 .accessibilityIdentifier("home.locations")
                 #if DEBUG
                 if model.isPreview { PreviewControls(model: model) }
                 #endif
             }
-            .padding(.horizontal, 28).padding(.bottom, 32)
+            .padding(.horizontal, 24).padding(.bottom, 32)
             .frame(maxWidth: 540).frame(maxWidth: .infinity)
         }
-        .background(Color(uiColor: .systemBackground))
-        .navigationTitle("Tono")
+        .background(TonoBrand.ground.ignoresSafeArea())
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink(destination: ProtectionSettings(model: model)) {
-                    Image(systemName: "slider.horizontal.3")
+                    Image(systemName: "gearshape")
                 }.accessibilityLabel("Protection settings")
             }
         }
         .confirmationDialog("Pause protection?", isPresented: $showPause, titleVisibility: .visible) {
             Button("Pause until I resume", role: .destructive) { Task { await model.pause() } }
         } message: { Text("Your traffic will no longer be protected by Tono. On Demand stays off until you resume.") }
+        .sensoryFeedback(trigger: model.state == .protected) { _, arrived in
+            arrived ? .success : nil
+        }
     }
 
     private var shouldPause: Bool { [.protected, .connecting, .recovering].contains(model.state) }
     private var actionTitle: String { shouldPause ? "Pause" : model.state == .paused ? "Resume protection" : "Connect" }
+}
+
+/// Glossy indigo power control. On = luminous ramp + halo; off/preview = quiet gray.
+private struct PowerButton: View {
+    let on: Bool
+    let enabled: Bool
+    let label: String
+    let action: () -> Void
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        ZStack {
+            if on && !reduceTransparency {
+                Circle()
+                    .fill(.radialGradient(
+                        Gradient(colors: [TonoBrand.halo.opacity(0.48), TonoBrand.halo.opacity(0)]),
+                        center: .center, startRadius: 44, endRadius: 132))
+                    .frame(width: 264, height: 264)
+            }
+            Button(action: action) {
+                Image(systemName: "power")
+                    .font(.system(size: 64, weight: .semibold))
+                    .foregroundStyle(on ? .white : Color.secondary)
+                    .frame(width: 188, height: 188)
+                    .background {
+                        Circle().fill(
+                            on ? AnyShapeStyle(RadialGradient(
+                                colors: [TonoBrand.powerTop, TonoBrand.powerMid, TonoBrand.powerDeep],
+                                center: UnitPoint(x: 0.35, y: 0.28),
+                                startRadius: 10, endRadius: 120))
+                            : AnyShapeStyle(Color(uiColor: .secondarySystemBackground)))
+                    }
+                    .overlay {
+                        if on {
+                            Circle().fill(LinearGradient(
+                                colors: [.white.opacity(reduceTransparency ? 0 : 0.35), .white.opacity(0)],
+                                startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.45)))
+                        }
+                    }
+                    .shadow(color: on ? TonoBrand.powerMid.opacity(0.5) : .black.opacity(0.12),
+                            radius: on ? 32 : 12, y: on ? 15 : 8)
+            }
+            .buttonStyle(PressScaleStyle())
+            .disabled(!enabled)
+            .opacity(enabled ? 1 : 0.6)
+            .accessibilityIdentifier("home.action")
+            .accessibilityLabel(label)
+        }
+        .padding(.vertical, 8)
+    }
+}
+
+private struct LocationChip: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    func body(content: Content) -> some View {
+        if reduceTransparency {
+            content.background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+        } else {
+            content.glassEffect(.regular.interactive(), in: Capsule())
+        }
+    }
 }
 
 private struct LocationsView: View {
@@ -330,27 +392,48 @@ private struct DiagnosticsView: View {
     }
 }
 
-private struct ActionButton: View {
+/// Dribbble-style indigo pill CTA. Busy renders the spinner inside the button.
+private struct CTAButton: View {
     let title: String
-    let symbol: String
-    var prominent = false
+    var busy = false
     let action: () -> Void
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.isEnabled) private var isEnabled
     var body: some View {
-        Group {
-            if reduceTransparency { button.buttonStyle(.borderedProminent) }
-            else if prominent { button.buttonStyle(.glassProminent) }
-            else { button.buttonStyle(.glass) }
-        }.controlSize(.large)
+        Button(action: action) {
+            HStack(spacing: 10) {
+                if busy { ProgressView().tint(.white) }
+                Text(title).fontWeight(.semibold)
+                if !busy { Image(systemName: "arrow.right") }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .background {
+                Capsule().fill(RadialGradient(
+                    colors: [TonoBrand.powerTop, TonoBrand.powerMid, TonoBrand.powerDeep],
+                    center: UnitPoint(x: 0.5, y: 0.2), startRadius: 8, endRadius: 160))
+            }
+            .overlay {
+                if !reduceTransparency {
+                    Capsule().fill(LinearGradient(
+                        colors: [.white.opacity(0.3), .white.opacity(0)],
+                        startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.4)))
+                }
+            }
+        }
+        .buttonStyle(PressScaleStyle())
+        .foregroundStyle(.white)
+        .opacity(isEnabled ? 1 : 0.55)
+        .controlSize(.large)
     }
-    private var button: some View { Button(action: action) { Label(title, systemImage: symbol).padding(.horizontal, 12) } }
 }
 
-private struct CompanionSurface: ViewModifier {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    func body(content: Content) -> some View {
-        if reduceTransparency { content.background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 24)) }
-        else { content.glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 24)) }
+/// Subtle press shrink for the glossy controls (plain style gives none).
+private struct PressScaleStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.95 : 1)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }
 
@@ -369,6 +452,18 @@ private struct PreviewControls: View {
 #Preview("Protected · interface only") {
     let model = AppModel()
     model.preview(.protected)
+    return RootView(model: model)
+}
+
+#Preview("Ready · interface only") {
+    let model = AppModel()
+    model.preview(.ready)
+    return RootView(model: model)
+}
+
+#Preview("Paused · interface only") {
+    let model = AppModel()
+    model.preview(.paused)
     return RootView(model: model)
 }
 #endif

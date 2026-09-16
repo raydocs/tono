@@ -18,7 +18,7 @@ struct TonoApp: App {
     var body: some Scene {
         WindowGroup {
             RootView(model: model)
-                .tint(.teal)
+                .tint(TonoBrand.accent)
                 .task { await model.restore() }
                 .task(id: scenePhase == .active && [.connecting, .protected, .recovering].contains(model.state) && !model.isPreview) {
                     guard scenePhase == .active, !model.isPreview else { return }
