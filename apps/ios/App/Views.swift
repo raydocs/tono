@@ -106,8 +106,11 @@ struct HomeView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                         .accessibilityIdentifier("preview.banner")
                 }
+                // 290pt keeps state, power control and the location chip on the
+                // first screen of a 375x812 phone; 330 pushed the chip under the
+                // home indicator there and cut the control on 375x667.
                 QuietField(state: model.state)
-                    .frame(height: typeSize.isAccessibilitySize ? 140 : 330)
+                    .frame(height: typeSize.isAccessibilitySize ? 140 : 290)
                 VStack(spacing: 8) {
                     Text(model.state.title).font(.largeTitle.weight(.medium))
                         .contentTransition(.numericText())
@@ -132,7 +135,9 @@ struct HomeView: View {
                     }
                     // The button already carries the VoiceOver label. Keep the
                     // visual verb 8pt from its edge, without extra button padding.
-                    Text(actionTitle).font(.footnote).foregroundStyle(.secondary)
+                    // Primary, not secondary: it sits on the halo/shadow wash,
+                    // where secondary gray drops to about 2.7-3:1 in light mode.
+                    Text(actionTitle).font(.footnote).foregroundStyle(.primary)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityHidden(true)
