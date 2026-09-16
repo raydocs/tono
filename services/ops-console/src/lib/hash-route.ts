@@ -149,7 +149,11 @@ export function closeNode() {
   writeRoute({ ...current, node: null }, true);
 }
 
+let customerReturnRoute: OpsRoute | null = null;
+
 export function openCustomer(userId: string) {
+  const current = readRoute();
+  customerReturnRoute = current.page === 'customers' && current.customerId === null ? current : null;
   writeRoute({ ...EMPTY, page: 'customers', customerId: userId });
 }
 
@@ -177,7 +181,8 @@ export function setCustomerFilter(platform: Platform | null, bucket: AdoptionBuc
 
 /** The one link an invite has: the list, with their drawer open on top of it. */
 export function openInvite(email: string) {
-  writeRoute({ ...EMPTY, page: 'customers', invite: email });
+  const current = readRoute();
+  writeRoute({ ...(current.page === 'customers' && current.customerId === null ? current : EMPTY), page: 'customers', invite: email });
 }
 
 export function closeInvite() {
@@ -186,7 +191,7 @@ export function closeInvite() {
 }
 
 export function closeCustomer() {
-  writeRoute({ ...EMPTY, page: 'customers' });
+  writeRoute(customerReturnRoute ?? { ...EMPTY, page: 'customers' });
 }
 
 export function openIncident(id: string) {

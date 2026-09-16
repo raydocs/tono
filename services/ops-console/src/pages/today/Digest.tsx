@@ -1,8 +1,12 @@
-import type { IncidentDto } from '@contract';
+import { useMemo, useState } from 'react';
+import type { CustomerSummaryDto, IncidentDto } from '@contract';
 import { copy } from '@/copy/copy';
-import type { DigestDto } from '@/lib/api-followups';
+import { isFollowupOverdue, type DigestDto, type FollowupDto } from '@/lib/api-followups';
+import { nowSec } from '@/lib/clock';
 import { severityTone } from '@/lib/codes';
-import { goPage, openCustomer, openIncident, openNodePage } from '@/lib/hash-route';
+import { formatDate } from '@/lib/display';
+import { openCustomer, openIncident, openNodePage } from '@/lib/hash-route';
+import { usePrivacy } from '@/lib/privacy';
 import { beforeNoon, capNight, formatLife, groupNight, type NightGroup } from '@/lib/handling';
 import type { Tone } from '@/components/ops/StatusWord';
 import { useIsPhone } from '@/lib/use-phone';
@@ -34,6 +38,8 @@ export function Digest({
   digest,
   openCount,
   choresToday,
+  customers,
+  incidents,
   onShowOpen,
   onShowResolved,
   onShowChores,
@@ -42,6 +48,9 @@ export function Digest({
   /** The list's own count, so the block and the tab behind it cannot disagree. */
   openCount: number;
   choresToday: number;
+  /** Loaded rows used only to name each owed followup's subject. */
+  customers: readonly CustomerSummaryDto[];
+  incidents: readonly IncidentDto[];
   onShowOpen: () => void;
   onShowResolved: () => void;
   onShowChores: () => void;
@@ -100,7 +109,7 @@ export function Digest({
         ) : (
           <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
             {due.followups.length === 0 ? null : (
-              <Jump onClick={() => goPage('customers')}>{copy.digestDueFollowups(due.followups.length)}</Jump>
+              <DueFollowups rows={due.followups} customers={customers} incidents={incidents} />
             )}
             {due.checks.length === 0 ? null : (
               <Jump onClick={onShowOpen}>{copy.digestDueChecks(due.checks.length)}</Jump>
@@ -179,6 +188,110 @@ function Jump({ onClick, children }: { onClick: () => void; children: React.Reac
       {children}
     </button>
   );
+}
+
+/**
+ * Each owed followup opens its own subject — the customer 360, the incident
+ * drawer, or the node page — and says which one before the tap. Kind plus
+ * body alone could not tell two identical notes on different subjects apart,
+ * and the promised date the comment used to mention was never rendered.
+ *
+ * Subjects resolve off the already-loaded customer and incident lists with
+ * the existing privacy mask; a subject with no loaded row reads as its
+ * honest type plus id rather than a guessed handle. The digest only returns
+ * rows that carry a due date, so every row has one to show — nothing dateless
+ * is dressed up as due today.
+ *
+ * The subject owns the first line alone and wraps instead of truncating:
+ * sharing the line with the fixed tag and date widths crushed it to zero
+ * pixels in the narrow aux column on every width, and a hover title is no
+ * substitute for a readable name. Kind, note and date share the second
+ * line — the note truncates, the date never does — so a row stays two
+ * lines tall and the dense morning read keeps its height budget. Overdue
+ * follows the Worker's Shanghai calendar-day rule, not the current second.
+ *
+ * The list caps at a few rows with the rest one tap away in place: 200 owed
+ * rows once stretched the morning read past 6600 px. Nothing is dropped and
+ * nothing retreats to the customer table.
+ */
+const DUE_FOLLOWUP_FIRST = 3;
+
+function DueFollowups({
+  rows,
+  customers,
+  incidents,
+}: {
+  rows: readonly FollowupDto[];
+  customers: readonly CustomerSummaryDto[];
+  incidents: readonly IncidentDto[];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const privacy = usePrivacy();
+  const now = nowSec();
+  const emails = useMemo(() => new Map(customers.map((row) => [row.userId, row.email])), [customers]);
+  const titles = useMemo(() => new Map(incidents.map((row) => [row.id, row.title])), [incidents]);
+  const mixed = rows.some((row) => row.subjectType !== 'user');
+  const shown = expanded ? rows : rows.slice(0, DUE_FOLLOWUP_FIRST);
+  return (
+    <div className="flex min-w-0 basis-full flex-col gap-1">
+      <span className="text-micro text-[var(--muted-foreground)]">
+        {mixed ? copy.digestDueFollowupsMixed(rows.length) : copy.digestDueFollowups(rows.length)}
+      </span>
+      {shown.map((row) => {
+        const subject = subjectLabel(row, emails, titles, privacy.email);
+        const overdue = isFollowupOverdue(row.dueAt, now);
+        const when = row.dueAt === null
+          ? copy.missing
+          : overdue
+            ? `${formatDate(row.dueAt)} · ${copy.digestDueOverdue}`
+            : formatDate(row.dueAt);
+        return (
+          <button
+            key={row.id}
+            type="button"
+            className="flex w-full min-w-0 flex-col gap-0.5 rounded-lg px-2 py-1.5 text-left hover:bg-[var(--background)] max-[640px]:min-h-[44px] max-[640px]:justify-center"
+            aria-label={`${copy.followupKind[row.kind]} ${subject} ${row.body} ${when}`}
+            title={`${subject} ${when}`}
+            onClick={() => openFollowup(row)}
+          >
+            <span className="min-w-0 text-body break-all">{subject}</span>
+            <span className="flex min-w-0 items-baseline gap-2">
+              <span className="tone-rem ops-tag shrink-0">{copy.followupKind[row.kind]}</span>
+              <span className="min-w-0 flex-1 truncate text-body underline-offset-4 hover:underline">{row.body}</span>
+              <span className="shrink-0 font-mono text-micro text-[var(--muted-foreground)]">{when}</span>
+            </span>
+          </button>
+        );
+      })}
+      {expanded || rows.length <= DUE_FOLLOWUP_FIRST ? null : (
+        <button type="button" className="self-start rounded-lg px-2 py-1.5 text-left text-body underline-offset-4 hover:underline max-[640px]:min-h-[44px]" onClick={() => setExpanded(true)}>
+          {copy.digestDueMore(rows.length - DUE_FOLLOWUP_FIRST)}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function subjectLabel(
+  row: FollowupDto,
+  emails: ReadonlyMap<string, string>,
+  titles: ReadonlyMap<string, string>,
+  mask: (value: string) => string,
+): string {
+  if (row.subjectType === 'user') {
+    const email = emails.get(row.subjectId);
+    return email === undefined ? copy.digestFollowupUnknownUser(row.subjectId) : mask(email);
+  }
+  if (row.subjectType === 'incident') {
+    return titles.get(row.subjectId) ?? copy.digestFollowupUnknownIncident(row.subjectId);
+  }
+  return row.subjectId;
+}
+
+function openFollowup(row: FollowupDto): void {
+  if (row.subjectType === 'user') openCustomer(row.subjectId);
+  else if (row.subjectType === 'incident') openIncident(row.subjectId);
+  else openNodePage(row.subjectId);
 }
 
 /**

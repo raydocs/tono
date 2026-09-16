@@ -3,7 +3,6 @@ import type {
   AdoptionBucket,
   CustomerSummaryDto,
   FunnelDto,
-  FunnelStage,
   Platform,
   ReleaseDto,
   SystemHealthDto,
@@ -29,7 +28,6 @@ import {
   selectByPlatform,
   selectCustomers,
   wechatKnown,
-  type CustomerFilter,
   type CustomerFilterId,
 } from '@/lib/customers';
 import { invitesOf, listRows, selectByStage, stageCounts } from '@/lib/funnel';
@@ -41,6 +39,8 @@ import { newestFetch, useResource, type Resource } from '@/lib/use-resource';
 import '@/styles/customers.css';
 import type { Tone } from '@/components/ops/StatusWord';
 import { useCohort } from './customer/Cohort';
+import { useCustomerView } from './customer/use-customer-view';
+import { BatchResults } from './customer/BatchResults';
 import { customerColumns } from './customer/columns';
 import { FunnelBar } from './customer/Funnel';
 import { InviteDrawer } from './customer/InviteDrawer';
@@ -87,8 +87,8 @@ export default function CustomersPage({
   invite: string | null;
 }) {
   const privacy = usePrivacy();
-  const [filter, setFilter] = useState<CustomerFilter>(null);
-  const [stage, setStage] = useState<FunnelStage | null>(null);
+  const context = useCustomerView(`${platform ?? ''}/${bucket ?? ''}`, customers.status === 'ready');
+  const { filter, stage, sort } = context.view;
   const [onboarding, setOnboarding] = useState(false);
 
   const all = useMemo(
@@ -172,7 +172,7 @@ export default function CustomersPage({
         : 'ready';
 
   return (
-    <div className="page-wrap customers-page">
+    <div ref={context.container} className="page-wrap customers-page">
       <div className="page-head">
         <section className="customers-hero" aria-label={copy.pages.customers}>
           {/* The sentence the page is built around, and the one button that
@@ -187,7 +187,7 @@ export default function CustomersPage({
                       type="button"
                       aria-pressed={filter === id}
                       className={cn('count-bit', `tone-${FRAGMENT_TONE[id]}`)}
-                      onClick={() => setFilter((current) => (current === id ? null : id))}
+                      onClick={() => context.change({ filter: filter === id ? null : id, top: 0, left: 0 })}
                     >
                       <CountText values={[counts[id]]} render={(values) => copy.customerCount[id](values[0])} />
                     </button>
@@ -259,10 +259,11 @@ export default function CustomersPage({
           this page answers and the first one an operator asks in the morning:
           of the people who are paying, who has not started using it. */}
       {customers.status === 'ready' ? (
-        <FunnelBar counts={perStage} stage={stage} onPick={setStage} />
+        <FunnelBar counts={perStage} stage={stage} onPick={(stage) => context.change({ stage, top: 0, left: 0 })} />
       ) : null}
 
       {cohort.bar}
+      <BatchResults onChanged={customers.reload} />
 
       <DataTable
         rows={shown}
@@ -272,7 +273,9 @@ export default function CustomersPage({
            columns' total it collapses to zero and no scroll can bring it
            back. A local floor keeps identities readable on a phone while the
            container keeps the sideways scroll. */
-        className="[&>table]:min-w-[1020px]"
+        className="customer-list-table [&>table]:min-w-[1020px]"
+        sort={sort}
+        onSortChange={(sort) => context.change({ sort })}
         onRowClick={(row) => (row.customer === null
           ? openInvite(row.invite.email)
           : openCustomer(row.customer.userId))}
