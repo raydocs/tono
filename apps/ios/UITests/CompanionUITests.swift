@@ -33,6 +33,7 @@ final class CompanionUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.staticTexts["preview.banner"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["home.action"].isEnabled)
+        XCTAssertEqual(app.buttons["home.locations"].label, "Location") // chosen place is the value, not the label
         app.buttons["home.locations"].tap()
         XCTAssertTrue(app.navigationBars["Location"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons["Japan"].exists)

@@ -145,14 +145,18 @@ struct HomeView: View {
                 .padding(.top, 8)
                 NavigationLink(destination: LocationsView(model: model)) {
                     HStack(spacing: 10) {
-                        Image(systemName: "globe")
+                        Image(systemName: "globe").accessibilityHidden(true)
                         Text(model.locationTitle)
-                        Image(systemName: "chevron.right").font(.caption)
+                        Image(systemName: "chevron.right").font(.caption).accessibilityHidden(true)
                     }
                     .padding(.horizontal, 22).padding(.vertical, 14)
                 }
                 .buttonStyle(.plain)
                 .modifier(LocationChip())
+                // "Automatic" alone gives VoiceOver no context; the chip is the
+                // location picker, the chosen place is its value.
+                .accessibilityLabel("Location")
+                .accessibilityValue(model.locationTitle)
                 .accessibilityIdentifier("home.locations")
                 #if DEBUG
                 if model.isPreview { PreviewControls(model: model) }
