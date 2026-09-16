@@ -124,15 +124,20 @@ struct HomeView: View {
                         .multilineTextAlignment(.center)
                     NavigationLink("Review protection", destination: ProtectionSettings(model: model))
                 }
-                PowerButton(on: shouldPause && !model.isPreview,
-                            enabled: !model.busy && !model.isPreview,
-                            label: actionTitle) {
-                    if shouldPause { showPause = true } else { Task { await model.connect() } }
+                VStack(spacing: 8) {
+                    PowerButton(on: shouldPause && !model.isPreview,
+                                enabled: !model.busy && !model.isPreview,
+                                label: actionTitle) {
+                        if shouldPause { showPause = true } else { Task { await model.connect() } }
+                    }
+                    // The button already carries the VoiceOver label. Keep the
+                    // visual verb 8pt from its edge, without extra button padding.
+                    Text(actionTitle).font(.footnote).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityHidden(true)
                 }
-                // Visual verb next to the icon-only control; the button
-                // already carries the VoiceOver label.
-                Text(actionTitle).font(.footnote).foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
+                .padding(.top, 8)
                 NavigationLink(destination: LocationsView(model: model)) {
                     HStack(spacing: 10) {
                         Image(systemName: "globe")
@@ -222,7 +227,6 @@ private struct PowerButton: View {
         .opacity(enabled ? 1 : 0.6)
         .accessibilityIdentifier("home.action")
         .accessibilityLabel(label)
-        .padding(.vertical, 8)
     }
 }
 
@@ -409,23 +413,29 @@ private struct DiagnosticsView: View {
 }
 
 /// Dribbble-style indigo pill CTA. Busy renders the spinner inside the button.
-private struct CTAButton: View {
+struct CTAButton: View {
     let title: String
     var busy = false
     let action: () -> Void
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.isEnabled) private var isEnabled
+    @ScaledMetric(relativeTo: .body) private var adornmentWidth: CGFloat = 22
     var body: some View {
         Button(action: action) {
             ZStack {
                 Text(title).fontWeight(.semibold)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    // Symmetric clearance keeps the title centered and lets it
+                    // wrap before reaching the busy/idle adornment.
+                    .padding(.horizontal, adornmentWidth + 10)
                 HStack {
                     Spacer()
                     Group {
                         if busy { ProgressView().tint(.white) }
                         else { Image(systemName: "arrow.right").accessibilityHidden(true) }
                     }
-                    .frame(width: 22, alignment: .trailing)
+                    .frame(width: adornmentWidth, alignment: .trailing)
                 }
             }
             .frame(maxWidth: .infinity)

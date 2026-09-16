@@ -13,7 +13,7 @@ enum LiquidOrb {
         }
     }
 
-    /// Orbiting-mote budget. Low Power halves it; Reduce Transparency draws rings only.
+    /// Orbiting-mote budget. Low Power halves it; Reduce Transparency skips motes.
     static func moteCount(lowPower: Bool) -> Int { lowPower ? 24 : 48 }
 
     /// Mote phase accumulates from time alone. Alignment must never rescale

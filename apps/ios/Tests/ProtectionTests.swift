@@ -1,5 +1,6 @@
 import XCTest
 import NetworkExtension
+import SwiftUI
 @testable import Tono
 
 final class ProtectionTests: XCTestCase {
@@ -161,6 +162,29 @@ final class ProtectionTests: XCTestCase {
         XCTAssertFalse(proto.enforceRoutes) // applies only when includeAllNetworks is false
         XCTAssertFalse(proto.disconnectOnSleep)
         XCTAssertEqual(proto.providerBundleIdentifier, "com.ninx.tono.PacketTunnel")
+    }
+
+    @MainActor func testNarrowRecoveryCTAReservesAdornmentSpaceInBothActivityStates() {
+        let title = "Retry sign-out cleanup"
+        let width: CGFloat = 200
+        // At the default Dynamic Type size: 20pt outer insets, then a 22pt
+        // adornment plus 10pt clearance on each side of the centered title.
+        let titleWidth = width - 2 * 20 - 2 * (22 + 10)
+        let reference = UIHostingController(rootView: Text(title).fontWeight(.semibold)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(width: titleWidth)
+            .dynamicTypeSize(.large))
+        let titleSize = reference.sizeThatFits(in: CGSize(width: titleWidth, height: 1000))
+        let idle = UIHostingController(rootView: CTAButton(title: title) {}.dynamicTypeSize(.large))
+        let busy = UIHostingController(rootView: CTAButton(title: title, busy: true) {}.dynamicTypeSize(.large))
+        let proposal = CGSize(width: width, height: 1000)
+        let idleSize = idle.sizeThatFits(in: proposal)
+        let busySize = busy.sizeThatFits(in: proposal)
+        XCTAssertEqual(idleSize.width, width, accuracy: 1)
+        XCTAssertEqual(idleSize.height, titleSize.height + 2 * 16, accuracy: 1)
+        XCTAssertEqual(busySize.width, idleSize.width, accuracy: 1)
+        XCTAssertEqual(busySize.height, idleSize.height, accuracy: 1)
     }
 
     func testMotePhaseIgnoresAlignmentAfterLongRun() {
