@@ -419,7 +419,11 @@ struct CTAButton: View {
     let action: () -> Void
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.isEnabled) private var isEnabled
-    @ScaledMetric(relativeTo: .body) private var adornmentWidth: CGFloat = 22
+    @ScaledMetric(relativeTo: .body) private var scaledAdornment: CGFloat = 22
+    /// Follows Dynamic Type through xxxLarge (~30pt) and then holds, so the
+    /// symmetric clearance never squeezes the title zone below one long word
+    /// on a 375pt phone at accessibility sizes.
+    private var adornmentWidth: CGFloat { min(scaledAdornment, 30) }
     var body: some View {
         Button(action: action) {
             ZStack {
@@ -435,6 +439,7 @@ struct CTAButton: View {
                         if busy { ProgressView().tint(.white) }
                         else { Image(systemName: "arrow.right").accessibilityHidden(true) }
                     }
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                     .frame(width: adornmentWidth, alignment: .trailing)
                 }
             }
