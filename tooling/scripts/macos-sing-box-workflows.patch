@@ -1,0 +1,179 @@
+diff --git a/.github/workflows/macos-ci.yml b/.github/workflows/macos-ci.yml
+index ba256d5d..56ba8b3d 100644
+--- a/.github/workflows/macos-ci.yml
++++ b/.github/workflows/macos-ci.yml
+@@ -29,7 +29,22 @@ concurrency:
+   cancel-in-progress: true
+ 
+ jobs:
++  sing-box-input:
++    runs-on: ubuntu-24.04
++    timeout-minutes: 20
++    steps:
++      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
++      - name: Build and verify fixed darwin-arm64 input
++        run: sh tooling/scripts/prepare-macos-sing-box.sh
++      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
++        with:
++          name: sing-box-darwin-arm64
++          path: apps/macos/Tono/Resources/sing-box
++          if-no-files-found: error
++          retention-days: 14
++
+   build:
++    needs: sing-box-input
+     # The app uses macOS 26 APIs — `glassEffect` among them — so a macos-15 image
+     # cannot compile it. On that runner every job that builds the app failed with
+     # "value of type 'some View' has no member 'glassEffect'", which reads like a
+@@ -38,6 +53,16 @@ jobs:
+     steps:
+       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+ 
++      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
++        with:
++          name: sing-box-darwin-arm64
++          path: apps/macos/Tono/Resources
++      - name: Verify core and build current helper
++        run: |
++          chmod +x apps/macos/Tono/Resources/sing-box
++          sh tooling/scripts/verify-macos-sing-box.sh
++          tooling/scripts/build-core-helper.sh
++
+       - name: Build the macOS app without signing
+         run: |
+           xcodebuild \
+@@ -48,6 +73,8 @@ jobs:
+             build
+ 
+       - name: Run the TonoTests unit tests
++        env:
++          TEST_RUNNER_TONO_EMIT_SINGBOX: ${{ runner.temp }}/sing-box-product.json
+         run: |
+           xcodebuild \
+             -project apps/macos/Tono.xcodeproj \
+@@ -56,11 +83,29 @@ jobs:
+             CODE_SIGNING_ALLOWED=NO \
+             test
+ 
++      - name: Check actual Swift runtime bytes with fixed core and helper
++        run: |
++          python3 - <<'PY'
++          import os, pathlib, subprocess, hashlib
++          config = pathlib.Path(os.environ['RUNNER_TEMP']) / 'sing-box-product.json'
++          assert config.is_file(), 'Swift emitter did not produce runtime bytes'
++          subprocess.run(['apps/macos/Tono/Resources/sing-box', 'check', '-c', str(config)], check=True, timeout=15)
++          subprocess.run(['apps/macos/Tono/Resources/tono-core-helper', '--runtime-contract-check', str(config)], check=True, timeout=5)
++          print('Swift runtime SHA256:', hashlib.sha256(config.read_bytes()).hexdigest())
++          PY
++
+   policy-tests:
++    needs: sing-box-input
+     runs-on: macos-26
+     steps:
+       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+ 
++      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
++        with:
++          name: sing-box-darwin-arm64
++          path: apps/macos/Tono/Resources
++      - run: chmod +x apps/macos/Tono/Resources/sing-box
++
+       - name: Subscription URL policy
+         run: tooling/scripts/test-subscription-url-policy.sh
+ 
+@@ -82,8 +127,8 @@ jobs:
+       - name: macOS incident regressions
+         run: tooling/scripts/test-macos-incident-regressions.sh
+ 
+-      - name: Reload preserves established connections
+-        run: tooling/scripts/test-reload-preserves-connections.sh
++      # Protected sing-box reload is stop/start, not Mihomo hot reload.
++      # Its process replacement is exercised by the helper lifecycle test.
+ 
+       - name: Install lifecycle recovery safety (no root)
+         run: python3 tooling/scripts/tests/test_helper_install_recovery.py
+@@ -113,10 +158,20 @@ jobs:
+   # the ones a developer was least likely to have run. Both faults they cover
+   # shipped, in consecutive builds. On a runner they run every time.
+   privileged-tests:
++    needs: sing-box-input
+     runs-on: macos-26
+     steps:
+       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+ 
++      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
++        with:
++          name: sing-box-darwin-arm64
++          path: apps/macos/Tono/Resources
++      - name: Verify core input
++        run: |
++          chmod +x apps/macos/Tono/Resources/sing-box
++          sh tooling/scripts/verify-macos-sing-box.sh
++
+       - name: Build the privileged helper
+         run: tooling/scripts/build-core-helper.sh
+ 
+@@ -134,7 +189,7 @@ jobs:
+           sudo /usr/bin/install -d -o root -g wheel -m 0755 /var/run/tono-core
+           sudo /usr/bin/install -d -o root -g wheel -m 0755 /Library/PrivilegedHelperTools
+           sudo /usr/bin/install -o root -g wheel -m 0755 \
+-            apps/macos/Tono/Resources/mihomo /Library/PrivilegedHelperTools/tono-mihomo
++            apps/macos/Tono/Resources/sing-box /Library/PrivilegedHelperTools/tono-sing-box
+ 
+       - name: Helper self-test including the PF parse
+         run: sudo apps/macos/Tono/Resources/tono-core-helper --self-test
+diff --git a/.github/workflows/macos-release.yml b/.github/workflows/macos-release.yml
+index dfe02796..7bfcbce3 100644
+--- a/.github/workflows/macos-release.yml
++++ b/.github/workflows/macos-release.yml
+@@ -85,10 +85,24 @@ jobs:
+           fi
+           echo "running from $GITHUB_REF"
+ 
++  sing-box-input:
++    needs: branch
++    runs-on: ubuntu-24.04
++    timeout-minutes: 20
++    steps:
++      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
++      - run: sh tooling/scripts/prepare-macos-sing-box.sh
++      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
++        with:
++          name: sing-box-darwin-arm64
++          path: apps/macos/Tono/Resources/sing-box
++          if-no-files-found: error
++          retention-days: 14
++
+   build:
+     # Manual releases belong to the macOS release line. A tag is accepted only
+     # after the ancestry check below proves it names a commit on that line.
+-    needs: branch
++    needs: [branch, sing-box-input]
+     runs-on: macos-26
+     outputs:
+       short_version: ${{ steps.release-version.outputs.short_version }}
+@@ -111,6 +125,15 @@ jobs:
+         with:
+           fetch-depth: 0
+ 
++      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
++        with:
++          name: sing-box-darwin-arm64
++          path: apps/macos/Tono/Resources
++      - name: Verify unsigned sing-box input
++        run: |
++          chmod +x apps/macos/Tono/Resources/sing-box
++          sh tooling/scripts/verify-macos-sing-box.sh
++
+       - name: Resolve the release keychain path
+         # A workflow-env value is never shell-expanded, and the runner context
+         # is not available to job-level env — write the real path at runtime
+@@ -329,7 +352,7 @@ jobs:
+           assert info["CFBundleShortVersionString"] == "0.0.72"
+           assert str(info["CFBundleVersion"]) == "72"
+           files = [root / (name + ".zip"), app / "Contents/MacOS/Tono",
+-                   app / "Contents/Resources/tono-core-helper", app / "Contents/Resources/mihomo"]
++                   app / "Contents/Resources/tono-core-helper", app / "Contents/Resources/sing-box"]
+           report = {"source": os.environ["GITHUB_SHA"], "version": "0.0.72", "build": 72,
+                     "candidateOnly": True, "releaseAccepted": False, "developerIDSigned": True,
+                     "notarized": True, "sparkleSigned": False,
