@@ -79,8 +79,24 @@ struct WindowConfigurator: NSViewRepresentable {
         let view = WindowConfiguratorView()
         DispatchQueue.main.async { [weak view] in
             guard let view, let window = view.window else { return }
-            window.minSize = NSSize(width: 860, height: 540)
-            window.contentMinSize = NSSize(width: 860, height: 540)
+            let minSize = NSSize(width: 860, height: 540)
+            let maxSize = NSSize(width: 1280, height: 720)
+            window.minSize = minSize
+            window.contentMinSize = minSize
+            window.maxSize = maxSize
+            window.contentMaxSize = maxSize
+
+            if window.frame.height > maxSize.height || window.frame.width > maxSize.width {
+                let defaultSize = NSSize(width: 920, height: 600)
+                let screen = window.screen ?? NSScreen.main
+                let visibleFrame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+                let origin = NSPoint(
+                    x: visibleFrame.midX - defaultSize.width / 2,
+                    y: visibleFrame.midY - defaultSize.height / 2
+                )
+                window.setFrame(NSRect(origin: origin, size: defaultSize), display: true, animate: false)
+            }
+
             window.isOpaque = false
             window.backgroundColor = .clear
             context.coordinator.attach(to: window)
