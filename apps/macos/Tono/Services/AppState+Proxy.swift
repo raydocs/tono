@@ -245,7 +245,7 @@ extension AppState {
             return
         }
         if isOwnedTonoMode {
-            errorMessage = "Managed sing-box routes change only through a protected configuration replacement."
+            errorMessage = String(localized: "Managed sing-box routes change only through a protected configuration replacement.")
             return
         }
 
