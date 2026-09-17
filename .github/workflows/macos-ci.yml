@@ -71,6 +71,7 @@ jobs:
             -configuration Release \
             -derivedDataPath apps/macos/build \
             CODE_SIGNING_ALLOWED=NO \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO \
             build
 
       - name: Package macOS Beta App
@@ -94,6 +95,7 @@ jobs:
             -scheme Tono \
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO \
             test
 
       - name: Check actual Swift runtime bytes with fixed core and helper
