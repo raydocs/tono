@@ -1,7 +1,7 @@
 import Foundation
 import Darwin
 
-extension LocalTrafficAudit {
+nonisolated extension LocalTrafficAudit {
     /// Flush queued entries before revealing the file in Finder.
     func prepareForReveal() -> URL {
         queue.sync { [self] in

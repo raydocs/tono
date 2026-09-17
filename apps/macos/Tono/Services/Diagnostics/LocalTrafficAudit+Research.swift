@@ -1,7 +1,7 @@
 import Foundation
 import Darwin
 
-extension LocalTrafficAudit {
+nonisolated extension LocalTrafficAudit {
     func recordResearchProtection(
         _ protection: TrafficAuditProtectionSnapshot
     ) {

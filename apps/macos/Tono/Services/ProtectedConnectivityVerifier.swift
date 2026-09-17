@@ -260,7 +260,7 @@ nonisolated enum ProtectedConnectivityVerifier {
         }
     }
 
-    private enum HTTPHeaderResult {
+    private enum HTTPHeaderResult: Sendable {
         case cancelled
         case failed(ProbeFailureCategory, String)
         case response(Int, String)
@@ -274,7 +274,7 @@ nonisolated enum ProtectedConnectivityVerifier {
         await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 let once = OnceResume<HTTPHeaderResult>()
-                let finish: (HTTPHeaderResult) -> Void = { result in
+                let finish: @Sendable (HTTPHeaderResult) -> Void = { result in
                     if once.take(result) {
                         connection.cancel()
                         continuation.resume(returning: result)
@@ -316,7 +316,7 @@ nonisolated enum ProtectedConnectivityVerifier {
     private static func receiveHTTPHeader(
         connection: NWConnection,
         buffer: Data,
-        finish: @escaping (HTTPHeaderResult) -> Void
+        finish: @escaping @Sendable (HTTPHeaderResult) -> Void
     ) {
         if Task.isCancelled {
             finish(.cancelled)

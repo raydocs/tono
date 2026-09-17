@@ -1,12 +1,11 @@
 import Foundation
 import CryptoKit
 import Darwin
-import AppKit
 import Security
 
 /// Produces runtime.yaml from subscription YAML + minimal overlay.
 /// Follows Verge's principle: subscription config is immutable, overlay only control fields.
-extension ConfigPipeline {
+nonisolated extension ConfigPipeline {
     static func pinsWithinSessionEndpointBudget(
         _ pins: [DirectDomainPin],
         seededBy fixed: [DirectEndpoint],

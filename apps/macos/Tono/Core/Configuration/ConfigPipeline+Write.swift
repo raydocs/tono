@@ -1,12 +1,11 @@
 import Foundation
 import CryptoKit
 import Darwin
-import AppKit
 import Security
 
 /// Produces runtime.yaml from subscription YAML + minimal overlay.
 /// Follows Verge's principle: subscription config is immutable, overlay only control fields.
-extension ConfigPipeline {
+nonisolated extension ConfigPipeline {
     static func extractProxiesSection(from lines: [String]) -> String {
         guard let start = lines.firstIndex(where: {
             !$0.hasPrefix(" ") && !$0.hasPrefix("\t") &&

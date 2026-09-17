@@ -61,7 +61,7 @@ struct AccountSettingsView: View {
             // Plan, expiry, quota and usage are otherwise whatever they were at
             // sign-in, which for a resident menu-bar client can be days old.
             await session.refreshAccount()
-            try? await session.reloadDevices()
+            _ = try? await session.reloadDevices()
         }
     }
 }

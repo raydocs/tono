@@ -3,7 +3,7 @@ import CryptoKit
 
 // M1 only. Frozen contract: 7f64978c5d9d5b8551e0b81f7247cb5a630ebf56.
 // No product caller, signature admission, staging, process or network operations.
-extension ConfigPipeline {
+nonisolated extension ConfigPipeline {
     enum SingBoxError: String, Error, LocalizedError, CustomStringConvertible {
         case untrustedSnapshot = "TONO_SINGBOX_UNTRUSTED_SNAPSHOT"
         case unsupportedPolicy = "TONO_SINGBOX_UNSUPPORTED_POLICY"

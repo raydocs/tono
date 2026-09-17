@@ -451,7 +451,7 @@ extension AccountSession {
         // The device is revoked either way; only the refreshed inventory is
         // missing, and the next panel appearance reloads it.
         guard isCurrent() else { return }
-        try? await reloadDevices()
+        _ = try? await reloadDevices()
     }
 
     /// Plan, expiry, quota and usage are read once at sign-in and then drift for
