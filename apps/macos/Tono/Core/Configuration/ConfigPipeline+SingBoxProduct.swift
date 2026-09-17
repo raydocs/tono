@@ -177,11 +177,13 @@ extension ConfigPipeline {
         // Controller /dns/query and outbound resolution need real answers.
         // Only packets arriving from the protected client listeners get fake IP.
         dnsRules.append(["inbound": ["Tono-DNS", "Tono-TUN", "Tono-Mixed"], "query_type": ["A"], "action": "route", "server": "Tono-FakeIP"])
-        rules.append(["ip_cidr": ["224.0.0.0/4", "169.254.0.0/16", "ff00::/8", "fe80::/10", "127.0.0.0/8", "::1/128"], "action": "route", "outbound": "DIRECT"])
+        rules.append(["ip_cidr": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "224.0.0.0/4", "255.255.255.255/32", "fe80::/10", "fc00::/7", "ff00::/8", "127.0.0.0/8", "::1/128"], "action": "route", "outbound": "DIRECT"])
         rules.append(["network": "udp", "port": [5353], "action": "route", "outbound": "DIRECT"])
+        rules.append(["process_name": ["sharingd", "rapportd", "SidecarDisplayAgent", "identityservicesd"], "action": "route", "outbound": "DIRECT"])
         rules.append(["ip_version": 6, "action": "reject"])
         rules.append(["network": ["udp", "icmp"], "action": "reject"])
-        let exclusions = Array(Set(usable.map(\.server))).sorted().map { "\($0)/32" }
+        let localSubnets = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "fe80::/10", "fc00::/7", "224.0.0.0/4"]
+        let exclusions = Array(Set(usable.map(\.server))).sorted().map { "\($0)/32" } + localSubnets
         let runtime: [String: Any] = [
             "log": ["level": overlay.logLevel == "warning" ? "warn" : overlay.logLevel],
             "dns": ["servers": dnsServers, "rules": dnsRules, "final": "Tono-DoH", "strategy": "ipv4_only"],
