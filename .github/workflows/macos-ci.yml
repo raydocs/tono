@@ -69,8 +69,21 @@ jobs:
             -project apps/macos/Tono.xcodeproj \
             -scheme Tono \
             -configuration Release \
+            -derivedDataPath apps/macos/build \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+      - name: Package macOS Beta App
+        run: |
+          mkdir -p apps/macos/dist
+          ditto -c -k --keepParent apps/macos/build/Build/Products/Release/Tono.app apps/macos/dist/Tono-macOS-beta.zip
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: tono-macos-beta-${{ github.sha }}
+          path: apps/macos/dist/Tono-macOS-beta.zip
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Run the TonoTests unit tests
         env:
