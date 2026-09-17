@@ -77,7 +77,7 @@ fi
 # install is the worst state to leave a machine in.
 # `-x` matches the process name; `-f` matched any command line mentioning the
 # core, including this script's own, so the guard fired on itself.
-if /usr/bin/pgrep -x tono-mihomo > /dev/null 2>&1; then
+if /usr/bin/pgrep -x 'tono-(mihomo|sing-box)' > /dev/null 2>&1; then
   print "a Tono core is running; disconnect before running this" >&2
   exit 1
 fi
@@ -92,7 +92,7 @@ fi
 
 label=com.raydocs.tono.core-helper
 helper_path=/Library/PrivilegedHelperTools/tono-core-helper
-mihomo_path=/Library/PrivilegedHelperTools/tono-mihomo
+mihomo_path=/Library/PrivilegedHelperTools/tono-sing-box
 uid_path=/Library/PrivilegedHelperTools/tono.allowed-uid
 plist_path=/Library/LaunchDaemons/$label.plist
 socket_path=/var/run/tono-core/service.sock

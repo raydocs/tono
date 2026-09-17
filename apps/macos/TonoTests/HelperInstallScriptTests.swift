@@ -19,7 +19,7 @@ final class HelperInstallScriptTests: XCTestCase {
     private func script(uid: uid_t = 501) -> String {
         HelperManager.installScript(
             helperSource: "/Applications/Tono.app/Contents/Resources/tono-core-helper",
-            mihomoSource: "/Applications/Tono.app/Contents/Resources/mihomo",
+            mihomoSource: "/Applications/Tono.app/Contents/Resources/sing-box",
             uid: uid
         )
     }
@@ -48,9 +48,9 @@ final class HelperInstallScriptTests: XCTestCase {
         XCTAssertTrue(line.contains("--verify --strict --all-architectures"))
     }
 
-    func testMihomoIsVerifiedTooAndNotJustTheHelper() {
-        guard let line = requirementLine(containing: "identifier \"mihomo\"") else {
-            return XCTFail("no codesign requirement pins mihomo")
+    func testSingBoxIsVerifiedTooAndNotJustTheHelper() {
+        guard let line = requirementLine(containing: "identifier \"sing-box\"") else {
+            return XCTFail("no codesign requirement pins sing-box")
         }
         XCTAssertTrue(line.contains("anchor apple generic"))
         XCTAssertTrue(line.contains("certificate leaf[subject.OU] = \"YY57758GS7\""))
@@ -63,7 +63,7 @@ final class HelperInstallScriptTests: XCTestCase {
         let text = script()
         for (verifyNeedle, moveNeedle) in [
             ("identifier \"com.raydocs.tono.helper\"", "mv -f '/Library/PrivilegedHelperTools/tono-core-helper.new'"),
-            ("identifier \"mihomo\"", "mv -f '/Library/PrivilegedHelperTools/tono-mihomo.new'"),
+            ("identifier \"sing-box\"", "mv -f '/Library/PrivilegedHelperTools/tono-sing-box.new'"),
         ] {
             guard let verify = text.range(of: verifyNeedle),
                   let move = text.range(of: moveNeedle) else {
@@ -190,7 +190,7 @@ final class HelperInstallScriptTests: XCTestCase {
         }
         let text = HelperManager.installScript(
             helperSource: "\(app)/Contents/Resources/tono-core-helper",
-            mihomoSource: "\(app)/Contents/Resources/mihomo",
+            mihomoSource: "\(app)/Contents/Resources/sing-box",
             uid: uid
         )
         try text.write(toFile: destination, atomically: true, encoding: .utf8)

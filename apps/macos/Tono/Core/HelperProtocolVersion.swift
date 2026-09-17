@@ -86,7 +86,9 @@ nonisolated enum HelperProtocolVersion {
     ///   the link-local multicast groups, and IPv6 link-local unicast. Without
     ///   this bump a 3.16.0 daemon keeps dropping Universal Clipboard and
     ///   Sidecar while the GUI thinks the helper is current.
-    static let current = "3.17.0"
+    /// 4.0: sing-box JSON staging/check, protected process replacement, new
+    /// signed executable identity. Never accept the old Mihomo daemon.
+    static let current = "4.0.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

@@ -8,10 +8,10 @@ let helperVersion = HelperProtocolVersion.current
 let socketDirectory = "/var/run/tono-core"
 let socketPath = "\(socketDirectory)/service.sock"
 let runtimeDirectory = "\(socketDirectory)/runtime"
-let runtimeConfigPath = "\(runtimeDirectory)/config.yaml"
-let pidPath = "\(socketDirectory)/mihomo.pid"
+let runtimeConfigPath = "\(runtimeDirectory)/config.json"
+let pidPath = "\(socketDirectory)/sing-box.pid"
 let allowedUIDPath = "/Library/PrivilegedHelperTools/tono.allowed-uid"
-let mihomoPath = "/Library/PrivilegedHelperTools/tono-mihomo"
+let mihomoPath = "/Library/PrivilegedHelperTools/tono-sing-box"
 let maximumRequestBytes = 16 * 1024
 let maximumHeaderBytes = 8 * 1024
 let maximumDiagnosticBytes = 32 * 1024
@@ -102,7 +102,9 @@ func staleOwnedCorePIDs(
 ) -> [Int32] {
     processes.compactMap {
         guard $0.pid > 1, $0.uid == 0,
-              $0.executablePath == expectedExecutablePath else { return nil }
+              $0.executablePath == expectedExecutablePath
+                || (expectedExecutablePath == mihomoPath
+                    && $0.executablePath == "/Library/PrivilegedHelperTools/tono-mihomo") else { return nil }
         return $0.pid
     }.sorted()
 }
@@ -112,19 +114,66 @@ func runCoreLifecyclePolicySelfTests() -> Bool {
         .init(pid: 31, executablePath: mihomoPath, uid: 0),
         .init(pid: 32, executablePath: mihomoPath, uid: 501),
         .init(pid: 33, executablePath: "/tmp/tono-mihomo", uid: 0),
-    ]) == [31]
+        .init(pid: 34, executablePath: "/Library/PrivilegedHelperTools/tono-mihomo", uid: 0),
+    ]) == [31, 34]
 }
 
 func ownedRuntimeConfigIsSafe(_ contents: String) -> Bool {
-    contents.hasPrefix("# Tono owned runtime")
-        && contents.contains("\nallow-lan: false\n")
-        && contents.contains("\nipv6: false\n")
-        && contents.contains("\nmode: rule\n")
-        && contents.contains("\nexternal-controller: '127.0.0.1:")
-        && contents.contains("\n  listen: \(ProtectedDNSContract.listener)\n")
-        && contents.contains("\n  enhanced-mode: fake-ip\n")
-        && contents.contains("\n  device: utun199\n")
-        && contents.contains("\n  - MATCH,Tono-Exit")
+    guard let object = try? JSONSerialization.jsonObject(with: Data(contents.utf8)) as? [String: Any],
+          Set(object.keys).isSubset(of: ["log", "dns", "inbounds", "outbounds", "route", "experimental"]),
+          let route = object["route"] as? [String: Any], route["final"] as? String == "Tono-Exit",
+          route["rule_set"] == nil,
+          let experimental = object["experimental"] as? [String: Any],
+          Set(experimental.keys).isSubset(of: ["clash_api", "cache_file"]),
+          let api = experimental["clash_api"] as? [String: Any],
+          let controller = api["external_controller"] as? String,
+          controller.hasPrefix("127.0.0.1:"),
+          let secret = api["secret"] as? String, !secret.isEmpty,
+          api["external_ui"] == nil, api["external_ui_download_url"] == nil,
+          api["default_mode"] as? String == "rule",
+          let cache = experimental["cache_file"] as? [String: Any], cache["enabled"] as? Bool == false,
+          let inbounds = object["inbounds"] as? [[String: Any]], !inbounds.isEmpty,
+          inbounds.contains(where: {
+              $0["type"] as? String == "direct" && $0["tag"] as? String == "Tono-DNS"
+                  && $0["listen"] as? String == ProtectedDNSContract.server
+                  && $0["listen_port"] as? Int == ProtectedDNSContract.port
+          }),
+          let dns = object["dns"] as? [String: Any], dns["strategy"] as? String == "ipv4_only",
+          let servers = dns["servers"] as? [[String: Any]],
+          let outbounds = object["outbounds"] as? [[String: Any]] else { return false }
+    for inbound in inbounds {
+        switch inbound["type"] as? String {
+        case "tun":
+            guard inbound["interface_name"] as? String == "utun199",
+                  inbound["dns_mode"] as? String == "disabled", inbound["stack"] == nil,
+                  inbound["address"] as? [String] == ["198.18.0.1/30"],
+                  inbound["auto_route"] as? Bool == true,
+                  inbound["strict_route"] as? Bool == false else { return false }
+        case "direct", "mixed":
+            guard inbound["listen"] as? String == "127.0.0.1" else { return false }
+        default: return false
+        }
+    }
+    for server in servers {
+        guard ["fakeip", "https", "hosts"].contains(server["type"] as? String ?? ""),
+              server["path"] == nil || server["type"] as? String == "https" else { return false }
+    }
+    for outbound in outbounds {
+        guard ["vless", "hysteria2", "socks", "direct", "selector"].contains(outbound["type"] as? String ?? "") else { return false }
+    }
+    // No user-controlled files, arbitrary process execution, insecure TLS or
+    // additional remote resource loader may be passed to the privileged core.
+    func safe(_ value: Any) -> Bool {
+        if let dictionary = value as? [String: Any] {
+            let forbidden: Set<String> = ["certificate_path", "client_certificate_path", "client_key_path",
+                "key_path", "external_ui", "output", "rule_set", "insecure", "default_mark", "routing_mark"]
+            return !dictionary.keys.contains(where: { forbidden.contains($0) })
+                && dictionary.values.allSatisfy(safe)
+        }
+        if let array = value as? [Any] { return array.allSatisfy(safe) }
+        return true
+    }
+    return safe(object)
 }
 
 /// The refusal matrix that keeps an unprivileged user from getting root to run a
@@ -189,7 +238,7 @@ func runCoreLifecycleSelfTests() -> Bool {
     }
     guard let home = try? homeDirectory(for: allowedUID) else { return false }
     let configDirectory = "\(home)/Library/Application Support/Tono-Dev/config"
-    let configPath = "\(configDirectory)/config.yaml"
+    let configPath = "\(configDirectory)/config.json"
 
     // A core already running would own the DNS port this one needs.
     let probe = Process()
@@ -197,7 +246,7 @@ func runCoreLifecycleSelfTests() -> Bool {
     // `-x` matches the process name, not the whole command line: with `-f` this
     // matched any shell whose arguments happened to mention the core, including
     // the one running this test.
-    probe.arguments = ["-x", "tono-mihomo"]
+    probe.arguments = ["-x", "tono-sing-box"]
     probe.standardOutput = FileHandle.nullDevice
     probe.standardError = FileHandle.nullDevice
     try? probe.run()
@@ -209,39 +258,8 @@ func runCoreLifecycleSelfTests() -> Bool {
         return false
     }
 
-    // Shaped to satisfy `ownedRuntimeConfigIsSafe` and to be accepted by the
-    // core, with the tunnel switched off: the predicate requires the device to
-    // be named, not to be created, and creating one would rearrange the routing
-    // table of whatever machine this runs on.
-    let config = """
-    # Tono owned runtime
-    allow-lan: false
-    ipv6: false
-    mode: rule
-    log-level: warning
-    external-controller: '127.0.0.1:29394'
-    secret: 'core-lifecycle-self-test'
-    dns:
-      enable: true
-      listen: \(ProtectedDNSContract.listener)
-      enhanced-mode: fake-ip
-      fake-ip-range: 198.18.0.1/16
-      nameserver:
-        - 223.5.5.5
-    tun:
-      enable: false
-      device: utun199
-      stack: gvisor
-    proxies: []
-    proxy-groups:
-      - name: Tono-Exit
-        type: select
-        proxies:
-          - DIRECT
-    rules:
-      - MATCH,Tono-Exit
-
-    """
+    // Loopback-only fixture. No system DNS change, TUN or remote dial.
+    let config = coreLifecycleTestJSON
     defer {
         try? FileManager.default.removeItem(
             atPath: "\(home)/Library/Application Support/Tono-Dev"
@@ -288,7 +306,7 @@ func runCoreLifecycleSelfTests() -> Bool {
         // anything alive at this point was started by it.
         let sweep = Process()
         sweep.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        sweep.arguments = ["-x", "tono-mihomo"]
+        sweep.arguments = ["-x", "tono-sing-box"]
         sweep.standardOutput = FileHandle.nullDevice
         sweep.standardError = FileHandle.nullDevice
         try? sweep.run()
@@ -332,6 +350,19 @@ func runCoreLifecycleSelfTests() -> Bool {
         try manager.start(configDirectory: configDirectory, configSHA256: digest)
     }
     check("still-the-same-core", manager.status().pid == started.pid)
+
+    do {
+        _ = try manager.sync(configDirectory: configDirectory, configSHA256: digest)
+        check("reload-replaces-pid", manager.status().pid != started.pid)
+        check("reload-running", manager.status().running)
+        refuses("reload-while-asleep-refused") {
+            _ = try manager.sync(configDirectory: configDirectory, configSHA256: digest,
+                                 startAllowed: { false })
+        }
+        check("failed-reload-does-not-fallback", !manager.status().running)
+    } catch {
+        failures.append("protected-replacement")
+    }
 
     do {
         try manager.stop()
@@ -486,32 +517,28 @@ func runStagingRefusalSelfTests() -> Bool {
     return false
 }
 
+let coreLifecycleTestJSON = #"""
+{"log":{"level":"warn"},
+ "dns":{"strategy":"ipv4_only","servers":[{"type":"hosts","tag":"local","predefined":{"probe.invalid":["198.19.1.2"]}}],"final":"local"},
+ "inbounds":[{"type":"direct","tag":"Tono-DNS","listen":"127.0.0.1","listen_port":53}],
+ "outbounds":[{"type":"direct","tag":"Tono-Exit"}],
+ "route":{"final":"Tono-Exit","rules":[{"inbound":["Tono-DNS"],"action":"hijack-dns"}]},
+ "experimental":{"cache_file":{"enabled":false},"clash_api":{"external_controller":"127.0.0.1:29394","secret":"core-lifecycle-self-test","default_mode":"rule"}}}
+"""#
+
 func runOwnedRuntimeContractSelfTests() -> Bool {
-    let valid = """
-    # Tono owned runtime
-    allow-lan: false
-    ipv6: false
-    mode: rule
-    external-controller: '127.0.0.1:9090'
-    dns:
-      listen: \(ProtectedDNSContract.listener)
-      enhanced-mode: fake-ip
-    tun:
-      device: utun199
-    rules:
-      - MATCH,Tono-Exit
-    """
+    let valid = coreLifecycleTestJSON
     return ownedRuntimeConfigIsSafe(valid)
         && !ownedRuntimeConfigIsSafe(
             valid.replacingOccurrences(
-                of: ProtectedDNSContract.listener,
-                with: "198.18.0.2:53"
+                of: #""listen":"127.0.0.1""#,
+                with: #""listen":"198.18.0.2""#
             )
         )
         && !ownedRuntimeConfigIsSafe(
             valid.replacingOccurrences(
-                of: ProtectedDNSContract.listener,
-                with: "0.0.0.0:53"
+                of: #""listen":"127.0.0.1""#,
+                with: #""listen":"0.0.0.0""#
             )
         )
 }
@@ -806,6 +833,10 @@ umask(0o077)
 if CommandLine.arguments.dropFirst() == ["--version"] {
     print(helperVersion)
     exit(0)
+}
+if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--runtime-contract-check" {
+    let contents = try? String(contentsOfFile: CommandLine.arguments[2], encoding: .utf8)
+    exit(contents.map(ownedRuntimeConfigIsSafe) == true ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--core-lifecycle-self-test"] {
     exit(runCoreLifecycleSelfTests() ? 0 : 1)

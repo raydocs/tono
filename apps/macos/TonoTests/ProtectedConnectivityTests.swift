@@ -455,10 +455,11 @@ final class ProtectedConnectivityTests: XCTestCase {
     }
 
     func testFakeIPClassifierAndDNSAnswerParser() {
-        XCTAssertTrue(ProtectedDNSProbe.isFakeIP("198.18.0.1"))
+        XCTAssertTrue(ProtectedDNSProbe.isFakeIP("198.19.0.1"))
+        XCTAssertFalse(ProtectedDNSProbe.isFakeIP("198.18.0.2"))
         XCTAssertFalse(ProtectedDNSProbe.isFakeIP("1.1.1.1"))
-        XCTAssertTrue(ProtectedDNSProbe.containsFakeIP(["1.1.1.1", "198.18.12.34"]))
-        XCTAssertEqual(ProtectedDNSProbe.firstFakeIP(in: ["1.1.1.1", "198.18.12.34"]), "198.18.12.34")
+        XCTAssertTrue(ProtectedDNSProbe.containsFakeIP(["1.1.1.1", "198.19.12.34"]))
+        XCTAssertEqual(ProtectedDNSProbe.firstFakeIP(in: ["1.1.1.1", "198.19.12.34"]), "198.19.12.34")
         XCTAssertNil(ProtectedDNSProbe.firstFakeIP(in: ["8.8.8.8"]))
         XCTAssertEqual(
             ProtectedConnectivityVerifier.parseHTTPStatus(
@@ -470,7 +471,7 @@ final class ProtectedConnectivityTests: XCTestCase {
 
         var packet = ProtectedDNSProbe.encodeQuery(name: "www.gstatic.com")
         // Flip to a response with one A answer: keep the question, append
-        // name-pointer + type A + class IN + TTL + rdlength 4 + 198.18.1.2
+        // name-pointer + type A + class IN + TTL + rdlength 4 + 198.19.1.2
         packet[2] = 0x81
         packet[3] = 0x80
         packet[6] = 0x00
@@ -481,24 +482,24 @@ final class ProtectedConnectivityTests: XCTestCase {
             0x00, 0x01,
             0x00, 0x00, 0x00, 0x3C,
             0x00, 0x04,
-            198, 18, 1, 2,
+            198, 19, 1, 2,
         ])
-        XCTAssertEqual(ProtectedDNSProbe.decodeAnswers(packet), ["198.18.1.2"])
+        XCTAssertEqual(ProtectedDNSProbe.decodeAnswers(packet), ["198.19.1.2"])
         XCTAssertTrue(
             ProtectedDNSProbe.systemResolverBypassesProtectedListener(
-                listenerAnswers: ["198.18.1.2"],
+                listenerAnswers: ["198.19.1.2"],
                 systemAnswers: ["203.107.1.1"]
             )
         )
         XCTAssertFalse(
             ProtectedDNSProbe.systemResolverBypassesProtectedListener(
-                listenerAnswers: ["198.18.1.2"],
-                systemAnswers: ["198.18.1.2"]
+                listenerAnswers: ["198.19.1.2"],
+                systemAnswers: ["198.19.1.2"]
             )
         )
         XCTAssertFalse(
             ProtectedDNSProbe.systemResolverBypassesProtectedListener(
-                listenerAnswers: ["198.18.1.2"],
+                listenerAnswers: ["198.19.1.2"],
                 systemAnswers: []
             )
         )

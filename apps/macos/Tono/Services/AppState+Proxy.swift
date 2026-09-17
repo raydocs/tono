@@ -25,6 +25,10 @@ extension AppState {
             errorMessage = String(localized: "The selected node is unavailable.")
             return
         }
+        if let desiredNode, let reason = ConfigPipeline.singBoxUnavailableReason(desiredNode) {
+            errorMessage = reason + ": this sing-box build cannot authenticate the catalog's HY2 certificate pin. Choose Reality."
+            return
+        }
 
         if isConnected,
            let current = proxyService.activeNodeName,
@@ -98,7 +102,6 @@ extension AppState {
             do {
                 try checkSwitchCurrent()
                 let previousName = self.proxyService.activeNodeName
-                let previousNode = previousName.flatMap { self.localProxyNode(matching: $0) }
                 let previousEndpoints = self.currentProxyEndpoints()
                 let nextEndpoints = try ConfigPipeline.dialEndpoints(for: desiredNode)
                     + self.claudeHomeDialEndpoints(excluding: desiredNode)
@@ -116,10 +119,19 @@ extension AppState {
                     node: desiredNode?.id,
                     generation: Int(switchGeneration)
                 )
-                try await api.selectProxy(
-                    group: ConfigPipeline.exitGroupName,
-                    proxy: nodeName
+                var nextOverlay = self.currentOwnedRuntimeOverlay()
+                nextOverlay.selectedNodeName = nodeName
+                let digest = try await self.coreRuntime.writeRuntimeConfig(
+                    overlay: nextOverlay, customNodes: self.importedExitNodes,
+                    directPolicy: self.activeDirectPolicy
                 )
+                try checkSwitchCurrent()
+                let path = try await PrivilegedRuntimeCoordinator.shared.syncCoreConfig(
+                    configDirectory: self.coreRuntime.configDirectory.path, configSHA256: digest)
+                try await api.reloadConfig(path: path)
+                self.loadedRuntimeConfigDigest = digest
+                self.commitResidentialRouteAuditContext(overlay: nextOverlay,
+                    nodes: self.importedExitNodes, digest: digest)
                 try checkSwitchCurrent()
                 // Prove the new exit before tearing leftover sockets on the
                 // previous destination. Closing everything first dumped the
@@ -136,41 +148,6 @@ extension AppState {
                     rounds: 1
                 )
                 try checkSwitchCurrent()
-                if case .failed = switchVerdict, let previousName {
-                    try await api.selectProxy(
-                        group: ConfigPipeline.exitGroupName,
-                        proxy: previousName
-                    )
-                    try checkSwitchCurrent()
-                    let rollback = await self.verifyProtectedConnection(
-                        controllerTask: Task {
-                            await self.advisoryControllerExitProbe(
-                                api: api,
-                                selectedExit: previousNode ?? self.selectedExitNode()
-                            )
-                        },
-                        mixedPort: self.config.mixedPort,
-                        generation: switchGeneration,
-                        rounds: 1
-                    )
-                    try checkSwitchCurrent()
-                    ConnectionTelemetryBuffer.shared.record(
-                        "switchRollback",
-                        node: desiredNode?.id,
-                        generation: Int(switchGeneration)
-                    )
-                    try await self.armSwitchKillSwitch(proxyEndpoints: previousEndpoints)
-                    try checkSwitchCurrent()
-                    if case .failed(let failure) = rollback {
-                        self.lastClassifiedFailure = failure
-                        self.isRecoveringProtectedConnection = true
-                        throw CoreControllerError.protectionFailed(failure.userMessage)
-                    }
-                    protectionTransitionInFlight = false
-                    throw CoreControllerError.protectionFailed(
-                        String(localized: "New server failed verification. Switched back to the previous one.")
-                    )
-                }
                 if case .failed(let failure) = switchVerdict {
                     self.lastClassifiedFailure = failure
                     throw CoreControllerError.protectionFailed(failure.userMessage)
@@ -265,6 +242,10 @@ extension AppState {
         guard isConnected else { return }
         if isMainProxyGroup(groupName) {
             selectNode(target)
+            return
+        }
+        if isOwnedTonoMode {
+            errorMessage = "Managed sing-box routes change only through a protected configuration replacement."
             return
         }
 
@@ -618,17 +599,7 @@ extension AppState {
                 }
                 guard !Task.isCancelled, !isDisconnecting else { return }
                 guard connectionCoordinator.configReloadRequestID == requestID else { return }
-                if pinsOnlyRefresh {
-                    // A background pin refresh must never take the session
-                    // down. The armed endpoint set is a superset of the
-                    // active one, the old config is still in force, and the
-                    // next monitor cycle will retry.
-                    LocalTrafficAudit.shared.recordEvent(
-                        "managed_direct_refresh_failed",
-                        details: ["error": String(describing: error)]
-                    )
-                    finishConfigReloadRequest(requestID)
-                } else if ownedRuntime {
+                if ownedRuntime || pinsOnlyRefresh {
                     finishConfigReloadRequest(requestID, startPending: false)
                     disconnect(releaseKillSwitch: false)
                     errorMessage = String(
