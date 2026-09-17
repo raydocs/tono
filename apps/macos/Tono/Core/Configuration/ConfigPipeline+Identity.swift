@@ -1,12 +1,12 @@
 import Foundation
 import CryptoKit
 import Darwin
-import AppKit
+import CoreServices
 import Security
 
 /// Produces runtime.yaml from subscription YAML + minimal overlay.
 /// Follows Verge's principle: subscription config is immutable, overlay only control fields.
-extension ConfigPipeline {
+nonisolated extension ConfigPipeline {
     static func isClaudeCodeIdentity(process: String, processPath: String) -> Bool {
         let path = processPath.lowercased()
         // Desktop is `Claude`; the CLI is `claude` / `claude.exe`. Do not
@@ -27,7 +27,7 @@ extension ConfigPipeline {
     /// Exact suffixes accepted by traffic-policy v3. They are rendered only
     /// as TCP DOMAIN-SUFFIX rules; the control plane and client both reject
     /// arbitrary suffixes and subdomain-shaped entries here.
-    static let managedWebDirectSuffixAllowlist = [
+    nonisolated static let managedWebDirectSuffixAllowlist = [
         "bilibili.com", "biliapi.net", "bilivideo.com", "hdslb.com",
         "qq.com", "gtimg.cn", "gtimg.com", "iqiyi.com", "qiyi.com",
         "qiyipic.com", "iqiyipic.com", "youku.com", "ykimg.com",
@@ -76,7 +76,7 @@ extension ConfigPipeline {
     /// list: the caller is asking for a signed desktop application's raw-IP
     /// traffic to leave the tunnel, not for every browser tab under a public
     /// namespace.
-    static let managedNativeDirectSuffixAllowlist = [
+    nonisolated static let managedNativeDirectSuffixAllowlist = [
         "qq.com", "qq.com.cn", "qpic.cn", "qlogo.cn", "gtimg.cn",
         "gtimg.com", "wechat.com", "weixin.com", "weixinbridge.com",
         "wxs.qq.com",
@@ -117,7 +117,7 @@ extension ConfigPipeline {
     /// would have to be re-released as often as the policy moves. Published
     /// policy is signed, so this list costs production nothing; an unsigned
     /// document asking for a raw-IP direct route is exactly what it refuses.
-    static let managedDirectIPv4Allowlist: [String] = []
+    nonisolated static let managedDirectIPv4Allowlist: [String] = []
 
     /// Domain families the reviewed WeChat bundle dials, resolved through China
     /// DoH on the interface-bound direct outbound.
@@ -144,7 +144,7 @@ extension ConfigPipeline {
     /// `nameserver-policy` entry has no fallback to the global nameserver, so
     /// if the direct outbound cannot reach AliDNS these names stop resolving
     /// rather than resolving through the exit.
-    static let wechatDirectDNSSuffixes = [
+    nonisolated static let wechatDirectDNSSuffixes = [
         "wechat.com",       // snsvideo.c2c, mmsns.c2c, mmhead.c2c, dns, dl
         "weixinbridge.com", // cube, badjs
         "qpic.cn",          // mmbiz, mmsns, wework
@@ -160,7 +160,7 @@ extension ConfigPipeline {
     /// answers region-correct. TCP/443 stays inside the helper's session
     /// endpoint contract, and TLS server authentication protects the answers
     /// that feed the hosts pins and the PF allowlist.
-    static let managedDirectResolverURLs = [
+    nonisolated static let managedDirectResolverURLs = [
         "https://223.5.5.5/dns-query",
         "https://223.6.6.6/dns-query",
     ]
@@ -172,9 +172,9 @@ extension ConfigPipeline {
     /// alone would produce an arm the daemon rejects, turning a partial loss of
     /// direct routes into a session that cannot connect at all. The two must
     /// move together or not move.
-    static let maximumSessionDirectEndpoints = 256
+    nonisolated static let maximumSessionDirectEndpoints = 256
 
-    static let managedDirectResolverEndpoints = [
+    nonisolated static let managedDirectResolverEndpoints = [
         DirectEndpoint(address: "223.5.5.5", port: 443, transport: "tcp"),
         DirectEndpoint(address: "223.6.6.6", port: 443, transport: "tcp"),
     ]
@@ -222,7 +222,7 @@ extension ConfigPipeline {
     /// invisible, and the list is sampled when the runtime is generated, so a
     /// move mid-session is picked up on the next connect or policy refresh
     /// rather than immediately.
-    static let reviewedDirectDefaultBundlePaths = [
+    nonisolated static let reviewedDirectDefaultBundlePaths = [
         "/Applications/WeChat.app/",
         "/Applications/微信.app/",
         "/Applications/DingTalk.app/",
@@ -238,7 +238,7 @@ extension ConfigPipeline {
     /// an arbitrary process name or path. A relocation is admitted only for
     /// vendors whose signing team has been captured below; otherwise it stays
     /// on the tunnel until a real signed bundle is reviewed.
-    static let reviewedDirectBundleIdentifiers = [
+    nonisolated static let reviewedDirectBundleIdentifiers = [
         "com.tencent.xinWeChat",
         "com.alibaba.DingTalk",
         "com.alibaba.DingTalkMac",
@@ -258,7 +258,7 @@ extension ConfigPipeline {
     /// Feishu/Lark relocations stay fail-closed until a real signed bundle is
     /// inspected on a target Mac; the standard `/Applications` paths remain
     /// supported meanwhile.
-    static let reviewedDirectTeamIdentifiers = [
+    nonisolated static let reviewedDirectTeamIdentifiers = [
         "com.alibaba.DingTalk": "XN6U3EV979",
         "com.alibaba.DingTalkMac": "XN6U3EV979",
         "com.alibaba.dingtalk": "XN6U3EV979",
@@ -266,12 +266,19 @@ extension ConfigPipeline {
         "com.dingtalk.DingTalkMac": "XN6U3EV979",
     ]
 
+    private static func applicationURLs(forBundleIdentifier identifier: String) -> [URL] {
+        guard let cfURLs = LSCopyApplicationURLsForBundleIdentifier(identifier as CFString, nil)?.takeRetainedValue() as? [URL] else {
+            return []
+        }
+        return cfURLs
+    }
+
     /// WeChat-only paths are kept separate because the audit counters are
     /// deliberately WeChat-specific. Routing uses the broader reviewed list.
     static var wechatProcessBundlePaths: [String] {
         var paths = ["/Applications/WeChat.app/", "/Applications/微信.app/"]
-        let discovered = NSWorkspace.shared.urlsForApplications(
-            withBundleIdentifier: "com.tencent.xinWeChat"
+        let discovered = applicationURLs(
+            forBundleIdentifier: "com.tencent.xinWeChat"
         )
         for url in discovered + applicationSubfolderBundles(named: ["WeChat.app", "微信.app"]) {
             let path = url.standardizedFileURL.resolvingSymlinksInPath().path + "/"
@@ -286,8 +293,8 @@ extension ConfigPipeline {
     static var managedDirectProcessBundlePaths: [String] {
         var paths = reviewedDirectDefaultBundlePaths
         for identifier in reviewedDirectBundleIdentifiers {
-            let discovered = NSWorkspace.shared.urlsForApplications(
-                withBundleIdentifier: identifier
+            let discovered = applicationURLs(
+                forBundleIdentifier: identifier
             )
             for url in discovered {
                 let path = url.standardizedFileURL.resolvingSymlinksInPath().path + "/"
@@ -393,7 +400,7 @@ extension ConfigPipeline {
     ///
     /// If Tencent ever ships under a second team, adoption fails closed: the
     /// bundle is skipped, WeChat routes through the tunnel, and nothing leaks.
-    static let reviewedWeChatTeamIdentifier: String? = "5A4RE8SF68"
+    nonisolated static let reviewedWeChatTeamIdentifier: String? = "5A4RE8SF68"
 
     static func isSignedWeChatBundle(at url: URL) -> Bool {
         var requirementText =

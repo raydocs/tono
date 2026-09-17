@@ -21,8 +21,8 @@ final class DiagnosticsLogOwnershipTests: XCTestCase {
         final class Consent: @unchecked Sendable {
             private let lock = NSLock()
             private var value = true
-            func get() -> Bool { lock.lock(); defer { lock.unlock() }; return value }
-            func set(_ value: Bool) { lock.lock(); defer { lock.unlock() }; self.value = value }
+            nonisolated func get() -> Bool { lock.lock(); defer { lock.unlock() }; return value }
+            nonisolated func set(_ value: Bool) { lock.lock(); defer { lock.unlock() }; self.value = value }
         }
         let name = "log-consent-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))

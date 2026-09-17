@@ -1,12 +1,11 @@
 import Foundation
 import CryptoKit
 import Darwin
-import AppKit
 import Security
 
 /// Produces runtime.yaml from subscription YAML + minimal overlay.
 /// Follows Verge's principle: subscription config is immutable, overlay only control fields.
-extension ConfigPipeline {
+nonisolated extension ConfigPipeline {
     static func dialEndpoints(for node: ProxyNode?) throws -> [DialEndpoint] {
         guard let node else { return [] }
         let validated = try validatedOwnedNode(node)

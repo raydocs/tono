@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
 
-extension ConfigPipeline {
+nonisolated extension ConfigPipeline {
     /// Product inputs have already passed account/catalog/policy ownership and
     /// freshness admission. Revalidate transport/route fields here; this value
     /// is not a Started or Connected receipt.
@@ -19,6 +19,9 @@ extension ConfigPipeline {
     static func singBoxUnavailableReason(_ node: ProxyNode) -> String? {
         if node.type == .hysteria2, node.tlsFingerprint != nil {
             return "TONO_SINGBOX_HY2_DER_PIN_UNSUPPORTED"
+        }
+        if node.type != .vless && node.type != .hysteria2 {
+            return "TONO_SINGBOX_UNSUPPORTED_TRANSPORT"
         }
         return nil
     }
@@ -69,22 +72,44 @@ extension ConfigPipeline {
         if requiredCapabilities.contains("direct"), plan == nil { throw SingBoxError.unsupportedPolicy }
 
         var outbounds: [[String: Any]] = try usable.map { node in
-            guard node.type == .vless, let uuid = node.uuid, let sni = node.sni,
-                  let key = node.realityPublicKey, let shortID = node.realityShortId else {
+            switch node.type {
+            case .vless:
+                guard let uuid = node.uuid, let sni = node.sni,
+                      let key = node.realityPublicKey, let shortID = node.realityShortId else {
+                    throw SingBoxError.unsupportedTransport
+                }
+                let fingerprint = node.clientFingerprint ?? "chrome"
+                guard ["chrome", "firefox", "safari", "ios", "android", "edge", "360", "qq", "random", "randomized"].contains(fingerprint) else {
+                    throw SingBoxError.unsupportedFingerprint
+                }
+                var outbound: [String: Any] = [
+                    "type": "vless", "tag": node.name, "server": node.server, "server_port": node.port,
+                    "uuid": uuid, "tls": ["enabled": true, "server_name": sni,
+                        "utls": ["enabled": true, "fingerprint": fingerprint],
+                        "reality": ["enabled": true, "public_key": key, "short_id": shortID]],
+                ]
+                if let flow = node.flow { outbound["flow"] = flow }
+                return outbound
+            case .hysteria2:
+                guard let password = node.password, !password.isEmpty else {
+                    throw SingBoxError.unsupportedTransport
+                }
+                let serverName = node.sni ?? node.server
+                let outbound: [String: Any] = [
+                    "type": "hysteria2",
+                    "tag": node.name,
+                    "server": node.server,
+                    "server_port": node.port,
+                    "password": password,
+                    "tls": [
+                        "enabled": true,
+                        "server_name": serverName,
+                    ],
+                ]
+                return outbound
+            default:
                 throw SingBoxError.unsupportedTransport
             }
-            let fingerprint = node.clientFingerprint ?? "chrome"
-            guard ["chrome", "firefox", "safari", "ios", "android", "edge", "360", "qq", "random", "randomized"].contains(fingerprint) else {
-                throw SingBoxError.unsupportedFingerprint
-            }
-            var outbound: [String: Any] = [
-                "type": "vless", "tag": node.name, "server": node.server, "server_port": node.port,
-                "uuid": uuid, "tls": ["enabled": true, "server_name": sni,
-                    "utls": ["enabled": true, "fingerprint": fingerprint],
-                    "reality": ["enabled": true, "public_key": key, "short_id": shortID]],
-            ]
-            if let flow = node.flow { outbound["flow"] = flow }
-            return outbound
         }
         if let transport {
             var outbound: [String: Any] = ["type": "socks", "tag": homeNodeName,

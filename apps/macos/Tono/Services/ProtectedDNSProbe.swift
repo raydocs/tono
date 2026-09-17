@@ -52,7 +52,7 @@ nonisolated enum ProtectedDNSProbe {
                 let connection = NWConnection(host: host, port: nwPort, using: .udp)
                 holder.connection = connection
                 let once = OnceResume<[String]>()
-                let finish: ([String]) -> Void = { answers in
+                let finish: @Sendable ([String]) -> Void = { answers in
                     if once.take(answers) {
                         connection.cancel()
                         continuation.resume(returning: answers)
