@@ -238,6 +238,17 @@ nonisolated struct HelperManager {
               let mihomoSource = Bundle.main.url(forResource: "sing-box", withExtension: nil) else {
             throw HelperInstallError.resourceNotFound
         }
+
+        if installedVersion != nil, !daemonRejected {
+            if attemptSilentUpgrade(
+                helperSource: helperSource,
+                mihomoSource: mihomoSource,
+                preparationStartedAt: preparationStartedAt
+            ) {
+                return
+            }
+        }
+
         try verifyEmbeddedExecutable(
             helperSource,
             identifier: "com.raydocs.tono.helper"
@@ -832,6 +843,52 @@ nonisolated struct HelperManager {
                     + "Install a signed Tono package; an administrator repair "
                     + "cannot fix an unsigned app."
             )
+        }
+    }
+
+    private static func attemptSilentUpgrade(
+        helperSource: URL,
+        mihomoSource: URL,
+        preparationStartedAt: Date
+    ) -> Bool {
+        do {
+            try verifyEmbeddedExecutable(
+                helperSource,
+                identifier: "com.raydocs.tono.helper"
+            )
+            try verifyEmbeddedExecutable(mihomoSource, identifier: "sing-box")
+
+            let payload: [String: Any] = [
+                "helperSource": helperSource.path,
+                "mihomoSource": mihomoSource.path,
+            ]
+            let body = try JSONSerialization.data(withJSONObject: payload)
+            let response = try sendRequest(
+                method: "POST",
+                path: "/helper/upgrade",
+                body: body
+            )
+            guard response.status == 200 else { return false }
+
+            let startupDeadline = Date().addingTimeInterval(5)
+            while Date() < startupDeadline {
+                usleep(150_000)
+                if currentVersion() == helperVersion {
+                    LocalTrafficAudit.shared.recordEvent(
+                        "helper_silent_upgrade_succeeded",
+                        details: [
+                            "version": helperVersion,
+                            "duration_ms": Self.durationMilliseconds(
+                                since: preparationStartedAt
+                            ),
+                        ]
+                    )
+                    return true
+                }
+            }
+            return false
+        } catch {
+            return false
         }
     }
 

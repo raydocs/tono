@@ -42,6 +42,7 @@ DEVELOPER_DIR=$developer_dir /usr/bin/xcodebuild \
   -configuration Debug \
   -derivedDataPath "$test_dir/DerivedData" \
   CODE_SIGNING_ALLOWED=NO \
+  ENABLE_USER_SCRIPT_SANDBOXING=NO \
   build
 
 echo "[2/3] Validating privacy-bounded app-routing classification"
