@@ -1163,7 +1163,8 @@ extension AppState {
             var consecutiveHealthFailures = 0
             var tunRouteRearmAttempts = 0
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(10))
+                let intervalSeconds = consecutiveHealthFailures > 0 ? 2 : 5
+                try? await Task.sleep(for: .seconds(intervalSeconds))
                 guard let self, !Task.isCancelled, self.isConnected else { return }
                 if self.config.tunEnabled {
                     let tunExists = KillSwitchService.interfaceExists(
@@ -1179,10 +1180,9 @@ extension AppState {
                     }
                     healthCycle += 1
                     // Network and DNS changes arrive through SCDynamicStore.
-                    // Keep a once-per-minute command-based audit only as a
-                    // fallback for missed notifications, reducing process
-                    // launches from roughly 36/minute to three/minute.
-                    if healthCycle.isMultiple(of: 6),
+                    // Keep a roughly once-per-minute command-based audit only as a
+                    // fallback for missed notifications (12 cycles * 5s = 60s).
+                    if healthCycle.isMultiple(of: 12),
                        let service = self.protectedDNSService {
                         // Both probes queue behind the release sequence on the
                         // one privileged actor, so a user who taps Restore
@@ -1335,11 +1335,11 @@ extension AppState {
                     guard !Task.isCancelled, self.isConnected else { return }
                 }
                 // Full external probes are recovery/liveness checks, not the
-                // leak barrier. Run them every 30 seconds so a dead cloud
-                // exit cannot leave Claude waiting for several minutes. Wake,
-                // connect, network-change, and node-switch paths still verify
-                // immediately.
-                guard healthCycle.isMultiple(of: 3),
+                // leak barrier. In healthy state, probe every 2 cycles (10s)
+                // to maintain low overhead. In degraded state (consecutiveHealthFailures > 0),
+                // probe immediately on every 2-second cycle for rapid 3-4s self-healing.
+                let shouldProbeTraffic = consecutiveHealthFailures > 0 || healthCycle.isMultiple(of: 2)
+                guard shouldProbeTraffic,
                       self.switchingNodeId == nil,
                       self.connectionCoordinator.configReloadTask == nil,
                       let api = self.coreController
@@ -1442,9 +1442,9 @@ extension AppState {
                         reason: failure.code.rawValue,
                         generation: Int(self.connectionCoordinator.protectionOperationGeneration)
                     )
-                    // Recover in place first. Restart the core only when the
-                    // node/core path itself is proven unreachable.
-                    if failure.code == .coreExitUnreachable,
+                    // Recover in place first. Restart or switch the core when the
+                    // node/core path or the real TUN data path is proven dead.
+                    if (failure.code == .coreExitUnreachable || failure.code == .tunRouteUnavailable),
                        await self.attemptAutomaticCloudFailover() {
                         consecutiveHealthFailures = 0
                         self.healthCounters = ProtectedHealthCounters()
