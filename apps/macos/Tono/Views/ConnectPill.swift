@@ -170,6 +170,11 @@ struct ConnectPill: View {
         .animation(TonoMotion.stateChange(reduceMotion: reduceMotion), value: isConnecting)
         .animation(TonoMotion.stateChange(reduceMotion: reduceMotion), value: isDisconnecting)
         .animation(TonoMotion.stateChange(reduceMotion: reduceMotion), value: isProtectionBlocked)
+        .onChange(of: isConnected) { oldValue, newValue in
+            if !oldValue && newValue {
+                NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .default)
+            }
+        }
     }
 
     /// Identity for the headline crossfade; `LocalizedStringKey` is not
@@ -181,7 +186,7 @@ struct ConnectPill: View {
     // MARK: - Copy
 
     private var statusText: LocalizedStringKey {
-        if isConnecting { return "Cancel" }
+        if isConnecting { return "Connecting…" }
         if isDisconnecting { return "Disconnecting…" }
         if isRecovering { return "Recovering protected connection…" }
         if isProtectionBlocked { return "Protected Offline" }

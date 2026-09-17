@@ -63,52 +63,58 @@ struct ActiveNodeCard: View {
             .padding(.top, 12)
             .padding(.bottom, 8)
 
-            HStack {
-                HStack(spacing: 10) {
-                    NodeRouteMark(size: 32, city: nodeCityParts(cleanName).city)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(nodeRouteTitle(for: nodeName))
-                            .font(.system(size: 13, weight: .semibold))
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.primary)
-                        Text(secondaryLine)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
+            Button {
+                onSwitch?()
+            } label: {
+                HStack {
+                    HStack(spacing: 10) {
+                        NodeRouteMark(size: 32, city: nodeCityParts(cleanName).city)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(nodeRouteTitle(for: nodeName))
+                                .font(.system(size: 13, weight: .semibold))
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.primary)
+                            Text(secondaryLine)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                }
-                Spacer()
-                // Always render the slot. Hiding it until the first probe made
-                // the card reflow when the number arrived, and left no word for
-                // "nobody has measured this yet".
-                let measured = latency > 0
-                let tint = measured
-                    ? Color(hex: LatencyLevel.level(for: latency, kind: .exit).color)
-                    : TonoStatus.neutral
-                Text(
-                    measured
-                        ? LatencyLevel.spokenTitle(for: latency, kind: .exit)
-                        : String(localized: "Not tested")
-                )
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(tint)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 6))
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(
-                .white.opacity(colorScheme == .dark ? 0.08 : 0.24),
-                in: RoundedRectangle(cornerRadius: 10)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(
-                        .white.opacity(colorScheme == .dark ? 0.14 : 0.45),
-                        lineWidth: 1
+                    Spacer()
+                    // Always render the slot. Hiding it until the first probe made
+                    // the card reflow when the number arrived, and left no word for
+                    // "nobody has measured this yet".
+                    let measured = latency > 0
+                    let tint = measured
+                        ? Color(hex: LatencyLevel.level(for: latency, kind: .exit).color)
+                        : TonoStatus.neutral
+                    Text(
+                        measured
+                            ? LatencyLevel.spokenTitle(for: latency, kind: .exit)
+                            : String(localized: "Not tested")
                     )
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(tint)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 6))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(
+                    .white.opacity(colorScheme == .dark ? 0.08 : 0.24),
+                    in: RoundedRectangle(cornerRadius: 10)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(
+                            .white.opacity(colorScheme == .dark ? 0.14 : 0.45),
+                            lineWidth: 1
+                        )
+                }
+                .glassEffect(in: RoundedRectangle(cornerRadius: 10))
+                .contentShape(RoundedRectangle(cornerRadius: 10))
             }
-            .glassEffect(in: RoundedRectangle(cornerRadius: 10))
+            .buttonStyle(.plain)
             .padding(.horizontal, 12)
             .padding(.bottom, isConnected ? 8 : 12)
 

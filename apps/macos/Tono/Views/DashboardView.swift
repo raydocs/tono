@@ -763,6 +763,8 @@ private struct ConnectionProgressCard: View {
         """
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(summary, forType: .string)
+        NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
+        ToastCenter.shared.show(String(localized: "Copied"), systemImage: "doc.on.doc.fill")
     }
 }
 
