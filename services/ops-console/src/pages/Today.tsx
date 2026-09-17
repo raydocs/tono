@@ -182,6 +182,8 @@ export default function TodayPage({
             digest={digest}
             openCount={open.length}
             choresToday={choresDueToday(chores).length}
+            customers={people}
+            incidents={all}
             onShowOpen={() => setTab('open')}
             onShowResolved={() => setTab('resolved')}
             onShowChores={() => setTab('chores')}

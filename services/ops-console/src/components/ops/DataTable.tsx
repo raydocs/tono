@@ -3,6 +3,7 @@ import { copy } from '@/copy/copy';
 import { cn } from '@/lib/utils';
 
 export type TableState = 'ready' | 'loading' | 'error' | 'empty';
+export type TableSort = { id: string | null; direction: 'asc' | 'desc' };
 
 export type DataColumn<T> = {
   id: string;
@@ -26,6 +27,8 @@ export function DataTable<T>({
   errorMessage,
   emptyMessage,
   className,
+  sort,
+  onSortChange,
 }: {
   rows: T[];
   columns: DataColumn<T>[];
@@ -37,9 +40,12 @@ export function DataTable<T>({
   /** What an empty table is empty *of*; the fleet's wording is the default. */
   emptyMessage?: string;
   className?: string;
+  /** Opt-in controlled sorting; other tables retain their local behavior. */
+  sort?: TableSort;
+  onSortChange?: (sort: TableSort) => void;
 }) {
-  const [sortId, setSortId] = useState<string | null>(null);
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [localSort, setLocalSort] = useState<TableSort>({ id: null, direction: 'asc' });
+  const { id: sortId, direction: sortDir } = sort ?? localSort;
   const [focusId, setFocusId] = useState<string | null>(null);
 
   const sorted = useMemo(() => {
@@ -62,15 +68,14 @@ export function DataTable<T>({
   }, [rows, columns, sortId, sortDir]);
 
   function toggleSort(id: string) {
-    if (sortId !== id) {
-      setSortId(id);
-      setSortDir('asc');
-      return;
-    }
-    setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    const next: TableSort = { id, direction: sortId === id && sortDir === 'asc' ? 'desc' : 'asc' };
+    if (onSortChange) onSortChange(next);
+    else setLocalSort(next);
   }
 
   function onKey(event: KeyboardEvent<HTMLTableRowElement>, index: number, row: T) {
+    // Embedded checkboxes/links/buttons own their keys, not row navigation.
+    if (event.target !== event.currentTarget && (event.target as HTMLElement).closest('button, a, input, select, textarea')) return;
     if (event.key === 'ArrowDown') {
       event.preventDefault();
       const next = sorted[index + 1];

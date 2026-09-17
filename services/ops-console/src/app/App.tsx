@@ -139,6 +139,7 @@ export function App() {
               ? <CustomerDetailPage userId={route.customerId} />
               : (
                 <CustomersPage
+                  key={`${route.platform ?? ''}/${route.bucket ?? ''}`}
                   customers={customers}
                   funnel={funnel}
                   releases={releases}

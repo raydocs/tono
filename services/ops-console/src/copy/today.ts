@@ -166,6 +166,23 @@ export const todayCopy = {
   digestOpenCount: (n: number) => `${n} 个事故进行中`,
   digestNoOpen: '没有进行中的事故',
   digestDueFollowups: (n: number) => `客户跟进 ${n} 条`,
+  /**
+   * The same count when the owed rows are not all about customers: an
+   * incident or node followup in the list makes 客户跟进 the wrong name.
+   * The all-customer sentence stays so the existing count line keeps reading
+   * the same on ordinary mornings.
+   */
+  digestDueFollowupsMixed: (n: number) => `跟进 ${n} 条`,
+  /** The collapsed tail of the owed list: how many more open in place. */
+  digestDueMore: (n: number) => `还有 ${n} 条`,
+  /** A promised date already past on a row that is still owed. */
+  digestDueOverdue: '已逾期',
+  /**
+   * A followup whose subject has no loaded row to name it: the honest
+   * type-plus-id rather than a guessed handle.
+   */
+  digestFollowupUnknownUser: (id: string) => `客户 ${id}`,
+  digestFollowupUnknownIncident: (id: string) => `事故 ${id}`,
   digestDueChecks: (n: number) => `到期复测 ${n} 个`,
   digestDueChores: (n: number) => `到期待办 ${n} 件`,
   digestNoDue: '今天没有到期的事',
