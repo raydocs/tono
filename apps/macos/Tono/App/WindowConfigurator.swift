@@ -3,6 +3,12 @@ import AppKit
 
 // MARK: - Window Configurator (NSWindow-level safety net)
 
+private final class WindowConfiguratorView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+}
+
 struct WindowConfigurator: NSViewRepresentable {
     let onVisibilityChange: @MainActor @Sendable (Bool) -> Void
 
@@ -70,7 +76,7 @@ struct WindowConfigurator: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSView {
-        let view = NSView()
+        let view = WindowConfiguratorView()
         DispatchQueue.main.async { [weak view] in
             guard let view, let window = view.window else { return }
             window.minSize = NSSize(width: 860, height: 540)

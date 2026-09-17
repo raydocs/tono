@@ -24,13 +24,24 @@ set -euo pipefail
 
 repo_root=${0:A:h:h:h}
 derived=${TONO_LOCAL_VERIFY_DERIVED:-/tmp/tono-xcode-release}
-identity=${TONO_SIGN_IDENTITY:-"Developer ID Application: Ruirui Wan (YY57758GS7)"}
 developer_dir=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}
 
 if [[ ! -d $developer_dir ]]; then
   echo "Xcode not found at $developer_dir. xcode-select may point at the Command Line Tools;" >&2
   echo "this script does not need that changed — it sets DEVELOPER_DIR itself." >&2
   exit 2
+fi
+
+if [[ -z "${TONO_SIGN_IDENTITY:-}" ]]; then
+  if security find-identity -v -p codesigning | grep -q "Developer ID Application: Ruirui Wan (YY57758GS7)"; then
+    identity="Developer ID Application: Ruirui Wan (YY57758GS7)"
+  elif security find-identity -v -p codesigning | grep -q "Apple Development: Ruirui Wan"; then
+    identity=$(security find-identity -v -p codesigning | grep -o 'Apple Development: Ruirui Wan[^"]*' | head -n1)
+  else
+    identity="Developer ID Application: Ruirui Wan (YY57758GS7)"
+  fi
+else
+  identity="$TONO_SIGN_IDENTITY"
 fi
 
 if ! security find-identity -v -p codesigning | grep -q "$identity"; then
@@ -46,7 +57,8 @@ DEVELOPER_DIR="$developer_dir" /usr/bin/xcodebuild build \
   -destination 'platform=macOS' \
   -derivedDataPath "$derived" \
   CODE_SIGN_STYLE=Manual \
-  CODE_SIGN_IDENTITY="$identity" >/dev/null
+  ENABLE_USER_SCRIPT_SANDBOXING=NO \
+  CODE_SIGN_IDENTITY="$identity"
 
 app="$derived/Build/Products/Release/Tono.app"
 [[ -d $app ]] || { echo "build produced no app at $app" >&2; exit 1 }
