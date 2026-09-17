@@ -9,6 +9,7 @@ import { Empty } from '@/components/ops/Empty';
 import { PageNote } from '@/components/ops/PageNote';
 import { StatusWord } from '@/components/ops/StatusWord';
 import { copy } from '@/copy/copy';
+import { formatBytesMeasured } from '@/lib/display';
 import { closeNode, openNode, openNodePage } from '@/lib/hash-route';
 import { usePrivacy } from '@/lib/privacy';
 import { useIsPhone } from '@/lib/use-phone';
@@ -101,6 +102,41 @@ export default function NodesPage({
    * should have measured it.
    */
   const pathWired = useMemo(() => all.some((node) => node.forwardWorst.value !== null), [all]);
+  const fleetTotals = useMemo(() => {
+    let occupants = 0;
+    let hasOccupants = false;
+    let usedBytes = 0;
+    let hasUsed = false;
+    let quotaBytes = 0;
+    let hasQuota = false;
+
+    for (const node of onShow) {
+      if (node.occupancy.value !== null) {
+        occupants += node.occupancy.value;
+        hasOccupants = true;
+      }
+      const q = node.quota.value;
+      if (q?.used !== null && q?.used !== undefined) {
+        usedBytes += q.used;
+        hasUsed = true;
+      }
+      if (q?.quota !== null && q?.quota !== undefined) {
+        quotaBytes += q.quota;
+        hasQuota = true;
+      }
+    }
+
+    const trafficText = hasUsed
+      ? (hasQuota && quotaBytes > 0
+        ? copy.fleetTrafficTotal(formatBytesMeasured(usedBytes), formatBytesMeasured(quotaBytes))
+        : copy.fleetTrafficUsedOnly(formatBytesMeasured(usedBytes)))
+      : null;
+
+    return {
+      occupancyText: hasOccupants ? copy.fleetOccupancyTotal(occupants) : null,
+      trafficText,
+    };
+  }, [onShow]);
   const selectedView = useMemo(() => {
     const found = all.find((node) => node.name === selected);
     return found ? toNodeView(found, facts.get(found.name)) : null;
@@ -146,6 +182,18 @@ export default function NodesPage({
             fetchedAt={newestFetch(nodes, health, fleet)}
             backfill={health.status === 'ready' ? health.data.backfill : null}
           />
+
+          {nodes.status === 'ready' && (fleetTotals.occupancyText || fleetTotals.trafficText) ? (
+            <p className="nodes-aggregate-bar text-micro text-[var(--muted-foreground)] flex items-center gap-2">
+              {fleetTotals.occupancyText ? (
+                <span className="font-mono">{fleetTotals.occupancyText}</span>
+              ) : null}
+              {fleetTotals.occupancyText && fleetTotals.trafficText ? <span>·</span> : null}
+              {fleetTotals.trafficText ? (
+                <span className="font-mono">{fleetTotals.trafficText}</span>
+              ) : null}
+            </p>
+          ) : null}
 
           {nodes.status === 'ready' && all.length > 0 && !pathWired ? (
             <p className="text-body text-[var(--muted-foreground)]">{copy.pathNotWired}</p>
