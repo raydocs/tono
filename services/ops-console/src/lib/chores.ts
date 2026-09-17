@@ -29,6 +29,15 @@ export type Chore = {
    * to the invite instead.
    */
   who?: { userId: string | null; email: string; wechatId: string | null };
+  /**
+   * Which fleet machine the chore is about, on the chores that are about one.
+   *
+   * Customer chores carry `who`; fleet chores carry `node`. A row with neither
+   * stays a sentence. A row with one opens its object — the renewal check view
+   * for a node, the 360 for a customer — instead of asking the operator to go
+   * and look the name up in another tab.
+   */
+  node?: string;
 };
 
 const DAY = 86_400;
@@ -54,6 +63,7 @@ export function fleetChores(nodes: readonly FleetNodeDto[]): Chore[] {
         kind: 'profile',
         summary: copy.chore.nodeProfile(node.name),
         dueAt: null,
+        node: node.name,
       });
       continue;
     }
@@ -63,6 +73,7 @@ export function fleetChores(nodes: readonly FleetNodeDto[]): Chore[] {
         kind: 'renew',
         summary: copy.chore.nodeRenew(node.name, formatDate(profile.renewsAt)),
         dueAt: profile.renewsAt,
+        node: node.name,
       });
     }
     const quota = profile.trafficQuotaBytes;
@@ -73,6 +84,7 @@ export function fleetChores(nodes: readonly FleetNodeDto[]): Chore[] {
         kind: 'quota',
         summary: copy.chore.nodeQuota(node.name, formatPercent(used / quota)),
         dueAt: profile.trafficCycleEnd,
+        node: node.name,
       });
     }
   }
@@ -97,12 +109,14 @@ export function customerChores(
   const out: Chore[] = [];
   for (const row of rows) {
     const who = mask(row.email);
+    const target = { userId: row.userId, email: row.email, wechatId: row.wechatId };
     if (due(row.expiresAt)) {
       out.push({
         id: `user-expiry-${row.userId}`,
         kind: 'expiry',
         summary: copy.chore.customerExpiry(who, formatDate(row.expiresAt)),
         dueAt: row.expiresAt,
+        who: target,
       });
     }
     const quota = row.quotaBytes;
@@ -113,6 +127,7 @@ export function customerChores(
         kind: 'quota',
         summary: copy.chore.customerQuota(who, formatPercent(used / quota)),
         dueAt: row.expiresAt,
+        who: target,
       });
     }
     const stale = tooOld(row, minSupported);
@@ -122,6 +137,7 @@ export function customerChores(
         kind: 'version',
         summary: copy.chore.customerVersion(who, stale),
         dueAt: null,
+        who: target,
       });
     }
     /**
@@ -145,6 +161,7 @@ export function customerChores(
         kind: 'profile',
         summary: copy.chore.customerProfile(who),
         dueAt: null,
+        who: target,
       });
     }
   }

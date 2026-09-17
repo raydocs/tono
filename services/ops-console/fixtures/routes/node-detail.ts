@@ -295,6 +295,28 @@ function readFor(file: NodeFile, parts: string[], name: string, range: string, s
   if (section === 'acceptance') return sheetFor(name, set);
   if (section === 'connections') return file.connections;
   if (section === 'history') return file.history;
+  if (section === 'receipts') {
+    return {
+      items: [
+        {
+          id: 'rcpt-fixture-1',
+          kind: 'catalog_retire',
+          subjectType: 'node',
+          subjectId: name,
+          incidentId: 'inc-node-la',
+          jobId: 'job-retire-1',
+          before: { revision: 48, listed: [name] },
+          after: { revision: 49 },
+          clientAcks: 12,
+          rollbackOf: null,
+          actor: 'operator@example.com',
+          at: file.clock - 900,
+        },
+      ],
+      nextCursor: null,
+      updatedAt: file.clock,
+    };
+  }
   if (section === 'jobs') return file.jobs;
   if (section === 'bindings') return file.detail.bindings;
   // `?range=` is honoured rather than ignored: 最近 30 天 is the only reason
@@ -309,7 +331,9 @@ function readFor(file: NodeFile, parts: string[], name: string, range: string, s
 const PROFILE_KEYS = new Set([
   'provider', 'providerAccountId', 'region', 'lineTags', 'port', 'price',
   'currency', 'billingCycle', 'renewsAt', 'expiresAt', 'notes', 'quota',
+  'capacityUsers', 'displayName', 'failureDomain', 'replaces',
 ]);
+const DETAIL_KEYS = new Set(['displayName', 'failureDomain', 'replaces']);
 
 const DATE_KEYS = new Set(['renewsAt', 'expiresAt']);
 
@@ -365,8 +389,14 @@ async function handleProfile(
       facts[key] = at === null ? null : at - back;
       continue;
     }
-    if (key === 'port' || key === 'billingCycle') {
+    if (key === 'port' || key === 'billingCycle' || key === 'capacityUsers') {
       facts[key] = nullableInt(value);
+      continue;
+    }
+    if (DETAIL_KEYS.has(key)) {
+      const text = value === null || value === '' ? undefined : String(value);
+      if (text === undefined) delete file.detail[key];
+      else file.detail[key] = text;
       continue;
     }
     if (key === 'price') {

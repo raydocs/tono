@@ -5,6 +5,27 @@
 export const PLATFORMS = ['windows', 'macos', 'linux', 'android', 'ios'] as const;
 export type Platform = (typeof PLATFORMS)[number];
 
+export type PlatformCapabilityFlags = {
+  deviceActions: boolean;
+  diagnosticsUpload: boolean;
+  killSwitchTelemetry: boolean;
+  periodicTelemetry: boolean;
+  autoUpdate: boolean;
+  trafficLog: boolean;
+};
+
+/** What a shipped client on this platform can actually do. Unlisted platforms have no row. */
+export const PLATFORM_CAPABILITIES: { [K in Platform]?: PlatformCapabilityFlags } = {
+  linux: {
+    deviceActions: false,
+    diagnosticsUpload: false,
+    killSwitchTelemetry: false,
+    periodicTelemetry: false,
+    autoUpdate: false,
+    trafficLog: false,
+  },
+};
+
 export function isPlatform(value: unknown): value is Platform {
   return typeof value === 'string' && (PLATFORMS as readonly string[]).includes(value);
 }

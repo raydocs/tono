@@ -1,4 +1,5 @@
 import type {
+  ChangeReceiptDto,
   ConnectionEventDto,
   JobDto,
   JobParamsDto,
@@ -101,6 +102,10 @@ export type NodeProfileInput = {
   expiresAt?: number | null;
   notes?: string | null;
   quota?: NodeQuotaInput | null;
+  capacityUsers?: number | null;
+  displayName?: string | null;
+  failureDomain?: string | null;
+  replaces?: string | null;
 };
 
 export const nodeApi = {
@@ -114,6 +119,8 @@ export const nodeApi = {
     getJson<NodeAcceptanceDto>(nodePath(name, '/acceptance'), signal),
   history: (name: string, signal?: AbortSignal) =>
     getJson<ListDto<NodeHistoryEntryDto>>(nodePath(name, '/history'), signal),
+  receipts: (name: string, signal?: AbortSignal) =>
+    getJson<ListDto<ChangeReceiptDto>>(nodePath(name, '/receipts'), signal),
   jobs: (name: string, signal?: AbortSignal) =>
     getJson<ListDto<JobDto>>(nodePath(name, '/jobs'), signal),
 

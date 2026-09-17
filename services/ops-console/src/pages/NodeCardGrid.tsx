@@ -55,7 +55,7 @@ export function NodeCardGrid({
             y: { duration: HOVER_SECONDS },
           }}
           className={cn(
-            'node-card raised cursor-pointer rounded-[10px] bg-[var(--surface)]',
+            'node-card raised cursor-pointer rounded-[16px] bg-[var(--surface)]',
             selected === view.node.name && 'outline outline-1 outline-[var(--accent)]',
           )}
           role="button"

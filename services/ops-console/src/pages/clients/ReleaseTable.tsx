@@ -75,6 +75,7 @@ export function ReleaseTable({
         columns={releaseColumns(ask, channel)}
         getRowId={(row) => row.id}
         state={rows.length === 0 ? 'empty' : 'ready'}
+        className="clients-release-table"
       />
       <ConfirmDialog
         open={pending !== null}

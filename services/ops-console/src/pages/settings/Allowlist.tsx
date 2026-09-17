@@ -7,6 +7,7 @@ import { allowlistApi, isEmailAddress, type AllowedEmail } from '@/lib/allowlist
 import { formatDate } from '@/lib/display';
 import { usePrivacy } from '@/lib/privacy';
 import { useResource } from '@/lib/use-resource';
+import '@/styles/settings-assets.css';
 import { ConfirmDialog, TextField, Toolbar } from './form';
 import { useWrite } from './use-write';
 
@@ -57,7 +58,7 @@ export function Allowlist() {
   }
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="settings-allowlist flex flex-col gap-8">
       <div className="flex flex-col gap-3">
         <Toolbar>
           {entries.status === 'ready' ? <span>{words.count(rows.length)}</span> : null}
@@ -98,6 +99,7 @@ export function Allowlist() {
           state={state}
           emptyMessage={words.empty}
           errorMessage={entries.status === 'error' ? entries.message : undefined}
+          className="settings-allowlist-table"
         />
       </div>
 

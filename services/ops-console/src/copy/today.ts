@@ -168,6 +168,23 @@ export const todayCopy = {
   digestOpenCount: (n: number) => `${n} 个事故进行中`,
   digestNoOpen: '没有进行中的事故',
   digestDueFollowups: (n: number) => `客户跟进 ${n} 条`,
+  /**
+   * The same count when the owed rows are not all about customers: an
+   * incident or node followup in the list makes 客户跟进 the wrong name.
+   * The all-customer sentence stays so the existing count line keeps reading
+   * the same on ordinary mornings.
+   */
+  digestDueFollowupsMixed: (n: number) => `跟进 ${n} 条`,
+  /** The collapsed tail of the owed list: how many more open in place. */
+  digestDueMore: (n: number) => `还有 ${n} 条`,
+  /** A promised date already past on a row that is still owed. */
+  digestDueOverdue: '已逾期',
+  /**
+   * A followup whose subject has no loaded row to name it: the honest
+   * type-plus-id rather than a guessed handle.
+   */
+  digestFollowupUnknownUser: (id: string) => `客户 ${id}`,
+  digestFollowupUnknownIncident: (id: string) => `事故 ${id}`,
   digestDueChecks: (n: number) => `到期复测 ${n} 个`,
   digestDueChores: (n: number) => `到期待办 ${n} 件`,
   digestNoDue: '今天没有到期的事',
@@ -209,6 +226,20 @@ export const todayCopy = {
     alert: '推送',
     resolved: '已恢复',
   } as const,
+  receipt: '回执',
+  receiptAction: {
+    catalog_retire: '下架了',
+    catalog_relist: '已重新上架',
+    catalog_publish: '已发布目录',
+    policy_publish: '已发布分流',
+    identity_sync: '已同步身份',
+    xray_restart: '已重启服务',
+  } as const,
+  receiptCatalogRev: (from: number, to: number) => `目录 ${from} → ${to}`,
+  receiptPolicyRev: (from: number, to: number) => `分流 ${from} → ${to}`,
+  receiptClientAcks: (count: number) => `${count} 位客户端已刷新`,
+  receiptSentence: (action: string, revText?: string | null, acksText?: string | null) =>
+    [action, revText, acksText].filter(Boolean).join(' · '),
   deliveryStatus: {
     pending: '待发',
     sent: '已发',

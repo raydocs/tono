@@ -47,6 +47,8 @@ import {
 import { assertAuditList } from './audit';
 import { assertSystemHealth } from './system';
 import { assertFxRate, assertLedgerEntryList, assertMonthSummary } from './ledger';
+import { assertChangeReceipt } from './receipts';
+import { assertSloResponse } from './slo';
 
 export const assertNodeSummaryList = (value: unknown) => assertList(value, assertNodeSummary);
 export const assertNodeHistoryList = (value: unknown) => assertList(value, assertNodeHistoryEntry);
@@ -68,6 +70,7 @@ export const assertHomeLineList = (value: unknown) => assertList(value, assertHo
 export const assertHomeLineUsageList = (value: unknown) => assertList(value, assertHomeLineUsageDay);
 export const assertAlertRuleList = (value: unknown) => assertList(value, assertAlertRule);
 export const assertAlertDeliveryList = (value: unknown) => assertList(value, assertAlertDelivery);
+export const assertNodeReceiptsList = (value: unknown) => assertList(value, assertChangeReceipt);
 
 /** `GET nodes/{name}/errors` is a Measured array, not the list envelope. */
 export function assertNodeErrorsMeasured(value: unknown) {
@@ -121,6 +124,8 @@ export const NAMED_CHECKERS = {
   assertLedgerEntryList,
   assertMonthSummary,
   assertFxRate,
+  assertNodeReceiptsList,
+  assertSloResponse,
 } as const;
 
 export const CHECKER_BY_NAME = NAMED_CHECKERS;
@@ -181,6 +186,8 @@ export const GET_ROUTE_TABLE: readonly GetRouteBinding[] = [
 
   // dept:a
   // append your entries inside your block
+  { route: 'GET /api/v1/ops/nodes/{name}/receipts', checker: 'assertNodeReceiptsList' },
+  { route: 'GET /api/v1/ops/slo', checker: 'assertSloResponse' },
 
   // dept:b
   // append your entries inside your block

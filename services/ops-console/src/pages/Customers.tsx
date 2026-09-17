@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import type {
   AdoptionBucket,
+  CustomerListCounts,
   CustomerSummaryDto,
   FunnelDto,
-  FunnelStage,
   Platform,
   ReleaseDto,
   SystemHealthDto,
@@ -29,7 +29,6 @@ import {
   selectByPlatform,
   selectCustomers,
   wechatKnown,
-  type CustomerFilter,
   type CustomerFilterId,
 } from '@/lib/customers';
 import { invitesOf, listRows, selectByStage, stageCounts } from '@/lib/funnel';
@@ -38,8 +37,11 @@ import { usePrivacy } from '@/lib/privacy';
 import { publishedVersions } from '@/lib/releases';
 import { cn } from '@/lib/utils';
 import { newestFetch, useResource, type Resource } from '@/lib/use-resource';
+import '@/styles/customers.css';
 import type { Tone } from '@/components/ops/StatusWord';
 import { useCohort } from './customer/Cohort';
+import { useCustomerView } from './customer/use-customer-view';
+import { BatchResults } from './customer/BatchResults';
 import { customerColumns } from './customer/columns';
 import { FunnelBar } from './customer/Funnel';
 import { InviteDrawer } from './customer/InviteDrawer';
@@ -63,6 +65,7 @@ export default function CustomersPage({
   platform,
   bucket,
   invite,
+  listCounts,
 }: {
   /**
    * The shell owns this list, so onboarding a customer has to ask it to read
@@ -70,6 +73,8 @@ export default function CustomersPage({
    * cannot invent one that the hub has not confirmed.
    */
   customers: Resource<CustomerSummaryDto[]> & { reload: () => void };
+  /** Fleet-wide counts from the list envelope; the page falls back to this view. */
+  listCounts?: CustomerListCounts;
   /**
    * Everyone who has not connected yet. The list is the shell's, like the
    * customers themselves, because the daily page and Command-K read the same
@@ -86,15 +91,23 @@ export default function CustomersPage({
   invite: string | null;
 }) {
   const privacy = usePrivacy();
-  const [filter, setFilter] = useState<CustomerFilter>(null);
-  const [stage, setStage] = useState<FunnelStage | null>(null);
+  const context = useCustomerView(`${platform ?? ''}/${bucket ?? ''}`, customers.status === 'ready');
+  const { filter, stage, sort } = context.view;
   const [onboarding, setOnboarding] = useState(false);
 
   const all = useMemo(
     () => (customers.status === 'ready' ? customers.data : []),
     [customers],
   );
-  const counts = useMemo(() => customerCounts(all), [all]);
+  const counts = useMemo(() => {
+    if (!listCounts) return customerCounts(all);
+    return {
+      all: Object.values(listCounts.byVerdict).reduce((sum, n) => sum + n, 0),
+      ok: listCounts.byVerdict.ok,
+      unreachable: listCounts.byVerdict.unreachable,
+      never_used: listCounts.byVerdict.never_used,
+    };
+  }, [all, listCounts]);
   const perPlatform = useMemo(() => platformCounts(all), [all]);
   const released = useMemo(() => releasedPlatforms(all), [all]);
   const published = useMemo(
@@ -127,7 +140,10 @@ export default function CustomersPage({
     [rows, invites, filter, platform, bucket],
   );
   /** The bar counts the whole fleet, the way the count sentence above it does. */
-  const perStage = useMemo(() => stageCounts(listRows(all, invites)), [all, invites]);
+  const perStage = useMemo(
+    () => (listCounts ? listCounts.byStage : stageCounts(listRows(all, invites))),
+    [all, invites, listCounts],
+  );
   const shown = useMemo(() => selectByStage(table, stage), [table, stage]);
   const picked = useMemo(
     () => shown.map((row) => row.customer).filter((row): row is CustomerSummaryDto => row !== null),
@@ -171,47 +187,50 @@ export default function CustomersPage({
         : 'ready';
 
   return (
-    <div className="page-wrap">
+    <div ref={context.container} className="page-wrap customers-page">
       <div className="page-head">
-        {/* The sentence the page is built around, and the one button that
-            adds a row to it. */}
-        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
-          {customers.status === 'ready' ? (
-            <p className="text-verdict">
-              {CUSTOMER_FILTERS.map((id, index) => (
-                <span key={id}>
-                  {index === 0 ? null : <span className="mx-2 text-[var(--muted-foreground)]">·</span>}
-                  <button
-                    type="button"
-                    aria-pressed={filter === id}
-                    className={cn('count-bit', `tone-${FRAGMENT_TONE[id]}`)}
-                    onClick={() => setFilter((current) => (current === id ? null : id))}
-                  >
-                    <CountText values={[counts[id]]} render={(values) => copy.customerCount[id](values[0])} />
-                  </button>
-                </span>
-              ))}
-            </p>
-          ) : (
-            <p className="text-verdict text-[var(--muted-foreground)]">
-              {customers.status === 'loading' ? copy.loading : copy.loadError}
-            </p>
-          )}
-          <div className="ml-auto shrink-0">
-            <Action primary onClick={() => setOnboarding(true)}>{copy.onboard}</Action>
+        <section className="customers-hero" aria-label={copy.pages.customers}>
+          {/* The sentence the page is built around, and the one button that
+              adds a row to it. */}
+          <div className="customers-hero-row">
+            {customers.status === 'ready' ? (
+              <p className="text-verdict">
+                {CUSTOMER_FILTERS.map((id, index) => (
+                  <span key={id}>
+                    {index === 0 ? null : <span className="mx-2 text-[var(--muted-foreground)]">·</span>}
+                    <button
+                      type="button"
+                      aria-pressed={filter === id}
+                      className={cn('count-bit', `tone-${FRAGMENT_TONE[id]}`)}
+                      onClick={() => context.change({ filter: filter === id ? null : id, top: 0, left: 0 })}
+                    >
+                      <CountText values={[counts[id]]} render={(values) => copy.customerCount[id](values[0])} />
+                    </button>
+                  </span>
+                ))}
+              </p>
+            ) : (
+              <p className="text-verdict text-[var(--muted-foreground)]">
+                {customers.status === 'loading' ? copy.loading : copy.loadError}
+              </p>
+            )}
+            <div className="ml-auto shrink-0">
+              <Action primary onClick={() => setOnboarding(true)}>{copy.onboard}</Action>
+            </div>
           </div>
-        </div>
 
-        <PageNote
-          fetchedAt={newestFetch(customers, health)}
-          backfill={health.status === 'ready' ? health.data.backfill : null}
-        />
+          <PageNote
+            className="customers-hero-note"
+            fetchedAt={newestFetch(customers, health)}
+            backfill={health.status === 'ready' ? health.data.backfill : null}
+          />
 
-        {/* The fleet page's rule for a column nobody has filled in yet: drop
-            it, and say once, quietly, what is missing. */}
-        {customers.status === 'ready' && all.length > 0 && !wired ? (
-          <p className="text-body text-[var(--muted-foreground)]">{copy.customerPlanNotWired}</p>
-        ) : null}
+          {/* The fleet page's rule for a column nobody has filled in yet: drop
+              it, and say once, quietly, what is missing. */}
+          {customers.status === 'ready' && all.length > 0 && !wired ? (
+            <p className="text-body text-[var(--muted-foreground)]">{copy.customerPlanNotWired}</p>
+          ) : null}
+        </section>
 
         {/* All five platforms, always. The ones nothing has shipped for say so. */}
         <div className="toolbar-row">
@@ -255,15 +274,23 @@ export default function CustomersPage({
           this page answers and the first one an operator asks in the morning:
           of the people who are paying, who has not started using it. */}
       {customers.status === 'ready' ? (
-        <FunnelBar counts={perStage} stage={stage} onPick={setStage} />
+        <FunnelBar counts={perStage} stage={stage} onPick={(stage) => context.change({ stage, top: 0, left: 0 })} />
       ) : null}
 
       {cohort.bar}
+      <BatchResults onChanged={customers.reload} />
 
       <DataTable
         rows={shown}
         columns={columns}
         getRowId={(row) => row.key}
+        /* The address column is the only flexible one: below the fixed
+           columns' total it collapses to zero and no scroll can bring it
+           back. A local floor keeps identities readable on a phone while the
+           container keeps the sideways scroll. */
+        className="customer-list-table [&>table]:min-w-[1020px]"
+        sort={sort}
+        onSortChange={(sort) => context.change({ sort })}
         onRowClick={(row) => (row.customer === null
           ? openInvite(row.invite.email)
           : openCustomer(row.customer.userId))}

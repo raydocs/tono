@@ -51,7 +51,7 @@ export function Alerts() {
       : rows.length === 0 ? 'empty' : 'ready';
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="settings-alerts flex flex-col gap-8">
       <Section
         title={words.rules}
         aside={(
@@ -79,6 +79,7 @@ export function Alerts() {
           state={state}
           emptyMessage={words.empty}
           errorMessage={rules.status === 'error' ? rules.message : undefined}
+          className="settings-rules-table"
         />
       </Section>
 

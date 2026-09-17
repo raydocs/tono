@@ -188,4 +188,43 @@ describe('runOpsCron', () => {
     ).bind(job.id).first<{ status: string }>();
     expect(expired?.status).toBe('expired');
   });
+
+  it('rolls up daily SLO with success rate and unmeasured minutes', async () => {
+    const dayStart = Math.floor(NOW / 86_400) * 86_400;
+    const yesterday = dayStart - 86_400;
+    const hourStart = yesterday + 10 * 3_600;
+
+    for (let i = 0; i < 8; i++) {
+      await db().prepare(
+        `INSERT INTO connection_events(
+           id, at_ms, received_at, source, user_id, kind, node, elapsed_ms, edge_as_org, edge_via_exit, platform
+         ) VALUES(?, ?, ?, 'window', 'u-cron', 'connectOk', 'Tokyo · Fuji', 50, 'China Mobile', 0, 'macos')`,
+      ).bind(`e-ok-${i}`, (hourStart + i * 60) * 1000, hourStart + i * 60).run();
+    }
+    for (let i = 0; i < 2; i++) {
+      await db().prepare(
+        `INSERT INTO connection_events(
+           id, at_ms, received_at, source, user_id, kind, node, code, edge_as_org, edge_via_exit, platform
+         ) VALUES(?, ?, ?, 'window', 'u-cron', 'connectFail', 'Tokyo · Fuji', 'ETIMEDOUT', 'China Mobile', 0, 'macos')`,
+      ).bind(`e-fail-${i}`, (hourStart + 600 + i * 60) * 1000, hourStart + 600 + i * 60).run();
+    }
+
+    const report = await runOpsCron(env as unknown as Env, dayStart + 600);
+    expect(report.daily.ok).toBe(true);
+
+    const slo = await db().prepare(
+      'SELECT * FROM ops_daily_slo WHERE day_at = ? AND node = ?',
+    ).bind(yesterday, 'Tokyo · Fuji').first<{
+      attempts: number;
+      successes: number;
+      p50_ms: number;
+      unmeasured_min: number;
+    }>();
+
+    expect(slo).toBeDefined();
+    expect(Number(slo?.attempts)).toBe(10);
+    expect(Number(slo?.successes)).toBe(8);
+    expect(Number(slo?.successes) / Number(slo?.attempts)).toBe(0.8);
+    expect(Number(slo?.unmeasured_min)).toBe(23 * 60);
+  });
 });

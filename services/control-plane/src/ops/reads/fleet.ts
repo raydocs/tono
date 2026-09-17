@@ -33,7 +33,7 @@ import {
 } from './activity';
 import { retireDependencies, revokeExitToken } from '../retire-dependencies';
 
-async function managedCatalogTemplate(e: Env) {
+export async function managedCatalogTemplate(e: Env) {
   const row = await e.DB.prepare(
     'SELECT revision, ciphertext, nonce, content_sha256, updated_at FROM managed_exit_catalog WHERE singleton_id = 1',
   ).first<Row>();

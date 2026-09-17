@@ -24,13 +24,32 @@ function text(value: unknown): string | null {
   return s.length ? s : null;
 }
 
-async function allRows(db: D1Database, sql: string): Promise<Row[]> {
+async function allRows(db: D1Database, sql: string, binds: unknown[] = []): Promise<Row[]> {
   try {
-    return (await db.prepare(sql).all<Row>()).results ?? [];
+    const stmt = db.prepare(sql);
+    const result = binds.length > 0 ? await stmt.bind(...binds).all<Row>() : await stmt.all<Row>();
+    return result.results ?? [];
   } catch (error) {
     if (missingTable(error)) return [];
     throw error;
   }
+}
+
+const IN_CHUNK = 90;
+
+async function allByUserIds(
+  db: D1Database,
+  sqlFor: (placeholders: string) => string,
+  userIds: string[],
+): Promise<Row[]> {
+  if (userIds.length === 0) return [];
+  const out: Row[] = [];
+  for (let i = 0; i < userIds.length; i += IN_CHUNK) {
+    const chunk = userIds.slice(i, i + IN_CHUNK);
+    const placeholders = chunk.map(() => '?').join(',');
+    out.push(...await allRows(db, sqlFor(placeholders), chunk));
+  }
+  return out;
 }
 
 export function funnelDays(nowSec: number, since: number): number {
@@ -100,16 +119,41 @@ export type FunnelIndex = {
   byUserId: Map<string, FunnelPerson>;
 };
 
-export async function loadFunnelFacts(db: D1Database, nowSec: number): Promise<FunnelIndex> {
-  const allowlist = await allRows(db, 'SELECT email, created_at, wechat_id, contact, notes FROM signup_allowlist');
-  const users = await allRows(db, 'SELECT id, email, wechat_id, contact, notes, created_at, usage_bytes, usage_reported_bytes, first_entitled_at FROM users');
-  const devices = await allRows(db, 'SELECT user_id, COUNT(*) AS n, MIN(created_at) AS first_device_at FROM devices GROUP BY user_id');
-  const statuses = await allRows(db, 'SELECT * FROM ops_customer_status');
-  const hours = await allRows(db, `SELECT user_id,
+export async function loadFunnelFacts(
+  db: D1Database,
+  nowSec: number,
+  userIds?: string[],
+): Promise<FunnelIndex> {
+  if (userIds !== undefined && userIds.length === 0) return { people: [], byUserId: new Map() };
+  const allowlist = userIds
+    ? []
+    : await allRows(db, 'SELECT email, created_at, wechat_id, contact, notes FROM signup_allowlist');
+  const userSql = 'SELECT id, email, wechat_id, contact, notes, created_at, usage_bytes, usage_reported_bytes, first_entitled_at FROM users';
+  const users = userIds
+    ? await allByUserIds(db, (placeholders) => `${userSql} WHERE id IN (${placeholders})`, userIds)
+    : await allRows(db, userSql);
+  const devices = userIds
+    ? await allByUserIds(
+      db,
+      (placeholders) =>
+        `SELECT user_id, COUNT(*) AS n, MIN(created_at) AS first_device_at FROM devices WHERE user_id IN (${placeholders}) GROUP BY user_id`,
+      userIds,
+    )
+    : await allRows(db, 'SELECT user_id, COUNT(*) AS n, MIN(created_at) AS first_device_at FROM devices GROUP BY user_id');
+  const statuses = userIds
+    ? await allByUserIds(db, (placeholders) => `SELECT * FROM ops_customer_status WHERE user_id IN (${placeholders})`, userIds)
+    : await allRows(db, 'SELECT * FROM ops_customer_status');
+  const hoursSql = `SELECT user_id,
       MIN(CASE WHEN online_minutes > 0 THEN hour_at END) AS first_online_at,
       MIN(CASE WHEN connected_minutes > 0 THEN hour_at END) AS first_connected_hour_at
-    FROM customer_activity_hours GROUP BY user_id`);
-  const events = await allRows(db, `SELECT user_id, MIN(at_ms) AS first_ok_ms FROM connection_events WHERE kind = 'connectOk' GROUP BY user_id`);
+    FROM customer_activity_hours`;
+  const hours = userIds
+    ? await allByUserIds(db, (placeholders) => `${hoursSql} WHERE user_id IN (${placeholders}) GROUP BY user_id`, userIds)
+    : await allRows(db, `${hoursSql} GROUP BY user_id`);
+  const eventsSql = `SELECT user_id, MIN(at_ms) AS first_ok_ms FROM connection_events WHERE kind = 'connectOk'`;
+  const events = userIds
+    ? await allByUserIds(db, (placeholders) => `${eventsSql} AND user_id IN (${placeholders}) GROUP BY user_id`, userIds)
+    : await allRows(db, `${eventsSql} GROUP BY user_id`);
 
   const deviceByUser = new Map(devices.map((row) => [String(row.user_id), {
     n: Number(row.n) || 0,

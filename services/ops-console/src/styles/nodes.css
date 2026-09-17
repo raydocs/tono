@@ -1,0 +1,100 @@
+/* Nodes list: the anomaly summary leads, the fleet follows.
+ *
+ * Scoped under `.nodes-page` throughout. The count fragments stay the
+ * interactive prose they are (filter buttons with their own tones); this file
+ * only gives them a hero card to live in and lifts the node cards to the
+ * sample language. No composite health score is invented anywhere here:
+ * the summary is the same fragments, emphasised by order, not by arithmetic.
+ * Motion stays in the component (layout springs); hover here only deepens the
+ * shadow so the two systems never fight over `transform`. */
+
+.nodes-hero {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 20px;
+  box-shadow: var(--shadow-card-lg);
+  padding: 22px 24px;
+}
+
+.dark .nodes-hero {
+  border-color: rgb(255 255 255 / 0.07);
+  box-shadow: var(--shadow-card-lg), inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+.nodes-hero .text-verdict {
+  text-wrap: balance;
+}
+
+/* The summary leads with trouble: alarmed fragments read at full weight,
+ * healthy and unmeasured ones stay quiet. Tones and counts are untouched. */
+.nodes-hero .count-bit.tone-sev,
+.nodes-hero .count-bit.tone-warn {
+  font-weight: 600;
+}
+
+.nodes-hero-note {
+  margin-top: 8px;
+}
+
+.nodes-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The cards/table switch reads as one segmented control, like the Today tabs:
+ * the live half is filled, the other half is quiet. The buttons keep their
+ * own classes and labels; only the grouping is new. */
+.nodes-view-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.nodes-view-switch .ops-view-btn {
+  border: 0;
+  box-shadow: none;
+}
+
+/* The quiet half stays legible in both themes instead of sinking to a whisper. */
+.nodes-view-switch .ops-view-btn:not([aria-pressed="true"]) {
+  color: color-mix(in srgb, var(--foreground) 68%, transparent);
+}
+
+.nodes-view-switch .ops-view-btn:not([aria-pressed="true"]):hover {
+  color: var(--foreground);
+}
+
+@media (min-width: 641px) {
+  .nodes-page .node-card {
+    border-radius: 16px;
+    box-shadow: var(--shadow-card);
+    transition: box-shadow 150ms ease, border-color 150ms ease;
+  }
+
+  .nodes-page .node-card:hover {
+    box-shadow: var(--shadow-card-lg);
+  }
+
+  .dark .nodes-page .node-card {
+    border-color: rgb(255 255 255 / 0.07);
+    box-shadow: var(--shadow-card), inset 0 1px 0 rgb(255 255 255 / 0.05);
+  }
+
+  .dark .nodes-page .node-card:hover {
+    box-shadow: var(--shadow-card-lg), inset 0 1px 0 rgb(255 255 255 / 0.05);
+  }
+}
+
+@media (max-width: 640px) {
+  .nodes-hero {
+    padding: 18px 16px;
+    border-radius: 18px;
+  }
+}
