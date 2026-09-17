@@ -8,6 +8,10 @@ import Foundation
 // against real files on disk rather than a mocked file system.
 // Minimal stand-ins so the real uploader source compiles standalone. Only the
 // default-argument surface is needed; nothing here is exercised by the test.
+final class DiagnosticsLogOwnership: @unchecked Sendable {
+    static let shared = DiagnosticsLogOwnership()
+    func withCurrent<R>(_ id: String, action: () -> R) -> R? { action() }
+}
 final class LocalTrafficAudit {
     static let shared = LocalTrafficAudit()
     static let maximumBackups = 2

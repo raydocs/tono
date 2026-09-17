@@ -44,7 +44,7 @@ print "Tono macOS suite"
 
 run "xctest (app unit tests)" \
   xcodebuild test -project apps/macos/Tono.xcodeproj -scheme Tono \
-    -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO -quiet
+    -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_USER_SCRIPT_SANDBOXING=NO -quiet
 
 run "subscription url policy" tooling/scripts/test-subscription-url-policy.sh
 run "helper peer authorization" tooling/scripts/test-helper-peer-authorization.sh
