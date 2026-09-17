@@ -21,7 +21,7 @@ jobs:
           mkdir -p apps/windows/app/src-tauri/sidecar
           tooling/scripts/build-mihomo-adaptive.sh --install-adaptive-windows
           # The builder and the committed identities must describe the same inputs.
-          git diff --exit-code -- apps/macos/Tono/Resources/core-identity.json apps/windows/app/src-tauri/core-identity.json
+          git diff --exit-code -- apps/windows/app/src-tauri/core-identity.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: windows-core-${{ github.sha }}

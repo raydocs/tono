@@ -275,7 +275,8 @@ jobs:
             -configuration Debug \
             -destination 'platform=macOS,arch=arm64' \
             -derivedDataPath "$RUNNER_TEMP/DerivedData-tests" \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO
 
       - name: Load the Developer ID identity and notarytool credentials
         env:

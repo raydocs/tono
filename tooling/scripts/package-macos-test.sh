@@ -89,6 +89,7 @@ DEVELOPER_DIR="$developer_dir" /usr/bin/xcodebuild \
     DEVELOPMENT_TEAM="$team_id" \
     CODE_SIGNING_ALLOWED=YES \
     CODE_SIGNING_REQUIRED=YES \
+    ENABLE_USER_SCRIPT_SANDBOXING=NO \
     archive >/dev/null
 
 source_app="$archive_path/Products/Applications/Tono.app"
