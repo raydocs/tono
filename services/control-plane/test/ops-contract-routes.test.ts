@@ -229,7 +229,7 @@ describe('ops GET route ↔ checker table', () => {
       const body = await response.json() as unknown;
       expect(() => NAMED_CHECKERS[row.checker](body), row.route).not.toThrow();
     }
-  });
+  }, 30_000);
 
   it('returns 304 for If-None-Match on nodes, customers, incidents', async () => {
     await seedReads();

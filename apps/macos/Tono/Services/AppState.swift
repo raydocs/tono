@@ -1514,47 +1514,7 @@ final class AppState {
             let tun = await ProtectedConnectivityVerifier.raceSystemTUNProbes(timeoutSeconds: 8)
             guard generation == connectionCoordinator.protectionOperationGeneration else { return }
             if case .lost = tun {
-                ConnectionTelemetryBuffer.shared.record(
-                    "optionalPolicyRollback",
-                    reason: "tun_failed_after_reload",
-                    generation: Int(generation)
-                )
-                // Roll back the same three copies the forward transaction
-                // changed. Rewriting only the user-owned file left the helper's
-                // root snapshot and the live core on the failed policy. Keep
-                // the home-routing directives too: omitting them silently
-                // changed Claude's egress identity during rollback.
-                let rollbackOverlay = currentOwnedRuntimeOverlay()
-                let rollbackNodes = importedExitNodes
-                let rollbackDigest = try await coreRuntime.writeRuntimeConfig(
-                    overlay: rollbackOverlay,
-                    customNodes: rollbackNodes,
-                    directPolicy: base
-                )
-                let rollbackPath = try await PrivilegedRuntimeCoordinator.shared
-                    .syncCoreConfig(
-                        configDirectory: coreRuntime.configDirectory.path,
-                        configSHA256: rollbackDigest
-                    )
-                try await api.reloadConfig(path: rollbackPath)
-                loadedRuntimeConfigDigest = rollbackDigest
-                commitResidentialRouteAuditContext(
-                    overlay: rollbackOverlay,
-                    nodes: rollbackNodes,
-                    digest: rollbackDigest
-                )
-                try await PrivilegedRuntimeCoordinator.shared.armKillSwitch(
-                    apiHosts: [],
-                    tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
-                    proxyEndpoints: currentProxyEndpoints(),
-                    sessionDirectEndpoints: base?.sessionEndpoints ?? [],
-                    tailscaleBootstrapEnabled:
-                        AppProfile.homeExitEnabled && tonoTransport != nil,
-                    helperPrepared: true,
-                    reviewedBundleDirect:
-                        base?.requiresAddressFreeDirectPermit == true
-                )
-                return
+                throw CoreControllerError.protectionFailed("sing-box replacement failed TUN verification")
             }
             activeDirectPolicy = resolved
             ConnectionTelemetryBuffer.shared.record(
@@ -1568,6 +1528,10 @@ final class AppState {
                 error: error.localizedDescription,
                 generation: Int(generation)
             )
+            guard !Task.isCancelled, !isDisconnecting,
+                  generation == connectionCoordinator.protectionOperationGeneration else { return }
+            disconnect(releaseKillSwitch: false)
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -2125,7 +2089,7 @@ final class AppState {
         )
     }
 
-    private func currentOwnedRuntimeOverlay() -> ConfigPipeline.OverlayConfig {
+    func currentOwnedRuntimeOverlay() -> ConfigPipeline.OverlayConfig {
         ConfigPipeline.OverlayConfig(
             mixedPort: config.mixedPort,
             externalController: config.externalController,

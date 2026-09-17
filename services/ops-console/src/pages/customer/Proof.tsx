@@ -1,3 +1,4 @@
+import type { LogWindowDto } from '@contract';
 import { Empty } from '@/components/ops/Empty';
 import { Fact } from '@/components/ops/DetailDrawer';
 import { FoldedSection } from '@/components/ops/Section';
@@ -22,15 +23,51 @@ export function Proof({
   detail,
   loading,
   message,
+  logWindows,
 }: {
   detail: CustomerAccountDetail | null;
   loading: boolean;
   message: string | null;
+  logWindows?: LogWindowDto[];
 }) {
   const proof = detail?.proof ?? null;
   const reports = detail?.diagnostics ?? [];
+  const windows = logWindows ?? [];
   return (
     <>
+      {logWindows === undefined ? null : (
+        <FoldedSection title={copy.logWindowsSection} count={windows.length}>
+          {windows.length === 0 ? <Empty message={copy.logWindowsEmpty} /> : null}
+          {windows.map((entry) => (
+            <div key={entry.id} className="grid gap-x-8 sm:grid-cols-2">
+              <Fact
+                label={copy.logWindowFacts.who}
+                measured={measured(
+                  entry.openedBy ?? copy.logWindowUnknownActor,
+                  entry.openedAt,
+                  copy.sourceWord.manual,
+                )}
+              />
+              <Fact
+                label={copy.logWindowFacts.reads}
+                measured={measured(
+                  copy.logWindowReads(entry.reads),
+                  entry.openedAt,
+                  copy.sourceWord.manual,
+                )}
+              />
+              <Fact
+                label={copy.logWindowFacts.openedAt}
+                measured={measured(formatWhen(entry.openedAt), entry.openedAt, copy.sourceWord.manual)}
+              />
+              <Fact
+                label={copy.logWindowFacts.expiresAt}
+                measured={measured(formatWhen(entry.expiresAt), entry.expiresAt, copy.sourceWord.manual)}
+              />
+            </div>
+          ))}
+        </FoldedSection>
+      )}
       <FoldedSection title={copy.proofSection}>
         {loading ? <Empty message={copy.loading} /> : null}
         {message === null ? null : <Empty message={message} />}

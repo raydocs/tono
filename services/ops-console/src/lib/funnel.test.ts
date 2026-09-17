@@ -10,7 +10,8 @@ import {
 import { copy } from '@/copy/copy';
 import raw from '../../fixtures/customers.json';
 import rawFunnel from '../../fixtures/funnel.json';
-import { customerChores, inviteChores } from './chores';
+import { customerChores, fleetChores, inviteChores } from './chores';
+import { nowSec } from './clock';
 import { materializeOps } from './ops-fixtures';
 import {
   daysSince,
@@ -155,4 +156,98 @@ describe('开通跟进 as a chore', () => {
     const chased = new Set(inviteChores(liveInvites, plain).map((chore) => chore.who?.email));
     for (const row of fresh) expect(chased.has(row.email), row.email).toBe(false);
   });
+
+  /**
+   * A1/A2: every chore that is about somebody or some machine carries the way
+   * in. Expiry/quota/version/profile used to be sentences; the row now opens
+   * the 360, and a fleet row opens the node page, instead of asking the
+   * operator to look the name up in another tab. One test, every branch: the
+   * default fixtures exercise each customer kind once floors exist, and three
+   * built fleet nodes cover renew/quota/missing-profile.
+   */
+  it('carries its object on every expiry/quota/version/profile/fleet row', () => {
+    const floors = { macos: '9.9.9', windows: '9.9.9', linux: '9.9.9', android: '9.9.9', ios: '9.9.9' };
+    const mine = customerChores(liveRows, plain, floors);
+    const kinds = new Set(mine.map((chore) => chore.kind));
+    for (const kind of ['expiry', 'quota', 'version', 'profile'] as const) {
+      expect(kinds.has(kind), kind).toBe(true);
+    }
+    for (const chore of mine) {
+      if (chore.kind === 'onboarding') continue;
+      const userId = chore.id.replace(/^user-(expiry|quota|version|profile)-/, '');
+      const row = liveRows.find((item) => item.userId === userId);
+      expect(row, chore.id).toBeTruthy();
+      expect(chore.who?.userId, chore.id).toBe(userId);
+      expect(chore.who?.email, chore.id).toBe(row?.email);
+    }
+    // Every version-reporting row falls under the test floors.
+    const versioned = liveRows.filter((row) => row.minAppVersion !== null);
+    expect(versioned.length).toBeGreaterThan(0);
+    for (const row of versioned) {
+      const chore = mine.find((item) => item.id === `user-version-${row.userId}`);
+      expect(chore?.who?.userId, row.userId).toBe(row.userId);
+    }
+    const soon = nowSec() + DAY;
+    const fleet = fleetChores([
+      fleetNode('n-renew', { price: 5, renewsAt: soon, trafficQuotaBytes: null, trafficUsedBytes: null }),
+      fleetNode('n-quota', {
+        price: 5,
+        renewsAt: soon + 365 * DAY,
+        trafficQuotaBytes: 1000,
+        trafficUsedBytes: 800,
+        trafficCycleEnd: soon,
+      }),
+      fleetNode('n-bare', null),
+    ]);
+    expect(fleet.map((chore) => chore.id).sort()).toEqual([
+      'node-profile-n-bare', 'node-quota-n-quota', 'node-renew-n-renew',
+    ]);
+    for (const chore of fleet) {
+      expect(chore.node, chore.id).toBe(chore.id.replace(/^node-(renew|quota|profile)-/, ''));
+    }
+  });
 });
+
+/** Three fleet shapes, one per branch the page renders a row for. */
+function fleetNode(
+  name: string,
+  profile: {
+    price: number | null;
+    renewsAt: number | null;
+    trafficQuotaBytes?: number | null;
+    trafficUsedBytes?: number | null;
+    trafficCycleEnd?: number | null;
+  } | null,
+) {
+  return {
+    name,
+    catalogListed: true,
+    qualityStatus: 'ok',
+    qualityLabel: 'ok',
+    agentStatus: 'ok',
+    agentObservedAt: null,
+    profile: profile === null ? null : {
+      id: name,
+      catalogName: name,
+      price: profile.price,
+      currency: 'USD',
+      billingCycle: 1,
+      trafficQuotaBytes: profile.trafficQuotaBytes ?? null,
+      trafficUsedBytes: profile.trafficUsedBytes ?? null,
+      trafficCycleStart: null,
+      trafficCycleEnd: profile.trafficCycleEnd ?? null,
+      cycleNetIn: null,
+      cycleNetOut: null,
+      renewsAt: profile.renewsAt,
+      status: 'active',
+      createdAt: 0,
+      updatedAt: 0,
+    },
+    agent: null,
+    quality: null,
+    occupancy: 0,
+    affectedUsers: [],
+    needsAttention: false,
+    reasons: [],
+  };
+}

@@ -232,6 +232,11 @@ describe('每一条验收', () => {
     expect(busy.evidence).toContain('2');
   });
 
+  it('容量 fails when occupancy meets the ceiling', () => {
+    const capacity = capacityItem({ rows: Array.from({ length: 12 }, () => ({})) as never[], asOf: NOW }, 10);
+    expect(capacity.state).toBe('fail');
+  });
+
   it('替代机器 is a fail when nothing covers for the machine', () => {
     const names = new Set([NODE, SIBLING]);
     expect(standbyItem('tyo', [SIBLING], names, NOW).state).toBe('pass');

@@ -1,0 +1,267 @@
+/* Shell prototype: floating capsules on a quiet canvas.
+ *
+ * Scoped under `.shell-root / .shell-rail / .shell-frame` throughout. Routes,
+ * roles, header controls and pages are untouched — this file only recomposes
+ * the chrome around them. Icons stay monochrome; the live page is a solid
+ * circle. The Chinese name is always the accessible name and becomes visible
+ * on hover or keyboard focus. */
+
+.shell-root {
+  gap: 12px;
+  padding: 12px;
+}
+
+/* The outer card the pages sit in; the rail floats outside it on the canvas,
+ * like the reference. No overflow clipping here: clipped ancestors break the
+ * sticky aux column on Today. */
+.shell-frame {
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 28px;
+  box-shadow: var(--shadow-card-lg);
+}
+
+.dark .shell-frame {
+  border-color: rgb(255 255 255 / 0.07);
+  box-shadow: var(--shadow-card-lg), inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+/* The header keeps its DOM and controls; only the bar styling lifts off so
+ * the pills on it (search, source, avatar) read as floating controls. */
+.shell-frame .shell-header {
+  background: transparent;
+  border-bottom: 0;
+}
+
+.shell-rail {
+  position: relative;
+  z-index: 5;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 72px;
+  padding: 4px 0 4px 4px;
+  background: transparent;
+  border: 0;
+}
+
+@media (min-width: 960px) {
+  /* Long pages (node detail, ledger, audit) scroll past a static rail. Pin
+   * it to the frame instead so navigation stays reachable without changing
+   * DOM order or tab order. */
+  .shell-rail {
+    position: sticky;
+    top: 12px;
+    align-self: flex-start;
+    max-height: calc(100vh - 24px);
+  }
+}
+
+.rail-float {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 8px;
+  border-radius: 28px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--shadow-card-lg);
+}
+
+.dark .rail-float {
+  border-color: rgb(255 255 255 / 0.07);
+  box-shadow: var(--shadow-card-lg), inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+.rail-brandbox {
+  padding: 8px;
+  border-radius: 999px;
+}
+
+.rail-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.rail-nav {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.rail-link {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  color: var(--muted-foreground);
+  transition: background 150ms ease, color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+}
+
+.rail-link:hover {
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+  color: var(--foreground);
+  transform: translateY(-1px);
+}
+
+.rail-link[aria-current="page"] {
+  background: var(--accent);
+  color: #ffffff;
+  box-shadow: 0 6px 16px rgb(91 76 245 / 0.35);
+}
+
+.rail-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The visible Chinese name: hidden until hover or keyboard focus, while the
+ * accessible name (aria-label) and title are always present. */
+.rail-tip {
+  position: absolute;
+  left: calc(100% + 12px);
+  top: 50%;
+  translate: 0 -50%;
+  flex: none;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--shadow-card);
+  color: var(--foreground);
+  font-size: 13px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+
+.rail-link:hover .rail-tip,
+.rail-link:focus-visible .rail-tip {
+  opacity: 1;
+}
+
+.dark .rail-tip {
+  border-color: rgb(255 255 255 / 0.08);
+}
+
+/* ------------------------------------------------- phone: its own design */
+
+.shell-main {
+  min-width: 0;
+}
+
+@media (max-width: 959px) {
+  .shell-root {
+    padding: 0;
+  }
+
+  .shell-frame {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .dark .shell-frame {
+    border: 0;
+    box-shadow: none;
+  }
+
+  /* Two floating pills along the bottom edge — brand and pages — instead of
+   * a squeezed sidebar. It sits under the Radix overlay so an open sheet
+   * covers it rather than fighting it. */
+  .shell-rail {
+    position: fixed;
+    z-index: 30;
+    left: 12px;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    flex-direction: row;
+    gap: 8px;
+    width: auto;
+    padding: 0;
+  }
+
+  .rail-float {
+    flex-direction: row;
+    justify-content: space-evenly;
+    gap: 2px;
+    padding: 8px 10px;
+    border-radius: 999px;
+  }
+
+  /* The brand keeps a fixed width; the nav capsule takes the rest. Without
+   * this the brand inherits the 100% capsule width and pushes every entry
+   * off-viewport while scrollWidth stays 0, which no overflow assertion can
+   * catch — only measuring each entry's box does. */
+  .rail-brandbox {
+    flex: none;
+    width: auto;
+    padding: 6px;
+  }
+
+  .rail-navbox {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: auto;
+  }
+
+  .rail-brand {
+    width: 36px;
+    height: 36px;
+    font-size: 12px;
+  }
+
+  .rail-nav {
+    flex: 1 1 auto;
+    flex-direction: row;
+    justify-content: space-evenly;
+    gap: 2px;
+  }
+
+  .rail-link {
+    width: 44px;
+    height: 44px;
+  }
+
+  .rail-link:hover {
+    transform: none;
+  }
+
+  .shell-main {
+    padding-bottom: 112px;
+  }
+}
+
+@media (hover: none) {
+  /* Touch has no hover: the name appears on keyboard focus only, never stuck
+   * on after a tap. */
+  .rail-link:hover .rail-tip {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-link,
+  .rail-tip {
+    transition: none;
+  }
+}

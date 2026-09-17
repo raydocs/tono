@@ -89,20 +89,27 @@ export interface ListEnvelope<T> {
   nextCursor: string | null;
   total?: number;
   updatedAt: number;
+  counts?: {
+    byVerdict: Record<string, number>;
+    byStage: Record<string, number>;
+  };
 }
 
 /**
  * The one list shape. `total` is omitted, not nulled, when an endpoint cannot
  * count cheaply — the console shows "N 项" only when it was actually counted.
+ * `counts` is the same: only the customer list sends it.
  */
 export function listEnvelope<T>(
   items: T[],
   nextCursor: string | null,
   updatedAt: number,
   total?: number,
+  counts?: ListEnvelope<T>['counts'],
 ): ListEnvelope<T> {
   const envelope: ListEnvelope<T> = { items, nextCursor, updatedAt };
   if (total !== undefined) envelope.total = total;
+  if (counts !== undefined) envelope.counts = counts;
   return envelope;
 }
 

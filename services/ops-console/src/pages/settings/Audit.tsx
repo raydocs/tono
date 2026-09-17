@@ -1,14 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AuditEntryDto } from '@contract';
 import { Action } from '@/components/ops/Action';
 import { DataTable, type DataColumn, type TableState } from '@/components/ops/DataTable';
 import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
+import { auditSearchCopy as searchWords } from '@/copy/audit-search';
 import { settingsApi } from '@/lib/api-settings';
 import { formatWhen, formatWhenAgo } from '@/lib/display';
 import { actorWord } from '@/lib/settings';
 import { usePrivacy } from '@/lib/privacy';
-import { Toolbar } from './form';
+import { openCustomer, openNodePage } from '@/lib/hash-route';
+import { Field, Toolbar } from './form';
+import { AuditFilters, EMPTY_AUDIT_FILTERS } from './AuditFilters';
 
 const words = copy.settings.audit;
 
@@ -25,22 +28,34 @@ type Cursor = { before: number; beforeId: string } | null;
  */
 export function Audit() {
   const privacy = usePrivacy();
-  const [targetId, setTargetId] = useState<string | null>(null);
+  const [filters, setFilters] = useState(EMPTY_AUDIT_FILTERS);
+  const { targetId } = filters;
+  const [filtering, setFiltering] = useState(false);
+  const [action, setAction] = useState('');
+  const [targetType, setTargetType] = useState<string | null>(null);
   const [entries, setEntries] = useState<AuditEntryDto[]>([]);
   const [cursor, setCursor] = useState<Cursor>(null);
   const [state, setState] = useState<'loading' | 'error' | 'ready'>('loading');
   const [message, setMessage] = useState<string | null>(null);
   const [more, setMore] = useState(false);
+  const request = useRef(0);
+  const abort = useRef<AbortController | null>(null);
 
   const load = useCallback(async (from: Cursor, append: boolean) => {
-    if (!append) setState('loading');
+    abort.current?.abort();
+    const controller = new AbortController();
+    abort.current = controller;
+    const id = ++request.current;
+    if (!append) { setState('loading'); setEntries([]); setCursor(null); }
     setMore(true);
+    setMessage(null);
     try {
       const page = await settingsApi.audit({
-        targetId,
-        before: from?.before ?? null,
+        ...filters,
+        before: from?.before ?? filters.before,
         beforeId: from?.beforeId ?? null,
-      });
+      }, controller.signal);
+      if (id !== request.current || controller.signal.aborted) return;
       setEntries((current) => (append ? [...current, ...page.entries] : page.entries));
       setCursor(page.hasMore && page.nextBefore !== null && page.nextBeforeId !== null
         ? { before: page.nextBefore, beforeId: page.nextBeforeId }
@@ -48,26 +63,38 @@ export function Audit() {
       setState('ready');
       setMessage(null);
     } catch (failure) {
-      setState('error');
+      if (id !== request.current || controller.signal.aborted) return;
+      if (!append) setState('error');
       setMessage(failure instanceof Error ? failure.message : copy.loadError);
     } finally {
-      setMore(false);
+      if (id === request.current && !controller.signal.aborted) setMore(false);
     }
-  }, [targetId]);
+  }, [filters]);
 
   useEffect(() => {
     void load(null, false);
+    const current = abort.current;
+    return () => { current?.abort(); };
   }, [load]);
 
   const columns = useMemo(() => auditColumns(privacy.email), [privacy.email]);
+  const shown = entries.filter((row) => row.action.toLowerCase().includes(action.trim().toLowerCase()));
+  const hasFilters = Boolean(targetId || filters.actorEmail || filters.before || action);
+  const openTarget = !targetId ? null
+    : targetType === 'user' || targetType === 'customer' ? () => openCustomer(targetId)
+      : targetType === 'node' ? () => openNodePage(targetId) : null;
   const tableState: TableState = state === 'ready'
-    ? (entries.length === 0 ? 'empty' : 'ready')
+    ? (shown.length === 0 ? 'empty' : 'ready')
     : state;
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="settings-audit flex flex-col gap-3">
       <Toolbar
-        aside={targetId ? <Action onClick={() => setTargetId(null)}>{words.clearFilter}</Action> : null}
+        aside={<>
+          <Action className="max-sm:min-h-11" onClick={() => setFiltering(!filtering)}>{searchWords.filters}</Action>
+          {openTarget ? <Action className="max-sm:min-h-11" onClick={openTarget}>{searchWords.open}</Action> : null}
+          {hasFilters ? <Action className="max-sm:min-h-11" onClick={() => { setFilters(EMPTY_AUDIT_FILTERS); setAction(''); setTargetType(null); }}>{words.clearFilter}</Action> : null}
+        </>}
       >
         {targetId ? (
           <>
@@ -77,19 +104,31 @@ export function Audit() {
         ) : (
           <span className="normal-case tracking-normal">{words.filterTargetHint}</span>
         )}
+        {filters.actorEmail ? <span>{privacy.email(filters.actorEmail)}</span> : null}
+        {filters.before ? <span>{searchWords.beforeActive(formatWhen(filters.before))}</span> : null}
       </Toolbar>
+      {!filtering ? null : <>
+        <AuditFilters key={JSON.stringify(filters)} filters={filters} onApply={(next) => { setFilters(next); setTargetType(null); }} />
+        <Field label={searchWords.action}>
+          <input className="min-h-11 min-w-0 rounded-[8px] border border-[var(--hairline)] bg-[var(--background)] px-2 text-body" value={action} onChange={(event) => setAction(event.target.value)} />
+        </Field>
+      </>}
+      {action && state === 'ready' ? <p className="text-body text-[var(--muted-foreground)]" role="status">{searchWords.scope(entries.length, shown.length, cursor !== null)}</p> : null}
       <DataTable
-        rows={entries}
+        rows={shown}
         columns={columns}
         getRowId={(row) => row.id}
-        onRowClick={(row) => { if (row.targetId) setTargetId(row.targetId); }}
+        onRowClick={(row) => { if (row.targetId) { setFilters({ ...filters, targetId: row.targetId }); setTargetType(row.targetType); } }}
         state={tableState}
-        emptyMessage={words.empty}
+        emptyMessage={action ? searchWords.noMatches : words.empty}
         errorMessage={message ?? undefined}
+        className="settings-audit-table"
       />
+      {message && state === 'ready' ? <p role="alert" className="panel-error p-3 text-body">{message}</p> : null}
+      {state === 'error' ? <Action pending={more} onClick={() => { void load(null, false); }}>{searchWords.retry}</Action> : null}
       {cursor === null ? null : (
         <div className="flex justify-center">
-          <Action pending={more} onClick={() => { void load(cursor, true); }}>
+          <Action pending={more} onClick={() => { void load(cursor, true); }} className="settings-more">
             {more ? words.loadingMore : words.more}
           </Action>
         </div>

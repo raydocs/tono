@@ -350,6 +350,35 @@ nonisolated struct ConfigPipeline {
         "aistudio.google.com",
         "generativelanguage.googleapis.com",
         "notebooklm.google.com",
+        // Meta Muse
+        "muse.ai",
+        "meta.ai",
+        "muse.meta.com",
+        "www.muse.ai",
+        // Meta & Facebook
+        "meta.com",
+        "facebook.com",
+        "fb.com",
+        "fb.me",
+        "fb.watch",
+        "fbcdn.net",
+        "facebook.net",
+        "messenger.com",
+        // Instagram & Threads
+        "instagram.com",
+        "cdninstagram.com",
+        "ig.me",
+        "threads.net",
+        // Gmail & Google Auth
+        "gmail.com",
+        "mail.google.com",
+        "googlemail.com",
+        "inbox.google.com",
+        "accounts.google.com",
+        "myaccount.google.com",
+        "oauth2.googleapis.com",
+        "mail-pa.clients6.google.com",
+        "gmail.googleapis.com",
     ]
     /// Anthropic's own unicast (ARIN AP-2440). Claude Code has been seen
     /// dialing `160.79.104.10` by raw IP, which no DOMAIN-SUFFIX can catch.

@@ -215,6 +215,9 @@ test.describe('node detail page', () => {
     await page.getByRole('button', { name: /变更记录/ }).click();
     await expect(page.getByText('回程丢包偏高')).toBeVisible();
     await expect(page.locator('body')).not.toContainText('carrier_loss');
+    await page.getByRole('button', { name: /^回执/ }).click();
+    await expect(page.getByText(/目录 48 → 49/)).toBeVisible();
+    await expect(page.getByText('回程丢包偏高')).toBeVisible();
   });
 
   /**

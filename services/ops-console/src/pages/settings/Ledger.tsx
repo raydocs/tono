@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Action } from '@/components/ops/Action';
 import { ConfirmDialog } from '@/components/ops/ConfirmDialog';
 import { EmptyLine } from '@/components/ops/Empty';
@@ -20,8 +20,10 @@ import {
   pendingNodes,
 } from '@/lib/ledger';
 import { useResource } from '@/lib/use-resource';
+import '@/styles/settings-ledger.css';
 import { LedgerDrawer } from './LedgerDrawer';
 import { LedgerRecon } from './LedgerRecon';
+import { LedgerSlo } from './LedgerSlo';
 import { LedgerTable } from './LedgerTable';
 import { Toolbar } from './form';
 import { useWrite } from './use-write';
@@ -47,10 +49,20 @@ export function Ledger() {
   const [month, setMonth] = useState(() => monthOf(nowSec()));
   const [adding, setAdding] = useState(false);
   const [closing, setClosing] = useState(false);
+  /**
+   * A same-month write retires the summary on screen. The nonce rides the
+   * summary key so the next read starts from loading instead of vouching
+   * for the old figures while the refetch is in flight — and lands in
+   * error rather than stale-ready when the refetch fails. Either way the
+   * lock guards below see no valid summary until a fresh one arrives.
+   */
+  const [summaryNonce, setSummaryNonce] = useState(0);
 
-  const summary = useResource(`ledger-month-${month}`, (signal) => ledgerApi.month(month, signal));
+  const summary = useResource(`ledger-month-${month}#${summaryNonce}`, (signal) => ledgerApi.month(month, signal));
   const entries = useResource(`ledger-entries-${month}`, (signal) => ledgerApi.entries(month, signal));
   const reload = useCallback(() => {
+    setClosing(false);
+    setSummaryNonce((n) => n + 1);
     summary.reload();
     entries.reload();
   }, [summary, entries]);
@@ -59,6 +71,24 @@ export function Ledger() {
   const month0 = summary.status === 'ready' ? summary.data : null;
   const rows = entries.status === 'ready' ? entries.data.items : [];
   const locked = month0?.closedAt !== null && month0?.closedAt !== undefined;
+  /**
+   * Locking agrees to a specific set of numbers, so it needs a live summary
+   * for the month on screen — not a failed read, not last month's answer
+   * left over while the new one loads, and not a month that has since
+   * locked. Both the button and the confirm check this; the button alone
+   * cannot stop a dialog that is already open.
+   */
+  const summaryValid = month0 !== null && month0.month === month && !locked;
+
+  /**
+   * An open confirm that loses its premise closes instead of firing into
+   * the new state: switching months or a refetch that locks the month must
+   * not lock the wrong month or lock with no figures. Recovery never
+   * reopens it — the operator asks again on purpose.
+   */
+  useEffect(() => {
+    if (closing && !summaryValid) setClosing(false);
+  }, [closing, summaryValid]);
 
   const emails = useMemo(() => {
     const map = new Map<string, string>();
@@ -71,7 +101,7 @@ export function Ledger() {
   }, [emails]);
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="settings-ledger flex flex-col gap-8">
       <div className="flex flex-col gap-4">
         <Toolbar
           aside={(
@@ -92,8 +122,9 @@ export function Ledger() {
                 {words.exportAction}
               </a>
               <Action
-                reason={locked ? words.closedAlready : null}
-                onClick={() => setClosing(true)}
+                reason={locked ? words.closedAlready : !summaryValid ? words.closeWaiting : null}
+                pending={write.pending}
+                onClick={() => { if (summaryValid && !write.pending) setClosing(true); }}
               >
                 {words.closeAction}
               </Action>
@@ -101,7 +132,11 @@ export function Ledger() {
           )}
         >
           <MonthPicker month={month} onChange={setMonth} />
-          {month0 === null ? null : <span>{words.entryCount(rows.length)}</span>}
+          {/* The count belongs to the entries read, not the summary: while
+              the entries are still loading or have failed, no number here —
+              a 0 would read as an empty month. Ready-but-empty keeps its
+              real 0. */}
+          {entries.status === 'ready' ? <span>{words.entryCount(rows.length)}</span> : null}
           {month0?.closedAt ? (
             <span className="ops-tag">
               {words.closedBy(month0.closedBy ?? copy.missing, formatWhen(month0.closedAt))}
@@ -130,6 +165,9 @@ export function Ledger() {
           </Section>
           <Section title={words.recon}>
             <LedgerRecon summary={month0} />
+          </Section>
+          <Section title={words.slo}>
+            <LedgerSlo />
           </Section>
         </>
       )}
@@ -179,6 +217,10 @@ export function Ledger() {
         failure={write.error}
         onCancel={() => setClosing(false)}
         onConfirm={() => {
+          if (!summaryValid || write.pending) {
+            setClosing(false);
+            return;
+          }
           void write.run(() => ledgerApi.close(month)).then((ok) => {
             if (ok) setClosing(false);
           });
@@ -218,7 +260,7 @@ function Totals({ summary }: { summary: MonthSummaryDto }) {
   const cell = (value: number) => measured<number | null>(value, at, words.source);
   const money = (value: number) => ({ number: formatCny(value) ?? copy.missing });
   return (
-    <div className="grid gap-6 border-y border-[var(--hairline)] py-4 sm:grid-cols-3">
+    <div className="settings-ledger-totals grid gap-6 py-4 sm:grid-cols-3">
       <MetricCard label={words.revenue} value={cell(summary.revenueCnyMinor)} format={money} />
       <MetricCard label={words.cost} value={cell(summary.costCnyMinor)} format={money} />
       <MetricCard label={words.margin} value={cell(summary.marginCnyMinor)} format={money} />

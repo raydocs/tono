@@ -9,6 +9,7 @@ import { Empty } from '@/components/ops/Empty';
 import { PageNote } from '@/components/ops/PageNote';
 import { StatusWord } from '@/components/ops/StatusWord';
 import { copy } from '@/copy/copy';
+import { formatBytesMeasured } from '@/lib/display';
 import { closeNode, openNode, openNodePage } from '@/lib/hash-route';
 import { usePrivacy } from '@/lib/privacy';
 import { useIsPhone } from '@/lib/use-phone';
@@ -28,6 +29,7 @@ import { cn } from '@/lib/utils';
 import type { Tone } from '@/components/ops/StatusWord';
 import type { FleetNodeDto } from '@/lib/types';
 import type { FleetState } from '@/lib/use-fleet';
+import '@/styles/nodes.css';
 import { NodeCardGrid } from './NodeCardGrid';
 import { NodeTable } from './NodeTable';
 import { toNodeView } from './node-metrics';
@@ -100,6 +102,41 @@ export default function NodesPage({
    * should have measured it.
    */
   const pathWired = useMemo(() => all.some((node) => node.forwardWorst.value !== null), [all]);
+  const fleetTotals = useMemo(() => {
+    let occupants = 0;
+    let hasOccupants = false;
+    let usedBytes = 0;
+    let hasUsed = false;
+    let quotaBytes = 0;
+    let hasQuota = false;
+
+    for (const node of onShow) {
+      if (node.occupancy.value !== null) {
+        occupants += node.occupancy.value;
+        hasOccupants = true;
+      }
+      const q = node.quota.value;
+      if (q?.used !== null && q?.used !== undefined) {
+        usedBytes += q.used;
+        hasUsed = true;
+      }
+      if (q?.quota !== null && q?.quota !== undefined) {
+        quotaBytes += q.quota;
+        hasQuota = true;
+      }
+    }
+
+    const trafficText = hasUsed
+      ? (hasQuota && quotaBytes > 0
+        ? copy.fleetTrafficTotal(formatBytesMeasured(usedBytes), formatBytesMeasured(quotaBytes))
+        : copy.fleetTrafficUsedOnly(formatBytesMeasured(usedBytes)))
+      : null;
+
+    return {
+      occupancyText: hasOccupants ? copy.fleetOccupancyTotal(occupants) : null,
+      trafficText,
+    };
+  }, [onShow]);
   const selectedView = useMemo(() => {
     const found = all.find((node) => node.name === selected);
     return found ? toNodeView(found, facts.get(found.name)) : null;
@@ -114,41 +151,56 @@ export default function NodesPage({
         : 'ready';
 
   return (
-    <div className="page-wrap">
+    <div className="page-wrap nodes-page">
       <div className="page-head">
-        {/* R2 reaches the headline too: a fleet that failed to load has no counts,
-            and a zero count would be a measurement the console never took. */}
-        {nodes.status === 'ready' ? (
-          <p className="text-verdict">
-            {fragments.map((id, index) => (
-              <span key={id}>
-                {index === 0 ? null : <span className="mx-2 text-[var(--muted-foreground)]">·</span>}
-                <CountBit
-                  id={id}
-                  active={filter === id}
-                  count={counts[id]}
-                  render={(values) => copy.count[id](values[0])}
-                  onClick={() => setFilter((current) => (current === id ? null : id))}
-                />
-              </span>
-            ))}
-          </p>
-        ) : (
-          <p className="text-verdict text-[var(--muted-foreground)]">
-            {nodes.status === 'loading' ? copy.loading : copy.loadError}
-          </p>
-        )}
+        <section className="nodes-hero" aria-label={copy.pages.nodes}>
+          {/* R2 reaches the headline too: a fleet that failed to load has no counts,
+              and a zero count would be a measurement the console never took. */}
+          {nodes.status === 'ready' ? (
+            <p className="text-verdict">
+              {fragments.map((id, index) => (
+                <span key={id}>
+                  {index === 0 ? null : <span className="mx-2 text-[var(--muted-foreground)]">·</span>}
+                  <CountBit
+                    id={id}
+                    active={filter === id}
+                    count={counts[id]}
+                    render={(values) => copy.count[id](values[0])}
+                    onClick={() => setFilter((current) => (current === id ? null : id))}
+                  />
+                </span>
+              ))}
+            </p>
+          ) : (
+            <p className="text-verdict text-[var(--muted-foreground)]">
+              {nodes.status === 'loading' ? copy.loading : copy.loadError}
+            </p>
+          )}
 
-        <PageNote
-          fetchedAt={newestFetch(nodes, health, fleet)}
-          backfill={health.status === 'ready' ? health.data.backfill : null}
-        />
+          <PageNote
+            className="nodes-hero-note"
+            fetchedAt={newestFetch(nodes, health, fleet)}
+            backfill={health.status === 'ready' ? health.data.backfill : null}
+          />
 
-        {nodes.status === 'ready' && all.length > 0 && !pathWired ? (
-          <p className="text-body text-[var(--muted-foreground)]">{copy.pathNotWired}</p>
-        ) : null}
+          {nodes.status === 'ready' && (fleetTotals.occupancyText || fleetTotals.trafficText) ? (
+            <p className="nodes-aggregate-bar text-micro text-[var(--muted-foreground)] flex items-center gap-2">
+              {fleetTotals.occupancyText ? (
+                <span className="font-mono">{fleetTotals.occupancyText}</span>
+              ) : null}
+              {fleetTotals.occupancyText && fleetTotals.trafficText ? <span>·</span> : null}
+              {fleetTotals.trafficText ? (
+                <span className="font-mono">{fleetTotals.trafficText}</span>
+              ) : null}
+            </p>
+          ) : null}
 
-        <div className="toolbar-row">
+          {nodes.status === 'ready' && all.length > 0 && !pathWired ? (
+            <p className="text-body text-[var(--muted-foreground)]">{copy.pathNotWired}</p>
+          ) : null}
+        </section>
+
+        <div className="toolbar-row nodes-toolbar">
           {NODE_LIFECYCLE_CHIPS.map((id) => (
             <Chip
               key={id}
@@ -164,13 +216,13 @@ export default function NodesPage({
           ))}
 
           {phone ? null : (
-            <div className="ml-auto flex items-center gap-2">
+            <div className="nodes-view-switch ml-auto flex items-center gap-0.5">
               <button
                 type="button"
                 aria-pressed={view === 'cards'}
                 className={cn(
-                  'flex h-8 items-center gap-1 rounded-[999px] border border-[var(--hairline)] px-3 text-micro',
-                  view === 'cards' && 'bg-[var(--accent)] text-white',
+                  'ops-view-btn flex h-8 items-center gap-1 rounded-[999px] border border-transparent px-3 text-micro',
+                  view === 'cards' ? 'bg-[var(--accent)] text-white' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
                 )}
                 onClick={() => setChosen('cards')}
               >
@@ -181,8 +233,8 @@ export default function NodesPage({
                 type="button"
                 aria-pressed={view === 'table'}
                 className={cn(
-                  'flex h-8 items-center gap-1 rounded-[999px] border border-[var(--hairline)] px-3 text-micro',
-                  view === 'table' && 'bg-[var(--accent)] text-white',
+                  'ops-view-btn flex h-8 items-center gap-1 rounded-[999px] border border-transparent px-3 text-micro',
+                  view === 'table' ? 'bg-[var(--accent)] text-white' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
                 )}
                 onClick={() => setChosen('table')}
               >

@@ -464,4 +464,30 @@ describe('ops node jobs', () => {
     ).bind(retirePendingDedupeKey(kite)).first<{ n: number }>();
     expect(Number(afterRelist?.n)).toBe(0);
   });
+
+  it('records a change receipt after catalog_retire with incremented revision', async () => {
+    const e = env as unknown as Env;
+    const t = 1_800_001_000;
+    const kite = 'Tokyo · Kite';
+    const fuji = 'Tokyo · Fuji';
+    await seedTwoNodeCatalog(e, t, kite, fuji);
+
+    await enqueue('catalog_retire', t, { nodeName: kite, idempotencyKey: 'receipt-retire-kite' });
+    expect(await runWorkerJobs(e, t, 5)).toBe(1);
+
+    const receipt = await db().prepare(
+      `SELECT kind, subject_type, subject_id, before_json, after_json, client_acks, at
+       FROM ops_change_receipts
+       WHERE subject_type = 'node' AND subject_id = ?`,
+    ).bind(kite).first<{
+      kind: string; subject_type: string; subject_id: string; before_json: string; after_json: string; client_acks: number; at: number;
+    }>();
+
+    expect(receipt).not.toBeNull();
+    expect(receipt?.kind).toBe('catalog_retire');
+    const before = JSON.parse(receipt?.before_json ?? '{}') as { revision: number; listed: string[] };
+    const after = JSON.parse(receipt?.after_json ?? '{}') as { revision: number };
+    expect(before.revision + 1).toBe(after.revision);
+    expect(before.listed).toContain(kite);
+  });
 });

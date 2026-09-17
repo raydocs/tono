@@ -1,0 +1,83 @@
+/* Node detail: conclusion first, evidence in the open, reference aside.
+ *
+ * Everything here is scoped under `.node-detail-page`. The zoning is deliberate rather than
+ * mechanical: the hero card carries identity plus the actions, the acceptance
+ * block keeps its decision emphasis, the aux card groups the narrow reference
+ * sections (facts, bindings, quota), and the evidence sections (paths, load,
+ * occupants, errors, timeline, jobs, history) stay as hairline sections so
+ * the page does not become cards inside cards. Order, resources, lazy
+ * mounting and all action protections are untouched. */
+
+.node-detail-page .node-hero-card {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 20px;
+  box-shadow: var(--shadow-card-lg);
+  padding: 22px 24px;
+}
+
+.dark .node-detail-page .node-hero-card {
+  border-color: rgb(255 255 255 / 0.07);
+  box-shadow: var(--shadow-card-lg), inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+.node-detail-page .node-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.node-detail-page .node-detail-main {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  min-width: 0;
+}
+
+.node-detail-page .node-aux-card {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 20px;
+  box-shadow: var(--shadow-card-lg);
+  padding: 18px;
+}
+
+.dark .node-detail-page .node-aux-card {
+  border-color: rgb(255 255 255 / 0.07);
+  box-shadow: var(--shadow-card-lg), inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+@media (min-width: 1100px) {
+  .node-detail-page .node-detail-grid {
+    grid-template-columns: minmax(0, 1fr) 360px;
+  }
+
+  .node-detail-page .node-detail-main {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .node-detail-page .node-aux-card {
+    grid-column: 2;
+    grid-row: 1;
+    position: sticky;
+    top: 16px;
+  }
+}
+
+@media (max-width: 640px) {
+  .node-detail-page .node-hero-card {
+    padding: 18px 16px;
+    border-radius: 18px;
+  }
+
+  .node-detail-page .node-aux-card {
+    padding: 16px;
+    border-radius: 18px;
+  }
+}

@@ -88,7 +88,7 @@ nonisolated final class ConfigStorage: @unchecked Sendable {
 
     var runtimeConfigPath: URL {
         appSupportDirectory.appendingPathComponent("config", isDirectory: true)
-            .appendingPathComponent("config.yaml")
+            .appendingPathComponent("config.json")
     }
 
     // MARK: - Subscription YAML (immutable, stored as-is)

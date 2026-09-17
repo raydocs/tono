@@ -91,3 +91,9 @@ export function splitBytes(value: number | null | undefined): { number: string; 
   if (cut < 0) return { number: text, unit: '' };
   return { number: text.slice(0, cut), unit: text.slice(cut + 1) };
 }
+
+export function splitPercent(ratio: number | null | undefined): { number: string; unit: string } {
+  if (ratio === null || ratio === undefined) return { number: copy.missing, unit: copy.unit.pct };
+  return { number: (ratio * 100).toFixed(1), unit: copy.unit.pct };
+}
+

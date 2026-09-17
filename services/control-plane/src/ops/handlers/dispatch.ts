@@ -34,9 +34,11 @@ import {
 } from './alerts';
 import { getSystemHealth } from './system';
 import { postReplay } from './replay';
+import { getSlo } from './slo';
 import {
   getFx, getLedger, getMonth, getMonthExport, patchLedger, postLedger, postLedgerReverse, postMonthClose,
 } from './ledger';
+import { getNodeReceipts } from './receipts';
 import type { Actor } from './common';
 // dept:E
 import { actionForRequest, requireCan, resolveOpsRole } from '../roles';
@@ -115,6 +117,8 @@ export const OPS_V1_ROUTES = [
   // dept:a
   // append your entries inside your block
   'POST /api/v1/ops/replay',
+  'GET /api/v1/ops/nodes/{name}/receipts',
+  'GET /api/v1/ops/slo',
 
   // dept:b
   // append your entries inside your block
@@ -205,6 +209,8 @@ const ROUTES: Array<{ method: string; re: RegExp; handle: Handler }> = [
   // dept:a
   // append your entries inside your block
   { method: 'POST', re: /^\/api\/v1\/ops\/replay$/, handle: (req, e) => postReplay(req, e) },
+  { method: 'GET', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/receipts$/, handle: (req, e, _a, p) => getNodeReceipts(req, e, p[0]) },
+  { method: 'GET', re: /^\/api\/v1\/ops\/slo$/, handle: (req, e) => getSlo(req, e) },
 
   // dept:b
   // append your entries inside your block

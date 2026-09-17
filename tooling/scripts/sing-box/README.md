@@ -5,6 +5,89 @@ Product integration now uses [the v2 shared contract](product-contract.md),
 The builder pins and frozen M0 fixtures below remain unchanged. New JSON rules
 do not require a different core build; native application remains a separate gate.
 
+## Check the shared integration branch locally
+
+Use a clean checkout of `origin/feat/shared-sing-box-contract` and compare
+`git rev-parse HEAD` with PR #202's head before recording results. To avoid
+overwriting an existing checkout, run these from an existing Tono checkout:
+
+```sh
+git fetch origin main feat/shared-sing-box-contract
+git worktree add --detach ../tono-shared-verify origin/feat/shared-sing-box-contract
+git -C ../tono-shared-verify rev-parse HEAD
+```
+
+Run subsequent commands from that new worktree's root. Python-only checks need
+Python 3.10+ and do not build or start a product:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+  -s tooling/scripts/sing-box -p 'test_*.py' -v
+```
+
+Expected: **20 tests, OK (skipped=1)** without `TONO_SINGBOX_CHECK_BINARY`.
+The skipped test is a real-core parser check, not a passed parser check.
+For all 20 checks on a disposable **Linux x86_64** host, supply the retained
+M1 Linux binary, or reconstruct it with the pinned builder documented below:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 \
+TONO_SINGBOX_CHECK_BINARY=/absolute/path/to/approved/linux-amd64-v2/sing-box \
+python3 -m unittest discover -s tooling/scripts/sing-box -p 'test_*.py' -v
+```
+
+The parser test checks the binary SHA from `release.json` before execution,
+checks two handwritten product shapes with a 15-second bound per invocation,
+and rejects a bad Reality key. It never invokes `run`. These are **not actual
+Rust/Swift emitted-byte checks, TLS handshakes or native protection receipts**.
+An upstream release download has a different binary hash and must fail here.
+
+On a permitted Linux/Windows build host with Rust **1.98 or newer**, run the
+focused shared Rust regressions (do not implicitly compile on the MacBook):
+
+```sh
+cargo test --manifest-path apps/windows/Cargo.toml --locked -p tono-core sing_box::
+```
+
+Expected at the tested source: **17 passed**, comprising the 13 frozen M1
+tests plus four product-compiler regressions. To match the existing hosted core
+job exactly, omit the `sing_box::` filter. This is portable compiler coverage,
+not PF/WFP, Service/helper, installer or Connected acceptance.
+
+### Durable evidence and retained artifacts
+
+The unchanged emitter source at
+[`c1bf5049`](https://github.com/raydocs/tono/commit/c1bf5049b25d9a27bd35afac2d8a58f9dc16f115)
+passed [Windows CI](https://github.com/raydocs/tono/actions/runs/34905344106),
+[PR Windows CI](https://github.com/raydocs/tono/actions/runs/34905348688), and
+[macOS CI](https://github.com/raydocs/tono/actions/runs/34905348835): 11 checks
+passed. The hosted core log records **260 unit + 14 integration tests passed**,
+including all four `sing_box::runtime::tests`. The later main reconciliation
+imports only main's guidance/home-agent documentation; no emitter, Cargo or
+runtime-template bytes change. This is explicitly prior-SHA evidence, not a
+claim that a documentation/manifest follow-up already passed new CI.
+
+All three original build manifests are now committed byte-for-byte under
+`manifests/<build-target>.json`. Their hashes match `release.json` and the
+independent M1 handoff below; source, Go, tags, modules and unsigned binary
+identities are preserved. Their `M1_OFFLINE_NOT_INSTALLABLE` scope is deliberate:
+archiving provenance does not authorize installation or signing.
+
+Binary executables, upstream archives, Go/toolchain/module caches and raw CI
+logs stay outside Git. They are large reproducible/downloaded inputs or raw
+diagnostics, not missing source changes. Rebuild instructions, provenance and
+CI permalinks are retained here; binary transfer paths are below. If the old
+build Orb is unavailable, obtain the approved inputs and rebuild; do not
+substitute a different official binary or pretend these binaries were uploaded
+as a GitHub release. No release/upload-to-customer-channel was performed.
+
+Remaining blockers: a real QUIC DER verifier for Tono HY2, resolver redundancy,
+platform-owned Swift/Service and native DNS/PF/WFP/installer verification,
+and deletion of old YAML APIs only after atomic migration of all callers.
+The branch is an integration draft, not a complete Mihomo replacement.
+
+## Historical M1 build contract
+
 This package owns only CONTRACT §6's build/authentication-boundary work. It
 supports SHIP_PLAN G1/G2 evidence without closing a gate. The only baseline is
 [M0 7f64978c](https://github.com/raydocs/tono/commit/7f64978c5d9d5b8551e0b81f7247cb5a630ebf56).

@@ -92,6 +92,25 @@ export type DigestDto = {
 
 export type FollowupDue = 'today' | 'overdue' | 'open';
 
+const SHANGHAI_OFFSET = 8 * 3_600;
+
+/**
+ * Shanghai midnight for the day `at` falls on, in epoch seconds — the same
+ * boundary the Worker draws in `handlers/followups.ts` (`shanghaiDayStart`
+ * over `+08:00`). The console needs its own copy because the digest page
+ * labels rows the API already filtered: overdue is strictly before this
+ * stamp, and a note promised for today at 00:00 is still due today at 03:23.
+ */
+export function shanghaiDayStartSec(at: number): number {
+  const day = new Date((at + SHANGHAI_OFFSET) * 1_000).toISOString().slice(0, 10);
+  return Math.floor(Date.parse(`${day}T00:00:00+08:00`) / 1_000);
+}
+
+/** Overdue by the Worker's calendar-day rule, never by the current second. */
+export function isFollowupOverdue(dueAt: number | null, at: number): boolean {
+  return dueAt !== null && dueAt < shanghaiDayStartSec(at);
+}
+
 const id = (value: string) => encodeURIComponent(value);
 
 export const followupApi = {
