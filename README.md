@@ -15,8 +15,8 @@ the user's traffic.
   fallback and no certificate-verification bypass.
 - **Operations:** ops2 is the operator console, separate from the customer apps.
 
-The current product Core is Tono's patched Mihomo. The sing-box/Go/gVisor
-comparisons are experiments, **not a completed migration or release approval**.
+macOS uses sing-box as its product Core; Windows still uses Tono's
+patched Mihomo. **The macOS sing-box build is not a customer release**.
 Ubuntu desktop and the `tono` CLI are planned, not shipped products.
 
 Tono is its own product. Reused components and license obligations are recorded

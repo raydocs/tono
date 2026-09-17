@@ -22,7 +22,7 @@ integration branch.
 
 | Path | Role |
 |---|---|
-| `apps/macos/` | SwiftUI client + `tono-core-helper` (PF, DNS, Mihomo) |
+| `apps/macos/` | SwiftUI client + `tono-core-helper` (PF, DNS, sing-box) |
 | `apps/windows/app/` | Windows GUI (Tauri). `pages/tono/` is the product shell |
 | `apps/windows/service/` | Privileged service (WFP) |
 | `apps/windows/crates/tono-core/` | Portable catalog, policy, connect FSM, auth |
