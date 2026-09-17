@@ -17,10 +17,10 @@ is the apply order:
 | `0018` | `0018_periodic_telemetry_windows.sql`, `0018_traffic_policy_signature.sql`, `0018_user_default_proxy.sql` |
 
 Do not collapse, renumber, or rewrite these to “fix” the prefixes. New
-schema changes continue from the highest existing number (`0072` at the
+schema changes continue from the highest existing number (`0076` at the
 time this note was written).
 
-## 0039–0072
+## 0039–0076
 
 Ops tables after the sequence was unique. Applied in numeric order:
 
@@ -49,3 +49,7 @@ Ops tables after the sequence was unique. Applied in numeric order:
 - `0070_drop_orphan_diagnostics_and_destination_tables.sql` — drops four tables no code reads (numbers 0026–0030 were reused long ago)
 - `0071_ops_exit_asns.sql` — known exit ASNs so edge attribution can tell tunnel uploads from customer networks
 - `0072_hy2_transport.sql` — optional hy2 columns on node profiles, connection events, and quality samples
+- `0073_ops_change_receipts.sql` — `ops_change_receipts` records catalog/policy/identity/xray operator writes with rollback-of and ack tracking
+- `0074_ops_daily_slo.sql` — `ops_daily_slo` daily SLO rollup per (day, platform, carrier, node), filled by cron
+- `0075_ops_node_capacity_users.sql` — `ops_node_profiles.capacity_users` for capacity-based node acceptance
+- `0076_ops_node_identity.sql` — immutable `ops_node_identity`; display name, failure domain, and which node it replaces
