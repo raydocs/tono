@@ -109,7 +109,13 @@ extension KillSwitchManager {
                 "pass in quick inet from { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } keep state (if-bound) label \"tono-lan\""
             )
             lines.append(
-                "pass out quick inet6 to { fe80::/10, ff00::/8, fc00::/7 } keep state (if-bound) label \"tono-linklocal\""
+                "pass out quick inet6 to fe80::/10 keep state (if-bound) label \"tono-linklocal\""
+            )
+            lines.append(
+                "pass in quick inet6 to fe80::/10 keep state (if-bound) label \"tono-linklocal\""
+            )
+            lines.append(
+                "pass out quick inet6 to { ff00::/8, fc00::/7 } keep state (if-bound) label \"tono-linklocal\""
             )
             lines.append(
                 "pass in quick inet6 from { fe80::/10, ff00::/8, fc00::/7 } keep state (if-bound) label \"tono-linklocal\""
