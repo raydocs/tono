@@ -95,6 +95,35 @@ test.describe('customers page', () => {
     expect(table.clipped).toBeLessThanOrEqual(0);
   });
 
+  test('expiry dates fit their cell content box without taking identity space', async ({ page }) => {
+    await open(page, '/customers');
+    const geometry = await page.evaluate(() => {
+      const index = [...document.querySelectorAll('thead th')]
+        .findIndex((th) => th.textContent?.trim() === '到期');
+      const dates = [...document.querySelectorAll('tbody tr')].flatMap((row) => {
+        const cell = row.querySelectorAll('td')[index];
+        if (!cell || !/^\d{4}-\d{2}-\d{2}$/.test(cell.textContent?.trim() ?? '')) return [];
+        const range = document.createRange();
+        range.selectNodeContents(cell);
+        const text = range.getBoundingClientRect();
+        const box = cell.getBoundingClientRect();
+        const style = getComputedStyle(cell);
+        return [{
+          textLeft: text.left, textRight: text.right,
+          contentLeft: box.left + parseFloat(style.paddingLeft),
+          contentRight: box.right - parseFloat(style.paddingRight),
+        }];
+      });
+      return { dates, overflow: document.documentElement.scrollWidth - innerWidth };
+    });
+    expect(geometry.dates.length).toBeGreaterThan(0);
+    for (const date of geometry.dates) {
+      expect(date.textLeft).toBeGreaterThanOrEqual(date.contentLeft - 1);
+      expect(date.textRight).toBeLessThanOrEqual(date.contentRight + 1);
+    }
+    expect(geometry.overflow).toBe(0);
+  });
+
   /**
    * The handle sits beside the address because the two answer the same
    * question — which person is this row — and it hides as a group the way the
