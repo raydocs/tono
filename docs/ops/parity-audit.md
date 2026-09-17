@@ -16,7 +16,7 @@
 | 运营待办（额度/到期/目录落后） | `Dashboard.tsx` | GET `users` `activity` | `users` `telemetry_windows` | `Today.tsx` chores 页 | 覆盖（口径改成引擎） |
 | 闲置家宽 / 闲置 Claude | `Dashboard.tsx` | GET `dashboard` | `home_exits` `product_accounts` | 缺 | 今天页加库存数字，或沿用 GET `dashboard` |
 | 谁在线（最多 5） | `Dashboard.tsx` `users/PersonRow.tsx` | GET `activity` | `telemetry_windows` | `pages/Customers.tsx` 在线筛选 | 覆盖 |
-| 节点占用 Top | `Dashboard.tsx` | GET `activity` `fleet-nodes` | `telemetry_windows` | `node/Occupants.tsx` | 机队占用条缺，详情有 |
+| 节点占用 Top | `Dashboard.tsx` | GET `activity` `fleet-nodes` | `telemetry_windows` | `node/Occupants.tsx` | 机队占用条已建，详情有；Top N 仍缺 |
 | 客户本期用量 Top | `Dashboard.tsx` | GET `users` | `users` | `Customers.tsx` 额度列；`CustomerDetail.tsx` 配额条 | 独立流量页缺，见下 |
 | 最近操作 | `Dashboard.tsx` | GET `audit` | `ops_audit` | `settings/Audit.tsx` | 覆盖（设置·审计） |
 | 故障筛选：客户路径 / 路径未测 | `FailuresPage.tsx` | GET `activity` `live` | `telemetry_windows` `operations_live_snapshot` | `Today.tsx` 打开的事故 | 快照「未测」列表不要搬；引擎不把缺测当事故 |
