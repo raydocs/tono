@@ -10,7 +10,7 @@ macOS SwiftUI          Windows Tauri           Ubuntu desktop (Tauri)
          \                   |                     /
           \                  |                    /
            privileged runtime (helper / TonoService)
-                    └── tono-core (Mihomo TUN) + OS kill switch
+                    └── tono-core + OS kill switch
                                     ↑
                               tono CLI (planned)
 ```
@@ -19,7 +19,7 @@ macOS SwiftUI          Windows Tauri           Ubuntu desktop (Tauri)
 
 | Path | Role |
 |---|---|
-| `apps/macos/` | macOS GUI + `tono-core-helper` (PF, DNS, Mihomo) |
+| `apps/macos/` | macOS GUI + `tono-core-helper` (PF, DNS, sing-box) |
 | `apps/windows/app/` | Windows / future Ubuntu GUI (Tauri) |
 | `apps/windows/service/` | Privileged service (WFP today; nftables for Linux) |
 | `apps/windows/crates/tono-core/` | Portable catalog, policy, connect FSM, auth |
@@ -41,7 +41,7 @@ tree, not only in this file.
 |---|---|
 | `Views/` | SwiftUI screens |
 | `Services/` | Product state, account, catalog, audits |
-| `Core/` | Helper, Mihomo, PF/DNS, owned runtime |
+| `Core/` | Helper, sing-box, PF/DNS, owned runtime |
 | `Models/` | Value types |
 | `Support/` | Formatting, profiles, small policy helpers |
 
