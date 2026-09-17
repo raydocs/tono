@@ -48,7 +48,7 @@ final class CoreManager {
         // user-owned parser inputs into a root process merely because legacy
         // versions left them in the config directory.
         try atomicCopy(
-            source: "\(source)/config.yaml",
+            source: "\(source)/config.json",
             destination: runtimeConfigPath,
             expectedOwner: allowedUID,
             expectedSHA256: expectedSHA256,
@@ -59,7 +59,33 @@ final class CoreManager {
         guard ownedRuntimeConfigIsSafe(contents) else {
             throw HelperFailure.invalid("Runtime config is not an owned Tono config.")
         }
+        try checkConfiguration()
         return runtimeConfigPath
+    }
+
+    /// Parsing is bounded and runs against the root snapshot, never the
+    /// user-writable input. Do not expose raw parser output containing secrets.
+    private func checkConfiguration() throws {
+        _ = try secureMetadata(mihomoPath, type: mode_t(S_IFREG), owner: 0)
+        let checker = Process()
+        checker.executableURL = URL(fileURLWithPath: mihomoPath)
+        checker.arguments = ["check", "-D", runtimeDirectory, "-c", runtimeConfigPath]
+        checker.currentDirectoryURL = URL(fileURLWithPath: runtimeDirectory)
+        checker.environment = ["HOME": runtimeDirectory, "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
+        checker.standardOutput = FileHandle.nullDevice
+        checker.standardError = FileHandle.nullDevice
+        try checker.run()
+        for _ in 0..<100 where checker.isRunning { usleep(50_000) }
+        if checker.isRunning {
+            checker.terminate()
+            for _ in 0..<10 where checker.isRunning { usleep(50_000) }
+            if checker.isRunning { kill(checker.processIdentifier, SIGKILL) }
+            checker.waitUntilExit()
+            throw HelperFailure.coded(code: "CORE_CONFIG_TIMEOUT", message: "sing-box check timed out.")
+        }
+        guard checker.terminationStatus == 0 else {
+            throw HelperFailure.coded(code: "CORE_CONFIG_REJECTED", message: "sing-box rejected the runtime configuration.")
+        }
     }
 
     func start(
@@ -69,6 +95,15 @@ final class CoreManager {
     ) throws {
         lock.lock()
         defer { lock.unlock() }
+        try startLocked(configDirectory: configDirectory, configSHA256: configSHA256,
+                        startAllowed: startAllowed)
+    }
+
+    private func startLocked(
+        configDirectory: String,
+        configSHA256: String,
+        startAllowed: () -> Bool
+    ) throws {
         if process?.isRunning == true {
             // Coded, because the app's recovery for it — stop the orphaned core,
             // then start again so a force-killed GUI cannot leave mixed port,
@@ -76,7 +111,7 @@ final class CoreManager {
             // to key off something sturdier than this sentence.
             throw HelperFailure.coded(
                 code: "CORE_ALREADY_RUNNING",
-                message: "Mihomo is already running."
+                message: "sing-box is already running."
             )
         }
         _ = try secureMetadata(mihomoPath, type: mode_t(S_IFREG), owner: 0)
@@ -87,7 +122,7 @@ final class CoreManager {
 
         let child = Process()
         child.executableURL = URL(fileURLWithPath: mihomoPath)
-        child.arguments = ["-d", runtimeDirectory, "-f", configPath]
+        child.arguments = ["run", "-D", runtimeDirectory, "-c", configPath]
         child.currentDirectoryURL = URL(fileURLWithPath: runtimeDirectory, isDirectory: true)
         child.environment = [
             // Never give a root process a user-writable HOME. Mihomo receives
@@ -134,21 +169,30 @@ final class CoreManager {
         }
     }
 
-    func sync(configDirectory: String, configSHA256: String) throws -> String {
+    /// Serialized protected replacement. The caller keeps PF and system DNS
+    /// armed throughout; failure never restarts an older configuration.
+    func sync(configDirectory: String, configSHA256: String,
+              startAllowed: () -> Bool = { true }) throws -> String {
         lock.lock()
         defer { lock.unlock() }
         guard process?.isRunning == true else {
-            throw HelperFailure.invalid("Mihomo is not running.")
+            throw HelperFailure.invalid("sing-box is not running.")
         }
-        return try snapshot(
-            configDirectory,
-            expectedSHA256: configSHA256
-        )
+        // Refuse malformed or swapped bytes before disrupting the live child.
+        _ = try snapshot(configDirectory, expectedSHA256: configSHA256)
+        try stopLocked()
+        try startLocked(configDirectory: configDirectory, configSHA256: configSHA256,
+                        startAllowed: startAllowed)
+        return runtimeConfigPath
     }
 
     func stop() throws {
         lock.lock()
         defer { lock.unlock() }
+        try stopLocked()
+    }
+
+    private func stopLocked() throws {
         guard let child = process, child.isRunning else {
             process = nil
             try? removePIDFile()
@@ -165,7 +209,7 @@ final class CoreManager {
             for _ in 0..<20 where child.isRunning { usleep(50_000) }
         }
         guard !child.isRunning else {
-            throw HelperFailure.system("Mihomo did not stop.")
+            throw HelperFailure.system("sing-box did not stop.")
         }
         process = nil
         try removePIDFile()
@@ -236,9 +280,9 @@ final class CoreManager {
         diagnosticLock.lock()
         defer { diagnosticLock.unlock() }
         if let lastFailure { return lastFailure }
-        let detail = Self.sanitizedDiagnostic(diagnosticData)
-        let prefix = "Mihomo exited during startup (status \(child.terminationStatus))."
-        let failure = detail.isEmpty ? prefix : "\(prefix) \(detail)"
+        // Endpoint, username and credential formats are extensible upstream.
+        // Regex scrubbing is not a safe boundary for arbitrary core logs.
+        let failure = "sing-box exited (status \(child.terminationStatus))."
         lastFailure = failure
         return failure
     }

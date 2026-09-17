@@ -9,7 +9,7 @@ import Network
 /// `networksetup`. Neither path launches `dig`.
 nonisolated enum ProtectedDNSProbe {
     static let name = "www.gstatic.com"
-    static let fakeIPPrefix = "198.18."
+    static let fakeIPPrefix = "198.19."
 
     static func isFakeIP(_ value: String) -> Bool {
         value.hasPrefix(fakeIPPrefix)

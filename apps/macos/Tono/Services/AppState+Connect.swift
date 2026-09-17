@@ -23,6 +23,10 @@ extension AppState {
             errorMessage = String(localized: "No protected Tono cloud exit is ready.")
             return
         }
+        if let selected = selectedExitNode(), let reason = ConfigPipeline.singBoxUnavailableReason(selected) {
+            errorMessage = reason + ": this sing-box build cannot authenticate the catalog's HY2 certificate pin. Choose Reality."
+            return
+        }
         self.connectionCoordinator.bumpGeneration()
         isProtectionBlocked = false
         connectionStage = .preparing

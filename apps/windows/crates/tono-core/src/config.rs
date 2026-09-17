@@ -219,7 +219,7 @@ pub const HOME_SOCKS5_OUTBOUND_NAME: &str = "Tono-Home-Residential";
 /// the desktop apps. `google.com`, `googleapis.com`, and `gstatic.com`
 /// stay out: they are shared by Search, YouTube, Gmail, and Tono's own
 /// exit probe. Gemini is pinned by its product hostnames instead.
-pub const CLAUDE_HOME_DOMAINS: [&str; 55] = [
+pub const CLAUDE_HOME_DOMAINS: [&str; 80] = [
     "anthropic.com",
     "claude.ai",
     "claude.com",
@@ -278,6 +278,35 @@ pub const CLAUDE_HOME_DOMAINS: [&str; 55] = [
     "aistudio.google.com",
     "generativelanguage.googleapis.com",
     "notebooklm.google.com",
+    // Meta Muse
+    "muse.ai",
+    "meta.ai",
+    "muse.meta.com",
+    "www.muse.ai",
+    // Meta & Facebook
+    "meta.com",
+    "facebook.com",
+    "fb.com",
+    "fb.me",
+    "fb.watch",
+    "fbcdn.net",
+    "facebook.net",
+    "messenger.com",
+    // Instagram & Threads
+    "instagram.com",
+    "cdninstagram.com",
+    "ig.me",
+    "threads.net",
+    // Gmail & Google Auth
+    "gmail.com",
+    "mail.google.com",
+    "googlemail.com",
+    "inbox.google.com",
+    "accounts.google.com",
+    "myaccount.google.com",
+    "oauth2.googleapis.com",
+    "mail-pa.clients6.google.com",
+    "gmail.googleapis.com",
 ];
 /// Anthropic's own unicast range (ARIN AP-2440 / AS399358). Customer audits
 /// only ever show `160.79.104.10:443` as a raw dest, which skips every
@@ -2062,13 +2091,26 @@ reality-opts:
             "browser-intake-ap2-datadoghq.com",
             "browser-intake-datadoghq.eu",
             "browser-intake-ddog-gov.com",
+            "muse.ai",
+            "meta.com",
+            "facebook.com",
+            "instagram.com",
+            "gmail.com",
+            "accounts.google.com",
         ] {
             assert!(
                 CLAUDE_HOME_DOMAINS.contains(&required),
                 "{required} must leave through the home hop"
             );
         }
-        for forbidden in ["google.com", "googleapis.com", "gstatic.com", "youtube.com"] {
+        for forbidden in [
+            "google.com",
+            "googleapis.com",
+            "gstatic.com",
+            "youtube.com",
+            "googlevideo.com",
+            "drive.google.com",
+        ] {
             assert!(
                 !CLAUDE_HOME_DOMAINS.contains(&forbidden),
                 "{forbidden} would pull unrelated traffic onto the home hop"

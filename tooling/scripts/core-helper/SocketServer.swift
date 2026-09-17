@@ -141,7 +141,9 @@ final class SocketServer {
                 try core.start(
                     configDirectory: directory,
                     configSHA256: digest,
-                    startAllowed: { transitionGate.isAwake() }
+                    startAllowed: {
+                        transitionGate.isAwake() && killSwitch.status()["live"] as? Bool == true
+                    }
                 )
                 sendResponse(client, status: 200, object: ["ok": true])
             case ("POST", "/core/sync"):
@@ -153,7 +155,10 @@ final class SocketServer {
                 }
                 let path = try core.sync(
                     configDirectory: directory,
-                    configSHA256: digest
+                    configSHA256: digest,
+                    startAllowed: {
+                        transitionGate.isAwake() && killSwitch.status()["live"] as? Bool == true
+                    }
                 )
                 sendResponse(client, status: 200, object: ["ok": true, "configPath": path])
             case ("DELETE", "/core/stop"):

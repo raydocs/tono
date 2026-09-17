@@ -79,13 +79,58 @@ extension KillSwitchManager {
                 "pass out quick on awdl0 all keep state (if-bound) label \"tono-continuity\""
             )
             lines.append(
+                "pass in quick on llw0 all keep state (if-bound) label \"tono-continuity\""
+            )
+            lines.append(
+                "pass out quick on llw0 all keep state (if-bound) label \"tono-continuity\""
+            )
+            lines.append(
+                "pass in quick on bridge100 all keep state (if-bound) label \"tono-continuity\""
+            )
+            lines.append(
+                "pass out quick on bridge100 all keep state (if-bound) label \"tono-continuity\""
+            )
+            lines.append(
                 "pass out quick inet proto udp to 224.0.0.251 port 5353 keep state (if-bound) label \"tono-mdns\""
+            )
+            lines.append(
+                "pass in quick inet proto udp to 224.0.0.251 port 5353 keep state (if-bound) label \"tono-mdns\""
             )
             lines.append(
                 "pass out quick inet6 proto udp to ff02::fb port 5353 keep state (if-bound) label \"tono-mdns\""
             )
             lines.append(
+                "pass in quick inet6 proto udp to ff02::fb port 5353 keep state (if-bound) label \"tono-mdns\""
+            )
+            lines.append(
+                "pass out quick inet to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } keep state (if-bound) label \"tono-lan\""
+            )
+            lines.append(
+                "pass in quick inet from { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } keep state (if-bound) label \"tono-lan\""
+            )
+            lines.append(
                 "pass out quick inet6 to fe80::/10 keep state (if-bound) label \"tono-linklocal\""
+            )
+            lines.append(
+                "pass in quick inet6 to fe80::/10 keep state (if-bound) label \"tono-linklocal\""
+            )
+            lines.append(
+                "pass out quick inet6 to { ff00::/8, fc00::/7 } keep state (if-bound) label \"tono-linklocal\""
+            )
+            lines.append(
+                "pass in quick inet6 from { fe80::/10, ff00::/8, fc00::/7 } keep state (if-bound) label \"tono-linklocal\""
+            )
+            lines.append(
+                "pass out quick inet proto udp from any port 68 to any port 67 keep state (if-bound) label \"tono-dhcp\""
+            )
+            lines.append(
+                "pass in quick inet proto udp from any port 67 to any port 68 keep state (if-bound) label \"tono-dhcp\""
+            )
+            lines.append(
+                "pass out quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\""
+            )
+            lines.append(
+                "pass in quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\""
             )
         }
         for interface in state.tunnelInterfaces.sorted() {

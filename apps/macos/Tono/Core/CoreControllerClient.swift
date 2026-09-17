@@ -171,7 +171,10 @@ actor CoreControllerClient {
     ]
 
     func patchConfig(_ patch: [String: Any]) async throws {
-        guard !patch.keys.contains(where: { Self.controllerBindingKeys.contains($0) }) else {
+        // Upstream accepts but ignores every PATCH field except mode. Never
+        // report those ignored mutations as successfully applied settings.
+        guard patch.count == 1, patch["mode"] as? String == "rule",
+              !patch.keys.contains(where: { Self.controllerBindingKeys.contains($0) }) else {
             throw CoreControllerError.requestFailed("PATCH /configs")
         }
         let body = try JSONSerialization.data(withJSONObject: patch)
@@ -331,64 +334,19 @@ actor CoreControllerClient {
     /// primitive off this client's surface; it is not the boundary, since
     /// anything holding `secret` can issue the raw PUT itself.
     private static let rootOwnedRuntimeConfigPath =
-        "/var/run/tono-core/runtime/config.yaml"
+        "/var/run/tono-core/runtime/config.json"
 
-    /// Tell mihomo to reload config from disk (PUT /configs?force=true)
+    /// The helper already replaced the process under PF in /core/sync.
+    /// sing-box's Clash PUT /configs is not a configuration-apply receipt.
+    /// Only poll the newly started controller; never replay an apply request.
     func reloadConfig(path: String) async throws {
         guard path == Self.rootOwnedRuntimeConfigPath else {
-            throw CoreControllerError.requestFailed("PUT /configs?force=true")
+            throw CoreControllerError.requestFailed("Unexpected runtime path")
         }
-        let body = try JSONEncoder().encode(["path": path])
-        let maximumAttempts = 2
-        for attempt in 1...maximumAttempts {
-            try Task.checkCancellation()
-            var urlRequest = URLRequest(
-                url: URL(
-                    string: baseURL.absoluteString + "/configs?force=true"
-                )!
-            )
-            urlRequest.httpMethod = "PUT"
-            // Mihomo applies a full catalog/policy config synchronously and may
-            // recreate TUN when its route fingerprint changes. The session-wide
-            // five-second timeout can therefore report failure while that apply
-            // is still completing. A repeated PUT of the same root-owned config
-            // is idempotent; require a definite 2xx before proceeding.
-            urlRequest.timeoutInterval = 30
-            urlRequest.setValue(
-                "application/json",
-                forHTTPHeaderField: "Content-Type"
-            )
-            if !secret.isEmpty {
-                urlRequest.setValue(
-                    "Bearer \(secret)",
-                    forHTTPHeaderField: "Authorization"
-                )
-            }
-            urlRequest.httpBody = body
-
-            do {
-                let (_, response) = try await session.data(for: urlRequest)
-                guard let httpResponse = response as? HTTPURLResponse,
-                      (200...299).contains(httpResponse.statusCode) else {
-                    throw CoreControllerError.requestFailed(
-                        "PUT /configs?force=true"
-                    )
-                }
-                return
-            } catch let error as URLError
-                where error.code == .timedOut
-                    || error.code == .networkConnectionLost
-                    || error.code == .cannotConnectToHost
-            {
-                guard attempt < maximumAttempts else { throw error }
-                // The first apply may still own Mihomo's config mutex. Wait
-                // until the local controller is responsive, then reissue the
-                // same config and accept only its explicit success response.
-                try await waitUntilReady(
-                    maxAttempts: 20,
-                    intervalMs: 500
-                )
-            }
+        try await waitUntilReady(maxAttempts: 20, intervalMs: 500)
+        let status = await PrivilegedRuntimeCoordinator.shared.coreStatus()
+        guard status.verified, status.running else {
+            throw CoreControllerError.requestFailed("Owned core stopped after replacement")
         }
     }
 

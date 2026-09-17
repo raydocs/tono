@@ -85,10 +85,24 @@ jobs:
           fi
           echo "running from $GITHUB_REF"
 
+  sing-box-input:
+    needs: branch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: sh tooling/scripts/prepare-macos-sing-box.sh
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: sing-box-darwin-arm64
+          path: apps/macos/Tono/Resources/sing-box
+          if-no-files-found: error
+          retention-days: 14
+
   build:
     # Manual releases belong to the macOS release line. A tag is accepted only
     # after the ancestry check below proves it names a commit on that line.
-    needs: branch
+    needs: [branch, sing-box-input]
     runs-on: macos-26
     outputs:
       short_version: ${{ steps.release-version.outputs.short_version }}
@@ -110,6 +124,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: sing-box-darwin-arm64
+          path: apps/macos/Tono/Resources
+      - name: Verify unsigned sing-box input
+        run: |
+          chmod +x apps/macos/Tono/Resources/sing-box
+          sh tooling/scripts/verify-macos-sing-box.sh
 
       - name: Resolve the release keychain path
         # A workflow-env value is never shell-expanded, and the runner context
@@ -329,7 +352,7 @@ jobs:
           assert info["CFBundleShortVersionString"] == "0.0.72"
           assert str(info["CFBundleVersion"]) == "72"
           files = [root / (name + ".zip"), app / "Contents/MacOS/Tono",
-                   app / "Contents/Resources/tono-core-helper", app / "Contents/Resources/mihomo"]
+                   app / "Contents/Resources/tono-core-helper", app / "Contents/Resources/sing-box"]
           report = {"source": os.environ["GITHUB_SHA"], "version": "0.0.72", "build": 72,
                     "candidateOnly": True, "releaseAccepted": False, "developerIDSigned": True,
                     "notarized": True, "sparkleSigned": False,

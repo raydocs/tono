@@ -13,7 +13,7 @@ nonisolated struct HelperManager {
 
     private static let helperVersion = HelperProtocolVersion.current
     private static let helperInstallPath = "/Library/PrivilegedHelperTools/tono-core-helper"
-    private static let mihomoInstallPath = "/Library/PrivilegedHelperTools/tono-mihomo"
+    private static let mihomoInstallPath = "/Library/PrivilegedHelperTools/tono-sing-box"
     private static let allowedUIDPath = "/Library/PrivilegedHelperTools/tono.allowed-uid"
     private static let plistInstallPath = "/Library/LaunchDaemons/com.raydocs.tono.core-helper.plist"
     private static let plistLabel = "com.raydocs.tono.core-helper"
@@ -78,7 +78,7 @@ nonisolated struct HelperManager {
         /usr/bin/install -o root -g wheel -m 0755 \(helperSrc) '\(helperTemporaryPath)'
         /usr/bin/codesign --verify --strict --all-architectures -R='anchor apple generic and identifier "com.raydocs.tono.helper" and certificate leaf[subject.OU] = "YY57758GS7"' '\(helperTemporaryPath)'
         /usr/bin/install -o root -g wheel -m 0755 \(mihomoSrc) '\(mihomoTemporaryPath)'
-        /usr/bin/codesign --verify --strict --all-architectures -R='anchor apple generic and identifier "mihomo" and certificate leaf[subject.OU] = "YY57758GS7"' '\(mihomoTemporaryPath)'
+        /usr/bin/codesign --verify --strict --all-architectures -R='anchor apple generic and identifier "sing-box" and certificate leaf[subject.OU] = "YY57758GS7"' '\(mihomoTemporaryPath)'
         /usr/bin/printf '%s' '\(plistB64)' | /usr/bin/base64 -D > '\(plistTemporaryPath)'
         /usr/sbin/chown root:wheel '\(plistTemporaryPath)'
         /bin/chmod 0644 '\(plistTemporaryPath)'
@@ -235,14 +235,14 @@ nonisolated struct HelperManager {
         }
 
         guard let helperSource = Bundle.main.url(forResource: "tono-core-helper", withExtension: nil),
-              let mihomoSource = Bundle.main.url(forResource: "mihomo", withExtension: nil) else {
+              let mihomoSource = Bundle.main.url(forResource: "sing-box", withExtension: nil) else {
             throw HelperInstallError.resourceNotFound
         }
         try verifyEmbeddedExecutable(
             helperSource,
             identifier: "com.raydocs.tono.helper"
         )
-        try verifyEmbeddedExecutable(mihomoSource, identifier: "mihomo")
+        try verifyEmbeddedExecutable(mihomoSource, identifier: "sing-box")
 
         let uid = getuid()
         guard uid > 0 else {
@@ -541,7 +541,7 @@ nonisolated struct HelperManager {
             ]
         )
         let envelope = try requireSuccess(result, operation: "sync")
-        guard let path = envelope.configPath, path == "/var/run/tono-core/runtime/config.yaml" else {
+        guard let path = envelope.configPath, path == "/var/run/tono-core/runtime/config.json" else {
             throw HelperIPCError.invalidResponse
         }
         return path
@@ -860,6 +860,8 @@ nonisolated struct HelperManager {
             receiveTimeoutSeconds = 30
         case "/core/stop":
             receiveTimeoutSeconds = 6
+        case "/core/start", "/core/sync":
+            receiveTimeoutSeconds = 20
         case "/version", "/core/status", "/killswitch/status":
             receiveTimeoutSeconds = 2
         default:

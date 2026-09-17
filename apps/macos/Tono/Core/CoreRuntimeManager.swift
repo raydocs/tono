@@ -12,13 +12,12 @@ private actor RuntimeConfigWriter {
         directPolicy: ConfigPipeline.ManagedDirectRuntimePolicy?,
         outputPath: URL
     ) throws -> String {
-        try ConfigPipeline.generateRuntime(
-            subscriptionYAML: ConfigStorage.shared.loadSubscriptionYAML() ?? "",
+        let runtime = try ConfigPipeline.buildSingBoxRuntime(
             overlay: overlay,
-            customNodes: customNodes,
-            directPolicy: directPolicy,
-            outputPath: outputPath
+            nodes: customNodes,
+            directPlan: directPolicy
         )
+        return try ConfigPipeline.secureWrite(String(decoding: runtime.runtimeJSON, as: UTF8.self), to: outputPath)
     }
 }
 
@@ -31,7 +30,7 @@ final class CoreRuntimeManager {
     private(set) var runtimeConfigSHA256: String?
     private let configWriter = RuntimeConfigWriter()
 
-    /// Config directory for mihomo
+    /// Config directory for the owned sing-box runtime.
     var configDirectory: URL {
         let dir = ConfigStorage.shared.appSupportDirectory.appendingPathComponent("config", isDirectory: true)
         if !FileManager.default.fileExists(atPath: dir.path) {
@@ -42,31 +41,14 @@ final class CoreRuntimeManager {
 
     /// Main config file path
     var configFilePath: URL {
-        configDirectory.appendingPathComponent("config.yaml")
+        configDirectory.appendingPathComponent("config.json")
     }
 
-    /// Find the mihomo binary (for non-helper fallback checks)
+    /// Only the packaged core is an eligible input. No executable fallback.
     func findBinary() -> URL? {
-        let paths: [URL] = [
-            Bundle.main.url(forResource: "mihomo", withExtension: nil),
-            ConfigStorage.shared.appSupportDirectory.appendingPathComponent("bin/mihomo"),
-            URL(fileURLWithPath: "/usr/local/bin/mihomo"),
-        ].compactMap { $0 }
-        return paths.first { FileManager.default.isExecutableFile(atPath: $0.path) }
-    }
-
-    // MARK: - Geodata
-
-    private func ensureGeodataFiles() {
-        let fm = FileManager.default
-        for filename in ["country.mmdb", "geoip.dat", "geosite.dat"] {
-            let dest = configDirectory.appendingPathComponent(filename)
-            guard !fm.fileExists(atPath: dest.path) else { continue }
-            if let bundled = Bundle.main.url(forResource: filename.components(separatedBy: ".").first,
-                                              withExtension: filename.components(separatedBy: ".").last) {
-                try? fm.copyItem(at: bundled, to: dest)
-            }
-        }
+        guard let binary = Bundle.main.url(forResource: "sing-box", withExtension: nil),
+              FileManager.default.isExecutableFile(atPath: binary.path) else { return nil }
+        return binary
     }
 
     // MARK: - Write Runtime Config
@@ -108,12 +90,6 @@ final class CoreRuntimeManager {
             }
         }
 
-        // The owned Tono runtime intentionally has no GEOIP/GEOSITE/MMDB rules.
-        // Legacy non-Tono development configs may still opt into those assets.
-        if overlay.tonoTransport == nil &&
-            overlay.selectedNodeName == ConfigPipeline.homeNodeName {
-            ensureGeodataFiles()
-        }
         let digest: String
         if let precomputedDigest, !precomputedDigest.isEmpty {
             digest = precomputedDigest

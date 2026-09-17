@@ -2771,6 +2771,16 @@
         }
       }
     },
+    "Managed sing-box routes change only through a protected configuration replacement.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "托管的 sing-box 路由仅能通过受保护的配置替换更改。"
+          }
+        }
+      }
+    },
     "Miami": {
       "localizations": {
         "zh-Hans": {

@@ -48,7 +48,7 @@ fi
 
 for executable in \
     "$repo_root/apps/macos/Tono/Resources/tono-core-helper" \
-    "$repo_root/apps/macos/Tono/Resources/mihomo"; do
+    "$repo_root/apps/macos/Tono/Resources/sing-box"; do
     if [ ! -x "$executable" ]; then
         echo "Missing embedded executable: $executable" >&2
         exit 1
@@ -167,10 +167,10 @@ verify_embedded_requirement() {
 /usr/bin/codesign --verify --deep --strict --all-architectures "$source_app"
 verify_signed_executable "$source_app/Contents/MacOS/Tono"
 verify_signed_executable "$source_app/Contents/Resources/tono-core-helper"
-verify_signed_executable "$source_app/Contents/Resources/mihomo"
+verify_signed_executable "$source_app/Contents/Resources/sing-box"
 verify_embedded_requirement \
     "$source_app/Contents/Resources/tono-core-helper" com.raydocs.tono.helper
-verify_embedded_requirement "$source_app/Contents/Resources/mihomo" mihomo
+verify_embedded_requirement "$source_app/Contents/Resources/sing-box" sing-box
 
 /usr/bin/ditto "$source_app" "$artifact_app"
 /usr/bin/codesign --verify --deep --strict --all-architectures "$artifact_app"
