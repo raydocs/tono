@@ -91,14 +91,14 @@ struct TonoApp: App {
         // during scene initialization (before applicationDidFinishLaunching),
         // so we must clear them here in init() to prevent stale sizes.
         let defaults = AppProfile.defaults
-        if defaults.integer(forKey: SettingsKey.windowGeometryPolicyVersion) < 1 {
+        if defaults.integer(forKey: SettingsKey.windowGeometryPolicyVersion) < 2 {
             for key in defaults.dictionaryRepresentation().keys
                 where key.hasPrefix("NSWindow Frame ")
                     || key.hasPrefix("NSSplitView Subview Frames ")
             {
                 defaults.removeObject(forKey: key)
             }
-            defaults.set(1, forKey: SettingsKey.windowGeometryPolicyVersion)
+            defaults.set(2, forKey: SettingsKey.windowGeometryPolicyVersion)
         }
     }
 
@@ -126,8 +126,8 @@ struct TonoApp: App {
                 // Without this, NavigationSplitView reports ~200px minimum
                 // which causes the window to open at sidebar-only width.
                 Color.clear
-                    .frame(minWidth: 860, idealWidth: 920,
-                           minHeight: 540, idealHeight: 600)
+                    .frame(minWidth: 860, idealWidth: 920, maxWidth: 1280,
+                           minHeight: 540, idealHeight: 600, maxHeight: 720)
 
                 if InterfaceLanguagePreference.hasChosen {
                     if WelcomeLaunchGate.showsIntro(
@@ -180,7 +180,7 @@ struct TonoApp: App {
             }
         }
         .defaultSize(width: 920, height: 600)
-        .windowResizability(.contentMinSize)
+        .windowResizability(.contentSize)
         .restorationBehavior(.disabled)
         .windowStyle(.hiddenTitleBar)
         .commands {

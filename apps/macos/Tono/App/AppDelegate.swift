@@ -125,6 +125,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func enforceDefaultWindowSize() {
         let defaultSize = NSSize(width: 920, height: 600)
         let minSize = NSSize(width: 860, height: 540)
+        let maxSize = NSSize(width: 1280, height: 720)
 
         for delay in [0.1, 0.5] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
@@ -134,8 +135,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
                 window.minSize = minSize
                 window.contentMinSize = minSize
+                window.maxSize = maxSize
+                window.contentMaxSize = maxSize
 
-                if window.frame.width < minSize.width || window.frame.height < minSize.height {
+                if window.frame.width < minSize.width
+                    || window.frame.height < minSize.height
+                    || window.frame.width > maxSize.width
+                    || window.frame.height > maxSize.height
+                {
                     let screen = window.screen ?? NSScreen.main
                     let visibleFrame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
                     let origin = NSPoint(
