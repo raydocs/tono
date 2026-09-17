@@ -1,0 +1,519 @@
+{
+  "schema_version": 1,
+  "scope": "M1_OFFLINE_NOT_INSTALLABLE",
+  "contract_commit": "7f64978c5d9d5b8551e0b81f7247cb5a630ebf56",
+  "candidate_sha256": "9e50077ea88adcaf17c8b6c8344868f651ce4af9b576135669a8de02c2f101de",
+  "profile": "reality-tcp-no-special-routing-v1",
+  "source": {
+    "repository": "https://github.com/SagerNet/sing-box",
+    "tag": "v1.15.0-alpha.3",
+    "commit": "93fff5954390367dd456cad3cbd79be54f8b941f",
+    "go_mod_sha256": "c8a55d750ff56af8e097478b7ce88f10224f406041e73002ef89e4c8ade5769b",
+    "go_sum_sha256": "121265484ad99c79970266e5896eba82ff660c2921624225afa316e408f6d38e",
+    "sing_tun": "v0.9.4-0.20260912075549-869f0a4d76af",
+    "patches": []
+  },
+  "build": {
+    "go_version": "go1.27.1",
+    "gotoolchain": "local",
+    "cgo_enabled": "0",
+    "tags": [
+      "with_gvisor",
+      "with_quic",
+      "with_utls",
+      "with_clash_api"
+    ],
+    "args": [
+      "-mod=readonly",
+      "-trimpath"
+    ],
+    "ldflags": "-X github.com/sagernet/sing-box/constant.Version=1.15.0-alpha.3-tono-m1.1 -w -s -buildid=",
+    "entrypoint": "./cmd/sing-box",
+    "targets": [
+      {
+        "goos": "linux",
+        "goarch": "amd64",
+        "goamd64": "v2",
+        "purpose": "offline validation only"
+      },
+      {
+        "goos": "darwin",
+        "goarch": "arm64",
+        "purpose": "unsigned candidate input; native qualification required"
+      },
+      {
+        "goos": "windows",
+        "goarch": "amd64",
+        "goamd64": "v2",
+        "purpose": "unsigned candidate input; native qualification required"
+      }
+    ]
+  },
+  "target": {
+    "goos": "darwin",
+    "goarch": "arm64",
+    "purpose": "unsigned candidate input; native qualification required"
+  },
+  "binary": "sing-box",
+  "binary_sha256": "6c86720c7baf60057ad9ea05b64149939d29a37397e93599563de0db5677baae",
+  "build_info": {
+    "settings": {
+      "-buildmode": "exe",
+      "-compiler": "gc",
+      "-tags": "with_gvisor,with_quic,with_utls,with_clash_api",
+      "-trimpath": "true",
+      "DefaultGODEBUG": "cryptocustomrand=1,tlssecpmlkem=0,tracebacklabels=0,urlstrictcolons=0,x509sslcertoverrideplatform=0",
+      "CGO_ENABLED": "0",
+      "GOARCH": "arm64",
+      "GOOS": "darwin",
+      "GOARM64": "v8.0",
+      "vcs": "git",
+      "vcs.revision": "93fff5954390367dd456cad3cbd79be54f8b941f",
+      "vcs.time": "2026-09-13T13:44:14Z",
+      "vcs.modified": "false"
+    },
+    "modules": [
+      [
+        "path",
+        "github.com/sagernet/sing-box/cmd/sing-box"
+      ],
+      [
+        "mod",
+        "github.com/sagernet/sing-box",
+        "v0.0.0-20260913134414-93fff5954390"
+      ],
+      [
+        "dep",
+        "github.com/ajg/form",
+        "v1.5.1",
+        "h1:t9c7v8JUKu/XxOGBU0yjNpaMloxGEJhUkqFRq0ibGeU="
+      ],
+      [
+        "dep",
+        "github.com/andybalholm/brotli",
+        "v1.1.0",
+        "h1:eLKJA0d02Lf0mVpIDgYnqXcUn0GqVmEFny3VuID1U3M="
+      ],
+      [
+        "dep",
+        "github.com/caddyserver/certmagic",
+        "v0.25.3-0.20260421143802-60d9d8b415d6",
+        "h1:LYSB6VgWzKtNrcxElw3c97BP40Oc7bizKxA9K1Vi/5k="
+      ],
+      [
+        "dep",
+        "github.com/caddyserver/zerossl",
+        "v0.1.5",
+        "h1:dkvOjBAEEtY6LIGAHei7sw2UgqSD6TrWweXpV7lvEvE="
+      ],
+      [
+        "dep",
+        "github.com/clipperhouse/uax29/v2",
+        "v2.2.0",
+        "h1:ChwIKnQN3kcZteTXMgb1wztSgaU+ZemkgWdohwgs8tY="
+      ],
+      [
+        "dep",
+        "github.com/coder/websocket",
+        "v1.8.14",
+        "h1:9L0p0iKiNOibykf283eHkKUHHrpG7f65OE3BhhO7v9g="
+      ],
+      [
+        "dep",
+        "github.com/cretz/bine",
+        "v0.2.0",
+        "h1:8GiDRGlTgz+o8H9DSnsl+5MeBK4HsExxgl6WgzOCuZo="
+      ],
+      [
+        "dep",
+        "github.com/database64128/netx-go",
+        "v0.1.1",
+        "h1:dT5LG7Gs7zFZBthFBbzWE6K8wAHjSNAaK7wCYZT7NzM="
+      ],
+      [
+        "dep",
+        "github.com/database64128/tfo-go/v2",
+        "v2.3.2",
+        "h1:UhZMKiMq3swZGUiETkLBDzQnZBPSAeBMClpJGlnJ5Fw="
+      ],
+      [
+        "dep",
+        "github.com/fsnotify/fsnotify",
+        "v1.9.0",
+        "h1:2Ml+OJNzbYCTzsxtv8vKSFD9PbJjmhYF14k/jKC7S9k="
+      ],
+      [
+        "dep",
+        "github.com/go-chi/chi/v5",
+        "v5.2.5",
+        "h1:Eg4myHZBjyvJmAFjFvWgrqDTXFyOzjj7YIm3L3mu6Ug="
+      ],
+      [
+        "dep",
+        "github.com/go-chi/render",
+        "v1.0.3",
+        "h1:AsXqd2a1/INaIfUSKq3G5uA8weYx20FOsM7uSoCyyt4="
+      ],
+      [
+        "dep",
+        "github.com/gobwas/httphead",
+        "v0.1.0",
+        "h1:exrUm0f4YX0L7EBwZHuCF4GDp8aJfVeBrlLQrs6NqWU="
+      ],
+      [
+        "dep",
+        "github.com/gobwas/pool",
+        "v0.2.1",
+        "h1:xfeeEhW7pwmX8nuLVlqbzVc7udMDrwetjEv+TZIz1og="
+      ],
+      [
+        "dep",
+        "github.com/gofrs/uuid/v5",
+        "v5.5.1",
+        "h1:z1Ce19/JwNidXpy3tOQc3241lnJLKdKyq/xlNvlD4Ng="
+      ],
+      [
+        "dep",
+        "github.com/google/btree",
+        "v1.1.3",
+        "h1:CVpQJjYgC4VbzxeGVHfvZrv1ctoYCAI8vbl07Fcxlyg="
+      ],
+      [
+        "dep",
+        "github.com/google/gopacket",
+        "v1.1.19",
+        "h1:ves8RnFZPGiFnTS0uPQStjwru6uO6h+nlr9j6fL7kF8="
+      ],
+      [
+        "dep",
+        "github.com/hashicorp/yamux",
+        "v0.1.2",
+        "h1:XtB8kyFOyHXYVFnwT5C3+Bdo8gArse7j2AQ0DA0Uey8="
+      ],
+      [
+        "dep",
+        "github.com/huin/goupnp",
+        "v1.3.0",
+        "h1:UvLUlWDNpoUdYzb2TCn+MuTWtcjXKSza2n6CBdQ0xXc="
+      ],
+      [
+        "dep",
+        "github.com/jackpal/go-nat-pmp",
+        "v1.0.2",
+        "h1:KzKSgb7qkJvOUTqYl9/Hg/me3pWgBmERKrTGD7BdWus="
+      ],
+      [
+        "dep",
+        "github.com/klauspost/compress",
+        "v1.19.1",
+        "h1:VsB4HPswih7mmZ8WleSFQ75c/Ui1M4trX5oAsJnhSlk="
+      ],
+      [
+        "dep",
+        "github.com/klauspost/cpuid/v2",
+        "v2.3.0",
+        "h1:S4CRMLnYUhGeDFDqkGriYKdfoFlDnMtqTiI/sFzhA9Y="
+      ],
+      [
+        "dep",
+        "github.com/koron/go-ssdp",
+        "v0.0.4",
+        "h1:1IDwrghSKYM7yLf7XCzbByg2sJ/JcNOZRXS2jczTwz0="
+      ],
+      [
+        "dep",
+        "github.com/libdns/libdns",
+        "v1.1.1",
+        "h1:wPrHrXILoSHKWJKGd0EiAVmiJbFShguILTg9leS/P/U="
+      ],
+      [
+        "dep",
+        "github.com/libp2p/go-nat",
+        "v1.0.1-0.20250821073202-01afc089f138",
+        "h1:YohuNPT/1k3VcThCQlBZ43PCPWPfMRS1zcxWBF2SLK8="
+      ],
+      [
+        "dep",
+        "github.com/libp2p/go-netroute",
+        "v0.2.1",
+        "h1:V8kVrpD8GK0Riv15/7VN6RbUQ3URNZVosw7H2v9tksU="
+      ],
+      [
+        "dep",
+        "github.com/logrusorgru/aurora",
+        "v2.0.3+incompatible",
+        "h1:tOpm7WcpBTn4fjmVfgpQq0EfczGlG91VSDkswnjF5A8="
+      ],
+      [
+        "dep",
+        "github.com/mattn/go-runewidth",
+        "v0.0.27",
+        "h1:Feg/Oou5zI/wnpgDF6omIU0OokC9GxLC/WRknhVlIR0="
+      ],
+      [
+        "dep",
+        "github.com/metacubex/utls",
+        "v1.8.7",
+        "h1:Cp+yWkNTFkSihETgGWq34hlVFds5HpYWVOR1xovUVTs="
+      ],
+      [
+        "dep",
+        "github.com/mholt/acmez/v3",
+        "v3.1.6",
+        "h1:eGVQNObP0pBN4sxqrXeg7MYqTOWyoiYpQqITVWlrevk="
+      ],
+      [
+        "dep",
+        "github.com/miekg/dns",
+        "v1.1.72",
+        "h1:vhmr+TF2A3tuoGNkLDFK9zi36F2LS+hKTRW0Uf8kbzI="
+      ],
+      [
+        "dep",
+        "github.com/oschwald/maxminddb-golang",
+        "v1.13.1",
+        "h1:G3wwjdN9JmIK2o/ermkHM+98oX5fS+k5MbwsmL4MRQE="
+      ],
+      [
+        "dep",
+        "github.com/quic-go/qpack",
+        "v0.6.0",
+        "h1:g7W+BMYynC1LbYLSqRt8PBg5Tgwxn214ZZR34VIOjz8="
+      ],
+      [
+        "dep",
+        "github.com/sagernet/bbolt",
+        "v0.0.0-20260823094646-e24805439c9c",
+        "h1:JdEDkgiwsDxiZb4+dQYgVOU/lND+jZxFmN5y/q49EXk="
+      ],
+      [
+        "dep",
+        "github.com/sagernet/cors",
+        "v1.2.1",
+        "h1:Cv5Z8y9YSD6Gm+qSpNrL3LO4lD3eQVvbFYJSG7JCMHQ="
+      ],
+      [
+        "dep",
+        "github.com/sagernet/fswatch",
+        "v0.1.2",
+        "h1:/TT7k4mkce1qFPxamLO842WjqBgbTBiXP2mlUjp9PFk="
+      ],
+      [
+        "dep",
+        "github.com/sagernet/gvisor",
+        "v0.0.0-20260727.0-sing-box-mod.1",
+        "h1:IdQ7yTKkB2wv8txwshxUroPlO4npOYAV71xb7xQ7Lys="
+      ],
+      [
+        "dep",
+        "github.com/sagernet/quic-go",
+        "v0.61.0-sing-box-mod.7",
+        "h1:sW2O+DoNF+my1PGlSZ3zG2N+fdxLR3DC0l4sXCM0lBE="
+      ],
+      [
+        "dep",
+        "github.com/sagernet/sing",
+        "v0.9.4-0.20260912053229-7776850263cd",
+        "h1:awZQVpsmNdo/EZgEW1nwj9sMQbtgfD130oFIH/7fIDM="
+      ],
+      [
+        "dep",
+        "github.com/sagernet/sing-anytls",
+        "v0.0.0-20260904135308-cec2d74334be",
+        "h1:0uMXu8kcJU0XLc2vfjGH6q6khmECCc5WYpD9dqlu1Xg="
+      ],
+      [
+        "dep",
+        "github.com/sagernet/sing-mux",
+        "v0.3.7-0.20260905054442-91d1502591ce",
+        "h1:ay1pGbzMF4e7iggj+uESNhwMNPbZZajDghcdC4P92Dc="
+      ],
+      [
+        "dep",
+        "github.com/sagernet/sing-quic",
+        "v0.7.1-0.20260904135313-497364e8ee3e",
+        "h1:2r0FRN0DBSfggWYtdH/69uW91kqEOByBWw/5hiCq6qU="
+      ],
+      [
+        "dep",
+        "github.com/sagernet/sing-shadowsocks",
+        "v0.2.8",
+        "h1:PURj5PRoAkqeHh2ZW205RWzN9E9RtKCVCzByXruQWfE="
+      ],
+      [
+        "dep",
+        "github.com/sagernet/sing-shadowsocks2",
+        "v0.2.1",
+        "h1:dWV9OXCeFPuYGHb6IRqlSptVnSzOelnqqs2gQ2/Qioo="
+      ],
+      [
+        "dep",
+        "github.com/sagernet/sing-shadowtls",
+        "v0.2.1",
+        "h1:ZiHZdnEnP+YS73NMsxiZmIFCwNd0M4k7PkGCKNXhbaM="
+      ],
+      [
+        "dep",
+        "github.com/sagernet/sing-snell",
+        "v0.0.0-20260904135315-bc5a12ac736f",
+        "h1:tbTCI+iis5sTmua7a6Q7vebcSRURok/LGgnEafnQAsc="
+      ],
+      [
+        "dep",
+        "github.com/sagernet/sing-tun",
+        "v0.9.4-0.20260912075549-869f0a4d76af",
+        "h1:wmMmklQXjb9YVETQRIXuNUuJBnhpkNgVw8xh44KlUh4="
+      ],
+      [
+        "dep",
+        "github.com/sagernet/sing-vmess",
+        "v0.2.8",
+        "h1:xd5nnDOMlC76RgrLksS4jlk3eMt3c3CvQY3NsjWPWeI="
+      ],
+      [
+        "dep",
+        "github.com/sagernet/smux",
+        "v1.5.50-sing-box-mod.1",
+        "h1:XkJcivBC9V4wBjiGXIXZ229aZCU1hzcbp6kSkkyQ478="
+      ],
+      [
+        "dep",
+        "github.com/sagernet/ws",
+        "v0.0.0-20231204124109-acfe8907c854",
+        "h1:6uUiZcDRnZSAegryaUGwPC/Fj13JSHwiTftrXhMmYOc="
+      ],
+      [
+        "dep",
+        "github.com/spf13/cobra",
+        "v1.10.2",
+        "h1:DMTTonx5m65Ic0GOoRY2c16WCbHxOOw6xxezuLaBpcU="
+      ],
+      [
+        "dep",
+        "github.com/spf13/pflag",
+        "v1.0.10",
+        "h1:4EBh2KAYBwaONj6b2Ye1GiHfwjqyROoF4RwYO+vPwFk="
+      ],
+      [
+        "dep",
+        "github.com/vishvananda/netns",
+        "v0.0.5",
+        "h1:DfiHV+j8bA32MFM7bfEunvT8IAqQ/NzSJHtcmW5zdEY="
+      ],
+      [
+        "dep",
+        "github.com/zeebo/blake3",
+        "v0.2.4",
+        "h1:KYQPkhpRtcqh0ssGYcKLG1JYvddkEA8QwCM/yBqhaZI="
+      ],
+      [
+        "dep",
+        "go.uber.org/multierr",
+        "v1.11.0",
+        "h1:blXXJkSxSSfBVBlC76pxqeO+LN3aDfLQo+309xJstO0="
+      ],
+      [
+        "dep",
+        "go.uber.org/zap",
+        "v1.27.1",
+        "h1:08RqriUEv8+ArZRYSTXy1LeBScaMpVSTBhCeaZYfMYc="
+      ],
+      [
+        "dep",
+        "go.uber.org/zap/exp",
+        "v0.3.0",
+        "h1:6JYzdifzYkGmTdRR59oYH+Ng7k49H9qVpWwNSsGJj3U="
+      ],
+      [
+        "dep",
+        "go4.org/netipx",
+        "v0.0.0-20231129151722-fdeea329fbba",
+        "h1:0b9z3AuHCjxk0x/opv64kcgZLBseWJUpBw5I82+2U4M="
+      ],
+      [
+        "dep",
+        "golang.org/x/crypto",
+        "v0.54.0",
+        "h1:YLIA59K4fiNzHzjnZt2tUJQjQtUWfWbeHBqKtk3eScw="
+      ],
+      [
+        "dep",
+        "golang.org/x/exp",
+        "v0.0.0-20260410095643-746e56fc9e2f",
+        "h1:W3F4c+6OLc6H2lb//N1q4WpJkhzJCK5J6kUi1NTVXfM="
+      ],
+      [
+        "dep",
+        "golang.org/x/mod",
+        "v0.37.0",
+        "h1:vF1DjpVEshcIqoEaauuHebaLk1O1forxjxBaVn884JQ="
+      ],
+      [
+        "dep",
+        "golang.org/x/net",
+        "v0.57.0",
+        "h1:K5+3DljvIuDG9/Jv9rvyMywYNFCQ9RSUY6OOTTkT+tE="
+      ],
+      [
+        "dep",
+        "golang.org/x/sync",
+        "v0.22.0",
+        "h1:SZjpbeLmrCk4xhRSZFNZW5gFUeCeFgjekvI/+gfScek="
+      ],
+      [
+        "dep",
+        "golang.org/x/sys",
+        "v0.47.0",
+        "h1:o7XGOvZQCADBQQ4Y7VNq2dRWQR7JmOUW8Kxx4ZsNgWs="
+      ],
+      [
+        "dep",
+        "golang.org/x/term",
+        "v0.45.0",
+        "h1:NwWyBmoJCbfTHpxrWoZ9C6/VxOf7ic219I8xZZFdrf0="
+      ],
+      [
+        "dep",
+        "golang.org/x/text",
+        "v0.40.0",
+        "h1:Ub2Z6/xjgF1WrYQz2nuITOEegKFtiIy+rieRJ5lHZKs="
+      ],
+      [
+        "dep",
+        "golang.org/x/time",
+        "v0.15.0",
+        "h1:bbrp8t3bGUeFOx08pvsMYRTCVSMk89u4tKbNOZbp88U="
+      ],
+      [
+        "dep",
+        "golang.zx2c4.com/wireguard/wgctrl",
+        "v0.0.0-20241231184526-a9ab2273dd10",
+        "h1:3GDAcqdIg1ozBNLgPy4SLT84nfcBjr6rhGtXYtrkWLU="
+      ],
+      [
+        "dep",
+        "google.golang.org/genproto/googleapis/rpc",
+        "v0.0.0-20251202230838-ff82c1b0f217",
+        "h1:gRkg/vSppuSQoDjxyiGfN4Upv/h/DQmIR10ZU8dh4Ww="
+      ],
+      [
+        "dep",
+        "google.golang.org/grpc",
+        "v1.79.1",
+        "h1:zGhSi45ODB9/p3VAawt9a+O/MULLl9dpizzNNpq7flY="
+      ],
+      [
+        "dep",
+        "google.golang.org/protobuf",
+        "v1.36.11",
+        "h1:fV6ZwhNocDyBLK0dj+fg8ektcVegBBuEolpbTQyBNVE="
+      ],
+      [
+        "dep",
+        "lukechampine.com/blake3",
+        "v1.3.0",
+        "h1:sJ3XhFINmHSrYCgl958hscfIa3bw8x4DqMP3u1YvoYE="
+      ]
+    ]
+  }
+}

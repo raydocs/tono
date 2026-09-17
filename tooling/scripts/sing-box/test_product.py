@@ -26,6 +26,14 @@ class ProductContractTests(unittest.TestCase):
         self.assertEqual(candidate["source"]["go_sum_sha256"], release["go_sum_sha256"])
         self.assertFalse(release["automatic_fallback"])
         self.assertFalse(release["post_replay"])
+        for target in release["targets"].values():
+            raw = (HERE / "manifests" / (target["build_target"] + ".json")).read_bytes()
+            self.assertEqual(hashlib.sha256(raw).hexdigest(), target["manifest_sha256"])
+            manifest = json.loads(raw)
+            self.assertEqual(manifest["binary_sha256"], target["binary_sha256"])
+            self.assertEqual(manifest["binary"], target["binary"])
+            self.assertEqual(manifest["source"], candidate["source"])
+            self.assertEqual(manifest["build"], candidate["build"])
 
     def test_template_scopes_fake_dns_and_never_restores_deprecated_stack(self):
         runtime = json.loads((HERE / "runtime-template.json").read_text())
