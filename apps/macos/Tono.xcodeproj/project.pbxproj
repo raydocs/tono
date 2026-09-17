@@ -442,7 +442,7 @@
 				CODE_SIGN_ENTITLEMENTS = Tono/Tono.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 72;
+				CURRENT_PROJECT_VERSION = 73;
 				DEVELOPMENT_TEAM = YY57758GS7;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -454,7 +454,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.0.72;
+				MARKETING_VERSION = 0.0.73;
 				PRODUCT_BUNDLE_IDENTIFIER = com.raydocs.tono;
 				PRODUCT_NAME = Tono;
 				REGISTER_APP_GROUPS = YES;
@@ -477,7 +477,7 @@
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 72;
+				CURRENT_PROJECT_VERSION = 73;
 				DEVELOPMENT_TEAM = YY57758GS7;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -489,7 +489,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.0.72;
+				MARKETING_VERSION = 0.0.73;
 				PRODUCT_BUNDLE_IDENTIFIER = com.raydocs.tono;
 				PRODUCT_NAME = Tono;
 				REGISTER_APP_GROUPS = YES;
