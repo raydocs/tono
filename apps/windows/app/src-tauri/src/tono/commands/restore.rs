@@ -262,7 +262,12 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
             }
             if !info.suspended {
                 if crate::tono::update_handoff::load_pending()
-                    .is_some_and(|journal| journal.keep_kill_switch_armed)
+                    .is_some_and(|journal| {
+                        // A retry after the verifier's durable write must not
+                        // regress it. Fresh connection verification still owns commit.
+                        journal.keep_kill_switch_armed
+                            && journal.phase != crate::tono::update_handoff::Phase::Verified
+                    })
                 {
                     let _ = crate::tono::update_handoff::record_owner_phase(
                         crate::tono::update_handoff::Phase::ProtectionResuming,

@@ -37,12 +37,17 @@ non-TUN modes, LAN exposure, streaming-unlock checkers, WebDAV backup.
 
 ## Signed Windows updates
 
-Release builds use only the Tono-owned static updater feed at
-`https://raw.githubusercontent.com/raydocs/tono/windows-updates/latest.json`.
-This is the `latest.json` file on the dedicated, auditable `windows-updates`
-branch; it does not use GitHub's repository-wide “latest release”, so macOS
-tags and releases cannot move the Windows channel. The normal developer build
-does not configure an updater endpoint.
+Current release configuration uses the Tono-owned updater feed at
+`https://releases.afk.ccwu.cc/windows/latest.json`, as defined in
+`app/scripts/prepare-updater-config.mjs`. The Worker serves the static manifest
+and `/download/*` installer bytes from R2, not an anonymous GitHub asset fetch.
+The normal developer build does not configure an updater endpoint.
+
+The `windows-updates/latest.json` branch remains a legacy compatibility and
+audit path: builds before 0.0.33 used its raw GitHub URL. Before making this
+source repository private in a future change, audit remaining legacy clients and public GitHub
+release-note links; do not infer that the current Worker/R2 path requires a
+public source repository. This is a documentation correction, not a feed change.
 
 The manually dispatched `Windows release` workflow builds the App and all
 three Windows Service binaries from the same commit, generates signed NSIS
@@ -53,30 +58,37 @@ Promotion rejects draft/prerelease releases, non-Windows entries, mutable or
 cross-version asset URLs, and any artifact that fails the configured Tauri
 signature.
 
-Only the final fast-forward update of the `windows-updates` Git ref publishes
-the new pointer. Any validation, download, commit, or push failure leaves the
-previous branch tip—and therefore the previous valid `latest.json`—unchanged.
-Rollback is an audited fast-forward revert commit restoring an earlier
-`latest.json`; already-updated clients still refuse downgrades.
+Promotion first fast-forwards the legacy `windows-updates` ref, then updates
+`services/control-plane/public/windows/latest.json` and regenerates the release
+center on `main`. These are separate steps, not one atomic publication. A
+failure after the legacy push can leave the populations seeing different
+pointers until the control-plane publication is completed. Qualification must
+check the actual served manifests and R2 bytes, not only a successful branch
+push. Recovery uses audited forward commits; clients still refuse downgrades.
 
 Before the first updater-enabled release, an operator must generate one Tauri
 updater signing keypair outside this repository and configure:
 
 - repository variable `TONO_UPDATER_PUBLIC_KEY` with the complete outer-Base64
   public-key value emitted by Tauri (copy the generated `.pub` content unchanged);
-- protected GitHub Environment `windows-release`, restricted to `main` with a
+- protected GitHub Environment `windows-release`, restricted to `release/windows` with a
   required reviewer and self-approval/bypass disabled where supported;
 - `windows-release` Environment secrets `TAURI_SIGNING_PRIVATE_KEY` and
   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`;
 - protected GitHub Environment `windows-update-channel`, also restricted to
-  reviewed deployments from `main`;
+  reviewed deployments from `release/windows`;
 - branch protection for `windows-updates` that forbids direct pushes, force
   pushes, and deletion while allowing only the reviewed promotion workflow to
   fast-forward the branch.
 
-Both workflows also reject dispatches whose ref is not `main`. The Environment
+Both workflows also reject dispatches whose ref is not `release/windows`. The Environment
 deployment-branch restrictions remain the security boundary because a branch
 can otherwise modify its own workflow definition before dispatch.
+
+These are required safeguards, not a claim that every control is configured.
+On 2026-09-14 the API showed both Windows environments restricted to
+`release/windows`, but neither listed a required-reviewer rule. Re-qualify
+publication permissions before any release; repository visibility is not approval.
 
 Never commit the private key. Losing or rotating it without a signed migration
 release prevents already-installed clients from accepting future updates.
@@ -337,9 +349,17 @@ SECURITY.md security invariants and disclosure
 
 ## Development
 
+**Execution location:** routine native compilation and tests use GitHub-hosted
+`windows-2025`; the owner's Windows machine handles separately approved native
+acceptance. See [build and test execution](../../docs/BUILD_AND_TEST.md). The maintainer's
+MacBook is for editing and frontend preview, not the default cross-compilation
+host. Follow [app contribution notes](app/CONTRIBUTING.md) for frontend-only
+commands. Native GUI/service and disruptive QA need separate authorization.
+
 Windows 10 22H2 / Windows 11, x64 and ARM64.
 
-- Rust stable (MSVC toolchain), Node.js LTS + pnpm
+- Source-pinned Rust (MSVC toolchain), Node.js and the app's pinned pnpm;
+  match the current workflow and lockfiles instead of upgrading to “latest”
 - Tauri 2.x prerequisites (WebView2, VS C++ build tools)
 - A Windows VM or machine with second NIC/Wi-Fi for the network-change
   matrix, plus packet capture (Wireshark/`pktmon`) for leak verification

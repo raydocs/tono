@@ -46,8 +46,8 @@ export function Digest({
 }: {
   digest: Resource<DigestDto>;
   /** The list's own count, so the block and the tab behind it cannot disagree. */
-  openCount: number;
-  choresToday: number;
+  openCount: number | null;
+  choresToday: number | null;
   /** Loaded rows used only to name each owed followup's subject. */
   customers: readonly CustomerSummaryDto[];
   incidents: readonly IncidentDto[];
@@ -63,7 +63,7 @@ export function Digest({
   const ended = capNight(groupNight(overnight.resolved));
   const running = capNight(groupNight(overnight.opened));
 
-  const owed = due.followups.length + due.checks.length + choresToday;
+  const owed = choresToday === null ? null : due.followups.length + due.checks.length + choresToday;
   if (night === 0 && openCount === 0 && owed === 0) {
     return (
       <section className="today-digest rounded-[12px] border border-[var(--hairline)] px-4 py-3">
@@ -99,7 +99,7 @@ export function Digest({
 
       <Line title={copy.digestNow}>
         <button type="button" className="text-left text-body underline-offset-4 hover:underline" onClick={onShowOpen}>
-          {openCount === 0 ? copy.digestNoOpen : copy.digestOpenCount(openCount)}
+          {openCount === null ? copy.loadError : openCount === 0 ? copy.digestNoOpen : copy.digestOpenCount(openCount)}
         </button>
       </Line>
 
@@ -115,7 +115,7 @@ export function Digest({
               <Jump onClick={onShowOpen}>{copy.digestDueChecks(due.checks.length)}</Jump>
             )}
             {choresToday === 0 ? null : (
-              <Jump onClick={onShowChores}>{copy.digestDueChores(choresToday)}</Jump>
+              <Jump onClick={onShowChores}>{choresToday === null ? copy.choresIncomplete : copy.digestDueChores(choresToday)}</Jump>
             )}
           </div>
         )}

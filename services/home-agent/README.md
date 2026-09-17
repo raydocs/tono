@@ -1,8 +1,8 @@
 # Tono home usage agent
 
 The Cloudflare Worker accepts monotonic usage reports at `POST /api/v1/home/usage`.
-This directory is the Mac Studio side agent that attributes exit-node traffic to
-Tono user IDs and reports totals.
+This directory is the residential-exit usage reporter that attributes
+exit-node traffic to Tono user IDs and reports totals.
 
 ## Status
 
@@ -78,7 +78,7 @@ Rules:
 2. Configure that ID as `TONO_SOURCE_ID`, put its node-specific token in the
    protected token file, and configure an absolute, protected `TAILSCALE_CLI`
    path that can read the
-   Mac Studio daemon; set `TAILSCALE_SOCKET` only for a non-default LocalAPI
+   Tailscale daemon on the residential-exit Mac; set `TAILSCALE_SOCKET` only for a non-default LocalAPI
    socket.
 3. Run every 10 minutes under launchd with a protected service identity and
    secret storage; add exponential retry scheduling around process invocations.

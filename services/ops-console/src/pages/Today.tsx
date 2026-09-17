@@ -99,10 +99,14 @@ export default function TodayPage({
    * one. The mistaken rows stay in the list — losing them would lose the
    * evidence that the rule needs changing — but they are out of the number.
    */
-  const counts: Record<TabId, number> = {
-    open: open.length,
-    resolved: recoveredCount(resolved),
-    chores: chores.length,
+  const incidentsReady = incidents.status === 'ready';
+  const choresReady = fleetReady && customers.status === 'ready'
+    && funnel.status === 'ready' && releases.status === 'ready';
+  const dueToday = choresReady ? choresDueToday(chores).length : null;
+  const counts: Record<TabId, number | null> = {
+    open: incidentsReady ? open.length : null,
+    resolved: incidentsReady ? recoveredCount(resolved) : null,
+    chores: choresReady ? chores.length : null,
   };
 
   const digest = useResource('digest', (signal) => followupApi.digest(signal));
@@ -112,19 +116,14 @@ export default function TodayPage({
   );
 
   /**
-   * The hero numbers, each in its own caliber and each null-aware. A resource
-   * that has not landed renders a dash: the tab counts below may read zero
-   * while loading (their long-standing behavior, untouched here), but the hero
-   * must not print a calm nobody measured.
+   * All chores surfaces share readiness, but not count definitions: the tab
+   * counts every chore, the digest only today's, and the hero also includes
+   * followups and checks. Missing inputs must never become a complete sum.
    */
-  const incidentsReady = incidents.status === 'ready';
-  const choresReady = customers.status === 'ready'
-    && funnel.status === 'ready'
-    && releases.status === 'ready';
   const kpiOpen = incidentsReady ? open.length : null;
   const kpiImpacted = incidentsReady ? impactedCustomers(all) : null;
-  const kpiDue = choresReady && fleetReady && digest.status === 'ready'
-    ? choresDueToday(chores).length
+  const kpiDue = dueToday !== null && digest.status === 'ready'
+    ? dueToday
       + digest.data.due.followups.length
       + digest.data.due.checks.length
     : null;
@@ -180,8 +179,8 @@ export default function TodayPage({
               reader can act. */}
           <Digest
             digest={digest}
-            openCount={open.length}
-            choresToday={choresDueToday(chores).length}
+            openCount={counts.open}
+            choresToday={dueToday}
             customers={people}
             incidents={all}
             onShowOpen={() => setTab('open')}
@@ -205,16 +204,16 @@ export default function TodayPage({
                 onClick={() => setTab(id)}
               >
                 {copy.todayTabs[id]}
-                <span className="ml-1.5 font-mono text-micro">{copy.tabCount(counts[id])}</span>
+                <span className="ml-1.5 font-mono text-micro">{counts[id] === null ? copy.missing : copy.tabCount(counts[id])}</span>
               </button>
             ))}
           </div>
 
           <div className="today-list-wrap">
-            {incidents.status !== 'ready' ? (
+            {tab === 'chores' ? (
+              choresReady ? <ChoreList rows={chores} /> : <Empty message={copy.choresIncomplete} />
+            ) : incidents.status !== 'ready' ? (
               <Empty message={incidents.status === 'loading' ? copy.loading : incidents.message || copy.loadError} />
-            ) : tab === 'chores' ? (
-              <ChoreList rows={chores} />
             ) : (
               <IncidentList
                 rows={tab === 'open' ? open : resolved}

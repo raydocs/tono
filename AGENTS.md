@@ -40,7 +40,8 @@ workspaces stay separate.
 ## Hard rules
 
 1. **No customer-channel publish** until SHIP_PLAN G1–G3 have evidence. Do not
-   edit `services/control-plane/public/appcast.xml` or push `windows-updates`
+   edit `services/control-plane/public/appcast.xml` or
+   `services/control-plane/public/windows/latest.json`, or push `windows-updates`
    for a ship. Internal tags only.
 2. **Protection must not loosen.** Fail-closed at PF / WFP. No
    `skip-cert-verify`. No unprivileged sidecar path.
@@ -56,6 +57,9 @@ workspaces stay separate.
 ## Verification
 
 Run the smallest check that covers the tree you touched.
+**Choose its execution host before running it.** The maintainer's MacBook is
+the editing/review machine, not the default native build worker. See
+[build and test execution](docs/BUILD_AND_TEST.md).
 
 | Tree | Check |
 |---|---|
@@ -64,6 +68,29 @@ Run the smallest check that covers the tree you touched.
 | `services/control-plane` | `npm test` / the matching `test/*.test.ts` |
 | `services/ops-console` | vitest for the file; Playwright only for a page flow you changed |
 | Docs-only | No test run |
+
+### Execution location (owner decision, 2026-09-14)
+
+- MacBook: editing, review, fixtures, focused frontend/Worker checks and
+  inspecting downloaded candidate apps. Do not automatically run `xcodebuild`,
+  `swift build/test`, native `cargo build/test/check/clippy`, Tauri dev/build,
+  Core builds or release packaging here. These commands recreate large caches.
+- Routine CI stays on GitHub-hosted `macos-26`, `windows-2025` and
+  `ubuntu-24.04`; the repository is public. Do not replace fixed OS labels with
+  `latest` or register persistent home runners as part of ordinary CI work.
+  `tono-build` remains retired.
+- Mac Studio is **no longer a residential exit**. It and the Windows machine
+  are native acceptance devices. Do not provision an exit or reuse an address
+  or tag from an archived handoff. Device access does not prove qualification.
+- If an exact check cannot run remotely, report it as not run and request a
+  bounded local exception; do not silently fall back to MacBook compilation or
+  call an untested change verified. Match evidence to the exact tested SHA.
+- Public PR code must not gain persistent-machine or signing privileges.
+  Keep privileged network/installer acceptance separate. Retain the
+  disposable-host guard on the Windows candidate-install smoke; hosted
+  Windows Server CI is not Windows 11 device acceptance.
+- Do not install toolchains, sync build caches, remove active worktrees or
+  delete retained evidence merely to make the default local command work.
 
 Do not run `wrangler deploy`, `wrangler secret`, or `d1 * --remote` unless the
 user asked to deploy.

@@ -157,7 +157,9 @@ export const todayCopy = {
    * that decide whether it is worth the tap, and nothing else. A disclosure
    * that says only 早报 is a door with no label on it.
    */
-  digestFold: (night: number, owed: number) => `昨夜 ${night} 件 · 今天 ${owed} 件`,
+  digestFold: (night: number, owed: number | null) =>
+    `昨夜 ${night} 件 · ${owed === null ? '今天待办数据未齐' : `今天 ${owed} 件`}`,
+  choresIncomplete: '待办数据未齐，暂时无法确认总数',
   digestNight: '昨夜',
   digestNow: '现在要处理',
   digestToday: '今天必须做',

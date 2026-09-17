@@ -1,8 +1,11 @@
 //! Atomic update handoff journal shared by the Windows updater and first launch.
 
 use serde::{Deserialize, Serialize};
+
+mod store;
+#[cfg(test)]
 use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -137,124 +140,34 @@ pub fn journal_path(app_support: &Path) -> PathBuf {
 /// Archive raw bytes, not a parsed journal: even corrupt/expired state matters.
 /// If archiving or writing fails, preparation fails and the current file stays.
 pub fn write_prepared(path: &Path, journal: &UpdateHandoffJournal) -> io::Result<()> {
-    match fs::File::open(path) {
-        Ok(mut previous) => {
-            let history = path.with_extension("history");
-            fs::create_dir_all(&history)?;
-            let archive_path = history.join(format!("{}.json", uuid::Uuid::new_v4()));
-            let mut archive = fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(archive_path)?;
-            io::copy(&mut previous, &mut archive)?;
-            archive.sync_all()?;
-            if let Ok(directory) = fs::File::open(&history) {
-                let _ = directory.sync_all();
-            }
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
-    }
-    write_atomic(path, journal)
+    let _transaction = store::transaction()?;
+    store::write_prepared(path, journal)
 }
 
 pub fn write_atomic(path: &Path, journal: &UpdateHandoffJournal) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let payload = serde_json::to_vec_pretty(journal)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    let temp = path.with_extension("json.tmp");
-    {
-        let mut file = fs::File::create(&temp)?;
-        file.write_all(&payload)?;
-        file.sync_all()?;
-    }
-    fs::rename(&temp, path)?;
-    // Best-effort directory fsync so the rename itself is durable after a crash
-    // during update handoff. Failure here must not undo a successful write.
-    if let Some(parent) = path.parent() {
-        if let Ok(dir_handle) = fs::File::open(parent) {
-            let _ = dir_handle.sync_all();
-        }
-    }
-    Ok(())
+    let _transaction = store::transaction()?;
+    store::write_atomic(path, journal)
 }
 
 pub fn load(path: &Path) -> io::Result<Option<UpdateHandoffJournal>> {
-    let data = match fs::read(path) {
-        Ok(data) => data,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
-    };
-    let journal: UpdateHandoffJournal = serde_json::from_slice(&data)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    if journal.schema_version != UpdateHandoffJournal::SCHEMA_VERSION {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "unsupported update journal schema",
-        ));
-    }
-    if matches!(
-        journal.phase,
-        UpdateHandoffPhase::Committed | UpdateHandoffPhase::Idle
-    ) {
-        fs::remove_file(path)?;
-        return Ok(None);
-    }
-    if journal.is_expired() {
-        // Expiry forbids resume, but does not prove that recovery succeeded.
-        // Keep the original bytes available for diagnosis, including Failed.
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "update journal expired",
-        ));
-    }
-    Ok(Some(journal))
+    let _transaction = store::transaction()?;
+    store::load(path)
 }
 
 /// Persist a real owner's observed transition. An illegal transition records
 /// failure, never success; failed evidence is immutable on subsequent attempts.
 /// Only a durably saved successful commit permits removal.
 pub fn advance_pending(path: &Path, phase: UpdateHandoffPhase) -> io::Result<()> {
-    let Some(mut journal) = load(path)? else {
-        return Ok(());
-    };
-    if journal.phase == UpdateHandoffPhase::Failed {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "update journal failed",
-        ));
-    }
-    journal.advance(phase);
-    write_atomic(path, &journal)?;
-    if journal.phase == UpdateHandoffPhase::Failed {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "illegal update journal phase",
-        ));
-    }
-    if journal.phase == UpdateHandoffPhase::Committed {
-        fs::remove_file(path)?;
-    }
-    Ok(())
+    let _transaction = store::transaction()?;
+    store::advance_pending(path, phase)
 }
 
 /// Record a real failure without pretending a later success happened.
 /// An already-failed journal is left byte-for-byte; there is no journal to
 /// invent when the file is missing.
 pub fn fail_pending(path: &Path, code: &str, stage: &str) -> io::Result<()> {
-    let Some(mut journal) = load(path)? else {
-        return Ok(());
-    };
-    if journal.phase == UpdateHandoffPhase::Failed {
-        return Ok(());
-    }
-    journal.last_error_code = Some(code.into());
-    journal.last_error_stage = Some(stage.into());
-    journal.phase = UpdateHandoffPhase::Failed;
-    journal.updated_at_unix = unix_now();
-    write_atomic(path, &journal)
+    let _transaction = store::transaction()?;
+    store::fail_pending(path, code, stage)
 }
 
 /// Failed journals stay on disk. The customer UI uses this so a later
@@ -271,48 +184,16 @@ pub fn record_first_launch_migration(
     path: &Path,
     current_app_version: &str,
 ) -> io::Result<Option<UpdateHandoffJournal>> {
-    let Some(journal) = load(path)? else {
-        return Ok(None);
-    };
-    if journal.phase == UpdateHandoffPhase::Failed {
-        return Ok(Some(journal));
-    }
-    if journal.next_app_version != current_app_version {
-        fail_pending(
-            path,
-            "TONO_UPDATE_INSTALL_ABORTED",
-            &format!("{:?}->FirstLaunchMigration", journal.phase),
-        )?;
-        return load(path);
-    }
-    advance_pending(path, UpdateHandoffPhase::FirstLaunchMigration)?;
-    load(path)
+    let _transaction = store::transaction()?;
+    store::record_first_launch_migration(path, current_app_version)
 }
 
 /// Installer process entry. Legal from a completed quiesce, a recorded
 /// protected handoff, or a retry that is already at `InstallStarted`.
 /// Missing file is not an update; do not invent a journal.
 pub fn record_install_started(path: &Path) -> io::Result<bool> {
-    let Some(journal) = load(path)? else {
-        return Ok(false);
-    };
-    match journal.phase {
-        UpdateHandoffPhase::InstallStarted => Ok(true),
-        UpdateHandoffPhase::CleanShutdownCompleted
-        | UpdateHandoffPhase::ProtectedHandoffRecorded => {
-            advance_pending(path, UpdateHandoffPhase::InstallStarted)?;
-            Ok(true)
-        }
-        UpdateHandoffPhase::Failed => Ok(false),
-        other => {
-            fail_pending(
-                path,
-                "TONO_JOURNAL_ILLEGAL_PHASE",
-                &format!("{other:?}->InstallStarted"),
-            )?;
-            Ok(false)
-        }
-    }
+    let _transaction = store::transaction()?;
+    store::record_install_started(path)
 }
 
 /// Persist Verified then Committed, and only then remove the file.
@@ -320,27 +201,8 @@ pub fn record_install_started(path: &Path) -> io::Result<bool> {
 /// or this process is not the owner of a verified recovery. Persistence
 /// failure leaves the file; it never reports commit.
 pub fn commit_verified_recovery(path: &Path, current_app_version: &str) -> io::Result<bool> {
-    let Some(journal) = load(path)? else {
-        return Ok(false);
-    };
-    if journal.next_app_version != current_app_version {
-        return Ok(false);
-    }
-    let unprotected_first_launch = journal.phase == UpdateHandoffPhase::FirstLaunchMigration
-        && !journal.was_connected
-        && !journal.keep_kill_switch_armed;
-    let can_commit = matches!(
-        journal.phase,
-        UpdateHandoffPhase::ProtectionResuming | UpdateHandoffPhase::Verified
-    ) || unprotected_first_launch;
-    if !can_commit {
-        return Ok(false);
-    }
-    if journal.phase != UpdateHandoffPhase::Verified {
-        advance_pending(path, UpdateHandoffPhase::Verified)?;
-    }
-    advance_pending(path, UpdateHandoffPhase::Committed)?;
-    Ok(true)
+    let _transaction = store::transaction()?;
+    store::commit_verified_recovery(path, current_app_version)
 }
 
 fn unix_now() -> u64 {
@@ -482,14 +344,17 @@ mod tests {
             advance_pending(&path, phase).unwrap();
             assert_eq!(load(&path).unwrap().unwrap().phase, phase);
         }
-        // Inject a persistence failure without relying on root-sensitive chmod.
-        fs::create_dir(path.with_extension("json.tmp")).unwrap();
-        assert!(advance_pending(&path, UpdateHandoffPhase::Committed).is_err());
+        // Inject the failed save, not a particular scratch filename. Writers
+        // now own unique scratch paths, and chmod is not reliable under root.
+        assert!(store::advance_pending_with(
+            &path,
+            UpdateHandoffPhase::Committed,
+            |_, _| Err(io::Error::from(io::ErrorKind::StorageFull)),
+        ).is_err());
         assert_eq!(
             load(&path).unwrap().unwrap().phase,
             UpdateHandoffPhase::Verified
         );
-        fs::remove_dir(path.with_extension("json.tmp")).unwrap();
         advance_pending(&path, UpdateHandoffPhase::Committed).unwrap();
         assert!(!path.exists());
         fs::remove_dir_all(dir).unwrap();
@@ -554,8 +419,11 @@ mod tests {
         assert_eq!(fs::read(&path).unwrap(), b"original evidence");
         fs::remove_file(path.with_extension("history")).unwrap();
         // Archiving succeeds but saving the new current attempt fails.
-        fs::create_dir(path.with_extension("json.tmp")).unwrap();
-        assert!(write_prepared(&path, &next).is_err());
+        assert!(store::write_prepared_with(
+            &path,
+            &next,
+            |_, _| Err(io::Error::from(io::ErrorKind::StorageFull)),
+        ).is_err());
         assert_eq!(fs::read(&path).unwrap(), b"original evidence");
         let archive = fs::read_dir(path.with_extension("history"))
             .unwrap()
@@ -575,6 +443,52 @@ mod tests {
             journal.last_error_code.as_deref(),
             Some("TONO_JOURNAL_ILLEGAL_PHASE")
         );
+    }
+
+    #[test]
+    fn first_launch_reentry_preserves_durable_recovery_progress() {
+        let dir = env::temp_dir().join(format!("tono-journal-reentry-{}", std::process::id()));
+        let path = journal_path(&dir);
+        let mut journal = UpdateHandoffJournal::new("0.0.72", "0.0.73", 7, true, true);
+        journal.phase = UpdateHandoffPhase::InstallStarted;
+        write_atomic(&path, &journal).unwrap();
+        record_first_launch_migration(&path, "0.0.73").unwrap();
+        advance_pending(&path, UpdateHandoffPhase::ProtectionResuming).unwrap();
+
+        // Account restore can be retried, or the new process can crash before
+        // verifying its connection. Re-entry is not a backwards transition.
+        let resuming = fs::read(&path).unwrap();
+        let resumed = record_first_launch_migration(&path, "0.0.73")
+            .unwrap()
+            .unwrap();
+        assert_eq!(resumed.phase, UpdateHandoffPhase::ProtectionResuming);
+        assert_eq!(fs::read(&path).unwrap(), resuming);
+        assert!(resumed.keep_kill_switch_armed);
+
+        // A crash after the verifier's durable write must also retain evidence;
+        // only the separate commit owner can remove it.
+        advance_pending(&path, UpdateHandoffPhase::Verified).unwrap();
+        let verified = fs::read(&path).unwrap();
+        assert_eq!(
+            record_first_launch_migration(&path, "0.0.73")
+                .unwrap()
+                .unwrap()
+                .phase,
+            UpdateHandoffPhase::Verified
+        );
+        assert_eq!(fs::read(&path).unwrap(), verified);
+
+        // Preserving progress must never authorize the predecessor binary.
+        let wrong = record_first_launch_migration(&path, "0.0.72")
+            .unwrap()
+            .unwrap();
+        assert_eq!(wrong.phase, UpdateHandoffPhase::Failed);
+        assert_eq!(
+            wrong.last_error_code.as_deref(),
+            Some("TONO_UPDATE_INSTALL_ABORTED")
+        );
+        assert!(!commit_verified_recovery(&path, "0.0.73").unwrap());
+        fs::remove_dir_all(dir).unwrap();
     }
 
     const PROTECTED_OWNERS: [UpdateHandoffPhase; 7] = [
