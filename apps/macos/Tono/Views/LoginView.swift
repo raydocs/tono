@@ -11,6 +11,7 @@ struct LoginView: View {
     @State private var email = ""
     @State private var emailCode = ""
     @State private var deviceName = Host.current().localizedName ?? "Mac"
+    @State private var isDeviceNameExpanded = false
     @State private var restoredInternetFromGate = false
     /// Guards the six-digit auto-submit against firing twice for the same code
     /// (error state flips, focus loss, re-entrant onChange from filtering).
@@ -76,23 +77,25 @@ struct LoginView: View {
     }
 
     var body: some View {
-        ScrollView {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .center, spacing: 40) {
-                    welcomeStory(compact: false)
-                        .frame(width: 320, height: 480)
-                    signInForm.frame(width: 380)
+        GeometryReader { proxy in
+            ScrollView(.vertical) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .center, spacing: 40) {
+                        welcomeStory(compact: false)
+                            .frame(width: 320, height: 480)
+                        signInForm.frame(width: 380)
+                    }
+                    VStack(alignment: .leading, spacing: 24) {
+                        welcomeStory(compact: true)
+                            .frame(maxWidth: 420, minHeight: 240)
+                        signInForm.frame(maxWidth: 420)
+                    }
                 }
-                VStack(alignment: .leading, spacing: 24) {
-                    welcomeStory(compact: true)
-                        .frame(maxWidth: 420, minHeight: 240)
-                    signInForm.frame(maxWidth: 420)
-                }
+                .padding(40)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: proxy.size.height, alignment: .center)
             }
-            .padding(40)
-            .frame(maxWidth: .infinity)
         }
-        .defaultScrollAnchor(.center)
     }
 
     private func welcomeStory(compact: Bool) -> some View {
@@ -271,8 +274,15 @@ struct LoginView: View {
                                 .focused($focusedField, equals: .email)
                                 .disabled(busy || session.emailChallenge != nil)
                             if !showsCodeStep {
-                                DisclosureGroup("Device name") {
+                                DisclosureGroup(isExpanded: $isDeviceNameExpanded) {
                                     gateField("Device name", text: $deviceName)
+                                        .padding(.top, 2)
+                                } label: {
+                                    HStack {
+                                        Text("Device name")
+                                        Spacer()
+                                    }
+                                    .contentShape(Rectangle())
                                 }
                                 .font(.caption)
                                 .disabled(busy)
