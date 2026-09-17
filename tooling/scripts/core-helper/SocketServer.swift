@@ -3,6 +3,7 @@ import Darwin
 import CryptoKit
 import IOKit
 import IOKit.pwr_mgt
+import Security
 
 final class SocketServer {
     private let allowedUID: uid_t
@@ -199,6 +200,15 @@ final class SocketServer {
             case ("POST", "/dns/restore"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
                 sendResponse(client, status: 200, object: try protectedDNS.restore())
+            case ("POST", "/helper/upgrade"):
+                let object = try jsonObject(request.body)
+                guard let helperSrc = object["helperSource"] as? String,
+                      let mihomoSrc = object["mihomoSource"] as? String else {
+                    throw HelperFailure.invalid("Invalid helper upgrade request.")
+                }
+                try stageAndUpgrade(helperSource: helperSrc, mihomoSource: mihomoSrc)
+                sendResponse(client, status: 200, object: ["ok": true, "restarting": true])
+                helperShutdownRequested = 1
             default:
                 sendResponse(client, status: 404, object: ["ok": false, "error": "Not found."])
             }
@@ -209,6 +219,67 @@ final class SocketServer {
             sendResponse(client, status: status, object: body)
         } catch {
             sendResponse(client, status: 500, object: ["ok": false, "error": "Internal helper error."])
+        }
+    }
+
+    private func verifyEmbeddedSignature(_ path: String, identifier: String) throws {
+        var code: SecStaticCode?
+        let url = URL(fileURLWithPath: path)
+        guard SecStaticCodeCreateWithPath(url as CFURL, SecCSFlags(rawValue: 0), &code) == errSecSuccess,
+              let code else {
+            throw HelperFailure.invalid("Code object cannot be created for \(path)")
+        }
+        let requirementText = #"anchor apple generic and identifier "\#(identifier)" and certificate leaf[subject.OU] = "YY57758GS7""#
+        var requirement: SecRequirement?
+        guard SecRequirementCreateWithString(requirementText as CFString, SecCSFlags(rawValue: 0), &requirement) == errSecSuccess,
+              let requirement,
+              SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: 0), requirement) == errSecSuccess else {
+            throw HelperFailure.invalid("Signature requirement failed for \(path)")
+        }
+    }
+
+    private func stageAndUpgrade(helperSource: String, mihomoSource: String) throws {
+        try verifyEmbeddedSignature(helperSource, identifier: "com.raydocs.tono.helper")
+        try verifyEmbeddedSignature(mihomoSource, identifier: "sing-box")
+
+        let helperTemp = "/Library/PrivilegedHelperTools/tono-core-helper.new"
+        let mihomoTemp = "/Library/PrivilegedHelperTools/tono-sing-box.new"
+        let helperDest = "/Library/PrivilegedHelperTools/tono-core-helper"
+        let mihomoDest = "/Library/PrivilegedHelperTools/tono-sing-box"
+
+        unlink(helperTemp)
+        unlink(mihomoTemp)
+
+        let p1 = Process()
+        p1.executableURL = URL(fileURLWithPath: "/usr/bin/install")
+        p1.arguments = ["-o", "root", "-g", "wheel", "-m", "0755", helperSource, helperTemp]
+        try p1.run()
+        p1.waitUntilExit()
+        guard p1.terminationStatus == 0 else {
+            throw HelperFailure.system("Could not copy helper binary.")
+        }
+
+        let p2 = Process()
+        p2.executableURL = URL(fileURLWithPath: "/usr/bin/install")
+        p2.arguments = ["-o", "root", "-g", "wheel", "-m", "0755", mihomoSource, mihomoTemp]
+        try p2.run()
+        p2.waitUntilExit()
+        guard p2.terminationStatus == 0 else {
+            unlink(helperTemp)
+            throw HelperFailure.system("Could not copy core binary.")
+        }
+
+        try verifyEmbeddedSignature(helperTemp, identifier: "com.raydocs.tono.helper")
+        try verifyEmbeddedSignature(mihomoTemp, identifier: "sing-box")
+
+        guard rename(helperTemp, helperDest) == 0 else {
+            unlink(helperTemp)
+            unlink(mihomoTemp)
+            throw HelperFailure.system("Could not replace helper binary.")
+        }
+        guard rename(mihomoTemp, mihomoDest) == 0 else {
+            unlink(mihomoTemp)
+            throw HelperFailure.system("Could not replace core binary.")
         }
     }
 }

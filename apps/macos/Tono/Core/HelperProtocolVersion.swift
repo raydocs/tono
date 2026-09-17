@@ -91,7 +91,9 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.0.0 → 4.1.0: PF permits Apple Continuity on `llw0` and `bridge100`,
     ///   bidirectional mDNS (5353), RFC1918 LAN, DHCP, and NDP for Sidecar,
     ///   Universal Clipboard, and local network traffic.
-    static let current = "4.1.0"
+    /// - 4.1.0 → 4.2.0: Root helper adds authenticated self-upgrade endpoint
+    ///   `/helper/upgrade` to eliminate administrator password prompts on future updates.
+    static let current = "4.2.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

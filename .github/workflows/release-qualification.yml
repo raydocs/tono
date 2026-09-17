@@ -7,6 +7,20 @@ permissions:
   contents: read
 
 jobs:
+  sing-box-input:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Build and verify fixed darwin-arm64 input
+        run: sh tooling/scripts/prepare-macos-sing-box.sh
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: sing-box-darwin-arm64
+          path: apps/macos/Tono/Resources/sing-box
+          if-no-files-found: error
+          retention-days: 14
+
   windows-core:
     runs-on: ubuntu-24.04
     steps:
@@ -31,9 +45,15 @@ jobs:
       - run: pnpm test
 
   macos-policy:
+    needs: sing-box-input
     runs-on: macos-26
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: sing-box-darwin-arm64
+          path: apps/macos/Tono/Resources
+      - run: chmod +x apps/macos/Tono/Resources/sing-box
       - name: Multi-exit policy
         run: tooling/scripts/test-multi-exit-policy.sh "$GITHUB_WORKSPACE/tooling/scripts/tests/fixtures/multi-vless-reality.yaml"
       - name: macOS incident regressions
