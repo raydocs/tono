@@ -38,6 +38,7 @@ atomic_install() {
   local source=$1
   local target=$2
   local target_dir=${target:h}
+  /bin/mkdir -p "$target_dir"
   install_tmp=$(mktemp "$target_dir/.mihomo.install.XXXXXX")
   /usr/bin/install -m 755 "$source" "$install_tmp"
   /bin/mv -f "$install_tmp" "$target"
@@ -199,11 +200,7 @@ install_adaptive() {
 }
 JSON
   )
-  for dest in \
-    "$repo_root/apps/macos/Tono/Resources/core-identity.json" \
-    "$repo_root/apps/windows/app/src-tauri/core-identity.json"; do
-    printf '%s\n' "$identity_json" > "$dest"
-  done
+  printf '%s\n' "$identity_json" > "$repo_root/apps/windows/app/src-tauri/core-identity.json"
 }
 
 case $mode in
