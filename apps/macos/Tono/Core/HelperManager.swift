@@ -870,9 +870,10 @@ nonisolated struct HelperManager {
             )
             guard response.status == 200 else { return false }
 
-            let startupDeadline = Date().addingTimeInterval(5)
+            let startupDeadline = Date().addingTimeInterval(15)
+            var pollIntervalMicroseconds: UInt32 = 100_000
             while Date() < startupDeadline {
-                usleep(150_000)
+                usleep(pollIntervalMicroseconds)
                 if currentVersion() == helperVersion {
                     LocalTrafficAudit.shared.recordEvent(
                         "helper_silent_upgrade_succeeded",
@@ -885,9 +886,23 @@ nonisolated struct HelperManager {
                     )
                     return true
                 }
+                pollIntervalMicroseconds = min(pollIntervalMicroseconds + 50_000, 300_000)
             }
+            LocalTrafficAudit.shared.recordEvent(
+                "helper_silent_upgrade_timed_out",
+                details: [
+                    "expected_version": helperVersion,
+                    "duration_ms": Self.durationMilliseconds(
+                        since: preparationStartedAt
+                    ),
+                ]
+            )
             return false
         } catch {
+            LocalTrafficAudit.shared.recordEvent(
+                "helper_silent_upgrade_failed",
+                details: ["error": error.localizedDescription]
+            )
             return false
         }
     }

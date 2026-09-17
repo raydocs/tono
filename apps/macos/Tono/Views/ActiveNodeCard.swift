@@ -12,6 +12,7 @@ struct ActiveNodeCard: View {
     var claudeHomeHost: String? = nil
     var onSwitch: (() -> Void)?
     @State private var isSwitchHovered = false
+    @State private var isCardHovered = false
     @State private var showsRulesPopover = false
 
     private var cleanName: String {
@@ -64,6 +65,7 @@ struct ActiveNodeCard: View {
             .padding(.bottom, 8)
 
             Button {
+                NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .default)
                 onSwitch?()
             } label: {
                 HStack {
@@ -89,7 +91,7 @@ struct ActiveNodeCard: View {
                         : TonoStatus.neutral
                     Text(
                         measured
-                            ? LatencyLevel.spokenTitle(for: latency, kind: .exit)
+                             ? LatencyLevel.spokenTitle(for: latency, kind: .exit)
                             : String(localized: "Not tested")
                     )
                         .font(.system(size: 12, weight: .semibold))
@@ -101,13 +103,13 @@ struct ActiveNodeCard: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
                 .background(
-                    .white.opacity(colorScheme == .dark ? 0.08 : 0.24),
+                    .white.opacity(isCardHovered ? (colorScheme == .dark ? 0.14 : 0.36) : (colorScheme == .dark ? 0.08 : 0.24)),
                     in: RoundedRectangle(cornerRadius: 10)
                 )
                 .overlay {
                     RoundedRectangle(cornerRadius: 10)
                         .strokeBorder(
-                            .white.opacity(colorScheme == .dark ? 0.14 : 0.45),
+                            (isCardHovered ? TonoBrand.accent.opacity(0.4) : .white.opacity(colorScheme == .dark ? 0.14 : 0.45)),
                             lineWidth: 1
                         )
                 }
@@ -115,6 +117,11 @@ struct ActiveNodeCard: View {
                 .contentShape(RoundedRectangle(cornerRadius: 10))
             }
             .buttonStyle(.plain)
+            .onHover { isCardHovered = $0 }
+            .animation(
+                TonoMotion.easeOut(0.15, reduceMotion: reduceMotion),
+                value: isCardHovered
+            )
             .padding(.horizontal, 12)
             .padding(.bottom, isConnected ? 8 : 12)
 

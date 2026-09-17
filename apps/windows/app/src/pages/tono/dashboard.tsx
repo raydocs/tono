@@ -258,10 +258,14 @@ const ActiveNodeCard = ({
       )}
 
       <div style={{ padding: '0 10px 10px' }}>
-        <div
+        <button
+          type="button"
+          onClick={() => navigate('/servers')}
           style={{
             display: 'flex',
+            width: '100%',
             alignItems: 'center',
+            textAlign: 'left',
             gap: 12,
             borderRadius: 13,
             padding: '13px 15px',
@@ -269,6 +273,16 @@ const ActiveNodeCard = ({
               ? 'rgba(255,255,255,0.055)'
               : 'rgba(235,240,250,0.68)',
             border: `1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(56,72,108,0.08)'}`,
+            cursor: 'pointer',
+            transition: 'background 0.15s ease, border-color 0.15s ease',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = dark ? 'rgba(255,255,255,0.09)' : 'rgba(225,232,246,0.85)'
+            e.currentTarget.style.borderColor = dark ? 'rgba(255,255,255,0.16)' : 'rgba(56,72,108,0.18)'
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = dark ? 'rgba(255,255,255,0.055)' : 'rgba(235,240,250,0.68)'
+            e.currentTarget.style.borderColor = dark ? 'rgba(255,255,255,0.08)' : 'rgba(56,72,108,0.08)'
           }}
         >
           <TonoNodeBadge size={36} city={nodeCityParts(serverName).city} />
@@ -323,7 +337,7 @@ const ActiveNodeCard = ({
                 )
               : '—'}
           </span>
-        </div>
+        </button>
       </div>
       {connected && (
         <div style={{ padding: '0 10px 10px' }}>
