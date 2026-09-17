@@ -1,4 +1,8 @@
-//! M1 synthetic/offline emitter for the frozen M0 Reality TCP profile.
+//! Shared sing-box JSON compiler and frozen M1 synthetic/offline emitter.
+//!
+//! [`build_runtime`] consumes owner-admitted product inputs under the v2 shared
+//! contract. It grants no snapshot trust or lifecycle authority. The original
+//! [`build_synthetic_offline_draft`] below retains its frozen M0 behavior.
 //!
 //! This is NOT a product snapshot admission API. Synthetic documents have no
 //! authentication/freshness authority. No caller may turn this draft into a
@@ -26,6 +30,9 @@ use sha2::{Digest, Sha256};
 use std::{collections::BTreeSet, fmt, net::SocketAddrV4};
 use thiserror::Error;
 
+mod runtime;
+pub use runtime::{DialEndpoint, OwnedSingBoxRuntime, RuntimeInput, Transport, build_runtime};
+
 pub const PROFILE: &str = "reality-tcp-no-special-routing-v1";
 const MAX_BYTES: usize = 8 * 1024 * 1024;
 
@@ -46,6 +53,8 @@ pub enum SingBoxError {
     UnsupportedFingerprint,
     #[error("TONO_SINGBOX_INVALID_CONTROL")]
     InvalidControl,
+    #[error("TONO_SINGBOX_UNSUPPORTED_CERTIFICATE_PIN")]
+    UnsupportedCertificatePin,
 }
 
 /// Explicitly synthetic data, not deserializable from a product/IPC request.
