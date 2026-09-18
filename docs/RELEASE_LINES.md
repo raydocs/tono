@@ -32,12 +32,12 @@ format and the release script passes and verifies the exact source commit.
 
 ## Current source and published state
 
-Source versions in this tree are **macOS 0.0.72 (build 72)** and **Windows
-0.0.72**. That is not a claim that either candidate is notarised, signed for
+Source versions in this tree are **macOS 0.0.73 (build 73)** and **Windows
+0.0.73**. That is not a claim that either candidate is notarised, signed for
 customers, or present on a live update feed. Publication and channel
 promotion are separate gated operations; see
-`apps/macos/release-notes/build72.md` and
-`apps/windows/release-notes/0.0.72.md`.
+`apps/macos/release-notes/build73.md` and
+`apps/windows/release-notes/0.0.73.md`.
 
 In-tree customer feeds in this checkout (what a control-plane deploy of
 *this* commit would serve) are Sparkle `public/appcast.xml` at **0.0.67**
@@ -63,7 +63,7 @@ tags are not those feeds.
   route split with Chinese chrome; connecting no longer drops every connection
   or fails a superseded arm. Helper protocol **3.12.0** restores DNS without
   snapshotting `127.0.0.1` as the original resolver.
-- `release/windows` source is 0.0.72 on top of the 0.0.31 Service pin fix
+- `release/windows` source is 0.0.73 on top of the 0.0.31 Service pin fix
   (Core SHA-256 is injected after the exact Mihomo is prepared, then both
   Service binaries are verified against the packaged Core). Later source
   adds a pin file at install, proactive token refresh, learned control-plane
