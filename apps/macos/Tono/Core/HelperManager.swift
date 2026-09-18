@@ -846,6 +846,23 @@ nonisolated struct HelperManager {
         }
     }
 
+    static let silentUpgradePollTimeout: TimeInterval = 45
+
+    static func receiveTimeout(for path: String) -> Int {
+        switch path {
+        case "/killswitch/arm", "/helper/upgrade":
+            return 30
+        case "/core/stop":
+            return 6
+        case "/core/start", "/core/sync":
+            return 20
+        case "/version", "/core/status", "/killswitch/status":
+            return 2
+        default:
+            return 6
+        }
+    }
+
     private static func attemptSilentUpgrade(
         helperSource: URL,
         mihomoSource: URL,
@@ -863,14 +880,16 @@ nonisolated struct HelperManager {
                 "mihomoSource": mihomoSource.path,
             ]
             let body = try JSONSerialization.data(withJSONObject: payload)
-            let response = try sendRequest(
+            let response = try? sendRequest(
                 method: "POST",
                 path: "/helper/upgrade",
                 body: body
             )
-            guard response.status == 200 else { return false }
+            if let response, response.status != 200 {
+                return false
+            }
 
-            let startupDeadline = Date().addingTimeInterval(15)
+            let startupDeadline = Date().addingTimeInterval(silentUpgradePollTimeout)
             var pollIntervalMicroseconds: UInt32 = 100_000
             while Date() < startupDeadline {
                 usleep(pollIntervalMicroseconds)
@@ -926,19 +945,7 @@ nonisolated struct HelperManager {
         // must fail fast if an old daemon is wedged. Only Kill Switch arm can
         // legitimately spend longer while resolving and committing its bounded
         // allowlist.
-        let receiveTimeoutSeconds: Int
-        switch path {
-        case "/killswitch/arm":
-            receiveTimeoutSeconds = 30
-        case "/core/stop":
-            receiveTimeoutSeconds = 6
-        case "/core/start", "/core/sync":
-            receiveTimeoutSeconds = 20
-        case "/version", "/core/status", "/killswitch/status":
-            receiveTimeoutSeconds = 2
-        default:
-            receiveTimeoutSeconds = 6
-        }
+        let receiveTimeoutSeconds = receiveTimeout(for: path)
         var receiveTimeout = timeval(tv_sec: receiveTimeoutSeconds, tv_usec: 0)
         _ = withUnsafePointer(to: &receiveTimeout) {
             setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, $0, socklen_t(MemoryLayout<timeval>.size))

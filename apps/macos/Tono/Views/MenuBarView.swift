@@ -9,21 +9,29 @@ struct MenuBarView: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            currentNode
-            primaryAction
-            if appState.isProtectionBlocked
-                || (KillSwitchService.isArmed && accountSession.state != .ready) {
-                restoreAction
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                currentNode
+                primaryAction
+                if appState.isProtectionBlocked
+                    || (KillSwitchService.isArmed && accountSession.state != .ready) {
+                    restoreAction
+                }
+                menuDivider
+                openTonoButton
+                quitButton
             }
-            menuDivider
-            openTonoButton
-            quitButton
+            .padding(.bottom, 8)
+            .frame(width: 280)
         }
-        .padding(.bottom, 8)
         .frame(width: 280)
-        .fixedSize()
+        .frame(maxHeight: maximumPopoverHeight)
+    }
+
+    private var maximumPopoverHeight: CGFloat {
+        let screenHeight = (NSApp.keyWindow?.screen ?? NSScreen.main)?.visibleFrame.height ?? 600
+        return max(240, min(screenHeight - 80, 480))
     }
 
     private var status: MenuBarProtectionStatus {

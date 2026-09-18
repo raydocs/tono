@@ -239,6 +239,22 @@ final class SocketServer {
     }
 
     private func stageAndUpgrade(helperSource: String, mihomoSource: String) throws {
+        guard helperSource.contains(".app/Contents/"),
+              mihomoSource.contains(".app/Contents/") else {
+            throw HelperFailure.invalid("Upgrade source paths must reside inside an app bundle.")
+        }
+        let helperFD = open(helperSource, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        guard helperFD >= 0 else {
+            throw HelperFailure.invalid("Cannot safely open helper source.")
+        }
+        close(helperFD)
+
+        let mihomoFD = open(mihomoSource, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        guard mihomoFD >= 0 else {
+            throw HelperFailure.invalid("Cannot safely open core source.")
+        }
+        close(mihomoFD)
+
         try verifyEmbeddedSignature(helperSource, identifier: "com.raydocs.tono.helper")
         try verifyEmbeddedSignature(mihomoSource, identifier: "sing-box")
 
