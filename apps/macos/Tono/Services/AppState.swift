@@ -104,6 +104,7 @@ final class AppState {
     /// can explicitly restore normal Internet instead of unknowingly retrying
     /// into another fail-closed transition.
     var isProtectionBlocked: Bool = false
+    var lastPhysicalFingerprint: PhysicalInterfaceFingerprint?
     var switchingNodeId: String? = nil
     var proxyMode: ProxyMode = .rule
     var activeNode: ProxyNode? = nil
@@ -305,6 +306,14 @@ final class AppState {
         updateLiveStreamSubscriptions()
     }
 
+    private(set) var isScreenLocked: Bool = false
+
+    func handleScreenLockChanged(isLocked: Bool) {
+        guard isScreenLocked != isLocked else { return }
+        isScreenLocked = isLocked
+        updateLiveStreamSubscriptions()
+    }
+
     /// Dynamic-store notifications replace the old five-second route and DNS
     /// command polling. Debounce the burst emitted by one macOS transition,
     /// then inspect the committed primary service and root-owned DNS state
@@ -350,11 +359,15 @@ final class AppState {
                 self.connectionCoordinator.networkEnvironmentTask = nil
                 return
             }
+            let currentFingerprint = PhysicalInterfaceFingerprint.current()
+            let physicalChanged = (self.lastPhysicalFingerprint != nil && self.lastPhysicalFingerprint != currentFingerprint)
             guard primaryService != self.protectedDNSService
-                    || dnsIntegrity == .broken else {
+                    || dnsIntegrity == .broken
+                    || physicalChanged else {
                 self.connectionCoordinator.networkEnvironmentTask = nil
                 return
             }
+            self.lastPhysicalFingerprint = currentFingerprint
             self.connectionCoordinator.networkEnvironmentTask = nil
             LocalTrafficAudit.shared.recordEvent(
                 "system_network_change_requires_reconnect",

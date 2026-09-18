@@ -78,6 +78,56 @@ struct TonoPeerAuthorizer {
         ) == errSecSuccess
     }
 
+    /// Derives the validated application bundle of the connected peer process
+    /// using the kernel LOCAL_PEERTOKEN audit token.
+    func peerBundleURL(socket fd: Int32) -> URL? {
+        var peerUID: uid_t = 0
+        var peerGID: gid_t = 0
+        var token = audit_token_t()
+        var length = socklen_t(MemoryLayout<audit_token_t>.size)
+        guard getpeereid(fd, &peerUID, &peerGID) == 0,
+              peerUID == allowedUID,
+              withUnsafeMutablePointer(to: &token, {
+            getsockopt(fd, SOL_LOCAL, LOCAL_PEERTOKEN, $0, &length)
+        }) == 0, length == MemoryLayout<audit_token_t>.size else {
+            return nil
+        }
+
+        let tokenData = withUnsafeBytes(of: &token) { Data($0) }
+        let attributes = [kSecGuestAttributeAudit: tokenData] as CFDictionary
+        var code: SecCode?
+        guard SecCodeCopyGuestWithAttributes(
+            nil,
+            attributes,
+            SecCSFlags(rawValue: 0),
+            &code
+        ) == errSecSuccess, let code,
+        SecCodeCheckValidity(code, SecCSFlags(rawValue: 0), requirement) == errSecSuccess else {
+            return nil
+        }
+
+        var staticCode: SecStaticCode?
+        guard SecCodeCopyStaticCode(code, SecCSFlags(rawValue: 0), &staticCode) == errSecSuccess,
+              let staticCode else {
+            return nil
+        }
+
+        var pathURL: CFURL?
+        guard SecCodeCopyPath(staticCode, SecCSFlags(rawValue: 0), &pathURL) == errSecSuccess,
+              let url = pathURL as URL? else {
+            return nil
+        }
+
+        var current = url.standardizedFileURL
+        while current.path != "/" {
+            if current.pathExtension == "app" {
+                return current
+            }
+            current = current.deletingLastPathComponent()
+        }
+        return nil
+    }
+
     /// A malformed requirement string makes `init` throw, which stops the helper
     /// from ever binding its socket — every client would see a connection
     /// failure with no explanation. The build script runs this so a typo in the

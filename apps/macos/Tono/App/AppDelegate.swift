@@ -95,6 +95,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             name: NSWorkspace.didWakeNotification,
             object: nil
         )
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(screenDidLock(_:)),
+            name: NSNotification.Name("com.apple.screenIsLocked"),
+            object: nil
+        )
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(screenDidUnlock(_:)),
+            name: NSNotification.Name("com.apple.screenIsUnlocked"),
+            object: nil
+        )
         let monitor = SystemNetworkChangeMonitor { [weak self] in
             self?.appState?.handleSystemNetworkChange()
         }
@@ -120,6 +132,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         _ = notification
         appState?.resumeAfterSystemWake()
         accountSession?.resumeAfterSystemWake()
+    }
+
+    @objc private func screenDidLock(_ notification: Notification) {
+        _ = notification
+        appState?.handleScreenLockChanged(isLocked: true)
+    }
+
+    @objc private func screenDidUnlock(_ notification: Notification) {
+        _ = notification
+        appState?.handleScreenLockChanged(isLocked: false)
     }
 
     private func enforceDefaultWindowSize() {

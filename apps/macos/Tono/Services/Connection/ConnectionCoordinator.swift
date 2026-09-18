@@ -100,6 +100,46 @@ final class ConnectionCoordinator {
         cancelDeferredConnect()
     }
 
+    /// Determines whether a reconnect kick should be debounced based on cooldown,
+    /// or if scheduling should proceed. When an immediate kick is accepted,
+    /// the previous reconnect task is safely cancelled.
+    func shouldDebounceReconnectKick(immediate: Bool, now: Date = Date()) -> Bool {
+        if immediate {
+            if let lastKick = lastProtectedReconnectKick,
+               now.timeIntervalSince(lastKick) < ProtectedReconnectSchedule.networkChangeKickCooldown,
+               protectedReconnectTask != nil {
+                return true
+            }
+            lastProtectedReconnectKick = now
+            protectedReconnectTask?.cancel()
+            protectedReconnectTask = nil
+            protectedReconnectID = nil
+            return false
+        } else if protectedReconnectTask != nil {
+            return true
+        }
+        return false
+    }
+
+    func cancelConnectionTasks() {
+        connectTask?.cancel()
+        connectTask = nil
+        connectWatchdogTask?.cancel()
+        connectWatchdogTask = nil
+        connectAttemptID = nil
+    }
+
+    func cancelReconnectTasks() {
+        protectedReconnectTask?.cancel()
+        protectedReconnectTask = nil
+        protectedReconnectID = nil
+        lastProtectedReconnectKick = nil
+        wakeRecoveryTask?.cancel()
+        wakeRecoveryTask = nil
+        sleepRestrictTask?.cancel()
+        sleepRestrictTask = nil
+    }
+
     private func cancelDeferredConnect() {
         deferredConnect?.task.cancel()
         deferredConnect = nil
