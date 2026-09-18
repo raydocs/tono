@@ -48,7 +48,7 @@ jobs:
             if ($built -ne $current) { throw "Candidate source differs from the tested tree: $path" }
           }
           $output = Join-Path $env:RUNNER_TEMP 'tono-candidate'
-          gh run download $id --name "tono-windows-0.0.72-candidate-$source" --dir $output
+          gh run download $id --name "tono-windows-0.0.73-candidate-$source" --dir $output
           $manifest = Get-Content (Join-Path $output 'candidate-manifest.json') -Raw | ConvertFrom-Json
           if ($manifest.source -ne $source) { throw 'Artifact manifest source does not match its workflow run.' }
           "CANDIDATE_DIRECTORY=$output" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
