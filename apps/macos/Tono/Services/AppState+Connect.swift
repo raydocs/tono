@@ -627,6 +627,11 @@ extension AppState {
             || coreRuntime.isRunning
             || AppProfile.defaults.bool(forKey: SettingsKey.didStartCore)
 
+        let runtimeMayOwnNetwork =
+            KillSwitchService.isArmed
+                || AppProfile.defaults.bool(forKey: SettingsKey.didStartCore)
+                || HelperManager.hasInstalledHelperArtifact
+
         connectionCoordinator.executeDisconnect(
             releaseKillSwitch: releaseKillSwitch,
             pendingTasks: pendingTasks,
