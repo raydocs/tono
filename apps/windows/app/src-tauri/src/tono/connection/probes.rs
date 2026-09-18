@@ -28,10 +28,10 @@ use super::status::set_stage;
 use super::transaction::ConnectTransaction;
 
 /// §6.8 exit probe target.
-pub(super) const EXIT_PROBE_URL: &str = "https://www.gstatic.com/generate_204";
+pub(super) const EXIT_PROBE_URL: &str = crate::tono::protected_probe::PROBE_ORIGINS[0].url;
 
 /// §6.8: the probe also proves fake-ip DNS via this lookup.
-pub(super) const FAKE_IP_LOOKUP_HOST: &str = "www.gstatic.com";
+pub(super) const FAKE_IP_LOOKUP_HOST: &str = "www.google.com";
 
 /// §6.7 DNS verification retry count.
 pub(super) const VERIFY_ATTEMPTS: u32 = 3;
@@ -74,40 +74,14 @@ pub(super) const TUN_DATA_PLANE_CONNECT_TIMEOUT: Duration = Duration::from_secs(
 
 pub(super) const TUN_DATA_PLANE_TIMEOUT: Duration = Duration::from_secs(18);
 
-/// Happy-eyeballs spacing between the three TLS origins. Starting them in the
-/// same millisecond on a cold Reality path made the first verification round
-/// lose to self-congestion even when the node was healthy.
+/// Retained probe scheduling interval; the single Google target starts immediately.
 pub(super) const TUN_PROBE_STAGGER: Duration = Duration::from_millis(100);
 
-/// A single public origin is not a data plane. The controller probe and 0.0.7's App probe both
-/// targeted Google, so one node-to-Google failure made two nominally independent checks fail
-/// together on a mainland tester. Race independent TLS origins and accept the first exact,
-/// authenticated response. Because WFP is already verified Locked, any such fresh App flow can
-/// only leave through WinTUN; an ordinary physical-interface fallback remains impossible.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct TunDataPlaneProbe {
-    pub(super) label: &'static str,
-    pub(super) url: &'static str,
-    pub(super) expected_status: u16,
-}
-
-pub(super) const TUN_DATA_PLANE_PROBES: [TunDataPlaneProbe; 3] = [
-    TunDataPlaneProbe {
-        label: "Google",
-        url: EXIT_PROBE_URL,
-        expected_status: 204,
-    },
-    TunDataPlaneProbe {
-        label: "Cloudflare",
-        url: "https://cp.cloudflare.com/generate_204",
-        expected_status: 204,
-    },
-    TunDataPlaneProbe {
-        label: "Apple",
-        url: "https://www.apple.com/library/test/success.html",
-        expected_status: 200,
-    },
-];
+/// TUN and diagnostic loopback requests share the same Google HTTPS 200 contract.
+/// WFP must still be Locked; a physical-interface fallback is not accepted.
+pub(super) use crate::tono::protected_probe::{
+    ProbeOrigin as TunDataPlaneProbe, PROBE_ORIGINS as TUN_DATA_PLANE_PROBES,
+};
 
 /// V1/H1 — §6.9 kill-switch verification retries. `KillSwitchStatus.live` on Windows is not a
 /// live query: it is a ~1.5 s-decaying cache refreshed by a 1 s loop, so one slow-but-successful
@@ -512,7 +486,7 @@ pub(super) fn fake_ip_attempt_timeout(attempt: u32) -> Duration {
     }
 }
 
-/// One exit probe: `GET /proxies/Tono-Exit/delay` against the generate_204 target with an
+/// One exit probe: `GET /proxies/Tono-Exit/delay` against the Google homepage with an
 /// [`EXIT_PROBE_CORE_TIMEOUT_MS`] core-side budget; a positive delay proves egress. The client
 /// budget ([`EXIT_PROBE_CLIENT_TIMEOUT`]) is strictly larger, so the verdict — including a
 /// mihomo-reported failure — always comes from the core (C2).
@@ -615,7 +589,7 @@ pub(super) async fn verify_locked() -> Result<KillSwitchStatus, String> {
 
 /// The authoritative connection verdict: an ordinary fresh App flow must traverse the protected
 /// Windows data plane. With WFP locked, a physical-interface fallback is blocked and only the
-/// recorded WinTUN LUID is permitted, so a valid HTTPS 204 is positive evidence of tunnel traffic.
+/// recorded WinTUN LUID is permitted, so a valid Google HTTPS 200 is evidence of tunnel traffic.
 pub(super) async fn verify_locked_data_plane(recorder: Option<&ProbeRecorder>) -> Result<KillSwitchStatus, String> {
     let began = std::time::Instant::now();
     let status = verify_locked().await.map_err(|error| {
