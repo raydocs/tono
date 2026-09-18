@@ -62,6 +62,22 @@ public struct DataUsageSummaryView: View {
         self.isCard = isCard
     }
 
+    public init(
+        appState: AppState,
+        title: LocalizedStringKey? = "DATA USAGE",
+        isCard: Bool = true
+    ) {
+        let todayUp = appState.trafficStats.totalUpload
+        let todayDown = appState.trafficStats.totalDownload
+        let ledgerTotal = appState.appTrafficLedger.overall.total
+        let monthUp = max(todayUp, ledgerTotal > 0 ? ledgerTotal : todayUp)
+        let monthDown = max(todayDown, appState.trafficStats.totalDownload)
+        self.today = PeriodUsage(upload: todayUp, download: todayDown)
+        self.month = PeriodUsage(upload: monthUp, download: monthDown)
+        self.title = title
+        self.isCard = isCard
+    }
+
     public var body: some View {
         let content = VStack(alignment: .leading, spacing: 10) {
             if let title {

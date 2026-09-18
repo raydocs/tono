@@ -7,6 +7,7 @@ struct DashboardView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var dashboardNS
     @State private var trafficHistory = TrafficHistory()
+    @State private var showsDataUsagePopover = false
     /// When the pill last flipped into connecting. A click that lands within
     /// `cancelGraceInterval` of that moment is ignored: the pill is now the
     /// Cancel control while connecting, so without this a double-click on
@@ -174,13 +175,24 @@ struct DashboardView: View {
                 tint: Color(hex: "32ADE6")
             )
 
-            DashboardStatCard(
-                title: "Live traffic",
-                value: trafficSummaryValue,
-                detail: trafficSummaryDetail,
-                systemImage: "waveform.path.ecg",
-                tint: Color(hex: "5856D6")
-            )
+            Button {
+                showsDataUsagePopover.toggle()
+            } label: {
+                DashboardStatCard(
+                    title: "Live traffic",
+                    value: trafficSummaryValue,
+                    detail: trafficSummaryDetail,
+                    systemImage: "waveform.path.ecg",
+                    tint: Color(hex: "5856D6")
+                )
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showsDataUsagePopover, arrowEdge: .top) {
+                DataUsageSummaryView(appState: appState, isCard: false)
+                    .padding(16)
+                    .frame(width: 320)
+            }
+            .help("View data usage summary")
         }
     }
 
@@ -274,7 +286,7 @@ struct DashboardView: View {
         HStack(spacing: 14) {
             infoItem(label: "IP", value: appState.networkInfo.ip)
             infoItem(label: "Network", value: appState.networkInfo.org)
-            infoItem(label: "Location", value: appState.networkInfo.location)
+            infoItem(label: "Location", value: locationDisplayValue)
             infoItem(label: "DNS", value: ProtectedDNSContract.server)
                 .help(
                     "System DNS: \(ProtectedDNSContract.server) · "
@@ -351,6 +363,17 @@ struct DashboardView: View {
                 try? await Task.sleep(for: .seconds(1))
             }
         }
+    }
+
+    private var locationDisplayValue: String {
+        let loc = appState.networkInfo.location
+        guard loc != "--" && !loc.isEmpty else { return "--" }
+        let candidate = loc.split(separator: ",").last?
+            .trimmingCharacters(in: .whitespaces) ?? loc
+        if let flag = UnicodeCountryFlag.emoji(for: candidate) {
+            return "\(flag) \(loc)"
+        }
+        return loc
     }
 
     private func infoItem(label: LocalizedStringKey, value: String) -> some View {
