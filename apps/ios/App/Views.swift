@@ -106,8 +106,11 @@ struct HomeView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                         .accessibilityIdentifier("preview.banner")
                 }
+                // 290pt keeps state, power control and the location chip on the
+                // first screen of a 375x812 phone; 330 pushed the chip under the
+                // home indicator there and cut the control on 375x667.
                 QuietField(state: model.state)
-                    .frame(height: typeSize.isAccessibilitySize ? 140 : 330)
+                    .frame(height: typeSize.isAccessibilitySize ? 140 : 290)
                 VStack(spacing: 8) {
                     Text(model.state.title).font(.largeTitle.weight(.medium))
                         .contentTransition(.numericText())
@@ -132,7 +135,9 @@ struct HomeView: View {
                     }
                     // The button already carries the VoiceOver label. Keep the
                     // visual verb 8pt from its edge, without extra button padding.
-                    Text(actionTitle).font(.footnote).foregroundStyle(.secondary)
+                    // Primary, not secondary: it sits on the halo/shadow wash,
+                    // where secondary gray drops to about 2.7-3:1 in light mode.
+                    Text(actionTitle).font(.footnote).foregroundStyle(.primary)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityHidden(true)
@@ -140,14 +145,18 @@ struct HomeView: View {
                 .padding(.top, 8)
                 NavigationLink(destination: LocationsView(model: model)) {
                     HStack(spacing: 10) {
-                        Image(systemName: "globe")
+                        Image(systemName: "globe").accessibilityHidden(true)
                         Text(model.locationTitle)
-                        Image(systemName: "chevron.right").font(.caption)
+                        Image(systemName: "chevron.right").font(.caption).accessibilityHidden(true)
                     }
                     .padding(.horizontal, 22).padding(.vertical, 14)
                 }
                 .buttonStyle(.plain)
                 .modifier(LocationChip())
+                // "Automatic" alone gives VoiceOver no context; the chip is the
+                // location picker, the chosen place is its value.
+                .accessibilityLabel("Location")
+                .accessibilityValue(model.locationTitle)
                 .accessibilityIdentifier("home.locations")
                 #if DEBUG
                 if model.isPreview { PreviewControls(model: model) }
@@ -178,7 +187,9 @@ struct HomeView: View {
     private var actionTitle: String { shouldPause ? "Pause" : model.state == .paused ? "Resume protection" : "Connect" }
 }
 
-/// Glossy indigo power control. On = luminous ramp + halo; off/preview = quiet gray.
+/// Glossy indigo power control. On = luminous ramp + halo. Off but available
+/// (Ready, Paused) = tinted disc with a 1pt accent edge, so it reads as a
+/// control rather than a disabled one. Disabled/preview = quiet gray.
 private struct PowerButton: View {
     let on: Bool
     let enabled: Bool
@@ -190,21 +201,18 @@ private struct PowerButton: View {
         Button(action: action) {
             Image(systemName: "power")
                 .font(.system(size: 64, weight: .semibold))
-                .foregroundStyle(on ? .white : Color.secondary)
+                .foregroundStyle(glyph)
                 .frame(width: 188, height: 188)
-                .background {
-                    Circle().fill(
-                        on ? AnyShapeStyle(RadialGradient(
-                            colors: [TonoBrand.powerTop, TonoBrand.powerMid, TonoBrand.powerDeep],
-                            center: UnitPoint(x: 0.35, y: 0.28),
-                            startRadius: 10, endRadius: 120))
-                        : AnyShapeStyle(Color(uiColor: .secondarySystemBackground)))
-                }
+                .background { Circle().fill(fill) }
                 .overlay {
                     if on {
                         Circle().fill(LinearGradient(
                             colors: [.white.opacity(reduceTransparency ? 0 : 0.35), .white.opacity(0)],
                             startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.45)))
+                    } else if enabled {
+                        // The 10% tint alone is ~1.1:1 against the ground; the
+                        // edge is what gives the tap target a boundary.
+                        Circle().strokeBorder(TonoBrand.accent.opacity(0.35), lineWidth: 1)
                     }
                 }
                 .shadow(color: on ? TonoBrand.powerMid.opacity(0.5) : .black.opacity(0.12),
@@ -227,6 +235,21 @@ private struct PowerButton: View {
         .opacity(enabled ? 1 : 0.6)
         .accessibilityIdentifier("home.action")
         .accessibilityLabel(label)
+    }
+
+    private var glyph: Color { on ? .white : enabled ? TonoBrand.accent : .secondary }
+
+    private var fill: AnyShapeStyle {
+        if on {
+            AnyShapeStyle(RadialGradient(
+                colors: [TonoBrand.powerTop, TonoBrand.powerMid, TonoBrand.powerDeep],
+                center: UnitPoint(x: 0.35, y: 0.28),
+                startRadius: 10, endRadius: 120))
+        } else if enabled {
+            AnyShapeStyle(TonoBrand.accent.opacity(0.10))
+        } else {
+            AnyShapeStyle(Color(uiColor: .secondarySystemBackground))
+        }
     }
 }
 
@@ -419,7 +442,11 @@ struct CTAButton: View {
     let action: () -> Void
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.isEnabled) private var isEnabled
-    @ScaledMetric(relativeTo: .body) private var adornmentWidth: CGFloat = 22
+    @ScaledMetric(relativeTo: .body) private var scaledAdornment: CGFloat = 22
+    /// Follows Dynamic Type through xxxLarge (~30pt) and then holds, so the
+    /// symmetric clearance never squeezes the title zone below one long word
+    /// on a 375pt phone at accessibility sizes.
+    private var adornmentWidth: CGFloat { min(scaledAdornment, 30) }
     var body: some View {
         Button(action: action) {
             ZStack {
@@ -435,6 +462,7 @@ struct CTAButton: View {
                         if busy { ProgressView().tint(.white) }
                         else { Image(systemName: "arrow.right").accessibilityHidden(true) }
                     }
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                     .frame(width: adornmentWidth, alignment: .trailing)
                 }
             }
@@ -501,5 +529,18 @@ private struct PreviewControls: View {
     let model = AppModel()
     model.preview(.paused)
     return RootView(model: model)
+}
+
+// Component-only preview. App previews keep the power control gray and
+// disabled; this is the only way to inspect the on / ready styles without
+// touching that contract or a VPN. Actions are no-ops.
+#Preview("PowerButton · on / ready / disabled") {
+    VStack(spacing: 40) {
+        PowerButton(on: true, enabled: true, label: "Pause") {}
+        PowerButton(on: false, enabled: true, label: "Connect") {}
+        PowerButton(on: false, enabled: false, label: "Connect") {}
+    }
+    .padding(48)
+    .background(TonoBrand.ground.ignoresSafeArea())
 }
 #endif

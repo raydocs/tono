@@ -187,6 +187,25 @@ final class ProtectionTests: XCTestCase {
         XCTAssertEqual(busySize.height, idleSize.height, accuracy: 1)
     }
 
+    @MainActor func testAccessibilityRecoveryCTAHoldsAdornmentSlotAtThirtyPoints() {
+        let title = "Retry sign-out cleanup"
+        let width: CGFloat = 327 // 375pt phone minus the 24pt page insets
+        // At AX5 the slot stops at 30pt instead of scaling to ~69pt, so the
+        // title keeps 207pt: "cleanup" (~185pt) stays one word instead of
+        // breaking mid-word in a 130pt zone.
+        let titleWidth = width - 2 * 20 - 2 * (30 + 10)
+        let reference = UIHostingController(rootView: Text(title).fontWeight(.semibold)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(width: titleWidth)
+            .dynamicTypeSize(.accessibility5))
+        let titleSize = reference.sizeThatFits(in: CGSize(width: titleWidth, height: 1000))
+        let button = UIHostingController(rootView: CTAButton(title: title) {}.dynamicTypeSize(.accessibility5))
+        let buttonSize = button.sizeThatFits(in: CGSize(width: width, height: 1000))
+        XCTAssertEqual(buttonSize.width, width, accuracy: 1)
+        XCTAssertEqual(buttonSize.height, titleSize.height + 2 * 16, accuracy: 1)
+    }
+
     func testMotePhaseIgnoresAlignmentAfterLongRun() {
         // No alignment parameter exists: a 10-minute run must not snap when
         // Protected falls back to Paused.
