@@ -2,6 +2,60 @@
 //! A recent log tail is not attempt-bound: observations are clues, not a diagnosis.
 
 use serde::Serialize;
+use std::sync::{Arc, Mutex};
+
+/// Whitelisted App observations, not a transport-handshake verdict. No raw errors/URLs.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeOutcome {
+    pub round: u32,
+    pub path: &'static str,
+    pub origin: &'static str,
+    pub passed: bool,
+    pub category: &'static str,
+    pub actual_status: Option<u16>,
+    pub elapsed_ms: u64,
+}
+
+#[derive(Clone)]
+pub struct ProbeRecorder {
+    pub round: u32,
+    pub path: &'static str,
+    pub outcomes: Arc<Mutex<Vec<ProbeOutcome>>>,
+}
+
+impl ProbeRecorder {
+    pub fn record(
+        &self,
+        origin: &str,
+        passed: bool,
+        category: &'static str,
+        actual_status: Option<u16>,
+        elapsed_ms: u64,
+    ) {
+        let origin = match origin {
+            "Google" => "Google",
+            "Cloudflare" => "Cloudflare",
+            "Apple" => "Apple",
+            "WFP" => "WFP",
+            _ => "unknown",
+        };
+        if let Ok(mut outcomes) = self.outcomes.lock() {
+            // At most 2 x 3 TUN origins + 3 loopback origins + controller/WFP.
+            if outcomes.len() < 16 {
+                outcomes.push(ProbeOutcome {
+                    round: self.round,
+                    path: self.path,
+                    origin,
+                    passed,
+                    category,
+                    actual_status,
+                    elapsed_ms,
+                });
+            }
+        }
+    }
+}
 
 /// Memory-only attempt identity. No account identifiers, runtime YAML or credentials.
 #[derive(Debug, Clone, Serialize)]
@@ -12,6 +66,8 @@ pub struct ConnectionAttempt {
     pub selected_server: String,
     pub transport: &'static str,
     pub catalog_revision: Option<i64>,
+    #[serde(skip)]
+    pub probe_outcomes: Arc<Mutex<Vec<ProbeOutcome>>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -23,6 +79,7 @@ pub struct FailedAttempt {
     pub failed_stage: Option<&'static str>,
     pub error_code: Option<String>,
     pub steps: Vec<tono_core::auth::DiagnosticsStep>,
+    pub probe_outcomes: Vec<ProbeOutcome>,
 }
 
 #[derive(Default)]
@@ -45,6 +102,7 @@ impl AttemptHistory {
             selected_server,
             transport,
             catalog_revision: (catalog_revision >= 0).then_some(catalog_revision),
+            probe_outcomes: Arc::new(Mutex::new(Vec::new())),
         };
         self.current = Some(attempt.clone());
         attempt
@@ -175,17 +233,29 @@ mod tests {
     fn retry_preserves_failure_identity_and_rejects_a_superseded_writer() {
         let mut history = AttemptHistory::default();
         let first = history.begin(1000, "Original city".into(), "tcp", 54);
+        let recorder = ProbeRecorder {
+            round: 1,
+            path: "tun",
+            outcomes: first.probe_outcomes.clone(),
+        };
+        recorder.record("Google", false, "dns", None, 173);
         let failed = FailedAttempt {
             attempt: first.clone(),
             failed_at_ms: 2000,
             failed_stage: Some("verifyingTraffic"),
             error_code: Some("CORE_EXIT_UNREACHABLE".into()),
             steps: vec![],
+            probe_outcomes: first.probe_outcomes.lock().unwrap().clone(),
         };
         history.retain(failed.clone());
         let second = history.begin(3000, "Retry city".into(), "hy2", 55);
         assert_ne!(first.id, second.id);
+        recorder.record("Apple", false, "tls", None, 891);
+        assert!(second.probe_outcomes.lock().unwrap().is_empty());
         let saved = history.last_failure.as_ref().unwrap();
+        assert_eq!(saved.probe_outcomes.len(), 1);
+        assert_eq!(saved.probe_outcomes[0].origin, "Google");
+        assert_eq!(saved.probe_outcomes[0].elapsed_ms, 173);
         assert_eq!(saved.attempt.selected_server, "Original city");
         assert_eq!(saved.attempt.catalog_revision, Some(54));
         assert_eq!(saved.failed_at_ms, 2000);

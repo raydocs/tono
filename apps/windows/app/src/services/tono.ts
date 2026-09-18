@@ -580,6 +580,15 @@ export interface TonoLocalDiagnosticsReport extends TonoDiagnosticsReport {
       failedStage: string | null
       errorCode: string | null
       steps: TonoDiagnosticsStep[]
+      probeOutcomes?: {
+        round: number
+        path: string
+        origin: string
+        passed: boolean
+        category: string
+        actualStatus: number | null
+        elapsedMs: number
+      }[]
     } | null
     coreLog: {
       status: string
@@ -680,6 +689,9 @@ export const formatTonoDiagnostics = (
                 `Attempt failure: ${local.lastFailedAttempt.failedStage ?? '(unknown)'}; code=${local.lastFailedAttempt.errorCode ?? '(none)'}`,
                 ...local.lastFailedAttempt.steps.map(step =>
                   `  - ${step.key}: ${step.state}${step.elapsedMs == null ? '' : ` (${formatTonoElapsed(step.elapsedMs)})`}`),
+                'Completed probes: App observations, not proof of exit transport handshake failure. Missing entries may be unstarted, cancelled or unavailable.',
+                ...(local.lastFailedAttempt.probeOutcomes ?? []).map(probe =>
+                  `  - round=${probe.round} path=${probe.path} origin=${probe.origin} result=${probe.passed ? 'passed' : 'failed'} category=${probe.category} status=${probe.actualStatus ?? 'unknown'} elapsed=${probe.elapsedMs}ms`),
               ]
             : ['Retained failed attempt: (none captured)']),
           'Recent Core log: not correlated to this attempt; not a root-cause diagnosis',

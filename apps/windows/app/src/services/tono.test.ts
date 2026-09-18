@@ -465,6 +465,10 @@ describe('stable diagnostic copy', () => {
           selectedServer: 'Buffalo original', transport: 'tcp', catalogRevision: 54,
           failedStage: 'verifyingTraffic', errorCode: 'TONO_NODE_OR_CORE_UNREACHABLE',
           steps: [{ key: 'verifyingTraffic', state: 'failed', elapsedMs: 2600 }],
+          probeOutcomes: [
+            { round: 1, path: 'tun', origin: 'Google', passed: false, category: 'dns', actualStatus: null, elapsedMs: 173 },
+            { round: 2, path: 'loopback', origin: 'Apple', passed: false, category: 'tls', actualStatus: null, elapsedMs: 891 },
+          ],
         },
       },
     })
@@ -474,6 +478,9 @@ describe('stable diagnostic copy', () => {
     expect(copied).toContain('Attempt started (UTC): 2024-04-05T19:34:30.000Z')
     expect(copied).toContain('Attempt failure: verifyingTraffic; code=TONO_NODE_OR_CORE_UNREACHABLE')
     expect(copied).toContain('verifyingTraffic: failed (2.6s)')
+    expect(copied).toContain('round=1 path=tun origin=Google result=failed category=dns status=unknown elapsed=173ms')
+    expect(copied).toContain('round=2 path=loopback origin=Apple result=failed category=tls status=unknown elapsed=891ms')
+    expect(copied).toContain('App observations, not proof of exit transport handshake failure')
     expect(copied).toContain('Recent Core log: not correlated to this attempt')
   })
 })

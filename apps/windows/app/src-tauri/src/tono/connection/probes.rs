@@ -13,6 +13,7 @@ use tono_logging::{Type, logging};
 use tono_service_protocol::{KillSwitchStatus, KillSwitchStatusMode};
 
 use crate::core::service;
+use crate::tono::local_evidence::ProbeRecorder;
 use crate::tono::{audit::{self, AuditEvent}, state::TonoState};
 use super::cleanup::stale_after_arm;
 use super::controller::{
@@ -167,9 +168,23 @@ pub(super) async fn verify_post_lock(
     // CheckingExit is only a UI label. The real TUN race starts immediately;
     // controller /delay may finish later and is never required for Connected.
     set_stage(state, app, ConnectStage::CheckingExit, generation, true, started).await?;
+    let outcomes = {
+        let inner = state.lock().await;
+        if inner.connect_generation == generation {
+            inner.attempt_history.current.as_ref().map(|attempt| attempt.probe_outcomes.clone())
+        } else {
+            None
+        }
+    };
+    let controller_recorder = outcomes.as_ref().map(|outcomes| ProbeRecorder { round: 1, path: "controller", outcomes: outcomes.clone() });
     let controller_secret = secret.to_string();
     let mut controller_task = Some(tokio::spawn(async move {
-        probe_exit_once(&controller_secret, controller_port).await
+        let began = std::time::Instant::now();
+        let result = probe_exit_once(&controller_secret, controller_port).await;
+        if let Some(recorder) = controller_recorder {
+            recorder.record("Google", result.is_ok(), "advisory", None, began.elapsed().as_millis() as u64);
+        }
+        result
     }));
     set_stage(state, app, ConnectStage::VerifyingTraffic, generation, true, started).await?;
     let mut last = String::from("post-lock verification did not run");
@@ -181,17 +196,19 @@ pub(super) async fn verify_post_lock(
             return Err(stale_after_arm(state, generation).await);
         }
         let final_round = round + 1 == POST_LOCK_VERIFY_ROUNDS;
+        let tun_recorder = outcomes.as_ref().map(|outcomes| ProbeRecorder { round: round + 1, path: "tun", outcomes: outcomes.clone() });
+        let proxy_recorder = outcomes.as_ref().map(|outcomes| ProbeRecorder { round: round + 1, path: "loopback", outcomes: outcomes.clone() });
         let (data_plane, proxy_cross_check) = if final_round {
             let (data_plane, proxy) = transaction
                 .wait("real TUN verification with proxy cross-check", async {
-                    tokio::join!(verify_locked_data_plane(), verify_mixed_proxy_data_plane(mixed_port))
+                    tokio::join!(verify_locked_data_plane(tun_recorder.as_ref()), verify_mixed_proxy_data_plane(mixed_port, proxy_recorder.as_ref()))
                 })
                 .await?;
             (data_plane, Some(proxy))
         } else {
             (
                 transaction
-                    .wait("real TUN data-plane verification", verify_locked_data_plane())
+                    .wait("real TUN data-plane verification", verify_locked_data_plane(tun_recorder.as_ref()))
                     .await?,
                 None,
             )
@@ -599,18 +616,29 @@ pub(super) async fn verify_locked() -> Result<KillSwitchStatus, String> {
 /// The authoritative connection verdict: an ordinary fresh App flow must traverse the protected
 /// Windows data plane. With WFP locked, a physical-interface fallback is blocked and only the
 /// recorded WinTUN LUID is permitted, so a valid HTTPS 204 is positive evidence of tunnel traffic.
-pub(super) async fn verify_locked_data_plane() -> Result<KillSwitchStatus, String> {
-    let status = verify_locked().await?;
-    verify_tun_data_plane().await?;
+pub(super) async fn verify_locked_data_plane(recorder: Option<&ProbeRecorder>) -> Result<KillSwitchStatus, String> {
+    let began = std::time::Instant::now();
+    let status = verify_locked().await.map_err(|error| {
+        if let Some(recorder) = recorder {
+            recorder.record("WFP", false, "protection", None, began.elapsed().as_millis() as u64);
+        }
+        error
+    })?;
+    verify_tun_data_plane_observed(recorder).await?;
     Ok(status)
 }
 
 pub(super) async fn verify_tun_data_plane() -> Result<(), String> {
+    verify_tun_data_plane_observed(None).await
+}
+
+async fn verify_tun_data_plane_observed(recorder: Option<&ProbeRecorder>) -> Result<(), String> {
     crate::tono::integration_profile::delay_remote_operation().await;
     crate::tono::protected_probe::verify_protected_origins(
         TUN_DATA_PLANE_CONNECT_TIMEOUT,
         TUN_DATA_PLANE_TIMEOUT,
         TUN_PROBE_STAGGER,
+        recorder,
     )
     .await
     .map(|_| ())
@@ -621,7 +649,7 @@ pub(super) async fn verify_tun_data_plane() -> Result<(), String> {
 /// WinTUN but still uses the exact owned runtime, selected exit group, staged core, WFP endpoint
 /// permit, and remote node. A success therefore isolates a Windows TUN/route failure; it is never
 /// returned as a successful connection verdict.
-pub(super) async fn verify_mixed_proxy_data_plane(mixed_port: u16) -> Result<(), String> {
+pub(super) async fn verify_mixed_proxy_data_plane(mixed_port: u16, recorder: Option<&ProbeRecorder>) -> Result<(), String> {
     let proxy_url = format!("http://127.0.0.1:{mixed_port}");
     let proxy = reqwest::Proxy::all(&proxy_url)
         .map_err(|error| format!("cannot configure loopback diagnostic proxy: {error}"))?;
@@ -635,7 +663,7 @@ pub(super) async fn verify_mixed_proxy_data_plane(mixed_port: u16) -> Result<(),
         .map_err(|error| format!("cannot create loopback diagnostic proxy probe: {error}"))?;
     crate::tono::integration_profile::delay_remote_operation().await;
 
-    race_data_plane_probes(&client).await.map_err(|failures| {
+    race_data_plane_probes(&client, recorder).await.map_err(|failures| {
         format!(
             "all {} independent loopback-proxy probes failed: {}",
             TUN_DATA_PLANE_PROBES.len(),
@@ -648,7 +676,7 @@ pub(super) fn tun_probe_stagger(index: usize) -> Duration {
     TUN_PROBE_STAGGER * (index as u32)
 }
 
-pub(super) async fn race_data_plane_probes(client: &reqwest::Client) -> Result<(), Vec<String>> {
+pub(super) async fn race_data_plane_probes(client: &reqwest::Client, recorder: Option<&ProbeRecorder>) -> Result<(), Vec<String>> {
     let mut in_flight = FuturesUnordered::new();
     for (index, probe) in TUN_DATA_PLANE_PROBES.into_iter().enumerate() {
         let client = client.clone();
@@ -657,7 +685,7 @@ pub(super) async fn race_data_plane_probes(client: &reqwest::Client) -> Result<(
             if !delay.is_zero() {
                 tokio::time::sleep(delay).await;
             }
-            probe_tun_endpoint(&client, probe).await
+            probe_tun_endpoint(&client, probe, recorder).await
         });
     }
 
@@ -671,13 +699,22 @@ pub(super) async fn race_data_plane_probes(client: &reqwest::Client) -> Result<(
     Err(failures)
 }
 
-pub(super) async fn probe_tun_endpoint(client: &reqwest::Client, probe: TunDataPlaneProbe) -> Result<(), String> {
+pub(super) async fn probe_tun_endpoint(client: &reqwest::Client, probe: TunDataPlaneProbe, recorder: Option<&ProbeRecorder>) -> Result<(), String> {
+    let began = std::time::Instant::now();
     let response = client
         .get(probe.url)
         .send()
         .await
-        .map_err(|error| format!("{} ({}): {}", probe.label, probe.url, describe_reqwest_error(&error)))?;
+        .map_err(|error| {
+            if let Some(recorder) = recorder {
+                recorder.record(probe.label, false, crate::tono::protected_probe::classify_reqwest(&error).as_str(), None, began.elapsed().as_millis() as u64);
+            }
+            format!("{} ({}): {}", probe.label, probe.url, describe_reqwest_error(&error))
+        })?;
     let actual = response.status().as_u16();
+    if let Some(recorder) = recorder {
+        recorder.record(probe.label, actual == probe.expected_status, "http", Some(actual), began.elapsed().as_millis() as u64);
+    }
     if actual == probe.expected_status {
         Ok(())
     } else {
