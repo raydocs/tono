@@ -244,6 +244,93 @@ final class ConnectionCoordinatorTests: XCTestCase {
         XCTAssertNil(coordinator.wakeRecoveryTask)
         XCTAssertNil(coordinator.sleepRestrictTask)
     }
+
+    func testExecuteDisconnectCancelsTasksAndSerializesTeardown() async {
+        let coordinator = ConnectionCoordinator()
+        coordinator.connectTask = Task { }
+        coordinator.protectedReconnectTask = Task { }
+
+        let gate = DisconnectGate()
+        var teardownExecuted = false
+        var prepared = false
+
+        coordinator.executeDisconnect(
+            releaseKillSwitch: true,
+            pendingTasks: [],
+            prepare: { prepared = true },
+            operation: { _ in
+                await gate.wait()
+                teardownExecuted = true
+            }
+        )
+
+        XCTAssertTrue(prepared)
+        XCTAssertNil(coordinator.connectTask)
+        XCTAssertNil(coordinator.protectedReconnectTask)
+        XCTAssertFalse(teardownExecuted)
+
+        gate.open()
+        await coordinator.disconnectSequence?.value
+        XCTAssertTrue(teardownExecuted)
+    }
+
+    func testExecuteConnectDefersWhenDisconnecting() async {
+        let coordinator = ConnectionCoordinator()
+        let gate = DisconnectGate()
+        var teardownFinished = false
+
+        coordinator.enqueueDisconnect { _ in
+            await gate.wait()
+            teardownFinished = true
+        }
+
+        var deferredFired = false
+        coordinator.executeConnect(
+            isDisconnecting: true,
+            deferredFallback: {
+                XCTAssertTrue(teardownFinished)
+                deferredFired = true
+            },
+            prepare: { (true, UUID()) },
+            onWatchdog: { _ in },
+            perform: { _, _ in }
+        )
+
+        XCTAssertFalse(deferredFired)
+        gate.open()
+        await coordinator.disconnectSequence?.value
+        // Allow deferred connect task to resume
+        try? await Task.sleep(for: .milliseconds(20))
+        XCTAssertTrue(deferredFired)
+    }
+
+    func testExecuteProtectedReconnectLoopFiresAndCleansUp() async {
+        let coordinator = ConnectionCoordinator()
+        var scheduledAttempt: Int?
+        var cleanedUp = false
+        var attemptPerformed = false
+
+        coordinator.scheduleProtectedReconnectLoop(
+            immediate: true,
+            onAttemptScheduled: { attempt, delay in
+                scheduledAttempt = attempt
+                XCTAssertEqual(delay, 0)
+                return true
+            },
+            onCleanup: {
+                cleanedUp = true
+            },
+            performAttempt: {
+                attemptPerformed = true
+                return true // Stop loop
+            }
+        )
+
+        XCTAssertEqual(scheduledAttempt, 0)
+        await coordinator.protectedReconnectTask?.value
+        XCTAssertTrue(attemptPerformed)
+        XCTAssertTrue(cleanedUp)
+    }
 }
 
 /// Explicit suspension instead of sleeps: teardown may complete before or after

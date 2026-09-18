@@ -8155,6 +8155,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "tono-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "log",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tono-core",
+ "tono-logging",
+ "tono-service-client",
+ "tono-service-protocol",
+]
+
+[[package]]
 name = "tono-core"
 version = "0.1.0"
 dependencies = [
@@ -8237,6 +8253,18 @@ dependencies = [
  "tokio-tungstenite",
  "ts-rs",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "tono-service-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "log",
+ "parking_lot",
+ "tokio",
+ "tono-logging",
+ "tono-service-protocol",
 ]
 
 [[package]]
@@ -8341,6 +8369,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tono-authenticode",
+ "tono-client",
  "tono-core",
  "tono-draft",
  "tono-i18n",
@@ -8348,6 +8377,7 @@ dependencies = [
  "tono-logger",
  "tono-logging",
  "tono-plugin-core",
+ "tono-service-client",
  "tono-service-protocol",
  "tono-signal",
  "warp",
