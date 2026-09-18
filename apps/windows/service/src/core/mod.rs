@@ -6,14 +6,12 @@ pub use structure::{
     AuthenticatedRequest, AuthenticatedSessionRequest, BootstrapPins, ClashConfig, CoreConfig,
     DirectRuntimeReloadResult, DnsProtectionStatus, FinalizeDirectRuntimeReloadRequest,
     KillSwitchConfig, KillSwitchLockRequest, KillSwitchStatus, KillSwitchStatusMode,
-    MacosKillSwitchConfig, MacosKillSwitchMode, MacosProxyConfig, LEGACY_OWNER_TOKEN_FILE_NAME,
-    OWNER_TOKEN_FILE_NAME,
-    OwnerCredentials, OwnerIdentity, OwnerSessionHandle, OwnerSessionProof, ProtocolInfo,
-    ProtocolVersion, ProxyApplyOutcome, ProxyEndpoint, ProxyProtocol, RemoteProvider,
-    RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, ReplaceProxyEndpointsRequest,
-    RuntimeAsset, RuntimeBundle,
-    LEGACY_SERVICE_PROTOCOL_HEADER, SERVICE_PROTOCOL_HEADER, SESSION_TOKEN_HEX_LEN,
-    ServiceErrorCode, ServiceLifecycleState,
+    LEGACY_OWNER_TOKEN_FILE_NAME, LEGACY_SERVICE_PROTOCOL_HEADER, MacosKillSwitchConfig,
+    MacosKillSwitchMode, MacosProxyConfig, OWNER_TOKEN_FILE_NAME, OwnerCredentials, OwnerIdentity,
+    OwnerSessionHandle, OwnerSessionProof, ProtocolInfo, ProtocolVersion, ProxyApplyOutcome,
+    ProxyEndpoint, ProxyProtocol, RemoteProvider, RenewDirectRuntimeReloadRequest,
+    ReplaceDirectEndpointsRequest, ReplaceProxyEndpointsRequest, RuntimeAsset, RuntimeBundle,
+    SERVICE_PROTOCOL_HEADER, SESSION_TOKEN_HEX_LEN, ServiceErrorCode, ServiceLifecycleState,
     ServiceOperationKind, ServiceOperationSnapshot, ServiceStatusSnapshot, StageRejection,
     StageRuntimeOutcome, StartClashRequest, StartClashResult, StopClashOptions, StopClashPayload,
     WriterConfig, canonical_direct_endpoints, direct_endpoint_digest,
@@ -28,9 +26,9 @@ pub use paths::{OwnerPaths, ServicePaths, mihomo_ipc_path, service_paths};
 #[cfg(feature = "standalone")]
 mod atomic_file;
 #[cfg(feature = "standalone")]
-mod bootstrap_pins;
-#[cfg(feature = "standalone")]
 mod auth;
+#[cfg(feature = "standalone")]
+mod bootstrap_pins;
 #[cfg(feature = "standalone")]
 mod desired;
 #[cfg(feature = "standalone")]
@@ -65,6 +63,8 @@ mod runtime;
 mod runtime_generation;
 #[cfg(feature = "standalone")]
 mod server;
+#[cfg(all(feature = "standalone", any(windows, test)))]
+mod sing_box;
 #[cfg(feature = "standalone")]
 mod state;
 #[cfg(feature = "standalone")]

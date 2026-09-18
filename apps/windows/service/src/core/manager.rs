@@ -9,7 +9,6 @@ use crate::core::state::set_core_lifecycle_state;
 use crate::core::structure::ServiceLifecycleState;
 use crate::{OwnerIdentity, WriterConfig};
 use anyhow::{Context as _, Result, anyhow};
-use tono_logger::AsyncLogger;
 use compact_str::CompactString;
 use flexi_logger::writers::LogWriter;
 use flexi_logger::{DeferredNow, Record};
@@ -29,6 +28,7 @@ use tokio::{
     sync::{Mutex, oneshot},
     task::JoinHandle,
 };
+use tono_logger::AsyncLogger;
 use tracing::{error, info, warn};
 
 /// Core teardown must not hold the owner lifecycle lock indefinitely. On Windows the Job Object
@@ -305,6 +305,17 @@ fn backoff_delay(attempt: u32, max: Duration) -> Duration {
 }
 
 fn core_args(config: &ClashConfig) -> Vec<String> {
+    #[cfg(all(windows, not(feature = "test")))]
+    {
+        return vec![
+            "run".to_string(),
+            "-D".to_string(),
+            config.core_config.config_dir.clone(),
+            "-c".to_string(),
+            config.core_config.config_path.clone(),
+        ];
+    }
+    #[cfg(any(not(windows), feature = "test"))]
     vec![
         "-d".to_string(),
         config.core_config.config_dir.clone(),
@@ -368,10 +379,24 @@ async fn write_runtime_record_for_config(
     let pid = pid.context("spawned core did not expose a process ID")?;
     let identity = process_identity(pid)?
         .with_context(|| format!("core process {pid} exited before runtime record {context}"))?;
+    #[cfg(all(windows, not(feature = "test")))]
+    let runtime_sha256 = {
+        use sha2::{Digest, Sha256};
+        let bytes = tokio::fs::read(&config.core_config.config_path).await?;
+        Some(
+            Sha256::digest(&bytes)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect(),
+        )
+    };
+    #[cfg(any(not(windows), feature = "test"))]
+    let runtime_sha256 = None;
     write_core_runtime_record(&CoreRuntimeRecord {
         pid,
         ipc_path: config.core_config.core_ipc_path.clone(),
         identity,
+        runtime_sha256,
     })
     .await
     .with_context(|| format!("failed to write core runtime record {context}"))
@@ -657,13 +682,7 @@ impl CoreManager {
         };
         let child_pid = child_guard.id();
 
-        if let Err(error) = secure_core_ipc_socket(
-            config.core_config.core_ipc_path.clone(),
-            owner.clone(),
-            child_pid,
-        )
-        .await
-        {
+        if let Err(error) = secure_running_core(&config, owner.clone(), child_pid).await {
             if let Err(kill_error) = child_guard.kill_now().await {
                 let now_secs = unix_timestamp_secs();
                 *self.running_config.lock().await = Some(config.clone());
@@ -945,12 +964,8 @@ impl CoreManager {
                     {
                         Ok(mut new_guard) => {
                             let new_pid = new_guard.id();
-                            if let Err(error) = secure_core_ipc_socket(
-                                config.core_config.core_ipc_path.clone(),
-                                owner.clone(),
-                                new_pid,
-                            )
-                            .await
+                            if let Err(error) =
+                                secure_running_core(&config, owner.clone(), new_pid).await
                             {
                                 error!("Failed to secure restarted core IPC: {error:#}");
                                 if let Err(kill_error) = new_guard.kill_now().await {
@@ -1154,6 +1169,64 @@ pub async fn run_with_logging(
     owner: &OwnerIdentity,
 ) -> Result<ChildGuard> {
     set_or_update_writer(writer_config).await?;
+
+    #[cfg(all(windows, not(feature = "test")))]
+    let _image_lock = {
+        use std::os::windows::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ)
+            .open(bin_path)
+            .context("cannot lock Core image for authentication")?
+    };
+    #[cfg(all(windows, not(feature = "test")))]
+    {
+        crate::core::runtime_generation::verify_core_binary(std::path::Path::new(bin_path))
+            .map_err(|error| anyhow!("Core authentication failed: {error:?}"))?;
+        if args.first().map(String::as_str) != Some("run") || args.len() != 5 {
+            anyhow::bail!("TONO_SINGBOX_INVALID_LAUNCH");
+        }
+        // Check the exact service-owned file under the same Job containment as run.
+        // Parser diagnostics can contain credentials; discard them rather than logging.
+        crate::core::sing_box::control(&tokio::fs::read_to_string(&args[4]).await?)?;
+        let child = Command::new(bin_path)
+            .arg("check")
+            .args(&args[1..])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()?;
+        let mut guard = ChildGuard {
+            child: Some(child),
+            readers: Vec::new(),
+            job: None,
+        };
+        let pid = guard.id().context("TONO_SINGBOX_CHECK_MISSING_PID")?;
+        match WindowsCoreJob::attach(pid) {
+            Ok(job) => guard.job = Some(job),
+            Err(error) => {
+                guard.kill_now().await?;
+                return Err(error);
+            }
+        }
+        let status = tokio::time::timeout(
+            Duration::from_secs(15),
+            guard
+                .child
+                .as_mut()
+                .context("TONO_SINGBOX_CHECK_MISSING_CHILD")?
+                .wait(),
+        )
+        .await;
+        match status {
+            Ok(Ok(status)) if status.success() => {}
+            _ => {
+                guard.kill_now().await?;
+                anyhow::bail!("TONO_SINGBOX_CHECK_FAILED");
+            }
+        }
+    }
 
     #[cfg(windows)]
     let child = {
@@ -1376,6 +1449,26 @@ fn grant_core_ipc_directory_to_owner(target: &std::path::Path, uid: u32, gid: u3
     result
 }
 
+async fn secure_running_core(
+    config: &ClashConfig,
+    owner: OwnerIdentity,
+    expected_pid: Option<u32>,
+) -> Result<()> {
+    #[cfg(all(windows, not(feature = "test")))]
+    {
+        let _ = owner;
+        crate::core::sing_box::verify_listeners(&config.core_config.config_path, expected_pid).await
+    }
+    #[cfg(any(not(windows), feature = "test"))]
+    secure_core_ipc_socket(
+        config.core_config.core_ipc_path.clone(),
+        owner,
+        expected_pid,
+    )
+    .await
+}
+
+#[cfg(any(not(windows), feature = "test"))]
 async fn secure_core_ipc_socket(
     core_ipc_path: String,
     owner: OwnerIdentity,

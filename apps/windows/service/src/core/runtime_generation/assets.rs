@@ -39,7 +39,7 @@ pub(crate) struct PreparedRuntime {
     runtime: PathBuf,
     stale_runtime_paths: Vec<PathBuf>,
     plan: super::staging::StagePlan,
-    yaml: String,
+    runtime_json: String,
 }
 
 impl PreparedRuntime {
@@ -56,7 +56,7 @@ impl PreparedRuntime {
     /// difference between a restart and a failed one — a geo database the running core has
     /// memory-mapped cannot be replaced at all while it lives.
     pub(crate) async fn materialize(&self) -> Result<(), ServiceError> {
-        materialize_plan(&self.runtime, &self.plan, &self.yaml).await
+        materialize_plan(&self.runtime, &self.plan, &self.runtime_json).await
     }
 
     /// The core started against this generation: retire whatever the old layout left behind.
@@ -250,6 +250,13 @@ pub(crate) async fn prepare_runtime(
     owner: &AuthenticatedOwner,
     bundle: &RuntimeBundle,
 ) -> Result<PreparedRuntime, ServiceError> {
+    #[cfg(all(windows, not(feature = "test")))]
+    let control = crate::core::sing_box::control(&bundle.runtime_json)
+        .map_err(|error| invalid_asset(error.to_string()))?;
+    #[cfg(all(windows, not(feature = "test")))]
+    let ipc_path = format!("tcp://{}", control.address);
+    #[cfg(any(not(windows), feature = "test"))]
+    let ipc_path = mihomo_ipc_path(&owner.identity);
     let core_path = validate_core_path(owner, &bundle.core_path)?;
     let owner_paths = ensure_owner_state_directory(&owner.identity)
         .map_err(|error| invalid_asset(format!("failed to secure owner state root: {error:#}")))?;
@@ -274,7 +281,7 @@ pub(crate) async fn prepare_runtime(
         clash_config: ClashConfig {
             core_config: CoreConfig {
                 core_path: core_path.to_string_lossy().into_owned(),
-                core_ipc_path: mihomo_ipc_path(&owner.identity),
+                core_ipc_path: ipc_path,
                 config_path: runtime
                     .join(RUNTIME_CONFIG_FILE_NAME)
                     .to_string_lossy()
@@ -286,7 +293,7 @@ pub(crate) async fn prepare_runtime(
         runtime: runtime.clone(),
         stale_runtime_paths: Vec::new(),
         plan: plan_runtime_refresh(owner, bundle, &core_path, &runtime).await?,
-        yaml: bundle.yaml.clone(),
+        runtime_json: bundle.runtime_json.clone(),
     };
     prepared.stale_runtime_paths = snapshot_stale_runtime_directories(owner_root, &runtime).await;
     Ok(prepared)
@@ -341,7 +348,7 @@ async fn plan_runtime_refresh(
 async fn materialize_plan(
     runtime: &Path,
     plan: &super::staging::StagePlan,
-    yaml: &str,
+    runtime_json: &str,
 ) -> Result<(), ServiceError> {
     // The plan is shared, so what gets recorded is corrected here: a copy whose source moved
     // under it loses its entry rather than the whole start losing.
@@ -387,7 +394,7 @@ async fn materialize_plan(
 
     let config_path = runtime.join(RUNTIME_CONFIG_FILE_NAME);
     if let Err(error) =
-        super::staging::commit_staged_config(runtime, &config_path, yaml, &manifest).await
+        super::staging::commit_staged_config(runtime, &config_path, runtime_json, &manifest).await
     {
         // The manifest goes in before the configuration, so it can be in place while the
         // configuration is not — claiming a remote cache belongs to a url nothing is serving. Left
@@ -665,12 +672,9 @@ pub(super) fn classify_windows_core_path(
 /// else on disk is never touched.
 #[cfg(windows)]
 pub(crate) fn is_installed_core_image_path(canonical: &Path) -> bool {
-    let is_core_image = canonical
-        .file_name()
-        .is_some_and(|name| {
+    let is_core_image = canonical.file_name().is_some_and(|name| {
             let name = name.to_string_lossy();
-            name.eq_ignore_ascii_case("tono-core.exe")
-                || name.eq_ignore_ascii_case("verge-mihomo.exe")
+        name.eq_ignore_ascii_case("tono-core.exe") || name.eq_ignore_ascii_case("verge-mihomo.exe")
         });
     is_core_image && is_permitted_windows_core_location(canonical)
 }
@@ -791,7 +795,7 @@ pub(super) fn validate_destination(destination: &str) -> Result<PathBuf, Service
 }
 
 /// The file a runtime generation's configuration always lives in.
-pub(super) const RUNTIME_CONFIG_FILE_NAME: &str = "config.yaml";
+pub(super) const RUNTIME_CONFIG_FILE_NAME: &str = "config.json";
 /// The infix every file staging writes as a temporary carries.
 pub(super) const STAGING_TEMP_INFIX: &str = ".staging-";
 
@@ -922,6 +926,7 @@ pub(super) fn destination_key_for(
         // runs after the configuration is committed — would then delete the live configuration.
         [only]
             if only.eq_ignore_ascii_case(RUNTIME_CONFIG_FILE_NAME)
+                || only.eq_ignore_ascii_case("config.yaml")
                 || only.eq_ignore_ascii_case(super::staging::MANIFEST_FILE_NAME) =>
         {
             Err(invalid_asset(format!(
@@ -1596,7 +1601,7 @@ mod tests {
         std::fs::write(app_root.join("mihomo"), b"mock core")?;
         let owner = test_owner(std::fs::canonicalize(&app_root)?);
         let bundle = RuntimeBundle {
-            yaml: "mode: rule\n".to_string(),
+            runtime_json: "mode: rule\n".to_string(),
             assets: vec![RuntimeAsset {
                 source: owner
                     .app_data_root
@@ -1642,7 +1647,7 @@ mod tests {
         let owner = test_owner(std::fs::canonicalize(&app_root)?);
         let core_path = app_root.join("mihomo").to_string_lossy().into_owned();
         let running = RuntimeBundle {
-            yaml: "mode: rule\n".to_string(),
+            runtime_json: "mode: rule\n".to_string(),
             assets: vec![],
             remote_providers: Vec::new(),
             core_path: core_path.clone(),
@@ -1650,7 +1655,7 @@ mod tests {
         let prepared = prepare_and_materialize(&owner, &running).await?;
 
         let payload = RuntimeBundle {
-            yaml: "mode: global\n".to_string(),
+            runtime_json: "mode: global\n".to_string(),
             assets: vec![RuntimeAsset {
                 source: owner
                     .app_data_root
@@ -1695,7 +1700,7 @@ mod tests {
         let owner = test_owner(std::fs::canonicalize(&app_root)?);
         let canonical_source = owner.app_data_root.join("legacy-provider.yaml");
         let bundle = RuntimeBundle {
-            yaml: "mode: rule\n".to_string(),
+            runtime_json: "mode: rule\n".to_string(),
             assets: vec![RuntimeAsset {
                 source: canonical_source.to_string_lossy().into_owned(),
                 destination: "providers/copied.yaml".to_string(),
@@ -1728,14 +1733,14 @@ mod tests {
         std::fs::write(app_root.join("mihomo"), b"mock core")?;
         let owner = test_owner(std::fs::canonicalize(&app_root)?);
         let valid = RuntimeBundle {
-            yaml: "mode: rule\n".to_string(),
+            runtime_json: "mode: rule\n".to_string(),
             assets: vec![],
             remote_providers: Vec::new(),
             core_path: app_root.join("mihomo").to_string_lossy().into_owned(),
         };
         let prepared = prepare_and_materialize(&owner, &valid).await?;
         let invalid = RuntimeBundle {
-            yaml: "mode: global\n".to_string(),
+            runtime_json: "mode: global\n".to_string(),
             assets: vec![RuntimeAsset {
                 source: owner
                     .app_data_root
@@ -1782,7 +1787,7 @@ mod tests {
         std::fs::write(app_root.join("mihomo"), b"mock core")?;
         let owner = test_owner(std::fs::canonicalize(&app_root)?);
         let bundle = RuntimeBundle {
-            yaml: "mode: rule\n".to_string(),
+            runtime_json: "mode: rule\n".to_string(),
             assets: vec![],
             remote_providers: Vec::new(),
             core_path: app_root.join("mihomo").to_string_lossy().into_owned(),
@@ -1821,7 +1826,7 @@ mod tests {
         std::fs::write(app_root.join("mihomo"), b"mock core")?;
         let owner = test_owner(std::fs::canonicalize(&app_root)?);
         let valid = RuntimeBundle {
-            yaml: "mode: rule\n".to_string(),
+            runtime_json: "mode: rule\n".to_string(),
             assets: vec![],
             remote_providers: Vec::new(),
             core_path: app_root.join("mihomo").to_string_lossy().into_owned(),
@@ -1830,7 +1835,7 @@ mod tests {
         std::fs::write(core_owned_state(&prepared), b"the node the user picked")?;
 
         let invalid = RuntimeBundle {
-            yaml: "mode: global\n".to_string(),
+            runtime_json: "mode: global\n".to_string(),
             assets: vec![RuntimeAsset {
                 source: owner
                     .app_data_root
@@ -1870,7 +1875,7 @@ mod tests {
         let owner = test_owner(std::fs::canonicalize(&app_root)?);
         let core_path = app_root.join("mihomo").to_string_lossy().into_owned();
         let running = RuntimeBundle {
-            yaml: "mode: rule\n".to_string(),
+            runtime_json: "mode: rule\n".to_string(),
             assets: vec![],
             remote_providers: Vec::new(),
             core_path: core_path.clone(),
@@ -1878,7 +1883,7 @@ mod tests {
         let prepared = prepare_and_materialize(&owner, &running).await?;
 
         let candidate = RuntimeBundle {
-            yaml: "mode: global\n".to_string(),
+            runtime_json: "mode: global\n".to_string(),
             assets: vec![RuntimeAsset {
                 source: owner
                     .app_data_root
@@ -1934,7 +1939,7 @@ mod tests {
             .to_string_lossy()
             .into_owned();
         let running = RuntimeBundle {
-            yaml: "mode: rule\n".to_string(),
+            runtime_json: "mode: rule\n".to_string(),
             assets: vec![RuntimeAsset {
                 source: asset.clone(),
                 destination: "providers/one.yaml".to_string(),
@@ -1947,7 +1952,7 @@ mod tests {
 
         std::fs::write(app_root.join("provider.yaml"), b"second\n")?;
         let next = RuntimeBundle {
-            yaml: "mode: global\n".to_string(),
+            runtime_json: "mode: global\n".to_string(),
             ..running
         };
         let planned = prepare_runtime(&owner, &next).await?;
@@ -1991,7 +1996,7 @@ mod tests {
         std::fs::write(app_root.join("mihomo"), b"mock core")?;
         let owner = test_owner(std::fs::canonicalize(&app_root)?);
         let bundle = RuntimeBundle {
-            yaml: "mode: rule\n".to_string(),
+            runtime_json: "mode: rule\n".to_string(),
             assets: vec![RuntimeAsset {
                 source: owner
                     .app_data_root
@@ -2050,7 +2055,7 @@ mod tests {
         std::fs::write(app_root.join("mihomo"), b"mock core")?;
         let owner = test_owner(std::fs::canonicalize(&app_root)?);
         let bundle = RuntimeBundle {
-            yaml: "mode: rule\n".to_string(),
+            runtime_json: "mode: rule\n".to_string(),
             assets: vec![RuntimeAsset {
                 source: owner
                     .app_data_root
@@ -2101,7 +2106,7 @@ mod tests {
         let owner = test_owner(std::fs::canonicalize(&app_root)?);
         let core_path = app_root.join("mihomo").to_string_lossy().into_owned();
         let good = RuntimeBundle {
-            yaml: "mode: rule\n".to_string(),
+            runtime_json: "mode: rule\n".to_string(),
             assets: vec![],
             remote_providers: Vec::new(),
             core_path: core_path.clone(),
@@ -2110,7 +2115,7 @@ mod tests {
 
         let asset_source = owner.app_data_root.join("first");
         let half_bad = RuntimeBundle {
-            yaml: "mode: global\n".to_string(),
+            runtime_json: "mode: global\n".to_string(),
             assets: vec![
                 RuntimeAsset {
                     source: asset_source.to_string_lossy().into_owned(),

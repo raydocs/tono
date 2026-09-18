@@ -3,6 +3,16 @@
 mod common;
 
 use anyhow::{Context as _, Result};
+use serde::Deserialize;
+use serial_test::serial;
+#[cfg(windows)]
+use std::path::PathBuf;
+#[cfg(windows)]
+use std::process::{Child, Command, Stdio};
+#[cfg(windows)]
+use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(windows)]
+use std::time::{Duration, Instant};
 #[cfg(windows)]
 use tono_service_protocol::service_paths;
 use tono_service_protocol::{
@@ -19,16 +29,6 @@ use tono_service_protocol::{
     get_clash_logs as client_get_clash_logs, restore_desired_state,
     set_system_proxy as client_set_system_proxy, update_writer as client_update_writer,
 };
-use serde::Deserialize;
-use serial_test::serial;
-#[cfg(windows)]
-use std::path::PathBuf;
-#[cfg(windows)]
-use std::process::{Child, Command, Stdio};
-#[cfg(windows)]
-use std::sync::atomic::{AtomicU64, Ordering};
-#[cfg(windows)]
-use std::time::{Duration, Instant};
 
 #[cfg(windows)]
 const RUNTIME_LOCK_TARGET_ENV: &str = "SERVICE_IPC_TEST_RUNTIME_LOCK_TARGET";
@@ -253,7 +253,7 @@ fn windows_runtime_bundle(yaml: &str) -> Result<RuntimeBundle> {
         "missing mock_binary at {mock_binary:?}"
     );
     Ok(RuntimeBundle {
-        yaml: yaml.to_owned(),
+        runtime_json: yaml.to_owned(),
         assets: vec![],
         remote_providers: Vec::new(),
         core_path: mock_binary.to_string_lossy().into_owned(),
@@ -520,7 +520,7 @@ async fn same_owner_restart_concurrent_start_and_failed_update_remain_atomic() -
         "missing mock_binary at {mock_binary:?}"
     );
     let bundle = RuntimeBundle {
-        yaml: "mode: rule\n".to_string(),
+        runtime_json: "mode: rule\n".to_string(),
         assets: vec![],
         remote_providers: Vec::new(),
         core_path: mock_binary.to_string_lossy().into_owned(),
@@ -644,7 +644,7 @@ async fn windows_restart_does_not_wait_for_locked_stale_runtime_cleanup() -> Res
         std::fs::create_dir(&stale_generation)?;
         let stale_generation_file = stale_generation.join("stale.lock");
         std::fs::write(&stale_generation_file, b"stale")?;
-        bundle.yaml = "mode: direct\n".to_owned();
+        bundle.runtime_json = "mode: direct\n".to_owned();
         let restart_token = "a2".repeat(32);
         let (_, holder) = start_clash_while_runtime_file_is_locked(
             &credentials,
@@ -665,7 +665,7 @@ async fn windows_restart_does_not_wait_for_locked_stale_runtime_cleanup() -> Res
         std::fs::create_dir(&backup)?;
         let stale_backup_file = backup.join("stale.lock");
         std::fs::write(&stale_backup_file, b"stale")?;
-        bundle.yaml = "mode: global\n".to_owned();
+        bundle.runtime_json = "mode: global\n".to_owned();
         let cleanup_token = "a3".repeat(32);
         let (cleanup_restart, holder) = start_clash_while_runtime_file_is_locked(
             &credentials,
@@ -707,7 +707,7 @@ async fn different_owner_takeover_routes_failure_and_restore_are_isolated() -> R
     let key_b = owner_key(&owner_b.identity);
     let key_c = owner_key(&owner_c.identity);
     let bundle = RuntimeBundle {
-        yaml: "mode: rule\n".to_string(),
+        runtime_json: "mode: rule\n".to_string(),
         assets: vec![],
         remote_providers: Vec::new(),
         core_path: common::test_bin_path("mock_binary")

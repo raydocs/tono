@@ -3,16 +3,16 @@ mod common;
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
-    use tono_service_protocol::{
-        OwnerSessionProof, RuntimeBundle, StartClashRequest, connect, get_status,
-        load_owner_desired_state, owner_key, run_ipc_server, start_clash, stop_clash,
-        stop_ipc_server,
-    };
     use serial_test::serial;
     use std::sync::OnceLock;
     use std::{env, path::PathBuf, process::Command};
     use tokio::task::JoinHandle;
     use tokio::time::{Duration, sleep};
+    use tono_service_protocol::{
+        OwnerSessionProof, RuntimeBundle, StartClashRequest, connect, get_status,
+        load_owner_desired_state, owner_key, run_ipc_server, start_clash, stop_clash,
+        stop_ipc_server,
+    };
     use tracing::info;
 
     use crate::common;
@@ -117,7 +117,7 @@ mod tests {
     async fn step_start_mock_binary() -> OwnerSessionProof {
         let credentials = common::owner_credentials();
         let runtime_bundle = RuntimeBundle {
-            yaml: "mode: rule\n".to_string(),
+            runtime_json: "mode: rule\n".to_string(),
             assets: vec![],
             remote_providers: Vec::new(),
             core_path: bin_path().to_string_lossy().to_string(),

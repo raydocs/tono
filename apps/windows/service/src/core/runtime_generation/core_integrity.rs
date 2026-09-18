@@ -220,12 +220,10 @@ fn pinned_core_digest() -> Option<String> {
 /// Fail-closed in every direction: an unreadable file, an absent pin and a wrong digest are all
 /// errors.
 ///
-/// Reached only from `validate_core_path`, i.e. from `prepare_runtime` and `stage_runtime` — the
-/// App-driven planning path. `CoreManager::start_core` does not call it, so neither the watchdog
-/// respawn nor the boot-time desired-state restore verifies the binary it spawns; both take the
-/// path out of persisted state and run it. Say "on the planning path" rather than "before every
-/// start", which is what this comment used to claim and what `SECURITY.md` repeated.
-pub(super) fn verify_core_binary(core_path: &Path) -> Result<(), ServiceError> {
+/// Called by planning and by the Windows spawn boundary, including watchdog
+/// recovery and desired-state restore. The spawn boundary holds a no-write/no-delete
+/// image handle across verification and process creation.
+pub(crate) fn verify_core_binary(core_path: &Path) -> Result<(), ServiceError> {
     let measured = sha256_hex(core_path).map_err(|error| {
         refused(format!(
             "core binary {core_path:?} could not be read for verification: {error}"
@@ -421,7 +419,11 @@ mod tests {
             PublisherPinVerdict::Mismatched
         );
         assert_eq!(
-            classify_publisher_pin(Some(&format!("AA:{}", "bb".repeat(19))), true, &[pin.clone()]),
+            classify_publisher_pin(
+                Some(&format!("AA:{}", "bb".repeat(19))),
+                true,
+                &[pin.clone()]
+            ),
             PublisherPinVerdict::Mismatched
         );
         assert_eq!(

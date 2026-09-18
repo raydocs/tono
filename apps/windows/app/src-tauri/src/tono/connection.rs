@@ -12,32 +12,30 @@
 //! side effects — no `fail_connect`, no emit, no core action — when it
 //! moved (H1).
 
-mod failure;
-mod stages;
-mod transaction;
 mod cleanup;
 mod controller;
-mod endpoints;
-mod monitor;
-mod probes;
-mod status;
-mod disconnect;
-mod reconnect;
-mod switch;
 mod direct;
+mod disconnect;
+mod endpoints;
+mod failure;
+mod monitor;
 mod platform;
+mod probes;
+mod reconnect;
+mod stages;
+mod status;
+mod switch;
+mod transaction;
 
 // Compatibility surface for existing command and test callers. The transaction
 // and error modules do not import this orchestration facade.
-pub use failure::{
-    BFE_NOT_RUNNING_PREFIX, NODE_OR_CORE_UNREACHABLE_PREFIX,
-    RELEASE_RECONCILING_PREFIX, SERVICE_BUSY_PREFIX,
-    SERVICE_TOO_OLD_PREFIX, TUN_DATA_PLANE_BROKEN_PREFIX, TUN_INGRESS_BROKEN_PREFIX,
-    WFP_ENGINE_WEDGED_PREFIX, is_retryable_lock_error, map_service_ready_error,
-    map_wfp_engine_error,
-};
 #[allow(unused_imports, reason = "retain the existing public error-marker path")]
 pub use failure::SERVICE_NOT_RUNNING_PREFIX;
+pub use failure::{
+    BFE_NOT_RUNNING_PREFIX, NODE_OR_CORE_UNREACHABLE_PREFIX, RELEASE_RECONCILING_PREFIX, SERVICE_BUSY_PREFIX,
+    SERVICE_TOO_OLD_PREFIX, TUN_DATA_PLANE_BROKEN_PREFIX, TUN_INGRESS_BROKEN_PREFIX, WFP_ENGINE_WEDGED_PREFIX,
+    is_retryable_lock_error, map_service_ready_error, map_wfp_engine_error,
+};
 use failure::{CATALOG_NOT_READY_REJECTION, StageFailure, TRANSITION_IN_FLIGHT_REJECTION};
 use stages::run_stages;
 use transaction::ConnectTransaction;
@@ -46,20 +44,20 @@ use transaction::{CONNECT_BUDGET_LEGS, CONNECT_TRANSACTION_TIMEOUT};
 
 use std::{error::Error as _, net::IpAddr, sync::Arc, time::Duration};
 
-use tono_logging::{Type, logging};
-use tono_service_protocol::{
-    KillSwitchConfig, KillSwitchStatus, KillSwitchStatusMode, OwnerSessionProof, ProxyEndpoint,
-    ProxyProtocol, RuntimeBundle, ServiceLifecycleState, ServiceStatusSnapshot, StageRuntimeOutcome,
-};
 use futures::{StreamExt as _, stream::FuturesUnordered};
 use tauri::AppHandle;
-use tono_plugin_core::{MihomoExt as _, models::Protocol};
 use tokio_util::sync::CancellationToken;
 use tono_core::{
     EXIT_GROUP_NAME,
     config::{self, RuntimePorts, build_owned_runtime_with_ports},
     connection::{ConnectStage, ReconnectBackoff},
     node::ValidatedNode,
+};
+use tono_logging::{Type, logging};
+use tono_plugin_core::{MihomoExt as _, models::Protocol};
+use tono_service_protocol::{
+    KillSwitchConfig, KillSwitchStatus, KillSwitchStatusMode, OwnerSessionProof, ProxyEndpoint, ProxyProtocol,
+    RuntimeBundle, ServiceLifecycleState, ServiceStatusSnapshot, StageRuntimeOutcome,
 };
 
 #[cfg(not(windows))]
@@ -76,31 +74,31 @@ use crate::{
 
 pub use crate::tono::connection_health::{
     CORE_MISSING_SUSTAINED_SAMPLES, CoreSample, HEALTH_FAILURE_THRESHOLD, HealthLegs, NETWORK_EVENT_DEBOUNCE,
-    NetworkChangeOutcome, classify_core_sample, connection_loop_continues, core_change_fires,
-    health_threshold_reached, kill_switch_unhealthy, kill_switch_unhealthy_for_monitor,
-    monitor_requires_reconnect, network_event_fires, owned_direct_reload_in_flight,
-    protected_dns_unhealthy, startup_resume_guards_hold, startup_runtime_is_resume_candidate,
+    NetworkChangeOutcome, classify_core_sample, connection_loop_continues, core_change_fires, health_threshold_reached,
+    kill_switch_unhealthy, kill_switch_unhealthy_for_monitor, monitor_requires_reconnect, network_event_fires,
+    owned_direct_reload_in_flight, protected_dns_unhealthy, startup_resume_guards_hold,
+    startup_runtime_is_resume_candidate,
 };
+#[cfg(any(not(windows), test))]
+pub use crate::tono::connection_plan::stop_core_before_release;
 pub use crate::tono::connection_plan::{
     FailurePlan, SelectAction, guard_rejection_is_transient, plan_failure, reconnect_allowed, retry_now_is_noop,
     select_action, sign_out_needs_release, single_flight_begin, stale_exit_needs_release,
 };
-#[cfg(any(not(windows), test))]
-pub use crate::tono::connection_plan::stop_core_before_release;
 pub(crate) use crate::tono::connection_routes::{
-    ANTHROPIC_DESTINATIONS, MAX_DIRECT_SAMPLES, MAX_PROTECTED_ROUTE_SAMPLES,
-    ProtectedDestination, ProtectedRoute, ProtectedRouteAggregate, SampledConnections,
-    PAYMENT_DESTINATIONS, TELEMETRY_DESTINATIONS, TURNSTILE_DESTINATIONS, UPDATE_DESTINATIONS, classify_protected_route,
-    new_direct_samples, observe_protected_routes, protected_destination,
+    ANTHROPIC_DESTINATIONS, MAX_DIRECT_SAMPLES, MAX_PROTECTED_ROUTE_SAMPLES, PAYMENT_DESTINATIONS,
+    ProtectedDestination, ProtectedRoute, ProtectedRouteAggregate, SampledConnections, TELEMETRY_DESTINATIONS,
+    TURNSTILE_DESTINATIONS, UPDATE_DESTINATIONS, classify_protected_route, new_direct_samples,
+    observe_protected_routes, protected_destination,
 };
 
 use cleanup::{ensure_fresh, retire_timed_out_generation};
+pub use controller::close_owned_controller_connection;
 use controller::{
-    CONTROLLER_HTTP_TIMEOUT, CONTROLLER_READY_TIMEOUT, LOCK_ATTEMPTS, LOCK_RETRY_INTERVAL,
-    classify_bfe_state, controller_client, controller_url, dns_listener_conflict_message, ensure_service_ready,
+    CONTROLLER_HTTP_TIMEOUT, CONTROLLER_READY_TIMEOUT, LOCK_ATTEMPTS, LOCK_RETRY_INTERVAL, classify_bfe_state,
+    controller_client, controller_url, dns_listener_conflict_message, ensure_service_ready,
     lock_kill_switch_with_retries, select_exit_group, wait_controller,
 };
-pub use controller::close_owned_controller_connection;
 use endpoints::proxy_endpoints_for;
 pub use endpoints::{proxy_endpoint_of, unique_proxy_endpoints};
 use monitor::{IN_PLACE_RECOVERY_COOLDOWN, NETWORK_MONITOR_INTERVAL, monitor_interval, wechat_paths_changed};
@@ -113,29 +111,28 @@ use probes::{
     EXIT_PROBE_CLIENT_TIMEOUT, EXIT_PROBE_CORE_TIMEOUT_MS, FAKE_IP_LOOKUP_TIMEOUT, POST_LOCK_VERIFY_ROUND_DELAY,
     POST_LOCK_VERIFY_ROUNDS, PostLockVerification, TUN_DATA_PLANE_CONNECT_TIMEOUT, TUN_DATA_PLANE_PROBES,
     TUN_DATA_PLANE_TIMEOUT, TUN_PROBE_STAGGER, VERIFY_LOCK_ATTEMPTS, classify_exhausted_data_plane,
-    classify_post_lock_verification, connect_failure_is_dead_exit, fake_ip_attempt_timeout,
-    fake_ip_verification_error, format_tun_probe_failures, tun_probe_stagger, verify_tun_data_plane,
+    classify_post_lock_verification, connect_failure_is_dead_exit, fake_ip_attempt_timeout, fake_ip_verification_error,
+    format_tun_probe_failures, tun_probe_stagger, verify_tun_data_plane,
 };
 #[cfg(test)]
 use probes::{fake_ip_race_state, tun_dns_proves_fake_ip};
 pub use probes::{is_fake_ip, test_current_server, verify_lock_retry_window};
 
-pub use disconnect::{disconnect, release_explicit};
+use direct::{
+    CLOUD_DNS_QUERY_ATTEMPTS, CLOUD_POLICY_RESOLUTION_TIMEOUT, CapturedTrafficPolicy, ControllerDirectRuleProof,
+    MAX_DIRECT_ENDPOINTS, MIHOMO_PROCESS_PATH_REGEX_TYPE, OptionalDirectResolution, WINDOWS_OPTIONAL_DIRECT_ENABLED,
+    classify_optional_direct_resolution, controller_direct_graph_is_active, controller_dns_status_is_retryable,
+    dns_query_a, dns_query_a_with_retry, expected_controller_direct_rules, prove_service_endpoint_digest,
+    prove_service_reload_mode, validate_direct_reload_result,
+};
+pub use direct::{build_direct_plan, collect_ipv4_literals};
 #[cfg(test)]
 use disconnect::{EXPLICIT_RELEASE_TIMEOUT, SERVICE_LIFECYCLE_TIMEOUT};
-pub use reconnect::{retry_reconnect_now, schedule_reconnect, schedule_startup_resume_if_proven};
-use reconnect::active_runtime_resume_status;
-pub use switch::{selected_node_vanished, switch_selected_node};
-pub use direct::{build_direct_plan, collect_ipv4_literals};
-use direct::{
-    WINDOWS_OPTIONAL_DIRECT_ENABLED, CapturedTrafficPolicy, ControllerDirectRuleProof, MAX_DIRECT_ENDPOINTS,
-    CLOUD_DNS_QUERY_ATTEMPTS, CLOUD_POLICY_RESOLUTION_TIMEOUT, MIHOMO_PROCESS_PATH_REGEX_TYPE,
-    OptionalDirectResolution, classify_optional_direct_resolution, controller_direct_graph_is_active,
-    controller_dns_status_is_retryable, dns_query_a, dns_query_a_with_retry, expected_controller_direct_rules,
-    prove_service_endpoint_digest, prove_service_reload_mode, spawn_optional_direct_after_connected,
-    validate_direct_reload_result,
-};
+pub use disconnect::{disconnect, release_explicit};
 use platform::{detect_physical_interface, is_virtual_uplink_description, write_redacted_copy};
+use reconnect::active_runtime_resume_status;
+pub use reconnect::{retry_reconnect_now, schedule_reconnect, schedule_startup_resume_if_proven};
+pub use switch::{selected_node_vanished, switch_selected_node};
 
 /// Drop the ConnectOk session clock. A new connect attempt is not the session
 /// that last reached ConnectOk, so disconnectOk must not report `elapsedMs`
@@ -158,8 +155,6 @@ const BROWSER_DNS_PREFLIGHT_PREFIX: &str = "TONO_BROWSER_DNS_PREFLIGHT";
 /// connect progress/audit trail. Mihomo's local API normally returns a tiny JSON error; cap the
 /// extracted message in case that shape changes.
 const CONTROLLER_ERROR_DETAIL_LIMIT: usize = 384;
-
-
 
 /// Spawned task futures are boxed into this trait object so a spawner's
 /// async opaque type never embeds the spawned task's (the tasks re-enter
@@ -326,7 +321,18 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle) -> Attempt {
         let _ = crate::core::sysopt::Sysopt::global().reset_sysproxy().await;
     }
 
-    match run_stages(state, app, &node, &nodes, routing.as_ref(), generation, started, &transaction).await {
+    match run_stages(
+        state,
+        app,
+        &node,
+        &nodes,
+        routing.as_ref(),
+        generation,
+        started,
+        &transaction,
+    )
+    .await
+    {
         Ok(()) => Attempt::Connected,
         Err(StageFailure::Stale) => Attempt::Stale,
         Err(StageFailure::TimedOut(err)) => {
@@ -348,14 +354,22 @@ async fn attempt_from_stage_failure(state: &Arc<TonoState>, generation: u64, fai
     }
 }
 
-
 /// §6.1 guards: forced values live in the owned runtime; here we check the
 /// account is ready (H2a — the reconnect path's only account gate), the
 /// catalog is usable, the selection exists and passed admission, and no
 /// transaction is in flight. Pure read — no state changes.
 async fn guard_snapshot(
     state: &Arc<TonoState>,
-) -> Result<(ValidatedNode, Vec<ValidatedNode>, Option<tono_core::CatalogRouting>, u64, CancellationToken), String> {
+) -> Result<
+    (
+        ValidatedNode,
+        Vec<ValidatedNode>,
+        Option<tono_core::CatalogRouting>,
+        u64,
+        CancellationToken,
+    ),
+    String,
+> {
     if state.release_in_progress().await {
         return Err(format!(
             "{RELEASE_RECONCILING_PREFIX}: network protection release is still reconciling; wait before reconnecting"
@@ -396,28 +410,6 @@ async fn guard_snapshot(
     ))
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /// The §6 failure decision table, executing [`plan_failure`]. After arm:
 /// stop the core, keep blocking (restrict to the bootstrap channel),
 /// Protected Offline. Before arm: full release.
@@ -445,13 +437,18 @@ async fn fail_connect(state: &Arc<TonoState>, app: &AppHandle, err: String) -> S
         let plan = plan_failure(armed, session_verified, was_disconnecting);
         let action: &'static str = if was_disconnecting {
             "racedDisconnect"
-        } else if armed && session_verified {
+        } else if armed {
             "keepBlockingAndReconnect"
         } else {
             "fullRelease"
         };
         if plan.mark_armed {
             inner.fsm.mark_kill_switch_armed();
+            if !session_verified {
+                // Do not manufacture a Verified latch. A rejected sing-box runtime
+                // stays protected offline until explicit disconnect or a new attempt.
+                inner.fsm.initial_release_failed();
+            }
         } else if armed && !session_verified && !was_disconnecting {
             // Keep reality visible until the required full release actually succeeds.
             inner.fsm.mark_kill_switch_armed();
@@ -486,10 +483,7 @@ async fn fail_connect(state: &Arc<TonoState>, app: &AppHandle, err: String) -> S
             inner.retry_attempt += 1;
         }
         let node = inner.selected_node.clone();
-        let transport = inner
-            .selected_node
-            .as_deref()
-            .map(tono_core::catalog_transport_of_name);
+        let transport = inner.selected_node.as_deref().map(tono_core::catalog_transport_of_name);
         (plan, stage, action, armed, transport, node)
     };
     let code = failure::stable_error_code(&err).map(str::to_owned);
@@ -538,36 +532,6 @@ async fn fail_connect(state: &Arc<TonoState>, app: &AppHandle, err: String) -> S
     err
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /// Wire key for the kill switch mode in audit records.
 fn kill_switch_mode_key(mode: KillSwitchStatusMode) -> &'static str {
     match mode {
@@ -576,64 +540,6 @@ fn kill_switch_mode_key(mode: KillSwitchStatusMode) -> &'static str {
         KillSwitchStatusMode::Blocked => "blocked",
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 /// Extract the human-readable part of a Mihomo controller error without carrying credentials,
 /// query strings, arbitrary control characters, or an unbounded response into logs/UI state.
@@ -681,52 +587,32 @@ pub fn controller_error_detail(body: &str) -> Option<String> {
     Some(normalized)
 }
 
-
-
-
-
-
-
-
-
-
-
 #[cfg(test)]
 mod tests {
     use super::{
         BFE_NOT_RUNNING_PREFIX, CATALOG_NOT_READY_REJECTION, CLOUD_POLICY_RESOLUTION_TIMEOUT, CONNECT_BUDGET_LEGS,
-        ProtectedDestination, ProtectedRoute, ProtectedRouteAggregate, SampledConnections, classify_bfe_state,
-        classify_protected_route, new_direct_samples, observe_protected_routes, protected_destination,
-        wechat_paths_changed,
         CONNECT_TRANSACTION_TIMEOUT, CONTROLLER_READY_TIMEOUT, CORE_MISSING_SUSTAINED_SAMPLES,
         ControllerDirectRuleProof, CoreSample, EXIT_PROBE_ADVISORY_BUDGET, EXIT_PROBE_CLIENT_TIMEOUT,
-        EXIT_PROBE_CORE_TIMEOUT_MS, EXPLICIT_RELEASE_TIMEOUT, FailurePlan, HEALTH_FAILURE_THRESHOLD, HealthLegs,
-        IN_PLACE_RECOVERY_COOLDOWN,
-        LOCK_ATTEMPTS, LOCK_RETRY_INTERVAL, MAX_DIRECT_ENDPOINTS, NETWORK_EVENT_DEBOUNCE, NETWORK_MONITOR_INTERVAL,
-        POST_LOCK_VERIFY_ROUND_DELAY, POST_LOCK_VERIFY_ROUNDS, RELEASE_RECONCILING_PREFIX, SERVICE_BUSY_PREFIX,
-        NetworkChangeOutcome, SERVICE_LIFECYCLE_TIMEOUT, SERVICE_TOO_OLD_PREFIX, SelectAction,
-        TRANSITION_IN_FLIGHT_REJECTION,
-        FAKE_IP_LOOKUP_TIMEOUT, TUN_DATA_PLANE_CONNECT_TIMEOUT, TUN_DATA_PLANE_PROBES, TUN_DATA_PLANE_TIMEOUT,
-        TUN_PROBE_STAGGER,
-        VERIFY_LOCK_ATTEMPTS,
-        WFP_ENGINE_WEDGED_PREFIX, WINDOWS_OPTIONAL_DIRECT_ENABLED, build_direct_plan, classify_core_sample,
-        collect_ipv4_literals, connection_loop_continues, controller_direct_graph_is_active, controller_error_detail,
-        core_change_fires,
-        dns_listener_conflict_message, expected_controller_direct_rules, format_tun_probe_failures, guard_rejection_is_transient,
-        health_threshold_reached, is_fake_ip, is_retryable_lock_error, kill_switch_unhealthy,
-        kill_switch_unhealthy_for_monitor, map_service_ready_error, owned_direct_reload_in_flight,
-        policy_behavior_change_allows_in_place_recovery,
-        map_wfp_engine_error, monitor_interval, monitor_requires_reconnect, network_event_fires, plan_failure,
-        protected_dns_unhealthy, prove_service_endpoint_digest, prove_service_reload_mode, proxy_endpoint_of,
-        unique_proxy_endpoints,
-        reconnect_allowed, retry_now_is_noop, select_action, sign_out_needs_release, single_flight_begin,
-        stale_exit_needs_release, startup_resume_guards_hold, startup_runtime_is_resume_candidate,
-        fake_ip_attempt_timeout, stop_core_before_release, tun_probe_stagger, validate_direct_reload_result,
-        verify_lock_retry_window,
-    };
-    use tono_service_protocol::{
-        DirectRuntimeReloadResult, DnsProtectionStatus, KillSwitchStatus, KillSwitchStatusMode, OwnerSessionProof,
-        ServiceLifecycleState, ServiceOperationKind, ServiceOperationSnapshot, ServiceStatusSnapshot,
+        EXIT_PROBE_CORE_TIMEOUT_MS, EXPLICIT_RELEASE_TIMEOUT, FAKE_IP_LOOKUP_TIMEOUT, FailurePlan,
+        HEALTH_FAILURE_THRESHOLD, HealthLegs, IN_PLACE_RECOVERY_COOLDOWN, LOCK_ATTEMPTS, LOCK_RETRY_INTERVAL,
+        MAX_DIRECT_ENDPOINTS, NETWORK_EVENT_DEBOUNCE, NETWORK_MONITOR_INTERVAL, NetworkChangeOutcome,
+        POST_LOCK_VERIFY_ROUND_DELAY, POST_LOCK_VERIFY_ROUNDS, ProtectedDestination, ProtectedRoute,
+        ProtectedRouteAggregate, RELEASE_RECONCILING_PREFIX, SERVICE_BUSY_PREFIX, SERVICE_LIFECYCLE_TIMEOUT,
+        SERVICE_TOO_OLD_PREFIX, SampledConnections, SelectAction, TRANSITION_IN_FLIGHT_REJECTION,
+        TUN_DATA_PLANE_CONNECT_TIMEOUT, TUN_DATA_PLANE_PROBES, TUN_DATA_PLANE_TIMEOUT, TUN_PROBE_STAGGER,
+        VERIFY_LOCK_ATTEMPTS, WFP_ENGINE_WEDGED_PREFIX, WINDOWS_OPTIONAL_DIRECT_ENABLED, build_direct_plan,
+        classify_bfe_state, classify_core_sample, classify_protected_route, collect_ipv4_literals,
+        connection_loop_continues, controller_direct_graph_is_active, controller_error_detail, core_change_fires,
+        dns_listener_conflict_message, expected_controller_direct_rules, fake_ip_attempt_timeout,
+        format_tun_probe_failures, guard_rejection_is_transient, health_threshold_reached, is_fake_ip,
+        is_retryable_lock_error, kill_switch_unhealthy, kill_switch_unhealthy_for_monitor, map_service_ready_error,
+        map_wfp_engine_error, monitor_interval, monitor_requires_reconnect, network_event_fires, new_direct_samples,
+        observe_protected_routes, owned_direct_reload_in_flight, plan_failure,
+        policy_behavior_change_allows_in_place_recovery, protected_destination, protected_dns_unhealthy,
+        prove_service_endpoint_digest, prove_service_reload_mode, proxy_endpoint_of, reconnect_allowed,
+        retry_now_is_noop, select_action, sign_out_needs_release, single_flight_begin, stale_exit_needs_release,
+        startup_resume_guards_hold, startup_runtime_is_resume_candidate, stop_core_before_release, tun_probe_stagger,
+        unique_proxy_endpoints, validate_direct_reload_result, verify_lock_retry_window, wechat_paths_changed,
     };
     use std::time::Duration;
     use std::{
@@ -737,13 +623,15 @@ mod tests {
         connection::ConnectionStatus,
         node::{NodeProtocol, ValidatedNode},
     };
+    use tono_service_protocol::{
+        DirectRuntimeReloadResult, DnsProtectionStatus, KillSwitchStatus, KillSwitchStatusMode, OwnerSessionProof,
+        ServiceLifecycleState, ServiceOperationKind, ServiceOperationSnapshot, ServiceStatusSnapshot,
+    };
 
     #[test]
     fn dns_listener_conflict_reports_both_socket_owners_consistently() {
-        let message = dns_listener_conflict_message(
-            Some("tcp address already in use"),
-            Some("udp address already in use"),
-        );
+        let message =
+            dns_listener_conflict_message(Some("tcp address already in use"), Some("udp address already in use"));
         assert!(message.contains("DNS port 127.0.0.1:53 is unavailable"));
         assert!(message.contains("TCP: tcp address already in use"));
         assert!(message.contains("UDP: udp address already in use"));
@@ -828,8 +716,7 @@ mod tests {
         // what keeps a permanently unreachable Service from re-proving the data plane for the
         // whole session and rotating the audit file away.
         assert!(
-            IN_PLACE_RECOVERY_COOLDOWN
-                > NETWORK_MONITOR_INTERVAL * (HEALTH_FAILURE_THRESHOLD + 1),
+            IN_PLACE_RECOVERY_COOLDOWN > NETWORK_MONITOR_INTERVAL * (HEALTH_FAILURE_THRESHOLD + 1),
             "the cooldown must outlast the threshold it is bounding"
         );
     }
@@ -1019,34 +906,24 @@ mod tests {
 
     // ---- C3: a transient verification failure is not "the tunnel never came up" ----
 
-    /// Why the retry has to live inside the transaction: at `checkingExit`/`verifyingTraffic`
-    /// the barrier is armed and locked but `session_verified` is still false, so the failure
-    /// decision table resolves to a full release — and the reconnect gate then refuses to hand
-    /// out a delay, because it requires the very latch the release just cleared.
+    /// A failed native proof must not release the barrier or fabricate verification.
     #[test]
-    fn a_post_lock_failure_would_otherwise_be_a_dead_end() {
+    fn a_post_lock_failure_stays_protected_without_fabricating_verification() {
         assert_eq!(
             plan_failure(true, false, false),
             FailurePlan {
-                mark_armed: false,
-                stop_core: Some(true),
-                restrict_bootstrap: false,
+                mark_armed: true,
+                stop_core: Some(false),
+                restrict_bootstrap: true,
             }
         );
-        // ...and the FSM confirms the dead end: after that release neither
-        // `is_protection_blocked` nor `session_verified` holds, and `next_reconnect_delay`
-        // requires both — so the user lands on NotConnected with nothing scheduled.
         let mut fsm = tono_core::connection::ConnectionFsm::new();
         fsm.begin_connect();
         fsm.mark_kill_switch_armed();
         assert!(!fsm.session_verified(), "the latch is committed after these stages");
-        fsm.connect_failed();
-        assert!(!fsm.status().is_protection_blocked);
-        assert_eq!(
-            fsm.next_reconnect_delay(),
-            None,
-            "nothing retries after a post-lock failure — so the retry must happen before it"
-        );
+        fsm.initial_release_failed();
+        assert!(fsm.status().is_protection_blocked);
+        assert!(!fsm.session_verified());
     }
 
     #[test]
@@ -1068,8 +945,8 @@ mod tests {
     fn exhausted_tun_failure_uses_the_independent_proxy_cross_check() {
         use super::{
             NODE_OR_CORE_UNREACHABLE_PREFIX, TUN_DATA_PLANE_BROKEN_PREFIX, TUN_INGRESS_BROKEN_PREFIX,
-            classify_exhausted_data_plane, connect_failure_is_dead_exit, fake_ip_verification_error,
-            fake_ip_race_state, tun_dns_proves_fake_ip,
+            classify_exhausted_data_plane, connect_failure_is_dead_exit, fake_ip_race_state,
+            fake_ip_verification_error, tun_dns_proves_fake_ip,
         };
 
         let tun = "all real TUN probes timed out".to_string();
@@ -1091,37 +968,23 @@ mod tests {
         );
         assert!(unreachable.starts_with(NODE_OR_CORE_UNREACHABLE_PREFIX));
         assert!(connect_failure_is_dead_exit(&unreachable));
-        assert!(!connect_failure_is_dead_exit(
-            &classify_exhausted_data_plane(Ok(()), "tun timeout".into(), Ok(()))
-        ));
-        assert!(
-            fake_ip_verification_error("no fake-ip in [1.1.1.1]")
-                .contains("Encrypted DNS")
-        );
-        assert!(
-            fake_ip_verification_error("Windows system DNS A query exceeded 5s")
-                .contains("Encrypted DNS")
-        );
-        assert!(
-            !fake_ip_verification_error("Windows DNS worker failed").contains("Encrypted DNS")
-        );
-        assert!(
-            !fake_ip_verification_error("exceeded 5s; TUN DNS: timeout").contains("Encrypted DNS")
-        );
-        assert!(tun_dns_proves_fake_ip(Ok(std::net::Ipv4Addr::new(198, 18, 0, 7))));
+        assert!(!connect_failure_is_dead_exit(&classify_exhausted_data_plane(
+            Ok(()),
+            "tun timeout".into(),
+            Ok(())
+        )));
+        assert!(fake_ip_verification_error("no fake-ip in [1.1.1.1]").contains("Encrypted DNS"));
+        assert!(fake_ip_verification_error("Windows system DNS A query exceeded 5s").contains("Encrypted DNS"));
+        assert!(!fake_ip_verification_error("Windows DNS worker failed").contains("Encrypted DNS"));
+        assert!(!fake_ip_verification_error("exceeded 5s; TUN DNS: timeout").contains("Encrypted DNS"));
+        assert!(tun_dns_proves_fake_ip(Ok(std::net::Ipv4Addr::new(198, 19, 0, 7))));
         assert!(!tun_dns_proves_fake_ip(Ok(std::net::Ipv4Addr::new(1, 1, 1, 1))));
         assert!(!tun_dns_proves_fake_ip(Err("timeout")));
 
-        let fake = std::net::Ipv4Addr::new(198, 18, 0, 7);
+        let fake = std::net::Ipv4Addr::new(198, 19, 0, 7);
         let public = std::net::Ipv4Addr::new(1, 1, 1, 1);
-        assert_eq!(
-            fake_ip_race_state(Some(&Ok(vec![fake])), None),
-            Some(Ok("system"))
-        );
-        assert_eq!(
-            fake_ip_race_state(None, Some(&Ok(fake))),
-            Some(Ok("tun"))
-        );
+        assert_eq!(fake_ip_race_state(Some(&Ok(vec![fake])), None), Some(Ok("system")));
+        assert_eq!(fake_ip_race_state(None, Some(&Ok(fake))), Some(Ok("tun")));
         assert_eq!(
             fake_ip_race_state(Some(&Err("exceeded 2s".into())), None),
             None,
@@ -1175,10 +1038,7 @@ mod tests {
     fn tun_probe_origins_are_staggered_not_bursted() {
         assert_eq!(tun_probe_stagger(0), Duration::ZERO);
         assert_eq!(tun_probe_stagger(1), TUN_PROBE_STAGGER);
-        assert_eq!(
-            tun_probe_stagger(2),
-            TUN_PROBE_STAGGER + TUN_PROBE_STAGGER
-        );
+        assert_eq!(tun_probe_stagger(2), TUN_PROBE_STAGGER + TUN_PROBE_STAGGER);
         assert!(
             tun_probe_stagger(TUN_DATA_PLANE_PROBES.len() - 1) < TUN_DATA_PLANE_CONNECT_TIMEOUT,
             "stagger is only spacing, not a second timeout"
@@ -1224,15 +1084,13 @@ mod tests {
         }
     }
 
-    /// Fail-closed: retrying the checks changes nothing about the decision table. An exhausted
-    /// group still resolves to the same full release an unverified session always did, and a
-    /// verified session still keeps blocking and reconnects.
+    /// Exhausted checks preserve protection for both unverified and verified sessions.
     #[test]
     fn post_lock_retry_does_not_weaken_the_failure_table() {
         assert_eq!(
             plan_failure(true, false, false).stop_core,
-            Some(true),
-            "an unverified session is still fully released once the retries are exhausted"
+            Some(false),
+            "only explicit disconnect releases an armed runtime"
         );
         assert_eq!(
             plan_failure(true, true, false),
@@ -1301,14 +1159,8 @@ mod tests {
         assert!(!wechat_paths_changed(None, &["a".to_string()]));
         assert!(!wechat_paths_changed(Some(&[]), &[]));
         assert!(wechat_paths_changed(Some(&[]), &["a".to_string()]));
-        assert!(wechat_paths_changed(
-            Some(&["a".to_string()][..]),
-            &["b".to_string()]
-        ));
-        assert!(!wechat_paths_changed(
-            Some(&["a".to_string()][..]),
-            &["a".to_string()]
-        ));
+        assert!(wechat_paths_changed(Some(&["a".to_string()][..]), &["b".to_string()]));
+        assert!(!wechat_paths_changed(Some(&["a".to_string()][..]), &["a".to_string()]));
     }
 
     /// disconnectOk elapsedMs is the duration of the current ConnectOk session.
@@ -1361,9 +1213,7 @@ mod tests {
             reality_public_key: String::new(),
             reality_short_id: String::new(),
             protocol: NodeProtocol::Hysteria2,
-            tls_fingerprint: Some(
-                "e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db".to_string(),
-            ),
+            tls_fingerprint: Some("e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db".to_string()),
         }
     }
 
@@ -1462,6 +1312,7 @@ mod tests {
                 active_generation: Some(9),
                 service_state: ServiceLifecycleState::Running,
                 core_pid: Some(1234),
+                runtime_sha256: None,
                 core_generation: 1,
                 core_started_at: Some(1_700_000_000),
                 last_core_exit_reason: None,
@@ -1628,10 +1479,10 @@ mod tests {
     }
 
     #[test]
-    fn fake_ip_range_is_198_18_slash_16() {
-        assert!(is_fake_ip(IpAddr::V4(Ipv4Addr::new(198, 18, 0, 1))));
-        assert!(is_fake_ip(IpAddr::V4(Ipv4Addr::new(198, 18, 255, 254))));
-        assert!(!is_fake_ip(IpAddr::V4(Ipv4Addr::new(198, 19, 0, 1))));
+    fn fake_ip_range_is_disjoint_from_tun_dns() {
+        assert!(is_fake_ip(IpAddr::V4(Ipv4Addr::new(198, 19, 0, 1))));
+        assert!(is_fake_ip(IpAddr::V4(Ipv4Addr::new(198, 19, 255, 254))));
+        assert!(!is_fake_ip(IpAddr::V4(Ipv4Addr::new(198, 18, 0, 2))));
         assert!(!is_fake_ip(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))));
         assert!(!is_fake_ip(IpAddr::V6(Ipv6Addr::LOCALHOST)));
     }
@@ -1691,13 +1542,13 @@ mod tests {
                 restrict_bootstrap: false,
             }
         );
-        // Initial post-arm failure has not crossed the verification barrier: full release.
+        // Initial post-arm failure has not crossed verification: keep protection.
         assert_eq!(
             plan_failure(true, false, false),
             FailurePlan {
-                mark_armed: false,
-                stop_core: Some(true),
-                restrict_bootstrap: false,
+                mark_armed: true,
+                stop_core: Some(false),
+                restrict_bootstrap: true,
             }
         );
         // A raced disconnect owns the release end to end; the failing
@@ -2454,8 +2305,7 @@ mod tests {
         let expected = vec![
             ControllerDirectRuleProof {
                 proxy: "Tono-China-Direct".to_owned(),
-                payload: "((Network,tcp) && (ProcessName,Weixin.exe))"
-                    .to_owned(),
+                payload: "((Network,tcp) && (ProcessName,Weixin.exe))".to_owned(),
             },
             ControllerDirectRuleProof {
                 proxy: "Tono-China-Direct".to_owned(),
@@ -2469,8 +2319,7 @@ mod tests {
             },
             ControllerDirectRuleProof {
                 proxy: "Tono-China-Web-Direct".to_owned(),
-                payload: "((Network,tcp) && (DstPort,443) && (DomainSuffix,baidu.com))"
-                    .to_owned(),
+                payload: "((Network,tcp) && (DstPort,443) && (DomainSuffix,baidu.com))".to_owned(),
             },
         ];
         let proxies = serde_json::json!({
@@ -2514,7 +2363,8 @@ mod tests {
         )
         .unwrap();
         assert!(
-            controller_direct_graph_is_active(&rules, &proxies, &expected[..2], "Ethernet 2", true, false, false,).is_err(),
+            controller_direct_graph_is_active(&rules, &proxies, &expected[..2], "Ethernet 2", true, false, false,)
+                .is_err(),
             "a stale web DIRECT proxy/rule must make read-back fail"
         );
 
@@ -2522,9 +2372,13 @@ mod tests {
         let first_direct = 2 + home_len;
         let last = rules["rules"].as_array().unwrap().len() - 1;
         let mut wrong_order = rules.clone();
-        wrong_order["rules"].as_array_mut().unwrap().swap(first_direct - 1, first_direct);
+        wrong_order["rules"]
+            .as_array_mut()
+            .unwrap()
+            .swap(first_direct - 1, first_direct);
         assert!(
-            controller_direct_graph_is_active(&wrong_order, &proxies, &expected, "Ethernet 2", true, true, false,).is_err(),
+            controller_direct_graph_is_active(&wrong_order, &proxies, &expected, "Ethernet 2", true, true, false,)
+                .is_err(),
             "home process pins must remain ahead of DIRECT selectors"
         );
 
@@ -2532,21 +2386,24 @@ mod tests {
         broad_selector["rules"][first_direct]["payload"] =
             serde_json::json!("((Network,tcp) && (DstPort,443) && (Domain,wxs.qq.com))");
         assert!(
-            controller_direct_graph_is_active(&broad_selector, &proxies, &expected, "Ethernet 2", true, true, false,).is_err(),
+            controller_direct_graph_is_active(&broad_selector, &proxies, &expected, "Ethernet 2", true, true, false,)
+                .is_err(),
             "a DIRECT selector without the exact process condition must fail read-back"
         );
 
         let mut wrong_interface = proxies.clone();
         wrong_interface["proxies"]["Tono-China-Direct"]["interface"] = serde_json::json!("Wi-Fi");
         assert!(
-            controller_direct_graph_is_active(&rules, &wrong_interface, &expected, "Ethernet 2", true, true, false,).is_err(),
+            controller_direct_graph_is_active(&rules, &wrong_interface, &expected, "Ethernet 2", true, true, false,)
+                .is_err(),
             "a same-named DIRECT outbound bound to another interface must fail"
         );
 
         let mut wrong_type = proxies.clone();
         wrong_type["proxies"]["Tono-China-Direct"]["type"] = serde_json::json!("Selector");
         assert!(
-            controller_direct_graph_is_active(&rules, &wrong_type, &expected, "Ethernet 2", true, true, false,).is_err(),
+            controller_direct_graph_is_active(&rules, &wrong_type, &expected, "Ethernet 2", true, true, false,)
+                .is_err(),
             "a same-named non-Direct outbound must fail"
         );
 
@@ -2554,14 +2411,16 @@ mod tests {
         let duplicate = stale_rule["rules"][first_direct].clone();
         stale_rule["rules"].as_array_mut().unwrap().insert(last - 1, duplicate);
         assert!(
-            controller_direct_graph_is_active(&stale_rule, &proxies, &expected, "Ethernet 2", true, true, false,).is_err(),
+            controller_direct_graph_is_active(&stale_rule, &proxies, &expected, "Ethernet 2", true, true, false,)
+                .is_err(),
             "an extra stale or duplicated DIRECT rule must fail exact cardinality"
         );
 
         let mut wrong_fallback = rules.clone();
         wrong_fallback["rules"][last]["proxy"] = serde_json::json!("DIRECT");
         assert!(
-            controller_direct_graph_is_active(&wrong_fallback, &proxies, &expected, "Ethernet 2", true, true, false,).is_err(),
+            controller_direct_graph_is_active(&wrong_fallback, &proxies, &expected, "Ethernet 2", true, true, false,)
+                .is_err(),
             "the final fallback must remain exact Tono-Exit"
         );
     }
@@ -2573,8 +2432,7 @@ mod tests {
         // loopback and the DIRECT pins.
         let expected = vec![ControllerDirectRuleProof {
             proxy: "Tono-China-Direct".to_owned(),
-            payload: "((Network,tcp) && (ProcessName,Weixin.exe))"
-                .to_owned(),
+            payload: "((Network,tcp) && (ProcessName,Weixin.exe))".to_owned(),
         }];
         let proxies = serde_json::json!({
             "proxies": {
@@ -2586,7 +2444,9 @@ mod tests {
         let split_rules = controller_rules_graph(
             "Tono-Claude-Home",
             true,
-            vec![serde_json::json!({"type": "AND", "payload": "((Network,tcp) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"})],
+            vec![
+                serde_json::json!({"type": "AND", "payload": "((Network,tcp) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"}),
+            ],
         );
         controller_direct_graph_is_active(&split_rules, &proxies, &expected, "Ethernet 2", true, false, true)
             .expect("the exact split graph must pass");
@@ -2594,14 +2454,19 @@ mod tests {
         // The same graph must fail when the caller did not stage a split (and vice versa):
         // a split graph silently answering an unsplit proof would hide a stale reload.
         assert!(
-            controller_direct_graph_is_active(&split_rules, &proxies, &expected, "Ethernet 2", true, false, false).is_err(),
+            controller_direct_graph_is_active(&split_rules, &proxies, &expected, "Ethernet 2", true, false, false)
+                .is_err(),
             "a split graph must not satisfy the unsplit proof"
         );
 
         let mut missing_group = proxies.clone();
-        missing_group["proxies"].as_object_mut().unwrap().remove("Tono-Claude-Home");
+        missing_group["proxies"]
+            .as_object_mut()
+            .unwrap()
+            .remove("Tono-Claude-Home");
         assert!(
-            controller_direct_graph_is_active(&split_rules, &missing_group, &expected, "Ethernet 2", true, false, true).is_err(),
+            controller_direct_graph_is_active(&split_rules, &missing_group, &expected, "Ethernet 2", true, false, true)
+                .is_err(),
             "split rules without the Tono-Claude-Home group must fail"
         );
 
@@ -2609,7 +2474,8 @@ mod tests {
         let mut wrong_target = split_rules.clone();
         wrong_target["rules"][domain_index]["proxy"] = serde_json::json!("Tono-Exit");
         assert!(
-            controller_direct_graph_is_active(&wrong_target, &proxies, &expected, "Ethernet 2", true, false, true).is_err(),
+            controller_direct_graph_is_active(&wrong_target, &proxies, &expected, "Ethernet 2", true, false, true)
+                .is_err(),
             "a Claude domain leaking to Tono-Exit must fail"
         );
     }
@@ -2622,8 +2488,7 @@ mod tests {
         // Tono-Home-Residential outbound must not trip it.
         let expected = vec![ControllerDirectRuleProof {
             proxy: "Tono-China-Direct".to_owned(),
-            payload: "((Network,tcp) && (ProcessName,Weixin.exe))"
-                .to_owned(),
+            payload: "((Network,tcp) && (ProcessName,Weixin.exe))".to_owned(),
         }];
         let proxies = serde_json::json!({
             "proxies": {
@@ -2636,7 +2501,9 @@ mod tests {
         let split_rules = controller_rules_graph(
             "Tono-Claude-Home",
             true,
-            vec![serde_json::json!({"type": "AND", "payload": "((Network,tcp) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"})],
+            vec![
+                serde_json::json!({"type": "AND", "payload": "((Network,tcp) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"}),
+            ],
         );
         controller_direct_graph_is_active(&split_rules, &proxies, &expected, "Ethernet 2", true, false, true)
             .expect("the exact socks5 split graph must pass");
@@ -2705,7 +2572,16 @@ mod tests {
                 ports: vec![443],
             },
         ];
-        let (plan, endpoints) = build_direct_plan("Ethernet 2".to_string(), &pins, &web_pins, &media, &suffixes, &node, Vec::new()).unwrap();
+        let (plan, endpoints) = build_direct_plan(
+            "Ethernet 2".to_string(),
+            &pins,
+            &web_pins,
+            &media,
+            &suffixes,
+            &node,
+            Vec::new(),
+        )
+        .unwrap();
         // WeChat TCP tuples deduped: (9.0.0.10, 80|443) +
         // (9.0.0.11, 80|443) = 4; exact web remains separate by host.
         assert_eq!(plan.tcp_wechat_rules.len(), 4);
@@ -2728,9 +2604,15 @@ mod tests {
         assert_eq!(plan.udp_wechat_rules.len(), 2);
         // Policy suffixes are unioned with the reviewed built-ins, sorted and deduplicated.
         let mut expected_suffixes: Vec<_> = tono_core::config::ALWAYS_ADDRESS_FREE_WEB_SUFFIXES
-            .iter().flat_map(|suffix| [80, 443].map(|port| (suffix.to_string(), port))).collect();
-        expected_suffixes.extend([("bilibili.com".to_string(), 80), ("bilibili.com".to_string(), 443),
-            ("baidu.com".to_string(), 80), ("baidu.com".to_string(), 443)]);
+            .iter()
+            .flat_map(|suffix| [80, 443].map(|port| (suffix.to_string(), port)))
+            .collect();
+        expected_suffixes.extend([
+            ("bilibili.com".to_string(), 80),
+            ("bilibili.com".to_string(), 443),
+            ("baidu.com".to_string(), 80),
+            ("baidu.com".to_string(), 443),
+        ]);
         expected_suffixes.sort_unstable();
         expected_suffixes.dedup();
         assert_eq!(plan.web_suffix_rules, expected_suffixes);
@@ -2773,8 +2655,7 @@ mod tests {
             controller_rules.len(),
             plan.tcp_wechat_rules.len()
                 + process_rows
-                + plan.udp_wechat_rules.len()
-                    * tono_core::config::REVIEWED_DIRECT_PROCESS_NAMES.len()
+                + plan.udp_wechat_rules.len() * tono_core::config::REVIEWED_DIRECT_PROCESS_NAMES.len()
                 + plan.tcp_web_rules.len(),
             "controller read-back must require one canonical Mihomo row per generated rule"
         );
@@ -2793,21 +2674,17 @@ mod tests {
     #[test]
     fn bilibili_suffix_is_in_controller_proof_only_with_signed_native_path() {
         let node = node();
-        let pins = vec![
-            (
+        let pins = vec![(
                 "wxs.qq.com".to_string(),
                 vec![std::net::Ipv4Addr::new(9, 0, 0, 10)],
                 vec![443],
-            ),
-        ];
+        )];
         let suffixes = vec![tono_core::policy::PolicyDomain {
             host: "bilibili.com".to_string(),
             ports: vec![80, 443],
         }];
-        let prefix = tono_core::config::wechat_prefix_path_regex(
-            r"C:\Program Files\Tencent\WeChat",
-        )
-        .expect("reviewed prefix");
+        let prefix =
+            tono_core::config::wechat_prefix_path_regex(r"C:\Program Files\Tencent\WeChat").expect("reviewed prefix");
         let (plan, _) = build_direct_plan(
             "Ethernet 2".to_string(),
             &pins,
@@ -2821,13 +2698,11 @@ mod tests {
         let rules = expected_controller_direct_rules(&plan);
         assert!(rules.iter().any(|rule| {
             rule.proxy == tono_core::config::WEB_DIRECT_GROUP_NAME
-                && rule.payload
-                    == "((Network,tcp) && (DstPort,80) && (DomainSuffix,bilibili.com))"
+                && rule.payload == "((Network,tcp) && (DstPort,80) && (DomainSuffix,bilibili.com))"
         }));
         assert!(rules.iter().any(|rule| {
             rule.proxy == tono_core::config::WEB_DIRECT_GROUP_NAME
-                && rule.payload
-                    == "((Network,tcp) && (DstPort,443) && (DomainSuffix,bilibili.com))"
+                && rule.payload == "((Network,tcp) && (DstPort,443) && (DomainSuffix,bilibili.com))"
         }));
         assert!(rules.iter().any(|rule| {
             rule.proxy == tono_core::config::WEB_DIRECT_GROUP_NAME
@@ -2837,10 +2712,7 @@ mod tests {
             assert!(
                 rules.iter().any(|rule| {
                     rule.proxy == tono_core::config::WEB_DIRECT_GROUP_NAME
-                        && rule.payload
-                            == format!(
-                                "((Network,tcp) && (DstPort,443) && (DomainSuffix,{suffix}))"
-                            )
+                        && rule.payload == format!("((Network,tcp) && (DstPort,443) && (DomainSuffix,{suffix}))")
                 }),
                 "{suffix} must be in the controller proof"
             );
@@ -2855,8 +2727,8 @@ mod tests {
             vec![std::net::Ipv4Addr::new(9, 0, 0, 10)],
             vec![443],
         )];
-        let prefix = tono_core::config::wechat_prefix_path_regex(r"C:\Program Files\Tencent\WeChat")
-            .expect("reviewed prefix");
+        let prefix =
+            tono_core::config::wechat_prefix_path_regex(r"C:\Program Files\Tencent\WeChat").expect("reviewed prefix");
         let (plan, _) = build_direct_plan(
             "Ethernet 2".to_string(),
             &pins,
@@ -2960,7 +2832,11 @@ mod tests {
             ]}"#,
         );
         let flagged = new_direct_samples(&other_process, &mut seen);
-        assert_eq!(flagged.len(), 1, "a different process on a seen address is not a duplicate");
+        assert_eq!(
+            flagged.len(),
+            1,
+            "a different process on a seen address is not a duplicate"
+        );
         assert_eq!(flagged[0].process, "evil.exe");
 
         // A domain-routed flow under fake-ip carries a name and no usable address. Recording
@@ -3037,11 +2913,7 @@ mod tests {
                 "Home 01",
                 ProtectedRoute::Blocked,
             ),
-            (
-                r#"{"connections":[{"chains":[]}]}"#,
-                "Home 01",
-                ProtectedRoute::Unknown,
-            ),
+            (r#"{"connections":[{"chains":[]}]}"#, "Home 01", ProtectedRoute::Unknown),
         ];
 
         for (payload, residential_target, expected) in cases {
@@ -3085,7 +2957,10 @@ mod tests {
         assert_eq!(aggregate.blocked, 1);
         assert_eq!(aggregate.unknown, 1);
         assert_eq!(aggregate.invariant_violations(), 2);
-        assert_eq!(aggregate.latest, Some((ProtectedRoute::Unknown, ProtectedDestination::Anthropic)));
+        assert_eq!(
+            aggregate.latest,
+            Some((ProtectedRoute::Unknown, ProtectedDestination::Anthropic))
+        );
 
         assert!(!observe_protected_routes(
             &payload,
@@ -3098,10 +2973,12 @@ mod tests {
 
     #[test]
     fn protected_destination_matching_respects_domain_boundaries() {
-        let protected = sampled(
-            r#"{"connections":[{"metadata":{"host":"API.CLAUDE.AI."}},{"metadata":{"host":"notclaude.ai"}}]}"#,
+        let protected =
+            sampled(r#"{"connections":[{"metadata":{"host":"API.CLAUDE.AI."}},{"metadata":{"host":"notclaude.ai"}}]}"#);
+        assert_eq!(
+            protected_destination(&protected.connections[0]),
+            Some(ProtectedDestination::Anthropic)
         );
-        assert_eq!(protected_destination(&protected.connections[0]), Some(ProtectedDestination::Anthropic));
         assert_eq!(protected_destination(&protected.connections[1]), None);
     }
 
@@ -3155,10 +3032,8 @@ mod tests {
         )
         .expect("plan");
 
-        let permitted: std::collections::BTreeSet<String> = endpoints
-            .iter()
-            .map(|endpoint| format!("{}/32", endpoint.ip))
-            .collect();
+        let permitted: std::collections::BTreeSet<String> =
+            endpoints.iter().map(|endpoint| format!("{}/32", endpoint.ip)).collect();
         assert!(!permitted.is_empty(), "fixture must produce permits");
 
         // Two ways a rule can be covered, and every rule must be covered by one of them:
@@ -3173,8 +3048,7 @@ mod tests {
                 .nth(1)
                 .and_then(|rest| rest.split(')').next())
                 .and_then(|value| value.parse::<u16>().ok());
-            let covered_by_port = port
-                .is_some_and(|port| tono_service_protocol::REVIEWED_DIRECT_PORTS.contains(&port));
+            let covered_by_port = port.is_some_and(|port| tono_service_protocol::REVIEWED_DIRECT_PORTS.contains(&port));
             let pin = rule
                 .payload
                 .split("(IPCIDR,")

@@ -10,9 +10,11 @@ use tono_logging::{Type, logging};
 use tono_plugin_core::{MihomoExt as _, models::Protocol};
 use tono_service_protocol::{KillSwitchStatus, OwnerSessionProof};
 
+use super::failure::{
+    BFE_NOT_RUNNING_PREFIX, SERVICE_TOO_OLD_PREFIX, is_retryable_lock_error, map_service_ready_error,
+};
 use crate::core::service;
 use crate::tono::{audit::AuditEvent, state::TonoState};
-use super::failure::{BFE_NOT_RUNNING_PREFIX, SERVICE_TOO_OLD_PREFIX, is_retryable_lock_error, map_service_ready_error};
 
 /// §6.4: controller readiness poll budget. Mihomo's controller is usually up within a few
 /// hundred milliseconds, so the first polls run on a tight 50 ms grid before falling back to
@@ -109,9 +111,7 @@ pub(super) fn query_bfe_state() -> Result<(bool, String), String> {
 pub(super) async fn ensure_service_ready() -> Result<(), String> {
     // `tono_service_ready_or_repair`: an unprotected App quit stops the SCM service, so the
     // first connect afterwards revives it through the established install/repair entry.
-    service::tono_service_ready_or_repair()
-        .await
-        .map_err(|err| {
+    service::tono_service_ready_or_repair().await.map_err(|err| {
             // Ask BFE before answering. TonoService is AutoStart with a hard BFE dependency, so
             // when BFE is off the SCM refuses to start it and does not retry — a reboot does not
             // help either. `preflight_bfe` already knows how to say that, but it runs later in
@@ -323,10 +323,7 @@ pub(super) async fn preflight_dns_listener() -> Result<(), String> {
             (tcp, udp) => {
                 let tcp_error = tcp.err().map(|error| error.to_string());
                 let udp_error = udp.err().map(|error| error.to_string());
-                last_error = dns_listener_conflict_message(
-                    tcp_error.as_deref(),
-                    udp_error.as_deref(),
-                );
+                last_error = dns_listener_conflict_message(tcp_error.as_deref(), udp_error.as_deref());
                 if attempt + 1 < ATTEMPTS {
                     tokio::time::sleep(INTERVAL).await;
                 }
@@ -341,7 +338,7 @@ pub(super) async fn preflight_dns_listener() -> Result<(), String> {
     Ok(())
 }
 
-/// §6.4: poll the mihomo controller `/version` for at most 15 seconds. Each localhost request is
+/// §6.4: poll the pinned sing-box controller `/version` for at most 15 seconds. Each localhost request is
 /// independently bounded as well, so a half-open socket cannot multiply the whole-stage budget.
 pub(super) async fn wait_controller(secret: &str, controller_port: u16) -> Result<(), String> {
     let client = controller_client(CONTROLLER_HTTP_TIMEOUT)?;
@@ -359,7 +356,24 @@ pub(super) async fn wait_controller(secret: &str, controller_port: u16) -> Resul
         )
         .await
         {
-            Ok(Ok(response)) if response.status().is_success() => return Ok(()),
+            Ok(Ok(response)) if response.status().is_success() => {
+                let identity: serde_json::Value = serde_json::from_str(include_str!("../../../core-identity.json"))
+                    .map_err(|_| "invalid embedded Core identity".to_owned())?;
+                let expected = format!("sing-box {}", identity["tonoCoreVersion"].as_str().unwrap_or_default());
+                let body = tokio::time::timeout(
+                    deadline
+                        .saturating_duration_since(tokio::time::Instant::now())
+                        .min(CONTROLLER_POLL_TIMEOUT),
+                    response.json::<serde_json::Value>(),
+                )
+                .await
+                .map_err(|_| "controller version body timed out".to_owned())?
+                .map_err(|_| "invalid controller version body".to_owned())?;
+                if body["version"].as_str() != Some(expected.as_str()) {
+                    return Err("TONO_SINGBOX_CONTROLLER_IDENTITY_MISMATCH".to_owned());
+                }
+                return Ok(());
+            }
             Ok(Ok(response)) => last = format!("controller answered {}", response.status()),
             Ok(Err(err)) => last = err.to_string(),
             Err(_) => last = format!("controller poll exceeded {CONTROLLER_POLL_TIMEOUT:?}"),
@@ -378,7 +392,7 @@ pub(super) async fn wait_controller(secret: &str, controller_port: u16) -> Resul
         };
         tokio::time::sleep(remaining.min(interval)).await;
     }
-    Err(format!("mihomo controller not ready: {last}"))
+    Err(format!("sing-box controller not ready: {last}"))
 }
 
 /// §6.5+§6.6: lock, retrying only while the TUN adapter comes up (≤ 50 × 200 ms between
