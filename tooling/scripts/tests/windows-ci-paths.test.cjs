@@ -20,6 +20,9 @@ for (const event of ['push', 'pull_request']) {
       'apps/windows/service/**',
       'apps/windows/app/**',
       '.github/workflows/windows-ci.yml',
+      '.github/workflows/windows-candidate.yml',
+      '.github/workflows/windows-installer-smoke.yml',
+      'tooling/scripts/test-windows-candidate-install.ps1',
       'tooling/scripts/tests/windows-ci-paths.test.cjs',
       'tooling/scripts/test-windows-qa.ps1',
       'tooling/scripts/tests/windows-qa-guards.Tests.ps1',
@@ -48,4 +51,29 @@ test('the frontend job actually executes this trigger regression test', () => {
 test('the native Service job executes safe QA fault-targeting regressions', () => {
   assert.ok(workflow.jobs.service.steps.some(step =>
     step.shell === 'pwsh' && step.run?.includes('tooling/scripts/tests/windows-qa-guards.Tests.ps1')))
+})
+
+test('Windows runs the dependency journal integration tests explicitly', () => {
+  const job = workflow.jobs['app-rust']
+  assert.equal(job['runs-on'], 'windows-2025')
+  const step = job.steps.find(step => step.run === 'cargo test --locked -p tono-core --test update_journal_atomic')
+  assert.ok(step, 'Tauri tests do not execute dependency integration tests')
+  assert.equal(step['working-directory'], 'apps/windows')
+  assert.equal(step.if, undefined)
+  assert.notEqual(step['continue-on-error'], true)
+})
+
+test('Windows candidate build and installer smoke agree with the product version', () => {
+  const version = JSON.parse(readFileSync(path.join(root, 'apps/windows/app/package.json'), 'utf8')).version
+  const candidate = load(readFileSync(path.join(root, '.github/workflows/windows-candidate.yml'), 'utf8'))
+  const smoke = load(readFileSync(path.join(root, '.github/workflows/windows-installer-smoke.yml'), 'utf8'))
+  const steps = candidate.jobs.build.steps
+  const gate = steps.find(step => step.run?.includes('verify-desktop-version.py'))
+  assert.equal(gate.run.match(/verify-desktop-version\.py --expected (\S+)/)?.[1], version)
+  const artifact = steps.find(step => step.uses?.startsWith('actions/upload-artifact@')).with.name
+  assert.equal(artifact, `tono-windows-${version}-candidate-` + '${{ github.sha }}')
+  const fetch = smoke.jobs['install-repair-uninstall'].steps.find(step => step.run?.includes('gh run download'))
+  assert.ok(fetch.run.includes(`--name "tono-windows-${version}-candidate-$source"`))
+  const installer = readFileSync(path.join(root, 'tooling/scripts/test-windows-candidate-install.ps1'), 'utf8')
+  assert.equal(installer.match(/\$manifest\.version -ne '([^']+)'/)?.[1], version)
 })

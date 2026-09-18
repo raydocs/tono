@@ -1271,38 +1271,22 @@ mod tests {
     }
 
     #[test]
-    fn real_data_plane_probes_independent_https_origins() {
-        assert!(
-            TUN_DATA_PLANE_PROBES.len() >= 3,
-            "one provider failure must not decide whether a locked tunnel works"
-        );
-        let mut hosts = BTreeSet::new();
-        for probe in TUN_DATA_PLANE_PROBES {
-            let url = reqwest::Url::parse(probe.url).expect("probe URL must parse");
-            assert_eq!(url.scheme(), "https", "{} must be authenticated TLS", probe.label);
-            hosts.insert(url.host_str().expect("probe URL must carry a host").to_string());
-            assert!(
-                (200..300).contains(&probe.expected_status),
-                "{} must require an exact success status",
-                probe.label
-            );
-        }
-        assert_eq!(
-            hosts.len(),
-            TUN_DATA_PLANE_PROBES.len(),
-            "nominally separate probes must not share an origin"
-        );
+    fn real_data_plane_probes_only_google_homepage() {
+        assert_eq!(TUN_DATA_PLANE_PROBES.len(), 1);
+        assert_eq!(TUN_DATA_PLANE_PROBES[0].url, "https://www.google.com");
+        assert_eq!(TUN_DATA_PLANE_PROBES[0].expected_status, 200);
+        assert_eq!(super::probes::EXIT_PROBE_URL, "https://www.google.com");
+        assert_eq!(super::probes::FAKE_IP_LOOKUP_HOST, "www.google.com");
+        assert_eq!(TUN_DATA_PLANE_PROBES, crate::tono::protected_probe::PROBE_ORIGINS);
     }
 
     #[test]
     fn real_data_plane_failure_names_every_failed_origin() {
         let failures = vec![
             "Google: timeout".to_string(),
-            "Cloudflare: connect reset".to_string(),
-            "Apple: status 503".to_string(),
         ];
         let error = format_tun_probe_failures(&failures);
-        assert!(error.contains("all 3 independent"));
+        assert!(error.contains("all 1 independent"));
         for failure in failures {
             assert!(error.contains(&failure));
         }

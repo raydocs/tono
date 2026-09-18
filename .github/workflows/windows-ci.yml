@@ -25,6 +25,9 @@ on:
       - apps/windows/service/**
       - apps/windows/app/**
       - .github/workflows/windows-ci.yml
+      - .github/workflows/windows-candidate.yml
+      - .github/workflows/windows-installer-smoke.yml
+      - tooling/scripts/test-windows-candidate-install.ps1
       - tooling/scripts/tests/windows-ci-paths.test.cjs
       - tooling/scripts/test-windows-qa.ps1
       - tooling/scripts/tests/windows-qa-guards.Tests.ps1
@@ -43,6 +46,9 @@ on:
       - apps/windows/service/**
       - apps/windows/app/**
       - .github/workflows/windows-ci.yml
+      - .github/workflows/windows-candidate.yml
+      - .github/workflows/windows-installer-smoke.yml
+      - tooling/scripts/test-windows-candidate-install.ps1
       - tooling/scripts/tests/windows-ci-paths.test.cjs
       - tooling/scripts/test-windows-qa.ps1
       - tooling/scripts/tests/windows-qa-guards.Tests.ps1
@@ -171,6 +177,11 @@ jobs:
       - name: Test the Tauri crate
         working-directory: apps/windows/app/src-tauri
         run: cargo test --locked
+
+      # Cargo does not execute dependency integration tests with the Tauri suite.
+      - name: Test update journal atomic writes on Windows
+        working-directory: apps/windows
+        run: cargo test --locked -p tono-core --test update_journal_atomic
 
   service:
     runs-on: windows-2025
