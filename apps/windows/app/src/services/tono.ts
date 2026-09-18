@@ -566,6 +566,11 @@ export interface TonoDiagnosticsReceipt {
 export interface TonoLocalDiagnosticsReport extends TonoDiagnosticsReport {
   localEvidence?: {
     status: 'collected'
+    appBuild?: string | null
+    expectedCoreVersion?: string | null
+    reportedCoreVersion?: string | null
+    reportedExitProtocol?: string | null
+    selectedProtocol?: string | null
     connectionGeneration: number
     controllerGeneration: number
     failureAtMs: number | null
@@ -676,6 +681,11 @@ export const formatTonoDiagnostics = (
     ...(local
       ? [
           'Local evidence (Copy details only; not included in cloud upload):',
+          `App build: ${local.appBuild ?? '(unknown)'}`,
+          `Bundled Core expectation: ${local.expectedCoreVersion ?? '(unknown)'}`,
+          `Controller-reported Core version: ${local.reportedCoreVersion ?? '(unavailable; not verified)'}`,
+          `Controller-selected exit protocol: ${local.reportedExitProtocol ?? '(unavailable; not verified)'}; not proof of handshake`,
+          `Selected catalog protocol: ${local.selectedProtocol ?? '(unknown)'}; not proof of runtime handshake`,
           `Connection generation (process-local): ${local.connectionGeneration}`,
           `Controller generation (process-local): ${local.controllerGeneration}`,
           `Failure at (UTC): ${local.failureAtMs == null ? '(none)' : new Date(local.failureAtMs).toISOString()}`,

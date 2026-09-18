@@ -344,6 +344,13 @@ pub(super) async fn run_stages(
         inner.controller_generation = inner.controller_generation.wrapping_add(1);
         inner.fsm.mark_session_verified();
         inner.fsm.connect_succeeded().map_err(StageFailure::error)?;
+        if let Err(error) = crate::tono::state::save_successful_selection(
+            &inner.catalog_dir, &node.name,
+            inner.attempt_history.current.as_ref().and_then(|attempt| attempt.catalog_revision).unwrap_or(-1),
+            commands::epoch_millis(),
+        ) {
+            logging!(warn, Type::Service, "Tono: could not retain successful selection: {error}");
+        }
         crate::tono::update_handoff::commit_if_verified(env!("CARGO_PKG_VERSION"));
         inner.exit_ip = None;
         inner.exit_org = None;

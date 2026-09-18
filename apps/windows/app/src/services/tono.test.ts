@@ -434,6 +434,11 @@ describe('stable diagnostic copy', () => {
         connectionGeneration: 7,
         controllerGeneration: 12,
         failureAtMs: 1712345678000,
+        appBuild: 'abcdef0123456789abcdef0123456789abcdef0123',
+        expectedCoreVersion: 'expected-core',
+        reportedCoreVersion: 'running-core',
+        reportedExitProtocol: 'hysteria2',
+        selectedProtocol: 'vless-reality',
         coreLog: {
           status: 'available',
           inspectedLines: 3,
@@ -444,6 +449,11 @@ describe('stable diagnostic copy', () => {
     })
     expect(copied).toContain('Reported at (UTC): 2024-04-05T19:34:38.901Z')
     expect(copied).toContain('Catalog revision: 54')
+    expect(copied).toContain('App build: abcdef0123456789abcdef0123456789abcdef0123')
+    expect(copied).toContain('Bundled Core expectation: expected-core')
+    expect(copied).toContain('Controller-reported Core version: running-core')
+    expect(copied).toContain('Controller-selected exit protocol: hysteria2')
+    expect(copied).toContain('Selected catalog protocol: vless-reality')
     expect(copied).toContain('Connection generation (process-local): 7')
     expect(copied).toContain('Failure at (UTC): 2024-04-05T19:34:38.000Z')
     expect(copied).toContain('tls_handshake_eof: 2')
