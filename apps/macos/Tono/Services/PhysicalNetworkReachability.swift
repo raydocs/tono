@@ -117,7 +117,9 @@ nonisolated struct PhysicalInterfaceFingerprint: Equatable, Sendable {
             if isUp && isRunning && !isLoopback && !isExcludedInterface(name: name),
                let addr = current.pointee.ifa_addr {
                 let family = addr.pointee.sa_family
-                if family == UInt8(AF_INET) || family == UInt8(AF_INET6) {
+                // Collect stable physical IPv4 addresses; ignore IPv6 temporary
+                // privacy addresses (RFC 4941) to avoid churn false-positives.
+                if family == UInt8(AF_INET) {
                     var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
                     if getnameinfo(
                         addr,

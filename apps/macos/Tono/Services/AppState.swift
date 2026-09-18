@@ -306,6 +306,14 @@ final class AppState {
         updateLiveStreamSubscriptions()
     }
 
+    private(set) var isScreenLocked: Bool = false
+
+    func handleScreenLockChanged(isLocked: Bool) {
+        guard isScreenLocked != isLocked else { return }
+        isScreenLocked = isLocked
+        updateLiveStreamSubscriptions()
+    }
+
     /// Dynamic-store notifications replace the old five-second route and DNS
     /// command polling. Debounce the burst emitted by one macOS transition,
     /// then inspect the committed primary service and root-owned DNS state

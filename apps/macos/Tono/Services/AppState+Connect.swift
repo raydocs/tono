@@ -707,8 +707,7 @@ extension AppState {
         // Cancel any in-progress connect Task. The teardown sequence waits for
         // it to leave the serialized helper actor before issuing stop/disarm.
         let pendingConnect = self.connectionCoordinator.connectTask
-        pendingConnect?.cancel()
-        self.connectionCoordinator.connectTask = nil
+        self.connectionCoordinator.cancelConnectionTasks()
         isConnecting = false
         connectionStage = .preparing
         isDisconnecting = true
@@ -1100,7 +1099,9 @@ extension AppState {
     func updateLiveStreamSubscriptions() {
         guard isConnected, let webSocket else { return }
 
-        if isMainWindowVisible,
+        // Module 6: Screen lock powers down foreground UI traffic charts to save energy,
+        // without touching connectivity health checks, helper monitoring, or pin refresh.
+        if isMainWindowVisible && !isScreenLocked,
            selectedPage == .dashboard || selectedPage == .activity {
             webSocket.startTrafficStream()
         } else {
@@ -1132,8 +1133,8 @@ extension AppState {
         let logsEnabled =
             AppProfile.defaults.object(forKey: SettingsKey.logsEnabled) as? Bool
                 ?? true
-        if localAuditEnabled || claudeTrafficResearchEnabled
-            || (isMainWindowVisible && selectedPage == .logs && logsEnabled) {
+        let uiLogsRequested = isMainWindowVisible && !isScreenLocked && selectedPage == .logs && logsEnabled
+        if localAuditEnabled || claudeTrafficResearchEnabled || uiLogsRequested {
             webSocket.startLogsStream(level: logLevel)
         } else {
             webSocket.stopLogsStream()

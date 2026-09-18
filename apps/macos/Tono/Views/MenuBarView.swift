@@ -29,9 +29,17 @@ struct MenuBarView: View {
         .frame(maxHeight: maximumPopoverHeight)
     }
 
+    static func clampedPopoverHeight(for screenHeight: CGFloat) -> CGFloat {
+        let available = max(120, screenHeight - 80)
+        return min(available, 480)
+    }
+
     private var maximumPopoverHeight: CGFloat {
-        let screenHeight = (NSApp.keyWindow?.screen ?? NSScreen.main)?.visibleFrame.height ?? 600
-        return max(240, min(screenHeight - 80, 480))
+        let mouseLocation = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) })
+            ?? NSScreen.main
+        let screenHeight = screen?.visibleFrame.height ?? 600
+        return Self.clampedPopoverHeight(for: screenHeight)
     }
 
     private var status: MenuBarProtectionStatus {

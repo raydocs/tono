@@ -34,22 +34,24 @@ extension AccountSession {
                 // No account owns this launch, so the cache loaded from disk a
                 // moment ago may not stay installed or selectable.
                 ManagedExitCatalogOwnership.purge()
-                // Signed out: never leave a previous session's kill switch armed.
+                // Signed out: preserve fail-closed protection if a crash recovery requires it.
+                // Disarming PF is strictly reserved for explicit user actions or uncompressed clean states.
                 if !AppProfile.homeExitEnabled {
                     // A force-quit of an older Home-US build may have left its
                     // child daemon behind. Cleanup is local-only and does not
                     // invoke the Tailscale CLI or contact its control plane.
                     try? await sidecar.prepareCloudOnly()
                 }
-                do {
-                    try await PrivilegedRuntimeCoordinator.shared.disarmKillSwitch()
-                } catch {
-                    state = .error(
-                        String(localized: "Tono could not release a protection state left by an earlier session. Run the documented sudo emergency-disarm command, then reopen Tono. \(error.localizedDescription)")
-                    )
-                    return
+                if !shouldResumeProtection {
+                    do {
+                        try await PrivilegedRuntimeCoordinator.shared.disarmKillSwitch()
+                    } catch {
+                        state = .error(
+                            String(localized: "Tono could not release a protection state left by an earlier session. Run the documented sudo emergency-disarm command, then reopen Tono. \(error.localizedDescription)")
+                        )
+                        return
+                    }
                 }
-                shouldResumeProtection = false
                 state = .signedOut
                 await loadAuthMethods()
                 return

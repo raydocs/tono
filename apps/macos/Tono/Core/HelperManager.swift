@@ -1076,18 +1076,35 @@ private extension String {
 enum HelperPathConfinement {
     enum Error: Swift.Error, Equatable {
         case notInAppBundle(String)
+        case pathTraversal(String)
         case cannotSafelyOpen(String)
+        case escapesBundle(String)
     }
 
-    static func isBundleConfined(path: String) -> Bool {
-        path.contains(".app/Contents/")
+    static func isBundleConfined(path: String, bundlePath: String = Bundle.main.bundlePath) -> Bool {
+        guard !path.contains("..") else { return false }
+        let allowedPrefix = bundlePath.hasSuffix("/") ? bundlePath + "Contents/" : bundlePath + "/Contents/"
+        return path.hasPrefix(allowedPrefix)
     }
 
-    static func validateUpgradePath(_ path: String) throws {
-        guard isBundleConfined(path: path) else {
+    static func validateUpgradePath(_ path: String, bundlePath: String = Bundle.main.bundlePath) throws {
+        guard !path.contains("..") else {
+            throw Error.pathTraversal(path)
+        }
+        guard isBundleConfined(path: path, bundlePath: bundlePath) else {
             throw Error.notInAppBundle(path)
         }
-        let fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        var resolved = [CChar](repeating: 0, count: Int(PATH_MAX))
+        guard realpath(path, &resolved) != nil else {
+            throw Error.cannotSafelyOpen(path)
+        }
+        let realPath = String(cString: resolved)
+        let allowedPrefix = bundlePath.hasSuffix("/") ? bundlePath + "Contents/" : bundlePath + "/Contents/"
+        guard realPath.hasPrefix(allowedPrefix) else {
+            throw Error.escapesBundle(path)
+        }
+
+        let fd = open(realPath, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
         guard fd >= 0 else {
             throw Error.cannotSafelyOpen(path)
         }

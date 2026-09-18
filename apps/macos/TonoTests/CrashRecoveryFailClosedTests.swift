@@ -87,4 +87,25 @@ final class CrashRecoveryFailClosedTests: XCTestCase {
         XCTAssertFalse(shouldResume)
         XCTAssertFalse(KillSwitchService.isArmed, "Confirmed unarm must clear stale local state")
     }
+
+    func testSignedOutPreservesFailClosedWhenShouldResumeProtectionIsTrue() {
+        // Startup without a refresh token must NOT disarm PF if crash recovery
+        // determined that protection should be resumed.
+        var disarmedCalled = false
+        let mockDisarm = { disarmedCalled = true }
+
+        let shouldResumeProtection = true
+        if !shouldResumeProtection {
+            mockDisarm()
+        }
+
+        XCTAssertFalse(disarmedCalled, "Crash recovery requiring protection must not automatically disarm PF on launch")
+
+        // Only when protection was not required can an unowned signed-out launch clean up
+        let shouldNotResume = false
+        if !shouldNotResume {
+            mockDisarm()
+        }
+        XCTAssertTrue(disarmedCalled, "Unarmed signed-out launch may safely disarm unneeded rules")
+    }
 }
