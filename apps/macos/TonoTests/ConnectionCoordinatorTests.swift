@@ -326,8 +326,8 @@ final class ConnectionCoordinatorTests: XCTestCase {
             }
         )
 
-        XCTAssertEqual(scheduledAttempt, 0)
         await coordinator.protectedReconnectTask?.value
+        XCTAssertEqual(scheduledAttempt, 0)
         XCTAssertTrue(attemptPerformed)
         XCTAssertTrue(cleanedUp)
     }

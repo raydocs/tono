@@ -68,7 +68,7 @@ P0 recovery -> P1 compiling/tested baseline -> P2 upstream/release integration
 | W3 | Not started: tono-client/service-client crate extraction and CVR runtime-path retirement |
 | W4 | Monaco removed from package.json, lockfile, and theme CSS; locale loading constrained to en/zh with fallback tests. Unused leftover locale JSON files remain on disk but are not loaded |
 | D | Not accepted: desktop structure and native/privileged qualification incomplete |
-| C1/C2 | Partial: Env/auth/catalog/home/product-account/traffic-policy extracted from `index.ts`. Router still in `index.ts`. Worker typecheck + 328 tests pass. Not a deployment acceptance |
+| C1/C2 | Partial: Env/auth/catalog/home/product-account/traffic-policy extracted from `index.ts`. Router still in `index.ts`. Worker typecheck + 890 tests across 43 files pass. Not a deployment acceptance |
 | L1–L4 | Deferred; Linux remains fail-closed and is not a usable/shipped VPN product |
 
 Locked decisions:
@@ -124,7 +124,7 @@ than the workspace floor.
 | New macOS tests | Provider ordering/target preservation; traversal/symlink refusal; process cancellation registration; reconnect delays 2/5/10/20/30; coordinator generation ownership |
 | App Rust (`--features clippy --lib`) | 421 passed after cleanup/controller/probes/monitor extraction, including six paused-clock tests |
 | Service (`--features standalone,client,test --lib`) | 305 passed on Mac; platform/model coverage, not real Windows WFP |
-| Worker typecheck/full Vitest | Passed; 328 tests across eight files |
+| Worker typecheck/full Vitest | Passed; 890 tests across 43 files |
 | Windows frontend | Typecheck, full Vitest, and 84 dev-control/packaging tests passed after upstream merge |
 | Policy signing contract | 4/4 passed; trust key, context and protected host set unchanged |
 | Multi-exit fixture | Both selected exits validated by bundled Mihomo |
