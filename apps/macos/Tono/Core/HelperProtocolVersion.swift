@@ -93,7 +93,9 @@ nonisolated enum HelperProtocolVersion {
     ///   Universal Clipboard, and local network traffic.
     /// - 4.1.0 → 4.2.0: Root helper adds authenticated self-upgrade endpoint
     ///   `/helper/upgrade` to eliminate administrator password prompts on future updates.
-    static let current = "4.2.0"
+    /// - 4.2.0 → 4.3.0: Enforce strict peer bundle confinement and realpath traversal
+    ///   refusal on `/helper/upgrade`.
+    static let current = "4.3.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

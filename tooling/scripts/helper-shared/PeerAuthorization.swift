@@ -106,8 +106,14 @@ struct TonoPeerAuthorizer {
             return nil
         }
 
+        var staticCode: SecStaticCode?
+        guard SecCodeCopyStaticCode(code, SecCSFlags(rawValue: 0), &staticCode) == errSecSuccess,
+              let staticCode else {
+            return nil
+        }
+
         var pathURL: CFURL?
-        guard SecCodeCopyPath(code, SecCSFlags(rawValue: 0), &pathURL) == errSecSuccess,
+        guard SecCodeCopyPath(staticCode, SecCSFlags(rawValue: 0), &pathURL) == errSecSuccess,
               let url = pathURL as URL? else {
             return nil
         }
