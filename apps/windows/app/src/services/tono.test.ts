@@ -452,4 +452,28 @@ describe('stable diagnostic copy', () => {
     expect(formatTonoDiagnostics(report({ catalogRevision: null }))).toContain('Catalog revision: (unknown)')
     expect(formatTonoDiagnostics(report())).not.toContain('Recent Core log')
   })
+
+  it('keeps a previous failed attempt distinct from the current retry and recent logs', () => {
+    const copied = formatTonoDiagnostics({
+      ...report({ selectedServer: 'Tokyo retry', catalogRevision: 55, error: null }),
+      localEvidence: {
+        status: 'collected', connectionGeneration: 8, controllerGeneration: 13,
+        failureAtMs: null,
+        coreLog: { status: 'unavailable', inspectedLines: 0, truncated: false, observations: [] },
+        lastFailedAttempt: {
+          id: 'attempt-A', startedAtMs: 1712345670000, failedAtMs: 1712345678000,
+          selectedServer: 'Buffalo original', transport: 'tcp', catalogRevision: 54,
+          failedStage: 'verifyingTraffic', errorCode: 'TONO_NODE_OR_CORE_UNREACHABLE',
+          steps: [{ key: 'verifyingTraffic', state: 'failed', elapsedMs: 2600 }],
+        },
+      },
+    })
+    expect(copied).toContain('Server: Tokyo retry')
+    expect(copied).toContain('Retained failed attempt (memory only): attempt-A')
+    expect(copied).toContain('Attempt server: Buffalo original; transport=tcp; catalog=54')
+    expect(copied).toContain('Attempt started (UTC): 2024-04-05T19:34:30.000Z')
+    expect(copied).toContain('Attempt failure: verifyingTraffic; code=TONO_NODE_OR_CORE_UNREACHABLE')
+    expect(copied).toContain('verifyingTraffic: failed (2.6s)')
+    expect(copied).toContain('Recent Core log: not correlated to this attempt')
+  })
 })

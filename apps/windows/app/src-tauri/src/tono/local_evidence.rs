@@ -3,6 +3,64 @@
 
 use serde::Serialize;
 
+/// Memory-only attempt identity. No account identifiers, runtime YAML or credentials.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionAttempt {
+    pub id: String,
+    pub started_at_ms: i64,
+    pub selected_server: String,
+    pub transport: &'static str,
+    pub catalog_revision: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FailedAttempt {
+    #[serde(flatten)]
+    pub attempt: ConnectionAttempt,
+    pub failed_at_ms: i64,
+    pub failed_stage: Option<&'static str>,
+    pub error_code: Option<String>,
+    pub steps: Vec<tono_core::auth::DiagnosticsStep>,
+}
+
+#[derive(Default)]
+pub struct AttemptHistory {
+    pub current: Option<ConnectionAttempt>,
+    pub last_failure: Option<FailedAttempt>,
+}
+
+impl AttemptHistory {
+    pub fn begin(
+        &mut self,
+        started_at_ms: i64,
+        selected_server: String,
+        transport: &'static str,
+        catalog_revision: i64,
+    ) -> ConnectionAttempt {
+        let attempt = ConnectionAttempt {
+            id: tono_core::auth::new_installation_id(),
+            started_at_ms,
+            selected_server,
+            transport,
+            catalog_revision: (catalog_revision >= 0).then_some(catalog_revision),
+        };
+        self.current = Some(attempt.clone());
+        attempt
+    }
+
+    pub fn retain(&mut self, failure: FailedAttempt) {
+        if self
+            .current
+            .as_ref()
+            .is_some_and(|current| current.id == failure.attempt.id)
+        {
+            self.last_failure = Some(failure);
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CoreLogEvidence {
@@ -112,6 +170,35 @@ pub async fn collect_core_log() -> CoreLogEvidence {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retry_preserves_failure_identity_and_rejects_a_superseded_writer() {
+        let mut history = AttemptHistory::default();
+        let first = history.begin(1000, "Original city".into(), "tcp", 54);
+        let failed = FailedAttempt {
+            attempt: first.clone(),
+            failed_at_ms: 2000,
+            failed_stage: Some("verifyingTraffic"),
+            error_code: Some("CORE_EXIT_UNREACHABLE".into()),
+            steps: vec![],
+        };
+        history.retain(failed.clone());
+        let second = history.begin(3000, "Retry city".into(), "hy2", 55);
+        assert_ne!(first.id, second.id);
+        let saved = history.last_failure.as_ref().unwrap();
+        assert_eq!(saved.attempt.selected_server, "Original city");
+        assert_eq!(saved.attempt.catalog_revision, Some(54));
+        assert_eq!(saved.failed_at_ms, 2000);
+        history.retain(FailedAttempt {
+            attempt: second,
+            failed_at_ms: 4000,
+            ..failed.clone()
+        });
+        history.retain(failed);
+        assert_eq!(history.last_failure.as_ref().unwrap().failed_at_ms, 4000);
+        history = AttemptHistory::default();
+        assert!(history.current.is_none() && history.last_failure.is_none());
+    }
 
     #[test]
     fn core_observations_are_bounded_whitelisted_counts_not_raw_logs() {

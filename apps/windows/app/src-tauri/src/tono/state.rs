@@ -275,6 +275,8 @@ pub struct TonoInner {
     pub failed_stage: Option<&'static str>,
     pub connect_error: Option<String>,
     pub connect_error_at_ms: Option<i64>,
+    /// Memory-only retained failure, independent of the current retry's UI fields.
+    pub attempt_history: crate::tono::local_evidence::AttemptHistory,
     /// F3: retry bookkeeping — failed attempts so far and the scheduled
     /// reconnect deadline (epoch millis).
     pub retry_attempt: u32,
@@ -531,6 +533,7 @@ impl TonoState {
                 failed_stage: None,
                 connect_error: None,
                 connect_error_at_ms: None,
+                attempt_history: Default::default(),
                 retry_attempt: 0,
                 next_retry_at_ms: None,
                 catalog_failover_tried: std::collections::BTreeSet::new(),
