@@ -23,7 +23,7 @@ macOS SwiftUI          Windows Tauri           Ubuntu desktop (Tauri)
 | `apps/windows/app/` | Windows / future Ubuntu GUI (Tauri) |
 | `apps/windows/service/` | Privileged service (WFP today; nftables for Linux) |
 | `apps/windows/crates/tono-core/` | Portable catalog, policy, connect FSM, auth |
-| `services/control-plane/` | Cloudflare Worker, D1, ops console. Entry is `src/index.ts`; extracted so far: `crypto`, `oidc`, `access`, `ops-timeseries`, `ops-usage-hours`, `errors`, `http`, `catalog-yaml` |
+| `services/control-plane/` | Cloudflare Worker, D1, ops console. Entry is `src/index.ts`; extracted so far: `crypto`, `oidc`, `access`, `ops-timeseries`, `ops-usage-hours`, `errors`, `http`, `catalog-yaml`, … |
 | `services/exit-agent/` | VPS Xray roster + metering |
 | `services/home-agent/` | Tailscale home-exit reporter |
 | `ops-panel/` | SSH quality collector |
