@@ -414,6 +414,7 @@ pub async fn verify_protected_origins(
     connect_timeout: Duration,
     request_timeout: Duration,
     stagger: Duration,
+    recorder: Option<&crate::tono::local_evidence::ProbeRecorder>,
 ) -> Result<ProbeOriginResult, Vec<ProbeOriginResult>> {
     let origins = origin_order();
     let mut in_flight = futures::stream::FuturesUnordered::new();
@@ -422,7 +423,12 @@ pub async fn verify_protected_origins(
             if index > 0 && !stagger.is_zero() {
                 tokio::time::sleep(stagger * index as u32).await;
             }
-            probe_one(origin, connect_timeout, request_timeout).await
+            let result = probe_one(origin, connect_timeout, request_timeout).await;
+            if let Some(recorder) = recorder {
+                let observation = match &result { Ok(value) | Err(value) => value };
+                recorder.record(&observation.origin, result.is_ok(), observation.category.as_str(), observation.actual_status, observation.elapsed_ms as u64);
+            }
+            result
         });
     }
     let mut failures = Vec::new();

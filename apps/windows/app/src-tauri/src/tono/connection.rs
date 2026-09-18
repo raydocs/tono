@@ -402,6 +402,7 @@ async fn retain_attempt_failure(
             failed_at_ms: commands::epoch_millis(),
             failed_stage: inner.fsm.status().stage.map(commands::stage_key),
             error_code: failure::stable_error_code(error).map(str::to_owned),
+            probe_outcomes: attempt_record.probe_outcomes.lock().map(|outcomes| outcomes.clone()).unwrap_or_default(),
             steps: steps
                 .iter()
                 .map(|step| tono_core::auth::DiagnosticsStep {
@@ -1305,6 +1306,37 @@ mod tests {
         for failure in failures {
             assert!(error.contains(&failure));
         }
+    }
+
+    #[tokio::test]
+    async fn loopback_probe_retains_http_failure_without_changing_verdict() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 4096];
+            let _ = stream.read(&mut request).await.unwrap();
+            stream.write_all(b"HTTP/1.1 418 Teapot\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap();
+        });
+        let outcomes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorder = crate::tono::local_evidence::ProbeRecorder { round: 2, path: "loopback", outcomes: outcomes.clone() };
+        let client = reqwest::Client::builder().no_proxy().timeout(std::time::Duration::from_secs(3)).build().unwrap();
+        let probe = super::probes::TunDataPlaneProbe {
+            label: "Apple",
+            url: Box::leak(format!("http://{address}/owned-fixture").into_boxed_str()),
+            expected_status: 200,
+        };
+        let result = super::probes::probe_tun_endpoint(&client, probe, Some(&recorder)).await;
+        assert!(result.unwrap_err().contains("answered 418, expected 200"));
+        server.await.unwrap();
+        let saved = outcomes.lock().unwrap();
+        assert_eq!(saved.len(), 1);
+        assert_eq!((saved[0].round, saved[0].path, saved[0].origin), (2, "loopback", "Apple"));
+        assert!(!saved[0].passed);
+        assert_eq!(saved[0].category, "http");
+        assert_eq!(saved[0].actual_status, Some(418));
+        assert!(!serde_json::to_string(&*saved).unwrap().contains("owned-fixture"));
     }
 
     /// Fail-closed: retrying the checks changes nothing about the decision table. An exhausted
