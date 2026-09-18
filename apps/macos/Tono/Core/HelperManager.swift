@@ -1099,7 +1099,16 @@ enum HelperPathConfinement {
             throw Error.cannotSafelyOpen(path)
         }
         let realPath = String(cString: resolved)
-        let allowedPrefix = bundlePath.hasSuffix("/") ? bundlePath + "Contents/" : bundlePath + "/Contents/"
+
+        var resolvedBundle = [CChar](repeating: 0, count: Int(PATH_MAX))
+        let canonicalBundlePath: String
+        if realpath(bundlePath, &resolvedBundle) != nil {
+            canonicalBundlePath = String(cString: resolvedBundle)
+        } else {
+            canonicalBundlePath = bundlePath
+        }
+
+        let allowedPrefix = canonicalBundlePath.hasSuffix("/") ? canonicalBundlePath + "Contents/" : canonicalBundlePath + "/Contents/"
         guard realPath.hasPrefix(allowedPrefix) else {
             throw Error.escapesBundle(path)
         }

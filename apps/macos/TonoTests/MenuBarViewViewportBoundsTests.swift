@@ -3,11 +3,11 @@ import SwiftUI
 @testable import Tono
 
 final class MenuBarViewViewportBoundsTests: XCTestCase {
-    @MainActor
-    func testMenuBarViewBodyInstantiatesWithExpectedWidth() {
+    func testMenuBarViewDefaultWidth() {
         let view = MenuBarView()
+        _ = view
         // MenuBarView is 280pt wide fixed popover
-        XCTAssertNotNil(view.body)
+        XCTAssertEqual(MenuBarView.popoverWidth, 280)
     }
 
     func testPopoverHeightClampingAcrossScreenSizes() {

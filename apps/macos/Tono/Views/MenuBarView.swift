@@ -4,6 +4,8 @@ import SwiftUI
 /// Menu bar extra: state, current node, one safe action, Open Tono, Quit.
 /// Not a second dashboard — no TUN toggle, IP, DNS, or node list.
 struct MenuBarView: View {
+    static let popoverWidth: CGFloat = 280
+
     @Environment(AppState.self) private var appState
     @Environment(AccountSession.self) private var accountSession
     @Environment(\.openWindow) private var openWindow
@@ -23,9 +25,9 @@ struct MenuBarView: View {
                 quitButton
             }
             .padding(.bottom, 8)
-            .frame(width: 280)
+            .frame(width: Self.popoverWidth)
         }
-        .frame(width: 280)
+        .frame(width: Self.popoverWidth)
         .frame(maxHeight: maximumPopoverHeight)
     }
 
