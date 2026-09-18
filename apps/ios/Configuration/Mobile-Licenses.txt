@@ -1,0 +1,24 @@
+Tono mobile runtime source integration
+
+sing-box v1.15.0-alpha.3, commit 93fff5954390367dd456cad3cbd79be54f8b941f
+Copyright (C) 2022 nekohasekai and contributors. GPL-3.0-or-later.
+https://github.com/SagerNet/sing-box
+https://www.gnu.org/licenses/gpl-3.0.html
+Modified for Tono: leaf DER verification, optional raw OOM profile disable,
+and public packet-flow API. Exact patches and reproducible source recipes:
+https://github.com/raydocs/tono/tree/feat/ios-native-companion/apps/ios
+
+sing-tun, commit 869f0a4d76af32b9ad8cdfa821aee35489d650db
+Copyright (C) 2022 nekohasekai and contributors. GPL-3.0-or-later.
+https://github.com/SagerNet/sing-tun
+Modified for Tono: explicit public packet-flow stack factory.
+
+gomobile v0.1.12, commit b2c30f47825831593d6980af8191527490f9c968
+Copyright The Go Authors. BSD-3-Clause.
+https://github.com/SagerNet/gomobile
+
+The exact upstream LICENSE files accompany build-mobile.py output, along with
+the locked module graph and build receipt. These notices are not a substitute
+for reviewing all transitive licenses, providing corresponding source, or
+resolving GPL/Apple distribution obligations before any distribution.
+This repository change authorizes no App Store, TestFlight or other release.

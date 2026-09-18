@@ -1,0 +1,14 @@
+{
+  "producer": "services/control-plane/src/crypto.ts sha256 (unpadded base64url)",
+  "catalog": {
+    "revision": 7,
+    "yaml": "opaque",
+    "sha256": "bSKYhMEmi7CrMtjaMV0P5S-RRyKL2DCje8n7KKlUlA0"
+  },
+  "policy": {
+    "revision": 8,
+    "json": "{\"version\":3,\"domains\":[],\"mediaEndpoints\":[],\"tcpEndpoints\":[],\"webDomains\":[],\"directSuffixes\":[]}\n",
+    "sha256": "rB_ejqJwIj8OamfVn2_Lt3UzmB3iYABu6XWiiulZMr4",
+    "signature": null
+  }
+}
