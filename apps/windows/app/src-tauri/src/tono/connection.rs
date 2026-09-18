@@ -250,7 +250,7 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle) -> Attempt {
     // F5 single-flight, latched BEFORE any service I/O: rapid repeated
     // clicks admit exactly one attempt to the service probe; the rest exit
     // here with no side effects (the real-machine double-probe this kills).
-    {
+    let attempt_record = {
         let mut inner = state.lock().await;
         let current_generation = inner.connect_generation;
         if !single_flight_begin(&mut inner.fsm, current_generation, generation) {
@@ -279,75 +279,158 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle) -> Attempt {
         inner.optional_direct_skip = None;
         inner.direct_reload_until = None;
         commands::emit_status(app, &commands::status_of(&inner));
-    }
+        let revision = inner.catalog_tracker.current_revision();
+        let name = crate::tono::diagnostics::scrub_text_with(
+            &node.name,
+            &[
+                node.uuid.clone(),
+                node.reality_public_key.clone(),
+                node.reality_short_id.clone(),
+                node.server.to_string(),
+            ],
+        );
+        inner.attempt_history.begin(
+            commands::epoch_millis(),
+            name,
+            node.catalog_transport(),
+            revision,
+        )
+    };
 
     state.audit().log(AuditEvent::ConnectBegin {
         node: node.name.clone(),
         transport: node.catalog_transport(),
     });
 
-    // A residential Web guarantee requires Mihomo to see protected hostnames. Browser-owned DoH
-    // (and ECH layered on it) can hide that identity, so prove Chrome/Edge's effective managed +
-    // local configuration before starting the Service or changing WFP. Ordinary Tono protection
-    // intentionally remains available when the catalog has no residential Claude route.
-    #[cfg(windows)]
-    if routing
-        .as_ref()
-        .is_some_and(|routing| routing.home_socks5.is_some() || routing.home_proxy.is_some())
-    {
+    let outcome = async {
+        // A residential Web guarantee requires Mihomo to see protected hostnames. Browser-owned DoH
+        // (and ECH layered on it) can hide that identity, so prove Chrome/Edge's effective managed +
+        // local configuration before starting the Service or changing WFP. Ordinary Tono protection
+        // intentionally remains available when the catalog has no residential Claude route.
+        #[cfg(windows)]
+        if routing
+            .as_ref()
+            .is_some_and(|routing| routing.home_socks5.is_some() || routing.home_proxy.is_some())
+        {
+            match transaction
+                .wait(
+                    "browser Secure DNS preflight",
+                    crate::tono::browser_dns::verify_residential_browser_dns(),
+                )
+                .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    return Attempt::Failed(format!("{BROWSER_DNS_PREFLIGHT_PREFIX}: {error}"));
+                }
+                Err(failure) => {
+                    return attempt_from_stage_failure(state, generation, &attempt_record, failure)
+                        .await;
+                }
+            }
+        }
+
         match transaction
-            .wait(
-                "browser Secure DNS preflight",
-                crate::tono::browser_dns::verify_residential_browser_dns(),
-            )
+            .wait("service readiness", ensure_service_ready())
             .await
         {
             Ok(Ok(())) => {}
-            Ok(Err(error)) => {
-                return Attempt::Failed(format!("{BROWSER_DNS_PREFLIGHT_PREFIX}: {error}"));
+            Ok(Err(err)) => {
+                // The kill switch may already be armed from a previous session, so this is a
+                // transaction failure, not a guard rejection. `fail_connect` runs the decision
+                // table and (pre-arm) releases the FSM cleanly.
+                return Attempt::Failed(err);
             }
-            Err(failure) => return attempt_from_stage_failure(state, generation, failure).await,
+            Err(failure) => {
+                return attempt_from_stage_failure(state, generation, &attempt_record, failure)
+                    .await;
+            }
+        }
+
+        #[cfg(windows)]
+        {
+            let _ = crate::core::sysopt::Sysopt::global().reset_sysproxy().await;
+        }
+
+        match run_stages(
+            state,
+            app,
+            &node,
+            &nodes,
+            routing.as_ref(),
+            generation,
+            started,
+            &transaction,
+        )
+        .await
+        {
+            Ok(()) => Attempt::Connected,
+            Err(StageFailure::Stale) => Attempt::Stale,
+            Err(StageFailure::TimedOut(err)) => {
+                retain_attempt_failure(state, generation, &attempt_record, &err).await;
+                retire_timed_out_generation(state, generation).await;
+                Attempt::Failed(err)
+            }
+            Err(StageFailure::Error(err)) => Attempt::Failed(err),
         }
     }
-
-    match transaction.wait("service readiness", ensure_service_ready()).await {
-        Ok(Ok(())) => {}
-        Ok(Err(err)) => {
-            // The kill switch may already be armed from a previous session, so this is a
-            // transaction failure, not a guard rejection. `fail_connect` runs the decision
-            // table and (pre-arm) releases the FSM cleanly.
-            return Attempt::Failed(err);
-        }
-        Err(failure) => return attempt_from_stage_failure(state, generation, failure).await,
+    .await;
+    if let Attempt::Failed(error) = &outcome {
+        retain_attempt_failure(state, generation, &attempt_record, error).await;
     }
+    outcome
+}
 
-    #[cfg(windows)]
-    {
-        let _ = crate::core::sysopt::Sysopt::global().reset_sysproxy().await;
-    }
-
-    match run_stages(state, app, &node, &nodes, routing.as_ref(), generation, started, &transaction).await {
-        Ok(()) => Attempt::Connected,
-        Err(StageFailure::Stale) => Attempt::Stale,
-        Err(StageFailure::TimedOut(err)) => {
-            retire_timed_out_generation(state, generation).await;
-            Attempt::Failed(err)
-        }
-        Err(StageFailure::Error(err)) => Attempt::Failed(err),
+async fn retain_attempt_failure(
+    state: &Arc<TonoState>,
+    generation: u64,
+    attempt_record: &crate::tono::local_evidence::ConnectionAttempt,
+    error: &str,
+) {
+    let mut inner = state.lock().await;
+    // Timeouts capture before retiring their generation. Superseded attempts must
+    // not read another transition's steps or overwrite its evidence.
+    if inner.connect_generation == generation {
+        let mut steps = inner.connect_steps.clone();
+        let elapsed = inner
+            .step_started_at
+            .map(|at| at.elapsed().as_millis() as u64)
+            .unwrap_or(0);
+        crate::tono::steps::fail_current(&mut steps, elapsed);
+        let failed = crate::tono::local_evidence::FailedAttempt {
+            attempt: attempt_record.clone(),
+            failed_at_ms: commands::epoch_millis(),
+            failed_stage: inner.fsm.status().stage.map(commands::stage_key),
+            error_code: failure::stable_error_code(error).map(str::to_owned),
+            steps: steps
+                .iter()
+                .map(|step| tono_core::auth::DiagnosticsStep {
+                    key: step.key.to_owned(),
+                    state: crate::tono::steps::state_key(step.state).to_owned(),
+                    elapsed_ms: step.elapsed_ms,
+                })
+                .collect(),
+        };
+        inner.attempt_history.retain(failed);
     }
 }
 
-async fn attempt_from_stage_failure(state: &Arc<TonoState>, generation: u64, failure: StageFailure) -> Attempt {
+async fn attempt_from_stage_failure(
+    state: &Arc<TonoState>,
+    generation: u64,
+    attempt_record: &crate::tono::local_evidence::ConnectionAttempt,
+    failure: StageFailure,
+) -> Attempt {
     match failure {
         StageFailure::Stale => Attempt::Stale,
         StageFailure::TimedOut(error) => {
+            retain_attempt_failure(state, generation, attempt_record, &error).await;
             retire_timed_out_generation(state, generation).await;
             Attempt::Failed(error)
         }
         StageFailure::Error(error) => Attempt::Failed(error),
     }
 }
-
 
 /// §6.1 guards: forced values live in the owned runtime; here we check the
 /// account is ready (H2a — the reconnect path's only account gate), the

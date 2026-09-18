@@ -320,6 +320,7 @@ pub async fn tono_sign_out(state: tauri::State<'_, Arc<TonoState>>, app: AppHand
     inner.fsm.sign_out_or_quit();
     inner.account = None;
     inner.account_state = AccountState::SignedOut;
+    inner.attempt_history = Default::default();
     inner.challenge_id = None;
     inner.controller_secret = None;
     inner.controller_port = None;

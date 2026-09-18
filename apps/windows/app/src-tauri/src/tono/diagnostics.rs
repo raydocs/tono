@@ -115,7 +115,7 @@ const VIRTUAL_ADAPTER_MARKERS: &[(&str, &str)] = &[
 ///
 /// Steps 1 and 3 overlap on purpose: (1) is exact but only covers what the
 /// app happens to hold in memory, (3) is structural and covers the rest.
-fn scrub_text_with(raw: &str, known: &[String]) -> String {
+pub(crate) fn scrub_text_with(raw: &str, known: &[String]) -> String {
     let mut text = raw.to_string();
     for secret in known {
         let secret = secret.trim();

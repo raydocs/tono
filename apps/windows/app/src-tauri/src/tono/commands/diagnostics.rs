@@ -220,6 +220,8 @@ struct LocalDiagnosticsEvidence {
     connection_generation: u64,
     controller_generation: u64,
     failure_at_ms: Option<i64>,
+    current_attempt_id: Option<String>,
+    last_failed_attempt: Option<crate::tono::local_evidence::FailedAttempt>,
     core_log: crate::tono::local_evidence::CoreLogEvidence,
 }
 
@@ -234,6 +236,7 @@ pub async fn tono_local_diagnostics_report(
         inner.connect_generation, inner.controller_generation,
         inner.connect_error_at_ms, inner.catalog_tracker.current_revision(),
         inner.selected_node.clone(), inner.retry_attempt,
+        inner.attempt_history.current.as_ref().map(|attempt| attempt.id.clone()),
     );
     let before = {
         let inner = state.lock().await;
@@ -252,6 +255,8 @@ pub async fn tono_local_diagnostics_report(
             connection_generation: before.0,
             controller_generation: before.1,
             failure_at_ms: before.2,
+            current_attempt_id: before.6,
+            last_failed_attempt: inner.attempt_history.last_failure.clone(),
             core_log,
         },
     })

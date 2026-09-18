@@ -569,6 +569,18 @@ export interface TonoLocalDiagnosticsReport extends TonoDiagnosticsReport {
     connectionGeneration: number
     controllerGeneration: number
     failureAtMs: number | null
+    currentAttemptId?: string | null
+    lastFailedAttempt?: {
+      id: string
+      startedAtMs: number
+      failedAtMs: number
+      selectedServer: string
+      transport: string
+      catalogRevision: number | null
+      failedStage: string | null
+      errorCode: string | null
+      steps: TonoDiagnosticsStep[]
+    } | null
     coreLog: {
       status: string
       inspectedLines: number
@@ -658,6 +670,18 @@ export const formatTonoDiagnostics = (
           `Connection generation (process-local): ${local.connectionGeneration}`,
           `Controller generation (process-local): ${local.controllerGeneration}`,
           `Failure at (UTC): ${local.failureAtMs == null ? '(none)' : new Date(local.failureAtMs).toISOString()}`,
+          `Current attempt ID: ${local.currentAttemptId ?? '(unknown)'}`,
+          ...(local.lastFailedAttempt
+            ? [
+                `Retained failed attempt (memory only): ${local.lastFailedAttempt.id}`,
+                `Attempt started (UTC): ${new Date(local.lastFailedAttempt.startedAtMs).toISOString()}`,
+                `Attempt failed (UTC): ${new Date(local.lastFailedAttempt.failedAtMs).toISOString()}`,
+                `Attempt server: ${local.lastFailedAttempt.selectedServer}; transport=${local.lastFailedAttempt.transport}; catalog=${local.lastFailedAttempt.catalogRevision ?? '(unknown)'}`,
+                `Attempt failure: ${local.lastFailedAttempt.failedStage ?? '(unknown)'}; code=${local.lastFailedAttempt.errorCode ?? '(none)'}`,
+                ...local.lastFailedAttempt.steps.map(step =>
+                  `  - ${step.key}: ${step.state}${step.elapsedMs == null ? '' : ` (${formatTonoElapsed(step.elapsedMs)})`}`),
+              ]
+            : ['Retained failed attempt: (none captured)']),
           'Recent Core log: not correlated to this attempt; not a root-cause diagnosis',
           `Core log status: ${local.coreLog.status}; inspected lines=${local.coreLog.inspectedLines}; truncated=${local.coreLog.truncated}`,
           ...local.coreLog.observations.map(({ code, count }) => `  - ${code}: ${count}`),
