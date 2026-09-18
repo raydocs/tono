@@ -92,7 +92,10 @@ struct MenuBarView: View {
         let name = appState.activeNode?.name ?? appState.proxyService.activeNodeName ?? ""
         guard !name.isEmpty else { return String(localized: "No server selected") }
         let (flag, clean) = ConfigParser.extractFlag(from: name)
-        return "\(nodeRouteTitle(for: name)) · \(nodeRegionCode(flag: flag, name: clean))"
+        let region = nodeRegionCode(flag: flag, name: clean)
+        let flagEmoji = UnicodeCountryFlag.emoji(for: region)
+        let prefix = flagEmoji.map { "\($0) " } ?? ""
+        return "\(prefix)\(nodeRouteTitle(for: name)) · \(region)"
     }
 
     private var busy: Bool {

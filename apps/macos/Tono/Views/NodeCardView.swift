@@ -538,12 +538,7 @@ struct NodeCardView: View {
 
                             HStack(spacing: 6) {
                                 nodeMetaChip(node.protocolType.uppercased(), systemImage: "lock.fill")
-                                Label(
-                                    nodeRegionCode(flag: node.flag, name: node.name),
-                                    systemImage: "globe"
-                                )
-                                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                                .foregroundStyle(.secondary)
+                                nodeRegionChip(flag: node.flag, name: node.name)
                                 if !node.relay.isEmpty {
                                     Text(node.relay)
                                         .font(.system(size: 10, weight: .medium))
@@ -600,6 +595,24 @@ struct NodeCardView: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .background(.white.opacity(colorScheme == .dark ? 0.08 : 0.42), in: Capsule())
+    }
+
+    @ViewBuilder
+    private func nodeRegionChip(flag: String, name: String) -> some View {
+        let region = nodeRegionCode(flag: flag, name: name)
+        if let flagEmoji = UnicodeCountryFlag.emoji(for: region) {
+            HStack(spacing: 4) {
+                Text(flagEmoji)
+                    .font(.system(size: 10))
+                Text(region)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            Label(region, systemImage: "globe")
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+        }
     }
 }
 
