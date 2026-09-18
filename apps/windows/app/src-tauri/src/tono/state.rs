@@ -666,6 +666,28 @@ pub fn selection_path(dir: &std::path::Path) -> std::path::PathBuf {
     dir.join(SELECTION_FILE_NAME)
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SuccessfulSelection {
+    selected: String,
+    revision: i64,
+    verified_at_ms: i64,
+}
+
+/// Historical hint only, never evidence of current reachability or a requested selection.
+pub fn save_successful_selection(dir: &std::path::Path, selected: &str, revision: i64, now: i64) -> Result<()> {
+    let record = SuccessfulSelection { selected: selected.to_owned(), revision, verified_at_ms: now };
+    write_private_file(&dir.join("last-success.json"), &serde_json::to_vec(&record)?)
+}
+
+pub fn load_successful_selection(dir: &std::path::Path, revision: i64, now: i64) -> Option<String> {
+    let record: SuccessfulSelection = serde_json::from_slice(
+        &std::fs::read(dir.join("last-success.json")).ok()?,
+    ).ok()?;
+    let age = now.checked_sub(record.verified_at_ms)?;
+    (revision >= 0 && record.revision == revision && (0..86_400_000).contains(&age)
+        && !record.selected.is_empty() && record.selected.len() <= 128).then_some(record.selected)
+}
+
 /// Persist the selection with owner-only protection (0600 on unix, a
 /// private DACL on Windows). Best-effort by contract: callers log and move
 /// on, a lost selection file only costs one re-pick.
@@ -1034,6 +1056,19 @@ impl Drop for CurrentUserSid {
 mod tests {
     use super::{matching_selected_delay, AccountState, ReleaseOperation};
     use std::{sync::Arc, time::Duration};
+
+    #[test]
+    fn successful_selection_is_private_recent_revision_bound_history() {
+        let dir = std::env::temp_dir().join(format!("tono-success-{}", tono_core::auth::new_installation_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        super::save_successful_selection(&dir, "Tokyo · Fuji", 54, 1000).unwrap();
+        assert_eq!(super::load_successful_selection(&dir, 54, 1001).as_deref(), Some("Tokyo · Fuji"));
+        assert!(super::load_successful_selection(&dir, 55, 1001).is_none());
+        assert!(super::load_successful_selection(&dir, 54, 999).is_none());
+        assert!(super::load_successful_selection(&dir, 54, 1000 + 86_400_000).is_none());
+        assert!(super::load_selection(&dir).is_none(), "success must not overwrite explicit selection");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn account_state_keys_are_stable() {

@@ -217,6 +217,11 @@ pub struct LocalDiagnosticsReport {
 #[serde(rename_all = "camelCase")]
 struct LocalDiagnosticsEvidence {
     status: &'static str,
+    app_build: Option<&'static str>,
+    expected_core_version: Option<String>,
+    reported_core_version: Option<String>,
+    reported_exit_protocol: Option<&'static str>,
+    selected_protocol: Option<&'static str>,
     connection_generation: u64,
     controller_generation: u64,
     failure_at_ms: Option<i64>,
@@ -238,12 +243,45 @@ pub async fn tono_local_diagnostics_report(
         inner.selected_node.clone(), inner.retry_attempt,
         inner.attempt_history.current.as_ref().map(|attempt| attempt.id.clone()),
     );
-    let before = {
+    let (before, controller) = {
         let inner = state.lock().await;
-        identity(&inner)
+        (identity(&inner), inner.controller_port.zip(inner.controller_secret.clone()))
     };
     let report = collect_diagnostics_report(state.inner(), &app).await;
     let core_log = crate::tono::local_evidence::collect_core_log().await;
+    // Authenticated owned-controller response, not a measurement of the executable hash.
+    // Do not use the UI plugin: its context is not installed until Connected.
+    let reported_core_version = tokio::time::timeout(DIAGNOSTICS_PROBE_TIMEOUT, async {
+        let (port, secret) = controller.as_ref()?;
+        let client = reqwest::Client::builder().no_proxy()
+            .redirect(reqwest::redirect::Policy::none()).build().ok()?;
+        let response = client.get(format!("http://127.0.0.1:{port}/version"))
+            .bearer_auth(secret).send().await.ok()?.error_for_status().ok()?;
+        response.json::<tono_plugin_core::models::MihomoVersion>().await.ok().map(|value| value.version)
+    }).await.ok().flatten()
+        .filter(|value| !value.is_empty() && value.len() <= 128
+            && value.bytes().all(|b| b.is_ascii_alphanumeric() || b".-_+".contains(&b)));
+    let reported_exit_protocol = tokio::time::timeout(DIAGNOSTICS_PROBE_TIMEOUT, async {
+        let (port, secret) = controller.as_ref()?;
+        let client = reqwest::Client::builder().no_proxy()
+            .redirect(reqwest::redirect::Policy::none()).build().ok()?;
+        let group = client.get(format!("http://127.0.0.1:{port}/proxies/{}", tono_core::EXIT_GROUP_NAME))
+            .bearer_auth(secret).send().await.ok()?.error_for_status().ok()?
+            .json::<serde_json::Value>().await.ok()?;
+        let name = group.get("now")?.as_str()?;
+        let mut url = reqwest::Url::parse(&format!("http://127.0.0.1:{port}/proxies/")).ok()?;
+        url.path_segments_mut().ok()?.pop_if_empty().push(name);
+        let proxy = client.get(url).bearer_auth(secret).send().await.ok()?.error_for_status().ok()?
+            .json::<serde_json::Value>().await.ok()?;
+        match proxy.get("type")?.as_str()? {
+            "VLESS" => Some("vless"),
+            "Hysteria2" => Some("hysteria2"),
+            _ => None,
+        }
+    }).await.ok().flatten();
+    let expected_core_version = serde_json::from_str::<serde_json::Value>(
+        include_str!("../../../core-identity.json"),
+    ).ok().and_then(|value| value.get("tonoCoreVersion")?.as_str().map(str::to_owned));
     let inner = state.lock().await;
     if identity(&inner) != before {
         return Err("Connection changed while collecting diagnostics; copy details again.".to_string());
@@ -252,6 +290,14 @@ pub async fn tono_local_diagnostics_report(
         report,
         local_evidence: LocalDiagnosticsEvidence {
             status: "collected",
+            app_build: option_env!("GITHUB_SHA").filter(|value| value.len() == 40
+                && value.bytes().all(|b| b.is_ascii_hexdigit())),
+            expected_core_version,
+            reported_core_version,
+            reported_exit_protocol,
+            selected_protocol: inner.selected_node.as_ref().and_then(|name|
+                inner.nodes.iter().find(|node| &node.name == name)
+                    .map(|node| if node.is_hysteria2() { "hysteria2" } else { "vless-reality" })),
             connection_generation: before.0,
             controller_generation: before.1,
             failure_at_ms: before.2,

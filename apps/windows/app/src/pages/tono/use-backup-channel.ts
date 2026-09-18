@@ -45,7 +45,7 @@ export function useManualBackupChannel(
   })
   const hy2Sibling = backupChannelName(
     selectedServer,
-    (servers ?? []).map((server) => server.name),
+    (servers ?? []).filter((server) => server.available).map((server) => server.name),
   )
   // Handshake eof is the usual case. After a protected-offline restart the
   // progress record may have no error left; still offer the sibling rather
