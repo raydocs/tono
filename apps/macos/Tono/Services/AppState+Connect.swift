@@ -600,8 +600,9 @@ extension AppState {
                     }
                 }
             }
-        )
-    }
+        }
+    )
+}
 
     /// Stops Mihomo/TUN. Kill switch is NOT disarmed here — that only happens on
     /// intentional logout / user "turn off protection" so a crash or health failure
@@ -861,8 +862,9 @@ extension AppState {
                     self.disconnectionStartedAt = nil
                 }
             }
-        )
-    }
+        }
+    )
+}
 
     func disconnectAndWait(releaseKillSwitch: Bool = false) async {
         disconnect(releaseKillSwitch: releaseKillSwitch)
