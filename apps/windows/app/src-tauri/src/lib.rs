@@ -175,6 +175,7 @@ mod app_init {
             tono::commands::connection_cmd::tono_connect_progress,
             tono::commands::connection_cmd::tono_retry_now,
             tono::commands::diagnostics::tono_diagnostics_report,
+            tono::commands::diagnostics::tono_local_diagnostics_report,
             tono::commands::diagnostics::tono_upload_diagnostics,
             tono::commands::terminal::tono_check_terminal_env,
             tono::commands::terminal::tono_clear_terminal_proxy_env,

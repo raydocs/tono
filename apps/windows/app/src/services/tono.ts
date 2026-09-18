@@ -562,6 +562,25 @@ export interface TonoDiagnosticsReceipt {
   receivedAt: number | null
 }
 
+/** Local Copy details only. Not part of the cloud diagnostics contract. */
+export interface TonoLocalDiagnosticsReport extends TonoDiagnosticsReport {
+  localEvidence?: {
+    status: 'collected'
+    connectionGeneration: number
+    controllerGeneration: number
+    failureAtMs: number | null
+    coreLog: {
+      status: string
+      inspectedLines: number
+      truncated: boolean
+      observations: { code: string; count: number }[]
+    }
+  }
+}
+
+export const tonoLocalDiagnosticsReport = () =>
+  call<TonoLocalDiagnosticsReport>('tono_local_diagnostics_report')
+
 /** The exact payload an upload would send. Local only — nothing is sent. */
 export const tonoDiagnosticsReport = () =>
   call<TonoDiagnosticsReport>('tono_diagnostics_report')
@@ -578,12 +597,13 @@ export const tonoUploadDiagnostics = () =>
 /**
  * Render a report as the plain text "Copy details" puts on the clipboard.
  *
- * Deliberately the *same object* the upload sends, so what the user can read
- * and what leaves the machine can never drift apart.
+ * The base report matches the upload. Explicit local collection may append
+ * whitelisted Core observations; those are not sent by the upload command.
  */
 export const formatTonoDiagnostics = (
-  report: TonoDiagnosticsReport,
+  report: TonoLocalDiagnosticsReport,
 ): string => {
+  const local = report.localEvidence
   const killSwitch =
     report.killSwitchMode == null
       ? '(unknown)'
@@ -592,11 +612,13 @@ export const formatTonoDiagnostics = (
         : `${report.killSwitchMode} (wanted=${report.killSwitchWanted}, live=${report.killSwitchLive})`
   return [
     `Tono v${report.appVersion} diagnostics`,
+    `Reported at (UTC): ${new Date(report.reportedAtMs).toISOString()}`,
     `OS: ${report.osVersion} (${report.osArch})`,
     `Service protocol: ${report.serviceProtocol ?? '(unknown)'}${
       report.serviceBuild ? ` (build ${report.serviceBuild})` : ''
     }`,
     `Server: ${report.selectedServer ?? '(none)'}`,
+    `Catalog revision: ${report.catalogRevision ?? '(unknown)'}`,
     `UI state: ${report.uiState}`,
     `Account state: ${report.accountState}`,
     `Protection: ${killSwitch}`,
@@ -630,6 +652,18 @@ export const formatTonoDiagnostics = (
     ),
     `Audit log: ${report.auditLogPath}`,
     `Service log (admin only): ${report.serviceLogPath}`,
+    ...(local
+      ? [
+          'Local evidence (Copy details only; not included in cloud upload):',
+          `Connection generation (process-local): ${local.connectionGeneration}`,
+          `Controller generation (process-local): ${local.controllerGeneration}`,
+          `Failure at (UTC): ${local.failureAtMs == null ? '(none)' : new Date(local.failureAtMs).toISOString()}`,
+          'Recent Core log: not correlated to this attempt; not a root-cause diagnosis',
+          `Core log status: ${local.coreLog.status}; inspected lines=${local.coreLog.inspectedLines}; truncated=${local.coreLog.truncated}`,
+          ...local.coreLog.observations.map(({ code, count }) => `  - ${code}: ${count}`),
+          'No matched observation does not prove a healthy Core. Raw logs, destinations and credentials are omitted.',
+        ]
+      : []),
   ].join('\n')
 }
 

@@ -14,6 +14,7 @@ import {
   tonoCheckTerminalEnv,
   tonoClearTerminalProxyEnv,
   tonoDiagnosticsReport,
+  tonoLocalDiagnosticsReport,
   tonoUploadDiagnostics,
   type TonoDiagnosticsReport,
 } from '@/services/tono'
@@ -171,8 +172,7 @@ const SupportPage = () => {
 
   const handleCopyDetails = useLockFn(async () => {
     try {
-      const { data } = await refreshReport()
-      if (!data) throw new Error('Diagnostics report unavailable')
+      const data = await tonoLocalDiagnosticsReport()
       await navigator.clipboard.writeText(formatTonoDiagnostics(data))
       showNotice.success('tono.support.detailsCopied')
     } catch (error) {

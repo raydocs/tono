@@ -425,4 +425,31 @@ describe('stable diagnostic copy', () => {
       formatTonoDiagnostics(report({ error: 'dns probe failed' })),
     ).toContain('Error code: (none)')
   })
+
+  it('copies bounded local evidence without presenting recent core observations as a root cause', () => {
+    const copied = formatTonoDiagnostics({
+      ...report({ reportedAtMs: 1712345678901, catalogRevision: 54 }),
+      localEvidence: {
+        status: 'collected',
+        connectionGeneration: 7,
+        controllerGeneration: 12,
+        failureAtMs: 1712345678000,
+        coreLog: {
+          status: 'available',
+          inspectedLines: 3,
+          truncated: true,
+          observations: [{ code: 'tls_handshake_eof', count: 2 }],
+        },
+      },
+    })
+    expect(copied).toContain('Reported at (UTC): 2024-04-05T19:34:38.901Z')
+    expect(copied).toContain('Catalog revision: 54')
+    expect(copied).toContain('Connection generation (process-local): 7')
+    expect(copied).toContain('Failure at (UTC): 2024-04-05T19:34:38.000Z')
+    expect(copied).toContain('tls_handshake_eof: 2')
+    expect(copied).toContain('not correlated to this attempt; not a root-cause diagnosis')
+    expect(copied).toContain('truncated=true')
+    expect(formatTonoDiagnostics(report({ catalogRevision: null }))).toContain('Catalog revision: (unknown)')
+    expect(formatTonoDiagnostics(report())).not.toContain('Recent Core log')
+  })
 })
