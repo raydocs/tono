@@ -178,6 +178,11 @@ jobs:
         working-directory: apps/windows/app/src-tauri
         run: cargo test --locked
 
+      # Cargo does not execute dependency integration tests with the Tauri suite.
+      - name: Test update journal atomic writes on Windows
+        working-directory: apps/windows
+        run: cargo test --locked -p tono-core --test update_journal_atomic
+
   service:
     runs-on: windows-2025
     steps:

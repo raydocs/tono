@@ -53,6 +53,16 @@ test('the native Service job executes safe QA fault-targeting regressions', () =
     step.shell === 'pwsh' && step.run?.includes('tooling/scripts/tests/windows-qa-guards.Tests.ps1')))
 })
 
+test('Windows runs the dependency journal integration tests explicitly', () => {
+  const job = workflow.jobs['app-rust']
+  assert.equal(job['runs-on'], 'windows-2025')
+  const step = job.steps.find(step => step.run === 'cargo test --locked -p tono-core --test update_journal_atomic')
+  assert.ok(step, 'Tauri tests do not execute dependency integration tests')
+  assert.equal(step['working-directory'], 'apps/windows')
+  assert.equal(step.if, undefined)
+  assert.notEqual(step['continue-on-error'], true)
+})
+
 test('Windows candidate build and installer smoke agree with the product version', () => {
   const version = JSON.parse(readFileSync(path.join(root, 'apps/windows/app/package.json'), 'utf8')).version
   const candidate = load(readFileSync(path.join(root, '.github/workflows/windows-candidate.yml'), 'utf8'))
