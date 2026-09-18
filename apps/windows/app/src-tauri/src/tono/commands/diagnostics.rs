@@ -205,6 +205,58 @@ pub async fn tono_diagnostics_report(
     Ok(collect_diagnostics_report(state.inner(), &app).await)
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalDiagnosticsReport {
+    #[serde(flatten)]
+    report: crate::tono::diagnostics::DiagnosticsReport,
+    local_evidence: LocalDiagnosticsEvidence,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalDiagnosticsEvidence {
+    status: &'static str,
+    connection_generation: u64,
+    controller_generation: u64,
+    failure_at_ms: Option<i64>,
+    core_log: crate::tono::local_evidence::CoreLogEvidence,
+}
+
+/// Explicit Copy details only. Kept separate from the upload contract and normal
+/// page refresh: raw logs never leave Rust, and no extra cloud disclosure occurs.
+#[tauri::command]
+pub async fn tono_local_diagnostics_report(
+    state: tauri::State<'_, Arc<TonoState>>,
+    app: AppHandle,
+) -> Result<LocalDiagnosticsReport, String> {
+    let identity = |inner: &TonoInner| (
+        inner.connect_generation, inner.controller_generation,
+        inner.connect_error_at_ms, inner.catalog_tracker.current_revision(),
+        inner.selected_node.clone(), inner.retry_attempt,
+    );
+    let before = {
+        let inner = state.lock().await;
+        identity(&inner)
+    };
+    let report = collect_diagnostics_report(state.inner(), &app).await;
+    let core_log = crate::tono::local_evidence::collect_core_log().await;
+    let inner = state.lock().await;
+    if identity(&inner) != before {
+        return Err("Connection changed while collecting diagnostics; copy details again.".to_string());
+    }
+    Ok(LocalDiagnosticsReport {
+        report,
+        local_evidence: LocalDiagnosticsEvidence {
+            status: "collected",
+            connection_generation: before.0,
+            controller_generation: before.1,
+            failure_at_ms: before.2,
+            core_log,
+        },
+    })
+}
+
 /// Upload one diagnostics report and return its support reference code.
 ///
 /// **User-initiated only.** This is the sole upload path and it exists

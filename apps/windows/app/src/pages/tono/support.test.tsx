@@ -20,6 +20,7 @@ import type { TonoDiagnosticsReport } from '@/services/tono'
 
 const {
   diagnosticsReportMock,
+  localDiagnosticsReportMock,
   uploadDiagnosticsMock,
   auditLogPathMock,
   checkTerminalEnvMock,
@@ -28,6 +29,7 @@ const {
   noticeError,
 } = vi.hoisted(() => ({
   diagnosticsReportMock: vi.fn(),
+  localDiagnosticsReportMock: vi.fn(),
   uploadDiagnosticsMock: vi.fn(),
   auditLogPathMock: vi.fn(),
   checkTerminalEnvMock: vi.fn(),
@@ -39,6 +41,7 @@ const {
 vi.mock('@/services/tono', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/services/tono')>()),
   tonoDiagnosticsReport: diagnosticsReportMock,
+  tonoLocalDiagnosticsReport: localDiagnosticsReportMock,
   tonoUploadDiagnostics: uploadDiagnosticsMock,
   tonoAuditLogPath: auditLogPathMock,
   tonoCheckTerminalEnv: checkTerminalEnvMock,
@@ -108,6 +111,7 @@ const stubClipboard = () => {
 
 beforeEach(() => {
   diagnosticsReportMock.mockReset().mockResolvedValue(report)
+  localDiagnosticsReportMock.mockReset().mockResolvedValue(report)
   auditLogPathMock.mockReset().mockResolvedValue({
     path: 'C:\\Users\\Alice\\AppData\\Local\\Tono\\traffic-audit.jsonl',
     droppedCount: 0,
@@ -144,6 +148,7 @@ describe('Tono Support page', () => {
       'C:\\Users\\Alice\\AppData\\Local\\Tono\\traffic-audit.jsonl',
     )
     expect(diagnosticsReportMock).toHaveBeenCalled()
+    expect(localDiagnosticsReportMock).not.toHaveBeenCalled()
     expect(auditLogPathMock).toHaveBeenCalled()
   })
 
@@ -214,6 +219,8 @@ describe('Tono Support page', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
     expect(writeText.mock.calls[0][0]).toContain('Tono v0.0.18 diagnostics')
     expect(writeText.mock.calls[0][0]).toContain('Server: US West 1')
+    expect(localDiagnosticsReportMock).toHaveBeenCalledTimes(1)
+    expect(uploadDiagnosticsMock).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy path' }))
     await waitFor(() =>

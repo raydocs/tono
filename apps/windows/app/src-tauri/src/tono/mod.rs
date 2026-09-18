@@ -16,6 +16,7 @@ mod connection_routes;
 mod route_ledger;
 pub mod credentials;
 pub mod diagnostics;
+pub(crate) mod local_evidence;
 pub(crate) mod encrypted_dns;
 mod integration_profile;
 pub mod policy_sync;
