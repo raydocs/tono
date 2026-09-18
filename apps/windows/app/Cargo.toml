@@ -7,6 +7,8 @@ members = [
   "crates/tauri-plugin-tono-sysinfo",
   "crates/tono-i18n",
   "crates/tono-limiter",
+  "crates/tono-service-client",
+  "crates/tono-client",
 ]
 resolver = "2"
 
@@ -51,6 +53,8 @@ tono-logging = { path = "crates/tono-logging" }
 tono-signal = { path = "crates/tono-signal" }
 tono-i18n = { path = "crates/tono-i18n" }
 tono-limiter = { path = "crates/tono-limiter" }
+tono-service-client = { path = "crates/tono-service-client" }
+tono-client = { path = "crates/tono-client" }
 tauri-plugin-tono-sysinfo = { path = "crates/tauri-plugin-tono-sysinfo" }
 
 tauri = { version = "2.11.5" }
