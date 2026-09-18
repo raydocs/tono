@@ -62,7 +62,7 @@ public struct DataUsageSummaryView: View {
         self.isCard = isCard
     }
 
-    public init(
+    init(
         appState: AppState,
         title: LocalizedStringKey? = "DATA USAGE",
         isCard: Bool = true
