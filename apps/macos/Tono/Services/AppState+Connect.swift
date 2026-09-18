@@ -659,17 +659,10 @@ extension AppState {
             consecutiveProtectedFailureCount = 0
             protectedReconnectPausedForUserAction = false
             protectedReconnectPauseLiftsOnNetworkChange = false
-            self.connectionCoordinator.protectedReconnectTask?.cancel()
-            self.connectionCoordinator.protectedReconnectTask = nil
-            self.connectionCoordinator.protectedReconnectID = nil
-            self.connectionCoordinator.lastProtectedReconnectKick = nil
+            self.connectionCoordinator.cancelReconnectTasks()
             isProtectedReconnectScheduled = false
             protectedReconnectAttempt = 0
             protectedReconnectNextAttemptAt = nil
-            self.connectionCoordinator.wakeRecoveryTask?.cancel()
-            self.connectionCoordinator.wakeRecoveryTask = nil
-            self.connectionCoordinator.sleepRestrictTask?.cancel()
-            self.connectionCoordinator.sleepRestrictTask = nil
             resumeProtectionAfterWake = false
             autoConnectRequested = false
             connectionStartedAt = nil
@@ -736,6 +729,7 @@ extension AppState {
 
         // Reset state
         isConnected = false
+        lastPhysicalFingerprint = nil
         isProxyDegraded = false
         networkInfo = NetworkInfo()
         trafficStats = TrafficStats()
@@ -916,6 +910,7 @@ extension AppState {
         // resurrect the UI as connected while that teardown is queued.
         guard isConnecting, !Task.isCancelled else { return false }
         isConnected = true
+        lastPhysicalFingerprint = PhysicalInterfaceFingerprint.current()
         isProtectionBlocked = false
         isRecoveringProtectedConnection = false
         isProxyDegraded = proxyFailed
@@ -1708,20 +1703,7 @@ extension AppState {
             lastProtectedFailureSignature = nil
             consecutiveProtectedFailureCount = 0
         }
-        if immediate {
-            let now = Date()
-            if let lastKick = self.connectionCoordinator.lastProtectedReconnectKick,
-               now.timeIntervalSince(lastKick) < ProtectedReconnectSchedule.networkChangeKickCooldown,
-               self.connectionCoordinator.protectedReconnectTask != nil {
-                return
-            }
-            self.connectionCoordinator.lastProtectedReconnectKick = now
-            self.connectionCoordinator.protectedReconnectTask?.cancel()
-            self.connectionCoordinator.protectedReconnectTask = nil
-            self.connectionCoordinator.protectedReconnectID = nil
-        } else if self.connectionCoordinator.protectedReconnectTask != nil {
-            // The existing loop owns the attempt counter. A failed connect must
-            // never cancel it and reset weak-network backoff to two seconds.
+        if self.connectionCoordinator.shouldDebounceReconnectKick(immediate: immediate) {
             return
         }
 

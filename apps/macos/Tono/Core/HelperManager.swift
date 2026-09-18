@@ -869,6 +869,8 @@ nonisolated struct HelperManager {
         preparationStartedAt: Date
     ) -> Bool {
         do {
+            try HelperPathConfinement.validateUpgradePath(helperSource.path)
+            try HelperPathConfinement.validateUpgradePath(mihomoSource.path)
             try verifyEmbeddedExecutable(
                 helperSource,
                 identifier: "com.raydocs.tono.helper"
@@ -1066,5 +1068,29 @@ private extension String {
             .replacingOccurrences(of: "\"", with: "\\\"")
             .replacingOccurrences(of: "\r", with: "")
             .replacingOccurrences(of: "\n", with: "\\n")
+    }
+}
+
+// MARK: - Helper Path Confinement
+
+enum HelperPathConfinement {
+    enum Error: Swift.Error, Equatable {
+        case notInAppBundle(String)
+        case cannotSafelyOpen(String)
+    }
+
+    static func isBundleConfined(path: String) -> Bool {
+        path.contains(".app/Contents/")
+    }
+
+    static func validateUpgradePath(_ path: String) throws {
+        guard isBundleConfined(path: path) else {
+            throw Error.notInAppBundle(path)
+        }
+        let fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        guard fd >= 0 else {
+            throw Error.cannotSafelyOpen(path)
+        }
+        close(fd)
     }
 }
