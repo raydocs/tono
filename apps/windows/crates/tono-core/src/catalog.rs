@@ -28,11 +28,14 @@ pub const CACHE_FILE_NAME: &str = "managed-exit-catalog.json";
 /// Commit a default selection only when it cannot mislabel an active runtime.
 /// Returns the applied name so the caller can persist it after the state change.
 pub fn apply_default_selection(
-    _status: &crate::connection::ConnectionStatus,
+    status: &crate::connection::ConnectionStatus,
     selected: &mut Option<String>,
     requires_choice: &mut bool,
     replacement: String,
 ) -> Option<String> {
+    if status.is_connected || status.is_connecting || status.is_disconnecting {
+        return None;
+    }
     *selected = Some(replacement.clone());
     *requires_choice = false;
     Some(replacement)
