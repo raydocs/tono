@@ -147,9 +147,10 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
             Err(CatalogError::StaleRevision) => (false, false),
             Err(err) => return Err(err.to_string()),
         };
-        let vanished = installed
+        let vanished = (installed
             && inner.catalog_requires_choice
-            && (inner.fsm.status().is_connected || inner.fsm.status().is_connecting);
+            && (inner.fsm.status().is_connected || inner.fsm.status().is_connecting))
+            .then_some(inner.connect_generation);
         let snapshot = emit.then(|| commands::status_of(&inner));
         drop(inner);
         if let Some(snapshot) = snapshot {
@@ -158,8 +159,10 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
         vanished
     };
 
-    if selection_vanished && state.lock().await.sign_in_generation == auth_generation {
-        connection::selected_node_vanished(state.clone(), app.clone()).await;
+    if let Some(generation) = selection_vanished {
+        if state.lock().await.sign_in_generation == auth_generation {
+            connection::selected_node_vanished(state.clone(), app.clone(), generation).await;
+        }
     }
     Ok(())
 }
@@ -419,8 +422,9 @@ pub fn ensure_usable_selection(inner: &mut TonoInner) -> Option<String> {
     else {
         return None;
     };
-    inner.selected_node = Some(replacement.clone());
-    inner.catalog_requires_choice = false;
+    let replacement = tono_core::catalog::apply_default_selection(
+        inner.fsm.status(), &mut inner.selected_node, &mut inner.catalog_requires_choice, replacement,
+    )?;
     if let Err(error) = crate::tono::state::save_selection(&inner.catalog_dir, &replacement) {
         logging!(
             warn,
