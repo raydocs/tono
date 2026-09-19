@@ -99,8 +99,19 @@ pub async fn verify_with_diagnostic<T>(
     authoritative: impl std::future::Future<Output = Result<T, String>>,
     diagnostic: impl std::future::Future<Output = Result<(), String>>,
 ) -> (Result<T, String>, Option<Result<(), String>>) {
-    let (result, diagnostic) = tokio::join!(authoritative, diagnostic);
-    (result, Some(diagnostic))
+    tokio::pin!(authoritative, diagnostic);
+    tokio::select! {
+        biased;
+        result = &mut authoritative => {
+            if result.is_ok() {
+                // Drop the diagnostic future here: no detached request can outlive this proof.
+                (result, None)
+            } else {
+                (result, Some(diagnostic.await))
+            }
+        }
+        detail = &mut diagnostic => (authoritative.await, Some(detail)),
+    }
 }
 
 pub fn classify_post_lock<T>(
@@ -175,6 +186,15 @@ mod tests {
         let mut context = Context::from_waker(Waker::noop());
         let mut proof = pin!(verify_with_diagnostic(ready(Ok(7_u8)), pending()));
         assert_eq!(proof.as_mut().poll(&mut context), Poll::Ready((Ok(7), None)));
+
+        // A fast successful diagnostic must not turn a pending/failed TUN into Connected.
+        let mut pending_tun = pin!(verify_with_diagnostic(pending::<Result<u8, String>>(), ready(Ok(()))));
+        assert!(pending_tun.as_mut().poll(&mut context).is_pending());
+        let mut failed_tun = pin!(verify_with_diagnostic(ready(Err::<u8, _>("TUN failed".into())), ready(Ok(()))));
+        assert_eq!(failed_tun.as_mut().poll(&mut context), Poll::Ready((Err("TUN failed".into()), Some(Ok(())))));
+
+        let mut failed_diagnostic = pin!(verify_with_diagnostic(ready(Err::<u8, _>("TUN failed".into())), ready(Err("proxy failed".into()))));
+        assert_eq!(failed_diagnostic.as_mut().poll(&mut context), Poll::Ready((Err("TUN failed".into()), Some(Err("proxy failed".into())))));
     }
 
     #[test]
