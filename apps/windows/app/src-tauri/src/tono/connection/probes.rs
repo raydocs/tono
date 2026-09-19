@@ -173,12 +173,14 @@ pub(super) async fn verify_post_lock(
         let tun_recorder = outcomes.as_ref().map(|outcomes| ProbeRecorder { round: round + 1, path: "tun", outcomes: outcomes.clone() });
         let proxy_recorder = outcomes.as_ref().map(|outcomes| ProbeRecorder { round: round + 1, path: "loopback", outcomes: outcomes.clone() });
         let (data_plane, proxy_cross_check) = if final_round {
-            let (data_plane, proxy) = transaction
-                .wait("real TUN verification with proxy cross-check", async {
-                    tokio::join!(verify_locked_data_plane(tun_recorder.as_ref()), verify_mixed_proxy_data_plane(mixed_port, proxy_recorder.as_ref()))
-                })
-                .await?;
-            (data_plane, Some(proxy))
+            transaction
+                .wait("real TUN verification with proxy cross-check",
+                    tono_core::protected_connectivity::verify_with_diagnostic(
+                        verify_locked_data_plane(tun_recorder.as_ref()),
+                        verify_mixed_proxy_data_plane(mixed_port, proxy_recorder.as_ref()),
+                    ),
+                )
+                .await?
         } else {
             (
                 transaction
