@@ -25,6 +25,19 @@ pub const MAX_CACHE_FILE_BYTES: u64 = 2 * 1024 * 1024;
 /// Cache file name inside the app data dir (§3).
 pub const CACHE_FILE_NAME: &str = "managed-exit-catalog.json";
 
+/// Commit a default selection only when it cannot mislabel an active runtime.
+/// Returns the applied name so the caller can persist it after the state change.
+pub fn apply_default_selection(
+    _status: &crate::connection::ConnectionStatus,
+    selected: &mut Option<String>,
+    requires_choice: &mut bool,
+    replacement: String,
+) -> Option<String> {
+    *selected = Some(replacement.clone());
+    *requires_choice = false;
+    Some(replacement)
+}
+
 /// Wire shape of `GET exit-catalog` (§3). `updatedAt` is optional.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExitCatalogResponse {
@@ -496,6 +509,27 @@ impl CatalogCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_catalog_removal_preserves_selection_and_requires_choice() {
+        let mut status = crate::connection::ConnectionStatus::default();
+        status.is_connected = true;
+        let mut selected = Some("removed exit".to_owned());
+        let mut requires_choice = true;
+        assert_eq!(apply_default_selection(&status, &mut selected, &mut requires_choice, "new default".into()), None);
+        assert_eq!(selected.as_deref(), Some("removed exit"));
+        assert!(requires_choice, "catalog teardown must remain reachable");
+        status.is_connected = false;
+        status.is_connecting = true;
+        assert_eq!(apply_default_selection(&status, &mut selected, &mut requires_choice, "new default".into()), None);
+        status.is_connecting = false;
+        status.is_disconnecting = true;
+        assert_eq!(apply_default_selection(&status, &mut selected, &mut requires_choice, "new default".into()), None);
+        status.is_disconnecting = false;
+        assert_eq!(apply_default_selection(&status, &mut selected, &mut requires_choice, "new default".into()), Some("new default".into()));
+        assert_eq!(selected.as_deref(), Some("new default"));
+        assert!(!requires_choice);
+    }
 
     const NODE_YAML: &str = r#"  - name: "US Reality 01"
     type: vless

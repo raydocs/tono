@@ -419,8 +419,9 @@ pub fn ensure_usable_selection(inner: &mut TonoInner) -> Option<String> {
     else {
         return None;
     };
-    inner.selected_node = Some(replacement.clone());
-    inner.catalog_requires_choice = false;
+    let replacement = tono_core::catalog::apply_default_selection(
+        inner.fsm.status(), &mut inner.selected_node, &mut inner.catalog_requires_choice, replacement,
+    )?;
     if let Err(error) = crate::tono::state::save_selection(&inner.catalog_dir, &replacement) {
         logging!(
             warn,
