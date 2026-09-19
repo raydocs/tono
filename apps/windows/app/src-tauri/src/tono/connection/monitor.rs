@@ -23,7 +23,7 @@ use crate::tono::{
 };
 use super::{
     Attempt, BoxedTask, MAX_DIRECT_SAMPLES, MAX_PROTECTED_ROUTE_SAMPLES, ProtectedRouteAggregate,
-    attempt, fail_connect, kill_switch_mode_key, new_direct_samples, observe_protected_routes,
+    fail_connect, kill_switch_mode_key, new_direct_samples, observe_protected_routes,
     seed_autostart_after_connect,
 };
 use super::direct::dns_query_a;
@@ -822,6 +822,10 @@ pub(super) async fn handle_network_change_inner(
     // first reconnect on "DNS 53 busy" because the just-killed listener was
     // the one we needed.
     if allow_in_place && verify_tun_data_plane().await.is_ok() {
+        let inner = state.lock().await;
+        if inner.connect_generation != generation || !inner.fsm.status().is_connected {
+            return NetworkChangeOutcome::Handled;
+        }
         logging!(
             info,
             Type::Service,
@@ -829,31 +833,42 @@ pub(super) async fn handle_network_change_inner(
         );
         return NetworkChangeOutcome::RecoveredInPlace;
     }
-    {
-        let mut inner = state.lock().await;
-        if inner.connect_generation != generation || inner.fsm.status().is_disconnecting {
+    // The exclusive release guard also excludes StartClash/DNS readers, including Retry now.
+    // Keep it inside a detached worker: aborting netmon must not expose a still-running stop.
+    let guard_state = Arc::clone(state);
+    let recovery_state = Arc::clone(state);
+    let recovery_app = app.clone();
+    let stopped = tono_core::recovery::reconcile_recovery(
+        async move { guard_state.begin_privileged_release().await },
+        async move {
+            {
+                let mut inner = recovery_state.lock().await;
+                if inner.connect_generation != generation || !inner.fsm.status().is_connected {
+                    return false;
+                }
+                inner.fsm.tunnel_died();
+                commands::emit_status(&recovery_app, &commands::status_of(&inner));
+            }
+            recovery_state.audit().log(AuditEvent::ProtectedOffline { reason: "networkChange" });
+            // Stop(false) already restricts WFP under the Service lifecycle lock. A separate
+            // owner-only restrict request could arrive late and mutate a replacement session.
+            if let Err(error) = service::tono_stop_core(false).await {
+                logging!(warn, Type::Service, "Tono: recovery stop requires reconciliation: {error:#}");
+            }
+            true
+        },
+    ).await;
+    match stopped {
+        Ok(true) => {}
+        Ok(false) => return NetworkChangeOutcome::Handled,
+        Err(error) => {
+            logging!(error, Type::Service, "Tono: recovery worker failed; keeping protection: {error}");
             return NetworkChangeOutcome::Handled;
         }
-        inner.fsm.tunnel_died();
-        commands::emit_status(&app, &commands::status_of(&inner));
     }
-    state.audit().log(AuditEvent::ProtectedOffline {
-        reason: "networkChange",
-    });
-    let _ = service::tono_restrict_bootstrap().await;
-    // Stop the core before re-attempting, like both sibling teardowns (`switch_selected_node`,
-    // `selected_node_vanished`). `restrict_bootstrap` only rewrites WFP; it leaves mihomo
-    // running, and mihomo owns loopback:53 for the whole session — the very port `run_stages`'
-    // DNS preflight binds. Without this, every sleep/wake and Wi-Fi flap burned attempt #1 on a
-    // guaranteed "DNS UDP 127.0.0.1:53 is unavailable", recorded a ConnectFail, bumped the retry
-    // counter and showed a DNS error, and only then stopped the core on the way out.
-    // `false` = keep blocking: the core goes down, the barrier stays armed.
-    let _ = service::tono_stop_core(false).await;
-    // Immediately before re-entering the transaction, and deliberately not earlier: a disconnect
-    // bumps the generation as its very first act (`invalidate_connection(true)`, before any
-    // IPC), so any release that will complete has already bumped by the time this reads. A moved
-    // generation means someone else owns the machine — exit without touching the FSM, the core
-    // or the UI, exactly like `StageFailure::Stale`.
+    // Teardown is settled and its exclusive guard is gone. A disconnect may have retired us
+    // while waiting; check here and again inside attempt admission rather than adopting its
+    // newer generation after this lock is released.
     {
         let inner = state.lock().await;
         if inner.connect_generation != generation || inner.fsm.status().is_disconnecting {
@@ -865,7 +880,7 @@ pub(super) async fn handle_network_change_inner(
             return NetworkChangeOutcome::Handled;
         }
     }
-    match attempt(state, app).await {
+    match super::attempt_for_generation(state, app, Some(generation)).await {
         Attempt::Failed(err) => {
             let _ = fail_connect(state, app, err).await;
             schedule_reconnect(state, app).await;

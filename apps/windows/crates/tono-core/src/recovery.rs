@@ -8,9 +8,10 @@ pub async fn reconcile_recovery<G: Send + 'static>(
     guard: impl Future<Output = G> + Send + 'static,
     recovery: impl Future<Output = bool> + Send + 'static,
 ) -> Result<bool, tokio::task::JoinError> {
-    // Baseline: the existing recovery has no retained mutation guard.
-    drop(guard);
-    Ok(recovery.await)
+    tokio::spawn(async move {
+        let _guard = guard.await;
+        recovery.await
+    }).await
 }
 
 #[cfg(test)]
@@ -42,17 +43,16 @@ mod tests {
         ));
         entering.await.unwrap();
         assert!(barrier.try_write().is_err(), "release must not overtake admitted recovery");
+        assert!(barrier.try_read().is_err(), "replacement Core startup must wait too");
         caller.abort();
         assert!(caller.await.unwrap_err().is_cancelled());
         assert!(barrier.try_write().is_err(), "caller cancellation must not expose a live mutation");
         resume.send(()).unwrap();
         let release = tokio::time::timeout(Duration::from_secs(2), barrier.write()).await.unwrap();
         assert_eq!(stopped.load(Ordering::SeqCst), 7);
-        session.store(8, Ordering::SeqCst);
-        drop(release);
 
         // Admission happens after the guard: a queued old generation cannot stop session 8.
-        let admitted = reconcile_recovery(Arc::clone(&barrier).write_owned(), {
+        let queued = tokio::spawn(reconcile_recovery(Arc::clone(&barrier).write_owned(), {
             let session = Arc::clone(&session);
             let stopped = Arc::clone(&stopped);
             async move {
@@ -60,7 +60,12 @@ mod tests {
                 stopped.store(8, Ordering::SeqCst);
                 true
             }
-        }).await.unwrap();
+        }));
+        tokio::task::yield_now().await;
+        assert!(!queued.is_finished());
+        session.store(8, Ordering::SeqCst);
+        drop(release);
+        let admitted = queued.await.unwrap().unwrap();
         assert!(!admitted);
         assert_eq!(stopped.load(Ordering::SeqCst), 7);
     }
