@@ -93,6 +93,16 @@ pub enum PostLockDecision<T> {
     },
 }
 
+/// Run the authoritative proof alongside a diagnostic that must never substitute for it.
+/// The caller owns the shared deadline and cancellation of both borrowed futures.
+pub async fn verify_with_diagnostic<T>(
+    authoritative: impl std::future::Future<Output = Result<T, String>>,
+    diagnostic: impl std::future::Future<Output = Result<(), String>>,
+) -> (Result<T, String>, Option<Result<(), String>>) {
+    let (result, diagnostic) = tokio::join!(authoritative, diagnostic);
+    (result, Some(diagnostic))
+}
+
 pub fn classify_post_lock<T>(
     controller: Result<(), String>,
     data_plane: Result<T, String>,
@@ -158,6 +168,14 @@ pub fn classify_exhausted_data_plane(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn successful_tun_does_not_wait_for_diagnostic() {
+        use std::{future::{Future, pending, ready}, pin::pin, task::{Context, Poll, Waker}};
+        let mut context = Context::from_waker(Waker::noop());
+        let mut proof = pin!(verify_with_diagnostic(ready(Ok(7_u8)), pending()));
+        assert_eq!(proof.as_mut().poll(&mut context), Poll::Ready((Ok(7), None)));
+    }
 
     #[test]
     fn controller_failure_with_real_tun_stays_connected() {
