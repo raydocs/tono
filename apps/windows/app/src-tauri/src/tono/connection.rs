@@ -235,14 +235,23 @@ pub async fn connect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String
 /// Returns a boxed future (see [`BoxedAttempt`]); call sites `await` it as
 /// before.
 fn attempt<'a>(state: &'a Arc<TonoState>, app: &'a AppHandle) -> BoxedAttempt<'a> {
-    Box::pin(attempt_inner(state, app))
+    attempt_for_generation(state, app, None)
 }
 
-async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle) -> Attempt {
+fn attempt_for_generation<'a>(state: &'a Arc<TonoState>, app: &'a AppHandle, expected_generation: Option<u64>) -> BoxedAttempt<'a> {
+    Box::pin(attempt_inner(state, app, expected_generation))
+}
+
+async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generation: Option<u64>) -> Attempt {
     let (node, nodes, routing, generation, cancellation) = match guard_snapshot(state).await {
         Ok(snapshot) => snapshot,
         Err(err) => return Attempt::GuardRejected(err),
     };
+    // A recovery task cannot adopt a new generation between its final check and admission.
+    // The existing single-flight check below covers a bump after this snapshot.
+    if expected_generation.is_some_and(|expected| expected != generation) {
+        return Attempt::Stale;
+    }
     let transaction = ConnectTransaction::new(cancellation);
     // L5: the clock starts at the top of the attempt, so even a
     // service-readiness failure leaves no orphan ConnectFail.
