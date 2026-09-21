@@ -331,15 +331,14 @@ pub(super) async fn run_stages(
     // dashboard reuses the Mihomo plugin's traffic WebSocket, so point that plugin at this
     // generation before publishing Connected. Updating the protocol last prevents a subscriber
     // from observing a half-configured HTTP context.
-    configure_owned_controller_for_ui(state, app, &secret, controller_port);
-
     // §6.10: only now Connected; monitors start.
     {
-        let mut inner = state.lock().await;
-        if inner.connect_generation != generation {
-            drop(inner);
-            return Err(stale_after_arm(state, generation).await);
-        }
+        let mut inner = match controller_commit_guard(state, generation, || {
+            configure_owned_controller_for_ui(state, app, &secret, controller_port);
+        }).await {
+            Ok(inner) => inner,
+            Err(_) => return Err(stale_after_arm(state, generation).await),
+        };
         inner.kill_switch = Some(kill_status);
         inner.controller_generation = inner.controller_generation.wrapping_add(1);
         inner.fsm.mark_session_verified();
@@ -410,4 +409,16 @@ pub(super) async fn run_stages(
         service_session,
     );
     Ok(())
+}
+
+/// Bind controller publication to the state commit which follows it.
+async fn controller_commit_guard<'a>(
+    state: &'a Arc<TonoState>, generation: u64, publish: impl FnOnce() + Send,
+) -> Result<tokio::sync::MutexGuard<'a, crate::tono::state::TonoInner>, StageFailure> {
+    publish();
+    let inner = state.lock().await;
+    if inner.connect_generation != generation {
+        return Err(StageFailure::Stale);
+    }
+    Ok(inner)
 }
