@@ -36,6 +36,7 @@ const {
   tonoUploadDiagnosticsMock,
   tonoServersMock,
   tonoSelectServerMock,
+  tonoStatusMock,
   subscribeTonoStatusMock,
   noticeSuccess,
   noticeError,
@@ -48,6 +49,7 @@ const {
   tonoUploadDiagnosticsMock: vi.fn(),
   tonoServersMock: vi.fn(),
   tonoSelectServerMock: vi.fn(),
+  tonoStatusMock: vi.fn(),
   subscribeTonoStatusMock: vi.fn((_handler: unknown) => () => {}),
   noticeSuccess: vi.fn(),
   noticeError: vi.fn(),
@@ -67,6 +69,7 @@ vi.mock('@/services/tono', async (importOriginal) => ({
   tonoUploadDiagnostics: tonoUploadDiagnosticsMock,
   tonoServers: tonoServersMock,
   tonoSelectServer: tonoSelectServerMock,
+  tonoStatus: tonoStatusMock,
   subscribeTonoStatus: subscribeTonoStatusMock,
   TONO_STATUS_EVENT: 'tono://status',
 }))
@@ -185,6 +188,7 @@ beforeEach(() => {
   })
   tonoServersMock.mockReset().mockResolvedValue([])
   tonoSelectServerMock.mockReset().mockResolvedValue(undefined)
+  tonoStatusMock.mockReset().mockResolvedValue({ uiState: 'notConnected' })
   subscribeTonoStatusMock.mockReset()
   subscribeTonoStatusMock.mockImplementation(() => () => {})
   noticeSuccess.mockReset()
@@ -812,6 +816,7 @@ describe('ConnectProgressCard', () => {
 
     it('selects the hy2 sibling and retries only after the user clicks', async () => {
       tonoServersMock.mockResolvedValue(catalogWithHy2())
+      tonoStatusMock.mockResolvedValue({ uiState: 'protectedOffline' })
       tonoConnectProgressMock.mockResolvedValue(
         makeProgress({ error: handshakeError }),
       )
