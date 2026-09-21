@@ -169,7 +169,7 @@ mod tests {
 
     #[tokio::test]
     async fn failure_ownership_spans_status_cleanup_and_caller_abort() {
-        let state = Arc::new(TonoState::create().unwrap());
+        let state = Arc::new(TonoState::for_test());
         let generation = state.lock().await.connect_generation;
         let (status_entered, at_status) = oneshot::channel();
         let (resume_status, status_resumed) = oneshot::channel();

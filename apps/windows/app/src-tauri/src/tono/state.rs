@@ -473,7 +473,20 @@ impl TonoState {
         let catalog_dir = tono_data_dir()?;
         std::fs::create_dir_all(&catalog_dir)
             .with_context(|| format!("failed to create Tono data dir {}", catalog_dir.display()))?;
+        let audit = crate::tono::audit::Audit::new(&catalog_dir.join("logs"), &catalog_dir);
+        Self::with_catalog_dir(catalog_dir, audit)
+    }
 
+    /// Diskless lifecycle fixture: no Tauri handle, credential vault, Service, or audit writer.
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        let catalog_dir = std::env::temp_dir().join(format!("tono-state-{}", new_installation_id()));
+        let (sender, _receiver) = tokio::sync::mpsc::channel(1);
+        let audit = crate::tono::audit::Audit::for_test(sender, &catalog_dir, false);
+        Self::with_catalog_dir(catalog_dir, audit).unwrap()
+    }
+
+    fn with_catalog_dir(catalog_dir: PathBuf, audit: Arc<crate::tono::audit::Audit>) -> Result<Self> {
         let credentials = Arc::new(SessionCredentialStore::new());
         let transport = TonoTransport::new()?;
         let client = Arc::new(TonoApiClient::new(
@@ -487,9 +500,6 @@ impl TonoState {
         // forever). The startup load task hydrates the persisted id (or
         // persists this one) off-thread with a timeout.
         let installation_id = new_installation_id();
-
-        // §8 audit: JSONL under `tono/logs`, toggle from `tono/settings.json`.
-        let audit = crate::tono::audit::Audit::new(&catalog_dir.join("logs"), &catalog_dir);
 
         Ok(Self {
             inner: tokio::sync::Mutex::new(TonoInner {
