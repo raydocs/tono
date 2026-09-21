@@ -476,7 +476,7 @@ impl TonoState {
         std::fs::create_dir_all(&catalog_dir)
             .with_context(|| format!("failed to create Tono data dir {}", catalog_dir.display()))?;
         let audit = crate::tono::audit::Audit::new(&catalog_dir.join("logs"), &catalog_dir);
-        Self::with_catalog_dir(catalog_dir, audit)
+        Self::with_catalog_dir(catalog_dir, audit, Arc::new(SessionCredentialStore::new()))
     }
 
     /// Diskless lifecycle fixture: no Tauri handle, credential vault, Service, or audit writer.
@@ -485,11 +485,12 @@ impl TonoState {
         let catalog_dir = std::env::temp_dir().join(format!("tono-state-{}", new_installation_id()));
         let (sender, _receiver) = tokio::sync::mpsc::channel(1);
         let audit = crate::tono::audit::Audit::for_test(sender, &catalog_dir, false);
-        Self::with_catalog_dir(catalog_dir, audit).unwrap()
+        Self::with_catalog_dir(catalog_dir, audit, Arc::new(SessionCredentialStore::for_test())).unwrap()
     }
 
-    fn with_catalog_dir(catalog_dir: PathBuf, audit: Arc<crate::tono::audit::Audit>) -> Result<Self> {
-        let credentials = Arc::new(SessionCredentialStore::new());
+    fn with_catalog_dir(
+        catalog_dir: PathBuf, audit: Arc<crate::tono::audit::Audit>, credentials: Arc<SessionCredentialStore>,
+    ) -> Result<Self> {
         let transport = TonoTransport::new()?;
         let client = Arc::new(TonoApiClient::new(
             tono_core::auth::DEFAULT_BASE_URL,

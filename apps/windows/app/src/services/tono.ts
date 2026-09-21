@@ -584,6 +584,8 @@ export interface TonoLocalDiagnosticsReport extends TonoDiagnosticsReport {
       catalogRevision: number | null
       failedStage: string | null
       errorCode: string | null
+      connectionGeneration?: number
+      errorDetail?: string
       steps: TonoDiagnosticsStep[]
       probeOutcomes?: {
         round: number
@@ -697,6 +699,8 @@ export const formatTonoDiagnostics = (
                 `Attempt failed (UTC): ${new Date(local.lastFailedAttempt.failedAtMs).toISOString()}`,
                 `Attempt server: ${local.lastFailedAttempt.selectedServer}; transport=${local.lastFailedAttempt.transport}; catalog=${local.lastFailedAttempt.catalogRevision ?? '(unknown)'}`,
                 `Attempt failure: ${local.lastFailedAttempt.failedStage ?? '(unknown)'}; code=${local.lastFailedAttempt.errorCode ?? '(none)'}`,
+                `Attempt generation (process-local): ${local.lastFailedAttempt.connectionGeneration ?? '(unknown)'}`,
+                `Attempt cause (scrubbed): ${local.lastFailedAttempt.errorDetail ?? '(not captured)'}`,
                 ...local.lastFailedAttempt.steps.map(step =>
                   `  - ${step.key}: ${step.state}${step.elapsedMs == null ? '' : ` (${formatTonoElapsed(step.elapsedMs)})`}`),
                 'Completed probes: App observations, not proof of exit transport handshake failure. Missing entries may be unstarted, cancelled or unavailable.',

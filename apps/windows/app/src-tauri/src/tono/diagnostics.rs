@@ -62,6 +62,23 @@ const MAX_TEXT_LEN: usize = 2000;
 /// shred the message without protecting anything.
 const MIN_KNOWN_SECRET_LEN: usize = 6;
 
+/// Capture before the originating attempt retires its credentials. Never serialize this list.
+pub(crate) fn known_secrets(inner: &crate::tono::state::TonoInner) -> Vec<String> {
+    use tono_core::credentials::CredentialStore as _;
+    let mut known = Vec::new();
+    if let Some(secret) = &inner.controller_secret {
+        known.push(secret.clone());
+    }
+    for node in &inner.nodes {
+        known.extend([node.uuid.clone(), node.reality_public_key.clone(),
+            node.reality_short_id.clone(), node.server.to_string()]);
+    }
+    if let Ok(Some(token)) = inner.credentials.refresh_token() {
+        known.push(token);
+    }
+    known
+}
+
 /// IPv4 literals in free text. Catalog nodes are guaranteed IPv4 literals, so
 /// this is the shape that could leak an exit address through an error
 /// message. IPv6 is not matched: no product value is an IPv6 literal, and a

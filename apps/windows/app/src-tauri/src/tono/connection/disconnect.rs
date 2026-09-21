@@ -48,7 +48,7 @@ pub(crate) async fn release_for_account(state: &Arc<TonoState>, app: &AppHandle)
 }
 
 pub(crate) async fn complete_account_release(operation: &LifecycleOperation) -> Result<(), String> {
-    wait_explicit_release(operation).await
+    operation.wait().await
 }
 
 /// Transfer failure's exclusive ownership to release, rather than reacquiring the same writer.

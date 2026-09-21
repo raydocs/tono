@@ -11,9 +11,9 @@
 //!   fixes).
 //! - [`SessionCredentialStore`] — the store handed to tono-core's
 //!   `ApiClient`: memory-first, so every sync trait call the client makes
-//!   is a pure memory access; keyring persistence is a fire-and-forget
-//!   `spawn_blocking` write-through that can hang a blocking-pool thread at
-//!   worst, never the product logic.
+//!   is a memory/queue access. One bounded writer orders vault mutations;
+//!   account close awaits its acknowledgement without holding product locks.
+//!   A stalled vault never blocks an executor thread or opens login admission.
 
 use keyring::Entry;
 use std::sync::Arc;
@@ -100,13 +100,18 @@ impl CredentialStore for TonoCredentialStore {
 }
 
 /// The store `ApiClient` actually holds (§2): every sync trait call is a
-/// pure memory access. Reads are hydrated by the startup load task;
-/// writes (`adopt`, token rotation, `logout`) additionally persist to the
-/// keyring via a detached `spawn_blocking` write-through — fire-and-forget,
-/// so a hung vault can never stall the session it belongs to.
+/// memory/queue access. Reads are hydrated by startup; writes are ordered by the
+/// same short mutex as their memory commit. FIFO is the persistence revision order:
+/// an old write/delete cannot land after a newer accepted mutation. No OS I/O under locks.
 pub struct SessionCredentialStore {
     memory: MemoryCredentialStore,
     vault: Option<Arc<dyn CredentialStore>>,
+    writer: parking_lot::Mutex<Option<tokio::sync::mpsc::Sender<VaultCommand>>>,
+}
+
+enum VaultCommand {
+    Write(CredentialKey, Option<String>),
+    Flush(tokio::sync::oneshot::Sender<Result<(), CredentialError>>),
 }
 
 impl SessionCredentialStore {
@@ -114,6 +119,7 @@ impl SessionCredentialStore {
         Self {
             memory: MemoryCredentialStore::new(),
             vault: Some(Arc::new(TonoCredentialStore)),
+            writer: Default::default(),
         }
     }
 
@@ -123,40 +129,77 @@ impl SessionCredentialStore {
         Self {
             memory: MemoryCredentialStore::new(),
             vault: None,
+            writer: Default::default(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_test_vault(vault: Arc<dyn CredentialStore>) -> Self {
+        Self { vault: Some(vault), ..Self::for_test() }
     }
 
     /// Memory-only write, skipping the vault write-through. Used by the
     /// startup load task to hydrate from the vault without writing the same
     /// bytes straight back.
     pub fn set_local(&self, key: CredentialKey, value: &str) -> Result<(), CredentialError> {
+        let _writer = self.writer.lock();
         self.memory.set(key, value)
     }
 
-    /// Detached vault write; logs on failure, never blocks the caller.
-    fn persist_write(&self, key: CredentialKey, value: String) {
-        let Some(vault) = self.vault.clone() else { return; };
-        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            runtime.spawn(async move {
-                if let Err(err) = tokio::task::spawn_blocking(move || vault.set(key, &value)).await.map_err(join_error).and_then(|result| result) {
-                    tono_logging::logging!(
-                        warn,
-                        tono_logging::Type::Service,
-                        "Tono: 凭据回写系统钥匙串失败: {err}"
-                    );
-                }
-            });
+    fn mutate(&self, key: CredentialKey, value: Option<String>) -> Result<(), CredentialError> {
+        let mut writer = self.writer.lock();
+        if let Some(vault) = self.vault.clone() {
+            if writer.is_none() {
+                let runtime = tokio::runtime::Handle::try_current()
+                    .map_err(|_| CredentialError::Store("credential writer runtime unavailable".into()))?;
+                // At most 64 pending mutations and one OS operation, even if the vault stalls.
+                let (sender, mut receiver) = tokio::sync::mpsc::channel(64);
+                *writer = Some(sender);
+                runtime.spawn(async move {
+                    let mut failures = std::collections::HashMap::new();
+                    while let Some(command) = receiver.recv().await {
+                        match command {
+                            VaultCommand::Write(key, value) => {
+                                let vault = vault.clone();
+                                let result = tokio::task::spawn_blocking(move || match value {
+                                    Some(value) => vault.set(key, &value),
+                                    None => vault.delete(key),
+                                }).await.map_err(join_error).and_then(|result| result);
+                                match result {
+                                    Ok(()) => { failures.remove(&key); }
+                                    Err(error) => {
+                                        tono_logging::logging!(warn, tono_logging::Type::Service,
+                                            "Tono: credential persistence failed; durable state is unknown");
+                                        failures.insert(key, error);
+                                    }
+                                }
+                            }
+                            VaultCommand::Flush(done) => {
+                                let result = failures.values().next().cloned().map_or(Ok(()), Err);
+                                let _ = done.send(result);
+                            }
+                        }
+                    }
+                });
+            }
+            writer.as_ref().expect("writer initialized").try_send(VaultCommand::Write(key, value.clone()))
+                .map_err(|_| CredentialError::Store("credential persistence queue full or closed".into()))?;
+        }
+        match value {
+            Some(value) => self.memory.set(key, &value),
+            None => self.memory.delete(key),
         }
     }
 
-    /// Detached vault delete.
-    fn persist_delete(&self, key: CredentialKey) {
-        let Some(vault) = self.vault.clone() else { return; };
-        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            runtime.spawn(async move {
-                let _ = tokio::task::spawn_blocking(move || vault.delete(key)).await;
-            });
-        }
+    /// Acknowledge all accepted mutations preceding this barrier. A caller's timeout must not
+    /// cancel the owner waiting here; sign-out retains account admission until this settles.
+    pub async fn flush(&self) -> Result<(), CredentialError> {
+        let writer = self.writer.lock().clone();
+        let Some(writer) = writer else { return Ok(()); };
+        let (done, result) = tokio::sync::oneshot::channel();
+        writer.send(VaultCommand::Flush(done)).await
+            .map_err(|_| CredentialError::Store("credential writer stopped before acknowledgement".into()))?;
+        result.await.map_err(|_| CredentialError::Store("credential acknowledgement lost".into()))?
     }
 }
 
@@ -166,15 +209,11 @@ impl CredentialStore for SessionCredentialStore {
     }
 
     fn set(&self, key: CredentialKey, value: &str) -> Result<(), CredentialError> {
-        self.memory.set(key, value)?;
-        self.persist_write(key, value.to_string());
-        Ok(())
+        self.mutate(key, Some(value.to_string()))
     }
 
     fn delete(&self, key: CredentialKey) -> Result<(), CredentialError> {
-        self.memory.delete(key)?;
-        self.persist_delete(key);
-        Ok(())
+        self.mutate(key, None)
     }
 }
 
@@ -192,12 +231,13 @@ mod tests {
             entered: tokio::sync::Notify,
             changed: tokio::sync::Notify,
             calls: AtomicUsize,
+            held_call: AtomicUsize,
             completed: AtomicUsize,
             gate: Mutex<std::sync::mpsc::Receiver<()>>,
         }
         impl Vault {
             fn mutate(&self, value: Option<&str>) -> Result<(), CredentialError> {
-                if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                if self.calls.fetch_add(1, Ordering::SeqCst) == self.held_call.load(Ordering::SeqCst) {
                     self.entered.notify_one();
                     self.gate.lock().unwrap().recv_timeout(std::time::Duration::from_secs(5)).unwrap();
                 }
@@ -223,9 +263,10 @@ mod tests {
         let (release, gate) = std::sync::mpsc::channel();
         let vault = Arc::new(Vault {
             durable: MemoryCredentialStore::new(), entered: Default::default(), changed: Default::default(),
-            calls: AtomicUsize::new(0), completed: AtomicUsize::new(0), gate: Mutex::new(gate),
+            calls: AtomicUsize::new(0), held_call: AtomicUsize::new(0),
+            completed: AtomicUsize::new(0), gate: Mutex::new(gate),
         });
-        let store = SessionCredentialStore { memory: MemoryCredentialStore::new(), vault: Some(vault.clone()) };
+        let store = SessionCredentialStore::with_test_vault(vault.clone());
         store.set_refresh_token("old-account").unwrap();
         vault.entered.notified().await;
         store.delete_refresh_token().unwrap();
@@ -237,9 +278,19 @@ mod tests {
         tokio::time::timeout(std::time::Duration::from_secs(2), vault.completed(3)).await.unwrap();
         assert_eq!(store.refresh_token().unwrap().as_deref(), Some("replacement"));
         assert_eq!(vault.durable.refresh_token().unwrap().as_deref(), Some("replacement"));
+        // The converse: a delayed delete cannot erase a subsequent replacement write.
+        vault.held_call.store(3, Ordering::SeqCst);
+        store.delete_refresh_token().unwrap();
+        vault.entered.notified().await;
+        store.set_refresh_token("second-replacement").unwrap();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(1), vault.completed(4)).await;
+        release.send(()).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), store.flush()).await.unwrap().unwrap();
+        assert_eq!(vault.durable.refresh_token().unwrap().as_deref(), Some("second-replacement"));
         // Deletion must be ordered after every preceding write as well.
         store.delete_refresh_token().unwrap();
-        tokio::time::timeout(std::time::Duration::from_secs(2), vault.completed(4)).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), store.flush()).await.unwrap().unwrap();
+        assert_eq!(vault.completed.load(Ordering::SeqCst), 6);
         assert_eq!(vault.durable.refresh_token().unwrap(), None);
     }
 

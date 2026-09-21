@@ -154,19 +154,7 @@ async fn collect_diagnostics_report(
     let revision = inner.catalog_tracker.current_revision();
     // The live secret values, handed to the scrubber to be *subtracted* from
     // free text (never emitted). Structural rules cover what is not here.
-    let mut known_secrets: Vec<String> = Vec::new();
-    if let Some(secret) = &inner.controller_secret {
-        known_secrets.push(secret.clone());
-    }
-    for node in &inner.nodes {
-        known_secrets.push(node.uuid.clone());
-        known_secrets.push(node.reality_public_key.clone());
-        known_secrets.push(node.reality_short_id.clone());
-        known_secrets.push(node.server.to_string());
-    }
-    if let Ok(Some(token)) = inner.credentials.refresh_token() {
-        known_secrets.push(token);
-    }
+    let known_secrets = crate::tono::diagnostics::known_secrets(&inner);
     crate::tono::diagnostics::build_report(&crate::tono::diagnostics::DiagnosticsSources {
         app_version: &app_version,
         os_version: &os_version,
@@ -323,12 +311,15 @@ pub async fn tono_upload_diagnostics(
     state: tauri::State<'_, Arc<TonoState>>,
     app: AppHandle,
 ) -> Result<TonoDiagnosticsReceipt, String> {
-    let client = {
+    let (client, identity) = {
         let inner = state.lock().await;
-        inner.client.clone()
+        if inner.account_close.is_some() {
+            return Err("account sign-out is still reconciling".to_string());
+        }
+        (inner.client.clone(), inner.client.diagnostics_log_identity().await)
     };
     let report = collect_diagnostics_report(state.inner(), &app).await;
-    match client.upload_diagnostics_report(&report).await {
+    match client.upload_diagnostics_report_for_identity(&report, identity).await {
         Ok(receipt) => {
             state.audit().log(AuditEvent::DiagnosticsUploaded {
                 reference: receipt.reference_code.clone(),

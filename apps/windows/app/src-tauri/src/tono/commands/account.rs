@@ -310,9 +310,9 @@ pub async fn tono_sign_in_verify(
 pub async fn tono_sign_out(state: tauri::State<'_, Arc<TonoState>>, app: AppHandle) -> Result<(), String> {
     let release_app = app.clone();
     let resume_app = app.clone();
-    sign_out_with(state.inner().clone(),
+    close_account_with(state.inner().clone(), AccountCloseReason::User,
         move |state| async move { connection::release_for_account(&state, &release_app).await },
-        |client| async move { client.logout().await },
+        |client| async move { client.logout().await.map_err(|error| error.to_string()) },
         move |state, generation| async move {
             catalog_sync::spawn_periodic_for_auth_generation(&state, &resume_app, generation).await;
             crate::tono::telemetry::spawn_periodic_for_auth_generation(&state, &resume_app, generation).await;
@@ -323,24 +323,40 @@ pub async fn tono_sign_out(state: tauri::State<'_, Arc<TonoState>>, app: AppHand
 }
 
 /// System boundaries only: admission, task retirement, and account/FSM commits remain here.
-async fn sign_out_with<R, RF, L, LF, S, SF, E>(
-    state: Arc<TonoState>, release: R, logout: L, resume: S, emit: E,
+#[derive(Clone, Copy)]
+pub(super) enum AccountCloseReason {
+    User,
+    /// Restore has already established this session is absent/dead. Even on failed release,
+    /// clear the dead account but keep protection visible. Never act on a newer generation.
+    Expired { generation: u64 },
+    /// No token was loaded. Failed stored-protection release remains a retryable restore error.
+    Missing { generation: u64 },
+}
+
+pub(super) async fn close_account_with<R, RF, L, LF, S, SF, E>(
+    state: Arc<TonoState>, reason: AccountCloseReason, release: R, logout: L, resume: S, emit: E,
 ) -> Result<(), String>
 where
     R: FnOnce(Arc<TonoState>) -> RF + Send + 'static,
     RF: std::future::Future<Output = Result<(), String>> + Send + 'static,
     L: FnOnce(Arc<crate::tono::state::TonoApiClient>) -> LF + Send + 'static,
-    LF: std::future::Future<Output = ()> + Send + 'static,
+    LF: std::future::Future<Output = Result<(), String>> + Send + 'static,
     S: FnOnce(Arc<TonoState>, u64) -> SF + Send + 'static,
     SF: std::future::Future<Output = ()> + Send + 'static,
     E: Fn(&TonoInner) + Send + Sync + 'static,
 {
     use futures::FutureExt as _;
-    let (client, generation, protected, operation) = {
+    let expired = matches!(reason, AccountCloseReason::Expired { .. });
+    let (client, credentials, generation, protected, operation) = {
         let mut inner = state.lock().await;
+        if let AccountCloseReason::Expired { generation } | AccountCloseReason::Missing { generation } = reason {
+            if inner.sign_in_generation != generation {
+                return Ok(());
+            }
+        }
         if let Some(operation) = inner.account_close.clone() {
             drop(inner);
-            return operation.wait().await;
+            return wait_account_close(&operation).await;
         }
         inner.invalidate_connection(true);
         inner.sign_in_generation = inner.sign_in_generation.wrapping_add(1);
@@ -349,18 +365,24 @@ where
         inner.cancel_server_tests();
         let operation = Arc::new(crate::tono::state::LifecycleOperation::new(inner.sign_in_generation));
         inner.account_close = Some(Arc::clone(&operation));
-        let protected = connection::sign_out_needs_release(inner.fsm.status(), inner.fsm.kill_switch_armed());
-        (inner.client.clone(), inner.sign_in_generation, protected, operation)
+        let protected = !matches!(reason, AccountCloseReason::User)
+            || connection::sign_out_needs_release(inner.fsm.status(), inner.fsm.kill_switch_armed());
+        (inner.client.clone(), inner.credentials.clone(), inner.sign_in_generation, protected, operation)
     };
     let completion = Arc::clone(&operation);
     // Spawn before the next await: no admitted close can be abandoned with its UI command.
     // The separate close slot outlives the shorter DNS/Core/WFP release operation.
     tokio::spawn(async move {
+        let mut resume_account = false;
+        let mut finalized = false;
         let result = std::panic::AssertUnwindSafe(async {
-            if protected {
-                release(Arc::clone(&state)).await?;
+            let release_result = if protected { release(Arc::clone(&state)).await } else { Ok(()) };
+            if release_result.is_err() && !expired {
+                resume_account = matches!(reason, AccountCloseReason::User);
+                return release_result;
             }
-            logout(client).await;
+            logout(client).await?;
+            credentials.flush().await.map_err(|_| "local credential deletion was not acknowledged; retry sign-out".to_string())?;
             let mut inner = state.lock().await;
             inner.fsm.sign_out_or_quit();
             inner.account = None;
@@ -369,34 +391,108 @@ where
             inner.challenge_id = None;
             inner.controller_secret = None;
             inner.controller_port = None;
-            inner.kill_switch = None;
+            if release_result.is_err() {
+                inner.fsm.mark_kill_switch_armed();
+            } else {
+                inner.kill_switch = None;
+            }
             inner.network_events_counter = None;
             inner.catalog_last_synced_at_ms = None;
             inner.catalog_sync_error = None;
+            finalized = true;
             state.audit().log(AuditEvent::SignOut);
-            Ok(())
+            release_result
         }).catch_unwind().await.unwrap_or_else(|_| Err("account close task failed; retry sign-out".to_string()));
         {
             let mut inner = state.lock().await;
             if result.is_err() {
                 // Release not proven: retain the account and the armed latch, never hide it.
                 inner.fsm.initial_release_failed();
+                if !resume_account && !finalized {
+                    inner.account_state = AccountState::Error("account close incomplete; retry restore or sign-out".to_string());
+                }
             }
             inner.account_close = None;
             emit(&inner);
         }
-        if result.is_err() {
+        if resume_account {
             resume(Arc::clone(&state), generation).await;
         }
         completion.complete(result);
     });
-    operation.wait().await
+    wait_account_close(&operation).await
+}
+
+async fn wait_account_close(operation: &crate::tono::state::LifecycleOperation) -> Result<(), String> {
+    tokio::time::timeout(Duration::from_secs(55), operation.wait()).await
+        .unwrap_or_else(|_| Err("account close is still reconciling release or local credentials; login remains blocked until it settles".to_string()))
 }
 
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
     use tokio::sync::oneshot;
+
+    #[tokio::test]
+    async fn account_close_waits_for_durable_deletion_and_reports_a_failed_acknowledgement() {
+        use std::sync::{Mutex, atomic::{AtomicBool, Ordering}};
+        use tono_core::credentials::{CredentialError, CredentialStore, MemoryCredentialStore};
+        struct Vault {
+            durable: MemoryCredentialStore,
+            entered: tokio::sync::Notify,
+            first: AtomicBool,
+            gate: Mutex<std::sync::mpsc::Receiver<()>>,
+        }
+        impl CredentialStore for Vault {
+            fn get(&self, key: CredentialKey) -> Result<Option<String>, CredentialError> { self.durable.get(key) }
+            fn set(&self, key: CredentialKey, value: &str) -> Result<(), CredentialError> { self.durable.set(key, value) }
+            fn delete(&self, key: CredentialKey) -> Result<(), CredentialError> {
+                if self.first.swap(false, Ordering::SeqCst) {
+                    self.entered.notify_one();
+                    self.gate.lock().unwrap().recv_timeout(Duration::from_secs(5)).unwrap();
+                    return Err(CredentialError::Store("injected delete refusal".into()));
+                }
+                self.durable.delete(key)
+            }
+        }
+        let (release, gate) = std::sync::mpsc::channel();
+        let vault = Arc::new(Vault {
+            durable: MemoryCredentialStore::new(), entered: Default::default(),
+            first: AtomicBool::new(true), gate: Mutex::new(gate),
+        });
+        vault.durable.set_refresh_token("persisted-old-session").unwrap();
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.credentials = Arc::new(crate::tono::credentials::SessionCredentialStore::with_test_vault(vault.clone()));
+            inner.client = Arc::new(crate::tono::state::TonoApiClient::new(
+                "https://api.example.test", crate::tono::transport::TonoTransport::new().unwrap(), inner.credentials.clone(),
+            ).unwrap());
+            // No live token: real ApiClient logout performs only its local wipe, with no HTTP.
+            inner.account_state = AccountState::Ready;
+        }
+        let caller = tokio::spawn(close_account_with(Arc::clone(&state), AccountCloseReason::User,
+            |_| async { Ok(()) },
+            |client| async move { client.logout().await.map_err(|error| error.to_string()) },
+            |_, _| async {}, |_| {},
+        ));
+        tokio::time::timeout(Duration::from_secs(2), vault.entered.notified()).await.unwrap();
+        let close = state.lock().await.account_close.clone().expect("vault deletion still owns admission");
+        assert!(!caller.is_finished(), "enqueue is not durable acknowledgement");
+        caller.abort();
+        let _ = caller.await;
+        release.send(()).unwrap();
+        assert!(tokio::time::timeout(Duration::from_secs(2), close.wait()).await.unwrap().is_err());
+        assert!(matches!(state.lock().await.account_state, AccountState::Error(_)));
+        assert_eq!(vault.durable.refresh_token().unwrap().as_deref(), Some("persisted-old-session"));
+        close_account_with(Arc::clone(&state), AccountCloseReason::User,
+            |_| async { Ok(()) },
+            |client| async move { client.logout().await.map_err(|error| error.to_string()) },
+            |_, _| async {}, |_| {},
+        ).await.unwrap();
+        assert_eq!(state.lock().await.account_state, AccountState::SignedOut);
+        assert_eq!(vault.durable.refresh_token().unwrap(), None);
+    }
 
     #[tokio::test(start_paused = true)]
     async fn account_close_joins_release_past_the_ui_budget_before_reopening_admission() {
@@ -418,12 +514,12 @@ mod lifecycle_tests {
         ).await;
         at_release.await.unwrap();
         let (joined, joining) = oneshot::channel();
-        let caller = tokio::spawn(sign_out_with(Arc::clone(&state),
+        let caller = tokio::spawn(close_account_with(Arc::clone(&state), AccountCloseReason::User,
             move |_| async move {
                 joined.send(()).unwrap();
                 connection::complete_account_release(&operation).await
             },
-            |_| async {}, |_, _| async {}, |_| {},
+            |_| async { Ok(()) }, |_, _| async {}, |_| {},
         ));
         joining.await.unwrap();
         let close = state.lock().await.account_close.clone().unwrap();
@@ -454,7 +550,7 @@ mod lifecycle_tests {
         let (release, resumed) = oneshot::channel();
         let (done, finished) = oneshot::channel();
         let done = std::sync::Mutex::new(Some(done));
-        let caller = tokio::spawn(sign_out_with(Arc::clone(&state),
+        let caller = tokio::spawn(close_account_with(Arc::clone(&state), AccountCloseReason::User,
             |state| async move {
                 state.lock().await.fsm.sign_out_or_quit(); // Service proved the release.
                 Ok(())
@@ -462,6 +558,7 @@ mod lifecycle_tests {
             move |_| async move {
                 entered.send(()).unwrap();
                 let _ = resumed.await;
+                Ok(())
             },
             |_, _| async {},
             move |inner| {
@@ -491,7 +588,7 @@ mod lifecycle_tests {
         // Failure is the opposite contract: do not wipe the account or weaken protection.
         state.lock().await.account_state = AccountState::Ready;
         state.lock().await.fsm.mark_kill_switch_armed();
-        let result = sign_out_with(Arc::clone(&state),
+        let result = close_account_with(Arc::clone(&state), AccountCloseReason::User,
             |_| async { Err("DNS restore failed".into()) },
             |_| async { panic!("logout must not run after a failed explicit release") },
             |_, _| async {}, |_| {},

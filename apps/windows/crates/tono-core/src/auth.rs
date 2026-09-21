@@ -914,9 +914,12 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
     }
 
     /// The token to send, renewed first when it is about to expire.
-    async fn current_access_token(&self) -> Result<(String, u64), ApiError> {
+    async fn current_access_token(&self, identity: u64) -> Result<(String, u64), ApiError> {
         let decision = {
             let state = self.state.lock().await;
+            if state.identity_epoch != identity {
+                return Err(ApiError::Unauthorized);
+            }
             match &state.access_token {
                 Some(token) => match state.access_token_expiry {
                     None => CurrentToken::Use {
@@ -948,7 +951,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         match decision {
             CurrentToken::Use { token, epoch } => Ok((token, epoch)),
             CurrentToken::RefreshSoon { token, epoch } => {
-                match self.refresh_access_token(epoch).await {
+                match self.refresh_access_token(epoch, identity).await {
                     Ok(renewed) => {
                         let epoch = self.state.lock().await.epoch;
                         Ok((renewed, epoch))
@@ -964,7 +967,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
                         state.access_token_expiry = None;
                     }
                 }
-                let token = self.refresh_access_token(epoch).await?;
+                let token = self.refresh_access_token(epoch, identity).await?;
                 let epoch = self.state.lock().await.epoch;
                 Ok((token, epoch))
             }
@@ -1067,10 +1070,17 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         &self,
         report: &DiagnosticsReport,
     ) -> Result<DiagnosticsReceipt, ApiError> {
+        let identity = self.diagnostics_log_identity().await;
+        self.upload_diagnostics_report_for_identity(report, identity).await
+    }
+
+    pub async fn upload_diagnostics_report_for_identity(
+        &self, report: &DiagnosticsReport, identity: u64,
+    ) -> Result<DiagnosticsReceipt, ApiError> {
         let body = serde_json::to_string(&DiagnosticsReportRequest { report })
             .map_err(|_| ApiError::InvalidResponse)?;
         let response = self
-            .authorized(HttpMethod::Post, endpoints::DIAGNOSTICS_REPORTS, Some(body))
+            .authorized_for_identity(HttpMethod::Post, endpoints::DIAGNOSTICS_REPORTS, Some(body), identity)
             .await?;
         let receipt: DiagnosticsReceipt = decode_json(&response)?;
         // A receipt with no code is useless to the user: they would be told
@@ -1089,6 +1099,13 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         &self,
         window: &TelemetryWindowReport,
     ) -> Result<TelemetryWindowReceipt, ApiError> {
+        let identity = self.diagnostics_log_identity().await;
+        self.upload_telemetry_window_for_identity(window, identity).await
+    }
+
+    pub async fn upload_telemetry_window_for_identity(
+        &self, window: &TelemetryWindowReport, identity: u64,
+    ) -> Result<TelemetryWindowReceipt, ApiError> {
         if window.kind != TELEMETRY_KIND_PERIODIC_WINDOW {
             return Err(ApiError::InvalidInput(
                 "telemetry window kind must be periodic_window".to_string(),
@@ -1102,7 +1119,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         let body = serde_json::to_string(&TelemetryWindowRequest { window })
             .map_err(|_| ApiError::InvalidResponse)?;
         let response = self
-            .authorized(HttpMethod::Post, endpoints::TELEMETRY_WINDOWS, Some(body))
+            .authorized_for_identity(HttpMethod::Post, endpoints::TELEMETRY_WINDOWS, Some(body), identity)
             .await?;
         let receipt: TelemetryWindowReceipt = decode_json(&response)?;
         if receipt.id.trim().is_empty() {
@@ -1117,10 +1134,17 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         &self,
         report: &ConnectFailureReport,
     ) -> Result<ConnectFailureReceipt, ApiError> {
+        let identity = self.diagnostics_log_identity().await;
+        self.upload_connect_failure_for_identity(report, identity).await
+    }
+
+    pub async fn upload_connect_failure_for_identity(
+        &self, report: &ConnectFailureReport, identity: u64,
+    ) -> Result<ConnectFailureReceipt, ApiError> {
         let prepared = report.for_wire()?;
         let body = serde_json::to_string(&prepared).map_err(|_| ApiError::InvalidResponse)?;
         let response = self
-            .authorized(HttpMethod::Post, endpoints::TELEMETRY_FAILURES, Some(body))
+            .authorized_for_identity(HttpMethod::Post, endpoints::TELEMETRY_FAILURES, Some(body), identity)
             .await?;
         decode_json(&response)
     }
@@ -1226,8 +1250,9 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         Ok(())
     }
 
-    /// Best-effort server logout, then local token wipe (§2).
-    pub async fn logout(&self) {
+    /// Best-effort server logout, then a checked local token wipe (§2).
+    /// Asynchronous stores must additionally acknowledge durable deletion at their owner.
+    pub async fn logout(&self) -> Result<(), ApiError> {
         let identity = {
             let mut state = self.state.lock().await;
             state.identity_epoch = state.identity_epoch.wrapping_add(1);
@@ -1238,18 +1263,19 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         // but neither its 401 retry nor its local wipe may borrow that replacement identity.
         let mut state = self.state.lock().await;
         if state.identity_epoch == identity {
+            self.credentials.delete_refresh_token()?;
             state.access_token = None;
             state.access_token_expiry = None;
             state.epoch += 1;
-            let _ = self.credentials.delete_refresh_token();
         }
+        Ok(())
     }
 
     async fn logout_identity(&self, identity: u64) -> Result<(), ApiError> {
         self.ensure_log_identity(identity).await?;
         // A restored refresh-only session must still be revoked server-side. Empty credentials
         // fail here without network I/O. This also preserves the normal pre-expiry renewal.
-        self.current_access_token().await?;
+        self.current_access_token(identity).await?;
         let (token, epoch, body) = self.logout_request(identity).await?;
         match self.call(HttpMethod::Post, endpoints::LOGOUT, Some(body), Some(&token)).await {
             Err(ApiError::Unauthorized) => {
@@ -1262,7 +1288,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
                     state.access_token_expiry = None;
                 }
                 drop(state);
-                self.refresh_access_token(epoch).await?;
+                self.refresh_access_token(epoch, identity).await?;
                 // Rotation can replace the refresh token: capture bearer/body together again,
                 // but only for the original logout identity. No transport retry on this replay.
                 let (token, _, body) = self.logout_request(identity).await?;
@@ -1293,20 +1319,36 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         path: &str,
         body: Option<String>,
     ) -> Result<Vec<u8>, ApiError> {
-        let (token, epoch) = self.current_access_token().await?;
-        match self.call(method, path, body.clone(), Some(&token)).await {
+        let identity = self.diagnostics_log_identity().await;
+        self.authorized_for_identity(method, path, body, identity).await
+    }
+
+    async fn authorized_for_identity(
+        &self, method: HttpMethod, path: &str, body: Option<String>, identity: u64,
+    ) -> Result<Vec<u8>, ApiError> {
+        let (token, epoch) = self.current_access_token(identity).await?;
+        self.ensure_log_identity(identity).await?;
+        let response = self.call(method, path, body.clone(), Some(&token)).await;
+        self.ensure_log_identity(identity).await?;
+        match response {
             Err(ApiError::Unauthorized) => {
                 // Drop the stale token only if nobody refreshed meanwhile.
                 let mut state = self.state.lock().await;
+                if state.identity_epoch != identity {
+                    return Err(ApiError::Unauthorized);
+                }
                 if state.epoch == epoch {
                     state.access_token = None;
                     state.access_token_expiry = None;
                 }
                 drop(state);
-                let renewed = self.refresh_access_token(epoch).await?;
+                let renewed = self.refresh_access_token(epoch, identity).await?;
+                self.ensure_log_identity(identity).await?;
                 // No transport retry on the replay: the refresh just proved
                 // connectivity, and the budget is one retry per logical request.
-                self.send(method, path, body, Some(&renewed)).await
+                let response = self.send(method, path, body, Some(&renewed)).await;
+                self.ensure_log_identity(identity).await?;
+                response
             }
             result => result,
         }
@@ -1326,7 +1368,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         identity_epoch: u64,
     ) -> Result<Vec<u8>, ApiError> {
         self.ensure_log_identity(identity_epoch).await?;
-        let (token, epoch) = self.current_access_token().await?;
+        let (token, epoch) = self.current_access_token(identity_epoch).await?;
         self.ensure_log_identity(identity_epoch).await?;
         let build = |bearer: &str| ApiRequest {
             method: HttpMethod::Post,
@@ -1341,12 +1383,15 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         match result {
             Err(ApiError::Unauthorized) => {
                 let mut state = self.state.lock().await;
+                if state.identity_epoch != identity_epoch {
+                    return Err(ApiError::Unauthorized);
+                }
                 if state.epoch == epoch {
                     state.access_token = None;
                     state.access_token_expiry = None;
                 }
                 drop(state);
-                let renewed = self.refresh_access_token(epoch).await?;
+                let renewed = self.refresh_access_token(epoch, identity_epoch).await?;
                 self.ensure_log_identity(identity_epoch).await?;
                 let replay = map_status(self.transport.send(build(&renewed)).await?);
                 self.ensure_log_identity(identity_epoch).await?;
@@ -1366,20 +1411,20 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
     /// Concurrent refreshes coalesce: the first caller through
     /// `refresh_lock` performs the one in-flight refresh; waiters observe
     /// the bumped epoch and reuse its token instead of refreshing again.
-    async fn refresh_access_token(&self, stale_epoch: u64) -> Result<String, ApiError> {
+    async fn refresh_access_token(&self, stale_epoch: u64, identity: u64) -> Result<String, ApiError> {
         let _permit = self.refresh_lock.lock().await;
-        {
+        let refresh = {
             let state = self.state.lock().await;
+            if state.identity_epoch != identity {
+                return Err(ApiError::Unauthorized);
+            }
             if state.epoch != stale_epoch {
                 if let Some(token) = &state.access_token {
                     return Ok(token.clone());
                 }
             }
-        }
-        let refresh = self
-            .credentials
-            .refresh_token()?
-            .ok_or(ApiError::Unauthorized)?;
+            self.credentials.refresh_token()?.ok_or(ApiError::Unauthorized)?
+        };
         let body = serde_json::to_string(&RefreshRequest {
             refresh_token: refresh,
         })
@@ -1393,6 +1438,9 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         // A stale result is discarded, never written over the new
         // session's tokens (L3).
         let mut state = self.state.lock().await;
+        if state.identity_epoch != identity {
+            return Err(ApiError::Unauthorized);
+        }
         if state.epoch != stale_epoch {
             return state.access_token.clone().ok_or(ApiError::Unauthorized);
         }
@@ -2431,7 +2479,7 @@ mod tests {
         });
         store.set_refresh_token("refresh-1").unwrap();
         client.me().await.unwrap();
-        client.logout().await;
+        client.logout().await.unwrap();
         assert_eq!(
             mock.count_to("auth/logout"),
             1,
@@ -2787,7 +2835,7 @@ mod tests {
             .adopt(&auth_response("access-1", None))
             .await
             .unwrap();
-        client.logout().await;
+        client.logout().await.unwrap();
         assert_eq!(mock.count_to("auth/logout"), 1);
         assert_eq!(store.refresh_token().unwrap(), None);
         // Subsequent authorized calls cannot refresh anymore.
@@ -2828,7 +2876,7 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(2), transport.entered.notified()).await.unwrap();
         client.adopt(&auth_response("new-access", Some("new-refresh"))).await.unwrap();
         transport.release.notify_one();
-        tokio::time::timeout(Duration::from_secs(2), logout).await.unwrap().unwrap();
+        tokio::time::timeout(Duration::from_secs(2), logout).await.unwrap().unwrap().unwrap();
         assert_eq!(store.refresh_token().unwrap().as_deref(), Some("new-refresh"));
         assert_eq!(client.state.lock().await.access_token.as_deref(), Some("new-access"));
         let sent = transport.requests.lock().unwrap();
@@ -2867,6 +2915,7 @@ mod tests {
         let store = Arc::new(MemoryCredentialStore::new());
         let client = Arc::new(ApiClient::new("https://api.example.test", transport.clone(), store.clone()).unwrap());
         client.adopt(&auth_response("old-access", Some("old-refresh"))).await.unwrap();
+        let identity = client.diagnostics_log_identity().await;
         let task_client = client.clone();
         let upload = tokio::spawn(async move { task_client.upload_diagnostics_report(&sample_report()).await });
         tokio::time::timeout(Duration::from_secs(2), transport.entered.notified()).await.unwrap();
@@ -2876,6 +2925,10 @@ mod tests {
         assert_eq!(transport.requests.lock().unwrap().len(), 1, "A's report must never be sent with B's bearer");
         assert_eq!(result, Err(ApiError::Unauthorized));
         assert_eq!(store.refresh_token().unwrap().as_deref(), Some("new-refresh"));
+        // Account replacement before dispatch, not only while a response is held.
+        assert_eq!(client.upload_diagnostics_report_for_identity(&sample_report(), identity).await,
+            Err(ApiError::Unauthorized));
+        assert_eq!(transport.requests.lock().unwrap().len(), 1);
     }
 
     #[test]
@@ -2979,7 +3032,9 @@ mod tests {
             .await
             .unwrap();
         release_tx.send(()).unwrap();
-        let me = pending.await.unwrap().unwrap();
+        assert_eq!(pending.await.unwrap(), Err(ApiError::Unauthorized));
+        assert_eq!(mock.count_to("me"), 0, "the retired request cannot borrow the new token");
+        let me = client.me().await.unwrap();
         assert_eq!(me.user.id, "u");
         assert_eq!(
             store.refresh_token().unwrap().as_deref(),

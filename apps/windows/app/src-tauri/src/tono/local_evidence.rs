@@ -75,9 +75,12 @@ pub struct ConnectionAttempt {
 pub struct FailedAttempt {
     #[serde(flatten)]
     pub attempt: ConnectionAttempt,
+    pub connection_generation: u64,
     pub failed_at_ms: i64,
     pub failed_stage: Option<&'static str>,
     pub error_code: Option<String>,
+    /// Bounded, scrubbed at failure time; local Copy details only, never the cloud payload.
+    pub error_detail: String,
     pub steps: Vec<tono_core::auth::DiagnosticsStep>,
     pub probe_outcomes: Vec<ProbeOutcome>,
 }
@@ -241,9 +244,11 @@ mod tests {
         recorder.record("Google", false, "dns", None, 173);
         let failed = FailedAttempt {
             attempt: first.clone(),
+            connection_generation: 41,
             failed_at_ms: 2000,
             failed_stage: Some("verifyingTraffic"),
             error_code: Some("CORE_EXIT_UNREACHABLE".into()),
+            error_detail: "tls handshake eof".into(),
             steps: vec![],
             probe_outcomes: first.probe_outcomes.lock().unwrap().clone(),
         };

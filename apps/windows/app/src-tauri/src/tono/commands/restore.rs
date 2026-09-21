@@ -181,41 +181,27 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
                 emit_status(&app, &status_of(&inner));
                 return;
             }
-            if matches!(protection, StoredProtection::Armed(_)) {
-                {
-                    let mut inner = state.lock().await;
-                    if inner.sign_in_generation != generation {
-                        return;
-                    }
-                    apply_stored_protection(&mut inner, &protection);
-                }
-                if let Err(error) = connection::release_explicit(&state, &app).await {
-                    let mut inner = state.lock().await;
-                    if inner.sign_in_generation != generation {
-                        return;
-                    }
-                    inner.account_state = AccountState::Error(format!(
-                        "stored protection could not be released while signed out: {error}"
-                    ));
-                    emit_status(&app, &status_of(&inner));
-                    return;
-                }
+            let release_needed = matches!(protection, StoredProtection::Armed(_));
+            if release_needed {
                 let mut inner = state.lock().await;
-                // Generation first, like every sibling block: a user who signed in while the
-                // startup release reconciled may already own a fresh connect transaction, and
-                // `sign_out_or_quit` here would wipe its FSM mid-flight.
                 if inner.sign_in_generation != generation {
                     return;
                 }
-                inner.fsm.sign_out_or_quit();
-                inner.kill_switch = None;
+                apply_stored_protection(&mut inner, &protection);
             }
-            let mut inner = state.lock().await;
-            if inner.sign_in_generation != generation {
-                return;
+            let release_app = app.clone();
+            if let Err(error) = super::account::close_account_with(
+                state, super::account::AccountCloseReason::Missing { generation },
+                move |state| async move {
+                    if release_needed { connection::release_for_account(&state, &release_app).await }
+                    else { Ok(()) }
+                },
+                |client| async move { client.logout().await.map_err(|error| error.to_string()) },
+                |_, _| async {},
+                move |inner| emit_status(&app, &status_of(inner)),
+            ).await {
+                logging!(error, Type::Service, "Tono: signed-out recovery incomplete: {error}");
             }
-            inner.account_state = AccountState::SignedOut;
-            emit_status(&app, &status_of(&inner));
             return;
         }
         TokenProbe::HasToken => {}
@@ -333,8 +319,8 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
         Err(ApiError::Unauthorized) => {
             let release_app = app.clone();
             close_dead_restore_with(state, generation,
-                move |state| async move { connection::release_explicit(&state, &release_app).await },
-                |client| async move { client.logout().await },
+                move |state| async move { connection::release_for_account(&state, &release_app).await },
+                |client| async move { client.logout().await.map_err(|error| error.to_string()) },
                 move |inner| emit_status(&app, &status_of(inner)),
             ).await;
         }
@@ -363,39 +349,15 @@ async fn close_dead_restore_with<R, RF, L, LF, E>(
     R: FnOnce(Arc<TonoState>) -> RF + Send + 'static,
     RF: std::future::Future<Output = Result<(), String>> + Send + 'static,
     L: FnOnce(Arc<crate::tono::state::TonoApiClient>) -> LF + Send + 'static,
-    LF: std::future::Future<Output = ()> + Send + 'static,
+    LF: std::future::Future<Output = Result<(), String>> + Send + 'static,
     E: Fn(&TonoInner) + Send + Sync + 'static,
 {
-    if state.lock().await.sign_in_generation != generation {
-        return;
+    if let Err(error) = super::account::close_account_with(
+        state, super::account::AccountCloseReason::Expired { generation },
+        release, logout, |_, _| async {}, emit,
+    ).await {
+        logging!(error, Type::Service, "Tono: expired-session cleanup not complete: {error}");
     }
-    let release_error = release(Arc::clone(&state)).await.err();
-    if let Some(err) = &release_error {
-        logging!(error, Type::Service, "Tono: 401 恢复时释放 Kill Switch 失败，系统仍受保护: {err}");
-    }
-    let client = {
-        let inner = state.lock().await;
-        if inner.sign_in_generation != generation {
-            return;
-        }
-        inner.client.clone()
-    };
-    logout(client).await;
-    let mut inner = state.lock().await;
-    if inner.sign_in_generation != generation {
-        return;
-    }
-    inner.fsm.sign_out_or_quit();
-    inner.account = None;
-    inner.account_state = AccountState::SignedOut;
-    if release_error.is_some() {
-        inner.fsm.mark_kill_switch_armed();
-    } else {
-        inner.kill_switch = None;
-    }
-    emit(&inner);
-    drop(inner);
-    state.audit().log(AuditEvent::SignOut);
 }
 
 #[cfg(test)]
@@ -414,7 +376,7 @@ mod account_close_tests {
                 resumed.await.unwrap();
                 state.lock().await.fsm.sign_out_or_quit();
                 Ok(())
-            }, |_| async {}, |_| {},
+            }, |_| async { Ok(()) }, |_| {},
         ));
         at_release.await.unwrap();
         let closed = state.lock().await.account_close.is_some();

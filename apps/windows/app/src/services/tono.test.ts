@@ -474,6 +474,7 @@ describe('stable diagnostic copy', () => {
           id: 'attempt-A', startedAtMs: 1712345670000, failedAtMs: 1712345678000,
           selectedServer: 'Buffalo original', transport: 'tcp', catalogRevision: 54,
           failedStage: 'verifyingTraffic', errorCode: 'TONO_NODE_OR_CORE_UNREACHABLE',
+          connectionGeneration: 7, errorDetail: 'tls handshake eof <- dial <ip>:443',
           steps: [{ key: 'verifyingTraffic', state: 'failed', elapsedMs: 2600 }],
           probeOutcomes: [
             { round: 1, path: 'tun', origin: 'Google', passed: false, category: 'dns', actualStatus: null, elapsedMs: 173 },
@@ -487,6 +488,8 @@ describe('stable diagnostic copy', () => {
     expect(copied).toContain('Attempt server: Buffalo original; transport=tcp; catalog=54')
     expect(copied).toContain('Attempt started (UTC): 2024-04-05T19:34:30.000Z')
     expect(copied).toContain('Attempt failure: verifyingTraffic; code=TONO_NODE_OR_CORE_UNREACHABLE')
+    expect(copied).toContain('Attempt generation (process-local): 7')
+    expect(copied).toContain('Attempt cause (scrubbed): tls handshake eof <- dial <ip>:443')
     expect(copied).toContain('verifyingTraffic: failed (2.6s)')
     expect(copied).toContain('round=1 path=tun origin=Google result=failed category=dns status=unknown elapsed=173ms')
     expect(copied).toContain('round=2 path=loopback origin=Apple result=failed category=tls status=unknown elapsed=891ms')

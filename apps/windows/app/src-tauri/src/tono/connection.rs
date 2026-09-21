@@ -426,9 +426,13 @@ async fn retain_attempt_failure(
         crate::tono::steps::fail_current(&mut steps, elapsed);
         let failed = crate::tono::local_evidence::FailedAttempt {
             attempt: attempt_record.clone(),
+            connection_generation: generation,
             failed_at_ms: commands::epoch_millis(),
             failed_stage: inner.fsm.status().stage.map(commands::stage_key),
             error_code: failure::stable_error_code(error).map(str::to_owned),
+            error_detail: crate::tono::diagnostics::scrub_text_with(
+                error, &crate::tono::diagnostics::known_secrets(&inner),
+            ),
             probe_outcomes: attempt_record.probe_outcomes.lock().map(|outcomes| outcomes.clone()).unwrap_or_default(),
             steps: steps
                 .iter()
@@ -561,7 +565,7 @@ async fn fail_connect_observed(
     observed: Option<KillSwitchStatus>, guard: tokio::sync::OwnedRwLockWriteGuard<()>,
 ) -> bool {
     logging!(error, Type::Service, "Tono: 连接事务失败: {err}");
-    let (plan, stage, action, armed, transport, node) = {
+    let (plan, stage, action, armed, transport, node, account_owner) = {
         let mut inner = state.lock().await;
         if inner.connect_generation != generation {
             return false;
@@ -630,7 +634,8 @@ async fn fail_connect_observed(
             .selected_node
             .as_deref()
             .map(tono_core::catalog_transport_of_name);
-        (plan, stage, action, armed, transport, node)
+        let account_owner = (inner.sign_in_generation, inner.client.diagnostics_log_identity().await);
+        (plan, stage, action, armed, transport, node, account_owner)
     };
     let code = failure::stable_error_code(&err).map(str::to_owned);
     state.audit().log(AuditEvent::ConnectFail {
@@ -643,6 +648,7 @@ async fn fail_connect_observed(
     });
     crate::tono::telemetry::spawn_connect_failure_report(
         state,
+        account_owner,
         stage.map(commands::stage_key),
         &err,
         node,
