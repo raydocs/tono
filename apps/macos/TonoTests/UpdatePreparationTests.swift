@@ -20,7 +20,7 @@ final class UpdatePreparationTests: XCTestCase {
 
     func testUpdateSnapshotDoesNotInventRuntimeIdentityAndPreservesKnownCatalog() {
         let app = AppState()
-        app.managedCatalogVersion = 73
+        app.managedCatalogRevision = 73
         app.isProtectionBlocked = true
         let journal = app.softwareUpdateJournal(nextVersion: "0.0.74")
         XCTAssertEqual(journal.coreVersion, "unknown", "no live Core version was read")
