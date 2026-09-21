@@ -394,6 +394,73 @@ where
     Ok(())
 }
 
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use tokio::sync::oneshot;
+
+    #[tokio::test]
+    async fn sign_out_owns_admission_until_logout_finishes_even_without_its_caller() {
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.account_state = AccountState::Ready;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+        }
+        let (entered, at_logout) = oneshot::channel();
+        let (release, resumed) = oneshot::channel();
+        let (done, finished) = oneshot::channel();
+        let done = std::sync::Mutex::new(Some(done));
+        let caller = tokio::spawn(sign_out_with(Arc::clone(&state),
+            |state| async move {
+                state.lock().await.fsm.sign_out_or_quit(); // Service proved the release.
+                Ok(())
+            },
+            move |_| async move {
+                entered.send(()).unwrap();
+                let _ = resumed.await;
+            },
+            |_, _| async {},
+            move |inner| {
+                if inner.account_state == AccountState::SignedOut {
+                    if let Some(done) = done.lock().unwrap().take() { let _ = done.send(()); }
+                }
+            },
+        ));
+        at_logout.await.unwrap();
+        let admitted = {
+            let mut inner = state.lock().await;
+            let generation = inner.connect_generation;
+            connection::begin_attempt(&mut inner, generation).is_some()
+        };
+        caller.abort();
+        assert!(caller.await.unwrap_err().is_cancelled());
+        let _ = release.send(());
+        let completion = tokio::time::timeout(Duration::from_secs(2), finished).await;
+        assert!(!admitted, "release completion must not reopen Connect during server logout");
+        assert!(matches!(completion, Ok(Ok(()))), "account close must outlive its UI waiter");
+        let inner = state.lock().await;
+        assert_eq!(inner.account_state, AccountState::SignedOut);
+        assert!(!inner.fsm.status().is_connecting);
+        assert!(!inner.fsm.kill_switch_armed());
+        drop(inner);
+
+        // Failure is the opposite contract: do not wipe the account or weaken protection.
+        state.lock().await.account_state = AccountState::Ready;
+        state.lock().await.fsm.mark_kill_switch_armed();
+        let result = sign_out_with(Arc::clone(&state),
+            |_| async { Err("DNS restore failed".into()) },
+            |_| async { panic!("logout must not run after a failed explicit release") },
+            |_, _| async {}, |_| {},
+        ).await;
+        assert_eq!(result, Err("DNS restore failed".into()));
+        let inner = state.lock().await;
+        assert_eq!(inner.account_state, AccountState::Ready);
+        assert!(inner.fsm.kill_switch_armed());
+    }
+}
+
 /// The current account, if signed in.
 #[tauri::command]
 pub async fn tono_account(state: tauri::State<'_, Arc<TonoState>>) -> Result<Option<TonoAccountInfo>, String> {

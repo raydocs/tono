@@ -295,6 +295,47 @@ mod tests {
     use tokio::sync::oneshot;
 
     #[tokio::test]
+    async fn release_owner_finishes_session_metadata_after_the_ui_waiter_is_cancelled() {
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            inner.fsm.begin_disconnect();
+            inner.connected_at = Some(std::time::Instant::now());
+            inner.retry_attempt = 7;
+            inner.next_retry_at_ms = Some(9876);
+        }
+        let (entered, at_release) = oneshot::channel();
+        let (resume, resumed) = oneshot::channel();
+        let (settled, settlement) = oneshot::channel();
+        let operation = coordinate_release(&state, None,
+            move |_guard| async move {
+                entered.send(()).unwrap();
+                resumed.await.unwrap();
+                Ok(()) // A proven Service DNS/Core/WFP release, not a UI-only transition.
+            },
+            move || async move { settled.send(()).unwrap(); },
+        ).await;
+        at_release.await.unwrap();
+        let waiter_operation = Arc::clone(&operation);
+        let waiter = tokio::spawn(async move { waiter_operation.wait().await });
+        waiter.abort();
+        let _ = waiter.await;
+        resume.send(()).unwrap();
+        settlement.await.unwrap();
+        operation.wait().await.unwrap();
+        let inner = state.lock().await;
+        assert!(inner.connected_at.is_none(), "the detached release owns the session clock too");
+        assert_eq!(inner.retry_attempt, 0);
+        assert!(inner.next_retry_at_ms.is_none());
+        assert!(!inner.fsm.kill_switch_armed());
+        assert!(!inner.fsm.status().is_disconnecting);
+    }
+
+    #[tokio::test]
     async fn failure_transfers_writer_and_disconnect_joins_the_real_release_result() {
         tokio::time::timeout(Duration::from_secs(5), async {
             let state = Arc::new(TonoState::for_test());
