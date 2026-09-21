@@ -4,7 +4,7 @@
 import { type Env, type Row, now, id, str } from '../env';
 import { ApiError } from '../errors';
 import { DIAGNOSTICS_MAX_REPORTED_AT_MS } from '../diagnostics-limits';
-import { redactJobResult } from './jobs';
+import { redactJobResult } from './job-redaction';
 import { rejectUnexpectedKeys, body } from '../request';
 import {
   edgeAttribution,

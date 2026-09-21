@@ -14,9 +14,9 @@ import {
   heartbeatJob,
   leaseJobs,
   listJobs,
-  redactJobResult,
   validateJobRequest,
 } from '../src/ops/jobs';
+import { redactJobResult } from '../src/ops/job-redaction';
 import { runWorkerJobs } from '../src/ops/jobs-worker';
 import { retirePendingDedupeKey } from '../src/ops/retire-dependencies';
 import { runVerdictPass } from '../src/ops/verdict-run';
