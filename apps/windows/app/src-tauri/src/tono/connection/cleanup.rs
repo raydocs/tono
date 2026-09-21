@@ -13,6 +13,27 @@ use crate::tono::state::TonoState;
 
 use super::failure::StageFailure;
 
+/// Own the asynchronous failure tail independently of its original connect/reconnect caller.
+/// The status future and continuation are injectable so ownership can be tested without Service IPC.
+pub(super) async fn reconcile_failure<S, F, C>(
+    state: Arc<TonoState>,
+    generation: u64,
+    status: S,
+    cleanup: C,
+) -> Result<bool, tokio::task::JoinError>
+where
+    S: std::future::Future<Output = Option<tono_service_protocol::KillSwitchStatus>> + Send + 'static,
+    F: std::future::Future<Output = bool> + Send + 'static,
+    C: FnOnce(Option<tono_service_protocol::KillSwitchStatus>, Option<tokio::sync::OwnedRwLockWriteGuard<()>>) -> F
+        + Send + 'static,
+{
+    tokio::spawn(async move {
+        let _ = (state, generation);
+        let observed = status.await;
+        cleanup(observed, None).await
+    }).await
+}
+
 pub(super) async fn retire_timed_out_generation(state: &Arc<TonoState>, generation: u64) {
     let mut inner = state.lock().await;
     if inner.connect_generation != generation {
@@ -139,4 +160,87 @@ pub(super) async fn stale_after_dns(state: &Arc<TonoState>, generation: u64) -> 
         return stale_after_arm(state, generation).await;
     }
     StageFailure::Stale
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::oneshot;
+
+    #[tokio::test]
+    async fn failure_ownership_spans_status_cleanup_and_caller_abort() {
+        let state = Arc::new(TonoState::create().unwrap());
+        let generation = state.lock().await.connect_generation;
+        let (status_entered, at_status) = oneshot::channel();
+        let (resume_status, status_resumed) = oneshot::channel();
+        let (cleanup_entered, at_cleanup) = oneshot::channel();
+        let (resume_cleanup, cleanup_resumed) = oneshot::channel();
+        let (finished, finish) = oneshot::channel();
+        let caller = tokio::spawn(reconcile_failure(
+            Arc::clone(&state), generation,
+            async move {
+                status_entered.send(()).unwrap();
+                status_resumed.await.unwrap();
+                None
+            },
+            move |_, guard| async move {
+                cleanup_entered.send(()).unwrap();
+                cleanup_resumed.await.unwrap();
+                drop(guard);
+                finished.send(()).unwrap();
+                true
+            },
+        ));
+        at_status.await.unwrap();
+        let replacement = state.begin_connect_mutation();
+        tokio::pin!(replacement);
+        assert!(futures::poll!(&mut replacement).is_pending(),
+            "replacement admission must not overtake failure's status wait");
+        let disconnect = state.begin_privileged_release();
+        tokio::pin!(disconnect);
+        assert!(futures::poll!(&mut disconnect).is_pending(),
+            "Disconnect must join ownership, not release beneath failure status");
+        resume_status.send(()).unwrap();
+        at_cleanup.await.unwrap();
+        caller.abort();
+        assert!(caller.await.unwrap_err().is_cancelled());
+        assert!(futures::poll!(&mut replacement).is_pending(),
+            "post-status/pre-stop ownership must survive the parent abort");
+        assert!(futures::poll!(&mut disconnect).is_pending());
+        resume_cleanup.send(()).unwrap();
+        finish.await.unwrap();
+        drop(replacement.await);
+        drop(disconnect.await);
+
+        // A completion already retired by Disconnect must not adopt successful B.
+        {
+            let mut inner = state.lock().await;
+            inner.invalidate_connection(true);
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            inner.controller_secret = Some("session-B".into());
+            inner.controller_port = Some(19091);
+        }
+        let stale_state = Arc::clone(&state);
+        let applied = reconcile_failure(Arc::clone(&state), generation, async { None },
+            move |_, _guard| async move {
+                let mut inner = stale_state.lock().await;
+                inner.fsm.connect_failed();
+                inner.controller_secret = None;
+                inner.connect_error = Some("late A".into());
+                inner.next_retry_at_ms = Some(1);
+                true
+            }).await.unwrap();
+        assert!(!applied, "retired failure must never execute its continuation");
+        let inner = state.lock().await;
+        assert!(inner.fsm.status().is_connected);
+        assert!(inner.fsm.kill_switch_armed());
+        assert!(inner.fsm.session_verified());
+        assert_eq!(inner.controller_secret.as_deref(), Some("session-B"));
+        assert_eq!(inner.controller_port, Some(19091));
+        assert!(inner.connect_error.is_none());
+        assert!(inner.next_retry_at_ms.is_none());
+    }
 }
