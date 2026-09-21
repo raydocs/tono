@@ -1614,6 +1614,8 @@ async fn engine_apply_snapshot(snapshot: &DnsSnapshot) -> Result<Vec<(String, bo
         // the PowerShell batch, which is precisely why rung 2 verifies on the reported machine
         // even though its live apply keeps failing.
         if ok && is_automatic_reset(snapshot) {
+            #[cfg(test)]
+            test_hooks::note_automatic_reset();
             test_hooks::set_live_dns_on_loopback(false);
         }
         Ok(snapshot
@@ -1762,6 +1764,19 @@ pub(crate) mod test_hooks {
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn set_encrypted_restore_fails(fails: bool) {
         ENCRYPTED_RESTORE_FAILS.store(fails, Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    static AUTOMATIC_RESETS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    #[cfg(test)]
+    pub(crate) fn note_automatic_reset() {
+        AUTOMATIC_RESETS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_automatic_resets() -> usize {
+        AUTOMATIC_RESETS.swap(0, Ordering::Relaxed)
     }
 }
 

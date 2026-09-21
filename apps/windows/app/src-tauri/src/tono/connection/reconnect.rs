@@ -304,3 +304,61 @@ pub(super) async fn reconnect_loop(state: Arc<TonoState>, app: AppHandle, first_
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::oneshot;
+
+    #[tokio::test]
+    async fn retry_replacement_cancels_the_displaced_loop_before_losing_its_handle() {
+        struct OnDrop(Option<oneshot::Sender<()>>);
+        impl Drop for OnDrop {
+            fn drop(&mut self) {
+                if let Some(sender) = self.0.take() {
+                    let _ = sender.send(());
+                }
+            }
+        }
+
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.account_state = AccountState::Ready;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            inner.fsm.tunnel_died();
+            // Both callers have already passed the old command's separate abort section.
+            inner.tasks.abort_reconnect();
+            inner.tasks.abort_reconnect();
+        }
+        let (entered, entry) = oneshot::channel();
+        let (dropped, drop_observed) = oneshot::channel();
+        retry_reconnect_with(&state, |_| tauri::async_runtime::spawn(async move {
+            let _lifetime = OnDrop(Some(dropped));
+            entered.send(()).unwrap();
+            std::future::pending::<()>().await;
+        })).await;
+        entry.await.unwrap();
+        let displaced = state.lock().await.tasks.reconnect.as_ref().unwrap().inner().abort_handle();
+        let (entered, entry) = oneshot::channel();
+        let (dropped, survivor_drop) = oneshot::channel();
+        retry_reconnect_with(&state, |_| tauri::async_runtime::spawn(async move {
+            let _lifetime = OnDrop(Some(dropped));
+            entered.send(()).unwrap();
+            std::future::pending::<()>().await;
+        })).await;
+        entry.await.unwrap();
+        let cancelled = tokio::time::timeout(Duration::from_secs(2), drop_observed).await;
+        // Clean up even on the deliberately failing baseline; no orphan survives the test.
+        displaced.abort();
+        state.lock().await.invalidate_connection(true);
+        tokio::time::timeout(Duration::from_secs(2), survivor_drop).await.unwrap().unwrap();
+        assert!(cancelled.is_ok(), "replacing the registry slot must cancel the displaced reconnect loop");
+        let inner = state.lock().await;
+        assert!(inner.tasks.reconnect.is_none());
+        assert!(inner.fsm.kill_switch_armed(), "task retirement must not release protection");
+    }
+}
