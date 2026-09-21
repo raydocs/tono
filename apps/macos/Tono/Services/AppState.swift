@@ -390,14 +390,18 @@ final class AppState {
                 forInfoDictionaryKey: "CFBundleShortVersionString"
             ) as? String ?? "unknown",
             nextAppVersion: nextVersion,
-            coreVersion: "v1.19.30-tono-gvisor-adaptive.1",
+            // The helper does not attest the running binary's version/digest,
+            // and this bundle has no source-commit field. Preserve unknowns;
+            // a packaged input or CFBundleVersion cannot supply those facts.
+            coreVersion: "unknown",
             coreSHA256: "",
-            buildCommit: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "",
+            buildCommit: "",
+            // Required contract for this app, not an observed helper identity.
             helperProtocolVersion: HelperProtocolVersion.current,
             wasConnected: isConnected || isConnecting || isProtectionBlocked,
             keepKillSwitchArmed: isConnected || isConnecting || isProtectionBlocked || KillSwitchService.isArmed,
             selectedNodeAnonymousId: selectedExitNode()?.id,
-            catalogRevision: nil,
+            catalogRevision: managedCatalogVersion,
             connectionGeneration: connectionCoordinator.protectionOperationGeneration
         )
     }

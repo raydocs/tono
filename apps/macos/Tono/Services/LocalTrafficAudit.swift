@@ -58,6 +58,8 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
     static let shared = LocalTrafficAudit()
     static let maximumFileBytes = 10 * 1_024 * 1_024
     static let maximumBackups = 2
+    static let maximumPendingEntries = 256
+    static let maximumPendingBytes = 256 * 1_024
 
     static var isEnabled: Bool {
         AppProfile.defaults.object(
@@ -85,6 +87,7 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
     let timestampFormatter: ISO8601DateFormatter
     var pending: [Data] = []
     var pendingBytes = 0
+    var droppedPendingEntries = 0
     var flushWorkItem: DispatchWorkItem?
     var seenConnectionIDs = Set<String>()
     var seenConnectionOrder: [String] = []
