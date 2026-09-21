@@ -323,8 +323,8 @@ pub(super) async fn cold_switch_selected_node(
         return;
     }
     match attempt_for_generation(&state, &app, Some(generation)).await {
-        Attempt::Failed { generation, error } => {
-            if fail_connect(&state, &app, generation, error).await {
+        Attempt::Failed { generation, error, account_owner } => {
+            if fail_connect(&state, &app, generation, error, account_owner).await {
                 schedule_reconnect_for_generation(&state, &app, generation).await;
             }
         }

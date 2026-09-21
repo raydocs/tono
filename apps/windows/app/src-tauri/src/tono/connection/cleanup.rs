@@ -231,19 +231,19 @@ mod tests {
         state.lock().await.challenge_id = Some("challenge-a".into());
         account::adopt_sign_in_response(&state, &client, first_auth, "challenge-a", &auth("a"), |_| {})
             .await.unwrap();
-        let generation = {
+        let (generation, _, account_owner) = {
             let mut inner = state.lock().await;
-            super::super::begin_attempt(&mut inner, 0).unwrap().0
+            super::super::begin_attempt(&mut inner, 0).await.unwrap()
         };
         // A same-account failure must actually upload; silently dropping every report is wrong.
         let control = super::super::record_connect_failure(
-            &state, generation, "CORE_EXIT_UNREACHABLE: same-account evidence", None,
+            &state, generation, "CORE_EXIT_UNREACHABLE: same-account evidence", None, account_owner,
         ).await.unwrap();
         timeout(Duration::from_secs(5), control.report.unwrap()).await.unwrap().unwrap();
 
-        let generation = {
+        let (generation, _, account_owner) = {
             let mut inner = state.lock().await;
-            super::super::begin_attempt(&mut inner, generation).unwrap().0
+            super::super::begin_attempt(&mut inner, generation).await.unwrap()
         };
         let (entered, at_status) = oneshot::channel();
         let (resume, resumed) = oneshot::channel();
@@ -256,7 +256,7 @@ mod tests {
             },
             move |observed, _guard| async move {
                 let recorded = super::super::record_connect_failure(
-                    &task_state, generation, "CORE_EXIT_UNREACHABLE: old attempt A", observed,
+                    &task_state, generation, "CORE_EXIT_UNREACHABLE: old attempt A", observed, account_owner,
                 ).await.unwrap();
                 // Account replacement must not discard the required network cleanup plan.
                 assert_eq!(recorded.plan.stop_core, Some(true));
@@ -291,14 +291,14 @@ mod tests {
     async fn idle_retry_admission_retires_failure_tails_before_they_publish() {
         let state = Arc::new(TonoState::for_test());
         let mut inner = state.lock().await;
-        let (first, first_token) = super::super::begin_attempt(&mut inner, 0).unwrap();
+        let (first, first_token, _) = super::super::begin_attempt(&mut inner, 0).await.unwrap();
         assert_eq!(first, 1);
         inner.fsm.connect_failed();
-        let (second, second_token) = super::super::begin_attempt(&mut inner, first).unwrap();
+        let (second, second_token, _) = super::super::begin_attempt(&mut inner, first).await.unwrap();
         assert_eq!(second, 2, "an idle retry must not reuse the failed attempt's epoch");
         assert!(first_token.is_cancelled());
         assert!(!second_token.is_cancelled());
-        assert!(super::super::begin_attempt(&mut inner, first).is_none());
+        assert!(super::super::begin_attempt(&mut inner, first).await.is_none());
         inner.next_retry_at_ms = Some(12345);
         drop(inner);
         super::super::reconnect::publish_next_retry(&state, first, None).await;
@@ -311,15 +311,16 @@ mod tests {
     async fn timeout_returns_only_its_own_successor_and_external_retirement_is_stale() {
         use super::super::{Attempt, attempt_from_stage_failure};
         let state = Arc::new(TonoState::for_test());
-        let (record, cancelled) = {
+        let (record, cancelled, account_owner) = {
             let mut inner = state.lock().await;
             inner.connect_generation = 41;
             inner.fsm.begin_connect();
             inner.fsm.mark_kill_switch_armed();
             inner.tasks.reconnect = Some(tauri::async_runtime::spawn(std::future::pending()));
-            (inner.attempt_history.begin(1, "exit-A".into(), "vless", 3), inner.connect_cancellation.clone())
+            (inner.attempt_history.begin(1, "exit-A".into(), "vless", 3), inner.connect_cancellation.clone(),
+                (inner.sign_in_generation, inner.client.diagnostics_log_identity().await))
         };
-        let own = attempt_from_stage_failure(&state, 41, &record, StageFailure::TimedOut("deadline".into())).await;
+        let own = attempt_from_stage_failure(&state, 41, &record, StageFailure::TimedOut("deadline".into()), account_owner).await;
         assert!(cancelled.is_cancelled());
         {
             let mut inner = state.lock().await;
@@ -333,8 +334,9 @@ mod tests {
         }
         // Inspect the returned outcome AFTER an unrelated retirement: it must still contain 42,
         // not whatever generation the failure consumer happens to observe later.
-        assert!(matches!(own, Attempt::Failed { generation: 42, error } if error == "deadline"));
-        let external = attempt_from_stage_failure(&state, 42, &record, StageFailure::TimedOut("late".into())).await;
+        assert!(matches!(own, Attempt::Failed { generation: 42, error, account_owner: owner }
+            if error == "deadline" && owner == account_owner));
+        let external = attempt_from_stage_failure(&state, 42, &record, StageFailure::TimedOut("late".into()), account_owner).await;
         assert!(matches!(external, Attempt::Stale));
         let inner = state.lock().await;
         assert_eq!(inner.connect_generation, 43);
@@ -413,7 +415,7 @@ mod tests {
         {
             let mut inner = state.lock().await;
             let current = inner.connect_generation;
-            super::super::begin_attempt(&mut inner, current).unwrap();
+            super::super::begin_attempt(&mut inner, current).await.unwrap();
             inner.fsm.mark_kill_switch_armed();
             inner.fsm.mark_session_verified();
             inner.fsm.connect_succeeded().unwrap();

@@ -276,9 +276,9 @@ pub(super) async fn reconnect_loop(state: Arc<TonoState>, app: AppHandle, first_
                     }
                 }
             }
-            Attempt::Failed { generation: failed_generation, error } => {
+            Attempt::Failed { generation: failed_generation, error, account_owner } => {
                 generation = failed_generation;
-                if !fail_connect(&state, &app, generation, error).await {
+                if !fail_connect(&state, &app, generation, error, account_owner).await {
                     return;
                 }
                 let (next, spent) = {

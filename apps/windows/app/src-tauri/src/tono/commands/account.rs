@@ -578,7 +578,7 @@ mod lifecycle_tests {
         let admitted = {
             let mut inner = state.lock().await;
             let generation = inner.connect_generation;
-            connection::begin_attempt(&mut inner, generation).is_some()
+            connection::begin_attempt(&mut inner, generation).await.is_some()
         };
         caller.abort();
         assert!(caller.await.unwrap_err().is_cancelled());
