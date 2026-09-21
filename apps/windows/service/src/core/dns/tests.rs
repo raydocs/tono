@@ -1,6 +1,39 @@
     use super::*;
     use serial_test::serial;
 
+    #[tokio::test]
+    #[serial]
+    async fn nrpt_restore_failure_keeps_release_closed_and_retryable() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("9.9.9.9"))]).await?;
+        test_hooks::set_encrypted_restore_fails(true);
+        let failed = ensure_restored().await;
+        test_hooks::set_encrypted_restore_fails(false);
+        assert!(failed.is_err(), "NRPT failure must refuse the disarm gate");
+        assert!(snapshot_path().exists(), "keep recovery evidence until NRPT is restored");
+        ensure_restored().await?;
+        assert!(!snapshot_path().exists());
+
+        // An older build may already have deleted the adapter snapshot while leaving NRPT.
+        test_hooks::set_encrypted_restore_fails(true);
+        let missing = ensure_restored().await;
+        test_hooks::set_encrypted_restore_fails(false);
+        assert!(missing.is_err(), "no adapter snapshot does not prove NRPT is clean");
+        ensure_restored().await?;
+
+        // A corrupt adapter snapshot also cannot bypass the same restore requirement.
+        atomic_write(&snapshot_path(), b"{ corrupt").await?;
+        test_hooks::set_encrypted_restore_fails(true);
+        let corrupt = ensure_restored().await;
+        test_hooks::set_encrypted_restore_fails(false);
+        assert!(corrupt.is_err(), "unreadable snapshot must not suppress NRPT failure");
+        assert!(snapshot_path().exists(), "do not quarantine before required cleanup succeeds");
+        ensure_restored().await?;
+        assert!(!snapshot_path().exists());
+        reset_dns_state().await;
+        Ok(())
+    }
+
     fn adapter(guid: &str, v4: Option<&str>) -> AdapterDnsSnapshot {
         AdapterDnsSnapshot {
             interface_guid: guid.to_owned(),

@@ -1752,6 +1752,17 @@ pub(crate) mod test_hooks {
     pub(crate) fn set_apply_batch_unavailable(unavailable: bool) {
         APPLY_BATCH_UNAVAILABLE.store(unavailable, Ordering::Relaxed);
     }
+
+    static ENCRYPTED_RESTORE_FAILS: AtomicBool = AtomicBool::new(false);
+
+    pub(crate) fn encrypted_restore_fails() -> bool {
+        ENCRYPTED_RESTORE_FAILS.load(Ordering::Relaxed)
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_encrypted_restore_fails(fails: bool) {
+        ENCRYPTED_RESTORE_FAILS.store(fails, Ordering::Relaxed);
+    }
 }
 
 async fn engine_flush_cache() -> Result<()> {
@@ -1795,6 +1806,9 @@ async fn engine_restore_encrypted_dns() -> Result<()> {
     }
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
+        if test_hooks::encrypted_restore_fails() {
+            bail!("injected Tono NRPT removal failure");
+        }
         Ok(())
     }
 }
