@@ -179,7 +179,7 @@ enum Attempt {
     /// selection, suspended). No failure handling applies.
     GuardRejected(String),
     /// The transaction ran (or reached the service checks) and failed.
-    Failed(String),
+    Failed { generation: u64, error: String },
     /// The connect generation moved under us (disconnect / sign-out / node
     /// switch / catalog teardown). Exit without touching the FSM, the core,
     /// or the UI: the flow that bumped the generation owns the cleanup.
@@ -223,10 +223,11 @@ pub async fn connect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String
         }
         Attempt::GuardRejected(err) => Err(err),
         Attempt::Stale => Err("connection superseded by a newer transition".to_string()),
-        Attempt::Failed(err) => {
-            let err = fail_connect(&state, &app, err).await;
-            schedule_reconnect(&state, &app).await;
-            Err(err)
+        Attempt::Failed { generation, error } => {
+            if fail_connect(&state, &app, generation, error.clone()).await {
+                reconnect::schedule_reconnect_for_generation(&state, &app, generation).await;
+            }
+            Err(error)
         }
     }
 }
@@ -242,8 +243,24 @@ fn attempt_for_generation<'a>(state: &'a Arc<TonoState>, app: &'a AppHandle, exp
     Box::pin(attempt_inner(state, app, expected_generation))
 }
 
+/// The caller holds lifecycle admission and the state mutex. Idle is not an ownership token:
+/// every admitted retry gets a fresh epoch so a completed failure tail cannot act on its state.
+fn begin_attempt(inner: &mut TonoInner, generation: u64) -> Option<(u64, CancellationToken)> {
+    if inner.fsm.status().is_disconnecting
+        || !single_flight_begin(&mut inner.fsm, inner.connect_generation, generation)
+    {
+        return None;
+    }
+    // Abort-free: the registered reconnect/switch task may itself be admitting this attempt.
+    inner.retire_connection_generation(false);
+    Some((inner.connect_generation, inner.connect_cancellation.clone()))
+}
+
 async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generation: Option<u64>) -> Attempt {
-    let (node, nodes, routing, generation, cancellation) = match guard_snapshot(state).await {
+    // Admission is a lifecycle mutation too: failure may have made the FSM idle while its
+    // detached cleanup still owns the Core. Do not reuse that idle window or its generation.
+    let admission = state.begin_connect_mutation().await;
+    let (node, nodes, routing, generation, _) = match guard_snapshot(state).await {
         Ok(snapshot) => snapshot,
         Err(err) => return Attempt::GuardRejected(err),
     };
@@ -252,22 +269,20 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
     if expected_generation.is_some_and(|expected| expected != generation) {
         return Attempt::Stale;
     }
-    let transaction = ConnectTransaction::new(cancellation);
     // L5: the clock starts at the top of the attempt, so even a
     // service-readiness failure leaves no orphan ConnectFail.
     let started = std::time::Instant::now();
     // F5 single-flight, latched BEFORE any service I/O: rapid repeated
     // clicks admit exactly one attempt to the service probe; the rest exit
     // here with no side effects (the real-machine double-probe this kills).
-    let attempt_record = {
+    let (attempt_record, generation, cancellation) = {
         let mut inner = state.lock().await;
-        let current_generation = inner.connect_generation;
-        if !single_flight_begin(&mut inner.fsm, current_generation, generation) {
+        let Some((admitted_generation, cancellation)) = begin_attempt(&mut inner, generation) else {
             if inner.connect_generation != generation {
                 return Attempt::Stale;
             }
             return Attempt::GuardRejected(TRANSITION_IN_FLIGHT_REJECTION.to_string());
-        }
+        };
         // A disconnected-only endpoint batch cannot overlap WFP/Core startup. Cancel it in the
         // same critical section that atomically moves the FSM to Connecting, leaving no new-test
         // admission window between the two operations.
@@ -298,13 +313,16 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
                 node.server.to_string(),
             ],
         );
-        inner.attempt_history.begin(
+        let record = inner.attempt_history.begin(
             commands::epoch_millis(),
             name,
             node.catalog_transport(),
             revision,
-        )
+        );
+        (record, admitted_generation, cancellation)
     };
+    drop(admission);
+    let transaction = ConnectTransaction::new(cancellation);
 
     state.audit().log(AuditEvent::ConnectBegin {
         node: node.name.clone(),
@@ -330,7 +348,7 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
             {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => {
-                    return Attempt::Failed(format!("{BROWSER_DNS_PREFLIGHT_PREFIX}: {error}"));
+                    return Attempt::Failed { generation, error: format!("{BROWSER_DNS_PREFLIGHT_PREFIX}: {error}") };
                 }
                 Err(failure) => {
                     return attempt_from_stage_failure(state, generation, &attempt_record, failure)
@@ -348,7 +366,7 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
                 // The kill switch may already be armed from a previous session, so this is a
                 // transaction failure, not a guard rejection. `fail_connect` runs the decision
                 // table and (pre-arm) releases the FSM cleanly.
-                return Attempt::Failed(err);
+                return Attempt::Failed { generation, error: err };
             }
             Err(failure) => {
                 return attempt_from_stage_failure(state, generation, &attempt_record, failure)
@@ -374,17 +392,13 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
         .await
         {
             Ok(()) => Attempt::Connected,
-            Err(StageFailure::Stale) => Attempt::Stale,
-            Err(StageFailure::TimedOut(err)) => {
-                retain_attempt_failure(state, generation, &attempt_record, &err).await;
-                retire_timed_out_generation(state, generation).await;
-                Attempt::Failed(err)
+            Err(failure) => {
+                attempt_from_stage_failure(state, generation, &attempt_record, failure).await
             }
-            Err(StageFailure::Error(err)) => Attempt::Failed(err),
         }
     }
     .await;
-    if let Attempt::Failed(error) = &outcome {
+    if let Attempt::Failed { error, .. } = &outcome {
         retain_attempt_failure(state, generation, &attempt_record, error).await;
     }
     outcome
@@ -435,10 +449,12 @@ async fn attempt_from_stage_failure(
         StageFailure::Stale => Attempt::Stale,
         StageFailure::TimedOut(error) => {
             retain_attempt_failure(state, generation, attempt_record, &error).await;
-            retire_timed_out_generation(state, generation).await;
-            Attempt::Failed(error)
+            match retire_timed_out_generation(state, generation).await {
+                Some(generation) => Attempt::Failed { generation, error },
+                None => Attempt::Stale,
+            }
         }
-        StageFailure::Error(error) => Attempt::Failed(error),
+        StageFailure::Error(error) => Attempt::Failed { generation, error },
     }
 }
 
@@ -514,29 +530,35 @@ async fn guard_snapshot(
 /// The §6 failure decision table, executing [`plan_failure`]. After arm:
 /// stop the core, keep blocking (restrict to the bootstrap channel),
 /// Protected Offline. Before arm: full release.
-async fn fail_connect(state: &Arc<TonoState>, app: &AppHandle, err: String) -> String {
-    let generation = state.lock().await.connect_generation;
+async fn fail_connect(state: &Arc<TonoState>, app: &AppHandle, generation: u64, err: String) -> bool {
     let task_state = Arc::clone(state);
     let task_app = app.clone();
-    let task_error = err.clone();
-    let _ = cleanup::reconcile_failure(
+    match cleanup::reconcile_failure(
         Arc::clone(state),
         generation,
         async { service::tono_kill_switch_status().await.ok() },
-        move |observed, _guard| async move {
-            fail_connect_observed(&task_state, &task_app, task_error, observed).await;
-            true
+        move |observed, guard| async move {
+            fail_connect_observed(&task_state, &task_app, generation, err, observed, guard).await
         },
-    ).await;
-    err
+    ).await {
+        Ok(current) => current,
+        Err(error) => {
+            logging!(error, Type::Service, "Tono: failure reconciliation worker failed; keeping protection: {error}");
+            false
+        }
+    }
 }
 
 async fn fail_connect_observed(
-    state: &Arc<TonoState>, app: &AppHandle, err: String, observed: Option<KillSwitchStatus>,
-) {
+    state: &Arc<TonoState>, app: &AppHandle, generation: u64, err: String,
+    observed: Option<KillSwitchStatus>, guard: tokio::sync::OwnedRwLockWriteGuard<()>,
+) -> bool {
     logging!(error, Type::Service, "Tono: 连接事务失败: {err}");
     let (plan, stage, action, armed, transport, node) = {
         let mut inner = state.lock().await;
+        if inner.connect_generation != generation {
+            return false;
+        }
         if let Some(status) = &observed {
             inner.kill_switch = Some(status.clone());
         }
@@ -626,26 +648,36 @@ async fn fail_connect_observed(
             .log(AuditEvent::ProtectedOffline { reason: "connectFail" });
     }
 
-    if plan.stop_core == Some(true) && armed {
-        match release_explicit(state, app).await {
-            Ok(()) => {
-                state.lock().await.fsm.connect_failed();
-            }
+    let mut guard = Some(guard);
+    let release_result = if plan.stop_core == Some(true) && armed {
+        // Register the real release before transferring this writer. If Disconnect already
+        // registered its worker, the coordinator drops our writer and joins that actual result.
+        Some(disconnect::release_explicit_with_guard(state, app, guard.take()).await)
+    } else {
+        if let Some(release) = plan.stop_core {
+            let _ = service::tono_stop_core(release).await;
+        }
+        if plan.restrict_bootstrap {
+            let _ = service::tono_restrict_bootstrap().await;
+        }
+        None
+    };
+
+    let mut inner = state.lock().await;
+    if inner.connect_generation != generation {
+        return false;
+    }
+    if let Some(result) = release_result {
+        match result {
+            Ok(()) => { inner.fsm.connect_failed(); }
             Err(release_error) => {
-                let mut inner = state.lock().await;
                 inner.fsm.initial_release_failed();
                 inner.connect_error = Some(crate::tono::audit::redact(&format!("{err}; {release_error}")));
             }
         }
-    } else if let Some(release) = plan.stop_core {
-        let _ = service::tono_stop_core(release).await;
     }
-    if plan.restrict_bootstrap {
-        let _ = service::tono_restrict_bootstrap().await;
-    }
-
-    let inner = state.lock().await;
     commands::emit_status(app, &commands::status_of(&inner));
+    true
 }
 
 

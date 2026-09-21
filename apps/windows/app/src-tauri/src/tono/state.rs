@@ -222,8 +222,8 @@ pub struct TonoInner {
     /// Monotonic epoch of the controller endpoint adopted by the UI. Unlike the connect
     /// transaction generation, this also advances for automatic recovery within one intent.
     pub controller_generation: u64,
-    /// Connect transaction generation. Disconnect, sign-out, and node
-    /// switches bump it; an in-flight attempt re-checks it at every stage
+    /// Connect transaction generation. Every admitted attempt, Disconnect, sign-out, and node
+    /// switch bumps it; an in-flight attempt re-checks it at every stage
     /// boundary and exits without side effects when it moved.
     pub connect_generation: u64,
     /// Immediate cancellation signal for read-only/current-stage work. Privileged IPC mutations
@@ -459,7 +459,8 @@ pub struct TonoState {
     release_operation: tokio::sync::Mutex<Option<Arc<ReleaseOperation>>>,
     /// A late StartClash or DNS-enable commit must settle before explicit release reaches the
     /// Service. Connect mutations hold a read guard inside their detached reconciliation task;
-    /// the one release worker holds the write guard through the atomic Service release.
+    /// admission also takes a reader. Detached failure/switch cleanup and the one release worker
+    /// hold the writer; a full-release failure transfers its writer into that coordinator.
     privileged_transition: Arc<tokio::sync::RwLock<()>>,
     /// Prevent a validated cloud policy from being revoked/replaced between DIRECT runtime
     /// staging and the final exact WFP endpoint commit. Sync commits take the writer; one

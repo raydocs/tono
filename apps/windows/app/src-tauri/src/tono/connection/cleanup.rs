@@ -24,20 +24,28 @@ pub(super) async fn reconcile_failure<S, F, C>(
 where
     S: std::future::Future<Output = Option<tono_service_protocol::KillSwitchStatus>> + Send + 'static,
     F: std::future::Future<Output = bool> + Send + 'static,
-    C: FnOnce(Option<tono_service_protocol::KillSwitchStatus>, Option<tokio::sync::OwnedRwLockWriteGuard<()>>) -> F
+    C: FnOnce(Option<tono_service_protocol::KillSwitchStatus>, tokio::sync::OwnedRwLockWriteGuard<()>) -> F
         + Send + 'static,
 {
     tokio::spawn(async move {
-        let _ = (state, generation);
+        let guard = state.begin_privileged_release().await;
+        if state.lock().await.connect_generation != generation {
+            return false;
+        }
         let observed = status.await;
-        cleanup(observed, None).await
+        // Disconnect may retire the attempt while status is awaiting IPC. It cannot release or
+        // admit a replacement through our writer, but its intent still supersedes this failure.
+        if state.lock().await.connect_generation != generation {
+            return false;
+        }
+        cleanup(observed, guard).await
     }).await
 }
 
-pub(super) async fn retire_timed_out_generation(state: &Arc<TonoState>, generation: u64) {
+pub(super) async fn retire_timed_out_generation(state: &Arc<TonoState>, generation: u64) -> Option<u64> {
     let mut inner = state.lock().await;
     if inner.connect_generation != generation {
-        return;
+        return None;
     }
     // A first attempt may release a late unverified arm. A previously verified protected
     // reconnect keeps the barrier, matching the normal failure decision table.
@@ -46,6 +54,7 @@ pub(super) async fn retire_timed_out_generation(state: &Arc<TonoState>, generati
     // task (reconnect loop / monitor re-entry / switch), and aborting the registry here would
     // kill the caller before `fail_connect` + `schedule_reconnect` run, stranding Connecting.
     inner.retire_connection_generation(release_late_commit);
+    Some(inner.connect_generation)
 }
 
 /// The generation guard used between the long I/O steps.
@@ -166,6 +175,63 @@ pub(super) async fn stale_after_dns(state: &Arc<TonoState>, generation: u64) -> 
 mod tests {
     use super::*;
     use tokio::sync::oneshot;
+    use tokio::time::{Duration, timeout};
+
+    #[tokio::test]
+    async fn idle_retry_admission_retires_failure_tails_before_they_publish() {
+        let state = Arc::new(TonoState::for_test());
+        let mut inner = state.lock().await;
+        let (first, first_token) = super::super::begin_attempt(&mut inner, 0).unwrap();
+        assert_eq!(first, 1);
+        inner.fsm.connect_failed();
+        let (second, second_token) = super::super::begin_attempt(&mut inner, first).unwrap();
+        assert_eq!(second, 2, "an idle retry must not reuse the failed attempt's epoch");
+        assert!(first_token.is_cancelled());
+        assert!(!second_token.is_cancelled());
+        assert!(super::super::begin_attempt(&mut inner, first).is_none());
+        inner.next_retry_at_ms = Some(12345);
+        drop(inner);
+        super::super::reconnect::publish_next_retry(&state, first, None).await;
+        let inner = state.lock().await;
+        assert_eq!(inner.next_retry_at_ms, Some(12345), "a stale tail cannot clear B's deadline");
+        assert!(inner.fsm.status().is_connecting);
+    }
+
+    #[tokio::test]
+    async fn timeout_returns_only_its_own_successor_and_external_retirement_is_stale() {
+        use super::super::{Attempt, attempt_from_stage_failure};
+        let state = Arc::new(TonoState::for_test());
+        let (record, cancelled) = {
+            let mut inner = state.lock().await;
+            inner.connect_generation = 41;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.tasks.reconnect = Some(tauri::async_runtime::spawn(std::future::pending()));
+            (inner.attempt_history.begin(1, "exit-A".into(), "vless", 3), inner.connect_cancellation.clone())
+        };
+        let own = attempt_from_stage_failure(&state, 41, &record, StageFailure::TimedOut("deadline".into())).await;
+        assert!(cancelled.is_cancelled());
+        {
+            let mut inner = state.lock().await;
+            assert_eq!(inner.connect_generation, 42);
+            assert!(inner.release_intent_for(41));
+            assert!(!inner.tasks.reconnect.as_ref().unwrap().inner().is_finished(),
+                "self-timeout must not abort its registered failure consumer");
+            inner.invalidate_connection(true);
+            inner.fsm.sign_out_or_quit();
+            inner.controller_secret = Some("new-owner".into());
+        }
+        // Inspect the returned outcome AFTER an unrelated retirement: it must still contain 42,
+        // not whatever generation the failure consumer happens to observe later.
+        assert!(matches!(own, Attempt::Failed { generation: 42, error } if error == "deadline"));
+        let external = attempt_from_stage_failure(&state, 42, &record, StageFailure::TimedOut("late".into())).await;
+        assert!(matches!(external, Attempt::Stale));
+        let inner = state.lock().await;
+        assert_eq!(inner.connect_generation, 43);
+        assert_eq!(inner.controller_secret.as_deref(), Some("new-owner"));
+        assert!(inner.connect_error.is_none());
+        assert!(inner.next_retry_at_ms.is_none());
+    }
 
     #[tokio::test]
     async fn failure_ownership_spans_status_cleanup_and_caller_abort() {
@@ -191,7 +257,7 @@ mod tests {
                 true
             },
         ));
-        at_status.await.unwrap();
+        timeout(Duration::from_secs(5), at_status).await.unwrap().unwrap();
         let replacement = state.begin_connect_mutation();
         tokio::pin!(replacement);
         assert!(futures::poll!(&mut replacement).is_pending(),
@@ -201,22 +267,43 @@ mod tests {
         assert!(futures::poll!(&mut disconnect).is_pending(),
             "Disconnect must join ownership, not release beneath failure status");
         resume_status.send(()).unwrap();
-        at_cleanup.await.unwrap();
+        timeout(Duration::from_secs(5), at_cleanup).await.unwrap().unwrap();
         caller.abort();
         assert!(caller.await.unwrap_err().is_cancelled());
         assert!(futures::poll!(&mut replacement).is_pending(),
             "post-status/pre-stop ownership must survive the parent abort");
         assert!(futures::poll!(&mut disconnect).is_pending());
         resume_cleanup.send(()).unwrap();
-        finish.await.unwrap();
-        drop(replacement.await);
-        drop(disconnect.await);
+        timeout(Duration::from_secs(5), finish).await.unwrap().unwrap();
+        drop(timeout(Duration::from_secs(5), replacement).await.unwrap());
+        drop(timeout(Duration::from_secs(5), disconnect).await.unwrap());
+
+        // Disconnect can retire A during status, but cannot complete privileged release before
+        // A relinquishes ownership. The resumed status must never enter its failure continuation.
+        let (entered, at_status) = oneshot::channel();
+        let (resume, resumed) = oneshot::channel();
+        let retired = tokio::spawn(reconcile_failure(Arc::clone(&state), generation,
+            async move {
+                entered.send(()).unwrap();
+                resumed.await.unwrap();
+                None
+            },
+            |_, _| async { panic!("status returned for a retired attempt") },
+        ));
+        timeout(Duration::from_secs(5), at_status).await.unwrap().unwrap();
+        state.lock().await.invalidate_connection(true);
+        let disconnect = state.begin_privileged_release();
+        tokio::pin!(disconnect);
+        assert!(futures::poll!(&mut disconnect).is_pending());
+        resume.send(()).unwrap();
+        assert!(!timeout(Duration::from_secs(5), retired).await.unwrap().unwrap().unwrap());
+        drop(timeout(Duration::from_secs(5), disconnect).await.unwrap());
 
         // A completion already retired by Disconnect must not adopt successful B.
         {
             let mut inner = state.lock().await;
-            inner.invalidate_connection(true);
-            inner.fsm.begin_connect();
+            let current = inner.connect_generation;
+            super::super::begin_attempt(&mut inner, current).unwrap();
             inner.fsm.mark_kill_switch_armed();
             inner.fsm.mark_session_verified();
             inner.fsm.connect_succeeded().unwrap();

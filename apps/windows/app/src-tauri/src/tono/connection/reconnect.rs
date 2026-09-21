@@ -15,7 +15,7 @@ use crate::tono::{
     connection_plan::{guard_rejection_is_transient, reconnect_allowed, retry_now_is_noop},
     state::{AccountState, TonoInner, TonoState},
 };
-use super::{Attempt, BoxedTask, attempt, fail_connect, seed_autostart_after_connect};
+use super::{Attempt, BoxedTask, attempt_for_generation, fail_connect, seed_autostart_after_connect};
 
 /// Re-prove the complete current-owner runtime immediately before either scheduling or admitting
 /// the DNS-listener exception. No cached installer hint or old UI snapshot is authority here.
@@ -38,6 +38,13 @@ pub(super) async fn active_runtime_resume_status() -> Option<KillSwitchStatus> {
 pub async fn schedule_reconnect(state: &Arc<TonoState>, app: &AppHandle) {
     let mut inner = state.lock().await;
     schedule_reconnect_locked(&mut inner, state, app);
+}
+
+pub(super) async fn schedule_reconnect_for_generation(state: &Arc<TonoState>, app: &AppHandle, generation: u64) {
+    let mut inner = state.lock().await;
+    if inner.connect_generation == generation {
+        schedule_reconnect_locked(&mut inner, state, app);
+    }
 }
 
 /// Run one protected reconnect **now**, for an explicit user action.
@@ -66,8 +73,9 @@ pub async fn retry_reconnect_now(state: &Arc<TonoState>, app: &AppHandle) {
     // just fixed what was wrong with it. Give the automatic retries their full budget back, so
     // the bound that stops an unattended loop can never strand a repaired install.
     inner.fsm.reset_reconnect_backoff();
+    let generation = inner.connect_generation;
     let handle =
-        AsyncHandler::spawn(move || Box::pin(reconnect_loop(task_state, task_app, Duration::ZERO)) as BoxedTask);
+        AsyncHandler::spawn(move || Box::pin(reconnect_loop(task_state, task_app, Duration::ZERO, generation)) as BoxedTask);
     inner.tasks.reconnect = Some(handle);
     // The deadline is now, so the UI stops showing a countdown it is no longer
     // waiting for.
@@ -126,7 +134,8 @@ pub(super) fn schedule_reconnect_locked(inner: &mut TonoInner, state: &Arc<TonoS
     let task_app = app.clone();
     // The task future is boxed into a trait object so this function's opaque
     // type never embeds the reconnect loop's (which re-enters `attempt`).
-    let handle = AsyncHandler::spawn(move || Box::pin(reconnect_loop(task_state, task_app, delay)) as BoxedTask);
+    let generation = inner.connect_generation;
+    let handle = AsyncHandler::spawn(move || Box::pin(reconnect_loop(task_state, task_app, delay, generation)) as BoxedTask);
     inner.tasks.reconnect = Some(handle);
     // F3: expose the scheduled deadline to the UI.
     inner.next_retry_at_ms = Some(commands::epoch_millis() + delay.as_millis() as i64);
@@ -193,17 +202,22 @@ pub async fn schedule_startup_resume_if_proven(state: &Arc<TonoState>, app: &App
 /// but every rung after the first belongs to [`reconnect_loop`], which only computed a delay and
 /// slept. The card therefore showed Protected Offline and a stale error through the whole
 /// 5/10/20/30 s wait with nothing saying a retry was queued.
-pub(super) async fn publish_next_retry(state: &Arc<TonoState>, delay: Option<Duration>) {
+pub(super) async fn publish_next_retry(state: &Arc<TonoState>, generation: u64, delay: Option<Duration>) {
     let mut inner = state.lock().await;
-    inner.next_retry_at_ms = delay.map(|delay| commands::epoch_millis() + delay.as_millis() as i64);
+    if inner.connect_generation == generation {
+        inner.next_retry_at_ms = delay.map(|delay| commands::epoch_millis() + delay.as_millis() as i64);
+    }
 }
 
-pub(super) async fn reconnect_loop(state: Arc<TonoState>, app: AppHandle, first_delay: Duration) {
+pub(super) async fn reconnect_loop(state: Arc<TonoState>, app: AppHandle, first_delay: Duration, mut generation: u64) {
     let mut delay = first_delay;
     loop {
         tokio::time::sleep(delay).await;
         let allowed = {
             let inner = state.lock().await;
+            if inner.connect_generation != generation {
+                return;
+            }
             reconnect_allowed(
                 inner.catalog_requires_choice,
                 inner.fsm.status(),
@@ -211,21 +225,20 @@ pub(super) async fn reconnect_loop(state: Arc<TonoState>, app: AppHandle, first_
             )
         };
         if !allowed {
-            publish_next_retry(&state, None).await;
+            publish_next_retry(&state, generation, None).await;
             return;
         }
-        match attempt(&state, &app).await {
+        match attempt_for_generation(&state, &app, Some(generation)).await {
             Attempt::Connected => {
                 seed_autostart_after_connect();
                 return;
             }
             Attempt::Stale => {
-                publish_next_retry(&state, None).await;
                 return;
             }
             Attempt::GuardRejected(reason) => {
                 if !guard_rejection_is_transient(&reason) {
-                    publish_next_retry(&state, None).await;
+                    publish_next_retry(&state, generation, None).await;
                     return;
                 }
                 // The attempt never started, so this is not a connect failure: no `fail_connect`,
@@ -234,10 +247,13 @@ pub(super) async fn reconnect_loop(state: Arc<TonoState>, app: AppHandle, first_
                 logging!(info, Type::Service, "Tono: 自动重连被暂态守卫拒绝，稍后重试: {reason}");
                 let (next, spent) = {
                     let mut inner = state.lock().await;
+                    if inner.connect_generation != generation {
+                        return;
+                    }
                     let next = inner.fsm.next_reconnect_delay();
                     (next, inner.fsm.reconnect_budget_exhausted())
                 };
-                publish_next_retry(&state, next).await;
+                publish_next_retry(&state, generation, next).await;
                 match next {
                     Some(next_delay) => delay = next_delay,
                     None => {
@@ -248,10 +264,16 @@ pub(super) async fn reconnect_loop(state: Arc<TonoState>, app: AppHandle, first_
                     }
                 }
             }
-            Attempt::Failed(err) => {
-                let err = fail_connect(&state, &app, err).await;
+            Attempt::Failed { generation: failed_generation, error } => {
+                generation = failed_generation;
+                if !fail_connect(&state, &app, generation, error).await {
+                    return;
+                }
                 let (next, spent) = {
                     let mut inner = state.lock().await;
+                    if inner.connect_generation != generation {
+                        return;
+                    }
                     let next = if inner.catalog_requires_choice {
                         None
                     } else {
@@ -259,7 +281,7 @@ pub(super) async fn reconnect_loop(state: Arc<TonoState>, app: AppHandle, first_
                     };
                     (next, inner.fsm.reconnect_budget_exhausted())
                 };
-                publish_next_retry(&state, next).await;
+                publish_next_retry(&state, generation, next).await;
                 match next {
                     Some(next_delay) => delay = next_delay,
                     None => {
