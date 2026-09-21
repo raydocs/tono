@@ -332,7 +332,7 @@ mod tests {
 
     #[tokio::test]
     async fn selection_publication_waits_for_direct_commit() {
-        let state = Arc::new(TonoState::create().expect("test state"));
+        let state = Arc::new(TonoState::for_test());
         state.lock().await.selected_node = Some("A".to_owned());
         let activation = state.begin_policy_activation().await;
         let (polling, polled) = tokio::sync::oneshot::channel();
