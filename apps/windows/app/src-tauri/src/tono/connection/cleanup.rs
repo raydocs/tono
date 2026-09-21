@@ -176,6 +176,118 @@ mod tests {
     use tokio::time::{Duration, timeout};
 
     #[tokio::test]
+    async fn held_failure_status_cannot_attribute_an_old_attempt_to_replacement_login() {
+        use crate::tono::{commands::account, state::TonoApiClient, transport::TonoTransport};
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        // The real HTTP adapter records the authenticated body. Only the remote endpoint,
+        // Service status, and server-issued sign-in responses are fixtures.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (stop_server, mut stopped) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            loop {
+                let (mut socket, _) = tokio::select! {
+                    accepted = listener.accept() => accepted.unwrap(),
+                    _ = &mut stopped => break,
+                };
+                let mut header = Vec::new();
+                while !header.ends_with(b"\r\n\r\n") {
+                    header.push(socket.read_u8().await.unwrap());
+                    assert!(header.len() < 8192);
+                }
+                let header = String::from_utf8(header).unwrap().to_ascii_lowercase();
+                let length = header.lines().find_map(|line| line.strip_prefix("content-length:"))
+                    .unwrap().trim().parse::<usize>().unwrap();
+                assert!(length < 4096);
+                let mut body = vec![0; length];
+                socket.read_exact(&mut body).await.unwrap();
+                requests.push((header, serde_json::from_slice::<serde_json::Value>(&body).unwrap()));
+                socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 17\r\nConnection: close\r\n\r\n{\"accepted\":true}")
+                    .await.unwrap();
+            }
+            requests
+        });
+        let auth = |owner: &str| -> tono_core::auth::AuthResponse {
+            serde_json::from_value(serde_json::json!({
+                "accessToken": format!("fixture-access-{owner}"),
+                "user": { "id": owner, "email": format!("{owner}@example.test") }
+            })).unwrap()
+        };
+        let state = Arc::new(TonoState::for_test());
+        let directory = {
+            let mut inner = state.lock().await;
+            inner.client = Arc::new(TonoApiClient::new(
+                &format!("http://{address}"), TonoTransport::new().unwrap(), inner.credentials.clone(),
+            ).unwrap());
+            inner.selected_node = Some("Fixture City".into());
+            inner.catalog_dir.clone()
+        };
+        std::fs::create_dir_all(&directory).unwrap();
+        state.audit().set_enabled(true).unwrap();
+        state.audit().set_periodic_telemetry_enabled(true).unwrap();
+        let (client, _, first_auth) = account::begin_sign_in(&state).await.unwrap();
+        state.lock().await.challenge_id = Some("challenge-a".into());
+        account::adopt_sign_in_response(&state, &client, first_auth, "challenge-a", &auth("a"), |_| {})
+            .await.unwrap();
+        let generation = {
+            let mut inner = state.lock().await;
+            super::super::begin_attempt(&mut inner, 0).unwrap().0
+        };
+        // A same-account failure must actually upload; silently dropping every report is wrong.
+        let control = super::super::record_connect_failure(
+            &state, generation, "CORE_EXIT_UNREACHABLE: same-account evidence", None,
+        ).await.unwrap();
+        timeout(Duration::from_secs(5), control.report.unwrap()).await.unwrap().unwrap();
+
+        let generation = {
+            let mut inner = state.lock().await;
+            super::super::begin_attempt(&mut inner, generation).unwrap().0
+        };
+        let (entered, at_status) = oneshot::channel();
+        let (resume, resumed) = oneshot::channel();
+        let task_state = Arc::clone(&state);
+        let failure = tokio::spawn(reconcile_failure(Arc::clone(&state), generation,
+            async move {
+                entered.send(()).unwrap();
+                resumed.await.unwrap();
+                None
+            },
+            move |observed, _guard| async move {
+                let recorded = super::super::record_connect_failure(
+                    &task_state, generation, "CORE_EXIT_UNREACHABLE: old attempt A", observed,
+                ).await.unwrap();
+                // Account replacement must not discard the required network cleanup plan.
+                assert_eq!(recorded.plan.stop_core, Some(true));
+                if let Some(report) = recorded.report {
+                    timeout(Duration::from_secs(5), report).await.unwrap().unwrap();
+                }
+                true
+            },
+        ));
+        timeout(Duration::from_secs(5), at_status).await.unwrap().unwrap();
+        let (client, _, second_auth) = account::begin_sign_in(&state).await.unwrap();
+        state.lock().await.challenge_id = Some("challenge-b".into());
+        account::adopt_sign_in_response(&state, &client, second_auth, "challenge-b", &auth("b"), |_| {})
+            .await.unwrap();
+        assert_ne!(first_auth, second_auth);
+        assert_eq!(state.lock().await.connect_generation, generation,
+            "replacement login is allowed without explicit logout or connection retirement");
+        resume.send(()).unwrap();
+        assert!(timeout(Duration::from_secs(5), failure).await.unwrap().unwrap().unwrap());
+        stop_server.send(()).unwrap();
+        let requests = timeout(Duration::from_secs(5), server).await.unwrap().unwrap();
+        std::fs::remove_dir_all(&directory).unwrap();
+        assert_eq!(requests.len(), 1, "A's held failure must not become a B-authenticated upload");
+        assert!(requests[0].0.contains("authorization: bearer fixture-access-a"));
+        assert!(requests[0].0.contains("telemetry/failures http/1.1"));
+        assert_eq!(requests[0].1["node"], "Fixture City");
+        assert_eq!(requests[0].1["error"], "CORE_EXIT_UNREACHABLE: same-account evidence");
+        assert_eq!(state.lock().await.account.as_ref().unwrap().id, "b");
+    }
+
+    #[tokio::test]
     async fn idle_retry_admission_retires_failure_tails_before_they_publish() {
         let state = Arc::new(TonoState::for_test());
         let mut inner = state.lock().await;
