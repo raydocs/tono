@@ -2838,6 +2838,46 @@ mod tests {
         assert_eq!(body["refreshToken"], "old-refresh");
     }
 
+    #[tokio::test]
+    async fn held_json_failure_cannot_replay_an_old_payload_under_a_replacement_account() {
+        #[derive(Default)]
+        struct HeldReport {
+            entered: tokio::sync::Notify,
+            release: tokio::sync::Notify,
+            requests: Mutex<Vec<ApiRequest>>,
+        }
+        #[async_trait]
+        impl HttpTransport for HeldReport {
+            async fn send(&self, request: ApiRequest) -> Result<ApiResponse, ApiError> {
+                let first = {
+                    let mut requests = self.requests.lock().unwrap();
+                    requests.push(request);
+                    requests.len() == 1
+                };
+                if first {
+                    self.entered.notify_one();
+                    self.release.notified().await;
+                    json(401, "{}")
+                } else {
+                    json(200, r#"{"referenceCode":"wrong-account","receivedAt":1}"#)
+                }
+            }
+        }
+        let transport = Arc::new(HeldReport::default());
+        let store = Arc::new(MemoryCredentialStore::new());
+        let client = Arc::new(ApiClient::new("https://api.example.test", transport.clone(), store.clone()).unwrap());
+        client.adopt(&auth_response("old-access", Some("old-refresh"))).await.unwrap();
+        let task_client = client.clone();
+        let upload = tokio::spawn(async move { task_client.upload_diagnostics_report(&sample_report()).await });
+        tokio::time::timeout(Duration::from_secs(2), transport.entered.notified()).await.unwrap();
+        client.adopt(&auth_response("new-access", Some("new-refresh"))).await.unwrap();
+        transport.release.notify_one();
+        let result = tokio::time::timeout(Duration::from_secs(2), upload).await.unwrap().unwrap();
+        assert_eq!(transport.requests.lock().unwrap().len(), 1, "A's report must never be sent with B's bearer");
+        assert_eq!(result, Err(ApiError::Unauthorized));
+        assert_eq!(store.refresh_token().unwrap().as_deref(), Some("new-refresh"));
+    }
+
     #[test]
     fn logout_request_omits_null_refresh_token() {
         // The server 400s on an explicit JSON null (it is not `undefined`).

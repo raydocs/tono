@@ -16,6 +16,7 @@
 //!   worst, never the product logic.
 
 use keyring::Entry;
+use std::sync::Arc;
 use tono_core::credentials::{CredentialError, CredentialKey, CredentialStore, MemoryCredentialStore};
 
 /// keyring service name; entries appear as `tono/<key>` (§2).
@@ -105,15 +106,14 @@ impl CredentialStore for TonoCredentialStore {
 /// so a hung vault can never stall the session it belongs to.
 pub struct SessionCredentialStore {
     memory: MemoryCredentialStore,
-    /// False in tests: no vault access at all.
-    persist: bool,
+    vault: Option<Arc<dyn CredentialStore>>,
 }
 
 impl SessionCredentialStore {
     pub fn new() -> Self {
         Self {
             memory: MemoryCredentialStore::new(),
-            persist: true,
+            vault: Some(Arc::new(TonoCredentialStore)),
         }
     }
 
@@ -122,7 +122,7 @@ impl SessionCredentialStore {
     pub fn for_test() -> Self {
         Self {
             memory: MemoryCredentialStore::new(),
-            persist: false,
+            vault: None,
         }
     }
 
@@ -135,12 +135,10 @@ impl SessionCredentialStore {
 
     /// Detached vault write; logs on failure, never blocks the caller.
     fn persist_write(&self, key: CredentialKey, value: String) {
-        if !self.persist {
-            return;
-        }
+        let Some(vault) = self.vault.clone() else { return; };
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
             runtime.spawn(async move {
-                if let Err(err) = TonoCredentialStore::set_async(key, &value).await {
+                if let Err(err) = tokio::task::spawn_blocking(move || vault.set(key, &value)).await.map_err(join_error).and_then(|result| result) {
                     tono_logging::logging!(
                         warn,
                         tono_logging::Type::Service,
@@ -153,12 +151,10 @@ impl SessionCredentialStore {
 
     /// Detached vault delete.
     fn persist_delete(&self, key: CredentialKey) {
-        if !self.persist {
-            return;
-        }
+        let Some(vault) = self.vault.clone() else { return; };
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
             runtime.spawn(async move {
-                let _ = TonoCredentialStore::delete_async(key).await;
+                let _ = tokio::task::spawn_blocking(move || vault.delete(key)).await;
             });
         }
     }
@@ -186,6 +182,66 @@ impl CredentialStore for SessionCredentialStore {
 mod tests {
     use super::{SERVICE_NAME, SessionCredentialStore, account_name};
     use tono_core::credentials::{CredentialKey, CredentialStore};
+
+    #[tokio::test]
+    async fn delayed_vault_mutations_cannot_resurrect_or_erase_a_replacement_token() {
+        use std::sync::{Arc, Mutex, atomic::{AtomicUsize, Ordering}};
+        use tono_core::credentials::{CredentialError, MemoryCredentialStore};
+        struct Vault {
+            durable: MemoryCredentialStore,
+            entered: tokio::sync::Notify,
+            changed: tokio::sync::Notify,
+            calls: AtomicUsize,
+            completed: AtomicUsize,
+            gate: Mutex<std::sync::mpsc::Receiver<()>>,
+        }
+        impl Vault {
+            fn mutate(&self, value: Option<&str>) -> Result<(), CredentialError> {
+                if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    self.entered.notify_one();
+                    self.gate.lock().unwrap().recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+                }
+                match value {
+                    Some(value) => self.durable.set_refresh_token(value)?,
+                    None => self.durable.delete_refresh_token()?,
+                }
+                self.completed.fetch_add(1, Ordering::SeqCst);
+                self.changed.notify_one();
+                Ok(())
+            }
+            async fn completed(&self, count: usize) {
+                while self.completed.load(Ordering::SeqCst) < count {
+                    self.changed.notified().await;
+                }
+            }
+        }
+        impl CredentialStore for Vault {
+            fn get(&self, key: CredentialKey) -> Result<Option<String>, CredentialError> { self.durable.get(key) }
+            fn set(&self, _: CredentialKey, value: &str) -> Result<(), CredentialError> { self.mutate(Some(value)) }
+            fn delete(&self, _: CredentialKey) -> Result<(), CredentialError> { self.mutate(None) }
+        }
+        let (release, gate) = std::sync::mpsc::channel();
+        let vault = Arc::new(Vault {
+            durable: MemoryCredentialStore::new(), entered: Default::default(), changed: Default::default(),
+            calls: AtomicUsize::new(0), completed: AtomicUsize::new(0), gate: Mutex::new(gate),
+        });
+        let store = SessionCredentialStore { memory: MemoryCredentialStore::new(), vault: Some(vault.clone()) };
+        store.set_refresh_token("old-account").unwrap();
+        vault.entered.notified().await;
+        store.delete_refresh_token().unwrap();
+        store.set_refresh_token("replacement").unwrap();
+        // A deliberately stalled OS write: unordered persistence lets both successors finish
+        // here; an ordered owner cannot. This deadline bounds fault injection, not a sleep race.
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(1), vault.completed(2)).await;
+        release.send(()).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), vault.completed(3)).await.unwrap();
+        assert_eq!(store.refresh_token().unwrap().as_deref(), Some("replacement"));
+        assert_eq!(vault.durable.refresh_token().unwrap().as_deref(), Some("replacement"));
+        // Deletion must be ordered after every preceding write as well.
+        store.delete_refresh_token().unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), vault.completed(4)).await.unwrap();
+        assert_eq!(vault.durable.refresh_token().unwrap(), None);
+    }
 
     #[test]
     fn account_names_are_stable() {

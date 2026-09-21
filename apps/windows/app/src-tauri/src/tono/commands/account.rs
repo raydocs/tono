@@ -311,7 +311,7 @@ pub async fn tono_sign_out(state: tauri::State<'_, Arc<TonoState>>, app: AppHand
     let release_app = app.clone();
     let resume_app = app.clone();
     sign_out_with(state.inner().clone(),
-        move |state| async move { connection::release_explicit(&state, &release_app).await },
+        move |state| async move { connection::release_for_account(&state, &release_app).await },
         |client| async move { client.logout().await },
         move |state, generation| async move {
             catalog_sync::spawn_periodic_for_auth_generation(&state, &resume_app, generation).await;
@@ -397,6 +397,49 @@ where
 mod lifecycle_tests {
     use super::*;
     use tokio::sync::oneshot;
+
+    #[tokio::test(start_paused = true)]
+    async fn account_close_joins_release_past_the_ui_budget_before_reopening_admission() {
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.account_state = AccountState::Ready;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+        }
+        let (entered, at_release) = oneshot::channel();
+        let (resume, resumed) = oneshot::channel();
+        let operation = connection::coordinate_release(&state, None,
+            move |_guard| async move {
+                entered.send(()).unwrap();
+                resumed.await.unwrap();
+                Ok(())
+            }, || async {},
+        ).await;
+        at_release.await.unwrap();
+        let (joined, joining) = oneshot::channel();
+        let caller = tokio::spawn(sign_out_with(Arc::clone(&state),
+            move |_| async move {
+                joined.send(()).unwrap();
+                connection::complete_account_release(&operation).await
+            },
+            |_| async {}, |_, _| async {}, |_| {},
+        ));
+        joining.await.unwrap();
+        let close = state.lock().await.account_close.clone().unwrap();
+        tokio::time::advance(Duration::from_secs(56)).await;
+        tokio::task::yield_now().await;
+        let admission_closed = state.lock().await.account_close.is_some();
+        caller.abort();
+        let _ = caller.await;
+        resume.send(()).unwrap();
+        let result = close.wait().await;
+        assert!(admission_closed, "a UI deadline cannot complete the detached account owner");
+        assert_eq!(result, Ok(()), "late successful release must still finish sign-out");
+        let inner = state.lock().await;
+        assert_eq!(inner.account_state, AccountState::SignedOut);
+        assert!(!inner.fsm.kill_switch_armed());
+    }
 
     #[tokio::test]
     async fn sign_out_owns_admission_until_logout_finishes_even_without_its_caller() {

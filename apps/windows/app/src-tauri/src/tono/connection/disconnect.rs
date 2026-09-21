@@ -41,6 +41,16 @@ pub async fn release_explicit(state: &Arc<TonoState>, app: &AppHandle) -> Result
     release_explicit_with_guard(state, app, None).await
 }
 
+/// Account teardown must own the release, not just the UI's wait for it.
+pub(crate) async fn release_for_account(state: &Arc<TonoState>, app: &AppHandle) -> Result<(), String> {
+    let operation = start_explicit_release(state, app, None).await;
+    complete_account_release(&operation).await
+}
+
+pub(crate) async fn complete_account_release(operation: &LifecycleOperation) -> Result<(), String> {
+    wait_explicit_release(operation).await
+}
+
 /// Transfer failure's exclusive ownership to release, rather than reacquiring the same writer.
 pub(super) async fn release_explicit_with_guard(
     state: &Arc<TonoState>, app: &AppHandle,
@@ -81,7 +91,7 @@ async fn wait_explicit_release(operation: &LifecycleOperation) -> Result<(), Str
 /// Register and supervise exactly one real release. A joining failure drops its transferred
 /// writer before waiting, allowing the existing worker to acquire it. No generation-based skip
 /// can complete this operation: every joiner observes the actual release result.
-async fn coordinate_release<F, C, S, SF>(
+pub(crate) async fn coordinate_release<F, C, S, SF>(
     state: &Arc<TonoState>, guard: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
     sequence: C, settled: S,
 ) -> Arc<LifecycleOperation>
