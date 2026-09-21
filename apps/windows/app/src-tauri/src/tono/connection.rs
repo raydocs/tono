@@ -245,7 +245,7 @@ fn attempt_for_generation<'a>(state: &'a Arc<TonoState>, app: &'a AppHandle, exp
 
 /// The caller holds lifecycle admission and the state mutex. Idle is not an ownership token:
 /// every admitted retry gets a fresh epoch so a completed failure tail cannot act on its state.
-fn begin_attempt(inner: &mut TonoInner, generation: u64) -> Option<(u64, CancellationToken)> {
+pub(crate) fn begin_attempt(inner: &mut TonoInner, generation: u64) -> Option<(u64, CancellationToken)> {
     if inner.fsm.status().is_disconnecting
         || !single_flight_begin(&mut inner.fsm, inner.connect_generation, generation)
     {

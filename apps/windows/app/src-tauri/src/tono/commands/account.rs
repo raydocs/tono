@@ -302,6 +302,33 @@ pub async fn tono_sign_in_verify(
 /// C1). A failed release keeps the system armed and aborts the sign-out.
 #[tauri::command]
 pub async fn tono_sign_out(state: tauri::State<'_, Arc<TonoState>>, app: AppHandle) -> Result<(), String> {
+    let release_app = app.clone();
+    let resume_app = app.clone();
+    sign_out_with(state.inner().clone(),
+        move |state| async move { connection::release_explicit(&state, &release_app).await },
+        |client| async move { client.logout().await },
+        move |state, generation| async move {
+            catalog_sync::spawn_periodic_for_auth_generation(&state, &resume_app, generation).await;
+            crate::tono::telemetry::spawn_periodic_for_auth_generation(&state, &resume_app, generation).await;
+            crate::tono::log_upload::spawn_periodic_for_auth_generation(&state, &resume_app, generation).await;
+        },
+        move |inner| emit_status(&app, &status_of(inner)),
+    ).await
+}
+
+/// System boundaries only: admission, task retirement, and account/FSM commits remain here.
+async fn sign_out_with<R, RF, L, LF, S, SF, E>(
+    state: Arc<TonoState>, release: R, logout: L, resume: S, emit: E,
+) -> Result<(), String>
+where
+    R: FnOnce(Arc<TonoState>) -> RF + Send + 'static,
+    RF: std::future::Future<Output = Result<(), String>> + Send,
+    L: FnOnce(Arc<crate::tono::state::TonoApiClient>) -> LF + Send + 'static,
+    LF: std::future::Future<Output = ()> + Send,
+    S: FnOnce(Arc<TonoState>, u64) -> SF + Send + 'static,
+    SF: std::future::Future<Output = ()> + Send,
+    E: Fn(&TonoInner) + Send + 'static,
+{
     let (client, generation) = {
         let mut inner = state.lock().await;
         inner.invalidate_connection(true);
@@ -321,7 +348,7 @@ pub async fn tono_sign_out(state: tauri::State<'_, Arc<TonoState>>, app: AppHand
     if protected {
         // Same sequence and same failure semantics as disconnect (M3): if
         // the release cannot be proven, stay armed and do not sign out.
-        if let Err(err) = connection::release_explicit(&state, &app).await {
+        if let Err(err) = release(Arc::clone(&state)).await {
             let mut inner = state.lock().await;
             if inner.sign_in_generation != generation {
                 return Err("sign-out was superseded by a newer authentication action".to_string());
@@ -331,15 +358,11 @@ pub async fn tono_sign_out(state: tauri::State<'_, Arc<TonoState>>, app: AppHand
             // though the Service release just failed (mirrors
             // `stay_armed_after_failed_release`).
             inner.fsm.initial_release_failed();
-            emit_status(&app, &status_of(&inner));
+            emit(&inner);
             drop(inner);
             // L4: the user is still signed in — restart the catalog sync
             // that `abort_catalog_sync` just stopped.
-            catalog_sync::spawn_periodic_for_auth_generation(&state, &app, generation).await;
-            crate::tono::telemetry::spawn_periodic_for_auth_generation(&state, &app, generation)
-                .await;
-            crate::tono::log_upload::spawn_periodic_for_auth_generation(&state, &app, generation)
-                .await;
+            resume(Arc::clone(&state), generation).await;
             return Err(err);
         }
     }
@@ -348,7 +371,7 @@ pub async fn tono_sign_out(state: tauri::State<'_, Arc<TonoState>>, app: AppHand
     if state.lock().await.sign_in_generation != generation {
         return Err("sign-out was superseded by a newer authentication action".to_string());
     }
-    client.logout().await;
+    logout(client).await;
 
     let mut inner = state.lock().await;
     if inner.sign_in_generation != generation {
@@ -365,7 +388,7 @@ pub async fn tono_sign_out(state: tauri::State<'_, Arc<TonoState>>, app: AppHand
     inner.network_events_counter = None;
     inner.catalog_last_synced_at_ms = None;
     inner.catalog_sync_error = None;
-    emit_status(&app, &status_of(&inner));
+    emit(&inner);
     drop(inner);
     state.audit().log(AuditEvent::SignOut);
     Ok(())
