@@ -2773,6 +2773,50 @@ mod tests {
         assert_eq!(client.me().await.unwrap_err(), ApiError::Unauthorized);
     }
 
+    #[tokio::test]
+    async fn held_logout_cannot_revoke_or_wipe_a_replacement_session() {
+        #[derive(Default)]
+        struct HeldLogout {
+            entered: tokio::sync::Notify,
+            release: tokio::sync::Notify,
+            requests: Mutex<Vec<ApiRequest>>,
+        }
+        #[async_trait]
+        impl HttpTransport for HeldLogout {
+            async fn send(&self, request: ApiRequest) -> Result<ApiResponse, ApiError> {
+                let first = {
+                    let mut requests = self.requests.lock().unwrap();
+                    requests.push(request);
+                    requests.len() == 1
+                };
+                if first {
+                    self.entered.notify_one();
+                    self.release.notified().await;
+                    json(401, "{}")
+                } else {
+                    json(200, "{}")
+                }
+            }
+        }
+        let transport = Arc::new(HeldLogout::default());
+        let store = Arc::new(MemoryCredentialStore::new());
+        let client = Arc::new(ApiClient::new("https://api.example.test", transport.clone(), store.clone()).unwrap());
+        client.adopt(&auth_response("old-access", Some("old-refresh"))).await.unwrap();
+        let task_client = client.clone();
+        let logout = tokio::spawn(async move { task_client.logout().await });
+        tokio::time::timeout(Duration::from_secs(2), transport.entered.notified()).await.unwrap();
+        client.adopt(&auth_response("new-access", Some("new-refresh"))).await.unwrap();
+        transport.release.notify_one();
+        tokio::time::timeout(Duration::from_secs(2), logout).await.unwrap().unwrap();
+        assert_eq!(store.refresh_token().unwrap().as_deref(), Some("new-refresh"));
+        assert_eq!(client.state.lock().await.access_token.as_deref(), Some("new-access"));
+        let sent = transport.requests.lock().unwrap();
+        assert_eq!(sent.len(), 1, "late logout must not retry with the replacement identity");
+        assert_eq!(sent[0].bearer.as_deref(), Some("old-access"));
+        let body: serde_json::Value = serde_json::from_str(sent[0].json_body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["refreshToken"], "old-refresh");
+    }
+
     #[test]
     fn logout_request_omits_null_refresh_token() {
         // The server 400s on an explicit JSON null (it is not `undefined`).
