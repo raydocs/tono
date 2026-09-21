@@ -1953,7 +1953,7 @@ async fn recover_unreadable_snapshot(reason: &str) -> Result<()> {
     }
     // Adapter evidence alone does not prove the resolver is restored: NRPT can still
     // route every namespace to the stopped TUN resolver. Keep the file on failure.
-    engine_restore_encrypted_dns().await?;
+    restore_resolver_policy().await?;
     quarantine_snapshot(
         "corrupt",
         &format!(
@@ -2137,9 +2137,23 @@ async fn enable_unlocked(trigger: EnableTrigger) -> Result<DnsProtectionStatus> 
     status_unlocked().await
 }
 
-/// Restore every adapter from the snapshot, prove it by registry read-back *and* by a live read
-/// that finds nothing left on the loopback core, then drop the snapshot. Failing any of that
-/// keeps the snapshot — and, via the disarm invariant, the block armed.
+#[derive(Debug)]
+struct ResolverPolicyRestoreFailed;
+
+impl std::fmt::Display for ResolverPolicyRestoreFailed {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("resolver policy restoration failed; adapter DHCP fallback cannot repair NRPT/DoH")
+    }
+}
+
+// Typed context preserves the cause and phase without matching diagnostic strings. A policy
+// failure must not reset already-restored static adapter DNS to DHCP during uninstall.
+async fn restore_resolver_policy() -> Result<()> {
+    engine_restore_encrypted_dns().await.context(ResolverPolicyRestoreFailed)
+}
+
+/// Restore adapters and resolver policies before dropping their recovery snapshot. A failed
+/// proof keeps the snapshot and, via the disarm invariant, the block armed.
 pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
     if !SUPPORTED {
         return status_unlocked().await;
@@ -2159,7 +2173,7 @@ pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
             record_outcome(ensure_snapshotless_dns_is_safe().await)?;
             // Older builds could delete this snapshot before NRPT cleanup succeeded.
             // Reconcile the independently owned rule and DoH captures on every retry.
-            record_outcome(engine_restore_encrypted_dns().await)?;
+            record_outcome(restore_resolver_policy().await)?;
             if let Err(error) = engine_flush_cache().await {
                 tracing::warn!("DNS cache flush after snapshotless restore failed: {error:#}");
             }
@@ -2273,7 +2287,7 @@ pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
     let degraded = record_outcome(outcome)?;
     // Required resolver cleanup belongs to the disarm proof, not best-effort housekeeping.
     // A failed NRPT/DoH restore retains the adapter snapshot and its independent captures.
-    record_outcome(engine_restore_encrypted_dns().await)?;
+    record_outcome(restore_resolver_policy().await)?;
     match tokio::fs::remove_file(snapshot_path()).await {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -2353,6 +2367,7 @@ pub(crate) async fn restore_for_uninstall() -> Result<UninstallDnsRestore> {
     // handles the unreadable-snapshot recovery, so nothing below has to repeat any of it.
     let exact_error = match restore_protected().await {
         Ok(_) => return Ok(UninstallDnsRestore::Exact),
+        Err(error) if error.downcast_ref::<ResolverPolicyRestoreFailed>().is_some() => return Err(error),
         Err(error) => error,
     };
     tracing::error!(
@@ -2438,6 +2453,9 @@ pub(crate) async fn restore_for_uninstall() -> Result<UninstallDnsRestore> {
         // because an uninstaller is the last place to turn a logic slip into a crash.
         UninstallRung::Exact => Ok(UninstallDnsRestore::Exact),
         UninstallRung::Automatic => {
+            // DHCP does not restore NRPT/DoH. Retain recovery evidence and report the cause
+            // instead of publishing success or quarantining the snapshot on policy failure.
+            record_outcome(restore_resolver_policy().await)?;
             let note = format!(
                 "{DNS_RESTORED_AUTOMATIC_PREFIX}: the saved DNS servers could not be proven \
                  restored ({exact_error:#}), so {} adapter(s) were set back to automatic (DHCP) \
@@ -2464,9 +2482,6 @@ pub(crate) async fn restore_for_uninstall() -> Result<UninstallDnsRestore> {
             .await
             {
                 tracing::warn!("dns: the superseded snapshot could not be set aside: {error:#}");
-            }
-            if let Err(error) = engine_restore_encrypted_dns().await {
-                tracing::warn!("dns: encrypted DNS restore after the DHCP fallback failed: {error:#}");
             }
             if let Err(error) = engine_flush_cache().await {
                 tracing::warn!("DNS cache flush after the DHCP fallback failed: {error:#}");

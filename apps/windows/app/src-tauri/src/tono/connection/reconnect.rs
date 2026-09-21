@@ -83,6 +83,9 @@ async fn retry_reconnect_with(
     // just fixed what was wrong with it. Give the automatic retries their full budget back, so
     // the bound that stops an unattended loop can never strand a repaired install.
     inner.fsm.reset_reconnect_backoff();
+    // Admission, cancellation and replacement are one critical section. Doing the abort in the
+    // command before reacquiring this lock allowed another retry to lose its still-live handle.
+    inner.tasks.abort_reconnect();
     let generation = inner.connect_generation;
     let handle = spawn(generation);
     inner.tasks.reconnect = Some(handle);
