@@ -515,8 +515,26 @@ async fn guard_snapshot(
 /// stop the core, keep blocking (restrict to the bootstrap channel),
 /// Protected Offline. Before arm: full release.
 async fn fail_connect(state: &Arc<TonoState>, app: &AppHandle, err: String) -> String {
+    let generation = state.lock().await.connect_generation;
+    let task_state = Arc::clone(state);
+    let task_app = app.clone();
+    let task_error = err.clone();
+    let _ = cleanup::reconcile_failure(
+        Arc::clone(state),
+        generation,
+        async { service::tono_kill_switch_status().await.ok() },
+        move |observed, _guard| async move {
+            fail_connect_observed(&task_state, &task_app, task_error, observed).await;
+            true
+        },
+    ).await;
+    err
+}
+
+async fn fail_connect_observed(
+    state: &Arc<TonoState>, app: &AppHandle, err: String, observed: Option<KillSwitchStatus>,
+) {
     logging!(error, Type::Service, "Tono: 连接事务失败: {err}");
-    let observed = service::tono_kill_switch_status().await.ok();
     let (plan, stage, action, armed, transport, node) = {
         let mut inner = state.lock().await;
         if let Some(status) = &observed {
@@ -628,7 +646,6 @@ async fn fail_connect(state: &Arc<TonoState>, app: &AppHandle, err: String) -> S
 
     let inner = state.lock().await;
     commands::emit_status(app, &commands::status_of(&inner));
-    err
 }
 
 
