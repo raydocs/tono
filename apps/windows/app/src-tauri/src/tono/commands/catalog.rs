@@ -20,6 +20,12 @@ use crate::{
 };
 use super::*;
 
+/// Admission boundary shared with the DIRECT policy transaction. The returned ownership
+/// must follow a hot switch until its selector and exact endpoint set have settled.
+async fn begin_selection_change(state: &TonoState) -> tokio::sync::OwnedRwLockReadGuard<()> {
+    state.begin_policy_activation().await
+}
+
 /// Servers from the validated catalog, US/JP first, with the selection flag.
 #[tauri::command]
 pub async fn tono_servers(state: tauri::State<'_, Arc<TonoState>>) -> Result<Vec<TonoServer>, String> {
@@ -205,6 +211,7 @@ pub async fn tono_select_server(
     app: AppHandle,
     name: String,
 ) -> Result<(), String> {
+    let selection_guard = begin_selection_change(&state).await;
     let action = {
         let mut inner = state.lock().await;
         if !inner.nodes.iter().any(|node| node.name == name) {
@@ -275,6 +282,7 @@ pub async fn tono_select_server(
             let from = previous.clone().unwrap_or_default();
             let to = name.clone();
             inner.tasks.switch = Some(AsyncHandler::spawn(move || async move {
+                let _selection_guard = selection_guard;
                 connection::switch_selected_node(task_state, task_app, generation, from, to).await;
             }));
         }
@@ -316,4 +324,53 @@ pub async fn tono_test_current_server(
     app: AppHandle,
 ) -> Result<u64, String> {
     connection::test_current_server(state.inner(), &app).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn selection_publication_waits_for_direct_commit() {
+        let state = Arc::new(TonoState::create().expect("test state"));
+        state.lock().await.selected_node = Some("A".to_owned());
+        let activation = state.begin_policy_activation().await;
+        let (polling, polled) = tokio::sync::oneshot::channel();
+        let (finish, finished) = tokio::sync::oneshot::channel();
+        let change_state = Arc::clone(&state);
+        let change = tokio::spawn(async move {
+            let admission = begin_selection_change(&change_state);
+            tokio::pin!(admission);
+            // Poll admission before acknowledging the barrier; no scheduler timing assumption.
+            let guard = tokio::select! {
+                biased;
+                guard = &mut admission => {
+                    polling.send(true).unwrap();
+                    guard
+                }
+                _ = std::future::ready(()) => {
+                    polling.send(false).unwrap();
+                    admission.await
+                }
+            };
+            change_state.lock().await.selected_node = Some("B".to_owned());
+            finished.await.unwrap();
+            drop(guard);
+        });
+        assert!(!polled.await.unwrap(), "selection must not publish B while DIRECT A owns its commit");
+        assert_eq!(state.lock().await.selected_node.as_deref(), Some("A"));
+        drop(activation);
+        // Wait for publication, then prove DIRECT cannot start while the switch still owns
+        // selector/WFP convergence. Yielding here is bounded by an explicit test deadline.
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while state.lock().await.selected_node.as_deref() != Some("B") {
+                tokio::task::yield_now().await;
+            }
+        }).await.unwrap();
+        assert!(tokio::time::timeout(Duration::from_millis(20), state.begin_policy_activation()).await.is_err());
+        finish.send(()).unwrap();
+        change.await.unwrap();
+        let _next_activation = tokio::time::timeout(Duration::from_secs(2), state.begin_policy_activation()).await.unwrap();
+        assert_eq!(state.lock().await.selected_node.as_deref(), Some("B"));
+    }
 }
