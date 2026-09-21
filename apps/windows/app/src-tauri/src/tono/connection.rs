@@ -884,6 +884,41 @@ mod tests {
         node::{NodeProtocol, ValidatedNode},
     };
 
+    #[tokio::test]
+    async fn retained_failure_keeps_bounded_scrubbed_cause_when_retry_clears_live_error() {
+        let state = std::sync::Arc::new(crate::tono::state::TonoState::for_test());
+        let first = {
+            let mut inner = state.lock().await;
+            inner.connect_generation = 41;
+            inner.controller_secret = Some("fixture-controller-secret".into());
+            inner.attempt_history.begin(1000, "Original city".into(), "tcp", 54)
+        };
+        let error = format!(
+            "CORE_EXIT_UNREACHABLE: tls handshake eof <- dial 203.0.113.8:443 <- fixture-controller-secret; {}",
+            "é".repeat(3000),
+        );
+        super::retain_attempt_failure(&state, 41, &first, &error).await;
+        {
+            let mut inner = state.lock().await;
+            inner.connect_generation = 42;
+            inner.connect_error = None;
+            inner.controller_secret = Some("replacement-controller-secret".into());
+            inner.attempt_history.begin(3000, "Retry city".into(), "hy2", 55);
+        }
+        // A late writer must not splice replacement credentials or a new cause into A.
+        super::retain_attempt_failure(&state, 41, &first, "replacement-only cause").await;
+        let inner = state.lock().await;
+        let saved = serde_json::to_value(inner.attempt_history.last_failure.as_ref().unwrap()).unwrap();
+        assert_eq!(saved["id"], first.id);
+        assert_eq!(saved["connectionGeneration"], 41);
+        let detail = saved["errorDetail"].as_str().expect("retain the cause, not only its stable code");
+        assert!(detail.starts_with("CORE_EXIT_UNREACHABLE: tls handshake eof <- dial <ip>:443 <- <redacted>"));
+        assert!(!detail.contains("fixture-controller-secret") && !detail.contains("replacement"));
+        assert!(detail.chars().count() <= 2001);
+        assert!(detail.ends_with('…'));
+        assert!(inner.connect_error.is_none());
+    }
+
     #[test]
     fn dns_listener_conflict_reports_both_socket_owners_consistently() {
         let message = dns_listener_conflict_message(
