@@ -247,6 +247,8 @@ final class AppState {
     // Core components
     let coreRuntime = CoreRuntimeManager()
     let connectionCoordinator = ConnectionCoordinator()
+    var networkProtection = NetworkProtectionOperations()
+    var connectionAdmission: () -> Bool = { true }
     let subscriptionManager = SubscriptionManager()
     let proxyService = ProxyService()
     private let providerRuleLoader = ProviderRuleLoader()

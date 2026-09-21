@@ -80,9 +80,8 @@ extension AccountSession {
         // launch/termination paths where that consumer is unavailable:
         // DNS must be restored before PF is opened.
         do {
-            _ = try await PrivilegedRuntimeCoordinator.shared
-                .restoreProtectedDNSIfConfigured()
-            try await PrivilegedRuntimeCoordinator.shared.disarmKillSwitch()
+            _ = try await networkProtection.restoreDNS()
+            try await networkProtection.disarm()
         } catch {
             // Retain fail-closed protection when recovery cannot be proven.
         }

@@ -66,6 +66,7 @@ final class AccountSession {
     let cloudFallbackPreferred: @MainActor () -> Bool
     let cloudFallbackConsumer: @MainActor (Bool) throws -> Void
     let killSwitchDisarmConsumer: @MainActor () async -> Void
+    var networkProtection = NetworkProtectionOperations()
     let diagnosticSnapshotConsumer: @MainActor () -> TonoDiagnosticSnapshot
     let pathLatencyConsumer: @MainActor () -> TonoPathLatency
     /// The traffic ledger's monotonic per-route counter. Injected the way every
