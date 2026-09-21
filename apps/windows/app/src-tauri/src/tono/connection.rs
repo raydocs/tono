@@ -564,11 +564,59 @@ async fn fail_connect_observed(
     state: &Arc<TonoState>, app: &AppHandle, generation: u64, err: String,
     observed: Option<KillSwitchStatus>, guard: tokio::sync::OwnedRwLockWriteGuard<()>,
 ) -> bool {
+    let Some(RecordedFailure { plan, armed, report: _report }) =
+        record_connect_failure(state, generation, &err, observed).await
+    else {
+        return false;
+    };
+    let mut guard = Some(guard);
+    let release_result = if plan.stop_core == Some(true) && armed {
+        // Register the real release before transferring this writer. If Disconnect already
+        // registered its worker, the coordinator drops our writer and joins that actual result.
+        Some(disconnect::release_explicit_with_guard(state, app, guard.take()).await)
+    } else {
+        if let Some(release) = plan.stop_core {
+            let _ = service::tono_stop_core(release).await;
+        }
+        if plan.restrict_bootstrap {
+            let _ = service::tono_restrict_bootstrap().await;
+        }
+        None
+    };
+
+    let mut inner = state.lock().await;
+    if inner.connect_generation != generation {
+        return false;
+    }
+    if let Some(result) = release_result {
+        match result {
+            Ok(()) => { inner.fsm.connect_failed(); }
+            Err(release_error) => {
+                inner.fsm.initial_release_failed();
+                inner.connect_error = Some(crate::tono::audit::redact(&format!("{err}; {release_error}")));
+            }
+        }
+    }
+    commands::emit_status(app, &commands::status_of(&inner));
+    true
+}
+
+struct RecordedFailure {
+    plan: FailurePlan,
+    armed: bool,
+    /// Detached in production; tests may join the actual HTTP boundary without timing sleeps.
+    report: Option<tauri::async_runtime::JoinHandle<()>>,
+}
+
+/// Commit the observed failure and its evidence before applying the privileged cleanup plan.
+async fn record_connect_failure(
+    state: &Arc<TonoState>, generation: u64, err: &str, observed: Option<KillSwitchStatus>,
+) -> Option<RecordedFailure> {
     logging!(error, Type::Service, "Tono: 连接事务失败: {err}");
     let (plan, stage, action, armed, transport, node, account_owner) = {
         let mut inner = state.lock().await;
         if inner.connect_generation != generation {
-            return false;
+            return None;
         }
         if let Some(status) = &observed {
             inner.kill_switch = Some(status.clone());
@@ -640,13 +688,13 @@ async fn fail_connect_observed(
     let code = failure::stable_error_code(&err).map(str::to_owned);
     state.audit().log(AuditEvent::ConnectFail {
         stage: stage.map(commands::stage_key),
-        error: err.clone(),
+        error: err.to_owned(),
         action,
         transport,
         code: code.clone(),
         node: node.clone(),
     });
-    crate::tono::telemetry::spawn_connect_failure_report(
+    let report = crate::tono::telemetry::spawn_connect_failure_report(
         state,
         account_owner,
         stage.map(commands::stage_key),
@@ -660,37 +708,7 @@ async fn fail_connect_observed(
             .audit()
             .log(AuditEvent::ProtectedOffline { reason: "connectFail" });
     }
-
-    let mut guard = Some(guard);
-    let release_result = if plan.stop_core == Some(true) && armed {
-        // Register the real release before transferring this writer. If Disconnect already
-        // registered its worker, the coordinator drops our writer and joins that actual result.
-        Some(disconnect::release_explicit_with_guard(state, app, guard.take()).await)
-    } else {
-        if let Some(release) = plan.stop_core {
-            let _ = service::tono_stop_core(release).await;
-        }
-        if plan.restrict_bootstrap {
-            let _ = service::tono_restrict_bootstrap().await;
-        }
-        None
-    };
-
-    let mut inner = state.lock().await;
-    if inner.connect_generation != generation {
-        return false;
-    }
-    if let Some(result) = release_result {
-        match result {
-            Ok(()) => { inner.fsm.connect_failed(); }
-            Err(release_error) => {
-                inner.fsm.initial_release_failed();
-                inner.connect_error = Some(crate::tono::audit::redact(&format!("{err}; {release_error}")));
-            }
-        }
-    }
-    commands::emit_status(app, &commands::status_of(&inner));
-    true
+    Some(RecordedFailure { plan, armed, report })
 }
 
 

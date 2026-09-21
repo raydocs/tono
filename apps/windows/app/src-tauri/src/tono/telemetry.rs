@@ -194,12 +194,12 @@ pub(crate) fn spawn_connect_failure_report(
     node: Option<String>,
     transport: Option<&'static str>,
     code: Option<&str>,
-) {
+) -> Option<tauri::async_runtime::JoinHandle<()>> {
     if !state.audit().periodic_telemetry_enabled() || !state.audit().enabled() {
-        return;
+        return None;
     }
     let Some(node) = node.filter(|name| !name.trim().is_empty()) else {
-        return;
+        return None;
     };
     let stage = stage.unwrap_or("unknown").to_string();
     let code = code
@@ -215,7 +215,7 @@ pub(crate) fn spawn_connect_failure_report(
         .filter(|value| *value == "tcp" || *value == "hy2")
         .map(str::to_string);
     let task_state = state.clone();
-    AsyncHandler::spawn(move || async move {
+    Some(AsyncHandler::spawn(move || async move {
         let (generation, identity) = account_owner;
         let (client, tcp_delay_ms, exit_delay_ms) = {
             let inner = task_state.lock().await;
@@ -256,7 +256,7 @@ pub(crate) fn spawn_connect_failure_report(
             transport,
         };
         let _ = client.upload_connect_failure_for_identity(&report, identity).await;
-    });
+    }))
 }
 
 /// Probe whether the account session behind a `NotFound` upload is still

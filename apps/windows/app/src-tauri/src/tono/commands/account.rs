@@ -175,19 +175,7 @@ pub async fn tono_sign_in_start(
     // The installation id hydrates from the vault off-thread at startup;
     // wait for it so sign-in registers the stable device id.
     load_credentials(state.inner()).await;
-    let (client, installation_id, generation) = {
-        let mut inner = state.lock().await;
-        if inner.account_close.is_some() {
-            return Err("account sign-out is still reconciling".to_string());
-        }
-        inner.sign_in_generation = inner.sign_in_generation.wrapping_add(1);
-        state.audit().abandon_log_upload_owner();
-        (
-            inner.client.clone(),
-            inner.installation_id.clone(),
-            inner.sign_in_generation,
-        )
-    };
+    let (client, installation_id, generation) = begin_sign_in(state.inner()).await?;
     // Empty device name → the platform default ("Windows PC", §2).
     let challenge = client
         .start_email_sign_in(&email, "", &installation_id)
@@ -250,29 +238,9 @@ pub async fn tono_sign_in_verify(
             auth_error(&err)
         })?;
 
-    let info = account_info_of(&auth.user);
-    {
-        let mut inner = state.lock().await;
-        if inner.sign_in_generation != generation || inner.challenge_id.as_deref() != Some(challenge_id.as_str()) {
-            return Err("sign-in verification was superseded by a newer attempt".to_string());
-        }
-        // Keep the Tono state lock through adoption: a resend/sign-out cannot invalidate this
-        // generation between the last check and the token write.
-        client.adopt(&auth).await.map_err(|err| err.to_string())?;
-        inner.challenge_id = None;
-        inner.account = Some(auth.user.clone());
-        // Attribute the first catalog/connect failures too, not only records
-        // produced after the periodic uploader eventually starts.
-        state.audit().activate_log_upload_owner(&auth.user.id);
-        inner.catalog_last_synced_at_ms = None;
-        inner.catalog_sync_error = None;
-        inner.account_state = if info.suspended {
-            AccountState::Suspended
-        } else {
-            AccountState::Ready
-        };
-        emit_status(&app, &status_of(&inner));
-    }
+    let info = adopt_sign_in_response(state.inner(), &client, generation, &challenge_id, &auth,
+        |inner| emit_status(&app, &status_of(inner)),
+    ).await?;
     state.audit().log(AuditEvent::SignInOk {
         email: auth.user.email.clone(),
     });
@@ -299,6 +267,45 @@ pub async fn tono_sign_in_verify(
         crate::tono::log_upload::spawn_periodic_for_auth_generation(&state, &app, generation)
             .await;
     }
+    Ok(info)
+}
+
+/// Account admission and adoption remain shared with the command path; only server/UI I/O
+/// lives outside these boundaries. In particular, a replacement sign-in does not retire Core.
+pub(crate) async fn begin_sign_in(
+    state: &Arc<TonoState>,
+) -> Result<(Arc<crate::tono::state::TonoApiClient>, String, u64), String> {
+    let mut inner = state.lock().await;
+    if inner.account_close.is_some() {
+        return Err("account sign-out is still reconciling".to_string());
+    }
+    inner.sign_in_generation = inner.sign_in_generation.wrapping_add(1);
+    state.audit().abandon_log_upload_owner();
+    Ok((inner.client.clone(), inner.installation_id.clone(), inner.sign_in_generation))
+}
+
+pub(crate) async fn adopt_sign_in_response(
+    state: &Arc<TonoState>, client: &Arc<crate::tono::state::TonoApiClient>,
+    generation: u64, challenge_id: &str, auth: &tono_core::auth::AuthResponse,
+    emit: impl FnOnce(&TonoInner),
+) -> Result<TonoAccountInfo, String> {
+    let info = account_info_of(&auth.user);
+    let mut inner = state.lock().await;
+    if inner.sign_in_generation != generation || inner.challenge_id.as_deref() != Some(challenge_id) {
+        return Err("sign-in verification was superseded by a newer attempt".to_string());
+    }
+    // Keep the Tono state lock through adoption: a resend/sign-out cannot invalidate this
+    // generation between the last check and the token write.
+    client.adopt(auth).await.map_err(|err| err.to_string())?;
+    inner.challenge_id = None;
+    inner.account = Some(auth.user.clone());
+    // Attribute the first catalog/connect failures too, not only records
+    // produced after the periodic uploader eventually starts.
+    state.audit().activate_log_upload_owner(&auth.user.id);
+    inner.catalog_last_synced_at_ms = None;
+    inner.catalog_sync_error = None;
+    inner.account_state = if info.suspended { AccountState::Suspended } else { AccountState::Ready };
+    emit(&inner);
     Ok(info)
 }
 
