@@ -22,8 +22,8 @@ use super::*;
 
 /// Admission boundary shared with the DIRECT policy transaction. The returned ownership
 /// must follow a hot switch until its selector and exact endpoint set have settled.
-async fn begin_selection_change(state: &TonoState) -> tokio::sync::OwnedRwLockReadGuard<()> {
-    state.begin_policy_activation().await
+async fn begin_selection_change(state: &TonoState) -> tokio::sync::OwnedRwLockWriteGuard<()> {
+    state.begin_policy_update().await
 }
 
 /// Servers from the validated catalog, US/JP first, with the selection flag.
@@ -270,21 +270,32 @@ pub async fn tono_select_server(
             logging!(warn, Type::Service, "Tono: 选中节点持久化失败: {err}");
         }
         emit_status(&app, &status_of(&inner));
-        // Spawned *and* registered under one guard. Registering after `drop(inner)` left a
-        // window in which a concurrent `disconnect()` ran `abort_connection_tasks()` against an
-        // empty switch slot and this line then installed a task nothing could abort — a node
-        // switch surviving the disconnect that was supposed to cancel it, re-arming WFP behind
-        // a completed release. The task's first act is to lock this same mutex, so it cannot
-        // make progress before the guard is dropped below.
+        // Register under the selection snapshot lock. The worker takes exclusive lifecycle
+        // ownership and revalidates this captured generation before touching the Core. A
+        // Disconnect retires that generation even when it aborts only the registered waiter.
         if action == connection::SelectAction::Switch {
             let task_state = state.inner().clone();
             let task_app = app.clone();
             let from = previous.clone().unwrap_or_default();
             let to = name.clone();
             inner.tasks.switch = Some(AsyncHandler::spawn(move || async move {
-                let _selection_guard = selection_guard;
-                connection::switch_selected_node(task_state, task_app, generation, from, to).await;
+                // The registry owns only the waiter. Disconnect may abort it, but an already
+                // dispatched selector/WFP operation must retain ownership until it settles.
+                let result = tono_core::recovery::reconcile_recovery(
+                    async move { selection_guard },
+                    async move {
+                        connection::switch_selected_node(task_state, task_app, generation, from, to).await;
+                        true
+                    },
+                ).await;
+                if let Err(error) = result {
+                    logging!(error, Type::Service, "Tono: selected-exit reconciliation failed: {error}");
+                }
             }));
+        } else {
+            // Reconnect admission has its own generation fence; do not retain a policy writer
+            // while waiting for an unrelated retry command.
+            drop(selection_guard);
         }
         drop(inner);
         if cleared_choice {
@@ -353,9 +364,15 @@ mod tests {
                     admission.await
                 }
             };
-            change_state.lock().await.selected_node = Some("B".to_owned());
-            finished.await.unwrap();
-            drop(guard);
+            let operation_state = Arc::clone(&change_state);
+            tono_core::recovery::reconcile_recovery(
+                async move { guard },
+                async move {
+                    operation_state.lock().await.selected_node = Some("B".to_owned());
+                    finished.await.unwrap();
+                    true
+                },
+            ).await.unwrap();
         });
         assert!(!polled.await.unwrap(), "selection must not publish B while DIRECT A owns its commit");
         assert_eq!(state.lock().await.selected_node.as_deref(), Some("A"));
@@ -367,10 +384,15 @@ mod tests {
                 tokio::task::yield_now().await;
             }
         }).await.unwrap();
-        assert!(tokio::time::timeout(Duration::from_millis(20), state.begin_policy_activation()).await.is_err());
+        let next_activation = state.begin_policy_activation();
+        tokio::pin!(next_activation);
+        assert!(futures::poll!(&mut next_activation).is_pending());
+        change.abort();
+        assert!(change.await.unwrap_err().is_cancelled());
+        assert!(futures::poll!(&mut next_activation).is_pending(),
+            "cancelling the switch waiter must not expose an unsettled selector/WFP operation");
         finish.send(()).unwrap();
-        change.await.unwrap();
-        let _next_activation = tokio::time::timeout(Duration::from_secs(2), state.begin_policy_activation()).await.unwrap();
+        let _next_activation = tokio::time::timeout(Duration::from_secs(2), next_activation).await.unwrap();
         assert_eq!(state.lock().await.selected_node.as_deref(), Some("B"));
     }
 }
