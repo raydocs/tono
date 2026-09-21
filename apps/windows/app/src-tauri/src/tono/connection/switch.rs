@@ -12,12 +12,12 @@ use crate::tono::{
     audit::AuditEvent, catalog_sync, commands, connection_plan::guard_rejection_is_transient, state::TonoState,
 };
 use super::{
-    Attempt, BoxedTask, attempt, fail_connect, seed_autostart_after_connect,
+    Attempt, BoxedTask, attempt_for_generation, fail_connect, seed_autostart_after_connect,
 };
 use super::controller::{controller_client, controller_url, fetch_connections, select_exit_group};
 use super::endpoints::{proxy_endpoints_for, unique_proxy_endpoints};
 use super::probes::verify_tun_data_plane;
-use super::reconnect::schedule_reconnect;
+use super::reconnect::schedule_reconnect_for_generation;
 
 /// §3: the selected node vanished from a new catalog while a tunnel was up —
 /// stop the core, keep the kill switch armed, and wait for the user to pick
@@ -138,6 +138,9 @@ pub async fn switch_selected_node(
     previous_name: String,
     next_name: String,
 ) {
+    // The catalog owner keeps this worker detached and holds the policy writer. Own the Core
+    // exclusively too, before reading its session: a retired switch must never adopt B's proof.
+    let guard = state.begin_privileged_release().await;
     let snapshot = {
         let inner = state.lock().await;
         if inner.connect_generation != generation {
@@ -191,7 +194,7 @@ pub async fn switch_selected_node(
                 Type::Service,
                 "Tono: hot switch missing Service session ({error:#}); falling back to cold switch"
             );
-            cold_switch_selected_node(state, app, generation).await;
+            cold_switch_selected_node(state, app, generation, guard).await;
             return;
         }
     };
@@ -201,7 +204,7 @@ pub async fn switch_selected_node(
             Type::Service,
             "Tono: hot switch could not widen WFP ({error:#}); falling back to cold switch"
         );
-        cold_switch_selected_node(state, app, generation).await;
+        cold_switch_selected_node(state, app, generation, guard).await;
         return;
     }
     if state.lock().await.connect_generation != generation {
@@ -211,7 +214,7 @@ pub async fn switch_selected_node(
 
     let Some((secret, port)) = secret.zip(port) else {
         let _ = service::tono_replace_proxy_endpoints(&session, old_endpoints).await;
-        cold_switch_selected_node(state, app, generation).await;
+        cold_switch_selected_node(state, app, generation, guard).await;
         return;
     };
     if let Err(error) = select_exit_group(&secret, port, &next_name).await {
@@ -223,7 +226,7 @@ pub async fn switch_selected_node(
         let _ = service::tono_replace_proxy_endpoints(&session, old_endpoints).await;
         // Keep the user's new selection. A catalog-grown node is missing from the live
         // controller; rebuilding the runtime with WFP still armed is the only way to admit it.
-        cold_switch_selected_node(state, app, generation).await;
+        cold_switch_selected_node(state, app, generation, guard).await;
         return;
     }
     if state.lock().await.connect_generation != generation {
@@ -253,7 +256,7 @@ pub async fn switch_selected_node(
         };
         if converge_or_recover(
             rollback,
-            cold_switch_selected_node(Arc::clone(&state), app.clone(), generation),
+            cold_switch_selected_node(Arc::clone(&state), app.clone(), generation, guard),
         ).await {
             restore_selected_node(&state, &app, generation, &previous_name).await;
         }
@@ -266,7 +269,7 @@ pub async fn switch_selected_node(
     }
     if !converge_or_recover(
         service::tono_replace_proxy_endpoints(&session, new_endpoints),
-        cold_switch_selected_node(Arc::clone(&state), app.clone(), generation),
+        cold_switch_selected_node(Arc::clone(&state), app.clone(), generation, guard),
     ).await {
         return;
     }
@@ -291,7 +294,10 @@ async fn converge_or_recover(
     true
 }
 
-pub(super) async fn cold_switch_selected_node(state: Arc<TonoState>, app: AppHandle, generation: u64) {
+pub(super) async fn cold_switch_selected_node(
+    state: Arc<TonoState>, app: AppHandle, generation: u64,
+    guard: tokio::sync::OwnedRwLockWriteGuard<()>,
+) {
     {
         let mut inner = state.lock().await;
         if inner.connect_generation != generation {
@@ -310,17 +316,21 @@ pub(super) async fn cold_switch_selected_node(state: Arc<TonoState>, app: AppHan
         commands::emit_status(&app, &commands::status_of(&inner));
     }
     let _ = service::tono_stop_core(false).await;
+    // Startup and failure reconciliation acquire their own lifecycle ownership. Transfer only
+    // the generation into re-entry; holding this writer across either path would deadlock.
+    drop(guard);
     if state.lock().await.connect_generation != generation {
         return;
     }
-    match attempt(&state, &app).await {
-        Attempt::Failed(err) => {
-            let _ = fail_connect(&state, &app, err).await;
-            schedule_reconnect(&state, &app).await;
+    match attempt_for_generation(&state, &app, Some(generation)).await {
+        Attempt::Failed { generation, error } => {
+            if fail_connect(&state, &app, generation, error).await {
+                schedule_reconnect_for_generation(&state, &app, generation).await;
+            }
         }
         Attempt::GuardRejected(reason) if guard_rejection_is_transient(&reason) => {
             logging!(info, Type::Service, "Tono: 节点切换被暂态守卫拒绝，稍后重试: {reason}");
-            schedule_reconnect(&state, &app).await;
+            schedule_reconnect_for_generation(&state, &app, generation).await;
         }
         Attempt::Connected => seed_autostart_after_connect(),
         Attempt::GuardRejected(_) | Attempt::Stale => {}

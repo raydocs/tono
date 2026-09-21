@@ -27,7 +27,7 @@ use super::{
     seed_autostart_after_connect,
 };
 use super::direct::dns_query_a;
-use super::reconnect::schedule_reconnect;
+use super::reconnect::schedule_reconnect_for_generation;
 use super::controller::{CONTROLLER_HTTP_TIMEOUT, controller_client, controller_url, fetch_connections};
 use super::probes::{verify_locked, verify_tun_data_plane};
 
@@ -881,15 +881,16 @@ pub(super) async fn handle_network_change_inner(
         }
     }
     match super::attempt_for_generation(state, app, Some(generation)).await {
-        Attempt::Failed(err) => {
-            let _ = fail_connect(state, app, err).await;
-            schedule_reconnect(state, app).await;
+        Attempt::Failed { generation, error } => {
+            if fail_connect(state, app, generation, error).await {
+                schedule_reconnect_for_generation(state, app, generation).await;
+            }
         }
         // A transient guard (a release still reconciling, a transition still finishing) is not a
         // verdict — without a reschedule the machine sits blocked with nothing left to retry.
         Attempt::GuardRejected(reason) if guard_rejection_is_transient(&reason) => {
             logging!(info, Type::Service, "Tono: 重连被暂态守卫拒绝，稍后重试: {reason}");
-            schedule_reconnect(state, app).await;
+            schedule_reconnect_for_generation(state, app, generation).await;
         }
         Attempt::Connected => seed_autostart_after_connect(),
         Attempt::GuardRejected(_) | Attempt::Stale => {}
