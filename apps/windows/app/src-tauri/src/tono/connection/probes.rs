@@ -15,7 +15,6 @@ use tono_service_protocol::{KillSwitchStatus, KillSwitchStatusMode};
 use crate::core::service;
 use crate::tono::local_evidence::ProbeRecorder;
 use crate::tono::{audit::{self, AuditEvent}, state::TonoState};
-use super::cleanup::stale_after_arm;
 use super::controller::{
     CONTROLLER_HTTP_TIMEOUT, CONTROLLER_READY_TIMEOUT, VERSION_POLL_ATTEMPTS, VERSION_POLL_FAST_ATTEMPTS,
     VERSION_POLL_FAST_INTERVAL, VERSION_POLL_INTERVAL, controller_client, controller_url,
@@ -141,7 +140,7 @@ pub(super) async fn verify_post_lock(
     // cross-border round without adding any connection proof.
     // CheckingExit is only a UI label. The real TUN race starts immediately;
     // controller /delay may finish later and is never required for Connected.
-    set_stage(state, app, ConnectStage::CheckingExit, generation, true, started).await?;
+    set_stage(state, app, ConnectStage::CheckingExit, generation, started).await?;
     let outcomes = {
         let inner = state.lock().await;
         if inner.connect_generation == generation {
@@ -160,14 +159,14 @@ pub(super) async fn verify_post_lock(
         }
         result
     }));
-    set_stage(state, app, ConnectStage::VerifyingTraffic, generation, true, started).await?;
+    set_stage(state, app, ConnectStage::VerifyingTraffic, generation, started).await?;
     let mut last = String::from("post-lock verification did not run");
     for round in 0..POST_LOCK_VERIFY_ROUNDS {
         if round > 0 && state.lock().await.connect_generation != generation {
             if let Some(task) = controller_task.take() {
                 task.abort();
             }
-            return Err(stale_after_arm(state, generation).await);
+            return Err(StageFailure::Stale);
         }
         let final_round = round + 1 == POST_LOCK_VERIFY_ROUNDS;
         let tun_recorder = outcomes.as_ref().map(|outcomes| ProbeRecorder { round: round + 1, path: "tun", outcomes: outcomes.clone() });

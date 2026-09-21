@@ -6,7 +6,6 @@ use tauri::AppHandle;
 use tono_core::connection::ConnectStage;
 
 use crate::tono::{audit::AuditEvent, commands, state::TonoState};
-use super::cleanup::stale_after_arm;
 use super::failure::StageFailure;
 
 pub(super) async fn set_stage(
@@ -14,7 +13,6 @@ pub(super) async fn set_stage(
     app: &AppHandle,
     stage: ConnectStage,
     generation: u64,
-    armed: bool,
     started: std::time::Instant,
 ) -> Result<(), StageFailure> {
     let fresh = {
@@ -45,11 +43,7 @@ pub(super) async fn set_stage(
     if fresh {
         return Ok(());
     }
-    // `armed` marks stage boundaries past a committed StartClash: a stale
-    // exit there patches the late arm (H-1).
-    if armed {
-        Err(stale_after_arm(state, generation).await)
-    } else {
-        Err(StageFailure::Stale)
-    }
+    // Read/UI-only boundaries have no cleanup authority. Compensation belongs solely to the
+    // detached mutation holding the lifecycle reader, before a replacement can be admitted.
+    Err(StageFailure::Stale)
 }

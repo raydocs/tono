@@ -37,18 +37,16 @@ use crate::{
 /// Concrete account API client used across the product layer.
 pub type TonoApiClient = ApiClient<TonoTransport, SessionCredentialStore>;
 
-/// One explicit DNS/Core/WFP release shared by Disconnect, Sign Out, Quit, and startup
-/// reconciliation. The result lives outside `TonoInner`, so waiting for it never holds the large
-/// product-state mutex. `Notify` also lets a later caller join an operation whose original UI
-/// waiter already timed out without launching a second, racing release.
-pub struct ReleaseOperation {
+/// Completion of a single owned lifecycle operation (release or account close). Waiting never
+/// holds the product-state mutex, and later callers join even if the original UI waiter left.
+pub struct LifecycleOperation {
     id: u64,
     result: StdMutex<Option<std::result::Result<(), String>>>,
     notify: tokio::sync::Notify,
 }
 
-impl ReleaseOperation {
-    fn new(id: u64) -> Self {
+impl LifecycleOperation {
+    pub(crate) fn new(id: u64) -> Self {
         Self {
             id,
             result: StdMutex::new(None),
@@ -177,6 +175,9 @@ pub struct TonoInner {
     /// `error` account state instead of a mistaken signed-out).
     pub credential_error: Option<String>,
     pub account_state: AccountState,
+    /// Admission stays closed through protected release AND server/local logout. The detached
+    /// owner clears this slot only after its final state commit, even if its UI waiter leaves.
+    pub account_close: Option<Arc<LifecycleOperation>>,
     /// Last verified account payload (`GET me` or the sign-in response).
     pub account: Option<User>,
     /// In-flight email sign-in challenge, consumed by `tono_sign_in_verify`.
@@ -456,7 +457,7 @@ pub struct TonoState {
     route_ledger: parking_lot::Mutex<crate::tono::route_ledger::RouteLedger>,
     /// Serializes login, periodic, and user-initiated catalog fetches for one account session.
     catalog_sync_operation: tokio::sync::Mutex<()>,
-    release_operation: tokio::sync::Mutex<Option<Arc<ReleaseOperation>>>,
+    release_operation: tokio::sync::Mutex<Option<Arc<LifecycleOperation>>>,
     /// A late StartClash or DNS-enable commit must settle before explicit release reaches the
     /// Service. Connect mutations hold a read guard inside their detached reconciliation task;
     /// admission also takes a reader. Detached failure/switch cleanup and the one release worker
@@ -509,6 +510,7 @@ impl TonoState {
                 credentials_loaded: false,
                 credential_error: None,
                 account_state: AccountState::SignedOut,
+                account_close: None,
                 account: None,
                 challenge_id: None,
                 sign_in_generation: 0,
@@ -593,13 +595,13 @@ impl TonoState {
 
     /// Start one release or join the already-running one. The boolean is true only for the caller
     /// responsible for spawning the supervisor.
-    pub async fn begin_release(&self) -> (Arc<ReleaseOperation>, bool) {
+    pub async fn begin_release(&self) -> (Arc<LifecycleOperation>, bool) {
         let mut slot = self.release_operation.lock().await;
         if let Some(operation) = slot.as_ref() {
             return (Arc::clone(operation), false);
         }
         let id = self.next_release_id.fetch_add(1, Ordering::Relaxed);
-        let operation = Arc::new(ReleaseOperation::new(id));
+        let operation = Arc::new(LifecycleOperation::new(id));
         *slot = Some(Arc::clone(&operation));
         (operation, true)
     }
@@ -1065,7 +1067,7 @@ impl Drop for CurrentUserSid {
 
 #[cfg(test)]
 mod tests {
-    use super::{matching_selected_delay, AccountState, ReleaseOperation};
+    use super::{matching_selected_delay, AccountState, LifecycleOperation};
     use std::{sync::Arc, time::Duration};
 
     #[test]
@@ -1093,7 +1095,7 @@ mod tests {
 
     #[tokio::test]
     async fn release_operation_wakes_every_joiner_and_replays_the_result() {
-        let operation = Arc::new(ReleaseOperation::new(7));
+        let operation = Arc::new(LifecycleOperation::new(7));
         let first = tokio::spawn({
             let operation = Arc::clone(&operation);
             async move { operation.wait().await }

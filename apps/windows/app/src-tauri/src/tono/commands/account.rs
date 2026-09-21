@@ -24,7 +24,7 @@ use super::diagnostics::auth_error;
 pub async fn load_credentials(state: &Arc<TonoState>) {
     let generation = {
         let inner = state.lock().await;
-        if inner.credentials_loaded {
+        if inner.credentials_loaded || inner.account_close.is_some() {
             return;
         }
         inner.sign_in_generation
@@ -40,7 +40,7 @@ pub async fn load_credentials(state: &Arc<TonoState>) {
     // Another hydration may have won while this vault read was in flight. More importantly,
     // sign-out or a newer login generation must not let a late startup read resurrect the old
     // refresh token in the memory-first credential store.
-    if inner.credentials_loaded {
+    if inner.credentials_loaded || inner.account_close.is_some() {
         return;
     }
     if inner.sign_in_generation != generation {
@@ -177,6 +177,9 @@ pub async fn tono_sign_in_start(
     load_credentials(state.inner()).await;
     let (client, installation_id, generation) = {
         let mut inner = state.lock().await;
+        if inner.account_close.is_some() {
+            return Err("account sign-out is still reconciling".to_string());
+        }
         inner.sign_in_generation = inner.sign_in_generation.wrapping_add(1);
         state.audit().abandon_log_upload_owner();
         (
@@ -227,6 +230,9 @@ pub async fn tono_sign_in_verify(
     let _ = email; // the challenge, not the address, identifies the attempt
     let (client, challenge_id, generation) = {
         let inner = state.lock().await;
+        if inner.account_close.is_some() {
+            return Err("account sign-out is still reconciling".to_string());
+        }
         let challenge_id = inner
             .challenge_id
             .clone()
@@ -322,76 +328,69 @@ async fn sign_out_with<R, RF, L, LF, S, SF, E>(
 ) -> Result<(), String>
 where
     R: FnOnce(Arc<TonoState>) -> RF + Send + 'static,
-    RF: std::future::Future<Output = Result<(), String>> + Send,
+    RF: std::future::Future<Output = Result<(), String>> + Send + 'static,
     L: FnOnce(Arc<crate::tono::state::TonoApiClient>) -> LF + Send + 'static,
-    LF: std::future::Future<Output = ()> + Send,
+    LF: std::future::Future<Output = ()> + Send + 'static,
     S: FnOnce(Arc<TonoState>, u64) -> SF + Send + 'static,
-    SF: std::future::Future<Output = ()> + Send,
-    E: Fn(&TonoInner) + Send + 'static,
+    SF: std::future::Future<Output = ()> + Send + 'static,
+    E: Fn(&TonoInner) + Send + Sync + 'static,
 {
-    let (client, generation) = {
+    use futures::FutureExt as _;
+    let (client, generation, protected, operation) = {
         let mut inner = state.lock().await;
+        if let Some(operation) = inner.account_close.clone() {
+            drop(inner);
+            return operation.wait().await;
+        }
         inner.invalidate_connection(true);
         inner.sign_in_generation = inner.sign_in_generation.wrapping_add(1);
         state.audit().abandon_log_upload_owner();
         inner.tasks.abort_catalog_sync();
         inner.cancel_server_tests();
-        (inner.client.clone(), inner.sign_in_generation)
+        let operation = Arc::new(crate::tono::state::LifecycleOperation::new(inner.sign_in_generation));
+        inner.account_close = Some(Arc::clone(&operation));
+        let protected = connection::sign_out_needs_release(inner.fsm.status(), inner.fsm.kill_switch_armed());
+        (inner.client.clone(), inner.sign_in_generation, protected, operation)
     };
-
-    // M-1: the predicate covers an in-flight connect too, matching the
-    // disconnect and quit paths.
-    let protected = {
-        let inner = state.lock().await;
-        connection::sign_out_needs_release(inner.fsm.status(), inner.fsm.kill_switch_armed())
-    };
-    if protected {
-        // Same sequence and same failure semantics as disconnect (M3): if
-        // the release cannot be proven, stay armed and do not sign out.
-        if let Err(err) = release(Arc::clone(&state)).await {
-            let mut inner = state.lock().await;
-            if inner.sign_in_generation != generation {
-                return Err("sign-out was superseded by a newer authentication action".to_string());
+    let completion = Arc::clone(&operation);
+    // Spawn before the next await: no admitted close can be abandoned with its UI command.
+    // The separate close slot outlives the shorter DNS/Core/WFP release operation.
+    tokio::spawn(async move {
+        let result = std::panic::AssertUnwindSafe(async {
+            if protected {
+                release(Arc::clone(&state)).await?;
             }
-            // `initial_release_failed`, not `connect_failed`: for an armed-but-unverified
-            // session the latter resolves to FullRelease and clears the armed latch even
-            // though the Service release just failed (mirrors
-            // `stay_armed_after_failed_release`).
-            inner.fsm.initial_release_failed();
+            logout(client).await;
+            let mut inner = state.lock().await;
+            inner.fsm.sign_out_or_quit();
+            inner.account = None;
+            inner.account_state = AccountState::SignedOut;
+            inner.attempt_history = Default::default();
+            inner.challenge_id = None;
+            inner.controller_secret = None;
+            inner.controller_port = None;
+            inner.kill_switch = None;
+            inner.network_events_counter = None;
+            inner.catalog_last_synced_at_ms = None;
+            inner.catalog_sync_error = None;
+            state.audit().log(AuditEvent::SignOut);
+            Ok(())
+        }).catch_unwind().await.unwrap_or_else(|_| Err("account close task failed; retry sign-out".to_string()));
+        {
+            let mut inner = state.lock().await;
+            if result.is_err() {
+                // Release not proven: retain the account and the armed latch, never hide it.
+                inner.fsm.initial_release_failed();
+            }
+            inner.account_close = None;
             emit(&inner);
-            drop(inner);
-            // L4: the user is still signed in — restart the catalog sync
-            // that `abort_catalog_sync` just stopped.
-            resume(Arc::clone(&state), generation).await;
-            return Err(err);
         }
-    }
-    // Best-effort server logout, then local token wipe (§2; logout itself
-    // is deliberately infallible).
-    if state.lock().await.sign_in_generation != generation {
-        return Err("sign-out was superseded by a newer authentication action".to_string());
-    }
-    logout(client).await;
-
-    let mut inner = state.lock().await;
-    if inner.sign_in_generation != generation {
-        return Err("sign-out was superseded by a newer authentication action".to_string());
-    }
-    inner.fsm.sign_out_or_quit();
-    inner.account = None;
-    inner.account_state = AccountState::SignedOut;
-    inner.attempt_history = Default::default();
-    inner.challenge_id = None;
-    inner.controller_secret = None;
-    inner.controller_port = None;
-    inner.kill_switch = None;
-    inner.network_events_counter = None;
-    inner.catalog_last_synced_at_ms = None;
-    inner.catalog_sync_error = None;
-    emit(&inner);
-    drop(inner);
-    state.audit().log(AuditEvent::SignOut);
-    Ok(())
+        if result.is_err() {
+            resume(Arc::clone(&state), generation).await;
+        }
+        completion.complete(result);
+    });
+    operation.wait().await
 }
 
 #[cfg(test)]

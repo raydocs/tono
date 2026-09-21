@@ -8,7 +8,7 @@ use tono_logging::{Type, logging};
 use crate::core::{CoreManager, manager::RunningMode};
 use crate::core::service;
 use crate::process::AsyncHandler;
-use crate::tono::{audit::AuditEvent, commands, state::{ReleaseOperation, TonoState}};
+use crate::tono::{audit::AuditEvent, commands, state::{LifecycleOperation, TonoState}};
 #[cfg(not(windows))]
 use crate::tono::connection_plan::stop_core_before_release;
 use super::controller::fetch_connections;
@@ -53,7 +53,7 @@ pub(super) async fn release_explicit_with_guard(
 async fn start_explicit_release(
     state: &Arc<TonoState>, app: &AppHandle,
     guard: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
-) -> Arc<ReleaseOperation> {
+) -> Arc<LifecycleOperation> {
     let worker_state = Arc::clone(state);
     let worker_app = app.clone();
     let task_state = Arc::clone(state);
@@ -69,7 +69,7 @@ async fn start_explicit_release(
     ).await
 }
 
-async fn wait_explicit_release(operation: &ReleaseOperation) -> Result<(), String> {
+async fn wait_explicit_release(operation: &LifecycleOperation) -> Result<(), String> {
     match tokio::time::timeout(EXPLICIT_RELEASE_TIMEOUT, operation.wait()).await {
         Ok(result) => result,
         Err(_) => Err(format!(
@@ -84,7 +84,7 @@ async fn wait_explicit_release(operation: &ReleaseOperation) -> Result<(), Strin
 async fn coordinate_release<F, C, S, SF>(
     state: &Arc<TonoState>, guard: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
     sequence: C, settled: S,
-) -> Arc<ReleaseOperation>
+) -> Arc<LifecycleOperation>
 where
     C: FnOnce(tokio::sync::OwnedRwLockWriteGuard<()>) -> F + Send + 'static,
     F: std::future::Future<Output = Result<(), String>> + Send + 'static,
@@ -100,7 +100,47 @@ where
                 Some(guard) => guard,
                 None => worker_state.begin_privileged_release().await,
             };
-            sequence(guard).await
+            let (generation, disconnecting, connected_at, secret, port) = {
+                let inner = worker_state.lock().await;
+                (inner.connect_generation, inner.fsm.status().is_disconnecting, inner.connected_at,
+                    inner.controller_secret.clone(), inner.controller_port)
+            };
+            // The release, not its UI waiter, owns the bounded final sample too. Sampling never
+            // delays dispatch of DNS/Core/WFP teardown and cannot mutate a replacement ledger.
+            let (result, sample) = tokio::join!(sequence(guard), async {
+                match (disconnecting, secret.as_deref(), port) {
+                    (true, Some(secret), Some(port)) => fetch_connections(secret, port).await,
+                    _ => None,
+                }
+            });
+            if result.is_ok() {
+                let mut inner = worker_state.lock().await;
+                if inner.connect_generation == generation {
+                    if let Some(payload) = sample.as_ref() {
+                        worker_state.route_ledger().lock().ingest(payload);
+                    }
+                    if disconnecting {
+                        worker_state.audit().log(AuditEvent::DisconnectOk {
+                            elapsed_ms: super::session_elapsed_ms(connected_at),
+                            bytes_up: sample.as_ref().map(|payload| payload.upload_total),
+                            bytes_down: sample.as_ref().map(|payload| payload.download_total),
+                        });
+                    }
+                }
+                // Admission stays excluded by release_operation until ALL session metadata is
+                // finalized. A cancelled/timed-out command has no remaining cleanup authority.
+                inner.fsm.sign_out_or_quit();
+                inner.controller_secret = None;
+                inner.controller_port = None;
+                inner.network_events_counter = None;
+                inner.last_core_pid = None;
+                inner.last_restart_count = None;
+                inner.connected_at = None;
+                inner.retry_attempt = 0;
+                inner.next_retry_at_ms = None;
+                worker_state.route_ledger().lock().clear_connection_counters();
+            }
+            result
         });
         let supervised_operation = Arc::clone(&operation);
         AsyncHandler::spawn(move || async move {
@@ -109,16 +149,17 @@ where
                 .map_err(|error| format!("release reconciliation task failed: {error}"))
                 .and_then(|result| result);
             if let Err(message) = &result {
+                task_state.lock().await.fsm.initial_release_failed();
                 task_state
                     .audit()
                     .log(AuditEvent::ReleaseFail { error: message.clone() });
                 logging!(error, Type::Service, "Tono: 安全释放对账失败: {message}");
             }
-            supervised_operation.complete(result);
             task_state.finish_release(supervised_operation.id()).await;
             // A timed-out caller may no longer be present to repaint. Publish the final state (or
             // the still-protected failure state) after the coordinator has settled.
             settled().await;
+            supervised_operation.complete(result);
         });
     } else {
         drop(guard);
@@ -132,7 +173,7 @@ where
 /// recreate a cancellation window between the steps. Other platforms retain their existing
 /// helper sequence until their Service route provides the same complete stop semantics.
 pub(super) async fn run_explicit_release_sequence(
-    state: &Arc<TonoState>, app: &AppHandle,
+    state: &Arc<TonoState>, _app: &AppHandle,
     _release_guard: tokio::sync::OwnedRwLockWriteGuard<()>,
 ) -> Result<(), String> {
     // Wait for detached StartClash/DNS commits that began before the release generation bump.
@@ -180,17 +221,6 @@ pub(super) async fn run_explicit_release_sequence(
 
     let mut inner = state.lock().await;
     inner.kill_switch = Some(status);
-    inner.controller_secret = None;
-    inner.controller_port = None;
-    inner.network_events_counter = None;
-    inner.last_core_pid = None;
-    inner.last_restart_count = None;
-    // Also closes a caller that reached its UI budget and temporarily surfaced Protected
-    // Offline; this transition is allowed only after the Service proved WFP is gone. A new
-    // connect cannot race this commit because `guard_snapshot` rejects while the coordinator is
-    // populated.
-    inner.fsm.sign_out_or_quit();
-    commands::emit_status(app, &commands::status_of(&inner));
     Ok(())
 }
 
@@ -198,7 +228,7 @@ pub(super) async fn run_explicit_release_sequence(
 /// sequence (DNS restore → core stop → owner-gated release, §6/C1).
 /// Idempotent while a disconnect is already in flight (L6).
 pub async fn disconnect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String> {
-    let (controller_secret, controller_port, connected_at, generation, operation) = {
+    let operation = {
         let mut inner = state.lock().await;
         if inner.fsm.status().is_disconnecting {
             let operation = start_explicit_release(&state, &app, None).await;
@@ -215,63 +245,10 @@ pub async fn disconnect(state: Arc<TonoState>, app: AppHandle) -> Result<(), Str
         // Register while the FSM lock still excludes admission. Sampling before registration
         // allowed a joining Disconnect/failure to finish release, admit B, then this caller's
         // delayed sample would dispatch another owner-wide release against B.
-        let operation = start_explicit_release(&state, &app, None).await;
-        (
-            inner.controller_secret.clone(),
-            inner.controller_port,
-            inner.connected_at,
-            inner.connect_generation,
-            operation,
-        )
+        start_explicit_release(&state, &app, None).await
     };
     state.audit().log(AuditEvent::DisconnectBegin { cause: "user" });
-
-    // Best-effort sample races the registered teardown. Missing counters must not delay the
-    // privileged release or launch a second release after a joined operation already settled.
-    let elapsed_ms = super::session_elapsed_ms(connected_at);
-    let sample = match (controller_secret.as_deref(), controller_port) {
-        (Some(secret), Some(port)) => fetch_connections(secret, port).await,
-        _ => None,
-    };
-    if let Some(payload) = sample.as_ref() {
-        state.route_ledger().lock().ingest(payload);
-    }
-    let bytes_up = sample.as_ref().map(|payload| payload.upload_total);
-    let bytes_down = sample.as_ref().map(|payload| payload.download_total);
-
-    if let Err(err) = wait_explicit_release(&operation).await {
-        let mut inner = state.lock().await;
-        if inner.connect_generation == generation {
-            inner.fsm.initial_release_failed();
-            commands::emit_status(&app, &commands::status_of(&inner));
-        }
-        return Err(err);
-    }
-
-    let mut inner = state.lock().await;
-    if inner.connect_generation != generation {
-        return Ok(());
-    }
-    inner.fsm.finish_disconnect();
-    inner.controller_secret = None;
-    inner.controller_port = None;
-    inner.kill_switch = None;
-    inner.network_events_counter = None;
-    inner.last_core_pid = None;
-    inner.last_restart_count = None;
-    inner.connected_at = None;
-    // F3: a user disconnect supersedes the backoff state.
-    inner.retry_attempt = 0;
-    inner.next_retry_at_ms = None;
-    commands::emit_status(&app, &commands::status_of(&inner));
-    drop(inner);
-    state.route_ledger().lock().clear_connection_counters();
-    state.audit().log(AuditEvent::DisconnectOk {
-        elapsed_ms,
-        bytes_up,
-        bytes_down,
-    });
-    Ok(())
+    wait_explicit_release(&operation).await
 }
 
 /// A releasing step failed mid-disconnect: fall back to Protected Offline

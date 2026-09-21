@@ -74,7 +74,7 @@ pub async fn tono_refresh_catalog(
 ) -> Result<TonoCatalogStatus, String> {
     let generation = {
         let inner = state.lock().await;
-        if !matches!(inner.account_state, AccountState::Ready) {
+        if inner.account_close.is_some() || !matches!(inner.account_state, AccountState::Ready) {
             return Err("sign in before refreshing cloud servers".to_string());
         }
         inner.sign_in_generation
@@ -132,7 +132,7 @@ pub async fn tono_test_available_servers(
 ) -> Result<Vec<TonoServerTestResult>, String> {
     let (generation, auth_generation, catalog_revision, cancellation, nodes) = {
         let mut inner = state.lock().await;
-        if !matches!(inner.account_state, AccountState::Ready) {
+        if inner.account_close.is_some() || !matches!(inner.account_state, AccountState::Ready) {
             return Err("sign in before testing servers".to_string());
         }
         if inner.fsm.status().is_connected || inner.fsm.status().is_connecting || inner.fsm.kill_switch_armed() {
@@ -214,6 +214,9 @@ pub async fn tono_select_server(
     let selection_guard = begin_selection_change(&state).await;
     let action = {
         let mut inner = state.lock().await;
+        if inner.account_close.is_some() {
+            return Err("account sign-out is still reconciling".to_string());
+        }
         if !inner.nodes.iter().any(|node| node.name == name) {
             return Err("unknown server".to_string());
         }

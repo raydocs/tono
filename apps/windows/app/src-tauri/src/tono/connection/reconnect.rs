@@ -70,7 +70,7 @@ async fn retry_reconnect_with(
     spawn: impl FnOnce(u64) -> tauri::async_runtime::JoinHandle<()>,
 ) {
     let mut inner = state.lock().await;
-    if !reconnect_allowed(
+    if inner.account_close.is_some() || !reconnect_allowed(
         inner.catalog_requires_choice,
         inner.fsm.status(),
         inner.fsm.kill_switch_armed(),
@@ -121,7 +121,7 @@ pub(super) fn note_reconnect_budget_exhausted(state: &Arc<TonoState>) {
 /// Disconnect/sign-out must never observe an empty task slot and then be followed by a reconnect
 /// handle that escaped their abort.
 pub(super) fn schedule_reconnect_locked(inner: &mut TonoInner, state: &Arc<TonoState>, app: &AppHandle) {
-    if !reconnect_allowed(
+    if inner.account_close.is_some() || !reconnect_allowed(
         inner.catalog_requires_choice,
         inner.fsm.status(),
         inner.fsm.kill_switch_armed(),

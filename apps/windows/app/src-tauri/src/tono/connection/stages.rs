@@ -13,7 +13,7 @@ use tono_logging::{Type, logging};
 use tono_service_protocol::{KillSwitchConfig, RuntimeBundle};
 
 use super::cleanup::{
-    enable_dns_cancellation_safe, ensure_fresh, stale_after_arm, stale_after_dns, start_core_cancellation_safe,
+    enable_dns_cancellation_safe, ensure_fresh, start_core_cancellation_safe,
 };
 use super::controller::{
     allocate_runtime_ports, configure_owned_controller_for_ui, lock_kill_switch_with_retries, preflight_bfe,
@@ -71,7 +71,7 @@ pub(super) async fn run_stages(
     }
 
     transaction.check("preparing service")?;
-    set_stage(state, app, ConnectStage::PreparingService, generation, false, started).await?;
+    set_stage(state, app, ConnectStage::PreparingService, generation, started).await?;
 
     // Revision 12 closes both DNS-owner ordering holes. Reconcile under the authenticated Service
     // lifecycle lock before the App's loopback:53 availability test: orphaned installed cores and
@@ -239,7 +239,7 @@ pub(super) async fn run_stages(
     // §6.3: startingKillSwitch — the Service persists intent, installs the
     // bootstrap WFP policy, writes the runtime copy, and starts the core;
     // a failure inside is fail-closed on the Service side.
-    set_stage(state, app, ConnectStage::StartingKillSwitch, generation, false, started).await?;
+    set_stage(state, app, ConnectStage::StartingKillSwitch, generation, started).await?;
     ensure_fresh(state, generation).await?;
     transaction
         .wait(
@@ -252,10 +252,9 @@ pub(super) async fn run_stages(
     {
         let mut inner = state.lock().await;
         if inner.connect_generation != generation {
-            // A disconnect/switch bumped us while the StartClash IPC was in
-            // flight; it cannot be retracted. Patch the late arm (H-1).
-            drop(inner);
-            return Err(stale_after_arm(state, generation).await);
+            // The detached mutation already reconciled under lifecycle ownership. This outer
+            // waiter owns no resource: another generation may have finished release/reconnect.
+            return Err(StageFailure::Stale);
         }
         inner.fsm.mark_kill_switch_armed();
         inner.controller_secret = Some(secret.clone());
@@ -270,8 +269,8 @@ pub(super) async fn run_stages(
     // §6.4 + §6.5: the controller bind and the WinTUN LUID appear independently
     // after StartClash. Waiting for them in series paid the lock ladder on
     // every connect even when `/version` was already answering.
-    set_stage(state, app, ConnectStage::StartingTunnel, generation, true, started).await?;
-    set_stage(state, app, ConnectStage::LockingTraffic, generation, true, started).await?;
+    set_stage(state, app, ConnectStage::StartingTunnel, generation, started).await?;
+    set_stage(state, app, ConnectStage::LockingTraffic, generation, started).await?;
     let (controller_ready, lock_ready) = transaction
         .wait("controller readiness and lock", async {
             tokio::join!(
@@ -287,16 +286,14 @@ pub(super) async fn run_stages(
 
     // §6.7: securingDNS — snapshot + point resolvers at the protected TUN endpoint, then prove
     // an ordinary lookup returns a fake-ip address.
-    set_stage(state, app, ConnectStage::SecuringDns, generation, true, started).await?;
+    set_stage(state, app, ConnectStage::SecuringDns, generation, started).await?;
     transaction
         .wait(
             "enabling protected DNS",
             enable_dns_cancellation_safe(state, generation, service_session.clone()),
         )
         .await??;
-    if state.lock().await.connect_generation != generation {
-        return Err(stale_after_dns(state, generation).await);
-    }
+    ensure_fresh(state, generation).await?;
     transaction
         .wait("fake-IP verification", verify_fake_ip())
         .await?
@@ -333,12 +330,9 @@ pub(super) async fn run_stages(
     // from observing a half-configured HTTP context.
     // §6.10: only now Connected; monitors start.
     {
-        let mut inner = match controller_commit_guard(state, generation, || {
+        let mut inner = controller_commit_guard(state, generation, || {
             configure_owned_controller_for_ui(state, app, &secret, controller_port);
-        }).await {
-            Ok(inner) => inner,
-            Err(_) => return Err(stale_after_arm(state, generation).await),
-        };
+        }).await?;
         inner.kill_switch = Some(kill_status);
         inner.controller_generation = inner.controller_generation.wrapping_add(1);
         inner.fsm.mark_session_verified();
@@ -377,9 +371,9 @@ pub(super) async fn run_stages(
         inner.retry_attempt = 0;
         inner.next_retry_at_ms = None;
         inner.connected_at = Some(std::time::Instant::now());
+        state.route_ledger().lock().clear_connection_counters();
         commands::emit_status(app, &commands::status_of(&inner));
     }
-    state.route_ledger().lock().clear_connection_counters();
     state.audit().log(AuditEvent::ConnectOk {
         node: node.name.clone(),
         elapsed_ms: started.elapsed().as_millis() as u64,
@@ -415,11 +409,11 @@ pub(super) async fn run_stages(
 async fn controller_commit_guard<'a>(
     state: &'a Arc<TonoState>, generation: u64, publish: impl FnOnce() + Send,
 ) -> Result<tokio::sync::MutexGuard<'a, crate::tono::state::TonoInner>, StageFailure> {
-    publish();
     let inner = state.lock().await;
     if inner.connect_generation != generation {
         return Err(StageFailure::Stale);
     }
+    publish();
     Ok(inner)
 }
 

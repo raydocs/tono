@@ -246,7 +246,8 @@ fn attempt_for_generation<'a>(state: &'a Arc<TonoState>, app: &'a AppHandle, exp
 /// The caller holds lifecycle admission and the state mutex. Idle is not an ownership token:
 /// every admitted retry gets a fresh epoch so a completed failure tail cannot act on its state.
 pub(crate) fn begin_attempt(inner: &mut TonoInner, generation: u64) -> Option<(u64, CancellationToken)> {
-    if inner.fsm.status().is_disconnecting
+    if inner.account_close.is_some()
+        || inner.fsm.status().is_disconnecting
         || !single_flight_begin(&mut inner.fsm, inner.connect_generation, generation)
     {
         return None;
@@ -471,6 +472,9 @@ async fn guard_snapshot(
         ));
     }
     let inner = state.lock().await;
+    if inner.account_close.is_some() {
+        return Err("account sign-out is still reconciling".to_string());
+    }
     match &inner.account_state {
         AccountState::Ready => {}
         AccountState::Suspended => return Err("account is suspended".to_string()),

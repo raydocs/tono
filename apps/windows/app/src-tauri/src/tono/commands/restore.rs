@@ -110,6 +110,9 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
     let restore_deadline = tokio::time::Instant::now() + RESTORE_TRANSACTION_TIMEOUT;
     let generation = {
         let mut inner = state.lock().await;
+        if inner.account_close.is_some() {
+            return;
+        }
         // Restore is an authentication transaction too. A retry supersedes an older restore,
         // while sign-in/sign-out already bump the same generation.
         inner.sign_in_generation = inner.sign_in_generation.wrapping_add(1);

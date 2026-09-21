@@ -901,10 +901,11 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
     /// Install tokens from a completed sign-in (§2). The refresh token, when
     /// present, is persisted; the access token lives in memory only.
     pub async fn adopt(&self, auth: &AuthResponse) -> Result<(), ApiError> {
+        // Adoption and logout's conditional wipe share one identity critical section.
+        let mut state = self.state.lock().await;
         if let Some(refresh) = &auth.refresh_token {
             self.credentials.set_refresh_token(refresh)?;
         }
-        let mut state = self.state.lock().await;
         state.access_token = Some(auth.access_token.clone());
         state.access_token_expiry = access_token_expiry_unix(&auth.access_token);
         state.epoch += 1;
@@ -1227,41 +1228,61 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
 
     /// Best-effort server logout, then local token wipe (§2).
     pub async fn logout(&self) {
-        {
+        let identity = {
             let mut state = self.state.lock().await;
             state.identity_epoch = state.identity_epoch.wrapping_add(1);
-        }
-        // Gate on "a session exists", not on "an access token is cached". A process that
-        // never completed an authorized call — offline at startup, or a refresh that failed
-        // on transport — holds a valid refresh token and no access token, and the old gate
-        // wiped that token locally while leaving it live on the server. `authorized` refreshes
-        // first when the access token is missing, and `refresh_access_token` fails without a
-        // network call when the store is empty, so the never-signed-in case stays a no-op.
-        let has_session = self.credentials.refresh_token().ok().flatten().is_some()
-            || self.state.lock().await.access_token.is_some();
-        if has_session {
-            // Read the refresh token immediately before the POST: reaching the server may go
-            // through a refresh that rotates it, which would put a stale value in the body.
-            let body = serde_json::to_string(&LogoutRequest {
-                refresh_token: self.credentials.refresh_token().ok().flatten(),
-            })
-            .ok();
-            let _ = self
-                .authorized(HttpMethod::Post, endpoints::LOGOUT, body)
-                .await;
-        }
-        // Wipe the persisted token while the state lock is held. Releasing it first left a
-        // window in which a refresh that started after the epoch bump could read the token
-        // back off disk and resurrect the session the user just ended.
-        {
-            let mut state = self.state.lock().await;
+            state.identity_epoch
+        };
+        let _ = self.logout_identity(identity).await;
+        // A replacement adoption owns its own credentials. The old HTTP response may finish,
+        // but neither its 401 retry nor its local wipe may borrow that replacement identity.
+        let mut state = self.state.lock().await;
+        if state.identity_epoch == identity {
             state.access_token = None;
             state.access_token_expiry = None;
-            // Invalidate any in-flight refresh so its stale result is
-            // discarded instead of resurrecting the wiped session (L3).
             state.epoch += 1;
             let _ = self.credentials.delete_refresh_token();
         }
+    }
+
+    async fn logout_identity(&self, identity: u64) -> Result<(), ApiError> {
+        self.ensure_log_identity(identity).await?;
+        // A restored refresh-only session must still be revoked server-side. Empty credentials
+        // fail here without network I/O. This also preserves the normal pre-expiry renewal.
+        self.current_access_token().await?;
+        let (token, epoch, body) = self.logout_request(identity).await?;
+        match self.call(HttpMethod::Post, endpoints::LOGOUT, Some(body), Some(&token)).await {
+            Err(ApiError::Unauthorized) => {
+                let mut state = self.state.lock().await;
+                if state.identity_epoch != identity {
+                    return Err(ApiError::Unauthorized);
+                }
+                if state.epoch == epoch {
+                    state.access_token = None;
+                    state.access_token_expiry = None;
+                }
+                drop(state);
+                self.refresh_access_token(epoch).await?;
+                // Rotation can replace the refresh token: capture bearer/body together again,
+                // but only for the original logout identity. No transport retry on this replay.
+                let (token, _, body) = self.logout_request(identity).await?;
+                self.send(HttpMethod::Post, endpoints::LOGOUT, Some(body), Some(&token)).await?;
+                Ok(())
+            }
+            result => result.map(|_| ()),
+        }
+    }
+
+    async fn logout_request(&self, identity: u64) -> Result<(String, u64, String), ApiError> {
+        let state = self.state.lock().await;
+        if state.identity_epoch != identity {
+            return Err(ApiError::Unauthorized);
+        }
+        let token = state.access_token.clone().ok_or(ApiError::Unauthorized)?;
+        let body = serde_json::to_string(&LogoutRequest {
+            refresh_token: self.credentials.refresh_token().ok().flatten(),
+        }).map_err(|_| ApiError::InvalidResponse)?;
+        Ok((token, state.epoch, body))
     }
 
     /// Send with the current access token; on 401 refresh once and retry

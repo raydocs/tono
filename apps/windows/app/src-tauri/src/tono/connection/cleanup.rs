@@ -81,12 +81,12 @@ pub(super) async fn start_core_cancellation_safe(
     }
     let task_state = Arc::clone(state);
     let task = tokio::spawn(async move {
-        let _mutation_guard = mutation_guard;
+        let mutation_guard = mutation_guard;
         service::tono_start_core_with_kill_switch(bundle, kill_switch)
             .await
             .map_err(StageFailure::error)?;
         if task_state.lock().await.connect_generation != generation {
-            return Err(stale_after_arm(&task_state, generation).await);
+            return Err(stale_after_arm(&task_state, generation, &mutation_guard).await);
         }
         Ok(())
     });
@@ -108,12 +108,12 @@ pub(super) async fn enable_dns_cancellation_safe(
     }
     let task_state = Arc::clone(state);
     let task = tokio::spawn(async move {
-        let _mutation_guard = mutation_guard;
+        let mutation_guard = mutation_guard;
         service::tono_enable_protected_dns_for_session(&service_session)
             .await
             .map_err(StageFailure::error)?;
         if task_state.lock().await.connect_generation != generation {
-            return Err(stale_after_dns(&task_state, generation).await);
+            return Err(stale_after_dns(&task_state, generation, &mutation_guard).await);
         }
         Ok(())
     });
@@ -121,17 +121,12 @@ pub(super) async fn enable_dns_cancellation_safe(
         .map_err(|error| StageFailure::error(format!("DNS reconciliation task failed: {error}")))?
 }
 
-/// A stale exit past a committed StartClash (H-1): the IPC cannot be
-/// retracted and the bumper's release may have run before the Service
-/// committed, so patch the late arm with one best-effort owner-gated
-/// release (idempotent, no session needed).
-///
-/// Chosen over join-waiting the in-flight attempt inside disconnect /
-/// sign-out: the join would serialize the user's release behind a
-/// StartClash lifecycle IPC of up to ~30 s, while this patch is bounded and
-/// order-safe by construction — it runs strictly after the arm commit it
-/// patches, and is idempotent against the bumper's own release.
-pub(super) async fn stale_after_arm(state: &Arc<TonoState>, generation: u64) -> StageFailure {
+/// Only the detached mutation may compensate its commit. The held reader proves that the
+/// retiring writer has not released/replaced its Core; an outer read-only waiter lacks it.
+async fn stale_after_arm(
+    state: &Arc<TonoState>, generation: u64,
+    _guard: &tokio::sync::OwnedRwLockReadGuard<()>,
+) -> StageFailure {
     // Asks for the intent of the bump that retired *this* generation, not the latest one: a
     // later non-releasing bump must not downgrade a pending release into "keep blocking".
     let release_intent = { state.lock().await.release_intent_for(generation) };
@@ -155,7 +150,10 @@ pub(super) async fn stale_after_arm(state: &Arc<TonoState>, generation: u64) -> 
 /// restore DNS while the old enable IPC is still in flight; if that enable commits afterwards,
 /// releasing WFP alone strands the machine on Tono's protected DNS with no answering core. Node-switch
 /// invalidations deliberately keep DNS protected because their replacement transaction owns it.
-pub(super) async fn stale_after_dns(state: &Arc<TonoState>, generation: u64) -> StageFailure {
+async fn stale_after_dns(
+    state: &Arc<TonoState>, generation: u64,
+    guard: &tokio::sync::OwnedRwLockReadGuard<()>,
+) -> StageFailure {
     let release_intent = { state.lock().await.release_intent_for(generation) };
     if release_intent {
         if let Err(error) = service::tono_restore_protected_dns().await {
@@ -166,7 +164,7 @@ pub(super) async fn stale_after_dns(state: &Arc<TonoState>, generation: u64) -> 
             );
             return StageFailure::Stale;
         }
-        return stale_after_arm(state, generation).await;
+        return stale_after_arm(state, generation, guard).await;
     }
     StageFailure::Stale
 }
