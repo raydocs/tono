@@ -125,8 +125,45 @@ pub async fn tono_repair_service() -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn tono_service_prerequisites() -> crate::core::service::ServicePrerequisites {
-    crate::core::service::service_prerequisites()
+pub async fn tono_service_prerequisites() -> Result<crate::core::service::ServicePrerequisites, String> {
+    query_service_prerequisites(crate::core::service::service_prerequisites).await
+}
+
+async fn query_service_prerequisites(
+    provider: impl FnOnce() -> crate::core::service::ServicePrerequisites + Send + 'static,
+) -> Result<crate::core::service::ServicePrerequisites, String> {
+    // SCM calls are synchronous: async alone would still block the executor.
+    tokio::task::spawn_blocking(provider)
+        .await
+        .map_err(|error| format!("service prerequisite query failed: {error}"))
+}
+
+#[cfg(test)]
+mod prerequisite_tests {
+    #[tokio::test(flavor = "current_thread")]
+    async fn stalled_prerequisite_provider_does_not_block_control_work() {
+        let control_thread = std::thread::current().id();
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let query = tokio::spawn(super::query_service_prerequisites(move || {
+            started.send(std::thread::current().id()).unwrap();
+            // A bounded wait makes an accidental inline call fail instead of hanging CI.
+            wait.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+            crate::core::service::ServicePrerequisites {
+                service_running: false,
+                service_registered: true,
+                bfe_running: false,
+            }
+        }));
+        let provider_thread = ready.await.unwrap();
+        // This control work must run while the provider is still blocked.
+        release.send(()).unwrap();
+        assert_ne!(provider_thread, control_thread);
+        let report = query.await.unwrap().unwrap();
+        assert!(!report.service_running);
+        assert!(report.service_registered);
+        assert!(!report.bfe_running);
+    }
 }
 
 #[tauri::command]
