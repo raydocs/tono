@@ -577,6 +577,51 @@ final class ProtectedDNSManager {
         }
     }
 
+    /// Fault-injected lifecycle regression. No live DNS preferences or root
+    /// snapshot are changed; production restoreServices owns every decision.
+    static func runRestoreReadFailureSelfTest() -> Bool {
+        enum ReadFailure: Error { case injected }
+        let snapshot = Snapshot(service: "Wi-Fi", servers: ["9.9.9.9"])
+        var settings = [
+            "Wi-Fi": [protectedDNSServer],
+            "Disabled Ethernet": [protectedDNSServer],
+            "Bridge": [protectedDNSServer],
+            "Custom": ["8.8.4.4"],
+        ]
+        var unreadable = true
+        var snapshotRemoved = false
+        func restore() throws {
+            try restoreServices(
+                snapshot: snapshot,
+                services: Set(settings.keys),
+                read: { service in
+                    if service == "Disabled Ethernet", unreadable { throw ReadFailure.injected }
+                    return settings[service]!
+                },
+                write: { settings[$1] = $0 },
+                removeSnapshot: { snapshotRemoved = true }
+            )
+        }
+        var refused = false
+        do { try restore() } catch ReadFailure.injected { refused = true } catch {}
+        guard refused, !snapshotRemoved,
+              settings["Wi-Fi"] == ["9.9.9.9"],
+              settings["Bridge"] == [],
+              settings["Disabled Ethernet"] == [protectedDNSServer],
+              settings["Custom"] == ["8.8.4.4"] else {
+            print("DNS restore read-failure regression FAILED: refused=\(refused), snapshotRemoved=\(snapshotRemoved)")
+            return false
+        }
+        unreadable = false
+        do { try restore() } catch { return false }
+        guard snapshotRemoved, settings["Disabled Ethernet"] == [],
+              settings["Wi-Fi"] == ["9.9.9.9"], settings["Custom"] == ["8.8.4.4"] else {
+            return false
+        }
+        print("DNS restore read-failure regression passed: failure retains snapshot; retry restores all services")
+        return true
+    }
+
     static func runSelfTests() -> Bool {
         do {
             guard try validateService("Wi-Fi") == "Wi-Fi",
