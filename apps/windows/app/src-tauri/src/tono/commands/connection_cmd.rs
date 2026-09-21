@@ -99,7 +99,10 @@ pub async fn retry_now(state: Arc<TonoState>, app: AppHandle) -> Result<(), Stri
 pub async fn tono_status(state: tauri::State<'_, Arc<TonoState>>) -> Result<TonoStatus, String> {
     note_frontend_ipc();
     if let Some(status) = STATUS_SNAPSHOT.load_full() {
-        return Ok((*status).clone());
+        let mut status = (*status).clone();
+        // The installer can change the journal without a connection transition.
+        status.update_incomplete = crate::tono::update_handoff::incomplete();
+        return Ok(status);
     }
     let inner = state.lock().await;
     Ok(status_of(&inner))

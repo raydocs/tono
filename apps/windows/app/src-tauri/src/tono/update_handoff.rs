@@ -22,13 +22,91 @@
 //! macOS Sparkle has no NSIS helper, so `installHandler` still writes
 //! `InstallStarted` in-process after the quiesce hops.
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
+
+use once_cell::sync::Lazy;
 
 use tono_core::update_journal::{
     self, UpdateHandoffJournal, UpdateHandoffPhase, advance_pending, commit_verified_recovery,
     incomplete_from_phase, journal_path, load, record_first_launch_migration, write_prepared,
 };
 use tono_logging::{Type, logging};
+
+const JOURNAL_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
+// Longer than the UI's five-second safety-net poll: normal refreshes can
+// serve recent evidence, but a stuck reader cannot retain a clear result forever.
+const JOURNAL_MAX_AGE: Duration = Duration::from_secs(10);
+static PROJECTION: Lazy<Arc<JournalProjection>> =
+    Lazy::new(|| Arc::new(JournalProjection::default()));
+
+#[derive(Default)]
+struct JournalProjection {
+    state: Mutex<ProjectionState>,
+}
+
+#[derive(Default)]
+struct ProjectionState {
+    generation: u64,
+    writers: usize,
+    refreshing: bool,
+    refreshed_at: Option<Instant>,
+    incomplete: bool,
+}
+
+impl JournalProjection {
+    fn incomplete_with(self: &Arc<Self>, read: impl FnOnce() -> bool + Send + 'static) -> bool {
+        // This lock never covers I/O. Even contention on the projection must
+        // not delay a caller holding the connection state mutex.
+        let Ok(mut state) = self.state.try_lock() else {
+            return true;
+        };
+        let age = state.refreshed_at.map(|at| at.elapsed());
+        let warning = state.writers != 0
+            || age.is_none_or(|age| age >= JOURNAL_MAX_AGE)
+            || state.incomplete;
+        if state.writers != 0
+            || state.refreshing
+            || age.is_some_and(|age| age < JOURNAL_REFRESH_INTERVAL)
+        {
+            return warning;
+        }
+        state.refreshing = true;
+        let generation = state.generation;
+        drop(state);
+        let projection = self.clone();
+        crate::process::AsyncHandler::spawn_blocking(move || {
+            let incomplete = read();
+            let mut state = projection.state.lock().unwrap();
+            state.refreshing = false;
+            // A read started before a local write cannot clear its warning.
+            if state.generation == generation {
+                state.incomplete = incomplete;
+                state.refreshed_at = Some(Instant::now());
+            }
+        });
+        warning
+    }
+
+    fn with_write<T>(&self, write: impl FnOnce() -> T) -> T {
+        {
+            let mut state = self.state.lock().unwrap();
+            state.generation += 1;
+            state.writers += 1;
+            state.refreshed_at = None;
+        }
+        let _invalidate = scopeguard::guard((), |_| {
+            let mut state = self.state.lock().unwrap();
+            state.generation += 1;
+            state.writers -= 1;
+            state.refreshed_at = None;
+        });
+        write()
+    }
+}
 
 pub fn support_dir() -> PathBuf {
     crate::utils::dirs::app_home_dir().unwrap_or_else(|_| std::env::temp_dir().join("Tono"))
@@ -54,8 +132,10 @@ pub fn load_pending() -> Option<UpdateHandoffJournal> {
 
 /// Failed or unreadable/expired evidence must stay visible. Failure to load a
 /// journal is not proof that no update is pending; it must not clear the warning.
+/// Path resolution, journal locking, disk I/O and parsing run off the caller.
+/// Status polls refresh external changes, with at most one read in flight.
 pub fn incomplete() -> bool {
-    incomplete_at(&current_path())
+    PROJECTION.incomplete_with(|| incomplete_at(&current_path()))
 }
 
 fn incomplete_at(path: &Path) -> bool {
@@ -66,15 +146,15 @@ fn incomplete_at(path: &Path) -> bool {
 }
 
 pub fn save_prepared(journal: &UpdateHandoffJournal) -> std::io::Result<()> {
-    write_prepared(&current_path(), journal)
+    PROJECTION.with_write(|| write_prepared(&current_path(), journal))
 }
 
 pub fn record_owner_phase(phase: UpdateHandoffPhase) -> std::io::Result<()> {
-    advance_pending(&current_path(), phase)
+    PROJECTION.with_write(|| advance_pending(&current_path(), phase))
 }
 
 pub fn begin_first_launch_migration(current_app_version: &str) -> Option<UpdateHandoffJournal> {
-    match record_first_launch_migration(&current_path(), current_app_version) {
+    match PROJECTION.with_write(|| record_first_launch_migration(&current_path(), current_app_version)) {
         Ok(Some(journal))
             if journal.phase == UpdateHandoffPhase::FirstLaunchMigration =>
         {
@@ -95,7 +175,9 @@ pub fn begin_first_launch_migration(current_app_version: &str) -> Option<UpdateH
 /// New process: only a verified recovery (or an unprotected first launch that
 /// has already migrated) may commit. Persistence failure leaves the file.
 pub fn commit_if_verified(current_app_version: &str) -> bool {
-    report_commit(commit_verified_recovery(&current_path(), current_app_version))
+    report_commit(PROJECTION.with_write(|| {
+        commit_verified_recovery(&current_path(), current_app_version)
+    }))
 }
 
 /// Account/catalog restoration does not verify a tunnel. It may finish only
@@ -105,11 +187,11 @@ pub fn commit_after_account_restore(
     current_app_version: &str,
     protection_proven_absent: bool,
 ) -> bool {
-    report_commit(commit_after_account_restore_at(
+    report_commit(PROJECTION.with_write(|| commit_after_account_restore_at(
         &current_path(),
         current_app_version,
         protection_proven_absent,
-    ))
+    )))
 }
 
 fn commit_after_account_restore_at(
@@ -155,6 +237,87 @@ pub use update_journal::{UpdateHandoffJournal as Journal, UpdateHandoffPhase as 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stalled_projection_releases_state_and_never_clears_unknown_evidence() {
+        use std::sync::{Arc, Mutex, mpsc};
+        use std::time::{Duration, Instant};
+
+        let dir = scopeguard::guard(
+            std::env::temp_dir().join(format!("tono-update-projection-{}", nanoid::nanoid!())),
+            |path| { let _ = std::fs::remove_dir_all(path); },
+        );
+        std::fs::create_dir_all(&*dir).unwrap();
+        let path = journal_path(&dir);
+        let projection = Arc::new(JournalProjection::default());
+        let state = Arc::new(Mutex::new(()));
+        let (reading, started) = mpsc::channel();
+        let (release, stalled) = mpsc::channel();
+        let (returned, result) = mpsc::channel();
+        let caller = {
+            let projection = projection.clone();
+            let state = state.clone();
+            let path = path.clone();
+            std::thread::spawn(move || {
+                let _state = state.lock().unwrap();
+                let warning = projection.incomplete_with(move || {
+                    reading.send(()).unwrap();
+                    stalled.recv().unwrap();
+                    incomplete_at(&path)
+                });
+                returned.send(warning).unwrap();
+            })
+        };
+        let budget = Duration::from_secs(10);
+        started.recv_timeout(budget).unwrap();
+        assert!(result.recv_timeout(budget).unwrap(), "unknown evidence must warn");
+        caller.join().unwrap();
+        assert!(state.try_lock().is_ok(), "disk I/O must not retain connection state");
+        for _ in 0..100 {
+            assert!(projection.incomplete_with(|| panic!("duplicate refresh")));
+        }
+
+        // A local write must fence the pre-write read, even when it returns clear.
+        projection.with_write(|| ());
+        release.send(()).unwrap();
+        let wait_for_refresh = || {
+            let deadline = Instant::now() + budget;
+            while projection.state.lock().unwrap().refreshing {
+                assert!(Instant::now() < deadline, "refresh did not finish");
+                std::thread::yield_now();
+            }
+        };
+        wait_for_refresh();
+        assert!(projection.state.lock().unwrap().refreshed_at.is_none());
+        assert!(projection.incomplete_with(|| false));
+        wait_for_refresh();
+        assert!(!projection.incomplete_with(|| panic!("fresh evidence was reread")));
+
+        // External changes are reread even while recent evidence is usable.
+        // If that read stalls past the age limit, the old clear result expires.
+        std::fs::write(&path, b"corrupt external replacement").unwrap();
+        projection.state.lock().unwrap().refreshed_at =
+            Some(Instant::now() - JOURNAL_REFRESH_INTERVAL);
+        let (release, stalled) = mpsc::channel();
+        let external_path = path.clone();
+        assert!(!projection.incomplete_with(move || {
+            stalled.recv().unwrap();
+            incomplete_at(&external_path)
+        }));
+        projection.state.lock().unwrap().refreshed_at =
+            Some(Instant::now() - JOURNAL_MAX_AGE);
+        assert!(projection.incomplete_with(|| panic!("duplicate external refresh")));
+        release.send(()).unwrap();
+        wait_for_refresh();
+        assert!(projection.incomplete_with(|| panic!("unreadable evidence was reread")));
+        projection.with_write(|| {
+            assert!(projection.incomplete_with(|| panic!("read during local write")));
+            std::fs::remove_file(&path).unwrap();
+        });
+        assert!(projection.incomplete_with(move || incomplete_at(&path)));
+        wait_for_refresh();
+        assert!(!projection.incomplete_with(|| panic!("fresh committed evidence was reread")));
+    }
 
     #[test]
     fn prepare_stays_at_update_prepared() {
