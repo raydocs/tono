@@ -30,7 +30,12 @@ UUID_RE = re.compile(
 )
 EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.I)
 IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
-PASSWORD_RE = re.compile(r"\bpassword\b", re.I)
+# Remove the assigned value too, including quoted spaces/escapes. Run this
+# before the other redactors so their replacement text cannot split a value.
+PASSWORD_RE = re.compile(
+    r"\bpassword\b(?:[\"']?\s*[:=]\s*(?:\"(?:\\.|[^\"\\])*(?:\"|$)|"
+    r"'(?:\\.|[^'\\])*(?:'|$)|[^\s,;}\]]+))?", re.I,
+)
 LINE_KEEP = re.compile(r"dial|handshake|timeout|reset|refused|REALITY", re.I)
 IPV4_EXACT = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$")
 SAFE_HOST = re.compile(r"^[A-Za-z0-9.:_-]+$")
@@ -150,12 +155,10 @@ def redact_text(text: str, allow_ip: str | None = None) -> str:
         value = match.group(0)
         return value if allow and value == allow else "[redacted]"
 
-    return PASSWORD_RE.sub(
-        "[redacted]",
-        IPV4_RE.sub(
-            ipv4,
-            EMAIL_RE.sub("[redacted]", UUID_RE.sub("[redacted]", text)),
-        ),
+    text = PASSWORD_RE.sub("[redacted]", text)
+    return IPV4_RE.sub(
+        ipv4,
+        EMAIL_RE.sub("[redacted]", UUID_RE.sub("[redacted]", text)),
     )
 
 
@@ -165,7 +168,10 @@ def redact_value(value: Any, allow_ip: str | None = None) -> Any:
     if isinstance(value, list):
         return [redact_value(item, allow_ip) for item in value]
     if isinstance(value, dict):
-        return {str(key): redact_value(item, allow_ip) for key, item in value.items()}
+        return {
+            str(key): "[redacted]" if str(key).lower() == "password" else redact_value(item, allow_ip)
+            for key, item in value.items()
+        }
     return value
 
 
@@ -480,6 +486,8 @@ def handle_xray_dial_errors(params: dict, ctx: JobContext) -> tuple[str, str, di
     rc, text = ctx.ssh(ctx.node, _journal_remote(since, max_lines), 100)
     if rc == 124:
         return "timeout", "ssh timeout reading xray journal", {}
+    if rc != 0:
+        return "error", f"xray journal read failed rc={rc}", {}
     lines = text.splitlines()
     scanned = len(lines)
     keep = [line for line in lines if LINE_KEEP.search(line)]
@@ -497,6 +505,8 @@ def handle_xray_error_digest(params: dict, ctx: JobContext) -> tuple[str, str, d
     rc, text = ctx.ssh(ctx.node, _journal_remote(since, 400), 100)
     if rc == 124:
         return "timeout", "ssh timeout reading xray journal", {}
+    if rc != 0:
+        return "error", f"xray journal read failed rc={rc}", {}
     digest = digest_from_lines(text.splitlines(), node_allow_ip(ctx.node))
     total = sum(digest["counts"].values())
     return "ok", f"xray_error_digest matched={total}", digest

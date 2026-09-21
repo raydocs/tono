@@ -328,7 +328,7 @@ describe('ops ingest hooks', () => {
       appVersion: '0.0.72',
       osVersion: 'macOS 14.4',
       osArch: 'arm64',
-      coreErrors: ['dial tcp 203.0.113.9:443: i/o timeout'],
+      coreErrors: ['dial tcp 203.0.113.9:443: i/o timeout Password="two word diagnostic"; handshake EOF'],
     }, account.token));
     expect(ok.status).toBe(202);
     expect(await ok.json()).toEqual({ accepted: true });
@@ -337,7 +337,7 @@ describe('ops ingest hooks', () => {
        WHERE user_id = ? AND source = 'failure'`,
     ).bind(account.userId).first<{ source: string; kind: string; node: string; error: string }>();
     expect(row).toMatchObject({ source: 'failure', kind: 'connectFail', node: 'Tokyo · Kite' });
-    expect(row?.error).toContain('[redacted]');
+    expect(row?.error).toBe('dial tcp [redacted]:443: i/o timeout [redacted]; handshake EOF');
     const status = await db().prepare(
       'SELECT last_fail_code, last_fail_node FROM ops_customer_status WHERE user_id = ?',
     ).bind(account.userId).first<{ last_fail_code: string; last_fail_node: string }>();
