@@ -18,6 +18,20 @@ final class UpdatePreparationTests: XCTestCase {
         )
     }
 
+    func testUpdateSnapshotDoesNotInventRuntimeIdentityAndPreservesKnownCatalog() {
+        let app = AppState()
+        app.managedCatalogRevision = 73
+        app.isProtectionBlocked = true
+        let journal = app.softwareUpdateJournal(nextVersion: "0.0.74")
+        XCTAssertEqual(journal.coreVersion, "unknown", "no live Core version was read")
+        XCTAssertEqual(journal.coreSHA256, "", "a packaged input digest is not running-binary evidence")
+        XCTAssertEqual(journal.buildCommit, "", "CFBundleVersion is not a source commit")
+        XCTAssertEqual(journal.catalogRevision, 73)
+        XCTAssertEqual(journal.nextAppVersion, "0.0.74")
+        XCTAssertTrue(journal.keepKillSwitchArmed)
+        XCTAssertEqual(journal.helperProtocolVersion, HelperProtocolVersion.current)
+    }
+
     func testProtectedHandoffRequiresALiveBarrierNotOnlyIntent() {
         XCTAssertFalse(UpdatePreparation.protectionMatches(
             keepKillSwitchArmed: true, armed: false, wanted: true, live: false

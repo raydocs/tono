@@ -845,7 +845,9 @@ if CommandLine.arguments.dropFirst() == ["--staging-self-test"] {
     exit(runStagingRefusalSelfTests() ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--lifecycle-self-test"] {
-    exit(KillSwitchManager.runLifecycleSelfTests() ? 0 : 1)
+    let pfPassed = KillSwitchManager.runLifecycleSelfTests()
+    let dnsPassed = ProtectedDNSManager.runRestoreReadFailureSelfTest()
+    exit(pfPassed && dnsPassed ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--self-test"] {
     exit(

@@ -247,6 +247,7 @@ final class AppState {
     // Core components
     let coreRuntime = CoreRuntimeManager()
     let connectionCoordinator = ConnectionCoordinator()
+    var networkProtection = NetworkProtectionOperations()
     let subscriptionManager = SubscriptionManager()
     let proxyService = ProxyService()
     private let providerRuleLoader = ProviderRuleLoader()
@@ -381,30 +382,35 @@ final class AppState {
         }
     }
 
-    /// Close observation sockets immediately and move an active session toward
-    /// the helper's bootstrap-only PF state before macOS powers networking
-    /// down. The root helper independently installs an emergency all-block on
-    /// the power event, so a delayed GUI callback cannot create an egress gap.
-    /// Quiesce connect/health/switch work before a Sparkle install. PF stays
-    /// armed until cleanup proves DNS + core stop, or the journal records a
-    /// fail-closed handoff.
-    func prepareForSoftwareUpdate(nextVersion: String) async throws -> UpdateHandoffJournal {
-        let journal = UpdateHandoffJournal(
+    /// Snapshot update evidence before any runtime ownership is retired.
+    func softwareUpdateJournal(nextVersion: String) -> UpdateHandoffJournal {
+        UpdateHandoffJournal(
             phase: .updatePrepared,
             previousAppVersion: Bundle.main.object(
                 forInfoDictionaryKey: "CFBundleShortVersionString"
             ) as? String ?? "unknown",
             nextAppVersion: nextVersion,
-            coreVersion: "v1.19.30-tono-gvisor-adaptive.1",
+            // The helper does not attest the running binary's version/digest,
+            // and this bundle has no source-commit field. Preserve unknowns;
+            // a packaged input or CFBundleVersion cannot supply those facts.
+            coreVersion: "unknown",
             coreSHA256: "",
-            buildCommit: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "",
+            buildCommit: "",
+            // Required contract for this app, not an observed helper identity.
             helperProtocolVersion: HelperProtocolVersion.current,
             wasConnected: isConnected || isConnecting || isProtectionBlocked,
             keepKillSwitchArmed: isConnected || isConnecting || isProtectionBlocked || KillSwitchService.isArmed,
             selectedNodeAnonymousId: selectedExitNode()?.id,
-            catalogRevision: nil,
+            catalogRevision: managedCatalogVersion,
             connectionGeneration: connectionCoordinator.protectionOperationGeneration
         )
+    }
+
+    /// Quiesce connect/health/switch work before a Sparkle install. PF stays
+    /// armed until cleanup proves DNS + core stop, or the journal records a
+    /// fail-closed handoff.
+    func prepareForSoftwareUpdate(nextVersion: String) async throws -> UpdateHandoffJournal {
+        let journal = softwareUpdateJournal(nextVersion: nextVersion)
         let runtimeMayOwnNetwork = journal.keepKillSwitchArmed
             || coreRuntime.isRunning
             || AppProfile.defaults.bool(forKey: SettingsKey.didStartCore)

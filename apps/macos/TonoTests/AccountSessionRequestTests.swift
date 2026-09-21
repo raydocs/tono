@@ -43,6 +43,7 @@ final class AccountSessionRequestTests: XCTestCase {
         catalogConsumer: @escaping @MainActor (TonoExitCatalogResponse) async throws -> Void = { _ in },
         trafficPolicyConsumer: @escaping @MainActor (TonoTrafficPolicyResponse) async throws -> Int = { $0.revision },
         cloudFallbackConsumer: @escaping @MainActor (Bool) throws -> Void = { _ in },
+        killSwitchDisarmConsumer: @escaping @MainActor () async -> Void = {},
         routeSplitConsumer: @escaping @MainActor () -> AppTrafficLedger.RouteSplit = { .init() }
     ) -> (AccountSession, URLSession, String, AsyncStream<HeldAccountProtocol>) {
         let host = "\(UUID().uuidString.lowercased()).invalid"
@@ -52,7 +53,7 @@ final class AccountSessionRequestTests: XCTestCase {
         config.protocolClasses = [HeldAccountProtocol.self]
         let transport = URLSession(configuration: config)
         let api = TonoAPIClient(baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport)
-        let account = AccountSession(api: api, keychain: testKeychain(host), sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, catalogConsumer: catalogConsumer, trafficPolicyConsumer: trafficPolicyConsumer, cloudFallbackConsumer: cloudFallbackConsumer, routeSplitConsumer: routeSplitConsumer)
+        let account = AccountSession(api: api, keychain: testKeychain(host), sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, catalogConsumer: catalogConsumer, trafficPolicyConsumer: trafficPolicyConsumer, cloudFallbackConsumer: cloudFallbackConsumer, killSwitchDisarmConsumer: killSwitchDisarmConsumer, routeSplitConsumer: routeSplitConsumer)
         account.state = .signedOut
         return (account, transport, host, requests)
     }
@@ -863,6 +864,52 @@ final class AccountSessionRequestTests: XCTestCase {
         release.open()
         await cleanup.value
         XCTAssertFalse(account.accountLifecycle.isBusy)
+    }
+
+    func testAccountReleaseCannotDisarmAfterDisconnectOwnerRetainsProtection() async {
+        let app = AppState()
+        app.isConnected = true
+        app.coreRuntime.isRunning = true
+        var coreRunning = true
+        var barrierArmed = true
+        var events: [String] = []
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { _ in events.append("stop-refused"); return false }
+        runtime.coreStatus = { (coreRunning, true) }
+        runtime.restoreDNS = { events.append("dns-restored"); return true }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = { events.append("disarmed"); barrierArmed = false }
+        runtime.restrictToBootstrap = { events.append("restricted"); barrierArmed = true }
+        app.networkProtection = runtime
+        let (account, transport, host, _) = fixture(killSwitchDisarmConsumer: {
+            await app.disconnectAndWait(releaseKillSwitch: true)
+        })
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
+
+        // The real AccountSession -> AppState -> coordinator release path runs;
+        // only helper/system I/O is replaced. Account cleanup cannot overrule
+        // the owner's refusal to open PF while its Core remains alive.
+        await account.releaseNetworkProtection()
+        XCTAssertTrue(barrierArmed, "account fallback must not disarm after Core-stop refusal")
+        XCTAssertTrue(app.isProtectionBlocked)
+        XCTAssertFalse(app.isConnected)
+        XCTAssertFalse(app.isDisconnecting)
+        XCTAssertEqual(events, ["stop-refused", "dns-restored", "restricted"])
+
+        // A later explicit retry still owns the same transaction and may open
+        // PF after a successful stop; retaining protection is not a dead end.
+        events.removeAll()
+        app.networkProtection.stopCore = { runtime in
+            coreRunning = false
+            runtime.isRunning = false
+            events.append("stopped")
+            return true
+        }
+        await account.releaseNetworkProtection()
+        XCTAssertFalse(barrierArmed)
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertEqual(events, ["stopped", "dns-restored", "disarmed"])
     }
 
     func testProtectionReleaseMakesInterruptedAuthenticatedStartupRetryable() throws {

@@ -35,6 +35,14 @@ nonisolated extension LocalTrafficAudit {
         data.append(0x0A)
         pending.append(data)
         pendingBytes += data.count
+        // Flush thresholds are not retention limits: a failed write restores
+        // the batch. Keep the newest bounded evidence even if disk stays full
+        // or unsafe; logging must not exhaust memory while recovery is needed.
+        while pending.count > Self.maximumPendingEntries
+                || pendingBytes > Self.maximumPendingBytes {
+            pendingBytes -= pending.removeFirst().count
+            droppedPendingEntries += 1
+        }
 
         if pending.count >= 64 || pendingBytes >= 64 * 1_024 {
             flushPending()
@@ -51,8 +59,26 @@ nonisolated extension LocalTrafficAudit {
     func flushPending() {
         flushWorkItem?.cancel()
         flushWorkItem = nil
-        guard !pending.isEmpty else { return }
-        let output = pending.reduce(into: Data()) { $0.append($1) }
+        guard !pending.isEmpty || droppedPendingEntries > 0 else { return }
+        var output = Data()
+        if droppedPendingEntries > 0 {
+            // Loss may span account/consent boundaries. This notice has no
+            // upload scope and remains local; each retained entry keeps its
+            // original scope. Reset the count only after a successful write.
+            let notice: [String: Any] = [
+                "schema": 1,
+                "timestamp": timestampFormatter.string(from: Date()),
+                "session_id": sessionID,
+                "kind": "audit_dropped",
+                "dropped_entries": droppedPendingEntries,
+            ]
+            guard let data = try? JSONSerialization.data(
+                withJSONObject: notice, options: [.sortedKeys]
+            ) else { return }
+            output.append(data)
+            output.append(0x0A)
+        }
+        for data in pending { output.append(data) }
         let snapshot = pending
         let snapshotBytes = pendingBytes
         pending.removeAll(keepingCapacity: true)
@@ -70,6 +96,7 @@ nonisolated extension LocalTrafficAudit {
         do {
             try handle.seekToEnd()
             try handle.write(contentsOf: output)
+            droppedPendingEntries = 0
         } catch {
             restorePending()
         }
