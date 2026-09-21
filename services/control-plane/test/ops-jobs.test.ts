@@ -14,9 +14,9 @@ import {
   heartbeatJob,
   leaseJobs,
   listJobs,
-  redactJobResult,
   validateJobRequest,
 } from '../src/ops/jobs';
+import { redactJobResult } from '../src/ops/job-redaction';
 import { runWorkerJobs } from '../src/ops/jobs-worker';
 import { retirePendingDedupeKey } from '../src/ops/retire-dependencies';
 import { runVerdictPass } from '../src/ops/verdict-run';
@@ -130,9 +130,6 @@ describe('ops node jobs', () => {
   it('redacts secrets from stored results', async () => {
     const uuid = '123e4567-e89b-12d3-a456-426614174000';
     const raw = `user ops@example.com uuid=${uuid} ip=203.0.113.9 node=198.51.100.4 password=hunter2`;
-    expect(redactJobResult(raw, '198.51.100.4')).toBe(
-      'user [redacted] uuid=[redacted] ip=[redacted] node=198.51.100.4 [redacted]=hunter2',
-    );
     const t = 1_800_000_300;
     await enqueue('node_config_snapshot', t);
     const claimed = await leaseJobs(db(), 'hub', 1, t);
@@ -140,16 +137,30 @@ describe('ops node jobs', () => {
       db(),
       claimed.jobs[0].id,
       claimed.leaseId,
-      { status: 'error', summary: raw, resultJson: { log: raw } },
+      {
+        status: 'error', summary: raw,
+        resultJson: JSON.stringify({
+          log: raw,
+          credentials: { Password: 'synthetic-assignment-value' },
+          lines: ['handshake EOF Password: "two word diagnostic"; connection reset'],
+        }),
+      },
       t + 1,
       '198.51.100.4',
     );
     expect(done.status).toBe('failed');
     expect(done.resultStatus).toBe('error');
-    expect(done.resultSummary).not.toMatch(/ops@example.com|203\.0\.113\.9|password/i);
+    expect(done.resultSummary).not.toMatch(/ops@example.com|203\.0\.113\.9|password|hunter2/i);
     expect(done.resultSummary).not.toContain(uuid);
     expect(done.resultSummary).toContain('198.51.100.4');
-    expect(done.resultJson).not.toMatch(/ops@example.com|203\.0\.113\.9/i);
+    expect(JSON.parse(done.resultJson!)).toEqual({
+      log: 'user [redacted] uuid=[redacted] ip=[redacted] node=198.51.100.4 [redacted]',
+      credentials: { '[redacted]': '[redacted]' },
+      lines: ['handshake EOF [redacted]; connection reset'],
+    });
+    expect(redactJobResult(raw, '198.51.100.4')).toBe(
+      'user [redacted] uuid=[redacted] ip=[redacted] node=198.51.100.4 [redacted]',
+    );
   });
 
   it('requeues an expired lease then fails after max attempts', async () => {
