@@ -1,6 +1,7 @@
 import Network
 import SystemConfiguration
 import Foundation
+import Darwin
 
 /// The interface kinds that can carry this Mac's own traffic. A tunnel reports
 /// `.other` and is deliberately absent: the locked TUN is up on exactly the
@@ -63,6 +64,80 @@ nonisolated final class PhysicalNetworkReachability: @unchecked Sendable {
         lock.lock()
         satisfied.removeAll()
         lock.unlock()
+    }
+}
+
+/// Physical network interface fingerprint used strictly for debouncing
+/// SCDynamicStore notification bursts when physical interface addresses
+/// have not changed.
+///
+/// Deliberately excludes tunnel interfaces (`utun*`, including Tono's
+/// 198.18.0.1/30 TUN), loopback, bridge, and virtual interfaces.
+/// Never filters out RFC 1918 / non-globally-routable IPs from physical
+/// interfaces, and never performs bare physical socket probes.
+nonisolated struct PhysicalInterfaceFingerprint: Equatable, Sendable {
+    let rawValue: String
+
+    static func isExcludedInterface(name: String) -> Bool {
+        name.hasPrefix("lo")
+            || name.hasPrefix("utun")
+            || name.hasPrefix("tun")
+            || name.hasPrefix("tap")
+            || name.hasPrefix("awdl")
+            || name.hasPrefix("llw")
+            || name.hasPrefix("bridge")
+            || name.hasPrefix("ipsec")
+            || name.hasPrefix("ppp")
+    }
+
+    static func fromEntries(_ entries: [(name: String, address: String)]) -> PhysicalInterfaceFingerprint {
+        let formatted = entries
+            .filter { !isExcludedInterface(name: $0.name) }
+            .map { "\($0.name)=\($0.address)" }
+            .sorted()
+        return PhysicalInterfaceFingerprint(rawValue: formatted.joined(separator: ";"))
+    }
+
+    static func current() -> PhysicalInterfaceFingerprint {
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else {
+            return PhysicalInterfaceFingerprint(rawValue: "")
+        }
+        defer { freeifaddrs(firstAddr) }
+
+        var entries: [(name: String, address: String)] = []
+        var ptr: UnsafeMutablePointer<ifaddrs>? = firstAddr
+        while let current = ptr {
+            let flags = Int32(current.pointee.ifa_flags)
+            let isUp = (flags & IFF_UP) == IFF_UP
+            let isRunning = (flags & IFF_RUNNING) == IFF_RUNNING
+            let isLoopback = (flags & IFF_LOOPBACK) == IFF_LOOPBACK
+
+            let name = String(cString: current.pointee.ifa_name)
+            if isUp && isRunning && !isLoopback && !isExcludedInterface(name: name),
+               let addr = current.pointee.ifa_addr {
+                let family = addr.pointee.sa_family
+                // Collect stable physical IPv4 addresses; ignore IPv6 temporary
+                // privacy addresses (RFC 4941) to avoid churn false-positives.
+                if family == UInt8(AF_INET) {
+                    var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                    if getnameinfo(
+                        addr,
+                        socklen_t(addr.pointee.sa_len),
+                        &hostname,
+                        socklen_t(hostname.count),
+                        nil,
+                        0,
+                        NI_NUMERICHOST
+                    ) == 0 {
+                        let ipStr = String(cString: hostname)
+                        entries.append((name: name, address: ipStr))
+                    }
+                }
+            }
+            ptr = current.pointee.ifa_next
+        }
+        return fromEntries(entries)
     }
 }
 

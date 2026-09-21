@@ -50,6 +50,8 @@ tono-logging = { workspace = true }
 tono-signal = { workspace = true }
 tono-i18n = { workspace = true }
 tono-limiter = { workspace = true }
+tono-service-client = { workspace = true }
+tono-client = { workspace = true }
 tauri-plugin-tono-sysinfo = { workspace = true }
 tauri-plugin-clipboard-manager = { workspace = true }
 tauri = { workspace = true, features = [

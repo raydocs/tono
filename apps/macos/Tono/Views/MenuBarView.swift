@@ -4,26 +4,44 @@ import SwiftUI
 /// Menu bar extra: state, current node, one safe action, Open Tono, Quit.
 /// Not a second dashboard — no TUN toggle, IP, DNS, or node list.
 struct MenuBarView: View {
+    static let popoverWidth: CGFloat = 280
+
     @Environment(AppState.self) private var appState
     @Environment(AccountSession.self) private var accountSession
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            currentNode
-            primaryAction
-            if appState.isProtectionBlocked
-                || (KillSwitchService.isArmed && accountSession.state != .ready) {
-                restoreAction
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                currentNode
+                primaryAction
+                if appState.isProtectionBlocked
+                    || (KillSwitchService.isArmed && accountSession.state != .ready) {
+                    restoreAction
+                }
+                menuDivider
+                openTonoButton
+                quitButton
             }
-            menuDivider
-            openTonoButton
-            quitButton
+            .padding(.bottom, 8)
+            .frame(width: Self.popoverWidth)
         }
-        .padding(.bottom, 8)
-        .frame(width: 280)
-        .fixedSize()
+        .frame(width: Self.popoverWidth)
+        .frame(maxHeight: maximumPopoverHeight)
+    }
+
+    static func clampedPopoverHeight(for screenHeight: CGFloat) -> CGFloat {
+        let available = max(120, screenHeight - 80)
+        return min(available, 480)
+    }
+
+    private var maximumPopoverHeight: CGFloat {
+        let mouseLocation = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) })
+            ?? NSScreen.main
+        let screenHeight = screen?.visibleFrame.height ?? 600
+        return Self.clampedPopoverHeight(for: screenHeight)
     }
 
     private var status: MenuBarProtectionStatus {
@@ -74,7 +92,10 @@ struct MenuBarView: View {
         let name = appState.activeNode?.name ?? appState.proxyService.activeNodeName ?? ""
         guard !name.isEmpty else { return String(localized: "No server selected") }
         let (flag, clean) = ConfigParser.extractFlag(from: name)
-        return "\(nodeRouteTitle(for: name)) · \(nodeRegionCode(flag: flag, name: clean))"
+        let region = nodeRegionCode(flag: flag, name: clean)
+        let flagEmoji = UnicodeCountryFlag.emoji(for: region)
+        let prefix = flagEmoji.map { "\($0) " } ?? ""
+        return "\(prefix)\(nodeRouteTitle(for: name)) · \(region)"
     }
 
     private var busy: Bool {

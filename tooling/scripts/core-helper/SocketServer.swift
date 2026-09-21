@@ -206,7 +206,14 @@ final class SocketServer {
                       let mihomoSrc = object["mihomoSource"] as? String else {
                     throw HelperFailure.invalid("Invalid helper upgrade request.")
                 }
-                try stageAndUpgrade(helperSource: helperSrc, mihomoSource: mihomoSrc)
+                guard let peerBundle = authorizer.peerBundleURL(socket: client) else {
+                    throw HelperFailure.invalid("Upgrade requires an authenticated peer bundle.")
+                }
+                try stageAndUpgrade(
+                    helperSource: helperSrc,
+                    mihomoSource: mihomoSrc,
+                    peerBundlePath: peerBundle.path
+                )
                 sendResponse(client, status: 200, object: ["ok": true, "restarting": true])
                 helperShutdownRequested = 1
             default:
@@ -238,9 +245,51 @@ final class SocketServer {
         }
     }
 
-    private func stageAndUpgrade(helperSource: String, mihomoSource: String) throws {
-        try verifyEmbeddedSignature(helperSource, identifier: "com.raydocs.tono.helper")
-        try verifyEmbeddedSignature(mihomoSource, identifier: "sing-box")
+    private func stageAndUpgrade(
+        helperSource: String,
+        mihomoSource: String,
+        peerBundlePath: String
+    ) throws {
+        let allowedPrefix = peerBundlePath.hasSuffix("/") ? peerBundlePath + "Contents/" : peerBundlePath + "/Contents/"
+        guard helperSource.hasPrefix(allowedPrefix),
+              mihomoSource.hasPrefix(allowedPrefix),
+              !helperSource.contains(".."),
+              !mihomoSource.contains("..") else {
+            throw HelperFailure.invalid("Upgrade source paths must reside inside the authenticated peer bundle.")
+        }
+
+        var resolvedHelper = [CChar](repeating: 0, count: Int(PATH_MAX))
+        guard realpath(helperSource, &resolvedHelper) != nil else {
+            throw HelperFailure.invalid("Cannot resolve helper source path.")
+        }
+        let realHelperPath = String(cString: resolvedHelper)
+        guard realHelperPath.hasPrefix(allowedPrefix) else {
+            throw HelperFailure.invalid("Helper source path escapes authenticated peer bundle.")
+        }
+
+        var resolvedMihomo = [CChar](repeating: 0, count: Int(PATH_MAX))
+        guard realpath(mihomoSource, &resolvedMihomo) != nil else {
+            throw HelperFailure.invalid("Cannot resolve core source path.")
+        }
+        let realMihomoPath = String(cString: resolvedMihomo)
+        guard realMihomoPath.hasPrefix(allowedPrefix) else {
+            throw HelperFailure.invalid("Core source path escapes authenticated peer bundle.")
+        }
+
+        let helperFD = open(realHelperPath, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        guard helperFD >= 0 else {
+            throw HelperFailure.invalid("Cannot safely open helper source.")
+        }
+        close(helperFD)
+
+        let mihomoFD = open(realMihomoPath, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        guard mihomoFD >= 0 else {
+            throw HelperFailure.invalid("Cannot safely open core source.")
+        }
+        close(mihomoFD)
+
+        try verifyEmbeddedSignature(realHelperPath, identifier: "com.raydocs.tono.helper")
+        try verifyEmbeddedSignature(realMihomoPath, identifier: "sing-box")
 
         let helperTemp = "/Library/PrivilegedHelperTools/tono-core-helper.new"
         let mihomoTemp = "/Library/PrivilegedHelperTools/tono-sing-box.new"
@@ -252,7 +301,7 @@ final class SocketServer {
 
         let p1 = Process()
         p1.executableURL = URL(fileURLWithPath: "/usr/bin/install")
-        p1.arguments = ["-o", "root", "-g", "wheel", "-m", "0755", helperSource, helperTemp]
+        p1.arguments = ["-o", "root", "-g", "wheel", "-m", "0755", realHelperPath, helperTemp]
         try p1.run()
         p1.waitUntilExit()
         guard p1.terminationStatus == 0 else {
@@ -261,7 +310,7 @@ final class SocketServer {
 
         let p2 = Process()
         p2.executableURL = URL(fileURLWithPath: "/usr/bin/install")
-        p2.arguments = ["-o", "root", "-g", "wheel", "-m", "0755", mihomoSource, mihomoTemp]
+        p2.arguments = ["-o", "root", "-g", "wheel", "-m", "0755", realMihomoPath, mihomoTemp]
         try p2.run()
         p2.waitUntilExit()
         guard p2.terminationStatus == 0 else {

@@ -4,155 +4,153 @@ extension AppState {
     // MARK: - Connection Control
 
     func connect() {
-        if isDisconnecting {
-            connectionCoordinator.connectAfterDisconnect { [weak self] in
+        connectionCoordinator.executeConnect(
+            isDisconnecting: isDisconnecting,
+            deferredFallback: { [weak self] in
                 guard let self,
                       !self.isConnected,
                       !self.isConnecting,
                       !self.isDisconnecting else { return }
                 self.connect()
-            }
-            return
-        }
-        guard !isConnected && !isConnecting else { return }
-        guard !catalogSelectionRequiresChoice else {
-            errorMessage = String(localized: "Choose an available cloud server before reconnecting.")
-            return
-        }
-        guard isTonoReady else {
-            errorMessage = String(localized: "No protected Tono cloud exit is ready.")
-            return
-        }
-        if let selected = selectedExitNode(), let reason = ConfigPipeline.singBoxUnavailableReason(selected) {
-            errorMessage = reason + ": this sing-box build cannot authenticate the catalog's HY2 certificate pin. Choose Reality."
-            return
-        }
-        self.connectionCoordinator.bumpGeneration()
-        isProtectionBlocked = false
-        connectionStage = .preparing
-        completedConnectionStages = []
-        lastConnectionStageDurations = []
-        lastConnectionFailure = nil
-        connectionStartedAt = Date()
-        connectionStageStartedAt = connectionStartedAt
-        if !isProtectedReconnectScheduled {
-            protectedReconnectAttempt = 0
-            protectedReconnectNextAttemptAt = nil
-            clearCatalogFailoverSweep()
-        }
-        lastClassifiedFailure = nil
-        isConnecting = true
-        errorMessage = nil
-        // Any fresh connect attempt is user-visible intent to try again; the
-        // reconnect loop re-pauses if the same user-action failure repeats.
-        protectedReconnectPausedForUserAction = false
-
-        // Session-dynamic mixed/controller ports avoid collisions with leftover
-        // 7890/9090 listeners from other proxies or a previous core.
-        let sessionPorts = SessionRuntimePorts.allocatePair()
-        let port = sessionPorts.mixed
-        config.mixedPort = port
-        config.externalController = "127.0.0.1:\(sessionPorts.controller)"
-        // Tono always requires TUN; LAN exposure is never allowed.
-        config.tunEnabled = true
-        config.allowLan = false
-        config.mode = ProxyMode.rule.rawValue.lowercased()
-        proxyMode = .rule
-
-        let selectedExit = preferManagedCatalogExitForConnect()
-        let selectedExitName = selectedExit?.name ?? ConfigPipeline.homeNodeName
-        LocalTrafficAudit.shared.recordEvent(
-            "connect_requested",
-            details: [
-                "selected_exit": selectedExitName,
-                "claude_home_route": managedCatalogRouting?.homeSocks5 != nil
-                    ? "homeSocks5"
-                    : managedCatalogRouting?.homeProxy != nil
-                        ? "homeProxy"
-                        : "absent",
-                "mixed_port": String(port),
-                "controller_port": String(sessionPorts.controller),
-            ]
-        )
-        ConnectionTelemetryBuffer.shared.record(
-            "connectBegin",
-            stage: ConnectionStage.preparing.rawValue,
-            node: selectedExit?.name,
-            generation: Int(self.connectionCoordinator.protectionOperationGeneration),
-            transport: selectedExit?.catalogTransport
-        )
-
-        let overlay = ConfigPipeline.OverlayConfig(
-            mixedPort: port,
-            externalController: config.externalController,
-            secret: config.secret,
-            mode: "rule",
-            logLevel: "warning",
-            allowLan: false,
-            tunEnabled: true,
-            selectedNodeName: selectedExitName,
-            tonoTransport: tonoTransport,
-            claudeHomeNodeName: managedCatalogRouting?.homeProxy,
-            defaultNodeName: managedCatalogRouting?.defaultProxy,
-            claudeHomeSocks5: managedCatalogRouting?.homeSocks5
-        )
-        let apiHost = (Bundle.main.object(forInfoDictionaryKey: "TonoAPIBaseURL") as? String)
-            .flatMap { URL(string: $0)?.host }
-
-        // Health-check: poll /version until mihomo is ready
-        let apiPort = config.externalController.split(separator: ":").last.flatMap { Int($0) } ?? 9090
-        let api = CoreControllerClient(port: apiPort, secret: config.secret)
-        let runtimeNodes = importedExitNodes
-        let usesHomeBootstrap = AppProfile.homeExitEnabled && tonoTransport != nil
-        let trafficPolicy = managedTrafficPolicy
-
-        let attemptID = UUID()
-        self.connectionCoordinator.connectAttemptID = attemptID
-        // Every stage is individually bounded, but their worst-case sum is
-        // multi-minute. One overall deadline converts a wedged-but-not-erroring
-        // attempt into the ordinary failure path instead of an endless spinner.
-        self.connectionCoordinator.connectWatchdogTask?.cancel()
-        self.connectionCoordinator.connectWatchdogTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(240))
-            // A first-run attempt can legitimately sit on the administrator
-            // prompt past the deadline; the prompt itself is already bounded
-            // (180s in HelperManager), so grant that stage one extension
-            // instead of tearing down under the user's credential dialog.
-            if let self, !Task.isCancelled, self.isConnecting,
-               self.connectionCoordinator.connectAttemptID == attemptID,
-               self.connectionStage == .preparingHelper
-                || self.connectionStage == .preparing {
-                try? await Task.sleep(for: .seconds(200))
-            }
-            guard let self, !Task.isCancelled,
-                  self.isConnecting, self.connectionCoordinator.connectAttemptID == attemptID else {
-                return
-            }
-            LocalTrafficAudit.shared.recordEvent(
-                "connect_watchdog_fired",
-                details: ["stage": String(describing: self.connectionStage)]
-            )
-            let stalledMessage = String(
-                localized: "The connection attempt stalled and was stopped."
-            )
-            if KillSwitchService.isArmed {
-                self.disconnect(releaseKillSwitch: false)
-                self.errorMessage = stalledMessage + " "
-                    + String(localized: "Kill Switch is blocking traffic while Tono retries. Click Restore internet to get back online.")
-                self.scheduleProtectedReconnect()
-            } else {
-                self.errorMessage = stalledMessage
-                self.disconnect(releaseKillSwitch: true)
-            }
-        }
-        self.connectionCoordinator.connectTask = Task { [weak self, coreRuntime] in
-            guard let self else { return }
-            do {
-                guard let networkService =
-                    await PrivilegedRuntimeCoordinator.shared.primaryNetworkService()
-                else {
-                    throw SystemProxyError.noNetworkService
+            },
+            prepare: { [weak self] in
+                guard let self else { return (false, UUID()) }
+                guard !self.isConnected && !self.isConnecting else { return (false, UUID()) }
+                guard !self.catalogSelectionRequiresChoice else {
+                    self.errorMessage = String(localized: "Choose an available cloud server before reconnecting.")
+                    return (false, UUID())
                 }
+                guard self.isTonoReady else {
+                    self.errorMessage = String(localized: "No protected Tono cloud exit is ready.")
+                    return (false, UUID())
+                }
+                if let selected = self.selectedExitNode(), let reason = ConfigPipeline.singBoxUnavailableReason(selected) {
+                    self.errorMessage = reason + ": this sing-box build cannot authenticate the catalog's HY2 certificate pin. Choose Reality."
+                    return (false, UUID())
+                }
+                self.isProtectionBlocked = false
+                self.connectionStage = .preparing
+                self.completedConnectionStages = []
+                self.lastConnectionStageDurations = []
+                self.lastConnectionFailure = nil
+                self.connectionStartedAt = Date()
+                self.connectionStageStartedAt = self.connectionStartedAt
+                if !self.isProtectedReconnectScheduled {
+                    self.protectedReconnectAttempt = 0
+                    self.protectedReconnectNextAttemptAt = nil
+                    self.clearCatalogFailoverSweep()
+                }
+                self.lastClassifiedFailure = nil
+                self.isConnecting = true
+                self.errorMessage = nil
+                // Any fresh connect attempt is user-visible intent to try again; the
+                // reconnect loop re-pauses if the same user-action failure repeats.
+                self.protectedReconnectPausedForUserAction = false
+
+                // Session-dynamic mixed/controller ports avoid collisions with leftover
+                // 7890/9090 listeners from other proxies or a previous core.
+                let sessionPorts = SessionRuntimePorts.allocatePair()
+                let port = sessionPorts.mixed
+                self.config.mixedPort = port
+                self.config.externalController = "127.0.0.1:\(sessionPorts.controller)"
+                // Tono always requires TUN; LAN exposure is never allowed.
+                self.config.tunEnabled = true
+                self.config.allowLan = false
+                self.config.mode = ProxyMode.rule.rawValue.lowercased()
+                self.proxyMode = .rule
+
+                let selectedExit = self.preferManagedCatalogExitForConnect()
+                let selectedExitName = selectedExit?.name ?? ConfigPipeline.homeNodeName
+                LocalTrafficAudit.shared.recordEvent(
+                    "connect_requested",
+                    details: [
+                        "selected_exit": selectedExitName,
+                        "claude_home_route": self.managedCatalogRouting?.homeSocks5 != nil
+                            ? "homeSocks5"
+                            : self.managedCatalogRouting?.homeProxy != nil
+                                ? "homeProxy"
+                                : "absent",
+                        "mixed_port": String(port),
+                        "controller_port": String(sessionPorts.controller),
+                    ]
+                )
+                ConnectionTelemetryBuffer.shared.record(
+                    "connectBegin",
+                    stage: ConnectionStage.preparing.rawValue,
+                    node: selectedExit?.name,
+                    generation: Int(self.connectionCoordinator.protectionOperationGeneration),
+                    transport: selectedExit?.catalogTransport
+                )
+                return (true, UUID())
+            },
+            onWatchdog: { [weak self] attemptID in
+                guard let self else { return }
+                // A first-run attempt can legitimately sit on the administrator
+                // prompt past the deadline; the prompt itself is already bounded
+                // (180s in HelperManager), so grant that stage one extension
+                // instead of tearing down under the user's credential dialog.
+                if self.isConnecting,
+                   self.connectionCoordinator.connectAttemptID == attemptID,
+                   self.connectionStage == .preparingHelper
+                    || self.connectionStage == .preparing {
+                    try? await Task.sleep(for: .seconds(200))
+                }
+                guard !Task.isCancelled,
+                      self.isConnecting, self.connectionCoordinator.connectAttemptID == attemptID else {
+                    return
+                }
+                LocalTrafficAudit.shared.recordEvent(
+                    "connect_watchdog_fired",
+                    details: ["stage": String(describing: self.connectionStage)]
+                )
+                let stalledMessage = String(
+                    localized: "The connection attempt stalled and was stopped."
+                )
+                if KillSwitchService.isArmed {
+                    self.disconnect(releaseKillSwitch: false)
+                    self.errorMessage = stalledMessage + " "
+                        + String(localized: "Kill Switch is blocking traffic while Tono retries. Click Restore internet to get back online.")
+                    self.scheduleProtectedReconnect()
+                } else {
+                    self.errorMessage = stalledMessage
+                    self.disconnect(releaseKillSwitch: true)
+                }
+            },
+            perform: { [weak self, coreRuntime] attemptID, generation in
+                guard let self else { return }
+                let port = self.config.mixedPort
+                let selectedExit = self.preferManagedCatalogExitForConnect()
+                let selectedExitName = selectedExit?.name ?? ConfigPipeline.homeNodeName
+                let overlay = ConfigPipeline.OverlayConfig(
+                    mixedPort: port,
+                    externalController: self.config.externalController,
+                    secret: self.config.secret,
+                    mode: "rule",
+                    logLevel: "warning",
+                    allowLan: false,
+                    tunEnabled: true,
+                    selectedNodeName: selectedExitName,
+                    tonoTransport: self.tonoTransport,
+                    claudeHomeNodeName: self.managedCatalogRouting?.homeProxy,
+                    defaultNodeName: self.managedCatalogRouting?.defaultProxy,
+                    claudeHomeSocks5: self.managedCatalogRouting?.homeSocks5
+                )
+                let apiHost = (Bundle.main.object(forInfoDictionaryKey: "TonoAPIBaseURL") as? String)
+                    .flatMap { URL(string: $0)?.host }
+
+                // Health-check: poll /version until mihomo is ready
+                let apiPort = self.config.externalController.split(separator: ":").last.flatMap { Int($0) } ?? 9090
+                let api = CoreControllerClient(port: apiPort, secret: self.config.secret)
+                let runtimeNodes = self.importedExitNodes
+                let usesHomeBootstrap = AppProfile.homeExitEnabled && self.tonoTransport != nil
+                let trafficPolicy = self.managedTrafficPolicy
+
+                do {
+                    guard let networkService =
+                        await PrivilegedRuntimeCoordinator.shared.primaryNetworkService()
+                    else {
+                        throw SystemProxyError.noNetworkService
+                    }
                 self.protectedDNSService = networkService
                 var physicalInterface = await PrivilegedRuntimeCoordinator.shared
                     .primaryNetworkInterface()
@@ -603,159 +601,151 @@ extension AppState {
                 }
             }
         }
-    }
+    )
+}
 
     /// Stops Mihomo/TUN. Kill switch is NOT disarmed here — that only happens on
     /// intentional logout / user "turn off protection" so a crash or health failure
     /// leaves the host fail-closed via Kill Switch.
     func disconnect(releaseKillSwitch: Bool = false) {
-        self.connectionCoordinator.bumpGeneration()
-        LocalTrafficAudit.shared.recordEvent(
-            "disconnect_requested",
-            details: [
-                "release_kill_switch": String(releaseKillSwitch),
-                "was_connected": String(isConnected),
-            ]
-        )
-        // Recorded here, at the top, because everything it reports is gone by
-        // the time the teardown below returns: `trafficStats` is replaced with
-        // a fresh one and `isConnected` goes false further down, and the
-        // release branch clears `connectionStartedAt`. Guarded on `isConnected`
-        // as well as the start date so a health-driven disconnect followed by
-        // the user's own "Restore internet" — which reaches this function a
-        // second time with the start date still set — cannot bank a second,
-        // empty session.
-        if isConnected, let sessionStartedAt = connectionStartedAt {
-            ConnectionTelemetryBuffer.shared.record(
-                "disconnectOk",
-                elapsedMs: max(0, Int(Date().timeIntervalSince(sessionStartedAt) * 1_000)),
-                node: selectedExitNode()?.name,
-                // Mihomo's top-level counters are cumulative, not the sum of live flows.
-                bytesUp: trafficStats.totalUpload,
-                bytesDown: trafficStats.totalDownload
-            )
-        }
-        let protectionMayBeActive = isProtectionBlocked
-            || isConnected
-            || isConnecting
-            || KillSwitchService.isArmed
-        // An explicit release can spend up to 180 seconds on the administrator
-        // repair prompt. Keep the UI protected/offline until core stop, DNS
-        // restoration, and PF disarm have all committed.
-        isProtectionBlocked = !releaseKillSwitch || protectionMayBeActive
-        let runtimeMayOwnNetwork =
-            KillSwitchService.isArmed
-                || AppProfile.defaults.bool(forKey: SettingsKey.didStartCore)
-                || HelperManager.hasInstalledHelperArtifact
-        let shouldStopCore = isConnected
-            || isConnecting
-            || coreRuntime.isRunning
-            || AppProfile.defaults.bool(forKey: SettingsKey.didStartCore)
-        if releaseKillSwitch {
-            // A released host starts a genuinely new story; stale failure
-            // history must not let a single failure in a future session trip
-            // the "repeated three times" pause.
-            lastProtectedFailureSignature = nil
-            consecutiveProtectedFailureCount = 0
-            protectedReconnectPausedForUserAction = false
-            protectedReconnectPauseLiftsOnNetworkChange = false
-            self.connectionCoordinator.protectedReconnectTask?.cancel()
-            self.connectionCoordinator.protectedReconnectTask = nil
-            self.connectionCoordinator.protectedReconnectID = nil
-            self.connectionCoordinator.lastProtectedReconnectKick = nil
-            isProtectedReconnectScheduled = false
-            protectedReconnectAttempt = 0
-            protectedReconnectNextAttemptAt = nil
-            self.connectionCoordinator.wakeRecoveryTask?.cancel()
-            self.connectionCoordinator.wakeRecoveryTask = nil
-            self.connectionCoordinator.sleepRestrictTask?.cancel()
-            self.connectionCoordinator.sleepRestrictTask = nil
-            resumeProtectionAfterWake = false
-            autoConnectRequested = false
-            connectionStartedAt = nil
-            connectionStageStartedAt = nil
-            completedConnectionStages = []
-            lastConnectionFailure = nil
-        }
-        // Connection-scoped observations. `/connections` stops arriving once the
-        // core is gone, so leaving these set would have the next session judge a
-        // phantom stream from the previous one — old enough to look in-flight —
-        // and needlessly defer its first pin refreshes.
-        oldestProxiedConnectionStart = nil
-        lastManagedDirectActivity = nil
-        pinRefreshDeferralCount = 0
-        catalogApplyDeferralCount = 0
-        // Drained below alongside connect/nodeSwitch/configReload rather than
-        // merely cancelled: this monitor issues privileged probes, and a task
-        // suspended on the coordinator actor resumes regardless of cancellation,
-        // so the release sequence has to wait for it to unwind before it
-        // restores DNS and disarms PF.
-        let pendingCoreMonitor = self.connectionCoordinator.coreMonitorTask
-        pendingCoreMonitor?.cancel()
-        self.connectionCoordinator.coreMonitorTask = nil
-        self.connectionCoordinator.networkEnvironmentTask?.cancel()
-        self.connectionCoordinator.networkEnvironmentTask = nil
-        networkInfoTask?.cancel()
-        networkInfoTask = nil
+        let pendingConnect = self.connectionCoordinator.connectTask
         let pendingNodeSwitch = self.connectionCoordinator.nodeSwitchTask
         pendingNodeSwitch?.cancel()
         self.connectionCoordinator.nodeSwitchTask = nil
         let pendingConfigReload = self.connectionCoordinator.configReloadTask
         pendingConfigReload?.cancel()
         self.connectionCoordinator.configReloadTask = nil
-        pendingFullConfigReload = false
-        pendingDirectPolicyReload = nil
-        loadedRuntimeConfigDigest = nil
-        residentialRouteAuditGeneration &+= 1
-        residentialRouteAuditContext = nil
-        LocalTrafficAudit.shared.setResidentialRouteContext(nil)
-        LocalTrafficAudit.setAssistantDirectFirstMember(nil)
+        let pendingCoreMonitor = self.connectionCoordinator.coreMonitorTask
+        pendingCoreMonitor?.cancel()
+        self.connectionCoordinator.coreMonitorTask = nil
 
-        // Cancel any in-progress connect Task. The teardown sequence waits for
-        // it to leave the serialized helper actor before issuing stop/disarm.
-        let pendingConnect = self.connectionCoordinator.connectTask
-        pendingConnect?.cancel()
-        self.connectionCoordinator.connectTask = nil
-        isConnecting = false
-        connectionStage = .preparing
-        isDisconnecting = true
-        disconnectionStartedAt = Date()
-        disconnectionStage = .finishingOperation
-        switchingNodeId = nil
+        let pendingTasks = [pendingConnect, pendingNodeSwitch, pendingConfigReload, pendingCoreMonitor]
+            .compactMap { $0 }
 
-        // Stop WebSocket streams
-        webSocket?.stopAll()
-        webSocket = nil
-        coreController = nil
-        proxyService.setAPI(nil)
+        let shouldStopCore = isConnected
+            || isConnecting
+            || coreRuntime.isRunning
+            || AppProfile.defaults.bool(forKey: SettingsKey.didStartCore)
 
-        // Stop UI-side streams/timers immediately; blocking system operations
-        // continue on the serialized runtime actor.
-        stopProxyGuard()
-        stopLatencyTestTimer()
+        let runtimeMayOwnNetwork =
+            KillSwitchService.isArmed
+                || AppProfile.defaults.bool(forKey: SettingsKey.didStartCore)
+                || HelperManager.hasInstalledHelperArtifact
 
-        // Reset state
-        isConnected = false
-        isProxyDegraded = false
-        networkInfo = NetworkInfo()
-        trafficStats = TrafficStats()
-        trafficFeedLive = false
-        connectionsFeedLive = false
-        connections = []
-        connectionsDisplayLimited = false
-        appTrafficLedger.reset()
-        logEntries = []
-        activeRules = []
-        ruleProviders = [:]
-        providerRulesCache = []
-        providerRulesLoaded = false
-        isLoadingProviderRules = false
-        activeDirectPolicy = nil
+        connectionCoordinator.executeDisconnect(
+            releaseKillSwitch: releaseKillSwitch,
+            pendingTasks: pendingTasks,
+            prepare: { [weak self] in
+                guard let self else { return }
+                LocalTrafficAudit.shared.recordEvent(
+                    "disconnect_requested",
+                    details: [
+                        "release_kill_switch": String(releaseKillSwitch),
+                        "was_connected": String(self.isConnected),
+                    ]
+                )
+                // Recorded here, at the top, because everything it reports is gone by
+                // the time the teardown below returns: `trafficStats` is replaced with
+                // a fresh one and `isConnected` goes false further down, and the
+                // release branch clears `connectionStartedAt`. Guarded on `isConnected`
+                // as well as the start date so a health-driven disconnect followed by
+                // the user's own "Restore internet" — which reaches this function a
+                // second time with the start date still set — cannot bank a second,
+                // empty session.
+                if self.isConnected, let sessionStartedAt = self.connectionStartedAt {
+                    ConnectionTelemetryBuffer.shared.record(
+                        "disconnectOk",
+                        elapsedMs: max(0, Int(Date().timeIntervalSince(sessionStartedAt) * 1_000)),
+                        node: self.selectedExitNode()?.name,
+                        // Mihomo's top-level counters are cumulative, not the sum of live flows.
+                        bytesUp: self.trafficStats.totalUpload,
+                        bytesDown: self.trafficStats.totalDownload
+                    )
+                }
+                let protectionMayBeActive = self.isProtectionBlocked
+                    || self.isConnected
+                    || self.isConnecting
+                    || KillSwitchService.isArmed
+                // An explicit release can spend up to 180 seconds on the administrator
+                // repair prompt. Keep the UI protected/offline until core stop, DNS
+                // restoration, and PF disarm have all committed.
+                self.isProtectionBlocked = !releaseKillSwitch || protectionMayBeActive
+                if releaseKillSwitch {
+                    // A released host starts a genuinely new story; stale failure
+                    // history must not let a single failure in a future session trip
+                    // the "repeated three times" pause.
+                    self.lastProtectedFailureSignature = nil
+                    self.consecutiveProtectedFailureCount = 0
+                    self.protectedReconnectPausedForUserAction = false
+                    self.protectedReconnectPauseLiftsOnNetworkChange = false
+                    self.isProtectedReconnectScheduled = false
+                    self.protectedReconnectAttempt = 0
+                    self.protectedReconnectNextAttemptAt = nil
+                    self.resumeProtectionAfterWake = false
+                    self.autoConnectRequested = false
+                    self.connectionStartedAt = nil
+                    self.connectionStageStartedAt = nil
+                    self.completedConnectionStages = []
+                    self.lastConnectionFailure = nil
+                }
+                // Connection-scoped observations. `/connections` stops arriving once the
+                // core is gone, so leaving these set would have the next session judge a
+                // phantom stream from the previous one — old enough to look in-flight —
+                // and needlessly defer its first pin refreshes.
+                self.oldestProxiedConnectionStart = nil
+                self.lastManagedDirectActivity = nil
+                self.pinRefreshDeferralCount = 0
+                self.catalogApplyDeferralCount = 0
+                self.connectionCoordinator.networkEnvironmentTask?.cancel()
+                self.connectionCoordinator.networkEnvironmentTask = nil
+                self.networkInfoTask?.cancel()
+                self.networkInfoTask = nil
+                self.pendingFullConfigReload = false
+                self.pendingDirectPolicyReload = nil
+                self.loadedRuntimeConfigDigest = nil
+                self.residentialRouteAuditGeneration &+= 1
+                self.residentialRouteAuditContext = nil
+                LocalTrafficAudit.shared.setResidentialRouteContext(nil)
+                LocalTrafficAudit.setAssistantDirectFirstMember(nil)
 
-        connectionCoordinator.enqueueDisconnect(
-            waitingFor: [pendingConnect, pendingNodeSwitch, pendingConfigReload, pendingCoreMonitor]
-                .compactMap { $0 }
-        ) { [weak self, coreRuntime] requestID in
+                self.isConnecting = false
+                self.connectionStage = .preparing
+                self.isDisconnecting = true
+                self.disconnectionStartedAt = Date()
+                self.disconnectionStage = .finishingOperation
+                self.switchingNodeId = nil
+
+                // Stop WebSocket streams
+                self.webSocket?.stopAll()
+                self.webSocket = nil
+                self.coreController = nil
+                self.proxyService.setAPI(nil)
+
+                // Stop UI-side streams/timers immediately; blocking system operations
+                // continue on the serialized runtime actor.
+                self.stopProxyGuard()
+                self.stopLatencyTestTimer()
+
+                // Reset state
+                self.isConnected = false
+                self.lastPhysicalFingerprint = nil
+                self.isProxyDegraded = false
+                self.networkInfo = NetworkInfo()
+                self.trafficStats = TrafficStats()
+                self.trafficFeedLive = false
+                self.connectionsFeedLive = false
+                self.connections = []
+                self.connectionsDisplayLimited = false
+                self.appTrafficLedger.reset()
+                self.logEntries = []
+                self.activeRules = []
+                self.ruleProviders = [:]
+                self.providerRulesCache = []
+                self.providerRulesLoaded = false
+                self.isLoadingProviderRules = false
+                self.activeDirectPolicy = nil
+            },
+            operation: { [weak self, coreRuntime] requestID in
             var transitionError: String?
             var helperReadyForRelease = true
             if releaseKillSwitch {
@@ -878,7 +868,8 @@ extension AppState {
                 }
             }
         }
-    }
+    )
+}
 
     func disconnectAndWait(releaseKillSwitch: Bool = false) async {
         disconnect(releaseKillSwitch: releaseKillSwitch)
@@ -916,6 +907,7 @@ extension AppState {
         // resurrect the UI as connected while that teardown is queued.
         guard isConnecting, !Task.isCancelled else { return false }
         isConnected = true
+        lastPhysicalFingerprint = PhysicalInterfaceFingerprint.current()
         isProtectionBlocked = false
         isRecoveringProtectedConnection = false
         isProxyDegraded = proxyFailed
@@ -1105,7 +1097,9 @@ extension AppState {
     func updateLiveStreamSubscriptions() {
         guard isConnected, let webSocket else { return }
 
-        if isMainWindowVisible,
+        // Module 6: Screen lock powers down foreground UI traffic charts to save energy,
+        // without touching connectivity health checks, helper monitoring, or pin refresh.
+        if isMainWindowVisible && !isScreenLocked,
            selectedPage == .dashboard || selectedPage == .activity {
             webSocket.startTrafficStream()
         } else {
@@ -1137,8 +1131,8 @@ extension AppState {
         let logsEnabled =
             AppProfile.defaults.object(forKey: SettingsKey.logsEnabled) as? Bool
                 ?? true
-        if localAuditEnabled || claudeTrafficResearchEnabled
-            || (isMainWindowVisible && selectedPage == .logs && logsEnabled) {
+        let uiLogsRequested = isMainWindowVisible && !isScreenLocked && selectedPage == .logs && logsEnabled
+        if localAuditEnabled || claudeTrafficResearchEnabled || uiLogsRequested {
             webSocket.startLogsStream(level: logLevel)
         } else {
             webSocket.stopLogsStream()
@@ -1708,78 +1702,47 @@ extension AppState {
             lastProtectedFailureSignature = nil
             consecutiveProtectedFailureCount = 0
         }
-        if immediate {
-            let now = Date()
-            if let lastKick = self.connectionCoordinator.lastProtectedReconnectKick,
-               now.timeIntervalSince(lastKick) < ProtectedReconnectSchedule.networkChangeKickCooldown,
-               self.connectionCoordinator.protectedReconnectTask != nil {
-                return
-            }
-            self.connectionCoordinator.lastProtectedReconnectKick = now
-            self.connectionCoordinator.protectedReconnectTask?.cancel()
-            self.connectionCoordinator.protectedReconnectTask = nil
-            self.connectionCoordinator.protectedReconnectID = nil
-        } else if self.connectionCoordinator.protectedReconnectTask != nil {
-            // The existing loop owns the attempt counter. A failed connect must
-            // never cancel it and reset weak-network backoff to two seconds.
-            return
-        }
 
-        let recoveryID = UUID()
-        self.connectionCoordinator.protectedReconnectID = recoveryID
-        isProtectedReconnectScheduled = true
-        self.connectionCoordinator.protectedReconnectTask = Task { [weak self] in
-            guard let self else { return }
-            defer {
-                if self.connectionCoordinator.protectedReconnectID == recoveryID {
-                    self.connectionCoordinator.protectedReconnectTask = nil
-                    self.connectionCoordinator.protectedReconnectID = nil
-                    self.isProtectedReconnectScheduled = false
-                    self.protectedReconnectNextAttemptAt = nil
-                    if self.isConnected || !self.isProtectionBlocked {
-                        self.protectedReconnectAttempt = 0
-                    }
-                }
-            }
-
-            // Stay responsive through brief packet loss, then settle at a
-            // battery-friendly 30-second cadence for prolonged weak signal.
-            let delays = ProtectedReconnectSchedule.delaysSeconds
-            var attempt = 0
-            while !Task.isCancelled {
-                // A user-action failure recorded by the previous attempt ends
-                // the loop; Retry Now starts a fresh one.
-                if self.protectedReconnectPausedForUserAction { return }
-                let delay = immediate && attempt == 0
-                    ? 0
-                    : delays[min(attempt, delays.count - 1)]
+        self.connectionCoordinator.scheduleProtectedReconnectLoop(
+            immediate: immediate,
+            onAttemptScheduled: { [weak self] attempt, delay in
+                guard let self else { return false }
+                if self.protectedReconnectPausedForUserAction { return false }
+                self.isProtectedReconnectScheduled = true
                 self.protectedReconnectAttempt = attempt + 1
                 self.protectedReconnectNextAttemptAt = delay > 0
-                    ? Date().addingTimeInterval(TimeInterval(delay))
+                    ? Date().addingTimeInterval(delay)
                     : nil
-                if delay > 0 {
-                    try? await Task.sleep(for: .seconds(delay))
+                return true
+            },
+            onCleanup: { [weak self] in
+                guard let self else { return }
+                self.isProtectedReconnectScheduled = false
+                self.protectedReconnectNextAttemptAt = nil
+                if self.isConnected || !self.isProtectionBlocked {
+                    self.protectedReconnectAttempt = 0
                 }
-                guard !Task.isCancelled else { return }
+            },
+            performAttempt: { [weak self] in
+                guard let self else { return true }
                 if !self.isTonoReady {
-                    attempt += 1
-                    continue
+                    return false
                 }
                 self.protectedReconnectNextAttemptAt = nil
 
                 await self.finishPendingDisconnect()
-                guard !Task.isCancelled, !self.isConnected else { return }
+                guard !Task.isCancelled, !self.isConnected else { return true }
                 // Root emergency recovery may have released helper-owned PF
                 // state while this loop was sleeping. Accept only an
                 // authenticated unarmed status and exit before connect can
                 // re-arm it; rejection pauses for explicit helper repair.
                 if await self.reconcileConfirmedExternalProtectionRelease() {
-                    return
+                    return true
                 }
                 guard !Task.isCancelled,
-                      !self.protectedReconnectPausedForUserAction else { return }
+                      !self.protectedReconnectPausedForUserAction else { return true }
                 if self.catalogSelectionRequiresChoice {
-                    return
+                    return true
                 }
                 if self.isConnecting {
                     let pending = self.connectionCoordinator.connectTask
@@ -1788,8 +1751,6 @@ extension AppState {
                     LocalTrafficAudit.shared.recordEvent(
                         "protected_reconnect_attempt",
                         details: [
-                            "attempt": String(attempt + 1),
-                            "delay_seconds": String(delay),
                             "selected_exit": self.selectedExitNode()?.name ?? "unknown",
                         ]
                     )
@@ -1798,10 +1759,9 @@ extension AppState {
                     _ = await pending?.value
                 }
                 await self.finishPendingDisconnect()
-                if self.isConnected { return }
-                attempt += 1
+                return self.isConnected
             }
-        }
+        )
     }
 
     /// Let the user bypass the weak-network backoff without weakening PF. The

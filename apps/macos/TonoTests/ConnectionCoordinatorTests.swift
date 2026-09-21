@@ -185,6 +185,152 @@ final class ConnectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(operations, ["preserve-protection", "explicit-release"])
         XCTAssertEqual(published, ["released"])
     }
+
+    func testShouldDebounceReconnectKickEnforcesCooldown() {
+        let coordinator = ConnectionCoordinator()
+
+        // When not immediate and no task is active, do not debounce
+        XCTAssertFalse(coordinator.shouldDebounceReconnectKick(immediate: false))
+
+        // Simulate an active reconnect task
+        coordinator.protectedReconnectTask = Task { }
+        coordinator.protectedReconnectID = UUID()
+
+        // Non-immediate kick with active task is debounced
+        XCTAssertTrue(coordinator.shouldDebounceReconnectKick(immediate: false))
+
+        // Immediate kick clears existing task and records timestamp
+        let t0 = Date()
+        XCTAssertFalse(coordinator.shouldDebounceReconnectKick(immediate: true, now: t0))
+        XCTAssertNil(coordinator.protectedReconnectTask)
+        XCTAssertNil(coordinator.protectedReconnectID)
+
+        // Set task again
+        coordinator.protectedReconnectTask = Task { }
+        coordinator.protectedReconnectID = UUID()
+
+        // Immediate kick within cooldown (< 30s) is debounced
+        let t1 = t0.addingTimeInterval(10)
+        XCTAssertTrue(coordinator.shouldDebounceReconnectKick(immediate: true, now: t1))
+        XCTAssertNotNil(coordinator.protectedReconnectTask)
+
+        // Immediate kick after cooldown (> 30s) is accepted
+        let t2 = t0.addingTimeInterval(35)
+        XCTAssertFalse(coordinator.shouldDebounceReconnectKick(immediate: true, now: t2))
+        XCTAssertNil(coordinator.protectedReconnectTask)
+    }
+
+    func testCancelConnectionTasksAndCancelReconnectTasks() {
+        let coordinator = ConnectionCoordinator()
+        coordinator.connectTask = Task { }
+        coordinator.connectWatchdogTask = Task { }
+        coordinator.connectAttemptID = UUID()
+
+        coordinator.cancelConnectionTasks()
+        XCTAssertNil(coordinator.connectTask)
+        XCTAssertNil(coordinator.connectWatchdogTask)
+        XCTAssertNil(coordinator.connectAttemptID)
+
+        coordinator.protectedReconnectTask = Task { }
+        coordinator.protectedReconnectID = UUID()
+        coordinator.lastProtectedReconnectKick = Date()
+        coordinator.wakeRecoveryTask = Task { }
+        coordinator.sleepRestrictTask = Task { }
+
+        coordinator.cancelReconnectTasks()
+        XCTAssertNil(coordinator.protectedReconnectTask)
+        XCTAssertNil(coordinator.protectedReconnectID)
+        XCTAssertNil(coordinator.lastProtectedReconnectKick)
+        XCTAssertNil(coordinator.wakeRecoveryTask)
+        XCTAssertNil(coordinator.sleepRestrictTask)
+    }
+
+    func testExecuteDisconnectCancelsTasksAndSerializesTeardown() async {
+        let coordinator = ConnectionCoordinator()
+        coordinator.connectTask = Task { }
+        coordinator.protectedReconnectTask = Task { }
+
+        let gate = DisconnectGate()
+        var teardownExecuted = false
+        var prepared = false
+
+        coordinator.executeDisconnect(
+            releaseKillSwitch: true,
+            pendingTasks: [],
+            prepare: { prepared = true },
+            operation: { _ in
+                await gate.wait()
+                teardownExecuted = true
+            }
+        )
+
+        XCTAssertTrue(prepared)
+        XCTAssertNil(coordinator.connectTask)
+        XCTAssertNil(coordinator.protectedReconnectTask)
+        XCTAssertFalse(teardownExecuted)
+
+        gate.open()
+        await coordinator.disconnectSequence?.value
+        XCTAssertTrue(teardownExecuted)
+    }
+
+    func testExecuteConnectDefersWhenDisconnecting() async {
+        let coordinator = ConnectionCoordinator()
+        let gate = DisconnectGate()
+        var teardownFinished = false
+
+        coordinator.enqueueDisconnect { _ in
+            await gate.wait()
+            teardownFinished = true
+        }
+
+        var deferredFired = false
+        coordinator.executeConnect(
+            isDisconnecting: true,
+            deferredFallback: {
+                XCTAssertTrue(teardownFinished)
+                deferredFired = true
+            },
+            prepare: { (true, UUID()) },
+            onWatchdog: { _ in },
+            perform: { _, _ in }
+        )
+
+        XCTAssertFalse(deferredFired)
+        gate.open()
+        await coordinator.disconnectSequence?.value
+        // Allow deferred connect task to resume
+        try? await Task.sleep(for: .milliseconds(20))
+        XCTAssertTrue(deferredFired)
+    }
+
+    func testExecuteProtectedReconnectLoopFiresAndCleansUp() async {
+        let coordinator = ConnectionCoordinator()
+        var scheduledAttempt: Int?
+        var cleanedUp = false
+        var attemptPerformed = false
+
+        coordinator.scheduleProtectedReconnectLoop(
+            immediate: true,
+            onAttemptScheduled: { attempt, delay in
+                scheduledAttempt = attempt
+                XCTAssertEqual(delay, 0)
+                return true
+            },
+            onCleanup: {
+                cleanedUp = true
+            },
+            performAttempt: {
+                attemptPerformed = true
+                return true // Stop loop
+            }
+        )
+
+        await coordinator.protectedReconnectTask?.value
+        XCTAssertEqual(scheduledAttempt, 0)
+        XCTAssertTrue(attemptPerformed)
+        XCTAssertTrue(cleanedUp)
+    }
 }
 
 /// Explicit suspension instead of sleeps: teardown may complete before or after
