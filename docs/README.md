@@ -9,6 +9,7 @@ Start here. Dated handoffs and one-off reviews live in [archive/](archive/).
 | [BUILD_AND_TEST.md](BUILD_AND_TEST.md) | GitHub-hosted CI, MacBook lightweight work, native-device acceptance and cache retention |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Contributor workflow and verification evidence |
 | [../AGENTS.md](../AGENTS.md) | Coding-agent rules; choose an execution host before compiling |
+| [ENGINEERING_QUALITY_ACCEPTANCE.md](ENGINEERING_QUALITY_ACCEPTANCE.md) | Astra Max remediation scope, phased execution, diagnostic evidence and combined-source acceptance |
 
 Mac Studio no longer serves as a residential exit (owner confirmed 2026-09-14).
 Routine builds use GitHub-hosted runners; native-device acceptance remains separate.
