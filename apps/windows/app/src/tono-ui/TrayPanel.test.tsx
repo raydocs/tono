@@ -54,6 +54,7 @@ vi.mock('@/services/tono', async (importOriginal) => ({
   tonoRetryNow: mocks.tonoRetryNow,
   tonoConnect: mocks.tonoConnect,
   tonoDisconnect: mocks.tonoDisconnect,
+  tonoStatus: async () => mocks.status,
 }))
 
 import { TrayPanel } from './TrayPanel'

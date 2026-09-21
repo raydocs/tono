@@ -16,6 +16,7 @@ import {
   tonoRefreshCatalog,
   tonoSelectServer,
   tonoServers,
+  tonoStatus,
   tonoTestAvailableServers,
   tonoTestCurrentServer,
 } from '@/services/tono'
@@ -128,7 +129,7 @@ const ServersPage = () => {
         setSelectError(null)
         setSwitchingName(name)
         try {
-          await tonoConnect()
+          if (idleSelectShouldConnect((await tonoStatus()).uiState)) await tonoConnect()
           await mutateTonoStatus()
         } catch (error) {
           if (!isSupersededConnectRejection(error)) {
@@ -143,9 +144,9 @@ const ServersPage = () => {
       setSwitchingName(name)
       try {
         await tonoSelectServer(name)
-        // First-connect handshake eof fully releases protection, so select
-        // is UpdateOnly. The card already says Connecting; actually connect.
-        if (idleSelectShouldConnect(status?.uiState)) await tonoConnect()
+        // Selection may have joined a switch/reconnect while this render was idle. Read the
+        // backend after its acknowledgement; the captured render cannot authorize another start.
+        if (idleSelectShouldConnect((await tonoStatus()).uiState)) await tonoConnect()
         await Promise.all([mutateServers(), mutateTonoStatus()])
         // Select acknowledges dispatch; a hot/cold switch may still be running.
         // Announce the localized city the card shows, not the raw wire name —

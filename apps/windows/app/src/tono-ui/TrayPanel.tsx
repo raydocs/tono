@@ -27,6 +27,7 @@ import {
   tonoRetryNow,
   tonoSelectServer,
   tonoServers,
+  tonoStatus,
   type TonoUiState,
 } from '@/services/tono'
 import { hasLiveProtection } from '@/tono-ui/protection-evidence'
@@ -145,7 +146,7 @@ export const TrayPanel = () => {
     setActionError(null)
     try {
       await tonoSelectServer(name)
-      if (idleSelectShouldConnect(uiState)) await tonoConnect()
+      if (idleSelectShouldConnect((await tonoStatus()).uiState)) await tonoConnect()
       await mutateTonoStatus()
       setPicking(false)
     } catch (error) {
