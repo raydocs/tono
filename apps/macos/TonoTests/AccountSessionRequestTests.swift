@@ -886,7 +886,6 @@ final class AccountSessionRequestTests: XCTestCase {
             await app.disconnectAndWait(releaseKillSwitch: true)
         })
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
-        account.networkProtection = runtime
 
         // The real AccountSession -> AppState -> coordinator release path runs;
         // only helper/system I/O is replaced. Account cleanup cannot overrule

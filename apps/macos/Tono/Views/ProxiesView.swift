@@ -291,6 +291,7 @@ struct ProxiesView: View {
     }())
     .environment(AccountSession(
         sidecar: TonoSidecarService(),
-        descriptorConsumer: { _ in }
+        descriptorConsumer: { _ in },
+        killSwitchDisarmConsumer: {}
     ))
 }

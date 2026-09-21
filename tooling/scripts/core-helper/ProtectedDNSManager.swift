@@ -157,7 +157,17 @@ final class ProtectedDNSManager {
             attempt(snapshot.servers, for: snapshot.service)
         }
         for service in services {
-            let current = (try? read(service)) ?? []
+            let current: [String]
+            do {
+                current = try read(service)
+            } catch {
+                // Unreadable is not DHCP/empty: the adapter can still point
+                // at our dead loopback listener. Recover the other services,
+                // but retain the snapshot and refuse release until a retry
+                // can prove every service safe.
+                failure = failure ?? error
+                continue
+            }
             // Only loopback is swept. A service the user pointed somewhere of
             // their own is not ours to rewrite.
             guard current == [Self.protectedDNSServer] else { continue }

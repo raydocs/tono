@@ -65,8 +65,8 @@ final class AccountSession {
     let trafficPolicyConsumer: @MainActor (TonoTrafficPolicyResponse) async throws -> Int
     let cloudFallbackPreferred: @MainActor () -> Bool
     let cloudFallbackConsumer: @MainActor (Bool) throws -> Void
+    /// Required cleanup owner; account lifecycle never releases PF separately.
     let killSwitchDisarmConsumer: @MainActor () async -> Void
-    var networkProtection = NetworkProtectionOperations()
     let diagnosticSnapshotConsumer: @MainActor () -> TonoDiagnosticSnapshot
     let pathLatencyConsumer: @MainActor () -> TonoPathLatency
     /// The traffic ledger's monotonic per-route counter. Injected the way every
@@ -164,7 +164,7 @@ final class AccountSession {
          trafficPolicyConsumer: @escaping @MainActor (TonoTrafficPolicyResponse) async throws -> Int = { $0.revision },
          cloudFallbackPreferred: @escaping @MainActor () -> Bool = { false },
          cloudFallbackConsumer: @escaping @MainActor (Bool) throws -> Void = { _ in },
-         killSwitchDisarmConsumer: @escaping @MainActor () async -> Void = {},
+         killSwitchDisarmConsumer: @escaping @MainActor () async -> Void,
          diagnosticSnapshotConsumer: @escaping @MainActor () -> TonoDiagnosticSnapshot = {
              TonoDiagnosticSnapshot(
                  appVersion: "unknown", build: "unknown", connected: false,

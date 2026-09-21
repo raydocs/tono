@@ -74,17 +74,10 @@ extension AccountSession {
     }
 
     func releaseNetworkProtection() async {
+        // AppState owns Core stop, DNS restore, PF release and their readbacks.
+        // Completion can mean it retained protection and presented a recovery
+        // error. A second disarm here would override that fail-closed decision.
         await killSwitchDisarmConsumer()
-        // The app-state consumer performs the same ordered transaction and
-        // surfaces any UI error. Keep an idempotent fallback here for
-        // launch/termination paths where that consumer is unavailable:
-        // DNS must be restored before PF is opened.
-        do {
-            _ = try await networkProtection.restoreDNS()
-            try await networkProtection.disarm()
-        } catch {
-            // Retain fail-closed protection when recovery cannot be proven.
-        }
     }
 
     func startSidecar(
