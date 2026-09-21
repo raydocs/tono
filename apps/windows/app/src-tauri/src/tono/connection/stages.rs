@@ -422,3 +422,34 @@ async fn controller_commit_guard<'a>(
     }
     Ok(inner)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[tokio::test]
+    async fn retired_verification_cannot_publish_a_controller_over_the_replacement() {
+        let state = Arc::new(TonoState::for_test());
+        let retired = {
+            let mut inner = state.lock().await;
+            let retired = inner.connect_generation;
+            inner.invalidate_connection(true);
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            inner.controller_secret = Some("replacement-controller".into());
+            inner.controller_port = Some(19991);
+            retired
+        };
+        let published = AtomicBool::new(false);
+        let late = controller_commit_guard(&state, retired, || published.store(true, Ordering::SeqCst)).await;
+        assert!(matches!(late, Err(StageFailure::Stale)));
+        assert!(!published.load(Ordering::SeqCst), "stale completion must not repoint the live UI controller");
+        let inner = state.lock().await;
+        assert!(inner.fsm.status().is_connected && inner.fsm.kill_switch_armed());
+        assert_eq!(inner.controller_secret.as_deref(), Some("replacement-controller"));
+        assert_eq!(inner.controller_port, Some(19991));
+    }
+}
