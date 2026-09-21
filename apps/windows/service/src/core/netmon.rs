@@ -36,11 +36,8 @@ static LAST_AT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new
 static CHANGE_COUNT: AtomicU64 = AtomicU64::new(0);
 #[cfg_attr(feature = "test", allow(dead_code))]
 static STARTED: AtomicBool = AtomicBool::new(false);
-#[cfg(not(feature = "test"))]
 static PENDING_RAW: AtomicBool = AtomicBool::new(false);
-#[cfg(not(feature = "test"))]
 static LAST_RAW_MILLIS: AtomicU64 = AtomicU64::new(0);
-#[cfg(not(feature = "test"))]
 static FIRST_RAW_MILLIS: AtomicU64 = AtomicU64::new(0);
 
 fn now_unix() -> u64 {
@@ -108,6 +105,31 @@ fn raw_should_publish() -> bool {
     !crate::core::dns::in_self_write_window()
 }
 
+fn anchor() -> std::time::Instant {
+    static ANCHOR: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    *ANCHOR.get_or_init(std::time::Instant::now)
+}
+
+/// Callback bookkeeping is shared by native registration and deterministic tests. No I/O or
+/// async lock is allowed on the IPHelper callback thread.
+fn raw_notify(kind: &str, notification_type: windows_sys::Win32::NetworkManagement::IpHelper::MIB_NOTIFICATION_TYPE) {
+    if !raw_should_publish() {
+        let total = crate::core::dns::note_suppressed_self_write();
+        tracing::debug!(
+            "netmon: raw notification {kind} (type {notification_type}) attributed to this \
+             service's own DNS write; not published ({total} suppressed since start)"
+        );
+        return;
+    }
+    let now = anchor().elapsed().as_millis() as u64;
+    LAST_RAW_MILLIS.store(now, Ordering::Relaxed);
+    if !PENDING_RAW.load(Ordering::Relaxed) {
+        FIRST_RAW_MILLIS.store(now, Ordering::Relaxed);
+    }
+    PENDING_RAW.store(true, Ordering::Release);
+    tracing::debug!("netmon raw notification: {kind} (type {notification_type})");
+}
+
 /// Register the IP-interface and route change notifications plus the debounce task.
 /// Idempotent; the registrations live for the service's lifetime by design.
 pub fn start() {
@@ -117,49 +139,13 @@ pub fn start() {
 
 #[cfg(not(feature = "test"))]
 mod imp {
-    use super::{FIRST_RAW_MILLIS, LAST_RAW_MILLIS, PENDING_RAW, STARTED, note_event};
+    use super::{FIRST_RAW_MILLIS, LAST_RAW_MILLIS, PENDING_RAW, STARTED, anchor, note_event, raw_notify};
     use std::sync::atomic::Ordering;
     use windows_sys::Win32::NetworkManagement::IpHelper::{
         MIB_IPFORWARD_ROW2, MIB_IPINTERFACE_ROW, MIB_NOTIFICATION_TYPE, NotifyIpInterfaceChange,
         NotifyRouteChange2,
     };
     use windows_sys::Win32::Networking::WinSock::AF_UNSPEC;
-
-    // `Instant::elapsed` against a process-lifetime anchor is what the debounce wants; keep a
-    // lazy anchor rather than a global `Instant` (const-unfriendly).
-    fn anchor() -> std::time::Instant {
-        static ANCHOR: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-        *ANCHOR.get_or_init(std::time::Instant::now)
-    }
-
-    fn raw_notify(kind: &str, notification_type: MIB_NOTIFICATION_TYPE) {
-        // Our own DNS write, echoed back at us. Counted for diagnostics, never published: the
-        // product layer answers a published event with a full teardown + reconnect, and the
-        // reconnect writes DNS again. Note what is *not* done here — `PENDING_RAW` is left
-        // exactly as it is, so a genuine burst that was already pending before the window
-        // opened still fires on schedule.
-        if !super::raw_should_publish() {
-            let total = crate::core::dns::note_suppressed_self_write();
-            tracing::debug!(
-                "netmon: raw notification {kind} (type {notification_type}) attributed to this \
-                 service's own DNS write; not published ({total} suppressed since start)"
-            );
-            return;
-        }
-        let now = anchor().elapsed().as_millis() as u64;
-        // Timestamps first, `PENDING_RAW` last (release): the debounce task acquires on
-        // `PENDING_RAW`, so publishing the flag before `LAST_RAW_MILLIS` would let it fire
-        // against a stale timestamp with effectively zero debounce.
-        LAST_RAW_MILLIS.store(now, Ordering::Relaxed);
-        if !PENDING_RAW.load(Ordering::Relaxed) {
-            // First raw event of this burst: anchor the max-latency cap. Racing the debounce
-            // task's clear can at worst duplicate or slightly delay one event — benign, since
-            // `note_event` never disarms anything.
-            FIRST_RAW_MILLIS.store(now, Ordering::Relaxed);
-        }
-        PENDING_RAW.store(true, Ordering::Release);
-        tracing::debug!("netmon raw notification: {kind} (type {notification_type})");
-    }
 
     /// SAFETY: registered with `NotifyIpInterfaceChange`; called on an IPHelper thread with a
     /// valid (possibly null) row pointer we never dereference.
