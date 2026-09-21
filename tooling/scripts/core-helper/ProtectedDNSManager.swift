@@ -116,12 +116,38 @@ final class ProtectedDNSManager {
         defer { lock.unlock() }
         let snapshot = try loadSnapshot()
         let services = try Self.allServices()
+        try Self.restoreServices(
+            snapshot: snapshot,
+            services: services,
+            read: Self.currentDNS,
+            write: Self.setDNS,
+            removeSnapshot: removeSnapshot
+        )
+        return response(
+            configured: false,
+            snapshotPresent: false,
+            service: snapshot?.service
+        )
+    }
+
+    /// The same recovery transaction runs against either System Configuration
+    /// or controlled I/O. Snapshot removal is part of the transaction, not a
+    /// decision a test or caller can make independently of service readback.
+    private static func restoreServices(
+        snapshot: Snapshot?,
+        services: Set<String>,
+        read: (String) throws -> [String],
+        write: ([String], String) throws -> Void,
+        removeSnapshot: () throws -> Void
+    ) throws {
         var failure: Error?
 
         func attempt(_ servers: [String], for service: String) {
             do {
-                try Self.setDNS(servers, for: service)
-                try verify(servers, for: service)
+                try write(servers, service)
+                guard try read(service) == servers else {
+                    throw HelperFailure.system("The protected DNS transition did not commit.")
+                }
             } catch {
                 failure = failure ?? error
             }
@@ -131,7 +157,7 @@ final class ProtectedDNSManager {
             attempt(snapshot.servers, for: snapshot.service)
         }
         for service in services {
-            let current = (try? Self.currentDNS(for: service)) ?? []
+            let current = (try? read(service)) ?? []
             // Only loopback is swept. A service the user pointed somewhere of
             // their own is not ours to rewrite.
             guard current == [Self.protectedDNSServer] else { continue }
@@ -141,11 +167,6 @@ final class ProtectedDNSManager {
             throw failure
         }
         try removeSnapshot()
-        return response(
-            configured: false,
-            snapshotPresent: false,
-            service: snapshot?.service
-        )
     }
 
     func status() -> [String: Any] {
