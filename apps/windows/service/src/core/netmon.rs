@@ -13,10 +13,11 @@
 //! IP-interface parameter change, and this service writes them on every connect, every restore
 //! and every DNS reconcile tick; publishing those callbacks made the product layer tear down
 //! and rebuild a perfectly healthy tunnel every few seconds for ever. `raw_notify` therefore
-//! drops — counts, but does not publish — any raw notification that arrives while the `dns`
-//! module has a write window open ([`crate::core::dns::in_self_write_window`]). Suppression
-//! applies to *arriving* callbacks only: a burst that was already pending when the window
-//! opened still fires, so nothing observed before a write of ours is ever retracted.
+//! defers notifications arriving in the DNS-write window to a bounded topology read. A DNS
+//! echo has no interface/route change; a real overlapping change must still reach the App.
+//! Pre-window notifications retain their unconditional invalidation semantics.
+
+mod topology;
 
 use once_cell::sync::Lazy;
 use std::collections::VecDeque;
@@ -37,8 +38,36 @@ static CHANGE_COUNT: AtomicU64 = AtomicU64::new(0);
 #[cfg_attr(feature = "test", allow(dead_code))]
 static STARTED: AtomicBool = AtomicBool::new(false);
 static PENDING_RAW: AtomicBool = AtomicBool::new(false);
+static PENDING_EXTERNAL: AtomicBool = AtomicBool::new(false);
 static LAST_RAW_MILLIS: AtomicU64 = AtomicU64::new(0);
 static FIRST_RAW_MILLIS: AtomicU64 = AtomicU64::new(0);
+
+/// One observation per debounced batch; no queue of callbacks or unbounded read retries.
+struct Reconciler {
+    baseline: Option<topology::Topology>,
+    unknown_reported: bool,
+}
+
+impl Reconciler {
+    fn observe(&mut self, observed: Result<topology::Topology, String>, external: bool) -> Option<&'static str> {
+        match observed {
+            Ok(current) => {
+                let changed = self.baseline.as_ref().is_none_or(|old| *old != current);
+                self.baseline = Some(current);
+                self.unknown_reported = false;
+                (external || changed).then_some("network-change (ip-interface/route)")
+            }
+            Err(error) => {
+                // Unknown is never "unchanged", but do not create a reconnect loop merely
+                // because repeated DNS echoes meet one persistently unreadable IP Helper.
+                let report = external || !self.unknown_reported;
+                if report { tracing::warn!("netmon: topology observation unavailable: {error}"); }
+                self.unknown_reported = true;
+                report.then_some("network-observation-unknown")
+            }
+        }
+    }
+}
 
 fn now_unix() -> u64 {
     std::time::SystemTime::now()
@@ -96,8 +125,8 @@ fn debounce_should_fire(quiet_millis: u64, pending_for_millis: u64) -> bool {
 
 /// Whether a raw notification arriving *now* belongs to the product-facing feed.
 ///
-/// `false` means this service is mid-DNS-write and the callback is (very probably) the echo of
-/// that write. The decision is a load-only atomic read in `dns`, which matters: this runs on an
+/// `false` means defer to topology reconciliation, NOT proof that this callback is a DNS echo.
+/// The decision is a load-only atomic read in `dns`, which matters: this runs on an
 /// IPHelper callback thread that must never block and is not a tokio context, so it cannot take
 /// the `DNS_OPERATION` lock that the apply itself holds.
 #[cfg_attr(feature = "test", allow(dead_code))]
@@ -116,10 +145,11 @@ fn raw_notify(kind: &str, notification_type: windows_sys::Win32::NetworkManageme
     if !raw_should_publish() {
         let total = crate::core::dns::note_suppressed_self_write();
         tracing::debug!(
-            "netmon: raw notification {kind} (type {notification_type}) attributed to this \
-             service's own DNS write; not published ({total} suppressed since start)"
+            "netmon: raw notification {kind} (type {notification_type}) overlaps a DNS write; \
+             deferred to topology reconciliation ({total} deferred since start)"
         );
-        return;
+    } else {
+        PENDING_EXTERNAL.store(true, Ordering::Release);
     }
     let now = anchor().elapsed().as_millis() as u64;
     LAST_RAW_MILLIS.store(now, Ordering::Relaxed);
@@ -139,7 +169,7 @@ pub fn start() {
 
 #[cfg(not(feature = "test"))]
 mod imp {
-    use super::{FIRST_RAW_MILLIS, LAST_RAW_MILLIS, PENDING_RAW, STARTED, anchor, note_event, raw_notify};
+    use super::{FIRST_RAW_MILLIS, LAST_RAW_MILLIS, PENDING_RAW, PENDING_EXTERNAL, STARTED, Reconciler, anchor, note_event, raw_notify, topology};
     use std::sync::atomic::Ordering;
     use windows_sys::Win32::NetworkManagement::IpHelper::{
         MIB_IPFORWARD_ROW2, MIB_IPINTERFACE_ROW, MIB_NOTIFICATION_TYPE, NotifyIpInterfaceChange,
@@ -171,6 +201,9 @@ mod imp {
             return;
         }
         anchor();
+        // Seed before registering: the first deferred callback must compare against the
+        // pre-change state, not seed itself and silently lose the change.
+        let baseline = topology::read().ok();
         // Leaked out-handle slots: registrations are process-lifetime by design, so the slots
         // must never be freed or reused (also keeps edition-2024 `static_mut_refs` out).
         let interface_handle: &'static mut windows_sys::Win32::Foundation::HANDLE =
@@ -214,7 +247,8 @@ mod imp {
             return;
         }
 
-        tokio::spawn(async {
+        tokio::spawn(async move {
+            let mut reconciler = Reconciler { baseline, unknown_reported: false };
             let mut interval = tokio::time::interval(std::time::Duration::from_millis(250));
             loop {
                 interval.tick().await;
@@ -224,6 +258,11 @@ mod imp {
                 let elapsed = anchor().elapsed().as_millis() as u64;
                 let quiet = elapsed.saturating_sub(LAST_RAW_MILLIS.load(Ordering::Relaxed));
                 let pending_for = elapsed.saturating_sub(FIRST_RAW_MILLIS.load(Ordering::Relaxed));
+                // Let the normal write/tail settle, with the existing 3-second maximum wait
+                // even during continuous DNS churn. The comparison contains no DNS fields.
+                if !super::raw_should_publish() && pending_for < super::DEBOUNCE_MAX_WAIT.as_millis() as u64 {
+                    continue;
+                }
                 if super::debounce_should_fire(quiet, pending_for)
                     && PENDING_RAW.swap(false, Ordering::AcqRel)
                 {
@@ -231,7 +270,14 @@ mod imp {
                     // swap can't leave a stale first-pending stamp (worst case: one early
                     // extra event — benign).
                     FIRST_RAW_MILLIS.store(elapsed, Ordering::Relaxed);
-                    note_event("network-change (ip-interface/route)");
+                    let external = PENDING_EXTERNAL.swap(false, Ordering::AcqRel);
+                    // At most one read worker, never one per callback. No DNS_OPERATION lock,
+                    // mutation, or blocking native read on an IPHelper callback thread.
+                    let observed = tokio::task::spawn_blocking(topology::read).await
+                        .unwrap_or_else(|_| Err("topology read task failed".into()));
+                    if let Some(kind) = reconciler.observe(observed, external) {
+                        note_event(kind);
+                    }
                 }
             }
         });
@@ -264,6 +310,18 @@ mod tests {
         drop(window);
         assert_eq!(super::change_count(), before, "the callback must not publish a DNS echo");
         assert!(retained, "the worker must reconcile physical changes that overlap a DNS write");
+        let baseline = super::topology::Topology {
+            interfaces: vec![(17, 3, 25, 1500, true)],
+            routes: vec![(17, 0, 0, 0x0100000a, 10)],
+        };
+        let mut reconciler = super::Reconciler { baseline: Some(baseline.clone()), unknown_reported: false };
+        assert!(reconciler.observe(Ok(baseline.clone()), false).is_none(), "DNS-only echoes stay quiet");
+        let mut moved = baseline;
+        moved.routes[0].3 = 0x0200000a;
+        assert!(reconciler.observe(Ok(moved.clone()), false).is_some(), "same adapter, changed gateway is real");
+        assert!(reconciler.observe(Ok(moved), false).is_none(), "one batch must not repeat forever");
+        assert_eq!(reconciler.observe(Err("synthetic read refusal".into()), false), Some("network-observation-unknown"));
+        assert!(reconciler.observe(Err("still unreadable".into()), false).is_none());
     }
 
     /// The P0: a DNS write of ours must not reach the product-facing feed, and dropping the

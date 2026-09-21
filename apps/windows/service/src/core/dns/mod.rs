@@ -151,7 +151,7 @@ pub(crate) const NO_NAME_SERVERS: &str = "";
 /// Connection name of Tono's WinTUN adapter. Mirrors `tono_core::config::TUN_DEVICE_NAME`
 /// (`apps/windows/crates/tono-core/src/config.rs`); this crate is self-contained and cannot
 /// import it, so the two spellings are kept in sync by hand.
-const TUN_ADAPTER_NAME: &str = "Tono";
+pub(crate) const TUN_ADAPTER_NAME: &str = "Tono";
 const SNAPSHOT_VERSION: u32 = 1;
 /// Sidecar next to `protected-dns.json`. Written *before* Encrypted DNS is
 /// mutated so a crash still has the user's `EnableAutoDoh` value to put back.
@@ -370,7 +370,7 @@ static SELF_WRITE_DEPTH: AtomicU32 = AtomicU32::new(0);
 static SELF_WRITE_OPENED_AT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Monotonic millis until which the tail of the last closed window runs.
 static SELF_WRITE_TAIL_UNTIL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-/// Raw notifications `netmon` attributed to a window and did not publish. Diagnostic only.
+/// Raw notifications deferred for topology reconciliation during a write window. Diagnostic only.
 #[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
 static SELF_WRITE_SUPPRESSED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -416,7 +416,7 @@ pub(crate) fn in_self_write_window() -> bool {
     )
 }
 
-/// Count a notification `netmon` attributed to a window and dropped. Returns the running total
+/// Count a notification `netmon` deferred during a window. Returns the running total
 /// so the caller can put it in one log line.
 #[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
 pub(crate) fn note_suppressed_self_write() -> u64 {
