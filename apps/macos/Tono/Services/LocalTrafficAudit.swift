@@ -158,9 +158,10 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
         )
     }
 
-    private init() {
-        let directory = ConfigStorage.shared.appSupportDirectory
-            .appendingPathComponent("Logs", isDirectory: true)
+    init(logFileURL: URL? = nil) {
+        let directory = logFileURL?.deletingLastPathComponent()
+            ?? ConfigStorage.shared.appSupportDirectory
+                .appendingPathComponent("Logs", isDirectory: true)
         try? fileManager.createDirectory(
             at: directory,
             withIntermediateDirectories: true,
@@ -170,7 +171,7 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
             [.posixPermissions: 0o700],
             ofItemAtPath: directory.path
         )
-        logFileURL = directory.appendingPathComponent("traffic-audit.jsonl")
+        self.logFileURL = logFileURL ?? directory.appendingPathComponent("traffic-audit.jsonl")
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         timestampFormatter = formatter

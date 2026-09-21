@@ -382,15 +382,9 @@ final class AppState {
         }
     }
 
-    /// Close observation sockets immediately and move an active session toward
-    /// the helper's bootstrap-only PF state before macOS powers networking
-    /// down. The root helper independently installs an emergency all-block on
-    /// the power event, so a delayed GUI callback cannot create an egress gap.
-    /// Quiesce connect/health/switch work before a Sparkle install. PF stays
-    /// armed until cleanup proves DNS + core stop, or the journal records a
-    /// fail-closed handoff.
-    func prepareForSoftwareUpdate(nextVersion: String) async throws -> UpdateHandoffJournal {
-        let journal = UpdateHandoffJournal(
+    /// Snapshot update evidence before any runtime ownership is retired.
+    func softwareUpdateJournal(nextVersion: String) -> UpdateHandoffJournal {
+        UpdateHandoffJournal(
             phase: .updatePrepared,
             previousAppVersion: Bundle.main.object(
                 forInfoDictionaryKey: "CFBundleShortVersionString"
@@ -406,6 +400,13 @@ final class AppState {
             catalogRevision: nil,
             connectionGeneration: connectionCoordinator.protectionOperationGeneration
         )
+    }
+
+    /// Quiesce connect/health/switch work before a Sparkle install. PF stays
+    /// armed until cleanup proves DNS + core stop, or the journal records a
+    /// fail-closed handoff.
+    func prepareForSoftwareUpdate(nextVersion: String) async throws -> UpdateHandoffJournal {
+        let journal = softwareUpdateJournal(nextVersion: nextVersion)
         let runtimeMayOwnNetwork = journal.keepKillSwitchArmed
             || coreRuntime.isRunning
             || AppProfile.defaults.bool(forKey: SettingsKey.didStartCore)
