@@ -243,11 +243,27 @@ mod tests {
     use serial_test::serial;
 
     #[test]
+    #[serial]
     fn events_are_recorded_and_bounded() {
         for index in 0..(super::MAX_RECORDED_EVENTS + 8) {
             super::note_event(&format!("test-event-{index}"));
         }
         assert!(super::change_count() >= super::MAX_RECORDED_EVENTS as u64);
+    }
+
+    #[test]
+    #[serial]
+    fn a_real_network_change_during_dns_write_is_deferred_not_discarded() {
+        use std::sync::atomic::Ordering;
+        super::PENDING_RAW.store(false, Ordering::Release);
+        let before = super::change_count();
+        let window = crate::core::dns::open_self_write_window_for_tests();
+        super::raw_notify("route", 1);
+        super::raw_notify("ip-interface", 1);
+        let retained = super::PENDING_RAW.swap(false, Ordering::AcqRel);
+        drop(window);
+        assert_eq!(super::change_count(), before, "the callback must not publish a DNS echo");
+        assert!(retained, "the worker must reconcile physical changes that overlap a DNS write");
     }
 
     /// The P0: a DNS write of ours must not reach the product-facing feed, and dropping the
