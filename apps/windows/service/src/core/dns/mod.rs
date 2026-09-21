@@ -1936,6 +1936,9 @@ async fn recover_unreadable_snapshot(reason: &str) -> Result<()> {
              escape hatch. The unreadable file is kept for diagnosis."
         );
     }
+    // Adapter evidence alone does not prove the resolver is restored: NRPT can still
+    // route every namespace to the stopped TUN resolver. Keep the file on failure.
+    engine_restore_encrypted_dns().await?;
     quarantine_snapshot(
         "corrupt",
         &format!(
@@ -1945,9 +1948,6 @@ async fn recover_unreadable_snapshot(reason: &str) -> Result<()> {
         ),
     )
     .await?;
-    if let Err(error) = engine_restore_encrypted_dns().await {
-        tracing::warn!("dns: encrypted DNS restore after unreadable snapshot failed: {error:#}");
-    }
     Ok(())
 }
 
@@ -2142,6 +2142,12 @@ pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
             // separate writes. Refuse to stop the core/disarm if the current TUN DNS endpoint
             // survived while its recovery record did not.
             record_outcome(ensure_snapshotless_dns_is_safe().await)?;
+            // Older builds could delete this snapshot before NRPT cleanup succeeded.
+            // Reconcile the independently owned rule and DoH captures on every retry.
+            record_outcome(engine_restore_encrypted_dns().await)?;
+            if let Err(error) = engine_flush_cache().await {
+                tracing::warn!("DNS cache flush after snapshotless restore failed: {error:#}");
+            }
             return status_unlocked().await;
         }
         Err(error) => return Err(error.into()),
@@ -2250,6 +2256,9 @@ pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
     }
     .await;
     let degraded = record_outcome(outcome)?;
+    // Required resolver cleanup belongs to the disarm proof, not best-effort housekeeping.
+    // A failed NRPT/DoH restore retains the adapter snapshot and its independent captures.
+    record_outcome(engine_restore_encrypted_dns().await)?;
     match tokio::fs::remove_file(snapshot_path()).await {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -2263,13 +2272,6 @@ pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
         *DNS_LAST_ERROR
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(note);
-    }
-    // The restore is proven (or degraded-accepted on registry evidence): put Encrypted DNS
-    // back, drop our NRPT rule, then flush. NRPT left pointing at a stopped core is as
-    // dead as adapter DNS left on 198.18.0.2; a failure here is logged and retried next
-    // disconnect rather than undeleting the adapter snapshot.
-    if let Err(error) = engine_restore_encrypted_dns().await {
-        tracing::error!("dns: encrypted DNS restore after adapter restore failed: {error:#}");
     }
     if let Err(error) = engine_flush_cache().await {
         tracing::warn!("DNS cache flush after restore failed: {error:#}");
