@@ -57,6 +57,18 @@ pub(super) async fn schedule_reconnect_for_generation(state: &Arc<TonoState>, ap
 /// safety predicate is unchanged: still only while idle in Protected Offline with
 /// a verified session and no pending catalog choice.
 pub async fn retry_reconnect_now(state: &Arc<TonoState>, app: &AppHandle) {
+    let task_state = state.clone();
+    let task_app = app.clone();
+    retry_reconnect_with(state, move |generation| {
+        AsyncHandler::spawn(move || Box::pin(reconnect_loop(task_state, task_app, Duration::ZERO, generation)) as BoxedTask)
+    }).await;
+}
+
+/// The scheduler owns admission and task registration; the adapter only constructs its task.
+async fn retry_reconnect_with(
+    state: &Arc<TonoState>,
+    spawn: impl FnOnce(u64) -> tauri::async_runtime::JoinHandle<()>,
+) {
     let mut inner = state.lock().await;
     if !reconnect_allowed(
         inner.catalog_requires_choice,
@@ -66,16 +78,13 @@ pub async fn retry_reconnect_now(state: &Arc<TonoState>, app: &AppHandle) {
     {
         return;
     }
-    let task_state = state.clone();
-    let task_app = app.clone();
     inner.catalog_failover_tried.clear();
     // A press is the evidence the ladder cannot have: someone is at the machine and may have
     // just fixed what was wrong with it. Give the automatic retries their full budget back, so
     // the bound that stops an unattended loop can never strand a repaired install.
     inner.fsm.reset_reconnect_backoff();
     let generation = inner.connect_generation;
-    let handle =
-        AsyncHandler::spawn(move || Box::pin(reconnect_loop(task_state, task_app, Duration::ZERO, generation)) as BoxedTask);
+    let handle = spawn(generation);
     inner.tasks.reconnect = Some(handle);
     // The deadline is now, so the UI stops showing a countdown it is no longer
     // waiting for.
