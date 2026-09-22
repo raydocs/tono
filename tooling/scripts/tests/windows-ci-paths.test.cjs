@@ -83,6 +83,38 @@ test('Windows executes journal phase and persistence regressions with a nonzero-
   assert.ok(step.run.includes('Expected journal regression is missing'))
 })
 
+test('shared update contract changes execute both native implementations and reject zero tests', () => {
+  const mac = load(readFileSync(path.join(root, '.github/workflows/macos-ci.yml'), 'utf8'))
+  for (const event of ['push', 'pull_request']) {
+    for (const changed of [
+      'tooling/scripts/tests/fixtures/update-protocol-v1/manifest.json',
+      'apps/macos/Tono/Models/UpdateContractV1.swift',
+      'apps/macos/TonoTests/UpdateContractV1Tests.swift',
+      'apps/windows/crates/tono-core/src/update_contract.rs',
+      'apps/windows/crates/tono-core/tests/update_contract.rs',
+    ]) {
+      assert.ok(workflow.on[event].paths.some(pattern => path.matchesGlob(changed, pattern)), `Windows omits ${changed}`)
+      assert.ok(mac.on[event].paths.some(pattern => path.matchesGlob(changed, pattern)), `macOS omits ${changed}`)
+    }
+  }
+  const step = workflow.jobs['app-rust'].steps.find(step =>
+    step.run?.includes("$test = 'shared_wire_and_ownership_contract'"))
+  assert.equal(step?.['working-directory'], 'apps/windows')
+  assert.equal(step.shell, 'pwsh')
+  assert.equal(step.if, undefined)
+  assert.notEqual(step['continue-on-error'], true)
+  assert.ok(step.run.includes('cargo test --locked -p tono-core --test update_contract -- --list'))
+  assert.ok(step.run.includes('cargo test --locked -p tono-core --test update_contract $test -- --exact --nocapture'))
+  assert.ok(step.run.includes('Shared update contract test is missing'))
+  assert.ok(step.run.includes('$LASTEXITCODE -ne 0'))
+  const native = mac.jobs.build.steps.find(step => step.env?.TEST_RUNNER_TONO_EMIT_UPDATE_CONTRACT)
+  assert.ok(native?.run.includes('xcodebuild'))
+  const guard = mac.jobs.build.steps.find(step => step.run?.includes('result.read_text() == hashlib.sha256'))
+  assert.ok(guard?.run.includes('update-contract-v1-result.txt'))
+  assert.equal(guard.if, undefined)
+  assert.notEqual(guard['continue-on-error'], true)
+})
+
 test('Windows candidate build and installer smoke agree with the product version', () => {
   const version = JSON.parse(readFileSync(path.join(root, 'apps/windows/app/package.json'), 'utf8')).version
   const candidate = load(readFileSync(path.join(root, '.github/workflows/windows-candidate.yml'), 'utf8'))

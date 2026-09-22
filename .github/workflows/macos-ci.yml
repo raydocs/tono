@@ -9,6 +9,8 @@ on:
       - apps/macos/**
       - tooling/scripts/**
       - .github/workflows/macos-ci.yml
+      - apps/windows/crates/tono-core/src/update_contract.rs
+      - apps/windows/crates/tono-core/tests/update_contract.rs
   # Every branch, not just the default one. This repository is a fork, and no
   # `pull_request` event has ever produced a run here — PR #1 merged without one.
   # Restricted to `main` and paired with a trigger that does not fire, this
@@ -20,6 +22,8 @@ on:
       - apps/macos/**
       - tooling/scripts/**
       - .github/workflows/macos-ci.yml
+      - apps/windows/crates/tono-core/src/update_contract.rs
+      - apps/windows/crates/tono-core/tests/update_contract.rs
 
 permissions:
   contents: read
@@ -89,6 +93,7 @@ jobs:
       - name: Run the TonoTests unit tests
         env:
           TEST_RUNNER_TONO_EMIT_SINGBOX: ${{ runner.temp }}/sing-box-product.json
+          TEST_RUNNER_TONO_EMIT_UPDATE_CONTRACT: ${{ runner.temp }}/update-contract-v1-result.txt
         run: |
           xcodebuild \
             -project apps/macos/Tono.xcodeproj \
@@ -98,6 +103,16 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             ENABLE_USER_SCRIPT_SANDBOXING=NO \
             test
+
+      - name: Require the shared update contract XCTest to execute
+        run: |
+          python3 - <<'PY'
+          import hashlib, os, pathlib
+          fixture = pathlib.Path('tooling/scripts/tests/fixtures/update-protocol-v1/manifest.json')
+          result = pathlib.Path(os.environ['RUNNER_TEMP']) / 'update-contract-v1-result.txt'
+          assert result.read_text() == hashlib.sha256(fixture.read_bytes()).hexdigest() + '\n'
+          print('Swift shared update contract executed against the checked-out fixture')
+          PY
 
       - name: Preserve native test results and render attachments
         if: always()

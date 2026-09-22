@@ -1,0 +1,2 @@
+# Signed-byte fixtures must remain identical on hosted Windows and macOS.
+*.json text eol=lf

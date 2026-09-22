@@ -273,6 +273,11 @@
 
 ### 门 3 · 发出去还能再发
 
+2026-09-22：按老板要求，新增 [macOS/Windows 共用升级协议 v1](UPDATE_PROTOCOL_V1.md)
+基础实现及同源夹具；尚未接入特权组件或安装器。它区分安装授权与已安装身份，
+不把 Sparkle continuation 当作安装器已进入的证明。下列 legacy journal 相位
+不能迁移成可信收据，G3.2 的安装器所有权与 G3.3 真机证据仍未由此完成；#26 保持开放。
+
 **G3.1 实现完整 journal 相位，禁止跳相** — Grok · L
 
 - 背景：issue #26。允许序列（`tono-core/src/update_journal.rs`）：

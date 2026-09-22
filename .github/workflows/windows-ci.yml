@@ -31,6 +31,9 @@ on:
       - tooling/scripts/tests/windows-ci-paths.test.cjs
       - tooling/scripts/test-windows-qa.ps1
       - tooling/scripts/tests/windows-qa-guards.Tests.ps1
+      - tooling/scripts/tests/fixtures/update-protocol-v1/**
+      - apps/macos/Tono/Models/UpdateContractV1.swift
+      - apps/macos/TonoTests/UpdateContractV1Tests.swift
   # Every branch, not just the default one. This repository is a fork, and no
   # `pull_request` event has ever produced a run here — PR #1 merged without one.
   # Restricted to `main` and paired with a trigger that does not fire, this
@@ -52,6 +55,9 @@ on:
       - tooling/scripts/tests/windows-ci-paths.test.cjs
       - tooling/scripts/test-windows-qa.ps1
       - tooling/scripts/tests/windows-qa-guards.Tests.ps1
+      - tooling/scripts/tests/fixtures/update-protocol-v1/**
+      - apps/macos/Tono/Models/UpdateContractV1.swift
+      - apps/macos/TonoTests/UpdateContractV1Tests.swift
 
 permissions:
   contents: read
@@ -204,6 +210,18 @@ jobs:
       - name: Test update journal atomic writes on Windows
         working-directory: apps/windows
         run: cargo test --locked -p tono-core --test update_journal_atomic
+
+      - name: Test shared desktop update contract on Windows
+        working-directory: apps/windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $test = 'shared_wire_and_ownership_contract'
+          $listed = cargo test --locked -p tono-core --test update_contract -- --list
+          if ($LASTEXITCODE -ne 0) { throw 'Could not enumerate shared update contract' }
+          if (-not ($listed -match "^${test}: test$")) { throw 'Shared update contract test is missing' }
+          cargo test --locked -p tono-core --test update_contract $test -- --exact --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Shared update contract failed' }
 
   service:
     runs-on: windows-2025
