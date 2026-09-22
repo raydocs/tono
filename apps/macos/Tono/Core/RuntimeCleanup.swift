@@ -3,6 +3,11 @@ import Foundation
 // MARK: - Runtime Cleanup
 
 enum RuntimeCleanup {
+    /// Display/automatic-connect hints only; all mutation grants remain root-owned.
+    static var nativeUpdateBlocksConnect = false
+    static var nativeUpdatePending = false
+    static var nativeUpdateRecovery: UpdateContractV1.Protection?
+
     static func markCoreStarted(tunEnabled: Bool) {
         AppProfile.defaults.set(true, forKey: SettingsKey.didStartCore)
         AppProfile.defaults.set(tunEnabled, forKey: SettingsKey.lastTunEnabled)
@@ -13,45 +18,33 @@ enum RuntimeCleanup {
         AppProfile.defaults.removeObject(forKey: SettingsKey.lastTunEnabled)
     }
 
-    /// A post-update first launch carries the handoff journal, and this is the
-    /// step it describes: the recovery below is what resumes protection on the
-    /// new build, or fails to. On any other launch there is no journal and this
-    /// does nothing.
-    private static func recordUpdateHandoff(
-        _ phase: UpdateHandoffPhase,
-        errorCode: ProtectedFailureCode? = nil,
-        errorStage: String? = nil
-    ) {
-        guard let journal = UpdateHandoffStore.load() else { return }
-        // A relaunch still performs live cleanup/recovery below, but must not
-        // downgrade the verifier's durable receipt. Fresh verification owns commit.
-        if phase == .protectionResuming && journal.phase == .verified { return }
-        try? UpdateHandoffStore.write(journal.advancing(
-            to: phase,
-            errorCode: errorCode?.rawValue,
-            errorStage: errorStage
-        ))
-    }
-
     /// Recover a previous process's network mutations transactionally before
     /// account restoration performs any request. If protection had been active,
     /// PF stays armed with only Tono's bounded control-plane recovery exception
     /// until a verified session reconnects or the user explicitly disarms it.
     static func cleanupStaleRuntime() async throws -> Bool {
-        do {
-            return try await recoverStaleRuntime()
-        } catch {
-            // Every throwing exit of the recovery is a launch that could not
-            // restore the previous runtime. After an update that is exactly
-            // where the recovery failed, so name it before the error surfaces
-            // as a generic start failure.
-            recordUpdateHandoff(
-                .failed,
-                errorCode: .updateRecoveryFailed,
-                errorStage: "cleanupStaleRuntime"
-            )
-            throw error
+        let coordinator = PrivilegedRuntimeCoordinator.shared
+        if let pending = try await coordinator.pendingNativeUpdate(), pending.pending {
+            nativeUpdatePending = true
+            nativeUpdateBlocksConnect = true
+            let adopted = try await coordinator.nativeUpdate("reconcile")
+            guard let receipt = adopted.receipt, receipt.blockedReason == nil,
+                  receipt.phase == .installedIdentityVerified || receipt.phase == .recoveryVerified else {
+                throw NativeUpdateDownload.failure("The pending update cannot authenticate this successor.")
+            }
+            nativeUpdateRecovery = receipt.requiredRecovery
+            KillSwitchService.isArmed = receipt.requiredRecovery != .unprotected
+            clearCoreStarted()
+            if receipt.requiredRecovery == .connected {
+                nativeUpdateBlocksConnect = false // Root permits only this adopted incarnation.
+                return true
+            }
+            _ = try await coordinator.nativeUpdate("commit")
+            nativeUpdatePending = false
+            nativeUpdateBlocksConnect = false
+            return false // Protected Offline must not silently become Connected.
         }
+        return try await recoverStaleRuntime()
     }
 
     private static func recoverStaleRuntime() async throws -> Bool {
@@ -90,7 +83,6 @@ enum RuntimeCleanup {
         }
 
         if shouldResumeProtection {
-            recordUpdateHandoff(.protectionResuming)
             // Remove stale TUN/proxy exceptions and retain the persisted exact
             // control-plane HTTPS addresses before stopping the old core. A
             // failed reassert leaves the previous PF block live, so cleanup can

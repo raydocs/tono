@@ -6,6 +6,21 @@ enum PeerAuthorizationError: Error {
     case requirement
 }
 
+struct TonoAuthenticatedPeer {
+    let uid: uid_t
+    let auditToken: Data
+    let bundleURL: URL
+
+    /// Audit-token PID versions are only unique within one kernel boot.
+    static func bootSession() throws -> String {
+        var buffer = [CChar](repeating: 0, count: 128)
+        var size = buffer.count
+        guard sysctlbyname("kern.bootsessionuuid", &buffer, &size, nil, 0) == 0,
+              size > 1, size <= buffer.count else { throw PeerAuthorizationError.requirement }
+        return String(cString: buffer)
+    }
+}
+
 /// Authenticates the process at the other end of a connected Unix-domain
 /// socket. UID checks alone are not an application identity boundary: every
 /// process owned by the interactive user shares that UID. LOCAL_PEERTOKEN is
@@ -81,6 +96,12 @@ struct TonoPeerAuthorizer {
     /// Derives the validated application bundle of the connected peer process
     /// using the kernel LOCAL_PEERTOKEN audit token.
     func peerBundleURL(socket fd: Int32) -> URL? {
+        peerIdentity(socket: fd)?.bundleURL
+    }
+
+    /// Retain the kernel token, not a PID supplied by the App. The updater
+    /// revalidates this incarnation against the registered on-disk code.
+    func peerIdentity(socket fd: Int32) -> TonoAuthenticatedPeer? {
         var peerUID: uid_t = 0
         var peerGID: gid_t = 0
         var token = audit_token_t()
@@ -121,7 +142,7 @@ struct TonoPeerAuthorizer {
         var current = url.standardizedFileURL
         while current.path != "/" {
             if current.pathExtension == "app" {
-                return current
+                return TonoAuthenticatedPeer(uid: peerUID, auditToken: tokenData, bundleURL: current)
             }
             current = current.deletingLastPathComponent()
         }

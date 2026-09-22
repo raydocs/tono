@@ -80,6 +80,9 @@ final class AppState {
     /// Failed update journal still on disk. Dashboard tells the customer to
     /// disconnect and reinstall; a later connect must not hide this.
     var updateIncomplete: Bool = UpdateHandoffStore.showsIncompleteUpdate()
+    /// UI interlock only. The helper's private pending receipt is authoritative.
+    var nativeUpdatePending = false
+    var nativeUpdateDisconnectTask: Task<Void, Never>?
     var isProtectedReconnectScheduled = false
     var protectedReconnectAttempt = 0
     var protectedReconnectNextAttemptAt: Date?
@@ -411,7 +414,8 @@ final class AppState {
         )
     }
 
-    /// Quiesce connect/health/switch work before a Sparkle install. PF stays
+    /// Legacy diagnostics only; the native updater uses installNativeUpdate.
+    /// Quiesce connect/health/switch work before a legacy handoff. PF stays
     /// armed until cleanup proves DNS + core stop, or the journal records a
     /// fail-closed handoff.
     func prepareForSoftwareUpdate(nextVersion: String) async throws -> UpdateHandoffJournal {
@@ -460,6 +464,7 @@ final class AppState {
     }
 
     func prepareForSystemSleep() {
+        guard !nativeUpdatePending else { return } // Root power monitor still tightens PF.
         let shouldResume = isConnected || isConnecting || isProtectionBlocked
             || KillSwitchService.isArmed
         resumeProtectionAfterWake = shouldResume
@@ -498,6 +503,7 @@ final class AppState {
     /// the full transactional connect path again. Until that commits, traffic
     /// remains fail-closed.
     func resumeAfterSystemWake() {
+        guard !nativeUpdatePending else { return }
         let shouldResume = resumeProtectionAfterWake || KillSwitchService.isArmed
         resumeProtectionAfterWake = false
         LocalTrafficAudit.shared.recordEvent(
@@ -595,7 +601,8 @@ final class AppState {
             }
             return
         }
-        autoConnectRequested = true
+        autoConnectRequested = RuntimeCleanup.nativeUpdateRecovery == nil
+            || RuntimeCleanup.nativeUpdateRecovery == .connected
         attemptAutomaticConnect()
     }
 
@@ -636,7 +643,8 @@ final class AppState {
     }
 
     func attemptAutomaticConnect() {
-        guard autoConnectRequested, initialDataLoaded, isTonoReady,
+        guard !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect,
+              autoConnectRequested, initialDataLoaded, isTonoReady,
               !catalogSelectionRequiresChoice, !isConnected, !isConnecting else { return }
         // connect() silently no-ops while a previous disconnect drains. The
         // intent flag must survive that window, or a crash-recovery launch
@@ -1006,9 +1014,9 @@ final class AppState {
         stopProxyGuard()
         proxyGuardTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self, self.isConnected, SystemProxy.didSetProxy else { return }
+                guard let self, !self.nativeUpdatePending, self.isConnected, SystemProxy.didSetProxy else { return }
                 let intact = await PrivilegedRuntimeCoordinator.shared.systemProxyIsIntact()
-                guard self.isConnected, SystemProxy.didSetProxy else { return }
+                guard !self.nativeUpdatePending, self.isConnected, SystemProxy.didSetProxy else { return }
                 if !intact {
                     do {
                         try await PrivilegedRuntimeCoordinator.shared.reapplySystemProxy()
@@ -1060,6 +1068,7 @@ final class AppState {
 
     /// Dynamically apply a setting change via PATCH /configs without reconnecting.
     func applySettingChange(key: String, value: Any) {
+        guard !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
         if isOwnedTonoMode {
             if key == "tun", let tun = value as? [String: Any], tun["enable"] as? Bool == false {
                 errorMessage = String(localized: "Tono requires TUN mode while cloud protection is active.")

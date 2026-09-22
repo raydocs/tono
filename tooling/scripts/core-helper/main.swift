@@ -12,7 +12,7 @@ let runtimeConfigPath = "\(runtimeDirectory)/config.json"
 let pidPath = "\(socketDirectory)/sing-box.pid"
 let allowedUIDPath = "/Library/PrivilegedHelperTools/tono.allowed-uid"
 let mihomoPath = "/Library/PrivilegedHelperTools/tono-sing-box"
-let maximumRequestBytes = 16 * 1024
+let maximumRequestBytes = 48 * 1024
 let maximumHeaderBytes = 8 * 1024
 let maximumDiagnosticBytes = 32 * 1024
 var helperShutdownRequested: sig_atomic_t = 0
@@ -551,24 +551,41 @@ func requestHelperShutdown(_ signal: Int32) {
 /// Last-resort recovery for a machine whose GUI cannot reconnect or quit
 /// normally. This path is intentionally unavailable over the user socket and
 /// requires an administrator to execute the installed, signed helper as root.
-func runEmergencyDisarm() -> Bool {
+func runEmergencyDisarm(underLock suppliedStorage: UpdateStorage? = nil) -> Bool {
     guard geteuid() == 0 else {
         fputs("Tono emergency recovery must be run with sudo.\n", stderr)
         return false
     }
     do {
+        let storage = try suppliedStorage ?? UpdateStorage()
+        let disarm = { () throws -> Bool in
+        var ledger = try storage.load()
+        let pending = ledger.attempt != nil && ledger.attempt?.receipt.phase != .committed
+        if pending {
+            ledger.attempt?.disconnectRequested = true
+            try storage.save(ledger)
+        }
         let allowedUID = try readAllowedUID()
         // Initialization terminates a stale owned Mihomo process before PF is
         // opened, preventing a half-running privileged runtime after recovery.
-        _ = try CoreManager(allowedUID: allowedUID)
+        let core = try CoreManager(allowedUID: allowedUID)
         // Restore the user's DHCP/custom DNS before opening PF. If DNS recovery
         // fails, retain fail-closed protection instead of returning a machine
         // with direct egress but a dead resolver.
-        _ = try ProtectedDNSManager().restore()
+        let dns = try ProtectedDNSManager()
         let manager = try KillSwitchManager(allowedUID: allowedUID)
-        _ = try manager.disarm()
+        if pending {
+            try UpdateRuntime(core: core, firewall: manager, dns: dns, power: PowerTransitionGate()).disconnect()
+            ledger.attempt?.disconnectVerified = true
+            try storage.save(ledger)
+        } else {
+            _ = try dns.restore()
+            _ = try manager.disarm()
+        }
         print("Tono network protection is disarmed.")
         return true
+        }
+        return try suppliedStorage == nil ? storage.locked(disarm) : disarm()
     } catch {
         fputs("Tono emergency recovery failed; PF remains fail-closed.\n", stderr)
         return false
@@ -582,6 +599,23 @@ func runEmergencyDisarm() -> Bool {
 /// launchd plist, allowed-uid record, and the executables — so the next app
 /// launch performs a clean authenticated reinstall.
 func runEmergencyReset() -> Bool {
+    guard geteuid() == 0 else { return false }
+    do {
+        let storage = try UpdateStorage()
+        return try storage.locked {
+            let attempt = try storage.load().attempt
+            guard attempt == nil || attempt?.receipt.phase == .committed else {
+                throw HelperFailure.invalid("Pending update evidence prevents helper reset. Use explicit emergency-disarm, not removal.")
+            }
+            return runEmergencyResetLocked(storage)
+        }
+    } catch {
+        fputs("Helper reset refused; pending or corrupt update evidence is retained.\n", stderr)
+        return false
+    }
+}
+
+private func runEmergencyResetLocked(_ storage: UpdateStorage) -> Bool {
     // Stop the daemon FIRST: with KeepAlive it can otherwise service a
     // concurrent GUI arm between this tool's disarm and the removal below,
     // re-writing PF state that then survives with no helper left installed —
@@ -596,7 +630,7 @@ func runEmergencyReset() -> Bool {
     try? bootout.run()
     bootout.waitUntilExit()
 
-    guard runEmergencyDisarm() else {
+    guard runEmergencyDisarm(underLock: storage) else {
         // Protection could not be released; removing the installation now
         // would strand the machine fail-closed with nothing able to enforce
         // or undo it. Put the daemon registration back and keep everything.
@@ -830,6 +864,45 @@ signal(SIGPIPE, SIG_IGN)
 signal(SIGTERM, requestHelperShutdown)
 signal(SIGINT, requestHelperShutdown)
 umask(0o077)
+func updateAllowsOrdinaryInstall() -> Bool {
+    guard geteuid() == 0 else { return false }
+    do {
+        let storage = try UpdateStorage()
+        return try storage.locked {
+            let attempt = try storage.load().attempt
+            return attempt == nil || attempt?.receipt.phase == .committed
+        }
+    } catch { return false }
+}
+
+if CommandLine.arguments.dropFirst() == ["--update-install-allowed"] {
+    exit(updateAllowsOrdinaryInstall() ? 0 : 1)
+}
+if CommandLine.arguments.dropFirst() == ["--update-install-guard"] {
+    guard geteuid() == 0 else { exit(1) }
+    do {
+        let storage = try UpdateStorage()
+        let status = try storage.locked { () throws -> Int32 in
+            let attempt = try storage.load().attempt
+            guard attempt == nil || attempt?.receipt.phase == .committed else {
+                throw HelperFailure.invalid("Pending update prevents helper repair.")
+            }
+            let installer = Process()
+            installer.executableURL = URL(fileURLWithPath: "/bin/sh")
+            installer.standardInput = FileHandle.standardInput
+            try installer.run()
+            installer.waitUntilExit()
+            return installer.terminationStatus
+        }
+        exit(status)
+    } catch { exit(1) }
+}
+if CommandLine.arguments.dropFirst() == ["--update-executor"] {
+    exit(UpdateExecutor.run() ? 0 : 1)
+}
+if CommandLine.arguments.dropFirst() == ["--update-self-test"] {
+    exit(runUpdateSelfTests() ? 0 : 1)
+}
 if CommandLine.arguments.dropFirst() == ["--version"] {
     print(helperVersion)
     exit(0)
@@ -871,6 +944,14 @@ if CommandLine.arguments.dropFirst() == ["--emergency-reset"] {
     exit(runEmergencyReset() ? 0 : 1)
 }
 do {
+    // Executor recovery must precede CoreManager's stale-child cleanup and
+    // normal PF restoration. The independent job owns a consumed replacement.
+    do {
+        if try UpdateExecutor.startup() { exit(0) }
+    } catch {
+        if let uid = try? readAllowedUID() { try? KillSwitchManager.installEmergencyBlock(allowedUID: uid) }
+        throw error
+    }
     let server = try SocketServer()
     server.run()
 } catch {

@@ -98,7 +98,9 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.3.0 → 4.4.0: Protected DNS recovery retains its snapshot and refuses
     ///   release when any service's DNS cannot be read, instead of treating an
     ///   unreadable service as clean. Existing IPC and authorization are unchanged.
-    static let current = "4.4.0"
+    /// - 4.4.0 → 4.5.0: root-owned full-bundle update transaction, detached
+    ///   signatures, durable consumption, independent executor and recovery.
+    static let current = "4.5.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

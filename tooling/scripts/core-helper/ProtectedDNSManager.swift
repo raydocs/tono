@@ -130,6 +130,30 @@ final class ProtectedDNSManager {
         )
     }
 
+    /// Update admission/commit cannot infer restored DNS from an absent
+    /// snapshot alone. Read every persisted service and active resolver state.
+    func verifyRestored() throws {
+        lock.lock()
+        defer { lock.unlock() }
+        guard try loadSnapshot() == nil else { throw HelperFailure.invalid("DNS recovery is still pending.") }
+        for service in try Self.allServices() {
+            guard try !Self.currentDNS(for: service).contains(Self.protectedDNSServer) else {
+                throw HelperFailure.invalid("A network service still uses the stopped Tono resolver.")
+            }
+        }
+        guard let store = SCDynamicStoreCreate(nil, "Tono update DNS readback" as CFString, nil, nil),
+              let values = SCDynamicStoreCopyMultiple(store, nil,
+                ["State:/Network/Service/.*/DNS", "State:/Network/Global/DNS"] as CFArray) as? [String: Any] else {
+            throw HelperFailure.invalid("Active DNS state cannot be inspected.")
+        }
+        for case let config as [String: Any] in values.values {
+            if let servers = config[kSCPropNetDNSServerAddresses as String] as? [String],
+               servers.contains(Self.protectedDNSServer) {
+                throw HelperFailure.invalid("The active resolver still points to the stopped Core.")
+            }
+        }
+    }
+
     /// The same recovery transaction runs against either System Configuration
     /// or controlled I/O. Snapshot removal is part of the transaction, not a
     /// decision a test or caller can make independently of service readback.

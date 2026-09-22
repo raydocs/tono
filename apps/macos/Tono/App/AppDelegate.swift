@@ -262,6 +262,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 
+    /// Root has already persisted consumption and owns teardown/relaunch.
+    /// Never route update termination through the ordinary PF release path.
+    func terminateForNativeUpdate() {
+        runtimeStopped = true
+        NSApp.terminate(nil)
+    }
+
     /// A main-queue dispatch source must not synchronously enter AppKit's
     /// `terminateLater` loop: the cleanup Task would be queued behind the
     /// dispatch callback that is waiting for its reply. Complete cleanup first,
@@ -305,6 +312,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func finishTerminationCleanup() async {
+        do {
+            if let update = try await PrivilegedRuntimeCoordinator.shared.pendingNativeUpdate(), update.pending {
+                await appState?.finishPendingPersistence()
+                return
+            }
+        } catch {
+            // An unreachable/corrupt v1 helper is not evidence that no update
+            // owns protection. Quit without competing repair or PF release.
+            return
+        }
         // First stop transports while retaining PF. Noncritical persistence is
         // also completed before the final release transaction, so a timeout in
         // either phase cannot leave an unknown network path open.
