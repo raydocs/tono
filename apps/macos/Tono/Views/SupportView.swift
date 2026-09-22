@@ -38,6 +38,7 @@ struct SupportView: View {
     private struct RuntimeProbe {
         let helperInstalled: Bool
         let helperReady: Bool
+        let helperVersion: String?
         let helperRejectsApp: Bool
         /// Whether an authenticated helper actually answered the status query.
         /// `coreRunning` is conservative when it did not — safe for the release
@@ -57,6 +58,7 @@ struct SupportView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
+                    SupportHealthSection()
                     summaryCard(snapshot)
                     webrtcCard
                     browserDNSCard
@@ -171,7 +173,7 @@ struct SupportView: View {
             )
             supportDivider
             SupportRow(
-                label: String(localized: "Support reference"),
+                label: String(localized: "Device ID"),
                 value: accountSession?.device?.id ?? String(localized: "Not signed in"),
                 monospaced: true
             )
@@ -704,7 +706,7 @@ struct SupportView: View {
     private var helperText: String {
         guard let probe else { return String(localized: "Checking…") }
         if probe.helperReady {
-            return "\(String(localized: "Ready")) · \(HelperProtocolVersion.current)"
+            return "\(String(localized: "Ready")) · \(probe.helperVersion ?? "unknown")"
         }
         if probe.helperRejectsApp {
             return String(localized: "Installed · rejecting this app")
@@ -853,13 +855,15 @@ struct SupportView: View {
         // never resolve them on the UI actor.
         let helper = await Task.detached {
             let installed = HelperManager.hasInstalledHelperArtifact
-            let ready = HelperManager.isHelperRunning()
+            let version = HelperManager.currentVersion()
+            let ready = version == HelperProtocolVersion.current
             let rejects = ready ? false : HelperManager.daemonRejectsClient()
-            return (installed: installed, ready: ready, rejects: rejects)
+            return (installed: installed, ready: ready, version: version, rejects: rejects)
         }.value
         probe = RuntimeProbe(
             helperInstalled: helper.installed,
             helperReady: helper.ready,
+            helperVersion: helper.version,
             helperRejectsApp: helper.rejects,
             coreStatusVerified: core.verified,
             coreRunning: core.running,
@@ -871,7 +875,7 @@ struct SupportView: View {
 
 // MARK: - Card Container
 
-private struct SupportCard<Content: View>: View {
+struct SupportCard<Content: View>: View {
     @Environment(\.colorScheme) private var colorScheme
     let icon: String
     let title: String

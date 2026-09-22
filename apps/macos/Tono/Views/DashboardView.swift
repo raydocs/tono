@@ -35,6 +35,8 @@ struct DashboardView: View {
                 Spacer(minLength: 12)
 
                 VStack(spacing: 24) {
+                    RecoveryNotice(appState: appState)
+                        .frame(maxWidth: 520, alignment: .leading)
                     ConnectPill(isConnected: Binding(
                         get: { appState.isConnected },
                         set: { newValue in
@@ -90,6 +92,9 @@ struct DashboardView: View {
                             .transition(TonoMotion.surfaceTransition)
                     }
 
+                    if !showsConnectionDetails {
+                        RouteChoicesView()
+                    }
                 }
 
                 Spacer(minLength: 12)

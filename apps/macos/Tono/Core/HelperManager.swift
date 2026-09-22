@@ -472,7 +472,8 @@ nonisolated struct HelperManager {
         }
     }
 
-    private static func currentVersion() -> String? {
+    /// The daemon's own reply, not the required or on-disk helper version.
+    static func currentVersion() -> String? {
         guard case .version(let value) = probeDaemon() else { return nil }
         return value
     }

@@ -28,6 +28,19 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		C0D000112F80000000000001 /* Record build source */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = ();
+			inputPaths = ("$(SRCROOT)/scripts/write-build-source.sh",);
+			name = "Record build source";
+			outputPaths = ("$(BUILT_PRODUCTS_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/tono-build-source.json",);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "sh \"$SRCROOT/scripts/write-build-source.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
 		C0D000102F80000000000001 /* Pin sing-box codesign identifier */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
@@ -189,6 +202,7 @@
 				14F0D2042F78C04F000C4896 /* Sources */,
 				14F0D2052F78C04F000C4896 /* Frameworks */,
 				14F0D2062F78C04F000C4896 /* Resources */,
+				C0D000112F80000000000001 /* Record build source */,
 				C0D0000A2F80000000000001 /* Embed Executables */,
 				C0D000102F80000000000001 /* Pin sing-box codesign identifier */,
 				C0D0000E2F80000000000001 /* Pin helper codesign identifier */,

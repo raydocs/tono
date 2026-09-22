@@ -32,7 +32,10 @@ extension ProxiesView {
                             .padding(.top, regionCodes.first == code ? 0 : 8)
                         LazyVGrid(columns: columns, spacing: 12) {
                             ForEach(grouped[code] ?? []) { node in
-                                localNodeCard(node)
+                                VStack(alignment: .leading, spacing: 6) {
+                                    localNodeCard(node)
+                                    routePreferenceControls(node)
+                                }
                             }
                         }
                     }
@@ -49,6 +52,32 @@ extension ProxiesView {
                 )
                 .frame(maxWidth: .infinity, minHeight: 260)
             }
+        }
+    }
+
+    @ViewBuilder
+    func routePreferenceControls(_ node: ProxyNode) -> some View {
+        if let owner = accountSession.user?.id, owner == ManagedExitCatalogOwnership.currentAccount {
+            let favorite = appState.routePreferences.favorites(owner: owner, catalog: appState.managedCatalogNodes)
+                .contains(ProxyNode.catalogBaseName(for: node.name))
+            HStack {
+                Button {
+                    appState.toggleRouteFavorite(node.name, owner: owner)
+                } label: {
+                    Label(favorite ? String(localized: "Remove favorite") : String(localized: "Favorite"),
+                          systemImage: favorite ? "star.fill" : "star")
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("routeFavorite-\(ProxyNode.catalogBaseName(for: node.name))")
+                if let recent = appState.routePreferences.recentSuccesses(owner: owner, catalog: appState.managedCatalogNodes)
+                    .first(where: { $0.name == node.name }) {
+                    Spacer()
+                    Text("Last successful connection")
+                    Text(recent.at, format: .dateTime.hour().minute())
+                }
+            }
+            .font(.system(size: 10)).foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
         }
     }
 

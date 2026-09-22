@@ -15,6 +15,9 @@ struct MenuBarView: View {
             VStack(alignment: .leading, spacing: 0) {
                 header
                 currentNode
+                RecoveryNotice(appState: appState)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, appState.recoveryFeedback == nil ? 0 : 10)
                 primaryAction
                 if appState.isProtectionBlocked
                     || (KillSwitchService.isArmed && accountSession.state != .ready) {

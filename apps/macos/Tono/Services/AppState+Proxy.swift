@@ -81,6 +81,8 @@ extension AppState {
             ]
         )
         let switchGeneration = connectionCoordinator.protectionOperationGeneration
+        let routeOwner = ManagedExitCatalogOwnership.currentAccount
+        let routeCatalogDigest = managedCatalogDigest
         connectionCoordinator.nodeSwitchTask = Task { [weak self] in
             guard let self else { return }
             defer {
@@ -158,10 +160,13 @@ extension AppState {
                     converge: { try await self.armSwitchKillSwitch(proxyEndpoints: nextEndpoints) },
                     commit: { self.rememberSwitchedNode(desiredNode, name: nodeName) },
                     recover: { error in
+                        self.retireFailedRouteSuccess(nodeName, owner: routeOwner, generation: switchGeneration)
                         self.recoverFailedNodeSwitch(desiredNode, name: nodeName, error: error)
                     }
                 ) else { return }
                 protectionTransitionInFlight = false
+                self.recordVerifiedRouteSuccess(nodeName, owner: routeOwner, generation: switchGeneration,
+                                                catalogDigest: routeCatalogDigest)
                 await proxyService.refresh()
                 try checkSwitchCurrent()
                 ConnectionTelemetryBuffer.shared.record(
@@ -197,6 +202,7 @@ extension AppState {
                 // be converted into an automatic protected reconnect.
                 guard !Task.isCancelled, !isDisconnecting,
                       self.connectionCoordinator.protectionOperationGeneration == switchGeneration else { return }
+                self.retireFailedRouteSuccess(nodeName, owner: routeOwner, generation: switchGeneration)
                 LocalTrafficAudit.shared.recordEvent(
                     "node_switch_failed",
                     details: [

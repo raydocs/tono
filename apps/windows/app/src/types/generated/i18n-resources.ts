@@ -1119,6 +1119,68 @@ export interface TranslationResources {
       errors: {
         unknownAction: string
       }
+      experience: {
+        catalog: string
+        channel: string
+        channelCandidate: string
+        channelDevelopment: string
+        channelRelease: string
+        channelUnknown: string
+        check: {
+          account: string
+          catalog: string
+          core: string
+          dns: string
+          exit: string
+          service: string
+          tunnel: string
+        }
+        checkedAt: string
+        checkFailed: string
+        checking: string
+        coreExpected: string
+        coreReported: string
+        healthDescription: string
+        healthTitle: string
+        hint: {
+          account: string
+          catalog: string
+          core: string
+          dns: string
+          exit: string
+          service: string
+          tunnel: string
+        }
+        identityHint: string
+        identityTitle: string
+        installHint: string
+        prepareFailed: string
+        preparing: string
+        preview: string
+        previewHint: string
+        receiptContext: string
+        receiptTime: string
+        recoveryActive: string
+        recoveryStopped: string
+        recoveryTitle: string
+        recoveryWaiting: string
+        repair: string
+        repairDescription: string
+        repairing: string
+        repairTitle: string
+        retryHealth: string
+        retryPreview: string
+        runHealth: string
+        service: string
+        source: string
+        stale: string
+        state: {
+          attention: string
+          observed: string
+          unknown: string
+        }
+        summaryHint: string
+      }
       intro: {
         getStarted: string
         landmark: string
@@ -1330,6 +1392,51 @@ export interface TranslationResources {
           successHint: string
           uploading: string
         }
+      }
+      routeExplanation: {
+        chain: string
+        chainHint: string
+        close: string
+        gone: string
+        insufficient: string
+        limit: string
+        matchedRule: string
+        notReported: string
+        observationHint: string
+        observedRoute: string
+        openApp: string
+        openConnection: string
+        title: string
+        unknown: string
+      }
+      routes: {
+        addFavorite: string
+        anyRegion: string
+        changed: string
+        favorites: string
+        fixedRegion: string
+        keepsConnection: string
+        loadFailed: string
+        loading: string
+        noFavorites: string
+        noRecent: string
+        noRecommendation: string
+        preferenceHint: string
+        reason: {
+          recent: string
+          tcp: string
+        }
+        recent: string
+        recommended: string
+        removeFavorite: string
+        save: string
+        saved: string
+        saveFailed: string
+        selectedRecommendation: string
+        selectOnly: string
+        title: string
+        useRecommendation: string
+        verifiedAt: string
       }
       servers: {
         cloudGroup: string

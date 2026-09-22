@@ -14,11 +14,13 @@ import {
   tonoCatalogStatus,
   tonoConnect,
   tonoRefreshCatalog,
+  tonoRoutePreferences,
   tonoSelectServer,
   tonoServers,
   tonoStatus,
   tonoTestAvailableServers,
   tonoTestCurrentServer,
+  tonoUpdateRoutePreferences,
 } from '@/services/tono'
 import { PageHeader } from '@/tono-ui/PageHeader'
 import {
@@ -47,15 +49,18 @@ import {
   hy2UdpIsVendorBlocked,
   UDP_BACKUP_GROUP,
   isHy2CatalogName,
+  catalogBaseName,
 } from './node-meta'
+import {
+  endpointEvidenceMatches,
+  MAX_FAVORITES,
+  preferencesMatch,
+  recommendRoute,
+  type EndpointEvidence,
+} from './route-preferences'
+import { RoutePreferencesPanel } from './route-preferences-panel'
 
 const catalogStatusQueryKey = ['tono', 'catalog-status'] as const
-
-type EndpointTestState = {
-  revision: number | null
-  latencies: Record<string, number>
-  failures: Record<string, 'timeout' | 'failed'>
-}
 
 const hex = (color: string, alpha: number) =>
   `${color}${Math.round(alpha * 255)
@@ -81,13 +86,21 @@ const ServersPage = () => {
   const [refreshFeedback, setRefreshFeedback] = useState<string | null>(null)
   const [searchText, setSearchText] = useState('')
   const [regionFilter, setRegionFilter] = useState<string | null>(null)
+  const [savingPreferences, setSavingPreferences] = useState(false)
+  const [selectingRecommendation, setSelectingRecommendation] = useState(false)
+  const [now, setNow] = useState(Date.now)
   const cancelRequestedRef = useRef(false)
   const [currentExitTest, setCurrentExitTest] = useState<{
     name: string
     latency: number
+    scope: string | null
+    generation: number
+    atMs: number
   } | null>(null)
-  const [endpointTests, setEndpointTests] = useState<EndpointTestState>({
+  const [endpointTests, setEndpointTests] = useState<EndpointEvidence>({
+    scope: null,
     revision: null,
+    atMs: 0,
     latencies: {},
     failures: {},
   })
@@ -106,6 +119,37 @@ const ServersPage = () => {
     queryFn: tonoCatalogStatus,
     refetchInterval: 30_000,
   })
+  const scope = status?.routePreferenceScope
+  const {
+    data: storedPreferences,
+    error: preferencesError,
+    refetch: refreshPreferences,
+  } = useQuery({
+    queryKey: ['tono', 'route-preferences', scope, status?.catalogRevision],
+    queryFn: tonoRoutePreferences,
+    enabled: !!scope,
+    refetchInterval: 30_000,
+  })
+  const preferences = preferencesMatch(
+    storedPreferences,
+    scope,
+    status?.catalogRevision,
+  )
+    ? storedPreferences
+    : undefined
+  const recommendation = recommendRoute(
+    servers ?? [],
+    preferences,
+    scope,
+    status?.catalogRevision,
+    endpointTests,
+    now,
+  )
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 5_000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   useEffect(
     () => () => {
@@ -113,6 +157,55 @@ const ServersPage = () => {
     },
     [],
   )
+
+  const savePreferences = useLockFn(
+    async (favorites: string[], fixedRegion: string | null) => {
+      if (!preferences) return
+      setSavingPreferences(true)
+      setSelectError(null)
+      try {
+        await tonoUpdateRoutePreferences(
+          preferences.scope,
+          preferences.catalogRevision,
+          favorites,
+          fixedRegion,
+        )
+        await refreshPreferences()
+      } catch {
+        setSelectError(t('tono.routes.saveFailed'))
+      } finally {
+        setSavingPreferences(false)
+      }
+    },
+  )
+
+  const handleRecommendation = useLockFn(async () => {
+    const current = recommendRoute(
+      servers ?? [],
+      preferences,
+      scope,
+      status?.catalogRevision,
+      endpointTests,
+      Date.now(),
+    )
+    if (!current || !preferences || status?.uiState !== 'notConnected') return
+    setSelectingRecommendation(true)
+    setSelectError(null)
+    try {
+      // The backend checks scope, revision and idle state under its selection lock. Select only:
+      // a separate deliberate Connect avoids a read-then-connect admission race.
+      await tonoSelectServer(current.name, {
+        scope: preferences.scope,
+        catalogRevision: preferences.catalogRevision,
+      })
+      await Promise.all([mutateServers(), mutateTonoStatus()])
+      showToast(t('tono.routes.selectedRecommendation'))
+    } catch {
+      setSelectError(t('tono.routes.changed'))
+    } finally {
+      setSelectingRecommendation(false)
+    }
+  })
 
   const handleSelect = useLockFn(
     async (name: string, selected: boolean, available: boolean) => {
@@ -129,7 +222,8 @@ const ServersPage = () => {
         setSelectError(null)
         setSwitchingName(name)
         try {
-          if (idleSelectShouldConnect((await tonoStatus()).uiState)) await tonoConnect()
+          if (idleSelectShouldConnect((await tonoStatus()).uiState))
+            await tonoConnect()
           await mutateTonoStatus()
         } catch (error) {
           if (!isSupersededConnectRejection(error)) {
@@ -146,7 +240,8 @@ const ServersPage = () => {
         await tonoSelectServer(name)
         // Selection may have joined a switch/reconnect while this render was idle. Read the
         // backend after its acknowledgement; the captured render cannot authorize another start.
-        if (idleSelectShouldConnect((await tonoStatus()).uiState)) await tonoConnect()
+        if (idleSelectShouldConnect((await tonoStatus()).uiState))
+          await tonoConnect()
         await Promise.all([mutateServers(), mutateTonoStatus()])
         // Select acknowledges dispatch; a hot/cold switch may still be running.
         // Announce the localized city the card shows, not the raw wire name —
@@ -172,7 +267,20 @@ const ServersPage = () => {
     setSelectError(null)
     try {
       const latency = await tonoTestCurrentServer()
-      setCurrentExitTest({ name: selected.name, latency })
+      const current = await tonoStatus()
+      if (
+        current.routePreferenceScope === scope &&
+        current.controllerGeneration === status?.controllerGeneration &&
+        current.selectedServer === selected.name
+      ) {
+        setCurrentExitTest({
+          name: selected.name,
+          latency,
+          scope: scope ?? null,
+          generation: current.controllerGeneration,
+          atMs: Date.now(),
+        })
+      }
     } catch (error) {
       setSelectError(formatTonoActionError(error, t))
     } finally {
@@ -184,10 +292,23 @@ const ServersPage = () => {
     setTestingAll(true)
     cancelRequestedRef.current = false
     setSelectError(null)
+    // The batch has no per-node timestamps. Age every result from admission, not completion,
+    // so a slow batch cannot make its earliest measurements look newly fresh.
+    const testedAtMs = Date.now()
     try {
       const results = await tonoTestAvailableServers()
+      const current = await tonoStatus()
+      if (
+        current.routePreferenceScope !== scope ||
+        current.catalogRevision !== status?.catalogRevision ||
+        current.uiState !== 'notConnected'
+      )
+        return
+      setNow(Date.now())
       setEndpointTests({
-        revision: catalog?.revision ?? null,
+        scope: scope ?? null,
+        revision: status?.catalogRevision ?? null,
+        atMs: testedAtMs,
         latencies: Object.fromEntries(
           results.flatMap((result) =>
             result.latencyMs === null ? [] : [[result.name, result.latencyMs]],
@@ -484,6 +605,33 @@ const ServersPage = () => {
         )}
       </div>
 
+      {scope && (
+        <RoutePreferencesPanel
+          dark={dark}
+          preferences={preferences}
+          servers={servers ?? []}
+          recommendation={recommendation}
+          idle={status?.uiState === 'notConnected'}
+          busy={
+            savingPreferences ||
+            selectingRecommendation ||
+            switchingName !== null
+          }
+          now={now}
+          error={!!preferencesError}
+          onChangeRegion={(region) =>
+            preferences && void savePreferences(preferences.favorites, region)
+          }
+          onRecommend={() => void handleRecommendation()}
+          onRetry={() => void refreshPreferences()}
+          onSelect={(name) => {
+            const server = servers?.find((server) => server.name === name)
+            if (server)
+              void handleSelect(name, server.selected, server.available)
+          }}
+        />
+      )}
+
       <div
         style={{
           display: 'flex',
@@ -715,8 +863,12 @@ const ServersPage = () => {
               )}
               <div className="tono-server-grid">
                 {group.servers.map((server) => {
-                  const endpointTestsCurrent =
-                    endpointTests.revision === (catalog?.revision ?? null)
+                  const endpointTestsCurrent = endpointEvidenceMatches(
+                    endpointTests,
+                    scope,
+                    status?.catalogRevision,
+                    now,
+                  )
                   const endpointLatency = endpointTestsCurrent
                     ? endpointTests.latencies[server.name]
                     : undefined
@@ -724,7 +876,12 @@ const ServersPage = () => {
                     ? endpointTests.failures[server.name]
                     : undefined
                   const exitLatency =
-                    currentExitTest?.name === server.name
+                    currentExitTest?.name === server.name &&
+                    currentExitTest.scope === scope &&
+                    currentExitTest.generation ===
+                      status?.controllerGeneration &&
+                    now >= currentExitTest.atMs &&
+                    now - currentExitTest.atMs < 120_000
                       ? currentExitTest.latency
                       : server.selected &&
                           status?.exitDelayMs &&
@@ -792,7 +949,8 @@ const ServersPage = () => {
                   const isSwitchingCard = switchingName === server.name
                   const othersLocked =
                     switchingName !== null && switchingName !== server.name
-                  const cardDisabled = !available || othersLocked
+                  const cardDisabled =
+                    !available || othersLocked || selectingRecommendation
                   const highlighted =
                     isSwitchingCard ||
                     (server.selected && switchingName === null)
@@ -806,40 +964,18 @@ const ServersPage = () => {
                     latencyText,
                     cardStatus,
                   ].join(', ')
+                  const favorite =
+                    preferences?.favorites.includes(
+                      catalogBaseName(server.name),
+                    ) ?? false
                   return (
-                    <button
+                    <div
                       key={server.name}
-                      type="button"
-                      className="tono-server-card"
-                      aria-label={cardSummary}
-                      disabled={cardDisabled}
-                      onClick={() =>
-                        void handleSelect(
-                          server.name,
-                          server.selected,
-                          available,
-                        )
-                      }
                       style={{
-                        position: 'relative',
-                        overflow: 'visible',
-                        flexDirection: 'column',
-                        alignItems: 'stretch',
-                        justifyContent: 'space-between',
                         display: 'flex',
-                        gap: 14,
-                        minHeight: 126,
-                        padding: '16px 16px 14px',
+                        flexDirection: 'column',
+                        minWidth: 0,
                         borderRadius: 18,
-                        fontFamily: 'inherit',
-                        textAlign: 'left',
-                        cursor: cardDisabled
-                          ? 'not-allowed'
-                          : highlighted
-                            ? 'default'
-                            : 'pointer',
-                        opacity: cardDisabled ? 0.55 : 1,
-                        color: text.primary,
                         background: highlighted
                           ? hex(TONO_COLORS.accent, dark ? 0.13 : 0.08)
                           : dark
@@ -851,176 +987,256 @@ const ServersPage = () => {
                         boxShadow: highlighted
                           ? `0 18px 34px -22px ${hex(TONO_COLORS.accent, 0.82)}`
                           : `0 10px 24px -22px rgba(16,24,48,${dark ? 0.9 : 0.28})`,
-                        transition: `background 0.15s ${TONO_EASE}, border-color 0.15s ${TONO_EASE}, transform 0.15s ${TONO_EASE}`,
+                        transition: `background 0.15s ${TONO_EASE}, border-color 0.15s ${TONO_EASE}`,
                       }}
                     >
-                      {highlighted && (
-                        <span
-                          aria-hidden
-                          className="tono-server-card__line"
-                          style={{
-                            position: 'absolute',
-                            top: 0,
-                            left: 18,
-                            right: 18,
-                            height: 2,
-                            borderRadius: 999,
-                            background: `linear-gradient(90deg, ${TONO_COLORS.accent}, ${TONO_COLORS.accentSoft}, ${TONO_COLORS.accentWarm})`,
-                          }}
-                        />
-                      )}
-                      <span
+                      <button
+                        type="button"
+                        className="tono-server-card"
+                        aria-label={cardSummary}
+                        disabled={cardDisabled}
+                        onClick={() =>
+                          void handleSelect(
+                            server.name,
+                            server.selected,
+                            available,
+                          )
+                        }
                         style={{
-                          display: 'flex',
+                          position: 'relative',
+                          overflow: 'visible',
                           flexDirection: 'column',
-                          gap: 7,
-                          minWidth: 0,
+                          alignItems: 'stretch',
+                          justifyContent: 'space-between',
+                          display: 'flex',
+                          gap: 14,
+                          minHeight: 126,
+                          padding: '16px 16px 14px',
+                          borderRadius: 18,
+                          fontFamily: 'inherit',
+                          textAlign: 'left',
+                          cursor: cardDisabled
+                            ? 'not-allowed'
+                            : highlighted
+                              ? 'default'
+                              : 'pointer',
+                          opacity: cardDisabled ? 0.55 : 1,
+                          color: text.primary,
+                          background: 'transparent',
+                          border: 'none',
+                          boxShadow: 'none',
+                          transform: 'none',
                         }}
                       >
+                        {highlighted && (
+                          <span
+                            aria-hidden
+                            className="tono-server-card__line"
+                            style={{
+                              position: 'absolute',
+                              top: 0,
+                              left: 18,
+                              right: 18,
+                              height: 2,
+                              borderRadius: 999,
+                              background: `linear-gradient(90deg, ${TONO_COLORS.accent}, ${TONO_COLORS.accentSoft}, ${TONO_COLORS.accentWarm})`,
+                            }}
+                          />
+                        )}
                         <span
                           style={{
                             display: 'flex',
-                            alignItems: 'center',
-                            gap: 12,
+                            flexDirection: 'column',
+                            gap: 7,
                             minWidth: 0,
                           }}
                         >
-                          <TonoNodeBadge
-                            size={44}
-                            city={nodeCityParts(server.name).city}
-                          />
                           <span
                             style={{
-                              flex: 1,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 12,
                               minWidth: 0,
-                              fontSize: 14,
-                              fontWeight: 650,
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
                             }}
                           >
-                            {cityTitle}
-                          </span>
-                          {nodeCityParts(server.name).codename && (
+                            <TonoNodeBadge
+                              size={44}
+                              city={nodeCityParts(server.name).city}
+                            />
                             <span
                               style={{
+                                flex: 1,
+                                minWidth: 0,
+                                fontSize: 14,
+                                fontWeight: 650,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {cityTitle}
+                            </span>
+                            {nodeCityParts(server.name).codename && (
+                              <span
+                                style={{
+                                  flexShrink: 0,
+                                  padding: '2px 6px',
+                                  borderRadius: 999,
+                                  color: text.secondary,
+                                  background: dark
+                                    ? 'rgba(255,255,255,0.08)'
+                                    : 'rgba(20,22,30,0.05)',
+                                  fontSize: 9,
+                                  fontWeight: 650,
+                                }}
+                              >
+                                {nodeCityParts(server.name).codename}
+                              </span>
+                            )}
+                            {server.selected && (
+                              <span
+                                style={{
+                                  flexShrink: 0,
+                                  padding: '3px 6px',
+                                  borderRadius: 999,
+                                  color: TONO_COLORS.connected,
+                                  background: hex(TONO_COLORS.connected, 0.13),
+                                  fontSize: 9,
+                                  fontWeight: 750,
+                                  letterSpacing: 0.6,
+                                }}
+                              >
+                                {t('tono.servers.selected')}
+                              </span>
+                            )}
+                            {isSwitchingCard ? (
+                              <span
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 6,
+                                  flexShrink: 0,
+                                  padding: '6px 8px',
+                                  borderRadius: 999,
+                                  color: TONO_COLORS.accent,
+                                  background: hex(TONO_COLORS.accent, 0.11),
+                                  fontSize: 11,
+                                  fontWeight: 650,
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                <span
+                                  aria-hidden
+                                  className="tono-spin"
+                                  style={{
+                                    width: 12,
+                                    height: 12,
+                                    borderRadius: '50%',
+                                    border: `1.5px solid ${hex(TONO_COLORS.accent, 0.35)}`,
+                                    borderTopColor: TONO_COLORS.accent,
+                                    flexShrink: 0,
+                                  }}
+                                />
+                                {t('tono.dashboard.status.connecting')}
+                              </span>
+                            ) : (
+                              <span
+                                key={latencyText}
+                                // Pop only when a result from this session
+                                // lands; cached values must not all pop on
+                                // first paint.
+                                className={
+                                  endpointLatency !== undefined ||
+                                  endpointFailure !== undefined ||
+                                  currentExitTest?.name === server.name
+                                    ? 'tono-value-pop'
+                                    : undefined
+                                }
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 6,
+                                  flexShrink: 0,
+                                  padding: '6px 8px',
+                                  borderRadius: 999,
+                                  color: latencyTone,
+                                  background: latencyHasTone
+                                    ? hex(latencyTone, 0.11)
+                                    : dark
+                                      ? 'rgba(255,255,255,0.06)'
+                                      : 'rgba(56,72,108,0.06)',
+                                  fontSize: 11,
+                                  fontWeight: 650,
+                                  fontFamily: TONO_MONO_STACK,
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                <span
+                                  aria-hidden
+                                  style={{
+                                    width: 6,
+                                    height: 6,
+                                    borderRadius: '50%',
+                                    background: latencyTone,
+                                    boxShadow: latencyHasTone
+                                      ? `0 0 0 3px ${hex(latencyTone, 0.1)}`
+                                      : 'none',
+                                  }}
+                                />
+                                {latencyText}
+                              </span>
+                            )}
+                          </span>
+                          <span
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              minWidth: 0,
+                              paddingLeft: 56,
+                              color: text.tertiary,
+                              fontSize: 10,
+                              fontWeight: 600,
+                            }}
+                          >
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
                                 flexShrink: 0,
-                                padding: '2px 6px',
+                                letterSpacing: 0.4,
+                              }}
+                            >
+                              <TonoIcon name="globe" size={10} />
+                              {nodeCode(server.name)}
+                            </span>
+                            <span
+                              style={{
+                                padding: '3px 6px',
                                 borderRadius: 999,
                                 color: text.secondary,
                                 background: dark
                                   ? 'rgba(255,255,255,0.08)'
-                                  : 'rgba(20,22,30,0.05)',
-                                fontSize: 9,
-                                fontWeight: 650,
+                                  : 'rgba(235,240,250,0.86)',
+                                letterSpacing: 0.2,
                               }}
                             >
-                              {nodeCityParts(server.name).codename}
+                              {t(nodeProtocolKey(server.name))}
                             </span>
-                          )}
-                          {server.selected && (
-                            <span
-                              style={{
-                                flexShrink: 0,
-                                padding: '3px 6px',
-                                borderRadius: 999,
-                                color: TONO_COLORS.connected,
-                                background: hex(TONO_COLORS.connected, 0.13),
-                                fontSize: 9,
-                                fontWeight: 750,
-                                letterSpacing: 0.6,
-                              }}
-                            >
-                              {t('tono.servers.selected')}
-                            </span>
-                          )}
-                          {isSwitchingCard ? (
-                            <span
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 6,
-                                flexShrink: 0,
-                                padding: '6px 8px',
-                                borderRadius: 999,
-                                color: TONO_COLORS.accent,
-                                background: hex(TONO_COLORS.accent, 0.11),
-                                fontSize: 11,
-                                fontWeight: 650,
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              <span
-                                aria-hidden
-                                className="tono-spin"
-                                style={{
-                                  width: 12,
-                                  height: 12,
-                                  borderRadius: '50%',
-                                  border: `1.5px solid ${hex(TONO_COLORS.accent, 0.35)}`,
-                                  borderTopColor: TONO_COLORS.accent,
-                                  flexShrink: 0,
-                                }}
-                              />
-                              {t('tono.dashboard.status.connecting')}
-                            </span>
-                          ) : (
-                            <span
-                              key={latencyText}
-                              // Pop only when a result from this session
-                              // lands; cached values must not all pop on
-                              // first paint.
-                              className={
-                                endpointLatency !== undefined ||
-                                endpointFailure !== undefined ||
-                                currentExitTest?.name === server.name
-                                  ? 'tono-value-pop'
-                                  : undefined
-                              }
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 6,
-                                flexShrink: 0,
-                                padding: '6px 8px',
-                                borderRadius: 999,
-                                color: latencyTone,
-                                background: latencyHasTone
-                                  ? hex(latencyTone, 0.11)
-                                  : dark
-                                    ? 'rgba(255,255,255,0.06)'
-                                    : 'rgba(56,72,108,0.06)',
-                                fontSize: 11,
-                                fontWeight: 650,
-                                fontFamily: TONO_MONO_STACK,
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              <span
-                                aria-hidden
-                                style={{
-                                  width: 6,
-                                  height: 6,
-                                  borderRadius: '50%',
-                                  background: latencyTone,
-                                  boxShadow: latencyHasTone
-                                    ? `0 0 0 3px ${hex(latencyTone, 0.1)}`
-                                    : 'none',
-                                }}
-                              />
-                              {latencyText}
-                            </span>
-                          )}
+                          </span>
                         </span>
                         <span
                           style={{
                             display: 'flex',
                             alignItems: 'center',
-                            gap: 6,
-                            minWidth: 0,
-                            paddingLeft: 56,
-                            color: text.tertiary,
+                            justifyContent: 'space-between',
+                            gap: 8,
+                            paddingTop: 10,
+                            borderTop: `1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(56,72,108,0.08)'}`,
+                            color: server.selected
+                              ? TONO_COLORS.connected
+                              : text.tertiary,
                             fontSize: 10,
                             fontWeight: 600,
                           }}
@@ -1029,94 +1245,97 @@ const ServersPage = () => {
                             style={{
                               display: 'inline-flex',
                               alignItems: 'center',
-                              gap: 4,
-                              flexShrink: 0,
-                              letterSpacing: 0.4,
+                              gap: 6,
                             }}
                           >
-                            <TonoIcon name="globe" size={10} />
-                            {nodeCode(server.name)}
+                            <span
+                              aria-hidden
+                              style={{
+                                width: 6,
+                                height: 6,
+                                borderRadius: '50%',
+                                background: server.selected
+                                  ? TONO_COLORS.connected
+                                  : available
+                                    ? TONO_COLORS.accent
+                                    : text.tertiary,
+                                opacity: available ? 1 : 0.55,
+                              }}
+                            />
+                            {cardStatus}
                           </span>
-                          <span
-                            style={{
-                              padding: '3px 6px',
-                              borderRadius: 999,
-                              color: text.secondary,
-                              background: dark
-                                ? 'rgba(255,255,255,0.08)'
-                                : 'rgba(235,240,250,0.86)',
-                              letterSpacing: 0.2,
-                            }}
-                          >
-                            {t(nodeProtocolKey(server.name))}
-                          </span>
+                          {server.selected ? (
+                            <span
+                              aria-hidden
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                width: 20,
+                                height: 20,
+                                borderRadius: '50%',
+                                color: '#FFFFFF',
+                                background: TONO_COLORS.connected,
+                              }}
+                            >
+                              <TonoIcon
+                                name="check"
+                                size={12}
+                                strokeWidth={2.2}
+                              />
+                            </span>
+                          ) : (
+                            <span aria-hidden style={{ color: text.tertiary }}>
+                              <TonoIcon name="chevronRight" size={14} />
+                            </span>
+                          )}
                         </span>
-                      </span>
-                      <span
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: 8,
-                          paddingTop: 10,
-                          borderTop: `1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(56,72,108,0.08)'}`,
-                          color: server.selected
-                            ? TONO_COLORS.connected
-                            : text.tertiary,
-                          fontSize: 10,
-                          fontWeight: 600,
-                        }}
-                      >
-                        <span
+                      </button>
+                      {available && preferences && (
+                        <button
+                          type="button"
+                          className="tono-link"
+                          aria-pressed={favorite}
+                          aria-label={t(
+                            favorite
+                              ? 'tono.routes.removeFavorite'
+                              : 'tono.routes.addFavorite',
+                            { name: cityTitle },
+                          )}
+                          disabled={
+                            !preferences ||
+                            savingPreferences ||
+                            (!favorite &&
+                              preferences.favorites.length >= MAX_FAVORITES)
+                          }
+                          onClick={() => {
+                            if (!preferences) return
+                            const base = catalogBaseName(server.name)
+                            void savePreferences(
+                              favorite
+                                ? preferences.favorites.filter(
+                                    (name) => name !== base,
+                                  )
+                                : [...preferences.favorites, base],
+                              preferences.fixedRegion,
+                            )
+                          }}
                           style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 6,
+                            alignSelf: 'flex-start',
+                            margin: '0 16px 10px',
+                            padding: '4px 0',
+                            color: favorite
+                              ? TONO_COLORS.accent
+                              : text.secondary,
+                            fontSize: 11,
                           }}
                         >
-                          <span
-                            aria-hidden
-                            style={{
-                              width: 6,
-                              height: 6,
-                              borderRadius: '50%',
-                              background: server.selected
-                                ? TONO_COLORS.connected
-                                : available
-                                  ? TONO_COLORS.accent
-                                  : text.tertiary,
-                              opacity: available ? 1 : 0.55,
-                            }}
-                          />
-                          {cardStatus}
-                        </span>
-                        {server.selected ? (
-                          <span
-                            aria-hidden
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              width: 20,
-                              height: 20,
-                              borderRadius: '50%',
-                              color: '#FFFFFF',
-                              background: TONO_COLORS.connected,
-                            }}
-                          >
-                            <TonoIcon
-                              name="check"
-                              size={12}
-                              strokeWidth={2.2}
-                            />
-                          </span>
-                        ) : (
-                          <span aria-hidden style={{ color: text.tertiary }}>
-                            <TonoIcon name="chevronRight" size={14} />
-                          </span>
-                        )}
-                      </span>
-                    </button>
+                          {t(
+                            favorite ? 'tono.routes.saved' : 'tono.routes.save',
+                          )}
+                        </button>
+                      )}
+                    </div>
                   )
                 })}
               </div>

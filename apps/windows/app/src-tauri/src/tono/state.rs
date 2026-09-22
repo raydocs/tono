@@ -451,6 +451,8 @@ impl TonoInner {
 pub struct TonoState {
     inner: tokio::sync::Mutex<TonoInner>,
     audit: Arc<crate::tono::audit::Audit>,
+    /// One frozen, account-owned manual upload preview. Never persisted or sent automatically.
+    pub(crate) support_reports: parking_lot::Mutex<crate::tono::support_reports::SupportReports>,
     /// Per-route byte ledger, locked independently of `inner` so the sampler
     /// and the telemetry uploader never need the product mutex to ingest or
     /// read a delta.
@@ -569,6 +571,7 @@ impl TonoState {
                 tasks: TaskRegistry::default(),
             }),
             audit,
+            support_reports: parking_lot::Mutex::new(Default::default()),
             route_ledger: parking_lot::Mutex::new(crate::tono::route_ledger::RouteLedger::default()),
             catalog_sync_operation: tokio::sync::Mutex::new(()),
             release_operation: tokio::sync::Mutex::new(None),

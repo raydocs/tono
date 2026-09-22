@@ -118,6 +118,8 @@ extension AppState {
             },
             perform: { [weak self, coreRuntime] attemptID, generation in
                 guard let self else { return }
+                let routeOwner = ManagedExitCatalogOwnership.currentAccount
+                let routeCatalogDigest = self.managedCatalogDigest
                 let port = self.config.mixedPort
                 let selectedExit = self.preferManagedCatalogExitForConnect()
                 let selectedExitName = selectedExit?.name ?? ConfigPipeline.homeNodeName
@@ -443,6 +445,8 @@ extension AppState {
                 // round trip and could interrupt a healthy first connection.
                 let committed = await self.onCoreStarted(api: api)
                 guard committed else { return }
+                self.recordVerifiedRouteSuccess(selectedExitName, owner: routeOwner, generation: generation,
+                                                catalogDigest: routeCatalogDigest)
                 // Pins are for the *next* fail-closed window, not this
                 // Connected commit. Resolving them here used to hold the UI
                 // on Connecting after the real TUN path was already proven.
@@ -478,6 +482,7 @@ extension AppState {
                 // The serialized disconnect sequence runs after any in-flight
                 // helper operation, so a late arm/start cannot win the race.
                 if Task.isCancelled { return }
+                self.retireFailedRouteSuccess(selectedExitName, owner: routeOwner, generation: generation)
                 let failedStage = self.connectionStage
                 let failedAt = Date()
                 let totalDuration = self.connectionStartedAt.map {
@@ -858,6 +863,7 @@ extension AppState {
                     self.isProtectionBlocked = transitionLeavesProtectionBlocked
                     if releaseKillSwitch, !transitionLeavesProtectionBlocked {
                         self.protectedDNSService = nil
+                        self.recoveryCause = nil
                     }
                     if let transitionError {
                         self.errorMessage = transitionError
@@ -1193,6 +1199,7 @@ extension AppState {
                               self.connectionCoordinator.protectionOperationGeneration == observedGeneration
                         else { return }
                         guard primaryService == service else {
+                            self.recoveryCause = .networkChange
                             self.disconnect(releaseKillSwitch: false)
                             self.errorMessage = String(
                                 localized: "The active network changed; Kill Switch is blocking traffic while Tono protects the new connection."
@@ -1639,6 +1646,7 @@ extension AppState {
 
     private func acceptConfirmedExternalProtectionRelease() {
         self.connectionCoordinator.bumpGeneration()
+        recoveryCause = nil
         KillSwitchService.isArmed = false
         KillSwitchService.needsSessionExceptionReassert = false
         self.connectionCoordinator.protectedReconnectTask?.cancel()

@@ -96,6 +96,8 @@ export interface TonoStatus {
   killSwitch: TonoKillSwitch | null
   catalogRevision: number | null
   catalogRequiresChoice: boolean
+  /** Opaque, process-local account scope for preferences; never an account ID. */
+  routePreferenceScope?: string | null
   /** Monotonic owner token for the current managed controller endpoint. */
   controllerGeneration: number
   exitIp?: string | null
@@ -201,6 +203,7 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
     prefix: 'TONO_DIAG_UNAVAILABLE',
     key: 'tono.progress.upload.errors.unavailable',
   },
+  { prefix: 'TONO_DIAG_PREVIEW_EXPIRED', key: 'tono.experience.prepareFailed' },
   { prefix: 'TONO_DIAG_FAILED', key: 'tono.progress.upload.errors.failed' },
 ]
 
@@ -417,8 +420,43 @@ export const tonoCatalogStatus = () =>
 export const tonoRefreshCatalog = () =>
   call<TonoCatalogStatus>('tono_refresh_catalog')
 
-export const tonoSelectServer = (name: string) =>
-  call<void>('tono_select_server', { name })
+export const tonoSelectServer = (
+  name: string,
+  expectation?: { scope: string; catalogRevision: number },
+) =>
+  call<void>('tono_select_server', {
+    name,
+    ...(expectation
+      ? {
+          expectedScope: expectation.scope,
+          expectedCatalogRevision: expectation.catalogRevision,
+        }
+      : {}),
+  })
+
+export interface TonoRoutePreferences {
+  scope: string
+  catalogRevision: number
+  favorites: string[]
+  recent: { name: string; revision: number; verifiedAtMs: number }[]
+  fixedRegion: string | null
+}
+
+export const tonoRoutePreferences = () =>
+  call<TonoRoutePreferences>('tono_route_preferences')
+
+export const tonoUpdateRoutePreferences = (
+  scope: string,
+  catalogRevision: number,
+  favorites: string[],
+  fixedRegion: string | null,
+) =>
+  call<TonoRoutePreferences>('tono_update_route_preferences', {
+    scope,
+    catalogRevision,
+    favorites,
+    fixedRegion,
+  })
 
 export const tonoTestCurrentServer = () =>
   call<number>('tono_test_current_server')
@@ -518,7 +556,7 @@ export const formatTonoElapsed = (ms: number) =>
 // is the single definition of the upload payload — see the wire-shape comment
 // above it. The whole struct is a hand-written whitelist assembled in Rust;
 // the WebView never contributes a field, and it never posts the report itself
-// (`tono_upload_diagnostics` rebuilds it backend-side before sending).
+// (`tono_prepare_support_report` freezes it backend-side before confirmation).
 
 export interface TonoDiagnosticsStep {
   key: string
@@ -562,11 +600,19 @@ export interface TonoDiagnosticsReceipt {
   receivedAt: number | null
 }
 
-/** Local Copy details only. Not part of the cloud diagnostics contract. */
+/** Local health check / Copy details only. Not part of the cloud diagnostics contract. */
 export interface TonoLocalDiagnosticsReport extends TonoDiagnosticsReport {
   localEvidence?: {
     status: 'collected'
     appBuild?: string | null
+    buildProvenance?:
+      | 'candidate'
+      | 'release-workflow'
+      | 'development'
+      | 'unknown'
+    accountScope?: string | null
+    protectionLive?: boolean | null
+    protectionWanted?: boolean | null
     expectedCoreVersion?: string | null
     reportedCoreVersion?: string | null
     reportedExitProtocol?: string | null
@@ -613,14 +659,23 @@ export const tonoLocalDiagnosticsReport = () =>
 export const tonoDiagnosticsReport = () =>
   call<TonoDiagnosticsReport>('tono_diagnostics_report')
 
+export interface TonoPreparedSupportReport {
+  previewId: string
+  report: TonoDiagnosticsReport
+}
+
+/** Freeze one account-owned schema-v1 body for local review; no upload. */
+export const tonoPrepareSupportReport = () =>
+  call<TonoPreparedSupportReport>('tono_prepare_support_report')
+
 /**
  * Upload one report and return its support reference code.
  *
  * Only ever called from an explicit user confirmation. There is no automatic,
  * silent, or on-crash caller, by design — this is a VPN.
  */
-export const tonoUploadDiagnostics = () =>
-  call<TonoDiagnosticsReceipt>('tono_upload_diagnostics')
+export const tonoUploadDiagnostics = (previewId: string) =>
+  call<TonoDiagnosticsReceipt>('tono_upload_diagnostics', { previewId })
 
 /**
  * Render a report as the plain text "Copy details" puts on the clipboard.
@@ -684,6 +739,7 @@ export const formatTonoDiagnostics = (
       ? [
           'Local evidence (Copy details only; not included in cloud upload):',
           `App build: ${local.appBuild ?? '(unknown)'}`,
+          `Build provenance: ${local.buildProvenance ?? 'unknown'}; not proof of customer-channel publication`,
           `Bundled Core expectation: ${local.expectedCoreVersion ?? '(unknown)'}`,
           `Controller-reported Core version: ${local.reportedCoreVersion ?? '(unavailable; not verified)'}`,
           `Controller-selected exit protocol: ${local.reportedExitProtocol ?? '(unavailable; not verified)'}; not proof of handshake`,
@@ -701,16 +757,22 @@ export const formatTonoDiagnostics = (
                 `Attempt failure: ${local.lastFailedAttempt.failedStage ?? '(unknown)'}; code=${local.lastFailedAttempt.errorCode ?? '(none)'}`,
                 `Attempt generation (process-local): ${local.lastFailedAttempt.connectionGeneration ?? '(unknown)'}`,
                 `Attempt cause (scrubbed): ${local.lastFailedAttempt.errorDetail ?? '(not captured)'}`,
-                ...local.lastFailedAttempt.steps.map(step =>
-                  `  - ${step.key}: ${step.state}${step.elapsedMs == null ? '' : ` (${formatTonoElapsed(step.elapsedMs)})`}`),
+                ...local.lastFailedAttempt.steps.map(
+                  (step) =>
+                    `  - ${step.key}: ${step.state}${step.elapsedMs == null ? '' : ` (${formatTonoElapsed(step.elapsedMs)})`}`,
+                ),
                 'Completed probes: App observations, not proof of exit transport handshake failure. Missing entries may be unstarted, cancelled or unavailable.',
-                ...(local.lastFailedAttempt.probeOutcomes ?? []).map(probe =>
-                  `  - round=${probe.round} path=${probe.path} origin=${probe.origin} result=${probe.passed ? 'passed' : 'failed'} category=${probe.category} status=${probe.actualStatus ?? 'unknown'} elapsed=${probe.elapsedMs}ms`),
+                ...(local.lastFailedAttempt.probeOutcomes ?? []).map(
+                  (probe) =>
+                    `  - round=${probe.round} path=${probe.path} origin=${probe.origin} result=${probe.passed ? 'passed' : 'failed'} category=${probe.category} status=${probe.actualStatus ?? 'unknown'} elapsed=${probe.elapsedMs}ms`,
+                ),
               ]
             : ['Retained failed attempt: (none captured)']),
           'Recent Core log: not correlated to this attempt; not a root-cause diagnosis',
           `Core log status: ${local.coreLog.status}; inspected lines=${local.coreLog.inspectedLines}; truncated=${local.coreLog.truncated}`,
-          ...local.coreLog.observations.map(({ code, count }) => `  - ${code}: ${count}`),
+          ...local.coreLog.observations.map(
+            ({ code, count }) => `  - ${code}: ${count}`,
+          ),
           'No matched observation does not prove a healthy Core. Raw logs, destinations and credentials are omitted.',
         ]
       : []),

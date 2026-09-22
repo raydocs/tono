@@ -125,6 +125,8 @@ final class AppState {
     }
     var isProxyDegraded: Bool = false
     var isRecoveringProtectedConnection: Bool = false
+    /// Presentation context only; ConnectionCoordinator still owns all work.
+    var recoveryCause: RecoveryCause?
     var lastClassifiedFailure: ProtectedFailure?
     var healthCounters = ProtectedHealthCounters()
     var tonoTransport: TonoTransportDescriptor? = nil
@@ -144,6 +146,7 @@ final class AppState {
     // Proxies
     var proxyRegions: [ProxyRegion] = []
     var selectedNodeId: String? = nil
+    var routePreferences = LocalRoutePreferences()
 
     // Rules
     var rules: [RuleItem] = []
@@ -331,6 +334,7 @@ final class AppState {
                 "protected_reconnect_network_kick",
                 details: auditProtectionDetails()
             )
+            recoveryCause = .networkChange
             scheduleProtectedReconnect(immediate: true)
             return
         }
@@ -374,6 +378,7 @@ final class AppState {
                 "system_network_change_requires_reconnect",
                 details: self.auditProtectionDetails()
             )
+            self.recoveryCause = .networkChange
             self.disconnect(releaseKillSwitch: false)
             self.errorMessage = String(
                 localized: "The active network changed; Kill Switch is blocking traffic while Tono protects the new connection."
@@ -500,6 +505,7 @@ final class AppState {
             details: auditProtectionDetails()
         )
         guard shouldResume else { return }
+        recoveryCause = .wake
         connectionCoordinator.bumpGeneration()
         connectionCoordinator.networkEnvironmentTask?.cancel()
         connectionCoordinator.networkEnvironmentTask = nil
@@ -1322,7 +1328,14 @@ final class AppState {
         controllerTask: Task<ProbeCheck, Never>? = nil,
         mixedPort: Int,
         generation: UInt64,
-        rounds: Int
+        rounds: Int,
+        // I/O seam only: tests hold the origin race, not classification,
+        // generation checks, catalog publication or history insertion.
+        raceProbes: @MainActor (Int, Int?, String?) async -> OriginRace = { timeout, proxyPort, preferred in
+            await ProtectedConnectivityVerifier.raceSystemTUNProbes(
+                timeoutSeconds: timeout, mixedProxyPort: proxyPort, preferredLabel: preferred
+            )
+        }
     ) async -> ConnectivityVerdict {
         var lastFailure: ProtectedFailure?
         for round in 1...max(1, rounds) {
@@ -1351,20 +1364,14 @@ final class AppState {
                 )
             }
             let includeMixed = round == max(1, rounds)
-            let race = await ProtectedConnectivityVerifier.raceSystemTUNProbes(
-                timeoutSeconds: 12,
-                preferredLabel: lastSuccessfulProbeOrigin
-            )
+            let race = await raceProbes(12, nil, lastSuccessfulProbeOrigin)
             if case .won(let label) = race {
                 lastSuccessfulProbeOrigin = label
             }
             let tun = race.tunCheck
             let mixed: ProbeCheck?
             if includeMixed, case .failed = tun {
-                switch await ProtectedConnectivityVerifier.raceSystemTUNProbes(
-                    timeoutSeconds: 8,
-                    mixedProxyPort: mixedPort
-                ) {
+                switch await raceProbes(8, mixedPort, nil) {
                 case .won:
                     mixed = .ok
                 case .lost(let probes):
@@ -2070,7 +2077,11 @@ final class AppState {
                 ? "Direct"
                 : conn.chains.joined(separator: " → "),
             uploadText: formatBytes(conn.upload),
-            downloadText: formatBytes(conn.download)
+            downloadText: formatBytes(conn.download),
+            routingExplanation: ActivityRouteExplanation(
+                connection: conn, catalog: managedCatalogNodes,
+                residentialTerminal: residentialRouteAuditContext?.admittedTerminal
+            )
         )
     }
 
