@@ -21,7 +21,8 @@ Use the execution guide's dated status, not old handoff machine assignments.
 |---|---|
 | [architecture.md](architecture.md) | System map, deployables, macOS / Windows code map |
 | [SHIP_PLAN.md](SHIP_PLAN.md) | Customer 0.0.73 — four gates before any update-channel publish |
-| [UPDATE_PROTOCOL_V1.md](UPDATE_PROTOCOL_V1.md) | Shared macOS/Windows update contract and conformance; inactive until privileged adapters qualify |
+| [UPDATE_PROTOCOL_V1.md](UPDATE_PROTOCOL_V1.md) | Shared macOS/Windows update wire values and conformance, not installation acceptance |
+| [UPDATE_INTEGRATION_V1.md](UPDATE_INTEGRATION_V1.md) | Native protected-update ownership, detached transport, paired packaging and G3 evidence boundaries |
 | [RELEASE_LINES.md](RELEASE_LINES.md) | `release/macos`, `release/windows`, `main`; tag formats |
 | [ui-design-system.md](ui-design-system.md) | Shared visual tokens for both clients |
 | [desktop-clarity.md](desktop-clarity.md) | Welcome / login / content-layer clarity |

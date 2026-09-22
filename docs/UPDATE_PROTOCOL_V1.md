@@ -1,17 +1,19 @@
-# Tono Update Protocol v1 — shared, inactive contract
+# Tono Update Protocol v1 — shared desktop contract
 
 Scope: [#26](https://github.com/raydocs/tono/issues/26), SHIP_PLAN G3.
 The owner requested one macOS/Windows product update protocol and can manually
-replace legacy clients. This is the first implementation slice: the same release
-manifest/receipt shape and pure progress guard in Swift and Rust, with shared
-conformance inputs. **Neither platform's updater uses it yet.** No migration,
-signature verifier, new IPC capability, privileged receipt store or installer
-handoff is implemented here. Product version remains 0.0.73.
+replace legacy clients. This document specifies the common release manifest,
+receipt shape and pure progress guard in Swift and Rust, with shared conformance
+inputs. Native callers, signature verification, private stores and replacement
+executors belong to [UPDATE_INTEGRATION_V1.md](UPDATE_INTEGRATION_V1.md). Shared
+conformance is not native installation or release acceptance. Product version
+remains 0.0.73.
 
-The protocol version is independent of macOS Helper 4.4.0 and Windows IPC 2.15.
-Those local versions must change with their respective future adapters; they do
-not need the same number. Existing user journals remain diagnostics, never input
-to a trusted v1 receipt migration. No protected legacy bridge is planned.
+The protocol version is independent of the macOS Helper and Windows Service IPC
+capability versions. Those local versions change with their native adapters;
+they do not need the same number. Existing user journals remain diagnostics,
+never input to a trusted v1 receipt migration. No protected legacy bridge is
+planned.
 
 ## One wire shape, not two similar phase names
 
@@ -55,9 +57,10 @@ is a label, **not** a downgrade comparator or installed-identity proof.
 
 One release/build binds both targets, but their bytes, native signing identities,
 installers and OS verification remain distinct. There are no URLs, arbitrary
-paths, keys or signature-trust booleans in this model. The future signed envelope
-must cover these **exact manifest bytes** with a platform-scoped pinned verifier
-and protect against downgrade/replay. No signing keys are combined here.
+paths, keys or signature-trust booleans in this model. Detached signatures cover
+these **exact manifest bytes** with platform-scoped pinned verifiers; native
+admission must also protect against downgrade/replay. No signing keys are
+combined here.
 Component digests describe expected executable bytes; native verification must
 also check the macOS code signature/bundle or compiled Windows publisher policy,
 protected installed location, dependencies and authenticated execution identity.
@@ -76,7 +79,7 @@ packaging boundaries are specified in [UPDATE_INTEGRATION_V1.md](UPDATE_INTEGRAT
 | Key | Shape / binding |
 |---|---|
 | `kind`, `protocolVersion` | `tonoUpdateReceipt`, integer `1` |
-| `attemptId` | 64 lowercase hex; future coordinator-generated random 256-bit identifier, not a bearer credential |
+| `attemptId` | 64 lowercase hex; coordinator-generated random 256-bit identifier, not a bearer credential |
 | `owner` | At most 128 identifier bytes; native adapter's authenticated principal key, not an email or App claim |
 | `initiatingGeneration` | Coordinator-admitted initiating session incarnation |
 | `installedLocationSha256` | Native adapter's independently validated registered installation identity digest, not an App-supplied path hash |
@@ -88,11 +91,11 @@ packaging boundaries are specified in [UPDATE_INTEGRATION_V1.md](UPDATE_INTEGRAT
 | `blockedReason` | Optional `preparationFailed`, `installationUncertain`, `recoveryFailed`, `cancelled` |
 
 The principal/location derivation recipes, native session incarnation mapping
-and cross-restart monotonic generation allocation belong to the future adapters
-and must be specified/tested before activation. A local App generation counter
-that resets at startup is not this ownership proof. Receipt expiry or a clock
-rollback refuses further grants without erasing the last durable record or
-releasing protection. Expiry is **not** proof that installation did not happen.
+and cross-restart monotonic generation allocation belong to the native adapters,
+not the wire decoder. A local App generation counter that resets at startup is
+not this ownership proof. Receipt expiry or a clock rollback refuses further
+grants without erasing the last durable record or releasing protection. Expiry
+is **not** proof that installation did not happen.
 
 ## Authorization and installation facts are different
 
@@ -167,17 +170,17 @@ Run the existing hosted lanes, not MacBook compilation or a toolchain downgrade:
 Changes to either implementation/test or shared fixtures trigger both existing
 native workflows. No new runner, privileged secret, dependency or manual dispatch.
 
-## Remaining implementation gates — #26 stays open
+## Native acceptance gates — #26 stays open
 
-1. **Windows:** signed-input verification, private immutable staging, authenticated
-   Service store with cross-process atomicity, exact installer-bound consumption
-   **before** live/repair-resource mutation, authenticated successor adoption.
-   No broad user-journal scan is an authority source.
-2. **macOS:** root Helper authentication/persistence and replacement continuity;
-   trustworthy binding to the actual Sparkle-consumed input. If public APIs cannot
-   establish it, protected automatic upgrade remains unsupported; hashing another
-   download or blessing an App callback is not a workaround. No Sparkle fork or
-   production UI change is implied by this contract.
+1. **Windows:** verify private signed inputs, Service-owned cross-process durable
+   admission and consumption **before** live/repair-resource mutation, independent
+   executor recovery, and authenticated successor adoption. No broad user-journal
+   scan is an authority source.
+2. **macOS:** verify root Helper authentication/persistence, private full-bundle
+   staging, independent executor continuity and successor recovery. The native
+   integration uses a Tono-owned installer, not Sparkle installation or a private
+   Sparkle hook. Hashing another download or blessing an App callback is not
+   package or execution identity.
 3. **Both:** crash/write-failure injection at every persisted owner boundary,
    cancellation/Disconnect/reboot/rollback and expired attempts, then authorized
    installed-device PF/WFP/DNS/packet evidence. Signing and customer update-channel
@@ -186,4 +189,4 @@ native workflows. No new runner, privileged secret, dependency or manual dispatc
 Manual replacement of legacy clients does not authorize automatically disarming
 unknown protection. New adapters must refuse unsupported protected handoffs;
 normal verified Disconnect/manual installation is the migration route. Do not
-promote customer feeds or call this inactive foundation a stable update rollout.
+promote customer feeds or call source integration a stable update rollout.
