@@ -1253,15 +1253,32 @@ fn update_handoff_journal_paths(
     Ok(paths)
 }
 
+#[cfg(windows)]
+fn update_handoff_users_root(system_drive: Option<&std::ffi::OsStr>) -> std::io::Result<PathBuf> {
+    use std::path::{Component, Prefix};
+
+    let system_drive = system_drive.ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "SystemDrive unavailable for journal discovery")
+    })?;
+    let drive = Path::new(system_drive);
+    let mut components = drive.components();
+    if !matches!(components.next(), Some(Component::Prefix(prefix)) if matches!(prefix.kind(), Prefix::Disk(_)))
+        || components.next().is_some()
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "SystemDrive must be a drive letter for journal discovery",
+        ));
+    }
+    // SystemDrive is normally C:, not C:\. A bare Users suffix would resolve
+    // relative to the installer's current directory on that drive (C:Users).
+    Ok(drive.join(r"\Users"))
+}
+
 #[cfg_attr(not(windows), allow(dead_code))]
 fn record_install_started_for_installed_app(app_target: &Path) -> std::io::Result<()> {
     #[cfg(windows)]
-    let users_root = Some(
-        PathBuf::from(std::env::var_os("SystemDrive").ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::NotFound, "SystemDrive unavailable for journal discovery")
-        })?)
-        .join("Users"),
-    );
+    let users_root = Some(update_handoff_users_root(std::env::var_os("SystemDrive").as_deref())?);
     #[cfg(not(windows))]
     let users_root: Option<PathBuf> = None;
     let paths = update_handoff_journal_paths(Some(app_target), users_root.as_deref())?;
@@ -2099,6 +2116,28 @@ mod tests {
                 .join("com.raydocs.tono")
                 .join("update-handoff.json")
         ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn journal_discovery_uses_an_absolute_system_drive_root() {
+        use std::ffi::OsStr;
+        use std::io::ErrorKind;
+
+        // Not C: a hard-coded fallback must not silently scan another drive.
+        // An absolute result cannot change with the installer's working directory.
+        let users = update_handoff_users_root(Some(OsStr::new("D:"))).unwrap();
+        assert_eq!(users, PathBuf::from(r"D:\Users"));
+        assert!(users.is_absolute());
+        assert_eq!(update_handoff_users_root(None).unwrap_err().kind(), ErrorKind::NotFound);
+        assert_eq!(
+            update_handoff_users_root(Some(OsStr::new("D:relative"))).unwrap_err().kind(),
+            ErrorKind::InvalidInput,
+        );
+        assert_eq!(
+            update_handoff_users_root(Some(OsStr::new(r"\\server\share"))).unwrap_err().kind(),
+            ErrorKind::InvalidInput,
+        );
     }
 
     #[test]
