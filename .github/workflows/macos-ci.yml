@@ -94,9 +94,21 @@ jobs:
             -project apps/macos/Tono.xcodeproj \
             -scheme Tono \
             -configuration Debug \
+            -resultBundlePath apps/macos/test-results/TonoTests.xcresult \
             CODE_SIGNING_ALLOWED=NO \
             ENABLE_USER_SCRIPT_SANDBOXING=NO \
             test
+
+      - name: Preserve native test results and render attachments
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: tono-macos-tests-${{ github.sha }}
+          path: |
+            apps/macos/test-results/TonoTests.xcresult
+            apps/macos/test-results/renders/*.png
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Check actual Swift runtime bytes with fixed core and helper
         run: |

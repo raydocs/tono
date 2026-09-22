@@ -2,6 +2,676 @@
   "sourceLanguage": "en",
   "strings": {
     "": {},
+    "Account": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "账户"
+          }
+        }
+      }
+    },
+    "Account is ready locally. Server entitlement was not rechecked.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本机账户状态已就绪，未向服务器重新核实使用权限。"
+          }
+        }
+      }
+    },
+    "Build and runtime identity": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "构建与运行身份"
+          }
+        }
+      }
+    },
+    "Catalog choice only: no recent successful route in this catalog. Reachability is unknown; no background test or switch was performed.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅依据当前目录选择：此目录没有近期成功连接记录。可达性未知，未进行后台测试或切换。"
+          }
+        }
+      }
+    },
+    "Check this Mac": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "检查这台 Mac"
+          }
+        }
+      }
+    },
+    "Close": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭"
+          }
+        }
+      }
+    },
+    "Connect using this route?": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用这条线路连接？"
+          }
+        }
+      }
+    },
+    "Connection": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连接"
+          }
+        }
+      }
+    },
+    "Connection snapshot: %@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连接状态快照：%@"
+          }
+        }
+      }
+    },
+    "Connection state and the last attempt are local evidence, not a new reachability test. Retry only when needed; a healthy exit is left unchanged.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连接状态和上次尝试仅为本机证据，并非新的可达性测试。仅在需要时重试；正常出口保持不变。"
+          }
+        }
+      }
+    },
+    "Copy receipt and local identity": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制回执与本机身份"
+          }
+        }
+      }
+    },
+    "Core state is unknown because the helper did not answer. Open Support after helper authorization.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "辅助程序未回复，核心状态未知。完成辅助程序授权后再打开支持页面检查。"
+          }
+        }
+      }
+    },
+    "DNS ownership is unknown. Authorize the helper and check again; no resolver query was sent.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DNS 接管状态未知。请授权辅助程序后重新检查；本次未发送域名解析查询。"
+          }
+        }
+      }
+    },
+    "Debug or Release is a build configuration, not proof of a signed customer release. Source metadata describes the build checkout; matching versions do not attest running binaries.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Debug 或 Release 只是构建配置，不证明这是已签名的客户发行版。源码信息描述构建时的工作树；版本一致也不能证明运行中二进制的身份。"
+          }
+        }
+      }
+    },
+    "Device ID": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "设备 ID"
+          }
+        }
+      }
+    },
+    "Favorite": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收藏"
+          }
+        }
+      }
+    },
+    "Helper authorization is unavailable. Use a signed Tono app in Applications; choose Repair and reconnect and approve the macOS administrator prompt. This check never prompts or repairs.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "辅助程序授权不可用。请使用“应用程序”中的已签名 Tono，选择“修复并重连”并批准 macOS 管理员提示。本次检查不会请求授权或执行修复。"
+          }
+        }
+      }
+    },
+    "Last failure category: %@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次失败分类：%@"
+          }
+        }
+      }
+    },
+    "Last successful connection": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次成功连接"
+          }
+        }
+      }
+    },
+    "Local health check": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本机健康检查"
+          }
+        }
+      }
+    },
+    "Needs attention": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要处理"
+          }
+        }
+      }
+    },
+    "Network changed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "网络已变化"
+          }
+        }
+      }
+    },
+    "No account-owned catalog is available. Open Nodes and refresh the catalog.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有属于当前账户的可用目录。请打开节点页面刷新目录。"
+          }
+        }
+      }
+    },
+    "No current flow evidence. Generate traffic in the app while connected, then check Activity again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有当前流量的线路证据。连接后在该应用中产生流量，再查看活动页面。"
+          }
+        }
+      }
+    },
+    "No earlier rule matched; Tono used the default rule.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "前面的规则均未匹配，Tono 使用了默认规则。"
+          }
+        }
+      }
+    },
+    "No support receipt was received. The server may have stored the report. Try again only if you want to send this same preview again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未收到支持回执，服务器可能已经保存报告。只有确实希望再次发送同一份预览时才重试。"
+          }
+        }
+      }
+    },
+    "Observed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已观察"
+          }
+        }
+      }
+    },
+    "Observed chain · terminal first": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已观察到的链路 · 最终出口在前"
+          }
+        }
+      }
+    },
+    "Only the JSON below will be sent to Tono support under the account that collected it. It contains no raw logs, tokens, IP addresses, process names, or browsing history. Build and attempt details stay local beside the receipt.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅将下方 JSON 以收集时的账户身份发送给 Tono 支持团队。不包含原始日志、令牌、IP 地址、进程名或浏览记录。构建和尝试详情仅保留在本机回执旁。"
+          }
+        }
+      }
+    },
+    "Open Account to sign in or review the account status.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请打开账户页面登录或检查账户状态。"
+          }
+        }
+      }
+    },
+    "Preview support report": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "预览支持报告"
+          }
+        }
+      }
+    },
+    "Protected DNS is not configured. If recovery is blocked, use Retry now; this check does not reconnect.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "受保护 DNS 未配置。若恢复受阻，请选择“立即重试”；本次检查不会重连。"
+          }
+        }
+      }
+    },
+    "Protection intent is cached. Live PF rules were not rechecked because the helper status operation can repair them; this check never changes the network.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保护意图来自缓存。辅助程序的状态操作可能修复 PF，因此未重新检查实时规则；本次检查绝不改变网络。"
+          }
+        }
+      }
+    },
+    "Read-only checks. No connection, network reset, repair, or upload happens here.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "只读检查，不会发起连接、重置网络、修复或上传。"
+          }
+        }
+      }
+    },
+    "Recovery completed through the existing protected connection flow.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已通过原有的受保护连接流程完成恢复。"
+          }
+        }
+      }
+    },
+    "Recovery has not completed. Retry now uses the same protection owner; it does not reset the network or release protection.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢复尚未完成。“立即重试”仍由原有保护流程负责，不会重置网络或解除保护。"
+          }
+        }
+      }
+    },
+    "Recovery paused. Use Repair and reconnect; approve the macOS administrator prompt only from a signed Tono app. Protection has not been intentionally released.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢复已暂停。请选择“修复并重连”，仅批准已签名 Tono 发出的 macOS 管理员提示。尚未主动解除保护。"
+          }
+        }
+      }
+    },
+    "Remove favorite": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消收藏"
+          }
+        }
+      }
+    },
+    "Review recommended route": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查看推荐线路"
+          }
+        }
+      }
+    },
+    "Send this report": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "发送这份报告"
+          }
+        }
+      }
+    },
+    "Sending requires a separate confirmation and a signed-in account. Raw-log upload and remote diagnostics settings are not changed.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "发送需要单独确认并已登录账户，不会改变原始日志上传或远程诊断设置。"
+          }
+        }
+      }
+    },
+    "Succeeded within 24 hours in this catalog. Favorites rank only among recent successful routes; latency alone does not decide.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在当前目录中于 24 小时内成功连接过。收藏仅在近期成功线路之间优先，不只依据延迟决定。"
+          }
+        }
+      }
+    },
+    "Support received this report. Keep the reference code.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "支持团队已收到这份报告，请保留参考码。"
+          }
+        }
+      }
+    },
+    "The account changed. Close this preview and check again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "账户已变化，请关闭预览并重新检查。"
+          }
+        }
+      }
+    },
+    "The account or connection changed during the check. Check again for a consistent snapshot.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "检查期间账户或连接已变化。请重新检查以获取一致的快照。"
+          }
+        }
+      }
+    },
+    "The account, catalog, or connection changed. Review a fresh recommendation.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "账户、目录或连接已变化，请重新查看推荐。"
+          }
+        }
+      }
+    },
+    "The connection changed. Close this preview and check again before sending.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连接已变化。发送前请关闭预览并重新检查。"
+          }
+        }
+      }
+    },
+    "The controller reported the rule below. Its matching reason is not available.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "控制器报告了下方规则，但未提供具体匹配原因。"
+          }
+        }
+      }
+    },
+    "The helper answered. This is protocol evidence, not binary attestation.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "辅助程序已回复。这是协议响应证据，不是二进制身份认证。"
+          }
+        }
+      }
+    },
+    "The helper read back protected DNS settings. DNS resolution and browser Secure DNS were not tested.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "辅助程序已读回受保护 DNS 设置，未测试域名解析或浏览器安全 DNS。"
+          }
+        }
+      }
+    },
+    "The helper reports Core stopped. Connect only when you want protection.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "辅助程序报告核心已停止。仅在需要保护时连接。"
+          }
+        }
+      }
+    },
+    "The helper reports a running Core. Its binary build identity is unverified.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "辅助程序报告核心正在运行，其二进制构建身份尚未验证。"
+          }
+        }
+      }
+    },
+    "The reported terminal blocked this flow.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "报告中的最终出口已拦截这条连接。"
+          }
+        }
+      }
+    },
+    "The terminal route is unknown. A rule or selector name alone cannot prove the egress.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最终出口线路未知。仅凭规则或选择器名称无法证明实际出口。"
+          }
+        }
+      }
+    },
+    "This flow used a Tono cloud exit.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这条连接使用了 Tono 云端出口。"
+          }
+        }
+      }
+    },
+    "This flow used a managed direct path. It did not use the cloud exit; this does not mean all protection is off.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这条连接使用了托管直连线路，而非云端出口；这不表示所有保护都已关闭。"
+          }
+        }
+      }
+    },
+    "This flow used the configured residential terminal, not just the cloud selector.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这条连接使用了已配置的住宅最终出口，而不仅是云端选择器。"
+          }
+        }
+      }
+    },
+    "This starts a connection only after confirmation. It never switches an already connected exit.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "确认后才会开始连接，绝不会切换已经连接的出口。"
+          }
+        }
+      }
+    },
+    "Tono is recovering the protected route. No alternate exit is selected automatically. Keep the Mac awake and wait for the connection result.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 正在恢复受保护线路，不会自动选择其他出口。请保持 Mac 唤醒并等待连接结果。"
+          }
+        }
+      }
+    },
+    "Tono manages these rules. Each flow can take a different path. This shows up to eight currently reported flows; totals can include closed flows whose rule evidence is no longer available.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这些规则由 Tono 管理，同一应用的不同连接可能走不同线路。此处最多展示八条当前连接；流量总计可能包含已关闭、规则证据不再可用的连接。"
+          }
+        }
+      }
+    },
+    "Tono matched a domain rule for this destination, not every connection from the application.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 为这个目标匹配了域名规则，而非为该应用的所有连接统一分配线路。"
+          }
+        }
+      }
+    },
+    "Tono matched an address rule for this destination.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 为这个目标匹配了地址规则。"
+          }
+        }
+      }
+    },
+    "Tono matched an application rule for this flow.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 为这条连接匹配了应用规则。"
+          }
+        }
+      }
+    },
+    "Unknown": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未知"
+          }
+        }
+      }
+    },
+    "Using the accepted account catalog. Availability at the server was not rechecked.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用已接受的账户目录，未向服务器重新核实可用性。"
+          }
+        }
+      }
+    },
+    "Waking this Mac": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac 唤醒恢复"
+          }
+        }
+      }
+    },
+    "Why this route?": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "为什么走这条线路？"
+          }
+        }
+      }
+    },
     "A log upload is already in progress. Please wait for it to finish.": {
       "localizations": {
         "zh-Hans": {
