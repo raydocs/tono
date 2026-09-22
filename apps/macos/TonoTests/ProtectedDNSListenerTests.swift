@@ -37,8 +37,8 @@ final class ProtectedDNSListenerTests: XCTestCase {
             answers = await ProtectedDNSProbe.queryListener(
                 server: "127.0.0.1", port: port, timeout: 2,
                 makeConnection: { host, port in
-                    // Precisely between cancellation-handler installation and
-                    // connection registration; no scheduler/sleep race required.
+                    // Cancel at the creation/registration boundary. The old
+                    // handler saw an empty holder here and lost cancellation.
                     withUnsafeCurrentTask { task in
                         XCTAssertNotNil(task)
                         task?.cancel()
@@ -53,6 +53,53 @@ final class ProtectedDNSListenerTests: XCTestCase {
         // The old implementation's own two-second timeout bounds test cleanup.
         await pending.value
         XCTAssertEqual(answers, [])
+    }
+
+    func testListenerAcceptsReplyToItsActualUDPQuery() async throws {
+        let parameters = NWParameters.udp
+        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+        let listener = try NWListener(using: parameters)
+        let queue = DispatchQueue(label: "net.tono.tests.dns-listener")
+        let ready = expectation(description: "loopback DNS fixture is ready")
+        let sent = expectation(description: "fixture answered the actual query")
+        let reply = response()
+        listener.stateUpdateHandler = { state in
+            if case .ready = state { ready.fulfill() }
+        }
+        listener.newConnectionHandler = { connection in
+            connection.start(queue: queue)
+            connection.receiveMessage { query, _, _, error in
+                guard error == nil, let query, query.count == 33 else {
+                    XCTFail("expected one complete loopback IN A query")
+                    connection.cancel()
+                    sent.fulfill()
+                    return
+                }
+                var packet = reply
+                // The server echoes the caller's unpredictable transaction ID.
+                // The expected answer remains independently specified below.
+                packet[0] = query[query.startIndex]
+                packet[1] = query[query.startIndex + 1]
+                connection.send(content: packet, completion: .contentProcessed { error in
+                    XCTAssertNil(error)
+                    connection.cancel()
+                    sent.fulfill()
+                })
+            }
+        }
+        defer {
+            listener.stateUpdateHandler = nil
+            listener.newConnectionHandler = nil
+            listener.cancel()
+        }
+        listener.start(queue: queue)
+        await fulfillment(of: [ready], timeout: 1)
+        let port = try XCTUnwrap(listener.port)
+        let answers = await ProtectedDNSProbe.queryListener(
+            server: "127.0.0.1", port: Int(port.rawValue), timeout: 1
+        )
+        await fulfillment(of: [sent], timeout: 1)
+        XCTAssertEqual(answers, ["198.19.1.2"])
     }
 
     func testListenerReplyMustMatchSuccessfulQuestion() {
@@ -77,6 +124,40 @@ final class ProtectedDNSListenerTests: XCTestCase {
         var wrongClass = valid
         wrongClass[32] = 0x03
         XCTAssertEqual(ProtectedDNSProbe.decodeAnswers(wrongClass), [], "question must be IN")
+
+        var actualQuery = Data(valid.prefix(33))
+        actualQuery[0] = 0x24
+        actualQuery[1] = 0x68
+        actualQuery[2] = 0x01
+        actualQuery[3] = 0
+        actualQuery[7] = 0
+        var actualReply = valid
+        actualReply[0] = 0x24
+        actualReply[1] = 0x68
+        actualReply[13] = 0x57 // DNS names compare case-insensitively.
+        XCTAssertEqual(ProtectedDNSProbe.decodeAnswers(actualReply, query: actualQuery), ["198.19.1.2"])
+        XCTAssertEqual(ProtectedDNSProbe.decodeAnswers(valid, query: actualQuery), [])
+    }
+
+    func testListenerAnswersFollowQuestionAliasNotUnrelatedOwners() {
+        var unrelated = response()
+        unrelated[34] = 0x10 // gstatic.com is not the question www.gstatic.com.
+        XCTAssertEqual(ProtectedDNSProbe.decodeAnswers(unrelated), [])
+        var wrongClass = response()
+        wrongClass[38] = 0x03
+        XCTAssertEqual(ProtectedDNSProbe.decodeAnswers(wrongClass), [])
+
+        var alias = Data(response().prefix(33))
+        alias[7] = 2
+        alias.append(contentsOf: [
+            0xC0, 0x0C, 0x00, 0x05, 0x00, 0x01,
+            0x00, 0x00, 0x00, 0x3C, 0x00, 0x08,
+            0x05, 0x61, 0x6C, 0x69, 0x61, 0x73, 0xC0, 0x10,
+            // A record owned by alias.gstatic.com, the preceding CNAME target.
+            0xC0, 0x2D, 0x00, 0x01, 0x00, 0x01,
+            0x00, 0x00, 0x00, 0x3C, 0x00, 0x04, 198, 19, 1, 2,
+        ])
+        XCTAssertEqual(ProtectedDNSProbe.decodeAnswers(alias), ["198.19.1.2"])
     }
 
     func testMalformedTrailingAnswerCannotLeaveFakeIPProof() {
