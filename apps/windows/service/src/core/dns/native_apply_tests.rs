@@ -292,3 +292,175 @@ fn native_apply_unavailable_readback_never_confirms_setter_success() {
         "missing readback cannot prove this apply even after compatibility claims success"
     );
 }
+
+#[tokio::test]
+#[serial_test::serial]
+async fn native_apply_absence_retains_pending_until_active_repair() -> Result<()> {
+    use super::super::test_io::{self, Fixture};
+    use crate::core::dns as facade;
+    let a = effective(&entry(1), [9, 9, 9, 9], true);
+    let b = effective(&entry(2), [149, 112, 112, 112], false);
+    let guid = a.guid.clone();
+    let fixture = Fixture::new(vec![a, b])?;
+    test_io::with(|io| {
+        io.fail_live.insert(guid.clone());
+    });
+    assert!(facade::status_is_unverified(&facade::enable().await?));
+    assert!(fixture.snapshot()?.adapters[0].live_apply_failed);
+
+    // A is collected by the facade, then vanishes before apply_protected_set enumerates it.
+    // B still has to pass real native orchestration/readback: this is not an empty-set proof.
+    test_io::with(|io| io.vanish_after_collect = Some(guid.clone()));
+    let absent = facade::enable().await?;
+    let saved = fixture.snapshot()?;
+    fixture.assert_originals(&saved);
+    assert!(
+        saved.adapters[0].live_apply_failed,
+        "absence must not retire A's pending effective-apply evidence"
+    );
+    assert!(absent.enabled && !facade::status_is_unverified(&absent));
+
+    let idle_counts = test_io::with(|io| (io.writes, io.native_calls)).unwrap();
+    facade::enable().await?;
+    assert_eq!(
+        test_io::with(|io| (io.writes, io.native_calls)).unwrap(),
+        idle_counts,
+        "historical absent A must not cause perpetual writes to healthy B"
+    );
+
+    test_io::with(|io| {
+        io.absent.remove(&guid);
+        io.fail_live.clear();
+        io.adapters[0].luid += 1;
+        io.adapters[0].ipv4_index += 1;
+    });
+    // Restart-shaped observation: there is no process-local failure set or error string.
+    test_io::reset_memory();
+    let returned = facade::status_unlocked().await?;
+    assert!(
+        facade::needs_reconcile(
+            true,
+            true,
+            returned.enabled,
+            facade::status_is_unverified(&returned)
+        ),
+        "returning A still owes effective proof even though the registry looks protected"
+    );
+    let before = test_io::with(|io| (io.native_calls, io.effective_reads)).unwrap();
+    let repaired = facade::enable().await?;
+    let after = test_io::with(|io| (io.native_calls, io.effective_reads)).unwrap();
+    assert!(
+        after.0 > before.0 && after.1 > before.1,
+        "reappearance must really apply and read back"
+    );
+    assert!(repaired.enabled && !facade::status_is_unverified(&repaired));
+    let saved = fixture.snapshot()?;
+    assert!(saved.adapters.iter().all(|a| !a.live_apply_failed));
+    fixture.assert_originals(&saved);
+    Ok(())
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn native_apply_registry_error_retains_pending_repair() -> Result<()> {
+    use super::super::{
+        NAME_SERVER, PROFILE_NAME_SERVER,
+        test_io::{self, Fixture},
+        v4_key, v6_key,
+    };
+    use crate::core::dns as facade;
+    let a = effective(&entry(1), [9, 9, 9, 9], true);
+    let guid = a.guid.clone();
+    let fixture = Fixture::new(vec![a])?;
+    assert!(facade::enable().await?.enabled);
+    fixture.assert_originals(&fixture.snapshot()?);
+    let before = test_io::with(|io| {
+        // External drift triggers the same repair the watchdog requests. Restore/DHCP is
+        // deliberately not involved, and the next failure occurs after both v4 writes.
+        io.keys
+            .get_mut(&v4_key(&guid))
+            .unwrap()
+            .insert(NAME_SERVER.into(), "8.8.4.4".into());
+        io.adapters[0].dns_servers = Some(vec![
+            "8.8.4.4".parse().unwrap(),
+            "2001:db8::53".parse().unwrap(),
+        ]);
+        io.fail_write = Some((v6_key(&guid), NAME_SERVER.into()));
+        io.before_write.clear();
+        (io.writes, io.native_calls, io.effective_reads)
+    })
+    .unwrap();
+    let _operation = facade::DNS_OPERATION.lock().await;
+    let error = facade::enable_unlocked(facade::EnableTrigger::Reconcile)
+        .await
+        .unwrap_err();
+    assert!(format!("{error:#}").contains("injected IPv6 registry write failure"));
+    test_io::with(|io| {
+        assert_eq!(
+            io.writes,
+            before.0 + 2,
+            "both v4 values changed before the error"
+        );
+        assert_eq!(
+            (io.native_calls, io.effective_reads),
+            (before.1, before.2),
+            "no live apply ran"
+        );
+        assert_eq!(
+            io.read(&v4_key(&guid), PROFILE_NAME_SERVER).as_deref(),
+            Some("198.18.0.2")
+        );
+    });
+    let status = facade::status_unlocked().await?;
+    assert!(
+        facade::needs_reconcile(
+            true,
+            true,
+            status.enabled,
+            facade::status_is_unverified(&status)
+        ),
+        "partial registry error must remain repairable despite protected-looking v4 registry"
+    );
+    assert!(
+        status
+            .last_error
+            .as_deref()
+            .unwrap()
+            .contains("injected IPv6 registry write failure")
+    );
+    let saved = fixture.snapshot()?;
+    assert!(
+        saved.adapters[0].live_apply_failed,
+        "unfinished apply must survive process restart"
+    );
+    fixture.assert_originals(&saved);
+    test_io::with(|io| {
+        assert!(!io.before_write.is_empty());
+        for snapshot in &io.before_write {
+            assert!(
+                snapshot.adapters[0].live_apply_failed,
+                "persist pending BEFORE the first mutation"
+            );
+            fixture.assert_originals(snapshot);
+        }
+        io.fail_write = None;
+    });
+    test_io::reset_memory();
+    let restarted = facade::status_unlocked().await?;
+    assert!(facade::needs_reconcile(
+        true,
+        true,
+        restarted.enabled,
+        facade::status_is_unverified(&restarted)
+    ));
+    let repaired = facade::enable_unlocked(facade::EnableTrigger::Reconcile).await?;
+    assert!(repaired.enabled && !facade::status_is_unverified(&repaired));
+    assert_eq!(repaired.last_error, None);
+    assert!(
+        test_io::with(|io| io.native_calls > before.1 && io.effective_reads > before.2).unwrap()
+    );
+    let saved = fixture.snapshot()?;
+    assert!(!saved.adapters[0].live_apply_failed);
+    fixture.assert_originals(&saved);
+    Ok(())
+}
