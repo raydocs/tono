@@ -21,6 +21,10 @@ use windows_sys::Win32::System::Registry::{
 #[path = "native_apply.rs"]
 mod native_apply;
 
+#[cfg(test)]
+#[path = "apply_test_io.rs"]
+pub(super) mod test_io;
+
 const TCPIP4_INTERFACES: &str =
     r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces";
 const TCPIP6_INTERFACES: &str =
@@ -70,6 +74,10 @@ fn super_wide(value: &str) -> Vec<u16> {
 }
 
 fn read_sz(subkey: &str, value: &str) -> Result<Option<String>> {
+    #[cfg(test)]
+    if let Some(value) = test_io::with(|io| io.read(subkey, value)) {
+        return Ok(value);
+    }
     let Some(key) = RegKey::open(subkey, false)? else {
         return Ok(None);
     };
@@ -124,6 +132,10 @@ fn read_sz(subkey: &str, value: &str) -> Result<Option<String>> {
 }
 
 fn write_sz(subkey: &str, value: &str, data: &str) -> Result<()> {
+    #[cfg(test)]
+    if let Some(result) = test_io::with(|io| io.write(subkey, value, data)) {
+        return result;
+    }
     let Some(key) = RegKey::open(subkey, true)? else {
         bail!("registry key {subkey} does not exist");
     };
@@ -373,6 +385,10 @@ fn active_adapters() -> Result<Vec<ActiveAdapter>> {
 }
 
 fn active_adapters_read(include_dns: bool) -> Result<Vec<ActiveAdapter>> {
+    #[cfg(test)]
+    if let Some(adapters) = test_io::with(|io| io.adapters(include_dns)) {
+        return Ok(adapters);
+    }
     // `Parameters\Interfaces` is historical state, not a list of live adapters: it commonly
     // contains disabled, unplugged, removed, and pseudo interfaces. Those either have no
     // Win32_NetworkAdapterConfiguration object or return 84 (IP not enabled), which used to
@@ -806,6 +822,10 @@ fn parse_guid_list(value: &str) -> std::collections::BTreeSet<String> {
 }
 
 fn live_apply_batch(entries: &[LiveApplyEntry], mode: ApplyMode) -> Vec<(String, bool)> {
+    #[cfg(test)]
+    if let Some(results) = test_io::with(|io| io.legacy(entries, mode)) {
+        return results;
+    }
     let restoring = mode == ApplyMode::Restore;
     let mut script = SCRIPT_PRELUDE.replace(PROTECTED_DNS_V4_TOKEN, super::PROTECTED_DNS_V4);
     let mut rejected: std::collections::BTreeSet<String> = Default::default();
@@ -911,6 +931,10 @@ fn live_apply_with_retry(entries: Vec<LiveApplyEntry>, mode: ApplyMode) -> Vec<(
 /// cache entries served while DNS pointed at the loopback core are the classic post-
 /// disconnect pollution; without a flush, restored resolvers keep them until TTL expiry.
 pub(super) fn flush_resolver_cache() -> Result<()> {
+    #[cfg(test)]
+    if test_io::active() {
+        return Ok(()); // No host-wide cache mutation in the isolated apply fixture.
+    }
     use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
     // DnsFlushResolverCache (Vista+) is exported by dnsapi.dll but is not in
     // any SDK import library — it must be resolved at runtime (the same
@@ -943,6 +967,10 @@ pub(super) fn flush_resolver_cache() -> Result<()> {
 /// Whether the adapter's per-family registry subkey exists. Single-stack adapters lack one
 /// family entirely; both apply and verify must skip the absent family instead of failing.
 fn key_exists(subkey: &str) -> Result<bool> {
+    #[cfg(test)]
+    if let Some(exists) = test_io::with(|io| io.keys.contains_key(subkey)) {
+        return Ok(exists);
+    }
     Ok(RegKey::open(subkey, false)?.is_some())
 }
 
@@ -1293,6 +1321,10 @@ fn install_nrpt() -> Result<()> {
 
 /// Snapshot Encrypted DNS, turn DoH off, and force the DNS Client through TUN DNS.
 pub(super) fn suppress_encrypted_dns() -> Result<()> {
+    #[cfg(test)]
+    if test_io::active() {
+        return Ok(()); // Resolver-policy OS effects are outside this apply regression.
+    }
     if read_capture_file()?.is_none() {
         write_capture_file(read_dword(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH)?)?;
     }

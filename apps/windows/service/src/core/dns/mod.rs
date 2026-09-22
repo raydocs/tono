@@ -312,6 +312,10 @@ pub(crate) struct DnsSnapshot {
 }
 
 fn snapshot_path() -> PathBuf {
+    #[cfg(all(windows, test, not(feature = "test")))]
+    if let Some(path) = engine::test_io::with(|io| io.snapshot_path.clone()) {
+        return path;
+    }
     crate::service_paths()
         .persistent_state_dir()
         .join("protected-dns.json")
@@ -1264,7 +1268,14 @@ fn now_unix() -> u64 {
 }
 
 async fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
-    crate::core::paths::ensure_persistent_state_layout()?;
+    // Native facade tests use a private temporary directory, not the installed Service root.
+    #[cfg(all(windows, test, not(feature = "test")))]
+    let isolated = engine::test_io::active();
+    #[cfg(not(all(windows, test, not(feature = "test"))))]
+    let isolated = false;
+    if !isolated {
+        crate::core::paths::ensure_persistent_state_layout()?;
+    }
     crate::core::platform_security::secure_private_service_file_if_exists(path)?;
     let temporary = path.with_extension("tmp");
     if std::fs::symlink_metadata(&temporary).is_ok() {

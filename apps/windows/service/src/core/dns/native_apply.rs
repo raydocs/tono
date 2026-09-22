@@ -32,6 +32,13 @@ struct NativeApi {
 
 impl NativeApi {
     fn load() -> Result<Self> {
+        #[cfg(test)]
+        if super::test_io::active() {
+            return Ok(Self {
+                module: std::ptr::null_mut(),
+                set: super::test_io::set_dns,
+            });
+        }
         let name = super::super_wide("iphlpapi.dll");
         // SAFETY: NUL-terminated literal and restricted system DLL search, no App path.
         let module = unsafe {
@@ -69,12 +76,16 @@ impl NativeApi {
 
 impl Drop for NativeApi {
     fn drop(&mut self) {
+        #[cfg(test)]
+        if self.module.is_null() {
+            return; // The isolated fixture supplies a function, not a loader reference.
+        }
         // SAFETY: our loader reference is released only after synchronous calls finish.
         unsafe { FreeLibrary(self.module) };
     }
 }
 
-fn interface_guid(value: &str) -> Result<GUID> {
+pub(super) fn interface_guid(value: &str) -> Result<GUID> {
     let value = value
         .strip_prefix('{')
         .and_then(|s| s.strip_suffix('}'))
