@@ -1,12 +1,9 @@
 import SwiftUI
 
-/// Compact region code for the card meta line. Flags are no longer drawn;
-/// the region survives as quiet text next to the protocol chip. A flag emoji
-/// decodes to its ISO letters (🇺🇸 → "US"), otherwise a known region token in
-/// the wire name wins, then the city of the display name, then two-letter
-/// initials. Keep the maps aligned with `nodeCode` in the Windows
-/// `pages/tono/node-meta.ts`.
-func nodeRegionCode(flag: String, name: String) -> String {
+/// Geographic evidence from catalog metadata, without guessed initials or the
+/// hy2 list category. An unknown location must not satisfy a fixed region.
+/// Keep the maps aligned with `nodeCode` in Windows `pages/tono/node-meta.ts`.
+func catalogNodeRegionCode(flag: String, name: String) -> String? {
     let indicators = flag.unicodeScalars.filter { (0x1F1E6...0x1F1FF).contains($0.value) }
     if indicators.count == 2 {
         let letters = indicators.compactMap {
@@ -37,7 +34,14 @@ func nodeRegionCode(flag: String, name: String) -> String {
     if let cityCode = cityCodes[city] {
         return cityCode
     }
+    return nil
+}
 
+/// Compact card label: known geography first, then display-only initials.
+/// Guessed initials are never evidence for a recommendation's region.
+func nodeRegionCode(flag: String, name: String) -> String {
+    if let region = catalogNodeRegionCode(flag: flag, name: name) { return region }
+    let displayName = ProxyNode.displayName(for: name)
     let words = displayName.split(whereSeparator: { !$0.isLetter })
     if words.count >= 2 {
         return String(words.prefix(2).compactMap(\.first)).uppercased()

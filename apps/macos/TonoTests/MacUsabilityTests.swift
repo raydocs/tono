@@ -130,6 +130,67 @@ final class MacUsabilityTests: XCTestCase {
         XCTAssertTrue(app.routePreferences.recentSuccesses(owner: "account-a", catalog: app.managedCatalogNodes).isEmpty)
     }
 
+    func testFixedRegionNeverFallsBackToAnOutsideSuccessWhenRegionIsUnavailable() throws {
+        let suite = "tono-fixed-region-test-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite); ManagedExitCatalogOwnership.purge() }
+        let app = AppState()
+        app.routePreferences = LocalRoutePreferences(defaults: defaults)
+        ManagedExitCatalogOwnership.adopt("account-a")
+        let outside = Fixture.realityNode()
+        let inside = Fixture.realityNode(name: "JP-VLESS-Reality", id: "jp", flag: "🇯🇵")
+        let unknown = Fixture.realityNode(name: "Jade Passage", id: "unknown", flag: "")
+        app.proxyRegions = [.init(id: AppState.managedCatalogRegionID, name: "Tono", nodes: [outside, inside, unknown])]
+        app.managedCatalogDigest = String(repeating: "a", count: 64)
+        app.selectedNodeId = outside.id
+        app.activeNode = outside
+        app.proxyService.activeNodeName = outside.name
+        app.isConnected = true
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        app.recordVerifiedRouteSuccess(outside.name, owner: "account-a", generation: app.connectionCoordinator.protectionOperationGeneration, now: now)
+        app.isConnected = false
+        let unrestricted = try XCTUnwrap(app.routeRecommendation(owner: "account-a", now: now))
+        XCTAssertEqual(unrestricted.name, outside.name)
+        XCTAssertEqual(unrestricted.successfulAt, now)
+
+        app.setPreferredRouteRegion("JP", owner: "account-a")
+        app.routePreferences = LocalRoutePreferences(defaults: defaults)
+        XCTAssertEqual(app.routePreferences.preferredRegion(owner: "account-a"), "JP")
+        XCTAssertNil(app.routePreferences.preferredRegion(owner: "account-b"))
+        XCTAssertEqual(app.routePreferenceRegions, ["JP", "US"])
+        let inRegion = try XCTUnwrap(app.routeRecommendation(owner: "account-a", now: now))
+        XCTAssertEqual(inRegion.name, inside.name)
+        XCTAssertNil(inRegion.successfulAt, "outside success is not evidence for this untested route")
+        XCTAssertFalse(app.confirmRouteRecommendation(unrestricted, now: now))
+        XCTAssertEqual(app.selectedNodeId, outside.id)
+
+        // The only actual in-region route is vendor-blocked; the unknown
+        // location's display initials happen to be JP but are not geography.
+        let blocked = Fixture.hy2Node(name: "JP-VLESS-Reality · hy2", id: "jp-hy2", flag: "🇯🇵")
+        app.proxyRegions[0].nodes = [outside, blocked, unknown]
+        XCTAssertTrue(ProxyNode.hy2UdpIsVendorBlocked(blocked.name))
+        XCTAssertEqual(nodeRegionCode(flag: unknown.flag, name: unknown.name), "JP")
+        XCTAssertNil(app.routeRecommendation(owner: "account-a", now: now))
+        app.proxyRegions[0].nodes = [outside, unknown]
+        app.routePreferences = LocalRoutePreferences(defaults: defaults)
+        XCTAssertEqual(app.routePreferences.preferredRegion(owner: "account-a"), "JP")
+        XCTAssertNil(app.routeRecommendation(owner: "account-a", now: now), "removed region must not silently clear")
+        app.setPreferredRouteRegion("XX", owner: "account-a")
+        app.setPreferredRouteRegion(nil, owner: "account-b")
+        XCTAssertEqual(app.routePreferences.preferredRegion(owner: "account-a"), "JP")
+        XCTAssertNil(app.connectionCoordinator.connectTask)
+        XCTAssertFalse(app.isConnected)
+
+        app.setPreferredRouteRegion(nil, owner: "account-a")
+        app.routePreferences = LocalRoutePreferences(defaults: defaults)
+        XCTAssertEqual(app.routeRecommendation(owner: "account-a", now: now)?.name, outside.name)
+        // Even when the name/evidence are unchanged, changing the preference
+        // retires the old confirmation instead of reusing its consent.
+        app.setPreferredRouteRegion("US", owner: "account-a")
+        XCTAssertFalse(app.confirmRouteRecommendation(unrestricted, now: now))
+        XCTAssertNil(app.connectionCoordinator.connectTask)
+    }
+
     func testRecoveryFeedbackUsesExistingOwnerAndReleaseClearsIt() async {
         let app = AppState()
         app.recoveryCause = .wake

@@ -9,16 +9,43 @@ struct RouteChoicesView: View {
 
     var body: some View {
         if let owner = account?.user?.id, account?.isReady == true,
-           let recommendation = appState.routeRecommendation(owner: owner) {
+           owner == ManagedExitCatalogOwnership.currentAccount {
+            let region = appState.routePreferences.preferredRegion(owner: owner)
+            let regions = appState.routePreferenceRegions
             VStack(alignment: .leading, spacing: 6) {
-                RouteRecommendationDetails(proposal: recommendation)
-                Button("Review recommended route") {
-                    proposal = appState.routeRecommendation(owner: owner)
-                    stale = false
-                    showingConfirmation = proposal != nil
+                Picker("Fixed recommendation region", selection: Binding(
+                    get: { appState.routePreferences.preferredRegion(owner: owner) ?? "" },
+                    set: { value in
+                        guard account?.user?.id == owner, account?.isReady == true else { return }
+                        appState.setPreferredRouteRegion(value.isEmpty ? nil : value, owner: owner)
+                    }
+                )) {
+                    Text("Any region").tag("")
+                    ForEach(regions, id: \.self) { Text(verbatim: $0).tag($0) }
+                    if let region, !regions.contains(region) {
+                        Text("Saved region unavailable").tag(region)
+                    }
+                }
+                .pickerStyle(.menu)
+                .font(.system(size: 12))
+                Text("Recommendations only. Manual choices and the connected exit do not change.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                if region != nil, appState.routeRecommendationNodes(owner: owner).isEmpty {
+                    Text("No available route in your fixed region. Choose another region or Any region to clear it; Tono will not recommend outside it.")
+                        .font(.system(size: 11)).foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let recommendation = appState.routeRecommendation(owner: owner) {
+                    Divider().padding(.vertical, 4)
+                    RouteRecommendationDetails(proposal: recommendation)
+                    Button("Review recommended route") {
+                        proposal = appState.routeRecommendation(owner: owner)
+                        stale = false
+                        showingConfirmation = proposal != nil
+                    }
                 }
                 if stale {
-                    Text("The account, catalog, or connection changed. Review a fresh recommendation.")
+                    Text("The account, catalog, route preference, or connection changed. Review a fresh recommendation.")
                         .font(.system(size: 11)).foregroundStyle(.orange)
                 }
             }

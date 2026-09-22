@@ -1,14 +1,30 @@
 import Foundation
 
 extension AppState {
+    var routePreferenceRegions: [String] {
+        Set(managedCatalogNodes.compactMap { catalogNodeRegionCode(flag: $0.flag, name: $0.name) }).sorted()
+    }
+
+    func setPreferredRouteRegion(_ region: String?, owner: String) {
+        guard owner == ManagedExitCatalogOwnership.currentAccount else { return }
+        routePreferences.setPreferredRegion(region, owner: owner, catalog: managedCatalogNodes)
+    }
+
+    func routeRecommendationNodes(owner: String) -> [ProxyNode] {
+        guard owner == ManagedExitCatalogOwnership.currentAccount else { return [] }
+        let region = routePreferences.preferredRegion(owner: owner)
+        return managedCatalogNodes.filter {
+            ConfigPipeline.singBoxUnavailableReason($0) == nil && !ProxyNode.hy2UdpIsVendorBlocked($0.name)
+                && (region == nil || catalogNodeRegionCode(flag: $0.flag, name: $0.name) == region)
+        }
+    }
+
     func routeRecommendation(owner: String, now: Date = Date()) -> RouteRecommendation? {
         guard owner == ManagedExitCatalogOwnership.currentAccount,
               !isConnected, !isConnecting, !isDisconnecting, switchingNodeId == nil,
               connectionCoordinator.configReloadTask == nil,
               let digest = managedCatalogDigest else { return nil }
-        let available = managedCatalogNodes.filter {
-            ConfigPipeline.singBoxUnavailableReason($0) == nil && !ProxyNode.hy2UdpIsVendorBlocked($0.name)
-        }
+        let available = routeRecommendationNodes(owner: owner)
         let favorites = routePreferences.favorites(owner: owner, catalog: available)
         let proven = routePreferences.recentSuccesses(owner: owner, catalog: available, now: now)
             .filter { $0.catalogDigest == digest }
@@ -20,7 +36,8 @@ extension AppState {
             ?? available.first
         guard let name = recent?.name ?? fallback?.name else { return nil }
         return RouteRecommendation(owner: owner, generation: connectionCoordinator.protectionOperationGeneration,
-                                   catalogDigest: digest, name: name, successfulAt: recent?.at)
+                                   catalogDigest: digest, preferredRegion: routePreferences.preferredRegion(owner: owner),
+                                   name: name, successfulAt: recent?.at)
     }
 
     /// Revalidate immediately before the existing selection/connect owner runs.
@@ -32,6 +49,7 @@ extension AppState {
               proposal.generation == connectionCoordinator.protectionOperationGeneration,
               proposal.catalogDigest == managedCatalogDigest,
               let current = routeRecommendation(owner: proposal.owner, now: now),
+              current.preferredRegion == proposal.preferredRegion,
               current.name == proposal.name, current.successfulAt == proposal.successfulAt else { return false }
         selectNode(proposal.name)
         return true
