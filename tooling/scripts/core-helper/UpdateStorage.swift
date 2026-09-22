@@ -8,6 +8,7 @@ final class UpdateStorage {
     static let directory = "/Library/Application Support/Tono/Updates"
     let root: String
     private let lockFD: Int32
+    private let synchronizeDirectory: (String) throws -> Void
 
     enum Execution: String, Codable {
         case reserved, staged, consumed, replacing, replaced, rollingBack, rolledBack
@@ -34,16 +35,20 @@ final class UpdateStorage {
         var attempt: Attempt?
     }
 
-    init(root: String = UpdateStorage.directory) throws {
+    init(root: String = UpdateStorage.directory,
+         synchronizeDirectory: @escaping (String) throws -> Void = UpdateStorage.syncDirectory) throws {
         self.root = root
+        self.synchronizeDirectory = synchronizeDirectory
         if root == Self.directory {
             // Startup reconciliation runs before DNS/PF managers, including on
             // the first helper install. Do not rely on them creating this.
             _ = try secureMetadata("/Library", type: mode_t(S_IFDIR), owner: 0)
             _ = try secureMetadata("/Library/Application Support", type: mode_t(S_IFDIR), owner: 0)
             try ensureRootDirectory("/Library/Application Support/Tono", permissions: 0o700)
+            try Self.syncDirectory("/Library/Application Support")
         }
         try ensureRootDirectory(root, permissions: 0o700)
+        try Self.syncDirectory(URL(fileURLWithPath: root).deletingLastPathComponent().path)
         lockFD = open(root + "/lock", O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard lockFD >= 0 else { throw HelperFailure.system("Update lock is unavailable.") }
         do { _ = try secureMetadata(root + "/lock", type: mode_t(S_IFREG), owner: 0) }
@@ -87,11 +92,16 @@ final class UpdateStorage {
                 throw HelperFailure.invalid("Update execution evidence is inconsistent.")
             }
         }
+        // A previous save may have renamed successfully but failed its final
+        // directory sync. Re-establish durability before any query/replay can
+        // acknowledge that visible candidate or retire its recovery entry.
+        try synchronizeDirectory(root)
         return ledger
     }
 
     func save(_ ledger: Ledger) throws {
-        try Self.write(UpdateContractV1.canonical(ledger), to: root + "/ledger.json")
+        try Self.write(UpdateContractV1.canonical(ledger), to: root + "/ledger.json",
+                       synchronizeDirectory: synchronizeDirectory)
     }
 
     func attemptDirectory(_ attempt: Attempt) -> String {
@@ -117,7 +127,8 @@ final class UpdateStorage {
         }
     }
 
-    static func write(_ bytes: Data, to path: String) throws {
+    static func write(_ bytes: Data, to path: String,
+                      synchronizeDirectory: (String) throws -> Void = UpdateStorage.syncDirectory) throws {
         let temporary = path + "." + UUID().uuidString
         let fd = open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard fd >= 0 else { throw HelperFailure.system("Cannot create update record.") }
@@ -132,7 +143,7 @@ final class UpdateStorage {
               rename(temporary, path) == 0 else {
             throw HelperFailure.system("Update record was not durably committed.")
         }
-        try syncDirectory(URL(fileURLWithPath: path).deletingLastPathComponent().path)
+        try synchronizeDirectory(URL(fileURLWithPath: path).deletingLastPathComponent().path)
     }
 
     static func syncDirectory(_ path: String) throws {

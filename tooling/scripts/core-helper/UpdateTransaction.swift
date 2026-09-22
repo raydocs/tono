@@ -294,6 +294,28 @@ final class UpdateTransaction {
         // erase a consumed attempt. This is not cancellation or commit.
     }
 
+    func retireUnconsumed(peer: TonoAuthenticatedPeer) throws {
+        var ledger = try storage.load()
+        try effects.authenticate(peer)
+        guard var attempt = ledger.attempt,
+              attempt.execution == .reserved || attempt.execution == .staged,
+              attempt.receipt.owner == Self.owner(peer),
+              attempt.receipt.installedLocationSha256 == Self.location,
+              attempt.originalComponents == (try effects.installedComponents()),
+              attempt.disconnectRequested, attempt.disconnectVerified,
+              try effects.observe() == .unprotected else {
+            throw HelperFailure.invalid("Only an unconsumed attempt with verified explicit Disconnect can be retired.")
+        }
+        // Expiry/blocked state does not prevent cleanup, but grants no new
+        // installation. Keep the original obligation and last successful proof
+        // in an independently durable archive before clearing the active slot.
+        if attempt.receipt.blockedReason == nil { attempt.receipt.blockedReason = .cancelled }
+        try UpdateStorage.write(UpdateContractV1.canonical(attempt),
+            to: storage.root + "/" + attempt.receipt.attemptId + ".json")
+        ledger.attempt = nil
+        try persist(ledger) // Generation and consumed high-water are unchanged.
+    }
+
     func gate(method: String, path: String, peer: TonoAuthenticatedPeer) throws {
         guard method != "GET", !path.hasPrefix("/update/") else { return }
         let ledger = try storage.load()

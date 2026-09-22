@@ -886,7 +886,7 @@ nonisolated struct HelperManager {
     static func receiveTimeout(for path: String) -> Int {
         switch path {
         case "/update/stage": return 600
-        case "/update/prepare", "/update/commit", "/update/reconcile", "/update/disconnect": return 45
+        case "/update/prepare", "/update/commit", "/update/reconcile", "/update/disconnect", "/update/retire": return 45
         case "/update/offer", "/update/execute": return 30
         case "/killswitch/arm", "/helper/upgrade":
             return 30

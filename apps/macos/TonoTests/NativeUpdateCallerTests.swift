@@ -1,4 +1,5 @@
 import AppKit
+import ScreenCaptureKit
 import XCTest
 @testable import Tono
 
@@ -45,27 +46,43 @@ final class NativeUpdateCallerTests: XCTestCase {
         XCTAssertEqual(result.execution, "consumed")
     }
 
-    func testNativeUpdateOfferAndFailureRender() throws {
+    func testNativeUpdateOfferAndFailureRender() async throws {
         let offer = AppUpdater.offerAlert(version: "0.0.73")
         XCTAssertEqual(offer.buttons.map(\.title), ["Install and Restart", "Not Now"])
-        try capture(offer, name: "native-update-offer")
+        try await capture(offer, name: "native-update-offer")
         let failure = AppUpdater.failureAlert(detail: "Update consumption is uncertain. Network protection and recovery evidence remain in place.")
         XCTAssertEqual(failure.buttons.map(\.title), ["OK"])
-        try capture(failure, name: "native-update-incomplete")
+        try await capture(failure, name: "native-update-incomplete")
+        let retry = AppUpdater.failureAlert(detail: "Private package bytes do not match the signed target.", retryable: true)
+        XCTAssertEqual(retry.buttons.map(\.title), ["Keep Protection", "Disconnect and Retry"])
+        try await capture(retry, name: "native-update-retry")
     }
 
-    private func capture(_ alert: NSAlert, name: String) throws {
+    private func capture(_ alert: NSAlert, name: String) async throws {
         alert.layout()
         let window = alert.window
         window.appearance = NSAppearance(named: .aqua)
-        window.orderFront(nil)
+        window.center()
+        window.makeKeyAndOrderFront(nil)
         defer { window.orderOut(nil) }
         let view = try XCTUnwrap(window.contentView)
         view.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         window.displayIfNeeded()
-        let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
-        view.cacheDisplay(in: view.bounds, to: bitmap)
+        try await Task.sleep(for: .milliseconds(200))
+        // cacheDisplay produced only the icon: macOS 26 alerts use compositor
+        // layers. Capture this process's actual window, never the desktop or
+        // another application's content, and do not request capture privileges.
+        let content = try await SCShareableContent.currentProcess
+        let target = try XCTUnwrap(content.windows.first { $0.windowID == CGWindowID(window.windowNumber) })
+        let filter = SCContentFilter(desktopIndependentWindow: target)
+        let configuration = SCStreamConfiguration()
+        configuration.width = Int(window.frame.width * 2)
+        configuration.height = Int(window.frame.height * 2)
+        configuration.showsCursor = false
+        let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
+        let bitmap = NSBitmapImageRep(cgImage: image)
+        let center = try XCTUnwrap(bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2))
+        XCTAssertGreaterThan(center.alphaComponent, 0, "Icon-only capture is not visual evidence")
         let bytes = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
         XCTAssertGreaterThan(bytes.count, 5_000)
         let directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()

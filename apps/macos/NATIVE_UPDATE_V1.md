@@ -21,6 +21,10 @@ and retained PF are native observations, not App claims. `execute` atomically
 persists consumption and sequence high-water before registering the executor.
 A lost acknowledgement queries the same consumed attempt, including repairing
 its executor registration, never making a second grant.
+Every ledger read re-syncs the containing directory before returning a grant.
+A rename followed by a failed directory sync therefore cannot authorize
+executor registration/startup, successor runtime mutation or retirement until
+durability is re-established. Merely observing candidate bytes is insufficient.
 
 `UpdateExecutor` is a private copy of the old signed helper, registered as an
 independent launchd job. It waits for the initiating process to exit, rechecks
@@ -67,6 +71,16 @@ Corrupt, expired, blocked and changed-incarnation states remain diagnosable and
 fail-closed. Automatic recovery does not silently bless a manual replacement.
 Blocked evidence is deliberately not garbage-collected or cleared by reinstall.
 
+The native error alert offers **Keep Protection** (default) or **Disconnect and
+Retry** for an unconsumed reserved/staged attempt. The latter performs privileged
+Disconnect and then `/update/retire`. Root authenticates the original installed
+components, registered location and owner, requires durable requested/verified
+Disconnect and fresh unprotected runtime readback, then durably archives the
+receipt before clearing its active pointer. Failed/cancelled reason, original
+recovery obligation, private assets, generation and high-water remain retained.
+A new attempt gets a new identity/generation; consumed/uncertain installation
+cannot use this path. Retirement does not pretend the failed attempt committed.
+
 ## Production-bound verification boundaries
 
 Native execution belongs on the existing hosted `macos-26` lanes:
@@ -89,10 +103,22 @@ of Apple's signed `sleep`, replaces its disk path with `cat`, and calls the real
 dynamic-code check while the old process remains mapped. No test signing key or
 production environment bypass is added.
 
+The post-rename failure regression uses the real atomic writer through rename,
+then injects directory-sync failure and a failing read-side durability retry.
+The real replay boundary must not invoke the substituted executor/repair effect
+until a successful sync; consumption/high-water remain a single grant. The
+successor regression faults the same boundary after adoption and calls the real
+`gate` before any runtime mutation. Retirement exercises the real durable archive,
+readback refusal, owner refusal and new-admission generation/high-water behavior;
+native authentication/network effects remain substituted in that regression.
+
 XCTest calls the active App ordering boundary for preparation failure and lost
 consume acknowledgement. It renders the actual offer/incomplete NSAlerts to
-`test-results/renders/native-update-{offer,incomplete}.png`. Those captures must
-be inspected, not inferred from a passing test. The portable metadata-writer
+`test-results/renders/native-update-{offer,incomplete,retry}.png` using
+ScreenCaptureKit's current-process-only window capture (no desktop capture or
+permission request). The first offscreen `cacheDisplay` attempt captured only
+icons; its passing PNG-size assertion was not visual evidence. Captures must be
+inspected, not inferred from a passing test. The portable metadata-writer
 regression is `python3 apps/macos/scripts/test_build_source.py`; it is not native
 Swift evidence.
 
