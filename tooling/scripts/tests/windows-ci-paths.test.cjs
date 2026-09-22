@@ -53,6 +53,32 @@ test('the native Service job executes safe QA fault-targeting regressions', () =
     step.shell === 'pwsh' && step.run?.includes('tooling/scripts/tests/windows-qa-guards.Tests.ps1')))
 })
 
+test('native updater adapters run in hosted lanes with nonzero Windows test guards', () => {
+  const mac = load(readFileSync(path.join(root, '.github/workflows/macos-ci.yml'), 'utf8'))
+  const helper = mac.jobs['privileged-tests']
+  assert.equal(helper['runs-on'], 'macos-26')
+  const selfTest = helper.steps.find(step => step.run === 'sudo apps/macos/Tono/Resources/tono-core-helper --update-self-test')
+  assert.ok(selfTest)
+  assert.equal(selfTest.if, undefined)
+  assert.notEqual(selfTest['continue-on-error'], true)
+  assert.equal(workflow.jobs.service['runs-on'], 'windows-2025')
+  const native = workflow.jobs.service.steps.find(step => step.name === 'Test native update admission and independent executor')
+  assert.equal(native?.['working-directory'], 'apps/windows/service')
+  assert.equal(native.shell, 'pwsh')
+  assert.equal(native.if, undefined)
+  assert.notEqual(native['continue-on-error'], true)
+  for (const prefix of ['update_transaction::tests::update_', 'core::update::tests::update_', 'update_executor::tests::update_']) {
+    assert.ok(native.run.includes(prefix))
+  }
+  for (const target of ['--lib', '--bin tono-service-install']) {
+    assert.ok(native.run.includes(`cargo test --locked --features standalone,client ${target} $filter -- --list`))
+    assert.ok(native.run.includes(`cargo test --locked --features standalone,client ${target} $filter -- --nocapture`))
+  }
+  assert.ok(native.run.includes('Native update tests are missing'))
+  assert.ok(native.run.includes('Independent executor tests are missing'))
+  assert.ok(native.run.includes('$LASTEXITCODE -ne 0'))
+})
+
 test('Windows runs the dependency journal integration tests explicitly', () => {
   const job = workflow.jobs['app-rust']
   assert.equal(job['runs-on'], 'windows-2025')

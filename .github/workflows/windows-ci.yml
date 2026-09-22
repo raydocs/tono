@@ -251,9 +251,33 @@ jobs:
         # to nothing and the job would pass having tested nothing at all.
         run: cargo test --locked --features standalone,client,test
 
-      # `mod wfp` is `not(feature = "test")`, so every invocation above compiles it out and
-      # the tests inside it have never run anywhere — including the one that predates this
-      # step. That is the one part of the kill switch no model can stand in for: whether the
+      - name: Test native update admission and independent executor
+        working-directory: apps/windows/service
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          foreach ($filter in @('update_transaction::tests::update_', 'core::update::tests::update_')) {
+            $listed = cargo test --locked --features standalone,client --lib $filter -- --list
+            if ($LASTEXITCODE -ne 0) { throw "Could not enumerate $filter" }
+            if (-not ($listed -match "^$([regex]::Escape($filter)).*: test$")) {
+              throw "Native update tests are missing: $filter"
+            }
+            cargo test --locked --features standalone,client --lib $filter -- --nocapture
+            if ($LASTEXITCODE -ne 0) { throw "Native update tests failed: $filter" }
+          }
+          $filter = 'update_executor::tests::update_'
+          $listed = cargo test --locked --features standalone,client --bin tono-service-install $filter -- --list
+          if ($LASTEXITCODE -ne 0) { throw 'Could not enumerate independent executor tests' }
+          if (-not ($listed -match "^$([regex]::Escape($filter)).*: test$")) {
+            throw 'Independent executor tests are missing'
+          }
+          cargo test --locked --features standalone,client --bin tono-service-install $filter -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Independent executor tests failed' }
+
+      # `mod wfp` is `not(feature = "test")`, so the lifecycle suite compiles it out.
+      # The targeted updater tests do not execute this module either. This is the part
+      # of the kill switch no model can stand in for: whether the
       # kernel accepts the filter shapes the service builds. This runner is Windows and
       # administrator, so it can answer.
       #
