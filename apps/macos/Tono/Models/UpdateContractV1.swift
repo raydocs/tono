@@ -36,6 +36,7 @@ nonisolated enum UpdateContractV1 {
         let kind: String
         let protocolVersion: UInt32
         let releaseId: String
+        let releaseSequence: UInt64
         let targets: [Target]
 
         /// Shape only; native signatures and downgrade policy are NOT checked.
@@ -48,6 +49,7 @@ nonisolated enum UpdateContractV1 {
         func validate() throws {
             guard kind == "tonoUpdateManifest", protocolVersion == 1,
                   identifier(appVersion, max: 64), identifier(releaseId, max: 128),
+                  (1...maxInteger).contains(releaseSequence),
                   hex(buildCommit, size: 40), targets.count == 2,
                   targets[0].id != targets[1].id,
                   targets.allSatisfy({ target in

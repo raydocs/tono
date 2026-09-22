@@ -51,7 +51,7 @@ final class UpdateContractV1Tests: XCTestCase {
     func testSharedWireAndOwnershipContract() throws {
         let fixtures = try JSONDecoder().decode(Fixtures.self, from: fixture("conformance.json"))
         XCTAssertEqual(fixtures.fixtureVersion, 1)
-        XCTAssertEqual(fixtures.rejectedDocuments.count, 13, "missing parser cases")
+        XCTAssertEqual(fixtures.rejectedDocuments.count, 15, "missing parser cases")
         XCTAssertEqual(fixtures.replays.count, 4, "missing owner replays")
         XCTAssertEqual(fixtures.replays.reduce(0) { $0 + $1.steps.count }, 33)
         let bytes = try fixture("manifest.json")

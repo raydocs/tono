@@ -1,6 +1,6 @@
 {
   "fixtureVersion": 1,
-  "manifestSha256": "2fa022aef89cf4a83b077556d591a9bb86d5f301334121e5badd86e1eed74ccc",
+  "manifestSha256": "2acc99b9829a726e18294cdb6369f0983717ca60b63112e2cd10b37af0166c31",
   "rejectedDocuments": [
     {"name":"unknown-version","document":"manifest.json","find":"\"protocolVersion\":1","replace":"\"protocolVersion\":2"},
     {"name":"duplicate-key","document":"manifest.json","find":"\"protocolVersion\":1","replace":"\"protocolVersion\":1,\"protocolVersion\":1"},
@@ -9,12 +9,14 @@
     {"name":"unknown-component","document":"manifest.json","find":"\"privilegedSha256\"","replace":"\"futureComponent\":true,\"privilegedSha256\""},
     {"name":"duplicate-platform","document":"manifest.json","find":"windows-x86_64","replace":"macos-arm64"},
     {"name":"zero-artifact","document":"manifest.json","find":"4194305","replace":"0"},
+    {"name":"zero-sequence","document":"manifest.json","find":"\"releaseSequence\":74","replace":"\"releaseSequence\":0"},
+    {"name":"unsafe-sequence","document":"manifest.json","find":"\"releaseSequence\":74","replace":"\"releaseSequence\":9007199254740992"},
     {"name":"legacy-kind","document":"macos-receipt.json","find":"tonoUpdateReceipt","replace":"updateHandoffJournal"},
     {"name":"null-optional","document":"macos-receipt.json","find":"\"createdAtUnix\"","replace":"\"blockedReason\":null,\"createdAtUnix\""},
     {"name":"expiry-underflow","document":"macos-receipt.json","find":"1900000600","replace":"1899999999"},
     {"name":"missing-successor","document":"macos-receipt.json","find":"\"preparing\"","replace":"\"committed\""},
     {"name":"unsafe-generation","document":"windows-receipt.json","find":"\"initiatingGeneration\":91","replace":"\"initiatingGeneration\":9007199254740992"},
-    {"name":"different-manifest","document":"windows-receipt.json","find":"2fa022aef89cf4a83b077556d591a9bb86d5f301334121e5badd86e1eed74ccc","replace":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+    {"name":"different-manifest","document":"windows-receipt.json","find":"2acc99b9829a726e18294cdb6369f0983717ca60b63112e2cd10b37af0166c31","replace":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
   ],
   "replays": [
     {

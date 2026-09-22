@@ -57,6 +57,7 @@ pub struct ReleaseManifest {
     pub kind: String,
     pub protocol_version: u32,
     pub release_id: String,
+    pub release_sequence: u64,
     pub targets: Vec<Target>,
 }
 
@@ -74,6 +75,7 @@ impl ReleaseManifest {
             || self.protocol_version != 1
             || !identifier(&self.app_version, 64)
             || !identifier(&self.release_id, 128)
+            || !(1..=MAX_INTEGER).contains(&self.release_sequence)
             || !hex(&self.build_commit, 40)
             || self.targets.len() != 2
             || self.targets[0].id == self.targets[1].id

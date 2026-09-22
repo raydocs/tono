@@ -46,6 +46,7 @@ is a label, **not** a downgrade comparator or installed-identity proof.
 |---|---|
 | `kind`, `protocolVersion` | `tonoUpdateManifest`, integer `1` |
 | `releaseId`, `appVersion` | At most 128 / 64 identifier bytes |
+| `releaseSequence` | Integer 1–9,007,199,254,740,991; publisher-assigned monotonic release order, not a version-string comparison |
 | `buildCommit` | Source commit identity; not a claim of a clean/signed build |
 | `targets` | Exactly one `macos-arm64` and one `windows-x86_64` target |
 | target `id` | One of those two identifiers; not the native updater's feed key |
@@ -58,8 +59,17 @@ paths, keys or signature-trust booleans in this model. The future signed envelop
 must cover these **exact manifest bytes** with a platform-scoped pinned verifier
 and protect against downgrade/replay. No signing keys are combined here.
 Component digests describe expected executable bytes; native verification must
-also check the code signature/bundle or Authenticode identity, actual installed
-location, dependencies and execution identity. A file hash alone is insufficient.
+also check the macOS code signature/bundle or compiled Windows publisher policy,
+protected installed location, dependencies and authenticated execution identity.
+SHIP_PLAN permits an initial Windows release without Authenticode, not unsigned
+update authority. A file hash alone is insufficient on either platform.
+
+Before the first v1 activation, both implementations include `releaseSequence`.
+The privileged adapter must compare it against its durable consumed high-water
+mark and the installed build's floor, under the same lock as attempt admission.
+Do not lower that mark after rollback or infer ordering from `releaseId`.
+This field's shape check is not itself replay protection. Implementation and
+packaging boundaries are specified in [UPDATE_INTEGRATION_V1.md](UPDATE_INTEGRATION_V1.md).
 
 ### Privileged receipt (private store, not App-owned JSON)
 
@@ -136,7 +146,7 @@ InstallStarted requirement is not silently discharged/replaced by this model.**
 receipt and refusal/replay inputs, not signatures or actual customer evidence.
 Swift's `testSharedWireAndOwnershipContract` and Rust's
 `shared_wire_and_ownership_contract` run those same bytes against the real
-implementations. Thirteen malformed-document cases, four bounded replays with
+implementations. Fifteen malformed-document cases, four bounded replays with
 33 steps and an oversized-input check distinguish the plausible wrong answers:
 ignored future fields, permissive numeric decoding, expired/wrong-owner grants,
 old-generation adoption, wrong artifacts/components, fake continuation progress,

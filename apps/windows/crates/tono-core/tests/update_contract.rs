@@ -61,7 +61,7 @@ fn shared_wire_and_ownership_contract() {
     assert_eq!(fixtures.fixture_version, 1);
     assert_eq!(
         fixtures.rejected_documents.len(),
-        13,
+        15,
         "missing parser cases"
     );
     assert_eq!(fixtures.replays.len(), 4, "missing owner replays");
