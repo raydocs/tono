@@ -617,11 +617,19 @@ describe('dashboard claude residential route badge', () => {
     expect(screen.queryByText('First connect')).toBeNull()
   })
 
-  it('does not present Disconnect as cancellation of a protected update', () => {
+  it('offers explicit confirmed Disconnect for an incomplete update even while idle, without calling it cancellation', async () => {
     mocks.status = makeStatus({ updateIncomplete: true })
     renderDashboard()
-    expect(screen.getByRole('alert').textContent).toBe(
+    expect(screen.getByRole('alert').textContent).toContain(
       'Update recovery is incomplete. Keep Tono open. If recovery does not finish, contact support before reinstalling; Disconnect does not cancel a protected update.',
     )
+    fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }))
+    expect(mocks.tonoDisconnect).not.toHaveBeenCalled()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Restore Normal Internet' }),
+    )
+    await waitFor(() => expect(mocks.tonoDisconnect).toHaveBeenCalledOnce())
+    expect(mocks.tonoConnect).not.toHaveBeenCalled()
+    expect(mocks.tonoRetryNow).not.toHaveBeenCalled()
   })
 })

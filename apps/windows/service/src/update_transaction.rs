@@ -2,7 +2,8 @@
 //! Native effects live in `windows`; the same store/consumption boundary is
 //! exercised with real files and substituted I/O in the focused tests.
 use crate::update_contract::{
-    Components, Context, Observation, Phase, Receipt, ReleaseManifest, Target, TargetId, canonical,
+    Components, Context, Observation, Phase, Protection, Receipt, ReleaseManifest, Target,
+    TargetId, canonical,
 };
 use anyhow::{Context as _, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -36,6 +37,13 @@ pub enum Execution {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct DisconnectEvidence {
+    pub requested_at_unix: u64,
+    pub verified_at_unix: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Attempt {
     pub manifest: ReleaseManifest,
     pub receipt: Receipt,
@@ -45,6 +53,8 @@ pub struct Attempt {
     pub execution: Execution,
     pub executor: Option<Image>,
     pub old_components: Components,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disconnect: Option<DisconnectEvidence>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -115,6 +125,16 @@ impl State {
                 self.manual_installer.is_none() || a.receipt.phase == Phase::Committed,
                 "manual lease conflicts with pending update"
             );
+            if let Some(disconnect) = &a.disconnect {
+                ensure!(
+                    a.receipt.phase != Phase::Committed
+                        && disconnect.requested_at_unix >= a.receipt.created_at_unix
+                        && disconnect
+                            .verified_at_unix
+                            .is_none_or(|at| at >= disconnect.requested_at_unix),
+                    "explicit Disconnect evidence conflicts with transaction"
+                );
+            }
         }
         Ok(())
     }
@@ -220,7 +240,9 @@ impl Store {
         ensure!(!self.write_failed, "disk acknowledgement is uncertain");
         let a = self.attempt()?;
         ensure!(
-            a.receipt.blocked_reason.is_none() && a.receipt.phase != Phase::Committed,
+            a.receipt.blocked_reason.is_none()
+                && a.receipt.phase != Phase::Committed
+                && a.disconnect.is_none(),
             "attempt cannot grant further authority"
         );
         ensure!(
@@ -261,6 +283,122 @@ impl Store {
         attempt.execution = Execution::Consumed;
         attempt.receipt.updated_at_unix = now;
         self.save_with(next, write)
+    }
+
+    /// Shared gate for repair-resource mutation, including recovery registration.
+    /// Store::open re-establishes durability before a restart can reach this gate.
+    pub fn consumed_attempt(&self) -> Result<&Attempt> {
+        ensure!(!self.write_failed, "consumption durability is uncertain");
+        let a = self.attempt()?;
+        ensure!(
+            matches!(
+                a.execution,
+                Execution::Consumed
+                    | Execution::Replaced
+                    | Execution::RolledBack
+                    | Execution::Uncertain
+            ) && self.state.consumed_sequence >= a.manifest.release_sequence,
+            "repair mutation requires durable consumption"
+        );
+        Ok(a)
+    }
+
+    fn disconnect_peer(&self, owner: &str, peer: &Image) -> Result<&Attempt> {
+        ensure!(
+            !self.write_failed && self.pending(),
+            "no durable pending attempt"
+        );
+        let a = self.attempt()?;
+        ensure!(a.receipt.owner == owner, "Disconnect owner mismatch");
+        ensure!(
+            a.initiating_image == *peer || a.successor_image.as_ref() == Some(peer),
+            "Disconnect requires the original or executor-launched incarnation"
+        );
+        Ok(a)
+    }
+
+    /// Explicit release is not cancellation or successful recovery. Persist its
+    /// request before touching protection and leave requiredRecovery unchanged.
+    pub fn request_disconnect(&mut self, owner: &str, peer: &Image, now: u64) -> Result<()> {
+        let a = self.disconnect_peer(owner, peer)?;
+        ensure!(
+            now >= a.receipt.updated_at_unix,
+            "Disconnect clock is uncertain"
+        );
+        if a.disconnect.is_some() {
+            return Ok(());
+        }
+        let mut next = self.state.clone();
+        next.attempt.as_mut().unwrap().disconnect = Some(DisconnectEvidence {
+            requested_at_unix: now,
+            verified_at_unix: None,
+        });
+        self.save(next)
+    }
+
+    pub fn verify_disconnect(
+        &mut self,
+        owner: &str,
+        peer: &Image,
+        now: u64,
+        observed: Protection,
+    ) -> Result<()> {
+        let a = self.disconnect_peer(owner, peer)?;
+        let requested = a
+            .disconnect
+            .as_ref()
+            .context("Disconnect was not requested")?;
+        ensure!(
+            observed == Protection::Unprotected && now >= requested.requested_at_unix,
+            "fresh unprotected readback is required"
+        );
+        let mut next = self.state.clone();
+        next.attempt
+            .as_mut()
+            .unwrap()
+            .disconnect
+            .as_mut()
+            .unwrap()
+            .verified_at_unix = Some(now);
+        self.save(next)
+    }
+
+    pub fn retire_unconsumed(&mut self, owner: &str, peer: &Image) -> Result<()> {
+        self.retire_unconsumed_with(owner, peer, atomic_write)
+    }
+
+    fn retire_unconsumed_with(
+        &mut self,
+        owner: &str,
+        peer: &Image,
+        archive: impl FnOnce(&Path, &[u8]) -> Result<()>,
+    ) -> Result<()> {
+        let a = self.disconnect_peer(owner, peer)?;
+        ensure!(
+            a.initiating_image == *peer
+                && a.executor.is_none()
+                && matches!(
+                    a.execution,
+                    Execution::Reserved | Execution::Extracting | Execution::Staged
+                )
+                && self.state.consumed_sequence < a.manifest.release_sequence
+                && a.disconnect
+                    .as_ref()
+                    .is_some_and(|d| d.verified_at_unix.is_some()),
+            "consumed, launch-uncertain or unverified evidence cannot be retired"
+        );
+        let path = self
+            .root
+            .join(format!("retired-{}.json", a.receipt.attempt_id));
+        if let Err(error) = archive(&path, &serde_json::to_vec(&self.state)?) {
+            self.write_failed = true;
+            return Err(error);
+        }
+        // The full original obligation and private payload remain as evidence.
+        // Never lower sequence/generation or turn explicit release into commit.
+        let mut next = self.state.clone();
+        next.attempt = None;
+        self.save(next)
     }
 
     /// Only the executor-created, initially suspended process can adopt. A path
@@ -412,11 +550,11 @@ pub fn replace(source: &Path, target: &Path) -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::update_contract::Protection;
 
-    fn reserved() -> (PathBuf, Store, Image, Image) {
+    pub(crate) fn reserved() -> (PathBuf, Store, Image, Image) {
         let root = std::env::temp_dir().join(format!(
             "tono-update-{}-{}",
             std::process::id(),
@@ -463,13 +601,14 @@ mod tests {
                     install_root: root.clone(),
                     execution: Execution::Staged,
                     executor: Some(executor.clone()),
+                    disconnect: None,
                 }),
             })
             .unwrap();
         (root, store, peer, executor)
     }
 
-    fn authorize(store: &mut Store, peer: &Image) {
+    pub(crate) fn authorize(store: &mut Store, peer: &Image) {
         store
             .observe(
                 "windows:fixture-owner",
@@ -664,6 +803,100 @@ mod tests {
         assert_eq!(
             store.attempt().unwrap().receipt.successor_generation,
             Some(92)
+        );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_explicit_disconnect_archives_only_proven_unconsumed_attempts() {
+        let (root, mut store, peer, _) = reserved();
+        let owner = "windows:fixture-owner";
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().executor = None;
+        next.attempt.as_mut().unwrap().execution = Execution::Reserved;
+        store.save(next).unwrap();
+        let original = store.attempt().unwrap().receipt.clone();
+        let mut other_peer = peer.clone();
+        other_peer.started_at += 1;
+        assert!(
+            store
+                .request_disconnect(owner, &other_peer, 1_900_000_001)
+                .is_err()
+        );
+        assert!(
+            store
+                .request_disconnect("another-owner", &peer, 1_900_000_001)
+                .is_err()
+        );
+        store
+            .request_disconnect(owner, &peer, 1_900_000_001)
+            .unwrap();
+        assert!(
+            store.live_attempt(1_900_000_001).is_err(),
+            "explicit release fences installation and recovery"
+        );
+        assert!(store.retire_unconsumed(owner, &peer).is_err());
+        assert!(
+            store
+                .verify_disconnect(owner, &peer, 1_900_000_002, Protection::ProtectedOffline)
+                .is_err()
+        );
+        // Native readback is injected at this Store boundary, not a WFP test.
+        store
+            .verify_disconnect(owner, &peer, 1_900_000_002, Protection::Unprotected)
+            .unwrap();
+        assert_eq!(
+            store.attempt().unwrap().receipt,
+            original,
+            "Disconnect must not rewrite requiredRecovery/phase"
+        );
+        assert!(
+            store
+                .retire_unconsumed_with(owner, &peer, |_, _| anyhow::bail!("archive disk full"))
+                .is_err()
+        );
+        assert!(store.pending());
+        drop(store);
+        let mut store = Store::open(&root).unwrap();
+        let archive_path = root.join(format!("retired-{}.json", original.attempt_id));
+        store
+            .retire_unconsumed_with(owner, &peer, |path, bytes| {
+                let current: State =
+                    serde_json::from_slice(&std::fs::read(root.join("state.json"))?)?;
+                assert!(current.attempt.is_some(), "archive must precede retirement");
+                atomic_write(path, bytes)
+            })
+            .unwrap();
+        let archive: State = serde_json::from_slice(&std::fs::read(archive_path).unwrap()).unwrap();
+        assert_eq!(archive.attempt.unwrap().receipt, original);
+        drop(store);
+        let store = Store::open(&root).unwrap();
+        assert!(!store.pending());
+        assert_eq!(
+            (store.state.consumed_sequence, store.state.generation),
+            (73, 91)
+        );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        let original = store.attempt().unwrap().receipt.clone();
+        store
+            .request_disconnect(owner, &peer, 1_900_000_003)
+            .unwrap();
+        store
+            .verify_disconnect(owner, &peer, 1_900_000_004, Protection::Unprotected)
+            .unwrap();
+        assert!(store.retire_unconsumed(owner, &peer).is_err());
+        assert!(store.consume(&executor, 1_900_000_005).is_err());
+        assert!(store.pending());
+        assert_eq!(store.attempt().unwrap().receipt, original);
+        assert_eq!(
+            (store.state.consumed_sequence, store.state.generation),
+            (74, 91)
         );
         drop(store);
         std::fs::remove_dir_all(root).unwrap();

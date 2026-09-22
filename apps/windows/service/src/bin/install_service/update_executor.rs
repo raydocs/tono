@@ -147,6 +147,7 @@ fn execute(recovery: bool) -> Result<(), Error> {
         store.consume(&self_image, tx::now()?)?;
     }
     // From here every live/repair mutation has a durable consumed high-water.
+    native::register_consumed_recovery(&store)?;
     let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
     let service = manager.open_service(
         tono_service_protocol::WINDOWS_SERVICE_NAME,
@@ -373,6 +374,7 @@ mod tests {
                     install_root: root.clone(),
                     execution: tx::Execution::Staged,
                     executor: Some(executor.clone()),
+                    disconnect: None,
                 }),
             })
             .unwrap();

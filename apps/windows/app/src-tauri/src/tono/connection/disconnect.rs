@@ -43,7 +43,7 @@ pub async fn release_explicit(state: &Arc<TonoState>, app: &AppHandle) -> Result
 
 /// Account teardown must own the release, not just the UI's wait for it.
 pub(crate) async fn release_for_account(state: &Arc<TonoState>, app: &AppHandle) -> Result<(), String> {
-    let operation = start_explicit_release(state, app, None).await;
+    let operation = start_explicit_release(state, app, None, false).await;
     complete_account_release(&operation).await
 }
 
@@ -56,13 +56,14 @@ pub(super) async fn release_explicit_with_guard(
     state: &Arc<TonoState>, app: &AppHandle,
     guard: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
 ) -> Result<(), String> {
-    let operation = start_explicit_release(state, app, guard).await;
+    let operation = start_explicit_release(state, app, guard, false).await;
     wait_explicit_release(&operation).await
 }
 
 async fn start_explicit_release(
     state: &Arc<TonoState>, app: &AppHandle,
     guard: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
+    explicit_disconnect: bool,
 ) -> Arc<LifecycleOperation> {
     let worker_state = Arc::clone(state);
     let worker_app = app.clone();
@@ -70,7 +71,7 @@ async fn start_explicit_release(
     let task_app = app.clone();
     coordinate_release(state, guard,
         move |guard| async move {
-            run_explicit_release_sequence(&worker_state, &worker_app, guard).await
+            run_release_sequence(&worker_state, &worker_app, guard, explicit_disconnect).await
         },
         move || async move {
             let inner = task_state.lock().await;
@@ -183,8 +184,16 @@ where
 /// recreate a cancellation window between the steps. Other platforms retain their existing
 /// helper sequence until their Service route provides the same complete stop semantics.
 pub(super) async fn run_explicit_release_sequence(
+    state: &Arc<TonoState>, app: &AppHandle,
+    release_guard: tokio::sync::OwnedRwLockWriteGuard<()>,
+) -> Result<(), String> {
+    run_release_sequence(state, app, release_guard, false).await
+}
+
+async fn run_release_sequence(
     state: &Arc<TonoState>, _app: &AppHandle,
     _release_guard: tokio::sync::OwnedRwLockWriteGuard<()>,
+    _explicit_disconnect: bool,
 ) -> Result<(), String> {
     // Wait for detached StartClash/DNS commits that began before the release generation bump.
     // Keeping this guard through the Service call also prevents a stale mutation from starting
@@ -199,9 +208,18 @@ pub(super) async fn run_explicit_release_sequence(
         .map_err(|error| format!("kill switch release failed; protection stays on: {error}"))?;
 
     #[cfg(windows)]
-    let status = service::tono_release_kill_switch()
-        .await
-        .map_err(|error| format!("kill switch release failed; protection stays on: {error}"))?;
+    let status = {
+        // Only the user Disconnect command requests this durable release. Quit,
+        // sign-out and automatic failure cleanup keep the pending-update fence.
+        let update_release = if _explicit_disconnect {
+            commands::update::disconnect_if_pending().await.map_err(|e| format!("update Disconnect remains unproven: {e:#}"))?
+        } else { None };
+        match update_release {
+            Some(status) => status,
+            None => service::tono_release_kill_switch().await
+                .map_err(|error| format!("kill switch release failed; protection stays on: {error}"))?,
+        }
+    };
 
     #[cfg(not(windows))]
     let status = {
@@ -241,13 +259,14 @@ pub async fn disconnect(state: Arc<TonoState>, app: AppHandle) -> Result<(), Str
     let operation = {
         let mut inner = state.lock().await;
         if inner.fsm.status().is_disconnecting {
-            let operation = start_explicit_release(&state, &app, None).await;
+            let operation = start_explicit_release(&state, &app, None, true).await;
             drop(inner);
             return wait_explicit_release(&operation).await;
         }
         inner.invalidate_connection(true);
         let status = inner.fsm.status();
-        if !status.is_connected && !status.is_connecting && !status.is_protection_blocked {
+        if !status.is_connected && !status.is_connecting && !status.is_protection_blocked
+            && !commands::update::incomplete() {
             return Ok(());
         }
         inner.fsm.begin_disconnect();
@@ -255,7 +274,7 @@ pub async fn disconnect(state: Arc<TonoState>, app: AppHandle) -> Result<(), Str
         // Register while the FSM lock still excludes admission. Sampling before registration
         // allowed a joining Disconnect/failure to finish release, admit B, then this caller's
         // delayed sample would dispatch another owner-wide release against B.
-        start_explicit_release(&state, &app, None).await
+        start_explicit_release(&state, &app, None, true).await
     };
     state.audit().log(AuditEvent::DisconnectBegin { cause: "user" });
     wait_explicit_release(&operation).await

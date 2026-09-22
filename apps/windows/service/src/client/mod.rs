@@ -217,7 +217,11 @@ pub async fn update_transaction(
     credentials: &OwnerCredentials,
     request: crate::update_wire::UpdateRequest,
 ) -> Result<Response<crate::update_wire::UpdateStatus>> {
-    let seconds = if matches!(request, crate::update_wire::UpdateRequest::Prepare { .. }) { 240 } else { 20 };
+    let seconds = match request {
+        crate::update_wire::UpdateRequest::Prepare { .. } => 240,
+        crate::update_wire::UpdateRequest::Disconnect => 65,
+        _ => 20,
+    };
     protected_call(Verb::Post, IpcCommand::UpdateTransaction, credentials, None,
         request, Some(Duration::from_secs(seconds))).await
 }
