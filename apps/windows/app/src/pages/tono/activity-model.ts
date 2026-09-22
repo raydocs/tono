@@ -211,6 +211,9 @@ export const toActivityRow = (connection: IConnectionsItem): ActivityRow => {
   )
   const familyAliases =
     process === WECHAT_ACTIVITY_PROCESS ? 'wechat weixin 微信' : ''
+  const chain = connection.chains
+    .slice(0, 16)
+    .map((hop) => sanitizeActivityValue(hop))
   return {
     id: connection.id,
     process: process || '—',
@@ -218,11 +221,9 @@ export const toActivityRow = (connection: IConnectionsItem): ActivityRow => {
     protocol: protocol || '—',
     route,
     rule,
-    chain: connection.chains
-      .slice(0, 16)
-      .map((hop) => sanitizeActivityValue(hop)),
+    chain,
     chainTruncated: connection.chains.length > 16,
-    hasRouteEvidence: !!connection.chains[0]?.trim(),
+    hasRouteEvidence: !!chain[0],
     searchText:
       `${process} ${originalProcess} ${familyAliases} ${target} ${protocol} ${rule}`.toLowerCase(),
   }
