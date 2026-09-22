@@ -14,11 +14,22 @@ Native update qualification remains governed by [UPDATE_INTEGRATION_V1](UPDATE_I
 | Confirmed source bottleneck | Change being integrated | Evidence required |
 | --- | --- | --- |
 | Windows protected DNS apply starts PowerShell/CIM/netsh on the connect path | Native `SetInterfaceDnsSettings` apply plus effective `GetAdaptersAddresses` readback; one bounded compatibility batch only after synchronous completion | Healthy native orchestration spawns no shell; partial/error/contradictory readback cannot report success; existing single-writer timeout and snapshot regressions retained |
-| macOS `getaddrinfo` blocks inside a task-group timeout race; leaving the group drains the blocking child | Cancellable system DNS via DNSService API with owned callback/deadline/cancel lifecycle | Deadline, explicit cancellation and late callback complete exactly once, with no abandoned blocking resolver |
+| macOS `getaddrinfo` blocks inside a task-group timeout race; leaving the group drains the blocking child. DNS-SD submission itself can also synchronously block on the daemon | System DNS via DNSService API; independent waiter deadline/cancellation, serial C-ref ownership and one outstanding request claim | Both held submission and held callback release the caller on deadline/cancel; no stacked blocked submissions, late readiness or cross-queue deallocation |
 | macOS final failed TUN probe is followed by another serial mixed-proxy diagnostic | Overlap the diagnostic with the final TUN round; cancel it on TUN success | Only real TUN proof grants Connected; diagnostic success cannot substitute; stale/cancelled work cannot write route preference or telemetry |
 
 Native source and exact hosted regression results are recorded in the integration PR.
 Until those results exist, the above is implementation scope, not a passed checklist.
+
+The macOS setup distinction is important: Apple's DNS-SD client synchronously
+submits the daemon request before installing dispatch callbacks. Its nominal daemon
+acknowledgement wait is 60 seconds, and not every setup I/O has a wall-clock bound
+([client stub, pinned source](https://github.com/apple-oss-distributions/mDNSResponder/blob/d4658af3f5f291311c6aee4210aa6d39bda82bbe/mDNSShared/dnssd_clientstub.c#L1153-L1158)).
+A timer queued behind that C call does not bound Disconnect. The scoped repair
+separates ending the caller's wait from eventual OS cleanup: deadline/cancellation
+returns no DNS readiness, while the owner retains the one request claim until it
+can dispose the ref. A synchronous OS call is **not forcibly canceled**; subsequent
+requests fail closed rather than accumulate blocked workers. Native tests must
+hold the submission call itself, not only withhold an already-registered callback.
 
 Kept unchanged:
 
