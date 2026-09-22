@@ -82,6 +82,7 @@ extension AppState {
         )
         let switchGeneration = connectionCoordinator.protectionOperationGeneration
         let routeOwner = ManagedExitCatalogOwnership.currentAccount
+        let routeCatalogDigest = managedCatalogDigest
         connectionCoordinator.nodeSwitchTask = Task { [weak self] in
             guard let self else { return }
             defer {
@@ -164,7 +165,8 @@ extension AppState {
                     }
                 ) else { return }
                 protectionTransitionInFlight = false
-                self.recordVerifiedRouteSuccess(nodeName, owner: routeOwner, generation: switchGeneration)
+                self.recordVerifiedRouteSuccess(nodeName, owner: routeOwner, generation: switchGeneration,
+                                                catalogDigest: routeCatalogDigest)
                 await proxyService.refresh()
                 try checkSwitchCurrent()
                 ConnectionTelemetryBuffer.shared.record(
