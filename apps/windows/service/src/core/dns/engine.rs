@@ -1006,12 +1006,8 @@ fn apply_protected(guid: &str, active: &ActiveAdapter) -> Result<LiveApplyEntry>
 
 pub(super) fn apply_protected_set(guids: &[String]) -> Result<Vec<(String, bool)>> {
     let active = active_adapter_map()?;
-    // An adapter that is no longer active has no live resolver to point anywhere.
-    let mut results = guids
-        .iter()
-        .filter(|guid| !active.contains_key(&guid.to_ascii_uppercase()))
-        .map(|guid| (guid.clone(), true))
-        .collect::<Vec<_>>();
+    // Absence is a non-participant, not effective-apply success. Omit it so the facade keeps
+    // its durable pending bit for reappearance without repeatedly writing healthy adapters.
     let entries = guids
         .iter()
         .filter_map(|guid| {
@@ -1021,8 +1017,7 @@ pub(super) fn apply_protected_set(guids: &[String]) -> Result<Vec<(String, bool)
         })
         .map(|(guid, adapter)| apply_protected(guid, adapter))
         .collect::<Result<Vec<_>>>()?;
-    results.extend(native_apply::apply(&entries));
-    Ok(results)
+    Ok(native_apply::apply(&entries))
 }
 
 fn restore_value(subkey: &str, value: &str, saved: &Option<String>) -> Result<()> {

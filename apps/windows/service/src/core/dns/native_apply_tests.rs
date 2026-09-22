@@ -320,6 +320,13 @@ async fn native_apply_absence_retains_pending_until_active_repair() -> Result<()
     );
     assert!(absent.enabled && !facade::status_is_unverified(&absent));
 
+    let (idle, active_pending) = facade::observe_status_unlocked().await?;
+    assert!(!facade::needs_reconcile(
+        true,
+        true,
+        idle.enabled,
+        active_pending || facade::status_is_unverified(&idle)
+    ));
     let idle_counts = test_io::with(|io| (io.writes, io.native_calls)).unwrap();
     facade::enable().await?;
     assert_eq!(
@@ -411,13 +418,17 @@ async fn native_apply_registry_error_retains_pending_repair() -> Result<()> {
             Some("198.18.0.2")
         );
     });
-    let status = facade::status_unlocked().await?;
+    // Use the same private observation and gate as the watchdog, without turning a hard
+    // registry error into an advisory warning for the App's unchanged health predicate.
+    let (status, active_pending) = facade::observe_status_unlocked().await?;
+    assert!(active_pending);
+    assert!(status.enabled && !facade::status_is_unverified(&status));
     assert!(
         facade::needs_reconcile(
             true,
             true,
             status.enabled,
-            facade::status_is_unverified(&status)
+            active_pending || facade::status_is_unverified(&status)
         ),
         "partial registry error must remain repairable despite protected-looking v4 registry"
     );
