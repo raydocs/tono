@@ -33,7 +33,8 @@ class MixedProbeTests(unittest.TestCase):
         cls.binary = root / 'probe'
         subprocess.run(['xcrun', 'swiftc', '-parse-as-library', *[
             str(SERVICES / f) for f in ['ProtectedConnectivity.swift',
-                'ProtectedConnectivityVerifier.swift', 'ProtectedDNSProbe.swift']],
+                'ProtectedConnectivityVerifier.swift', 'ProtectedDNSProbe.swift',
+                'ProtectedSystemResolver.swift']],
             str(harness), '-o', str(cls.binary)], check=True, capture_output=True)
 
     @classmethod
