@@ -16,7 +16,7 @@ actor PrivilegedRuntimeCoordinator {
     func stageUpdate(manifest: Data, signature: Data, package: URL) throws -> HelperManager.UpdateStatus {
         try HelperManager.updateRequest("stage", object: [
             "manifest": manifest.base64EncodedString(), "signature": signature.base64EncodedString(),
-            "package": package.resolvingSymlinksInPath().path,
+            "package": try HelperManager.updatePackagePath(package),
         ])
     }
 

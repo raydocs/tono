@@ -26,6 +26,12 @@ A rename followed by a failed directory sync therefore cannot authorize
 executor registration/startup, successor runtime mutation or retirement until
 durability is re-established. Merely observing candidate bytes is insufficient.
 
+The App sends a POSIX `realpath` spelling of its downloaded temporary file.
+Foundation's `resolvingSymlinksInPath` strips `/private` on macOS, leaving a
+`/var` or `/tmp` alias that the Helper correctly refuses. The Helper still
+walks every component with `openat(O_NOFOLLOW)`; App canonicalization grants no
+trust and cannot bypass private-copy ownership, size or hash verification.
+
 `UpdateExecutor` is a private copy of the old signed helper, registered as an
 independent launchd job. It waits for the initiating process to exit, rechecks
 the staged package and offline runtime, persists `replacing`, then replaces the

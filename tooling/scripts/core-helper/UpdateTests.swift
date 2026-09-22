@@ -21,7 +21,10 @@ func runUpdateSelfTests() -> Bool {
         do {
             try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
             defer { try? FileManager.default.removeItem(at: temporary) }
-            try body(temporary.resolvingSymlinksInPath().path)
+            guard let physicalPath = canonicalPath(temporary.path) else {
+                throw HelperFailure.invalid("Cannot resolve the private test directory.")
+            }
+            try body(physicalPath)
             print("PASS update: \(name)")
         } catch { failures.append(name); fputs("FAIL update: \(name): \(error)\n", stderr) }
     }

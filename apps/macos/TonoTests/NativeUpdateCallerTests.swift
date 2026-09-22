@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import ScreenCaptureKit
 import XCTest
 @testable import Tono
@@ -46,6 +47,26 @@ final class NativeUpdateCallerTests: XCTestCase {
         XCTAssertEqual(result.execution, "consumed")
     }
 
+    func testDownloadedTemporaryPathContainsNoLinkedAncestors() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tono-update-path-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let package = directory.appendingPathComponent("package.zip")
+        let bytes = Data("downloaded-package".utf8)
+        try bytes.write(to: package)
+        let physical = try HelperManager.updatePackagePath(package)
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: physical)), bytes)
+        var ancestor = ""
+        for part in physical.split(separator: "/") {
+            ancestor += "/" + part
+            var metadata = stat()
+            XCTAssertEqual(lstat(ancestor, &metadata), 0)
+            XCTAssertNotEqual(metadata.st_mode & mode_t(S_IFMT), mode_t(S_IFLNK),
+                              "App sent a linked path that the no-follow Helper must refuse")
+        }
+        XCTAssertThrowsError(try HelperManager.updatePackagePath(package.appendingPathExtension("missing")))
+    }
+
     func testNativeUpdateOfferAndFailureRender() async throws {
         let offer = AppUpdater.offerAlert(version: "0.0.73")
         XCTAssertEqual(offer.buttons.map(\.title), ["Install and Restart", "Not Now"])
@@ -78,6 +99,7 @@ final class NativeUpdateCallerTests: XCTestCase {
         let configuration = SCStreamConfiguration()
         configuration.width = Int(window.frame.width * 2)
         configuration.height = Int(window.frame.height * 2)
+        configuration.scalesToFit = true
         configuration.showsCursor = false
         let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
         let bitmap = NSBitmapImageRep(cgImage: image)
