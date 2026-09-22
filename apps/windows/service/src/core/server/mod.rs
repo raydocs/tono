@@ -773,11 +773,26 @@ enum OwnerLifecycleGate<'a> {
 /// The guard is returned rather than dropped here, so it lives for the whole of the caller's
 /// operation. On a rejected gate the response is built while the guard is still held, which is
 /// where it is built today.
+struct OwnerLifecycleGuard {
+    _lifecycle: MutexGuard<'static, ()>,
+    #[cfg(windows)]
+    _repair: crate::ServiceRepairGate,
+}
+
 async fn enter_owner_lifecycle(
     owner: &AuthenticatedOwner,
     gate: OwnerLifecycleGate<'_>,
-) -> ControlFlow<Result<HttpResponse>, MutexGuard<'static, ()>> {
+) -> ControlFlow<Result<HttpResponse>, OwnerLifecycleGuard> {
     let lifecycle_guard = OWNER_LIFECYCLE_LOCK.lock().await;
+    #[cfg(windows)]
+    let repair = match crate::acquire_service_repair_gate() {
+        Ok(Some(guard)) => guard,
+        _ => return ControlFlow::Break(service_unavailable("native installer owns the lifecycle")),
+    };
+    #[cfg(windows)]
+    if let Err(error) = crate::core::update::lifecycle_allowed(owner) {
+        return ControlFlow::Break(service_error(ServiceError::still_protected(error.to_string())));
+    }
     let gated = match gate {
         OwnerLifecycleGate::Unchecked => Ok(()),
         OwnerLifecycleGate::ArmedPolicyOwner => {
@@ -789,7 +804,11 @@ async fn enter_owner_lifecycle(
         }
     };
     match gated {
-        Ok(()) => ControlFlow::Continue(lifecycle_guard),
+        Ok(()) => ControlFlow::Continue(OwnerLifecycleGuard {
+            _lifecycle: lifecycle_guard,
+            #[cfg(windows)]
+            _repair: repair,
+        }),
         Err(error) => ControlFlow::Break(service_error(error)),
     }
 }

@@ -336,7 +336,7 @@
     "whatFailed": "失败原因",
     "copyDetails": "复制诊断信息",
     "catalogRequiresChoice": "当前节点已下线，请另选一个",
-    "updateIncomplete": "更新未完成，请手动断开后重装",
+    "updateIncomplete": "更新恢复尚未完成，请保持 Tono 运行。如无法恢复，请先联系支持再重装；断开连接不会取消受保护的更新。",
     "killSwitchError": "断网保护：{{message}}",
     "killSwitchErrorNote": "上次错误，可能已恢复。",
     "errors": {

@@ -213,6 +213,15 @@ impl Verb {
 ///
 /// `session` chooses the envelope: routes that need only an authenticated owner pass `None`,
 /// routes that need proof of the current session pass `Some`.
+pub async fn update_transaction(
+    credentials: &OwnerCredentials,
+    request: crate::update_wire::UpdateRequest,
+) -> Result<Response<crate::update_wire::UpdateStatus>> {
+    let seconds = if matches!(request, crate::update_wire::UpdateRequest::Prepare { .. }) { 240 } else { 20 };
+    protected_call(Verb::Post, IpcCommand::UpdateTransaction, credentials, None,
+        request, Some(Duration::from_secs(seconds))).await
+}
+
 async fn protected_call<P, R>(
     verb: Verb,
     command: IpcCommand,

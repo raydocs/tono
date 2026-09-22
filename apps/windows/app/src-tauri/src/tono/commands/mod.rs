@@ -38,6 +38,7 @@ pub mod restore;
 pub mod diagnostics;
 pub mod support;
 pub mod quit;
+pub mod update;
 pub use account::{
     load_credentials, tono_account, tono_devices, tono_repair_service, tono_revoke_device,
     tono_service_prerequisites, tono_sign_in_start, tono_sign_in_verify, tono_sign_out,
@@ -59,7 +60,7 @@ pub use diagnostics::{
 };
 pub use quit::{
     flush_audit_for_exit, quit_protection_active, quit_release, resync_after_cancelled_quit,
-    stop_service_on_unprotected_quit, tono_prepare_update,
+    stop_service_on_unprotected_quit,
 };
 
 
@@ -291,7 +292,7 @@ pub(crate) fn status_of(inner: &TonoInner) -> TonoStatus {
         } else {
             None
         },
-        update_incomplete: crate::tono::update_handoff::incomplete(),
+        update_incomplete: update::incomplete() || crate::tono::update_handoff::incomplete(),
     }
 }
 

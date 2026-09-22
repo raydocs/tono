@@ -946,6 +946,23 @@ async fn verify_live_unlocked_for(armed: &Armed, current_core: Option<CoreInstan
     }
 }
 
+/// Update proof must query WFP now, never elevate the diagnostic cache to proof.
+#[cfg(windows)]
+pub(crate) async fn observe_for_update() -> Result<KillSwitchStatus> {
+    let _operation = WFP_OPERATION.lock().await;
+    let armed = armed_guard().clone();
+    if let Some(armed) = armed {
+        let current = current_core_instance_authoritative().await;
+        verify_live_unlocked_for(&armed, current).await?;
+        note_verify(true);
+        if current.is_none() {
+            // A successful Core stop is not proof that its adapter disappeared.
+            crate::core::update::tunnel_absent(&armed.intent.tunnel_interface)?;
+        }
+    }
+    Ok(status().await)
+}
+
 async fn remove_all_filters_unlocked() -> Result<()> {
     #[cfg(all(windows, not(feature = "test")))]
     {
@@ -2459,6 +2476,8 @@ pub async fn retire_unverified_on_service_start() -> Result<bool> {
     if !SUPPORTED {
         return Ok(false);
     }
+    #[cfg(windows)]
+    if crate::core::update::pending() { return Ok(false); }
     let _operation = WFP_OPERATION.lock().await;
     let Some(armed) = armed_guard().clone() else {
         return Ok(false);
@@ -3279,6 +3298,7 @@ mod tests {
                 gid: 20,
             },
             app_data_root: std::env::temp_dir(),
+            peer_pid: None,
         };
         let config = ClashConfig {
             core_config: CoreConfig {

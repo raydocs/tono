@@ -934,6 +934,12 @@ impl CoreManager {
                         restart_timestamps.push(now);
                         continue;
                     }
+                    #[cfg(windows)]
+                    if crate::core::update::pending() {
+                        // The coordinator stopped or is replacing this generation.
+                        // Watchdog restart is not successor recovery authority.
+                        break 'watchdog;
+                    }
                     let args = core_args(&config);
                     match run_with_logging(
                         &config.core_config.core_path,

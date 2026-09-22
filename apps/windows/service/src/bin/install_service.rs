@@ -6,6 +6,9 @@ fn main() {
 mod shared;
 #[path = "install_service/update_journal.rs"]
 mod installer_journal;
+#[cfg(windows)]
+#[path = "install_service/update_executor.rs"]
+mod update_executor;
 
 use anyhow::Error;
 use anyhow::{Context as _, bail};
@@ -992,6 +995,7 @@ fn copy_ordinary_file_exclusive(source: &Path, destination: &Path) -> Result<(),
 /// where the old Service expects it. Rollback also copies its backup through a fresh restore file,
 /// so failure restoring the second member never consumes the first member's only recovery copy.
 #[cfg(windows)]
+#[derive(serde::Serialize, serde::Deserialize)]
 struct CoordinatedBinaryReplacement {
     staged: PathBuf,
     target: PathBuf,
@@ -1617,6 +1621,7 @@ fn main() -> anyhow::Result<()> {
     };
     use std::ffi::{OsStr, OsString};
 
+    if update_executor::dispatch()? { return Ok(()); }
     let install_mode = parse_windows_install_mode(std::env::args_os().skip(1))?;
     if run_maintenance_if_requested()? {
         return Ok(());
@@ -1633,17 +1638,9 @@ fn main() -> anyhow::Result<()> {
     // privileged installer state.
     let _gate = enter_repair_gate()?;
     let source = bundled_service_binary()?;
-    if let Some((_, app)) = &replacement_candidates {
-        // G3: gate at installer entry, not only in the existing-Service branch.
-        // Refusal must precede core-pin publication, Service stop/configuration,
-        // and any binary replacement. A persisted phase is still NOT a receipt
-        // authenticating this installer/package to the initiating owner (#26).
-        if let Err(error) = record_install_started_for_installed_app(&app.target) {
-            eprintln!("tono-install: update journal gate refused replacement: {error}");
-            drop(_gate);
-            std::process::exit(installer_journal::JOURNAL_GATE_REJECTED_EXIT_CODE);
-        }
-    }
+    // Legacy user journals are diagnostics only. This entry has no v1 grant:
+    // both runtime replacement and service-only repair require verified Disconnect.
+    tokio::runtime::Runtime::new()?.block_on(tono_service_protocol::update_native::manual_gate())?;
     let install_dir = tono_service_protocol::prepare_service_install_directory()?;
     publish_core_digest_pin(&install_dir)?;
     let target = install_dir.join("tono-service.exe");

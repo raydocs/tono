@@ -2528,6 +2528,17 @@ pub(crate) async fn status() -> DnsProtectionStatus {
         .clone()
 }
 
+/// Transaction proof reads actual adapter state under the DNS writer lock.
+/// The diagnostic cache is deliberately not proof of update recovery.
+#[cfg(windows)]
+pub(crate) async fn observe_for_update() -> Result<DnsProtectionStatus> {
+    let _operation = DNS_OPERATION.lock().await;
+    if !snapshot_path().exists() {
+        ensure_snapshotless_dns_is_safe().await?;
+    }
+    status_unlocked().await
+}
+
 fn publish_status(status: &DnsProtectionStatus) {
     *DNS_STATUS_CACHE
         .lock()

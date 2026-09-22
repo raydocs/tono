@@ -7,6 +7,8 @@ pub enum IpcCommand {
     GetVersion,
     #[strum(serialize = "/status")]
     Status,
+    #[strum(serialize = "/update/transaction")]
+    UpdateTransaction,
     #[strum(serialize = "/macos-kill-switch/preflight")]
     PreflightMacosKillSwitch,
     #[strum(serialize = "/kill-switch/status")]
