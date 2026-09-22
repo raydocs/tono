@@ -1179,6 +1179,7 @@ export interface TranslationResources {
           observed: string
           unknown: string
         }
+        summaryHint: string
       }
       intro: {
         getStarted: string

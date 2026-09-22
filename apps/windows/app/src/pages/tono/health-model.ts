@@ -1,14 +1,20 @@
 import type { TonoLocalDiagnosticsReport, TonoStatus } from '@/services/tono'
 
 export type HealthState = 'observed' | 'attention' | 'unknown'
+export const HEALTH_CHECK_KEYS = [
+  'account',
+  'catalog',
+  'service',
+  'core',
+  'dns',
+  'tunnel',
+  'exit',
+] as const
 
 /** Classify only what was read. No intent, TCP latency or old failure implies live health. */
 export const healthChecks = (
   report: TonoLocalDiagnosticsReport,
-): Record<
-  'account' | 'catalog' | 'service' | 'core' | 'dns' | 'tunnel' | 'exit',
-  HealthState
-> => {
+): Record<(typeof HEALTH_CHECK_KEYS)[number], HealthState> => {
   const local = report.localEvidence
   const connected = report.uiState === 'connected'
   return {

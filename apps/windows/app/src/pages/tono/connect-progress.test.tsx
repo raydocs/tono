@@ -79,6 +79,14 @@ vi.mock('@/services/tono', async (importOriginal) => ({
 
 vi.mock('@/services/states', () => ({ useThemeMode: () => 'dark' }))
 
+vi.mock('@tauri-apps/api/window', () => ({
+  getCurrentWindow: () => ({
+    isVisible: async () => true,
+    onFocusChanged: async () => () => {},
+    listen: async () => () => {},
+  }),
+}))
+
 vi.mock('@/services/notice-service', () => ({
   showNotice: { success: noticeSuccess, error: noticeError, info: vi.fn() },
 }))
@@ -221,7 +229,7 @@ describe('ConnectProgressCard', () => {
     expect(
       (await screen.findByTestId('tono-recovery-feedback')).textContent,
     ).toContain('No automatic retry is scheduled')
-    fireEvent.click(screen.getByRole('button', { name: 'Retry now' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Retry Now' }))
     await waitFor(() => expect(tonoRetryNowMock).toHaveBeenCalledTimes(1))
     expect(tonoConnectMock).not.toHaveBeenCalled()
   })

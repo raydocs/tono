@@ -47,6 +47,7 @@
   "experience": {
     "healthTitle": "Network health check",
     "healthDescription": "Read local account, service and connection evidence. This does not change your network, upload logs or prove every website works.",
+    "summaryHint": "This summary may include cached state. It is not a live protection check; use the health check above.",
     "runHealth": "Run health check",
     "checking": "Checking…",
     "checkedAt": "Checked {{time}}",

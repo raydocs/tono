@@ -255,6 +255,9 @@ const SupportPage = () => {
           <h2 style={{ margin: '0 0 6px', fontSize: 14, color: text.primary }}>
             {t('tono.support.summary.title')}
           </h2>
+          <p style={{ fontSize: 12, lineHeight: 1.55, color: text.secondary }}>
+            {t('tono.experience.summaryHint')}
+          </p>
           {reportError && (
             <p
               role="alert"

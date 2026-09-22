@@ -15,7 +15,11 @@ import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
 import { TonoConfirmDialog } from '@/tono-ui/TonoAccountCard'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 
-import { healthChecks, healthIsCurrent } from './health-model'
+import {
+  HEALTH_CHECK_KEYS,
+  healthChecks,
+  healthIsCurrent,
+} from './health-model'
 
 /** Explicit local observation; never poll, repair, connect or upload as part of a check. */
 export const HealthCheck = () => {
@@ -43,6 +47,10 @@ export const HealthCheck = () => {
     }
   })
   const repair = useLockFn(async () => {
+    if (!current || status?.uiState !== 'notConnected') {
+      setRepairOpen(false)
+      return
+    }
     setRepairing(true)
     setRepairError(null)
     try {
@@ -65,6 +73,7 @@ export const HealthCheck = () => {
   }
   const local = report?.localEvidence
   const unknown = t('tono.experience.state.unknown')
+  const checks = report ? healthChecks(report) : null
   return (
     <>
       <GlassCard radius="var(--tono-radius-card)" padding={18}>
@@ -107,9 +116,9 @@ export const HealthCheck = () => {
                 { time: new Date(report.reportedAtMs).toLocaleString() },
               )}
             </p>
-            {current && (
+            {current && checks && (
               <div data-testid="tono-health-results">
-                {Object.entries(healthChecks(report)).map(([key, value]) => (
+                {HEALTH_CHECK_KEYS.map((key) => (
                   <div
                     key={key}
                     data-testid={`tono-health-${key}`}
@@ -130,14 +139,14 @@ export const HealthCheck = () => {
                       <span
                         style={{
                           color:
-                            value === 'attention'
+                            checks[key] === 'attention'
                               ? TONO_COLORS.protectedOffline
-                              : value === 'observed'
+                              : checks[key] === 'observed'
                                 ? TONO_COLORS.latencyGood
                                 : text.secondary,
                         }}
                       >
-                        {t(`tono.experience.state.${value}`)}
+                        {t(`tono.experience.state.${checks[key]}`)}
                       </span>
                     </div>
                     <p
@@ -183,33 +192,35 @@ export const HealthCheck = () => {
             {t('tono.experience.identityTitle')}
           </h2>
           <dl style={{ margin: 0, fontSize: 12 }}>
-            {[
+            {(
               [
-                'channel',
-                t(
-                  local?.buildProvenance === 'candidate'
-                    ? 'tono.experience.channelCandidate'
-                    : local?.buildProvenance === 'release-workflow'
-                      ? 'tono.experience.channelRelease'
-                      : local?.buildProvenance === 'development'
-                        ? 'tono.experience.channelDevelopment'
-                        : 'tono.experience.channelUnknown',
-                ),
-              ],
-              ['source', local?.appBuild ?? unknown],
-              [
-                'service',
-                `${report.serviceProtocol ?? unknown} / ${report.serviceBuild ?? unknown}`,
-              ],
-              ['coreExpected', local?.expectedCoreVersion ?? unknown],
-              ['coreReported', local?.reportedCoreVersion ?? unknown],
-              [
-                'catalog',
-                report.catalogRevision == null
-                  ? unknown
-                  : String(report.catalogRevision),
-              ],
-            ].map(([key, value]) => (
+                [
+                  'channel',
+                  t(
+                    local?.buildProvenance === 'candidate'
+                      ? 'tono.experience.channelCandidate'
+                      : local?.buildProvenance === 'release-workflow'
+                        ? 'tono.experience.channelRelease'
+                        : local?.buildProvenance === 'development'
+                          ? 'tono.experience.channelDevelopment'
+                          : 'tono.experience.channelUnknown',
+                  ),
+                ],
+                ['source', local?.appBuild ?? unknown],
+                [
+                  'service',
+                  `${report.serviceProtocol ?? unknown} / ${report.serviceBuild ?? unknown}`,
+                ],
+                ['coreExpected', local?.expectedCoreVersion ?? unknown],
+                ['coreReported', local?.reportedCoreVersion ?? unknown],
+                [
+                  'catalog',
+                  report.catalogRevision == null
+                    ? unknown
+                    : String(report.catalogRevision),
+                ],
+              ] as const
+            ).map(([key, value]) => (
               <div
                 key={key}
                 style={{
@@ -247,7 +258,7 @@ export const HealthCheck = () => {
           </p>
         </GlassCard>
       )}
-      {repairOpen && (
+      {repairOpen && current && status?.uiState === 'notConnected' && (
         <TonoConfirmDialog
           dark={dark}
           title={t('tono.experience.repairTitle')}

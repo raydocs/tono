@@ -47,6 +47,7 @@
   "experience": {
     "healthTitle": "网络健康检查",
     "healthDescription": "读取本机账号、服务和连接证据。不修改网络、不上传日志，也不证明所有网站都可访问。",
+    "summaryHint": "以下摘要可能包含缓存状态，不代表实时保护结果；请使用上方健康检查核实。",
     "runHealth": "开始健康检查",
     "checking": "正在检查…",
     "checkedAt": "检查时间 {{time}}",

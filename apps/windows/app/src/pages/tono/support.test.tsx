@@ -122,16 +122,14 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue({ previewId: 'frozen-1', report })
   repairServiceMock.mockReset().mockResolvedValue(undefined)
-  statusMock
-    .mockReset()
-    .mockReturnValue({
-      uiState: 'connected',
-      selectedServer: 'US West 1',
-      accountState: 'ready',
-      routePreferenceScope: 'scope-a',
-      controllerGeneration: 4,
-      catalogRevision: 12,
-    })
+  statusMock.mockReset().mockReturnValue({
+    uiState: 'connected',
+    selectedServer: 'US West 1',
+    accountState: 'ready',
+    routePreferenceScope: 'scope-a',
+    controllerGeneration: 4,
+    catalogRevision: 12,
+  })
   auditLogPathMock.mockReset().mockResolvedValue({
     path: 'C:\\Users\\Alice\\AppData\\Local\\Tono\\traffic-audit.jsonl',
     droppedCount: 0,
@@ -225,6 +223,11 @@ describe('Tono Support page', () => {
     expect(screen.getByRole('alert').textContent).toBe(
       "Couldn't load the diagnostics summary. Refresh to try again.",
     )
+    expect(
+      screen.getByText(
+        'This summary may include cached state. It is not a live protection check; use the health check above.',
+      ),
+    ).toBeDefined()
     expect(refresh.disabled).toBe(false)
     await act(async () => fireEvent.click(refresh))
     expect(screen.queryByRole('alert')).toBeNull()
@@ -330,6 +333,40 @@ describe('Tono Support page', () => {
     expect(uploadDiagnosticsMock).toHaveBeenLastCalledWith('frozen-2')
   })
 
+  it('retires held previews and receipts when the account changes without navigation', async () => {
+    let finishPreview!: (value: {
+      previewId: string
+      report: TonoDiagnosticsReport
+    }) => void
+    prepareSupportReportMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishPreview = resolve
+      }),
+    )
+    const view = renderPage()
+    fireEvent.click(
+      await screen.findByTestId('tono-support-upload-diagnostics'),
+    )
+    statusMock.mockReturnValue({
+      ...statusMock(),
+      routePreferenceScope: 'scope-b',
+    })
+    view.rerender(<SupportPage />)
+    await act(async () => finishPreview({ previewId: 'old-a', report }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(uploadDiagnosticsMock).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('tono-support-upload-diagnostics'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Send report' }))
+    await screen.findByTestId('tono-support-upload-reference')
+    statusMock.mockReturnValue({
+      ...statusMock(),
+      routePreferenceScope: 'scope-c',
+    })
+    view.rerender(<SupportPage />)
+    expect(screen.queryByTestId('tono-support-upload-reference')).toBeNull()
+    expect(screen.getByTestId('tono-support-upload-diagnostics')).toBeDefined()
+  })
+
   it('runs health read-only, distinguishes unknowns and invalidates account-stale observations', async () => {
     localDiagnosticsReportMock.mockResolvedValue({
       ...report,
@@ -366,6 +403,29 @@ describe('Tono Support page', () => {
     expect(screen.getByText('Test candidate')).toBeDefined()
     expect(repairServiceMock).not.toHaveBeenCalled()
     expect(uploadDiagnosticsMock).not.toHaveBeenCalled()
+    const observed = await localDiagnosticsReportMock()
+    localDiagnosticsReportMock.mockResolvedValue({
+      ...observed,
+      serviceProtocol: '1.14',
+      localEvidence: {
+        ...observed.localEvidence,
+        reportedCoreVersion: '1.0.0',
+        protectionWanted: true,
+        protectionLive: true,
+      },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Run the check again' }))
+    await waitFor(() =>
+      expect(screen.getByTestId('tono-health-core').textContent).toContain(
+        'Observed',
+      ),
+    )
+    expect(screen.getByTestId('tono-health-tunnel').textContent).toContain(
+      'Observed',
+    )
+    expect(screen.getByTestId('tono-health-exit').textContent).toContain(
+      'Observed',
+    )
     statusMock.mockReturnValue({
       ...statusMock(),
       routePreferenceScope: 'scope-b',
@@ -375,6 +435,42 @@ describe('Tono Support page', () => {
     expect(
       screen.getByText('Connection or account changed. Run the check again.'),
     ).toBeDefined()
+  })
+
+  it('requires separate consent to repair and does not treat repair as fresh health evidence', async () => {
+    statusMock.mockReturnValue({ ...statusMock(), uiState: 'notConnected' })
+    localDiagnosticsReportMock.mockResolvedValue({
+      ...report,
+      uiState: 'notConnected',
+      serviceProtocol: null,
+      localEvidence: {
+        status: 'collected',
+        accountScope: 'scope-a',
+        controllerGeneration: 4,
+      },
+    })
+    renderPage()
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Run health check' }),
+    )
+    const repair = await screen.findByRole('button', { name: 'Repair service' })
+    expect(screen.getByTestId('tono-health-exit').textContent).toContain(
+      'Not verified',
+    )
+    expect(repairServiceMock).not.toHaveBeenCalled()
+    fireEvent.click(repair)
+    const dialog = await screen.findByRole('dialog')
+    expect(repairServiceMock).not.toHaveBeenCalled()
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'Repair service' }),
+    )
+    await waitFor(() => expect(repairServiceMock).toHaveBeenCalledTimes(1))
+    expect(screen.queryByTestId('tono-health-results')).toBeNull()
+    expect(
+      screen.getByRole('button', { name: 'Run health check' }),
+    ).toBeDefined()
+    expect(localDiagnosticsReportMock).toHaveBeenCalledTimes(1)
+    expect(uploadDiagnosticsMock).not.toHaveBeenCalled()
   })
 })
 

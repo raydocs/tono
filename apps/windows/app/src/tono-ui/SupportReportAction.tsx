@@ -2,6 +2,7 @@ import { useLockFn } from 'ahooks'
 import { useState, type CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { useTonoStatus } from '@/hooks/use-tono'
 import { showNotice } from '@/services/notice-service'
 import { useThemeMode } from '@/services/states'
 import {
@@ -15,14 +16,28 @@ import {
 import { TONO_COLORS, TONO_MONO_STACK, tonoText } from './theme'
 import { TonoConfirmDialog } from './TonoAccountCard'
 
-/** Shared by Support and connection failures: local frozen preview → consent → receipt. */
-export const SupportReportAction = ({
-  testIdPrefix = 'tono',
-  style,
-}: {
+interface SupportReportActionProps {
   testIdPrefix?: string
   style?: CSSProperties
-}) => {
+}
+
+/** Shared by Support and connection failures: local frozen preview → consent → receipt. */
+export const SupportReportAction = (props: SupportReportActionProps) => {
+  const { status } = useTonoStatus()
+  // Replacement without navigation must also retire the old preview/receipt in the UI.
+  // Backend identity fencing remains authoritative for any already-dispatched request.
+  return (
+    <OwnedSupportReportAction
+      key={`${status?.accountState}:${status?.routePreferenceScope}`}
+      {...props}
+    />
+  )
+}
+
+const OwnedSupportReportAction = ({
+  testIdPrefix = 'tono',
+  style,
+}: SupportReportActionProps) => {
   const { t } = useTranslation()
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)

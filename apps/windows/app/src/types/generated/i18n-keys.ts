@@ -595,6 +595,7 @@ export const translationKeys = [
   'tono.routeExplanation.limit',
   'tono.experience.healthTitle',
   'tono.experience.healthDescription',
+  'tono.experience.summaryHint',
   'tono.experience.runHealth',
   'tono.experience.checking',
   'tono.experience.checkedAt',

@@ -29,6 +29,8 @@ void i18n.use(initReactI18next).init({
   },
   lng: new URLSearchParams(location.search).get('lang') || 'en',
   fallbackLng: 'en',
+  // Match production i18n: React escapes text, so i18next must not escape it twice.
+  interpolation: { escapeValue: false },
 })
 
 function PreviewShell({ children }: { children: ReactNode }) {
