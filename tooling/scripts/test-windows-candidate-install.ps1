@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$CandidateDirectory,
-    [switch]$DiagnoseHelper
+    [switch]$DiagnoseHelper,
+    [switch]$DiagnosticDriveRoot
 )
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
@@ -10,6 +11,7 @@ $PSNativeCommandUseErrorActionPreference = $true
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') {
     throw 'Installer smoke tests require an ephemeral GitHub-hosted Windows runner.'
 }
+if ($DiagnosticDriveRoot -and -not $DiagnoseHelper) { throw 'Working-directory comparison is diagnostic-only.' }
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Administrator runner required.' }
 function Test-TonoServiceExists {
@@ -82,8 +84,13 @@ try {
         }
         $stdout = Join-Path $env:RUNNER_TEMP 'tono-installer-helper.stdout.log'
         $stderr = Join-Path $env:RUNNER_TEMP 'tono-installer-helper.stderr.log'
+        $helperDirectory = Split-Path $helper
+        if ($DiagnosticDriveRoot) { $helperDirectory = [IO.Path]::GetPathRoot($target) }
+        $report['systemDrive'] = $env:SystemDrive
+        $report['helperWorkingDirectory'] = $helperDirectory
         Write-Output 'DIAGNOSTIC ONLY: original installed helper --replace-runtime; no NSIS repair acceptance'
-        $helperProcess = Start-Process -FilePath $helper -ArgumentList '--replace-runtime' -WorkingDirectory (Split-Path $helper) -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+        Write-Output "SystemDrive=$env:SystemDrive; helper working directory=$helperDirectory"
+        $helperProcess = Start-Process -FilePath $helper -ArgumentList '--replace-runtime' -WorkingDirectory $helperDirectory -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
         if (-not $helperProcess.WaitForExit(300000)) {
             # Do not kill Rust in the middle of rollback or start a competing cleanup.
             # The hosted job is disposable; its timeout must not become device proof.

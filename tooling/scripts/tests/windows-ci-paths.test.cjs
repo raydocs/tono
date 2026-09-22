@@ -81,6 +81,7 @@ test('Windows candidate build and installer smoke agree with the product version
 test('helper diagnosis pins the prior artifact without claiming NSIS repair acceptance', () => {
   const smoke = load(readFileSync(path.join(root, '.github/workflows/windows-installer-smoke.yml'), 'utf8'))
   assert.equal(smoke.on.workflow_dispatch.inputs.diagnose_helper.default, false)
+  assert.equal(smoke.on.workflow_dispatch.inputs.diagnostic_drive_root.default, false)
   assert.deepEqual(smoke.permissions, { contents: 'read', actions: 'read' })
   const job = smoke.jobs['install-repair-uninstall']
   assert.equal(job['runs-on'], 'windows-2025')
@@ -92,6 +93,7 @@ test('helper diagnosis pins the prior artifact without claiming NSIS repair acce
   assert.ok(fetch.includes('if ($built -ne $current) { throw'))
   const installer = readFileSync(path.join(root, 'tooling/scripts/test-windows-candidate-install.ps1'), 'utf8')
   assert.ok(installer.includes("$env:RUNNER_ENVIRONMENT -ne 'github-hosted'"))
+  assert.ok(installer.includes("if ($DiagnosticDriveRoot -and -not $DiagnoseHelper) { throw"))
   const diagnostic = installer.split('    if ($DiagnoseHelper) {')[1].split('    } else {')[0]
   assert.ok(diagnostic.includes("-ArgumentList '--replace-runtime'"))
   assert.ok(diagnostic.includes('if ($helperProcess.ExitCode -ne 0) { throw'))

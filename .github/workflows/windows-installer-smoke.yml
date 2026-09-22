@@ -11,6 +11,10 @@ on:
         description: Diagnose only the frozen 35691265073 helper; NOT NSIS repair acceptance
         type: boolean
         default: false
+      diagnostic_drive_root:
+        description: Helper diagnostic only - compare a drive-root cwd instead of installed resources
+        type: boolean
+        default: false
   push:
     branches: ['stability/desktop-0.0.72-20260908']
     paths:
@@ -30,6 +34,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
       DIAGNOSE_HELPER: ${{ inputs.diagnose_helper }}
+      DIAGNOSTIC_DRIVE_ROOT: ${{ inputs.diagnostic_drive_root }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Fetch only a successful same-source candidate artifact
@@ -39,6 +44,7 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           $id = $env:CANDIDATE_RUN_ID
           $diagnostic = $env:DIAGNOSE_HELPER -eq 'true'
+          if ($env:DIAGNOSTIC_DRIVE_ROOT -eq 'true' -and -not $diagnostic) { throw 'Working-directory comparison is diagnostic-only.' }
           if ($diagnostic -and $id -ne '35691265073') { throw 'Helper diagnostic requires the frozen failing candidate run.' }
           if ([string]::IsNullOrWhiteSpace($id)) {
             $runs = gh run list --workflow windows-candidate.yml --branch $env:GITHUB_REF_NAME --status success --limit 1 --json databaseId | ConvertFrom-Json
@@ -71,7 +77,7 @@ jobs:
           "CANDIDATE_DIRECTORY=$output" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
       - name: Install, repair and uninstall on the ephemeral administrator runner
         shell: pwsh
-        run: tooling/scripts/test-windows-candidate-install.ps1 -CandidateDirectory $env:CANDIDATE_DIRECTORY -DiagnoseHelper:($env:DIAGNOSE_HELPER -eq 'true')
+        run: tooling/scripts/test-windows-candidate-install.ps1 -CandidateDirectory $env:CANDIDATE_DIRECTORY -DiagnoseHelper:($env:DIAGNOSE_HELPER -eq 'true') -DiagnosticDriveRoot:($env:DIAGNOSTIC_DRIVE_ROOT -eq 'true')
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
