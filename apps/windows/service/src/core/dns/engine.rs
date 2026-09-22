@@ -18,6 +18,9 @@ use windows_sys::Win32::System::Registry::{
     RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
 };
 
+#[path = "native_apply.rs"]
+mod native_apply;
+
 const TCPIP4_INTERFACES: &str =
     r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces";
 const TCPIP6_INTERFACES: &str =
@@ -360,9 +363,16 @@ pub(super) struct ActiveAdapter {
     pub ipv4_index: u32,
     /// IPv6 interface index, or 0 when IPv6 is not bound.
     pub ipv6_index: u32,
+    /// Effective resolver addresses, only populated when DNS read-back was requested.
+    /// `None` (enumeration skipped DNS) must never count as an empty resolver list.
+    pub dns_servers: Option<Vec<std::net::IpAddr>>,
 }
 
 fn active_adapters() -> Result<Vec<ActiveAdapter>> {
+    active_adapters_read(false)
+}
+
+fn active_adapters_read(include_dns: bool) -> Result<Vec<ActiveAdapter>> {
     // `Parameters\Interfaces` is historical state, not a list of live adapters: it commonly
     // contains disabled, unplugged, removed, and pseudo interfaces. Those either have no
     // Win32_NetworkAdapterConfiguration object or return 84 (IP not enabled), which used to
@@ -375,7 +385,11 @@ fn active_adapters() -> Result<Vec<ActiveAdapter>> {
     // stays a single cheap in-process call.
     let flags = GAA_FLAG_SKIP_ANYCAST
         | GAA_FLAG_SKIP_MULTICAST
-        | GAA_FLAG_SKIP_DNS_SERVER
+        | if include_dns {
+            0
+        } else {
+            GAA_FLAG_SKIP_DNS_SERVER
+        }
         | GAA_FLAG_SKIP_FRIENDLY_NAME;
     let mut bytes = INITIAL_BUFFER_BYTES;
     for _ in 0..MAX_BUFFER_ATTEMPTS {
@@ -431,11 +445,21 @@ fn active_adapters() -> Result<Vec<ActiveAdapter>> {
                     .iter()
                     .any(|saved| saved.guid.eq_ignore_ascii_case(guid))
                 {
+                    let dns_servers = if include_dns {
+                        // SAFETY: the DNS records and socket addresses belong to this
+                        // successful IP Helper buffer and are copied before it is dropped.
+                        Some(unsafe {
+                            native_apply::read_dns_servers(adapter.FirstDnsServerAddress)
+                        }?)
+                    } else {
+                        None
+                    };
                     adapters.push(ActiveAdapter {
                         guid: guid.to_owned(),
                         luid,
                         ipv4_index,
                         ipv6_index,
+                        dns_servers,
                     });
                 }
             }
@@ -500,10 +524,10 @@ pub(super) fn collect_adapters() -> Result<Vec<AdapterDnsSnapshot>> {
         .collect()
 }
 
-/// Live application, **per address family**, in ONE PowerShell process (cold start is the
-/// dominant cost). The registry writes are the authoritative record this module verifies
-/// against; the live apply is what makes the running resolver pick the change up without an
-/// interface bounce.
+/// Per-family inputs for native protected apply or legacy apply/restore. The latter batches
+/// ONE PowerShell process (cold start is the dominant cost). The exact snapshot, not this
+/// normalized live list, remains restoration authority. Live application makes the running
+/// resolver pick the change up without an interface bounce. The legacy mechanism is:
 ///
 /// * IPv4 goes through CIM
 ///   (`Win32_NetworkAdapterConfiguration.SetDNSServerSearchOrder`, the architecture doc's
@@ -533,8 +557,11 @@ pub(super) fn collect_adapters() -> Result<Vec<AdapterDnsSnapshot>> {
 /// pseudo adapter and bricking the machine on it.
 ///
 /// 注意:运行时尚未实测 — wrapped so any failure is logged, never fatal.
+#[derive(Clone)]
 struct LiveApplyEntry {
     guid: String,
+    /// Fresh runtime identity used to reject adapter replacement during native read-back.
+    luid: u64,
     /// Live IPv4/IPv6 interface indices; 0 means the family is not bound here.
     ipv4_index: u32,
     ipv6_index: u32,
@@ -938,6 +965,7 @@ fn apply_protected(guid: &str, active: &ActiveAdapter) -> Result<LiveApplyEntry>
     }
     Ok(LiveApplyEntry {
         guid: guid.to_owned(),
+        luid: active.luid,
         ipv4_index: active.ipv4_index,
         ipv6_index: active.ipv6_index,
         // One family per list: the IPv4 mechanism never sees an IPv6 address and the IPv6
@@ -965,7 +993,7 @@ pub(super) fn apply_protected_set(guids: &[String]) -> Result<Vec<(String, bool)
         })
         .map(|(guid, adapter)| apply_protected(guid, adapter))
         .collect::<Result<Vec<_>>>()?;
-    results.extend(live_apply_with_retry(entries, ApplyMode::Protect));
+    results.extend(native_apply::apply(&entries));
     Ok(results)
 }
 
@@ -979,6 +1007,7 @@ fn restore_value(subkey: &str, value: &str, saved: &Option<String>) -> Result<()
 fn restore_entry(adapter: &AdapterDnsSnapshot, active: &ActiveAdapter) -> LiveApplyEntry {
     LiveApplyEntry {
         guid: adapter.interface_guid.clone(),
+        luid: active.luid,
         ipv4_index: active.ipv4_index,
         ipv6_index: active.ipv6_index,
         ipv4_servers: super::restored_live_servers_v4(adapter),
@@ -1295,4 +1324,3 @@ pub(super) fn restore_encrypted_dns() -> Result<()> {
     }
     Ok(())
 }
-

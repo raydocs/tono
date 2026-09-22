@@ -32,9 +32,9 @@
 //! **The enable-time read-back is evidence, not a gate.** Applying protected DNS is a *write*;
 //! proving it from Windows is not reliably possible. The registry stores "static, no servers"
 //! and "use DHCP" identically (which is why the IPv6 leg of the read-back was already removed),
-//! and the live apply runs through PowerShell/CIM/netsh, which fails on real machines for
-//! reasons that have nothing to do with whether DNS works: pseudo-adapters, constrained language
-//! mode, EDR hooks, a damaged WMI repository. Gating `enable` on that weak proof killed connects
+//! and native effective read-back or the PowerShell/CIM/netsh compatibility path can fail
+//! independently of whether DNS works: pseudo-adapters, constrained language mode, EDR hooks,
+//! a damaged WMI repository. Gating `enable` on that weak proof killed connects
 //! on machines whose DNS was fine — the last one bailed with "protected DNS could not be verified
 //! on every active adapter" at 1.1 s, *before* the strong proof ever ran. So `enable` now
 //! **records** what it could not verify (per-adapter live-apply failures in the snapshot and in
@@ -85,11 +85,13 @@
 //! that cannot be obtained is *unproven*, never proven — fail-closed for the normal disarm,
 //! while the emergency path stays the documented escape hatch (it logs and proceeds).
 //!
-//! **The live apply is per address family.** IPv4 goes through CIM
-//! (`SetDNSServerSearchOrder`, an IPv4-only method), IPv6 through `netsh interface ipv6 set
-//! dnsservers`, and each family is proven by its own live read-back. Merging both families into
-//! one CIM call either fails on every adapter or silently drops the IPv6 address, which leaves
-//! an IPv6 resolver leaking while the registry still reads "protected".
+//! **The live apply is per address family.** Protected apply prefers the dynamically resolved
+//! `SetInterfaceDnsSettings` and confirms both families with `GetAdaptersAddresses`. Native
+//! success without effective read-back (including zero IPv6 resolvers) is not a proven apply.
+//! Missing API, completed failure or contradictory read-back gets one bounded compatibility
+//! batch, still inside the same single-writer claim. Compatibility and restore use CIM
+//! (`SetDNSServerSearchOrder`, an IPv4-only method) and `netsh interface ipv6 set dnsservers`.
+//! Restore/DHCP never uses the native empty string: the exact saved snapshot remains authority.
 //!
 //! **Degraded exit:** a registry-only match is not accepted as a
 //! normal restore — but it *is* accepted, once, after the live apply has failed
@@ -115,7 +117,7 @@
 //! the user's original DNS (`DNS_SNAPSHOT_MISSING_PREFIX`).
 //!
 //! The pure snapshot/merge/restore-decision logic in this file is platform-independent and
-//! unit-tested on any host; the registry/CIM/netsh engine is compiled only on Windows.
+//! unit-tested on any host; the native/registry/CIM/netsh engine is compiled only on Windows.
 
 use crate::core::structure::DnsProtectionStatus;
 use anyhow::{Context as _, Result, bail};
@@ -1589,8 +1591,8 @@ async fn engine_apply_protected(adapters: &[AdapterDnsSnapshot]) -> Result<Vec<(
 }
 
 async fn engine_apply_snapshot(snapshot: &DnsSnapshot) -> Result<Vec<(String, bool)>> {
-    // Restore writes the same per-adapter registry values and runs the same CIM/netsh batch as
-    // the loopback apply, so it raises the same notifications and gets the same window.
+    // Restore writes the same per-adapter registry values and runs the legacy CIM/netsh
+    // batch, so it raises the same notifications and gets the same self-write window.
     let _self_write = SelfWriteWindow::open();
     #[cfg(all(windows, not(feature = "test")))]
     {
@@ -2758,7 +2760,7 @@ fn is_active_dns_adapter(oper_status: i32, if_type: u32, has_bound_ip: bool) -> 
     oper_status == IF_OPER_STATUS_UP && if_type != IF_TYPE_SOFTWARE_LOOPBACK && has_bound_ip
 }
 
-// --- Windows engine: registry snapshot/set + best-effort CIM live-apply ---
+// --- Windows engine: registry snapshot/set + native apply, legacy compatibility/restore ---
 
 #[cfg(all(windows, not(feature = "test")))]
 mod engine;
