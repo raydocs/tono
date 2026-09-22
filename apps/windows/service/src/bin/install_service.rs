@@ -1255,10 +1255,24 @@ fn update_handoff_journal_paths(
 
 #[cfg(windows)]
 fn update_handoff_users_root(system_drive: Option<&std::ffi::OsStr>) -> std::io::Result<PathBuf> {
+    use std::path::{Component, Prefix};
+
     let system_drive = system_drive.ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::NotFound, "SystemDrive unavailable for journal discovery")
     })?;
-    Ok(PathBuf::from(system_drive).join("Users"))
+    let drive = Path::new(system_drive);
+    let mut components = drive.components();
+    if !matches!(components.next(), Some(Component::Prefix(prefix)) if matches!(prefix.kind(), Prefix::Disk(_)))
+        || components.next().is_some()
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "SystemDrive must be a drive letter for journal discovery",
+        ));
+    }
+    // SystemDrive is normally C:, not C:\. A bare Users suffix would resolve
+    // relative to the installer's current directory on that drive (C:Users).
+    Ok(drive.join(r"\Users"))
 }
 
 #[cfg_attr(not(windows), allow(dead_code))]

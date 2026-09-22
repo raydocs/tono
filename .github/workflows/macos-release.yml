@@ -48,6 +48,12 @@ on:
 permissions:
   contents: read
 
+# Advance the reviewed candidate contract together; never admit arbitrary PR refs.
+env:
+  CANDIDATE_REF: refs/heads/stability/desktop-0.0.73-20260922
+  CANDIDATE_VERSION: '0.0.73'
+  CANDIDATE_BUILD: '73'
+
 concurrency:
   group: macos-release-${{ inputs.version || github.ref_name }}
   cancel-in-progress: false
@@ -71,8 +77,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$CANDIDATE_ONLY" = true ]; then
-            if [ "$GITHUB_REF" != refs/heads/stability/desktop-0.0.72-20260908 ]; then
-              echo "::error::Candidate signing is restricted to the reviewed 0.0.72 stability branch."
+            if [ "$GITHUB_REF" != "$CANDIDATE_REF" ]; then
+              echo "::error::Candidate signing is restricted to $CANDIDATE_REF ($CANDIDATE_VERSION/build$CANDIDATE_BUILD)."
               exit 1
             fi
             echo "candidate only: no appcast job or release publication"
@@ -85,24 +91,12 @@ jobs:
           fi
           echo "running from $GITHUB_REF"
 
-  sing-box-input:
-    needs: branch
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - run: sh tooling/scripts/prepare-macos-sing-box.sh
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: sing-box-darwin-arm64
-          path: apps/macos/Tono/Resources/sing-box
-          if-no-files-found: error
-          retention-days: 14
-
   build:
     # Manual releases belong to the macOS release line. A tag is accepted only
     # after the ancestry check below proves it names a commit on that line.
-    needs: [branch, sing-box-input]
+    # branch waits for qualify, which already uploads the verified immutable Core.
+    # Consume those same bytes rather than conflicting with its artifact name.
+    needs: branch
     runs-on: macos-26
     outputs:
       short_version: ${{ steps.release-version.outputs.short_version }}
@@ -146,9 +140,9 @@ jobs:
         run: |
           set -eu
           if [ "$CANDIDATE_ONLY" = true ]; then
-            test "$GITHUB_REF" = refs/heads/stability/desktop-0.0.72-20260908
+            test "$GITHUB_REF" = "$CANDIDATE_REF"
             test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-            python3 tooling/scripts/verify-desktop-version.py --expected 0.0.72
+            python3 tooling/scripts/verify-desktop-version.py --expected "$CANDIDATE_VERSION"
             exit 0
           fi
           git fetch --no-tags origin release/macos
@@ -350,11 +344,12 @@ jobs:
           app = root / (name + ".app")
           with (app / "Contents/Info.plist").open("rb") as stream:
               info = plistlib.load(stream)
-          assert info["CFBundleShortVersionString"] == "0.0.72"
-          assert str(info["CFBundleVersion"]) == "72"
+          version, build = info["CFBundleShortVersionString"], str(info["CFBundleVersion"])
+          assert version == os.environ["CANDIDATE_VERSION"]
+          assert build == os.environ["CANDIDATE_BUILD"]
           files = [root / (name + ".zip"), app / "Contents/MacOS/Tono",
                    app / "Contents/Resources/tono-core-helper", app / "Contents/Resources/sing-box"]
-          report = {"source": os.environ["GITHUB_SHA"], "version": "0.0.72", "build": 72,
+          report = {"source": os.environ["GITHUB_SHA"], "version": version, "build": int(build),
                     "candidateOnly": True, "releaseAccepted": False, "developerIDSigned": True,
                     "notarized": True, "sparkleSigned": False,
                     "files": [{"name": str(path.relative_to(root)),
