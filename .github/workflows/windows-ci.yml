@@ -251,6 +251,23 @@ jobs:
         # to nothing and the job would pass having tested nothing at all.
         run: cargo test --locked --features standalone,client,test
 
+      # The lifecycle `test` feature replaces the native DNS engine. Compile and
+      # exercise its production orchestration with injected API/readback boundaries,
+      # not a host-network mutation or an unfiltered no-test-feature suite.
+      - name: Test native DNS apply orchestration
+        working-directory: apps/windows/service
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $filter = 'core::dns::engine::native_apply::tests::'
+          $listed = cargo test --locked --features standalone,client --lib $filter -- --list
+          if ($LASTEXITCODE -ne 0) { throw 'Could not enumerate native DNS apply tests' }
+          if (-not ($listed -match "^$([regex]::Escape($filter)).*: test$")) {
+            throw 'Native DNS apply tests are missing'
+          }
+          cargo test --locked --features standalone,client --lib $filter -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Native DNS apply tests failed' }
+
       - name: Test native update admission and independent executor
         working-directory: apps/windows/service
         shell: pwsh

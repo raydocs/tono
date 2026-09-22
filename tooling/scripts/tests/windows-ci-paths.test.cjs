@@ -53,6 +53,21 @@ test('the native Service job executes safe QA fault-targeting regressions', () =
     step.shell === 'pwsh' && step.run?.includes('tooling/scripts/tests/windows-qa-guards.Tests.ps1')))
 })
 
+test('native DNS orchestration executes without the stub feature and cannot pass with zero tests', () => {
+  const job = workflow.jobs.service
+  assert.equal(job['runs-on'], 'windows-2025')
+  const step = job.steps.find(step => step.name === 'Test native DNS apply orchestration')
+  assert.equal(step?.['working-directory'], 'apps/windows/service')
+  assert.equal(step.shell, 'pwsh')
+  assert.equal(step.if, undefined)
+  assert.notEqual(step['continue-on-error'], true)
+  assert.ok(step.run.includes("$filter = 'core::dns::engine::native_apply::tests::'"))
+  assert.ok(step.run.includes('cargo test --locked --features standalone,client --lib $filter -- --list'))
+  assert.ok(step.run.includes('cargo test --locked --features standalone,client --lib $filter -- --nocapture'))
+  assert.ok(step.run.includes('Native DNS apply tests are missing'))
+  assert.ok(step.run.includes('$LASTEXITCODE -ne 0'))
+})
+
 test('native updater adapters run in hosted lanes with nonzero Windows test guards', () => {
   const mac = load(readFileSync(path.join(root, '.github/workflows/macos-ci.yml'), 'utf8'))
   const helper = mac.jobs['privileged-tests']
