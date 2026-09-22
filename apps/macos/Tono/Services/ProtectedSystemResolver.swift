@@ -3,9 +3,19 @@ import Dispatch
 import Foundation
 import dnssd
 
-/// Ordinary system DNS, with an owned, cancellable DNSServiceRef instead of a
-/// blocking getaddrinfo worker that structured task cancellation cannot drain.
+/// Ordinary system DNS with a prompt, cancellable waiter and an owned DNSServiceRef.
+/// DNSServiceGetAddrInfo itself is synchronous: Apple's clientstub can wait 60s
+/// for a daemon ACK, in addition to blocking connect/send. We cannot forcibly
+/// cancel that C call or deallocate its in-progress ref from another queue.
+/// The waiter retires independently; at most one request retains C ownership
+/// until eventual same-queue cleanup. Retries fail closed instead of accumulating
+/// blocked setup workers. No late setup/callback can grant DNS readiness.
+/// Source: apple-oss-distributions/mDNSResponder d4658af3, mDNSShared/dnssd_clientstub.c
+/// (DNSSD_CLIENT_TIMEOUT, deliver_request, DNSServiceGetAddrInfoInternal).
 nonisolated enum ProtectedSystemResolver {
+    static let ownershipQueue = DispatchQueue(label: "net.tono.system-dns", qos: .userInitiated)
+    private static let inFlight = InFlight()
+
     /// Only the three DNS-SD C calls are substituted in tests. Request lifetime,
     /// callback parsing, deadline, cancellation and terminal arbitration stay real.
     nonisolated struct Functions: Sendable {
@@ -25,47 +35,93 @@ nonisolated enum ProtectedSystemResolver {
     }
 
     static func query(name: String, timeout: TimeInterval, functions: Functions) async -> [String] {
-        let request = Request(functions: functions)
+        guard !Task.isCancelled else { return [] }
+        let request = Request(functions: functions, timeout: timeout)
+        // Claim before enqueueing ANY C work, including across retries after a
+        // timeout. The caller gives up its answer, never the C operation's claim.
+        guard inFlight.claim(request) else { return [] }
         let answers = await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
-                request.queue.async {
-                    request.start(name: name, timeout: timeout, continuation: continuation)
-                }
+                request.begin(name: name, continuation: continuation)
             }
         } onCancel: {
-            request.queue.async { request.finish([]) }
+            request.finish([])
         }
         // A successful callback can race the caller's cancellation before its
         // continuation is scheduled. Cancellation never grants DNS readiness.
         return Task.isCancelled ? [] : answers
     }
 
-    /// All mutable fields and C operations are confined to this serial queue.
+    /// Also retains the callback context if its waiter has already returned.
+    /// Only owner-queue cleanup may release the claim, by request identity.
+    nonisolated private final class InFlight: @unchecked Sendable {
+        private let lock = NSLock()
+        private var request: Request?
+
+        func claim(_ request: Request) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard self.request == nil else { return false }
+            self.request = request
+            return true
+        }
+
+        func clear(_ request: Request) {
+            lock.lock()
+            if self.request === request { self.request = nil }
+            lock.unlock()
+        }
+    }
+
+    /// Waiter state has a short lock, never held over C work. Ref/answer storage
+    /// and every C call stay on ownershipQueue, which may itself remain blocked.
     /// dns_sd.h requires deallocation on the installed dispatch queue, with no
     /// concurrent ProcessResult. mDNSResponder's clientstub guarantees no more
     /// callbacks after that deallocation returns; callback sockaddr is borrowed
     /// stack memory, so copy it before leaving the callback.
     nonisolated private final class Request: @unchecked Sendable {
-        let queue = DispatchQueue(label: "net.tono.system-dns", qos: .userInitiated)
         private let functions: Functions
-        private var service: DNSServiceRef?
+        private let deadline: DispatchTime
+        private let lock = NSLock()
+        // Lock-protected waiter state; cancellation can precede begin.
         private var timer: DispatchSourceTimer?
         private var continuation: CheckedContinuation<[String], Never>?
         private var terminal: [String]?
+        // Owner-queue-only state. Never read these under the waiter lock.
+        private var service: DNSServiceRef?
         private var answers: [String] = []
 
-        init(functions: Functions) { self.functions = functions }
+        init(functions: Functions, timeout: TimeInterval) {
+            self.functions = functions
+            deadline = .now() + max(0.2, timeout)
+        }
 
-        func start(name: String, timeout: TimeInterval, continuation: CheckedContinuation<[String], Never>) {
-            dispatchPrecondition(condition: .onQueue(queue))
-            // onCancel may be enqueued before start, even for a task cancelled
-            // before it enters withTaskCancellationHandler. Don't create a ref.
+        func begin(name: String, continuation: CheckedContinuation<[String], Never>) {
+            lock.lock()
             if let terminal {
+                lock.unlock()
                 continuation.resume(returning: terminal)
                 return
             }
             self.continuation = continuation
-            let deadline = DispatchTime.now() + max(0.2, timeout)
+            // Install BEFORE submitting setup, on a queue that never runs C API
+            // work. Neither the timer nor onCancel waits for ownershipQueue.
+            let timer = DispatchSource.makeTimerSource(queue: .global(qos: .userInitiated))
+            self.timer = timer
+            timer.setEventHandler { self.finish([]) }
+            timer.schedule(deadline: deadline)
+            timer.resume()
+            ownershipQueue.async { self.start(name: name) }
+            lock.unlock()
+        }
+
+        private var isPending: Bool {
+            lock.withLock { terminal == nil && DispatchTime.now() < deadline }
+        }
+
+        private func start(name: String) {
+            dispatchPrecondition(condition: .onQueue(ownershipQueue))
+            guard isPending else { finishOnOwner([]); return }
             let status = name.withCString { hostname in
                 functions.getAddrInfo(
                     &service, 0, 0, DNSServiceProtocol(kDNSServiceProtocol_IPv4), hostname,
@@ -77,28 +133,24 @@ nonisolated enum ProtectedSystemResolver {
                     Unmanaged.passUnretained(self).toOpaque()
                 )
             }
-            guard status == kDNSServiceErr_NoError, let service else {
-                finish([])
+            // A timed-out/cancelled submission may finally return a ref. Dispose
+            // it here, without installing callbacks or reviving its waiter.
+            guard status == kDNSServiceErr_NoError, let service, isPending else {
+                finishOnOwner([])
                 return
             }
-            guard functions.setDispatchQueue(service, queue) == kDNSServiceErr_NoError else {
-                finish([])
+            guard functions.setDispatchQueue(service, ownershipQueue) == kDNSServiceErr_NoError,
+                  isPending else {
+                finishOnOwner([])
                 return
             }
-            // The timer and query's cancellation handler retain the request
-            // through deallocation. finish clears the timer's retain cycle.
-            let timer = DispatchSource.makeTimerSource(queue: queue)
-            self.timer = timer
-            timer.setEventHandler { self.finish([]) }
-            timer.schedule(deadline: deadline)
-            timer.resume()
         }
 
         private func receive(flags: DNSServiceFlags, error: DNSServiceErrorType, address: UnsafePointer<sockaddr>?) {
-            dispatchPrecondition(condition: .onQueue(queue))
-            guard terminal == nil else { return }
+            dispatchPrecondition(condition: .onQueue(ownershipQueue))
+            guard isPending else { return }
             guard error == kDNSServiceErr_NoError else {
-                finish([])
+                finishOnOwner([])
                 return
             }
             // Preserve the initial IPv4 batch so a fake-IP is not hidden by an
@@ -116,23 +168,43 @@ nonisolated enum ProtectedSystemResolver {
                 }
             }
             if flags & DNSServiceFlags(kDNSServiceFlagsMoreComing) == 0, !answers.isEmpty {
-                finish(answers)
+                finishOnOwner(answers)
             }
         }
 
-        func finish(_ result: [String]) {
-            dispatchPrecondition(condition: .onQueue(queue))
-            guard terminal == nil else { return }
-            terminal = result
+        /// Callback/setup completion normally cleans up before returning an
+        /// answer, so the next healthy query can claim the owner immediately.
+        /// A cancellation/deadline can still win while deallocation is running.
+        private func finishOnOwner(_ result: [String]) {
+            dispose()
+            finish(result)
+        }
+
+        private func dispose() {
+            dispatchPrecondition(condition: .onQueue(ownershipQueue))
             if let service {
                 self.service = nil
                 functions.deallocate(service)
             }
-            timer?.setEventHandler {}
-            timer?.cancel()
-            timer = nil
+            inFlight.clear(self)
+        }
+
+        /// Exactly-once waiter arbitration, with no C calls or queue waits.
+        /// Timely failure is independent of eventual native resource cleanup.
+        func finish(_ result: [String]) {
+            lock.lock()
+            guard terminal == nil else { lock.unlock(); return }
+            // Also enforce the clock at publication if the timer was delayed.
+            let result = DispatchTime.now() < deadline ? result : []
+            terminal = result
+            let timer = self.timer
+            self.timer = nil
             let continuation = self.continuation
             self.continuation = nil
+            lock.unlock()
+            timer?.setEventHandler {}
+            timer?.cancel()
+            ownershipQueue.async { self.dispose() }
             continuation?.resume(returning: result)
         }
     }
