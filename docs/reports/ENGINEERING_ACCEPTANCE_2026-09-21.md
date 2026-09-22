@@ -1,6 +1,6 @@
 # Tono 工程整改与组合验收记录 — 2026-09-21
 
-本记录对应[所有者任务书](https://github.com/raydocs/tono/blob/8189417eebcc946e742da7c1f4d37e3dda004ee0/docs/ENGINEERING_QUALITY_ACCEPTANCE.md)，不是部署、客户发布或发布门关闭许可。执行期间没有改客户更新源，没有合并 main，没有签名发布、节点操作、远端 D1 或权限放宽。
+本记录对应[所有者任务书](https://github.com/raydocs/tono/blob/8189417eebcc946e742da7c1f4d37e3dda004ee0/docs/ENGINEERING_QUALITY_ACCEPTANCE.md)，不是部署、客户发布或发布门关闭许可。第 1–8 节保留工程交付时的历史状态；所有者随后授权的 main 合并、内部候选与测试准入结论见第 9 节。没有改客户更新源、签名发布、节点操作、远端 D1 或权限放宽。
 
 ## 1. 源码与交付身份
 
@@ -156,3 +156,40 @@ DIRECT/选择使用policy串行边界，再进入privileged lifecycle锁，再�
 **A. 代码与工程层面是否达到本轮要求？** 本轮有限清单内的已确认正确性缺陷已完成代码修复、失败先行回归、最终组合自动化与独立反证复审；没有剩余的已确认P1源码修复项。collector CI wiring现已交付且托管执行通过，不再是权限阻塞。**仍不能判定整份任务书全部验收完成**：运行身份采集与若干原生恢复边界的证据仍不完整。代码/测试/CI/分项及组合记录以Draft交付；不把源码修复、托管green或模型意见提升成全系统保证。
 
 **B. 是否具备进入后续实机验收的条件？** 最终组合native和有限复审已收齐，**具备进入受控内部设备诊断的源码基础**，可在另行获准、可恢复的指定设备上按精确源码/二进制身份开展实包保护与恢复场景。**尚不具备正式已安装/受保护更新验收的完整候选条件**：普通App CI使用占位发布资源，未交付获准的签名安装候选；#26安装器身份合同和实际组件/config身份仍待闭环。剩余外部动作是另行确定候选/设备授权与身份采集，不再需要交付CI补丁；本轮不自动执行这些设备或发布操作，G1–G3与客户渠道保持原门禁。
+
+## 9. 2026-09-22 合并与内部测试候选续办
+
+所有者 raydocs 明确要求合并可合并的整改，并评估能否替换尚未公开的现有测试版本。本节只推进该范围；不等于客户发布、设备网络操作或修改签名准入的授权。
+
+### 已合并源码，不再是 Draft 交付
+
+- [#267](https://github.com/raydocs/tono/pull/267) 从 Draft 转为 ready 后普通合并，实际 main merge 为 [0e20f2df671a528d80c2366d65aca3df1830117a](https://github.com/raydocs/tono/commit/0e20f2df671a528d80c2366d65aca3df1830117a)。已测 head [1fe84fd5ae383cfe82801232e95d859c402a4e24](https://github.com/raydocs/tono/commit/1fe84fd5ae383cfe82801232e95d859c402a4e24)、PR checkout [66d86528b7f02046544fce1515cea8f54cebf11a](https://github.com/raydocs/tono/commit/66d86528b7f02046544fce1515cea8f54cebf11a) 与实际 merge 的 tree 均为 `937749187d8ef9e268a2086aaf967ce148a6bee5`。合并前 Windows/macOS/Services 共 16 项检查成功；不把等树核对称为 merge SHA 上的新执行。
+- 任务书 [#266](https://github.com/raydocs/tono/pull/266) 随后普通合并，main 为 [25e56707f91c3c6c69a30b4d76b46e087543c99e](https://github.com/raydocs/tono/commit/25e56707f91c3c6c69a30b4d76b46e087543c99e)。与前一 merge 只差任务书及文档入口，产品/测试/依赖/workflow 未变。Windows 候选明确使用这个源码，而不是浮动的“最新 0.0.73”。
+- #268/#271/#272 的实际提交已随组合进入 main；GitHub 也把 #179 记为已合并。#189/#240/#242/#244/#258/#262/#263/#264/#265 的发布 head 均已是 main 祖先，已附集成出处并关闭冗余 PR；这些是 **closed as integrated**，不虚称另做了九次 GitHub merge，也没有删除分支或改写历史。
+- 已用限定证据关闭源码缺陷 #239/#243/#245/#246/#247/#248/#250/#260/#261/#269/#270。#241/#249/#251/#259 保持 open：分别欠已安装恢复、真实 DNS/NRPT、跨入口展示时序、原生网络事件证据；已补注源码修复与剩余验收的区别。#26 和 #4/#5 仍开放，不用代码合并代替协议/设备/计量证据。
+- 未纳入未审查的 Dependabot 更新、iOS #204 或仍受阻的 Windows sing-box 产品迁移 #203。没有为“合完所有 PR”扩大本次整改。
+
+合并后自动触发的 [Windows35691122450](https://github.com/raydocs/tono/actions/runs/35691122450)、[macOS35691122398](https://github.com/raydocs/tono/actions/runs/35691122398)、[Services35691122458](https://github.com/raydocs/tono/actions/runs/35691122458) 也已完成成功，run head 均为实际 merge 0e20f2df；没有手动重复派发。直接读取 Windows App job106628133809 和 macOS build job106628386416 的日志，二者 checkout 均明确为该 SHA：前者 `cargo test --locked` 为 `492 passed; 0 failed`，超时关闭、vault 删除确认/乱序、旧失败跨账户归属回归均 `ok`，journal integration 为 `3 passed`；后者沿用第 6 节相同无签名 xcodebuild 命令，`Executed 344 tests, with 1 test skipped and 0 failures`、`TEST SUCCEEDED`。其余 job 此处记录 API 的成功状态，不冒称再次逐一核对所有命名断言。App CI 仍含占位发布资源；下一节的真实候选打包证据单独记录。
+
+### 候选产物与实际验证
+
+| 平台 / 阶段 | 来源与结果 | 不能据此宣称 |
+|---|---|---|
+| Windows 0.0.73 内部安装候选 | 单次派发现有 `windows-candidate.yml`：[run35691265073](https://github.com/raydocs/tono/actions/runs/35691265073)，两个 job 成功；build106629018538 日志 checkout 为 25e56707。`pnpm tauri build --bundles nsis` 生成一个包，`pnpm release:preflight --payload-only` 输出 `local NSIS payload OK`。 | 打包成功不代表可覆盖安装；下面实际 repair 失败，候选未获替换资格。 |
+| Windows 安装检查 | 单次派发现有 `windows-installer-smoke.yml`，绑定 `candidate_run_id=35691265073`：[run35693574024/job106635490996](https://github.com/raydocs/tono/actions/runs/35693574024/job/106635490996)，checkout 同为 25e56707。全新安装、Service Running、Core pin、卸载和 DNS 不变均通过；第二次 `/S /UPDATE` **退出 2，同版本修复失败，job 退出 1**。 | 不把 cleanup 成功覆盖 primary failure；不是 Windows 11 或旧版受保护升级验收，也不能从 outer exit2 猜出 helper 拒绝原因。 |
+| macOS 0.0.73 内部签名候选 | [#273](https://github.com/raydocs/tono/issues/273) 记录源码/配置阻塞：candidate-only 签名路径只准入旧 `stability/desktop-0.0.72-20260908` 且校验版本 0.0.72。普通 macOS CI 的 zip 使用 `CODE_SIGNING_ALLOWED=NO`；本轮没有尝试签名或公证任务。 | 不是一次公证失败，也不是可直接发给外部测试者覆盖安装的 Developer ID 签名包；不能放宽到任意 PR ref 或要求绕过系统安全检查。 |
+
+Windows [候选 artifact10679403673](https://github.com/raydocs/tono/actions/runs/35691265073/artifacts/10679403673) 包含安装器和 manifest，GitHub 返回有效期至 2026-09-29 06:07:38 UTC。下载后 `sha256sum` 得到安装器 SHA-256 `fbc84460c68258585530c58f1200c52b44bfce40c51fbc2c96e23aa6acdb2d61`，与 manifest 相符；不要和 GitHub ZIP 的 digest `e866258de5736895d205759c4f317e643c0f4ac7d6fa31f61815e5c35056c375` 混用。manifest 实际为源码 25e56707、版本 0.0.73、`candidateOnly=true`、`releaseAccepted=false`、`updaterSigned=false`、`authenticodeSigned=false`；Core pin 为 `1185613100cc5b0d3b138160a66e108777b3d2aa935761fa619f68ba2c786123`。候选使用真实同源码 Service/固定 Core、关闭自动更新，不是普通 App unit CI 的占位资源；这些构建身份也不是用户当前运行进程的身份证明。
+
+实际 smoke 命令为 `tooling/scripts/test-windows-candidate-install.ps1 -CandidateDirectory $env:CANDIDATE_DIRECTORY`，保留原有一次性 hosted Windows、拒绝已有安装及严格源码/digest 检查。[失败 JSON artifact10679622431](https://github.com/raydocs/tono/actions/runs/35693574024/artifacts/10679622431) 明确为 `freshInstall=true`、`sameVersionRepair=false`、`uninstall=true`、`dnsUnchanged=true`、`physicalUpgradeQualified=false`。NSIS/Service 源码有多个 preflight、事务及 journal 拒绝分支；现有 smoke 没有保存 NSIS detail/helper 输出，**根因尚未证明**，不把这个 outer exit2 当作已确认的 exit76、可忽略的重启要求或认证交接问题。已向 [#26 补充实测证据](https://github.com/raydocs/tono/issues/26#issuecomment-5772016253)；下一次定点诊断须在正常 cleanup 前保存失败详情，不重复盲跑、不重建同一包，也不跳 journal/权限检查来制造通过。
+
+### 替换现有测试版本的边界
+
+**本次判断：目前不能把这个候选当作现有测试版本的直接替换包。Windows 的同版本覆盖已实际失败，macOS 还没有本源码的合格签名候选。** 有限审查源码修复与 main CI 通过不等于安装验收，也不等于未知 bug 清零。交付替换测试包还须分开满足：
+
+1. 明确平台、源码 SHA、候选 run、archive/installer SHA-256 与组件 manifest；不能只写“0.0.73”或把磁盘 manifest 当运行进程证明。
+2. Windows 先定位并解决上述同版本替换失败、收齐修复源码对应的成功安装证据，再在获准、可恢复的 Windows 11 测试设备上记录原安装版本、组件/配置身份、连接/断开/切换、失败恢复与真实网络前后状态。macOS 先批准可信精确源码的签名候选路径，再补签名/公证及已安装 helper 的设备证据。
+3. 手动替换前正常断开并确认网络已恢复，保留旧包与恢复手段；如果安装器以 exit76 或未恢复 journal 拒绝，保留日志并停止，不删除 journal 或跳过保护来取得“安装成功”。本轮没有在任何用户日常设备上执行这些步骤。
+4. 不把手动候选安装推广成受保护在线升级：#26 的 installer-bound 认证交接仍未解决，Sparkle、Windows 更新源、签名/发布与 G1–G3 门禁不变。
+
+本次续办只更新本记录，不修改产品、测试、依赖或 workflow；文档核对不需要重跑 native suite。没有新建全仓审查或后台跟进计划。
