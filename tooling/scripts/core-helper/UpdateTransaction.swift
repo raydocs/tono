@@ -225,7 +225,7 @@ final class UpdateTransaction {
               attempt.initiatingToken != peer.auditToken || attempt.initiatingBoot != boot else { throw HelperFailure.invalid("Pending update needs recovery; no successor grant.") }
         let manifest = try UpdateContractV1.ReleaseManifest.decode(attempt.manifest)
         let components = try effects.installedComponents()
-        guard components == manifest.target(.macosArm64).components else { throw HelperFailure.invalid("Installed update components differ.") }
+        guard components == (try manifest.target(.macosArm64).components) else { throw HelperFailure.invalid("Installed update components differ.") }
         if let token = attempt.successorToken {
             guard token == peer.auditToken, attempt.successorBoot == boot else { throw HelperFailure.invalid("Update successor incarnation changed; recovery remains pending.") }
             return

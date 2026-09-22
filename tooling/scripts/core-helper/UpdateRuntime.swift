@@ -117,12 +117,13 @@ final class UpdateRuntime {
             throw HelperFailure.invalid("Cannot read system proxy state for update.")
         }
         for service in services {
-            guard let proto = SCNetworkServiceCopyProtocol(service, kSCNetworkProtocolTypeProxies),
+            guard let serviceID = SCNetworkServiceGetServiceID(service),
+                  let proto = SCNetworkServiceCopyProtocol(service, kSCNetworkProtocolTypeProxies),
                   let config = SCNetworkProtocolGetConfiguration(proto) as? [String: Any] else {
                 throw HelperFailure.invalid("Cannot read a network service proxy configuration.")
             }
             try Self.noCoreProxy(config)
-            let key = "State:/Network/Service/\(SCNetworkServiceGetServiceID(service) as String)/Proxies"
+            let key = "State:/Network/Service/\(serviceID as String)/Proxies"
             if let live = SCDynamicStoreCopyValue(store, key as CFString) as? [String: Any] { try Self.noCoreProxy(live) }
         }
     }
