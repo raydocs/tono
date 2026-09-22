@@ -1,12 +1,12 @@
 # Tono 0.0.73
 
-This is the first public cut. **The backup channel is manual in this version.** Tono does not switch to it on its own.
+This is a test candidate, not a qualified stable release or a customer update-channel promotion. **The backup channel is manual in this version.** Tono does not switch to it on its own.
 
 - Connect on the default path with a named city. After you are connected, the dashboard and Activity should stay on Connected. If they bounce back to retry, copy the diagnostic block and send it.
 - If a city will not stay up, you can pick **Backup channel** yourself. It is not turned on automatically, and it is not in every account.
 - When a connection fails, the main screen shows a short reason. Support can copy the failed stage and error code for a report.
-- The network helper is 4.3.0. Upgrading from pre-4.2.0 installs will require an administrator password once; all subsequent helper updates are applied silently and securely without password prompts.
-- No phone app. No Linux app. macOS 14+.
+- The network helper is 4.4.0. Installation or repair may require macOS administrator authorization; approve only the expected Tono network-helper request.
+- This candidate requires an Apple Silicon Mac running macOS 26.3 or later. It is not an Intel, macOS 14 or macOS 15 package. No phone app. No Linux app.
 - Sleep and wake are not certified in this build. If the session does not come back, connect again.
 - The first in-app update on a real Mac is still unproven. Keep a way back to 0.0.72 until that is checked.
 
