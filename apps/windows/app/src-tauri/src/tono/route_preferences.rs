@@ -273,7 +273,8 @@ async fn request(
         .await
         .map_err(|_| "route preference storage is slow; refresh before retrying")?
         .map_err(|_| "route preference worker stopped")??;
-    if !context.is_current(&state.lock().await) {
+    let inner = state.lock().await;
+    if !context.is_current(&inner) {
         return Err("route preference account or catalog changed".into());
     }
     Ok(reply)

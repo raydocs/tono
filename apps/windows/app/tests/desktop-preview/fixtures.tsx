@@ -233,14 +233,17 @@ export const tonoConnectProgress = async () => ({
 })
 const connections = [
   {
-    id: 'home',
+    id: 'cloud',
     metadata: {
       process: 'Claude.exe',
       host: 'api.example.test',
       network: 'tcp',
       destinationPort: '443',
     },
-    chains: ['Tono-Exit', 'Tono-Claude-Home'],
+    chains:
+      scenario === 'selectors'
+        ? ['Tono-Exit', 'Tono-Claude-Home']
+        : ['Tokyo · Sakura', 'Tono-Exit', 'Tono-Claude-Home'],
     rule: 'DOMAIN-SUFFIX',
     rulePayload: 'example.test',
     upload: 128,
@@ -254,8 +257,8 @@ const connections = [
       network: 'tcp',
       destinationPort: '443',
     },
-    chains: [],
-    rule: '',
+    chains: scenario === 'selectors' ? ['Tono-Claude-Home'] : [],
+    rule: scenario === 'selectors' ? 'MATCH' : '',
     upload: 64,
     download: 256,
   },

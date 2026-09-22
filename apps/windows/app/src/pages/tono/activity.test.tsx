@@ -19,18 +19,26 @@ import enTono from '@/locales/en/tono.json'
 const {
   closeConnectionMock,
   closeAllConnectionsMock,
+  serversMock,
   connectionDataMock,
   tonoStatusMock,
   useConnectionDataMock,
 } = vi.hoisted(() => ({
   closeConnectionMock: vi.fn(),
   closeAllConnectionsMock: vi.fn(),
+  serversMock: vi.fn(),
   connectionDataMock: { activeConnections: [] as IConnectionsItem[] },
-  tonoStatusMock: { uiState: 'connected', controllerGeneration: 7 },
+  tonoStatusMock: {
+    uiState: 'connected',
+    controllerGeneration: 7,
+    routePreferenceScope: 'activity:7',
+    catalogRevision: 54,
+  },
   useConnectionDataMock: vi.fn(),
 }))
 
 vi.mock('@/hooks/use-tono', () => ({
+  tonoServersQueryKey: ['tonoServers'],
   useTonoStatus: () => ({ status: tonoStatusMock }),
 }))
 
@@ -45,6 +53,7 @@ vi.mock('@/services/notice-service', () => ({
 vi.mock('@/services/tono', () => ({
   tonoCloseConnection: closeConnectionMock,
   tonoCloseAllConnections: closeAllConnectionsMock,
+  tonoServers: serversMock,
 }))
 vi.mock('@/components/base/virtual-list', () => ({
   VirtualList: ({
@@ -126,6 +135,17 @@ const localDnsConnection = (
 beforeEach(() => {
   closeConnectionMock.mockReset().mockResolvedValue(undefined)
   closeAllConnectionsMock.mockReset().mockResolvedValue(undefined)
+  serversMock
+    .mockReset()
+    .mockResolvedValue([
+      {
+        name: 'US · Proven',
+        server: '203.0.113.9',
+        port: 443,
+        available: true,
+        selected: true,
+      },
+    ])
   tonoStatusMock.uiState = 'connected'
   tonoStatusMock.controllerGeneration = 7
   useConnectionDataMock.mockReset().mockReturnValue({
@@ -425,7 +445,7 @@ describe('Activity app search regressions', () => {
 })
 
 describe('ActivityPage', () => {
-  it('explains each observed app route from the sanitized chain and rule, never inventing DIRECT for an unknown connection', () => {
+  it('explains only reported terminals, never promoting selectors or unknown chains to verified routes', async () => {
     const unknown = connection('unknown', {
       chains: [],
       rule: '',
@@ -433,11 +453,7 @@ describe('ActivityPage', () => {
       metadata: { ...connection('unknown').metadata, process: 'shared.exe' },
     })
     const routed = connection('routed', {
-      chains: [
-        'https://alice:secret@exit.example/private?token=abc',
-        'Tono-Exit',
-        'Tono-Claude-Home',
-      ],
+      chains: ['US · Proven', 'Tono-Exit', 'Tono-Claude-Home'],
       rule: 'DOMAIN-SUFFIX',
       rulePayload: 'https://bob:password@rules.example/list?key=secret',
       metadata: { ...connection('routed').metadata, process: 'shared.exe' },
@@ -446,7 +462,53 @@ describe('ActivityPage', () => {
       chains: ['\u0000', 'Tono-Exit'],
       metadata: { ...connection('stripped').metadata, process: 'shared.exe' },
     })
-    connectionDataMock.activeConnections = [unknown, routed, strippedTerminal]
+    const exitSelector = connection('exit-selector', {
+      chains: ['Tono-Exit'],
+      rule: 'MATCH',
+      metadata: {
+        ...connection('exit-selector').metadata,
+        process: 'shared.exe',
+      },
+    })
+    const homeSelector = connection('home-selector', {
+      chains: ['Tono-Claude-Home'],
+      rule: 'MATCH',
+      metadata: {
+        ...connection('home-selector').metadata,
+        process: 'shared.exe',
+      },
+    })
+    const unrecognizedTerminal = connection('unrecognized', {
+      chains: [
+        'https://alice:secret@exit.example/private?token=abc',
+        'Tono-Exit',
+      ],
+      metadata: {
+        ...connection('unrecognized').metadata,
+        process: 'shared.exe',
+      },
+    })
+    const residential = connection('residential', {
+      chains: ['Tono-Home-Residential', 'Tono-Claude-Home'],
+      metadata: {
+        ...connection('residential').metadata,
+        process: 'shared.exe',
+      },
+    })
+    const direct = connection('direct', {
+      chains: ['DIRECT'],
+      metadata: { ...connection('direct').metadata, process: 'shared.exe' },
+    })
+    connectionDataMock.activeConnections = [
+      unknown,
+      routed,
+      strippedTerminal,
+      exitSelector,
+      homeSelector,
+      unrecognizedTerminal,
+      residential,
+      direct,
+    ]
     const view = render(<ActivityPage />)
     expect(
       screen.queryByRole('region', { name: 'Why this route · shared.exe' }),
@@ -457,11 +519,15 @@ describe('ActivityPage', () => {
     const explanation = within(
       screen.getByRole('region', { name: 'Why this route · shared.exe' }),
     )
-    expect(explanation.getAllByText('Not verified')).toHaveLength(2)
+    await waitFor(() => {
+      expect(explanation.getAllByText('Not verified')).toHaveLength(5)
+    })
     expect(explanation.getByText('Cloud')).toBeDefined()
+    expect(explanation.getByText('Home')).toBeDefined()
+    expect(explanation.getByText('Direct')).toBeDefined()
     expect(explanation.getByText('DOMAIN-SUFFIX (rules.example)')).toBeDefined()
     expect(
-      explanation.getByText('exit.example ← Tono-Exit ← Tono-Claude-Home'),
+      explanation.getByText('US · Proven ← Tono-Exit ← Tono-Claude-Home'),
     ).toBeDefined()
     expect(explanation.getByText(/not packet-level attestation/)).toBeDefined()
     expect(screen.getByRole('region').textContent).not.toMatch(

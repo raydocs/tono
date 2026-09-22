@@ -5,10 +5,6 @@ import { TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
 
 import type { ActivityRow } from './activity-model'
 
-/** The legacy list's empty-chain badge is not evidence of a DIRECT rule. */
-export const observedActivityRoute = (row: ActivityRow) =>
-  row.hasRouteEvidence ? row.route : 'unknown'
-
 export const ActivityRouteExplanation = ({
   rows,
   title,
@@ -79,9 +75,9 @@ export const ActivityRouteExplanation = ({
               </dt>
               <dd style={{ margin: 0 }}>
                 {t(
-                  observedActivityRoute(row) === 'unknown'
+                  row.observedRoute === 'unknown'
                     ? 'tono.routeExplanation.unknown'
-                    : `tono.activity.routes.${row.route}`,
+                    : `tono.activity.routes.${row.observedRoute}`,
                 )}
               </dd>
               <dt style={{ color: text.secondary }}>
@@ -116,7 +112,7 @@ export const ActivityRouteExplanation = ({
             </dl>
             <p style={{ marginBottom: 0, color: text.tertiary, fontSize: 11 }}>
               {t(
-                !row.hasRouteEvidence
+                row.observedRoute === 'unknown'
                   ? 'tono.routeExplanation.insufficient'
                   : 'tono.routeExplanation.chainHint',
               )}

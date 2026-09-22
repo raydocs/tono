@@ -3,10 +3,15 @@ import { useTranslation } from 'react-i18next'
 
 import { VirtualList } from '@/components/base/virtual-list'
 import { useConnectionData } from '@/hooks/use-connection-data'
-import { useTonoStatus } from '@/hooks/use-tono'
+import { tonoServersQueryKey, useTonoStatus } from '@/hooks/use-tono'
 import { showNotice } from '@/services/notice-service'
+import { useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
-import { tonoCloseAllConnections, tonoCloseConnection } from '@/services/tono'
+import {
+  tonoCloseAllConnections,
+  tonoCloseConnection,
+  tonoServers,
+} from '@/services/tono'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import { PageHeader } from '@/tono-ui/PageHeader'
 import {
@@ -117,6 +122,26 @@ const ActivityPage = () => {
     title: string
     generation: number | undefined
   } | null>(null)
+  const { data: catalogServers } = useQuery({
+    // Do not borrow a previous account/catalog's names while the new list is loading.
+    queryKey: [
+      ...tonoServersQueryKey,
+      'activity',
+      status?.routePreferenceScope,
+      status?.catalogRevision,
+      generation,
+    ],
+    queryFn: tonoServers,
+    enabled:
+      connected &&
+      explanation !== null &&
+      !!status?.routePreferenceScope &&
+      status.catalogRevision != null,
+  })
+  const catalogNames = useMemo(
+    () => catalogServers?.map((server) => server.name) ?? [],
+    [catalogServers],
+  )
   const {
     response: { data, live },
     refreshGetClashConnection,
@@ -158,7 +183,10 @@ const ActivityPage = () => {
     () => activeConnections.slice(0, MAX_ACTIVITY_CONNECTIONS),
     [activeConnections],
   )
-  const rows = useMemo(() => capped.map(toActivityRow), [capped])
+  const rows = useMemo(
+    () => capped.map((connection) => toActivityRow(connection, catalogNames)),
+    [capped, catalogNames],
+  )
   const explanationRows =
     explanation && connected && explanation.generation === generation
       ? rows.filter(

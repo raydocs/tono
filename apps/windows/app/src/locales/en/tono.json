@@ -40,7 +40,7 @@
     "chainHint": "The terminal outbound is on the left; selector groups follow. The route label comes from this chain, not from the app name or your selected node.",
     "unknown": "Not verified",
     "notReported": "Not reported",
-    "insufficient": "The runtime did not report a terminal chain. The list's legacy Direct badge is not evidence of a DIRECT rule or of direct egress.",
+    "insufficient": "The runtime did not report a recognized terminal. A selector or legacy list badge is not evidence of a DIRECT rule or of the actual egress.",
     "gone": "These connections are no longer in the live feed.",
     "limit": "Showing the first 20 connections for this app."
   },

@@ -10,7 +10,7 @@ export interface ActivityRow {
   /** Bounded, sanitized runtime chain, in terminal-outbound-first order. */
   chain: string[]
   chainTruncated: boolean
-  hasRouteEvidence: boolean
+  observedRoute: Exclude<ActivityRoute, 'local'> | 'unknown'
   searchText: string
 }
 
@@ -177,7 +177,39 @@ export const classifyActivityRoute = (
   return 'proxied'
 }
 
-export const toActivityRow = (connection: IConnectionsItem): ActivityRow => {
+/** Evidence is stricter than the legacy list badge: selectors are not terminals. */
+const observedActivityRoute = (
+  connection: IConnectionsItem,
+  catalogNames: readonly string[],
+): ActivityRow['observedRoute'] => {
+  const terminal = connection.chains[0]
+  if (
+    !terminal ||
+    terminal === 'Tono-Exit' ||
+    terminal === 'Tono-Claude-Home'
+  ) {
+    return 'unknown'
+  }
+  if (terminal === 'REJECT' || terminal === 'REJECT-DROP') return 'rejected'
+  if (
+    terminal === 'DIRECT' ||
+    terminal === 'Tono-China-Direct' ||
+    terminal === 'Tono-China-Web-Direct'
+  ) {
+    return 'direct'
+  }
+  if (terminal === 'Tono-Home-Residential') return 'home'
+  if (!catalogNames.includes(terminal)) return 'unknown'
+  return connection.chains.includes('Tono-Claude-Home') &&
+    !connection.chains.includes('Tono-Exit')
+    ? 'home'
+    : 'proxied'
+}
+
+export const toActivityRow = (
+  connection: IConnectionsItem,
+  catalogNames: readonly string[] = [],
+): ActivityRow => {
   const { metadata } = connection
   const process = processName(metadata)
   const host = sanitizeActivityValue(
@@ -223,7 +255,7 @@ export const toActivityRow = (connection: IConnectionsItem): ActivityRow => {
     rule,
     chain,
     chainTruncated: connection.chains.length > 16,
-    hasRouteEvidence: !!chain[0],
+    observedRoute: observedActivityRoute(connection, catalogNames),
     searchText:
       `${process} ${originalProcess} ${familyAliases} ${target} ${protocol} ${rule}`.toLowerCase(),
   }
