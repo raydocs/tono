@@ -1,6 +1,12 @@
 name: Windows candidate installer
 
 on:
+  workflow_call:
+    inputs:
+      update_release_sequence:
+        description: Monotonic sequence for a paired unsigned native candidate
+        required: true
+        type: string
   workflow_dispatch:
   push:
     branches:
@@ -33,7 +39,10 @@ jobs:
         working-directory: apps/windows/app
         shell: pwsh
     env:
-      VITE_TONO_UPDATES_CONFIGURED: 'false'
+      TONO_UPDATE_RELEASE_SEQUENCE: ${{ inputs.update_release_sequence || '' }}
+      TONO_RELEASE_SEQUENCE: ${{ inputs.update_release_sequence || '' }}
+      TONO_UPDATER_PUBLIC_KEY: ${{ inputs.update_release_sequence != '' && vars.TONO_UPDATER_PUBLIC_KEY || '' }}
+      VITE_TONO_UPDATES_CONFIGURED: ${{ inputs.update_release_sequence != '' && vars.TONO_UPDATER_PUBLIC_KEY != '' && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
@@ -133,11 +142,36 @@ jobs:
           $files += (Resolve-Path src-tauri/sidecar/tono-core-x86_64-pc-windows-msvc.exe).Path
           $hashes = @($files | ForEach-Object { @{ name = (Split-Path -Leaf $_); sha256 = (Get-FileHash $_ -Algorithm SHA256).Hash.ToLowerInvariant() } })
           @{ version = $version; source = $env:GITHUB_SHA; candidateOnly = $true; releaseAccepted = $false; updaterSigned = $false; authenticodeSigned = $false; files = $hashes } | ConvertTo-Json -Depth 5 | Set-Content target/release/bundle/nsis/candidate-manifest.json
+
+      - name: Measure paired unsigned update target from the actual NSIS payload
+        if: inputs.update_release_sequence != ''
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $installer = @(Get-ChildItem target/release/bundle/nsis/*-setup.exe)
+          if ($installer.Count -ne 1) { throw 'Expected exactly one NSIS package' }
+          $extracted = Join-Path $env:RUNNER_TEMP 'paired-windows-payload'
+          7z x -y "-o$extracted" $installer[0].FullName
+          $components = @{}
+          foreach ($name in @('Tono.exe.next', 'tono-core.exe.next', 'tono-service.exe')) {
+            $matches = @(Get-ChildItem -LiteralPath $extracted -Recurse -File | Where-Object Name -eq $name)
+            if ($matches.Count -ne 1) { throw "Expected one packaged $name, found $($matches.Count)" }
+            $components[$name] = $matches[0].FullName
+          }
+          $version = node -p "require('./package.json').version"
+          node ../../../tooling/scripts/desktop-update-v1.mjs measure `
+            --version $version --source $env:GITHUB_SHA --sequence $env:TONO_UPDATE_RELEASE_SEQUENCE `
+            --target windows-x86_64 --artifact $installer[0].FullName `
+            --app $components['Tono.exe.next'] --core $components['tono-core.exe.next'] `
+            --privileged $components['tono-service.exe'] `
+            --output target/release/bundle/nsis/update-target.windows-x86_64.json
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: tono-windows-0.0.73-candidate-${{ github.sha }}
           path: |
             apps/windows/app/target/release/bundle/nsis/*-setup.exe
             apps/windows/app/target/release/bundle/nsis/candidate-manifest.json
+            apps/windows/app/target/release/bundle/nsis/update-target.windows-x86_64.json
           if-no-files-found: error
           retention-days: 7

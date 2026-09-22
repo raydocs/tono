@@ -27,6 +27,9 @@ on:
       - .github/workflows/windows-ci.yml
       - .github/workflows/windows-candidate.yml
       - .github/workflows/windows-installer-smoke.yml
+      - .github/workflows/desktop-update-candidate.yml
+      - tooling/scripts/desktop-update-v1.mjs
+      - tooling/scripts/tests/desktop-update-v1.test.mjs
       - tooling/scripts/test-windows-candidate-install.ps1
       - tooling/scripts/tests/windows-ci-paths.test.cjs
       - tooling/scripts/test-windows-qa.ps1
@@ -51,6 +54,9 @@ on:
       - .github/workflows/windows-ci.yml
       - .github/workflows/windows-candidate.yml
       - .github/workflows/windows-installer-smoke.yml
+      - .github/workflows/desktop-update-candidate.yml
+      - tooling/scripts/desktop-update-v1.mjs
+      - tooling/scripts/tests/desktop-update-v1.test.mjs
       - tooling/scripts/test-windows-candidate-install.ps1
       - tooling/scripts/tests/windows-ci-paths.test.cjs
       - tooling/scripts/test-windows-qa.ps1
@@ -117,6 +123,9 @@ jobs:
       - name: Verify Windows CI trigger coverage
         working-directory: apps/windows/app
         run: node --test ../../../tooling/scripts/tests/windows-ci-paths.test.cjs
+
+      - name: Verify paired manifest signatures and artifact binding
+        run: node --test ../../../tooling/scripts/tests/desktop-update-v1.test.mjs
 
       - name: Test
         run: pnpm test

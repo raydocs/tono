@@ -129,3 +129,42 @@ test('Windows candidate build and installer smoke agree with the product version
   const installer = readFileSync(path.join(root, 'tooling/scripts/test-windows-candidate-install.ps1'), 'utf8')
   assert.equal(installer.match(/\$manifest\.version -ne '([^']+)'/)?.[1], version)
 })
+
+test('paired candidates share one source and sequence without granting signing or publication', () => {
+  const read = name => load(readFileSync(path.join(root, '.github/workflows', name), 'utf8'))
+  const pair = read('desktop-update-candidate.yml')
+  const mac = read('macos-ci.yml')
+  const win = read('windows-candidate.yml')
+  assert.deepEqual(Object.keys(pair.on), ['workflow_dispatch'])
+  assert.deepEqual(pair.permissions, { contents: 'read' })
+  assert.equal(pair.jobs.macos.uses, './.github/workflows/macos-ci.yml')
+  assert.equal(pair.jobs.windows.uses, './.github/workflows/windows-candidate.yml')
+  assert.deepEqual(pair.jobs.macos.with, pair.jobs.windows.with)
+  assert.equal(pair.jobs.macos.with.update_release_sequence, '${{ needs.inputs.outputs.sequence }}')
+  assert.deepEqual(pair.jobs.pair.needs, ['inputs', 'macos', 'windows'])
+  for (const value of [pair, mac, win]) {
+    assert.ok(!JSON.stringify(value).includes('secrets.'), 'unsigned candidate must not gain signing credentials')
+    for (const job of Object.values(value.jobs)) {
+      if (job['runs-on']) assert.ok(['ubuntu-24.04', 'macos-26', 'windows-2025'].includes(job['runs-on']))
+      for (const step of job.steps ?? []) {
+        if (step.uses?.startsWith('actions/checkout@')) assert.equal(step.with?.ref, undefined, 'native jobs must build the caller SHA')
+      }
+    }
+  }
+  for (const [value, id] of [[mac, 'macos-arm64'], [win, 'windows-x86_64']]) {
+    assert.equal(value.on.workflow_call.inputs.update_release_sequence.required, true)
+    const step = value.jobs.build.steps.find(step => step.run?.includes(`--target ${id}`))
+    assert.ok(step?.run.includes('desktop-update-v1.mjs measure'))
+    assert.ok(step.run.includes('GITHUB_SHA'))
+    assert.ok(step.run.includes(`update-target.${id}.json`))
+  }
+  const assembly = pair.jobs.pair.steps.find(step => step.run?.includes('desktop-update-v1.mjs assemble'))
+  assert.ok(assembly?.run.includes('--source "$GITHUB_SHA"'))
+  assert.ok(assembly.run.includes('manifest.unsigned.json'))
+  assert.ok(workflow.jobs.app.steps.some(step => step.run?.includes('node --test ../../../tooling/scripts/tests/desktop-update-v1.test.mjs')))
+  for (const event of ['push', 'pull_request']) {
+    for (const changed of ['.github/workflows/desktop-update-candidate.yml', 'tooling/scripts/desktop-update-v1.mjs', 'tooling/scripts/tests/desktop-update-v1.test.mjs']) {
+      assert.ok(workflow.on[event].paths.some(pattern => path.matchesGlob(changed, pattern)), changed)
+    }
+  }
+})

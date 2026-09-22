@@ -1,6 +1,12 @@
 name: macOS CI
 
 on:
+  workflow_call:
+    inputs:
+      update_release_sequence:
+        description: Monotonic sequence for a paired unsigned native candidate
+        required: true
+        type: string
   # Manual re-run, so a flake or an infrastructure hiccup does not need a
   # pointless commit to retry.
   workflow_dispatch:
@@ -54,8 +60,15 @@ jobs:
     # "value of type 'some View' has no member 'glassEffect'", which reads like a
     # code error and is really a missing SDK.
     runs-on: macos-26
+    env:
+      TONO_UPDATE_RELEASE_SEQUENCE: ${{ inputs.update_release_sequence || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        if: inputs.update_release_sequence != ''
+        with:
+          node-version: 24
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
@@ -83,10 +96,26 @@ jobs:
           mkdir -p apps/macos/dist
           ditto -c -k --keepParent apps/macos/build/Build/Products/Release/Tono.app apps/macos/dist/Tono-macOS-beta.zip
 
+      - name: Measure paired unsigned update target from the packaged bundle
+        if: inputs.update_release_sequence != ''
+        run: |
+          set -euo pipefail
+          ditto -x -k apps/macos/dist/Tono-macOS-beta.zip "$RUNNER_TEMP/paired-macos"
+          app="$RUNNER_TEMP/paired-macos/Tono.app"
+          version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")
+          node tooling/scripts/desktop-update-v1.mjs measure \
+            --version "$version" --source "$GITHUB_SHA" --sequence "$TONO_UPDATE_RELEASE_SEQUENCE" \
+            --target macos-arm64 --artifact apps/macos/dist/Tono-macOS-beta.zip \
+            --app "$app/Contents/MacOS/Tono" --core "$app/Contents/Resources/sing-box" \
+            --privileged "$app/Contents/Resources/tono-core-helper" \
+            --output apps/macos/dist/update-target.macos-arm64.json
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: tono-macos-beta-${{ github.sha }}
-          path: apps/macos/dist/Tono-macOS-beta.zip
+          path: |
+            apps/macos/dist/Tono-macOS-beta.zip
+            apps/macos/dist/update-target.macos-arm64.json
           if-no-files-found: error
           retention-days: 7
 

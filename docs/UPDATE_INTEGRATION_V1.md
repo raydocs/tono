@@ -115,3 +115,75 @@ installation path for tests. New UI states need real rendered review. A hosted
 unit test or component capture does not replace authorized installed Mac and
 Windows 11 success/failure, DNS and packet-level acceptance. #26/G3 remains open
 until that evidence exists.
+
+## Paired build and offline publisher commands
+
+`desktop-update-candidate.yml` is an operator-dispatched, unsigned workflow. It
+calls the existing macOS/Windows native build lanes at the caller SHA with the
+same validated sequence, measures components extracted from the actual archive
+and NSIS package, and emits `manifest.unsigned.json` beside both packages. It
+does not have signing secrets, execute installers or publish anything. An
+unsigned macOS CI archive remains unusable at the production Helper trust
+boundary; do not sign that manifest as a shortcut around Developer ID/notarization.
+
+For a real pair, both native packages must first be built from the same approved
+source with the same sequence through the existing signing/qualification gates.
+Set `TONO_UPDATE_RELEASE_SEQUENCE` for macOS sealed build metadata and
+`TONO_RELEASE_SEQUENCE` for the Windows compiled floor. The paired candidate
+workflow supplies both names from its one input. Keep the source appVersion in
+sync; labels are not used to compare update order.
+
+The offline publisher has no private-key, network, upload or feed operation:
+
+```sh
+# Run on each native build after final package creation, using actual unpacked
+# App/Core/Helper-or-Service files from that package (not a previous build).
+node tooling/scripts/desktop-update-v1.mjs measure \
+  --version "$VERSION" --source "$SOURCE_SHA" --sequence "$SEQUENCE" \
+  --target macos-arm64 --artifact "$MAC_ZIP" \
+  --app "$MAC_APP/Contents/MacOS/Tono" \
+  --core "$MAC_APP/Contents/Resources/sing-box" \
+  --privileged "$MAC_APP/Contents/Resources/tono-core-helper" \
+  --output update-target.macos-arm64.json
+
+node tooling/scripts/desktop-update-v1.mjs measure \
+  --version "$VERSION" --source "$SOURCE_SHA" --sequence "$SEQUENCE" \
+  --target windows-x86_64 --artifact "$WIN_EXE" \
+  --app "$UNPACKED_WIN_APP" --core "$UNPACKED_WIN_CORE" \
+  --privileged "$UNPACKED_WIN_SERVICE" --output update-target.windows-x86_64.json
+
+node tooling/scripts/desktop-update-v1.mjs assemble \
+  --macos update-target.macos-arm64.json --windows update-target.windows-x86_64.json \
+  --source "$SOURCE_SHA" --sequence "$SEQUENCE" --release-id "$RELEASE_ID" \
+  --output manifest.json
+```
+
+Signing is a separate authorized operation. The pinned Sparkle 2.9.6 `sign_update`
+tool can sign the **JSON file bytes** with the existing macOS update key; it is
+only a signing utility here, never the installer. Tauri's existing `signer sign`
+can sign the same JSON using its private-key-file option. Keep private keys and
+passwords out of command arguments/logs; use the existing isolated signing jobs.
+Retain the raw Ed25519 Base64 result as `manifest.macos-arm64.sig` and Tauri's
+Base64 minisign box as `manifest.windows-x86_64.sig`. Do not reserialize the JSON.
+
+After both signatures exist, supply **public-key files** matching the native
+compiled pins (never keys from the candidate itself):
+
+```sh
+node tooling/scripts/desktop-update-v1.mjs bundle \
+  --manifest manifest.json --macos-artifact "$MAC_ZIP" --windows-artifact "$WIN_EXE" \
+  --macos-signature manifest.macos-arm64.sig \
+  --windows-signature manifest.windows-x86_64.sig \
+  --macos-public-key macos-update-public-key.txt \
+  --windows-public-key windows-update-public-key.txt \
+  --output new-desktop-update-bundle
+```
+
+This refuses either bad/missing signature or a changed package, copies packages
+without overwriting an existing bundle, rehashes copied bytes, then creates the
+local discovery pointer last. Native code signing, package contents and installed
+recovery still require their native verifiers; this tool verifies detached
+signatures and artifact binding, not Developer ID, Authenticode or G3 acceptance.
+Uploading the result or advancing a customer pointer is a separate authorized,
+gated operation. Re-signing or stapling after measurement requires a new manifest
+and both signatures.
