@@ -7,6 +7,10 @@ export interface ActivityRow {
   protocol: string
   route: ActivityRoute
   rule: string
+  /** Bounded, sanitized runtime chain, in terminal-outbound-first order. */
+  chain: string[]
+  chainTruncated: boolean
+  hasRouteEvidence: boolean
   searchText: string
 }
 
@@ -205,7 +209,8 @@ export const toActivityRow = (connection: IConnectionsItem): ActivityRow => {
     (metadata.process || metadata.processPath || '').split(/[\\/]/).pop() || '',
     100,
   )
-  const familyAliases = process === WECHAT_ACTIVITY_PROCESS ? 'wechat weixin 微信' : ''
+  const familyAliases =
+    process === WECHAT_ACTIVITY_PROCESS ? 'wechat weixin 微信' : ''
   return {
     id: connection.id,
     process: process || '—',
@@ -213,6 +218,11 @@ export const toActivityRow = (connection: IConnectionsItem): ActivityRow => {
     protocol: protocol || '—',
     route,
     rule,
+    chain: connection.chains
+      .slice(0, 16)
+      .map((hop) => sanitizeActivityValue(hop)),
+    chainTruncated: connection.chains.length > 16,
+    hasRouteEvidence: !!connection.chains[0]?.trim(),
     searchText:
       `${process} ${originalProcess} ${familyAliases} ${target} ${protocol} ${rule}`.toLowerCase(),
   }
@@ -261,7 +271,10 @@ export const aggregateActivityApps = (
     byProcess.set(row.process, current)
   }
   for (const row of byProcess.values()) {
-    row.searchText = [row.searchText, ...(searchTerms.get(row.process) ?? [])].join(' ')
+    row.searchText = [
+      row.searchText,
+      ...(searchTerms.get(row.process) ?? []),
+    ].join(' ')
   }
   return [...byProcess.values()].sort((left, right) => {
     if (right.total !== left.total) return right.total - left.total
