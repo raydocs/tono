@@ -22,12 +22,29 @@ environment markers are not mode evidence. One implementation thread, no childre
 | Recovery feedback | `RecoveryNotice` is presentation derived from existing state; it owns no tasks. Existing wake/network-change entry points set context and successful explicit release clears it. Dashboard/menu retain the existing Retry / Repair and reconnect action. `testRecoveryFeedbackUsesExistingOwnerAndReleaseClearsIt` drives that owner with only OS I/O substituted. |
 | Activity explanation | Real `AppState.updateConnections` binds terminal-first chain evidence to each flow. App rows and flow details explain rule/chain, including absent/selector-only unknowns. No rule editor. `testActivityExplanationUsesTerminalEvidenceNotTheSelectedNodeOrRule` distinguishes cloud terminal from a residential member later in the chain and a rule without terminal evidence. |
 
+## Catalog history ownership regression
+
+Independent review identified a same-name catalog replacement during held
+verification: completion recaptured the new digest and incorrectly credited
+the old verification to that catalog. The regression-first commit intentionally
+retains this defect for hosted red evidence. Its one new test exercises real
+catalog validation/publication, `verifyProtectedConnection` classification and
+history insertion. Only network origin I/O is a held continuation; the caller's
+already-verified runtime commit is represented locally, not a real helper/core
+installation. Same account/generation must not let C1 proof credit C2, while a
+new unchanged-C2 verification must still record success. Connect and switch need
+to pass their admitted digest explicitly; the final fix and red/green run IDs
+will be recorded before claiming this behavior is accepted.
+
 ## Native render review
 
 `MacUsabilityRenderTests.testNativeUsabilityStatesProduceReviewableAttachments`
 uses AppKit `NSHostingView` and the production SwiftUI views with synthetic
 state. It does not sign in, scan browsers, query the helper, connect or upload.
 The displayed synthetic receipt is labelled as such and is not server evidence.
+Nodes route choices and Dashboard wake feedback are **production-component**
+captures, not full-page renders. The complete menu-bar view includes its existing
+recovery action. No product glass effects are disabled for the test.
 
 The existing hosted `macos-26` workflow runs its unchanged unsigned Release
 build and Debug `TonoTests` command, now with
@@ -37,12 +54,13 @@ bounded direct PNG copies under `renders/`:
 
 - `health-unknown-helper.png`, `build-unverified.png`
 - `report-preview.png`, `report-receipt.png`, `report-no-receipt.png`
-- `nodes-favorite-recommendation.png`, `nodes-region-unavailable.png`
-- `dashboard-wake-paused.png`, `menubar-wake-paused.png`, `network-recovery-running.png`
+- `nodes-route-choices-favorite-component.png`, `nodes-region-unavailable-component.png`
+- `dashboard-wake-notice-component.png`, `menubar-wake-paused.png`, `network-recovery-running.png`
 - `activity-cloud-and-unknown.png`
 
-Outputs are gitignored. Tests only check that images were emitted; a person or
-agent must inspect the images. Run/job/head/checkout and artifact identity must
+Outputs are gitignored. Tests check bounded PNG output and opacity samples on
+the intentionally opaque canvas; a person or agent must still inspect content
+and layout. Run/job/head/checkout and artifact identity must
 be recorded in the PR/thread after execution; configuring captures is not proof
 they rendered correctly. Linux source checks cannot run XCTest or SwiftUI.
 
@@ -52,8 +70,26 @@ via a push checkout: unsigned Release build/package, policy tests and privileged
 helper tests passed, but XCTest **compilation failed**, so no tests or renders ran.
 The capture harness attempted to write the read-only `accessibilityReduceMotion`
 environment key. The follow-up uses SwiftUI's animation-disabled transaction
-instead. Its native results and image review remain pending until recorded with
-the exact follow-up SHA in PR #278 / the thread; source inspection is not a pass.
+instead.
+
+Follow-up push run [35713898492](https://github.com/raydocs/tono/actions/runs/35713898492)
+tested [f84ed4b3](https://github.com/raydocs/tono/commit/f84ed4b3cd15607267d645099cf0b54e203ea85d)
+on macOS 26.6.2 arm64, Xcode 26.6 / SDK 26.5. All four jobs passed, including
+355 XCTest cases with zero failures and one existing opt-in install-script
+emission skip. Artifact `10688412480` contains 11 PNGs and the xcresult.
+Actual image inspection found eight readable captures, but the full Dashboard
+bitmap was entirely transparent and both whole Nodes images omitted content.
+Those three images are **not** visual acceptance despite the test's success.
+
+The narrow harness correction captures `RouteChoicesView` and `RecoveryNotice`
+directly, allows one bounded AppKit layout/display turn, and rejects transparent
+output rather than relying on PNG byte size. `NSView.cacheDisplay` does not prove
+full-page Liquid Glass compositor fidelity; no screen-recording permission or
+extra signing/device privilege is requested to work around that limitation.
+Results for this correction must be matched to its published SHA in PR #278 /
+the thread. The report preview's mid-line bottom edge is its normal bounded
+180–260pt JSON ScrollView, with spacing before sibling status/actions; the
+product UI is not expanded to force all scrollable content into a screenshot.
 
 Not covered by these fixtures: real-account server storage, signed Helper
 authorization, installed Core identity, actual network handoffs/sleep, PF/DNS
