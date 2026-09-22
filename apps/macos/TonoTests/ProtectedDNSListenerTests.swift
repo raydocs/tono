@@ -115,6 +115,14 @@ final class ProtectedDNSListenerTests: XCTestCase {
         var serverFailure = valid
         serverFailure[3] = 0x82
         XCTAssertEqual(ProtectedDNSProbe.decodeAnswers(serverFailure), [], "SERVFAIL is not proof")
+        var extendedFailure = valid
+        extendedFailure[11] = 1
+        // OPT extended RCODE=1 with header RCODE=0 means BADVERS, not NOERROR.
+        // The probe does not negotiate EDNS, so no unsolicited OPT is admissible.
+        extendedFailure.append(contentsOf: [
+            0x00, 0x00, 0x29, 0x02, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ])
+        XCTAssertEqual(ProtectedDNSProbe.decodeAnswers(extendedFailure), [], "BADVERS is not proof")
         var truncated = valid
         truncated[2] = 0x83
         XCTAssertEqual(ProtectedDNSProbe.decodeAnswers(truncated), [], "TC withdraws partial proof")
