@@ -442,7 +442,11 @@ describe('ActivityPage', () => {
       rulePayload: 'https://bob:password@rules.example/list?key=secret',
       metadata: { ...connection('routed').metadata, process: 'shared.exe' },
     })
-    connectionDataMock.activeConnections = [unknown, routed]
+    const strippedTerminal = connection('stripped', {
+      chains: ['\u0000', 'Tono-Exit'],
+      metadata: { ...connection('stripped').metadata, process: 'shared.exe' },
+    })
+    connectionDataMock.activeConnections = [unknown, routed, strippedTerminal]
     const view = render(<ActivityPage />)
     expect(
       screen.queryByRole('region', { name: 'Why this route · shared.exe' }),
@@ -453,7 +457,7 @@ describe('ActivityPage', () => {
     const explanation = within(
       screen.getByRole('region', { name: 'Why this route · shared.exe' }),
     )
-    expect(explanation.getByText('Not verified')).toBeDefined()
+    expect(explanation.getAllByText('Not verified')).toHaveLength(2)
     expect(explanation.getByText('Cloud')).toBeDefined()
     expect(explanation.getByText('DOMAIN-SUFFIX (rules.example)')).toBeDefined()
     expect(
