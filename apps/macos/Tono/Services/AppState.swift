@@ -1340,47 +1340,66 @@ final class AppState {
         rounds: Int,
         // I/O seam only: tests hold the origin race, not classification,
         // generation checks, catalog publication or history insertion.
-        raceProbes: @MainActor (Int, Int?, String?) async -> OriginRace = { timeout, proxyPort, preferred in
+        raceProbes: @escaping @MainActor (Int, Int?, String?) async -> OriginRace = { timeout, proxyPort, preferred in
             await ProtectedConnectivityVerifier.raceSystemTUNProbes(
                 timeoutSeconds: timeout, mixedProxyPort: proxyPort, preferredLabel: preferred
             )
         }
     ) async -> ConnectivityVerdict {
+        // Check again after every suspension: cancellation/generation retirement
+        // while network I/O is held cannot publish a preferred origin or event.
+        func interrupted(_ round: Int) -> ConnectivityVerdict? {
+            let detail: String
+            if Task.isCancelled {
+                detail = "cancelled"
+            } else if generation != connectionCoordinator.protectionOperationGeneration {
+                detail = "stale generation"
+            } else {
+                return nil
+            }
+            return .failed(ProtectedConnectivity.failure(
+                .unknownClassifiedFailure,
+                stage: "verifyingTraffic",
+                attempt: round,
+                generation: generation,
+                detail: detail
+            ))
+        }
+        defer { controllerTask?.cancel() }
         var lastFailure: ProtectedFailure?
         for round in 1...max(1, rounds) {
-            if Task.isCancelled {
-                controllerTask?.cancel()
-                return .failed(
-                    ProtectedConnectivity.failure(
-                        .unknownClassifiedFailure,
-                        stage: "verifyingTraffic",
-                        attempt: round,
-                        generation: generation,
-                        detail: "cancelled"
-                    )
-                )
-            }
-            if generation != connectionCoordinator.protectionOperationGeneration {
-                controllerTask?.cancel()
-                return .failed(
-                    ProtectedConnectivity.failure(
-                        .unknownClassifiedFailure,
-                        stage: "verifyingTraffic",
-                        attempt: round,
-                        generation: generation,
-                        detail: "stale generation"
-                    )
-                )
-            }
+            if let result = interrupted(round) { return result }
             let includeMixed = round == max(1, rounds)
-            let race = await raceProbes(12, nil, lastSuccessfulProbeOrigin)
+            // Diagnostic only. Start alongside the last TUN round so a failed
+            // TUN does not add a fresh eight-second wait. Deliberately not an
+            // async-let/group child: a winning TUN must not drain a losing probe.
+            let mixedTask: Task<OriginRace, Never>? = includeMixed ? Task {
+                guard !Task.isCancelled else { return .lost([]) }
+                return await raceProbes(8, mixedPort, nil)
+            } : nil
+            defer { mixedTask?.cancel() }
+            let race = await withTaskCancellationHandler {
+                await raceProbes(12, nil, lastSuccessfulProbeOrigin)
+            } onCancel: {
+                mixedTask?.cancel()
+                controllerTask?.cancel()
+            }
+            if let result = interrupted(round) { return result }
             if case .won(let label) = race {
+                mixedTask?.cancel()
                 lastSuccessfulProbeOrigin = label
             }
             let tun = race.tunCheck
             let mixed: ProbeCheck?
-            if includeMixed, case .failed = tun {
-                switch await raceProbes(8, mixedPort, nil) {
+            if let mixedTask, case .failed = tun {
+                let diagnostic = await withTaskCancellationHandler {
+                    await mixedTask.value
+                } onCancel: {
+                    mixedTask.cancel()
+                    controllerTask?.cancel()
+                }
+                if let result = interrupted(round) { return result }
+                switch diagnostic {
                 case .won:
                     mixed = .ok
                 case .lost(let probes):
@@ -1396,7 +1415,12 @@ final class AppState {
                 if let controller {
                     controllerResult = controller
                 } else if let controllerTask {
-                    controllerResult = await controllerTask.value
+                    controllerResult = await withTaskCancellationHandler {
+                        await controllerTask.value
+                    } onCancel: {
+                        controllerTask.cancel()
+                    }
+                    if let result = interrupted(round) { return result }
                 } else {
                     controllerResult = .ok
                 }

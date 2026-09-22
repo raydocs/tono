@@ -240,7 +240,10 @@ final class MacUsabilityTests: XCTestCase {
             held = Task {
                 let verdict = await app.verifyProtectedConnection(
                     mixedPort: 12345, generation: generation, rounds: 1,
-                    raceProbes: { _, _, _ in
+                    raceProbes: { _, proxyPort, _ in
+                        // Only hold the TUN authority; the final diagnostic now
+                        // runs concurrently and must not reuse its continuation.
+                        if proxyPort != nil { return .lost([]) }
                         entered.fulfill()
                         await gate.wait()
                         return .won("synthetic-tun")
