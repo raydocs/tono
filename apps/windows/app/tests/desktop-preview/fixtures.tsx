@@ -25,7 +25,9 @@ const status: TonoStatus = {
     scenario === 'stopped' ||
     scenario === 'update-recovery'
       ? 'protectedOffline'
-      : location.hash.includes('servers') || scenario === 'service'
+      : location.hash.includes('servers') ||
+          scenario === 'service' ||
+          scenario === 'update-unprotected'
         ? 'notConnected'
         : 'connected',
   stage: null,
@@ -37,7 +39,8 @@ const status: TonoStatus = {
   catalogRequiresChoice: false,
   controllerGeneration: 8,
   routePreferenceScope: 'preview:7',
-  updateIncomplete: scenario === 'update-recovery',
+  updateIncomplete:
+    scenario === 'update-recovery' || scenario === 'update-unprotected',
 }
 
 export const tonoStatusQueryKey = ['tonoStatus'] as const
@@ -103,7 +106,11 @@ export const tonoSignInVerify = async (_email: string, code: string) => {
     )
   return { suspended: false }
 }
-export const tonoDisconnect = async () => {}
+export const tonoDisconnect = async () => {
+  document.body.dataset.disconnectCalls = String(
+    Number(document.body.dataset.disconnectCalls || 0) + 1,
+  )
+}
 export const tonoRetryRestore = async () => {}
 export const tonoStatus = async () => status
 export const subscribeTonoStatus = () => () => {}

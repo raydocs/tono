@@ -293,6 +293,7 @@ pub(crate) async fn request(
                 execution: Execution::Reserved,
                 executor: None,
                 old_components,
+                disconnect: None,
             });
             store.save(next)?; // Before staging, quiescence, or ownership changes.
             let dir = store.attempt_dir()?;
@@ -386,7 +387,6 @@ pub(crate) async fn request(
                 "preparation incomplete"
             );
             let dir = store.attempt_dir()?;
-            register_recovery(&dir)?;
             store.execution(Execution::Launching)?;
             let child = std::process::Command::new(dir.join("executor.exe"))
                 .arg("--update-execute")
@@ -396,6 +396,56 @@ pub(crate) async fn request(
             next.attempt.as_mut().unwrap().executor = Some(executor);
             store.save(next)?;
             // Child waits for the persisted identity while this lock is held.
+        }
+        UpdateRequest::Disconnect => {
+            if !store.pending() {
+                return status(&store);
+            }
+            // Record the explicit authenticated request before any release.
+            // The original recovery obligation is never rewritten as Unprotected.
+            store.request_disconnect(&owner.key, &peer, now()?)?;
+            wfp::authorize_write_for(&owner.key)?;
+            if let Some(active) = desired::load_active_owner().await? {
+                ensure!(
+                    active.owner_key == owner.key,
+                    "active Core belongs to another owner"
+                );
+            }
+            owner_proxy_absent(owner)?;
+            dns::ensure_restored().await?;
+            let prior = super::runtime::read_core_runtime_record().await?;
+            manager::CORE_MANAGER.lock().await.stop_core().await?;
+            if let Some(prior) = prior {
+                ensure!(
+                    super::process::process_identity(prior.pid)?.as_ref() != Some(&prior.identity),
+                    "Core survived explicit Disconnect"
+                );
+            }
+            desired::persist_owner_core_stopped(owner).await?;
+            desired::clear_active_owner().await?;
+            tunnel_absent("Tono")?;
+            wfp::release().await?;
+            owner_proxy_absent(owner)?;
+            let observed = protection(owner).await?;
+            ensure!(
+                app_image(peer.pid)? == peer,
+                "Disconnect peer changed before readback"
+            );
+            store.verify_disconnect(&owner.key, &peer, now()?, observed)?;
+            let a = store.attempt()?;
+            if matches!(
+                a.execution,
+                Execution::Reserved | Execution::Extracting | Execution::Staged
+            ) && a.executor.is_none()
+            {
+                ensure!(
+                    installed_components(&a.install_root)? == a.old_components,
+                    "original installed identity changed; evidence cannot be retired"
+                );
+                store.retire_unconsumed(&owner.key, &peer)?;
+            }
+            // Consumed / launch-uncertain records stay pending after release.
+            // They cannot install, reconnect or commit by fabricating recovery.
         }
         UpdateRequest::Adopt => {
             if !store.pending() {
@@ -496,32 +546,41 @@ fn status(store: &Store) -> Result<UpdateStatus> {
     })
 }
 
-fn register_recovery(dir: &Path) -> Result<()> {
-    let command = format!(
-        "\"{}\" --update-recover",
-        dir.join("executor.exe").display()
-    );
-    let result = std::process::Command::new("C:\\Windows\\System32\\schtasks.exe")
-        .args([
-            "/Create",
-            "/TN",
-            "Tono Update Recovery v1",
-            "/SC",
-            "ONSTART",
-            "/RU",
-            "SYSTEM",
-            "/RL",
-            "HIGHEST",
-            "/TR",
-            &command,
-            "/F",
-        ])
-        .output()?;
-    ensure!(
-        result.status.success(),
-        "could not register independent SYSTEM recovery executor"
-    );
-    Ok(())
+/// The scheduled task is a repair resource, so even its first registration is
+/// behind durable consumption. Startup uses this same boundary after reopen.
+pub fn register_consumed_recovery(store: &Store) -> Result<()> {
+    register_recovery_with(store, |dir| {
+        let command = format!(
+            "\"{}\" --update-recover",
+            dir.join("executor.exe").display()
+        );
+        let result = std::process::Command::new("C:\\Windows\\System32\\schtasks.exe")
+            .args([
+                "/Create",
+                "/TN",
+                "Tono Update Recovery v1",
+                "/SC",
+                "ONSTART",
+                "/RU",
+                "SYSTEM",
+                "/RL",
+                "HIGHEST",
+                "/TR",
+                &command,
+                "/F",
+            ])
+            .output()?;
+        ensure!(
+            result.status.success(),
+            "could not register independent SYSTEM recovery executor"
+        );
+        Ok(())
+    })
+}
+
+fn register_recovery_with(store: &Store, register: impl FnOnce(&Path) -> Result<()>) -> Result<()> {
+    store.consumed_attempt()?;
+    register(&store.attempt_dir()?)
 }
 
 /// Called by NSIS before live or repair writes. Only the verified package in
@@ -675,8 +734,9 @@ pub fn reconcile_before_desired() -> Result<bool> {
     let a = store.attempt()?;
     if matches!(
         a.execution,
-        Execution::Consumed | Execution::Launching | Execution::Uncertain
+        Execution::Consumed | Execution::Replaced | Execution::Uncertain
     ) {
+        register_consumed_recovery(&store)?;
         if a.executor
             .as_ref()
             .is_none_or(|e| image(e.pid).ok().as_ref() != Some(e))
@@ -692,6 +752,37 @@ pub fn reconcile_before_desired() -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn update_recovery_registration_requires_durable_consumption() {
+        use crate::update_transaction::tests::{authorize, reserved};
+        let (root, mut store, peer, executor) = reserved();
+        let task = root.join("recovery-task");
+        assert!(register_recovery_with(&store, |_| panic!("pre-consume repair mutation")).is_err());
+        authorize(&mut store, &peer);
+        assert!(
+            register_recovery_with(&store, |_| panic!("launching is not consumption")).is_err()
+        );
+        assert!(!task.exists());
+        store.consume(&executor, 1_900_000_002).unwrap();
+        // Replace only schtasks I/O. The actual production registration gate
+        // checks the same durable state before handing control to the writer.
+        register_recovery_with(&store, |dir| {
+            let durable: State = serde_json::from_slice(&std::fs::read(root.join("state.json"))?)?;
+            let a = durable.attempt.unwrap();
+            assert_eq!(a.execution, Execution::Consumed);
+            assert_eq!(durable.consumed_sequence, 74);
+            assert_eq!(dir, root.join(a.receipt.attempt_id));
+            atomic_write(&task, b"registered")
+        })
+        .unwrap();
+        drop(store);
+        let store = Store::open(&root).unwrap();
+        register_recovery_with(&store, |_| atomic_write(&task, b"reconciled")).unwrap();
+        assert_eq!(std::fs::read(task).unwrap(), b"reconciled");
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn update_signature_binds_exact_bytes_and_trusted_comment() {

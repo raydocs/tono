@@ -1167,9 +1167,7 @@ pub(crate) async fn tono_release_kill_switch() -> Result<KillSwitchStatus> {
                     Type::Service,
                     "Tono: kill-switch release response was lost, but status proves disarm completed"
                 );
-                cancel_owner_monitors();
-                clear_active_service_session();
-                CoreManager::global().core_stopped();
+                record_verified_release(&status);
                 return Ok(status);
             }
             return Err(error).context("无法连接到Tono Service");
@@ -1179,6 +1177,12 @@ pub(crate) async fn tono_release_kill_switch() -> Result<KillSwitchStatus> {
         bail!(response.message);
     }
     let status = response.data.context("Tono Service 未返回 Kill Switch 状态")?;
+    record_verified_release(&status);
+    Ok(status)
+}
+
+/// Shared by ordinary release and the Service-owned update Disconnect response.
+pub(crate) fn record_verified_release(status: &KillSwitchStatus) {
     if !status.wanted && !status.live {
         // The owner-gated Service release is a complete last-resort disconnect and may have
         // stopped a Core after our session-gated best-effort stop failed. Mirror that committed
@@ -1187,7 +1191,6 @@ pub(crate) async fn tono_release_kill_switch() -> Result<KillSwitchStatus> {
         clear_active_service_session();
         CoreManager::global().core_stopped();
     }
-    Ok(status)
 }
 
 /// Whether a live owner session exists for session-gated routes (stop-core

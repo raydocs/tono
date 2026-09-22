@@ -303,8 +303,10 @@ test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
   assert.match(
     validateNsisAutomaticUpgradeFlow(
       installerSource.replace(
-        'Section Install',
-        'Section Install\n  nsis_tauri_utils::RunAsUser "$INSTDIR\\${MAINBINARYNAME}.exe" ""',
+        // Mutate the live install branch without invalidating the earlier
+        // private-extraction gate: this regression targets GUI launch policy.
+        '  SetOutPath $INSTDIR\n\n  !ifmacrodef NSIS_HOOK_PREINSTALL',
+        '  SetOutPath $INSTDIR\n  nsis_tauri_utils::RunAsUser "$INSTDIR\\${MAINBINARYNAME}.exe" ""\n\n  !ifmacrodef NSIS_HOOK_PREINSTALL',
       ),
     ),
     /single canonical RunMainBinary launcher/,
@@ -344,8 +346,8 @@ test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
           `  ;${canonicalGuiLaunchLine.trimStart()}`,
         )
         .replace(
-          'Section Install',
-          `Section Install\n${canonicalGuiLaunchLine}`,
+          '  SetOutPath $INSTDIR\n\n  !ifmacrodef NSIS_HOOK_PREINSTALL',
+          `  SetOutPath $INSTDIR\n${canonicalGuiLaunchLine}\n\n  !ifmacrodef NSIS_HOOK_PREINSTALL`,
         ),
     ),
     /RunMainBinary must be reboot-gated/,

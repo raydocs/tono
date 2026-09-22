@@ -26,14 +26,20 @@ pub fn incomplete() -> bool {
     INCOMPLETE.load(Ordering::Acquire)
 }
 
-pub async fn request(request: UpdateRequest) -> Result<UpdateStatus> {
+async fn native_capable() -> Result<bool> {
     let version = tono_service_protocol::get_version().await?;
+    ensure!(version.code == 0, "Service capability is unavailable");
+    Ok(version.data.as_ref().is_some_and(|v| {
+        v.supports_client(
+            tono_service_protocol::ProtocolVersion::current(),
+            tono_service_protocol::MIN_SERVICE_REVISION_FOR_UPDATE_TRANSACTION,
+        )
+    }))
+}
+
+pub async fn request(request: UpdateRequest) -> Result<UpdateStatus> {
     ensure!(
-        version.code == 0
-            && version.data.as_ref().is_some_and(|v| v.supports_client(
-                tono_service_protocol::ProtocolVersion::current(),
-                tono_service_protocol::MIN_SERVICE_REVISION_FOR_UPDATE_TRANSACTION
-            )),
+        native_capable().await?,
         "Service does not support protected update v1; Disconnect and manually replace the legacy client"
     );
     let response = tono_service_protocol::update_transaction(&current_owner_credentials()?, request).await?;
@@ -221,6 +227,12 @@ pub async fn tono_install_update(
 }
 
 pub async fn adopt() -> Result<Option<Protection>> {
+    // A known legacy Service uses normal verified Disconnect/manual replacement.
+    // A failed v1 adoption, unlike a proven absent attempt, must remain visible.
+    if !native_capable().await? {
+        return Ok(None);
+    }
+    INCOMPLETE.store(true, Ordering::Release);
     let status = request(UpdateRequest::Adopt).await?;
     let Some(receipt) = status.receipt.filter(|r| r.phase != Phase::Committed) else {
         return Ok(None);
@@ -229,6 +241,24 @@ pub async fn adopt() -> Result<Option<Protection>> {
         request(UpdateRequest::Commit).await?;
     }
     Ok(Some(receipt.required_recovery))
+}
+
+pub async fn disconnect_if_pending() -> Result<Option<tono_service_protocol::KillSwitchStatus>> {
+    if !incomplete() {
+        return Ok(None);
+    }
+    let pending = request(UpdateRequest::Status).await?;
+    if !pending.receipt.is_some_and(|r| r.phase != Phase::Committed) {
+        return Ok(None);
+    }
+    crate::core::proxy_control::stop_guard().await;
+    crate::core::proxy_control::clear().await?;
+    request(UpdateRequest::Disconnect).await?;
+    // The Service command proves and records cleanup; this ordinary read also
+    // supplies the released protection projection to the existing UI worker.
+    let status = crate::core::service::tono_kill_switch_status().await?;
+    crate::core::service::record_verified_release(&status);
+    Ok(Some(status))
 }
 
 pub async fn commit_if_pending() -> Result<()> {

@@ -20,6 +20,7 @@ pub enum UpdateRequest {
     Install {
         attempt_id: String,
     },
+    Disconnect,
     Adopt,
     Commit,
     Status,
