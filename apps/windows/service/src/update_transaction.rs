@@ -553,12 +553,18 @@ pub fn replace(source: &Path, target: &Path) -> Result<()> {
 pub(crate) mod tests {
     use super::*;
     use crate::update_contract::Protection;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
 
     pub(crate) fn reserved() -> (PathBuf, Store, Image, Image) {
+        // Windows clock ticks can be shared by parallel tests. Keep each real
+        // private store isolated without serializing the transaction tests.
         let root = std::env::temp_dir().join(format!(
-            "tono-update-{}-{}",
+            "tono-update-{}-{}-{}",
             std::process::id(),
-            now_nanos()
+            now_nanos(),
+            NEXT_ROOT.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir(&root).unwrap();
         let manifest = ReleaseManifest::decode(include_bytes!(
