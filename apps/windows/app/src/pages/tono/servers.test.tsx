@@ -443,11 +443,16 @@ it('stores a hy2 favorite under its shared node identity without selecting, conn
     },
   )
   renderPage()
-  fireEvent.click(
-    await screen.findByRole('button', {
-      name: 'Save Buffalo · Niagara · Backup channel as a favorite',
-    }),
+  const favorite = await screen.findByRole('button', {
+    name: 'Save Buffalo · Niagara · Backup channel as a favorite',
+  })
+  const card = favorite.parentElement
+  expect(card?.style.border).toContain('1px solid')
+  expect(card?.closest('button')).toBeNull()
+  expect(card?.querySelector('.tono-server-card')?.nextElementSibling).toBe(
+    favorite,
   )
+  fireEvent.click(favorite)
   await waitFor(() =>
     expect(updatePreferencesMock).toHaveBeenCalledWith(
       'account-a:7',

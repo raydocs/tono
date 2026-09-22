@@ -974,7 +974,20 @@ const ServersPage = () => {
                       style={{
                         display: 'flex',
                         flexDirection: 'column',
-                        gap: 5,
+                        minWidth: 0,
+                        borderRadius: 18,
+                        background: highlighted
+                          ? hex(TONO_COLORS.accent, dark ? 0.13 : 0.08)
+                          : dark
+                            ? 'rgba(16,21,33,0.72)'
+                            : 'rgba(255,255,255,0.76)',
+                        border: highlighted
+                          ? `1px solid ${hex(TONO_COLORS.accent, 0.55)}`
+                          : `1px solid ${dark ? 'rgba(255,255,255,0.1)' : 'rgba(56,72,108,0.09)'}`,
+                        boxShadow: highlighted
+                          ? `0 18px 34px -22px ${hex(TONO_COLORS.accent, 0.82)}`
+                          : `0 10px 24px -22px rgba(16,24,48,${dark ? 0.9 : 0.28})`,
+                        transition: `background 0.15s ${TONO_EASE}, border-color 0.15s ${TONO_EASE}`,
                       }}
                     >
                       <button
@@ -1009,18 +1022,10 @@ const ServersPage = () => {
                               : 'pointer',
                           opacity: cardDisabled ? 0.55 : 1,
                           color: text.primary,
-                          background: highlighted
-                            ? hex(TONO_COLORS.accent, dark ? 0.13 : 0.08)
-                            : dark
-                              ? 'rgba(16,21,33,0.72)'
-                              : 'rgba(255,255,255,0.76)',
-                          border: highlighted
-                            ? `1px solid ${hex(TONO_COLORS.accent, 0.55)}`
-                            : `1px solid ${dark ? 'rgba(255,255,255,0.1)' : 'rgba(56,72,108,0.09)'}`,
-                          boxShadow: highlighted
-                            ? `0 18px 34px -22px ${hex(TONO_COLORS.accent, 0.82)}`
-                            : `0 10px 24px -22px rgba(16,24,48,${dark ? 0.9 : 0.28})`,
-                          transition: `background 0.15s ${TONO_EASE}, border-color 0.15s ${TONO_EASE}, transform 0.15s ${TONO_EASE}`,
+                          background: 'transparent',
+                          border: 'none',
+                          boxShadow: 'none',
+                          transform: 'none',
                         }}
                       >
                         {highlighted && (
@@ -1316,8 +1321,9 @@ const ServersPage = () => {
                             )
                           }}
                           style={{
-                            alignSelf: 'flex-end',
-                            padding: '4px 8px',
+                            alignSelf: 'flex-start',
+                            margin: '0 16px 10px',
+                            padding: '4px 0',
                             color: favorite
                               ? TONO_COLORS.accent
                               : text.secondary,
