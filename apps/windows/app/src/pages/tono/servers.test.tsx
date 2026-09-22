@@ -299,6 +299,62 @@ it('does not turn an accepted switch into a failed connect using a stale idle re
   expect(screen.queryByRole('alert')).toBeNull()
 })
 
+it('refreshes an acknowledged selection when another Connect wins after the status read, without hiding real failures', async () => {
+  serversMock.mockResolvedValue([
+    {
+      name: 'Tokyo · Sakura',
+      server: 'a.test',
+      port: 443,
+      selected: true,
+      available: true,
+    },
+    {
+      name: 'Los Angeles · Sunset',
+      server: 'b.test',
+      port: 443,
+      selected: false,
+      available: true,
+    },
+  ])
+  let rejectConnect!: (error: Error) => void
+  connectMock.mockReturnValueOnce(
+    new Promise<void>((_, reject) => {
+      rejectConnect = reject
+    }),
+  )
+  renderPage()
+  fireEvent.click(await screen.findByRole('button', { name: /Los Angeles/ }))
+  await waitFor(() => expect(connectMock).toHaveBeenCalledTimes(1))
+  // The fresh status was idle, but another entry point finished Connect before
+  // this IPC was admitted. This is later than the stale-render regression above.
+  statusMock.mockResolvedValue({ uiState: 'connected' })
+  await act(async () => rejectConnect(new Error('already connected')))
+  await waitFor(() => expect(mutateTonoStatusMock).toHaveBeenCalledTimes(1))
+  expect(toastMock).toHaveBeenCalledWith('Switch to Los Angeles requested')
+  expect(screen.queryByRole('alert')).toBeNull()
+
+  // The same-city reconnect entry point must also refresh when another attempt
+  // was admitted, rather than leaving the old idle projection behind.
+  statusMock.mockResolvedValue({ uiState: 'notConnected' })
+  connectMock.mockRejectedValueOnce(new Error('already connecting'))
+  fireEvent.click(screen.getByRole('button', { name: /Tokyo/ }))
+  await waitFor(() => expect(mutateTonoStatusMock).toHaveBeenCalledTimes(2))
+  expect(screen.queryByRole('alert')).toBeNull()
+
+  // A genuine failure is not success just because another state read could say
+  // connected. Nor is the same string from Select an accepted Connect command.
+  connectMock.mockRejectedValueOnce(new Error('DNS restoration failed'))
+  fireEvent.click(screen.getByRole('button', { name: /Los Angeles/ }))
+  expect(await screen.findByRole('alert')).toBeDefined()
+  expect(mutateTonoStatusMock).toHaveBeenCalledTimes(2)
+  selectServerMock.mockRejectedValueOnce(new Error('already connected'))
+  fireEvent.click(screen.getByRole('button', { name: /Los Angeles/ }))
+  await waitFor(() => expect(selectServerMock).toHaveBeenCalledTimes(3))
+  expect(await screen.findByRole('alert')).toBeDefined()
+  expect(connectMock).toHaveBeenCalledTimes(3)
+  expect(toastMock).toHaveBeenCalledTimes(1)
+})
+
 it('lets the user pick the hy2 sibling and labels it as the backup channel', async () => {
   serversMock.mockResolvedValue([
     {

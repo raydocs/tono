@@ -63,6 +63,26 @@ test('Windows runs the dependency journal integration tests explicitly', () => {
   assert.notEqual(step['continue-on-error'], true)
 })
 
+test('Windows executes journal phase and persistence regressions with a nonzero-test guard', () => {
+  const job = workflow.jobs['app-rust']
+  assert.equal(job['runs-on'], 'windows-2025')
+  const step = job.steps.find(step => step.run?.includes("$filter = 'update_journal::tests::'"))
+  assert.ok(step, 'dependency unit tests currently execute only on Ubuntu')
+  assert.equal(step['working-directory'], 'apps/windows')
+  assert.equal(step.shell, 'pwsh')
+  assert.equal(step.if, undefined)
+  assert.notEqual(step['continue-on-error'], true)
+  assert.ok(step.run.includes('cargo test --locked -p tono-core --lib $filter -- --list'))
+  assert.ok(step.run.includes('cargo test --locked -p tono-core --lib $filter -- --nocapture'))
+  for (const required of [
+    'only_verified_commit_can_remove_journal',
+    'owner_replay_advances_in_order_and_crash_at_each_phase_never_commits',
+    'first_launch_reentry_preserves_durable_recovery_progress',
+  ]) assert.ok(step.run.includes(required), `missing regression enumeration guard: ${required}`)
+  assert.ok(step.run.includes('$LASTEXITCODE -ne 0'))
+  assert.ok(step.run.includes('Expected journal regression is missing'))
+})
+
 test('Windows candidate build and installer smoke agree with the product version', () => {
   const version = JSON.parse(readFileSync(path.join(root, 'apps/windows/app/package.json'), 'utf8')).version
   const candidate = load(readFileSync(path.join(root, '.github/workflows/windows-candidate.yml'), 'utf8'))

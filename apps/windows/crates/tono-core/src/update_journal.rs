@@ -341,6 +341,15 @@ mod tests {
             UpdateHandoffPhase::ProtectionResuming,
             UpdateHandoffPhase::Verified,
         ] {
+            // At every owner boundary a refused write must retain the previous
+            // durable evidence byte-for-byte. Retrying then advances exactly once.
+            // This exercises the journal store, not real Service/installer ownership.
+            let previous = fs::read(&path).unwrap();
+            let refused = store::advance_pending_with(&path, phase, |_, _| {
+                Err(io::Error::from(io::ErrorKind::StorageFull))
+            });
+            assert_eq!(refused.unwrap_err().kind(), io::ErrorKind::StorageFull);
+            assert_eq!(fs::read(&path).unwrap(), previous);
             advance_pending(&path, phase).unwrap();
             assert_eq!(load(&path).unwrap().unwrap().phase, phase);
         }

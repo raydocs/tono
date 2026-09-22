@@ -178,6 +178,28 @@ jobs:
         working-directory: apps/windows/app/src-tauri
         run: cargo test --locked
 
+      # The consumer does not execute tono-core's unit tests. G3 phase replay,
+      # persistence refusal and re-entry must run on Windows, not only Ubuntu.
+      - name: Test update journal phase and persistence recovery on Windows
+        working-directory: apps/windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $filter = 'update_journal::tests::'
+          $listed = cargo test --locked -p tono-core --lib $filter -- --list
+          if ($LASTEXITCODE -ne 0) { throw 'Could not enumerate journal regressions' }
+          foreach ($name in @(
+            'only_verified_commit_can_remove_journal',
+            'owner_replay_advances_in_order_and_crash_at_each_phase_never_commits',
+            'first_launch_reentry_preserves_durable_recovery_progress'
+          )) {
+            if (-not ($listed -match "^$([regex]::Escape($filter + $name)): test$")) {
+              throw "Expected journal regression is missing: $name"
+            }
+          }
+          cargo test --locked -p tono-core --lib $filter -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Journal phase/persistence regressions failed' }
+
       # Cargo does not execute dependency integration tests with the Tauri suite.
       - name: Test update journal atomic writes on Windows
         working-directory: apps/windows
