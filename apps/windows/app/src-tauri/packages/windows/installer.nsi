@@ -72,6 +72,8 @@ ${StrLoc}
 
 Var PassiveMode
 Var UpdateMode
+Var TonoPrivateUnpack
+Var TonoManualMutated
 Var NoShortcutMode
 Var ExistingVersion
 Var ExistingUninstallCommand
@@ -398,6 +400,38 @@ LangString restoreNetworkTooltip ${LANG_ENGLISH} "Restores your network if ${PRO
 LangString restoreNetworkTooltip ${LANG_RUSSIAN} "Восстанавливает сеть, если ${PRODUCTNAME} не может. Требуются права администратора."
 
 Function .onInit
+  ; This is the first entry, before language/repair/registry/resource writes.
+  ; The SYSTEM updater only extracts into its pre-created private attempt.
+  ClearErrors
+  ${GetOptions} $CMDLINE "/TONO-PRIVATE-UNPACK" $TonoPrivateUnpack
+  ${IfNot} ${Errors}
+    StrCpy $TonoPrivateUnpack 1
+    nsExec::ExecToLog '"$PROGRAMFILES64\Tono\resources\tono-service-install.exe" --update-unpack-gate "$EXEPATH"'
+    Pop $0
+    ${If} $0 != "0"
+      SetErrorLevel 76
+      Abort "Private update extraction was not authorized by the Service."
+    ${EndIf}
+    StrCpy $INSTDIR "$EXEDIR\payload"
+    Return
+  ${EndIf}
+  StrCpy $TonoPrivateUnpack 0
+  ; Bootstrap/manual install uses only temporary bundled files until verified
+  ; Disconnect and a durable native lifecycle lease have both succeeded.
+  InitPluginsDir
+  SetOutPath "$PLUGINSDIR\tono-gate"
+  {{#each resources_dirs}}
+    CreateDirectory "$PLUGINSDIR\tono-gate\\{{this}}"
+  {{/each}}
+  {{#each resources}}
+    File /a "/oname={{this.[1]}}" "{{no-escape @key}}"
+  {{/each}}
+  nsExec::ExecToLog '"$PLUGINSDIR\tono-gate\resources\tono-service-install.exe" --manual-update-gate'
+  Pop $0
+  ${If} $0 != "0"
+    SetErrorLevel 76
+    Abort "Disconnect and resolve any pending protected update before manual installation. No installed files have been changed."
+  ${EndIf}
   ${GetOptions} $CMDLINE "/P" $PassiveMode
   ${IfNot} ${Errors}
     StrCpy $PassiveMode 1
@@ -678,6 +712,10 @@ FunctionEnd
 !macroend
 
 Section CheckAndInstallVSRuntime
+  ${If} $TonoPrivateUnpack = 1
+    Return
+  ${EndIf}
+  StrCpy $TonoManualMutated 1
   StrCpy $VC_RUNTIME_NEEDED "0"
 
   ${If} ${IsNativeARM64}
@@ -774,6 +812,9 @@ Section CheckAndInstallVSRuntime
 SectionEnd
 
 Section WebView2
+  ${If} $TonoPrivateUnpack = 1
+    Return
+  ${EndIf}
   ; The literal WOW6432Node paths below are only correct in the native register view this build
   ; installs under. Re-assert it rather than inheriting whatever an earlier section left set: a
   ; misdetected WebView2 sends an offline install into the bootstrapper and Aborts it.
@@ -871,6 +912,21 @@ Section WebView2
 SectionEnd
 
 Section Install
+  ${If} $TonoPrivateUnpack = 1
+    SetOutPath $INSTDIR
+    File /a "/oname=${MAINBINARYNAME}.exe" "${MAINBINARYSRCPATH}"
+    {{#each resources_dirs}}
+      CreateDirectory "$INSTDIR\\{{this}}"
+    {{/each}}
+    {{#each resources}}
+      File /a "/oname={{this.[1]}}" "{{no-escape @key}}"
+    {{/each}}
+    {{#each binaries}}
+      File /a "/oname={{this}}" "{{no-escape @key}}"
+    {{/each}}
+    ; No installed path, SCM, ARP, shortcut, redist, hook or cleanup mutation.
+    Return
+  ${EndIf}
   SetOutPath $INSTDIR
 
   !ifmacrodef NSIS_HOOK_PREINSTALL
@@ -1079,7 +1135,26 @@ Function .onInstFailed
   ${EndIf}
 FunctionEnd
 
+Function .onGUIEnd
+  ; A cancelled wizard before Section execution made no installed mutation.
+  ; Failed/interrupted mutation retains its lease until a verified manual retry.
+  ${If} $TonoPrivateUnpack = 0
+  ${AndIf} $TonoManualMutated != 1
+    nsExec::ExecToLog '"$PLUGINSDIR\tono-gate\resources\tono-service-install.exe" --manual-update-finish'
+    Pop $0
+  ${EndIf}
+FunctionEnd
+
 Function .onInstSuccess
+  ${If} $TonoPrivateUnpack = 1
+    Return
+  ${EndIf}
+  nsExec::ExecToLog '"$PLUGINSDIR\tono-gate\resources\tono-service-install.exe" --manual-update-finish'
+  Pop $0
+  ${If} $0 != "0"
+    SetErrorLevel 76
+    Return
+  ${EndIf}
   ; Exit 3010 means the old Service is running and its replacement is queued for reboot. Do not
   ; launch a new app binary against that potentially incompatible protocol generation.
   IfRebootFlag skipPostInstallRun checkPostInstallRun
@@ -1114,6 +1189,15 @@ Function .onInstSuccess
 FunctionEnd
 
 Function un.onInit
+  ; Refuse pending v1 before the pre-uninstall hook or any App termination.
+  nsExec::ExecToLog '"$INSTDIR\resources\tono-service-install.exe" --manual-update-gate'
+  Pop $0
+  ${If} $0 != "0"
+    SetErrorLevel 76
+    Abort "Disconnect and resolve any pending protected update before uninstalling."
+  ${EndIf}
+  InitPluginsDir
+  CopyFiles /SILENT "$INSTDIR\resources\tono-service-install.exe" "$PLUGINSDIR\tono-gate.exe"
   !insertmacro SetContext
 
   !if "${INSTALLMODE}" == "both"
@@ -1134,7 +1218,7 @@ Function un.onInit
 FunctionEnd
 
 Section Uninstall
-
+  StrCpy $TonoManualMutated 1
   !ifmacrodef NSIS_HOOK_PREUNINSTALL
     !insertmacro NSIS_HOOK_PREUNINSTALL
   !endif
@@ -1293,6 +1377,21 @@ Section Uninstall
     SetAutoClose true
   ${EndIf}
 SectionEnd
+
+Function un.onUninstSuccess
+  nsExec::ExecToLog '"$PLUGINSDIR\tono-gate.exe" --manual-update-finish'
+  Pop $0
+  ${If} $0 != "0"
+    SetErrorLevel 76
+  ${EndIf}
+FunctionEnd
+
+Function un.onGUIEnd
+  ${If} $TonoManualMutated != 1
+    nsExec::ExecToLog '"$PLUGINSDIR\tono-gate.exe" --manual-update-finish'
+    Pop $0
+  ${EndIf}
+FunctionEnd
 
 Function RestorePreviousInstallLocation
   ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""

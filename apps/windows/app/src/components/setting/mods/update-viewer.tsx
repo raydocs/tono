@@ -16,7 +16,7 @@ import type { Options as ReactMarkdownOptions } from 'react-markdown'
 
 import { BaseDialog, type DialogRef } from '@/components/base'
 import { useUpdate } from '@/hooks/use-update'
-import { prepareUpdate } from '@/services/cmds'
+import { installUpdate } from '@/services/update'
 import { showNotice } from '@/services/notice-service'
 import { useSetUpdateState, useUpdateState } from '@/services/states'
 
@@ -226,11 +226,9 @@ export function UpdateViewer({ ref }: { ref?: Ref<DialogRef> }) {
     }
 
     try {
-      // download() resolves only after signature verification. Windows install
-      // exits this process, so durable preparation must finish before it starts.
-      await updateInfo.download(onDownloadEvent)
-      await prepareUpdate(updateInfo.version)
-      await updateInfo.install()
+      // The native caller transports bytes; Service owns staging, quiescence,
+      // one-use installation and authenticated successor recovery.
+      await installUpdate(updateInfo.manifestSha256, onDownloadEvent)
     } catch (err: any) {
       showNotice.error(err)
     } finally {

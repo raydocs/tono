@@ -17,6 +17,7 @@ fn owner(uid: u32) -> AuthenticatedOwner {
         key: uid.to_string(),
         identity: OwnerIdentity::Unix { uid, gid: 20 },
         app_data_root: std::env::temp_dir(),
+        peer_pid: None,
     }
 }
 

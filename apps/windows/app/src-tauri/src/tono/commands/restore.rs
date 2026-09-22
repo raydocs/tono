@@ -106,7 +106,10 @@ pub(super) fn unknown_protection_message(reason: &str) -> String {
 /// process obtains a new Service session/controller; weaker evidence continues to wait for the
 /// user and is never promoted directly to Connected.
 pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
-    let _ = crate::tono::update_handoff::begin_first_launch_migration(env!("CARGO_PKG_VERSION"));
+    let update_recovery = super::update::adopt().await;
+    if let Err(error) = &update_recovery {
+        logging!(warn, Type::Service, "Protected update adoption not established: {error:#}");
+    }
     let restore_deadline = tokio::time::Instant::now() + RESTORE_TRANSACTION_TIMEOUT;
     let generation = {
         let mut inner = state.lock().await;
@@ -250,18 +253,6 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
                 emit_status(&app, &status_of(&inner));
             }
             if !info.suspended {
-                if crate::tono::update_handoff::load_pending()
-                    .is_some_and(|journal| {
-                        // A retry after the verifier's durable write must not
-                        // regress it. Fresh connection verification still owns commit.
-                        journal.keep_kill_switch_armed
-                            && journal.phase != crate::tono::update_handoff::Phase::Verified
-                    })
-                {
-                    let _ = crate::tono::update_handoff::record_owner_phase(
-                        crate::tono::update_handoff::Phase::ProtectionResuming,
-                    );
-                }
                 match tokio::time::timeout_at(
                     restore_deadline,
                     catalog_sync::sync_with_retries_for_auth_generation(&state, &app, generation),
@@ -301,13 +292,21 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
                 // longer has the old session token or controller secret. Re-prove the live
                 // current-owner runtime, then schedule the ordinary fully verified replacement;
                 // the restore task does not await that potentially long connection transaction.
-                connection::schedule_startup_resume_if_proven(&state, &app, generation).await;
-                // Protected Offline was not Connected, but its update still
-                // needs verification by the new connection, not just me().
-                crate::tono::update_handoff::commit_after_account_restore(
-                    env!("CARGO_PKG_VERSION"),
-                    matches!(protection, StoredProtection::ProvenAbsent),
-                );
+                match update_recovery {
+                    Ok(Some(tono_service_protocol::update_contract::Protection::Connected)) => {
+                        let state = state.clone();
+                        let app = app.clone();
+                        AsyncHandler::spawn(move || async move {
+                            if let Err(error) = connection::connect(state, app).await {
+                                logging!(warn, Type::Service, "Update recovery remains incomplete: {error}");
+                            }
+                        });
+                    }
+                    Ok(None) => connection::schedule_startup_resume_if_proven(&state, &app, generation).await,
+                    // An offline obligation must stay offline. Failed adoption
+                    // cannot grant reconnect by falling through legacy restore.
+                    _ => {}
+                }
                 crate::tono::telemetry::spawn_periodic_for_auth_generation(&state, &app, generation)
                     .await;
                 crate::tono::log_upload::spawn_periodic_for_auth_generation(

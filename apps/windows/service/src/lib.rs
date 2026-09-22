@@ -1,6 +1,19 @@
 mod channel;
 mod core;
 
+// Compile the one shared value model, not a local mirror. Pulling the complete
+// portable product crate into this independent Service workspace would also pull
+// catalog/session/async runtime dependencies into every installer binary.
+#[cfg(any(feature = "client", feature = "standalone"))]
+#[path = "../../crates/tono-core/src/update_contract.rs"]
+pub mod update_contract;
+#[cfg(any(feature = "client", feature = "standalone"))]
+pub mod update_wire;
+#[cfg(feature = "standalone")]
+pub mod update_transaction;
+#[cfg(all(feature = "standalone", windows))]
+pub use core::update as update_native;
+
 #[cfg(feature = "client")]
 mod client;
 
@@ -126,7 +139,9 @@ pub const PROTOCOL_EPOCH: u16 = 2;
 /// Revision 15 adds `/kill-switch/proxy-endpoints` so a live node switch can widen or
 /// shrink the Reality destination permit without restarting the core. MIN_REQUIRED stays 14:
 /// an older Service is still fail-closed; the App falls back to a cold switch.
-pub const PROTOCOL_REVISION: u16 = 15;
+/// Revision 16 adds the Service-owned, detached-manifest update transaction.
+pub const PROTOCOL_REVISION: u16 = 16;
+pub const MIN_SERVICE_REVISION_FOR_UPDATE_TRANSACTION: u16 = 16;
 /// Revisions 7 through 12 are wire/behaviour incompatible with older peers. Reject a mismatch at
 /// the protocol probe rather than failing later during a required mutation. Revision 13 is
 /// additive: a revision-12 client may still pair.

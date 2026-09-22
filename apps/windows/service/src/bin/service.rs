@@ -617,6 +617,18 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for RotatingLogFile {
 /// now may an unverified first-attempt barrier be retired. If that retirement is ambiguous, keep
 /// the machine fail-closed and do not restore a desired Core behind an ownership mismatch.
 async fn restore_reconciled_desired_state() {
+    #[cfg(windows)]
+    match tono_service_protocol::update_native::reconcile_before_desired() {
+        Ok(false) => {}
+        Ok(true) => {
+            warn!("Update evidence pending: retaining protection and skipping desired-state restoration");
+            return;
+        }
+        Err(error) => {
+            warn!("Update reconciliation uncertain; no desired-state restoration: {error:#}");
+            return;
+        }
+    }
     if let Err(error) = retire_unverified_windows_kill_switch().await {
         warn!(
             "Unverified Windows protection could not be safely retired after Core reconciliation; \

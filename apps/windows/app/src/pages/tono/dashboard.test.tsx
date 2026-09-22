@@ -617,11 +617,11 @@ describe('dashboard claude residential route badge', () => {
     expect(screen.queryByText('First connect')).toBeNull()
   })
 
-  it('tells the customer to disconnect and reinstall when the update journal is Failed', () => {
+  it('does not present Disconnect as cancellation of a protected update', () => {
     mocks.status = makeStatus({ updateIncomplete: true })
     renderDashboard()
     expect(screen.getByRole('alert').textContent).toBe(
-      'The update did not finish. Disconnect, then reinstall Tono.',
+      'Update recovery is incomplete. Keep Tono open. If recovery does not finish, contact support before reinstalling; Disconnect does not cancel a protected update.',
     )
   })
 })

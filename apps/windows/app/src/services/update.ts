@@ -1,10 +1,5 @@
-import {
-  check,
-  type CheckOptions,
-  type Update,
-} from '@tauri-apps/plugin-updater'
-
-import { version as appVersion } from '@root/package.json'
+import { Channel, invoke } from '@tauri-apps/api/core'
+import type { DownloadEvent } from '@tauri-apps/plugin-updater'
 
 type VersionParts = {
   main: bigint[]
@@ -92,38 +87,29 @@ export const compareVersions = (
   return compareVersionParts(partsA, partsB)
 }
 
-const resolveRemoteVersion = (update: Update): string | null => {
-  return ensureSemver(update.version)
-}
-
-const localVersionNormalized = ensureSemver(appVersion)
 // Release builds set this only after prepare-updater-config.mjs has injected the Tono-owned
 // endpoint and public key. Developer builds therefore never query any inherited channel.
 export const TONO_UPDATES_CONFIGURED =
   import.meta.env.VITE_TONO_UPDATES_CONFIGURED === 'true'
 
-export const checkUpdateSafe = async (
-  options?: CheckOptions,
-): Promise<Update | null> => {
-  if (!TONO_UPDATES_CONFIGURED) return null
-  const result = await check({ ...(options ?? {}), allowDowngrades: false })
-  if (!result) return null
-
-  const remoteVersion = resolveRemoteVersion(result)
-  const comparison = compareVersions(remoteVersion, localVersionNormalized)
-
-  // A signed feed is still required to name a strict SemVer newer than this App. Do not let a
-  // malformed response bypass the downgrade check.
-  if (comparison === null || comparison <= 0) {
-    try {
-      await result.close()
-    } catch (err) {
-      console.warn('[updater] failed to close stale update resource', err)
-    }
-    return null
-  }
-
-  return result
+export interface UpdateOffer {
+  version: string
+  manifestSha256: string
+  body?: string
 }
 
-export type { CheckOptions }
+export const checkUpdateSafe = async (): Promise<UpdateOffer | null> => {
+  if (!TONO_UPDATES_CONFIGURED) return null
+  // The native Service verifies the detached signature and releaseSequence.
+  // A version label or a legacy feed cannot authorize this path.
+  return invoke<UpdateOffer | null>('tono_check_update')
+}
+
+export const installUpdate = async (
+  manifestSha256: string,
+  onDownloadEvent: (event: DownloadEvent) => void,
+): Promise<void> => {
+  const progress = new Channel<DownloadEvent>()
+  progress.onmessage = onDownloadEvent
+  return invoke<void>('tono_install_update', { manifestSha256, progress })
+}

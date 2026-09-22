@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
@@ -7,6 +7,13 @@ import en from '@/locales/en/tono.json'
 import zh from '@/locales/zh/tono.json'
 import enShared from '@/locales/en/shared.json'
 import zhShared from '@/locales/zh/shared.json'
+import enSettings from '@/locales/en/settings.json'
+import zhSettings from '@/locales/zh/settings.json'
+import DashboardPage from '@/pages/tono/dashboard'
+import { UpdateViewer } from '@/components/setting/mods/update-viewer'
+import type { DialogRef } from '@/components/base'
+import { NoticeManager } from '@/components/layout/notice-manager'
+import { UpdateStateProvider } from '../../src/services/states'
 import IntroPage from '@/pages/tono/intro'
 import LoginPage from '@/pages/tono/login'
 import SupportPage from '@/pages/tono/support'
@@ -24,8 +31,8 @@ import '@/tono-ui/tono.css'
 
 void i18n.use(initReactI18next).init({
   resources: {
-    en: { translation: { tono: en, shared: enShared } },
-    zh: { translation: { tono: zh, shared: zhShared } },
+    en: { translation: { tono: en, shared: enShared, settings: enSettings } },
+    zh: { translation: { tono: zh, shared: zhShared, settings: zhSettings } },
   },
   lng: new URLSearchParams(location.search).get('lang') || 'en',
   fallbackLng: 'en',
@@ -102,7 +109,31 @@ function Components() {
   )
 }
 
+function UpdatePreview() {
+  const dialog = useRef<DialogRef>(null)
+  return (
+    <UpdateStateProvider>
+      <PreviewShell>
+        <div className="tono-page">
+          <button onClick={() => dialog.current?.open()}>Review update</button>
+          <UpdateViewer ref={dialog} />
+          <NoticeManager />
+        </div>
+      </PreviewShell>
+    </UpdateStateProvider>
+  )
+}
+
 const router = createHashRouter([
+  { path: '/update', element: <UpdatePreview /> },
+  {
+    path: '/dashboard',
+    element: (
+      <PreviewShell>
+        <DashboardPage />
+      </PreviewShell>
+    ),
+  },
   {
     path: '/login',
     element: (

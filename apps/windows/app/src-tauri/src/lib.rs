@@ -83,7 +83,6 @@ mod app_init {
             .plugin(tauri_plugin_dialog::init())
             .plugin(tauri_plugin_shell::init())
             .plugin(tauri_plugin_http::init())
-            .plugin(tauri_plugin_updater::Builder::new().build())
             .plugin(
                 tono_plugin_core::Builder::new()
                     .protocol(tono_plugin_core::models::Protocol::LocalSocket)
@@ -140,7 +139,8 @@ mod app_init {
             cmd::open_windows_dns_settings,
             cmd::tono_encrypted_dns_overrides,
             cmd::restart_app,
-            tono::commands::quit::tono_prepare_update,
+            tono::commands::update::tono_check_update,
+            tono::commands::update::tono_install_update,
             cmd::get_runtime_state,
             cmd::get_tono_preferences,
             cmd::patch_tono_preferences,

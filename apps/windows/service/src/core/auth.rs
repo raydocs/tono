@@ -22,6 +22,7 @@ pub struct AuthenticatedOwner {
     pub key: String,
     pub identity: OwnerIdentity,
     pub app_data_root: PathBuf,
+    pub peer_pid: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -370,6 +371,7 @@ fn authenticate_owner(
             key: owner_key(&credentials.identity),
             identity: credentials.identity.clone(),
             app_data_root,
+            peer_pid: None,
         })
     }
 
@@ -429,6 +431,7 @@ fn authenticate_synthetic_test_owner(
         key: owner_key(&credentials.identity),
         identity: credentials.identity.clone(),
         app_data_root,
+        peer_pid: None,
     }))
 }
 
@@ -538,6 +541,7 @@ mod windows_auth {
             key: owner_key(&credentials.identity),
             identity: credentials.identity.clone(),
             app_data_root,
+            peer_pid: peer.process_id,
         })
     }
 

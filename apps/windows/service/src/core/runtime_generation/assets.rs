@@ -1583,6 +1583,7 @@ mod tests {
             key: uid.to_string(),
             identity: OwnerIdentity::Unix { uid, gid },
             app_data_root,
+            peer_pid: None,
         }
     }
 

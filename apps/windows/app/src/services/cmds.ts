@@ -21,10 +21,6 @@ export async function restartApp() {
   return invoke<void>('restart_app')
 }
 
-export async function prepareUpdate(nextVersion: string) {
-  return invoke<void>('tono_prepare_update', { nextVersion })
-}
-
 // 获取当前运行模式
 export type RunningMode = 'Service' | 'Sidecar' | 'NotRunning'
 

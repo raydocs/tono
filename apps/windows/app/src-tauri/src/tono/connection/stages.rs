@@ -325,6 +325,10 @@ pub(super) async fn run_stages(
         .map_err(StageFailure::error)?;
     kill_status.verified = true;
 
+    if let Err(error) = commands::update::commit_if_pending().await {
+        logging!(warn, Type::Service, "Update recovery commit remains unproven: {error:#}");
+    }
+
     // The Tono runtime owns a fresh HTTP controller port and secret on every connection. The
     // dashboard reuses the Mihomo plugin's traffic WebSocket, so point that plugin at this
     // generation before publishing Connected. Updating the protocol last prevents a subscriber
@@ -346,7 +350,6 @@ pub(super) async fn run_stages(
         ) {
             logging!(warn, Type::Service, "Tono: could not retain successful selection: {error}");
         }
-        crate::tono::update_handoff::commit_if_verified(env!("CARGO_PKG_VERSION"));
         inner.exit_ip = None;
         inner.exit_org = None;
         inner.exit_location = None;

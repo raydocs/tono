@@ -8,6 +8,22 @@ use tracing::{info, trace, warn};
 
 pub(super) fn create_ipc_router() -> Result<Router> {
     let router = Router::new()
+        .post(IpcCommand::UpdateTransaction.as_ref(), |ctx| async move {
+            let (request, owner) = match authenticate_request::<AuthenticatedRequest<crate::update_wire::UpdateRequest>>(&ctx).await {
+                ControlFlow::Continue(value) => value,
+                ControlFlow::Break(response) => return response,
+            };
+            let _lifecycle = OWNER_LIFECYCLE_LOCK.lock().await;
+            #[cfg(windows)]
+            return match crate::core::update::request(&owner, request.payload).await {
+                Ok(status) => ok_json(status),
+                Err(error) => service_unavailable(format!("Update refused; evidence/protection retained: {error:#}")),
+            };
+            #[cfg(not(windows))] {
+                let _ = (request, owner);
+                service_unavailable("Windows update transaction is unsupported here")
+            }
+        })
         .get(IpcCommand::Magic.as_ref(), |ctx| async move {
             trace!("Received Magic command");
             ipc_request_context_to_auth_context(&ctx)?;
@@ -354,6 +370,9 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             );
             #[cfg(windows)]
             {
+                if let Err(error) = crate::core::update::release_allowed() {
+                    return service_unavailable(error.to_string());
+                }
                 // Make the owner-gated release a complete last-resort Disconnect. The App may
                 // have lost the StartClash response and therefore have no session proof with
                 // which to stop a Core that did start. Restore DNS first; then stop and retire
@@ -733,6 +752,12 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             };
             let _operation_guard =
                 OperationGuard::begin(ServiceOperationKind::StopCore, IPC_HANDLER_TIMEOUT);
+            #[cfg(windows)]
+            if request.payload.release_kill_switch() {
+                if let Err(error) = crate::core::update::release_allowed() {
+                    return service_unavailable(error.to_string());
+                }
+            }
             if let Err(error) = clear_proxy_with_direct_compensation().await {
                 return service_error(error);
             }
@@ -903,6 +928,10 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     ControlFlow::Continue(guard) => guard,
                     ControlFlow::Break(response) => return response,
                 };
+            #[cfg(windows)]
+            if let Err(error) = crate::core::update::release_allowed() {
+                return service_unavailable(error.to_string());
+            }
             let verdict = owner_goodbye_verdict(
                 windows_kill_switch::status().await.wanted,
                 load_owner_desired_state(&owner.key)
