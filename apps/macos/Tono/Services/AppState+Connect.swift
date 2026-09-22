@@ -953,9 +953,10 @@ extension AppState {
             updateIncomplete = true
             errorMessage = error.localizedDescription
             ConnectionTelemetryBuffer.shared.record(
-                "updateResumeJournalFailed",
-                stage: "journalPersistence",
+                "updateResumeFailed",
+                stage: "nativeUpdateRecovery",
                 generation: Int(self.connectionCoordinator.protectionOperationGeneration),
+                code: ProtectedFailureCode.updateRecoveryFailed.rawValue,
                 updateResume: true
             )
         }

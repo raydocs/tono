@@ -68,12 +68,16 @@ func runUpdateSelfTests() -> Bool {
     test("durable-consume-write-failure-and-lost-ack") { directory in
         let store = try UpdateStorage(root: directory)
         var failWrite = true
+        var failDirectorySync = false
         var launches = 0
         var io = effects()
         io.launchExecutor = { _ in launches += 1 }
         let engine = UpdateTransaction(storage: store, effects: io, persist: { candidate in
             if candidate.attempt?.execution == .consumed && failWrite { throw HelperFailure.system("injected write failure") }
-            try store.save(candidate)
+            if candidate.attempt?.execution == .consumed && failDirectorySync {
+                try UpdateStorage.write(UpdateContractV1.canonical(candidate), to: directory + "/ledger.json",
+                    synchronizeDirectory: { _ in throw HelperFailure.system("injected post-rename directory sync failure") })
+            } else { try store.save(candidate) }
         })
         try reserved(store, engine)
         let before = try UpdateStorage.read(directory + "/ledger.json", maximum: 128 * 1024)
@@ -81,11 +85,23 @@ func runUpdateSelfTests() -> Bool {
         try check(launches == 0, "Executor launched before consumed write")
         try check(UpdateStorage.read(directory + "/ledger.json", maximum: 128 * 1024) == before, "Failed consume changed disk")
         failWrite = false
-        try engine.execute(peer: owner)
-        let loaded = try UpdateStorage(root: directory)
+        failDirectorySync = true
+        try refuses { try engine.execute(peer: owner) }
+        try check(launches == 0, "Failed directory sync acknowledged consumption")
+        var allowDurabilityRetry = false
+        let loaded = try UpdateStorage(root: directory, synchronizeDirectory: { path in
+            guard allowDurabilityRetry else { throw HelperFailure.system("injected durability retry failure") }
+            try UpdateStorage.syncDirectory(path)
+        })
         let restarted = UpdateTransaction(storage: loaded, effects: io)
+        try refuses { try restarted.resumeConsumedExecutor(peer: owner) }
+        try check(launches == 0, "Visible-but-unsynced consume launched repair resources")
+        allowDurabilityRetry = true
+        // load re-establishes directory durability for the visible rename;
+        // query repairs only this consumed executor, not a second admission.
         var durable = try loaded.load()
         try check(durable.highWater == 14 && durable.attempt?.execution == .consumed, "Consumed evidence missing after reload")
+        try restarted.resumeConsumedExecutor(peer: owner)
         try refuses { try restarted.consume(&durable) }
         try refuses { try restarted.reserve(peer: owner, manifest: manifest, manifestBytes: UpdateContractV1.canonical(manifest), signature: Data()) }
         try check(launches == 1, "Replay reinstalled")
@@ -128,17 +144,25 @@ func runUpdateSelfTests() -> Bool {
 
     test("successor-incarnation-components-and-recovery-binding") { directory in
         let store = try UpdateStorage(root: directory)
-        var recovery: UpdateContractV1.Protection = .connected
+        var recovery: UpdateContractV1.Protection = .protectedOffline
         var refusePhase: UpdateContractV1.Phase?
+        var failAdoptionSync = false
+        var observedProtection: UpdateContractV1.Protection = .connected
         var io = effects()
+        io.observe = { observedProtection }
         io.recovery = { _ in recovery }
         let engine = UpdateTransaction(storage: store, effects: io, persist: { candidate in
             if let refusePhase, candidate.attempt?.receipt.phase == refusePhase {
                 throw HelperFailure.system("injected owner-boundary write failure")
             }
-            try store.save(candidate)
+            if failAdoptionSync && candidate.attempt?.receipt.phase == .installedIdentityVerified {
+                try UpdateStorage.write(UpdateContractV1.canonical(candidate), to: directory + "/ledger.json",
+                    synchronizeDirectory: { _ in throw HelperFailure.system("injected adoption directory sync failure") })
+            } else { try store.save(candidate) }
         })
         try reserved(store, engine)
+        // Preparation is now protected offline; capture was Connected.
+        observedProtection = .protectedOffline
         try engine.execute(peer: owner)
         try refuses { try engine.reconcile(peer: successor) }
         try UpdateExecutor.perform(storage: store, validate: { _ in }, replace: { _ in }, rollback: { _ in })
@@ -153,13 +177,25 @@ func runUpdateSelfTests() -> Bool {
         try check(store.load().attempt?.successorToken == nil && store.load().generation == 1,
                   "Failed adoption published a successor grant")
         refusePhase = nil
+        failAdoptionSync = true
+        try refuses { try engine.reconcile(peer: successor) }
+        var allowAdoptionRetry = false
+        let uncertainStore = try UpdateStorage(root: directory, synchronizeDirectory: { path in
+            guard allowAdoptionRetry else { throw HelperFailure.system("injected adoption retry failure") }
+            try UpdateStorage.syncDirectory(path)
+        })
+        let uncertain = UpdateTransaction(storage: uncertainStore, effects: io)
+        try refuses { try uncertain.gate(method: "POST", path: "/core/start", peer: successor) }
+        allowAdoptionRetry = true
+        try uncertain.gate(method: "POST", path: "/core/start", peer: successor)
+        failAdoptionSync = false
         try engine.reconcile(peer: successor)
         let generation = try store.load().generation
         try engine.reconcile(peer: successor)
         try check(store.load().generation == generation, "Idempotent query allocated a second successor")
-        try refuses { try engine.commit(peer: successor) } // Connected is not captured Protected Offline.
+        try refuses { try engine.commit(peer: successor) } // Protected Offline is not captured Connected.
         try check(store.load().attempt?.receipt.phase == .installedIdentityVerified, "Wrong recovery committed")
-        recovery = .protectedOffline
+        recovery = .connected
         refusePhase = .recoveryVerified
         try refuses { try engine.commit(peer: successor) }
         try check(store.load().attempt?.receipt.phase == .installedIdentityVerified, "Failed recovery write advanced proof")
@@ -188,8 +224,53 @@ func runUpdateSelfTests() -> Bool {
                   && result.attempt?.receipt.requiredRecovery == obligation
                   && result.attempt?.receipt.phase == .installationAuthorized, "Disconnect fabricated update completion")
         try refuses { try engine.execute(peer: owner) }
+        try refuses { try engine.retireUnconsumed(peer: owner) }
         try refuses { try engine.gate(method: "POST", path: "/helper/upgrade", peer: owner) }
         try refuses { try engine.gate(method: "POST", path: "/core/start", peer: successor) }
+    }
+
+    test("unconsumed-retirement-archives-before-new-admission") { directory in
+        let store = try UpdateStorage(root: directory)
+        var baseline = UpdateStorage.Ledger()
+        baseline.highWater = 7
+        try store.save(baseline)
+        var observed: UpdateContractV1.Protection = .protectedOffline
+        var refuseRetirementWrite = false
+        var io = effects()
+        io.observe = { observed }
+        let engine = UpdateTransaction(storage: store, effects: io, persist: { candidate in
+            if candidate.attempt == nil && refuseRetirementWrite {
+                throw HelperFailure.system("injected retirement write failure")
+            }
+            try store.save(candidate)
+        })
+        try engine.reserve(peer: owner, manifest: manifest, manifestBytes: UpdateContractV1.canonical(manifest), signature: Data())
+        try engine.cancel(peer: owner)
+        guard let original = try store.load().attempt else { throw HelperFailure.invalid("Missing cancelled attempt") }
+        try refuses { try engine.retireUnconsumed(peer: owner) }
+        try engine.disconnect(peer: owner)
+        // A recorded release Boolean is insufficient; real readback must agree.
+        try refuses { try engine.retireUnconsumed(peer: owner) }
+        observed = .unprotected
+        let wrongOwner = TonoAuthenticatedPeer(uid: 502, auditToken: successor.auditToken, bundleURL: owner.bundleURL)
+        try refuses { try engine.retireUnconsumed(peer: wrongOwner) }
+        refuseRetirementWrite = true
+        try refuses { try engine.retireUnconsumed(peer: owner) }
+        try check(store.load().attempt?.receipt.attemptId == original.receipt.attemptId, "Failed retirement released the active attempt")
+        try refuses { try engine.reserve(peer: successor, manifest: manifest, manifestBytes: UpdateContractV1.canonical(manifest), signature: Data()) }
+        refuseRetirementWrite = false
+        try engine.retireUnconsumed(peer: owner)
+        let retired = try store.load()
+        try check(retired.attempt == nil && retired.highWater == 7 && retired.generation == 1, "Retirement erased ordering evidence")
+        let archive = try UpdateStorage.read(directory + "/" + original.receipt.attemptId + ".json", maximum: 128 * 1024)
+        let retained = try JSONDecoder().decode(UpdateStorage.Attempt.self, from: archive)
+        try check(retained.receipt.blockedReason == .cancelled && retained.receipt.phase == .preparing
+                  && retained.receipt.requiredRecovery == .protectedOffline && retained.disconnectVerified,
+                  "Retirement rewrote the obligation or deleted failure evidence")
+        try engine.reserve(peer: successor, manifest: manifest, manifestBytes: UpdateContractV1.canonical(manifest), signature: Data())
+        let fresh = try store.load()
+        try check(fresh.generation == 2 && fresh.highWater == 7 && fresh.attempt?.receipt.attemptId != original.receipt.attemptId,
+                  "Retry reused a retired grant or lost high-water")
     }
 
     test("old-mapped-process-refused-after-disk-replacement") { directory in
@@ -216,6 +297,6 @@ func runUpdateSelfTests() -> Bool {
         try refuses { try UpdatePackage.sameCode(after.0, installed: after.1) }
         try check(child.isRunning, "Fixture exited before stale-mapped identity was checked")
     }
-    print("Update production-bound tests: \(6 - failures.count) passed, \(failures.count) failed; native-device acceptance NOT performed")
+    print("Update production-bound tests: \(7 - failures.count) passed, \(failures.count) failed; native-device acceptance NOT performed")
     return failures.isEmpty
 }

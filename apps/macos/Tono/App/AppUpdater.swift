@@ -33,8 +33,15 @@ final class AppUpdater: ObservableObject {
     private func check(userInitiated: Bool) async {
         guard canCheckForUpdates, let appState else { return }
         canCheckForUpdates = false
-        defer { canCheckForUpdates = true }
+        var retryRequested = false
+        defer {
+            canCheckForUpdates = true
+            if retryRequested { Task { await check(userInitiated: true) } }
+        }
         do {
+            if let pending = try await PrivilegedRuntimeCoordinator.shared.pendingNativeUpdate(), pending.pending {
+                throw NativeUpdateDownload.failure(pending.diagnostic ?? "A previous update is pending. Installation and recovery evidence are retained.")
+            }
             let offer = try await NativeUpdateDownload.discover()
             let available = try await PrivilegedRuntimeCoordinator.shared.verifyUpdateOffer(
                 manifest: offer.bytes, signature: offer.signature
@@ -60,9 +67,19 @@ final class AppUpdater: ObservableObject {
             // discovery does not raise a modal or perform a fallback install.
             if userInitiated || appState.nativeUpdatePending {
                 appState.errorMessage = error.localizedDescription
-                appState.updateIncomplete = appState.nativeUpdatePending
-                let alert = Self.failureAlert(detail: error.localizedDescription)
-                alert.runModal()
+                let pending = try? await PrivilegedRuntimeCoordinator.shared.pendingNativeUpdate()
+                appState.updateIncomplete = pending?.pending ?? appState.nativeUpdatePending
+                let retryable = pending?.pending == true && ["reserved", "staged"].contains(pending?.execution ?? "")
+                let alert = Self.failureAlert(detail: error.localizedDescription, retryable: retryable)
+                if alert.runModal() == .alertSecondButtonReturn && retryable {
+                    do {
+                        try await appState.retireUnconsumedNativeUpdate()
+                        retryRequested = true
+                    } catch {
+                        appState.errorMessage = error.localizedDescription
+                        Self.failureAlert(detail: error.localizedDescription).runModal()
+                    }
+                }
             }
         }
     }
@@ -76,12 +93,18 @@ final class AppUpdater: ObservableObject {
         return alert
     }
 
-    static func failureAlert(detail: String) -> NSAlert {
+    static func failureAlert(detail: String, retryable: Bool = false) -> NSAlert {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = String(localized: "Update not completed")
         alert.informativeText = detail
-        alert.addButton(withTitle: String(localized: "OK"))
+        if retryable {
+            alert.informativeText += "\n\n" + String(localized: "Disconnect and Retry restores Internet access before retiring this unconsumed attempt. Failed update evidence will be retained.")
+            alert.addButton(withTitle: String(localized: "Keep Protection"))
+            alert.addButton(withTitle: String(localized: "Disconnect and Retry"))
+        } else {
+            alert.addButton(withTitle: String(localized: "OK"))
+        }
         return alert
     }
 }

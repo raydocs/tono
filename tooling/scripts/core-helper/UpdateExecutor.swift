@@ -97,6 +97,7 @@ enum UpdateExecutor {
             guard initial.receipt.phase != .committed else { return true }
             if initial.execution == .replaced || initial.execution == .rolledBack {
                 try startDaemon()
+                try launchSuccessor(uid: uid, attempt: initial)
                 return true
             }
             if initial.execution == .consumed && (initial.receipt.blockedReason != nil || initial.disconnectRequested) {
@@ -164,9 +165,9 @@ enum UpdateExecutor {
                 })
             }
             try startDaemon()
-            // The executor never impersonates the App on helper IPC. Launch
-            // Services starts a new user process, which must authenticate anew.
-            try UpdatePackage.run("/bin/launchctl", ["asuser", String(uid), "/usr/bin/sudo", "-u", "#\(uid)", "/usr/bin/open", "-n", UpdatePackage.appPath])
+            let installed = try storage.locked { try storage.load().attempt }
+            guard let installed else { throw HelperFailure.invalid("Installed update evidence disappeared.") }
+            try launchSuccessor(uid: uid, attempt: installed)
             return true
         } catch {
             // Keep all evidence; do not turn an exception into "not installed".
@@ -273,6 +274,15 @@ enum UpdateExecutor {
     private static func startDaemon() throws {
         do { try UpdatePackage.run("/bin/launchctl", ["bootstrap", "system", daemonPlist]) }
         catch { try UpdatePackage.run("/bin/launchctl", ["print", "system/" + daemonLabel]) }
+    }
+
+    private static func launchSuccessor(uid: uid_t, attempt: UpdateStorage.Attempt) throws {
+        if let token = attempt.successorToken,
+           attempt.successorBoot == (try TonoAuthenticatedPeer.bootSession()), processExists(token) { return }
+        // Re-enter this path after a crash between the replaced write and
+        // launch. The executor does not impersonate the App on helper IPC;
+        // Launch Services starts a fresh process that must authenticate anew.
+        try UpdatePackage.run("/bin/launchctl", ["asuser", String(uid), "/usr/bin/sudo", "-u", "#\(uid)", "/usr/bin/open", "-n", UpdatePackage.appPath])
     }
 
     private static func syncFile(_ path: String) throws {

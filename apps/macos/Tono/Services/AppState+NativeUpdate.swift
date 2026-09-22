@@ -65,6 +65,31 @@ extension AppState {
             }
         }
     }
+
+    /// The retry button explicitly requests Internet release. Root rechecks
+    /// cleanup and archives the old receipt; this never clears consumed state.
+    func retireUnconsumedNativeUpdate() async throws {
+        let coordinator = PrivilegedRuntimeCoordinator.shared
+        let pending = try await coordinator.nativeUpdate("status")
+        guard pending.pending, ["reserved", "staged"].contains(pending.execution ?? "") else {
+            throw NativeUpdateDownload.failure("This attempt cannot be retried before installation recovery.")
+        }
+        nativeUpdatePending = true
+        await suspendForNativeUpdate()
+        let released = try await coordinator.nativeUpdate("disconnect")
+        guard released.disconnectVerified == true else { throw NativeUpdateDownload.failure("Update Disconnect was not verified.") }
+        let retired = try await coordinator.nativeUpdate("retire")
+        guard !retired.pending else { throw NativeUpdateDownload.failure("Update retirement did not commit.") }
+        nativeUpdatePending = false
+        RuntimeCleanup.nativeUpdatePending = false
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        RuntimeCleanup.nativeUpdateRecovery = nil
+        KillSwitchService.isArmed = false
+        isProtectionBlocked = false
+        updateIncomplete = UpdateHandoffStore.showsIncompleteUpdate()
+        errorMessage = nil
+        RuntimeCleanup.clearCoreStarted()
+    }
 }
 
 /// The active caller's ordering, with a narrow transport seam for XCTest.

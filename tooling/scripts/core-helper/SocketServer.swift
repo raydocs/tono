@@ -279,6 +279,7 @@ final class SocketServer {
             case ("POST", "/update/commit"): try transitionGate.whileAwake { try updates.commit(peer: peer) }
             case ("POST", "/update/cancel"): try updates.cancel(peer: peer)
             case ("POST", "/update/disconnect"): try updates.disconnect(peer: peer)
+            case ("POST", "/update/retire"): try transitionGate.whileAwake { try updates.retireUnconsumed(peer: peer) }
             default: throw HelperFailure.invalid("Unknown update operation.")
             }
         }
