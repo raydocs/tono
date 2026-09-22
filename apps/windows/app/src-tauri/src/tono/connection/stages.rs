@@ -47,6 +47,7 @@ pub(super) async fn run_stages(
     generation: u64,
     started: std::time::Instant,
     transaction: &ConnectTransaction,
+    route_owner: Option<&crate::tono::route_preferences::PreferenceContext>,
 ) -> Result<(), StageFailure> {
     // §6.2: proxy endpoints (public IPv4/port/TCP) from the selected node;
     // the bootstrap API hosts are the only control-plane recovery channel.
@@ -337,6 +338,7 @@ pub(super) async fn run_stages(
         inner.controller_generation = inner.controller_generation.wrapping_add(1);
         inner.fsm.mark_session_verified();
         inner.fsm.connect_succeeded().map_err(StageFailure::error)?;
+        crate::tono::route_preferences::record_verified(&inner, route_owner, &node.name);
         if let Err(error) = crate::tono::state::save_successful_selection(
             &inner.catalog_dir, &node.name,
             inner.attempt_history.current.as_ref().and_then(|attempt| attempt.catalog_revision).unwrap_or(-1),

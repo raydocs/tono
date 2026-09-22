@@ -23,6 +23,7 @@ import {
   WECHAT_ACTIVITY_PROCESS,
   toActivityRow,
 } from './activity-model'
+import { ActivityRouteExplanation } from './activity-explanation'
 
 type ActivityFilter = 'all' | Exclude<ActivityRoute, 'local'>
 type ActivityView = 'apps' | 'connections'
@@ -110,6 +111,12 @@ const ActivityPage = () => {
   const [query, setQuery] = useState('')
   const [closingId, setClosingId] = useState<string | null>(null)
   const [closingAll, setClosingAll] = useState(false)
+  const [explanation, setExplanation] = useState<{
+    kind: 'app' | 'connection'
+    value: string
+    title: string
+    generation: number | undefined
+  } | null>(null)
   const {
     response: { data, live },
     refreshGetClashConnection,
@@ -152,6 +159,16 @@ const ActivityPage = () => {
     [activeConnections],
   )
   const rows = useMemo(() => capped.map(toActivityRow), [capped])
+  const explanationRows =
+    explanation && connected && explanation.generation === generation
+      ? rows.filter(
+          (row) =>
+            row.route !== 'local' &&
+            (explanation.kind === 'app'
+              ? row.process === explanation.value
+              : row.id === explanation.value),
+        )
+      : null
   const normalizedQuery = query.trim().toLowerCase()
   const appRows = useMemo(() => aggregateActivityApps(rows), [rows])
   const visibleApps = useMemo(
@@ -239,10 +256,25 @@ const ActivityPage = () => {
               {activityProcessLabel(row.process, t)}
             </strong>
           </span>
-          <span
+          <button
+            type="button"
+            className="tono-link"
+            aria-label={t('tono.routeExplanation.openConnection', {
+              target: row.target,
+            })}
+            onClick={() =>
+              setExplanation({
+                kind: 'connection',
+                value: row.id,
+                title: activityProcessLabel(row.process, t),
+                generation,
+              })
+            }
             title={row.target}
             style={{
               minWidth: 0,
+              textAlign: 'left',
+              color: text.primary,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -251,7 +283,7 @@ const ActivityPage = () => {
             }}
           >
             {row.target}
-          </span>
+          </button>
           <span
             style={{
               color: text.secondary,
@@ -295,6 +327,7 @@ const ActivityPage = () => {
       closingAll,
       closingId,
       dark,
+      generation,
       handleClose,
       t,
       text.primary,
@@ -339,6 +372,15 @@ const ActivityPage = () => {
           </button>
         }
       />
+
+      {explanation && explanationRows && (
+        <ActivityRouteExplanation
+          rows={explanationRows}
+          title={explanation.title}
+          dark={dark}
+          onClose={() => setExplanation(null)}
+        />
+      )}
 
       <GlassCard
         radius="var(--tono-radius-card)"
@@ -595,9 +637,28 @@ const ActivityPage = () => {
                           fontSize: 13,
                         }}
                       >
-                        <span style={{ fontWeight: 600 }}>
+                        <button
+                          type="button"
+                          className="tono-link"
+                          aria-label={t('tono.routeExplanation.openApp', {
+                            name: activityProcessLabel(app.process, t),
+                          })}
+                          onClick={() =>
+                            setExplanation({
+                              kind: 'app',
+                              value: app.process,
+                              title: activityProcessLabel(app.process, t),
+                              generation,
+                            })
+                          }
+                          style={{
+                            fontWeight: 600,
+                            textAlign: 'left',
+                            color: text.primary,
+                          }}
+                        >
                           {activityProcessLabel(app.process, t)}
-                        </span>
+                        </button>
                         <span style={{ fontFamily: TONO_MONO_STACK }}>
                           {app.total}
                         </span>

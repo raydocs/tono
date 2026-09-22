@@ -285,7 +285,7 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
     // F5 single-flight, latched BEFORE any service I/O: rapid repeated
     // clicks admit exactly one attempt to the service probe; the rest exit
     // here with no side effects (the real-machine double-probe this kills).
-    let (attempt_record, generation, cancellation, account_owner) = {
+    let (attempt_record, generation, cancellation, account_owner, route_owner) = {
         let mut inner = state.lock().await;
         let Some((admitted_generation, cancellation, account_owner)) = begin_attempt(&mut inner, generation).await else {
             if inner.connect_generation != generation {
@@ -329,7 +329,8 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
             node.catalog_transport(),
             revision,
         );
-        (record, admitted_generation, cancellation, account_owner)
+        let route_owner = crate::tono::route_preferences::PreferenceContext::capture(&inner);
+        (record, admitted_generation, cancellation, account_owner, route_owner)
     };
     drop(admission);
     let transaction = ConnectTransaction::new(cancellation);
@@ -398,6 +399,7 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
             generation,
             started,
             &transaction,
+            route_owner.as_ref(),
         )
         .await
         {
