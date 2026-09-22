@@ -14,6 +14,7 @@ final class LocalRoutePreferences {
     private struct Account: Codable {
         var favorites: [String] = []
         var successes: [Success] = []
+        var preferredRegion: String?
         var updatedAt = Date()
     }
     static let storageKey = "localRoutePreferences.v1"
@@ -29,6 +30,8 @@ final class LocalRoutePreferences {
            decoded.allSatisfy({ key, value in
                key.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil
                    && value.favorites.count <= 32 && value.successes.count <= 16
+                   && (value.preferredRegion?.utf8.count ?? 0) <= 2
+                   && (value.preferredRegion == nil || value.preferredRegion?.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil)
                    && value.favorites.allSatisfy { !$0.isEmpty && $0.utf8.count <= 400 }
                    && value.successes.allSatisfy { !$0.name.isEmpty && $0.name.utf8.count <= 400 && $0.catalogDigest.count <= 64 }
            }) {
@@ -40,6 +43,22 @@ final class LocalRoutePreferences {
 
     private func key(_ owner: String) -> String {
         SHA256.hash(data: Data(owner.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Preserve a removed/unknown region until the user explicitly clears it;
+    /// silently dropping it would enable out-of-region recommendations.
+    func preferredRegion(owner: String) -> String? {
+        accounts[key(owner)]?.preferredRegion
+    }
+
+    func setPreferredRegion(_ region: String?, owner: String, catalog: [ProxyNode]) {
+        if let region {
+            guard region.utf8.count == 2, region.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil,
+                  catalog.contains(where: { catalogNodeRegionCode(flag: $0.flag, name: $0.name) == region }) else { return }
+        }
+        var account = accounts[key(owner)] ?? Account()
+        account.preferredRegion = region
+        save(account, owner: owner)
     }
 
     func favorites(owner: String, catalog: [ProxyNode]) -> Set<String> {
@@ -101,6 +120,7 @@ struct RouteRecommendation: Identifiable {
     let owner: String
     let generation: UInt64
     let catalogDigest: String
+    let preferredRegion: String?
     let name: String
     let successfulAt: Date?
 }

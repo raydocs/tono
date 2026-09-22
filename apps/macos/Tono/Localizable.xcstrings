@@ -452,12 +452,62 @@
         }
       }
     },
-    "The account, catalog, or connection changed. Review a fresh recommendation.": {
+    "Any region": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "账户、目录或连接已变化，请重新查看推荐。"
+            "value": "不限地区"
+          }
+        }
+      }
+    },
+    "Fixed recommendation region": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "固定推荐地区"
+          }
+        }
+      }
+    },
+    "Saved region unavailable": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已保存地区不可用"
+          }
+        }
+      }
+    },
+    "Recommendations only. Manual choices and the connected exit do not change.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅限制推荐范围，不改变手动选择或已连接的出口。"
+          }
+        }
+      }
+    },
+    "No available route in your fixed region. Choose another region or Any region to clear it; Tono will not recommend outside it.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "固定地区内没有可用线路。请选择其他地区，或选择「不限地区」清除此偏好；Tono 不会推荐该地区以外的线路。"
+          }
+        }
+      }
+    },
+    "The account, catalog, route preference, or connection changed. Review a fresh recommendation.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "账户、目录、线路偏好或连接已变化，请重新查看推荐。"
           }
         }
       }

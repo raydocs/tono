@@ -19,7 +19,7 @@ final class MacUsabilityRenderTests: XCTestCase {
         let owner = try XCTUnwrap(account.user?.id)
         ManagedExitCatalogOwnership.adopt(owner)
         let node = Fixture.realityNode()
-        let other = Fixture.realityNode(name: "Tokyo · Dawn", id: "tokyo")
+        let other = Fixture.realityNode(name: "Tokyo · Dawn", id: "tokyo", flag: "🇯🇵")
         app.proxyRegions = [.init(id: AppState.managedCatalogRegionID, name: "Tono", nodes: [node, other])]
         app.managedCatalogRevision = 73
         app.managedCatalogDigest = String(repeating: "a", count: 64)
@@ -56,9 +56,17 @@ final class MacUsabilityRenderTests: XCTestCase {
         app.isConnected = true
         app.recordVerifiedRouteSuccess(node.name, owner: owner, generation: app.connectionCoordinator.protectionOperationGeneration)
         app.isConnected = false
-        try capture("nodes-favorite-recommendation", width: 740, height: 600) {
+        app.setPreferredRouteRegion("US", owner: owner)
+        try capture("nodes-favorite-recommendation", width: 740, height: 700) {
             ProxiesView().environment(app).environment(account)
         }
+        app.setPreferredRouteRegion("JP", owner: owner)
+        app.proxyRegions[0].nodes = [node]
+        try capture("nodes-region-unavailable", width: 740, height: 600) {
+            ProxiesView().environment(app).environment(account)
+        }
+        app.proxyRegions[0].nodes = [node, other]
+        app.setPreferredRouteRegion(nil, owner: owner)
         app.isProtectionBlocked = true
         app.recoveryCause = .wake
         app.protectedReconnectPausedForUserAction = true
@@ -98,7 +106,10 @@ final class MacUsabilityRenderTests: XCTestCase {
         .background(Color(nsColor: .windowBackgroundColor))
         .environment(\.colorScheme, .light)
         .environment(\.locale, Locale(identifier: "en"))
-        .environment(\.accessibilityReduceMotion, true)
+        .transaction { transaction in
+            transaction.animation = nil
+            transaction.disablesAnimations = true
+        }
         let host = NSHostingView(rootView: root)
         let rect = NSRect(x: 0, y: 0, width: width, height: height)
         let window = NSWindow(contentRect: rect, styleMask: [.borderless], backing: .buffered, defer: false)
