@@ -20,6 +20,13 @@ set -- \
   "$helper_dir/KillSwitchPF.swift" \
   "$helper_dir/KillSwitchTests.swift" \
   "$helper_dir/ProtectedDNSManager.swift" \
+  "$helper_dir/UpdateStorage.swift" \
+  "$helper_dir/UpdatePackage.swift" \
+  "$helper_dir/UpdateRuntime.swift" \
+  "$helper_dir/UpdateTransaction.swift" \
+  "$helper_dir/UpdateExecutor.swift" \
+  "$helper_dir/UpdateTests.swift" \
+  "$repo_dir/apps/macos/Tono/Models/UpdateContractV1.swift" \
   "$repo_dir/tooling/scripts/helper-shared/PeerAuthorization.swift" \
   "$protocol_version_source"
 

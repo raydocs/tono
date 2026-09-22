@@ -9,7 +9,6 @@
 /* Begin PBXBuildFile section */
 		C0D000012F80000000000001 /* sing-box in Embed Executables */ = {isa = PBXBuildFile; fileRef = C0D000052F80000000000001 /* sing-box */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		C0D000042F80000000000001 /* tono-core-helper in Embed Executables */ = {isa = PBXBuildFile; fileRef = C0D000082F80000000000001 /* tono-core-helper */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		C0D0000B2F80000000000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = C0D0000D2F80000000000001 /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -149,7 +148,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				C0D0000B2F80000000000001 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -216,7 +214,6 @@
 			);
 			name = Tono;
 			packageProductDependencies = (
-				C0D0000D2F80000000000001 /* Sparkle */,
 			);
 			productName = Tono;
 			productReference = 14F0D2082F78C04F000C4896 /* Tono.app */;
@@ -276,7 +273,6 @@
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 14F0D2092F78C04F000C4896 /* Products */;
 			packageReferences = (
-				C0D0000C2F80000000000001 /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			projectDirPath = "";
 			projectRoot = "";
@@ -601,24 +597,6 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		C0D0000C2F80000000000001 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/sparkle-project/Sparkle";
-			requirement = {
-				kind = exactVersion;
-				version = 2.9.6;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		C0D0000D2F80000000000001 /* Sparkle */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = C0D0000C2F80000000000001 /* XCRemoteSwiftPackageReference "Sparkle" */;
-			productName = Sparkle;
-		};
-/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 14F0D2002F78C04F000C4896 /* Project object */;
 }

@@ -73,6 +73,13 @@ nonisolated struct HelperManager {
         return """
         set -e
         /usr/bin/install -d -o root -g wheel -m 0755 /Library/PrivilegedHelperTools
+        guard_dir=$(/usr/bin/mktemp -d /Library/PrivilegedHelperTools/tono-installer.XXXXXX)
+        trap '/bin/rm -f "$guard_dir/guard"; /bin/rmdir "$guard_dir"' EXIT
+        /usr/bin/install -o root -g wheel -m 0700 \(helperSrc) "$guard_dir/guard"
+        /usr/bin/codesign --verify --strict --all-architectures -R='anchor apple generic and identifier "com.raydocs.tono.helper" and certificate leaf[subject.OU] = "YY57758GS7" and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and entitlement["com.apple.security.get-task-allow"] absent' "$guard_dir/guard"
+        "$guard_dir/guard" --update-install-guard <<'TONO_INSTALL_UNDER_ROOT_UPDATE_LOCK'
+        set -e
+        /usr/bin/install -d -o root -g wheel -m 0755 /Library/PrivilegedHelperTools
         /usr/bin/install -d -o root -g wheel -m 0755 /var/run/tono-core
         /bin/rm -f '\(helperTemporaryPath)' '\(mihomoTemporaryPath)' '\(plistTemporaryPath)'
         /usr/bin/install -o root -g wheel -m 0755 \(helperSrc) '\(helperTemporaryPath)'
@@ -104,6 +111,7 @@ nonisolated struct HelperManager {
         # accepted and started the new job. Treat bootstrap as a request; the
         # authenticated /version poll below is the authoritative result.
         /bin/launchctl bootstrap system '\(plistInstallPath)' || true
+        TONO_INSTALL_UNDER_ROOT_UPDATE_LOCK
         """
     }
 
@@ -849,8 +857,37 @@ nonisolated struct HelperManager {
 
     static let silentUpgradePollTimeout: TimeInterval = 45
 
+    struct UpdateStatus: Decodable, Sendable {
+        let pending: Bool
+        let receipt: UpdateContractV1.Receipt?
+        let execution: String?
+        let disconnectVerified: Bool?
+        let diagnostic: String?
+    }
+
+    static func updateRequest(_ operation: String, object: [String: Any]? = nil) throws -> UpdateStatus {
+        let path = "/update/" + operation
+        let result = try sendRequest(method: operation == "status" ? "GET" : "POST", path: path,
+                                     body: object.map { try JSONSerialization.data(withJSONObject: $0) })
+        _ = try requireSuccess(result, operation: "update " + operation)
+        return try JSONDecoder().decode(UpdateStatus.self, from: result.body)
+    }
+
+    static func updateOffer(manifest: Data, signature: Data) throws -> Bool {
+        let result = try sendJSONObject(method: "POST", path: "/update/offer", object: [
+            "manifest": manifest.base64EncodedString(), "signature": signature.base64EncodedString(),
+        ])
+        _ = try requireSuccess(result, operation: "verify update offer")
+        guard let object = try JSONSerialization.jsonObject(with: result.body) as? [String: Any],
+              let available = object["available"] as? Bool else { throw HelperIPCError.invalidResponse }
+        return available
+    }
+
     static func receiveTimeout(for path: String) -> Int {
         switch path {
+        case "/update/stage": return 600
+        case "/update/prepare", "/update/commit", "/update/reconcile", "/update/disconnect": return 45
+        case "/update/offer", "/update/execute": return 30
         case "/killswitch/arm", "/helper/upgrade":
             return 30
         case "/core/stop":
