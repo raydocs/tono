@@ -82,9 +82,11 @@ enum UpdatePackage {
         guard SecCodeCheckValidity(live, [], nil) == errSecSuccess else {
             throw HelperFailure.invalid("Loaded update process no longer matches its on-disk image.")
         }
+        var liveStatic: SecStaticCode?
         var dynamicInfo: CFDictionary?
         var staticInfo: CFDictionary?
-        guard SecCodeCopySigningInformation(live, SecCSFlags(rawValue: kSecCSSigningInformation), &dynamicInfo) == errSecSuccess,
+        guard SecCodeCopyStaticCode(live, [], &liveStatic) == errSecSuccess, let liveStatic,
+              SecCodeCopySigningInformation(liveStatic, SecCSFlags(rawValue: kSecCSSigningInformation), &dynamicInfo) == errSecSuccess,
               SecCodeCopySigningInformation(installed, SecCSFlags(rawValue: kSecCSSigningInformation), &staticInfo) == errSecSuccess,
               let a = (dynamicInfo as? [String: Any])?[kSecCodeInfoUnique as String] as? Data,
               let b = (staticInfo as? [String: Any])?[kSecCodeInfoUnique as String] as? Data,
