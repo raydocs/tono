@@ -1,6 +1,12 @@
 import { useLockFn } from 'ahooks'
 import dayjs from 'dayjs'
-import { useEffect, useEffectEvent, useRef, useState } from 'react'
+import {
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 
@@ -282,6 +288,8 @@ interface ConfirmDialogProps {
   title: string
   message: string
   error?: string | null
+  children?: ReactNode
+  busy?: boolean
   confirmLabel: string
   cancelLabel: string
   onConfirm: () => void
@@ -293,6 +301,8 @@ export const TonoConfirmDialog = ({
   title,
   message,
   error,
+  children,
+  busy = false,
   confirmLabel,
   cancelLabel,
   onConfirm,
@@ -313,8 +323,8 @@ export const TonoConfirmDialog = ({
         cancelFromKeyboard()
       }
       if (event.key !== 'Tab') return
-      const buttons = panel?.querySelectorAll<HTMLButtonElement>(
-        'button:not(:disabled)',
+      const buttons = panel?.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), [tabindex="0"], a[href], input:not(:disabled)',
       )
       const first = buttons?.[0]
       const last = buttons?.[buttons.length - 1]
@@ -340,6 +350,7 @@ export const TonoConfirmDialog = ({
     <div
       role="dialog"
       aria-modal="true"
+      aria-busy={busy}
       aria-labelledby="tono-confirm-title"
       style={{
         position: 'fixed',
@@ -355,7 +366,10 @@ export const TonoConfirmDialog = ({
       <div
         ref={panelRef}
         style={{
-          width: 340,
+          width: children ? 560 : 340,
+          maxWidth: 'calc(100vw - 32px)',
+          maxHeight: 'calc(100vh - 32px)',
+          overflowY: 'auto',
           borderRadius: 'var(--tono-radius-card-sm)',
           padding: 20,
           background: 'var(--tono-surface-dialog)',
@@ -377,6 +391,7 @@ export const TonoConfirmDialog = ({
         <div style={{ fontSize: 13, color: text.secondary, marginBottom: 12 }}>
           {message}
         </div>
+        {children}
         {error && (
           <div
             role="alert"
@@ -395,6 +410,7 @@ export const TonoConfirmDialog = ({
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button
             type="button"
+            disabled={busy}
             className="tono-button"
             style={{
               padding: '7px 14px',
@@ -410,6 +426,7 @@ export const TonoConfirmDialog = ({
           </button>
           <button
             type="button"
+            disabled={busy}
             className="tono-button"
             style={{
               padding: '7px 14px',

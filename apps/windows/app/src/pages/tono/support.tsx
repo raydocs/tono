@@ -15,16 +15,16 @@ import {
   tonoClearTerminalProxyEnv,
   tonoDiagnosticsReport,
   tonoLocalDiagnosticsReport,
-  tonoUploadDiagnostics,
   type TonoDiagnosticsReport,
 } from '@/services/tono'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import { PageHeader } from '@/tono-ui/PageHeader'
 import { SupportContact } from '@/tono-ui/SupportContact'
+import { SupportReportAction } from '@/tono-ui/SupportReportAction'
 import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
-import { TonoConfirmDialog } from '@/tono-ui/TonoAccountCard'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 
+import { HealthCheck } from './health-check'
 import { nodeCityLabel } from './node-meta'
 
 const hex = (color: string, alpha: number) =>
@@ -35,8 +35,6 @@ const hex = (color: string, alpha: number) =>
 const diagnosticsQueryKey = ['tonoDiagnosticsReport'] as const
 const auditLogPathQueryKey = ['tonoAuditLogPath'] as const
 const terminalEnvQueryKey = ['tonoTerminalEnv'] as const
-
-type UploadPhase = 'idle' | 'confirming' | 'uploading' | 'sent'
 
 const valueOrUnknown = (value: string | null) => value ?? '—'
 
@@ -115,10 +113,6 @@ const SupportPage = () => {
   const { t } = useTranslation()
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
-  const [uploadPhase, setUploadPhase] = useState<UploadPhase>('idle')
-  const [uploadError, setUploadError] = useState<string | null>(null)
-  const [referenceCode, setReferenceCode] = useState<string | null>(null)
-  const [codeCopied, setCodeCopied] = useState(false)
 
   const {
     data: report,
@@ -192,30 +186,6 @@ const SupportPage = () => {
     }
   })
 
-  const handleUpload = useLockFn(async () => {
-    setUploadPhase('uploading')
-    setUploadError(null)
-    try {
-      const receipt = await tonoUploadDiagnostics()
-      setReferenceCode(receipt.referenceCode)
-      setUploadPhase('sent')
-    } catch (error) {
-      setUploadError(formatTonoActionError(error, t))
-      setUploadPhase('confirming')
-    }
-  })
-
-  const handleCopyCode = useLockFn(async () => {
-    if (!referenceCode) return
-    try {
-      await navigator.clipboard.writeText(referenceCode)
-      setCodeCopied(true)
-    } catch (error) {
-      console.warn('[Support] copy reference code failed:', error)
-      showNotice.error('tono.support.copyFailed')
-    }
-  })
-
   // DNS warning markers (TONO_DNS_UNVERIFIED / TONO_DNS_RESTORE_DEGRADED) ride in
   // dnsLastError by design but are not failures — the tunnel stays protected. Showing
   // them under "last error" panics users for a healthy connection, so they get their
@@ -274,6 +244,7 @@ const SupportPage = () => {
       />
 
       <div style={{ display: 'grid', gap: 14, maxWidth: 680 }}>
+        <HealthCheck />
         <GlassCard radius="var(--tono-radius-card)" padding={18}>
           <h2 style={{ margin: '0 0 8px', fontSize: 14, color: text.primary }}>
             {t('tono.support.contact.copyMessage')}
@@ -600,91 +571,10 @@ const SupportPage = () => {
             >
               {t('tono.progress.copyDetails')}
             </button>
-            {referenceCode == null && (
-              <button
-                type="button"
-                className="tono-button"
-                data-testid="tono-support-upload-diagnostics"
-                onClick={() => {
-                  setUploadError(null)
-                  setUploadPhase('confirming')
-                }}
-                disabled={uploadPhase === 'uploading'}
-                style={{
-                  ...buttonStyle,
-                  opacity: uploadPhase === 'uploading' ? 0.6 : 1,
-                }}
-              >
-                {uploadPhase === 'uploading'
-                  ? t('tono.progress.upload.uploading')
-                  : t('tono.progress.upload.action')}
-              </button>
-            )}
+            <SupportReportAction testIdPrefix="tono-support" />
           </div>
-
-          {referenceCode != null && (
-            <div
-              data-testid="tono-support-upload-reference"
-              style={{
-                marginTop: 12,
-                padding: '10px 12px',
-                borderRadius: 10,
-                background: `${TONO_COLORS.latencyGood}1F`,
-              }}
-            >
-              <div
-                style={{ fontSize: 11, color: text.secondary, marginBottom: 6 }}
-              >
-                {t('tono.progress.upload.successHint')}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <code
-                  style={{
-                    flex: 1,
-                    fontSize: 15,
-                    fontWeight: 700,
-                    letterSpacing: 1,
-                    fontFamily: TONO_MONO_STACK,
-                    color: text.primary,
-                    userSelect: 'text',
-                  }}
-                >
-                  {referenceCode}
-                </code>
-                <button
-                  type="button"
-                  className="tono-button"
-                  onClick={handleCopyCode}
-                  style={buttonStyle}
-                >
-                  {codeCopied
-                    ? t('tono.progress.upload.codeCopied')
-                    : t('tono.progress.upload.copyCode')}
-                </button>
-              </div>
-            </div>
-          )}
         </GlassCard>
       </div>
-
-      {(uploadPhase === 'confirming' || uploadPhase === 'uploading') && (
-        <TonoConfirmDialog
-          dark={dark}
-          title={t('tono.progress.upload.confirmTitle')}
-          message={t('tono.progress.upload.confirmMessage')}
-          error={uploadError}
-          confirmLabel={
-            uploadPhase === 'uploading'
-              ? t('tono.progress.upload.uploading')
-              : t('tono.progress.upload.confirmSend')
-          }
-          cancelLabel={t('shared.actions.cancel')}
-          onConfirm={handleUpload}
-          onCancel={() => {
-            if (uploadPhase !== 'uploading') setUploadPhase('idle')
-          }}
-        />
-      )}
     </div>
   )
 }

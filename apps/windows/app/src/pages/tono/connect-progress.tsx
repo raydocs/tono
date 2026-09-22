@@ -17,15 +17,14 @@ import {
   tonoConnectProgress,
   tonoLocalDiagnosticsReport,
   tonoRetryNow,
-  tonoUploadDiagnostics,
   type TonoConnectStep,
   type TonoUiState,
 } from '@/services/tono'
 import { CONNECT_STAGE_LABEL_KEYS } from '@/tono-ui/connect-stages'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import { OpenDnsSettingsButton } from '@/tono-ui/OpenDnsSettingsButton'
+import { SupportReportAction } from '@/tono-ui/SupportReportAction'
 import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
-import { TonoConfirmDialog } from '@/tono-ui/TonoAccountCard'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 import { useReleaseProtection } from '@/tono-ui/useReleaseProtection'
 
@@ -147,15 +146,6 @@ interface ConnectProgressCardProps {
   onChooseRoute?: () => void
 }
 
-/**
- * Manual resend on this card: idle → the user reads what will be sent →
- * confirms → one in-flight request → a reference code that replaces the
- * button. Connect failures also upload automatically; this button is a
- * resend. There is no path back to `idle` from `sent` without remounting
- * the card, so the button cannot be mashed while a request is in flight.
- */
-type UploadPhase = 'idle' | 'confirming' | 'uploading' | 'sent'
-
 export const ConnectProgressCard = ({
   uiState,
   protectionConfirmed = false,
@@ -169,20 +159,14 @@ export const ConnectProgressCard = ({
 
   const active = uiState === 'connecting' || uiState === 'protectedOffline'
   const progress = useConnectProgress(active)
-  const { available: showBackupAction, selectAndRetry } = useManualBackupChannel(
-    selectedServer,
-    uiState,
-  )
+  const { available: showBackupAction, selectAndRetry } =
+    useManualBackupChannel(selectedServer, uiState)
 
   const [retryError, setRetryError] = useState<string | null>(null)
   const [retrying, setRetrying] = useState(false)
   const { requestRelease, dialog: restoreDialog } =
     useReleaseProtection(onRefreshStatus)
   const [nowMs, setNowMs] = useState(() => Date.now())
-  const [uploadPhase, setUploadPhase] = useState<UploadPhase>('idle')
-  const [uploadError, setUploadError] = useState<string | null>(null)
-  const [referenceCode, setReferenceCode] = useState<string | null>(null)
-  const [codeCopied, setCodeCopied] = useState(false)
 
   const nextRetryAtMs = progress?.nextRetryAtMs ?? null
 
@@ -242,32 +226,6 @@ export const ConnectProgressCard = ({
     }
   })
 
-  const handleUpload = useLockFn(async () => {
-    setUploadPhase('uploading')
-    setUploadError(null)
-    try {
-      const receipt = await tonoUploadDiagnostics()
-      setReferenceCode(receipt.referenceCode)
-      setUploadPhase('sent')
-    } catch (error) {
-      setUploadError(formatTonoActionError(error, t))
-      // Back to the confirm dialog, which keeps the error visible next to the
-      // action that produced it and lets the user retry deliberately.
-      setUploadPhase('confirming')
-    }
-  })
-
-  const handleCopyCode = useLockFn(async () => {
-    if (!referenceCode) return
-    try {
-      await navigator.clipboard.writeText(referenceCode)
-      setCodeCopied(true)
-    } catch (error) {
-      console.warn('[ConnectProgress] copy reference code failed:', error)
-      showNotice.error('tono.progress.copyFailed')
-    }
-  })
-
   // Protected Offline by itself is not an in-flight transaction. On process restart the Service
   // can still hold a durable barrier while this GUI has neither begun an attempt nor recorded a
   // failure. Keep the card's release/diagnostics actions visible in that state, but do not render
@@ -280,8 +238,7 @@ export const ConnectProgressCard = ({
   // Handshake eof FullRelease is notConnected. Production catalogs may have
   // no hy2, so Retry / Choose route on this card is the next hand — do not
   // wait for a backup sibling before showing the card.
-  const releasedFailure =
-    uiState === 'notConnected' && progress?.error != null
+  const releasedFailure = uiState === 'notConnected' && progress?.error != null
   const visible =
     uiState === 'protectedOffline' || showProgress || showBackupAction
   if (!visible) {
@@ -371,6 +328,32 @@ export const ConnectProgressCard = ({
           )}
         </div>
       )}
+
+      {progress &&
+        (uiState === 'protectedOffline' ||
+          (uiState === 'connecting' && progress.retryAttempt > 0)) && (
+          <div
+            role="status"
+            data-testid="tono-recovery-feedback"
+            style={{
+              marginBottom: 14,
+              fontSize: 12,
+              lineHeight: 1.5,
+              color: text.secondary,
+            }}
+          >
+            <strong style={{ display: 'block', color: text.primary }}>
+              {t('tono.experience.recoveryTitle')}
+            </strong>
+            {t(
+              uiState === 'connecting'
+                ? 'tono.experience.recoveryActive'
+                : nextRetryAtMs != null
+                  ? 'tono.experience.recoveryWaiting'
+                  : 'tono.experience.recoveryStopped',
+            )}
+          </div>
+        )}
 
       {showProgress && progress != null && (
         <>
@@ -547,65 +530,63 @@ export const ConnectProgressCard = ({
       {/* Retry countdown + actions. Protected Offline uses the scheduled
           reconnect; a released first-connect failure must still offer Retry
           (Connect) and Choose route even when the catalog has no hy2. */}
-      {((uiState === 'protectedOffline' &&
-        progress != null &&
-        nextRetryAtMs != null) ||
+      {((uiState === 'protectedOffline' && progress != null) ||
         releasedFailure) && (
-          <div
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            marginTop: 14,
+          }}
+        >
+          {uiState === 'protectedOffline' && nextRetryAtMs != null ? (
+            <span
+              data-testid="tono-retry-countdown"
+              style={{ flex: 1, fontSize: 11, color: text.secondary }}
+            >
+              {remainSec != null && remainSec > 0
+                ? t('tono.progress.retryIn', {
+                    n: (progress?.retryAttempt ?? 0) + 1,
+                    seconds: remainSec,
+                  })
+                : t('tono.progress.retrying')}
+            </span>
+          ) : (
+            <span style={{ flex: 1 }} />
+          )}
+          <button
+            type="button"
+            className="tono-button tono-action"
+            data-testid="tono-progress-retry"
+            onClick={handleRetryNow}
+            disabled={retrying}
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              marginTop: 14,
+              padding: '7px 13px',
+              fontSize: 12,
             }}
           >
-            {uiState === 'protectedOffline' && nextRetryAtMs != null ? (
-              <span
-                data-testid="tono-retry-countdown"
-                style={{ flex: 1, fontSize: 11, color: text.secondary }}
-              >
-                {remainSec != null && remainSec > 0
-                  ? t('tono.progress.retryIn', {
-                      n: (progress?.retryAttempt ?? 0) + 1,
-                      seconds: remainSec,
-                    })
-                  : t('tono.progress.retrying')}
-              </span>
-            ) : (
-              <span style={{ flex: 1 }} />
-            )}
+            {retrying ? '…' : t('tono.progress.retryNow')}
+          </button>
+          {onChooseRoute && !isEncryptedDnsFailure(progress?.error) && (
             <button
               type="button"
-              className="tono-button tono-action"
-              data-testid="tono-progress-retry"
-              onClick={handleRetryNow}
-              disabled={retrying}
+              className="tono-button"
+              data-testid="tono-progress-switch-route"
+              onClick={onChooseRoute}
               style={{
                 padding: '7px 13px',
                 fontSize: 12,
+                color: text.primary,
+                background: secondaryBackground,
+                border: secondaryBorder,
               }}
             >
-              {retrying ? '…' : t('tono.progress.retryNow')}
+              {t('tono.progress.switchRoute')}
             </button>
-            {onChooseRoute && !isEncryptedDnsFailure(progress?.error) && (
-              <button
-                type="button"
-                className="tono-button"
-                data-testid="tono-progress-switch-route"
-                onClick={onChooseRoute}
-                style={{
-                  padding: '7px 13px',
-                  fontSize: 12,
-                  color: text.primary,
-                  background: secondaryBackground,
-                  border: secondaryBorder,
-                }}
-              >
-                {t('tono.progress.switchRoute')}
-              </button>
-            )}
-          </div>
-        )}
+          )}
+        </div>
+      )}
       {showBackupAction && (
         <div
           style={{
@@ -688,107 +669,10 @@ export const ConnectProgressCard = ({
               >
                 {t('tono.progress.copyDetails')}
               </button>
-              {referenceCode == null && (
-                <button
-                  type="button"
-                  className="tono-button"
-                  data-testid="tono-upload-diagnostics"
-                  onClick={() => {
-                    setUploadError(null)
-                    setUploadPhase('confirming')
-                  }}
-                  // In flight: no second request, no queue of confirmations.
-                  disabled={uploadPhase === 'uploading'}
-                  style={{
-                    flex: 1,
-                    padding: '9px 14px',
-                    fontSize: 12,
-                    color: text.primary,
-                    background: secondaryBackground,
-                    border: secondaryBorder,
-                    opacity: uploadPhase === 'uploading' ? 0.6 : 1,
-                  }}
-                >
-                  {uploadPhase === 'uploading'
-                    ? t('tono.progress.upload.uploading')
-                    : t('tono.progress.upload.action')}
-                </button>
-              )}
+              <SupportReportAction style={{ flex: 1 }} />
             </>
           )}
         </div>
-      )}
-
-      {/* The receipt replaces the button: after a successful upload the user
-          is given a code to quote, not another chance to press send. */}
-      {referenceCode != null && (
-        <div
-          data-testid="tono-upload-reference"
-          style={{
-            marginTop: 12,
-            padding: '10px 12px',
-            borderRadius: 10,
-            background: hex(TONO_COLORS.latencyGood, 0.12),
-          }}
-        >
-          <div style={{ fontSize: 11, color: text.secondary, marginBottom: 6 }}>
-            {t('tono.progress.upload.successHint')}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <code
-              style={{
-                flex: 1,
-                fontSize: 15,
-                fontWeight: 700,
-                letterSpacing: 1,
-                fontFamily: TONO_MONO_STACK,
-                color: text.primary,
-                userSelect: 'text',
-                wordBreak: 'break-all',
-              }}
-            >
-              {referenceCode}
-            </code>
-            <button
-              type="button"
-              className="tono-button"
-              onClick={handleCopyCode}
-              style={{
-                padding: '6px 12px',
-                fontSize: 12,
-                flexShrink: 0,
-                color: text.primary,
-                background: secondaryBackground,
-                border: secondaryBorder,
-              }}
-            >
-              {codeCopied
-                ? t('tono.progress.upload.codeCopied')
-                : t('tono.progress.upload.copyCode')}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* What will be sent, before it is sent. */}
-      {(uploadPhase === 'confirming' || uploadPhase === 'uploading') && (
-        <TonoConfirmDialog
-          dark={dark}
-          title={t('tono.progress.upload.confirmTitle')}
-          message={t('tono.progress.upload.confirmMessage')}
-          error={uploadError}
-          confirmLabel={
-            uploadPhase === 'uploading'
-              ? t('tono.progress.upload.uploading')
-              : t('tono.progress.upload.confirmSend')
-          }
-          cancelLabel={t('shared.actions.cancel')}
-          onConfirm={handleUpload}
-          onCancel={() => {
-            if (uploadPhase === 'uploading') return
-            setUploadPhase('idle')
-          }}
-        />
       )}
 
       {restoreDialog}

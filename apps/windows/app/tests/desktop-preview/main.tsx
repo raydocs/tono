@@ -1,12 +1,18 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
 import { createHashRouter, RouterProvider } from 'react-router'
 import en from '@/locales/en/tono.json'
 import zh from '@/locales/zh/tono.json'
+import enShared from '@/locales/en/shared.json'
+import zhShared from '@/locales/zh/shared.json'
 import IntroPage from '@/pages/tono/intro'
 import LoginPage from '@/pages/tono/login'
+import SupportPage from '@/pages/tono/support'
+import ServersPage from '@/pages/tono/servers'
+import ActivityPage from '@/pages/tono/activity'
+import { ConnectProgressCard } from '@/pages/tono/connect-progress'
 import { MeshBackground } from '@/tono-ui/MeshBackground'
 import { TonoSidebar } from '@/tono-ui/TonoSidebar'
 import { ConnectPill } from '@/tono-ui/ConnectPill'
@@ -18,12 +24,32 @@ import '@/tono-ui/tono.css'
 
 void i18n.use(initReactI18next).init({
   resources: {
-    en: { translation: { tono: en } },
-    zh: { translation: { tono: zh } },
+    en: { translation: { tono: en, shared: enShared } },
+    zh: { translation: { tono: zh, shared: zhShared } },
   },
   lng: new URLSearchParams(location.search).get('lang') || 'en',
   fallbackLng: 'en',
 })
+
+function PreviewShell({ children }: { children: ReactNode }) {
+  return (
+    <div className="tono-shell">
+      <TonoSidebar />
+      <main className="tono-main" style={{ overflow: 'auto' }}>
+        <p
+          style={{
+            margin: '16px 24px 0',
+            fontSize: 11,
+            color: 'var(--tono-text-secondary)',
+          }}
+        >
+          0.0.73 UI preview · synthetic data · no native/network actions
+        </p>
+        {children}
+      </main>
+    </div>
+  )
+}
 
 function Components() {
   const [connected, setConnected] = useState(false)
@@ -89,6 +115,45 @@ const router = createHashRouter([
       <main className="tono-main" style={{ height: '100%' }}>
         <IntroPage />
       </main>
+    ),
+  },
+  {
+    path: '/support',
+    element: (
+      <PreviewShell>
+        <SupportPage />
+      </PreviewShell>
+    ),
+  },
+  {
+    path: '/servers',
+    element: (
+      <PreviewShell>
+        <ServersPage />
+      </PreviewShell>
+    ),
+  },
+  {
+    path: '/activity',
+    element: (
+      <PreviewShell>
+        <ActivityPage />
+      </PreviewShell>
+    ),
+  },
+  {
+    path: '/recovery',
+    element: (
+      <PreviewShell>
+        <div className="tono-page">
+          <ConnectProgressCard
+            uiState="protectedOffline"
+            protectionConfirmed
+            selectedServer="Tokyo · Sakura"
+            onRefreshStatus={async () => {}}
+          />
+        </div>
+      </PreviewShell>
     ),
   },
   { path: '*', element: <Components /> },

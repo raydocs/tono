@@ -26,6 +26,25 @@ async fn begin_selection_change(state: &TonoState) -> tokio::sync::OwnedRwLockWr
     state.begin_policy_update().await
 }
 
+/// Called under the publication lock. Manual selection retains its existing semantics;
+/// a recommendation may only select within the idle account/catalog that produced it.
+fn validate_selection_expectation(
+    inner: &TonoInner,
+    scope: Option<&str>,
+    revision: Option<i64>,
+) -> Result<(), String> {
+    if scope.is_some() || revision.is_some() {
+        if scope.is_none()
+            || crate::tono::route_preferences::scope_of(inner).as_deref() != scope
+            || Some(inner.catalog_tracker.current_revision()) != revision
+            || inner.fsm.status().ui_state() != UiState::NotConnected
+        {
+            return Err("route recommendation changed; refresh before selecting".to_string());
+        }
+    }
+    Ok(())
+}
+
 /// Servers from the validated catalog, US/JP first, with the selection flag.
 #[tauri::command]
 pub async fn tono_servers(state: tauri::State<'_, Arc<TonoState>>) -> Result<Vec<TonoServer>, String> {
@@ -210,6 +229,8 @@ pub async fn tono_select_server(
     state: tauri::State<'_, Arc<TonoState>>,
     app: AppHandle,
     name: String,
+    expected_scope: Option<String>,
+    expected_catalog_revision: Option<i64>,
 ) -> Result<(), String> {
     let selection_guard = begin_selection_change(&state).await;
     let action = {
@@ -217,6 +238,9 @@ pub async fn tono_select_server(
         if inner.account_close.is_some() {
             return Err("account sign-out is still reconciling".to_string());
         }
+        // Recommendations are selection-only, not hot switches/reconnects. Validate all
+        // ownership under the same lock as publication, never after a frontend status read.
+        validate_selection_expectation(&inner, expected_scope.as_deref(), expected_catalog_revision)?;
         if !inner.nodes.iter().any(|node| node.name == name) {
             return Err("unknown server".to_string());
         }
@@ -343,6 +367,30 @@ pub async fn tono_test_current_server(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn recommendation_admission_requires_the_same_idle_account_and_catalog() {
+        let state = TonoState::for_test();
+        let mut inner = state.lock().await;
+        inner.account_state = AccountState::Ready;
+        inner.account = Some(serde_json::from_value(serde_json::json!({
+            "id": "fixture-owner", "email": "fixture@example.test",
+        })).unwrap());
+        inner.catalog_tracker = tono_core::CatalogTracker::from_installed(17, "fixture".into());
+        let scope = crate::tono::route_preferences::scope_of(&inner).unwrap();
+        assert!(validate_selection_expectation(&inner, Some(&scope), Some(17)).is_ok());
+        assert!(validate_selection_expectation(&inner, Some(&scope), None).is_err());
+        assert!(validate_selection_expectation(&inner, None, Some(17)).is_err());
+        assert!(validate_selection_expectation(&inner, Some(&scope), Some(16)).is_err());
+        inner.sign_in_generation += 1;
+        assert!(validate_selection_expectation(&inner, Some(&scope), Some(17)).is_err());
+        let scope = crate::tono::route_preferences::scope_of(&inner).unwrap();
+        assert!(validate_selection_expectation(&inner, Some(&scope), Some(17)).is_ok());
+        inner.fsm.begin_connect();
+        assert!(validate_selection_expectation(&inner, Some(&scope), Some(17)).is_err());
+        // Manual picks still use the ordinary selection/switch owner, not the hint guard.
+        assert!(validate_selection_expectation(&inner, None, None).is_ok());
+    }
 
     #[tokio::test]
     async fn selection_publication_waits_for_direct_commit() {

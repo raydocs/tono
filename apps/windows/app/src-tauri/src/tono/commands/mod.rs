@@ -36,6 +36,7 @@ pub mod catalog;
 pub mod connection_cmd;
 pub mod restore;
 pub mod diagnostics;
+pub mod support;
 pub mod quit;
 pub use account::{
     load_credentials, tono_account, tono_devices, tono_repair_service, tono_revoke_device,
@@ -49,6 +50,7 @@ pub use connection_cmd::{
     retry_now, tono_close_all_connections, tono_close_connection, tono_connect, tono_connect_progress,
     tono_disconnect, tono_retry_now, tono_status,
 };
+pub use crate::tono::route_preferences::{tono_route_preferences, tono_update_route_preferences};
 pub use restore::{restore_session, restore_session_guarded, tono_retry_restore};
 pub use diagnostics::{
     tono_audit_enabled, tono_audit_log_path, tono_diagnostics_report, tono_network_log_upload_enabled,
@@ -91,6 +93,8 @@ pub struct TonoStatus {
     pub kill_switch: Option<KillSwitchStatus>,
     pub catalog_revision: Option<i64>,
     pub catalog_requires_choice: bool,
+    /// Opaque process-local auth scope; never the persisted account ID.
+    pub route_preference_scope: Option<String>,
     /// Monotonic owner token for controller/WebSocket data. Never expose the controller secret.
     pub controller_generation: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -258,6 +262,7 @@ pub(crate) fn status_of(inner: &TonoInner) -> TonoStatus {
         kill_switch: inner.kill_switch.clone(),
         catalog_revision: (revision >= 0).then_some(revision),
         catalog_requires_choice: inner.catalog_requires_choice,
+        route_preference_scope: crate::tono::route_preferences::scope_of(inner),
         controller_generation: inner.controller_generation,
         exit_ip: inner.exit_ip.clone(),
         exit_org: inner.exit_org.clone(),
