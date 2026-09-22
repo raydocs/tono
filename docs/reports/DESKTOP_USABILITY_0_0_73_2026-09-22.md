@@ -98,6 +98,17 @@ R1 整改的 DPR 2 页面重新捕获并检查：仅选择器两条记录的 DOM
 新回归的 `ok`。这解决了先前 E0308，但不证明 Credential Manager 或已安装网络会话。
 整合 macOS 后，`git diff --exit-code 12a085a0 HEAD -- apps/windows .github/workflows/windows-ci.yml tooling`
 为 exit 0；Windows 树及该 CI/工具未改变，以上是有范围依据的沿用证据，不冒充在新 SHA 重跑。
+
+最终 Windows PR 自动 run
+[35717902392](https://github.com/raydocs/tono/actions/runs/35717902392) 随后四个 job 全部成功。
+[app-rust106713627790](https://github.com/raydocs/tono/actions/runs/35717902392/job/106713627790)
+实际 checkout 是临时 merge
+[2ce220ed](https://github.com/raydocs/tono/commit/2ce220ed1830c68a1e85984f757c16825b9044f7)，
+不是 source head。父线程 fetch 核对其 parents 为基线 046849f2 与源码 35e28dc3，且它与
+35e28dc3 的完整 Git tree 都是 `50caea57c1982c9d4e8edded5bba406d6450457b`，diff 为零。
+该 job 再次实际执行 `cargo test --locked`：499 passed、0 failed；原有 opt-in 1 ignored；
+Windows 原子更新日记目标 3 passed。不是只依赖分片或旧分支结果。
+
 35e28dc3 的普通 macOS push
 [35717897070](https://github.com/raydocs/tono/actions/runs/35717897070) 四个 job 全部成功。
 [build106714024510](https://github.com/raydocs/tono/actions/runs/35717897070/job/106714024510)
