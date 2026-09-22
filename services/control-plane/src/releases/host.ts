@@ -46,7 +46,7 @@ function secureReleaseResponse(r: Response, path: string): Response {
   h.set('x-content-type-options', 'nosniff');
   h.set('x-frame-options', 'DENY');
   h.set('strict-transport-security', 'max-age=31536000; includeSubDomains');
-  if (path === '/' || path.endsWith('.html')) {
+  if (path === '/' || path.endsWith('.html') || path === '/desktop/v1/latest/manifest.json') {
     h.set('cache-control', 'no-store');
   }
   return new Response(r.body, { status: r.status, statusText: r.statusText, headers: h });
@@ -77,10 +77,19 @@ export async function handleReleaseHost(req: Request, e: Env): Promise<Response 
   // signatures cover the bytes, not the address, so serving the same file
   // from here is verified exactly as before.
   const download = /^\/download\/([A-Za-z0-9][A-Za-z0-9._-]{0,127})$/.exec(path);
-  if (download) {
-    const key = download[1];
-    const sizeHint = (await e.RELEASES.head(key))?.size ?? 0;
-    const range = parseBytesRange(req.headers.get('range'), sizeHint);
+  // Detached v1 offers have one mutable discovery object and five exact
+  // immutable names. This must not become a general bucket-prefix browser.
+  // Serving source is not publication: only a separately authorized publisher
+  // may upload these objects or advance the discovery pointer.
+  const desktop = /^\/desktop\/v1\/[0-9a-f]{64}\/(manifest\.json|manifest\.macos-arm64\.sig|manifest\.windows-x86_64\.sig|package\.macos-arm64\.zip|package\.windows-x86_64\.exe)$/.exec(path);
+  const latestDesktopManifest = path === '/desktop/v1/latest/manifest.json';
+  const key = download?.[1] ?? (desktop || latestDesktopManifest ? path.slice(1) : null);
+  if (key) {
+    const filename = download?.[1] ?? desktop?.[1] ?? 'manifest.json';
+    const desktopMetadata = !download && filename.startsWith('manifest.');
+    // Metadata is always returned whole: signatures authenticate exact bytes.
+    const sizeHint = desktopMetadata ? 0 : (await e.RELEASES.head(key))?.size ?? 0;
+    const range = desktopMetadata ? null : parseBytesRange(req.headers.get('range'), sizeHint);
     const object = range
       ? await e.RELEASES.get(key, { range: { offset: range.offset, length: range.length } })
       : await e.RELEASES.get(key);
@@ -88,15 +97,23 @@ export async function handleReleaseHost(req: Request, e: Env): Promise<Response 
     const headers = new Headers();
     object.writeHttpMetadata(headers);
     headers.set('etag', object.httpEtag);
-    headers.set('accept-ranges', 'bytes');
+    headers.set('accept-ranges', desktopMetadata ? 'none' : 'bytes');
     headers.set('cache-control', 'public, max-age=31536000, immutable');
-    headers.set('content-disposition', `attachment; filename="${key}"`);
+    headers.set('content-disposition', `attachment; filename="${filename}"`);
+    if (desktopMetadata) {
+      headers.set('content-type', filename === 'manifest.json' ? 'application/json' : 'text/plain; charset=utf-8');
+    }
     if (range) {
       const end = range.offset + range.length - 1;
       headers.set('content-range', `bytes ${range.offset}-${end}/${sizeHint || '*'}`);
       headers.set('content-length', String(range.length));
       if (req.method === 'HEAD') {
         return secureReleaseResponse(new Response(null, { status: 206, headers }), path);
+      }
+      if (desktop) {
+        // R2's range restricts body itself. Keep v1 packages streaming even for
+        // large ranges rather than loading an installer into Worker memory.
+        return secureReleaseResponse(new Response(object.body, { status: 206, headers }), path);
       }
       const bytes = await object.arrayBuffer();
       const start = bytes.byteLength === sizeHint ? range.offset : 0;

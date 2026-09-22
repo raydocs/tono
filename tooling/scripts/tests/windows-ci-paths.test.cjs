@@ -153,10 +153,16 @@ test('paired candidates share one source and sequence without granting signing o
   }
   for (const [value, id] of [[mac, 'macos-arm64'], [win, 'windows-x86_64']]) {
     assert.equal(value.on.workflow_call.inputs.update_release_sequence.required, true)
+    assert.equal(value.jobs.build.env.TONO_UPDATE_RELEASE_SEQUENCE, "${{ inputs.update_release_sequence || '' }}")
     const step = value.jobs.build.steps.find(step => step.run?.includes(`--target ${id}`))
     assert.ok(step?.run.includes('desktop-update-v1.mjs measure'))
     assert.ok(step.run.includes('GITHUB_SHA'))
     assert.ok(step.run.includes(`update-target.${id}.json`))
+  }
+  for (const [name, job] of [['macos-release.yml', 'build'], ['windows-release.yml', 'build-draft']]) {
+    const release = read(name)
+    assert.equal(release.on.workflow_dispatch.inputs.update_release_sequence.type, 'string')
+    assert.equal(release.jobs[job].env.TONO_UPDATE_RELEASE_SEQUENCE, "${{ inputs.update_release_sequence || '' }}")
   }
   const assembly = pair.jobs.pair.steps.find(step => step.run?.includes('desktop-update-v1.mjs assemble'))
   assert.ok(assembly?.run.includes('--source "$GITHUB_SHA"'))

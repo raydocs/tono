@@ -280,3 +280,8 @@ jobs:
         # Proves ownership, permission, and symlink enforcement by constructing
         # the failing cases, which needs the ability to chown to another user.
         run: sudo apps/macos/Tono/Resources/tono-core-helper --staging-self-test
+
+      - name: Helper native update transaction self-test
+        # Production store, staging and executor boundaries with temporary I/O,
+        # not a signing bypass or installed-device PF/DNS acceptance.
+        run: sudo apps/macos/Tono/Resources/tono-core-helper --update-self-test

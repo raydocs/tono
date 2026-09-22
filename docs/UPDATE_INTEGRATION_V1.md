@@ -51,6 +51,12 @@ is compiled into the Helper; Windows trust is compiled from the existing
 `TONO_UPDATER_PUBLIC_KEY` release input, not read from mutable App configuration.
 No configured Windows key means no update admission.
 
+The release-host Worker allows only these exact R2 keys under `desktop/v1/`.
+The `latest/manifest.json` discovery response is `no-store`, including a missing
+object response; digest-addressed objects are immutable. Metadata ignores Range
+requests and returns exact whole bytes; packages retain GET/HEAD range support.
+This is a read-only route, not an upload API or a deployed/published offer.
+
 ## Privileged transaction, not an App journal
 
 1. Authenticate the live requesting App's native process incarnation and
@@ -128,10 +134,13 @@ boundary; do not sign that manifest as a shortcut around Developer ID/notarizati
 
 For a real pair, both native packages must first be built from the same approved
 source with the same sequence through the existing signing/qualification gates.
-Set `TONO_UPDATE_RELEASE_SEQUENCE` for macOS sealed build metadata and
-`TONO_RELEASE_SEQUENCE` for the Windows compiled floor. The paired candidate
-workflow supplies both names from its one input. Keep the source appVersion in
-sync; labels are not used to compare update order.
+Set `TONO_UPDATE_RELEASE_SEQUENCE` for both macOS sealed build metadata and the
+Windows compiled floor. The paired candidate workflow supplies it from its one
+input; the existing gated release workflows also accept the optional
+`update_release_sequence` input without changing their branch/signing gates.
+Omitting it produces no v1 installed floor, so automatic admission refuses rather
+than guessing from the app version. Keep the source appVersion in sync; labels
+are not used to compare update order.
 
 The offline publisher has no private-key, network, upload or feed operation:
 
@@ -160,7 +169,9 @@ node tooling/scripts/desktop-update-v1.mjs assemble \
 
 Signing is a separate authorized operation. The pinned Sparkle 2.9.6 `sign_update`
 tool can sign the **JSON file bytes** with the existing macOS update key; it is
-only a signing utility here, never the installer. Tauri's existing `signer sign`
+only a signing utility here, never the installer. The release workflow downloads
+the independently checksum-pinned binary archive, not the removed App SwiftPM
+dependency, and verifies the tool before using it. Tauri's existing `signer sign`
 can sign the same JSON using its private-key-file option. Keep private keys and
 passwords out of command arguments/logs; use the existing isolated signing jobs.
 Retain the raw Ed25519 Base64 result as `manifest.macos-arm64.sig` and Tauri's

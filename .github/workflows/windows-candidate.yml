@@ -40,7 +40,6 @@ jobs:
         shell: pwsh
     env:
       TONO_UPDATE_RELEASE_SEQUENCE: ${{ inputs.update_release_sequence || '' }}
-      TONO_RELEASE_SEQUENCE: ${{ inputs.update_release_sequence || '' }}
       TONO_UPDATER_PUBLIC_KEY: ${{ inputs.update_release_sequence != '' && vars.TONO_UPDATER_PUBLIC_KEY || '' }}
       VITE_TONO_UPDATES_CONFIGURED: ${{ inputs.update_release_sequence != '' && vars.TONO_UPDATER_PUBLIC_KEY != '' && 'true' || 'false' }}
     steps:

@@ -41,6 +41,10 @@ on:
         required: false
         default: false
         type: boolean
+      update_release_sequence:
+        description: Optional v1 installed floor; must match the paired Windows build (positive safe integer)
+        required: false
+        type: string
   push:
     tags:
       - tono-macos-*-build*
@@ -106,6 +110,7 @@ jobs:
       release_link: ${{ steps.release-version.outputs.release_link }}
     env:
       TONO_MACOS_NOTARY_PROFILE: tono-macos-release
+      TONO_UPDATE_RELEASE_SEQUENCE: ${{ inputs.update_release_sequence || '' }}
       # Not `${{ runner.temp }}`: the runner context is unavailable in a job-level
       # env, so referencing it there is an invalid expression and the workflow
       # fails at startup — before its own trigger is even evaluated. That is why
@@ -434,20 +439,22 @@ jobs:
 
       - name: Locate the pinned Sparkle 2.9.6 sign_update tool
         run: |
-          set -eu
-          resolved=apps/macos/Tono.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
-          if ! grep -qE '"version"[[:space:]]*:[[:space:]]*"2\.9\.6"' "$resolved"; then
-            echo "::error title=Sparkle pin drifted::$resolved no longer pins Sparkle 2.9.6"
-            echo "FATAL: the signing tool must come from the same Sparkle version the app embeds." >&2
-            exit 1
-          fi
-          xcodebuild \
-            -project apps/macos/Tono.xcodeproj \
-            -scheme Tono \
-            -resolvePackageDependencies \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData-sparkle" > /dev/null
+          set -euo pipefail
+          # Only the offline signer is used. Tono.app no longer embeds Sparkle;
+          # resolving the App's package graph therefore cannot obtain this tool.
+          # URL/checksum are Sparkle 2.9.6 Package.swift's binaryTarget pin.
+          archive="$RUNNER_TEMP/Sparkle-for-Swift-Package-Manager.zip"
+          curl --fail --location --proto '=https' --proto-redir '=https' \
+            'https://github.com/sparkle-project/Sparkle/releases/download/2.9.6/Sparkle-for-Swift-Package-Manager.zip' \
+            --output "$archive"
+          printf '%s  %s\n' \
+            '8d5fb41d960b43f4a68aa14126bf62b098544ec8d191cdcc73eb14e63a8e7606' "$archive" \
+            | shasum -a 256 -c -
+          mkdir "$RUNNER_TEMP/sparkle-signing-2.9.6"
+          ditto -x -k "$archive" "$RUNNER_TEMP/sparkle-signing-2.9.6"
           sign_update=$(python3 tooling/scripts/find-sparkle-sign-update.py \
-            "$RUNNER_TEMP/DerivedData-sparkle/SourcePackages/artifacts")
+            "$RUNNER_TEMP/sparkle-signing-2.9.6")
+          codesign --verify --strict "$sign_update"
           echo "SIGN_UPDATE=$sign_update" >> "$GITHUB_ENV"
 
       - name: Sign the enclosure with Sparkle and verify the signature round-trips

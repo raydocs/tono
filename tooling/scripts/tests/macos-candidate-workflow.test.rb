@@ -41,6 +41,29 @@ abort 'candidate must not enter the Sparkle-key environment' unless appcast['if'
 abort 'appcast environment must retain its existing gate' unless appcast['environment'] == 'macos-appcast'
 puts "macOS candidate workflow: #{cases.length} branch cases and update-authority guards passed"
 
+# The signing utility is independent of the removed App runtime dependency.
+# Execute the actual workflow shell with corrupt downloaded bytes; extraction
+# and executable discovery must never run before the checksum succeeds.
+signer_step = appcast.fetch('steps').find { |step| step['name'] == 'Locate the pinned Sparkle 2.9.6 sign_update tool' }.fetch('run')
+abort 'signer must not depend on the App package graph' if signer_step.include?('resolvePackageDependencies')
+abort 'signer archive pin must match Sparkle 2.9.6 Package.swift' unless signer_step.include?('8d5fb41d960b43f4a68aa14126bf62b098544ec8d191cdcc73eb14e63a8e7606')
+Dir.mktmpdir('tono-signer-pin-') do |directory|
+  stub = <<~SH
+    curl() {
+      while [ "$#" -gt 0 ]; do
+        if [ "$1" = --output ]; then shift; printf 'corrupt archive' > "$1"; return 0; fi
+        shift
+      done
+      return 1
+    }
+    ditto() { touch "$RUNNER_TEMP/extraction-was-reached"; }
+  SH
+  _, status = Open3.capture2e({ 'RUNNER_TEMP' => directory }, '/bin/bash', '-c', stub + signer_step, chdir: root)
+  abort 'signer download accepted changed bytes' if status.success?
+  abort 'unverified signer archive was extracted' if File.exist?(File.join(directory, 'extraction-was-reached'))
+end
+puts 'independent Sparkle signer: corrupted download refuses before extraction (no keys or network)'
+
 # Execute both remaining production candidate boundaries, not just the first ref gate.
 build_steps = workflow.fetch('jobs').fetch('build').fetch('steps')
 source_gate = build_steps.find { |step| step['name'] == 'Require the macOS release line' }.fetch('run')
