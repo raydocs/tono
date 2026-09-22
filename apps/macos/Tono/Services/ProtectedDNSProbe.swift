@@ -5,8 +5,8 @@ import Network
 /// In-process fake-IP checks for the protected DNS preflight.
 ///
 /// Local listener proof talks UDP to 127.0.0.1:53. System-resolver proof uses
-/// `getaddrinfo` so it sees the same path as an ordinary app after
-/// `networksetup`. Neither path launches `dig`.
+/// the cancellable macOS system resolver after `networksetup`, not an explicit
+/// listener query. Neither path launches `dig`.
 nonisolated enum ProtectedDNSProbe {
     static let name = "www.gstatic.com"
     static let fakeIPPrefix = "198.19."
@@ -23,7 +23,7 @@ nonisolated enum ProtectedDNSProbe {
         answers.first(where: isFakeIP)
     }
 
-    /// Listener returned a fake-IP, but getaddrinfo still produced a public
+    /// Listener returned a fake-IP, but the system resolver produced a public
     /// address. Encrypted DNS, iCloud Private Relay, or a stale resolver cache
     /// is ignoring 127.0.0.1:53.
     static func systemResolverBypassesProtectedListener(
@@ -95,23 +95,11 @@ nonisolated enum ProtectedDNSProbe {
         }
     }
 
-    static func querySystemResolver(timeout: TimeInterval) async -> [String] {
-        await withTaskGroup(of: [String].self) { group in
-            group.addTask {
-                await withCheckedContinuation { continuation in
-                    DispatchQueue.global(qos: .userInitiated).async {
-                        continuation.resume(returning: systemLookup(name))
-                    }
-                }
-            }
-            group.addTask {
-                try? await Task.sleep(for: .seconds(max(0.2, timeout)))
-                return []
-            }
-            let first = await group.next() ?? []
-            group.cancelAll()
-            return first
-        }
+    static func querySystemResolver(
+        timeout: TimeInterval,
+        resolver: ProtectedSystemResolver.Functions = .live
+    ) async -> [String] {
+        await ProtectedSystemResolver.query(name: name, timeout: timeout, functions: resolver)
     }
 
     static func encodeQuery(name: String, id: UInt16 = 0x544E) -> Data {
@@ -190,34 +178,6 @@ nonisolated enum ProtectedDNSProbe {
             if cursor > packet.count { return false }
         }
         return false
-    }
-
-    private static func systemLookup(_ name: String) -> [String] {
-        var hints = addrinfo()
-        hints.ai_family = AF_INET
-        hints.ai_socktype = SOCK_STREAM
-        var result: UnsafeMutablePointer<addrinfo>?
-        let status = getaddrinfo(name, nil, &hints, &result)
-        defer {
-            if let result {
-                freeaddrinfo(result)
-            }
-        }
-        guard status == 0 else { return [] }
-        var answers: [String] = []
-        var current = result
-        while let info = current {
-            if info.pointee.ai_family == AF_INET, let addr = info.pointee.ai_addr {
-                var ipv4 = addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
-                    $0.pointee
-                }
-                var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
-                _ = inet_ntop(AF_INET, &ipv4.sin_addr, &buffer, socklen_t(INET_ADDRSTRLEN))
-                answers.append(String(cString: buffer))
-            }
-            current = info.pointee.ai_next
-        }
-        return answers
     }
 }
 
