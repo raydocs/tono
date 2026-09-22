@@ -54,7 +54,8 @@ final class MacUsabilityRenderTests: XCTestCase {
         app.isProtectionBlocked = false
         app.toggleRouteFavorite(node.name, owner: owner)
         app.isConnected = true
-        app.recordVerifiedRouteSuccess(node.name, owner: owner, generation: app.connectionCoordinator.protectionOperationGeneration)
+        app.recordVerifiedRouteSuccess(node.name, owner: owner, generation: app.connectionCoordinator.protectionOperationGeneration,
+                                       catalogDigest: app.managedCatalogDigest)
         app.isConnected = false
         app.setPreferredRouteRegion("US", owner: owner)
         // AppKit cacheDisplay omits compositor-backed Liquid Glass content:

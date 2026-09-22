@@ -102,11 +102,13 @@ final class MacUsabilityTests: XCTestCase {
         app.proxyService.activeNodeName = quick.name
         let now = Date()
         let generation = app.connectionCoordinator.protectionOperationGeneration
-        app.recordVerifiedRouteSuccess(proven.name, owner: "account-a", generation: generation, now: now)
+        app.recordVerifiedRouteSuccess(proven.name, owner: "account-a", generation: generation,
+                                       catalogDigest: app.managedCatalogDigest, now: now)
         XCTAssertTrue(app.routePreferences.recentSuccesses(owner: "account-a", catalog: app.managedCatalogNodes).isEmpty)
         app.isConnected = true
         app.proxyService.activeNodeName = proven.name
-        app.recordVerifiedRouteSuccess(proven.name, owner: "account-a", generation: generation, now: now)
+        app.recordVerifiedRouteSuccess(proven.name, owner: "account-a", generation: generation,
+                                       catalogDigest: app.managedCatalogDigest, now: now)
         app.proxyService.activeNodeName = quick.name
         app.isConnected = false
         let proposal = try XCTUnwrap(app.routeRecommendation(owner: "account-a", now: now))
@@ -148,7 +150,8 @@ final class MacUsabilityTests: XCTestCase {
         app.proxyService.activeNodeName = outside.name
         app.isConnected = true
         let now = Date(timeIntervalSince1970: 1_790_000_000)
-        app.recordVerifiedRouteSuccess(outside.name, owner: "account-a", generation: app.connectionCoordinator.protectionOperationGeneration, now: now)
+        app.recordVerifiedRouteSuccess(outside.name, owner: "account-a", generation: app.connectionCoordinator.protectionOperationGeneration,
+                                       catalogDigest: app.managedCatalogDigest, now: now)
         app.isConnected = false
         let unrestricted = try XCTUnwrap(app.routeRecommendation(owner: "account-a", now: now))
         XCTAssertEqual(unrestricted.name, outside.name)
@@ -247,7 +250,7 @@ final class MacUsabilityTests: XCTestCase {
                     // Represent the caller's completed runtime commit only;
                     // no helper, PF or real connection is installed by this test.
                     app.isConnected = true
-                    app.recordVerifiedRouteSuccess(name, owner: owner, generation: generation)
+                    app.recordVerifiedRouteSuccess(name, owner: owner, generation: generation, catalogDigest: admittedDigest)
                 }
                 return verdict
             }
@@ -267,12 +270,13 @@ final class MacUsabilityTests: XCTestCase {
 
             // Positive control: a new C2 verification with no intervening
             // catalog change must still retain usable success evidence.
+            let nextAdmittedDigest = app.managedCatalogDigest
             let unchanged = await app.verifyProtectedConnection(
                 mixedPort: 12345, generation: generation, rounds: 1,
                 raceProbes: { _, _, _ in .won("synthetic-tun") }
             )
             XCTAssertEqual(unchanged, .connected(controllerAdvisory: nil))
-            app.recordVerifiedRouteSuccess(name, owner: owner, generation: generation)
+            app.recordVerifiedRouteSuccess(name, owner: owner, generation: generation, catalogDigest: nextAdmittedDigest)
             let successes = app.routePreferences.recentSuccesses(owner: "history-owner", catalog: app.managedCatalogNodes)
             XCTAssertEqual(successes.count, 1)
             XCTAssertEqual(successes.first?.catalogDigest, replacement.sha256)

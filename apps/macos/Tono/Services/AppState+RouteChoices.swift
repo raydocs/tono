@@ -62,13 +62,18 @@ extension AppState {
 
     /// Call only after data-plane verification and final protection convergence,
     /// never from selection/persistence or a failed switch's recovery intent.
-    func recordVerifiedRouteSuccess(_ name: String, owner: String?, generation: UInt64, now: Date = Date()) {
+    /// Catalog identity is admitted before the operation suspends. A same-name
+    /// replacement may publish without retiring this generation; it has not
+    /// earned the old operation's proof, so omit history rather than relabel it.
+    func recordVerifiedRouteSuccess(
+        _ name: String, owner: String?, generation: UInt64, catalogDigest: String?, now: Date = Date()
+    ) {
         guard let owner, owner == ManagedExitCatalogOwnership.currentAccount,
               generation == connectionCoordinator.protectionOperationGeneration,
               isConnected, !isDisconnecting, !isProxyDegraded,
               currentProxySelectionTarget() == name,
-              let digest = managedCatalogDigest else { return }
-        routePreferences.recordSuccess(name, owner: owner, catalog: managedCatalogNodes, digest: digest, now: now)
+              let catalogDigest, catalogDigest == managedCatalogDigest else { return }
+        routePreferences.recordSuccess(name, owner: owner, catalog: managedCatalogNodes, digest: catalogDigest, now: now)
     }
 
     /// A newer failed attempt retires that route's successful evidence; do not

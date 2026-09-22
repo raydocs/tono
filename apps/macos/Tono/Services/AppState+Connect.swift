@@ -119,6 +119,7 @@ extension AppState {
             perform: { [weak self, coreRuntime] attemptID, generation in
                 guard let self else { return }
                 let routeOwner = ManagedExitCatalogOwnership.currentAccount
+                let routeCatalogDigest = self.managedCatalogDigest
                 let port = self.config.mixedPort
                 let selectedExit = self.preferManagedCatalogExitForConnect()
                 let selectedExitName = selectedExit?.name ?? ConfigPipeline.homeNodeName
@@ -444,7 +445,8 @@ extension AppState {
                 // round trip and could interrupt a healthy first connection.
                 let committed = await self.onCoreStarted(api: api)
                 guard committed else { return }
-                self.recordVerifiedRouteSuccess(selectedExitName, owner: routeOwner, generation: generation)
+                self.recordVerifiedRouteSuccess(selectedExitName, owner: routeOwner, generation: generation,
+                                                catalogDigest: routeCatalogDigest)
                 // Pins are for the *next* fail-closed window, not this
                 // Connected commit. Resolving them here used to hold the UI
                 // on Connecting after the real TUN path was already proven.

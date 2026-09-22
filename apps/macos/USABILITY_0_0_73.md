@@ -26,15 +26,25 @@ environment markers are not mode evidence. One implementation thread, no childre
 
 Independent review identified a same-name catalog replacement during held
 verification: completion recaptured the new digest and incorrectly credited
-the old verification to that catalog. The regression-first commit intentionally
-retains this defect for hosted red evidence. Its one new test exercises real
+the old verification to that catalog. Both connect and switch now capture the
+catalog digest beside the account owner before suspension. History recording
+requires that admitted digest to be present and still current; it omits changed
+identity rather than relabelling old proof. Protection/lifecycle decisions are
+unchanged. The one new test exercises real
 catalog validation/publication, `verifyProtectedConnection` classification and
 history insertion. Only network origin I/O is a held continuation; the caller's
 already-verified runtime commit is represented locally, not a real helper/core
 installation. Same account/generation must not let C1 proof credit C2, while a
-new unchanged-C2 verification must still record success. Connect and switch need
-to pass their admitted digest explicitly; the final fix and red/green run IDs
-will be recorded before claiming this behavior is accepted.
+new unchanged-C2 verification must still record success.
+
+Red evidence: [09cff3d2](https://github.com/raydocs/tono/commit/09cff3d2abac0080d1958cc818b7a93657fb9009),
+ordinary push run [35716447221](https://github.com/raydocs/tono/actions/runs/35716447221),
+build job `106709410256`, completed 356 tests with one existing opt-in skip and
+exactly one failure: `testHeldVerificationCannotCreditASameNameReplacementCatalog`
+reported **C1 verification must not mark the same-name C2 route as proven**.
+The unchanged-C2 control passed. Native render test and all other tests passed;
+the runtime-bytes step was skipped because XCTest failed. Green evidence must
+be matched to the published fix SHA in the PR/thread, not inferred from this doc.
 
 ## Native render review
 
@@ -86,8 +96,13 @@ directly, allows one bounded AppKit layout/display turn, and rejects transparent
 output rather than relying on PNG byte size. `NSView.cacheDisplay` does not prove
 full-page Liquid Glass compositor fidelity; no screen-recording permission or
 extra signing/device privilege is requested to work around that limitation.
-Results for this correction must be matched to its published SHA in PR #278 /
-the thread. The report preview's mid-line bottom edge is its normal bounded
+The red run's artifact `10690501018` contains the corrected components. Direct
+image inspection confirmed a readable US picker/recent-success/review action,
+a retained unavailable-region picker with no recommendation action, and the
+paused-wake notice without clipping. This render result does not turn the
+deliberately failing catalog test into a pass. Final corrected-source artifacts
+must be matched to the published SHA in PR #278 / the thread.
+The report preview's mid-line bottom edge is its normal bounded
 180–260pt JSON ScrollView, with spacing before sibling status/actions; the
 product UI is not expanded to force all scrollable content into a screenshot.
 
