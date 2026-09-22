@@ -865,6 +865,22 @@ nonisolated struct HelperManager {
         let diagnostic: String?
     }
 
+    static func updatePackagePath(_ package: URL) throws -> String {
+        // Foundation resolvingSymlinksInPath strips /private on macOS and can
+        // hand root a /var or /tmp symlink. Keep the POSIX spelling on the wire.
+        // This is not a trust decision: root still walks every component with
+        // openat(O_NOFOLLOW), verifies ownership, copies and hashes its input.
+        let path = package.path
+        guard package.isFileURL, !path.utf8.contains(0), path.utf8.count < Int(PATH_MAX) else {
+            throw HelperIPCError.invalidResponse
+        }
+        var resolved = [CChar](repeating: 0, count: Int(PATH_MAX))
+        guard realpath(path, &resolved) != nil else {
+            throw NativeUpdateDownload.failure("Downloaded update package path is unavailable.")
+        }
+        return String(cString: resolved)
+    }
+
     static func updateRequest(_ operation: String, object: [String: Any]? = nil) throws -> UpdateStatus {
         let path = "/update/" + operation
         let result = try sendRequest(method: operation == "status" ? "GET" : "POST", path: path,
