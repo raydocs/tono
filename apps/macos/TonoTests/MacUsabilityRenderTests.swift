@@ -57,21 +57,24 @@ final class MacUsabilityRenderTests: XCTestCase {
         app.recordVerifiedRouteSuccess(node.name, owner: owner, generation: app.connectionCoordinator.protectionOperationGeneration)
         app.isConnected = false
         app.setPreferredRouteRegion("US", owner: owner)
-        try capture("nodes-favorite-recommendation", width: 740, height: 700) {
-            ProxiesView().environment(app).environment(account)
+        // AppKit cacheDisplay omits compositor-backed Liquid Glass content:
+        // the full Nodes page captured partially and Dashboard was alpha=0.
+        // Render the exact production components, not substitute page mocks.
+        try capture("nodes-route-choices-favorite-component", width: 600, height: 340) {
+            RouteChoicesView().environment(app).environment(account).padding(24)
         }
         app.setPreferredRouteRegion("JP", owner: owner)
         app.proxyRegions[0].nodes = [node]
-        try capture("nodes-region-unavailable", width: 740, height: 600) {
-            ProxiesView().environment(app).environment(account)
+        try capture("nodes-region-unavailable-component", width: 600, height: 300) {
+            RouteChoicesView().environment(app).environment(account).padding(24)
         }
         app.proxyRegions[0].nodes = [node, other]
         app.setPreferredRouteRegion(nil, owner: owner)
         app.isProtectionBlocked = true
         app.recoveryCause = .wake
         app.protectedReconnectPausedForUserAction = true
-        try capture("dashboard-wake-paused", width: 720, height: 560) {
-            DashboardView().environment(app).environment(account)
+        try capture("dashboard-wake-notice-component", width: 560, height: 220) {
+            RecoveryNotice(appState: app).padding(24)
         }
         try capture("menubar-wake-paused", width: 300, height: 480) {
             MenuBarView().environment(app).environment(account)
@@ -114,12 +117,34 @@ final class MacUsabilityRenderTests: XCTestCase {
         let rect = NSRect(x: 0, y: 0, width: width, height: height)
         let window = NSWindow(contentRect: rect, styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: .aqua)
         window.contentView = host
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+            window.close()
+        }
         host.frame = rect
+        window.orderFront(nil)
         host.layoutSubtreeIfNeeded()
-        host.displayIfNeeded()
+        // A bounded presentation turn lets AppKit-backed controls finish
+        // layout. It does not capture the screen or request recording access.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        host.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
         let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
         host.cacheDisplay(in: host.bounds, to: bitmap)
+        // The root intentionally has an opaque background. PNG byte count
+        // alone previously accepted a fully transparent Dashboard image.
+        // This catches missing compositor pixels, not semantic/layout errors;
+        // those still require actual image inspection.
+        var minimumAlpha: CGFloat = 1
+        for y in stride(from: 0, to: bitmap.pixelsHigh, by: 8) {
+            for x in stride(from: 0, to: bitmap.pixelsWide, by: 8) {
+                minimumAlpha = min(minimumAlpha, bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0)
+            }
+        }
+        XCTAssertEqual(minimumAlpha, 1, "\(name): incomplete offscreen capture, not native visual acceptance")
         let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
         XCTAssertGreaterThan(png.count, 5_000, "capture must contain rendered content, not an empty canvas")
         XCTAssertLessThan(png.count, 4 * 1_024 * 1_024)
@@ -131,6 +156,5 @@ final class MacUsabilityRenderTests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
-        window.close()
     }
 }

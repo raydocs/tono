@@ -1,3 +1,4 @@
+import CryptoKit
 import XCTest
 @testable import Tono
 
@@ -191,6 +192,101 @@ final class MacUsabilityTests: XCTestCase {
         XCTAssertNil(app.connectionCoordinator.connectTask)
     }
 
+    func testHeldVerificationCannotCreditASameNameReplacementCatalog() async throws {
+        let suite = "tono-route-catalog-test-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let storage = ConfigStorage.shared
+        let savedFiles = ["regions.json", "rules.json", "config.json"].map { name in
+            let url = storage.appSupportDirectory.appendingPathComponent(name)
+            return (url, try? Data(contentsOf: url))
+        }
+        let selection = AppProfile.defaults.object(forKey: SettingsKey.selectedProxyTargetName)
+        let migration = AppProfile.defaults.object(forKey: SettingsKey.cloudExitDefaultPolicyVersion)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            AppProfile.defaults.set(selection, forKey: SettingsKey.selectedProxyTargetName)
+            AppProfile.defaults.set(migration, forKey: SettingsKey.cloudExitDefaultPolicyVersion)
+            for (url, data) in savedFiles {
+                if let data { try? storage.writeSensitive(data, to: url) }
+                else { try? FileManager.default.removeItem(at: url) }
+            }
+        }
+        let app = AppState()
+        app.routePreferences = LocalRoutePreferences(defaults: defaults)
+        ManagedExitCatalogOwnership.adopt("history-owner")
+        let gate = HeldRouteVerification()
+        var held: Task<ConnectivityVerdict, Never>?
+        do {
+            func catalog(server: String) throws -> ManagedExitCatalogCache {
+                let yaml = "proxies:\n" + (try ConfigPipeline.ownedNodeYAML(Fixture.realityNode(server: server)))
+                let digest = Data(SHA256.hash(data: Data(yaml.utf8))).base64EncodedString()
+                    .replacingOccurrences(of: "=", with: "")
+                    .replacingOccurrences(of: "+", with: "-")
+                    .replacingOccurrences(of: "/", with: "_")
+                return .init(revision: 73, yaml: yaml, sha256: digest, updatedAt: nil, routing: nil, owner: "history-owner")
+            }
+            let first = try catalog(server: "203.0.114.7")
+            let replacement = try catalog(server: "203.0.114.8")
+            try await app.installManagedExitCatalog(first, persistCache: false, allowRuntimeTransition: false)
+            let name = try XCTUnwrap(app.selectedExitNode()?.name)
+            let owner = ManagedExitCatalogOwnership.currentAccount
+            let generation = app.connectionCoordinator.protectionOperationGeneration
+            let admittedDigest = try XCTUnwrap(app.managedCatalogDigest)
+            app.isConnecting = true
+            let entered = expectation(description: "C1 verification held at network I/O")
+            held = Task {
+                let verdict = await app.verifyProtectedConnection(
+                    mixedPort: 12345, generation: generation, rounds: 1,
+                    raceProbes: { _, _, _ in
+                        entered.fulfill()
+                        await gate.wait()
+                        return .won("synthetic-tun")
+                    }
+                )
+                if case .connected = verdict {
+                    // Represent the caller's completed runtime commit only;
+                    // no helper, PF or real connection is installed by this test.
+                    app.isConnected = true
+                    app.recordVerifiedRouteSuccess(name, owner: owner, generation: generation)
+                }
+                return verdict
+            }
+            await fulfillment(of: [entered], timeout: 2)
+            try await app.installManagedExitCatalog(replacement, persistCache: false, allowRuntimeTransition: true)
+            XCTAssertEqual(app.selectedExitNode()?.name, name)
+            XCTAssertEqual(app.managedCatalogDigest, replacement.sha256)
+            XCTAssertNotEqual(app.managedCatalogDigest, admittedDigest)
+            XCTAssertEqual(ManagedExitCatalogOwnership.currentAccount, owner)
+            XCTAssertEqual(app.connectionCoordinator.protectionOperationGeneration, generation)
+            XCTAssertTrue(app.managedCatalogReloadPending)
+            gate.open()
+            let verdict = await held?.value
+            XCTAssertEqual(verdict, .connected(controllerAdvisory: nil))
+            XCTAssertTrue(app.routePreferences.recentSuccesses(owner: "history-owner", catalog: app.managedCatalogNodes).isEmpty,
+                          "C1 verification must not mark the same-name C2 route as proven")
+
+            // Positive control: a new C2 verification with no intervening
+            // catalog change must still retain usable success evidence.
+            let unchanged = await app.verifyProtectedConnection(
+                mixedPort: 12345, generation: generation, rounds: 1,
+                raceProbes: { _, _, _ in .won("synthetic-tun") }
+            )
+            XCTAssertEqual(unchanged, .connected(controllerAdvisory: nil))
+            app.recordVerifiedRouteSuccess(name, owner: owner, generation: generation)
+            let successes = app.routePreferences.recentSuccesses(owner: "history-owner", catalog: app.managedCatalogNodes)
+            XCTAssertEqual(successes.count, 1)
+            XCTAssertEqual(successes.first?.catalogDigest, replacement.sha256)
+        } catch {
+            XCTFail("catalog/verification fixture failed: \(error)")
+        }
+        gate.open()
+        _ = await held?.value
+        app.isConnecting = false
+        app.isConnected = false
+        ManagedExitCatalogOwnership.purge()
+        await app.finishPendingPersistence()
+    }
+
     func testRecoveryFeedbackUsesExistingOwnerAndReleaseClearsIt() async {
         let app = AppState()
         app.recoveryCause = .wake
@@ -228,5 +324,22 @@ final class MacUsabilityTests: XCTestCase {
         let unknown = APIConnection(id: "unknown", metadata: flow.metadata, upload: 0, download: 0, start: flow.start, chains: [], rule: "DIRECT", rulePayload: nil)
         app.updateConnections(from: .init(downloadTotal: 0, uploadTotal: 0, connections: [unknown]))
         XCTAssertEqual(app.connections.first?.routingExplanation?.path, .unknown)
+    }
+}
+
+@MainActor
+private final class HeldRouteVerification {
+    private var isOpen = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func open() {
+        isOpen = true
+        continuation?.resume()
+        continuation = nil
     }
 }

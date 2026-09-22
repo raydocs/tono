@@ -1328,7 +1328,14 @@ final class AppState {
         controllerTask: Task<ProbeCheck, Never>? = nil,
         mixedPort: Int,
         generation: UInt64,
-        rounds: Int
+        rounds: Int,
+        // I/O seam only: tests hold the origin race, not classification,
+        // generation checks, catalog publication or history insertion.
+        raceProbes: @MainActor (Int, Int?, String?) async -> OriginRace = { timeout, proxyPort, preferred in
+            await ProtectedConnectivityVerifier.raceSystemTUNProbes(
+                timeoutSeconds: timeout, mixedProxyPort: proxyPort, preferredLabel: preferred
+            )
+        }
     ) async -> ConnectivityVerdict {
         var lastFailure: ProtectedFailure?
         for round in 1...max(1, rounds) {
@@ -1357,20 +1364,14 @@ final class AppState {
                 )
             }
             let includeMixed = round == max(1, rounds)
-            let race = await ProtectedConnectivityVerifier.raceSystemTUNProbes(
-                timeoutSeconds: 12,
-                preferredLabel: lastSuccessfulProbeOrigin
-            )
+            let race = await raceProbes(12, nil, lastSuccessfulProbeOrigin)
             if case .won(let label) = race {
                 lastSuccessfulProbeOrigin = label
             }
             let tun = race.tunCheck
             let mixed: ProbeCheck?
             if includeMixed, case .failed = tun {
-                switch await ProtectedConnectivityVerifier.raceSystemTUNProbes(
-                    timeoutSeconds: 8,
-                    mixedProxyPort: mixedPort
-                ) {
+                switch await raceProbes(8, mixedPort, nil) {
                 case .won:
                     mixed = .ok
                 case .lost(let probes):
