@@ -10,7 +10,8 @@
 - 刷新后的远端：main [d27a216881105d43bf689b81342560036ba0b702](https://github.com/raydocs/tono/commit/d27a216881105d43bf689b81342560036ba0b702)，release/windows [0171990d500853a507a7fbcc075947f36b022173](https://github.com/raydocs/tono/commit/0171990d500853a507a7fbcc075947f36b022173)，release/macos [bdc75a4e8b25767ef9a2dff954df37c54f0dfcd1](https://github.com/raydocs/tono/commit/bdc75a4e8b25767ef9a2dff954df37c54f0dfcd1)。#262 及依赖 PR 仍开放；代码的祖先关系不等于 GitHub PR 已合并。未纳入无关 Dependabot 更新。
 - macOS [#268](https://github.com/raydocs/tono/pull/268)、services [#271](https://github.com/raydocs/tono/pull/271)、macOS 报告 [#272](https://github.com/raydocs/tono/pull/272) 已通过实际提交集成到 **本组合分支**，不是 main。对应代码 `cff1da32`、`d663c4ac`，报告 `6061e251`、`711f29d4`；完整身份与日志见[macOS 分项记录](ENGINEERING_MACOS_2026-09-21.md)和[services 分项记录](ENGINEERING_SERVICES_2026-09-21.md)。
 - 当前行为验收源码 [c74106ca8c44d192c3aa0f908028d9e38761575d](https://github.com/raydocs/tono/commit/c74106ca8c44d192c3aa0f908028d9e38761575d)。PR merge checkout [b365e09a1b53b4feb733f3bdd122dbc0da9e1b4f](https://github.com/raydocs/tono/commit/b365e09a1b53b4feb733f3bdd122dbc0da9e1b4f) 与它的 Git tree 均为 `c48ae084af29a7c411b6729e8c40994dcb33d3f7`，本地 `git diff --exit-code` 为0。运行 head 与 checkout 是不同字段；下表明确区分，实际checkout还须以各job日志为准。
-- 本报告是后续文档，不把文档提交冒称成已经执行的原生源码。已确认除报告外代码/测试/依赖/配置未变；第 6 节的托管原生结果是文档提交沿用的同代码证据，不是该文档SHA的新执行。
+- 首次报告交付 [2806ca887d3c692d011ae710d0dd13a6b721961c](https://github.com/raydocs/tono/commit/2806ca887d3c692d011ae710d0dd13a6b721961c) 只增加本报告，除报告外代码/测试/依赖/配置与上述行为源码相同；第 6 节的托管原生结果是其沿用的同代码证据，不是该文档SHA的新执行。
+- 2026-09-22 CI续办 [a50b875ab2bf250ad91a7d60fae0b33ac08c9d29](https://github.com/raydocs/tono/commit/a50b875ab2bf250ad91a7d60fae0b33ac08c9d29) 已成功推送，仅修改 Services workflow 的 collector 路径触发与测试步骤；没有修改产品代码、测试、依赖或运行权限。新配置的实际托管执行另列于第 6 节，不再把全部配置称为与首次报告相同；本次报告更新不冒称新SHA的原生执行。
 
 ## 2. 第一方覆盖清单
 
@@ -33,7 +34,7 @@
 | `tono-core` config/node/catalog/policy/connection/update-journal | 相关调用点审查、锁定依赖测试 / G1–G3 | 三个 Windows workspace 不合并；既有解析、签名、持久化断言保留。没有全量 parser fuzz 或全状态空间穷举。 |
 | `tono-plugin-core`、`tono-authenticode`、logger；App crates client/service-client/logging/draft/signal/limiter/i18n/sysinfo | 边界盘点，非逐行审计 / G1、G3 | 通过消费者 native 编译与既有调用/测试检查，不把依赖测试等同逐包独立执行。旧 Verge 通用页面、编辑器和开发 sidecar 不属于本轮产品改造；不改特权路径兼容名称。 |
 | Linux/Ubuntu packaging、未来 CLI、mobile | 未交付能力，不认证 / 架构边界 | 仓库仅有 macOS、Windows 产品树；Linux 尚无生产 nftables，不能按桌面 UI 可启动推断保护可用；没有增加旁路 Core。移动端/CLI 不制造“验收通过”。 |
-| tooling、共享 helper scripts、CI、锁文件/第三方补丁 | 定向审查 / G1–G3、ops | 固定 hosted OS labels、锁定安装、三个 Rust workspace、Core pin/产物身份、测试隔离、release 权限边界；没有升级依赖。Services 缺 collector 路径/测试的 wiring 修复被 workflows 权限阻止，见第 7 节。设计资源、历史归档、无关脚本不做重写或全面审计。 |
+| tooling、共享 helper scripts、CI、锁文件/第三方补丁 | 定向审查 / G1–G3、ops | 固定 hosted OS labels、锁定安装、三个 Rust workspace、Core pin/产物身份、测试隔离、release 权限边界；没有升级依赖。Services collector 路径/测试曾被 workflows 权限阻止，2026-09-22已补齐并在push/PR实际通过，见第 6、7 节。设计资源、历史归档、无关脚本不做重写或全面审计。 |
 
 ## 3. 六类症状的区分路径
 
@@ -103,7 +104,7 @@ DIRECT/选择使用policy串行边界，再进入privileged lifecycle锁，再�
 
 最初组合 [5c3a1d2a8c58b052a016f8f73b0b730be7484070](https://github.com/raydocs/tono/commit/5c3a1d2a8c58b052a016f8f73b0b730be7484070) 的三个push workflow成功，但独立审查仍发现W10–W13，随后用R5重现并修复。这直接说明“CI绿”不是完整工程验收。该源码另一个Services PR run [35660494018](https://github.com/raydocs/tono/actions/runs/35660494018)/job106534310687失败：`dense fleet: long names truncate rather than reflow` 在 `states.spec.ts:26` 读 `.node-card` 数量0（应>40），86pass/1fail。未删此断言，也没有把它归为已证明的基础设施故障；该次run保持失败。
 
-### 当前组合执行（逐项核对实际 checkout 与命名结果）
+### 2026-09-21组合执行（逐项核对实际 checkout 与命名结果）
 
 | 环境 / 命令 | 精确来源 | 当前结果 / 限制 |
 |---|---|---|
@@ -117,11 +118,24 @@ DIRECT/选择使用policy串行边界，再进入privileged lifecycle锁，再�
 | Ubuntu24.04 Worker `npm run typecheck`; `npm test`; `../../tooling/scripts/test-policy-signing-contract.sh`，工作目录`services/control-plane` | PR [35666413158](https://github.com/raydocs/tono/actions/runs/35666413158)/106553075578，head c74106ca，日志checkout b365e09a | typecheck成功；43files/890tests、policy4/4通过；整个Services run八job成功。 |
 | 同Services run：contract、agents、local migration | contract106553075854、agents106553075870、migrations106553075970，逐job日志checkout b365e09a | `npm run check:contract && npm run check:budgets`、console build成功；定点Vitest routes3/fixtures2/generator11；Node tooling66；Ruby20runs/258assertions；三条agent Python命令82/15/24 OK。迁移仅local D1 replay，无remote操作。 |
 | 同Services run：`npx playwright test --shard=N/4 --ignore-snapshots`，工作目录`services/ops-console` | shard1–4分别106553075959、106553075918、106553075928、106553075947；逐job日志checkout b365e09a | 87+87+77+86=337passed；9项既有docs截图捕获skip。当前dense-fleet断言通过，不抹掉历史失败。既有`--ignore-snapshots`只提供功能验证，不是视觉验收；无手动重复触发。 |
-| Linux Orb `python3 ops-panel/tests/test_jobs.py -v` | 组合源码scope `ops-panel`，fingerprint `4c70356aa1f108c81c177414b26306b645081fe23c09fd4f4f5c7cec06d71cd7` | 25tests OK；后续Windows改动不改变该scope，acceptance_status确认current。CI仍未自动接此检查。 |
+| Linux Orb `python3 ops-panel/tests/test_jobs.py -v` | 组合源码scope `ops-panel`，fingerprint `4c70356aa1f108c81c177414b26306b645081fe23c09fd4f4f5c7cec06d71cd7` | 25tests OK；后续Windows改动不改变该scope，acceptance_status确认current。当时尚未接入CI，续办证据见下。 |
 
 上表Windows push、macOS PR和Services PR已全部完成成功；并行自动Windows PR [35666413213](https://github.com/raydocs/tono/actions/runs/35666413213)亦返回success，仅记录状态、不重复计入命名测试证据。没有手动重跑以制造绿灯。`acceptance_ci_evidence`保存Windows App和macOS helper回执；前者命名提取截断、后者未自动提取自测输出，PR来源也由工具标为checkout-unverified。主线程另读完整job日志核对上述checkout、结果与命名反例，不把提取缺失说成工具已证明通过。
 
-后续报告差异核对：`git diff --exit-code c74106ca8c44d192c3aa0f908028d9e38761575d -- . ':(exclude)docs/reports/ENGINEERING_ACCEPTANCE_2026-09-21.md'` exit0，工作树只有本报告新增。因只改文档，不为报告重复native构建；该检查不是行为测试，也不是任务书全部验收证明。
+首次报告差异核对：提交2806ca88前，`git diff --exit-code c74106ca8c44d192c3aa0f908028d9e38761575d -- . ':(exclude)docs/reports/ENGINEERING_ACCEPTANCE_2026-09-21.md'` exit0，工作树只有本报告新增。该历史检查不适用于后续新增workflow的整棵树；不把它记作新配置的验证。
+
+### 2026-09-22 CI续办（原权限阻塞解除）
+
+所有者通知已更新并要求继续后，实际push已接受 [a50b875ab2bf250ad91a7d60fae0b33ac08c9d29](https://github.com/raydocs/tono/commit/a50b875ab2bf250ad91a7d60fae0b33ac08c9d29) 的workflow修改；没有推断具体更换了哪种凭据或权限设置。相对2806ca88仅增加 `ops-panel/**` 的push/PR触发范围和 `Operator SSH collector jobs` 步骤，沿用 `ubuntu-24.04` 与原有权限。未手动派发或重跑workflow。
+
+| 执行 / 来源 | 决定性证据 |
+|---|---|
+| Linux Orb `python3 -m unittest discover -s ops-panel/tests -p 'test_*.py'` | 25tests OK，exit0；scope为workflow与`ops-panel`，fingerprint `a9970c2750915a9825eeb841aae55a1b60d58cd5d1549d8f7b61c2f1774393c5`。测试注入SSH/网络适配，不对节点执行操作。 |
+| Linux Orb一次性Node断言，使用App锁定的`js-yaml`解析实际workflow | push/PR都匹配collector源码与测试、不匹配无关docs；固定host、准确测试命令、步骤未设置`if`且未忽略失败、顶层`contents: read`均符合断言，exit0。完整命令保留在本线程回执；scope为workflow和App manifest/lock，fingerprint `dcfa088b54782cded04a3e18785ca8d7cf913339f28462d478aff3ce73ded4d5`。 |
+| Services push [35688650199/job106620754318](https://github.com/raydocs/tono/actions/runs/35688650199/job/106620754318)，`service-agents`，Ubuntu24.04.5 | 日志checkout明确为a50b875a；新增步骤实际运行上面的`unittest discover`命令，`Ran 25 tests in 0.160s`、`OK`，step/job成功。既有agent命令82/15/24亦OK。 |
+| Services PR [35688652742/job106620762457](https://github.com/raydocs/tono/actions/runs/35688652742/job/106620762457)，同job/host | run head为a50b875a，日志checkout为 [f7db13ecfc5474da3d2d0eb3558143b7981b6200](https://github.com/raydocs/tono/commit/f7db13ecfc5474da3d2d0eb3558143b7981b6200)，不是将run head冒充checkout。新增步骤同命令，`Ran 25 tests in 0.159s`、`OK`，step/job成功。既有agent命令82/15/24亦OK。 |
+
+读取两份实际job日志并fetch PR checkout后，a50b875a与f7db13ec的Git tree均为 `f0abef74cd76aeda9bdf7fb2b7eabbd9aa5cc673`。2026-09-22 04:58 UTC查询显示两条Services run各8个job全部success；除上述agents日志外，不把其他job状态冒称已重新核对命名测试。`acceptance_ci_evidence`保存了push job回执，实际25项摘要可读；本地两份定点回执仍对应当前scope。本次文档更新沿用该CI配置证据，不是对文档SHA再执行测试；此前原生行为证据仍以各自checkout为准。
 
 没有跑MacBook native、发布级全量审计、真实系统故障试验、全parser fuzz、一般ops-console unit suite、签名/安装/升级/客户线路；未执行不写通过。子Orb报告/模型判断是审查意见，不是可替代命令的验收回执。
 
@@ -131,32 +145,14 @@ DIRECT/选择使用policy串行边界，再进入privileged lifecycle锁，再�
 
 [最终有限复审](https://ampcode.com/threads/T-01a0c5fd-c2f5-7391-81f2-456a328cc1b1)在独立clean checkout核对已发布c74106ca，确认W14 **在源码中解决**，没有找到本次修复内的具体存活反例或直接正确性/保护回归；前次已解决问题未重开。核对四条消费者及timeout owner传递、admission变更前的identity await、锁顺序、adoption锁内audit enqueue和保留的cleanup plan，并独立读取R6真实red。此结论是源码/时序审查加既有red日志，审查者没有执行native或认证最终green；最终组合执行由主线程逐job确认。未再启动全库审计，未把有限复审冒称所有WFP/PF/系统API均合格。
 
-1. **CI权限阻塞**：collector自动触发/测试补丁仅在local分支 `fix/g1-engineering-workflow-coverage-20260921`、commit `1e84cf1f26e87ce8ece201aec644027a847c78f4`；GitHub App缺workflows写权限，push被拒绝。未绕过、未再次尝试同路径，发布源码不含此改动。[主线程](https://ampcode.com/threads/T-01a0c5d0-1c0d-77a0-b272-0a931282c5b5)保留可下载的 `services-ci-collector-coverage.patch`，SHA-256 `aab05dec3ec90bda0aa05fb86a81d31414c083114c727b33a0c245a0ef799913`；只含原workflow diff。具备workflows权限的维护者可在干净checkout下载补丁后使用下面的恢复命令；不要push main。
+1. **CI权限阻塞已解除（2026-09-22）**：此前GitHub App缺workflows写权限，原补丁push被拒；local分支 `fix/g1-engineering-workflow-coverage-20260921`、commit `1e84cf1f26e87ce8ece201aec644027a847c78f4`及[主线程](https://ampcode.com/threads/T-01a0c5d0-1c0d-77a0-b272-0a931282c5b5)的 `services-ci-collector-coverage.patch`（SHA-256 `aab05dec3ec90bda0aa05fb86a81d31414c083114c727b33a0c245a0ef799913`）保留为历史证据。所有者通知更新后，本轮一次正常push已被接受，原workflow改动以 [a50b875a](https://github.com/raydocs/tono/commit/a50b875ab2bf250ad91a7d60fae0b33ac08c9d29) 交付，push/PR的collector步骤均实际通过。无需再应用旧补丁或修改Actions运行时token权限；没有使用权限绕过。分项services报告中的BLOCKED/NOT SHIPPED描述的是此前状态，由本节续办记录关闭。
 2. **运行身份/恢复证据缺口**：实际App/Service/helper/Core版本、路径、PID、hash与应用配置digest需要从指定设备获取；还欠SC unreadable与自动DNS区分、IP Helper慢/失败/IPv6-only、WFP/PF/TUN实包、断网/睡眠/崩溃/真实vault。保留unknown不等于这些路径已认证。
 3. **G3外部协议/设备阻塞**：[Issue #26](https://github.com/raydocs/tono/issues/26) 的installer-bound认证handoff与安装/更新证据未闭环。不能靠跳journal相位、弱化权限或未签名构建充当客户更新资格；本轮未改变该策略。
 4. **ops既有外部阻塞**：[#4](https://github.com/raydocs/tono/issues/4) paired legacy/named accounting receipts缺失，切换拒绝保留；[#5](https://github.com/raydocs/tono/issues/5) 缺per-peer generation/retirement证据，不猜epoch。不部署或试验计费切换，不把这些任意升级为新客户发布门。
 5. **覆盖限制**：一般ops UI/历史digest freshness、未交付Linux/CLI、所有特权系统API、所有剩余第一方文件未逐行认证；清单已给范围和原因。没有宣称找出全部bug。
 
-```sh
-# 下载本线程补丁到 ~/Downloads/services-ci-collector-coverage.patch 后执行。
-git fetch origin fix/g1-engineering-acceptance-20260921
-git switch -c fix/g1-services-ci-collector-coverage origin/fix/g1-engineering-acceptance-20260921
-git apply --check "$HOME/Downloads/services-ci-collector-coverage.patch"
-git apply "$HOME/Downloads/services-ci-collector-coverage.patch"
-python3 -m unittest discover -s ops-panel/tests -p 'test_*.py'
-git diff --check
-git add .github/workflows/services-ci.yml
-git diff --cached
-git commit -m "ci(ops): cover collector paths and job tests"
-git push -u origin fix/g1-services-ci-collector-coverage
-gh pr create --repo raydocs/tono --base fix/g1-engineering-acceptance-20260921 \
-  --head fix/g1-services-ci-collector-coverage --draft \
-  --title "ci(ops 3.4): run collector regressions" \
-  --body "Wire the existing collector regressions into Services CI. No deployment or release authority changes."
-```
-
 ## 8. 分开回答验收问题
 
-**A. 代码与工程层面是否达到本轮要求？** 本轮有限清单内的已确认正确性缺陷已完成代码修复、失败先行回归、最终组合自动化与独立反证复审；没有剩余的已确认P1源码修复项。**完整工程交付仍受阻，不能判定整份任务书全部验收完成**：collector CI wiring因workflows权限未交付；运行身份采集与若干原生恢复边界的证据仍不完整。代码/测试/分项及组合记录以Draft交付；不把源码修复、托管green或模型意见提升成全系统保证。
+**A. 代码与工程层面是否达到本轮要求？** 本轮有限清单内的已确认正确性缺陷已完成代码修复、失败先行回归、最终组合自动化与独立反证复审；没有剩余的已确认P1源码修复项。collector CI wiring现已交付且托管执行通过，不再是权限阻塞。**仍不能判定整份任务书全部验收完成**：运行身份采集与若干原生恢复边界的证据仍不完整。代码/测试/CI/分项及组合记录以Draft交付；不把源码修复、托管green或模型意见提升成全系统保证。
 
-**B. 是否具备进入后续实机验收的条件？** 最终组合native和有限复审已收齐，**具备进入受控内部设备诊断的源码基础**，可在另行获准、可恢复的指定设备上按精确源码/二进制身份开展实包保护与恢复场景。**尚不具备正式已安装/受保护更新验收的完整候选条件**：普通App CI使用占位发布资源，未交付获准的签名安装候选；#26安装器身份合同和实际组件/config身份仍待闭环。最小外部动作是维护者交付第7节CI补丁，并另行确定候选/设备授权与身份采集；本轮不自动执行这些设备或发布操作，G1–G3与客户渠道保持原门禁。
+**B. 是否具备进入后续实机验收的条件？** 最终组合native和有限复审已收齐，**具备进入受控内部设备诊断的源码基础**，可在另行获准、可恢复的指定设备上按精确源码/二进制身份开展实包保护与恢复场景。**尚不具备正式已安装/受保护更新验收的完整候选条件**：普通App CI使用占位发布资源，未交付获准的签名安装候选；#26安装器身份合同和实际组件/config身份仍待闭环。剩余外部动作是另行确定候选/设备授权与身份采集，不再需要交付CI补丁；本轮不自动执行这些设备或发布操作，G1–G3与客户渠道保持原门禁。
