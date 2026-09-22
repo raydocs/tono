@@ -732,7 +732,8 @@ struct LoginErrorPreviewCard: View {
         LoginView(
             session: AccountSession(
                 sidecar: TonoSidecarService(),
-                descriptorConsumer: { _ in }
+                descriptorConsumer: { _ in },
+                killSwitchDisarmConsumer: {}
             )
         )
     }
@@ -746,7 +747,8 @@ struct LoginErrorPreviewCard: View {
         LoginView(
             session: AccountSession(
                 sidecar: TonoSidecarService(),
-                descriptorConsumer: { _ in }
+                descriptorConsumer: { _ in },
+                killSwitchDisarmConsumer: {}
             )
         )
     }

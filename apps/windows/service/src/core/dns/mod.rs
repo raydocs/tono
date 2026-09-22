@@ -151,7 +151,7 @@ pub(crate) const NO_NAME_SERVERS: &str = "";
 /// Connection name of Tono's WinTUN adapter. Mirrors `tono_core::config::TUN_DEVICE_NAME`
 /// (`apps/windows/crates/tono-core/src/config.rs`); this crate is self-contained and cannot
 /// import it, so the two spellings are kept in sync by hand.
-const TUN_ADAPTER_NAME: &str = "Tono";
+pub(crate) const TUN_ADAPTER_NAME: &str = "Tono";
 const SNAPSHOT_VERSION: u32 = 1;
 /// Sidecar next to `protected-dns.json`. Written *before* Encrypted DNS is
 /// mutated so a crash still has the user's `EnableAutoDoh` value to put back.
@@ -370,7 +370,7 @@ static SELF_WRITE_DEPTH: AtomicU32 = AtomicU32::new(0);
 static SELF_WRITE_OPENED_AT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Monotonic millis until which the tail of the last closed window runs.
 static SELF_WRITE_TAIL_UNTIL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-/// Raw notifications `netmon` attributed to a window and did not publish. Diagnostic only.
+/// Raw notifications deferred for topology reconciliation during a write window. Diagnostic only.
 #[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
 static SELF_WRITE_SUPPRESSED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -416,7 +416,7 @@ pub(crate) fn in_self_write_window() -> bool {
     )
 }
 
-/// Count a notification `netmon` attributed to a window and dropped. Returns the running total
+/// Count a notification `netmon` deferred during a window. Returns the running total
 /// so the caller can put it in one log line.
 #[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
 pub(crate) fn note_suppressed_self_write() -> u64 {
@@ -1614,6 +1614,8 @@ async fn engine_apply_snapshot(snapshot: &DnsSnapshot) -> Result<Vec<(String, bo
         // the PowerShell batch, which is precisely why rung 2 verifies on the reported machine
         // even though its live apply keeps failing.
         if ok && is_automatic_reset(snapshot) {
+            #[cfg(test)]
+            test_hooks::note_automatic_reset();
             test_hooks::set_live_dns_on_loopback(false);
         }
         Ok(snapshot
@@ -1752,6 +1754,30 @@ pub(crate) mod test_hooks {
     pub(crate) fn set_apply_batch_unavailable(unavailable: bool) {
         APPLY_BATCH_UNAVAILABLE.store(unavailable, Ordering::Relaxed);
     }
+
+    static ENCRYPTED_RESTORE_FAILS: AtomicBool = AtomicBool::new(false);
+
+    pub(crate) fn encrypted_restore_fails() -> bool {
+        ENCRYPTED_RESTORE_FAILS.load(Ordering::Relaxed)
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_encrypted_restore_fails(fails: bool) {
+        ENCRYPTED_RESTORE_FAILS.store(fails, Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    static AUTOMATIC_RESETS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    #[cfg(test)]
+    pub(crate) fn note_automatic_reset() {
+        AUTOMATIC_RESETS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_automatic_resets() -> usize {
+        AUTOMATIC_RESETS.swap(0, Ordering::Relaxed)
+    }
 }
 
 async fn engine_flush_cache() -> Result<()> {
@@ -1795,6 +1821,9 @@ async fn engine_restore_encrypted_dns() -> Result<()> {
     }
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
+        if test_hooks::encrypted_restore_fails() {
+            bail!("injected Tono NRPT removal failure");
+        }
         Ok(())
     }
 }
@@ -1922,6 +1951,9 @@ async fn recover_unreadable_snapshot(reason: &str) -> Result<()> {
              escape hatch. The unreadable file is kept for diagnosis."
         );
     }
+    // Adapter evidence alone does not prove the resolver is restored: NRPT can still
+    // route every namespace to the stopped TUN resolver. Keep the file on failure.
+    restore_resolver_policy().await?;
     quarantine_snapshot(
         "corrupt",
         &format!(
@@ -1931,9 +1963,6 @@ async fn recover_unreadable_snapshot(reason: &str) -> Result<()> {
         ),
     )
     .await?;
-    if let Err(error) = engine_restore_encrypted_dns().await {
-        tracing::warn!("dns: encrypted DNS restore after unreadable snapshot failed: {error:#}");
-    }
     Ok(())
 }
 
@@ -2108,9 +2137,23 @@ async fn enable_unlocked(trigger: EnableTrigger) -> Result<DnsProtectionStatus> 
     status_unlocked().await
 }
 
-/// Restore every adapter from the snapshot, prove it by registry read-back *and* by a live read
-/// that finds nothing left on the loopback core, then drop the snapshot. Failing any of that
-/// keeps the snapshot — and, via the disarm invariant, the block armed.
+#[derive(Debug)]
+struct ResolverPolicyRestoreFailed;
+
+impl std::fmt::Display for ResolverPolicyRestoreFailed {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("resolver policy restoration failed; adapter DHCP fallback cannot repair NRPT/DoH")
+    }
+}
+
+// Typed context preserves the cause and phase without matching diagnostic strings. A policy
+// failure must not reset already-restored static adapter DNS to DHCP during uninstall.
+async fn restore_resolver_policy() -> Result<()> {
+    engine_restore_encrypted_dns().await.context(ResolverPolicyRestoreFailed)
+}
+
+/// Restore adapters and resolver policies before dropping their recovery snapshot. A failed
+/// proof keeps the snapshot and, via the disarm invariant, the block armed.
 pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
     if !SUPPORTED {
         return status_unlocked().await;
@@ -2128,6 +2171,12 @@ pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
             // separate writes. Refuse to stop the core/disarm if the current TUN DNS endpoint
             // survived while its recovery record did not.
             record_outcome(ensure_snapshotless_dns_is_safe().await)?;
+            // Older builds could delete this snapshot before NRPT cleanup succeeded.
+            // Reconcile the independently owned rule and DoH captures on every retry.
+            record_outcome(restore_resolver_policy().await)?;
+            if let Err(error) = engine_flush_cache().await {
+                tracing::warn!("DNS cache flush after snapshotless restore failed: {error:#}");
+            }
             return status_unlocked().await;
         }
         Err(error) => return Err(error.into()),
@@ -2236,6 +2285,9 @@ pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
     }
     .await;
     let degraded = record_outcome(outcome)?;
+    // Required resolver cleanup belongs to the disarm proof, not best-effort housekeeping.
+    // A failed NRPT/DoH restore retains the adapter snapshot and its independent captures.
+    record_outcome(restore_resolver_policy().await)?;
     match tokio::fs::remove_file(snapshot_path()).await {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -2249,13 +2301,6 @@ pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
         *DNS_LAST_ERROR
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(note);
-    }
-    // The restore is proven (or degraded-accepted on registry evidence): put Encrypted DNS
-    // back, drop our NRPT rule, then flush. NRPT left pointing at a stopped core is as
-    // dead as adapter DNS left on 198.18.0.2; a failure here is logged and retried next
-    // disconnect rather than undeleting the adapter snapshot.
-    if let Err(error) = engine_restore_encrypted_dns().await {
-        tracing::error!("dns: encrypted DNS restore after adapter restore failed: {error:#}");
     }
     if let Err(error) = engine_flush_cache().await {
         tracing::warn!("DNS cache flush after restore failed: {error:#}");
@@ -2322,6 +2367,7 @@ pub(crate) async fn restore_for_uninstall() -> Result<UninstallDnsRestore> {
     // handles the unreadable-snapshot recovery, so nothing below has to repeat any of it.
     let exact_error = match restore_protected().await {
         Ok(_) => return Ok(UninstallDnsRestore::Exact),
+        Err(error) if error.downcast_ref::<ResolverPolicyRestoreFailed>().is_some() => return Err(error),
         Err(error) => error,
     };
     tracing::error!(
@@ -2407,6 +2453,9 @@ pub(crate) async fn restore_for_uninstall() -> Result<UninstallDnsRestore> {
         // because an uninstaller is the last place to turn a logic slip into a crash.
         UninstallRung::Exact => Ok(UninstallDnsRestore::Exact),
         UninstallRung::Automatic => {
+            // DHCP does not restore NRPT/DoH. Retain recovery evidence and report the cause
+            // instead of publishing success or quarantining the snapshot on policy failure.
+            record_outcome(restore_resolver_policy().await)?;
             let note = format!(
                 "{DNS_RESTORED_AUTOMATIC_PREFIX}: the saved DNS servers could not be proven \
                  restored ({exact_error:#}), so {} adapter(s) were set back to automatic (DHCP) \
@@ -2433,9 +2482,6 @@ pub(crate) async fn restore_for_uninstall() -> Result<UninstallDnsRestore> {
             .await
             {
                 tracing::warn!("dns: the superseded snapshot could not be set aside: {error:#}");
-            }
-            if let Err(error) = engine_restore_encrypted_dns().await {
-                tracing::warn!("dns: encrypted DNS restore after the DHCP fallback failed: {error:#}");
             }
             if let Err(error) = engine_flush_cache().await {
                 tracing::warn!("DNS cache flush after the DHCP fallback failed: {error:#}");

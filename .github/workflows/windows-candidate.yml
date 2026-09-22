@@ -56,7 +56,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           pnpm install --frozen-lockfile
-          python ../../../tooling/scripts/verify-desktop-version.py --expected 0.0.72
+          python ../../../tooling/scripts/verify-desktop-version.py --expected 0.0.73
       - name: Prepare the exact stable Mihomo and Windows resources
         shell: pwsh
         run: |
@@ -135,7 +135,7 @@ jobs:
           @{ version = $version; source = $env:GITHUB_SHA; candidateOnly = $true; releaseAccepted = $false; updaterSigned = $false; authenticodeSigned = $false; files = $hashes } | ConvertTo-Json -Depth 5 | Set-Content target/release/bundle/nsis/candidate-manifest.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: tono-windows-0.0.72-candidate-${{ github.sha }}
+          name: tono-windows-0.0.73-candidate-${{ github.sha }}
           path: |
             apps/windows/app/target/release/bundle/nsis/*-setup.exe
             apps/windows/app/target/release/bundle/nsis/candidate-manifest.json

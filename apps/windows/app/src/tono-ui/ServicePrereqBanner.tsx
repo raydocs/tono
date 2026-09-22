@@ -1,5 +1,5 @@
 import { useLockFn } from 'ahooks'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { useThemeMode } from '@/services/states'
@@ -10,6 +10,10 @@ import {
   type TonoServicePrerequisites,
 } from '@/services/tono'
 import { TONO_COLORS, tonoText } from '@/tono-ui/theme'
+
+// Share the native query across remounts as well as interval ticks. A stalled SCM
+// call cannot be cancelled by abandoning its IPC promise.
+let pendingPrerequisites: Promise<TonoServicePrerequisites> | null = null
 
 const hex = (color: string, alpha: number) =>
   `${color}${Math.round(alpha * 255)
@@ -30,21 +34,28 @@ export const ServicePrereqBanner = () => {
   const [state, setState] = useState<TonoServicePrerequisites | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [repairing, setRepairing] = useState(false)
+  const refreshingRef = useRef(false)
 
   const refresh = useCallback(async () => {
+    if (refreshingRef.current) return
+    refreshingRef.current = true
     try {
-      setState(await tonoServicePrerequisites())
+      pendingPrerequisites ??= tonoServicePrerequisites().finally(() => {
+        pendingPrerequisites = null
+      })
+      setState(await pendingPrerequisites)
     } catch {
       // A prerequisite check that cannot run must never itself become a banner; the connect
       // path still reports what it finds.
       setState(null)
+    } finally {
+      refreshingRef.current = false
     }
   }, [])
 
   useEffect(() => {
     void refresh()
-    // Cheap, read-only, and the state changes out from under us when the user repairs by hand
-    // or another program stops BFE mid-session.
+    // Read-only, but SCM can stall. refresh coalesces ticks until it answers.
     const timer = window.setInterval(() => void refresh(), 30_000)
     return () => window.clearInterval(timer)
   }, [refresh])
@@ -54,6 +65,8 @@ export const ServicePrereqBanner = () => {
     setError(null)
     try {
       await tonoRepairService()
+      // Do not mistake a query started before repair for its verification.
+      await pendingPrerequisites?.catch(() => {})
       await refresh()
     } catch (cause) {
       setError(formatTonoActionError(cause, t))

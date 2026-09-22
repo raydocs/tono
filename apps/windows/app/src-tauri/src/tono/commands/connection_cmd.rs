@@ -80,13 +80,6 @@ pub async fn tono_retry_now(state: tauri::State<'_, Arc<TonoState>>, app: AppHan
 /// Shared Protected Offline retry entry for IPC and native surfaces such as the tray. Keeping
 /// this beside the command prevents either caller from bypassing the reconnect predicate.
 pub async fn retry_now(state: Arc<TonoState>, app: AppHandle) -> Result<(), String> {
-    {
-        let mut inner = state.lock().await;
-        if connection::retry_now_is_noop(inner.fsm.status()) {
-            return Ok(());
-        }
-        inner.tasks.abort_reconnect();
-    }
     // Not `schedule_reconnect`: that consumes a rung of the backoff ladder, so
     // aborting the pending attempt and then asking for the *next* delay made this
     // button strictly delay recovery.
@@ -99,7 +92,10 @@ pub async fn retry_now(state: Arc<TonoState>, app: AppHandle) -> Result<(), Stri
 pub async fn tono_status(state: tauri::State<'_, Arc<TonoState>>) -> Result<TonoStatus, String> {
     note_frontend_ipc();
     if let Some(status) = STATUS_SNAPSHOT.load_full() {
-        return Ok((*status).clone());
+        let mut status = (*status).clone();
+        // The installer can change the journal without a connection transition.
+        status.update_incomplete = crate::tono::update_handoff::incomplete();
+        return Ok(status);
     }
     let inner = state.lock().await;
     Ok(status_of(&inner))

@@ -365,10 +365,8 @@ pub(super) fn spawn_optional_direct_after_connected(
             clear_direct_reload_in_flight(&state, generation).await;
             return;
         };
-        if state.lock().await.connect_generation != generation {
-            clear_direct_reload_in_flight(&state, generation).await;
-            return;
-        }
+        // Reload already mutated the runtime. Even a stale generation must pass through the
+        // detached commit/reconciliation owner, which retracts only the captured Service session.
         let wechat_paths = pending.wechat_process_path_regexes.clone();
         match commit_direct_policy_cancellation_safe(&state, generation, pending).await {
             Ok((status, heartbeat)) => {
@@ -1245,16 +1243,17 @@ pub(super) async fn commit_direct_policy_cancellation_safe(
     generation: u64,
     pending: PendingDirectCommit,
 ) -> Result<(KillSwitchStatus, DirectLeaseHeartbeat), StageFailure> {
-    let mutation_guard = state.begin_connect_mutation().await;
-    if !direct_context_is_current(state, generation, &pending.selected_node, &pending.policy).await {
-        drop(mutation_guard);
-        return Err(StageFailure::Stale);
-    }
     let task_state = Arc::clone(state);
     let task = tokio::spawn(async move {
-        let _mutation_guard = mutation_guard;
+        // Own the whole pending transaction, including its policy reader, before waiting for
+        // lifecycle admission. Cancellation of the waiter must not discard a completed reload.
+        let pending = pending;
+        let _mutation_guard = task_state.begin_connect_mutation().await;
         let reconcile_session = pending.session.clone();
         let result = async {
+            if !direct_context_is_current(&task_state, generation, &pending.selected_node, &pending.policy).await {
+                return Err(StageFailure::Stale);
+            }
             let empty_digest = tono_service_protocol::direct_endpoint_digest(&[]).map_err(StageFailure::error)?;
             let before = service::tono_service_status_snapshot()
                 .await
@@ -1376,6 +1375,8 @@ pub(super) async fn commit_direct_policy_cancellation_safe(
                 );
             }
         }
+        // A selected-exit writer may proceed only after both commit and failure retraction.
+        drop(pending);
         result
     });
     task.await

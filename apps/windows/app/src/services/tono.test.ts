@@ -425,4 +425,75 @@ describe('stable diagnostic copy', () => {
       formatTonoDiagnostics(report({ error: 'dns probe failed' })),
     ).toContain('Error code: (none)')
   })
+
+  it('copies bounded local evidence without presenting recent core observations as a root cause', () => {
+    const copied = formatTonoDiagnostics({
+      ...report({ reportedAtMs: 1712345678901, catalogRevision: 54 }),
+      localEvidence: {
+        status: 'collected',
+        connectionGeneration: 7,
+        controllerGeneration: 12,
+        failureAtMs: 1712345678000,
+        appBuild: 'abcdef0123456789abcdef0123456789abcdef0123',
+        expectedCoreVersion: 'expected-core',
+        reportedCoreVersion: 'running-core',
+        reportedExitProtocol: 'hysteria2',
+        selectedProtocol: 'vless-reality',
+        coreLog: {
+          status: 'available',
+          inspectedLines: 3,
+          truncated: true,
+          observations: [{ code: 'tls_handshake_eof', count: 2 }],
+        },
+      },
+    })
+    expect(copied).toContain('Reported at (UTC): 2024-04-05T19:34:38.901Z')
+    expect(copied).toContain('Catalog revision: 54')
+    expect(copied).toContain('App build: abcdef0123456789abcdef0123456789abcdef0123')
+    expect(copied).toContain('Bundled Core expectation: expected-core')
+    expect(copied).toContain('Controller-reported Core version: running-core')
+    expect(copied).toContain('Controller-selected exit protocol: hysteria2')
+    expect(copied).toContain('Selected catalog protocol: vless-reality')
+    expect(copied).toContain('Connection generation (process-local): 7')
+    expect(copied).toContain('Failure at (UTC): 2024-04-05T19:34:38.000Z')
+    expect(copied).toContain('tls_handshake_eof: 2')
+    expect(copied).toContain('not correlated to this attempt; not a root-cause diagnosis')
+    expect(copied).toContain('truncated=true')
+    expect(formatTonoDiagnostics(report({ catalogRevision: null }))).toContain('Catalog revision: (unknown)')
+    expect(formatTonoDiagnostics(report())).not.toContain('Recent Core log')
+  })
+
+  it('keeps a previous failed attempt distinct from the current retry and recent logs', () => {
+    const copied = formatTonoDiagnostics({
+      ...report({ selectedServer: 'Tokyo retry', catalogRevision: 55, error: null }),
+      localEvidence: {
+        status: 'collected', connectionGeneration: 8, controllerGeneration: 13,
+        failureAtMs: null,
+        coreLog: { status: 'unavailable', inspectedLines: 0, truncated: false, observations: [] },
+        lastFailedAttempt: {
+          id: 'attempt-A', startedAtMs: 1712345670000, failedAtMs: 1712345678000,
+          selectedServer: 'Buffalo original', transport: 'tcp', catalogRevision: 54,
+          failedStage: 'verifyingTraffic', errorCode: 'TONO_NODE_OR_CORE_UNREACHABLE',
+          connectionGeneration: 7, errorDetail: 'tls handshake eof <- dial <ip>:443',
+          steps: [{ key: 'verifyingTraffic', state: 'failed', elapsedMs: 2600 }],
+          probeOutcomes: [
+            { round: 1, path: 'tun', origin: 'Google', passed: false, category: 'dns', actualStatus: null, elapsedMs: 173 },
+            { round: 2, path: 'loopback', origin: 'Apple', passed: false, category: 'tls', actualStatus: null, elapsedMs: 891 },
+          ],
+        },
+      },
+    })
+    expect(copied).toContain('Server: Tokyo retry')
+    expect(copied).toContain('Retained failed attempt (memory only): attempt-A')
+    expect(copied).toContain('Attempt server: Buffalo original; transport=tcp; catalog=54')
+    expect(copied).toContain('Attempt started (UTC): 2024-04-05T19:34:30.000Z')
+    expect(copied).toContain('Attempt failure: verifyingTraffic; code=TONO_NODE_OR_CORE_UNREACHABLE')
+    expect(copied).toContain('Attempt generation (process-local): 7')
+    expect(copied).toContain('Attempt cause (scrubbed): tls handshake eof <- dial <ip>:443')
+    expect(copied).toContain('verifyingTraffic: failed (2.6s)')
+    expect(copied).toContain('round=1 path=tun origin=Google result=failed category=dns status=unknown elapsed=173ms')
+    expect(copied).toContain('round=2 path=loopback origin=Apple result=failed category=tls status=unknown elapsed=891ms')
+    expect(copied).toContain('App observations, not proof of exit transport handshake failure')
+    expect(copied).toContain('Recent Core log: not correlated to this attempt')
+  })
 })

@@ -95,7 +95,10 @@ nonisolated enum HelperProtocolVersion {
     ///   `/helper/upgrade` to eliminate administrator password prompts on future updates.
     /// - 4.2.0 → 4.3.0: Enforce strict peer bundle confinement and realpath traversal
     ///   refusal on `/helper/upgrade`.
-    static let current = "4.3.0"
+    /// - 4.3.0 → 4.4.0: Protected DNS recovery retains its snapshot and refuses
+    ///   release when any service's DNS cannot be read, instead of treating an
+    ///   unreadable service as clean. Existing IPC and authorization are unchanged.
+    static let current = "4.4.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

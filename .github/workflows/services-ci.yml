@@ -31,6 +31,7 @@ on:
   pull_request:
     paths:
       - services/**
+      - ops-panel/**
       - tooling/scripts/remote/**
       # The download-page check and its tests live here. Without these two the
       # generator could be changed without ever running the job that guards it.
@@ -54,6 +55,7 @@ on:
   push:
     paths:
       - services/**
+      - ops-panel/**
       - tooling/scripts/remote/**
       # The download-page check and its tests live here. Without these two the
       # generator could be changed without ever running the job that guards it.
@@ -149,6 +151,9 @@ jobs:
 
       - name: Home usage reporter
         run: python3 services/home-agent/test_report_example.py
+
+      - name: Operator SSH collector jobs
+        run: python3 -m unittest discover -s ops-panel/tests -p 'test_*.py'
 
   ops-contract:
     runs-on: ubuntu-24.04
@@ -361,4 +366,3 @@ jobs:
         # contract source through Vite aliases, so a control-plane-only change
         # still needs these specs.
         run: npx playwright test --shard=${{ matrix.shard }}/4 --ignore-snapshots
-

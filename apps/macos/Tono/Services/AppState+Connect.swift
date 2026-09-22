@@ -631,6 +631,7 @@ extension AppState {
             KillSwitchService.isArmed
                 || AppProfile.defaults.bool(forKey: SettingsKey.didStartCore)
                 || HelperManager.hasInstalledHelperArtifact
+        let networkProtection = self.networkProtection
 
         connectionCoordinator.executeDisconnect(
             releaseKillSwitch: releaseKillSwitch,
@@ -755,8 +756,7 @@ extension AppState {
                     // answers, but its "restored" does not mean this build's
                     // DNS contract. Repair either once, while PF remains
                     // fail-closed, before attempting any release operation.
-                    try await PrivilegedRuntimeCoordinator.shared
-                        .repairHelperForExplicitReleaseIfNeeded()
+                    try await networkProtection.repairForRelease()
                 } catch {
                     helperReadyForRelease = false
                     transitionError = String(
@@ -773,11 +773,11 @@ extension AppState {
                 self?.disconnectionStage = .stoppingTunnel
             }
             let stopped = helperReadyForRelease
-                ? (shouldStopCore ? await coreRuntime.stopAsync() : true)
+                ? (shouldStopCore ? await networkProtection.stopCore(coreRuntime) : true)
                 : false
             let coreStillRunning: Bool
             if helperReadyForRelease && shouldStopCore {
-                let status = await PrivilegedRuntimeCoordinator.shared.coreStatus()
+                let status = await networkProtection.coreStatus()
                 coreStillRunning = status.running || !status.verified
             } else {
                 coreStillRunning = false
@@ -797,8 +797,7 @@ extension AppState {
                 }
                 if helperReadyForRelease {
                     do {
-                        _ = try await PrivilegedRuntimeCoordinator.shared
-                            .restoreProtectedDNSIfConfigured()
+                        _ = try await networkProtection.restoreDNS()
                         protectedDNSRestored = true
                     } catch {
                         // A first-run user may cancel the administrator prompt
@@ -824,7 +823,7 @@ extension AppState {
                     "The protected core could not be stopped. Kill Switch remains active; retry disconnecting."
             }
             do {
-                try await PrivilegedRuntimeCoordinator.shared.disableSystemProxyIfNeeded()
+                try await networkProtection.disableSystemProxy()
             } catch {
                 transitionError = String(
                     localized: "System proxy could not be turned off. Disable the proxy manually in System Settings > Network."
@@ -839,10 +838,10 @@ extension AppState {
             if helperReadyForRelease {
                 do {
                     if releaseKillSwitch, coreStopped, protectedDNSRestored {
-                        try await PrivilegedRuntimeCoordinator.shared.disarmKillSwitch()
+                        try await networkProtection.disarm()
                         transitionLeavesProtectionBlocked = false
                     } else {
-                        try await PrivilegedRuntimeCoordinator.shared.restrictKillSwitchToBootstrap()
+                        try await networkProtection.restrictToBootstrap()
                         transitionLeavesProtectionBlocked = true
                     }
                 } catch {

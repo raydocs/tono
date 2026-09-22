@@ -16,7 +16,7 @@ import enShared from '@/locales/en/shared.json'
 import enTono from '@/locales/en/tono.json'
 import type { TonoServer } from '@/services/tono'
 
-const { serversMock, selectServerMock, connectMock, mutateTonoStatusMock, toastMock, uiStateMock } = vi.hoisted(
+const { serversMock, selectServerMock, connectMock, mutateTonoStatusMock, toastMock, uiStateMock, statusMock } = vi.hoisted(
   () => ({
     serversMock: vi.fn(),
     selectServerMock: vi.fn(),
@@ -24,6 +24,7 @@ const { serversMock, selectServerMock, connectMock, mutateTonoStatusMock, toastM
     mutateTonoStatusMock: vi.fn(),
     toastMock: vi.fn(),
     uiStateMock: vi.fn(),
+    statusMock: vi.fn(),
   }),
 )
 vi.mock('@/services/tono', async (original) => ({
@@ -31,6 +32,7 @@ vi.mock('@/services/tono', async (original) => ({
   tonoServers: serversMock,
   tonoSelectServer: selectServerMock,
   tonoConnect: connectMock,
+  tonoStatus: statusMock,
   tonoCatalogStatus: async () => ({
     revision: null,
     nodeCount: 0,
@@ -62,6 +64,7 @@ beforeEach(() => {
   connectMock.mockResolvedValue(undefined)
   mutateTonoStatusMock.mockResolvedValue(undefined)
   uiStateMock.mockReturnValue('notConnected')
+  statusMock.mockImplementation(async () => ({ uiState: uiStateMock() }))
 })
 afterEach(cleanup)
 
@@ -215,6 +218,24 @@ it('acknowledges a dispatched switch without claiming the new exit is connected'
   await waitFor(() => expect(toastMock).toHaveBeenCalledWith('Switch to Los Angeles requested'))
   expect(selectServerMock).toHaveBeenCalledWith('Los Angeles · Sunset')
   expect(connectMock).not.toHaveBeenCalled()
+})
+
+it('does not turn an accepted switch into a failed connect using a stale idle render', async () => {
+  let resume!: () => void
+  selectServerMock.mockReturnValue(new Promise<void>((done) => { resume = done }))
+  connectMock.mockRejectedValue(new Error('already connected'))
+  serversMock.mockResolvedValue([
+    { name: 'Tokyo · Sakura', server: 'a.test', port: 443, selected: true, available: true },
+    { name: 'Los Angeles · Sunset', server: 'b.test', port: 443, selected: false, available: true },
+  ])
+  renderPage() // The rendered snapshot is idle; a backend transition wins during selection.
+  fireEvent.click(await screen.findByRole('button', { name: /Los Angeles/ }))
+  statusMock.mockResolvedValue({ uiState: 'connected' })
+  await act(async () => resume())
+  await waitFor(() => expect(screen.queryByText('Connecting')).toBeNull())
+  expect(connectMock).not.toHaveBeenCalled()
+  expect(toastMock).toHaveBeenCalledWith('Switch to Los Angeles requested')
+  expect(screen.queryByRole('alert')).toBeNull()
 })
 
 it('lets the user pick the hy2 sibling and labels it as the backup channel', async () => {

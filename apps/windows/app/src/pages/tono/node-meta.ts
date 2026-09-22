@@ -55,7 +55,10 @@ export const backupChannelName = (
   if (!selected) return null
   const selectedKey = stripLeadingFlag(catalogBaseName(selected))
   const hy2Rows = serverNames.filter(isHy2CatalogName)
-  if (hy2Rows.length === 0) return null
+  // Reality-only catalogs still need a manual next hand, never an automatic switch.
+  if (hy2Rows.length === 0) return serverNames.find(
+    (name) => stripLeadingFlag(catalogBaseName(name)) !== selectedKey,
+  ) ?? null
 
   if (!isHy2CatalogName(selected)) {
     const sibling = hy2Rows.find(

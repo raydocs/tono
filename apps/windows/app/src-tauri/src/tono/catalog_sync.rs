@@ -147,9 +147,10 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
             Err(CatalogError::StaleRevision) => (false, false),
             Err(err) => return Err(err.to_string()),
         };
-        let vanished = installed
+        let vanished = (installed
             && inner.catalog_requires_choice
-            && (inner.fsm.status().is_connected || inner.fsm.status().is_connecting);
+            && (inner.fsm.status().is_connected || inner.fsm.status().is_connecting))
+            .then_some(inner.connect_generation);
         let snapshot = emit.then(|| commands::status_of(&inner));
         drop(inner);
         if let Some(snapshot) = snapshot {
@@ -158,8 +159,10 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
         vanished
     };
 
-    if selection_vanished && state.lock().await.sign_in_generation == auth_generation {
-        connection::selected_node_vanished(state.clone(), app.clone()).await;
+    if let Some(generation) = selection_vanished {
+        if state.lock().await.sign_in_generation == auth_generation {
+            connection::selected_node_vanished(state.clone(), app.clone(), generation).await;
+        }
     }
     Ok(())
 }
@@ -354,8 +357,13 @@ pub fn replacement_for_selection(
     selected: Option<&str>,
     nodes: &[ValidatedNode],
     default_proxy: Option<&str>,
+    recent_success: Option<&str>,
 ) -> Option<String> {
-    let preferred = default_usable_exit(nodes, default_proxy)?;
+    // Never implicitly switch to a backup transport based on historical success.
+    let preferred = recent_success.and_then(|name| node_named(nodes, name))
+        .filter(|node| !node.is_hysteria2() && !is_exit_blocked(&node.name))
+        .map(|node| node.name.clone())
+        .or_else(|| default_usable_exit(nodes, default_proxy))?;
     match selected {
         None => Some(preferred),
         Some(name) if is_exit_blocked(name) => Some(preferred),
@@ -401,17 +409,22 @@ pub fn tcp_probe_socket(node: &ValidatedNode) -> Option<std::net::SocketAddr> {
 /// If selection is missing or points at a blocked exit, move the user to a usable default
 /// and persist. Returns the name that was applied (if any).
 pub fn ensure_usable_selection(inner: &mut TonoInner) -> Option<String> {
+    let recent_success = crate::tono::state::load_successful_selection(
+        &inner.catalog_dir, inner.catalog_tracker.current_revision(),
+        crate::tono::commands::epoch_millis(),
+    );
     let default_proxy = inner
         .routing
         .as_ref()
         .and_then(|routing| routing.default_proxy.as_deref());
     let Some(replacement) =
-        replacement_for_selection(inner.selected_node.as_deref(), &inner.nodes, default_proxy)
+        replacement_for_selection(inner.selected_node.as_deref(), &inner.nodes, default_proxy, recent_success.as_deref())
     else {
         return None;
     };
-    inner.selected_node = Some(replacement.clone());
-    inner.catalog_requires_choice = false;
+    let replacement = tono_core::catalog::apply_default_selection(
+        inner.fsm.status(), &mut inner.selected_node, &mut inner.catalog_requires_choice, replacement,
+    )?;
     if let Err(error) = crate::tono::state::save_selection(&inner.catalog_dir, &replacement) {
         logging!(
             warn,
@@ -649,17 +662,26 @@ mod tests {
         // A leftover name that is still in this catalog stays put. Auto-hopping
         // after every CORE_EXIT made China testers' manual Salt Lake pick jump.
         assert_eq!(
-            replacement_for_selection(Some("US-VLESS-Reality"), &nodes, None),
+            replacement_for_selection(Some("US-VLESS-Reality"), &nodes, None, None),
             None
         );
         assert_eq!(
-            replacement_for_selection(Some("Salt Lake City · Summit"), &nodes, None),
+            replacement_for_selection(Some("Salt Lake City · Summit"), &nodes, None, None),
             None
         );
         assert_eq!(
-            replacement_for_selection(Some("imported leftover"), &nodes, None).as_deref(),
+            replacement_for_selection(Some("imported leftover"), &nodes, None, None).as_deref(),
             Some("Salt Lake City · Summit")
         );
+    }
+
+    #[test]
+    fn recent_success_only_replaces_missing_choices_and_never_selects_hy2() {
+        let nodes = vec![node("Salt Lake City · Summit"), node("Tokyo · Fuji"), hy2("Tokyo · Fuji · hy2")];
+        assert_eq!(replacement_for_selection(None, &nodes, None, Some("Tokyo · Fuji")).as_deref(), Some("Tokyo · Fuji"));
+        assert_eq!(replacement_for_selection(Some("Salt Lake City · Summit"), &nodes, None, Some("Tokyo · Fuji")), None);
+        assert_eq!(replacement_for_selection(None, &nodes, None, Some("Tokyo · Fuji · hy2")).as_deref(), Some("Salt Lake City · Summit"));
+        assert_eq!(replacement_for_selection(None, &nodes, None, Some("removed node")).as_deref(), Some("Salt Lake City · Summit"));
     }
 
     #[test]

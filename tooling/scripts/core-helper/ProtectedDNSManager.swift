@@ -116,12 +116,38 @@ final class ProtectedDNSManager {
         defer { lock.unlock() }
         let snapshot = try loadSnapshot()
         let services = try Self.allServices()
+        try Self.restoreServices(
+            snapshot: snapshot,
+            services: services,
+            read: Self.currentDNS,
+            write: Self.setDNS,
+            removeSnapshot: removeSnapshot
+        )
+        return response(
+            configured: false,
+            snapshotPresent: false,
+            service: snapshot?.service
+        )
+    }
+
+    /// The same recovery transaction runs against either System Configuration
+    /// or controlled I/O. Snapshot removal is part of the transaction, not a
+    /// decision a test or caller can make independently of service readback.
+    private static func restoreServices(
+        snapshot: Snapshot?,
+        services: Set<String>,
+        read: (String) throws -> [String],
+        write: ([String], String) throws -> Void,
+        removeSnapshot: () throws -> Void
+    ) throws {
         var failure: Error?
 
         func attempt(_ servers: [String], for service: String) {
             do {
-                try Self.setDNS(servers, for: service)
-                try verify(servers, for: service)
+                try write(servers, service)
+                guard try read(service) == servers else {
+                    throw HelperFailure.system("The protected DNS transition did not commit.")
+                }
             } catch {
                 failure = failure ?? error
             }
@@ -131,7 +157,17 @@ final class ProtectedDNSManager {
             attempt(snapshot.servers, for: snapshot.service)
         }
         for service in services {
-            let current = (try? Self.currentDNS(for: service)) ?? []
+            let current: [String]
+            do {
+                current = try read(service)
+            } catch {
+                // Unreadable is not DHCP/empty: the adapter can still point
+                // at our dead loopback listener. Recover the other services,
+                // but retain the snapshot and refuse release until a retry
+                // can prove every service safe.
+                failure = failure ?? error
+                continue
+            }
             // Only loopback is swept. A service the user pointed somewhere of
             // their own is not ours to rewrite.
             guard current == [Self.protectedDNSServer] else { continue }
@@ -141,11 +177,6 @@ final class ProtectedDNSManager {
             throw failure
         }
         try removeSnapshot()
-        return response(
-            configured: false,
-            snapshotPresent: false,
-            service: snapshot?.service
-        )
     }
 
     func status() -> [String: Any] {
@@ -554,6 +585,51 @@ final class ProtectedDNSManager {
               chmod(supportDirectory, 0o700) == 0 else {
             throw HelperFailure.system("Could not secure protected DNS storage.")
         }
+    }
+
+    /// Fault-injected lifecycle regression. No live DNS preferences or root
+    /// snapshot are changed; production restoreServices owns every decision.
+    static func runRestoreReadFailureSelfTest() -> Bool {
+        enum ReadFailure: Error { case injected }
+        let snapshot = Snapshot(service: "Wi-Fi", servers: ["9.9.9.9"])
+        var settings = [
+            "Wi-Fi": [protectedDNSServer],
+            "Disabled Ethernet": [protectedDNSServer],
+            "Bridge": [protectedDNSServer],
+            "Custom": ["8.8.4.4"],
+        ]
+        var unreadable = true
+        var snapshotRemoved = false
+        func restore() throws {
+            try restoreServices(
+                snapshot: snapshot,
+                services: Set(settings.keys),
+                read: { service in
+                    if service == "Disabled Ethernet", unreadable { throw ReadFailure.injected }
+                    return settings[service]!
+                },
+                write: { settings[$1] = $0 },
+                removeSnapshot: { snapshotRemoved = true }
+            )
+        }
+        var refused = false
+        do { try restore() } catch ReadFailure.injected { refused = true } catch {}
+        guard refused, !snapshotRemoved,
+              settings["Wi-Fi"] == ["9.9.9.9"],
+              settings["Bridge"] == [],
+              settings["Disabled Ethernet"] == [protectedDNSServer],
+              settings["Custom"] == ["8.8.4.4"] else {
+            print("DNS restore read-failure regression FAILED: refused=\(refused), snapshotRemoved=\(snapshotRemoved)")
+            return false
+        }
+        unreadable = false
+        do { try restore() } catch { return false }
+        guard snapshotRemoved, settings["Disabled Ethernet"] == [],
+              settings["Wi-Fi"] == ["9.9.9.9"], settings["Custom"] == ["8.8.4.4"] else {
+            return false
+        }
+        print("DNS restore read-failure regression passed: failure retains snapshot; retry restores all services")
+        return true
     }
 
     static func runSelfTests() -> Bool {

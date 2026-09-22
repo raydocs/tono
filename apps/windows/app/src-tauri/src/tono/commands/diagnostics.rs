@@ -154,19 +154,7 @@ async fn collect_diagnostics_report(
     let revision = inner.catalog_tracker.current_revision();
     // The live secret values, handed to the scrubber to be *subtracted* from
     // free text (never emitted). Structural rules cover what is not here.
-    let mut known_secrets: Vec<String> = Vec::new();
-    if let Some(secret) = &inner.controller_secret {
-        known_secrets.push(secret.clone());
-    }
-    for node in &inner.nodes {
-        known_secrets.push(node.uuid.clone());
-        known_secrets.push(node.reality_public_key.clone());
-        known_secrets.push(node.reality_short_id.clone());
-        known_secrets.push(node.server.to_string());
-    }
-    if let Ok(Some(token)) = inner.credentials.refresh_token() {
-        known_secrets.push(token);
-    }
+    let known_secrets = crate::tono::diagnostics::known_secrets(&inner);
     crate::tono::diagnostics::build_report(&crate::tono::diagnostics::DiagnosticsSources {
         app_version: &app_version,
         os_version: &os_version,
@@ -205,6 +193,109 @@ pub async fn tono_diagnostics_report(
     Ok(collect_diagnostics_report(state.inner(), &app).await)
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalDiagnosticsReport {
+    #[serde(flatten)]
+    report: crate::tono::diagnostics::DiagnosticsReport,
+    local_evidence: LocalDiagnosticsEvidence,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalDiagnosticsEvidence {
+    status: &'static str,
+    app_build: Option<&'static str>,
+    expected_core_version: Option<String>,
+    reported_core_version: Option<String>,
+    reported_exit_protocol: Option<&'static str>,
+    selected_protocol: Option<&'static str>,
+    connection_generation: u64,
+    controller_generation: u64,
+    failure_at_ms: Option<i64>,
+    current_attempt_id: Option<String>,
+    last_failed_attempt: Option<crate::tono::local_evidence::FailedAttempt>,
+    core_log: crate::tono::local_evidence::CoreLogEvidence,
+}
+
+/// Explicit Copy details only. Kept separate from the upload contract and normal
+/// page refresh: raw logs never leave Rust, and no extra cloud disclosure occurs.
+#[tauri::command]
+pub async fn tono_local_diagnostics_report(
+    state: tauri::State<'_, Arc<TonoState>>,
+    app: AppHandle,
+) -> Result<LocalDiagnosticsReport, String> {
+    let identity = |inner: &TonoInner| (
+        inner.connect_generation, inner.controller_generation,
+        inner.connect_error_at_ms, inner.catalog_tracker.current_revision(),
+        inner.selected_node.clone(), inner.retry_attempt,
+        inner.attempt_history.current.as_ref().map(|attempt| attempt.id.clone()),
+    );
+    let (before, controller) = {
+        let inner = state.lock().await;
+        (identity(&inner), inner.controller_port.zip(inner.controller_secret.clone()))
+    };
+    let report = collect_diagnostics_report(state.inner(), &app).await;
+    let core_log = crate::tono::local_evidence::collect_core_log().await;
+    // Authenticated owned-controller response, not a measurement of the executable hash.
+    // Do not use the UI plugin: its context is not installed until Connected.
+    let reported_core_version = tokio::time::timeout(DIAGNOSTICS_PROBE_TIMEOUT, async {
+        let (port, secret) = controller.as_ref()?;
+        let client = reqwest::Client::builder().no_proxy()
+            .redirect(reqwest::redirect::Policy::none()).build().ok()?;
+        let response = client.get(format!("http://127.0.0.1:{port}/version"))
+            .bearer_auth(secret).send().await.ok()?.error_for_status().ok()?;
+        response.json::<tono_plugin_core::models::MihomoVersion>().await.ok().map(|value| value.version)
+    }).await.ok().flatten()
+        .filter(|value| !value.is_empty() && value.len() <= 128
+            && value.bytes().all(|b| b.is_ascii_alphanumeric() || b".-_+".contains(&b)));
+    let reported_exit_protocol = tokio::time::timeout(DIAGNOSTICS_PROBE_TIMEOUT, async {
+        let (port, secret) = controller.as_ref()?;
+        let client = reqwest::Client::builder().no_proxy()
+            .redirect(reqwest::redirect::Policy::none()).build().ok()?;
+        let group = client.get(format!("http://127.0.0.1:{port}/proxies/{}", tono_core::EXIT_GROUP_NAME))
+            .bearer_auth(secret).send().await.ok()?.error_for_status().ok()?
+            .json::<serde_json::Value>().await.ok()?;
+        let name = group.get("now")?.as_str()?;
+        let mut url = reqwest::Url::parse(&format!("http://127.0.0.1:{port}/proxies/")).ok()?;
+        url.path_segments_mut().ok()?.pop_if_empty().push(name);
+        let proxy = client.get(url).bearer_auth(secret).send().await.ok()?.error_for_status().ok()?
+            .json::<serde_json::Value>().await.ok()?;
+        match proxy.get("type")?.as_str()? {
+            "VLESS" => Some("vless"),
+            "Hysteria2" => Some("hysteria2"),
+            _ => None,
+        }
+    }).await.ok().flatten();
+    let expected_core_version = serde_json::from_str::<serde_json::Value>(
+        include_str!("../../../core-identity.json"),
+    ).ok().and_then(|value| value.get("tonoCoreVersion")?.as_str().map(str::to_owned));
+    let inner = state.lock().await;
+    if identity(&inner) != before {
+        return Err("Connection changed while collecting diagnostics; copy details again.".to_string());
+    }
+    Ok(LocalDiagnosticsReport {
+        report,
+        local_evidence: LocalDiagnosticsEvidence {
+            status: "collected",
+            app_build: option_env!("GITHUB_SHA").filter(|value| value.len() == 40
+                && value.bytes().all(|b| b.is_ascii_hexdigit())),
+            expected_core_version,
+            reported_core_version,
+            reported_exit_protocol,
+            selected_protocol: inner.selected_node.as_ref().and_then(|name|
+                inner.nodes.iter().find(|node| &node.name == name)
+                    .map(|node| if node.is_hysteria2() { "hysteria2" } else { "vless-reality" })),
+            connection_generation: before.0,
+            controller_generation: before.1,
+            failure_at_ms: before.2,
+            current_attempt_id: before.6,
+            last_failed_attempt: inner.attempt_history.last_failure.clone(),
+            core_log,
+        },
+    })
+}
+
 /// Upload one diagnostics report and return its support reference code.
 ///
 /// **User-initiated only.** This is the sole upload path and it exists
@@ -220,12 +311,15 @@ pub async fn tono_upload_diagnostics(
     state: tauri::State<'_, Arc<TonoState>>,
     app: AppHandle,
 ) -> Result<TonoDiagnosticsReceipt, String> {
-    let client = {
+    let (client, identity) = {
         let inner = state.lock().await;
-        inner.client.clone()
+        if inner.account_close.is_some() {
+            return Err("account sign-out is still reconciling".to_string());
+        }
+        (inner.client.clone(), inner.client.diagnostics_log_identity().await)
     };
     let report = collect_diagnostics_report(state.inner(), &app).await;
-    match client.upload_diagnostics_report(&report).await {
+    match client.upload_diagnostics_report_for_identity(&report, identity).await {
         Ok(receipt) => {
             state.audit().log(AuditEvent::DiagnosticsUploaded {
                 reference: receipt.reference_code.clone(),

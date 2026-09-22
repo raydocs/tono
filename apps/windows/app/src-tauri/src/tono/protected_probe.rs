@@ -27,20 +27,10 @@ pub struct ProbeOrigin {
     pub expected_status: u16,
 }
 
-pub const PROBE_ORIGINS: [ProbeOrigin; 3] = [
+pub const PROBE_ORIGINS: [ProbeOrigin; 1] = [
     ProbeOrigin {
         label: "Google",
-        url: "https://www.gstatic.com/generate_204",
-        expected_status: 204,
-    },
-    ProbeOrigin {
-        label: "Cloudflare",
-        url: "https://cp.cloudflare.com/generate_204",
-        expected_status: 204,
-    },
-    ProbeOrigin {
-        label: "Apple",
-        url: "https://www.apple.com/library/test/success.html",
+        url: "https://www.google.com",
         expected_status: 200,
     },
 ];
@@ -414,6 +404,7 @@ pub async fn verify_protected_origins(
     connect_timeout: Duration,
     request_timeout: Duration,
     stagger: Duration,
+    recorder: Option<&crate::tono::local_evidence::ProbeRecorder>,
 ) -> Result<ProbeOriginResult, Vec<ProbeOriginResult>> {
     let origins = origin_order();
     let mut in_flight = futures::stream::FuturesUnordered::new();
@@ -422,7 +413,12 @@ pub async fn verify_protected_origins(
             if index > 0 && !stagger.is_zero() {
                 tokio::time::sleep(stagger * index as u32).await;
             }
-            probe_one(origin, connect_timeout, request_timeout).await
+            let result = probe_one(origin, connect_timeout, request_timeout).await;
+            if let Some(recorder) = recorder {
+                let observation = match &result { Ok(value) | Err(value) => value };
+                recorder.record(&observation.origin, result.is_ok(), observation.category.as_str(), observation.actual_status, observation.elapsed_ms as u64);
+            }
+            result
         });
     }
     let mut failures = Vec::new();
@@ -472,17 +468,17 @@ mod tests {
     }
 
     #[test]
-    fn preferred_origin_is_tried_first() {
+    fn previous_provider_preference_cannot_add_another_target() {
         remember_success("Apple");
-        assert_eq!(origin_order()[0].label, "Apple");
+        assert_eq!(origin_order(), PROBE_ORIGINS.to_vec());
         remember_success("Google");
     }
 
     #[test]
     fn https_origins_parse() {
         let (host, path) = parse_https_origin(PROBE_ORIGINS[0].url).unwrap();
-        assert_eq!(host, "www.gstatic.com");
-        assert_eq!(path, "/generate_204");
+        assert_eq!(host, "www.google.com");
+        assert_eq!(path, "/");
     }
 
     #[test]

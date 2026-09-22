@@ -15,7 +15,7 @@ import {
   subscribeTonoStatus,
   tonoConnect,
   tonoConnectProgress,
-  tonoDiagnosticsReport,
+  tonoLocalDiagnosticsReport,
   tonoRetryNow,
   tonoUploadDiagnostics,
   type TonoConnectStep,
@@ -222,14 +222,12 @@ export const ConnectProgressCard = ({
     }
   })
 
-  // Copy details renders the *same* structured report the upload sends
-  // (`tono_diagnostics_report` is the local, nothing-leaves-the-machine half
-  // of `tono_upload_diagnostics`), so the two can never disagree about what
-  // the payload contains — which is what makes the disclosure below honest.
+  // Explicit local collection adds whitelisted Core observations to the base
+  // report. The upload action keeps its original, narrower disclosure.
   const handleCopyDetails = useLockFn(async () => {
     let text: string
     try {
-      text = formatTonoDiagnostics(await tonoDiagnosticsReport())
+      text = formatTonoDiagnostics(await tonoLocalDiagnosticsReport())
     } catch (error) {
       console.warn('[ConnectProgress] diagnostics report failed:', error)
       showNotice.error('tono.progress.copyFailed')

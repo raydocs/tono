@@ -15,7 +15,7 @@ use crate::tono::{
     connection_plan::{guard_rejection_is_transient, reconnect_allowed, retry_now_is_noop},
     state::{AccountState, TonoInner, TonoState},
 };
-use super::{Attempt, BoxedTask, attempt, fail_connect, seed_autostart_after_connect};
+use super::{Attempt, BoxedTask, attempt_for_generation, fail_connect, seed_autostart_after_connect};
 
 /// Re-prove the complete current-owner runtime immediately before either scheduling or admitting
 /// the DNS-listener exception. No cached installer hint or old UI snapshot is authority here.
@@ -40,6 +40,13 @@ pub async fn schedule_reconnect(state: &Arc<TonoState>, app: &AppHandle) {
     schedule_reconnect_locked(&mut inner, state, app);
 }
 
+pub(super) async fn schedule_reconnect_for_generation(state: &Arc<TonoState>, app: &AppHandle, generation: u64) {
+    let mut inner = state.lock().await;
+    if inner.connect_generation == generation {
+        schedule_reconnect_locked(&mut inner, state, app);
+    }
+}
+
 /// Run one protected reconnect **now**, for an explicit user action.
 ///
 /// Deliberately not [`schedule_reconnect`]: that hands out the next rung of the
@@ -50,8 +57,20 @@ pub async fn schedule_reconnect(state: &Arc<TonoState>, app: &AppHandle) {
 /// safety predicate is unchanged: still only while idle in Protected Offline with
 /// a verified session and no pending catalog choice.
 pub async fn retry_reconnect_now(state: &Arc<TonoState>, app: &AppHandle) {
+    let task_state = state.clone();
+    let task_app = app.clone();
+    retry_reconnect_with(state, move |generation| {
+        AsyncHandler::spawn(move || Box::pin(reconnect_loop(task_state, task_app, Duration::ZERO, generation)) as BoxedTask)
+    }).await;
+}
+
+/// The scheduler owns admission and task registration; the adapter only constructs its task.
+async fn retry_reconnect_with(
+    state: &Arc<TonoState>,
+    spawn: impl FnOnce(u64) -> tauri::async_runtime::JoinHandle<()>,
+) {
     let mut inner = state.lock().await;
-    if !reconnect_allowed(
+    if inner.account_close.is_some() || !reconnect_allowed(
         inner.catalog_requires_choice,
         inner.fsm.status(),
         inner.fsm.kill_switch_armed(),
@@ -59,15 +78,16 @@ pub async fn retry_reconnect_now(state: &Arc<TonoState>, app: &AppHandle) {
     {
         return;
     }
-    let task_state = state.clone();
-    let task_app = app.clone();
     inner.catalog_failover_tried.clear();
     // A press is the evidence the ladder cannot have: someone is at the machine and may have
     // just fixed what was wrong with it. Give the automatic retries their full budget back, so
     // the bound that stops an unattended loop can never strand a repaired install.
     inner.fsm.reset_reconnect_backoff();
-    let handle =
-        AsyncHandler::spawn(move || Box::pin(reconnect_loop(task_state, task_app, Duration::ZERO)) as BoxedTask);
+    // Admission, cancellation and replacement are one critical section. Doing the abort in the
+    // command before reacquiring this lock allowed another retry to lose its still-live handle.
+    inner.tasks.abort_reconnect();
+    let generation = inner.connect_generation;
+    let handle = spawn(generation);
     inner.tasks.reconnect = Some(handle);
     // The deadline is now, so the UI stops showing a countdown it is no longer
     // waiting for.
@@ -101,7 +121,7 @@ pub(super) fn note_reconnect_budget_exhausted(state: &Arc<TonoState>) {
 /// Disconnect/sign-out must never observe an empty task slot and then be followed by a reconnect
 /// handle that escaped their abort.
 pub(super) fn schedule_reconnect_locked(inner: &mut TonoInner, state: &Arc<TonoState>, app: &AppHandle) {
-    if !reconnect_allowed(
+    if inner.account_close.is_some() || !reconnect_allowed(
         inner.catalog_requires_choice,
         inner.fsm.status(),
         inner.fsm.kill_switch_armed(),
@@ -126,7 +146,8 @@ pub(super) fn schedule_reconnect_locked(inner: &mut TonoInner, state: &Arc<TonoS
     let task_app = app.clone();
     // The task future is boxed into a trait object so this function's opaque
     // type never embeds the reconnect loop's (which re-enters `attempt`).
-    let handle = AsyncHandler::spawn(move || Box::pin(reconnect_loop(task_state, task_app, delay)) as BoxedTask);
+    let generation = inner.connect_generation;
+    let handle = AsyncHandler::spawn(move || Box::pin(reconnect_loop(task_state, task_app, delay, generation)) as BoxedTask);
     inner.tasks.reconnect = Some(handle);
     // F3: expose the scheduled deadline to the UI.
     inner.next_retry_at_ms = Some(commands::epoch_millis() + delay.as_millis() as i64);
@@ -193,17 +214,22 @@ pub async fn schedule_startup_resume_if_proven(state: &Arc<TonoState>, app: &App
 /// but every rung after the first belongs to [`reconnect_loop`], which only computed a delay and
 /// slept. The card therefore showed Protected Offline and a stale error through the whole
 /// 5/10/20/30 s wait with nothing saying a retry was queued.
-pub(super) async fn publish_next_retry(state: &Arc<TonoState>, delay: Option<Duration>) {
+pub(super) async fn publish_next_retry(state: &Arc<TonoState>, generation: u64, delay: Option<Duration>) {
     let mut inner = state.lock().await;
-    inner.next_retry_at_ms = delay.map(|delay| commands::epoch_millis() + delay.as_millis() as i64);
+    if inner.connect_generation == generation {
+        inner.next_retry_at_ms = delay.map(|delay| commands::epoch_millis() + delay.as_millis() as i64);
+    }
 }
 
-pub(super) async fn reconnect_loop(state: Arc<TonoState>, app: AppHandle, first_delay: Duration) {
+pub(super) async fn reconnect_loop(state: Arc<TonoState>, app: AppHandle, first_delay: Duration, mut generation: u64) {
     let mut delay = first_delay;
     loop {
         tokio::time::sleep(delay).await;
         let allowed = {
             let inner = state.lock().await;
+            if inner.connect_generation != generation {
+                return;
+            }
             reconnect_allowed(
                 inner.catalog_requires_choice,
                 inner.fsm.status(),
@@ -211,21 +237,20 @@ pub(super) async fn reconnect_loop(state: Arc<TonoState>, app: AppHandle, first_
             )
         };
         if !allowed {
-            publish_next_retry(&state, None).await;
+            publish_next_retry(&state, generation, None).await;
             return;
         }
-        match attempt(&state, &app).await {
+        match attempt_for_generation(&state, &app, Some(generation)).await {
             Attempt::Connected => {
                 seed_autostart_after_connect();
                 return;
             }
             Attempt::Stale => {
-                publish_next_retry(&state, None).await;
                 return;
             }
             Attempt::GuardRejected(reason) => {
                 if !guard_rejection_is_transient(&reason) {
-                    publish_next_retry(&state, None).await;
+                    publish_next_retry(&state, generation, None).await;
                     return;
                 }
                 // The attempt never started, so this is not a connect failure: no `fail_connect`,
@@ -234,10 +259,13 @@ pub(super) async fn reconnect_loop(state: Arc<TonoState>, app: AppHandle, first_
                 logging!(info, Type::Service, "Tono: 自动重连被暂态守卫拒绝，稍后重试: {reason}");
                 let (next, spent) = {
                     let mut inner = state.lock().await;
+                    if inner.connect_generation != generation {
+                        return;
+                    }
                     let next = inner.fsm.next_reconnect_delay();
                     (next, inner.fsm.reconnect_budget_exhausted())
                 };
-                publish_next_retry(&state, next).await;
+                publish_next_retry(&state, generation, next).await;
                 match next {
                     Some(next_delay) => delay = next_delay,
                     None => {
@@ -248,10 +276,16 @@ pub(super) async fn reconnect_loop(state: Arc<TonoState>, app: AppHandle, first_
                     }
                 }
             }
-            Attempt::Failed(err) => {
-                let err = fail_connect(&state, &app, err).await;
+            Attempt::Failed { generation: failed_generation, error, account_owner } => {
+                generation = failed_generation;
+                if !fail_connect(&state, &app, generation, error, account_owner).await {
+                    return;
+                }
                 let (next, spent) = {
                     let mut inner = state.lock().await;
+                    if inner.connect_generation != generation {
+                        return;
+                    }
                     let next = if inner.catalog_requires_choice {
                         None
                     } else {
@@ -259,7 +293,7 @@ pub(super) async fn reconnect_loop(state: Arc<TonoState>, app: AppHandle, first_
                     };
                     (next, inner.fsm.reconnect_budget_exhausted())
                 };
-                publish_next_retry(&state, next).await;
+                publish_next_retry(&state, generation, next).await;
                 match next {
                     Some(next_delay) => delay = next_delay,
                     None => {
@@ -271,5 +305,63 @@ pub(super) async fn reconnect_loop(state: Arc<TonoState>, app: AppHandle, first_
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::oneshot;
+
+    #[tokio::test]
+    async fn retry_replacement_cancels_the_displaced_loop_before_losing_its_handle() {
+        struct OnDrop(Option<oneshot::Sender<()>>);
+        impl Drop for OnDrop {
+            fn drop(&mut self) {
+                if let Some(sender) = self.0.take() {
+                    let _ = sender.send(());
+                }
+            }
+        }
+
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.account_state = AccountState::Ready;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            inner.fsm.tunnel_died();
+            // Both callers have already passed the old command's separate abort section.
+            inner.tasks.abort_reconnect();
+            inner.tasks.abort_reconnect();
+        }
+        let (entered, entry) = oneshot::channel();
+        let (dropped, drop_observed) = oneshot::channel();
+        retry_reconnect_with(&state, |_| tauri::async_runtime::spawn(async move {
+            let _lifetime = OnDrop(Some(dropped));
+            entered.send(()).unwrap();
+            std::future::pending::<()>().await;
+        })).await;
+        entry.await.unwrap();
+        let displaced = state.lock().await.tasks.reconnect.as_ref().unwrap().inner().abort_handle();
+        let (entered, entry) = oneshot::channel();
+        let (dropped, survivor_drop) = oneshot::channel();
+        retry_reconnect_with(&state, |_| tauri::async_runtime::spawn(async move {
+            let _lifetime = OnDrop(Some(dropped));
+            entered.send(()).unwrap();
+            std::future::pending::<()>().await;
+        })).await;
+        entry.await.unwrap();
+        let cancelled = tokio::time::timeout(Duration::from_secs(2), drop_observed).await;
+        // Clean up even on the deliberately failing baseline; no orphan survives the test.
+        displaced.abort();
+        state.lock().await.invalidate_connection(true);
+        tokio::time::timeout(Duration::from_secs(2), survivor_drop).await.unwrap().unwrap();
+        assert!(cancelled.is_ok(), "replacing the registry slot must cancel the displaced reconnect loop");
+        let inner = state.lock().await;
+        assert!(inner.tasks.reconnect.is_none());
+        assert!(inner.fsm.kill_switch_armed(), "task retirement must not release protection");
     }
 }

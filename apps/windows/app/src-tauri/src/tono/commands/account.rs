@@ -24,7 +24,7 @@ use super::diagnostics::auth_error;
 pub async fn load_credentials(state: &Arc<TonoState>) {
     let generation = {
         let inner = state.lock().await;
-        if inner.credentials_loaded {
+        if inner.credentials_loaded || inner.account_close.is_some() {
             return;
         }
         inner.sign_in_generation
@@ -40,7 +40,7 @@ pub async fn load_credentials(state: &Arc<TonoState>) {
     // Another hydration may have won while this vault read was in flight. More importantly,
     // sign-out or a newer login generation must not let a late startup read resurrect the old
     // refresh token in the memory-first credential store.
-    if inner.credentials_loaded {
+    if inner.credentials_loaded || inner.account_close.is_some() {
         return;
     }
     if inner.sign_in_generation != generation {
@@ -125,8 +125,45 @@ pub async fn tono_repair_service() -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn tono_service_prerequisites() -> crate::core::service::ServicePrerequisites {
-    crate::core::service::service_prerequisites()
+pub async fn tono_service_prerequisites() -> Result<crate::core::service::ServicePrerequisites, String> {
+    query_service_prerequisites(crate::core::service::service_prerequisites).await
+}
+
+async fn query_service_prerequisites(
+    provider: impl FnOnce() -> crate::core::service::ServicePrerequisites + Send + 'static,
+) -> Result<crate::core::service::ServicePrerequisites, String> {
+    // SCM calls are synchronous: async alone would still block the executor.
+    tokio::task::spawn_blocking(provider)
+        .await
+        .map_err(|error| format!("service prerequisite query failed: {error}"))
+}
+
+#[cfg(test)]
+mod prerequisite_tests {
+    #[tokio::test(flavor = "current_thread")]
+    async fn stalled_prerequisite_provider_does_not_block_control_work() {
+        let control_thread = std::thread::current().id();
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let query = tokio::spawn(super::query_service_prerequisites(move || {
+            started.send(std::thread::current().id()).unwrap();
+            // A bounded wait makes an accidental inline call fail instead of hanging CI.
+            wait.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+            crate::core::service::ServicePrerequisites {
+                service_running: false,
+                service_registered: true,
+                bfe_running: false,
+            }
+        }));
+        let provider_thread = ready.await.unwrap();
+        // This control work must run while the provider is still blocked.
+        release.send(()).unwrap();
+        assert_ne!(provider_thread, control_thread);
+        let report = query.await.unwrap().unwrap();
+        assert!(!report.service_running);
+        assert!(report.service_registered);
+        assert!(!report.bfe_running);
+    }
 }
 
 #[tauri::command]
@@ -138,16 +175,7 @@ pub async fn tono_sign_in_start(
     // The installation id hydrates from the vault off-thread at startup;
     // wait for it so sign-in registers the stable device id.
     load_credentials(state.inner()).await;
-    let (client, installation_id, generation) = {
-        let mut inner = state.lock().await;
-        inner.sign_in_generation = inner.sign_in_generation.wrapping_add(1);
-        state.audit().abandon_log_upload_owner();
-        (
-            inner.client.clone(),
-            inner.installation_id.clone(),
-            inner.sign_in_generation,
-        )
-    };
+    let (client, installation_id, generation) = begin_sign_in(state.inner()).await?;
     // Empty device name → the platform default ("Windows PC", §2).
     let challenge = client
         .start_email_sign_in(&email, "", &installation_id)
@@ -190,6 +218,9 @@ pub async fn tono_sign_in_verify(
     let _ = email; // the challenge, not the address, identifies the attempt
     let (client, challenge_id, generation) = {
         let inner = state.lock().await;
+        if inner.account_close.is_some() {
+            return Err("account sign-out is still reconciling".to_string());
+        }
         let challenge_id = inner
             .challenge_id
             .clone()
@@ -207,29 +238,9 @@ pub async fn tono_sign_in_verify(
             auth_error(&err)
         })?;
 
-    let info = account_info_of(&auth.user);
-    {
-        let mut inner = state.lock().await;
-        if inner.sign_in_generation != generation || inner.challenge_id.as_deref() != Some(challenge_id.as_str()) {
-            return Err("sign-in verification was superseded by a newer attempt".to_string());
-        }
-        // Keep the Tono state lock through adoption: a resend/sign-out cannot invalidate this
-        // generation between the last check and the token write.
-        client.adopt(&auth).await.map_err(|err| err.to_string())?;
-        inner.challenge_id = None;
-        inner.account = Some(auth.user.clone());
-        // Attribute the first catalog/connect failures too, not only records
-        // produced after the periodic uploader eventually starts.
-        state.audit().activate_log_upload_owner(&auth.user.id);
-        inner.catalog_last_synced_at_ms = None;
-        inner.catalog_sync_error = None;
-        inner.account_state = if info.suspended {
-            AccountState::Suspended
-        } else {
-            AccountState::Ready
-        };
-        emit_status(&app, &status_of(&inner));
-    }
+    let info = adopt_sign_in_response(state.inner(), &client, generation, &challenge_id, &auth,
+        |inner| emit_status(&app, &status_of(inner)),
+    ).await?;
     state.audit().log(AuditEvent::SignInOk {
         email: auth.user.email.clone(),
     });
@@ -259,78 +270,341 @@ pub async fn tono_sign_in_verify(
     Ok(info)
 }
 
+/// Account admission and adoption remain shared with the command path; only server/UI I/O
+/// lives outside these boundaries. In particular, a replacement sign-in does not retire Core.
+pub(crate) async fn begin_sign_in(
+    state: &Arc<TonoState>,
+) -> Result<(Arc<crate::tono::state::TonoApiClient>, String, u64), String> {
+    let mut inner = state.lock().await;
+    if inner.account_close.is_some() {
+        return Err("account sign-out is still reconciling".to_string());
+    }
+    inner.sign_in_generation = inner.sign_in_generation.wrapping_add(1);
+    state.audit().abandon_log_upload_owner();
+    Ok((inner.client.clone(), inner.installation_id.clone(), inner.sign_in_generation))
+}
+
+pub(crate) async fn adopt_sign_in_response(
+    state: &Arc<TonoState>, client: &Arc<crate::tono::state::TonoApiClient>,
+    generation: u64, challenge_id: &str, auth: &tono_core::auth::AuthResponse,
+    emit: impl FnOnce(&TonoInner),
+) -> Result<TonoAccountInfo, String> {
+    let info = account_info_of(&auth.user);
+    let mut inner = state.lock().await;
+    if inner.sign_in_generation != generation || inner.challenge_id.as_deref() != Some(challenge_id) {
+        return Err("sign-in verification was superseded by a newer attempt".to_string());
+    }
+    // Keep the Tono state lock through adoption: a resend/sign-out cannot invalidate this
+    // generation between the last check and the token write.
+    client.adopt(auth).await.map_err(|err| err.to_string())?;
+    inner.challenge_id = None;
+    inner.account = Some(auth.user.clone());
+    // Attribute the first catalog/connect failures too, not only records
+    // produced after the periodic uploader eventually starts.
+    state.audit().activate_log_upload_owner(&auth.user.id);
+    inner.catalog_last_synced_at_ms = None;
+    inner.catalog_sync_error = None;
+    inner.account_state = if info.suspended { AccountState::Suspended } else { AccountState::Ready };
+    emit(&inner);
+    Ok(info)
+}
+
 /// Sign out: bump the connect generation and abort every background task
 /// first (H1/H2b), then release with disconnect semantics — DNS restore
 /// must be proven and the release is owner-gated, never best-effort (M3,
 /// C1). A failed release keeps the system armed and aborts the sign-out.
 #[tauri::command]
 pub async fn tono_sign_out(state: tauri::State<'_, Arc<TonoState>>, app: AppHandle) -> Result<(), String> {
-    let (client, generation) = {
+    let release_app = app.clone();
+    let resume_app = app.clone();
+    close_account_with(state.inner().clone(), AccountCloseReason::User,
+        move |state| async move { connection::release_for_account(&state, &release_app).await },
+        |client| async move { client.logout().await.map_err(|error| error.to_string()) },
+        move |state, generation| async move {
+            catalog_sync::spawn_periodic_for_auth_generation(&state, &resume_app, generation).await;
+            crate::tono::telemetry::spawn_periodic_for_auth_generation(&state, &resume_app, generation).await;
+            crate::tono::log_upload::spawn_periodic_for_auth_generation(&state, &resume_app, generation).await;
+        },
+        move |inner| emit_status(&app, &status_of(inner)),
+    ).await
+}
+
+/// System boundaries only: admission, task retirement, and account/FSM commits remain here.
+#[derive(Clone, Copy)]
+pub(super) enum AccountCloseReason {
+    User,
+    /// Restore has already established this session is absent/dead. Even on failed release,
+    /// clear the dead account but keep protection visible. Never act on a newer generation.
+    Expired { generation: u64 },
+    /// No token was loaded. Failed stored-protection release remains a retryable restore error.
+    Missing { generation: u64 },
+}
+
+pub(super) async fn close_account_with<R, RF, L, LF, S, SF, E>(
+    state: Arc<TonoState>, reason: AccountCloseReason, release: R, logout: L, resume: S, emit: E,
+) -> Result<(), String>
+where
+    R: FnOnce(Arc<TonoState>) -> RF + Send + 'static,
+    RF: std::future::Future<Output = Result<(), String>> + Send + 'static,
+    L: FnOnce(Arc<crate::tono::state::TonoApiClient>) -> LF + Send + 'static,
+    LF: std::future::Future<Output = Result<(), String>> + Send + 'static,
+    S: FnOnce(Arc<TonoState>, u64) -> SF + Send + 'static,
+    SF: std::future::Future<Output = ()> + Send + 'static,
+    E: Fn(&TonoInner) + Send + Sync + 'static,
+{
+    use futures::FutureExt as _;
+    let expired = matches!(reason, AccountCloseReason::Expired { .. });
+    let (client, credentials, generation, protected, operation) = {
         let mut inner = state.lock().await;
+        if let AccountCloseReason::Expired { generation } | AccountCloseReason::Missing { generation } = reason {
+            if inner.sign_in_generation != generation {
+                return Ok(());
+            }
+        }
+        if let Some(operation) = inner.account_close.clone() {
+            drop(inner);
+            return wait_account_close(&operation).await;
+        }
         inner.invalidate_connection(true);
         inner.sign_in_generation = inner.sign_in_generation.wrapping_add(1);
         state.audit().abandon_log_upload_owner();
         inner.tasks.abort_catalog_sync();
         inner.cancel_server_tests();
-        (inner.client.clone(), inner.sign_in_generation)
+        let operation = Arc::new(crate::tono::state::LifecycleOperation::new(inner.sign_in_generation));
+        inner.account_close = Some(Arc::clone(&operation));
+        let protected = !matches!(reason, AccountCloseReason::User)
+            || connection::sign_out_needs_release(inner.fsm.status(), inner.fsm.kill_switch_armed());
+        (inner.client.clone(), inner.credentials.clone(), inner.sign_in_generation, protected, operation)
     };
-
-    // M-1: the predicate covers an in-flight connect too, matching the
-    // disconnect and quit paths.
-    let protected = {
-        let inner = state.lock().await;
-        connection::sign_out_needs_release(inner.fsm.status(), inner.fsm.kill_switch_armed())
-    };
-    if protected {
-        // Same sequence and same failure semantics as disconnect (M3): if
-        // the release cannot be proven, stay armed and do not sign out.
-        if let Err(err) = connection::release_explicit(&state, &app).await {
-            let mut inner = state.lock().await;
-            if inner.sign_in_generation != generation {
-                return Err("sign-out was superseded by a newer authentication action".to_string());
+    let completion = Arc::clone(&operation);
+    // Spawn before the next await: no admitted close can be abandoned with its UI command.
+    // The separate close slot outlives the shorter DNS/Core/WFP release operation.
+    tokio::spawn(async move {
+        let mut resume_account = false;
+        let mut finalized = false;
+        let result = std::panic::AssertUnwindSafe(async {
+            let release_result = if protected { release(Arc::clone(&state)).await } else { Ok(()) };
+            if release_result.is_err() && !expired {
+                resume_account = matches!(reason, AccountCloseReason::User);
+                return release_result;
             }
-            // `initial_release_failed`, not `connect_failed`: for an armed-but-unverified
-            // session the latter resolves to FullRelease and clears the armed latch even
-            // though the Service release just failed (mirrors
-            // `stay_armed_after_failed_release`).
-            inner.fsm.initial_release_failed();
-            emit_status(&app, &status_of(&inner));
-            drop(inner);
-            // L4: the user is still signed in — restart the catalog sync
-            // that `abort_catalog_sync` just stopped.
-            catalog_sync::spawn_periodic_for_auth_generation(&state, &app, generation).await;
-            crate::tono::telemetry::spawn_periodic_for_auth_generation(&state, &app, generation)
-                .await;
-            crate::tono::log_upload::spawn_periodic_for_auth_generation(&state, &app, generation)
-                .await;
-            return Err(err);
+            logout(client).await?;
+            credentials.flush().await.map_err(|_| "local credential deletion was not acknowledged; retry sign-out".to_string())?;
+            let mut inner = state.lock().await;
+            inner.fsm.sign_out_or_quit();
+            inner.account = None;
+            inner.account_state = AccountState::SignedOut;
+            inner.attempt_history = Default::default();
+            inner.challenge_id = None;
+            inner.controller_secret = None;
+            inner.controller_port = None;
+            if release_result.is_err() {
+                inner.fsm.mark_kill_switch_armed();
+            } else {
+                inner.kill_switch = None;
+            }
+            inner.network_events_counter = None;
+            inner.catalog_last_synced_at_ms = None;
+            inner.catalog_sync_error = None;
+            finalized = true;
+            state.audit().log(AuditEvent::SignOut);
+            release_result
+        }).catch_unwind().await.unwrap_or_else(|_| Err("account close task failed; retry sign-out".to_string()));
+        {
+            let mut inner = state.lock().await;
+            if result.is_err() {
+                // Release not proven: retain the account and the armed latch, never hide it.
+                inner.fsm.initial_release_failed();
+                if !resume_account && !finalized {
+                    inner.account_state = AccountState::Error("account close incomplete; retry restore or sign-out".to_string());
+                }
+            }
+            inner.account_close = None;
+            emit(&inner);
         }
-    }
-    // Best-effort server logout, then local token wipe (§2; logout itself
-    // is deliberately infallible).
-    if state.lock().await.sign_in_generation != generation {
-        return Err("sign-out was superseded by a newer authentication action".to_string());
-    }
-    client.logout().await;
+        if resume_account {
+            resume(Arc::clone(&state), generation).await;
+        }
+        completion.complete(result);
+    });
+    wait_account_close(&operation).await
+}
 
-    let mut inner = state.lock().await;
-    if inner.sign_in_generation != generation {
-        return Err("sign-out was superseded by a newer authentication action".to_string());
+async fn wait_account_close(operation: &crate::tono::state::LifecycleOperation) -> Result<(), String> {
+    tokio::time::timeout(Duration::from_secs(55), operation.wait()).await
+        .unwrap_or_else(|_| Err("account close is still reconciling release or local credentials; login remains blocked until it settles".to_string()))
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use tokio::sync::oneshot;
+
+    #[tokio::test]
+    async fn account_close_waits_for_durable_deletion_and_reports_a_failed_acknowledgement() {
+        use std::sync::{Mutex, atomic::{AtomicBool, Ordering}};
+        use tono_core::credentials::{CredentialError, CredentialStore, MemoryCredentialStore};
+        struct Vault {
+            durable: MemoryCredentialStore,
+            entered: tokio::sync::Notify,
+            first: AtomicBool,
+            gate: Mutex<std::sync::mpsc::Receiver<()>>,
+        }
+        impl CredentialStore for Vault {
+            fn get(&self, key: CredentialKey) -> Result<Option<String>, CredentialError> { self.durable.get(key) }
+            fn set(&self, key: CredentialKey, value: &str) -> Result<(), CredentialError> { self.durable.set(key, value) }
+            fn delete(&self, key: CredentialKey) -> Result<(), CredentialError> {
+                if self.first.swap(false, Ordering::SeqCst) {
+                    self.entered.notify_one();
+                    self.gate.lock().unwrap().recv_timeout(Duration::from_secs(5)).unwrap();
+                    return Err(CredentialError::Store("injected delete refusal".into()));
+                }
+                self.durable.delete(key)
+            }
+        }
+        let (release, gate) = std::sync::mpsc::channel();
+        let vault = Arc::new(Vault {
+            durable: MemoryCredentialStore::new(), entered: Default::default(),
+            first: AtomicBool::new(true), gate: Mutex::new(gate),
+        });
+        vault.durable.set_refresh_token("persisted-old-session").unwrap();
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.credentials = Arc::new(crate::tono::credentials::SessionCredentialStore::with_test_vault(vault.clone()));
+            inner.client = Arc::new(crate::tono::state::TonoApiClient::new(
+                "https://api.example.test", crate::tono::transport::TonoTransport::new().unwrap(), inner.credentials.clone(),
+            ).unwrap());
+            // No live token: real ApiClient logout performs only its local wipe, with no HTTP.
+            inner.account_state = AccountState::Ready;
+        }
+        let caller = tokio::spawn(close_account_with(Arc::clone(&state), AccountCloseReason::User,
+            |_| async { Ok(()) },
+            |client| async move { client.logout().await.map_err(|error| error.to_string()) },
+            |_, _| async {}, |_| {},
+        ));
+        tokio::time::timeout(Duration::from_secs(2), vault.entered.notified()).await.unwrap();
+        let close = state.lock().await.account_close.clone().expect("vault deletion still owns admission");
+        assert!(!caller.is_finished(), "enqueue is not durable acknowledgement");
+        caller.abort();
+        let _ = caller.await;
+        release.send(()).unwrap();
+        assert!(tokio::time::timeout(Duration::from_secs(2), close.wait()).await.unwrap().is_err());
+        assert!(matches!(state.lock().await.account_state, AccountState::Error(_)));
+        assert_eq!(vault.durable.refresh_token().unwrap().as_deref(), Some("persisted-old-session"));
+        close_account_with(Arc::clone(&state), AccountCloseReason::User,
+            |_| async { Ok(()) },
+            |client| async move { client.logout().await.map_err(|error| error.to_string()) },
+            |_, _| async {}, |_| {},
+        ).await.unwrap();
+        assert_eq!(state.lock().await.account_state, AccountState::SignedOut);
+        assert_eq!(vault.durable.refresh_token().unwrap(), None);
     }
-    inner.fsm.sign_out_or_quit();
-    inner.account = None;
-    inner.account_state = AccountState::SignedOut;
-    inner.challenge_id = None;
-    inner.controller_secret = None;
-    inner.controller_port = None;
-    inner.kill_switch = None;
-    inner.network_events_counter = None;
-    inner.catalog_last_synced_at_ms = None;
-    inner.catalog_sync_error = None;
-    emit_status(&app, &status_of(&inner));
-    drop(inner);
-    state.audit().log(AuditEvent::SignOut);
-    Ok(())
+
+    #[tokio::test(start_paused = true)]
+    async fn account_close_joins_release_past_the_ui_budget_before_reopening_admission() {
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.account_state = AccountState::Ready;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+        }
+        let (entered, at_release) = oneshot::channel();
+        let (resume, resumed) = oneshot::channel();
+        let operation = connection::coordinate_release(&state, None,
+            move |_guard| async move {
+                entered.send(()).unwrap();
+                resumed.await.unwrap();
+                Ok(())
+            }, || async {},
+        ).await;
+        at_release.await.unwrap();
+        let (joined, joining) = oneshot::channel();
+        let caller = tokio::spawn(close_account_with(Arc::clone(&state), AccountCloseReason::User,
+            move |_| async move {
+                joined.send(()).unwrap();
+                connection::complete_account_release(&operation).await
+            },
+            |_| async { Ok(()) }, |_, _| async {}, |_| {},
+        ));
+        joining.await.unwrap();
+        let close = state.lock().await.account_close.clone().unwrap();
+        tokio::time::advance(Duration::from_secs(56)).await;
+        tokio::task::yield_now().await;
+        let admission_closed = state.lock().await.account_close.is_some();
+        caller.abort();
+        let _ = caller.await;
+        resume.send(()).unwrap();
+        let result = close.wait().await;
+        assert!(admission_closed, "a UI deadline cannot complete the detached account owner");
+        assert_eq!(result, Ok(()), "late successful release must still finish sign-out");
+        let inner = state.lock().await;
+        assert_eq!(inner.account_state, AccountState::SignedOut);
+        assert!(!inner.fsm.kill_switch_armed());
+    }
+
+    #[tokio::test]
+    async fn sign_out_owns_admission_until_logout_finishes_even_without_its_caller() {
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.account_state = AccountState::Ready;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+        }
+        let (entered, at_logout) = oneshot::channel();
+        let (release, resumed) = oneshot::channel();
+        let (done, finished) = oneshot::channel();
+        let done = std::sync::Mutex::new(Some(done));
+        let caller = tokio::spawn(close_account_with(Arc::clone(&state), AccountCloseReason::User,
+            |state| async move {
+                state.lock().await.fsm.sign_out_or_quit(); // Service proved the release.
+                Ok(())
+            },
+            move |_| async move {
+                entered.send(()).unwrap();
+                let _ = resumed.await;
+                Ok(())
+            },
+            |_, _| async {},
+            move |inner| {
+                if inner.account_state == AccountState::SignedOut {
+                    if let Some(done) = done.lock().unwrap().take() { let _ = done.send(()); }
+                }
+            },
+        ));
+        at_logout.await.unwrap();
+        let admitted = {
+            let mut inner = state.lock().await;
+            let generation = inner.connect_generation;
+            connection::begin_attempt(&mut inner, generation).await.is_some()
+        };
+        caller.abort();
+        assert!(caller.await.unwrap_err().is_cancelled());
+        let _ = release.send(());
+        let completion = tokio::time::timeout(Duration::from_secs(2), finished).await;
+        assert!(!admitted, "release completion must not reopen Connect during server logout");
+        assert!(matches!(completion, Ok(Ok(()))), "account close must outlive its UI waiter");
+        let inner = state.lock().await;
+        assert_eq!(inner.account_state, AccountState::SignedOut);
+        assert!(!inner.fsm.status().is_connecting);
+        assert!(!inner.fsm.kill_switch_armed());
+        drop(inner);
+
+        // Failure is the opposite contract: do not wipe the account or weaken protection.
+        state.lock().await.account_state = AccountState::Ready;
+        state.lock().await.fsm.mark_kill_switch_armed();
+        let result = close_account_with(Arc::clone(&state), AccountCloseReason::User,
+            |_| async { Err("DNS restore failed".into()) },
+            |_| async { panic!("logout must not run after a failed explicit release") },
+            |_, _| async {}, |_| {},
+        ).await;
+        assert_eq!(result, Err("DNS restore failed".into()));
+        let inner = state.lock().await;
+        assert_eq!(inner.account_state, AccountState::Ready);
+        assert!(inner.fsm.kill_switch_armed());
+    }
 }
 
 /// The current account, if signed in.

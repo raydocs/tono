@@ -12,6 +12,7 @@ import {
   tonoRetryNow,
   tonoSelectServer,
   tonoServers,
+  tonoStatus,
   type TonoUiState,
 } from '@/services/tono'
 
@@ -45,7 +46,7 @@ export function useManualBackupChannel(
   })
   const hy2Sibling = backupChannelName(
     selectedServer,
-    (servers ?? []).map((server) => server.name),
+    (servers ?? []).filter((server) => server.available).map((server) => server.name),
   )
   // Handshake eof is the usual case. After a protected-offline restart the
   // progress record may have no error left; still offer the sibling rather
@@ -61,8 +62,9 @@ export function useManualBackupChannel(
   const selectAndRetry = useLockFn(async () => {
     if (!hy2Sibling) return
     await tonoSelectServer(hy2Sibling)
-    if (offline) await tonoRetryNow()
-    else await tonoConnect()
+    const current = await tonoStatus()
+    if (current.uiState === 'protectedOffline') await tonoRetryNow()
+    else if (current.uiState === 'notConnected') await tonoConnect()
   })
 
   return { available, hy2Sibling, selectAndRetry }

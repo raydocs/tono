@@ -36,6 +36,7 @@ const {
   tonoUploadDiagnosticsMock,
   tonoServersMock,
   tonoSelectServerMock,
+  tonoStatusMock,
   subscribeTonoStatusMock,
   noticeSuccess,
   noticeError,
@@ -48,6 +49,7 @@ const {
   tonoUploadDiagnosticsMock: vi.fn(),
   tonoServersMock: vi.fn(),
   tonoSelectServerMock: vi.fn(),
+  tonoStatusMock: vi.fn(),
   subscribeTonoStatusMock: vi.fn((_handler: unknown) => () => {}),
   noticeSuccess: vi.fn(),
   noticeError: vi.fn(),
@@ -63,9 +65,11 @@ vi.mock('@/services/tono', async (importOriginal) => ({
   tonoConnect: tonoConnectMock,
   tonoDisconnect: tonoDisconnectMock,
   tonoDiagnosticsReport: tonoDiagnosticsReportMock,
+  tonoLocalDiagnosticsReport: tonoDiagnosticsReportMock,
   tonoUploadDiagnostics: tonoUploadDiagnosticsMock,
   tonoServers: tonoServersMock,
   tonoSelectServer: tonoSelectServerMock,
+  tonoStatus: tonoStatusMock,
   subscribeTonoStatus: subscribeTonoStatusMock,
   TONO_STATUS_EVENT: 'tono://status',
 }))
@@ -184,6 +188,7 @@ beforeEach(() => {
   })
   tonoServersMock.mockReset().mockResolvedValue([])
   tonoSelectServerMock.mockReset().mockResolvedValue(undefined)
+  tonoStatusMock.mockReset().mockResolvedValue({ uiState: 'notConnected' })
   subscribeTonoStatusMock.mockReset()
   subscribeTonoStatusMock.mockImplementation(() => () => {})
   noticeSuccess.mockReset()
@@ -811,6 +816,7 @@ describe('ConnectProgressCard', () => {
 
     it('selects the hy2 sibling and retries only after the user clicks', async () => {
       tonoServersMock.mockResolvedValue(catalogWithHy2())
+      tonoStatusMock.mockResolvedValue({ uiState: 'protectedOffline' })
       tonoConnectProgressMock.mockResolvedValue(
         makeProgress({ error: handshakeError }),
       )
@@ -896,6 +902,24 @@ describe('ConnectProgressCard', () => {
       await waitFor(() =>
         expect(tonoSelectServerMock).toHaveBeenCalledWith(dedirockHy2),
       )
+      await waitFor(() => expect(tonoConnectMock).toHaveBeenCalledTimes(1))
+      expect(tonoRetryNowMock).not.toHaveBeenCalled()
+    })
+
+    it('offers a Reality alternative without selecting it until clicked when no hy2 exists', async () => {
+      const alternative = 'Los Angeles · Sunset'
+      tonoServersMock.mockResolvedValue([
+        { name: tokyo, server: '203.0.113.10', port: 443, selected: true, available: true },
+        { name: 'Unavailable city', server: '203.0.113.11', port: 443, selected: false, available: false },
+        { name: alternative, server: '198.51.100.10', port: 443, selected: false, available: true },
+      ])
+      tonoConnectProgressMock.mockResolvedValue(makeProgress({ error: handshakeError }))
+      renderCard({ uiState: 'notConnected', selectedServer: tokyo })
+      const button = await screen.findByRole('button', { name: 'Try backup channel' })
+      expect(tonoSelectServerMock).not.toHaveBeenCalled()
+      expect(tonoConnectMock).not.toHaveBeenCalled()
+      fireEvent.click(button)
+      await waitFor(() => expect(tonoSelectServerMock).toHaveBeenCalledWith(alternative))
       await waitFor(() => expect(tonoConnectMock).toHaveBeenCalledTimes(1))
       expect(tonoRetryNowMock).not.toHaveBeenCalled()
     })

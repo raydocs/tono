@@ -8,10 +8,9 @@ use tono_logging::{Type, logging};
 use crate::core::{CoreManager, manager::RunningMode};
 use crate::core::service;
 use crate::process::AsyncHandler;
-use crate::tono::{audit::AuditEvent, commands, state::TonoState};
+use crate::tono::{audit::AuditEvent, commands, state::{LifecycleOperation, TonoState}};
 #[cfg(not(windows))]
 use crate::tono::connection_plan::stop_core_before_release;
-use super::{BoxedTask, fail_connect};
 use super::controller::fetch_connections;
 
 /// UI budget for an explicit release. The ordered DNS → Core → WFP sequence runs in a detached
@@ -39,35 +38,48 @@ pub(super) const SERVICE_LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(65);
 /// caller joins one App-side operation; its UI deadline never cancels the worker. A failed release
 /// keeps the system armed and surfaces an error.
 pub async fn release_explicit(state: &Arc<TonoState>, app: &AppHandle) -> Result<(), String> {
-    let (operation, is_new) = state.begin_release().await;
-    if is_new {
-        let task_state = Arc::clone(state);
-        let task_app = app.clone();
-        let worker_state = Arc::clone(state);
-        let worker_app = app.clone();
-        let worker =
-            tauri::async_runtime::spawn(async move { run_explicit_release_sequence(&worker_state, &worker_app).await });
-        let supervised_operation = Arc::clone(&operation);
-        AsyncHandler::spawn(move || async move {
-            let result = worker
-                .await
-                .map_err(|error| format!("release reconciliation task failed: {error}"))
-                .and_then(|result| result);
-            if let Err(message) = &result {
-                task_state
-                    .audit()
-                    .log(AuditEvent::ReleaseFail { error: message.clone() });
-                logging!(error, Type::Service, "Tono: 安全释放对账失败: {message}");
-            }
-            supervised_operation.complete(result);
-            task_state.finish_release(supervised_operation.id()).await;
-            // A timed-out caller may no longer be present to repaint. Publish the final state (or
-            // the still-protected failure state) after the coordinator has settled.
+    release_explicit_with_guard(state, app, None).await
+}
+
+/// Account teardown must own the release, not just the UI's wait for it.
+pub(crate) async fn release_for_account(state: &Arc<TonoState>, app: &AppHandle) -> Result<(), String> {
+    let operation = start_explicit_release(state, app, None).await;
+    complete_account_release(&operation).await
+}
+
+pub(crate) async fn complete_account_release(operation: &LifecycleOperation) -> Result<(), String> {
+    operation.wait().await
+}
+
+/// Transfer failure's exclusive ownership to release, rather than reacquiring the same writer.
+pub(super) async fn release_explicit_with_guard(
+    state: &Arc<TonoState>, app: &AppHandle,
+    guard: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
+) -> Result<(), String> {
+    let operation = start_explicit_release(state, app, guard).await;
+    wait_explicit_release(&operation).await
+}
+
+async fn start_explicit_release(
+    state: &Arc<TonoState>, app: &AppHandle,
+    guard: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
+) -> Arc<LifecycleOperation> {
+    let worker_state = Arc::clone(state);
+    let worker_app = app.clone();
+    let task_state = Arc::clone(state);
+    let task_app = app.clone();
+    coordinate_release(state, guard,
+        move |guard| async move {
+            run_explicit_release_sequence(&worker_state, &worker_app, guard).await
+        },
+        move || async move {
             let inner = task_state.lock().await;
             commands::emit_status(&task_app, &commands::status_of(&inner));
-        });
-    }
+        },
+    ).await
+}
 
+async fn wait_explicit_release(operation: &LifecycleOperation) -> Result<(), String> {
     match tokio::time::timeout(EXPLICIT_RELEASE_TIMEOUT, operation.wait()).await {
         Ok(result) => result,
         Err(_) => Err(format!(
@@ -76,17 +88,107 @@ pub async fn release_explicit(state: &Arc<TonoState>, app: &AppHandle) -> Result
     }
 }
 
+/// Register and supervise exactly one real release. A joining failure drops its transferred
+/// writer before waiting, allowing the existing worker to acquire it. No generation-based skip
+/// can complete this operation: every joiner observes the actual release result.
+pub(crate) async fn coordinate_release<F, C, S, SF>(
+    state: &Arc<TonoState>, guard: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
+    sequence: C, settled: S,
+) -> Arc<LifecycleOperation>
+where
+    C: FnOnce(tokio::sync::OwnedRwLockWriteGuard<()>) -> F + Send + 'static,
+    F: std::future::Future<Output = Result<(), String>> + Send + 'static,
+    S: FnOnce() -> SF + Send + 'static,
+    SF: std::future::Future<Output = ()> + Send + 'static,
+{
+    let (operation, is_new) = state.begin_release().await;
+    if is_new {
+        let task_state = Arc::clone(state);
+        let worker_state = Arc::clone(state);
+        let worker = tauri::async_runtime::spawn(async move {
+            let guard = match guard {
+                Some(guard) => guard,
+                None => worker_state.begin_privileged_release().await,
+            };
+            let (generation, disconnecting, connected_at, secret, port) = {
+                let inner = worker_state.lock().await;
+                (inner.connect_generation, inner.fsm.status().is_disconnecting, inner.connected_at,
+                    inner.controller_secret.clone(), inner.controller_port)
+            };
+            // The release, not its UI waiter, owns the bounded final sample too. Sampling never
+            // delays dispatch of DNS/Core/WFP teardown and cannot mutate a replacement ledger.
+            let (result, sample) = tokio::join!(sequence(guard), async {
+                match (disconnecting, secret.as_deref(), port) {
+                    (true, Some(secret), Some(port)) => fetch_connections(secret, port).await,
+                    _ => None,
+                }
+            });
+            if result.is_ok() {
+                let mut inner = worker_state.lock().await;
+                if inner.connect_generation == generation {
+                    if let Some(payload) = sample.as_ref() {
+                        worker_state.route_ledger().lock().ingest(payload);
+                    }
+                    if disconnecting {
+                        worker_state.audit().log(AuditEvent::DisconnectOk {
+                            elapsed_ms: super::session_elapsed_ms(connected_at),
+                            bytes_up: sample.as_ref().map(|payload| payload.upload_total),
+                            bytes_down: sample.as_ref().map(|payload| payload.download_total),
+                        });
+                    }
+                }
+                // Admission stays excluded by release_operation until ALL session metadata is
+                // finalized. A cancelled/timed-out command has no remaining cleanup authority.
+                inner.fsm.sign_out_or_quit();
+                inner.controller_secret = None;
+                inner.controller_port = None;
+                inner.network_events_counter = None;
+                inner.last_core_pid = None;
+                inner.last_restart_count = None;
+                inner.connected_at = None;
+                inner.retry_attempt = 0;
+                inner.next_retry_at_ms = None;
+                worker_state.route_ledger().lock().clear_connection_counters();
+            }
+            result
+        });
+        let supervised_operation = Arc::clone(&operation);
+        AsyncHandler::spawn(move || async move {
+            let result = worker
+                .await
+                .map_err(|error| format!("release reconciliation task failed: {error}"))
+                .and_then(|result| result);
+            if let Err(message) = &result {
+                task_state.lock().await.fsm.initial_release_failed();
+                task_state
+                    .audit()
+                    .log(AuditEvent::ReleaseFail { error: message.clone() });
+                logging!(error, Type::Service, "Tono: 安全释放对账失败: {message}");
+            }
+            task_state.finish_release(supervised_operation.id()).await;
+            // A timed-out caller may no longer be present to repaint. Publish the final state (or
+            // the still-protected failure state) after the coordinator has settled.
+            settled().await;
+            supervised_operation.complete(result);
+        });
+    } else {
+        drop(guard);
+    }
+    operation
+}
+
 /// The release worker is never owned by one UI call. On Windows the owner-gated Service route is
 /// already the transaction boundary: under one lifecycle lock it proves DNS restoration, stops
 /// and retires the matching Core, then removes WFP. Calling those as three App-owned IPCs would
 /// recreate a cancellation window between the steps. Other platforms retain their existing
 /// helper sequence until their Service route provides the same complete stop semantics.
-pub(super) async fn run_explicit_release_sequence(state: &Arc<TonoState>, app: &AppHandle) -> Result<(), String> {
+pub(super) async fn run_explicit_release_sequence(
+    state: &Arc<TonoState>, _app: &AppHandle,
+    _release_guard: tokio::sync::OwnedRwLockWriteGuard<()>,
+) -> Result<(), String> {
     // Wait for detached StartClash/DNS commits that began before the release generation bump.
     // Keeping this guard through the Service call also prevents a stale mutation from starting
     // between the wait and the atomic DNS/Core/WFP transaction.
-    let _release_guard = state.begin_privileged_release().await;
-
     #[cfg(windows)]
     // An unprotected quit may have stopped the Service after the last release. Revive the
     // registered Service before asking its owner-gated endpoint to remove protection. This is
@@ -129,17 +231,6 @@ pub(super) async fn run_explicit_release_sequence(state: &Arc<TonoState>, app: &
 
     let mut inner = state.lock().await;
     inner.kill_switch = Some(status);
-    inner.controller_secret = None;
-    inner.controller_port = None;
-    inner.network_events_counter = None;
-    inner.last_core_pid = None;
-    inner.last_restart_count = None;
-    // Also closes a caller that reached its UI budget and temporarily surfaced Protected
-    // Offline; this transition is allowed only after the Service proved WFP is gone. A new
-    // connect cannot race this commit because `guard_snapshot` rejects while the coordinator is
-    // populated.
-    inner.fsm.sign_out_or_quit();
-    commands::emit_status(app, &commands::status_of(&inner));
     Ok(())
 }
 
@@ -147,10 +238,12 @@ pub(super) async fn run_explicit_release_sequence(state: &Arc<TonoState>, app: &
 /// sequence (DNS restore → core stop → owner-gated release, §6/C1).
 /// Idempotent while a disconnect is already in flight (L6).
 pub async fn disconnect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String> {
-    let (controller_secret, controller_port, connected_at) = {
+    let operation = {
         let mut inner = state.lock().await;
         if inner.fsm.status().is_disconnecting {
-            return Ok(());
+            let operation = start_explicit_release(&state, &app, None).await;
+            drop(inner);
+            return wait_explicit_release(&operation).await;
         }
         inner.invalidate_connection(true);
         let status = inner.fsm.status();
@@ -159,53 +252,13 @@ pub async fn disconnect(state: Arc<TonoState>, app: AppHandle) -> Result<(), Str
         }
         inner.fsm.begin_disconnect();
         commands::emit_status(&app, &commands::status_of(&inner));
-        (
-            inner.controller_secret.clone(),
-            inner.controller_port,
-            inner.connected_at,
-        )
+        // Register while the FSM lock still excludes admission. Sampling before registration
+        // allowed a joining Disconnect/failure to finish release, admit B, then this caller's
+        // delayed sample would dispatch another owner-wide release against B.
+        start_explicit_release(&state, &app, None).await
     };
     state.audit().log(AuditEvent::DisconnectBegin { cause: "user" });
-
-    // Sample before tearing the core down. A failed sample must not stall or
-    // fail the user's disconnect: elapsed/bytes stay None and we continue.
-    let elapsed_ms = super::session_elapsed_ms(connected_at);
-    let sample = match (controller_secret.as_deref(), controller_port) {
-        (Some(secret), Some(port)) => fetch_connections(secret, port).await,
-        _ => None,
-    };
-    if let Some(payload) = sample.as_ref() {
-        state.route_ledger().lock().ingest(payload);
-    }
-    let bytes_up = sample.as_ref().map(|payload| payload.upload_total);
-    let bytes_down = sample.as_ref().map(|payload| payload.download_total);
-
-    if let Err(err) = release_explicit(&state, &app).await {
-        stay_armed_after_failed_release(&state, &app).await;
-        return Err(err);
-    }
-
-    let mut inner = state.lock().await;
-    inner.fsm.finish_disconnect();
-    inner.controller_secret = None;
-    inner.controller_port = None;
-    inner.kill_switch = None;
-    inner.network_events_counter = None;
-    inner.last_core_pid = None;
-    inner.last_restart_count = None;
-    inner.connected_at = None;
-    // F3: a user disconnect supersedes the backoff state.
-    inner.retry_attempt = 0;
-    inner.next_retry_at_ms = None;
-    commands::emit_status(&app, &commands::status_of(&inner));
-    drop(inner);
-    state.route_ledger().lock().clear_connection_counters();
-    state.audit().log(AuditEvent::DisconnectOk {
-        elapsed_ms,
-        bytes_up,
-        bytes_down,
-    });
-    Ok(())
+    wait_explicit_release(&operation).await
 }
 
 /// A releasing step failed mid-disconnect: fall back to Protected Offline
@@ -221,4 +274,110 @@ pub(super) async fn stay_armed_after_failed_release(state: &Arc<TonoState>, app:
     let mut inner = state.lock().await;
     inner.fsm.initial_release_failed();
     commands::emit_status(app, &commands::status_of(&inner));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::oneshot;
+
+    #[tokio::test]
+    async fn release_owner_finishes_session_metadata_after_the_ui_waiter_is_cancelled() {
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            inner.fsm.begin_disconnect();
+            inner.connected_at = Some(std::time::Instant::now());
+            inner.retry_attempt = 7;
+            inner.next_retry_at_ms = Some(9876);
+        }
+        let (entered, at_release) = oneshot::channel();
+        let (resume, resumed) = oneshot::channel();
+        let (settled, settlement) = oneshot::channel();
+        let operation = coordinate_release(&state, None,
+            move |_guard| async move {
+                entered.send(()).unwrap();
+                resumed.await.unwrap();
+                Ok(()) // A proven Service DNS/Core/WFP release, not a UI-only transition.
+            },
+            move || async move { settled.send(()).unwrap(); },
+        ).await;
+        at_release.await.unwrap();
+        let waiter_operation = Arc::clone(&operation);
+        let waiter = tokio::spawn(async move { waiter_operation.wait().await });
+        waiter.abort();
+        let _ = waiter.await;
+        resume.send(()).unwrap();
+        settlement.await.unwrap();
+        operation.wait().await.unwrap();
+        let inner = state.lock().await;
+        assert!(inner.connected_at.is_none(), "the detached release owns the session clock too");
+        assert_eq!(inner.retry_attempt, 0);
+        assert!(inner.next_retry_at_ms.is_none());
+        assert!(!inner.fsm.kill_switch_armed());
+        assert!(!inner.fsm.status().is_disconnecting);
+    }
+
+    #[tokio::test]
+    async fn failure_transfers_writer_and_disconnect_joins_the_real_release_result() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let state = Arc::new(TonoState::for_test());
+            let guard = state.begin_privileged_release().await;
+            let (entered, at_release) = oneshot::channel();
+            let (resume, resumed) = oneshot::channel();
+            let (settled, settlement) = oneshot::channel();
+            let failure = coordinate_release(&state, Some(guard),
+                move |guard| async move {
+                    entered.send(()).unwrap();
+                    resumed.await.unwrap();
+                    drop(guard);
+                    Err("DNS restore failed; still protected".into())
+                },
+                move || async move { settled.send(()).unwrap(); },
+            ).await;
+            at_release.await.unwrap(); // would time out if transfer reacquired its own writer
+            let disconnect = coordinate_release(&state, None,
+                |_| async { panic!("Disconnect must join, not launch another release") },
+                || async {},
+            ).await;
+            assert_eq!(failure.id(), disconnect.id());
+            assert!(state.release_in_progress().await);
+            let replacement = state.begin_connect_mutation();
+            tokio::pin!(replacement);
+            assert!(futures::poll!(&mut replacement).is_pending());
+            resume.send(()).unwrap();
+            assert_eq!(disconnect.wait().await, Err("DNS restore failed; still protected".into()));
+            assert_eq!(failure.wait().await, disconnect.wait().await);
+            settlement.await.unwrap();
+            drop(replacement.await);
+
+            // Opposite order: Disconnect registered first and waits for failure's held writer.
+            // Joining must drop that writer, then report the actual failure, never stale-skip Ok.
+            let guard = state.begin_privileged_release().await;
+            let (entered, at_release) = oneshot::channel();
+            let (resume, resumed) = oneshot::channel();
+            let disconnect = coordinate_release(&state, None,
+                move |guard| async move {
+                    entered.send(()).unwrap();
+                    resumed.await.unwrap();
+                    drop(guard);
+                    Err("release denied".into())
+                },
+                || async {},
+            ).await;
+            let failure = coordinate_release(&state, Some(guard),
+                |_| async { panic!("failure must join the existing release") },
+                || async {},
+            ).await;
+            at_release.await.unwrap();
+            assert_eq!(failure.id(), disconnect.id());
+            resume.send(()).unwrap();
+            assert_eq!(failure.wait().await, Err("release denied".into()));
+            assert_eq!(disconnect.wait().await, failure.wait().await);
+        }).await.expect("guard transfer and both coordinator join orders must not deadlock");
+    }
 }

@@ -121,6 +121,9 @@ use probes::{fake_ip_race_state, tun_dns_proves_fake_ip};
 pub use probes::{is_fake_ip, test_current_server, verify_lock_retry_window};
 
 pub use disconnect::{disconnect, release_explicit};
+pub(crate) use disconnect::release_for_account;
+#[cfg(test)]
+pub(crate) use disconnect::{complete_account_release, coordinate_release};
 #[cfg(test)]
 use disconnect::{EXPLICIT_RELEASE_TIMEOUT, SERVICE_LIFECYCLE_TIMEOUT};
 pub use reconnect::{retry_reconnect_now, schedule_reconnect, schedule_startup_resume_if_proven};
@@ -179,7 +182,7 @@ enum Attempt {
     /// selection, suspended). No failure handling applies.
     GuardRejected(String),
     /// The transaction ran (or reached the service checks) and failed.
-    Failed(String),
+    Failed { generation: u64, error: String, account_owner: (u64, u64) },
     /// The connect generation moved under us (disconnect / sign-out / node
     /// switch / catalog teardown). Exit without touching the FSM, the core,
     /// or the UI: the flow that bumped the generation owns the cleanup.
@@ -223,10 +226,11 @@ pub async fn connect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String
         }
         Attempt::GuardRejected(err) => Err(err),
         Attempt::Stale => Err("connection superseded by a newer transition".to_string()),
-        Attempt::Failed(err) => {
-            let err = fail_connect(&state, &app, err).await;
-            schedule_reconnect(&state, &app).await;
-            Err(err)
+        Attempt::Failed { generation, error, account_owner } => {
+            if fail_connect(&state, &app, generation, error.clone(), account_owner).await {
+                reconnect::schedule_reconnect_for_generation(&state, &app, generation).await;
+            }
+            Err(error)
         }
     }
 }
@@ -235,30 +239,60 @@ pub async fn connect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String
 /// Returns a boxed future (see [`BoxedAttempt`]); call sites `await` it as
 /// before.
 fn attempt<'a>(state: &'a Arc<TonoState>, app: &'a AppHandle) -> BoxedAttempt<'a> {
-    Box::pin(attempt_inner(state, app))
+    attempt_for_generation(state, app, None)
 }
 
-async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle) -> Attempt {
-    let (node, nodes, routing, generation, cancellation) = match guard_snapshot(state).await {
+fn attempt_for_generation<'a>(state: &'a Arc<TonoState>, app: &'a AppHandle, expected_generation: Option<u64>) -> BoxedAttempt<'a> {
+    Box::pin(attempt_inner(state, app, expected_generation))
+}
+
+/// The caller holds lifecycle admission and the state mutex. Idle is not an ownership token:
+/// every admitted retry gets a fresh epoch so a completed failure tail cannot act on its state.
+pub(crate) async fn begin_attempt(
+    inner: &mut TonoInner, generation: u64,
+) -> Option<(u64, CancellationToken, (u64, u64))> {
+    // Capture under the same account lock as adoption, before any admission mutation:
+    // cancellation while awaiting the API mutex must not leave an orphan Connecting latch.
+    // Replacement login need not retire Core; its identity must never relabel this attempt.
+    let account_owner = (inner.sign_in_generation, inner.client.diagnostics_log_identity().await);
+    if inner.account_close.is_some()
+        || inner.fsm.status().is_disconnecting
+        || !single_flight_begin(&mut inner.fsm, inner.connect_generation, generation)
+    {
+        return None;
+    }
+    // Abort-free: the registered reconnect/switch task may itself be admitting this attempt.
+    inner.retire_connection_generation(false);
+    Some((inner.connect_generation, inner.connect_cancellation.clone(), account_owner))
+}
+
+async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generation: Option<u64>) -> Attempt {
+    // Admission is a lifecycle mutation too: failure may have made the FSM idle while its
+    // detached cleanup still owns the Core. Do not reuse that idle window or its generation.
+    let admission = state.begin_connect_mutation().await;
+    let (node, nodes, routing, generation, _) = match guard_snapshot(state).await {
         Ok(snapshot) => snapshot,
         Err(err) => return Attempt::GuardRejected(err),
     };
-    let transaction = ConnectTransaction::new(cancellation);
+    // A recovery task cannot adopt a new generation between its final check and admission.
+    // The existing single-flight check below covers a bump after this snapshot.
+    if expected_generation.is_some_and(|expected| expected != generation) {
+        return Attempt::Stale;
+    }
     // L5: the clock starts at the top of the attempt, so even a
     // service-readiness failure leaves no orphan ConnectFail.
     let started = std::time::Instant::now();
     // F5 single-flight, latched BEFORE any service I/O: rapid repeated
     // clicks admit exactly one attempt to the service probe; the rest exit
     // here with no side effects (the real-machine double-probe this kills).
-    {
+    let (attempt_record, generation, cancellation, account_owner) = {
         let mut inner = state.lock().await;
-        let current_generation = inner.connect_generation;
-        if !single_flight_begin(&mut inner.fsm, current_generation, generation) {
+        let Some((admitted_generation, cancellation, account_owner)) = begin_attempt(&mut inner, generation).await else {
             if inner.connect_generation != generation {
                 return Attempt::Stale;
             }
             return Attempt::GuardRejected(TRANSITION_IN_FLIGHT_REJECTION.to_string());
-        }
+        };
         // A disconnected-only endpoint batch cannot overlap WFP/Core startup. Cancel it in the
         // same critical section that atomically moves the FSM to Connecting, leaving no new-test
         // admission window between the two operations.
@@ -279,75 +313,165 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle) -> Attempt {
         inner.optional_direct_skip = None;
         inner.direct_reload_until = None;
         commands::emit_status(app, &commands::status_of(&inner));
-    }
+        let revision = inner.catalog_tracker.current_revision();
+        let name = crate::tono::diagnostics::scrub_text_with(
+            &node.name,
+            &[
+                node.uuid.clone(),
+                node.reality_public_key.clone(),
+                node.reality_short_id.clone(),
+                node.server.to_string(),
+            ],
+        );
+        let record = inner.attempt_history.begin(
+            commands::epoch_millis(),
+            name,
+            node.catalog_transport(),
+            revision,
+        );
+        (record, admitted_generation, cancellation, account_owner)
+    };
+    drop(admission);
+    let transaction = ConnectTransaction::new(cancellation);
 
     state.audit().log(AuditEvent::ConnectBegin {
         node: node.name.clone(),
         transport: node.catalog_transport(),
     });
 
-    // A residential Web guarantee requires Mihomo to see protected hostnames. Browser-owned DoH
-    // (and ECH layered on it) can hide that identity, so prove Chrome/Edge's effective managed +
-    // local configuration before starting the Service or changing WFP. Ordinary Tono protection
-    // intentionally remains available when the catalog has no residential Claude route.
-    #[cfg(windows)]
-    if routing
-        .as_ref()
-        .is_some_and(|routing| routing.home_socks5.is_some() || routing.home_proxy.is_some())
-    {
+    let outcome = async {
+        // A residential Web guarantee requires Mihomo to see protected hostnames. Browser-owned DoH
+        // (and ECH layered on it) can hide that identity, so prove Chrome/Edge's effective managed +
+        // local configuration before starting the Service or changing WFP. Ordinary Tono protection
+        // intentionally remains available when the catalog has no residential Claude route.
+        #[cfg(windows)]
+        if routing
+            .as_ref()
+            .is_some_and(|routing| routing.home_socks5.is_some() || routing.home_proxy.is_some())
+        {
+            match transaction
+                .wait(
+                    "browser Secure DNS preflight",
+                    crate::tono::browser_dns::verify_residential_browser_dns(),
+                )
+                .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    return Attempt::Failed { generation, error: format!("{BROWSER_DNS_PREFLIGHT_PREFIX}: {error}"), account_owner };
+                }
+                Err(failure) => {
+                    return attempt_from_stage_failure(state, generation, &attempt_record, failure, account_owner)
+                        .await;
+                }
+            }
+        }
+
         match transaction
-            .wait(
-                "browser Secure DNS preflight",
-                crate::tono::browser_dns::verify_residential_browser_dns(),
-            )
+            .wait("service readiness", ensure_service_ready())
             .await
         {
             Ok(Ok(())) => {}
-            Ok(Err(error)) => {
-                return Attempt::Failed(format!("{BROWSER_DNS_PREFLIGHT_PREFIX}: {error}"));
+            Ok(Err(err)) => {
+                // The kill switch may already be armed from a previous session, so this is a
+                // transaction failure, not a guard rejection. `fail_connect` runs the decision
+                // table and (pre-arm) releases the FSM cleanly.
+                return Attempt::Failed { generation, error: err, account_owner };
             }
-            Err(failure) => return attempt_from_stage_failure(state, generation, failure).await,
+            Err(failure) => {
+                return attempt_from_stage_failure(state, generation, &attempt_record, failure, account_owner)
+                    .await;
+            }
+        }
+
+        #[cfg(windows)]
+        {
+            let _ = crate::core::sysopt::Sysopt::global().reset_sysproxy().await;
+        }
+
+        match run_stages(
+            state,
+            app,
+            &node,
+            &nodes,
+            routing.as_ref(),
+            generation,
+            started,
+            &transaction,
+        )
+        .await
+        {
+            Ok(()) => Attempt::Connected,
+            Err(failure) => {
+                attempt_from_stage_failure(state, generation, &attempt_record, failure, account_owner).await
+            }
         }
     }
-
-    match transaction.wait("service readiness", ensure_service_ready()).await {
-        Ok(Ok(())) => {}
-        Ok(Err(err)) => {
-            // The kill switch may already be armed from a previous session, so this is a
-            // transaction failure, not a guard rejection. `fail_connect` runs the decision
-            // table and (pre-arm) releases the FSM cleanly.
-            return Attempt::Failed(err);
-        }
-        Err(failure) => return attempt_from_stage_failure(state, generation, failure).await,
+    .await;
+    if let Attempt::Failed { error, .. } = &outcome {
+        retain_attempt_failure(state, generation, &attempt_record, error).await;
     }
+    outcome
+}
 
-    #[cfg(windows)]
-    {
-        let _ = crate::core::sysopt::Sysopt::global().reset_sysproxy().await;
-    }
-
-    match run_stages(state, app, &node, &nodes, routing.as_ref(), generation, started, &transaction).await {
-        Ok(()) => Attempt::Connected,
-        Err(StageFailure::Stale) => Attempt::Stale,
-        Err(StageFailure::TimedOut(err)) => {
-            retire_timed_out_generation(state, generation).await;
-            Attempt::Failed(err)
-        }
-        Err(StageFailure::Error(err)) => Attempt::Failed(err),
+async fn retain_attempt_failure(
+    state: &Arc<TonoState>,
+    generation: u64,
+    attempt_record: &crate::tono::local_evidence::ConnectionAttempt,
+    error: &str,
+) {
+    let mut inner = state.lock().await;
+    // Timeouts capture before retiring their generation. Superseded attempts must
+    // not read another transition's steps or overwrite its evidence.
+    if inner.connect_generation == generation {
+        let mut steps = inner.connect_steps.clone();
+        let elapsed = inner
+            .step_started_at
+            .map(|at| at.elapsed().as_millis() as u64)
+            .unwrap_or(0);
+        crate::tono::steps::fail_current(&mut steps, elapsed);
+        let failed = crate::tono::local_evidence::FailedAttempt {
+            attempt: attempt_record.clone(),
+            connection_generation: generation,
+            failed_at_ms: commands::epoch_millis(),
+            failed_stage: inner.fsm.status().stage.map(commands::stage_key),
+            error_code: failure::stable_error_code(error).map(str::to_owned),
+            error_detail: crate::tono::diagnostics::scrub_text_with(
+                error, &crate::tono::diagnostics::known_secrets(&inner),
+            ),
+            probe_outcomes: attempt_record.probe_outcomes.lock().map(|outcomes| outcomes.clone()).unwrap_or_default(),
+            steps: steps
+                .iter()
+                .map(|step| tono_core::auth::DiagnosticsStep {
+                    key: step.key.to_owned(),
+                    state: crate::tono::steps::state_key(step.state).to_owned(),
+                    elapsed_ms: step.elapsed_ms,
+                })
+                .collect(),
+        };
+        inner.attempt_history.retain(failed);
     }
 }
 
-async fn attempt_from_stage_failure(state: &Arc<TonoState>, generation: u64, failure: StageFailure) -> Attempt {
+async fn attempt_from_stage_failure(
+    state: &Arc<TonoState>,
+    generation: u64,
+    attempt_record: &crate::tono::local_evidence::ConnectionAttempt,
+    failure: StageFailure,
+    account_owner: (u64, u64),
+) -> Attempt {
     match failure {
         StageFailure::Stale => Attempt::Stale,
         StageFailure::TimedOut(error) => {
-            retire_timed_out_generation(state, generation).await;
-            Attempt::Failed(error)
+            retain_attempt_failure(state, generation, attempt_record, &error).await;
+            match retire_timed_out_generation(state, generation).await {
+                Some(generation) => Attempt::Failed { generation, error, account_owner },
+                None => Attempt::Stale,
+            }
         }
-        StageFailure::Error(error) => Attempt::Failed(error),
+        StageFailure::Error(error) => Attempt::Failed { generation, error, account_owner },
     }
 }
-
 
 /// §6.1 guards: forced values live in the owned runtime; here we check the
 /// account is ready (H2a — the reconnect path's only account gate), the
@@ -362,6 +486,9 @@ async fn guard_snapshot(
         ));
     }
     let inner = state.lock().await;
+    if inner.account_close.is_some() {
+        return Err("account sign-out is still reconciling".to_string());
+    }
     match &inner.account_state {
         AccountState::Ready => {}
         AccountState::Suspended => return Err("account is suspended".to_string()),
@@ -421,11 +548,87 @@ async fn guard_snapshot(
 /// The §6 failure decision table, executing [`plan_failure`]. After arm:
 /// stop the core, keep blocking (restrict to the bootstrap channel),
 /// Protected Offline. Before arm: full release.
-async fn fail_connect(state: &Arc<TonoState>, app: &AppHandle, err: String) -> String {
+async fn fail_connect(
+    state: &Arc<TonoState>, app: &AppHandle, generation: u64, err: String, account_owner: (u64, u64),
+) -> bool {
+    let task_state = Arc::clone(state);
+    let task_app = app.clone();
+    match cleanup::reconcile_failure(
+        Arc::clone(state),
+        generation,
+        async { service::tono_kill_switch_status().await.ok() },
+        move |observed, guard| async move {
+            fail_connect_observed(&task_state, &task_app, generation, err, observed, guard, account_owner).await
+        },
+    ).await {
+        Ok(current) => current,
+        Err(error) => {
+            logging!(error, Type::Service, "Tono: failure reconciliation worker failed; keeping protection: {error}");
+            false
+        }
+    }
+}
+
+async fn fail_connect_observed(
+    state: &Arc<TonoState>, app: &AppHandle, generation: u64, err: String,
+    observed: Option<KillSwitchStatus>, guard: tokio::sync::OwnedRwLockWriteGuard<()>,
+    account_owner: (u64, u64),
+) -> bool {
+    let Some(RecordedFailure { plan, armed, report: _report }) =
+        record_connect_failure(state, generation, &err, observed, account_owner).await
+    else {
+        return false;
+    };
+    let mut guard = Some(guard);
+    let release_result = if plan.stop_core == Some(true) && armed {
+        // Register the real release before transferring this writer. If Disconnect already
+        // registered its worker, the coordinator drops our writer and joins that actual result.
+        Some(disconnect::release_explicit_with_guard(state, app, guard.take()).await)
+    } else {
+        if let Some(release) = plan.stop_core {
+            let _ = service::tono_stop_core(release).await;
+        }
+        if plan.restrict_bootstrap {
+            let _ = service::tono_restrict_bootstrap().await;
+        }
+        None
+    };
+
+    let mut inner = state.lock().await;
+    if inner.connect_generation != generation {
+        return false;
+    }
+    if let Some(result) = release_result {
+        match result {
+            Ok(()) => { inner.fsm.connect_failed(); }
+            Err(release_error) => {
+                inner.fsm.initial_release_failed();
+                inner.connect_error = Some(crate::tono::audit::redact(&format!("{err}; {release_error}")));
+            }
+        }
+    }
+    commands::emit_status(app, &commands::status_of(&inner));
+    true
+}
+
+struct RecordedFailure {
+    plan: FailurePlan,
+    armed: bool,
+    /// Detached in production; tests may join the actual HTTP boundary without timing sleeps.
+    report: Option<tauri::async_runtime::JoinHandle<()>>,
+}
+
+/// Commit the observed failure and its evidence before applying the privileged cleanup plan.
+async fn record_connect_failure(
+    state: &Arc<TonoState>, generation: u64, err: &str, observed: Option<KillSwitchStatus>,
+    account_owner: (u64, u64),
+) -> Option<RecordedFailure> {
     logging!(error, Type::Service, "Tono: 连接事务失败: {err}");
-    let observed = service::tono_kill_switch_status().await.ok();
-    let (plan, stage, action, armed, transport, node) = {
+    let (plan, armed, report) = {
         let mut inner = state.lock().await;
+        if inner.connect_generation != generation {
+            return None;
+        }
         if let Some(status) = &observed {
             inner.kill_switch = Some(status.clone());
         }
@@ -490,52 +693,35 @@ async fn fail_connect(state: &Arc<TonoState>, app: &AppHandle, err: String) -> S
             .selected_node
             .as_deref()
             .map(tono_core::catalog_transport_of_name);
-        (plan, stage, action, armed, transport, node)
+        // Network cleanup still belongs to this connection generation. Account-scoped
+        // evidence does not: a replacement sign-in must not inherit the old failure via
+        // either immediate telemetry or the audit log. Keep this check and log enqueue
+        // under the adoption lock; the detached HTTP task also retains the captured owner.
+        let report = if inner.sign_in_generation == account_owner.0
+            && inner.client.diagnostics_log_identity().await == account_owner.1
+        {
+            let code = failure::stable_error_code(err).map(str::to_owned);
+            state.audit().log(AuditEvent::ConnectFail {
+                stage: stage.map(commands::stage_key),
+                error: err.to_owned(),
+                action,
+                transport,
+                code: code.clone(),
+                node: node.clone(),
+            });
+            let report = crate::tono::telemetry::spawn_connect_failure_report(
+                state, account_owner, stage.map(commands::stage_key), err, node, transport, code.as_deref(),
+            );
+            if plan.mark_armed {
+                state.audit().log(AuditEvent::ProtectedOffline { reason: "connectFail" });
+            }
+            report
+        } else {
+            None
+        };
+        (plan, armed, report)
     };
-    let code = failure::stable_error_code(&err).map(str::to_owned);
-    state.audit().log(AuditEvent::ConnectFail {
-        stage: stage.map(commands::stage_key),
-        error: err.clone(),
-        action,
-        transport,
-        code: code.clone(),
-        node: node.clone(),
-    });
-    crate::tono::telemetry::spawn_connect_failure_report(
-        state,
-        stage.map(commands::stage_key),
-        &err,
-        node,
-        transport,
-        code.as_deref(),
-    );
-    if plan.mark_armed {
-        state
-            .audit()
-            .log(AuditEvent::ProtectedOffline { reason: "connectFail" });
-    }
-
-    if plan.stop_core == Some(true) && armed {
-        match release_explicit(state, app).await {
-            Ok(()) => {
-                state.lock().await.fsm.connect_failed();
-            }
-            Err(release_error) => {
-                let mut inner = state.lock().await;
-                inner.fsm.initial_release_failed();
-                inner.connect_error = Some(crate::tono::audit::redact(&format!("{err}; {release_error}")));
-            }
-        }
-    } else if let Some(release) = plan.stop_core {
-        let _ = service::tono_stop_core(release).await;
-    }
-    if plan.restrict_bootstrap {
-        let _ = service::tono_restrict_bootstrap().await;
-    }
-
-    let inner = state.lock().await;
-    commands::emit_status(app, &commands::status_of(&inner));
-    err
+    Some(RecordedFailure { plan, armed, report })
 }
 
 
@@ -737,6 +923,41 @@ mod tests {
         connection::ConnectionStatus,
         node::{NodeProtocol, ValidatedNode},
     };
+
+    #[tokio::test]
+    async fn retained_failure_keeps_bounded_scrubbed_cause_when_retry_clears_live_error() {
+        let state = std::sync::Arc::new(crate::tono::state::TonoState::for_test());
+        let first = {
+            let mut inner = state.lock().await;
+            inner.connect_generation = 41;
+            inner.controller_secret = Some("fixture-controller-secret".into());
+            inner.attempt_history.begin(1000, "Original city".into(), "tcp", 54)
+        };
+        let error = format!(
+            "CORE_EXIT_UNREACHABLE: tls handshake eof <- dial 203.0.113.8:443 <- fixture-controller-secret; {}",
+            "é".repeat(3000),
+        );
+        super::retain_attempt_failure(&state, 41, &first, &error).await;
+        {
+            let mut inner = state.lock().await;
+            inner.connect_generation = 42;
+            inner.connect_error = None;
+            inner.controller_secret = Some("replacement-controller-secret".into());
+            inner.attempt_history.begin(3000, "Retry city".into(), "hy2", 55);
+        }
+        // A late writer must not splice replacement credentials or a new cause into A.
+        super::retain_attempt_failure(&state, 41, &first, "replacement-only cause").await;
+        let inner = state.lock().await;
+        let saved = serde_json::to_value(inner.attempt_history.last_failure.as_ref().unwrap()).unwrap();
+        assert_eq!(saved["id"], first.id);
+        assert_eq!(saved["connectionGeneration"], 41);
+        let detail = saved["errorDetail"].as_str().expect("retain the cause, not only its stable code");
+        assert!(detail.starts_with("CORE_EXIT_UNREACHABLE: tls handshake eof <- dial <ip>:443 <- <redacted>"));
+        assert!(!detail.contains("fixture-controller-secret") && !detail.contains("replacement"));
+        assert!(detail.chars().count() <= 2001);
+        assert!(detail.ends_with('…'));
+        assert!(inner.connect_error.is_none());
+    }
 
     #[test]
     fn dns_listener_conflict_reports_both_socket_owners_consistently() {
@@ -1187,41 +1408,56 @@ mod tests {
     }
 
     #[test]
-    fn real_data_plane_probes_independent_https_origins() {
-        assert!(
-            TUN_DATA_PLANE_PROBES.len() >= 3,
-            "one provider failure must not decide whether a locked tunnel works"
-        );
-        let mut hosts = BTreeSet::new();
-        for probe in TUN_DATA_PLANE_PROBES {
-            let url = reqwest::Url::parse(probe.url).expect("probe URL must parse");
-            assert_eq!(url.scheme(), "https", "{} must be authenticated TLS", probe.label);
-            hosts.insert(url.host_str().expect("probe URL must carry a host").to_string());
-            assert!(
-                (200..300).contains(&probe.expected_status),
-                "{} must require an exact success status",
-                probe.label
-            );
-        }
-        assert_eq!(
-            hosts.len(),
-            TUN_DATA_PLANE_PROBES.len(),
-            "nominally separate probes must not share an origin"
-        );
+    fn real_data_plane_probes_only_google_homepage() {
+        assert_eq!(TUN_DATA_PLANE_PROBES.len(), 1);
+        assert_eq!(TUN_DATA_PLANE_PROBES[0].url, "https://www.google.com");
+        assert_eq!(TUN_DATA_PLANE_PROBES[0].expected_status, 200);
+        assert_eq!(super::probes::EXIT_PROBE_URL, "https://www.google.com");
+        assert_eq!(super::probes::FAKE_IP_LOOKUP_HOST, "www.google.com");
+        assert_eq!(TUN_DATA_PLANE_PROBES, crate::tono::protected_probe::PROBE_ORIGINS);
     }
 
     #[test]
     fn real_data_plane_failure_names_every_failed_origin() {
         let failures = vec![
             "Google: timeout".to_string(),
-            "Cloudflare: connect reset".to_string(),
-            "Apple: status 503".to_string(),
         ];
         let error = format_tun_probe_failures(&failures);
-        assert!(error.contains("all 3 independent"));
+        assert!(error.contains("all 1 independent"));
         for failure in failures {
             assert!(error.contains(&failure));
         }
+    }
+
+    #[tokio::test]
+    async fn loopback_probe_retains_http_failure_without_changing_verdict() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 4096];
+            let _ = stream.read(&mut request).await.unwrap();
+            stream.write_all(b"HTTP/1.1 418 Teapot\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap();
+        });
+        let outcomes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorder = crate::tono::local_evidence::ProbeRecorder { round: 2, path: "loopback", outcomes: outcomes.clone() };
+        let client = reqwest::Client::builder().no_proxy().timeout(std::time::Duration::from_secs(3)).build().unwrap();
+        let probe = super::probes::TunDataPlaneProbe {
+            label: "Apple",
+            url: Box::leak(format!("http://{address}/owned-fixture").into_boxed_str()),
+            expected_status: 200,
+        };
+        let result = super::probes::probe_tun_endpoint(&client, probe, Some(&recorder)).await;
+        assert!(result.unwrap_err().contains("answered 418, expected 200"));
+        server.await.unwrap();
+        let saved = outcomes.lock().unwrap();
+        assert_eq!(saved.len(), 1);
+        assert_eq!((saved[0].round, saved[0].path, saved[0].origin), (2, "loopback", "Apple"));
+        assert!(!saved[0].passed);
+        assert_eq!(saved[0].category, "http");
+        assert_eq!(saved[0].actual_status, Some(418));
+        assert!(!serde_json::to_string(&*saved).unwrap().contains("owned-fixture"));
     }
 
     /// Fail-closed: retrying the checks changes nothing about the decision table. An exhausted

@@ -562,6 +562,53 @@ export interface TonoDiagnosticsReceipt {
   receivedAt: number | null
 }
 
+/** Local Copy details only. Not part of the cloud diagnostics contract. */
+export interface TonoLocalDiagnosticsReport extends TonoDiagnosticsReport {
+  localEvidence?: {
+    status: 'collected'
+    appBuild?: string | null
+    expectedCoreVersion?: string | null
+    reportedCoreVersion?: string | null
+    reportedExitProtocol?: string | null
+    selectedProtocol?: string | null
+    connectionGeneration: number
+    controllerGeneration: number
+    failureAtMs: number | null
+    currentAttemptId?: string | null
+    lastFailedAttempt?: {
+      id: string
+      startedAtMs: number
+      failedAtMs: number
+      selectedServer: string
+      transport: string
+      catalogRevision: number | null
+      failedStage: string | null
+      errorCode: string | null
+      connectionGeneration?: number
+      errorDetail?: string
+      steps: TonoDiagnosticsStep[]
+      probeOutcomes?: {
+        round: number
+        path: string
+        origin: string
+        passed: boolean
+        category: string
+        actualStatus: number | null
+        elapsedMs: number
+      }[]
+    } | null
+    coreLog: {
+      status: string
+      inspectedLines: number
+      truncated: boolean
+      observations: { code: string; count: number }[]
+    }
+  }
+}
+
+export const tonoLocalDiagnosticsReport = () =>
+  call<TonoLocalDiagnosticsReport>('tono_local_diagnostics_report')
+
 /** The exact payload an upload would send. Local only — nothing is sent. */
 export const tonoDiagnosticsReport = () =>
   call<TonoDiagnosticsReport>('tono_diagnostics_report')
@@ -578,12 +625,13 @@ export const tonoUploadDiagnostics = () =>
 /**
  * Render a report as the plain text "Copy details" puts on the clipboard.
  *
- * Deliberately the *same object* the upload sends, so what the user can read
- * and what leaves the machine can never drift apart.
+ * The base report matches the upload. Explicit local collection may append
+ * whitelisted Core observations; those are not sent by the upload command.
  */
 export const formatTonoDiagnostics = (
-  report: TonoDiagnosticsReport,
+  report: TonoLocalDiagnosticsReport,
 ): string => {
+  const local = report.localEvidence
   const killSwitch =
     report.killSwitchMode == null
       ? '(unknown)'
@@ -592,11 +640,13 @@ export const formatTonoDiagnostics = (
         : `${report.killSwitchMode} (wanted=${report.killSwitchWanted}, live=${report.killSwitchLive})`
   return [
     `Tono v${report.appVersion} diagnostics`,
+    `Reported at (UTC): ${new Date(report.reportedAtMs).toISOString()}`,
     `OS: ${report.osVersion} (${report.osArch})`,
     `Service protocol: ${report.serviceProtocol ?? '(unknown)'}${
       report.serviceBuild ? ` (build ${report.serviceBuild})` : ''
     }`,
     `Server: ${report.selectedServer ?? '(none)'}`,
+    `Catalog revision: ${report.catalogRevision ?? '(unknown)'}`,
     `UI state: ${report.uiState}`,
     `Account state: ${report.accountState}`,
     `Protection: ${killSwitch}`,
@@ -630,6 +680,40 @@ export const formatTonoDiagnostics = (
     ),
     `Audit log: ${report.auditLogPath}`,
     `Service log (admin only): ${report.serviceLogPath}`,
+    ...(local
+      ? [
+          'Local evidence (Copy details only; not included in cloud upload):',
+          `App build: ${local.appBuild ?? '(unknown)'}`,
+          `Bundled Core expectation: ${local.expectedCoreVersion ?? '(unknown)'}`,
+          `Controller-reported Core version: ${local.reportedCoreVersion ?? '(unavailable; not verified)'}`,
+          `Controller-selected exit protocol: ${local.reportedExitProtocol ?? '(unavailable; not verified)'}; not proof of handshake`,
+          `Selected catalog protocol: ${local.selectedProtocol ?? '(unknown)'}; not proof of runtime handshake`,
+          `Connection generation (process-local): ${local.connectionGeneration}`,
+          `Controller generation (process-local): ${local.controllerGeneration}`,
+          `Failure at (UTC): ${local.failureAtMs == null ? '(none)' : new Date(local.failureAtMs).toISOString()}`,
+          `Current attempt ID: ${local.currentAttemptId ?? '(unknown)'}`,
+          ...(local.lastFailedAttempt
+            ? [
+                `Retained failed attempt (memory only): ${local.lastFailedAttempt.id}`,
+                `Attempt started (UTC): ${new Date(local.lastFailedAttempt.startedAtMs).toISOString()}`,
+                `Attempt failed (UTC): ${new Date(local.lastFailedAttempt.failedAtMs).toISOString()}`,
+                `Attempt server: ${local.lastFailedAttempt.selectedServer}; transport=${local.lastFailedAttempt.transport}; catalog=${local.lastFailedAttempt.catalogRevision ?? '(unknown)'}`,
+                `Attempt failure: ${local.lastFailedAttempt.failedStage ?? '(unknown)'}; code=${local.lastFailedAttempt.errorCode ?? '(none)'}`,
+                `Attempt generation (process-local): ${local.lastFailedAttempt.connectionGeneration ?? '(unknown)'}`,
+                `Attempt cause (scrubbed): ${local.lastFailedAttempt.errorDetail ?? '(not captured)'}`,
+                ...local.lastFailedAttempt.steps.map(step =>
+                  `  - ${step.key}: ${step.state}${step.elapsedMs == null ? '' : ` (${formatTonoElapsed(step.elapsedMs)})`}`),
+                'Completed probes: App observations, not proof of exit transport handshake failure. Missing entries may be unstarted, cancelled or unavailable.',
+                ...(local.lastFailedAttempt.probeOutcomes ?? []).map(probe =>
+                  `  - round=${probe.round} path=${probe.path} origin=${probe.origin} result=${probe.passed ? 'passed' : 'failed'} category=${probe.category} status=${probe.actualStatus ?? 'unknown'} elapsed=${probe.elapsedMs}ms`),
+              ]
+            : ['Retained failed attempt: (none captured)']),
+          'Recent Core log: not correlated to this attempt; not a root-cause diagnosis',
+          `Core log status: ${local.coreLog.status}; inspected lines=${local.coreLog.inspectedLines}; truncated=${local.coreLog.truncated}`,
+          ...local.coreLog.observations.map(({ code, count }) => `  - ${code}: ${count}`),
+          'No matched observation does not prove a healthy Core. Raw logs, destinations and credentials are omitted.',
+        ]
+      : []),
   ].join('\n')
 }
 

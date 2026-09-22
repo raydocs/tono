@@ -37,18 +37,16 @@ use crate::{
 /// Concrete account API client used across the product layer.
 pub type TonoApiClient = ApiClient<TonoTransport, SessionCredentialStore>;
 
-/// One explicit DNS/Core/WFP release shared by Disconnect, Sign Out, Quit, and startup
-/// reconciliation. The result lives outside `TonoInner`, so waiting for it never holds the large
-/// product-state mutex. `Notify` also lets a later caller join an operation whose original UI
-/// waiter already timed out without launching a second, racing release.
-pub struct ReleaseOperation {
+/// Completion of a single owned lifecycle operation (release or account close). Waiting never
+/// holds the product-state mutex, and later callers join even if the original UI waiter left.
+pub struct LifecycleOperation {
     id: u64,
     result: StdMutex<Option<std::result::Result<(), String>>>,
     notify: tokio::sync::Notify,
 }
 
-impl ReleaseOperation {
-    fn new(id: u64) -> Self {
+impl LifecycleOperation {
+    pub(crate) fn new(id: u64) -> Self {
         Self {
             id,
             result: StdMutex::new(None),
@@ -177,6 +175,9 @@ pub struct TonoInner {
     /// `error` account state instead of a mistaken signed-out).
     pub credential_error: Option<String>,
     pub account_state: AccountState,
+    /// Admission stays closed through protected release AND server/local logout. The detached
+    /// owner clears this slot only after its final state commit, even if its UI waiter leaves.
+    pub account_close: Option<Arc<LifecycleOperation>>,
     /// Last verified account payload (`GET me` or the sign-in response).
     pub account: Option<User>,
     /// In-flight email sign-in challenge, consumed by `tono_sign_in_verify`.
@@ -222,8 +223,8 @@ pub struct TonoInner {
     /// Monotonic epoch of the controller endpoint adopted by the UI. Unlike the connect
     /// transaction generation, this also advances for automatic recovery within one intent.
     pub controller_generation: u64,
-    /// Connect transaction generation. Disconnect, sign-out, and node
-    /// switches bump it; an in-flight attempt re-checks it at every stage
+    /// Connect transaction generation. Every admitted attempt, Disconnect, sign-out, and node
+    /// switch bumps it; an in-flight attempt re-checks it at every stage
     /// boundary and exits without side effects when it moved.
     pub connect_generation: u64,
     /// Immediate cancellation signal for read-only/current-stage work. Privileged IPC mutations
@@ -275,6 +276,8 @@ pub struct TonoInner {
     pub failed_stage: Option<&'static str>,
     pub connect_error: Option<String>,
     pub connect_error_at_ms: Option<i64>,
+    /// Memory-only retained failure, independent of the current retry's UI fields.
+    pub attempt_history: crate::tono::local_evidence::AttemptHistory,
     /// F3: retry bookkeeping — failed attempts so far and the scheduled
     /// reconnect deadline (epoch millis).
     pub retry_attempt: u32,
@@ -454,10 +457,11 @@ pub struct TonoState {
     route_ledger: parking_lot::Mutex<crate::tono::route_ledger::RouteLedger>,
     /// Serializes login, periodic, and user-initiated catalog fetches for one account session.
     catalog_sync_operation: tokio::sync::Mutex<()>,
-    release_operation: tokio::sync::Mutex<Option<Arc<ReleaseOperation>>>,
+    release_operation: tokio::sync::Mutex<Option<Arc<LifecycleOperation>>>,
     /// A late StartClash or DNS-enable commit must settle before explicit release reaches the
     /// Service. Connect mutations hold a read guard inside their detached reconciliation task;
-    /// the one release worker holds the write guard through the atomic Service release.
+    /// admission also takes a reader. Detached failure/switch cleanup and the one release worker
+    /// hold the writer; a full-release failure transfers its writer into that coordinator.
     privileged_transition: Arc<tokio::sync::RwLock<()>>,
     /// Prevent a validated cloud policy from being revoked/replaced between DIRECT runtime
     /// staging and the final exact WFP endpoint commit. Sync commits take the writer; one
@@ -471,8 +475,22 @@ impl TonoState {
         let catalog_dir = tono_data_dir()?;
         std::fs::create_dir_all(&catalog_dir)
             .with_context(|| format!("failed to create Tono data dir {}", catalog_dir.display()))?;
+        let audit = crate::tono::audit::Audit::new(&catalog_dir.join("logs"), &catalog_dir);
+        Self::with_catalog_dir(catalog_dir, audit, Arc::new(SessionCredentialStore::new()))
+    }
 
-        let credentials = Arc::new(SessionCredentialStore::new());
+    /// Diskless lifecycle fixture: no Tauri handle, credential vault, Service, or audit writer.
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        let catalog_dir = std::env::temp_dir().join(format!("tono-state-{}", new_installation_id()));
+        let (sender, _receiver) = tokio::sync::mpsc::channel(1);
+        let audit = crate::tono::audit::Audit::for_test(sender, &catalog_dir, false);
+        Self::with_catalog_dir(catalog_dir, audit, Arc::new(SessionCredentialStore::for_test())).unwrap()
+    }
+
+    fn with_catalog_dir(
+        catalog_dir: PathBuf, audit: Arc<crate::tono::audit::Audit>, credentials: Arc<SessionCredentialStore>,
+    ) -> Result<Self> {
         let transport = TonoTransport::new()?;
         let client = Arc::new(TonoApiClient::new(
             tono_core::auth::DEFAULT_BASE_URL,
@@ -486,9 +504,6 @@ impl TonoState {
         // persists this one) off-thread with a timeout.
         let installation_id = new_installation_id();
 
-        // §8 audit: JSONL under `tono/logs`, toggle from `tono/settings.json`.
-        let audit = crate::tono::audit::Audit::new(&catalog_dir.join("logs"), &catalog_dir);
-
         Ok(Self {
             inner: tokio::sync::Mutex::new(TonoInner {
                 client,
@@ -496,6 +511,7 @@ impl TonoState {
                 credentials_loaded: false,
                 credential_error: None,
                 account_state: AccountState::SignedOut,
+                account_close: None,
                 account: None,
                 challenge_id: None,
                 sign_in_generation: 0,
@@ -531,6 +547,7 @@ impl TonoState {
                 failed_stage: None,
                 connect_error: None,
                 connect_error_at_ms: None,
+                attempt_history: Default::default(),
                 retry_attempt: 0,
                 next_retry_at_ms: None,
                 catalog_failover_tried: std::collections::BTreeSet::new(),
@@ -579,13 +596,13 @@ impl TonoState {
 
     /// Start one release or join the already-running one. The boolean is true only for the caller
     /// responsible for spawning the supervisor.
-    pub async fn begin_release(&self) -> (Arc<ReleaseOperation>, bool) {
+    pub async fn begin_release(&self) -> (Arc<LifecycleOperation>, bool) {
         let mut slot = self.release_operation.lock().await;
         if let Some(operation) = slot.as_ref() {
             return (Arc::clone(operation), false);
         }
         let id = self.next_release_id.fetch_add(1, Ordering::Relaxed);
-        let operation = Arc::new(ReleaseOperation::new(id));
+        let operation = Arc::new(LifecycleOperation::new(id));
         *slot = Some(Arc::clone(&operation));
         (operation, true)
     }
@@ -661,6 +678,28 @@ struct SelectionFile {
 
 pub fn selection_path(dir: &std::path::Path) -> std::path::PathBuf {
     dir.join(SELECTION_FILE_NAME)
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SuccessfulSelection {
+    selected: String,
+    revision: i64,
+    verified_at_ms: i64,
+}
+
+/// Historical hint only, never evidence of current reachability or a requested selection.
+pub fn save_successful_selection(dir: &std::path::Path, selected: &str, revision: i64, now: i64) -> Result<()> {
+    let record = SuccessfulSelection { selected: selected.to_owned(), revision, verified_at_ms: now };
+    write_private_file(&dir.join("last-success.json"), &serde_json::to_vec(&record)?)
+}
+
+pub fn load_successful_selection(dir: &std::path::Path, revision: i64, now: i64) -> Option<String> {
+    let record: SuccessfulSelection = serde_json::from_slice(
+        &std::fs::read(dir.join("last-success.json")).ok()?,
+    ).ok()?;
+    let age = now.checked_sub(record.verified_at_ms)?;
+    (revision >= 0 && record.revision == revision && (0..86_400_000).contains(&age)
+        && !record.selected.is_empty() && record.selected.len() <= 128).then_some(record.selected)
 }
 
 /// Persist the selection with owner-only protection (0600 on unix, a
@@ -1029,8 +1068,21 @@ impl Drop for CurrentUserSid {
 
 #[cfg(test)]
 mod tests {
-    use super::{matching_selected_delay, AccountState, ReleaseOperation};
+    use super::{matching_selected_delay, AccountState, LifecycleOperation};
     use std::{sync::Arc, time::Duration};
+
+    #[test]
+    fn successful_selection_is_private_recent_revision_bound_history() {
+        let dir = std::env::temp_dir().join(format!("tono-success-{}", tono_core::auth::new_installation_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        super::save_successful_selection(&dir, "Tokyo · Fuji", 54, 1000).unwrap();
+        assert_eq!(super::load_successful_selection(&dir, 54, 1001).as_deref(), Some("Tokyo · Fuji"));
+        assert!(super::load_successful_selection(&dir, 55, 1001).is_none());
+        assert!(super::load_successful_selection(&dir, 54, 999).is_none());
+        assert!(super::load_successful_selection(&dir, 54, 1000 + 86_400_000).is_none());
+        assert!(super::load_selection(&dir).is_none(), "success must not overwrite explicit selection");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn account_state_keys_are_stable() {
@@ -1044,7 +1096,7 @@ mod tests {
 
     #[tokio::test]
     async fn release_operation_wakes_every_joiner_and_replays_the_result() {
-        let operation = Arc::new(ReleaseOperation::new(7));
+        let operation = Arc::new(LifecycleOperation::new(7));
         let first = tokio::spawn({
             let operation = Arc::clone(&operation);
             async move { operation.wait().await }

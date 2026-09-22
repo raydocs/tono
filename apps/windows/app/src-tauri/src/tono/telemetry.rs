@@ -188,17 +188,18 @@ pub(crate) async fn spawn_periodic_for_auth_generation(state: &Arc<TonoState>, _
 /// as the periodic window — this is not the 3.5 raw connection log.
 pub(crate) fn spawn_connect_failure_report(
     state: &Arc<TonoState>,
+    account_owner: (u64, u64),
     stage: Option<&'static str>,
     error: &str,
     node: Option<String>,
     transport: Option<&'static str>,
     code: Option<&str>,
-) {
+) -> Option<tauri::async_runtime::JoinHandle<()>> {
     if !state.audit().periodic_telemetry_enabled() || !state.audit().enabled() {
-        return;
+        return None;
     }
     let Some(node) = node.filter(|name| !name.trim().is_empty()) else {
-        return;
+        return None;
     };
     let stage = stage.unwrap_or("unknown").to_string();
     let code = code
@@ -214,10 +215,11 @@ pub(crate) fn spawn_connect_failure_report(
         .filter(|value| *value == "tcp" || *value == "hy2")
         .map(str::to_string);
     let task_state = state.clone();
-    AsyncHandler::spawn(move || async move {
-        let (client, generation, tcp_delay_ms, exit_delay_ms) = {
+    Some(AsyncHandler::spawn(move || async move {
+        let (generation, identity) = account_owner;
+        let (client, tcp_delay_ms, exit_delay_ms) = {
             let inner = task_state.lock().await;
-            if matches!(
+            if inner.sign_in_generation != generation || inner.account_close.is_some() || matches!(
                 inner.account_state,
                 crate::tono::state::AccountState::SignedOut | crate::tono::state::AccountState::Restoring
             ) {
@@ -225,7 +227,6 @@ pub(crate) fn spawn_connect_failure_report(
             }
             (
                 inner.client.clone(),
-                inner.sign_in_generation,
                 inner.selected_tcp_delay_ms().map(|ms| ms as i64),
                 inner.selected_exit_delay_ms().map(|ms| ms as i64),
             )
@@ -254,8 +255,8 @@ pub(crate) fn spawn_connect_failure_report(
             exit_delay_ms,
             transport,
         };
-        let _ = client.upload_connect_failure(&report).await;
-    });
+        let _ = client.upload_connect_failure_for_identity(&report, identity).await;
+    }))
 }
 
 /// Probe whether the account session behind a `NotFound` upload is still
@@ -276,12 +277,12 @@ async fn upload_once(state: &Arc<TonoState>, generation: u64) -> Result<(), ApiE
     if !state.audit().periodic_telemetry_enabled() || !state.audit().enabled() {
         return Ok(());
     }
-    let client = {
+    let (client, identity) = {
         let inner = state.lock().await;
-        if inner.sign_in_generation != generation {
+        if inner.sign_in_generation != generation || inner.account_close.is_some() {
             return Ok(());
         }
-        inner.client.clone()
+        (inner.client.clone(), inner.client.diagnostics_log_identity().await)
     };
 
     let (report, uploaded_totals, baseline_epoch) = build_window_report(state).await.map_err(ApiError::InvalidInput)?;
@@ -296,7 +297,7 @@ async fn upload_once(state: &Arc<TonoState>, generation: u64) -> Result<(), ApiE
     }
     let bytes = serde_json::to_vec(&report).map(|v| v.len()).unwrap_or(0) as u32;
     let event_count = report.event_count;
-    match client.upload_telemetry_window(&report).await {
+    match client.upload_telemetry_window_for_identity(&report, identity).await {
         Ok(receipt) => {
             let inner = state.lock().await;
             if inner.sign_in_generation != generation || !state.audit().periodic_telemetry_enabled() {
