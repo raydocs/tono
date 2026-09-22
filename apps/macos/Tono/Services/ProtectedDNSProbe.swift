@@ -126,6 +126,10 @@ nonisolated enum ProtectedDNSProbe {
             guard let owner = readName(packet, offset: &offset),
                   offset + 10 <= packet.count else { return [] }
             let type = Int(packet[offset]) << 8 | Int(packet[offset + 1])
+            // This probe sends no EDNS OPT. RFC 6891 §7 forbids an unsolicited
+            // OPT response; ignoring one would also discard its extended RCODE
+            // and could turn BADVERS into a successful fake-IP proof.
+            guard type != 41 else { return [] }
             let recordClass = Int(packet[offset + 2]) << 8 | Int(packet[offset + 3])
             let rdlength = Int(packet[offset + 8]) << 8 | Int(packet[offset + 9])
             offset += 10
