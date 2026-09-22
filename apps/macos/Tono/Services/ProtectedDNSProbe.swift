@@ -39,7 +39,10 @@ nonisolated enum ProtectedDNSProbe {
         server: String,
         port: Int,
         timeout: TimeInterval,
-        name: String = ProtectedDNSProbe.name
+        name: String = ProtectedDNSProbe.name,
+        makeConnection: @Sendable (NWEndpoint.Host, NWEndpoint.Port) -> NWConnection = {
+            NWConnection(host: $0, port: $1, using: .udp)
+        }
     ) async -> [String] {
         let packet = encodeQuery(name: name)
         let host = NWEndpoint.Host(server)
@@ -49,7 +52,7 @@ nonisolated enum ProtectedDNSProbe {
         let holder = ConnectionHolder()
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
-                let connection = NWConnection(host: host, port: nwPort, using: .udp)
+                let connection = makeConnection(host, nwPort)
                 holder.connection = connection
                 let once = OnceResume<[String]>()
                 let finish: @Sendable ([String]) -> Void = { answers in
