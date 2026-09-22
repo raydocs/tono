@@ -93,7 +93,10 @@ impl ReleaseManifest {
 
     pub fn sha256(&self) -> Result<String, ContractError> {
         self.validate()?;
-        Ok(format!("{:x}", Sha256::digest(canonical(self)?)))
+        Ok(Sha256::digest(canonical(self)?)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect())
     }
 
     fn target(&self, id: TargetId) -> Result<&Target, ContractError> {
