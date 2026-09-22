@@ -125,6 +125,8 @@ final class AppState {
     }
     var isProxyDegraded: Bool = false
     var isRecoveringProtectedConnection: Bool = false
+    /// Presentation context only; ConnectionCoordinator still owns all work.
+    var recoveryCause: RecoveryCause?
     var lastClassifiedFailure: ProtectedFailure?
     var healthCounters = ProtectedHealthCounters()
     var tonoTransport: TonoTransportDescriptor? = nil
@@ -144,6 +146,7 @@ final class AppState {
     // Proxies
     var proxyRegions: [ProxyRegion] = []
     var selectedNodeId: String? = nil
+    var routePreferences = LocalRoutePreferences()
 
     // Rules
     var rules: [RuleItem] = []
@@ -331,6 +334,7 @@ final class AppState {
                 "protected_reconnect_network_kick",
                 details: auditProtectionDetails()
             )
+            recoveryCause = .networkChange
             scheduleProtectedReconnect(immediate: true)
             return
         }
@@ -374,6 +378,7 @@ final class AppState {
                 "system_network_change_requires_reconnect",
                 details: self.auditProtectionDetails()
             )
+            self.recoveryCause = .networkChange
             self.disconnect(releaseKillSwitch: false)
             self.errorMessage = String(
                 localized: "The active network changed; Kill Switch is blocking traffic while Tono protects the new connection."
@@ -500,6 +505,7 @@ final class AppState {
             details: auditProtectionDetails()
         )
         guard shouldResume else { return }
+        recoveryCause = .wake
         connectionCoordinator.bumpGeneration()
         connectionCoordinator.networkEnvironmentTask?.cancel()
         connectionCoordinator.networkEnvironmentTask = nil
@@ -2070,7 +2076,11 @@ final class AppState {
                 ? "Direct"
                 : conn.chains.joined(separator: " → "),
             uploadText: formatBytes(conn.upload),
-            downloadText: formatBytes(conn.download)
+            downloadText: formatBytes(conn.download),
+            routingExplanation: ActivityRouteExplanation(
+                connection: conn, catalog: managedCatalogNodes,
+                residentialTerminal: residentialRouteAuditContext?.admittedTerminal
+            )
         )
     }
 

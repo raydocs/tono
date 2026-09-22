@@ -169,6 +169,118 @@ final class AccountSessionRequestTests: XCTestCase {
         account.state = .ready
     }
 
+    func testSupportReportRequiresConfirmationAndSendsOnlyFrozenPreviewWithActualReceipt() async throws {
+        let (account, transport, host, requests) = fixture()
+        defer {
+            transport.invalidateAndCancel(); HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+        }
+        try await adoptTestAccount(account)
+        let rawConsent = AppProfile.defaults.object(forKey: SettingsKey.networkLogUploadEnabled) as? Bool
+        let remoteConsent = AppProfile.defaults.object(forKey: SettingsKey.remoteDiagnosticsEnabled) as? Bool
+        let app = AppState()
+        app.isProtectionBlocked = true
+        app.errorMessage = "token=private-secret https://browsing.example/private"
+        app.connectionCoordinator.connectAttemptID = UUID()
+        let observation = await app.collectLocalHealth(account: account, probe: { .init() })
+        account.previewSupportReport(try XCTUnwrap(observation))
+        let draft = try XCTUnwrap(account.supportReportDraft)
+        XCTAssertNil(account.uploadingSupportReportID)
+        XCTAssertNil(account.supportReportReceipt)
+        // A changed connection cannot send a stale preview, even with the same account.
+        await account.confirmSupportReport(id: draft.id, generation: draft.health.generation + 1)
+        XCTAssertNil(account.uploadingSupportReportID)
+        let task = Task { await account.confirmSupportReport(id: draft.id, generation: draft.health.generation) }
+        let pending = try await nextRequest(requests)
+        XCTAssertEqual(pending.request.url?.path, "/api/v1/diagnostics/reports")
+        XCTAssertEqual(pending.request.httpMethod, "POST")
+        XCTAssertEqual(pending.request.value(forHTTPHeaderField: "Authorization"), "Bearer test-only-access")
+        var data = pending.request.httpBody ?? Data()
+        if let stream = pending.request.httpBodyStream {
+            stream.open(); defer { stream.close() }
+            var bytes = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&bytes, maxLength: bytes.count)
+                guard count > 0 else { break }
+                data.append(contentsOf: bytes.prefix(count))
+            }
+        }
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? NSDictionary)
+        let preview = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(draft.preview.utf8)) as? NSDictionary)
+        XCTAssertEqual(json, preview, "the actual request must match the approved preview")
+        XCTAssertEqual(Set(json.allKeys.compactMap { $0 as? String }), ["report"])
+        let report = try XCTUnwrap(json["report"] as? [String: Any])
+        let wireKeys: Set<String> = ["schemaVersion", "reportedAtMs", "appVersion", "osVersion", "osArch", "serviceProtocol", "serviceBuild", "uiState", "accountState", "selectedServer", "catalogRevision", "killSwitchMode", "killSwitchWanted", "killSwitchLive", "killSwitchLastError", "dnsEnabled", "dnsLastError", "failedStage", "error", "retryAttempt", "totalElapsedMs", "steps", "virtualAdapters", "auditLogPath", "serviceLogPath"]
+        XCTAssertTrue(Set(report.keys).isSubset(of: wireKeys))
+        XCTAssertEqual(report["schemaVersion"] as? Int, 1)
+        XCTAssertEqual(report["auditLogPath"] as? String, "")
+        XCTAssertEqual(report["serviceLogPath"] as? String, "")
+        XCTAssertNil(report["killSwitchLive"])
+        let body = String(decoding: data, as: UTF8.self)
+        XCTAssertFalse(body.contains("private-secret"))
+        XCTAssertFalse(body.contains("browsing.example"))
+        XCTAssertFalse(body.contains(draft.health.attempt!.uuidString))
+        XCTAssertFalse(body.contains("test-only-access"))
+        pending.respond(status: 201, body: #"{"referenceCode":"TON-NATIVE-73","receivedAt":1790000000}"#)
+        await task.value
+        let receipt = try XCTUnwrap(account.supportReportReceipt)
+        XCTAssertEqual(receipt.server.referenceCode, "TON-NATIVE-73")
+        XCTAssertEqual(receipt.server.receivedAt, 1_790_000_000)
+        XCTAssertTrue(receipt.copyText.contains(draft.health.attempt!.uuidString))
+        XCTAssertEqual(rawConsent, AppProfile.defaults.object(forKey: SettingsKey.networkLogUploadEnabled) as? Bool)
+        XCTAssertEqual(remoteConsent, AppProfile.defaults.object(forKey: SettingsKey.remoteDiagnosticsEnabled) as? Bool)
+        account.discardSupportReport()
+        XCTAssertFalse(draft.lease.isCurrent())
+    }
+
+    func testSupportReportAccountRetirementStopsHeldUnauthorizedRetryAndClearsReceipt() async throws {
+        let (account, transport, host, requests) = fixture()
+        defer {
+            transport.invalidateAndCancel(); HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+        }
+        try await adoptTestAccount(account)
+        let app = AppState()
+        let observation = await app.collectLocalHealth(account: account, probe: { .init() })
+        account.previewSupportReport(try XCTUnwrap(observation))
+        let draft = try XCTUnwrap(account.supportReportDraft)
+        let task = Task { await account.confirmSupportReport(id: draft.id, generation: draft.health.generation) }
+        let held = try await nextRequest(requests)
+        // Retire synchronously before credentials are cleared, as real sign-out does.
+        account.invalidateAccountReads()
+        XCTAssertFalse(draft.lease.isCurrent())
+        HeldAccountProtocol.install(host) { request in
+            XCTFail("retired consent must not refresh credentials or retry the report")
+            request.respond(status: 500, body: "{}")
+        }
+        held.respond(status: 401, body: #"{"error":{"message":"expired"}}"#)
+        await task.value
+        XCTAssertNil(account.supportReportDraft)
+        XCTAssertNil(account.supportReportReceipt)
+        XCTAssertNil(account.supportReportError)
+    }
+
+    func testSupportReportWithoutServerReferenceNeverClaimsReceiptOrEchoesTransportBody() async throws {
+        let (account, transport, host, requests) = fixture()
+        defer {
+            transport.invalidateAndCancel(); HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+        }
+        try await adoptTestAccount(account)
+        let app = AppState()
+        let observation = await app.collectLocalHealth(account: account, probe: { .init() })
+        account.previewSupportReport(try XCTUnwrap(observation))
+        let draft = try XCTUnwrap(account.supportReportDraft)
+        let task = Task { await account.confirmSupportReport(id: draft.id, generation: draft.health.generation) }
+        let held = try await nextRequest(requests)
+        held.respond(status: 201, body: #"{"referenceCode":"","detail":"private-secret"}"#)
+        await task.value
+        XCTAssertNil(account.supportReportReceipt)
+        XCTAssertNotNil(account.supportReportError)
+        XCTAssertFalse(account.supportReportError!.contains("private-secret"))
+        XCTAssertEqual(account.supportReportDraft?.preview, draft.preview)
+    }
+
     func testFailedPeriodicUploadRetainsEventsUntilOwnedSnapshotIsAcknowledged() async throws {
         let (account, transport, host, requests) = fixture()
         let buffer = ConnectionTelemetryBuffer.shared

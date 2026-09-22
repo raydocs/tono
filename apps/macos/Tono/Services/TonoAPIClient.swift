@@ -227,6 +227,22 @@ actor TonoAPIClient {
         try await authorizedRequest("telemetry/failures", method: "POST", body: report)
     }
 
+    func uploadSupportReport(
+        _ request: TonoSupportReportRequest,
+        requestIsCurrent: @escaping @Sendable () -> Bool
+    ) async throws -> TonoSupportReceipt {
+        let receipt: TonoSupportReceipt = try await authorizedRequest(
+            "diagnostics/reports", method: "POST", body: request,
+            requestIsCurrent: requestIsCurrent
+        )
+        try Self.requireCurrent(requestIsCurrent)
+        guard !receipt.referenceCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              receipt.referenceCode.count <= 100,
+              !receipt.referenceCode.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+        else { throw APIError.invalidResponse }
+        return receipt
+    }
+
     func submitDeviceActionResult(id: String, result: TonoDeviceActionResult) async throws {
         let validID = try validatedDeviceID(id)
         let _: TonoDeviceActionResultResponse = try await authorizedRequest(

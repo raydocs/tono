@@ -32,7 +32,14 @@ final class AccountSession {
     @ObservationIgnored var nextDeviceReloadID: UInt64 = 0
     @ObservationIgnored var nextDeviceRevokeID: UInt64 = 0
     @ObservationIgnored var nextTrafficPolicyRefreshID: UInt64 = 0
-    func invalidateAccountReads() { accountReadRevision &+= 1 }
+    var supportReportDraft: SupportReportDraft?
+    var supportReportReceipt: SupportReportReceipt?
+    var supportReportError: String?
+    var uploadingSupportReportID: UUID?
+    func invalidateAccountReads() {
+        accountReadRevision &+= 1
+        discardSupportReport()
+    }
 
     var user: TonoUser? {
         didSet {
