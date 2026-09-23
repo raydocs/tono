@@ -32,6 +32,29 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows runtime asset 从已校验的句柄复制（H2-F4）
+
+- **归属**：G1 保护不变量（特权端不跟随用户可写路径）；平台/模块：Windows Service
+  runtime generation（`apps/windows/service`），App 无代码改动。
+- **来源**：基线 main b1b6fe6c → 分支 `fix/runtime-asset-reparse-20260923`；Issue #355；
+  PR 与准确源码 SHA 见 PR，提交本条时未合 main。
+- **缺陷修复（内部审查 H2-F4，源码推导，影响低）**：`validate_source` 在规划阶段按路径
+  校验，`copy_staged_file` 在停旧 Core 之后用 `tokio::fs::copy` 按路径重新打开，会跟随
+  中途换上的 junction/symlink。改后：复制只打开一次源文件，并证明该句柄仍解析到已校验
+  路径（Windows `GetFinalPathNameByHandleW`；Unix canonical + dev/ino），不一致即拒绝，
+  内容从同一句柄读取。StartClash 的 `materialize` 与 `stage_runtime` 共用此原语。
+- **新增/优化**：无。
+- **工程与测试**：新增 `#[tokio::test]`
+  `a_source_directory_swapped_for_a_link_after_validation_is_not_copied`（`staging.rs`）：
+  校验路径成立后把源目录换成 junction（Windows，`mklink /J`）或 symlink（Unix），复制
+  必须失败且目标不存在；旧代码会跟随链接复制成功，断言失败。
+- **验证**：本机（MacBook）只做编辑与 `rustfmt --check`，未运行 cargo build/test；编译与
+  回归委托本 PR 的 GitHub-hosted `windows-2025` CI，结果以该 run 为准。
+- **候选/发布**：仅源码，无新候选、无新包；未触碰 `appcast.xml`/`latest.json` 或
+  `windows-updates`。
+- **剩余限制**：复制后目标文件不做摘要复核（句柄已固定，内容即该文件当前内容）；
+  gather 阶段的 1 GiB 上限仍按规划时的大小判断，复制时不再截断。硬链接不在本修复范围内。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
