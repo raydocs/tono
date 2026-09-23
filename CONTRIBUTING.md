@@ -50,6 +50,16 @@ Remote tests do not see uncommitted local edits. Do not claim an unrelated
 green `main` run verifies a branch. Do not commit another agent's files, build
 caches, private credentials or unredacted diagnostic captures.
 
+## Record each internal update
+
+Maintain the [internal changelog](docs/INTERNAL_CHANGELOG.md) in the same PR as
+each internal code, configuration, build/test tooling or release/acceptance
+delivery. Use its template to distinguish fixes, new behavior, verification
+and unverified limits. Record which exact candidate contains the change, or
+say that no new package exists. Link detailed reports rather than copying
+their evidence; preserve historical failures and source identities. Read-only
+reviews and formatting-only edits need no empty entry.
+
 ## Branch and release ownership
 
 macOS is released from `release/macos`, Windows from `release/windows`, and

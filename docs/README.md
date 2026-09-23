@@ -6,6 +6,7 @@ Start here. Dated handoffs and one-off reviews live in [archive/](archive/).
 
 | Doc | What it owns |
 |---|---|
+| [INTERNAL_CHANGELOG.md](INTERNAL_CHANGELOG.md) | Internal fixes/features, source and candidate inclusion, verification limits; update in the same delivery PR |
 | [BUILD_AND_TEST.md](BUILD_AND_TEST.md) | GitHub-hosted CI, MacBook lightweight work, native-device acceptance and cache retention |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Contributor workflow and verification evidence |
 | [../AGENTS.md](../AGENTS.md) | Coding-agent rules; choose an execution host before compiling |
