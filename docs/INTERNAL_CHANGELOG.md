@@ -32,6 +32,51 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-22 · 连接中选择的云出口不再被连接完成回写静默覆盖
+
+- **归属**：G1（连接/节点选择：用户最后一次选择意图跨连接完成保持，I2）；
+  macOS 客户端 `apps/macos`。
+- **来源**：分支 `fix/macos-pending-exit-selection-20260922`，叠在
+  `fix/macos-tun-switch-guard-20260922`（PR #298）、
+  `fix/macos-external-release-misjudge-20260922`（PR #304）、
+  `fix/macos-optional-policy-reconnect-20260922`（PR #306）、
+  `fix/macos-pending-network-change-20260922`（PR #309）、
+  `fix/macos-sleep-during-release-20260922`（PR #310）之上，基线同后者；
+  R1-F6，出自 2026-09-22 macOS 连接生命周期审查及 V3 对抗核实（降级为低：
+  生产 Cloud Servers 卡片连接中已 `.disabled`，无守卫的 `nodeCard` 是死代码，
+  现网触发面只剩点击与重渲染同帧竞争及未来新入口；但选择被覆盖的回写路径
+  逐行属实）。提交时未合 main。
+- **缺陷修复**：正在连接 X 时用户选 Y，`selectNode` 的 `!isConnected` 分支
+  持久化 Y（`selectedNodeId`/`activeNode`/`proxyService.activeNodeName`/
+  `persistProxySelection`）后因 `shouldConnect(connecting: true) == false`
+  只记录不拨号；连接完成后 `onCoreStarted` 的 `networkInfoTask` 经
+  `proxyService.refresh()` 从 selector `now` 读回 X（连接发起时捕获的出口），
+  回写 `applyProxySelection(X)` + `persistProxySelection(X)`——用户选择被静默
+  覆盖回 X，UI 与持久化一致回退，且没有排队切换。修复：`selectNode` 在
+  `isConnecting` 期间额外记录 `pendingExitSelection`（用户最后意图）；回写
+  提取为 `reconcileProxySelectionAfterCoreStart()` 并消费该标记——与 core
+  实际出口一致时按原回写收尾，不同时不覆盖用户选择，而是经 `selectNode`
+  既有 connected 切换路径（arm 先行、验证后 close connections、
+  `finishNodeSwitch` 代际护栏）发起对 Y 的受保护切换；`connect()` prepare
+  清除残留标记，未完成的连接尝试不会把陈旧选择泄漏进下一次。不放宽保护：
+  切换本身走既有受保护流程，与 #298 的 coreMonitor 守卫共存，无额外处理。
+- **新增/优化**：无新能力。`AppState` 新增内部标记 `pendingExitSelection`；
+  `onCoreStarted` 的回写闭包提取为可测方法 `reconcileProxySelectionAfterCoreStart()`
+  （无 pending 时行为与原闭包等价）。
+- **工程与测试**：新增一个窄 XCTest
+  `NodeSelectionTests.testExitPickedWhileConnectingSurvivesConnectCompletion`
+  （fixture `isConnecting` + 目录含 X/Y，`selectNode(Y)` 后驱动完成回写，
+  断言选择未被覆盖回 X 且已发起既有节点切换）。无 fixture/CI 修正。
+- **验证**：仅源码级自查（逐行对照 `AppState+Proxy.swift`/`AppState+Connect.swift`/
+  `ProxyService.swift` 调用链与前五步改动的共存）；按 2026-09-14 执行位置决定，
+  本机未运行 `xcodebuild`/XCTest（MacBook 不做本地原生构建），XCTest 回归
+  委托本 PR CI（macos-26）——提交时未执行，结果待 CI，不得视为已验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：视图层同帧点击竞争（`.disabled` 生效前一帧）不在 XCTest
+  覆盖范围（不驱动 SwiftUI 渲染时序）；切换发起后的 arm/verify/converge
+  全流程依赖真实 core 与 helper，属既有 #298/#304 覆盖的路径，本测试只断言
+  切换已发起且选择未被覆盖。
+
 ## 2026-09-22 · 睡眠不再把进行中的显式 Restore internet 改写为保留保护+唤醒重连；未 armed 的 teardown 不再宣称 Kill Switch 在护机
 
 - **归属**：G1（断开与恢复：用户明确要求的恢复直连跨睡眠保持，UI 保护状态与真实 PF

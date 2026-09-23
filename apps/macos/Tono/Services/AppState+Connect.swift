@@ -44,6 +44,13 @@ extension AppState {
                 self.lastClassifiedFailure = nil
                 self.isConnecting = true
                 self.errorMessage = nil
+                // A pending exit selection belongs to the connect attempt
+                // that was in flight when the user picked it (R1-F6); its
+                // epilogue consumes it. An attempt that never completed —
+                // cancelled, failed — must not leak its stale pick into this
+                // fresh one: the selection this connect dials is whatever
+                // the user chose last, idle picks included.
+                self.pendingExitSelection = nil
                 // Any fresh connect attempt is user-visible intent to try again; the
                 // reconnect loop re-pauses if the same user-action failure repeats.
                 self.protectedReconnectPausedForUserAction = false
@@ -1088,13 +1095,7 @@ extension AppState {
             guard let self else { return }
             await self.proxyService.refresh()
             await MainActor.run {
-                if let selected = self.proxyService.activeNodeName,
-                   self.applyProxySelection(selected) {
-                    self.proxyService.activeGroupName = ConfigPipeline.exitGroupName
-                    self.persistProxySelection(selected)
-                } else {
-                    self.restoreProxySelection(persistFallback: true)
-                }
+                self.reconcileProxySelectionAfterCoreStart()
             }
             try? await Task.sleep(for: .milliseconds(1_500))
             guard !Task.isCancelled, self.isConnected else { return }
@@ -1126,6 +1127,39 @@ extension AppState {
         // connect's epilogue clearing `isConnecting`.
         consumePendingNetworkChange()
         return true
+    }
+
+    /// The connect epilogue's selection writeback. `refresh()` has already
+    /// copied the running core's authoritative selector `now` into
+    /// `proxyService.activeNodeName`; normally that value is adopted and
+    /// persisted. An exit the user picked while this connect was still in
+    /// flight (recorded as `pendingExitSelection`, R1-F6) must survive
+    /// instead: when the core landed on a different exit, the pick is not
+    /// silently overwritten back to it — the ordinary protected node switch
+    /// to the pending exit starts here through `selectNode`'s connected
+    /// path (arm old ∪ new first, verify, then converge), so no second
+    /// switching path exists and no protection is relaxed.
+    func reconcileProxySelectionAfterCoreStart() {
+        let selected = proxyService.activeNodeName
+        if let pending = pendingExitSelection {
+            pendingExitSelection = nil
+            guard let selected, proxyTarget(pending, matches: selected) else {
+                // The core dialed the exit captured before the pick. The
+                // user's last intent wins (I2): switch to it through the
+                // existing flow rather than re-recording the old exit.
+                selectNode(pending)
+                return
+            }
+            // The core landed exactly on the pending pick (a protected
+            // retry may have redialed it): the ordinary writeback below
+            // agrees with the user's intent.
+        }
+        if let selected, applyProxySelection(selected) {
+            proxyService.activeGroupName = ConfigPipeline.exitGroupName
+            persistProxySelection(selected)
+        } else {
+            restoreProxySelection(persistFallback: true)
+        }
     }
 
     /// Controller streams are observation only, never part of TUN/PF safety.

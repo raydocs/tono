@@ -290,6 +290,19 @@ final class AppState {
     /// it settles — so the observation is held here instead of dropped and
     /// consumed by `consumePendingNetworkChange()` at that settling point.
     var pendingNetworkChangeCheck = false
+    /// An exit the user picked while a connect was still in flight (R1-F6).
+    /// `selectNode`'s not-connected branch persists the pick but cannot dial
+    /// it — a second connect is refused mid-flight — and the connect
+    /// epilogue's writeback adopts the running core's authoritative selector
+    /// `now`, the exit the in-flight connect captured *before* the pick, so
+    /// without this marker the newer choice was silently overwritten in UI
+    /// and storage. Held here and consumed by
+    /// `reconcileProxySelectionAfterCoreStart()`: when the core landed on a
+    /// different exit, the user's last intent wins and the ordinary
+    /// protected node switch to the pending exit starts from the connected
+    /// session. A fresh `connect()` clears it so an attempt that never
+    /// completed cannot leak its stale pick into the next one.
+    var pendingExitSelection: String?
 
     // MARK: - Init
 

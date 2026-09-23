@@ -49,6 +49,17 @@ extension AppState {
             proxyService.activeNodeName = nodeName
             persistProxySelection(nodeName)
             catalogSelectionRequiresChoice = false
+            if isConnecting {
+                // R1-F6: this pick cannot dial while a connect is in flight
+                // (shouldConnect(connecting:) refuses a second connect), so
+                // it is recorded and persisted only. The connect epilogue's
+                // writeback reads the core's authoritative `now` — the exit
+                // the in-flight connect captured before this pick — and
+                // would otherwise overwrite the newer choice back to it.
+                // Hold the user's last intent; the epilogue consumes it and
+                // starts the ordinary protected switch when they differ.
+                pendingExitSelection = nodeName
+            }
             // First-connect handshake eof fully releases protection, so a
             // tap on the server list used to persist only. The card already
             // feels like Connect; actually connect. Protected Offline retries
