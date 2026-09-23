@@ -21,6 +21,7 @@ use crate::tono::{
     connection_plan::{guard_rejection_is_transient, reconnect_allowed},
     state::{TonoInner, TonoState},
 };
+use tono_core::connection::ConnectionStatus;
 use super::{
     Attempt, BoxedTask, MAX_DIRECT_SAMPLES, MAX_PROTECTED_ROUTE_SAMPLES, ProtectedRouteAggregate,
     fail_connect, kill_switch_mode_key, new_direct_samples, observe_protected_routes,
@@ -1004,7 +1005,86 @@ pub(crate) async fn handle_policy_behavior_change(
     state: &Arc<TonoState>,
     app: &AppHandle,
 ) -> NetworkChangeOutcome {
+    // F5: while the FSM is Connecting there is no live session to tear down — the
+    // entry guard inside `handle_network_change_inner` would silently drop the
+    // change, leaving the committing session on the policy snapshot captured
+    // before the first Core start. Record the deferral instead; the connect
+    // commit consumes it and re-runs the optional-DIRECT decision with the
+    // latest installed policy.
+    {
+        let mut inner = state.lock().await;
+        match apply_policy_change_disposition(&mut inner) {
+            PolicyChangeDisposition::ReconnectNow => {}
+            PolicyChangeDisposition::DeferUntilConnected => {
+                logging!(
+                    info,
+                    Type::Service,
+                    "Tono: deferring policy behavior change that arrived during connect"
+                );
+                return NetworkChangeOutcome::Handled;
+            }
+            PolicyChangeDisposition::Ignore => return NetworkChangeOutcome::Handled,
+        }
+    }
     handle_network_change_inner(state, app, policy_behavior_change_allows_in_place_recovery()).await
+}
+
+/// What a traffic-policy behavior change should do when it arrives, given the
+/// connect FSM's current state (F5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PolicyChangeDisposition {
+    /// Connected: schedule the protected teardown + reconnect now.
+    ReconnectNow,
+    /// Connecting: record the deferral; the connect commit consumes it.
+    DeferUntilConnected,
+    /// Idle, or a release is in flight: the next connect captures the new
+    /// policy on its own, and a teardown during Disconnect is never ours to run.
+    Ignore,
+}
+
+/// The pure verdict for a policy behavior change against one FSM snapshot.
+pub(super) fn policy_change_disposition(status: &ConnectionStatus) -> PolicyChangeDisposition {
+    if status.is_disconnecting {
+        PolicyChangeDisposition::Ignore
+    } else if status.is_connecting {
+        PolicyChangeDisposition::DeferUntilConnected
+    } else if status.is_connected {
+        PolicyChangeDisposition::ReconnectNow
+    } else {
+        PolicyChangeDisposition::Ignore
+    }
+}
+
+/// Decide a policy behavior change under the state lock and record the
+/// deferral when it lands while Connecting. `Connecting` wins over a leftover
+/// `Connected` flag: a forming attempt is already carrying its own snapshot,
+/// and tearing the tunnel down from underneath it is never this path's call.
+pub(super) fn apply_policy_change_disposition(inner: &mut TonoInner) -> PolicyChangeDisposition {
+    match policy_change_disposition(inner.fsm.status()) {
+        PolicyChangeDisposition::DeferUntilConnected => {
+            inner.record_pending_policy_change();
+            PolicyChangeDisposition::DeferUntilConnected
+        }
+        other => other,
+    }
+}
+
+/// F5 fallback: a deferred policy change whose refreshed document needs a
+/// pre-TUN physical egress snapshot that the committing attempt never captured
+/// (the policy went from no DIRECT content to some) cannot be applied in
+/// place — the interface must be discovered before the first Core start.
+/// Schedule the same protected teardown + reconnect a connected-session change
+/// gets; the fresh transaction rediscovers the interface and installs the new
+/// policy. Spawned detached for the same reasons as the account-scoped policy
+/// sync caller: the entry guard and generation capture inside
+/// [`handle_policy_behavior_change`] keep a disconnect or replacement session
+/// safe.
+pub(super) fn spawn_deferred_policy_reconnect(state: &Arc<TonoState>, app: &AppHandle) {
+    let state = Arc::clone(state);
+    let app = app.clone();
+    AsyncHandler::spawn(move || async move {
+        handle_policy_behavior_change(&state, &app).await;
+    });
 }
 
 pub(crate) const fn policy_behavior_change_allows_in_place_recovery() -> bool {
@@ -1144,4 +1224,63 @@ pub(super) async fn bootstrap_hosts() -> Vec<String> {
             Ok(Err(_)) | Err(_) => Vec::new(),
         };
     bootstrap::merge_bootstrap_hosts(&dynamic)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PolicyChangeDisposition, apply_policy_change_disposition, policy_change_disposition};
+    use crate::tono::state::TonoState;
+    use std::sync::Arc;
+
+    /// F5: a policy behavior change that arrives while Connecting used to be
+    /// dropped by the `handle_network_change_inner` entry guard — no session
+    /// existed to tear down, nothing was recorded, and the session that
+    /// eventually committed kept the policy snapshot captured before the first
+    /// Core start until the next manual reconnect. The change must defer
+    /// instead: the disposition records a pending policy change that the
+    /// connect commit consumes after `connect_succeeded`.
+    #[tokio::test]
+    async fn a_policy_behavior_change_during_connecting_defers_until_the_connect_commits() {
+        let state = Arc::new(TonoState::for_test());
+        let mut inner = state.lock().await;
+        let generation = inner.connect_generation;
+        inner.fsm.begin_connect();
+        assert_eq!(
+            policy_change_disposition(inner.fsm.status()),
+            PolicyChangeDisposition::DeferUntilConnected
+        );
+        assert_eq!(
+            apply_policy_change_disposition(&mut inner),
+            PolicyChangeDisposition::DeferUntilConnected
+        );
+        // A release in flight is still never this path's to interrupt.
+        inner.fsm.begin_disconnect();
+        assert_eq!(
+            policy_change_disposition(inner.fsm.status()),
+            PolicyChangeDisposition::Ignore
+        );
+        inner.fsm.finish_disconnect();
+        // The committing attempt drives the FSM the way `run_stages` does.
+        inner.fsm.begin_connect();
+        assert_eq!(
+            apply_policy_change_disposition(&mut inner),
+            PolicyChangeDisposition::DeferUntilConnected
+        );
+        inner.fsm.mark_kill_switch_armed();
+        inner.fsm.mark_session_verified();
+        inner.fsm.connect_succeeded().unwrap();
+        assert!(inner.fsm.status().is_connected);
+        assert_eq!(
+            inner.take_pending_policy_change(),
+            Some(generation),
+            "the deferred change must survive until the connect commit consumes it"
+        );
+        assert_eq!(inner.take_pending_policy_change(), None, "consumption is once");
+        // Once Connected the disposition is unchanged: the protected teardown +
+        // reconnect runs immediately, never deferred.
+        assert_eq!(
+            policy_change_disposition(inner.fsm.status()),
+            PolicyChangeDisposition::ReconnectNow
+        );
+    }
 }

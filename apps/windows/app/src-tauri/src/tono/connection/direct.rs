@@ -175,6 +175,18 @@ pub(super) struct CapturedTrafficPolicy {
     pub(super) document: tono_core::policy::TonoTrafficPolicy,
 }
 
+impl CapturedTrafficPolicy {
+    /// Whether the document carries any DIRECT-targetable content — the same
+    /// emptiness test `apply_cloud_policy` applies before staging the overlay,
+    /// and the condition a physical-interface snapshot is captured for.
+    pub(super) fn has_direct_content(&self) -> bool {
+        !self.document.domains.is_empty()
+            || !self.document.media_endpoints.is_empty()
+            || !self.document.web_domains.is_empty()
+            || !self.document.direct_suffixes.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ServiceCoreIdentity {
     pub(super) pid: u32,

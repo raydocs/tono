@@ -32,6 +32,46 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows connecting 期间到达的 policy 行为变更不再丢弃
+
+- **归属**：G1「已连接=能用」——已连接会话应按最新已安装 policy 提供 DIRECT/WeChat
+  直连覆盖，而不是把 connecting 期间到达的行为变更静默丢到下次手动重连（会话内一致性，
+  属已连接行为，不占 G2 的失败下一手）。
+- **来源**：基线 main [576d7087](https://github.com/raydocs/tono/commit/576d7087)，分支
+  `fix/windows-policy-defer-connecting-20260922`（PR 见该分支）；提交时未合 main。
+- **缺陷修复**：R2-F5（对抗核实降级为低后只修丢弃/延迟部分；原报告"UI 显示直连已开"
+  被 V5 核实推翻——实际走 `skip_optional_direct_policy` 写 `optional_direct_skip`，
+  UI 如实显示 directSkipped，故本条不改前端）。原行为：FSM 处于 Connecting 时
+  `handle_policy_behavior_change → handle_network_change_inner` 入口守卫直接无操作且无
+  任何待处理记录；连接成功后 `spawn_optional_direct_after_connected` 携带连接前捕获的
+  旧 policy 快照，`direct_context_is_current` 比对 revision/digest 不一致 → 跳过 overlay，
+  新 policy 的 DIRECT 授权本会话永不应用，直到下次重连（pin-refresh 的 wechat 腿也因
+  `applied_wechat_path_regexes` 为 None 不补放）。现行为：connecting 期间的行为变更由
+  `policy_change_disposition`（ReconnectNow / DeferUntilConnected / Ignore 纯判定）给出
+  DeferUntilConnected 并在 `TonoInner` 记录 pending（含 deferral 时的 connect
+  generation）；connect 提交块在 `connect_succeeded` 后消费 pending，用最新已安装
+  policy 重建快照再走 optional-direct 应用路径。若刷新后的 policy 需要本次连接从未
+  捕获的 pre-TUN 物理出口快照（内容从无到有），改走与已连接时完全相同的受保护
+  teardown + 重连，由新事务重新发现接口并安装新 policy。已连接时立即 teardown+重连、
+  DIRECT 应用失败的 restrict/不重连收敛、policy 写锁与 DIRECT 激活读锁互斥的既有
+  纪律均不变；不泄漏（跳过路径保持全隧道）。
+- **新增/优化**：无新功能。
+- **工程与测试**：`connection/monitor.rs` 新增一个回归
+  `a_policy_behavior_change_during_connecting_defers_until_the_connect_commits`
+  （`#[tokio::test]`：FSM `begin_connect()` → 判定返回 `DeferUntilConnected` 且记录
+  pending；`connect_succeeded()` 后 `take_pending_policy_change()` 为 Some；disconnecting
+  返回 Ignore、connected 仍 ReconnectNow）。修复前实现无 pending 记录，该测试失败。
+  三个 Windows Cargo workspace 保持分离，仅改 `app`。
+- **验证**：本机未运行 cargo 构建/测试/格式检查（2026-09-14 执行位置决定：MacBook 只做
+  编辑与源码自查）；委托本 PR 的 GitHub-hosted CI——`windows-2025` 上
+  `apps/windows/app/src-tauri` 的 `cargo test --locked` 覆盖上述测试。提交时未获得 CI
+  结果，不把未跑的检查写成通过；准确源码 SHA 以 PR 为准。
+- **候选/发布**：无新包，仅源码；不改 `appcast.xml` / `windows-latest.json`，不推
+  `windows-updates`。
+- **剩余限制**：只修 connecting 窗口的丢弃/延迟。`directOverlay==='off'` 在其它 Err
+  路径被前端渲染为 directOn 的问题仍独立存在（V5 旁注，不在本条范围）；Windows 11
+  实机行为未验证，夹具结论不等于设备验收。
+
 ## 2026-09-23 · Windows 监视器重连成功后不再自中断丢失连接尾部
 
 - **归属**：G1（已连接=能用；monitor 恢复的会话与用户点 Connect 的会话尾部行为一致）。

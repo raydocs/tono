@@ -22,7 +22,7 @@ use super::controller::{
 use super::endpoints::proxy_endpoint_of;
 use super::monitor::{
     bootstrap_hosts, refresh_control_plane_pins_from_service, spawn_control_plane_pin_refresh,
-    spawn_exit_identity_lookup, spawn_network_monitor,
+    spawn_deferred_policy_reconnect, spawn_exit_identity_lookup, spawn_network_monitor,
 };
 use super::probes::{verify_fake_ip, verify_post_lock};
 use super::status::set_stage;
@@ -93,8 +93,11 @@ pub(super) async fn run_stages(
 
     // Capture both the policy and its physical egress before WinTUN changes the default route.
     // Re-reading either after the first Core start can select the Tono adapter itself and makes
-    // the runtime plan disagree with the WFP preflight that was actually performed.
-    let traffic_policy = {
+    // the runtime plan disagree with the WFP preflight that was actually performed. The policy
+    // half may be replaced once more, under the commit below, when a policy behavior change that
+    // arrived mid-connect is consumed (F5); the interface half never is — it is only ever
+    // captured here, before the first Core start.
+    let mut traffic_policy = {
         let inner = state.lock().await;
         inner.traffic_policy.clone().map(|document| CapturedTrafficPolicy {
             revision: inner.policy_tracker.current_revision(),
@@ -103,12 +106,7 @@ pub(super) async fn run_stages(
         })
     };
     let needs_physical_interface = WINDOWS_OPTIONAL_DIRECT_ENABLED
-        && traffic_policy.as_ref().is_some_and(|policy| {
-            !policy.document.domains.is_empty()
-                || !policy.document.media_endpoints.is_empty()
-                || !policy.document.web_domains.is_empty()
-                || !policy.document.direct_suffixes.is_empty()
-        });
+        && traffic_policy.as_ref().is_some_and(|policy| policy.has_direct_content());
 
     // The preparation probes are independent of each other and all read-only /
     // cancellation-safe (the two port binds are released immediately; the core-path query is a
@@ -334,6 +332,7 @@ pub(super) async fn run_stages(
     // generation before publishing Connected. Updating the protocol last prevents a subscriber
     // from observing a half-configured HTTP context.
     // §6.10: only now Connected; monitors start.
+    let mut deferred_policy_change = None;
     {
         let mut inner = controller_commit_guard(state, generation, || {
             configure_owned_controller_for_ui(state, app, &secret, controller_port);
@@ -342,6 +341,28 @@ pub(super) async fn run_stages(
         inner.controller_generation = inner.controller_generation.wrapping_add(1);
         inner.fsm.mark_session_verified();
         inner.fsm.connect_succeeded().map_err(StageFailure::error)?;
+        // F5: a policy behavior change that arrived while this attempt was still
+        // Connecting was deferred (`handle_network_change_inner` has nothing to
+        // tear down mid-connect). Consume the deferral now and re-capture the
+        // policy half of the snapshot from the latest installed document, so
+        // this session's optional-DIRECT decision runs against the new policy
+        // instead of the copy taken before the first Core start — which
+        // `direct_context_is_current` would correctly reject, deferring the
+        // change to the next manual reconnect.
+        let deferred = inner.take_pending_policy_change();
+        if deferred.is_some() {
+            logging!(
+                info,
+                Type::Service,
+                "Tono: consuming the policy behavior change deferred during this connect"
+            );
+            traffic_policy = inner.traffic_policy.clone().map(|document| CapturedTrafficPolicy {
+                revision: inner.policy_tracker.current_revision(),
+                digest: inner.policy_tracker.current_digest().unwrap_or_default().to_owned(),
+                document,
+            });
+        }
+        deferred_policy_change = deferred;
         crate::tono::route_preferences::record_verified(&inner, route_owner, &node.name);
         if let Err(error) = crate::tono::state::save_successful_selection(
             &inner.catalog_dir, &node.name,
@@ -392,6 +413,22 @@ pub(super) async fn run_stages(
         home_node.map(|home| home.name.clone())
     };
     spawn_control_plane_pin_refresh(state, app, generation, residential_target).await;
+    // F5 fallback: a deferred change whose refreshed policy needs a physical egress
+    // snapshot this attempt never captured (the change went from no DIRECT content to
+    // some, so `needs_physical_interface` was false when this attempt began) cannot be
+    // applied in place — the interface must be discovered before the first Core start.
+    // Rerun the same protected teardown + reconnect a connected-session change would
+    // schedule; the fresh transaction rediscovers the interface and installs the new
+    // policy. Skip this session's overlay spawn: without the snapshot it would only
+    // record a deterministic skip.
+    if deferred_policy_change.is_some()
+        && WINDOWS_OPTIONAL_DIRECT_ENABLED
+        && physical_interface.is_none()
+        && traffic_policy.as_ref().is_some_and(|policy| policy.has_direct_content())
+    {
+        spawn_deferred_policy_reconnect(state, app);
+        return Ok(());
+    }
     spawn_optional_direct_after_connected(
         state,
         app,

@@ -327,6 +327,14 @@ pub struct TonoInner {
     /// and safety checks (`managed-traffic-policy.json`).
     pub policy_tracker: tono_core::policy::PolicyTracker,
     pub traffic_policy: Option<tono_core::policy::TonoTrafficPolicy>,
+    /// A policy *behavior change* that arrived while the FSM was Connecting
+    /// (F5). `handle_network_change_inner` has nothing to act on mid-connect —
+    /// no session exists to tear down — so the change is recorded here and the
+    /// connect commit consumes it, re-running the optional-DIRECT decision
+    /// against the latest installed policy. Holds the `connect_generation` at
+    /// the time of deferral; consumption re-reads current state, so a record
+    /// left over from a failed attempt is a harmless no-op refresh.
+    pending_policy_change: Option<u64>,
     /// Signed WeChat PROCESS-PATH-REGEX rows last committed with the optional
     /// DIRECT overlay. `None` means the overlay is not active, so a later
     /// discovery must not force a reconnect.
@@ -480,6 +488,21 @@ impl TonoInner {
     pub fn policy_cache(&self) -> tono_core::policy::PolicyCache {
         policy_cache_at(&self.catalog_dir)
     }
+
+    /// Record a policy behavior change that landed while Connecting (F5).
+    /// Called under the state lock by the policy-change disposition path.
+    pub fn record_pending_policy_change(&mut self) {
+        self.pending_policy_change = Some(self.connect_generation);
+    }
+
+    /// Consume a deferred policy behavior change (F5). The connect commit
+    /// calls this right after `connect_succeeded` and, when a deferral is
+    /// present, re-runs the optional-DIRECT decision with the latest
+    /// installed policy instead of the snapshot captured before the first
+    /// Core start.
+    pub fn take_pending_policy_change(&mut self) -> Option<u64> {
+        self.pending_policy_change.take()
+    }
 }
 
 /// The `tauri::State` handle. Every access goes through the async mutex;
@@ -592,6 +615,7 @@ impl TonoState {
                 catalog_failover_tried: std::collections::BTreeSet::new(),
                 policy_tracker: tono_core::policy::PolicyTracker::new(),
                 traffic_policy: None,
+                pending_policy_change: None,
                 applied_wechat_path_regexes: None,
                 optional_direct_active: false,
                 optional_direct_skip: None,
