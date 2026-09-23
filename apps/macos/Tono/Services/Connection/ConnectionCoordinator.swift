@@ -12,6 +12,13 @@ final class ConnectionCoordinator {
     var protectionOperationGeneration: UInt64 = 0
     private(set) var disconnectSequence: Task<Void, Never>?
     private var disconnectRequestID = 0
+    /// True while the serialized teardown queue's newest request is an
+    /// explicit release (Restore internet), including while that teardown is
+    /// still in flight — a release can hold the queue for up to 180 s on the
+    /// administrator repair prompt. The sleep/wake paths read it so a sleep
+    /// cannot rewrite the user's pending release into preserve teardowns and
+    /// wake recovery (R1-F2).
+    private var disconnectQueueReleaseIntent = false
     var nodeSwitchTask: Task<Void, Never>?
     var protectedReconnectTask: Task<Void, Never>?
     var protectedReconnectID: UUID?
@@ -25,16 +32,26 @@ final class ConnectionCoordinator {
 
     private var deferredConnect: (id: UUID, task: Task<Void, Never>)?
 
+    /// Whether the pending or in-flight teardown queue's newest request is an
+    /// explicit release. Newest-wins, matching `disconnectRequestID`: a later
+    /// teardown request replaces the intent, and completion of the newest
+    /// request retires it.
+    var disconnectQueueRequestsRelease: Bool {
+        disconnectQueueReleaseIntent
+    }
+
     /// All teardown requests share one queue. Drain cancelled connection work
     /// before executing privileged stop/DNS/PF operations; cancelling a Task
     /// does not mean an in-flight helper request has stopped mutating the host.
     func enqueueDisconnect(
         waitingFor pendingTasks: [Task<Void, Never>] = [],
+        releaseIntent: Bool = false,
         operation: @escaping @MainActor (Int) async -> Void
     ) {
         cancelDeferredConnect()
         disconnectRequestID &+= 1
         let requestID = disconnectRequestID
+        disconnectQueueReleaseIntent = releaseIntent
         let previousDisconnect = disconnectSequence
         disconnectSequence = Task {
             await previousDisconnect?.value
@@ -47,6 +64,7 @@ final class ConnectionCoordinator {
     /// publish a stale result over a newer disconnect/release request's UI.
     func completeDisconnect(_ requestID: Int, update: () -> Void) {
         guard requestID == disconnectRequestID else { return }
+        disconnectQueueReleaseIntent = false
         update()
     }
 
@@ -193,7 +211,11 @@ final class ConnectionCoordinator {
             cancelReconnectTasks()
         }
         prepare()
-        enqueueDisconnect(waitingFor: pendingTasks, operation: operation)
+        enqueueDisconnect(
+            waitingFor: pendingTasks,
+            releaseIntent: releaseKillSwitch,
+            operation: operation
+        )
     }
 
     /// Coordinates scheduling a protected reconnect attempt with exponential backoff and debouncing.
