@@ -1270,18 +1270,25 @@ pub(crate) fn authorize_takeover_for(
     }
 }
 
-/// True unless every logged-on Windows session was inspected and none belongs to the user whose
-/// owner key is `owner_key`. Any failure to enumerate or inspect a user session answers true:
-/// not knowing must keep the other user's protection in place.
+/// True unless every Windows session a user can be signed in to was inspected and none belongs to
+/// the user whose owner key is `owner_key`. Only sessions in the Active, Connected or
+/// Disconnected state can hold a signed-in user; listener, idle, reset, down and init sessions
+/// are skipped, so a Remote Desktop listener cannot keep a takeover refused forever. Within
+/// those sessions, only an explicit "no user" (`ERROR_NO_TOKEN`) or "session gone"
+/// (`ERROR_CTX_WINSTATION_NOT_FOUND`) counts as not signed in; any other failure, and any
+/// failure to enumerate, answers true: not knowing must keep the other user's protection in
+/// place.
 #[cfg(all(windows, not(feature = "test")))]
 fn owner_signed_in(owner_key: &str) -> bool {
     use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
-    use windows_sys::Win32::Foundation::{ERROR_NO_TOKEN, GetLastError, LocalFree};
+    use windows_sys::Win32::Foundation::{
+        ERROR_CTX_WINSTATION_NOT_FOUND, ERROR_NO_TOKEN, GetLastError, LocalFree,
+    };
     use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
     use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_USER, TokenUser};
     use windows_sys::Win32::System::RemoteDesktop::{
-        WTS_CURRENT_SERVER_HANDLE, WTS_SESSION_INFOW, WTSEnumerateSessionsW, WTSFreeMemory,
-        WTSQueryUserToken,
+        WTS_CURRENT_SERVER_HANDLE, WTS_SESSION_INFOW, WTSActive, WTSConnected, WTSDisconnected,
+        WTSEnumerateSessionsW, WTSFreeMemory, WTSQueryUserToken,
     };
 
     fn session_user_key(token: &OwnedHandle) -> Option<String> {
@@ -1337,14 +1344,19 @@ fn owner_signed_in(owner_key: &str) -> bool {
     }
     let listed = unsafe { std::slice::from_raw_parts(sessions, count as usize) }
         .iter()
+        .filter(|session| matches!(session.State, WTSActive | WTSConnected | WTSDisconnected))
         .map(|session| session.SessionId)
         .collect::<Vec<_>>();
     unsafe { WTSFreeMemory(sessions.cast()) };
     for session_id in listed {
         let mut token = std::ptr::null_mut();
         if unsafe { WTSQueryUserToken(session_id, &mut token) } == 0 {
-            if unsafe { GetLastError() } == ERROR_NO_TOKEN {
-                // Session 0, the RDP listener and an empty logon screen carry no user.
+            if matches!(
+                unsafe { GetLastError() },
+                ERROR_NO_TOKEN | ERROR_CTX_WINSTATION_NOT_FOUND
+            ) {
+                // No user on this session (e.g. an empty logon screen), or it ended after the
+                // enumeration.
                 continue;
             }
             tracing::warn!(

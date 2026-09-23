@@ -36,15 +36,17 @@
 
 - **归属**：G1 保护不变量（fail-closed；"不同本地用户不得释放他人保护"）；平台/模块：
   Windows Service（`apps/windows/service`），App 无代码改动。
-- **来源**：基线 main b1b6fe6c → 分支 `fix/wfp-owner-takeover-20260923`；Issue #353；
+- **来源**：基线 main b1b6fe6c（2026-09-23 rebase 到 26d438c1）→ 分支 `fix/wfp-owner-takeover-20260923`；Issue #353；
   PR 与准确源码 SHA 见 PR，提交本条时未合 main。
 - **缺陷修复（内部审查 H2-F2，源码推导）**：`authorize_write_for` 已禁止另一本地用户
   Release，但 `StartClash` / `PrepareCoreStart` 走 `Unchecked` 门，`arm_bootstrap`
   直接把 intent 的 `owner_key` 改成调用方，随后停掉前一用户的 Core；owner 被改写后
   Release 对新调用方放行。改后：武装 intent 的 owner 是另一用户、且该用户仍有
-  Windows 登录会话（活动或断开，WTS 枚举）时，两条路由在生命周期锁内、停任何 Core
+  Windows 登录会话（WTS 枚举，只看 Active/Connected/Disconnected 状态的会话）时，两条路由在生命周期锁内、停任何 Core
   之前以新错误码 `ProtectionHeldByAnotherUser`(1014, HTTP 409) 拒绝；`arm_bootstrap`
-  在 WFP 锁内再检查一次。会话无法枚举或读取按"仍登录"处理。原 owner 注销后允许接管；
+  在 WFP 锁内再检查一次。RDP 监听、Idle、Init、Down 等状态的会话不参与判定；上述三种状态的
+  会话查询 token 时，只有 `ERROR_NO_TOKEN`（无用户）与 `ERROR_CTX_WINSTATION_NOT_FOUND`（会话
+  已结束）视为已登出，其余错误及会话无法枚举仍按"仍登录"处理。原 owner 注销后允许接管；
   无 owner 的 emergency intent 与 Release 的 owner 检查不变。
 - **新增/优化**：无。
 - **工程与测试**：新增 `#[tokio::test]`
@@ -61,7 +63,13 @@
   `windows-updates`。
 - **剩余限制**：App 尚未把 1014 映射成"另一用户正在使用 Tono"的专门提示，目前显示为
   一次连接失败并附服务端消息。第二个用户在原 owner 仍登录时既不能连接也不能释放，
-  只能等原 owner 断开或注销。未对提升权限的管理员开例外。多用户实机行为需验收。
+  只能等原 owner 断开或注销。未对提升权限的管理员开例外。多用户实机行为需验收
+  （含开启远程桌面的 Win11 Pro 上监听会话被正确跳过）。会话状态过滤与错误码分类只在 CI 编译，
+  没有单元测试执行（生产 WTS 路径在 `test` feature 下编译掉）。快速用户切换时原 owner 的断开
+  会话仍算"仍登录"，第二个用户可能整机断网：需 owner 确认。
+- **续记（2026-09-23，第三轮审查）**：会话枚举只考虑 Active/Connected/Disconnected，避免
+  RDP 监听等会话让接管被永久拒绝；`ERROR_CTX_WINSTATION_NOT_FOUND` 视为会话已结束。本机
+  未编译，委托本 PR CI。
 
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
