@@ -1,4 +1,4 @@
-//! Windows-only, opt-in OS effects for the real apply/enable/status path. No facade decisions
+//! Windows-only, opt-in OS effects for the real apply/enable/status/recovery path. No facade decisions
 //! are injected. Snapshot serialization, atomic replacement and file security stay real in a
 //! unique temporary directory; registry/IP Helper/native/legacy effects never touch host DNS.
 
@@ -38,6 +38,7 @@ pub(crate) struct Machine {
     pub writes: usize,
     pub native_calls: usize,
     pub effective_reads: usize,
+    pub policy_restores: usize,
     pub before_write: Vec<DnsSnapshot>,
 }
 
@@ -222,6 +223,7 @@ impl Fixture {
             writes: 0,
             native_calls: 0,
             effective_reads: 0,
+            policy_restores: 0,
             before_write: Vec::new(),
         });
         Ok(Self { root, originals })

@@ -32,6 +32,31 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 混合 DNS 残留不能证明恢复成功
+
+- **归属/来源**：G1 断开与恢复；从已合入的
+  [4d4aafc8](https://github.com/raydocs/tono/commit/4d4aafc8129988cee76150ddb7ebdf0becd7d4b2)
+  继续定点检查，分支 `fix/dns-followup-20260923`；
+  [差异与关联 PR](https://github.com/raydocs/tono/compare/main...fix/dns-followup-20260923)。
+  本条提交时仍是独立修复分支，不沿用上一轮 main 合并授权。
+- **缺陷修复**：恢复快照损坏、进程内没有旧失败标记时，IPv4 `NameServer` 或
+  `ProfileNameServer` 中的 `1.1.1.1, 198.18.0.2` 被“列表全是 Tono 地址”的判断漏掉，
+  `recover_unreadable_snapshot` 可错误接受恢复并隔离唯一快照；卸载恢复也会漏选这个适配器。
+  现在复用已有“包含当前 TUN DNS 地址”的判断：仍有该地址就保留快照并拒绝恢复成功，
+  不把公共备用 DNS 当成移除残留的证据。旧 loopback/用户本地解析器处理保持不变。
+- **工程与测试**：新增一个生产 facade 回归
+  `mixed_protected_dns_cannot_prove_corrupt_snapshot_recovery`，经过真实损坏文件解析、
+  原生 engine 的注册表读取、恢复拒绝和卸载选择；清除残留后还须能完成恢复并保留隔离文件。
+  延用 OS I/O 隔离夹具，补入 NRPT/DoH 恢复计数，避免反例和正例触碰宿主策略；没有伪造
+  facade 的成功/失败结果。既有 native DNS 前缀已覆盖新测试，无工作流改动。
+- **验证**：本地只做 diff/格式检查；原生命令由现有 GitHub-hosted `windows-2025` Service
+  执行：`cargo test --locked --features standalone,client --lib core::dns::engine::native_apply::tests:: -- --nocapture`，
+  前置相同前缀的 `-- --list` 防止零测试。准确源码 SHA、实际结果及日志续记保留在关联 PR；
+  提交时未获得本次原生结果，不把上一轮 main 的绿灯移用到此修复，也没有修复前的原生红灯。
+- **新增/发布/限制**：无新功能、无新包、无部署；只收紧残留 DNS 的恢复证据，不变更
+  WFP、恢复超时、原始 DNS 字符串或快照 schema。夹具验证不等于 Windows 11 实机恢复、
+  真实 API/适配器变化或 G1/G3 验收；本轮定点检查不表示整个产品已无 bug。
+
 ## 2026-09-23 · 桌面源码合入 main，保留发布边界
 
 所有者在本线程明确要求把能合并的 PR ship 到 GitHub `main`。归属仍为 G1–G3

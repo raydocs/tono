@@ -475,3 +475,79 @@ async fn native_apply_registry_error_retains_pending_repair() -> Result<()> {
     fixture.assert_originals(&saved);
     Ok(())
 }
+
+#[tokio::test]
+#[serial_test::serial]
+async fn mixed_protected_dns_cannot_prove_corrupt_snapshot_recovery() -> Result<()> {
+    use super::super::{
+        PROFILE_NAME_SERVER,
+        test_io::{self, Fixture},
+        v4_key,
+    };
+    use crate::core::dns as facade;
+    let a = effective(&entry(1), [198, 18, 0, 2], false);
+    let b = effective(&entry(2), [149, 112, 112, 112], false);
+    let guid = a.guid.clone();
+    let _fixture = Fixture::new(vec![a, b])?;
+    let path = test_io::with(|io| {
+        // The ordinary value and B are public; only A's active-profile list still
+        // contains the TUN resolver, behind a public server. Any occurrence matters.
+        io.keys
+            .get_mut(&v4_key(&guid))
+            .unwrap()
+            .insert(PROFILE_NAME_SERVER.into(), "1.1.1.1, 198.18.0.2".into());
+        io.snapshot_path.clone()
+    })
+    .unwrap();
+    let corrupt = b"{invalid DNS recovery snapshot";
+    tokio::fs::write(&path, corrupt).await?;
+
+    // Real restore -> parse failure -> engine registry read -> recovery gate. Only
+    // OS effects are injected; neither the proof nor the facade outcome is stubbed.
+    let error = facade::restore_protected()
+        .await
+        .expect_err("a public fallback cannot prove the Tono redirect was removed");
+    let message = format!("{error:#}");
+    assert!(message.contains(facade::DNS_SNAPSHOT_UNREADABLE_PREFIX));
+    assert!(message.contains("tono_dns=true"), "{message}");
+    assert_eq!(tokio::fs::read(&path).await?, corrupt);
+    assert_eq!(
+        test_io::with(|io| (io.writes, io.native_calls, io.policy_restores)).unwrap(),
+        (0, 0, 0),
+        "refused recovery must keep its evidence and leave resolver policies alone"
+    );
+    assert_eq!(
+        facade::uninstall_reset_targets().await?,
+        vec![guid.clone()],
+        "uninstall selection must not omit a partial current redirect either"
+    );
+
+    // Independent positive control: once the TUN address is removed, recovery
+    // must still complete, restore policy and retain the corrupt file for diagnosis.
+    test_io::with(|io| {
+        io.keys
+            .get_mut(&v4_key(&guid))
+            .unwrap()
+            .insert(PROFILE_NAME_SERVER.into(), "1.1.1.1, 9.9.9.9".into());
+        io.adapters[0].dns_servers =
+            Some(vec!["1.1.1.1".parse().unwrap(), "9.9.9.9".parse().unwrap()]);
+    });
+    let restored = facade::restore_protected().await?;
+    assert!(!restored.enabled && !restored.snapshot_present);
+    assert_eq!(restored.last_error, None);
+    assert!(!path.exists());
+    assert_eq!(test_io::with(|io| io.policy_restores).unwrap(), 1);
+    let retained = std::fs::read_dir(path.parent().unwrap())?
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<std::io::Result<Vec<_>>>()?;
+    assert_eq!(retained.len(), 1);
+    assert!(
+        retained[0]
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("protected-dns.corrupt-")
+    );
+    assert_eq!(tokio::fs::read(&retained[0]).await?, corrupt);
+    Ok(())
+}
