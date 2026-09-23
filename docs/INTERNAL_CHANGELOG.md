@@ -37,7 +37,7 @@
 - **归属**：G3 受保护升级中断恢复；Windows Service 更新事务
   （`apps/windows/service` 独立 workspace）+ 协议文档。
 - **来源**：基线 main `576d7087` → 分支 `fix/windows-update-txn-recovery-20260922`；
-  关联 PR 见本轮提交记录；提交时未合 main。
+  PR #301；提交时未合 main。
 - **缺陷修复**（2026-09-22 并发/时序审查 + 对抗核实轮确认三项同根因：事务全部权威
   出口以精确进程 incarnation 为钥匙、唯一非 commit 终态只对 Install 前发起进程开放）：
   - **F1**（权限绑定单一 App incarnation）：Disconnect/退休 peer 谓词从 pid+started_at
@@ -73,6 +73,25 @@
   `update_executor::tests::update_` 定向枚举步。提交时未获得原生结果，不沿用上一轮
   main 的绿灯，也不声称未测代码已验证。
 - **候选/发布**：无新包，仅源码。
+- **版本生效边界**：升级时运行的 `executor.exe` 是 Prepare 时从**已安装旧版**
+  `resources/tono-service-install.exe` 复制的，`--update-recover`/ONSTART 任务与发布前
+  全部 Service 侧检查也由已装旧版 Service 执行。因此本 PR 对从 0.0.73（及任何不含本
+  修复的版本）出发的首跳升级**不生效**（F4 恢复判定、F6 reconcile、F1 发布前半段均不
+  适用），**不构成 G3 证据**；它保护的是从含本修复的版本出发的下一跳升级。
+- **剩余限制**：
+  - **未解决的独立问题（已存在，非本 PR 引入）**：Replaced 且已验证 Disconnect 仍永久
+    pending、产品内无出口——连接、Adopt/Commit、再更新、Quit/登出释放、卸载/重装全部被
+    拒（网络已释放，不泄漏流量）。这是可达性最高的产品锁死路径：升级后自动重连失败 →
+    用户点 Restore internet 即触发。需单独设计「已安装+已释放」归档终态（不能把释放当
+    commit，备份清理归属需明确），另立待办。
+  - **跟进项（安装完整性缺口，无保护绕过）**：恢复判定（`classify_recovery`
+    TargetVerified）与 `retire_rolled_back` 以三组件（Tono.exe / tono-core.exe /
+    tono-service.exe）摘要代替整份 durable plan（整棵 payload 树 + `core-sha256.txt`，
+    逐成员 `old_digest/new_digest`）成员校验；发布在二进制之后、后续成员之前中断，或
+    回滚恢复了二进制而未恢复某资源时，会被判为全部发布/全部回滚。修法是逐成员校验。
+  - 非 Windows 平台的 incarnation 探测编译为恒「已死」，只影响开发编译路径（该
+    crate 测试仅在 windows-2025 lane 执行）；Windows 11 实机升级中断验收仍属 G3 未闭合
+    证据。
 - **剩余限制**：Replaced 且已验证 Disconnect（用户显式拒绝一个已完成安装）仍保持
   pending（不回滚也不退休），需后续单独判定；非 Windows 平台的 incarnation 探测编译
   为恒「已死」，只影响开发编译路径（该 crate 测试仅在 windows-2025 lane 执行）；

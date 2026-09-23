@@ -183,6 +183,41 @@ its recorded incarnations died.
   initiating App, retirable through Disconnect — because nothing executed;
   this is not a second execution grant.
 
+Limits of this clarification (stated so it is not over-read):
+
+- **Effective only from a build that already contains it.** `Prepare` copies
+  the *installed* `resources/tono-service-install.exe` into the transaction
+  as `executor.exe`; `--update-recover` and the ONSTART recovery task run that
+  copy, and every pre-publication Service check runs in the installed
+  Service. An upgrade that starts from 0.0.73, or from any build without this
+  change, therefore runs the old executor and old Service: the recovery
+  classification and Launching reconciliation above do not apply, and only
+  the post-publication part served by the new Service does. This is not G3
+  evidence for the first hop from 0.0.73; it protects the next upgrade that
+  starts from a build containing it.
+- **Replaced + verified Disconnect stays pending with no in-product exit
+  (open, pre-existing).** Neither terminal archive above covers `Replaced`.
+  When a completed installation is adopted, the post-upgrade automatic
+  reconnect fails and the user presses Restore internet, the verified
+  Disconnect releases protection but leaves the attempt pending; from then on
+  connect, adopt/commit, update, Quit/sign-out release and
+  uninstall/reinstall are all refused. Traffic does not leak (release has
+  already happened), but the product is locked. This path exists before this
+  clarification and is the most reachable lock of the set; it is tracked as a
+  separate unresolved issue and needs its own design decision (an
+  "installed and released" terminal state, with backup cleanup ownership),
+  not treating release as commit.
+- **Recovery and rolled-back retirement check three components, not the full
+  durable plan (open).** `TargetVerified` recovery and `retire_rolled_back`
+  compare only `Tono.exe`, `tono-core.exe` and `tono-service.exe` against the
+  target/original digests, while the durable plan covers the whole payload
+  tree plus `core-sha256.txt`, each member with `old_digest`/`new_digest`. A
+  publication interrupted after the binaries but before a later member, or a
+  rollback that restores the binaries but not a resource, can be classified
+  as fully published or fully rolled back. This is a narrow installation
+  integrity gap, not a protection bypass; the fix is per-member digest
+  verification against the plan.
+
 ## Automated conformance and its limits
 
 `tooling/scripts/tests/fixtures/update-protocol-v1/` contains synthetic manifest,
