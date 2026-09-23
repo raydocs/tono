@@ -12,8 +12,9 @@ on:
         required: false
         type: string
 
+# Read-only by default. Only `publish-draft`, which runs no build code, can write.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: windows-release-${{ inputs.version }}
@@ -63,8 +64,18 @@ jobs:
       VITE_TONO_UPDATES_CONFIGURED: 'true'
       RELEASE_VERSION: ${{ inputs.version }}
 
+    outputs:
+      installer: ${{ steps.stage.outputs.installer }}
+      installer_sha256: ${{ steps.stage.outputs.installer_sha256 }}
+      signature_sha256: ${{ steps.stage.outputs.signature_sha256 }}
+
+    # This job runs pnpm install scripts, Vite plugins and crate build scripts. It
+    # gets a read-only token that is not written to .git/config, and it publishes
+    # nothing: the payload leaves through an artifact whose digests are job outputs.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
         with:
@@ -211,23 +222,17 @@ jobs:
           pnpm exec vitest run tests/update.test.ts
           pnpm test:dev-control
 
-      - name: Build signed updater artifacts and create a draft GitHub Release
-        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f
+      - name: Build signed updater artifacts
+        shell: pwsh
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TONO_UPDATER_PUBLIC_KEY: ${{ vars.TONO_UPDATER_PUBLIC_KEY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           VITE_TONO_UPDATES_CONFIGURED: 'true'
-        with:
-          projectPath: apps/windows/app
-          tauriScript: pnpm tauri
-          args: --config src-tauri/tauri.updater.conf.json
-          tagName: v__VERSION__
-          releaseName: Tono Windows v__VERSION__
-          releaseBody: ${{ env.RELEASE_NOTES }}
-          releaseDraft: true
-          prerelease: false
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          pnpm tauri build --config src-tauri/tauri.updater.conf.json
 
       - name: Inspect the built NSIS payload
         shell: pwsh
@@ -243,6 +248,39 @@ jobs:
           }
           pnpm release:preflight --payload-only $installers[0].FullName
 
+      - name: Stage the payload and record its digests
+        id: stage
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installers = @(
+            Get-ChildItem -LiteralPath 'target/release/bundle/nsis' `
+              -Filter '*-setup.exe' -File
+          )
+          if ($installers.Count -ne 1) {
+            throw "Expected exactly one NSIS setup executable, found $($installers.Count)"
+          }
+          $installer = $installers[0]
+          $signature = Get-Item -LiteralPath "$($installer.FullName).sig"
+          if ($installer.Name -notmatch '^[A-Za-z0-9._-]+-setup\.exe$') {
+            throw "Unexpected installer name: $($installer.Name)"
+          }
+          $stage = Join-Path $env:RUNNER_TEMP 'windows-release-payload'
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item -LiteralPath $installer.FullName, $signature.FullName -Destination $stage
+          $installerSha256 = (Get-FileHash -LiteralPath (Join-Path $stage $installer.Name) -Algorithm SHA256).Hash.ToLowerInvariant()
+          $signatureSha256 = (Get-FileHash -LiteralPath (Join-Path $stage $signature.Name) -Algorithm SHA256).Hash.ToLowerInvariant()
+          "installer=$($installer.Name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "installer_sha256=$installerSha256" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "signature_sha256=$signatureSha256" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: windows-release-payload-${{ github.sha }}
+          path: ${{ runner.temp }}/windows-release-payload/
+          if-no-files-found: error
+          retention-days: 7
+
       # The draft this job creates reaches no user until the channel is advanced. That used to
       # be said in the release body, where users read it and operators did not; it belongs in
       # the run summary instead.
@@ -253,7 +291,7 @@ jobs:
           $lines = @(
             "## Tono Windows v$env:RELEASE_VERSION",
             "",
-            "A **draft** GitHub Release was created. No user can reach it yet.",
+            "The payload was built. ``publish-draft`` turns it into a **draft** GitHub Release; no user can reach it yet.",
             "",
             "1. Review and **publish** the draft release.",
             "2. Run **Promote Windows update channel** for exactly ``$env:RELEASE_VERSION``.",
@@ -261,3 +299,80 @@ jobs:
             "Until step 2 completes, ``windows-updates/latest.json`` keeps offering the previously promoted version to every installed client."
           )
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Value ($lines -join "`n")
+
+  # The only job that can write. It checks out nothing executable and runs no build
+  # code: it downloads the payload, refuses bytes that differ from the digests the
+  # build job recorded, and creates the draft release with its updater manifest.
+  publish-draft:
+    needs: build-draft
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      INSTALLER: ${{ needs.build-draft.outputs.installer }}
+      INSTALLER_SHA256: ${{ needs.build-draft.outputs.installer_sha256 }}
+      SIGNATURE_SHA256: ${{ needs.build-draft.outputs.signature_sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          sparse-checkout: apps/windows/release-notes
+          sparse-checkout-cone-mode: true
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: windows-release-payload-${{ github.sha }}
+          path: ${{ runner.temp }}/payload
+
+      - name: Refuse a payload that is not what the build job recorded
+        working-directory: ${{ runner.temp }}/payload
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "$INSTALLER" =~ ^[A-Za-z0-9._-]+-setup\.exe$ ]]
+          [[ "$INSTALLER_SHA256" =~ ^[0-9a-f]{64}$ && "$SIGNATURE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          test "$(find . -type f | sort)" = "$(printf './%s\n./%s.sig' "$INSTALLER" "$INSTALLER" | sort)"
+          printf '%s  %s\n%s  %s\n' \
+            "$INSTALLER_SHA256" "$INSTALLER" \
+            "$SIGNATURE_SHA256" "$INSTALLER.sig" | sha256sum --check --strict
+
+      - name: Create the draft release and its updater manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="v${RELEASE_VERSION}"
+          notes="apps/windows/release-notes/${RELEASE_VERSION}.md"
+          test -s "$notes"
+          payload="$RUNNER_TEMP/payload"
+          existing=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" \
+            --jq ".[] | select(.tag_name == \"$tag\") | [.id, .draft] | @tsv")
+          if [ -z "$existing" ]; then
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft \
+              --target "$GITHUB_SHA" --title "Tono Windows $tag" --notes-file "$notes"
+          elif [ "$(wc -l <<<"$existing")" -ne 1 ] || [ "$(cut -f2 <<<"$existing")" != true ]; then
+            echo "::error::$tag already has a published release or more than one draft. Nothing was uploaded."
+            exit 1
+          else
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft \
+              --target "$GITHUB_SHA" --title "Tono Windows $tag" --notes-file "$notes"
+          fi
+          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber \
+            "$payload/$INSTALLER" "$payload/$INSTALLER.sig"
+          # Same shape tauri-action wrote: the channel validator matches these URLs
+          # against the published release's assets and then rewrites them to the bucket.
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/${INSTALLER}"
+          jq -n \
+            --arg version "$RELEASE_VERSION" \
+            --rawfile notes "$notes" \
+            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+            --rawfile signature "$payload/$INSTALLER.sig" \
+            --arg url "$url" \
+            '($signature | gsub("\\s+$"; "")) as $signature
+             | {version: $version, notes: ($notes | gsub("^\\s+|\\s+$"; "")), pub_date: $pub_date,
+              platforms: {
+                "windows-x86_64": {signature: $signature, url: $url},
+                "windows-x86_64-nsis": {signature: $signature, url: $url}}}' \
+            > "$RUNNER_TEMP/latest.json"
+          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber "$RUNNER_TEMP/latest.json"

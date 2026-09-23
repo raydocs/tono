@@ -32,6 +32,33 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 发布 workflow 权限最小化（内部审查 H5-F1）
+
+- **归属**：发布工具链加固（SHIP_PLAN 发布前置，非客户可见行为）；`.github/workflows`。
+- **来源**：基线 main `498ed426` → 分支 `fix/windows-release-perms-20260923`；Issue #362；
+  提交时未合 main。
+- **缺陷修复**：`windows-release.yml` 原在 workflow 级给 `contents: write`，运行
+  pnpm/Vite/crate 构建脚本和 tauri-action 的 `build-draft` 作业持有可写 token，且
+  checkout 把 token 留在 `.git/config` → 现 workflow 级 `contents: read`；`build-draft`
+  只构建签名并上传 artifact、记录 SHA-256；新增不运行构建代码的 `publish-draft`
+  （唯一 `contents: write`），按摘要复核后创建草稿 Release 并生成 `latest.json`（格式
+  与 tauri-action 原输出一致，供 `validate-windows-channel.mjs` 校验）。
+  `windows-update-promote.yml` 同样改为只给 `promote` 作业写权限，checkout 不持久化
+  token，仅在两次 push（及 fetch/pull）时传入。`control-plane-d1-backup.yml` checkout
+  加 `persist-credentials: false`（其 secrets 已是 step 级）。
+- **新增/优化**：无。仓库设置不在本 PR 范围。
+- **工程与测试**：`tooling/scripts/tests/windows-ci-paths.test.cjs` 新增一个 test：
+  两个 Windows 发布 workflow 的 workflow 级无写权限、所有 checkout 不持久化凭据、运行
+  pnpm/npm/cargo/tauri-action 的作业无写权限、`publish-draft` 是写作业。旧 workflow
+  上失败于 “windows-release.yml grants write at workflow level”。
+- **验证**：MacBook 本机 `node --test tooling/scripts/tests/windows-ci-paths.test.cjs`
+  12/12 通过（修复前新增项失败）；三个 workflow js-yaml 解析 + bash 步骤 `bash -n`；
+  本机无 actionlint，未跑。`build-draft`/`publish-draft`/`promote` 只在
+  `release/windows` 上 `workflow_dispatch` 运行，PR CI 不执行，需所有者在下一次发布时观察。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：Tauri 更新签名私钥仍须注入运行构建代码的作业（`tauri build` 内签名）；
+  草稿复用逻辑依赖 `gh release` 按 tag 解析草稿。
+
 ## 2026-09-23 · Windows 升级事务中断后无终态/误回滚的结构修复（F1/F4/F6）
 
 - **归属**：G3 受保护升级中断恢复；Windows Service 更新事务
