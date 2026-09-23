@@ -32,6 +32,56 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows connecting 期间到达的 policy 行为变更不再丢弃
+
+- **归属**：G1「已连接=能用」——已连接会话应按最新已安装 policy 提供 DIRECT/WeChat
+  直连覆盖，而不是把 connecting 期间到达的行为变更静默丢到下次手动重连（会话内一致性，
+  属已连接行为，不占 G2 的失败下一手）。
+- **来源**：基线 main [576d7087](https://github.com/raydocs/tono/commit/576d7087)，分支
+  `fix/windows-policy-defer-connecting-20260922`（PR 见该分支）；提交时未合 main。
+- **缺陷修复**：R2-F5（对抗核实降级为低后只修丢弃/延迟部分；原报告"UI 显示直连已开"
+  被 V5 核实推翻——实际走 `skip_optional_direct_policy` 写 `optional_direct_skip`，
+  UI 如实显示 directSkipped，故本条不改前端）。原行为：FSM 处于 Connecting 时
+  `handle_policy_behavior_change → handle_network_change_inner` 入口守卫直接无操作且无
+  任何待处理记录；连接成功后 `spawn_optional_direct_after_connected` 携带连接前捕获的
+  旧 policy 快照，`direct_context_is_current` 比对 revision/digest 不一致 → 跳过 overlay，
+  新 policy 的 DIRECT 授权本会话永不应用，直到下次重连（pin-refresh 的 wechat 腿也因
+  `applied_wechat_path_regexes` 为 None 不补放）。现行为：connecting 期间的行为变更由
+  `policy_change_disposition`（ReconnectNow / DeferUntilConnected / Ignore 纯判定）给出
+  DeferUntilConnected 并在 `TonoInner` 记录 pending（记下该 attempt 的 connect
+  generation）；每次代际退役（Disconnect、连接失败、账户关闭/切换、下一次 attempt 准入）
+  都清除 pending，connect 提交块在 `connect_succeeded` 后只消费与本 attempt 代际相同的
+  记录，其它一律丢弃，因此绝不会串到下一个会话或其他账户；判定时在同一锁下重新核对
+  `sign_in_generation`。消费后用最新已安装 policy 重建快照再走 optional-direct 应用
+  路径。若刷新后的 policy 含 DIRECT 内容而本次连接**从未尝试**接口发现
+  （`needs_physical_interface` 为假，内容从无到有），改走与已连接时相同的受保护
+  teardown + 重连，由新事务发现接口并安装新 policy；该兜底任务携带本 attempt 代际，
+  入口处会话已不是该代际的 Connected 就退出。接口发现**已尝试但失败**（虚拟/Hyper-V
+  默认路由常态）不触发兜底，仍走原 skip 路径保持全隧道。已连接时立即 teardown+重连、
+  DIRECT 应用失败的 restrict/不重连收敛、policy 写锁与 DIRECT 激活读锁互斥的既有
+  纪律均不变；不泄漏（跳过路径保持全隧道）。
+- **新增/优化**：无新功能。
+- **工程与测试**：`connection/monitor.rs` 一个回归
+  `a_policy_change_deferred_during_connecting_is_consumed_only_by_that_attempt`
+  （`#[tokio::test]`：attempt A Connecting 时记录 pending → 按 `disconnect()` 的顺序
+  `invalidate_connection` 后断开 → 下一 attempt B 提交时 `take_pending_policy_change(B)`
+  为假；B 之后的 attempt C 自己记录的 pending 在其提交时被消费且仅一次）。审查返工前的
+  实现断开不清 pending、消费不比代际，"不得到达下个会话"一条会失败（返工前的测试反而
+  把"断开后记录仍在"写成了预期，已改正）。兜底条件与代际入口检查未被单测覆盖。
+  三个 Windows Cargo workspace 保持分离，仅改 `app`。
+- **验证**：本机未运行 cargo 构建/测试/格式检查（2026-09-14 执行位置决定：MacBook 只做
+  编辑与源码自查）；委托本 PR 的 GitHub-hosted CI——`windows-2025` 上
+  `apps/windows/app/src-tauri` 的 `cargo test --locked` 覆盖上述测试。提交时未获得 CI
+  结果，不把未跑的检查写成通过；准确源码 SHA 以 PR 为准。审查返工（pending 清除与
+  代际比较、兜底只在"从未尝试发现"时触发、兜底任务带代际）同样本机未编译，委托 CI。
+- **候选/发布**：无新包，仅源码；不改 `appcast.xml` / `windows-latest.json`，不推
+  `windows-updates`。
+- **剩余限制**：只修 connecting 窗口的丢弃/延迟。兜底任务的代际检查与
+  `handle_network_change_inner` 再次捕获代际之间仍有一个很小的锁释放窗口（与 policy_sync
+  调用方同一纪律）。`directOverlay==='off'` 在其它 Err
+  路径被前端渲染为 directOn 的问题仍独立存在（V5 旁注，不在本条范围）；Windows 11
+  实机行为未验证，夹具结论不等于设备验收。
+
 ## 2026-09-23 · Windows 监视器重连成功后不再自中断丢失连接尾部
 
 - **归属**：G1（已连接=能用；monitor 恢复的会话与用户点 Connect 的会话尾部行为一致）。

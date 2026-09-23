@@ -327,6 +327,16 @@ pub struct TonoInner {
     /// and safety checks (`managed-traffic-policy.json`).
     pub policy_tracker: tono_core::policy::PolicyTracker,
     pub traffic_policy: Option<tono_core::policy::TonoTrafficPolicy>,
+    /// A policy *behavior change* that arrived while the FSM was Connecting
+    /// (F5). `handle_network_change_inner` has nothing to act on mid-connect —
+    /// no session exists to tear down — so the change is recorded here and the
+    /// connect commit consumes it, re-running the optional-DIRECT decision
+    /// against the latest installed policy. Holds the `connect_generation` at
+    /// the time of deferral. Every generation retirement (Disconnect, a failed
+    /// attempt, account close, the next attempt's admission) clears it, and
+    /// the commit consumes it only for its own generation, so a record can
+    /// never reach a later session or another account.
+    pending_policy_change: Option<u64>,
     /// Signed WeChat PROCESS-PATH-REGEX rows last committed with the optional
     /// DIRECT overlay. `None` means the overlay is not active, so a later
     /// discovery must not force a reconnect.
@@ -447,6 +457,8 @@ impl TonoInner {
         let retired = self.connect_generation;
         self.connect_generation = self.connect_generation.wrapping_add(1);
         self.release_on_stale = release_on_stale;
+        // A deferred policy change belongs to the attempt being retired (F5).
+        self.pending_policy_change = None;
         if self.retired_intents.len() == RETIRED_INTENT_HISTORY {
             self.retired_intents.pop_front();
         }
@@ -479,6 +491,22 @@ impl TonoInner {
     /// platform safety policy as the catalog cache).
     pub fn policy_cache(&self) -> tono_core::policy::PolicyCache {
         policy_cache_at(&self.catalog_dir)
+    }
+
+    /// Record a policy behavior change that landed while Connecting (F5).
+    /// Called under the state lock by the policy-change disposition path.
+    pub fn record_pending_policy_change(&mut self) {
+        self.pending_policy_change = Some(self.connect_generation);
+    }
+
+    /// Consume a deferred policy behavior change (F5). The connect commit
+    /// calls this right after `connect_succeeded` with its own attempt
+    /// generation; only a deferral recorded for that generation counts, and
+    /// then the commit re-runs the optional-DIRECT decision with the latest
+    /// installed policy instead of the snapshot captured before the first
+    /// Core start. A record from any other generation is discarded.
+    pub fn take_pending_policy_change(&mut self, generation: u64) -> bool {
+        self.pending_policy_change.take() == Some(generation)
     }
 }
 
@@ -592,6 +620,7 @@ impl TonoState {
                 catalog_failover_tried: std::collections::BTreeSet::new(),
                 policy_tracker: tono_core::policy::PolicyTracker::new(),
                 traffic_policy: None,
+                pending_policy_change: None,
                 applied_wechat_path_regexes: None,
                 optional_direct_active: false,
                 optional_direct_skip: None,
