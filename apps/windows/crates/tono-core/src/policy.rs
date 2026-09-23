@@ -484,6 +484,14 @@ pub fn validate_policy_with_trust(
     if version < POLICY_VERSION_V1 {
         return Err(PolicyError::InvalidResponse);
     }
+    // A revision inside the document is covered by its signature; the
+    // envelope's is not. When both exist they must agree, or the envelope
+    // was relabelled and the whole response is refused (#317).
+    if let Some(embedded) = object.get("revision")
+        && embedded.as_i64() != Some(response.revision)
+    {
+        return Err(PolicyError::InvalidResponse);
+    }
     let document: TonoTrafficPolicy =
         serde_json::from_str(&response.json).map_err(|_| PolicyError::InvalidResponse)?;
     let policy_domains: Vec<PolicyDomain> = document
@@ -634,6 +642,9 @@ pub struct PolicyTracker {
     current_revision: i64,
     current_digest: Option<String>,
     current_signature: Option<String>,
+    /// The current revision number came from inside verified signed bytes,
+    /// not from the unsigned envelope (#317).
+    revision_authenticated: bool,
 }
 
 impl Default for PolicyTracker {
@@ -649,6 +660,7 @@ impl PolicyTracker {
             current_revision: -1,
             current_digest: None,
             current_signature: None,
+            revision_authenticated: false,
         }
     }
 
@@ -667,7 +679,26 @@ impl PolicyTracker {
             current_revision: revision,
             current_digest: Some(digest),
             current_signature: signature,
+            revision_authenticated: false,
         }
+    }
+
+    /// Seed from a cached response, keeping whether its revision was signed
+    /// so the ratchet in `install` survives a restart.
+    pub fn from_cached(response: &TonoTrafficPolicyResponse) -> Self {
+        let mut tracker = Self::from_installed_with_signature(
+            response.revision,
+            response.sha256.clone(),
+            response.signature.clone(),
+        );
+        // The cache was re-validated on load, so an embedded revision
+        // already equals the envelope's.
+        tracker.revision_authenticated = crate::policy_signature::verdict(
+            &response.json,
+            response.signature.as_deref(),
+        ) == crate::policy_signature::SignatureVerdict::Trusted
+            && embeds_revision(&response.json);
+        tracker
     }
 
     pub fn current_revision(&self) -> i64 {
@@ -716,6 +747,24 @@ impl PolicyTracker {
         }
         let trusted = verdict == crate::policy_signature::SignatureVerdict::Trusted;
         let policy = validate_policy_with_trust(response, protected, trusted)?;
+        // Only a revision inside the signed bytes is evidence of order. A
+        // signed revision replaces one that nobody signed whatever the two
+        // numbers are — that is how a client pinned by a replayed document
+        // with a forged revision recovers — and once a signed revision is
+        // installed, an unsigned number can no longer move the gate. Host
+        // trust is unaffected: it still comes from the signature verdict
+        // and the compiled allowlists alone (#317).
+        let authenticated = trusted && embeds_revision(&response.json);
+        if authenticated && !self.revision_authenticated {
+            self.current_revision = response.revision;
+            self.current_digest = Some(response.sha256.clone());
+            self.current_signature = response.signature.clone();
+            self.revision_authenticated = true;
+            return Ok(PolicyInstallOutcome::Installed(policy));
+        }
+        if !authenticated && self.revision_authenticated {
+            return Err(PolicyError::StaleRevision);
+        }
         if response.revision < self.current_revision {
             return Err(PolicyError::StaleRevision);
         }
@@ -745,6 +794,15 @@ impl PolicyTracker {
         self.current_signature = response.signature.clone();
         Ok(PolicyInstallOutcome::Installed(policy))
     }
+}
+
+/// The signed document names its own revision. Whether it matches the
+/// envelope is checked by `validate_policy_with_trust`.
+fn embeds_revision(json: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|value| value.get("revision").cloned())
+        .is_some()
 }
 
 /// A cache entry that survived safety checks and full re-validation.
