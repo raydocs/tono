@@ -32,6 +32,44 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 监视器重连成功后不再自中断丢失连接尾部
+
+- **归属**：G1（已连接=能用；monitor 恢复的会话与用户点 Connect 的会话尾部行为一致）。
+  影响 `apps/windows/app` 连接编排与仪表盘。
+- **来源**：基线 main
+  [576d7087](https://github.com/raydocs/tono/commit/576d7087) → 分支
+  `fix/windows-monitor-self-abort-20260922`；
+  [差异与关联 PR](https://github.com/raydocs/tono/compare/main...fix/windows-monitor-self-abort-20260922)。
+  提交时未合 main。
+- **缺陷修复**：R2-F4（对抗核实降级后仍成立）：网络监视器驱动的重连在旧 monitor
+  自己的任务栈内联执行，成功尾部 `spawn_network_monitor` 无条件
+  `abort_network_monitor()`，abort 了槽位里正在执行 `run_stages` 的自己；tokio 仅标记
+  取消，任务在下一个 Pending await（`spawn_control_plane_pin_refresh` 的
+  `state.lock().await`，常与托盘刷新任务争锁）被销毁。核实确认的实际损失：本会话
+  DIRECT 覆盖层缺失（国内/WeChat 直连回到全隧道，fail-closed 不泄漏）、pin-refresh
+  注册丢失（新任务以孤儿存活、靠代际自查，功能不丢）、`seed_autostart_after_connect`
+  跳过（仅首连生效，无实质影响）；且 `direct_overlay="off"` 被仪表盘 connectHint 当成
+  直连已开显示（旧逻辑只区分 `skipped`）。现在
+  `TaskRegistry::register_network_monitor` 比较 `JoinHandle::id()` 与
+  `tokio::task::try_id()`，槽位句柄即当前任务时只替换不 abort；旧 monitor 完成连接
+  尾部后按既有 `connection_loop_continues(Handled)` 语义自行退出。前端仅
+  `directOverlay === 'on'` 显示 directOn，`off`/`skipped` 显示 directSkipped。
+- **新增/优化**：无新能力。DIRECT 覆盖层语义、WFP 保护、断开/登出路径的
+  `abort_connection_tasks` 全部不变；其余替换路径（用户 Connect、重连退避、节点切换）
+  仍中止被替换的监视器。
+- **工程与测试**：新增一个回归
+  `a_monitor_replacing_its_own_registration_finishes_the_connect_tail`
+  （connection/monitor.rs tests）：任务把自身句柄放入槽位后执行同一注册逻辑，
+  `yield_now().await` 后 oneshot 发送并断言接收；旧无条件 abort 语义下任务在 yield
+  后被取消、收不到 → 失败。
+- **验证**：按所有者 2026-09-14 执行位置决定，本机（MacBook）仅编辑与源码自查，
+  未运行 cargo/npm 构建与测试；`apps/windows` workspace `cargo test` 与该回归委托
+  本 PR CI（GitHub-hosted `windows-2025`），结果续记于 PR。未在 Windows 11 实机复现
+  monitor 驱动重连场景。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：实机上的监视器重连后 DIRECT 覆盖层到位情况未验证；UI 提示
+  directSkipped 同时覆盖 `off` 与 `skipped`（两者语义一致：国内直连未开）。
+
 ## 2026-09-23 · Windows 原生更新接管后不再搁浅 Connecting 状态机
 
 - **归属/来源**：G3 升级生命周期与连接交错（R2 审查 F3，V5 对抗核实已确认）；基线 main
