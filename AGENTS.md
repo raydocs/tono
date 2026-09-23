@@ -54,6 +54,16 @@ workspaces stay separate.
    XCTest, Worker one `it`. Do not add table-driven suites to make a change look
    complete.
 
+## Internal update record
+
+Every internal delivery with code, configuration, build/test tooling or
+release/acceptance changes must update [docs/INTERNAL_CHANGELOG.md](docs/INTERNAL_CHANGELOG.md)
+in the same PR. Follow its entry template: separate fixes from features and
+test/fixture corrections; record source/PR, actual verification, remaining
+limits, and candidate identity or explicitly no new package. Link detailed
+evidence instead of duplicating it. A green source PR is not a released build.
+Do not create empty entries for read-only reviews or formatting-only edits.
+
 ## Verification
 
 Run the smallest check that covers the tree you touched.
