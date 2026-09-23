@@ -639,3 +639,84 @@ async fn corrupt_snapshot_recovery_refuses_over_an_inactive_leftover_tun_dns() -
     assert_eq!(tokio::fs::read(quarantined).await?, corrupt);
     Ok(())
 }
+
+/// R3-F2: a corrupt resolver-policy capture must not turn Disconnect into a permanent
+/// refusal. The sidecar writes used to be neither atomic nor ever rewritten, so a crash or
+/// power loss could leave `protected-interface-doh.json` zero-length; every later restore
+/// then failed the parse — on every retry, with no in-product way out, and the file survives
+/// even an uninstall/reinstall. Here a normal session exists (a real snapshot on disk), the
+/// adapter vanishes mid-session — the documented "vanished counts as proven" restore — and
+/// the capture lands zero-length: restore must succeed through the proven path, quarantine
+/// the capture under the snapshot quarantine's naming, and report the loss through the
+/// marker rather than as a clean restore. (The suppress early-death aggravation — the same
+/// unreadable file failing the capture read before any policy was written — is fixed by the
+/// same parse-tolerant engine path, but suppress stays fixture-short-circuited, so this test
+/// asserts the restore face only.)
+#[tokio::test]
+#[serial_test::serial]
+async fn corrupt_interface_doh_capture_is_quarantined_not_a_permanent_refusal() -> Result<()> {
+    use super::super::{NAME_SERVER, test_io::{self, Fixture}, v4_key};
+    use crate::core::dns as facade;
+
+    let a = effective(&entry(1), [9, 9, 9, 9], false);
+    let guid = a.guid.clone();
+    let _fixture = Fixture::new(vec![a])?;
+    assert!(facade::enable().await?.enabled);
+    let capture_path = test_io::with(|io| {
+        // The adapter left while protection was on: its registry key keeps the protected
+        // values and the snapshot keeps the originals, which `apply_snapshot` restores.
+        io.absent.insert(guid.clone());
+        io.capture_dir.join("protected-interface-doh.json")
+    })
+    .unwrap();
+    // The crash face: the sidecar exists, but its bytes never made it to disk.
+    std::fs::write(&capture_path, b"")?;
+
+    let restored = facade::restore_protected().await?;
+    assert!(
+        !restored.enabled && !restored.snapshot_present,
+        "{restored:?}"
+    );
+    assert!(
+        restored
+            .last_error
+            .as_deref()
+            .is_some_and(|note| note.contains(facade::DNS_CAPTURE_QUARANTINED_PREFIX)),
+        "the lost capture must be surfaced, not reported as a clean restore: {:?}",
+        restored.last_error
+    );
+    // The vanished adapter's registry was still restored from the intact snapshot, and the
+    // snapshot was retired; only the unreadable capture was set aside, empty bytes retained.
+    assert!(!capture_path.exists());
+    test_io::with(|io| {
+        assert_eq!(
+            io.read(&v4_key(&guid), NAME_SERVER).as_deref(),
+            Some("9.9.9.9, 149.112.112.112"),
+            "the snapshot's originals must be back in the vanished adapter's key"
+        );
+    });
+    let retained = std::fs::read_dir(capture_path.parent().unwrap())?
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<std::io::Result<Vec<_>>>()?;
+    assert_eq!(
+        retained.len(),
+        1,
+        "the retired snapshot must be gone: {retained:?}"
+    );
+    let quarantined = &retained[0];
+    assert!(
+        quarantined
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("protected-interface-doh.corrupt-"),
+        "the unreadable capture must be quarantined, not kept in place: {quarantined:?}"
+    );
+    assert_eq!(std::fs::read(quarantined)?, b"");
+    assert_eq!(
+        test_io::with(|io| io.policy_restores).unwrap(),
+        1,
+        "the policy restore must have run for real through the fixture"
+    );
+    Ok(())
+}
