@@ -32,6 +32,27 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 签名/公证/Sparkle workflow 凭据范围（内部审查 H5-F2）
+
+- **归属**：发布工具链加固（非客户可见行为）；`.github/workflows/macos-release.yml`。
+- **来源**：基线 main `498ed426` → 分支 `fix/macos-release-secrets-20260923`；Issue #366；
+  提交时未合 main。
+- **缺陷修复**：注释把 `macos-appcast` 称作 “gated” 环境，但审批/分支限制取决于仓库
+  环境配置，workflow 文件本身不提供 → 改为如实说明门禁位置；`build` 与
+  `validate-appcast` 的 checkout 改 `persist-credentials: false`，`release/macos` 祖先
+  检查的 fetch 单独接收只读 token。签名/公证/Sparkle secrets 原本已是 step 级，未改动。
+- **新增/优化**：无。仓库设置不在本 PR 范围。
+- **工程与测试**：`tooling/scripts/tests/macos-candidate-workflow.test.rb` 新增一段：签名
+  secrets 不得出现在 workflow/job 级 env、任一 job 无写权限、所有 checkout 不持久化
+  凭据。旧 workflow 上失败于 “build checkout must not persist the token in .git/config”。
+- **验证**：MacBook 本机 `ruby tooling/scripts/tests/macos-candidate-workflow.test.rb`
+  全部通过（修复前新增段失败）；所有 `run:` 块 `bash -n`；本机无 actionlint，未跑。
+  `build`/`validate-appcast` 只在 release 线或 release tag 上运行，PR CI 不执行，需所有者
+  在下一次 macOS 发布时观察 ancestry fetch。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：Developer ID 身份在打包步骤期间位于已解锁的临时钥匙串中，xcodebuild 与
+  打包脚本在此期间运行，这是签名所必需的。
+
 ## 2026-09-23 · coreMonitor 不得把运行时替换的瞬时 utun 消失判为 TUN 死亡
 
 - **归属**：G1（已连接=能用：切换/热重载不掉线）；macOS 客户端 `apps/macos`。
