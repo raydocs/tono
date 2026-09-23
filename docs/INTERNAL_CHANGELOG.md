@@ -46,12 +46,19 @@
   FSM 永久停留在 Connecting，connect/retry 全拒，仅手动 Disconnect 可解。现把该收敛抽为
   `quiesce_connection_after_update(fsm, core_running)`：connecting 未 armed → 回 Not Connected；
   已 armed → 保留 blocked 闩收敛为 Protected Offline（不放宽保护：更新不是 Disconnect）；
-  Connected 行为保持现状（仅 Service 报 Core 已停时 tunnel_died）。遗留 `tono_prepare_update`
+  Connected 行为保持现状（仅 Service 报 Core 已停时 tunnel_died）。审查修正（代际门）：
+  收敛原先只要 Service 快照有应答就折叠 connecting，若更新在 `invalidate_connection` 之前
+  失败（如下载中途因 WinTUN 改路由断流），会把一个活着的 attempt 强改为 Not Connected，
+  进而令其提交时 `InvalidSuccessPrecondition`、已验证连接被丢弃换成受保护重连。现在作废时
+  记下 `connect_generation`，仅当它仍等于当前代际（即确是本次更新作废的 attempt）才折叠
+  connecting；未作废或代际已被更新后准入的新 attempt 推进时不碰 FSM。遗留 `tono_prepare_update`
   （quit.rs）形状相同但前端与 `generate_handler` 均未引用（死代码），本轮不动，留待专门清理。
 - **新增/优化**：无。
 - **工程与测试**：app workspace 新增一个窄回归 `update_quiesce_never_strands_connecting`
   （update.rs 测试模块），覆盖未 armed → Not Connected 与已 armed → Protected Offline 两个
-  收敛分支；无表驱动套件。tono-core 无改动（复用既有 `initial_release_failed` /
+  收敛分支，并在同一测试中断言“更新未作废（None）或代际已推进”时进行中的 connecting 不被
+  改动（修正前函数无条件折叠 connecting，该断言会失败）；无表驱动套件。代际比较在纯函数内，
+  调用点只负责传入作废时与收敛时的代际，调用点本身无测试覆盖。tono-core 无改动（复用既有 `initial_release_failed` /
   `tunnel_died` 转移），三个 Windows workspace 保持分离。
 - **验证**：本机（MacBook）按所有者执行位置决定只做源码编辑与 diff 自查，未运行任何
   cargo build/test/check（原生构建禁止本机执行）；编译与回归委托本 PR 的 GitHub-hosted
@@ -59,7 +66,7 @@
   提交时无本机测试结果，不沿用其他 SHA 的绿灯。
 - **候选/发布**：仅源码，无新候选包；未触碰 `appcast.xml` / `windows/latest.json` /
   `windows-updates`。
-- **剩余限制**：更新收敛依赖 Service 状态快照应答；Service IPC 完全无应答的极端情形仍保持
+- **剩余限制**：更新在作废前失败时不触碰 FSM（进行中的 attempt 自行完成其转移）。更新收敛依赖 Service 状态快照应答；Service IPC 完全无应答的极端情形仍保持
   本地视图（与取消退出路径的既有设计一致）。该缺陷为已核实的源码推导（R2 + V5），修复前
   未在 Windows 11 实机复现，实机验证仍属 G3 验收范围。
 

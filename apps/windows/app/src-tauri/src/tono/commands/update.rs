@@ -130,6 +130,9 @@ pub async fn tono_install_update(
     let _install = INSTALL
         .try_lock()
         .map_err(|_| "An update request is already running".to_string())?;
+    // The generation this update retired, if it got that far. Convergence may
+    // only fold the attempt this update invalidated, never a live one.
+    let mut invalidated = None;
     let outcome = async {
         let (manifest, signature, decoded) = OFFER.lock().await.clone().context("Check for updates again")?;
         ensure!(
@@ -176,6 +179,7 @@ pub async fn tono_install_update(
         {
             let mut inner = state.lock().await;
             inner.invalidate_connection(false);
+            invalidated = Some(inner.connect_generation);
             inner.tasks.abort_catalog_sync();
         }
         INCOMPLETE.store(true, Ordering::Release);
@@ -217,7 +221,8 @@ pub async fn tono_install_update(
     // and the attempt the update invalidated must never stay Connecting.
     if let Ok(snapshot) = crate::core::service::tono_service_status_snapshot().await {
         let mut inner = state.lock().await;
-        quiesce_connection_after_update(&mut inner.fsm, snapshot.core_pid.is_some());
+        let current = inner.connect_generation;
+        quiesce_connection_after_update(&mut inner.fsm, snapshot.core_pid.is_some(), invalidated, current);
         super::emit_status(&app, &super::status_of(&inner));
     }
     super::quit::resync_after_cancelled_quit(app).await;
@@ -236,8 +241,18 @@ pub async fn tono_install_update(
 /// not a Disconnect and must not loosen protection. A Connected session keeps
 /// its previous behavior — folded only when the Service reports the Core is
 /// no longer running (`core_running == false`).
-fn quiesce_connection_after_update(fsm: &mut ConnectionFsm, core_running: bool) {
-    if fsm.status().is_connecting {
+///
+/// Connecting is folded only when `invalidated` (the generation this update
+/// left behind) is still `current`: an update that failed before invalidating
+/// (download, proxy clear) or an attempt admitted after the invalidation
+/// (which bumps the generation) is live and owns its own FSM transitions.
+fn quiesce_connection_after_update(
+    fsm: &mut ConnectionFsm,
+    core_running: bool,
+    invalidated: Option<u64>,
+    current: u64,
+) {
+    if fsm.status().is_connecting && invalidated == Some(current) {
         // Unarmed → Not Connected; armed → Protected Offline, latch retained.
         fsm.initial_release_failed();
     } else if fsm.status().is_connected && !core_running {
@@ -302,7 +317,7 @@ mod update_quiesce_tests {
         // Cancelled before StartClash armed the WFP policy.
         let mut fsm = ConnectionFsm::new();
         fsm.begin_connect();
-        quiesce_connection_after_update(&mut fsm, false);
+        quiesce_connection_after_update(&mut fsm, false, Some(7), 7);
         assert!(!fsm.status().is_connecting);
         assert_eq!(fsm.status().ui_state(), UiState::NotConnected);
         assert!(!fsm.kill_switch_armed());
@@ -312,9 +327,19 @@ mod update_quiesce_tests {
         let mut fsm = ConnectionFsm::new();
         fsm.begin_connect();
         fsm.mark_kill_switch_armed();
-        quiesce_connection_after_update(&mut fsm, false);
+        quiesce_connection_after_update(&mut fsm, false, Some(7), 7);
         assert!(!fsm.status().is_connecting);
         assert!(fsm.kill_switch_armed());
         assert_eq!(fsm.status().ui_state(), UiState::ProtectedOffline);
+
+        // The update failed before invalidating (e.g. the download broke), or
+        // a new attempt was admitted after it (generation moved on): that
+        // attempt is live and must not be touched.
+        let mut fsm = ConnectionFsm::new();
+        fsm.begin_connect();
+        quiesce_connection_after_update(&mut fsm, false, None, 7);
+        assert!(fsm.status().is_connecting);
+        quiesce_connection_after_update(&mut fsm, false, Some(7), 8);
+        assert!(fsm.status().is_connecting);
     }
 }
