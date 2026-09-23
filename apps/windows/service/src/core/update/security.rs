@@ -91,7 +91,39 @@ fn verify_acl(file: &File) -> Result<()> {
         }
     }
     let _descriptor = Descriptor(descriptor);
+    verify_owner_and_dacl(owner, dacl)
+}
+
+/// `NT SERVICE\TrustedInstaller`. `C:\Program Files` hands it `(CI)(IO)(F)`, so every directory
+/// an installer creates beneath it carries an effective, inherited `TrustedInstaller:(I)(F)`; the
+/// installer does not rewrite that ACL. It is the Windows servicing identity, which no ordinary
+/// user holds, and administrators could already take ownership, so trusting it widens nothing.
+const TRUSTED_INSTALLER_SID: &str =
+    "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
+
+/// Only SYSTEM, BUILTIN\Administrators and TrustedInstaller may own or be granted write access
+/// to the installed tree; Users, Authenticated Users, Everyone or the owner user may not.
+/// `CREATOR OWNER` needs no entry: Program Files passes it only as an inherit-only ACE, which is
+/// skipped below, and inheritance substitutes the creator's owner SID — the owner this function
+/// already requires to be trusted.
+fn verify_owner_and_dacl(owner: PSID, dacl: *const ACL) -> Result<()> {
+    struct LocalSid(PSID);
+    impl Drop for LocalSid {
+        fn drop(&mut self) {
+            unsafe { LocalFree(self.0) };
+        }
+    }
+    let mut installer = std::ptr::null_mut();
+    ensure!(
+        unsafe { ConvertStringSidToSidW(wide(TRUSTED_INSTALLER_SID).as_ptr(), &mut installer) }
+            != 0,
+        "SID creation failed"
+    );
+    let installer = LocalSid(installer);
     let trusted = |sid| -> Result<bool> {
+        if unsafe { EqualSid(sid, installer.0) } != 0 {
+            return Ok(true);
+        }
         for kind in [WinLocalSystemSid, WinBuiltinAdministratorsSid] {
             let mut bytes = [0_u64; 9];
             let mut length = std::mem::size_of_val(&bytes) as u32;
@@ -236,12 +268,26 @@ pub fn app_image(pid: u32) -> Result<Image> {
     let root = install_root()?;
     verify_tree(&root, 0)?;
     let image = image(pid)?;
-    ensure!(
-        image.path == root.join("Tono.exe"),
-        "peer is not the registered App image"
-    );
+    if image.path != root.join("Tono.exe") {
+        return Err(NotRegisteredApp.into());
+    }
     Ok(image)
 }
+
+/// The one verdict [`app_image`] reaches about the caller itself: its image is not the registered
+/// installation's `Tono.exe`. Every other `app_image` error means the proof could not be completed
+/// (registry, ACL or file reads, a file held open, the tree changing), not that the caller is not
+/// the App.
+#[derive(Debug)]
+pub struct NotRegisteredApp;
+
+impl std::fmt::Display for NotRegisteredApp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("peer is not the registered App image")
+    }
+}
+
+impl std::error::Error for NotRegisteredApp {}
 
 pub fn verify_tree(root: &Path, depth: usize) -> Result<()> {
     ensure!(depth < 12, "installation tree too deep");
@@ -516,5 +562,64 @@ impl Drop for SuspendedApp {
         if !self.resumed {
             unsafe { windows_sys::Win32::System::Threading::TerminateProcess(self.process.0, 1) };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn verify_sddl(sddl: &str) -> Result<()> {
+        let mut descriptor = std::ptr::null_mut();
+        ensure!(
+            unsafe {
+                ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    wide(sddl).as_ptr(),
+                    SDDL_REVISION_1,
+                    &mut descriptor,
+                    std::ptr::null_mut(),
+                )
+            } != 0,
+            "SDDL parse failed: {}",
+            std::io::Error::last_os_error()
+        );
+        struct Descriptor(PSECURITY_DESCRIPTOR);
+        impl Drop for Descriptor {
+            fn drop(&mut self) {
+                unsafe { LocalFree(self.0) };
+            }
+        }
+        let descriptor = Descriptor(descriptor);
+        let (mut owner, mut dacl) = (std::ptr::null_mut(), std::ptr::null_mut());
+        let (mut defaulted, mut present) = (0, 0);
+        ensure!(
+            unsafe { GetSecurityDescriptorOwner(descriptor.0, &mut owner, &mut defaulted) } != 0
+                && unsafe {
+                    GetSecurityDescriptorDacl(descriptor.0, &mut present, &mut dacl, &mut defaulted)
+                } != 0,
+            "descriptor unreadable"
+        );
+        verify_owner_and_dacl(owner, dacl)
+    }
+
+    /// What an elevated installer's `C:\Program Files\Tono` inherits from Windows' default
+    /// Program Files ACL (icacls: TrustedInstaller:(I)(F), SYSTEM:(I)(F), Administrators:(I)(F),
+    /// Users:(I)(RX), CREATOR OWNER inherit-only, app packages RX). Not yet read from a device.
+    #[test]
+    fn default_program_files_inherited_acl_is_trusted_and_user_write_is_not() {
+        const TI: &str = "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
+        let inherited = format!(
+            "O:BAD:AI(A;ID;FA;;;{TI})(A;CIIOID;GA;;;{TI})(A;ID;FA;;;SY)(A;OICIIOID;GA;;;SY)\
+             (A;ID;FA;;;BA)(A;OICIIOID;GA;;;BA)(A;ID;0x1200a9;;;BU)(A;OICIIOID;GXGR;;;BU)\
+             (A;OICIIOID;GA;;;CO)(A;ID;0x1200a9;;;S-1-15-2-1)(A;OICIIOID;GXGR;;;S-1-15-2-1)\
+             (A;ID;0x1200a9;;;S-1-15-2-2)(A;OICIIOID;GXGR;;;S-1-15-2-2)"
+        );
+        verify_sddl(&inherited).expect("the default Program Files inheritance must be trusted");
+
+        let user_modify = format!("{inherited}(A;;0x1301bf;;;BU)");
+        assert!(
+            verify_sddl(&user_modify).is_err(),
+            "a Users write grant must still be refused"
+        );
     }
 }

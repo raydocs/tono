@@ -274,16 +274,36 @@ async fn disconnect_path_gates_stay_open_after_stop_clears_the_owner_record()
     Ok(())
 }
 
+/// Every owner-lifecycle route enters through `enter_owner_lifecycle`, so that is where the
+/// installed-App image proof has to be applied; deleting the call must fail this test. A proof
+/// that could not be completed must reach the App as the retryable 503, not as the 401 that
+/// means "not the Tono App".
 #[cfg(windows)]
 #[tokio::test]
-async fn a_process_of_the_owner_user_that_is_not_the_installed_app_is_refused() {
-    // The test binary runs as the owner user but from outside the registered installation.
-    let mut peer = owner(92_010);
-    peer.peer_pid = Some(std::process::id());
+#[serial]
+async fn lifecycle_entry_refuses_when_the_app_image_proof_cannot_complete() {
+    fn unproven(
+        _: &AuthenticatedOwner,
+    ) -> std::result::Result<(), crate::core::auth::ServiceError> {
+        Err(super::app_identity_unproven(
+            "installation tree file held open by another process",
+        ))
+    }
+    struct Restore(super::AppPeerProof);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            super::replace_test_app_peer_proof(self.0);
+        }
+    }
+    let _restore = Restore(super::replace_test_app_peer_proof(unproven));
 
-    let error = super::require_installed_app_peer(&peer)
-        .await
-        .expect_err("only the registered Tono.exe may enter the owner lifecycle");
+    let entered =
+        super::enter_owner_lifecycle(&owner(92_010), super::OwnerLifecycleGate::ArmedPolicyOwner)
+            .await;
 
-    assert_eq!(error.code, ServiceErrorCode::UnauthorizedOwner);
+    let std::ops::ControlFlow::Break(response) = entered else {
+        panic!("the lifecycle entry must apply the App image proof");
+    };
+    let response = response.expect("the refusal encodes as a response");
+    assert_eq!(response.status, http::StatusCode::SERVICE_UNAVAILABLE);
 }

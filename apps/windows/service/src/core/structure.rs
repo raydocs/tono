@@ -588,6 +588,12 @@ pub enum ServiceErrorCode {
     /// `POST /lifecycle/owner-goodbye` refused: the kill switch is armed, or the durable desired
     /// state wants (or cannot prove it does not want) the core running. Mapped to 409 Conflict.
     StillProtected = 1012,
+    /// A lifecycle route could not prove that its caller is the registered installation's
+    /// `Tono.exe` (registry, ACL or file read failed, or the tree was changing). Unlike
+    /// `UnauthorizedOwner` this is not a verdict about the caller: retry, and if it persists an
+    /// administrator can release protection with `--emergency-disarm`. Mapped to 503. (1013 is
+    /// taken on main by `StaleReleaseEpoch`.)
+    AppIdentityUnproven = 1014,
 }
 
 pub fn owner_key(identity: &OwnerIdentity) -> String {

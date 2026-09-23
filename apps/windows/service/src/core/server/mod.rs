@@ -773,25 +773,92 @@ enum OwnerLifecycleGate<'a> {
 /// installation's `Tono.exe` — the same image binding the update routes use. Other legitimate
 /// actors (uninstaller, installer repair) act as administrators through `--emergency-disarm` and
 /// the SCM, not through this pipe.
+///
+/// Only "the peer's image is not the registered `Tono.exe`" is a 401. A proof that could not be
+/// completed is `AppIdentityUnproven` (503): retryable, and it names the administrator exit. It
+/// still refuses — Release included — because an ordinary process of the user can make the proof
+/// fail on purpose (for example by holding a file in the installation tree open without read
+/// sharing), so admitting on an incomplete proof would reopen the bypass this closes.
 #[cfg(windows)]
 #[cfg_attr(feature = "test", allow(dead_code))]
+async fn prove_installed_app_peer(
+    owner: &AuthenticatedOwner,
+) -> std::result::Result<(), ServiceError> {
+    let Some(pid) = owner.peer_pid else {
+        return Err(app_identity_unproven(
+            "the pipe did not identify the peer process",
+        ));
+    };
+    match tokio::task::spawn_blocking(move || crate::core::update::app_image(pid)).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(error)) if error.is::<crate::core::update::NotRegisteredApp>() => {
+            Err(ServiceError::new(
+                crate::ServiceErrorCode::UnauthorizedOwner,
+                format!("caller is not the installed Tono App: {error:#}"),
+            ))
+        }
+        Ok(Err(error)) => Err(app_identity_unproven(&format!("{error:#}"))),
+        Err(error) => Err(app_identity_unproven(&format!(
+            "image check did not complete: {error}"
+        ))),
+    }
+}
+
+#[cfg(windows)]
+#[cfg_attr(feature = "test", allow(dead_code))]
+fn app_identity_unproven(detail: &str) -> ServiceError {
+    ServiceError::new(
+        crate::ServiceErrorCode::AppIdentityUnproven,
+        format!(
+            "Tono Service could not confirm that this request came from the installed Tono App \
+             ({detail}), so nothing was changed. Try again. If this keeps happening, repair \
+             Tono, or release network protection by running `tono-service.exe \
+             --emergency-disarm` as Administrator from the Tono installation folder."
+        ),
+    )
+}
+
+/// The lifecycle `test` feature drives these routes from test processes, which are the owner user
+/// but by construction not the installed App, so the proof is injectable there. The default
+/// admits; a test that injects a refusal proves the lifecycle entry applies it.
+#[cfg(all(windows, feature = "test"))]
+type AppPeerProof = fn(&AuthenticatedOwner) -> std::result::Result<(), ServiceError>;
+
+#[cfg(all(windows, feature = "test"))]
+fn admit_test_peer(_: &AuthenticatedOwner) -> std::result::Result<(), ServiceError> {
+    Ok(())
+}
+
+#[cfg(all(windows, feature = "test"))]
+static TEST_APP_PEER_PROOF: std::sync::Mutex<AppPeerProof> =
+    std::sync::Mutex::new(admit_test_peer as AppPeerProof);
+
+/// Installs `proof` for the lifecycle entry and returns the one it replaced.
+#[cfg(all(windows, feature = "test", test))]
+fn replace_test_app_peer_proof(proof: AppPeerProof) -> AppPeerProof {
+    std::mem::replace(
+        &mut *TEST_APP_PEER_PROOF
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+        proof,
+    )
+}
+
+#[cfg(all(windows, not(feature = "test")))]
 async fn require_installed_app_peer(
     owner: &AuthenticatedOwner,
 ) -> std::result::Result<(), ServiceError> {
-    let refused = |detail: String| {
-        ServiceError::new(
-            crate::ServiceErrorCode::UnauthorizedOwner,
-            format!("caller is not the installed Tono App: {detail}"),
-        )
-    };
-    let pid = owner
-        .peer_pid
-        .ok_or_else(|| refused("the pipe did not identify the peer process".into()))?;
-    match tokio::task::spawn_blocking(move || crate::core::update::app_image(pid)).await {
-        Ok(Ok(_)) => Ok(()),
-        Ok(Err(error)) => Err(refused(format!("{error:#}"))),
-        Err(error) => Err(refused(format!("image check did not complete: {error}"))),
-    }
+    prove_installed_app_peer(owner).await
+}
+
+#[cfg(all(windows, feature = "test"))]
+async fn require_installed_app_peer(
+    owner: &AuthenticatedOwner,
+) -> std::result::Result<(), ServiceError> {
+    let proof = *TEST_APP_PEER_PROOF
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    proof(owner)
 }
 
 /// Takes `OWNER_LIFECYCLE_LOCK` and then applies the route's gate, in that order — the gate
@@ -810,9 +877,7 @@ async fn enter_owner_lifecycle(
     owner: &AuthenticatedOwner,
     gate: OwnerLifecycleGate<'_>,
 ) -> ControlFlow<Result<HttpResponse>, OwnerLifecycleGuard> {
-    // The lifecycle `test` feature drives these routes from test processes, which by
-    // construction are not the installed App; the check itself is covered directly.
-    #[cfg(all(windows, not(feature = "test")))]
+    #[cfg(windows)]
     if let Err(error) = require_installed_app_peer(owner).await {
         return ControlFlow::Break(service_error(error));
     }
@@ -969,6 +1034,7 @@ fn service_error(error: ServiceError) -> Result<HttpResponse> {
         crate::ServiceErrorCode::UnauthorizedOwner => StatusCode::UNAUTHORIZED,
         crate::ServiceErrorCode::NotActive => StatusCode::CONFLICT,
         crate::ServiceErrorCode::StillProtected => StatusCode::CONFLICT,
+        crate::ServiceErrorCode::AppIdentityUnproven => StatusCode::SERVICE_UNAVAILABLE,
         _ => StatusCode::UNPROCESSABLE_ENTITY,
     };
     json_response::<()>(status, error.code as u16, error.message, None)
