@@ -49,9 +49,9 @@
 - **工程与测试**：新增 `CoreRouteClassificationTests.testReviewedDirectPathRequiresSignedBundleAtStandardLocation`
   （临时目录中未签名的同名 bundle 不被授予；生产路径列表中每项都须通过签名校验。旧代码在
   没装这些 App 的 CI 上因无条件的默认路径失败）。增加仅测试使用的
-  `managedDirectBundlePathsOverride`；3 处依赖“默认路径必在”的既有测试
+  `managedDirectBundlePathsOverride`；4 处依赖“默认路径必在”的既有测试
   （`testReviewedChinaOfficeAppsShareTheWeChatDirectBoundary`、`SingBoxConfigTests` 产品运行时、
-  `MultiExitPolicyTests`）改为显式注入路径，删除断言缺陷行为的默认路径断言。
+  `MultiExitPolicyTests`、`WeChatResolverPolicyTests`）改为显式注入路径，删除断言缺陷行为的默认路径断言。
 - **验证**：本机只做 diff 检查，并用 `codesign -v -R` 核对新 requirement：本机 App Store
   WeChat 与 Developer ID 应用可通过，未签名的假 bundle 与 identifier 不符时被拒。XCTest、
   multi-exit 脚本与 `sing-box check` 由 GitHub-hosted `macos-26` CI 执行，结果见 PR。
