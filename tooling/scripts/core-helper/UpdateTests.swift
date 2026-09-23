@@ -300,6 +300,29 @@ func runUpdateSelfTests() -> Bool {
         try refuses { try UpdatePackage.sameCode(after.0, installed: after.1) }
         try check(child.isRunning, "Fixture exited before stale-mapped identity was checked")
     }
-    print("Update production-bound tests: \(7 - failures.count) passed, \(failures.count) failed; native-device acceptance NOT performed")
+    test("startup-interrupted-by-own-executor-bootout-does-not-arm-emergency-block") { directory in
+        // The executor holds the lock (perform/validate runs for seconds);
+        // the daemon's startup waits behind it and receives the bootout SIGTERM.
+        let holder = try UpdateStorage(root: directory)
+        var armed = 0
+        try holder.locked {
+            let daemon = try UpdateStorage(root: directory)
+            helperShutdownRequested = 1
+            defer { helperShutdownRequested = 0 }
+            let clean = try UpdateExecutor.startup(storage: daemon, emergencyBlock: { armed += 1 })
+            try check(clean, "A bootout while waiting behind the executor's lock is a clean stop")
+        }
+        try check(armed == 0, "Executor bootout during startup armed the emergency block")
+        // Only the bootout whitelist is clean; an unreadable ledger keeps
+        // arming the fail-closed barrier and stops launch as before.
+        let corrupt = try UpdateStorage(root: directory + "/corrupt")
+        try UpdateStorage.write(Data("not a ledger".utf8), to: directory + "/corrupt/ledger.json")
+        var corrupted = 0
+        try refuses {
+            _ = try UpdateExecutor.startup(storage: corrupt, emergencyBlock: { corrupted += 1 })
+        }
+        try check(corrupted == 1, "Corrupt-ledger startup stopped arming the emergency block")
+    }
+    print("Update production-bound tests: \(8 - failures.count) passed, \(failures.count) failed; native-device acceptance NOT performed")
     return failures.isEmpty
 }

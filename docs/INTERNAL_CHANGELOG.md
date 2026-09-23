@@ -32,6 +32,42 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 升级开机竞态：执行器 bootout 停 Helper 不再误装紧急 PF 阻断
+
+- **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 启动恢复。R4-F5
+  （2026-09-22 升级中断恢复审查发现，对抗核实轮 V9 确认并修正影响面）。叠在
+  R3-F4 修复 PR #303 与 R3-F3 修复 `fix/macos-dns-snapshot-outlet-20260922`（#307）之上，
+  本条分支 `fix/macos-update-bootout-startup-20260922`。
+- **缺陷修复**：consumed→replaced 窗口内重启机时，`core-helper`（RunAtLoad+KeepAlive）与
+  `update-executor`（RunAtLoad）并行启动；执行器先持锁进入 perform 的 validate（全束验签
+  冷启动可达数秒），Helper main 的 `UpdateExecutor.startup()` 在 `storage.locked` 自旋等待；
+  执行器到 `stopDaemon()` 的 `launchctl bootout` 发 SIGTERM，自旋守卫抛错，main 的 catch
+  无差别 `installEmergencyBlock`（全阻断）并 exit(1)——把自己的执行器停机当成了账本损坏。
+  现把 main 的 catch 收进 `UpdateExecutor.startup(storage:emergencyBlock:)`：`locked` 的
+  自旋守卫在 `helperShutdownRequested` 时改抛可区分的 `HelperFailure.stopping`，startup 对
+  stopping 返回干净停止（main exit(0)，执行器拥有流程，`startDaemon` 事后拉回，无需任何
+  PF 动作）；其余任何 startup 错误仍照旧装紧急阻断（fail-closed 不变）。核实修正的影响面
+  （V9）：`installEmergencyBlock` 不写持久化状态文件，受保护义务经执行器
+  `restoreAtLaunch`/`retainBootstrap` 自愈；真正落入坏态的是 `.unprotected` 义务——紧急
+  规则残留使 validate 观测 `.unknown` → blocked → 落入 R4-F2 的永久 pending（事务终态缺
+  口由后续 PR 修，本条只修"bootout 被当成账本损坏"这一根因）。触发面经核实为窗口内重启
+  机（UpdateStorage.swift:61-62 注释自证该交错是设计预期），同一 boot 内正常升级不暴露。
+- **工程与测试**：新增一个窄 helper 自测
+  `startup-interrupted-by-own-executor-bootout-does-not-arm-emergency-block`（载体
+  `--update-self-test`）：第二持有者持锁 + `helperShutdownRequested=1` → 断言 startup 返回
+  干净停止且 emergencyBlock 回调未 invoked；同测并断言损坏账本仍会触发 emergencyBlock
+  （仅此一个白名单分支，不放宽保护）。修复前实现 `armed==1` 必失败。另：helper 源码变更
+  按 `build-core-helper.sh` 契约门推进 `HelperProtocolVersion` 4.7.0 → 4.8.0；
+  CONTRACT.sha256 以脚本同一 sed|shasum 管道本机重算（纯文本哈希，未编译；管道已先对
+  修改前树复现 #307 记录的 4.7.0 哈希自证一致）。
+- **验证**：本机为编辑/审查机（2026-09-14 所有者决定），swift 编译与测试未在本机执行；
+  回归委托本 PR CI（GitHub-hosted macos-26，macos-ci 运行 build-core-helper.sh 契约门与
+  `sudo … --update-self-test`）。准确源码 SHA 与实际 CI 结果见关联 PR；提交时未获得本轮
+  CI 结果，不沿用其他分支或上一轮 main 的绿灯。
+- **新增/发布/限制**：无新功能、无新包、无部署，仅源码。R4-F2（consumed 后无终态）与
+  R4-F3（successor 单 incarnation 绑定）不在本条；触发概率的实机数据仍缺（依赖启动次序
+  与冷启动验签耗时），仅源码路径与 launchd 语义核实。
+
 ## 2026-09-23 · macOS 快照文件不可读时隔离后清扫，三条恢复出口不再同点死锁
 
 - **归属/来源**：G1 断开与恢复；macOS `tono-core-helper` 的 `protected-dns.json` 恢复链。
