@@ -162,6 +162,30 @@ def xray_binary() -> Path:
     return path
 
 
+def xray_config_path() -> Path:
+    # The static config tono-xray loads at start. shared-legacy lives here, so a
+    # retirement that only reaches the running process is undone by a restart.
+    return Path(env("TONO_XRAY_CONFIG", required=False) or "/opt/tono-xray/current/config.json")
+
+
+def retire_override(raw: str) -> bool | None:
+    """The operator's TONO_RETIRE_SHARED_LEGACY, or None when unset.
+
+    Case and common spellings are accepted. Anything else retires: a typo must
+    not silently keep a credential every old catalog still holds.
+    """
+    value = raw.strip().lower()
+    if not value:
+        return None
+    if value in ("1", "true", "yes", "on"):
+        return True
+    if value in ("0", "false", "no", "off"):
+        return False
+    print(f"TONO_RETIRE_SHARED_LEGACY={raw!r} is not true/false; retiring shared-legacy",
+          file=sys.stderr)
+    return True
+
+
 def api_address() -> str:
     # The management inbound. Localhost-only by design: this is the interface that
     # can add and remove accounts.
@@ -661,8 +685,22 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
     Removal is the enforcement path, and a wrong one disconnects a paying
     customer. So it runs off what the node holds, or failing that off the labels
     this agent recorded installing, and never off counters. When neither is
-    known, nothing is removed.
+    known, nothing is removed — except shared-legacy under an explicit
+    retirement, which lives in the static config and so may be back after a
+    restart even though no inventory still names it.
     """
+    removed = 0
+    if retire_shared_legacy and listed is None:
+        result = run_xray(binary, [
+            "api", commands["remove_user"], f"--server={address}",
+            f"--tag={tag}", f"--email={LEGACY_CLIENT_EMAIL}",
+        ])
+        if result.returncode != 0 and "not found" not in (result.stderr or "").lower():
+            raise Refusal(
+                f"removing {LEGACY_CLIENT_EMAIL} failed: {result.stderr.strip() or result.returncode}"
+            )
+        if recorded is not None:
+            recorded = recorded - {LEGACY_CLIENT_EMAIL}
     wanted = {
         client_label(entry["userId"], entry.get("deviceId"), entry["clientUUID"]): entry["clientUUID"]
         for entry in roster
@@ -680,7 +718,6 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
         label for label in installed
         if label == LEGACY_CLIENT_EMAIL or label.startswith(CLIENT_LABEL_PREFIX)
     }
-    removed = 0
     if installed is None:
         print("this exit cannot say which clients it holds; removed nothing")
     else:
@@ -920,6 +957,66 @@ def reconcile_and_read_stable(
     raise AssertionError("bounded xray reconciliation loop did not return")
 
 
+def persist_shared_legacy_retirement(binary: Path, config: Path) -> bool:
+    """Remove shared-legacy from the static Xray config so a restart cannot revive it.
+
+    Written beside the original with its owner and mode, checked by the
+    installed xray, then renamed into place; a failure leaves the old file and
+    is a refusal, never a silent success. Returns whether the file changed.
+    """
+    try:
+        info = config.stat()
+        document = json.loads(config.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise Refusal(f"cannot read {config} to retire {LEGACY_CLIENT_EMAIL}: {error}") from error
+    changed = False
+    for inbound in document.get("inbounds", []) if isinstance(document, dict) else []:
+        if not isinstance(inbound, dict) or inbound.get("protocol") != "vless":
+            continue
+        settings = inbound.get("settings")
+        clients = settings.get("clients") if isinstance(settings, dict) else None
+        if not isinstance(clients, list):
+            continue
+        kept = [c for c in clients
+                if not (isinstance(c, dict) and c.get("email") == LEGACY_CLIENT_EMAIL)]
+        if len(kept) != len(clients):
+            settings["clients"] = kept
+            changed = True
+    if not changed:
+        return False
+    temporary: str | None = None
+    try:
+        descriptor, temporary = tempfile.mkstemp(prefix=".config-", suffix=".json",
+                                                 dir=config.parent)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            os.fchown(output.fileno(), info.st_uid, info.st_gid)
+            os.fchmod(output.fileno(), stat.S_IMODE(info.st_mode))
+            json.dump(document, output, indent=2)
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        checked = run_xray(binary, ["run", "-test", "-config", temporary])
+        if checked.returncode != 0:
+            raise Refusal(
+                f"xray rejected {config} without {LEGACY_CLIENT_EMAIL}: "
+                f"{(checked.stderr or checked.stdout or '').strip() or checked.returncode}"
+            )
+        os.replace(temporary, config)
+        temporary = None
+        directory_fd = os.open(config.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except OSError as error:
+        raise Refusal(f"cannot persist {LEGACY_CLIENT_EMAIL} retirement to {config}: {error}") from error
+    finally:
+        if temporary is not None:
+            os.unlink(temporary)
+    print(f"removed {LEGACY_CLIENT_EMAIL} from {config}")
+    return True
+
+
 def sync_hy2_roster(roster: list[dict[str, str]]) -> bool:
     """Replace an installed hy2 checker's list from this verified roster only.
 
@@ -1001,7 +1098,7 @@ def run_once(path: Path) -> None:
     source = source_id(state)
     commands = require_commands(binary)
 
-    retire_override = env("TONO_RETIRE_SHARED_LEGACY", required=False)
+    override = retire_override(os.environ.get("TONO_RETIRE_SHARED_LEGACY", ""))
     node_id, observed_at, roster, server_retire_shared_legacy = fetch_roster(base, token)
     if node_id != source:
         raise Refusal(
@@ -1023,11 +1120,7 @@ def run_once(path: Path) -> None:
             raise Refusal("queued usage is more than five minutes ahead of the roster clock")
     # An explicit environment value wins in both directions so an operator can
     # stop an automatic retirement. An unset value follows the control plane.
-    retire_shared_legacy = (
-        server_retire_shared_legacy
-        if not retire_override
-        else retire_override in ("1", "true", "yes")
-    )
+    retire_shared_legacy = server_retire_shared_legacy if override is None else override
     # Revocations must reach hy2 even if the following Xray reconciliation
     # fails. Never ACK the roster unless both installed transports were updated.
     sync_hy2_roster(roster)
@@ -1044,6 +1137,9 @@ def run_once(path: Path) -> None:
         raise Refusal(
             "the live client inventory is unavailable and no durable inventory can prove complete reconciliation"
         )
+    if retire_shared_legacy:
+        # Checked every round: a hand edit or reprovision can put it back.
+        persist_shared_legacy_retirement(binary, xray_config_path())
     # Only a complete reconciliation is readiness evidence. Do this before any
     # state save so a failed acknowledgement leaves the durable state intact and
     # the whole roster can be retried next round.

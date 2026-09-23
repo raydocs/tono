@@ -78,7 +78,13 @@ old report IDs safe after a counter reset.
 
 `TONO_RETIRE_SHARED_LEGACY` is optional. When unset, the agent follows the
 control plane's `retireSharedLegacy` signal. Set it to `false` to block automatic
-retirement during rollback, or to `true` to force retirement.
+retirement during rollback, or to `true` to force retirement. Case does not
+matter (`1/true/yes/on`, `0/false/no/off`); any other value retires.
+
+Retirement removes `shared-legacy` from the running Xray and from the static
+config (`TONO_XRAY_CONFIG`, default `/opt/tono-xray/current/config.json`), so
+a restart cannot bring it back. The file is replaced atomically with its owner
+and mode after `xray run -test` accepts it; the agent must be able to write it.
 
 Run the regression suite with:
 

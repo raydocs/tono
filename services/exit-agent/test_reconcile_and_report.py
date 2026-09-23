@@ -544,6 +544,7 @@ class RosterControlSignals(unittest.TestCase):
                  side_effect=reconcile_error,
              ) as reconcile, \
              patch.object(agent, "sync_hy2_roster", side_effect=hy2_error), \
+             patch.object(agent, "persist_shared_legacy_retirement"), \
              patch.object(agent, "acknowledge_roster", side_effect=ack_error) as acknowledge, \
              patch.object(agent, "acknowledge_metering"):
             if ack_error or reconcile_error or hy2_error or not inventory_known:
@@ -621,6 +622,51 @@ class RosterControlSignals(unittest.TestCase):
                 agent.run_once(path)
         reconcile.assert_not_called()
         self.assertEqual(json.loads(path.read_text(encoding="utf-8")), state)
+
+    def test_shared_legacy_retirement_survives_an_xray_restart(self) -> None:
+        # Mixed-case override, no live listing, and a durable inventory that no
+        # longer names shared-legacy: each used to leave it installed, and the
+        # static config brought it back on every Xray restart.
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        path.write_text(json.dumps({**fresh_state(), "installedClients": ["u:usr_1"]}))
+        config = Path(directory.name) / "config.json"
+        config.write_text(json.dumps({"inbounds": [{
+            "tag": "tono-vless", "protocol": "vless", "settings": {"clients": [
+                {"id": "11111111-1111-4111-8111-111111111111", "email": agent.LEGACY_CLIENT_EMAIL},
+                {"id": "22222222-2222-4222-8222-222222222222", "email": "operator"},
+            ]},
+        }]}))
+        calls: list[list[str]] = []
+
+        def fake_xray(_binary, arguments):
+            calls.append(arguments)
+            stdout = '{"stat": []}' if "statsquery" in arguments else ""
+            return type("Result", (), {"returncode": 0, "stdout": stdout, "stderr": ""})
+
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "exit-node-a",
+                 "TONO_RETIRE_SHARED_LEGACY": "True", "TONO_XRAY_CONFIG": str(config),
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "xray_start_marker", return_value=None), \
+             patch.object(agent, "require_commands", return_value={
+                 "add_user": "adu", "remove_user": "rmu", "stats_query": "statsquery",
+             }), \
+             patch.object(agent, "fetch_roster", return_value=("exit-node-a", 1_700_000_000, [
+                 {"userId": "usr_1", "clientUUID": "33333333-3333-4333-8333-333333333333",
+                  "deviceId": None},
+             ], False)), \
+             patch.object(agent, "run_xray", fake_xray), \
+             patch.object(agent, "acknowledge_roster"), \
+             patch.object(agent, "acknowledge_metering"):
+            agent.run_once(path)
+
+        self.assertIn(f"--email={agent.LEGACY_CLIENT_EMAIL}", [a for c in calls for a in c])
+        clients = json.loads(config.read_text())["inbounds"][0]["settings"]["clients"]
+        self.assertEqual([client["email"] for client in clients], ["operator"])
 
 
 class Hy2RosterAuthorization(unittest.TestCase):
