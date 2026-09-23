@@ -195,5 +195,134 @@ GitHub 归档 digest 为 `sha256:a0f804c99e46f838347832c4028abed7b77986ab2c637d0
 - G3：[#26](https://github.com/raydocs/tono/issues/26) 的受保护更新与已装设备证据仍开放；
   [#273](https://github.com/raydocs/tono/issues/273) 的候选签名配置修复来自 #276，仍不代表实际
   签名/公证完成。旧安装器 smoke 的准确源码是 429d6e40，不冒充本功能版本的安装验收。
-- 未合并、部署、签名、创建发布标签、发布朋友包或改客户更新源。只有实际 G1–G3 证据齐备后，
-  才能按独立授权处理候选与渠道；本记录不提供发布许可，也不承诺全库没有其他 bug。
+- 以上记录截止整合分支验收时，当时未合并、部署、签名、创建发布标签、发布朋友包或改客户
+  更新源。此后的合并及测试候选使用所有者追加授权，状态见下节；G1–G3 仍须有实机证据才能
+  推进客户渠道。本记录不提供发布许可，也不承诺全库没有其他 bug。
+
+## 追加授权：合并后的 0.0.73 测试候选
+
+所有者随后要求完成工程验收并合入 main，再启动 GitHub CI 生成新的 0.0.73 包供测试人员测试，
+同时继续检查遗漏风险。#276、#279 已分别普通合并；测试候选冻结于 main
+[569ce865](https://github.com/raydocs/tono/commit/569ce8654f57e66f293cf4e443b5e0819b71912d)，
+远端专用分支 `stability/desktop-0.0.73-20260922` 指向同一提交。没有改写平台发布线或旧标签。
+整合分片 #277/#278 不再独立合并。
+
+合并后自动 push CI 的实际 checkout 和完整日志已读回，不再只是沿用 PR merge-tree 证据：
+
+- [Windows 35722605447](https://github.com/raydocs/tono/actions/runs/35722605447) 四个 job 成功。
+  [app-rust106728962323](https://github.com/raydocs/tono/actions/runs/35722605447/job/106728962323)
+  的 `cargo test --locked` 为 499 passed / 0 failed，原有 opt-in integration 1 ignored；
+  `cargo test --locked -p tono-core --test update_journal_atomic` 为 3 passed。
+- [macOS 35722605401](https://github.com/raydocs/tono/actions/runs/35722605401) 四个 job 成功。
+  [build106729267381](https://github.com/raydocs/tono/actions/runs/35722605401/job/106729267381)
+  的 unsigned Release、实际 runtime/Core/helper 合同和 XCTest 成功：356 tests / 1 existing skip /
+  0 failures。receipt 日志提取不可用，数量来自直接下载的完整 job 日志。
+- 候选工作流必需的 [frontend106735823380](https://github.com/raydocs/tono/actions/runs/35724809207/job/106735823380)
+  在同一准确源码执行 `pnpm typecheck` 和 `pnpm test`：36 files / 284 tests passed。
+
+本次追加检查限定于发布入口、源码与产物身份、打包信任边界和安装检查，没有重新发起全仓审计。
+确认并纠正了发布说明的真实错误：macOS 原文声称 14+、helper 4.3.0，但项目部署目标和 helper
+编译目标均为 26.3，打包明确为 arm64，`HelperProtocolVersion.current` 为 4.4.0。新说明明确
+Apple Silicon / macOS 26.3+，不再声称此包适用于 Intel/14/15，也不保证所有 helper 更新都无
+授权提示。Windows 说明标明 x64，并把两端的“first public cut”改为未获稳定版资格的测试候选。
+这些是文档修正，没有更改版本、兼容性目标或产品二进制；按仓库规则不为文档再跑产品测试。
+
+已有 `tono-macos-0.0.73-build73` 指向旧源码，`v0.0.73` 也已有旧安装器草稿。因此不能覆盖旧
+标签或混用旧草稿资产。新测试交付使用独立内部 RC 标签，不标 Latest，不上传客户 feed，
+不推进 Sparkle、`windows-updates` 或生产 Worker。macOS 候选不进入 Sparkle 签名环境；Windows
+候选关闭 updater 配置，保留未作 Authenticode/updater 签名的声明。
+
+### macOS 新签名包：CI、Apple 公证与下载校验通过
+
+本次唯一一次手动候选运行是
+[35724809207](https://github.com/raydocs/tono/actions/runs/35724809207)，输入
+`version=0.0.73, candidate_only=true`，上述专用分支与准确源码。六个 job 成功，
+`validate-appcast` 按候选隔离合同跳过，而不是 Sparkle 签名成功。
+[build106737261893](https://github.com/raydocs/tono/actions/runs/35724809207/job/106737261893)
+的完整日志确认：
+
+- 实际 checkout 为 569ce8654f57e66f293cf4e443b5e0819b71912d。
+- `xcodebuild test ... -configuration Debug -destination 'platform=macOS,arch=arm64'`
+  为 356 tests / 1 existing skip / 0 failures，目录竞态回归通过。
+- `tooling/scripts/package-macos-test.sh` 重建当前 helper，归档并签名；`codesign --verify
+  --deep --strict --all-architectures` 成功。公证输出 `status=Accepted, submitExitCode=0`，
+  `stapler validate` 输出 `The validate action worked!`，`spctl -a -t exec -vv` 输出
+  `accepted / source=Notarized Developer ID`。没有使用跳过签名或忽略拒绝的路径。
+
+[artifact10693693603](https://github.com/raydocs/tono/actions/runs/35724809207/artifacts/10693693603)
+是 `Tono-0.0.73-build73-arm64`，20,215,154 bytes，GitHub 外层归档 SHA-256
+`24d1d190c6924722a916917f38d045dd339da3c91d015ab4e3038aceb9312028`，2026-09-29 12:17:32 UTC
+到期。下载后 `sha256sum --check -` 输出 `macos-run-artifact.zip: OK`。
+内部实际分发 ZIP 为 `Tono-0.0.73-build73-arm64.zip`，SHA-256：
+`fb4dc0f68987da54705b20c386426d631cb3a2659740d87965ff672f5332393f`。
+
+Linux Orb 使用 `zipfile/plistlib/hashlib/struct` 只读校验 ZIP CRC、唯一顶层 `Tono.app`、
+内部 ZIP/App/helper/Core 与 manifest 的全部摘要、三个 Mach-O 的 arm64 类型，以及实际
+`Info.plist` 的 `0.0.73 / 73 / LSMinimumSystemVersion=26.3`，全部通过。签名验证证据来自
+上述 macOS 托管 job，不把 Linux 的摘要检查冒充 codesign/Gatekeeper。
+包内 `tono-build-source.json` 实读为准确源码、`Release`、`dirty=true`；构建脚本会重建已跟踪
+的 helper 资源，该字段不是纯源码 checkout 时的 clean 证明，没有为美化显示而写成 false。
+manifest 保留 `candidateOnly=true, releaseAccepted=false, developerIDSigned=true, notarized=true,
+sparkleSigned=false`。这关闭实际候选签名/公证的执行缺口，不关闭已安装 helper/设备网络验收。
+
+### Windows 新包：内容预检与原始安装检查通过
+
+本次一次 [candidate35724809260](https://github.com/raydocs/tono/actions/runs/35724809260)
+在同一专用分支、准确源码完成；[build106736468397](https://github.com/raydocs/tono/actions/runs/35724809260/job/106736468397)
+实际重建 Service/Core/App，不复用旧 0.0.73 草稿安装器。`pnpm typecheck`、4 项 updater
+测试及 85 项打包/开发合同测试通过，保留 5 个既有平台相关 skip。
+`pnpm release:preflight --payload-only <installer>` 的实际 7-Zip 内容检查通过，17 entries，
+Service 与安装 helper 内嵌 Core pin、pin 文件和已打包 Core 匹配。
+
+[artifact10694885424](https://github.com/raydocs/tono/actions/runs/35724809260/artifacts/10694885424)
+是 `tono-windows-0.0.73-candidate-569ce8654f57e66f293cf4e443b5e0819b71912d`，25,127,722 bytes，
+外层归档 SHA-256 为 `0d537f3fc6ad789df83465795a1dcba38d1a9107b7a8989e889e1361d683e11d`，
+2026-09-29 12:34:34 UTC 到期。下载后 `sha256sum --check -` 输出 `windows-run-artifact.zip: OK`；
+manifest 源码/版本和以下实际安装器 SHA-256 校验通过：
+
+`Tono_0.0.73_x64-setup.exe`，25,135,330 bytes，
+`e0837a2ab2f5126ae05f11188f9a7de469605453785888310cafb7f566ed0cad`。
+
+随后仅运行一次同分支、同源码、指定候选 run 的
+[smoke35728148869 / job106746780226](https://github.com/raydocs/tono/actions/runs/35728148869/job/106746780226)，
+保留原始 disposable GitHub-hosted Windows Server 2025 限制与候选来源检查。实际命令仍为
+`tooling/scripts/test-windows-candidate-install.ps1 -CandidateDirectory $env:CANDIDATE_DIRECTORY`，
+未采用 #275 的诊断模式、改 cwd 或放松 journal 门禁。原始输出：
+
+```text
+PASS fresh silent install, Service running, installed Core pin, no GUI auto-launch
+PASS same-version replacement/repair and Service restart
+PASS uninstall removed Service/runtime payload and preserved DNS
+```
+
+[artifact10694142487](https://github.com/raydocs/tono/actions/runs/35728148869/artifacts/10694142487)
+已下载读回，源码为准确 569ce865，`freshInstall/sameVersionRepair/uninstall/dnsUnchanged=true`、
+`physicalUpgradeQualified=false`。这是新组合包的未配置安装/修复/卸载证据，不是旧包沿用，也不
+证明 Windows 11、旧版已登录升级、真实 TUN/WFP 流量或受保护更新。安装器 manifest 明确
+`candidateOnly=true, releaseAccepted=false, updaterSigned=false, authenticodeSigned=false`。
+
+### 已发布的测试交付与仍待测试的场景
+
+[Tono 0.0.73 — Test candidate RC 2026-09-22.1](https://github.com/raydocs/tono/releases/tag/tono-desktop-0.0.73-rc.20260922.1)
+已发布为 `draft=false, prerelease=true`。新标签 `tono-desktop-0.0.73-rc.20260922.1` 读回为
+准确源码 569ce8654f57e66f293cf4e443b5e0819b71912d，非本次文档修订提交。
+先建立 Draft、核对六项上传摘要/大小/发布说明与准确 target，再发布预发布；没有替换资产。
+GitHub Latest 仍是 `v0.0.72`，旧 macOS 0.0.73 标签与 Windows 0.0.73 草稿保留。
+
+发布资产包含 Windows 安装器、已签名/公证的 macOS ZIP、两个平台的原始 candidate manifest、
+Windows 安装检查 JSON 和 `SHA256SUMS.txt`。六项都使用无认证 `curl -qfsSL` 从公开资产 URL
+重新下载，HTTP 200；逐项与 GitHub 上传 digest 比较一致，`sha256sum --check SHA256SUMS.txt`
+对两个包、两个 manifest 和安装回执全部输出 `OK`。测试者不需要 GitHub 账号读取这些下载。
+这证明本轮 Orb 到公开资产的可达性，不证明大陆所有网络均可访问 GitHub。
+
+本轮额外排查没有确认新的产品运行时缺陷；确认修正的是发布说明的兼容性、helper 版本和
+候选资格误标。未为“找更多问题”再扩展功能、重构或升级依赖，也未将新包替换成未测试源码。
+签名/构建/原始安装检查均无当前阻塞，可以交给指定测试人员进行手动设备验收；仍不能称为
+已通过全部稳定版门槛。
+
+Release 已提供中文测试清单：先断开并退出旧版，核对哈希与支持页源码，再走登录、真实 HTTPS、
+仪表盘/Activity、断开恢复 DNS、再次连接，以及收藏/固定地区/报告预览回执检查。睡眠、网络
+切换和受保护更新只在可恢复内部设备单列。失败保留同一次尝试的脱敏诊断、阶段与错误码，
+不提交 UUID、令牌、密码或完整配置。真实账号上传、PF/WFP 流量、装机授权、完整原生玻璃页面、
+G1–G3 设备及运营商证据仍未由本轮建立，#26 和 #273 保留边界而不自动关闭。
+没有新增合并、生产部署、客户 feed 编辑或自动更新推广；发布说明及证据文档通过独立 PR 交付。
