@@ -29,6 +29,24 @@ Hub **从不执行自由文本**。租到的 `type` 只能命中硬编码 handle
 
 上报前会脱敏：UUID、邮箱、除该节点公网 IP 以外的 IPv4、单词 `password` 都替换成 `[redacted]`。`summary` 截到 500 字，`resultJson` 超过 16 KiB 会丢掉末尾行并带 `"truncated": true`。Reality 配置只上报公钥的 sha256 指纹，私钥不离开节点。
 
+### SSH 主机密钥（固定 known-hosts）
+
+采集器、任务执行器和大陆探针的 SSH 全部用 `StrictHostKeyChecking=yes`，只信任
+hub 上的 `/opt/tono-ops/tono-collector-known-hosts`（`GlobalKnownHostsFile=/dev/null`），
+和 `tooling/scripts/check-node-in-fleet.py` 用的是同一个文件。主机密钥不在这个文件里或
+与之不符时，连接直接失败，不会自动接受，也不会把 root 密码发给对端：
+
+- 节点任务返回 `error`（ssh rc=255）；
+- 大陆探针记为 `host_key_unverified`，不计入封锁判定（全部未登记时视为没有大陆数据）；
+  `node_probe` 的对应运营商行带 `hostKeyUnverified` 计数。
+
+**登记流程**：新增或重装节点、新增大陆探针时，在写进 `nodes.secrets.json` 之前，
+先把该主机的主机密钥追加到上述文件，并把指纹与供应商控制台核对（与
+`.claude/skills/add-tono-node/SKILL.md`「Still needs a human · host-key fingerprint」和
+`check-node-in-fleet.py` 的 `HOST_KEY_UNPINNED` 提示是同一步）。指纹变了就先确认机器
+确实重装过，再删旧行重登，不要为了让采集恢复而跳过核对。注意 `onboard-node.rb` 固定的是
+笔记本上的 `~/.ssh/tono-fleet-known-hosts`，hub 这个文件需要单独登记。
+
 ### 安装 timer
 
 与采集器一样部署在 `/opt/tono-ops/`（`jobs.py` 必须和 `collect.py` 同目录）：

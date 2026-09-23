@@ -263,22 +263,9 @@ def ssh_exec(node: dict, remote: str, timeout: int = 60) -> tuple[int, str]:
     password = str(node["password"])
     env = os.environ.copy()
     env["SSHPASS"] = password
-    cmd = [
-        "sshpass",
-        "-e",
-        "ssh",
-        "-o",
-        "StrictHostKeyChecking=no",
-        "-o",
-        "UserKnownHostsFile=/dev/null",
-        "-o",
-        "ConnectTimeout=15",
-        "-p",
-        str(port),
-        f"root@{host}",
-        "bash",
-        "-s",
-    ]
+    import collect  # type: ignore
+
+    cmd = [*collect.ssh_password_argv(host, port, 15), "bash", "-s"]
     try:
         proc = subprocess.run(
             cmd,
@@ -306,21 +293,9 @@ def ssh_agent(agent: dict, remote: str, timeout: int = 25) -> tuple[int, str]:
         return 1, "missing_agent_credentials"
     env = os.environ.copy()
     env["SSHPASS"] = password
-    cmd = [
-        "sshpass",
-        "-e",
-        "ssh",
-        "-o",
-        "StrictHostKeyChecking=no",
-        "-o",
-        "UserKnownHostsFile=/dev/null",
-        "-o",
-        "ConnectTimeout=12",
-        "-p",
-        str(port),
-        f"root@{host}",
-        remote,
-    ]
+    import collect  # type: ignore
+
+    cmd = [*collect.ssh_password_argv(host, port, 12), remote]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
         return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
@@ -569,6 +544,7 @@ def handle_node_probe(params: dict, ctx: JobContext) -> tuple[str, str, dict]:
             out[carrier] = {"reachable": False}
             continue
         reachable = False
+        unverified = 0
         latency_ms: int | None = None
         for agent in agents[:6]:
             remote = (
@@ -578,6 +554,9 @@ def handle_node_probe(params: dict, ctx: JobContext) -> tuple[str, str, dict]:
                 f"echo EXIT:$EC MS:$(( (END-START)/1000000 ))"
             )
             _rc, text = ssh_agent(agent, remote, timeout=25)
+            if "Host key verification failed" in text and "EXIT:" not in text:
+                unverified += 1
+                continue
             match = re.search(r"EXIT:(\d+)", text)
             code = int(match.group(1)) if match else _rc
             ms_match = re.search(r"MS:(\d+)", text)
@@ -588,6 +567,8 @@ def handle_node_probe(params: dict, ctx: JobContext) -> tuple[str, str, dict]:
                     latency_ms = ms if latency_ms is None else min(latency_ms, ms)
             time.sleep(0.4)
         entry: dict[str, Any] = {"reachable": reachable}
+        if unverified:
+            entry["hostKeyUnverified"] = unverified
         if reachable and latency_ms is not None:
             entry["latencyMs"] = latency_ms
         out[carrier] = entry
