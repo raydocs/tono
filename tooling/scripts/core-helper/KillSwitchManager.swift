@@ -3,6 +3,8 @@ import Darwin
 
 let killSwitchStatePath = "/Library/Application Support/Tono/killswitch.state"
 let killSwitchPFPath = "/Library/Application Support/Tono/pf.tono.conf"
+/// The `pfctl -E` token this helper holds, bound to its boot session.
+let killSwitchPFReferencePath = "/Library/Application Support/Tono/pf.reference"
 let killSwitchMainPFPath = "/etc/pf.conf"
 let killSwitchMainBackupPath = "/etc/pf.conf.tono-backup"
 let killSwitchHostsPath = "/etc/hosts"
@@ -99,6 +101,11 @@ final class KillSwitchManager {
     /// skip the machine-wide state flush that would otherwise sever every
     /// established flow on the host. nil always forces the safe full flush.
     var lastLoadedPassRules: Set<String>?
+    /// Set when the liveness supervisor had to reinstall PF because it was no
+    /// longer filtering (disabled, or the Tono anchor was gone) while armed.
+    /// Cleared only by the next committed arm or a disarm, so the app can read
+    /// it without mutating anything and must re-arm to clear it.
+    var repairedSinceArm = false
 
     init(allowedUID: uid_t) throws {
         self.allowedUID = allowedUID
@@ -298,6 +305,7 @@ final class KillSwitchManager {
         try Self.ensureAnchorLoaded(disposal: disposal)
         lastLoadedPassRules = passRules
         stateGeneration &+= 1
+        repairedSinceArm = false
         return response(
             armed: true,
             wanted: true,
@@ -405,8 +413,12 @@ final class KillSwitchManager {
             throw HelperFailure.system("PF child anchor remained active.")
         }
         try Self.removeStateIfPresent()
+        // Only after the anchor is empty and the intent is gone. If no other
+        // program holds a reference, PF stops, which is the pre-arm state.
+        Self.releasePFEnableReference()
         stateGeneration &+= 1
         lastLoadedPassRules = nil
+        repairedSinceArm = false
         return response(armed: false, wanted: false, live: false)
     }
 
@@ -452,6 +464,57 @@ final class KillSwitchManager {
             result["error"] = String(describing: error).prefixString(1024)
             return result
         }
+    }
+
+    /// Periodic check from the helper's idle loop. Nothing else looks at PF
+    /// while a session is connected: `status()` heals, but only when someone
+    /// calls it, and the connected app does not. Another program releasing its
+    /// PF reference, a `pfctl -d`, or a main-ruleset reload without the Tono
+    /// anchor left the kill switch off until the next arm.
+    func superviseProtection() {
+        guard Self.stateFileExists() else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        let live = Self.effectiveStatus()
+        let referenced = Self.heldPFEnableReference() != nil
+        guard !live || !referenced else { return }
+        do {
+            guard let state = try loadState(), state.armed else { return }
+            if live {
+                // Still filtering, but on someone else's reference (PF was
+                // stopped and re-enabled by another program). Take ours back
+                // before that program releases its own.
+                try Self.holdPFEnableReference()
+                return
+            }
+            try Self.writeRules(state: state, allowedUID: allowedUID)
+            try Self.ensureHostsMappings(state: state)
+            try Self.ensureAnchorLoaded(flushStates: true)
+        } catch {
+            guard !live else { return }
+            try? Self.installEmergencyBlock(allowedUID: allowedUID)
+        }
+        // The persisted state omits the session's direct exceptions, so the
+        // app has to re-arm; the flag is how it finds out.
+        lastLoadedPassRules = nil
+        repairedSinceArm = true
+        let message = "tono: kill switch was not filtering while armed; reinstalled "
+            + "(live: \(Self.effectiveStatus()))\n"
+        FileHandle.standardError.write(Data(message.utf8))
+    }
+
+    /// Read-only view for the connected app. Unlike `status()`, this never
+    /// loads rules or flushes states.
+    func health() -> [String: Any] {
+        lock.lock()
+        defer { lock.unlock() }
+        return [
+            "ok": true,
+            "wantArmed": Self.stateFileExists(),
+            "live": Self.effectiveStatus(),
+            "repairedSinceArm": repairedSinceArm,
+            "version": helperVersion,
+        ]
     }
 
     func response(

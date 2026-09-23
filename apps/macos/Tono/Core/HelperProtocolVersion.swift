@@ -131,7 +131,13 @@ nonisolated enum HelperProtocolVersion {
     ///   provably gone (different boot, or its audit token resolves to no
     ///   live process), allocating a fresh successor generation without
     ///   changing the proof phase. A 4.8.0 daemon keeps both dead ends.
-    static let current = "4.9.0"
+    /// - 4.9.0 → 4.12.0 (provisional; renumber in merge order): the helper
+    ///   holds its own `pfctl -E` enable reference (recorded, released on
+    ///   disarm) instead of enabling PF only when it was off, supervises PF
+    ///   liveness every ten seconds while armed and reinstalls it when it is
+    ///   not filtering, and adds the read-only `GET /killswitch/health`
+    ///   (`repairedSinceArm`) the connected app polls.
+    static let current = "4.12.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

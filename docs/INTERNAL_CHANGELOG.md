@@ -32,6 +32,42 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS Helper 持有自己的 PF 启用引用，已连接期间监督 PF 是否仍在过滤
+
+- **归属/来源**：G1 连接保护；macOS `tono-core-helper` 的 PF 生命周期与 App 连接监控。
+  内部审查 H12-F1，Issue #420，PR #421。基线 main bb2ed4e4（含 #311）→ 分支
+  `fix/pf-enable-ref-20260923`；提交时未合 main。
+- **缺陷修复**：`ensureAnchorLoaded` 只在 PF 关闭时执行 `pfctl -e`。如果别的程序已经用引用
+  令牌启用了 PF，Helper 自己不持有任何引用，对方释放令牌后 PF 停止。另外，已连接期间没有
+  任何地方检查 PF：`status()` 只在被调用时修复，而已连接的 App 不调用它。结果是 kill switch
+  可能不再过滤，UI 仍显示已连接，直到下一次 arm。现在：
+  - 每次 arm 都用 `pfctl -E` 取得 Helper 自己的引用，令牌连同 boot session 记录在
+    `/Library/Application Support/Tono/pf.reference`。先记录新令牌再释放旧令牌。disarm 在
+    清空锚点、删除意图之后，只释放本次开机记录且内核仍列出的那一个令牌。
+  - Helper 空闲循环每 10 秒检查一次（在更新锁内）。armed 时如果 PF 未启用、主规则集缺少
+    Tono 锚点或规则不在，就按持久状态重装（失败则装紧急阻断），并置 `repairedSinceArm`。
+    只丢了引用时重新取得引用。
+  - 新增只读 `GET /killswitch/health`（不加载规则、不 flush）。App 已连接时每 60 秒读取一次。
+    如果 Helper 报告修复过 PF 或 PF 不生效，App 在断网保护下重连，并显示“保护异常：另一个
+    程序中断了网络保护”。重连会恢复本会话的直连例外，持久状态不含这些例外。
+- **新增/优化**：无独立新功能。`/killswitch/health` 只服务于上述检测。
+- **工程与测试**：`--lifecycle-self-test` 新增一组引用检查（CI privileged-tests 以 root 真实
+  运行 pfctl）：先模拟另一个程序 `-E` 取得令牌，Helper 取得并记录自己的令牌，释放对方令牌后
+  PF 仍启用，重复调用复用同一令牌，释放后令牌不再列出、记录已删除，PF 恢复到测试开始时的
+  状态。旧实现没有这些函数（无法编译）；按旧语义（PF 已启用就跳过），对方释放后 PF 会停止。
+  Helper 源码变更按契约门推进 `HelperProtocolVersion` 4.9.0 → 4.12.0（暂定，合并时按顺序
+  重编号），CONTRACT.sha256 按 build-core-helper.sh 同一清单与管道本机重算（纯文本哈希，
+  未编译）。
+- **验证**：本机（编辑机）未运行 swift/xcodebuild；Helper 编译、`--lifecycle-self-test`
+  与 App 编译/TonoTests 委托本 PR 的 GitHub-hosted `macos-26` CI，结果以 PR 页为准。
+  本机只确认了 `/sbin/pfctl` 含 `Token : %llu`、`TOKENS:`、`pf: token invalid` 等字符串
+  （`-E`/`-X`/`-s References` 存在），没有在本机改动 PF。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：App 侧的重连分支没有单独的 XCTest（监控 tick 直接调用 Helper，没有注入点）。
+  最坏情况下检测延迟为 Helper 10 秒加 App 60 秒；Helper 在 10 秒内修复 PF，App 的重连只负责
+  恢复会话例外并提示用户。哪些系统组件用令牌启用 PF、XNU 引用计数的精确语义、PF 被关闭期间
+  的实际泄漏面，都需要实机确认。另一个产品把自己的锚点插在 Tono 锚点之前的情况不在本条范围。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3

@@ -163,6 +163,11 @@ actor PrivilegedRuntimeCoordinator {
         KillSwitchService.refreshStatus()
     }
 
+    /// nil when the helper did not answer, which is evidence of nothing.
+    func killSwitchHealth() -> (wanted: Bool, live: Bool, repairedSinceArm: Bool)? {
+        try? HelperManager.killSwitchHealth()
+    }
+
     func cleanupStaleSystemProxy() {
         SystemProxy.cleanupIfStale()
     }

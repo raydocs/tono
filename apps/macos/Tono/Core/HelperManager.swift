@@ -29,6 +29,9 @@ nonisolated struct HelperManager {
         let wantArmed: Bool?
         let live: Bool?
         let healed: Bool?
+        /// Set by the helper's PF liveness supervisor after it had to reinstall
+        /// the kill switch; cleared by the next arm. Absent before 4.12.0.
+        let repairedSinceArm: Bool?
         let flushedStates: Bool?
         /// Addresses whose states were killed individually instead of flushing
         /// the machine. Absent from a pre-3.11.0 daemon, which only had the
@@ -662,6 +665,22 @@ nonisolated struct HelperManager {
         // dropping the field here keeps callers from reading a stale "no" as a
         // statement about the last arm.
         return (reply.armed, reply.wanted, reply.live, reply.healed)
+    }
+
+    /// Read-only PF liveness for a connected session. Unlike
+    /// `killSwitchStatus()`, the helper loads nothing and flushes nothing to
+    /// answer it.
+    static func killSwitchHealth() throws -> (
+        wanted: Bool, live: Bool, repairedSinceArm: Bool
+    ) {
+        let result = try sendRequest(method: "GET", path: "/killswitch/health")
+        let envelope = try requireSuccess(result, operation: "kill switch health")
+        guard let wanted = envelope.wantArmed,
+              let live = envelope.live,
+              let repaired = envelope.repairedSinceArm else {
+            throw HelperIPCError.invalidResponse
+        }
+        return (wanted, live, repaired)
     }
 
     /// Whether any daemon answered the socket at all, regardless of the reply's

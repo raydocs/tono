@@ -222,6 +222,16 @@
         }
       }
     },
+    "Network protection was interrupted by another program; Kill Switch is blocking traffic while Tono reconnects.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保护异常：另一个程序中断了网络保护。断网保护正在阻断流量，Tono 正在重新连接。"
+          }
+        }
+      }
+    },
     "No account-owned catalog is available. Open Nodes and refresh the catalog.": {
       "localizations": {
         "zh-Hans": {
