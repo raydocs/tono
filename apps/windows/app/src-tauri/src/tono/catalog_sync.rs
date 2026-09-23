@@ -892,7 +892,7 @@ mod tests {
         let effect = install_and_persist(&installed.tracker, &cache, &rotated).unwrap();
         assert!(effect.installed, "a routing-only rotation must not read as unchanged");
         let cached = cache.load().unwrap().response;
-        assert_eq!(cached.routing.unwrap().home_socks5.unwrap().password, "new-secret");
+        assert_eq!(cached.routing.as_ref().unwrap().home_socks5.as_ref().unwrap().password, "new-secret");
         let restarted = tono_core::CatalogTracker::from_cached(&cached);
         assert!(!install_and_persist(&restarted, &cache, &rotated).unwrap().installed);
     }
