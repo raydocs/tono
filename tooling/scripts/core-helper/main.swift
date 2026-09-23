@@ -37,6 +37,11 @@ let killSwitchArmFields = Set([
 enum HelperFailure: Error {
     case invalid(String)
     case system(String)
+    /// A shutdown signal for this helper interrupted the operation. Distinct
+    /// from `.system` because startup must not arm fail-closed state for it:
+    /// the request came from this helper's own update executor (bootout), so
+    /// there is nothing wrong with the machine's evidence.
+    case stopping(String)
     /// A refusal the caller can act on programmatically.
     ///
     /// Everything else is prose, which is right for a message a person reads and
@@ -48,7 +53,7 @@ enum HelperFailure: Error {
 
     var message: String {
         switch self {
-        case .invalid(let message), .system(let message): message
+        case .invalid(let message), .system(let message), .stopping(let message): message
         case .coded(_, let message): message
         }
     }
@@ -948,12 +953,11 @@ if CommandLine.arguments.dropFirst() == ["--emergency-reset"] {
 do {
     // Executor recovery must precede CoreManager's stale-child cleanup and
     // normal PF restoration. The independent job owns a consumed replacement.
-    do {
-        if try UpdateExecutor.startup() { exit(0) }
-    } catch {
-        if let uid = try? readAllowedUID() { try? KillSwitchManager.installEmergencyBlock(allowedUID: uid) }
-        throw error
-    }
+    // startup() installs the corrupt-ledger emergency barrier itself and also
+    // returns a clean stop when the executor's own bootout interrupts this
+    // daemon behind the update lock — in that window the executor owns the
+    // flow and no PF action is ours to take.
+    if try UpdateExecutor.startup() { exit(0) }
     let server = try SocketServer()
     server.run()
 } catch {

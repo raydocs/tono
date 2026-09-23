@@ -61,8 +61,14 @@ final class UpdateStorage {
         // launchctl bootout must be able to stop a daemon waiting behind the
         // executor. A blocking flock would otherwise deadlock that bootout.
         while flock(lockFD, LOCK_EX | LOCK_NB) != 0 {
-            guard (errno == EWOULDBLOCK || errno == EINTR), helperShutdownRequested == 0 else {
+            guard errno == EWOULDBLOCK || errno == EINTR else {
                 throw HelperFailure.system("Update lock unavailable or helper stopping.")
+            }
+            // The stop request is our own update executor's bootout SIGTERM.
+            // Report it as a clean stop, not as lock or ledger trouble, so the
+            // daemon can exit without arming fail-closed evidence barriers.
+            guard helperShutdownRequested == 0 else {
+                throw HelperFailure.stopping("Update lock unavailable or helper stopping.")
             }
             usleep(50_000)
         }

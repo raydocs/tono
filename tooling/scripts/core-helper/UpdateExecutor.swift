@@ -72,18 +72,40 @@ enum UpdateExecutor {
         catch { try UpdatePackage.run("/bin/launchctl", ["print", "system/" + label]) }
     }
 
+    /// The fail-closed response to a startup failure: install the emergency
+    /// PF barrier for the installed user. Best-effort, as it was in main —
+    /// the original error is what the caller surfaces and exits on.
+    private static func armEmergencyBlock() {
+        if let uid = try? readAllowedUID() { try? KillSwitchManager.installEmergencyBlock(allowedUID: uid) }
+    }
+
     /// Called before constructing CoreManager or restoring normal desired
     /// state. A corrupt ledger installs a fail-closed barrier and stops launch.
-    static func startup() throws -> Bool {
-        let storage = try UpdateStorage()
-        return try storage.locked {
-            guard let attempt = try storage.load().attempt, attempt.receipt.phase != .committed else { return false }
-            if attempt.execution == .consumed && (attempt.receipt.blockedReason != nil || attempt.disconnectRequested) { return false }
-            if [.consumed, .replacing, .rollingBack].contains(attempt.execution) {
-                try launch(storage: storage, attempt: attempt)
-                return true
+    /// A stop request that arrives while this daemon waits behind the update
+    /// lock is not corruption: that SIGTERM is our own update executor's
+    /// `launchctl bootout` (the spin guard exists precisely so a bootout can
+    /// stop a waiting daemon), the executor owns the replacement flow, and it
+    /// bootstraps this daemon back afterwards. Stopping then is clean: no PF
+    /// action, exit success. Every other startup failure keeps installing the
+    /// barrier.
+    static func startup(storage: UpdateStorage? = nil,
+                        emergencyBlock: () throws -> Void = armEmergencyBlock) throws -> Bool {
+        do {
+            let storage = try storage ?? UpdateStorage()
+            return try storage.locked {
+                guard let attempt = try storage.load().attempt, attempt.receipt.phase != .committed else { return false }
+                if attempt.execution == .consumed && (attempt.receipt.blockedReason != nil || attempt.disconnectRequested) { return false }
+                if [.consumed, .replacing, .rollingBack].contains(attempt.execution) {
+                    try launch(storage: storage, attempt: attempt)
+                    return true
+                }
+                return false
             }
-            return false
+        } catch HelperFailure.stopping {
+            return true
+        } catch {
+            try? emergencyBlock()
+            throw error
         }
     }
 

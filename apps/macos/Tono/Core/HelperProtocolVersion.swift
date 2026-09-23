@@ -113,7 +113,14 @@ nonisolated enum HelperProtocolVersion {
     ///   reports such a file as `snapshotPresent: true` so the app calls
     ///   `/dns/restore` instead of refusing. `--emergency-disarm` still
     ///   refuses to open PF while DNS restoration fails.
-    static let current = "4.7.0"
+    /// - 4.7.0 → 4.8.0: startup recovery no longer arms the emergency PF
+    ///   barrier when our own update executor's `launchctl bootout` stops the
+    ///   daemon while it waits behind the update lock (a reboot inside the
+    ///   consumed→replaced window races the two RunAtLoad jobs). That
+    ///   SIGTERM is a clean stop — the executor owns the replacement and
+    ///   bootstraps this daemon back — while every other startup failure,
+    ///   including a corrupt ledger, still installs the fail-closed barrier.
+    static let current = "4.8.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
