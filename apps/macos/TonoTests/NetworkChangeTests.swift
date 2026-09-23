@@ -46,5 +46,32 @@ final class NetworkChangeTests: XCTestCase {
         // Leave no debounced helper probe behind for later tests.
         app.connectionCoordinator.networkEnvironmentTask?.cancel()
         app.connectionCoordinator.networkEnvironmentTask = nil
+
+        // Disconnect window: the held observation is typically Tono's own
+        // restoreDNS / enableProtectedDNS write. A settled teardown on an
+        // armed, ready host must only clear the marker — replaying it as an
+        // immediate kick lifted the repeated-failure pause, reset the backoff
+        // and auto-reconnected an explicit release whose disarm failed.
+        KillSwitchService.isArmed = true
+        defer { KillSwitchService.isArmed = false }
+        app.proxyRegions = [
+            ProxyRegion(
+                id: AppState.managedCatalogRegionID,
+                name: "TONO CLOUD",
+                nodes: [Fixture.realityNode()]
+            )
+        ]
+        app.isConnected = false
+        app.isDisconnecting = true
+        app.handleSystemNetworkChange()
+        XCTAssertTrue(app.pendingNetworkChangeCheck)
+        app.isDisconnecting = false
+        app.consumePendingNetworkChange()
+        XCTAssertFalse(app.pendingNetworkChangeCheck)
+        XCTAssertNil(
+            app.connectionCoordinator.protectedReconnectTask,
+            "a settled disconnect must not replay the held change as a reconnect kick"
+        )
+        app.connectionCoordinator.cancelReconnectTasks()
     }
 }

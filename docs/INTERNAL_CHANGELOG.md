@@ -56,10 +56,14 @@
   （teardown 已 settle）：已连接走与 connected 分支完全相同的 750 ms 去抖
   `networkEnvironmentTask` 对账（primaryService/protectedDNSService、DNS 完整性、
   物理指纹；自写排除由既有指纹机制承担，任务体内的 settle 守卫等连接收尾清
-  `isConnecting`），已断开仍受保护时走与 disconnected 分支相同的 immediate
-  protected-reconnect kick（armed/isTonoReady/wakeRecoveryTask 守卫同序）。消费只触发
-  既有协调路径，不新增任何直连旁路；PF 全程 armed，不放宽保护；60 s 命令审计兜底
-  原样保留。
+  `isConnecting`）；断开收尾只清 pending 标记、不 kick。第二轮审查
+  （prreview-mac-conn #309，需返工）指出首版在断开收尾无条件回放 immediate
+  protected-reconnect kick：被保留的通知常是 Tono 自己的 DNS 写入（connect 的
+  `enableProtectedDNS` / release 的 `restoreDNS`），回放会抬起「同一失败三次暂停」、
+  清零退避，并把 disarm 失败的显式 release 自动重连（违反 I5）；每条 preserve
+  teardown 已自行调度 loop 或有意暂停，release 不得重连，故断开分支不再 kick。消费
+  只触发既有协调路径，不新增任何直连旁路；PF 全程 armed，不放宽保护；60 s 命令审计
+  兜底原样保留。
 - **新增/优化**：无新能力。配套把 connected 分支的环境对账任务体抽为共享私有函数
   `scheduleNetworkEnvironmentReconciliation()`（任务体逐字未改），新增
   `network_change_held_pending`/`pending_network_change_reconciled` 两个诊断审计事件。
@@ -71,13 +75,18 @@
   `isConnecting=false; isConnected=true` 后调 `consumePendingNetworkChange()`，断言
   `connectionCoordinator.networkEnvironmentTask != nil`（只断言调度，750 ms 去抖与
   helper 探测不在测试内运行，结束前取消任务）。当前实现（修复前）无 pending 字段、
-  无任务，断言失败。
+  无任务，断言失败。第二轮在同一测试追加断开阶段：`isArmed=true`、目录一个节点
+  （`isTonoReady`）、`isDisconnecting=true` 时通知入 pending，收尾消费后断言标记清除且
+  `protectedReconnectTask == nil`；首版会 immediate kick 建 loop，断言失败。
 - **验证**：编辑机（MacBook，按 2026-09-14 执行位置决定与本 PR 本机限制）只编辑未编译
   未运行——未执行 `xcodebuild`/`swift build`/`swift test`/`swiftc`；Swift 语法、访问
   级别与调用链人工自查。回归委托本 PR CI（GitHub-hosted `macos-26`）；提交时 CI 结果
-  未知，不沿用任何旧 SHA 绿灯。准确受测源码为 PR head。
+  未知，不沿用任何旧 SHA 绿灯。准确受测源码为 PR head。第二轮修改同样本机未编译，
+  委托 CI。
 - **候选/发布**：无新包，仅源码。
-- **剩余限制**：实机 SCDynamicStore 通知与连接窗口交错的命中率未量化（V3 已核时序上界
+- **剩余限制**：断开/teardown 期间到达的真实环境变化（非自写）现同样只清标记：
+  preserve 路径依赖其已调度的 loop 退避重试，睡眠/显式 release 不重连，与父基丢弃
+  语义一致；实机 SCDynamicStore 通知与连接窗口交错的命中率未量化（V3 已核时序上界
   成立，降级路径常快于 60 s）；pending 消费只缩短发现延迟，不改变 fail-closed 语义；
   R1 审查其余发现（F2、F6）与 F5 的 Windows 侧（已由 W8/#259 修复）不在本条范围。
 

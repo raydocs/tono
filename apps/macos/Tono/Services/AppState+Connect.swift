@@ -877,8 +877,8 @@ extension AppState {
                     self.isDisconnecting = false
                     self.disconnectionStartedAt = nil
                     // A network change observed mid-disconnect was held
-                    // pending (R1-F5); the teardown has settled, so
-                    // reconcile it exactly as a fresh notification would.
+                    // pending (R1-F5); the teardown has settled, so clear
+                    // the marker without kicking a reconnect.
                     self.consumePendingNetworkChange()
                 }
             }

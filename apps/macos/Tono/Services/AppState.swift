@@ -392,29 +392,23 @@ final class AppState {
     /// `onCoreStarted` published connected, and when a disconnect completed.
     /// A connected session gets the same debounced environment comparison a
     /// live notification gets (the reconciliation's own debounce waits out
-    /// the connect epilogue); a still-protected disconnected session gets the
-    /// same immediate protected-reconnect kick the disconnected branch of
-    /// `handleSystemNetworkChange()` performs. Consumption only triggers
-    /// those existing coordination paths — it opens no direct bypass.
+    /// the connect epilogue); that comparison is what excludes Tono's own
+    /// DNS writes. A settled disconnect only clears the marker: the held
+    /// observation is most often Tono's own `enableProtectedDNS` /
+    /// `restoreDNS` write, and replaying it as an immediate kick would lift
+    /// the repeated-failure pause, reset the backoff, and auto-reconnect an
+    /// explicit release whose disarm failed. Every preserve teardown already
+    /// schedules its own recovery or pauses on purpose, and a release must
+    /// not reconnect. Consumption opens no direct bypass.
     func consumePendingNetworkChange() {
         guard pendingNetworkChangeCheck else { return }
         pendingNetworkChangeCheck = false
-        if isConnected {
-            LocalTrafficAudit.shared.recordEvent(
-                "pending_network_change_reconciled",
-                details: auditProtectionDetails()
-            )
-            scheduleNetworkEnvironmentReconciliation()
-            return
-        }
-        guard KillSwitchService.isArmed, isTonoReady,
-              connectionCoordinator.wakeRecoveryTask == nil else { return }
+        guard isConnected else { return }
         LocalTrafficAudit.shared.recordEvent(
-            "protected_reconnect_network_kick",
+            "pending_network_change_reconciled",
             details: auditProtectionDetails()
         )
-        recoveryCause = .networkChange
-        scheduleProtectedReconnect(immediate: true)
+        scheduleNetworkEnvironmentReconciliation()
     }
 
     /// Debounced reconciliation of the committed network environment against
