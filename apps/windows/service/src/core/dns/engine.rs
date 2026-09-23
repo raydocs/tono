@@ -1334,6 +1334,10 @@ pub(super) fn suppress_encrypted_dns() -> Result<()> {
 /// Put `EnableAutoDoh` back, restore per-adapter DoH flags, and delete our NRPT rule.
 /// Idempotent when no capture exists.
 pub(super) fn restore_encrypted_dns() -> Result<()> {
+    #[cfg(test)]
+    if test_io::with(|io| io.policy_restores += 1).is_some() {
+        return Ok(()); // Isolated recovery tests must never change host NRPT/DoH policy.
+    }
     if let Err(error) = delete_key(&nrpt_rule_key()) {
         tracing::error!("dns: Tono NRPT rule could not be removed: {error:#}");
         return Err(error);

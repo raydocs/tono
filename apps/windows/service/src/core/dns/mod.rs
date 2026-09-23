@@ -615,9 +615,13 @@ fn adapter_contains_current_protected_dns(adapter: &AdapterDnsSnapshot) -> bool 
 /// asking [`is_loopback_value`], which deliberately excludes `198.18.0.2`, so on every machine
 /// protected by a current build it selected nothing — and an empty selection proved itself
 /// trivially. Asking one question in one place is what stops that from recurring.
+/// A mixed IPv4 list is not fully protected, but still contains a Tono-only resolver that
+/// will stop answering with the core. Reuse the missing-snapshot containment check rather
+/// than mistaking a public fallback for evidence that the redirect has been removed.
 #[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
 fn adapter_reads_as_tono_dns(adapter: &AdapterDnsSnapshot) -> bool {
-    is_tono_dns_value(adapter.ipv4_name_server.as_deref())
+    adapter_contains_current_protected_dns(adapter)
+        || is_tono_dns_value(adapter.ipv4_name_server.as_deref())
         || is_tono_dns_value(adapter.ipv4_profile_name_server.as_deref())
         || is_tono_dns_value(adapter.ipv6_name_server.as_deref())
         || is_tono_dns_value(adapter.ipv6_profile_name_server.as_deref())
