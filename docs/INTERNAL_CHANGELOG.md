@@ -32,6 +32,51 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 升级事务中断后无终态/误回滚的结构修复（F1/F4/F6）
+
+- **归属**：G3 受保护升级中断恢复；Windows Service 更新事务
+  （`apps/windows/service` 独立 workspace）+ 协议文档。
+- **来源**：基线 main `576d7087` → 分支 `fix/windows-update-txn-recovery-20260922`；
+  关联 PR 见本轮提交记录；提交时未合 main。
+- **缺陷修复**（2026-09-22 并发/时序审查 + 对抗核实轮确认三项同根因：事务全部权威
+  出口以精确进程 incarnation 为钥匙、唯一非 commit 终态只对 Install 前发起进程开放）：
+  - **F1**（权限绑定单一 App incarnation）：Disconnect/退休 peer 谓词从 pid+started_at
+    精确相等改为「owner 匹配 + 注册安装根路径 + 当前摘要为 old/target App 组件」；
+    新增 `retire_rolled_back` 归档终态（已验证 Disconnect 且安装身份等于保留原件）。
+    触发序：Prepare 持久化后发起 App 退出/执行器回滚（已终止发起进程）→ 重开 App 的
+    全部出口被拒。
+  - **F4**（successor 单 incarnation + 恢复一律回滚）：`classify_recovery` 三分支按
+    「durable plan 是否存在 + 已装组件是否等于 signed target」判定；已等于 target 不
+    回滚——successor 未登记的事务由恢复提升为 Replaced，首个 target 身份 App 经
+    `authenticate_successor` 重绑收养；`service.start`/`wait_for_service_ready` 失败
+    不再经 `SuspendedApp::drop` 终止已登记 successor。触发序：提交前退出新 App 或
+    重启机 → 完整已校验安装被撤销且落入 F1。
+  - **F6**（Launching 静默终态）：执行器 incarnation 空/死 ⇒ 消费可判定不可能 →
+    `retire_unconsumed` 接受 Launching；`reconcile_before_desired` 将该状态置回
+    Staged（同一发起 App 可再 launch，或经 Disconnect 退休），不二次授权执行。
+- **新增/优化**：UPDATE_PROTOCOL_V1.md 新增「Interrupted-transaction recovery and
+  terminal states (2026-09-22 clarification)」小节，只澄清不改变旧条款；U1 单次消费、
+  U3 高水位不回退、U4 Disconnect 不伪造提交全部保持（退休只在证明未消费或已验证
+  回滚到 old 时发生）。
+- **工程与测试**：新增 4 个窄回归——`update_fresh_registered_app_incarnation_can_disconnect_and_retire_unconsumed_attempt`、
+  `update_app_started_after_replacement_with_target_identity_is_an_adoptable_successor`、
+  `update_launching_without_live_executor_incarnation_is_retirable_after_verified_disconnect`
+  （以上在 update_transaction.rs，前三个在旧实现第一处 unwrap 必失败）与
+  `update_recovery_classifies_publication_by_installed_identity_not_successor_liveness`
+  （update_executor.rs 恢复判定纯函数）。既有
+  `update_explicit_disconnect_archives_only_proven_unconsumed_attempts` 中「同注册路径、
+  started_at+1 被拒」的断言改为异路径身份拒绝——原断言正是 F1 过度收紧的正面描述。
+- **验证**：本机未运行任何 cargo（所有者 2026-09-14 执行位置决定，MacBook 只做
+  编辑/审查）；全部委托本 PR 的 GitHub-hosted `windows-2025` Service lane：
+  `cargo test --locked --features standalone,client,test` 及既有
+  `update_transaction::tests::update_` / `core::update::tests::update_` /
+  `update_executor::tests::update_` 定向枚举步。提交时未获得原生结果，不沿用上一轮
+  main 的绿灯，也不声称未测代码已验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：Replaced 且已验证 Disconnect（用户显式拒绝一个已完成安装）仍保持
+  pending（不回滚也不退休），需后续单独判定；非 Windows 平台的 incarnation 探测编译
+  为恒「已死」，只影响开发编译路径（该 crate 测试仅在 windows-2025 lane 执行）；
+  Windows 11 实机升级中断验收仍属 G3 未闭合证据。
 ## 2026-09-23 · Windows PrepareCoreStart 绑定当前 release epoch（R2-F6）
 
 - **归属**：G1 连接生命周期（I1：旧 attempt 的迟到 Service 副作用不得影响新会话）；

@@ -143,6 +143,46 @@ one-use physical installation, pre-mutation receipt consumption, or artifact
 binding merely by renaming a callback. **G3's existing installer-owned
 InstallStarted requirement is not silently discharged/replaced by this model.**
 
+## Interrupted-transaction recovery and terminal states (2026-09-22 clarification)
+
+This section clarifies how a pending transaction ends when its recorded
+process incarnations disappear. It changes no rule above: the pending gate,
+evidence retention, anti-impersonation on first successor adoption, the
+single-execution rule and high-water monotonicity all keep their meaning.
+The initiating process is terminated by the executor and successors may exit
+before commit, so a transaction must not become unreachable merely because
+its recorded incarnations died.
+
+- **Disconnect authority is installation identity, not incarnation
+  equality.** Disconnect request, verification and retirement accept the
+  authenticated owner's process at the registered install root whose current
+  bytes hash to the original or target App component digest. A peer outside
+  that registered identity still cannot Disconnect.
+- **Successor re-proof after the recorded successor dies.** Once the recorded
+  successor incarnation is gone, a later process at the registered location
+  whose bytes are the verified target, which postdates the recorded successor
+  and does not recycle its pid, re-binds as the provable successor. First
+  adoption remains executor-creation proof; this is re-proof, not a second
+  first adoption.
+- **Recovery classifies by installed identity, not successor liveness.** A
+  reboot, or a user closing the new App before commit, is not an interrupted
+  publication. Recovery rolls back only when no durable plan exists or the
+  installed components are not the signed target. A complete, verified
+  publication stays installed; a successor that was never durably registered
+  is replaced by measured-target evidence and the first authenticated
+  target-identity App adopts it.
+- **Terminal archives after verified Disconnect.** An unconsumed attempt
+  whose recorded executor incarnation is provably gone, and a rolled-back or
+  uncertain attempt whose installed components equal the retained originals,
+  archive their full record and clear the live slot. The consumed high-water
+  never lowers and explicit release never becomes commit.
+- **Launching without a live executor incarnation is provably unconsumed.**
+  Consumption only accepts the exact recorded executor incarnation. When
+  that incarnation is gone and the high-water still sits below the release,
+  reconciliation returns the attempt to Staged — re-launchable by the same
+  initiating App, retirable through Disconnect — because nothing executed;
+  this is not a second execution grant.
+
 ## Automated conformance and its limits
 
 `tooling/scripts/tests/fixtures/update-protocol-v1/` contains synthetic manifest,
