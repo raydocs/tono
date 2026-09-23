@@ -32,6 +32,51 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-22 · Windows 快照合并与损坏恢复不再把 TUN DNS 地址记为原始值
+
+- **归属/来源**：G1 断开与恢复（Disconnect 不得被污染快照永久拒绝）；缺陷编号 R3-F1
+  （新根因，与 #293 的混合值判定、#290 的 protect 侧 pending 保留不同轴）。基线
+  main `576d7087`，分支 `fix/windows-dns-merge-guard-20260922`；
+  [差异与关联 PR](https://github.com/raydocs/tono/compare/main...fix/windows-dns-merge-guard-20260922)。
+  本条提交时仍是独立修复分支，不沿用任何 main 合并授权。
+- **缺陷修复（两面同一根因）**：
+  (a) `merge_snapshot` 对快照已存在时新纳入的适配器无 Tono 值检查、GUID 用精确 `==`
+  比较。一个（重新）激活时注册表已带 `198.18.0.2` 且不在快照内的适配器会被以该值
+  作为“原始 DNS”追加落盘；此后每次 Disconnect 把 `198.18.0.2` 写回该适配器并在证明
+  阶段被 `any_loopback` 无条件拒绝，产品内无出口。现在对“尚未记录原始值”的适配器
+  子集应用与无快照分支相同的 orphan 守卫与 DHCP heal 语义（新标记
+  `TONO_DNS_ORPHANED_ADAPTER`），GUID 比较统一为忽略大小写，已记录的原始值不受影响。
+  (b) `recover_unreadable_snapshot` 只读 active 适配器：损坏/缺失快照恢复期间 inactive
+  适配器上残留的 `198.18.0.2` 无人读、无人清，适配器回网后经 (a) 污染合并。现在恢复
+  证据改为枚举注册表 `Tcpip(6)\Parameters\Interfaces` 全部子键（新 engine 读取
+  `collect_interface_key_adapters`，沿用隧道排除），inactive 残留同样拒绝恢复直至
+  操作员清理，判定谓词与原 `any_loopback` 完全相同（同注册表读、更大范围）。
+  触发序列与逐环核实见 R3 审查报告 F1 及 V6 对抗核实。
+- **新增/优化**：无新功能；只收紧“什么可以成为原始值/什么可以证明恢复”的证据面。
+- **工程与测试**：两个窄回归（每行为一个）：stub 域
+  `a_fresh_adapter_already_on_tono_dns_is_never_recorded_as_original`
+  （dns/tests.rs，快照存在 + fresh 适配器带 TUN 端点 → enable 拒绝、快照不被污染，
+  当前实现在落盘后必败）；native 域
+  `corrupt_snapshot_recovery_refuses_over_an_inactive_leftover_tun_dns`
+  （native_apply_tests.rs，损坏快照 + 仅存在于注册表的 inactive 适配器 → 恢复拒绝、
+  证据保留、零写入；清理后恢复完成并隔离旧文件）。夹具扩展仅一处：OS I/O 隔离
+  Machine 增加 `subkeys` 注册表枚举，使 `enum_subkeys` 在夹具激活时改走夹具键表，
+  不触碰宿主注册表（该 helper 原无夹具路径，DoH 枚举在夹具下本就被 suppress/restore
+  短路，行为不变）。
+- **验证**：按所有者 2026-09-14 执行位置决定，本机（MacBook）未运行任何 cargo
+  build/test/check/clippy，只做编辑与源码自查；回归委托本 PR 的 GitHub-hosted
+  `windows-2025` Service CI：lifecycle `cargo test --locked --features standalone,client,test`
+  与 native DNS 前缀命令（`cargo test --locked --features standalone,client --lib
+  core::dns::engine::native_apply::tests::`，前置 `-- --list` 防零测试，命令与
+  windows-ci.yml 现有步骤一致）。提交时未获得结果；准确源码 SHA、实际 CI 输出与
+  续记保留在关联 PR，不把上一轮 main 的绿灯移用到本修复。
+- **候选/发布**：无新包，仅源码；不部署、不触碰 `appcast.xml` / `windows-updates` /
+  `latest.json`。
+- **剩余限制**：不放宽任何保护（含 TUN DNS 地址的适配器在所有路径都不得被记为
+  “已恢复原始值”；#293 混合判定与 #290 缺失适配器 pending 语义不变）；未验证
+  Windows 11 实机断电产生的真实损坏文件与 inactive 适配器回网时序；emergency 后
+  依赖操作员按拒绝信息清理适配器 DNS；夹具通过不等于 G1 实机验收。
+
 ## 2026-09-23 · Windows 混合 DNS 残留不能证明恢复成功
 
 - **归属/来源**：G1 断开与恢复；从已合入的

@@ -675,10 +675,54 @@ fn ensure_snapshotless_adapters_are_safe(adapters: &[AdapterDnsSnapshot]) -> Res
     Ok(())
 }
 
+/// The merge-time face of the same rule: a snapshot may exist and still meet an adapter whose
+/// original has never been recorded — one that appeared (or reappeared) while its registry key
+/// already carried a leftover protected endpoint, exactly the state a corrupt-snapshot recovery
+/// misses when the adapter is inactive while it runs. Recording that endpoint as the "original"
+/// would make every later disconnect write it back and be refused for proving against it, so
+/// the adapter is refused (or healed first) instead. Saved originals are not at stake here.
+fn ensure_unrecorded_adapters_are_safe(adapters: &[AdapterDnsSnapshot]) -> Result<()> {
+    if adapters.iter().any(adapter_contains_current_protected_dns) {
+        bail!(
+            "{DNS_ORPHANED_ADAPTER_PREFIX}: a newly seen adapter still contains Tono's protected \
+             DNS target ({PROTECTED_DNS_V4}), so enable refuses to append it to protected-dns.json \
+             with that target recorded as its original DNS. In Windows set the affected adapter's \
+             DNS server assignment back to Automatic (DHCP) — or to the servers you use — and \
+             retry; the saved originals of the already recorded adapters are kept."
+        );
+    }
+    Ok(())
+}
+
+/// The adapters `fresh` would contribute anew this round: those not already recorded in
+/// `existing`. GUID comparison is case-insensitive like everywhere else that matches adapter
+/// identity; an exact match here used to append a duplicate record that carried the live
+/// protected values as an "original".
+fn unrecorded_adapters(
+    existing: Option<&DnsSnapshot>,
+    fresh: &[AdapterDnsSnapshot],
+) -> Vec<AdapterDnsSnapshot> {
+    fresh
+        .iter()
+        .filter(|adapter| {
+            existing.is_none_or(|snapshot| {
+                !snapshot.adapters.iter().any(|saved| {
+                    saved
+                        .interface_guid
+                        .eq_ignore_ascii_case(&adapter.interface_guid)
+                })
+            })
+        })
+        .cloned()
+        .collect()
+}
+
 /// After a failed connect, release can leave adapters on `198.18.0.2` while deleting
 /// `protected-dns.json`. The next Connect then hits [`ensure_snapshotless_adapters_are_safe`] and
 /// hard-fails. Heal by resetting those adapters to automatic (DHCP) — we have no better original
-/// to restore — then re-collect so enable can take a clean snapshot.
+/// to restore — then re-collect so enable can take a clean snapshot. The same heal serves a
+/// snapshot-present enable whose fresh (unrecorded) adapter carries a leftover endpoint: the
+/// function only ever touches adapters from the slice it is handed.
 async fn heal_orphaned_protected_dns_without_snapshot(
     adapters: &[AdapterDnsSnapshot],
 ) -> Result<Vec<AdapterDnsSnapshot>> {
@@ -691,7 +735,7 @@ async fn heal_orphaned_protected_dns_without_snapshot(
         return Ok(adapters.to_vec());
     }
     tracing::warn!(
-        "dns: protected-dns.json is missing but {} adapter(s) still list {PROTECTED_DNS_V4}; \
+        "dns: {} adapter(s) with no recorded original still list {PROTECTED_DNS_V4}; \
          resetting them to automatic (DHCP) so Connect can proceed",
         orphaned.len()
     );
@@ -782,16 +826,19 @@ fn is_protected_v6_value(value: Option<&str>) -> bool {
 /// Idempotent enable: preserve every original already recorded, but append adapters that appeared
 /// after protection started. Replacing an existing record would snapshot our loopback values and
 /// destroy the way back; ignoring fresh GUIDs would leave a hot-plugged adapter unprotected.
+/// GUID identity is compared case-insensitively, like [`active_snapshot_adapters`] and the engine:
+/// GetAdaptersAddresses spelling is not guaranteed to repeat, and an exact match here used to
+/// append a duplicate record carrying the live protected values as the "original".
 fn merge_snapshot(existing: Option<DnsSnapshot>, fresh: DnsSnapshot) -> DnsSnapshot {
     let Some(mut existing) = existing else {
         return fresh;
     };
     for adapter in fresh.adapters {
-        if !existing
-            .adapters
-            .iter()
-            .any(|saved| saved.interface_guid == adapter.interface_guid)
-        {
+        if !existing.adapters.iter().any(|saved| {
+            saved
+                .interface_guid
+                .eq_ignore_ascii_case(&adapter.interface_guid)
+        }) {
             existing.adapters.push(adapter);
         }
     }
@@ -1331,6 +1378,11 @@ pub(crate) const DNS_SNAPSHOT_UNREADABLE_PREFIX: &str = "TONO_DNS_SNAPSHOT_UNREA
 /// Stable marker for a deleted recovery snapshot while an adapter still carries the current
 /// Tono-only DNS endpoint. The disarm gate must stay closed until Windows DNS is repaired.
 pub(crate) const DNS_SNAPSHOT_MISSING_PREFIX: &str = "TONO_DNS_SNAPSHOT_MISSING";
+/// Stable marker for an adapter that Tono has never recorded meeting the current Tono-only DNS
+/// endpoint — the merge-time face of the same orphaned state [`DNS_SNAPSHOT_MISSING_PREFIX`]
+/// guards when there is no snapshot at all. The enable that hits it keeps the durable snapshot
+/// and its saved originals untouched.
+pub(crate) const DNS_ORPHANED_ADAPTER_PREFIX: &str = "TONO_DNS_ORPHANED_ADAPTER";
 
 /// Stable, App-mappable marker for "the restore was accepted on registry evidence alone after a
 /// sustained live-apply failure" (see [`accepts_degraded_restore`]). It rides in `last_error` on
@@ -1589,6 +1641,33 @@ async fn engine_collect() -> Result<Vec<AdapterDnsSnapshot>> {
 /// core can never re-enter a snapshot or a restore proof.
 async fn collect_dns_adapters() -> Result<Vec<AdapterDnsSnapshot>> {
     let adapters = engine_collect().await?;
+    let current_tunnel_luid = crate::core::windows_kill_switch::protected_tunnel_luid().await;
+    Ok(without_current_tunnel(adapters, current_tunnel_luid))
+}
+
+async fn engine_collect_interface_keys() -> Result<Vec<AdapterDnsSnapshot>> {
+    #[cfg(all(windows, not(feature = "test")))]
+    {
+        bounded_dns_call(
+            DNS_CALL_TIMEOUT,
+            "collect registry interfaces",
+            engine::collect_interface_key_adapters,
+        )
+        .await
+    }
+    #[cfg(not(all(windows, not(feature = "test"))))]
+    {
+        Ok(test_hooks::collected_adapters())
+    }
+}
+
+/// Every interface the registry knows about, active or not: the `Parameters\Interfaces` key
+/// spaces outlive the active set (disabled, unplugged and removed adapters keep their last
+/// written DNS values), and a TUN endpoint parked on an inactive adapter is invisible to
+/// [`collect_dns_adapters`]. Excludes the tunnel adapter exactly like it, by connection name
+/// when the core is gone — the registry view carries no LUID.
+async fn collect_registry_interface_adapters() -> Result<Vec<AdapterDnsSnapshot>> {
+    let adapters = engine_collect_interface_keys().await?;
     let current_tunnel_luid = crate::core::windows_kill_switch::protected_tunnel_luid().await;
     Ok(without_current_tunnel(adapters, current_tunnel_luid))
 }
@@ -1962,19 +2041,25 @@ async fn quarantine_snapshot(label: &str, reason: &str) -> Result<()> {
 /// refused, and because the file is only deleted *after* a proven restore it stays unreadable
 /// across every retry and every reboot — a permanently blocked machine with no in-app way out.
 ///
-/// The way out is evidence, not trust: read the live adapters and demand that *nothing* still
+/// The way out is evidence, not trust: read the machine and demand that *nothing* still
 /// points at either Tono's current TUN DNS endpoint or a legacy protected loopback value (and
 /// that no live-apply failure is on record). That establishes
 /// the property the disarm gate actually protects — the machine is not left resolving through a
 /// core that is no longer running — without knowing what the servers used to be. Only then is
 /// the file quarantined.
 ///
+/// The evidence comes from the registry's own interface list, not the active set: an adapter
+/// that was unplugged, disabled or removed when the file went unreadable keeps its last DNS
+/// values in `Parameters\Interfaces`, and a leftover TUN endpoint parked there would ride the
+/// adapter's return straight into the next merge as a poisoned "original" — so inactive
+/// leftovers must refuse this recovery exactly like active ones.
+///
 /// Every other outcome (still on a Tono DNS target, a recorded live failure, or an engine call that
 /// times out on the way to finding out) returns an error: nothing is deleted, nothing is
 /// disarmed, and the message names the two documented ways forward.
 async fn recover_unreadable_snapshot(reason: &str) -> Result<()> {
-    let current = collect_dns_adapters().await?;
-    let any_loopback = engine_any_loopback(&current).await?;
+    let interfaces = collect_registry_interface_adapters().await?;
+    let any_loopback = interfaces.iter().any(adapter_reads_as_tono_dns);
     let live_apply_failed = !LIVE_APPLY_FAILURES
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -2069,16 +2154,25 @@ async fn enable_unlocked(trigger: EnableTrigger) -> Result<DnsProtectionStatus> 
         taken_at: now_unix(),
         adapters: collect_dns_adapters().await?,
     };
-    if !snapshot_present {
-        // A recovery file can be deleted independently of the registry (AV quarantine, manual
-        // cleanup, disk corruption, failed-connect release). Never turn the TUN endpoint left
-        // behind into the new "original". If adapters still list 198.18.0.2 with no snapshot,
-        // heal them to DHCP first so Connect is not permanently bricked after a prior failure.
-        if ensure_snapshotless_adapters_are_safe(&fresh.adapters).is_err() {
-            fresh.adapters = heal_orphaned_protected_dns_without_snapshot(&fresh.adapters).await?;
-        }
-        record_outcome(ensure_snapshotless_adapters_are_safe(&fresh.adapters))?;
+    // A recovery file can be deleted independently of the registry (AV quarantine, manual
+    // cleanup, disk corruption, failed-connect release). Never turn the TUN endpoint left
+    // behind into the new "original". The same applies with a snapshot present to an adapter
+    // whose original is not recorded yet — typically one that reappears carrying the endpoint a
+    // corrupt-snapshot recovery could not see while it was inactive. Adapters already recorded
+    // keep their saved originals, so the live protected values on them do not trip this guard.
+    // If an unrecorded adapter still lists 198.18.0.2, heal it to DHCP first so Connect is not
+    // permanently bricked after a prior failure; refuse only when the heal cannot be proven.
+    let safety_check: fn(&[AdapterDnsSnapshot]) -> Result<()> = if snapshot_present {
+        ensure_unrecorded_adapters_are_safe
+    } else {
+        ensure_snapshotless_adapters_are_safe
+    };
+    let mut unrecorded = unrecorded_adapters(existing.as_ref(), &fresh.adapters);
+    if safety_check(&unrecorded).is_err() {
+        fresh.adapters = heal_orphaned_protected_dns_without_snapshot(&unrecorded).await?;
+        unrecorded = unrecorded_adapters(existing.as_ref(), &fresh.adapters);
     }
+    record_outcome(safety_check(&unrecorded))?;
     // Health and replay decisions cover adapters that are live now, not historical snapshot
     // entries that have since been disabled or unplugged. Their originals remain in `snapshot`
     // and are still restored in the registry on disconnect.

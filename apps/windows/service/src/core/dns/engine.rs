@@ -174,6 +174,10 @@ fn delete_value(subkey: &str, value: &str) -> Result<()> {
 }
 
 fn enum_subkeys(subkey: &str) -> Result<Vec<String>> {
+    #[cfg(test)]
+    if let Some(names) = test_io::with(|io| io.subkeys(subkey)) {
+        return Ok(names);
+    }
     let Some(key) = RegKey::open(subkey, false)? else {
         return Ok(Vec::new());
     };
@@ -538,6 +542,25 @@ pub(super) fn collect_adapters() -> Result<Vec<AdapterDnsSnapshot>> {
         .iter()
         .map(|adapter| read_adapter(&adapter.guid, Some(adapter.luid)))
         .collect()
+}
+
+/// Every interface subkey in both `Parameters\Interfaces` key spaces — the registry's own
+/// record, which `active_adapters` deliberately narrows to live adapters but which outlives
+/// them: disabled, unplugged and removed interfaces keep their last written DNS values. The
+/// corrupt-snapshot recovery needs exactly this longer memory, because a TUN endpoint left on
+/// an inactive adapter is invisible to [`collect_adapters`] and re-enters the next enable as a
+/// poisoned "original" the moment the adapter comes back. Reads only; healing stays a decision
+/// for the facade.
+pub(super) fn collect_interface_key_adapters() -> Result<Vec<AdapterDnsSnapshot>> {
+    let mut guids: Vec<String> = Vec::new();
+    for root in [TCPIP4_INTERFACES, TCPIP6_INTERFACES] {
+        for guid in enum_subkeys(root)? {
+            if !guids.iter().any(|known| known.eq_ignore_ascii_case(&guid)) {
+                guids.push(guid);
+            }
+        }
+    }
+    guids.iter().map(|guid| read_adapter(guid, None)).collect()
 }
 
 /// Per-family inputs for native protected apply or legacy apply/restore. The latter batches

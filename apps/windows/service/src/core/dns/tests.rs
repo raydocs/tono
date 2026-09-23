@@ -890,6 +890,52 @@
         Ok(())
     }
 
+    /// R3-F1, merge half: with a snapshot present, a fresh adapter that appears while its
+    /// registry still carries the TUN DNS endpoint must never be appended with that endpoint
+    /// recorded as its "original" — a disconnect would then write 198.18.0.2 back onto the
+    /// adapter and be refused for ever for failing the proof against it. The snapshot-less
+    /// branch already refuses this state; the merge must not be the side door around it.
+    #[tokio::test]
+    #[serial]
+    async fn a_fresh_adapter_already_on_tono_dns_is_never_recorded_as_original() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        // {A} is protected and recorded; {B} reappears from an inactive period with the
+        // endpoint still in its registry — the state a corrupt-snapshot recovery misses when
+        // it only reads the active adapters.
+        test_hooks::set_collected_adapters(vec![
+            adapter("{A}", Some(PROTECTED_DNS_V4)),
+            adapter("{B}", Some(PROTECTED_DNS_V4)),
+        ]);
+        let enable_error = enable()
+            .await
+            .expect_err("an unrecorded adapter on the TUN endpoint is not a clean append");
+        let enable_message = format!("{enable_error:#}");
+        assert!(
+            enable_message.contains(DNS_ORPHANED_ADAPTER_PREFIX),
+            "{enable_message}"
+        );
+        let saved = read_snapshot().await?;
+        assert!(
+            saved
+                .adapters
+                .iter()
+                .all(|a| !adapter_contains_current_protected_dns(a)),
+            "no adapter original may contain the TUN endpoint: {saved:?}"
+        );
+        assert_eq!(
+            saved.adapters.len(),
+            1,
+            "the refusal must keep the saved originals untouched: {saved:?}"
+        );
+        assert_eq!(
+            saved.adapters[0].ipv4_name_server.as_deref(),
+            Some("1.1.1.1")
+        );
+        reset_dns_state().await;
+        Ok(())
+    }
+
     /// The pure half of the P0 fix: what the window says, given only the four observable
     /// values. In particular an open window that has aged past the cap stops suppressing —
     /// a leaked depth cannot mute the machine's network events for the life of the service.

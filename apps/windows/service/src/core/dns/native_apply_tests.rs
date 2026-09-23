@@ -551,3 +551,79 @@ async fn mixed_protected_dns_cannot_prove_corrupt_snapshot_recovery() -> Result<
     assert_eq!(tokio::fs::read(&retained[0]).await?, corrupt);
     Ok(())
 }
+
+/// R3-F1, recovery half: the corrupt-snapshot recovery must take its evidence from the
+/// registry's own interface list, not only the active adapters. A leftover TUN endpoint on an
+/// adapter that was inactive when the file went unreadable used to be invisible to the
+/// recovery: it survived the quarantine and rode the adapter's return into the next merge as
+/// a poisoned "original". Here {B} never joins the active set — only its interface key exists.
+#[tokio::test]
+#[serial_test::serial]
+async fn corrupt_snapshot_recovery_refuses_over_an_inactive_leftover_tun_dns() -> Result<()> {
+    use super::super::{NAME_SERVER, test_io::{self, Fixture}, v4_key};
+    use crate::core::dns as facade;
+
+    let a = effective(&entry(1), [9, 9, 9, 9], false);
+    let b = entry(2).guid;
+    let fixture = Fixture::new(vec![a])?;
+    let path = test_io::with(|io| {
+        // {B} exists only in the registry: unplugged or disabled while the snapshot was lost,
+        // its interface key still carries the protected endpoint.
+        io.keys.insert(
+            v4_key(&b),
+            [(NAME_SERVER.to_owned(), facade::PROTECTED_DNS_V4.to_owned())].into(),
+        );
+        io.snapshot_path.clone()
+    })
+    .unwrap();
+    let corrupt = b"{invalid DNS recovery snapshot";
+    tokio::fs::write(&path, corrupt).await?;
+
+    let error = facade::enable()
+        .await
+        .expect_err("an inactive leftover must refuse the recovery, not ride it out");
+    let message = format!("{error:#}");
+    assert!(
+        message.contains(facade::DNS_SNAPSHOT_UNREADABLE_PREFIX),
+        "{message}"
+    );
+    assert!(message.contains("tono_dns=true"), "{message}");
+    assert_eq!(
+        tokio::fs::read(&path).await?,
+        corrupt,
+        "a refused recovery keeps its evidence"
+    );
+    assert_eq!(
+        test_io::with(|io| (io.writes, io.native_calls, io.policy_restores)).unwrap(),
+        (0, 0, 0),
+        "a refused recovery must not rewrite adapter DNS or resolver policy"
+    );
+
+    // Once the leftover is cleaned up in Windows, the same recovery completes: the corrupt
+    // file is quarantined and enable proceeds from a clean snapshot of the active adapters.
+    test_io::with(|io| {
+        io.keys
+            .get_mut(&v4_key(&b))
+            .unwrap()
+            .insert(NAME_SERVER.into(), "1.1.1.1".into());
+    });
+    let status = facade::enable().await?;
+    assert!(status.enabled && status.snapshot_present, "{status:?}");
+    let saved = fixture.snapshot()?;
+    assert_eq!(saved.adapters.len(), 1, "{saved:?}");
+    fixture.assert_originals(&saved);
+    let retained = std::fs::read_dir(path.parent().unwrap())?
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<std::io::Result<Vec<_>>>()?;
+    let quarantined = retained
+        .iter()
+        .find(|path| {
+            path.file_name().is_some_and(|name| {
+                name.to_string_lossy()
+                    .starts_with("protected-dns.corrupt-")
+            })
+        })
+        .expect("the unreadable file must be quarantined, not kept in place");
+    assert_eq!(tokio::fs::read(quarantined).await?, corrupt);
+    Ok(())
+}
