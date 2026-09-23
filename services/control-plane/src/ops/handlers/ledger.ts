@@ -172,7 +172,7 @@ export async function postLedger(req: Request, e: Env, actor: Actor): Promise<Re
   const currency = currencyForKind(kind, b.currency);
   const fxDate = parseDay(b.fxDate as string | null | undefined, utcDateString(t));
   const { rate, day } = await rateFor(e, currency, fxDate);
-  const cnyMinor = cnyMinorFrom(amountMinor, rate);
+  const cnyMinor = cnyMinorFrom(amountMinor, currency, rate);
   const entryId = id();
   const paidAt = parsePaidAt(b.paidAt);
   const note = parseNote(b.note);
