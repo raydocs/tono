@@ -359,7 +359,7 @@ async fn materialize_plan(
 
     for copy in &plan.copies {
         let target = resolve_in_generation(runtime, &copy.destination)?;
-        super::staging::copy_staged_file(&copy.source, &target)
+        super::staging::copy_staged_file(&copy.source, copy.identity.len, &target)
             .await
             .map_err(|error| {
                 invalid_asset(format!(
@@ -375,7 +375,8 @@ async fn materialize_plan(
         // Staging turns this into a restart; a start cannot, and does not need to. Dropping the
         // entry says the same thing the manifest says about any destination it omits — nothing is
         // proven about it — so the next staging copies it again. A geo database being rewritten
-        // while the core starts must not be a start failure.
+        // while the core starts must not be a start failure. (One that grew past its planned
+        // length is the exception: the copy refuses it rather than copy without bound.)
         if super::staging::source_identity_changed(&copy.source, &copy.identity).await {
             tracing::warn!(
                 destination = %copy.destination,

@@ -289,7 +289,7 @@ pub(crate) async fn stage_runtime(
 
     for copy in &plan.copies {
         let target = resolve_in_generation(&generation, &copy.destination)?;
-        if let Err(error) = copy_staged_file(&copy.source, &target).await {
+        if let Err(error) = copy_staged_file(&copy.source, copy.identity.len, &target).await {
             return Ok(StageRuntimeOutcome::RestartRequired {
                 reason: StageRejection::RuntimeUnwritable {
                     detail: format!(
@@ -533,16 +533,29 @@ async fn replace_staged_file(staged: &Path, destination: &Path) -> std::io::Resu
     result
 }
 
-pub(super) async fn copy_staged_file(source: &str, destination: &Path) -> std::io::Result<()> {
+/// Copy `source`, which planning saw at `planned_len` bytes, into place at `destination`.
+///
+/// The open, the handle check and the whole copy run as one blocking call: a start copies after
+/// the previous core has stopped, so every round trip here is time without a tunnel.
+pub(super) async fn copy_staged_file(
+    source: &str,
+    planned_len: u64,
+    destination: &Path,
+) -> std::io::Result<()> {
     if let Some(parent) = destination.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
     let requested = source.to_owned();
-    let reader = tokio::task::spawn_blocking(move || open_validated_source(&requested))
-        .await
-        .map_err(std::io::Error::other)??;
     let staged = staging_temp_path(destination);
-    if let Err(error) = copy_from_handle(reader, &staged).await {
+    let target = staged.clone();
+    let copied = tokio::task::spawn_blocking(move || {
+        let reader = open_validated_source(&requested)?;
+        copy_from_handle(reader, planned_len, &target)
+    })
+    .await
+    .map_err(std::io::Error::other)
+    .and_then(|copied| copied);
+    if let Err(error) = copied {
         let _ = tokio::fs::remove_file(&staged).await;
         return Err(error);
     }
@@ -607,13 +620,24 @@ fn handle_is_at(file: &std::fs::File, path: &Path) -> std::io::Result<bool> {
         && named.ino() == opened.ino())
 }
 
-async fn copy_from_handle(reader: std::fs::File, staged: &Path) -> std::io::Result<()> {
-    use tokio::io::AsyncWriteExt as _;
+/// Copy at most the length planning recorded. The owner can still append to the file it named
+/// after the handle was pinned; a source that grew is refused rather than copied without bound
+/// into the Service's data (or cut short into a truncated asset). A shorter source is whole
+/// content and is copied; the caller's re-stat sees its changed identity.
+fn copy_from_handle(reader: std::fs::File, planned_len: u64, staged: &Path) -> std::io::Result<()> {
+    use std::io::{Read as _, Write as _};
 
-    let mut reader = tokio::fs::File::from_std(reader);
-    let mut writer = tokio::fs::File::create(staged).await?;
-    tokio::io::copy(&mut reader, &mut writer).await?;
-    writer.flush().await
+    // A large buffer keeps a geo database to a few dozen reads.
+    let mut writer = std::io::BufWriter::with_capacity(1 << 20, std::fs::File::create(staged)?);
+    // One byte past the plan is enough to see growth without copying it.
+    let copied = std::io::copy(&mut reader.take(planned_len.saturating_add(1)), &mut writer)?;
+    if copied > planned_len {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("runtime asset source grew past the {planned_len} bytes it was planned at"),
+        ));
+    }
+    writer.flush()
 }
 
 pub(super) async fn commit_staged_config(
@@ -682,7 +706,8 @@ mod tests {
         std::fs::create_dir_all(raw.join("providers"))?;
         std::fs::create_dir_all(raw.join("elsewhere"))?;
         std::fs::write(raw.join("providers/rules.yaml"), b"validated")?;
-        std::fs::write(raw.join("elsewhere/rules.yaml"), b"outside the roots")?;
+        // Same length as the validated file, so only the handle check can refuse the copy.
+        std::fs::write(raw.join("elsewhere/rules.yaml"), b"elsewhere")?;
         // What `validate_source` would have approved: the canonical path, as it stood.
         let root = std::fs::canonicalize(&raw)?;
         let validated = root.join("providers").join("rules.yaml");
@@ -701,7 +726,7 @@ mod tests {
         #[cfg(unix)]
         std::os::unix::fs::symlink(raw.join("elsewhere"), raw.join("providers"))?;
 
-        let result = copy_staged_file(&validated.to_string_lossy(), &destination).await;
+        let result = copy_staged_file(&validated.to_string_lossy(), 9, &destination).await;
 
         assert!(result.is_err(), "a relinked source must not be copied");
         assert!(!destination.exists());
