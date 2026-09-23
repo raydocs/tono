@@ -32,6 +32,56 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · 连接中途到达的系统网络变化不再被丢弃，改为 pending 待窗口结束对账
+
+- **归属**：G1（断开与恢复：网络切换后受保护会话及时自愈，不依赖 60 s 命令审计兜底）；
+  macOS 客户端 `apps/macos`。
+- **来源**：分支 `fix/macos-pending-network-change-20260922`，叠在
+  `fix/macos-tun-switch-guard-20260922`（PR #298）、
+  `fix/macos-external-release-misjudge-20260922`（PR #304）、
+  `fix/macos-optional-policy-reconnect-20260922`（PR #306）之上，基线同后者；R1-F5，
+  出自 2026-09-22 macOS 连接生命周期并发/时序审查及 V3 对抗核实（已确认，源码推导级；
+  是 Windows W8/#259（特权服务 netmon.rs 保留 pending、窗口结束后对账）的 macOS
+  平台遗漏——同族问题 Windows 已修、macOS 纯丢弃）。提交时未合 main。
+- **缺陷修复**：`handleSystemNetworkChange()` 在 `isConnecting/isDisconnecting` 期间的
+  入口 guard 直接 return，不留 pending。连接中途主网络服务切换（Wi-Fi→有线/热点，
+  securingDNS 之后、`onCoreStarted` 之前的数秒窗口）时：`onCoreStarted` 把新拓扑固化为
+  `lastPhysicalFingerprint` 基线，connected 分支的 `physicalChanged` 对此永远为 false；
+  系统 DNS 已是新服务的 ISP resolver，PF 阻断其 53 端口，域名健康探测失败进入
+  Recovering 循环不升级，唯一兜底是 `healthCycle.isMultiple(of:12)` 的
+  primaryNetworkService 命令审计（最长约 60 s，2 s 降级 tick 下更快）才发现并重连；
+  期间 fail-closed 不泄漏但无 DNS。修复：过渡期到达的网络变化置
+  `pendingNetworkChangeCheck = true`（记 `network_change_held_pending` 审计）不再丢弃；
+  在两个收尾点消费——`onCoreStarted` 收尾（基线已捕获）与 `completeDisconnect` 收尾
+  （teardown 已 settle）：已连接走与 connected 分支完全相同的 750 ms 去抖
+  `networkEnvironmentTask` 对账（primaryService/protectedDNSService、DNS 完整性、
+  物理指纹；自写排除由既有指纹机制承担，任务体内的 settle 守卫等连接收尾清
+  `isConnecting`），已断开仍受保护时走与 disconnected 分支相同的 immediate
+  protected-reconnect kick（armed/isTonoReady/wakeRecoveryTask 守卫同序）。消费只触发
+  既有协调路径，不新增任何直连旁路；PF 全程 armed，不放宽保护；60 s 命令审计兜底
+  原样保留。
+- **新增/优化**：无新能力。配套把 connected 分支的环境对账任务体抽为共享私有函数
+  `scheduleNetworkEnvironmentReconciliation()`（任务体逐字未改），新增
+  `network_change_held_pending`/`pending_network_change_reconciled` 两个诊断审计事件。
+- **工程与测试**：新增一个窄 XCTest
+  `NetworkChangeTests.testNetworkChangeObservedWhileConnectingIsReconciledOnceConnected`
+  （新文件 `apps/macos/TonoTests/NetworkChangeTests.swift`，文件系统同步组自动入 target）：
+  fixture `isConnecting=true`、`protectedDNSService="Wi-Fi"`，调
+  `handleSystemNetworkChange()` 断言留下 pending 标记且不建协调任务；切
+  `isConnecting=false; isConnected=true` 后调 `consumePendingNetworkChange()`，断言
+  `connectionCoordinator.networkEnvironmentTask != nil`（只断言调度，750 ms 去抖与
+  helper 探测不在测试内运行，结束前取消任务）。当前实现（修复前）无 pending 字段、
+  无任务，断言失败。
+- **验证**：编辑机（MacBook，按 2026-09-14 执行位置决定与本 PR 本机限制）只编辑未编译
+  未运行——未执行 `xcodebuild`/`swift build`/`swift test`/`swiftc`；Swift 语法、访问
+  级别与调用链人工自查。回归委托本 PR CI（GitHub-hosted `macos-26`）；提交时 CI 结果
+  未知，不沿用任何旧 SHA 绿灯。准确受测源码为 PR head。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：实机 SCDynamicStore 通知与连接窗口交错的命中率未量化（V3 已核时序上界
+  成立，降级路径常快于 60 s）；pending 消费只缩短发现延迟，不改变 fail-closed 语义；
+  R1 审查其余发现（F2、F6）与 F5 的 Windows 侧（已由 W8/#259 修复）不在本条范围。
+
+## 2026-09-23 · 后台可选策略替换失败后必须调度受保护重连
 ## 2026-09-23 · 后台可选策略替换失败后必须调度受保护重连
 
 - **归属**：G1（断开与恢复：稳定网络上的 fail-closed 主机不滞留 Protected Offline）；

@@ -283,6 +283,13 @@ final class AppState {
         ConfigPipeline.ManagedDirectRuntimePolicy?
     var networkInfoTask: Task<Void, Never>?
     var protectedDNSService: String?
+    /// A system network change that arrived while a connect or disconnect was
+    /// still in flight (R1-F5, the macOS counterpart of the Windows W8/#259
+    /// pending-notification fix). The transition window cannot reconcile it
+    /// yet — a connect only captures the baseline the comparison needs when
+    /// it settles — so the observation is held here instead of dropped and
+    /// consumed by `consumePendingNetworkChange()` at that settling point.
+    var pendingNetworkChangeCheck = false
 
     // MARK: - Init
 
@@ -339,9 +346,28 @@ final class AppState {
     /// then inspect the committed primary service and root-owned DNS state
     /// once. PF remains the synchronous leak boundary while this runs.
     func handleSystemNetworkChange() {
+        if isConnecting || isDisconnecting {
+            // The transition window cannot judge a network change yet: the
+            // connect has not captured the baseline the reconciliation
+            // compares against, and the coordinator's own arm/start/teardown
+            // tasks are mid-flight. W8/#259 taught the Windows service to
+            // keep such notifications pending and reconcile once its window
+            // closed; macOS dropped them outright, so a mid-connect service
+            // switch only surfaced through the ~60 s command audit — after
+            // `onCoreStarted` had already adopted the new topology as its
+            // baseline. Hold the observation and let
+            // `consumePendingNetworkChange()` run the ordinary comparison
+            // when the transition settles. PF stays armed the whole time;
+            // this only defers existing reconciliation paths.
+            pendingNetworkChangeCheck = true
+            LocalTrafficAudit.shared.recordEvent(
+                "network_change_held_pending",
+                details: auditProtectionDetails()
+            )
+            return
+        }
         if !isConnected {
-            guard KillSwitchService.isArmed, isTonoReady,
-                  !isConnecting, !isDisconnecting else { return }
+            guard KillSwitchService.isArmed, isTonoReady else { return }
             // Wake recovery owns its barrier/retry sequence. Dynamic Store
             // emits several route and DNS notifications during the same wake;
             // they must not create a second coordinator that races its connect.
@@ -354,11 +380,51 @@ final class AppState {
             scheduleProtectedReconnect(immediate: true)
             return
         }
-        guard isConnected, !isConnecting, !isDisconnecting else { return }
         LocalTrafficAudit.shared.recordEvent(
             "system_network_change_observed",
             details: auditProtectionDetails()
         )
+        scheduleNetworkEnvironmentReconciliation()
+    }
+
+    /// Reconcile a network change that was held pending through a connect or
+    /// disconnect window (R1-F5). Runs where the transition settles: after
+    /// `onCoreStarted` published connected, and when a disconnect completed.
+    /// A connected session gets the same debounced environment comparison a
+    /// live notification gets (the reconciliation's own debounce waits out
+    /// the connect epilogue); a still-protected disconnected session gets the
+    /// same immediate protected-reconnect kick the disconnected branch of
+    /// `handleSystemNetworkChange()` performs. Consumption only triggers
+    /// those existing coordination paths — it opens no direct bypass.
+    func consumePendingNetworkChange() {
+        guard pendingNetworkChangeCheck else { return }
+        pendingNetworkChangeCheck = false
+        if isConnected {
+            LocalTrafficAudit.shared.recordEvent(
+                "pending_network_change_reconciled",
+                details: auditProtectionDetails()
+            )
+            scheduleNetworkEnvironmentReconciliation()
+            return
+        }
+        guard KillSwitchService.isArmed, isTonoReady,
+              connectionCoordinator.wakeRecoveryTask == nil else { return }
+        LocalTrafficAudit.shared.recordEvent(
+            "protected_reconnect_network_kick",
+            details: auditProtectionDetails()
+        )
+        recoveryCause = .networkChange
+        scheduleProtectedReconnect(immediate: true)
+    }
+
+    /// Debounced reconciliation of the committed network environment against
+    /// the session's captured baseline: primary service vs
+    /// `protectedDNSService`, root-owned DNS integrity, and the physical
+    /// fingerprint (which is how Tono's own DNS writes are excluded). Shared
+    /// by the connected branch of `handleSystemNetworkChange()` and by
+    /// `consumePendingNetworkChange()` so a deferred observation runs exactly
+    /// the comparison a live one would.
+    private func scheduleNetworkEnvironmentReconciliation() {
         connectionCoordinator.networkEnvironmentTask?.cancel()
         connectionCoordinator.networkEnvironmentTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(750))
