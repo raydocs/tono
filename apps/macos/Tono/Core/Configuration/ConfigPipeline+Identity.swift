@@ -483,8 +483,8 @@ nonisolated extension ConfigPipeline {
             SecCSFlags(rawValue: kSecCSSigningInformation),
             &information
         ) == errSecSuccess,
-              let information = information as? [String: Any] else { return false }
-        return information[kSecCodeInfoTeamIdentifier as String] as? String == team
+              let info = information as? [String: Any] else { return false }
+        return info[kSecCodeInfoTeamIdentifier as String] as? String == team
     }
 
     /// Anchored RE2 patterns for Mihomo PROCESS-PATH-REGEX sub-rules, derived
