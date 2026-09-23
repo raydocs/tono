@@ -32,6 +32,36 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows Service 端校验 StartClash / StageRuntime 运行配置
+
+- **归属/来源**：G1 保护不得放宽（内部审查 H2-F3，[#351](https://github.com/raydocs/tono/issues/351)
+  第 2 部分；第 1 部分映像绑定见 #352）；影响 Windows Service（`apps/windows/service`）。
+  基线 main b1b6fe6c，分支 `fix/win-service-runtime-config-20260923`；提交时未合 main。
+- **缺陷修复**：StartClash/StageRuntime 的 `bundle.yaml` 被原样交给 SYSTEM 运行的 Core，
+  owned-runtime 合约只由 App 保证。新增 `runtime_generation/owned_config.rs`
+  `ensure_owned_runtime_config_is_safe`，与 macOS `ownedRuntimeConfigIsSafe` 逐项对应：
+  顶层/dns/tun/profile/sniffer 键白名单（拒绝 external-ui、rule/proxy-providers、listeners、
+  tunnels 等）；port/socks/redir 为 0，`bind-address: 127.0.0.1`、`allow-lan: false`、
+  `mode: rule`；external-controller 与 DNS listen 只允许 `127.0.0.1:`，secret 非空；
+  tun `enable`、`device: Tono`、`strict-route: true`；出站类型限 vless/hysteria2/socks5/direct，
+  组只允许 select 且必须有 `Tono-Exit`，最后一条规则为 `MATCH,Tono-Exit`；全文禁止
+  certificate/private-key/ca/ca-str/external-ui*/skip-cert-verify/routing-mark。不合约返回
+  `InvalidRuntimeAsset`，在取生命周期锁之前拒绝。
+- **新增/优化**：Service 新依赖 `serde_yaml_ng 0.10`（与 App/tono-core 同一解析器；
+  Cargo.lock 按 `apps/windows/Cargo.lock` 的同版本与校验和补入 serde_yaml_ng、ryu、unsafe-libyaml）。
+- **工程与测试**：新增一个 `#[test]`
+  `the_service_refuses_runtime_yaml_outside_the_owned_contract`：App 形状的夹具通过，
+  非回环 controller、`skip-cert-verify`、非 `MATCH,Tono-Exit` 结尾被拒。在 main 上的失败方式
+  是编译失败（校验函数不存在）。lifecycle `test` feature 的集成测试使用 `mode: rule` 占位
+  YAML，故该 feature 下校验不接入路由。
+- **验证**：本机（MacBook）按 AGENTS.md 未运行 cargo；手工补写的 lockfile 与编译、测试
+  委托本 PR 的 GitHub-hosted `windows-2025` CI（`--locked`）。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：夹具是按 `tono-core` 生成器手写的形状，不是跨 workspace 的真实输出比对；
+  若 App 生成器新增顶层键而未同步本白名单，连接会被 Service 拒绝（fail-closed）。
+  不校验规则内容与出站目标（WFP 端点约束仍在）；runtime assets 的 reparse 问题（H2-F4）
+  不在本条。未实机验证。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
