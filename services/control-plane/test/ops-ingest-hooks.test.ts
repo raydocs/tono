@@ -8,6 +8,8 @@ import { jwtSign } from '../src/crypto';
 import worker, { type Env } from '../src/index';
 import { enqueueJob } from '../src/ops/jobs';
 import { afterLogSegment } from '../src/ops/ingest-hooks';
+import { projectBacklog } from '../src/ops/customers';
+import { loadMonthSummary } from '../src/ops/ledger';
 
 const JWT_SECRET = 'test-jwt-secret-with-at-least-32-characters';
 const COLLECTOR = 'collector-test-token-with-at-least-32-chars';
@@ -102,6 +104,22 @@ describe('ops ingest hooks', () => {
     ).bind(account.userId).first<{ selected_server: string; connected: number }>();
     expect(status?.selected_server).toBe('Salt Lake City · Summit');
     expect(Number(status?.connected)).toBe(1);
+  });
+
+  it('counts a window once across ingest and the cron pass, and leaves byte-less usage pending', async () => {
+    const account = await seedAccount('once');
+    expect((await api('telemetry/windows', json(telemetryWindow(), account.token))).status).toBe(201);
+    const minutes = async () => Number((await db().prepare(
+      'SELECT SUM(online_minutes) AS m FROM customer_activity_hours WHERE user_id = ?',
+    ).bind(account.userId).first<{ m: number }>())?.m);
+    const afterIngest = await minutes();
+    expect(afterIngest).toBeGreaterThan(0);
+    const t = Math.floor(Date.now() / 1000);
+    await projectBacklog(db(), t);
+    expect(await minutes()).toBe(afterIngest);
+    const month = new Date(Date.now() - 600_000).toISOString().slice(0, 7);
+    const summary = await loadMonthSummary(db(), month, t);
+    expect(summary.customers.find((row) => row.userId === account.userId)?.pending).toBe(true);
   });
 
   it('PUT ops-ingest/snapshot writes ops_node_status', async () => {
