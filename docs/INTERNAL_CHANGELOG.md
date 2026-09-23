@@ -45,12 +45,19 @@
   installationId 并记下新锚点，随后走既有的无 token 路径（purge 托管目录、显示未登录），用户
   按新设备登录，原 Mac 的会话不受影响。旧版本存储没有锚点时直接采纳当前锚点。硬件 UUID
   读不到时不做判断。
+  - 审查后补充（#414 第三轮审查的非阻断建议）：首次写入锚点失败时只记日志并保留会话，
+    restore 继续，下次启动重试写入；此前该错误会让 restore 进入 `.error` 状态（保护保留、
+    不登出，但无法恢复会话）。锚点不符后的删除 token、删除 installationId 和写入新锚点失败
+    仍然抛错。
 - **新增/优化**：无。
 - **工程与测试**：新增一个 XCTest
   `KeychainDeviceAnchorTests.testASessionCarriedToAnotherMacIsDroppedAndGetsANewDeviceIdentity`：
   用注入的锚点 "mac-a" 建立会话，再用 "mac-b" 调用，断言 refresh token 已删除、installationId
   已更换，同锚点重复调用则保留会话。旧代码没有这个检查（测试无法编译，即失败）。
-- **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
+  审查后在同一个测试开头补了断言：首次写入锚点被注入的写入函数拒绝时，函数返回 false 且
+  不抛错，锚点仍为空（下次启动重试）。修改前的分支上首次写入失败会直接抛错，且没有
+  `recordAnchor` 参数，测试无法编译，即失败。
+- **验证**：本机（编辑机）未运行 xcodebuild，审查后的修正同样本机未编译；委托本 PR 的 GitHub-hosted `macos-26` CI
   （TonoTests），结果以 PR 页为准。迁移助理 / Time Machine 场景未做实机验证。
 - **候选/发布**：无新包，仅源码。
 - **剩余限制**：修复前已经克隆的两台 Mac 都会采纳各自的锚点，无法识别（需要服务端或用户

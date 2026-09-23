@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import IOKit
+import os
 import Security
 
 nonisolated struct KeychainStore: Sendable {
@@ -58,16 +59,27 @@ nonisolated struct KeychainStore: Sendable {
     /// build, with no anchor, adopts the current one. Returns whether the
     /// session was dropped.
     @discardableResult
-    func discardSessionCopiedFromAnotherMac(currentAnchor: String?) throws -> Bool {
+    func discardSessionCopiedFromAnotherMac(
+        currentAnchor: String?,
+        recordAnchor: ((String) throws -> Void)? = nil
+    ) throws -> Bool {
         guard let currentAnchor else { return false }
+        let record: (String) throws -> Void = recordAnchor ?? { try self.set($0, for: .deviceAnchor) }
         guard let stored = try string(for: .deviceAnchor) else {
-            try set(currentAnchor, for: .deviceAnchor)
+            // Adopting the anchor is bookkeeping. If it cannot be written, the
+            // session stays and the next launch tries again.
+            do {
+                try record(currentAnchor)
+            } catch {
+                Logger(subsystem: "com.raydocs.tono", category: "account")
+                    .error("Could not record the device anchor: \(String(describing: error), privacy: .public)")
+            }
             return false
         }
         guard stored != currentAnchor else { return false }
         try remove(.refreshToken)
         try remove(.installationId)
-        try set(currentAnchor, for: .deviceAnchor)
+        try record(currentAnchor)
         return true
     }
 

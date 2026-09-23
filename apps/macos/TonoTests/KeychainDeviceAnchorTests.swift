@@ -11,6 +11,11 @@ final class KeychainDeviceAnchorTests: XCTestCase {
         }
         try keychain.set("r0", for: .refreshToken)
         let original = try keychain.installationId()
+        struct WriteFailed: Error {}
+        XCTAssertFalse(try keychain.discardSessionCopiedFromAnotherMac(
+            currentAnchor: "mac-a", recordAnchor: { _ in throw WriteFailed() }
+        ), "a failed first anchor write must not block restore")
+        XCTAssertNil(try keychain.string(for: .deviceAnchor), "the next launch retries the first write")
         XCTAssertFalse(try keychain.discardSessionCopiedFromAnotherMac(currentAnchor: "mac-a"))
         XCTAssertFalse(try keychain.discardSessionCopiedFromAnotherMac(currentAnchor: "mac-a"))
         XCTAssertEqual(try keychain.string(for: .refreshToken), "r0", "the Mac that created the session keeps it")
