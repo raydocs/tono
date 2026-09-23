@@ -3068,6 +3068,51 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await admin(`home-exits/${homeBId}`, undefined, 'DELETE')).status).toBe(204);
   });
 
+  it('keeps a retired home exit and its hy2 twin out of other accounts\' catalogs', async () => {
+    const yaml = `proxies:
+  - name: "Shared JP"
+    type: vless
+    server: 1.1.1.1
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+    tls: true
+  - name: "Home Residential A"
+    type: vless
+    server: 8.8.8.8
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+    tls: true
+  - name: "Home Residential A · hy2"
+    type: hysteria2
+    server: 8.8.8.8
+    port: 443
+    password: {{TONO_CLIENT_UUID}}
+    sni: www.microsoft.com
+    fingerprint: e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db
+`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+    const home = await admin('home-exits', { proxyName: 'Home Residential A', displayName: '家庭 A' });
+    expect(home.status).toBe(201);
+    const homeId = ((await home.json()) as any).homeExit.id;
+    const owner = await createAccount('retired-home-owner');
+    const other = await createAccount('retired-home-other');
+    expect((await admin(`users/${owner.user.id}/home-binding`, { homeExitId: homeId }, 'PUT')).status).toBe(201);
+    const catalogFor = async (token: string) => ((await (await api('exit-catalog', {
+      headers: { authorization: `Bearer ${token}`, 'X-Tono-Accept': 'hy2' },
+    })).json()) as any).yaml as string;
+
+    expect(await catalogFor(owner.accessToken)).toContain('Home Residential A · hy2');
+    expect(await catalogFor(other.accessToken)).not.toContain('Home Residential A');
+
+    expect((await admin(`users/${owner.user.id}/home-binding`, undefined, 'DELETE')).status).toBe(204);
+    expect((await admin(`home-exits/${homeId}`, { status: 'retired' }, 'PATCH')).status).toBe(200);
+    for (const viewer of [owner, other]) {
+      const served = await catalogFor(viewer.accessToken);
+      expect(served).toContain('Shared JP');
+      expect(served).not.toContain('Home Residential A');
+    }
+  });
+
   it('publishes routing metadata to bound users and validates defaultProxyName', async () => {
     const yaml = `proxies:
   - name: "Shared VPS JP"

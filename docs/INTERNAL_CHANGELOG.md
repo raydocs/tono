@@ -32,6 +32,35 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · 控制面：停用/退役的家宽出口及其 hy2 孪生节点不再对全员可见
+
+- **归属/来源**：ops 控制面安全修复（H4-F2，[#322](https://github.com/raydocs/tono/issues/322)）；
+  影响 `services/control-plane`（目录下发 + D1）。基线 main
+  [576d7087](https://github.com/raydocs/tono/commit/576d7087cc54084acef3a4cda15c433ec96bb679)，
+  分支 `fix/home-exit-visibility-20260923`；提交时未合 main。
+- **缺陷修复**：按用户过滤目录时，限制名单只收 `status='active' AND kind='catalog'`
+  的家宽出口名（0035 触发器）。停用、退役（含 `assign replace:true` 自动退役旧出口）、
+  删除或改名后，名字掉出名单，但运营发布的 YAML 仍含该块，于是这个私有住宅节点下发给
+  所有账户，并替换成各自的 UUID。另外 `<名> · hy2` 孪生块按精确名匹配，从未被限制。
+  改后行为：新增 migration `0077_home_exit_name_history.sql`，只追加不删除，记录所有曾属于
+  catalog 型家宽出口的名字，不论当前状态；限制名单改为取这份历史。
+  `filterCatalogYamlForUser` 按基名匹配，hy2 孪生块随本体一起限制或放行。只有当前绑定
+  且 active 的家宽出口会对其绑定用户放行（沿用原逻辑）。
+- **新增/优化**：无。
+- **工程与测试**：一个 Worker `it`：
+  `keeps a retired home exit and its hy2 twin out of other accounts' catalogs`
+  （`test/worker.test.ts`）。在旧代码上有两处失败：hy2 孪生块在出口 active 时已对他人可见；
+  注释掉该断言后，退役后本体对他人可见。0077 的触发器不用 `OR IGNORE`，因为外层 UPSERT
+  的冲突策略会覆盖它（preview seed 的 `ON CONFLICT DO UPDATE` 会因此失败）。
+- **验证**：MacBook 本机、worktree 基于 576d7087：`npx vitest run test/worker.test.ts -t "retired home exit"`
+  修复前红、修复后绿；`npx vitest run`（control-plane 全量）43 个文件、892 个测试全部通过。
+  没有跑 D1 remote，也没有部署。
+- **候选/发布**：仅源码，无新候选；Worker 未部署，0077 未应用到生产 D1。
+- **剩余限制**：roster 仍不按节点隔离（`/api/v1/home/exit-identities` 对每个节点下发全员身份），
+  所以已解绑用户如果还记得节点参数，仍能连到住宅节点，留作后续。曾用作家宽出口的名字若改给
+  共享节点，会对所有人隐藏（fail-closed），需要运营改名，或有意删除历史行。目录 PUT 不校验
+  与家宽名冲突。
+
 ## 2026-09-23 · Windows App 在 Protected Offline（armed 未验证）期间的 Service 真值再同步
 
 - **归属/来源**：G1 断开/保护状态与实际一致（R2-F2）；影响 Windows App
