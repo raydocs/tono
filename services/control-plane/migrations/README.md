@@ -54,6 +54,6 @@ Ops tables after the sequence was unique. Applied in numeric order:
 - `0075_ops_node_capacity_users.sql` — `ops_node_profiles.capacity_users` for capacity-based node acceptance
 - `0076_ops_node_identity.sql` — immutable `ops_node_identity`; display name, failure domain, and which node it replaces
 
-## 0077+
+## 0079
 
-- `0077_session_rotation_successor.sql` — `sessions.rotated_at` / `successor_id` so a lost refresh response can be recovered once inside the grace window
+- `0079_session_rotation_successor.sql` — `sessions.rotated_at` / `successor_id` so a lost refresh response can be recovered once inside the grace window

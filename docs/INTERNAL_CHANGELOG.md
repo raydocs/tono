@@ -46,7 +46,7 @@
   仍返回 401。吊销旧 session 与插入后继放进同一个 D1 batch，后继 INSERT 以抢到吊销为条件，
   消除原来「旧 session 已吊销、后继插入失败」的部分提交。
 - **新增/优化**：`tokens()` 与 refresh 逻辑移到 `src/sessions.ts`（`index.ts` 行数上限 4014，
-  当前 3957）。新 migration `0077_session_rotation_successor.sql`。
+  当前 3957）。新 migration `0079_session_rotation_successor.sql`。
 - **工程与测试**：新增一个 Worker `it`
   （`honours one replay of a just-rotated refresh token whose response was lost`）。
   删除 lifecycle 用例中「立即重放必须 401」这一条断言：它把无宽限写成了契约，
@@ -58,7 +58,7 @@
 - **验证**：本机（MacBook，worktree）新 `it` 在旧代码上失败（重放返回 401，期望 200），
   修复后通过；`services/control-plane` 下 `npx vitest run` 43 个文件、892 个用例全部通过；
   `npm run typecheck`、`check:contract`、`check:budgets` 通过。未对远端 D1 执行 migration，未部署。
-- **候选/发布**：仅源码，无新候选。部署顺序：先对 D1 执行 0077 migration，再部署 Worker；
+- **候选/发布**：仅源码，无新候选。部署顺序：先对 D1 执行 0079 migration，再部署 Worker；
   否则 refresh 会因缺列失败。
 - **剩余限制**：Windows 在异步写 Credential Manager 之前被终止、且超过 10 分钟后才启动，
   这种情况仍是真 401，需要客户端持久化改动，记录在 #314。宽限期内，持有已轮换旧 token
