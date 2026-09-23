@@ -1665,11 +1665,47 @@ async fn engine_collect_interface_keys() -> Result<Vec<AdapterDnsSnapshot>> {
 /// spaces outlive the active set (disabled, unplugged and removed adapters keep their last
 /// written DNS values), and a TUN endpoint parked on an inactive adapter is invisible to
 /// [`collect_dns_adapters`]. Excludes the tunnel adapter exactly like it, by connection name
-/// when the core is gone — the registry view carries no LUID.
+/// when the core is gone — the registry view carries no LUID — and additionally drops
+/// [`is_inactive_tunnel_interface_key`] keys, which the name cannot cover once the WinTUN
+/// device (and with it, possibly, its `Connection` key) is gone.
 async fn collect_registry_interface_adapters() -> Result<Vec<AdapterDnsSnapshot>> {
     let adapters = engine_collect_interface_keys().await?;
     let current_tunnel_luid = crate::core::windows_kill_switch::protected_tunnel_luid().await;
-    Ok(without_current_tunnel(adapters, current_tunnel_luid))
+    let active = collect_dns_adapters().await?;
+    Ok(without_current_tunnel(adapters, current_tunnel_luid)
+        .into_iter()
+        .filter(|adapter| !is_inactive_tunnel_interface_key(adapter, &active))
+        .collect())
+}
+
+/// A name-independent tunnel exclusion for the registry view. The WinTUN interface key gets its
+/// `NameServer` from the TUN inbound's `dns_address` (sing-box sets it through the interface DNS
+/// API, which writes `NameServer` only), and that key can outlive the device it belonged to.
+/// Tono's own protected apply (`engine::apply_protected`) always writes IPv4 `NameServer`
+/// *and* `ProfileNameServer`, so a key that is not active, holds exactly the TUN DNS address
+/// in IPv4 `NameServer` and nothing in any other value is the tunnel's shape, not a real
+/// adapter Tono redirected. Anything else — a profile value, a mixed list (#293), a legacy
+/// loopback, an IPv6 server, or an active adapter — stays in the evidence. A real adapter
+/// misread here is not recorded as an original either: if it comes back, enable meets it as
+/// unrecorded and [`ensure_unrecorded_adapters_are_safe`] heals or refuses it.
+fn is_inactive_tunnel_interface_key(
+    adapter: &AdapterDnsSnapshot,
+    active: &[AdapterDnsSnapshot],
+) -> bool {
+    let empty =
+        |value: Option<&str>| value.is_none_or(|value| parse_name_server_list(value).is_empty());
+    let is_active = active
+        .iter()
+        .any(|live| live.interface_guid.eq_ignore_ascii_case(&adapter.interface_guid));
+    let tun_dns_only = adapter
+        .ipv4_name_server
+        .as_deref()
+        .is_some_and(|value| parse_name_server_list(value) == [PROTECTED_DNS_V4]);
+    !is_active
+        && tun_dns_only
+        && empty(adapter.ipv4_profile_name_server.as_deref())
+        && empty(adapter.ipv6_name_server.as_deref())
+        && empty(adapter.ipv6_profile_name_server.as_deref())
 }
 
 /// The corrupt-snapshot recovery's live question — does any interface the registry knows

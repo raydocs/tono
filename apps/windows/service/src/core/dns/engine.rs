@@ -182,7 +182,10 @@ fn enum_subkeys(subkey: &str) -> Result<Vec<String>> {
         return Ok(Vec::new());
     };
     let mut names = Vec::new();
-    for index in 0_u32..64 {
+    // No upper bound: `Parameters\Interfaces` routinely holds more than 64 GUIDs on Hyper-V /
+    // WSL / Docker machines, and the corrupt-snapshot recovery treats this list as the complete
+    // registry record. The loop ends on ERROR_NO_MORE_ITEMS or fails on any other status.
+    for index in 0_u32.. {
         let mut buf = [0_u16; 256];
         let mut len = buf.len() as u32;
         // SAFETY: `buf` is the name out-buffer; `len` is its capacity in characters.

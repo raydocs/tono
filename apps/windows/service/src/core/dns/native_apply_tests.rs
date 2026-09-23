@@ -557,20 +557,32 @@ async fn mixed_protected_dns_cannot_prove_corrupt_snapshot_recovery() -> Result<
 /// adapter that was inactive when the file went unreadable used to be invisible to the
 /// recovery: it survived the quarantine and rode the adapter's return into the next merge as
 /// a poisoned "original". Here {B} never joins the active set — only its interface key exists.
+/// {C} is the removed WinTUN interface's key: the TUN DNS address in `NameServer` alone, the
+/// shape Tono's own apply never writes. It is not a leftover, so once {B} is cleaned up it
+/// must not keep refusing the recovery.
 #[tokio::test]
 #[serial_test::serial]
 async fn corrupt_snapshot_recovery_refuses_over_an_inactive_leftover_tun_dns() -> Result<()> {
-    use super::super::{NAME_SERVER, test_io::{self, Fixture}, v4_key};
+    use super::super::{NAME_SERVER, PROFILE_NAME_SERVER, test_io::{self, Fixture}, v4_key};
     use crate::core::dns as facade;
 
     let a = effective(&entry(1), [9, 9, 9, 9], false);
     let b = entry(2).guid;
+    let c = entry(3).guid;
     let fixture = Fixture::new(vec![a])?;
     let path = test_io::with(|io| {
         // {B} exists only in the registry: unplugged or disabled while the snapshot was lost,
-        // its interface key still carries the protected endpoint.
+        // its interface key still carries the protected endpoint exactly as Tono's apply wrote it.
         io.keys.insert(
             v4_key(&b),
+            [
+                (NAME_SERVER.to_owned(), facade::PROTECTED_DNS_V4.to_owned()),
+                (PROFILE_NAME_SERVER.to_owned(), facade::PROTECTED_DNS_V4.to_owned()),
+            ]
+            .into(),
+        );
+        io.keys.insert(
+            v4_key(&c),
             [(NAME_SERVER.to_owned(), facade::PROTECTED_DNS_V4.to_owned())].into(),
         );
         io.snapshot_path.clone()
@@ -599,13 +611,13 @@ async fn corrupt_snapshot_recovery_refuses_over_an_inactive_leftover_tun_dns() -
         "a refused recovery must not rewrite adapter DNS or resolver policy"
     );
 
-    // Once the leftover is cleaned up in Windows, the same recovery completes: the corrupt
-    // file is quarantined and enable proceeds from a clean snapshot of the active adapters.
+    // Once the leftover is cleaned up in Windows, the same recovery completes — the removed
+    // tunnel's key {C} does not hold it back: the corrupt file is quarantined and enable
+    // proceeds from a clean snapshot of the active adapters.
     test_io::with(|io| {
-        io.keys
-            .get_mut(&v4_key(&b))
-            .unwrap()
-            .insert(NAME_SERVER.into(), "1.1.1.1".into());
+        let key = io.keys.get_mut(&v4_key(&b)).unwrap();
+        key.insert(NAME_SERVER.into(), "1.1.1.1".into());
+        key.remove(PROFILE_NAME_SERVER);
     });
     let status = facade::enable().await?;
     assert!(status.enabled && status.snapshot_present, "{status:?}");

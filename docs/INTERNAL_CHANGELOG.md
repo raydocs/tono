@@ -97,6 +97,37 @@ DNS 上”不再被听见——损坏快照被误判可以隔离，disarm 门随
 既有夹具语义均不动，**未修改任何测试夹具**。验证仍按所有者 2026-09-14 执行位置决定
 本机零 cargo，委托同一 `windows-2025` CI 重跑；本续记提交时未获得结果，不预支绿灯。
 
+### 2026-09-23 续记 2 · 审查意见：注册表视图的名称无关 TUN 排除与子键枚举截断
+
+- **缺陷修复（审查 P1）**：上文“沿用隧道排除”不准确——注册表视图无 LUID，只剩
+  `Connection\Name == "Tono"` 一道排除。若 wintun 设备删除后
+  `Tcpip\Parameters\Interfaces\{tunGUID}\NameServer = 198.18.0.2` 残留而 `Connection\Name`
+  随设备消失，损坏快照后的每次 Connect 都会以 `tono_dns=true` 永久拒绝。现在注册表
+  视图另加名称无关排除 `is_inactive_tunnel_interface_key`：键**不在**当前活跃集、IPv4
+  `NameServer` **恰为** `198.18.0.2`、其余三值（IPv4 `ProfileNameServer`、IPv6 两值）
+  全空/缺失——这是 TUN 入站 `dns_address` 经接口 DNS API 写出的形状；Tono 自己的
+  protected apply 总是同时写 IPv4 `NameServer` 与 `ProfileNameServer`，所以被 Tono
+  重定向过的真实适配器（含 inactive）、混合值（#293）、legacy loopback、活跃适配器均
+  仍计入证据、仍拒绝假恢复。被误判为 TUN 形状的真实适配器若回网，会在 enable 中作为
+  “未记录”适配器由 (a) 守卫 heal 或拒绝，不会成为污染原始值。
+- **缺陷修复（审查 P2）**：`enum_subkeys` 原 `0..64` 静默截断；改为无上限枚举直到
+  `ERROR_NO_MORE_ITEMS`，其他状态返回错误，不再把不完整集合当完整证据
+  （Hyper-V/WSL/Docker 机器常超 64 个接口 GUID）。
+- **测试/夹具修正**：不新增测试。修改既有 native 回归
+  `corrupt_snapshot_recovery_refuses_over_an_inactive_leftover_tun_dns`：{B} 夹具改为
+  Tono apply 实际写出的形状（`NameServer` + `ProfileNameServer`），并加入仅
+  `NameServer=198.18.0.2` 的已删除 TUN 键 {C}；清理 {B} 后恢复必须在 {C} 存在时完成。
+  修改前的分支上第二次 `enable()` 会被 {C} 以 `tono_dns=true` 拒绝，测试必败。
+- **验证**：本机（MacBook）未编译、未运行 cargo，委托本 PR 的 `windows-2025` CI；
+  提交时未获得结果。
+- **剩余限制**：TUN 键形状是按 sing-tun/Windows 接口 DNS API 行为推断的，**未实机
+  核实**。需在 Windows 验收机 Disconnect（wintun 删除）后查：
+  `reg query HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\{tunGUID}`
+  是否残留 `NameServer`、是否带 `ProfileNameServer`，以及
+  `HKLM\SYSTEM\CurrentControlSet\Control\Network\{4D36E972-E325-11CE-BFC1-08002BE10318}\{tunGUID}\Connection /v Name`
+  是否消失。若 TUN 键实际带有 `ProfileNameServer` 或 IPv6 值，本排除不生效，损坏快照
+  后 Connect 仍会被拒（fail-closed，不泄漏），需改为持久化 TUN GUID 的排除。
+
 ## 2026-09-23 · Windows 混合 DNS 残留不能证明恢复成功
 
 - **归属/来源**：G1 断开与恢复；从已合入的
