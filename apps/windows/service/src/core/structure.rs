@@ -636,6 +636,10 @@ pub enum ServiceErrorCode {
     /// own arrival-time snapshot). The refusal happens before any Core is touched. Mapped to
     /// 409 Conflict.
     StaleReleaseEpoch = 1013,
+    /// `StartClash` / `PrepareCoreStart` refused: the armed network protection belongs to a
+    /// different local user whose Windows logon session still exists. Taking it over would stop
+    /// that user's Core and hand their protection to the caller. Mapped to 409 Conflict.
+    ProtectionHeldByAnotherUser = 1014,
 }
 
 pub fn owner_key(identity: &OwnerIdentity) -> String {

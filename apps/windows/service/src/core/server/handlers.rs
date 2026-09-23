@@ -539,7 +539,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 PrepareCoreStartPayload::Legacy(()) => windows_kill_switch::release_epoch(),
             };
             let _lifecycle_guard =
-                match enter_owner_lifecycle(&owner, OwnerLifecycleGate::Unchecked).await {
+                match enter_owner_lifecycle(&owner, OwnerLifecycleGate::ArmedPolicyTakeover).await {
                     ControlFlow::Continue(guard) => guard,
                     ControlFlow::Break(response) => return response,
                 };
@@ -619,7 +619,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             #[cfg(feature = "test")]
             test_proxy_barrier_note_start_waiting();
             let _lifecycle_guard =
-                match enter_owner_lifecycle(&owner, OwnerLifecycleGate::Unchecked).await {
+                match enter_owner_lifecycle(&owner, OwnerLifecycleGate::ArmedPolicyTakeover).await {
                     ControlFlow::Continue(guard) => guard,
                     ControlFlow::Break(response) => return response,
                 };
@@ -653,6 +653,9 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 if let Err(error) =
                     windows_kill_switch::arm_bootstrap(kill_switch, &core_path, &owner.key).await
                 {
+                    if let Some(refusal) = error.downcast_ref::<ServiceError>() {
+                        return service_error(refusal.clone());
+                    }
                     return service_unavailable(format!(
                         "Failed to arm Windows kill switch: {error:#}"
                     ));

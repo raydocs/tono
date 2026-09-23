@@ -186,6 +186,10 @@ static TEST_PERSIST_FAILURE: AtomicBool = AtomicBool::new(false);
 static TEST_INSTALL_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
 #[cfg(test)]
 static TEST_PERSIST_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
+/// Test stand-in for the Windows logon-session lookup: true means the recorded owner has signed
+/// out. Defaults to "still signed in", the answer that refuses a takeover.
+#[cfg(test)]
+static TEST_OWNER_SIGNED_OUT: AtomicBool = AtomicBool::new(false);
 static NEXT_DIRECT_RELOAD_ID: AtomicU64 = AtomicU64::new(1);
 /// Longer than the App's absolute connect transaction: while this bracket expires the physical
 /// DIRECT set is empty, but a stale request must still be invalidated eventually.
@@ -1114,6 +1118,8 @@ pub(crate) async fn arm_bootstrap(
     }
     let api_host_ips = admit_api_host_ips(&config.bootstrap_api_hosts);
     let _operation = WFP_OPERATION.lock().await;
+    // Re-checked under the WFP lock: this is the write that records the new owner.
+    authorize_takeover_for(owner_key).map_err(anyhow::Error::new)?;
     let inherited_verified = armed_guard().as_ref().is_some_and(|armed| {
         armed.intent.owner_key.as_deref() == Some(owner_key) && armed.intent.is_verified()
     });
@@ -1238,6 +1244,133 @@ pub(crate) fn authorize_write_for(
         Ok(())
     } else {
         Err(crate::core::auth::ServiceError::not_active())
+    }
+}
+
+/// Whether `caller_key` may make itself the owner of the armed protection (StartClash /
+/// PrepareCoreStart).
+///
+/// `authorize_write_for` stops a different local user from releasing the armed policy, but a
+/// start rewrites the recorded owner and stops the running Core, after which that user's
+/// release would pass. So a start is refused on the same terms while the recorded owner still
+/// has a Windows logon session (active or disconnected). Once that user has signed out nobody
+/// is left to protect and the next user may take over. Ownerless intents stay open to anyone,
+/// exactly as in `authorize_write_for`.
+pub(crate) fn authorize_takeover_for(
+    caller_key: &str,
+) -> std::result::Result<(), crate::core::auth::ServiceError> {
+    let recorded = { armed_guard().clone() }
+        .filter(|armed| armed.intent.wanted)
+        .and_then(|armed| armed.intent.owner_key);
+    match recorded {
+        Some(recorded) if recorded != caller_key && owner_signed_in(&recorded) => {
+            Err(crate::core::auth::ServiceError::protection_held_by_another_user())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// True unless every logged-on Windows session was inspected and none belongs to the user whose
+/// owner key is `owner_key`. Any failure to enumerate or inspect a user session answers true:
+/// not knowing must keep the other user's protection in place.
+#[cfg(all(windows, not(feature = "test")))]
+fn owner_signed_in(owner_key: &str) -> bool {
+    use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
+    use windows_sys::Win32::Foundation::{ERROR_NO_TOKEN, GetLastError, LocalFree};
+    use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
+    use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_USER, TokenUser};
+    use windows_sys::Win32::System::RemoteDesktop::{
+        WTS_CURRENT_SERVER_HANDLE, WTS_SESSION_INFOW, WTSEnumerateSessionsW, WTSFreeMemory,
+        WTSQueryUserToken,
+    };
+
+    fn session_user_key(token: &OwnedHandle) -> Option<String> {
+        let mut required = 0_u32;
+        unsafe {
+            GetTokenInformation(
+                token.as_raw_handle(),
+                TokenUser,
+                std::ptr::null_mut(),
+                0,
+                &mut required,
+            )
+        };
+        if required == 0 {
+            return None;
+        }
+        let words = (required as usize).div_ceil(std::mem::size_of::<usize>());
+        let mut buffer = vec![0_usize; words];
+        if unsafe {
+            GetTokenInformation(
+                token.as_raw_handle(),
+                TokenUser,
+                buffer.as_mut_ptr().cast(),
+                required,
+                &mut required,
+            )
+        } == 0
+        {
+            return None;
+        }
+        let user = unsafe { &*buffer.as_ptr().cast::<TOKEN_USER>() };
+        let mut text = std::ptr::null_mut();
+        if unsafe { ConvertSidToStringSidW(user.User.Sid, &mut text) } == 0 || text.is_null() {
+            return None;
+        }
+        let length = (0..)
+            .take_while(|index| unsafe { *text.add(*index) } != 0)
+            .count();
+        let sid = String::from_utf16(unsafe { std::slice::from_raw_parts(text, length) });
+        unsafe { LocalFree(text.cast()) };
+        Some(crate::core::structure::owner_key(
+            &crate::OwnerIdentity::Windows { sid: sid.ok()? },
+        ))
+    }
+
+    let mut sessions: *mut WTS_SESSION_INFOW = std::ptr::null_mut();
+    let mut count = 0_u32;
+    if unsafe { WTSEnumerateSessionsW(WTS_CURRENT_SERVER_HANDLE, 0, 1, &mut sessions, &mut count) }
+        == 0
+    {
+        tracing::warn!("logon sessions could not be enumerated; treating the owner as signed in");
+        return true;
+    }
+    let listed = unsafe { std::slice::from_raw_parts(sessions, count as usize) }
+        .iter()
+        .map(|session| session.SessionId)
+        .collect::<Vec<_>>();
+    unsafe { WTSFreeMemory(sessions.cast()) };
+    for session_id in listed {
+        let mut token = std::ptr::null_mut();
+        if unsafe { WTSQueryUserToken(session_id, &mut token) } == 0 {
+            if unsafe { GetLastError() } == ERROR_NO_TOKEN {
+                // Session 0, the RDP listener and an empty logon screen carry no user.
+                continue;
+            }
+            tracing::warn!(
+                "session {session_id} user could not be read; treating the owner as signed in"
+            );
+            return true;
+        }
+        let token = unsafe { OwnedHandle::from_raw_handle(token) };
+        match session_user_key(&token) {
+            Some(key) if key == owner_key => return true,
+            Some(_) => {}
+            None => return true,
+        }
+    }
+    false
+}
+
+#[cfg(not(all(windows, not(feature = "test"))))]
+fn owner_signed_in(_owner_key: &str) -> bool {
+    #[cfg(test)]
+    {
+        !TEST_OWNER_SIGNED_OUT.load(Ordering::Relaxed)
+    }
+    #[cfg(not(test))]
+    {
+        true
     }
 }
 
@@ -3003,6 +3136,7 @@ mod tests {
         mark_verified("owner-alice").await?;
         arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
         assert!(ARMED.lock().unwrap().as_ref().unwrap().intent.is_verified());
+        TEST_OWNER_SIGNED_OUT.store(true, Ordering::Relaxed);
         arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-bob").await?;
         assert!(!ARMED.lock().unwrap().as_ref().unwrap().intent.is_verified());
         cleanup().await;
@@ -3050,6 +3184,7 @@ mod tests {
         TEST_AMBIGUOUS_INSTALL_FAILURE.store(false, Ordering::Relaxed);
         TEST_PERSIST_ATTEMPTS.store(0, Ordering::Relaxed);
         TEST_INSTALL_ATTEMPTS.store(0, Ordering::Relaxed);
+        TEST_OWNER_SIGNED_OUT.store(false, Ordering::Relaxed);
         crate::core::dns::test_hooks::set_live_dns_on_loopback(false);
         crate::core::manager::set_running_core_identity_for_kill_switch_tests(None).await;
         *ARMED.lock().unwrap() = None;
@@ -4088,6 +4223,31 @@ mod tests {
             last_error.contains("could not be restored"),
             "unexpected last_error: {last_error}"
         );
+        cleanup().await;
+        Ok(())
+    }
+
+    /// H2-F2: a start by a different local user must not rewrite the recorded owner of armed
+    /// protection while that user is still signed in; otherwise the takeover makes the refused
+    /// release pass.
+    #[tokio::test]
+    #[serial]
+    async fn another_signed_in_user_cannot_take_over_armed_protection() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+
+        let error = arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-bob")
+            .await
+            .expect_err("a second signed-in user must not take over armed protection");
+
+        assert_eq!(
+            error
+                .downcast_ref::<crate::core::auth::ServiceError>()
+                .map(|refusal| refusal.code),
+            Some(crate::ServiceErrorCode::ProtectionHeldByAnotherUser)
+        );
+        let on_disk: IntentRecord = serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
+        assert_eq!(on_disk.owner_key.as_deref(), Some("owner-alice"));
         cleanup().await;
         Ok(())
     }

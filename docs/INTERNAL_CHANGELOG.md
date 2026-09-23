@@ -32,6 +32,37 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 另一登录用户不得接管已武装的保护（H2-F2）
+
+- **归属**：G1 保护不变量（fail-closed；"不同本地用户不得释放他人保护"）；平台/模块：
+  Windows Service（`apps/windows/service`），App 无代码改动。
+- **来源**：基线 main b1b6fe6c → 分支 `fix/wfp-owner-takeover-20260923`；Issue #353；
+  PR 与准确源码 SHA 见 PR，提交本条时未合 main。
+- **缺陷修复（内部审查 H2-F2，源码推导）**：`authorize_write_for` 已禁止另一本地用户
+  Release，但 `StartClash` / `PrepareCoreStart` 走 `Unchecked` 门，`arm_bootstrap`
+  直接把 intent 的 `owner_key` 改成调用方，随后停掉前一用户的 Core；owner 被改写后
+  Release 对新调用方放行。改后：武装 intent 的 owner 是另一用户、且该用户仍有
+  Windows 登录会话（活动或断开，WTS 枚举）时，两条路由在生命周期锁内、停任何 Core
+  之前以新错误码 `ProtectionHeldByAnotherUser`(1014, HTTP 409) 拒绝；`arm_bootstrap`
+  在 WFP 锁内再检查一次。会话无法枚举或读取按"仍登录"处理。原 owner 注销后允许接管；
+  无 owner 的 emergency intent 与 Release 的 owner 检查不变。
+- **新增/优化**：无。
+- **工程与测试**：新增 `#[tokio::test]`
+  `another_signed_in_user_cannot_take_over_armed_protection`（`windows_kill_switch.rs`）：
+  alice 武装后 bob 的 `arm_bootstrap` 必须返回 1014 且磁盘 intent 仍属 alice；旧代码下
+  bob 的武装成功，断言失败。既有 `arm_inherits_verification_only_for_same_owner`
+  原本就断言跨用户武装成功，现先把 alice 标为已注销再武装 bob，保留其"验证状态不跨
+  owner 继承"的原意。windows-sys 增加 `Win32_System_RemoteDesktop` feature（不改 Cargo.lock）。
+- **验证**：本机（MacBook）按 2026-09-14 决定只做编辑与 `rustfmt --check`（新增代码无差异），
+  未运行 `cargo build/test/check/clippy`；编译与回归委托本 PR 的 GitHub-hosted
+  `windows-2025` CI，结果以该 run 为准。WTS 会话判定只在 CI 编译，未在 Windows 11
+  多用户实机上执行。
+- **候选/发布**：仅源码，无新候选、无新包；未触碰 `appcast.xml`/`latest.json` 或
+  `windows-updates`。
+- **剩余限制**：App 尚未把 1014 映射成"另一用户正在使用 Tono"的专门提示，目前显示为
+  一次连接失败并附服务端消息。第二个用户在原 owner 仍登录时既不能连接也不能释放，
+  只能等原 owner 断开或注销。未对提升权限的管理员开例外。多用户实机行为需验收。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
