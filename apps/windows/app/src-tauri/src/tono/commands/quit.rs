@@ -267,6 +267,9 @@ mod update_cleanup_tests {
 /// release cannot be proven; the unpreventable WM_ENDSESSION path applies its own short outer
 /// budget in the run-event handler.
 pub async fn quit_release(app: AppHandle) -> Result<(), String> {
+    if super::update::incomplete() {
+        return Err("A Service-owned update is pending; Quit/Disconnect cannot cancel its recovery obligation".into());
+    }
     let Some(state) = app.try_state::<Arc<TonoState>>().map(|state| state.inner().clone()) else {
         return Ok(());
     };

@@ -14,6 +14,7 @@ final class SocketServer {
     private let protectedDNS: ProtectedDNSManager
     private let transitionGate: PowerTransitionGate
     private let powerMonitor: HelperPowerMonitor
+    private let updates: UpdateTransaction
     private var serverFD: Int32 = -1
 
     init() throws {
@@ -28,6 +29,9 @@ final class SocketServer {
         killSwitch = try KillSwitchManager(allowedUID: allowedUID)
         protectedDNS = try ProtectedDNSManager()
         transitionGate = PowerTransitionGate()
+        updates = .live(storage: try UpdateStorage(), runtime: UpdateRuntime(
+            core: core, firewall: killSwitch, dns: protectedDNS, power: transitionGate
+        ))
         powerMonitor = HelperPowerMonitor(
             killSwitch: killSwitch,
             core: core,
@@ -119,6 +123,30 @@ final class SocketServer {
 
         do {
             let request = try readRequest(client)
+            try updates.storage.locked {
+                // Keep the existing authorizer for ordinary networking. A
+                // pending update additionally requires the registered bundle.
+                let peer = authorizer.peerIdentity(socket: client)
+                if let peer { try updates.gate(method: request.method, path: request.path, peer: peer) }
+                else if request.method != "GET" { throw HelperFailure.invalid("Cannot bind helper mutation to a peer bundle.") }
+                if request.path.hasPrefix("/update/") {
+                    guard let peer else { throw HelperFailure.invalid("Cannot authenticate update peer.") }
+                    try handleUpdate(request, peer: peer, client: client)
+                } else {
+                    try handleRuntime(request, client: client)
+                }
+            }
+        } catch let failure as HelperFailure {
+            let status = failure.code == "CORE_ALREADY_RUNNING" ? 409 : 400
+            var body: [String: Any] = ["ok": false, "error": failure.message]
+            if let code = failure.code { body["code"] = code }
+            sendResponse(client, status: status, object: body)
+        } catch {
+            sendResponse(client, status: 500, object: ["ok": false, "error": "Internal helper error; pending update evidence is retained."])
+        }
+    }
+
+    private func handleRuntime(_ request: HTTPRequest, client: Int32) throws {
             switch (request.method, request.path) {
             case ("GET", "/version"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
@@ -219,14 +247,43 @@ final class SocketServer {
             default:
                 sendResponse(client, status: 404, object: ["ok": false, "error": "Not found."])
             }
-        } catch let failure as HelperFailure {
-            let status = failure.code == "CORE_ALREADY_RUNNING" ? 409 : 400
-            var body: [String: Any] = ["ok": false, "error": failure.message]
-            if let code = failure.code { body["code"] = code }
-            sendResponse(client, status: status, object: body)
-        } catch {
-            sendResponse(client, status: 500, object: ["ok": false, "error": "Internal helper error."])
+    }
+
+    private func handleUpdate(_ request: HTTPRequest, peer: TonoAuthenticatedPeer, client: Int32) throws {
+        if request.method == "POST", request.path == "/update/offer" {
+            let object = try jsonObject(request.body)
+            guard object.count == 2, let manifest = object["manifest"] as? String,
+                  let signature = object["signature"] as? String,
+                  let bytes = Data(base64Encoded: manifest), let sig = Data(base64Encoded: signature) else {
+                throw HelperFailure.invalid("Invalid detached update offer.")
+            }
+            sendResponse(client, status: 200, object: ["ok": true,
+                "available": try updates.offer(peer: peer, manifest: bytes, signature: sig)])
+            return
         }
+        if request.method == "POST", request.path == "/update/stage" {
+            let object = try jsonObject(request.body)
+            guard object.count == 3, let manifest = object["manifest"] as? String,
+                  let signature = object["signature"] as? String, let package = object["package"] as? String,
+                  let bytes = Data(base64Encoded: manifest), let sig = Data(base64Encoded: signature) else {
+                throw HelperFailure.invalid("Invalid update staging request.")
+            }
+            try updates.stage(peer: peer, manifestBytes: bytes, signature: sig, packagePath: package)
+        } else {
+            guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected update body.") }
+            switch (request.method, request.path) {
+            case ("GET", "/update/status"): try updates.resumeConsumedExecutor(peer: peer)
+            case ("POST", "/update/prepare"): try updates.prepare(peer: peer)
+            case ("POST", "/update/execute"): try transitionGate.whileAwake { try updates.execute(peer: peer) }
+            case ("POST", "/update/reconcile"): try updates.reconcile(peer: peer)
+            case ("POST", "/update/commit"): try transitionGate.whileAwake { try updates.commit(peer: peer) }
+            case ("POST", "/update/cancel"): try updates.cancel(peer: peer)
+            case ("POST", "/update/disconnect"): try updates.disconnect(peer: peer)
+            case ("POST", "/update/retire"): try transitionGate.whileAwake { try updates.retireUnconsumed(peer: peer) }
+            default: throw HelperFailure.invalid("Unknown update operation.")
+            }
+        }
+        sendResponse(client, status: 200, object: try updates.status())
     }
 
     private func verifyEmbeddedSignature(_ path: String, identifier: String) throws {

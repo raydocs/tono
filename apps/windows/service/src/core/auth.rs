@@ -22,6 +22,7 @@ pub struct AuthenticatedOwner {
     pub key: String,
     pub identity: OwnerIdentity,
     pub app_data_root: PathBuf,
+    pub peer_pid: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -370,6 +371,7 @@ fn authenticate_owner(
             key: owner_key(&credentials.identity),
             identity: credentials.identity.clone(),
             app_data_root,
+            peer_pid: None,
         })
     }
 
@@ -429,6 +431,7 @@ fn authenticate_synthetic_test_owner(
         key: owner_key(&credentials.identity),
         identity: credentials.identity.clone(),
         app_data_root,
+        peer_pid: None,
     }))
 }
 
@@ -485,6 +488,7 @@ mod windows_auth {
         // path the caller named and could therefore have arranged, so none of it is worth
         // consulting until the connection itself has been bound to the declared owner. Placing it
         // here also means an unidentifiable peer costs no filesystem work at all.
+        let peer_pid = peer.process_id;
         let peer = classify_peer(peer, declared_sid.as_ptr());
         super::require_declared_owner_peer(&credentials.identity, peer)?;
         // Windows records Builtin Administrators — not the user — as the owner of everything an
@@ -538,6 +542,7 @@ mod windows_auth {
             key: owner_key(&credentials.identity),
             identity: credentials.identity.clone(),
             app_data_root,
+            peer_pid,
         })
     }
 

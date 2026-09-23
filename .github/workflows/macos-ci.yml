@@ -1,6 +1,12 @@
 name: macOS CI
 
 on:
+  workflow_call:
+    inputs:
+      update_release_sequence:
+        description: Monotonic sequence for a paired unsigned native candidate
+        required: true
+        type: string
   # Manual re-run, so a flake or an infrastructure hiccup does not need a
   # pointless commit to retry.
   workflow_dispatch:
@@ -9,6 +15,8 @@ on:
       - apps/macos/**
       - tooling/scripts/**
       - .github/workflows/macos-ci.yml
+      - apps/windows/crates/tono-core/src/update_contract.rs
+      - apps/windows/crates/tono-core/tests/update_contract.rs
   # Every branch, not just the default one. This repository is a fork, and no
   # `pull_request` event has ever produced a run here — PR #1 merged without one.
   # Restricted to `main` and paired with a trigger that does not fire, this
@@ -20,6 +28,8 @@ on:
       - apps/macos/**
       - tooling/scripts/**
       - .github/workflows/macos-ci.yml
+      - apps/windows/crates/tono-core/src/update_contract.rs
+      - apps/windows/crates/tono-core/tests/update_contract.rs
 
 permissions:
   contents: read
@@ -50,8 +60,15 @@ jobs:
     # "value of type 'some View' has no member 'glassEffect'", which reads like a
     # code error and is really a missing SDK.
     runs-on: macos-26
+    env:
+      TONO_UPDATE_RELEASE_SEQUENCE: ${{ inputs.update_release_sequence || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        if: inputs.update_release_sequence != ''
+        with:
+          node-version: 24
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
@@ -79,16 +96,33 @@ jobs:
           mkdir -p apps/macos/dist
           ditto -c -k --keepParent apps/macos/build/Build/Products/Release/Tono.app apps/macos/dist/Tono-macOS-beta.zip
 
+      - name: Measure paired unsigned update target from the packaged bundle
+        if: inputs.update_release_sequence != ''
+        run: |
+          set -euo pipefail
+          ditto -x -k apps/macos/dist/Tono-macOS-beta.zip "$RUNNER_TEMP/paired-macos"
+          app="$RUNNER_TEMP/paired-macos/Tono.app"
+          version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")
+          node tooling/scripts/desktop-update-v1.mjs measure \
+            --version "$version" --source "$GITHUB_SHA" --sequence "$TONO_UPDATE_RELEASE_SEQUENCE" \
+            --target macos-arm64 --artifact apps/macos/dist/Tono-macOS-beta.zip \
+            --app "$app/Contents/MacOS/Tono" --core "$app/Contents/Resources/sing-box" \
+            --privileged "$app/Contents/Resources/tono-core-helper" \
+            --output apps/macos/dist/update-target.macos-arm64.json
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: tono-macos-beta-${{ github.sha }}
-          path: apps/macos/dist/Tono-macOS-beta.zip
+          path: |
+            apps/macos/dist/Tono-macOS-beta.zip
+            apps/macos/dist/update-target.macos-arm64.json
           if-no-files-found: error
           retention-days: 7
 
       - name: Run the TonoTests unit tests
         env:
           TEST_RUNNER_TONO_EMIT_SINGBOX: ${{ runner.temp }}/sing-box-product.json
+          TEST_RUNNER_TONO_EMIT_UPDATE_CONTRACT: ${{ runner.temp }}/update-contract-v1-result.txt
         run: |
           xcodebuild \
             -project apps/macos/Tono.xcodeproj \
@@ -98,6 +132,16 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             ENABLE_USER_SCRIPT_SANDBOXING=NO \
             test
+
+      - name: Require the shared update contract XCTest to execute
+        run: |
+          python3 - <<'PY'
+          import hashlib, os, pathlib
+          fixture = pathlib.Path('tooling/scripts/tests/fixtures/update-protocol-v1/manifest.json')
+          result = pathlib.Path(os.environ['RUNNER_TEMP']) / 'update-contract-v1-result.txt'
+          assert result.read_text() == hashlib.sha256(fixture.read_bytes()).hexdigest() + '\n'
+          print('Swift shared update contract executed against the checked-out fixture')
+          PY
 
       - name: Preserve native test results and render attachments
         if: always()
@@ -236,3 +280,8 @@ jobs:
         # Proves ownership, permission, and symlink enforcement by constructing
         # the failing cases, which needs the ability to chown to another user.
         run: sudo apps/macos/Tono/Resources/tono-core-helper --staging-self-test
+
+      - name: Helper native update transaction self-test
+        # Production store, staging and executor boundaries with temporary I/O,
+        # not a signing bypass or installed-device PF/DNS acceptance.
+        run: sudo apps/macos/Tono/Resources/tono-core-helper --update-self-test

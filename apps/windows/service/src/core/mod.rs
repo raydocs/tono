@@ -69,6 +69,8 @@ mod server;
 mod state;
 #[cfg(feature = "standalone")]
 mod status;
+#[cfg(all(feature = "standalone", windows))]
+pub mod update;
 #[cfg(feature = "test")]
 mod test_credentials;
 #[cfg(all(feature = "standalone", unix))]

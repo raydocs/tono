@@ -1,5 +1,6 @@
 import { navigationItems } from '@/pages/_navigation-meta'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
+import type { DownloadEvent } from '@tauri-apps/plugin-updater'
 import type {
   TonoDiagnosticsReport,
   TonoLocalDiagnosticsReport,
@@ -9,15 +10,24 @@ import type {
 
 // Keep production formatters/classifiers; replace only the native IO boundary.
 export * from '../../src/services/tono'
+export {
+  UpdateStateProvider,
+  useUpdateState,
+  useSetUpdateState,
+} from '../../src/services/states'
 
 const params = new URLSearchParams(location.search)
 const scenario = params.get('scenario')
 const status: TonoStatus = {
   accountState: 'ready',
   uiState:
-    scenario === 'recovery' || scenario === 'stopped'
+    scenario === 'recovery' ||
+    scenario === 'stopped' ||
+    scenario === 'update-recovery'
       ? 'protectedOffline'
-      : location.hash.includes('servers') || scenario === 'service'
+      : location.hash.includes('servers') ||
+          scenario === 'service' ||
+          scenario === 'update-unprotected'
         ? 'notConnected'
         : 'connected',
   stage: null,
@@ -29,6 +39,8 @@ const status: TonoStatus = {
   catalogRequiresChoice: false,
   controllerGeneration: 8,
   routePreferenceScope: 'preview:7',
+  updateIncomplete:
+    scenario === 'update-recovery' || scenario === 'update-unprotected',
 }
 
 export const tonoStatusQueryKey = ['tonoStatus'] as const
@@ -45,6 +57,36 @@ export const useTonoStatus = () => ({
     : status,
   mutateTonoStatus: async () => {},
 })
+export const useTrafficData = () => ({
+  response: { data: undefined },
+  live: false,
+  refreshGetClashTraffic: async () => {},
+})
+export const tonoEncryptedDnsOverrides = async () => false
+export const openWindowsDnsSettings = async () => {}
+export const useUpdate = () => ({
+  updateInfo: { version: '0.0.73', manifestSha256: 'a'.repeat(64) },
+})
+export const installUpdate = async (
+  manifest: string,
+  progress: (event: DownloadEvent) => void,
+) => {
+  document.body.dataset.updateManifest = manifest
+  document.body.dataset.updateCalls = String(
+    Number(document.body.dataset.updateCalls || 0) + 1,
+  )
+  progress({ event: 'Started', data: { contentLength: 1000 } })
+  progress({ event: 'Progress', data: { chunkLength: 250 } })
+  // Controlled native-I/O failure only. The production dialog/state/notice renderers run unchanged.
+  await new Promise<void>((resolve) =>
+    window.addEventListener('preview-refuse-update', () => resolve(), {
+      once: true,
+    }),
+  )
+  throw new Error(
+    'Service refused the update; evidence and protection retained (simulated).',
+  )
+}
 const wait = () =>
   new Promise((resolve) =>
     setTimeout(
@@ -64,7 +106,11 @@ export const tonoSignInVerify = async (_email: string, code: string) => {
     )
   return { suspended: false }
 }
-export const tonoDisconnect = async () => {}
+export const tonoDisconnect = async () => {
+  document.body.dataset.disconnectCalls = String(
+    Number(document.body.dataset.disconnectCalls || 0) + 1,
+  )
+}
 export const tonoRetryRestore = async () => {}
 export const tonoStatus = async () => status
 export const subscribeTonoStatus = () => () => {}

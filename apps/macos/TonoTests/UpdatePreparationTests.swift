@@ -1,4 +1,3 @@
-import Sparkle
 import XCTest
 @testable import Tono
 
@@ -47,46 +46,22 @@ final class UpdatePreparationTests: XCTestCase {
         ))
     }
 
-    func testDNSRestoreFailureRecordsFailureAndVetoesSparkleContinuation() async throws {
+    func testLegacyDNSFailureRetainsDiagnosticEvidence() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("tono-update-preparation-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
         let url = directory.appendingPathComponent("update-handoff.json")
-        let delegate = TonoSparkleDelegate()
-        // No update checking, helper, PF, DNS or real user journal is used.
-        let controller = SPUStandardUpdaterController(
-            startingUpdater: false, updaterDelegate: delegate, userDriverDelegate: nil
-        )
-        XCTAssertTrue(delegate.responds(to: NSSelectorFromString("updaterShouldRelaunchApplication:")))
-        XCTAssertTrue(delegate.responds(to: NSSelectorFromString("updater:didFinishUpdateCycleForUpdateCheck:error:")))
-        var continued = false
-        var installationPermitted = false
-        await delegate.prepareInstallation(prepare: {
+        // Legacy evidence stays readable, but grants no native installation.
+        do {
             _ = try await UpdatePreparation.run(self.prepared(), at: url) {
                 throw DNSRestoreFailure.injected
             }
-        }, installHandler: {
-            continued = true
-            // Pinned Sparkle rechecks this veto before installing; continuation
-            // on failure must finish the cycle through abort, not hang it.
-            installationPermitted = delegate.updaterShouldRelaunchApplication(controller.updater)
-        })
-        XCTAssertTrue(continued)
-        XCTAssertFalse(installationPermitted)
+            XCTFail("DNS failure must be retained")
+        } catch {}
         let failed = try XCTUnwrap(UpdateHandoffStore.load(at: url))
         XCTAssertEqual(failed.phase, .failed)
         XCTAssertEqual(failed.lastErrorStage, "runtimeQuiescence")
         XCTAssertTrue(failed.keepKillSwitchArmed)
-
-        delegate.updater(controller.updater, didFinishUpdateCycleFor: .updates, error: nil)
-        await delegate.prepareInstallation(prepare: {
-            let journal = try await UpdatePreparation.run(self.prepared(), at: url, quiesce: {})
-            try UpdateHandoffStore.write(journal.advancing(to: .installStarted), at: url)
-        }, installHandler: {
-            installationPermitted = delegate.updaterShouldRelaunchApplication(controller.updater)
-        })
-        XCTAssertTrue(installationPermitted, "a failed cycle must not permanently veto a later retry")
-        XCTAssertEqual(UpdateHandoffStore.load(at: url)?.phase, .installStarted)
     }
 
     func testPreparationArchivesRawEvidenceAndRefusesAnArchiveFailure() async throws {

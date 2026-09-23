@@ -16,9 +16,10 @@ import type { Options as ReactMarkdownOptions } from 'react-markdown'
 
 import { BaseDialog, type DialogRef } from '@/components/base'
 import { useUpdate } from '@/hooks/use-update'
-import { prepareUpdate } from '@/services/cmds'
+import { installUpdate } from '@/services/update'
 import { showNotice } from '@/services/notice-service'
 import { useSetUpdateState, useUpdateState } from '@/services/states'
+import { formatTonoActionError } from '@/services/tono'
 
 type MarkdownNode = {
   type: string
@@ -144,6 +145,14 @@ export function UpdateViewer({ ref }: { ref?: Ref<DialogRef> }) {
 
   const { updateInfo } = useUpdate()
 
+  const [failedOffer, setFailedOffer] = useState<{
+    manifestSha256: string
+    message: string
+  } | null>(null)
+  const refusal =
+    failedOffer?.manifestSha256 === updateInfo?.manifestSha256
+      ? failedOffer
+      : null
   const [downloaded, setDownloaded] = useState(0)
   const [total, setTotal] = useState(0)
   const downloadedRef = useRef(0)
@@ -189,7 +198,7 @@ export function UpdateViewer({ ref }: { ref?: Ref<DialogRef> }) {
   }, [updateInfo])
 
   const onUpdate = useLockFn(async () => {
-    if (!updateInfo) return
+    if (!updateInfo || refusal) return
     if (breakChangeFlag) {
       showNotice.error('settings.modals.update.messages.breakChangeError')
       return
@@ -226,13 +235,16 @@ export function UpdateViewer({ ref }: { ref?: Ref<DialogRef> }) {
     }
 
     try {
-      // download() resolves only after signature verification. Windows install
-      // exits this process, so durable preparation must finish before it starts.
-      await updateInfo.download(onDownloadEvent)
-      await prepareUpdate(updateInfo.version)
-      await updateInfo.install()
-    } catch (err: any) {
-      showNotice.error(err)
+      // The native caller transports bytes; Service owns staging, quiescence,
+      // one-use installation and authenticated successor recovery.
+      await installUpdate(updateInfo.manifestSha256, onDownloadEvent)
+    } catch (err) {
+      // Keep the refusal inside the modal, and keep this offer blocked even
+      // after closing/reopening it. Only a different checked manifest is new.
+      setFailedOffer({
+        manifestSha256: updateInfo.manifestSha256,
+        message: formatTonoActionError(err) || t('tono.errors.unknownAction'),
+      })
     } finally {
       setUpdateState(false)
       setDownloaded(0)
@@ -292,6 +304,8 @@ export function UpdateViewer({ ref }: { ref?: Ref<DialogRef> }) {
       }}
       okBtn={t('settings.modals.update.actions.update')}
       cancelBtn={t('shared.actions.cancel')}
+      disableOk={refusal !== null}
+      loading={updateState}
       onClose={() => setOpen(false)}
       onCancel={() => setOpen(false)}
       onOk={onUpdate}
@@ -474,6 +488,23 @@ export function UpdateViewer({ ref }: { ref?: Ref<DialogRef> }) {
           </Suspense>
         )}
       </Box>
+      {refusal && (
+        <Box
+          role="alert"
+          sx={{
+            mt: 1,
+            p: 1.5,
+            flexShrink: 0,
+            borderRadius: 1,
+            fontSize: 13,
+            color: 'error.main',
+            bgcolor: (theme) => alpha(theme.palette.error.main, 0.08),
+            overflowWrap: 'anywhere',
+          }}
+        >
+          {refusal.message}
+        </Box>
+      )}
       {updateState && (
         <LinearProgress
           variant={total > 0 ? 'determinate' : 'indeterminate'}

@@ -5,8 +5,8 @@ import Network
 /// In-process fake-IP checks for the protected DNS preflight.
 ///
 /// Local listener proof talks UDP to 127.0.0.1:53. System-resolver proof uses
-/// `getaddrinfo` so it sees the same path as an ordinary app after
-/// `networksetup`. Neither path launches `dig`.
+/// the cancellable macOS system resolver after `networksetup`, not an explicit
+/// listener query. Neither path launches `dig`.
 nonisolated enum ProtectedDNSProbe {
     static let name = "www.gstatic.com"
     static let fakeIPPrefix = "198.19."
@@ -23,7 +23,7 @@ nonisolated enum ProtectedDNSProbe {
         answers.first(where: isFakeIP)
     }
 
-    /// Listener returned a fake-IP, but getaddrinfo still produced a public
+    /// Listener returned a fake-IP, but the system resolver produced a public
     /// address. Encrypted DNS, iCloud Private Relay, or a stale resolver cache
     /// is ignoring 127.0.0.1:53.
     static func systemResolverBypassesProtectedListener(
@@ -39,79 +39,38 @@ nonisolated enum ProtectedDNSProbe {
         server: String,
         port: Int,
         timeout: TimeInterval,
-        name: String = ProtectedDNSProbe.name
+        name: String = ProtectedDNSProbe.name,
+        makeConnection: @Sendable (NWEndpoint.Host, NWEndpoint.Port) -> NWConnection = {
+            NWConnection(host: $0, port: $1, using: .udp)
+        }
     ) async -> [String] {
-        let packet = encodeQuery(name: name)
+        guard !Task.isCancelled else { return [] }
+        let packet = encodeQuery(name: name, id: UInt16.random(in: .min ... .max))
         let host = NWEndpoint.Host(server)
         guard let nwPort = NWEndpoint.Port(rawValue: UInt16(clamping: max(1, port))) else {
             return []
         }
-        let holder = ConnectionHolder()
-        return await withTaskCancellationHandler {
+        // Create, but do not start, the connection before installing cancellation.
+        // If creation races cancellation, onCancel still retires this owned request
+        // before begin can start it; there is no empty registration slot to miss.
+        let request = DNSListenerRequest(connection: makeConnection(host, nwPort), timeout: timeout)
+        let answers = await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
-                let connection = NWConnection(host: host, port: nwPort, using: .udp)
-                holder.connection = connection
-                let once = OnceResume<[String]>()
-                let finish: @Sendable ([String]) -> Void = { answers in
-                    if once.take(answers) {
-                        connection.cancel()
-                        continuation.resume(returning: answers)
-                    }
-                }
-                connection.stateUpdateHandler = { state in
-                    switch state {
-                    case .ready:
-                        connection.send(
-                            content: packet,
-                            completion: .contentProcessed { error in
-                                if error != nil {
-                                    finish([])
-                                    return
-                                }
-                                connection.receiveMessage { data, _, _, error in
-                                    if error != nil || Task.isCancelled {
-                                        finish([])
-                                        return
-                                    }
-                                    finish(decodeAnswers(data ?? Data()))
-                                }
-                            }
-                        )
-                    case .failed, .cancelled:
-                        finish([])
-                    default:
-                        break
-                    }
-                }
-                connection.start(queue: DispatchQueue.global(qos: .userInitiated))
-                DispatchQueue.global(qos: .userInitiated).asyncAfter(
-                    deadline: .now() + max(0.2, timeout)
-                ) {
-                    finish([])
-                }
+                request.begin(packet: packet, continuation: continuation)
             }
         } onCancel: {
-            holder.connection?.cancel()
+            request.finish([])
         }
+        // Dispatch callbacks do not execute inside the originating Swift task.
+        // Recheck here if cancellation raced a successful continuation resume.
+        return Task.isCancelled ? [] : answers
     }
 
-    static func querySystemResolver(timeout: TimeInterval) async -> [String] {
-        await withTaskGroup(of: [String].self) { group in
-            group.addTask {
-                await withCheckedContinuation { continuation in
-                    DispatchQueue.global(qos: .userInitiated).async {
-                        continuation.resume(returning: systemLookup(name))
-                    }
-                }
-            }
-            group.addTask {
-                try? await Task.sleep(for: .seconds(max(0.2, timeout)))
-                return []
-            }
-            let first = await group.next() ?? []
-            group.cancelAll()
-            return first
-        }
+    static func querySystemResolver(
+        timeout: TimeInterval,
+        resolver: ProtectedSystemResolver.Functions = .live
+    ) async -> [String] {
+        await ProtectedSystemResolver.query(name: name, timeout: timeout, functions: resolver)
     }
 
     static func encodeQuery(name: String, id: UInt16 = 0x544E) -> Data {
@@ -134,38 +93,87 @@ nonisolated enum ProtectedDNSProbe {
         return packet
     }
 
-    static func decodeAnswers(_ packet: Data) -> [String] {
-        guard packet.count >= 12 else { return [] }
-        let qdcount = Int(packet[4]) << 8 | Int(packet[5])
-        let ancount = Int(packet[6]) << 8 | Int(packet[7])
+    static func decodeAnswers(
+        _ data: Data,
+        query: Data = ProtectedDNSProbe.encodeQuery(name: ProtectedDNSProbe.name)
+    ) -> [String] {
+        // Normalize slice indices and match the actual request, not a hard-coded ID.
+        let packet = Array(data)
+        let query = Array(query)
+        guard packet.count >= 12, query.count >= 12,
+              packet[0] == query[0], packet[1] == query[1],
+              packet[2] & 0xFA == 0x80, // response, standard opcode, not truncated
+              packet[3] & 0x0F == 0,   // NOERROR
+              packet[4] == 0, packet[5] == 1,
+              query[4] == 0, query[5] == 1 else { return [] }
         var offset = 12
-        for _ in 0..<qdcount {
-            guard skipName(packet, offset: &offset) else { return [] }
-            offset += 4
-            guard offset <= packet.count else { return [] }
-        }
-        var answers: [String] = []
-        for _ in 0..<ancount {
-            guard skipName(packet, offset: &offset) else { break }
-            guard offset + 10 <= packet.count else { break }
+        var queryOffset = 12
+        guard let question = readName(packet, offset: &offset),
+              let expected = readName(query, offset: &queryOffset), question == expected,
+              offset + 4 <= packet.count, queryOffset + 4 == query.count,
+              Array(packet[offset..<offset + 4]) == [0, 1, 0, 1],
+              Array(query[queryOffset..<queryOffset + 4]) == [0, 1, 0, 1] else { return [] }
+        offset += 4
+        let ancount = Int(packet[6]) << 8 | Int(packet[7])
+        let nscount = Int(packet[8]) << 8 | Int(packet[9])
+        let arcount = Int(packet[10]) << 8 | Int(packet[11])
+        var addresses: [Data: [String]] = [:]
+        var aliases: [Data: Data] = [:]
+        // A malformed later record invalidates the WHOLE datagram, even if an
+        // earlier record contained a fake-IP. Authority/additional A records
+        // are not answers to our question, but their framing must also be valid.
+        for index in 0..<(ancount + nscount + arcount) {
+            guard let owner = readName(packet, offset: &offset),
+                  offset + 10 <= packet.count else { return [] }
             let type = Int(packet[offset]) << 8 | Int(packet[offset + 1])
+            // This probe sends no EDNS OPT. RFC 6891 §7 forbids an unsolicited
+            // OPT response; ignoring one would also discard its extended RCODE
+            // and could turn BADVERS into a successful fake-IP proof.
+            guard type != 41 else { return [] }
+            let recordClass = Int(packet[offset + 2]) << 8 | Int(packet[offset + 3])
             let rdlength = Int(packet[offset + 8]) << 8 | Int(packet[offset + 9])
             offset += 10
-            guard offset + rdlength <= packet.count else { break }
-            if type == 1, rdlength == 4 {
-                answers.append(
-                    "\(packet[offset]).\(packet[offset + 1]).\(packet[offset + 2]).\(packet[offset + 3])"
-                )
+            let end = offset + rdlength
+            guard end <= packet.count else { return [] }
+            if type == 1, recordClass == 1 {
+                guard rdlength == 4 else { return [] }
+                if index < ancount {
+                    addresses[owner, default: []].append(
+                        "\(packet[offset]).\(packet[offset + 1]).\(packet[offset + 2]).\(packet[offset + 3])"
+                    )
+                }
+            } else if type == 5, recordClass == 1 {
+                var nameOffset = offset
+                guard let target = readName(packet, offset: &nameOffset), nameOffset == end else { return [] }
+                if index < ancount {
+                    guard aliases[owner] == nil || aliases[owner] == target else { return [] }
+                    aliases[owner] = target
+                }
             }
-            offset += rdlength
+            offset = end
         }
-        return answers
+        guard offset == packet.count else { return [] }
+        // Follow only the question's CNAME chain, never an unrelated A record
+        // that happens to contain a fake-IP. Cycles and conflicting A/CNAME fail.
+        var owner = question
+        var visited = Set<Data>()
+        while visited.insert(owner).inserted {
+            if let answers = addresses[owner] {
+                return aliases[owner] == nil ? answers : []
+            }
+            guard let target = aliases[owner] else { return [] }
+            owner = target
+        }
+        return []
     }
 
-    private static func skipName(_ packet: Data, offset: inout Int) -> Bool {
+    /// RFC 1035 labels, with ASCII case folding and bounded backward compression.
+    /// Keep label lengths in the key: a dot inside a label is not a name separator.
+    private static func readName(_ packet: [UInt8], offset: inout Int) -> Data? {
         var jumps = 0
         var cursor = offset
         var advancedPastName = false
+        var name = Data()
         while cursor < packet.count {
             let length = Int(packet[cursor])
             if length == 0 {
@@ -173,51 +181,31 @@ nonisolated enum ProtectedDNSProbe {
                 if !advancedPastName {
                     offset = cursor
                 }
-                return true
+                name.append(0)
+                return name
             }
             if length & 0xC0 == 0xC0 {
-                guard cursor + 1 < packet.count else { return false }
+                guard cursor + 1 < packet.count else { return nil }
+                let target = (length & 0x3F) << 8 | Int(packet[cursor + 1])
+                guard target >= 12, target < cursor else { return nil }
                 if !advancedPastName {
                     offset = cursor + 2
                     advancedPastName = true
                 }
-                cursor = (length & 0x3F) << 8 | Int(packet[cursor + 1])
+                cursor = target
                 jumps += 1
-                if jumps > 8 { return false }
+                if jumps > 8 { return nil }
                 continue
             }
-            cursor += 1 + length
-            if cursor > packet.count { return false }
+            guard length <= 63, cursor + 1 + length <= packet.count,
+                  name.count + 1 + length < 255 else { return nil }
+            name.append(UInt8(length))
+            name.append(contentsOf: packet[(cursor + 1)..<(cursor + 1 + length)].map {
+                (65...90).contains($0) ? $0 + 32 : $0
+            })
+            cursor += length + 1
         }
-        return false
-    }
-
-    private static func systemLookup(_ name: String) -> [String] {
-        var hints = addrinfo()
-        hints.ai_family = AF_INET
-        hints.ai_socktype = SOCK_STREAM
-        var result: UnsafeMutablePointer<addrinfo>?
-        let status = getaddrinfo(name, nil, &hints, &result)
-        defer {
-            if let result {
-                freeaddrinfo(result)
-            }
-        }
-        guard status == 0 else { return [] }
-        var answers: [String] = []
-        var current = result
-        while let info = current {
-            if info.pointee.ai_family == AF_INET, let addr = info.pointee.ai_addr {
-                var ipv4 = addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
-                    $0.pointee
-                }
-                var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
-                _ = inet_ntop(AF_INET, &ipv4.sin_addr, &buffer, socklen_t(INET_ADDRSTRLEN))
-                answers.append(String(cString: buffer))
-            }
-            current = info.pointee.ai_next
-        }
-        return answers
+        return nil
     }
 }
 
@@ -522,37 +510,84 @@ nonisolated enum BrowserDNSDiagnostics {
     }
 }
 
-private final class ConnectionHolder: @unchecked Sendable {
+/// One terminal decision owns the waiter, timer and connection cleanup. Cancel
+/// can precede continuation installation and never waits for a Network callback.
+nonisolated private final class DNSListenerRequest: @unchecked Sendable {
     private let lock = NSLock()
-    private nonisolated(unsafe) var _connection: NWConnection?
+    private let queue = DispatchQueue(label: "net.tono.listener-dns", qos: .userInitiated)
+    private let connection: NWConnection
+    private let deadline: DispatchTime
+    private var continuation: CheckedContinuation<[String], Never>?
+    private var terminal: [String]?
+    private var timer: DispatchSourceTimer?
 
-    nonisolated init() {}
-
-    nonisolated var connection: NWConnection? {
-        get {
-            lock.lock()
-            defer { lock.unlock() }
-            return _connection
-        }
-        set {
-            lock.lock()
-            defer { lock.unlock() }
-            _connection = newValue
-        }
+    init(connection: NWConnection, timeout: TimeInterval) {
+        self.connection = connection
+        deadline = .now() + max(0.2, timeout)
     }
-}
 
-private final class OnceResume<Value>: @unchecked Sendable {
-    private let lock = NSLock()
-    private nonisolated(unsafe) var value: Value?
+    private var isPending: Bool {
+        lock.withLock { terminal == nil && DispatchTime.now() < deadline }
+    }
 
-    nonisolated init() {}
-
-    nonisolated func take(_ next: Value) -> Bool {
+    func begin(packet: Data, continuation: CheckedContinuation<[String], Never>) {
         lock.lock()
-        defer { lock.unlock() }
-        guard value == nil else { return false }
-        value = next
-        return true
+        if let terminal {
+            lock.unlock()
+            continuation.resume(returning: terminal)
+            return
+        }
+        self.continuation = continuation
+        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .userInitiated))
+        self.timer = timer
+        timer.setEventHandler { self.finish([]) }
+        timer.schedule(deadline: deadline)
+        timer.resume()
+        lock.unlock()
+        queue.async { self.start(packet: packet) }
+    }
+
+    private func start(packet: Data) {
+        guard isPending else { return }
+        connection.stateUpdateHandler = { [weak self] state in
+            guard let self, self.isPending else { return }
+            switch state {
+            case .ready:
+                self.connection.send(content: packet, completion: .contentProcessed { [weak self] error in
+                    guard let self, self.isPending else { return }
+                    guard error == nil else { self.finish([]); return }
+                    self.connection.receiveMessage { [weak self] data, _, _, error in
+                        guard let self else { return }
+                        self.finish(error == nil
+                            ? ProtectedDNSProbe.decodeAnswers(data ?? Data(), query: packet)
+                            : [])
+                    }
+                })
+            case .failed, .cancelled:
+                self.finish([])
+            default:
+                break
+            }
+        }
+        connection.start(queue: queue)
+    }
+
+    func finish(_ answers: [String]) {
+        lock.lock()
+        guard terminal == nil else { lock.unlock(); return }
+        let answers = DispatchTime.now() < deadline ? answers : []
+        terminal = answers
+        let continuation = self.continuation
+        self.continuation = nil
+        let timer = self.timer
+        self.timer = nil
+        lock.unlock()
+        timer?.setEventHandler {}
+        timer?.cancel()
+        queue.async {
+            self.connection.stateUpdateHandler = nil
+            self.connection.cancel()
+        }
+        continuation?.resume(returning: answers)
     }
 }

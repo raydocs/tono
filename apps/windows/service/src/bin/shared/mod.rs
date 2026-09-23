@@ -10,7 +10,11 @@ use anyhow::Error;
 
 pub(crate) fn enter_repair_gate() -> Result<tono_service_protocol::ServiceRepairGate, Error> {
     match tono_service_protocol::acquire_service_repair_gate()? {
-        Some(gate) => Ok(gate),
+        Some(gate) => {
+            #[cfg(windows)]
+            tono_service_protocol::update_native::maintenance_allowed()?;
+            Ok(gate)
+        }
         None => {
             eprintln!("Service repair is already in progress");
             std::process::exit(tono_service_protocol::REPAIR_IN_PROGRESS_EXIT_CODE);
@@ -22,6 +26,7 @@ pub(crate) fn run_maintenance_if_requested() -> Result<bool, Error> {
     if !std::env::args().any(|argument| argument == "--cleanup-stale-owners") {
         return Ok(false);
     }
+    let _gate = enter_repair_gate()?;
     let removed = tono_service_protocol::cleanup_stale_owner_state()?;
     println!("Removed {} stale owner state directories", removed.len());
     Ok(true)

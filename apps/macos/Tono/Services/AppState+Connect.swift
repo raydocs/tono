@@ -4,6 +4,7 @@ extension AppState {
     // MARK: - Connection Control
 
     func connect() {
+        guard !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
         connectionCoordinator.executeConnect(
             isDisconnecting: isDisconnecting,
             deferredFallback: { [weak self] in
@@ -613,6 +614,11 @@ extension AppState {
     /// intentional logout / user "turn off protection" so a crash or health failure
     /// leaves the host fail-closed via Kill Switch.
     func disconnect(releaseKillSwitch: Bool = false) {
+        if nativeUpdatePending || RuntimeCleanup.nativeUpdateBlocksConnect
+            || (releaseKillSwitch && RuntimeCleanup.nativeUpdatePending) {
+            if releaseKillSwitch { disconnectPendingNativeUpdate() }
+            return
+        }
         let pendingConnect = self.connectionCoordinator.connectTask
         let pendingNodeSwitch = self.connectionCoordinator.nodeSwitchTask
         pendingNodeSwitch?.cancel()
@@ -878,6 +884,7 @@ extension AppState {
 
     func disconnectAndWait(releaseKillSwitch: Bool = false) async {
         disconnect(releaseKillSwitch: releaseKillSwitch)
+        if releaseKillSwitch { await nativeUpdateDisconnectTask?.value }
         let pending = self.connectionCoordinator.disconnectSequence
         _ = await pending?.value
     }
@@ -932,11 +939,9 @@ extension AppState {
             transport: selectedExitNode()?.catalogTransport
         )
         do {
-            if try UpdateHandoffStore.commitVerifiedRecovery(
-                currentAppVersion: Bundle.main.object(
-                    forInfoDictionaryKey: "CFBundleShortVersionString"
-                ) as? String ?? "unknown"
-            ) {
+            if let pending = try await PrivilegedRuntimeCoordinator.shared.pendingNativeUpdate(), pending.pending {
+                _ = try await PrivilegedRuntimeCoordinator.shared.nativeUpdate("commit")
+                RuntimeCleanup.nativeUpdatePending = false
                 ConnectionTelemetryBuffer.shared.record(
                     "updateResumeOk",
                     generation: Int(self.connectionCoordinator.protectionOperationGeneration),
@@ -944,12 +949,14 @@ extension AppState {
                 )
             }
         } catch {
-            // A healthy connection is not proof that update recovery evidence
-            // committed. Preserve the journal and report only a bounded stage.
+            // A healthy App connection is not privileged update commit proof.
+            updateIncomplete = true
+            errorMessage = error.localizedDescription
             ConnectionTelemetryBuffer.shared.record(
-                "updateResumeJournalFailed",
-                stage: "journalPersistence",
+                "updateResumeFailed",
+                stage: "nativeUpdateRecovery",
                 generation: Int(self.connectionCoordinator.protectionOperationGeneration),
+                code: ProtectedFailureCode.updateRecoveryFailed.rawValue,
                 updateResume: true
             )
         }
@@ -1698,6 +1705,7 @@ extension AppState {
     }
 
     func scheduleProtectedReconnect(immediate: Bool = false) {
+        guard !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
         // A network-change kick carries new information: a repeated-failure
         // pause may be lifted (the environment changed, the outcome can
         // differ). A user-action pause stays — only Retry Now lifts it, or

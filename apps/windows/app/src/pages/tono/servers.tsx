@@ -5,14 +5,13 @@ import { useTranslation } from 'react-i18next'
 
 import { tonoServersQueryKey, useTonoStatus } from '@/hooks/use-tono'
 import { useQuery } from '@/services/query-client'
+import { connectIfIdleAfterSelection } from '@/services/server-selection'
 import { useThemeMode } from '@/services/states'
 import {
   formatTonoActionError,
   idleSelectShouldConnect,
-  isSupersededConnectRejection,
   tonoCancelServerTests,
   tonoCatalogStatus,
-  tonoConnect,
   tonoRefreshCatalog,
   tonoRoutePreferences,
   tonoSelectServer,
@@ -222,13 +221,10 @@ const ServersPage = () => {
         setSelectError(null)
         setSwitchingName(name)
         try {
-          if (idleSelectShouldConnect((await tonoStatus()).uiState))
-            await tonoConnect()
+          await connectIfIdleAfterSelection()
           await mutateTonoStatus()
         } catch (error) {
-          if (!isSupersededConnectRejection(error)) {
-            setSelectError(formatTonoActionError(error, t))
-          }
+          setSelectError(formatTonoActionError(error, t))
         } finally {
           setSwitchingName(null)
         }
@@ -238,10 +234,7 @@ const ServersPage = () => {
       setSwitchingName(name)
       try {
         await tonoSelectServer(name)
-        // Selection may have joined a switch/reconnect while this render was idle. Read the
-        // backend after its acknowledgement; the captured render cannot authorize another start.
-        if (idleSelectShouldConnect((await tonoStatus()).uiState))
-          await tonoConnect()
+        await connectIfIdleAfterSelection()
         await Promise.all([mutateServers(), mutateTonoStatus()])
         // Select acknowledges dispatch; a hot/cold switch may still be running.
         // Announce the localized city the card shows, not the raw wire name —
@@ -252,9 +245,7 @@ const ServersPage = () => {
           }),
         )
       } catch (error) {
-        if (!isSupersededConnectRejection(error)) {
-          setSelectError(formatTonoActionError(error, t))
-        }
+        setSelectError(formatTonoActionError(error, t))
       } finally {
         setSwitchingName(null)
       }

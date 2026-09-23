@@ -285,8 +285,52 @@ export function validateNsisAutomaticUpgradeFlow(source) {
     return 'a registry-less existing binary must block instead of being treated as a clean install'
   }
 
-  const installSection =
+  let installSection =
     text.match(/Section Install\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  // v1 has a separate *private extraction* branch, not a second live installer.
+  // Validate its bounded entry before excluding it from the legacy/manual .next
+  // assertions below. This source check supplements native permission tests;
+  // it is not evidence that NSIS or WFP has executed.
+  const privateExtraction = installSection.match(
+    /^\s*\$\{If\} \$TonoPrivateUnpack = 1\s+SetOutPath \$INSTDIR([\s\S]*?)\s+Return\s+\$\{EndIf\}/,
+  )
+  const unpackGate = onInit.indexOf('--update-unpack-gate "$EXEPATH"')
+  const privateRoot = onInit.indexOf('StrCpy $INSTDIR "$EXEDIR\\payload"')
+  const manualGate = onInit.indexOf('--manual-update-gate')
+  if (
+    !privateExtraction ||
+    unpackGate < 0 ||
+    privateRoot <= unpackGate ||
+    manualGate <= privateRoot ||
+    !onInit.slice(unpackGate, privateRoot).includes('Abort ') ||
+    !onInit.slice(manualGate).includes('Abort ') ||
+    !onInit.slice(privateRoot, manualGate).includes('Return')
+  ) {
+    return 'v1 private extraction and manual mutation require separate native gates in .onInit'
+  }
+  const privateLines = privateExtraction[1]
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith(';'))
+  if (
+    privateLines.some(
+      (line) =>
+        !/^(?:File \/a |CreateDirectory "\$INSTDIR\\|\{\{#each (?:resources_dirs|resources|binaries)\}\}|\{\{\/each\}\})/.test(
+          line,
+        ),
+    )
+  ) {
+    return 'v1 private extraction must contain only private payload files, never live mutation'
+  }
+  const uninstallInit =
+    text.match(/Function un\.onInit\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  if (
+    !uninstallInit.includes('--manual-update-gate') ||
+    !uninstallInit.includes('Abort ')
+  ) {
+    return 'uninstall must acquire the native gate before hooks or App termination'
+  }
+  installSection = installSection.slice(privateExtraction[0].length)
   if (/\$APPDATA/i.test(installSection)) {
     return 'the install/upgrade section must not delete Tono application data'
   }

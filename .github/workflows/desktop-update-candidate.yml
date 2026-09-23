@@ -1,0 +1,96 @@
+name: Paired desktop update candidate
+
+# Deliberate operator dispatch only. This runs unsigned builds with no signing
+# credentials, installer execution, release/upload-to-bucket or customer feed.
+on:
+  workflow_dispatch:
+    inputs:
+      release_sequence:
+        description: Positive monotonic release sequence shared by both native builds
+        required: true
+        type: string
+      release_id:
+        description: Immutable identifier for this pair (not a version ordering rule)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-update-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  inputs:
+    runs-on: ubuntu-24.04
+    outputs:
+      sequence: ${{ steps.validate.outputs.sequence }}
+    steps:
+      - name: Validate the common build input before either native build
+        id: validate
+        env:
+          SEQUENCE: ${{ inputs.release_sequence }}
+          RELEASE_ID: ${{ inputs.release_id }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          sequence, release_id = os.environ['SEQUENCE'], os.environ['RELEASE_ID']
+          assert re.fullmatch(r'[1-9][0-9]{0,15}', sequence), 'invalid release sequence'
+          assert int(sequence) <= 9_007_199_254_740_991, 'unsafe release sequence'
+          assert re.fullmatch(r'[A-Za-z0-9._:-]{1,128}', release_id), 'invalid release identifier'
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('sequence=' + sequence + '\n')
+          PY
+
+  macos:
+    needs: inputs
+    uses: ./.github/workflows/macos-ci.yml
+    with:
+      update_release_sequence: ${{ needs.inputs.outputs.sequence }}
+
+  windows:
+    needs: inputs
+    uses: ./.github/workflows/windows-candidate.yml
+    with:
+      update_release_sequence: ${{ needs.inputs.outputs.sequence }}
+
+  pair:
+    needs: [inputs, macos, windows]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: tono-macos-beta-${{ github.sha }}
+          path: paired/macos
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: tono-windows-0.0.73-candidate-${{ github.sha }}
+          path: paired/windows
+      - name: Assemble exact-source unsigned manifest and preserve both payloads
+        env:
+          SEQUENCE: ${{ needs.inputs.outputs.sequence }}
+          RELEASE_ID: ${{ inputs.release_id }}
+        run: |
+          set -euo pipefail
+          node tooling/scripts/desktop-update-v1.mjs assemble \
+            --macos paired/macos/update-target.macos-arm64.json \
+            --windows paired/windows/update-target.windows-x86_64.json \
+            --source "$GITHUB_SHA" --sequence "$SEQUENCE" --release-id "$RELEASE_ID" \
+            --output paired/manifest.unsigned.json
+          printf '%s\n' \
+            'UNSIGNED CANDIDATE PAIR — NOT UPDATE AUTHORITY' \
+            'Do not sign these unsigned macOS bytes as a release.' \
+            'A real pair is measured after Developer ID signing/notarization/stapling.' \
+            'Both detached manifest signatures and installed-device G3 qualification are still required.' \
+            > paired/NOT-RELEASE-ACCEPTANCE.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: tono-desktop-update-candidate-${{ github.sha }}
+          path: paired/
+          if-no-files-found: error
+          retention-days: 7

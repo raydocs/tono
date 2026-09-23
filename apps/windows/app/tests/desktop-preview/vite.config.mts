@@ -17,8 +17,12 @@ export default defineConfig({
       ...[
         'hooks/use-tono',
         'hooks/use-connection-data',
+        'hooks/use-traffic-data',
+        'hooks/use-update',
         'services/states',
         'services/tono',
+        'services/cmds',
+        'services/update',
         'tono-ui/SupportContact',
         'pages/_navigation',
       ].map((name) => ({

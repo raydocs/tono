@@ -7796,6 +7796,116 @@
           }
         }
       }
+    },
+    "A Tono update is available": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "有可用的 Tono 更新"
+          }
+        }
+      }
+    },
+    "Install Tono %@? Tono will verify the full package, retain network protection during replacement, and restart. Recovery must be verified before the update is complete.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安装 Tono %@？Tono 将验证完整安装包，在替换期间保留网络保护，然后重新启动。只有验证恢复状态后，更新才算完成。"
+          }
+        }
+      }
+    },
+    "Install and Restart": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安装并重新启动"
+          }
+        }
+      }
+    },
+    "Not Now": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂不更新"
+          }
+        }
+      }
+    },
+    "Update not completed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新未完成"
+          }
+        }
+      }
+    },
+    "Disconnect and Retry restores Internet access before retiring this unconsumed attempt. Failed update evidence will be retained.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“断开并重试”会先恢复互联网访问，再结束此次尚未开始安装的更新尝试。失败更新的证据将被保留。"
+          }
+        }
+      }
+    },
+    "Keep Protection": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保持保护"
+          }
+        }
+      }
+    },
+    "Disconnect and Retry": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "断开并重试"
+          }
+        }
+      }
+    },
+    "You're up to date": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已是最新版本"
+          }
+        }
+      }
+    },
+    "The signed release is not newer than this installation.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已签名的发布版本不比当前安装版本更新。"
+          }
+        }
+      }
+    },
+    "OK": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "好"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

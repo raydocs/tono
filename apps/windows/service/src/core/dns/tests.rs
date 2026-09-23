@@ -1006,9 +1006,10 @@
         SELF_WRITE_TAIL_UNTIL.store(0, Ordering::Relaxed);
     }
 
-    /// Write a snapshot as if a previous enable had taken it, so `enable` takes the replay path
-    /// (the stub engine enumerates nothing, so the adapters have to come from the file).
+    /// Seed both the durable originals and the stub's active enumeration. A historical snapshot
+    /// alone no longer implies an adapter is active and needs protected-apply replay.
     async fn seed_snapshot(adapters: Vec<AdapterDnsSnapshot>) -> Result<()> {
+        test_hooks::set_collected_adapters(adapters.clone());
         atomic_write(
             &snapshot_path(),
             &serde_json::to_vec_pretty(&DnsSnapshot {

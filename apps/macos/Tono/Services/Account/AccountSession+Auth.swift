@@ -11,19 +11,6 @@ extension AccountSession {
         hasStartedRestore = true
         state = .restoring
         do {
-            if let journal = try? UpdateHandoffStore.recordFirstLaunchMigration(
-                currentAppVersion: Bundle.main.object(
-                    forInfoDictionaryKey: "CFBundleShortVersionString"
-                ) as? String ?? ""
-            ) {
-                ConnectionTelemetryBuffer.shared.record(
-                    "updateResumeBegin",
-                    stage: journal.phase.rawValue,
-                    mode: "updateResume",
-                    generation: Int(journal.connectionGeneration),
-                    updateResume: true
-                )
-            }
             // Crash recovery can invoke networksetup and helper IPC. Run it on
             // the serialized runtime actor so the first window paints
             // immediately instead of blocking AppKit's launch callback.
@@ -42,7 +29,7 @@ extension AccountSession {
                     // invoke the Tailscale CLI or contact its control plane.
                     try? await sidecar.prepareCloudOnly()
                 }
-                if !shouldResumeProtection {
+                if !shouldResumeProtection && !KillSwitchService.isArmed {
                     do {
                         try await PrivilegedRuntimeCoordinator.shared.disarmKillSwitch()
                     } catch {

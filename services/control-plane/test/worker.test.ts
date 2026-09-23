@@ -588,6 +588,72 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(await ranged.text()).toBe('cdef');
   });
 
+  it('serves only exact desktop v1 objects without caching the discovery pointer', async () => {
+    const bucket = (env as unknown as Env).RELEASES;
+    const digest = 'ab'.repeat(32);
+    const immutable = `/desktop/v1/${digest}`;
+    const latest = '/desktop/v1/latest/manifest.json';
+    const fetchRelease = async (path: string, init: RequestInit = {}, host = 'releases.afk.ccwu.cc') => {
+      const context = createExecutionContext();
+      const response = await worker.fetch(
+        new Request(`https://${host}${path}`, init), env as unknown as Env, context,
+      );
+      await waitOnExecutionContext(context);
+      return response;
+    };
+
+    const missing = await fetchRelease(latest);
+    expect(missing.status).toBe(404);
+    expect(missing.headers.get('cache-control')).toBe('no-store');
+    const original = '{"releaseId":"signed-bytes-must-not-be-reserialized"}';
+    await bucket.put(latest.slice(1), original, {
+      httpMetadata: { cacheControl: 'public, max-age=31536000, immutable' },
+    });
+    await bucket.put(`${immutable.slice(1)}/manifest.json`, original);
+    const discovery = await fetchRelease(latest, { headers: { range: 'bytes=0-2' } });
+    expect(discovery.status).toBe(200);
+    expect(discovery.headers.get('cache-control')).toBe('no-store');
+    expect(discovery.headers.get('accept-ranges')).toBe('none');
+    expect(discovery.headers.get('content-type')).toBe('application/json');
+    expect(discovery.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(await discovery.text()).toBe(original);
+    await bucket.put(latest.slice(1), '{"releaseId":"next"}');
+    expect(await (await fetchRelease(latest)).text()).toBe('{"releaseId":"next"}');
+    const retained = await fetchRelease(`${immutable}/manifest.json`);
+    expect(retained.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    expect(await retained.text()).toBe(original);
+
+    await bucket.put(`${immutable.slice(1)}/manifest.macos-arm64.sig`, 'mac-signature');
+    await bucket.put(`${immutable.slice(1)}/manifest.windows-x86_64.sig`, 'windows-signature');
+    expect(await (await fetchRelease(`${immutable}/manifest.macos-arm64.sig`)).text()).toBe('mac-signature');
+    expect(await (await fetchRelease(`${immutable}/manifest.windows-x86_64.sig`)).text()).toBe('windows-signature');
+    await bucket.put(`${immutable.slice(1)}/package.macos-arm64.zip`, 'mac-package');
+    const head = await fetchRelease(`${immutable}/package.macos-arm64.zip`, { method: 'HEAD' });
+    expect(head.status).toBe(200);
+    expect(head.headers.get('content-length')).toBe('11');
+    expect(head.headers.get('content-disposition')).toBe('attachment; filename="package.macos-arm64.zip"');
+    expect(await head.text()).toBe('');
+    await bucket.put(`${immutable.slice(1)}/package.windows-x86_64.exe`, 'abcdefghijk');
+    const ranged = await fetchRelease(`${immutable}/package.windows-x86_64.exe`, {
+      headers: { range: 'bytes=3-6' },
+    });
+    expect(ranged.status).toBe(206);
+    expect(ranged.headers.get('content-range')).toBe('bytes 3-6/11');
+    expect(await ranged.text()).toBe('defg');
+
+    // Invalid names remain inaccessible even when matching bucket keys exist.
+    await bucket.put('desktop/v1/latest/package.windows-x86_64.exe', 'not-an-offer');
+    await bucket.put(`${immutable.slice(1)}/private.json`, 'not-public');
+    expect((await fetchRelease('/desktop/v1/latest/package.windows-x86_64.exe')).status).toBe(404);
+    expect((await fetchRelease(`${immutable}/private.json`)).status).toBe(404);
+    expect((await fetchRelease(`/desktop/v1/${digest.toUpperCase()}/manifest.json`)).status).toBe(404);
+    expect((await fetchRelease(`${immutable}/manifest.json`, {}, 'test')).status).toBe(404);
+    const write = await fetchRelease(latest, { method: 'PUT', body: 'replace' });
+    expect(write.status).toBe(405);
+    expect(write.headers.get('allow')).toBe('GET, HEAD');
+    expect(await (await fetchRelease(latest)).text()).toBe('{"releaseId":"next"}');
+  });
+
   it('parses a single byte range and rejects the rest', () => {
     expect(parseBytesRange('bytes=0-0', 10)).toEqual({ offset: 0, length: 1 });
     expect(parseBytesRange('bytes=2-5', 10)).toEqual({ offset: 2, length: 4 });

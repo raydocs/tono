@@ -19,6 +19,16 @@ case "${CONFIGURATION:-}" in
   Debug|Release) configuration=$CONFIGURATION ;;
   *) configuration=Unknown ;;
 esac
+sequence=${TONO_UPDATE_RELEASE_SEQUENCE:-null}
+if [ "$sequence" != null ]; then
+  case "$sequence" in
+    ''|0*|*[!0-9]*) echo 'Invalid TONO_UPDATE_RELEASE_SEQUENCE' >&2; exit 1 ;;
+  esac
+  if [ "${#sequence}" -gt 16 ] || [ "$sequence" -gt 9007199254740991 ]; then
+    echo 'TONO_UPDATE_RELEASE_SEQUENCE exceeds the shared contract' >&2
+    exit 1
+  fi
+fi
 mkdir -p "$(dirname "$output")"
-printf '{"commit":%s,"dirty":%s,"configuration":"%s"}\n' \
-  "$commit_json" "$dirty" "$configuration" > "$output"
+printf '{"commit":%s,"dirty":%s,"configuration":"%s","releaseSequence":%s}\n' \
+  "$commit_json" "$dirty" "$configuration" "$sequence" > "$output"

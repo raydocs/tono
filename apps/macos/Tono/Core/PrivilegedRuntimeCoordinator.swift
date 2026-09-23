@@ -6,6 +6,43 @@ import Foundation
 actor PrivilegedRuntimeCoordinator {
     static let shared = PrivilegedRuntimeCoordinator()
 
+    func verifyUpdateOffer(manifest: Data, signature: Data) throws -> Bool {
+        guard HelperManager.currentVersion() == HelperProtocolVersion.current else {
+            throw CoreRuntimeError.startFailed("Native updates require the current paired Tono candidate and helper. Legacy clients need manual replacement after Disconnect.")
+        }
+        return try HelperManager.updateOffer(manifest: manifest, signature: signature)
+    }
+
+    func stageUpdate(manifest: Data, signature: Data, package: URL) throws -> HelperManager.UpdateStatus {
+        try HelperManager.updateRequest("stage", object: [
+            "manifest": manifest.base64EncodedString(), "signature": signature.base64EncodedString(),
+            "package": try HelperManager.updatePackagePath(package),
+        ])
+    }
+
+    func nativeUpdate(_ operation: String) throws -> HelperManager.UpdateStatus {
+        if operation == "prepare" || operation == "disconnect" {
+            try disableSystemProxyIfNeeded()
+        }
+        return try HelperManager.updateRequest(operation)
+    }
+
+    /// Nil is allowed only for an absent/legacy helper. A v1 helper refusing
+    /// or timing out never grants normal recovery/cleanup authority.
+    func pendingNativeUpdate() throws -> HelperManager.UpdateStatus? {
+        let version = HelperManager.currentVersion()
+        if let version, version.compare("4.5.0", options: .numeric) == .orderedAscending { return nil }
+        guard version != nil else {
+            if HelperManager.hasInstalledHelperArtifact {
+                // Query anyway: a restarting v1 helper must not be mistaken
+                // for a legacy helper on a version-probe timeout.
+                return try HelperManager.updateRequest("status")
+            }
+            return nil
+        }
+        return try HelperManager.updateRequest("status")
+    }
+
     func prepareHelper() throws {
         try HelperManager.installIfNeeded()
     }

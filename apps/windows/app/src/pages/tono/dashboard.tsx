@@ -808,6 +808,7 @@ const DashboardPage = () => {
           style={{
             display: 'flex',
             justifyContent: 'center',
+            flexShrink: 0,
             marginBottom: 8,
           }}
         >
@@ -821,7 +822,18 @@ const DashboardPage = () => {
               background: hex(TONO_COLORS.protectedOffline, 0.12),
             }}
           >
-            {t('tono.dashboard.updateIncomplete')}
+            <p style={{ margin: '0 0 8px' }}>
+              {t('tono.dashboard.updateIncomplete')}
+            </p>
+            <button
+              type="button"
+              className="tono-button tono-action"
+              onClick={requestRelease}
+              disabled={uiState === 'disconnecting'}
+              style={{ minHeight: 32, padding: '6px 12px', fontSize: 12 }}
+            >
+              {t('tono.tray.disconnect')}
+            </button>
           </div>
         </div>
       )}
@@ -854,7 +866,9 @@ const DashboardPage = () => {
         style={{
           flex: '1 1 auto',
           width: '100%',
-          minHeight: 0,
+          // A retained progress/error card must scroll below the update notice,
+          // not shrink this stack and paint upward over its Disconnect action.
+          minHeight: status?.updateIncomplete ? 'auto' : 0,
           boxSizing: 'border-box',
           display: 'flex',
           flexDirection: 'column',

@@ -1,5 +1,12 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import i18n from 'i18next'
 import type { ReactNode } from 'react'
 import { initReactI18next } from 'react-i18next'
@@ -212,6 +219,60 @@ describe('TrayPanel backup channel', () => {
     await waitFor(() => expect(mocks.tonoConnect).toHaveBeenCalledTimes(1))
     expect(mocks.tonoSelectServer).toHaveBeenCalledWith(tokyo)
     expect(mocks.tonoRetryNow).not.toHaveBeenCalled()
+  })
+
+  it('closes and refreshes the picker when another Connect wins admission, but keeps genuine failures visible', async () => {
+    mocks.status = makeStatus({
+      uiState: 'notConnected',
+      protectionBlocked: false,
+    })
+    let rejectConnect!: (error: Error) => void
+    mocks.tonoConnect.mockReturnValueOnce(
+      new Promise<void>((_, reject) => {
+        rejectConnect = reject
+      }),
+    )
+    render(<TrayPanel />, { wrapper: freshSWR })
+    fireEvent.click(screen.getByTitle('Switch node'))
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Backup channel/ }),
+    )
+    await waitFor(() => expect(mocks.tonoConnect).toHaveBeenCalledTimes(1))
+    // Another window starts after this window's idle read, before Connect IPC.
+    mocks.status = makeStatus({ uiState: 'connecting' })
+    await act(async () => rejectConnect(new Error('already connecting')))
+    await waitFor(() => expect(mocks.mutateTonoStatus).toHaveBeenCalledTimes(1))
+    expect(screen.getByTitle('Switch node').getAttribute('aria-expanded')).toBe(
+      'false',
+    )
+    expect(screen.queryByRole('alert')).toBeNull()
+
+    mocks.status = makeStatus({
+      uiState: 'notConnected',
+      protectionBlocked: false,
+    })
+    mocks.tonoConnect.mockRejectedValueOnce(new Error('already connected'))
+    fireEvent.click(screen.getByTitle('Switch node'))
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Backup channel/ }),
+    )
+    await waitFor(() => expect(mocks.mutateTonoStatus).toHaveBeenCalledTimes(2))
+    expect(screen.getByTitle('Switch node').getAttribute('aria-expanded')).toBe(
+      'false',
+    )
+    expect(screen.queryByRole('alert')).toBeNull()
+
+    mocks.tonoConnect.mockRejectedValueOnce(new Error('DNS restoration failed'))
+    fireEvent.click(screen.getByTitle('Switch node'))
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Backup channel/ }),
+    )
+    expect(await screen.findByRole('alert')).toBeDefined()
+    expect(screen.getByTitle('Switch node').getAttribute('aria-expanded')).toBe(
+      'true',
+    )
+    expect(mocks.mutateTonoStatus).toHaveBeenCalledTimes(2)
+    expect(mocks.tonoConnect).toHaveBeenCalledTimes(3)
   })
 
   it('does not offer the backup channel for a DNS failure', async () => {

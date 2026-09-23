@@ -11,13 +11,10 @@ import {
   latencyLabelVars,
   readNodeLatency,
 } from '@/pages/tono/node-latency'
-import {
-  nodeCityLabel,
-  nodeCityParts,
-  nodeCode,
-} from '@/pages/tono/node-meta'
+import { nodeCityLabel, nodeCityParts, nodeCode } from '@/pages/tono/node-meta'
 import { useManualBackupChannel } from '@/pages/tono/use-backup-channel'
 import { useQuery } from '@/services/query-client'
+import { connectIfIdleAfterSelection } from '@/services/server-selection'
 import { useThemeMode } from '@/services/states'
 import {
   formatTonoActionError,
@@ -27,7 +24,6 @@ import {
   tonoRetryNow,
   tonoSelectServer,
   tonoServers,
-  tonoStatus,
   type TonoUiState,
 } from '@/services/tono'
 import { hasLiveProtection } from '@/tono-ui/protection-evidence'
@@ -146,7 +142,7 @@ export const TrayPanel = () => {
     setActionError(null)
     try {
       await tonoSelectServer(name)
-      if (idleSelectShouldConnect((await tonoStatus()).uiState)) await tonoConnect()
+      await connectIfIdleAfterSelection()
       await mutateTonoStatus()
       setPicking(false)
     } catch (error) {
@@ -189,8 +185,11 @@ export const TrayPanel = () => {
                 color: text.primary,
               }}
             >
-              {t(uiState === 'protectedOffline' && !hasLiveProtection(status)
-                ? 'tono.pill.title.protectionUnknown' : STATUS_LABEL[uiState])}
+              {t(
+                uiState === 'protectedOffline' && !hasLiveProtection(status)
+                  ? 'tono.pill.title.protectionUnknown'
+                  : STATUS_LABEL[uiState],
+              )}
             </span>
           </div>
           <div

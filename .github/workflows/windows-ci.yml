@@ -27,10 +27,16 @@ on:
       - .github/workflows/windows-ci.yml
       - .github/workflows/windows-candidate.yml
       - .github/workflows/windows-installer-smoke.yml
+      - .github/workflows/desktop-update-candidate.yml
+      - tooling/scripts/desktop-update-v1.mjs
+      - tooling/scripts/tests/desktop-update-v1.test.mjs
       - tooling/scripts/test-windows-candidate-install.ps1
       - tooling/scripts/tests/windows-ci-paths.test.cjs
       - tooling/scripts/test-windows-qa.ps1
       - tooling/scripts/tests/windows-qa-guards.Tests.ps1
+      - tooling/scripts/tests/fixtures/update-protocol-v1/**
+      - apps/macos/Tono/Models/UpdateContractV1.swift
+      - apps/macos/TonoTests/UpdateContractV1Tests.swift
   # Every branch, not just the default one. This repository is a fork, and no
   # `pull_request` event has ever produced a run here — PR #1 merged without one.
   # Restricted to `main` and paired with a trigger that does not fire, this
@@ -48,10 +54,16 @@ on:
       - .github/workflows/windows-ci.yml
       - .github/workflows/windows-candidate.yml
       - .github/workflows/windows-installer-smoke.yml
+      - .github/workflows/desktop-update-candidate.yml
+      - tooling/scripts/desktop-update-v1.mjs
+      - tooling/scripts/tests/desktop-update-v1.test.mjs
       - tooling/scripts/test-windows-candidate-install.ps1
       - tooling/scripts/tests/windows-ci-paths.test.cjs
       - tooling/scripts/test-windows-qa.ps1
       - tooling/scripts/tests/windows-qa-guards.Tests.ps1
+      - tooling/scripts/tests/fixtures/update-protocol-v1/**
+      - apps/macos/Tono/Models/UpdateContractV1.swift
+      - apps/macos/TonoTests/UpdateContractV1Tests.swift
 
 permissions:
   contents: read
@@ -111,6 +123,9 @@ jobs:
       - name: Verify Windows CI trigger coverage
         working-directory: apps/windows/app
         run: node --test ../../../tooling/scripts/tests/windows-ci-paths.test.cjs
+
+      - name: Verify paired manifest signatures and artifact binding
+        run: node --test ../../../tooling/scripts/tests/desktop-update-v1.test.mjs
 
       - name: Test
         run: pnpm test
@@ -178,10 +193,44 @@ jobs:
         working-directory: apps/windows/app/src-tauri
         run: cargo test --locked
 
+      # The consumer does not execute tono-core's unit tests. G3 phase replay,
+      # persistence refusal and re-entry must run on Windows, not only Ubuntu.
+      - name: Test update journal phase and persistence recovery on Windows
+        working-directory: apps/windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $filter = 'update_journal::tests::'
+          $listed = cargo test --locked -p tono-core --lib $filter -- --list
+          if ($LASTEXITCODE -ne 0) { throw 'Could not enumerate journal regressions' }
+          foreach ($name in @(
+            'only_verified_commit_can_remove_journal',
+            'owner_replay_advances_in_order_and_crash_at_each_phase_never_commits',
+            'first_launch_reentry_preserves_durable_recovery_progress'
+          )) {
+            if (-not ($listed -match "^$([regex]::Escape($filter + $name)): test$")) {
+              throw "Expected journal regression is missing: $name"
+            }
+          }
+          cargo test --locked -p tono-core --lib $filter -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Journal phase/persistence regressions failed' }
+
       # Cargo does not execute dependency integration tests with the Tauri suite.
       - name: Test update journal atomic writes on Windows
         working-directory: apps/windows
         run: cargo test --locked -p tono-core --test update_journal_atomic
+
+      - name: Test shared desktop update contract on Windows
+        working-directory: apps/windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $test = 'shared_wire_and_ownership_contract'
+          $listed = cargo test --locked -p tono-core --test update_contract -- --list
+          if ($LASTEXITCODE -ne 0) { throw 'Could not enumerate shared update contract' }
+          if (-not ($listed -match "^${test}: test$")) { throw 'Shared update contract test is missing' }
+          cargo test --locked -p tono-core --test update_contract $test -- --exact --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Shared update contract failed' }
 
   service:
     runs-on: windows-2025
@@ -202,9 +251,50 @@ jobs:
         # to nothing and the job would pass having tested nothing at all.
         run: cargo test --locked --features standalone,client,test
 
-      # `mod wfp` is `not(feature = "test")`, so every invocation above compiles it out and
-      # the tests inside it have never run anywhere — including the one that predates this
-      # step. That is the one part of the kill switch no model can stand in for: whether the
+      # The lifecycle `test` feature replaces the native DNS engine. Compile and
+      # exercise its production orchestration with injected API/readback boundaries,
+      # not a host-network mutation or an unfiltered no-test-feature suite.
+      - name: Test native DNS apply orchestration
+        working-directory: apps/windows/service
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $filter = 'core::dns::engine::native_apply::tests::'
+          $listed = cargo test --locked --features standalone,client --lib $filter -- --list
+          if ($LASTEXITCODE -ne 0) { throw 'Could not enumerate native DNS apply tests' }
+          if (-not ($listed -match "^$([regex]::Escape($filter)).*: test$")) {
+            throw 'Native DNS apply tests are missing'
+          }
+          cargo test --locked --features standalone,client --lib $filter -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Native DNS apply tests failed' }
+
+      - name: Test native update admission and independent executor
+        working-directory: apps/windows/service
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          foreach ($filter in @('update_transaction::tests::update_', 'core::update::tests::update_')) {
+            $listed = cargo test --locked --features standalone,client --lib $filter -- --list
+            if ($LASTEXITCODE -ne 0) { throw "Could not enumerate $filter" }
+            if (-not ($listed -match "^$([regex]::Escape($filter)).*: test$")) {
+              throw "Native update tests are missing: $filter"
+            }
+            cargo test --locked --features standalone,client --lib $filter -- --nocapture
+            if ($LASTEXITCODE -ne 0) { throw "Native update tests failed: $filter" }
+          }
+          $filter = 'update_executor::tests::update_'
+          $listed = cargo test --locked --features standalone,client --bin tono-service-install $filter -- --list
+          if ($LASTEXITCODE -ne 0) { throw 'Could not enumerate independent executor tests' }
+          if (-not ($listed -match "^$([regex]::Escape($filter)).*: test$")) {
+            throw 'Independent executor tests are missing'
+          }
+          cargo test --locked --features standalone,client --bin tono-service-install $filter -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Independent executor tests failed' }
+
+      # `mod wfp` is `not(feature = "test")`, so the lifecycle suite compiles it out.
+      # The targeted updater tests do not execute this module either. This is the part
+      # of the kill switch no model can stand in for: whether the
       # kernel accepts the filter shapes the service builds. This runner is Windows and
       # administrator, so it can answer.
       #

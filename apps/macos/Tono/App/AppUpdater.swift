@@ -1,110 +1,111 @@
 import SwiftUI
-import Sparkle
 import Combine
 import AppKit
 
-/// Owns Sparkle's single long-lived updater. Release builds start it only from
-/// /Applications, so a read-only DMG launch cannot perform network or update
-/// work before the existing installation guard terminates the app.
+/// Discovery/UI only. Root owns signature verification, the private consumed
+/// input, replacement and commit. There is intentionally no legacy installer.
 @MainActor
 final class AppUpdater: ObservableObject {
     @Published private(set) var canCheckForUpdates = false
-    private let updaterController: SPUStandardUpdaterController?
-    private let sparkleDelegate: TonoSparkleDelegate?
+    private weak var appState: AppState?
+    private var automaticCheck: Task<Void, Never>?
 
     init(enabled: Bool) {
-        guard enabled else {
-            updaterController = nil
-            sparkleDelegate = nil
-            return
-        }
-
-        let delegate = TonoSparkleDelegate()
-        self.sparkleDelegate = delegate
-        let controller = SPUStandardUpdaterController(
-            startingUpdater: true,
-            updaterDelegate: delegate,
-            userDriverDelegate: nil
-        )
-        updaterController = controller
-        controller.updater.publisher(for: \.canCheckForUpdates)
-            .assign(to: &$canCheckForUpdates)
+        canCheckForUpdates = enabled
     }
 
     func attach(appState: AppState) {
-        sparkleDelegate?.appState = appState
+        self.appState = appState
+        guard canCheckForUpdates, automaticCheck == nil else { return }
+        automaticCheck = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(30))
+            while !Task.isCancelled {
+                await self?.check(userInitiated: false)
+                try? await Task.sleep(for: .seconds(21_600))
+            }
+        }
     }
 
     func checkForUpdates() {
-        updaterController?.updater.checkForUpdates()
+        Task { await check(userInitiated: true) }
     }
-}
 
-@MainActor
-final class TonoSparkleDelegate: NSObject, SPUUpdaterDelegate {
-    weak var appState: AppState?
-    private var installPrepared = false
-    private var installPreparationFailed = false
-
-    func updater(
-        _ updater: SPUUpdater,
-        shouldPostponeRelaunchForUpdate item: SUAppcastItem,
-        untilInvokingBlock installHandler: @escaping () -> Void
-    ) -> Bool {
-        guard !installPrepared else { return false }
-        Task { @MainActor in
-            let version = item.displayVersionString
-            await self.prepareInstallation(prepare: {
-                guard let appState = self.appState else {
-                    throw CoreRuntimeError.startFailed("Update preparation requires the application state.")
-                }
-                let journal = try await appState.prepareForSoftwareUpdate(nextVersion: version)
-                let recorded = journal.advancing(to: .installStarted)
-                do {
-                    try UpdateHandoffStore.write(recorded)
-                } catch {
-                    try? UpdateHandoffStore.write(journal.advancing(
-                        to: .failed,
-                        errorCode: "TONO_UPDATE_PREPARATION_FAILED",
-                        errorStage: "installEntry"
-                    ))
-                    throw error
-                }
-            }, installHandler: installHandler)
+    private func check(userInitiated: Bool) async {
+        guard canCheckForUpdates, let appState else { return }
+        canCheckForUpdates = false
+        var retryRequested = false
+        defer {
+            canCheckForUpdates = true
+            if retryRequested { Task { await check(userInitiated: true) } }
         }
-        return true
-    }
-
-    func prepareInstallation(
-        prepare: () async throws -> Void,
-        installHandler: () -> Void
-    ) async {
         do {
-            try await prepare()
-            installPrepared = true
+            if let pending = try await PrivilegedRuntimeCoordinator.shared.pendingNativeUpdate(), pending.pending {
+                throw NativeUpdateDownload.failure(pending.diagnostic ?? "A previous update is pending. Installation and recovery evidence are retained.")
+            }
+            let offer = try await NativeUpdateDownload.discover()
+            let available = try await PrivilegedRuntimeCoordinator.shared.verifyUpdateOffer(
+                manifest: offer.bytes, signature: offer.signature
+            )
+            guard available else {
+                if userInitiated {
+                    let alert = NSAlert()
+                    alert.messageText = String(localized: "You're up to date")
+                    alert.informativeText = String(localized: "The signed release is not newer than this installation.")
+                    alert.runModal()
+                }
+                return
+            }
+            guard Self.offerAlert(version: offer.manifest.appVersion).runModal() == .alertFirstButtonReturn else { return }
+            let package = try await NativeUpdateDownload.package(for: offer)
+            defer { try? FileManager.default.removeItem(at: package.deletingLastPathComponent()) }
+            try await appState.installNativeUpdate(manifest: offer.bytes, signature: offer.signature, package: package)
+            // The result is a helper-owned consumed receipt, not an App-owned
+            // InstallStarted stamp. The executor waits for this process to exit.
+            (NSApp.delegate as? AppDelegate)?.terminateForNativeUpdate()
         } catch {
-            installPreparationFailed = true
-            appState?.updateIncomplete = true
-            appState?.errorMessage = UpdateHandoffStore.incompleteUpdateCopy
-                + " " + error.localizedDescription
+            // Missing metadata is an error, never "up to date". Background
+            // discovery does not raise a modal or perform a fallback install.
+            if userInitiated || appState.nativeUpdatePending {
+                appState.errorMessage = error.localizedDescription
+                let pending = try? await PrivilegedRuntimeCoordinator.shared.pendingNativeUpdate()
+                appState.updateIncomplete = pending?.pending ?? appState.nativeUpdatePending
+                let retryable = pending?.pending == true && ["reserved", "staged"].contains(pending?.execution ?? "")
+                let alert = Self.failureAlert(detail: error.localizedDescription, retryable: retryable)
+                if alert.runModal() == .alertSecondButtonReturn && retryable {
+                    do {
+                        try await appState.retireUnconsumedNativeUpdate()
+                        retryRequested = true
+                    } catch {
+                        appState.errorMessage = error.localizedDescription
+                        Self.failureAlert(detail: error.localizedDescription).runModal()
+                    }
+                }
+            }
         }
-        // Sparkle 2.9.6 rechecks updaterShouldRelaunchApplication *before*
-        // continuing installation. On failure resume only to reach that veto;
-        // keeping the block forever would strand the update cycle and Retry.
-        installHandler()
     }
 
-    func updaterShouldRelaunchApplication(_ updater: SPUUpdater) -> Bool {
-        !installPreparationFailed
+    static func offerAlert(version: String) -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = String(localized: "A Tono update is available")
+        alert.informativeText = String(localized: "Install Tono \(version)? Tono will verify the full package, retain network protection during replacement, and restart. Recovery must be verified before the update is complete.")
+        alert.addButton(withTitle: String(localized: "Install and Restart"))
+        alert.addButton(withTitle: String(localized: "Not Now"))
+        return alert
     }
 
-    func updater(
-        _ updater: SPUUpdater,
-        didFinishUpdateCycleFor updateCheck: SPUUpdateCheck,
-        error: Error?
-    ) {
-        installPrepared = false
-        installPreparationFailed = false
+    static func failureAlert(detail: String, retryable: Bool = false) -> NSAlert {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = String(localized: "Update not completed")
+        alert.informativeText = detail
+        if retryable {
+            alert.informativeText += "\n\n" + String(localized: "Disconnect and Retry restores Internet access before retiring this unconsumed attempt. Failed update evidence will be retained.")
+            alert.addButton(withTitle: String(localized: "Keep Protection"))
+            alert.addButton(withTitle: String(localized: "Disconnect and Retry"))
+        } else {
+            alert.addButton(withTitle: String(localized: "OK"))
+        }
+        return alert
     }
 }
 

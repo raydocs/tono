@@ -18,6 +18,13 @@ use windows_sys::Win32::System::Registry::{
     RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
 };
 
+#[path = "native_apply.rs"]
+mod native_apply;
+
+#[cfg(test)]
+#[path = "apply_test_io.rs"]
+pub(super) mod test_io;
+
 const TCPIP4_INTERFACES: &str =
     r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces";
 const TCPIP6_INTERFACES: &str =
@@ -67,6 +74,10 @@ fn super_wide(value: &str) -> Vec<u16> {
 }
 
 fn read_sz(subkey: &str, value: &str) -> Result<Option<String>> {
+    #[cfg(test)]
+    if let Some(value) = test_io::with(|io| io.read(subkey, value)) {
+        return Ok(value);
+    }
     let Some(key) = RegKey::open(subkey, false)? else {
         return Ok(None);
     };
@@ -121,6 +132,10 @@ fn read_sz(subkey: &str, value: &str) -> Result<Option<String>> {
 }
 
 fn write_sz(subkey: &str, value: &str, data: &str) -> Result<()> {
+    #[cfg(test)]
+    if let Some(result) = test_io::with(|io| io.write(subkey, value, data)) {
+        return result;
+    }
     let Some(key) = RegKey::open(subkey, true)? else {
         bail!("registry key {subkey} does not exist");
     };
@@ -360,9 +375,20 @@ pub(super) struct ActiveAdapter {
     pub ipv4_index: u32,
     /// IPv6 interface index, or 0 when IPv6 is not bound.
     pub ipv6_index: u32,
+    /// Effective resolver addresses, only populated when DNS read-back was requested.
+    /// `None` (enumeration skipped DNS) must never count as an empty resolver list.
+    pub dns_servers: Option<Vec<std::net::IpAddr>>,
 }
 
 fn active_adapters() -> Result<Vec<ActiveAdapter>> {
+    active_adapters_read(false)
+}
+
+fn active_adapters_read(include_dns: bool) -> Result<Vec<ActiveAdapter>> {
+    #[cfg(test)]
+    if let Some(adapters) = test_io::with(|io| io.adapters(include_dns)) {
+        return Ok(adapters);
+    }
     // `Parameters\Interfaces` is historical state, not a list of live adapters: it commonly
     // contains disabled, unplugged, removed, and pseudo interfaces. Those either have no
     // Win32_NetworkAdapterConfiguration object or return 84 (IP not enabled), which used to
@@ -375,7 +401,11 @@ fn active_adapters() -> Result<Vec<ActiveAdapter>> {
     // stays a single cheap in-process call.
     let flags = GAA_FLAG_SKIP_ANYCAST
         | GAA_FLAG_SKIP_MULTICAST
-        | GAA_FLAG_SKIP_DNS_SERVER
+        | if include_dns {
+            0
+        } else {
+            GAA_FLAG_SKIP_DNS_SERVER
+        }
         | GAA_FLAG_SKIP_FRIENDLY_NAME;
     let mut bytes = INITIAL_BUFFER_BYTES;
     for _ in 0..MAX_BUFFER_ATTEMPTS {
@@ -431,11 +461,21 @@ fn active_adapters() -> Result<Vec<ActiveAdapter>> {
                     .iter()
                     .any(|saved| saved.guid.eq_ignore_ascii_case(guid))
                 {
+                    let dns_servers = if include_dns {
+                        // SAFETY: the DNS records and socket addresses belong to this
+                        // successful IP Helper buffer and are copied before it is dropped.
+                        Some(unsafe {
+                            native_apply::read_dns_servers(adapter.FirstDnsServerAddress)
+                        }?)
+                    } else {
+                        None
+                    };
                     adapters.push(ActiveAdapter {
                         guid: guid.to_owned(),
                         luid,
                         ipv4_index,
                         ipv6_index,
+                        dns_servers,
                     });
                 }
             }
@@ -500,10 +540,10 @@ pub(super) fn collect_adapters() -> Result<Vec<AdapterDnsSnapshot>> {
         .collect()
 }
 
-/// Live application, **per address family**, in ONE PowerShell process (cold start is the
-/// dominant cost). The registry writes are the authoritative record this module verifies
-/// against; the live apply is what makes the running resolver pick the change up without an
-/// interface bounce.
+/// Per-family inputs for native protected apply or legacy apply/restore. The latter batches
+/// ONE PowerShell process (cold start is the dominant cost). The exact snapshot, not this
+/// normalized live list, remains restoration authority. Live application makes the running
+/// resolver pick the change up without an interface bounce. The legacy mechanism is:
 ///
 /// * IPv4 goes through CIM
 ///   (`Win32_NetworkAdapterConfiguration.SetDNSServerSearchOrder`, the architecture doc's
@@ -533,8 +573,11 @@ pub(super) fn collect_adapters() -> Result<Vec<AdapterDnsSnapshot>> {
 /// pseudo adapter and bricking the machine on it.
 ///
 /// 注意:运行时尚未实测 — wrapped so any failure is logged, never fatal.
+#[derive(Clone)]
 struct LiveApplyEntry {
     guid: String,
+    /// Fresh runtime identity used to reject adapter replacement during native read-back.
+    luid: u64,
     /// Live IPv4/IPv6 interface indices; 0 means the family is not bound here.
     ipv4_index: u32,
     ipv6_index: u32,
@@ -779,6 +822,10 @@ fn parse_guid_list(value: &str) -> std::collections::BTreeSet<String> {
 }
 
 fn live_apply_batch(entries: &[LiveApplyEntry], mode: ApplyMode) -> Vec<(String, bool)> {
+    #[cfg(test)]
+    if let Some(results) = test_io::with(|io| io.legacy(entries, mode)) {
+        return results;
+    }
     let restoring = mode == ApplyMode::Restore;
     let mut script = SCRIPT_PRELUDE.replace(PROTECTED_DNS_V4_TOKEN, super::PROTECTED_DNS_V4);
     let mut rejected: std::collections::BTreeSet<String> = Default::default();
@@ -884,6 +931,10 @@ fn live_apply_with_retry(entries: Vec<LiveApplyEntry>, mode: ApplyMode) -> Vec<(
 /// cache entries served while DNS pointed at the loopback core are the classic post-
 /// disconnect pollution; without a flush, restored resolvers keep them until TTL expiry.
 pub(super) fn flush_resolver_cache() -> Result<()> {
+    #[cfg(test)]
+    if test_io::active() {
+        return Ok(()); // No host-wide cache mutation in the isolated apply fixture.
+    }
     use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
     // DnsFlushResolverCache (Vista+) is exported by dnsapi.dll but is not in
     // any SDK import library — it must be resolved at runtime (the same
@@ -916,6 +967,10 @@ pub(super) fn flush_resolver_cache() -> Result<()> {
 /// Whether the adapter's per-family registry subkey exists. Single-stack adapters lack one
 /// family entirely; both apply and verify must skip the absent family instead of failing.
 fn key_exists(subkey: &str) -> Result<bool> {
+    #[cfg(test)]
+    if let Some(exists) = test_io::with(|io| io.keys.contains_key(subkey)) {
+        return Ok(exists);
+    }
     Ok(RegKey::open(subkey, false)?.is_some())
 }
 
@@ -938,6 +993,7 @@ fn apply_protected(guid: &str, active: &ActiveAdapter) -> Result<LiveApplyEntry>
     }
     Ok(LiveApplyEntry {
         guid: guid.to_owned(),
+        luid: active.luid,
         ipv4_index: active.ipv4_index,
         ipv6_index: active.ipv6_index,
         // One family per list: the IPv4 mechanism never sees an IPv6 address and the IPv6
@@ -950,12 +1006,8 @@ fn apply_protected(guid: &str, active: &ActiveAdapter) -> Result<LiveApplyEntry>
 
 pub(super) fn apply_protected_set(guids: &[String]) -> Result<Vec<(String, bool)>> {
     let active = active_adapter_map()?;
-    // An adapter that is no longer active has no live resolver to point anywhere.
-    let mut results = guids
-        .iter()
-        .filter(|guid| !active.contains_key(&guid.to_ascii_uppercase()))
-        .map(|guid| (guid.clone(), true))
-        .collect::<Vec<_>>();
+    // Absence is a non-participant, not effective-apply success. Omit it so the facade keeps
+    // its durable pending bit for reappearance without repeatedly writing healthy adapters.
     let entries = guids
         .iter()
         .filter_map(|guid| {
@@ -965,8 +1017,7 @@ pub(super) fn apply_protected_set(guids: &[String]) -> Result<Vec<(String, bool)
         })
         .map(|(guid, adapter)| apply_protected(guid, adapter))
         .collect::<Result<Vec<_>>>()?;
-    results.extend(live_apply_with_retry(entries, ApplyMode::Protect));
-    Ok(results)
+    Ok(native_apply::apply(&entries))
 }
 
 fn restore_value(subkey: &str, value: &str, saved: &Option<String>) -> Result<()> {
@@ -979,6 +1030,7 @@ fn restore_value(subkey: &str, value: &str, saved: &Option<String>) -> Result<()
 fn restore_entry(adapter: &AdapterDnsSnapshot, active: &ActiveAdapter) -> LiveApplyEntry {
     LiveApplyEntry {
         guid: adapter.interface_guid.clone(),
+        luid: active.luid,
         ipv4_index: active.ipv4_index,
         ipv6_index: active.ipv6_index,
         ipv4_servers: super::restored_live_servers_v4(adapter),
@@ -1264,6 +1316,10 @@ fn install_nrpt() -> Result<()> {
 
 /// Snapshot Encrypted DNS, turn DoH off, and force the DNS Client through TUN DNS.
 pub(super) fn suppress_encrypted_dns() -> Result<()> {
+    #[cfg(test)]
+    if test_io::active() {
+        return Ok(()); // Resolver-policy OS effects are outside this apply regression.
+    }
     if read_capture_file()?.is_none() {
         write_capture_file(read_dword(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH)?)?;
     }
@@ -1295,4 +1351,3 @@ pub(super) fn restore_encrypted_dns() -> Result<()> {
     }
     Ok(())
 }
-

@@ -7,6 +7,10 @@ on:
         description: Exact App SemVer already committed in package.json and Tauri/Cargo config
         required: true
         type: string
+      update_release_sequence:
+        description: Optional v1 installed floor; must match the paired macOS build (positive safe integer)
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -55,6 +59,7 @@ jobs:
         working-directory: apps/windows/app
     env:
       TONO_UPDATER_PUBLIC_KEY: ${{ vars.TONO_UPDATER_PUBLIC_KEY }}
+      TONO_UPDATE_RELEASE_SEQUENCE: ${{ inputs.update_release_sequence || '' }}
       VITE_TONO_UPDATES_CONFIGURED: 'true'
       RELEASE_VERSION: ${{ inputs.version }}
 

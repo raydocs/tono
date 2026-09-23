@@ -32,9 +32,9 @@
 //! **The enable-time read-back is evidence, not a gate.** Applying protected DNS is a *write*;
 //! proving it from Windows is not reliably possible. The registry stores "static, no servers"
 //! and "use DHCP" identically (which is why the IPv6 leg of the read-back was already removed),
-//! and the live apply runs through PowerShell/CIM/netsh, which fails on real machines for
-//! reasons that have nothing to do with whether DNS works: pseudo-adapters, constrained language
-//! mode, EDR hooks, a damaged WMI repository. Gating `enable` on that weak proof killed connects
+//! and native effective read-back or the PowerShell/CIM/netsh compatibility path can fail
+//! independently of whether DNS works: pseudo-adapters, constrained language mode, EDR hooks,
+//! a damaged WMI repository. Gating `enable` on that weak proof killed connects
 //! on machines whose DNS was fine — the last one bailed with "protected DNS could not be verified
 //! on every active adapter" at 1.1 s, *before* the strong proof ever ran. So `enable` now
 //! **records** what it could not verify (per-adapter live-apply failures in the snapshot and in
@@ -48,8 +48,10 @@
 //! fake-ip probe catches, with the recorded note in the status payload to say why. What stays a
 //! hard failure of `enable` is the case where **no per-adapter
 //! outcome exists at all** (the adapter enumeration or the apply batch itself errored, or the
-//! record of the round could not be persisted): then there is nothing to restore, nothing to
-//! reconcile, and nothing truthful to report.
+//! record of the round could not be persisted). Such an error can follow partial mutation:
+//! original values AND the unfinished per-adapter obligation are persisted before applying.
+//! Only effective verification retires that obligation; an absent adapter keeps it until
+//! reappearance, but does not drive repair while absent.
 //!
 //! **Encrypted DNS is pinned off for the session.** Win10/11 Encrypted DNS and per-adapter
 //! DoH templates send lookups over HTTPS to a public resolver. WFP then default-denies that
@@ -85,11 +87,13 @@
 //! that cannot be obtained is *unproven*, never proven — fail-closed for the normal disarm,
 //! while the emergency path stays the documented escape hatch (it logs and proceeds).
 //!
-//! **The live apply is per address family.** IPv4 goes through CIM
-//! (`SetDNSServerSearchOrder`, an IPv4-only method), IPv6 through `netsh interface ipv6 set
-//! dnsservers`, and each family is proven by its own live read-back. Merging both families into
-//! one CIM call either fails on every adapter or silently drops the IPv6 address, which leaves
-//! an IPv6 resolver leaking while the registry still reads "protected".
+//! **The live apply is per address family.** Protected apply prefers the dynamically resolved
+//! `SetInterfaceDnsSettings` and confirms both families with `GetAdaptersAddresses`. Native
+//! success without effective read-back (including zero IPv6 resolvers) is not a proven apply.
+//! Missing API, completed failure or contradictory read-back gets one bounded compatibility
+//! batch, still inside the same single-writer claim. Compatibility and restore use CIM
+//! (`SetDNSServerSearchOrder`, an IPv4-only method) and `netsh interface ipv6 set dnsservers`.
+//! Restore/DHCP never uses the native empty string: the exact saved snapshot remains authority.
 //!
 //! **Degraded exit:** a registry-only match is not accepted as a
 //! normal restore — but it *is* accepted, once, after the live apply has failed
@@ -115,7 +119,7 @@
 //! the user's original DNS (`DNS_SNAPSHOT_MISSING_PREFIX`).
 //!
 //! The pure snapshot/merge/restore-decision logic in this file is platform-independent and
-//! unit-tested on any host; the registry/CIM/netsh engine is compiled only on Windows.
+//! unit-tested on any host; the native/registry/CIM/netsh engine is compiled only on Windows.
 
 use crate::core::structure::DnsProtectionStatus;
 use anyhow::{Context as _, Result, bail};
@@ -292,10 +296,11 @@ pub(crate) struct AdapterDnsSnapshot {
     pub ipv4_profile_name_server: Option<String>,
     pub ipv6_name_server: Option<String>,
     pub ipv6_profile_name_server: Option<String>,
-    /// The last CIM live-apply for this adapter failed, so the running resolver cannot be
-    /// trusted to match the registry until a retry succeeds. Recorded in memory and in the
-    /// snapshot file. It forces the protected-DNS write to be replayed on the next enable
-    /// ([`needs_loopback_replay`]) and it is why the restore proof insists on live evidence —
+    /// An apply is unfinished or failed, so the running resolver cannot be trusted to match
+    /// the registry until effective verification succeeds. Set before mutation in memory and
+    /// the snapshot, including rounds that return Err without per-adapter results. It forces
+    /// replay while this adapter is active, not while absent, and survives reappearance.
+    /// It is also why the restore proof insists on live evidence —
     /// but it does **not** by itself refuse a restore whose live state is verifiably correct
     /// (see [`restore_is_proven`] and the module docs).
     #[serde(default)]
@@ -310,6 +315,10 @@ pub(crate) struct DnsSnapshot {
 }
 
 fn snapshot_path() -> PathBuf {
+    #[cfg(all(windows, test, not(feature = "test")))]
+    if let Some(path) = engine::test_io::with(|io| io.snapshot_path.clone()) {
+        return path;
+    }
     crate::service_paths()
         .persistent_state_dir()
         .join("protected-dns.json")
@@ -785,8 +794,26 @@ fn merge_snapshot(existing: Option<DnsSnapshot>, fresh: DnsSnapshot) -> DnsSnaps
     existing
 }
 
+/// Use the original records (including their GUID spelling), but only for adapters observed
+/// active this round. Historical originals and pending bits remain in the full snapshot.
+fn active_snapshot_adapters(
+    snapshot: &DnsSnapshot,
+    current: &[AdapterDnsSnapshot],
+) -> Vec<AdapterDnsSnapshot> {
+    snapshot
+        .adapters
+        .iter()
+        .filter(|saved| {
+            current.iter().any(|adapter| {
+                adapter.interface_guid.eq_ignore_ascii_case(&saved.interface_guid)
+            })
+        })
+        .cloned()
+        .collect()
+}
+
 /// Short-circuiting `enable` is only safe when a snapshot exists, the adapters are actually on
-/// loopback, AND no live-apply failure is recorded (memory or snapshot). With no snapshot this is
+/// loopback, AND no active apply is pending (memory or snapshot). With no snapshot this is
 /// the initial enable, so it must capture the originals and apply loopback. Anything else replays
 /// the write — which also retries the live-apply — against the *original* snapshot.
 fn needs_loopback_replay(
@@ -858,8 +885,8 @@ fn unverified_note(failed: &[String], total: usize, read_back: LoopbackReadBack)
         _ => named,
     };
     Some(format!(
-        "{DNS_PROTECTION_UNVERIFIED_PREFIX}: protected DNS ({PROTECTED_DNS_V4}) was applied but could not be verified \
-         on {} of {total} adapter(s) — live apply failed on: {adapters}; read-back={}. \
+        "{DNS_PROTECTION_UNVERIFIED_PREFIX}: protected DNS ({PROTECTED_DNS_V4}) application is unfinished or unverified \
+         on {} of {total} adapter(s) — pending live apply: {adapters}; read-back={}. \
          Protection was NOT abandoned and this is not a leak: WFP default-denies physical DNS \
          on both address families and permits the verified TUN interface, so an adapter whose \
          configuration cannot be verified can only fail to resolve, never bypass the tunnel. The connect \
@@ -1262,7 +1289,14 @@ fn now_unix() -> u64 {
 }
 
 async fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
-    crate::core::paths::ensure_persistent_state_layout()?;
+    // Native facade tests use a private temporary directory, not the installed Service root.
+    #[cfg(all(windows, test, not(feature = "test")))]
+    let isolated = engine::test_io::active();
+    #[cfg(not(all(windows, test, not(feature = "test"))))]
+    let isolated = false;
+    if !isolated {
+        crate::core::paths::ensure_persistent_state_layout()?;
+    }
     crate::core::platform_security::secure_private_service_file_if_exists(path)?;
     let temporary = path.with_extension("tmp");
     if std::fs::symlink_metadata(&temporary).is_ok() {
@@ -1589,8 +1623,8 @@ async fn engine_apply_protected(adapters: &[AdapterDnsSnapshot]) -> Result<Vec<(
 }
 
 async fn engine_apply_snapshot(snapshot: &DnsSnapshot) -> Result<Vec<(String, bool)>> {
-    // Restore writes the same per-adapter registry values and runs the same CIM/netsh batch as
-    // the loopback apply, so it raises the same notifications and gets the same window.
+    // Restore writes the same per-adapter registry values and runs the legacy CIM/netsh
+    // batch, so it raises the same notifications and gets the same self-write window.
     let _self_write = SelfWriteWindow::open();
     #[cfg(all(windows, not(feature = "test")))]
     {
@@ -1871,7 +1905,8 @@ fn record_outcome<T>(result: Result<T>) -> Result<T> {
     }
 }
 
-/// Record per-adapter live-apply results in memory and into the snapshot's per-adapter flags.
+/// Record per-adapter outcomes or reserve an unfinished apply before mutation. Omitted adapters
+/// keep their evidence; in particular the protect engine must not report absence as success.
 fn note_live_results(snapshot: &mut DnsSnapshot, results: &[(String, bool)]) {
     let mut failures = LIVE_APPLY_FAILURES.lock().unwrap();
     for (guid, ok) in results {
@@ -2045,17 +2080,25 @@ async fn enable_unlocked(trigger: EnableTrigger) -> Result<DnsProtectionStatus> 
     // and are still restored in the registry on disconnect.
     let active_adapters = fresh.adapters.clone();
     let mut snapshot = merge_snapshot(existing, fresh);
+    let applying = active_snapshot_adapters(&snapshot, &active_adapters);
     let all_loopback = snapshot_present && engine_all_loopback(&active_adapters).await?;
-    let live_apply_failed = snapshot
-        .adapters
-        .iter()
-        .any(|adapter| adapter.live_apply_failed);
+    let live_apply_failed = applying.iter().any(|adapter| adapter.live_apply_failed);
+    let replay = needs_loopback_replay(snapshot_present, all_loopback, live_apply_failed);
+    if replay {
+        // Registry writes can land before entry construction returns Err, and a bounded call
+        // can outlive its waiter. Persist the obligation before either can mutate anything.
+        let pending = applying
+            .iter()
+            .map(|adapter| (adapter.interface_guid.clone(), false))
+            .collect::<Vec<_>>();
+        note_live_results(&mut snapshot, &pending);
+    }
     // Snapshot first, even on an otherwise idempotent replay: `snapshot` may now include adapters
-    // that appeared after the first enable, and any later failure must retain their originals.
+    // that appeared after the first enable. Any error retains originals AND unfinished work.
     atomic_write(&snapshot_path(), &serde_json::to_vec_pretty(&snapshot)?).await?;
-    if !needs_loopback_replay(snapshot_present, all_loopback, live_apply_failed) {
-        // Protection is complete and nothing is outstanding: retire any note from an earlier
-        // round so the reconciler is not kept awake by evidence that no longer holds.
+    if !replay {
+        // No active adapter owes work. Do not let an absent historical adapter's note keep
+        // the reconciler writing; its saved pending bit still applies when it returns.
         clear_unverified_note();
         // Adapters may already be on 198.18.0.2 from an older build that did not pin
         // Encrypted DNS off. Do that here or Win10/11 DoH still times out fake-ip.
@@ -2068,11 +2111,10 @@ async fn enable_unlocked(trigger: EnableTrigger) -> Result<DnsProtectionStatus> 
     // must be recorded, not a failure (see the module docs). `Err` is reserved for the round
     // that produced no per-adapter outcome at all.
     let outcome: Result<Option<String>> = async {
-        // Hard failure #1: the batch could not be run, so not one adapter was touched and there
-        // is no result to record. `?` on purpose — with nothing applied there is nothing to
-        // restore and nothing for the watchdog to reconcile, and a status that claimed
-        // "protected" would be a lie. A wedged engine (`DNS_ENGINE_WEDGED_PREFIX`) surfaces here.
-        let live = engine_apply_protected(&snapshot.adapters).await?;
+        // Err is not proof of zero writes. Keep the pre-written pending flags on error or
+        // timeout. Only the observed active set was reserved: never send historical adapters
+        // that could reappear between collection and apply without a pending record.
+        let live = engine_apply_protected(&applying).await?;
         note_apply_round(live.iter().any(|(_, ok)| !ok));
         note_live_results(&mut snapshot, &live);
         // Hard failure #2: the record of the round could not be persisted. Persist both failures
@@ -2528,6 +2570,17 @@ pub(crate) async fn status() -> DnsProtectionStatus {
         .clone()
 }
 
+/// Transaction proof reads actual adapter state under the DNS writer lock.
+/// The diagnostic cache is deliberately not proof of update recovery.
+#[cfg(windows)]
+pub(crate) async fn observe_for_update() -> Result<DnsProtectionStatus> {
+    let _operation = DNS_OPERATION.lock().await;
+    if !snapshot_path().exists() {
+        ensure_snapshotless_dns_is_safe().await?;
+    }
+    status_unlocked().await
+}
+
 fn publish_status(status: &DnsProtectionStatus) {
     *DNS_STATUS_CACHE
         .lock()
@@ -2612,8 +2665,8 @@ pub fn spawn_status_watchdog() {
             // and point the machine at a loopback core that is no longer running. This mirrors
             // the WFP watchdog, which reads `armed_guard()` while holding `WFP_OPERATION`.
             let _operation = DNS_OPERATION.lock().await;
-            let status = match status_unlocked().await {
-                Ok(status) => status,
+            let (status, active_pending) = match observe_status_unlocked().await {
+                Ok(observation) => observation,
                 Err(error) => {
                     publish_status_error(&error);
                     continue;
@@ -2629,7 +2682,7 @@ pub fn spawn_status_watchdog() {
                 PROTECTION_WANTED.load(Ordering::Acquire),
                 status.snapshot_present,
                 status.enabled,
-                status_is_unverified(&status),
+                active_pending || status_is_unverified(&status),
             );
             if !repair {
                 if failures > 0 {
@@ -2694,6 +2747,12 @@ pub fn spawn_status_watchdog() {
 }
 
 async fn status_unlocked() -> Result<DnsProtectionStatus> {
+    observe_status_unlocked().await.map(|(status, _)| status)
+}
+
+/// The wire status retains its configuration/advisory semantics. The watchdog also needs the
+/// active durable obligation: neither an ordinary error string nor a restart may hide it.
+async fn observe_status_unlocked() -> Result<(DnsProtectionStatus, bool)> {
     let snapshot = match tokio::fs::read(snapshot_path()).await {
         // Status only reports; the recovery itself belongs to `enable`/`restore_protected`,
         // which hold the operation lock and may change the machine. Reporting the reason (with
@@ -2704,26 +2763,58 @@ async fn status_unlocked() -> Result<DnsProtectionStatus> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(error.into()),
     };
-    let enabled = match snapshot.as_ref() {
-        Some(_snapshot) if ENGINE_LIVE => {
+    let snapshot = snapshot
+        .map(|snapshot| with_live_failures(&snapshot, &LIVE_APPLY_FAILURES.lock().unwrap()));
+    let (enabled, active_pending, active_count) = match snapshot.as_ref() {
+        Some(snapshot) if ENGINE_LIVE => {
             // Include adapters that appeared since the last enable. Checking only saved GUIDs can
             // report a false healthy state while a fresh adapter still uses an external resolver.
             let current = collect_dns_adapters().await?;
-            engine_all_loopback(&current).await?
+            let pending = active_snapshot_adapters(snapshot, &current)
+                .into_iter()
+                .filter(|adapter| adapter.live_apply_failed)
+                .map(|adapter| adapter.interface_guid)
+                .collect::<Vec<_>>();
+            (engine_all_loopback(&current).await?, pending, current.len())
         }
-        Some(snapshot) => engine_all_loopback(&snapshot.adapters).await?,
-        None => false,
+        Some(snapshot) => (
+            engine_all_loopback(&snapshot.adapters).await?,
+            Vec::new(),
+            snapshot.adapters.len(),
+        ),
+        None => (false, Vec::new(), 0),
     };
+    let mut last_error = DNS_LAST_ERROR.lock().unwrap().clone();
+    if !active_pending.is_empty() {
+        let read_back = if enabled {
+            LoopbackReadBack::Verified
+        } else {
+            LoopbackReadBack::Contradicted
+        };
+        if let Some(note) = unverified_note(&active_pending, active_count, read_back) {
+            // Keep hard errors hard for the App. Adding an advisory marker to a registry error
+            // would make its existing health predicate classify that error as a warning.
+            if last_error.as_deref().is_none_or(|error| error.contains(DNS_PROTECTION_UNVERIFIED_PREFIX)) {
+                last_error = Some(note);
+            }
+        }
+    } else if enabled
+        && last_error.as_deref().is_some_and(|error| error.contains(DNS_PROTECTION_UNVERIFIED_PREFIX))
+    {
+        // Absence does not erase pending bits, but a note about inactive adapters must not
+        // keep a healthy active set in a perpetual repair loop.
+        last_error = None;
+    }
     let status = DnsProtectionStatus {
         enabled,
         snapshot_present: snapshot.is_some(),
         adapters: snapshot
             .as_ref()
             .map_or(0, |snapshot| snapshot.adapters.len() as u32),
-        last_error: DNS_LAST_ERROR.lock().unwrap().clone(),
+        last_error,
     };
     publish_status(&status);
-    Ok(status)
+    Ok((status, !active_pending.is_empty()))
 }
 
 /// Only an operational adapter with a **bound IP stack** has a live resolver that can leak DNS.
@@ -2747,7 +2838,7 @@ fn is_active_dns_adapter(oper_status: i32, if_type: u32, has_bound_ip: bool) -> 
     oper_status == IF_OPER_STATUS_UP && if_type != IF_TYPE_SOFTWARE_LOOPBACK && has_bound_ip
 }
 
-// --- Windows engine: registry snapshot/set + best-effort CIM live-apply ---
+// --- Windows engine: registry snapshot/set + native apply, legacy compatibility/restore ---
 
 #[cfg(all(windows, not(feature = "test")))]
 mod engine;

@@ -60,6 +60,39 @@ const windowsReleasePs1Source = readFileSync(
 const canonicalGuiLaunchLine =
   '  nsis_tauri_utils::RunAsUser "$INSTDIR\\${MAINBINARYNAME}.exe" "$MainBinaryArgs"'
 
+test('NSIS private extraction cannot bypass native admission or mutate the live installation', () => {
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace('--update-unpack-gate', '--unchecked'),
+    ),
+    /separate native gates/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace('--manual-update-gate', '--unchecked'),
+    ),
+    /separate native gates/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        'StrCpy $INSTDIR "$EXEDIR\\payload"',
+        'StrCpy $INSTDIR "$PROGRAMFILES64\\Tono"',
+      ),
+    ),
+    /separate native gates/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        '; No installed path, SCM, ARP, shortcut, redist, hook or cleanup mutation.',
+        'WriteRegStr HKLM "Software\\Tono" "unsafe" "1"',
+      ),
+    ),
+    /only private payload files/,
+  )
+})
+
 test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
   assert.equal(validateNsisAutomaticUpgradeFlow(installerSource), null)
 
@@ -270,8 +303,10 @@ test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
   assert.match(
     validateNsisAutomaticUpgradeFlow(
       installerSource.replace(
-        'Section Install',
-        'Section Install\n  nsis_tauri_utils::RunAsUser "$INSTDIR\\${MAINBINARYNAME}.exe" ""',
+        // Mutate the live install branch without invalidating the earlier
+        // private-extraction gate: this regression targets GUI launch policy.
+        '  SetOutPath $INSTDIR\n\n  !ifmacrodef NSIS_HOOK_PREINSTALL',
+        '  SetOutPath $INSTDIR\n  nsis_tauri_utils::RunAsUser "$INSTDIR\\${MAINBINARYNAME}.exe" ""\n\n  !ifmacrodef NSIS_HOOK_PREINSTALL',
       ),
     ),
     /single canonical RunMainBinary launcher/,
@@ -311,8 +346,8 @@ test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
           `  ;${canonicalGuiLaunchLine.trimStart()}`,
         )
         .replace(
-          'Section Install',
-          `Section Install\n${canonicalGuiLaunchLine}`,
+          '  SetOutPath $INSTDIR\n\n  !ifmacrodef NSIS_HOOK_PREINSTALL',
+          `  SetOutPath $INSTDIR\n${canonicalGuiLaunchLine}\n\n  !ifmacrodef NSIS_HOOK_PREINSTALL`,
         ),
     ),
     /RunMainBinary must be reboot-gated/,
@@ -808,26 +843,45 @@ test('portable partition keeps only the allowlist', () => {
 // Tauri derives the ACL namespace from the plugin's Cargo `links` metadata,
 // NOT PluginBuilder::new. Renaming the crate while keeping the old runtime
 // name compiles and installs, but every renderer IPC is denied at runtime.
-const corePluginRoot = new URL('../../crates/tono-plugin-core/', import.meta.url)
-const corePluginManifest = readFileSync(new URL('Cargo.toml', corePluginRoot), 'utf8')
-const corePluginAclName = corePluginManifest.match(/^links = "([^"]+)"/m)[1]
+const corePluginRoot = new URL(
+  '../../crates/tono-plugin-core/',
+  import.meta.url,
+)
+const corePluginManifest = readFileSync(
+  new URL('Cargo.toml', corePluginRoot),
+  'utf8',
+)
+const corePluginAclName = corePluginManifest
+  .match(/^links = "([^"]+)"/m)[1]
   .replace(/^tauri-plugin-/, '')
 
 test('Core plugin runtime registration matches its generated ACL namespace', () => {
   const source = readFileSync(new URL('src/lib.rs', corePluginRoot), 'utf8')
   const runtimeName = source.match(/PluginBuilder::new\("([^"]+)"\)/)[1]
   assert.equal(runtimeName, corePluginAclName)
-  const capability = JSON.parse(readFileSync(
-    new URL('../src-tauri/capabilities/desktop.json', import.meta.url), 'utf8',
-  ))
+  const capability = JSON.parse(
+    readFileSync(
+      new URL('../src-tauri/capabilities/desktop.json', import.meta.url),
+      'utf8',
+    ),
+  )
   assert.ok(capability.permissions.includes(`${runtimeName}:default`))
 })
 
-for (const entrypoint of ['guest-js/index.ts', 'dist-js/index.js', 'dist-js/index.cjs']) {
+for (const entrypoint of [
+  'guest-js/index.ts',
+  'dist-js/index.js',
+  'dist-js/index.cjs',
+]) {
   test(`Core plugin ${entrypoint} invokes the namespace granted by desktop ACL`, () => {
     const source = readFileSync(new URL(entrypoint, corePluginRoot), 'utf8')
-    const namespaces = [...source.matchAll(/plugin:([^|\s]+)\|/g)].map((m) => m[1])
-    assert.ok(namespaces.length >= 30, 'must inspect the full renderer command surface')
+    const namespaces = [...source.matchAll(/plugin:([^|\s]+)\|/g)].map(
+      (m) => m[1],
+    )
+    assert.ok(
+      namespaces.length >= 30,
+      'must inspect the full renderer command surface',
+    )
     assert.deepEqual([...new Set(namespaces)], [corePluginAclName])
   })
 }
