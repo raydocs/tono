@@ -77,6 +77,26 @@
   Windows 11 实机断电产生的真实损坏文件与 inactive 适配器回网时序；emergency 后
   依赖操作员按拒绝信息清理适配器 DNS；夹具通过不等于 G1 实机验收。
 
+### 2026-09-23 续记 · lifecycle CI 4 项既有测试失败：恢复证据在 test 构建丢失 loopback hook
+
+`9c8e5f13` 的 lifecycle 步骤 307 通过 / 4 失败（push 与 pull_request 两个 run 的 service
+job 同因，[失败日志](https://github.com/raydocs/tono/actions/runs/35820994514/job/107052595536)）：
+`disarm_is_refused_until_dns_restore_is_proven`、
+`emergency_disarm_removes_wfp_intent_but_reports_unrestored_dns`、
+`release_is_refused_until_dns_restore_is_proven`、
+`release_when_not_armed_still_attempts_dns_restore_best_effort`。属本条 (b) 引入的
+**测试域回归**（非产品缺陷、非编译错误）：`recover_unreadable_snapshot` 的 any-loopback
+证据从 `engine_any_loopback`（test-feature 构建读 `set_live_dns_on_loopback`，是模块
+文档化的“restore 不可证明”夹具渠道）换成注册表视图谓词后，test 构建里该视图取
+`test_hooks::collected_adapters()` 的空默认值，四个夹具用 hook 表达的“机器仍在 Tono
+DNS 上”不再被听见——损坏快照被误判可以隔离，disarm 门随之打开（应 Err 得到 Ok）。
+同分支的 `unverified_startup_intent_stays_blocked_until_core_and_dns_reconcile` 等其余
+用例不受影响。修复为窄谓词 `registry_interfaces_read_as_tono_dns`：生产
+（`not(feature = "test")`）分支保持注册表全集判定不变，test-feature 构建 OR 回
+`live_dns_on_loopback`（只更 fail-closed，永不 AND），native 域与 stub 域两个新回归、
+既有夹具语义均不动，**未修改任何测试夹具**。验证仍按所有者 2026-09-14 执行位置决定
+本机零 cargo，委托同一 `windows-2025` CI 重跑；本续记提交时未获得结果，不预支绿灯。
+
 ## 2026-09-23 · Windows 混合 DNS 残留不能证明恢复成功
 
 - **归属/来源**：G1 断开与恢复；从已合入的

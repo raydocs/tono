@@ -1672,6 +1672,25 @@ async fn collect_registry_interface_adapters() -> Result<Vec<AdapterDnsSnapshot>
     Ok(without_current_tunnel(adapters, current_tunnel_luid))
 }
 
+/// The corrupt-snapshot recovery's live question — does any interface the registry knows
+/// about still read as pointed at a Tono resolver — answered from that registry view itself.
+/// Test-feature builds additionally keep the contract [`engine_any_loopback`] established
+/// while this evidence still flowed through it: there `set_live_dns_on_loopback` is the
+/// stand-in for the whole machine state, and a recovery that ignored it would only ever see
+/// the empty default of `test_hooks::collected_adapters` — the fail-closed half of the
+/// corrupt-snapshot contract would be unreachable in every lifecycle test. The two answers
+/// are OR-ed, never AND-ed, so a registry view a fixture does populate stays authoritative
+/// and the combined answer can only lean further closed.
+fn registry_interfaces_read_as_tono_dns(adapters: &[AdapterDnsSnapshot]) -> bool {
+    #[cfg(not(all(windows, not(feature = "test"))))]
+    {
+        if test_hooks::live_dns_is_on_loopback() {
+            return true;
+        }
+    }
+    adapters.iter().any(adapter_reads_as_tono_dns)
+}
+
 async fn engine_apply_protected(adapters: &[AdapterDnsSnapshot]) -> Result<Vec<(String, bool)>> {
     // The only two writers of adapter DNS are this and `engine_apply_snapshot`; both mark the
     // window so `netmon` does not report our own writes as the machine's network changing.
@@ -2059,7 +2078,7 @@ async fn quarantine_snapshot(label: &str, reason: &str) -> Result<()> {
 /// disarmed, and the message names the two documented ways forward.
 async fn recover_unreadable_snapshot(reason: &str) -> Result<()> {
     let interfaces = collect_registry_interface_adapters().await?;
-    let any_loopback = interfaces.iter().any(adapter_reads_as_tono_dns);
+    let any_loopback = registry_interfaces_read_as_tono_dns(&interfaces);
     let live_apply_failed = !LIVE_APPLY_FAILURES
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
