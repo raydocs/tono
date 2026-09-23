@@ -58,7 +58,7 @@ final class ProtectedDNSManager {
             } else {
                 try Self.setDNS([Self.protectedDNSServer], for: service)
                 try verify([Self.protectedDNSServer], for: service)
-                return response(
+                return Self.response(
                     configured: true,
                     snapshotPresent: true,
                     service: service
@@ -89,7 +89,7 @@ final class ProtectedDNSManager {
             }
             throw error
         }
-        return response(
+        return Self.response(
             configured: true,
             snapshotPresent: true,
             service: service
@@ -123,7 +123,7 @@ final class ProtectedDNSManager {
             write: Self.setDNS,
             removeSnapshot: removeSnapshot
         )
-        return response(
+        return Self.response(
             configured: false,
             snapshotPresent: false,
             service: snapshot?.service
@@ -206,21 +206,9 @@ final class ProtectedDNSManager {
     func status() -> [String: Any] {
         lock.lock()
         defer { lock.unlock() }
+        let snapshot: Snapshot?
         do {
-            guard let snapshot = try loadSnapshot() else {
-                return response(
-                    configured: false,
-                    snapshotPresent: false,
-                    service: nil
-                )
-            }
-            let configured =
-                try Self.currentDNS(for: snapshot.service) == [Self.protectedDNSServer]
-            return response(
-                configured: configured,
-                snapshotPresent: true,
-                service: snapshot.service
-            )
+            snapshot = try loadSnapshot()
         } catch {
             return [
                 "ok": false,
@@ -229,9 +217,51 @@ final class ProtectedDNSManager {
                 "error": "Protected DNS status is unavailable.",
             ]
         }
+        return Self.statusResponse(snapshot: snapshot, read: Self.currentDNS)
     }
 
-    private func response(
+    /// The status report as a transaction over injected I/O, mirroring
+    /// restoreServices. Production status() owns the real snapshot and
+    /// reader.
+    ///
+    /// A snapshot that loaded is a pending restore even when its service has
+    /// become unreadable (renamed or deleted service, failing networksetup):
+    /// restore() sweeps loopback DNS off every service it can still read and
+    /// handles a missing snapshot service explicitly. Collapsing that state
+    /// into snapshotPresent:false made the app refuse to call /dns/restore at
+    /// all, so the read failure is reported separately while the snapshot
+    /// stays visible for recovery.
+    private static func statusResponse(
+        snapshot: Snapshot?,
+        read: (String) throws -> [String]
+    ) -> [String: Any] {
+        guard let snapshot else {
+            return Self.response(
+                configured: false,
+                snapshotPresent: false,
+                service: nil
+            )
+        }
+        do {
+            let configured =
+                try read(snapshot.service) == [Self.protectedDNSServer]
+            return Self.response(
+                configured: configured,
+                snapshotPresent: true,
+                service: snapshot.service
+            )
+        } catch {
+            return [
+                "ok": false,
+                "configured": false,
+                "snapshotPresent": true,
+                "service": snapshot.service,
+                "error": "Protected DNS status is unavailable.",
+            ]
+        }
+    }
+
+    private static func response(
         configured: Bool,
         snapshotPresent: Bool,
         service: String?
@@ -653,6 +683,26 @@ final class ProtectedDNSManager {
             return false
         }
         print("DNS restore read-failure regression passed: failure retains snapshot; retry restores all services")
+        return true
+    }
+
+    /// Fault-injected status regression. No live DNS preferences or root
+    /// snapshot are read; production statusResponse owns the real reader.
+    static func runStatusUnreadableServiceSelfTest() -> Bool {
+        enum ReadFailure: Error { case injected }
+        let snapshot = Snapshot(service: "Wi-Fi", servers: ["9.9.9.9"])
+        let status = statusResponse(snapshot: snapshot) { _ in
+            throw ReadFailure.injected
+        }
+        let snapshotPresent = status["snapshotPresent"] as? Bool
+        guard snapshotPresent == true,
+              (status["ok"] as? Bool) == false,
+              (status["configured"] as? Bool) == false,
+              (status["service"] as? String) == "Wi-Fi" else {
+            print("DNS status unreadable-service regression FAILED: snapshotPresent=\(snapshotPresent.map { "\($0)" } ?? "nil")")
+            return false
+        }
+        print("DNS status unreadable-service regression passed: a loaded snapshot stays present when its service is unreadable")
         return true
     }
 
