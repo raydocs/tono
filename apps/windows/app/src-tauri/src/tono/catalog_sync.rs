@@ -32,8 +32,7 @@ pub fn seed_from_cache(inner: &mut TonoInner) {
     let Some(cached) = inner.catalog_cache().load() else {
         return;
     };
-    inner.catalog_tracker =
-        tono_core::CatalogTracker::from_installed(cached.response.revision, cached.response.sha256.clone());
+    inner.catalog_tracker = tono_core::CatalogTracker::from_cached(&cached.response);
     inner.nodes = cached.nodes;
     inner.routing = sanitized_routing(cached.response.routing.as_ref(), &inner.nodes);
     enforce_selection_survival(inner);
@@ -785,6 +784,7 @@ mod tests {
             yaml,
             updated_at: None,
             routing: None,
+            routing_sha256: None,
         }
     }
 
@@ -862,6 +862,39 @@ mod tests {
         let effect = install_and_persist(&effect.tracker, &cache, &catalog(3)).unwrap();
         assert!(!effect.installed, "same revision + digest is idempotent");
         assert_eq!(effect.tracker.current_revision(), 3);
+    }
+
+    #[test]
+    fn routing_only_rotation_replaces_routing_at_same_revision() {
+        let dir = TempDir::new("persist-routing");
+        let cache = CatalogCache::new(dir.path(), Box::new(NoopCheck));
+        let with_password = |password: &str, served: &str| {
+            let mut response = catalog(5);
+            response.routing = Some(tono_core::CatalogRouting {
+                home_socks5: Some(tono_core::CatalogHomeSocks5 {
+                    host: "resi-gateway.example.com".into(),
+                    port: 11080,
+                    username: "resi-user".into(),
+                    password: password.into(),
+                }),
+                ..Default::default()
+            });
+            // Values produced by the control plane's `routingSha256` recipe.
+            response.routing_sha256 = Some(served.into());
+            response
+        };
+        let old = with_password("old-secret", "atX8ZGZ9FW7hp6tffFfundGCRMyiLyyDrpyrI-kZjVw");
+        let installed = install_and_persist(&CatalogTracker::new(), &cache, &old).unwrap();
+        assert!(installed.installed);
+
+        // Same revision, same YAML digest: only the credential rotated.
+        let rotated = with_password("new-secret", "NTPLX5Abvy0EPlYHQiEBDfgIUJ00gDWr-4RolAQdJVs");
+        let effect = install_and_persist(&installed.tracker, &cache, &rotated).unwrap();
+        assert!(effect.installed, "a routing-only rotation must not read as unchanged");
+        let cached = cache.load().unwrap().response;
+        assert_eq!(cached.routing.unwrap().home_socks5.unwrap().password, "new-secret");
+        let restarted = tono_core::CatalogTracker::from_cached(&cached);
+        assert!(!install_and_persist(&restarted, &cache, &rotated).unwrap().installed);
     }
 
     #[test]

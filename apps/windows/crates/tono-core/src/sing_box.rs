@@ -421,6 +421,7 @@ mod tests {
                 yaml,
                 updated_at: None,
                 routing: None,
+                routing_sha256: None,
             };
             let policy = TonoTrafficPolicyResponse {
                 revision: 29,

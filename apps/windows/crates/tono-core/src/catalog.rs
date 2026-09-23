@@ -56,6 +56,13 @@ pub struct ExitCatalogResponse {
     /// ([`sanitize_routing`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routing: Option<CatalogRouting>,
+    /// Freshness digest of `routing` ([`routing_digest`]), served only on the
+    /// per-account view. A routing-only rotation (rebind, unbind, SOCKS5
+    /// credential change) moves neither `revision` nor `sha256`, so this is
+    /// the third component of the install key. When present it must match
+    /// the served routing.
+    #[serde(rename = "routingSha256", default, skip_serializing_if = "Option::is_none")]
+    pub routing_sha256: Option<String>,
 }
 
 /// Split-routing directives from `GET exit-catalog`: `homeProxy` names the
@@ -192,6 +199,30 @@ pub fn catalog_digest(yaml: &str) -> String {
     URL_SAFE_NO_PAD.encode(Sha256::digest(yaml.as_bytes()))
 }
 
+/// Freshness digest of the routing document, the control plane's
+/// `routingSha256` recipe: home proxy, default proxy and the home SOCKS5
+/// (`host`, `port`, `username`, `password` joined by newlines) joined by
+/// newlines, SHA-256, base64url without padding. An absent document hashes
+/// as empty material, so an unbind moves the digest too.
+pub fn routing_digest(routing: Option<&CatalogRouting>) -> String {
+    let socks5 = routing
+        .and_then(|routing| routing.home_socks5.as_ref())
+        .map(|socks5| {
+            format!(
+                "{}\n{}\n{}\n{}",
+                socks5.host, socks5.port, socks5.username, socks5.password
+            )
+        })
+        .unwrap_or_default();
+    let material = format!(
+        "{}\n{}\n{}",
+        routing.and_then(|routing| routing.home_proxy.as_deref()).unwrap_or(""),
+        routing.and_then(|routing| routing.default_proxy.as_deref()).unwrap_or(""),
+        socks5
+    );
+    catalog_digest(&material)
+}
+
 /// Why a catalog (or its cache) was rejected.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum CatalogError {
@@ -223,6 +254,11 @@ pub fn validate_catalog(catalog: &ExitCatalogResponse) -> Result<Vec<ValidatedNo
     // so a plain string compare is sufficient.
     if catalog.sha256 != catalog_digest(&catalog.yaml) {
         return Err(CatalogError::InvalidResponse);
+    }
+    if let Some(served) = &catalog.routing_sha256 {
+        if *served != routing_digest(catalog.routing.as_ref()) {
+            return Err(CatalogError::InvalidResponse);
+        }
     }
     // 3. Parse and admit every node.
     let document: serde_yaml_ng::Value =
@@ -264,6 +300,7 @@ pub enum InstallOutcome {
 pub struct CatalogTracker {
     current_revision: i64,
     current_digest: Option<String>,
+    current_routing: Option<String>,
 }
 
 impl Default for CatalogTracker {
@@ -278,15 +315,27 @@ impl CatalogTracker {
         Self {
             current_revision: -1,
             current_digest: None,
+            current_routing: None,
         }
     }
 
     /// Seed from a previously verified cache so a download can never roll
-    /// back across restarts.
+    /// back across restarts. Assumes no routing document; use
+    /// [`CatalogTracker::from_cached`] when the cached response carries one.
     pub fn from_installed(revision: i64, digest: String) -> Self {
         Self {
             current_revision: revision,
             current_digest: Some(digest),
+            current_routing: Some(routing_digest(None)),
+        }
+    }
+
+    /// Seed from a verified cached response, including its routing digest.
+    pub fn from_cached(response: &ExitCatalogResponse) -> Self {
+        Self {
+            current_revision: response.revision,
+            current_digest: Some(response.sha256.clone()),
+            current_routing: Some(routing_digest(response.routing.as_ref())),
         }
     }
 
@@ -299,7 +348,8 @@ impl CatalogTracker {
     }
 
     /// Validate `catalog` (steps 1-3) and commit it unless its revision is
-    /// older. Equal revision with the same digest is an idempotent no-op.
+    /// older. Equal revision with the same digest and routing digest is an
+    /// idempotent no-op; a routing-only change at the same revision installs.
     /// Equal revision with a different digest installs: the revision is
     /// fleet-wide while the served body is issued per account (client UUID,
     /// filtered home exits), so it is the next account's or a re-issued
@@ -313,13 +363,16 @@ impl CatalogTracker {
         if catalog.revision < self.current_revision {
             return Err(CatalogError::StaleRevision);
         }
+        let routing = routing_digest(catalog.routing.as_ref());
         if catalog.revision == self.current_revision
             && self.current_digest.as_deref() == Some(catalog.sha256.as_str())
+            && self.current_routing.as_deref() == Some(routing.as_str())
         {
             return Ok(InstallOutcome::Unchanged);
         }
         self.current_revision = catalog.revision;
         self.current_digest = Some(catalog.sha256.clone());
+        self.current_routing = Some(routing);
         Ok(InstallOutcome::Installed(nodes))
     }
 }
@@ -557,6 +610,7 @@ mod tests {
             sha256: catalog_digest(yaml),
             updated_at: None,
             routing: None,
+            routing_sha256: None,
         }
     }
 
