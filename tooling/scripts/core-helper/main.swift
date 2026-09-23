@@ -123,8 +123,152 @@ func runCoreLifecyclePolicySelfTests() -> Bool {
     ]) == [31, 34]
 }
 
+/// Folds an object key the way Go's JSON decoder matches it to a struct field
+/// (`bytes.EqualFold`). Every option name the core knows is ASCII, and the only
+/// non-ASCII letters whose simple fold reaches ASCII are U+017F (s) and U+212A (k).
+func goFoldedJSONKey(_ key: String) -> String {
+    var folded = String.UnicodeScalarView()
+    for scalar in key.unicodeScalars {
+        switch scalar.value {
+        case 0x41...0x5A: folded.append(Unicode.Scalar(UInt8(scalar.value + 0x20)))
+        case 0x017F: folded.append("s")
+        case 0x212A: folded.append("k")
+        default: folded.append(scalar)
+        }
+    }
+    return String(folded)
+}
+
+/// Foundation keeps the first of a repeated object key; the core's Go decoder
+/// keeps the last and also binds case-folded spellings to the same option.
+/// Refuse any object whose decoded keys collide after that folding, so the
+/// allowlist below and the core always read the same value. The input has
+/// already been accepted by `JSONSerialization`, so only strings and container
+/// punctuation need to be tracked here.
+///
+/// Deliberately stricter than Go: this folds the keys of every object,
+/// including map-typed ones (such as a hosts DNS server's `predefined`),
+/// whose keys Go matches exactly and never folds. The app's own config never
+/// has keys that differ only in case (option names are fixed lowercase ASCII,
+/// and the predefined host names are lowercased and deduplicated before
+/// writing), so nothing it generates is refused. A future map with such keys
+/// would be.
+func jsonObjectKeysAreUnambiguous(_ contents: String) -> Bool {
+    let bytes = Array(contents.utf8)
+    func hex4(_ start: Int) -> UInt32? {
+        guard start + 4 <= bytes.count else { return nil }
+        var value: UInt32 = 0
+        for byte in bytes[start..<start + 4] {
+            guard let digit = Character(Unicode.Scalar(byte)).hexDigitValue else { return nil }
+            value = value << 4 | UInt32(digit)
+        }
+        return value
+    }
+    // Decodes the string whose opening quote is at `start`, returning its value
+    // and the index after the closing quote. Lone surrogates decode to U+FFFD,
+    // as they do in Go.
+    func decodeString(_ start: Int) -> (String, Int)? {
+        var decoded: [UInt8] = []
+        var index = start + 1
+        while index < bytes.count {
+            let byte = bytes[index]
+            if byte == UInt8(ascii: "\"") { return (String(decoding: decoded, as: UTF8.self), index + 1) }
+            guard byte == UInt8(ascii: "\\") else {
+                decoded.append(byte)
+                index += 1
+                continue
+            }
+            guard index + 1 < bytes.count else { return nil }
+            let escape = bytes[index + 1]
+            index += 2
+            switch escape {
+            case UInt8(ascii: "\""), UInt8(ascii: "\\"), UInt8(ascii: "/"): decoded.append(escape)
+            case UInt8(ascii: "b"): decoded.append(0x08)
+            case UInt8(ascii: "f"): decoded.append(0x0C)
+            case UInt8(ascii: "n"): decoded.append(0x0A)
+            case UInt8(ascii: "r"): decoded.append(0x0D)
+            case UInt8(ascii: "t"): decoded.append(0x09)
+            case UInt8(ascii: "u"):
+                guard var value = hex4(index) else { return nil }
+                index += 4
+                if (0xD800...0xDBFF).contains(value), index + 6 <= bytes.count,
+                   bytes[index] == UInt8(ascii: "\\"), bytes[index + 1] == UInt8(ascii: "u"),
+                   let low = hex4(index + 2), (0xDC00...0xDFFF).contains(low) {
+                    value = 0x10000 + ((value - 0xD800) << 10) + (low - 0xDC00)
+                    index += 6
+                }
+                let scalar = Unicode.Scalar(value) ?? "\u{FFFD}"
+                decoded.append(contentsOf: String(Character(scalar)).utf8)
+            default: return nil
+            }
+        }
+        return nil
+    }
+    // One frame per open container: nil for an array, the folded keys seen so
+    // far for an object.
+    var frames: [Set<String>?] = []
+    var nextStringIsKey = false
+    var index = 0
+    while index < bytes.count {
+        switch bytes[index] {
+        case UInt8(ascii: "{"):
+            frames.append(Set<String>())
+            nextStringIsKey = true
+            index += 1
+        case UInt8(ascii: "["):
+            frames.append(nil)
+            nextStringIsKey = false
+            index += 1
+        case UInt8(ascii: "}"), UInt8(ascii: "]"):
+            guard frames.popLast() != nil else { return false }
+            nextStringIsKey = false
+            index += 1
+        case UInt8(ascii: ","):
+            nextStringIsKey = frames.last.map { $0 != nil } ?? false
+            index += 1
+        case UInt8(ascii: "\""):
+            guard let string = decodeString(index) else { return false }
+            if nextStringIsKey {
+                guard var keys = frames.last ?? nil,
+                      keys.insert(goFoldedJSONKey(string.0)).inserted else { return false }
+                frames[frames.count - 1] = keys
+                nextStringIsKey = false
+            }
+            index = string.1
+        default:
+            index += 1
+        }
+    }
+    return frames.isEmpty
+}
+
+/// The parsed document with every object key folded as the core folds it.
+/// Returns nil on a collision, which `jsonObjectKeysAreUnambiguous` has
+/// already refused; the helper never traps on its input.
+func goFoldedJSONKeys(_ value: Any) -> Any? {
+    if let dictionary = value as? [String: Any] {
+        var folded: [String: Any] = [:]
+        for (key, child) in dictionary {
+            guard let child = goFoldedJSONKeys(child),
+                  folded.updateValue(child, forKey: goFoldedJSONKey(key)) == nil else { return nil }
+        }
+        return folded
+    }
+    if let array = value as? [Any] {
+        var folded: [Any] = []
+        for child in array {
+            guard let child = goFoldedJSONKeys(child) else { return nil }
+            folded.append(child)
+        }
+        return folded
+    }
+    return value
+}
+
 func ownedRuntimeConfigIsSafe(_ contents: String) -> Bool {
-    guard let object = try? JSONSerialization.jsonObject(with: Data(contents.utf8)) as? [String: Any],
+    guard jsonObjectKeysAreUnambiguous(contents),
+          let parsed = try? JSONSerialization.jsonObject(with: Data(contents.utf8)),
+          let object = goFoldedJSONKeys(parsed) as? [String: Any],
           Set(object.keys).isSubset(of: ["log", "dns", "inbounds", "outbounds", "route", "experimental"]),
           let route = object["route"] as? [String: Any], route["final"] as? String == "Tono-Exit",
           route["rule_set"] == nil,
@@ -544,6 +688,13 @@ func runOwnedRuntimeContractSelfTests() -> Bool {
             valid.replacingOccurrences(
                 of: #""listen":"127.0.0.1""#,
                 with: #""listen":"0.0.0.0""#
+            )
+        )
+        // Foundation keeps the first repeated key and the core keeps the last.
+        && !ownedRuntimeConfigIsSafe(
+            valid.replacingOccurrences(
+                of: #""route":{"final":"Tono-Exit""#,
+                with: #""route":{"final":"Tono-Exit","final":"direct""#
             )
         )
 }
