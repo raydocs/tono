@@ -152,9 +152,9 @@
 | H1-F1 | macOS Continuity 直连规则只按进程名匹配，未绑定受保护路径或代码身份；直连策略活动时，非预期进程的 web 端口流量可能经物理接口出去 | in-PR | [#325](https://github.com/raydocs/tono/issues/325)，[#327](https://github.com/raydocs/tono/pull/327) | 高·推导 | Windows 侧已明确不按进程名直连 |
 | H1-F2 | macOS reviewed 直连的默认安装路径不校验存在性与签名即授予路径前缀；Windows 对用户可写的官方布局目录授予前缀 | in-PR | [#332](https://github.com/raydocs/tono/issues/332)，[#336](https://github.com/raydocs/tono/pull/336)（macOS）；[#333](https://github.com/raydocs/tono/issues/333)（Windows，PR 待开） | 高·推导 | Windows 变体未修；运行时按路径匹配仍依赖目录不可写 |
 | H1-F3 | Windows TLS 嗅探对裸 IP 生效，与无 IP/进程条件的域名后缀直连规则组合，直连目的不受 pinned 地址约束 | in-PR | [#338](https://github.com/raydocs/tono/issues/338)，[#339](https://github.com/raydocs/tono/pull/339) | 高·推导 | 依赖 mihomo 嗅探语义，需实机；macOS 无嗅探，行为不同 |
-| H1-F4 | Windows WFP 只在出向授权层阻断，入向接受层无 block-all，外部发起的入向流不经隧道也不被阻断 | open | [#328](https://github.com/raydocs/tono/issues/328) | 高·推导 | 修复分支进行中、PR 待开；全局 IPv6 场景最现实；macOS PF 行为不同 |
-| H1-F6 | 两端 DHCP 放行只按端口，不限目的地址、接口和进程 | open | [#341](https://github.com/raydocs/tono/issues/341) | 中·实机 | 取决于非特权进程能否占用 DHCP 客户端端口 |
-| D7 | macOS 连接中 `tono-lan` 对私网任意端口、任意用户放行 | accepted-design | — | — | 设计残留，Windows 无此放行；应写入文档 |
+| H1-F4 | Windows WFP 只在出向授权层阻断，入向接受层无 block-all，外部发起的入向流不经隧道也不被阻断 | in-PR | [#328](https://github.com/raydocs/tono/issues/328)，[#343](https://github.com/raydocs/tono/pull/343) | 高·推导 | 全局 IPv6 场景最现实；macOS PF 行为不同 |
+| H1-F6 | 两端 DHCP 放行只按端口，不限目的地址、接口和进程 | in-PR | [#341](https://github.com/raydocs/tono/issues/341)，[#345](https://github.com/raydocs/tono/pull/345)（Windows）、[#347](https://github.com/raydocs/tono/pull/347)（macOS） | 中·实机 | 取决于非特权进程能否占用 DHCP 客户端端口 |
+| D7 | macOS 连接中 `tono-lan` 对私网任意端口、任意用户放行（含直连 LAN DNS） | in-PR | [#344](https://github.com/raydocs/tono/issues/344)，[#348](https://github.com/raydocs/tono/pull/348) | 中·推导 | #348 只收紧 LAN DNS；其余私网放行仍是设计残留，Windows 无此放行 |
 
 ## 8. 特权边界
 
