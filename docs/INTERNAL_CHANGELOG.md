@@ -32,6 +32,33 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows kill switch 入站接受默认拒绝（H1-F4）
+
+- **归属/来源**：G1 保护一致性（断开/连接时保护与 UI 一致）；影响 Windows Service
+  （`apps/windows/service`）。基线 main da7bad1b → 分支 `fix/wfp-inbound-accept-20260923`；
+  Issue #328；提交时未合 main。
+- **缺陷修复**：WFP 默认拒绝只装在 `ALE_AUTH_CONNECT_V4/V6`，`ALE_AUTH_RECV_ACCEPT_V4/V6`
+  没有 block（v6 只有 NDP permit、v4 层根本未建模）。远端发起的流只在 RECV_ACCEPT 授权一次，
+  其出向包不再经过 CONNECT 层，所以物理网卡上的监听端可接受连接，整条流不经隧道。改后
+  RECV_ACCEPT v4/v6 在同一子层加持久 floor block-all + 会话 block-all（权重 1，与 connect
+  层一致），并补 permit：loopback 地址/ALE flag 两种形式（hard，权重 8）、Locked 时 WinTUN
+  LUID（权重 8）、DHCP 服务器回包（v4 68←67、v6 546←547，权重 7）、原有 NDP。Windows 无 LAN
+  放行，因此不加 LAN 入站放行。`FILTER_NAMESPACE` 升到 v10（`…9e09…`）。
+- **新增/优化**：无。
+- **工程与测试**：新回归 `inbound_accept_on_the_physical_adapter_is_blocked_in_every_mode`
+  （`wfp_model.rs`，一个 `#[test]`）：三种模式下物理口入向 TCP（v4/v6）判 Block，loopback 判
+  Permit，TUN 接口仅 Locked 判 Permit。在未修复规则上的实测失败：仅加测试+层枚举的一次性分支
+  经 Windows CI（run 35842751048）失败于 `arbitrate` 的 “every layer must end in a block-all”
+  （该层无任何过滤器可判决）。随规则表变更同步修正三个计数/固定值断言：持久过滤器 2→4、
+  tunnel permit 2→4、namespace pin。
+- **验证**：本机（编辑机）未运行 cargo；回归与编译委托本 PR 的 GitHub-hosted `windows-2025`
+  CI。CI 的真实 WFP 引擎步骤只加载既有的多前缀 permit，没有加载新的 RECV_ACCEPT_V4 过滤器。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：未实机确认（RECV_ACCEPT 语义、mihomo controller/本地 DNS 的回环入向被 loopback
+  permit 覆盖、内核接受新层上的条件组合）。连接期间物理口上的入向服务（RDP/SMB/远程桌面、
+  Tailscale 等其他虚拟网卡入向）将被拒绝，与 macOS PF 行为一致。入站 DHCP permit 仍只按端口；
+  其进程/目的收窄见 #341。与 #341 的 Windows PR 都把 namespace 升到 v10，后合入者需改为 v11。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
