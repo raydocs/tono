@@ -52,10 +52,10 @@
   解析错 `?` 硬拒，`restore_resolver_policy` 四个调用点（无快照分支、证明通过后、损坏
   快照恢复、卸载 rung 2）全部被阻，每次重试读同一文件，产品内无出口；suppress 早夭的
   会话（读捕获失败发生在写 `EnableAutoDoh=0` 之前，策略根本未压制）同样被砖。现在
-  restore 侧对不可读捕获隔离（改名保留 `*.corrupt-<ts>.json`，参照主快照 quarantine
-  模式）后按“无捕获”语义继续：在位值即恢复结果，新标记
-  `TONO_DNS_CAPTURE_QUARANTINED` 随 `last_error` 在**成功**恢复上透出（App 按警告面
-  显示）。选择“保持现状而非猜测 Windows 默认值”的依据：早夭面在位值就是用户原值，
+  restore 侧对不可读捕获隔离（改名保留为 `protected-*.corrupt-<ts>`，无 `.json` 后缀，
+  参照主快照 quarantine 模式）后按“无捕获”语义继续：在位值即恢复结果，新标记
+  `TONO_DNS_CAPTURE_QUARANTINED` 随 `last_error` 在**成功**恢复上透出（App 映射见下方
+  续记）。选择“保持现状而非猜测 Windows 默认值”的依据：早夭面在位值就是用户原值，
   主动写猜测默认值会破坏它；suppress 已写入的面在位值为 0，恢复后用户可在设置中重新
   打开，损失被标记而非沉默。核心不变量：旁路文件损坏不得成为 Disconnect 的永久阻断，
   也不得伪造“已恢复加密 DNS”的正面证据（两者均不假）。
@@ -90,10 +90,39 @@
 - **剩余限制**：不放宽任何保护（NRPT 删除与策略注册表写失败仍 fail-closed 且可重试；
   隔离只作用于捕获文件本身）；损坏文件的原值不可恢复，只能隔离保留供手工诊断；
   未验证 Windows 11 实机断电产生的真实损坏文件；未把旁路文件纳入卸载器恢复状态清扫
-  （verify-V6 可选项，修复后残留只影响标记面不再阻断）；suppress 侧的隔离与"在位值为
-  自身压制值时不重捕获"只记引擎日志（该路径本就 warn 级，且后续 record_outcome 会清
-  `last_error`），用户可感知面由 restore 侧标记承担；enable 恢复路径上的隔离同样只记
-  日志；夹具通过不等于 G1 实机验收。
+  （verify-V6 可选项，修复后残留只影响标记面不再阻断）；suppress 侧隔离在当次 Connect
+  只记引擎日志，经下方续记的持久记录由随后的 restore 透出标记；enable 恢复路径上的隔离
+  同样只记日志；夹具通过不等于 G1 实机验收。
+
+### 2026-09-23 续记 · 审查意见：suppress 侧隔离留下持久“原值已丢失”记录；App 映射新标记
+
+- **缺陷修复（审查 Q1）**：标准 F2 时序——捕获文件损坏 → 下一次 Connect 的 suppress
+  隔离它，但在位值已是上一会话写入的 `EnableAutoDoh=0` / 已清零的 DoH 模板，不再重捕获
+  → Disconnect 找不到捕获 `Ok(None)` → restore 报**干净成功**，用户 DoH 偏好被静默关掉，
+  违反本条“不得伪造已恢复加密 DNS 的正面证据”。现在 suppress 侧隔离时留下持久记录
+  `protected-secure-dns.lost.json` / `protected-interface-doh.lost.json`（原子写，同捕获
+  文件纪律）：`EnableAutoDoh` 在位值为 0 而无法重捕获时写；DoH 模板只要发生隔离就写
+  （已清零的模板从在位集合中消失，重捕获必然不完整）。restore 在捕获处理成功后消费该
+  记录并返回“已隔离”，于是同一条 `TONO_DNS_CAPTURE_QUARANTINED` 成功附注在两种时序下
+  都会出现；捕获写回失败时记录保留供重试；记录删不掉时仍按存在报告，绝不因此拒绝
+  release。仍不猜测 Windows 默认值。
+- **App 映射（审查 Q2）**：`connection_health.rs` 的 `DNS_WARNING_MARKERS` 与 support 页
+  `dnsWarningMarkers` 加入 `TONO_DNS_CAPTURE_QUARANTINED`，与 degraded 标记同款警告面，
+  支持页不再把它显示为 last error。连接健康判定仍要求 `enabled && snapshot_present`，
+  该标记只在断开后的成功 restore 上出现，不放宽已连接健康门。Service 侧
+  `core/update.rs` 对 `last_error.is_none()` 的严格判定未改（与 degraded 标记既有行为
+  一致：更新 Prepare 会在下一次成功 DNS 操作清掉标记前拒绝）。
+- **测试**：新增一个窄回归（审查明确要求）
+  `a_capture_quarantined_by_suppress_is_still_reported_by_restore`（native_apply_tests.rs，
+  engine 级）：0 字节 `protected-interface-doh.json` → `suppress_interface_doh()`（夹具中无
+  启用模板，即已被上一会话清零）→ `restore_interface_doh()` 必须返回 `true`，再次 restore
+  返回 `false`。修改前的分支上 suppress 隔离后不留任何文件，restore 读到 `Ok(None)` 返回
+  `false`，测试必败。`EnableAutoDoh` 一侧使用同一记录机制，但 `suppress_encrypted_dns` 在
+  夹具下仍短路、`read_dword` 无夹具改道，未测试。
+- **验证**：本机（MacBook）未编译、未运行 cargo 或前端检查（本 worktree 无
+  node_modules），委托本 PR 的 `windows-2025` Service/App CI；提交时未获得结果。
+- **剩余限制**：旧版本 build 不认识 `.lost.json` 记录（回退安装会忽略它，回到修复前的
+  静默行为，不会阻断）；损坏文件原值仍不可恢复；未实机验证。
 
 ## 2026-09-22 · Windows 快照合并与损坏恢复不再把 TUN DNS 地址记为原始值
 

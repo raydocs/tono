@@ -720,3 +720,33 @@ async fn corrupt_interface_doh_capture_is_quarantined_not_a_permanent_refusal() 
     );
     Ok(())
 }
+
+/// R3-F2, the standard timeline: the capture goes zero-length, and the *next Connect* reaches
+/// it before any restore does. Its suppress quarantines the file, but the live templates are
+/// already zeroed by the earlier session, so there is nothing left to re-capture. The loss
+/// used to live only in that suppress's log line: the following restore found no capture at
+/// all and reported a clean result, leaving the user's DoH preference silently off. The
+/// restore must report the loss instead.
+#[test]
+#[serial_test::serial]
+fn a_capture_quarantined_by_suppress_is_still_reported_by_restore() -> Result<()> {
+    use super::super::{restore_interface_doh, suppress_interface_doh, test_io::{self, Fixture}};
+
+    let _fixture = Fixture::new(vec![effective(&entry(1), [9, 9, 9, 9], false)])?;
+    let capture_path =
+        test_io::with(|io| io.capture_dir.join("protected-interface-doh.json")).unwrap();
+    std::fs::write(&capture_path, b"")?;
+
+    // Connect: no enabled template is left in the fixture registry — they are ours, zeroed.
+    suppress_interface_doh()?;
+    // Disconnect.
+    assert!(
+        restore_interface_doh()?,
+        "a capture lost during suppress must reach the restore result, not read as clean"
+    );
+    assert!(
+        !restore_interface_doh()?,
+        "the loss is reported once, by the restore that consumed it"
+    );
+    Ok(())
+}

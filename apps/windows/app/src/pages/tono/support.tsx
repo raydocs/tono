@@ -186,11 +186,16 @@ const SupportPage = () => {
     }
   })
 
-  // DNS warning markers (TONO_DNS_UNVERIFIED / TONO_DNS_RESTORE_DEGRADED) ride in
-  // dnsLastError by design but are not failures — the tunnel stays protected. Showing
-  // them under "last error" panics users for a healthy connection, so they get their
-  // own row. Mirrors DNS_WARNING_MARKERS in src-tauri/src/tono/connection.rs.
-  const dnsWarningMarkers = ['TONO_DNS_UNVERIFIED', 'TONO_DNS_RESTORE_DEGRADED']
+  // DNS warning markers (TONO_DNS_UNVERIFIED / TONO_DNS_RESTORE_DEGRADED /
+  // TONO_DNS_CAPTURE_QUARANTINED) ride in dnsLastError by design but are not failures —
+  // the tunnel stays protected. Showing them under "last error" panics users for a healthy
+  // connection, so they get their own row. Mirrors DNS_WARNING_MARKERS in
+  // src-tauri/src/tono/connection.rs.
+  const dnsWarningMarkers = [
+    'TONO_DNS_UNVERIFIED',
+    'TONO_DNS_RESTORE_DEGRADED',
+    'TONO_DNS_CAPTURE_QUARANTINED',
+  ]
   const dnsWarning =
     report?.dnsLastError &&
     dnsWarningMarkers.some((marker) => report.dnsLastError!.includes(marker))
