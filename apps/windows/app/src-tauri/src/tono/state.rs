@@ -118,6 +118,13 @@ pub struct TaskRegistry {
     pub direct_lease_heartbeat: Option<JoinHandle<()>>,
     pub pin_refresh: Option<JoinHandle<()>>,
     pub switch: Option<JoinHandle<()>>,
+    /// R2-F2: bounded Service-truth poll while the FSM idles in Protected Offline (armed but
+    /// unverified in the defect's original shape). The connected-lifetime monitor only runs
+    /// while `is_connected`, so after a Service restart retired an unverified barrier nothing
+    /// re-read that verdict and the UI kept claiming a block over an open machine. Registered
+    /// on entry to that state, retired on exit; the loop itself also stops once the state is
+    /// gone, so it is never a resident task.
+    pub protection_resync: Option<JoinHandle<()>>,
 }
 
 impl TaskRegistry {
@@ -151,6 +158,10 @@ impl TaskRegistry {
         Self::abort(&mut self.switch);
     }
 
+    pub fn abort_protection_resync(&mut self) {
+        Self::abort(&mut self.protection_resync);
+    }
+
     /// Connection-scoped tasks: everything that drives the connect
     /// transaction or reacts to the tunnel. Aborted on disconnect and on a
     /// node switch; the catalog sync is account-scoped and survives both.
@@ -160,6 +171,7 @@ impl TaskRegistry {
         self.abort_direct_lease_heartbeat();
         self.abort_pin_refresh();
         self.abort_switch();
+        self.abort_protection_resync();
     }
 }
 

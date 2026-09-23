@@ -105,7 +105,8 @@ use endpoints::proxy_endpoints_for;
 pub use endpoints::{proxy_endpoint_of, unique_proxy_endpoints};
 use monitor::{IN_PLACE_RECOVERY_COOLDOWN, NETWORK_MONITOR_INTERVAL, monitor_interval, wechat_paths_changed};
 pub(crate) use monitor::{
-    handle_network_change, handle_policy_behavior_change, policy_behavior_change_allows_in_place_recovery,
+    ensure_protection_resync, ensure_protection_resync_locked, handle_network_change,
+    handle_policy_behavior_change, policy_behavior_change_allows_in_place_recovery, spawn_protection_resync,
 };
 #[cfg(test)]
 use probes::EXIT_PROBE_ADVISORY_BUDGET;
@@ -610,6 +611,11 @@ async fn fail_connect_observed(
         }
     }
     commands::emit_status(app, &commands::status_of(&inner));
+    // R2-F2: a failure outcome that keeps the machine armed now sits idle in Protected
+    // Offline (verified or not). Register the Service-truth poll: the connected monitor only
+    // runs while `is_connected`, and a Service restart can retire an unverified barrier with
+    // nothing else ever re-reading that verdict.
+    monitor::ensure_protection_resync_locked(&mut inner, || monitor::spawn_protection_resync(state, app));
     true
 }
 

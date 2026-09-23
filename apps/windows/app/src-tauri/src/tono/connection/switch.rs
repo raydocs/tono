@@ -47,6 +47,11 @@ pub async fn selected_node_vanished(state: Arc<TonoState>, app: AppHandle, expec
                     inner.fsm.initial_release_failed();
                 }
                 commands::emit_status(&app, &commands::status_of(&inner));
+                // R2-F2: the unverified arm this leaves behind idles in Protected Offline
+                // until the user picks a node — it must keep its Service-truth poll.
+                super::monitor::ensure_protection_resync_locked(&mut inner, || {
+                    super::monitor::spawn_protection_resync(&state, &app)
+                });
                 inner.connect_generation
             };
             logging!(warn, Type::Service, "Tono: 选中节点从新目录中消失，停止核心但保持封锁");
@@ -314,6 +319,11 @@ pub(super) async fn cold_switch_selected_node(
             inner.fsm.initial_release_failed();
         }
         commands::emit_status(&app, &commands::status_of(&inner));
+        // R2-F2: same armed idle state as the vanish path; the re-entry attempt below may
+        // be guard-rejected, and the barrier's Service truth must not go unwatched then.
+        super::monitor::ensure_protection_resync_locked(&mut inner, || {
+            super::monitor::spawn_protection_resync(&state, &app)
+        });
     }
     let _ = service::tono_stop_core(false).await;
     // Startup and failure reconciliation acquire their own lifecycle ownership. Transfer only

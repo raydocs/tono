@@ -74,8 +74,14 @@ async fn start_explicit_release(
             run_release_sequence(&worker_state, &worker_app, guard, explicit_disconnect).await
         },
         move || async move {
-            let inner = task_state.lock().await;
+            let mut inner = task_state.lock().await;
             commands::emit_status(&task_app, &commands::status_of(&inner));
+            // R2-F2: a failed release leaves an armed machine idle in Protected Offline, and
+            // after this repaint nothing re-reads the Service. Register the Service-truth
+            // poll for exactly that outcome; a successful release is a no-op (not watching).
+            super::monitor::ensure_protection_resync_locked(&mut inner, || {
+                super::monitor::spawn_protection_resync(&task_state, &task_app)
+            });
         },
     ).await
 }
