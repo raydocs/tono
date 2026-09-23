@@ -32,6 +32,43 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 升级 Replaced + 已验证 Disconnect 的「已安装且已释放」终态（R4-F7）
+
+- **归属**：G3 受保护升级；Windows Service 更新事务（`apps/windows/service`）+ 协议文档。
+- **来源**：基线 main `498ed426`（含 #301）→ 分支 `fix/update-replaced-release-20260923`；
+  Issue #358；PR 见续记；提交时未合 main。
+- **缺陷修复（R4-F7，源码推导，非 #301 引入）**：升级已完成并被新 App 收养（Replaced）
+  后自动重连失败、用户点 Restore internet → Disconnect 已验证、网络已释放，但 Disconnect
+  handler 只归档未消费与 RolledBack/Uncertain，Replaced 永久 pending；此后连接、
+  Adopt/Commit、再更新、Quit/登出释放、卸载/重装全部被拒，产品内无出口（不泄漏流量）。
+  改后：新增 `Store::retire_released_installation` 归档终态——前提为 execution=Replaced、
+  Disconnect 已验证为 Unprotected、请求方经 `authenticate_successor` 证明为注册安装根
+  的 target 身份 successor（旧字节 App 仍可 Disconnect 但不能结束 Replaced 事务）、
+  已装三组件等于 target 且 durable plan 每个成员 sha256 等于其 `new_digest`。
+- **新增/优化**：释放不等于 commit——phase、requiredRecovery、successor 证据与
+  consumed/generation 高水位原样进归档，不走 `Committed` 清理路径。备份清理归属：
+  该事务之后不会再有 commit 或执行器运行，由 Service 在清空槽位**之前**删除每个 plan
+  成员绑定的 `.rollback/.restore/.publish` 副本（路径须等于成员目标+后缀、位于安装根或
+  Service 目录；只删普通文件）；否则它们会拒绝下一次升级的 prepare。私有 attempt 证据
+  （payload、plan、executor、package）保留。删除失败则事务保持 pending、可重试。
+  UPDATE_PROTOCOL_V1.md 澄清节新增该条并删去对应「open」限制。
+- **工程与测试**：新增 1 个 `#[test]`
+  `update_replaced_attempt_released_by_verified_disconnect_reaches_archive_without_commit`
+  （update_transaction.rs）：旧字节 peer 被拒、备份释放失败保持 pending、成功时释放先于
+  归档、归档 receipt 未变（phase 仍 InstalledIdentityVerified）、高水位 (74, 92) 保持。
+  旧代码上该归档出口不存在（测试无法编译，即无出口本身）。
+- **验证**：本机未运行任何 cargo（执行位置决定）；委托本 PR 的 GitHub-hosted
+  `windows-2025` Service lane（含 `update_transaction::tests::update_` 定向枚举）。
+  结果见续记。Service handler 的原生部分（installed_components、plan 逐成员摘要、
+  文件删除）无单测，未在 Windows 设备上执行。
+- **候选/发布**：无新包，仅源码。
+- **版本生效**：该出口由升级后已安装的**新** Service 执行（Disconnect handler），故只要
+  目标版本含本修复即生效，不依赖旧版执行器；从不含本修复的版本升级到不含本修复的版本
+  不受益。
+- **剩余限制**：Windows 11 实机「升级后重连失败 → Restore internet → 可再连接/再更新」
+  未验收；恢复判定 TargetVerified 与 `retire_rolled_back` 的逐成员校验另行修复
+  （#301 跟进项 2）；App 侧 Disconnect 二次确认未做。
+
 ## 2026-09-23 · Windows 升级事务中断后无终态/误回滚的结构修复（F1/F4/F6）
 
 - **归属**：G3 受保护升级中断恢复；Windows Service 更新事务

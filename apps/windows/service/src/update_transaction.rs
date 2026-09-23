@@ -446,6 +446,48 @@ impl Store {
         self.archive_attempt(&attempt_id, atomic_write)
     }
 
+    /// "Installed and released" terminal for a completed replacement whose
+    /// owner then released protection with a verified explicit Disconnect.
+    /// This is not commit: the phase, recorded obligation, successor evidence
+    /// and consumed/generation high-water are archived unchanged. Only a
+    /// provable target-identity successor may end it; the caller separately
+    /// proves the installed plan equals the target. `release_backups` removes
+    /// the retained rollback copies before the slot clears (the Service owns
+    /// that cleanup here, because no executor or commit will ever run for
+    /// this attempt); it must be idempotent so a failure leaves a retryable
+    /// pending record.
+    pub fn retire_released_installation(
+        &mut self,
+        owner: &str,
+        peer: &Image,
+        release_backups: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
+        self.retire_released_installation_with(owner, peer, release_backups, atomic_write)
+    }
+
+    fn retire_released_installation_with(
+        &mut self,
+        owner: &str,
+        peer: &Image,
+        release_backups: impl FnOnce() -> Result<()>,
+        archive: impl FnOnce(&Path, &[u8]) -> Result<()>,
+    ) -> Result<()> {
+        let a = self.disconnect_peer(owner, peer)?;
+        ensure!(
+            a.execution == Execution::Replaced
+                && a.disconnect
+                    .as_ref()
+                    .is_some_and(|d| d.verified_at_unix.is_some()),
+            "only a verified Disconnect of a replaced attempt can be released"
+        );
+        // Same proof as adoption: target bytes at the registered path, and
+        // either the recorded successor or a later incarnation superseding it.
+        self.authenticate_successor(peer)?;
+        release_backups()?;
+        let attempt_id = self.attempt()?.receipt.attempt_id.clone();
+        self.archive_attempt(&attempt_id, archive)
+    }
+
     /// Only a target-identity App at the registered installation can adopt:
     /// the executor-created successor directly, or — once that recorded
     /// incarnation is gone — a later process whose current bytes are the
@@ -1108,6 +1150,92 @@ pub(crate) mod tests {
         store.retire_unconsumed(owner, &peer).unwrap();
         assert!(!store.pending());
         assert_eq!(store.state.consumed_sequence, 73);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_replaced_attempt_released_by_verified_disconnect_reaches_archive_without_commit() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        let components = target(&store.attempt().unwrap().manifest)
+            .components
+            .clone();
+        let successor = Image {
+            pid: 30,
+            started_at: 400,
+            path: peer.path.clone(),
+            sha256: components.app_sha256.clone(),
+        };
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().execution = Execution::Replaced;
+        next.attempt.as_mut().unwrap().successor_image = Some(successor.clone());
+        store.save(next).unwrap();
+        let owner = "windows:fixture-owner";
+        store
+            .observe(
+                owner,
+                &successor,
+                92,
+                1_900_000_003,
+                Observation::InstalledIdentityVerified { components },
+            )
+            .unwrap();
+        // Post-upgrade reconnect failed; the user pressed Restore internet.
+        store
+            .request_disconnect(owner, &successor, 1_900_000_004)
+            .unwrap();
+        store
+            .verify_disconnect(owner, &successor, 1_900_000_005, Protection::Unprotected)
+            .unwrap();
+        let original = store.attempt().unwrap().receipt.clone();
+        // Old App bytes at the same path may Disconnect but cannot end a
+        // replaced attempt; a failed backup release leaves it retryable.
+        assert!(
+            store
+                .retire_released_installation(owner, &peer, || panic!("unauthenticated release"))
+                .is_err()
+        );
+        assert!(
+            store
+                .retire_released_installation(owner, &successor, || anyhow::bail!("backup busy"))
+                .is_err()
+        );
+        assert!(store.pending());
+        let mut released = false;
+        store
+            .retire_released_installation_with(
+                owner,
+                &successor,
+                || {
+                    released = true;
+                    Ok(())
+                },
+                |path, bytes| {
+                    let current: State =
+                        serde_json::from_slice(&std::fs::read(root.join("state.json"))?)?;
+                    assert!(current.attempt.is_some(), "archive must precede release");
+                    atomic_write(path, bytes)
+                },
+            )
+            .unwrap();
+        assert!(released, "backup cleanup ownership is exercised before archive");
+        let archive: State = serde_json::from_slice(
+            &std::fs::read(root.join(format!("retired-{}.json", original.attempt_id))).unwrap(),
+        )
+        .unwrap();
+        let archived = archive.attempt.unwrap();
+        assert_eq!(archived.receipt, original, "release is not commit");
+        assert_eq!(archived.receipt.phase, Phase::InstalledIdentityVerified);
+        assert_eq!(archived.successor_image, Some(successor));
+        drop(store);
+        let store = Store::open(&root).unwrap();
+        assert!(!store.pending());
+        assert_eq!(
+            (store.state.consumed_sequence, store.state.generation),
+            (74, 92)
+        );
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
     }
