@@ -32,6 +32,33 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Claude 账号指派与替换改为单个 D1 batch
+
+- **归属**：ops 任务（`docs/ops/plan-2026-09-11.md` 4.2 审查残留：开户/指派写路径；
+  其结果也是 1.6 月结对账中 assigned 账号与漏斗 `first_entitled_at` 的输入）；控制面
+  `services/control-plane`。不属客户发布门。
+- **来源**：内部审查 H8-F5，Issue #401；分支 `fix/product-account-assign-20260923`，基线
+  origin/main 18301fc5。提交时未合 main。无 migration（沿用 0023 的 `account_ref` 唯一索引与
+  每用户仅一个 assigned 的部分唯一索引）。
+- **缺陷修复**：两位运营同时把同一 pooled 账号指派给两位客户，两次都 201；输家被写上
+  `plan`、`first_entitled_at` 和 `assigned` 事件，名下却没有账号。替换先退旧、再单独建新，
+  第二步失败时客户两头落空。改后：`createAssignedProductAccount` 把「取账号 + 事件 +
+  开通标记 + 审计」放进一个 D1 batch，取账号语句带 `status='pooled'` 条件，其后每条都以
+  `changes() > 0` 串联；取账号未命中返回 409 `ACCOUNT_REF_IN_USE`，不留事件、标记或审计；
+  唯一索引冲突同样整批回滚（每用户已有 assigned 时为 409 `PRODUCT_ALREADY_ASSIGNED`）。
+  `replaceProductAccount` 把退旧、指派新号、`replaced` 事件与审计放进同一个 batch；退旧本身
+  要求目标仍可用（pooled 或尚未登记），失败时原账号保持 assigned。
+- **新增/优化**：无。
+- **工程与测试**：一个 Worker `it`（`test/worker.test.ts`
+  `assigns a pooled Claude account to only one of two concurrent users`）。
+- **验证**：MacBook 本机 worktree：该 `it` 在旧代码上失败（两个请求都 201，期望 [201, 409]），
+  修复后通过；已有替换原子性/pooled 替换测试仍通过；`npx vitest run`（control-plane 全量）
+  43 个文件、892 个测试通过；`npm run typecheck`、`npm run check:budgets` 通过。未部署，
+  未碰 remote D1。
+- **候选/发布**：仅源码，无新候选；Worker 未部署。
+- **剩余限制**：替换的部分失败路径由 batch 的事务语义保证，没有单独的故障注入测试；
+  指派审计现在与写入同批，`ops_audit` 不可写时整次指派失败（原先静默跳过审计）。
+
 ## 2026-09-23 · 后台可选策略替换失败后必须调度受保护重连
 
 - **归属**：G1（断开与恢复：稳定网络上的 fail-closed 主机不滞留 Protected Offline）；
