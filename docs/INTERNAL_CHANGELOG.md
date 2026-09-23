@@ -32,6 +32,38 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · 控制面 refresh 轮换的丢响应宽限（#314）
+
+- **归属/来源**：G1 保护不因网络故障释放（hunt H3-F4）；影响控制面 Worker
+  `/api/v1/auth/refresh` 与 D1 `sessions`。基线 main
+  [244075f2](https://github.com/raydocs/tono/commit/244075f2)，分支
+  `fix/refresh-replay-grace-20260923`，Issue #314；未合 main、未部署。
+- **缺陷修复**：服务端已轮换 refresh、但响应丢失（大陆链路超时；客户端对超时的 POST
+  不重试），客户端下次用旧 token 得到 401，两端都把它当成会话死亡，于是登出并释放
+  PF/WFP。现在轮换会记录 `rotated_at` / `successor_id`。10 分钟内重放刚轮换的
+  token 可以恢复一次：仅当后继仍有效、且自身从未轮换时，服务端替客户端再轮换一次后继，
+  整条链仍只保留一个有效 session。窗口外、第二次重放、后继已被使用/登出/吊销时，
+  仍返回 401。吊销旧 session 与插入后继放进同一个 D1 batch，后继 INSERT 以抢到吊销为条件，
+  消除原来「旧 session 已吊销、后继插入失败」的部分提交。
+- **新增/优化**：`tokens()` 与 refresh 逻辑移到 `src/sessions.ts`（`index.ts` 行数上限 4014，
+  当前 3957）。新 migration `0077_session_rotation_successor.sql`。
+- **工程与测试**：新增一个 Worker `it`
+  （`honours one replay of a just-rotated refresh token whose response was lost`）。
+  删除 lifecycle 用例中「立即重放必须 401」这一条断言：它把无宽限写成了契约，
+  重放语义现在由新 `it` 覆盖。属于测试契约修正。
+- **客户端**：核实后不改。两端都明确设计为只有权威的账户丢失（401）才释放
+  （macOS `AccountSession+Telemetry.swift` "only auth sign-out disarms"；Windows
+  `REPORT.md` restore-401 走 `release_explicit()`），网络错误保留保护。缺陷在于服务端
+  产生了假 401。
+- **验证**：本机（MacBook，worktree）新 `it` 在旧代码上失败（重放返回 401，期望 200），
+  修复后通过；`services/control-plane` 下 `npx vitest run` 43 个文件、892 个用例全部通过；
+  `npm run typecheck`、`check:contract`、`check:budgets` 通过。未对远端 D1 执行 migration，未部署。
+- **候选/发布**：仅源码，无新候选。部署顺序：先对 D1 执行 0077 migration，再部署 Worker；
+  否则 refresh 会因缺列失败。
+- **剩余限制**：Windows 在异步写 Credential Manager 之前被终止、且超过 10 分钟后才启动，
+  这种情况仍是真 401，需要客户端持久化改动，记录在 #314。宽限期内，持有已轮换旧 token
+  的第三方可以顶掉尚未轮换的后继（合法客户端随后得到 401），这种暴露只限 10 分钟内一次。
+
 ## 2026-09-23 · Windows App 在 Protected Offline（armed 未验证）期间的 Service 真值再同步
 
 - **归属/来源**：G1 断开/保护状态与实际一致（R2-F2）；影响 Windows App
