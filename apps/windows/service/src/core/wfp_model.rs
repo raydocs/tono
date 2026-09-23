@@ -76,8 +76,9 @@ pub const MAX_API_HOST_IPS: usize = 8;
 /// port-53 block over the default-deny floor; v7: `…9e06…` per-packet outbound-transport
 /// enforcement; v8: `…9e07…` Mihomo-app-scoped ALE plus exact transport tuples for
 /// lease-backed DIRECT; v9: `…9e08…` ALE-only stateful enforcement, keeping app identity and
-/// tuple in one filter and relying on documented policy-change reauthorization for stale flows.)
-const FILTER_NAMESPACE: u128 = 0x2f7c_9e08_0000_4a6c_0000_0000_0000_0000;
+/// tuple in one filter and relying on documented policy-change reauthorization for stale flows;
+/// v10: `…9e09…` DHCP client permits bounded to broadcast/multicast and non-public servers.)
+const FILTER_NAMESPACE: u128 = 0x2f7c_9e09_0000_4a6c_0000_0000_0000_0000;
 
 const fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
@@ -224,6 +225,17 @@ fn hard_permit(mut filter: FilterSpec) -> FilterSpec {
     filter
 }
 
+/// Where a DHCPv4 client may send: the limited broadcast, and the non-public ranges a LAN or
+/// carrier-side DHCP server answers unicast renewals from.
+const DHCP_V4_SERVER_PREFIXES: [([u8; 4], u8); 6] = [
+    ([255, 255, 255, 255], 32),
+    ([10, 0, 0, 0], 8),
+    ([100, 64, 0, 0], 10),
+    ([169, 254, 0, 0], 16),
+    ([172, 16, 0, 0], 12),
+    ([192, 168, 0, 0], 16),
+];
+
 /// The persistent fail-closed floor: address-or-ALE loopback, DHCP, and NDP permits over
 /// persistent ALE block-alls. The independent loopback paths are deliberate: real Windows has
 /// exposed controller connections through address matching and DNS through ALE classification.
@@ -231,6 +243,37 @@ pub fn intent_floor() -> Vec<FilterSpec> {
     use Condition as C;
     use FilterAction as A;
     use LayerKind as L;
+    // DHCP is identified by ports alone, and nothing stops another process from sending from
+    // the client port. Bound the destination as well, so the permit reaches only where a DHCP
+    // client legitimately sends: the limited broadcast, or a server in non-public space for
+    // unicast renewal. A server on a public address loses unicast renewal only; the client's
+    // broadcast rebind still renews the lease. WFP ORs repeated address conditions, so each
+    // list below is one "destination is one of" condition.
+    let mut dhcp_v4 = vec![
+        C::Protocol(IpProtocol::Udp),
+        C::LocalPort(68),
+        C::RemotePort(67),
+    ];
+    dhcp_v4.extend(DHCP_V4_SERVER_PREFIXES.iter().map(|(addr, prefix)| {
+        C::RemoteAddressV4 {
+            addr: *addr,
+            prefix: *prefix,
+        }
+    }));
+    let dhcp_v6 = vec![
+        C::Protocol(IpProtocol::Udp),
+        C::LocalPort(546),
+        C::RemotePort(547),
+        // All_DHCP_Relay_Agents_and_Servers (RFC 8415) and link-local servers.
+        C::RemoteAddressV6 {
+            addr: [0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 2],
+            prefix: 128,
+        },
+        C::RemoteAddressV6 {
+            addr: [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            prefix: 10,
+        },
+    ];
     vec![
         hard_permit(spec(
             "intent/permit-loopback-address-v4".into(),
@@ -280,11 +323,7 @@ pub fn intent_floor() -> Vec<FilterSpec> {
             L::AleAuthConnectV4,
             WEIGHT_INFRA_PERMIT,
             A::Permit,
-            vec![
-                C::Protocol(IpProtocol::Udp),
-                C::LocalPort(68),
-                C::RemotePort(67),
-            ],
+            dhcp_v4,
             false,
         ),
         spec(
@@ -293,11 +332,7 @@ pub fn intent_floor() -> Vec<FilterSpec> {
             L::AleAuthConnectV6,
             WEIGHT_INFRA_PERMIT,
             A::Permit,
-            vec![
-                C::Protocol(IpProtocol::Udp),
-                C::LocalPort(546),
-                C::RemotePort(547),
-            ],
+            dhcp_v6,
             false,
         ),
         spec(
@@ -958,7 +993,7 @@ mod tests {
         // Upgrade safety: the key-only diff adopts anything with a matching key, so the
         // namespace must change whenever the rule tables do. Pin the current marker (see the
         // constant's doc comment); any rule-table change must bump it and this pin.
-        assert_eq!(FILTER_NAMESPACE >> 64, 0x2f7c_9e08_0000_4a6c);
+        assert_eq!(FILTER_NAMESPACE >> 64, 0x2f7c_9e09_0000_4a6c);
     }
 
     #[test]
@@ -1511,6 +1546,31 @@ mod tests {
                     arbitrate(&filters, &inbound),
                     FilterAction::Permit,
                     "{mode:?}: NDP inbound type {ty}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn dhcp_client_permits_do_not_reach_public_destinations() {
+        for mode in [
+            KillSwitchStatusMode::Bootstrap,
+            KillSwitchStatusMode::Locked,
+            KillSwitchStatusMode::Blocked,
+        ] {
+            let filters = expected_filters(&config(mode));
+            for (layer, local, remote, ip, expected) in [
+                (LayerKind::AleAuthConnectV4, 68, 67, "203.0.113.8", FilterAction::Block),
+                (LayerKind::AleAuthConnectV4, 68, 67, "255.255.255.255", FilterAction::Permit),
+                (LayerKind::AleAuthConnectV6, 546, 547, "2001:db8::1", FilterAction::Block),
+                (LayerKind::AleAuthConnectV6, 546, 547, "ff02::1:2", FilterAction::Permit),
+            ] {
+                let mut probe = packet(layer, IpProtocol::Udp, ip, remote);
+                probe.local_port = Some(local);
+                assert_eq!(
+                    arbitrate(&filters, &probe),
+                    expected,
+                    "{mode:?}: DHCP client port to {ip}"
                 );
             }
         }
