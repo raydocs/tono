@@ -294,6 +294,9 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
       );
       await bumpCatalogRevision(e);
       await enqueueRefreshCatalogForUser(e, String(user.id));
+      // Audited here, not only by the closing user.onboard row: a later
+      // account-assignment 409 would otherwise leave this binding unrecorded.
+      await writeOpsAudit(e, actor.email, 'home.assign', 'user', String(user.id), `onboard bound home for ${address}`);
     }
     binding = await loadHomeBinding(e, String(user.id));
     if (b.accountRef) {

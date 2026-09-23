@@ -2928,6 +2928,28 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await adminFetched.json() as any).yaml).toContain('type: hysteria2');
   });
 
+  it('audits a home exit SOCKS5 password change without recording the password', async () => {
+    const created = await admin('home-exits', {
+      proxyName: 'Audit Socks Home',
+      displayName: '审计 Socks',
+      kind: 'socks5',
+      socks5Host: '203.0.113.60',
+      socks5Port: 11080,
+      socks5Username: 'resi-audit',
+      socks5Password: 'old-upstream-secret',
+    });
+    expect(created.status).toBe(201);
+    const homeId = ((await created.json()) as any).homeExit.id;
+    const patched = await admin(`home-exits/${homeId}`, { socks5Password: 'new-upstream-secret' }, 'PATCH');
+    expect(patched.status).toBe(200);
+    const audit = await env.DB.prepare(
+      "SELECT * FROM ops_audit WHERE action = 'home.update' AND target_id = ?",
+    ).bind(homeId).first<any>();
+    expect(audit).toMatchObject({ actor_type: 'token_admin', target_type: 'home_exit' });
+    expect(String(audit.summary)).toContain('socks5Password');
+    expect(String(audit.summary)).not.toContain('upstream-secret');
+  });
+
   it('binds one home exit per user and filters that proxy from other catalogs', async () => {
     const yaml = `proxies:
   - name: "Shared JP"

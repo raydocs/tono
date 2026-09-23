@@ -323,6 +323,10 @@ export async function homeExitsResource(
     }
     const row = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(mt[1]).first<Row>();
     await bumpCatalogRevision(e);
+    // Field names only: the SOCKS5 credential itself never enters the audit log.
+    const changed = ['proxyName', 'displayName', 'egressIpv4', 'kind', 'socks5Host', 'socks5Port',
+      'socks5Username', 'socks5Password', 'status', 'notes'].filter((field) => b[field] !== undefined);
+    await writeOpsAudit(e, actorEmail, 'home.update', 'home_exit', mt[1], `${displayName}: changed ${changed.join(', ') || 'nothing'}`);
     return Response.json({ homeExit: publicHomeExit(row!) });
   }
   if (mt && m === 'DELETE') {
@@ -335,6 +339,7 @@ export async function homeExitsResource(
     const deleted = await e.DB.prepare('DELETE FROM home_exits WHERE id = ?').bind(mt[1]).run();
     if (!deleted.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
     await bumpCatalogRevision(e);
+    await writeOpsAudit(e, actorEmail, 'home.delete', 'home_exit', mt[1], 'deleted');
     return new Response(null, { status: 204 });
   }
   if (resource === 'home-bindings' && m === 'GET') {
