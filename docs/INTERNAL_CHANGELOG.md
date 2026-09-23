@@ -32,6 +32,51 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · 永不 armed 的内部转换不得被重连 loop 判为外部 release
+
+- **归属**：G1（断开与恢复：用户连接意图不被静默丢弃）；macOS 客户端 `apps/macos`。
+- **来源**：分支 `fix/macos-external-release-misjudge-20260922`，叠在
+  `fix/macos-tun-switch-guard-20260922`（PR #298）之上，基线同该分支；R1-F3，出自
+  2026-09-22 macOS 连接生命周期并发/时序审查及 V2 对抗核实（已确认；helper 未安装
+  子变体因 `.unavailable` 自愈，不在本条范围）。提交时未合 main。
+- **缺陷修复**：连接中途（PF 尚未 arm，如启动即点 Connect 撞上立即策略刷新）到达的
+  托管流量策略更新走 `installManagedTrafficPolicy` 的 `disconnect(release:false)` +
+  `scheduleProtectedReconnect(immediate:true)`；teardown 的 `restrictToBootstrap` 因
+  `!isArmed` 空转，`completeDisconnect` 仍发布 `isProtectionBlocked`；重连 loop 的
+  `reconcileConfirmedExternalProtectionRelease` 把 helper「无持久化 kill-switch 状态
+  （wanted=false）」误判为 root 外部 release，`acceptConfirmedExternalProtectionRelease`
+  取消 loop、清空错误并写假 `external_protection_release_confirmed` 审计——用户的
+  Connect 意图静默消失，终态 idle 无错误无重试。同一入口：唤醒重试耗尽后的
+  `scheduleProtectedReconnect()`（`AppState.swift` wake 路径）在同样 never-armed 状态
+  同样静默退出。修复：`scheduleProtectedReconnect` 在调度时快照
+  `KillSwitchService.isArmed`，loop 的 external-release 确认仅在调度时已 armed 的前提
+  下进行（`reconcileConfirmedExternalProtectionRelease(protectionWasArmed:)` 前置
+  守卫），never-armed 的内部转换不再冒充外部 release，loop 继续重连。真外部 release
+  检测语义保持（曾 armed 且 helper 认证回答 wanted=false 仍被接受并退出）；激活路径
+  `reconcileExternalProtectionState()` 走默认参数，行为不变；loop 从不 disarm，不放宽
+  保护。
+- **新增/优化**：`NetworkProtectionOperations` 增加 `refreshKillSwitchStatus` seam
+  （默认真实 `PrivilegedRuntimeCoordinator.refreshKillSwitchStatus`，生产行为不变），
+  `reconcileConfirmedExternalProtectionRelease` 改经 seam 调用以便测试注入状态 IPC。
+- **工程与测试**：新增一个窄 XCTest
+  `ProtectedReconnectTests.testInternalTransitionReconnectDoesNotTreatNeverArmedHelperAsExternalRelease`：
+  fixture `isConnecting` + `isArmed=false` + 一个可被选中但过不了 owned-node 校验的
+  目录节点（使 loop 的 connect 尝试在任何特权 helper/core 操作之前快速失败，其
+  pre-arm release teardown 按既有设计结束 loop），`refreshKillSwitchStatus` seam 返回
+  `.confirmed(requiresProtectionRecovery:false)`，其余 seam 空操作；执行
+  `disconnect(releaseKillSwitch:false)` + `scheduleProtectedReconnect(immediate:true)` 并
+  等 loop 结束；断言 `lastConnectionFailure` 与 `errorMessage` 非空——即一次真实 connect
+  尝试已发生且其失败文案留存。当前实现 loop 静默退出、两值为 nil，断言失败。
+- **验证**：编辑机（MacBook，按 2026-09-14 执行位置决定）只编辑未编译未运行——未执行
+  `xcodebuild`/`swift build`/`swift test`；Swift 语法、访问级别与调用链人工自查。回归
+  委托本 PR CI（GitHub-hosted `macos-26`）；提交时 CI 结果未知，不沿用任何旧 SHA 绿灯。
+  准确受测源码为 PR head。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：F2（睡眠改写显式 release / never-armed 的 Protected Offline 误报）与
+  F4（后台可选策略失败漏调度重连）为不同根因（V2 判定），另行修复不在本条；替换窗口
+  与外部 release 的实机量化未做。
+
+## 2026-09-23 · coreMonitor 不得把运行时替换的瞬时 utun 消失判为 TUN 死亡
 ## 2026-09-23 · coreMonitor 不得把运行时替换的瞬时 utun 消失判为 TUN 死亡
 
 - **归属**：G1（已连接=能用：切换/热重载不掉线）；macOS 客户端 `apps/macos`。
