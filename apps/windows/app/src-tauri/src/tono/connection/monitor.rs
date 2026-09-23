@@ -1004,6 +1004,7 @@ pub(crate) async fn handle_network_change(state: &Arc<TonoState>, app: &AppHandl
 pub(crate) async fn handle_policy_behavior_change(
     state: &Arc<TonoState>,
     app: &AppHandle,
+    auth_generation: u64,
 ) -> NetworkChangeOutcome {
     // F5: while the FSM is Connecting there is no live session to tear down — the
     // entry guard inside `handle_network_change_inner` would silently drop the
@@ -1013,6 +1014,12 @@ pub(crate) async fn handle_policy_behavior_change(
     // latest installed policy.
     {
         let mut inner = state.lock().await;
+        // The caller's account check ran under an earlier lock; a sign-out or
+        // account switch since then must not act on (or defer into) the new
+        // account's attempt.
+        if inner.sign_in_generation != auth_generation {
+            return NetworkChangeOutcome::Handled;
+        }
         match apply_policy_change_disposition(&mut inner) {
             PolicyChangeDisposition::ReconnectNow => {}
             PolicyChangeDisposition::DeferUntilConnected => {
@@ -1076,14 +1083,21 @@ pub(super) fn apply_policy_change_disposition(inner: &mut TonoInner) -> PolicyCh
 /// Schedule the same protected teardown + reconnect a connected-session change
 /// gets; the fresh transaction rediscovers the interface and installs the new
 /// policy. Spawned detached for the same reasons as the account-scoped policy
-/// sync caller: the entry guard and generation capture inside
-/// [`handle_policy_behavior_change`] keep a disconnect or replacement session
-/// safe.
-pub(super) fn spawn_deferred_policy_reconnect(state: &Arc<TonoState>, app: &AppHandle) {
+/// sync caller. Carries the committing attempt's `generation` and drops out at
+/// entry once that session is no longer the Connected one, so a Disconnect
+/// followed by a new Connect is never torn down by this task.
+pub(super) fn spawn_deferred_policy_reconnect(state: &Arc<TonoState>, app: &AppHandle, generation: u64) {
     let state = Arc::clone(state);
     let app = app.clone();
     AsyncHandler::spawn(move || async move {
-        handle_policy_behavior_change(&state, &app).await;
+        let auth_generation = {
+            let inner = state.lock().await;
+            if inner.connect_generation != generation || !inner.fsm.status().is_connected {
+                return;
+            }
+            inner.sign_in_generation
+        };
+        handle_policy_behavior_change(&state, &app, auth_generation).await;
     });
 }
 
@@ -1228,59 +1242,55 @@ pub(super) async fn bootstrap_hosts() -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{PolicyChangeDisposition, apply_policy_change_disposition, policy_change_disposition};
+    use super::{PolicyChangeDisposition, apply_policy_change_disposition};
     use crate::tono::state::TonoState;
     use std::sync::Arc;
 
-    /// F5: a policy behavior change that arrives while Connecting used to be
-    /// dropped by the `handle_network_change_inner` entry guard — no session
-    /// existed to tear down, nothing was recorded, and the session that
-    /// eventually committed kept the policy snapshot captured before the first
-    /// Core start until the next manual reconnect. The change must defer
-    /// instead: the disposition records a pending policy change that the
-    /// connect commit consumes after `connect_succeeded`.
+    /// F5: a policy behavior change that lands while Connecting is deferred to
+    /// that attempt's commit, and only that attempt's. A deferral left behind by
+    /// an attempt the user disconnected (or that failed, or whose account was
+    /// closed) must be discarded, never consumed by the next session's commit —
+    /// there it could schedule an unexplained protected teardown + reconnect.
     #[tokio::test]
-    async fn a_policy_behavior_change_during_connecting_defers_until_the_connect_commits() {
+    async fn a_policy_change_deferred_during_connecting_is_consumed_only_by_that_attempt() {
         let state = Arc::new(TonoState::for_test());
         let mut inner = state.lock().await;
-        let generation = inner.connect_generation;
+        inner.retire_connection_generation(false);
+        let abandoned = inner.connect_generation;
         inner.fsm.begin_connect();
-        assert_eq!(
-            policy_change_disposition(inner.fsm.status()),
-            PolicyChangeDisposition::DeferUntilConnected
-        );
         assert_eq!(
             apply_policy_change_disposition(&mut inner),
             PolicyChangeDisposition::DeferUntilConnected
         );
-        // A release in flight is still never this path's to interrupt.
+        // Disconnect, as `disconnect()` drives it.
+        inner.invalidate_connection(true);
         inner.fsm.begin_disconnect();
-        assert_eq!(
-            policy_change_disposition(inner.fsm.status()),
-            PolicyChangeDisposition::Ignore
-        );
         inner.fsm.finish_disconnect();
-        // The committing attempt drives the FSM the way `run_stages` does.
+
+        // The next attempt is admitted (`begin_attempt` retires once more) and commits.
+        inner.retire_connection_generation(false);
+        let next = inner.connect_generation;
+        assert_ne!(next, abandoned);
         inner.fsm.begin_connect();
-        assert_eq!(
-            apply_policy_change_disposition(&mut inner),
-            PolicyChangeDisposition::DeferUntilConnected
-        );
         inner.fsm.mark_kill_switch_armed();
         inner.fsm.mark_session_verified();
         inner.fsm.connect_succeeded().unwrap();
-        assert!(inner.fsm.status().is_connected);
-        assert_eq!(
-            inner.take_pending_policy_change(),
-            Some(generation),
-            "the deferred change must survive until the connect commit consumes it"
+        assert!(
+            !inner.take_pending_policy_change(next),
+            "a deferral from a disconnected attempt must not reach the next session"
         );
-        assert_eq!(inner.take_pending_policy_change(), None, "consumption is once");
-        // Once Connected the disposition is unchanged: the protected teardown +
-        // reconnect runs immediately, never deferred.
-        assert_eq!(
-            policy_change_disposition(inner.fsm.status()),
-            PolicyChangeDisposition::ReconnectNow
-        );
+
+        // A deferral recorded by the committing attempt itself is still consumed, once.
+        inner.fsm.begin_disconnect();
+        inner.fsm.finish_disconnect();
+        inner.retire_connection_generation(false);
+        let current = inner.connect_generation;
+        inner.fsm.begin_connect();
+        apply_policy_change_disposition(&mut inner);
+        inner.fsm.mark_kill_switch_armed();
+        inner.fsm.mark_session_verified();
+        inner.fsm.connect_succeeded().unwrap();
+        assert!(inner.take_pending_policy_change(current));
+        assert!(!inner.take_pending_policy_change(current), "consumption is once");
     }
 }

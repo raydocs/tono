@@ -332,7 +332,7 @@ pub(super) async fn run_stages(
     // generation before publishing Connected. Updating the protocol last prevents a subscriber
     // from observing a half-configured HTTP context.
     // §6.10: only now Connected; monitors start.
-    let mut deferred_policy_change = None;
+    let mut deferred_policy_change = false;
     {
         let mut inner = controller_commit_guard(state, generation, || {
             configure_owned_controller_for_ui(state, app, &secret, controller_port);
@@ -349,8 +349,8 @@ pub(super) async fn run_stages(
         // instead of the copy taken before the first Core start — which
         // `direct_context_is_current` would correctly reject, deferring the
         // change to the next manual reconnect.
-        let deferred = inner.take_pending_policy_change();
-        if deferred.is_some() {
+        let deferred = inner.take_pending_policy_change(generation);
+        if deferred {
             logging!(
                 info,
                 Type::Service,
@@ -420,13 +420,15 @@ pub(super) async fn run_stages(
     // Rerun the same protected teardown + reconnect a connected-session change would
     // schedule; the fresh transaction rediscovers the interface and installs the new
     // policy. Skip this session's overlay spawn: without the snapshot it would only
-    // record a deterministic skip.
-    if deferred_policy_change.is_some()
+    // record a deterministic skip. Keyed on "discovery never attempted", not on a missing
+    // interface: a discovery that ran and failed (virtual-only default route) would fail
+    // again after the teardown, so that case keeps the ordinary full-tunnel skip below.
+    if deferred_policy_change
         && WINDOWS_OPTIONAL_DIRECT_ENABLED
-        && physical_interface.is_none()
+        && !needs_physical_interface
         && traffic_policy.as_ref().is_some_and(|policy| policy.has_direct_content())
     {
-        spawn_deferred_policy_reconnect(state, app);
+        spawn_deferred_policy_reconnect(state, app, generation);
         return Ok(());
     }
     spawn_optional_direct_after_connected(

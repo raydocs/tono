@@ -332,8 +332,10 @@ pub struct TonoInner {
     /// no session exists to tear down — so the change is recorded here and the
     /// connect commit consumes it, re-running the optional-DIRECT decision
     /// against the latest installed policy. Holds the `connect_generation` at
-    /// the time of deferral; consumption re-reads current state, so a record
-    /// left over from a failed attempt is a harmless no-op refresh.
+    /// the time of deferral. Every generation retirement (Disconnect, a failed
+    /// attempt, account close, the next attempt's admission) clears it, and
+    /// the commit consumes it only for its own generation, so a record can
+    /// never reach a later session or another account.
     pending_policy_change: Option<u64>,
     /// Signed WeChat PROCESS-PATH-REGEX rows last committed with the optional
     /// DIRECT overlay. `None` means the overlay is not active, so a later
@@ -455,6 +457,8 @@ impl TonoInner {
         let retired = self.connect_generation;
         self.connect_generation = self.connect_generation.wrapping_add(1);
         self.release_on_stale = release_on_stale;
+        // A deferred policy change belongs to the attempt being retired (F5).
+        self.pending_policy_change = None;
         if self.retired_intents.len() == RETIRED_INTENT_HISTORY {
             self.retired_intents.pop_front();
         }
@@ -496,12 +500,13 @@ impl TonoInner {
     }
 
     /// Consume a deferred policy behavior change (F5). The connect commit
-    /// calls this right after `connect_succeeded` and, when a deferral is
-    /// present, re-runs the optional-DIRECT decision with the latest
+    /// calls this right after `connect_succeeded` with its own attempt
+    /// generation; only a deferral recorded for that generation counts, and
+    /// then the commit re-runs the optional-DIRECT decision with the latest
     /// installed policy instead of the snapshot captured before the first
-    /// Core start.
-    pub fn take_pending_policy_change(&mut self) -> Option<u64> {
-        self.pending_policy_change.take()
+    /// Core start. A record from any other generation is discarded.
+    pub fn take_pending_policy_change(&mut self, generation: u64) -> bool {
+        self.pending_policy_change.take() == Some(generation)
     }
 }
 
