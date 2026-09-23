@@ -35,12 +35,12 @@
 ## 2026-09-23 · Windows kill switch DHCP 放行收窄目的地址（H1-F6 Windows）
 
 - **归属/来源**：G1 保护一致性；影响 Windows Service（`apps/windows/service`）。基线 main
-  da7bad1b → 分支 `fix/dhcp-scope-windows-20260923`；Issue #341；提交时未合 main。
+  da7bad1b（2026-09-23 rebase 到 26d438c1）→ 分支 `fix/dhcp-scope-windows-20260923`；Issue #341；提交时未合 main。
 - **缺陷修复**：`intent/permit-dhcp-v4`（68→67）与 `intent/permit-dhcp-v6`（546→547）只按
   端口匹配，任意进程可经物理网卡到达任意公网地址的 UDP 67/547（所有模式，含 Protected
   Offline）。改后 DHCPv4 目的限定为 255.255.255.255 与非公网服务器段（10/8、172.16/12、
   192.168/16、169.254/16、100.64/10），DHCPv6 限定为 ff02::1:2 与 fe80::/10（WFP 对同字段
-  条件取 OR）。`FILTER_NAMESPACE` 升到 v10（`…9e09…`）。
+  条件取 OR）。`FILTER_NAMESPACE` 升到 v11（`…9e0a…`；v10 已由 #343 使用）。
 - **新增/优化**：无。
 - **工程与测试**：新回归 `dhcp_client_permits_do_not_reach_public_destinations`（一个
   `#[test]`）：三种模式下客户端端口到公网 v4/v6 判 Block、到广播/多播判 Permit。在未修复规则
@@ -50,7 +50,11 @@
 - **候选/发布**：无新包，仅源码。
 - **剩余限制**：未实机确认。DHCP 服务器在公网地址（如桥接模式）时单播续租被拒，依赖广播
   rebind 续租。未加 svchost/Dhcp 服务身份条件（需改引擎并实机确认 DHCP 客户端的 ALE 身份），
-  入站 DHCP permit（#328 引入）仍只按端口。与 #343 都把 namespace 升到 v10，后合入者改为 v11。
+  入站 DHCP permit 由 #343（#328）引入，不在本分支：其 DHCPv6 回包已在 #343 限定源地址
+  `fe80::/10`，DHCPv4 回包仍只按端口（公网 DHCP 服务器/中继存在，不能按源收窄）。Namespace：
+  #343 用 v10、本 PR 用 v11，建议合并顺序 #343 → #345；若本 PR 先合，#343 rebase 时须升到 v12。
+- **续记（2026-09-23，第三轮审查）**：namespace 由 v10 改为 v11，避免与 #343 同值——同值时
+  已装过另一版 v10 的机器会按 key 保留旧 DHCP 过滤器，收窄静默失效。本机未编译，委托本 PR CI。
 
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 

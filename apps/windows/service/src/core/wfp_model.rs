@@ -77,8 +77,10 @@ pub const MAX_API_HOST_IPS: usize = 8;
 /// enforcement; v8: `…9e07…` Mihomo-app-scoped ALE plus exact transport tuples for
 /// lease-backed DIRECT; v9: `…9e08…` ALE-only stateful enforcement, keeping app identity and
 /// tuple in one filter and relying on documented policy-change reauthorization for stale flows;
-/// v10: `…9e09…` DHCP client permits bounded to broadcast/multicast and non-public servers.)
-const FILTER_NAMESPACE: u128 = 0x2f7c_9e09_0000_4a6c_0000_0000_0000_0000;
+/// v10: `…9e09…` is taken by the inbound-accept default-deny change (#343) and must not be
+/// reused for a different rule table; v11: `…9e0a…` DHCP client permits bounded to
+/// broadcast/multicast and non-public servers.)
+const FILTER_NAMESPACE: u128 = 0x2f7c_9e0a_0000_4a6c_0000_0000_0000_0000;
 
 const fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
@@ -993,7 +995,7 @@ mod tests {
         // Upgrade safety: the key-only diff adopts anything with a matching key, so the
         // namespace must change whenever the rule tables do. Pin the current marker (see the
         // constant's doc comment); any rule-table change must bump it and this pin.
-        assert_eq!(FILTER_NAMESPACE >> 64, 0x2f7c_9e09_0000_4a6c);
+        assert_eq!(FILTER_NAMESPACE >> 64, 0x2f7c_9e0a_0000_4a6c);
     }
 
     #[test]
