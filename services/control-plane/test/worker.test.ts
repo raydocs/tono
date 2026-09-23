@@ -3416,6 +3416,44 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await admin(`home-exits/${homeId}`, undefined, 'DELETE')).status).toBe(204);
   });
 
+  it('refuses to hand an unbound user\'s socks5 credential to another user until it is rotated', async () => {
+    const home = await admin('home-exits', {
+      proxyName: 'Home Socks Rotation',
+      displayName: '家宽 Rotation',
+      kind: 'socks5',
+      socks5Host: '203.0.113.60',
+      socks5Port: 11090,
+      socks5Username: 'resi-rot',
+      socks5Password: 'first-secret',
+    });
+    expect(home.status).toBe(201);
+    const homeId = ((await home.json()) as any).homeExit.id as string;
+    const first = await createAccount('socks5-first-holder');
+    const next = await createAccount('socks5-next-holder');
+    const catalogText = async (token: string) => (await api('exit-catalog', {
+      headers: { authorization: `Bearer ${token}` },
+    })).text();
+
+    expect((await admin(`users/${first.user.id}/home-binding`, { homeExitId: homeId }, 'PUT')).status).toBe(201);
+    expect(await catalogText(first.accessToken)).toContain('first-secret');
+    expect((await admin(`users/${first.user.id}/home-binding`, undefined, 'DELETE')).status).toBe(204);
+    expect(await catalogText(first.accessToken)).not.toContain('first-secret');
+
+    // The first holder's cached copy still works upstream, so the same
+    // credential must not become the next user's line.
+    const reused = await admin(`users/${next.user.id}/home-binding`, { homeExitId: homeId }, 'PUT');
+    expect(reused.status).toBe(409);
+    expect((await reused.json() as any).error.code).toBe('SOCKS5_ROTATION_REQUIRED');
+    const listed = (await (await admin('home-exits', undefined, 'GET')).json() as any).homeExits;
+    expect(listed.find((row: any) => row.id === homeId).socks5RotationRequired).toBe(true);
+
+    expect((await admin(`home-exits/${homeId}`, { socks5Password: 'second-secret' }, 'PATCH')).status).toBe(200);
+    expect((await admin(`users/${next.user.id}/home-binding`, { homeExitId: homeId }, 'PUT')).status).toBe(201);
+    const nextCatalog = await catalogText(next.accessToken);
+    expect(nextCatalog).toContain('second-secret');
+    expect(nextCatalog).not.toContain('first-secret');
+  });
+
   it('moves routingSha256 for a routing-only rotation that leaves revision and yaml untouched', async () => {
     const yaml = `proxies:
   - name: "Shared VPS JP"

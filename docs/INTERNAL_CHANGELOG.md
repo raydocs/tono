@@ -32,6 +32,17 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · 住宅 SOCKS5 凭据在持有人失去绑定后标记待轮换（H7-F7）
+
+- **归属**：ops 任务（家宽线路 / 控制面）；`services/control-plane`，D1 migration `0080`。
+- **来源**：基线 main → 分支 `fix/home-socks5-rotation-20260923`；Issue #379；关联 PR，提交时未合 main；内部审查 H7-F7（源码推导）。
+- **缺陷修复**：socks5 型 home exit 的上游用户名/密码明文随绑定用户的目录下发。解绑、改绑、销户或停用用户只改绑定，不记录凭据已外发；同一凭据还能直接绑给下一个用户。前持有人设备上的缓存凭据对上游仍然有效。现在：`home_exits.socks5_rotation_required_at` 由触发器在绑定删除、绑定换到其他出口、绑定用户离开 `active` 时写入；给未持有该线路的用户绑定被标记的出口返回 `409 SOCKS5_ROTATION_REQUIRED`（API 检查加触发器兜底）；存入不同的上游密码（PATCH 或粘贴带新密码的线路）或改成非 socks5 才清除标记。前持有人的目录在解绑后已不再携带凭据（回归中断言）。
+- **新增/优化**：home exit 列表返回 `socks5RotationRequired`。上游密码仍需运维在供应商侧手工修改。
+- **工程与测试**：新增一个 Worker `it`（`refuses to hand an unbound user's socks5 credential to another user until it is rotated`）；旧代码上第二个用户绑定返回 201，断言 409 失败。
+- **验证**：MacBook 本机（worktree，node_modules symlink 到主仓库）`npx vitest run test/worker.test.ts -t "until it is rotated"`：旧代码红（201≠409），修复后绿；`npx vitest run` 全量 43 文件 892 项通过；`npm run typecheck`、`check:budgets` 通过。未部署，未执行 `d1 --remote`，migration 未在生产 D1 应用。
+- **候选/发布**：无新包，仅源码；Worker 部署和 migration 应用另行授权。
+- **剩余限制**：不能自动轮换上游密码（外部住宅网关，home-agent 不接触）；推荐在上游限制来源 IP 为出口节点。未覆盖：无状态变化的权益到期、用户仍 active 时吊销单台设备。ops console 暂不显示该标记。
+
 ## 2026-09-23 · coreMonitor 不得把运行时替换的瞬时 utun 消失判为 TUN 死亡
 
 - **归属**：G1（已连接=能用：切换/热重载不掉线）；macOS 客户端 `apps/macos`。

@@ -107,6 +107,9 @@ export function publicHomeExit(row: Row) {
     probeAlive: row.probe_alive == null ? undefined : Number(row.probe_alive),
     probeTotal: row.probe_total == null ? undefined : Number(row.probe_total),
     probeUptimeRatio: row.probe_uptime_ratio == null ? undefined : Number(row.probe_uptime_ratio),
+    // Set once a socks5 credential has reached a user who no longer holds
+    // this binding; cleared only by storing a new upstream password.
+    socks5RotationRequired: row.socks5_rotation_required_at == null ? undefined : true,
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };
@@ -298,12 +301,37 @@ export async function insertSocks5HomeExit(
   throw new ApiError(500, 'INTERNAL_ERROR', 'Home exit insert failed');
 }
 
+// A socks5 credential that already reached a user who lost the binding stays
+// usable against the upstream from that user's cached catalog. It must not be
+// handed to anyone new until the upstream password is replaced. Re-saving the
+// same user's current binding exposes nothing new.
+export async function assertHomeExitBindable(e: Env, userId: string, homeExitId: string) {
+  const row = await e.DB.prepare(
+    `SELECT home_exits.kind, home_exits.socks5_rotation_required_at,
+            (SELECT home_exit_id FROM user_home_bindings WHERE user_id = ?) AS current_home_exit_id
+     FROM home_exits WHERE home_exits.id = ?`,
+  ).bind(userId, homeExitId).first<Row>();
+  if (
+    row
+    && String(row.kind ?? 'catalog') === 'socks5'
+    && row.socks5_rotation_required_at != null
+    && String(row.current_home_exit_id ?? '') !== homeExitId
+  ) {
+    throw new ApiError(
+      409,
+      'SOCKS5_ROTATION_REQUIRED',
+      'This home line was issued to a user who no longer holds it; change the upstream password and store the new one before binding it again',
+    );
+  }
+}
+
 export async function upsertHomeBinding(
   e: Env,
   userId: string,
   homeExitId: string,
   defaultProxyName: string | null,
 ) {
+  await assertHomeExitBindable(e, userId, homeExitId);
   const t = now();
   const existing = await e.DB.prepare(
     'SELECT created_at FROM user_home_bindings WHERE user_id = ?',

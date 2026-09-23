@@ -25,6 +25,7 @@ import {
   findSocks5Home,
   insertSocks5HomeExit,
   upsertHomeBinding,
+  assertHomeExitBindable,
 } from '../../home';
 import {
   writeOpsAudit,
@@ -171,6 +172,14 @@ export async function homeExitsResource(
       if (owner && String(owner.user_id) !== userId) {
         throw new ApiError(409, 'HOME_EXIT_IN_USE', 'This home line is already assigned to another user');
       }
+      if (home.socks5_rotation_required_at != null && parsed.password !== String(home.socks5_password)) {
+        // The pasted line carries a new upstream password: that is the rotation.
+        await e.DB.prepare(
+          'UPDATE home_exits SET socks5_password = ?, socks5_rotation_required_at = NULL, updated_at = ? WHERE id = ?',
+        ).bind(parsed.password, now(), home.id).run();
+        home = (await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(home.id).first<Row>())!;
+      }
+      await assertHomeExitBindable(e, userId, String(home.id));
       if (String(home.status) !== 'active') {
         await e.DB.prepare(
           'UPDATE home_exits SET status = ?, display_name = ?, notes = ?, updated_at = ? WHERE id = ?',
@@ -303,17 +312,25 @@ export async function homeExitsResource(
       ? (keep && existing.socks5_password != null ? String(existing.socks5_password) : null)
       : (b.socks5Password === null || b.socks5Password === '' ? null : str(b.socks5Password, 'socks5Password', 1, 255));
     validateHomeSocks5(kind, socks5Host, socks5Port, socks5Username, socks5Password);
+    // Only a different upstream password (or leaving socks5 entirely) ends
+    // the exposure recorded when a previous holder lost the binding.
+    const rotationRequiredAt = kind !== 'socks5'
+      || (existing.socks5_password != null && socks5Password !== String(existing.socks5_password))
+      ? null
+      : (existing.socks5_rotation_required_at == null ? null : Number(existing.socks5_rotation_required_at));
     const t = now();
     try {
       const updated = await e.DB.prepare(
         `UPDATE home_exits
          SET proxy_name = ?, display_name = ?, egress_ipv4 = ?, kind = ?,
              socks5_host = ?, socks5_port = ?, socks5_username = ?, socks5_password = ?,
+             socks5_rotation_required_at = ?,
              status = ?, notes = ?, updated_at = ?
          WHERE id = ?`,
       ).bind(
         proxyName, displayName, egressIpv4, kind,
         socks5Host, socks5Port, socks5Username, socks5Password,
+        rotationRequiredAt,
         status, notes, t, mt[1],
       ).run();
       if (!updated.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
@@ -408,6 +425,7 @@ export async function homeExitsResource(
       throw new ApiError(409, 'HOME_EXIT_INACTIVE', 'Home exit must be active before binding');
     }
     const defaultProxyName = await defaultProxyNameField(e, b.defaultProxyName);
+    await assertHomeExitBindable(e, mt[1], homeExitId);
     const t = now();
     const existing = await e.DB.prepare(
       'SELECT created_at FROM user_home_bindings WHERE user_id = ?',
