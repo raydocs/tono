@@ -17,7 +17,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             #[cfg(windows)]
             return match crate::core::update::request(&owner, request.payload).await {
                 Ok(status) => ok_json(status),
-                Err(error) => service_unavailable(format!("Update refused; evidence/protection retained: {error:#}")),
+                Err(error) => service_unavailable(format!("Update refused; evidence retained and no protection release completed: {error:#}")),
             };
             #[cfg(not(windows))] {
                 let _ = (request, owner);

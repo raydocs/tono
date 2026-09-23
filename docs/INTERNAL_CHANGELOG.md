@@ -32,6 +32,48 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 更新 Disconnect 释放后的归档失败不再报成「保护仍在」（H9-F2）
+
+- **归属**：G3 受保护升级；Windows Service 更新事务（`apps/windows/service`）+ App 断开路径
+  （`apps/windows/app`）+ 协议文档。
+- **来源**：基线 main `18301fc5`（含 #295、#299、#301）→ 分支
+  `fix/update-release-after-archive-20260923`；Issue #393；内部审查 H9-F2（合并后组合回归）。
+  提交时未合 main。
+- **缺陷修复**：更新事务停在 `RolledBack`/`Uncertain`（执行器回滚失败或恢复任务尚未复原，
+  安装树与原始组件不符）时用户点 Disconnect：Service 先恢复 DNS、停 Core、清 owner、
+  `wfp::release()`，之后 #301 的归档校验失败以 Err 返回，路由文案写
+  "evidence/protection retained"；App 的 #295 监督者把任何 release Err 当作仍 armed，显示
+  Protected Offline，而机器已放开；#299 轮询约 30 s 后才纠正，每次重试都复现（违反 I3）。
+  改后：`wfp::release()` 成功之后的更新簿记（owner 代理/保护读回/peer 核对、
+  `verify_disconnect`、各归档分支）抽成 `retire_after_release`，失败时记录保持 pending，
+  响应为成功并带新字段 `UpdateStatus.needs_attention`（原因文本）；Service Err 现在只表示
+  没有完成任何保护释放，路由文案改为 "evidence retained and no protection release
+  completed"。App 收到 `needs_attention` 记日志，照常读 kill switch 状态、
+  `record_verified_release`，并按原有 `wanted||live` 校验折叠为 Not Connected；只有 Err
+  才保持 Protected Offline。`INCOMPLETE` 仍为真，后续 Connect 照旧被更新门拒绝。释放前的
+  失败路径、fail-closed 语义均不变。
+- **新增/优化**：无。协议为加字段：`needs_attention` 为
+  `#[serde(default, skip_serializing_if = "Option::is_none")]`，`UpdateStatus` 不拒未知字段，
+  不改 Service revision（参照 #302 的兼容考虑）：旧 App + 新 Service 忽略该字段、收到成功，
+  正确折叠；新 App + 旧 Service 字段缺省，旧 Service 仍在释放后返回 Err，行为同修复前，
+  由 #299 轮询兜底。
+- **与在审 PR 的关系**：#359（Replaced 归档 + 备份清理）与 #361（逐成员校验）都在同一位置、
+  释放之后新增 `?` 校验。rebase 到本 PR 后，这些分支应放进 `retire_after_release`，失败即
+  自动成为 `needs_attention`，不应在 handler 里再返回 Err。已在两个 PR 上留言。
+- **工程与测试**：新增一个 `#[test]`
+  `core::update::tests::update_disconnect_archive_refusal_after_release_is_not_a_release_failure`：
+  夹具走 Launching → consume → `Uncertain`，请求 Disconnect，注入与原始不符的已安装组件，
+  调 `retire_after_release` + `released`；断言返回 Ok、记录仍 pending、execution 为
+  `Uncertain`、`needs_attention` 含 "rollback not proven"。旧代码中这段校验内联在 handler 里，
+  `ensure!(..)?` 直接返回 Err（测试所需的拆分不存在，在旧代码上无法编译通过）。
+- **验证**：编辑机（MacBook）只编辑，未执行本机 `cargo build/test`（按 2026-09-14 执行位置
+  决定）。回归交给本 PR 的 GitHub-hosted `windows-2025` CI；提交时结果未知，以 PR checks 为准。
+  CI 绿灯不代表已部署或已实机验证。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：新 App 配旧 Service 时仍会出现修复前的约 30 s 误报，直到 Service 升级。
+  Service 不可达、JoinError 等"未知"情形仍按 #295 假定 armed（保守，未改）。`Uncertain`
+  混合安装树的实机出现频率未知，未实机复现。
+
 ## 2026-09-23 · 后台可选策略替换失败后必须调度受保护重连
 
 - **归属**：G1（断开与恢复：稳定网络上的 fail-closed 主机不滞留 Protected Offline）；
