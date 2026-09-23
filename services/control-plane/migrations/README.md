@@ -54,6 +54,6 @@ Ops tables after the sequence was unique. Applied in numeric order:
 - `0075_ops_node_capacity_users.sql` — `ops_node_profiles.capacity_users` for capacity-based node acceptance
 - `0076_ops_node_identity.sql` — immutable `ops_node_identity`; display name, failure domain, and which node it replaces
 
-## 0077
+## 0078
 
-- `0077_home_exit_name_history.sql` — every name ever used by a catalog home exit stays in the per-user catalog restriction set, whatever its status
+- `0078_home_exit_name_history.sql` — every name ever used by a catalog home exit stays in the per-user catalog restriction set, whatever its status
