@@ -540,11 +540,11 @@ pub struct PrepareCoreStartFreshness {
 }
 
 /// `null` was the payload before revision 17. It stays a distinct untagged variant so the
-/// shape still parses, but a Service that enforces the freshness gate refuses it: a
-/// destructive reconcile with no freshness proof is the late-request hole the gate exists to
-/// close, and excusing it would reintroduce the defect for any caller that skips the probe.
-/// This mirrors how the session-gated routes treat a missing session proof. A client that
-/// has probed an older Service still sends this arm, because that Service has no gate.
+/// shape still parses. A revision-17 Service accepts it from an older client, which still
+/// pairs at the probe, and takes the release-epoch snapshot itself when the request arrives
+/// (the pre-17 freshness). It does not refuse the request, because an older App that passes
+/// the probe must not then fail every connection at this route. A client that has probed an
+/// older Service still sends this arm, because that Service has no gate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum PrepareCoreStartPayload {
@@ -632,8 +632,9 @@ pub enum ServiceErrorCode {
     /// state wants (or cannot prove it does not want) the core running. Mapped to 409 Conflict.
     StillProtected = 1012,
     /// `POST /clash/prepare-start` refused: the request's client-snapshotted release epoch has
-    /// been superseded by an explicit release, or the request carried no snapshot at all. The
-    /// refusal happens before any Core is touched. Mapped to 409 Conflict.
+    /// been superseded by an explicit release (for an epoch-less legacy request, the Service's
+    /// own arrival-time snapshot). The refusal happens before any Core is touched. Mapped to
+    /// 409 Conflict.
     StaleReleaseEpoch = 1013,
 }
 

@@ -524,15 +524,19 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             // attempt's request can arrive seconds late, after the user's Disconnect released and
             // a successor connection already started its own unverified Core; without this gate
             // the late request is the one destructive route with no freshness token, and it would
-            // stop that successor Core (R2-F6). Like the session gates on Lock/MarkVerified/Stop,
-            // a missing proof is refused, never excused.
+            // stop that successor Core (R2-F6).
+            //
+            // A revision 12–16 client (an older App beside this Service) cannot send a snapshot.
+            // It passes the protocol probe (MIN_SUPPORTED_CLIENT_REVISION stays 12, because that
+            // same App still needs ReleaseKillSwitch/StopClash/RestoreProtectedDns, which the
+            // probe also gates). Refusing it here would fail every connection *after* the probe
+            // said the pair works. Instead, take the snapshot when the request arrives, the same
+            // in-Service freshness StartClash uses: a release that wins the lifecycle lock while
+            // the request waits still supersedes it. Only the window before arrival stays open
+            // for such a client, and that client had this gap before revision 17 too.
             let requested_release_epoch = match request.payload {
                 PrepareCoreStartPayload::Freshness(snapshot) => snapshot.release_epoch,
-                PrepareCoreStartPayload::Legacy(()) => {
-                    return service_error(ServiceError::stale_release_epoch(
-                        "PrepareCoreStart refused: the request carries no release-epoch freshness snapshot",
-                    ));
-                }
+                PrepareCoreStartPayload::Legacy(()) => windows_kill_switch::release_epoch(),
             };
             let _lifecycle_guard =
                 match enter_owner_lifecycle(&owner, OwnerLifecycleGate::Unchecked).await {

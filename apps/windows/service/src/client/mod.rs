@@ -734,8 +734,10 @@ pub async fn prepare_core_start(credentials: &OwnerCredentials) -> Result<Respon
 /// Build the `PrepareCoreStart` payload for the Service we just probed.
 ///
 /// The probe is part of the freshness contract, so a probe failure is an error rather than a
-/// silent downgrade: sending the epoch-less legacy payload to a revision-17 Service would be
-/// refused anyway, and the connect stage deserves the probe's clearer message. In the real
+/// silent downgrade: sending the epoch-less legacy payload to a revision-17 Service would
+/// throw away the client-side snapshot (the Service would fall back to an arrival-time one,
+/// which misses a request already in flight), and the connect stage deserves the probe's
+/// clearer message. In the real
 /// connect flow `ensure_service_ready` has just required the same probe to succeed, so this
 /// only fails when the Service dropped between the two calls — where the mutation itself
 /// would not have been answerable either.

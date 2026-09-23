@@ -51,8 +51,16 @@
   拒绝，拒绝发生在任何快照/操作发布/Core 停止之前，无半停止状态。合法路径
   （App 存活、期间无显式 release）行为不变。兼容：新旧混合配对时——新 App +
   旧 Service（<rev 17）由能力探测降级发送旧 `null` payload，行为同旧版；
-  旧 App + 新 Service 的无 epoch 请求按 Lock 路径先例拒绝（fail-closed），
-  其连接在配对 App 交付前失败，属有意取舍。
+  旧 App + 新 Service 的无 epoch 请求**被接受**，由 Service 在请求到达时自取 epoch
+  快照、在锁内比较（与 StartClash 的到达时快照相同）。
+- **审查修正（第二轮）**：初版对旧 App 的 `null` 请求一律 409，结果探测判定配对
+  可用，之后每次连接都在 prepare 阶段永久失败，违反 `lib.rs` "Reject a
+  mismatch at the protocol probe" 规则。没有把 `MIN_SUPPORTED_CLIENT_REVISION`
+  提到 17：探测门 `require_protocol_version`（`server/mod.rs` 686-700，经
+  `authenticate_request` 741 行）同样挡在 `ReleaseKillSwitch`/`StopClash`/
+  `RestoreProtectedDns` 前面，提到 17 会让与新 Service 短暂共存的旧 App 无法
+  释放 WFP、无法恢复 DNS。改为对 Legacy 采用到达时快照，旧 App 行为不比
+  rev 16 差。
 - **新增/优化**：`ProtocolInfo` 增加 `release_epoch`（`#[serde(default)]`，
   仅服务端 GetVersion 路由填充）；`PrepareCoreStartPayload` 采用与
   `StopClashPayload` 相同的 untagged `Legacy/Freshness` 线型。
@@ -68,6 +76,16 @@
   （数秒级 IPC 在途延迟）未在 Windows 11 实机复现，维持原定级。
 - **候选/发布**：仅源码，无新候选、无新包；未触碰 WFP/PF 规则、DNS 恢复语义、
   `appcast.xml`/`latest.json` 或 `windows-updates`。
+- **剩余限制**：不 bump epoch 的取消路径不刷新令牌：StopClash(release=true)
+  在无 armed 时为空操作；节点消失 `selected_node_vanished`（`stop_core(false)`，
+  无 release）；更新安装的 `invalidate_connection(false)`；连接事务 240 s 超时。
+  经这些路径取消的 attempt，其迟到 prepare 仍可能通过门，但触发条件比已修的
+  Disconnect→重连序列更窄。修复只在 Service 也升到 rev 17 后生效：
+  `MIN_REQUIRED_SERVICE_REVISION` 仍为 14，只升级 App 时新 App 对旧 Service
+  发 Legacy，F6 未修。旧 App 配新 Service 时只拿到到达时快照，在途迟到请求
+  仍会漏过（与 rev 16 相同）。Service 重启会把 epoch 归零，快照于重启前的请求
+  被拒绝并表现为一次连接失败（fail-closed，重试即恢复）。第二轮修正同样
+  本机未编译，委托 CI；已有回归测试走 Freshness 路径，不受本修正影响，未改。
 - **剩余限制**：不 bump epoch 的拆臂路径（如 StopClash(release=true) 在无 armed
   时为空操作）不刷新令牌——经这些变体取消的 attempt 其迟到 prepare 仍可能通过
   门，但触发条件比已修的 Disconnect→重连序列更窄；Service 重启会把 epoch 归零，

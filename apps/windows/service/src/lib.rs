@@ -146,15 +146,16 @@ pub const PROTOCOL_EPOCH: u16 = 2;
 /// touching no Core — once an explicit release has superseded the snapshot. This is the
 /// freshness gate the session-gated routes get from `OwnerSessionProof`; a first connection
 /// has no session yet, so the release epoch is the freshness token instead. MIN_SUPPORTED
-/// stays 12: an older client still pairs at the probe, but its epoch-less prepare request is
-/// refused by the route — fail-closed, exactly like a session-gated route without a session
-/// proof.
+/// stays 12 because an older App beside a newer Service must still be able to release WFP
+/// and restore DNS, and the probe gates those routes too. Its epoch-less prepare request is
+/// therefore accepted. The Service snapshots the epoch when the request arrives (the pre-17
+/// behaviour) rather than passing the probe and then refusing every connection at this route.
 pub const PROTOCOL_REVISION: u16 = 17;
 /// Revision that introduced the Service-owned, detached-manifest update transaction.
 pub const MIN_SERVICE_REVISION_FOR_UPDATE_TRANSACTION: u16 = 16;
 /// Revision whose `POST /clash/prepare-start` compares the request's client-snapshotted
-/// release epoch under the lifecycle lock and refuses a superseded (or epoch-less) request
-/// before touching any Core.
+/// release epoch under the lifecycle lock and refuses a superseded request before touching
+/// any Core. An epoch-less legacy request uses the Service's arrival-time snapshot instead.
 pub const MIN_SERVICE_REVISION_FOR_PREPARE_START_EPOCH: u16 = 17;
 /// Revisions 7 through 12 are wire/behaviour incompatible with older peers. Reject a mismatch at
 /// the protocol probe rather than failing later during a required mutation. Revision 13 is
