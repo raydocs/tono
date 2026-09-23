@@ -49,10 +49,14 @@
   Connect 意图静默消失，终态 idle 无错误无重试。同一入口：唤醒重试耗尽后的
   `scheduleProtectedReconnect()`（`AppState.swift` wake 路径）在同样 never-armed 状态
   同样静默退出。修复：`scheduleProtectedReconnect` 在调度时快照
-  `KillSwitchService.isArmed`，loop 的 external-release 确认仅在调度时已 armed 的前提
-  下进行（`reconcileConfirmedExternalProtectionRelease(protectionWasArmed:)` 前置
-  守卫），never-armed 的内部转换不再冒充外部 release，loop 继续重连。真外部 release
-  检测语义保持（曾 armed 且 helper 认证回答 wanted=false 仍被接受并退出）；激活路径
+  `KillSwitchService.isArmed`，loop 每次 attempt 以「调度时快照 || attempt 时实时
+  `isArmed`」作为 external-release 确认的前提
+  （`reconcileConfirmedExternalProtectionRelease(protectionWasArmed:)` 前置守卫），
+  never-armed 的内部转换不再冒充外部 release，loop 继续重连。第二轮审查
+  （prreview-mac-conn #304）指出仅用调度时快照会过期：同一 loop 内某次 attempt 已
+  arm 后失败（preserve teardown + 去抖，loop 继续、快照仍 false），退避期内真正的
+  root 紧急 disarm 会被 loop 无视并由 connect 重新 arm；现改为 attempt 时求值，
+  app 认为 PF armed 时 helper 认证回答 wanted=false 仍被接受并退出；激活路径
   `reconcileExternalProtectionState()` 走默认参数，行为不变；loop 从不 disarm，不放宽
   保护。
 - **新增/优化**：`NetworkProtectionOperations` 增加 `refreshKillSwitchStatus` seam
@@ -67,10 +71,16 @@
   `disconnect(releaseKillSwitch:false)` + `scheduleProtectedReconnect(immediate:true)` 并
   等 loop 结束；断言 `lastConnectionFailure` 与 `errorMessage` 非空——即一次真实 connect
   尝试已发生且其失败文案留存。当前实现 loop 静默退出、两值为 nil，断言失败。
+  第二轮在同一测试追加过期快照阶段：同样以 `isArmed=false` 调度 loop 后、首个
+  attempt 运行前置 `isArmed=true`（模拟本 loop 先前 attempt 已 arm 后失败），seam
+  仍回答 wanted=false；断言 release 被接受（`isArmed`/`isProtectionBlocked` 为
+  false、`lastConnectionFailure`/`errorMessage` 为 nil、loop 结束）。仅用快照的上一
+  版会跳过确认直接 connect，留下失败记录，断言失败（loop 等待以 10 s 看门狗封顶，
+  不会挂死 CI）。
 - **验证**：编辑机（MacBook，按 2026-09-14 执行位置决定）只编辑未编译未运行——未执行
   `xcodebuild`/`swift build`/`swift test`；Swift 语法、访问级别与调用链人工自查。回归
   委托本 PR CI（GitHub-hosted `macos-26`）；提交时 CI 结果未知，不沿用任何旧 SHA 绿灯。
-  准确受测源码为 PR head。
+  准确受测源码为 PR head。第二轮修改同样本机未编译，委托 CI。
 - **候选/发布**：无新包，仅源码。
 - **剩余限制**：F2（睡眠改写显式 release / never-armed 的 Protected Offline 误报）与
   F4（后台可选策略失败漏调度重连）为不同根因（V2 判定），另行修复不在本条；替换窗口

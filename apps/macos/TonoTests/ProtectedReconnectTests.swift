@@ -76,5 +76,37 @@ final class ProtectedReconnectTests: XCTestCase {
         XCTAssertFalse(app.isConnecting)
         XCTAssertFalse(app.isDisconnecting)
         XCTAssertNil(app.connectionCoordinator.protectedReconnectTask)
+
+        // Stale-snapshot case: the same never-armed internal transition
+        // schedules a loop (snapshot false), but by the time the loop's next
+        // attempt runs, an earlier attempt of that loop has armed PF and then
+        // failed — the app now holds armed protection. A root emergency
+        // release during the backoff (helper answers wanted=false) must be
+        // accepted, not overridden by connect re-arming PF.
+        app.isConnecting = true
+        KillSwitchService.isArmed = false
+        app.disconnect(releaseKillSwitch: false)
+        app.scheduleProtectedReconnect(immediate: true)
+        KillSwitchService.isArmed = true
+        let staleSnapshotLoop = app.connectionCoordinator.protectedReconnectTask
+        // Bound the wait: a loop that ignores the release keeps retrying.
+        let watchdog = Task {
+            try? await Task.sleep(for: .seconds(10))
+            staleSnapshotLoop?.cancel()
+        }
+        await staleSnapshotLoop?.value
+        watchdog.cancel()
+
+        XCTAssertFalse(
+            KillSwitchService.isArmed,
+            "a confirmed external release while armed must be accepted"
+        )
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertNil(
+            app.lastConnectionFailure,
+            "accepting the release ends the loop before connect can re-arm PF"
+        )
+        XCTAssertNil(app.errorMessage)
+        XCTAssertNil(app.connectionCoordinator.protectedReconnectTask)
     }
 }

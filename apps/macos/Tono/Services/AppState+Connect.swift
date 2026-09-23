@@ -1830,11 +1830,16 @@ extension AppState {
                 // state while this loop was sleeping. Accept only an
                 // authenticated unarmed status and exit before connect can
                 // re-arm it; rejection pauses for explicit helper repair. A
-                // loop scheduled without armed protection skips the check:
-                // only its own never-armed teardown could have produced the
-                // blocked claim, and that is not an external release.
+                // loop scheduled without armed protection skips the check
+                // only while PF is still unarmed now: its own never-armed
+                // teardown produced the blocked claim, and that is not an
+                // external release. Once an earlier attempt in this loop has
+                // armed PF (and then failed), the scheduling snapshot is
+                // stale — read the live armed state so a root emergency
+                // release during the backoff is still honored.
                 if await self.reconcileConfirmedExternalProtectionRelease(
                     protectionWasArmed: protectionWasArmedWhenScheduled
+                        || KillSwitchService.isArmed
                 ) {
                     return true
                 }
