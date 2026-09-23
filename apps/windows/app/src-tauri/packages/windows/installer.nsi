@@ -1365,6 +1365,13 @@ Section Uninstall
     SetShellVarContext current
     RmDir /r "$APPDATA\${BUNDLEID}"
     RmDir /r "$LOCALAPPDATA\${BUNDLEID}"
+
+    ; The account session is not in AppData: keyring stores it in Credential Manager as
+    ; `refresh-token.tono` (tono-core WINDOWS_CRED_TARGET_REFRESH_TOKEN). Delete it so a reinstall
+    ; does not come back signed in. The App also refuses a vault session its data directory did
+    ; not adopt, so a missing entry or a failed delete here is not fatal.
+    nsExec::ExecToLog /TIMEOUT=30000 '"$SYSDIR\cmdkey.exe" /delete:refresh-token.tono'
+    Pop $0
   ${EndIf}
 
   !ifmacrodef NSIS_HOOK_POSTUNINSTALL

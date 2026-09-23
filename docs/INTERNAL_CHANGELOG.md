@@ -32,6 +32,37 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 凭据库里的会话只由创建它的安装使用，卸载删除应用数据时一并删除
+
+- **归属/来源**：G1 账户隔离；影响 Windows App 凭据加载、登录采纳与 NSIS 卸载器。内部审查
+  H11-F3，Issue #408。基线 main 833c0607 → 分支 `fix/win-uninstall-session-20260923`；
+  提交时未合 main。
+- **缺陷修复**：refresh token 存在凭据管理器（`refresh-token.tono`），不在应用数据目录里。
+  卸载时勾选「删除应用数据」只删 `%APPDATA%`/`%LOCALAPPDATA%` 目录，重装后
+  `load_credentials` 无条件读入残留 token，静默恢复为上一账户。现在：(1) 登录采纳时在数据
+  目录写 `vault-session.marker`；`load_credentials` 仅在标记存在时读入 vault token。没有标记
+  但有已校验目录缓存的旧版本已登录目录，一次性补写标记，不会把现有用户登出。没有标记的新
+  目录不读入 token，restore 走未登录路径，其本地登出清理会把残留 token 从 vault 删除。
+  (2) 卸载器「删除应用数据」分支执行 `cmdkey /delete:refresh-token.tono`。(3) 更正注释和
+  tono-core 常量 `WINDOWS_CRED_TARGET_REFRESH_TOKEN` 的目标名（原写 `tono/refresh-token`，
+  实际为 keyring 的 `<user>.<service>`）。
+- **新增/优化**：无。
+- **工程与测试**：新增一个回归 `fresh_data_dir_does_not_adopt_a_vault_refresh_token`
+  （`commands/account.rs` lifecycle_tests）。为此把 vault 读取抽成 `load_credentials_from` 的
+  注入参数，生产路径不变。测试先断言无标记目录不读入 vault token（旧实现会读入，断言失败），
+  再断言写入标记后可以正常读入。契约修正：`account_names_are_stable` 原本断言错误的
+  `tono/refresh-token` 格式，改为断言 keyring 实际目标名等于 tono-core 常量（不新增测试）。
+  本机运行 `node --test scripts/windows-packaging.test.mjs`：22/22 通过（只验证模板约束，
+  不覆盖 cmdkey 行为）。
+- **验证**：本机（编辑机）未运行 cargo；委托本 PR 的 GitHub-hosted `windows-2025` CI
+  （app 与 tono-core `cargo test --locked`），结果以 PR 页为准。卸载器未在 Windows 11 实机运行。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：卸载不吊销服务端会话（卸载器没有已认证客户端；残留 token 在本机被删除或
+  拒用，服务端按正常有效期过期）。UAC 以另一个管理员身份提权卸载时，「current」上下文指向
+  该管理员，与现有 `$APPDATA` 删除有同样的限制。dev 通道与正式通道共用凭据名，全新的 dev
+  数据目录会清掉正式通道的 vault token（内部通道，已记录）。数据目录在漫游 `%APPDATA%` 下，
+  标记会随配置文件漫游，见 #409。
+
 ## 2026-09-23 · macOS 快照服务不可读时 status 折叠掉 snapshotPresent，断开被无谓拒绝
 
 - **归属/来源**：G1 断开与恢复；macOS `tono-core-helper` 的 `/dns/status`。R3-F4

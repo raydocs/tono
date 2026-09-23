@@ -19,8 +19,38 @@ use keyring::Entry;
 use std::sync::Arc;
 use tono_core::credentials::{CredentialError, CredentialKey, CredentialStore, MemoryCredentialStore};
 
-/// keyring service name; entries appear as `tono/<key>` (§2).
+/// keyring service name. keyring names a Windows generic credential
+/// `<user>.<service>`, so the entries are `refresh-token.tono` and
+/// `installation-id.tono` (§2). The uninstaller deletes the first by that name.
 const SERVICE_NAME: &str = "tono";
+
+/// Written to the Tono data directory when this installation adopts a sign-in. The session lives
+/// in Credential Manager, which survives an uninstall that deletes the data directory; a vault
+/// refresh token is only this installation's session when the marker says so.
+const VAULT_SESSION_MARKER: &str = "vault-session.marker";
+
+pub(crate) fn mark_vault_session_owned(data_dir: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(data_dir)?;
+    std::fs::write(data_dir.join(VAULT_SESSION_MARKER), b"1")
+}
+
+/// Whether the refresh token in the vault belongs to this data directory. A directory an earlier
+/// build left signed in has no marker but still has that account's verified catalog cache, so it
+/// adopts the marker once instead of signing every existing user out. A fresh directory (a new
+/// install, or a reinstall after "delete application data") has neither.
+pub(crate) fn data_dir_owns_vault_session(data_dir: &std::path::Path, catalog_cache: &std::path::Path) -> bool {
+    if data_dir.join(VAULT_SESSION_MARKER).exists() {
+        return true;
+    }
+    if !catalog_cache.exists() {
+        return false;
+    }
+    if let Err(error) = mark_vault_session_owned(data_dir) {
+        tono_logging::logging!(warn, tono_logging::Type::Service,
+            "Tono: failed to record the vault session marker: {error}");
+    }
+    true
+}
 
 fn account_name(key: CredentialKey) -> &'static str {
     match key {
@@ -296,10 +326,10 @@ mod tests {
 
     #[test]
     fn account_names_are_stable() {
-        // The refresh token lands at `tono/refresh-token` (§2).
+        // keyring's Windows target is `<user>.<service>`; the uninstaller deletes this name.
         assert_eq!(
-            format!("{SERVICE_NAME}/{}", account_name(CredentialKey::RefreshToken)),
-            "tono/refresh-token"
+            format!("{}.{SERVICE_NAME}", account_name(CredentialKey::RefreshToken)),
+            tono_core::credentials::WINDOWS_CRED_TARGET_REFRESH_TOKEN
         );
         assert_eq!(account_name(CredentialKey::InstallationId), "installation-id");
     }
