@@ -68,7 +68,10 @@ export async function exitClientUUID(e: Env, userId: string, deviceId?: string |
       // the per-user credential until the device credential is confirmed on
       // every exit. This makes the first deployment non-disruptive: exit nodes
       // and their tokens can only be provisioned after these endpoints exist.
-      if (await exitCredentialRolloutPhase(e) === 'dual') {
+      // A revoked device may hold the shared credential, so once any device
+      // of the account is revoked it is retired (migration 0077) and never
+      // served again; this device waits for its own credential instead.
+      if (await exitCredentialRolloutPhase(e) === 'dual' && !(await legacyExitCredentialRetired(e, userId))) {
         return exitClientUUID(e, userId, null);
       }
       throw new ApiError(
@@ -87,8 +90,15 @@ export async function exitClientUUID(e: Env, userId: string, deviceId?: string |
     );
   }
   const existing = await e.DB.prepare(
-    'SELECT client_uuid FROM exit_credentials WHERE user_id = ?',
+    'SELECT client_uuid, retired_at FROM exit_credentials WHERE user_id = ?',
   ).bind(userId).first<Row>();
+  if (existing?.retired_at != null) {
+    throw new ApiError(
+      409,
+      'DEVICE_IDENTITY_REQUIRED',
+      'The shared exit identity of this account was retired by a device revocation',
+    );
+  }
   if (existing) return String(existing.client_uuid);
   const minted = crypto.randomUUID();
   // Legacy issuance remains available only while the explicit rollout state is
@@ -99,10 +109,17 @@ export async function exitClientUUID(e: Env, userId: string, deviceId?: string |
      SELECT id, ?, ? FROM users WHERE id = ?`,
   ).bind(minted, now(), userId).run();
   const row = await e.DB.prepare(
-    'SELECT client_uuid FROM exit_credentials WHERE user_id = ?',
+    'SELECT client_uuid FROM exit_credentials WHERE user_id = ? AND retired_at IS NULL',
   ).bind(userId).first<Row>();
   if (!row) throw new ApiError(503, 'CATALOG_UNAVAILABLE', 'Could not issue an exit identity');
   return String(row.client_uuid);
+}
+
+async function legacyExitCredentialRetired(e: Env, userId: string) {
+  const row = await e.DB.prepare(
+    'SELECT 1 FROM exit_credentials WHERE user_id = ? AND retired_at IS NOT NULL',
+  ).bind(userId).first<Row>();
+  return row !== null;
 }
 
 export type CatalogRouting = {

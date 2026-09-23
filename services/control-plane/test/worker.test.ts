@@ -1318,6 +1318,43 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(identities).toEqual(expect.arrayContaining([legacy.client_uuid, device.client_uuid]));
   });
 
+  it('removes the shared legacy credential from the exit roster once any device of the account is revoked', async () => {
+    await env.DB.prepare('DELETE FROM exit_nodes').run();
+    const account = await createAccount('dual-rollout-revoke');
+    const second = await emailSignIn({
+      email: account.email,
+      deviceName: 'Second Mac',
+      installationId: 'dual-rollout-revoke-installation-two',
+    });
+    expect(second.status).toBe(200);
+    const survivor = await second.json() as any;
+    const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+
+    const catalog = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(catalog.status).toBe(200);
+    const leakedUUID = /uuid: ([0-9a-f-]{36})/.exec((await catalog.json() as any).yaml)?.[1];
+    expect(leakedUUID).toBeDefined();
+
+    const revoked = await api(`devices/${account.device.id}`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${survivor.accessToken}` },
+    });
+    expect(revoked.status).toBeLessThan(300);
+
+    const roster = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${HOME_TOKEN}` },
+    });
+    const identities = (await roster.json() as any).identities.map((entry: any) => entry.clientUUID);
+    expect(identities).not.toContain(leakedUUID);
+    const survivorCatalog = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${survivor.accessToken}` },
+    });
+    expect(await survivorCatalog.text()).not.toContain(leakedUUID);
+  });
+
   it('provisions and rotates a node token that is bound to its usage source', async () => {
     const created = await admin('exit-nodes', { id: 'exit-new', name: 'New Exit' });
     expect(created.status).toBe(201);

@@ -32,6 +32,31 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · 控制面：设备吊销同时退役账户共享 legacy exit 凭据
+
+- **归属/来源**：控制面凭据生命周期（ops/控制面安全修复，非客户 ship 门）；影响
+  `services/control-plane`。基线 main
+  [244075f2](https://github.com/raydocs/tono/commit/244075f28794652c5f562e67b72fde0e4d7c3184)，
+  分支 `fix/legacy-revoke-20260923`，Issue [#313](https://github.com/raydocs/tono/issues/313)；未合 main、未部署。
+- **缺陷修复**：dual rollout 阶段，设备首次拉目录时逐设备凭据尚未被全部节点 ack，会回落到账户共享的
+  `exit_credentials` UUID；吊销（DELETE、ops 动作、LRU 轮换、pending 过期）只删 `device_exit_credentials`，
+  只要账户还有别的活设备，共享 UUID 就一直在全部节点 roster 上，被吊销设备照样能连。改后：新迁移
+  `0077` 在任一设备从 pending/active 转为 revoked 时，在同一事务内永久退役该账户 legacy 凭据
+  （`retired_at`），推进目录 revision，并给其余活设备排 `refresh_catalog`；roster 的 legacy UNION 排除已退役行；
+  `exitClientUUID` 对已退役账户不再回落（设备侧等待自己的凭据就绪，未就绪返回 503
+  `EXIT_IDENTITY_PROPAGATING`；无设备的 legacy 签发返回 409 `DEVICE_IDENTITY_REQUIRED`）。
+  是退役而不是轮换：exit-agent 以 `u:<userId>` 标签管理 legacy client，同标签换 UUID 不会替换 Xray 已装的旧 UUID。
+- **新增/优化**：无。
+- **工程与测试**：`test/worker.test.ts` 新增一个 `it`
+  （removes the shared legacy credential from the exit roster once any device of the account is revoked）；
+  在旧代码上先跑红（roster 仍含被吊销设备拿到的 UUID），修复后绿。
+- **验证**：MacBook 本机 worktree，`npx vitest run test/worker.test.ts -t …` 先红后绿；
+  `npx vitest run`（control-plane 全部 43 文件 892 用例）通过；`npx tsc --noEmit` 通过。CI 结果见 PR。
+- **候选/发布**：无新包，仅源码；需要 D1 迁移 0077 + Worker 部署，均未执行。
+- **剩余限制**：exit-agent 无需改动（现有 reconcile 会删除从 roster 消失的 `u:<userId>`，hy2 allowlist 按摘要重写）；
+  部署顺序为先应用 0077 迁移、再部署 Worker。已退役账户的其余设备在节点 ack 其逐设备凭据前会短暂拿到 503；
+  切断在节点下一次 roster 轮询后生效。生产 `exit_credential_rollout.phase` 未在本机确认。
+
 ## 2026-09-23 · Windows App 在 Protected Offline（armed 未验证）期间的 Service 真值再同步
 
 - **归属/来源**：G1 断开/保护状态与实际一致（R2-F2）；影响 Windows App
