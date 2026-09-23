@@ -1,7 +1,9 @@
 import Foundation
 
-/// System boundary used by the disconnect owner. Tests replace only helper I/O,
-/// leaving admission, task draining, release decisions and UI settlement intact.
+/// System boundary used by the disconnect owner and by the protected
+/// reconnect loop's external-release reconciliation. Tests replace only
+/// helper I/O, leaving admission, task draining, release decisions and UI
+/// settlement intact.
 @MainActor
 struct NetworkProtectionOperations {
     var repairForRelease: () async throws -> Void = {
@@ -24,4 +26,8 @@ struct NetworkProtectionOperations {
     var restrictToBootstrap: () async throws -> Void = {
         try await PrivilegedRuntimeCoordinator.shared.restrictKillSwitchToBootstrap()
     }
+    var refreshKillSwitchStatus:
+        () async -> KillSwitchService.StatusObservation = {
+            await PrivilegedRuntimeCoordinator.shared.refreshKillSwitchStatus()
+        }
 }

@@ -1672,13 +1672,22 @@ extension AppState {
 
     /// Returns true only when a confirmed external release was accepted. Every
     /// unavailable, malformed, or rejecting response remains fail-closed.
+    /// `protectionWasArmed` carries the app's armed intent from when the caller
+    /// scheduled its recovery: a session this app itself tore down before the
+    /// first arm (mid-connect policy update, the wake handoff after the sleep
+    /// path already disarmed) also leaves `isProtectionBlocked` set, and a
+    /// helper that was never asked to arm answers with no persisted state —
+    /// reading that as an external release silently drops the connect intent
+    /// the recovery exists to fulfill.
     @discardableResult
-    private func reconcileConfirmedExternalProtectionRelease() async -> Bool {
-        guard isProtectionBlocked, !isConnected, !isConnecting,
+    private func reconcileConfirmedExternalProtectionRelease(
+        protectionWasArmed: Bool = true
+    ) async -> Bool {
+        guard protectionWasArmed, isProtectionBlocked, !isConnected, !isConnecting,
               !isDisconnecting else { return false }
         let observedGeneration = self.connectionCoordinator.protectionOperationGeneration
-        let observation = await PrivilegedRuntimeCoordinator.shared
-            .refreshKillSwitchStatus()
+        let networkProtection = self.networkProtection
+        let observation = await networkProtection.refreshKillSwitchStatus()
         guard !Task.isCancelled,
               self.connectionCoordinator.protectionOperationGeneration == observedGeneration,
               isProtectionBlocked, !isConnected, !isConnecting,
@@ -1778,6 +1787,16 @@ extension AppState {
             consecutiveProtectedFailureCount = 0
         }
 
+        // Snapshot before scheduling: this is the armed intent the pending
+        // teardown inherited. An internal transition that tears the session
+        // down before the first arm (mid-connect policy update, the wake
+        // handoff after the sleep path already disarmed) schedules this loop
+        // with `isArmed == false`, and its own teardown is what left
+        // `isProtectionBlocked` set — the loop must not later read the
+        // never-armed helper's "no persisted state" answer as an external
+        // release and abandon the connect intent it exists to fulfill.
+        let protectionWasArmedWhenScheduled = KillSwitchService.isArmed
+
         self.connectionCoordinator.scheduleProtectedReconnectLoop(
             immediate: immediate,
             onAttemptScheduled: { [weak self] attempt, delay in
@@ -1810,8 +1829,18 @@ extension AppState {
                 // Root emergency recovery may have released helper-owned PF
                 // state while this loop was sleeping. Accept only an
                 // authenticated unarmed status and exit before connect can
-                // re-arm it; rejection pauses for explicit helper repair.
-                if await self.reconcileConfirmedExternalProtectionRelease() {
+                // re-arm it; rejection pauses for explicit helper repair. A
+                // loop scheduled without armed protection skips the check
+                // only while PF is still unarmed now: its own never-armed
+                // teardown produced the blocked claim, and that is not an
+                // external release. Once an earlier attempt in this loop has
+                // armed PF (and then failed), the scheduling snapshot is
+                // stale — read the live armed state so a root emergency
+                // release during the backoff is still honored.
+                if await self.reconcileConfirmedExternalProtectionRelease(
+                    protectionWasArmed: protectionWasArmedWhenScheduled
+                        || KillSwitchService.isArmed
+                ) {
                     return true
                 }
                 guard !Task.isCancelled,
