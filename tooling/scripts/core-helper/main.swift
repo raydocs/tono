@@ -569,17 +569,9 @@ func runEmergencyDisarm(underLock suppliedStorage: UpdateStorage? = nil) -> Bool
         // Initialization terminates a stale owned Mihomo process before PF is
         // opened, preventing a half-running privileged runtime after recovery.
         let core = try CoreManager(allowedUID: allowedUID)
-        // Restore the user's DHCP/custom DNS before opening PF, but best
-        // effort. This command is the documented last-resort outlet an
-        // administrator runs precisely when the normal release paths refuse;
-        // keeping PF armed after a DNS failure does not protect the machine,
-        // it denies the one exit that is left — an unreadable snapshot used
-        // to brick restore, disarm, and reset on this exact line. restore()
-        // quarantines a corrupt snapshot and sweeps loopback DNS off every
-        // service it can still read; whatever residue it could not clean is
-        // reported instead of silently disarmed around. The strict order —
-        // normal release paths (app disconnect, update admission) refuse to
-        // open PF until restoration is proven — is unchanged.
+        // Restore the user's DHCP/custom DNS before opening PF. If DNS recovery
+        // fails, retain fail-closed protection instead of returning a machine
+        // with direct egress but a dead resolver.
         let dns = try ProtectedDNSManager()
         let manager = try KillSwitchManager(allowedUID: allowedUID)
         if pending {
@@ -587,22 +579,8 @@ func runEmergencyDisarm(underLock suppliedStorage: UpdateStorage? = nil) -> Bool
             ledger.attempt?.disconnectVerified = true
             try storage.save(ledger)
         } else {
-            var dnsResidue: String?
-            do {
-                _ = try dns.restore()
-            } catch {
-                dnsResidue = (error as? HelperFailure)?.message
-                    ?? String(describing: error)
-            }
+            _ = try dns.restore()
             _ = try manager.disarm()
-            if let dnsResidue {
-                fputs(
-                    "Tono emergency recovery disarmed PF but could not finish DNS restoration: \(dnsResidue)\n"
-                        + "A network service may still list 127.0.0.1 as its DNS server; "
-                        + "return it to automatic DNS in System Settings if name resolution fails.\n",
-                    stderr
-                )
-            }
         }
         print("Tono network protection is disarmed.")
         return true

@@ -263,18 +263,10 @@ final class ProtectedDNSManager {
     func status() -> [String: Any] {
         lock.lock()
         defer { lock.unlock() }
-        let snapshot: Snapshot?
-        do {
-            snapshot = try loadSnapshot()
-        } catch {
-            return [
-                "ok": false,
-                "configured": false,
-                "snapshotPresent": false,
-                "error": "Protected DNS status is unavailable.",
-            ]
-        }
-        return Self.statusResponse(snapshot: snapshot, read: Self.currentDNS)
+        return Self.statusResponse(
+            snapshotResult: Result(catching: loadSnapshot),
+            read: Self.currentDNS
+        )
     }
 
     /// The status report as a transaction over injected I/O, mirroring
@@ -288,10 +280,37 @@ final class ProtectedDNSManager {
     /// into snapshotPresent:false made the app refuse to call /dns/restore at
     /// all, so the read failure is reported separately while the snapshot
     /// stays visible for recovery.
+    ///
+    /// A snapshot file that exists but is fatally invalid is reported the
+    /// same way: restore() quarantines it and runs the snapshotless sweep
+    /// (see restoreTransaction), so hiding it behind snapshotPresent:false
+    /// kept the app from ever calling /dns/restore and left only the sudo
+    /// outlet. Transient `.system` inspection failures still report
+    /// snapshotPresent:false.
     private static func statusResponse(
-        snapshot: Snapshot?,
+        snapshotResult: Result<Snapshot?, Error>,
         read: (String) throws -> [String]
     ) -> [String: Any] {
+        let snapshot: Snapshot?
+        switch snapshotResult {
+        case .success(let loaded):
+            snapshot = loaded
+        case .failure(let error):
+            if let failure = error as? HelperFailure, case .invalid = failure {
+                return [
+                    "ok": false,
+                    "configured": false,
+                    "snapshotPresent": true,
+                    "error": "Protected DNS state is unreadable; restore will quarantine it.",
+                ]
+            }
+            return [
+                "ok": false,
+                "configured": false,
+                "snapshotPresent": false,
+                "error": "Protected DNS status is unavailable.",
+            ]
+        }
         guard let snapshot else {
             return Self.response(
                 configured: false,
@@ -782,7 +801,7 @@ final class ProtectedDNSManager {
     static func runStatusUnreadableServiceSelfTest() -> Bool {
         enum ReadFailure: Error { case injected }
         let snapshot = Snapshot(service: "Wi-Fi", servers: ["9.9.9.9"])
-        let status = statusResponse(snapshot: snapshot) { _ in
+        let status = statusResponse(snapshotResult: .success(snapshot)) { _ in
             throw ReadFailure.injected
         }
         let snapshotPresent = status["snapshotPresent"] as? Bool
@@ -824,18 +843,26 @@ final class ProtectedDNSManager {
             print("DNS corrupt-snapshot regression FAILED: restore threw \(error)")
             return false
         }
+        let status = statusResponse(
+            snapshotResult: .failure(HelperFailure.invalid("Protected DNS state is invalid.")),
+            read: { settings[$0]! }
+        )
+        let statusSnapshotPresent = status["snapshotPresent"] as? Bool
         guard quarantined,
               settings["Wi-Fi"] == [],
-              settings["Custom"] == ["8.8.4.4"] else {
+              settings["Custom"] == ["8.8.4.4"],
+              statusSnapshotPresent == true,
+              (status["ok"] as? Bool) == false else {
             print(
                 "DNS corrupt-snapshot regression FAILED: quarantined=\(quarantined), "
-                    + "Wi-Fi=\(settings["Wi-Fi"] ?? []), Custom=\(settings["Custom"] ?? [])"
+                    + "Wi-Fi=\(settings["Wi-Fi"] ?? []), Custom=\(settings["Custom"] ?? []), "
+                    + "status snapshotPresent=\(statusSnapshotPresent.map { "\($0)" } ?? "nil")"
             )
             return false
         }
         print(
             "DNS corrupt-snapshot regression passed: an unreadable snapshot is quarantined "
-                + "and the snapshotless loopback sweep still runs"
+                + "and the snapshotless loopback sweep still runs; status keeps it visible"
         )
         return true
     }

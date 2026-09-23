@@ -109,10 +109,10 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.6.0 → 4.7.0: an unreadable `protected-dns.json` no longer bricks
     ///   every release outlet. restore()/enable() quarantine a fatally
     ///   invalid snapshot aside and continue snapshotless (the loopback
-    ///   sweep runs; original values are not fabricated), and
-    ///   `--emergency-disarm` disarms PF even when DNS restoration cannot
-    ///   complete, reporting the residue instead of refusing the root-owned
-    ///   escape hatch.
+    ///   sweep runs; original values are not fabricated), and `/dns/status`
+    ///   reports such a file as `snapshotPresent: true` so the app calls
+    ///   `/dns/restore` instead of refusing. `--emergency-disarm` still
+    ///   refuses to open PF while DNS restoration fails.
     static let current = "4.7.0"
 }
 
