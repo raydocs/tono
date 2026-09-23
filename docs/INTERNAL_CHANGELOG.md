@@ -32,6 +32,33 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 更新待处理时显式 Disconnect 不再受墙钟顺序约束
+
+- **归属**：G1 断开与恢复；Windows Service `apps/windows/service/src/update_transaction.rs`。
+- **来源**：内部审查 H10-F3，Issue #413；分支 `fix/update-disconnect-clock-20260923`，基线
+  origin/main be1c75d2。提交时未合 main。
+- **缺陷修复**：原生更新待处理（WFP 仍按记录的恢复义务保持阻断）时，`request_disconnect`
+  要求墙钟 ≥ `receipt.updated_at_unix`，`verify_disconnect` 要求墙钟 ≥ `requested_at_unix`。
+  系统时间回拨（手动改时间、双系统 RTC、主板电池）后，唯一的产品内出口返回
+  `Disconnect clock is uncertain`；已持久化请求的重试也在同一检查上失败；WFP 不放行 NTP，
+  时钟无法自愈。改后与 macOS helper 对齐：显式释放不授予任何权限，不比较墙钟；记录的
+  请求/验证时间取 `max(now, 上一条持久证据时间)`，证据保持单调，现有 `State` 校验
+  （`requested ≥ created`、`verified ≥ requested`）与持久化格式不变，回滚后的旧 Service
+  仍能打开该记录。时间判断仍只留在授予权限的路径（`live_attempt`：consume、observe/commit、
+  adopt、unpack）。U1 单次消费、U3 高水位不回退、U4 Disconnect 不伪造提交保持不变。
+- **新增/优化**：无。
+- **工程与测试**：一个 `#[test]`
+  `update_transaction::tests::update_explicit_disconnect_releases_after_wall_clock_rollback`：
+  待处理 attempt `updatedAt = 1_900_000_010`，墙钟回到 `1_899_999_000` 时请求（含重试）与
+  验证成功、重新 open 通过校验、回拨下 `live_attempt` 仍拒绝、未消费记录可退休。旧代码在
+  第一次 `request_disconnect` 返回 Err。
+- **验证**：MacBook 为编辑/审查机，未运行原生 cargo；回归由本 PR 的 GitHub-hosted
+  `windows-2025` windows-ci service job（`update_transaction::tests::update_` 过滤）执行，结果
+  以 PR checks 为准。未做实机时钟回拨验收。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：重启后更新仍待处理时 WFP 是否保持阻断取决于 Service 启动对账（需实机）；
+  与在审 #359/#361/#396 无同区代码冲突，仅本文件条目位置需按合并顺序整理。
+
 ## 2026-09-23 · macOS 快照服务不可读时 status 折叠掉 snapshotPresent，断开被无谓拒绝
 
 - **归属/来源**：G1 断开与恢复；macOS `tono-core-helper` 的 `/dns/status`。R3-F4
