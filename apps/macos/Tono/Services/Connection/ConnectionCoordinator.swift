@@ -45,7 +45,7 @@ final class ConnectionCoordinator {
     /// does not mean an in-flight helper request has stopped mutating the host.
     func enqueueDisconnect(
         waitingFor pendingTasks: [Task<Void, Never>] = [],
-        releaseIntent: Bool,
+        releaseIntent: Bool = false,
         operation: @escaping @MainActor (Int) async -> Void
     ) {
         cancelDeferredConnect()
