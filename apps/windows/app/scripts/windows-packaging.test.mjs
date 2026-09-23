@@ -93,6 +93,15 @@ test('NSIS private extraction cannot bypass native admission or mutate the live 
   )
 })
 
+test('elevated setup never runs a Microsoft installer from the user temp directory', () => {
+  const code = installerSource
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*;/.test(line))
+    .join('\n')
+  assert.doesNotMatch(code, /(?:download\s+\S+|\/oname=)\s*"?\$TEMP\\/i)
+  assert.doesNotMatch(code, /ExecWait\s+['"`]"?\$TEMP\\/i)
+})
+
 test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
   assert.equal(validateNsisAutomaticUpgradeFlow(installerSource), null)
 

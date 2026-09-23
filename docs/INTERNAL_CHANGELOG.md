@@ -32,6 +32,28 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · 安装器从仅管理员可写位置执行 VC++/WebView2 安装程序（内部审查 H5-F4）
+
+- **归属**：Windows 手动安装路径加固；`apps/windows/app/src-tauri/packages/windows/installer.nsi`。
+- **来源**：基线 main `498ed426` → 分支 `fix/installer-admin-only-setup-files-20260923`；
+  Issue #383；提交时未合 main。
+- **缺陷修复**：提权安装器把 VC++ Redistributable 与 WebView2 bootstrapper 写到当前用户
+  `%TEMP%` 后直接 `ExecWait`，同用户未提权进程可在写入与执行之间替换 → 新宏
+  `TonoAdminOnlySetupFile` 用 `GetTempFileName` 在 `$WINDIR\Temp` 新建文件（继承 ACL
+  不给普通用户任何访问），同目录改名为 `.exe`（保留 ACL，目标已存在则失败），下载/释放
+  到该文件后执行并删除。拿不到该文件时：VC++ 跳过（与原下载失败同为记录后继续），
+  WebView2 中止（与原下载失败一致）。SYSTEM 私有解包路径不经过这两个 Section，未改。
+- **新增/优化**：无。未加 Authenticode 校验（文件已不可被普通用户替换）。
+- **工程与测试**：`windows-packaging.test.mjs` 新增一个 test：模板中不得有下载/释放到
+  `$TEMP\` 或从 `$TEMP\` `ExecWait`；旧模板上失败。
+- **验证**：MacBook 本机 `node --test scripts/windows-packaging.test.mjs` 23/23 通过（修复前
+  新增项失败）。本机无 makensis，未编译 NSIS；PR CI 不构建安装包；未在设备上安装。
+  需所有者在下一次 Windows 候选构建（NSIS 编译）和一次缺 VC++/WebView2 的干净 Windows 11
+  手动安装中确认。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：依赖 `C:\Windows\Temp` 的默认 ACL；`.onInit` 在 `$PLUGINSDIR`（同样位于用户
+  `%TEMP%`）执行随包的 `tono-service-install.exe --manual-update-gate`，不在本项范围，另行核实。
+
 ## 2026-09-23 · coreMonitor 不得把运行时替换的瞬时 utun 消失判为 TUN 死亡
 
 - **归属**：G1（已连接=能用：切换/热重载不掉线）；macOS 客户端 `apps/macos`。
