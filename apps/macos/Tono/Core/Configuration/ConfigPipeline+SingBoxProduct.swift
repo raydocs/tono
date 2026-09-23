@@ -16,6 +16,15 @@ nonisolated extension ConfigPipeline {
         var customMirror: Mirror { Mirror(self, children: ["summary": description]) }
     }
 
+    /// Apple Continuity daemons sent to DIRECT. Matched by exact path on the
+    /// SIP-sealed system volume; a basename would admit any renamed process.
+    static let continuityDirectProcessPaths = [
+        "/usr/libexec/sharingd",
+        "/usr/libexec/rapportd",
+        "/usr/libexec/SidecarDisplayAgent",
+        "/System/Library/PrivateFrameworks/IDS.framework/identityservicesd.app/Contents/MacOS/identityservicesd",
+    ]
+
     static func singBoxUnavailableReason(_ node: ProxyNode) -> String? {
         if node.type == .hysteria2, node.tlsFingerprint != nil {
             return "TONO_SINGBOX_HY2_DER_PIN_UNSUPPORTED"
@@ -204,7 +213,7 @@ nonisolated extension ConfigPipeline {
         dnsRules.append(["inbound": ["Tono-DNS", "Tono-TUN", "Tono-Mixed"], "query_type": ["A"], "action": "route", "server": "Tono-FakeIP"])
         rules.append(["ip_cidr": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "224.0.0.0/4", "255.255.255.255/32", "fe80::/10", "fc00::/7", "ff00::/8", "127.0.0.0/8", "::1/128"], "action": "route", "outbound": "DIRECT"])
         rules.append(["network": "udp", "port": [5353], "action": "route", "outbound": "DIRECT"])
-        rules.append(["process_name": ["sharingd", "rapportd", "SidecarDisplayAgent", "identityservicesd"], "action": "route", "outbound": "DIRECT"])
+        rules.append(["process_path": continuityDirectProcessPaths, "action": "route", "outbound": "DIRECT"])
         rules.append(["ip_version": 6, "action": "reject"])
         rules.append(["network": ["udp", "icmp"], "action": "reject"])
         let localSubnets = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "fe80::/10", "fc00::/7", "224.0.0.0/4"]

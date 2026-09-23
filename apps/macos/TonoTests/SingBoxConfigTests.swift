@@ -246,4 +246,23 @@ final class SingBoxConfigTests: XCTestCase {
             try result.runtimeJSON.write(to: URL(fileURLWithPath: path))
         }
     }
+
+    func testDirectRoutesNeverMatchOnProcessName() throws {
+        // A plan opens root's web ports in PF, so any rule that sends a
+        // basename to a direct outbound lets a renamed process leave untunneled.
+        let overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+            externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
+            selectedNodeName: "Fixture Beta")
+        let plan = ConfigPipeline.ManagedDirectRuntimePolicy(physicalInterface: "en0",
+            domainPins: [], webDomainPins: [.init(host: "www.qq.com", addresses: ["101.32.104.4"], ports: [443])],
+            mediaEndpoints: [], directResolverHosts: ["www.qq.com"], trusted: true)
+        let result = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: nodes(), directPlan: plan)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: result.runtimeJSON) as? [String: Any])
+        let rules = try XCTUnwrap((json["route"] as? [String: Any])?["rules"] as? [[String: Any]])
+        let direct: Set<String> = ["DIRECT", ConfigPipeline.appDirectGroupName, ConfigPipeline.webDirectGroupName]
+        let directRules = rules.filter { direct.contains($0["outbound"] as? String ?? "") }
+        XCTAssertFalse(directRules.contains { $0["process_name"] != nil })
+        let continuity = try XCTUnwrap(directRules.first { $0["process_path"] != nil })
+        XCTAssertEqual(continuity["process_path"] as? [String], ConfigPipeline.continuityDirectProcessPaths)
+    }
 }
