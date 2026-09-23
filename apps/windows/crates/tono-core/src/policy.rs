@@ -686,17 +686,35 @@ impl PolicyTracker {
         response: &TonoTrafficPolicyResponse,
         protected: &BTreeSet<Ipv4Addr>,
     ) -> Result<PolicyInstallOutcome, PolicyError> {
-        match crate::policy_signature::verdict(&response.json, response.signature.as_deref()) {
+        self.install_with_key(
+            response,
+            protected,
+            crate::policy_signature::TRAFFIC_POLICY_PUBLIC_KEY,
+        )
+    }
+
+    /// `install` against an explicit verifying key, so the gate can be
+    /// exercised with a throwaway keypair. Production always passes the
+    /// compiled-in key through `install`.
+    fn install_with_key(
+        &mut self,
+        response: &TonoTrafficPolicyResponse,
+        protected: &BTreeSet<Ipv4Addr>,
+        public_key_base64: &str,
+    ) -> Result<PolicyInstallOutcome, PolicyError> {
+        let verdict = crate::policy_signature::verdict_with_key(
+            &response.json,
+            response.signature.as_deref(),
+            public_key_base64,
+        );
+        match verdict {
             crate::policy_signature::SignatureVerdict::Untrustworthy => {
                 return Err(PolicyError::InvalidResponse);
             }
             crate::policy_signature::SignatureVerdict::Unsigned => {}
             crate::policy_signature::SignatureVerdict::Trusted => {}
         }
-        let trusted = crate::policy_signature::verdict(
-            &response.json,
-            response.signature.as_deref(),
-        ) == crate::policy_signature::SignatureVerdict::Trusted;
+        let trusted = verdict == crate::policy_signature::SignatureVerdict::Trusted;
         let policy = validate_policy_with_trust(response, protected, trusted)?;
         if response.revision < self.current_revision {
             return Err(PolicyError::StaleRevision);
@@ -1174,6 +1192,52 @@ mod tests {
             validate_policy(&response(1, &big), &no_protected()),
             Err(PolicyError::InvalidResponse)
         );
+    }
+
+    #[test]
+    fn signed_revision_outranks_an_unsigned_revision_pin() {
+        use crate::policy_signature::TRAFFIC_POLICY_SIGNATURE_CONTEXT;
+        use base64::Engine as _;
+        use ed25519_dalek::{Signer, SigningKey};
+
+        let signing = SigningKey::from_bytes(&[7_u8; 32]);
+        let key = base64::engine::general_purpose::STANDARD
+            .encode(signing.verifying_key().as_bytes());
+        let signed = |revision: i64, json: &str| {
+            let mut message = TRAFFIC_POLICY_SIGNATURE_CONTEXT.as_bytes().to_vec();
+            message.extend_from_slice(json.as_bytes());
+            let mut envelope = response(revision, json);
+            envelope.signature = Some(
+                base64::engine::general_purpose::STANDARD
+                    .encode(signing.sign(&message).to_bytes()),
+            );
+            envelope
+        };
+        let installed = |outcome: Result<PolicyInstallOutcome, PolicyError>| matches!(outcome, Ok(PolicyInstallOutcome::Installed(_)));
+
+        // A genuinely signed legacy document replayed under a forged revision
+        // is accepted: nothing signed says which revision it was.
+        let legacy = good_document();
+        let mut tracker = PolicyTracker::new();
+        assert!(installed(tracker.install_with_key(&signed(1 << 53, &legacy), &no_protected(), &key)));
+
+        // The next genuine publish carries its revision inside the signed
+        // bytes, and a number nobody signed must not outrank it.
+        let bound = r#"{"version":1,"revision":4,"domains":[],"mediaEndpoints":[]}"#;
+        assert!(installed(tracker.install_with_key(&signed(4, bound), &no_protected(), &key)));
+        assert_eq!(tracker.current_revision(), 4);
+
+        // From then on an unsigned revision cannot move the gate, and the
+        // envelope cannot relabel a signed one.
+        assert_eq!(
+            tracker.install_with_key(&signed(1 << 53, &legacy), &no_protected(), &key),
+            Err(PolicyError::StaleRevision)
+        );
+        assert_eq!(
+            tracker.install_with_key(&signed(5, bound), &no_protected(), &key),
+            Err(PolicyError::InvalidResponse)
+        );
+        assert_eq!(tracker.current_revision(), 4);
     }
 
     #[test]
