@@ -122,6 +122,47 @@ mod sample_commit_tests {
     }
 }
 
+#[cfg(test)]
+mod monitor_registration_tests {
+    use crate::tono::state::TaskRegistry;
+
+    /// A monitor-driven reconnect runs inline in the old monitor's own task, so the
+    /// connect tail that replaces the monitor registration executes inside the very
+    /// task the slot still holds. The replacement must not abort that handle: tokio
+    /// only marks a running task cancelled and destroys it at its next Pending await —
+    /// in production the `state.lock().await` of `spawn_control_plane_pin_refresh` —
+    /// silently dropping the session's optional DIRECT overlay after the FSM already
+    /// committed Connected. Under the previous unconditional `abort_network_monitor()`
+    /// the fixture task dies at the `yield_now().await` below, the send never runs,
+    /// and this assertion fails.
+    #[tokio::test]
+    async fn a_monitor_replacing_its_own_registration_finishes_the_connect_tail() {
+        let (self_handle_tx, self_handle_rx) = tokio::sync::oneshot::channel();
+        let (tail_tx, tail_rx) = tokio::sync::oneshot::channel::<()>();
+        let monitored = tokio::spawn(async move {
+            let mut tasks = TaskRegistry::default();
+            // The slot exactly as the recovered session left it: this very task.
+            tasks.network_monitor = Some(self_handle_rx.await.expect("fixture handle must arrive"));
+            // What `spawn_network_monitor` performs once the fresh monitor is spawned.
+            let replacement = tauri::async_runtime::JoinHandle::Tokio(tokio::spawn(async {}));
+            tasks.register_network_monitor(replacement);
+            // First Pending point after the self-replacement, standing in for the
+            // awaited state lock in the connect tail.
+            tokio::task::yield_now().await;
+            tail_tx
+                .send(())
+                .expect("the connect tail must survive replacing its own monitor registration");
+        });
+        self_handle_tx
+            .send(tauri::async_runtime::JoinHandle::Tokio(monitored))
+            .expect("fixture task must still be awaiting its handle");
+        assert!(
+            tail_rx.await.is_ok(),
+            "a monitor replacing its own registration must not abort itself at the next await"
+        );
+    }
+}
+
 /// Read the controller once, ingest the route ledger, record DIRECT diagnostics, and update
 /// protected-route evidence.
 ///
@@ -476,8 +517,10 @@ pub(super) async fn spawn_network_monitor(state: &Arc<TonoState>, app: &AppHandl
     // its opaque type here would make the async types infinitely recursive.
     let handle = AsyncHandler::spawn(move || Box::pin(network_monitor_loop(task_state, task_app)) as BoxedTask);
     let mut inner = state.lock().await;
-    inner.tasks.abort_network_monitor();
-    inner.tasks.network_monitor = Some(handle);
+    // Slot replacement, not a blind abort: this call also runs from the connect
+    // tail of a monitor-driven reconnect, i.e. from inside the very task the slot
+    // still holds. See `TaskRegistry::register_network_monitor`.
+    inner.tasks.register_network_monitor(handle);
 }
 
 /// R2-F2: Service-truth poll cadence while the FSM idles in Protected Offline. The

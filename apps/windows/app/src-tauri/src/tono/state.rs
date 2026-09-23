@@ -146,6 +146,31 @@ impl TaskRegistry {
         Self::abort(&mut self.network_monitor);
     }
 
+    /// Replace the monitor slot with a freshly spawned monitor loop.
+    ///
+    /// A monitor-driven reconnect runs inline in the old monitor's own task, so by the time
+    /// the connect tail registers the new monitor, this slot can still hold the calling
+    /// task itself. Aborting that handle cancels the caller at its next await — after the
+    /// FSM already committed Connected — dropping the pin-refresh registration and the
+    /// optional DIRECT overlay for this session (`abort_network_monitor` has no way to
+    /// know the handle is the caller; `retire_connection_generation` documents the same
+    /// constraint for the generation bump). When the slot holds the current task, swap the
+    /// slot only: the caller finishes its connect tail and then exits its loop on its own
+    /// (`connection_loop_continues` is false once the reconnect is handed to the new
+    /// session's monitor). Every other replacement — user Connect, reconnect backoff,
+    /// node switch — still aborts the displaced monitor.
+    pub fn register_network_monitor(&mut self, handle: JoinHandle<()>) {
+        let replacing_itself = tokio::task::try_id().is_some_and(|current| {
+            self.network_monitor
+                .as_ref()
+                .is_some_and(|registered| registered.inner().id() == current)
+        });
+        if !replacing_itself {
+            self.abort_network_monitor();
+        }
+        self.network_monitor = Some(handle);
+    }
+
     pub fn abort_direct_lease_heartbeat(&mut self) {
         Self::abort(&mut self.direct_lease_heartbeat);
     }
