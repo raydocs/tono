@@ -277,15 +277,25 @@ async fn upload_once(state: &Arc<TonoState>, generation: u64) -> Result<(), ApiE
     if !state.audit().periodic_telemetry_enabled() || !state.audit().enabled() {
         return Ok(());
     }
-    let (client, identity) = {
+    let (client, identity, account_scope) = {
         let inner = state.lock().await;
         if inner.sign_in_generation != generation || inner.account_close.is_some() {
             return Ok(());
         }
-        (inner.client.clone(), inner.client.diagnostics_log_identity().await)
+        // The audit file outlives sign-out; only this account's records may ride its window.
+        let Some(account_scope) = state.audit().account_scope() else {
+            return Ok(());
+        };
+        (
+            inner.client.clone(),
+            inner.client.diagnostics_log_identity().await,
+            account_scope,
+        )
     };
 
-    let (report, uploaded_totals, baseline_epoch) = build_window_report(state).await.map_err(ApiError::InvalidInput)?;
+    let (report, uploaded_totals, baseline_epoch) = build_window_report(state, account_scope)
+        .await
+        .map_err(ApiError::InvalidInput)?;
     {
         let inner = state.lock().await;
         if inner.sign_in_generation != generation
@@ -329,7 +339,10 @@ async fn upload_once(state: &Arc<TonoState>, generation: u64) -> Result<(), ApiE
     }
 }
 
-async fn build_window_report(state: &Arc<TonoState>) -> Result<(TelemetryWindowReport, BytesByRoute, u64), String> {
+async fn build_window_report(
+    state: &Arc<TonoState>,
+    account_scope: String,
+) -> Result<(TelemetryWindowReport, BytesByRoute, u64), String> {
     // Capture counters and their end time together, before any HTTP/IO await.
     let (now_ms, bytes_by_route, route_bytes_interval, uploaded_totals, baseline_epoch) = {
         let ledger = state.route_ledger().lock();
@@ -345,9 +358,10 @@ async fn build_window_report(state: &Arc<TonoState>) -> Result<(TelemetryWindowR
     };
     let start_ms = now_ms.saturating_sub(PERIODIC_TELEMETRY_LOOKBACK.as_millis() as i64);
     let log_path = state.audit().log_path().to_path_buf();
-    let (events, dropped) = tokio::task::spawn_blocking(move || collect_events(&log_path, start_ms, now_ms))
-        .await
-        .map_err(|err| err.to_string())??;
+    let (events, dropped) =
+        tokio::task::spawn_blocking(move || collect_events(&log_path, start_ms, now_ms, &account_scope))
+            .await
+            .map_err(|err| err.to_string())??;
 
     let app_version = env!("CARGO_PKG_VERSION").to_string();
     let os_version = AsyncHandler::spawn_blocking(|| tauri_plugin_tono_sysinfo::os_long_version())
@@ -458,7 +472,12 @@ pub(super) fn epoch_ms() -> i64 {
         .unwrap_or(0)
 }
 
-fn collect_events(path: &Path, start_ms: i64, end_ms: i64) -> Result<(Vec<TelemetryEvent>, u32), String> {
+fn collect_events(
+    path: &Path,
+    start_ms: i64,
+    end_ms: i64,
+    account_scope: &str,
+) -> Result<(Vec<TelemetryEvent>, u32), String> {
     if !path.exists() {
         return Ok((Vec::new(), 0));
     }
@@ -478,6 +497,10 @@ fn collect_events(path: &Path, start_ms: i64, end_ms: i64) -> Result<(Vec<Teleme
             continue;
         };
         if ts < start_ms || ts > end_ms {
+            continue;
+        }
+        // Unstamped (legacy, pre-sign-in) and other-account records never leave the device here.
+        if value.get("_accountScope").and_then(Value::as_str) != Some(account_scope) {
             continue;
         }
         let Some(kind) = value.get("kind").and_then(Value::as_str) else {
@@ -701,15 +724,25 @@ mod tests {
         let path = dir.path().join("traffic-audit.jsonl");
         let mut file = std::fs::File::create(&path).unwrap();
         let now = epoch_ms();
-        writeln!(file, r#"{{"ts":{},"kind":"signInOk","email":"a@b.com"}}"#, now - 1000).unwrap();
-        writeln!(file, r#"{{"ts":{},"kind":"networkChange","counter":3}}"#, now - 500).unwrap();
         writeln!(
             file,
-            r#"{{"ts":{},"kind":"connectOk","node":"Tokyo · Sakura · hy2","elapsedMs":1200,"transport":"hy2"}}"#,
+            r#"{{"ts":{},"_accountScope":"owner","kind":"signInOk","email":"a@b.com"}}"#,
+            now - 1000
+        )
+        .unwrap();
+        writeln!(
+            file,
+            r#"{{"ts":{},"_accountScope":"owner","kind":"networkChange","counter":3}}"#,
+            now - 500
+        )
+        .unwrap();
+        writeln!(
+            file,
+            r#"{{"ts":{},"_accountScope":"owner","kind":"connectOk","node":"Tokyo · Sakura · hy2","elapsedMs":1200,"transport":"hy2"}}"#,
             now - 100
         )
         .unwrap();
-        let (events, dropped) = collect_events(&path, now - 60_000, now).unwrap();
+        let (events, dropped) = collect_events(&path, now - 60_000, now, "owner").unwrap();
         assert_eq!(events.len(), 2);
         assert!(dropped >= 1);
         assert!(events.iter().all(|e| e.kind != "signInOk"));
@@ -726,11 +759,11 @@ mod tests {
         let now = epoch_ms();
         writeln!(
             file,
-            r#"{{"ts":{},"kind":"connectFail","stage":"checkingExit","error":"TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof","action":"fullRelease","transport":"tcp","code":"TONO_NODE_OR_CORE_UNREACHABLE","node":"Tokyo · Sakura"}}"#,
+            r#"{{"ts":{},"_accountScope":"owner","kind":"connectFail","stage":"checkingExit","error":"TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof","action":"fullRelease","transport":"tcp","code":"TONO_NODE_OR_CORE_UNREACHABLE","node":"Tokyo · Sakura"}}"#,
             now - 100
         )
         .unwrap();
-        let (events, _) = collect_events(&path, now - 60_000, now).unwrap();
+        let (events, _) = collect_events(&path, now - 60_000, now, "owner").unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, "connectFail");
         assert_eq!(events[0].stage.as_deref(), Some("checkingExit"));
@@ -762,18 +795,18 @@ mod tests {
         let now = epoch_ms();
         writeln!(
             file,
-            r#"{{"ts":{},"kind":"protectedRouteEvidence","generation":7,"residentialConnectionCount":1,"directConnectionCount":0,"proxiedConnectionCount":0,"blockedConnectionCount":0,"unknownConnectionCount":0,"latestRoute":"RESIDENTIAL","latestDestination":"ANTHROPIC"}}"#,
+            r#"{{"ts":{},"_accountScope":"owner","kind":"protectedRouteEvidence","generation":7,"residentialConnectionCount":1,"directConnectionCount":0,"proxiedConnectionCount":0,"blockedConnectionCount":0,"unknownConnectionCount":0,"latestRoute":"RESIDENTIAL","latestDestination":"ANTHROPIC"}}"#,
             now - 1000
         )
         .unwrap();
         writeln!(
             file,
-            r#"{{"ts":{},"kind":"protectedRouteEvidence","generation":7,"residentialConnectionCount":4,"directConnectionCount":2,"proxiedConnectionCount":1,"blockedConnectionCount":1,"unknownConnectionCount":1,"latestRoute":"PROXIED","latestDestination":"TURNSTILE","host":"private.example","path":"C:\\\\secret","node":"private-node","error":"private-error","probe":"private-probe"}}"#,
+            r#"{{"ts":{},"_accountScope":"owner","kind":"protectedRouteEvidence","generation":7,"residentialConnectionCount":4,"directConnectionCount":2,"proxiedConnectionCount":1,"blockedConnectionCount":1,"unknownConnectionCount":1,"latestRoute":"PROXIED","latestDestination":"TURNSTILE","host":"private.example","path":"C:\\\\secret","node":"private-node","error":"private-error","probe":"private-probe"}}"#,
             now - 100
         )
         .unwrap();
 
-        let (events, _) = collect_events(&path, now - 60_000, now).unwrap();
+        let (events, _) = collect_events(&path, now - 60_000, now, "owner").unwrap();
         assert_eq!(events.len(), 6, "five aggregate buckets plus one latest enum");
         assert_eq!(
             events
@@ -813,11 +846,11 @@ mod tests {
         let now = epoch_ms();
         writeln!(
             file,
-            r#"{{"ts":{},"kind":"disconnectOk","elapsedMs":45000,"bytesUp":1234,"bytesDown":5678}}"#,
+            r#"{{"ts":{},"_accountScope":"owner","kind":"disconnectOk","elapsedMs":45000,"bytesUp":1234,"bytesDown":5678}}"#,
             now - 100
         )
         .unwrap();
-        let (events, _) = collect_events(&path, now - 60_000, now).unwrap();
+        let (events, _) = collect_events(&path, now - 60_000, now, "owner").unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, "disconnectOk");
         assert_eq!(events[0].elapsed_ms, Some(45_000));
@@ -897,5 +930,40 @@ mod tests {
         let empty_json = serde_json::to_value(&empty).unwrap();
         assert_eq!(empty_json["bytesByRoute"]["cloud"], 11);
         assert_eq!(empty_json["bytesByRoute"]["direct"], 33);
+    }
+
+    #[test]
+    fn periodic_window_carries_only_the_signed_in_accounts_records() {
+        let dir = TempDir::new("account-scope");
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(8);
+        let audit = crate::tono::audit::Audit::for_test(sender, dir.path(), true);
+        let start = epoch_ms() - 60_000;
+        let fail = || AuditEvent::ConnectFail {
+            stage: Some("checkingExit"),
+            error: "TONO_NODE_OR_CORE_UNREACHABLE".to_string(),
+            action: "fullRelease",
+            transport: Some("tcp"),
+            code: Some("TONO_NODE_OR_CORE_UNREACHABLE".to_string()),
+            node: Some("Tokyo · Sakura".to_string()),
+        };
+        audit.log(fail());
+        audit.activate_log_upload_owner("account-a");
+        audit.log(fail());
+        audit.abandon_log_upload_owner();
+        audit.activate_log_upload_owner("account-b");
+        audit.log(AuditEvent::ConnectOk {
+            node: "Tokyo · Sakura".to_string(),
+            elapsed_ms: 900,
+            transport: "tcp",
+        });
+        let path = dir.path().join("traffic-audit.jsonl");
+        let mut file = std::fs::File::create(&path).unwrap();
+        while let Ok(record) = receiver.try_recv() {
+            writeln!(file, "{}", serde_json::to_string(&record).unwrap()).unwrap();
+        }
+        let scope = audit.account_scope().unwrap();
+        let (events, _) = collect_events(&path, start, epoch_ms() + 1, &scope).unwrap();
+        let kinds: Vec<_> = events.iter().map(|event| event.kind.as_str()).collect();
+        assert_eq!(kinds, ["connectOk"]);
     }
 }

@@ -32,6 +32,30 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows periodic telemetry 按账户归属过滤审计事件
+
+- **归属/来源**：G2 遥测/运维证据可信（H3-F3）；影响 Windows App
+  （`apps/windows/app`）。基线 main 576d7087，分支 `fix/telemetry-account-window-20260923`，
+  Issue [#319](https://github.com/raydocs/tono/issues/319)；提交时未合 main。
+- **缺陷修复**：账户 A 登出后约 17 分钟内账户 B 登录，B 的首个 periodic window
+  （`telemetry.rs` 只按 22 分钟时间窗读 `traffic-audit.jsonl`）会把 A 的 `connectFail`、
+  连接时间线和 `protectedRouteEvidence`（展开为 `protectedRouteInvariantViolation`）用 B 的
+  凭据上传。现在每条审计记录在入队时带一个与上传同意无关的 `_accountScope`（每次账户激活
+  生成的随机 id，登出/新登录开始时清空，不落盘），periodic window 只收当前账户 scope 的记录；
+  无 scope（旧记录、登录前）或他人 scope 的记录留在本机。与 macOS `clearAccount` 清空缓冲的
+  语义对齐。
+- **新增/优化**：无。本地审计文件内容与原始网络日志上传（`_uploadScope`）不变。
+- **工程与测试**：新增一个回归
+  `periodic_window_carries_only_the_signed_in_accounts_records`（`telemetry.rs`）；既有
+  `collect_events_*` fixture 补上 scope 以适配新签名。旧代码上该测试无法编译（无账户边界），
+  即旧实现没有这层过滤。
+- **验证**：本机仅对改动文件跑 rustfmt 检查；按执行位置规定未在 MacBook 跑原生
+  `cargo test`，以 PR 的 GitHub-hosted Windows CI 结果为准。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：升级后首个窗口不再携带升级前的无 scope 事件；App 重启后同一账户重启前的
+  事件也不再进入窗口（与 macOS 内存缓冲一致）。即时 `telemetry/failures` 路径沿用 W14 的
+  admission 身份，未改。未实机复现。
+
 ## 2026-09-23 · Windows App 在 Protected Offline（armed 未验证）期间的 Service 真值再同步
 
 - **归属/来源**：G1 断开/保护状态与实际一致（R2-F2）；影响 Windows App

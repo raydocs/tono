@@ -47,6 +47,10 @@ pub struct AuditRecord {
     /// Captured before queuing: a late disk write cannot acquire a new owner.
     #[serde(rename = "_uploadScope", skip_serializing_if = "Option::is_none")]
     pub upload_scope: Option<String>,
+    /// Consent-independent account boundary: periodic telemetry uploads only
+    /// records stamped with the currently signed-in account's scope.
+    #[serde(rename = "_accountScope", skip_serializing_if = "Option::is_none")]
+    pub account_scope: Option<String>,
     #[serde(flatten)]
     pub event: AuditEvent,
 }
@@ -57,7 +61,12 @@ impl AuditRecord {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|duration| duration.as_millis() as i64)
             .unwrap_or(0);
-        Self { ts, event, upload_scope: None }
+        Self {
+            ts,
+            event,
+            upload_scope: None,
+            account_scope: None,
+        }
     }
 }
 
@@ -546,6 +555,8 @@ pub(crate) struct LogUploadScope {
 struct UploadOwner {
     owner: Option<String>,
     scope: Option<LogUploadScope>,
+    /// Fresh per account activation, cleared on abandon; never persisted.
+    account_scope: Option<String>,
 }
 
 // Serialize all settings read/modify/write operations, including migration.
@@ -764,6 +775,9 @@ impl Audit {
     /// without a scope are retained locally, never silently attributed at upload.
     pub(crate) fn activate_log_upload_owner(&self, account: &str) {
         let mut owner = self.upload_owner.lock();
+        if owner.owner.as_deref() != Some(account) || owner.account_scope.is_none() {
+            owner.account_scope = Some(tono_core::auth::new_installation_id());
+        }
         owner.owner = Some(account.to_string());
         self.refresh_upload_scope(&mut owner);
     }
@@ -771,6 +785,7 @@ impl Audit {
     pub(crate) fn abandon_log_upload_owner(&self) {
         let mut owner = self.upload_owner.lock();
         owner.owner = None;
+        owner.account_scope = None;
         self.refresh_upload_scope(&mut owner);
     }
 
@@ -800,6 +815,10 @@ impl Audit {
                 id: saved.id, cancelled: tokio_util::sync::CancellationToken::new(),
             });
         }
+    }
+
+    pub(crate) fn account_scope(&self) -> Option<String> {
+        self.upload_owner.lock().account_scope.clone()
     }
 
     pub(crate) fn log_upload_scope(&self) -> Option<LogUploadScope> {
@@ -837,6 +856,7 @@ impl Audit {
         let owner = self.upload_owner.lock();
         let mut record = AuditRecord::now(event.redacted());
         record.upload_scope = owner.scope.as_ref().map(|scope| scope.id.clone());
+        record.account_scope = owner.account_scope.clone();
         let sender = self.sender.lock();
         if let Some(sender) = sender.as_ref()
             && sender.try_send(record).is_err()
