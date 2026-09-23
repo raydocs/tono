@@ -1463,7 +1463,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       headers: { authorization: `Bearer ${token}` },
     });
     expect((await admin('exit-nodes/exit-a', { status: 'disabled' }, 'PATCH')).status).toBe(200);
-    expect(await revokeExitToken(env, 'Test exit-b', 'ops@example.com', 1)).toBe(true);
+    expect(await revokeExitToken(env as unknown as Env, 'Test exit-b', 'ops@example.com', 1)).toBe(true);
     for (const token of [EXIT_NODE_TOKENS['exit-a'], EXIT_NODE_TOKENS['exit-b']]) {
       const response = await roster(token);
       expect(response.status).toBe(403);
