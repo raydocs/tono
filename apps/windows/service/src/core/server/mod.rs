@@ -25,8 +25,9 @@ use crate::{
     AuthenticatedRequest, AuthenticatedSessionRequest, BootstrapPins,
     FinalizeDirectRuntimeReloadRequest, IpcCommand, KillSwitchLockRequest,
     MIN_SUPPORTED_CLIENT_REVISION, MacosProxyConfig,
-    OwnerSessionHandle, ProtocolInfo, ProtocolVersion, ProxyApplyOutcome,
-    RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, ReplaceProxyEndpointsRequest,
+    OwnerSessionHandle, PrepareCoreStartPayload, ProtocolInfo, ProtocolVersion,
+    ProxyApplyOutcome, RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest,
+    ReplaceProxyEndpointsRequest,
     RuntimeBundle,
     LEGACY_SERVICE_PROTOCOL_HEADER, SERVICE_PROTOCOL_HEADER, ServiceOperationKind,
     StartClashRequest, StartClashResult,
@@ -936,6 +937,9 @@ fn service_error(error: ServiceError) -> Result<HttpResponse> {
         crate::ServiceErrorCode::UnauthorizedOwner => StatusCode::UNAUTHORIZED,
         crate::ServiceErrorCode::NotActive => StatusCode::CONFLICT,
         crate::ServiceErrorCode::StillProtected => StatusCode::CONFLICT,
+        // The request describes an attempt an explicit release already superseded: the
+        // current state wins, exactly like the other 409 rejections.
+        crate::ServiceErrorCode::StaleReleaseEpoch => StatusCode::CONFLICT,
         _ => StatusCode::UNPROCESSABLE_ENTITY,
     };
     json_response::<()>(status, error.code as u16, error.message, None)

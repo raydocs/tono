@@ -29,7 +29,8 @@ pub use core::{
     MacosKillSwitchConfig, MacosKillSwitchMode, MacosProxyConfig, LEGACY_OWNER_TOKEN_FILE_NAME,
     OWNER_TOKEN_FILE_NAME,
     OwnerCredentials, OwnerIdentity, OwnerSessionHandle, OwnerSessionProof, ProtocolInfo,
-    ProtocolVersion, ProxyApplyOutcome, ProxyEndpoint, ProxyProtocol, RemoteProvider,
+    ProtocolVersion, ProxyApplyOutcome, ProxyEndpoint, ProxyProtocol, PrepareCoreStartFreshness,
+    PrepareCoreStartPayload, RemoteProvider,
     RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, ReplaceProxyEndpointsRequest,
     RuntimeAsset, RuntimeBundle,
     LEGACY_SERVICE_PROTOCOL_HEADER, SERVICE_PROTOCOL_HEADER, SESSION_TOKEN_HEX_LEN,
@@ -140,8 +141,21 @@ pub const PROTOCOL_EPOCH: u16 = 2;
 /// shrink the Reality destination permit without restarting the core. MIN_REQUIRED stays 14:
 /// an older Service is still fail-closed; the App falls back to a cold switch.
 /// Revision 16 adds the Service-owned, detached-manifest update transaction.
-pub const PROTOCOL_REVISION: u16 = 16;
+/// Revision 17 binds `POST /clash/prepare-start` to the explicit-release epoch: the request
+/// carries the client's `GET /version` snapshot of that epoch, and the Service refuses it —
+/// touching no Core — once an explicit release has superseded the snapshot. This is the
+/// freshness gate the session-gated routes get from `OwnerSessionProof`; a first connection
+/// has no session yet, so the release epoch is the freshness token instead. MIN_SUPPORTED
+/// stays 12: an older client still pairs at the probe, but its epoch-less prepare request is
+/// refused by the route — fail-closed, exactly like a session-gated route without a session
+/// proof.
+pub const PROTOCOL_REVISION: u16 = 17;
+/// Revision that introduced the Service-owned, detached-manifest update transaction.
 pub const MIN_SERVICE_REVISION_FOR_UPDATE_TRANSACTION: u16 = 16;
+/// Revision whose `POST /clash/prepare-start` compares the request's client-snapshotted
+/// release epoch under the lifecycle lock and refuses a superseded (or epoch-less) request
+/// before touching any Core.
+pub const MIN_SERVICE_REVISION_FOR_PREPARE_START_EPOCH: u16 = 17;
 /// Revisions 7 through 12 are wire/behaviour incompatible with older peers. Reject a mismatch at
 /// the protocol probe rather than failing later during a required mutation. Revision 13 is
 /// additive: a revision-12 client may still pair.

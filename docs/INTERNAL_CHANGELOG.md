@@ -32,6 +32,46 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows PrepareCoreStart 绑定当前 release epoch（R2-F6）
+
+- **归属**：G1 连接生命周期（I1：旧 attempt 的迟到 Service 副作用不得影响新会话）；
+  平台/模块：Windows Service IPC 协议（`apps/windows/service`，App 侧无代码改动，
+  客户端逻辑在 `tono-service-protocol` 内）。
+- **来源**：基线 main 576d7087 → 分支 `fix/windows-prepare-start-freshness-20260922`；
+  PR 与准确源码 SHA 见续记，提交本条时未合 main。
+- **缺陷修复（R2-F6，源码确认 + 需实机级）**：被取消 attempt 的
+  `POST /clash/prepare-start` 迟到数秒到达时，该路由只有 `Unchecked` owner 门、
+  无会话/epoch 新鲜度令牌（对照 Lock/MarkVerified/Stop 均有会话门），且
+  `is_protected_startup_replacement_candidate` 对后继连接未验证的 Core 为假，
+  `prepare_start(false)` 会停掉后继受监督 Core，表现为一次莫名连接失败
+  （fail-closed，不泄漏）。修复：协议 revision 17 起，客户端在发出该破坏性请求前
+  经 `GET /version` 快照 Service 的 `RELEASE_EPOCH`（复用 StartClash 已有 epoch
+  机制，不引入新令牌类型）并在请求内携带；Service 在 `OWNER_LIFECYCLE_LOCK`
+  内比较，epoch 不等于当前 → 以新错误码 `StaleReleaseEpoch`(1013, HTTP 409)
+  拒绝，拒绝发生在任何快照/操作发布/Core 停止之前，无半停止状态。合法路径
+  （App 存活、期间无显式 release）行为不变。兼容：新旧混合配对时——新 App +
+  旧 Service（<rev 17）由能力探测降级发送旧 `null` payload，行为同旧版；
+  旧 App + 新 Service 的无 epoch 请求按 Lock 路径先例拒绝（fail-closed），
+  其连接在配对 App 交付前失败，属有意取舍。
+- **新增/优化**：`ProtocolInfo` 增加 `release_epoch`（`#[serde(default)]`，
+  仅服务端 GetVersion 路由填充）；`PrepareCoreStartPayload` 采用与
+  `StopClashPayload` 相同的 untagged `Legacy/Freshness` 线型。
+- **工程与测试**：新增一个 Service 集成回归
+  `late_prepare_core_start_superseded_by_release_cannot_stop_the_successor_core`
+  （`tests/test_owner_lifecycle.rs`）：快照 epoch → 显式 release（真实 bump）→
+  后继 StartClash（Core 未验证）→ 用旧 epoch 发 PrepareCoreStart → 断言返回
+  `StaleReleaseEpoch` 且 `core_pid` 不变；若门被移除，后继 PID 断言失败。
+- **验证**：本机（MacBook）按所有者 2026-09-14 决定只做编辑与源码自查，
+  未运行 `cargo build/test/check/clippy`；回归委托本 PR CI 的 GitHub-hosted
+  `windows-2025`（`cargo test --locked --features standalone,client,test`），
+  结果以该 run 的实际 checkout 为准，不预支。R2-F6 的实机触发窗口
+  （数秒级 IPC 在途延迟）未在 Windows 11 实机复现，维持原定级。
+- **候选/发布**：仅源码，无新候选、无新包；未触碰 WFP/PF 规则、DNS 恢复语义、
+  `appcast.xml`/`latest.json` 或 `windows-updates`。
+- **剩余限制**：不 bump epoch 的拆臂路径（如 StopClash(release=true) 在无 armed
+  时为空操作）不刷新令牌——经这些变体取消的 attempt 其迟到 prepare 仍可能通过
+  门，但触发条件比已修的 Disconnect→重连序列更窄；Service 重启会把 epoch 归零，
+  快照于重启前的请求被拒绝并表现为一次连接失败（fail-closed，重试即恢复）。
 ## 2026-09-23 · Windows connecting 期间到达的 policy 行为变更不再丢弃
 
 - **归属**：G1「已连接=能用」——已连接会话应按最新已安装 policy 提供 DIRECT/WeChat

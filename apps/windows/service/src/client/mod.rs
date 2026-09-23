@@ -19,11 +19,11 @@ mod windows_identity;
 use crate::{
     AuthenticatedRequest, AuthenticatedSessionRequest, BootstrapPins, DirectRuntimeReloadResult,
     DnsProtectionStatus, FinalizeDirectRuntimeReloadRequest, IPC_AUTH_EXPECT, IPC_PATH, IpcCommand,
-    KillSwitchLockRequest, KillSwitchStatus, MacosProxyConfig,
-    OwnerCredentials, OwnerSessionProof, ProtocolInfo, ProtocolVersion, ProxyApplyOutcome,
-    RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, ReplaceProxyEndpointsRequest,
-    RuntimeBundle,
-    ServiceStatusSnapshot, StageRuntimeOutcome, StartClashRequest, StartClashResult, WriterConfig,
+    KillSwitchLockRequest, KillSwitchStatus, MacosProxyConfig, OwnerCredentials, OwnerSessionProof,
+    PrepareCoreStartFreshness, PrepareCoreStartPayload, ProtocolInfo, ProtocolVersion,
+    ProxyApplyOutcome, RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest,
+    ReplaceProxyEndpointsRequest, RuntimeBundle, ServiceStatusSnapshot, StageRuntimeOutcome,
+    StartClashRequest, StartClashResult, WriterConfig,
     core::structure::{JsonConvert, Response},
 };
 
@@ -709,16 +709,56 @@ pub async fn remember_bootstrap_pins(
 /// the fixed DNS listener. A completely verified protected runtime is preserved for fail-closed
 /// replacement; stale supervised, recorded, and orphaned Tono cores are stopped. The returned
 /// count is diagnostic, and a third-party listener is never touched.
+///
+/// The request is destructive, so it carries a freshness proof: this function snapshots the
+/// Service's explicit-release epoch (`GET /version`) immediately before the mutating POST and
+/// sends that snapshot along. A Service at protocol revision 17 or newer compares the snapshot
+/// under its lifecycle lock and refuses the reconcile once an explicit release has superseded
+/// it — which is what stops a cancelled attempt's late request from killing a successor
+/// connection's not-yet-verified Core. An older Service has no such gate and still receives
+/// the legacy payload, so a mixed App/Service pair degrades to the old behaviour rather than
+/// failing to parse.
 pub async fn prepare_core_start(credentials: &OwnerCredentials) -> Result<Response<u32>> {
+    let payload = prepare_core_start_payload().await?;
     protected_call(
         Verb::Post,
         IpcCommand::PrepareCoreStart,
         credentials,
         None,
-        (),
+        payload,
         Some(LIFECYCLE_TIMEOUT),
     )
     .await
+}
+
+/// Build the `PrepareCoreStart` payload for the Service we just probed.
+///
+/// The probe is part of the freshness contract, so a probe failure is an error rather than a
+/// silent downgrade: sending the epoch-less legacy payload to a revision-17 Service would be
+/// refused anyway, and the connect stage deserves the probe's clearer message. In the real
+/// connect flow `ensure_service_ready` has just required the same probe to succeed, so this
+/// only fails when the Service dropped between the two calls — where the mutation itself
+/// would not have been answerable either.
+async fn prepare_core_start_payload() -> Result<PrepareCoreStartPayload> {
+    let probe = get_version().await?;
+    if probe.code > 0 {
+        anyhow::bail!(
+            "the Tono Service refused its protocol probe: {}",
+            probe.message
+        );
+    }
+    let Some(info) = probe.data else {
+        anyhow::bail!("the Tono Service omitted its protocol info");
+    };
+    if info.supports_prepare_start_epoch() {
+        Ok(PrepareCoreStartPayload::Freshness(
+            PrepareCoreStartFreshness {
+                release_epoch: info.release_epoch,
+            },
+        ))
+    } else {
+        Ok(PrepareCoreStartPayload::Legacy(()))
+    }
 }
 
 pub async fn start_clash(
