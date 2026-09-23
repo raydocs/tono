@@ -876,6 +876,10 @@ extension AppState {
                     }
                     self.isDisconnecting = false
                     self.disconnectionStartedAt = nil
+                    // A network change observed mid-disconnect was held
+                    // pending (R1-F5); the teardown has settled, so clear
+                    // the marker without kicking a reconnect.
+                    self.consumePendingNetworkChange()
                 }
             }
         }
@@ -1100,6 +1104,12 @@ extension AppState {
                 try? await updateAllSubscriptions()
             }
         }
+
+        // A network change observed mid-connect was held pending (R1-F5); the
+        // baseline captured above is what the reconciliation compares against,
+        // so consume it now. The reconciliation's own debounce waits out this
+        // connect's epilogue clearing `isConnecting`.
+        consumePendingNetworkChange()
         return true
     }
 
