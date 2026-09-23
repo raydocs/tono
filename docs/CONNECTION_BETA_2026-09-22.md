@@ -45,6 +45,90 @@ Kept unchanged:
   runtime migration or new third-party dependency. Windows on this base still uses
   Mihomo; macOS uses sing-box. A separate migration is not assumed complete.
 
+## G1 follow-up: preserve DNS cancellation and repair evidence
+
+[PR #289](https://github.com/raydocs/tono/pull/289) is a separate follow-up to
+[PR #286](https://github.com/raydocs/tono/pull/286), based on
+[705e16d9ac80a800591da195c0c360029db0ff77](https://github.com/raydocs/tono/commit/705e16d9ac80a800591da195c0c360029db0ff77).
+The bounded review covers the macOS listener probe and Windows protected-DNS
+apply/result propagation, not a new whole-repository audit.
+
+- macOS cancellation could occur before `NWConnection` registration and be lost;
+  the actual Disconnect coordinator then waited for the full DNS timeout. The
+  waiter now owns cancellation/terminal arbitration independently of Network
+  callbacks, with serial connection cleanup.
+- The listener parser accepted unrelated/error/truncated responses and retained
+  an earlier fake-IP answer when a later record was malformed. It now binds the
+  transaction, IN A question and answer/CNAME owners, and validates the entire
+  packet. The probe still sends ordinary DNS, not EDNS; unsolicited OPT must not
+  turn an extended error into readiness ([RFC 6891 §7](https://www.rfc-editor.org/rfc/rfc6891.html#section-7)).
+- Windows review found that an absent adapter could clear failed-apply evidence
+  without a live readback, and that an IPv6 registry error after IPv4 writes could
+  leave no pending flag. Both can suppress later repair despite unproven effective
+  DNS. These findings are not demonstrated WFP/Connected bypasses or losses of the
+  saved original DNS strings. The repair retains pending obligations before writes
+  and retires them only on actual positive apply evidence; historical absent entries
+  do not trigger repeated writes to healthy adapters. The Service observes active
+  pending work separately from the wire status: generic hard errors stay hard for
+  the App, while existing advisory warnings keep their meaning.
+
+Executed macOS evidence before the extended-error follow-up:
+
+| Source / hosted run | Result and limit |
+| --- | --- |
+| [ebb1147eb1bc1e3b7604be6bc951bdf95de120d3](https://github.com/raydocs/tono/commit/ebb1147eb1bc1e3b7604be6bc951bdf95de120d3), [red job](https://github.com/raydocs/tono/actions/runs/35796852082/job/106978376562) | Compiled; three regressions failed with eight expected assertions. The Disconnect fixture took 2.023 seconds and missed its 0.5-second bound; invalid replies produced fake-IP proof. 375 tests, one existing skip, no other failures. |
+| [6c73e007c73c0ff2af1793d5555604a0292bb609](https://github.com/raydocs/tono/commit/6c73e007c73c0ff2af1793d5555604a0292bb609), [first fixed job](https://github.com/raydocs/tono/actions/runs/35797978121/job/106981894935) | 377 tests, one existing skip, zero failures; all five listener tests passed, including a real loopback UDP reply and CNAME matching. The same cancellation test took 0.005 seconds. This predates the OPT regression and is not final follow-up acceptance. |
+
+Both runs used `macos-26-arm64` and the existing `xcodebuild -project
+apps/macos/Tono.xcodeproj -scheme Tono -configuration Debug -resultBundlePath
+apps/macos/test-results/TonoTests.xcresult CODE_SIGNING_ALLOWED=NO
+ENABLE_USER_SCRIPT_SANDBOXING=NO test` command. Checkout logs identify the exact
+push sources. The measured times describe a controlled cancellation fixture, not
+customer connect latency, throughput, or a 30–50% performance result.
+
+An independent source review found the remaining OPT error case after the first
+green run. Its test-first follow-up is
+[3f54138ec6f00f9244da34c13a92c6dded8d2b3b](https://github.com/raydocs/tono/commit/3f54138ec6f00f9244da34c13a92c6dded8d2b3b).
+The [hosted red job](https://github.com/raydocs/tono/actions/runs/35798629480/job/106983994620)
+compiled and ran 377 tests with one existing skip and exactly one failure:
+`testListenerReplyMustMatchSuccessfulQuestion` accepted the BADVERS fake-IP answer.
+[83904dfe0f465cd56b9799cdaae1c38c74bb315e](https://github.com/raydocs/tono/commit/83904dfe0f465cd56b9799cdaae1c38c74bb315e)
+adds the refusal without changing the regression. Its
+[hosted fixed job](https://github.com/raydocs/tono/actions/runs/35799418993/job/106986462381)
+ran all five listener tests successfully: 377 XCTest cases, one existing skip,
+zero failures. The same push's policy, privileged-helper and core-input jobs passed.
+
+Windows implementation comes from [PR #290](https://github.com/raydocs/tono/pull/290),
+[1506678a26699df7e78c21c1796c950c43008382](https://github.com/raydocs/tono/commit/1506678a26699df7e78c21c1796c950c43008382).
+Its preceding test-only
+[5245a44b7ddbb81551d6606715367332c684f444](https://github.com/raydocs/tono/commit/5245a44b7ddbb81551d6606715367332c684f444)
+ran on `windows-2025` in [Service job 106983780025](https://github.com/raydocs/tono/actions/runs/35798676610/job/106983780025):
+release-style build and 310 lifecycle tests passed; the guarded DNS prefix had four
+passes and the two intended failures. Later update/WFP steps were skipped, not passed.
+
+- `native_apply_absence_retains_pending_until_active_repair` failed because absence
+  retired the adapter's pending flag. The fixed regression also requires no repeated
+  writes while absent and real apply/readback after return and loss of process memory.
+- `native_apply_registry_error_retains_pending_repair` failed because protected-looking
+  IPv4 registry values hid the unfinished apply. The fixed regression uses the same
+  private status observation as the watchdog, checks the durable pending flag before
+  each registry mutation, retains the hard-error category and original DNS values,
+  and requires effective repair after a restart-shaped loss of memory.
+
+Both run through the existing `cargo test --locked --features standalone,client --lib
+core::dns::engine::native_apply::tests:: -- --nocapture` command, preceded by the
+same prefix's nonzero `--list` guard. The fixture replaces only OS registry/IP Helper,
+native setter and compatibility I/O; real production selection, native orchestration,
+facade decisions, snapshot serialization/atomic replacement and private-file security
+execute. This is not real adapter, Windows 11, DHCP/RA or installed-device evidence.
+
+The combined implementation is
+[6cc35e09e9cf5fe77a25574cecd050de60f8255c](https://github.com/raydocs/tono/commit/6cc35e09e9cf5fe77a25574cecd050de60f8255c).
+Use [PR #289](https://github.com/raydocs/tono/pull/289) for the final hosted checkout
+identities and results, including the OPT fix and both Windows regressions. The
+earlier green run and source reviews do not substitute for final-source verification.
+Device and release limits below remain unchanged.
+
 ## Measure the same device, route and scenario
 
 The read-only [comparison tool](../tooling/scripts/compare-connect-performance.mjs)
