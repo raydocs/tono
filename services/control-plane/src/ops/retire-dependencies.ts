@@ -121,7 +121,7 @@ export async function revokeExitToken(
     const token = randomToken();
     const updated = await e.DB.prepare(
       `UPDATE exit_nodes
-       SET token_hash = ?, status = 'disabled', updated_at = ?
+       SET revoked_token_hash = token_hash, token_hash = ?, status = 'disabled', updated_at = ?
        WHERE id = ? AND status = 'active'`,
     ).bind(await sha256(token), nowSec, String(row.id)).run();
     if (!Number(updated.meta.changes ?? 0)) return false;

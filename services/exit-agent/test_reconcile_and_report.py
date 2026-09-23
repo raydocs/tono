@@ -622,6 +622,51 @@ class RosterControlSignals(unittest.TestCase):
         reconcile.assert_not_called()
         self.assertEqual(json.loads(path.read_text(encoding="utf-8")), state)
 
+    def test_only_an_explicit_disabled_answer_withdraws_every_client(self) -> None:
+        import io
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        removed: list[str] = []
+        listing = json.dumps({"users": [
+            {"email": "u:usr_1"}, {"email": agent.LEGACY_CLIENT_EMAIL}, {"email": "operator"},
+        ]})
+
+        def fake_xray(_binary, arguments):
+            if "rmu" in arguments:
+                removed.append(arguments[-1].split("=", 1)[1])
+            stdout = listing if "inbounduser" in arguments else ""
+            return type("Result", (), {"returncode": 0, "stdout": stdout, "stderr": ""})
+
+        def round_answering(body: bytes) -> None:
+            def refuse(request, timeout=None):  # noqa: ARG001
+                raise urllib.error.HTTPError(
+                    request.full_url, 403, "Forbidden", {}, io.BytesIO(body),
+                )
+            with patch.dict(agent.os.environ, {
+                     "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "exit-node-a",
+                 }, clear=True), \
+                 patch.object(agent, "api_base", return_value="https://control.example"), \
+                 patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+                 patch.object(agent, "require_commands", return_value={
+                     "add_user": "adu", "remove_user": "rmu",
+                     "stats_query": "statsquery", "list_users": "inbounduser",
+                 }), \
+                 patch.object(agent, "run_xray", fake_xray), \
+                 patch.object(agent.urllib.request, "build_opener") as opener, \
+                 patch.object(agent, "acknowledge_roster") as acknowledge:
+                opener.return_value.open.side_effect = refuse
+                with self.assertRaises((agent.Refusal, urllib.error.HTTPError)):
+                    agent.run_once(path)
+            acknowledge.assert_not_called()
+
+        # An edge block or any other refusal is not the control plane's answer.
+        round_answering(b"<html>error code: 1010</html>")
+        self.assertEqual(removed, [])
+        round_answering(json.dumps({"error": {"code": "EXIT_NODE_DISABLED"}}).encode())
+        self.assertEqual(sorted(removed), sorted(["u:usr_1", agent.LEGACY_CLIENT_EMAIL]))
+
 
 class Hy2RosterAuthorization(unittest.TestCase):
     def setUp(self):

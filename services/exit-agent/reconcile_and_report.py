@@ -91,6 +91,10 @@ LEGACY_CLIENT_EMAIL = "shared-legacy"
 # mistaken for the still-installed previous generation.
 CLIENT_LABEL_PREFIX = "u:"
 SOURCE_ID_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,64}")
+# The control plane's answer for a token that belongs to a disabled or retired
+# node. Only this exact 403 body withdraws clients; a bare 401/403, an edge
+# block page or a network failure keeps the last roster and retries.
+EXIT_NODE_DISABLED_CODE = "EXIT_NODE_DISABLED"
 REQUEST_HEADERS = {
     "accept": "application/json",
     # Zone browser-integrity rejects a bare urllib UA with CF 403/1010.
@@ -108,6 +112,10 @@ class Rejection(RuntimeError):
 
 class Unreachable(RuntimeError):
     """Delivery did not get through. The queue keeps it for the next run."""
+
+
+class NodeDisabled(RuntimeError):
+    """The control plane says this exit node is disabled or retired."""
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -151,8 +159,25 @@ def open_control_plane(request: urllib.request.Request, timeout: int):
     try:
         return urllib.request.build_opener(NoRedirect).open(request, timeout=timeout)
     except urllib.error.HTTPError as error:
+        # Keep a bounded error body so a caller can tell an explicit control
+        # plane answer from an edge page; the response itself is closed here.
+        try:
+            error.tono_body = error.read(4096) if error.fp else b""
+        except OSError:
+            error.tono_body = b""
         error.close()
         raise
+
+
+def is_node_disabled(error: urllib.error.HTTPError) -> bool:
+    if error.code != 403:
+        return False
+    try:
+        payload = json.loads(getattr(error, "tono_body", b"") or b"")
+    except (ValueError, UnicodeDecodeError):
+        return False
+    detail = payload.get("error") if isinstance(payload, dict) else None
+    return isinstance(detail, dict) and detail.get("code") == EXIT_NODE_DISABLED_CODE
 
 
 def xray_binary() -> Path:
@@ -369,8 +394,14 @@ def fetch_roster(base: str, token: str) -> tuple[str, int, list[dict[str, str]],
         method="GET",
     )
     request.add_unredirected_header("Authorization", f"Bearer {token}")
-    with open_control_plane(request, timeout=20) as response:
-        payload = json.loads(response.read(MAX_RESPONSE_BYTES).decode("utf-8"))
+    try:
+        response = open_control_plane(request, timeout=20)
+    except urllib.error.HTTPError as error:
+        if is_node_disabled(error):
+            raise NodeDisabled("the control plane reports this exit node disabled") from error
+        raise
+    with response as opened:
+        payload = json.loads(opened.read(MAX_RESPONSE_BYTES).decode("utf-8"))
     node_id = payload.get("nodeId")
     observed_at = payload.get("observedAt")
     identities = payload.get("identities")
@@ -972,6 +1003,39 @@ def sync_hy2_roster(roster: list[dict[str, str]]) -> bool:
 
 
 
+def withdraw_disabled_node(binary: Path, commands: dict[str, str], address: str, tag: str,
+                           recorded: set[str] | None) -> tuple[int, set[str] | None]:
+    """Fail closed after the control plane says this node is disabled or retired.
+
+    The roster it last served still names every account, including ones revoked,
+    expired or over quota since. Keeping them installed would leave revocation
+    unenforced on a node nobody meters. Remove every client in this agent's
+    namespace plus shared-legacy and empty hy2; hand-added clients stay, as in a
+    normal reconcile. Returns the removal count and the remaining inventory, or
+    None when the node could not say what it holds.
+    """
+    failures: list[str] = []
+    try:
+        sync_hy2_roster([])
+    except Refusal as error:
+        failures.append(str(error))
+    listed = installed_clients(binary, commands, address, tag)
+    inventory = listed if listed is not None else recorded
+    # shared-legacy lives in the static config and is never recorded, so it is
+    # always a candidate; "not found" counts as removed.
+    candidates = set(inventory or ()) | {LEGACY_CLIENT_EMAIL}
+    try:
+        _, removed, remaining = reconcile(
+            binary, commands, address, tag, [], None, candidates, retire_shared_legacy=True,
+        )
+    except Refusal as error:
+        failures.append(str(error))
+        removed, remaining = 0, None
+    if failures:
+        raise Refusal("disabled exit node could not withdraw every client: " + "; ".join(failures))
+    return removed, remaining if inventory is not None else None
+
+
 def run_hy2_roster_once() -> None:
     """Enforce hy2 only; never opt a VLESS node into a metering migration.
 
@@ -983,7 +1047,11 @@ def run_hy2_roster_once() -> None:
     expected = env("TONO_SOURCE_ID")
     if not SOURCE_ID_PATTERN.fullmatch(expected):
         raise Refusal("hy2-only sync requires an explicit valid TONO_SOURCE_ID")
-    node_id, observed_at, roster, _ = fetch_roster(base, token)
+    try:
+        node_id, observed_at, roster, _ = fetch_roster(base, token)
+    except NodeDisabled:
+        sync_hy2_roster([])
+        raise Refusal("the control plane reports this exit node disabled; hy2 allowlist emptied")
     if node_id != expected:
         raise Refusal("hy2 roster node identity does not match TONO_SOURCE_ID")
     if not sync_hy2_roster(roster):
@@ -1002,7 +1070,25 @@ def run_once(path: Path) -> None:
     commands = require_commands(binary)
 
     retire_override = env("TONO_RETIRE_SHARED_LEGACY", required=False)
-    node_id, observed_at, roster, server_retire_shared_legacy = fetch_roster(base, token)
+    try:
+        node_id, observed_at, roster, server_retire_shared_legacy = fetch_roster(base, token)
+    except NodeDisabled:
+        remembered = state.get("installedClients")
+        removed, remaining = withdraw_disabled_node(
+            binary, commands, address, tag,
+            set(remembered) if isinstance(remembered, list) else None,
+        )
+        if remaining is not None:
+            state["installedClients"] = sorted(remaining)
+            save_state(path, state)
+        # Never a success: the node is out of service and an operator should
+        # stop tono-xray. Usage and acknowledgements are not sent.
+        raise Refusal(
+            f"the control plane reports this exit node disabled; removed {removed} client(s)"
+            " and emptied hy2"
+            + ("" if remaining is not None else
+               "; the client inventory is unknown, so stop tono-xray on this node")
+        )
     if node_id != source:
         raise Refusal(
             f"authenticated exit node {node_id!r} does not match durable source {source!r}"

@@ -80,6 +80,11 @@ old report IDs safe after a counter reset.
 control plane's `retireSharedLegacy` signal. Set it to `false` to block automatic
 retirement during rollback, or to `true` to force retirement.
 
+A disabled or retired node gets `403 EXIT_NODE_DISABLED` on the roster. Only
+that answer makes the agent remove every `u:` client and `shared-legacy`,
+empty the hy2 allowlist and exit non-zero; stop `tono-xray` afterwards. Any
+other HTTP error or network failure keeps the last roster and retries.
+
 Run the regression suite with:
 
 ```bash

@@ -32,6 +32,17 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · 停用/退役的出口节点必须撤下全部客户端（H7-F4）
+
+- **归属**：ops 控制面 / 出口节点吊销执行；`services/control-plane`、`services/exit-agent`。
+- **来源**：基线 main def3dd79 → 分支 `fix/exit-agent-node-disabled-20260923`（提交时未合 main）；内部审查 H7-F4，Issue #371。
+- **缺陷修复**：节点被 PATCH 为 disabled 或经退役流程 `revokeExitToken`（同时轮换 token）后，Worker 对其 token 返回与未知 token 相同的 401，exit-agent 直接退出，不删 client、不更新 hy2，最后一份 roster 中的身份（含之后被吊销/过期/超额的）在该节点持续可用且不计量。现在：属于 disabled 节点的 token（含退役前被轮换掉的旧 token，存于新列 `revoked_token_hash`，只用于应答、不认证任何请求）得到 `403 EXIT_NODE_DISABLED`；未知 token 仍 401。exit-agent 只在收到这个确切的 403 body 时移除所有 `u:` client 与 `shared-legacy`、清空 hy2 allowlist、记录并以非零退出；普通 401/403、边缘拦截页、5xx 与网络错误维持原行为（保留 roster、下轮重试）。
+- **新增/优化**：migration `0080_exit_node_revoked_token.sql`（新增可空列，不改旧 migration）。手工添加的非 `u:` client 仍不动；节点无法列出也无记录的 client 清单时只能删 `shared-legacy`，退出信息提示运维停掉 `tono-xray`。
+- **工程与测试**：Worker 一个 `it`（disabled 与 retired 节点 token 得 403 `EXIT_NODE_DISABLED`，未知 token 仍 401）；exit-agent 一个 unittest（403 HTML 页不删任何 client；403 `EXIT_NODE_DISABLED` 删 `u:` 与 `shared-legacy`、保留手工 client、不 ack）。两者在修复前的代码上均实际跑红。
+- **验证**：MacBook 本机 `npx vitest run`（control-plane 全量 43 文件 892 通过）；`python3 -m unittest test_reconcile_and_report`（83 通过）。未连接任何真实节点，未部署，migration 未在远端 D1 执行。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：需部署 Worker 并执行 migration 后才生效；已在运行的旧 agent 需更新后才会响应该信号。退役前已被轮换且未经本改动记录旧 hash 的节点（改动部署前退役的）仍只得到 401，需人工停掉其 `tono-xray`。Xray 移除 client 不保证断开已建立的连接。
+
 ## 2026-09-23 · coreMonitor 不得把运行时替换的瞬时 utun 消失判为 TUN 死亡
 
 - **归属**：G1（已连接=能用：切换/热重载不掉线）；macOS 客户端 `apps/macos`。
