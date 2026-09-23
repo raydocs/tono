@@ -100,7 +100,10 @@ nonisolated enum HelperProtocolVersion {
     ///   unreadable service as clean. Existing IPC and authorization are unchanged.
     /// - 4.4.0 → 4.5.0: root-owned full-bundle update transaction, detached
     ///   signatures, durable consumption, independent executor and recovery.
-    static let current = "4.5.0"
+    /// - 4.5.0 → 4.10.0: PF DHCP permit sends only to the limited broadcast and
+    ///   the inbound reply permit keeps no state. A 4.5.0 daemon keeps the
+    ///   any-destination DHCP permit. (4.6.0–4.9.0 are claimed by open PRs.)
+    static let current = "4.10.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
