@@ -100,7 +100,9 @@ nonisolated enum HelperProtocolVersion {
     ///   unreadable service as clean. Existing IPC and authorization are unchanged.
     /// - 4.4.0 → 4.5.0: root-owned full-bundle update transaction, detached
     ///   signatures, durable consumption, independent executor and recovery.
-    static let current = "4.5.0"
+    /// - 4.5.0 → 4.10.0: PF drops DNS (53/853) to LAN and link-local ranges while
+    ///   a tunnel is up. Numbered past the open 4.6–4.9 helper chain.
+    static let current = "4.10.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

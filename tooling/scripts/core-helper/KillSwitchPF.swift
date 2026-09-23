@@ -102,6 +102,15 @@ extension KillSwitchManager {
             lines.append(
                 "pass in quick inet6 proto udp to ff02::fb port 5353 keep state (if-bound) label \"tono-mdns\""
             )
+            // LAN ranges bypass the TUN, so DNS sent straight to a LAN resolver
+            // would never meet `hijack-dns`. System DNS is the loopback listener;
+            // nothing protected needs plain DNS or DoT to the LAN.
+            lines.append(
+                "block drop out quick inet proto { tcp, udp } to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } port { 53, 853 } label \"tono-lan-dns\""
+            )
+            lines.append(
+                "block drop out quick inet6 proto { tcp, udp } to { fe80::/10, fc00::/7, ff00::/8 } port { 53, 853 } label \"tono-lan-dns\""
+            )
             lines.append(
                 "pass out quick inet to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } keep state (if-bound) label \"tono-lan\""
             )

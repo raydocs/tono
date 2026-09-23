@@ -32,6 +32,28 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 保护期间阻断直连局域网 DNS（53/853）
+
+- **归属/来源**：G1 保护边界（内部审查 H1 报告中的未编号设计缺口）；影响 macOS root helper
+  PF 渲染。基线 main b1b6fe6c，分支 `fix/macos-lan-dns-20260923`，Issue
+  [#344](https://github.com/raydocs/tono/issues/344)；提交时未合 main。
+- **缺陷修复**：TUN 存在时 `tono-lan`/`tono-linklocal` 放行任意用户到私网、链路本地的任意端口，
+  而 sing-box 把这些网段排除出 TUN，所以直接发往路由器或其他 LAN 解析器的 DNS（53）/DoT（853）
+  碰不到 `hijack-dns`，查询名明文外泄。Windows 由 `dns-hijack any:53` 覆盖，两平台不一致。
+  改后：在这两组放行之前渲染 `tono-lan-dns` 的 `block drop out quick`，覆盖 IPv4 私网/169.254
+  与 IPv6 fe80::/10、fc00::/7、ff00::/8 的 TCP/UDP 53、853。系统 DNS（loopback 127.0.0.1）、
+  TUN、mDNS 5353 不受影响。
+- **新增/优化**：无。
+- **工程与测试**：helper 自测（`--self-test`）新增一个检查 `lanDNSBlockedFirst`：带 TUN 的规则集里
+  LAN DNS 阻断出现在 `tono-lan` 放行之前；旧代码无此规则而失败。同一自测在 CI 以 root 做 pfctl
+  语法解析。HelperProtocolVersion 4.5.0 → 4.10.0（跳过开放中的 4.6–4.9 helper 链），CONTRACT
+  已重算；与该链合并时需按合并顺序重算 CONTRACT。
+- **验证**：本机（MacBook）未编译 helper、未运行 pfctl；编译、自测与 PF 解析委托本 PR 的
+  GitHub-hosted `macos-26` CI（privileged-tests）。
+- **候选/发布**：无新包，仅源码；不涉及 Sparkle 更新源。
+- **剩余限制**：未实机复现。只阻断 53/853；其他端口上的自定义 DNS 协议（如私网 DoH 443）仍经
+  `tono-lan` 放行。用户有意使用的局域网 DNS 服务器在保护期间不再可直连（系统解析本就走 loopback）。
+
 ## 2026-09-23 · Windows PrepareCoreStart 绑定当前 release epoch（R2-F6）
 
 - **归属**：G1 连接生命周期（I1：旧 attempt 的迟到 Service 副作用不得影响新会话）；
