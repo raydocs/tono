@@ -58,7 +58,7 @@ final class ProtectedDNSManager {
             } else {
                 try Self.setDNS([Self.protectedDNSServer], for: service)
                 try verify([Self.protectedDNSServer], for: service)
-                return response(
+                return Self.response(
                     configured: true,
                     snapshotPresent: true,
                     service: service
@@ -89,7 +89,7 @@ final class ProtectedDNSManager {
             }
             throw error
         }
-        return response(
+        return Self.response(
             configured: true,
             snapshotPresent: true,
             service: service
@@ -123,7 +123,7 @@ final class ProtectedDNSManager {
             write: Self.setDNS,
             removeSnapshot: removeSnapshot
         )
-        return response(
+        return Self.response(
             configured: false,
             snapshotPresent: false,
             service: snapshot?.service
@@ -236,7 +236,7 @@ final class ProtectedDNSManager {
         read: (String) throws -> [String]
     ) -> [String: Any] {
         guard let snapshot else {
-            return response(
+            return Self.response(
                 configured: false,
                 snapshotPresent: false,
                 service: nil
@@ -245,7 +245,7 @@ final class ProtectedDNSManager {
         do {
             let configured =
                 try read(snapshot.service) == [Self.protectedDNSServer]
-            return response(
+            return Self.response(
                 configured: configured,
                 snapshotPresent: true,
                 service: snapshot.service

@@ -100,7 +100,13 @@ nonisolated enum HelperProtocolVersion {
     ///   unreadable service as clean. Existing IPC and authorization are unchanged.
     /// - 4.4.0 → 4.5.0: root-owned full-bundle update transaction, detached
     ///   signatures, durable consumption, independent executor and recovery.
-    static let current = "4.5.0"
+    /// - 4.5.0 → 4.6.0: `/dns/status` keeps reporting `snapshotPresent: true`
+    ///   (with the snapshot's service) when the snapshot is loadable but its
+    ///   network service's current DNS cannot be read, instead of folding
+    ///   that into `snapshotPresent: false`. A 4.5.0 daemon hides the snapshot
+    ///   and the GUI refuses to call `/dns/restore`, which can otherwise
+    ///   succeed for a renamed or removed service.
+    static let current = "4.6.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
