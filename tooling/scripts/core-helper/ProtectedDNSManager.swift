@@ -50,7 +50,7 @@ final class ProtectedDNSManager {
             throw error
         }
 
-        if let previous = try loadSnapshot() {
+        if let previous = try loadSnapshotQuarantiningCorruption() {
             if previous.service != service {
                 try Self.setDNS(previous.servers, for: previous.service)
                 try verify(previous.servers, for: previous.service)
@@ -111,17 +111,24 @@ final class ProtectedDNSManager {
     ///   failure is still raised, so PF stays armed and the caller can retry,
     ///   but the services that could be recovered already have been, and the
     ///   snapshot survives so the retry still knows the original resolvers.
+    ///
+    /// A fatally corrupt snapshot file no longer aborts the transaction
+    /// before it starts: it is quarantined aside and the sweep runs
+    /// snapshotless, because `save` is atomic — a file that fails the
+    /// ownership/content checks is an external event (backup restore,
+    /// permission drift, truncation) that no retry can repair, and refusing
+    /// here used to leave PF fail-closed with no outlet at all, not even
+    /// `--emergency-disarm`. See `restoreTransaction`.
     func restore() throws -> [String: Any] {
         lock.lock()
         defer { lock.unlock() }
-        let snapshot = try loadSnapshot()
-        let services = try Self.allServices()
-        try Self.restoreServices(
-            snapshot: snapshot,
-            services: services,
+        let snapshot = try Self.restoreTransaction(
+            snapshotResult: Result(catching: loadSnapshot),
+            services: try Self.allServices(),
             read: Self.currentDNS,
             write: Self.setDNS,
-            removeSnapshot: removeSnapshot
+            removeSnapshot: removeSnapshot,
+            quarantine: { try Self.quarantineSnapshot() }
         )
         return Self.response(
             configured: false,
@@ -201,6 +208,56 @@ final class ProtectedDNSManager {
             throw failure
         }
         try removeSnapshot()
+    }
+
+    /// The restore transaction over an injected snapshot outcome, mirroring
+    /// `statusResponse`. Production restore() owns the real snapshot, reader,
+    /// writer, quarantine, and removal.
+    ///
+    /// A `.failure` carrying `HelperFailure.invalid` means the snapshot file
+    /// exists but is provably not a valid snapshot (wrong owner, type, mode,
+    /// size, or content). `save` is fsync+rename, so that state is permanent —
+    /// "retain the snapshot and let the caller retry" can never succeed and
+    /// used to brick restore, `--emergency-disarm`, and `--emergency-reset`
+    /// at the same line. The way out is the same one Windows
+    /// `recover_unreadable_snapshot` takes: quarantine the file aside (kept
+    /// for diagnosis, never counted as restoration evidence), then run the
+    /// snapshotless sweep — every service still pointing at the loopback
+    /// listener is returned to DHCP/Empty, which needs no snapshot and does
+    /// not fabricate original values. Services with their own resolvers are
+    /// untouched, and the per-service readback proof still decides whether
+    /// the caller may release PF.
+    ///
+    /// Every other failure (`.system` read/inspect errors) is still thrown
+    /// unchanged: those can clear on retry, and M2's retain-and-refuse
+    /// contract stays meaningful for them.
+    private static func restoreTransaction(
+        snapshotResult: Result<Snapshot?, Error>,
+        services: Set<String>,
+        read: (String) throws -> [String],
+        write: ([String], String) throws -> Void,
+        removeSnapshot: () throws -> Void,
+        quarantine: () throws -> Void
+    ) throws -> Snapshot? {
+        let snapshot: Snapshot?
+        switch snapshotResult {
+        case .success(let loaded):
+            snapshot = loaded
+        case .failure(let error):
+            guard let failure = error as? HelperFailure, case .invalid = failure else {
+                throw error
+            }
+            try quarantine()
+            snapshot = nil
+        }
+        try restoreServices(
+            snapshot: snapshot,
+            services: services,
+            read: read,
+            write: write,
+            removeSnapshot: removeSnapshot
+        )
+        return snapshot
     }
 
     func status() -> [String: Any] {
@@ -283,6 +340,22 @@ final class ProtectedDNSManager {
     }
 
     // MARK: - Snapshot
+
+    /// Load the snapshot, treating a fatally corrupt file as "no snapshot"
+    /// after renaming it aside (`restoreTransaction` documents why retrying
+    /// can never repair it). The loopback guard in `enable` already refuses
+    /// to record our own resolver as an original, so a fresh snapshot taken
+    /// over a quarantined file cannot inherit the contamination. Transient
+    /// `.system` read failures are still thrown for a retry to handle.
+    private func loadSnapshotQuarantiningCorruption() throws -> Snapshot? {
+        do {
+            return try loadSnapshot()
+        } catch let failure as HelperFailure {
+            guard case .invalid = failure else { throw failure }
+            try Self.quarantineSnapshot()
+            return nil
+        }
+    }
 
     private func loadSnapshot() throws -> Snapshot? {
         var metadata = stat()
@@ -384,6 +457,24 @@ final class ProtectedDNSManager {
         guard unlink(Self.statePath) == 0 || errno == ENOENT else {
             throw HelperFailure.system("Could not clear protected DNS state.")
         }
+    }
+
+    /// Rename an unreadable snapshot aside instead of deleting it: even a
+    /// corrupt file is the only record of what this machine's resolvers used
+    /// to be, and it is diagnosis evidence for the external event that
+    /// produced it. The support directory is root-only 0700, so the renamed
+    /// file stays unreachable whatever metadata made it unworthy of trust;
+    /// root ownership is re-asserted anyway because losing it is one of the
+    /// corruption modes. ENOENT — nothing to quarantine — is not an error:
+    /// the caller proceeds as a plain missing snapshot.
+    private static func quarantineSnapshot() throws {
+        let quarantined = "\(statePath).corrupt-\(Int(Date().timeIntervalSince1970))"
+        guard rename(statePath, quarantined) == 0 else {
+            if errno == ENOENT { return }
+            throw HelperFailure.system("Could not quarantine protected DNS state.")
+        }
+        chown(quarantined, 0, 0)
+        chmod(quarantined, 0o600)
     }
 
     // MARK: - System Configuration (networksetup fallback)
@@ -703,6 +794,49 @@ final class ProtectedDNSManager {
             return false
         }
         print("DNS status unreadable-service regression passed: a loaded snapshot stays present when its service is unreadable")
+        return true
+    }
+
+    /// Fault-injected quarantine regression. No live DNS preferences or root
+    /// snapshot are changed; production restoreTransaction owns every
+    /// decision.
+    ///
+    /// Before the quarantine path, restore() propagated the loadSnapshot
+    /// failure before any service was touched: the loopback sweep never ran
+    /// and every outlet (restore, --emergency-disarm, --emergency-reset)
+    /// died on the same throw.
+    static func runCorruptSnapshotSelfTest() -> Bool {
+        var settings = [
+            "Wi-Fi": [protectedDNSServer],
+            "Custom": ["8.8.4.4"],
+        ]
+        var quarantined = false
+        do {
+            _ = try restoreTransaction(
+                snapshotResult: .failure(HelperFailure.invalid("Protected DNS state is invalid.")),
+                services: Set(settings.keys),
+                read: { settings[$0]! },
+                write: { settings[$1] = $0 },
+                removeSnapshot: {},
+                quarantine: { quarantined = true }
+            )
+        } catch {
+            print("DNS corrupt-snapshot regression FAILED: restore threw \(error)")
+            return false
+        }
+        guard quarantined,
+              settings["Wi-Fi"] == [],
+              settings["Custom"] == ["8.8.4.4"] else {
+            print(
+                "DNS corrupt-snapshot regression FAILED: quarantined=\(quarantined), "
+                    + "Wi-Fi=\(settings["Wi-Fi"] ?? []), Custom=\(settings["Custom"] ?? [])"
+            )
+            return false
+        }
+        print(
+            "DNS corrupt-snapshot regression passed: an unreadable snapshot is quarantined "
+                + "and the snapshotless loopback sweep still runs"
+        )
         return true
     }
 
