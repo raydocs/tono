@@ -1033,6 +1033,7 @@ export const translationKeys = [
   'tono.support.webrtc.title',
   'tono.support.webrtc.description',
   'tono.support.webrtc.open',
+  'tono.support.webrtc.openFailed',
   'tono.support.webrtc.copyVersion',
   'tono.settings.title',
   'tono.settings.account',

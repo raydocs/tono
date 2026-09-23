@@ -582,6 +582,7 @@
       "title": "WebRTC 泄漏检测",
       "description": "连上后打开。正常应看不到家里公网 IP。",
       "open": "打开 ip.cx/webrtc",
+      "openFailed": "无法打开浏览器，请手动访问 https://ip.cx/webrtc。",
       "copyVersion": "复制版本号"
     }
   },

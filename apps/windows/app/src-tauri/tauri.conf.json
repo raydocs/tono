@@ -55,6 +55,9 @@
     }
   },
   "plugins": {
+    "shell": {
+      "open": "https://ip\\.cx/webrtc"
+    },
     "updater": {
       "endpoints": [],
       "pubkey": ""

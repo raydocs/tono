@@ -32,6 +32,32 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 支持页「WebRTC 检查」按钮打不开页面
+
+- **归属**：G1（功能可用）；Windows App `apps/windows/app`（Support 页、Tauri capability）。
+- **来源**：基线 main `def3dd79` → 分支 `fix/webrtc-check-open-20260923`；Issue #386；
+  内部审查 H6 C 节（功能缺陷，非安全发现）；提交时未合 main。
+- **缺陷修复**：`support.tsx` 用 `plugin-shell open` 打开 `https://ip.cx/webrtc`，但 Windows
+  启用的 capability 都没有授予 `shell:allow-open`。结果是调用在运行时被拒，并误报
+  「复制失败」。现在 `desktop-capability` 授予 `shell:allow-open`，同时在 `tauri.conf.json`
+  设置 `plugins.shell.open = "https://ip\.cx/webrtc"`（插件会把它锚定为 `^...$`），只放行这个
+  固定 URL，不启用插件默认的 http(s)/mailto/tel 全放行。失败时改为显示新的
+  `tono.support.webrtc.openFailed` 提示（中/英）。
+- **新增/优化**：无。
+- **工程与测试**：在 `scripts/windows-packaging.test.mjs` 新增一个 node test，断言以下三点：
+  支持页唯一的 `openUrl` 字面量是该 URL；desktop capability 授予 `shell:allow-open`；
+  配置的 open 正则接受该 URL、拒绝其他 URL。重新生成了 i18n 类型文件。
+- **验证**（MacBook，本分支工作区）：
+  - 该 node test 在还原 capability/配置后失败（缺 `shell:allow-open`），修复后通过。
+  - `pnpm test:dev-control` 99/99 通过。
+  - `vitest run src/pages/tono/support.test.tsx` 16/16 通过。
+  - `tsc --noEmit` 通过，`eslint support.tsx` 通过。
+  - 未执行 Tauri 构建。未实机点击。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：设置页旧 `update-viewer.tsx` 的 GitHub release 链接仍不在 open 范围内，行为与
+  修复前一样被拒；它不在 Tono 产品更新路径上，本 PR 不放宽。打包后的 WebView2 打开外部浏览器
+  尚未实机确认。
+
 ## 2026-09-23 · coreMonitor 不得把运行时替换的瞬时 utun 消失判为 TUN 死亡
 
 - **归属**：G1（已连接=能用：切换/热重载不掉线）；macOS 客户端 `apps/macos`。
