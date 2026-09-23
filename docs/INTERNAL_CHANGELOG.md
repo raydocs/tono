@@ -32,6 +32,31 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · ops 诊断/重启任务改用实际 Xray unit `tono-xray.service`（H7-F8）
+
+- **归属**：ops 任务（运维计划 3.4 hub 任务执行器；3.1 验收单报错证据），非客户 ship gate；`ops-panel/`。
+- **来源**：基线 main `e7c913e1` → 分支 `fix/ops-xray-unit-20260923`；Issue #376，内部审查 H7-F8；
+  提交时未合 main。
+- **缺陷修复**：
+  - **原问题**：`xray_dial_errors`/`xray_error_digest` 读的是 `journalctl -u xray`，
+    `xray_restart` 执行的是 `systemctl restart xray`，但部署脚本安装的都是 `tono-xray.service`。
+    journal 对不存在的 unit 通常返回 0 且没有输出，任务会报 `ok matched=0`，验收单可能把它
+    当作「无报错」证据。
+  - **修复**：新增常量 `XRAY_UNIT = "tono-xray.service"`，三个任务都改用它。journal 任务先确认
+    `LoadState=loaded`，否则以 rc=3 报 error，不再把空读当成功。
+- **新增/优化**：无。
+- **工程与测试**：`test_jobs.py:471` 原来把错误的 `journalctl -u xray` 写成断言，现改为
+  `journalctl -u tono-xray.service`。这条就是本修复的回归测试，没有新增其他测试。在旧代码上
+  它会失败（handler 返回 error，不是 ok）。
+- **验证**：MacBook `python3 -m unittest discover -s ops-panel/tests -p 'test_*.py'`：旧代码 25 项
+  1 失败，修复后 25 项 OK。没有连接任何真实主机，也没有在节点上确认 `systemctl show -p LoadState`
+  的输出。CI 结果见 PR。
+- **候选/发布**：仅源码，无新候选；hub 部署需 owner 执行。
+- **剩余限制**：
+  - 如果某节点确实只跑旧的 `xray.service`（非 Tono 部署），journal 任务现在会报 error、不再
+    报 ok，这是有意的 fail-closed。
+  - 历史上 `ok` 的 journal 任务行不会追溯改判。
+
 ## 2026-09-23 · 永不 armed 的内部转换不得被重连 loop 判为外部 release
 
 - **归属**：G1（断开与恢复：用户连接意图不被静默丢弃）；macOS 客户端 `apps/macos`。

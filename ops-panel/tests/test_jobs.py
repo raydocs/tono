@@ -468,7 +468,7 @@ class RunJobsExitTests(unittest.TestCase):
 
     def test_dial_errors_handler_filters_and_redacts(self):
         def ssh(_node, remote, timeout=60):
-            self.assertIn("journalctl -u xray", remote)
+            self.assertIn("journalctl -u tono-xray.service", remote)
             self.assertIn('--since "-15min"', remote)
             self.assertIn("-n 20", remote)
             return 0, "\n".join([

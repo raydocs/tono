@@ -86,6 +86,8 @@ TCP_TUNING_KEYS = (
 )
 
 EXIT_AGENT_UNIT = "tono-exit-agent.service"
+# The unit every provisioning script installs (manage-tono-reality-node.sh et al.).
+XRAY_UNIT = "tono-xray.service"
 EXIT_AGENT_STATE = "/var/lib/tono-exit-agent/state.json"
 
 NEEDS_NODE = frozenset({
@@ -477,7 +479,12 @@ class IngestClient:
 
 
 def _journal_remote(since_minutes: int, max_lines: int) -> str:
-    return f'journalctl -u xray --since "-{int(since_minutes)}min" -n {int(max_lines)} --no-pager'
+    # journalctl exits 0 with no lines for a unit that does not exist, which
+    # would read as a clean node. Refuse that instead of reporting it.
+    return (
+        f'[ "$(systemctl show -p LoadState --value {XRAY_UNIT})" = loaded ] || exit 3\n'
+        f'journalctl -u {XRAY_UNIT} --since "-{int(since_minutes)}min" -n {int(max_lines)} --no-pager'
+    )
 
 
 def handle_xray_dial_errors(params: dict, ctx: JobContext) -> tuple[str, str, dict]:
@@ -710,8 +717,8 @@ echo "===END==="
 
 
 def handle_xray_restart(params: dict, ctx: JobContext) -> tuple[str, str, dict]:
-    remote = """set +e
-systemctl restart xray
+    remote = f"""set +e
+systemctl restart {XRAY_UNIT}
 RC=$?
 sleep 1
 echo "===RC==="
