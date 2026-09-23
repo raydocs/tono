@@ -181,8 +181,8 @@ nonisolated extension ConfigPipeline {
     /// WeChat 4.x, DingTalk and Feishu/Lark all perform important work in
     /// helper executables inside their app bundles. Process matching therefore
     /// covers the whole reviewed bundle prefix, not one exact executable path.
-    /// The standard install locations are always present; Launch Services adds
-    /// a non-standard install only after its bundle identity is checked.
+    /// Standard and Launch Services-registered installs are both admitted only
+    /// after their bundle identity is checked.
     ///
     /// Adoption is gated on the code signature and on being safe to embed in a
     /// Mihomo rule payload — and on nothing else. It used to also require the
@@ -222,22 +222,22 @@ nonisolated extension ConfigPipeline {
     /// invisible, and the list is sampled when the runtime is generated, so a
     /// move mid-session is picked up on the next connect or policy refresh
     /// rather than immediately.
-    nonisolated static let reviewedDirectDefaultBundlePaths = [
-        "/Applications/WeChat.app/",
-        "/Applications/微信.app/",
-        "/Applications/DingTalk.app/",
-        "/Applications/钉钉.app/",
-        "/Applications/Feishu.app/",
-        "/Applications/飞书.app/",
-        "/Applications/Lark.app/",
+    ///
+    /// These names are looked up directly under `/Applications` and one folder
+    /// below it. A name is not an identity: admin users write `/Applications`
+    /// without sudo, so each bundle found must still pass the same signed
+    /// identity check as a relocation before its path is granted.
+    nonisolated static let reviewedDirectBundleNames = [
+        "WeChat.app", "微信.app",
+        "DingTalk.app", "钉钉.app",
+        "Feishu.app", "飞书.app",
+        "Lark.app",
     ]
 
-    /// Bundle identifiers seen in macOS distributions. The standard
-    /// `/Applications` paths above remain the primary compatibility path; this
-    /// list lets a Launch Services-registered relocation work without trusting
-    /// an arbitrary process name or path. A relocation is admitted only for
-    /// vendors whose signing team has been captured below; otherwise it stays
-    /// on the tunnel until a real signed bundle is reviewed.
+    /// Bundle identifiers seen in macOS distributions. Any install, standard
+    /// path or relocation, is admitted only for vendors whose signing team has
+    /// been captured below; otherwise it stays on the tunnel until a real
+    /// signed bundle is reviewed.
     nonisolated static let reviewedDirectBundleIdentifiers = [
         "com.tencent.xinWeChat",
         "com.alibaba.DingTalk",
@@ -255,9 +255,8 @@ nonisolated extension ConfigPipeline {
     ]
 
     /// Team identity captured from the official DingTalk macOS distribution.
-    /// Feishu/Lark relocations stay fail-closed until a real signed bundle is
-    /// inspected on a target Mac; the standard `/Applications` paths remain
-    /// supported meanwhile.
+    /// Feishu/Lark stay fail-closed, including at the standard `/Applications`
+    /// paths, until a real signed bundle is inspected on a target Mac.
     nonisolated static let reviewedDirectTeamIdentifiers = [
         "com.alibaba.DingTalk": "XN6U3EV979",
         "com.alibaba.DingTalkMac": "XN6U3EV979",
@@ -290,8 +289,30 @@ nonisolated extension ConfigPipeline {
         return paths
     }
 
+    /// Test seam only. Production never assigns it; hosted CI has none of the
+    /// reviewed apps installed, so runtime-shape tests supply a path here.
+    nonisolated(unsafe) static var managedDirectBundlePathsOverride: [String]?
+
     static var managedDirectProcessBundlePaths: [String] {
-        var paths = reviewedDirectDefaultBundlePaths
+        managedDirectBundlePathsOverride ?? managedDirectProcessBundlePaths(
+            applicationsRoot: URL(fileURLWithPath: "/Applications", isDirectory: true)
+        )
+    }
+
+    static func managedDirectProcessBundlePaths(applicationsRoot root: URL) -> [String] {
+        var paths: [String] = []
+        for name in reviewedDirectBundleNames {
+            let url = root.appendingPathComponent(name, isDirectory: true)
+            let path = url.standardizedFileURL.resolvingSymlinksInPath().path + "/"
+            guard isRulePayloadSafeBundlePath(path),
+                  !paths.contains(path),
+                  let identifier = Bundle(url: url)?.bundleIdentifier,
+                  reviewedDirectBundleIdentifiers.contains(identifier),
+                  isSignedReviewedDirectBundle(at: url, identifier: identifier) else {
+                continue
+            }
+            paths.append(path)
+        }
         for identifier in reviewedDirectBundleIdentifiers {
             let discovered = applicationURLs(
                 forBundleIdentifier: identifier
@@ -306,12 +327,7 @@ nonisolated extension ConfigPipeline {
                 paths.append(path)
             }
         }
-        for url in applicationSubfolderBundles(named: [
-            "WeChat.app", "微信.app",
-            "DingTalk.app", "钉钉.app",
-            "Feishu.app", "飞书.app",
-            "Lark.app",
-        ]) {
+        for url in applicationSubfolderBundles(named: reviewedDirectBundleNames, under: root) {
             let path = url.standardizedFileURL.resolvingSymlinksInPath().path + "/"
             let identifier = Bundle(url: url)?.bundleIdentifier
             guard isRulePayloadSafeBundlePath(path),
@@ -383,9 +399,8 @@ nonisolated extension ConfigPipeline {
     ///
     /// Basic validation only: this is an identity question, not an integrity
     /// audit of a multi-hundred-megabyte bundle, and deep validation here would
-    /// hash every resource on the connect path. `/Applications/WeChat.app` is
-    /// unconditionally trusted as before — it is the reviewed location and is not
-    /// writable without administrator rights.
+    /// hash every resource on the connect path. `/Applications/WeChat.app` gets
+    /// the same check: admin users can write `/Applications` without sudo.
     ///
     /// Tencent's Developer ID team, so adoption is pinned to Tencent rather than
     /// to any Apple-issued signature that merely claims WeChat's identifier
@@ -403,32 +418,8 @@ nonisolated extension ConfigPipeline {
     nonisolated static let reviewedWeChatTeamIdentifier: String? = "5A4RE8SF68"
 
     static func isSignedWeChatBundle(at url: URL) -> Bool {
-        var requirementText =
-            #"anchor apple generic and identifier "com.tencent.xinWeChat""#
-        if let team = reviewedWeChatTeamIdentifier,
-           team.unicodeScalars.allSatisfy({
-               $0.isASCII && ($0.properties.isAlphabetic
-                   || CharacterSet.decimalDigits.contains($0))
-           }), !team.isEmpty {
-            requirementText += #" and certificate leaf[subject.OU] = ""# + team + #"""#
-        }
-        var code: SecStaticCode?
-        guard SecStaticCodeCreateWithPath(
-            url as CFURL,
-            SecCSFlags(rawValue: 0),
-            &code
-        ) == errSecSuccess, let code else { return false }
-        var requirement: SecRequirement?
-        guard SecRequirementCreateWithString(
-            requirementText as CFString,
-            SecCSFlags(rawValue: 0),
-            &requirement
-        ) == errSecSuccess, let requirement else { return false }
-        return SecStaticCodeCheckValidity(
-            code,
-            SecCSFlags(rawValue: kSecCSBasicValidateOnly),
-            requirement
-        ) == errSecSuccess
+        guard let team = reviewedWeChatTeamIdentifier else { return false }
+        return isSigned(at: url, identifier: "com.tencent.xinWeChat", team: team)
     }
 
     /// Relocated office bundles get an Apple-anchored signature and an exact
@@ -443,16 +434,32 @@ nonisolated extension ConfigPipeline {
             return isSignedWeChatBundle(at: url)
         }
         guard reviewedDirectBundleIdentifiers.contains(identifier),
-              identifier.range(
-                  of: #"^[A-Za-z0-9.-]+$"#,
-                  options: .regularExpression
-              ) != nil,
               let team = reviewedDirectTeamIdentifiers[identifier] else {
             return false
         }
+        return isSigned(at: url, identifier: identifier, team: team)
+    }
+
+    /// Developer ID builds carry the team in the leaf certificate. Mac App
+    /// Store builds are signed by Apple's leaf (the installed WeChat is one),
+    /// so the team is read from the Apple-sealed code directory instead. Both
+    /// must name the reviewed team.
+    private static func isSigned(at url: URL, identifier: String, team: String) -> Bool {
+        guard !team.isEmpty,
+              team.unicodeScalars.allSatisfy({
+                  $0.isASCII && ($0.properties.isAlphabetic
+                      || CharacterSet.decimalDigits.contains($0))
+              }),
+              identifier.range(
+                  of: #"^[A-Za-z0-9.-]+$"#,
+                  options: .regularExpression
+              ) != nil else {
+            return false
+        }
         let requirementText =
-            #"anchor apple generic and identifier "# + identifier
-            + #""" and certificate leaf[subject.OU] = ""# + team + #"""#
+            #"anchor apple generic and identifier ""# + identifier
+            + #"" and (certificate leaf[field.1.2.840.113635.100.6.1.9] exists"#
+            + #" or certificate leaf[subject.OU] = ""# + team + #"")"#
         var code: SecStaticCode?
         guard SecStaticCodeCreateWithPath(
             url as CFURL,
@@ -465,11 +472,19 @@ nonisolated extension ConfigPipeline {
             SecCSFlags(rawValue: 0),
             &requirement
         ) == errSecSuccess, let requirement else { return false }
-        return SecStaticCodeCheckValidity(
+        guard SecStaticCodeCheckValidity(
             code,
             SecCSFlags(rawValue: kSecCSBasicValidateOnly),
             requirement
-        ) == errSecSuccess
+        ) == errSecSuccess else { return false }
+        var information: CFDictionary?
+        guard SecCodeCopySigningInformation(
+            code,
+            SecCSFlags(rawValue: kSecCSSigningInformation),
+            &information
+        ) == errSecSuccess,
+              let information = information as? [String: Any] else { return false }
+        return information[kSecCodeInfoTeamIdentifier as String] as? String == team
     }
 
     /// Anchored RE2 patterns for Mihomo PROCESS-PATH-REGEX sub-rules, derived
