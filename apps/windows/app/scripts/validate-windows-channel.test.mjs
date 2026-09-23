@@ -140,7 +140,7 @@ test('promotion validates before one non-forced atomic channel ref update', asyn
   assert.match(workflow, /HEAD:refs\/heads\/windows-updates/)
   assert.ok(
     workflow.indexOf('validate-windows-channel.mjs') <
-      workflow.indexOf('git push origin HEAD:refs/heads/windows-updates'),
+      workflow.indexOf('git_auth push origin HEAD:refs/heads/windows-updates'),
   )
 })
 

@@ -51,8 +51,10 @@
   两个 Windows 发布 workflow 的 workflow 级无写权限、所有 checkout 不持久化凭据、运行
   pnpm/npm/cargo/tauri-action 的作业无写权限、`publish-draft` 是写作业。旧 workflow
   上失败于 “windows-release.yml grants write at workflow level”。
+  `validate-windows-channel.test.mjs` 中“先校验后推送”断言的推送命令字面量随之改为
+  `git_auth push origin HEAD:refs/heads/windows-updates`（顺序约束不变）。
 - **验证**：MacBook 本机 `node --test tooling/scripts/tests/windows-ci-paths.test.cjs`
-  12/12 通过（修复前新增项失败）；三个 workflow js-yaml 解析 + bash 步骤 `bash -n`；
+  12/12 通过（修复前新增项失败），`pnpm test:dev-control` 98/98；三个 workflow js-yaml 解析 + bash 步骤 `bash -n`；
   本机无 actionlint，未跑。`build-draft`/`publish-draft`/`promote` 只在
   `release/windows` 上 `workflow_dispatch` 运行，PR CI 不执行，需所有者在下一次发布时观察。
 - **候选/发布**：无新包，仅源码。
