@@ -259,6 +259,14 @@ final class AppState {
     /// interface index; tests substitute the syscall so a single monitor tick
     /// can be driven without the privileged helper.
     var tunInterfaceExists: (String) -> Bool = { KillSwitchService.interfaceExists($0) }
+    /// System boundary for the post-connect optional-policy background
+    /// replacement. Production (nil) resolves the managed web-domain pins and
+    /// performs the privileged arm → writeRuntimeConfig → /core/sync → reload
+    /// → TUN-verify sequence inline; tests substitute a closure (typically one
+    /// that throws) to drive the failure branch deterministically without DNS,
+    /// the helper, or sing-box — the same pattern as `networkProtection` and
+    /// `tunInterfaceExists`.
+    var optionalPolicyRuntimeMutation: (() async throws -> Void)?
     let subscriptionManager = SubscriptionManager()
     let proxyService = ProxyService()
     private let providerRuleLoader = ProviderRuleLoader()
@@ -1521,23 +1529,30 @@ final class AppState {
             revision: managedTrafficPolicyRevision,
             generation: Int(generation)
         )
-        let base = activeDirectPolicy
-        let resolved = await resolveManagedDirectDomains(
-            policy: policy,
-            base: base,
-            api: api
-        )
-        guard generation == connectionCoordinator.protectionOperationGeneration, isConnected,
-              !Task.isCancelled else { return }
-        guard let resolved, resolved != base else {
-            ConnectionTelemetryBuffer.shared.record(
-                "optionalPolicyRollback",
-                reason: "unchanged_or_unresolved",
-                generation: Int(generation)
-            )
-            return
-        }
         do {
+            // Test seam: `optionalPolicyRuntimeMutation` stands in for the
+            // resolver pass plus the privileged runtime replacement so the
+            // failure branch below can be driven deterministically.
+            if let runtimeMutation = optionalPolicyRuntimeMutation {
+                try await runtimeMutation()
+                return
+            }
+            let base = activeDirectPolicy
+            let resolved = await resolveManagedDirectDomains(
+                policy: policy,
+                base: base,
+                api: api
+            )
+            guard generation == connectionCoordinator.protectionOperationGeneration, isConnected,
+                  !Task.isCancelled else { return }
+            guard let resolved, resolved != base else {
+                ConnectionTelemetryBuffer.shared.record(
+                    "optionalPolicyRollback",
+                    reason: "unchanged_or_unresolved",
+                    generation: Int(generation)
+                )
+                return
+            }
             try await PrivilegedRuntimeCoordinator.shared.armKillSwitch(
                 apiHosts: [],
                 tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
@@ -1596,6 +1611,15 @@ final class AppState {
                   generation == connectionCoordinator.protectionOperationGeneration else { return }
             disconnect(releaseKillSwitch: false)
             errorMessage = error.localizedDescription
+            // The preserve teardown above parks the host fail-closed (PF
+            // bootstrap-only, protection blocked), and this was the only
+            // fail-closed failure branch that stopped there: on a stable
+            // network no kick ever follows, so the host sat in Protected
+            // Offline with no automatic recovery. Hand the intent to the
+            // persistent loop exactly as reloadCoreConfig's and
+            // recoverFailedNodeSwitch's failure branches do. The loop never
+            // disarms, so this does not loosen protection.
+            scheduleProtectedReconnect()
         }
     }
 
