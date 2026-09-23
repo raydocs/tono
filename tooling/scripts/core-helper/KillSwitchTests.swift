@@ -451,7 +451,8 @@ extension KillSwitchManager {
                     sessionDirectEndpoints: [],
             reviewedBundleDirectEnabled: false
                 ),
-                allowedUID: 501
+                allowedUID: 501,
+                physicalInterfaces: ["en0", "en7"]
             )
             let inactiveState = KillSwitchState(
                 armed: true,
@@ -600,7 +601,9 @@ extension KillSwitchManager {
                 "to fe80::/10",
             ]
             let continuityOffWithoutTunnel = !continuityNeedles.contains(where: rules.contains)
-            let lanDNSBlock = "block drop out quick inet proto { tcp, udp } to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } port { 53, 853 }"
+            // Scoped to the physical interfaces, so a company VPN's DNS on its
+            // own utun is not blocked.
+            let lanDNSBlock = "block drop out quick on { en0, en7 } inet proto { tcp, udp } to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } port { 53, 853 }"
             let lanDNSBlockedFirst: Bool = {
                 guard let block = cloudRules.range(of: lanDNSBlock),
                       let lan = cloudRules.range(of: "label \"tono-lan\"") else { return false }

@@ -43,16 +43,29 @@
   改后：在这两组放行之前渲染 `tono-lan-dns` 的 `block drop out quick`，覆盖 IPv4 私网/169.254
   与 IPv6 fe80::/10、fc00::/7、ff00::/8 的 TCP/UDP 53、853。系统 DNS（loopback 127.0.0.1）、
   TUN、mDNS 5353 不受影响。
+  - 审查后补充（#348 第三轮审查）：阻断规则限定在物理出口接口 `on { enN, ... }`（渲染规则时
+    用 `getifaddrs` 枚举当前存在的 `en` + 数字接口，覆盖 Wi-Fi、有线、USB/雷雳网卡和 iPhone USB
+    共享），不作用于 utun、ipsec、ppp 等其他 VPN 接口，所以与 Tono 同时运行的公司 VPN
+    （AnyConnect、GlobalProtect、WireGuard 等）推到自己 utun 上的 DNS 不会被挡。枚举不到任何
+    物理接口时，阻断保持不限接口（fail-closed）。
 - **新增/优化**：无。
 - **工程与测试**：helper 自测（`--self-test`）新增一个检查 `lanDNSBlockedFirst`：带 TUN 的规则集里
-  LAN DNS 阻断出现在 `tono-lan` 放行之前；旧代码无此规则而失败。同一自测在 CI 以 root 做 pfctl
+  LAN DNS 阻断出现在 `tono-lan` 放行之前；旧代码无此规则而失败。审查后同一检查改为用注入的
+  物理接口 `["en0", "en7"]` 渲染，并断言阻断带 `on { en0, en7 }` 限定；修改前的分支渲染的是
+  不限接口的阻断，匹配不到，检查失败。同一自测在 CI 以 root 做 pfctl
   语法解析。HelperProtocolVersion 4.5.0 → 4.10.0（跳过开放中的 4.6–4.9 helper 链），CONTRACT
   已重算；与该链合并时需按合并顺序重算 CONTRACT。
-- **验证**：本机（MacBook）未编译 helper、未运行 pfctl；编译、自测与 PF 解析委托本 PR 的
+- **验证**：本机（MacBook）未编译 helper、未运行 pfctl（审查后的接口限定同样本机未编译）；编译、自测与 PF 解析委托本 PR 的
   GitHub-hosted `macos-26` CI（privileged-tests）。
 - **候选/发布**：无新包，仅源码；不涉及 Sparkle 更新源。
 - **剩余限制**：未实机复现。只阻断 53/853；其他端口上的自定义 DNS 协议（如私网 DoH 443）仍经
   `tono-lan` 放行。用户有意使用的局域网 DNS 服务器在保护期间不再可直连（系统解析本就走 loopback）。
+  - **已知取舍，需要 owner 决定是否接受**：仍会挡掉企业 split DNS。公司 Mac 通过
+    `/etc/resolver/<域>` 或配置描述文件下发的私网补充解析器（例如 `10.1.1.53`）经物理网卡
+    直连，Tono 连接期间这些内网域名会解析失败。在 main 上它们经 `tono-lan` 可以解析。
+  - 物理接口列表在每次写 PF 规则时确定。会话中途新接入的网卡（例如插上 USB 网卡）在下一次
+    重写规则之前不在阻断范围内，此时该网卡上的 LAN DNS 与 main 行为相同（经 `tono-lan` 放行）。
+  - 接口限定和公司 VPN 并存场景未做实机验证。
 
 ## 2026-09-23 · Windows PrepareCoreStart 绑定当前 release epoch（R2-F6）
 
