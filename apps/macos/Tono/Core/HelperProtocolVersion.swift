@@ -100,7 +100,11 @@ nonisolated enum HelperProtocolVersion {
     ///   unreadable service as clean. Existing IPC and authorization are unchanged.
     /// - 4.4.0 → 4.5.0: root-owned full-bundle update transaction, detached
     ///   signatures, durable consumption, independent executor and recovery.
-    static let current = "4.5.0"
+    /// - 4.5.0 → 4.6.0: `/helper/upgrade` checks the requesting bundle's seal
+    ///   and the candidate helper and core against the installer's Developer ID
+    ///   requirement. It refuses a helper that is not strictly newer than the
+    ///   running one, so older builds need the administrator install.
+    static let current = "4.6.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

@@ -32,6 +32,40 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 静默 helper 升级与安装器使用同一准入（H2-F1）
+
+- **归属**：G1 保护完整性（root helper 替换路径）；平台/模块：macOS
+  `tooling/scripts/core-helper`（`SocketServer.stageAndUpgrade`）、`HelperProtocolVersion`。
+- **来源**：基线 main b1b6fe6c → 分支 `fix/helper-upgrade-admission-20260923`；
+  Issue #337；PR 与准确源码 SHA 见 PR，提交本条时未合 main。
+- **缺陷修复（内部审查 H2-F1，源码推导）**：`/helper/upgrade` 无需管理员同意就替换
+  root helper 和 root sing-box，但缺少另外两条安装路径已有的约束：没有版本下限；
+  签名要求缺少 Developer ID CA，也不要求 get-task-allow 不存在；候选没有绑定到发起
+  App 的签名封存。修复后：
+  - 候选路径必须等于发起 bundle 的 `Contents/Resources/tono-core-helper` 和
+    `Contents/Resources/sing-box`。
+  - 发起 bundle 本身要通过 `UpdatePackage.verifyCode`（Developer ID，strict，
+    nested code）。
+  - 源文件和 root 私有副本都复用同一个 `UpdatePackage.verifyCode`，删除了较弱的
+    `verifyEmbeddedSignature`。
+  - 读取已校验的 root 私有副本的 `--version`。候选版本必须严格高于运行中的
+    `HelperProtocolVersion`（三段数字比较，格式不合法时拒绝）。
+  - 被拒绝时 App 仍然回退到管理员安装，所以合法降级仍然可以在管理员同意后进行。
+- **新增/优化**：无。
+- **工程与测试**：helper 契约 4.5.0 → 4.6.0，并重算 `CONTRACT.sha256`。`--self-test`
+  增加 `runHelperUpgradeAdmissionSelfTest`，断言降级和同版本候选被拒、4.9.0 → 4.10.0
+  被接受。旧代码没有这个准入函数，所以这项 self-test 在旧代码上无法编译。
+- **验证**：本机只做编辑和源码自查，没有运行 swiftc 或 xcodebuild。helper 编译和
+  `sudo tono-core-helper --self-test` 由本 PR 的 macOS CI（GitHub-hosted `macos-26`）
+  执行，结果以该 run 为准。真实 Developer ID 包之间的静默升级和降级拒绝没有做实机验证。
+- **候选/发布**：仅源码，无新候选；未改动 PF 规则、`appcast.xml` 和 `latest.json`。
+- **剩余限制**：
+  - 已开的 helper 链 PR #303、#307、#308、#311 也在推进 4.6.0 → 4.9.0。后合并的一方
+    需要把版本推进到下一个号，并重算 `CONTRACT.sha256`。
+  - bundle 封存校验和复制之间仍然有文件替换窗口。root 私有副本会再按 Developer ID
+    要求校验，并检查版本下限，所以替换进来的文件只能是更新的正式签名 helper。
+  - 管理员安装路径本身没有版本下限，这是有意保留的：它需要管理员同意。
+
 ## 2026-09-23 · Windows PrepareCoreStart 绑定当前 release epoch（R2-F6）
 
 - **归属**：G1 连接生命周期（I1：旧 attempt 的迟到 Service 副作用不得影响新会话）；
