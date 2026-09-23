@@ -393,6 +393,10 @@ pub fn intent_floor() -> Vec<FilterSpec> {
     }
     // DHCP server replies arrive from the server's address, which is not the broadcast or
     // multicast address the request went to, so they are authorized as inbound traffic.
+    // DHCPv4 stays port-only: a server or relay on a public address answers from that address,
+    // and bounding it would leave those clients with no lease at all while protected. DHCPv6
+    // servers and relays answer clients from a link-local address (RFC 8415), so the v6
+    // reply is bounded to fe80::/10 and a global peer cannot open a flow on port 546.
     filters.push(spec(
         "intent/permit-dhcp-v4-in".into(),
         "intent permit DHCP v4 server to client",
@@ -416,6 +420,10 @@ pub fn intent_floor() -> Vec<FilterSpec> {
             C::Protocol(IpProtocol::Udp),
             C::LocalPort(546),
             C::RemotePort(547),
+            C::RemoteAddressV6 {
+                addr: [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                prefix: 10,
+            },
         ],
         false,
     ));
@@ -1644,6 +1652,29 @@ mod tests {
                     FilterAction::Permit,
                     "{mode:?}: local listeners keep accepting loopback peers ({layer:?})"
                 );
+
+                let (dhcp_server, dhcp_rogue, client, server) =
+                    if layer == LayerKind::AleAuthRecvAcceptV4 {
+                        ("192.168.1.1", None, 68, 67)
+                    } else {
+                        ("fe80::1", Some("2001:db8::67"), 546, 547)
+                    };
+                let mut reply = packet(layer, IpProtocol::Udp, dhcp_server, server);
+                reply.local_port = Some(client);
+                assert_eq!(
+                    arbitrate(&filters, &reply),
+                    FilterAction::Permit,
+                    "{mode:?}: DHCP server replies keep reaching the client ({layer:?})"
+                );
+                if let Some(rogue) = dhcp_rogue {
+                    let mut rogue = packet(layer, IpProtocol::Udp, rogue, server);
+                    rogue.local_port = Some(client);
+                    assert_eq!(
+                        arbitrate(&filters, &rogue),
+                        FilterAction::Block,
+                        "{mode:?}: a global peer cannot open a flow on the DHCPv6 client port"
+                    );
+                }
 
                 physical.local_interface = Some(0x1234_5678);
                 let expected = if mode == KillSwitchStatusMode::Locked {

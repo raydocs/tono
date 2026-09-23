@@ -35,19 +35,23 @@
 ## 2026-09-23 · Windows kill switch 入站接受默认拒绝（H1-F4）
 
 - **归属/来源**：G1 保护一致性（断开/连接时保护与 UI 一致）；影响 Windows Service
-  （`apps/windows/service`）。基线 main da7bad1b → 分支 `fix/wfp-inbound-accept-20260923`；
+  （`apps/windows/service`）。基线 main da7bad1b（2026-09-23 rebase 到 26d438c1）→ 分支 `fix/wfp-inbound-accept-20260923`；
   Issue #328；提交时未合 main。
 - **缺陷修复**：WFP 默认拒绝只装在 `ALE_AUTH_CONNECT_V4/V6`，`ALE_AUTH_RECV_ACCEPT_V4/V6`
   没有 block（v6 只有 NDP permit、v4 层根本未建模）。远端发起的流只在 RECV_ACCEPT 授权一次，
   其出向包不再经过 CONNECT 层，所以物理网卡上的监听端可接受连接，整条流不经隧道。改后
   RECV_ACCEPT v4/v6 在同一子层加持久 floor block-all + 会话 block-all（权重 1，与 connect
   层一致），并补 permit：loopback 地址/ALE flag 两种形式（hard，权重 8）、Locked 时 WinTUN
-  LUID（权重 8）、DHCP 服务器回包（v4 68←67、v6 546←547，权重 7）、原有 NDP。Windows 无 LAN
+  LUID（权重 8）、DHCP 服务器回包（v4 68←67 仅按端口；v6 546←547 且源地址限 `fe80::/10`，
+  RFC 8415 规定服务器/中继以链路本地地址回复，权重 7）、原有 NDP。Windows 无 LAN
   放行，因此不加 LAN 入站放行。`FILTER_NAMESPACE` 升到 v10（`…9e09…`）。
 - **新增/优化**：无。
 - **工程与测试**：新回归 `inbound_accept_on_the_physical_adapter_is_blocked_in_every_mode`
   （`wfp_model.rs`，一个 `#[test]`）：三种模式下物理口入向 TCP（v4/v6）判 Block，loopback 判
-  Permit，TUN 接口仅 Locked 判 Permit。在未修复规则上的实测失败：仅加测试+层枚举的一次性分支
+  Permit，TUN 接口仅 Locked 判 Permit；同一测试另断言 DHCP 回包放行（v4 192.168.1.1:67→68、
+  v6 fe80::1:547→546 判 Permit）与全局源 DHCPv6（2001:db8::67:547→546）判 Block——前者防止
+  日后误删/写错入站 DHCP permit 导致租约到期断网，后者在收窄前（纯端口规则）判 Permit 必失败。
+  在未修复规则上的实测失败：仅加测试+层枚举的一次性分支
   经 Windows CI（run 35842751048）失败于 `arbitrate` 的 “every layer must end in a block-all”
   （该层无任何过滤器可判决）。随规则表变更同步修正三个计数/固定值断言：持久过滤器 2→4、
   tunnel permit 2→4、namespace pin。
@@ -56,8 +60,17 @@
 - **候选/发布**：无新包，仅源码。
 - **剩余限制**：未实机确认（RECV_ACCEPT 语义、mihomo controller/本地 DNS 的回环入向被 loopback
   permit 覆盖、内核接受新层上的条件组合）。连接期间物理口上的入向服务（RDP/SMB/远程桌面、
-  Tailscale 等其他虚拟网卡入向）将被拒绝，与 macOS PF 行为一致。入站 DHCP permit 仍只按端口；
-  其进程/目的收窄见 #341。与 #341 的 Windows PR 都把 namespace 升到 v10，后合入者需改为 v11。
+  Tailscale 等其他虚拟网卡入向）将被拒绝，与 macOS PF 行为一致。**开启保护会立即断开当前的
+  远程桌面（RDP）会话**：在 RECV_ACCEPT 加过滤器会重授权已有入向 flow，arm 时 RDP 会话被拆掉；
+  之后入站 3389 被拒，floor 持久、Service 开机恢复 intent，重启也无法远程恢复，只能到机器前
+  操作或 `--emergency-disarm`。这是否为可接受的产品行为**需 owner 决定**，本 PR 未加 App 侧
+  RDP 检测提示。入站 DHCPv4 permit 仍只按端口：公网地址可主动发包到本机 :68 时，本地进程可借
+  这条入向 flow 向任意地址的 :67 回发（DHCPv4 服务器/中继可能用公网地址回复，不能按源收窄）。
+  Namespace 协调：本 PR 用 v10（`…9e09…`），#345（#341 Windows）用 v11（`…9e0a…`），建议
+  合并顺序 #343 → #345；若 #345 先合，本 PR rebase 时须升到 v12，不可沿用任何已发过的值。
+- **续记（2026-09-23，第三轮审查）**：入站 DHCPv6 permit 加源地址 `fe80::/10`；回归测试补
+  DHCP 回包放行与全局源 DHCPv6 拒绝断言；限制中补 RDP 会话断开与 namespace 顺序。本机未编译，
+  委托本 PR CI。
 
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
