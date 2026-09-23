@@ -32,6 +32,33 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · ops v1 home-lines 写入口沿用 shared-admin 的家宽出口约束
+
+- **归属**：ops 任务（`docs/ops/plan-2026-09-11.md` 4.2 审查残留：开户/家宽写路径的前置校验）；
+  控制面 `services/control-plane`，控制台家宽线路页。不属客户发布门。
+- **来源**：内部审查 H8-F3，Issue #397；分支 `fix/home-lines-guard-20260923`，基线 origin/main
+  18301fc5。提交时未合 main。与在审 #326（0078 名字历史）、#381（0080 SOCKS5 轮换）改同一资源，
+  但不改它们触及的行；本 PR 不加 migration。
+- **缺陷修复**：控制台「退掉这条线路」走 v1 `DELETE home-lines/{id}`，原先直接置 `retired`：
+  不查绑定、不推进目录 revision，被绑客户的 `GET /exit-catalog` 整份 503 直到手动改绑；
+  v1 `PATCH` 可写任意 status（非法值 500）且不推进 revision；v1 `POST` 不校验 proxyName、
+  不推进 revision（其他账户下发的 YAML 变了而 revision 不变）；开户 `homeExitId` 不查出口
+  是否 active。改后：新共享函数 `assertHomeExitUnbound`（`src/home.ts`）被 shared-admin
+  DELETE、shared-admin PATCH→retired、v1 DELETE、v1 PATCH→retired 共用，仍有绑定时一律
+  `409 HOME_EXIT_IN_USE`（不自动解绑，由运营显式解绑）；v1 退役与 status 变化、v1 新建都
+  `bumpCatalogRevision`；v1 status 走白名单（400）；v1 新建用 `proxyNameField`，重名 409
+  `HOME_EXIT_CONFLICT`；开户 `homeExitId` 指向非 active 出口时在任何写之前 409
+  `HOME_EXIT_INACTIVE`。
+- **新增/优化**：无。
+- **工程与测试**：一个 Worker `it`（`test/ops-api.test.ts`
+  `home-lines create and retire move the catalog revision and refuse a bound line`）。
+- **验证**：MacBook 本机 worktree：该 `it` 在旧代码上失败（v1 新建后 revision 仍为 5，期望 6），
+  修复后通过；`npx vitest run`（control-plane 全量）43 个文件、892 个测试通过；
+  `npm run typecheck`、`npm run check:budgets` 通过。未部署，未碰 remote D1。
+- **候选/发布**：仅源码，无新候选；Worker 未部署。
+- **剩余限制**：shared-admin PATCH→disabled 仍允许在绑状态下执行（有意的 fail-closed 暂停，
+  被绑客户目录 503）；控制台未单独提示 409 的含义，沿用通用错误提示。
+
 ## 2026-09-23 · 后台可选策略替换失败后必须调度受保护重连
 
 - **归属**：G1（断开与恢复：稳定网络上的 fail-closed 主机不滞留 Protected Offline）；
