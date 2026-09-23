@@ -32,6 +32,17 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · 出口节点质量工具按摘要固定，去掉第三方镜像兜底（H7-F3）
+
+- **归属**：ops 任务（采集器 / 运维面供应链）；`ops-panel/collect.py`，不影响客户端和 Worker。
+- **来源**：基线 main → 分支 `fix/node-diag-tools-20260923`；Issue #364；关联 PR，提交时未合 main；内部审查 H7-F3（源码推导）。
+- **缺陷修复**：质量采集在每台出口节点上以 root 下载并执行 `securityCheck`、`backtrace`，来源是可变 release tag `output`，GitHub 失败时回退第三方 CDN 镜像，不校验摘要；节点上已存在的文件以后每轮直接信任。现在两个工具各固定一个 sha256（记在 `collect.py`），`backtrace` 改用版本化的 `v0.0.21`；`securityCheck` 上游只发布 `output` tag，以摘要为固定点。下载只走 HTTPS，校验通过才赋可执行权限；每轮都重新校验节点上已有的文件，不符就删除并按 missing 上报；删除镜像兜底。
+- **新增/优化**：无。工具仍然需要：`parse_quality` 用其输出生成节点质量、风险/线路关键词，供 Komari 标签、report.json、控制面快照和 ops console 节点抽屉使用。
+- **工程与测试**：新增一个窄测试 `ops-panel/tests/test_collect.py::test_node_tools_are_digest_pinned_and_github_only`（旧代码上第三个 `dl` 参数是 CDN 地址而不是摘要，断言失败）。
+- **验证**：MacBook 本机 `python3 -m unittest discover -s ops-panel/tests -p 'test_*.py'`：修复前新测试失败，修复后 26 项通过。两个固定摘要由本机下载同一 URL 后 `shasum -a 256` 复核，与 GitHub release asset digest 一致（未执行二进制）。用本机 shim 演练 `dl()`：摘要相符安装、不符删除并返回 1、篡改后的已有文件被替换。未连接任何节点，未在 Linux 节点上运行远程脚本。
+- **候选/发布**：无新包，仅源码；hub 上的 `collect.py` 需按 README 手工部署后生效。
+- **剩余限制**：工具仍以 root 在节点上运行（固定摘要后的上游构建）；以低权限/沙箱运行、由 hub 分发（依赖 H7-F1 SSH 主机密钥校验）是后续项。上游更新 `output` 资产后，`securityCheck` 会显示 missing，直到有人审查并更新摘要。
+
 ## 2026-09-23 · coreMonitor 不得把运行时替换的瞬时 utun 消失判为 TUN 死亡
 
 - **归属**：G1（已连接=能用：切换/热重载不掉线）；macOS 客户端 `apps/macos`。
