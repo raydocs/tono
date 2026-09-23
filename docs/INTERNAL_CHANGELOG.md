@@ -32,6 +32,32 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 迁移到另一台 Mac 的会话按硬件锚点丢弃，按新设备登录
+
+- **归属/来源**：G1 账户/设备身份；影响 macOS `KeychainStore` 与 `AccountSession.restore`。
+  内部审查 H11-F2（macOS 最小部分），Issue #409。基线 main 833c0607 → 分支
+  `fix/macos-device-anchor-20260923`；提交时未合 main。
+- **缺陷修复**：refresh token 和 installationId 的 Keychain 项虽然设了 `ThisDeviceOnly`，但没有
+  `kSecUseDataProtectionKeychain`，App 也没有 access group，项目落在文件型 login keychain 中，
+  该属性不生效。迁移助理或 Time Machine 恢复会把它们带到新 Mac，两台机器共用一个设备身份
+  和一个单次使用的 refresh token，一台轮换后另一台被判会话死亡而登出。现在 Keychain 里另存
+  `SHA256(IOPlatformUUID)` 锚点，restore 最先比对：锚点不符就删除本机副本的 refresh token 和
+  installationId 并记下新锚点，随后走既有的无 token 路径（purge 托管目录、显示未登录），用户
+  按新设备登录，原 Mac 的会话不受影响。旧版本存储没有锚点时直接采纳当前锚点。硬件 UUID
+  读不到时不做判断。
+- **新增/优化**：无。
+- **工程与测试**：新增一个 XCTest
+  `KeychainDeviceAnchorTests.testASessionCarriedToAnotherMacIsDroppedAndGetsANewDeviceIdentity`：
+  用注入的锚点 "mac-a" 建立会话，再用 "mac-b" 调用，断言 refresh token 已删除、installationId
+  已更换，同锚点重复调用则保留会话。旧代码没有这个检查（测试无法编译，即失败）。
+- **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests），结果以 PR 页为准。迁移助理 / Time Machine 场景未做实机验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：修复前已经克隆的两台 Mac 都会采纳各自的锚点，无法识别（需要服务端或用户
+  操作处理）。更换主板会改变 IOPlatformUUID，这时会登出一次。改用 data protection keychain
+  （需要 provisioning profile 和 access group，属于签名链变更）以及 Windows 变体
+  （`CRED_PERSIST_LOCAL_MACHINE`、会话标记放到 `%LOCALAPPDATA%`）另行跟踪，见 #409。
+
 ## 2026-09-23 · macOS 快照服务不可读时 status 折叠掉 snapshotPresent，断开被无谓拒绝
 
 - **归属/来源**：G1 断开与恢复；macOS `tono-core-helper` 的 `/dns/status`。R3-F4

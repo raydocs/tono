@@ -16,6 +16,11 @@ extension AccountSession {
             // immediately instead of blocking AppKit's launch callback.
             shouldResumeProtection =
                 try await RuntimeCleanup.cleanupStaleRuntime()
+            // A session carried over from another Mac is that Mac's; drop it
+            // before anything uses it, and sign in here as a new device.
+            try keychain.discardSessionCopiedFromAnotherMac(
+                currentAnchor: KeychainStore.hardwareAnchor()
+            )
             guard try keychain.string(for: .refreshToken) != nil else {
                 deactivateAppRoutingResearch()
                 // No account owns this launch, so the cache loaded from disk a
