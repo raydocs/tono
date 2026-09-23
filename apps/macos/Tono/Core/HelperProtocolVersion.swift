@@ -106,7 +106,14 @@ nonisolated enum HelperProtocolVersion {
     ///   that into `snapshotPresent: false`. A 4.5.0 daemon hides the snapshot
     ///   and the GUI refuses to call `/dns/restore`, which can otherwise
     ///   succeed for a renamed or removed service.
-    static let current = "4.6.0"
+    /// - 4.6.0 → 4.7.0: an unreadable `protected-dns.json` no longer bricks
+    ///   every release outlet. restore()/enable() quarantine a fatally
+    ///   invalid snapshot aside and continue snapshotless (the loopback
+    ///   sweep runs; original values are not fabricated), and `/dns/status`
+    ///   reports such a file as `snapshotPresent: true` so the app calls
+    ///   `/dns/restore` instead of refusing. `--emergency-disarm` still
+    ///   refuses to open PF while DNS restoration fails.
+    static let current = "4.7.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

@@ -921,6 +921,7 @@ if CommandLine.arguments.dropFirst() == ["--lifecycle-self-test"] {
     let pfPassed = KillSwitchManager.runLifecycleSelfTests()
     let dnsPassed = ProtectedDNSManager.runRestoreReadFailureSelfTest()
         && ProtectedDNSManager.runStatusUnreadableServiceSelfTest()
+        && ProtectedDNSManager.runCorruptSnapshotSelfTest()
     exit(pfPassed && dnsPassed ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--self-test"] {

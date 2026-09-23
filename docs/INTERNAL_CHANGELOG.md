@@ -32,6 +32,54 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 快照文件不可读时隔离后清扫，三条恢复出口不再同点死锁
+
+- **归属/来源**：G1 断开与恢复；macOS `tono-core-helper` 的 `protected-dns.json` 恢复链。
+  R3-F3（2026-09-22 并发/时序审查发现，对抗核实轮 V7 确认为源码推导级：`save` 本身
+  fsync+rename 原子，触发前提限外部权限漂移/备份恢复/截断事件）。叠在 R3-F4 修复
+  `fix/macos-dns-status-snapshot-20260922`（PR #303）之上，本条分支
+  `fix/macos-dns-snapshot-outlet-20260922`；
+  [差异与关联 PR](https://github.com/raydocs/tono/compare/fix/macos-dns-status-snapshot-20260922...fix/macos-dns-snapshot-outlet-20260922)。
+- **缺陷修复**：`loadSnapshot()` 对 uid≠0、非普通文件、mode 含 group/other 位、size==0、
+  size>16 KiB、JSON 解码失败一律 throw（`HelperFailure.invalid`，永久性）。此前 `restore()`
+  第一步即 throw：loopback 清扫不执行、文件不隔离；`--emergency-disarm` 在 disarm 前
+  `_ = try dns.restore()` 失败即 "PF remains fail-closed"；`--emergency-reset` 依赖同一
+  函数失败即回滚 launchd 注册；App 报错指引的 sudo emergency-disarm 本身就是死路——
+  机器停留 PF 全阻断，唯一出口是 root 手删文件。现在 restore()/enable() 遇 invalid 级
+  失败先把文件改名隔离保留（`protected-dns.json.corrupt-<ts>`，重申 root/0600；不当成
+  已恢复的证据），再按「无快照但当前值可能受污染」的保守语义继续：loopback 清扫
+  （127.0.0.1 → DHCP/Empty）照常执行、用户自设 resolver 不动、不凭空捏造原始值（M2
+  拒绝假恢复的语义保持）；`.system` 级（lstat/open/read）瞬态失败仍 throw 交重试。
+  `--emergency-disarm` / `--emergency-reset` 保持严格顺序（`dns.restore()` 失败即
+  "PF remains fail-closed"，与父基一致），它们经同一 restore 事务，快照损坏时隔离后即可
+  完成，不再因此回滚 launchd 注册。审查轮修正：首版曾把非 pending 的 `--emergency-disarm`
+  改为 DNS 恢复失败也拆 PF，超出根因（把 `.system` 瞬态读失败也纳入放行）且与 pending
+  分支不一致，按所有者决定已回退。`/dns/status` 对 invalid 级快照改报
+  `ok:false, snapshotPresent:true`（`.system` 级仍报 false），App 既有门
+  （`ok == true || snapshotPresent`）因此在断开与启动恢复时直接转调 /dns/restore 完成
+  隔离+清扫，不再只剩 sudo 出口、也不再弹无意义的 helper 重装提示；`UpdateRuntime.observe`
+  对 snapshotPresent:true 不判 `.unprotected`，更新准入只更严。
+- **工程与测试**：新增一个窄 helper 自测 `runCorruptSnapshotSelfTest`（沿用
+  statusResponse/restoreServices 的注入模式，restore 的快照失败决策提取为静态事务
+  `restoreTransaction(snapshotResult:…)`）：喂 `.failure(HelperFailure.invalid)` 与
+  settings `{"Wi-Fi":[127.0.0.1], "Custom":["8.8.4.4"]}` → 断言不再 throw、Wi-Fi 被清为
+  `[]`、Custom 不动、quarantine 执行；修复前实现直接 throw，用例必失败。载体
+  `--lifecycle-self-test`。审查轮在同一用例追加一条断言：`statusResponse` 对
+  `.failure(HelperFailure.invalid)` 必须报 `snapshotPresent == true` 且 `ok == false`；
+  修改前 status() 的 catch 固定返回 snapshotPresent:false（且 statusResponse 不接受
+  失败结果），该断言必失败。另：helper 源码变更按 `build-core-helper.sh` 契约门推进
+  `HelperProtocolVersion` 4.6.0 → 4.7.0；CONTRACT.sha256 以脚本同一 sed|shasum 管道
+  本机重算（纯文本哈希，未编译）。
+- **验证**：本机为编辑/审查机（2026-09-14 所有者决定），swift 编译与测试未在本机执行；
+  回归委托本 PR CI（GitHub-hosted macos-26，macos-ci 运行 build-core-helper.sh 契约门与
+  `sudo … --lifecycle-self-test`）。准确源码 SHA 与实际 CI 结果见关联 PR；提交时未获得
+  本轮 CI 结果，不沿用其他分支或上一轮 main 的绿灯。
+- **新增/发布/限制**：无新功能、无新包、无部署，仅源码。未做实机损坏快照演练（需 root
+  构造 uid/mode/截断文件）；`.system` 级瞬态读失败下 App 断开与 sudo emergency-disarm
+  仍保持 fail-closed 拒绝（有意，重试可恢复）；隔离文件不随 emergency-reset 删除
+  （有意保留诊断证据）；审查 nit（隔离时 chown/chmod 跟随符号链接、同秒两次隔离覆盖）
+  未在本轮处理。
+
 ## 2026-09-23 · macOS 快照服务不可读时 status 折叠掉 snapshotPresent，断开被无谓拒绝
 
 - **归属/来源**：G1 断开与恢复；macOS `tono-core-helper` 的 `/dns/status`。R3-F4
