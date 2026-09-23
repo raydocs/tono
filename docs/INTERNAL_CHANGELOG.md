@@ -32,6 +32,17 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · exit-agent 吊销执行先于计量检查、逐个删除（H7-F6）
+
+- **归属**：ops 控制面 / 出口节点吊销执行；`services/exit-agent`。
+- **来源**：基线 main def3dd79 → 分支 `fix/exit-agent-revoke-first-20260923`（提交时未合 main）；内部审查 H7-F6，Issue #388。
+- **缺陷修复**：状态文件损坏、durable source 不匹配、缺 stats 命令、队列 observedAt 超前等与吊销无关的检查原先都在应用 roster 之前，任一失败本轮 Xray 与 hy2 都不删用户；`reconcile` 首个 rmu 失败即中止后续删除；roster 超过 512 KiB 被截断后每轮 JSON 解析失败。现在：roster 的 nodeId 与配置的 source 一致（吊销唯一依赖的检查）后立即更新 hy2 并 reconcile Xray，计量相关检查放到之后，仍拒绝本轮、不 ack；删除与添加逐个尝试、最后汇总报错；roster 读取上限提到 8 MiB，超限显式 Refusal 且不应用任何变更（截断前缀无法证明谁缺席，因此不据此删除）；非 JSON roster 转为 Refusal。
+- **新增/优化**：`require_commands` 把 stats 命令改为可选，缺失时在 reconcile 之后拒绝（不再挡住吊销）。
+- **工程与测试**：一个 unittest（队列中有超前 observedAt 的报告 + 记录清单两个待删 label、首个 rmu 失败 → hy2 仍更新、两个 label 都尝试删除、Refusal 且不 ack），在修复前代码上实际跑红。既有 `test_a_queued_future_timestamp_is_not_dropped_on_replay` 原断言 "reconcile 未调用" 固化的正是本缺陷，改为断言 reconcile 已执行，其余断言（报告不投递、状态不变）不变。
+- **验证**：MacBook 本机 `python3 -m unittest test_reconcile_and_report`（83 通过）。未连接真实节点。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：hy2 发布失败仍会阻止本轮 Xray reconcile（既有行为与测试，未改）；roster 超过 8 MiB 仍需控制面分页。
+
 ## 2026-09-23 · coreMonitor 不得把运行时替换的瞬时 utun 消失判为 TUN 死亡
 
 - **归属**：G1（已连接=能用：切换/热重载不掉线）；macOS 客户端 `apps/macos`。
