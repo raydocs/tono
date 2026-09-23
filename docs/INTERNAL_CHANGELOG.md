@@ -51,7 +51,7 @@
   (2) 新增有界 Service 真值轮询 `protection_resync_loop`（`connection/monitor.rs`，30 s 一次
   读 `/status` 的 kill_switch 聚合），FSM 处于空闲 Protected Offline（armed 未验证为原始
   形态，推广到全部 protection_blocked idle）时经 `TaskRegistry.protection_resync` 注册，
-  离开该状态即撤销（registry abort + 循环自退，无常驻线程）；注册点为全部可达入口：
+  离开该状态即撤销（registry abort + 循环自退，无常驻线程）；注册点：
   连接失败收敛尾、节点消失/冷切换、启动与重试 restore 尾、释放协调 settled 回调、取消退出
   resync。只在 Service 亲口证明 `wanted=false` 时收敛 FSM 到 Not Connected 并清闩；读不到
   状态保持原状（fail-closed，不放宽保护）；IPC 在途代际变动时不折叠陈旧读数。
@@ -59,7 +59,10 @@
 - **工程与测试**：新增一个回归
   `protected_offline_converges_when_the_service_proves_the_barrier_gone`
   （`connection/monitor.rs`，`#[tokio::test]`，无 AppHandle 依赖的 spawn 注入）：armed-unverified
-  idle 夹具断言 (a) TaskRegistry 持有 protection 轮询句柄（修复前该槽位不存在，必失败）、
+  idle 夹具断言 (a) TaskRegistry 持有 protection 轮询句柄——这是新 seam 的存在性测试，
+  在 main 上的失败方式是编译失败（`protection_resync` 字段与 `ensure_protection_resync_locked`
+  不存在），不是行为失败；它只证明该函数在匹配状态下注册，不覆盖各生产入口是否调用它
+  （入口接线靠源码核对）、
   (b) `apply_service_kill_switch(…, Some(wanted=false))` 后 `!kill_switch_armed` 且
   `ui_state == NotConnected`（锁住折叠语义）。W4/W5/W10 已修项（release 所有权、元数据收尾、
   55 s UI 等待）行为不变。
@@ -67,9 +70,15 @@
   cargo build/test/check/clippy；回归与编译委托本 PR 的 GitHub-hosted `windows-2025`
   CI（app workspace `cargo test`）。源码自查基于逐文件比对，不声称本机已验证。
 - **候选/发布**：无新包，仅源码；不涉及 Sparkle/windows 更新源。
-- **剩余限制**：`commands/account.rs` 登出/关闭的 release 失败分支（`initial_release_failed`
-  保闩）本轮未挂轮询注册——该文件属于 F1（release 被拒后 FSM 闩推断）的修复范围，届时与
-  `apply_service_kill_switch` 一并复用；实机"Service 重启 + 存活 App"组合夹具仍缺
+- **剩余限制**：登出/关闭路径无需单独挂钩——生产上所有 release（Disconnect、quit/失败转移
+  的 `release_explicit`、登出与 restore 的 `release_for_account`）都经 `start_explicit_release`，
+  其 settled 回调在监督者更新 FSM 之后、`operation.complete()` 之前注册轮询；唯一直接调用
+  `coordinate_release` 的 `commands/account.rs` 位于 `#[cfg(test)]`。但登出 release 被拒时
+  FSM 处于 blocked（从而被轮询覆盖）依赖 #295（R2-F1）落地；未合 #295 时未 arm 竞争分支
+  FSM 为 Not Connected，是 F1 本身而非本条。已验证会话经 monitor `tunnel_died` →
+  `schedule_reconnect_for_generation` 进入 idle Protected Offline 且未排程重连（如重连预算
+  耗尽）时不注册轮询；已验证 intent 在 Service 重启时保留、不被 retire，不构成 I3 反向。
+  实机"Service 重启 + 存活 App"组合夹具仍缺
   （known-findings §6），本轮以源码级路径与单测覆盖。
 
 ## 2026-09-22 · Windows 拒绝释放后的连接 FSM 保护可见性
