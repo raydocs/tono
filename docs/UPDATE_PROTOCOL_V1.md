@@ -143,6 +143,81 @@ one-use physical installation, pre-mutation receipt consumption, or artifact
 binding merely by renaming a callback. **G3's existing installer-owned
 InstallStarted requirement is not silently discharged/replaced by this model.**
 
+## Interrupted-transaction recovery and terminal states (2026-09-22 clarification)
+
+This section clarifies how a pending transaction ends when its recorded
+process incarnations disappear. It changes no rule above: the pending gate,
+evidence retention, anti-impersonation on first successor adoption, the
+single-execution rule and high-water monotonicity all keep their meaning.
+The initiating process is terminated by the executor and successors may exit
+before commit, so a transaction must not become unreachable merely because
+its recorded incarnations died.
+
+- **Disconnect authority is installation identity, not incarnation
+  equality.** Disconnect request, verification and retirement accept the
+  authenticated owner's process at the registered install root whose current
+  bytes hash to the original or target App component digest. A peer outside
+  that registered identity still cannot Disconnect.
+- **Successor re-proof after the recorded successor dies.** Once the recorded
+  successor incarnation is gone, a later process at the registered location
+  whose bytes are the verified target, which postdates the recorded successor
+  and does not recycle its pid, re-binds as the provable successor. First
+  adoption remains executor-creation proof; this is re-proof, not a second
+  first adoption.
+- **Recovery classifies by installed identity, not successor liveness.** A
+  reboot, or a user closing the new App before commit, is not an interrupted
+  publication. Recovery rolls back only when no durable plan exists or the
+  installed components are not the signed target. A complete, verified
+  publication stays installed; a successor that was never durably registered
+  is replaced by measured-target evidence and the first authenticated
+  target-identity App adopts it.
+- **Terminal archives after verified Disconnect.** An unconsumed attempt
+  whose recorded executor incarnation is provably gone, and a rolled-back or
+  uncertain attempt whose installed components equal the retained originals,
+  archive their full record and clear the live slot. The consumed high-water
+  never lowers and explicit release never becomes commit.
+- **Launching without a live executor incarnation is provably unconsumed.**
+  Consumption only accepts the exact recorded executor incarnation. When
+  that incarnation is gone and the high-water still sits below the release,
+  reconciliation returns the attempt to Staged — re-launchable by the same
+  initiating App, retirable through Disconnect — because nothing executed;
+  this is not a second execution grant.
+
+Limits of this clarification (stated so it is not over-read):
+
+- **Effective only from a build that already contains it.** `Prepare` copies
+  the *installed* `resources/tono-service-install.exe` into the transaction
+  as `executor.exe`; `--update-recover` and the ONSTART recovery task run that
+  copy, and every pre-publication Service check runs in the installed
+  Service. An upgrade that starts from 0.0.73, or from any build without this
+  change, therefore runs the old executor and old Service: the recovery
+  classification and Launching reconciliation above do not apply, and only
+  the post-publication part served by the new Service does. This is not G3
+  evidence for the first hop from 0.0.73; it protects the next upgrade that
+  starts from a build containing it.
+- **Replaced + verified Disconnect stays pending with no in-product exit
+  (open, pre-existing).** Neither terminal archive above covers `Replaced`.
+  When a completed installation is adopted, the post-upgrade automatic
+  reconnect fails and the user presses Restore internet, the verified
+  Disconnect releases protection but leaves the attempt pending; from then on
+  connect, adopt/commit, update, Quit/sign-out release and
+  uninstall/reinstall are all refused. Traffic does not leak (release has
+  already happened), but the product is locked. This path exists before this
+  clarification and is the most reachable lock of the set; it is tracked as a
+  separate unresolved issue and needs its own design decision (an
+  "installed and released" terminal state, with backup cleanup ownership),
+  not treating release as commit.
+- **Recovery and rolled-back retirement check three components, not the full
+  durable plan (open).** `TargetVerified` recovery and `retire_rolled_back`
+  compare only `Tono.exe`, `tono-core.exe` and `tono-service.exe` against the
+  target/original digests, while the durable plan covers the whole payload
+  tree plus `core-sha256.txt`, each member with `old_digest`/`new_digest`. A
+  publication interrupted after the binaries but before a later member, or a
+  rollback that restores the binaries but not a resource, can be classified
+  as fully published or fully rolled back. This is a narrow installation
+  integrity gap, not a protection bypass; the fix is per-member digest
+  verification against the plan.
+
 ## Automated conformance and its limits
 
 `tooling/scripts/tests/fixtures/update-protocol-v1/` contains synthetic manifest,

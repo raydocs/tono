@@ -102,12 +102,14 @@ impl State {
                 );
             }
             if a.execution == Execution::Replaced {
+                // An absent successor means recovery measured the verified
+                // target on disk after the executor-launched successor was
+                // never durably registered; the first authenticated
+                // target-identity App re-proves it on adoption.
                 ensure!(
-                    a.successor_image
-                        .as_ref()
-                        .is_some_and(|s| s.path == a.initiating_image.path
-                            && s.sha256 == target(&a.manifest).components.app_sha256),
-                    "successor evidence missing"
+                    a.successor_image.as_ref().is_none_or(|s| s.path == a.initiating_image.path
+                        && s.sha256 == target(&a.manifest).components.app_sha256),
+                    "successor evidence conflicts"
                 );
             }
             if matches!(
@@ -310,9 +312,18 @@ impl Store {
         );
         let a = self.attempt()?;
         ensure!(a.receipt.owner == owner, "Disconnect owner mismatch");
+        // Identity, not incarnation: the executor terminates the initiating
+        // process and successors exit before commit, so requiring the exact
+        // recorded pid+started_at strands the transaction with no provable
+        // peer. The Service derives `peer` from the authenticated pipe, so a
+        // passing process is the owner's live App at the registered install
+        // root running known bytes (original or target).
         ensure!(
-            a.initiating_image == *peer || a.successor_image.as_ref() == Some(peer),
-            "Disconnect requires the original or executor-launched incarnation"
+            peer.path == a.initiating_image.path
+                && (peer.sha256 == a.initiating_image.sha256
+                    || peer.sha256 == a.old_components.app_sha256
+                    || peer.sha256 == target(&a.manifest).components.app_sha256),
+            "Disconnect requires the registered App identity"
         );
         Ok(a)
     }
@@ -363,6 +374,26 @@ impl Store {
         self.save(next)
     }
 
+    /// Archive the full durable state and clear the live slot. The original
+    /// obligation, private payload and sequence/generation high-water remain.
+    fn archive_attempt(
+        &mut self,
+        attempt_id: &str,
+        archive: impl FnOnce(&Path, &[u8]) -> Result<()>,
+    ) -> Result<()> {
+        let path = self
+            .root
+            .join(format!("retired-{attempt_id}.json"));
+        if let Err(error) = archive(&path, &serde_json::to_vec(&self.state)?) {
+            self.write_failed = true;
+            return Err(error);
+        }
+        // Never lower sequence/generation or turn explicit release into commit.
+        let mut next = self.state.clone();
+        next.attempt = None;
+        self.save(next)
+    }
+
     pub fn retire_unconsumed(&mut self, owner: &str, peer: &Image) -> Result<()> {
         self.retire_unconsumed_with(owner, peer, atomic_write)
     }
@@ -374,44 +405,88 @@ impl Store {
         archive: impl FnOnce(&Path, &[u8]) -> Result<()>,
     ) -> Result<()> {
         let a = self.disconnect_peer(owner, peer)?;
+        // Consumption is impossible when the durable high-water still sits
+        // below the release AND the recorded executor incarnation is gone
+        // (never registered, or provably dead): `consume_with` only accepts
+        // that exact executor incarnation.
         ensure!(
-            a.initiating_image == *peer
-                && a.executor.is_none()
+            a.executor
+                .as_ref()
+                .is_none_or(|e| !incarnation_live(e))
                 && matches!(
                     a.execution,
                     Execution::Reserved | Execution::Extracting | Execution::Staged
+                        | Execution::Launching
                 )
                 && self.state.consumed_sequence < a.manifest.release_sequence
                 && a.disconnect
                     .as_ref()
                     .is_some_and(|d| d.verified_at_unix.is_some()),
-            "consumed, launch-uncertain or unverified evidence cannot be retired"
+            "consumed, live-executor or unverified evidence cannot be retired"
         );
-        let path = self
-            .root
-            .join(format!("retired-{}.json", a.receipt.attempt_id));
-        if let Err(error) = archive(&path, &serde_json::to_vec(&self.state)?) {
-            self.write_failed = true;
-            return Err(error);
-        }
-        // The full original obligation and private payload remain as evidence.
-        // Never lower sequence/generation or turn explicit release into commit.
-        let mut next = self.state.clone();
-        next.attempt = None;
-        self.save(next)
+        let attempt_id = a.receipt.attempt_id.clone();
+        self.archive_attempt(&attempt_id, archive)
     }
 
-    /// Only the executor-created, initially suspended process can adopt. A path
-    /// now naming new bytes says nothing about a second old mapped App image.
-    pub fn authenticate_successor(&self, peer: &Image) -> Result<()> {
+    /// Terminal archive for an attempt whose physical replacement already
+    /// undid itself (or never happened). Requires the same verified explicit
+    /// Disconnect as unconsumed retirement; the caller separately proves the
+    /// installed components equal the retained originals. The consumed
+    /// high-water is never lowered and no recovery is fabricated.
+    pub fn retire_rolled_back(&mut self, owner: &str, peer: &Image) -> Result<()> {
+        let a = self.disconnect_peer(owner, peer)?;
+        ensure!(
+            matches!(a.execution, Execution::RolledBack | Execution::Uncertain)
+                && a.disconnect
+                    .as_ref()
+                    .is_some_and(|d| d.verified_at_unix.is_some()),
+            "only a verified Disconnect of a rolled-back attempt can be retired"
+        );
+        let attempt_id = a.receipt.attempt_id.clone();
+        self.archive_attempt(&attempt_id, atomic_write)
+    }
+
+    /// Only a target-identity App at the registered installation can adopt:
+    /// the executor-created successor directly, or — once that recorded
+    /// incarnation is gone — a later process whose current bytes are the
+    /// verified target. A path now naming new bytes says nothing about a
+    /// second old mapped App image, so a rebinding peer must postdate the
+    /// recorded successor and must not recycle its pid.
+    pub fn authenticate_successor(&mut self, peer: &Image) -> Result<()> {
         let a = self.attempt()?;
         ensure!(
             a.execution == Execution::Replaced
-                && a.successor_image.as_ref() == Some(peer)
+                && peer.path == a.initiating_image.path
                 && peer.sha256 == target(&a.manifest).components.app_sha256,
-            "peer is not the executor-launched target incarnation"
+            "peer is not a target-identity App at the registered location"
         );
-        Ok(())
+        match a.successor_image.as_ref() {
+            Some(recorded) if recorded == peer => Ok(()),
+            Some(recorded) => {
+                ensure!(
+                    peer.pid != recorded.pid
+                        && peer.started_at > recorded.started_at
+                        && !incarnation_live(recorded),
+                    "recorded successor incarnation is live or not superseded"
+                );
+                let mut next = self.state.clone();
+                next.attempt.as_mut().unwrap().successor_image = Some(peer.clone());
+                self.save(next)
+            }
+            None => {
+                // Recovery measured the verified target on disk after the
+                // executor-launched successor was never durably registered.
+                // Adoption is measured identity; the initiating incarnation
+                // must be gone so it cannot re-enter as its own successor.
+                ensure!(
+                    peer != &a.initiating_image && !incarnation_live(&a.initiating_image),
+                    "initiating incarnation is still live"
+                );
+                let mut next = self.state.clone();
+                next.attempt.as_mut().unwrap().successor_image = Some(peer.clone());
+                self.save(next)
+            }
+        }
     }
 
     pub fn execution(&mut self, execution: Execution) -> Result<()> {
@@ -457,6 +532,24 @@ pub fn target(manifest: &ReleaseManifest) -> &Target {
         .iter()
         .find(|t| t.id == TargetId::WindowsX86_64)
         .unwrap()
+}
+
+/// Whether the recorded process incarnation still runs this exact image.
+/// Windows re-derives pid + kernel creation time + image digest through the
+/// native probe; the store contract also compiles off Windows, where tests
+/// drive dead-incarnation branches through explicit store fields.
+#[cfg(windows)]
+fn incarnation_live(recorded: &Image) -> bool {
+    crate::core::update::security::image(recorded.pid)
+        .ok()
+        .as_ref()
+        == Some(recorded)
+}
+
+#[cfg(not(windows))]
+fn incarnation_live(recorded: &Image) -> bool {
+    let _ = recorded;
+    false
 }
 
 pub fn digest(bytes: &[u8]) -> String {
@@ -823,11 +916,15 @@ pub(crate) mod tests {
         next.attempt.as_mut().unwrap().execution = Execution::Reserved;
         store.save(next).unwrap();
         let original = store.attempt().unwrap().receipt.clone();
-        let mut other_peer = peer.clone();
-        other_peer.started_at += 1;
+        // Disconnect is bound to the registered installation identity, not to
+        // one process incarnation: a relaunched App at the same install root
+        // with known bytes passes, so the rejected peer below is one whose
+        // image lives outside that registered identity.
+        let mut foreign_peer = peer.clone();
+        foreign_peer.path = root.join("elsewhere").join("Tono.exe");
         assert!(
             store
-                .request_disconnect(owner, &other_peer, 1_900_000_001)
+                .request_disconnect(owner, &foreign_peer, 1_900_000_001)
                 .is_err()
         );
         assert!(
@@ -929,6 +1026,89 @@ pub(crate) mod tests {
             Store::open(&root).is_err(),
             "absence cannot erase orphan evidence"
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_fresh_registered_app_incarnation_can_disconnect_and_retire_unconsumed_attempt() {
+        let (root, mut store, peer, _) = reserved();
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().executor = None;
+        store.save(next).unwrap();
+        let owner = "windows:fixture-owner";
+        // The initiating process exited (crash, user close, executor
+        // termination); a relaunched App at the same registered path with the
+        // same known bytes re-proves the installation identity.
+        let relaunched = Image {
+            pid: 77,
+            started_at: 999,
+            path: peer.path.clone(),
+            sha256: peer.sha256.clone(),
+        };
+        store
+            .request_disconnect(owner, &relaunched, 1_900_000_010)
+            .unwrap();
+        store
+            .verify_disconnect(owner, &relaunched, 1_900_000_011, Protection::Unprotected)
+            .unwrap();
+        store.retire_unconsumed(owner, &relaunched).unwrap();
+        assert!(!store.pending());
+        assert_eq!(store.state.consumed_sequence, 73);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_app_started_after_replacement_with_target_identity_is_an_adoptable_successor() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        let launched = Image {
+            pid: 30,
+            started_at: 400,
+            path: peer.path.clone(),
+            sha256: target(&store.attempt().unwrap().manifest)
+                .components
+                .app_sha256
+                .clone(),
+        };
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().execution = Execution::Replaced;
+        next.attempt.as_mut().unwrap().successor_image = Some(launched.clone());
+        store.save(next).unwrap();
+        // The user exited the executor-launched successor before commit and
+        // relaunched: a later incarnation at the registered path whose bytes
+        // are the verified target re-binds as the provable successor.
+        let relaunched = Image {
+            pid: 31,
+            started_at: 500,
+            ..launched.clone()
+        };
+        store.authenticate_successor(&relaunched).unwrap();
+        assert_eq!(
+            store.attempt().unwrap().successor_image,
+            Some(relaunched.clone())
+        );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_launching_without_live_executor_incarnation_is_retirable_after_verified_disconnect() {
+        let (root, mut store, peer, _) = reserved();
+        authorize(&mut store, &peer); // Launching with a registered executor
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().executor = None; // spawn failed / mirror write lost
+        store.save(next).unwrap();
+        let owner = "windows:fixture-owner";
+        store.request_disconnect(owner, &peer, 1_900_000_003).unwrap();
+        store
+            .verify_disconnect(owner, &peer, 1_900_000_004, Protection::Unprotected)
+            .unwrap();
+        store.retire_unconsumed(owner, &peer).unwrap();
+        assert!(!store.pending());
+        assert_eq!(store.state.consumed_sequence, 73);
+        drop(store);
         std::fs::remove_dir_all(root).unwrap();
     }
 }

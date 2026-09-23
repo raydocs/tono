@@ -1,6 +1,6 @@
 //! Native coordinator. All calls execute under the Service lifecycle writer;
 //! the on-disk lock also serializes the independently running SYSTEM executor.
-mod security;
+pub(crate) mod security;
 use super::{
     auth::AuthenticatedOwner, desired, dns, manager, windows_kill_switch as wfp, windows_security,
 };
@@ -34,7 +34,7 @@ pub fn pending() -> bool {
 }
 
 pub(crate) fn lifecycle_allowed(owner: &AuthenticatedOwner) -> Result<()> {
-    let store = open_store()?;
+    let mut store = open_store()?;
     ensure!(
         store.state.manual_installer.is_none(),
         "manual installer owns the machine lifecycle"
@@ -433,19 +433,34 @@ pub(crate) async fn request(
             );
             store.verify_disconnect(&owner.key, &peer, now()?, observed)?;
             let a = store.attempt()?;
+            let executor_gone = a
+                .executor
+                .as_ref()
+                .is_none_or(|e| image(e.pid).ok().as_ref() != Some(e));
             if matches!(
                 a.execution,
-                Execution::Reserved | Execution::Extracting | Execution::Staged
-            ) && a.executor.is_none()
+                Execution::Reserved | Execution::Extracting | Execution::Staged | Execution::Launching
+            ) && executor_gone
             {
                 ensure!(
                     installed_components(&a.install_root)? == a.old_components,
                     "original installed identity changed; evidence cannot be retired"
                 );
                 store.retire_unconsumed(&owner.key, &peer)?;
+            } else if matches!(a.execution, Execution::RolledBack | Execution::Uncertain) {
+                // A proven rollback reaches a terminal archive without
+                // lowering the consumed high-water or rewriting the recorded
+                // obligation; an unproven one stays pending below.
+                ensure!(
+                    installed_components(&a.install_root)? == a.old_components,
+                    "rollback not proven complete; evidence cannot be retired"
+                );
+                store.retire_rolled_back(&owner.key, &peer)?;
             }
-            // Consumed / launch-uncertain records stay pending after release.
-            // They cannot install, reconnect or commit by fabricating recovery.
+            // Records whose replacement is still in flight (Consumed/Replaced,
+            // a live executor, or an unproven rollback) stay pending after
+            // release. They cannot install, reconnect or commit by
+            // fabricating recovery.
         }
         UpdateRequest::Adopt => {
             if !store.pending() {
@@ -724,12 +739,31 @@ pub fn finish_manual() -> Result<()> {
 /// evidence exists. ONSTART recovery can repair binaries even if Service will
 /// not load. A live Service also wakes that same independent executor.
 pub fn reconcile_before_desired() -> Result<bool> {
-    let store = open_store()?;
+    let mut store = open_store()?;
     if store.state.manual_installer.is_some() {
         return Ok(true);
     }
     if !store.pending() {
         return Ok(false);
+    }
+    // A Launching attempt whose recorded executor incarnation is gone can
+    // never be consumed (consumption only accepts that exact incarnation)
+    // and the durable high-water proves none was. Return it to Staged: the
+    // same initiating App may launch again, and a Disconnect can retire it.
+    // This is not a second execution grant — nothing was executed.
+    if store.state.attempt.as_ref().is_some_and(|a| {
+        a.execution == Execution::Launching
+            && store.state.consumed_sequence < a.manifest.release_sequence
+            && a.executor
+                .as_ref()
+                .is_none_or(|e| image(e.pid).ok().as_ref() != Some(e))
+    }) {
+        let mut next = store.state.clone();
+        let attempt = next.attempt.as_mut().context("attempt checked above")?;
+        attempt.execution = Execution::Staged;
+        attempt.executor = None;
+        store.save(next)?;
+        return Ok(true);
     }
     let a = store.attempt()?;
     if matches!(
