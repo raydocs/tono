@@ -386,6 +386,12 @@ where
             let release_result = if protected { release(Arc::clone(&state)).await } else { Ok(()) };
             if release_result.is_err() && !expired {
                 resume_account = matches!(reason, AccountCloseReason::User);
+                // The Service refused the release, so the barrier is still up even when this
+                // attempt never latched armed locally (the sign-out raced an in-flight
+                // StartClash). Mark from the refusal — like the Expired tail below — so the
+                // closing `initial_release_failed` keeps protection visible instead of
+                // reporting Not Connected over a still-blocking WFP filter.
+                state.lock().await.fsm.mark_kill_switch_armed();
                 return release_result;
             }
             logout(client).await?;

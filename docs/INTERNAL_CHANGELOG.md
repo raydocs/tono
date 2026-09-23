@@ -32,6 +32,40 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-22 · Windows 拒绝释放后的连接 FSM 保护可见性
+
+- **归属/来源**：G1 断开与恢复——断开后保护状态必须两端一致；本条修的是 Service
+  拒绝 release 时 App FSM 谎报 Not Connected、Disconnect 随之变成空操作的断开一致性
+  缺陷。基线 main [576d7087](https://github.com/raydocs/tono/commit/576d7087cc54084acef3a4cda15c433ec96bb679)
+  → 分支 `fix/windows-release-refused-fsm-20260922`（PR 见关联分支）；提交时未合 main。
+- **缺陷修复**：R2-F1（2026-09-22 并发/时序审查 + 对抗核实轮已确认）。Disconnect/登出
+  与 in-flight StartClash 竞争且 Service 拒绝 release 时，release 监督者只调
+  `initial_release_failed()`，而该方法把 `is_protection_blocked` 折叠成本次 attempt 的
+  本地 `kill_switch_armed` 闩——该闩被 StartClash 竞争跳过、从未置位，FSM 于是报
+  Not Connected，WFP 实际仍 Blocked；此后 `disconnect()` 命中 idle 早退成空操作，托盘
+  禁用 Disconnect。现在监督者 Err 分支先 `mark_kill_switch_armed()` 再
+  `initial_release_failed()`（拒绝本身即事实，fail-closed 假定保护仍在，与错误文案
+  "protection stays on" 一致）；`tono_sign_out` 的 release 失败早退分支同样置闩，与既有
+  Expired 收尾分支对齐。不放宽保护：WFP 删除逻辑、Service 侧、fail-closed 语义均未改。
+- **新增/优化**：无。
+- **工程与测试**：新增一个窄回归
+  `refused_release_after_an_unarmed_connect_race_keeps_protection_visible`
+  （`apps/windows/app/src-tauri/src/tono/connection/disconnect.rs` tests）。旧实现上该测试
+  必失败：夹具 `begin_connect`+`begin_disconnect`（闩未置位）加注入 Err 的 release，
+  旧 `initial_release_failed` 得 `is_protection_blocked=false`，末条断言不成立。
+- **验证**：本机未编译未运行（编辑机约束，见 [BUILD_AND_TEST](BUILD_AND_TEST.md)）；
+  回归委托本 PR 的 GitHub-hosted CI（`windows-2025`，`app-rust` job 在
+  `apps/windows/app/src-tauri` 跑 `cargo test --locked`，路径过滤命中 `apps/windows/app/**`）。
+  准确源码 SHA 为本 PR 实际 push 的 commit（PR head）；提交时 CI 结果未产出，以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：只修 FSM 闩推断，不改变 Service 拒绝 release 的根因（DNS restore 失败、
+  core 终止未确认、WFP 过滤器删除失败仍会拒绝并保持 armed）；Windows 11 实机断开/恢复
+  清单未重测，不据此关 G1。监督者 Err 分支不区分 Err 来源、不读 Service 真值：Err≠拒绝
+  的子情形（Service 不可达/修复被拒、更新栅栏、release 任务 join 失败）同样置闩，若此时
+  机器从未 arm（Disconnect 落在 StartClash 之前），会被显示为 Protected Offline 而实际开放；
+  这与 `restore.rs` 对 `Unknown` 的既有取舍（记作 armed、不 verified）一致，由 #299 的
+  Service 真值轮询在 Service 可达后约 30 s 内以 `wanted=false` 纠正（未合 #299 时无自愈）。
+
 ## 2026-09-23 · Windows 混合 DNS 残留不能证明恢复成功
 
 - **归属/来源**：G1 断开与恢复；从已合入的
