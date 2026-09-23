@@ -32,6 +32,29 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 安装包移除未固定的第三方 enableLoopback.exe（内部审查 H5-F3）
+
+- **归属**：Windows 发布载荷加固；`apps/windows/app`（prebuild、打包白名单、NSIS 模板）+ Windows CI。
+- **来源**：基线 main `498ed426` → 分支 `fix/drop-unpinned-loopback-exe-20260923`；Issue #372；
+  提交时未合 main。
+- **缺陷修复**：`prebuild.mjs` 从第三方仓库可变 `latest` release 下载 `enableLoopback.exe`，
+  无 tag 固定、无摘要校验，并经 `tauri.conf.json` 资源白名单打进 Tono 签名安装包；App、
+  Service、crates 均无调用点 → 删除下载任务、`tauri.conf.json` 资源项、
+  `WINDOWS_RESOURCE_ALLOWLIST` 项及 Windows CI 的占位文件；把
+  `resources/enableLoopback.exe` 加入 `KNOWN_LEGACY_WINDOWS_PAYLOAD`，NSIS
+  `RemoveKnownLegacyPayload` 在升级安装与卸载时删除旧版本留下的副本。未使用的
+  `openUwpTool` i18n 文案未动。
+- **新增/优化**：无。
+- **工程与测试**：`windows-packaging.test.mjs` 新增一个 test：资源白名单中的 `.exe`
+  只能是本仓库构建的 `tono-service*`；旧白名单上失败。
+- **验证**：MacBook 本机 `node --test scripts/windows-packaging.test.mjs
+  scripts/prepare-updater-config.test.mjs` 28/28 通过（修复前新增项失败）；
+  `node --check scripts/prebuild.mjs`。未运行 Tauri/NSIS 构建（执行位置规则），由本 PR 的
+  Windows CI 覆盖 `cargo test`（占位资源已同步删除）。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：已装客户端里的旧副本只在下一次 NSIS 安装/升级或卸载时删除；Service
+  驱动的私有解包更新路径不执行该宏。
+
 ## 2026-09-23 · coreMonitor 不得把运行时替换的瞬时 utun 消失判为 TUN 死亡
 
 - **归属**：G1（已连接=能用：切换/热重载不掉线）；macOS 客户端 `apps/macos`。

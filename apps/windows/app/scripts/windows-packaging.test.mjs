@@ -733,6 +733,15 @@ test('resources whitelist rejects whole-directory packaging', () => {
   )
 })
 
+test('bundled resource executables are built from this repository', () => {
+  const executables = WINDOWS_RESOURCE_ALLOWLIST.filter((name) =>
+    /\.exe$/i.test(name),
+  )
+  for (const name of executables) {
+    assert.match(name, /^tono-service(?:-install|-uninstall)?\.exe$/)
+  }
+})
+
 test('payload validator requires staged executables and rejects legacy junk', () => {
   const good = [
     { name: 'Tono.exe.next' },

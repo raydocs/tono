@@ -536,7 +536,7 @@ const resolveServicePermission = async () => {
 }
 
 // =======================
-// Other resource resolvers (service, mmdb, geosite, geoip, enableLoopback)
+// Other resource resolvers (service, mmdb, geosite, geoip)
 // =======================
 const SERVICE_BINARIES = [
   'tono-service',
@@ -680,11 +680,6 @@ const resolveGeoIP = () =>
     file: 'geoip.dat',
     downloadURL: `https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.dat`,
   })
-const resolveEnableLoopback = () =>
-  resolveResource({
-    file: 'enableLoopback.exe',
-    downloadURL: `https://github.com/Kuingsmile/uwp-tool/releases/download/latest/enableLoopback.exe`,
-  })
 
 const resolveSetDnsScript = () =>
   resolveResource({
@@ -725,12 +720,6 @@ const tasks = [
   },
   // Owned runtime never references GEOIP/GEOSITE/MMDB. Do not download or
   // ship those ~28 MB assets in the Tono payload.
-  {
-    name: 'enableLoopback',
-    func: resolveEnableLoopback,
-    retry: 5,
-    winOnly: true,
-  },
   {
     name: 'service_chmod',
     func: resolveServicePermission,
