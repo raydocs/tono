@@ -254,6 +254,11 @@ final class AppState {
     let coreRuntime = CoreRuntimeManager()
     let connectionCoordinator = ConnectionCoordinator()
     var networkProtection = NetworkProtectionOperations()
+    /// System boundary for the core monitor's owned-TUN existence probe, the
+    /// same pattern as `networkProtection`: production reads the real
+    /// interface index; tests substitute the syscall so a single monitor tick
+    /// can be driven without the privileged helper.
+    var tunInterfaceExists: (String) -> Bool = { KillSwitchService.interfaceExists($0) }
     let subscriptionManager = SubscriptionManager()
     let proxyService = ProxyService()
     private let providerRuleLoader = ProviderRuleLoader()
