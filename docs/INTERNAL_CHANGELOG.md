@@ -32,6 +32,39 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 升级恢复判定与回滚退休逐成员校验 durable plan（#301 跟进 2）
+
+- **归属**：G3 受保护升级（安装完整性）；Windows Service 更新事务 + 执行器
+  （`apps/windows/service`）+ 协议文档。
+- **来源**：基线 main `498ed426`，叠加在 R4-F7 分支 `fix/update-replaced-release-20260923`
+  （PR #359，共用 plan 视图）之上 → 分支 `fix/update-plan-member-digests-20260923`；
+  Issue #360；PR 见续记；提交时未合 main，须在 #359 之后合并。
+- **缺陷修复（源码推导，无保护绕过）**：`classify_recovery` TargetVerified 与
+  `retire_rolled_back` handler 只比较 Tono.exe / tono-core.exe / tono-service.exe 三组件，
+  而 durable plan 覆盖整棵 payload 树 + `tono-service.exe` + `core-sha256.txt`（最后成员）。
+  发布在二进制之后、后续成员之前中断 → 误判已完整发布（残留旧 pin 可致 Core 启动被拒，
+  落入 #358 锁死）；回滚恢复了二进制而某资源失败 → 误判已回滚并归档。改后：新增
+  `update_native::plan_members_at`（读 plan 视图，校验 attempt、成员路径位于安装根/
+  Service 目录、scratch 路径绑定，逐成员 sha256 等于 old/new digest）；恢复判定
+  TargetVerified 额外要求全部成员 == `new_digest`，否则按中断回滚；RolledBack/Uncertain
+  退休在 plan 存在时额外要求全部成员 == `old_digest`（无 plan 仍表示未开始发布）。
+  R4-F7 的已安装且已释放出口复用同一校验。
+- **新增/优化**：无。
+- **工程与测试**：新增 1 个 `#[test]`
+  `core::update::tests::update_plan_members_gate_recovery_and_rollback_on_every_member_not_three_binaries`
+  （真实文件 + 与执行器相同的 plan 序列化形状：末成员仍旧 → New 拒；资源未回滚 → Old 拒；
+  全部一致 → 通过）。旧代码无逐成员校验入口（测试无法编译）。既有纯函数测试
+  `update_recovery_classifies_publication_by_installed_identity_not_successor_liveness`
+  只为新增参数补实参，断言不变。
+- **验证**：本机未运行任何 cargo；委托本 PR 的 GitHub-hosted `windows-2025` Service lane
+  （`core::update::tests::update_` / `update_executor::tests::update_` 定向枚举）。结果见续记。
+  恢复执行器与 Disconnect handler 的接线（SCM、原生组件测量）无单测、未在设备执行。
+- **候选/发布**：无新包，仅源码。
+- **版本生效**：恢复判定在执行器内，执行器是 Prepare 时从**已装旧版**复制的，故只对从含
+  本修复的版本出发的下一跳生效；退休校验在当时运行的 Service 内，取决于 Disconnect 时
+  已装 Service 版本。
+- **剩余限制**：Windows 11 实机中断恢复/回滚验收仍属 G3 未闭合证据。
+
 ## 2026-09-23 · Windows 升级 Replaced + 已验证 Disconnect 的「已安装且已释放」终态（R4-F7）
 
 - **归属**：G3 受保护升级；Windows Service 更新事务（`apps/windows/service`）+ 协议文档。

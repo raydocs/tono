@@ -167,15 +167,21 @@ its recorded incarnations died.
 - **Recovery classifies by installed identity, not successor liveness.** A
   reboot, or a user closing the new App before commit, is not an interrupted
   publication. Recovery rolls back only when no durable plan exists or the
-  installed components are not the signed target. A complete, verified
+  installed components are not the signed target. `TargetVerified` also
+  requires every member of the durable replacement plan (the payload tree,
+  `tono-service.exe` and `core-sha256.txt`) to hash to its `new_digest`;
+  three matching binaries with a later member still old is an interrupted
+  publication and rolls back (2026-09-23). A complete, verified
   publication stays installed; a successor that was never durably registered
   is replaced by measured-target evidence and the first authenticated
   target-identity App adopts it.
 - **Terminal archives after verified Disconnect.** An unconsumed attempt
   whose recorded executor incarnation is provably gone, and a rolled-back or
-  uncertain attempt whose installed components equal the retained originals,
-  archive their full record and clear the live slot. The consumed high-water
-  never lowers and explicit release never becomes commit.
+  uncertain attempt whose installed components equal the retained originals
+  — and, when a durable plan exists, whose every plan member hashes to its
+  `old_digest` (2026-09-23) — archive their full record and clear the live
+  slot. The consumed high-water never lowers and explicit release never
+  becomes commit.
 - **Installed and released (2026-09-23).** A `Replaced` attempt whose owner
   then completes a verified explicit Disconnect (for example, the post-upgrade
   reconnect failed and the user restored internet) also archives its full
@@ -213,16 +219,6 @@ Limits of this clarification (stated so it is not over-read):
   the post-publication part served by the new Service does. This is not G3
   evidence for the first hop from 0.0.73; it protects the next upgrade that
   starts from a build containing it.
-- **Recovery and rolled-back retirement check three components, not the full
-  durable plan (open).** `TargetVerified` recovery and `retire_rolled_back`
-  compare only `Tono.exe`, `tono-core.exe` and `tono-service.exe` against the
-  target/original digests, while the durable plan covers the whole payload
-  tree plus `core-sha256.txt`, each member with `old_digest`/`new_digest`. A
-  publication interrupted after the binaries but before a later member, or a
-  rollback that restores the binaries but not a resource, can be classified
-  as fully published or fully rolled back. This is a narrow installation
-  integrity gap, not a protection bypass; the fix is per-member digest
-  verification against the plan.
 
 ## Automated conformance and its limits
 
