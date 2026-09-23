@@ -323,6 +323,64 @@ func runUpdateSelfTests() -> Bool {
         }
         try check(corrupted == 1, "Corrupt-ledger startup stopped arming the emergency block")
     }
-    print("Update production-bound tests: \(8 - failures.count) passed, \(failures.count) failed; native-device acceptance NOT performed")
+    test("rolled-back-attempt-can-be-retired-after-verified-disconnect") { directory in
+        let store = try UpdateStorage(root: directory)
+        var observed: UpdateContractV1.Protection = .protectedOffline
+        var io = effects()
+        io.observe = { observed }
+        let engine = UpdateTransaction(storage: store, effects: io)
+        try reserved(store, engine)
+        try engine.execute(peer: owner)
+        // The executor's replacement fails and the rollback restores the
+        // captured installation: the attempt is consumed and rolled back.
+        try UpdateExecutor.perform(storage: store, validate: { _ in }, replace: { _ in
+            throw HelperFailure.system("injected replacement failure")
+        }, rollback: { _ in })
+        try check(store.load().attempt?.execution == .rolledBack, "Fixture must reach a rolled-back consumed attempt")
+        let attemptId = try store.load().attempt?.receipt.attemptId
+        try engine.disconnect(peer: owner)
+        observed = .unprotected
+        // Today's unconsumed-only retirement refused here and every gate
+        // stayed closed forever; the resolved archive must end the attempt.
+        try engine.retire(peer: owner)
+        let ledger = try store.load()
+        try check(ledger.attempt == nil && ledger.highWater == 14 && ledger.generation == 1,
+                  "A verified rollback must archive without lowering the high-water mark or generation")
+        let archive = try UpdateStorage.read(directory + "/" + (attemptId ?? "") + ".json", maximum: 128 * 1024)
+        let retained = try JSONDecoder().decode(UpdateStorage.Attempt.self, from: archive)
+        try check(retained.execution == .rolledBack && retained.receipt.blockedReason == .installationUncertain
+                  && retained.disconnectVerified && retained.receipt.phase == .installationAuthorized,
+                  "Resolved retirement erased failure evidence or fabricated a proof phase")
+        try engine.gate(method: "POST", path: "/core/start", peer: successor)
+    }
+    test("successor-relaunch-after-adoption-can-be-readopted-and-commit") { directory in
+        let store = try UpdateStorage(root: directory)
+        var successorAlive = true
+        var io = effects()
+        io.successorAlive = { _ in successorAlive }
+        let engine = UpdateTransaction(storage: store, effects: io)
+        try reserved(store, engine)
+        try engine.execute(peer: owner)
+        try UpdateExecutor.perform(storage: store, validate: { _ in }, replace: { _ in }, rollback: { _ in })
+        try check(store.load().attempt?.execution == .replaced, "Fixture must reach a replaced installation")
+        try engine.reconcile(peer: successor)
+        let relaunched = TonoAuthenticatedPeer(uid: 501, auditToken: Data("third-incarnation".utf8), bundleURL: owner.bundleURL)
+        // While the bound successor is provably alive, its grant is exclusive.
+        try refuses { try engine.reconcile(peer: relaunched) }
+        try check(store.load().attempt?.successorToken == successor.auditToken && store.load().generation == 2,
+                  "A live bound successor lost its grant")
+        // The bound incarnation exits; the executor-relaunched App re-binds
+        // the grant (fresh generation, same proof phase) and can commit.
+        successorAlive = false
+        try engine.reconcile(peer: relaunched)
+        let ledger = try store.load()
+        try check(ledger.generation == 3 && ledger.attempt?.successorToken == relaunched.auditToken
+                  && ledger.attempt?.receipt.phase == .installedIdentityVerified
+                  && ledger.attempt?.receipt.successorGeneration == 3,
+                  "Re-adoption must allocate a fresh successor generation without changing the proof phase")
+        try engine.commit(peer: relaunched)
+        try check(store.load().attempt?.receipt.phase == .committed, "A relaunched successor must be able to commit")
+    }
+    print("Update production-bound tests: \(10 - failures.count) passed, \(failures.count) failed; native-device acceptance NOT performed")
     return failures.isEmpty
 }

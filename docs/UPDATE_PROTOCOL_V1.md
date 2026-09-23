@@ -143,6 +143,37 @@ one-use physical installation, pre-mutation receipt consumption, or artifact
 binding merely by renaming a callback. **G3's existing installer-owned
 InstallStarted requirement is not silently discharged/replaced by this model.**
 
+### Terminal resolution and successor re-adoption (clarified 2026-09-22)
+
+This subsection records two adapter obligations that the clauses above already
+permit but one native round left implicit; it changes no earlier requirement.
+Both were specified while fixing the macOS adapter, whose consumed transactions
+had exactly one exit (commit) guarded by a single process incarnation.
+
+**Resolved retirement.** A consumed-side attempt that can no longer reach
+`committed` through its bound incarnations — executor-blocked before
+replacement, rolled back, expired, or explicitly abandoned after replacement —
+must still have one privileged terminal path: archive the evidence and clear
+the active slot without lowering the consumed high-water mark. Admission
+requires the same verified explicit Disconnect (or an administrator's
+equivalent emergency release) as unconsumed retirement, an observed
+`unprotected` recovery, and an independent on-disk component proof: the
+captured original components for pre-replacement and rolled-back attempts, or
+the signed target components for an abandoned replaced installation. Archiving
+is not cancellation, resume, or commit; the archived receipt keeps its last
+proof phase and a terminal blocked reason, and a rollback that never lowered
+the high-water mark is not lowered by retirement either.
+
+**Successor re-adoption.** The successor grant binds one *live* App
+incarnation — an audit token valid within one boot — not the first one
+forever. When the bound incarnation is provably gone (different boot session,
+or its token no longer resolves to a live process), a freshly authenticated
+peer at the verified target installation may re-bind the grant: a fresh
+successor generation, the same durable proof phase. While the bound successor
+is provably alive, no other incarnation may take the grant. This is the
+adapter-level twin of the executor's own successor relaunch; it adds no wire
+field and no phase transition.
+
 ## Interrupted-transaction recovery and terminal states (2026-09-22 clarification)
 
 This section clarifies how a pending transaction ends when its recorded

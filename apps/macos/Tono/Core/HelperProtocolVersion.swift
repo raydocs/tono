@@ -120,7 +120,18 @@ nonisolated enum HelperProtocolVersion {
     ///   SIGTERM is a clean stop — the executor owns the replacement and
     ///   bootstraps this daemon back — while every other startup failure,
     ///   including a corrupt ledger, still installs the fail-closed barrier.
-    static let current = "4.8.0"
+    /// - 4.8.0 → 4.9.0: consumed update transactions gained reachable
+    ///   terminal states. `/update/retire` now also archives a blocked,
+    ///   rolled-back, expired or abandoned-replacement attempt after the
+    ///   owner's verified Disconnect plus an on-disk component proof
+    ///   (original or signed target), and `--emergency-disarm` evaluates the
+    ///   same predicates after its verified release; the consumed high-water
+    ///   mark is never lowered. `reconcile` re-binds the successor grant to a
+    ///   freshly authenticated relaunch when the recorded successor is
+    ///   provably gone (different boot, or its audit token resolves to no
+    ///   live process), allocating a fresh successor generation without
+    ///   changing the proof phase. A 4.8.0 daemon keeps both dead ends.
+    static let current = "4.9.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

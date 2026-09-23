@@ -32,6 +32,55 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
+
+- **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
+  （2026-09-22 升级中断恢复审查发现，对抗核实轮 V9 确认为同一根因族：consumed 后唯一出口
+  commit + 证明权绑定唯一进程 incarnation + 全部门以 pending 拒绝）。叠在 #303、#307
+  （快照 quarantine + 4.7.0）与 #308（bootout 干净停止 + 4.8.0，
+  `fix/macos-update-bootout-startup-20260922`）之上；本条分支
+  `fix/macos-update-terminal-states-20260922`。
+- **缺陷修复**：F2——执行器侧一次失败（validate/`runtime.prepare` 失败、App 30 s 未退出、
+  `.replacing` 中断回滚、48 h 过期）后，事务停在 consumed+blocked / rolledBack，无任何终态：
+  `reconcile` 抛错、`AppUpdater.check` 的 retryable 只认 reserved/staged、"Restore internet"
+  可解除 PF 但 `gate`/`offer`/`reserve`/`--update-install-guard`/`--emergency-reset` 全部永久拒绝。
+  F3——successorToken 唯一绑定首个收养 App 的 audit token，commit 前 successor 退出/崩溃/重启机
+  （audit token 仅同一 boot 有效）后任何新 incarnation（含执行器 `launchSuccessor` 自己拉起的）
+  都被 `reconcile`/`bound` 拒绝，结果同 F2。修复为同一结构集：(a) 特权终态归档
+  `retireResolved`——要求 owner 认证、已验证显式 Disconnect、`observe()==.unprotected`，且
+  磁盘组件证明二选一（未进 replacement/已回滚 == originalComponents，或已替换安装 ==
+  签名 target 组件），归档 JSON 保留（含最后证明相位与 blockedReason）后清槽，highWater 与
+  generation 不变，并像 commit 一样退休执行器 launchd 项；挂在 `/update/retire`（按 execution
+  分派 unconsumed/resolved 两套谓词）与 `--emergency-disarm`（验证释放后自动评估，root CLI 无
+  peer，谓词不满足则什么都不改）。(b) `reconcile` successor 重绑——记录的 successor 跨 boot 或
+  token 不再解析为活进程且新 peer 通过既有认证/owner/组件校验时，重新分配 successor 代际
+  （换代不换相位：receipt 证明相位不动，适配器层原位更新 successorGeneration/token/boot，不调
+  `propose`，不动共享 wire 模型）；旧 successor 可证明存活时仍独占拒绝。App 侧
+  "Disconnect and Retry" 的 retryable 扩展到 blocked/rolledBack/expired/已断开/放弃替换的
+  consumed 侧（健康执行中与 successor 可恢复的仍不可重试）。U1 单次消费、U3 高水位不回退、
+  U4 Disconnect 不伪造提交全部保持；未放宽任何 gate 对未决事务的保护。
+- **工程与测试**：新增两个窄 helper 自测（载体 `--update-self-test`，计数 8→10）：
+  `rolled-back-attempt-can-be-retired-after-verified-disconnect`（F2：回滚 + 已验证 Disconnect
+  后归档清槽、highWater 保留、证据归档、`gate` 放行 /core/start）与
+  `successor-relaunch-after-adoption-can-be-readopted-and-commit`（F3：绑定 successor 存活时
+  拒绝第三 incarnation；消亡后重绑新代际且 commit 达 committed）。修复前实现分别在 retire 调用
+  与第二处 reconcile 处失败。helper 源码变更按 `build-core-helper.sh` 契约门推进
+  `HelperProtocolVersion` 4.8.0 → 4.9.0；CONTRACT.sha256 以脚本同一 sed|shasum 管道本机重算
+  （纯文本哈希，未编译；管道已先对修改前树复现 #308 记录的 4.8.0 哈希自证一致）。审查轮：
+  链上父分支修正后 rebase 并重算契约；App 启动 `RuntimeCleanup.cleanupStaleRuntime` 在
+  reconcile 拒绝时的错误文案改为指向新出口（"检查更新 → 断开并重试"），并在
+  Localizable.xcstrings 补中英文条目（纯文案，无新测试）。
+  `docs/UPDATE_PROTOCOL_V1.md` 新增小节 "Terminal resolution and successor re-adoption
+  (clarified 2026-09-22)"，记录两个终态/重绑契约，不改旧条款含义。
+- **验证**：本机为编辑/审查机（2026-09-14 所有者决定），swift 编译与测试未在本机执行；回归委托
+  本 PR CI（GitHub-hosted macos-26，macos-ci 运行 build-core-helper.sh 契约门与
+  `sudo … --update-self-test`）。准确源码 SHA 与实际 CI 结果见关联 PR；提交时未获得本轮 CI
+  结果，不沿用其他分支或上一轮 main 的绿灯。
+- **新增/发布/限制**：无新功能面向客户、无新包、无部署，仅源码。`--emergency-reset` 在
+  pending 时仍拒绝（先 disarm 归档后再 reset 可走）；重绑不覆盖 48 h 过期（过期+replaced 仍只能
+  走放弃归档，与"过期不是未安装证明"的文档语义一致）；Windows F1/F4/F6 不在本条。触发概率的
+  实机数据仍缺，仅源码路径与 launchd/audit-token 语义核实。
+
 ## 2026-09-23 · macOS 升级开机竞态：执行器 bootout 停 Helper 不再误装紧急 PF 阻断
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 启动恢复。R4-F5

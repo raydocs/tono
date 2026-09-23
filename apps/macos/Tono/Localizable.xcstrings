@@ -7847,12 +7847,12 @@
         }
       }
     },
-    "Disconnect and Retry restores Internet access before retiring this unconsumed attempt. Failed update evidence will be retained.": {
+    "Disconnect and Retry restores Internet access before retiring this attempt. Failed update evidence will be retained.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "“断开并重试”会先恢复互联网访问，再结束此次尚未开始安装的更新尝试。失败更新的证据将被保留。"
+            "value": "“断开并重试”会先恢复互联网访问，再结束此次更新尝试。失败更新的证据将被保留。"
           }
         }
       }
@@ -7873,6 +7873,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "断开并重试"
+          }
+        }
+      }
+    },
+    "The pending update cannot be resumed by this copy of Tono. Choose Check for Updates, then Disconnect and Retry, to restore Internet access and end this update attempt.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此 Tono 副本无法继续待完成的更新。请选择“检查更新”，再点“断开并重试”，以恢复互联网访问并结束此次更新尝试。"
           }
         }
       }

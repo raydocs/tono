@@ -67,11 +67,14 @@ extension AppState {
     }
 
     /// The retry button explicitly requests Internet release. Root rechecks
-    /// cleanup and archives the old receipt; this never clears consumed state.
-    func retireUnconsumedNativeUpdate() async throws {
+    /// cleanup and archives the receipt; unconsumed reservations retire as
+    /// before, and a consumed-side attempt retires only after the privileged
+    /// resolved predicates hold (verified Disconnect plus on-disk component
+    /// proof). Consumed evidence is archived, never fabricated into commit.
+    func retireDisconnectedNativeUpdate() async throws {
         let coordinator = PrivilegedRuntimeCoordinator.shared
         let pending = try await coordinator.nativeUpdate("status")
-        guard pending.pending, ["reserved", "staged"].contains(pending.execution ?? "") else {
+        guard pending.pending, AppUpdater.disconnectRetriable(pending) else {
             throw NativeUpdateDownload.failure("This attempt cannot be retried before installation recovery.")
         }
         nativeUpdatePending = true

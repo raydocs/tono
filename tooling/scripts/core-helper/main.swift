@@ -580,9 +580,23 @@ func runEmergencyDisarm(underLock suppliedStorage: UpdateStorage? = nil) -> Bool
         let dns = try ProtectedDNSManager()
         let manager = try KillSwitchManager(allowedUID: allowedUID)
         if pending {
-            try UpdateRuntime(core: core, firewall: manager, dns: dns, power: PowerTransitionGate()).disconnect()
+            let runtime = UpdateRuntime(core: core, firewall: manager, dns: dns, power: PowerTransitionGate())
+            try runtime.disconnect()
             ledger.attempt?.disconnectVerified = true
             try storage.save(ledger)
+            // The verified release above is the abandon intent this command
+            // exists to express. An attempt that is provably resolved on disk
+            // — rolled back to (or never moved from) the captured original
+            // components, or a fully replaced installation the user gave up
+            // on — now has a sanctioned terminal archive; take it so this
+            // documented last-resort exit also ends the transaction instead
+            // of leaving a permanently pending ledger that no product
+            // surface can resolve. Unmet predicates change nothing: evidence
+            // is archived, not erased, and the consumed high-water stays.
+            do { try UpdateTransaction.live(storage: storage, runtime: runtime).retire(peer: nil) }
+            catch {
+                fputs("Tono emergency recovery disarmed PF but could not archive the resolved update attempt: \(error)\n", stderr)
+            }
         } else {
             _ = try dns.restore()
             _ = try manager.disarm()
