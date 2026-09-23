@@ -38,7 +38,7 @@
   （`apps/windows/service`）+ 协议文档。
 - **来源**：基线 main `498ed426`，叠加在 R4-F7 分支 `fix/update-replaced-release-20260923`
   （PR #359，共用 plan 视图）之上 → 分支 `fix/update-plan-member-digests-20260923`；
-  Issue #360；PR 见续记；提交时未合 main，须在 #359 之后合并。
+  Issue #360；PR #361；提交时未合 main，须在 #359 之后合并。
 - **缺陷修复（源码推导，无保护绕过）**：`classify_recovery` TargetVerified 与
   `retire_rolled_back` handler 只比较 Tono.exe / tono-core.exe / tono-service.exe 三组件，
   而 durable plan 覆盖整棵 payload 树 + `tono-service.exe` + `core-sha256.txt`（最后成员）。
@@ -64,6 +64,9 @@
   本修复的版本出发的下一跳生效；退休校验在当时运行的 Service 内，取决于 Disconnect 时
   已装 Service 版本。
 - **剩余限制**：Windows 11 实机中断恢复/回滚验收仍属 G3 未闭合证据。
+- **续记（2026-09-23）**：PR #361 源码 `37074b70`（叠加 `7c6ccf00`）的 GitHub-hosted
+  `windows-2025` lane 全绿；service lane 日志确认新增 `#[test]` 与改参的既有纯函数测试运行
+  并通过。CI 绿不等于设备验证或已发布。
 
 ## 2026-09-23 · Windows 升级 Replaced + 已验证 Disconnect 的「已安装且已释放」终态（R4-F7）
 
