@@ -51,6 +51,10 @@
   - 读取已校验的 root 私有副本的 `--version`。候选版本必须严格高于运行中的
     `HelperProtocolVersion`（三段数字比较，格式不合法时拒绝）。
   - 被拒绝时 App 仍然回退到管理员安装，所以合法降级仍然可以在管理员同意后进行。
+  - 审查后补充（#350 第三轮审查）：`--version` 探测只读 stdout，stderr 丢弃。原先复用
+    `KillSwitchManager.run`，它把 stderr 合进同一个管道；候选 helper 在 stderr 打出任何
+    警告（例如运行时的重复类警告）都会让版本文本变成多行、解析失败，合法升级被拒并退回
+    管理员提示。
 - **新增/优化**：无。
 - **工程与测试**：helper 契约 4.5.0 → 4.6.0，并重算 `CONTRACT.sha256`。`--self-test`
   增加 `runHelperUpgradeAdmissionSelfTest`，断言降级和同版本候选被拒、4.9.0 → 4.10.0
@@ -58,6 +62,7 @@
 - **验证**：本机只做编辑和源码自查，没有运行 swiftc 或 xcodebuild。helper 编译和
   `sudo tono-core-helper --self-test` 由本 PR 的 macOS CI（GitHub-hosted `macos-26`）
   执行，结果以该 run 为准。真实 Developer ID 包之间的静默升级和降级拒绝没有做实机验证。
+  审查后补充的 stdout 修正同样本机未编译，委托 CI。
 - **候选/发布**：仅源码，无新候选；未改动 PF 规则、`appcast.xml` 和 `latest.json`。
 - **剩余限制**：
   - 已开的 helper 链 PR #303、#307、#308、#311 也在推进 4.6.0 → 4.9.0。后合并的一方
@@ -65,6 +70,15 @@
   - bundle 封存校验和复制之间仍然有文件替换窗口。root 私有副本会再按 Developer ID
     要求校验，并检查版本下限，所以替换进来的文件只能是更新的正式签名 helper。
   - 管理员安装路径本身没有版本下限，这是有意保留的：它需要管理员同意。
+  - 测试只覆盖纯比较函数 `helperUpgradeAdmissible`。生产接线没有测试覆盖，也没有实机验证：
+    候选路径必须等于发起 bundle 的 `Contents/Resources` 资源、发起 bundle 的封存校验
+    （`UpdatePackage.verifyCode`）、对 root 私有副本的再次校验，以及只读 stdout 的
+    `--version` 探测。
+  - 标准（非管理员）用户不能再静默回滚 helper，降级需要管理员同意。
+  - `--version` 探测没有超时：候选 helper 卡住时，accept 循环会一起卡住，直到 App 的 30 s
+    超时后走管理员安装、由 launchctl bootout 恢复。
+  - helper 版本号 4.6.0 已被 main 占用，合并时与 #347、#348 统一重排，并重算
+    `CONTRACT.sha256`；本轮只按当前号重算了哈希。
 
 ## 2026-09-23 · Windows PrepareCoreStart 绑定当前 release epoch（R2-F6）
 

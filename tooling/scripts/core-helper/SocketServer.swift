@@ -375,10 +375,21 @@ final class SocketServer {
             // Ask the verified root-owned copy, not the user-writable source,
             // which version it is. A silent upgrade only moves forward; an
             // older or equal build needs the administrator install.
-            let probe = try KillSwitchManager.run(helperTemp, ["--version"])
-            let candidate = String(decoding: probe.output.prefix(64), as: UTF8.self)
+            // Read stdout only: a runtime warning on stderr must not turn a
+            // valid version line into an unparsable one.
+            let probe = Process()
+            probe.executableURL = URL(fileURLWithPath: helperTemp)
+            probe.arguments = ["--version"]
+            probe.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
+            let stdout = Pipe()
+            probe.standardOutput = stdout
+            probe.standardError = FileHandle.nullDevice
+            try probe.run()
+            let output = stdout.fileHandleForReading.readDataToEndOfFile()
+            probe.waitUntilExit()
+            let candidate = String(decoding: output.prefix(64), as: UTF8.self)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard probe.status == 0,
+            guard probe.terminationStatus == 0,
                   helperUpgradeAdmissible(running: helperVersion, candidate: candidate) else {
                 throw HelperFailure.invalid("Silent helper upgrade requires a newer helper version.")
             }
