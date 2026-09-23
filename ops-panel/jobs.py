@@ -516,13 +516,17 @@ def handle_collect_quality(params: dict, ctx: JobContext) -> tuple[str, str, dic
     col = ctx.collector
     node = ctx.node
     quality = col.run_on_node_via_ssh(node)
-    ip = str(quality.get("public_ip") or node["host"])
-    time.sleep(0.5)
-    overseas = col.check_host_tcp_nodes(ip, col.OVERSEAS_NODES, port=443)
-    time.sleep(1.0)
-    asia = col.check_host_tcp_nodes(ip, col.ASIA_EDGE_NODES, port=443)
-    time.sleep(0.5)
-    mainland = col.probe_cn_agents(ip, ctx.cn_agents, port=443)
+    ip = col.probe_target(quality, node)
+    if ip is None:
+        overseas = asia = {"ok": False, "error": "no_public_ip"}
+        mainland = None
+    else:
+        time.sleep(0.5)
+        overseas = col.check_host_tcp_nodes(ip, col.OVERSEAS_NODES, port=443)
+        time.sleep(1.0)
+        asia = col.check_host_tcp_nodes(ip, col.ASIA_EDGE_NODES, port=443)
+        time.sleep(0.5)
+        mainland = col.probe_cn_agents(ip, ctx.cn_agents, port=443)
     block = col.classify_block(mainland, asia, overseas)
     quality["block"] = block
     report = {
