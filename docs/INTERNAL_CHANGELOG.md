@@ -32,6 +32,36 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows webview 只授予前端实际使用的 core 控制命令
+
+- **归属**：G2（保护不得放宽）；Windows App `apps/windows/app`（Tauri capability）。
+- **来源**：基线 main `def3dd79` → 分支 `fix/webview-mihomo-acl-20260923`；Issue #378；
+  内部审查 H6-F1（源码推导）；提交时未合 main。
+- **缺陷修复**：`capabilities/desktop.json` 原先把 `tono-plugin-core:default` 整体授予
+  `main`/`tray-flyout` webview，其中包括改 controller 地址/secret、patch/reload 配置、
+  重启、升级 core/UI/geo、更新 provider。连接后插件指向 SYSTEM core 的带 secret
+  controller，所以 renderer 可以在运行期改写 core 配置，这条路径不经过 Service。
+  现在只授予前端实际调用的六项：`ws_traffic`、`ws_connections`、`ws_disconnect`、
+  `clear_all_ws_connections`、`delay_proxy_by_name`、`healthcheck_node_in_provider`
+  （以 grep `apps/windows/app/src` 全部 `tono-plugin-core-api` 导入为准）。Rust 侧通过
+  `MihomoExt` 直接访问，不受 webview ACL 影响。
+- **新增/优化**：无。
+- **工程与测试**：新增一个 `#[test]`
+  `src-tauri/tests/webview_capabilities.rs::webview_capabilities_grant_only_the_core_commands_the_frontend_uses`，
+  扫描 `capabilities/*.json`，断言授予的插件权限是上述白名单的子集。旧代码因为授予了
+  `tono-plugin-core:default` 会失败。`scripts/windows-packaging.test.mjs` 里 ACL 命名空间
+  断言原来要求 `:default`，改为要求该命名空间下至少有一项 `allow-*` 授权。这是 fixture
+  修正，原意不变。
+- **验证**：编辑机（MacBook）未执行原生 `cargo test`。用 Python 按相同逻辑对 main 与本分支的
+  capability 做镜像检查：main 上 FAIL（`tono-plugin-core:default`），本分支 PASS。
+  `node --test --test-name-pattern "Core plugin" scripts/windows-packaging.test.mjs` 4/4 通过。
+  `rustfmt --check` 通过。Rust 回归委托本 PR CI（`windows-ci` / `windows-2025` 的
+  "Test the Tauri crate"）。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：core 的 controller 本身仍接受 `PUT/PATCH /configs`、`/restart`、升级和
+  provider 更新（持 secret 的同用户进程仍可调用）；在 Tono core 补丁里禁用这些接口，以及
+  Service 在运行期核对配置，都记录在 #378 作为后续。未做实机验证。
+
 ## 2026-09-23 · coreMonitor 不得把运行时替换的瞬时 utun 消失判为 TUN 死亡
 
 - **归属**：G1（已连接=能用：切换/热重载不掉线）；macOS 客户端 `apps/macos`。

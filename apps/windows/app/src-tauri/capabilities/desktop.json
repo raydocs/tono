@@ -9,6 +9,11 @@
     "autostart:allow-is-enabled",
     "core:window:allow-set-theme",
     "notification:default",
-    "tono-plugin-core:default"
+    "tono-plugin-core:allow-ws-traffic",
+    "tono-plugin-core:allow-ws-connections",
+    "tono-plugin-core:allow-ws-disconnect",
+    "tono-plugin-core:allow-clear-all-ws-connections",
+    "tono-plugin-core:allow-delay-proxy-by-name",
+    "tono-plugin-core:allow-healthcheck-node-in-provider"
   ]
 }
