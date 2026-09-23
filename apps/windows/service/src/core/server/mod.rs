@@ -767,6 +767,33 @@ enum OwnerLifecycleGate<'a> {
     ActiveSession(&'a OwnerSessionProof),
 }
 
+/// Owner authentication proves the *user* (pipe PID token SID plus the `%APPDATA%` token file),
+/// and any process of that user can read the token. Every route that enters the owner lifecycle
+/// arms, releases or reconfigures WFP, DNS or the Core, so it must also come from the registered
+/// installation's `Tono.exe` — the same image binding the update routes use. Other legitimate
+/// actors (uninstaller, installer repair) act as administrators through `--emergency-disarm` and
+/// the SCM, not through this pipe.
+#[cfg(windows)]
+#[cfg_attr(feature = "test", allow(dead_code))]
+async fn require_installed_app_peer(
+    owner: &AuthenticatedOwner,
+) -> std::result::Result<(), ServiceError> {
+    let refused = |detail: String| {
+        ServiceError::new(
+            crate::ServiceErrorCode::UnauthorizedOwner,
+            format!("caller is not the installed Tono App: {detail}"),
+        )
+    };
+    let pid = owner
+        .peer_pid
+        .ok_or_else(|| refused("the pipe did not identify the peer process".into()))?;
+    match tokio::task::spawn_blocking(move || crate::core::update::app_image(pid)).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(error)) => Err(refused(format!("{error:#}"))),
+        Err(error) => Err(refused(format!("image check did not complete: {error}"))),
+    }
+}
+
 /// Takes `OWNER_LIFECYCLE_LOCK` and then applies the route's gate, in that order — the gate
 /// reads the very state the lock protects.
 ///
@@ -783,6 +810,12 @@ async fn enter_owner_lifecycle(
     owner: &AuthenticatedOwner,
     gate: OwnerLifecycleGate<'_>,
 ) -> ControlFlow<Result<HttpResponse>, OwnerLifecycleGuard> {
+    // The lifecycle `test` feature drives these routes from test processes, which by
+    // construction are not the installed App; the check itself is covered directly.
+    #[cfg(all(windows, not(feature = "test")))]
+    if let Err(error) = require_installed_app_peer(owner).await {
+        return ControlFlow::Break(service_error(error));
+    }
     let lifecycle_guard = OWNER_LIFECYCLE_LOCK.lock().await;
     #[cfg(windows)]
     let repair = match crate::acquire_service_repair_gate() {

@@ -273,3 +273,17 @@ async fn disconnect_path_gates_stay_open_after_stop_clears_the_owner_record()
     drop(guard);
     Ok(())
 }
+
+#[cfg(windows)]
+#[tokio::test]
+async fn a_process_of_the_owner_user_that_is_not_the_installed_app_is_refused() {
+    // The test binary runs as the owner user but from outside the registered installation.
+    let mut peer = owner(92_010);
+    peer.peer_pid = Some(std::process::id());
+
+    let error = super::require_installed_app_peer(&peer)
+        .await
+        .expect_err("only the registered Tono.exe may enter the owner lifecycle");
+
+    assert_eq!(error.code, ServiceErrorCode::UnauthorizedOwner);
+}

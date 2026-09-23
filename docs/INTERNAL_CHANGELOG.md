@@ -32,6 +32,34 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows Service 保护路由只接受已安装的 Tono App
+
+- **归属/来源**：G1 保护不得放宽（内部审查 H2-F3，[#351](https://github.com/raydocs/tono/issues/351)
+  第 1 部分）；影响 Windows Service（`apps/windows/service`）。基线 main 244075f2，分支
+  `fix/win-service-app-image-20260923`；提交时未合 main。
+- **缺陷修复**：Service 只证明调用方是 owner 用户（pipe PID 的 SID + `%APPDATA%` token），
+  同用户任意进程都能调用 Release、RestoreDns、StartClash 等改变 WFP/DNS/Core 的路由。现在
+  `enter_owner_lifecycle` 在取生命周期锁之前要求对端是已注册安装目录下的 `Tono.exe`
+  （复用更新路由已有的 `update::app_image`，含安装树 ACL 校验），否则返回
+  `UnauthorizedOwner`。覆盖所有进入 owner lifecycle 的路由（含 StopClash、会话路由、
+  GetClashLogs、OwnerGoodbye）；只读状态路由不变。卸载/修复走管理员 `--emergency-disarm`
+  与 SCM，不经管道；原生更新在替换前终止发起 App，继任者从安装目录启动，Disconnect 不受影响。
+- **新增/优化**：无。
+- **工程与测试**：新增一个 `#[tokio::test]`
+  `a_process_of_the_owner_user_that_is_not_the_installed_app_is_refused`（`server/owner_lifecycle_tests.rs`，
+  Windows）：以测试进程自身 PID 作为对端，断言被拒。在 main 上的失败方式是编译失败
+  （`require_installed_app_peer` 不存在）。lifecycle `test` feature 下该检查不接入路由
+  （测试进程本就不是 App），由此测试直接覆盖。
+- **验证**：本机（MacBook）按 AGENTS.md 未运行 cargo；编译与测试委托本 PR 的 GitHub-hosted
+  `windows-2025` CI。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：Windows 未做 Authenticode，绑定的是“管理员保护的已注册安装目录中的
+  Tono.exe”，与更新路由同等强度，不等于 macOS 代码签名。开发构建与
+  `tono-service-integration-driver` 的 start/stop/logs 子命令对已安装 Service 将被拒
+  （QA 脚本只用 diagnose/qa-build-info，读路由不受影响）。每次进入生命周期会对 Tono.exe
+  做一次摘要并遍历安装树，耗时未实测。StartClash 配置的 Service 端校验在 #351 第 2 部分
+  单独 PR。未实机验证。
+
 ## 2026-09-23 · Windows App 在 Protected Offline（armed 未验证）期间的 Service 真值再同步
 
 - **归属/来源**：G1 断开/保护状态与实际一致（R2-F2）；影响 Windows App
