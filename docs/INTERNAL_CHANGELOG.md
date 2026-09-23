@@ -32,6 +32,75 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · 桌面源码合入 main，保留发布边界
+
+所有者在本线程明确要求把能合并的 PR ship 到 GitHub `main`。归属仍为 G1–G3
+桌面整改、升级与可追溯验收；本轮是源码集成交付，不是新的功能实现或客户发布。
+
+- **已合入**：[#289](https://github.com/raydocs/tono/pull/289) 正常合并为
+  [1ca878cf](https://github.com/raydocs/tono/commit/1ca878cfb8f9c213356eae263a83e5eba0b39075)，
+  一次保留 #281 → #282 → #283 → #286 → #289 的完整提交历史和最终修复。
+  合并前 main 为 [569ce865](https://github.com/raydocs/tono/commit/569ce8654f57e66f293cf4e443b5e0819b71912d)；
+  `git diff --exit-code d954a7f740f95f141136af423a39338d79a1b674 origin/main` 返回 0，
+  合并结果与已验证最终组合源码的完整树相同，没有把有已知续修的中间版本逐次送入 main。
+- **说明已合入**：[#280](https://github.com/raydocs/tono/pull/280) 正常合并为
+  [e94161e0](https://github.com/raydocs/tono/commit/e94161e07593d581995b4a9eecc54030eeaa7118)。
+  相对上一项仅增加两端 release notes 和既有 RC 报告，不改变候选字节。
+- **重复 PR 收尾**：GitHub 已把 #281 标记为 merged；#282/#283/#286 的准确 head
+  已是 main 的祖先，作为已集成记录关闭。#277/#278/#284/#285/#287/#288/#290 经
+  `git cherry` 确认所有提交均有等价补丁，再按 #279/#289 的组合交付关闭。
+  这不是丢弃源码，也不把子分支曾有的编译/测试失败改写成通过；没有重复合入旧实现。
+- **依赖组合另验**：三个原有绿灯 PR [#252](https://github.com/raydocs/tono/pull/252)、
+  [#255](https://github.com/raydocs/tono/pull/255)、[#256](https://github.com/raydocs/tono/pull/256)
+  在新 main 上无冲突合成 [#292](https://github.com/raydocs/tono/pull/292)，准确源码
+  [94bfa6cf](https://github.com/raydocs/tono/commit/94bfa6cfa15e13bba9786ec103be49a996010d4c)。
+  只含 Rollup、Windows 前端依赖组与 Rust 锁文件这七个文件；新 updater 的依赖条目保留。
+  `git diff --check origin/main...HEAD` 返回 0；记录时组合 Windows CI 待完成，仍为 Draft，
+  尚未合入。8 分钟有界等待结束时 18 项成功、2 项 Windows app-rust 待完成，详见
+  [当时状态及续验入口](https://github.com/raydocs/tono/pull/292#issuecomment-5787253794)。
+  已完成的准确 push 日志确认：
+  [前端](https://github.com/raydocs/tono/actions/runs/35804404717/job/107001851595) 36 文件/282 测试通过；
+  [Service](https://github.com/raydocs/tono/actions/runs/35804404717/job/107001851691) 310 项 lifecycle、
+  6 项 DNS、4+3+1 项更新及 WFP 形状检查通过。旧依赖 PR 的绿灯不代替新组合证据。
+- **未强行合入**：[#253](https://github.com/raydocs/tono/pull/253) 的 control-plane/
+  ops-contract/migrations 失败；[#254](https://github.com/raydocs/tono/pull/254) 的
+  ops-contract 与四个 E2E shard 失败；[#203](https://github.com/raydocs/tono/pull/203)、
+  [#204](https://github.com/raydocs/tono/pull/204) 有冲突且保留未完成的产品范围。
+  [#275](https://github.com/raydocs/tono/pull/275) 仍是固定旧二进制的单次诊断 Draft，
+  其红/绿诊断已用于 #276 修复，不把过时的例外工具作为新主线功能合入。
+- **验证与限制**：合并前复核 #289 的 12 项检查全成功，原始命令、确切 CI checkout、
+  377 项 macOS（1 skip）及 Windows DNS 6 项/lifecycle 310 项等证据见下文 F。
+  合入 main 后 [Services CI](https://github.com/raydocs/tono/actions/runs/35804170997) 成功；
+  [macOS CI](https://github.com/raydocs/tono/actions/runs/35804298002) 的实际 checkout 为上述
+  e94161e0，仍是 377 项、1 skip、0 失败；旧 1ca878cf 的 macOS run 被后续 push 的既有
+  concurrency 规则取消，不计通过。[Windows Service](https://github.com/raydocs/tono/actions/runs/35804170998/job/107001095427)
+  实际 checkout 为上述 1ca878cf，310 项 lifecycle、6 项 DNS 及更新/WFP 检查通过；当时
+  app-rust 仍在跑，不声称整个 main workflow 全绿。命名结果来自完整 job 日志，非步骤名推断。
+  未手动 dispatch、重跑或取消 CI，也未创建后台监控或自动合并承诺。
+  本记录的文档整理不另跑产品测试。没有 force push、历史改写、分支删除或工作树清理。
+- **候选/发布：源码交付，未发布新候选。** 已发布 RC 仍固定在旧的 569ce865，仍不含下文 C–F；
+  常规 CI 产生的未签名构建不是已签名 RC，不替换旧下载包。未部署 Worker、签名、安装设备、推进 Sparkle/windows
+  更新源，#26 及原有 G1/G3 实机、PF/WFP/DNS 与性能证据要求不因合并关闭。
+
+### 2026-09-23 续记 · 剩余依赖检查完成并合入
+
+整理交付记录期间的最终复核发现两个 app-rust 已完成；[#292 的完成续记](https://github.com/raydocs/tono/pull/292#issuecomment-5787272136)
+保留了这个状态变化，没有删除上面的 pending 观察。准确组合源码的 **20/20 检查全部成功**，
+包括 [Windows push 原生消费者](https://github.com/raydocs/tono/actions/runs/35804404717/job/107001851447)：
+499 项 Tauri、18 项 journal、3 项 atomic、1 项共享合同通过；另一个原有 opt-in target 的
+1 项 ignored 不计为执行成功。CI 日志提取摘要可用但命名列表有截断，不充作全需求证明。
+
+[#292](https://github.com/raydocs/tono/pull/292) 随后正常合入 main 为
+[4f58da37](https://github.com/raydocs/tono/commit/4f58da37fffa15bf5dc4430d6afb413af6e9561c)。
+合并后的完整树与已测试的 [94bfa6cf](https://github.com/raydocs/tono/commit/94bfa6cfa15e13bba9786ec103be49a996010d4c)
+相同；GitHub 同时确认 #252/#255/#256 均为 merged。没有另行解决依赖代码冲突、变更锁文件
+之外的实现或放宽测试。此前桌面合并的 Windows run 35804170998 此时也已全部成功。
+
+本总账及维护规则通过 [#291](https://github.com/raydocs/tono/pull/291) 的文档变更收尾。
+最后的新 main push CI 是独立运行，不把上述合并前或前一 main 的通过数重标为该 run 的结果。
+保留未合入项仍为 #253/#254 的失败检查、#203/#204 的冲突/未完成范围和 #275 的旧诊断 Draft。
+已合入源码与既有 RC 的包含关系仍不同，发布及实机门不变。
+
 ## 2026-09-21—23 · 工程整改线程全程回填
 
 来源：[Tono 工程整改验收线程](https://ampcode.com/threads/T-01a0c5d0-1c0d-77a0-b272-0a931282c5b5)。
@@ -40,7 +109,9 @@
 首轮报告明确编号 **20 项（W1–W14、M1–M4、S1–S2）**；下文另列后续修复与功能，
 不把它们混成一个无法复核的「全部 bug 总数」。
 
-### 交付与包含关系（2026-09-23 核对）
+### 交付与包含关系（2026-09-23 合入授权前的历史快照）
+
+以下保留首次回填时的状态，不覆盖当时的未合入/未验证事实；后续合入状态以上方续记为准。
 
 | 批次 / 归属 | 源码与 PR | 当前交付状态 |
 |---|---|---|
