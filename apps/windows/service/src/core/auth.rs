@@ -68,6 +68,10 @@ impl ServiceError {
         )
     }
 
+    pub(crate) fn stale_release_epoch(message: impl Into<String>) -> Self {
+        Self::new(ServiceErrorCode::StaleReleaseEpoch, message)
+    }
+
     pub(crate) fn invalid_proxy_config(message: impl Into<String>) -> Self {
         Self::new(ServiceErrorCode::InvalidProxyConfig, message)
     }

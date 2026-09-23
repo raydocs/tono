@@ -32,6 +32,64 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows PrepareCoreStart 绑定当前 release epoch（R2-F6）
+
+- **归属**：G1 连接生命周期（I1：旧 attempt 的迟到 Service 副作用不得影响新会话）；
+  平台/模块：Windows Service IPC 协议（`apps/windows/service`，App 侧无代码改动，
+  客户端逻辑在 `tono-service-protocol` 内）。
+- **来源**：基线 main 576d7087 → 分支 `fix/windows-prepare-start-freshness-20260922`；
+  PR 与准确源码 SHA 见续记，提交本条时未合 main。
+- **缺陷修复（R2-F6，源码确认 + 需实机级）**：被取消 attempt 的
+  `POST /clash/prepare-start` 迟到数秒到达时，该路由只有 `Unchecked` owner 门、
+  无会话/epoch 新鲜度令牌（对照 Lock/MarkVerified/Stop 均有会话门），且
+  `is_protected_startup_replacement_candidate` 对后继连接未验证的 Core 为假，
+  `prepare_start(false)` 会停掉后继受监督 Core，表现为一次莫名连接失败
+  （fail-closed，不泄漏）。修复：协议 revision 17 起，客户端在发出该破坏性请求前
+  经 `GET /version` 快照 Service 的 `RELEASE_EPOCH`（复用 StartClash 已有 epoch
+  机制，不引入新令牌类型）并在请求内携带；Service 在 `OWNER_LIFECYCLE_LOCK`
+  内比较，epoch 不等于当前 → 以新错误码 `StaleReleaseEpoch`(1013, HTTP 409)
+  拒绝，拒绝发生在任何快照/操作发布/Core 停止之前，无半停止状态。合法路径
+  （App 存活、期间无显式 release）行为不变。兼容：新旧混合配对时——新 App +
+  旧 Service（<rev 17）由能力探测降级发送旧 `null` payload，行为同旧版；
+  旧 App + 新 Service 的无 epoch 请求**被接受**，由 Service 在请求到达时自取 epoch
+  快照、在锁内比较（与 StartClash 的到达时快照相同）。
+- **审查修正（第二轮）**：初版对旧 App 的 `null` 请求一律 409，结果探测判定配对
+  可用，之后每次连接都在 prepare 阶段永久失败，违反 `lib.rs` "Reject a
+  mismatch at the protocol probe" 规则。没有把 `MIN_SUPPORTED_CLIENT_REVISION`
+  提到 17：探测门 `require_protocol_version`（`server/mod.rs` 686-700，经
+  `authenticate_request` 741 行）同样挡在 `ReleaseKillSwitch`/`StopClash`/
+  `RestoreProtectedDns` 前面，提到 17 会让与新 Service 短暂共存的旧 App 无法
+  释放 WFP、无法恢复 DNS。改为对 Legacy 采用到达时快照，旧 App 行为不比
+  rev 16 差。
+- **新增/优化**：`ProtocolInfo` 增加 `release_epoch`（`#[serde(default)]`，
+  仅服务端 GetVersion 路由填充）；`PrepareCoreStartPayload` 采用与
+  `StopClashPayload` 相同的 untagged `Legacy/Freshness` 线型。
+- **工程与测试**：新增一个 Service 集成回归
+  `late_prepare_core_start_superseded_by_release_cannot_stop_the_successor_core`
+  （`tests/test_owner_lifecycle.rs`）：快照 epoch → 显式 release（真实 bump）→
+  后继 StartClash（Core 未验证）→ 用旧 epoch 发 PrepareCoreStart → 断言返回
+  `StaleReleaseEpoch` 且 `core_pid` 不变；若门被移除，后继 PID 断言失败。
+- **验证**：本机（MacBook）按所有者 2026-09-14 决定只做编辑与源码自查，
+  未运行 `cargo build/test/check/clippy`；回归委托本 PR CI 的 GitHub-hosted
+  `windows-2025`（`cargo test --locked --features standalone,client,test`），
+  结果以该 run 的实际 checkout 为准，不预支。R2-F6 的实机触发窗口
+  （数秒级 IPC 在途延迟）未在 Windows 11 实机复现，维持原定级。
+- **候选/发布**：仅源码，无新候选、无新包；未触碰 WFP/PF 规则、DNS 恢复语义、
+  `appcast.xml`/`latest.json` 或 `windows-updates`。
+- **剩余限制**：不 bump epoch 的取消路径不刷新令牌：StopClash(release=true)
+  在无 armed 时为空操作；节点消失 `selected_node_vanished`（`stop_core(false)`，
+  无 release）；更新安装的 `invalidate_connection(false)`；连接事务 240 s 超时。
+  经这些路径取消的 attempt，其迟到 prepare 仍可能通过门，但触发条件比已修的
+  Disconnect→重连序列更窄。修复只在 Service 也升到 rev 17 后生效：
+  `MIN_REQUIRED_SERVICE_REVISION` 仍为 14，只升级 App 时新 App 对旧 Service
+  发 Legacy，F6 未修。旧 App 配新 Service 时只拿到到达时快照，在途迟到请求
+  仍会漏过（与 rev 16 相同）。Service 重启会把 epoch 归零，快照于重启前的请求
+  被拒绝并表现为一次连接失败（fail-closed，重试即恢复）。第二轮修正同样
+  本机未编译，委托 CI；已有回归测试走 Freshness 路径，不受本修正影响，未改。
+- **剩余限制**：不 bump epoch 的拆臂路径（如 StopClash(release=true) 在无 armed
+  时为空操作）不刷新令牌——经这些变体取消的 attempt 其迟到 prepare 仍可能通过
+  门，但触发条件比已修的 Disconnect→重连序列更窄；Service 重启会把 epoch 归零，
+  快照于重启前的请求被拒绝并表现为一次连接失败（fail-closed，重试即恢复）。
 ## 2026-09-23 · Windows connecting 期间到达的 policy 行为变更不再丢弃
 
 - **归属**：G1「已连接=能用」——已连接会话应按最新已安装 policy 提供 DIRECT/WeChat

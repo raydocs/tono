@@ -41,6 +41,15 @@ pub struct ProtocolInfo {
     pub build_version: String,
     pub protocol: ProtocolVersion,
     pub min_client_revision: u16,
+    /// The Service's explicit-release epoch at the moment of this response (filled only by the
+    /// serving side of the pipe). A destructive owner-gated request that carries a snapshot of
+    /// this value older than the live epoch belongs to an attempt an explicit release already
+    /// superseded, and the Service refuses it. `#[serde(default)]` so a client still parses an
+    /// older Service's answer, which never carries the field — and such a Service also fails
+    /// [`ProtocolInfo::supports_prepare_start_epoch`], so the defaulted zero is never sent as a
+    /// freshness proof.
+    #[serde(default)]
+    pub release_epoch: u64,
 }
 
 impl ProtocolInfo {
@@ -49,6 +58,9 @@ impl ProtocolInfo {
             build_version: crate::VERSION.to_owned(),
             protocol: ProtocolVersion::current(),
             min_client_revision: crate::MIN_SUPPORTED_CLIENT_REVISION,
+            // Only the serving side fills the real epoch (the GetVersion route); everywhere
+            // else this stays the neutral value of the local build's protocol statement.
+            release_epoch: 0,
         }
     }
 
@@ -109,6 +121,13 @@ impl ProtocolInfo {
     pub const fn supports_bootstrap_pins(&self) -> bool {
         self.protocol.epoch == ProtocolVersion::current().epoch
             && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_BOOTSTRAP_PINS
+    }
+
+    /// Whether `POST /clash/prepare-start` enforces the release-epoch freshness snapshot the
+    /// client copies from [`ProtocolInfo::release_epoch`] into the request.
+    pub const fn supports_prepare_start_epoch(&self) -> bool {
+        self.protocol.epoch == ProtocolVersion::current().epoch
+            && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_PREPARE_START_EPOCH
     }
 }
 
@@ -509,6 +528,30 @@ impl StopClashPayload {
     }
 }
 
+/// `POST /clash/prepare-start` freshness proof: the client's snapshot of the Service's
+/// explicit-release epoch, read from `GET /version` immediately before the mutating request.
+/// The same `RELEASE_EPOCH` StartClash snapshots itself inside the Service (see
+/// `windows_kill_switch::release_epoch`); carrying the client's copy is what makes the gate
+/// catch a request that was already in flight when the release completed — the in-Service
+/// snapshot is only taken once the request arrives, which is too late for exactly that case.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrepareCoreStartFreshness {
+    pub release_epoch: u64,
+}
+
+/// `null` was the payload before revision 17. It stays a distinct untagged variant so the
+/// shape still parses. A revision-17 Service accepts it from an older client, which still
+/// pairs at the probe, and takes the release-epoch snapshot itself when the request arrives
+/// (the pre-17 freshness). It does not refuse the request, because an older App that passes
+/// the probe must not then fail every connection at this route. A client that has probed an
+/// older Service still sends this arm, because that Service has no gate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum PrepareCoreStartPayload {
+    Legacy(()),
+    Freshness(PrepareCoreStartFreshness),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StartClashRequest {
     pub runtime: RuntimeBundle,
@@ -588,6 +631,11 @@ pub enum ServiceErrorCode {
     /// `POST /lifecycle/owner-goodbye` refused: the kill switch is armed, or the durable desired
     /// state wants (or cannot prove it does not want) the core running. Mapped to 409 Conflict.
     StillProtected = 1012,
+    /// `POST /clash/prepare-start` refused: the request's client-snapshotted release epoch has
+    /// been superseded by an explicit release (for an epoch-less legacy request, the Service's
+    /// own arrival-time snapshot). The refusal happens before any Core is touched. Mapped to
+    /// 409 Conflict.
+    StaleReleaseEpoch = 1013,
 }
 
 pub fn owner_key(identity: &OwnerIdentity) -> String {

@@ -31,7 +31,12 @@ pub(super) fn create_ipc_router() -> Result<Router> {
         })
         .get(IpcCommand::GetVersion.as_ref(), |ctx| async move {
             ipc_request_context_to_auth_context(&ctx)?;
-            ok_json(ProtocolInfo::current())
+            let mut info = ProtocolInfo::current();
+            // The freshness snapshot clients copy into destructive owner-gated requests
+            // (`PrepareCoreStart`). Filled only here, on the serving side of the pipe, so
+            // `ProtocolInfo::current()` stays a pure protocol statement everywhere else.
+            info.release_epoch = windows_kill_switch::release_epoch();
+            ok_json(info)
         })
         .get(IpcCommand::Status.as_ref(), |ctx| async move {
             trace!("Received Status command");
@@ -505,24 +510,55 @@ pub(super) fn create_ipc_router() -> Result<Router> {
         })
         .post(IpcCommand::PrepareCoreStart.as_ref(), |ctx| async move {
             trace!("Received PrepareCoreStart command");
-            let (_request, owner) =
-                match authenticate_request::<AuthenticatedRequest<()>>(&ctx).await {
+            let (request, owner) =
+                match authenticate_request::<AuthenticatedRequest<PrepareCoreStartPayload>>(&ctx)
+                    .await
+                {
                     ControlFlow::Continue(authenticated) => authenticated,
                     ControlFlow::Break(response) => return response,
                 };
             // No active session exists on a first connection, so this uses the same authenticated
-            // owner gate as StartClash. The lifecycle lock prevents reconciliation from racing a
-            // start/stop. CoreManager preserves a supervised process only with complete protected
-            // runtime proof; the fallback sweep admits only Tono's canonical installed image.
+            // owner gate as StartClash — but a destructive reconcile must also prove it is fresh.
+            // The request carries the client's snapshot of this Service's explicit-release epoch
+            // (the same RELEASE_EPOCH StartClash snapshots for itself further down). A cancelled
+            // attempt's request can arrive seconds late, after the user's Disconnect released and
+            // a successor connection already started its own unverified Core; without this gate
+            // the late request is the one destructive route with no freshness token, and it would
+            // stop that successor Core (R2-F6).
+            //
+            // A revision 12–16 client (an older App beside this Service) cannot send a snapshot.
+            // It passes the protocol probe (MIN_SUPPORTED_CLIENT_REVISION stays 12, because that
+            // same App still needs ReleaseKillSwitch/StopClash/RestoreProtectedDns, which the
+            // probe also gates). Refusing it here would fail every connection *after* the probe
+            // said the pair works. Instead, take the snapshot when the request arrives, the same
+            // in-Service freshness StartClash uses: a release that wins the lifecycle lock while
+            // the request waits still supersedes it. Only the window before arrival stays open
+            // for such a client, and that client had this gap before revision 17 too.
+            let requested_release_epoch = match request.payload {
+                PrepareCoreStartPayload::Freshness(snapshot) => snapshot.release_epoch,
+                PrepareCoreStartPayload::Legacy(()) => windows_kill_switch::release_epoch(),
+            };
             let _lifecycle_guard =
                 match enter_owner_lifecycle(&owner, OwnerLifecycleGate::Unchecked).await {
                     ControlFlow::Continue(guard) => guard,
                     ControlFlow::Break(response) => return response,
                 };
+            // Compare under the lifecycle lock, before anything is touched: a release that won
+            // the lock while this request waited invalidates it exactly like one that completed
+            // before it arrived. The refusal is side-effect free — no snapshot, no operation
+            // publication, no Core stop — so the successor's runtime stays exactly as it is.
+            if windows_kill_switch::release_superseded(requested_release_epoch) {
+                return service_error(ServiceError::stale_release_epoch(
+                    "PrepareCoreStart refused: an explicit release superseded this attempt",
+                ));
+            }
             // Decide under the lifecycle lock but before publishing this route's own operation:
-            // the shared proof requires a quiescent snapshot. A fully verified active runtime may
-            // keep serving DNS until StartClash replaces it; every weaker supervised runtime must
-            // be stopped now or it blocks the App's fixed-port bind before StartClash is reached.
+            // the shared proof requires a quiescent snapshot. The lifecycle lock prevents
+            // reconciliation from racing a start/stop; CoreManager preserves a supervised process
+            // only with complete protected runtime proof, and the fallback sweep admits only
+            // Tono's canonical installed image. A fully verified active runtime may keep serving
+            // DNS until StartClash replaces it; every weaker supervised runtime must be stopped
+            // now or it blocks the App's fixed-port bind before StartClash is reached.
             let snapshot = match service_status_snapshot(&owner).await {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
