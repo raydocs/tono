@@ -529,6 +529,26 @@ fn intent_is_valid(intent: &IntentRecord) -> bool {
             .all(|endpoint| wfp_model::parse_endpoint(endpoint).is_some())
 }
 
+/// The installed Tono app, the only process that calls the control plane (the Service has no
+/// HTTP client). Rule C is scoped to this image's app id; Program Files is writable only by
+/// administrators, the same trust the core-path allowlist rests on. Empty when the app is not
+/// installed there: the bootstrap API channel is then not rendered, which fails closed.
+fn installed_tono_app_path() -> String {
+    #[cfg(all(windows, not(feature = "test")))]
+    {
+        crate::core::update::program_files()
+            .map(|root| root.join("Tono").join("Tono.exe"))
+            .ok()
+            .filter(|path| path.is_file())
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    }
+    #[cfg(not(all(windows, not(feature = "test"))))]
+    {
+        String::new()
+    }
+}
+
 /// The rule model's view of an armed session, given who the running core is. Pure, so the
 /// tunnel-permit lifetime rule is testable without a core.
 fn rule_config_for(armed: &Armed, current_core: Option<CoreInstance>) -> RuleConfig {
@@ -544,6 +564,7 @@ fn rule_config_for(armed: &Armed, current_core: Option<CoreInstance>) -> RuleCon
             .collect(),
         tun_luid,
         app_path: armed.intent.app_path.clone(),
+        tono_app_path: installed_tono_app_path(),
         // DIRECT is a bypass of a live tunnel, never an independent escape hatch. A missing or
         // changed core identity retracts both grants in the same expected-set transaction.
         direct_endpoints: if armed.intent.mode == KillSwitchStatusMode::Locked && tun_luid.is_some()
@@ -893,8 +914,9 @@ async fn install_unlocked_for(armed: &Armed, current_core: Option<CoreInstance>)
     #[cfg(all(windows, not(feature = "test")))]
     {
         let app_path = armed.intent.app_path.clone();
+        let tono_app_path = config.tono_app_path.clone();
         let result = engine_call("install", move || {
-            crate::core::wfp::install(&expected, &app_path)
+            crate::core::wfp::install(&expected, &app_path, &tono_app_path)
         })
         .await;
         // `install` ends with exact provider-set verification, so only a successful transaction

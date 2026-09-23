@@ -32,6 +32,27 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 引导 API 放行绑定 Tono 程序身份
+
+- **归属/来源**：G1 保护边界；基线 origin/main `244075f2`，分支
+  `fix/wfp-bootstrap-app-bind-20260923`，Issue #330（内部审查 H1-F5 Windows 部分）。未合 main。
+- **缺陷修复**：Bootstrap 与 Blocked（Protected Offline）下的控制面放行（规则 C，
+  `session/permit-api/*`）原先只匹配地址、TCP 与 6 个端口，不带 `ALE_APP_ID`，本机任意进程都能
+  经物理网卡访问这些共享 Cloudflare anycast 地址。现在规则 C 额外要求 ALE_APP_ID 等于
+  `%ProgramFiles%\Tono\Tono.exe`（Windows 上唯一调用控制面的进程；Service 不含 HTTP 客户端），
+  并把该路径并入过滤器 key，使升级后的 Service 重新生成 key 并移除旧的无身份过滤器。App 不在该路径时
+  不渲染规则 C（失败即关闭）；app id 解析失败时沿用核心放行的做法，先装 block 再报错。
+- **工程与测试**：改写已有回归
+  `arbitration_api_channel_open_in_bootstrap_and_blocked_retracted_in_locked`：Bootstrap/Blocked
+  下 Tono app 的包放行，其他进程的同一元组必须 Block。旧规则表上其他进程的包得到 Permit，测试失败。
+- **验证**：本机只跑 rustfmt 检查改动片段（仓库里已有的格式差异未动）；按执行位置规定，本机不跑原生
+  cargo。Service 单元测试与 Windows 构建交给 PR 上 GitHub-hosted `windows-2025` CI，结果续记在
+  PR 中。没有实机 WFP 验证。
+- **新增/发布/限制**：无新包、无部署。`FwpmGetAppIdFromFileName` 对 Program Files 路径的匹配、
+  Protected Offline 下 App 重新登录与刷新策略，都需要在 Windows 11 实机确认。开发版或非标准安装位置
+  的 App 在保护开启期间无法走引导通道（失败即关闭）。macOS 部分另见 #331。
+
+
 ## 2026-09-23 · Windows App 在 Protected Offline（armed 未验证）期间的 Service 真值再同步
 
 - **归属/来源**：G1 断开/保护状态与实际一致（R2-F2）；影响 Windows App
