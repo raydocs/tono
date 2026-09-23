@@ -32,6 +32,77 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · 睡眠不再把进行中的显式 Restore internet 改写为保留保护+唤醒重连；未 armed 的 teardown 不再宣称 Kill Switch 在护机
+
+- **归属**：G1（断开与恢复：用户明确要求的恢复直连跨睡眠保持，UI 保护状态与真实 PF
+  一致）；macOS 客户端 `apps/macos`。
+- **来源**：分支 `fix/macos-sleep-during-release-20260922`，叠在
+  `fix/macos-tun-switch-guard-20260922`（PR #298）、
+  `fix/macos-external-release-misjudge-20260922`（PR #304）、
+  `fix/macos-optional-policy-reconnect-20260922`（PR #306）、
+  `fix/macos-pending-network-change-20260922`（PR #309）之上，基线同后者；R1-F2，
+  出自 2026-09-22 macOS 连接生命周期并发/时序审查及 V3 对抗核实（已确认：变体 b 确定、
+  变体 a 源码推导级——需睡眠落在 release teardown 窗口内）。提交时未合 main。
+- **缺陷修复**：两个根因面。
+  （1）睡眠路径无视「进行中的 teardown 是显式 release」：用户点 Restore internet 后
+  teardown A（release:true）可阻塞在 `repairForRelease()` 的管理员提示（最长 180 s）；
+  此时合盖，`prepareForSystemSleep` 只看聚合状态（`isProtectionBlocked/isArmed` 均真）→
+  置 `resumeProtectionAfterWake=true` 并入队 preserve teardown B，唤醒后
+  `resumeAfterSystemWake` 再入队 C；用户应答提示后 A 完成释放（PF 打开、`isArmed=false`），
+  但其 `completeDisconnect(A)` 因 requestID 已被 C 取代而被丢弃——A 的
+  `isProtectionBlocked=false` 永不发布；B/C 的 `restrictToBootstrap()` 因 `!isArmed`
+  空转成功却仍发布 Protected Offline（PF 已解除而 UI 报 Kill Switch blocking），唤醒
+  恢复继续 `connect()`——用户的"恢复直连"被整体改写为重新保护+自动重连。修复：
+  `ConnectionCoordinator` 记录 teardown 队列最新请求的 release 意图
+  （`enqueueDisconnect` 置位、最新请求的 `completeDisconnect` 退役、新请求按新意图覆盖，
+  与 `disconnectRequestID` 同一新者胜语义）；`prepareForSystemSleep` 检测到进行中的
+  release 时不置 `resumeProtectionAfterWake`、不入队 preserve teardown（release 自己的
+  `cancelReconnectTasks`/prepare 已做同等清理）；`resumeAfterSystemWake` 检测到时不建
+  `wakeRecoveryTask`、不再入队 C 也不 `connect()`——release 独自收尾并经自身
+  `completeDisconnect` 发布释放状态。`system_will_sleep`/`system_did_wake` 审计事件
+  增加 `release_teardown_in_flight` 字段。
+  （2）`restrictToBootstrap()` 的 `guard isArmed else return` 空转成功被当作"保护已保留"：
+  变体 b（无睡眠也成立）——首次连接尚未完成 stage-1 arm（helper 安装提示打开，
+  `isArmed=false`）时合盖，sleep 路径的 preserve teardown 中 stopCore 失败（helper 不可达
+  → `coreStatus` 不可证 → `coreStopped=false`）→ 报
+  "The protected core could not be stopped. Kill Switch remains active"而机器上没有任何
+  PF 规则；`restrictToBootstrap` 空转 → `completeDisconnect` 置 `isProtectionBlocked=true`。
+  修复：preserve 分支在 `restrictToBootstrap` 后按真实 `KillSwitchService.isArmed` 决定
+  `transitionLeavesProtectionBlocked`（未 armed 的空转不再发布 Protected Offline）；
+  stopCore 失败文案同按 `isArmed` 选择（未 armed 不再声称 Kill Switch remains active）。
+  不放宽保护：`isArmed=true` 的一切语义不变；release 路径（含 stopCore/DNS 失败的
+  不完整释放）与 `restrictToBootstrap` 抛错的 catch 仍 fail-closed 置
+  `isProtectionBlocked=true`；helper 持久化状态可能存在的释放失败场景维持原有
+  保守声明。本修复只消除"未 armed 却宣称已保护"的反向不一致。
+- **新增/优化**：无新能力。`ConnectionCoordinator` 新增内部记录
+  `disconnectQueueReleaseIntent` 与只读查询 `disconnectQueueRequestsRelease`；两个睡眠
+  审计事件各增一个诊断字段。
+- **工程与测试**：新增一个窄 XCTest
+  `AppStateSleepTests.testSleepDuringExplicitReleaseDoesNotConvertItIntoWakeReconnect`
+  （新文件 `apps/macos/TonoTests/AppStateSleepTests.swift`，文件系统同步组自动入 target）：
+  fixture `isConnected=true`、`coreRuntime.isRunning=true`、`KillSwitchService.isArmed=true`，
+  `repairForRelease` seam 挂在门上（显式挂起，非 sleep 轮询），断开路径全部走
+  `networkProtection` seam（stopCore 置 `isRunning=false`、disarm 置 `isArmed=false`、
+  restrictToBootstrap 内置"不得在 release 之上重 arm"canary）；`disconnect(release:true)`
+  → 等 teardown 到达提示 → `prepareForSystemSleep()` + `resumeAfterSystemWake()`（提示
+  未应答，等价合盖再唤醒）→ 断言 `resumeProtectionAfterWake==false`、
+  `wakeRecoveryTask==nil` → 开门让 release 独自完成 → 断言 `isProtectionBlocked==false`、
+  `KillSwitchService.isArmed==false`、`isDisconnecting==false`。当前实现（修复前）三者
+  分别为 true/true/false 且唤醒恢复任务已建立，断言失败。
+- **验证**：编辑机（MacBook，按 2026-09-14 执行位置决定与本 PR 本机限制）只编辑未编译
+  未运行——未执行 `xcodebuild`/`swift build`/`swift test`/`swiftc`；Swift 语法、访问
+  级别与调用链人工自查（含与 #298 armed 快照、#304 重连 loop 前提、#306 调度点、
+  #309 pending 消费的共存核对）。回归委托本 PR CI（GitHub-hosted `macos-26`）；提交时
+  CI 结果未知，不沿用任何旧 SHA 绿灯。准确受测源码为 PR head。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：变体 a 的实机命中率未量化（需睡眠恰落在 release teardown 窗口内，V3
+  已核路径确定）；release 在 helper `PowerTransitionGate` 睡眠窗口内到 `disarm()` 会被
+  拒绝并按既有 fail-closed 保留保护（用户重试 Restore internet），属既有语义非本条
+  引入；唤醒恢复自身在未 armed 主机上的"Re-protecting"过渡文案、以及 helper 崩溃后
+  持久化 PF 与 app `isArmed` 失同步的交互 5 场景不在本条范围（后者释放失败仍保守报
+  Protected Offline）。
+
+## 2026-09-23 · 连接中途到达的系统网络变化不再被丢弃，改为 pending 待窗口结束对账
 ## 2026-09-23 · 连接中途到达的系统网络变化不再被丢弃，改为 pending 待窗口结束对账
 
 - **归属**：G1（断开与恢复：网络切换后受保护会话及时自愈，不依赖 60 s 命令审计兜底）；
