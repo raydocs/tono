@@ -32,6 +32,53 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · 后台可选策略替换失败后必须调度受保护重连
+
+- **归属**：G1（断开与恢复：稳定网络上的 fail-closed 主机不滞留 Protected Offline）；
+  macOS 客户端 `apps/macos`。
+- **来源**：分支 `fix/macos-optional-policy-reconnect-20260922`，叠在
+  `fix/macos-tun-switch-guard-20260922`（PR #298）与
+  `fix/macos-external-release-misjudge-20260922`（PR #304）之上，基线同后者；R1-F4，
+  出自 2026-09-22 macOS 连接生命周期并发/时序审查及 V2 对抗核实（已确认；与 F3 不同
+  根因——F3 是 loop 被误判退出，F4 是 loop 根本没被调度）。提交时未合 main。
+- **缺陷修复**：每次连接成功后 `onCoreStarted → scheduleBackgroundOptionalPolicy →
+  applyOptionalDirectPolicyInBackground` 在共享 config-reload 句柄后执行运行时替换
+  （arm → writeRuntimeConfig → helper `/core/sync` → reload → TUN 验证）；任一步抛错
+  （重启后 8 s TUN 探测失败、`/core/sync` 超时等，弱网最易发生）时 catch 只做
+  `disconnect(releaseKillSwitch:false)` + `errorMessage`，是全代码库唯一不调度
+  `scheduleProtectedReconnect` 的 fail-closed 失败分支（对比 `reloadCoreConfig` 三个
+  catch、`recoverFailedNodeSwitch`、monitor/watchdog/connect 失败路径与唤醒重试耗尽
+  路径）。终态 PF bootstrap-only、`isProtectionBlocked=true`、无重连 loop；稳定网络上
+  无 kick 事件，主机无限期停在 Protected Offline，仅网络抖动或用户 Retry now 能救回。
+  修复：该 catch 补 `scheduleProtectedReconnect()`（非 immediate，与
+  `reloadCoreConfig` 通用 catch 同形同序），loop 接管恢复；`disconnect(release:false)`
+  的 fail-closed 语义与 stale-generation/cancellation 守卫原样保留，loop 从不 disarm，
+  不放宽保护。调度点安全：调用点在 `onCoreStarted` 之后（`isConnected=true`），守卫在
+  disconnect 之前判定 generation；loop 首次尝试先 `finishPendingDisconnect()` 排空本次
+  teardown，不与进行中操作竞争；沿用 F3 修复的 armed 调度快照（本场景 PF 已 armed，
+  loop 以 armed 前提调度，helper wanted=true 时正常 connect）。
+- **新增/优化**：为可测性给 `AppState` 加 `optionalPolicyRuntimeMutation` seam
+  （`() async throws -> Void`，默认 nil 走真实解析+特权替换，生产行为不变；同
+  `tunInterfaceExists`/`networkProtection` 模式）：注入时替代解析段与运行时变更段，
+  准入守卫与 catch 结构保持原位。无其他行为变化。
+- **工程与测试**：新增一个窄 XCTest
+  `OptionalPolicyTests.testBackgroundPolicyFailureSchedulesProtectedReconnect`：
+  fixture `isConnected=true`、`KillSwitchService.isArmed=true`、含一个托管域的策略、
+  抛错的 `optionalPolicyRuntimeMutation`，`NetworkProtectionOperations` 各 seam 空操作；
+  调 `scheduleBackgroundOptionalPolicy()` 后等 config-reload 任务与 teardown 序列完成；
+  断言 `isProtectionBlocked` 与 `errorMessage` 确证 fail-closed 终态，且
+  `isProtectedReconnectScheduled == true`、`connectionCoordinator.protectedReconnectTask
+  != nil`。当前实现（修复前）无任何调度，后两断言失败。
+- **验证**：编辑机（MacBook，按 2026-09-14 执行位置决定）只编辑未编译未运行——未执行
+  `xcodebuild`/`swift build`/`swift test`；Swift 语法、访问级别与调用链人工自查。回归
+  委托本 PR CI（GitHub-hosted `macos-26`，`macos-ci` 由 `apps/macos/**` 路径触发）；
+  提交时 CI 结果未知，不沿用任何旧 SHA 绿灯。准确受测源码为 PR head。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：失败触发为环境性（TUN 探测/`/core/sync` 超时的实机命中率未量化）；
+  R1 审查其余发现（F2、F5、F6）不在本条范围；错误文案仍为内部原文（与
+  `reloadCoreConfig` 的本地化文案对齐留待后续文案统一）。
+
+## 2026-09-23 · 永不 armed 的内部转换不得被重连 loop 判为外部 release
 ## 2026-09-23 · 永不 armed 的内部转换不得被重连 loop 判为外部 release
 
 - **归属**：G1（断开与恢复：用户连接意图不被静默丢弃）；macOS 客户端 `apps/macos`。
