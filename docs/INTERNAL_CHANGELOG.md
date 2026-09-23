@@ -32,6 +32,37 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 原生更新接管后不再搁浅 Connecting 状态机
+
+- **归属/来源**：G3 升级生命周期与连接交错（R2 审查 F3，V5 对抗核实已确认）；基线 main
+  [576d7087](https://github.com/raydocs/tono/commit/576d7087cc54084acef3a4cda15c433ec96bb679)，
+  分支 `fix/windows-update-connecting-fsm-20260922`；
+  [差异与关联 PR](https://github.com/raydocs/tono/compare/main...fix/windows-update-connecting-fsm-20260922)。
+  提交时仍是独立修复分支，未合 main。选 G3 而非 G1：缺陷不在断开/恢复语义本身，而在原生
+  更新事务（Prepare/Install）作废在途连接 attempt 后的收敛缺口；G1 的断开与释放路径未被触碰。
+- **缺陷修复**：`tono_install_update` 下载完成后 `inner.invalidate_connection(false)` 使在途
+  连接事务以 `Attempt::Stale` 返回（按约定不改 FSM），而后续收敛只折叠 `is_connected`
+  （tunnel_died），`resync_after_cancelled_quit` 两侧分支都不命中 connecting——更新失败后
+  FSM 永久停留在 Connecting，connect/retry 全拒，仅手动 Disconnect 可解。现把该收敛抽为
+  `quiesce_connection_after_update(fsm, core_running)`：connecting 未 armed → 回 Not Connected；
+  已 armed → 保留 blocked 闩收敛为 Protected Offline（不放宽保护：更新不是 Disconnect）；
+  Connected 行为保持现状（仅 Service 报 Core 已停时 tunnel_died）。遗留 `tono_prepare_update`
+  （quit.rs）形状相同但前端与 `generate_handler` 均未引用（死代码），本轮不动，留待专门清理。
+- **新增/优化**：无。
+- **工程与测试**：app workspace 新增一个窄回归 `update_quiesce_never_strands_connecting`
+  （update.rs 测试模块），覆盖未 armed → Not Connected 与已 armed → Protected Offline 两个
+  收敛分支；无表驱动套件。tono-core 无改动（复用既有 `initial_release_failed` /
+  `tunnel_died` 转移），三个 Windows workspace 保持分离。
+- **验证**：本机（MacBook）按所有者执行位置决定只做源码编辑与 diff 自查，未运行任何
+  cargo build/test/check（原生构建禁止本机执行）；编译与回归委托本 PR 的 GitHub-hosted
+  `windows-2025` CI（app workspace `cargo test`）。准确源码 SHA 与 CI 结果续记于关联 PR；
+  提交时无本机测试结果，不沿用其他 SHA 的绿灯。
+- **候选/发布**：仅源码，无新候选包；未触碰 `appcast.xml` / `windows/latest.json` /
+  `windows-updates`。
+- **剩余限制**：更新收敛依赖 Service 状态快照应答；Service IPC 完全无应答的极端情形仍保持
+  本地视图（与取消退出路径的既有设计一致）。该缺陷为已核实的源码推导（R2 + V5），修复前
+  未在 Windows 11 实机复现，实机验证仍属 G3 验收范围。
+
 ## 2026-09-23 · Windows App 在 Protected Offline（armed 未验证）期间的 Service 真值再同步
 
 - **归属/来源**：G1 断开/保护状态与实际一致（R2-F2）；影响 Windows App

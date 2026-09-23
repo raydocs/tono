@@ -13,6 +13,7 @@ use std::{
 };
 use tauri::{AppHandle, ipc::Channel};
 use tokio::{io::AsyncWriteExt as _, sync::Mutex};
+use tono_core::connection::ConnectionFsm;
 use tono_service_protocol::{
     update_contract::{Phase, Protection, ReleaseManifest, TargetId},
     update_wire::{DISCOVERY_URL, RELEASE_ROOT, UpdateRequest, UpdateStatus},
@@ -212,18 +213,36 @@ pub async fn tono_install_update(
     if outcome.is_err() && incomplete() {
         let _ = request(UpdateRequest::Status).await;
     }
-    // If preparation stopped Core but failed later, don't leave a Connected UI.
+    // If preparation stopped Core but failed later, don't leave a Connected UI;
+    // and the attempt the update invalidated must never stay Connecting.
     if let Ok(snapshot) = crate::core::service::tono_service_status_snapshot().await {
-        if snapshot.core_pid.is_none() {
-            let mut inner = state.lock().await;
-            if inner.fsm.status().is_connected {
-                inner.fsm.tunnel_died();
-            }
-            super::emit_status(&app, &super::status_of(&inner));
-        }
+        let mut inner = state.lock().await;
+        quiesce_connection_after_update(&mut inner.fsm, snapshot.core_pid.is_some());
+        super::emit_status(&app, &super::status_of(&inner));
     }
     super::quit::resync_after_cancelled_quit(app).await;
     outcome.map_err(|e| format!("Protected update stopped; evidence and protection retained: {e:#}"))
+}
+
+/// Fold the connection FSM once a native update has taken over, whatever the
+/// update outcome then turns out to be.
+///
+/// `tono_install_update` invalidates the connection generation before talking
+/// to the Service, so a connect transaction in flight unwinds with
+/// `Attempt::Stale`, which by contract leaves the FSM untouched — the flow
+/// that bumped the generation owns the cleanup, and this convergence is that
+/// cleanup. An attempt that never armed goes back to Not Connected; an armed
+/// one keeps the blocked latch and lands in Protected Offline: an update is
+/// not a Disconnect and must not loosen protection. A Connected session keeps
+/// its previous behavior — folded only when the Service reports the Core is
+/// no longer running (`core_running == false`).
+fn quiesce_connection_after_update(fsm: &mut ConnectionFsm, core_running: bool) {
+    if fsm.status().is_connecting {
+        // Unarmed → Not Connected; armed → Protected Offline, latch retained.
+        fsm.initial_release_failed();
+    } else if fsm.status().is_connected && !core_running {
+        fsm.tunnel_died();
+    }
 }
 
 pub async fn adopt() -> Result<Option<Protection>> {
@@ -266,4 +285,36 @@ pub async fn commit_if_pending() -> Result<()> {
         request(UpdateRequest::Commit).await?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod update_quiesce_tests {
+    use super::*;
+    use tono_core::connection::UiState;
+
+    /// R2-F3: a connecting attempt the update invalidated must never stay
+    /// Connecting. `Attempt::Stale` does not touch the FSM, `connect()` then
+    /// refuses "already connecting", and Retry treats connecting as a no-op,
+    /// so this convergence is the attempt's only exit short of the user
+    /// clicking Disconnect.
+    #[test]
+    fn update_quiesce_never_strands_connecting() {
+        // Cancelled before StartClash armed the WFP policy.
+        let mut fsm = ConnectionFsm::new();
+        fsm.begin_connect();
+        quiesce_connection_after_update(&mut fsm, false);
+        assert!(!fsm.status().is_connecting);
+        assert_eq!(fsm.status().ui_state(), UiState::NotConnected);
+        assert!(!fsm.kill_switch_armed());
+
+        // Cancelled after arm: the update is not a Disconnect — the blocked
+        // latch survives and the machine lands in Protected Offline.
+        let mut fsm = ConnectionFsm::new();
+        fsm.begin_connect();
+        fsm.mark_kill_switch_armed();
+        quiesce_connection_after_update(&mut fsm, false);
+        assert!(!fsm.status().is_connecting);
+        assert!(fsm.kill_switch_armed());
+        assert_eq!(fsm.status().ui_state(), UiState::ProtectedOffline);
+    }
 }
