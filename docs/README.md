@@ -7,6 +7,8 @@ Start here. Dated handoffs and one-off reviews live in [archive/](archive/).
 | Doc | What it owns |
 |---|---|
 | [INTERNAL_CHANGELOG.md](INTERNAL_CHANGELOG.md) | Internal fixes/features, source and candidate inclusion, verification limits; update in the same delivery PR |
+| [FINDINGS_LEDGER.md](FINDINGS_LEDGER.md) | The single ledger of known findings (open / in-PR / fixed / refuted / accepted-design); read before a review or bug fix, update in the same PR |
+| [reports/REVIEW_ROUNDS_2026-09-23.md](reports/REVIEW_ROUNDS_2026-09-23.md) | Review → verify → fix → diff-review → merge method, coverage and gaps of the 2026-09-22/23 rounds, reusable review constraints |
 | [BUILD_AND_TEST.md](BUILD_AND_TEST.md) | GitHub-hosted CI, MacBook lightweight work, native-device acceptance and cache retention |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Contributor workflow and verification evidence |
 | [../AGENTS.md](../AGENTS.md) | Coding-agent rules; choose an execution host before compiling |

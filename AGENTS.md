@@ -8,6 +8,10 @@ Verge or LiquidClash.
 Read [docs/README.md](docs/README.md) for the document map and
 [docs/architecture.md](docs/architecture.md) for the system map.
 
+Before reviewing code or fixing a bug, read
+[docs/FINDINGS_LEDGER.md](docs/FINDINGS_LEDGER.md) to avoid re-reporting known,
+fixed or refuted findings; update its rows in the same PR that you deliver.
+
 ## Two living plans
 
 | Plan | Owns | Do not |
