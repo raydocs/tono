@@ -32,6 +32,31 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · 目录节点名只接受控制面与客户端解码一致的写法（H10-F1）
+
+- **归属**：ops 控制面安全修复（住宅 home exit 只下发给绑定用户），非客户 ship gate；`services/control-plane`。
+- **来源**：基线 main `be1c75d2` → 分支 `fix/catalog-name-plain-20260923`；Issue #418，内部审查
+  H10-F1；提交时未合 main。与在审 #326 改同一过滤函数的相邻行，建议 #326 先合，本 PR 随后 rebase。
+- **缺陷修复**：
+  - **原问题**：按账户过滤 home exit 时，Worker 用行正则 `catalogProxyName` 读节点名；客户端用
+    YAML 解析器。写入校验不要求两者一致，名字用转义、块标量、行尾注释、续行或与 `proxyName`
+    不同的 Unicode 规范化形式写出时，过滤读到的名字不在限制名单里，已绑定的住宅节点块会下发
+    给所有账户。
+  - **修复**：Worker 没有 YAML 依赖，改为写入时 fail-closed。`PUT exit-catalog` 只接受名字是列表项
+    第一个键、单行纯文本（plain 或无转义的引号）、无注释/锚点/标签/块标量、不续行、NFC、块内只有
+    一个 `name` 键的条目（`catalogProxyPlainName` 读出的名字必须与 `catalogProxyName` 相同）。
+    home exit 的 `proxyName` 写入时规范化为 NFC，与目录名的精确比较一致。
+- **新增/优化**：无。
+- **工程与测试**：`test/worker.test.ts` 新增一个 `it`：内部审查报告中的反例（转义、`\u` 转义、
+  注释内 `{name: …}`、块标量、NFD）各 PUT 一次均 400，纯文本写法发布后未绑定账户拿不到该节点。
+  旧代码上实际跑红（第一个反例 PUT 返回 200），修复后绿。
+- **验证**：MacBook worktree `npx vitest run test/worker.test.ts -t "YAML parser would read differently"`
+  红→绿；control-plane 全量 vitest 43 文件 892 项通过；`tsc --noEmit` 无错误。CI 结果见 PR。
+- **候选/发布**：仅源码，无新候选；Worker 部署需 owner 执行。
+- **剩余限制**：只在写入时校验，生产 D1 中现存目录不会被重新校验（无生产 D1 访问，未确认其写法；
+  现有发布工具输出 plain 名字），建议部署后重新发布一次目录。未要求 home exit 登记时 `proxyName`
+  必须出现在当前目录中。macOS 行解析器与 Windows 的其他差异（丢弃不完整条目等）不在本条。
+
 ## 2026-09-23 · macOS 快照服务不可读时 status 折叠掉 snapshotPresent，断开被无谓拒绝
 
 - **归属/来源**：G1 断开与恢复；macOS `tono-core-helper` 的 `/dns/status`。R3-F4

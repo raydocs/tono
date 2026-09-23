@@ -19,7 +19,9 @@ export function optionalIpv4(value: unknown, field: string): string | null {
 }
 
 export function proxyNameField(value: unknown): string {
-  const name = str(value, 'proxyName', 1, 200).trim();
+  // NFC like every accepted catalog name, so the home-exit filter's exact
+  // comparison cannot miss a block over a different Unicode normalization.
+  const name = str(value, 'proxyName', 1, 200).trim().normalize('NFC');
   if (!name || /[\r\n\0]/.test(name)) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid proxyName');
   }

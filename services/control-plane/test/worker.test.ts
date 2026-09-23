@@ -2928,6 +2928,52 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await adminFetched.json() as any).yaml).toContain('type: hysteria2');
   });
 
+  it('rejects a catalog name a YAML parser would read differently from the home-exit filter', async () => {
+    const catalogWithHomeName = (nameLine: string) => `proxies:
+  - name: Shared JP
+    type: vless
+    server: 1.1.1.1
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+${nameLine}
+    type: vless
+    server: 198.51.100.20
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+`;
+    for (const nameLine of [
+      '  - name: "Home\\x20A"',
+      '  - name: "\\u5BB6\\u5BBD A"',
+      '  - name: Home A # was {name: Shared}',
+      '  - name: >-\n      Home A',
+      '  - name: Café A',
+    ]) {
+      const put = await admin('exit-catalog', { yaml: catalogWithHomeName(nameLine), expectedRevision: 0 }, 'PUT');
+      expect(put.status).toBe(400);
+      expect((await put.json() as any).error.code).toBe('INVALID_CATALOG');
+    }
+
+    expect((await admin(
+      'exit-catalog',
+      { yaml: catalogWithHomeName('  - name: Home A'), expectedRevision: 0 },
+      'PUT',
+    )).status).toBe(200);
+    const home = await admin('home-exits', { proxyName: 'Home A', displayName: 'Home A' });
+    expect(home.status).toBe(201);
+    const owner = await createAccount('plain-name-owner');
+    const other = await createAccount('plain-name-other');
+    expect((await admin(
+      `users/${owner.user.id}/home-binding`,
+      { homeExitId: ((await home.json()) as any).homeExit.id },
+      'PUT',
+    )).status).toBe(201);
+    const otherCatalog = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${other.accessToken}` },
+    });
+    expect(otherCatalog.status).toBe(200);
+    expect((await otherCatalog.json() as any).yaml).not.toContain('198.51.100.20');
+  });
+
   it('binds one home exit per user and filters that proxy from other catalogs', async () => {
     const yaml = `proxies:
   - name: "Shared JP"
