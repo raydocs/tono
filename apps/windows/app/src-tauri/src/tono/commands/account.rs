@@ -404,6 +404,7 @@ where
             inner.challenge_id = None;
             inner.controller_secret = None;
             inner.controller_port = None;
+            connection::remove_legacy_runtime_copy(&inner.catalog_dir);
             if release_result.is_err() {
                 inner.fsm.mark_kill_switch_armed();
             } else {
@@ -610,6 +611,26 @@ mod lifecycle_tests {
         let inner = state.lock().await;
         assert_eq!(inner.account_state, AccountState::Ready);
         assert!(inner.fsm.kill_switch_armed());
+    }
+
+    #[tokio::test]
+    async fn sign_out_removes_the_runtime_copy_that_holds_the_account_exit_credentials() {
+        let state = Arc::new(TonoState::for_test());
+        let copy = {
+            let mut inner = state.lock().await;
+            inner.account_state = AccountState::Ready;
+            std::fs::create_dir_all(&inner.catalog_dir).unwrap();
+            let copy = inner.catalog_dir.join("owned-runtime.redacted.yaml");
+            std::fs::write(&copy, b"proxies:\n- name: Tono-Claude-Home\n  username: account-a\n  password: account-a-secret\n").unwrap();
+            copy
+        };
+        close_account_with(Arc::clone(&state), AccountCloseReason::User,
+            |_| async { Ok(()) }, |_| async { Ok(()) }, |_, _| async {}, |_| {},
+        ).await.unwrap();
+        let inner = state.lock().await;
+        assert_eq!(inner.account_state, AccountState::SignedOut);
+        assert!(!copy.exists(), "the signed-out account's residential credentials must not stay on disk");
+        let _ = std::fs::remove_dir_all(&inner.catalog_dir);
     }
 }
 

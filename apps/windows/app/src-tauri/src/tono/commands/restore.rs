@@ -124,6 +124,7 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
         }
         catalog_sync::seed_from_cache(&mut inner);
         crate::tono::policy_sync::seed_from_cache(&mut inner);
+        connection::remove_legacy_runtime_copy(&inner.catalog_dir);
         emit_status(&app, &status_of(&inner));
         inner.sign_in_generation
     };
