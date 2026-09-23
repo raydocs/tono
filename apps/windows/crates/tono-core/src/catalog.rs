@@ -250,7 +250,8 @@ pub fn validate_catalog(catalog: &ExitCatalogResponse) -> Result<Vec<ValidatedNo
 /// Result of a [`CatalogTracker::install`] call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InstallOutcome {
-    /// Newer revision: validated nodes, ready to swap in.
+    /// Newer revision, or a different body at the same revision: validated
+    /// nodes, ready to swap in.
     Installed(Vec<ValidatedNode>),
     /// Same revision and digest as the installed catalog: idempotent accept.
     Unchanged,
@@ -297,10 +298,13 @@ impl CatalogTracker {
         self.current_digest.as_deref()
     }
 
-    /// Validate `catalog` (steps 1-3) and commit it if its revision is
-    /// strictly newer. Equal revision with a different digest is
-    /// `invalidResponse`; equal revision with the same digest is an
-    /// idempotent no-op.
+    /// Validate `catalog` (steps 1-3) and commit it unless its revision is
+    /// older. Equal revision with the same digest is an idempotent no-op.
+    /// Equal revision with a different digest installs: the revision is
+    /// fleet-wide while the served body is issued per account (client UUID,
+    /// filtered home exits), so it is the next account's or a re-issued
+    /// device's own payload, not a conflicting copy. It has already passed
+    /// the same full validation as any other install.
     pub fn install(
         &mut self,
         catalog: &ExitCatalogResponse,
@@ -309,12 +313,10 @@ impl CatalogTracker {
         if catalog.revision < self.current_revision {
             return Err(CatalogError::StaleRevision);
         }
-        if catalog.revision == self.current_revision {
-            return if self.current_digest == Some(catalog.sha256.clone()) {
-                Ok(InstallOutcome::Unchanged)
-            } else {
-                Err(CatalogError::InvalidResponse)
-            };
+        if catalog.revision == self.current_revision
+            && self.current_digest.as_deref() == Some(catalog.sha256.as_str())
+        {
+            return Ok(InstallOutcome::Unchanged);
         }
         self.current_revision = catalog.revision;
         self.current_digest = Some(catalog.sha256.clone());
@@ -981,20 +983,23 @@ mod tests {
     }
 
     #[test]
-    fn tracker_same_revision_different_digest_is_invalid() {
+    fn tracker_same_revision_different_digest_installs_the_new_body() {
+        // The control plane keeps one fleet-wide revision but issues the body
+        // per account, so the next account at the same revision is a new
+        // install, not tampering.
         let mut tracker = CatalogTracker::new();
         tracker.install(&valid_catalog(5)).unwrap();
-        let conflicting = catalog_with_yaml(
+        let next_account = catalog_with_yaml(
             5,
             &format!(
                 "proxies:\n{}",
                 NODE_YAML.replace("US Reality 01", "Other Name")
             ),
         );
-        assert_eq!(
-            tracker.install(&conflicting).unwrap_err(),
-            CatalogError::InvalidResponse
-        );
+        let outcome = tracker.install(&next_account).unwrap();
+        assert!(matches!(outcome, InstallOutcome::Installed(ref nodes) if nodes[0].name == "Other Name"));
+        assert_eq!(tracker.current_revision(), 5);
+        assert_eq!(tracker.current_digest(), Some(next_account.sha256.as_str()));
     }
 
     #[test]

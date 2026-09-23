@@ -412,6 +412,7 @@ where
             inner.network_events_counter = None;
             inner.catalog_last_synced_at_ms = None;
             inner.catalog_sync_error = None;
+            catalog_sync::discard_account_catalog(&mut inner);
             finalized = true;
             state.audit().log(AuditEvent::SignOut);
             release_result
@@ -505,6 +506,50 @@ mod lifecycle_tests {
         ).await.unwrap();
         assert_eq!(state.lock().await.account_state, AccountState::SignedOut);
         assert_eq!(vault.durable.refresh_token().unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn sign_out_discards_the_account_issued_catalog() {
+        let state = Arc::new(TonoState::for_test());
+        let cache_path = {
+            let mut inner = state.lock().await;
+            inner.account_state = AccountState::Ready;
+            inner.catalog_tracker = tono_core::CatalogTracker::from_installed(7, "account-a".into());
+            inner.nodes = vec![tono_core::node::ValidatedNode {
+                name: "Tokyo · Sakura".into(),
+                server: std::net::Ipv4Addr::new(8, 8, 8, 8),
+                port: 443,
+                uuid: "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d".into(),
+                servername: "www.microsoft.com".into(),
+                flow: None,
+                client_fingerprint: None,
+                reality_public_key: "0123456789abcdef0123456789abcdef0123456789a".into(),
+                reality_short_id: "0123456789abcdef".into(),
+                protocol: tono_core::node::NodeProtocol::VlessReality,
+                tls_fingerprint: None,
+            }];
+            inner.routing = Some(tono_core::CatalogRouting {
+                home_socks5: Some(tono_core::CatalogHomeSocks5 {
+                    host: "203.0.113.9".into(), port: 1080,
+                    username: "account-a".into(), password: "account-a-secret".into(),
+                }),
+                ..Default::default()
+            });
+            let path = inner.catalog_cache().path().to_path_buf();
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, b"{}").unwrap();
+            path
+        };
+        close_account_with(Arc::clone(&state), AccountCloseReason::User,
+            |_| async { Ok(()) }, |_| async { Ok(()) }, |_, _| async {}, |_| {},
+        ).await.unwrap();
+        let inner = state.lock().await;
+        assert_eq!(inner.account_state, AccountState::SignedOut);
+        assert!(inner.nodes.is_empty(), "the next account must not dial this account's exits");
+        assert!(inner.routing.is_none(), "residential credentials must not survive sign-out");
+        assert_eq!(inner.catalog_tracker.current_revision(), -1);
+        assert!(!cache_path.exists(), "restart must not reseed the signed-out account's catalog");
+        let _ = std::fs::remove_dir_all(&inner.catalog_dir);
     }
 
     #[tokio::test(start_paused = true)]
