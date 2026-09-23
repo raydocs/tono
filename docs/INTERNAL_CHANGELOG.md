@@ -36,7 +36,7 @@
 
 - **归属**：G3 受保护升级；Windows Service 更新事务（`apps/windows/service`）+ 协议文档。
 - **来源**：基线 main `498ed426`（含 #301）→ 分支 `fix/update-replaced-release-20260923`；
-  Issue #358；PR 见续记；提交时未合 main。
+  Issue #358；PR #359；提交时未合 main。
 - **缺陷修复（R4-F7，源码推导，非 #301 引入）**：升级已完成并被新 App 收养（Replaced）
   后自动重连失败、用户点 Restore internet → Disconnect 已验证、网络已释放，但 Disconnect
   handler 只归档未消费与 RolledBack/Uncertain，Replaced 永久 pending；此后连接、
@@ -68,6 +68,9 @@
 - **剩余限制**：Windows 11 实机「升级后重连失败 → Restore internet → 可再连接/再更新」
   未验收；恢复判定 TargetVerified 与 `retire_rolled_back` 的逐成员校验另行修复
   （#301 跟进项 2）；App 侧 Disconnect 二次确认未做。
+- **续记（2026-09-23）**：PR #359 源码 `7c6ccf00` 的 GitHub-hosted `windows-2025` lane
+  全绿（service / app / app-rust / core）；service lane 日志确认新增 `#[test]` 运行并通过
+  （314 passed）。CI 绿不等于设备验证或已发布。
 
 ## 2026-09-23 · Windows 升级事务中断后无终态/误回滚的结构修复（F1/F4/F6）
 
