@@ -981,6 +981,15 @@ mod tests {
     }
 
     #[test]
+    fn unsigned_policy_cannot_carve_media_endpoints() {
+        // Mac parity: the unsigned media allowlist ships empty, so only a
+        // signed document may take an exact IP:port out of the tunnel.
+        let doc = policy_json("", r#"{"address":"9.0.0.9","ports":[443]}"#);
+        let policy = validate_policy(&response(1, &doc), &no_protected()).unwrap();
+        assert!(policy.media_endpoints.is_empty());
+    }
+
+    #[test]
     fn accepts_v2_exact_web_and_rejects_v1_web() {
         let v2 = r#"{"version":2,"domains":[],"mediaEndpoints":[],"webDomains":[{"host":"video.bilibili.com","ports":[443]},{"host":"ykimg.alicdn.com","ports":[443]}]}"#;
         let policy = validate_policy(&response(1, v2), &no_protected()).unwrap();
