@@ -398,7 +398,10 @@ mod account_close_tests {
 pub async fn tono_retry_restore(state: tauri::State<'_, Arc<TonoState>>, app: AppHandle) -> Result<(), String> {
     state.audit().log(AuditEvent::RetryRestore);
     load_credentials(state.inner()).await;
-    restore_session(app, state.inner().clone()).await;
+    restore_session(app.clone(), state.inner().clone()).await;
+    // R2-F2: a retried restore can re-enter armed Protected Offline just like the startup
+    // pass; keep the Service-truth poll registered for whatever state it settled on.
+    connection::ensure_protection_resync(state.inner(), &app).await;
     Ok(())
 }
 
@@ -426,4 +429,10 @@ pub async fn restore_session_guarded(app: AppHandle, state: Arc<TonoState>) {
             emit_status(&app, &status_of(&inner));
         }
     }
+    // R2-F2: startup restore is the surviving-App entry into armed-unverified Protected
+    // Offline (`apply_stored_protection` on an Armed/Unknown probe, an account error that
+    // keeps protection, or a release the dead-session cleanup failed to prove). Whatever
+    // idle blocked state restore settled on must hold its Service-truth poll: a later
+    // Service restart retires an unverified barrier and nothing else would re-read that.
+    connection::ensure_protection_resync(&state, &app).await;
 }

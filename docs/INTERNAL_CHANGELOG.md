@@ -32,6 +32,46 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows App 在 Protected Offline（armed 未验证）期间的 Service 真值再同步
+
+- **归属/来源**：G1 断开/保护状态与实际一致（R2-F2）；影响 Windows App
+  （`apps/windows/app`，三个 Windows workspace 保持分离）。基线 main
+  [576d7087](https://github.com/raydocs/tono/commit/576d7087cc54084acef3a4cda15c433ec96bb679)，
+  分支 `fix/windows-service-restart-resync-20260922`
+  （[与 main 的差异](https://github.com/raydocs/tono/compare/main...fix/windows-service-restart-resync-20260922)，
+  PR 随后在该分支上创建）；提交时未合 main。
+- **缺陷修复**：App 存活并显示 Protected Offline（armed 未验证）期间 Service 重启时，
+  Service 启动路径 `retire_unverified_windows_kill_switch`（`bin/service.rs` →
+  `retire_unverified_on_service_start` → `disarm_unlocked`）会自动删除全部 WFP 过滤器并
+  恢复 DNS，而 App 侧核实无任何再同步路径（monitor 仅 `is_connected` 时运行、自动重连需
+  `session_verified`、`tono_status` 只回缓存、restore 探测只在启动、IPC 每请求新建管道无
+  断线回调），UI 持续显示"已封锁"而机器已明文开放——I3 明文禁止的反向不一致。修复两部分：
+  (1) 把 `resync_after_cancelled_quit` 里的 KillSwitchStatus → FSM 折叠抽成
+  `apply_service_kill_switch`（`commands/quit.rs`），quit 路径与轮询共用同一语义；
+  (2) 新增有界 Service 真值轮询 `protection_resync_loop`（`connection/monitor.rs`，30 s 一次
+  读 `/status` 的 kill_switch 聚合），FSM 处于空闲 Protected Offline（armed 未验证为原始
+  形态，推广到全部 protection_blocked idle）时经 `TaskRegistry.protection_resync` 注册，
+  离开该状态即撤销（registry abort + 循环自退，无常驻线程）；注册点为全部可达入口：
+  连接失败收敛尾、节点消失/冷切换、启动与重试 restore 尾、释放协调 settled 回调、取消退出
+  resync。只在 Service 亲口证明 `wanted=false` 时收敛 FSM 到 Not Connected 并清闩；读不到
+  状态保持原状（fail-closed，不放宽保护）；IPC 在途代际变动时不折叠陈旧读数。
+- **新增/优化**：无客户可见新功能；仅上述再同步任务与 TaskRegistry 槽位。
+- **工程与测试**：新增一个回归
+  `protected_offline_converges_when_the_service_proves_the_barrier_gone`
+  （`connection/monitor.rs`，`#[tokio::test]`，无 AppHandle 依赖的 spawn 注入）：armed-unverified
+  idle 夹具断言 (a) TaskRegistry 持有 protection 轮询句柄（修复前该槽位不存在，必失败）、
+  (b) `apply_service_kill_switch(…, Some(wanted=false))` 后 `!kill_switch_armed` 且
+  `ui_state == NotConnected`（锁住折叠语义）。W4/W5/W10 已修项（release 所有权、元数据收尾、
+  55 s UI 等待）行为不变。
+- **验证**：本机（MacBook，编辑机）按 AGENTS.md 执行地点约束未运行任何
+  cargo build/test/check/clippy；回归与编译委托本 PR 的 GitHub-hosted `windows-2025`
+  CI（app workspace `cargo test`）。源码自查基于逐文件比对，不声称本机已验证。
+- **候选/发布**：无新包，仅源码；不涉及 Sparkle/windows 更新源。
+- **剩余限制**：`commands/account.rs` 登出/关闭的 release 失败分支（`initial_release_failed`
+  保闩）本轮未挂轮询注册——该文件属于 F1（release 被拒后 FSM 闩推断）的修复范围，届时与
+  `apply_service_kill_switch` 一并复用；实机"Service 重启 + 存活 App"组合夹具仍缺
+  （known-findings §6），本轮以源码级路径与单测覆盖。
+
 ## 2026-09-22 · Windows 拒绝释放后的连接 FSM 保护可见性
 
 - **归属/来源**：G1 断开与恢复——断开后保护状态必须两端一致；本条修的是 Service

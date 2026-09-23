@@ -19,7 +19,7 @@ use crate::tono::{
         network_event_fires, protected_dns_unhealthy,
     },
     connection_plan::{guard_rejection_is_transient, reconnect_allowed},
-    state::TonoState,
+    state::{TonoInner, TonoState},
 };
 use super::{
     Attempt, BoxedTask, MAX_DIRECT_SAMPLES, MAX_PROTECTED_ROUTE_SAMPLES, ProtectedRouteAggregate,
@@ -478,6 +478,186 @@ pub(super) async fn spawn_network_monitor(state: &Arc<TonoState>, app: &AppHandl
     let mut inner = state.lock().await;
     inner.tasks.abort_network_monitor();
     inner.tasks.network_monitor = Some(handle);
+}
+
+/// R2-F2: Service-truth poll cadence while the FSM idles in Protected Offline. The
+/// connected-lifetime monitor above is the opposite regime (it runs only while
+/// `is_connected`), and the reconnect ladder needs `session_verified` — so an armed but
+/// unverified barrier sat unwatched, and a Service restart that retired it
+/// (`retire_unverified_on_service_start`) left the UI claiming "blocked" over an open
+/// machine for as long as the app lived. One bounded local IPC read per interval, alive
+/// only while the state holds.
+pub(super) const PROTECTION_RESYNC_INTERVAL: Duration = Duration::from_secs(30);
+
+/// The state the Service-truth poll watches: Protected Offline with no transaction in flight
+/// (armed-unverified in the defect's original shape; verified sessions cost nothing extra and
+/// their Service truth deserves the same answer). Exactly the state whose "this machine is
+/// blocked" claim can outlive the barrier itself.
+pub(super) fn protection_resync_watches(status: &tono_core::connection::ConnectionStatus) -> bool {
+    status.is_protection_blocked
+        && !status.is_connected
+        && !status.is_connecting
+        && !status.is_disconnecting
+}
+
+/// Construct the Service-truth poll task. Split from [`ensure_protection_resync_locked`] so
+/// regressions can register a fixture task without a Tauri `AppHandle`.
+pub(crate) fn spawn_protection_resync(
+    state: &Arc<TonoState>,
+    app: &AppHandle,
+) -> tauri::async_runtime::JoinHandle<()> {
+    let task_state = Arc::clone(state);
+    let task_app = app.clone();
+    AsyncHandler::spawn(move || Box::pin(protection_resync_loop(task_state, task_app)) as BoxedTask)
+}
+
+/// Register the Service-truth poll when the FSM idles in Protected Offline, retire it when it
+/// does not. Idempotent: a live poll is left alone and a finished handle is replaced. The
+/// registry abort plus the loop's own exit check (defense in depth) keep this from ever
+/// becoming a resident task.
+pub(crate) fn ensure_protection_resync_locked(
+    inner: &mut TonoInner,
+    spawn: impl FnOnce() -> tauri::async_runtime::JoinHandle<()>,
+) {
+    if !protection_resync_watches(inner.fsm.status()) {
+        inner.tasks.abort_protection_resync();
+        return;
+    }
+    if inner
+        .tasks
+        .protection_resync
+        .as_ref()
+        .is_some_and(|handle| !handle.inner().is_finished())
+    {
+        return;
+    }
+    inner.tasks.abort_protection_resync();
+    inner.tasks.protection_resync = Some(spawn());
+}
+
+/// Lock-free-caller wrapper for tails that do not hold the product guard (startup restore).
+pub(crate) async fn ensure_protection_resync(state: &Arc<TonoState>, app: &AppHandle) {
+    let mut inner = state.lock().await;
+    ensure_protection_resync_locked(&mut inner, || spawn_protection_resync(state, app));
+}
+
+/// The bounded Service-truth poll for idle Protected Offline (R2-F2). Every tick reads the
+/// Service's own kill-switch verdict and folds it through the same
+/// `apply_service_kill_switch` the cancelled-quit resync uses. Convergence is strictly
+/// Service-proven — `wanted=false` is the only reading that releases the UI, and an
+/// unanswered Service changes nothing — so this can never loosen protection; it only stops
+/// the UI from claiming a barrier the Service already retired. Exits when the state is left;
+/// a generation move during an in-flight read defers to the next tick instead of folding
+/// stale evidence.
+async fn protection_resync_loop(state: Arc<TonoState>, app: AppHandle) {
+    let mut interval = tokio::time::interval(PROTECTION_RESYNC_INTERVAL);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // Consume the immediate first tick: the entry path just took its own Service reading (a
+    // refused release, a startup protection probe), so the first poll belongs one interval out.
+    interval.tick().await;
+    loop {
+        interval.tick().await;
+        let generation = {
+            let inner = state.lock().await;
+            if !protection_resync_watches(inner.fsm.status()) {
+                // Left idle Protected Offline (Connected, a new attempt, a release): its owner
+                // retires this task; nothing here may outlive the state that justified it.
+                return;
+            }
+            inner.connect_generation
+        };
+        let kill_switch = service::tono_service_status_snapshot()
+            .await
+            .ok()
+            .and_then(|snapshot| snapshot.kill_switch);
+        let mut inner = state.lock().await;
+        if inner.connect_generation != generation {
+            // A transition was admitted while the IPC was in flight. Folding a pre-transition
+            // reading could release the UI over a barrier that was re-armed in between; the
+            // next tick re-reads under the new generation instead.
+            continue;
+        }
+        if !protection_resync_watches(inner.fsm.status()) {
+            return;
+        }
+        let previous_kill_switch = inner.kill_switch.clone();
+        let previous_status = inner.fsm.status().clone();
+        let service_disarmed = matches!(&kill_switch, Some(status) if !status.wanted);
+        commands::quit::apply_service_kill_switch(&mut inner, kill_switch);
+        if service_disarmed {
+            logging!(
+                info,
+                Type::Service,
+                "Tono: Service 已证明 WFP 解除（服务重启退休了未验证屏障，或释放已完成），Protected Offline 收敛为未连接"
+            );
+        }
+        if inner.kill_switch != previous_kill_switch || inner.fsm.status() != &previous_status {
+            commands::emit_status(&app, &commands::status_of(&inner));
+        }
+        if service_disarmed {
+            return;
+        }
+    }
+}
+
+#[cfg(test)]
+mod protection_resync_tests {
+    use super::*;
+    use tono_core::connection::UiState;
+    use tono_service_protocol::{KillSwitchStatus, KillSwitchStatusMode};
+
+    /// R2-F2 regression, both halves of the fix:
+    /// (a) the trigger — entering armed-unverified idle Protected Offline must leave a
+    ///     registered Service-truth poll handle in the task registry (the defect: the slot did
+    ///     not exist and nothing ever re-read the Service while the app lived);
+    /// (b) the fold — a Service reading of `wanted=false` is the only reading that converges
+    ///     this FSM to Not Connected with the armed latch cleared (the quit path's semantics,
+    ///     now shared by the poll).
+    #[tokio::test]
+    async fn protected_offline_converges_when_the_service_proves_the_barrier_gone() {
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            // First connect armed the barrier, the session never verified, and the initial
+            // full release was refused: the exact fixture of the defect.
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.initial_release_failed();
+            assert_eq!(inner.fsm.status().ui_state(), UiState::ProtectedOffline);
+            assert!(!inner.fsm.session_verified());
+            ensure_protection_resync_locked(&mut inner, || {
+                tauri::async_runtime::spawn(std::future::pending::<()>())
+            });
+        }
+        {
+            let inner = state.lock().await;
+            assert!(
+                inner.tasks.protection_resync.is_some(),
+                "idle Protected Offline must hold a registered Service-truth poll handle"
+            );
+        }
+        state.lock().await.tasks.abort_protection_resync();
+
+        // The Service restarted and retired the unverified barrier: its own reading says the
+        // barrier is not wanted, and only that reading may release the UI.
+        let service_disarmed = KillSwitchStatus {
+            wanted: false,
+            verified: false,
+            live: false,
+            mode: KillSwitchStatusMode::Blocked,
+            tunnel_permit_rendered: false,
+            endpoints: Vec::new(),
+            direct_endpoint_digest: String::new(),
+            last_error: None,
+        };
+        let mut inner = state.lock().await;
+        crate::tono::commands::quit::apply_service_kill_switch(&mut inner, Some(service_disarmed));
+        assert!(
+            !inner.fsm.kill_switch_armed(),
+            "the Service proved the barrier gone; the armed latch must clear"
+        );
+        assert_eq!(inner.fsm.status().ui_state(), UiState::NotConnected);
+    }
 }
 
 /// F2 leg 2: periodically repeat the same authoritative multi-origin real App request used at
