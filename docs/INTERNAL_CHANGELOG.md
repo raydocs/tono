@@ -31,6 +31,27 @@
 - 候选/发布：无新包，或标签、包源码、下载入口、SHA-256、签名及发布状态。
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
+## 2026-09-23 · Windows 未签名策略的 media 端点不再放行（H3-F6）
+
+- **归属/来源**：G1 保护不放宽（签名才可扩大绕行面）；影响 Windows tono-core
+  （`apps/windows/crates/tono-core/src/policy.rs`）。基线 main 49c82dde，分支
+  `fix/windows-unsigned-media-20260923`；Issue #318；提交时未合 main。
+- **缺陷修复**：`validate_policy_with_trust` 对 `mediaEndpoints` 不看 `trusted`，未签名
+  策略里任意公网 IPv4 都会变成 WeChat 进程名集合的 UDP DIRECT 规则与 WFP 精确许可；macOS
+  未签名 IPv4 白名单为空、全部丢弃。改后 Windows 未签名文档的 media 端点一律丢弃，签名文档
+  行为不变（仍要求公网 IPv4、非永久保护、非选中节点、端口 443/8000）。
+- **新增/优化**：无。
+- **工程与测试**：新增回归 `unsigned_policy_cannot_carve_media_endpoints`。测试契约修正：
+  `accepts_valid_document_and_normalizes` 原断言未签名 media 被接受（把错误行为写成契约），
+  改为在 trusted 下断言规范化；`rejects_media_port_and_duplicate_violations`、
+  `rejects_disallowed_and_protected_addresses` 改为 trusted，避免因"未签名全丢"而变成空断言。
+- **验证**：红灯：只含新测试的提交在 GitHub-hosted `ubuntu-24.04` Windows CI core 作业
+  （run 35842653037）以断言失败（`policy.rs:989`，265 过 1 败）；修复后结果见 PR CI。
+  本机未运行 cargo（AGENTS 执行地点约束）。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：Worker canonical 仍接受未签名任意公网 media（应改为 signatureRequired），
+  未在本 PR 处理；非 Windows 11 实机验证。
+
 
 ## 2026-09-23 · macOS 升级开机竞态：执行器 bootout 停 Helper 不再误装紧急 PF 阻断
 
