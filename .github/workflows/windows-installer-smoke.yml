@@ -7,6 +7,14 @@ on:
         description: Successful Windows candidate installer run (empty selects latest on this branch)
         type: string
         required: false
+      diagnose_helper:
+        description: Diagnose only the frozen 35691265073 helper; NOT NSIS repair acceptance
+        type: boolean
+        default: false
+      diagnostic_drive_root:
+        description: Helper diagnostic only - compare a drive-root cwd instead of installed resources
+        type: boolean
+        default: false
   push:
     branches: ['stability/desktop-0.0.72-20260908']
     paths:
@@ -19,11 +27,14 @@ permissions:
 
 jobs:
   install-repair-uninstall:
+    name: ${{ inputs.diagnose_helper && 'Frozen helper diagnostic (not repair acceptance)' || 'Install, repair and uninstall' }}
     runs-on: windows-2025
     timeout-minutes: 20
     env:
       GH_TOKEN: ${{ github.token }}
       CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+      DIAGNOSE_HELPER: ${{ inputs.diagnose_helper }}
+      DIAGNOSTIC_DRIVE_ROOT: ${{ inputs.diagnostic_drive_root }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Fetch only a successful same-source candidate artifact
@@ -32,6 +43,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           $id = $env:CANDIDATE_RUN_ID
+          $diagnostic = $env:DIAGNOSE_HELPER -eq 'true'
+          if ($env:DIAGNOSTIC_DRIVE_ROOT -eq 'true' -and -not $diagnostic) { throw 'Working-directory comparison is diagnostic-only.' }
+          if ($diagnostic -and $id -ne '35691265073') { throw 'Helper diagnostic requires the frozen failing candidate run.' }
           if ([string]::IsNullOrWhiteSpace($id)) {
             $runs = gh run list --workflow windows-candidate.yml --branch $env:GITHUB_REF_NAME --status success --limit 1 --json databaseId | ConvertFrom-Json
             if ($runs.Count -ne 1) { throw 'No successful candidate installer exists on this branch.' }
@@ -39,7 +53,12 @@ jobs:
           }
           if ($id -notmatch '^\d+$') { throw 'Candidate run ID must be numeric.' }
           $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$id" | ConvertFrom-Json
-          if ($run.conclusion -ne 'success' -or $run.head_branch -ne $env:GITHUB_REF_NAME -or $run.path -ne '.github/workflows/windows-candidate.yml' -or $run.head_repository.full_name -ne $env:GITHUB_REPOSITORY) { throw 'Candidate provenance does not match this branch/repository/workflow.' }
+          if ($run.conclusion -ne 'success' -or $run.path -ne '.github/workflows/windows-candidate.yml' -or $run.head_repository.full_name -ne $env:GITHUB_REPOSITORY) { throw 'Candidate provenance does not match this repository/workflow.' }
+          if ($diagnostic) {
+            # Diagnostic tooling may differ; the product bytes must be this exact prior
+            # main candidate. The normal same-branch acceptance path is unchanged.
+            if ($run.head_branch -ne 'main' -or $run.head_sha -ne '25e56707f91c3c6c69a30b4d76b46e087543c99e') { throw 'Not the frozen main candidate.' }
+          } elseif ($run.head_branch -ne $env:GITHUB_REF_NAME) { throw 'Candidate provenance does not match this branch.' }
           $source = $run.head_sha
           git fetch --depth=1 origin $source
           foreach ($path in @('apps/windows', 'tooling/scripts/build-mihomo-adaptive.sh', 'tooling/scripts/mihomo-adaptive', '.github/workflows/windows-candidate.yml', '.github/workflows/windows-core.yml')) {
@@ -51,14 +70,20 @@ jobs:
           gh run download $id --name "tono-windows-0.0.73-candidate-$source" --dir $output
           $manifest = Get-Content (Join-Path $output 'candidate-manifest.json') -Raw | ConvertFrom-Json
           if ($manifest.source -ne $source) { throw 'Artifact manifest source does not match its workflow run.' }
+          if ($diagnostic) {
+            $installer = Join-Path $output 'Tono_0.0.73_x64-setup.exe'
+            if ((Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'fbc84460c68258585530c58f1200c52b44bfce40c51fbc2c96e23aa6acdb2d61') { throw 'Frozen installer digest mismatch.' }
+          }
           "CANDIDATE_DIRECTORY=$output" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
       - name: Install, repair and uninstall on the ephemeral administrator runner
         shell: pwsh
-        run: tooling/scripts/test-windows-candidate-install.ps1 -CandidateDirectory $env:CANDIDATE_DIRECTORY
+        run: tooling/scripts/test-windows-candidate-install.ps1 -CandidateDirectory $env:CANDIDATE_DIRECTORY -DiagnoseHelper:($env:DIAGNOSE_HELPER -eq 'true') -DiagnosticDriveRoot:($env:DIAGNOSTIC_DRIVE_ROOT -eq 'true')
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
           name: windows-installer-smoke-${{ github.sha }}
-          path: ${{ runner.temp }}/tono-installer-smoke.json
+          path: |
+            ${{ runner.temp }}/tono-installer-smoke.json
+            ${{ runner.temp }}/tono-installer-helper.*.log
           if-no-files-found: warn
           retention-days: 7

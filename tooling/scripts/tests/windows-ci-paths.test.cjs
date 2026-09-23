@@ -77,3 +77,29 @@ test('Windows candidate build and installer smoke agree with the product version
   const installer = readFileSync(path.join(root, 'tooling/scripts/test-windows-candidate-install.ps1'), 'utf8')
   assert.equal(installer.match(/\$manifest\.version -ne '([^']+)'/)?.[1], version)
 })
+
+test('helper diagnosis pins the prior artifact without claiming NSIS repair acceptance', () => {
+  const smoke = load(readFileSync(path.join(root, '.github/workflows/windows-installer-smoke.yml'), 'utf8'))
+  assert.equal(smoke.on.workflow_dispatch.inputs.diagnose_helper.default, false)
+  assert.equal(smoke.on.workflow_dispatch.inputs.diagnostic_drive_root.default, false)
+  assert.deepEqual(smoke.permissions, { contents: 'read', actions: 'read' })
+  const job = smoke.jobs['install-repair-uninstall']
+  assert.equal(job['runs-on'], 'windows-2025')
+  const fetch = job.steps.find(step => step.run?.includes('gh run download')).run
+  assert.ok(fetch.includes("$diagnostic -and $id -ne '35691265073'"))
+  assert.ok(fetch.includes("$run.head_branch -ne 'main' -or $run.head_sha -ne '25e56707f91c3c6c69a30b4d76b46e087543c99e'"))
+  assert.ok(fetch.includes('fbc84460c68258585530c58f1200c52b44bfce40c51fbc2c96e23aa6acdb2d61'))
+  assert.ok(fetch.includes('elseif ($run.head_branch -ne $env:GITHUB_REF_NAME)'))
+  assert.ok(fetch.includes('if ($built -ne $current) { throw'))
+  const installer = readFileSync(path.join(root, 'tooling/scripts/test-windows-candidate-install.ps1'), 'utf8')
+  assert.ok(installer.includes("$env:RUNNER_ENVIRONMENT -ne 'github-hosted'"))
+  assert.ok(installer.includes("if ($DiagnosticDriveRoot -and -not $DiagnoseHelper) { throw"))
+  const diagnostic = installer.split('    if ($DiagnoseHelper) {')[1].split('    } else {')[0]
+  assert.ok(diagnostic.includes("-ArgumentList '--replace-runtime'"))
+  assert.ok(diagnostic.includes('if ($helperProcess.ExitCode -ne 0) { throw'))
+  assert.ok(!diagnostic.includes('$report.sameVersionRepair = $true'))
+  assert.match(installer, /} else \{\s+Invoke-Installer \$installer '\/S \/UPDATE'\s+Assert-Installed\s+\$report.sameVersionRepair = \$true/)
+  const upload = job.steps.find(step => step.uses?.startsWith('actions/upload-artifact@'))
+  assert.equal(upload.if, 'always()')
+  assert.ok(upload.with.path.includes('tono-installer-helper.*.log'))
+})

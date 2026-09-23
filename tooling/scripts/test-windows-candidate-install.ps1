@@ -1,5 +1,9 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$CandidateDirectory)
+param(
+    [Parameter(Mandatory)][string]$CandidateDirectory,
+    [switch]$DiagnoseHelper,
+    [switch]$DiagnosticDriveRoot
+)
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
 # This changes Service/installation state. It must never run on the owner's PC
@@ -7,6 +11,7 @@ $PSNativeCommandUseErrorActionPreference = $true
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') {
     throw 'Installer smoke tests require an ephemeral GitHub-hosted Windows runner.'
 }
+if ($DiagnosticDriveRoot -and -not $DiagnoseHelper) { throw 'Working-directory comparison is diagnostic-only.' }
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Administrator runner required.' }
 function Test-TonoServiceExists {
@@ -56,16 +61,53 @@ function Assert-Installed {
 }
 $beforeDns = Dns-State
 $report = [ordered]@{ source = $manifest.source; version = $manifest.version; freshInstall = $false; sameVersionRepair = $false; uninstall = $false; dnsUnchanged = $false; physicalUpgradeQualified = $false }
+$report['diagnosticOnly'] = [bool]$DiagnoseHelper
+$report['harnessSource'] = $env:GITHUB_SHA
+$helperProcess = $null
 $out = Join-Path $env:RUNNER_TEMP 'tono-installer-smoke.json'
 try {
     Invoke-Installer $installer '/S'
     Assert-Installed
     $report.freshInstall = $true
     Write-Output 'PASS fresh silent install, Service running, installed Core pin, no GUI auto-launch'
-    Invoke-Installer $installer '/S /UPDATE'
-    Assert-Installed
-    $report.sameVersionRepair = $true
-    Write-Output 'PASS same-version replacement/repair and Service restart'
+    if ($DiagnoseHelper) {
+        # Reproduce the helper layer once, NOT after an NSIS failure. In particular,
+        # never retry exit 76, which may have retained a Failed journal. Stage the
+        # exact installed same-version bytes just as NSIS stages its .next payloads.
+        $helper = Join-Path $target 'resources/tono-service-install.exe'
+        $helperPin = @($manifest.files | Where-Object name -eq 'tono-service-install.exe')
+        if ($helperPin.Count -ne 1 -or (Get-FileHash $helper -Algorithm SHA256).Hash.ToLowerInvariant() -ne $helperPin[0].sha256) { throw 'Installed helper digest differs from candidate.' }
+        foreach ($name in @('Tono.exe', 'tono-core.exe')) {
+            $live = Join-Path $target $name
+            if (Test-Path "$live.next") { throw "Refusing preexisting staged payload: $live.next" }
+            Copy-Item -LiteralPath $live -Destination "$live.next"
+        }
+        $stdout = Join-Path $env:RUNNER_TEMP 'tono-installer-helper.stdout.log'
+        $stderr = Join-Path $env:RUNNER_TEMP 'tono-installer-helper.stderr.log'
+        $helperDirectory = Split-Path $helper
+        if ($DiagnosticDriveRoot) { $helperDirectory = [IO.Path]::GetPathRoot($target) }
+        $report['systemDrive'] = $env:SystemDrive
+        $report['helperWorkingDirectory'] = $helperDirectory
+        Write-Output 'DIAGNOSTIC ONLY: original installed helper --replace-runtime; no NSIS repair acceptance'
+        Write-Output "SystemDrive=$env:SystemDrive; helper working directory=$helperDirectory"
+        $helperProcess = Start-Process -FilePath $helper -ArgumentList '--replace-runtime' -WorkingDirectory $helperDirectory -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+        if (-not $helperProcess.WaitForExit(300000)) {
+            # Do not kill Rust in the middle of rollback or start a competing cleanup.
+            # The hosted job is disposable; its timeout must not become device proof.
+            throw 'Replacement helper did not settle within five minutes; no retry or forced termination.'
+        }
+        $report['helperExitCode'] = $helperProcess.ExitCode
+        Get-Content -LiteralPath $stdout, $stderr -Tail 80 | Write-Output
+        if ($helperProcess.ExitCode -ne 0) { throw "Original replacement helper refused or requires reboot: $($helperProcess.ExitCode)" }
+        Assert-Installed
+        $report['helperReplacement'] = $true
+        Write-Output 'Helper-only replacement completed; sameVersionRepair remains unverified'
+    } else {
+        Invoke-Installer $installer '/S /UPDATE'
+        Assert-Installed
+        $report.sameVersionRepair = $true
+        Write-Output 'PASS same-version replacement/repair and Service restart'
+    }
 } catch {
     $report['primaryError'] = $_.Exception.Message
     Write-Warning "Primary installer smoke failure: $($_.Exception.Message)"
@@ -73,6 +115,9 @@ try {
 } finally {
     $uninstaller = Join-Path $target 'uninstall.exe'
     try {
+        if ($null -ne $helperProcess -and -not $helperProcess.HasExited) {
+            throw 'Cleanup refused while replacement helper still owns the transaction; disposable host must be discarded.'
+        }
         if (Test-Path $uninstaller) {
             # _?= keeps NSIS in this waited process instead of spawning a temp copy.
             Invoke-Installer $uninstaller "/S _?=$target"
@@ -91,6 +136,7 @@ try {
         Write-Warning "Cleanup failure: $($_.Exception.Message)"
         throw
     } finally {
+        if ($null -ne $helperProcess) { $helperProcess.Dispose() }
         $report | ConvertTo-Json | Set-Content $out
     }
 }
