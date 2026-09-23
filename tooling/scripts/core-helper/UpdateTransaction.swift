@@ -17,6 +17,10 @@ final class UpdateTransaction {
         var disconnect: () throws -> Void
         var launchExecutor: (UpdateStorage.Attempt) throws -> Void
         var cleanupCommitted: () throws -> Void = {}
+        /// Whether a bound successor's audit token still resolves to a live
+        /// process. Re-adoption is allowed only when this is false (or the
+        /// recorded boot session has ended).
+        var successorAlive: (Data) -> Bool = UpdateExecutor.processExists
     }
 
     let storage: UpdateStorage
@@ -227,7 +231,32 @@ final class UpdateTransaction {
         let components = try effects.installedComponents()
         guard components == (try manifest.target(.macosArm64).components) else { throw HelperFailure.invalid("Installed update components differ.") }
         if let token = attempt.successorToken {
-            guard token == peer.auditToken, attempt.successorBoot == boot else { throw HelperFailure.invalid("Update successor incarnation changed; recovery remains pending.") }
+            guard token == peer.auditToken, attempt.successorBoot == boot else {
+                // The successor grant binds one live incarnation, not the first
+                // one forever. A recorded successor from another boot cannot
+                // authenticate in this one, and a same-boot token that no
+                // longer resolves to a live process has exited — the
+                // executor's own relaunch path creates exactly that successor.
+                // While the bound successor is provably alive, nobody else
+                // may take the grant.
+                guard attempt.successorBoot != boot || !effects.successorAlive(token) else {
+                    throw HelperFailure.invalid("Update successor incarnation changed; recovery remains pending.")
+                }
+                guard ledger.generation < UpdateContractV1.maxInteger else { throw HelperFailure.invalid("Update generation exhausted.") }
+                ledger.generation += 1
+                // Change the generation, not the phase: the durable proof
+                // phase and its evidence stay untouched (the shared receipt
+                // model has no re-adoption proposal from
+                // installedIdentityVerified), and only the incarnation grant
+                // moves to the freshly authenticated live successor.
+                attempt.receipt.successorGeneration = ledger.generation
+                attempt.receipt.updatedAtUnix = now()
+                attempt.successorToken = peer.auditToken
+                attempt.successorBoot = boot
+                ledger.attempt = attempt
+                try persist(ledger)
+                return
+            }
             return
         }
         guard ledger.generation < UpdateContractV1.maxInteger else { throw HelperFailure.invalid("Update generation exhausted.") }
@@ -314,6 +343,72 @@ final class UpdateTransaction {
             to: storage.root + "/" + attempt.receipt.attemptId + ".json")
         ledger.attempt = nil
         try persist(ledger) // Generation and consumed high-water are unchanged.
+    }
+
+    /// One transport endpoint, two retire predicates: unconsumed reservations
+    /// keep their existing retirement; every consumed-side attempt uses the
+    /// resolved archive below. Both require the owner's verified explicit
+    /// Disconnect, and neither ever lowers the consumed high-water mark.
+    func retire(peer: TonoAuthenticatedPeer?) throws {
+        switch try storage.load().attempt?.execution {
+        case .reserved, .staged:
+            guard let peer else { throw HelperFailure.invalid("Update retirement requires an authenticated owner.") }
+            try retireUnconsumed(peer: peer)
+        default:
+            try retireResolved(peer: peer)
+        }
+    }
+
+    /// The terminal state for an attempt whose replacement can no longer be
+    /// completed by its bound incarnations: the executor blocked or rolled
+    /// back before `.replaced`, the attempt expired or was explicitly
+    /// abandoned after consumption, or a fully replaced installation was
+    /// explicitly abandoned by its user. The owner's verified explicit
+    /// Disconnect (U4: never fabricated completion) plus an independent
+    /// on-disk component proof — the captured original components for
+    /// pre-replacement/rolled-back attempts, the signed target components for
+    /// an abandoned replacement — sanction archiving the evidence and
+    /// clearing the active slot. `peer` is nil only for the root emergency
+    /// CLI, which already holds strictly greater privilege and its own
+    /// verified release; every IPC caller authenticates a live owner peer.
+    func retireResolved(peer: TonoAuthenticatedPeer?) throws {
+        var ledger = try storage.load()
+        if let peer {
+            try effects.authenticate(peer)
+            guard ledger.attempt?.receipt.owner == Self.owner(peer) else {
+                throw HelperFailure.invalid("Only the update owner can retire a resolved attempt.")
+            }
+        }
+        guard var attempt = ledger.attempt, attempt.receipt.phase != .committed,
+              attempt.execution == .consumed || attempt.execution == .rolledBack || attempt.execution == .replaced,
+              attempt.receipt.installedLocationSha256 == Self.location,
+              attempt.disconnectRequested, attempt.disconnectVerified,
+              try effects.observe() == .unprotected else {
+            throw HelperFailure.invalid("Only a resolved update attempt with verified explicit Disconnect can be retired.")
+        }
+        if attempt.execution == .replaced {
+            let manifest = try UpdateContractV1.ReleaseManifest.decode(attempt.manifest)
+            guard try effects.installedComponents() == manifest.target(.macosArm64).components else {
+                throw HelperFailure.invalid("Replaced installation components differ; evidence retained.")
+            }
+        } else {
+            // A consumed attempt never entered replacement and a rolled-back
+            // one restored its capture; both must still hash to the original.
+            guard attempt.originalComponents == (try effects.installedComponents()) else {
+                throw HelperFailure.invalid("Installed components differ from the captured original; evidence retained.")
+            }
+        }
+        // Same archive discipline as unconsumed retirement: the receipt keeps
+        // its last proof phase and gains a terminal blocked reason; the
+        // consumed high-water mark and generation counter are unchanged.
+        if attempt.receipt.blockedReason == nil { attempt.receipt.blockedReason = .cancelled }
+        try UpdateStorage.write(UpdateContractV1.canonical(attempt),
+            to: storage.root + "/" + attempt.receipt.attemptId + ".json")
+        ledger.attempt = nil
+        try persist(ledger)
+        // The executor entry has nothing left to recover; retire it exactly
+        // like a committed transaction does.
+        try effects.cleanupCommitted()
     }
 
     func gate(method: String, path: String, peer: TonoAuthenticatedPeer) throws {

@@ -279,7 +279,10 @@ enum UpdateExecutor {
         try UpdateStorage.syncDirectory(directory)
     }
 
-    private static func processExists(_ token: Data) -> Bool {
+    /// Audit tokens are only meaningful within one boot; a token that no longer
+    /// resolves to a live code object proves that incarnation exited. Shared
+    /// with the transaction's successor re-adoption check.
+    static func processExists(_ token: Data) -> Bool {
         var code: SecCode?
         return SecCodeCopyGuestWithAttributes(nil, [kSecGuestAttributeAudit: token] as CFDictionary, [], &code) == errSecSuccess
     }

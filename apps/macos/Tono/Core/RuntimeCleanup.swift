@@ -30,7 +30,7 @@ enum RuntimeCleanup {
             let adopted = try await coordinator.nativeUpdate("reconcile")
             guard let receipt = adopted.receipt, receipt.blockedReason == nil,
                   receipt.phase == .installedIdentityVerified || receipt.phase == .recoveryVerified else {
-                throw NativeUpdateDownload.failure("The pending update cannot authenticate this successor.")
+                throw NativeUpdateDownload.failure(String(localized: "The pending update cannot be resumed by this copy of Tono. Choose Check for Updates, then Disconnect and Retry, to restore Internet access and end this update attempt."))
             }
             nativeUpdateRecovery = receipt.requiredRecovery
             KillSwitchService.isArmed = receipt.requiredRecovery != .unprotected
