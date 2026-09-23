@@ -32,6 +32,35 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 快照服务不可读时 status 折叠掉 snapshotPresent，断开被无谓拒绝
+
+- **归属/来源**：G1 断开与恢复；macOS `tono-core-helper` 的 `/dns/status`。R3-F4
+  （2026-09-22 并发/时序审查发现，对抗核实轮 V7 已确认低危）。基线 main
+  [576d7087](https://github.com/raydocs/tono/commit/576d7087cc54084acef3a4cda15c433ec96bb679)，
+  分支 `fix/macos-dns-status-snapshot-20260922`；
+  [差异与关联 PR](https://github.com/raydocs/tono/compare/main...fix/macos-dns-status-snapshot-20260922)。
+- **缺陷修复**：受保护期间快照存在但 `currentDNS(for: snapshot.service)` 抛错（服务被
+  重命名/删除、`networksetup` 非零返回）时，`status()` 的 catch 把状态折叠成
+  `ok:false, snapshotPresent:false` 并丢掉 service 键；App 侧
+  `guard envelope.ok == true || snapshotPresent`（HelperManager.swift:726）随之失败，
+  POST `/dns/restore` 从未发出——而 `restore()`/`restoreServices` 对快照服务缺失有明确
+  处理本可成功。现在 `status()` 区分两种失败：loadSnapshot 失败仍报
+  `snapshotPresent:false`（快照不可信，属 R3-F3 后续范围）；快照已加载但当前服务不可读
+  改报 `ok:false, snapshotPresent:true` 并携带 service，读回失败信息单独携带，App 侧
+  既有状态门无需改动即转调 `/dns/restore`。restore 的读回验证语义与 M2「读取错误不
+  假装恢复」不变；本条只修“状态折叠导致根本不去尝试恢复”。
+- **工程与测试**：按 `restoreServices` 的注入模式把状态决策提取为静态事务
+  `statusResponse(snapshot:read:)`（生产 `status()` 仍用真实 loadSnapshot/currentDNS，
+  行为面不变），新增 helper 自测 `runStatusUnreadableServiceSelfTest`：有效快照 +
+  注入 currentDNS 抛错 → 断言 `snapshotPresent==true`、`ok==false`、service 保留；
+  修复前实现报 false，用例必失败。载体 `--lifecycle-self-test`。
+- **验证**：本机为编辑/审查机（2026-09-14 所有者决定），swift 编译与测试未在本机执行；
+  回归委托本 PR CI（GitHub-hosted macos-26，`tooling/scripts/**` 触发 macos-ci，
+  `sudo … --lifecycle-self-test`）。准确源码 SHA 与实际 CI 结果见关联 PR；提交时未获得
+  本轮 CI 结果，不沿用其他分支或上一轮 main 的绿灯。
+- **新增/发布/限制**：无新功能、无新包、无部署，仅源码。未做实机服务重命名演练；
+  R3-F3（快照文件损坏/不安全时的隔离与产品内出口）为独立后续修复，不在本条；本条
+  不改动 App 侧 guard、HelperManager 或 restore 读回验证。
 ## 2026-09-23 · 睡眠不再把进行中的显式 Restore internet 改写为保留保护+唤醒重连；未 armed 的 teardown 不再宣称 Kill Switch 在护机
 
 - **归属**：G1（断开与恢复：用户明确要求的恢复直连跨睡眠保持，UI 保护状态与真实 PF
@@ -103,7 +132,6 @@
   Protected Offline）。
 
 ## 2026-09-23 · 连接中途到达的系统网络变化不再被丢弃，改为 pending 待窗口结束对账
-## 2026-09-23 · 连接中途到达的系统网络变化不再被丢弃，改为 pending 待窗口结束对账
 
 - **归属**：G1（断开与恢复：网络切换后受保护会话及时自愈，不依赖 60 s 命令审计兜底）；
   macOS 客户端 `apps/macos`。
@@ -162,7 +190,6 @@
   R1 审查其余发现（F2、F6）与 F5 的 Windows 侧（已由 W8/#259 修复）不在本条范围。
 
 ## 2026-09-23 · 后台可选策略替换失败后必须调度受保护重连
-## 2026-09-23 · 后台可选策略替换失败后必须调度受保护重连
 
 - **归属**：G1（断开与恢复：稳定网络上的 fail-closed 主机不滞留 Protected Offline）；
   macOS 客户端 `apps/macos`。
@@ -208,7 +235,6 @@
   R1 审查其余发现（F2、F5、F6）不在本条范围；错误文案仍为内部原文（与
   `reloadCoreConfig` 的本地化文案对齐留待后续文案统一）。
 
-## 2026-09-23 · 永不 armed 的内部转换不得被重连 loop 判为外部 release
 ## 2026-09-23 · 永不 armed 的内部转换不得被重连 loop 判为外部 release
 
 - **归属**：G1（断开与恢复：用户连接意图不被静默丢弃）；macOS 客户端 `apps/macos`。
@@ -263,7 +289,6 @@
   F4（后台可选策略失败漏调度重连）为不同根因（V2 判定），另行修复不在本条；替换窗口
   与外部 release 的实机量化未做。
 
-## 2026-09-23 · coreMonitor 不得把运行时替换的瞬时 utun 消失判为 TUN 死亡
 ## 2026-09-23 · coreMonitor 不得把运行时替换的瞬时 utun 消失判为 TUN 死亡
 
 - **归属**：G1（已连接=能用：切换/热重载不掉线）；macOS 客户端 `apps/macos`。
