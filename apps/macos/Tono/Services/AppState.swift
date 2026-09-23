@@ -544,12 +544,22 @@ final class AppState {
 
     func prepareForSystemSleep() {
         guard !nativeUpdatePending else { return } // Root power monitor still tightens PF.
-        let shouldResume = isConnected || isConnecting || isProtectionBlocked
-            || KillSwitchService.isArmed
+        // An explicit Restore internet can still be draining its privileged
+        // release — held on the serialized queue, possibly blocked for up to
+        // 180 s on the administrator repair prompt. Sleep must not rewrite
+        // that pending user intent into preserve-and-reconnect: the release
+        // stays the queue's owner, finishes after wake, and publishes the
+        // released state itself (R1-F2).
+        let releaseInFlight = connectionCoordinator.disconnectQueueRequestsRelease
+        let shouldResume = !releaseInFlight
+            && (isConnected || isConnecting || isProtectionBlocked
+                || KillSwitchService.isArmed)
         resumeProtectionAfterWake = shouldResume
+        var sleepDetails = auditProtectionDetails()
+        sleepDetails["release_teardown_in_flight"] = String(releaseInFlight)
         LocalTrafficAudit.shared.recordEvent(
             "system_will_sleep",
-            details: auditProtectionDetails()
+            details: sleepDetails
         )
         guard shouldResume else { return }
         connectionCoordinator.bumpGeneration()
@@ -583,11 +593,21 @@ final class AppState {
     /// remains fail-closed.
     func resumeAfterSystemWake() {
         guard !nativeUpdatePending else { return }
-        let shouldResume = resumeProtectionAfterWake || KillSwitchService.isArmed
+        // The release teardown sleep deferred to can still own the queue: its
+        // administrator prompt could only be answered after wake, so PF may
+        // read armed even though the user asked for an open host. Wake
+        // recovery would enqueue a preserve teardown over the release and
+        // reconnect — converting the explicit release into re-protection.
+        // Let the release finish; its completion publishes the outcome.
+        let releaseInFlight = connectionCoordinator.disconnectQueueRequestsRelease
+        let shouldResume = !releaseInFlight
+            && (resumeProtectionAfterWake || KillSwitchService.isArmed)
         resumeProtectionAfterWake = false
+        var wakeDetails = auditProtectionDetails()
+        wakeDetails["release_teardown_in_flight"] = String(releaseInFlight)
         LocalTrafficAudit.shared.recordEvent(
             "system_did_wake",
-            details: auditProtectionDetails()
+            details: wakeDetails
         )
         guard shouldResume else { return }
         recoveryCause = .wake

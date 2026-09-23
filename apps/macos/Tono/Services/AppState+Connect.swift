@@ -830,8 +830,13 @@ extension AppState {
             var transitionLeavesProtectionBlocked =
                 !releaseKillSwitch || !coreStopped || !protectedDNSRestored
             if !coreStopped, transitionError == nil {
-                transitionError =
-                    "The protected core could not be stopped. Kill Switch remains active; retry disconnecting."
+                // The stop failure only means "Kill Switch remains active"
+                // while PF is actually armed. A first connect interrupted
+                // before its stage-1 arm holds no PF rule; its teardown must
+                // not tell that host the Kill Switch is holding it (R1-F2).
+                transitionError = KillSwitchService.isArmed
+                    ? "The protected core could not be stopped. Kill Switch remains active; retry disconnecting."
+                    : "The protected core could not be stopped; retry disconnecting."
             }
             do {
                 try await networkProtection.disableSystemProxy()
@@ -853,7 +858,17 @@ extension AppState {
                         transitionLeavesProtectionBlocked = false
                     } else {
                         try await networkProtection.restrictToBootstrap()
-                        transitionLeavesProtectionBlocked = true
+                        // `restrictToBootstrap` deliberately no-ops while PF
+                        // is not armed, and that idle success is not held
+                        // protection: a preserve teardown of a never-armed
+                        // session must not publish Protected Offline over an
+                        // open host (R1-F2). Every armed path keeps the
+                        // claim, and an incomplete release stays fail-closed.
+                        if !releaseKillSwitch, !KillSwitchService.isArmed {
+                            transitionLeavesProtectionBlocked = false
+                        } else {
+                            transitionLeavesProtectionBlocked = true
+                        }
                     }
                 } catch {
                     transitionLeavesProtectionBlocked = true
