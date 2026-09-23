@@ -36,31 +36,44 @@
 
 - **归属/来源**：G1 保护不得放宽（内部审查 H2-F3，[#351](https://github.com/raydocs/tono/issues/351)
   第 2 部分；第 1 部分映像绑定见 #352）；影响 Windows Service（`apps/windows/service`）。
-  基线 main b1b6fe6c，分支 `fix/win-service-runtime-config-20260923`；提交时未合 main。
+  基线 main b1b6fe6c（2026-09-23 rebase 到 26d438c1），分支 `fix/win-service-runtime-config-20260923`；提交时未合 main。
 - **缺陷修复**：StartClash/StageRuntime 的 `bundle.yaml` 被原样交给 SYSTEM 运行的 Core，
   owned-runtime 合约只由 App 保证。新增 `runtime_generation/owned_config.rs`
-  `ensure_owned_runtime_config_is_safe`，与 macOS `ownedRuntimeConfigIsSafe` 逐项对应：
+  `ensure_owned_runtime_config_is_safe`，按 macOS `ownedRuntimeConfigIsSafe` 的同类检查映射到
+  Mihomo 键（不是逐项等价，见剩余限制）：
   顶层/dns/tun/profile/sniffer 键白名单（拒绝 external-ui、rule/proxy-providers、listeners、
   tunnels 等）；port/socks/redir 为 0，`bind-address: 127.0.0.1`、`allow-lan: false`、
   `mode: rule`；external-controller 与 DNS listen 只允许 `127.0.0.1:`，secret 非空；
   tun `enable`、`device: Tono`、`strict-route: true`；出站类型限 vless/hysteria2/socks5/direct，
   组只允许 select 且必须有 `Tono-Exit`，最后一条规则为 `MATCH,Tono-Exit`；全文禁止
-  certificate/private-key/ca/ca-str/external-ui*/skip-cert-verify/routing-mark。不合约返回
+  certificate/private-key/ca/ca-str/external-ui*/skip-cert-verify/routing-mark（比较前按 Mihomo
+  解码规则规范化键：`_` 视为 `-`、按 Go `EqualFold` 大小写不敏感，故 `Skip_Cert_Verify`、
+  `CA` 等拼写同样被拒）。不合约返回
   `InvalidRuntimeAsset`，在取生命周期锁之前拒绝。
 - **新增/优化**：Service 新依赖 `serde_yaml_ng 0.10`（与 App/tono-core 同一解析器；
   Cargo.lock 按 `apps/windows/Cargo.lock` 的同版本与校验和补入 serde_yaml_ng、ryu、unsafe-libyaml）。
 - **工程与测试**：新增一个 `#[test]`
   `the_service_refuses_runtime_yaml_outside_the_owned_contract`：App 形状的夹具通过，
-  非回环 controller、`skip-cert-verify`、非 `MATCH,Tono-Exit` 结尾被拒。在 main 上的失败方式
+  非回环 controller、`skip-cert-verify`、`Skip_Cert_Verify`、非 `MATCH,Tono-Exit` 结尾被拒
+  （`Skip_Cert_Verify` 在精确匹配的实现上会被放行，断言失败）。在 main 上的失败方式
   是编译失败（校验函数不存在）。lifecycle `test` feature 的集成测试使用 `mode: rule` 占位
   YAML，故该 feature 下校验不接入路由。
 - **验证**：本机（MacBook）按 AGENTS.md 未运行 cargo；手工补写的 lockfile 与编译、测试
-  委托本 PR 的 GitHub-hosted `windows-2025` CI（`--locked`）。
+  委托本 PR 的 GitHub-hosted `windows-2025` CI（`--locked`）。首版 c2ca1fdf 的 Windows CI
+  run 35896001331 / 35895968611 为绿；CI 绿不等于实机验证。规范化续修的结果见本 PR 新 head 的 CI。
 - **候选/发布**：无新包，仅源码。
 - **剩余限制**：夹具是按 `tono-core` 生成器手写的形状，不是跨 workspace 的真实输出比对；
   若 App 生成器新增顶层键而未同步本白名单，连接会被 Service 拒绝（fail-closed）。
   不校验规则内容与出站目标（WFP 端点约束仍在）；runtime assets 的 reparse 问题（H2-F4）
-  不在本条。未实机验证。
+  不在本条。未实机验证。**本条不能关闭 #351 第 2 部分**：Core 以校验后的配置启动后，持有
+  controller secret 的调用方仍可经 Mihomo 控制器 `PUT /configs`（payload 整份替换）或
+  `PATCH /configs`（allow-lan、bind-address、端口、tun 等）把被拒的内容改回；App 自身也依赖
+  `PUT /configs`（`direct.rs` reload），不能直接关掉。#380（webview 只授予用到的 core 命令）
+  部分缓解（收窄能拿到控制器的前端面），完整封堵需要 Mihomo 补丁或由 Service 持有 secret/代理
+  reload。与 macOS 不等价：sing-box clash_api 没有整份配置替换。
+- **续记（2026-09-23，第三轮审查）**：禁止键改为规范化后匹配（`_`→`-`、大小写不敏感，含
+  U+017F/U+212A 两个折叠到 ASCII 的字符），测试加 `Skip_Cert_Verify` 反例；限制补控制器绕过。
+  本机未编译，委托本 PR CI。
 
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 

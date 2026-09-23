@@ -68,6 +68,7 @@ const SNIFFER_KEYS: &[&str] = &[
 const PROXY_TYPES: &[&str] = &["vless", "hysteria2", "socks5", "direct"];
 /// Keys refused anywhere in the document: user-chosen files, a web UI loaded from disk or the
 /// network, disabled certificate verification, and socket marks that step around routing.
+/// Compared after `mihomo_key`, so every spelling Mihomo's decoder accepts is refused too.
 const FORBIDDEN_KEYS: &[&str] = &[
     "certificate",
     "private-key",
@@ -192,7 +193,7 @@ fn no_forbidden_keys(value: &Value) -> Result<(), String> {
         Value::Mapping(mapping) => {
             for (key, child) in mapping {
                 if let Some(key) = key.as_str()
-                    && FORBIDDEN_KEYS.contains(&key)
+                    && FORBIDDEN_KEYS.contains(&mihomo_key(key).as_str())
                 {
                     return Err(format!("`{key}` is not allowed in the owned runtime"));
                 }
@@ -204,6 +205,22 @@ fn no_forbidden_keys(value: &Value) -> Result<(), String> {
         Value::Tagged(tagged) => no_forbidden_keys(&tagged.value),
         _ => Ok(()),
     }
+}
+
+/// The spelling Mihomo's struct decoder resolves a key to when no field matches it exactly:
+/// `_` is replaced with `-` (`DefaultKeyReplacer`) and the result is compared with Go's
+/// `strings.EqualFold`. Simple case folding maps only two non-ASCII characters onto ASCII
+/// letters (U+017F long s and U+212A Kelvin sign), so folding those plus ASCII lowercasing
+/// matches every key EqualFold would equate with an ASCII field name.
+fn mihomo_key(key: &str) -> String {
+    key.chars()
+        .map(|c| match c {
+            '_' => '-',
+            '\u{017F}' => 's',
+            '\u{212A}' => 'k',
+            c => c.to_ascii_lowercase(),
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -279,6 +296,7 @@ rules:
         for (from, to) in [
             ("external-controller: 127.0.0.1:9090", "external-controller: 0.0.0.0:9090"),
             ("  network: tcp", "  network: tcp\n  skip-cert-verify: true"),
+            ("  network: tcp", "  network: tcp\n  Skip_Cert_Verify: true"),
             ("- MATCH,Tono-Exit", "- MATCH,DIRECT"),
         ] {
             let changed = OWNED.replacen(from, to, 1);
