@@ -91,6 +91,14 @@ nonisolated final class ConfigStorage: @unchecked Sendable {
             .appendingPathComponent("config.json")
     }
 
+    /// The sing-box runtime carries the account's exit credentials (client
+    /// UUID, Reality parameters, residential SOCKS5 username and password), so
+    /// it goes with the catalog it was built from. The helper runs its own
+    /// root-owned snapshot, and every start or reload rewrites this file first.
+    func removeRuntimeConfig() {
+        try? fileManager.removeItem(at: runtimeConfigPath)
+    }
+
     // MARK: - Subscription YAML (immutable, stored as-is)
 
     var subscriptionYAMLPath: URL {
@@ -314,6 +322,7 @@ enum ManagedExitCatalogOwnership {
         discardInstalledCatalog = nil
         discard?()
         ConfigStorage.shared.removeManagedExitCatalog()
+        ConfigStorage.shared.removeRuntimeConfig()
     }
 }
 
