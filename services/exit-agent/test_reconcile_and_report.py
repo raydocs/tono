@@ -1355,6 +1355,9 @@ class ReconcileSafety(unittest.TestCase):
             self.reconcile([], {"u:a\x00bad", "u:z"}, None)
         self.assertIn("u:z", self.calls[-1])
         self.assertFalse(any("u:a\x00bad" in call for call in self.calls))
+        # The legacy adduser/adi check reads "already exists" from stderr.
+        self.assertNotIn("already exists", agent.add_inbound_user(
+            Path("/unused"), "adduser", "a", "t", "u:a\x00already exists", "x").stderr)
         with patch.dict(os.environ, {"TONO_XRAY_INBOUND_TAG": "x\nRemoved 1 user(s) in total."}):
             with self.assertRaises(agent.Refusal):
                 agent.inbound_tag()

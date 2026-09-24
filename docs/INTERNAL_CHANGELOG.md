@@ -54,6 +54,8 @@
   续修 4（Codex 核实 163cb823：RR2 FIXED，RR1 PARTIAL）：不可打印 email 不再交给 subprocess（NUL 字节曾抛
   `ValueError` 并跳过其后所有删除），直接记为失败；`TONO_XRAY_INBOUND_TAG` 只允许字母、数字、`.`、`_`、`-`，
   否则本轮拒绝（tag 回显同样可伪造整行成功文本）。
+  续修 5（Codex 核实 26dc5647：tag 与 NUL 已修，legacy 残留）：拒绝结果的 stderr 不再包含 email，否则旧
+  `adduser`/`adi` 的「already exists」判定会把 `u:a\x00already exists` 读成已在并 ACK。
 - **新增/优化**：无。
 - **工程与测试**：回归 `test_rmu_success_is_read_from_its_output_not_its_exit_code` 用节点实测的三段 rc=0 输出
   （用户不存在→已删，错误 tag→失败，`Removed 1`→已删），并断言 rmu argv 恰为

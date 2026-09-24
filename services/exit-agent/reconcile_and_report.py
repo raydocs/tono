@@ -419,8 +419,9 @@ def _one_line(email: str) -> bool:
 
 def _refused(email: str) -> subprocess.CompletedProcess[str]:
     # Not run at all: a NUL byte would make subprocess raise and skip every
-    # later removal.
-    return subprocess.CompletedProcess([], 1, "", f"refused non-printable email {email!r}")
+    # later removal. The email stays out of the message, or the legacy
+    # "already exists"/"not found" checks would read it as a result.
+    return subprocess.CompletedProcess([], 1, "", "refused a non-printable email")
 
 
 def removal_succeeded(result: subprocess.CompletedProcess[str], email: str, command: str = "rmu") -> bool:
