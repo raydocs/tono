@@ -221,22 +221,19 @@ nonisolated struct HelperManager {
         // after this method returns.
         if installedVersion != nil {
             do {
-                _ = try restoreProtectedDNSIfConfigured()
-                try stopCore()
-                let status = try killSwitchStatus()
-                if status.armed || status.wanted, !status.live {
-                    throw HelperIPCError.commandFailed(
-                        "The previous helper could not keep PF fail-closed during its upgrade."
-                    )
-                }
+                try prepareAuthenticatedHelperForReplacement(
+                    restoreDNS: { _ = try restoreProtectedDNSIfConfigured() },
+                    stopCore: stopCore,
+                    killSwitchStatus: killSwitchStatus
+                )
             } catch {
                 LocalTrafficAudit.shared.recordEvent(
                     "helper_upgrade_preflight_failed",
                     details: ["error": error.localizedDescription]
                 )
                 throw HelperInstallError.installFailed(
-                    "The previous network helper could not restore DNS, stop "
-                        + "the core, and retain firewall protection safely. "
+                    "The previous network helper could not stop the core and "
+                        + "retain firewall protection safely. "
                         + error.localizedDescription
                 )
             }
@@ -407,6 +404,37 @@ nonisolated struct HelperManager {
         </dict>
         </plist>
         """
+    }
+
+    /// Readies an authenticated older helper for replacement. Stopping the
+    /// core and confirming that any wanted PF state is live are required: PF
+    /// is the leak boundary while the daemon is swapped. DNS recovery is
+    /// attempted but does not gate the swap. An older helper that cannot read
+    /// its own DNS snapshot (corrupt, or naming a service that no longer
+    /// exists) fails this step on every attempt, and the replacement helper
+    /// is the component that can quarantine that snapshot and sweep the
+    /// loopback resolver. Refusing the upgrade here left such a host in
+    /// Protected Offline with no in-product way out.
+    static func prepareAuthenticatedHelperForReplacement(
+        restoreDNS: () throws -> Void,
+        stopCore: () throws -> Void,
+        killSwitchStatus: () throws -> (armed: Bool, wanted: Bool, live: Bool, healed: Bool)
+    ) throws {
+        do {
+            try restoreDNS()
+        } catch {
+            LocalTrafficAudit.shared.recordEvent(
+                "helper_upgrade_dns_restore_deferred",
+                details: ["error": error.localizedDescription]
+            )
+        }
+        try stopCore()
+        let status = try killSwitchStatus()
+        if status.armed || status.wanted, !status.live {
+            throw HelperIPCError.commandFailed(
+                "The previous helper could not keep PF fail-closed during its upgrade."
+            )
+        }
     }
 
     static func isHelperRunning() -> Bool {
