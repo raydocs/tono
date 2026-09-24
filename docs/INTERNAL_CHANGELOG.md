@@ -37,8 +37,8 @@
 - **归属/来源**：G2 连不上有下一手；Windows `src-tauri/src/tono/transport.rs` 与
   `crates/tono-core/src/auth.rs`。Issue #583；审查项 R607-F1。从 #607 拆出：#607 的离线准入部分
   （#582）按所有者决定另行重设计（单一拒绝入口 + 持久化拒绝，Windows 与 macOS 一起），本 PR
-  不含标记文件、离线 Ready、目录同步/恢复的离线改动和对应界面文字。基线 origin/main bf177a10；
-  分支 `fix/issue-583-transport-20260924`；未合 main。
+  不含标记文件、离线 Ready、目录同步/恢复的离线改动和对应界面文字。基线 origin/main bf177a10，
+  后并入 main 3c3f9b95（合并提交 aea51516）；分支 `fix/issue-583-transport-20260924`；PR #611。
 - **缺陷修复**：
   - #583：控制面直连（pinned）客户端的连接超时是共用的 30 s，等于启动恢复总预算
     `RESTORE_TRANSACTION_TIMEOUT`。直连地址被丢包时，恢复在直连这一步就用完预算，系统 DNS 备用
@@ -49,7 +49,8 @@
     POST/DELETE 的送达判断不变；其它客户端（fallback 的系统 DNS、备用端口）超时不变。
   - R607-F1：`ApiClient::call` 在首次请求为可重试的传输错误、重试收到服务器答复（401/403/其它
     4xx/5xx）时，丢弃答复并返回第一次的传输错误。现在重试仍为传输错误才返回原错误，服务器的答复
-    优先。影响：启动恢复中重试收到的 401 走原有的过期会话清理（此前进 error），403/5xx 仍进 error；
+    优先。影响：启动恢复中重试收到的 401 进 Suspended（保留保护与已存会话，提示重新登录；此前进 error），
+    403/5xx 仍进 error；
     传输失败仍进 error（本 PR 不改为 Ready）。
 - **新增/优化**：无。
 - **工程与测试**：两个回归（规则 5）。
@@ -57,17 +58,25 @@
     10.255.255.1、系统 DNS 路径指向本机夹具，经真实 `ApiClient::me()` 走 refresh（POST）+ `me`（GET），
     断言两次合计小于恢复预算一半；再构造“偏好已学到、DNS 路径变黑洞、直连健康”的 transport，
     首选请求被 500 ms 超时取消后，下一次请求须在 5 s 内由直连答复。旧代码直连 30 s、无偏好，
-    第一段约 60 s；有偏好但取消不清除时第二段约 30 s；均失败（按代码推理，未实跑）。有隧道截获
+    第一段约 60 s；有偏好但取消不清除时第二段约 10 s（超过 5 s 上限）；均失败（按代码推理，未实跑）。有隧道截获
     黑洞地址时跳过；耗时约 11 s。
   - `tono-core auth::tests::a_retry_the_server_refused_is_not_reported_as_unreachable`：refresh 首次
     Connect 失败、重试 401，断言 `me()` 返回 `Unauthorized`；旧代码返回 Transport（按代码推理，未实跑）。
   - `RESTORE_TRANSACTION_TIMEOUT` 改为 `pub(crate)` 供测试引用。
-- **验证**：本机未执行 cargo（执行位置规则）；两个回归交给本 PR 的 windows-2025 CI（Tauri crate
-  `cargo test` 与 tono-core 测试）。未改前端。
+- **验证**：本机未执行 cargo（执行位置规则）。Windows CI run 36058698693 在 aea51516 上全绿：
+  transport 回归在 windows-2025 `app-rust` 作业通过（实跑约 13 s，未走隧道跳过分支）；tono-core
+  回归在 ubuntu-24.04 `core` 作业通过（windows-2025 只跑 tono-core 的 `update_journal` 过滤）。
+  两个回归在旧代码上的失败未实跑。未改前端。双厂商审查：Codex 无发现；Opus 报告 F1/F2（见剩余限制）
+  及本条文字错误（已改），F1/F2 尚待异厂商复核。
 - **候选/发布**：仅源码，无新候选。
 - **剩余限制**：未实机验证。#582（控制面不可达时用缓存连接）不在本 PR，另行重设计；启动时控制面
   不可达仍进 error 状态并显示“Session expired”。系统 DNS 路径本身较慢时（审查按约 11 s 推算），
   refresh 的直连 10 s + 备用路径 + `me` 的备用路径仍可能超出 30 s 预算，本 PR 只去掉了第二次直连等待。
+  审查 F1（Opus 发现，待复核）：hyper-util 0.1.20 把 connect 超时按地址数均分并逐个尝试，10 s 在两个
+  编译期 pin 下每个地址只有 5 s（只覆盖 0 s/3 s 两次 SYN），学到更多 pin 时更少；此前 30 s 每地址 15 s。
+  丢包链路 + Protected Offline 下，旧代码可能在 9 s 重传时连上而新代码失败（仍 fail-closed）。上文
+  「10 s 覆盖两次重传」的注释不成立。审查 F2：`restore_deadline` 在保护探测之前设定，探测最坏约 14 s
+  也计入 30 s；`me` 走 `resolved_first` 是独立连接池，不复用 refresh 的连接。
 
 ## 2026-09-24 · macOS Core 重启期间撤下 reviewed-bundle PF 放行（不清空状态）
 
