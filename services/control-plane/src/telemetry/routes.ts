@@ -408,7 +408,7 @@ export async function telemetryRoutes(
     // lifted out of the report rather than repeated at the top level.
     rejectUnexpectedKeys(b, ['report']);
     const { json: reportJson, appVersion, osVersion } = canonicalDiagnosticsReport(b.report);
-    await rateLimitDiagnostics(e, req, a.userId);
+    await rateLimitDiagnostics(e, a.userId);
     // The reference code (plus the display-only receipt time) is the entire
     // response; the payload is never echoed.
     return Response.json(
@@ -481,7 +481,7 @@ export async function telemetryRoutes(
     const b = await body(req, TELEMETRY_BODY_MAX_BYTES);
     rejectUnexpectedKeys(b, ['window']);
     const parsed = canonicalTelemetryWindow(b.window);
-    await rateLimitTelemetry(e, req, a.userId);
+    await rateLimitTelemetry(e, a.userId);
     const stored = await storeTelemetryWindow(
       e,
       a.userId,
@@ -508,7 +508,7 @@ export async function telemetryRoutes(
 
   if (p === '/api/v1/telemetry/failures' && m === 'POST') {
     const a = await auth(req, e);
-    await rateLimitTelemetry(e, req, a.userId, 'FAILURE');
+    await rateLimitTelemetry(e, a.userId, 'FAILURE');
     return ingestConnectFailure(req, e, a);
   }
 

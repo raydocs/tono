@@ -1,5 +1,4 @@
 import { sha256 } from '../crypto';
-import { clientIp } from '../auth';
 import { type Env, type Row, now, envInt } from '../env';
 import { ApiError } from '../errors';
 import { DIAGNOSTICS_DAY_SECONDS } from '../diagnostics-limits';
@@ -41,13 +40,11 @@ export async function rateLimitDiagnosticsLog(e: Env, uid: string) {
   );
 }
 
-export async function rateLimitDiagnostics(e: Env, req: Request, uid: string) {
-  await consumeRateLimit(
-    e,
-    `rl:${await sha256(`diagnostics:ip:${clientIp(req)}`)}`,
-    envInt(e, 'RATE_LIMIT_DIAGNOSTICS_IP_HOUR', 30),
-    DIAGNOSTICS_HOUR_SECONDS,
-  );
+// Reports, telemetry windows and failure reports are authenticated, and while a
+// client is connected its control-plane traffic leaves through the exit node,
+// so a client-IP bucket would make every user on one node share a budget. Like
+// the log upload above, these are keyed on the account only.
+export async function rateLimitDiagnostics(e: Env, uid: string) {
   await consumeRateLimit(
     e,
     `rl:${await sha256(`diagnostics:user-hour:${uid}`)}`,
@@ -64,12 +61,10 @@ export async function rateLimitDiagnostics(e: Env, req: Request, uid: string) {
 
 const TELEMETRY_KEYS = {
   TELEMETRY: [
-    'RATE_LIMIT_TELEMETRY_IP_HOUR',
     'RATE_LIMIT_TELEMETRY_USER_HOUR',
     'RATE_LIMIT_TELEMETRY_USER_DAY',
   ],
   FAILURE: [
-    'RATE_LIMIT_FAILURE_IP_HOUR',
     'RATE_LIMIT_FAILURE_USER_HOUR',
     'RATE_LIMIT_FAILURE_USER_DAY',
   ],
@@ -78,13 +73,11 @@ const TELEMETRY_KEYS = {
 // Failure reports keep their own bucket, or a burst of them starves the heartbeat.
 export async function rateLimitTelemetry(
   e: Env,
-  req: Request,
   uid: string,
   kind: 'TELEMETRY' | 'FAILURE' = 'TELEMETRY',
 ) {
-  const defaults = kind === 'FAILURE' ? [60, 12, 60] : [30, 6, 80];
+  const defaults = kind === 'FAILURE' ? [12, 60] : [6, 80];
   const scopes = [
-    [`ip:${clientIp(req)}`, DIAGNOSTICS_HOUR_SECONDS],
     [`user-hour:${uid}`, DIAGNOSTICS_HOUR_SECONDS],
     [`user-day:${uid}`, DIAGNOSTICS_DAY_SECONDS],
   ] as const;

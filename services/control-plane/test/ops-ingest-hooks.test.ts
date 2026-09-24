@@ -256,6 +256,26 @@ describe('ops ingest hooks', () => {
     }
   });
 
+  it('accounts that reach the Worker through one exit IP keep separate telemetry budgets', async () => {
+    const accounts = [];
+    for (let i = 0; i < 6; i++) accounts.push(await seedAccount(`shared-exit-${i}`));
+    // Six accounts each spend their full hourly allowance (6) from one exit
+    // node address: 36 windows, more than any single shared-IP budget allowed.
+    for (const account of accounts) {
+      for (let n = 0; n < 6; n++) {
+        const response = await api('telemetry/windows', {
+          ...json(telemetryWindow(), account.token),
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${account.token}`,
+            'cf-connecting-ip': '203.0.113.7',
+          },
+        });
+        expect(response.status).toBe(201);
+      }
+    }
+  });
+
   it('a customer incident opened on a heartbeat reaches a user-subject alert rule', async () => {
     const account = await seedAccount('alert');
     const t = Math.floor(Date.now() / 1000);

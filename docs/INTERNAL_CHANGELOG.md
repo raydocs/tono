@@ -32,6 +32,29 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · 控制面遥测、失败上报、支持报告改为按账户限流
+
+- **归属/来源**：G2（失败进入客户时间线）与 ops 客户在线状态；控制面 Worker。内部审查
+  H13-F4，Issue #440。基线 main bb2ed4e4 → 分支 `fix/telemetry-ratelimit-account-20260923`；
+  提交时未合 main。
+- **缺陷修复**：`/telemetry/windows`、`/telemetry/failures`、`/diagnostics/reports` 已要求
+  用户令牌，但限流器另有一个按 `cf-connecting-ip` 计数的桶（遥测 30/h、失败 60/h、支持报告
+  30/h）。已连接客户端访问控制面走出口节点，同一节点上的所有用户共用这个 IP 预算：超过约
+  10 台开周期遥测的设备后，每小时排在后面的设备持续 429，在 ops 显示离线、失败事件丢失，
+  支持报告也可能被别人的流量拒绝。现在三条路由只按账户的小时/天桶计数，与日志上传的做法
+  一致；移除不再使用的 `RATE_LIMIT_{TELEMETRY,FAILURE,DIAGNOSTICS}_IP_HOUR`（env 类型、
+  `wrangler.jsonc`、`worker-configuration.d.ts`、`docs/ops/ingest-limits.md`）。
+- **新增/优化**：无。
+- **工程与测试**：`test/ops-ingest-hooks.test.ts` 新增一个 `it`：6 个账户从同一
+  `cf-connecting-ip` 各发满每小时 6 个窗口，全部应为 201。旧代码第 31 个请求返回 429
+  （本机先红后绿）。
+- **验证**：MacBook worktree：该 `it` 在旧代码失败；修复后 `ops-ingest-hooks`、
+  `ingest-limits`、`ingest-budgets` 3 文件 19 测试通过，control-plane 全量 vitest 43 文件
+  892 测试通过，`tsc --noEmit` 无错误。CI 结果以 PR 页为准。未部署。
+- **候选/发布**：无新包，仅源码（Worker）。
+- **剩余限制**：单个账户多台设备仍共用账户小时预算（遥测 6/h，与原来一致）。未鉴权的登录类
+  路由仍按 IP 限流，不在本条范围。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
