@@ -76,8 +76,10 @@ pub const MAX_API_HOST_IPS: usize = 8;
 /// port-53 block over the default-deny floor; v7: `…9e06…` per-packet outbound-transport
 /// enforcement; v8: `…9e07…` Mihomo-app-scoped ALE plus exact transport tuples for
 /// lease-backed DIRECT; v9: `…9e08…` ALE-only stateful enforcement, keeping app identity and
-/// tuple in one filter and relying on documented policy-change reauthorization for stale flows.)
-const FILTER_NAMESPACE: u128 = 0x2f7c_9e08_0000_4a6c_0000_0000_0000_0000;
+/// tuple in one filter and relying on documented policy-change reauthorization for stale flows;
+/// v10: `…9e09…` inbound `ALE_AUTH_RECV_ACCEPT` default-deny with loopback, tunnel and
+/// DHCP/NDP permits.)
+const FILTER_NAMESPACE: u128 = 0x2f7c_9e09_0000_4a6c_0000_0000_0000_0000;
 
 const fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
@@ -98,6 +100,7 @@ pub(crate) fn key_for(tag: &str) -> Guid {
 pub enum LayerKind {
     AleAuthConnectV4,
     AleAuthConnectV6,
+    AleAuthRecvAcceptV4,
     AleAuthRecvAcceptV6,
 }
 
@@ -233,11 +236,17 @@ fn hard_permit(mut filter: FilterSpec) -> FilterSpec {
 /// The persistent fail-closed floor: address-or-ALE loopback, DHCP, and NDP permits over
 /// persistent ALE block-alls. The independent loopback paths are deliberate: real Windows has
 /// exposed controller connections through address matching and DNS through ALE classification.
+///
+/// Both directions are covered. A flow a remote peer initiates is authorized once, at
+/// `ALE_AUTH_RECV_ACCEPT`, and its outbound packets never reach `ALE_AUTH_CONNECT`; a
+/// connect-only floor therefore let any listener on the physical adapter (a global IPv6
+/// address is the common case) accept a connection and carry the whole flow off-tunnel. The
+/// inbound layers get the same shape: loopback, DHCP replies and NDP over a block-all.
 pub fn intent_floor() -> Vec<FilterSpec> {
     use Condition as C;
     use FilterAction as A;
     use LayerKind as L;
-    vec![
+    let mut filters = vec![
         hard_permit(spec(
             "intent/permit-loopback-address-v4".into(),
             "intent permit loopback address v4",
@@ -348,7 +357,97 @@ pub fn intent_floor() -> Vec<FilterSpec> {
             vec![],
             true,
         ),
-    ]
+    ];
+
+    // Inbound: local listeners (the core's controller and DNS) accept loopback peers only.
+    for (tag, layer, address) in [
+        (
+            "v4",
+            L::AleAuthRecvAcceptV4,
+            C::RemoteAddressV4 {
+                addr: [127, 0, 0, 0],
+                prefix: 8,
+            },
+        ),
+        (
+            "v6",
+            L::AleAuthRecvAcceptV6,
+            C::RemoteAddressV6 {
+                addr: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                prefix: 128,
+            },
+        ),
+    ] {
+        filters.push(hard_permit(spec(
+            format!("intent/permit-inbound-loopback-address-{tag}"),
+            &format!("intent permit inbound loopback address {tag}"),
+            layer,
+            WEIGHT_HARD_PERMIT,
+            A::Permit,
+            vec![address],
+            false,
+        )));
+        filters.push(hard_permit(spec(
+            format!("intent/permit-inbound-loopback-ale-{tag}"),
+            &format!("intent permit inbound loopback ALE {tag}"),
+            layer,
+            WEIGHT_HARD_PERMIT,
+            A::Permit,
+            vec![C::AleLoopback],
+            false,
+        )));
+    }
+    // DHCP server replies arrive from the server's address, which is not the broadcast or
+    // multicast address the request went to, so they are authorized as inbound traffic.
+    // DHCPv4 stays port-only: a server or relay on a public address answers from that address,
+    // and bounding it would leave those clients with no lease at all while protected. DHCPv6
+    // servers and relays answer clients from a link-local address (RFC 8415), so the v6
+    // reply is bounded to fe80::/10 and a global peer cannot open a flow on port 546.
+    filters.push(spec(
+        "intent/permit-dhcp-v4-in".into(),
+        "intent permit DHCP v4 server to client",
+        L::AleAuthRecvAcceptV4,
+        WEIGHT_INFRA_PERMIT,
+        A::Permit,
+        vec![
+            C::Protocol(IpProtocol::Udp),
+            C::LocalPort(68),
+            C::RemotePort(67),
+        ],
+        false,
+    ));
+    filters.push(spec(
+        "intent/permit-dhcp-v6-in".into(),
+        "intent permit DHCPv6 server to client",
+        L::AleAuthRecvAcceptV6,
+        WEIGHT_INFRA_PERMIT,
+        A::Permit,
+        vec![
+            C::Protocol(IpProtocol::Udp),
+            C::LocalPort(546),
+            C::RemotePort(547),
+            C::RemoteAddressV6 {
+                addr: [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                prefix: 10,
+            },
+        ],
+        false,
+    ));
+    for (tag, layer) in [
+        ("v4", L::AleAuthRecvAcceptV4),
+        ("v6", L::AleAuthRecvAcceptV6),
+    ] {
+        filters.push(spec(
+            format!("intent/block-all-inbound-{tag}"),
+            &format!("intent block all inbound {tag}"),
+            layer,
+            WEIGHT_BLOCK_ALL,
+            A::Block,
+            vec![],
+            true,
+        ));
+    }
+    filters
 }
 
 /// Parse and classify an endpoint for rule rendering. Invalid *or non-public* IPs render no
@@ -503,7 +602,12 @@ pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
     if config.mode == KillSwitchStatusMode::Locked
         && let Some(luid) = config.tun_luid
     {
-        for layer in [L::AleAuthConnectV4, L::AleAuthConnectV6] {
+        for layer in [
+            L::AleAuthConnectV4,
+            L::AleAuthConnectV6,
+            L::AleAuthRecvAcceptV4,
+            L::AleAuthRecvAcceptV6,
+        ] {
             filters.push(spec(
                 format!("session/permit-tunnel/{layer:?}/{luid}"),
                 "session permit tunnel interface",
@@ -688,6 +792,8 @@ pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
     for layer in [
         L::AleAuthConnectV4,
         L::AleAuthConnectV6,
+        L::AleAuthRecvAcceptV4,
+        L::AleAuthRecvAcceptV6,
     ] {
         filters.push(spec(
             format!("session/block-all/{layer:?}"),
@@ -856,7 +962,7 @@ mod tests {
             .iter()
             .filter(|filter| filter.persistent)
             .collect::<Vec<_>>();
-        assert_eq!(persistent.len(), 2);
+        assert_eq!(persistent.len(), 4);
         assert!(
             persistent.iter().all(|filter| {
                 filter.action == FilterAction::Block && filter.conditions.is_empty()
@@ -901,8 +1007,8 @@ mod tests {
             })
             .count();
         assert_eq!(
-            tun_permits, 2,
-            "tunnel permit on v4/v6 ALE authorization layers"
+            tun_permits, 4,
+            "tunnel permit on v4/v6 ALE connect and receive-accept layers"
         );
         assert!(
             !filters.iter().any(|filter| {
@@ -973,7 +1079,7 @@ mod tests {
         // Upgrade safety: the key-only diff adopts anything with a matching key, so the
         // namespace must change whenever the rule tables do. Pin the current marker (see the
         // constant's doc comment); any rule-table change must bump it and this pin.
-        assert_eq!(FILTER_NAMESPACE >> 64, 0x2f7c_9e08_0000_4a6c);
+        assert_eq!(FILTER_NAMESPACE >> 64, 0x2f7c_9e09_0000_4a6c);
     }
 
     #[test]
@@ -1530,6 +1636,75 @@ mod tests {
                     arbitrate(&filters, &inbound),
                     FilterAction::Permit,
                     "{mode:?}: NDP inbound type {ty}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn inbound_accept_on_the_physical_adapter_is_blocked_in_every_mode() {
+        for mode in [
+            KillSwitchStatusMode::Bootstrap,
+            KillSwitchStatusMode::Locked,
+            KillSwitchStatusMode::Blocked,
+        ] {
+            let filters = expected_filters(&config(mode));
+            for (layer, peer) in [
+                (LayerKind::AleAuthRecvAcceptV4, "203.0.113.9"),
+                (LayerKind::AleAuthRecvAcceptV6, "2001:db8::9"),
+            ] {
+                let mut physical = packet(layer, IpProtocol::Tcp, peer, 51_413);
+                physical.local_port = Some(6881);
+                assert_eq!(
+                    arbitrate(&filters, &physical),
+                    FilterAction::Block,
+                    "{mode:?}: a peer-initiated flow on the physical adapter must not be accepted ({layer:?})"
+                );
+
+                let loopback = if layer == LayerKind::AleAuthRecvAcceptV4 {
+                    "127.0.0.1"
+                } else {
+                    "::1"
+                };
+                assert_eq!(
+                    arbitrate(&filters, &packet(layer, IpProtocol::Tcp, loopback, 50_000)),
+                    FilterAction::Permit,
+                    "{mode:?}: local listeners keep accepting loopback peers ({layer:?})"
+                );
+
+                let (dhcp_server, dhcp_rogue, client, server) =
+                    if layer == LayerKind::AleAuthRecvAcceptV4 {
+                        ("192.168.1.1", None, 68, 67)
+                    } else {
+                        ("fe80::1", Some("2001:db8::67"), 546, 547)
+                    };
+                let mut reply = packet(layer, IpProtocol::Udp, dhcp_server, server);
+                reply.local_port = Some(client);
+                assert_eq!(
+                    arbitrate(&filters, &reply),
+                    FilterAction::Permit,
+                    "{mode:?}: DHCP server replies keep reaching the client ({layer:?})"
+                );
+                if let Some(rogue) = dhcp_rogue {
+                    let mut rogue = packet(layer, IpProtocol::Udp, rogue, server);
+                    rogue.local_port = Some(client);
+                    assert_eq!(
+                        arbitrate(&filters, &rogue),
+                        FilterAction::Block,
+                        "{mode:?}: a global peer cannot open a flow on the DHCPv6 client port"
+                    );
+                }
+
+                physical.local_interface = Some(0x1234_5678);
+                let expected = if mode == KillSwitchStatusMode::Locked {
+                    FilterAction::Permit
+                } else {
+                    FilterAction::Block
+                };
+                assert_eq!(
+                    arbitrate(&filters, &physical),
+                    expected,
+                    "{mode:?}: tunnel-interface accept follows the tunnel permit ({layer:?})"
                 );
             }
         }
