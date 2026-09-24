@@ -31,6 +31,30 @@
 - 候选/发布：无新包，或标签、包源码、下载入口、SHA-256、签名及发布状态。
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
+## 2026-09-23 · Windows 策略 revision 只认签名内的值（H3-F5 客户端侧）
+
+- **归属/来源**：G1 保护不放宽/签名信任边界；影响 Windows tono-core `policy.rs` 与 App
+  `policy_sync.rs`。基线 main 49c82dde，分支 `fix/policy-revision-binding-20260923`；
+  Issue #317（含完整设计与过渡方案）；提交时未合 main。
+- **缺陷修复**：签名只覆盖 `v1\n + json`，revision 在签名外却是单调闸门；被攻破的 Worker
+  或 TLS 中间人可把历史真实签名策略配超大 revision 重放，永久钉住客户端。改后：json 内若带
+  `revision` 必须等于信封 revision，否则整份拒绝；只有"签名 Trusted 且 json 内含 revision"才算
+  已认证 revision；已认证 revision 无视数值大小替换未认证的当前 revision（已被钉住的客户端
+  借此恢复）；一旦装入已认证 revision，未认证文档（未签名或旧 v1 签名）不能再推动闸门
+  （按 StaleRevision 静默保持，fail-closed）。缓存播种经 `PolicyTracker::from_cached` 保留
+  该状态。主机信任仍只由签名结论与编译期白名单决定，未放宽。
+- **新增/优化**：`PolicyTracker::install` 内部改走可注入公钥的 `install_with_key`（生产仍用
+  编译期公钥）。
+- **工程与测试**：新增回归 `signed_revision_outranks_an_unsigned_revision_pin`。
+- **验证**：红灯：只含测试与无行为变化重构的提交在 GitHub-hosted `ubuntu-24.04` Windows CI
+  core 作业（run 35842730707）以断言失败（`policy.rs:1227`，265 过 1 败）；修复后结果见 PR CI。
+  本机未运行 cargo。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：Worker 尚未在 canonical json 中写入 revision、发布工具尚未随 dry run 传
+  expectedRevision，因此本修复在服务端落地前处于休眠（旧文档行为与现状相同）；macOS 尚未实现
+  同一规则；`sing_box.rs` 的 JSON 键白名单会把带 `revision` 的策略判为 UnsupportedPolicy
+  （fail-closed），服务端落地前需同步。均记录在 #317。
+
 ## 2026-09-23 · Windows 未签名策略的 media 端点不再放行（H3-F6）
 
 - **归属/来源**：G1 保护不放宽（签名才可扩大绕行面）；影响 Windows tono-core
