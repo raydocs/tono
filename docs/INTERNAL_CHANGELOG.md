@@ -2016,6 +2016,24 @@
 - **候选/发布**：无新包，仅源码；下一次候选构建才会带内部标记。
 - **剩余限制**：未在真实候选安装包上验证提示与上报；测试者只能用本地诊断日志开关停止上报（无单独开关）；
   时间线窗口本身仍默认关闭。
+## 2026-09-24 · Windows 更新发现：一次检查连同重试失败后不再永久停摆
+
+- **归属/来源**：G3 更新通道（发现环节）；Windows App 前端 `hooks/use-update.ts`。内部审查 H18-O-F1，
+  Issue #543。基线 origin/main 8dc79a5b → 分支 `fix/win-update-discovery-retry-20260924`，PR #544；提交时未合 main。
+- **缺陷修复**：自动更新检查只靠 SWR 的 24 h `refreshInterval` 与 `retry: 2`。首次检查和两次 5 s 重试都失败
+  （如开机自启时网络未就绪）后，SWR 缓存保留错误，锁定版本 2.5.1 的轮询在有缓存错误时跳过每个 tick；
+  reconnect 重验证也因查询适配层传入 `undefined` 覆盖默认值而关闭；原生 `start_background_check` 无调用者。
+  结果是 App 不重启、不手动检查就再也不自动发现新版本。现在缓存出现错误时另起一个不受该门控的 1 h
+  重查计时器（每次失败换新错误对象，计时器随之重排；成功后错误清除，恢复原 24 h 轮询），并对该查询开启
+  reconnect 重验证。仍走原有受 Service 验签保护的 `tono_check_update`。
+- **新增/优化**：无。
+- **工程与测试**：新增一个 vitest `it`（`src/hooks/use-update.test.tsx`，假计时器）：前三次检查失败、之后成功，
+  推进 24 h + 1 min 后必须至少第四次检查并持有 offer。旧代码只有 3 次调用（本机实跑红，见 PR）。
+- **验证**：本机 `vitest run src/hooks/use-update.test.tsx` 修复前 1 failed（expected 3 ≥ 4）、修复后 1 passed；
+  `tsc --noEmit` 与该两文件 eslint 通过。完整 `pnpm test` 由本 PR 的 GitHub-hosted CI 执行，结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：Settings 页打开时有多个 `useUpdate` 实例挂载，错误状态下每小时可能并发 2–3 次检查（结果以最后一次为准）；
+  托盘隐藏窗口是否被 SWR 视为 hidden（影响成功路径的 24 h 轮询）未确认、未改；原生 `start_background_check` 仍无调用者。
 
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
