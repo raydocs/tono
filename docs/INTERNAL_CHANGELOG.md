@@ -49,6 +49,32 @@
 - **候选/发布**：无新包，仅文档。
 - **剩余限制**：H16/H17 条目全部是源码推导或阅读确认，回归草案均未运行；需实机的部分列在审查轮记录第 3 节。
 
+## 2026-09-23 · 家宽出口、token-admin 用户与白名单写操作补审计
+
+- **归属**：ops 任务（`docs/ops/plan-2026-09-11.md` 5.2 角色启用：角色越权的追溯依赖完整审计，
+  见 `docs/ops/api-contract.md:154-156`）；控制面 `services/control-plane`。不属客户发布门。
+- **来源**：内部审查 H8-F6，Issue #405；分支 `fix/admin-write-audit-20260923`，基线 origin/main
+  18301fc5。提交时未合 main。无 migration。
+- **缺陷修复**：以下写操作原先不写 `ops_audit`，改后复用 `writeOpsAudit`：
+  shared-admin `PATCH home-exits/{id}`（`home.update`，摘要只列字段名，不含 SOCKS5 密码）、
+  `DELETE home-exits/{id}`（`home.delete`）；token-admin `PATCH /api/v1/admin/users/{id}`
+  （`user.usage-reset`、`user.update` 列出改动字段）、`DELETE /api/v1/admin/signup-allowlist`
+  （`allowlist.remove`，仅实际删除时）、`POST`/`DELETE /api/v1/admin/invitations`
+  （`invitation.create` 不含邀请码、`invitation.delete` 仅实际删除时）；开户 `homeExitId`
+  分支在绑定当时写 `home.assign`，后续账号指派 409 时也留痕。token-admin actor 为
+  `token-admin`（映射 `token_admin`）。
+- **新增/优化**：无。
+- **工程与测试**：`src/index.ts` 已在行数上限（`test/index-size.txt` = 4014），按预算脚本要求把
+  上述四个 token-admin 写路由原样移到 `src/ops/token-admin.ts` 再加审计；index.ts 降到 3906 行，
+  上限文件未下调（避免与其他在审 PR 冲突）。一个 Worker `it`（`test/worker.test.ts`
+  `audits a home exit SOCKS5 password change without recording the password`）。
+- **验证**：MacBook 本机 worktree：该 `it` 在旧代码上失败（无 `home.update` 审计行），修复后通过；
+  `npx vitest run`（control-plane 全量）43 个文件、892 个测试通过；`npm run typecheck`、
+  `npm run check:budgets` 通过。其余审计点无单独测试（规则 5）。未部署，未碰 remote D1。
+- **候选/发布**：仅源码，无新候选；Worker 未部署。
+- **剩余限制**：审计写入仍为尽力而为（`writeOpsAudit` 吞错），不与业务写同一事务；
+  token-admin 审计无法区分具体持 token 的人。
+
 ## 2026-09-23 · 控制面遥测、失败上报、支持报告改为按账户限流
 
 - **归属/来源**：G2（失败进入客户时间线）与 ops 客户在线状态；控制面 Worker。内部审查
