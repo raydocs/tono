@@ -385,24 +385,55 @@ def remove_inbound_user(
     return run_xray(binary, ["api", command, f"--server={address}", f"-tag={tag}", email])
 
 
+def _output_lines(result: subprocess.CompletedProcess[str]) -> list[str]:
+    return f"{result.stdout or ''}\n{result.stderr or ''}".splitlines()
+
+
+def _total_at_least_one(lines: list[str], verb: str) -> bool:
+    for line in lines:
+        match = re.fullmatch(rf"{verb} (\d+) user\(s\) in total\.", line.strip())
+        if match and int(match.group(1)) >= 1:
+            return True
+    return False
+
+
+def _vless_user_error(lines: list[str], email: str, outcome: str) -> bool:
+    pattern = rf"rpc error: code = \w+ desc = proxy/vless: User {re.escape(email)} {outcome}\."
+    return any(re.fullmatch(pattern, line.strip()) for line in lines)
+
+
 def removal_succeeded(result: subprocess.CompletedProcess[str], email: str) -> bool:
     """Whether `rmu` removed `email` or it was already absent.
 
     Xray 26 `rmu` exits 0 even when a removal fails, so the exit code alone
-    proves nothing. A wrong inbound tag prints "handler not found" and
-    "Removed 0 user(s)"; only the per-user "User <email> not found" line means
-    the identity is really gone.
+    proves nothing. Only whole lines count (main/commands/all/api/
+    inbound_user_remove.go, v26.3.27): an echoed email or tag must not pass as
+    a total or a per-user result. A wrong inbound tag prints "handler not
+    found" and "Removed 0 user(s) in total.".
     """
-    output = f"{result.stdout or ''}\n{result.stderr or ''}"
-    if re.search(rf"\bUser {re.escape(email)} not found\b", output):
+    lines = _output_lines(result)
+    if result.returncode == 0 and _total_at_least_one(lines, "Removed"):
         return True
-    if result.returncode != 0:
+    if any("failed to get handler" in line or "handler not found" in line for line in lines):
         return False
-    count = re.search(r"Removed (\d+) user\(s\)", output)
-    return count is not None and int(count.group(1)) >= 1
+    return _vless_user_error(lines, email, "not found")
 
 
-def removal_error(result: subprocess.CompletedProcess[str]) -> str:
+def addition_outcome(result: subprocess.CompletedProcess[str], email: str) -> str:
+    """"added", "present" or "failed" for one `adu` run.
+
+    Like `rmu`, `adu` exits 0 after an RPC error and prints "Added 0 user(s)
+    in total." (main/commands/all/api/inbound_user_add.go, v26.3.27).
+    """
+    lines = _output_lines(result)
+    if _vless_user_error(lines, email, "already exists"):
+        return "present"
+    if result.returncode == 0 and _total_at_least_one(lines, "Added"):
+        return "added"
+    return "failed"
+
+
+def api_error(result: subprocess.CompletedProcess[str]) -> str:
     return (result.stderr or "").strip() or (result.stdout or "").strip() or str(result.returncode)
 
 
@@ -944,7 +975,7 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
         if not removal_succeeded(result, LEGACY_CLIENT_EMAIL):
             # Like every other removal: reported with the rest, never a reason
             # to skip the revocations that follow.
-            failures.append(f"removing {LEGACY_CLIENT_EMAIL} failed: {removal_error(result)}")
+            failures.append(f"removing {LEGACY_CLIENT_EMAIL} failed: {api_error(result)}")
         if recorded is not None:
             recorded = recorded - {LEGACY_CLIENT_EMAIL}
     wanted = {
@@ -981,7 +1012,7 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
             result = remove_inbound_user(binary, commands["remove_user"], address, tag, label)
             if not removal_succeeded(result, label):
                 # One failure must not leave every later revocation in place.
-                failures.append(f"removing {label} failed: {removal_error(result)}")
+                failures.append(f"removing {label} failed: {api_error(result)}")
                 continue
             if known_installed is not None:
                 known_installed.discard(label)
@@ -1001,14 +1032,18 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
         # Already-present is success, not failure: two agents on one timer, or a
         # retry after a lost response, must not turn into an error loop. It is
         # not an addition either, or every round would report the whole roster.
-        # Xray 26 `adu` prints "already exists" on stdout and may still exit 0.
-        output = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
-        if "already exists" in output:
-            pass
-        elif result.returncode != 0:
-            failures.append(f"adding {label} failed: {result.stderr.strip() or result.returncode}")
-            continue
+        # Xray 26 `adu` prints its per-user result on stdout and exits 0 even
+        # when the add failed; the legacy commands keep the exit-code rule.
+        if commands["add_user"] == "adu":
+            outcome = addition_outcome(result, label)
         else:
+            output = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
+            outcome = ("present" if "already exists" in output
+                       else "failed" if result.returncode != 0 else "added")
+        if outcome == "failed":
+            failures.append(f"adding {label} failed: {api_error(result)}")
+            continue
+        if outcome == "added":
             added += 1
         if known_installed is not None:
             known_installed.add(label)

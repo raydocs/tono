@@ -784,7 +784,9 @@ class RosterControlSignals(unittest.TestCase):
 
         def fake_xray(_binary, arguments):
             calls.append(arguments)
-            stdout = '{"stat": []}' if "statsquery" in arguments else "Removed 1 user(s) in total." if "rmu" in arguments else ""
+            stdout = ('{"stat": []}' if "statsquery" in arguments
+                      else "Removed 1 user(s) in total." if "rmu" in arguments
+                      else "Added 1 user(s) in total." if "adu" in arguments else "")
             return type("Result", (), {"returncode": 0, "stdout": stdout, "stderr": ""})
 
         with patch.dict(agent.os.environ, {
@@ -1195,7 +1197,7 @@ class ReconcileSafety(unittest.TestCase):
     def setUp(self) -> None:
         self.calls: list[list[str]] = []
         self.adu_docs: list[dict] = []
-        self.result = type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})
+        self.result = type("Result", (), {"returncode": 0, "stdout": "Added 1 user(s) in total.", "stderr": ""})
 
         def fake_run(_binary, arguments):
             self.calls.append(arguments)
@@ -1318,12 +1320,42 @@ class ReconcileSafety(unittest.TestCase):
         self.assertTrue(agent.removal_succeeded(missing, email))
         self.assertFalse(agent.removal_succeeded(wrong_tag, email))
         self.assertTrue(agent.removal_succeeded(removed, email))
+        # Echoed text must not pass: an email that looks like a total, and a
+        # tag that looks like a per-user not-found, both with a wrong tag.
+        spoof_email = "u:Removed 1 user(s) in total."
+        echoed_email = result(f"remove user: {spoof_email}\nrpc error: code = Unknown desc = "
+                              "app/proxyman/command: failed to get handler: no-such-tag > "
+                              "app/proxyman/inbound: handler not found: no-such-tag\n"
+                              "Removed 0 user(s) in total.\n")
+        self.assertFalse(agent.removal_succeeded(echoed_email, spoof_email))
+        spoof_tag = "User u:x not found"
+        echoed_tag = result(f"remove user: u:x\nrpc error: code = Unknown desc = "
+                            f"app/proxyman/command: failed to get handler: {spoof_tag} > "
+                            f"app/proxyman/inbound: handler not found: {spoof_tag}\n"
+                            "Removed 0 user(s) in total.\n")
+        self.assertFalse(agent.removal_succeeded(echoed_tag, "u:x"))
         # The original bug was the argv: Xray 26 rejects `--email=`.
         self.reconcile([], {email}, None)
         self.assertEqual(
             self.calls[0], ["api", "rmu", "--server=127.0.0.1:10085", "-tag=tono-vless", email],
         )
         self.assertFalse(any("--email" in arg for arg in self.calls[0]))
+
+    def test_an_adu_that_exits_0_after_an_rpc_error_is_a_failure(self) -> None:
+        # Xray 26 `adu` exits 0 and prints "Added 0" when the add failed.
+        self.result = agent.subprocess.CompletedProcess([], 0, (
+            "processing inbound: tono-vless\nadd user: u:usr_1\n"
+            "rpc error: code = Unknown desc = app/proxyman/command: failed to get handler: "
+            "tono-vless > app/proxyman/inbound: handler not found: tono-vless\n"
+            "Added 0 user(s) in total.\n"), "")
+        with self.assertRaises(agent.Refusal) as refused:
+            self.reconcile(
+                [{"userId": "usr_1", "clientUUID": "11111111-1111-4111-8111-111111111111"}],
+                set(),
+                None,
+            )
+        # A refusal returns no inventory, so the label cannot be recorded or ACKed.
+        self.assertIn("adding u:usr_1 failed", str(refused.exception))
 
     def test_the_installed_label_is_the_prefixed_one(self) -> None:
         self.reconcile(
@@ -1342,7 +1374,9 @@ class ReconcileSafety(unittest.TestCase):
         # Adds are attempted whenever the node cannot be asked what it holds,
         # because clients added over the API do not survive a restart. Counting
         # them would print the whole roster as added on every run.
-        self.result = type("Result", (), {"returncode": 1, "stdout": "", "stderr": "User already exists."})
+        self.result = type("Result", (), {"returncode": 0, "stdout": (
+            "add user: u:usr_1\nrpc error: code = Unknown desc = "
+            "proxy/vless: User u:usr_1 already exists.\nAdded 0 user(s) in total.\n"), "stderr": ""})
         added, removed, _ = self.reconcile(
             [{"userId": "usr_1", "clientUUID": "11111111-1111-4111-8111-111111111111"}],
             None,
@@ -1448,7 +1482,7 @@ class ControlPlaneOutage(unittest.TestCase):
 
         def fake_add(_binary, _command, _address, _tag, added_label, _uuid):
             added.append(added_label)
-            return agent.subprocess.CompletedProcess([], 0, "", "")
+            return agent.subprocess.CompletedProcess([], 0, "Added 1 user(s) in total.", "")
 
         def fake_deliver(_base, _token, queue_path, state):
             count = len(state["pendingReports"])
