@@ -1668,6 +1668,7 @@ mod tests {
             snapshot_present: true,
             adapters: 3,
             last_error: None,
+            resolver_policy_warning: None,
         };
         assert!(!protected_dns_unhealthy(Some(&healthy)));
 
@@ -1740,6 +1741,7 @@ mod tests {
                 snapshot_present: true,
                 adapters: 1,
                 last_error: None,
+                resolver_policy_warning: None,
             },
         )
     }
@@ -2281,6 +2283,7 @@ mod tests {
             snapshot_present: true,
             adapters: 2,
             last_error: None,
+            resolver_policy_warning: None,
         };
         assert!(!protected_dns_unhealthy(Some(&healthy)));
         assert!(protected_dns_unhealthy(None));
