@@ -444,17 +444,28 @@ impl RotatingWriter {
     }
 
     /// current → `.1` (single retained generation), fresh current file.
+    ///
+    /// A missing current path means an earlier rotation renamed it but could not create the
+    /// next file (disk full), so `file` still points at the backup. Then only the current file
+    /// is recreated: removing the backup and renaming a missing path failed on every later
+    /// rotation until restart, and cost the retained generation.
     fn rotate(&mut self) -> std::io::Result<()> {
         use std::io::Write as _;
 
         self.file.flush()?;
-        let backup = self.backup_path();
-        match std::fs::remove_file(&backup) {
-            Ok(()) => {}
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-            Err(err) => return Err(err),
+        let current_missing = matches!(
+            std::fs::symlink_metadata(&self.path),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound
+        );
+        if !current_missing {
+            let backup = self.backup_path();
+            match std::fs::remove_file(&backup) {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => return Err(err),
+            }
+            std::fs::rename(&self.path, &backup)?;
         }
-        std::fs::rename(&self.path, &backup)?;
         self.file = state::open_private_append(&self.path).map_err(|err| std::io::Error::other(err.to_string()))?;
         self.written = 0;
         Ok(())
