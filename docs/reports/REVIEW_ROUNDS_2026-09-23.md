@@ -114,7 +114,7 @@
   必须在修复前失败；不得为变绿改断言或加测试专用分支。新 seam 的存在性测试要如实写明它的失败方式。
 - D1 schema 变更加新 migration，不改旧 migration。
 - 同 PR 更新 INTERNAL_CHANGELOG（按模板，插在模板代码块之后最前）和 FINDINGS_LEDGER 对应行。
-- 不碰 appcast/latest.json/windows-updates，不部署，不合并自己的 PR。
+- 修复 agent 不碰 appcast/latest.json/windows-updates，不部署，不合并自己的 PR；合并、部署与发布由另一方按 [AGENTS.md](../../AGENTS.md) 的条件执行。
 
 ### 4.5 独立 diff 审查
 

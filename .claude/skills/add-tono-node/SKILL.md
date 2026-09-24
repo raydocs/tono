@@ -25,9 +25,11 @@ unreachable for a day without a single error anywhere.
 
 The onboarding repo lives on the ops machine, not on every checkout; run
 `ls ~/Downloads/Project/tono-node-provisioning/bin` first. If it is absent, use the in-repo
-scripts: `tooling/scripts/provision-reality-node.rb` (preflight/apply),
-`tooling/scripts/publish-managed-catalog.rb --append`, and
-`tooling/scripts/check-node-in-fleet.py` (audit).
+scripts: `tooling/scripts/provision-reality-node.rb` (preflight/apply) and
+`tooling/scripts/check-node-in-fleet.py` (audit). They cover only Xray and the catalog:
+do not run `tooling/scripts/publish-managed-catalog.rb --append` until the audit reports
+every other place present; otherwise stop after provisioning and record the gap in
+`docs/DECISIONS.md`.
 
 ```sh
 cd ~/Downloads/Project/tono-node-provisioning

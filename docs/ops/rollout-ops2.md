@@ -1,6 +1,6 @@
 # 新后台（/ops2/）上线步骤
 
-这份是把 `ops/platform` 分支推到生产的操作清单。在绑定 `tono` wrangler profile 的维护者 `main` 检出里执行（条件见 [AGENTS.md](../../AGENTS.md)）；hub 的 SSH 与 Telegram bot token 由老板提供。
+这份是把 `ops/platform` 分支推到生产的操作清单。生产步骤在绑定 `tono` wrangler profile 的维护者 `main` 检出里执行（§0.3 的 preview 演练记录是在 spookfish 目录跑的）（条件见 [AGENTS.md](../../AGENTS.md)）；hub 的 SSH 与 Telegram bot token 由老板提供。
 
 ## 0. 上线前的状态
 

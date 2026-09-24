@@ -90,14 +90,13 @@ cd services/control-plane
 npx wrangler d1 create tono-control-plane          # 记下新的 database_id
 # 把 wrangler.jsonc 与 wrangler.admin.jsonc 里的 database_id 都改成新值，提交到 main（PR，CI 绿）
 npx wrangler d1 execute tono-control-plane --remote -y --file /tmp/restore.sql        # 不带 --config
-npx wrangler d1 migrations apply tono-control-plane --remote --config wrangler.jsonc  # 备份之后合并的迁移会在这里补上
 ```
 
-然后在主检出跑 `tooling/scripts/deploy-control-plane-main.sh`（它会再跑一次 `migrations list / apply`，再依次部署 API 与 admin 两个 Worker，带 `BUILD_SHA`）。旧库不要立刻删：留到 §6 验证通过后一周。
+然后在主检出跑 `tooling/scripts/deploy-control-plane-main.sh`（备份之后合并的迁移由它 `migrations list / apply` 补上，再依次部署 API 与 admin 两个 Worker，带 `BUILD_SHA`）。生产迁移只经这个脚本，不单独跑 `migrations apply`。旧库不要立刻删：留到 §6 验证通过后一周。
 
 注意：旧库还在时不要用同一个名字建新库；用别的名字并同步改两个配置里的 `database_name`，或先在控制台把旧库改名。
 
-### (b) 原地清空再导入（`database_id` 不变，不用重新部署）
+### (b) 原地清空再导入（`database_id` 不变）
 
 D1 不能关外键、不允许 `integrity_check`、不允许动 `_cf_KV`，所以清空只能按依赖顺序：先触发器、再索引、再子表先于父表。`tooling/scripts/wipe-d1-in-order.mjs` 就是干这个的；对生产名它默认拒绝，需要两道门都在：
 
@@ -113,8 +112,9 @@ TONO_ALLOW_PRODUCTION_WIPE=1 node tooling/scripts/wipe-d1-in-order.mjs --apply -
 ```sh
 cd services/control-plane
 npx wrangler d1 execute tono-control-plane --remote -y --file /tmp/restore.sql        # 不带 --config
-npx wrangler d1 migrations apply tono-control-plane --remote --config wrangler.jsonc
 ```
+
+然后在主检出跑 `tooling/scripts/deploy-control-plane-main.sh`，由它补上备份之后的迁移并重新部署两个 Worker。
 
 导入约 30 秒（09-10 演练：28 秒、721,917 行）。`d1 execute` 出错时**先** `d1 migrations list`，不要手工补 SQL，也不要重复导入（会撞主键）；重复导入前先再跑一次清空。
 

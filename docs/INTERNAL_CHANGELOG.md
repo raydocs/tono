@@ -42,14 +42,29 @@
   产品取舍），其余重复内容改为链接。新增 [DECISIONS](DECISIONS.md)（模板 + 三条 `owner` 决定）与
   仓库根 `.jev-route.json`（Windows Service/WFP、kill switch/PF/DNS/NRPT、客户更新源计为受保护路径）。
   两个节点/运维 skill 去掉「先取得批准」的停顿和已失效的 0012 迁移部署段。SHIP_PLAN、RELEASE_LINES、
-  BUILD_AND_TEST、CONTRIBUTING、docs/README 与三份 ops 文档中与新规则冲突的句子同步改写；
+  BUILD_AND_TEST、CONTRIBUTING、docs/README 与三份 ops 文档中找到的冲突句同步改写（审查又找到的残留见续记）；
   SHIP_PLAN §6 勾选行未改。
 - **工程与测试**：无代码、工作流或配置行为改动（`.jev-route.json` 只影响审查路由）。
 - **验证**：文档变更，未运行产品测试。`route.mjs review --paths apps/windows/service/src/core/manager.rs --dry-run`
   报 `protected_area: true`（无该文件时为 `false`）；计划 §4 的 grep 结果贴在 PR 正文。
 - **候选/发布**：无新包，仅文档。
-- **剩余限制**：macOS「CI 产物 → release → appcast」组合发布路径仍未端到端跑过（AGENTS.md 已注明）；
+- **剩余限制**：macOS「CI 产物 → release → appcast」组合发布路径仍未端到端跑过（RELEASE_LINES 已注明）；
   gh token 能否自批 GitHub environment 部署未实测。
+- **2026-09-24 续记（审查返工，jev-route f4512463 三方审查）**：AGENTS.md 仍为 70 行。审查命令改为从最新
+  `origin/main` 检出跑 `route.mjs review --git origin/<base>...<head>`，决策号、槽位与核实结果贴 PR 评论；
+  定义合并批次（`main` 上含直推在内、上次记录区间或线上 `buildSha` 之后的全部提交）并记录审查区间；
+  合并顺序以 PR 正文为准（含 `## Merge order`）；合并方检查本页是否更新；受损凭据可立即停用。
+  恢复 `StartClash`/升级进程清扫改名规则与 macOS 全量测试条件；目录描述改回「按设备的出口目录 + 签名流量策略」。
+  客户发布步骤、两个 Windows environment（`windows-release`、`windows-update-channel`，自批未实测、只限 G4、
+  每次记录）与回滚语义移到 [RELEASE_LINES](RELEASE_LINES.md#customer-publish-g4)；macOS 链补签名文件、
+  `generate-release-center.mjs`、提交 `public/`、prerelease 与标签 SHA 核对；已验证路径限 Mac Studio，
+  sudo 一步归老板。BUILD_AND_TEST 区分候选签名与客户发布。加节点的仓库内后备路径在审计报齐目录以外各处之前不
+  `--append`；provisioning skill 恢复 Xcode 依赖、删除集合规则统一。继续清理 SHIP_PLAN（§2.2 不改行仅限 G1–G3、
+  §2.3 已冻结 0.0.73、§2.9、§3.5 改为 DECISIONS 暂定条目、谁/审合发、G4.3 指向发布步骤、G4.4 回滚、依赖图）、
+  docs/README、运维计划 §2.5 与任务表「谁」、rollout-ops2、restore-production（生产迁移只经部署脚本）、
+  services/exit-agent 与 preview README、REVIEW_ROUNDS 中残留的停顿与矛盾。`.jev-route.json` 另加
+  `ProtectedSystemResolver`、`protected_probe`。等待另一厂商核实的 Opus 单方发现（发布门勾选者与 SHA 绑定、
+  路由配置来源、部署前备份与 preview 演练、保护执行代码覆盖、密钥范围、G4 顺序）本次未改文字。
 
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 

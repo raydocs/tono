@@ -88,3 +88,55 @@ tags are not those feeds.
    from `release/windows`.
 5. Verify the immutable tag resolves to the source SHA before advancing an
    update feed or channel.
+
+## Customer publish (G4)
+
+When an agent may start is set in [AGENTS.md](../AGENTS.md) (owner-written G1–G3
+evidence in SHIP_PLAN §6). Record each step's run URL, SHA and artifact hashes in
+[INTERNAL_CHANGELOG.md](INTERNAL_CHANGELOG.md).
+
+**macOS.** This composite is documented in `macos-release.yml`'s step summary and
+has not yet run end to end.
+
+1. Tag `tono-macos-<version>-build<build>` on pushed `release/macos`.
+   `macos-release.yml` signs and notarises, and uploads the zip plus
+   `macos-release-proof-<sha>` (holding `enclosure.sig`) as Actions artifacts that
+   expire after 7 days.
+2. `gh release create <tag> --prerelease --target <sha> <zip>`; confirm it is not a
+   draft and that `gh api repos/raydocs/tono/commits/<tag> --jq .sha` is the built SHA.
+3. `node tooling/scripts/upload-release-asset.mjs --tag <tag>`, run from the root of
+   the checkout bound to the `tono` wrangler profile.
+4. `node tooling/scripts/publish-macos-appcast.mjs` with the argv of the workflow's
+   "Validate the appcast entry" step (`--signature-file` pointing at that run's
+   `enclosure.sig`), without `--dry-run`.
+5. `git fetch origin windows-updates`, then `node tooling/scripts/generate-release-center.mjs`
+   (the deploy script refuses a stale release centre); commit
+   `services/control-plane/public/` on `main`; deploy per AGENTS.md.
+
+The proven path is `tooling/scripts/release-macos.sh --version <v> --build <n>
+--publish --lifecycle-token <token>`, which does steps 2–5 except the deploy. It
+builds and packages natively, so it runs on the Mac Studio, never the MacBook. The
+token comes from `sudo tooling/scripts/test-helper-install-lifecycle.sh`, which is
+the owner's step.
+
+**Windows.**
+
+1. `windows-release.yml` on `release/windows` builds the signed draft; its job waits
+   on environment `windows-release`.
+2. `gh release edit v<version> --draft=false`, then
+   `node tooling/scripts/upload-release-asset.mjs --tag v<version>`.
+3. `windows-update-promote.yml` validates the bytes, advances `windows-updates` and
+   commits `services/control-plane/public/windows/latest.json` to `main`; its job
+   waits on environment `windows-update-channel`. Then deploy per AGENTS.md.
+
+Both environments list reviewer `raydocs`, the same account as the agents' token,
+so an agent approving them removes the only human check there. Whether that token
+can approve its own deployment is untested as of 2026-09-24. Self-approve only for
+the G4 publish; a signed candidate for G3 waits for the owner's approval. Record
+each approval (environment, run URL, SHA) in the changelog.
+
+**Rollback.** Moving a feed back to the last good entry only stops machines that
+have not updated yet. Updated machines refuse a lower build or release sequence on
+both platforms, so recover them by shipping the last good source as a higher macOS
+build or a higher Windows version. Worker rollback is `npx wrangler rollback` for
+each Worker config; migrations never roll back.

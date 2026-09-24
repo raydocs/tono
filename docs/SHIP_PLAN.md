@@ -3,7 +3,7 @@
 写给执行 agent 与老板。立场：客户打开 App 会不会觉得这是成品，不是运维台好不好用。
 运维后台剩余工作仍以 `docs/ops/plan-2026-09-11.md` 为准，**不构成本计划的发布门**。
 
-定稿日期：2026-09-10。基线：`main` `2cef4eac`（PR #140，第十四次控制面部署）。源码版本 macOS / Windows **0.0.72**。客户更新源仍是 Sparkle **0.0.67**、`windows/latest.json` **0.0.34**。GitHub 上的 `v0.0.72` / `tono-macos-0.0.72-build72` **不是**客户频道（issue #80）。
+定稿日期：2026-09-10。基线：`main` `2cef4eac`（PR #140，第十四次控制面部署）。源码版本（当时）macOS / Windows **0.0.72**，现已冻结到 0.0.73（§2.3）。客户更新源仍是 Sparkle **0.0.67**、`windows/latest.json` **0.0.34**。GitHub 上的 `v0.0.72` / `tono-macos-0.0.72-build72` **不是**客户频道（issue #80）。
 
 **这一发的产品版本号是 0.0.73。** 0.0.72 的 GitHub 标签已经存在且未进更新源；门 1–3 的代码合入 `main` 时仍可停留在 0.0.72，冻结提交再升到 0.0.73 再打标签、再推源。
 
@@ -81,14 +81,14 @@
 ## 2. 硬规则
 
 1. **四条门是发布门，不是愿望清单。** 任何 PR 说明必须写它服务 G1–G4 的哪一条；写不上来的不合进这一发的集成分支。
-2. **客户源只在 G1–G3 证据之后推。** 老板在 §6 为 G1、G2、G3 写下 `[x]` 与证据链接之前，不改 `public/appcast.xml`、不推 `windows-updates`、不把 GitHub release 从 prerelease 改成客户频道。之后由 agent 按 [AGENTS.md](../AGENTS.md) 的发布步骤执行 G4；agent 不改 §6 的勾选行。
-3. **版本。** 门 1–3 的开发提交保持 0.0.72。冻结提交一次性改：`apps/macos/Tono.xcodeproj/project.pbxproj` 的 `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`、`apps/windows/app/package.json`、`apps/windows/app/src-tauri/Cargo.toml`，以及 `python3 tooling/scripts/verify-desktop-version.py --expected 0.0.73`。夹具里的 `0.0.72` 示例不必全改，那是演示数据。
+2. **客户源只在 G1–G3 证据之后推。** 老板在 §6 为 G1、G2、G3 写下 `[x]` 与证据链接之前，不改 `public/appcast.xml`、不推 `windows-updates`、不把 GitHub release 从 prerelease 改成客户频道。之后由 agent 按 [AGENTS.md](../AGENTS.md) 的发布步骤执行 G4；agent 不改 §6 中 G1–G3 的勾选行，G4 各行由执行 agent 在推源过程中勾。
+3. **版本。** 已冻结到 0.0.73（[RELEASE_LINES](RELEASE_LINES.md)），后续提交不回退版本号。冻结提交改的是：`apps/macos/Tono.xcodeproj/project.pbxproj` 的 `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`、`apps/windows/app/package.json`、`apps/windows/app/src-tauri/Cargo.toml`，以及 `python3 tooling/scripts/verify-desktop-version.py --expected 0.0.73`。夹具里的 `0.0.72` 示例不必全改，那是演示数据。
 4. **目录合同。** 托管目录仍然只有 Tono 签发的出口。hy2 是同一节点的第二块，名字后缀 ` · hy2`（中间是空格+间隔号+空格）。展示名、判定、退役都折叠到基名。禁止为 hy2 另开一套节点身份。
 5. **保护面不得放宽。** hy2 只把 **那一个** `(IPv4, hy2_port, UDP)` 放进 PF/WFP 允许集；禁止 `skip-cert-verify`；禁止非公开 IPv4；Windows `admit_node` 与 macOS `validatedOwnedNode` 只**增** hy2 分支，不删 VLESS Reality 约束。
 6. **hy2 自动切换的前提是三网 UDP 证明。** 任一运营商完全不通 → 目录仍可带块，客户端只提供手动选择，开关默认关，发布说明写「本版备用通道仅手动」。禁止在未证明时做自动切换。
 7. **测试预算。** 每个行为一个最窄回归：Windows 一个 `#[test]` 或 `#[tokio::test]`，macOS 一个 XCTest，Worker 一个 `it`。不写表驱动大套。Playwright / 运维夹具与本计划无关，除非改了客户时间线的 `transport` 展示。
 8. **分支。** 客户端改动走 `release/macos` / `release/windows` 或直接 PR 到 `main`（现有习惯：Windows 在 Mac 上编不了 sidecar，PR 必须在 Windows 机器验证）。控制面+目录合同走 `main`。不要往 `ops/platform` 塞客户端。
-9. **密钥与隐私。** hy2 证书私钥只留在节点；指纹进 `ops_node_profiles`。密码与 VLESS 一样用 `{{TONO_CLIENT_UUID}}` 占位，Worker 按用户替换。原始连接日志默认是否开启由老板在 B0 拍板，拍完两端同一口径。
+9. **密钥与隐私。** hy2 证书私钥只留在节点；指纹进 `ops_node_profiles`。密码与 VLESS 一样用 `{{TONO_CLIENT_UUID}}` 占位，Worker 按用户替换。原始连接日志默认开启已在 B0 定（§3 第 1 条），两端同一口径。
 10. **冻。** G4 开始后只接受「装上会坏 / 更新会坏 / 连不上且无下一手」的修复。新功能排下一发。
 
 ---
@@ -99,7 +99,7 @@
 2. Windows 11 真机：编 #138、跑 `cargo test`、装候选包、走 G1 与 G3 清单。云端 Linux agent 不能代替 WFP。
 3. macOS 真机：Developer ID、公证、Sparkle EdDSA、`tooling/scripts/verify-release-gate.sh /path/to/Tono.app`、Helper 安装。
 4. hy2 三网证明（T0）：在 **vm-Gk43AX**（东京 JP Plus，`45.8.173.206`）手工装 hysteria2，电信/联通/移动各 5 次握手 + 30 秒下载；同一套配置再在 **vm-nvLHV3**（洛杉矶，`144.225.255.38`）各测一轮。结果写 `docs/ops/transport-hy2.md`。不通就执行 §2.6 的降级，不要让 agent 猜。
-5. 内部账号灰度：客户目录默认剥掉 ` · hy2`。`HY2_CATALOG_EMAILS`（逗号分隔）里的邮箱才能看见。未设则谁也看不见 hy2。Ops/admin 明文目录不剥。改这个变量之后必须 bump catalog revision（Windows 把同 revision 不同 digest 当篡改）。**仍不要 PUT**，直到客户端准入合进 `main` 且老板把邮箱写进该变量。不要把真实邮箱写进仓库。
+5. 内部账号灰度：`HY2_CATALOG_EMAILS`（逗号分隔）的邮箱值由老板提供，不写进仓库。其余按 [DECISIONS](DECISIONS.md) 的暂定口径：客户目录默认剥掉 ` · hy2`（未设变量则谁也看不见；Ops/admin 明文目录不剥），不 PUT hy2 块，直到客户端准入合进 `main` 且变量已设。改这个变量之后必须 bump catalog revision（Windows 把同 revision 不同 digest 当篡改）。
 6. 在 §6 为 G1–G3 勾 `[x]` 并附证据链接。之后推 Sparkle / `windows-updates` / R2 `tono-releases`（G4）由 agent 执行。
 7. 小范围朋友：名单由老板给；看哪些失败率、何时扩大按 G4.4，拿不准时取更保守的一侧并记入 [DECISIONS](DECISIONS.md)。
 
@@ -107,7 +107,7 @@
 
 ## 4. 任务清单（按门；每条可独立派）
 
-规模：S < 1 小时 agent，M 半天，L 一天。谁：Grok / 本机 agent 做实现；老板做真机；Fable/总监只审合发。
+规模：S < 1 小时 agent，M 半天，L 一天。谁：agent 做实现；老板做真机；审查按 jev-route，合并、部署与发布按 [AGENTS.md](../AGENTS.md) 的条件。
 
 ### B0 · 冻结口径（先做，否则 3.5 与 hy2 会打架）— 老板 · S
 
@@ -357,13 +357,13 @@ macOS Sparkle 没有 NSIS，仍由 `installHandler` 在静默断开之后写 `In
 
 **G4.3 推客户源** — agent（前提：老板已在 §6 勾 G1–G3）· S
 
-- macOS：从干净的 `release/macos` 按 `docs/RELEASE_LINES.md` 打 `tono-macos-0.0.73-build73`，改 `public/appcast.xml`，部署控制面（`main` 含该 appcast）。
-- Windows：从 `release/windows` 打 `v0.0.73`，推 `windows-updates` 的 `latest.json`，R2 对象存在且后台发布行 `verifiedAt` 有值（PR #140 已要求未校验不能发布）。
+- 两端按 [RELEASE_LINES 的客户发布步骤](RELEASE_LINES.md#customer-publish-g4) 执行（macOS `tono-macos-0.0.73-build73`，Windows `v0.0.73`）。
+- Windows：R2 对象存在且后台发布行 `verifiedAt` 有值（PR #140 已要求未校验不能发布）。
 - 验收：未改过 hosts 的内部机器「检查更新」看到 0.0.73；`curl` 更新源版本字符串是 0.0.73 不是 0.0.72。
 
 **G4.4 小范围朋友** — 老板给名单，agent 看指标与回滚 · S
 
-- 先 2–3 人，含至少一个 Windows、一个大陆运营商。24 小时内看失败即报与投诉。升高则撤 `latest.json` / appcast 到上一好版本（macOS 不能降 `CFBundleVersion`，回滚 = 再发更高 build 的旧代码，见 `RELEASE_LINES.md` Build 64 说明）。
+- 先 2–3 人，含至少一个 Windows、一个大陆运营商。24 小时内看失败即报与投诉。升高则先把 `latest.json` / appcast 退回上一好版本，停止扩大；这只挡住还没升的机器。已升的机器两端都不接受更低版本或发布序列，恢复 = 用上一好源码发更高版本（macOS 更高 build，Windows 更高版本），见 [RELEASE_LINES](RELEASE_LINES.md#customer-publish-g4)。
 - 过门：朋友能用、你能在 `/ops2/` 看到他们的连接，不靠他们发截图。
 
 ---
@@ -379,7 +379,7 @@ B0 口径
         └─ 通：G2.4 → G2.5 → G2.6+G2.7 → G2.8 → G2.9 ── G2 过门（自动）
 
 G1 且 G2A 之后：G3.1 → G3.2 → G3.3 ── G3 过门
-四门证据齐：G4.1 → G4.2 → G4.3 → G4.4 ── 发布标准达成，冻
+老板在 §6 勾完 G1–G3：G4.1 → G4.2 → G4.3 → G4.4 ── 发布标准达成，冻
 ```
 
 G3 不要与 G1 并行改同一份 Windows 连接/更新代码；G3.1 基于已过 G1 的 `main`。
