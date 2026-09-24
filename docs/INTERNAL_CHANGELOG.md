@@ -32,6 +32,40 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 更新接管同样作废在途 PrepareCoreStart（H9-F3）
+
+- **归属**：G1 连接生命周期（I1：旧 attempt 的迟到 Service 副作用不得影响新会话）；
+  Windows Service IPC（`apps/windows/service`，App 与线型无改动）。
+- **来源**：基线 main 18301fc5 → 分支 `fix/update-cancel-release-epoch-20260923`；
+  Issue [#390](https://github.com/raydocs/tono/issues/390)，内部审查 H9-F3（#294 × #302
+  组合）；PR 见该分支，提交时未合 main。
+- **缺陷修复**：原行为：更新接管 `invalidate_connection(false)` 作废 connecting 的
+  attempt A 但不 release，Service 的 release epoch 不动；#294 之后 A 被折叠为 Not
+  Connected，用户可不经 Disconnect 直接发起 B，B 读到同一 epoch；A 迟到的
+  PrepareCoreStart 通过 #302 的门并停掉 B 未验证的 Core（一次莫名连接失败，fail-closed，
+  不泄漏）。现行为：Service 另设 attempt epoch，每次显式 release 与
+  `UpdateRequest::Prepare`（在锁内、无论随后被拒或接受）都推进；`GET /version` 的
+  `release_epoch` 字段报告它，PrepareCoreStart 的门（含 Legacy 到达时快照）比较它，
+  错误码仍为 `StaleReleaseEpoch`。StartClash 仍只比较 `RELEASE_EPOCH`：更新不是
+  Disconnect，不得让迟到的 arm 回撤，保护不放宽。
+- **新增/优化**：无。
+- **工程与测试**：`tests/test_owner_lifecycle.rs` 一个回归
+  `late_prepare_core_start_superseded_by_update_takeover_cannot_stop_the_successor_core`
+  （`#[tokio::test]`）：快照 epoch → 被拒的更新 Prepare → 后继 StartClash → 用旧快照发
+  PrepareCoreStart → 断言 `StaleReleaseEpoch` 且 `core_pid` 不变。旧代码下 Prepare 不推进
+  epoch，请求被放行并停掉后继 Core，断言失败。同时修正 #302 条目中把更新作废变体列为
+  "更窄"剩余限制的过时说法。
+- **验证**：本机（MacBook）按 2026-09-14 执行位置决定只编辑与源码自查，未运行 cargo
+  构建/测试；回归委托本 PR CI 的 GitHub-hosted `windows-2025`
+  （`cargo test --locked --features standalone,client,test`），结果以该 run 为准。修复前
+  先红未在本机执行。Windows 11 实机时序未复现。
+- **候选/发布**：无新包，仅源码；未触碰 WFP/DNS 规则、`appcast.xml`/`latest.json` 或
+  `windows-updates`。
+- **剩余限制**：只覆盖更新接管；节点消失、连接事务 240 s 超时、Retry now 等不 release 的
+  取消路径仍不推进 epoch（#302 已列）。更新 Prepare 到达前刚准入的新 attempt 会被拒一次
+  （fail-closed，重试即恢复）。Prepare 请求未到达 Service（IPC 失败）时无推进。只在
+  Service 升级到含本修复的版本后生效。
+
 ## 2026-09-23 · Windows 升级恢复判定与回滚退休逐成员校验 durable plan（#301 跟进 2）
 
 - **归属**：G3 受保护升级（安装完整性）；Windows Service 更新事务 + 执行器
@@ -757,9 +791,11 @@
   `appcast.xml`/`latest.json` 或 `windows-updates`。
 - **剩余限制**：不 bump epoch 的取消路径不刷新令牌：StopClash(release=true)
   在无 armed 时为空操作；节点消失 `selected_node_vanished`（`stop_core(false)`，
-  无 release）；更新安装的 `invalidate_connection(false)`；连接事务 240 s 超时。
-  经这些路径取消的 attempt，其迟到 prepare 仍可能通过门，但触发条件比已修的
-  Disconnect→重连序列更窄。修复只在 Service 也升到 rev 17 后生效：
+  无 release）；连接事务 240 s 超时。经这些路径取消的 attempt，其迟到 prepare
+  仍可能通过门，但触发条件比已修的 Disconnect→重连序列更窄。（更新安装的
+  `invalidate_connection(false)` 原列于此；#294 合入后用户可不经 Disconnect 直接
+  发起后继连接，这一变体并不更窄，已由 #390 的修复改为更新 Prepare 同样作废在途
+  prepare 快照。）修复只在 Service 也升到 rev 17 后生效：
   `MIN_REQUIRED_SERVICE_REVISION` 仍为 14，只升级 App 时新 App 对旧 Service
   发 Legacy，F6 未修。旧 App 配新 Service 时只拿到到达时快照，在途迟到请求
   仍会漏过（与 rev 16 相同）。Service 重启会把 epoch 归零，快照于重启前的请求

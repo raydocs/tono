@@ -40,6 +40,29 @@ pub(crate) fn release_superseded(captured: u64) -> bool {
 
 fn note_explicit_release() {
     RELEASE_EPOCH.fetch_add(1, Ordering::SeqCst);
+    note_attempt_superseded();
+}
+
+/// The `PrepareCoreStart` freshness epoch (what `GET /version` reports as `release_epoch`).
+/// Bumped by every explicit release and by a native update takeover: the App invalidates its
+/// in-flight connect attempt before it sends `UpdateRequest::Prepare`, and from then on the
+/// user can start a successor connection without a Disconnect. StartClash keeps comparing
+/// `RELEASE_EPOCH` only — an update is not a Disconnect and must not make a late arm retract.
+static ATTEMPT_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+/// Snapshot copied by clients into `PrepareCoreStart` (via `GET /version`).
+pub(crate) fn attempt_epoch() -> u64 {
+    ATTEMPT_EPOCH.load(Ordering::SeqCst)
+}
+
+/// True when an explicit release or an update takeover happened after `captured`.
+pub(crate) fn attempt_superseded(captured: u64) -> bool {
+    ATTEMPT_EPOCH.load(Ordering::SeqCst) != captured
+}
+
+/// Supersede every connect attempt already in flight without touching protection.
+pub(crate) fn note_attempt_superseded() {
+    ATTEMPT_EPOCH.fetch_add(1, Ordering::SeqCst);
 }
 
 /// The fail-closed intent record in the service state directory. Written atomically before
