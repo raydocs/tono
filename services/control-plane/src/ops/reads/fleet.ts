@@ -11,6 +11,7 @@ import {
   splitManagedCatalogProxies,
   catalogBaseName,
   catalogHy2Name,
+  catalogEntryMissingClientFields,
 } from '../../catalog-yaml';
 import {
   type Env,
@@ -280,19 +281,6 @@ export async function retireFleetNode(
   };
 }
 
-function proxyBlockFromProfile(name: string, publicIp: string): string {
-  return [
-    `  - name: ${name}`,
-    '    type: vless',
-    `    server: ${publicIp}`,
-    '    port: 443',
-    `    uuid: ${CLIENT_UUID_PLACEHOLDER}`,
-    '    network: tcp',
-    '    tls: true',
-    '',
-  ].join('\n');
-}
-
 function hy2FingerprintHex(raw: unknown): string | null {
   const hex = String(raw ?? '').replace(/:/g, '').trim().toLowerCase();
   return /^[0-9a-f]{64}$/.test(hex) ? hex : null;
@@ -328,16 +316,32 @@ export async function relistFleetNode(
   if (expected !== catalog.revision) {
     throw new ApiError(409, 'CATALOG_CONFLICT', 'Managed catalog changed; preview relist again');
   }
-  let block = typeof requestBody.block === 'string' ? requestBody.block : '';
+  const block = typeof requestBody.block === 'string' ? requestBody.block : '';
   const profile = await e.DB.prepare(
     'SELECT public_ip, hy2_port, hy2_fingerprint FROM ops_node_profiles WHERE catalog_name = ?',
   ).bind(name).first<Row>();
   const ip = profile?.public_ip == null ? '' : String(profile.public_ip).trim();
-  if (!block.trim()) {
-    if (!ip) throw new ApiError(422, 'RELIST_NO_TEMPLATE', 'No stored catalog template for this node');
-    block = proxyBlockFromProfile(name, ip);
-  }
   let plan = relistCatalogPlan(catalog.yaml, name, block);
+  if (!plan.alreadyListed) {
+    // Neither the profile nor retirement keeps the node's Reality settings, so
+    // there is no template to rebuild the entry from. A guessed entry without
+    // them is refused by every client, which then rejects the whole catalog.
+    if (!block.trim()) {
+      throw new ApiError(
+        422,
+        'RELIST_NO_TEMPLATE',
+        'No stored catalog entry for this node; publish its full VLESS Reality entry with the catalog publish tool',
+      );
+    }
+    const missing = catalogEntryMissingClientFields(block);
+    if (missing.length > 0) {
+      throw new ApiError(
+        422,
+        'CATALOG_ENTRY_INCOMPLETE',
+        `Catalog entry for ${name} lacks fields clients require: ${missing.join(', ')}`,
+      );
+    }
+  }
   if (!plan.safe) {
     throw new ApiError(422, 'RELIST_UNSAFE', plan.warnings[0] ?? 'Node cannot be relisted');
   }

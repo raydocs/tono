@@ -206,6 +206,41 @@ function catalogSkipsCertVerify(block: string): boolean {
   return raw !== 'false' && raw !== 'no' && raw !== 'off' && raw !== 'n';
 }
 
+/** One scalar value for `key` in block (`key: v`) or flow (`{key: v, …}`) form. */
+function catalogScalar(block: string, key: string): string | null {
+  const escaped = escapeRegExp(key);
+  const line = block.match(new RegExp(String.raw`^\s*(?:-\s+)?${escaped}\s*:\s*(.*?)\s*(?:#.*)?$`, 'm'));
+  const flow = block.match(new RegExp(String.raw`[{,]\s*${escaped}\s*:\s*([^,}\n]*)`));
+  const raw = (line?.[1] ?? flow?.[1] ?? '').trim();
+  if (!line && !flow) return null;
+  return raw.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1').trim();
+}
+
+/**
+ * The VLESS fields both clients require before they admit a node (macOS
+ * `validatedOwnedNode`, Windows `admit_node`). One inadmissible entry makes
+ * each client refuse the whole catalog, so the Worker must refuse to publish
+ * it. Returns the missing or unusable fields; empty means admissible.
+ * Hysteria2 blocks are checked by catalogProxyUsesManagedIdentity instead.
+ */
+export function catalogEntryMissingClientFields(block: string): string[] {
+  if (catalogProxyType(block) !== 'vless') return [];
+  const missing: string[] = [];
+  if (!/^true$/i.test(catalogScalar(block, 'tls') ?? '')) missing.push('tls: true');
+  if (!catalogScalar(block, 'servername') && !catalogScalar(block, 'sni')) missing.push('servername');
+  if (catalogScalar(block, 'reality-opts') === null) missing.push('reality-opts');
+  if (!/^[A-Za-z0-9_-]{43}$/.test(catalogScalar(block, 'public-key') ?? '')) {
+    missing.push('reality-opts.public-key');
+  }
+  const shortId = catalogScalar(block, 'short-id') ?? '';
+  if (!/^(?:[0-9A-Fa-f]{2}){1,8}$/.test(shortId)) missing.push('reality-opts.short-id');
+  const flow = catalogScalar(block, 'flow');
+  if (flow && flow !== 'xtls-rprx-vision') missing.push('flow: xtls-rprx-vision');
+  const network = catalogScalar(block, 'network');
+  if (network && network.toLowerCase() !== 'tcp') missing.push('network: tcp');
+  return missing;
+}
+
 /**
  * A proxy block has exactly one managed identity placeholder.
  * VLESS: `uuid: {{TONO_CLIENT_UUID}}`. Hysteria2: `password: {{TONO_CLIENT_UUID}}`,
