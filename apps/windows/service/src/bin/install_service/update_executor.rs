@@ -418,6 +418,47 @@ mod tests {
     };
 
     #[test]
+    fn update_commit_retires_the_recovery_task_after_cleanup() {
+        let root = std::env::temp_dir().join(format!(
+            "tono-update-commit-retire-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let plan_path = root.join("replacement.json");
+        // Without the committed cleanup the boot task still has work left.
+        assert!(
+            finish_committed(&plan_path, || panic!(
+                "retired before the committed cleanup"
+            ))
+            .is_err()
+        );
+        tx::atomic_write(
+            &plan_path,
+            &serde_json::to_vec(&Plan {
+                attempt_id: "attempt".into(),
+                members: Vec::new(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let mut retired = false;
+        finish_committed(&plan_path, || {
+            retired = true;
+            Ok(())
+        })
+        .unwrap();
+        assert!(
+            retired,
+            "a committed update must not leave its SYSTEM boot task"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn update_executor_consumes_before_publication_and_reloads_interrupted_rollback() {
         let root = std::env::temp_dir().join(format!(
             "tono-update-executor-{}-{}",
@@ -602,41 +643,5 @@ mod tests {
             classify_recovery(false, &old, &target),
             RecoveryPublication::NoPlan
         );
-    }
-
-    #[test]
-    fn update_commit_retires_the_recovery_task_after_cleanup() {
-        let root = std::env::temp_dir().join(format!(
-            "tono-update-commit-retire-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir(&root).unwrap();
-        let plan_path = root.join("replacement.json");
-        // Without the committed cleanup the boot task still has work left.
-        assert!(
-            finish_committed(&plan_path, || panic!("retired before the committed cleanup"))
-                .is_err()
-        );
-        tx::atomic_write(
-            &plan_path,
-            &serde_json::to_vec(&Plan {
-                attempt_id: "attempt".into(),
-                members: Vec::new(),
-            })
-            .unwrap(),
-        )
-        .unwrap();
-        let mut retired = false;
-        finish_committed(&plan_path, || {
-            retired = true;
-            Ok(())
-        })
-        .unwrap();
-        assert!(retired, "a committed update must not leave its SYSTEM boot task");
-        std::fs::remove_dir_all(root).unwrap();
     }
 }
