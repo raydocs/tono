@@ -459,12 +459,15 @@ pub(crate) async fn request(
                 // every member must be back at its original bytes.
                 let plan = store.attempt_dir()?.join("replacement.json");
                 if plan.try_exists()? {
-                    plan_members_at(
-                        &plan,
-                        &a.receipt.attempt_id,
-                        &[a.install_root.as_path(), crate::service_paths().install_dir().as_path()],
-                        PlanSide::Old,
-                    )?;
+                    ensure!(
+                        plan_members_at(
+                            &plan,
+                            &a.receipt.attempt_id,
+                            &[a.install_root.as_path(), crate::service_paths().install_dir().as_path()],
+                            PlanSide::Old,
+                        )?,
+                        "rollback not proven complete for every plan member; evidence cannot be retired"
+                    );
                 }
                 store.retire_rolled_back(&owner.key, &peer)?;
             } else if a.execution == Execution::Replaced {
@@ -634,31 +637,34 @@ fn read_plan(plan_path: &Path, attempt_id: &str, roots: &[&Path]) -> Result<Vec<
 /// `core-sha256.txt`, not only the three native binaries) must hash to its
 /// recorded old or new digest. Three-component identity alone cannot tell a
 /// complete publication/rollback from one interrupted between members.
+/// `Ok(false)` only when a member was read and differs; an unreadable plan or
+/// member (sharing violation, AV lock) is `Err`, never evidence of either side.
 pub fn plan_members_at(
     plan_path: &Path,
     attempt_id: &str,
     roots: &[&Path],
     side: PlanSide,
-) -> Result<()> {
+) -> Result<bool> {
     for m in read_plan(plan_path, attempt_id, roots)? {
         let expected = match side {
             PlanSide::Old => &m.old_digest,
             PlanSide::New => &m.new_digest,
         };
         let expected: String = expected.iter().map(|b| format!("{b:02x}")).collect();
-        ensure!(
-            file_digest(&m.target)? == expected,
-            "installed plan member {:?} is not the {side:?} bytes",
-            m.target
-        );
+        if file_digest(&m.target)? != expected {
+            return Ok(false);
+        }
     }
-    Ok(())
+    Ok(true)
 }
 
 /// Every plan member must already be the target bytes before any rollback
 /// copy is removed. Idempotent: an absent copy is already released.
 fn release_replaced_backups(plan_path: &Path, attempt_id: &str, roots: &[&Path]) -> Result<()> {
-    plan_members_at(plan_path, attempt_id, roots, PlanSide::New)?;
+    ensure!(
+        plan_members_at(plan_path, attempt_id, roots, PlanSide::New)?,
+        "installed plan member is not the target; evidence cannot be released"
+    );
     for m in read_plan(plan_path, attempt_id, roots)? {
         for scratch in [&m.backup, &m.restore, &m.publish_scratch] {
             match std::fs::symlink_metadata(scratch) {
@@ -1004,15 +1010,22 @@ mod tests {
         };
         // Publication interrupted before the last member: not TargetVerified.
         install("new-app", "new-data", "old-pin");
-        assert!(plan_members_at(&plan, "a1", &roots, PlanSide::New).is_err());
+        assert!(!plan_members_at(&plan, "a1", &roots, PlanSide::New).unwrap());
         install("new-app", "new-data", "new-pin");
-        plan_members_at(&plan, "a1", &roots, PlanSide::New).unwrap();
+        assert!(plan_members_at(&plan, "a1", &roots, PlanSide::New).unwrap());
         assert!(plan_members_at(&plan, "other", &roots, PlanSide::New).is_err());
         // Rollback restored the binaries but not a resource: not retirable.
         install("old-app", "new-data", "old-pin");
-        assert!(plan_members_at(&plan, "a1", &roots, PlanSide::Old).is_err());
+        assert!(!plan_members_at(&plan, "a1", &roots, PlanSide::Old).unwrap());
         install("old-app", "old-data", "old-pin");
-        plan_members_at(&plan, "a1", &roots, PlanSide::Old).unwrap();
+        assert!(plan_members_at(&plan, "a1", &roots, PlanSide::Old).unwrap());
+        // A member that exists but cannot be read (a directory: open or read
+        // fails, like a sharing violation or AV lock) is an error, not a
+        // mismatch, so recovery cannot roll back a complete installation.
+        install("new-app", "new-data", "new-pin");
+        std::fs::remove_file(root.join("resources/data.bin")).unwrap();
+        std::fs::create_dir(root.join("resources/data.bin")).unwrap();
+        assert!(plan_members_at(&plan, "a1", &roots, PlanSide::New).is_err());
         std::fs::remove_dir_all(root).unwrap();
     }
 

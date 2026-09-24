@@ -171,10 +171,13 @@ its recorded incarnations died.
   requires every member of the durable replacement plan (the payload tree,
   `tono-service.exe` and `core-sha256.txt`) to hash to its `new_digest`;
   three matching binaries with a later member still old is an interrupted
-  publication and rolls back (2026-09-23). A complete, verified
-  publication stays installed; a successor that was never durably registered
-  is replaced by measured-target evidence and the first authenticated
-  target-identity App adopts it.
+  publication and rolls back (2026-09-23). A member that cannot be read
+  (sharing violation, AV lock) is not a mismatch: recovery exits with the
+  error before any rollback touches a file, leaving the attempt `Uncertain`
+  for the next recovery, as an unreadable binary already did. A complete,
+  verified publication stays installed; a successor that was never durably
+  registered is replaced by measured-target evidence and the first
+  authenticated target-identity App adopts it.
 - **Terminal archives after verified Disconnect.** An unconsumed attempt
   whose recorded executor incarnation is provably gone, and a rolled-back or
   uncertain attempt whose installed components equal the retained originals

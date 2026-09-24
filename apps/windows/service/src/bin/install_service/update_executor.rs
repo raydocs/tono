@@ -208,7 +208,10 @@ fn execute(recovery: bool) -> Result<(), Error> {
             let installed = native::components(&a.install_root, &service_path)?;
             let plan_present = plan_path.exists();
             // Three binaries at the target do not prove later members (the
-            // payload tree, `core-sha256.txt`) were published too.
+            // payload tree, `core-sha256.txt`) were published too. Only a
+            // member read as different is an interruption; an unreadable
+            // member (sharing violation, AV lock) exits like an unreadable
+            // component, before any rollback touches a file.
             let plan_members_new = plan_present
                 && native::plan_members_at(
                     &plan_path,
@@ -218,8 +221,7 @@ fn execute(recovery: bool) -> Result<(), Error> {
                         tono_service_protocol::service_paths().install_dir().as_path(),
                     ],
                     native::PlanSide::New,
-                )
-                .is_ok();
+                )?;
             match classify_recovery(
                 plan_present,
                 plan_members_new,

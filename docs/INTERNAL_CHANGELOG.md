@@ -67,6 +67,20 @@
 - **续记（2026-09-23）**：PR #361 源码 `37074b70`（叠加 `7c6ccf00`）的 GitHub-hosted
   `windows-2025` lane 全绿；service lane 日志确认新增 `#[test]` 与改参的既有纯函数测试运行
   并通过。CI 绿不等于设备验证或已发布。
+- **续记（2026-09-23，R4 审查修正）**：审查指出恢复执行器
+  `plan_members_at(..).is_ok()` 把成员读取 I/O 错误（共享冲突、AV 暂锁）当成「不是
+  target」→ Interrupted → 回滚一次已完整发布并校验过的安装并消耗序号；与 #359 备份部分
+  删除组合（审查 C2）可成混合树 + 永久 pending。改后 `plan_members_at` 返回
+  `Result<bool>`：`Ok(false)` 仅表示成员已读出且摘要不符，plan 或成员读不到为 `Err`。
+  执行器改为 `?` 传播：读不到时在任何回滚之前退出、不动文件，按既有 outcome 路径标记
+  `Uncertain`（与三组件读失败一致），下次 recover 重新判定。Disconnect 的 RolledBack/
+  Uncertain 退休与 Replaced 释放出口对 `Ok(false)` 与 `Err` 都拒绝（仍 fail-closed，
+  记录保持 pending）。测试：扩展同一 `#[test]`——不匹配断言 `Ok(false)`、一致断言
+  `Ok(true)`，新增成员路径为目录（存在但打开/读取失败）断言 `Err`；
+  旧签名 `Result<()>` 下不匹配与读不到同为 `Err`、执行器 `.is_ok()` 均变 false，测试在旧
+  分支无法编译。本机未编译，委托 CI（`windows-2025` Service lane）。剩余限制：读错误若
+  持续存在，记录停在 `Uncertain`（Adopt 需 Replaced，要等可读后的 recover 恢复）；审查
+  C1（恢复执行器停/起 Service 循环）未在本 PR 处理。
 
 ## 2026-09-23 · Windows 升级 Replaced + 已验证 Disconnect 的「已安装且已释放」终态（R4-F7）
 
