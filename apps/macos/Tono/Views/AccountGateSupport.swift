@@ -12,7 +12,6 @@ struct AccountBlockedView: View {
     /// carries its own progress rather than reading a session state that this
     /// screen can never be shown in.
     @State private var rechecking = false
-    @State private var restoredInternetFromGate = false
 
     private var explanation: String {
         // A nil detail means the control plane refused this session without
@@ -74,28 +73,9 @@ struct AccountBlockedView: View {
 
             Button("Sign Out", role: .destructive) { Task { await session.logout() } }
 
-            if KillSwitchService.isArmed, !restoredInternetFromGate {
-                // Renewing a plan needs a browser, and this screen is reachable
-                // with protection armed and no exit running. Signing out is the
-                // only other way off a fail-closed host, and it should not be
-                // the price of reading the renewal page. isArmed is a plain
-                // static (not observable), so the local flag forces the section
-                // to update once the restore completes.
-                Divider().padding(.vertical, 4)
-                Label(
-                    "Kill Switch is blocking direct Internet from an earlier session.",
-                    systemImage: "shield.slash"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                Button("Restore internet (turn off protection)") {
-                    Task {
-                        await session.restoreDirectInternet()
-                        restoredInternetFromGate = !KillSwitchService.isArmed
-                    }
-                }
-                .disabled(rechecking)
-            }
+            // Renewing a plan needs a browser, and this screen is reachable
+            // with protection armed and no exit running.
+            GateProtectionSection(session: session, disabled: rechecking)
         }
         .padding(.horizontal, 20)
         .frame(width: 360)

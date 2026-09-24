@@ -48,11 +48,16 @@ nonisolated enum KillSwitchService {
 
     /// Helper IPC boundary of `arm`. Production delivers the prepared
     /// `/killswitch/arm` request and reads `/killswitch/status`; tests replace
-    /// them to model a reply lost after the helper committed PF.
+    /// them to model a reply lost after the helper committed PF. `prepare` is
+    /// the helper preparation before it: version check, silent upgrade and,
+    /// only when allowed, the administrator install.
     nonisolated struct ArmIPC {
         var deliver: (() throws -> ArmReply) throws -> ArmReply = { try $0() }
         var status: () throws -> (armed: Bool, wanted: Bool, live: Bool, healed: Bool) = {
             try HelperManager.killSwitchStatus()
+        }
+        var prepare: (_ administratorPrompt: Bool) throws -> Void = {
+            try HelperManager.installIfNeeded(administratorPrompt: $0)
         }
     }
 
@@ -365,8 +370,10 @@ nonisolated enum KillSwitchService {
 
     /// After an app crash, re-supply control-plane metadata while keeping the
     /// stored fail-closed intent. The helper itself also restores PF at boot.
-    static func reassertIfNeeded() throws {
-        guard isArmed else { return }
+    /// Returns whether it armed: with no stored intent it arms nothing.
+    @discardableResult
+    static func reassertIfNeeded() throws -> Bool {
+        guard isArmed else { return false }
         let apiHost = (Bundle.main.object(forInfoDictionaryKey: "TonoAPIBaseURL") as? String)
             .flatMap { URL(string: $0)?.host }
         let exitNode = (Bundle.main.object(forInfoDictionaryKey: "TonoExitNode") as? String)?
@@ -387,12 +394,20 @@ nonisolated enum KillSwitchService {
             // inherited into a ruleset rebuilt without one.
             reviewedBundleDirect: false
         )
+        return true
     }
 
     /// Remove tunnel and proxy exceptions while preserving the control plane.
     /// Tailscale bootstrap remains available only when Home-US is enabled.
+    /// No caller asked for a helper repair (sleep, a preserve teardown after
+    /// suspension or a withdrawn route, quit, update preparation), so the
+    /// helper is prepared without the administrator prompt (MAC3-ADD-F1): the
+    /// version check and silent upgrade still run. A helper that needs the
+    /// prompt (one rejecting this app, or one the silent upgrade could not
+    /// replace) fails the call, and PF stays as the helper holds it.
     static func restrictToBootstrap() throws {
         guard isArmed else { return }
+        try installIfNeeded(administratorPrompt: false)
         let apiHost = (Bundle.main.object(forInfoDictionaryKey: "TonoAPIBaseURL") as? String)
             .flatMap { URL(string: $0)?.host }
         try arm(
@@ -402,6 +417,7 @@ nonisolated enum KillSwitchService {
             sessionDirectEndpoints: [],
             tailscaleBootstrapEnabled: AppProfile.homeExitEnabled,
             allowSystemResolution: false,
+            helperPrepared: true,
             // Bootstrap restriction deliberately strips every exception it is
             // not asked to keep; the reviewed-bundle permit is one of them.
             reviewedBundleDirect: false
@@ -412,11 +428,13 @@ nonisolated enum KillSwitchService {
         name.withCString { if_nametoindex($0) != 0 }
     }
 
-    static func installIfNeeded() throws {
+    static func installIfNeeded(administratorPrompt: Bool = true) throws {
         do {
-            try HelperManager.installIfNeeded()
+            try armIPC.prepare(administratorPrompt)
         } catch HelperInstallError.userDenied {
             throw Error.userDenied
+        } catch HelperIPCError.forbidden {
+            throw Error.helperRejected
         } catch {
             throw Error.installFailed(error.localizedDescription)
         }

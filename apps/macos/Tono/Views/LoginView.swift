@@ -12,7 +12,6 @@ struct LoginView: View {
     @State private var emailCode = ""
     @State private var deviceName = Host.current().localizedName ?? "Mac"
     @State private var isDeviceNameExpanded = false
-    @State private var restoredInternetFromGate = false
     /// Guards the six-digit auto-submit against firing twice for the same code
     /// (error state flips, focus loss, re-entrant onChange from filtering).
     @State private var autoSubmittedCode: String?
@@ -418,29 +417,9 @@ struct LoginView: View {
                         .font(.caption)
                     }
                 }
-                if KillSwitchService.isArmed, !restoredInternetFromGate {
-                    // A fail-closed host whose session cannot reach .ready
-                    // (crash recovery + unreachable control plane) previously
-                    // had NO restore-internet control anywhere: the dashboard
-                    // needs .ready and the menu-bar toggle is disabled. This
-                    // is the explicit escape hatch. isArmed is a plain static
-                    // (not observable), so the local flag forces the section
-                    // to update once the restore completes.
-                    Divider().padding(.vertical, 4)
-                    Label(
-                        "Kill Switch is blocking direct Internet from an earlier session.",
-                        systemImage: "shield.slash"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    Button("Restore internet (turn off protection)") {
-                        Task {
-                            await session.restoreDirectInternet()
-                            restoredInternetFromGate = !KillSwitchService.isArmed
-                        }
-                    }
-                    .disabled(busy)
-                }
+                // The dashboard needs .ready, so this is the explicit escape
+                // hatch for a fail-closed host stuck at sign-in.
+                GateProtectionSection(session: session, disabled: busy)
             }
         }
         .padding(28)
@@ -736,6 +715,7 @@ struct LoginErrorPreviewCard: View {
                 killSwitchDisarmConsumer: {}
             )
         )
+        .environment(AppState())
     }
     .frame(width: 720, height: 640)
     .preferredColorScheme(.light)
@@ -751,6 +731,7 @@ struct LoginErrorPreviewCard: View {
                 killSwitchDisarmConsumer: {}
             )
         )
+        .environment(AppState())
     }
     .frame(width: 720, height: 640)
     .preferredColorScheme(.dark)

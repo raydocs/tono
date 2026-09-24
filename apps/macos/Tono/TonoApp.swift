@@ -64,6 +64,9 @@ struct TonoApp: App {
             killSwitchDisarmConsumer: {
                 await appState.disconnectAndWait(releaseKillSwitch: true)
             },
+            protectionReleaseConsumer: {
+                await appState.acceptConfirmedProtectionReleaseBeforeSignIn()
+            },
             diagnosticSnapshotConsumer: {
                 CrashReporter.shared.annotatedRemoteDiagnosticSnapshot(
                     appState.compactRemoteDiagnosticSnapshot()
@@ -73,6 +76,9 @@ struct TonoApp: App {
                 await appState.claudeTrafficResearchSnapshot()
             },
             protectionBlockedConsumer: { appState.isProtectionBlocked },
+            protectedReconnectPausedConsumer: {
+                appState.protectedReconnectPausedForUserAction
+            },
             protectedRetryConsumer: {
                 appState.retryProtectedConnectionNow(repairHelper: false)
             },
@@ -140,7 +146,8 @@ struct TonoApp: App {
                 if InterfaceLanguagePreference.hasChosen {
                     if WelcomeLaunchGate.showsIntro(
                         introSeen: introSeen,
-                        sessionState: accountSession.state
+                        sessionState: accountSession.state,
+                        protectionHeld: KillSwitchService.isArmed
                     ) {
                         WelcomeIntroView()
                     } else {
@@ -150,6 +157,8 @@ struct TonoApp: App {
                                 .environment(accountSession)
                                 .environmentObject(updater)
                         }
+                        // The gate reads the protection state the menu bar reads.
+                        .environment(appState)
                     }
                 } else {
                     LanguageSetupView()

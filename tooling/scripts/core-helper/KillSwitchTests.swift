@@ -525,6 +525,25 @@ extension KillSwitchManager {
                 reviewedBundleDirectEnabled: true
             )
             let rules = renderRules(state: state, allowedUID: 501)
+            // The same session once its TUN is up: the only state in which the
+            // reviewed-bundle permit may render.
+            let tunneledRules = renderRules(
+                state: .init(
+                    armed: true,
+                    tailscaleBootstrapEnabled: state.tailscaleBootstrapEnabled,
+                    apiHosts: state.apiHosts,
+                    exitHints: state.exitHints,
+                    tunnelInterfaces: ["utun199"],
+                    resolvedHosts: state.resolvedHosts,
+                    pinnedHosts: state.pinnedHosts,
+                    derpEndpoints: state.derpEndpoints,
+                    cachedDERPEndpoints: state.cachedDERPEndpoints,
+                    proxyTargets: state.proxyTargets,
+                    sessionDirectEndpoints: state.sessionDirectEndpoints,
+                    reviewedBundleDirectEnabled: true
+                ),
+                allowedUID: 501
+            )
             let emergencyState = emergencyState(preserving: state)
             let emergencyRules = renderRules(
                 state: emergencyState,
@@ -641,14 +660,16 @@ extension KillSwitchManager {
             let persisted = persistentObject(state, allowedUID: 501)
             // Split into named steps: as a single boolean chain this grew past
             // what the type checker will solve in reasonable time.
-            let required = [
-                // The reviewed-bundle permit must stay root-only and stay bound
-                // to the fixed port list; an "any port" form would let a routing
-                // mistake exfiltrate anywhere.
+            // The reviewed-bundle permit must stay root-only and stay bound to
+            // the fixed port list; an "any port" form would let a routing
+            // mistake exfiltrate anywhere.
+            let bundleRequired = [
                 "pass out quick inet proto tcp from any to any " +
                     "port { 80, 443, 8000, 8080 } user root keep state (if-bound)",
                 "pass out quick inet proto udp from any to any " +
                     "port { 80, 443, 8000, 8080 } user root keep state (if-bound)",
+            ]
+            let required = [
                 "to 1.1.1.1 port 443 user { 0, 501 } keep state (if-bound)",
                 "to 8.8.8.8 port 443 user root keep state (if-bound)",
                 "proto udp",
@@ -685,6 +706,50 @@ extension KillSwitchManager {
             ]
             let ruleShapesHold = required.allSatisfy(rules.contains)
                 && !forbidden.contains(where: rules.contains)
+            let bundleShapesHold = bundleRequired.allSatisfy(tunneledRules.contains)
+                && !forbidden.contains(where: tunneledRules.contains)
+            // #586: the connect's first arm runs before the TUN exists, where
+            // this address-free permit is root web-port egress on the physical
+            // interface. A tunnel-less state that asks for it must not get it.
+            let bundleOffWithoutTunnel = !rules.contains("label \"tono-bundle\"")
+            // #608: /core/sync withholds the permit while the Core restarts
+            // without its utun, with no state flush, and leaves the full set as
+            // the baseline. Against it, an arm that really drops the permit
+            // still flushes, and the app's arm restoring it once the tunnel
+            // exists withdraws nothing.
+            let tunneledPassRules = passRules(in: tunneledRules)
+            let bundleFreePassRules = tunneledPassRules.filter { !$0.contains("label \"tono-bundle\"") }
+            var withheldRules = ""
+            var withholdDisposal: StateDisposal?
+            var rollbackRules = ""
+            if case let .withhold(narrowed, disposal, rollback) =
+                reviewedBundleWithholding(loaded: tunneledRules, baseline: tunneledPassRules) {
+                withheldRules = narrowed
+                withholdDisposal = disposal
+                rollbackRules = rollback
+            }
+            let withheldOnlyTheBundle: Bool = passRules(in: withheldRules) == bundleFreePassRules
+                && tunneledPassRules.count - bundleFreePassRules.count == 2
+                && withheldRules.contains("block drop out quick all")
+            let withheldWithoutFlush: Bool = withholdDisposal == StateDisposal.keep
+            let realRemovalStillFlushes: Bool =
+                stateDisposal(replacing: tunneledPassRules, with: bundleFreePassRules) == .full
+            let restoreIsWidening: Bool =
+                stateDisposal(replacing: tunneledPassRules, with: tunneledPassRules) == .keep
+            let unknownBaselineUntouched: Bool =
+                reviewedBundleWithholding(loaded: tunneledRules, baseline: nil) == .notLoaded
+            // R609-F1: a failed load puts the file back exactly as read, so it
+            // matches the baseline and a later call retries; a completed
+            // withhold is recognised as done; any other file means the permit
+            // may be loaded, and /core/sync must keep the old Core running.
+            let rollbackRestoresTheFile: Bool = rollbackRules == tunneledRules
+            let completedWithholdIsDone: Bool =
+                reviewedBundleWithholding(loaded: withheldRules, baseline: tunneledPassRules) == .notLoaded
+            let mismatchKeepsTheCore: Bool =
+                reviewedBundleWithholding(loaded: rules, baseline: tunneledPassRules) == .unknown
+            let bundleWithheldForCoreSync = withheldOnlyTheBundle && withheldWithoutFlush
+                && realRemovalStillFlushes && restoreIsWidening && unknownBaselineUntouched
+                && rollbackRestoresTheFile && completedWithholdIsDone && mismatchKeepsTheCore
             // Continuity is TUN-scoped: empty tunnelInterfaces (this `state`)
             // must not keep Sidecar as a side channel; a live utun must.
             let continuityNeedles = [
@@ -758,7 +823,8 @@ extension KillSwitchManager {
                 && installedHosts.contains(killSwitchHostsEndMarker)
                 && removedHosts.isEmpty
             // Reported, not silently folded in: a skip must not read as a pass.
-            let armedParse = pfSyntaxAccepts(rules)
+            // The tunneled set holds every line of `rules` plus the bundle permit.
+            let armedParse = pfSyntaxAccepts(tunneledRules)
             let bootstrapParse = pfSyntaxAccepts(cloudRules)
             let pfParses: Bool
             switch (armedParse, bootstrapParse) {
@@ -771,6 +837,9 @@ extension KillSwitchManager {
                 pfParses = armed && bootstrap
             }
             return ruleShapesHold
+                && bundleShapesHold
+                && bundleOffWithoutTunnel
+                && bundleWithheldForCoreSync
                 && continuityOffWithoutTunnel
                 && continuityOnWithTunnel
                 && lanDNSBlockedFirst

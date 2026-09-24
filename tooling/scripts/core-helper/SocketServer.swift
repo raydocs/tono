@@ -80,7 +80,12 @@ final class SocketServer {
             // out-of-process emergency disarm or an update transition.
             if Date().timeIntervalSince(lastProtectionCheck) >= 10 {
                 lastProtectionCheck = Date()
-                try? updates.storage.locked { killSwitch.superviseProtection() }
+                try? updates.storage.locked {
+                    killSwitch.superviseProtection()
+                    // A Core that exited took its utun with it (#608). Only
+                    // the app's next arm with a live tunnel restores the permit.
+                    if !core.status().running { try? killSwitch.withholdReviewedBundlePermit() }
+                }
             }
             var descriptor = pollfd(
                 fd: serverFD,
@@ -193,11 +198,22 @@ final class SocketServer {
                     configSHA256: digest,
                     startAllowed: {
                         transitionGate.isAwake() && killSwitch.status()["live"] as? Bool == true
-                    }
+                    },
+                    // The old Core's utun goes away with it (#608). A failure
+                    // fails the sync with the old Core still running.
+                    beforeStop: { try killSwitch.withholdReviewedBundlePermit() }
                 )
                 sendResponse(client, status: 200, object: ["ok": true, "configPath": path])
             case ("DELETE", "/core/stop"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
+                // The Core's utun goes away with it (#608). Best effort: the
+                // stop must still happen, and the idle loop retries.
+                do {
+                    try killSwitch.withholdReviewedBundlePermit()
+                } catch {
+                    let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+                    FileHandle.standardError.write(Data("tono: \(detail)\n".utf8))
+                }
                 try core.stop()
                 sendResponse(client, status: 200, object: ["ok": true])
             case ("GET", "/killswitch/status"):

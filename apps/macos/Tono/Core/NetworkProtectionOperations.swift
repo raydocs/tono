@@ -1,7 +1,7 @@
 import Foundation
 
-/// System boundary used by the disconnect owner and by the protected
-/// reconnect loop's external-release reconciliation. Tests replace only
+/// System boundary used by the disconnect owner, wake recovery and the
+/// protected reconnect loop's external-release reconciliation. Tests replace only
 /// helper I/O, leaving admission, task draining, release decisions and UI
 /// settlement intact.
 @MainActor
@@ -25,6 +25,10 @@ struct NetworkProtectionOperations {
     }
     var restrictToBootstrap: () async throws -> Void = {
         try await PrivilegedRuntimeCoordinator.shared.restrictKillSwitchToBootstrap()
+    }
+    /// True only when it armed; with no stored armed intent it arms nothing.
+    var reassertKillSwitch: () async throws -> Bool = {
+        try await PrivilegedRuntimeCoordinator.shared.reassertKillSwitchIfNeeded()
     }
     var refreshKillSwitchStatus:
         () async -> KillSwitchService.StatusObservation = {

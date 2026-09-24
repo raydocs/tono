@@ -43,12 +43,20 @@ extension AccountSession {
     /// it the sign-in gate and menu bar offered no way to restore internet.
     func restoreDirectInternet() async {
         invalidateAccountReads()
+        // Cancelling the account work does not reach a detached catalog
+        // request, and the release would wait out its network timeout. The
+        // slot is kept for the cleanup to drain before it releases.
+        catalogRefreshTask?.task.cancel()
         await accountLifecycle.enqueueCleanup(kind: .releaseProtection) {
+            await self.cancelManagedCatalogRefresh()
             await self.cancelRuntimeMonitor()
             await self.releaseNetworkProtection()
             self.shouldResumeProtection = false
             self.finishInterruptedAccountWorkAfterProtectionRelease()
         }.value
+        // The release retired any sign-in-methods read still in flight, and
+        // the sign-in screen loads them only when it first appears.
+        if user == nil, authMethods == nil { await loadAuthMethods() }
     }
 
     func finishInterruptedAccountWorkAfterProtectionRelease() {
@@ -281,6 +289,10 @@ extension AccountSession {
                 async let catalog: Bool = refreshManagedCatalog()
                 async let policy: Bool = refreshManagedTrafficPolicy()
                 _ = await (catalog, policy)
+                // A refusal while those were in flight suspended the account;
+                // re-reading it from here would start a re-acceptance nobody
+                // asked for.
+                guard !Task.isCancelled, state == .ready else { return }
                 await refreshAccount()
             }
         }

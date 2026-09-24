@@ -122,7 +122,21 @@ final class AppState {
     /// egress. Keep this distinct from ordinary "Not Connected" so the user
     /// can explicitly restore normal Internet instead of unknowingly retrying
     /// into another fail-closed transition.
-    var isProtectionBlocked: Bool = false
+    var isProtectionBlocked: Bool = false {
+        // Every write is a published verdict and replaces launch's doubt.
+        didSet { if isProtectionUnconfirmed { isProtectionUnconfirmed = false } }
+    }
+    /// Launch found a fail-closed intent from an earlier session that no
+    /// authenticated helper answer confirmed or cleared. Surfaces say the
+    /// protection state is unknown: neither Standby nor Protected Offline.
+    var isProtectionUnconfirmed = false
+    /// Orders launch verdicts and the activation answer that resolves one:
+    /// an answer read before a newer verdict was published is stale.
+    @ObservationIgnored var launchProtectionSequence: UInt64 = 0
+    /// The protection generation a confirmed external release opened. While
+    /// it is still the current generation, no protection operation followed
+    /// that release.
+    @ObservationIgnored var confirmedReleaseGeneration: UInt64? = nil
     var lastPhysicalFingerprint: PhysicalInterfaceFingerprint?
     var switchingNodeId: String? = nil
     var proxyMode: ProxyMode = .rule
@@ -320,6 +334,9 @@ final class AppState {
 
     init() {
         config.secret = Self.controllerSecret()
+        RuntimeCleanup.launchProtectionConsumer = { [weak self] protection in
+            self?.adoptLaunchProtection(protection)
+        }
         LocalTrafficAudit.shared.recordEvent(
             "app_state_initialized",
             details: [
@@ -671,6 +688,10 @@ final class AppState {
             self.connectionCoordinator.sleepRestrictTask = nil
             await self.finishPendingDisconnect()
             var barrierReady = false
+            // Only a reassert that armed holds this Mac offline. With no
+            // stored armed intent it arms nothing, and publishing Protected
+            // Offline would claim a barrier over an open host (INT610-F1).
+            var barrierArmed = false
             for delay in [0, 1, 2, 5, 10, 30] {
                 if delay > 0 {
                     try? await Task.sleep(for: .seconds(delay))
@@ -678,13 +699,19 @@ final class AppState {
                 guard !Task.isCancelled else { return }
                 if !barrierReady {
                     do {
-                        try await PrivilegedRuntimeCoordinator.shared
-                            .reassertKillSwitchIfNeeded()
+                        barrierArmed = try await self.networkProtection.reassertKillSwitch()
+                        guard !Task.isCancelled else { return }
                         barrierReady = true
                     } catch {
-                        self.isProtectionBlocked = true
+                        guard !Task.isCancelled else { return }
+                        // A failed reassert proves nothing about PF: the
+                        // stored intent can outlive a helper that is not
+                        // running. Show the unknown state launch uses, not
+                        // Protected Offline, and keep retrying (INT610-F1).
+                        self.isProtectionBlocked = false
+                        self.isProtectionUnconfirmed = true
                         self.errorMessage = String(
-                            localized: "Wake protection is still being reasserted; Internet remains blocked. \(error.localizedDescription)"
+                            localized: "Wake protection could not be confirmed; Tono keeps retrying. Direct Internet may still be blocked. \(error.localizedDescription)"
                         )
                         continue
                     }
@@ -697,16 +724,18 @@ final class AppState {
                 if self.protectedReconnectPausedForUserAction,
                    !self.protectedReconnectPauseLiftsOnNetworkChange {
                     if !Task.isCancelled {
-                        self.isProtectionBlocked = true
+                        if barrierArmed { self.isProtectionBlocked = true }
                         self.connectionCoordinator.wakeRecoveryTask = nil
                     }
                     return
                 }
                 guard self.isTonoReady else {
-                    self.isProtectionBlocked = true
-                    self.errorMessage = String(
-                        localized: "Waiting for the protected route after wake; Internet remains blocked."
-                    )
+                    if barrierArmed {
+                        self.isProtectionBlocked = true
+                        self.errorMessage = String(
+                            localized: "Waiting for the protected route after wake; Internet remains blocked."
+                        )
+                    }
                     continue
                 }
                 guard !self.isConnected, !self.isConnecting,
@@ -719,10 +748,12 @@ final class AppState {
                     }
                     return
                 }
-                self.isProtectionBlocked = true
-                self.errorMessage = String(
-                    localized: "Re-protecting this Mac after wake. Kill Switch is blocking direct traffic."
-                )
+                if barrierArmed {
+                    self.isProtectionBlocked = true
+                    self.errorMessage = String(
+                        localized: "Re-protecting this Mac after wake. Kill Switch is blocking direct traffic."
+                    )
+                }
                 self.connect()
                 self.connectionCoordinator.wakeRecoveryTask = nil
                 return
@@ -732,8 +763,11 @@ final class AppState {
             // with nothing scheduled: sleep preparation cancelled the standard
             // reconnect loop, and on a stable network no route-change kick may
             // ever arrive. Hand ownership to the persistent loop, exactly as
-            // post-connect failures do.
-            if !Task.isCancelled, self.isProtectionBlocked, !self.isConnected {
+            // post-connect failures do. The wake owes its connect whether the
+            // barrier is armed, unconfirmed or was never armed (a connect the
+            // lid interrupted before its first arm); the loop needs no
+            // Protected Offline claim to retry.
+            if !Task.isCancelled, !self.isConnected {
                 self.scheduleProtectedReconnect()
             }
         }
@@ -1736,6 +1770,27 @@ final class AppState {
                 nodes: runtimeNodes,
                 digest: digest
             )
+            // /core/sync withheld the reviewed-bundle permit while the Core
+            // restarted without its utun (#608). It returns only through an
+            // arm with the flag once the new tunnel exists.
+            if resolved.requiresAddressFreeDirectPermit {
+                guard await Self.waitForOwnedTunnelInterface() else {
+                    throw KillSwitchService.Error.commandFailed(
+                        "Mihomo did not recreate the owned \(ConfigPipeline.tonoTunInterface) interface."
+                    )
+                }
+                try await PrivilegedRuntimeCoordinator.shared.armKillSwitch(
+                    apiHosts: [],
+                    tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
+                    proxyEndpoints: currentProxyEndpoints(),
+                    sessionDirectEndpoints: resolved.sessionEndpoints,
+                    tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && tonoTransport != nil,
+                    helperPrepared: true,
+                    reviewedBundleDirect: true
+                )
+                guard generation == connectionCoordinator.protectionOperationGeneration,
+                      !Task.isCancelled else { return }
+            }
             let tun = await ProtectedConnectivityVerifier.raceSystemTUNProbes(timeoutSeconds: 8)
             guard generation == connectionCoordinator.protectionOperationGeneration else { return }
             if case .lost = tun {
