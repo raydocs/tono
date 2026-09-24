@@ -573,14 +573,16 @@ extension AccountSession {
     }
 
     /// A resume intent can outlive the sign-out that kept protection (a launch
-    /// 401). The runtime this sign-in starts would consume it and reconnect,
-    /// re-arming PF, so first ask the helper: a confirmed release since then
-    /// (the root emergency disarm) retires it. An unreachable or rejecting
-    /// helper is no evidence of a release, and the intent stands.
+    /// 401), and so can the armed intent behind it. The runtime this sign-in
+    /// starts would consume the resume intent and reconnect, re-arming PF, and
+    /// a stale armed intent re-arms it at the next sleep. So first ask the
+    /// helper: AppState accepts a confirmed release since then (the
+    /// root emergency disarm), clearing the armed intent, and the resume
+    /// intent retires with it. An unreachable or rejecting helper is no
+    /// evidence of a release, and both intents stand.
     func retireResumeIntentIfProtectionReleased() async {
         guard shouldResumeProtection else { return }
-        if case .confirmed(requiresProtectionRecovery: false) =
-            await killSwitchStatusObservation() {
+        if await protectionReleaseConsumer() {
             shouldResumeProtection = false
         }
     }

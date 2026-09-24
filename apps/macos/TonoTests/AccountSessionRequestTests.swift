@@ -717,18 +717,27 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertTrue(account.shouldResumeProtection)
     }
 
-    func testSignInKeepsAResumeIntentUnlessTheHelperConfirmsRelease() async {
+    func testSignInKeepsTheArmedAndResumeIntentsUnlessTheHelperConfirmsRelease() async {
         let (account, transport, host, _) = fixture()
-        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
-        // A launch 401 kept crash recovery's intent; a root emergency disarm
-        // since then is known only to the helper.
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); KillSwitchService.isArmed = false }
+        // A launch 401 kept crash recovery's armed and resume intents; a root
+        // emergency disarm since then is known only to the helper, and cannot
+        // clear this user's defaults. The status seam stands in for the IPC.
+        let app = AppState()
+        var helperStatus = KillSwitchService.StatusObservation.unavailable
+        var runtime = NetworkProtectionOperations()
+        runtime.refreshKillSwitchStatus = { helperStatus }
+        app.networkProtection = runtime
+        account.protectionReleaseConsumer = { await app.acceptConfirmedProtectionReleaseBeforeSignIn() }
+        KillSwitchService.isArmed = true
         account.shouldResumeProtection = true
-        account.killSwitchStatusObservation = { .unavailable }
         await account.retireResumeIntentIfProtectionReleased()
         XCTAssertTrue(account.shouldResumeProtection, "an unreachable helper is no evidence of a release")
-        account.killSwitchStatusObservation = { .confirmed(requiresProtectionRecovery: false) }
+        XCTAssertTrue(KillSwitchService.isArmed, "an unreachable helper must not loosen the armed intent")
+        helperStatus = .confirmed(requiresProtectionRecovery: false)
         await account.retireResumeIntentIfProtectionReleased()
         XCTAssertFalse(account.shouldResumeProtection, "a confirmed release must not be re-armed by the next sign-in")
+        XCTAssertFalse(KillSwitchService.isArmed, "a confirmed release must not be re-armed at the next sleep")
     }
 
     private func adoptReplacementCredentials(_ account: AccountSession) async throws {

@@ -68,6 +68,9 @@ struct TonoApp: App {
             },
             protectionBlockedConsumer: { appState.isProtectionBlocked },
             protectedRetryConsumer: { appState.retryProtectedConnectionNow() },
+            protectionReleaseConsumer: {
+                await appState.acceptConfirmedProtectionReleaseBeforeSignIn()
+            },
             appRoutingResearchActivationConsumer: {
                 appState.appRoutingResearchActivationChanged()
             },

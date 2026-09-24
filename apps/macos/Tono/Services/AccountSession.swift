@@ -128,12 +128,11 @@ final class AccountSession {
     @ObservationIgnored var authMethodsLoadRevision: UInt64?
     var hasStartedRestore = false
     var shouldResumeProtection = false
-    /// The helper's kill-switch status, read before a sign-in consumes a kept
-    /// resume intent. Replaceable so tests never reach the privileged socket.
-    @ObservationIgnored var killSwitchStatusObservation:
-        () async -> KillSwitchService.StatusObservation = {
-            await PrivilegedRuntimeCoordinator.shared.refreshKillSwitchStatus()
-        }
+    /// Before a sign-in consumes a kept resume intent: true only when AppState
+    /// accepted a helper-confirmed protection release under its protection
+    /// generation, clearing the armed intent. Replaceable so tests never reach
+    /// the privileged socket; unwired, no intent is ever retired.
+    @ObservationIgnored var protectionReleaseConsumer: @MainActor () async -> Bool
 
     var deviceLimit: Int { user?.deviceLimit ?? TonoAccountRules.maximumDevices }
     var isAtDeviceLimit: Bool { devices.count >= deviceLimit }
@@ -226,6 +225,7 @@ final class AccountSession {
             },
          protectionBlockedConsumer: @escaping @MainActor () -> Bool = { false },
          protectedRetryConsumer: @escaping @MainActor () -> Void = {},
+         protectionReleaseConsumer: @escaping @MainActor () async -> Bool = { false },
          appRoutingResearchActivationConsumer: @escaping
             @MainActor () -> Void = {},
          pathLatencyConsumer: @escaping @MainActor () -> TonoPathLatency = {
@@ -254,6 +254,7 @@ final class AccountSession {
         self.claudeTrafficResearchConsumer = claudeTrafficResearchConsumer
         self.protectionBlockedConsumer = protectionBlockedConsumer
         self.protectedRetryConsumer = protectedRetryConsumer
+        self.protectionReleaseConsumer = protectionReleaseConsumer
         self.appRoutingResearchActivationConsumer =
             appRoutingResearchActivationConsumer
         self.pathLatencyConsumer = pathLatencyConsumer

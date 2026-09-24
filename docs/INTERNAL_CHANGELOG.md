@@ -101,6 +101,15 @@
     PR 修复启动时 AppState 的保护真值（H16-O-F5 / H16-C-F1），本条不改。
   - 引导页判断读 `KillSwitchService.isArmed`（非 observable）；在登录页点"恢复网络"后若再
     出现 `.error`，从未看过引导的用户会重新看到引导页（既有行为）。
+- **后续（2026-09-24，PR 审查 N1：Codex 发现，Opus 复核）**：登录前 helper 确认已释放时，原先只放弃
+  resume 意图，`KillSwitchService.isArmed` 仍为 true（root 紧急解除改不了该用户的 defaults，启动 401
+  路径也不设 `isProtectionBlocked`，激活对账不运行），下次睡眠重新 arm PF，唤醒后重连。现在由 AppState
+  新增的 `acceptConfirmedProtectionReleaseBeforeSignIn` 读 helper：未连接/连接中/断开中且保护代际未变时，
+  确认释放才走既有 `acceptConfirmedExternalProtectionRelease`，一并清掉 armed 意图；不可达、拒绝或仍需
+  保护时两个意图都保留。`killSwitchStatusObservation` 换为 `protectionReleaseConsumer`（TonoApp 接到
+  AppState）；上文测试改名 `testSignInKeepsTheArmedAndResumeIntentsUnlessTheHelperConfirmsRelease`，经
+  真实 AppState 与 `refreshKillSwitchStatus` 替身同时断言两个意图。旧代码缺新函数无法编译，未跑红；
+  本机未构建，以 PR 的 `macos-26` CI 为准。
 
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
