@@ -34,15 +34,17 @@ pub(crate) fn mark_vault_session_owned(data_dir: &std::path::Path) -> std::io::R
     std::fs::write(data_dir.join(VAULT_SESSION_MARKER), b"1")
 }
 
-/// Whether the refresh token in the vault belongs to this data directory. A directory an earlier
-/// build left signed in has no marker but still has that account's verified catalog cache, so it
-/// adopts the marker once instead of signing every existing user out. A fresh directory (a new
-/// install, or a reinstall after "delete application data") has neither.
-pub(crate) fn data_dir_owns_vault_session(data_dir: &std::path::Path, catalog_cache: &std::path::Path) -> bool {
+/// Whether the refresh token in the vault belongs to this data directory. The marker answers for
+/// sessions this build adopted. A directory an earlier build left signed in has no marker, but it
+/// has files only a signed-in account writes (`account_traces`), even when its catalog sync never
+/// succeeded; it adopts the marker once instead of signing that user out and releasing their
+/// protection. A fresh directory (a new install, or a reinstall after "delete application data")
+/// has none of them.
+pub(crate) fn data_dir_owns_vault_session(data_dir: &std::path::Path, account_traces: &[std::path::PathBuf]) -> bool {
     if data_dir.join(VAULT_SESSION_MARKER).exists() {
         return true;
     }
-    if !catalog_cache.exists() {
+    if !account_traces.iter().any(|trace| trace.exists()) {
         return false;
     }
     if let Err(error) = mark_vault_session_owned(data_dir) {

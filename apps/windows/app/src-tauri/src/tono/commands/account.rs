@@ -97,8 +97,16 @@ where
             // token this directory never adopted is a previous installation's session — possibly
             // another person's account. Leave it unhydrated: restore then takes the signed-out
             // path, whose local logout wipe deletes it from the vault.
-            let catalog_cache = inner.catalog_cache().path().to_path_buf();
-            if crate::tono::credentials::data_dir_owns_vault_session(&inner.catalog_dir, &catalog_cache) {
+            // Written only for a signed-in account: the catalog and policy caches (sync), the
+            // node selection, and the privacy settings (the settings page, or the account's log
+            // upload scope). None is written by a signed-out first launch.
+            let account_traces = [
+                inner.catalog_cache().path().to_path_buf(),
+                inner.policy_cache().path().to_path_buf(),
+                crate::tono::state::selection_path(&inner.catalog_dir),
+                inner.catalog_dir.join(crate::tono::audit::SETTINGS_FILE_NAME),
+            ];
+            if crate::tono::credentials::data_dir_owns_vault_session(&inner.catalog_dir, &account_traces) {
                 // Hydrate memory only — writing the same bytes back would
                 // risk another prompting vault call.
                 let _ = inner.credentials.set_local(CredentialKey::RefreshToken, &token);
@@ -489,8 +497,26 @@ mod lifecycle_tests {
             inner.credentials_loaded = false;
         }
         load_credentials_from(&state, vault).await;
-        let inner = state.lock().await;
-        assert_eq!(inner.credentials.refresh_token().unwrap().as_deref(), Some("previous-install-session"));
+        {
+            let inner = state.lock().await;
+            assert_eq!(inner.credentials.refresh_token().unwrap().as_deref(), Some("previous-install-session"));
+            let _ = std::fs::remove_dir_all(&inner.catalog_dir);
+        }
+
+        // An earlier build signed in without a marker and its catalog sync never succeeded
+        // (offline, or 503 EXIT_IDENTITY_PROPAGATING), so there is no catalog cache. Another
+        // account trace, here the policy cache, still makes the session this installation's.
+        let upgraded = Arc::new(TonoState::for_test());
+        {
+            let inner = upgraded.lock().await;
+            std::fs::create_dir_all(&inner.catalog_dir).unwrap();
+            assert!(!inner.catalog_cache().path().exists());
+            std::fs::write(inner.policy_cache().path(), b"{}").unwrap();
+        }
+        load_credentials_from(&upgraded, vault).await;
+        let inner = upgraded.lock().await;
+        assert_eq!(inner.credentials.refresh_token().unwrap().as_deref(), Some("previous-install-session"),
+            "an upgrade must not sign out, and release the protection of, an account that never cached a catalog");
         let _ = std::fs::remove_dir_all(&inner.catalog_dir);
     }
 

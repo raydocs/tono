@@ -40,9 +40,22 @@
 - **缺陷修复**：refresh token 存在凭据管理器（`refresh-token.tono`），不在应用数据目录里。
   卸载时勾选「删除应用数据」只删 `%APPDATA%`/`%LOCALAPPDATA%` 目录，重装后
   `load_credentials` 无条件读入残留 token，静默恢复为上一账户。现在：(1) 登录采纳时在数据
-  目录写 `vault-session.marker`；`load_credentials` 仅在标记存在时读入 vault token。没有标记
-  但有已校验目录缓存的旧版本已登录目录，一次性补写标记，不会把现有用户登出。没有标记的新
-  目录不读入 token，restore 走未登录路径，其本地登出清理会把残留 token 从 vault 删除。
+  目录写 `vault-session.marker`；`load_credentials` 以标记为首选依据读入 vault token。没有
+  标记时，数据目录里只要有任一"只有已登录账户才会写"的文件，就视为旧版本留下的本安装会话，
+  一次性补写标记并读入，不会把现有用户登出。没有标记也没有这些文件的全新目录不读入 token，
+  restore 走未登录路径，其本地登出清理会把残留 token 从 vault 删除。
+  - 审查修正（R4 §1.4 问题 1 / W3）：初版只认目录缓存 `managed-exit-catalog.json`。旧版本已
+    登录但目录同步从未成功（离线，或 503 `EXIT_IDENTITY_PROPAGATING`）的机器没有目录缓存，
+    升级后 token 不读入 → restore `NoToken` → `AccountCloseReason::Missing` → 释放现有 WFP
+    保护并本地登出。现在账户痕迹为以下任一文件（均在 Tono 数据目录，路径取自代码常量）：
+    目录缓存 `managed-exit-catalog.json` 与策略缓存 `managed-traffic-policy.json`（只由登录后
+    的同步写入；策略同步可以在目录同步 503 时单独成功）；节点选择 `selection.json`（选择
+    节点或同步替换时写，需要账户目录）；隐私设置 `settings.json`（缺失时按默认值读取、不写
+    回，所以全新安装首次启动不会生成；只在设置页切换开关时写，而 guard 只让已登录账户进入
+    设置页；登录/恢复会话时若上传同意开启还会写入该账户的日志上传 scope）。未选：
+    `logs/traffic-audit.jsonl`（未登录时请求验证码、登录失败也会写审计）；`route-preferences.json`、
+    `last-success.json`（只在目录修订已提交后写，而目录修订只在目录缓存写入成功后提交，不增
+    加覆盖）。
   (2) 卸载器「删除应用数据」分支执行 `cmdkey /delete:refresh-token.tono`。(3) 更正注释和
   tono-core 常量 `WINDOWS_CRED_TARGET_REFRESH_TOKEN` 的目标名（原写 `tono/refresh-token`，
   实际为 keyring 的 `<user>.<service>`）。
@@ -50,18 +63,24 @@
 - **工程与测试**：新增一个回归 `fresh_data_dir_does_not_adopt_a_vault_refresh_token`
   （`commands/account.rs` lifecycle_tests）。为此把 vault 读取抽成 `load_credentials_from` 的
   注入参数，生产路径不变。测试先断言无标记目录不读入 vault token（旧实现会读入，断言失败），
-  再断言写入标记后可以正常读入。契约修正：`account_names_are_stable` 原本断言错误的
+  再断言写入标记后可以正常读入；审查修正后同一测试再用一个新数据目录：无标记、无目录缓存、
+  只有策略缓存文件，断言 token 被读入。初版分支上这一步会失败：旧判定只看标记和目录缓存，
+  两者都不存在即返回"不属于本安装"，token 保持为空。契约修正：`account_names_are_stable` 原本断言错误的
   `tono/refresh-token` 格式，改为断言 keyring 实际目标名等于 tono-core 常量（不新增测试）。
   本机运行 `node --test scripts/windows-packaging.test.mjs`：22/22 通过（只验证模板约束，
   不覆盖 cmdkey 行为）。
-- **验证**：本机（编辑机）未运行 cargo；委托本 PR 的 GitHub-hosted `windows-2025` CI
+- **验证**：本机（编辑机）未编译、未运行 cargo（审查修正同样如此）；委托本 PR 的 GitHub-hosted `windows-2025` CI
   （app 与 tono-core `cargo test --locked`），结果以 PR 页为准。卸载器未在 Windows 11 实机运行。
 - **候选/发布**：无新包，仅源码。
 - **剩余限制**：卸载不吊销服务端会话（卸载器没有已认证客户端；残留 token 在本机被删除或
   拒用，服务端按正常有效期过期）。UAC 以另一个管理员身份提权卸载时，「current」上下文指向
   该管理员，与现有 `$APPDATA` 删除有同样的限制。dev 通道与正式通道共用凭据名，全新的 dev
   数据目录会清掉正式通道的 vault token（内部通道，已记录）。数据目录在漫游 `%APPDATA%` 下，
-  标记会随配置文件漫游，见 #409。
+  标记会随配置文件漫游，见 #409。旧版本已登录、两种同步都从未成功、也从未写过
+  `settings.json` 的数据目录（49e8b2bb 之前不持久化日志上传 scope 的构建上、从未切换过隐私
+  开关）仍然没有任何痕迹，升级后照旧走 Missing 关闭，释放保护并登出。审查问题 2（`inner` 锁内
+  同步 fs `exists`/`write`，UNC 重定向 `%APPDATA%` 可能卡锁）与问题 3（标记与 vault 写入
+  不原子：标记写成功、vault 写失败时，下次启动读入的是旧安装残留 token）本轮未改。
 
 ## 2026-09-23 · macOS 快照服务不可读时 status 折叠掉 snapshotPresent，断开被无谓拒绝
 
