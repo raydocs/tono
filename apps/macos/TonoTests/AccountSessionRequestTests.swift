@@ -547,6 +547,41 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertFalse(released, "a suspension must not release PF/DNS protection")
     }
 
+    func testSuspensionStopsTheRunningNetworkLogUploader() async throws {
+        let (account, transport, host, requests) = fixture()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer {
+            transport.invalidateAndCancel(); HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try await adoptTestAccount(account)
+        // An empty log: the running loop sends nothing of its own here.
+        let uploader = DiagnosticsLogUploader(
+            auditLogURL: directory.appendingPathComponent("audit.jsonl"),
+            isEnabled: { true },
+            upload: { _, _, _, _, _, _ in }
+        )
+        account.diagnosticsLogUploader = uploader
+        await uploader.start()
+        let task = Task { await account.refreshAccount() }
+        let request = try await nextRequest(requests)
+        request.respond(status: 401, body: #"{"error":{"code":"UNAUTHORIZED"}}"#)
+        let renewal = try await nextRequest(requests)
+        renewal.respond(status: 401, body: #"{"error":{"code":"UNAUTHORIZED"}}"#)
+        await task.value
+        XCTAssertEqual(account.state, .suspended)
+        var running = await uploader.isRunning
+        let deadline = Date().addingTimeInterval(2)
+        while running, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+            running = await uploader.isRunning
+        }
+        XCTAssertFalse(running, "a suspended account's uploader would retry a refused token renewal every sweep")
+        await uploader.stop()
+    }
+
     func testExplicitInvalidationRetiresReadBeforeUserIsCleared() async throws {
         let (account, transport, host, requests) = fixture()
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
