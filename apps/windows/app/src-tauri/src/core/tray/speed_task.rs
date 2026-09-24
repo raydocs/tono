@@ -125,6 +125,7 @@ impl TraySpeedController {
             }
 
             Self::set_speed_connection_id(&speed_connection_id, None);
+            super::Tray::global().forget_speed();
         });
 
         *guard = Some(task);
@@ -163,7 +164,7 @@ impl TraySpeedController {
             }
             #[cfg(target_os = "windows")]
             {
-                let _ = tray.set_tooltip(Some("Tono"));
+                super::Tray::global().show_speed(None, |text| Ok(tray.set_tooltip(Some(text))?));
             }
         }
     }
@@ -205,14 +206,13 @@ impl TraySpeedController {
             }
             #[cfg(target_os = "windows")]
             {
-                let tooltip = format!(
+                let speed = format!(
                     "↑ {}\n↓ {}",
                     format_bytes_per_second(up),
                     format_bytes_per_second(down)
                 );
-                if let Err(err) = tray.set_tooltip(Some(&tooltip)) {
-                    logging!(warn, Type::Tray, "设置托盘速率提示失败: {err}");
-                }
+                // Added under the protection line, never in place of it.
+                super::Tray::global().show_speed(Some(speed), |text| Ok(tray.set_tooltip(Some(text))?));
             }
         }
     }
