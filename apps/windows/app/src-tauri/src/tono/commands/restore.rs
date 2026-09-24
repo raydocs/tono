@@ -412,6 +412,7 @@ pub async fn tono_retry_restore(state: tauri::State<'_, Arc<TonoState>>, app: Ap
 pub async fn restore_session_guarded(app: AppHandle, state: Arc<TonoState>) {
     use futures::FutureExt as _;
 
+    crate::tono::update_handoff::retire_completed_legacy_journal(env!("CARGO_PKG_VERSION"));
     load_credentials(&state).await;
     crate::tono::bootstrap::hydrate_learned_pins_from_service().await;
     let client = { Arc::clone(&state.lock().await.client) };
