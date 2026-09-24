@@ -3,7 +3,13 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 
-import { useTonoStatus } from '@/hooks/use-tono'
+import {
+  tonoAccountQueryKey,
+  tonoDevicesQueryKey,
+  tonoServersQueryKey,
+  useTonoStatus,
+} from '@/hooks/use-tono'
+import { removeCacheData } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
 import {
   formatTonoActionError,
@@ -11,8 +17,10 @@ import {
   tonoRetryRestore,
   tonoSignInStart,
   tonoSignInVerify,
+  tonoSignOut,
 } from '@/services/tono'
 import { GlassCard } from '@/tono-ui/GlassCard'
+import { hasLiveProtection } from '@/tono-ui/protection-evidence'
 import { SupportContact } from '@/tono-ui/SupportContact'
 import {
   TONO_COLORS,
@@ -44,6 +52,8 @@ const LoginPage = () => {
   const [verifying, setVerifying] = useState(false)
   const [retrying, setRetrying] = useState(false)
   const [restoringInternet, setRestoringInternet] = useState(false)
+  const [signingOut, setSigningOut] = useState(false)
+  const [signOutError, setSignOutError] = useState<string | null>(null)
   const [verifySuspended, setVerifySuspended] = useState(false)
   const [suspendedDismissed, setSuspendedDismissed] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -199,6 +209,30 @@ const LoginPage = () => {
     }
   })
 
+  // A paused account is sent no sign-in code, so "Use another email" cannot
+  // replace a session the control plane refuses; signing out is the way off
+  // this screen. As on the Account page, it releases protection first and
+  // keeps the account when that release cannot be proven.
+  const handleSignOut = useLockFn(async () => {
+    setSigningOut(true)
+    setSignOutError(null)
+    try {
+      await tonoSignOut()
+    } catch (error) {
+      setSignOutError(formatTonoActionError(error, t))
+      return
+    } finally {
+      setSigningOut(false)
+    }
+    removeCacheData(tonoAccountQueryKey)
+    removeCacheData(tonoDevicesQueryKey)
+    removeCacheData(tonoServersQueryKey)
+    setVerifySuspended(false)
+    setSuspendedDismissed(false)
+    resetToStart()
+    await mutateTonoStatus()
+  })
+
   const inputStyle: React.CSSProperties = {
     background: 'var(--tono-surface-input)',
     border: '1px solid var(--tono-surface-input-border)',
@@ -212,6 +246,13 @@ const LoginPage = () => {
     color: '#fff',
     background: 'var(--tono-action-fill)',
   }
+
+  // A restore that did not take over the Service's barrier leaves it as it is.
+  // A locked barrier that still renders the tunnel permit is the previous
+  // session's connection carrying traffic, not a blocked machine.
+  const previousTunnelRunning =
+    status?.killSwitch?.mode === 'locked' &&
+    status.killSwitch.tunnel_permit_rendered === true
 
   const internetRecovery = internetBlocked ? (
     <div
@@ -230,11 +271,21 @@ const LoginPage = () => {
         border: `1px solid ${TONO_COLORS.protectedOffline}4D`,
       }}
     >
+      {/* The card and its sign-in gate follow the fail-closed intent; the
+          "still blocked" claim needs the Service's live barrier. */}
       <span style={{ fontSize: 13, fontWeight: 650 }}>
-        {t('tono.login.networkBlocked.title')}
+        {previousTunnelRunning
+          ? t('tono.login.networkBlocked.stillRunningTitle')
+          : hasLiveProtection(status)
+            ? t('tono.login.networkBlocked.title')
+            : t('tono.pill.title.protectionUnknown')}
       </span>
       <span style={{ fontSize: 12, lineHeight: 1.45, color: text.secondary }}>
-        {t('tono.login.networkBlocked.description')}
+        {previousTunnelRunning
+          ? t('tono.login.networkBlocked.stillRunningDescription')
+          : hasLiveProtection(status)
+            ? t('tono.login.networkBlocked.description')
+            : t('tono.login.networkBlocked.unverifiedDescription')}
       </span>
       <button
         type="button"
@@ -312,6 +363,24 @@ const LoginPage = () => {
               ? t('tono.login.sessionEnded.signIn')
               : t('tono.login.changeEmail')}
           </button>
+
+          <button
+            type="button"
+            className="tono-link"
+            style={{ fontSize: 13, color: text.secondary }}
+            onClick={handleSignOut}
+            disabled={signingOut}
+          >
+            {t('tono.account.signOut')}
+          </button>
+          {signOutError && (
+            <span
+              role="alert"
+              style={{ fontSize: 12, color: 'var(--tono-text-error)' }}
+            >
+              {signOutError}
+            </span>
+          )}
         </GlassCard>
       </div>
     )

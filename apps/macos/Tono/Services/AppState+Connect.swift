@@ -263,8 +263,11 @@ extension AppState {
                     tailscaleBootstrapEnabled: usesHomeBootstrap,
                     allowSystemResolution: allowSystemResolution,
                     helperPrepared: true,
-                    reviewedBundleDirect:
-                        activeDirectPolicy?.requiresAddressFreeDirectPermit == true
+                    // Unlike the exact root-only endpoints above, the bundle
+                    // permit is address-free: before the TUN exists it is root
+                    // web-port egress on the physical interface. It is sent
+                    // only by the lock arm below, once the tunnel is live.
+                    reviewedBundleDirect: false
                 )
                 try Task.checkCancellation()
                 let digest = try await runtimeDigest

@@ -465,8 +465,9 @@ extension AppState {
                 } else {
                     sessionEndpoints = effectiveDirectPolicy?.sessionEndpoints ?? []
                 }
+                let tunnelArmed = KillSwitchService.interfaceExists(ConfigPipeline.tonoTunInterface)
                 try await PrivilegedRuntimeCoordinator.shared.armKillSwitch(
-                    tunnelInterfaces: KillSwitchService.interfaceExists(ConfigPipeline.tonoTunInterface)
+                    tunnelInterfaces: tunnelArmed
                         ? [ConfigPipeline.tonoTunInterface]
                         : [],
                     proxyEndpoints: (try ConfigPipeline.dialEndpoints(for: selectedExit))
@@ -512,6 +513,27 @@ extension AppState {
                     nodes: runtimeNodes,
                     digest: digest
                 )
+                // /core/sync withheld the reviewed-bundle permit while the
+                // Core restarted without its utun (#608). It returns only
+                // through an arm with the flag once the new tunnel exists.
+                // The pins-only branch below already sends that arm.
+                if !pinsOnlyRefresh, tunnelArmed,
+                   effectiveDirectPolicy?.requiresAddressFreeDirectPermit == true {
+                    try Task.checkCancellation()
+                    guard await Self.waitForOwnedTunnelInterface() else {
+                        throw KillSwitchService.Error.commandFailed(
+                            "Mihomo did not recreate the owned \(ConfigPipeline.tonoTunInterface) interface."
+                        )
+                    }
+                    try await PrivilegedRuntimeCoordinator.shared.armKillSwitch(
+                        tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
+                        proxyEndpoints: (try ConfigPipeline.dialEndpoints(for: selectedExit))
+                            + self.claudeHomeDialEndpoints(excluding: selectedExit),
+                        sessionDirectEndpoints: sessionEndpoints,
+                        tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && transport != nil,
+                        reviewedBundleDirect: true
+                    )
+                }
 
                 if let pendingDirectPolicy {
                     // Mihomo has accepted the new pins, so they are now the

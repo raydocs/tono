@@ -755,6 +755,7 @@ export interface TranslationResources {
             label: string
             pathLabel: string
           }
+          internalDiagnostics: string
           networkLogUpload: {
             description: string
             label: string
@@ -1231,7 +1232,10 @@ export interface TranslationResources {
           description: string
           restore: string
           restoring: string
+          stillRunningDescription: string
+          stillRunningTitle: string
           title: string
+          unverifiedDescription: string
         }
         resendIn: string
         restartTono: string

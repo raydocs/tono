@@ -176,7 +176,8 @@ final class CoreManager {
     /// Serialized protected replacement. The caller keeps PF and system DNS
     /// armed throughout; failure never restarts an older configuration.
     func sync(configDirectory: String, configSHA256: String,
-              startAllowed: () -> Bool = { true }) throws -> String {
+              startAllowed: () -> Bool = { true },
+              beforeStop: () throws -> Void = {}) throws -> String {
         lock.lock()
         defer { lock.unlock() }
         guard process?.isRunning == true else {
@@ -184,6 +185,7 @@ final class CoreManager {
         }
         // Refuse malformed or swapped bytes before disrupting the live child.
         _ = try snapshot(configDirectory, expectedSHA256: configSHA256)
+        try beforeStop()
         try stopLocked()
         try startLocked(configDirectory: configDirectory, configSHA256: configSHA256,
                         startAllowed: startAllowed)

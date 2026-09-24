@@ -32,6 +32,147 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · macOS Core 重启期间撤下 reviewed-bundle PF 放行（不清空状态）
+
+- **归属/来源**：G1 连接保护；`tono-core-helper`（`/core/sync`、空闲监督循环）、macOS `AppState+Proxy`
+  配置重载与 `AppState` 策略应用。#604 审查发现 R604-F1（High，Codex 发现、Opus 源码核实），Issue #608。
+  基线 `fix/issue-586-20260924` 17f2d71d（#604，未合 main）；分支 `fix/issue-608-20260924`；本 PR 叠在
+  #604 上；未合 main。
+- **缺陷修复**：服务器切换、配置重载、策略应用都先以 `utun199` + bundle 标志布防，再调 `/core/sync`；
+  Helper 先停旧 Core 再启动新 Core，utun 随之消失，但不带地址的 `tono-bundle` 放行仍留在锚点里，
+  Core 重启期间（约 1–2 s）root 进程可经物理网卡访问 Web 端口；Core 崩溃时同样如此。现在：
+  `/core/sync` 在新配置通过检查之后、停旧 Core 之前，只把两条 `tono-bundle` 从已加载的锚点撤下，
+  不清空 PF 状态，并递增 `stateGeneration`（在途 arm 会被拒绝）；`lastLoadedPassRules` 仍是原完整集合。
+  放行只能由 App 在隧道存在后带标志重新布防恢复：相对该基线没有撤回，不清空状态；之后真正去掉
+  该放行的 arm 相对基线仍算撤回，照旧全机清空。App：配置重载（非 pins-only）与策略应用在
+  `/core/sync` + reload 之后等 `utun199` 出现，再补一次带标志的布防；pins-only 收敛布防与切换路径的
+  收敛布防原本就带标志（已核对）。Core 崩溃：Helper 空闲循环（每 10 s）发现 Core 未运行时走同一
+  撤下路径。撤下为尽力而为：读取、校验或加载失败时保留原规则（不比原来更松），照常重启 Core，只写 stderr。
+- **新增/优化**：无。
+- **工程与测试**：Helper 协议 4.45.0 → 4.46.0（叠在 #604 的 4.45.0 上；按合并顺序重编号）；
+  CONTRACT 按 `build-core-helper.sh` 同一管道重算为 `42a3e809…`（先对 17f2d71d 复算出记录值
+  `51e335a1…` 以核对管道）。`writeRules` 拆出 `writeRuleText`，行为不变。回归测试一条：`runSelfTests`
+  的 `bundleWithheldForCoreSync`——对带隧道、带标志的规则集，撤下计划只去掉两条 `tono-bundle`、
+  仍保留 `block drop out quick all`、`disposal == .keep`；以计划保留的基线衡量，去掉放行的 arm 为
+  `.full`，恢复放行的 arm 为 `.keep`；基线未知时不撤。17f2d71d 上没有这条撤下路径
+  （`reviewedBundleWithholding` 不存在，自测编译失败）；那里唯一能去掉该放行的是不带标志的 arm，
+  相对同一基线为 `.full`（全机清空），正是 `.keep` 断言排除的结果（按代码推理，未实跑）。
+- **验证**：not run locally per execution-location rule; CI pending（GitHub-hosted `macos-26`：
+  `build-core-helper.sh` 编译后运行 `--self-test`，以及 root 下的 `--self-test` / `--lifecycle-self-test`
+  和 TonoTests）。本机只做了 CONTRACT 哈希的纯文本重算（未编译）。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：未在设备上验证。撤下期间，规则引擎直连的 bundle 流量被 PF 丢弃（fail-closed）：
+  重载/策略路径持续到新 TUN 出现后的补布防，切换路径持续到出口验证之后的收敛布防。已建立的
+  bundle 状态不清空，可持续到对应连接结束（与原来相同，不更松）。Core 崩溃时仍有至多约 10 s 的
+  监督周期窗口（App 侧 TUN 缺失判定约 5–10 s 后也会 fail-closed 拆除）；Core 仍在运行而 utun 消失
+  的情形不覆盖。只有本进程记录了基线且锚点文件与基线一致时才撤下；部分提交后（基线为 nil）不撤。
+- **续记（2026-09-24，#609 审查 R609-F1，Codex High / Grok low，源码推导）**：上文「撤下失败时照常重启 Core」
+  已改。原实现把收窄后的规则写盘、`pfctl -nf` 通过后若 `pfctl -f` 失败，只返回 false：内核仍有放行，
+  `/core/sync` 照样停旧 Core（无隧道窗口照旧），而磁盘上已是收窄文件，与基线不一致，空闲循环再也
+  不会重试，直到下一次 arm。现在：（a）写入或加载失败时把读到的原文件写回，磁盘、内核、基线重新一致，
+  空闲循环可以重试；（b）撤下失败，或锚点文件既不是基线也不是已撤下的版本（放行可能仍在）时，
+  `/core/sync` 在停旧 Core 之前报错返回，旧 Core 和隧道保持运行，App 按现有失败分支 fail-closed 拆除并
+  重连。已撤下的文件识别为完成，照常重启。没选「退回不带放行的完整 arm（全机清空）」：同一个
+  `pfctl -f` 失败时它同样会失败，且会清空全部连接。同一条自测扩展了三项断言：回滚内容等于读到的原文件、
+  已撤下的文件判为无需撤下、不一致的文件判为不可停 Core；`/core/sync` 与失败注入的接线没有测试替身，
+  未覆盖。Helper 版本仍为 4.46.0（未发布），CONTRACT 按同一管道重算为 `d386cfb4…`（先对 214330dc 复算出
+  `42a3e809…`）。仍未本地构建或运行测试。剩余：`/core/sync` 失败后 App 的保留拆除通过 `/core/stop`
+  停 Core，该路径不撤放行，放行在无隧道时保留到空闲循环重试（至多约 10 s）或重连的第一次布防。
+- **续记二（2026-09-24，协调人批准）**：上条剩余项已处理。`/core/stop` 在停 Core 之前也走同一撤下
+  （不清空状态）；尽力而为，失败只写 stderr，照常停 Core，空闲循环重试兜底。撤下失败且原文件也写
+  不回去时（磁盘上的收窄文件会被误判为「已撤下」），清空内存基线（下一次 arm 走全机清空）并置
+  `reviewedBundleFileUnconfirmed`：在下一次成功提交的 arm 之前，任何撤下都报错，`/core/sync` 因此
+  不停旧 Core，`/core/stop` 记录后照停，空闲循环忽略。这两处都是有副作用的 manager/IPC 代码，没有
+  测试替身，自测未扩展。Helper 版本仍为 4.46.0，CONTRACT 按同一管道重算为 `69ea0498…`（先对
+  549f546d 复算出 `d386cfb4…`）。仍未本地构建或运行测试。
+
+## 2026-09-24 · macOS 连接首次布防不再在 TUN 出现前放行 root Web 端口
+
+- **归属/来源**：G1 连接保护；macOS `AppState+Connect`、`tono-core-helper` PF 规则。内部审查 H21-O-F5
+  （High，跨厂商源码级核实），Issue #586。基线 origin/main ca00a736；分支 `fix/issue-586-20260924`；
+  本 PR；未合 main。
+- **缺陷修复**：连接（及受保护重试）的第一次布防在 `.startingTunnel` 之前就带上
+  `reviewedBundleDirect`，Helper 在 `tunnelInterfaces` 为空时仍渲染不带地址的
+  `pass out … port { 80, 443, 8000, 8080 } user root`（`tono-bundle`）。TUN 出现前的这段时间，
+  root 进程可经物理网卡访问这些端口，界面却已显示保护中。现在：App 只在 TUN 存在后的锁定布防
+  发送该标志，第一次布防固定为 `false`；Helper 在没有隧道接口时不渲染该放行（直接丢弃，不报错：
+  报错会让发送该标志的连接全部失败；不放行时该流量仍 fail-closed）。精确地址、仅 root 的
+  `sessionDirectEndpoints` 首次布防行为不变。配置重载路径在 utun 不存在时传空接口列表，同样由
+  Helper 丢弃该放行。
+- **新增/优化**：无。
+- **工程与测试**：Helper 协议 4.22.0 → 4.45.0（远端分支最高为 4.44.0；按合并顺序重编号），
+  CONTRACT 哈希按 `build-core-helper.sh` 同一管道重算为 `51e335a1…`（先对 HEAD 复算出原记录值
+  `3f2459e2…` 以核对管道）。回归测试一条：`runSelfTests` 的 `bundleOffWithoutTunnel`——无隧道、
+  标志为真的状态渲染结果不得含 `label "tono-bundle"`。旧代码对该状态渲染两条 `tono-bundle`
+  放行，断言为假，`--self-test` 失败（按代码推理，未实跑）。测试修正：原 `required` 在同一无隧道
+  状态上要求这两条放行（即断言了缺陷形态），现改为对同一状态加 `utun199` 的 `tunneledRules`
+  检查形状与 `forbidden`，PF 语法检查也改用 `tunneledRules`（其规则是原 `rules` 的超集）。
+- **验证**：not run locally per execution-location rule; CI pending（GitHub-hosted `macos-26`：
+  `build-core-helper.sh` 编译后运行 `--self-test`，以及 root 下的 `--self-test` / `--lifecycle-self-test`
+  和 TonoTests）。本机只做了 CONTRACT 哈希的纯文本重算（未编译）。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：未在设备上复现或验证。首次布防到锁定布防之间，规则引擎直连的该 bundle 流量会被
+  PF 丢弃（fail-closed，持续到 TUN 就绪，通常几秒）。TUN 在会话中途消失而状态仍列有接口的情形
+  不在本修复范围内。
+
+## 2026-09-24 · 舰队 exit-agent 接入（13 个在线节点，运维操作）
+- 归属：SHIP_PLAN 前置（交接 §2 第 2、3 步）；影响 exit 节点、D1 `exit_nodes`，无客户端改动。
+- 来源：#563 合并提交 85ba3945 的 `services/exit-agent/reconcile_and_report.py`；详细记录见
+  [FLEET_EXIT_AGENT_ROLLOUT_2026-09-24](reports/FLEET_EXIT_AGENT_ROLLOUT_2026-09-24.md)。
+- 缺陷修复：Westwood 自 09-18 起 agent 每轮失败（吊销不执行、计量停报）→ 部署后恢复 ACK 与计量，首轮移除 1 个已吊销身份。
+  另外 12 个在线节点此前未登记、从不 ACK → 全部登记并接入；各节点首轮补齐 6 个此前未在运行中 Xray 生效的身份。
+- 新增/优化：6 个 hy2 节点的检查器改为绑定 `/opt/tono-hy2` 目录，hy2 allowlist 由 agent 按 roster 维护；
+  Fuji 未发布的共享口令 hy2 停用（暂定决定，可恢复）。
+- 工程与测试：无代码改动。
+- 验证：D1 13 个节点 active、ACK 均在 62 秒内；hy2 节点真实身份 `ok:true`；未做客户端实机连接验证。
+- 候选/发布：无新包。
+- 剩余限制：`Tokyo · Sakura` 离线仍在目录内，需要 admin token 下架；ops hub 推送是否停用待定；首报补计 09-11 以来的流量。
+
+## 2026-09-24 · Windows 独立列车 train/win2-20260924
+
+- **归属/来源**：G1–G3 Windows 独立修复汇合（各 PR 归属见其自身条目）；基线 origin/main
+  [d98b217d](https://github.com/raydocs/tono/commit/d98b217d) → 分支 `train/win2-20260924`，按序
+  `--no-ff` 合入 15 个 PR：#513 (bfba4799)、#518 (35ef2230，含 #513)、#515 (8cab7ed3)、#520 (fd4a0f4b)、
+  #557 (c62ae4fe)、#565 (9def4537)、#571 (c2734825)、#569 (bc64320d)、#573 (aeb3445e)、#577 (128892ab)、
+  #580 (d132b0e8)、#544 (3b49c752)、#548 (407d57c1)、#554 (77169a16)、#558 (3d53a413)；无 PR 被剔除；提交时未合 main。
+- **缺陷修复**：见各 PR 条目；列车本身不改产品行为，只做冲突合并：
+  - `login.tsx`（#513 × #515）：登录页拦截卡片标题/说明三分支——Service 报告上次隧道仍在运行
+    （`mode: locked` 且 `tunnel_permit_rendered`）时显示 #515 的「上次的连接仍在运行」；否则有 live 屏障
+    时显示「网络已被拦截」；再否则显示 #513 的「保护状态未确认」与 `unverifiedDescription`。
+  - `login.test.tsx`（#515 × main）：保留 #515 的三个 query-key mock（`tonoAccountQueryKey`、
+    `tonoDevicesQueryKey`、`tonoServersQueryKey`）。
+  - en/zh `tono.json`（#513 × #515）：`unverifiedDescription` 与 `stillRunningTitle`/`stillRunningDescription`
+    取并集；`i18n-keys.ts`、`i18n-resources.ts` 用 `node scripts/generate-i18n-keys.mjs` 重新生成（最终 1085 键）。
+  - `tono/commands/update.rs`（#557 × main）：`disconnect_if_pending` 用 #557 的
+    `proxy_control::clear_for_update()`，保留 main 的 `released.needs_attention` 告警。
+  - `installer.nsi`（#569 × main/#571）：删 data 分支采用 #569——不再对本账户 `$APPDATA`/`$LOCALAPPDATA`
+    做 NSIS 递归 `RmDir /r`（由 helper 按全部 profile 删除，不穿越 junction）；保留 main 的
+    `cmdkey /delete:refresh-token.tono`。#571 的 `$TonoUninstallScope`、#569 的 `$AppDataPathPlain`
+    门控与 #573 的改动均保留（后两者文本上无冲突）。
+  - `docs/INTERNAL_CHANGELOG.md` 与 `docs/FINDINGS_LEDGER.md`：两边条目/行全部保留，只删冲突标记。
+- **新增/优化**：无。
+- **工程与测试**：无新测试；各 PR 自带测试全部保留。
+- **验证**：MacBook 列车工作树（node_modules 软链主仓库）：`apps/windows/app` `npx tsc --noEmit` 通过；
+  `npx vitest run` 37 文件 287 通过；`node --test tooling/scripts/tests/windows-ci-paths.test.cjs` 12 通过；
+  `npm run test:dev-control`（打包/发布脚本 node 测试）106 通过；无冲突标记；`git diff --check origin/main HEAD`
+  无输出。未在本机运行 cargo / Tauri / NSIS 构建，Rust 与安装器改动以 PR 的 Windows CI 为准（CI pending）。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：Rust 与 installer 合并结果未本地编译，等待 CI；未做实机验收。后续事项见
+  Issue [#602](https://github.com/raydocs/tono/issues/602)。
+- **续记（2026-09-24，Codex 审查列车头 `239aeb84`，Claude 交叉复核 F1/F2 确认）**：同分支追加两个修复提交。
+  - 缺陷修复 F1（P2，来自 #544）：`tono_check_update` 以字符串拒绝，下一轮失败缓存相同值，
+    `use-update.ts` 以 `checkError` 为依赖的重查计时器不再重设，SWR 又因缓存错误跳过每日轮询，
+    更新发现永久停止。改为以「是否有错误」为键的每小时 interval，直到某次检查成功、每日轮询恢复。
+  - 缺陷修复 F2（P2，来自 #569）：`--delete-app-data-all-profiles` 在 `enter_repair_gate()` 之前返回，
+    独立调用可在更新待定或其他清理持锁时删除所有账户数据。现在与其他清理模式同走 repair gate；
+    卸载程序在 Section Uninstall 内以自己的手动租约调用（`--final-uninstall` helper 已退出释放锁）。
+  - F3（审计恢复写入未绑定原目录）：按路径重开属实，但目录位于用户自身 AppData、写入以同一用户
+    身份进行，未跨权限边界，且与首次打开同一原语；不在本列车修复，另行登记。
+  - 验证（MacBook，本分支工作树）：`use-update.test.tsx` 新增字符串错误用例在修复前失败（24 小时内
+    调用停在 6 次）、修复后 2/2 通过；`npx tsc --noEmit` 通过；`windows-packaging.test.mjs` 新增
+    repair gate 用例修复前失败、修复后全文件 31/31 通过。未在本机运行 cargo / NSIS，
+    `uninstall_service.rs` 编译以 windows-2025 CI 为准；未做实机卸载验收。
+
 ## 2026-09-24 · mac3 列车 train/mac3-20260924
 
 - **归属/来源**：G2 macOS 账户状态与保护展示汇合（各 PR 归属见其自身条目）；基线 origin/main
@@ -1995,6 +2136,410 @@
 - **验证**：MacBook 列车工作树 `python3 services/exit-agent/test_reconcile_and_report.py`（89 通过）；`python3 -m unittest discover -s ops-panel/tests -p 'test_*.py'`（29 通过）；home-agent 与 exit metering 配置脚本测试通过；`services/control-plane` `npm run typecheck` 通过、`npx vitest run` 892 通过。未连接真实节点、hub 或探针，未部署。
 - **候选/发布**：仅源码，无新候选。
 - **剩余限制**：部署前置——#368 需先在 hub 登记节点与探针 known_hosts；#377 需为自定 unit 的节点在 hub `nodes.secrets.json` 填 `serviceName`，并与 #466 同时或之后部署（hub 上 `jobs.py` 与 `collect.py` 一起更新）；#384 需先在真实 Xray 25.3.6/26.x 确认 vless `clients: []` 能通过 `run -test`。`state.json.roster` 为明文凭据。#375 与控制面 #451 的 `revokeExitToken` SQL 相邻，后合者手工保留两边。
+## 2026-09-24 · Windows 托盘图标随每次状态发布刷新，提示不再被速率覆盖
+
+- **归属/来源**：G2 保护状态真实性；Windows App 原生托盘（`core/tray`、`tono/commands/mod.rs`）。
+  内部审查 H16-O-F2（= H16-C-F4），Issue [#517](https://github.com/raydocs/tono/issues/517)。
+  基线 main 8dc79a5b（2026-09-24 rebase），叠在 #513 之上 → 分支 `fix/win-tray-icon-state-20260924`，
+  PR [#518](https://github.com/raydocs/tono/pull/518)；提交时未合 main。
+- **缺陷修复**：托盘图标只在创建托盘、启动时一次性 `update_part` 和前端从不发送的图标偏好补丁时
+  取样；`emit_status` 只刷新菜单（Windows 上为空操作）和提示。连接、Protected Offline、恢复网络后
+  图标都停在启动时的样子（通常灰色）。另外 connecting/disconnecting 映射到绿色「已连接」图标；
+  默认开启的速率显示每秒用速率文字整段替换提示，关闭时又设为「Tono」，保护状态行消失。
+  现在 `emit_status` 只调用 `Tray::refresh_status`：在 `projection_lock` 下读取一次状态，同一快照
+  设置菜单、图标和提示；偏好路径的 `update_icon` 也取同一把锁，旧刷新不能盖回新图标。connecting/
+  disconnecting 改为灰色图标。提示由状态行和可选速率行组成，状态在前（Windows 只保留前 128 个
+  UTF-16 单元）；速率任务只更新速率行，两边都在同一把锁内写原生提示。
+  审查续修（518-O-F1 = 518-C-F1）：退出/重启期间 `is_exiting` 使状态发布跳过托盘，用户在拒绝
+  对话框选「保持打开」后托盘仍停在退出前的图标和「已保护」。现在每个取消分支清除标志后都重新
+  投影一次托盘（`surface_cancelled_quit` 与重启清理失败分支）。速率任务在退出开始后永久结束，
+  取消后提示会一直带着最后一次速率（518-O-F2，经核实）：任务结束时清掉缓存的速率行，取消后按偏好
+  重新启动速率任务。
+- **新增/优化**：无。
+- **工程与测试**：托盘刷新改经 `TrayProjectionTarget` 接缝（App 实现写 Tauri 托盘）。新增一个
+  `#[tokio::test]`：经 `emit_status` 所用的 `refresh_status_on` 发布 Connected 状态，再经速率任务
+  所用的 `show_speed` 写一次速率，断言菜单刷新一次、记录到 Tun 图标、第一次提示含保护状态行、
+  第二次提示为「状态行 + 速率行」（审查续修 518-O-F3 = 518-C-F2：原测试直接调用私有投影并手工
+  设置速率字段）。`emit_status` 到 `refresh_status` 的一行与 `AppTray` 绑定需要 Tauri AppHandle，
+  未被测试覆盖。原有图标映射测试把 connecting 固定为 Tun，改为断言 connecting/disconnecting 为 Common。
+- **验证**：本机（编辑机）未运行原生 cargo；Tauri crate `cargo test --locked` 委托本 PR 的
+  GitHub-hosted `windows-2025` CI，结果以 PR 页为准。新测试在旧代码上的失败未运行（旧代码无此
+  接缝，发布路径没有图标步骤）。改动文件的新增行用 rustfmt `--check` 核对无新增格式差异。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：未在实机上观察图标与提示；自定义托盘图标偏好与状态投影共用 `latest_arc`。
+  对话框显示期间托盘仍是退出前的样子，取消后才重投影；确认退出则不再刷新。本 PR 叠在 #513
+  （托盘提示按 live 证据显示「保护状态未确认」）之上，含其提交，不能单独合入。
+  与 #520 都改 `feat/window.rs` 的取消路径，但改动不在同一行块。
+  未验证的 Protected Offline 仍用橙色图标，与 flyout 一致（518-O-F4 经核实驳回，不改）。
+  取消恰好发生在速率任务收尾的毫秒级窗口内时，任务不会重启，直到下次启动。
+
+## 2026-09-24 · Windows 横幅、登录卡与托盘提示只在 Service 确认屏障时说「已拦住」
+
+- **归属/来源**：G2 保护状态真实性；Windows App 前端与托盘。内部审查 H16-O-F1（= H16-C-F5），
+  Issue [#511](https://github.com/raydocs/tono/issues/511)。基线 main 8dc79a5b（2026-09-24 rebase）→ 分支
+  `fix/win-blocked-evidence-20260924`，PR [#513](https://github.com/raydocs/tono/pull/513)；提交时未合 main。
+- **缺陷修复**：b489ea16 已让仪表盘 pill、进度卡、仪表盘提示和托盘面板在
+  `killSwitch.wanted && live` 不成立时显示「保护状态未确认」，但三个表面仍只看状态机锁存：
+  非仪表盘页的 Protected Offline 横幅（「已拦住直连，正在换线重试」）、登录页「网络已被拦截」卡片、
+  原生托盘提示（「保护已开启，当前未连接」）。启动时 Service 探测不到（`kill_switch = None`）时，
+  这些表面与仪表盘互相矛盾，并声称正在换线重试，而 Windows 从不自动换线，未验证会话也没有排程重试。
+  现在三处都用同一证据规则：无 live 屏障时标题改为「保护状态未确认」并复用
+  `tono.progress.protectionUnknownBody`（托盘新增 `tray.tono.state.protectionUnknown`，仅 en/zh）；
+  横幅只在 `nextRetryAtMs` 存在时说「已安排自动重试」，否则用「连接不可用期间直连已被拦住」，
+  并删去「换线」。卡片可见性、登录输入禁用、恢复网络与重试按钮不变，保护不放松。
+  审查续修（513-O-F1）：登录卡的未确认说明不再复用提到「恢复正常网络」的通用文案，改用新键
+  `tono.login.networkBlocked.unverifiedDescription`（en/zh），点名卡片上的「恢复网络」按钮并说明之后
+  可登录。
+- **新增/优化**：无。
+- **工程与测试**：`ProtectedOfflineBanner.test.tsx` 原 fixture 没有 `killSwitch` 却断言
+  「Protected offline」，固定了缺陷；改为默认带 `wanted/live=true`，并新增一个 `it`：
+  `{uiState:'protectedOffline', killSwitch:null}` 在 `/servers` 必须显示
+  `tono.pill.title.protectionUnknown` 且不得出现 `protectedOfflineDescription`。托盘测试 fixture
+  补新字段 `protection_live`，不新增托盘测试。
+- **验证**：MacBook worktree（node_modules 软链主仓库）：新 `it` 在旧代码上失败（1 failed / 4 passed），
+  修复后 `vitest run` 该文件 5/5 通过；`ProtectedOfflineBanner`、`login`、`tono-auth-guard` 三个文件
+  29/29 通过；`tsc --noEmit` 通过；三个 tsx 文件 eslint 通过。托盘 Rust 改动未在本机编译，
+  以 PR 的 Windows CI（`cargo test --locked`）为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：托盘提示在开启速率显示时仍会被速率文字覆盖，托盘图标也不随状态刷新
+  （H16-O-F2，另一 PR）。其余 11 种托盘语言缺新键时按 rust-i18n 回退到 zh。与在审 #460 同改
+  `login.tsx`，但不在同一行块；合并顺序见 PR 正文。
+## 2026-09-24 · Windows 启动恢复遇 401：账户进入 Suspended，不再释放 WFP、不再登出；暂停页可退出登录
+
+- **归属/来源**：G2 客户端账户状态；Windows App `tono/commands/restore.rs`、`tono/commands/account.rs`，
+  前端 `pages/tono/login.tsx`。内部审查 H17-O-F2（Windows 部分，= H17-G-F3 第 2 步），Issue #512
+  （macOS 对应 #510）；含审查轮 515-O-F1/515-C-F2、515-O-F2/515-C-F1、515-O-F4 的修正。基线 origin/main
+  8dc79a5b（初版写于 bb2ed4e4，经 059a2ea2 rebase；三者之间 `apps/windows` 无差异）→ 分支
+  `fix/windows-auth-401-keeps-protection-20260924`（PR #515）；提交时未合 main。
+- **缺陷修复**：套餐到期、流量用尽、账户停用、设备或会话被吊销时，Worker 对 `me` 与
+  `auth/refresh` 一律回 401，tono-core 自己的 refresh 也被拒后返回 `Unauthorized`。启动恢复
+  （含重启后、错误页 Retry）把它当作"会话已死"：`close_account_with(Expired)` 先走
+  `release_for_account`（DNS → Core → WFP 有序释放），再登出并删掉保存的 refresh token，界面
+  落到不给原因的登录页。现在 `me()` 的任何失败都由 `settle_failed_restore` 处理：保护状态按
+  Service 读数原样保留（与非 401 错误分支相同），401 让账户进入已有的 `Suspended`，不登出、
+  不删保存的会话。已有守卫拒绝 suspended 账户的 connect 与自动重连；登录页的暂停页在保护阻断时
+  照旧提供"恢复网络"（显式 Disconnect）。保留会话是必要的：Windows 无 token 的启动路径会释放
+  已存的屏障，登出只会把释放推迟到下次启动。
+- **缺陷修复（审查轮）**：暂停页原先只有恢复网络、联系客服和"换邮箱"，而 Worker 不给不合格
+  账户发验证码，保留会话后用户无法回到已退出状态。暂停页新增"退出登录"，调用现有
+  `tono_sign_out`：与账户页相同，先释放保护，释放无法证明时保留账户并显示错误；成功后清掉账户
+  相关缓存再刷新状态。Service 仍持有上一会话的 Core 且隧道放行已渲染（`mode: locked`、
+  `tunnel_permit_rendered`）时，登录页的恢复提示原先写"网络已被保护拦住"，实际上一连接仍在
+  转发流量；该状态下改为"上次的连接仍在运行 / 恢复网络会停止它"（en、zh，i18n 类型已重新生成），
+  按钮与显式 Disconnect 不变。
+- **新增/优化**：无。
+- **工程与测试**：restore 在保护探测之后的部分（token 探测、预算内的 `me()`、结果分派与账户
+  落状态）移入 `restore_account_with`，只注入系统 I/O：`me()`、屏障释放、服务器登出与 UI emit；
+  生产传入 `client.me()`、`release_for_account`、`client.logout()`、`emit_status`。删除随 401 路径
+  失效的 `close_dead_restore_with`、其回归
+  `expired_restore_reserves_account_ownership_before_its_first_side_effect`（W11）与
+  `AccountCloseReason::Expired`；新路径在同一把锁内检查代际并落状态，没有 await 与副作用，W11
+  的竞态不再存在。Rust 一个 `#[tokio::test]` `rejected_restore_suspends_and_keeps_protection`：
+  真实 tono-core `ApiClient` 配对所有请求回 401 的 transport（先装 access token，请求顺序为
+  `me` → `auth/refresh`），经 `restore_account_with` 的真实分派；断言注入的 release 与 logout
+  都未被调用、账户 Suspended、kill switch 仍武装且 `is_protection_blocked`、Service 状态原样、
+  未开始 account close、保存的 refresh token 仍在。红：提交 59ce9fb1 只含 seam 与该测试
+  （行为未改），GitHub-hosted `windows-2025` CI（run 35978180190，app-rust）在该测试的 `restore.rs:475` 断言
+  "a refused session must not release WFP" 处失败（504 passed，1 failed），不是编译错误；修复提交后通过。前端
+  `login.test.tsx` 一个 `it`：暂停页点"Sign Out"调用 `tonoSignOut`（不调用 `tonoDisconnect`）
+  并刷新状态，状态取上一连接仍在运行的屏障，同时断言"Previous connection still running"而非
+  "Internet is blocked"；在本 PR 之前的 login.tsx 与只加了退出按钮的版本上都失败，本机确认。
+- **验证**：本机（编辑机）：`vitest run src/pages/tono/login.test.tsx` 8/8，改动文件的
+  `tsc --noEmit`、biome format、eslint 通过。Rust 未在本机编译，Tauri crate `cargo test` 委托
+  本 PR 的 GitHub-hosted `windows-2025` CI，结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：Worker 仍对所有不合格情况回 401，客户端分不清到期、停用与设备吊销（H17-O-F2
+  的 Worker 部分未修）；未合 #460 前暂停页文案是"账号已暂停"，#460 合入后为中性的"登录已失效"。
+  到期账户在登录页请求验证码得到 202 但收不到码（Worker 行为，未改）。保存的会话被服务器拒绝
+  后，每次启动仍会发一次注定失败的 refresh，直到重新登录或在暂停页退出登录。续费后若 cron 已
+  吊销会话，仍需重新登录。启动遇 401 时从缓存载入的目录保留到新登录（数据保留问题；其中出口
+  凭据已被服务端拒绝，connect 也拒绝 suspended 账户）。"上一连接仍在运行"只按 Service 报告的
+  屏障状态判断，未在 Windows 11 实机验证。
+## 2026-09-24 · Windows 退出/重启拒绝对话框按 Service 读数说明保护状态
+
+- **归属/来源**：G2 保护状态真实性；Windows App `feat/window.rs`。内部审查 H16-O-F6，
+  Issue [#519](https://github.com/raydocs/tono/issues/519)。基线 main 8dc79a5b（2026-09-24 rebase）→ 分支
+  `fix/win-quit-refusal-copy-20260924`，PR [#520](https://github.com/raydocs/tono/pull/520)；提交时未合 main。
+- **缺陷修复**：交互式退出/重启在 8 s 内证明不了释放时，原生对话框固定写「网络保护仍然有效
+  ……本机保持受保护，现在退出也保持如此」，不读 Service。8 s 超时不会取消释放，后台释放仍可能
+  完成并移除 WFP；有待完成更新时 Quit 在查看屏障前就被拒绝，从未受保护的主机也会看到同一句话。
+  现在出错后先有界（2 s）读取 Service 的 kill-switch 状态，由纯函数 `classify_refusal` 分三类：
+  只有 Service 报告 `wanted && live` 且没有释放仍在运行时才说「保持受保护」；等待超时或读取前后
+  任一时刻仍登记着释放（例如待完成更新的拒绝先于正在进行的 Disconnect 返回）时说释放可能仍在
+  完成；无应答或未报告 live 屏障时说无法确认。三种文案都保留同样的恢复步骤。取消逻辑和退出
+  决策不变。审查续修：「释放已结束」不再只看是否超时，还看 `release_in_progress`（520-O-F1 =
+  520-C-F1）；原样插入的释放错误含「protection stays on」「assumed on」，会与无法确认的分支
+  矛盾，改为只写入日志、对话框提示见日志（520-C-F2，经核实）；标题、正文和按钮改经
+  `tono_i18n::t!`，新增 en/zh 键 `exitRefusal.*`（520-O-F3 = 520-C-F3）；等待超时或已有释放登记时
+  文案不取决于读数，不再做那次最长 2 s 的 Service 读取（520-O-F2）。
+- **新增/优化**：无。
+- **工程与测试**：新增一个 `#[test]`，断言 Service 无应答、`wanted=false` 为「无法确认」，超时或
+  仍有释放登记（即使 `wanted && live`）为「释放可能仍在完成」，只有两者皆无且 live 屏障时为
+  「保持受保护」。
+- **验证**：本机（编辑机）未运行原生 cargo；Tauri crate `cargo test --locked` 委托本 PR 的
+  GitHub-hosted `windows-2025` CI，结果以 PR 页为准。新测试在旧代码上的失败未运行（旧代码无该
+  函数，文案为硬编码常量）。改动行用 rustfmt `--check` 核对无新增格式差异。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：未在实机上触发慢释放。App 侧 IPC 报错而 Service 仍在处理释放的情况下，读数可能
+  仍是 `wanted && live`，对话框会说「保持受保护」，随后释放完成；此窗口未消除。其余 11 种托盘
+  语言缺 `exitRefusal.*` 时按 rust-i18n 回退到 zh（与 #513 同一取舍）。对话框不再显示具体错误。
+  与 #518 都改 `feat/window.rs` 的退出路径，改动不在同一行块。
+## 2026-09-24 · Windows 连接不再关闭非 Tono 的系统代理
+
+- **归属/来源**：G1 客户端保护边界（首次连接/断开对系统状态的改动）；Windows App。基线 origin/main
+  [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b)，分支 `fix/win-sysproxy-owner-20260924`，Issue #541
+  （内部审查 H19-C-F1，跨厂商核实 confirmed）；未合 main。
+- **缺陷修复**：每次连接在 Service 就绪后、WFP 武装前无条件把当前用户的 WinINET 代理（LAN 与全部 RAS/VPN 项）写成
+  直连，断开、停 Core、Service owner 丢失恢复再写一次，且从不保存或恢复原配置；公司代理/PAC 或其他产品的代理被
+  静默关闭并跨卸载保留。改后：Windows 上只有「当前设置的每个生效部分都指向本安装自己的回环监听」（手动代理为
+  `127.0.0.1`/`localhost` + 已配置 Mixed Port，或 PAC 为本实例 `http://127.0.0.1:<端口>/commands/pac`）才清除；
+  其他代理原样保留，因此无需保存/恢复。连接侧的清除移到 `run_stages` 成功（屏障已武装）之后；断开、停 Core、
+  owner 丢失恢复走同一所有权判定；设置读不出时不清除。
+- **新增/优化**：无。原生更新事务的前置条件不变：`tono_install_update` 与待定更新的显式 Disconnect 改调
+  `proxy_control::clear_for_update()`，仍无条件关闭（其 Service 在 `security::no_proxy` 拒绝代理开启时暂存）。
+- **工程与测试**：`core/sysopt.rs` 一个 `#[test]`（`only_a_proxy_naming_tono_listeners_is_cleared`）：公司代理、另一产品
+  回环端口、外部 PAC、Tono 端口+外部 PAC 均不算 Tono 所有；只有指向本安装监听的遗留才清除。
+- **验证**：见 PR；红：仅测试提交在 CI 编译失败（旧代码没有所有权判定）；绿：Windows CI `cargo test --locked`。
+  MacBook 未编译 Rust（仓库规则）。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：用户主动安装更新时仍会关闭非 Tono 代理（更新事务设计，非本修复范围）；不兼容隧道的外部代理不再被
+  清除，连接后该代理可能不可用，本修复不提示也不征求同意；RAS 项仍随 LAN 一起清（仅在 LAN 设置证明是 Tono 遗留时）；
+  未实机验证。
+## 2026-09-24 · Windows 最终卸载删除 Service 的 owner 运行时配置
+
+- **归属/来源**：卸载恢复原状/凭据残留（L1、C4）；Windows 卸载助手。叠在 #549 修复分支
+  `fix/win-update-recovery-task-20260924`（`--final-uninstall` 机制）之上；本分支
+  `fix/win-uninstall-runtime-config-20260924`，Issue #560（内部审查 H19-G-F4，跨厂商核实 confirmed）；未合 main。
+- **缺陷修复**：Service 把 App 发来的未脱敏运行时文档（含各出口 `password`/`uuid`）持久化到
+  `ProgramData\Tono\users\<owner>\runtime\config.yaml`，成功卸载（即使先断开并勾选删除数据）从不删除该树。
+  改后：最终卸载（`--final-uninstall`）且结果证明 WFP 已移除时，删除整个 `ProgramData\Tono\users`（各 owner 的
+  desired state、运行时配置、日志）；StillProtected、安装期清理、安装回滚、更新模式都不删。失败按外观残留处理。
+- **新增/优化**：无。
+- **工程与测试**：`uninstall_service.rs` 一个 `#[test]`（`final_uninstall_removes_owner_runtime_config_only_after_proven_removal`）：
+  StillProtected 时 `config.yaml` 保留，Clean 时 `users` 不存在。
+- **验证**：见 PR；红：仅测试提交叠在 #549 修复上，CI 运行时断言失败（旧的最终清理不删 `users`）；绿：Windows CI。
+  MacBook 未编译 Rust。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：须在 #549 之后合入；`ProgramData\Tono` 根下的 `active-owner.json`、`desired-state.json` 等非凭据状态保留；
+  非最终卸载（修复安装、更新）按设计保留运行时配置；未实机验证。
+
+## 2026-09-24 · Windows 更新恢复任务在提交与最终卸载时退休
+
+- **归属/来源**：G3 原生升级链 + 卸载恢复原状（L1）；Windows Service 更新执行器、卸载助手与 NSIS 卸载段。
+  基线 origin/main [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b)，分支
+  `fix/win-update-recovery-task-20260924`，Issue #549（内部审查 H19-O-F5 = H19-C-F3 = H19-G-F3）；未合 main。
+- **缺陷修复**：原生更新注册的 SYSTEM `ONSTART` 任务 `Tono Update Recovery v1` 从不删除：提交后
+  `cleanup_committed` 只清备份，此后每次开机仍启动 SYSTEM 执行器；卸载只删两个自启动任务，任务与
+  `ProgramData\Tono\updates-v1\<attempt>` 下的执行器副本和暂存安装包在卸载后继续存在并开机运行。改后：
+  (1) 执行器在提交后的清理成功后删除该任务（同 macOS 提交时退休 launchd 项），失败只记日志，下次开机的同一路径重试；
+  (2) NSIS 卸载段在非更新模式下给卸载助手传 `--final-uninstall`；助手只在结果证明 WFP 已移除（非 StillProtected）
+  时删除任务并在存储锁下删除各 attempt 目录，保留存储自身文件（`state.json` 的已消费高水位与手动安装租约，
+  D3；租约在助手返回后由 `--manual-update-finish` 释放）。安装期清理、安装失败回滚与更新模式不传该参数，行为不变。
+  这些清理失败按「外观残留」处理（退出码 2，继续卸载），不会把已证明安全的卸载变成阻断。
+- **新增/优化**：无。
+- **工程与测试**：两个 `#[test]`，各对应一个行为：`update_executor.rs`
+  `update_commit_retires_the_recovery_task_after_cleanup`（无提交清理时不退休；清理后退休）；
+  `uninstall_service.rs` `final_uninstall_retires_update_executors_only_after_proven_removal`（StillProtected 时不动；
+  证明移除后退休任务、删执行器目录、保留 `state.json`）。
+- **验证**：见 PR；红：仅测试提交在 CI 编译失败（旧代码没有这两个决定）；绿：Windows CI。MacBook 未编译 Rust，NSIS 未编译。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：schtasks 路径沿用注册时的 `C:\Windows\System32`（#471 合入后应一并改为系统目录；只在注册成功的机器上才需要退休，
+  二者一致）；已提交 attempt 目录在提交时不删（执行器正在运行自身映像，按 D3 保留为证据），只在最终卸载时删；
+  回滚终态（RolledBack）的任务仍保留到最终卸载；未实机验证任务删除与卸载顺序。
+## 2026-09-24 · Windows 卸载「删除应用数据」覆盖每个本机账户
+
+- **归属/来源**：卸载恢复原状与多用户隔离（L1/L5）；Windows NSIS 卸载段与卸载助手。基线 origin/main
+  [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b)，分支 `fix/win-app-data-all-profiles-20260924`，
+  Issue #559（内部审查 H19-O-F7 = H19-C-F2）；未合 main。
+- **缺陷修复**：勾选「删除应用数据」后只删 `SetShellVarContext current` 下的 `$APPDATA`/`$LOCALAPPDATA`，
+  提权卸载时这是批准 UAC 的管理员账户：另一管理员卸载时实际使用者的数据（含账户与出口配置）保留；标准用户借管理员
+  凭据卸载时反而删了管理员的目录。改后：`RemoveVergeService` 证明屏障已移除后，卸载段（勾选且非更新模式）调用
+  `tono-service-uninstall.exe --delete-app-data-all-profiles`，助手枚举用户配置文件目录（`FOLDERID_UserProfiles`，
+  跳过 `All Users` 等联接点），删除每个配置文件 `AppData\Roaming` 与 `AppData\Local` 下的 `com.raydocs.tono`；
+  用 Rust `remove_dir_all`/`remove_file`，链接只删链接本身、不跟随，避免提权删除被某个账户的联接点重定向。
+  原有当前账户 `RmDir` 保留。失败只记日志、不阻断卸载。
+- **新增/优化**：无。**暂定决定（更严格）**：选择实际删除所有账户的 Tono 数据，而不是只改确认文案说明「仅删除当前账户」。
+- **工程与测试**：`uninstall_service.rs` 一个 `#[test]`（`delete_app_data_reaches_every_profile_not_only_the_approving_admin`）：
+  两个配置文件的 Roaming/Local Tono 目录都删除，其他应用目录保留。
+- **验证**：见 PR；红：仅测试提交在 CI 编译失败（旧代码没有跨配置文件删除）；绿：Windows CI。MacBook 未编译 Rust，NSIS 未编译。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：不在 `FOLDERID_UserProfiles` 下的配置文件、文件夹重定向到别处的 AppData 不覆盖；各账户 Credential Manager
+  中的会话仍按 H11-F3/#412 处理，提权进程不能删他人凭据库；另一账户会话中 Tono 仍在运行时其被占用的文件可能删不掉；
+  不改 Tauri 自带的复选框文案；未实机验证。
+- **跟进 2026-09-24（跨厂商审查 WA-OpenAI-1）**：修复：原只对最后一级 `com.raydocs.tono` 不跟随链接，
+  `AppData\Local` 若是指向 `D:\Data` 的联接点，提权删除会删掉 `D:\Data\com.raydocs.tono`。现逐级检查配置文件目录、
+  `AppData`、`AppData\Roaming`、`AppData\Local`：任何一级是符号链接/联接点/其他重解析点或无法读取元数据，就跳过整个
+  配置文件并在返回错误中报告（NSIS 仅记日志）。测试：`delete_app_data_never_walks_through_a_redirected_app_data_folder`
+  （Windows 用 `mklink /J` 建联接点，无需特权）；旧代码会经联接点删掉外部目录，断言失败。验证：未在本机运行；CI 待定。
+  限制：检查与删除之间仍有竞态（配置文件所有者可在检查后改成联接点），未用句柄逐级打开消除；未实机验证。
+- **跟进 2026-09-24（Codex 复核 WA-OpenAI-1 PARTIAL，未闭合路径）**：修复：助手跳过某配置文件后，NSIS 仍对批准卸载的管理员
+  执行 `RmDir /r "$APPDATA|$LOCALAPPDATA\${BUNDLEID}"`，并直接删除窗口状态与旧 pins，绕过逐级检查。现删掉这两条 `RmDir /r`
+  （该账户的目录已由 `--delete-app-data-all-profiles` 在检查下删除）；卸载段先调用新的 `--check-current-app-data`，只有退出码为 0
+  （本账户 Roaming/Local AppData 位于其配置文件内，且从配置文件到最深删除路径 `com.raydocs.tono\tono` 的每级都不是链接/重解析点）
+  才删窗口状态与旧 pins；助手缺失、超时或失败都保留。Rust 侧 `remove_leftover_user_control_plane_pins` 用同一检查；配置文件循环
+  改用同一 `redirected_folder`。测试：packaging 新增一个 `test`（`NSIS uninstall deletes in the approving account AppData only after the
+  link check`），MacBook 上改前失败、改后 23/23 通过；Rust 由既有联接点测试覆盖共用检查。验证：Rust/NSIS 未在本机运行；CI 待定。
+  限制：AppData 被重定向到配置文件外时本账户的窗口状态与旧 pins 不再删除；检查与删除之间的竞态同上；NSIS 未编译，未实机验证。
+## 2026-09-24 · Windows 安装器可在确认后清除无主的 Tono 拦截
+
+- **归属/来源**：G3 客户安装/修复路径（L3 死路、C5）；Windows NSIS 模板、Service 手动安装门控、恢复脚本。叠在 #500
+  （`fix/installer-filter-gate-20260923`，H15-F2）之上并合入当前 origin/main；分支 `fix/win-orphan-barrier-install-20260924`，
+  Issue #564（内部审查 H19-O-F2，跨厂商核实 confirmed）；未合 main。
+- **缺陷修复**：`.onInit` 的 `--manual-update-gate` 只要有 Tono WFP 过滤器就拒绝，不看是否还有 Tono Service 能拥有/解除它们；
+  旧卸载器、被强删或被隔离的二进制留下持久阻断且无 SCM 注册时，App 和「恢复网络」快捷方式都不存在，安装器又拒绝，
+  安装段里专为此写的 `RemoveVergeService` 清理到不了（#500 的提示仍让用户去断开）。改后：过滤器存在时按「是否仍有注册且
+  二进制在盘的 Tono Service」分类——有（含已停止、SCM 读不出）仍为 `ProtectionActive`（77，行为同 #500）；确认没有则为
+  新的 `OrphanedProtection`（78）。非静默安装在 78 时弹确认框：选「否」保留拦截并退出；选「是」调用新的
+  `--manual-orphan-gate`（再次确认没有 Service 出现后取与卸载相同的租约），安装继续进入既有 `RemoveVergeService`，
+  该阶梯只有证明 WFP 已移除才继续，否则中止且不删文件。静默安装仍拒绝。卸载器把 78 与 77 同样走 #500 的确认释放路径。
+  恢复脚本改为指向当前安装器与这一确认路径，并更正「先重启」的建议（持久阻断在重启后仍在、例外不在）。
+- **新增/优化**：无。**暂定决定（更严格）**：只有在证明没有 Tono Service 可再武装拦截、且用户确认时才由安装器清除；
+  静默安装不自动清除。
+- **工程与测试**：`core/update.rs` 一个 `#[test]`（`update_manual_gate_names_an_orphaned_barrier_instead_of_asking_to_disconnect`，
+  测 `begin_manual` 实际使用的 `residual_filter_refusal` 分类）；扩展 #500 的 packaging 测试断言 78 确认分支、卸载 78→77、
+  三语文案与退出码常量 78。
+- **验证**：MacBook `node --test scripts/windows-packaging.test.mjs`（apps/windows/app）：在 #500 基线上该测试失败，改后 23/23 通过；
+  Rust 仅 rustfmt 解析，未执行 cargo；NSIS 未编译。其余见 PR 的 Windows CI。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：须在 #500 之后合入；静默/无人值守安装遇到无主拦截仍是死路；SCM 注册存在且 `ProgramData\Tono\bin\tono-service.exe`
+  在盘但 Service 本身损坏时仍按 77 处理；只识别 Tono 自己的注册与二进制路径；未实机验证（AV 隔离、旧卸载器残留、重启后状态）。
+- **跟进 2026-09-24（跨厂商审查 WA-OpenAI-3）**：修复：用户确认 78 且取得孤儿租约后，若 ARP 记录完整，`DetectExistingInstall`
+  仍把本次安装归为升级（`$ConfirmedExistingInstall=1`），`RemoveVergeService` 跳过清理，`--replace-runtime` 的 `manual_gate()`
+  因过滤器仍在而拒绝，重试 3 次后安装中止。现 `.onInit` 在 `--manual-orphan-gate` 成功后置 `$ClearingOrphanedBlock=1`，
+  `automatic_update` 见此标志即返回、不设任何升级标志：走完整 `RemoveVergeService` 清理（仍须证明 WFP 已移除）与全新安装
+  Service 路径；全新路径发布 GUI/Mihomo 前先删旧文件（`Rename` 不覆盖）。测试：packaging 新增一个 `test`
+  （`a confirmed orphaned-block clear reinstalls through the fresh path, not the upgrade path`），MacBook 上改前失败、改后 24/24 通过。
+  验证：Rust/NSIS 未在本机运行；CI 待定。限制：此路径显示全新安装向导（不再是被动升级），App 由完成页启动而不是自动重开；旧 `tono-core` 若仍被占用，
+  删除失败，安装在创建 Service 前中止；#500 尚未进 main（已在 `train/win-20260924`）；NSIS 未编译，未实机验证。
+- **跟进 2026-09-24（Codex 新发现，Opus 核实 CONFIRMED）**：修复：Service 消失、WFP 残留且 `active_owner` 的
+  `core_should_be_running=true`（连接中二进制被隔离即是此态）时，孤儿租约与卸载助手的紧急解除都不清该期望状态，随后全新安装
+  Service 的 `manual_gate()` 以「Disconnect before manual installation」拒绝，安装仍中止。现安装段在 `RemoveVergeService`（未证明
+  WFP 已移除即中止）之后、`StartVergeService` 之前，仅当 `$ClearingOrphanedBlock=1` 调用新的
+  `tono-service-install.exe --retire-orphaned-owner`：`retire_orphaned_owner` 要求本安装器持有租约、无 Service、无残留过滤器，
+  再调用既有 `retire_legacy_active_owner`（期望状态置停止并清 active owner）；失败则中止安装。测试：packaging 新增一个 `test`
+  （`a confirmed orphan clear retires the stale connected owner only after the barrier is gone`），MacBook 上改前失败、改后 25/25 通过。
+  验证：Rust/NSIS 未在本机运行；CI 待定。限制：退役失败时安装中止，此时拦截已解除但无 Service，再次运行安装器会因期望状态仍为运行
+  而得到 77（Disconnect）提示；无实机验证。
+## 2026-09-24 · Windows 开机自启任务按用户 SID 命名
+
+- **归属/来源**：多用户隔离（L5，低）；Windows App `utils/schtasks.rs` 与 NSIS 卸载段。基线 origin/main
+  [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b)，分支 `fix/win-autostart-task-per-user-20260924`，
+  Issue #568（内部审查 H19-C-F4）；未合 main。
+- **缺陷修复**：两个开机自启任务用全机固定名 `Tono` / `Tono (Admin)`；另一 Windows 用户首次连接成功后 `/Create /F`
+  会替换前一用户的同名任务，管理员模式还会删除另一模式的固定名任务而不看其主体。改后：任务名带所属用户 SID
+  （`Tono <SID>` / `Tono (Admin) <SID>`），创建、删除、存在性与启用状态都只看当前用户自己的名字；旧固定名任务只在其
+  `<Principal>` 的 `UserId` 等于当前 SID 时视为本人所有：状态读取把它算作已启用，任何一次设置变更把它退役；他人的旧任务
+  不读、不改、不删。卸载（非更新模式）在原有删除两个旧名之外，用 PowerShell `Get-ScheduledTask` 按
+  `^Tono (\(Admin\) )?S-1-[0-9-]+$` 删除所有用户的新名任务。
+- **新增/优化**：无。
+- **工程与测试**：`schtasks.rs` 一个 `#[test]`（`autostart_tasks_of_two_windows_users_never_share_a_name`）：两个 SID 的两种模式
+  名称互不相同且不同于旧名，CSV 列表只匹配本人名字，旧任务只有主体为本人 SID 时才归本人。
+- **验证**：见 PR；红：仅测试提交在 CI 编译失败（旧代码没有按用户命名与主体判定）；绿：Windows CI。MacBook 未编译 Rust，NSIS 未编译。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：旧版以 `DOMAIN\user` 形式记录主体的旧任务不会被识别为本人所有（保持不动，由卸载删除）；已升级用户在下次改动
+  设置前继续由其旧名任务自启；卸载依赖 PowerShell ScheduledTasks 模块；未实机验证多用户切换。
+- **跟进 2026-09-24（跨厂商审查 WA-OpenAI-4）**：修复：旧名任务的归属检查或删除失败只记日志，关闭/开启只看按 SID 命名的新任务，
+  于是关闭自启返回成功而本人的旧任务仍在登录时启动 App。现 `retire_owned_legacy_tasks` 返回错误：本人所有且删不掉、已列出但定义
+  读不出（可能是本人的）、或无法列出任务时都算失败；`set_auto_launch` 开启时在创建新任务前返回该错误（避免双启动），关闭时先删完
+  新任务再返回。他人的旧任务仍不动、不报错。测试：`a_legacy_task_this_user_may_own_that_stays_fails_the_autostart_change`
+  （注入查询/删除）；旧代码只记日志、返回 `()`，前两种情形会被当作成功。验证：未在本机运行；CI 待定。限制：另一账户的旧任务若
+  对本人可见但定义读不出，本人改自启设置会失败，直到管理员删除它；`is_auto_launch_enabled` 仍只把可读且本人所有的旧任务算作开启；
+  未实机验证。
+## 2026-09-24 · Windows 内部候选版默认发送分类连接失败记录
+
+- **归属/来源**：G1–G3 候选验收的现场证据；影响 Windows App（`tono/audit.rs`、`tono/telemetry.rs`、设置页）与
+  `windows-candidate.yml`。所有者决定 2026-09-24：内部候选/测试版默认开启分类连接失败遥测，公开发布版保持现状（关）。
+  基线 origin/main [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b)，分支
+  `fix/win-candidate-telemetry-20260924`，Issue #575，未合 main。
+- **缺陷修复**：无（行为变更来自所有者决定）。
+- **新增/优化**：a68d4e76 起立即 `telemetry/failures` 与诊断时间线共用默认关闭的同意开关，升级时 v2 迁移还会把旧的开启重置为关，
+  候选版与公开版行为相同，测试者失败连接从未到达运维。现在：编译期 `TONO_BUILD_CHANNEL=internal`，只由候选 workflow 设置（沿用的 `GITHUB_WORKFLOW` 出处判断在
+  paired candidate 的可复用 workflow 下拿到的是调用方名称，不可靠，故新增显式标记）。内部版在未开启时间线时也发送分类记录
+  （阶段、错误代码、版本、节点、平台/OS、传输、路径延迟），错误原文仍只在用户显式开启时间线后附带；本地诊断日志开关关闭时一律不发。
+  默认值来自构建而不是 `settings.json`，v2 重置无法在升级时关掉它。内部版设置页隐私卡片显示一行提示。公开版逻辑不变。
+- **工程与测试**：一个 `#[test]`（`internal_builds_keep_classified_failure_reports_through_the_timeline_reset`）；新增只读命令
+  `tono_internal_build`；i18n 生成文件由 `generate-i18n-keys.mjs` 重生成。
+- **验证**：本机仅前端：`tsc --noEmit`、`vitest run src/services/tono.test.ts`、eslint、biome format、
+  `windows-ci-paths.test.cjs` 通过；Rust 未在本机编译（按执行位置规定），以 PR CI 的 `cargo test` 为准，红→绿运行号见 PR。
+- **候选/发布**：无新包，仅源码；下一次候选构建才会带内部标记。
+- **剩余限制**：未在真实候选安装包上验证提示与上报；测试者只能用本地诊断日志开关停止上报（无单独开关）；
+  时间线窗口本身仍默认关闭。
+## 2026-09-24 · Windows 更新发现：一次检查连同重试失败后不再永久停摆
+
+- **归属/来源**：G3 更新通道（发现环节）；Windows App 前端 `hooks/use-update.ts`。内部审查 H18-O-F1，
+  Issue #543。基线 origin/main 8dc79a5b → 分支 `fix/win-update-discovery-retry-20260924`，PR #544；提交时未合 main。
+- **缺陷修复**：自动更新检查只靠 SWR 的 24 h `refreshInterval` 与 `retry: 2`。首次检查和两次 5 s 重试都失败
+  （如开机自启时网络未就绪）后，SWR 缓存保留错误，锁定版本 2.5.1 的轮询在有缓存错误时跳过每个 tick；
+  reconnect 重验证也因查询适配层传入 `undefined` 覆盖默认值而关闭；原生 `start_background_check` 无调用者。
+  结果是 App 不重启、不手动检查就再也不自动发现新版本。现在缓存出现错误时另起一个不受该门控的 1 h
+  重查计时器（每次失败换新错误对象，计时器随之重排；成功后错误清除，恢复原 24 h 轮询），并对该查询开启
+  reconnect 重验证。仍走原有受 Service 验签保护的 `tono_check_update`。
+- **新增/优化**：无。
+- **工程与测试**：新增一个 vitest `it`（`src/hooks/use-update.test.tsx`，假计时器）：前三次检查失败、之后成功，
+  推进 24 h + 1 min 后必须至少第四次检查并持有 offer。旧代码只有 3 次调用（本机实跑红，见 PR）。
+- **验证**：本机 `vitest run src/hooks/use-update.test.tsx` 修复前 1 failed（expected 3 ≥ 4）、修复后 1 passed；
+  `tsc --noEmit` 与该两文件 eslint 通过。完整 `pnpm test` 由本 PR 的 GitHub-hosted CI 执行，结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：Settings 页打开时有多个 `useUpdate` 实例挂载，错误状态下每小时可能并发 2–3 次检查（结果以最后一次为准）；
+  托盘隐藏窗口是否被 SWR 视为 hidden（影响成功路径的 24 h 轮询）未确认、未改；原生 `start_background_check` 仍无调用者。
+## 2026-09-24 · Windows 托盘速率：无 Core 时不再每秒重连并写 INFO 日志
+
+- **归属/来源**：G2 客户端诊断可用性（App 日志保留）；Windows App `core/tray/speed_task.rs`、
+  `crates/tono-plugin-core/src/mihomo.rs`。内部审查 H18-O-F2，Issue #547。基线 origin/main 8dc79a5b →
+  分支 `fix/win-tray-speed-idle-20260924`，PR #548；提交时未合 main。与 #518（同文件，仅改 tooltip 投影）
+  用 `git merge-tree` 试合无冲突。
+- **缺陷修复**：托盘速率任务默认开启，启动即运行，不看有没有 Core：未连接时插件上下文是产品从不提供的命名管道，
+  断开后仍指向已退役的 HTTP 控制器，每次连接失败后固定睡 1 s 再试；插件在连接前写一行
+  `log::info!("connecting to websocket…")`，默认构建不过滤。空闲时约每秒一行 INFO，按大小轮转的 App 日志几小时内
+  就被冲掉有用记录。现在任务只在本 App 已发布自有控制器（会话 Connected 且持有控制器 secret）时连接，空闲时每秒只读
+  一次产品状态，不连 socket、不写日志；连上后行为不变（失败 1 s 重试、Stale/Closed 重连）。每次 WebSocket 连接的
+  那行日志降为 debug。
+- **新增/优化**：无。
+- **工程与测试**：`speed_task.rs` 新增一个 `#[tokio::test(start_paused = true)]`
+  `speed_stream_waits_for_a_published_controller_before_connecting`：用真实 `TonoState::for_test()` 驱动新的
+  「等控制器再连」步骤，无控制器 10 min 内连接次数必须为 0，发布控制器后一个轮询周期内开始连接。先推只含测试的提交
+  （该步骤尚不存在，编译失败即红）。
+- **验证**：本机为编辑机，未运行原生 cargo；Tauri crate `cargo test` 委托本 PR 的 GitHub-hosted `windows-2025`
+  CI，结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：已连接但 Core 崩溃、FSM 尚未离开 Connected 的窗口内仍按 1 s 重试（日志已是 debug）；实际每行字节数与
+  修复前可保留的日志小时数仍是估算，未实测。
+## 2026-09-24 · Windows Activity：墙钟回拨不再让连接列表冻结数小时
+
+- **归属/来源**：G2 界面真实性（Activity 连接/流量数据）；Windows App 前端 `hooks/use-connection-data.ts`。
+  内部审查 H18-C-F1，Issue #553。基线 origin/main 8dc79a5b → 分支 `fix/win-activity-monotonic-throttle-20260924`，
+  PR #554；提交时未合 main。
+- **缺陷修复**：Activity 连接帧 500 ms 节流用墙钟计算间隔。系统时间回拨（手动改时间或时间同步纠正快钟）后
+  `Date.now() - lastFlushAt` 为负，下一帧排出约等于回拨量的 `setTimeout`（回拨 2 h 即约 2 h），其后的帧只覆盖待发帧；
+  `connectionFeedLive` 仍为 true，页面的等待提示与自动刷新都不触发，刷新也不重置 `lastFlushAt`。现在节流间隔改用
+  单调时钟 `performance.now()`，最多等 500 ms；事件自身的时间戳不变。
+- **新增/优化**：无。
+- **工程与测试**：`use-connection-data.test.tsx` 新增一个 vitest `it`：发布帧 A，系统时间回拨 2 h，再发帧 B，推进 500 ms
+  后快照必须是 B。旧代码仍停在 A（本机实跑红）。首个测试提交的帧字面量类型未收窄，补了一个仅测试的类型修正提交。
+- **验证**：本机 `vitest run src/hooks/use-connection-data.test.tsx` 修复前 1 failed（expected 1 to be 2）、修复后
+  2 passed；`tsc --noEmit` 与两文件 eslint 通过。完整 `pnpm test` 由本 PR 的 GitHub-hosted CI 执行，结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：同模块的连接超时门 `connectStartedAt` 仍用墙钟，但有单调的 `setTimeout` 看门狗兜底，未改；
+  未在实机上改系统时间验证。
+## 2026-09-24 · Windows 本地流量审计：轮转建新文件失败后可自行恢复
+
+- **归属/来源**：G2 诊断证据（本地审计日志）；Windows App `tono/audit.rs` `RotatingWriter`。内部审查 H18-C-F2，
+  Issue #556。基线 origin/main 8dc79a5b → 分支 `fix/win-audit-rotate-recover-20260924`，PR #558；提交时未合 main。
+- **缺陷修复**：`traffic-audit.jsonl` 到 10 MiB 轮转时先删旧备份、把当前文件改名为备份，再新建当前文件。改名成功而新建
+  失败（磁盘满）后，当前路径不存在，句柄仍指向已改名的备份，`written` 未复位。空间恢复后下一条超限记录再次轮转：
+  删掉句柄正在写的备份，再改名一个不存在的路径，每次都失败；写入循环吞掉错误、任务仍存活不会重建，直到 App 重启都
+  不再有当前审计文件，还可能丢掉保留的上一代。现在轮转时若当前路径不存在，只重建当前文件并把计数归零，不再删备份、
+  不再改名。
+- **新增/优化**：无。
+- **工程与测试**：`audit.rs` 新增一个 `#[test]` `rotation_recreates_the_current_file_after_a_failed_reopen`：写到接近
+  上限后把当前文件改名为备份（句柄仍开着，复现失败轮转后的状态），再写一条超限记录，当前文件必须重新出现且只含这条
+  记录，备份仍在。旧代码在该次写入时返回 NotFound。
+- **验证**：本机为编辑机，未运行原生 cargo；Tauri crate `cargo test` 委托本 PR 的 GitHub-hosted `windows-2025` CI，
+  结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：失败状态下仍放得进剩余额度的短记录会继续写入旧句柄（即备份文件），直到下一条超限记录触发重建；
+  日志目录整个被删除时轮转不重建目录，未改；未在实机上复现 NTFS 磁盘满。
+
 ## 2026-09-24 · macOS 账户 suspended 时停止网络日志上传
 
 - **归属/来源**：G2 客户端账户状态（macOS `AccountSession+Auth.swift`）。内部审查 H17-O-F7（另一审查方按

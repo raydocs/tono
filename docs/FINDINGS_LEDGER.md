@@ -37,7 +37,7 @@
 
 状态快照：2026-09-24，origin/main `059a2ea2`（R1–R4 修复已合入至 #311；#300、#305 仍在审；#312、#482 已关闭）。
 H5–H15 与 X1–X3 的修复 PR 均已开出、尚未合入。H16/H17 已登记 15 行，均为 `open`；另外 5 条由各自修复 PR 登记：
-H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#516）、H17-AUTH-WIN（#515）。表中编号与状态为写入时 GitHub 的真实状态。
+H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#516）、H17-O-F2 (Windows)（#515）。表中编号与状态为写入时 GitHub 的真实状态。
 
 ## 1. macOS 连接
 
@@ -95,6 +95,9 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | H6-C | Support 页 WebRTC 检查按钮缺少打开其固定页面的权限 | in-PR | [#386](https://github.com/raydocs/tono/issues/386)，[#387](https://github.com/raydocs/tono/pull/387) | 低·已确认 | 功能缺陷，非安全项 |
 | H16-C-F3 | 退出登录发布最终状态后，周期目录同步在解锁后发布的旧 Ready/Connected 快照可以覆盖 tono_status 缓存且不再被纠正 | open | 待开 | 中·推导 | 窗口是解锁与发布之间几条指令，需要 worker 线程被抢占；未复现；与 H17-AUTH-WIN（#515）同改 account.rs，排在其后 |
 | H16-O-F7 | 冷启动恢复把已探测到的屏障状态压到 me() 返回之后才发布，期间托盘 flyout 显示 Standby 并提供 Connect | open | 待开 | 低·已确认 | 核实后收窄：仅初始未保护且持有 refresh token 的冷启动恢复、仅豁免恢复屏的托盘 flyout；Connect 会被账户准入拒绝；排在 #515 之后（restore.rs） |
+| H16-O-F1 | Protected Offline 横幅、登录「网络已被拦截」卡片与托盘提示只凭状态机锁存声称已拦截，未看 Service 的 live 屏障（= H16-C-F5） | in-PR | [#511](https://github.com/raydocs/tono/issues/511)，[#513](https://github.com/raydocs/tono/pull/513) | 高·已确认 | 仪表盘、进度卡、托盘面板已由 b489ea16 修正；托盘提示被速率覆盖、图标不刷新见 H16-O-F2 |
+| H16-O-F2 | 托盘图标只在启动时取样，状态发布不刷新；connecting/disconnecting 显示已连接图标；速率显示整段替换提示的保护行（= H16-C-F4） | in-PR | [#517](https://github.com/raydocs/tono/issues/517)，[#518](https://github.com/raydocs/tono/pull/518) | 中·已确认 | 反向「橙色卡住」变体为推导；未实机观察 |
+| H16-O-F6 | 退出/重启拒绝对话框不读 Service 就承诺「本机保持受保护」，而 8 s 超时后释放仍可能完成、待完成更新时主机可能从未受保护 | in-PR | [#519](https://github.com/raydocs/tono/issues/519)，[#520](https://github.com/raydocs/tono/pull/520) | 中·推导 | 文案已确认，慢释放时序需实机；App 侧 IPC 报错而 Service 仍在释放时仍可能误说保持受保护 |
 
 ## 3. DNS（两端）
 
@@ -165,7 +168,7 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | H4-F1 | dual 阶段吊销设备不退役共享 legacy 出口凭据，被吊销设备仍可用出口并计入账户 | in-PR | [#313](https://github.com/raydocs/tono/issues/313)，[#323](https://github.com/raydocs/tono/pull/323) | 高·推导 | 暴露面取决于生产 rollout phase（本机无法查） |
 | H4-F2 | 停用/退役/删除/改名的住宅（catalog 型）home exit 及其 hy2 孪生块从限制名单掉出，下发给所有账户 | in-PR | [#322](https://github.com/raydocs/tono/issues/322)，[#326](https://github.com/raydocs/tono/pull/326) | 高·推导 | roster 不按节点隔离（身份隔离）列为后续 |
 | H4-F3 | ops 角色门不覆盖 shared-admin；另有原始日志读取与 signup-allowlist 写两处未拦截且文档未列 | open | 待开 | 低·推导 | shared-admin 不拦截是已记录限制；只有配置 OPS_ROLES 且有非 owner 角色时可利用 |
-| H3-F4 | refresh 严格单次轮换无宽限且非原子：响应丢失即产生伪 401，客户端登出并释放保护 | in-PR | [#314](https://github.com/raydocs/tono/issues/314)，[#329](https://github.com/raydocs/tono/pull/329) | 高·推导 | 修复在服务端，客户端「真 401 才释放」不变 |
+| H3-F4 | refresh 严格单次轮换无宽限且非原子：响应丢失即产生伪 401，客户端登出并释放保护 | in-PR | [#314](https://github.com/raydocs/tono/issues/314)，[#329](https://github.com/raydocs/tono/pull/329) | 高·推导 | 修复在服务端，客户端「真 401 才释放」不变；Windows 启动恢复遇 401 已不再释放（[#515](https://github.com/raydocs/tono/pull/515)） |
 | H3-F5 | 策略 revision 不在签名字节内，历史签名策略配伪造 revision 可永久钉住客户端 | in-PR | [#317](https://github.com/raydocs/tono/issues/317)，[#342](https://github.com/raydocs/tono/pull/342)（Windows 客户端）、[#472](https://github.com/raydocs/tono/pull/472)（Windows sing_box）、[#473](https://github.com/raydocs/tono/pull/473)（macOS）、[#474](https://github.com/raydocs/tono/pull/474)（Worker/签名工具） | 中·推导 | 前提是 Worker/D1 被攻破或 TLS 中间人；#474 的开关默认关闭，四个 PR 都合入并由发布侧启用后才生效 |
 | H10-F1 | 控制面节点名校验与客户端 YAML 解码不一致，受限住宅出口可能下发给其他账户 | in-PR | [#418](https://github.com/raydocs/tono/issues/418)，[#419](https://github.com/raydocs/tono/pull/419) | 高·推导 | — |
 | H13-F1 | 服务端声明不存储日志时，客户端无限重传网络日志上传 | in-PR | [#452](https://github.com/raydocs/tono/issues/452)，[#453](https://github.com/raydocs/tono/pull/453)（macOS）、[#454](https://github.com/raydocs/tono/pull/454)（Windows） | 低·推导 | 两个 PR 都合入后手动关闭 #452 |
@@ -203,6 +206,7 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | H17-AUTH-MAC | macOS 会话被拒（401：到期、超额、停用、设备吊销）时，启动恢复与后台上传路径先释放 PF/DNS 再登出（= H17-O-F1、H17-O-F2 macOS 部分、H17-G-F3 第 2、4 步） | in-PR | [#510](https://github.com/raydocs/tono/issues/510)，[#516](https://github.com/raydocs/tono/pull/516) | 高·已确认 | Worker 仍对所有不合格情形回 401，启动时仍登出且不显示原因；suspended 不停 Core（H17-C-F3）；Windows 同类见 H17-AUTH-WIN；启动 401 后菜单栏仍显示 Standby，待 H16-O-F5 |
 | H17-C-F3 | macOS 账户进入 suspended 后不停止 Core、不作废缓存的设备出口凭据，唤醒恢复仍可用它连接（= H17-G-F3 第 3 步） | open | 待开 | 中·已确认 | 被吊销设备可用到出口应用新 roster 为止；实际 Core/PF 行为需实机；排在 H17-AUTH-MAC（#516）之后 |
 | H17-O-F7 | macOS 账户 suspended 后网络日志上传器不停止，持续用已被拒绝的 refresh 重试 | open | 待开 | 低·已确认 | 退避上限约 16 分钟一次；Windows 由 #460 处理 |
+| H17-O-F2 (Windows) | Windows 启动恢复遇 401（到期、超额、停用、设备吊销）即释放 WFP 并登出，不给原因（= H17-G-F3 第 2 步） | in-PR | [#512](https://github.com/raydocs/tono/issues/512)，[#515](https://github.com/raydocs/tono/pull/515) | 高·已确认 | Worker 仍对所有不合格情形回 401（H17-O-F2 的 Worker 部分未修）；#460 合并前暂停页文案为"账号已暂停"；暂停页可主动退出登录，退出照旧先释放保护；缓存目录保留到新登录（出口凭据已被服务端拒绝）；会话已被 cron 吊销时续费后需重新登录；未实机 |
 
 ## 7. 数据面规则（PF / WFP / sing-box / mihomo）
 
@@ -323,6 +327,7 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | H21-O-F3 = H21-C-F1 | macOS 控制面客户端无 pinned 地址/备用端口/DNS 回退 | open | [#584](https://github.com/raydocs/tono/issues/584) | 中·已确认 | |
 | H21-O-F4 | macOS「试用备用通道」提供核心不可用的 hy2，受保护重连无限循环 | open | [#585](https://github.com/raydocs/tono/issues/585) | 中·已确认 | |
 | H21-O-F5 | macOS 每次连接首次 arm 在无 TUN 时放行 root web 端口 | open | [#586](https://github.com/raydocs/tono/issues/586) | 高·已确认 | 仅存在 DIRECT plan 时；泄漏量需实机 |
+| R604-F1 | macOS Core 重启（`/core/sync`、崩溃）期间无隧道，reviewed-bundle 放行仍在 | in-PR | [#608](https://github.com/raydocs/tono/issues/608) | 高·已确认 | 叠在 #604 上；崩溃窗口至多约 10 s；Core 运行中 utun 消失不覆盖；需实机 |
 | H21-O-F6 | macOS 控制面请求继承他人系统代理，受保护离线下被 PF 挡 | open | [#587](https://github.com/raydocs/tono/issues/587) | 中·已确认 | |
 | H21-O-F7 | 其他 VPN/TUN 未识别，失败归因错误 | open | 待开 | 中·推导(PLAUSIBLE) | #458/#468 部分覆盖 |
 | H21-O-F8 | 强制门户/TLS 拦截代理未识别 | open | 待开 | 低·推导(PLAUSIBLE) | |
