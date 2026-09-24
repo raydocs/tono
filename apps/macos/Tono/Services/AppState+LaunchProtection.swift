@@ -30,12 +30,17 @@ extension AppState {
     /// verdict. Never prompts; an unavailable or rejected answer changes
     /// nothing, and neither does a verdict some transition published meanwhile
     /// — including a launch verdict that leaves the launch still unconfirmed.
+    /// A protection operation that began meanwhile (a sleep or wake) moves
+    /// the protection generation but not the launch sequence; its recovery
+    /// reasserts the stored intent, so the older answer must not retire it.
     func resolveUnconfirmedProtection() async {
         guard isProtectionUnconfirmed else { return }
         let sequence = launchProtectionSequence
+        let generation = connectionCoordinator.protectionOperationGeneration
         let observation = await networkProtection.refreshKillSwitchStatus()
         guard !Task.isCancelled, isProtectionUnconfirmed,
-              launchProtectionSequence == sequence else { return }
+              launchProtectionSequence == sequence,
+              connectionCoordinator.protectionOperationGeneration == generation else { return }
         guard case .confirmed(let requiresProtectionRecovery) = observation else { return }
         KillSwitchService.isArmed = requiresProtectionRecovery
         adoptLaunchProtection(requiresProtectionRecovery ? .held : .released)

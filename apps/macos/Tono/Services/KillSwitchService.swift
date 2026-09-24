@@ -394,6 +394,12 @@ nonisolated enum KillSwitchService {
 
     /// Remove tunnel and proxy exceptions while preserving the control plane.
     /// Tailscale bootstrap remains available only when Home-US is enabled.
+    /// No caller asked for a helper repair (sleep, a preserve teardown after
+    /// suspension or a withdrawn route, quit, update preparation), so it
+    /// never installs or repairs the helper: that could raise an
+    /// administrator prompt nobody asked for (MAC3-ADD-F1). A helper that
+    /// cannot be reached or rejects this app fails the call, and PF stays as
+    /// the helper holds it.
     static func restrictToBootstrap() throws {
         guard isArmed else { return }
         let apiHost = (Bundle.main.object(forInfoDictionaryKey: "TonoAPIBaseURL") as? String)
@@ -405,6 +411,7 @@ nonisolated enum KillSwitchService {
             sessionDirectEndpoints: [],
             tailscaleBootstrapEnabled: AppProfile.homeExitEnabled,
             allowSystemResolution: false,
+            helperPrepared: true,
             // Bootstrap restriction deliberately strips every exception it is
             // not asked to keep; the reviewed-bundle permit is one of them.
             reviewedBundleDirect: false

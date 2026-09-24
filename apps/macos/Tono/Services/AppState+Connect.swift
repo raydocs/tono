@@ -1940,17 +1940,28 @@ extension AppState {
     /// Returns the helper's answer. A release is returned only when accepted;
     /// an answer that a protection operation overtook, or one not asked for
     /// because an operation is in flight, is `.unavailable`. Only an accepted
-    /// release clears anything: every other answer keeps every intent.
+    /// release clears anything: every other answer keeps every intent. The
+    /// one operation that may overtake a release answer is the same release,
+    /// accepted first by the activation reconcile: while nothing has followed
+    /// it, the answer agrees and is returned, so the caller's resume intent
+    /// retires with it instead of re-arming PF (INT610-F2).
     func acceptConfirmedProtectionReleaseBeforeSignIn() async
         -> KillSwitchService.StatusObservation {
         guard !isConnected, !isConnecting, !isDisconnecting else { return .unavailable }
         let observedGeneration = self.connectionCoordinator.protectionOperationGeneration
         let networkProtection = self.networkProtection
         let observation = await networkProtection.refreshKillSwitchStatus()
-        guard !Task.isCancelled,
-              self.connectionCoordinator.protectionOperationGeneration == observedGeneration,
-              !isConnected, !isConnecting, !isDisconnecting
+        guard !Task.isCancelled, !isConnected, !isConnecting, !isDisconnecting
         else { return .unavailable }
+        let generation = self.connectionCoordinator.protectionOperationGeneration
+        guard generation == observedGeneration else {
+            if case .confirmed(requiresProtectionRecovery: false) = observation,
+               confirmedReleaseGeneration == generation,
+               !KillSwitchService.isArmed, !isProtectionBlocked {
+                return observation
+            }
+            return .unavailable
+        }
         if case .confirmed(requiresProtectionRecovery: false) = observation {
             acceptConfirmedExternalProtectionRelease()
         }
@@ -1959,6 +1970,7 @@ extension AppState {
 
     func acceptConfirmedExternalProtectionRelease() {
         self.connectionCoordinator.bumpGeneration()
+        confirmedReleaseGeneration = self.connectionCoordinator.protectionOperationGeneration
         recoveryCause = nil
         KillSwitchService.isArmed = false
         KillSwitchService.needsSessionExceptionReassert = false

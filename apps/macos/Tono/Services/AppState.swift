@@ -133,6 +133,10 @@ final class AppState {
     /// Orders launch verdicts and the activation answer that resolves one:
     /// an answer read before a newer verdict was published is stale.
     @ObservationIgnored var launchProtectionSequence: UInt64 = 0
+    /// The protection generation a confirmed external release opened. While
+    /// it is still the current generation, no protection operation followed
+    /// that release.
+    @ObservationIgnored var confirmedReleaseGeneration: UInt64? = nil
     var lastPhysicalFingerprint: PhysicalInterfaceFingerprint?
     var switchingNodeId: String? = nil
     var proxyMode: ProxyMode = .rule
@@ -684,6 +688,10 @@ final class AppState {
             self.connectionCoordinator.sleepRestrictTask = nil
             await self.finishPendingDisconnect()
             var barrierReady = false
+            // Only a reassert that armed holds this Mac offline. With no
+            // stored armed intent it arms nothing, and publishing Protected
+            // Offline would claim a barrier over an open host (INT610-F1).
+            var barrierArmed = false
             for delay in [0, 1, 2, 5, 10, 30] {
                 if delay > 0 {
                     try? await Task.sleep(for: .seconds(delay))
@@ -691,7 +699,7 @@ final class AppState {
                 guard !Task.isCancelled else { return }
                 if !barrierReady {
                     do {
-                        try await PrivilegedRuntimeCoordinator.shared
+                        barrierArmed = try await PrivilegedRuntimeCoordinator.shared
                             .reassertKillSwitchIfNeeded()
                         barrierReady = true
                     } catch {
@@ -710,16 +718,18 @@ final class AppState {
                 if self.protectedReconnectPausedForUserAction,
                    !self.protectedReconnectPauseLiftsOnNetworkChange {
                     if !Task.isCancelled {
-                        self.isProtectionBlocked = true
+                        if barrierArmed { self.isProtectionBlocked = true }
                         self.connectionCoordinator.wakeRecoveryTask = nil
                     }
                     return
                 }
                 guard self.isTonoReady else {
-                    self.isProtectionBlocked = true
-                    self.errorMessage = String(
-                        localized: "Waiting for the protected route after wake; Internet remains blocked."
-                    )
+                    if barrierArmed {
+                        self.isProtectionBlocked = true
+                        self.errorMessage = String(
+                            localized: "Waiting for the protected route after wake; Internet remains blocked."
+                        )
+                    }
                     continue
                 }
                 guard !self.isConnected, !self.isConnecting,
@@ -732,10 +742,12 @@ final class AppState {
                     }
                     return
                 }
-                self.isProtectionBlocked = true
-                self.errorMessage = String(
-                    localized: "Re-protecting this Mac after wake. Kill Switch is blocking direct traffic."
-                )
+                if barrierArmed {
+                    self.isProtectionBlocked = true
+                    self.errorMessage = String(
+                        localized: "Re-protecting this Mac after wake. Kill Switch is blocking direct traffic."
+                    )
+                }
                 self.connect()
                 self.connectionCoordinator.wakeRecoveryTask = nil
                 return

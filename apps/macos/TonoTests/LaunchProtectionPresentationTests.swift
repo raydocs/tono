@@ -71,4 +71,26 @@ final class LaunchProtectionPresentationTests: XCTestCase {
         XCTAssertTrue(KillSwitchService.isArmed, "a stale answer must not retire the intent the launch is reasserting")
         XCTAssertTrue(state.isProtectionUnconfirmed)
     }
+
+    /// INT610-F1: a wake that starts while the activation answer is in flight
+    /// advances the protection generation, not the launch sequence. Accepting
+    /// the older release cleared the armed intent under the wake's recovery,
+    /// whose unarmed reassert then published Protected Offline over an open
+    /// host. The answer is dropped; the wake's recovery owns the verdict.
+    func testAnActivationAnswerAWakeOvertookIsDropped() async {
+        let storedIntent = KillSwitchService.isArmed
+        defer { KillSwitchService.isArmed = storedIntent }
+        KillSwitchService.isArmed = true
+        let state = AppState()
+        XCTAssertTrue(RuntimeCleanup.adoptLaunchObservation(.unavailable, localIntent: true))
+        XCTAssertTrue(state.isProtectionUnconfirmed)
+        state.networkProtection.refreshKillSwitchStatus = {
+            // The wake's own step: a new protection operation begins.
+            await MainActor.run { state.connectionCoordinator.bumpGeneration() }
+            return .confirmed(requiresProtectionRecovery: false)
+        }
+        await state.resolveUnconfirmedProtection()
+        XCTAssertTrue(KillSwitchService.isArmed, "an answer a wake overtook must not retire the intent the wake reasserts")
+        XCTAssertTrue(state.isProtectionUnconfirmed)
+    }
 }
