@@ -13,6 +13,17 @@ team_id=YY57758GS7
 signing_identity=${TONO_MACOS_SIGNING_IDENTITY:-}
 notarize=${TONO_MACOS_NOTARIZE:-0}
 notary_profile=${TONO_MACOS_NOTARY_PROFILE:-}
+# Empty for release builds. `internal` (set only by the candidate signing path)
+# turns on classified connect-failure reports by default.
+build_channel=${TONO_BUILD_CHANNEL:-}
+
+case "$build_channel" in
+    ''|internal) ;;
+    *)
+        echo "Unknown TONO_BUILD_CHANNEL: $build_channel" >&2
+        exit 1
+        ;;
+esac
 
 if [ -z "$signing_identity" ]; then
     signing_identity=$(
@@ -90,11 +101,17 @@ DEVELOPER_DIR="$developer_dir" /usr/bin/xcodebuild \
     CODE_SIGNING_ALLOWED=YES \
     CODE_SIGNING_REQUIRED=YES \
     ENABLE_USER_SCRIPT_SANDBOXING=NO \
+    TONO_BUILD_CHANNEL="$build_channel" \
     archive >/dev/null
 
 source_app="$archive_path/Products/Applications/Tono.app"
 if [ ! -d "$source_app" ]; then
     echo "Xcode archive did not contain Tono.app" >&2
+    exit 1
+fi
+built_channel=$(/usr/libexec/PlistBuddy -c 'Print :TonoBuildChannel' "$source_app/Contents/Info.plist" 2>/dev/null || true)
+if [ "$built_channel" != "$build_channel" ]; then
+    echo "Tono.app build channel is '$built_channel', expected '$build_channel'" >&2
     exit 1
 fi
 

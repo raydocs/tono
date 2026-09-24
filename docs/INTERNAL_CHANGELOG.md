@@ -32,6 +32,35 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · macOS 内部候选版默认发送分类连接失败记录
+
+- **归属/来源**：G1–G3 候选验收的现场证据；影响 macOS App（`AccountSession`、设置页、Info.plist）、
+  `package-macos-test.sh` 与 `macos-release.yml` 的 `candidate_only` 路径。所有者决定 2026-09-24：内部候选/测试版默认开启
+  分类连接失败遥测，公开发布版保持现状（关）。基线 origin/main [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b)，
+  分支 `fix/mac-candidate-telemetry-20260924`，Issue #576，未合 main。
+- **缺陷修复**：无（行为变更来自所有者决定）。
+- **新增/优化**：a68d4e76 起 `reportConnectFailure` 与保护快照共用默认关闭的同意开关，升级时 v2 迁移会把旧的开启重置为关；
+  候选签名路径与正式发布构建同一 Release 配置，包内没有渠道标记，测试者失败连接从未到达运维。现在：构建设置 `TONO_BUILD_CHANNEL` 展开到 Info.plist `TonoBuildChannel`，只有 `candidate_only` 签名运行设为
+  `internal`；打包脚本校验产物中的渠道与请求一致（公开版必须为空）。内部版在未开启快照时也发送分类记录（阶段、错误代码、版本、
+  节点、OS、传输、路径延迟），错误原文与 Core 日志行仍只在用户显式开启后附带。默认值来自包而不是 UserDefaults，v2 重置无法在升级时
+  关掉它。内部版设置 → 隐私显示一行提示（含简体中文）。公开版逻辑不变。
+- **工程与测试**：一个 XCTest（`testInternalBuildsKeepClassifiedFailureReportsThroughTheUpgradeReset`）。
+- **验证**：本机 `ruby tooling/scripts/tests/macos-candidate-workflow.test.rb` 通过、`sh -n package-macos-test.sh` 通过、
+  xcstrings JSON 可解析；Swift 未在本机编译（按执行位置规定），以 PR CI 的 XCTest 为准，红→绿运行号见 PR。
+- **候选/发布**：无新包，仅源码；下一次 `candidate_only` 签名运行才会带内部标记。
+- **剩余限制**：未在真实签名候选包上验证提示与上报；快照窗口本身仍默认关闭；
+  维护者本地用 `package-macos-test.sh` 打的测试包需显式 `TONO_BUILD_CHANNEL=internal` 才算内部版。
+- **2026-09-24 审查跟进**（DG-OpenAI-1/DG-grok-1，P2）：修复——内部版原先没有任何关闭方式（快照开关默认即关，不能兼作退出）。
+  新增独立键 `internalFailureReportsOptedOut`，`failureReportScope` 在内部版且已保存退出时返回 nil；设置 → 隐私的提示行改为
+  开关「连接失败上报」（默认开，含简体中文）。已开启快照的用户仍按快照同意发送完整记录。测试：一个 XCTest
+  （`testAnInternalBuildsSavedOptOutStopsClassifiedFailureReports`；旧代码无该键与参数，编译失败，旧逻辑对内部版恒返回
+  `.classified`）。验证：本机未运行（不做本机 Swift 编译），以 PR CI 为准。剩余限制：开关只控制内部版默认上报，不影响快照。
+- **2026-09-24 第二轮跟进**（核验方 Codex 指出，Opus 读码确认，P2）：修复——同意只在入口检查一次，已通过检查的报告
+  在等待 token 刷新或网络重试期间用户关闭开关后仍会发送。现在 `reportConnectFailure` 把
+  `failureReportStillAllowed` 作为 `requestIsCurrent` 传给 API，每次发送前重读开关（完整记录还要求快照同意仍开）。
+  测试：一个 XCTest（`testAPendingFailureReportStopsOnceTheUserOptsOut`，旧代码无此判定）。验证：本机未运行，以 PR CI 为准。
+  剩余限制：已发出的请求不撤回。
+
 ## 2026-09-24 · macOS 睡眠后唤醒重连获得新的重复失败预算
 
 - **归属/来源**：G1 连接恢复；macOS `AppState.prepareForSystemSleep()`。内部审查 H18-G-F1（交叉厂商核实降级为
