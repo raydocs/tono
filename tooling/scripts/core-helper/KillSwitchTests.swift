@@ -262,6 +262,24 @@ extension KillSwitchManager {
             check("labels-are-queryable", false)
         }
 
+        // 8. The emergency block's standalone main ruleset, used when
+        //    /etc/pf.conf cannot be loaded, must itself parse, or the fallback
+        //    is as dead as the file it replaces. Parse-only (`-n`): nothing
+        //    is loaded and no packet decision changes.
+        let standaloneMain = scratch + ".main"
+        defer { try? FileManager.default.removeItem(atPath: standaloneMain) }
+        if (try? Data(renderRules(state: emergency, allowedUID: 501).utf8)
+                .write(to: URL(fileURLWithPath: scratch))) != nil,
+           (try? Data(renderStandaloneMain(childPath: scratch).utf8)
+                .write(to: URL(fileURLWithPath: standaloneMain))) != nil {
+            check(
+                "standalone-emergency-main-parses",
+                (try? run("/sbin/pfctl", ["-nf", standaloneMain]))?.status == 0
+            )
+        } else {
+            check("standalone-emergency-main-written", false)
+        }
+
         if failures.isEmpty { return true }
         FileHandle.standardError.write(Data(
             "lifecycle self-test failed: \(failures.joined(separator: ", "))\n".utf8

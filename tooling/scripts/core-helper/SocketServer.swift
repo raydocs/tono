@@ -17,16 +17,14 @@ final class SocketServer {
     private let updates: UpdateTransaction
     private var serverFD: Int32 = -1
 
-    init() throws {
-        guard geteuid() == 0 else {
-            throw HelperFailure.invalid("The helper must run as root.")
-        }
-        allowedUID = try readAllowedUID()
+    /// `killSwitch` has already restored PF: see `startHelperDaemon`.
+    init(allowedUID: uid_t, killSwitch: KillSwitchManager) throws {
+        self.allowedUID = allowedUID
+        self.killSwitch = killSwitch
         allowedGID = try allowedGroup(for: allowedUID)
         authorizer = try TonoPeerAuthorizer(allowedUID: allowedUID)
         try ensureRootDirectory(socketDirectory, permissions: 0o755)
         core = try CoreManager(allowedUID: allowedUID)
-        killSwitch = try KillSwitchManager(allowedUID: allowedUID)
         protectedDNS = try ProtectedDNSManager()
         transitionGate = PowerTransitionGate()
         updates = .live(storage: try UpdateStorage(), runtime: UpdateRuntime(

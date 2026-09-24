@@ -548,6 +548,70 @@ func runOwnedRuntimeContractSelfTests() -> Bool {
         )
 }
 
+/// Daemon startup after executor recovery, in the order protection needs.
+///
+/// After a boot, macOS loads /etc/pf.conf with PF disabled; this daemon is the
+/// only thing that enables it. PF used to be restored only once the socket
+/// server had resolved the user's group and home, set up its directories and
+/// swept a stale core, and any failure on the way exited without touching PF,
+/// so an armed machine came up open and stayed open across every launchd
+/// retry. PF is now restored right after the allowed user is read, and any
+/// later failure installs the emergency block when protection was wanted.
+///
+/// A stop request is a clean stop, as in `UpdateExecutor.startup`: the
+/// executor's own bootout must not leave a barrier behind.
+func startHelperDaemon<KillSwitch, Server>(
+    readUID: () throws -> uid_t = {
+        guard geteuid() == 0 else {
+            throw HelperFailure.invalid("The helper must run as root.")
+        }
+        return try readAllowedUID()
+    },
+    restoreProtection: (uid_t) throws -> KillSwitch,
+    startServer: (uid_t, KillSwitch) throws -> Server,
+    secureFailedStartup: () -> Void,
+    stopRequested: () -> Bool = { helperShutdownRequested != 0 }
+) -> Server? {
+    do {
+        let allowedUID = try readUID()
+        let killSwitch = try restoreProtection(allowedUID)
+        return try startServer(allowedUID, killSwitch)
+    } catch {
+        if !stopRequested() { secureFailedStartup() }
+        return nil
+    }
+}
+
+/// PF is restored before the server initialises, a server failure leaves the
+/// machine fail-closed, and a requested stop does not (H12-F2).
+func runStartupOrderSelfTest() -> Bool {
+    struct StartupFailed: Error {}
+    var events: [String] = []
+    func start(stopRequested: Bool) -> Int? {
+        startHelperDaemon(
+            readUID: { 501 },
+            restoreProtection: { (_: uid_t) in events.append("restore") },
+            startServer: { (_: uid_t, _: Void) throws -> Int in
+                events.append("server")
+                throw StartupFailed()
+            },
+            secureFailedStartup: { events.append("secure") },
+            stopRequested: { stopRequested }
+        )
+    }
+    guard start(stopRequested: false) == nil,
+          events == ["restore", "server", "secure"] else {
+        FileHandle.standardError.write(Data("startup order: \(events)\n".utf8))
+        return false
+    }
+    events = []
+    guard start(stopRequested: true) == nil, events == ["restore", "server"] else {
+        FileHandle.standardError.write(Data("startup stop: \(events)\n".utf8))
+        return false
+    }
+    return true
+}
+
 func requestHelperShutdown(_ signal: Int32) {
     _ = signal
     helperShutdownRequested = 1
@@ -952,6 +1016,7 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && runCoreLifecyclePolicySelfTests()
             && runOwnedRuntimeContractSelfTests()
             && PowerTransitionGate.runSelfTests()
+            && runStartupOrderSelfTest()
             ? 0 : 1
     )
 }
@@ -972,8 +1037,15 @@ do {
     // daemon behind the update lock — in that window the executor owns the
     // flow and no PF action is ours to take.
     if try UpdateExecutor.startup() { exit(0) }
-    let server = try SocketServer()
-    server.run()
 } catch {
+    exit(1)
+}
+if let server = startHelperDaemon(
+    restoreProtection: { uid in try KillSwitchManager(allowedUID: uid) },
+    startServer: { uid, killSwitch in try SocketServer(allowedUID: uid, killSwitch: killSwitch) },
+    secureFailedStartup: KillSwitchManager.secureFailedStartup
+) {
+    server.run()
+} else {
     exit(1)
 }
