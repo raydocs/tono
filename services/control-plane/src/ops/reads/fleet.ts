@@ -313,6 +313,23 @@ function hy2BlockFromProfile(base: string, publicIp: string, fingerprint: string
   ].join('\n');
 }
 
+/**
+ * Retirement revokes the node's exit token and throws the new one away, so a
+ * name put back in the catalog would point customers at a node that can no
+ * longer pull a roster. No acceptance override skips this: the token has to be
+ * issued, the node re-enabled and the token deployed first.
+ */
+export async function assertExitIdentityActive(e: Env, name: string): Promise<void> {
+  const exit = await e.DB.prepare('SELECT status FROM exit_nodes WHERE name = ?').bind(name).first<Row>();
+  if (exit && String(exit.status) !== 'active') {
+    throw new ApiError(
+      409,
+      'EXIT_TOKEN_REVOKED',
+      `${name} 的出口令牌已在下架时吊销。先启用出口节点、重新签发令牌并部署到机器上，再上架`,
+    );
+  }
+}
+
 export async function relistFleetNode(
   e: Env,
   actorEmail: string,
@@ -328,6 +345,7 @@ export async function relistFleetNode(
   if (expected !== catalog.revision) {
     throw new ApiError(409, 'CATALOG_CONFLICT', 'Managed catalog changed; preview relist again');
   }
+  await assertExitIdentityActive(e, name);
   let block = typeof requestBody.block === 'string' ? requestBody.block : '';
   const profile = await e.DB.prepare(
     'SELECT public_ip, hy2_port, hy2_fingerprint FROM ops_node_profiles WHERE catalog_name = ?',
@@ -371,11 +389,14 @@ export async function relistFleetNode(
   const revision = catalog.revision + 1;
   const encrypted = await encryptCatalog(plan.yaml, requiredCatalogKey(e));
   const results = await e.DB.batch([
+    // The exit check rides in the write too: a drain sweep that revokes the
+    // token after the check above must not end with the node listed.
     e.DB.prepare(
       `UPDATE managed_exit_catalog
        SET revision = ?, ciphertext = ?, nonce = ?, content_sha256 = ?, updated_at = ?
-       WHERE singleton_id = 1 AND revision = ?`,
-    ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, changedAt, catalog.revision),
+       WHERE singleton_id = 1 AND revision = ?
+         AND NOT EXISTS (SELECT 1 FROM exit_nodes WHERE name = ? AND status <> 'active')`,
+    ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, changedAt, catalog.revision, name),
     e.DB.prepare(
       `INSERT INTO ops_node_profiles(id, catalog_name, status, created_at, updated_at)
        SELECT ?, ?, 'active', ?, ?
@@ -398,6 +419,7 @@ export async function relistFleetNode(
     ).bind(id(), changedAt, actorEmail.slice(0, 254), name, `relisted ${name}`.slice(0, 500), revision, digest),
   ]);
   if (!results[0].meta.changes) {
+    await assertExitIdentityActive(e, name);
     throw new ApiError(409, 'CATALOG_CONFLICT', 'Managed catalog changed; preview relist again');
   }
   return { revision, previousRevision: catalog.revision, alreadyListed: false, sha256: digest };

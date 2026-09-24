@@ -464,6 +464,9 @@ describe('ops node jobs', () => {
     expect((await exitStatus(kite))?.status).toBe('disabled');
     expect((await exitStatus(kite))?.token_hash).not.toBe(hash);
 
+    // Relisting a revoked node is refused; the operator re-enables it and
+    // deploys a newly issued token first (PATCH exit-nodes/{id}, POST …/token).
+    await db().prepare("UPDATE exit_nodes SET status = 'active' WHERE name = ?").bind(kite).run();
     const relist = await enqueue('catalog_relist', t + 3, { nodeName: kite, idempotencyKey: 'relist-kite' });
     expect(await runWorkerJobs(e, t + 3, 5)).toBe(1);
     const relistRow = await db().prepare('SELECT status FROM ops_node_jobs WHERE id = ?')
