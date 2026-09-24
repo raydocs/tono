@@ -670,27 +670,43 @@ extension KillSwitchManager {
             // interface. A tunnel-less state that asks for it must not get it.
             let bundleOffWithoutTunnel = !rules.contains("label \"tono-bundle\"")
             // #608: /core/sync withholds the permit while the Core restarts
-            // without its utun, with no state flush, and keeps the full set as
+            // without its utun, with no state flush, and leaves the full set as
             // the baseline. Against it, an arm that really drops the permit
             // still flushes, and the app's arm restoring it once the tunnel
             // exists withdraws nothing.
             let tunneledPassRules = passRules(in: tunneledRules)
             let bundleFreePassRules = tunneledPassRules.filter { !$0.contains("label \"tono-bundle\"") }
-            let withholding = reviewedBundleWithholding(loaded: tunneledRules, baseline: tunneledPassRules)
-            let withheldRules = withholding?.rules ?? ""
-            let withheldBaseline = withholding?.baseline
+            var withheldRules = ""
+            var withholdDisposal: StateDisposal?
+            var rollbackRules = ""
+            if case let .withhold(narrowed, disposal, rollback) =
+                reviewedBundleWithholding(loaded: tunneledRules, baseline: tunneledPassRules) {
+                withheldRules = narrowed
+                withholdDisposal = disposal
+                rollbackRules = rollback
+            }
             let withheldOnlyTheBundle: Bool = passRules(in: withheldRules) == bundleFreePassRules
                 && tunneledPassRules.count - bundleFreePassRules.count == 2
                 && withheldRules.contains("block drop out quick all")
-            let withheldWithoutFlush: Bool = withholding?.disposal == StateDisposal.keep
-            let realRemovalStillFlushes: Bool = withheldBaseline != nil
-                && stateDisposal(replacing: withheldBaseline, with: bundleFreePassRules) == .full
-            let restoreIsWidening: Bool = withheldBaseline != nil
-                && stateDisposal(replacing: withheldBaseline, with: tunneledPassRules) == .keep
+            let withheldWithoutFlush: Bool = withholdDisposal == StateDisposal.keep
+            let realRemovalStillFlushes: Bool =
+                stateDisposal(replacing: tunneledPassRules, with: bundleFreePassRules) == .full
+            let restoreIsWidening: Bool =
+                stateDisposal(replacing: tunneledPassRules, with: tunneledPassRules) == .keep
             let unknownBaselineUntouched: Bool =
-                reviewedBundleWithholding(loaded: tunneledRules, baseline: nil) == nil
+                reviewedBundleWithholding(loaded: tunneledRules, baseline: nil) == .notLoaded
+            // R609-F1: a failed load puts the file back exactly as read, so it
+            // matches the baseline and a later call retries; a completed
+            // withhold is recognised as done; any other file means the permit
+            // may be loaded, and /core/sync must keep the old Core running.
+            let rollbackRestoresTheFile: Bool = rollbackRules == tunneledRules
+            let completedWithholdIsDone: Bool =
+                reviewedBundleWithholding(loaded: withheldRules, baseline: tunneledPassRules) == .notLoaded
+            let mismatchKeepsTheCore: Bool =
+                reviewedBundleWithholding(loaded: rules, baseline: tunneledPassRules) == .unknown
             let bundleWithheldForCoreSync = withheldOnlyTheBundle && withheldWithoutFlush
                 && realRemovalStillFlushes && restoreIsWidening && unknownBaselineUntouched
+                && rollbackRestoresTheFile && completedWithholdIsDone && mismatchKeepsTheCore
             // Continuity is TUN-scoped: empty tunnelInterfaces (this `state`)
             // must not keep Sidecar as a side channel; a live utun must.
             let continuityNeedles = [

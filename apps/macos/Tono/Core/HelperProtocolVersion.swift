@@ -179,7 +179,8 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.45.0 → 4.46.0: `/core/sync`, and the idle loop once the Core has
     ///   exited, take the reviewed-bundle permit out of the loaded anchor
     ///   without a state flush while the Core has no utun; the app's next arm
-    ///   with the flag restores it once the tunnel exists. An older daemon
+    ///   with the flag restores it once the tunnel exists; if that fails,
+    ///   `/core/sync` fails with the old Core still running. An older daemon
     ///   keeps the permit loaded through every Core restart. (Stacked on
     ///   4.45.0; renumber in merge order.)
     static let current = "4.46.0"

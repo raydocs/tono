@@ -360,40 +360,59 @@ final class KillSwitchManager {
     /// returns only through the app's next arm with the flag, which renders it
     /// only while a tunnel exists.
     ///
-    /// Best effort: a failure leaves a ruleset no looser than the one before,
-    /// and the restart goes ahead as it always did.
-    @discardableResult
-    func withholdReviewedBundlePermit() -> Bool {
+    /// Throws while the permit may still be loaded, so /core/sync keeps the
+    /// old Core and its tunnel running instead of stopping it. A failure never
+    /// loosens the ruleset.
+    func withholdReviewedBundlePermit() throws {
         lock.lock()
         defer { lock.unlock() }
         guard let baseline = lastLoadedPassRules,
               baseline.contains(where: { $0.contains(Self.reviewedBundleLabel) }) else {
-            return false
+            return
         }
+        let loaded: String
         do {
-            let loaded = String(
+            loaded = String(
                 decoding: try Self.secureRead(killSwitchPFPath, maximumBytes: 4 * 1024 * 1024),
                 as: UTF8.self
             )
-            guard let plan = Self.reviewedBundleWithholding(loaded: loaded, baseline: baseline) else {
-                return false
-            }
+        } catch {
+            throw Self.withholdFailure(error)
+        }
+        switch Self.reviewedBundleWithholding(loaded: loaded, baseline: baseline) {
+        case .notLoaded:
+            return
+        case .unknown:
+            throw Self.withholdFailure(
+                HelperFailure.system("The PF rule file does not match the loaded ruleset.")
+            )
+        case .withhold(let rules, let disposal, let rollback):
             // An arm prepared against the ruleset being narrowed must not
             // commit it back while the tunnel is gone.
             stateGeneration &+= 1
-            try Self.writeRuleText(plan.rules)
-            try Self.ensureAnchorLoaded(disposal: plan.disposal)
-            // The same full set, and left as it is when a step above throws:
-            // it is a superset of anything now loaded, so the next arm cannot
-            // under-count what it withdraws.
-            lastLoadedPassRules = plan.baseline
-            return true
-        } catch {
-            FileHandle.standardError.write(Data(
-                "tono: reviewed-bundle permit not withheld: \(error)\n".utf8
-            ))
-            return false
+            do {
+                try Self.writeRuleText(rules)
+                try Self.ensureAnchorLoaded(disposal: disposal)
+            } catch {
+                // The narrowed file must not outlive a load the kernel may
+                // not have taken: it reads as already withheld and no later
+                // call would retry.
+                try? Self.atomicWrite(
+                    path: killSwitchPFPath,
+                    data: Data(rollback.utf8),
+                    permissions: 0o600
+                )
+                throw Self.withholdFailure(error)
+            }
         }
+    }
+
+    static func withholdFailure(_ error: Error) -> HelperFailure {
+        let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+        return .system(
+            "The reviewed-bundle permit could not be withheld; the running core was kept. "
+                + detail.prefixString(512)
+        )
     }
 
     /// Power transitions are secured inside the root helper rather than
