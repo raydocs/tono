@@ -5734,6 +5734,41 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(row.expires_at).toBeNull();
   });
 
+  // Provisional policy (2026-09-24): expiry revokes every device, session and
+  // exit credential; renewing restores nothing by itself, and each device
+  // signing in again does. The ops console copy promises exactly this.
+  it('expiry revokes every device within a cron tick and only a fresh sign-in restores service after renewal', async () => {
+    (env as unknown as Env).TAILSCALE_ENROLLMENT_ENABLED = 'false';
+    const account = await createAccount('expiry-renew');
+    await env.DB.prepare('UPDATE users SET expires_at = ? WHERE id = ?')
+      .bind(Math.floor(Date.now() / 1000) - 60, account.user.id).run();
+    const context = createExecutionContext();
+    await worker.scheduled(createScheduledController(), env as unknown as Env, context);
+    await waitOnExecutionContext(context);
+    const credentials = () => env.DB.prepare('SELECT COUNT(*) AS count FROM device_exit_credentials WHERE device_id = ?')
+      .bind(account.device.id).first<any>();
+    expect((await env.DB.prepare('SELECT status FROM devices WHERE id = ?').bind(account.device.id).first<any>()).status)
+      .toBe('revoked');
+    expect((await credentials()).count).toBe(0);
+
+    const renewed = await admin(`users/${account.user.id}`, {
+      expiresAt: Math.floor(Date.now() / 1000) + 30 * 86_400,
+    }, 'PATCH');
+    expect(renewed.status).toBe(200);
+    expect((await api('auth/refresh', json({ refreshToken: account.refreshToken }))).status).toBe(401);
+
+    const again = await emailSignIn({
+      email: account.email,
+      deviceName: 'Primary Mac',
+      installationId: 'expiry-renew-installation-one',
+    });
+    expect(again.status).toBe(200);
+    const signedIn = await again.json() as any;
+    expect(signedIn.device.id).toBe(account.device.id);
+    expect((await api('me', { headers: { authorization: `Bearer ${signedIn.accessToken}` } })).status).toBe(200);
+    expect((await credentials()).count).toBe(1);
+  });
+
   it('rejects invalid expiresAt values with 400', async () => {
     const account = await createAccount('expiry-invalid');
     for (const expiresAt of [0, -100, 1.5, 'tomorrow', Number.MAX_SAFE_INTEGER + 1]) {
