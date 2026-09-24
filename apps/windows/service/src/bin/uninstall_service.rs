@@ -681,53 +681,6 @@ fn final_cleanup_outcome(
     }
 }
 
-/// Passed by the Uninstall section only when "Delete app data" was ticked, and only after
-/// `RemoveVergeService` let the uninstall continue (the barrier was proven gone).
-#[cfg(any(windows, test))]
-const DELETE_APP_DATA_ARG: &str = "--delete-app-data-all-profiles";
-
-/// The App's data folder name under Roaming and Local AppData (`BUNDLEID` in installer.nsi).
-#[cfg(any(windows, test))]
-const APP_DATA_DIR_NAME: &str = "com.raydocs.tono";
-
-/// Remove Tono's app data from every profile under `profiles_root`. The elevated uninstaller
-/// runs as whichever administrator approved it, so its `$APPDATA` is that account's folder,
-/// not the folders of the users who signed in to Tono. Links are removed, never followed: a
-/// profile's own junction cannot point this elevated delete somewhere else.
-#[cfg(any(windows, test))]
-fn remove_app_data_in_profiles(profiles_root: &std::path::Path) -> Result<(), Error> {
-    let mut failures = Vec::new();
-    for entry in std::fs::read_dir(profiles_root)? {
-        let entry = entry?;
-        // Real profile directories only; "All Users" / "Default User" are junctions.
-        if !entry.file_type()?.is_dir() {
-            continue;
-        }
-        for base in ["Roaming", "Local"] {
-            let target = entry
-                .path()
-                .join("AppData")
-                .join(base)
-                .join(APP_DATA_DIR_NAME);
-            let removed = match std::fs::symlink_metadata(&target) {
-                Ok(metadata) if metadata.is_file() => std::fs::remove_file(&target),
-                Ok(_) => std::fs::remove_dir_all(&target),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                Err(error) => Err(error),
-            };
-            if let Err(error) = removed {
-                failures.push(format!("{}: {error}", target.display()));
-            }
-        }
-    }
-    anyhow::ensure!(
-        failures.is_empty(),
-        "app data could not be removed: {}",
-        failures.join("; ")
-    );
-    Ok(())
-}
-
 /// Whether any fail-closed recovery state may still exist. File names must match the library
 /// (`windows_kill_switch::intent_path`, `dns::snapshot_path`, `owner.rs`): the intent record
 /// and the DNS snapshot are the artifacts service-start recovery acts on, and a pid file means
@@ -800,6 +753,53 @@ fn remove_leftover_user_control_plane_pins() {
     }
 }
 
+/// Passed by the Uninstall section only when "Delete app data" was ticked, and only after
+/// `RemoveVergeService` let the uninstall continue (the barrier was proven gone).
+#[cfg(any(windows, test))]
+const DELETE_APP_DATA_ARG: &str = "--delete-app-data-all-profiles";
+
+/// The App's data folder name under Roaming and Local AppData (`BUNDLEID` in installer.nsi).
+#[cfg(any(windows, test))]
+const APP_DATA_DIR_NAME: &str = "com.raydocs.tono";
+
+/// Remove Tono's app data from every profile under `profiles_root`. The elevated uninstaller
+/// runs as whichever administrator approved it, so its `$APPDATA` is that account's folder,
+/// not the folders of the users who signed in to Tono. Links are removed, never followed: a
+/// profile's own junction cannot point this elevated delete somewhere else.
+#[cfg(any(windows, test))]
+fn remove_app_data_in_profiles(profiles_root: &std::path::Path) -> Result<(), Error> {
+    let mut failures = Vec::new();
+    for entry in std::fs::read_dir(profiles_root)? {
+        let entry = entry?;
+        // Real profile directories only; "All Users" / "Default User" are junctions.
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        for base in ["Roaming", "Local"] {
+            let target = entry
+                .path()
+                .join("AppData")
+                .join(base)
+                .join(APP_DATA_DIR_NAME);
+            let removed = match std::fs::symlink_metadata(&target) {
+                Ok(metadata) if metadata.is_file() => std::fs::remove_file(&target),
+                Ok(_) => std::fs::remove_dir_all(&target),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(error),
+            };
+            if let Err(error) = removed {
+                failures.push(format!("{}: {error}", target.display()));
+            }
+        }
+    }
+    anyhow::ensure!(
+        failures.is_empty(),
+        "app data could not be removed: {}",
+        failures.join("; ")
+    );
+    Ok(())
+}
+
 #[cfg(windows)]
 fn known_folder(id: windows_sys::core::GUID) -> Option<std::path::PathBuf> {
     use std::os::windows::ffi::OsStringExt as _;
@@ -826,49 +826,9 @@ mod tests {
         CleanupOutcome, DNS_RESTORED_AUTOMATIC_MARKER, DNS_STILL_ON_LOOPBACK_MARKER,
         EXIT_COSMETIC_FAILURE, EXIT_RESTORED_AUTOMATIC, EXIT_STILL_PROTECTED,
         WFP_REMOVED_CONTINUE_MARKER, classify_disarm_failure, cleanup_exit_code,
-        cleanup_fast_path_allowed, final_cleanup_outcome, poll_until, remove_app_data_in_profiles,
-        uninstall_may_continue,
+        cleanup_fast_path_allowed, final_cleanup_outcome, poll_until, uninstall_may_continue,
     };
     use std::cell::Cell;
-
-    #[test]
-    fn delete_app_data_reaches_every_profile_not_only_the_approving_admin() {
-        let profiles = std::env::temp_dir().join(format!(
-            "tono-profiles-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let data = |user: &str, base: &str, name: &str| {
-            profiles.join(user).join("AppData").join(base).join(name)
-        };
-        for user in ["admin", "signed-in-user"] {
-            for base in ["Roaming", "Local"] {
-                std::fs::create_dir_all(data(user, base, "com.raydocs.tono")).unwrap();
-                std::fs::write(
-                    data(user, base, "com.raydocs.tono").join("runtime.yaml"),
-                    b"x",
-                )
-                .unwrap();
-            }
-            std::fs::create_dir_all(data(user, "Roaming", "another-app")).unwrap();
-        }
-
-        remove_app_data_in_profiles(&profiles).unwrap();
-
-        for user in ["admin", "signed-in-user"] {
-            for base in ["Roaming", "Local"] {
-                assert!(
-                    !data(user, base, "com.raydocs.tono").exists(),
-                    "{user} {base} Tono data survived"
-                );
-            }
-            assert!(data(user, "Roaming", "another-app").exists());
-        }
-        std::fs::remove_dir_all(profiles).unwrap();
-    }
 
     #[test]
     fn clean_outcome_exits_zero() {
@@ -1112,5 +1072,46 @@ mod tests {
             final_cleanup_outcome(None, None, None),
             CleanupOutcome::Clean
         ));
+    }
+
+    #[test]
+    fn delete_app_data_reaches_every_profile_not_only_the_approving_admin() {
+        use super::remove_app_data_in_profiles;
+
+        let profiles = std::env::temp_dir().join(format!(
+            "tono-profiles-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let data = |user: &str, base: &str, name: &str| {
+            profiles.join(user).join("AppData").join(base).join(name)
+        };
+        for user in ["admin", "signed-in-user"] {
+            for base in ["Roaming", "Local"] {
+                std::fs::create_dir_all(data(user, base, "com.raydocs.tono")).unwrap();
+                std::fs::write(
+                    data(user, base, "com.raydocs.tono").join("runtime.yaml"),
+                    b"x",
+                )
+                .unwrap();
+            }
+            std::fs::create_dir_all(data(user, "Roaming", "another-app")).unwrap();
+        }
+
+        remove_app_data_in_profiles(&profiles).unwrap();
+
+        for user in ["admin", "signed-in-user"] {
+            for base in ["Roaming", "Local"] {
+                assert!(
+                    !data(user, base, "com.raydocs.tono").exists(),
+                    "{user} {base} Tono data survived"
+                );
+            }
+            assert!(data(user, "Roaming", "another-app").exists());
+        }
+        std::fs::remove_dir_all(profiles).unwrap();
     }
 }
