@@ -32,6 +32,30 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · macOS 续期时钥匙串读取失败不再当成会话被拒
+
+- **归属/来源**：G2 客户端账户状态；macOS `TonoAPIClient` 刷新令牌读取、`KeychainStore`。内部审查 H18-O-F3
+  （交叉厂商核实 confirmed，启动变体收窄），Issue #540。基线 origin/main 8dc79a5b → 分支
+  `fix/macos-keychain-read-error-20260924`；提交时未合 main。
+- **缺陷修复**：access token 过期（1 天）后续期要读钥匙串里的 refresh token。`currentRefreshToken()` 用 `try?`
+  读取，钥匙串锁定或不允许交互等任何非 `errSecItemNotFound` 状态都变成 nil，`refreshAccessToken()` 随即抛
+  `.unauthorized`，请求没发到服务端。于是周期账户重读把正常账户置为 `.suspended`；启动恢复（第一次读成功、
+  续期时第二次读失败）和遥测上传走账户丢失路径，删掉仍有效的 refresh token 并登出。现在只有"条目不存在"
+  表示无会话；其他钥匙串状态作为本地可重试错误抛出：账户重读和遥测按瞬时失败等下个周期，启动恢复进入
+  普通错误页（PF 保持），都不置 suspended、不登出、不释放保护。登出路径读不到令牌时仍只删本地副本，行为不变。
+- **新增/优化**：无。
+- **工程与测试**：`KeychainStore` 增加 `SecItemCopyMatching` 注入点（默认值不变）。新增
+  `RefreshTokenReadFailureTests.testUnreadableRefreshTokenDoesNotSuspendTheAccount`（一个 XCTest）：
+  读取返回 `errSecInteractionNotAllowed`，内存中无 access token，调用 `refreshAccount()`；断言状态仍为 `.ready`
+  且没有发出任何请求。只含注入点和测试的提交 c70616cd 在 GitHub-hosted macOS CI run
+  [35981508237](https://github.com/raydocs/tono/actions/runs/35981508237) 实际跑红：只有该测试失败，
+  `("suspended") is not equal to ("ready")`。
+- **验证**：本机（编辑机）未运行 xcodebuild/swift；TonoTests 委托本 PR 的 GitHub-hosted `macos-26` CI，结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：哪些实际钥匙串状态（睡眠锁定、智能卡、钥匙串密码不同步）会触发未在实机测量。启动恢复遇到该错误显示
+  通用错误文案（`KeychainStore.Error` 没有本地化描述），需用户点重试。#516、#535 给 `.unauthorized`/`.suspended` 增加
+  后果，本修复与它们无文件重叠。
+
 ## 2026-09-24 · macOS Helper 完整移除时撤回 /etc/pf.conf 挂钩并删除 .tono-backup
 
 - **归属/来源**：G1 连接保护（移除后恢复原状）；macOS `tono-core-helper`。内部审查 H19-O-F6（跨厂商核实：
