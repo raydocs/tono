@@ -150,6 +150,25 @@ describe('ops onboard pending profile', () => {
     expect(detail.notes).toBe('vip drawer');
   });
 
+  it('carries the onboard expiry and plan onto the account created at first sign-in', async () => {
+    const email = 'pending-expiry@example.com';
+    const expiresAt = 1_900_000_000;
+    const onboarded = await ops('users/onboard', json({ email, expiresAt, plan: 'claude_20x' }));
+    expect(onboarded.status).toBe(202);
+    expect((await onboarded.json() as { pendingProfile: boolean }).pendingProfile).toBe(true);
+
+    const started = await fetchApi('auth/email/start', json({
+      email, deviceName: 'Primary Mac', installationId: 'pending-expiry-install',
+    }));
+    expect(started.status).toBe(202);
+    const { challengeId } = await started.json() as { challengeId: string };
+    const verified = await fetchApi('auth/email/verify', json({ challengeId, code: emailCodes.get(challengeId) }));
+    expect(verified.status).toBe(200);
+    const user = await db().prepare('SELECT expires_at, plan FROM users WHERE email = ?')
+      .bind(email).first<{ expires_at: number | null; plan: string | null }>();
+    expect(user).toEqual({ expires_at: expiresAt, plan: 'claude_20x' });
+  });
+
   it('does not allowlist an email when wechatId is too long', async () => {
     const email = 'too-long-wechat@example.com';
     const onboarded = await ops('users/onboard', json({

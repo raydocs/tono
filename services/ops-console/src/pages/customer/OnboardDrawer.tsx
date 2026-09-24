@@ -52,10 +52,11 @@ const BLANK: Draft = {
  * onboarding: it shows the hub's own list of what is done and what is still
  * waiting, and offers the same form again for after the login.
  *
- * The plan and the expiry are a second call, because `users/onboard` does not
- * accept them. They are on this form anyway: an operator setting a customer up
- * is thinking about what they are paying for, and making them find the detail
- * page afterwards is how accounts end up with no expiry at all.
+ * The plan and the expiry travel with the same call. For a customer who has
+ * not logged in yet the hub keeps them on the sign-up list and puts them on
+ * the account at first sign-in: they used to be a second call that only ran
+ * once a record existed, and an onboarding before registration quietly left
+ * the customer with no expiry at all.
  */
 export function OnboardDrawer({
   open,
@@ -102,16 +103,10 @@ export function OnboardDrawer({
     else if (draft.productAccountId !== '') input.productAccountId = draft.productAccountId;
     if (draft.notes.trim() !== '') input.notes = draft.notes.trim();
     if (draft.contact.trim() !== '') input.contact = draft.contact.trim();
-    const answer = await customerApi.onboard(input);
-    setOutcome(answer);
-    if (answer.userId === null) return;
+    if (draft.plan !== '') input.plan = draft.plan;
     const expiresAt = draft.expiresAt.trim() === '' ? null : fromDateInput(draft.expiresAt);
-    const wantsPlan = draft.plan !== '';
-    if (expiresAt === null && !wantsPlan) return;
-    await customerApi.patchUser(answer.userId, {
-      ...(wantsPlan ? { plan: draft.plan } : {}),
-      ...(expiresAt === null ? {} : { expiresAt }),
-    });
+    if (expiresAt !== null) input.expiresAt = expiresAt;
+    setOutcome(await customerApi.onboard(input));
   }
 
   function submit() {

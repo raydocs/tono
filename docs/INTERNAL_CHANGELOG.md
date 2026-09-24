@@ -32,6 +32,29 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · 控制面 + ops 控制台：未注册客户开通时填的到期与套餐不再丢失
+
+- **归属/来源**：ops 客户生命周期（控制面 Worker + ops 控制台）；内部审查 H17-O-F4，
+  Issue [#527](https://github.com/raydocs/tono/issues/527)；基线 origin/main `8dc79a5b`，
+  分支 `fix/onboard-expiry-carry-20260924`；未合 main。
+- **缺陷修复**：开通抽屉只在客户已注册时才补发到期/套餐（第二次 `PATCH`），未注册邮箱直接跳过；
+  Worker 的 `users/onboard` 也拒收这两个字段，首次登录只带 wechat/contact/notes，账户建成后无到期。
+  改后：`users/onboard` 接受 `expiresAt`/`plan`（与 `PATCH users/{id}` 同样校验）；未注册时记在
+  `signup_allowlist`（新 migration `0091_signup_allowlist_entitlement.sql`），首次登录一起写进 `users`；
+  已注册时直接写 `users`，到期设为过去时间与 PATCH 一样立即 `enforceUser`；审计 `user.onboard`
+  注明设了哪些字段。控制台开通改为一次调用带上到期/套餐（去掉只对已注册客户生效的第二次调用），
+  未注册提示补一句「套餐和到期已经记下，客户第一次登录时生效」；fixture hub 同步接受到期。
+- **新增/优化**：无。
+- **工程与测试**：`test/ops-onboard-profile.test.ts` 新增一个 `it`（未注册邮箱带到期+套餐开通 →
+  邮箱验证码首次登录 → `users.expires_at/plan` 等于开通值）；旧代码上实跑失败（`expected 400 to be 202`）。
+- **验证**：本机 MacBook control-plane `npx vitest run`（43 文件 / 892 用例通过）、`npm run typecheck`、
+  `node tooling/scripts/check-migration-numbers.mjs`（唯一性通过，仅缺号告警）；ops-console
+  `npm run typecheck`、相关文件 eslint、`vitest run src/lib/customer-batch.test.ts test/ops-fixtures.test.ts
+  test/lint-rules.test.ts`（64 通过）。开通流程 Playwright 未在本机跑，以 PR CI `ops-console-e2e` 为准。
+- **候选/发布**：仅源码，无新候选；未部署；migration 未在远端 D1 应用。
+- **剩余限制**：migration 编号 0091 为临时取号（0077–0082、0088、0090 已被在审 PR 占用），合并时若已被占用
+  需顺延并同步 README；已在 allowlist 上但此前开通时丢了到期的客户不会被追溯补上。
+
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
 - **归属/来源**：G1–G3 审查与修复的可追溯性（工程流程与记录，非产品行为）；审查基线 main

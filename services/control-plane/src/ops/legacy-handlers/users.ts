@@ -199,13 +199,28 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
   const b = await body(req, 16 * 1024);
   rejectUnexpectedKeys(b, [
     'email', 'line', 'homeExitId', 'accountRef', 'productAccountId', 'openedAt', 'notes', 'contact',
-    'wechatId',
+    'wechatId', 'expiresAt', 'plan',
   ]);
   const address = email(b.email);
   const wechatId = b.wechatId !== undefined ? optionalWechatId(b.wechatId) : undefined;
   const notes = b.notes !== undefined ? optionalNotes(b.notes) : undefined;
   const contact = b.contact !== undefined ? optionalNotes(b.contact, 'contact', 200) : undefined;
   const openedAt = b.openedAt !== undefined ? optionalUnix(b.openedAt, 'openedAt') : undefined;
+  // Same rules as PATCH users/{id}. For a customer who has not registered yet
+  // they wait on the allowlist row and are copied at first sign-in, so the
+  // account is never created without the expiry the operator entered.
+  const expiresAt = b.expiresAt;
+  if (
+    expiresAt !== undefined &&
+    expiresAt !== null &&
+    (!Number.isSafeInteger(expiresAt) || expiresAt <= 0)
+  ) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid expiresAt');
+  }
+  if (b.plan !== undefined && b.plan !== null && b.plan !== '' && b.plan !== PRODUCT_CLAUDE) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid plan');
+  }
+  const plan = b.plan === undefined || b.plan === null || b.plan === '' ? null : PRODUCT_CLAUDE;
   if (b.accountRef !== undefined && b.accountRef !== null && b.accountRef !== '') {
     accountRefField(b.accountRef);
   }
@@ -246,7 +261,8 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
   ).bind(address, createdAt).run();
   const incomplete: string[] = [];
   if (!user) incomplete.push('user_not_registered');
-  const storeProfile = b.notes !== undefined || b.contact !== undefined || b.wechatId !== undefined;
+  const storeProfile = b.notes !== undefined || b.contact !== undefined || b.wechatId !== undefined
+    || expiresAt !== undefined || b.plan !== undefined;
   const pendingProfile = !user && storeProfile;
   let binding = null;
   let account = null;
@@ -254,18 +270,22 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
   if (user) {
     await exitClientUUID(e, String(user.id));
     exitIdentityIssued = true;
-    if (b.notes !== undefined || b.contact !== undefined || b.wechatId !== undefined) {
+    if (storeProfile) {
       await e.DB.prepare(
         `UPDATE users SET
            notes = CASE WHEN ? THEN ? ELSE notes END,
            contact = CASE WHEN ? THEN ? ELSE contact END,
            wechat_id = CASE WHEN ? THEN ? ELSE wechat_id END,
+           expires_at = CASE WHEN ? THEN ? ELSE expires_at END,
+           plan = CASE WHEN ? THEN ? ELSE plan END,
            updated_at = ?
          WHERE id = ?`,
       ).bind(
         b.notes !== undefined, notes ?? null,
         b.contact !== undefined, contact ?? null,
         b.wechatId !== undefined, wechatId ?? null,
+        expiresAt !== undefined, expiresAt ?? null,
+        b.plan !== undefined, plan,
         now(), user.id,
       ).run();
     }
@@ -321,16 +341,29 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
       `UPDATE signup_allowlist SET
          wechat_id = CASE WHEN ? THEN ? ELSE wechat_id END,
          contact = CASE WHEN ? THEN ? ELSE contact END,
-         notes = CASE WHEN ? THEN ? ELSE notes END
+         notes = CASE WHEN ? THEN ? ELSE notes END,
+         expires_at = CASE WHEN ? THEN ? ELSE expires_at END,
+         plan = CASE WHEN ? THEN ? ELSE plan END
        WHERE email = ?`,
     ).bind(
       b.wechatId !== undefined, wechatId ?? null,
       b.contact !== undefined, contact ?? null,
       b.notes !== undefined, notes ?? null,
+      expiresAt !== undefined, expiresAt ?? null,
+      b.plan !== undefined, plan,
       address,
     ).run();
   }
-  await writeOpsAudit(e, actor.email, 'user.onboard', 'user', user ? String(user.id) : null, address);
+  const entitlement = [
+    expiresAt !== undefined ? 'expiresAt' : null,
+    b.plan !== undefined ? 'plan' : null,
+  ].filter((name): name is string => name !== null);
+  await writeOpsAudit(
+    e, actor.email, 'user.onboard', 'user', user ? String(user.id) : null,
+    entitlement.length ? `${address} (set ${entitlement.join(', ')})` : address,
+  );
+  // A past expiry set on a registered customer takes effect now, as PATCH does.
+  if (user && expiresAt !== undefined) await deps.sharedAdminDeps.enforceUser(e, String(user.id));
   return Response.json({
     email: address,
     userId: user ? String(user.id) : null,
