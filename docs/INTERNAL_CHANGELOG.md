@@ -32,6 +32,24 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · Windows Activity：墙钟回拨不再让连接列表冻结数小时
+
+- **归属/来源**：G2 界面真实性（Activity 连接/流量数据）；Windows App 前端 `hooks/use-connection-data.ts`。
+  内部审查 H18-C-F1，Issue #553。基线 origin/main 8dc79a5b → 分支 `fix/win-activity-monotonic-throttle-20260924`，
+  PR #554；提交时未合 main。
+- **缺陷修复**：Activity 连接帧 500 ms 节流用墙钟计算间隔。系统时间回拨（手动改时间或时间同步纠正快钟）后
+  `Date.now() - lastFlushAt` 为负，下一帧排出约等于回拨量的 `setTimeout`（回拨 2 h 即约 2 h），其后的帧只覆盖待发帧；
+  `connectionFeedLive` 仍为 true，页面的等待提示与自动刷新都不触发，刷新也不重置 `lastFlushAt`。现在节流间隔改用
+  单调时钟 `performance.now()`，最多等 500 ms；事件自身的时间戳不变。
+- **新增/优化**：无。
+- **工程与测试**：`use-connection-data.test.tsx` 新增一个 vitest `it`：发布帧 A，系统时间回拨 2 h，再发帧 B，推进 500 ms
+  后快照必须是 B。旧代码仍停在 A（本机实跑红）。首个测试提交的帧字面量类型未收窄，补了一个仅测试的类型修正提交。
+- **验证**：本机 `vitest run src/hooks/use-connection-data.test.tsx` 修复前 1 failed（expected 1 to be 2）、修复后
+  2 passed；`tsc --noEmit` 与两文件 eslint 通过。完整 `pnpm test` 由本 PR 的 GitHub-hosted CI 执行，结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：同模块的连接超时门 `connectStartedAt` 仍用墙钟，但有单调的 `setTimeout` 看门狗兜底，未改；
+  未在实机上改系统时间验证。
+
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
 - **归属/来源**：G1–G3 审查与修复的可追溯性（工程流程与记录，非产品行为）；审查基线 main
