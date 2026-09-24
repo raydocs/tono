@@ -622,6 +622,86 @@ class RosterControlSignals(unittest.TestCase):
         reconcile.assert_not_called()
         self.assertEqual(json.loads(path.read_text(encoding="utf-8")), state)
 
+    def test_revocation_runs_before_metering_checks_and_past_a_failed_removal(self) -> None:
+        # A queued report ahead of the roster clock is a metering problem. It
+        # used to stop the round before any client was removed, and the first
+        # failed removal stopped the rest.
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        path.write_text(json.dumps({**fresh_state(), "sourceId": "exit-node-a",
+            "installedClients": ["u:gone_1", "u:gone_2"],
+            "pendingReports": [{"reportId": "r", "userId": "usr_1", "sourceId": "exit-node-a",
+                                "totalBytes": 1, "observedAt": 1_700_009_999}]}))
+        removals: list[str] = []
+
+        def fake_xray(_binary, arguments):
+            failed = False
+            if "rmu" in arguments:
+                label = arguments[-1].split("=", 1)[1]
+                removals.append(label)
+                failed = label == "u:gone_1"
+            return type("Result", (), {"returncode": 1 if failed else 0, "stdout": "",
+                                       "stderr": "injected failure" if failed else ""})
+
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "exit-node-a",
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "xray_start_marker", return_value=None), \
+             patch.object(agent, "require_commands", return_value={
+                 "add_user": "adu", "remove_user": "rmu", "stats_query": "statsquery",
+             }), \
+             patch.object(agent, "fetch_roster",
+                          return_value=("exit-node-a", 1_700_000_000, [], False)), \
+             patch.object(agent, "run_xray", fake_xray), \
+             patch.object(agent, "sync_hy2_roster") as hy2, \
+             patch.object(agent, "acknowledge_roster") as acknowledge:
+            with self.assertRaises(agent.Refusal):
+                agent.run_once(path)
+
+        hy2.assert_called_once_with([])
+        self.assertEqual(removals, ["u:gone_1", "u:gone_2"])
+        acknowledge.assert_not_called()
+
+    def test_a_state_file_that_is_not_an_object_still_lets_revocation_run(self) -> None:
+        # Valid JSON of the wrong type used to raise AttributeError before any
+        # client was removed. It is left untouched for the operator; the round
+        # still removes the revoked client and then refuses.
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        path.write_text("[]", encoding="utf-8")
+        removals: list[str] = []
+
+        def fake_xray(_binary, arguments):
+            if "rmu" in arguments:
+                removals.append(arguments[-1].split("=", 1)[1])
+            return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})
+
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "exit-node-a",
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "xray_start_marker", return_value=None), \
+             patch.object(agent, "require_commands", return_value={
+                 "add_user": "adu", "remove_user": "rmu", "stats_query": "statsquery",
+             }), \
+             patch.object(agent, "fetch_roster",
+                          return_value=("exit-node-a", 1_700_000_000, [], False)), \
+             patch.object(agent, "installed_clients", return_value={"u:gone"}), \
+             patch.object(agent, "run_xray", fake_xray), \
+             patch.object(agent, "sync_hy2_roster"), \
+             patch.object(agent, "acknowledge_roster") as acknowledge:
+            with self.assertRaisesRegex(agent.Refusal, "not a JSON object"):
+                agent.run_once(path)
+
+        self.assertEqual(removals, ["u:gone"])
+        acknowledge.assert_not_called()
+        self.assertEqual(path.read_text(encoding="utf-8"), "[]")
+
 
 class Hy2RosterAuthorization(unittest.TestCase):
     def setUp(self):
@@ -969,7 +1049,8 @@ class MultipleExits(unittest.TestCase):
             with self.assertRaises(agent.Refusal):
                 agent.run_once(path)
 
-        reconcile.assert_not_called()
+        # Revocation is enforced first; the future report still stays queued.
+        reconcile.assert_called_once()
         deliver.assert_not_called()
         self.assertEqual(json.loads(path.read_text(encoding="utf-8")), initial)
 
