@@ -474,6 +474,16 @@
 - **验证**：MacBook 本机 `npx vitest run`（control-plane 全量 43 文件 892 通过）、`npm run typecheck`（首轮 CI 因测试中 `env` 未转 `Env` 类型检查失败，已修正）；`python3 -m unittest test_reconcile_and_report`（83 通过）。未连接任何真实节点，未部署，migration 未在远端 D1 执行。
 - **候选/发布**：仅源码，无新候选。
 - **剩余限制**：需部署 Worker 并执行 migration 后才生效；已在运行的旧 agent 需更新后才会响应该信号。退役前已被轮换且未经本改动记录旧 hash 的节点（改动部署前退役的）仍只得到 401，需人工停掉其 `tono-xray`。Xray 移除 client 不保证断开已建立的连接。
+## 2026-09-23 · shared-legacy 退役持久化到 Xray 静态配置（H7-F5）
+
+- **归属**：ops 控制面 / 出口节点吊销执行；`services/exit-agent`。
+- **来源**：基线 main def3dd79 → 分支 `fix/exit-agent-legacy-persist-20260923`（提交时未合 main）；内部审查 H7-F5，Issue #382。
+- **缺陷修复**：(a) `retireSharedLegacy` 只经 API 从运行中的 Xray 删除 `shared-legacy`，它仍在 `config.json`，Xray 每次重启复活；现在退役时同时从静态配置删除（同目录临时文件、保留属主/权限、`xray run -test` 通过后原子 rename 并 fsync 目录），每轮检查，失败则本轮最终 Refusal（见下）。(b) 拿不到 live 用户列表、只能用记录清单时（退役后记录中已无它）不再跳过：退役态下总是对 `shared-legacy` 执行 rmu（"not found" 视为成功），不改变其他 client 的"清单未知不删"规则。(c) `TONO_RETIRE_SHARED_LEGACY` 大小写不敏感，接受 `1/true/yes/on`、`0/false/no/off`（原先 `True` 等被当成 false）。审查修正（R4）：其他值告警并**保持现状**（本轮不退役）——退役持久化后是单向的，`false` 撤不回，回滚时拼错不能触发它。静态配置写入失败不再挡 roster ACK 与用量上报：失败先告警，本轮在计量完成后才以 Refusal 退出（超额吊销依赖用量上报）。
+- **新增/优化**：新环境变量 `TONO_XRAY_CONFIG`（默认 `/opt/tono-xray/current/config.json`），README 与 env 示例同步。
+- **工程与测试**：一个 unittest（override=`True`、无 list 能力、记录清单不含 shared-legacy、服务端信号为 false → 仍 rmu `shared-legacy` 且 config.json 中只剩手工 client），在修复前代码上实际跑红；既有 `RosterControlSignals` 测试夹具补一行 patch 持久化函数。审查修正新增两个窄测试（同一夹具加 `persist_error` 参数）：`test_an_unrecognized_override_leaves_shared_legacy_in_place`（`flase` → 不退役；旧实现 `True is not false`）、`test_a_failed_retirement_write_still_meters_before_refusing`（持久化抛 Refusal 时仍 ack roster 与 metering、state 已保存、最终仍 Refusal；旧实现 `acknowledge_roster` 调用 0 次）。两者只还原 `reconcile_and_report.py` 时均失败。
+- **验证**：MacBook 本机 `python3 -m unittest test_reconcile_and_report`（83 通过；审查修正后 `python3 test_reconcile_and_report.py` 85 通过）。未连接真实节点，未在真实 Xray 上验证空 clients 的 vless inbound 能否通过 `run -test`（不通过时 agent 不写入、告警，本轮在计量后以非零退出；计量不停）。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：agent 运行用户需对 release 目录可写；只跑 `--hy2-roster-only` 或未配置 exit_nodes/agent 的节点仍不会退役 Xray 上的 shared-legacy，`device_only` 就绪门看不到这些节点（未在本 PR 处理）。退役后重跑 `enable-tono-exit-metering.sh` 会因 vless 无 client 而拒绝。退役对每台节点是单向的，恢复需 `.pre-metering` 备份或重新配置。
 
 ## 2026-09-23 · coreMonitor 不得把运行时替换的瞬时 utun 消失判为 TUN 死亡
 

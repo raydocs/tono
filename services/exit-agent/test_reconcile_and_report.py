@@ -514,6 +514,7 @@ class RosterControlSignals(unittest.TestCase):
         reconcile_error: Exception | None = None,
         inventory_known: bool = True,
         hy2_error: Exception | None = None,
+        persist_error: Exception | None = None,
     ):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -544,9 +545,10 @@ class RosterControlSignals(unittest.TestCase):
                  side_effect=reconcile_error,
              ) as reconcile, \
              patch.object(agent, "sync_hy2_roster", side_effect=hy2_error), \
+             patch.object(agent, "persist_shared_legacy_retirement", side_effect=persist_error), \
              patch.object(agent, "acknowledge_roster", side_effect=ack_error) as acknowledge, \
-             patch.object(agent, "acknowledge_metering"):
-            if ack_error or reconcile_error or hy2_error or not inventory_known:
+             patch.object(agent, "acknowledge_metering") as self.acknowledge_metering:
+            if ack_error or reconcile_error or hy2_error or persist_error or not inventory_known:
                 with self.assertRaises(agent.Refusal):
                     agent.run_once(path)
             else:
@@ -563,6 +565,20 @@ class RosterControlSignals(unittest.TestCase):
     def test_an_explicit_false_override_blocks_server_retirement(self) -> None:
         _, reconcile, _ = self.run_round(server_retire=True, override="false")
         self.assertFalse(reconcile.call_args.kwargs["retire_shared_legacy"])
+
+    def test_an_unrecognized_override_leaves_shared_legacy_in_place(self) -> None:
+        # Retirement is persisted and one-way, so a typo must not trigger it.
+        _, reconcile, _ = self.run_round(server_retire=True, override="flase")
+        self.assertFalse(reconcile.call_args.kwargs["retire_shared_legacy"])
+
+    def test_a_failed_retirement_write_still_meters_before_refusing(self) -> None:
+        path, _, acknowledge = self.run_round(
+            server_retire=True,
+            persist_error=agent.Refusal("xray rejected config.json"),
+        )
+        acknowledge.assert_called_once()
+        self.acknowledge_metering.assert_called_once()
+        self.assertTrue(path.exists())
 
     def test_an_ack_failure_does_not_persist_the_round(self) -> None:
         path, _, _ = self.run_round(
@@ -746,6 +762,51 @@ class RosterControlSignals(unittest.TestCase):
         self.assertEqual(removed, [])
         round_answering(json.dumps({"error": {"code": "EXIT_NODE_DISABLED"}}).encode())
         self.assertEqual(sorted(removed), sorted(["u:usr_1", agent.LEGACY_CLIENT_EMAIL]))
+
+    def test_shared_legacy_retirement_survives_an_xray_restart(self) -> None:
+        # Mixed-case override, no live listing, and a durable inventory that no
+        # longer names shared-legacy: each used to leave it installed, and the
+        # static config brought it back on every Xray restart.
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        path.write_text(json.dumps({**fresh_state(), "installedClients": ["u:usr_1"]}))
+        config = Path(directory.name) / "config.json"
+        config.write_text(json.dumps({"inbounds": [{
+            "tag": "tono-vless", "protocol": "vless", "settings": {"clients": [
+                {"id": "11111111-1111-4111-8111-111111111111", "email": agent.LEGACY_CLIENT_EMAIL},
+                {"id": "22222222-2222-4222-8222-222222222222", "email": "operator"},
+            ]},
+        }]}))
+        calls: list[list[str]] = []
+
+        def fake_xray(_binary, arguments):
+            calls.append(arguments)
+            stdout = '{"stat": []}' if "statsquery" in arguments else ""
+            return type("Result", (), {"returncode": 0, "stdout": stdout, "stderr": ""})
+
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "exit-node-a",
+                 "TONO_RETIRE_SHARED_LEGACY": "True", "TONO_XRAY_CONFIG": str(config),
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "xray_start_marker", return_value=None), \
+             patch.object(agent, "require_commands", return_value={
+                 "add_user": "adu", "remove_user": "rmu", "stats_query": "statsquery",
+             }), \
+             patch.object(agent, "fetch_roster", return_value=("exit-node-a", 1_700_000_000, [
+                 {"userId": "usr_1", "clientUUID": "33333333-3333-4333-8333-333333333333",
+                  "deviceId": None},
+             ], False)), \
+             patch.object(agent, "run_xray", fake_xray), \
+             patch.object(agent, "acknowledge_roster"), \
+             patch.object(agent, "acknowledge_metering"):
+            agent.run_once(path)
+
+        self.assertIn(f"--email={agent.LEGACY_CLIENT_EMAIL}", [a for c in calls for a in c])
+        clients = json.loads(config.read_text())["inbounds"][0]["settings"]["clients"]
+        self.assertEqual([client["email"] for client in clients], ["operator"])
 
 
 class Hy2RosterAuthorization(unittest.TestCase):
