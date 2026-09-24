@@ -143,7 +143,14 @@ nonisolated enum HelperProtocolVersion {
     ///   liveness every ten seconds while armed and reinstalls it when it is
     ///   not filtering, and adds the read-only `GET /killswitch/health`
     ///   (`repairedSinceArm`) the connected app polls.
-    static let current = "4.16.0"
+    /// - 4.16.0 → 4.17.0 (merge-train number): the protected DNS snapshot records
+    ///   the network service ID next to its display name, and restore
+    ///   writes the original servers back by ID. A service renamed while
+    ///   protected used to be swept to automatic DNS with its snapshot
+    ///   deleted. When the recorded service no longer exists the snapshot is
+    ///   archived aside and `/dns/restore` adds `originalDNSRestored: false`;
+    ///   an enumeration without IDs keeps the snapshot and refuses release.
+    static let current = "4.17.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
