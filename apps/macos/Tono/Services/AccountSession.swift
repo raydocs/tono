@@ -125,8 +125,14 @@ final class AccountSession {
     var lastTrafficPolicyRevision: Int?
     @ObservationIgnored let accountLifecycle = AccountLifecycleCoordinator()
     var authMethodsLoading = false
+    @ObservationIgnored var authMethodsLoadRevision: UInt64?
     var hasStartedRestore = false
     var shouldResumeProtection = false
+    /// Before a sign-in consumes a kept resume intent: true only when AppState
+    /// accepted a helper-confirmed protection release under its protection
+    /// generation, clearing the armed intent. Replaceable so tests never reach
+    /// the privileged socket; unwired, no intent is ever retired.
+    @ObservationIgnored var protectionReleaseConsumer: @MainActor () async -> Bool
 
     var deviceLimit: Int { user?.deviceLimit ?? TonoAccountRules.maximumDevices }
     var isAtDeviceLimit: Bool { devices.count >= deviceLimit }
@@ -172,6 +178,7 @@ final class AccountSession {
          cloudFallbackPreferred: @escaping @MainActor () -> Bool = { false },
          cloudFallbackConsumer: @escaping @MainActor (Bool) throws -> Void = { _ in },
          killSwitchDisarmConsumer: @escaping @MainActor () async -> Void,
+         protectionReleaseConsumer: @escaping @MainActor () async -> Bool = { false },
          diagnosticSnapshotConsumer: @escaping @MainActor () -> TonoDiagnosticSnapshot = {
              TonoDiagnosticSnapshot(
                  appVersion: "unknown", build: "unknown", connected: false,
@@ -243,6 +250,7 @@ final class AccountSession {
         self.cloudFallbackPreferred = cloudFallbackPreferred
         self.cloudFallbackConsumer = cloudFallbackConsumer
         self.killSwitchDisarmConsumer = killSwitchDisarmConsumer
+        self.protectionReleaseConsumer = protectionReleaseConsumer
         self.diagnosticSnapshotConsumer = diagnosticSnapshotConsumer
         self.claudeTrafficResearchConsumer = claudeTrafficResearchConsumer
         self.protectionBlockedConsumer = protectionBlockedConsumer

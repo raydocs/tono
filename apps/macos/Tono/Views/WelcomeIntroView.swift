@@ -4,12 +4,15 @@ import SwiftUI
 enum WelcomeLaunchGate {
     /// Unseen + no session → intro. Seen → gate. Signed-in (or still restoring)
     /// → never, so a returning user does not flash the intro while restore runs.
+    /// Kill switch still holding → gate: only it says why the Mac is offline
+    /// and offers Restore internet (a launch whose session was refused).
     @MainActor
     static func showsIntro(
         introSeen: Bool,
-        sessionState: AccountSession.State
+        sessionState: AccountSession.State,
+        protectionHeld: Bool = false
     ) -> Bool {
-        guard !introSeen else { return false }
+        guard !introSeen, !protectionHeld else { return false }
         switch sessionState {
         case .signedOut, .error:
             return true

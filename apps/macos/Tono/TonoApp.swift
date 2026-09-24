@@ -64,6 +64,9 @@ struct TonoApp: App {
             killSwitchDisarmConsumer: {
                 await appState.disconnectAndWait(releaseKillSwitch: true)
             },
+            protectionReleaseConsumer: {
+                await appState.acceptConfirmedProtectionReleaseBeforeSignIn()
+            },
             diagnosticSnapshotConsumer: {
                 CrashReporter.shared.annotatedRemoteDiagnosticSnapshot(
                     appState.compactRemoteDiagnosticSnapshot()
@@ -140,7 +143,8 @@ struct TonoApp: App {
                 if InterfaceLanguagePreference.hasChosen {
                     if WelcomeLaunchGate.showsIntro(
                         introSeen: introSeen,
-                        sessionState: accountSession.state
+                        sessionState: accountSession.state,
+                        protectionHeld: KillSwitchService.isArmed
                     ) {
                         WelcomeIntroView()
                     } else {
