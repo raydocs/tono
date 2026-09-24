@@ -52,6 +52,7 @@ export async function exitClientUUID(
   userId: string,
   deviceId?: string | null,
   servedNodes: string[] = [],
+  servedHomes: Array<{ node: string; name: string }> = [],
 ): Promise<string> {
   if (deviceId) {
     await e.DB.prepare(
@@ -71,13 +72,24 @@ export async function exitClientUUID(
     }
     // A served node without an active exit_nodes row has no token to
     // acknowledge a roster with, so nothing proves it holds the credential.
+    // A served catalog home is left out only while no exit_nodes row (any
+    // status) carries its name or hy2 base name: the two tables share no
+    // uniqueness, so a home named like an exit must not exempt that exit.
     const readiness = await e.DB.prepare(
       `SELECT COUNT(*) AS served_nodes,
               SUM(CASE WHEN exit_nodes.status = 'active' AND exit_nodes.last_roster_at > ?
                        THEN 0 ELSE 1 END) AS unready_nodes
-       FROM json_each(?) served
-       LEFT JOIN exit_nodes ON exit_nodes.name = served.value`,
-    ).bind(Number(row.created_at), JSON.stringify(servedNodes)).first<Row>();
+       FROM (
+         SELECT value AS node FROM json_each(?)
+         UNION
+         SELECT json_extract(home.value, '$.node') FROM json_each(?) home
+         WHERE EXISTS (
+           SELECT 1 FROM exit_nodes named
+           WHERE named.name IN (json_extract(home.value, '$.node'), json_extract(home.value, '$.name'))
+         )
+       ) served
+       LEFT JOIN exit_nodes ON exit_nodes.name = served.node`,
+    ).bind(Number(row.created_at), JSON.stringify(servedNodes), JSON.stringify(servedHomes)).first<Row>();
     if (Number(readiness?.served_nodes ?? 0) < 1 || Number(readiness?.unready_nodes ?? 0) > 0) {
       // During the dual phase, keep existing and newly logging-in clients on
       // the per-user credential until the device credential is confirmed on
@@ -300,18 +312,21 @@ export async function publicManagedCatalog(
   // filtering so its readiness covers exactly the exit nodes this response
   // serves. A catalog home (a name the home filter restricts) is a home_exits
   // row, and nothing ties it to an exit_nodes acknowledgement, so it is left
-  // out; a catalog that serves no exit node stays fail-closed. A served list
-  // with no proxies issues nothing, even if a comment keeps the placeholder.
+  // out unless an exit node shares its name; a catalog that serves no exit
+  // node stays fail-closed. A served list with no proxies issues nothing,
+  // even if a comment keeps the placeholder.
   const servedItems = options?.userId && served.includes(CLIENT_UUID_PLACEHOLDER)
     ? splitManagedCatalogProxies(served).items
     : [];
   if (options?.userId && servedItems.length > 0) {
-    const servedNodes = new Set(
-      servedItems
-        .filter((item) => !homeNames.has(item.name) && !homeNames.has(catalogBaseName(item.name)))
-        .map((item) => catalogBaseName(item.name)),
-    );
-    const issued = await exitClientUUID(e, options.userId, options.deviceId, [...servedNodes]);
+    const servedNodes = new Set<string>();
+    const servedHomes: Array<{ node: string; name: string }> = [];
+    for (const item of servedItems) {
+      const node = catalogBaseName(item.name);
+      if (homeNames.has(item.name) || homeNames.has(node)) servedHomes.push({ node, name: item.name });
+      else servedNodes.add(node);
+    }
+    const issued = await exitClientUUID(e, options.userId, options.deviceId, [...servedNodes], servedHomes);
     served = served.split(CLIENT_UUID_PLACEHOLDER).join(issued);
   }
   return {

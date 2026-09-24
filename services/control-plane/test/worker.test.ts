@@ -1449,6 +1449,34 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(yaml).toContain(device.client_uuid);
   });
 
+  it('keeps an unacked exit node in readiness when a bound catalog home shares its name', async () => {
+    const account = await createAccount('home-exit-collision');
+    await env.DB.prepare(
+      'INSERT INTO exit_credentials(user_id, client_uuid, created_at, retired_at) VALUES(?, ?, 1, 1)',
+    ).bind(account.user.id, crypto.randomUUID()).run();
+    const block = (name: string, server: string) => `  - name: ${name}\n    type: vless\n    server: ${server}\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
+    expect((await admin('exit-catalog', {
+      yaml: `proxies:\n${block('Tono-Exit', 'exit.example.com')}${block('Collision', 'collision.example.com')}`,
+      expectedRevision: 0,
+    }, 'PUT')).status).toBe(200);
+    // exit-default is seeded active with an acknowledgement an hour ahead.
+    await env.DB.prepare("UPDATE exit_nodes SET name = 'Tono-Exit' WHERE id = 'exit-default'").run();
+    // Registered and active, but it has never acknowledged a roster.
+    expect((await admin('exit-nodes', { id: 'exit-collision', name: 'Collision' })).status).toBe(201);
+    const home = await admin('home-exits', { proxyName: 'Collision', displayName: 'Collision home' });
+    expect((await admin(
+      `users/${account.user.id}/home-binding`,
+      { homeExitId: ((await home.json()) as any).homeExit.id },
+      'PUT',
+    )).status).toBe(201);
+
+    const catalog = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(catalog.status).toBe(503);
+    expect((await catalog.json() as any).error.code).toBe('EXIT_IDENTITY_PROPAGATING');
+  });
+
   it('issues no exit identity when the served catalog filters down to no proxies', async () => {
     const account = await createAccount('empty-served');
     await env.DB.prepare(

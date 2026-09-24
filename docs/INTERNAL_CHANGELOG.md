@@ -79,6 +79,19 @@
     915 通过；`npm run typecheck` 通过。未部署，未碰远端 D1，无原生构建。
   - 剩余限制：家宽节点自身是否装上设备凭据仍不在门控内（与 8fc72696 前相同）；非 `filterHomeExits` 的带 userId 调用不排除家宽
     （当前没有这种调用方）。
+- **续修（2026-09-24，三轮审查 A-R2-F1，P2，Grok 与 Codex 各自发现、Codex 内存复现，同分支）**：
+  - 缺陷修复：`home_exits.proxy_name` 与 `exit_nodes.name` 分属两表、没有跨表唯一约束，发布也不拒重名块。上一版按家宽名排除
+    就绪集合时，与出口节点同名的家宽（`Collision`、`Collision · hy2`，或历史上的 `X · hy2` 家宽）会把该出口一并豁免：
+    出口缺行、disabled 或 ACK 为 0 时门控照样放行。改后：在同一条 `json_each` 就绪查询里，家宽块只有在原名与 hy2 基名都
+    **没有任何** `exit_nodes` 行（不论状态）时才排除；有同名出口行的一律按出口严格规则判定，仍是一次读。
+  - 有意保留（非缺陷）：dual 阶段未退役账户、下发目录只剩家宽时拿共享 UUID，是文档中的 dual 回落；退役账户与 `device_only` 仍 503。
+  - 测试：`test/worker.test.ts` 新增一个 `it`（`keeps an unacked exit node in readiness when a bound catalog home shares its name`：
+    退役账户，`Tono-Exit` 已 ACK，另登记 `Collision` 出口 ACK 为 0，并绑定同名 catalog 家宽）断言 503 `EXIT_IDENTITY_PROPAGATING`。
+    修复前在 b6c0a817 上红（`expected 200 to be 503`，即下发了设备 UUID），修复后绿。
+  - 验证：MacBook 本机 worktree：`npx vitest run test/worker.test.ts test/ops-api.test.ts` 231 通过；`npx vitest run` 43 个文件
+    916 通过；`npm run typecheck` 通过。未部署，未碰远端 D1，无原生构建。
+  - 剩余限制：未加跨表重名拒绝（建家宽时拒与出口同名、登记出口时拒与家宽同名），门控已不依赖它；名字恰为 `X · hy2` 的出口行
+    与同名家宽重叠时，就绪仍按基名 `X` 连接，查不到则按未就绪处理（fail-closed）。
 
 ## 2026-09-24 · 控制面列车 #570 审查续修：开户轮换预检、家宽名 hy2 后缀
 
