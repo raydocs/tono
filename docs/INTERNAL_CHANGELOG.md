@@ -32,6 +32,22 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS Continuity 直连改为按系统路径匹配
+
+- **归属/来源**：G1 连接保护；基线 main 244075f2，分支 `fix/continuity-direct-path-20260923`，
+  [Issue #325](https://github.com/raydocs/tono/issues/325)（内部审查 H1-F1），本条提交时未合 main。
+- **缺陷修复**：sing-box 产品规则按可执行文件名把 4 个 Continuity 守护进程送 `DIRECT`
+  （1e69b137 引入）。国内直连策略激活时 PF 放行 root 的 80/443/8000/8080，文件名不是身份。
+  现改为 `process_path` 精确匹配 SIP 密封系统卷上的路径（`/usr/libexec/sharingd`、
+  `rapportd`、`SidecarDisplayAgent`、IDS.framework 内的 `identityservicesd`）。PF 不变：
+  它只能按 UID 区分，进程边界在 sing-box 路由。
+- **工程与测试**：`SingBoxConfigTests.testDirectRoutesNeverMatchOnProcessName`，旧代码上
+  因 `DIRECT` 规则含 `process_name` 失败。
+- **验证**：本机只做 diff 检查，路径在 macOS 26 上用 `ps`/`ls` 核对；XCTest 与 emitted
+  runtime 的 `sing-box check` 由 GitHub-hosted `macos-26` CI 执行，结果见 PR。
+- **新增/发布/限制**：无新功能、无新包、无部署。未做实机复现；旧系统版本若路径不同，
+  规则不匹配，流量留在隧道。Windows sing-box 草稿的 `direct_process_names` 输入生产未接线，未改。
+
 ## 2026-09-23 · macOS Helper 被关闭、未加载或不响应时，App 明确提示“这台 Mac 当前未受保护”并进入修复
 
 - **归属/来源**：G1 连接保护（重启后保持保护）；macOS App 启动恢复 `RuntimeCleanup`。
