@@ -1,8 +1,12 @@
 use crate::config::Config;
 use crate::core::{CoreManager, handle};
+use crate::tono::state::TonoState;
 use crate::utils;
 use crate::utils::window_manager::WindowManager;
+use std::sync::Arc;
+use tauri::Manager as _;
 use tono_logging::{Type, logging};
+use tono_service_protocol::KillSwitchStatus;
 use tokio::time::Duration;
 #[cfg(target_os = "macos")]
 use tokio::time::timeout;
@@ -125,13 +129,15 @@ pub async fn restart_app() {
         crate::tono::commands::quit_release(handle::Handle::app_handle().clone()),
     )
     .await;
+    let release_wait_timed_out = release.is_err();
     if let Some(error) = interactive_release_wait_error(release) {
         logging!(
             error,
             Type::Service,
             "Tono: 无法证明重启前已恢复网络保护: {error}"
         );
-        if !ask_to_restart_without_release(&error).await {
+        let refusal = refusal_protection(release_wait_timed_out).await;
+        if !ask_to_restart_without_release(refusal).await {
             handle::Handle::global().clear_is_exiting();
             surface_cancelled_quit().await;
             handle::Handle::notice_message("app_restart::core_stop_failed", "");
@@ -225,27 +231,133 @@ fn interactive_release_wait_error<E>(wait: Result<Result<(), String>, E>) -> Opt
     }
 }
 
-/// Ask whether to exit while network protection is still armed.
+/// Bound on the Service read that picks the refusal dialog's wording. A Service busy with the
+/// release, or wedged, answers nothing in time, and that reads as "not confirmed".
+const REFUSAL_PROTECTION_READ_BUDGET: Duration = Duration::from_secs(2);
+
+/// The Service's own kill-switch reading for the refusal dialog; `None` when it did not answer.
+async fn protection_for_refusal_dialog() -> Option<KillSwitchStatus> {
+    tokio::time::timeout(
+        REFUSAL_PROTECTION_READ_BUDGET,
+        crate::core::service::tono_kill_switch_status(),
+    )
+    .await
+    .ok()
+    .and_then(Result::ok)
+}
+
+/// Whether any explicit release (this exit's, or a Disconnect it did not join, such as the one
+/// the pending-update fence returns before) is still registered and can yet remove the barrier.
+async fn release_in_progress() -> bool {
+    let state = handle::Handle::app_handle()
+        .try_state::<Arc<TonoState>>()
+        .map(|state| state.inner().clone());
+    match state {
+        Some(state) => state.release_in_progress().await,
+        None => false,
+    }
+}
+
+/// What the refusal dialog may say about protection. A release that can still run decides the
+/// wording on its own, so the Service is read only when none is; a release registered by the time
+/// the read returns still counts as running.
+async fn refusal_protection(release_wait_timed_out: bool) -> RefusalProtection {
+    if release_wait_timed_out || release_in_progress().await {
+        return classify_refusal(release_wait_timed_out, true, None);
+    }
+    let protection = protection_for_refusal_dialog().await;
+    classify_refusal(false, release_in_progress().await, protection.as_ref())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RefusalProtection {
+    /// The Service reports a wanted and live barrier, and no release is running.
+    Held,
+    /// A release may still finish after the dialog is answered.
+    ReleaseMayComplete,
+    /// No Service evidence of a live barrier.
+    Unconfirmed,
+}
+
+/// "Stays protected" is a promise, so it needs the Service's reading of a wanted and live barrier
+/// and a release that can no longer run. A click-level timeout does not cancel the release, and a
+/// non-timeout error (the pending-update fence) can return while another release is in flight.
+fn classify_refusal(
+    release_wait_timed_out: bool,
+    release_in_progress: bool,
+    protection: Option<&KillSwitchStatus>,
+) -> RefusalProtection {
+    if release_wait_timed_out || release_in_progress {
+        RefusalProtection::ReleaseMayComplete
+    } else if protection.is_some_and(|status| status.wanted && status.live) {
+        RefusalProtection::Held
+    } else {
+        RefusalProtection::Unconfirmed
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExitAction {
+    Quit,
+    Restart,
+}
+
+/// Title and body for exiting without a proven release. The raw release error is logged, not
+/// shown: its text ("protection stays on", "assumed on") would contradict the evidence classes.
+fn release_refusal_copy(action: ExitAction, refusal: RefusalProtection) -> (String, String) {
+    let (action_word, question) = match action {
+        ExitAction::Quit => (
+            tono_i18n::t!("exitRefusal.quitAction"),
+            tono_i18n::t!("exitRefusal.quitQuestion"),
+        ),
+        ExitAction::Restart => (
+            tono_i18n::t!("exitRefusal.restartAction"),
+            tono_i18n::t!("exitRefusal.restartQuestion"),
+        ),
+    };
+    let (title, state) = match refusal {
+        RefusalProtection::Held => (
+            tono_i18n::t!("exitRefusal.titleHeld"),
+            tono_i18n::t!("exitRefusal.held", action = action_word),
+        ),
+        RefusalProtection::ReleaseMayComplete => (
+            tono_i18n::t!("exitRefusal.titleReleaseMayComplete"),
+            tono_i18n::t!("exitRefusal.releaseMayComplete", action = action_word),
+        ),
+        RefusalProtection::Unconfirmed => (
+            tono_i18n::t!("exitRefusal.titleUnconfirmed"),
+            tono_i18n::t!("exitRefusal.unconfirmed"),
+        ),
+    };
+    let body = format!(
+        "{}\n\n{state}\n\n{}\n\n{question}",
+        tono_i18n::t!("exitRefusal.intro"),
+        tono_i18n::t!("exitRefusal.recovery"),
+    );
+    (title.into_owned(), body)
+}
+
+/// Ask whether to exit while network protection may still be armed.
 ///
 /// The previous behaviour was to refuse, always. With the Service dead, uninstalled or wedged,
 /// `tono_release_kill_switch` fails on both the IPC and its idempotent read-back, so release can
 /// never succeed and every Quit click was rejected forever with nothing offered. The invariant
 /// is that we must not *silently* open the network — not that the app must be unclosable.
-/// Exiting here leaves the barrier armed, which is the fail-closed direction, and the dialog
-/// says exactly that plus the elevated command that restores connectivity.
-async fn ask_to_quit_without_release(error: &str) -> bool {
+/// Exiting here leaves whatever barrier exists armed, which is the fail-closed direction; the
+/// dialog says what is known about it (see [`classify_refusal`]) plus the elevated command
+/// that restores connectivity.
+async fn ask_to_quit_without_release(refusal: RefusalProtection) -> bool {
     use tauri_plugin_dialog::{DialogExt as _, MessageDialogButtons, MessageDialogKind};
 
+    let (title, body) = release_refusal_copy(ExitAction::Quit, refusal);
     let (tx, rx) = tokio::sync::oneshot::channel();
     handle::Handle::app_handle()
         .dialog()
-        .message(format!(
-            "Tono could not confirm that network protection was released.\n\n{error}\n\nThis machine stays protected: no traffic leaves it while protection is armed. If you quit now it stays that way — start Tono again and disconnect, or run `tono-service.exe --emergency-disarm` as Administrator from the Tono installation folder.\n\nQuit anyway?"
-        ))
-        .title("Network protection is still active")
+        .message(body)
+        .title(title)
         .buttons(MessageDialogButtons::OkCancelCustom(
-            "Quit anyway".to_owned(),
-            "Stay open".to_owned(),
+            tono_i18n::t!("exitRefusal.quitButton").into_owned(),
+            tono_i18n::t!("exitRefusal.stayOpen").into_owned(),
         ))
         .kind(MessageDialogKind::Warning)
         .show(move |confirmed| {
@@ -258,19 +370,18 @@ async fn ask_to_quit_without_release(error: &str) -> bool {
 /// Same fail-closed choice as Quit, for the RestoringSessionScreen "Restart Tono" button.
 /// `notice_message` cannot reach the frontend while `is_exiting` is set, so this has to be a
 /// native dialog — the same reason Quit cannot use a toast here.
-async fn ask_to_restart_without_release(error: &str) -> bool {
+async fn ask_to_restart_without_release(refusal: RefusalProtection) -> bool {
     use tauri_plugin_dialog::{DialogExt as _, MessageDialogButtons, MessageDialogKind};
 
+    let (title, body) = release_refusal_copy(ExitAction::Restart, refusal);
     let (tx, rx) = tokio::sync::oneshot::channel();
     handle::Handle::app_handle()
         .dialog()
-        .message(format!(
-            "Tono could not confirm that network protection was released.\n\n{error}\n\nThis machine stays protected: no traffic leaves it while protection is armed. If you restart now it stays that way — start Tono again and disconnect, or run `tono-service.exe --emergency-disarm` as Administrator from the Tono installation folder.\n\nRestart anyway?"
-        ))
-        .title("Network protection is still active")
+        .message(body)
+        .title(title)
         .buttons(MessageDialogButtons::OkCancelCustom(
-            "Restart anyway".to_owned(),
-            "Stay open".to_owned(),
+            tono_i18n::t!("exitRefusal.restartButton").into_owned(),
+            tono_i18n::t!("exitRefusal.stayOpen").into_owned(),
         ))
         .kind(MessageDialogKind::Warning)
         .show(move |confirmed| {
@@ -299,9 +410,11 @@ pub async fn quit() -> tono_signal::ShutdownOutcome {
         crate::tono::commands::quit_release(handle::Handle::app_handle().clone()),
     )
     .await;
+    let release_wait_timed_out = release.is_err();
     if let Some(error) = interactive_release_wait_error(release) {
         logging!(error, Type::Service, "Tono: 无法证明退出前已恢复网络保护: {error}");
-        if !ask_to_quit_without_release(&error).await {
+        let refusal = refusal_protection(release_wait_timed_out).await;
+        if !ask_to_quit_without_release(refusal).await {
             handle::Handle::global().clear_is_exiting();
             // A refused Quit is the only outcome that leaves the app running against the user's
             // intent, and by then the window is usually hidden (the X only hides) or already gone.
@@ -457,10 +570,11 @@ pub async fn hide() {
 #[cfg(test)]
 mod tests {
     use super::{
-        interactive_release_wait_error, run_interactive_cleanup_transition,
-        run_session_ending_cleanup_transition, should_abort_exit_after_cleanup,
+        classify_refusal, interactive_release_wait_error, run_interactive_cleanup_transition,
+        run_session_ending_cleanup_transition, should_abort_exit_after_cleanup, RefusalProtection,
         INTERACTIVE_QUIT_RELEASE_BUDGET,
     };
+    use tono_service_protocol::{KillSwitchStatus, KillSwitchStatusMode};
     use tokio::time::Duration;
     use parking_lot::Mutex;
     use std::{
@@ -514,6 +628,41 @@ mod tests {
             timed_out.contains("8s"),
             "the click-level message must name the budget, got {timed_out}"
         );
+    }
+
+    #[test]
+    fn refusal_dialog_promises_protection_only_for_a_live_barrier_after_the_release_ended() {
+        fn status(wanted: bool, live: bool) -> KillSwitchStatus {
+            KillSwitchStatus {
+                wanted,
+                verified: wanted,
+                live,
+                mode: KillSwitchStatusMode::Blocked,
+                tunnel_permit_rendered: false,
+                endpoints: Vec::new(),
+                direct_endpoint_digest: String::new(),
+                last_error: None,
+            }
+        }
+        let live = status(true, true);
+
+        assert_eq!(classify_refusal(false, false, None), RefusalProtection::Unconfirmed);
+        assert_eq!(
+            classify_refusal(false, false, Some(&status(false, false))),
+            RefusalProtection::Unconfirmed,
+            "the Service reports protection off"
+        );
+        assert_eq!(
+            classify_refusal(true, false, Some(&live)),
+            RefusalProtection::ReleaseMayComplete,
+            "a timed-out wait does not cancel the release"
+        );
+        assert_eq!(
+            classify_refusal(false, true, Some(&live)),
+            RefusalProtection::ReleaseMayComplete,
+            "an error that did not join an in-flight release (update fence) is not its end"
+        );
+        assert_eq!(classify_refusal(false, false, Some(&live)), RefusalProtection::Held);
     }
 
     #[tokio::test]

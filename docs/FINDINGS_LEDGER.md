@@ -97,6 +97,7 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | H16-O-F7 | 冷启动恢复把已探测到的屏障状态压到 me() 返回之后才发布，期间托盘 flyout 显示 Standby 并提供 Connect | open | 待开 | 低·已确认 | 核实后收窄：仅初始未保护且持有 refresh token 的冷启动恢复、仅豁免恢复屏的托盘 flyout；Connect 会被账户准入拒绝；排在 #515 之后（restore.rs） |
 | H16-O-F1 | Protected Offline 横幅、登录「网络已被拦截」卡片与托盘提示只凭状态机锁存声称已拦截，未看 Service 的 live 屏障（= H16-C-F5） | in-PR | [#511](https://github.com/raydocs/tono/issues/511)，[#513](https://github.com/raydocs/tono/pull/513) | 高·已确认 | 仪表盘、进度卡、托盘面板已由 b489ea16 修正；托盘提示被速率覆盖、图标不刷新见 H16-O-F2 |
 | H16-O-F2 | 托盘图标只在启动时取样，状态发布不刷新；connecting/disconnecting 显示已连接图标；速率显示整段替换提示的保护行（= H16-C-F4） | in-PR | [#517](https://github.com/raydocs/tono/issues/517)，[#518](https://github.com/raydocs/tono/pull/518) | 中·已确认 | 反向「橙色卡住」变体为推导；未实机观察 |
+| H16-O-F6 | 退出/重启拒绝对话框不读 Service 就承诺「本机保持受保护」，而 8 s 超时后释放仍可能完成、待完成更新时主机可能从未受保护 | in-PR | [#519](https://github.com/raydocs/tono/issues/519)，[#520](https://github.com/raydocs/tono/pull/520) | 中·推导 | 文案已确认，慢释放时序需实机；App 侧 IPC 报错而 Service 仍在释放时仍可能误说保持受保护 |
 
 ## 3. DNS（两端）
 
