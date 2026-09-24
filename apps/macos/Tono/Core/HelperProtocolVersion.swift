@@ -162,7 +162,11 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.18.0 → 4.20.0 (merge-train number): PF DHCP permit sends only to the limited broadcast and
     ///   the inbound reply permit keeps no state. An older daemon keeps the
     ///   any-destination DHCP permit.
-    static let current = "4.20.0"
+    /// - 4.20.0 → 4.21.0 (merge-train number): `/helper/upgrade` checks the requesting bundle's seal
+    ///   and the candidate helper and core against the installer's Developer ID
+    ///   requirement. It refuses a helper that is not strictly newer than the
+    ///   running one, so older builds need the administrator install.
+    static let current = "4.21.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

@@ -295,22 +295,6 @@ final class SocketServer {
         sendResponse(client, status: 200, object: try updates.status())
     }
 
-    private func verifyEmbeddedSignature(_ path: String, identifier: String) throws {
-        var code: SecStaticCode?
-        let url = URL(fileURLWithPath: path)
-        guard SecStaticCodeCreateWithPath(url as CFURL, SecCSFlags(rawValue: 0), &code) == errSecSuccess,
-              let code else {
-            throw HelperFailure.invalid("Code object cannot be created for \(path)")
-        }
-        let requirementText = #"anchor apple generic and identifier "\#(identifier)" and certificate leaf[subject.OU] = "YY57758GS7""#
-        var requirement: SecRequirement?
-        guard SecRequirementCreateWithString(requirementText as CFString, SecCSFlags(rawValue: 0), &requirement) == errSecSuccess,
-              let requirement,
-              SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: 0), requirement) == errSecSuccess else {
-            throw HelperFailure.invalid("Signature requirement failed for \(path)")
-        }
-    }
-
     private func stageAndUpgrade(
         helperSource: String,
         mihomoSource: String,
@@ -342,6 +326,16 @@ final class SocketServer {
             throw HelperFailure.invalid("Core source path escapes authenticated peer bundle.")
         }
 
+        // The candidates must be the requesting App's own sealed resources,
+        // and that App must pass the installer's Developer ID requirement with
+        // its nested code and resources intact.
+        let bundlePath = String(allowedPrefix.dropLast("/Contents/".count))
+        guard realHelperPath == bundlePath + UpdatePackage.helperExecutable,
+              realMihomoPath == bundlePath + UpdatePackage.coreExecutable else {
+            throw HelperFailure.invalid("Upgrade sources must be the peer bundle's sealed helper and core.")
+        }
+        _ = try UpdatePackage.verifyCode(bundlePath, identifier: "com.raydocs.tono")
+
         let helperFD = open(realHelperPath, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
         guard helperFD >= 0 else {
             throw HelperFailure.invalid("Cannot safely open helper source.")
@@ -354,8 +348,8 @@ final class SocketServer {
         }
         close(mihomoFD)
 
-        try verifyEmbeddedSignature(realHelperPath, identifier: "com.raydocs.tono.helper")
-        try verifyEmbeddedSignature(realMihomoPath, identifier: "sing-box")
+        try UpdatePackage.verifyCode(realHelperPath, identifier: "com.raydocs.tono.helper")
+        try UpdatePackage.verifyCode(realMihomoPath, identifier: "sing-box")
 
         let helperTemp = "/Library/PrivilegedHelperTools/tono-core-helper.new"
         let mihomoTemp = "/Library/PrivilegedHelperTools/tono-sing-box.new"
@@ -384,8 +378,35 @@ final class SocketServer {
             throw HelperFailure.system("Could not copy core binary.")
         }
 
-        try verifyEmbeddedSignature(helperTemp, identifier: "com.raydocs.tono.helper")
-        try verifyEmbeddedSignature(mihomoTemp, identifier: "sing-box")
+        do {
+            try UpdatePackage.verifyCode(helperTemp, identifier: "com.raydocs.tono.helper")
+            try UpdatePackage.verifyCode(mihomoTemp, identifier: "sing-box")
+            // Ask the verified root-owned copy, not the user-writable source,
+            // which version it is. A silent upgrade only moves forward; an
+            // older or equal build needs the administrator install.
+            // Read stdout only: a runtime warning on stderr must not turn a
+            // valid version line into an unparsable one.
+            let probe = Process()
+            probe.executableURL = URL(fileURLWithPath: helperTemp)
+            probe.arguments = ["--version"]
+            probe.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
+            let stdout = Pipe()
+            probe.standardOutput = stdout
+            probe.standardError = FileHandle.nullDevice
+            try probe.run()
+            let output = stdout.fileHandleForReading.readDataToEndOfFile()
+            probe.waitUntilExit()
+            let candidate = String(decoding: output.prefix(64), as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard probe.terminationStatus == 0,
+                  helperUpgradeAdmissible(running: helperVersion, candidate: candidate) else {
+                throw HelperFailure.invalid("Silent helper upgrade requires a newer helper version.")
+            }
+        } catch {
+            unlink(helperTemp)
+            unlink(mihomoTemp)
+            throw error
+        }
 
         guard rename(helperTemp, helperDest) == 0 else {
             unlink(helperTemp)
@@ -397,4 +418,26 @@ final class SocketServer {
             throw HelperFailure.system("Could not replace core binary.")
         }
     }
+}
+
+/// Silent upgrades never move the root helper backwards. Versions are the
+/// three-part numeric `HelperProtocolVersion` strings; anything else fails
+/// closed.
+func helperUpgradeAdmissible(running: String, candidate: String) -> Bool {
+    func parts(_ version: String) -> [Int]? {
+        let fields = version.split(separator: ".", omittingEmptySubsequences: false)
+        guard fields.count == 3,
+              fields.allSatisfy({ !$0.isEmpty && $0.count <= 6 && $0.utf8.allSatisfy { $0 >= 48 && $0 <= 57 } }) else {
+            return nil
+        }
+        return fields.compactMap { Int($0) }
+    }
+    guard let running = parts(running), let candidate = parts(candidate) else { return false }
+    return running.lexicographicallyPrecedes(candidate)
+}
+
+func runHelperUpgradeAdmissionSelfTest() -> Bool {
+    !helperUpgradeAdmissible(running: "4.6.0", candidate: "4.5.0")
+        && !helperUpgradeAdmissible(running: "4.6.0", candidate: "4.6.0")
+        && helperUpgradeAdmissible(running: "4.9.0", candidate: "4.10.0")
 }
