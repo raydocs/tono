@@ -239,10 +239,11 @@ extension AccountSession {
             routeTelemetryCursor.forgetIntervalSupport(epoch: routeEpoch)
         } catch TonoAPIClient.APIError.unauthorized {
             guard !Task.isCancelled, accountReadRevision == accountRevision else { return }
-            await fail(
-                TonoAPIClient.APIError.unauthorized,
-                signsOutOnUnauthorized: true
-            )
+            // Refused after the client's own token renewal. The Worker answers
+            // an expired plan, a used-up allowance, a disabled account and a
+            // revoked device this way, so re-read the account as the catalog
+            // cadence does: suspended, protection left as it is.
+            await refreshAccount()
         } catch {
             // The next cadence retries. This path must not drop protection.
         }
@@ -364,10 +365,9 @@ extension AccountSession {
                         }
                         AppRoutingResearch.shared.acknowledge(lease)
                     } catch TonoAPIClient.APIError.unauthorized {
-                        await fail(
-                            TonoAPIClient.APIError.unauthorized,
-                            signsOutOnUnauthorized: true
-                        )
+                        // As for the periodic window: suspend through the
+                        // account re-read, never sign out or release here.
+                        await refreshAccount()
                         return
                     } catch {
                         // The single persisted idempotent pending snapshot is
@@ -526,11 +526,17 @@ extension AccountSession {
         earlyTelemetryTask?.cancel()
         earlyTelemetryTask = nil
         await descriptorConsumer(nil)
-        // Health / runtime failures keep kill switch; only auth sign-out disarms.
+        // No failure disarms, a refused session included: the Worker refuses an
+        // expired plan, a used-up allowance, a disabled account and a revoked
+        // device alike. Sign out with PF and DNS left as they are, like a launch
+        // without a stored session; the sign-in gate offers Restore internet
+        // while the kill switch holds, and the next sign-in still reconnects
+        // when crash recovery asked for it.
         if accountLost {
             await sidecar.stop()
-            await releaseNetworkProtection()
+            let resumeProtection = shouldResumeProtection
             await api.logout(); clearAccount(); state = .signedOut
+            shouldResumeProtection = resumeProtection
         } else {
             // Leave kill switch armed if it was armed — prevents IP leak on failed reconnect.
             state = .error((error as? LocalizedError)?.errorDescription ?? String(localized: "Something went wrong. Please try again."))

@@ -32,6 +32,45 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · macOS 会话被拒（401）不再释放 PF/DNS 保护
+
+- **归属/来源**：G2 客户端账户状态与保护边界；macOS `AccountSession+Telemetry.swift`。
+  内部审查 H17-O-F1、H17-O-F2（macOS 部分），与另一审查方 H17-G-F3 第 2、4 步为同一路径；
+  Issue #510。基线 main bb2ed4e4 → 分支 `fix/macos-auth-401-keeps-protection-20260924`；
+  提交时未合 main。
+- **缺陷修复**：套餐到期、流量用尽、账户停用、设备吊销（含别处登录挤掉）时，Worker 对鉴权
+  路由和 `auth/refresh` 一律回 401。macOS 有三处把这种 401 当成账户丢失：启动 restore
+  （`me` 与续期都 401）、周期遥测窗口、分应用路由研究上传。三处都走
+  `fail(signsOutOnUnauthorized: true)`，先 `releaseNetworkProtection()`
+  （`disconnectAndWait(releaseKillSwitch: true)`）再登出。结果是 PF 与受保护 DNS 被放开，
+  界面只剩登录页，不说原因。开了遥测的 Mac 睡眠期间跨过到期后，唤醒 45 s 的遥测先于 300 s
+  的账户重读，每次都走这条路。现在任何 401 都不释放保护：
+  - 启动 restore 仍登出，但 PF/DNS 保持原样，并保留崩溃恢复的 resume 意图。界面落到登录页
+    已有的"恢复网络"入口，与无存储会话的启动路径相同；重新登录后按原意图自动重连。
+  - 后台上传的 401 改走 `refreshAccount`，与目录循环一样进入 `.suspended`。保护不变，显示
+    原因页。
+- **新增/优化**：无。
+- **工程与测试**：`AccountSessionRequestTests` 新增两个 XCTest：
+  - `testBackgroundUploadRefusedSessionSuspendsAndKeepsProtection`：遥测与 refresh 都回
+    401；断言 disarm consumer 未被调用、状态为 `.suspended`、账户仍在。
+  - `testLaunchRefusedSessionSignsOutAndKeepsProtection`：驱动启动 restore 的 catch；断言
+    disarm consumer 未被调用、状态为 `.signedOut`、本地 refresh token 已删、resume 意图保留。
+
+  只含测试的提交 a1154ced（产品代码未改）在 GitHub-hosted macOS CI run 35973008589 上实际
+  跑红：build 作业只有这两个测试失败（`AccountSessionRequestTests` 51 项、6 处断言失败）。
+  后台用例：disarm 被调用，状态为 `signedOut`；启动用例：disarm 被调用，resume 意图被清。
+- **验证**：本机是编辑机，未运行 xcodebuild/swift。TonoTests 委托本 PR 的 GitHub-hosted
+  `macos-26` CI，结果以 PR 页的准确 head SHA 为准。未实机验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：
+  - Worker 仍对所有不合格情形回 401（加 entitlement 码是另一单元）。因此启动时的 401 仍会
+    登出，也不显示原因。
+  - `.suspended` 不停止正在运行的 Core，不作废缓存的出口凭据（H17-C-F3）。
+  - 网络日志上传在 suspended 下继续尝试 refresh（H17-O-F7）。
+  - 进入 suspended 时，周期遥测任务的句柄没有清空，这是 `refreshAccount` 路径的既有行为。
+    若暂停超过 20 分钟，解除后周期遥测要等下次睡眠唤醒或重启 App 才恢复。
+  - Windows 启动时的 401 仍会释放 WFP（`restore.rs:318-325`），不在本条范围。
+
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
 - **归属/来源**：G1–G3 审查与修复的可追溯性（工程流程与记录，非产品行为）；审查基线 main
