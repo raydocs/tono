@@ -582,7 +582,7 @@ final class AccountSessionRequestTests: XCTestCase {
         // Renewed: the same session is accepted again. The in-app flag still
         // says Protected Offline, but the helper confirms a release made
         // outside the app, so the resume must not re-arm.
-        account.killSwitchStatusObservation = { .confirmed(requiresProtectionRecovery: false) }
+        account.protectionReleaseConsumer = { .confirmed(requiresProtectionRecovery: false) }
         let recheck = Task { await account.refreshAccount() }
         let renewed = try await nextRequest(requests)
         XCTAssertTrue(renewed.request.url?.path.hasSuffix("/auth/refresh") == true)
@@ -634,6 +634,37 @@ final class AccountSessionRequestTests: XCTestCase {
         }
         XCTAssertFalse(running, "a suspended account's uploader would retry a refused token renewal every sweep")
         await uploader.stop()
+    }
+
+    func testCheckAgainDoesNotResumeIntoAHelperRepairTheUserDidNotAskFor() async throws {
+        var resumes: [Bool] = []
+        let (account, transport, host, requests) = fixture(
+            cloudFallbackConsumer: { resumes.append($0) },
+            protectionBlockedConsumer: { true }
+        )
+        let logUpload = SettingsKey.isNetworkLogUploadEnabled()
+        AppProfile.defaults.set(false, forKey: SettingsKey.networkLogUploadEnabled)
+        defer {
+            transport.invalidateAndCancel(); HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            ManagedExitCatalogOwnership.purge()
+            AppProfile.defaults.set(logUpload, forKey: SettingsKey.networkLogUploadEnabled)
+        }
+        try await adoptTestAccount(account)
+        account.enterEntitlementBlock(detail: nil)
+        // Protected Offline, and the helper rejects this app: a resumed
+        // connect would go straight to the helper repair and its admin prompt.
+        account.protectionReleaseConsumer = { .rejected }
+        let recheck = Task { await account.refreshAccount() }
+        let reread = try await nextRequest(requests)
+        reread.respond(status: 200, body: "{\"user\":\(Self.originalUser)}")
+        let fresh = try await nextRequest(requests)
+        XCTAssertTrue(fresh.request.url?.path.hasSuffix("/exit-catalog") == true)
+        fresh.respond(status: 200, body: #"{"revision":1,"yaml":"fixture","sha256":"fixture"}"#)
+        await recheck.value
+        XCTAssertEqual(account.state, .ready)
+        XCTAssertEqual(resumes, [false], "Check again must not reconnect into an administrator prompt")
+        await account.stopRuntime()
     }
 
     func testExplicitInvalidationRetiresReadBeforeUserIsCleared() async throws {
@@ -826,18 +857,31 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertTrue(account.shouldResumeProtection)
     }
 
-    func testSignInKeepsAResumeIntentUnlessTheHelperConfirmsRelease() async {
+    func testSignInKeepsTheArmedAndResumeIntentsUnlessTheHelperConfirmsRelease() async {
         let (account, transport, host, _) = fixture()
-        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
-        // A launch 401 kept crash recovery's intent; a root emergency disarm
-        // since then is known only to the helper.
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); KillSwitchService.isArmed = false }
+        // A launch 401 kept crash recovery's armed and resume intents; a root
+        // emergency disarm since then is known only to the helper, and cannot
+        // clear this user's defaults. The status seam stands in for the IPC.
+        let app = AppState()
+        var helperStatus = KillSwitchService.StatusObservation.unavailable
+        var runtime = NetworkProtectionOperations()
+        runtime.refreshKillSwitchStatus = { helperStatus }
+        app.networkProtection = runtime
+        account.protectionReleaseConsumer = { await app.acceptConfirmedProtectionReleaseBeforeSignIn() }
+        KillSwitchService.isArmed = true
         account.shouldResumeProtection = true
-        account.killSwitchStatusObservation = { .unavailable }
         await account.retireResumeIntentIfProtectionReleased()
         XCTAssertTrue(account.shouldResumeProtection, "an unreachable helper is no evidence of a release")
-        account.killSwitchStatusObservation = { .confirmed(requiresProtectionRecovery: false) }
+        XCTAssertTrue(KillSwitchService.isArmed, "an unreachable helper must not loosen the armed intent")
+        helperStatus = .confirmed(requiresProtectionRecovery: false)
         await account.retireResumeIntentIfProtectionReleased()
         XCTAssertFalse(account.shouldResumeProtection, "a confirmed release must not be re-armed by the next sign-in")
+        XCTAssertFalse(KillSwitchService.isArmed, "a confirmed release must not be re-armed at the next sleep")
+        // A Protected Offline native-update recovery arms without a resume intent.
+        KillSwitchService.isArmed = true
+        await account.retireResumeIntentIfProtectionReleased()
+        XCTAssertFalse(KillSwitchService.isArmed, "an armed intent alone must still meet a confirmed release")
     }
 
     private func adoptReplacementCredentials(_ account: AccountSession) async throws {

@@ -272,6 +272,10 @@ extension AccountSession {
         // into a later account even when server logout is slow or unavailable.
         deactivateAppRoutingResearch()
         ManagedExitCatalogOwnership.purge()
+        // A catalog request in flight is a detached task that cancelling the
+        // account work does not reach; the cleanup would otherwise wait out
+        // its network timeout. The slot stays so the cleanup still drains it.
+        catalogRefreshTask?.task.cancel()
         await accountLifecycle.enqueueCleanup(kind: .signOut) {
             await self.stopRuntime(logOutIdentity: true, releaseKillSwitch: true)
             await self.api.logout()
@@ -512,6 +516,7 @@ extension AccountSession {
     /// only have its token renewal refused again. The runtime start that ends
     /// the block starts it again.
     func enterEntitlementBlock(detail: String?) {
+        entitlementRefusals &+= 1
         entitlementDetail = detail
         if state == .ready { blockedWhileReady = true }
         pauseAppRoutingResearch()
@@ -535,8 +540,10 @@ extension AccountSession {
     private func resumeAfterEntitlementBlock() async {
         guard state == .suspended, blockedWhileReady, let owner = user?.id else { return }
         let revision = accountReadRevision
+        let refusals = entitlementRefusals
         func isCurrent() -> Bool {
             !Task.isCancelled && accountReadRevision == revision
+                && entitlementRefusals == refusals
                 && state == .suspended && user?.id == owner
         }
         func keepBlock() {
@@ -557,12 +564,19 @@ extension AccountSession {
         }
         // The in-app flag can lag a release made outside the app (the root
         // emergency disarm). Only a helper-confirmed release retires the
-        // intent; an unreachable or rejecting helper keeps it.
+        // intent; an unreachable helper keeps it.
         if protectionBlockedConsumer() { shouldResumeProtection = true }
-        await retireResumeIntentIfProtectionReleased()
+        let helperAnswer = await retireResumeIntentIfProtectionReleased()
         guard isCurrent() else {
             keepBlock()
             return
+        }
+        // Check again asked for the account, not for a helper repair. A
+        // rejecting helper, or reconnects paused until the user acts, would
+        // turn the resume into an administrator prompt nobody asked for;
+        // the runtime starts without it and PF stays exactly as it is.
+        if helperAnswer == .rejected || protectedReconnectPausedConsumer() {
+            shouldResumeProtection = false
         }
         blockedWhileReady = false
         entitlementDetail = nil
@@ -620,16 +634,25 @@ extension AccountSession {
     }
 
     /// A resume intent can outlive the sign-out that kept protection (a launch
-    /// 401). The runtime this sign-in starts would consume it and reconnect,
-    /// re-arming PF, so first ask the helper: a confirmed release since then
-    /// (the root emergency disarm) retires it. An unreachable or rejecting
-    /// helper is no evidence of a release, and the intent stands.
-    func retireResumeIntentIfProtectionReleased() async {
-        guard shouldResumeProtection else { return }
-        if case .confirmed(requiresProtectionRecovery: false) =
-            await killSwitchStatusObservation() {
+    /// 401), and so can the armed intent behind it. The runtime this sign-in
+    /// starts would consume the resume intent and reconnect, re-arming PF, and
+    /// a stale armed intent re-arms it at the next sleep. So first ask the
+    /// helper: AppState accepts a confirmed release since then (the
+    /// root emergency disarm), clearing the armed intent, and the resume
+    /// intent retires with it. An unreachable or rejecting helper is no
+    /// evidence of a release, and both intents stand. The armed intent alone
+    /// is enough to ask: a Protected Offline native-update recovery arms it
+    /// without a resume intent. Returns the helper's answer (released, still
+    /// armed, rejected or unavailable), or nil when neither intent was set.
+    @discardableResult
+    func retireResumeIntentIfProtectionReleased() async
+        -> KillSwitchService.StatusObservation? {
+        guard shouldResumeProtection || KillSwitchService.isArmed else { return nil }
+        let answer = await protectionReleaseConsumer()
+        if case .confirmed(requiresProtectionRecovery: false) = answer {
             shouldResumeProtection = false
         }
+        return answer
     }
 
     func authenticate(_ operation: @escaping @MainActor () async throws -> TonoAuthResponse) async {

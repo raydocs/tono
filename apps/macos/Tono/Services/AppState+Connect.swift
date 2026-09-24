@@ -1745,6 +1745,32 @@ extension AppState {
         }
     }
 
+    /// A launch 401 signs out with PF, the armed intent and the resume intent
+    /// kept, and nothing on that path sets `isProtectionBlocked`, so the
+    /// activation reconcile above never runs. The root emergency disarm cannot
+    /// clear this user's defaults: a stale `isArmed` would re-arm PF at the
+    /// next sleep. Before a sign-in (or Check again's re-acceptance) consumes
+    /// those intents, accept an authenticated helper release the same way.
+    /// Returns the helper's answer. A release is returned only when accepted;
+    /// an answer that a protection operation overtook, or one not asked for
+    /// because an operation is in flight, is `.unavailable`. Only an accepted
+    /// release clears anything: every other answer keeps every intent.
+    func acceptConfirmedProtectionReleaseBeforeSignIn() async
+        -> KillSwitchService.StatusObservation {
+        guard !isConnected, !isConnecting, !isDisconnecting else { return .unavailable }
+        let observedGeneration = self.connectionCoordinator.protectionOperationGeneration
+        let networkProtection = self.networkProtection
+        let observation = await networkProtection.refreshKillSwitchStatus()
+        guard !Task.isCancelled,
+              self.connectionCoordinator.protectionOperationGeneration == observedGeneration,
+              !isConnected, !isConnecting, !isDisconnecting
+        else { return .unavailable }
+        if case .confirmed(requiresProtectionRecovery: false) = observation {
+            acceptConfirmedExternalProtectionRelease()
+        }
+        return observation
+    }
+
     private func acceptConfirmedExternalProtectionRelease() {
         self.connectionCoordinator.bumpGeneration()
         recoveryCause = nil
