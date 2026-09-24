@@ -131,6 +131,27 @@ pub fn seed_from_cache(inner: &mut TonoInner) {
     let _ = ensure_usable_selection(inner);
 }
 
+/// Drop the signed-out account's catalog from memory and disk. The body is
+/// issued per account (client UUID, residential SOCKS5 credentials), so the
+/// next account must never start from it, and the tracker must not compare
+/// the next account's payload against it. A failed delete is logged: the
+/// next session's catalog still replaces it on first sync.
+pub(crate) fn discard_account_catalog(inner: &mut TonoInner) {
+    inner.nodes = Vec::new();
+    inner.routing = None;
+    inner.catalog_tracker = tono_core::CatalogTracker::new();
+    let cache = inner.catalog_cache();
+    match std::fs::remove_file(cache.path()) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => logging!(
+            warn,
+            Type::Service,
+            "Tono: failed to delete the signed-out account's catalog cache: {err}"
+        ),
+    }
+}
+
 /// Sanitize the catalog's split-routing directives against the admitted
 /// nodes, warning on dropped selection hints. Catalog/cache admission has
 /// already rejected any unusable declared home hop before this projection.
