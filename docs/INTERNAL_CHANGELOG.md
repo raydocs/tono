@@ -32,6 +32,31 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 网络日志上传：服务器明确不存储时停驻，不再重发整段
+
+- **归属/来源**：G2（客户端 3.5 网络日志上传，#137）；macOS App `DiagnosticsLogUploader`。
+  内部审查 H13-F1，Issue #452（Windows 对应修复另开 PR）。基线 main bb2ed4e4 → 分支
+  `fix/log-upload-standdown-macos-20260923`；提交时未合 main。
+- **缺陷修复**：上传默认开，Worker 只为 ops 打开采集窗口的设备存储，其余返回 200
+  `stored:false`。App 把它当普通失败：保留整段、游标不动，按 120→960 s 退避后重发同一段
+  （最多 2 MiB gzip），无限期；已连接时这些字节经出口节点计入用户配额。现在
+  `uploadDiagnosticsLogSegment` 对不存储回执抛出专用 `DiagnosticsLogNotStoredError`
+  （文案不变），上传器收到后丢弃内存中的段（服务器已说明未存该键）、游标保持不动、进入停驻：
+  每 30 分钟用不超过 64 KiB 原始数据的小段探测一次；任何一次成功存储即结束停驻并恢复正常
+  分段。手动“立即上传”仍显示“未存储”的原因。
+- **新增/优化**：无。
+- **工程与测试**：`DiagnosticsLogUploadOutcomeTests` 新增一个 XCTest
+  `testANotStoredReceiptStandsDownToASmallProbe`：约 280 KB 日志，首段 1,200 行被拒后，
+  下一次间隔为停驻间隔，第二次只发不超过 64 KiB 的探测段。旧代码下第二次会重发同样的
+  1,200 行整段（新测试引用的错误类型与间隔常量在旧代码中不存在）。已有
+  `testNoStoreLogReceiptReportsFailureAndRetainsTheUploadCursor` 语义不变（拒收后同一序号
+  重试、存储后游标前进）。
+- **验证**：本机（编辑机）未运行 swift/xcodebuild；编译与 TonoTests 委托本 PR 的
+  GitHub-hosted `macos-26` CI，结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：停驻状态只在内存中，App 重启后第一次仍会发一个完整段再进入停驻。ops 打开
+  采集窗口后最长约 30 分钟才开始上传。实际上行字节量需实机抓包确认。
+
 ## 2026-09-23 · macOS 登出时删除含账户出口凭据的 sing-box 运行时文件
 
 - **归属/来源**：G1 账户隔离；影响 macOS `ManagedExitCatalogOwnership`/`ConfigStorage`。
