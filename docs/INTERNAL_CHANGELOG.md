@@ -845,6 +845,29 @@
   可能在新会话里保留至多 30 s（只影响提示）。与 #305 的文本冲突现在只在 `support.tsx` 标记列表
   （合并时保留四项）。
 
+## 2026-09-23 · Windows 升级后归档 0.0.72 遗留的更新交接记录
+
+- **归属/来源**：G3 客户升级路径；Windows App + tono-core。内部审查 H15-F3，Issue #496。
+  基线 origin/main bb2ed4e4；分支 `fix/legacy-handoff-windows-20260923`；未合 main。
+- **缺陷修复**：0.0.72 设置页更新写下 `update-handoff.json`（`ConnectionQuiescing`，或安装器
+  拒绝后被 0.0.72 记为 `Failed`）。0.0.73 起不再推进、提交或删除它，而状态读取把过期（`load`
+  返回 Err）或 Failed 当作"更新恢复未完成"，Dashboard 永久告警。改为启动恢复入口
+  `restore_session_guarded` 先调用 `update_handoff::retire_completed_legacy_journal`：当前
+  `CARGO_PKG_VERSION` ≥ 记录的 `next_app_version`（数字点分比较），把原字节归档到
+  `update-handoff.history/` 后删除；目标版本更高、无法解析、schema 不符或版本号不可解析时
+  保留原文件并照旧告警。原生 v1 更新事务（Service `state.json`）不受影响，保护状态也不依赖
+  这份记录。
+- **新增/优化**：无。
+- **工程与测试**：一个 `#[test]`
+  `completed_legacy_upgrade_journal_is_archived_and_no_longer_incomplete`（tono-core）：已过期的
+  0.0.72 → 0.0.73 记录在 0.0.72 下保留（`load` 仍报错），在 0.0.73 下原字节归档且 `load` 为空。
+  旧代码无此入口（编译失败即失败）。`write_prepared` 的归档代码抽成共用函数，行为不变。
+- **验证**：本机未执行 cargo（2026-09-14 所有者决定）；仅用 rustfmt 做语法解析检查。回归交给
+  本 PR 的 GitHub-hosted windows-2025 CI（`cargo test -p tono-core` 与 App crate），结果见 PR。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：必须在 0.0.73 发给 0.0.72 客户之前合入。未在 Windows 11 上用 0.0.72 设置页
+  升级实测。安装器在已连接时静默拒绝（H15-F2）另开 PR。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
