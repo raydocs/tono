@@ -32,6 +32,30 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 首次 arm 结果未知时保持 fail-closed 意图
+
+- **归属/来源**：G1 保护恢复；macOS `KillSwitchService.arm`。内部审查 X1-7（降级：需三个条件
+  同时发生），Issue #432。基线 main bb2ed4e4 → 分支 `fix/arm-unknown-outcome-20260923`；
+  提交时未合 main。
+- **缺陷修复**：helper 先持久化 armed 状态并加载 PF，再回复成功。回复丢失（helper 崩溃、
+  重启或接收超时）且紧接的 status 补查也拿不到回答时，App 本地 `isArmed` 仍为 false，
+  连接失败清理据此走释放拆除，helper 恢复后自动解除已经提交的 PF。现在只要请求可能已送达
+  （除套接字连接被拒以外的 IPC 失败）且 status 无回答，就按"可能已 arm"处理，把 `isArmed`
+  置 true：连接失败走保留拆除和受保护重连循环，循环里的 status 对账在 helper 确认没有 arm
+  时再释放。连接被拒（helper 从未收到请求）保持原行为。
+- **新增/优化**：无。
+- **工程与测试**：`KillSwitchService` 新增窄 IPC seam `armIPC`（`deliver` 包住真实
+  `/killswitch/arm` 请求，`status` 读 `/killswitch/status`），生产行为不变。新增
+  `KillSwitchArmOutcomeTests.testLostArmReplyWithUnavailableStatusKeepsFailClosedIntent`
+  （一个 XCTest）：arm 抛 `emptyResponse`，status 抛 `connectFailed`，断言 `isArmed == true`。
+  旧逻辑下为 false，断言失败。
+- **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests），结果以 PR 页为准。回执丢失场景未做实机复现。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：请求实际没被 helper 处理（例如 helper 读到半截请求就退出）时，界面会先显示
+  Protected Offline，直到重连循环的 status 对账确认未 arm 才回到开放状态，此时连接失败信息
+  也被清掉。helper 协议未改，CONTRACT.sha256 与协议版本不变。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
