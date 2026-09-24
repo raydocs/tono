@@ -48,8 +48,13 @@
 - **验证**：本机 `ruby tooling/scripts/tests/macos-candidate-workflow.test.rb` 通过、`sh -n package-macos-test.sh` 通过、
   xcstrings JSON 可解析；Swift 未在本机编译（按执行位置规定），以 PR CI 的 XCTest 为准，红→绿运行号见 PR。
 - **候选/发布**：无新包，仅源码；下一次 `candidate_only` 签名运行才会带内部标记。
-- **剩余限制**：未在真实签名候选包上验证提示与上报；内部版没有单独关闭开关；快照窗口本身仍默认关闭；
+- **剩余限制**：未在真实签名候选包上验证提示与上报；快照窗口本身仍默认关闭；
   维护者本地用 `package-macos-test.sh` 打的测试包需显式 `TONO_BUILD_CHANNEL=internal` 才算内部版。
+- **2026-09-24 审查跟进**（DG-OpenAI-1/DG-grok-1，P2）：修复——内部版原先没有任何关闭方式（快照开关默认即关，不能兼作退出）。
+  新增独立键 `internalFailureReportsOptedOut`，`failureReportScope` 在内部版且已保存退出时返回 nil；设置 → 隐私的提示行改为
+  开关「连接失败上报」（默认开，含简体中文）。已开启快照的用户仍按快照同意发送完整记录。测试：一个 XCTest
+  （`testAnInternalBuildsSavedOptOutStopsClassifiedFailureReports`；旧代码无该键与参数，编译失败，旧逻辑对内部版恒返回
+  `.classified`）。验证：本机未运行（不做本机 Swift 编译），以 PR CI 为准。剩余限制：开关只控制内部版默认上报，不影响快照。
 
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 

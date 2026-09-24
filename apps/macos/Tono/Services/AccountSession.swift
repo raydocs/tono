@@ -15,6 +15,11 @@ extension SettingsKey {
         "periodicTelemetryEnabled"
     nonisolated static let periodicTelemetryDefaultV2Applied =
         "periodicTelemetryDefaultV2Applied"
+    /// Internal builds only: the user turned off the classified connect-failure
+    /// report that those builds send by default. Its own key because the
+    /// snapshot switch is off by default and cannot also mean "opted out".
+    nonisolated static let internalFailureReportsOptedOut =
+        "internalFailureReportsOptedOut"
 }
 
 /// What an immediate connect-failure report may carry.
@@ -183,16 +188,23 @@ final class AccountSession {
         (info?["TonoBuildChannel"] as? String) == "internal"
     }
 
+    /// The saved internal-build opt-out. Unset means the default stays on.
+    nonisolated static var isInternalFailureReportsOptedOut: Bool {
+        AppProfile.defaults.bool(forKey: SettingsKey.internalFailureReportsOptedOut)
+    }
+
     /// Whether a connect failure is reported, and with what. Release builds
     /// report only after the snapshot opt-in; internal builds also send the
-    /// classified record without it. That default comes from the build, not
-    /// from UserDefaults, so the one-shot v2 reset cannot turn it off on upgrade.
+    /// classified record without it unless the user saved the opt-out. That
+    /// default comes from the build, not from UserDefaults, so the one-shot v2
+    /// reset cannot turn it off on upgrade.
     nonisolated static func failureReportScope(
         internalBuild: Bool,
-        snapshotOptedIn: Bool
+        snapshotOptedIn: Bool,
+        internalOptedOut: Bool
     ) -> ConnectFailureReportScope? {
         if snapshotOptedIn { return .full }
-        return internalBuild ? .classified : nil
+        return internalBuild && !internalOptedOut ? .classified : nil
     }
 
     init(api: TonoAPIClient = TonoAPIClient(), keychain: KeychainStore = KeychainStore(), sidecar: TonoSidecarService,

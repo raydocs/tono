@@ -16,6 +16,7 @@ final class PeriodicTelemetryConsentTests: XCTestCase {
     override func tearDown() {
         defaults.removeObject(forKey: SettingsKey.periodicTelemetryEnabled)
         defaults.removeObject(forKey: SettingsKey.periodicTelemetryDefaultV2Applied)
+        defaults.removeObject(forKey: SettingsKey.internalFailureReportsOptedOut)
         super.tearDown()
     }
 
@@ -60,16 +61,39 @@ final class PeriodicTelemetryConsentTests: XCTestCase {
             "a release build's unset build setting expands to an empty string"
         )
         XCTAssertEqual(
-            AccountSession.failureReportScope(internalBuild: true, snapshotOptedIn: snapshot),
+            AccountSession.failureReportScope(internalBuild: true, snapshotOptedIn: snapshot, internalOptedOut: false),
             .classified
         )
         XCTAssertNil(
-            AccountSession.failureReportScope(internalBuild: false, snapshotOptedIn: snapshot),
+            AccountSession.failureReportScope(internalBuild: false, snapshotOptedIn: snapshot, internalOptedOut: false),
             "release builds keep today's opt-in"
         )
         XCTAssertEqual(
-            AccountSession.failureReportScope(internalBuild: false, snapshotOptedIn: true),
+            AccountSession.failureReportScope(internalBuild: false, snapshotOptedIn: true, internalOptedOut: false),
             .full
+        )
+    }
+
+    /// Internal builds report classified failures by default, but the user can
+    /// save an opt-out; the snapshot switch cannot carry it because it is
+    /// already off by default.
+    func testAnInternalBuildsSavedOptOutStopsClassifiedFailureReports() {
+        defaults.removeObject(forKey: SettingsKey.internalFailureReportsOptedOut)
+        XCTAssertEqual(
+            AccountSession.failureReportScope(
+                internalBuild: true, snapshotOptedIn: false,
+                internalOptedOut: AccountSession.isInternalFailureReportsOptedOut
+            ),
+            .classified,
+            "an unset key keeps the internal default on"
+        )
+        defaults.set(true, forKey: SettingsKey.internalFailureReportsOptedOut)
+        XCTAssertNil(
+            AccountSession.failureReportScope(
+                internalBuild: true, snapshotOptedIn: false,
+                internalOptedOut: AccountSession.isInternalFailureReportsOptedOut
+            ),
+            "the saved opt-out must stop the classified report"
         )
     }
 

@@ -270,12 +270,14 @@ extension AccountSession {
     /// consent as the protection snapshot — it is a slice of the same event
     /// ring — and the Worker keeps a separate budget for it, so a bad evening
     /// of retries cannot starve the heartbeat that would show the recovery.
-    /// An internal build also sends the classified fields without that consent.
+    /// An internal build also sends the classified fields without that consent,
+    /// until the user turns that off in Settings.
     func reportConnectFailure(_ notice: ConnectFailureNotice) async {
         guard state == .ready, !systemSleeping, user != nil,
               let scope = Self.failureReportScope(
                   internalBuild: Self.isInternalBuild(),
-                  snapshotOptedIn: Self.isPeriodicTelemetryEnabled
+                  snapshotOptedIn: Self.isPeriodicTelemetryEnabled,
+                  internalOptedOut: Self.isInternalFailureReportsOptedOut
               ) else { return }
         let full = scope == .full
         let snapshot = diagnosticSnapshotConsumer()

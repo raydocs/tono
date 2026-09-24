@@ -952,12 +952,22 @@
         }
       }
     },
-    "Internal test build: failed connections are reported to Tono automatically (stage, error code, version and server only)": {
+    "Failed connection reports": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "内部测试版：连接失败会自动上报给 Tono（仅含阶段、错误代码、版本和服务器）"
+            "value": "连接失败上报"
+          }
+        }
+      }
+    },
+    "Internal test build, on by default: a failed connection is reported to Tono (stage, error code, version and server only). Turn it off here.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内部测试版默认开启：连接失败会上报给 Tono（仅含阶段、错误代码、版本和服务器）。可在此关闭。"
           }
         }
       }
