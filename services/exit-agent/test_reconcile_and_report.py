@@ -514,6 +514,7 @@ class RosterControlSignals(unittest.TestCase):
         reconcile_error: Exception | None = None,
         inventory_known: bool = True,
         hy2_error: Exception | None = None,
+        persist_error: Exception | None = None,
     ):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -544,10 +545,10 @@ class RosterControlSignals(unittest.TestCase):
                  side_effect=reconcile_error,
              ) as reconcile, \
              patch.object(agent, "sync_hy2_roster", side_effect=hy2_error), \
-             patch.object(agent, "persist_shared_legacy_retirement"), \
+             patch.object(agent, "persist_shared_legacy_retirement", side_effect=persist_error), \
              patch.object(agent, "acknowledge_roster", side_effect=ack_error) as acknowledge, \
-             patch.object(agent, "acknowledge_metering"):
-            if ack_error or reconcile_error or hy2_error or not inventory_known:
+             patch.object(agent, "acknowledge_metering") as self.acknowledge_metering:
+            if ack_error or reconcile_error or hy2_error or persist_error or not inventory_known:
                 with self.assertRaises(agent.Refusal):
                     agent.run_once(path)
             else:
@@ -564,6 +565,20 @@ class RosterControlSignals(unittest.TestCase):
     def test_an_explicit_false_override_blocks_server_retirement(self) -> None:
         _, reconcile, _ = self.run_round(server_retire=True, override="false")
         self.assertFalse(reconcile.call_args.kwargs["retire_shared_legacy"])
+
+    def test_an_unrecognized_override_leaves_shared_legacy_in_place(self) -> None:
+        # Retirement is persisted and one-way, so a typo must not trigger it.
+        _, reconcile, _ = self.run_round(server_retire=True, override="flase")
+        self.assertFalse(reconcile.call_args.kwargs["retire_shared_legacy"])
+
+    def test_a_failed_retirement_write_still_meters_before_refusing(self) -> None:
+        path, _, acknowledge = self.run_round(
+            server_retire=True,
+            persist_error=agent.Refusal("xray rejected config.json"),
+        )
+        acknowledge.assert_called_once()
+        self.acknowledge_metering.assert_called_once()
+        self.assertTrue(path.exists())
 
     def test_an_ack_failure_does_not_persist_the_round(self) -> None:
         path, _, _ = self.run_round(

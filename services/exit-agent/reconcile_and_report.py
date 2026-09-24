@@ -171,8 +171,10 @@ def xray_config_path() -> Path:
 def retire_override(raw: str) -> bool | None:
     """The operator's TONO_RETIRE_SHARED_LEGACY, or None when unset.
 
-    Case and common spellings are accepted. Anything else retires: a typo must
-    not silently keep a credential every old catalog still holds.
+    Case and common spellings are accepted. Anything else keeps shared-legacy
+    as it is this round and warns: retirement is persisted to the static
+    config and cannot be undone by a later `false`, so a typo during rollback
+    must not trigger it.
     """
     value = raw.strip().lower()
     if not value:
@@ -181,9 +183,9 @@ def retire_override(raw: str) -> bool | None:
         return True
     if value in ("0", "false", "no", "off"):
         return False
-    print(f"TONO_RETIRE_SHARED_LEGACY={raw!r} is not true/false; retiring shared-legacy",
+    print(f"TONO_RETIRE_SHARED_LEGACY={raw!r} is not true/false; leaving shared-legacy as it is",
           file=sys.stderr)
-    return True
+    return False
 
 
 def api_address() -> str:
@@ -1137,9 +1139,17 @@ def run_once(path: Path) -> None:
         raise Refusal(
             "the live client inventory is unavailable and no durable inventory can prove complete reconciliation"
         )
+    persist_error: Refusal | None = None
     if retire_shared_legacy:
         # Checked every round: a hand edit or reprovision can put it back.
-        persist_shared_legacy_retirement(binary, xray_config_path())
+        # The running Xray is already reconciled; a static-config write failure
+        # must not stop the roster ACK or usage reporting (quota enforcement
+        # depends on it), so it fails the round only after metering.
+        try:
+            persist_shared_legacy_retirement(binary, xray_config_path())
+        except Refusal as error:
+            print(f"shared-legacy retirement not persisted: {error}", file=sys.stderr)
+            persist_error = error
     # Only a complete reconciliation is readiness evidence. Do this before any
     # state save so a failed acknowledgement leaves the durable state intact and
     # the whole roster can be retried next round.
@@ -1224,10 +1234,12 @@ def run_once(path: Path) -> None:
     if not state["pendingReports"]:
         acknowledge_metering(base, token, observed_at)
         print("no new usage to report")
-        return
-    delivered, dropped = deliver_queue(base, token, path, state)
-    acknowledge_metering(base, token, observed_at)
-    print(f"reported usage for {delivered} accounts as {source}, dropped {dropped}")
+    else:
+        delivered, dropped = deliver_queue(base, token, path, state)
+        acknowledge_metering(base, token, observed_at)
+        print(f"reported usage for {delivered} accounts as {source}, dropped {dropped}")
+    if persist_error is not None:
+        raise persist_error
 
 
 def main(*, hy2_roster_only: bool = False) -> None:
