@@ -32,6 +32,35 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 网络切换后 DIRECT 仍绑旧网卡时不再原地保持
+
+- **归属/来源**：G1 连接可靠性；Windows App 连接监控（`connection/monitor.rs`、
+  `connection_health.rs`、`connection/platform.rs`）。内部审查 X2-1，Issue #461。基线 main
+  bb2ed4e4 → 分支 `fix/direct-rebind-20260923`；提交时未合 main。
+- **缺陷修复**：可选 DIRECT 出站按连接时抓到的网卡名写死 `interface-name`，之后不再重取；
+  网络变化后只要隧道探针成功就原地保持 Connected（事件探针分支与 `RecoveredInPlace` 两处）。
+  在两块网卡间切换（如拔网线由 Wi-Fi 接管）且旧网卡断开时，隧道已在新网卡恢复，DIRECT 新连接
+  仍拨向旧网卡而失败，界面却一直显示 Connected + DIRECT on。现在记录已提交 DIRECT 所绑网卡
+  （`applied_direct_interface`），原地保持前用纯函数 `may_recover_in_place` 判断：该网卡已不在
+  "带 IPv4 默认路由、运行中的硬件网卡"列表里（或读不到列表）时，改走既有的受保护拆除 + 重连
+  （`Stop(false)` 在 Service 锁内收紧 WFP，新事务在首次 Core 启动前重新探测网卡）。网卡列表
+  不经 `GetBestRoute2`（TUN 起来后它会解析到 Tono 自己的网卡），沿用同一硬件/虚拟网卡过滤。
+  没有 DIRECT 的全隧道会话不读网卡、行为不变。保护不放宽。
+- **新增/优化**：无。
+- **工程与测试**：新增一个 `#[test]`
+  `connection_health::tests::a_direct_overlay_bound_to_a_lost_adapter_cannot_recover_in_place`
+  （绑定 Ethernet、可用出口仅 Wi-Fi、隧道探针成功 → 不得原地保持）。旧代码的原地判定只看隧道
+  探针（相当于 `tunnel_proven`），该用例在旧语义下失败：本机用 `rustc --test` 单独编译该纯函数
+  与测试，旧语义红、新实现绿（非 cargo 构建，仅证明谓词）。`detect_physical_interface_windows`
+  的逐网卡判断抽成共用 `hardware_uplink_alias`，选择行为不变。
+- **验证**：本机为编辑机，未运行 cargo/Tauri；Windows 编译与 `cargo test --locked`（src-tauri）
+  委托本 PR 的 GitHub-hosted `windows-2025` CI，结果以 PR 页为准。未做实机切网验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：Mihomo `interface-name` 在 Windows 上网卡失去路由后的实际拨号行为仍需实机
+  确认（Issue #461 的三步清单）。已提交网卡若只靠拆分路由（非 0.0.0.0/0）出网，每次网络事件都会
+  重建一次（罕见配置）。DIRECT 提交完成之前到达的网络事件仍按旧逻辑判定（此时尚无已提交网卡）。
+  重建期间界面短暂显示 Protected Offline。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
