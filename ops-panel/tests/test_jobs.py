@@ -448,6 +448,41 @@ class RunJobsExitTests(unittest.TestCase):
         )
         self.assertEqual(code, 0)
 
+    def test_a_leased_job_whose_lease_was_lost_before_its_turn_never_runs(self):
+        # The hub leases a batch and runs it in order. While the first job ran,
+        # the second job's short xray_restart lease expired and the Worker put it
+        # back in the queue, so its heartbeat now answers 409. Running it anyway
+        # would restart the node now and again when the next pass leases it.
+        class LostSecond(FakeIngest):
+            def heartbeat(self, job_id: str, lease_id: str) -> str:
+                super().heartbeat(job_id, lease_id)
+                return "conflict" if job_id == "job-restart" else "ok"
+
+        ingest = LostSecond([
+            {"id": "job-digest", "nodeName": "A", "type": "xray_dial_errors", "params": {}},
+            {"id": "job-restart", "nodeName": "B", "type": "xray_restart", "params": {}},
+        ])
+        ssh_nodes = []
+
+        def ssh(node, _remote, timeout=60):
+            ssh_nodes.append(node["name"])
+            return 0, "===RC===\n0\n===SS===\nLISTEN 0 0 *:443 \n===END===\n"
+
+        code = jobs.run_jobs(
+            max_jobs=5,
+            collector=FakeCollector(),
+            client=ingest,
+            token="tok",
+            nodes=[{"name": "A", "host": "198.51.100.4"}, {"name": "B", "host": "198.51.100.5"}],
+            cn_agents=[],
+            heartbeat_interval=0.01,
+            ssh_fn=ssh,
+            acquire_lock=False,
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(ssh_nodes, ["A"])
+        self.assertEqual([result["id"] for result in ingest.results], ["job-digest"])
+
     def test_result_unreachable_is_nonzero(self):
         ingest = FakeIngest([{
             "id": "job-reinstall",

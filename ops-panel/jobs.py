@@ -905,12 +905,36 @@ def run_jobs(
 
         by_name = {str(node.get("name")): node for node in nodes or []}
         runner = ssh_fn or ssh_exec
+        # Jobs run one after another, but each carries its own lease: 60 s for
+        # xray_restart. Every renewal also covers the jobs still waiting, and
+        # each job is claimed again right before it starts. A lease the Worker
+        # has already expired and requeued answers 409, and that job is skipped:
+        # the pass that leases it next runs it once.
+        waiting = [
+            str(job.get("id") or "") for job in leased
+            if isinstance(job, dict) and job.get("id")
+        ]
+
+        def renew(job_id: str) -> str:
+            try:
+                return ingest.heartbeat(job_id, lease_id)
+            except ControlPlaneUnreachable as exc:
+                col.log(f"jobs: heartbeat failed {job_id} {exc}")
+                return "unreachable"
 
         for job in leased:
             if not isinstance(job, dict):
                 continue
             job_id = str(job.get("id") or "")
             if not job_id:
+                continue
+            if job_id in waiting:
+                waiting.remove(job_id)
+            claimed = renew(job_id)
+            if claimed != "ok":
+                col.log(f"jobs: lease not held at start, skipped {job_id} ({claimed})")
+                if claimed == "unreachable":
+                    unreachable = True
                 continue
             node_name = str(job.get("nodeName") or "")
             node = by_name.get(node_name)
@@ -919,10 +943,8 @@ def run_jobs(
             allow_ip = node_allow_ip(node)
 
             def heartbeat(job_id: str = job_id) -> None:
-                try:
-                    ingest.heartbeat(job_id, lease_id)
-                except ControlPlaneUnreachable as exc:
-                    col.log(f"jobs: heartbeat failed {job_id} {exc}")
+                for held in [job_id, *waiting]:
+                    renew(held)
 
             def run_handler(
                 job_type: str = job_type,
