@@ -1,5 +1,6 @@
 use crate::core::handle;
 use crate::process::AsyncHandler;
+use crate::tono::state::{TonoInner, TonoState};
 use crate::utils::connections_stream;
 #[cfg(target_os = "windows")]
 use crate::utils::speed::format_bytes_per_second;
@@ -7,8 +8,10 @@ use crate::utils::speed::format_bytes_per_second;
 use crate::utils::tray_speed;
 use crate::{Type, logging};
 use parking_lot::Mutex;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
+use tauri::Manager as _;
 use tauri::async_runtime::JoinHandle;
 use tono_plugin_core::models::WsConnectionId;
 
@@ -18,6 +21,47 @@ const TRAY_SPEED_RETRY_DELAY: Duration = Duration::from_secs(1);
 const TRAY_SPEED_IDLE_POLL_INTERVAL: Duration = Duration::from_millis(200);
 /// 托盘速率流在此时间内收不到有效数据时，触发重连并降级到 0/0。
 const TRAY_SPEED_STALE_TIMEOUT: Duration = Duration::from_secs(5);
+/// How often an idle speed task looks for a published controller. Reading the product state
+/// costs no I/O and writes no log line, unlike a connect attempt.
+const TRAY_SPEED_CONTROLLER_POLL: Duration = Duration::from_secs(1);
+
+/// Only a connected session publishes an owned Core controller to the plugin; the plugin's
+/// startup named-pipe context is never served. Without one, every `/traffic` attempt fails.
+fn owns_published_controller(inner: &TonoInner) -> bool {
+    inner.fsm.status().is_connected && inner.controller_secret.is_some()
+}
+
+async fn controller_published() -> bool {
+    let Some(state) = handle::Handle::app_handle().try_state::<Arc<TonoState>>() else {
+        return false;
+    };
+    owns_published_controller(&*state.lock().await)
+}
+
+/// Wait for a published controller, then make one connect attempt. `None` means `should_stop`
+/// ended the wait. With no Core the task polls the product state rather than retrying the
+/// socket every second, which wrote a connect log line per attempt (H18-O-F2).
+async fn connect_when_published<T, Published, PublishedFut, Connect, ConnectFut>(
+    mut published: Published,
+    connect: Connect,
+    should_stop: impl Fn() -> bool,
+) -> Option<T>
+where
+    Published: FnMut() -> PublishedFut,
+    PublishedFut: Future<Output = bool>,
+    Connect: FnOnce() -> ConnectFut,
+    ConnectFut: Future<Output = T>,
+{
+    loop {
+        if should_stop() {
+            return None;
+        }
+        if published().await {
+            return Some(connect().await);
+        }
+        tokio::time::sleep(TRAY_SPEED_CONTROLLER_POLL).await;
+    }
+}
 
 /// macOS 托盘速率任务控制器。
 #[derive(Clone)]
@@ -77,7 +121,16 @@ impl TraySpeedController {
                     break;
                 }
 
-                let stream_connect_result = connections_stream::connect_traffic_stream().await;
+                let Some(stream_connect_result) = connect_when_published(
+                    controller_published,
+                    connections_stream::connect_traffic_stream,
+                    || handle::Handle::global().is_exiting() || !Self::has_main_tray(),
+                )
+                .await
+                else {
+                    // The checks at the top of the loop end the task and say why.
+                    continue;
+                };
                 let mut speed_stream = match stream_connect_result {
                     Ok(stream) => stream,
                     Err(err) => {
@@ -125,6 +178,7 @@ impl TraySpeedController {
             }
 
             Self::set_speed_connection_id(&speed_connection_id, None);
+            super::Tray::global().forget_speed();
         });
 
         *guard = Some(task);
@@ -163,7 +217,7 @@ impl TraySpeedController {
             }
             #[cfg(target_os = "windows")]
             {
-                let _ = tray.set_tooltip(Some("Tono"));
+                super::Tray::global().show_speed(None, |text| Ok(tray.set_tooltip(Some(text))?));
             }
         }
     }
@@ -205,15 +259,63 @@ impl TraySpeedController {
             }
             #[cfg(target_os = "windows")]
             {
-                let tooltip = format!(
+                let speed = format!(
                     "↑ {}\n↓ {}",
                     format_bytes_per_second(up),
                     format_bytes_per_second(down)
                 );
-                if let Err(err) = tray.set_tooltip(Some(&tooltip)) {
-                    logging!(warn, Type::Tray, "设置托盘速率提示失败: {err}");
-                }
+                // Added under the protection line, never in place of it.
+                super::Tray::global().show_speed(Some(speed), |text| Ok(tray.set_tooltip(Some(text))?));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TRAY_SPEED_CONTROLLER_POLL, connect_when_published, owns_published_controller};
+    use crate::tono::state::TonoState;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    /// H18-O-F2: with no Core the old loop made one connect attempt, and wrote one INFO line,
+    /// every second. The task must wait for a published controller instead, then start.
+    #[tokio::test(start_paused = true)]
+    async fn speed_stream_waits_for_a_published_controller_before_connecting() {
+        let state = Arc::new(TonoState::for_test());
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let task = tokio::spawn({
+            let state = Arc::clone(&state);
+            let attempts = Arc::clone(&attempts);
+            async move {
+                connect_when_published(
+                    || {
+                        let state = Arc::clone(&state);
+                        async move { owns_published_controller(&*state.lock().await) }
+                    },
+                    move || async move { attempts.fetch_add(1, Ordering::SeqCst) + 1 },
+                    || false,
+                )
+                .await
+            }
+        });
+
+        tokio::time::sleep(Duration::from_secs(600)).await;
+        assert_eq!(attempts.load(Ordering::SeqCst), 0, "no controller, no connect attempt");
+
+        {
+            let mut inner = state.lock().await;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            inner.controller_secret = Some("published".into());
+        }
+        let started = tokio::time::timeout(TRAY_SPEED_CONTROLLER_POLL * 2, task)
+            .await
+            .expect("a published controller starts the stream within one poll")
+            .unwrap();
+        assert_eq!(started, Some(1));
     }
 }

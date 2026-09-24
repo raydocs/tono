@@ -102,6 +102,22 @@ final class AppState {
     /// one first so a live session is not hit by three cold TLS races.
     var lastSuccessfulProbeOrigin: String?
     var consecutiveProtectedFailureCount = 0
+    /// Times the helper's PF supervisor had to reinstall protection under a
+    /// connected session. A successful reconnect does not reset it: another
+    /// program that keeps stopping PF or reloading the main ruleset would
+    /// otherwise disconnect the session every minute without end. Only an
+    /// explicit Retry now, Restore internet, or a confirmed external release
+    /// clears it.
+    var consecutiveProtectionRepairCount = 0
+    /// `.broken` Protected DNS audits since the last `.intact` one. A connect
+    /// that succeeds does not reset it: the connect preflight cannot see the
+    /// default resolver the audit checks, so a mismatch that outlives
+    /// reconnects would otherwise tear the tunnel down forever.
+    var consecutiveProtectedDNSBrokenAudits = 0
+    /// Connect attempts in a row that found no primary network service.
+    /// Kept apart from `consecutiveProtectedFailureCount`, which exempts
+    /// this environmental failure from its three-strike pause.
+    var consecutiveNoNetworkServiceFailures = 0
     /// The protected path failed and PF is intentionally still blocking direct
     /// egress. Keep this distinct from ordinary "Not Connected" so the user
     /// can explicitly restore normal Internet instead of unknowingly retrying
@@ -238,6 +254,9 @@ final class AppState {
     /// Signature of the revision currently installed, so an unsigned copy of a
     /// revision the server has since signed is not mistaken for already applied.
     var managedTrafficPolicySignature: String?
+    /// The installed revision number was named inside verified signed bytes,
+    /// not only by the unsigned envelope (#317).
+    var managedTrafficPolicyRevisionAuthenticated = false
     var activeDirectPolicy: ConfigPipeline.ManagedDirectRuntimePolicy?
     var catalogSelectionRequiresChoice = false
     let initialDataLoader = InitialDataLoader()
@@ -254,11 +273,17 @@ final class AppState {
     let coreRuntime = CoreRuntimeManager()
     let connectionCoordinator = ConnectionCoordinator()
     var networkProtection = NetworkProtectionOperations()
+    /// System boundary for the connect tail's native-update resume, the same
+    /// pattern as `networkProtection`.
+    var nativeUpdateResume = NativeUpdateResumeOperations()
     /// System boundary for the core monitor's owned-TUN existence probe, the
     /// same pattern as `networkProtection`: production reads the real
     /// interface index; tests substitute the syscall so a single monitor tick
     /// can be driven without the privileged helper.
     var tunInterfaceExists: (String) -> Bool = { KillSwitchService.interfaceExists($0) }
+    /// System boundary for the connected session's read-only DNS and PF
+    /// audits, the same pattern as `tunInterfaceExists`.
+    var protectionAudits = ProtectionAuditOperations()
     /// System boundary for the post-connect optional-policy background
     /// replacement. Production (nil) resolves the managed web-domain pins and
     /// performs the privileged arm → writeRuntimeConfig → /core/sync → reload
@@ -367,7 +392,10 @@ final class AppState {
             return
         }
         if !isConnected {
-            guard KillSwitchService.isArmed, isTonoReady else { return }
+            // PF still armed after the user's Restore internet failed is not
+            // a session to recover; only the user's next Connect is (X1-2).
+            guard KillSwitchService.isArmed, isTonoReady,
+                  !connectionCoordinator.disconnectQueueRequestsRelease else { return }
             // Wake recovery owns its barrier/retry sequence. Dynamic Store
             // emits several route and DNS notifications during the same wake;
             // they must not create a second coordinator that races its connect.
@@ -427,8 +455,7 @@ final class AppState {
             let primaryService =
                 await PrivilegedRuntimeCoordinator.shared.primaryNetworkService()
             let dnsIntegrity = if let service = self.protectedDNSService {
-                await PrivilegedRuntimeCoordinator.shared
-                    .protectedDNSIntegrity(service: service)
+                await self.protectedDNSIntegrityConfirmingBroken(service: service)
             } else {
                 PrivilegedRuntimeCoordinator.ProtectedDNSIntegrity.broken
             }
@@ -442,9 +469,20 @@ final class AppState {
             }
             let currentFingerprint = PhysicalInterfaceFingerprint.current()
             let physicalChanged = (self.lastPhysicalFingerprint != nil && self.lastPhysicalFingerprint != currentFingerprint)
-            guard primaryService != self.protectedDNSService
-                    || dnsIntegrity == .broken
-                    || physicalChanged else {
+            let networkMoved = primaryService != self.protectedDNSService || physicalChanged
+            if dnsIntegrity == .intact { self.consecutiveProtectedDNSBrokenAudits = 0 }
+            if !networkMoved, case .supplementalConflict(let resolvers) = dnsIntegrity {
+                self.connectionCoordinator.networkEnvironmentTask = nil
+                self.holdProtectedDNSSupplementalConflict(resolvers)
+                return
+            }
+            guard networkMoved || dnsIntegrity == .broken else {
+                self.connectionCoordinator.networkEnvironmentTask = nil
+                return
+            }
+            // Only a mismatch on an unchanged network counts: a moved
+            // network is new information a reconnect can act on.
+            if !networkMoved, self.pauseIfProtectedDNSKeepsFailing() {
                 self.connectionCoordinator.networkEnvironmentTask = nil
                 return
             }
@@ -570,6 +608,19 @@ final class AppState {
         isProtectedReconnectScheduled = false
         protectedReconnectAttempt = 0
         protectedReconnectNextAttemptAt = nil
+        // Repeated-failure strikes describe the network they were earned on,
+        // and sleep ends it. Wake's connect gets a fresh budget of three, as
+        // a network-change kick would give it; otherwise its first identical
+        // failure pauses again with nothing scheduled. A pause that needs the
+        // user (a denied administrator prompt, a rejected helper) is not a
+        // network fact and is kept.
+        if !protectedReconnectPausedForUserAction
+            || protectedReconnectPauseLiftsOnNetworkChange {
+            protectedReconnectPausedForUserAction = false
+            protectedReconnectPauseLiftsOnNetworkChange = false
+            lastProtectedFailureSignature = nil
+            consecutiveProtectedFailureCount = 0
+        }
         if isConnected || isConnecting || coreRuntime.isRunning {
             disconnect(releaseKillSwitch: false)
         } else if KillSwitchService.isArmed || isProtectionBlocked {
@@ -592,7 +643,9 @@ final class AppState {
         // read armed even though the user asked for an open host. Wake
         // recovery would enqueue a preserve teardown over the release and
         // reconnect — converting the explicit release into re-protection.
-        // Let the release finish; its completion publishes the outcome.
+        // Let the release finish; its completion publishes the outcome. A
+        // release the sleep gate refused keeps the intent too: PF still reads
+        // armed, but the user asked for an open host, not a reconnect (X1-2).
         let releaseInFlight = connectionCoordinator.disconnectQueueRequestsRelease
         let shouldResume = !releaseInFlight
             && (resumeProtectionAfterWake || KillSwitchService.isArmed)
@@ -635,6 +688,19 @@ final class AppState {
                         )
                         continue
                     }
+                }
+                // A pause that waits for the user (a DNS conflict, Protected
+                // DNS that kept failing, a failure that needs their action)
+                // survives sleep: a wake reconnect would only reach the same
+                // verdict again. PF is reasserted above and the pause message
+                // stays. Pauses that lift on a network change do not stop here.
+                if self.protectedReconnectPausedForUserAction,
+                   !self.protectedReconnectPauseLiftsOnNetworkChange {
+                    if !Task.isCancelled {
+                        self.isProtectionBlocked = true
+                        self.connectionCoordinator.wakeRecoveryTask = nil
+                    }
+                    return
                 }
                 guard self.isTonoReady else {
                     self.isProtectionBlocked = true

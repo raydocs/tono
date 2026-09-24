@@ -109,4 +109,59 @@ final class ProtectedReconnectTests: XCTestCase {
         XCTAssertNil(app.errorMessage)
         XCTAssertNil(app.connectionCoordinator.protectedReconnectTask)
     }
+
+    /// X1-3: a helper that answers 403 pauses automatic retries and asks the
+    /// user to choose Repair and reconnect. That explicit loop must reach
+    /// connect(), whose helper preparation is the administrator reinstall,
+    /// instead of re-pausing on the same rejection before connect runs.
+    func testRepairAndReconnectReachesConnectWhenHelperRejectsThisApp() async {
+        let app = AppState()
+        // Same fast, pre-helper connect failure as above: the attempt is on
+        // the record without touching the privileged helper or core.
+        var catalogNode = Fixture.realityNode()
+        catalogNode.uuid = nil
+        app.proxyRegions = [
+            ProxyRegion(
+                id: AppState.managedCatalogRegionID,
+                name: "TONO CLOUD",
+                nodes: [catalogNode]
+            )
+        ]
+        KillSwitchService.isArmed = true
+        app.isProtectionBlocked = true
+        app.protectedReconnectPausedForUserAction = true
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { _ in true }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { true }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = {}
+        runtime.restrictToBootstrap = {}
+        runtime.refreshKillSwitchStatus = { .rejected }
+        app.networkProtection = runtime
+        defer {
+            KillSwitchService.isArmed = false
+            AppProfile.defaults.removeObject(forKey: SettingsKey.selectedProxyTargetName)
+        }
+
+        app.retryProtectedConnectionNow()
+        let loop = app.connectionCoordinator.protectedReconnectTask
+        let watchdog = Task {
+            try? await Task.sleep(for: .seconds(15))
+            loop?.cancel()
+        }
+        await loop?.value
+        watchdog.cancel()
+
+        XCTAssertNotNil(
+            app.lastConnectionFailure,
+            "Repair and reconnect must reach connect() despite the rejection"
+        )
+        XCTAssertTrue(
+            app.protectedReconnectPausedForUserAction,
+            "the automatic attempt after the repair still pauses on a rejection"
+        )
+        XCTAssertNil(app.connectionCoordinator.protectedReconnectTask)
+    }
 }

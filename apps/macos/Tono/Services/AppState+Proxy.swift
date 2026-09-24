@@ -89,6 +89,14 @@ extension AppState {
                 self.switchingNodeId = nil
                 if self.connectionCoordinator.protectionOperationGeneration == switchGeneration {
                     self.startPendingConfigReloadIfPossible()
+                } else if !self.isConnected,
+                          !self.connectionCoordinator.disconnectQueueRequestsRelease {
+                    // A preserve teardown (sleep, network change, policy
+                    // update) retired this switch. Its reconnect must go where
+                    // the switch was going, not back to the exit it was
+                    // leaving (X1-5). The session is already down, so this is
+                    // the next connect target, not a claim about the runtime.
+                    self.rememberSwitchedNode(desiredNode, name: nodeName)
                 }
             }
             guard let api else { return }

@@ -41,6 +41,23 @@ nonisolated enum KillSwitchService {
 
     private static let stateKey = "Tono_killSwitchArmed"
 
+    typealias ArmReply = (
+        armed: Bool, wanted: Bool, live: Bool,
+        healed: Bool, flushedStates: Bool, killedHosts: Int
+    )
+
+    /// Helper IPC boundary of `arm`. Production delivers the prepared
+    /// `/killswitch/arm` request and reads `/killswitch/status`; tests replace
+    /// them to model a reply lost after the helper committed PF.
+    nonisolated struct ArmIPC {
+        var deliver: (() throws -> ArmReply) throws -> ArmReply = { try $0() }
+        var status: () throws -> (armed: Bool, wanted: Bool, live: Bool, healed: Bool) = {
+            try HelperManager.killSwitchStatus()
+        }
+    }
+
+    nonisolated(unsafe) static var armIPC = ArmIPC()
+
     /// Whether the product intends the host to be fail-closed right now.
     static var isArmed: Bool {
         get { AppProfile.defaults.bool(forKey: stateKey) }
@@ -97,6 +114,12 @@ nonisolated enum KillSwitchService {
                 reviewedBundleDirect: reviewedBundleDirect
             )
             guard status.armed, status.wanted, status.live else {
+                // The helper answered, so the outcome is known: a reply that
+                // still reports armed intent (wanted without live PF) is a
+                // host the helper's status heal and monitor keep fail-closed.
+                // Mirror that intent so connect failure cleanup preserves
+                // protection instead of releasing it.
+                if status.wanted || status.armed { isArmed = true }
                 throw Error.commandFailed("The PF rules did not become active.")
             }
             if status.flushedStates {
@@ -133,13 +156,22 @@ nonisolated enum KillSwitchService {
             // The helper persists armed intent before loading PF. If the IPC
             // reply is lost after that commit, retain the fail-closed intent
             // locally instead of presenting the transition as unarmed.
-            if let status = try? HelperManager.killSwitchStatus(),
-               status.wanted || status.armed {
+            if let status = try? armIPC.status() {
+                if status.wanted || status.armed {
+                    isArmed = true
+                    // This very probe can run the helper's !live heal, which
+                    // reinstalls PF without the session exceptions the failed
+                    // arm carried. Record that so the session owner re-arms.
+                    if status.healed { needsSessionExceptionReassert = true }
+                }
+            } else if !armRequestNeverReachedHelper(error) {
+                // Neither the reply nor a status answer arrived, so PF may be
+                // live. Local false here let connect failure cleanup release
+                // committed protection automatically. Keep the fail-closed
+                // intent: connect failure cleanup then takes the preserve
+                // teardown, whose `restrictToBootstrap` holds PF in bootstrap
+                // mode, and the protected reconnect loop retries from there.
                 isArmed = true
-                // This very probe can run the helper's !live heal, which
-                // reinstalls PF without the session exceptions the failed arm
-                // carried. Record that so the session owner re-arms.
-                if status.healed { needsSessionExceptionReassert = true }
             }
             throw Error.commandFailed(error.localizedDescription)
         }
@@ -174,17 +206,19 @@ nonisolated enum KillSwitchService {
             armed: Bool, wanted: Bool, live: Bool,
             healed: Bool, flushedStates: Bool, killedHosts: Int
         ) {
-            try HelperManager.armKillSwitch(
-                apiHosts: apiHosts,
-                exitNodeHints: exitNodeHints,
-                tunnelInterfaces: tunnelInterfaces,
-                proxyEndpoints: proxyEndpoints,
-                sessionDirectEndpoints: sessionDirectEndpoints,
-                tailscaleBootstrapEnabled: tailscaleBootstrapEnabled,
-                allowSystemResolution: allowSystemResolution,
-                bootstrapPins: bootstrapPins,
-                reviewedBundleDirect: reviewedBundleDirect
-            )
+            try armIPC.deliver {
+                try HelperManager.armKillSwitch(
+                    apiHosts: apiHosts,
+                    exitNodeHints: exitNodeHints,
+                    tunnelInterfaces: tunnelInterfaces,
+                    proxyEndpoints: proxyEndpoints,
+                    sessionDirectEndpoints: sessionDirectEndpoints,
+                    tailscaleBootstrapEnabled: tailscaleBootstrapEnabled,
+                    allowSystemResolution: allowSystemResolution,
+                    bootstrapPins: bootstrapPins,
+                    reviewedBundleDirect: reviewedBundleDirect
+                )
+            }
         }
         do {
             return try attempt()
@@ -195,6 +229,13 @@ nonisolated enum KillSwitchService {
             )
             return try attempt()
         }
+    }
+
+    /// Only a refused socket connection proves the helper never received the
+    /// request. A write, read or timeout failure can follow the helper's commit.
+    private static func armRequestNeverReachedHelper(_ error: Swift.Error) -> Bool {
+        if case HelperIPCError.connectFailed = error { return true }
+        return false
     }
 
     private static let pinCacheKey = "Tono_controlPlanePinCache"
