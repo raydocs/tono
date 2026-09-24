@@ -63,8 +63,7 @@ extension AccountSession {
                 DiagnosticsLogOwnership.shared.activate(owner: restoredUser.id)
                 ManagedExitCatalogOwnership.adopt(restoredUser.id)
                 guard restoredUser.suspended != true else {
-                    pauseAppRoutingResearch()
-                    state = .suspended
+                    enterEntitlementBlock(detail: nil)
                     return
                 }
                 await startCloudOnlyRuntime()
@@ -86,8 +85,7 @@ extension AccountSession {
             devices = restoredDevices
             ManagedExitCatalogOwnership.adopt(restoredUser.id)
             guard user?.suspended != true else {
-                pauseAppRoutingResearch()
-                state = .suspended
+                enterEntitlementBlock(detail: nil)
                 return
             }
             device = devices.first(where: { $0.current == true })
@@ -151,8 +149,8 @@ extension AccountSession {
         case .suspended:
             // A block raised over a running session is an account fact, not a
             // broken session. Re-read the account instead of re-running the
-            // launch sequence, whose first step stops the core this Mac is
-            // still protected by.
+            // launch sequence, whose first step is crash cleanup of the
+            // runtime this session still owns; leaving the block restarts it.
             if blockedWhileReady {
                 await refreshAccount()
                 return
@@ -279,6 +277,10 @@ extension AccountSession {
         // into a later account even when server logout is slow or unavailable.
         deactivateAppRoutingResearch()
         ManagedExitCatalogOwnership.purge()
+        // A catalog request in flight is a detached task that cancelling the
+        // account work does not reach; the cleanup would otherwise wait out
+        // its network timeout. The slot stays so the cleanup still drains it.
+        catalogRefreshTask?.task.cancel()
         await accountLifecycle.enqueueCleanup(kind: .signOut) {
             await self.stopRuntime(logOutIdentity: true, releaseKillSwitch: true)
             await self.api.logout()
@@ -478,7 +480,7 @@ extension AccountSession {
             if refreshed.suspended == true {
                 enterEntitlementBlock(detail: nil)
             } else {
-                leaveEntitlementBlock()
+                await leaveEntitlementBlock()
             }
         } catch is CancellationError {
             return
@@ -509,22 +511,81 @@ extension AccountSession {
     /// which — expiry, allowance or a disabled account — instead of being signed
     /// out with a session-expired message, and protection is left exactly as it
     /// is. A nil detail falls back to the screen's own general copy.
+    ///
+    /// The exits in the cached catalog carry this device's client identity,
+    /// which the control plane has just refused. They are withdrawn before the
+    /// first suspension point, so no wake, reconnect or network-change path can
+    /// start a Core with them, and the running Core is stopped with PF kept
+    /// armed: the Mac stays Protected Offline and the suspended screen offers
+    /// Restore internet. The network-log uploader stops too: every sweep would
+    /// only have its token renewal refused again. The runtime start that ends
+    /// the block starts it again.
     func enterEntitlementBlock(detail: String?) {
+        entitlementRefusals &+= 1
         entitlementDetail = detail
         if state == .ready { blockedWhileReady = true }
         pauseAppRoutingResearch()
         state = .suspended
+        ManagedExitCatalogOwnership.purge()
+        Task { [weak self] in await self?.descriptorConsumer(nil) }
+        updateDiagnosticsLogUploading()
     }
 
     /// The control plane accepted this account again, so the block is lifted
-    /// and the running session it interrupted resumes where it paused —
-    /// including the synchronization loop, which stops outside `.ready`.
-    func leaveEntitlementBlock() {
-        guard state == .suspended, blockedWhileReady else { return }
+    /// and the session it interrupted resumes. The block withdrew the exits and
+    /// stopped the Core, so the runtime starts again from a freshly fetched
+    /// catalog — the synchronization loop with it — and reconnects when
+    /// protection still holds this Mac offline. Account lifecycle work, so a
+    /// sign-out or Restore internet cancels and drains it first.
+    func leaveEntitlementBlock() async {
+        guard state == .suspended, blockedWhileReady, user != nil else { return }
+        await accountLifecycle.run { await self.resumeAfterEntitlementBlock() }
+    }
+
+    private func resumeAfterEntitlementBlock() async {
+        guard state == .suspended, blockedWhileReady, let owner = user?.id else { return }
+        let revision = accountReadRevision
+        let refusals = entitlementRefusals
+        func isCurrent() -> Bool {
+            !Task.isCancelled && accountReadRevision == revision
+                && entitlementRefusals == refusals
+                && state == .suspended && user?.id == owner
+        }
+        func keepBlock() {
+            // No fresh exits: the refusal barrier and the block stand, and
+            // Check again retries the re-read.
+            guard state == .suspended, user?.id == owner else { return }
+            ManagedExitCatalogOwnership.purge()
+        }
+        // A catalog request still in flight from before the block belongs to
+        // reads the block retired. Joining it would hand back its discarded
+        // result instead of the fresh catalog this needs.
+        await cancelManagedCatalogRefresh()
+        guard isCurrent() else { return }
+        ManagedExitCatalogOwnership.adopt(owner)
+        guard await refreshManagedCatalog(attempts: 2), isCurrent() else {
+            keepBlock()
+            return
+        }
+        // The in-app flag can lag a release made outside the app (the root
+        // emergency disarm). Only a helper-confirmed release retires the
+        // intent; an unreachable helper keeps it.
+        if protectionBlockedConsumer() { shouldResumeProtection = true }
+        let helperAnswer = await retireResumeIntentIfProtectionReleased()
+        guard isCurrent() else {
+            keepBlock()
+            return
+        }
+        // Check again asked for the account, not for a helper repair. A
+        // rejecting helper, or reconnects paused until the user acts, would
+        // turn the resume into an administrator prompt nobody asked for;
+        // the runtime starts without it and PF stays exactly as it is.
+        if helperAnswer == .rejected || protectedReconnectPausedConsumer() {
+            shouldResumeProtection = false
+        }
         blockedWhileReady = false
         entitlementDetail = nil
-        state = .ready
-        startCatalogSync()
+        await performRuntimeRetry()
     }
 
     /// Transfers the one-time enrollment material and immediately removes the
@@ -586,12 +647,17 @@ extension AccountSession {
     /// intent retires with it. An unreachable or rejecting helper is no
     /// evidence of a release, and both intents stand. The armed intent alone
     /// is enough to ask: a Protected Offline native-update recovery arms it
-    /// without a resume intent.
-    func retireResumeIntentIfProtectionReleased() async {
-        guard shouldResumeProtection || KillSwitchService.isArmed else { return }
-        if await protectionReleaseConsumer() {
+    /// without a resume intent. Returns the helper's answer (released, still
+    /// armed, rejected or unavailable), or nil when neither intent was set.
+    @discardableResult
+    func retireResumeIntentIfProtectionReleased() async
+        -> KillSwitchService.StatusObservation? {
+        guard shouldResumeProtection || KillSwitchService.isArmed else { return nil }
+        let answer = await protectionReleaseConsumer()
+        if case .confirmed(requiresProtectionRecovery: false) = answer {
             shouldResumeProtection = false
         }
+        return answer
     }
 
     func authenticate(_ operation: @escaping @MainActor () async throws -> TonoAuthResponse) async {
@@ -619,8 +685,7 @@ extension AccountSession {
             adoptEnrollment(response.enrollment)
             try await reloadDevices()
             if response.user.suspended == true {
-                pauseAppRoutingResearch()
-                state = .suspended
+                enterEntitlementBlock(detail: nil)
                 return
             }
             await retireResumeIntentIfProtectionReleased()

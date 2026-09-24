@@ -77,6 +77,10 @@ final class AccountSession {
     /// running. Only that session can be resumed by a re-read of the account;
     /// a block raised before the runtime came up still needs a full restore.
     var blockedWhileReady = false
+    /// Counts refusals, including one that lands while the account is already
+    /// suspended and so changes no state. A re-acceptance started before the
+    /// latest refusal belongs to an answer the control plane has withdrawn.
+    @ObservationIgnored var entitlementRefusals: UInt64 = 0
     var enrollmentAuthKey: String?
     var enrollmentHostname: String?
     let api: TonoAPIClient
@@ -97,6 +101,10 @@ final class AccountSession {
     let claudeTrafficResearchConsumer:
         @MainActor () async -> TonoClaudeTrafficResearchSnapshot
     let protectionBlockedConsumer: @MainActor () -> Bool
+    /// Whether automatic reconnects are paused until the user acts (a denied
+    /// administrator prompt, a failed helper install). No account path may
+    /// lift that pause by requesting a resume on its own.
+    let protectedReconnectPausedConsumer: @MainActor () -> Bool
     let protectedRetryConsumer: @MainActor () -> Void
     let appRoutingResearchActivationConsumer: @MainActor () -> Void
     let exitNode: String
@@ -143,11 +151,14 @@ final class AccountSession {
     @ObservationIgnored var authMethodsLoadRevision: UInt64?
     var hasStartedRestore = false
     var shouldResumeProtection = false
-    /// Before a sign-in consumes a kept resume intent: true only when AppState
-    /// accepted a helper-confirmed protection release under its protection
+    /// Before a sign-in or Check again consumes a kept resume intent: the
+    /// helper's answer. A release (`.confirmed(requiresProtectionRecovery:
+    /// false)`) only when AppState accepted it under its protection
     /// generation, clearing the armed intent. Replaceable so tests never reach
-    /// the privileged socket; unwired, no intent is ever retired.
-    @ObservationIgnored var protectionReleaseConsumer: @MainActor () async -> Bool
+    /// the privileged socket; unwired, the helper is unavailable and no intent
+    /// is ever retired.
+    @ObservationIgnored var protectionReleaseConsumer:
+        @MainActor () async -> KillSwitchService.StatusObservation
 
     var deviceLimit: Int { user?.deviceLimit ?? TonoAccountRules.maximumDevices }
     var isAtDeviceLimit: Bool { devices.count >= deviceLimit }
@@ -237,7 +248,8 @@ final class AccountSession {
          cloudFallbackPreferred: @escaping @MainActor () -> Bool = { false },
          cloudFallbackConsumer: @escaping @MainActor (Bool) throws -> Void = { _ in },
          killSwitchDisarmConsumer: @escaping @MainActor () async -> Void,
-         protectionReleaseConsumer: @escaping @MainActor () async -> Bool = { false },
+         protectionReleaseConsumer: @escaping @MainActor ()
+            async -> KillSwitchService.StatusObservation = { .unavailable },
          diagnosticSnapshotConsumer: @escaping @MainActor () -> TonoDiagnosticSnapshot = {
              TonoDiagnosticSnapshot(
                  appVersion: "unknown", build: "unknown", connected: false,
@@ -284,6 +296,7 @@ final class AccountSession {
                 )
             },
          protectionBlockedConsumer: @escaping @MainActor () -> Bool = { false },
+         protectedReconnectPausedConsumer: @escaping @MainActor () -> Bool = { false },
          protectedRetryConsumer: @escaping @MainActor () -> Void = {},
          appRoutingResearchActivationConsumer: @escaping
             @MainActor () -> Void = {},
@@ -313,6 +326,7 @@ final class AccountSession {
         self.diagnosticSnapshotConsumer = diagnosticSnapshotConsumer
         self.claudeTrafficResearchConsumer = claudeTrafficResearchConsumer
         self.protectionBlockedConsumer = protectionBlockedConsumer
+        self.protectedReconnectPausedConsumer = protectedReconnectPausedConsumer
         self.protectedRetryConsumer = protectedRetryConsumer
         self.appRoutingResearchActivationConsumer =
             appRoutingResearchActivationConsumer

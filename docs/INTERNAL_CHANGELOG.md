@@ -1972,6 +1972,101 @@
 - **验证**：MacBook 列车工作树 `python3 services/exit-agent/test_reconcile_and_report.py`（89 通过）；`python3 -m unittest discover -s ops-panel/tests -p 'test_*.py'`（29 通过）；home-agent 与 exit metering 配置脚本测试通过；`services/control-plane` `npm run typecheck` 通过、`npx vitest run` 892 通过。未连接真实节点、hub 或探针，未部署。
 - **候选/发布**：仅源码，无新候选。
 - **剩余限制**：部署前置——#368 需先在 hub 登记节点与探针 known_hosts；#377 需为自定 unit 的节点在 hub `nodes.secrets.json` 填 `serviceName`，并与 #466 同时或之后部署（hub 上 `jobs.py` 与 `collect.py` 一起更新）；#384 需先在真实 Xray 25.3.6/26.x 确认 vless `clients: []` 能通过 `run -test`。`state.json.roster` 为明文凭据。#375 与控制面 #451 的 `revokeExitToken` SQL 相邻，后合者手工保留两边。
+## 2026-09-24 · macOS 账户 suspended 时停止网络日志上传
+
+- **归属/来源**：G2 客户端账户状态（macOS `AccountSession+Auth.swift`）。内部审查 H17-O-F7（另一审查方按
+  收窄条件确认）；Issue #536。叠在 #535（`fix/macos-suspended-stops-core-20260924`，其又叠在 #516）之上；本条分支
+  `fix/macos-suspended-stops-log-upload-20260924`；提交时未合 main。
+- **缺陷修复**：上传器已在运行（上传开关默认开、账户 ready）且有待发日志时，账户被控制面拒绝进入
+  `.suspended`，`enterEntitlementBlock` 不停上传器；上传器运行中只按日志 ownership 判断是否继续，
+  不看账户状态。于是每轮上传都 401 → `auth/refresh` 401 → 退避重试（上限 960 s，无次数上限），
+  直到睡眠、退出或登出。现在进入 `.suspended` 时通过既有的 `updateDiagnosticsLogUploading()`
+  停止上传器；账户重新可用时运行时启动（`startCatalogSync`）照旧重新启动它。
+- **新增/优化**：无。
+- **工程与测试**：`AccountSessionRequestTests` 新增一个 XCTest
+  `testSuspensionStopsTheRunningNetworkLogUploader`：上传器已启动，账户重读与续期都回 401；断言状态为
+  `.suspended` 且上传循环已停止。`DiagnosticsLogUploader` 增加只读 `isRunning` 供断言，无行为变化。
+  只含测试（及该只读属性）的提交 c03c8c69（叠在 #535 上，本修复未加）在 GitHub-hosted macOS CI
+  run 35977822472 上实际跑红：build 作业只有这一个测试失败（`AccountSessionRequestTests` 51 项、
+  1 处断言失败：suspended 后上传循环仍在运行）。
+- **验证**：本机是编辑机，未运行 xcodebuild/swift。TonoTests 委托 PR 的 GitHub-hosted `macos-26`
+  CI，结果以 PR 页的准确 head SHA 为准。未实机验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：周期遥测任务句柄在 suspended 时未清空（#516 已记录的既有行为），不在本条范围。
+- **后续（2026-09-24，重新叠在 #535 上）**：合入 #535 的 1ad72605（其已对齐 #516 fc33c9eb 的
+  `protectionReleaseConsumer` 设计）。唯一冲突在 `AccountSessionRequestTests.swift`：本条的
+  `testSuspensionStopsTheRunningNetworkLogUploader` 与 #535 的
+  `testCheckAgainDoesNotResumeIntoAHelperRepairTheUserDidNotAskFor` 两个都保留，本条产品代码无改动。
+  本机未构建，以 PR 的 `macos-26` CI 为准。
+
+## 2026-09-24 · macOS 账户进入 suspended 时停止 Core 并撤下缓存出口
+
+- **归属/来源**：G2 客户端账户状态与连接准入（macOS `AccountSession+Auth.swift`）。内部审查 H17-C-F3，
+  另一审查方 H17-G-F3 第 3 步为同一缺口；PR 双厂商审查 535-O-F2..F4、535-C-F1..F2。Issue #526，
+  PR #535。基线 origin/main 059a2ea2 → 分支 `fix/macos-suspended-stops-core-20260924`，叠在 #516
+  （合入其 cd94a22f，复用 helper 确认的恢复意图规则）；提交时未合 main。
+- **缺陷修复**：套餐到期、流量用尽、账户停用或设备被吊销后，账户重读收到 401（请求与续期都拒绝），
+  账户进入 `.suspended`。原来 `enterEntitlementBlock` 只改状态：正在运行的 Core 继续用本设备的
+  出口身份走流量；缓存目录（内存与磁盘）保留；连接层只按缓存判断就绪，唤醒恢复、保护重连循环、
+  网络变化和自动连接都不看账户状态，睡眠唤醒后可用同一凭据再起 Core，直到出口下次刷新名单。
+  现在进入 `.suspended` 时：
+  - 在第一个挂起点之前撤下缓存目录（与登出同一道 ownership 屏障：内存与磁盘都清，期间任何目录
+    都装不上），连接层不再有可用的出口；
+  - 停止正在运行的 Core，PF 保持武装：Mac 停在 Protected Offline，suspended 页面在 kill switch
+    武装时已提供"恢复网络"。任何 suspended 路径都不释放 PF。
+  - 启动与登录时直接进入 suspended 的三处（服务端目前不发 `suspended: true`）也走同一入口。
+  - 控制面重新接受账户时（`leaveEntitlementBlock`，作为账户生命周期工作运行，登出或恢复网络会先
+    取消并排空它）：先取消挂起前仍在途的目录请求（否则会加入它并拿到被丢弃的结果，进入 `.error`），
+    重新绑定 ownership 并拉取新目录；拉取失败则保持 suspended 与撤销屏障，"再次检查"可重试。
+    是否自动重连先按应用内的 Protected Offline 状态，再问 helper：只有 helper 确认保护已解除
+    （例如外部紧急解除）才放弃重连意图，helper 不可达或拒绝时保持（与 #516 同一规则）。之后从新
+    目录重启运行时并回到 ready。
+- **新增/优化**：无。
+- **工程与测试**：`AccountSessionRequestTests` 新增一个 XCTest
+  `testRefusedSessionStopsTheCoreAndWithdrawsItsExitsWithProtectionKept`：账户重读与续期都回 401；
+  断言状态为 `.suspended`、已安装目录被撤下、该账户的目录不再被接受、Core 停止一次、disarm
+  consumer 未被调用。审查后同一测试延伸到重新接受：挂起前有一个在途目录请求，续期与重读都成功、
+  应用内仍显示 Protected Offline 而 helper 确认已解除；断言重新接受另发新的目录请求、只安装新目录、
+  回到 `.ready`、恢复时不请求自动重连。测试 fixture 增加可注入的 `descriptorConsumer` 与
+  `protectionBlockedConsumer`。延伸部分的只含测试提交 7615d579 在修复前的 head 上跑红（run 35984764434：
+  只有这一个测试失败，重读成功后等待请求约 5 s 超时，按流程即没有发出新的目录请求；自动重连一项
+  因此未执行到）。最初只含测试的提交 febea58a
+  （产品代码未改）在 GitHub-hosted macOS CI run 35976604824 上实际跑红：build 作业只有这一个测试
+  失败（`AccountSessionRequestTests` 50 项、3 处断言失败：目录未撤下、目录仍被接受、Core 未停止；
+  "不释放 PF"一项在旧代码上本来成立）。
+- **验证**：本机是编辑机，未运行 xcodebuild/swift。TonoTests 委托 PR 的 GitHub-hosted `macos-26`
+  CI，结果以 PR 页的准确 head SHA 为准。未实机验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：
+  - 出口对已建立连接的处理未实机验证；本修复只保证客户端在有界时间内停用凭据。
+  - 保护重连循环在 suspended 期间可能继续按退避计时，但没有目录可用，不发起连接。
+  - 恢复路径（`leaveEntitlementBlock`）只在控制面重新接受同一会话时可达；被吊销的会话仍需
+    登出再登录。
+  - 网络日志上传在 suspended 下继续尝试 refresh（H17-O-F7），单独修。
+- **后续（2026-09-24，PR 复审 535R-C-F1..F3，Codex 发现、Opus 核实）**：
+  - F1：重新接受时不再丢弃 helper 的回答。helper 拒绝（`.rejected`），或自动重连因需用户操作
+    而暂停时，运行时不带恢复意图启动，不自动重连，"再次检查"不会引出 helper 修复的管理员授权；
+    PF 保持原样。新增 XCTest `testCheckAgainDoesNotResumeIntoAHelperRepairTheUserDidNotAskFor`
+    （helper 回 `.rejected`；断言回到 `.ready`、恢复参数为 `[false]`）。旧代码上按流程应为
+    `[true]`，这是推断，未跑红。
+  - F2：恢复网络与登出在排队清理前先取消在途的目录请求（独立 Task，取消账户工作传不到它），
+    否则清理要等它的网络超时。槽位保留，由清理排空；恢复网络的清理现在也排空并清掉该槽位。
+  - F3：`enterEntitlementBlock` 每次都递增拒绝计数（已是 `.suspended` 也递增），重新接受把它纳入
+    当前性检查；目录同步循环调用 `refreshAccount` 前重新确认 `.ready`。
+  - 剩余：暂停标志一支、F2、F3 没有单独测试。最后一次当前性检查之后、运行时启动期间到达的
+    拒绝不经计数拦截（此时目录已撤下），其结果未逐步验证。本机未运行 xcodebuild/swift，
+    交 PR 的 GitHub-hosted `macos-26` CI。
+- **后续（2026-09-24，与 #516 当前设计对齐）**：合入 #516 的 fc33c9eb（N1 修复把
+  `killSwitchStatusObservation` 换为 `protectionReleaseConsumer`，helper 确认释放时经 AppState 清掉
+  `isArmed`）。两边改写的 `retireResumeIntentIfProtectionReleased` 合为一个：resume 意图或 `isArmed`
+  任一为真时询问，返回 helper 的完整回答（`KillSwitchService.StatusObservation`：已释放 / 仍需保护 /
+  拒绝 / 不可达），两个意图都没有时返回 nil。`protectionReleaseConsumer` 与
+  `AppState.acceptConfirmedProtectionReleaseBeforeSignIn` 改为返回该回答而非 Bool：只有在当前保护代际内
+  被 AppState 接受的释放才以"已释放"返回，并清掉 armed 与 resume 意图；被保护操作赶超、或因操作在途
+  而未询问的回答报 `.unavailable`，什么都不清。登录照 #516 使用；"再次检查"用同一回答做 F1，其确认
+  释放现在也清 `isArmed`（原先只放弃 resume 意图）。#535 的两个测试改用新钩子
+  （`protectionReleaseConsumer` 直接返回 `.confirmed(requiresProtectionRecovery: false)` / `.rejected`），
+  #516 的测试不变，未新增测试。本机未构建，以 PR 的 `macos-26` CI 为准。
 
 ## 2026-09-24 · macOS 会话被拒（401）不再释放 PF/DNS 保护
 
