@@ -369,7 +369,7 @@ mod tests {
         append_proxy_entries, command_output_with_timeout, file_uri_path, proxy_assignments_in_json,
         proxy_assignments_in_text, scan_json_proxy_directory, scan_json_proxy_file,
         scan_powershell_profile_directories, scan_text_proxy_directory, vscode_profile_setting_paths,
-        vscode_workspace_discovery,
+        vscode_workspace_discovery, powershell_profile_roots,
     };
     use tono_core::connection::{ConnectStage, UiState};
 
@@ -549,6 +549,55 @@ mod tests {
         assert_eq!(entries[0].value, "<configured>");
         assert!(!entries[0].auto_clearable);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn terminal_proxy_scanner_reads_byte_order_marked_powershell_profiles() {
+        let root = std::env::temp_dir().join(format!(
+            "tono-powershell-bom-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut utf8 = vec![0xEF, 0xBB, 0xBF];
+        utf8.extend_from_slice(b"$env:HTTPS_PROXY = 'http://127.0.0.1:7890'\r\n");
+        std::fs::write(root.join("profile.ps1"), utf8).unwrap();
+        let mut utf16_le = vec![0xFF, 0xFE];
+        let mut utf16_be = vec![0xFE, 0xFF];
+        for unit in "$env:HTTP_PROXY = 'http://127.0.0.1:7890'\r\n".encode_utf16() {
+            utf16_le.extend_from_slice(&unit.to_le_bytes());
+        }
+        for unit in "$env:ALL_PROXY = 'socks5://127.0.0.1:7890'\r\n".encode_utf16() {
+            utf16_be.extend_from_slice(&unit.to_be_bytes());
+        }
+        std::fs::write(root.join("Microsoft.PowerShell_profile.ps1"), utf16_le).unwrap();
+        std::fs::write(root.join("Microsoft.VSCode_profile.ps1"), utf16_be).unwrap();
+        let mut entries = Vec::new();
+        scan_powershell_profile_directories(
+            &mut entries,
+            [root.clone()],
+            "PowerShell profile",
+            "manual cleanup",
+        )
+        .unwrap();
+
+        let mut keys: Vec<_> = entries.iter().map(|entry| entry.key.as_str()).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["ALL_PROXY", "HTTPS_PROXY", "HTTP_PROXY"]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn terminal_proxy_scanner_uses_the_documents_known_folder_or_fails() {
+        let home = std::path::Path::new(r"C:\Users\张三");
+        let redirected = std::path::PathBuf::from(r"D:\工作资料\文档");
+
+        let roots = powershell_profile_roots(home, Some(redirected.clone())).unwrap();
+        assert!(roots.contains(&redirected));
+        assert!(powershell_profile_roots(home, None).is_err());
     }
 
     #[test]
