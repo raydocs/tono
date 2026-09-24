@@ -365,8 +365,10 @@ nonisolated enum KillSwitchService {
 
     /// After an app crash, re-supply control-plane metadata while keeping the
     /// stored fail-closed intent. The helper itself also restores PF at boot.
-    static func reassertIfNeeded() throws {
-        guard isArmed else { return }
+    /// Returns whether it armed: with no stored intent it arms nothing.
+    @discardableResult
+    static func reassertIfNeeded() throws -> Bool {
+        guard isArmed else { return false }
         let apiHost = (Bundle.main.object(forInfoDictionaryKey: "TonoAPIBaseURL") as? String)
             .flatMap { URL(string: $0)?.host }
         let exitNode = (Bundle.main.object(forInfoDictionaryKey: "TonoExitNode") as? String)?
@@ -387,6 +389,7 @@ nonisolated enum KillSwitchService {
             // inherited into a ruleset rebuilt without one.
             reviewedBundleDirect: false
         )
+        return true
     }
 
     /// Remove tunnel and proxy exceptions while preserving the control plane.

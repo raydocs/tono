@@ -165,7 +165,8 @@ actor PrivilegedRuntimeCoordinator {
         try KillSwitchService.restrictToBootstrap()
     }
 
-    func reassertKillSwitchIfNeeded() throws {
+    @discardableResult
+    func reassertKillSwitchIfNeeded() throws -> Bool {
         try KillSwitchService.reassertIfNeeded()
     }
 

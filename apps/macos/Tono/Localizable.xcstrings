@@ -2523,6 +2523,16 @@
         }
       }
     },
+    "Direct traffic may be blocked": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "直连可能仍被拦截"
+          }
+        }
+      }
+    },
     "Direct traffic remains blocked while Tono waits to retry.": {
       "localizations": {
         "zh-Hans": {
@@ -4345,6 +4355,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "连接保护启动失败：%@"
+          }
+        }
+      }
+    },
+    "Protection unknown": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保护状态未知"
           }
         }
       }

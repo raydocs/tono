@@ -1853,6 +1853,12 @@ extension AppState {
     /// emergency recovery path. Only an authenticated helper response that
     /// confirms both armed=false and wanted=false may clear Protected Offline.
     func reconcileExternalProtectionState() {
+        if isProtectionUnconfirmed {
+            // Launch could not confirm the barrier; a helper that answers
+            // now resolves it to Protected Offline or released.
+            Task { [weak self] in await self?.resolveUnconfirmedProtection() }
+            return
+        }
         guard isProtectionBlocked, !isConnected, !isConnecting,
               !isDisconnecting else { return }
         Task { [weak self] in
@@ -1944,7 +1950,7 @@ extension AppState {
         return true
     }
 
-    private func acceptConfirmedExternalProtectionRelease() {
+    func acceptConfirmedExternalProtectionRelease() {
         self.connectionCoordinator.bumpGeneration()
         recoveryCause = nil
         KillSwitchService.isArmed = false

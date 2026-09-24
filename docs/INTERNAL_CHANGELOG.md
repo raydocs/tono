@@ -1790,6 +1790,46 @@
 - **候选/发布**：无新包，仅文档。
 - **剩余限制**：H16/H17 条目全部是源码推导或阅读确认，回归草案均未运行；需实机的部分列在审查轮记录第 3 节。
 
+## 2026-09-24 · macOS 启动把 helper 确认的屏障发布到界面
+
+- **归属/来源**：G2 客户端保护状态展示（macOS）。内部审查 H16-O-F5（= H16-C-F1），
+  Issue [#529](https://github.com/raydocs/tono/issues/529)。基线 origin/main 059a2ea2 → 分支
+  `fix/macos-launch-protection-20260924`；提交时未合 main。
+- **缺陷修复**：启动恢复（`RuntimeCleanup`）只把 helper 的屏障答复写进本地意图
+  `KillSwitchService.isArmed`，`AppState.isProtectionBlocked` 仍为 false：更新后须以
+  Protected Offline 恢复、或带着 PF 重启进入停用/错误/登出时，菜单栏、仪表盘徽标和连接按钮
+  都显示 Standby，而 PF 阻断全部流量；激活时 reconcile 和 Retry 都要求 `isProtectionBlocked`，
+  无法自行收敛。改后：helper 认证答复（或 root 的更新回执）确认屏障 → 发布 Protected Offline
+  （与会话内失败同一状态，横幅、Retry、Restore 均可用）；helper 未答复/拒绝而本地意图为
+  armed → 新的 `isProtectionUnconfirmed`，菜单栏显示「Protection unknown / 保护状态未知」，
+  既不显示 Standby，也不把本地意图当作屏障证明；启动第一步在 helper 答复前即按本地意图发布
+  unconfirmed，因此之后抛错的启动路径也不会显示 Standby。任何后续保护状态写入
+  （连接开始、拆除完成、释放、reconcile）都会清除 unconfirmed。
+  评审续修（Opus + Codex 双方发现）：再次启动恢复（gate 上 Retry）得到 helper 确认「未持有」时，
+  按激活 reconcile 同一路径撤销此前的 Protected Offline，不再残留 blocked；unconfirmed 在 helper
+  之后给出认证答复时收敛——启动时 reassert 成功（arm 须读到 armed/wanted/live）发布 held，
+  App 激活时的 reconcile 也对 unconfirmed 查询一次（不弹授权、不动重连状态）；仪表盘徽标、
+  保护卡片与连接按钮显示「保护状态未知」，按钮与菜单栏在 ready 时也提供恢复正常网络。
+- **新增/优化**：无。PF/helper、账户流程、保护策略均未改。
+- **工程与测试**：把启动的 helper 答复折叠抽成 `RuntimeCleanup.adoptLaunchObservation`
+  （先以不改行为的提交抽出）；新增一个 XCTest
+  `LaunchProtectionPresentationTests.testLaunchShowsTheHelperAnswerInsteadOfStandby`（评审续修后
+  同一测试另断言：同一 AppState 先 held 后 released 不残留 blocked；unconfirmed 在 helper 之后答复时收敛）。
+- **验证**：本机未编译（MacBook 为编辑机）；TonoTests 在本 PR 的 GitHub-hosted `macos-26` CI 运行，
+  结果以 PR 检查中对应 head SHA 为准。测试仅抽取提交（产品行为未改）的 CI 运行结果见 PR 正文。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：未实机验证。helper 一直不答复时 unconfirmed 保持（如实为未知）。启动确认屏障后
+  界面进入与会话内相同的 Protected Offline，点按连接按钮即恢复正常网络、激活 reconcile 会运行，
+  这是行为变化而非纯展示。账户 gate 的文案与菜单栏一致由后续 H16-C-F2 修复（#538）负责。
+- **后续（2026-09-24，PR 复审 537R-C-F1，Codex 发现、Opus 核实）**：启动 reassert 在本地意图已被
+  撤销时（`guard isArmed`）正常返回却什么都没 arm，启动仍发布 held，界面显示 Protected Offline
+  而 PF 实际未持有。现在 reassert 返回是否真的 arm，只有 arm 了才发布 held。启动裁决与激活时的
+  helper 答复共用一个序号：激活读取期间若有更新的启动裁决发布，旧答复丢弃，不再改写本地意图。
+  新增 XCTest `testAnActivationAnswerOlderThanTheLatestLaunchVerdictIsDropped`（激活读取期间
+  启动再发布 unconfirmed，随后到达的旧 `.confirmed(false)` 不得清掉意图）。旧代码上按流程
+  两处断言失败，这是推断，未跑红。reassert 返回值一支需要真实 helper，无单独测试。本机未运行
+  xcodebuild/swift，交 PR 的 GitHub-hosted `macos-26` CI。
+
 ## 2026-09-23 · 发现总账与审查流程记录
 
 - **归属/来源**：G1–G3 审查与修复的可追溯性（工程流程与记录，非产品行为）；基线 origin/main
