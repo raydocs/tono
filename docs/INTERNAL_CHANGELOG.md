@@ -32,6 +32,25 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · Windows 开机自启任务按用户 SID 命名
+
+- **归属/来源**：多用户隔离（L5，低）；Windows App `utils/schtasks.rs` 与 NSIS 卸载段。基线 origin/main
+  [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b)，分支 `fix/win-autostart-task-per-user-20260924`，
+  Issue #568（内部审查 H19-C-F4）；未合 main。
+- **缺陷修复**：两个开机自启任务用全机固定名 `Tono` / `Tono (Admin)`；另一 Windows 用户首次连接成功后 `/Create /F`
+  会替换前一用户的同名任务，管理员模式还会删除另一模式的固定名任务而不看其主体。改后：任务名带所属用户 SID
+  （`Tono <SID>` / `Tono (Admin) <SID>`），创建、删除、存在性与启用状态都只看当前用户自己的名字；旧固定名任务只在其
+  `<Principal>` 的 `UserId` 等于当前 SID 时视为本人所有：状态读取把它算作已启用，任何一次设置变更把它退役；他人的旧任务
+  不读、不改、不删。卸载（非更新模式）在原有删除两个旧名之外，用 PowerShell `Get-ScheduledTask` 按
+  `^Tono (\(Admin\) )?S-1-[0-9-]+$` 删除所有用户的新名任务。
+- **新增/优化**：无。
+- **工程与测试**：`schtasks.rs` 一个 `#[test]`（`autostart_tasks_of_two_windows_users_never_share_a_name`）：两个 SID 的两种模式
+  名称互不相同且不同于旧名，CSV 列表只匹配本人名字，旧任务只有主体为本人 SID 时才归本人。
+- **验证**：见 PR；红：仅测试提交在 CI 编译失败（旧代码没有按用户命名与主体判定）；绿：Windows CI。MacBook 未编译 Rust，NSIS 未编译。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：旧版以 `DOMAIN\user` 形式记录主体的旧任务不会被识别为本人所有（保持不动，由卸载删除）；已升级用户在下次改动
+  设置前继续由其旧名任务自启；卸载依赖 PowerShell ScheduledTasks 模块；未实机验证多用户切换。
+
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
 - **归属/来源**：G1–G3 审查与修复的可追溯性（工程流程与记录，非产品行为）；审查基线 main

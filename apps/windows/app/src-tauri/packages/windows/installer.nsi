@@ -1338,7 +1338,7 @@ Section Uninstall
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${PRODUCTNAME}"
 
     ; The Run value above is inherited plumbing that the Windows build never writes — auto
-    ; launch is a scheduled task (utils/schtasks.rs, TASK_NAME_USER / TASK_NAME_ADMIN), and
+    ; launch is a scheduled task (utils/schtasks.rs, LEGACY_TASK_NAME_USER / _ADMIN), and
     ; nothing removed it. A user who had turned auto launch on kept a task pointing at a
     ; deleted Tono.exe, which Task Scheduler retries and fails at every logon, silently,
     ; for ever. `update_launch` only runs on a settings toggle, so a later reinstall does
@@ -1346,6 +1346,10 @@ Section Uninstall
     nsExec::ExecToLog /TIMEOUT=30000 '"$SYSDIR\schtasks.exe" /Delete /TN "Tono" /F'
     Pop $0
     nsExec::ExecToLog /TIMEOUT=30000 '"$SYSDIR\schtasks.exe" /Delete /TN "Tono (Admin)" /F'
+    Pop $0
+    ; Current builds scope the name by the owner's SID ("Tono <SID>", "Tono (Admin) <SID>") so
+    ; Windows users no longer replace each other's task. Remove every user's, and nothing else.
+    nsExec::ExecToLog /TIMEOUT=60000 `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "Get-ScheduledTask -TaskPath '\' -ErrorAction SilentlyContinue | Where-Object { $$_.TaskName -match '^Tono (\(Admin\) )?S-1-[0-9-]+$$' } | Unregister-ScheduledTask -Confirm:$$false"`
     Pop $0
   ${EndIf}
 
