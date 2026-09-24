@@ -46,16 +46,31 @@
   `exitClientUUID` 对已退役账户不再回落（设备侧等待自己的凭据就绪，未就绪返回 503
   `EXIT_IDENTITY_PROPAGATING`；无设备的 legacy 签发返回 409 `DEVICE_IDENTITY_REQUIRED`）。
   是退役而不是轮换：exit-agent 以 `u:<userId>` 标签管理 legacy client，同标签换 UUID 不会替换 Xray 已装的旧 UUID。
+  审查后修正：（1）ops `POST users/onboard` 对已退役账户不再预签发 legacy（此前返回 409
+  `DEVICE_IDENTITY_REQUIRED`，而 `signup_allowlist` 已写入，属部分写）；预签发移到第一条写入之前，
+  失败不留部分写入，已退役账户按逐设备凭据正常完成开户（`exitIdentityIssued=true`）。
+  （2）0077 一次性回填上线前的吊销：凡已有 revoked 设备、legacy 仍未退役的账户立即退役（`WHERE retired_at IS NULL`，幂等）。
+  范围包含"已无活设备"的账户：roster 只在账户有设备且全部不活时隐藏 legacy，新设备一登录它就回来。
+  （3）触发器改为每个一条语句、单行（远端 D1 迁移解析不了多行触发器体，见 0015/0021）：设备吊销只退役凭据，
+  revision +1 与 `refresh_catalog` 挂在 `exit_credentials.retired_at` 由 NULL 变非 NULL 上，回填也会触发。
 - **新增/优化**：无。
-- **工程与测试**：`test/worker.test.ts` 新增一个 `it`
+- **工程与测试**：`test/worker.test.ts` 一个 `it`
   （removes the shared legacy credential from the exit roster once any device of the account is revoked）；
-  在旧代码上先跑红（roster 仍含被吊销设备拿到的 UUID），修复后绿。
+  在旧代码上先跑红（roster 仍含被吊销设备拿到的 UUID），修复后绿。审查后同一 `it` 追加：吊销后
+  ops onboard 该账户返回 202 且 `exitIdentityIssued=true`；在上一版源码上红（`expected 409 to be 202`）。
+  回填没有 vitest 覆盖（测试库从空库迁移）：本机用 sqlite3 在 0001–0076 上造数据后应用 0077 手工核对：
+  有 revoked 设备的账户被退役、纯活设备账户不动，revision 每账户 +1、存活设备排到 refresh，重跑回填不变。
 - **验证**：MacBook 本机 worktree，`npx vitest run test/worker.test.ts -t …` 先红后绿；
-  `npx vitest run`（control-plane 全部 43 文件 892 用例）通过；`npx tsc --noEmit` 通过。CI 结果见 PR。
+  `npx vitest run`（control-plane 全部 43 文件 892 用例）通过；`npm run typecheck`、`check:budgets` 通过。CI 结果见 PR。
+  远端 D1 未试跑（不碰远端）。
 - **候选/发布**：无新包，仅源码；需要 D1 迁移 0077 + Worker 部署，均未执行。
 - **剩余限制**：exit-agent 无需改动（现有 reconcile 会删除从 roster 消失的 `u:<userId>`，hy2 allowlist 按摘要重写）；
-  部署顺序为先应用 0077 迁移、再部署 Worker。已退役账户的其余设备在节点 ack 其逐设备凭据前会短暂拿到 503；
-  切断在节点下一次 roster 轮询后生效。生产 `exit_credential_rollout.phase` 未在本机确认。
+  部署顺序为先应用 0077 迁移、再部署 Worker。已退役账户的设备在每个 active 节点 ack 其逐设备凭据前拿到 503
+  `EXIT_IDENTITY_PROPAGATING`；只要有一个 active 但不再拉 roster 的节点，这些设备会一直 503（以前被 legacy 回落掩盖）。
+  LRU、到期、pending 过期都会触发退役，加上回填，dual 阶段的 legacy 回落会很快对大多数账户失效；
+  每个账户首次退役推进一次全局 revision，部署后头几天运营预览/ drain 的 `CATALOG_CONFLICT` 会比平时多（自愈）。
+  切断在节点下一次 roster 轮询后生效。生产 `exit_credential_rollout.phase` 未在本机确认；`device_only` 阶段 onboard
+  对已注册用户仍 409（main 上既有行为，本 PR 未改，但现在不留部分写入）。
 
 ## 2026-09-23 · Windows App 在 Protected Offline（armed 未验证）期间的 Service 真值再同步
 

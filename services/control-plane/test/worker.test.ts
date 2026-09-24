@@ -1353,6 +1353,17 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       headers: { authorization: `Bearer ${survivor.accessToken}` },
     });
     expect(await survivorCatalog.text()).not.toContain(leakedUUID);
+
+    const onboarded = await api('ops/users/onboard', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+      },
+      body: JSON.stringify({ email: account.email }),
+    });
+    expect(onboarded.status).toBe(202);
+    expect((await onboarded.json() as any).exitIdentityIssued).toBe(true);
   });
 
   it('provisions and rotates a node token that is bound to its usage source', async () => {

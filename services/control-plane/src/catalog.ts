@@ -115,7 +115,7 @@ export async function exitClientUUID(e: Env, userId: string, deviceId?: string |
   return String(row.client_uuid);
 }
 
-async function legacyExitCredentialRetired(e: Env, userId: string) {
+export async function legacyExitCredentialRetired(e: Env, userId: string) {
   const row = await e.DB.prepare(
     'SELECT 1 FROM exit_credentials WHERE user_id = ? AND retired_at IS NOT NULL',
   ).bind(userId).first<Row>();
