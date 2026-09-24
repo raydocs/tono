@@ -4201,11 +4201,22 @@ ${nameLine}
       ],
       version: 1,
     };
-    const blindWrite = await admin('traffic-policy', { policy }, 'PUT');
+    // Media endpoints need a signature (#318), so every write of this policy
+    // signs the bytes the endpoint says it will serve.
+    const signedWrite = async (value: unknown, expectedRevision?: number) => {
+      const preview = await admin('traffic-policy', { policy: value, dryRun: true }, 'PUT');
+      const signature = await signPolicy((await preview.json() as any).json);
+      return admin('traffic-policy', {
+        policy: value,
+        ...(expectedRevision === undefined ? {} : { expectedRevision }),
+        signature,
+      }, 'PUT');
+    };
+    const blindWrite = await signedWrite(policy);
     expect(blindWrite.status).toBe(400);
     expect((await blindWrite.json() as any).error.code).toBe('VALIDATION_ERROR');
 
-    const created = await admin('traffic-policy', { policy, expectedRevision: 0 }, 'PUT');
+    const created = await signedWrite(policy, 0);
     expect(created.status).toBe(200);
     const createdBody = await created.json() as any;
     expect(JSON.parse(createdBody.json)).toEqual({
@@ -4241,7 +4252,7 @@ ${nameLine}
       headers: { authorization: `Bearer ${account.accessToken}` },
     });
     expect(await fetched.json()).toEqual(createdBody);
-    const conflict = await admin('traffic-policy', { policy, expectedRevision: 0 }, 'PUT');
+    const conflict = await signedWrite(policy, 0);
     expect(conflict.status).toBe(409);
 
     const webPolicy = {
@@ -4252,11 +4263,7 @@ ${nameLine}
         { host: 'ykimg.alicdn.com', ports: [443] },
       ],
     };
-    const updated = await admin(
-      'traffic-policy',
-      { policy: webPolicy, expectedRevision: 1 },
-      'PUT',
-    );
+    const updated = await signedWrite(webPolicy, 1);
     expect(updated.status).toBe(200);
     expect(JSON.parse((await updated.json() as any).json)).toEqual({
       version: 2,
@@ -4279,11 +4286,7 @@ ${nameLine}
         { address: '49.51.67.253', ports: [443, 80] },
       ],
     };
-    const nativeUpdated = await admin(
-      'traffic-policy',
-      { policy: nativeWeChatPolicy, expectedRevision: 2 },
-      'PUT',
-    );
+    const nativeUpdated = await signedWrite(nativeWeChatPolicy, 2);
     expect(nativeUpdated.status).toBe(200);
     expect(JSON.parse((await nativeUpdated.json() as any).json)).toEqual({
       version: 4,
@@ -4400,10 +4403,16 @@ ${nameLine}
     }
     // The public boundary publishes through the normal admin write path and
     // is served back verbatim by publicTrafficPolicy — the realized impact
-    // was that this PUT returned 400 VALIDATION_ERROR before the fix.
+    // was that this PUT returned 400 VALIDATION_ERROR before the fix. Signed,
+    // because media endpoints need a signature (#318).
+    const boundary = await admin('traffic-policy', {
+      policy: empty('192.0.3.5', true),
+      dryRun: true,
+    }, 'PUT');
     const published = await admin('traffic-policy', {
       policy: empty('192.0.3.5', true),
       expectedRevision: 0,
+      signature: await signPolicy((await boundary.json() as any).json),
     }, 'PUT');
     expect(published.status).toBe(200);
     const served = await (await admin('traffic-policy', undefined, 'GET')).json() as any;
@@ -4531,6 +4540,40 @@ ${nameLine}
 
     // Nothing above was stored.
     expect((await (await admin('traffic-policy', undefined, 'GET')).json() as any).revision).toBe(0);
+  });
+
+  it('requires a signature before a media endpoint can leave the tunnel', async () => {
+    // #318: an exact IP:port carve-out is only reviewed by a signature. Both
+    // clients' unsigned media allowlists are empty, so an unsigned publish
+    // carrying one is refused here instead of being silently dropped (macOS)
+    // or honoured (older Windows builds).
+    const media = {
+      version: 1,
+      domains: [],
+      mediaEndpoints: [{ address: '43.146.27.17', ports: [443] }],
+    };
+    const unsigned = await admin('traffic-policy', { policy: media, expectedRevision: 0 }, 'PUT');
+    expect(unsigned.status).toBe(400);
+    expect((await unsigned.json() as any).error.code).toBe('VALIDATION_ERROR');
+    const preview = await admin('traffic-policy', { policy: media, dryRun: true }, 'PUT');
+    const previewed = await preview.json() as any;
+    expect(previewed.signatureRequired).toBe(true);
+
+    const signed = await admin('traffic-policy', {
+      policy: media, expectedRevision: 0, signature: await signPolicy(previewed.json),
+    }, 'PUT');
+    expect(signed.status).toBe(200);
+
+    // A row stored unsigned before this rule is still served; refusing it on
+    // read would turn every policy fetch into a 503. Clients drop it.
+    await env.DB.prepare(
+      'UPDATE managed_traffic_policy SET signature = NULL WHERE singleton_id = 1',
+    ).run();
+    const account = await createAccount('unsigned-media-legacy-row');
+    const fetched = await api('traffic-policy', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(fetched.status).toBe(200);
   });
 
   it('will not let a signature pull a protected host out of the tunnel', async () => {
@@ -4722,7 +4765,13 @@ ${nameLine}
       ],
       tcpEndpoints: [{ address: '49.51.67.253', ports: [443] }],
     };
-    const written = await admin('traffic-policy', { policy: retargeted, expectedRevision: 0 }, 'PUT');
+    // Signed: the media endpoint in this shape needs a signature (#318).
+    const retargetedPreview = await admin('traffic-policy', { policy: retargeted, dryRun: true }, 'PUT');
+    const written = await admin('traffic-policy', {
+      policy: retargeted,
+      expectedRevision: 0,
+      signature: await signPolicy((await retargetedPreview.json() as any).json),
+    }, 'PUT');
     expect(written.status).toBe(200);
     const stored = JSON.parse((await written.json() as any).json);
     expect(stored.directSuffixes.map((entry: any) => entry.host)).toEqual([

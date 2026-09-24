@@ -52,7 +52,28 @@ export function isPublicIPv4(address: string) {
 // into what a signature can override would make a leaked private key sufficient
 // to expose the traffic the product exists to protect, which is a strictly worse
 // position than the allowlist this mechanism replaces.
-export function canonicalTrafficPolicy(value: unknown, trusted = false): TrafficPolicy {
+//
+// Media endpoints need a signature (#318). An exact IP:port leaves the tunnel
+// on UDP for the WeChat process set, and both clients' unsigned media address
+// allowlists are empty, so an unsigned publish carrying one is refused rather
+// than stored for macOS to drop and older Windows builds to honour. Checked
+// last, after every entry has passed its own validation, so a malformed entry
+// is still reported as itself. `admitStoredUnsignedMedia` exists only for the
+// read path: a row stored before this rule must keep being served, or every
+// policy fetch becomes a 503; the clients drop those entries themselves.
+export function canonicalTrafficPolicy(
+  value: unknown,
+  trusted = false,
+  admitStoredUnsignedMedia = false,
+): TrafficPolicy {
+  const policy = canonicalTrafficPolicyEntries(value, trusted);
+  if (!trusted && !admitStoredUnsignedMedia && policy.mediaEndpoints.length) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Media endpoints require a signed policy');
+  }
+  return policy;
+}
+
+function canonicalTrafficPolicyEntries(value: unknown, trusted: boolean): TrafficPolicy {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid policy');
   }
@@ -359,7 +380,7 @@ export async function publicTrafficPolicy(e: Env) {
     // allowlist entry removed while the stored policy still uses it makes this
     // throw for every device. See the note on `allowedDirectSuffixes` before
     // narrowing anything.
-    canonicalTrafficPolicy(JSON.parse(json), Boolean(signature));
+    canonicalTrafficPolicy(JSON.parse(json), Boolean(signature), true);
     return {
       revision: Number(row.revision),
       json,
