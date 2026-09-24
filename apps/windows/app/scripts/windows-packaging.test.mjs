@@ -513,6 +513,33 @@ test('NSIS uninstall removes leftover user control-plane pins', () => {
   )
 })
 
+test('NSIS uninstall deletes in the approving account AppData only after the link check', () => {
+  const uninstall =
+    installerSource.match(/Section Uninstall\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  // No recursive NSIS delete of app data: the helper removes it from every profile, this one
+  // included, and never walks through a link or reparse point on the way.
+  assert.doesNotMatch(uninstall, /RmDir\s+\/r\s+"\$(?:LOCAL)?APPDATA/i)
+  const checkAt = uninstall.search(
+    /tono-service-uninstall\.exe" --check-current-app-data'\s+Pop \$AppDataPathPlain/,
+  )
+  assert.ok(checkAt >= 0, 'the helper must check this account AppData before any delete there')
+  const gated = [
+    ...uninstall.matchAll(
+      /\$\{(?:If|AndIf)\} \$AppDataPathPlain == "0"[\s\S]*?\$\{EndIf\}/g,
+    ),
+  ].map((block) => [block.index, block.index + block[0].length])
+  const deletes = [
+    ...uninstall.matchAll(/^\s*(?:Delete|RmDir)\b[^\n]*\$(?:LOCAL)?APPDATA[^\n]*/gim),
+  ]
+  assert.ok(deletes.length > 0)
+  for (const line of deletes) {
+    assert.ok(
+      gated.some(([start, end]) => checkAt < start && start < line.index && line.index < end),
+      `AppData delete outside the checked block: ${line[0].trim()}`,
+    )
+  }
+})
+
 test('NSIS removes every known old payload on upgrade and uninstall', () => {
   const cleanup = [
     ...KNOWN_LEGACY_WINDOWS_PAYLOAD,

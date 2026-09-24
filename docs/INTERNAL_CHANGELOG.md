@@ -1898,6 +1898,40 @@
 - **剩余限制**：schtasks 路径沿用注册时的 `C:\Windows\System32`（#471 合入后应一并改为系统目录；只在注册成功的机器上才需要退休，
   二者一致）；已提交 attempt 目录在提交时不删（执行器正在运行自身映像，按 D3 保留为证据），只在最终卸载时删；
   回滚终态（RolledBack）的任务仍保留到最终卸载；未实机验证任务删除与卸载顺序。
+## 2026-09-24 · Windows 卸载「删除应用数据」覆盖每个本机账户
+
+- **归属/来源**：卸载恢复原状与多用户隔离（L1/L5）；Windows NSIS 卸载段与卸载助手。基线 origin/main
+  [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b)，分支 `fix/win-app-data-all-profiles-20260924`，
+  Issue #559（内部审查 H19-O-F7 = H19-C-F2）；未合 main。
+- **缺陷修复**：勾选「删除应用数据」后只删 `SetShellVarContext current` 下的 `$APPDATA`/`$LOCALAPPDATA`，
+  提权卸载时这是批准 UAC 的管理员账户：另一管理员卸载时实际使用者的数据（含账户与出口配置）保留；标准用户借管理员
+  凭据卸载时反而删了管理员的目录。改后：`RemoveVergeService` 证明屏障已移除后，卸载段（勾选且非更新模式）调用
+  `tono-service-uninstall.exe --delete-app-data-all-profiles`，助手枚举用户配置文件目录（`FOLDERID_UserProfiles`，
+  跳过 `All Users` 等联接点），删除每个配置文件 `AppData\Roaming` 与 `AppData\Local` 下的 `com.raydocs.tono`；
+  用 Rust `remove_dir_all`/`remove_file`，链接只删链接本身、不跟随，避免提权删除被某个账户的联接点重定向。
+  原有当前账户 `RmDir` 保留。失败只记日志、不阻断卸载。
+- **新增/优化**：无。**暂定决定（更严格）**：选择实际删除所有账户的 Tono 数据，而不是只改确认文案说明「仅删除当前账户」。
+- **工程与测试**：`uninstall_service.rs` 一个 `#[test]`（`delete_app_data_reaches_every_profile_not_only_the_approving_admin`）：
+  两个配置文件的 Roaming/Local Tono 目录都删除，其他应用目录保留。
+- **验证**：见 PR；红：仅测试提交在 CI 编译失败（旧代码没有跨配置文件删除）；绿：Windows CI。MacBook 未编译 Rust，NSIS 未编译。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：不在 `FOLDERID_UserProfiles` 下的配置文件、文件夹重定向到别处的 AppData 不覆盖；各账户 Credential Manager
+  中的会话仍按 H11-F3/#412 处理，提权进程不能删他人凭据库；另一账户会话中 Tono 仍在运行时其被占用的文件可能删不掉；
+  不改 Tauri 自带的复选框文案；未实机验证。
+- **跟进 2026-09-24（跨厂商审查 WA-OpenAI-1）**：修复：原只对最后一级 `com.raydocs.tono` 不跟随链接，
+  `AppData\Local` 若是指向 `D:\Data` 的联接点，提权删除会删掉 `D:\Data\com.raydocs.tono`。现逐级检查配置文件目录、
+  `AppData`、`AppData\Roaming`、`AppData\Local`：任何一级是符号链接/联接点/其他重解析点或无法读取元数据，就跳过整个
+  配置文件并在返回错误中报告（NSIS 仅记日志）。测试：`delete_app_data_never_walks_through_a_redirected_app_data_folder`
+  （Windows 用 `mklink /J` 建联接点，无需特权）；旧代码会经联接点删掉外部目录，断言失败。验证：未在本机运行；CI 待定。
+  限制：检查与删除之间仍有竞态（配置文件所有者可在检查后改成联接点），未用句柄逐级打开消除；未实机验证。
+- **跟进 2026-09-24（Codex 复核 WA-OpenAI-1 PARTIAL，未闭合路径）**：修复：助手跳过某配置文件后，NSIS 仍对批准卸载的管理员
+  执行 `RmDir /r "$APPDATA|$LOCALAPPDATA\${BUNDLEID}"`，并直接删除窗口状态与旧 pins，绕过逐级检查。现删掉这两条 `RmDir /r`
+  （该账户的目录已由 `--delete-app-data-all-profiles` 在检查下删除）；卸载段先调用新的 `--check-current-app-data`，只有退出码为 0
+  （本账户 Roaming/Local AppData 位于其配置文件内，且从配置文件到最深删除路径 `com.raydocs.tono\tono` 的每级都不是链接/重解析点）
+  才删窗口状态与旧 pins；助手缺失、超时或失败都保留。Rust 侧 `remove_leftover_user_control_plane_pins` 用同一检查；配置文件循环
+  改用同一 `redirected_folder`。测试：packaging 新增一个 `test`（`NSIS uninstall deletes in the approving account AppData only after the
+  link check`），MacBook 上改前失败、改后 23/23 通过；Rust 由既有联接点测试覆盖共用检查。验证：Rust/NSIS 未在本机运行；CI 待定。
+  限制：AppData 被重定向到配置文件外时本账户的窗口状态与旧 pins 不再删除；检查与删除之间的竞态同上；NSIS 未编译，未实机验证。
 
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
