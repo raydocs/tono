@@ -32,6 +32,31 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Worker 拒绝未签名策略中的 media 端点（H3-F6 Worker 侧）
+
+- **归属/来源**：G1 保护不放宽（只有签名能扩大绕行面）；影响控制面
+  `services/control-plane/src/traffic-policy.ts`。基线 main bb2ed4e4，分支
+  `fix/worker-unsigned-media-20260923`；Issue #318（Windows 客户端侧为 #340）；提交时未合 main。
+- **缺陷修复**：`canonicalTrafficPolicy` 对 `mediaEndpoints` 不看 `trusted`，未签名发布可把任意公网
+  IPv4:443/8000 写入策略；macOS 未签名 media 白名单为空会丢弃，旧 Windows 会放行。改后：未签名
+  写入（PUT）含 media 端点即 400 `VALIDATION_ERROR`（在全部逐项校验之后判断，畸形条目仍按原错误
+  报告），dry run 相应返回 `signatureRequired: true`；签名写入不变。读取路径
+  （`publicTrafficPolicy`）对本规则之前已存的未签名 media 行继续放行，避免全网策略拉取 503，
+  客户端自行丢弃这些条目。
+- **新增/优化**：无。
+- **工程与测试**：新增回归 `requires a signature before a media endpoint can leave the tunnel`。
+  测试契约修正：`validates, encrypts, versions, and serves the managed traffic policy`、
+  `admits public IPv4 in the rest of 192.0.0.0/16 …`、`accepts the Feishu family …` 原以未签名
+  方式发布含 media 的策略，改为先 dry run 再以测试密钥签名发布；无效条目循环保持未签名（逐项
+  错误先于签名要求触发，断言仍有意义）。
+- **验证**：本机 `npx vitest run test/worker.test.ts -t "requires a signature before a media endpoint"`
+  在旧代码上失败（未签名 PUT 返回 200，期望 400），修复后通过；`npx vitest run` 全量 43 文件 892
+  用例通过；`tsc --noEmit` 通过。未部署。
+- **候选/发布**：无新包，仅源码；未部署 Worker。
+- **剩余限制**：部署前需确认生产当前策略若含 media 端点则为签名版本，否则下一次未签名发布会被
+  拒（读取不受影响）；`tcpEndpoints` 同样不看 `trusted`（macOS 未签名 TCP 白名单也为空），未在本
+  PR 处理；ops-console 未签名发布含 media 的策略会收到 400。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
