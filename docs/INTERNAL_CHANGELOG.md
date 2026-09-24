@@ -32,6 +32,62 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS Protected DNS 按系统主服务选服务，并核对实际生效的解析器
+
+- **归属/来源**：G1 保护；macOS `SystemProxy` 服务选择、`PrivilegedRuntimeCoordinator`
+  DNS 完整性判定与 `AppState` 审计后的重连策略。内部审查 X2-3，Issue #457；第二轮按
+  #458 独立审查（Codex，只读）修改。基线 main bb2ed4e4 → 分支
+  `fix/dns-primary-service-20260923`；提交时未合 main。
+- **缺陷修复**：
+  - 服务选择：旧代码把 IPv4 默认接口经 `networksetup -listnetworkserviceorder` 映射成服务，
+    但解析器把所有以 "(" 开头的行都当服务标题，设备行 `(Hardware Port: …, Device: en7)`
+    被吞掉，映射**总是**失败，于是回退到第一个名为 Wi-Fi 的服务——有线为主、Wi-Fi
+    同时开启的常见拓扑里，DNS 被写到空闲的 Wi-Fi，完整性检查也只读 Wi-Fi 自己存的设置就判
+    intact。现在服务取自 SCDynamicStore `State:/Network/Global/IPv4` 的 `PrimaryService`
+    （无 IPv4 主服务时取 IPv6；IPv4 主服务存在但无名字时不改用 IPv6，理由见代码注释），经
+    `SCNetworkServiceGetName` 映射为 helper 使用的名字；拿不到时返回 nil，连接以既有的
+    `noNetworkService` 失败、不写 DNS。系统代理模式共用同一选择函数。
+  - 完整性判定：helper 读回通过后，`State:/Network/Global/DNS` 的 `ServerAddresses` 必须
+    全部为 `127.0.0.1`，否则 `.broken`。另枚举补充解析器：`State:/Network/Service/*/DNS`
+    中带 `SupplementalMatchDomains` 的项与 `/etc/resolver/*`；只要有指向非 loopback 的，
+    判为新的 `.supplementalConflict`（既不 intact，也不当 broken 重连）：保持 PF 拆会话，
+    暂停自动重试（网络变化不解除），提示"DNS 冲突"并在横幅与本地审计
+    `protected_dns_supplemental_conflict` 中列出域名 → 服务器。不放宽 PF。
+  - 重连有界：审计判 `.broken`（且网络未变）计入独立计数，连接成功**不**清零、仅 `.intact`
+    审计/立即重试/释放清零；连续 3 次即停在"保护保持、DNS 未生效"并暂停自动重试
+    （`protected_dns_broken_retries_exhausted`）。`noNetworkService` 另计：连续 5 次（约 1 分钟
+    退避）后暂停并提示；网络变化可解除暂停，但计数不清零，所以每次网络变化只换一次尝试。
+  - 二次确认（第四轮审查）：周期审计与网络变化核对读到 `.broken` 时，先等 2 s 重读一次，
+    以第二次结果为准，DHCP 续租等造成的一次短暂坏读不再立即拆会话。PF 全程保持。
+  - 唤醒尊重暂停终态（第四轮审查）：唤醒恢复在重新确认 PF 后，若已处于"等用户处理"的暂停
+    （DNS 冲突、Protected DNS 反复失效、需用户操作的失败，即网络变化也不解除的那类），就保持
+    Protected Offline 与原提示、不再 connect；网络变化可解除的暂停照旧由唤醒解除。此前每次
+    唤醒都会重连一次再被审计暂停。
+- **新增/优化**：无。
+- **工程与测试**：`SystemNetworkObservation`（含补充解析器）；`primaryNetworkService(observe:)`
+  注入点，生产默认读实时动态存储。一个 XCTest
+  `ProtectedDNSServiceSelectionTests.testWiredIPv4PrimaryIsSelectedWhileWiFiIsAlsoUp`，
+  走生产 `SystemProxy.primaryNetworkService(observe:)`，拓扑为 IPv4 有效、有线为主、Wi-Fi
+  同时存在。**旧代码上没有行为失败的实跑**：旧代码没有注入点，测试只会编译失败；旧逻辑
+  为何选 Wi-Fi 是按上面的解析缺陷推理得出（见测试注释中的 networksetup 输出）。冲突判定与
+  有界重连、`.broken` 二次确认与唤醒暂停判断均未加测试（AGENTS 规则 5，审查未要求；
+  完整性读取与唤醒的 PF 重申都直接调用 `PrivilegedRuntimeCoordinator`，没有现成 seam）。
+  新增三条 zh-Hans 文案。删除无用的
+  `networkService(for:)`。未改 helper 源码，协议版本与 CONTRACT.sha256 不变。
+- **验证**：本机（编辑机）未编译、未运行 xcodebuild/swift，委托本 PR 的 GitHub-hosted
+  `macos-26` CI（build + TonoTests），结果以 PR 页为准。本机只读 `scutil` 核对了键布局
+  （`State:/Network/Service/<id>/DNS` 普通项无 `SupplementalMatchDomains`）。实机清单写在
+  PR 中，尚未执行。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：用户可见影响需实机确认。补充解析器只看上述两处来源；NetworkExtension/描述
+  文件下发的加密 DNS（DoH/DoT）设置、应用自带解析器不在观测内。非主服务的普通
+  `ServerAddresses`（只服务于指定接口的查询）不算冲突。冲突在连接后才由审计（网络变化
+  750 ms 或约 60 s 周期，读到 broken 时再加 2 s 复核）发现，连接期不预检。真实持续的
+  broken 因复核晚 2 s 才拆会话（PF 期间一直生效）。与全隧道 VPN 共存时若其动态服务成为 IPv4
+  主服务，连接以 `noNetworkService` 拒绝。直连策略的物理网卡仍由 `route -n get default`
+  取得（IPv4 only）。`apps/windows/app/scripts/unset_dns.sh` 的旧服务选择未改：它只随 Tauri
+  应用打包，而 Tauri 应用只出 Windows 包，且 Windows 打包显式禁止该脚本，生产不可达。
+
 ## 2026-09-23 · macOS 连接尾声在更新状态查询返回后重新核对代际再提交
 
 - **归属/来源**：G3 原生升级恢复 / G1 连接生命周期；macOS `AppState+Connect.onCoreStarted`。

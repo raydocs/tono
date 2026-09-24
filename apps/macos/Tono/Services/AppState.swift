@@ -108,6 +108,15 @@ final class AppState {
     /// otherwise disconnect the session every minute without end. Only an
     /// explicit Retry now or Restore internet clears it.
     var consecutiveProtectionRepairCount = 0
+    /// `.broken` Protected DNS audits since the last `.intact` one. A connect
+    /// that succeeds does not reset it: the connect preflight cannot see the
+    /// default resolver the audit checks, so a mismatch that outlives
+    /// reconnects would otherwise tear the tunnel down forever.
+    var consecutiveProtectedDNSBrokenAudits = 0
+    /// Connect attempts in a row that found no primary network service.
+    /// Kept apart from `consecutiveProtectedFailureCount`, which exempts
+    /// this environmental failure from its three-strike pause.
+    var consecutiveNoNetworkServiceFailures = 0
     /// The protected path failed and PF is intentionally still blocking direct
     /// egress. Keep this distinct from ordinary "Not Connected" so the user
     /// can explicitly restore normal Internet instead of unknowingly retrying
@@ -442,8 +451,7 @@ final class AppState {
             let primaryService =
                 await PrivilegedRuntimeCoordinator.shared.primaryNetworkService()
             let dnsIntegrity = if let service = self.protectedDNSService {
-                await PrivilegedRuntimeCoordinator.shared
-                    .protectedDNSIntegrity(service: service)
+                await self.protectedDNSIntegrityConfirmingBroken(service: service)
             } else {
                 PrivilegedRuntimeCoordinator.ProtectedDNSIntegrity.broken
             }
@@ -457,9 +465,20 @@ final class AppState {
             }
             let currentFingerprint = PhysicalInterfaceFingerprint.current()
             let physicalChanged = (self.lastPhysicalFingerprint != nil && self.lastPhysicalFingerprint != currentFingerprint)
-            guard primaryService != self.protectedDNSService
-                    || dnsIntegrity == .broken
-                    || physicalChanged else {
+            let networkMoved = primaryService != self.protectedDNSService || physicalChanged
+            if dnsIntegrity == .intact { self.consecutiveProtectedDNSBrokenAudits = 0 }
+            if !networkMoved, case .supplementalConflict(let resolvers) = dnsIntegrity {
+                self.connectionCoordinator.networkEnvironmentTask = nil
+                self.holdProtectedDNSSupplementalConflict(resolvers)
+                return
+            }
+            guard networkMoved || dnsIntegrity == .broken else {
+                self.connectionCoordinator.networkEnvironmentTask = nil
+                return
+            }
+            // Only a mismatch on an unchanged network counts: a moved
+            // network is new information a reconnect can act on.
+            if !networkMoved, self.pauseIfProtectedDNSKeepsFailing() {
                 self.connectionCoordinator.networkEnvironmentTask = nil
                 return
             }
@@ -652,6 +671,19 @@ final class AppState {
                         )
                         continue
                     }
+                }
+                // A pause that waits for the user (a DNS conflict, Protected
+                // DNS that kept failing, a failure that needs their action)
+                // survives sleep: a wake reconnect would only reach the same
+                // verdict again. PF is reasserted above and the pause message
+                // stays. Pauses that lift on a network change do not stop here.
+                if self.protectedReconnectPausedForUserAction,
+                   !self.protectedReconnectPauseLiftsOnNetworkChange {
+                    if !Task.isCancelled {
+                        self.isProtectionBlocked = true
+                        self.connectionCoordinator.wakeRecoveryTask = nil
+                    }
+                    return
                 }
                 guard self.isTonoReady else {
                     self.isProtectionBlocked = true
