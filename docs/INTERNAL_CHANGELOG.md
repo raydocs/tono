@@ -32,6 +32,97 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 升级恢复判定与回滚退休逐成员校验 durable plan（#301 跟进 2）
+
+- **归属**：G3 受保护升级（安装完整性）；Windows Service 更新事务 + 执行器
+  （`apps/windows/service`）+ 协议文档。
+- **来源**：基线 main `498ed426`，叠加在 R4-F7 分支 `fix/update-replaced-release-20260923`
+  （PR #359，共用 plan 视图）之上 → 分支 `fix/update-plan-member-digests-20260923`；
+  Issue #360；PR #361；提交时未合 main，须在 #359 之后合并。
+- **缺陷修复（源码推导，无保护绕过）**：`classify_recovery` TargetVerified 与
+  `retire_rolled_back` handler 只比较 Tono.exe / tono-core.exe / tono-service.exe 三组件，
+  而 durable plan 覆盖整棵 payload 树 + `tono-service.exe` + `core-sha256.txt`（最后成员）。
+  发布在二进制之后、后续成员之前中断 → 误判已完整发布（残留旧 pin 可致 Core 启动被拒，
+  落入 #358 锁死）；回滚恢复了二进制而某资源失败 → 误判已回滚并归档。改后：新增
+  `update_native::plan_members_at`（读 plan 视图，校验 attempt、成员路径位于安装根/
+  Service 目录、scratch 路径绑定，逐成员 sha256 等于 old/new digest）；恢复判定
+  TargetVerified 额外要求全部成员 == `new_digest`，否则按中断回滚；RolledBack/Uncertain
+  退休在 plan 存在时额外要求全部成员 == `old_digest`（无 plan 仍表示未开始发布）。
+  R4-F7 的已安装且已释放出口复用同一校验。
+- **新增/优化**：无。
+- **工程与测试**：新增 1 个 `#[test]`
+  `core::update::tests::update_plan_members_gate_recovery_and_rollback_on_every_member_not_three_binaries`
+  （真实文件 + 与执行器相同的 plan 序列化形状：末成员仍旧 → New 拒；资源未回滚 → Old 拒；
+  全部一致 → 通过）。旧代码无逐成员校验入口（测试无法编译）。既有纯函数测试
+  `update_recovery_classifies_publication_by_installed_identity_not_successor_liveness`
+  只为新增参数补实参，断言不变。
+- **验证**：本机未运行任何 cargo；委托本 PR 的 GitHub-hosted `windows-2025` Service lane
+  （`core::update::tests::update_` / `update_executor::tests::update_` 定向枚举）。结果见续记。
+  恢复执行器与 Disconnect handler 的接线（SCM、原生组件测量）无单测、未在设备执行。
+- **候选/发布**：无新包，仅源码。
+- **版本生效**：恢复判定在执行器内，执行器是 Prepare 时从**已装旧版**复制的，故只对从含
+  本修复的版本出发的下一跳生效；退休校验在当时运行的 Service 内，取决于 Disconnect 时
+  已装 Service 版本。
+- **剩余限制**：Windows 11 实机中断恢复/回滚验收仍属 G3 未闭合证据。
+- **续记（2026-09-23）**：PR #361 源码 `37074b70`（叠加 `7c6ccf00`）的 GitHub-hosted
+  `windows-2025` lane 全绿；service lane 日志确认新增 `#[test]` 与改参的既有纯函数测试运行
+  并通过。CI 绿不等于设备验证或已发布。
+- **续记（2026-09-23，R4 审查修正）**：审查指出恢复执行器
+  `plan_members_at(..).is_ok()` 把成员读取 I/O 错误（共享冲突、AV 暂锁）当成「不是
+  target」→ Interrupted → 回滚一次已完整发布并校验过的安装并消耗序号；与 #359 备份部分
+  删除组合（审查 C2）可成混合树 + 永久 pending。改后 `plan_members_at` 返回
+  `Result<bool>`：`Ok(false)` 仅表示成员已读出且摘要不符，plan 或成员读不到为 `Err`。
+  执行器改为 `?` 传播：读不到时在任何回滚之前退出、不动文件，按既有 outcome 路径标记
+  `Uncertain`（与三组件读失败一致），下次 recover 重新判定。Disconnect 的 RolledBack/
+  Uncertain 退休与 Replaced 释放出口对 `Ok(false)` 与 `Err` 都拒绝（仍 fail-closed，
+  记录保持 pending）。测试：扩展同一 `#[test]`——不匹配断言 `Ok(false)`、一致断言
+  `Ok(true)`，新增成员路径为目录（存在但打开/读取失败）断言 `Err`；
+  旧签名 `Result<()>` 下不匹配与读不到同为 `Err`、执行器 `.is_ok()` 均变 false，测试在旧
+  分支无法编译。本机未编译，委托 CI（`windows-2025` Service lane）。剩余限制：读错误若
+  持续存在，记录停在 `Uncertain`（Adopt 需 Replaced，要等可读后的 recover 恢复）；审查
+  C1（恢复执行器停/起 Service 循环）未在本 PR 处理。
+
+## 2026-09-23 · Windows 升级 Replaced + 已验证 Disconnect 的「已安装且已释放」终态（R4-F7）
+
+- **归属**：G3 受保护升级；Windows Service 更新事务（`apps/windows/service`）+ 协议文档。
+- **来源**：基线 main `498ed426`（含 #301）→ 分支 `fix/update-replaced-release-20260923`；
+  Issue #358；PR #359；提交时未合 main。
+- **缺陷修复（R4-F7，源码推导，非 #301 引入）**：升级已完成并被新 App 收养（Replaced）
+  后自动重连失败、用户点 Restore internet → Disconnect 已验证、网络已释放，但 Disconnect
+  handler 只归档未消费与 RolledBack/Uncertain，Replaced 永久 pending；此后连接、
+  Adopt/Commit、再更新、Quit/登出释放、卸载/重装全部被拒，产品内无出口（不泄漏流量）。
+  改后：新增 `Store::retire_released_installation` 归档终态——前提为 execution=Replaced、
+  Disconnect 已验证为 Unprotected、请求方经 `authenticate_successor` 证明为注册安装根
+  的 target 身份 successor（旧字节 App 仍可 Disconnect 但不能结束 Replaced 事务）、
+  已装三组件等于 target 且 durable plan 每个成员 sha256 等于其 `new_digest`。
+- **新增/优化**：释放不等于 commit——phase、requiredRecovery、successor 证据与
+  consumed/generation 高水位原样进归档，不走 `Committed` 清理路径。备份清理归属：
+  该事务之后不会再有 commit 或执行器运行，由 Service 在清空槽位**之前**删除每个 plan
+  成员绑定的 `.rollback/.restore/.publish` 副本（路径须等于成员目标+后缀、位于安装根或
+  Service 目录；只删普通文件）；否则它们会拒绝下一次升级的 prepare。私有 attempt 证据
+  （payload、plan、executor、package）保留。删除失败则事务保持 pending、可重试。
+  UPDATE_PROTOCOL_V1.md 澄清节新增该条并删去对应「open」限制。
+- **工程与测试**：新增 1 个 `#[test]`
+  `update_replaced_attempt_released_by_verified_disconnect_reaches_archive_without_commit`
+  （update_transaction.rs）：旧字节 peer 被拒、备份释放失败保持 pending、成功时释放先于
+  归档、归档 receipt 未变（phase 仍 InstalledIdentityVerified）、高水位 (74, 92) 保持。
+  旧代码上该归档出口不存在（测试无法编译，即无出口本身）。
+- **验证**：本机未运行任何 cargo（执行位置决定）；委托本 PR 的 GitHub-hosted
+  `windows-2025` Service lane（含 `update_transaction::tests::update_` 定向枚举）。
+  结果见续记。Service handler 的原生部分（installed_components、plan 逐成员摘要、
+  文件删除）无单测，未在 Windows 设备上执行。
+- **候选/发布**：无新包，仅源码。
+- **版本生效**：该出口由升级后已安装的**新** Service 执行（Disconnect handler），故只要
+  目标版本含本修复即生效，不依赖旧版执行器；从不含本修复的版本升级到不含本修复的版本
+  不受益。
+- **剩余限制**：Windows 11 实机「升级后重连失败 → Restore internet → 可再连接/再更新」
+  未验收；恢复判定 TargetVerified 与 `retire_rolled_back` 的逐成员校验另行修复
+  （#301 跟进项 2）；App 侧 Disconnect 二次确认未做。
+- **续记（2026-09-23）**：PR #359 源码 `7c6ccf00` 的 GitHub-hosted `windows-2025` lane
+  全绿（service / app / app-rust / core）；service lane 日志确认新增 `#[test]` 运行并通过
+  （314 passed）。CI 绿不等于设备验证或已发布。
+
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
