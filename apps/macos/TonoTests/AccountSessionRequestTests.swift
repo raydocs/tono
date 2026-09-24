@@ -115,6 +115,23 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertFalse(account.authMethodsLoading)
     }
 
+    func testProtectionReleaseReloadsTheSignInMethodsItRetired() async throws {
+        let (account, transport, host, requests) = fixture()
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        let first = Task { await account.loadAuthMethods() }
+        let retired = try await nextRequest(requests)
+        // Restore internet clicked while the sign-in screen is still loading.
+        let release = Task { await account.restoreDirectInternet() }
+        let reload = try await nextRequest(requests)
+        reload.respond(status: 200, body: Self.enabledMethods)
+        await release.value
+        retired.respond(status: 400, body: #"{"error":{"message":"retired failure"}}"#)
+        await first.value
+        XCTAssertEqual(account.authMethods?.email.enabled, true)
+        XCTAssertEqual(account.state, .signedOut)
+        XCTAssertFalse(account.authMethodsLoading)
+    }
+
     func testCurrentFailureStillReportsAnError() async throws {
         let (account, transport, host, requests) = fixture()
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
