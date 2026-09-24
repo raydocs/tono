@@ -330,13 +330,13 @@ async fn spawn_periodic_inner(state: &Arc<TonoState>, app: &AppHandle, auth_gene
         interval.tick().await;
         loop {
             interval.tick().await;
-            if !periodic_sync_continues(&task_state.lock().await, auth_generation) {
+            if !periodic_sync_continues(&*task_state.lock().await, auth_generation) {
                 return;
             }
             // A failing sync never replaces the last verified copy (§3) and
             // never surfaces to the UI beyond the log.
             let _ = sync_with_retries_inner(&task_state, &task_app, auth_generation).await;
-            if !periodic_sync_continues(&task_state.lock().await, auth_generation) {
+            if !periodic_sync_continues(&*task_state.lock().await, auth_generation) {
                 return;
             }
             // The cloud traffic policy rides the same cadence (Build 28).
