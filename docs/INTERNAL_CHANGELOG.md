@@ -32,6 +32,36 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS Protected DNS 按系统主服务选服务，并核对实际生效的解析器
+
+- **归属/来源**：G1 保护；macOS `SystemProxy` 服务选择与 `PrivilegedRuntimeCoordinator`
+  DNS 完整性判定。内部审查 X2-3，Issue #457。基线 main bb2ed4e4 → 分支
+  `fix/dns-primary-service-20260923`；提交时未合 main。
+- **缺陷修复**：`route -n get default` 映射不到服务（无 IPv4 默认路由，如 IPv6-only/CLAT
+  或切换瞬间）时，旧代码返回第一个名为 Wi-Fi 的已启用服务，DNS 被写到空闲的 Wi-Fi，
+  完整性检查也只读 Wi-Fi 自己存的设置就判 intact。现在服务取自 SCDynamicStore
+  `State:/Network/Global/IPv4` 的 `PrimaryService`（无 IPv4 主服务时取 IPv6），经
+  `SCNetworkServiceGetName` 映射为 helper 使用的名字；拿不到主服务或名字时返回 nil，
+  连接以既有的环境类错误 `noNetworkService` 失败、不写 DNS（不计入重复失败暂停，
+  网络恢复后自动重试）。完整性判定在 helper 读回通过后，再要求
+  `State:/Network/Global/DNS` 的 `ServerAddresses` 全部为保护监听 `127.0.0.1`，否则
+  `.broken`（保持 PF、重连）；动态存储打不开时 `.unverifiable`（与 helper 不可达同待遇）。
+  系统代理模式共用同一选择函数，同样不再猜 Wi-Fi。
+- **新增/优化**：无。
+- **工程与测试**：新增可注入的 `SystemNetworkObservation`；一个 XCTest
+  `ProtectedDNSServiceSelectionTests.testIPv6PrimaryEthernetIsSelectedOverEnabledWiFiWithoutIPv4Default`。
+  旧代码没有注入接口（测试无法编译即失败）；同一拓扑下旧逻辑按 `SystemProxy.swift:225-228`
+  返回 Wi-Fi。删除随之无用的 `networkService(for:)`。未改 helper 源码，协议版本与
+  CONTRACT.sha256 不变。
+- **验证**：本机（编辑机）未运行 xcodebuild/swift；委托本 PR 的 GitHub-hosted `macos-26`
+  CI（build + TonoTests），结果以 PR 页为准。实机清单（IPv6-only 与 CLAT 分别验证）写在
+  PR 中，尚未执行。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：用户可见影响需实机确认。`State:/Network/Global/DNS` 只代表默认解析器，
+  `/etc/resolver` 或 VPN 的补充解析器不在此判定内（#348 另议）。与全隧道 VPN 共存时若
+  其动态服务成为 IPv4 主服务，连接会以 `noNetworkService` 拒绝，而不是像旧代码那样猜 Wi-Fi。
+  直连策略的物理网卡仍由 `route -n get default` 取得（IPv4 only），不在本条范围。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3

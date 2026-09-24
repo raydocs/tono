@@ -205,7 +205,15 @@ actor PrivilegedRuntimeCoordinator {
     func protectedDNSIntegrity(service: String) -> ProtectedDNSIntegrity {
         let status = HelperManager.protectedDNSStatus()
         guard status.available else { return .unverifiable }
-        return status.configured && status.service == service ? .intact : .broken
+        guard status.configured && status.service == service else { return .broken }
+        // The helper reads back only what is stored on `service`. That is
+        // still "configured" when macOS resolves through a different
+        // service, so the verdict also needs the resolver macOS actually
+        // uses. A store that cannot be read is withheld, like the helper.
+        guard let observation = SystemNetworkObservation.current() else {
+            return .unverifiable
+        }
+        return observation.effectiveResolverIsProtected ? .intact : .broken
     }
 
     func protectedDNSStatus() -> (

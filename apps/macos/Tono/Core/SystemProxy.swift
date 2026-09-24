@@ -1,4 +1,5 @@
 import Foundation
+import SystemConfiguration
 
 // MARK: - System Proxy Error
 
@@ -174,63 +175,17 @@ nonisolated struct SystemProxy {
         return nil
     }
 
-    /// Resolve a networksetup service name from a BSD interface such as en0.
-    private static func networkService(for interface: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/sbin/networksetup")
-        process.arguments = ["-listnetworkserviceorder"]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        try? process.run()
-        process.waitUntilExit()
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard let output = String(data: data, encoding: .utf8) else { return nil }
-
-        var currentService: String?
-        for line in output.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("("), let end = trimmed.firstIndex(of: ")") {
-                let service = trimmed[trimmed.index(after: end)...]
-                    .trimmingCharacters(in: .whitespaces)
-                currentService = service.hasPrefix("*")
-                    ? String(service.dropFirst()).trimmingCharacters(in: .whitespaces)
-                    : service
-                continue
-            }
-
-            if let deviceRange = trimmed.range(of: "Device: ") {
-                var device = String(trimmed[deviceRange.upperBound...])
-                if let closingIndex = device.firstIndex(of: ")") {
-                    device = String(device[..<closingIndex])
-                }
-                device = device.trimmingCharacters(in: .whitespaces)
-                if device == interface, let currentService {
-                    return currentService
-                }
-            }
-        }
-
-        return nil
-    }
-
-    /// Get the primary network service name (e.g. "Wi-Fi")
+    /// The service macOS itself elected as primary, by name — the name
+    /// `networksetup` and the helper address a service by.
+    ///
+    /// `route -n get default` only sees the IPv4 default route. When it had
+    /// none (IPv6-only, CLAT, a transition) this used to fall back to the
+    /// first service called "Wi-Fi" whether or not it carried anything, and
+    /// Protected DNS was written to an idle adapter while the one in use kept
+    /// its own resolver. There is no guess any more: with no primary service
+    /// the caller gets nil and refuses to write DNS.
     static func primaryNetworkService() -> String? {
-        if let interface = primaryNetworkInterface(),
-           let service = networkService(for: interface) {
-            return service
-        }
-
-        let services = listNetworkServices()
-        if let wifi = services.first(where: { $0 == "Wi-Fi" || $0.hasPrefix("Wi-Fi ") }) {
-            return wifi
-        }
-
-        for preferred in ["Wi-Fi", "Ethernet", "USB 10/100/1000 LAN"] {
-            if services.contains(preferred) { return preferred }
-        }
-        return services.first
+        SystemNetworkObservation.current()?.primaryServiceName
     }
 
     /// Resolve the saved service name, falling back to primary if the saved one no longer exists
@@ -478,5 +433,92 @@ nonisolated struct SystemProxy {
             }
             throw SystemProxyError.commandFailed(errMsg.trimmingCharacters(in: .whitespacesAndNewlines))
         }
+    }
+}
+
+// MARK: - System Network Observation
+
+/// What System Configuration reports about the network macOS is actually
+/// using. Protected DNS selects its service and audits its effect from this
+/// value, so both decisions can be exercised with a captured observation
+/// instead of the live dynamic store.
+nonisolated struct SystemNetworkObservation: Equatable {
+    /// `State:/Network/Global/IPv4` → `PrimaryService` (a service ID).
+    var ipv4PrimaryServiceID: String?
+    /// `State:/Network/Global/IPv6` → `PrimaryService` (a service ID).
+    var ipv6PrimaryServiceID: String?
+    /// Service ID → the name `SCNetworkServiceGetName` gives it, which is
+    /// how `networksetup` and the helper look a service up.
+    var serviceNames: [String: String]
+    /// `State:/Network/Global/DNS` → `ServerAddresses`: the default resolver
+    /// macOS is really querying. Nil when there is none.
+    var effectiveDNSServers: [String]?
+
+    /// The IPv4 primary when macOS has one, otherwise the IPv6 primary. An
+    /// IPv4 primary without a name (a VPN's dynamic service, a half-written
+    /// setup) is not skipped in favour of IPv6: that would protect a service
+    /// macOS is not resolving through. Nil means "do not write DNS".
+    var primaryServiceName: String? {
+        guard let serviceID = ipv4PrimaryServiceID ?? ipv6PrimaryServiceID,
+              let name = serviceNames[serviceID],
+              !name.isEmpty
+        else { return nil }
+        return name
+    }
+
+    /// True only when every default resolver macOS uses is the protected
+    /// loopback listener. The helper's readback proves what was stored on
+    /// one service; this is what the system is actually resolving through.
+    var effectiveResolverIsProtected: Bool {
+        guard let servers = effectiveDNSServers, !servers.isEmpty else { return false }
+        return servers.allSatisfy { $0 == ProtectedDNSContract.server }
+    }
+
+    /// Nil only when the dynamic store cannot be opened or read.
+    static func current() -> SystemNetworkObservation? {
+        guard let store = SCDynamicStoreCreate(
+            nil,
+            "com.raydocs.tono.primary-service" as CFString,
+            nil,
+            nil
+        ) else { return nil }
+        let ipv4Key = SCDynamicStoreKeyCreateNetworkGlobalEntity(
+            nil, kSCDynamicStoreDomainState, kSCEntNetIPv4
+        ) as String
+        let ipv6Key = SCDynamicStoreKeyCreateNetworkGlobalEntity(
+            nil, kSCDynamicStoreDomainState, kSCEntNetIPv6
+        ) as String
+        let dnsKey = SCDynamicStoreKeyCreateNetworkGlobalEntity(
+            nil, kSCDynamicStoreDomainState, kSCEntNetDNS
+        ) as String
+        guard let values = SCDynamicStoreCopyMultiple(
+            store,
+            [ipv4Key, ipv6Key, dnsKey] as CFArray,
+            nil
+        ) as? [String: Any] else { return nil }
+
+        func primaryService(_ key: String) -> String? {
+            (values[key] as? [String: Any])?[kSCDynamicStorePropNetPrimaryService as String]
+                as? String
+        }
+        let primaryIDs = [primaryService(ipv4Key), primaryService(ipv6Key)].compactMap { $0 }
+        var names: [String: String] = [:]
+        if !primaryIDs.isEmpty,
+           let prefs = SCPreferencesCreate(nil, "com.raydocs.tono.primary-service" as CFString, nil) {
+            for serviceID in primaryIDs {
+                guard let service = SCNetworkServiceCopy(prefs, serviceID as CFString),
+                      let name = SCNetworkServiceGetName(service) as String?
+                else { continue }
+                names[serviceID] = name
+            }
+        }
+        return SystemNetworkObservation(
+            ipv4PrimaryServiceID: primaryService(ipv4Key),
+            ipv6PrimaryServiceID: primaryService(ipv6Key),
+            serviceNames: names,
+            effectiveDNSServers: (values[dnsKey] as? [String: Any])?[
+                kSCPropNetDNSServerAddresses as String
+            ] as? [String]
+        )
     }
 }
