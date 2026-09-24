@@ -40,21 +40,34 @@
 - **缺陷修复**：账户 A 登出后约 17 分钟内账户 B 登录，B 的首个 periodic window
   （`telemetry.rs` 只按 22 分钟时间窗读 `traffic-audit.jsonl`）会把 A 的 `connectFail`、
   连接时间线和 `protectedRouteEvidence`（展开为 `protectedRouteInvariantViolation`）用 B 的
-  凭据上传。现在每条审计记录在入队时带一个与上传同意无关的 `_accountScope`（每次账户激活
-  生成的随机 id，登出/新登录开始时清空，不落盘），periodic window 只收当前账户 scope 的记录；
-  无 scope（旧记录、登录前）或他人 scope 的记录留在本机。与 macOS `clearAccount` 清空缓冲的
-  语义对齐。
+  凭据上传。现在每条审计记录在入队时带一个与上传同意无关的 `_accountScope`，periodic
+  window 只收当前账户 scope 的记录；无 scope（旧记录、登录前、登出后）或他人 scope 的记录留在
+  本机。与 macOS `clearAccount` 清空缓冲的语义对齐。
+- **缺陷修复（R4 审查 §1.9）**：初版 scope 是每进程随机 id、不落盘，App 重启（含崩溃后重启）后
+  同一账户重启前约 22 分钟内的 `connectFail`/`protectedRouteEvidence`/Protected Offline 证据不再
+  上传，比 main 少证据。现在 scope 按账户稳定：`settings.json` 新增 `account_scope`
+  `{owner_digest, id}`，只存随机 id 与 `SHA-256("{id}:{账户 id}")`（以随机 id 加盐，不落明文
+  邮箱/用户 id），同一账户重启或登出后重登得到同一 scope，其记录继续进入窗口；换账户时摘要不匹配，
+  生成新 id 并覆盖（只保留一个槽，A→B→A 时 A 拿到新 scope，A 早先的记录留在本机）。登出
+  （abandon）仍立即清空内存 scope，登出期间的记录不带 scope、不上传。settings 文件不可读/损坏时
+  不覆盖它，本次运行用不落盘的新 id。
 - **新增/优化**：无。本地审计文件内容与原始网络日志上传（`_uploadScope`）不变。
 - **工程与测试**：新增一个回归
   `periodic_window_carries_only_the_signed_in_accounts_records`（`telemetry.rs`）；既有
   `collect_events_*` fixture 补上 scope 以适配新签名。旧代码上该测试无法编译（无账户边界），
-  即旧实现没有这层过滤。
+  即旧实现没有这层过滤。R4 修正扩展同一测试：在同一 settings 目录上重建 `Audit`（模拟重启）后
+  同一账户拿到重启前的 scope，重启前后的 `connectFail`+`connectOk` 都被收集，另一账户 scope
+  不同且只收自己的记录，落盘的 `account_scope` 不含账户 id；初版分支上重启后生成新随机 id，
+  `assert_eq!` scope 即失败。
 - **验证**：本机仅对改动文件跑 rustfmt 检查；按执行位置规定未在 MacBook 跑原生
-  `cargo test`，以 PR 的 GitHub-hosted Windows CI 结果为准。
+  `cargo test`，以 PR 的 GitHub-hosted Windows CI 结果为准。R4 修正本机未编译、未跑
+  rustfmt，委托 CI（windows-2025）。
 - **候选/发布**：仅源码，无新候选。
-- **剩余限制**：升级后首个窗口不再携带升级前的无 scope 事件；App 重启后同一账户重启前的
-  事件也不再进入窗口（与 macOS 内存缓冲一致）。即时 `telemetry/failures` 路径沿用 W14 的
-  admission 身份，未改。未实机复现。
+- **剩余限制**：升级后首个窗口不再携带升级前的无 scope 事件（旧记录无 scope）。重启后同一
+  账户的证据现在会继续上传；但 restore 验证账户前、登出期间写的记录不带 scope，不上传；只存一个
+  账户槽（A→B→A 丢 A 早先的 scope）。原始网络日志上传的 `network_log_upload_scope.owner` 仍按
+  既有实现存明文用户 id，本 PR 未改。即时 `telemetry/failures` 路径沿用 W14 的 admission 身份，
+  未改。未实机复现。
 
 ## 2026-09-23 · Windows App 在 Protected Offline（armed 未验证）期间的 Service 真值再同步
 

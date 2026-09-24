@@ -936,7 +936,7 @@ mod tests {
     fn periodic_window_carries_only_the_signed_in_accounts_records() {
         let dir = TempDir::new("account-scope");
         let (sender, mut receiver) = tokio::sync::mpsc::channel(8);
-        let audit = crate::tono::audit::Audit::for_test(sender, dir.path(), true);
+        let audit = crate::tono::audit::Audit::for_test(sender.clone(), dir.path(), true);
         let start = epoch_ms() - 60_000;
         let fail = || AuditEvent::ConnectFail {
             stage: Some("checkingExit"),
@@ -949,21 +949,34 @@ mod tests {
         audit.log(fail());
         audit.activate_log_upload_owner("account-a");
         audit.log(fail());
-        audit.abandon_log_upload_owner();
-        audit.activate_log_upload_owner("account-b");
+        let scope_a = audit.account_scope().unwrap();
+        // Relaunch: fresh in-memory owner state over the same settings dir.
+        let audit = crate::tono::audit::Audit::for_test(sender, dir.path(), true);
+        audit.activate_log_upload_owner("account-a");
+        assert_eq!(audit.account_scope().as_deref(), Some(scope_a.as_str()));
+        let settings = std::fs::read_to_string(dir.path().join(crate::tono::audit::SETTINGS_FILE_NAME)).unwrap();
+        let saved: Value = serde_json::from_str(&settings).unwrap();
+        assert!(!saved["account_scope"].to_string().contains("account-a"));
         audit.log(AuditEvent::ConnectOk {
             node: "Tokyo · Sakura".to_string(),
             elapsed_ms: 900,
             transport: "tcp",
         });
+        audit.abandon_log_upload_owner();
+        audit.activate_log_upload_owner("account-b");
+        let scope_b = audit.account_scope().unwrap();
+        assert_ne!(scope_b, scope_a);
+        audit.log(fail());
         let path = dir.path().join("traffic-audit.jsonl");
         let mut file = std::fs::File::create(&path).unwrap();
         while let Ok(record) = receiver.try_recv() {
             writeln!(file, "{}", serde_json::to_string(&record).unwrap()).unwrap();
         }
-        let scope = audit.account_scope().unwrap();
-        let (events, _) = collect_events(&path, start, epoch_ms() + 1, &scope).unwrap();
-        let kinds: Vec<_> = events.iter().map(|event| event.kind.as_str()).collect();
-        assert_eq!(kinds, ["connectOk"]);
+        let kinds = |scope: &str| -> Vec<String> {
+            let (events, _) = collect_events(&path, start, epoch_ms() + 1, scope).unwrap();
+            events.into_iter().map(|event| event.kind).collect()
+        };
+        assert_eq!(kinds(&scope_a), ["connectFail", "connectOk"]);
+        assert_eq!(kinds(&scope_b), ["connectFail"]);
     }
 }

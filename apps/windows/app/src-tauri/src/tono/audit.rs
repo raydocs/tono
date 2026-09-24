@@ -537,12 +537,28 @@ struct SettingsFile {
     network_log_upload_user_chosen: bool,
     #[serde(default)]
     network_log_upload_scope: Option<PersistedUploadScope>,
+    #[serde(default)]
+    account_scope: Option<PersistedAccountScope>,
 }
 
 #[derive(Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct PersistedUploadScope {
     owner: String,
     id: String,
+}
+
+/// Periodic-telemetry account boundary, stable per account across restarts.
+/// Never stores the account id: only a SHA-256 of `"{id}:{account}"`, salted
+/// by the random scope id itself, so a different account cannot match it.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct PersistedAccountScope {
+    owner_digest: String,
+    id: String,
+}
+
+fn account_scope_owner_digest(id: &str, account: &str) -> String {
+    // `catalog_digest` is plain SHA-256 of the UTF-8 bytes, base64url.
+    tono_core::catalog::catalog_digest(&format!("{id}:{account}"))
 }
 
 #[derive(Clone)]
@@ -555,7 +571,8 @@ pub(crate) struct LogUploadScope {
 struct UploadOwner {
     owner: Option<String>,
     scope: Option<LogUploadScope>,
-    /// Fresh per account activation, cleared on abandon; never persisted.
+    /// Reused per account across restarts (see `PersistedAccountScope`);
+    /// cleared in memory on abandon.
     account_scope: Option<String>,
 }
 
@@ -575,6 +592,7 @@ impl Default for SettingsFile {
             network_log_default_v3: true,
             network_log_upload_user_chosen: false,
             network_log_upload_scope: None,
+            account_scope: None,
         }
     }
 }
@@ -776,7 +794,7 @@ impl Audit {
     pub(crate) fn activate_log_upload_owner(&self, account: &str) {
         let mut owner = self.upload_owner.lock();
         if owner.owner.as_deref() != Some(account) || owner.account_scope.is_none() {
-            owner.account_scope = Some(tono_core::auth::new_installation_id());
+            owner.account_scope = Some(self.stable_account_scope(account));
         }
         owner.owner = Some(account.to_string());
         self.refresh_upload_scope(&mut owner);
@@ -815,6 +833,34 @@ impl Audit {
                 id: saved.id, cancelled: tokio_util::sync::CancellationToken::new(),
             });
         }
+    }
+
+    /// The same account gets the same scope after a relaunch, so records it
+    /// wrote before a crash or restart still ride its telemetry window; any
+    /// other account replaces the saved scope with a fresh id.
+    fn stable_account_scope(&self, account: &str) -> String {
+        let _settings_guard = SETTINGS_LOCK.lock();
+        // Like `refresh_upload_scope`: never rewrite an unreadable/malformed settings file.
+        let rewritable = match std::fs::read_to_string(self.settings_dir.join(SETTINGS_FILE_NAME)) {
+            Ok(body) => serde_json::from_str::<SettingsFile>(&body).is_ok(),
+            Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+        };
+        let mut settings = load_settings_locked(&self.settings_dir);
+        if let Some(saved) = settings.account_scope.as_ref()
+            && saved.owner_digest == account_scope_owner_digest(&saved.id, account)
+        {
+            return saved.id.clone();
+        }
+        let id = tono_core::auth::new_installation_id();
+        if rewritable {
+            settings.account_scope = Some(PersistedAccountScope {
+                owner_digest: account_scope_owner_digest(&id, account),
+                id: id.clone(),
+            });
+            // Best effort: an unsaved scope still stamps this run; the next launch starts a new one.
+            let _ = save_settings(&self.settings_dir, &settings);
+        }
+        id
     }
 
     pub(crate) fn account_scope(&self) -> Option<String> {
