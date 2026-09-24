@@ -178,6 +178,7 @@ final class AccountSession {
          cloudFallbackPreferred: @escaping @MainActor () -> Bool = { false },
          cloudFallbackConsumer: @escaping @MainActor (Bool) throws -> Void = { _ in },
          killSwitchDisarmConsumer: @escaping @MainActor () async -> Void,
+         protectionReleaseConsumer: @escaping @MainActor () async -> Bool = { false },
          diagnosticSnapshotConsumer: @escaping @MainActor () -> TonoDiagnosticSnapshot = {
              TonoDiagnosticSnapshot(
                  appVersion: "unknown", build: "unknown", connected: false,
@@ -225,7 +226,6 @@ final class AccountSession {
             },
          protectionBlockedConsumer: @escaping @MainActor () -> Bool = { false },
          protectedRetryConsumer: @escaping @MainActor () -> Void = {},
-         protectionReleaseConsumer: @escaping @MainActor () async -> Bool = { false },
          appRoutingResearchActivationConsumer: @escaping
             @MainActor () -> Void = {},
          pathLatencyConsumer: @escaping @MainActor () -> TonoPathLatency = {
@@ -250,11 +250,11 @@ final class AccountSession {
         self.cloudFallbackPreferred = cloudFallbackPreferred
         self.cloudFallbackConsumer = cloudFallbackConsumer
         self.killSwitchDisarmConsumer = killSwitchDisarmConsumer
+        self.protectionReleaseConsumer = protectionReleaseConsumer
         self.diagnosticSnapshotConsumer = diagnosticSnapshotConsumer
         self.claudeTrafficResearchConsumer = claudeTrafficResearchConsumer
         self.protectionBlockedConsumer = protectionBlockedConsumer
         self.protectedRetryConsumer = protectedRetryConsumer
-        self.protectionReleaseConsumer = protectionReleaseConsumer
         self.appRoutingResearchActivationConsumer =
             appRoutingResearchActivationConsumer
         self.pathLatencyConsumer = pathLatencyConsumer
