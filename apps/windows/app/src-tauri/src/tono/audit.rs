@@ -1171,6 +1171,33 @@ mod tests {
         }
     }
 
+    /// H18-C-F2: a rotation that renamed the current file but could not create the next one
+    /// (disk full) left the handle on the backup. Once space returns, the next rotation must
+    /// recreate the current file instead of deleting the backup and renaming a missing path.
+    #[test]
+    fn rotation_recreates_the_current_file_after_a_failed_reopen() {
+        let dir = TempDir::new("rotate-reopen");
+        let path = log_path(&dir);
+        let backup = dir.path().join(super::AUDIT_BACKUP_FILE_NAME);
+        let cap = 512_u64;
+        let line = |counter| serde_json::to_string(&AuditRecord::now(AuditEvent::NetworkChange { counter })).unwrap();
+        let mut writer = RotatingWriter::open(&path, cap).unwrap();
+        let mut counter = 0;
+        while writer.written + line(counter).len() as u64 + 1 <= cap {
+            writer.write_line(&line(counter), true).unwrap();
+            counter += 1;
+        }
+        // The failed rotation's state: renamed away, handle still open on the backup.
+        std::fs::rename(&path, &backup).unwrap();
+
+        writer.write_line(&line(counter), true).unwrap();
+
+        assert!(backup.exists(), "the retained generation must survive");
+        let current = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(current.lines().count(), 1);
+        assert!(current.contains(&format!("\"counter\":{counter}")));
+    }
+
     #[test]
     fn rotation_size_cap_constant_is_10_mib() {
         assert_eq!(MAX_AUDIT_FILE_BYTES, 10 * 1024 * 1024);
