@@ -32,6 +32,35 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · macOS 第二个账户打开 Tono：按名称拒绝，绝不把 Helper 改绑到自己
+
+- **归属/来源**：G1 连接保护（多账户隔离）；macOS App `HelperManager`。内部审查 H19-O-F3 = H19-G-F2（两个 finder
+  独立发现，阅读确认），Issue [#561](https://github.com/raydocs/tono/issues/561)。基线 origin/main
+  [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b) → 分支 `fix/helper-other-user-20260924`；未合 main。
+  与 #425（启动时自动修复）协调：本改动让“属于别的账户”走独立错误，不进入 #425 的 `connectFailed` 修复分支。
+- **缺陷修复**：Helper 只服务一个 macOS 账户，socket 以 0600 交给该账户。第二个账户连接被权限拒绝，App 只报
+  “The authenticated network helper is unavailable”，Retry 永远重复；一旦走到管理员安装（App 附带的 Helper
+  更新、daemon 未登记，或 #425 那类启动时自动修复），批准后 Helper 被改绑到第二个账户，第一个账户的保护随之
+  失控。现在：
+  - 连接失败时若 socket 属于另一个 uid，报 `HelperIPCError.boundToAnotherUser`，文案点名该账户，说明在该账户中
+    使用 Tono，或由管理员运行 `--emergency-reset` 后再迁移。
+  - `installIfNeeded` 在任何探测、弹窗、重装之前做同样检查并拒绝。
+  - root 安装脚本最前面加守卫：allowed-uid 记录的是另一个仍存在的账户时拒绝并返回账户名，App 显示同一错误。
+    账户已不存在（被删除、迁移遗留）时不阻止安装。
+  **临时产品决定（取更严一侧，待所有者确认）**：App 内任何安装（自动或用户点击）都不改绑另一个现存账户的
+  Helper；迁移只能由管理员显式运行 `--emergency-reset`（会释放原账户的保护）。
+- **新增/优化**：无。
+- **工程与测试**：新增 XCTest `HelperBoundAccountTests.testAnotherAccountsHelperIsRefusedByNameAndNotRebound`：
+  绑定真实 Unix socket，以另一个 uid 调 `connectFailure` 必须得到点名的错误；用临时记录文件以 `/bin/sh`
+  实际执行 root 守卫片段：记录为另一个现存账户时非零退出且能解析出账户名，同账户或不存在的 uid 放行。
+  先推送只含测试与现状行为桩的提交让 CI 变红，再推修复。zh-Hans 文案已加入字符串目录。
+- **验证**：本机（编辑机）未编译、未运行 xcodebuild；以本 PR 的 GitHub-hosted `macos-26` CI（TonoTests，含
+  LocalizationCoverageTests）为准。本机确认 `id -un <uid>` 对存在的 uid 输出用户名、对不存在的 uid 退出 1。
+- **候选/发布**：无新包，仅源码。Helper 源码未改，不需要协议版本号。
+- **剩余限制**：未在实机上用两个账户验证；自动重连循环遇到此错误仍按可重试处理（不再弹管理员框，但会反复
+  快速失败）。daemon 未运行（没有 socket）时只能靠 root 守卫在管理员授权之后拒绝，用户会先看到一次授权框。
+  守卫把“记录中的 uid 能解析为账户”当作账户存在。
+
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
 - **归属/来源**：G1–G3 审查与修复的可追溯性（工程流程与记录，非产品行为）；审查基线 main

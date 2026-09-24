@@ -72,6 +72,7 @@ nonisolated struct HelperManager {
         let uidTempPath = "\(allowedUIDPath).new.\(uid)"
         return """
         set -e
+        \(boundAccountGuard(uid: uid, allowedUIDPath: allowedUIDPath))
         /usr/bin/install -d -o root -g wheel -m 0755 /Library/PrivilegedHelperTools
         guard_dir=$(/usr/bin/mktemp -d /Library/PrivilegedHelperTools/tono-installer.XXXXXX)
         trap '/bin/rm -f "$guard_dir/guard"; /bin/rmdir "$guard_dir"' EXIT
@@ -116,6 +117,12 @@ nonisolated struct HelperManager {
     }
 
     static func installIfNeeded() throws {
+        // A helper serving another account is not broken. Refuse by name
+        // before any probe, prompt or reinstall could rebind it.
+        if let account = helperBoundAccount() {
+            LocalTrafficAudit.shared.recordEvent("helper_bound_to_another_account")
+            throw HelperIPCError.boundToAnotherUser(account)
+        }
         let preparationStartedAt = Date()
         LocalTrafficAudit.shared.recordEvent(
             "helper_preparation_started",
@@ -309,6 +316,10 @@ nonisolated struct HelperManager {
         guard process.terminationStatus == 0 else {
             let data = errors.fileHandleForReading.readDataToEndOfFile()
             let message = String(data: data, encoding: .utf8) ?? ""
+            if let account = boundAccount(inInstallerMessage: message) {
+                LocalTrafficAudit.shared.recordEvent("helper_bound_to_another_account")
+                throw HelperIPCError.boundToAnotherUser(account)
+            }
             // AppleScript reports a dismissed credential dialog with the
             // localized "User canceled" text, so plain "cancel" matching both
             // misses non-English systems (zh-Hans emits "用户已取消") and
@@ -982,22 +993,62 @@ nonisolated struct HelperManager {
         }
     }
 
-    /// The error for a failed connect to the helper socket (H19-O-F3).
+    /// The account a live helper serves, when that is not the calling account.
+    /// The daemon hands its socket to the one uid it trusts, mode 0600, so
+    /// another account cannot connect at all. It used to see only "helper
+    /// unavailable", and a repair from that account could rebind the helper to
+    /// itself and take the first account's barrier with it (H19-O-F3).
+    static func helperBoundAccount(
+        socketPath: String = HelperManager.socketPath,
+        currentUID: uid_t = getuid()
+    ) -> String? {
+        var metadata = stat()
+        guard lstat(socketPath, &metadata) == 0,
+              metadata.st_mode & mode_t(S_IFMT) == mode_t(S_IFSOCK),
+              metadata.st_uid != currentUID, metadata.st_uid != 0 else { return nil }
+        if let record = getpwuid(metadata.st_uid), let name = record.pointee.pw_name {
+            return String(cString: name)
+        }
+        return "UID \(metadata.st_uid)"
+    }
+
+    /// The error for a failed connect to the helper socket.
     static func connectFailure(
         socketPath: String = HelperManager.socketPath,
         currentUID: uid_t = getuid()
     ) -> HelperIPCError {
-        .connectFailed
+        if let account = helperBoundAccount(socketPath: socketPath, currentUID: currentUID) {
+            return .boundToAnotherUser(account)
+        }
+        return .connectFailed
     }
 
-    /// Shell run by root before the install replaces anything (H19-O-F3).
+    private static let boundAccountMarker = "TONO_HELPER_BOUND_TO_ACCOUNT:"
+
+    /// Run by root before the install replaces anything. While the trusted-user
+    /// record names another account that still exists on this Mac, refuse and
+    /// name it: no install from this app, automatic or explicit, rebinds the
+    /// helper away from that account. Moving Tono to another account is an
+    /// administrator's `--emergency-reset`, which releases that account's
+    /// protection and removes the record. A record for an account that no
+    /// longer exists does not block the install.
     static func boundAccountGuard(uid: uid_t, allowedUIDPath: String) -> String {
-        ""
+        """
+        if [ -f '\(allowedUIDPath)' ]; then
+          tono_bound_uid=$(/usr/bin/tr -cd '0-9' < '\(allowedUIDPath)')
+          if [ -n "$tono_bound_uid" ] && [ "$tono_bound_uid" != '\(uid)' ] && tono_bound_name=$(/usr/bin/id -un "$tono_bound_uid" 2>/dev/null); then
+            /bin/echo "\(boundAccountMarker)$tono_bound_name" >&2
+            exit 75
+          fi
+        fi
+        """
     }
 
     /// The account named by a refused root install, from osascript's error text.
     static func boundAccount(inInstallerMessage message: String) -> String? {
-        nil
+        guard let marker = message.range(of: boundAccountMarker) else { return nil }
+        let name = message[marker.upperBound...].prefix { !$0.isWhitespace && $0 != "(" }
+        return name.isEmpty ? nil : String(name)
     }
 
     // MARK: - Bounded Unix-socket HTTP client
@@ -1040,7 +1091,7 @@ nonisolated struct HelperManager {
                 Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
-        guard connected == 0 else { throw HelperIPCError.connectFailed }
+        guard connected == 0 else { throw connectFailure() }
 
         let payload = body ?? Data()
         var request = Data(
