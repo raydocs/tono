@@ -4339,6 +4339,16 @@
         }
       }
     },
+    "Protection from an earlier session could not be confirmed. Direct Internet may still be blocked.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法确认上一次会话的保护状态，直接联网可能仍被拦截。"
+          }
+        }
+      }
+    },
     "Protection snapshot": {
       "localizations": {
         "zh-Hans": {

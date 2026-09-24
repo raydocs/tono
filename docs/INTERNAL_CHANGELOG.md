@@ -1790,6 +1790,35 @@
 - **候选/发布**：无新包，仅文档。
 - **剩余限制**：H16/H17 条目全部是源码推导或阅读确认，回归草案均未运行；需实机的部分列在审查轮记录第 3 节。
 
+## 2026-09-24 · macOS 账户 gate 与菜单栏读同一保护状态
+
+- **归属/来源**：G2 客户端保护状态展示（macOS）。内部审查 H16-C-F2，
+  Issue [#533](https://github.com/raydocs/tono/issues/533)。叠在 #537（H16-O-F5）之上 → 分支
+  `fix/macos-gate-release-20260924`；须在 #537 之后合入；提交时未合 main。
+- **缺陷修复**：登录页与账户停用页的「Kill Switch 仍在拦截」提示只读不可观察的
+  `KillSwitchService.isArmed`，外加只有 gate 自己按钮才会置位的本地标志。用户从菜单栏
+  「恢复正常网络」成功释放后，账户状态按设计保持不变，已显示的 gate 没有任何被观察的输入变化，
+  继续声称仍在拦截。改后：两处 gate 共用 `GateProtectionSection`，由 `AppState.gateProtectionNotice`
+  派生（与菜单栏同源的可观察状态）：`isProtectionBlocked` 或已连接 → 原「仍在拦截」文案；
+  #537 的 `isProtectionUnconfirmed` 或仅有本地意图 → 新文案「无法确认上一次会话的保护状态，
+  直接联网可能仍被拦截」；两者皆无 → 隐藏。任何地方完成的释放都会写 `isProtectionBlocked`，
+  使已挂载的 gate 重新求值；去掉只对本按钮有效的本地标志。「恢复正常网络」按钮的显示条件与
+  菜单栏对非 ready 账户的恢复入口一致，逃生出口不会消失。
+- **新增/优化**：无。释放流程、账户状态、PF/helper 均未改。
+- **工程与测试**：先以不改行为的提交把两处重复的 gate 区块收成一个共享视图并经环境拿到
+  AppState；新增一个 XCTest `AccountGateProtectionTests.testMenuBarRestoreRetiresTheMountedGateNotice`
+  （真实 AccountSession → AppState 释放路径，仅替换 helper/系统 I/O；用 `withObservationTracking`
+  断言菜单栏释放会使 gate 读到的状态失效）。
+- **验证**：本机未编译；TonoTests 在本分支 GitHub-hosted `macos-26` CI 运行，以 PR 检查中
+  对应 head SHA 为准。行为不变提交的 CI 失败结果见 PR 正文。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：未实机验证 SwiftUI 实际重绘；测试证明的是 gate 读取的状态会被释放通知失效。
+  已连接但账户停用时仍沿用「上一次会话」文案（原有措辞）。
+- **后续（2026-09-24，PR 复审 538-O-F1）**：测试用默认 API 客户端；#516 合入后，
+  `restoreDirectInternet` 在未取得登录方式时会重新加载，测试就会向生产 `/auth/methods` 发请求。
+  现在测试在释放前先填入登录方式，释放不再发起任何网络请求。未新增测试。同时合入 #537 的复审
+  续修（a984c553）。本机未运行 xcodebuild/swift，交 PR 的 GitHub-hosted `macos-26` CI。
+
 ## 2026-09-24 · macOS 启动把 helper 确认的屏障发布到界面
 
 - **归属/来源**：G2 客户端保护状态展示（macOS）。内部审查 H16-O-F5（= H16-C-F1），
