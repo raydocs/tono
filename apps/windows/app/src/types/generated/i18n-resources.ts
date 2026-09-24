@@ -755,6 +755,7 @@ export interface TranslationResources {
             label: string
             pathLabel: string
           }
+          internalDiagnostics: string
           networkLogUpload: {
             description: string
             label: string

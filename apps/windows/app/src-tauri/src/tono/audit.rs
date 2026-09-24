@@ -509,6 +509,45 @@ fn default_true() -> bool {
 /// if the owner decides this must not stay default-on.
 pub const NETWORK_LOG_UPLOAD_DEFAULT: bool = true;
 
+/// Internal candidate build: `TONO_BUILD_CHANNEL=internal` at compile time,
+/// which only the Windows candidate workflow sets. Release builds never carry
+/// it, so their consent defaults stay as they are.
+pub fn internal_build() -> bool {
+    option_env!("TONO_BUILD_CHANNEL") == Some("internal")
+}
+
+/// What an immediate connect-failure report (`telemetry/failures`) may carry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailureReportScope {
+    /// The user opted into the diagnostic timeline: the redacted error text
+    /// rides along, as before.
+    Full,
+    /// Internal-build default (owner decision 2026-09-24): stage, error code,
+    /// version and node only. No error text, URLs, addresses or account data.
+    Classified,
+}
+
+/// Whether a connect failure is reported, and with what. The local log switch
+/// still stops every report. Release builds report only after the timeline
+/// opt-in; internal builds also send the classified record without it. That
+/// default comes from the build, not from `settings.json`, so the one-shot v2
+/// reset of the timeline switch cannot turn it off on upgrade.
+pub fn failure_report_scope(
+    internal_build: bool,
+    audit_enabled: bool,
+    timeline_opted_in: bool,
+) -> Option<FailureReportScope> {
+    if !audit_enabled {
+        None
+    } else if timeline_opted_in {
+        Some(FailureReportScope::Full)
+    } else if internal_build {
+        Some(FailureReportScope::Classified)
+    } else {
+        None
+    }
+}
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct SettingsFile {
     #[serde(default = "default_true")]
@@ -777,6 +816,11 @@ impl Audit {
         self.periodic_telemetry_enabled.load(Ordering::Acquire)
     }
 
+    /// [`failure_report_scope`] for this build and the current switches.
+    pub fn failure_report_scope(&self) -> Option<FailureReportScope> {
+        failure_report_scope(internal_build(), self.enabled(), self.periodic_telemetry_enabled())
+    }
+
     pub fn log_path(&self) -> &Path {
         &self.log_path
     }
@@ -988,9 +1032,10 @@ impl Audit {
 #[cfg(test)]
 mod tests {
     use super::{
-        Audit, AuditEvent, AuditRecord, MAX_AUDIT_FILE_BYTES, RotatingWriter, audit_enabled_from_settings,
-        network_log_upload_enabled_from_settings, periodic_telemetry_enabled_from_settings, redact,
-        save_network_log_upload_enabled, save_periodic_telemetry_enabled,
+        Audit, AuditEvent, AuditRecord, FailureReportScope, MAX_AUDIT_FILE_BYTES, RotatingWriter,
+        audit_enabled_from_settings, failure_report_scope, network_log_upload_enabled_from_settings,
+        periodic_telemetry_enabled_from_settings, redact, save_network_log_upload_enabled,
+        save_periodic_telemetry_enabled,
     };
     use std::path::{Path, PathBuf};
 
@@ -1355,6 +1400,36 @@ mod tests {
         assert!(
             periodic_telemetry_enabled_from_settings(legacy.path()),
             "a post-migration explicit opt-in must survive every later load"
+        );
+    }
+
+    #[test]
+    fn internal_builds_keep_classified_failure_reports_through_the_timeline_reset() {
+        // An upgraded install: the v2 migration resets the legacy default-on timeline switch.
+        let upgraded = TempDir::new("failure-report-upgrade");
+        std::fs::write(
+            upgraded.path().join(super::SETTINGS_FILE_NAME),
+            r#"{"audit_enabled":true,"periodic_telemetry_enabled":true,"network_log_default_v2":true}"#,
+        )
+        .unwrap();
+        let timeline = periodic_telemetry_enabled_from_settings(upgraded.path());
+        let audit = audit_enabled_from_settings(upgraded.path());
+        assert!(!timeline && audit);
+        assert_eq!(
+            failure_report_scope(true, audit, timeline),
+            Some(FailureReportScope::Classified),
+            "an internal build must keep reporting classified failures after the upgrade reset"
+        );
+        assert_eq!(
+            failure_report_scope(false, audit, timeline),
+            None,
+            "release builds keep the opt-in"
+        );
+        assert_eq!(failure_report_scope(false, audit, true), Some(FailureReportScope::Full));
+        assert_eq!(
+            failure_report_scope(true, false, true),
+            None,
+            "the local log switch stops every report"
         );
     }
 

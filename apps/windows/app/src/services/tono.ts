@@ -519,6 +519,8 @@ export const tonoPeriodicTelemetryEnabled = () =>
 export const tonoSetPeriodicTelemetryEnabled = (enabled: boolean) =>
   call<void>('tono_set_periodic_telemetry_enabled', { enabled })
 
+export const tonoInternalBuild = () => call<boolean>('tono_internal_build')
+
 export const tonoNetworkLogUploadEnabled = () =>
   call<boolean>('tono_network_log_upload_enabled')
 

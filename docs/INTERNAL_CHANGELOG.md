@@ -1997,6 +1997,25 @@
   （注入查询/删除）；旧代码只记日志、返回 `()`，前两种情形会被当作成功。验证：未在本机运行；CI 待定。限制：另一账户的旧任务若
   对本人可见但定义读不出，本人改自启设置会失败，直到管理员删除它；`is_auto_launch_enabled` 仍只把可读且本人所有的旧任务算作开启；
   未实机验证。
+## 2026-09-24 · Windows 内部候选版默认发送分类连接失败记录
+
+- **归属/来源**：G1–G3 候选验收的现场证据；影响 Windows App（`tono/audit.rs`、`tono/telemetry.rs`、设置页）与
+  `windows-candidate.yml`。所有者决定 2026-09-24：内部候选/测试版默认开启分类连接失败遥测，公开发布版保持现状（关）。
+  基线 origin/main [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b)，分支
+  `fix/win-candidate-telemetry-20260924`，Issue #575，未合 main。
+- **缺陷修复**：无（行为变更来自所有者决定）。
+- **新增/优化**：a68d4e76 起立即 `telemetry/failures` 与诊断时间线共用默认关闭的同意开关，升级时 v2 迁移还会把旧的开启重置为关，
+  候选版与公开版行为相同，测试者失败连接从未到达运维。现在：编译期 `TONO_BUILD_CHANNEL=internal`，只由候选 workflow 设置（沿用的 `GITHUB_WORKFLOW` 出处判断在
+  paired candidate 的可复用 workflow 下拿到的是调用方名称，不可靠，故新增显式标记）。内部版在未开启时间线时也发送分类记录
+  （阶段、错误代码、版本、节点、平台/OS、传输、路径延迟），错误原文仍只在用户显式开启时间线后附带；本地诊断日志开关关闭时一律不发。
+  默认值来自构建而不是 `settings.json`，v2 重置无法在升级时关掉它。内部版设置页隐私卡片显示一行提示。公开版逻辑不变。
+- **工程与测试**：一个 `#[test]`（`internal_builds_keep_classified_failure_reports_through_the_timeline_reset`）；新增只读命令
+  `tono_internal_build`；i18n 生成文件由 `generate-i18n-keys.mjs` 重生成。
+- **验证**：本机仅前端：`tsc --noEmit`、`vitest run src/services/tono.test.ts`、eslint、biome format、
+  `windows-ci-paths.test.cjs` 通过；Rust 未在本机编译（按执行位置规定），以 PR CI 的 `cargo test` 为准，红→绿运行号见 PR。
+- **候选/发布**：无新包，仅源码；下一次候选构建才会带内部标记。
+- **剩余限制**：未在真实候选安装包上验证提示与上报；测试者只能用本地诊断日志开关停止上报（无单独开关）；
+  时间线窗口本身仍默认关闭。
 
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
