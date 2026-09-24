@@ -128,7 +128,7 @@ nonisolated struct HelperManager {
         """
     }
 
-    static func installIfNeeded() throws {
+    static func installIfNeeded(administratorPrompt: Bool = true) throws {
         // A helper serving another account is not broken. Refuse by name
         // before any probe, prompt or reinstall could rebind it.
         if let account = helperBoundAccount() {
@@ -271,6 +271,24 @@ nonisolated struct HelperManager {
             ) {
                 return
             }
+        }
+
+        // A caller that did not ask for a repair stops before the prompt
+        // (MAC3-ADD-F1). Nothing above released PF, so it stays as the helper
+        // holds it; Connect and Restore internet own the prompt.
+        guard administratorPrompt else {
+            LocalTrafficAudit.shared.recordEvent(
+                "helper_administrator_prompt_withheld",
+                details: [
+                    "installed_version": installedVersion
+                        ?? (daemonRejected ? "rejected_client" : "unavailable"),
+                    "expected_version": helperVersion,
+                ]
+            )
+            if daemonRejected { throw HelperIPCError.forbidden }
+            throw HelperInstallError.installFailed(
+                "The network helper needs administrator approval, which only Connect or Restore internet asks for."
+            )
         }
 
         try verifyEmbeddedExecutable(

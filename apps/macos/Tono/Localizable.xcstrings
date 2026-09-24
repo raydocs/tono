@@ -2563,6 +2563,16 @@
         }
       }
     },
+    "Direct traffic may be blocked": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "直连可能仍被拦截"
+          }
+        }
+      }
+    },
     "Direct traffic remains blocked while Tono waits to retry.": {
       "localizations": {
         "zh-Hans": {
@@ -4369,6 +4379,16 @@
         }
       }
     },
+    "Protection from an earlier session could not be confirmed. Direct Internet may still be blocked.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法确认上一次会话的保护状态，直接联网可能仍被拦截。"
+          }
+        }
+      }
+    },
     "Protection snapshot": {
       "localizations": {
         "zh-Hans": {
@@ -4385,6 +4405,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "连接保护启动失败：%@"
+          }
+        }
+      }
+    },
+    "Protection unknown": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保护状态未知"
           }
         }
       }
@@ -7102,12 +7132,12 @@
         }
       }
     },
-    "Wake protection is still being reasserted; Internet remains blocked. %@": {
+    "Wake protection could not be confirmed; Tono keeps retrying. Direct Internet may still be blocked. %@": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "唤醒后的保护仍在重新生效，网络仍处于阻断状态。%@"
+            "value": "无法确认唤醒后的保护状态，Tono 会继续重试。直接联网可能仍被拦截。%@"
           }
         }
       }

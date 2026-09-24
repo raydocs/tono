@@ -64,6 +64,8 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | H16-O-F5 | 启动时从 helper 收养已 armed 的 PF 屏障，但不设 isProtectionBlocked：菜单栏与主窗显示 Standby，激活对账与 Retry 都以该标志为前提（= H16-C-F1） | open | 待开 | 中·已确认 | 全程 fail-closed，无泄漏；直到一次 Connect 或网络变化才收敛；与 H17-AUTH-MAC（#516）同改文件，排在其后 |
 | H16-O-F3 | 空闲、未 armed 的 Mac 上所选服务器被移出目录时，错误横幅称「断网保护仍在拦住直连」 | open | 待开 | 低·已确认 | 屏障不存在而文案称在拦截；药丸同时显示未连接，无泄漏；未绑定住宅线的用户都会走到这条分支 |
 | H16-C-F2 | 从菜单栏 Restore internet 成功释放后，已显示的账户 gate（suspended）不失效，继续称 Kill Switch 在拦截 | open | 待开 | 中·推导 | gate 读取不可观察的静态 isArmed；登录卡同一读法；SwiftUI 实际重绘需实机；排在 H16-O-F5 之后 |
+| MAC3-RECHECK-F1 | wake 保护未知与重试暂停并存时，菜单栏优先显示 Protected Offline | in-PR | [#610](https://github.com/raydocs/tono/pull/610) | 中·已确认 | `train/mac3-20260924` 已将未知判断移到暂停判断前；新增投影回归，XCTest 未运行，无新包 |
+| MAC3-RECHECK-F2 | wake reassert 成功返回后未检查取消，旧任务可覆盖保护状态并继续连接 | in-PR | [#610](https://github.com/raydocs/tono/pull/610) | 中·推导 | `train/mac3-20260924` 返回后立即检查取消；新增取消后成功返回回归，XCTest 未运行，无设备验收 |
 
 ## 2. Windows 连接
 
@@ -203,6 +205,7 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | H11-F3 | 卸载保留 refresh token，重装后自动登录回原账户 | in-PR | [#408](https://github.com/raydocs/tono/issues/408)，[#412](https://github.com/raydocs/tono/pull/412) | 中·已确认 | — |
 | H15-F4 | macOS 0.0.72 遗留的含凭据 config/config.yaml 从未删除 | in-PR | [#504](https://github.com/raydocs/tono/issues/504)，[#505](https://github.com/raydocs/tono/pull/505) | 低·推导 | 与 #411 相关 |
 | #491 | Windows 从 Suspended/Error 换账户登录时保留上一账户的目录、runtime 副本与 Core | in-PR | [#491](https://github.com/raydocs/tono/issues/491)，[#506](https://github.com/raydocs/tono/pull/506) | 高·推导 | 叠在 #316 → #410 → #506 |
+| H17-AUTH-MAC | macOS 会话被拒（401：到期、超额、停用、设备吊销）时，启动恢复与后台上传路径先释放 PF/DNS 再登出（= H17-O-F1、H17-O-F2 macOS 部分、H17-G-F3 第 2、4 步） | in-PR | [#510](https://github.com/raydocs/tono/issues/510)，[#516](https://github.com/raydocs/tono/pull/516) | 高·已确认 | Worker 仍对所有不合格情形回 401，启动时仍登出且不显示原因；suspended 不停 Core（H17-C-F3）；Windows 同类见 H17-AUTH-WIN；启动 401 后菜单栏仍显示 Standby，待 H16-O-F5 |
 | H17-C-F3 | macOS 账户进入 suspended 后不停止 Core、不作废缓存的设备出口凭据，唤醒恢复仍可用它连接（= H17-G-F3 第 3 步） | open | 待开 | 中·已确认 | 被吊销设备可用到出口应用新 roster 为止；实际 Core/PF 行为需实机；排在 H17-AUTH-MAC（#516）之后 |
 | H17-O-F7 | macOS 账户 suspended 后网络日志上传器不停止，持续用已被拒绝的 refresh 重试 | open | 待开 | 低·已确认 | 退避上限约 16 分钟一次；Windows 由 #460 处理 |
 | H17-O-F2 (Windows) | Windows 启动恢复遇 401（到期、超额、停用、设备吊销）即释放 WFP 并登出，不给原因（= H17-G-F3 第 2 步） | in-PR | [#512](https://github.com/raydocs/tono/issues/512)，[#515](https://github.com/raydocs/tono/pull/515) | 高·已确认 | Worker 仍对所有不合格情形回 401（H17-O-F2 的 Worker 部分未修）；#460 合并前暂停页文案为"账号已暂停"；暂停页可主动退出登录，退出照旧先释放保护；缓存目录保留到新登录（出口凭据已被服务端拒绝）；会话已被 cron 吊销时续费后需重新登录；未实机 |

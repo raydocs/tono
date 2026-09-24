@@ -34,4 +34,38 @@ final class KillSwitchArmOutcomeTests: XCTestCase {
             "an arm with an unknown outcome must keep fail-closed intent"
         )
     }
+
+    /// MAC3-ADD-F1: a suspension or Check again stops Core through the
+    /// preserve teardown, whose bootstrap restriction prepared the helper
+    /// with the administrator prompt allowed — a helper rejecting this app
+    /// then raised a prompt nobody asked for. The restriction still prepares
+    /// the helper (version check, silent upgrade), only without the prompt;
+    /// a helper that needs it fails the restriction before any arm request,
+    /// and the armed intent stands.
+    func testBootstrapRestrictionNeverPromptsForTheHelper() {
+        let savedIPC = KillSwitchService.armIPC
+        KillSwitchService.isArmed = true
+        defer {
+            KillSwitchService.armIPC = savedIPC
+            KillSwitchService.isArmed = false
+        }
+        var preparations: [Bool] = []
+        KillSwitchService.armIPC.prepare = { administratorPrompt in
+            preparations.append(administratorPrompt)
+            // What a rejecting helper answers once the prompt is withheld.
+            throw HelperIPCError.forbidden
+        }
+        KillSwitchService.armIPC.deliver = { _ in
+            XCTFail("a helper that needs repair must not be sent the restriction")
+            throw HelperIPCError.connectFailed
+        }
+
+        XCTAssertThrowsError(try KillSwitchService.restrictToBootstrap()) { error in
+            guard case KillSwitchService.Error.helperRejected = error else {
+                return XCTFail("expected the helper's rejection: \(error)")
+            }
+        }
+        XCTAssertEqual(preparations, [false], "the restriction prepares the helper, never with the administrator prompt")
+        XCTAssertTrue(KillSwitchService.isArmed)
+    }
 }

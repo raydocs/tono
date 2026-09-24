@@ -140,6 +140,9 @@ actor DiagnosticsLogUploader {
         sweepTask = nil
     }
 
+    /// Whether the background sweep loop is scheduled.
+    var isRunning: Bool { sweepTask != nil }
+
     /// Sign-out / account-switch: do not upload the previous account's unsent
     /// JSONL under the next JWT. Advance the on-disk cursor to the live file's
     /// end so a later sign-in of the same user also does not re-send that tail.

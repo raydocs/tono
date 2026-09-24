@@ -1859,6 +1859,12 @@ extension AppState {
     /// emergency recovery path. Only an authenticated helper response that
     /// confirms both armed=false and wanted=false may clear Protected Offline.
     func reconcileExternalProtectionState() {
+        if isProtectionUnconfirmed {
+            // Launch could not confirm the barrier; a helper that answers
+            // now resolves it to Protected Offline or released.
+            Task { [weak self] in await self?.resolveUnconfirmedProtection() }
+            return
+        }
         guard isProtectionBlocked, !isConnected, !isConnecting,
               !isDisconnecting else { return }
         Task { [weak self] in
@@ -1867,7 +1873,8 @@ extension AppState {
     }
 
     /// Returns true only when a confirmed external release was accepted. Every
-    /// unavailable, malformed, or rejecting response remains fail-closed.
+    /// unavailable, malformed, or rejecting response remains fail-closed. The
+    /// unknown state a wake's failed reassert publishes counts as blocked.
     /// `protectionWasArmed` carries the app's armed intent from when the caller
     /// scheduled its recovery: a session this app itself tore down before the
     /// first arm (mid-connect policy update, the wake handoff after the sleep
@@ -1883,14 +1890,14 @@ extension AppState {
         protectionWasArmed: Bool = true,
         repairRequested: Bool = false
     ) async -> Bool {
-        guard protectionWasArmed, isProtectionBlocked, !isConnected, !isConnecting,
-              !isDisconnecting else { return false }
+        guard protectionWasArmed, isProtectionBlocked || isProtectionUnconfirmed,
+              !isConnected, !isConnecting, !isDisconnecting else { return false }
         let observedGeneration = self.connectionCoordinator.protectionOperationGeneration
         let networkProtection = self.networkProtection
         let observation = await networkProtection.refreshKillSwitchStatus()
         guard !Task.isCancelled,
               self.connectionCoordinator.protectionOperationGeneration == observedGeneration,
-              isProtectionBlocked, !isConnected, !isConnecting,
+              isProtectionBlocked || isProtectionUnconfirmed, !isConnected, !isConnecting,
               !isDisconnecting else { return false }
 
         switch observation {
@@ -1928,8 +1935,46 @@ extension AppState {
         }
     }
 
-    private func acceptConfirmedExternalProtectionRelease() {
+    /// A launch 401 signs out with PF, the armed intent and the resume intent
+    /// kept, and nothing on that path sets `isProtectionBlocked`, so the
+    /// activation reconcile above never runs. The root emergency disarm cannot
+    /// clear this user's defaults: a stale `isArmed` would re-arm PF at the
+    /// next sleep. Before a sign-in (or Check again's re-acceptance) consumes
+    /// those intents, accept an authenticated helper release the same way.
+    /// Returns the helper's answer. A release is returned only when accepted;
+    /// an answer that a protection operation overtook, or one not asked for
+    /// because an operation is in flight, is `.unavailable`. Only an accepted
+    /// release clears anything: every other answer keeps every intent. The
+    /// one operation that may overtake a release answer is the same release,
+    /// accepted first by the activation reconcile: while nothing has followed
+    /// it, the answer agrees and is returned, so the caller's resume intent
+    /// retires with it instead of re-arming PF (INT610-F2).
+    func acceptConfirmedProtectionReleaseBeforeSignIn() async
+        -> KillSwitchService.StatusObservation {
+        guard !isConnected, !isConnecting, !isDisconnecting else { return .unavailable }
+        let observedGeneration = self.connectionCoordinator.protectionOperationGeneration
+        let networkProtection = self.networkProtection
+        let observation = await networkProtection.refreshKillSwitchStatus()
+        guard !Task.isCancelled, !isConnected, !isConnecting, !isDisconnecting
+        else { return .unavailable }
+        let generation = self.connectionCoordinator.protectionOperationGeneration
+        guard generation == observedGeneration else {
+            if case .confirmed(requiresProtectionRecovery: false) = observation,
+               confirmedReleaseGeneration == generation,
+               !KillSwitchService.isArmed, !isProtectionBlocked {
+                return observation
+            }
+            return .unavailable
+        }
+        if case .confirmed(requiresProtectionRecovery: false) = observation {
+            acceptConfirmedExternalProtectionRelease()
+        }
+        return observation
+    }
+
+    func acceptConfirmedExternalProtectionRelease() {
         self.connectionCoordinator.bumpGeneration()
+        confirmedReleaseGeneration = self.connectionCoordinator.protectionOperationGeneration
         recoveryCause = nil
         KillSwitchService.isArmed = false
         KillSwitchService.needsSessionExceptionReassert = false

@@ -172,6 +172,63 @@
     调用停在 6 次）、修复后 2/2 通过；`npx tsc --noEmit` 通过；`windows-packaging.test.mjs` 新增
     repair gate 用例修复前失败、修复后全文件 31/31 通过。未在本机运行 cargo / NSIS，
     `uninstall_service.rs` 编译以 windows-2025 CI 为准；未做实机卸载验收。
+
+## 2026-09-24 · mac3 列车 train/mac3-20260924
+
+- **归属/来源**：G2 macOS 账户状态与保护展示汇合（各 PR 归属见其自身条目）；基线 origin/main
+  [d98b217d](https://github.com/raydocs/tono/commit/d98b217d) → 分支 `train/mac3-20260924`，按序
+  `--no-ff` 合入 #516（fc33c9eb）、#537（a984c553）、#538（f8a3c16a，含 #537）；提交时未合 main。
+  mac2 列车 #605 尚未进 main，本列车不含它。
+- **缺陷修复**：无新增；各修复见对应 PR 条目。
+- **新增/优化**：无。
+- **工程与测试（合并时手工解决的冲突）**：
+  - #516 × #537：`AppState+Connect.swift` 同时保留 #516 新增的 `acceptConfirmedProtectionReleaseBeforeSignIn()`
+    与 #537 把 `acceptConfirmedExternalProtectionRelease()` 去掉 `private`（供 `AppState+LaunchProtection.swift` 调用）。
+  - 本文件：各合并两边条目全部保留，仅去掉冲突标记。`FINDINGS_LEDGER.md` 自动合并，无冲突。
+  - 未合入 #535：其新 head f587b441 基于 #516 旧 head，与 #516 现 head 在同一接缝上改法不同——#516
+    （fc8337ec/7b95aed4/fc33c9eb）用返回 Bool、在 AppState 保护代次下清除 armed 意图的
+    `protectionReleaseConsumer` 取代了 `killSwitchStatusObservation`；#535 让
+    `retireResumeIntentIfProtectionReleased()` 返回 helper 原始答复（Check again 需区分 `.rejected`），其测试仍设
+    `killSwitchStatusObservation`。合并需要重新设计该接口，不属于无歧义解决，故留出。
+  - 未合入 #539：叠在 #535 旧 head f814061e 上，含 #535 的提交，随 #535 一起留出。
+- **验证**：MacBook 列车工作树只做文本检查：无冲突标记（`git grep`）；`git diff --check origin/main HEAD` 通过；
+  `Localizable.xcstrings` JSON 解析通过；相对 origin/main 无 helper 源码（`tooling/scripts/core-helper/*`、
+  `helper-shared/*`、`HelperProtocolVersion.swift`）改动。未运行 xcodebuild/XCTest，编译与测试待列车 PR 的
+  GitHub-hosted `macos-26` CI。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：CI 待定；#535/#539 需先 rebase 到 #516 现 head 并统一 sign-in 释放接口后再进下一班列车；
+  其余跟进见 #601。没有实机验收。
+- **续记（2026-09-24，PR #610 集成审查，Codex 发现、Claude 读源码复核三项均确认）**：列车头 947cf8d6 已另行合入
+  #535（1ad72605）与 #539。修复提交 [60e70d55](https://github.com/raydocs/tono/commit/60e70d55)：
+  INT610-F1（P1）activation 对 unconfirmed 的解除答复只核对 launch 序号，跨过 wake 的 protection generation
+  仍被接受并清 `isArmed`，wake 的 reassert 返回 false 却发布 Protected Offline → 答复再核对 protection
+  generation；wake 仅在 reassert 真正武装时才发布 blocked。INT610-F2（P2）activation 先接受解除后，sign-in 同一
+  解除答复被 generation 拒绝、`shouldResumeProtection` 残留并自动重连 → 若越过它的只是该次已确认解除（其后无新操作、
+  仍为解除态），sign-in 返回解除答复并退掉 resume 意图。MAC3-ADD-F1（P2）挂起/Check again 的保留式拆除经
+  `restrictToBootstrap` → `installIfNeeded` 可对拒绝本 App 的 helper 弹管理员提示 → `restrictToBootstrap` 不再安装/修复
+  helper（`helperPrepared: true`），helper 不可达或拒绝时调用失败、PF 维持 helper 现状。测试：
+  `LaunchProtectionPresentationTests.testAnActivationAnswerAWakeOvertookIsDropped`、
+  `KillSwitchArmOutcomeTests.testBootstrapRestrictionNeverPreparesTheHelper`（失败前行为为推理：旧代码前者接受答复、
+  后者先走 helper 安装而非 arm 请求），F2 无新测试。仅 `git diff --check`；未在 MacBook 编译或跑 XCTest，待 `macos-26`
+  CI。剩余：wake 中 reassert 未武装且路由 48 s 内未就绪时不再移交重连循环；无实机验证。无新包。
+- **续记（2026-09-24，Codex 复核 60e70d55：F2 FIXED，F1 PARTIAL，另两项回归/过宽；Claude 读源码三项均确认）**：
+  (1) F1 残留（原有路径）：wake reassert 抛错仍发布 Protected Offline 和「网络仍处于阻断状态」→ 改为发布 #537 的
+  unconfirmed（「保护状态未知」），文案改为无法确认、继续重试；此状态下 activation 或重连循环读到 helper 确认解除时，
+  与 Protected Offline 一样走完整解除并结束 wake/重连恢复。(2) 上一续记引入的回归（即上条「剩余」）：未武装的
+  wake 在就绪超时后不再移交重连 → 恢复无条件移交，不再依赖 blocked 声明。(3) MAC3-ADD-F1 过宽：`helperPrepared: true`
+  让所有 `restrictToBootstrap` 调用跳过版本检查与静默升级 → 改为照常准备 helper，仅不弹管理员提示
+  （`installIfNeeded(administratorPrompt: false)`），需要提示时（拒绝本 App 或静默升级失败）失败、PF 维持 helper 现状。
+  测试：两个已加测试扩展——F1 测试改为驱动真实 wake（新增 `reassertKillSwitch` seam），另断言抛错时为 unknown 而非
+  Protected Offline；MAC3 测试改为断言准备只以不提示方式调用且不发 arm 请求。失败前行为为推理；未编译、未跑 XCTest，
+  待 `macos-26` CI；wake 移交（约 48 s）与 HelperManager 内部的提示前拦截无测试。无新包。
+- **续记（2026-09-24，PR #610，合并 main 后修复 F1/F2）**：基线 mac3 `b9bea67a`，以 `2ac94c30`
+  合入 origin/main `c9fe191e`；日志冲突按 main 条目在前、mac3 条目在后解决，逐节文本核对两侧原记录完整保留。
+  G2 缺陷修复：F1 菜单栏先判断 `isProtectionUnconfirmed`，再判断重试暂停，不再把未知保护显示成
+  Protected Offline；F2 wake 的 `reassertKillSwitch` 成功返回后立即检查取消，旧任务不得继续发布保护状态或发起连接。
+  新增/优化：无。工程与测试：`LaunchProtectionPresentationTests` 各新增一条回归，覆盖未知+暂停的菜单投影、
+  已取消的 reassert 成功返回不覆盖未知状态。验证：`git diff --check` 通过；按执行主机规则未运行 XCTest/原生编译，
+  修复前失败未实跑；待 GitHub-hosted `macos-26` CI。仅源码，无新包；无设备验收。
+
 ## 2026-09-24 · mac 独立列车 train/mac2-20260924
 
 - **归属/来源**：G1–G3 macOS 修复汇合（各 PR 归属见其自身条目）；基线 origin/main
@@ -2491,6 +2548,186 @@
 - **剩余限制**：失败状态下仍放得进剩余额度的短记录会继续写入旧句柄（即备份文件），直到下一条超限记录触发重建；
   日志目录整个被删除时轮转不重建目录，未改；未在实机上复现 NTFS 磁盘满。
 
+## 2026-09-24 · macOS 账户 suspended 时停止网络日志上传
+
+- **归属/来源**：G2 客户端账户状态（macOS `AccountSession+Auth.swift`）。内部审查 H17-O-F7（另一审查方按
+  收窄条件确认）；Issue #536。叠在 #535（`fix/macos-suspended-stops-core-20260924`，其又叠在 #516）之上；本条分支
+  `fix/macos-suspended-stops-log-upload-20260924`；提交时未合 main。
+- **缺陷修复**：上传器已在运行（上传开关默认开、账户 ready）且有待发日志时，账户被控制面拒绝进入
+  `.suspended`，`enterEntitlementBlock` 不停上传器；上传器运行中只按日志 ownership 判断是否继续，
+  不看账户状态。于是每轮上传都 401 → `auth/refresh` 401 → 退避重试（上限 960 s，无次数上限），
+  直到睡眠、退出或登出。现在进入 `.suspended` 时通过既有的 `updateDiagnosticsLogUploading()`
+  停止上传器；账户重新可用时运行时启动（`startCatalogSync`）照旧重新启动它。
+- **新增/优化**：无。
+- **工程与测试**：`AccountSessionRequestTests` 新增一个 XCTest
+  `testSuspensionStopsTheRunningNetworkLogUploader`：上传器已启动，账户重读与续期都回 401；断言状态为
+  `.suspended` 且上传循环已停止。`DiagnosticsLogUploader` 增加只读 `isRunning` 供断言，无行为变化。
+  只含测试（及该只读属性）的提交 c03c8c69（叠在 #535 上，本修复未加）在 GitHub-hosted macOS CI
+  run 35977822472 上实际跑红：build 作业只有这一个测试失败（`AccountSessionRequestTests` 51 项、
+  1 处断言失败：suspended 后上传循环仍在运行）。
+- **验证**：本机是编辑机，未运行 xcodebuild/swift。TonoTests 委托 PR 的 GitHub-hosted `macos-26`
+  CI，结果以 PR 页的准确 head SHA 为准。未实机验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：周期遥测任务句柄在 suspended 时未清空（#516 已记录的既有行为），不在本条范围。
+- **后续（2026-09-24，重新叠在 #535 上）**：合入 #535 的 1ad72605（其已对齐 #516 fc33c9eb 的
+  `protectionReleaseConsumer` 设计）。唯一冲突在 `AccountSessionRequestTests.swift`：本条的
+  `testSuspensionStopsTheRunningNetworkLogUploader` 与 #535 的
+  `testCheckAgainDoesNotResumeIntoAHelperRepairTheUserDidNotAskFor` 两个都保留，本条产品代码无改动。
+  本机未构建，以 PR 的 `macos-26` CI 为准。
+
+## 2026-09-24 · macOS 账户进入 suspended 时停止 Core 并撤下缓存出口
+
+- **归属/来源**：G2 客户端账户状态与连接准入（macOS `AccountSession+Auth.swift`）。内部审查 H17-C-F3，
+  另一审查方 H17-G-F3 第 3 步为同一缺口；PR 双厂商审查 535-O-F2..F4、535-C-F1..F2。Issue #526，
+  PR #535。基线 origin/main 059a2ea2 → 分支 `fix/macos-suspended-stops-core-20260924`，叠在 #516
+  （合入其 cd94a22f，复用 helper 确认的恢复意图规则）；提交时未合 main。
+- **缺陷修复**：套餐到期、流量用尽、账户停用或设备被吊销后，账户重读收到 401（请求与续期都拒绝），
+  账户进入 `.suspended`。原来 `enterEntitlementBlock` 只改状态：正在运行的 Core 继续用本设备的
+  出口身份走流量；缓存目录（内存与磁盘）保留；连接层只按缓存判断就绪，唤醒恢复、保护重连循环、
+  网络变化和自动连接都不看账户状态，睡眠唤醒后可用同一凭据再起 Core，直到出口下次刷新名单。
+  现在进入 `.suspended` 时：
+  - 在第一个挂起点之前撤下缓存目录（与登出同一道 ownership 屏障：内存与磁盘都清，期间任何目录
+    都装不上），连接层不再有可用的出口；
+  - 停止正在运行的 Core，PF 保持武装：Mac 停在 Protected Offline，suspended 页面在 kill switch
+    武装时已提供"恢复网络"。任何 suspended 路径都不释放 PF。
+  - 启动与登录时直接进入 suspended 的三处（服务端目前不发 `suspended: true`）也走同一入口。
+  - 控制面重新接受账户时（`leaveEntitlementBlock`，作为账户生命周期工作运行，登出或恢复网络会先
+    取消并排空它）：先取消挂起前仍在途的目录请求（否则会加入它并拿到被丢弃的结果，进入 `.error`），
+    重新绑定 ownership 并拉取新目录；拉取失败则保持 suspended 与撤销屏障，"再次检查"可重试。
+    是否自动重连先按应用内的 Protected Offline 状态，再问 helper：只有 helper 确认保护已解除
+    （例如外部紧急解除）才放弃重连意图，helper 不可达或拒绝时保持（与 #516 同一规则）。之后从新
+    目录重启运行时并回到 ready。
+- **新增/优化**：无。
+- **工程与测试**：`AccountSessionRequestTests` 新增一个 XCTest
+  `testRefusedSessionStopsTheCoreAndWithdrawsItsExitsWithProtectionKept`：账户重读与续期都回 401；
+  断言状态为 `.suspended`、已安装目录被撤下、该账户的目录不再被接受、Core 停止一次、disarm
+  consumer 未被调用。审查后同一测试延伸到重新接受：挂起前有一个在途目录请求，续期与重读都成功、
+  应用内仍显示 Protected Offline 而 helper 确认已解除；断言重新接受另发新的目录请求、只安装新目录、
+  回到 `.ready`、恢复时不请求自动重连。测试 fixture 增加可注入的 `descriptorConsumer` 与
+  `protectionBlockedConsumer`。延伸部分的只含测试提交 7615d579 在修复前的 head 上跑红（run 35984764434：
+  只有这一个测试失败，重读成功后等待请求约 5 s 超时，按流程即没有发出新的目录请求；自动重连一项
+  因此未执行到）。最初只含测试的提交 febea58a
+  （产品代码未改）在 GitHub-hosted macOS CI run 35976604824 上实际跑红：build 作业只有这一个测试
+  失败（`AccountSessionRequestTests` 50 项、3 处断言失败：目录未撤下、目录仍被接受、Core 未停止；
+  "不释放 PF"一项在旧代码上本来成立）。
+- **验证**：本机是编辑机，未运行 xcodebuild/swift。TonoTests 委托 PR 的 GitHub-hosted `macos-26`
+  CI，结果以 PR 页的准确 head SHA 为准。未实机验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：
+  - 出口对已建立连接的处理未实机验证；本修复只保证客户端在有界时间内停用凭据。
+  - 保护重连循环在 suspended 期间可能继续按退避计时，但没有目录可用，不发起连接。
+  - 恢复路径（`leaveEntitlementBlock`）只在控制面重新接受同一会话时可达；被吊销的会话仍需
+    登出再登录。
+  - 网络日志上传在 suspended 下继续尝试 refresh（H17-O-F7），单独修。
+- **后续（2026-09-24，PR 复审 535R-C-F1..F3，Codex 发现、Opus 核实）**：
+  - F1：重新接受时不再丢弃 helper 的回答。helper 拒绝（`.rejected`），或自动重连因需用户操作
+    而暂停时，运行时不带恢复意图启动，不自动重连，"再次检查"不会引出 helper 修复的管理员授权；
+    PF 保持原样。新增 XCTest `testCheckAgainDoesNotResumeIntoAHelperRepairTheUserDidNotAskFor`
+    （helper 回 `.rejected`；断言回到 `.ready`、恢复参数为 `[false]`）。旧代码上按流程应为
+    `[true]`，这是推断，未跑红。
+  - F2：恢复网络与登出在排队清理前先取消在途的目录请求（独立 Task，取消账户工作传不到它），
+    否则清理要等它的网络超时。槽位保留，由清理排空；恢复网络的清理现在也排空并清掉该槽位。
+  - F3：`enterEntitlementBlock` 每次都递增拒绝计数（已是 `.suspended` 也递增），重新接受把它纳入
+    当前性检查；目录同步循环调用 `refreshAccount` 前重新确认 `.ready`。
+  - 剩余：暂停标志一支、F2、F3 没有单独测试。最后一次当前性检查之后、运行时启动期间到达的
+    拒绝不经计数拦截（此时目录已撤下），其结果未逐步验证。本机未运行 xcodebuild/swift，
+    交 PR 的 GitHub-hosted `macos-26` CI。
+- **后续（2026-09-24，与 #516 当前设计对齐）**：合入 #516 的 fc33c9eb（N1 修复把
+  `killSwitchStatusObservation` 换为 `protectionReleaseConsumer`，helper 确认释放时经 AppState 清掉
+  `isArmed`）。两边改写的 `retireResumeIntentIfProtectionReleased` 合为一个：resume 意图或 `isArmed`
+  任一为真时询问，返回 helper 的完整回答（`KillSwitchService.StatusObservation`：已释放 / 仍需保护 /
+  拒绝 / 不可达），两个意图都没有时返回 nil。`protectionReleaseConsumer` 与
+  `AppState.acceptConfirmedProtectionReleaseBeforeSignIn` 改为返回该回答而非 Bool：只有在当前保护代际内
+  被 AppState 接受的释放才以"已释放"返回，并清掉 armed 与 resume 意图；被保护操作赶超、或因操作在途
+  而未询问的回答报 `.unavailable`，什么都不清。登录照 #516 使用；"再次检查"用同一回答做 F1，其确认
+  释放现在也清 `isArmed`（原先只放弃 resume 意图）。#535 的两个测试改用新钩子
+  （`protectionReleaseConsumer` 直接返回 `.confirmed(requiresProtectionRecovery: false)` / `.rejected`），
+  #516 的测试不变，未新增测试。本机未构建，以 PR 的 `macos-26` CI 为准。
+
+## 2026-09-24 · macOS 会话被拒（401）不再释放 PF/DNS 保护
+
+- **归属/来源**：G2 客户端账户状态与保护边界；macOS `Services/Account/AccountSession+*.swift`、
+  `Services/AccountSession.swift`、`Views/WelcomeIntroView.swift`、`TonoApp.swift`。
+  内部审查 H17-O-F1、H17-O-F2（macOS 部分），与另一审查方 H17-G-F3 第 2、4 步为同一路径；
+  PR 双厂商审查 516-O-F1..F4、516-C-F1..F3。Issue #510，PR #516。基线 main 8dc79a5b →
+  分支 `fix/macos-auth-401-keeps-protection-20260924`；提交时未合 main。
+- **缺陷修复**：套餐到期、流量用尽、账户停用、设备吊销（含别处登录挤掉）时，Worker 对鉴权
+  路由和 `auth/refresh` 一律回 401。macOS 有三处把这种 401 当成账户丢失：启动 restore
+  （`me` 与续期都 401）、周期遥测窗口、分应用路由研究上传。三处都走
+  `fail(signsOutOnUnauthorized: true)`，先 `releaseNetworkProtection()`
+  （`disconnectAndWait(releaseKillSwitch: true)`）再登出。结果是 PF 与受保护 DNS 被放开，
+  界面只剩登录页，不说原因。开了遥测的 Mac 睡眠期间跨过到期后，唤醒 45 s 的遥测先于 300 s
+  的账户重读，每次都走这条路。现在任何 401 都不释放保护：
+  - 启动 restore 仍登出，但 PF/DNS 保持原样，并保留崩溃恢复的 resume 意图。kill switch 仍
+    武装时，窗口不再显示 Welcome 引导（从未看过引导的老用户原先会落到引导页，页上既不说明
+    阻断也没有恢复入口；516-O-F1），而是落到登录页已有的阻断说明和"恢复网络"入口。
+    这与无存储会话的启动并不完全相同：那条路径在无需保持保护时会做一次清理性解除，并自己
+    加载登录方式。
+  - 后台上传的最终 401（请求和客户端自己的续期都被拒）直接对当前账户调用
+    `enterEntitlementBlock`，与 `refreshAccount` 收到 401 时相同，进入 `.suspended`。保护不变，
+    显示原因页。首版改走 `refreshAccount`，要再发一次续期；那次若遇断网或 5xx 会被静默忽略，
+    账户留在 `.ready`（516-C-F1）。
+  - 登录时若带着保留下来的 resume 意图，先读 helper 的 kill switch 状态。helper 确认已释放
+    （如 root 紧急解除）就放弃该意图，不再自动重连重新 arm PF；helper 不可达或拒绝不算释放，
+    意图保留（516-O-F3 / 516-C-F2）。
+  - 在登录页加载登录方式期间点"恢复网络"，释放会作废这次读取，登录页原先停在加载中且无法
+    重试。现在释放后若仍未取得登录方式就重新加载，被作废的旧读取也不再挡住新的读取
+    （516-O-F2）。
+- **新增/优化**：无。
+- **工程与测试**：
+  - `AccountSessionRequestTests` 新增四个 XCTest：
+    - `testBackgroundUploadRefusedSessionSuspendsAndKeepsProtection`：遥测与 refresh 都回
+      401，其后任何请求回 503；断言 disarm consumer 未被调用、状态为 `.suspended`、账户仍在。
+    - `testLaunchRefusedSessionSignsOutAndKeepsProtection`：驱动启动 restore 的 catch；断言
+      disarm consumer 未被调用、状态为 `.signedOut`、本地 refresh token 已删、resume 意图保留。
+    - `testSignInKeepsAResumeIntentUnlessTheHelperConfirmsRelease`：通过可替换的
+      `killSwitchStatusObservation` 注入 helper 状态；`.unavailable` 保留意图，
+      `.confirmed(false)` 放弃意图。直接调用登录前的检查函数，不走完整登录。
+    - `testProtectionReleaseReloadsTheSignInMethodsItRetired`：登录方式读取进行中调用
+      `restoreDirectInternet`；断言重新加载并发布了登录方式，加载标志已清。
+  - `WelcomeLaunchGateTests.testIntroWhenUnseenAndSignedOut` 增加一条断言：kill switch 仍
+    武装时不显示引导。
+  - 红灯（均为 GitHub-hosted macOS CI，只含测试的提交，产品代码未改）：
+    - 首轮两个测试：提交 a1154ced（基于 bb2ed4e4；变基后在本 PR 中为 43a101b9，文件逐字节
+      相同），run 35973008589。build 作业只有这两个测试失败（`AccountSessionRequestTests`
+      51 项、6 处断言失败）。后台用例：disarm 被调用，状态为 `signedOut`；启动用例：disarm
+      被调用，resume 意图被清。
+    - 后台用例加 503 之后：提交 4b4fad0b（在首版修复上；变基后为 6d5fcc5a，代码相同），
+      run 35977233730。只有该用例失败，状态为 `ready` 而不是 `suspended`。
+    - `testProtectionReleaseReloadsTheSignInMethodsItRetired`：提交 8f0ad561（在上一条之上，
+      只加该测试），run 35978342364。该用例等不到重新加载的请求，5 s 后失败；同一 run 中
+      后台用例照旧失败（该提交不含其修复）。
+    - resume 意图测试和引导断言依赖新增的函数和参数，在旧代码上无法编译，未跑红。
+- **验证**：本机是编辑机，未运行 xcodebuild/swift。TonoTests 委托本 PR 的 GitHub-hosted
+  `macos-26` CI，结果以 PR 页的准确 head SHA 为准。未实机验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：
+  - Worker 仍对所有不合格情形回 401（加 entitlement 码是另一单元）。因此启动时的 401 仍会
+    登出，也不显示原因。
+  - `.suspended` 不停止正在运行的 Core，不作废缓存的出口凭据（H17-C-F3，#535）。
+  - 网络日志上传在 suspended 下继续尝试 refresh（H17-O-F7）。
+  - 进入 suspended 时，周期遥测任务的句柄没有清空，这是 `refreshAccount` 路径的既有行为。
+    若暂停超过 20 分钟，解除后周期遥测要等下次睡眠唤醒或重启 App 才恢复。
+  - Windows 启动时的 401 仍会释放 WFP（`restore.rs:318-325`），见 H17-AUTH-WIN（#515）。
+  - 启动 401 保留 PF 后，菜单栏仍显示 Standby（516-C-F3 / 516-O-F1 菜单部分）。这依赖另一个
+    PR 修复启动时 AppState 的保护真值（H16-O-F5 / H16-C-F1），本条不改。
+  - 引导页判断读 `KillSwitchService.isArmed`（非 observable）；在登录页点"恢复网络"后若再
+    出现 `.error`，从未看过引导的用户会重新看到引导页（既有行为）。
+- **后续（2026-09-24，PR 审查 N1：Codex 发现，Opus 复核）**：登录前 helper 确认已释放时，原先只放弃
+  resume 意图，`KillSwitchService.isArmed` 仍为 true（root 紧急解除改不了该用户的 defaults，启动 401
+  路径也不设 `isProtectionBlocked`，激活对账不运行），下次睡眠重新 arm PF，唤醒后重连。现在由 AppState
+  新增的 `acceptConfirmedProtectionReleaseBeforeSignIn` 读 helper：未连接/连接中/断开中且保护代际未变时，
+  确认释放才走既有 `acceptConfirmedExternalProtectionRelease`，一并清掉 armed 意图；不可达、拒绝或仍需
+  保护时两个意图都保留。`killSwitchStatusObservation` 换为 `protectionReleaseConsumer`（TonoApp 接到
+  AppState）；上文测试改名 `testSignInKeepsTheArmedAndResumeIntentsUnlessTheHelperConfirmsRelease`，经
+  真实 AppState 与 `refreshKillSwitchStatus` 替身同时断言两个意图。旧代码缺新函数无法编译，未跑红；
+  本机未构建，以 PR 的 `macos-26` CI 为准。
+- **后续（2026-09-24，N1 复核残留：Codex 发现）**：原生更新以 Protected Offline 恢复时 `isArmed` 为 true
+  但 resume 意图为 false；之后启动 401、root 紧急解除、不重启直接登录，检查因只看 resume 意图而跳过，
+  下次睡眠仍按遗留的 `isArmed` 重新 arm。登录前检查现在在 resume 意图或 `isArmed` 任一为真时都运行，
+  仍只有 helper 确认释放才清除。同一测试追加"只有 armed 意图"一段；在 7b95aed4 上该段断言会失败
+  （检查被跳过，`isArmed` 保持 true），系推理，未跑红；本机未构建，以 PR 的 `macos-26` CI 为准。
+
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
 - **归属/来源**：G1–G3 审查与修复的可追溯性（工程流程与记录，非产品行为）；审查基线 main
@@ -2507,6 +2744,75 @@
   开放 PR 编号按 2026-09-24 `gh pr list` 实查。
 - **候选/发布**：无新包，仅文档。
 - **剩余限制**：H16/H17 条目全部是源码推导或阅读确认，回归草案均未运行；需实机的部分列在审查轮记录第 3 节。
+
+## 2026-09-24 · macOS 账户 gate 与菜单栏读同一保护状态
+
+- **归属/来源**：G2 客户端保护状态展示（macOS）。内部审查 H16-C-F2，
+  Issue [#533](https://github.com/raydocs/tono/issues/533)。叠在 #537（H16-O-F5）之上 → 分支
+  `fix/macos-gate-release-20260924`；须在 #537 之后合入；提交时未合 main。
+- **缺陷修复**：登录页与账户停用页的「Kill Switch 仍在拦截」提示只读不可观察的
+  `KillSwitchService.isArmed`，外加只有 gate 自己按钮才会置位的本地标志。用户从菜单栏
+  「恢复正常网络」成功释放后，账户状态按设计保持不变，已显示的 gate 没有任何被观察的输入变化，
+  继续声称仍在拦截。改后：两处 gate 共用 `GateProtectionSection`，由 `AppState.gateProtectionNotice`
+  派生（与菜单栏同源的可观察状态）：`isProtectionBlocked` 或已连接 → 原「仍在拦截」文案；
+  #537 的 `isProtectionUnconfirmed` 或仅有本地意图 → 新文案「无法确认上一次会话的保护状态，
+  直接联网可能仍被拦截」；两者皆无 → 隐藏。任何地方完成的释放都会写 `isProtectionBlocked`，
+  使已挂载的 gate 重新求值；去掉只对本按钮有效的本地标志。「恢复正常网络」按钮的显示条件与
+  菜单栏对非 ready 账户的恢复入口一致，逃生出口不会消失。
+- **新增/优化**：无。释放流程、账户状态、PF/helper 均未改。
+- **工程与测试**：先以不改行为的提交把两处重复的 gate 区块收成一个共享视图并经环境拿到
+  AppState；新增一个 XCTest `AccountGateProtectionTests.testMenuBarRestoreRetiresTheMountedGateNotice`
+  （真实 AccountSession → AppState 释放路径，仅替换 helper/系统 I/O；用 `withObservationTracking`
+  断言菜单栏释放会使 gate 读到的状态失效）。
+- **验证**：本机未编译；TonoTests 在本分支 GitHub-hosted `macos-26` CI 运行，以 PR 检查中
+  对应 head SHA 为准。行为不变提交的 CI 失败结果见 PR 正文。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：未实机验证 SwiftUI 实际重绘；测试证明的是 gate 读取的状态会被释放通知失效。
+  已连接但账户停用时仍沿用「上一次会话」文案（原有措辞）。
+- **后续（2026-09-24，PR 复审 538-O-F1）**：测试用默认 API 客户端；#516 合入后，
+  `restoreDirectInternet` 在未取得登录方式时会重新加载，测试就会向生产 `/auth/methods` 发请求。
+  现在测试在释放前先填入登录方式，释放不再发起任何网络请求。未新增测试。同时合入 #537 的复审
+  续修（a984c553）。本机未运行 xcodebuild/swift，交 PR 的 GitHub-hosted `macos-26` CI。
+
+## 2026-09-24 · macOS 启动把 helper 确认的屏障发布到界面
+
+- **归属/来源**：G2 客户端保护状态展示（macOS）。内部审查 H16-O-F5（= H16-C-F1），
+  Issue [#529](https://github.com/raydocs/tono/issues/529)。基线 origin/main 059a2ea2 → 分支
+  `fix/macos-launch-protection-20260924`；提交时未合 main。
+- **缺陷修复**：启动恢复（`RuntimeCleanup`）只把 helper 的屏障答复写进本地意图
+  `KillSwitchService.isArmed`，`AppState.isProtectionBlocked` 仍为 false：更新后须以
+  Protected Offline 恢复、或带着 PF 重启进入停用/错误/登出时，菜单栏、仪表盘徽标和连接按钮
+  都显示 Standby，而 PF 阻断全部流量；激活时 reconcile 和 Retry 都要求 `isProtectionBlocked`，
+  无法自行收敛。改后：helper 认证答复（或 root 的更新回执）确认屏障 → 发布 Protected Offline
+  （与会话内失败同一状态，横幅、Retry、Restore 均可用）；helper 未答复/拒绝而本地意图为
+  armed → 新的 `isProtectionUnconfirmed`，菜单栏显示「Protection unknown / 保护状态未知」，
+  既不显示 Standby，也不把本地意图当作屏障证明；启动第一步在 helper 答复前即按本地意图发布
+  unconfirmed，因此之后抛错的启动路径也不会显示 Standby。任何后续保护状态写入
+  （连接开始、拆除完成、释放、reconcile）都会清除 unconfirmed。
+  评审续修（Opus + Codex 双方发现）：再次启动恢复（gate 上 Retry）得到 helper 确认「未持有」时，
+  按激活 reconcile 同一路径撤销此前的 Protected Offline，不再残留 blocked；unconfirmed 在 helper
+  之后给出认证答复时收敛——启动时 reassert 成功（arm 须读到 armed/wanted/live）发布 held，
+  App 激活时的 reconcile 也对 unconfirmed 查询一次（不弹授权、不动重连状态）；仪表盘徽标、
+  保护卡片与连接按钮显示「保护状态未知」，按钮与菜单栏在 ready 时也提供恢复正常网络。
+- **新增/优化**：无。PF/helper、账户流程、保护策略均未改。
+- **工程与测试**：把启动的 helper 答复折叠抽成 `RuntimeCleanup.adoptLaunchObservation`
+  （先以不改行为的提交抽出）；新增一个 XCTest
+  `LaunchProtectionPresentationTests.testLaunchShowsTheHelperAnswerInsteadOfStandby`（评审续修后
+  同一测试另断言：同一 AppState 先 held 后 released 不残留 blocked；unconfirmed 在 helper 之后答复时收敛）。
+- **验证**：本机未编译（MacBook 为编辑机）；TonoTests 在本 PR 的 GitHub-hosted `macos-26` CI 运行，
+  结果以 PR 检查中对应 head SHA 为准。测试仅抽取提交（产品行为未改）的 CI 运行结果见 PR 正文。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：未实机验证。helper 一直不答复时 unconfirmed 保持（如实为未知）。启动确认屏障后
+  界面进入与会话内相同的 Protected Offline，点按连接按钮即恢复正常网络、激活 reconcile 会运行，
+  这是行为变化而非纯展示。账户 gate 的文案与菜单栏一致由后续 H16-C-F2 修复（#538）负责。
+- **后续（2026-09-24，PR 复审 537R-C-F1，Codex 发现、Opus 核实）**：启动 reassert 在本地意图已被
+  撤销时（`guard isArmed`）正常返回却什么都没 arm，启动仍发布 held，界面显示 Protected Offline
+  而 PF 实际未持有。现在 reassert 返回是否真的 arm，只有 arm 了才发布 held。启动裁决与激活时的
+  helper 答复共用一个序号：激活读取期间若有更新的启动裁决发布，旧答复丢弃，不再改写本地意图。
+  新增 XCTest `testAnActivationAnswerOlderThanTheLatestLaunchVerdictIsDropped`（激活读取期间
+  启动再发布 unconfirmed，随后到达的旧 `.confirmed(false)` 不得清掉意图）。旧代码上按流程
+  两处断言失败，这是推断，未跑红。reassert 返回值一支需要真实 helper，无单独测试。本机未运行
+  xcodebuild/swift，交 PR 的 GitHub-hosted `macos-26` CI。
 
 ## 2026-09-23 · 发现总账与审查流程记录
 
