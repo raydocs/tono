@@ -32,6 +32,23 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · fleet 合并列车（exit-agent #389→#375→#384→#464，ops-panel #466→#368→#373→#367→#377）
+
+- **归属**：ops 控制面 / 出口节点吊销与计量、hub 运维任务；`services/exit-agent`、`ops-panel`，#375 附带控制面 migration 0081。
+- **来源**：origin/main 8dc79a5b → 分支 `train/fleet-20260924`，按记录顺序 `--no-ff` 合入 9 个 PR；各 PR 的缺陷与测试见下方各自条目。
+- **缺陷修复**：无新增；只有合并时的组合处理（按 r4 审查记录 `r4-fleet-merge.log` 与 #464 PR 正文）：
+  - `run_once` 经 `fetch_roster_or_discard_cache` 取 roster；#375 的 `except NodeDisabled` 在 #464 的 `except Exception` 之前，并先 `discard_roster_cache`，删除失败写进最终 Refusal，撤回照常执行。
+  - #375 停用分支自行容错加载 state（#389 已把 state 加载移到吊销之后），state 不可用时仍撤回，只是不写回清单。
+  - #384 的 `retire_override`（bool|None）替换旧字符串比较，也传给 #464 的 `run_outage_round`；#384 早期 `rmu shared-legacy` 失败改为计入 #389 的 failures，不再中断其余删除。
+  - #384 的静态配置持久化挪到 reconcile 之后、state/source/待发报告检查之前（#389「吊销先于计量检查」），失败仍按 #384 延到计量后才拒绝；#464 的 `cache_error` 放在它之后。
+  - `run_outage_round` 容错加载 state，先按缓存恢复客户端，再在 state 不可用时拒绝（与 #389 可达路径一致；#464 正文建议「state 不可用则不恢复」，此处按 r4 记录）。
+  - ops-panel `collect.py`：#368 的 `ssh_password_argv` 与 #373 的 `public_ip`/`probe_target` 取并集；`tests/test_collect.py` 两个测试类都保留。#373 条目中两行仅含空格的行去掉尾随空白。
+- **新增/优化**：无。
+- **工程与测试**：无新测试；各 PR 自带测试全部保留。
+- **验证**：MacBook 列车工作树 `python3 services/exit-agent/test_reconcile_and_report.py`（89 通过）；`python3 -m unittest discover -s ops-panel/tests -p 'test_*.py'`（29 通过）；home-agent 与 exit metering 配置脚本测试通过；`services/control-plane` `npm run typecheck` 通过、`npx vitest run` 892 通过。未连接真实节点、hub 或探针，未部署。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：部署前置——#368 需先在 hub 登记节点与探针 known_hosts；#377 需为自定 unit 的节点在 hub `nodes.secrets.json` 填 `serviceName`，并与 #466 同时或之后部署（hub 上 `jobs.py` 与 `collect.py` 一起更新）；#384 需先在真实 Xray 25.3.6/26.x 确认 vless `clients: []` 能通过 `run -test`。`state.json.roster` 为明文凭据。#375 与控制面 #451 的 `revokeExitToken` SQL 相邻，后合者手工保留两边。
+
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
 - **归属/来源**：G1–G3 审查与修复的可追溯性（工程流程与记录，非产品行为）；审查基线 main
@@ -495,7 +512,7 @@
   - 目标选择 `probe_target`，节点自报值无效时回落到登记的 host，host 也要通过同一校验，
     两者都无效就跳过全部封锁探测；
   - 汇点 `probe_cn_agents`。
-  
+
   目标改为作为 `bash -c` 的位置参数传入（`shlex.quote`），不再拼进脚本文本。
 - **新增/优化**：无。
 - **工程与测试**：新增 `ops-panel/tests/test_collect.py` 的一个测试：`probe_cn_agents` 收到
@@ -504,7 +521,7 @@
 - **验证**：MacBook `python3 -m unittest discover -s ops-panel/tests -p 'test_*.py'`：
   - 旧代码：26 项中 1 项失败，即新测试；
   - 修复后：26 项全部通过。
-  
+
   另外打桩手动确认合法 IP 生成 `bash -c '…$0/$1' <ip> 443`，并且 `probe_target` 对私网
   地址或主机名回落/返回 None。没有连接任何真实主机。CI 结果见 PR。
 - **候选/发布**：只有源码，没有新候选；hub 部署由 owner 执行。
