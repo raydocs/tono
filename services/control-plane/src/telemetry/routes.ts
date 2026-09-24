@@ -1,4 +1,4 @@
-import { type Env, type Row, now, id, str } from '../env';
+import { type Env, type Row, envInt, now, id, str } from '../env';
 import { ApiError } from '../errors';
 import { auth } from '../auth';
 import { body, rejectUnexpectedKeys, diagnosticsInt } from '../request';
@@ -268,25 +268,43 @@ export async function storeDiagnosticsLogSegment(
   meta: ReturnType<typeof diagnosticsLogMetadata>,
   payload: Uint8Array,
 ) {
-  // A client that loses its upload cursor replays from the last segment it is
-  // sure about. Answering the replay from the index — rather than writing the
-  // object again — is what keeps that cheap and keeps `sequence` meaningful.
-  const existing = await e.DB.prepare(
-    'SELECT id, received_at FROM diagnostics_log_objects WHERE user_id = ? AND session_id = ? AND sequence = ?',
-  ).bind(uid, meta.sessionId, meta.sequence).first<Row>();
-  if (existing) {
+  // Every component of the key is server-derived. Retention finds objects
+  // through D1, never by listing the bucket. The UTC day in the key is also
+  // what lets the orphan sweep know no later upload can write it again.
+  const t = now();
+  const id = crypto.randomUUID();
+  const day = new Date(t * 1000).toISOString().slice(0, 10);
+  const key = `logs/${uid}/${day}/${meta.sessionId}-${String(meta.sequence).padStart(7, '0')}.jsonl.gz`;
+  // Record the key before the object exists, in the same statement that checks
+  // for a replay. If the index row below never lands (a D1 error, a cancelled
+  // request), this pending row is the only thing still pointing at the object
+  // and the scheduled sweep deletes the object from it. An index insert clears
+  // the pending row by trigger (migration 0088).
+  const pending = await e.DB.prepare(
+    `INSERT INTO diagnostics_log_pending_objects(r2_key, created_at)
+     SELECT ?, ? WHERE NOT EXISTS (
+       SELECT 1 FROM diagnostics_log_objects WHERE user_id = ? AND session_id = ? AND sequence = ?
+     )
+     ON CONFLICT(r2_key) DO UPDATE SET created_at = excluded.created_at
+     RETURNING r2_key`,
+  ).bind(key, t, uid, meta.sessionId, meta.sequence).first<Row>();
+  if (!pending) {
+    // A client that loses its upload cursor replays from the last segment it
+    // is sure about. Answering the replay from the index — rather than writing
+    // the object again — is what keeps that cheap and keeps `sequence`
+    // meaningful.
+    const existing = await e.DB.prepare(
+      'SELECT id, received_at FROM diagnostics_log_objects WHERE user_id = ? AND session_id = ? AND sequence = ?',
+    ).bind(uid, meta.sessionId, meta.sequence).first<Row>();
+    if (!existing) {
+      throw new ApiError(503, 'DIAGNOSTICS_LOG_UNAVAILABLE', 'Could not record the log segment');
+    }
     return {
       id: String(existing.id),
       receivedAt: Number(existing.received_at),
       duplicate: true,
     };
   }
-  const t = now();
-  const id = crypto.randomUUID();
-  // Every component is server-derived. The date prefix is what makes a
-  // retention sweep able to list a day without walking the whole bucket.
-  const day = new Date(t * 1000).toISOString().slice(0, 10);
-  const key = `logs/${uid}/${day}/${meta.sessionId}-${String(meta.sequence).padStart(7, '0')}.jsonl.gz`;
   await e.DIAGNOSTICS_LOGS.put(key, payload, {
     httpMetadata: { contentType: 'application/gzip', contentEncoding: 'gzip' },
   });
@@ -303,7 +321,8 @@ export async function storeDiagnosticsLogSegment(
   } catch {
     // Two concurrent uploads of the same sequence: the object is already the
     // right content, so resolve to the row that won instead of failing a client
-    // that did nothing wrong.
+    // that did nothing wrong. If the two straddled a UTC day, this key is not
+    // the winner's; its pending row stays and the sweep deletes this object.
     const winner = await e.DB.prepare(
       'SELECT id, received_at FROM diagnostics_log_objects WHERE user_id = ? AND session_id = ? AND sequence = ?',
     ).bind(uid, meta.sessionId, meta.sequence).first<Row>();
@@ -317,6 +336,61 @@ export async function storeDiagnosticsLogSegment(
     };
   }
   return { id, receivedAt: t, duplicate: false };
+}
+
+/** Scheduled retention for raw log segments, run from the Worker cron. */
+export async function sweepDiagnosticsLogs(e: Env, t: number) {
+  // Raw log segments: delete the payload before the index row. Losing the row
+  // first would orphan the object with nothing left pointing at it, and this
+  // bucket is the one place in the system holding unredacted hostnames.
+  const logRetention = envInt(
+    e,
+    'DIAGNOSTICS_LOG_RETENTION_SECONDS',
+    DIAGNOSTICS_LOG_RETENTION_DEFAULT_SECONDS,
+  );
+  const expiredLogs = await e.DB.prepare(
+    'SELECT id, r2_key FROM diagnostics_log_objects WHERE received_at <= ? LIMIT 50',
+  ).bind(t - logRetention).all<Row>();
+  if (expiredLogs.results.length > 0) {
+    const keys = expiredLogs.results.map((r) => String(r.r2_key));
+    const ids = expiredLogs.results.map((r) => String(r.id));
+    try {
+      await e.DIAGNOSTICS_LOGS.delete(keys);
+      // Only delete index rows from D1 if R2 deletion succeeded.
+      // Retaining the rows on failure allows the next sweep to retry deletion,
+      // preventing unredacted logs from remaining orphaned in R2.
+      const placeholders = ids.map(() => '?').join(',');
+      await e.DB.prepare(`DELETE FROM diagnostics_log_objects WHERE id IN (${placeholders})`)
+        .bind(...ids).run();
+    } catch (x) {
+      console.error('batch r2 deletion failed', x instanceof Error ? x.message : String(x));
+    }
+  }
+  // An object whose index row never landed is reachable only through its
+  // pending row. The key carries the UTC day of the upload that wrote it, so
+  // two days on no upload can still be writing that key and an unindexed one
+  // is an orphan. An indexed one keeps its object; only the pending row goes.
+  const pendingCutoff = t - 2 * DIAGNOSTICS_DAY_SECONDS;
+  const pendingLogs = await e.DB.prepare(
+    `SELECT p.r2_key,
+            EXISTS (SELECT 1 FROM diagnostics_log_objects o WHERE o.r2_key = p.r2_key) AS indexed
+     FROM diagnostics_log_pending_objects p
+     WHERE p.created_at <= ? LIMIT 50`,
+  ).bind(pendingCutoff).all<Row>();
+  if (pendingLogs.results.length > 0) {
+    const keys = pendingLogs.results.map((r) => String(r.r2_key));
+    const orphaned = pendingLogs.results.filter((r) => !Number(r.indexed)).map((r) => String(r.r2_key));
+    try {
+      if (orphaned.length > 0) await e.DIAGNOSTICS_LOGS.delete(orphaned);
+      // Same order as above: the pending row is dropped only once R2 said yes.
+      const placeholders = keys.map(() => '?').join(',');
+      await e.DB.prepare(
+        `DELETE FROM diagnostics_log_pending_objects WHERE created_at <= ? AND r2_key IN (${placeholders})`,
+      ).bind(pendingCutoff, ...keys).run();
+    } catch (x) {
+      console.error('orphaned log deletion failed', x instanceof Error ? x.message : String(x));
+    }
+  }
 }
 
 export async function storeDiagnosticsReport(
