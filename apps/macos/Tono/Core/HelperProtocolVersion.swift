@@ -131,7 +131,14 @@ nonisolated enum HelperProtocolVersion {
     ///   provably gone (different boot, or its audit token resolves to no
     ///   live process), allocating a fresh successor generation without
     ///   changing the proof phase. A 4.8.0 daemon keeps both dead ends.
-    static let current = "4.9.0"
+    /// - → 4.14.0 (renumbered at merge): the protected DNS snapshot records
+    ///   the network service ID next to its display name, and restore
+    ///   writes the original servers back by ID. A service renamed while
+    ///   protected used to be swept to automatic DNS with its snapshot
+    ///   deleted. When the recorded service no longer exists the snapshot is
+    ///   archived aside and `/dns/restore` adds `originalDNSRestored: false`;
+    ///   an enumeration without IDs keeps the snapshot and refuses release.
+    static let current = "4.14.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

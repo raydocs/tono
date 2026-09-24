@@ -32,6 +32,35 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS DNS 快照按服务 ID 恢复，改名不再丢原 DNS
+
+- **归属/来源**：G1 保护恢复；macOS `tono-core-helper` `ProtectedDNSManager`。内部审查
+  X3-1，Issue #475。基线 main bb2ed4e4 → 分支 `fix/dns-service-id-20260923`；提交时未合 main。
+- **缺陷修复**：快照只存服务显示名。保护期间用户在系统设置里给同一服务改名后，恢复按名字
+  找不到快照服务，把仍指向 `127.0.0.1` 的改名服务写成 `[]`（自动获取），读回成功后删掉快照并
+  报告成功，App 解除 PF；原来的静态 DNS 永久丢失。现在 enable 时额外记录
+  `SCNetworkServiceGetServiceID`（显示名保留作诊断和旧快照匹配），恢复按 ID 找服务写回原值，
+  写回读回确认后才删快照。快照服务在带 ID 的完整枚举里已不存在（服务被删除）时，不删快照而是
+  改名存档为 `protected-dns.json.orphaned-<ts>`，`/dns/restore` 附带
+  `originalDNSRestored: false`，loopback 清扫照常且需读回证明；枚举退回 `networksetup`
+  （没有 ID）且按名字也找不到时，保留快照并拒绝释放（M2 语义）。旧格式快照（无 ID）照常读取，
+  按名字匹配。enable 判断"同一服务"也按 ID。保护不放宽。
+- **新增/优化**：无。
+- **工程与测试**：helper 协议版本 4.9.0 → 4.14.0（占位，合并时按顺序重编号）并按 manifest
+  重算 `CONTRACT.sha256`。现有两个 DNS self-test 适配新的服务类型（名字-only 枚举，行为不变）。
+  新增一项 `--lifecycle-self-test`：`runRenamedServiceRestoreSelfTest`，服务 `S1` 由 `Wi-Fi`
+  改名为 `办公无线` 后恢复，断言 DNS 回到 `["10.0.0.53"]`、快照在读回确认之后才删除、其他服务
+  不动。旧代码会写成 `[]` 并删快照（该测试依赖新增的 ID 注入点，旧代码上的失败为构造推导，未实际
+  跑红）。
+- **验证**：本机为编辑机，未运行 swiftc/xcodebuild。helper 编译、`--self-test` 与
+  `--lifecycle-self-test` 委托本 PR 的 GitHub-hosted `macos-26` CI（privileged-tests），结果以
+  PR 页为准。未在实机上改名验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：`/dns/status` 仍按快照里的名字读，改名后报 `ok: false, snapshotPresent: true`
+  （App 照常调用恢复，已足够）。App 不展示 `originalDNSRestored: false`，用户看不到"原 DNS
+  所属服务已删除"的提示；存档文件只供诊断。服务被删除后又新建同名服务时按新 ID 视为不同服务，
+  原值不会写到新服务。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
