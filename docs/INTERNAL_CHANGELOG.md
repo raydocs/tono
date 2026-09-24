@@ -32,6 +32,32 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 运行期会话被拒：进入 Suspended，停止周期同步
+
+- **归属/来源**：G2 客户端账户状态与控制面调用；Windows App `tono/catalog_sync.rs`、
+  `tono/policy_sync.rs`。内部审查 H13-F3，Issue #459。基线 main bb2ed4e4 → 分支
+  `fix/win-account-suspended-20260923`；提交时未合 main。
+- **缺陷修复**：套餐到期、流量用尽、账户停用、设备或会话吊销时，Worker 对鉴权路由和
+  `auth/refresh` 都回 401。Windows 运行期对此没有任何账户状态变化：catalog/policy 同步对任何
+  错误都重试 3 次，每 5 分钟约 8 次必然失败的 refresh，界面一直是 Ready，连接只在出口失败。
+  现在 tono-core 自己的 refresh 也被拒后得到的 `Unauthorized` 不再重试，Ready 账户进入已有的
+  `Suspended`（与 macOS `.suspended` 一致）：周期同步退出，connect/自动重连已有的守卫拒绝
+  suspended 账户，界面转到已有的"账户已暂停"页。保护状态不变：不释放 WFP、不登出；该页已有的
+  恢复网络入口照旧。重新登录（或下次启动 restore）重新读取账户。
+- **新增/优化**：catalog 与 policy 共用一个重试函数 `run_with_retries`（预算不变：1 次 + 3 次
+  重试、间隔 1 s）。
+- **工程与测试**：`catalog_sync.rs` 新增一个 `#[tokio::test]`
+  `rejected_session_is_not_retried_and_suspends_periodic_sync`：会话被拒的尝试只跑 1 次；Ready
+  账户转为 Suspended；周期同步判定停止。旧代码下同类失败跑 4 次，账户保持 Ready，周期循环
+  不认 Suspended 继续运行。
+- **验证**：本机（编辑机）未运行原生 cargo；Tauri crate `cargo test` 委托本 PR 的
+  GitHub-hosted `windows-2025` CI，结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：没有 macOS 那样在面板出现/唤醒时自动重探并恢复；续费后需重新登录或重启 App
+  （重启走 restore 已有的 401 登出路径）。网络日志上传、遥测、DIRECT 租约心跳在 Suspended 下
+  不停，仍可能各自发 refresh。#314/#329 合并前，refresh 响应丢失造成的假 401 也会进入
+  "账户已暂停"页（旧行为是静默失败）。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
