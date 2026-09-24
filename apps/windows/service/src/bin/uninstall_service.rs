@@ -774,9 +774,53 @@ mod tests {
         CleanupOutcome, DNS_RESTORED_AUTOMATIC_MARKER, DNS_STILL_ON_LOOPBACK_MARKER,
         EXIT_COSMETIC_FAILURE, EXIT_RESTORED_AUTOMATIC, EXIT_STILL_PROTECTED,
         WFP_REMOVED_CONTINUE_MARKER, classify_disarm_failure, cleanup_exit_code,
-        cleanup_fast_path_allowed, final_cleanup_outcome, poll_until, uninstall_may_continue,
+        cleanup_fast_path_allowed, final_cleanup_outcome, final_uninstall_cleanup, poll_until,
+        uninstall_may_continue,
     };
     use std::cell::Cell;
+
+    #[test]
+    fn final_uninstall_retires_update_executors_only_after_proven_removal() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "tono-final-uninstall-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let updates = state_dir.join("updates-v1");
+        std::fs::create_dir_all(&updates).unwrap();
+        {
+            let mut store = tono_service_protocol::update_transaction::Store::open(&updates).unwrap();
+            let settled = store.state.clone();
+            store.save(settled).unwrap();
+        }
+        let executor = updates.join("attempt").join("executor.exe");
+        std::fs::create_dir(executor.parent().unwrap()).unwrap();
+        std::fs::write(&executor, b"executor").unwrap();
+
+        // The barrier may still be armed: nothing outside the recovery files is touched.
+        let outcome = final_uninstall_cleanup(
+            CleanupOutcome::StillProtected(anyhow::anyhow!("filters present")),
+            &state_dir,
+            || panic!("retired the recovery task while still protected"),
+        );
+        assert!(matches!(outcome, CleanupOutcome::StillProtected(_)));
+        assert!(executor.exists());
+
+        // Proven removal: the SYSTEM boot task and the executor copy go; the store stays.
+        let retired = Cell::new(false);
+        let outcome = final_uninstall_cleanup(CleanupOutcome::Clean, &state_dir, || {
+            retired.set(true);
+            Ok(())
+        });
+        assert!(matches!(outcome, CleanupOutcome::Clean));
+        assert!(retired.get());
+        assert!(!executor.parent().unwrap().exists());
+        assert!(updates.join("state.json").exists());
+        std::fs::remove_dir_all(state_dir).unwrap();
+    }
 
     #[test]
     fn clean_outcome_exits_zero() {
