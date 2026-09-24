@@ -377,6 +377,14 @@ def add_inbound_user(
             pass
 
 
+def remove_inbound_user(
+    binary: Path, command: str, address: str, tag: str, email: str,
+) -> subprocess.CompletedProcess[str]:
+    """Remove one identity. Xray 26 `rmu` takes `-tag=` and positional emails;
+    it rejects `--email=` outright. `removeuser` gets the same form."""
+    return run_xray(binary, ["api", command, f"--server={address}", f"-tag={tag}", email])
+
+
 def supported_api_commands(binary: Path) -> set[str]:
     """What this xray's `api` subcommand actually offers.
 
@@ -909,11 +917,11 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
     removed = 0
     failures: list[str] = []
     if retire_shared_legacy and listed is None:
-        result = run_xray(binary, [
-            "api", commands["remove_user"], f"--server={address}",
-            f"--tag={tag}", f"--email={LEGACY_CLIENT_EMAIL}",
-        ])
-        if result.returncode != 0 and "not found" not in (result.stderr or "").lower():
+        result = remove_inbound_user(
+            binary, commands["remove_user"], address, tag, LEGACY_CLIENT_EMAIL,
+        )
+        output = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
+        if result.returncode != 0 and "not found" not in output:
             # Like every other removal: reported with the rest, never a reason
             # to skip the revocations that follow.
             failures.append(
@@ -952,11 +960,9 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
                     continue
             elif not label.startswith(CLIENT_LABEL_PREFIX):
                 continue
-            result = run_xray(binary, [
-                "api", commands["remove_user"], f"--server={address}",
-                f"--tag={tag}", f"--email={label}",
-            ])
-            if result.returncode != 0 and "not found" not in (result.stderr or "").lower():
+            result = remove_inbound_user(binary, commands["remove_user"], address, tag, label)
+            output = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
+            if result.returncode != 0 and "not found" not in output:
                 # One failure must not leave every later revocation in place.
                 failures.append(f"removing {label} failed: {result.stderr.strip() or result.returncode}")
                 continue

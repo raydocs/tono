@@ -654,7 +654,7 @@ class RosterControlSignals(unittest.TestCase):
         def fake_xray(_binary, arguments):
             failed = False
             if "rmu" in arguments:
-                label = arguments[-1].split("=", 1)[1]
+                label = arguments[-1]
                 removals.append(label)
                 failed = label == "u:gone_1"
             return type("Result", (), {"returncode": 1 if failed else 0, "stdout": "",
@@ -693,7 +693,7 @@ class RosterControlSignals(unittest.TestCase):
 
         def fake_xray(_binary, arguments):
             if "rmu" in arguments:
-                removals.append(arguments[-1].split("=", 1)[1])
+                removals.append(arguments[-1])
             return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})
 
         with patch.dict(agent.os.environ, {
@@ -731,7 +731,7 @@ class RosterControlSignals(unittest.TestCase):
 
         def fake_xray(_binary, arguments):
             if "rmu" in arguments:
-                removed.append(arguments[-1].split("=", 1)[1])
+                removed.append(arguments[-1])
             stdout = listing if "inbounduser" in arguments else ""
             return type("Result", (), {"returncode": 0, "stdout": stdout, "stderr": ""})
 
@@ -804,7 +804,7 @@ class RosterControlSignals(unittest.TestCase):
              patch.object(agent, "acknowledge_metering"):
             agent.run_once(path)
 
-        self.assertIn(f"--email={agent.LEGACY_CLIENT_EMAIL}", [a for c in calls for a in c])
+        self.assertIn(agent.LEGACY_CLIENT_EMAIL, [a for c in calls for a in c])
         clients = json.loads(config.read_text())["inbounds"][0]["settings"]["clients"]
         self.assertEqual([client["email"] for client in clients], ["operator"])
 
@@ -1221,7 +1221,7 @@ class ReconcileSafety(unittest.TestCase):
         self.assertEqual((added, removed), (0, 1))
         self.assertEqual(installed, {agent.LEGACY_CLIENT_EMAIL})
         self.assertEqual(len(self.calls), 1)
-        self.assertIn("--email=u:usr_1", self.calls[0])
+        self.assertIn("u:usr_1", self.calls[0])
 
     def test_an_empty_roster_with_no_installed_inventory_removes_nothing(self) -> None:
         added, removed, installed = self.reconcile([], None, None)
@@ -1233,7 +1233,7 @@ class ReconcileSafety(unittest.TestCase):
         added, removed, installed = self.reconcile([], None, {"u:usr_1"})
         self.assertEqual((added, removed), (0, 1))
         self.assertEqual(installed, set())
-        self.assertIn("--email=u:usr_1", self.calls[0])
+        self.assertIn("u:usr_1", self.calls[0])
 
     def test_nothing_is_removed_when_the_installed_set_is_unknown(self) -> None:
         # Counters used to stand in for this. They are created on first connect
@@ -1282,7 +1282,7 @@ class ReconcileSafety(unittest.TestCase):
 
         self.assertEqual((added, removed), (1, 1))
         self.assertEqual(installed, {new_label})
-        self.assertIn(f"--email={old_label}", self.calls[0])
+        self.assertIn(old_label, self.calls[0])
         self.assertIn("rmu", self.calls[0])
         self.assertIn("adu", self.calls[1])
         self.assertEqual(self.adu_docs[0]["inbounds"][0]["tag"], "tono-vless")
@@ -1298,7 +1298,15 @@ class ReconcileSafety(unittest.TestCase):
         self.assertEqual((added, removed), (0, 1))
         removals = [call for call in self.calls if "rmu" in call]
         self.assertEqual(len(removals), 1)
-        self.assertIn("--email=u:usr_gone", removals[0])
+        self.assertIn("u:usr_gone", removals[0])
+
+    def test_rmu_passes_the_email_positionally(self) -> None:
+        # Xray 26 `rmu` fails with "flag provided but not defined: -email".
+        self.reconcile([], {"u:usr_gone"}, None)
+        self.assertEqual(
+            self.calls[0],
+            ["api", "rmu", "--server=127.0.0.1:10085", "-tag=tono-vless", "u:usr_gone"],
+        )
 
     def test_the_installed_label_is_the_prefixed_one(self) -> None:
         self.reconcile(
@@ -1746,9 +1754,8 @@ class ApiHelpParsing(unittest.TestCase):
 
         removed_labels: list[str] = []
         def mock_run_xray(binary, args):
-            for arg in args:
-                if arg.startswith("--email="):
-                    removed_labels.append(arg.split("=", 1)[1])
+            if "rmu" in args:
+                removed_labels.append(args[-1])
             return Result()
 
         commands = {"add_user": "adu", "remove_user": "rmu", "stats_query": "stats"}
