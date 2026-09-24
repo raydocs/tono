@@ -601,6 +601,37 @@ final class AccountSessionRequestTests: XCTestCase {
         await account.stopRuntime()
     }
 
+    func testCheckAgainDoesNotResumeIntoAHelperRepairTheUserDidNotAskFor() async throws {
+        var resumes: [Bool] = []
+        let (account, transport, host, requests) = fixture(
+            cloudFallbackConsumer: { resumes.append($0) },
+            protectionBlockedConsumer: { true }
+        )
+        let logUpload = SettingsKey.isNetworkLogUploadEnabled()
+        AppProfile.defaults.set(false, forKey: SettingsKey.networkLogUploadEnabled)
+        defer {
+            transport.invalidateAndCancel(); HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            ManagedExitCatalogOwnership.purge()
+            AppProfile.defaults.set(logUpload, forKey: SettingsKey.networkLogUploadEnabled)
+        }
+        try await adoptTestAccount(account)
+        account.enterEntitlementBlock(detail: nil)
+        // Protected Offline, and the helper rejects this app: a resumed
+        // connect would go straight to the helper repair and its admin prompt.
+        account.killSwitchStatusObservation = { .rejected }
+        let recheck = Task { await account.refreshAccount() }
+        let reread = try await nextRequest(requests)
+        reread.respond(status: 200, body: "{\"user\":\(Self.originalUser)}")
+        let fresh = try await nextRequest(requests)
+        XCTAssertTrue(fresh.request.url?.path.hasSuffix("/exit-catalog") == true)
+        fresh.respond(status: 200, body: #"{"revision":1,"yaml":"fixture","sha256":"fixture"}"#)
+        await recheck.value
+        XCTAssertEqual(account.state, .ready)
+        XCTAssertEqual(resumes, [false], "Check again must not reconnect into an administrator prompt")
+        await account.stopRuntime()
+    }
+
     func testExplicitInvalidationRetiresReadBeforeUserIsCleared() async throws {
         let (account, transport, host, requests) = fixture()
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }

@@ -67,6 +67,9 @@ struct TonoApp: App {
                 await appState.claudeTrafficResearchSnapshot()
             },
             protectionBlockedConsumer: { appState.isProtectionBlocked },
+            protectedReconnectPausedConsumer: {
+                appState.protectedReconnectPausedForUserAction
+            },
             protectedRetryConsumer: { appState.retryProtectedConnectionNow() },
             appRoutingResearchActivationConsumer: {
                 appState.appRoutingResearchActivationChanged()

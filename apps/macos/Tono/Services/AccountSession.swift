@@ -62,6 +62,10 @@ final class AccountSession {
     /// running. Only that session can be resumed by a re-read of the account;
     /// a block raised before the runtime came up still needs a full restore.
     var blockedWhileReady = false
+    /// Counts refusals, including one that lands while the account is already
+    /// suspended and so changes no state. A re-acceptance started before the
+    /// latest refusal belongs to an answer the control plane has withdrawn.
+    @ObservationIgnored var entitlementRefusals: UInt64 = 0
     var enrollmentAuthKey: String?
     var enrollmentHostname: String?
     let api: TonoAPIClient
@@ -82,6 +86,10 @@ final class AccountSession {
     let claudeTrafficResearchConsumer:
         @MainActor () async -> TonoClaudeTrafficResearchSnapshot
     let protectionBlockedConsumer: @MainActor () -> Bool
+    /// Whether automatic reconnects are paused until the user acts (a denied
+    /// administrator prompt, a failed helper install). No account path may
+    /// lift that pause by requesting a resume on its own.
+    let protectedReconnectPausedConsumer: @MainActor () -> Bool
     let protectedRetryConsumer: @MainActor () -> Void
     let appRoutingResearchActivationConsumer: @MainActor () -> Void
     let exitNode: String
@@ -225,6 +233,7 @@ final class AccountSession {
                 )
             },
          protectionBlockedConsumer: @escaping @MainActor () -> Bool = { false },
+         protectedReconnectPausedConsumer: @escaping @MainActor () -> Bool = { false },
          protectedRetryConsumer: @escaping @MainActor () -> Void = {},
          appRoutingResearchActivationConsumer: @escaping
             @MainActor () -> Void = {},
@@ -253,6 +262,7 @@ final class AccountSession {
         self.diagnosticSnapshotConsumer = diagnosticSnapshotConsumer
         self.claudeTrafficResearchConsumer = claudeTrafficResearchConsumer
         self.protectionBlockedConsumer = protectionBlockedConsumer
+        self.protectedReconnectPausedConsumer = protectedReconnectPausedConsumer
         self.protectedRetryConsumer = protectedRetryConsumer
         self.appRoutingResearchActivationConsumer =
             appRoutingResearchActivationConsumer

@@ -76,6 +76,19 @@
   - 恢复路径（`leaveEntitlementBlock`）只在控制面重新接受同一会话时可达；被吊销的会话仍需
     登出再登录。
   - 网络日志上传在 suspended 下继续尝试 refresh（H17-O-F7），单独修。
+- **后续（2026-09-24，PR 复审 535R-C-F1..F3，Codex 发现、Opus 核实）**：
+  - F1：重新接受时不再丢弃 helper 的回答。helper 拒绝（`.rejected`），或自动重连因需用户操作
+    而暂停时，运行时不带恢复意图启动，不自动重连，"再次检查"不会引出 helper 修复的管理员授权；
+    PF 保持原样。新增 XCTest `testCheckAgainDoesNotResumeIntoAHelperRepairTheUserDidNotAskFor`
+    （helper 回 `.rejected`；断言回到 `.ready`、恢复参数为 `[false]`）。旧代码上按流程应为
+    `[true]`，这是推断，未跑红。
+  - F2：恢复网络与登出在排队清理前先取消在途的目录请求（独立 Task，取消账户工作传不到它），
+    否则清理要等它的网络超时。槽位保留，由清理排空；恢复网络的清理现在也排空并清掉该槽位。
+  - F3：`enterEntitlementBlock` 每次都递增拒绝计数（已是 `.suspended` 也递增），重新接受把它纳入
+    当前性检查；目录同步循环调用 `refreshAccount` 前重新确认 `.ready`。
+  - 剩余：暂停标志一支、F2、F3 没有单独测试。最后一次当前性检查之后、运行时启动期间到达的
+    拒绝不经计数拦截（此时目录已撤下），其结果未逐步验证。本机未运行 xcodebuild/swift，
+    交 PR 的 GitHub-hosted `macos-26` CI。
 
 ## 2026-09-24 · macOS 会话被拒（401）不再释放 PF/DNS 保护
 
