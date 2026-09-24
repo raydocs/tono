@@ -139,7 +139,8 @@ use direct::{
     prove_service_endpoint_digest, prove_service_reload_mode, spawn_optional_direct_after_connected,
     validate_direct_reload_result,
 };
-use platform::{detect_physical_interface, is_virtual_uplink_description, write_redacted_copy};
+use platform::{detect_physical_interface, is_virtual_uplink_description};
+pub(crate) use platform::remove_legacy_runtime_copy;
 
 /// Drop the ConnectOk session clock. A new connect attempt is not the session
 /// that last reached ConnectOk, so disconnectOk must not report `elapsedMs`
