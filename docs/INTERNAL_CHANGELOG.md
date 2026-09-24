@@ -32,6 +32,22 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · 发现总账与审查流程记录
+
+- **归属/来源**：G1–G3 审查与修复的可追溯性（工程流程与记录，非产品行为）；基线 origin/main
+  [bb2ed4e4](https://github.com/raydocs/tono/commit/bb2ed4e4)（2026-09-24 rebase），分支 `docs/findings-ledger-20260923`。
+- **缺陷修复**：无。
+- **新增/优化**：新增 [FINDINGS_LEDGER](FINDINGS_LEDGER.md) 作为唯一已知问题总账（首轮 W/M/S、
+  审查轮 R1–R4、隐秘搜寻 H1–H15、内部复核轮 X1–X3、撤回项与已交付设计），取代每轮手工粘贴的 known-findings；
+  新增 [审查轮记录](reports/REVIEW_ROUNDS_2026-09-23.md)（方法、覆盖/未覆盖、可复用约束）。
+  AGENTS.md 要求审查或修 bug 前先读总账、交付时同 PR 更新条目。
+- **工程与测试**：无代码、配置或测试改动。
+- **验证**：文档变更，未运行产品测试；条目中的 issue/PR 编号与状态按 2026-09-24 GitHub 实查
+  （已合入的写 main 合并提交 SHA）；表格列数用脚本校验一致。
+- **候选/发布**：无新包，仅文档。
+- **剩余限制**：总账状态是写入时快照；并行进行中的合并与修复 PR 需由各自 PR 同步更新对应行。
+  `fixed` 只表示源码进 main，不表示实机验收。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
