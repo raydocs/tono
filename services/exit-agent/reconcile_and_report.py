@@ -50,6 +50,7 @@ import argparse
 import errno
 import fcntl
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -84,6 +85,11 @@ MAX_RESPONSE_BYTES = 512 * 1024
 # is never acted on, so the limit is set well above today's size.
 MAX_ROSTER_BYTES = 8 * 1024 * 1024
 STATE_MODE = 0o600
+# How long the last verified roster may stand in for an unreachable control
+# plane. Past this the node restores nothing: a day-old list is too likely to
+# name accounts that have since been revoked, expired or run out of quota.
+ROSTER_CACHE_MAX_AGE_SECONDS = 24 * 60 * 60
+ROSTER_CACHE_VERSION = 1
 HY2_AUTH_ALLOWLIST = Path("/opt/tono-hy2/auth-allow.sha256")
 HY2_ROSTER_MARKER = "# tono-exit-agent roster v1"
 # Label written by enable-tono-exit-metering.sh for the credential every
@@ -448,6 +454,11 @@ def fetch_roster(base: str, token: str) -> tuple[str, int, list[dict[str, str]],
         raise Refusal(f"roster response is not JSON: {error}") from error
     if not isinstance(payload, dict):
         raise Refusal("roster response is not the documented shape")
+    return parse_roster(payload)
+
+
+def parse_roster(payload: dict) -> tuple[str, int, list[dict[str, str]], bool]:
+    """Validate a roster document, fresh from the control plane or its saved copy."""
     node_id = payload.get("nodeId")
     observed_at = payload.get("observedAt")
     identities = payload.get("identities")
@@ -577,6 +588,151 @@ def save_state(path: Path, state: dict) -> None:
     # lifetime totals truncated, and truncated totals bill nobody for what they
     # already used.
     temporary.replace(path)
+
+
+def roster_cache_path(path: Path) -> Path:
+    return path.with_name(f"{path.name}.roster")
+
+
+def control_plane_unreachable(error: BaseException) -> bool:
+    """Whether a roster fetch failed without the control plane answering it.
+
+    Only then may the node fall back to its last verified roster. Any other
+    answer, such as a rejected or disabled token, a roster that fails validation
+    or another node's roster, is the control plane speaking, and it discards
+    the copy.
+    """
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code in RETRYABLE_STATUSES or error.code >= 500
+    return isinstance(error, (OSError, http.client.HTTPException))
+
+
+def discard_roster_cache(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        raise Refusal(f"the saved roster could not be removed: {error}") from error
+
+
+def node_disabled_answer(error: BaseException) -> bool:
+    """Whether the control plane answered 403 EXIT_NODE_DISABLED.
+
+    Reserved for PR #375, which keeps that bounded error body as `tono_body`
+    and raises NodeDisabled from the HTTPError; either form counts. Without
+    #375 no error carries the body and this is always false; such a 403 is
+    still an answer and discards the copy like any other.
+    """
+    for candidate in (error, error.__cause__):
+        if not isinstance(candidate, urllib.error.HTTPError) or candidate.code != 403:
+            continue
+        try:
+            payload = json.loads(getattr(candidate, "tono_body", b"") or b"")
+        except (ValueError, UnicodeDecodeError):
+            continue
+        detail = payload.get("error") if isinstance(payload, dict) else None
+        if isinstance(detail, dict) and detail.get("code") == "EXIT_NODE_DISABLED":
+            return True
+    return False
+
+
+def fetch_roster_or_discard_cache(base: str, token: str, cache: Path):
+    """fetch_roster, deleting the saved roster on any answer from the control plane.
+
+    The copy goes here, before any caller's handler runs. A disabled node
+    withdraws every client; if its copy survived, the next network error would
+    reinstall them all from it. For that answer a failed removal is reported
+    but does not replace the error, so the withdrawal still runs.
+    """
+    try:
+        return fetch_roster(base, token)
+    except Exception as error:
+        if node_disabled_answer(error):
+            try:
+                discard_roster_cache(cache)
+            except Refusal as refusal:
+                print(f"{refusal}; this disabled node still holds its saved roster",
+                      file=sys.stderr)
+            raise
+        if not control_plane_unreachable(error):
+            discard_roster_cache(cache)
+        raise
+
+
+def save_roster_cache(path: Path, node_id: str, observed_at: int,
+                      roster: list[dict[str, str]], retire_shared_legacy: bool) -> str | None:
+    """Keep the roster just verified, for an Xray restart during an outage.
+
+    The copy holds client credentials, so it is owner-only from creation and
+    replaced atomically. If it cannot be written, the previous copy is removed:
+    an older list may still name an account this roster has revoked. Returns an
+    error only when even that removal failed.
+    """
+    document = {
+        "version": ROSTER_CACHE_VERSION,
+        "savedAt": int(time.time()),
+        "nodeId": node_id,
+        "observedAt": observed_at,
+        "retireSharedLegacy": retire_shared_legacy,
+        "identities": roster,
+    }
+    temporary: str | None = None
+    try:
+        descriptor, temporary = tempfile.mkstemp(prefix=".roster-", dir=path.parent)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            os.fchmod(output.fileno(), STATE_MODE)
+            json.dump(document, output, sort_keys=True)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+        temporary = None
+        return None
+    except OSError as error:
+        print(f"the roster could not be saved for outages: {error}", file=sys.stderr)
+        try:
+            discard_roster_cache(path)
+        except Refusal as refusal:
+            return str(refusal)
+        return None
+    finally:
+        if temporary is not None:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+
+
+def load_roster_cache(path: Path, source: str) -> tuple[list[dict[str, str]], bool, int]:
+    """The last verified roster and its age, or a Refusal saying why not."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except FileNotFoundError as error:
+        raise Refusal("there is no saved roster") from error
+    except OSError as error:
+        raise Refusal(f"the saved roster cannot be read: {error}") from error
+    with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+        info = os.fstat(handle.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                or info.st_mode & 0o077):
+            raise Refusal("the saved roster is not a private service-owned file")
+        try:
+            document = json.load(handle)
+        except ValueError as error:
+            raise Refusal("the saved roster is corrupt") from error
+    if not isinstance(document, dict) or document.get("version") != ROSTER_CACHE_VERSION:
+        raise Refusal("the saved roster is not a version this agent reads")
+    saved_at = document.get("savedAt")
+    if not isinstance(saved_at, int) or isinstance(saved_at, bool):
+        raise Refusal("the saved roster has no valid savedAt")
+    age = int(time.time()) - saved_at
+    # A clock that moved backwards gives no usable age either.
+    if not 0 <= age <= ROSTER_CACHE_MAX_AGE_SECONDS:
+        raise Refusal(f"the saved roster is {age}s old, outside 0-{ROSTER_CACHE_MAX_AGE_SECONDS}s")
+    node_id, _, roster, retire_shared_legacy = parse_roster(document)
+    if node_id != source:
+        raise Refusal("the saved roster belongs to another exit node")
+    return roster, retire_shared_legacy, age
 
 
 @contextmanager
@@ -994,7 +1150,7 @@ def reconcile_and_read_stable(
     commands: dict[str, str],
     address: str,
     tag: str,
-    roster: list[dict[str, str]],
+    roster: list[dict[str, str]] | None,
     recorded: set[str] | None,
     retire_shared_legacy: bool = False,
 ) -> tuple[int, int, set[str] | None, dict[str, int], str | None]:
@@ -1006,14 +1162,18 @@ def reconcile_and_read_stable(
     that baseline: it looks like a small increase and silently forgives the
     bytes before it. Retry the whole mutation/read once against the new process;
     a node that keeps restarting is unknown rather than billable guesswork.
+    A `None` roster changes no client and only reads the counters.
     """
     for attempt in range(2):
         marker_before = xray_start_marker(binary)
-        listed = installed_clients(binary, commands, address, tag)
-        added, removed, installed = reconcile(
-            binary, commands, address, tag, roster, listed, recorded,
-            retire_shared_legacy=retire_shared_legacy,
-        )
+        if roster is None:
+            added, removed, installed = 0, 0, None
+        else:
+            listed = installed_clients(binary, commands, address, tag)
+            added, removed, installed = reconcile(
+                binary, commands, address, tag, roster, listed, recorded,
+                retire_shared_legacy=retire_shared_legacy,
+            )
         if "stats_query" not in commands:
             raise Refusal(
                 "clients were reconciled, but this xray offers no stats command "
@@ -1201,6 +1361,77 @@ def run_hy2_roster_once() -> None:
     print(f"hy2 roster applied: observedAt={observed_at}, identities={len(roster)}; no node-wide ACK or usage report")
 
 
+def run_outage_round(path: Path, configured: str, binary: Path,
+                     commands: dict[str, str], address: str, tag: str,
+                     override: bool | None, failure: BaseException) -> None:
+    """Serve and meter the last verified roster while the control plane is down.
+
+    Xray loses every API-added client when it restarts, so without this a
+    restart during an outage locks out every account on the node until the
+    control plane returns. The saved roster is the newest one this node
+    fetched (saved before it was enforced), so it names no account a fetched
+    roster had already removed. A copy older than a day, or one that is
+    missing or unreadable, restores nothing.
+
+    Counters are folded either way, so a restart cannot forgive the usage
+    before it. Reports need the control plane's roster clock, so the growth is
+    kept in the durable totals and reported by the next round that reaches it.
+    Nothing is acknowledged, and the round always exits non-zero.
+    """
+    # As in a reachable round, the roster is applied before any metering-side
+    # check: a damaged state file must not decide which clients are installed.
+    try:
+        state = load_state(path)
+        state_error: Exception | None = None
+    except (Refusal, ValueError, OSError) as error:
+        state, state_error = None, error
+    try:
+        roster, server_retire, age = load_roster_cache(roster_cache_path(path), configured)
+    except Refusal as refusal:
+        roster, server_retire, age, unusable = None, False, 0, refusal
+    retire_shared_legacy = server_retire if override is None else override
+    remembered = state.get("installedClients") if state else None
+    added, removed, installed, counters, settled_marker = reconcile_and_read_stable(
+        binary, commands, address, tag, roster,
+        set(remembered) if isinstance(remembered, list) else None,
+        retire_shared_legacy=retire_shared_legacy,
+    )
+    if state is None:
+        raise Refusal(
+            f"control plane unreachable ({failure}); the state file is unusable: {state_error}"
+        ) from failure
+    source_id(state)
+    if installed is not None:
+        state["installedClients"] = sorted(installed)
+    recorded_marker = state.get("startMarker")
+    restarted = bool(
+        settled_marker
+        and isinstance(recorded_marker, str)
+        and recorded_marker
+        and settled_marker != recorded_marker
+    )
+    if not isinstance(state.get("userTotals"), dict):
+        # The next reporting round compares against this; without it, that
+        # round would treat the growth folded here as already reported.
+        state["userTotals"] = aggregate_user_totals(state["totals"])
+    totals = lifetime_totals(state, counters, restarted=restarted)
+    state["totals"] = {label: int(value) for label, value in totals.items()}
+    if settled_marker:
+        state["startMarker"] = settled_marker
+    else:
+        state.pop("startMarker", None)
+    save_state(path, state)
+    if roster is None:
+        raise Refusal(
+            f"control plane unreachable ({failure}) and {unusable}; restored no clients."
+            " Usage is kept locally"
+        ) from failure
+    raise Unreachable(
+        f"control plane unreachable ({failure}); applied the roster verified {age}s ago"
+        f" (+{added} -{removed}). Usage is kept locally"
+    ) from failure
+
+
 def run_once(path: Path) -> None:
     base = api_base()
     token = env("TONO_HOME_AGENT_TOKEN")
@@ -1211,9 +1442,21 @@ def run_once(path: Path) -> None:
     configured = configured_source()
 
     override = retire_override(os.environ.get("TONO_RETIRE_SHARED_LEGACY", ""))
+    cache = roster_cache_path(path)
     try:
-        node_id, observed_at, roster, server_retire_shared_legacy = fetch_roster(base, token)
+        node_id, observed_at, roster, server_retire_shared_legacy = fetch_roster_or_discard_cache(
+            base, token, cache,
+        )
     except NodeDisabled:
+        # The control plane has spoken: the saved roster must not outlive the
+        # node, or a later outage round would reinstall it on a disabled node.
+        # fetch_roster_or_discard_cache has normally removed it already; a
+        # failure here is reported with the withdrawal, never instead of it.
+        try:
+            discard_roster_cache(cache)
+            cache_note = ""
+        except Refusal as refusal:
+            cache_note = f"; {refusal}"
         # Withdrawal is revocation: a damaged state file only costs it the
         # durable inventory, never the removal itself.
         try:
@@ -1221,10 +1464,13 @@ def run_once(path: Path) -> None:
         except (Refusal, ValueError, OSError):
             state = None
         remembered = state.get("installedClients") if state else None
-        removed, remaining = withdraw_disabled_node(
-            binary, commands, address, tag,
-            set(remembered) if isinstance(remembered, list) else None,
-        )
+        try:
+            removed, remaining = withdraw_disabled_node(
+                binary, commands, address, tag,
+                set(remembered) if isinstance(remembered, list) else None,
+            )
+        except Refusal as refusal:
+            raise Refusal(f"{refusal}{cache_note}") from refusal
         if remaining is not None and state is not None:
             state["installedClients"] = sorted(remaining)
             save_state(path, state)
@@ -1235,12 +1481,25 @@ def run_once(path: Path) -> None:
             " and emptied hy2"
             + ("" if remaining is not None else
                "; the client inventory is unknown, so stop tono-xray on this node")
+            + cache_note
         )
+    except Exception as error:
+        if not control_plane_unreachable(error):
+            raise
+        run_outage_round(path, configured, binary, commands, address, tag,
+                         override, error)
+        raise
     # The one check revocation depends on: this roster is for this node.
     if node_id != configured:
+        discard_roster_cache(cache)
         raise Refusal(
             f"authenticated exit node {node_id!r} does not match source {configured!r}"
         )
+    # Saved before anything is enforced, so the copy never trails a revocation
+    # this round has already seen.
+    cache_error = save_roster_cache(
+        cache, node_id, observed_at, roster, server_retire_shared_legacy,
+    )
     # Revocation runs before every metering check below. A damaged state file,
     # a source mismatch or a queued report ahead of the clock must not keep a
     # revoked, expired or over-quota account connected; the round still refuses
@@ -1273,6 +1532,10 @@ def run_once(path: Path) -> None:
         except Refusal as error:
             print(f"shared-legacy retirement not persisted: {error}", file=sys.stderr)
             persist_error = error
+    if cache_error:
+        # An older saved roster is still on disk and may name an account this
+        # roster revoked. Never report the round as complete while it is.
+        raise Refusal(cache_error)
     if state is None:
         raise Refusal(f"clients were reconciled, but the state file is unusable: {state_error}")
     source = source_id(state)

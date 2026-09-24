@@ -64,6 +64,44 @@
 - **候选/发布**：无新包，仅文档。
 - **剩余限制**：总账状态是写入时快照；并行进行中的合并与修复 PR 需由各自 PR 同步更新对应行。
   `fixed` 只表示源码进 main，不表示实机验收。
+## 2026-09-23 · exit-agent 在控制面不可达时从本地副本恢复 roster 并继续计量
+
+- **归属/来源**：ops 出口计量与吊销执行；`services/exit-agent`。内部审查 H13-F5，Issue #463。
+  基线 main bb2ed4e4 → 分支 `fix/exit-agent-roster-cache-20260923`；提交时未合 main。
+- **缺陷修复**：agent 只记录已安装标签，不保存凭据。控制面不可达（网络错误或 5xx）期间
+  Xray 一旦重启，经管理 API 加入的客户端全部丢失，节点上所有账户连不上，直到控制面恢复。
+  这期间计数器也不读，恢复后第一轮只按新进程读数计，重启前的增长不计费。现在每次拉到并
+  核对 nodeId 后，先把 roster 原子保存为 `state.json.roster`（0600、服务用户所有），再执行。
+  拉取失败且属于不可达时，若副本不超过 24 h，就按副本重装客户端；无论副本能否使用，都继续
+  把计数器折叠进持久 totals。本轮不 ACK、以非零退出，恢复后第一轮正常上报这段增长。副本
+  超龄、缺失、权限不对或损坏时不恢复任何客户端，并拒绝说明原因。控制面的其他任何回答都会先
+  删除副本，包括 401/403、roster 校验失败和 nodeId 不符。副本写入失败时删除旧副本；删除也
+  失败时本轮在执行后拒绝，不 ACK。
+  审查修正（R4）：删副本移进 `fetch_roster_or_discard_cache`，在 `run_once` 的任何 handler 之前完成；
+  并预留 `node_disabled_answer`：响应（或 #375 的 `NodeDisabled` 的 cause）是 403 且 body 为
+  `EXIT_NODE_DISABLED` 时先删副本，删除失败只告警、不替换原错误，撤除照常执行。这样 #375 的
+  `except NodeDisabled` 放在 `except Exception` 之前也不会留下副本（否则下一次网络错误会把停用
+  节点的全部客户端装回）。README 修正写反的论断：副本在执行前保存，是"不落后于"而不是"不新于"
+  已执行的 roster；并写明副本是明文 VLESS 凭据（0600，应排除出快照/备份）和 24 h 回填窗口。
+- **新增/优化**：无。
+- **工程与测试**：`test_reconcile_and_report.py` 新增一个测试
+  `test_an_outage_restores_the_last_verified_roster_and_keeps_metering`，连续跑 7 轮：成功；
+  不可达；不可达加 Xray 重启（客户端重装，重启前 4,000 字节保留）；25 h 后不可达（不恢复）；
+  成功（上报 5,300）；401（副本删除）；再次不可达（不恢复）。旧代码第一轮后不存在副本，
+  测试失败。
+  审查修正后第 6 轮由 401 改为经真实 `fetch_roster`（patch `build_opener`）得到的
+  403 `EXIT_NODE_DISABLED`，断言副本已删。单独在本分支上它和修正前一样通过（任何 403 都删）；
+  它守护的是与 #375 的合并：临时 worktree 里把本分支与 #375 合并、`except NodeDisabled` 放前面
+  且不加 discard（朴素解法），修正前的 #464 在该断言失败（`True is not false`），修正后 84 项通过。
+- **验证**：MacBook worktree：新测试在旧代码失败、修复后通过；exit-agent 全部 83 个测试
+  通过（`python3 test_reconcile_and_report.py`；审查修正后复跑 83 项通过）。未连接任何真实节点或 hub，未部署。CI 结果
+  以 PR 页为准。
+- **候选/发布**：无新包，仅源码（exit-agent）。
+- **剩余限制**：恢复要等到 Xray 重启后的下一次 timer 运行，本 PR 未给 `tono-xray` 加
+  `ExecStartPost`。控制面不可达期间被吊销的账户，在副本 24 h 期限内仍会被重装，与 Xray 不
+  重启时内存中保留它们的行为一致。副本是明文客户端凭据（0600）。停用节点删副本失败时副本
+  仍在（只告警）。hy2 允许列表是文件，重启后仍在，不可达时不改动。与在审
+  #375、#384、#389 修改同一 `run_once`，合并顺序与解决方式见 PR 正文。
 
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
