@@ -45,6 +45,11 @@ TOKEN_FILE = Path("/opt/tono-ops/collector.token")
 LOCK_FULL = BASE / "collect.lock"
 LOCK_AGENTS = BASE / "collect-agents.lock"
 API_BASE = os.environ.get("TONO_API_BASE", "https://api.afk.ccwu.cc").rstrip("/")
+# The hub's pinned host keys, the same file tooling/scripts/check-node-in-fleet.py
+# verifies against. A root password is only ever offered to a host whose key is
+# already in it: an unknown or changed key fails the connection, never gets added.
+KNOWN_HOSTS = BASE / "tono-collector-known-hosts"
+HOST_KEY_FAILED = "Host key verification failed"
 
 SC_URL = "https://github.com/oneclickvirt/securityCheck/releases/download/output/securityCheck-linux-amd64"
 BT_URL = "https://github.com/oneclickvirt/backtrace/releases/download/output/backtrace-linux-amd64"
@@ -183,6 +188,25 @@ def check_host_tcp_nodes(ip: str, nodes: list[str], port: int = 443, waits: int 
     }
 
 
+def ssh_password_argv(host: str, port: int, connect_timeout: int) -> list[str]:
+    return [
+        "sshpass",
+        "-e",
+        "ssh",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "-o",
+        f"UserKnownHostsFile={KNOWN_HOSTS}",
+        "-o",
+        "GlobalKnownHostsFile=/dev/null",
+        "-o",
+        f"ConnectTimeout={connect_timeout}",
+        "-p",
+        str(port),
+        f"root@{host}",
+    ]
+
+
 def probe_cn_agents(ip: str, agents: list[dict], port: int = 443) -> dict | None:
     """Authoritative mainland probe: SSH to CT/CU/CM hosts and TCP-connect to target:port."""
     if not agents:
@@ -202,21 +226,7 @@ def probe_cn_agents(ip: str, agents: list[dict], port: int = 443) -> dict | None
         )
         env = os.environ.copy()
         env["SSHPASS"] = password
-        cmd = [
-            "sshpass",
-            "-e",
-            "ssh",
-            "-o",
-            "StrictHostKeyChecking=no",
-            "-o",
-            "UserKnownHostsFile=/dev/null",
-            "-o",
-            "ConnectTimeout=12",
-            "-p",
-            str(ssh_port),
-            f"root@{host}",
-            remote,
-        ]
+        cmd = [*ssh_password_argv(host, ssh_port, 12), remote]
         try:
             p = subprocess.run(cmd, capture_output=True, text=True, timeout=25, env=env)
             text = (p.stdout or "") + (p.stderr or "")
@@ -227,6 +237,11 @@ def probe_cn_agents(ip: str, agents: list[dict], port: int = 443) -> dict | None
             success = False
             code = -1
             text = type(e).__name__
+        if HOST_KEY_FAILED in text and "EXIT:" not in text:
+            # The probe never ran, so this is not evidence the target is blocked.
+            log(f"  mainland probe {name}: host key not pinned in {KNOWN_HOSTS}")
+            detail[name] = {"ok": False, "code": code, "host": host, "error": "host_key_unverified"}
+            continue
         detail[name] = {"ok": success, "code": code, "host": host}
         if success:
             ok_n += 1
@@ -386,22 +401,7 @@ echo "===END==="
 """
     env = os.environ.copy()
     env["SSHPASS"] = password
-    cmd = [
-        "sshpass",
-        "-e",
-        "ssh",
-        "-o",
-        "StrictHostKeyChecking=no",
-        "-o",
-        "UserKnownHostsFile=/dev/null",
-        "-o",
-        "ConnectTimeout=15",
-        "-p",
-        str(port),
-        f"root@{host}",
-        "bash",
-        "-s",
-    ]
+    cmd = [*ssh_password_argv(host, port, 15), "bash", "-s"]
     try:
         p = subprocess.run(cmd, input=remote, capture_output=True, text=True, timeout=420, env=env)
         text = (p.stdout or "") + "\n" + (p.stderr or "")

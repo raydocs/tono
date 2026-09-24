@@ -459,6 +459,29 @@
 - **剩余限制**：失败触发为环境性（TUN 探测/`/core/sync` 超时的实机命中率未量化）；
   R1 审查其余发现（F2、F5、F6）不在本条范围；错误文案仍为内部原文（与
   `reloadCoreConfig` 的本地化文案对齐留待后续文案统一）。
+## 2026-09-23 · ops hub SSH 固定主机密钥（H7-F1）
+
+- **归属**：ops 任务（运维计划 §3 hub 部署 / 3.4 hub 任务执行器），非客户 ship gate；`ops-panel/`。
+- **来源**：基线 main `e7c913e1` → 分支 `fix/ops-ssh-hostkey-20260923`；Issue #365，
+  内部审查 H7-F1；提交时未合 main。
+- **缺陷修复**：`jobs.py` `ssh_exec`/`ssh_agent` 与 `collect.py` `probe_cn_agents`/
+  `run_on_node_via_ssh` 四处 SSH 原为 `StrictHostKeyChecking=no` + `/dev/null` known-hosts
+  后以 root 密码登录。现统一由 `collect.ssh_password_argv` 生成：`StrictHostKeyChecking=yes`、
+  `UserKnownHostsFile=/opt/tono-ops/tono-collector-known-hosts`（与 `check-node-in-fleet.py`
+  同一文件）、`GlobalKnownHostsFile=/dev/null`。未登记或变更的主机密钥连接失败，不自动接受。
+  主机密钥未验证的大陆探针不计入封锁判定（记 `host_key_unverified`；`node_probe` 带
+  `hostKeyUnverified` 计数），避免把未登记误报成「被墙」。
+- **新增/优化**：`ops-panel/README.md` 写明 known-hosts 登记流程（新增/重装节点、新增探针前
+  追加并与供应商控制台核对指纹）。
+- **工程与测试**：`test_jobs.py` 新增一个测试 `test_node_ssh_pins_the_hub_known_hosts_file`，
+  断言 `ssh_exec` argv 含严格校验与固定文件；旧代码上失败（argv 为 `StrictHostKeyChecking=no`）。
+- **验证**：MacBook `python3 -m unittest discover -s ops-panel/tests -p 'test_*.py'`：旧代码
+  26 项 1 失败（新测试），修复后 26 项 OK；另以打桩的 `subprocess.run` 手动确认主机密钥失败时
+  `probe_cn_agents` 返回 None（无大陆数据）。未连接任何真实主机。CI 结果见 PR。
+- **候选/发布**：仅源码，无新候选；hub 部署需 owner 执行。
+- **剩余限制**：部署前必须确认 hub 上 known-hosts 已登记全部 `nodes.secrets.json` 节点与
+  `mainland_probes`，否则对应节点采集/任务会 fail-closed 报错；仍使用 root 密码认证，
+  改为 key 认证未在本条范围；`onboard-node.rb` 不写 hub 这份文件，需单独登记。
 
 ## 2026-09-23 · 永不 armed 的内部转换不得被重连 loop 判为外部 release
 
