@@ -53,6 +53,17 @@ export function managedCatalogYAML(value: unknown): string {
   } catch {
     throw new ApiError(400, 'INVALID_CATALOG', 'Catalog must contain a readable proxies list');
   }
+  // The per-account home-exit and hy2 filters read names with the line regex in
+  // catalogProxyName; clients read them with a YAML parser. Accept only names
+  // both readers decode identically, so a filter can never keep a block that a
+  // client then admits under a restricted name.
+  if (items.some(({ name, block }) => catalogProxyPlainName(block) !== name)) {
+    throw new ApiError(
+      400,
+      'INVALID_CATALOG',
+      'Every catalog proxy must start with its name as single-line plain text in NFC (no escapes, quotes inside, comments, anchors, tags or block scalars)',
+    );
+  }
   if (items.some(({ block }) => !catalogProxyUsesManagedIdentity(block))) {
     throw new ApiError(
       400,
@@ -84,6 +95,43 @@ export function catalogProxyName(block: string): string | null {
     return raw.replace(/\\(["'\\])/g, '$1');
   }
   return null;
+}
+
+// Text that means the same thing to the line regex and to any YAML parser:
+// no escape or quote characters, no comment, flow, anchor, alias, tag, block
+// scalar or key indicators, no leading/trailing or tab whitespace.
+const PLAIN_CATALOG_NAME = /^[^\s\\"'#&*!|>%@`?:,[\]{}-](?:[^\t\\"'#:,[\]{}]*[^\s\\"'#:,[\]{}])?$/u;
+
+// Any key position holding a quoted, escaped, aliased, tagged, anchored or
+// explicit (`?`) key, or a literal `name` key. More than one `name` key hit
+// means a second key a YAML parser may read as the proxy name.
+const NAME_KEY = /(?:^[ \t]*(?:-[ \t]+)?|[{,][ \t]*)(?:[&!][^ \t]*[ \t]+)*["']?name["']?[ \t]*:/gm;
+const UNREADABLE_KEY = /(?:^[ \t]*(?:-[ \t]+)*|[{,][ \t]*)(?:\?(?:[ \t]|$)|\*|(?:[&!][^ \t]*[ \t]+)*"[^"\n]*\\[^"\n]*"[ \t]*:)/m;
+
+/**
+ * The proxy name, only when it is written so that a YAML parser and
+ * catalogProxyName read the same string: the first key of the list item
+ * (`- name: X` or `- {name: X, …}`), X plain or simply quoted text on that one
+ * line, nothing after it but the flow separator, NFC, and exactly one `name`
+ * key in the block. Anything else returns null.
+ */
+export function catalogProxyPlainName(block: string): string | null {
+  const lines = block.split('\n');
+  const first = lines[0] ?? '';
+  const blockStyle = first.match(/^( *- +)name: +(?:"([^"\n]*)"|'([^'\n]*)'|([^"'\n]*?)) *$/);
+  const flowStyle = first.match(/^ *- +\{ *name: +(?:"([^"\n]*)"|'([^'\n]*)'|([^"',}\n]*?)) *[,}]/);
+  const raw = blockStyle
+    ? blockStyle[2] ?? blockStyle[3] ?? blockStyle[4]
+    : flowStyle?.[1] ?? flowStyle?.[2] ?? flowStyle?.[3];
+  if (raw === undefined || !PLAIN_CATALOG_NAME.test(raw) || raw !== raw.normalize('NFC')) return null;
+  if (blockStyle) {
+    // A deeper line after a plain value continues it (`name: Home` + `  A`).
+    const keyColumn = blockStyle[1].length;
+    const next = lines.slice(1).find((line) => line.trim() !== '' && !/^\s*#/.test(line));
+    if (next !== undefined && (next.match(/^ */)?.[0].length ?? 0) !== keyColumn) return null;
+  }
+  if ((block.match(NAME_KEY) ?? []).length !== 1 || UNREADABLE_KEY.test(block)) return null;
+  return raw;
 }
 
 /**
