@@ -1,3 +1,4 @@
+import { HY2_NAME_SUFFIX } from './catalog-yaml';
 import { type Env, type Row, now, id, str } from './env';
 import { ApiError } from './errors';
 
@@ -26,6 +27,15 @@ export function proxyNameField(value: unknown): string {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid proxyName');
   }
   return name;
+}
+
+// Clients off the hy2 gray list get every block ending in the hy2 suffix
+// stripped; a catalog home line named that way would vanish while
+// routing.homeProxy still names it, and the client rejects the whole catalog.
+export function assertCatalogHomeProxyName(kind: string, proxyName: string) {
+  if (kind === 'catalog' && proxyName.endsWith(HY2_NAME_SUFFIX)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', `proxyName of a catalog home line must not end with "${HY2_NAME_SUFFIX}"`);
+  }
 }
 
 export async function defaultProxyNameField(e: Env, value: unknown): Promise<string | null> {

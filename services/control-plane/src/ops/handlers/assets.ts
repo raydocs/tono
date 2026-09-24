@@ -22,7 +22,7 @@ import {
 } from '../assets';
 import { patchHomeLine } from '../home-lines';
 import { bumpCatalogRevision } from '../../catalog';
-import { assertHomeExitUnbound, homeExitStatusField, proxyNameField } from '../../home';
+import { assertCatalogHomeProxyName, assertHomeExitUnbound, homeExitStatusField, proxyNameField } from '../../home';
 import {
   Actor,
   Env,
@@ -247,6 +247,7 @@ export async function postHomeLine(req: Request, e: Env, actor: Actor): Promise<
   // Same name rules as shared-admin home-exits: the name enters the per-user
   // catalog restriction set, so the served YAML changes and the revision must.
   const proxyName = proxyNameField(b.proxyName);
+  assertCatalogHomeProxyName('catalog', proxyName);
   const displayName = str(b.displayName, 'displayName', 1, 200).trim();
   const t = now();
   const idValue = newId();

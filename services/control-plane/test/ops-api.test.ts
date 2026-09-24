@@ -424,6 +424,25 @@ describe('ops v1 api', () => {
     expect(assertCustomerDetail(await (await ops('customers/u-1')).json()).wechatId).toBe('wxid_onboard');
   });
 
+  it('POST users/onboard refuses a socks5 line awaiting rotation before any write', async () => {
+    await seedUser('u-1', 'a@example.com');
+    await db().prepare("UPDATE users SET notes = 'before' WHERE id = 'u-1'").run();
+    await db().prepare(
+      `INSERT INTO home_exits(
+         id, proxy_name, display_name, kind, socks5_host, socks5_port, socks5_username, socks5_password,
+         socks5_rotation_required_at, status, created_at, updated_at
+       ) VALUES('h-rot', 'h-rot', '家宽 Rot', 'socks5', '203.0.113.61', 11091, 'resi-rot', 'old-secret', ?, 'active', ?, ?)`,
+    ).bind(NOW, NOW, NOW).run();
+    for (const target of [{ homeExitId: 'h-rot' }, { line: '203.0.113.61:11091:resi-rot:old-secret' }]) {
+      const refused = await ops('users/onboard', json({ email: 'a@example.com', notes: 'after', ...target }));
+      expect(refused.status).toBe(409);
+      expect(((await refused.json()) as { error: { code: string } }).error.code).toBe('SOCKS5_ROTATION_REQUIRED');
+    }
+    expect((await db().prepare("SELECT notes FROM users WHERE id = 'u-1'").first<{ notes: string }>())!.notes)
+      .toBe('before');
+    expect(await db().prepare("SELECT email FROM signup_allowlist WHERE email = 'a@example.com'").first()).toBeNull();
+  });
+
   it('GET customers?q= matches email or wechat id, and default list is unchanged', async () => {
     await seedUser('u-1', 'a@example.com');
     await seedUser('u-2', 'b@example.com');

@@ -17,6 +17,7 @@ import {
   upsertHomeBinding,
   parseHomeLine,
   findSocks5Home,
+  assertHomeExitBindable,
 } from '../../home';
 import {
   PRODUCT_CLAUDE,
@@ -244,7 +245,17 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
       if (owner && (!user || String(owner.user_id) !== String(user.id))) {
         throw new ApiError(400, 'HOME_ASSIGN_FAILED', 'Could not assign the pasted home line');
       }
+      // home-exits/assign clears a rotation flag only for a new password, then
+      // refuses a flagged line; refuse the reused password here, before any write.
+      if (user && parsedLine.password === String(home.socks5_password)) {
+        await assertHomeExitBindable(e, String(user.id), String(home.id));
+      }
     }
+  }
+  if (user && !parsedLine && b.homeExitId) {
+    // upsertHomeBinding below refuses a line awaiting rotation; refuse it
+    // here instead, before the allowlist and profile writes.
+    await assertHomeExitBindable(e, String(user.id), String(b.homeExitId));
   }
   const createdAt = now();
   let exitIdentityIssued = false;

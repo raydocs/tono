@@ -32,6 +32,31 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · 控制面列车 #570 审查续修：开户轮换预检、家宽名 hy2 后缀
+
+- **归属/来源**：控制面 ops 家宽线路（ops 任务，非客户 ship 门）；`services/control-plane`。来源：列车 PR #570
+  审查发现 TC-OpenAI-1 / TC-Grok-1（均 P3，已跨厂商核实）；分支 `train/cp-20260924`，基于 26ba2b07 的一个续修提交；未合 main。
+- **缺陷修复**：
+  - TC-OpenAI-1：ops `POST users/onboard` 给已注册用户绑定一条待轮换的 socks5 家宽（`socks5_rotation_required_at` 已置）时，
+    预检只看 `home_exits.status`；`signup_allowlist` 与 users 的 notes/contact/wechat 先写入，随后
+    `upsertHomeBinding` 才抛 409 `SOCKS5_ROTATION_REQUIRED`，且没有审计行。改后：`homeExitId` 路径在第一条写入前调用
+    `assertHomeExitBindable`；`line` 路径在贴入密码与库存密码相同（即不会触发轮换）时同样先调用它。两条路径都在写入前
+    返回 409 `SOCKS5_ROTATION_REQUIRED`，不留部分写入。
+  - TC-Grok-1：catalog 类家宽的 proxyName 可以以 ` · hy2` 结尾；未在 hy2 灰度内的客户端会被剥掉该块，而
+    `routing.homeProxy` 仍指向它，客户端拒收整份目录。改后：shared-admin `home-exits` 创建与 PATCH、ops v1
+    `home-lines` 创建，对 catalog 类且名字以 `HY2_NAME_SUFFIX` 结尾的一律 400 `VALIDATION_ERROR`。hy2 剥离逻辑不变，
+    不为绑定名开例外。生产目前没有此类行（已查）。
+- **新增/优化**：无。
+- **工程与测试**：`test/ops-api.test.ts` 一个 `it`（onboard 两条路径均 409，notes 不变、allowlist 无行）；
+  `test/worker.test.ts` 一个 `it`（创建、PATCH、v1 home-lines 创建均 400）。两者在未改源码上先跑红（`expected 'after' to be 'before'`、
+  `expected 201 to be 400`），修复后绿。fixture 修正：既有用例 `keeps a retired home exit and its hy2 twin out of other accounts' catalogs`
+  用 `Home Residential B · hy2` 建 catalog 家宽，正是现在被拒的输入，改为 `Home Residential B`（仍断言其 hy2 孪生块不下发给他人）。
+- **验证**：MacBook 本机 worktree `services/control-plane`：两个改动测试文件 227 个用例通过；`npx vitest run` 43 个文件
+  912 个用例通过；`npm run typecheck` 通过。未部署，未碰远端 D1，无原生构建。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：`line` 路径贴入新密码时由 `home-exits/assign` 完成轮换，预检不拦；socks5 类名字不受后缀限制（未改）。
+  已有的 hy2 后缀 catalog 行（若将来出现）在 PATCH 任意字段时会被拒，需先改名。
+
 ## 2026-09-24 · 控制面合并列车 train/cp-20260924
 
 - **归属/来源**：G1–G3 控制面修复与 ops 任务的合并（各 PR 的条目见下方）；基线 origin/main

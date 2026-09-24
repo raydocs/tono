@@ -12,6 +12,7 @@ import {
   enqueueRefreshCatalogForUser,
 } from '../../catalog';
 import {
+  assertCatalogHomeProxyName,
   assertHomeExitUnbound,
   optionalIpv4,
   proxyNameField,
@@ -97,6 +98,7 @@ export async function homeExitsResource(
     if (!['catalog', 'socks5'].includes(kind)) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid kind');
     }
+    assertCatalogHomeProxyName(kind, proxyName);
     const socks5Host = b.socks5Host === undefined || b.socks5Host === null || b.socks5Host === ''
       ? null
       : socks5HostField(b.socks5Host);
@@ -298,6 +300,7 @@ export async function homeExitsResource(
     if (!['catalog', 'socks5'].includes(kind)) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid kind');
     }
+    assertCatalogHomeProxyName(kind, proxyName);
     // Omitted socks5 fields keep their stored values; switching back to
     // catalog wipes them.
     const keep = kind === 'socks5';

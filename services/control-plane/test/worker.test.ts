@@ -3229,7 +3229,7 @@ ${nameLine}
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
     const home = await admin('home-exits', { proxyName: 'Home Residential A', displayName: '家庭 A' });
     expect(home.status).toBe(201);
-    expect((await admin('home-exits', { proxyName: 'Home Residential B · hy2', displayName: '家庭 B' })).status).toBe(201);
+    expect((await admin('home-exits', { proxyName: 'Home Residential B', displayName: '家庭 B' })).status).toBe(201);
     const homeId = ((await home.json()) as any).homeExit.id;
     const owner = await createAccount('retired-home-owner');
     const other = await createAccount('retired-home-other');
@@ -3635,6 +3635,22 @@ ${nameLine}
     const nextCatalog = await catalogText(next.accessToken);
     expect(nextCatalog).toContain('second-secret');
     expect(nextCatalog).not.toContain('first-secret');
+  });
+
+  it('refuses a catalog home exit whose proxyName ends with the hy2 suffix', async () => {
+    const suffixed = await admin('home-exits', { proxyName: 'Home Suffix · hy2', displayName: '家宽 Suffix' });
+    expect(suffixed.status).toBe(400);
+    expect((await suffixed.json() as any).error.code).toBe('VALIDATION_ERROR');
+    const plain = await admin('home-exits', { proxyName: 'Home Suffix', displayName: '家宽 Suffix' });
+    expect(plain.status).toBe(201);
+    const homeId = ((await plain.json()) as any).homeExit.id as string;
+    expect((await admin(`home-exits/${homeId}`, { proxyName: 'Home Suffix · hy2' }, 'PATCH')).status).toBe(400);
+    const line = await api('ops/home-lines', {
+      method: 'POST',
+      headers: { 'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL), 'content-type': 'application/json' },
+      body: JSON.stringify({ proxyName: 'Home Line · hy2', displayName: '家宽 Line' }),
+    });
+    expect(line.status).toBe(400);
   });
 
   it('moves routingSha256 for a routing-only rotation that leaves revision and yaml untouched', async () => {
