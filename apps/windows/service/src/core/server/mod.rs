@@ -805,7 +805,10 @@ async fn enter_owner_lifecycle(
         }
         OwnerLifecycleGate::ArmedPolicyTakeover => {
             windows_kill_switch::authorize_takeover_for(&owner.key).and_then(|()| {
-                windows_kill_switch::authorize_connect_session_for(&owner.key, owner.peer_pid)
+                windows_kill_switch::authorize_connect_session_for(
+                    &owner.key,
+                    owner.peer_session_id,
+                )
             })
         }
         OwnerLifecycleGate::ActiveOwner => require_active_owner(owner).await,

@@ -1585,6 +1585,7 @@ mod tests {
             identity: OwnerIdentity::Unix { uid, gid },
             app_data_root,
             peer_pid: None,
+            peer_session_id: None,
         }
     }
 

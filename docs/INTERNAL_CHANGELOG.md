@@ -84,6 +84,16 @@
   - 剩余限制：已经由远程会话持有已武装保护的现有安装保持原行为（不自动解除，仍 fail-closed）；
     断开状态 RDP 会话的 `WTSClientProtocolType` 取值、Hyper-V 增强会话（RDP 协议但不走网卡，会被
     误拒）均未经实机确认；没有实机 RDP 验收。
+  - 续记（2026-09-24，Codex 复核 `50da128d` 为 PARTIAL 后修正）：(1) P2 例外条件过宽——原先只看
+    `wanted + owner_key`，但 `ARMED` 在 WFP 安装前发布、安装失败也不撤销，本地首次武装失败后经 RDP
+    重试会拿到例外并首次真正武装。现在例外只给调用方自己的**已验证** intent（验证仅在 lock 成功后
+    提交，证明屏障确曾安装）；仅有 intent 仍按首次武装拒绝。(2) P2 PID 重用窗口——原先等完生命周期锁
+    后才按裸 PID 查会话。现在认证时在已核对 SID 的同一进程句柄/令牌上读取 `TokenSessionId`，存为
+    `AuthenticatedOwner::peer_session_id`；gate 只按该会话 ID 查询当前 `WTSClientProtocolType`
+    （等锁期间控制台被 RDP 接管也会看到远程）。同一个 `#[test]` 扩展到全部会话 × {无 intent、已验证、
+    仅 intent} 组合及他人已验证 intent。验证：本机仍未运行 cargo，待 GitHub-hosted `windows-2025` CI；
+    `git diff --check` 通过，改动部分 rustfmt 无新增差异。剩余限制：会话 ID 仅在原会话完全结束后才可能
+    被复用，此时原调用进程已退出，未另做处理。
 
 ## 2026-09-23 · Windows 发布 workflow 权限最小化（内部审查 H5-F1）
 

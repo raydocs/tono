@@ -1335,26 +1335,45 @@ pub(crate) enum CallerSession {
 /// verified the block is reinstalled at every boot; the emergency release refuses while the
 /// Service answers, and a disconnected owner still counts as signed in. A PC managed only over
 /// RDP could not be recovered. So a caller that is not provably on the console may not be the one
-/// that first arms protection. A caller that already holds armed protection keeps its existing
-/// fail-closed reconnect path unchanged; refusing it would not lift the block anyway. An
-/// unreadable session is refused like a remote one: the refusal leaves the network exactly as it
-/// was, while a wrong "console" answer could strand the machine.
-fn remote_session_connect_refused(session: CallerSession, caller_holds_armed_intent: bool) -> bool {
-    session != CallerSession::Console && !caller_holds_armed_intent
+/// that first arms protection. An unreadable session is refused like a remote one: the refusal
+/// leaves the network exactly as it was, while a wrong "console" answer could strand the machine.
+///
+/// The one exception is a caller whose own protection is already *verified* (`armed` is the
+/// published intent). Verification is committed only after a successful lock, so it proves the
+/// barrier was actually installed for this owner; that reconnect path stays fail-closed and
+/// unchanged. A bare `wanted` intent proves nothing: `ARMED` is published before the WFP install
+/// and survives a failed one, so a local first arm that failed before committing filters must not
+/// let a Remote Desktop retry arm for the first time.
+fn remote_session_connect_refused(
+    session: CallerSession,
+    armed: Option<&IntentRecord>,
+    caller_key: &str,
+) -> bool {
+    let caller_holds_verified_protection = armed.is_some_and(|intent| {
+        intent.wanted && intent.is_verified() && intent.owner_key.as_deref() == Some(caller_key)
+    });
+    session != CallerSession::Console && !caller_holds_verified_protection
 }
 
-/// Refuse a connect from a non-console session unless the caller already holds armed protection.
-/// `caller_pid` is the kernel-reported named-pipe peer (`AuthenticatedOwner::peer_pid`), so the
-/// session is the calling App's, not this Service's Session 0.
+/// Refuse a connect from a non-console session unless the caller already holds verified
+/// protection. `caller_session_id` is `AuthenticatedOwner::peer_session_id`: read from the token of
+/// the very pipe-peer process whose SID authentication verified, while that process handle was
+/// open, so it names the calling App's session (not this Service's Session 0) and cannot be
+/// redirected by a PID reused while the request waited for the lifecycle lock.
 pub(crate) fn authorize_connect_session_for(
     caller_key: &str,
-    caller_pid: Option<u32>,
+    caller_session_id: Option<u32>,
 ) -> std::result::Result<(), crate::core::auth::ServiceError> {
-    let caller_holds_armed_intent = armed_guard().as_ref().is_some_and(|armed| {
-        armed.intent.wanted && armed.intent.owner_key.as_deref() == Some(caller_key)
-    });
-    let session = caller_session(caller_pid);
-    if !remote_session_connect_refused(session, caller_holds_armed_intent) {
+    let session = caller_session(caller_session_id);
+    let refused = {
+        let armed = armed_guard();
+        remote_session_connect_refused(
+            session,
+            armed.as_ref().map(|armed| &armed.intent),
+            caller_key,
+        )
+    };
+    if !refused {
         return Ok(());
     }
     tracing::warn!("connect refused: caller session is {session:?}, not the local console");
@@ -1368,23 +1387,20 @@ pub(crate) fn authorize_connect_session_for(
     Err(crate::core::auth::ServiceError::remote_session_connect_refused(message))
 }
 
-/// The session of process `pid`, read through `ProcessIdToSessionId` and that session's
-/// `WTSClientProtocolType` (0 = console; 1 = legacy ICA and 2 = RDP are both remote). Any failure,
-/// including an unnamed peer, answers `Unknown`.
+/// The current `WTSClientProtocolType` of Windows session `session_id` (0 = console; 1 = legacy
+/// ICA and 2 = RDP are both remote). Read at the gate, not at authentication, so a console session
+/// taken over by Remote Desktop while the request waited is seen as remote. Any failure, including
+/// a peer whose session was never read, answers `Unknown`.
 #[cfg(all(windows, not(feature = "test")))]
-fn caller_session(pid: Option<u32>) -> CallerSession {
+fn caller_session(session_id: Option<u32>) -> CallerSession {
     use windows_sys::Win32::System::RemoteDesktop::{
-        ProcessIdToSessionId, WTS_CURRENT_SERVER_HANDLE, WTSClientProtocolType, WTSFreeMemory,
+        WTS_CURRENT_SERVER_HANDLE, WTSClientProtocolType, WTSFreeMemory,
         WTSQuerySessionInformationW,
     };
 
-    let Some(pid) = pid else {
+    let Some(session_id) = session_id else {
         return CallerSession::Unknown;
     };
-    let mut session_id = 0_u32;
-    if unsafe { ProcessIdToSessionId(pid, &mut session_id) } == 0 {
-        return CallerSession::Unknown;
-    }
     let mut buffer: windows_sys::core::PWSTR = std::ptr::null_mut();
     let mut returned = 0_u32;
     if unsafe {
@@ -1414,7 +1430,7 @@ fn caller_session(pid: Option<u32>) -> CallerSession {
 /// Off Windows and in the lifecycle `test` build there is no WTS: every caller is on the console,
 /// so the gate never changes those builds' behavior.
 #[cfg(not(all(windows, not(feature = "test"))))]
-fn caller_session(_pid: Option<u32>) -> CallerSession {
+fn caller_session(_session_id: Option<u32>) -> CallerSession {
     CallerSession::Console
 }
 
@@ -3594,6 +3610,7 @@ mod tests {
             },
             app_data_root: std::env::temp_dir(),
             peer_pid: None,
+            peer_session_id: None,
         };
         let config = ClashConfig {
             core_config: CoreConfig {
@@ -4414,14 +4431,36 @@ mod tests {
 
     /// TW-anthropic-1: a first connect from a Remote Desktop (or unreadable) session would arm a
     /// block that cuts that session and cannot be released remotely, so it is refused. The
-    /// console may connect, and a caller that already holds armed protection keeps its path.
+    /// console may connect, and only the caller's own *verified* protection keeps its reconnect
+    /// path: an intent left by a failed first install proves no barrier was ever committed.
     #[test]
     fn a_remote_session_cannot_be_the_first_to_arm_protection() {
         use CallerSession::{Console, Remote, Unknown};
-        assert!(remote_session_connect_refused(Remote, false));
-        assert!(remote_session_connect_refused(Unknown, false));
-        assert!(!remote_session_connect_refused(Console, false));
-        assert!(!remote_session_connect_refused(Remote, true));
+        fn refused(session: CallerSession, armed: Option<&IntentRecord>) -> bool {
+            remote_session_connect_refused(session, armed, "owner-alice")
+        }
+        let owned = |verified: bool, owner: &str| IntentRecord {
+            verified: Some(verified),
+            owner_key: Some(owner.to_owned()),
+            ..valid_intent(KillSwitchStatusMode::Bootstrap, true)
+        };
+        let verified = owned(true, "owner-alice");
+        let intent_only = owned(false, "owner-alice");
+        let other_users = owned(true, "owner-bob");
+
+        assert!(!refused(Console, None));
+        assert!(refused(Remote, None));
+        assert!(refused(Unknown, None));
+
+        assert!(!refused(Console, Some(&verified)));
+        assert!(!refused(Remote, Some(&verified)));
+        assert!(!refused(Unknown, Some(&verified)));
+
+        assert!(!refused(Console, Some(&intent_only)));
+        assert!(refused(Remote, Some(&intent_only)));
+        assert!(refused(Unknown, Some(&intent_only)));
+
+        assert!(refused(Remote, Some(&other_users)));
     }
 
     #[tokio::test]
