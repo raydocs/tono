@@ -425,6 +425,27 @@ test('privileged upgrade helper coordinates Service, Mihomo, and GUI publication
   )
 })
 
+test('Windows installers refuse to downgrade and hand back the manual lease on that exit', () => {
+  const windowsConfig = JSON.parse(
+    readFileSync(
+      new URL('../src-tauri/tauri.windows.conf.json', import.meta.url),
+      'utf8',
+    ),
+  )
+  // Tauri defaults this to true; an older build cannot undo a newer build's DNS changes.
+  assert.equal(windowsConfig.bundle.windows.allowDowngrades, false)
+  const blocked =
+    installerSource.match(/downgrade_blocked:([\s\S]*?)invalid_existing_version:/)?.[1] ?? ''
+  const releaseAt = blocked.indexOf('Call ReleaseManualLease')
+  assert.ok(releaseAt >= 0 && releaseAt < blocked.indexOf('Quit'))
+  const release =
+    installerSource.match(/Function ReleaseManualLease\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  assert.match(
+    release,
+    /nsExec::ExecToLog '"\$PLUGINSDIR\\tono-gate\\resources\\tono-service-install\.exe" --manual-update-finish'/,
+  )
+})
+
 test('NSIS uninstall removes leftover user control-plane pins', () => {
   assert.match(
     installerSource,
