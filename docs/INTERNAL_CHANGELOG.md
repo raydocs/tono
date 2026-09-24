@@ -49,6 +49,28 @@
 - **候选/发布**：无新包，仅文档。
 - **剩余限制**：H16/H17 条目全部是源码推导或阅读确认，回归草案均未运行；需实机的部分列在审查轮记录第 3 节。
 
+## 2026-09-23 · Worker 拒绝未签名策略中的 TCP 端点（H3-F6 后续）
+
+- **归属/来源**：G1 保护不放宽（只有签名能扩大绕行面）；影响控制面
+  `services/control-plane/src/traffic-policy.ts`。叠在 #470 分支
+  `fix/worker-unsigned-media-20260923`（943395bd）上，分支 `fix/worker-unsigned-tcp-20260923`；
+  Issue #485；提交时未合 main。
+- **缺陷修复**：`canonicalTrafficPolicy` 对 `tcpEndpoints` 不看 `trusted`，未签名发布可把任意
+  公网 IPv4:80/443 写入并下发。客户端已安全：macOS 未签名 TCP 地址白名单为空、全部丢弃；
+  Windows tono-core 不读取 `tcpEndpoints`。改后与 #470 的 media 规则一致：未签名写入含 TCP 端点
+  即 400 `VALIDATION_ERROR`，dry run 返回 `signatureRequired: true`；签名写入不变；读取路径对
+  已存的未签名行继续放行（参数由 `admitStoredUnsignedMedia` 改名为
+  `admitStoredUnsignedEndpoints`）。
+- **新增/优化**：无。
+- **工程与测试**：新增回归 `requires a signature before a TCP endpoint can leave the tunnel`；
+  无既有测试需修正。
+- **验证**：本机 `npx vitest run test/worker.test.ts -t "requires a signature before a TCP endpoint"`
+  在旧代码上失败（未签名 PUT 返回 200，期望 400），修复后通过；`npx vitest run` 全量 43 文件 893
+  用例通过；`tsc --noEmit` 通过。未部署。
+- **候选/发布**：无新包，仅源码；未部署 Worker。
+- **剩余限制**：须在 #470 之后合并；部署前需确认生产当前策略若含 `tcpEndpoints` 则为签名版本，
+  否则下一次未签名发布会被拒（读取不受影响）；ops-console 未签名发布含 TCP 端点的策略会收到 400。
+
 ## 2026-09-23 · Worker 拒绝未签名策略中的 media 端点（H3-F6 Worker 侧）
 
 - **归属/来源**：G1 保护不放宽（只有签名能扩大绕行面）；影响控制面
