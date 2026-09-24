@@ -256,7 +256,13 @@ extension KillSwitchManager {
                 "label \"tono-direct\""
             )
         }
-        if state.reviewedBundleDirectEnabled {
+        // Only while a TUN is up, like continuity above. With no tunnel this
+        // address-free permit is not a scoped exception but root web-port
+        // egress on the physical interface, and the connect's first arm runs
+        // before the TUN exists. Dropped rather than refused: a throw would
+        // fail every connect that sends the flag early, and without the permit
+        // the bundle's direct traffic still fails closed.
+        if state.reviewedBundleDirectEnabled && !state.tunnelInterfaces.isEmpty {
             // The reviewed bundle's traffic is routed direct by the rule engine,
             // and those packets leave as root from the core, so no `to <address>`
             // exception can express them: the addresses rotate and mostly never

@@ -198,7 +198,12 @@ nonisolated enum HelperProtocolVersion {
     ///   socket is owned by the account the helper served, and the app reads
     ///   that owner to refuse another account by name; a 4.43.0 reset leaves
     ///   it until reboot.
-    static let current = "4.44.0"
+    /// - 4.44.0 → 4.45.0: PF renders the reviewed-bundle permit
+    ///   (`tono-bundle`) only while a tunnel interface is armed; a tunnel-less
+    ///   arm that asks for it gets no permit instead of root web-port egress
+    ///   on the physical interface. An older daemon renders it on the
+    ///   connect's first arm, before the TUN exists.
+    static let current = "4.45.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
