@@ -189,16 +189,24 @@ extension KillSwitchManager {
         for endpoint in controlEndpoints.sorted(by: {
             ($0.transport, $0.port, $0.address) < ($1.transport, $1.port, $1.address)
         }) {
-            // Restricted to the two identities that legitimately use this
-            // bootstrap path: the root helper (DERP map refresh) and the signed
-            // app running as the interactive user (control-plane recovery while
+            // Restricted to two UIDs: root (the helper's DERP map refresh) and
+            // the interactive user the app runs as (control-plane recovery while
             // the tunnel is down). Without a `user` clause — the only exception
-            // family that lacked one — *any* local process could send to these
-            // addresses on 443 outside the tunnel. Because the control plane is
-            // fronted by shared anycast addresses and the edge routes by SNI,
-            // that was enough for an unprivileged process to reach an unrelated
-            // origin of its choosing on the same address and disclose the real
-            // IP while the kill switch was armed.
+            // family that lacked one — *any* local process, including other
+            // local users', could send to these addresses on 443 outside the
+            // tunnel.
+            //
+            // This is a UID boundary, not an app boundary. PF's `user` matches
+            // the socket owner's UID and PF has no process or code-signing
+            // condition, so every process the interactive user runs matches it
+            // exactly as the signed app does. The control plane is fronted by
+            // shared anycast addresses and the edge routes by SNI, so such a
+            // process can still reach an unrelated origin on these addresses
+            // from the physical interface, including in Protected Offline. The
+            // bound is these pinned addresses and TCP 443 only. Binding it to
+            // the app requires the bootstrap requests to be issued by root (the
+            // helper) or a dedicated identity and this rule to match only that;
+            // see #331 for the design.
             let family = endpoint.address.contains(":") ? "inet6" : "inet"
             lines.append(
                 "pass out quick \(family) proto \(endpoint.transport) " +
