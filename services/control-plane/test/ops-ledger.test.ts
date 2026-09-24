@@ -251,6 +251,19 @@ describe('ops ledger, month close, live FX', () => {
     expect(original.items[0].reversedBy).toBe(reverse.id);
   });
 
+  it('keeps the subject of a reversed entry and of its reversal fixed', async () => {
+    const created = await ops('ledger', json({
+      kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-A',
+      amountMinor: 10000, currency: 'CNY', month: MONTH(),
+    }));
+    const entry = assertLedgerEntry(await created.json());
+    const reverse = assertLedgerEntry(await (await ops(`ledger/${entry.id}/reverse`, json({}))).json());
+    for (const target of [entry.id, reverse.id]) {
+      const moved = await ops(`ledger/${encodeURIComponent(target)}`, json({ subjectId: 'u-B' }, 'PATCH'));
+      expect(moved.status).toBe(409);
+    }
+  });
+
   it('summarises two customers on one node at a 3:1 byte split plus one Claude account', async () => {
     const month = MONTH();
     await seedUser('u-a', 'a@example.com');

@@ -49,6 +49,29 @@
 - **候选/发布**：无新包，仅文档。
 - **剩余限制**：H16/H17 条目全部是源码推导或阅读确认，回归草案均未运行；需实机的部分列在审查轮记录第 3 节。
 
+## 2026-09-23 · 已冲正的账目行与冲正行锁定归属（H8-F2）
+
+- **归属**：ops 任务（运维计划 §1.3 D1 账目/月结），非客户 ship gate；`services/control-plane`。
+- **来源**：基线 main `18301fc5` → 分支 `fix/ledger-reversal-lock-20260923`；Issue #398，内部审查 H8-F2；
+  提交时未合 main。
+- **缺陷修复**：
+  - **原问题**：`PATCH ledger/{id}` 只查月份未锁，不查 `reversed_by`/`reverses`。冲正后再把
+    原行或冲正行改到另一个客户，月总额仍为 0，但同一笔钱在月报里拆成一个 −、一个 +。
+  - **修复**：已冲正的原行和冲正行不能改 `subjectType`/`subjectId`（409 `ALREADY_REVERSED`，
+    `note`/`paidAt` 照常可改）。PATCH 的 UPDATE 加条件：所在月未关账、归属变更时行仍未冲正；
+    变更 0 行按 `MONTH_CLOSED`/`ALREADY_REVERSED` 返回 409，顺带关掉「检查月份与 UPDATE 之间
+    关账」的竞态。冲正行在同一 batch 里从原行当前值复制，不再用 batch 之前读到的旧值。
+- **新增/优化**：无。`docs/ops/api-contract.md` 的 `PATCH ledger/{id}` 行补上新约束。
+- **工程与测试**：`test/ops-ledger.test.ts` 新增一个 `it`（录入 → 冲正 → 改原行/冲正行归属均 409）。
+  旧代码上实际跑红（收到 200），修复后绿。
+- **验证**：MacBook worktree `npx vitest run test/ops-ledger.test.ts`（21 项通过）、control-plane
+  全量 vitest 43 文件 892 项通过、`tsc --noEmit` 无错误。CI 结果见 PR。
+- **候选/发布**：仅源码，无新候选；Worker 部署需 owner 执行。
+- **剩余限制**：
+  - 关账「先算快照、后插入关账行」之间落进的新行仍会留在已关月却不在冻结总数里，见 #398。
+  - 冲正落在 UTC 当前月，控制台按本地月选月的不一致仍由 #191 跟踪（后端 UTC 为准）。
+  - 生产中已被拆开的冲正对不会自动修正。
+
 ## 2026-09-23 · 账目按币种小数位折算人民币（H8-F1）
 
 - **归属**：ops 任务（运维计划 §1.3 D1 账目/月结），非客户 ship gate；`services/control-plane`。
