@@ -1231,6 +1231,8 @@ export interface TranslationResources {
           description: string
           restore: string
           restoring: string
+          stillRunningDescription: string
+          stillRunningTitle: string
           title: string
           unverifiedDescription: string
         }

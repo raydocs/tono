@@ -84,6 +84,8 @@ export interface TonoKillSwitch {
   // `KillSwitchStatus` in the service crate carries no serde rename, so this
   // one field stays snake_case on the wire.
   last_error: string | null
+  /** Same snake_case wire name: the last render included the tunnel permit. */
+  tunnel_permit_rendered?: boolean
 }
 
 export interface TonoStatus {

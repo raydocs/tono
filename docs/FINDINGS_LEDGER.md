@@ -37,7 +37,7 @@
 
 状态快照：2026-09-24，origin/main `059a2ea2`（R1–R4 修复已合入至 #311；#300、#305 仍在审；#312、#482 已关闭）。
 H5–H15 与 X1–X3 的修复 PR 均已开出、尚未合入。H16/H17 已登记 15 行，均为 `open`；另外 5 条由各自修复 PR 登记：
-H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#516）、H17-AUTH-WIN（#515）。表中编号与状态为写入时 GitHub 的真实状态。
+H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#516）、H17-O-F2 (Windows)（#515）。表中编号与状态为写入时 GitHub 的真实状态。
 
 ## 1. macOS 连接
 
@@ -167,7 +167,7 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | H4-F1 | dual 阶段吊销设备不退役共享 legacy 出口凭据，被吊销设备仍可用出口并计入账户 | in-PR | [#313](https://github.com/raydocs/tono/issues/313)，[#323](https://github.com/raydocs/tono/pull/323) | 高·推导 | 暴露面取决于生产 rollout phase（本机无法查） |
 | H4-F2 | 停用/退役/删除/改名的住宅（catalog 型）home exit 及其 hy2 孪生块从限制名单掉出，下发给所有账户 | in-PR | [#322](https://github.com/raydocs/tono/issues/322)，[#326](https://github.com/raydocs/tono/pull/326) | 高·推导 | roster 不按节点隔离（身份隔离）列为后续 |
 | H4-F3 | ops 角色门不覆盖 shared-admin；另有原始日志读取与 signup-allowlist 写两处未拦截且文档未列 | open | 待开 | 低·推导 | shared-admin 不拦截是已记录限制；只有配置 OPS_ROLES 且有非 owner 角色时可利用 |
-| H3-F4 | refresh 严格单次轮换无宽限且非原子：响应丢失即产生伪 401，客户端登出并释放保护 | in-PR | [#314](https://github.com/raydocs/tono/issues/314)，[#329](https://github.com/raydocs/tono/pull/329) | 高·推导 | 修复在服务端，客户端「真 401 才释放」不变 |
+| H3-F4 | refresh 严格单次轮换无宽限且非原子：响应丢失即产生伪 401，客户端登出并释放保护 | in-PR | [#314](https://github.com/raydocs/tono/issues/314)，[#329](https://github.com/raydocs/tono/pull/329) | 高·推导 | 修复在服务端，客户端「真 401 才释放」不变；Windows 启动恢复遇 401 已不再释放（[#515](https://github.com/raydocs/tono/pull/515)） |
 | H3-F5 | 策略 revision 不在签名字节内，历史签名策略配伪造 revision 可永久钉住客户端 | in-PR | [#317](https://github.com/raydocs/tono/issues/317)，[#342](https://github.com/raydocs/tono/pull/342)（Windows 客户端）、[#472](https://github.com/raydocs/tono/pull/472)（Windows sing_box）、[#473](https://github.com/raydocs/tono/pull/473)（macOS）、[#474](https://github.com/raydocs/tono/pull/474)（Worker/签名工具） | 中·推导 | 前提是 Worker/D1 被攻破或 TLS 中间人；#474 的开关默认关闭，四个 PR 都合入并由发布侧启用后才生效 |
 | H10-F1 | 控制面节点名校验与客户端 YAML 解码不一致，受限住宅出口可能下发给其他账户 | in-PR | [#418](https://github.com/raydocs/tono/issues/418)，[#419](https://github.com/raydocs/tono/pull/419) | 高·推导 | — |
 | H13-F1 | 服务端声明不存储日志时，客户端无限重传网络日志上传 | in-PR | [#452](https://github.com/raydocs/tono/issues/452)，[#453](https://github.com/raydocs/tono/pull/453)（macOS）、[#454](https://github.com/raydocs/tono/pull/454)（Windows） | 低·推导 | 两个 PR 都合入后手动关闭 #452 |
@@ -204,6 +204,7 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | #491 | Windows 从 Suspended/Error 换账户登录时保留上一账户的目录、runtime 副本与 Core | in-PR | [#491](https://github.com/raydocs/tono/issues/491)，[#506](https://github.com/raydocs/tono/pull/506) | 高·推导 | 叠在 #316 → #410 → #506 |
 | H17-C-F3 | macOS 账户进入 suspended 后不停止 Core、不作废缓存的设备出口凭据，唤醒恢复仍可用它连接（= H17-G-F3 第 3 步） | open | 待开 | 中·已确认 | 被吊销设备可用到出口应用新 roster 为止；实际 Core/PF 行为需实机；排在 H17-AUTH-MAC（#516）之后 |
 | H17-O-F7 | macOS 账户 suspended 后网络日志上传器不停止，持续用已被拒绝的 refresh 重试 | open | 待开 | 低·已确认 | 退避上限约 16 分钟一次；Windows 由 #460 处理 |
+| H17-O-F2 (Windows) | Windows 启动恢复遇 401（到期、超额、停用、设备吊销）即释放 WFP 并登出，不给原因（= H17-G-F3 第 2 步） | in-PR | [#512](https://github.com/raydocs/tono/issues/512)，[#515](https://github.com/raydocs/tono/pull/515) | 高·已确认 | Worker 仍对所有不合格情形回 401（H17-O-F2 的 Worker 部分未修）；#460 合并前暂停页文案为"账号已暂停"；暂停页可主动退出登录，退出照旧先释放保护；缓存目录保留到新登录（出口凭据已被服务端拒绝）；会话已被 cron 吊销时续费后需重新登录；未实机 |
 
 ## 7. 数据面规则（PF / WFP / sing-box / mihomo）
 

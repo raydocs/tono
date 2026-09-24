@@ -266,7 +266,9 @@
       "description": "上次连接的防泄漏还在。先恢复网络，再登录。",
       "restore": "恢复网络",
       "restoring": "正在恢复…",
-      "unverifiedDescription": "Tono 无法确认上次连接的防泄漏是否还在。先点「恢复网络」，再登录。"
+      "unverifiedDescription": "Tono 无法确认上次连接的防泄漏是否还在。先点「恢复网络」，再登录。",
+      "stillRunningTitle": "上次的连接仍在运行",
+      "stillRunningDescription": "上次会话的隧道仍在转发流量。恢复网络会停止它。"
     },
     "errors": {
       "unreachable": "连不上登录服务器。换可用网络（热点，或先开其他翻墙）登录一次即可。",

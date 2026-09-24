@@ -266,7 +266,9 @@
       "description": "Leak protection from the last session is still on. Restore the network, then sign in.",
       "restore": "Restore network",
       "restoring": "Restoring…",
-      "unverifiedDescription": "Tono cannot confirm whether leak protection from the last session is still on. Choose Restore network, then sign in."
+      "unverifiedDescription": "Tono cannot confirm whether leak protection from the last session is still on. Choose Restore network, then sign in.",
+      "stillRunningTitle": "Previous connection still running",
+      "stillRunningDescription": "The last session's tunnel is still carrying traffic. Restore network stops it."
     },
     "errors": {
       "unreachable": "Can't reach the sign-in server. Use a working network (hotspot, or another VPN) once.",
