@@ -57,6 +57,19 @@
 - **候选/发布**：无新包，仅源码。
 - **剩余限制**：CI 待定；#535/#539 需先 rebase 到 #516 现 head 并统一 sign-in 释放接口后再进下一班列车；
   其余跟进见 #601。没有实机验收。
+- **续记（2026-09-24，PR #610 集成审查，Codex 发现、Claude 读源码复核三项均确认）**：列车头 947cf8d6 已另行合入
+  #535（1ad72605）与 #539。修复提交 [60e70d55](https://github.com/raydocs/tono/commit/60e70d55)：
+  INT610-F1（P1）activation 对 unconfirmed 的解除答复只核对 launch 序号，跨过 wake 的 protection generation
+  仍被接受并清 `isArmed`，wake 的 reassert 返回 false 却发布 Protected Offline → 答复再核对 protection
+  generation；wake 仅在 reassert 真正武装时才发布 blocked。INT610-F2（P2）activation 先接受解除后，sign-in 同一
+  解除答复被 generation 拒绝、`shouldResumeProtection` 残留并自动重连 → 若越过它的只是该次已确认解除（其后无新操作、
+  仍为解除态），sign-in 返回解除答复并退掉 resume 意图。MAC3-ADD-F1（P2）挂起/Check again 的保留式拆除经
+  `restrictToBootstrap` → `installIfNeeded` 可对拒绝本 App 的 helper 弹管理员提示 → `restrictToBootstrap` 不再安装/修复
+  helper（`helperPrepared: true`），helper 不可达或拒绝时调用失败、PF 维持 helper 现状。测试：
+  `LaunchProtectionPresentationTests.testAnActivationAnswerAWakeOvertookIsDropped`、
+  `KillSwitchArmOutcomeTests.testBootstrapRestrictionNeverPreparesTheHelper`（失败前行为为推理：旧代码前者接受答复、
+  后者先走 helper 安装而非 arm 请求），F2 无新测试。仅 `git diff --check`；未在 MacBook 编译或跑 XCTest，待 `macos-26`
+  CI。剩余：wake 中 reassert 未武装且路由 48 s 内未就绪时不再移交重连循环；无实机验证。无新包。
 ## 2026-09-24 · mac 独立列车 train/mac2-20260924
 
 - **归属/来源**：G1–G3 macOS 修复汇合（各 PR 归属见其自身条目）；基线 origin/main
