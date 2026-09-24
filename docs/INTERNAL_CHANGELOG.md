@@ -32,6 +32,40 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · mac 独立列车 train/mac2-20260924
+
+- **归属/来源**：G1–G3 macOS 修复汇合（各 PR 归属见其自身条目）；基线 origin/main
+  [d98b217d](https://github.com/raydocs/tono/commit/d98b217d) → 分支 `train/mac2-20260924`，按顺序 `--no-ff` 合入：
+  #550 `fix/helper-recovery-no-user-20260924`（1c1b329f）、#562 `fix/pf-hook-removal-20260924`（097024ec）、
+  #546 `fix/macos-keychain-read-error-20260924`（551a7bdc）、#552 `fix/macos-wake-reconnect-budget-20260924`（f96c589f）、
+  #581 `fix/mac-candidate-telemetry-20260924`（e11e5399）、#566 `fix/helper-orphan-app-gone-20260924`（1f69a391）、
+  #579 `fix/helper-other-user-20260924`（11dd36d2）。无 PR 被排除。提交时未合 main。
+- **缺陷修复**：见各 PR 条目（本条之下）。冲突处理：
+  - Helper 协议版本：各 PR 基于 4.9.0 各自写了临时编号，main 已到 4.22.0。按合入顺序定为合并列车编号
+    4.22.0 → 4.41.0（#550）→ 4.42.0（#562）→ 4.43.0（#566）→ 4.44.0（#579）；最终只有一个版本 **4.44.0**，
+    版本历史注释逐段接在 4.22.0 之后，“A 4.9.0 daemon/reset” 改为对应前一版本号。
+  - `CONTRACT.sha256`：每个 Helper 合并提交都按 `build-core-helper.sh` 的同一文件清单与注释/空行过滤重算。
+    该管线先在 origin/main（`4.22.0 3f2459e2…`）及 #550/#566/#579 分支头上复现了各自记录的哈希。最终为
+    `4.44.0 007d78fcd0bbcb8593597913899aa6d7825b8d9e171dd778c62c17644db0a8e2`。
+  - `main.swift`（#566 × main）：main 已把 `SocketServer` 构造移到 `startHelperDaemon(...)`；保留 main 结构，
+    只在 `UpdateExecutor.startup()` 之后加入 #566 的 `if releaseIfTonoWasRemoved() { exit(0) }`（在恢复 PF 之前）。
+  - `main.swift`（#579 × #566）：#579 的 `socketPath` 删除（连同注释）放进 #566 的 `removeHelperInstallation()`，
+    因此 `--emergency-reset` 与启动时发现 Tono.app 已删除的释放路径都会删掉 socket。
+  - `KillSwitchTests.swift`（#562 × main）：main 的第 8、9 段与 #562 的移除挂钩段都保留，后者编号改为 10。
+  - `UpdateTests.swift`（#566 × main）：main 的 ledger schema 测试与 #566 的两个测试都保留，计数改为 13。
+  - `docs/INTERNAL_CHANGELOG.md`：两侧条目全部保留，只去掉冲突标记。
+- **新增/优化**：无（列车本身）。
+- **工程与测试**：无新测试；各 PR 自带测试全部保留。
+- **验证**：MacBook 列车工作树，未运行 xcodebuild/swift/swiftc（按执行位置规定）。`git grep` 冲突标记为空；
+  `git diff --check origin/main HEAD` 干净；`Localizable.xcstrings` JSON 解析、`Info.plist` `plutil -lint`、
+  `package-macos-test.sh` `bash -n`、`macos-release.yml` YAML 解析均通过；
+  `node --test tooling/scripts/tests/*.test.cjs *.test.mjs` 80 项中 79 通过，1 项失败为
+  `windows-ci-paths.test.cjs` 在本工作树缺 `js-yaml`（无 node_modules，本列车未改动）。**CI pending**：Helper 构建、
+  `--self-test`、root 自测与 XCTest 以本 PR 的 GitHub-hosted `macos-26` CI 为准。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：未在实机验证任何 Helper 行为（删除账户、删除 Tono.app、第二账户、pf.conf 挂钩移除）；
+  4.44.0 对已安装用户需要管理员重装或升级。P3 后续事项见 Issue [#601](https://github.com/raydocs/tono/issues/601)。
+
 ## 2026-09-24 · macOS 第二个账户打开 Tono：按名称拒绝，绝不把 Helper 改绑到自己
 
 - **归属/来源**：G1 连接保护（多账户隔离）；macOS App `HelperManager`。内部审查 H19-O-F3 = H19-G-F2（两个 finder
