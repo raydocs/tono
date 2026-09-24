@@ -46,6 +46,54 @@ fn classify_recovery(
     }
 }
 
+impl RecoveryPublication {
+    /// Only a recovery that restores retained originals or records the old
+    /// identity needs the Service stopped. A complete, verified publication
+    /// whose successor is simply not running changes no file; stopping the
+    /// Service there restarted it, and every Service start spawns recovery
+    /// again for the still-pending attempt.
+    fn requires_service_stop(self) -> bool {
+        !matches!(self, Self::TargetVerified)
+    }
+}
+
+/// Read-only: the installed identity and the durable plan members decide
+/// what recovery may conclude. Nothing here stops the Service or writes.
+fn classify_installed(
+    a: &tx::Attempt,
+    plan_path: &Path,
+) -> Result<(Components, RecoveryPublication), Error> {
+    let service_path = tono_service_protocol::service_paths()
+        .install_dir()
+        .join("tono-service.exe");
+    let installed = native::components(&a.install_root, &service_path)?;
+    let plan_present = plan_path.exists();
+    // Three binaries at the target do not prove later members (the
+    // payload tree, `core-sha256.txt`) were published too. Only a
+    // member read as different is an interruption; an unreadable
+    // member (sharing violation, AV lock) exits like an unreadable
+    // component, before any rollback touches a file.
+    let plan_members_new = plan_present
+        && native::plan_members_at(
+            plan_path,
+            &a.receipt.attempt_id,
+            &[
+                a.install_root.as_path(),
+                tono_service_protocol::service_paths()
+                    .install_dir()
+                    .as_path(),
+            ],
+            native::PlanSide::New,
+        )?;
+    let publication = classify_recovery(
+        plan_present,
+        plan_members_new,
+        &installed,
+        &tx::target(&a.manifest).components,
+    );
+    Ok((installed, publication))
+}
+
 pub(super) fn dispatch() -> Result<bool, Error> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     match args.as_slice() {
@@ -159,6 +207,15 @@ fn execute(recovery: bool) -> Result<(), Error> {
         ) {
             return Ok(());
         }
+        // Classify before touching the Service: a complete publication keeps
+        // the running Service and only records the Replaced marker.
+        let (_, publication) = classify_installed(&a, &plan_path)?;
+        if !publication.requires_service_stop() {
+            if a.execution != tx::Execution::Replaced {
+                store.execution(tx::Execution::Replaced)?;
+            }
+            return Ok(());
+        }
     } else {
         ensure!(
             tx::file_digest(&dir.join("package.exe"))? == tx::target(&a.manifest).artifact_sha256,
@@ -205,29 +262,8 @@ fn execute(recovery: bool) -> Result<(), Error> {
             // The installed identity — not successor liveness — classifies the
             // interruption. A user closing the new App before commit or a
             // reboot must not revert a complete, verified publication.
-            let installed = native::components(&a.install_root, &service_path)?;
-            let plan_present = plan_path.exists();
-            // Three binaries at the target do not prove later members (the
-            // payload tree, `core-sha256.txt`) were published too. Only a
-            // member read as different is an interruption; an unreadable
-            // member (sharing violation, AV lock) exits like an unreadable
-            // component, before any rollback touches a file.
-            let plan_members_new = plan_present
-                && native::plan_members_at(
-                    &plan_path,
-                    &a.receipt.attempt_id,
-                    &[
-                        a.install_root.as_path(),
-                        tono_service_protocol::service_paths().install_dir().as_path(),
-                    ],
-                    native::PlanSide::New,
-                )?;
-            match classify_recovery(
-                plan_present,
-                plan_members_new,
-                &installed,
-                &tx::target(&a.manifest).components,
-            ) {
+            let (installed, publication) = classify_installed(&a, &plan_path)?;
+            match publication {
                 RecoveryPublication::NoPlan => {
                     // There cannot have been a publication without the durable plan.
                     ensure!(
@@ -604,5 +640,25 @@ mod tests {
             classify_recovery(false, false, &old, &target),
             RecoveryPublication::NoPlan
         );
+    }
+
+    #[test]
+    fn update_recovery_keeps_the_service_running_for_a_complete_publication() {
+        let target = Components {
+            app_sha256: "t".into(),
+            core_sha256: "tc".into(),
+            privileged_sha256: "tp".into(),
+        };
+        let old = Components {
+            app_sha256: "o".into(),
+            core_sha256: "oc".into(),
+            privileged_sha256: "op".into(),
+        };
+        // Replaced, successor closed before commit: nothing to restore, so the
+        // Service is not stopped (a stop/start would spawn recovery again).
+        assert!(!classify_recovery(true, true, &target, &target).requires_service_stop());
+        // Rollback and the no-plan identity check still run with the Service stopped.
+        assert!(classify_recovery(true, false, &target, &target).requires_service_stop());
+        assert!(classify_recovery(false, false, &old, &target).requires_service_stop());
     }
 }
