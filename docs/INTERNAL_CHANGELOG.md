@@ -32,6 +32,19 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · 舰队 exit-agent 接入（13 个在线节点，运维操作）
+- 归属：SHIP_PLAN 前置（交接 §2 第 2、3 步）；影响 exit 节点、D1 `exit_nodes`，无客户端改动。
+- 来源：#563 合并提交 85ba3945 的 `services/exit-agent/reconcile_and_report.py`；详细记录见
+  [FLEET_EXIT_AGENT_ROLLOUT_2026-09-24](reports/FLEET_EXIT_AGENT_ROLLOUT_2026-09-24.md)。
+- 缺陷修复：Westwood 自 09-18 起 agent 每轮失败（吊销不执行、计量停报）→ 部署后恢复 ACK 与计量，首轮移除 1 个已吊销身份。
+  另外 12 个在线节点此前未登记、从不 ACK → 全部登记并接入；各节点首轮补齐 6 个此前未在运行中 Xray 生效的身份。
+- 新增/优化：6 个 hy2 节点的检查器改为绑定 `/opt/tono-hy2` 目录，hy2 allowlist 由 agent 按 roster 维护；
+  Fuji 未发布的共享口令 hy2 停用（暂定决定，可恢复）。
+- 工程与测试：无代码改动。
+- 验证：D1 13 个节点 active、ACK 均在 62 秒内；hy2 节点真实身份 `ok:true`；未做客户端实机连接验证。
+- 候选/发布：无新包。
+- 剩余限制：`Tokyo · Sakura` 离线仍在目录内，需要 admin token 下架；ops hub 推送是否停用待定；首报补计 09-11 以来的流量。
+
 ## 2026-09-24 · exit-agent `rmu` 改为位置参数 email（Xray 26）
 
 - **归属**：ops 出口节点吊销与计量；`services/exit-agent/reconcile_and_report.py`。
