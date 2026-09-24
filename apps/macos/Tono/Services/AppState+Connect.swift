@@ -221,12 +221,9 @@ extension AppState {
                     // here as an opaque error. Classifying the stage is what
                     // makes the copyable diagnostic and the failure telemetry
                     // say something other than "none".
-                    self.lastClassifiedFailure = ProtectedConnectivity.failure(
-                        .helperProtocolMismatch,
-                        stage: "preparingHelper",
-                        attempt: 1,
-                        generation: self.connectionCoordinator.protectionOperationGeneration,
-                        detail: String(describing: error)
+                    self.lastClassifiedFailure = Self.helperPreparationFailure(
+                        error,
+                        generation: self.connectionCoordinator.protectionOperationGeneration
                     )
                     throw error
                 }
@@ -1779,11 +1776,33 @@ extension AppState {
         )
     }
 
+    /// A `prepareHelper` failure. Another account's helper is its own code and
+    /// shows the error's text, which names that account; it is not a helper to
+    /// repair. Every other install or identity failure stays a mismatch.
+    static func helperPreparationFailure(_ error: Error, generation: UInt64) -> ProtectedFailure {
+        let anotherAccount: Bool
+        if case HelperIPCError.boundToAnotherUser(_) = error {
+            anotherAccount = true
+        } else {
+            anotherAccount = false
+        }
+        var failure = ProtectedConnectivity.failure(
+            anotherAccount ? .helperBoundToAnotherAccount : .helperProtocolMismatch,
+            stage: "preparingHelper",
+            attempt: 1,
+            generation: generation,
+            detail: String(describing: error)
+        )
+        if anotherAccount { failure.userMessage = error.localizedDescription }
+        return failure
+    }
+
     /// Failures the automatic reconnect loop can never resolve: repeating the
     /// identical transaction would re-raise the same administrator prompt or
     /// fail installation the same way. Weak-network and transient helper
-    /// errors deliberately stay retryable.
-    private static func failureRequiresUserAction(_ error: Error) -> Bool {
+    /// errors deliberately stay retryable. Another account's helper stays
+    /// refused until that account or an administrator acts.
+    static func failureRequiresUserAction(_ error: Error) -> Bool {
         switch error {
         case KillSwitchService.Error.userDenied,
              KillSwitchService.Error.installFailed,
@@ -1791,7 +1810,8 @@ extension AppState {
              HelperInstallError.userDenied,
              HelperInstallError.resourceNotFound,
              HelperInstallError.installFailed,
-             HelperIPCError.forbidden:
+             HelperIPCError.forbidden,
+             HelperIPCError.boundToAnotherUser(_):
             true
         default:
             false

@@ -131,7 +131,11 @@ nonisolated enum HelperProtocolVersion {
     ///   provably gone (different boot, or its audit token resolves to no
     ///   live process), allocating a fresh successor generation without
     ///   changing the proof phase. A 4.8.0 daemon keeps both dead ends.
-    static let current = "4.9.0"
+    /// - 4.9.0 → 4.44.0 (provisional, renumber at merge): `--emergency-reset`
+    ///   also deletes /var/run/tono-core/service.sock. The socket is owned by
+    ///   the account the helper served, and the app reads that owner to refuse
+    ///   another account by name; a 4.9.0 reset leaves it until reboot.
+    static let current = "4.44.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

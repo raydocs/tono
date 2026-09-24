@@ -60,6 +60,19 @@
 - **剩余限制**：未在实机上用两个账户验证；自动重连循环遇到此错误仍按可重试处理（不再弹管理员框，但会反复
   快速失败）。daemon 未运行（没有 socket）时只能靠 root 守卫在管理员授权之后拒绝，用户会先看到一次授权框。
   守卫把“记录中的 uid 能解析为账户”当作账户存在。
+- **2026-09-24 审查跟进**（MA-Codex-4，P2；MA-Codex-6 = MA-GROK-3，P2；MA-Codex-3，P3）：修复——
+  (1) 按提示运行 `--emergency-reset` 后 socket 仍属原账户，第二个账户照样被按原账户名拒绝：`--emergency-reset`
+  现在删除 `/var/run/tono-core/service.sock`；App 在 launchd plist 不存在时忽略 socket；安装脚本在停掉旧 daemon 后
+  删除残留 socket（旧版 Helper 做的 reset 留下的 socket 属于别的 uid，新 daemon 会拒绝替换它）。
+  (2) 连接路径把此错误记成 `HELPER_PROTOCOL_MISMATCH`（“请修复”）并继续自动重试：新增错误码
+  `HELPER_BOUND_TO_ANOTHER_ACCOUNT`，界面显示点名账户的错误原文，`failureRequiresUserAction` 暂停自动重试（取代上文
+  “自动重连循环遇到此错误仍按可重试处理”）。(3) P3：root 守卫移到 Helper 更新锁内的安装片段开头，与
+  `--emergency-reset` 同锁，读取的记录就是随后覆盖的记录。Helper 源码因此改动（取代上文“不需要协议版本号”）：
+  4.9.0 → 4.44.0（临时编号，合并时按顺序重编号），`CONTRACT.sha256` 按构建脚本清单重算。测试：两个 XCTest——
+  `testASocketLeftWithoutTheDaemonIsNotAnotherAccountsHelper`、`testAnotherAccountsHelperIsItsOwnFailureAndWaitsForTheUser`；
+  原测试改为显式传入存在的 plist 路径。验证：本机未运行（不做本机 Swift 编译），以 PR CI 为准。剩余限制：Helper 删除
+  socket 没有自测（reset 接线需要真实安装）；新错误码仅 macOS，Windows 分类与运维台文案未同步；与 #566 同改
+  `main.swift` 的移除列表，后合并者须把 `socketPath` 放进 #566 的 `removeHelperInstallation()`。
 
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 

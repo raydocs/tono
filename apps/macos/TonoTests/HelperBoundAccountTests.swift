@@ -16,31 +16,22 @@ final class HelperBoundAccountTests: XCTestCase {
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(atPath: directory) }
 
-        // A live socket owned by this account, seen from another uid.
+        // A live socket owned by this account, seen from another uid, with the
+        // daemon's launchd plist installed.
         let socketPath = directory + "/service.sock"
-        let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
-        XCTAssertGreaterThanOrEqual(fd, 0)
+        let fd = Self.bindSocket(socketPath)
         defer { Darwin.close(fd) }
-        var address = sockaddr_un()
-        address.sun_family = sa_family_t(AF_UNIX)
-        _ = socketPath.withCString { source in
-            withUnsafeMutablePointer(to: &address.sun_path) {
-                $0.withMemoryRebound(to: CChar.self, capacity: 104) { strlcpy($0, source, 104) }
-            }
-        }
-        let bound = withUnsafePointer(to: &address) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
-            }
-        }
-        XCTAssertEqual(bound, 0)
-        guard case .boundToAnotherUser(let account) =
-            HelperManager.connectFailure(socketPath: socketPath, currentUID: me &+ 1) else {
+        let plist = directory + "/daemon.plist"
+        XCTAssertTrue(FileManager.default.createFile(atPath: plist, contents: Data()))
+        guard case .boundToAnotherUser(let account) = HelperManager.connectFailure(
+            socketPath: socketPath, currentUID: me &+ 1, daemonPlistPath: plist
+        ) else {
             return XCTFail("a helper serving another account must be refused by that account's name")
         }
         XCTAssertEqual(account, myName)
-        guard case .connectFailed =
-            HelperManager.connectFailure(socketPath: socketPath, currentUID: me) else {
+        guard case .connectFailed = HelperManager.connectFailure(
+            socketPath: socketPath, currentUID: me, daemonPlistPath: plist
+        ) else {
             return XCTFail("the owning account's own failed connect is not another account's helper")
         }
 
@@ -72,5 +63,56 @@ final class HelperBoundAccountTests: XCTestCase {
             (uid_t(2_000_000_000)...uid_t(2_000_000_100)).first { getpwuid($0) == nil }
         )
         XCTAssertEqual(try runGuard(recorded: "\(deleted)\n", caller: me).status, 0)
+    }
+
+    /// `--emergency-reset` removes the daemon's plist but used to leave its
+    /// socket, still owned by the first account, so the second account was
+    /// refused by that name after doing what the message told it (MA-Codex-4).
+    func testASocketLeftWithoutTheDaemonIsNotAnotherAccountsHelper() throws {
+        let directory = "/tmp/tono-stale-\(getpid())"
+        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: directory) }
+        let socketPath = directory + "/service.sock"
+        let fd = Self.bindSocket(socketPath)
+        defer { Darwin.close(fd) }
+        guard case .connectFailed = HelperManager.connectFailure(
+            socketPath: socketPath, currentUID: getuid() &+ 1, daemonPlistPath: directory + "/daemon.plist"
+        ) else {
+            return XCTFail("a socket left by a reset refused this account by the old account's name")
+        }
+    }
+
+    /// The connect path filed this refusal as a helper mismatch ("Repair it")
+    /// and kept retrying it (MA-Codex-6, MA-GROK-3). It needs the user, has its
+    /// own code, and its message names the other account.
+    func testAnotherAccountsHelperIsItsOwnFailureAndWaitsForTheUser() {
+        let error = HelperIPCError.boundToAnotherUser("alice")
+        let failure = AppState.helperPreparationFailure(error, generation: 1)
+        XCTAssertEqual(failure.code, .helperBoundToAnotherAccount)
+        XCTAssertTrue(failure.userMessage.contains("alice"), failure.userMessage)
+        XCTAssertTrue(
+            AppState.failureRequiresUserAction(error),
+            "automatic retries cannot move the helper to this account"
+        )
+    }
+
+    /// A Unix socket bound at `path`, owned by this account.
+    private static func bindSocket(_ path: String) -> Int32 {
+        let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        XCTAssertGreaterThanOrEqual(fd, 0)
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        _ = path.withCString { source in
+            withUnsafeMutablePointer(to: &address.sun_path) {
+                $0.withMemoryRebound(to: CChar.self, capacity: 104) { strlcpy($0, source, 104) }
+            }
+        }
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        XCTAssertEqual(bound, 0)
+        return fd
     }
 }
