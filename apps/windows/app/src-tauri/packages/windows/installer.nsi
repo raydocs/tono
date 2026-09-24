@@ -1226,6 +1226,20 @@ Section Uninstall
   !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
   !insertmacro RemoveVergeService
 
+  ; "Delete app data" means every Windows account's Tono data. This elevated uninstaller runs as
+  ; the administrator who approved it, so `$APPDATA` further down is only that account's folder.
+  ; The helper removes com.raydocs.tono from each local profile (links are removed, never
+  ; followed). It runs here, after RemoveVergeService proved the barrier gone and before the
+  ; helper itself is deleted with the resources.
+  ${If} $DeleteAppDataCheckboxState = 1
+  ${AndIf} $UpdateMode <> 1
+    nsExec::ExecToLog /TIMEOUT=120000 '"$INSTDIR\resources\tono-service-uninstall.exe" --delete-app-data-all-profiles'
+    Pop $0
+    ${If} $0 != "0"
+      DetailPrint "Some ${PRODUCTNAME} data in other Windows accounts could not be removed (result $0)."
+    ${EndIf}
+  ${EndIf}
+
   ; Remove cached window state files
   DetailPrint "Removing window-state.json / .window-state.json"
   SetShellVarContext current

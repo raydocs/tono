@@ -32,6 +32,27 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · Windows 卸载「删除应用数据」覆盖每个本机账户
+
+- **归属/来源**：卸载恢复原状与多用户隔离（L1/L5）；Windows NSIS 卸载段与卸载助手。基线 origin/main
+  [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b)，分支 `fix/win-app-data-all-profiles-20260924`，
+  Issue #559（内部审查 H19-O-F7 = H19-C-F2）；未合 main。
+- **缺陷修复**：勾选「删除应用数据」后只删 `SetShellVarContext current` 下的 `$APPDATA`/`$LOCALAPPDATA`，
+  提权卸载时这是批准 UAC 的管理员账户：另一管理员卸载时实际使用者的数据（含账户与出口配置）保留；标准用户借管理员
+  凭据卸载时反而删了管理员的目录。改后：`RemoveVergeService` 证明屏障已移除后，卸载段（勾选且非更新模式）调用
+  `tono-service-uninstall.exe --delete-app-data-all-profiles`，助手枚举用户配置文件目录（`FOLDERID_UserProfiles`，
+  跳过 `All Users` 等联接点），删除每个配置文件 `AppData\Roaming` 与 `AppData\Local` 下的 `com.raydocs.tono`；
+  用 Rust `remove_dir_all`/`remove_file`，链接只删链接本身、不跟随，避免提权删除被某个账户的联接点重定向。
+  原有当前账户 `RmDir` 保留。失败只记日志、不阻断卸载。
+- **新增/优化**：无。**暂定决定（更严格）**：选择实际删除所有账户的 Tono 数据，而不是只改确认文案说明「仅删除当前账户」。
+- **工程与测试**：`uninstall_service.rs` 一个 `#[test]`（`delete_app_data_reaches_every_profile_not_only_the_approving_admin`）：
+  两个配置文件的 Roaming/Local Tono 目录都删除，其他应用目录保留。
+- **验证**：见 PR；红：仅测试提交在 CI 编译失败（旧代码没有跨配置文件删除）；绿：Windows CI。MacBook 未编译 Rust，NSIS 未编译。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：不在 `FOLDERID_UserProfiles` 下的配置文件、文件夹重定向到别处的 AppData 不覆盖；各账户 Credential Manager
+  中的会话仍按 H11-F3/#412 处理，提权进程不能删他人凭据库；另一账户会话中 Tono 仍在运行时其被占用的文件可能删不掉；
+  不改 Tauri 自带的复选框文案；未实机验证。
+
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
 - **归属/来源**：G1–G3 审查与修复的可追溯性（工程流程与记录，非产品行为）；审查基线 main

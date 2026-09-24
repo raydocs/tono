@@ -301,6 +301,11 @@ fn main() -> Result<(), Error> {
 /// stop and uninstall the service
 #[cfg(windows)]
 fn main() -> anyhow::Result<()> {
+    if std::env::args().any(|argument| argument == DELETE_APP_DATA_ARG) {
+        let profiles = known_folder(windows_sys::Win32::UI::Shell::FOLDERID_UserProfiles)
+            .ok_or_else(|| anyhow::anyhow!("the user profiles folder is unavailable"))?;
+        return remove_app_data_in_profiles(&profiles);
+    }
     if run_maintenance_if_requested()? {
         return Ok(());
     }
@@ -674,6 +679,53 @@ fn final_cleanup_outcome(
         None => CleanupOutcome::Clean,
         Some(error) => CleanupOutcome::RestoredToAutomatic(error),
     }
+}
+
+/// Passed by the Uninstall section only when "Delete app data" was ticked, and only after
+/// `RemoveVergeService` let the uninstall continue (the barrier was proven gone).
+#[cfg(any(windows, test))]
+const DELETE_APP_DATA_ARG: &str = "--delete-app-data-all-profiles";
+
+/// The App's data folder name under Roaming and Local AppData (`BUNDLEID` in installer.nsi).
+#[cfg(any(windows, test))]
+const APP_DATA_DIR_NAME: &str = "com.raydocs.tono";
+
+/// Remove Tono's app data from every profile under `profiles_root`. The elevated uninstaller
+/// runs as whichever administrator approved it, so its `$APPDATA` is that account's folder,
+/// not the folders of the users who signed in to Tono. Links are removed, never followed: a
+/// profile's own junction cannot point this elevated delete somewhere else.
+#[cfg(any(windows, test))]
+fn remove_app_data_in_profiles(profiles_root: &std::path::Path) -> Result<(), Error> {
+    let mut failures = Vec::new();
+    for entry in std::fs::read_dir(profiles_root)? {
+        let entry = entry?;
+        // Real profile directories only; "All Users" / "Default User" are junctions.
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        for base in ["Roaming", "Local"] {
+            let target = entry
+                .path()
+                .join("AppData")
+                .join(base)
+                .join(APP_DATA_DIR_NAME);
+            let removed = match std::fs::symlink_metadata(&target) {
+                Ok(metadata) if metadata.is_file() => std::fs::remove_file(&target),
+                Ok(_) => std::fs::remove_dir_all(&target),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(error),
+            };
+            if let Err(error) = removed {
+                failures.push(format!("{}: {error}", target.display()));
+            }
+        }
+    }
+    anyhow::ensure!(
+        failures.is_empty(),
+        "app data could not be removed: {}",
+        failures.join("; ")
+    );
+    Ok(())
 }
 
 /// Whether any fail-closed recovery state may still exist. File names must match the library
