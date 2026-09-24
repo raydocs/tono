@@ -202,6 +202,7 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | #491 | Windows 从 Suspended/Error 换账户登录时保留上一账户的目录、runtime 副本与 Core | in-PR | [#491](https://github.com/raydocs/tono/issues/491)，[#506](https://github.com/raydocs/tono/pull/506) | 高·推导 | 叠在 #316 → #410 → #506 |
 | H17-C-F3 | macOS 账户进入 suspended 后不停止 Core、不作废缓存的设备出口凭据，唤醒恢复仍可用它连接（= H17-G-F3 第 3 步） | open | 待开 | 中·已确认 | 被吊销设备可用到出口应用新 roster 为止；实际 Core/PF 行为需实机；排在 H17-AUTH-MAC（#516）之后 |
 | H17-O-F7 | macOS 账户 suspended 后网络日志上传器不停止，持续用已被拒绝的 refresh 重试 | open | 待开 | 低·已确认 | 退避上限约 16 分钟一次；Windows 由 #460 处理 |
+| H17-AUTH-WIN | Windows 启动恢复遇 401（到期、超额、停用、设备吊销）即释放 WFP 并登出，不给原因 | in-PR | [#512](https://github.com/raydocs/tono/issues/512)，[#515](https://github.com/raydocs/tono/pull/515) | 高·已确认 | Worker 仍对所有不合格情形回 401；#460 合并前暂停页文案为"账号已暂停"；会话已被 cron 吊销时续费后需重新登录；未实机 |
 
 ## 7. 数据面规则（PF / WFP / sing-box / mihomo）
 
