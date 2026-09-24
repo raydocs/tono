@@ -132,7 +132,7 @@ fn execute(recovery: bool) -> Result<(), Error> {
         "executor image binding changed"
     );
     if a.receipt.phase == Phase::Committed {
-        cleanup_committed(&plan_path)?;
+        finish_committed(&plan_path, native::retire_recovery_task)?;
         return Ok(());
     }
     if recovery {
@@ -336,7 +336,7 @@ fn execute(recovery: bool) -> Result<(), Error> {
         std::thread::sleep(Duration::from_secs(1));
         let store = open_waiting()?;
         if store.attempt()?.receipt.phase == Phase::Committed {
-            cleanup_committed(&plan_path)?;
+            finish_committed(&plan_path, native::retire_recovery_task)?;
             return Ok(());
         }
     }
@@ -381,6 +381,23 @@ fn rollback_plan(plan: &mut Plan) -> Result<(), Error> {
         "rollback incomplete: {}",
         failures.join("; ")
     );
+    Ok(())
+}
+
+/// Commit ends the boot task's job: once the committed cleanup ran there is
+/// nothing left for `--update-recover` to do, so the SYSTEM ONSTART task is
+/// retired, as macOS retires its launchd job. A failed retirement leaves the
+/// task for the next boot, which lands here again and retries.
+fn finish_committed(
+    plan_path: &Path,
+    retire: impl FnOnce() -> Result<(), Error>,
+) -> Result<(), Error> {
+    cleanup_committed(plan_path)?;
+    if let Err(error) = retire() {
+        eprintln!(
+            "committed update cleaned up; the recovery task stays until the next boot: {error:#}"
+        );
+    }
     Ok(())
 }
 
