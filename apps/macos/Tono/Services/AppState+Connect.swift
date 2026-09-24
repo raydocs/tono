@@ -1703,10 +1703,14 @@ extension AppState {
     /// path already disarmed) also leaves `isProtectionBlocked` set, and a
     /// helper that was never asked to arm answers with no persisted state —
     /// reading that as an external release silently drops the connect intent
-    /// the recovery exists to fulfill.
+    /// the recovery exists to fulfill. `repairRequested` marks the first
+    /// attempt of a loop the user started with Repair and reconnect: a
+    /// rejection then continues into connect(), whose helper preparation is
+    /// the administrator reinstall that answers it.
     @discardableResult
     private func reconcileConfirmedExternalProtectionRelease(
-        protectionWasArmed: Bool = true
+        protectionWasArmed: Bool = true,
+        repairRequested: Bool = false
     ) async -> Bool {
         guard protectionWasArmed, isProtectionBlocked, !isConnected, !isConnecting,
               !isDisconnecting else { return false }
@@ -1724,7 +1728,15 @@ extension AppState {
         case .rejected:
             // No automatic retry can make an identity/UID rejection succeed.
             // Do not prompt on activation; the explicit Protected Offline
-            // action owns the one administrator repair attempt.
+            // action owns the one administrator repair attempt. Pausing that
+            // explicit attempt here as well ended it before connect() could
+            // reach the reinstall, so the repair was unreachable.
+            if repairRequested {
+                LocalTrafficAudit.shared.recordEvent(
+                    "helper_rejected_repair_requested"
+                )
+                return false
+            }
             protectedReconnectPausedForUserAction = true
             protectedReconnectPauseLiftsOnNetworkChange = false
             self.connectionCoordinator.protectedReconnectTask?.cancel()
@@ -1798,7 +1810,10 @@ extension AppState {
         }
     }
 
-    func scheduleProtectedReconnect(immediate: Bool = false) {
+    func scheduleProtectedReconnect(
+        immediate: Bool = false,
+        repairRequested: Bool = false
+    ) {
         guard !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
         // A network-change kick carries new information: a repeated-failure
         // pause may be lifted (the environment changed, the outcome can
@@ -1864,7 +1879,9 @@ extension AppState {
                 // release during the backoff is still honored.
                 if await self.reconcileConfirmedExternalProtectionRelease(
                     protectionWasArmed: protectionWasArmedWhenScheduled
-                        || KillSwitchService.isArmed
+                        || KillSwitchService.isArmed,
+                    repairRequested: repairRequested
+                        && self.protectedReconnectAttempt == 1
                 ) {
                     return true
                 }
@@ -1896,7 +1913,10 @@ extension AppState {
     /// Let the user bypass the weak-network backoff without weakening PF. The
     /// previous recovery loop is cancelled by ID before a new immediate loop
     /// waits for any in-flight teardown and starts the same full transaction.
-    func retryProtectedConnectionNow() {
+    /// `repairHelper` is false only for the Support remote retry: a helper
+    /// rejection must not put an administrator prompt in front of a user who
+    /// did not ask for it.
+    func retryProtectedConnectionNow(repairHelper: Bool = true) {
         guard isProtectionBlocked, !isConnected, !isConnecting else { return }
         protectedReconnectPausedForUserAction = false
         protectedReconnectPauseLiftsOnNetworkChange = false
@@ -1911,7 +1931,7 @@ extension AppState {
         self.connectionCoordinator.lastProtectedReconnectKick = nil
         isProtectedReconnectScheduled = false
         protectedReconnectNextAttemptAt = nil
-        scheduleProtectedReconnect(immediate: true)
+        scheduleProtectedReconnect(immediate: true, repairRequested: repairHelper)
     }
 
     /// Catalog hy2 the user can pick by hand. Prefer same-city; otherwise

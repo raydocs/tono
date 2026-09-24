@@ -32,6 +32,33 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS helper 拒绝本 App（403）时，"修复并重连"能走到 helper 重装
+
+- **归属/来源**：G1 保护恢复；macOS `AppState+Connect` 受保护重连循环。内部审查 X1-3，
+  Issue #428。基线 main bb2ed4e4 → 分支 `fix/helper-rejected-repair-20260923`；提交时未合 main。
+- **缺陷修复**：PF 已 armed、helper 对本 App 返回 403 时，App 进入 Protected Offline 并暂停
+  自动重试，提示用户点"Repair and reconnect"。这个按钮启动的重连循环在调用 `connect()` 之前
+  先做外部释放对账，对账又读到 `.rejected`，于是重新暂停、清空循环。`connect()` →
+  `prepareHelper()` 里的管理员重装因此永远走不到，点多少次都一样，唯一出口是关掉保护的
+  Restore internet（#304 的 `protectionWasArmed` 守卫只覆盖从未 arm 的情形）。现在用户显式
+  重试把循环的第一次尝试标为修复请求：这次尝试遇到 `.rejected` 时不再暂停，继续进入
+  `connect()`，由 helper 准备阶段弹出管理员重装。自动重试、前台激活对账和 Support 远程重试
+  （`retryProtectedConnectionNow(repairHelper: false)`）遇到拒绝仍然暂停，不会自行弹出管理员
+  提示。PF 全程保持 fail-closed。
+- **新增/优化**：无。
+- **工程与测试**：`ProtectedReconnectTests` 新增一个 XCTest
+  `testRepairAndReconnectReachesConnectWhenHelperRejectsThisApp`，用已有的
+  `NetworkProtectionOperations.refreshKillSwitchStatus` seam 固定返回 `.rejected`，PF armed、
+  处于用户操作暂停状态，调用 `retryProtectedConnectionNow()`。断言连接尝试确实发生
+  （`lastConnectionFailure` 非空，沿用同文件"缺 uuid 的目录节点在 helper 之前快速失败"的
+  写法），且之后的自动尝试仍因拒绝暂停。旧代码在第一次尝试就暂停，`lastConnectionFailure`
+  为空，断言失败。未改 helper 源码，CONTRACT.sha256 与协议版本不变。
+- **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests），结果以 PR 页为准。真实 403 下的管理员重装未做实机验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：如果 403 的原因是运行中的 App 包已被替换，重装 helper 也无效（需要重启 App），
+  现有文案仍指向重装。重装被用户取消或失败时，仍按既有规则暂停，等待用户下一次操作。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
