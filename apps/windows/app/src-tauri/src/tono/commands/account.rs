@@ -22,6 +22,21 @@ use super::*;
 use super::diagnostics::auth_error;
 
 pub async fn load_credentials(state: &Arc<TonoState>) {
+    load_credentials_from(state, || async {
+        let refresh = TonoCredentialStore::get_async(CredentialKey::RefreshToken).await;
+        let id = TonoCredentialStore::get_async(CredentialKey::InstallationId).await;
+        (refresh, id)
+    })
+    .await
+}
+
+type VaultRead = Result<Option<String>, tono_core::credentials::CredentialError>;
+
+async fn load_credentials_from<F, Fut>(state: &Arc<TonoState>, read: F)
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = (VaultRead, VaultRead)>,
+{
     let generation = {
         let inner = state.lock().await;
         if inner.credentials_loaded || inner.account_close.is_some() {
@@ -29,12 +44,7 @@ pub async fn load_credentials(state: &Arc<TonoState>) {
         }
         inner.sign_in_generation
     };
-    let outcome = tokio::time::timeout(CREDENTIAL_LOAD_TIMEOUT, async {
-        let refresh = TonoCredentialStore::get_async(CredentialKey::RefreshToken).await;
-        let id = TonoCredentialStore::get_async(CredentialKey::InstallationId).await;
-        (refresh, id)
-    })
-    .await;
+    let outcome = tokio::time::timeout(CREDENTIAL_LOAD_TIMEOUT, read()).await;
 
     let mut inner = state.lock().await;
     // Another hydration may have won while this vault read was in flight. More importantly,
@@ -83,9 +93,27 @@ pub async fn load_credentials(state: &Arc<TonoState>) {
     }
     match refresh {
         Ok(Some(token)) => {
-            // Hydrate memory only — writing the same bytes back would
-            // risk another prompting vault call.
-            let _ = inner.credentials.set_local(CredentialKey::RefreshToken, &token);
+            // Credential Manager outlives an uninstall that deletes the data directory, so a
+            // token this directory never adopted is a previous installation's session — possibly
+            // another person's account. Leave it unhydrated: restore then takes the signed-out
+            // path, whose local logout wipe deletes it from the vault.
+            // Written only for a signed-in account: the catalog and policy caches (sync), the
+            // node selection, and the privacy settings (the settings page, or the account's log
+            // upload scope). None is written by a signed-out first launch.
+            let account_traces = [
+                inner.catalog_cache().path().to_path_buf(),
+                inner.policy_cache().path().to_path_buf(),
+                crate::tono::state::selection_path(&inner.catalog_dir),
+                inner.catalog_dir.join(crate::tono::audit::SETTINGS_FILE_NAME),
+            ];
+            if crate::tono::credentials::data_dir_owns_vault_session(&inner.catalog_dir, &account_traces) {
+                // Hydrate memory only — writing the same bytes back would
+                // risk another prompting vault call.
+                let _ = inner.credentials.set_local(CredentialKey::RefreshToken, &token);
+            } else {
+                logging!(warn, Type::Service,
+                    "Tono: ignoring a stored session this installation did not create; sign in again");
+            }
         }
         Ok(None) => {}
         Err(err) => {
@@ -297,6 +325,10 @@ pub(crate) async fn adopt_sign_in_response(
     // Keep the Tono state lock through adoption: a resend/sign-out cannot invalidate this
     // generation between the last check and the token write.
     client.adopt(auth).await.map_err(|err| err.to_string())?;
+    if let Err(error) = crate::tono::credentials::mark_vault_session_owned(&inner.catalog_dir) {
+        // Not fatal: the next launch just asks this user to sign in again.
+        logging!(warn, Type::Service, "Tono: failed to record the vault session marker: {error}");
+    }
     inner.challenge_id = None;
     inner.account = Some(auth.user.clone());
     // Attribute the first catalog/connect failures too, not only records
@@ -447,6 +479,48 @@ async fn wait_account_close(operation: &crate::tono::state::LifecycleOperation) 
 mod lifecycle_tests {
     use super::*;
     use tokio::sync::oneshot;
+
+    #[tokio::test]
+    async fn fresh_data_dir_does_not_adopt_a_vault_refresh_token() {
+        let state = Arc::new(TonoState::for_test());
+        let vault = || async {
+            let refresh: VaultRead = Ok(Some("previous-install-session".to_string()));
+            let id: VaultRead = Ok(Some("9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d".to_string()));
+            (refresh, id)
+        };
+        load_credentials_from(&state, vault).await;
+        {
+            let mut inner = state.lock().await;
+            assert!(inner.credentials_loaded);
+            assert_eq!(inner.credentials.refresh_token().unwrap(), None,
+                "a session left in Credential Manager by an earlier installation must not sign this one in");
+            // This installation's own sign-in marks the directory; its token is then restored.
+            crate::tono::credentials::mark_vault_session_owned(&inner.catalog_dir).unwrap();
+            inner.credentials_loaded = false;
+        }
+        load_credentials_from(&state, vault).await;
+        {
+            let inner = state.lock().await;
+            assert_eq!(inner.credentials.refresh_token().unwrap().as_deref(), Some("previous-install-session"));
+            let _ = std::fs::remove_dir_all(&inner.catalog_dir);
+        }
+
+        // An earlier build signed in without a marker and its catalog sync never succeeded
+        // (offline, or 503 EXIT_IDENTITY_PROPAGATING), so there is no catalog cache. Another
+        // account trace, here the policy cache, still makes the session this installation's.
+        let upgraded = Arc::new(TonoState::for_test());
+        {
+            let inner = upgraded.lock().await;
+            std::fs::create_dir_all(&inner.catalog_dir).unwrap();
+            assert!(!inner.catalog_cache().path().exists());
+            std::fs::write(inner.policy_cache().path(), b"{}").unwrap();
+        }
+        load_credentials_from(&upgraded, vault).await;
+        let inner = upgraded.lock().await;
+        assert_eq!(inner.credentials.refresh_token().unwrap().as_deref(), Some("previous-install-session"),
+            "an upgrade must not sign out, and release the protection of, an account that never cached a catalog");
+        let _ = std::fs::remove_dir_all(&inner.catalog_dir);
+    }
 
     #[tokio::test]
     async fn account_close_waits_for_durable_deletion_and_reports_a_failed_acknowledgement() {
