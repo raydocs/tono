@@ -922,9 +922,10 @@ impl Audit {
 #[cfg(test)]
 mod tests {
     use super::{
-        Audit, AuditEvent, AuditRecord, MAX_AUDIT_FILE_BYTES, RotatingWriter, audit_enabled_from_settings,
-        network_log_upload_enabled_from_settings, periodic_telemetry_enabled_from_settings, redact,
-        save_network_log_upload_enabled, save_periodic_telemetry_enabled,
+        Audit, AuditEvent, AuditRecord, FailureReportScope, MAX_AUDIT_FILE_BYTES, RotatingWriter,
+        audit_enabled_from_settings, failure_report_scope, network_log_upload_enabled_from_settings,
+        periodic_telemetry_enabled_from_settings, redact, save_network_log_upload_enabled,
+        save_periodic_telemetry_enabled,
     };
     use std::path::{Path, PathBuf};
 
@@ -1289,6 +1290,36 @@ mod tests {
         assert!(
             periodic_telemetry_enabled_from_settings(legacy.path()),
             "a post-migration explicit opt-in must survive every later load"
+        );
+    }
+
+    #[test]
+    fn internal_builds_keep_classified_failure_reports_through_the_timeline_reset() {
+        // An upgraded install: the v2 migration resets the legacy default-on timeline switch.
+        let upgraded = TempDir::new("failure-report-upgrade");
+        std::fs::write(
+            upgraded.path().join(super::SETTINGS_FILE_NAME),
+            r#"{"audit_enabled":true,"periodic_telemetry_enabled":true,"network_log_default_v2":true}"#,
+        )
+        .unwrap();
+        let timeline = periodic_telemetry_enabled_from_settings(upgraded.path());
+        let audit = audit_enabled_from_settings(upgraded.path());
+        assert!(!timeline && audit);
+        assert_eq!(
+            failure_report_scope(true, audit, timeline),
+            Some(FailureReportScope::Classified),
+            "an internal build must keep reporting classified failures after the upgrade reset"
+        );
+        assert_eq!(
+            failure_report_scope(false, audit, timeline),
+            None,
+            "release builds keep the opt-in"
+        );
+        assert_eq!(failure_report_scope(false, audit, true), Some(FailureReportScope::Full));
+        assert_eq!(
+            failure_report_scope(true, false, true),
+            None,
+            "the local log switch stops every report"
         );
     }
 
