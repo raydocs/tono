@@ -53,6 +53,13 @@ pub async fn tono_set_periodic_telemetry_enabled(
     Ok(())
 }
 
+/// Whether this is an internal candidate build, which reports classified
+/// connect failures without the timeline opt-in. The settings page says so.
+#[tauri::command]
+pub async fn tono_internal_build() -> Result<bool, String> {
+    Ok(crate::tono::audit::internal_build())
+}
+
 /// Whether the raw audit log is uploaded.
 #[tauri::command]
 pub async fn tono_network_log_upload_enabled(

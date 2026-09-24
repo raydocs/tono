@@ -500,6 +500,45 @@ fn default_true() -> bool {
 /// if the owner decides this must not stay default-on.
 pub const NETWORK_LOG_UPLOAD_DEFAULT: bool = true;
 
+/// Internal candidate build: `TONO_BUILD_CHANNEL=internal` at compile time,
+/// which only the Windows candidate workflow sets. Release builds never carry
+/// it, so their consent defaults stay as they are.
+pub fn internal_build() -> bool {
+    option_env!("TONO_BUILD_CHANNEL") == Some("internal")
+}
+
+/// What an immediate connect-failure report (`telemetry/failures`) may carry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailureReportScope {
+    /// The user opted into the diagnostic timeline: the redacted error text
+    /// rides along, as before.
+    Full,
+    /// Internal-build default (owner decision 2026-09-24): stage, error code,
+    /// version and node only. No error text, URLs, addresses or account data.
+    Classified,
+}
+
+/// Whether a connect failure is reported, and with what. The local log switch
+/// still stops every report. Release builds report only after the timeline
+/// opt-in; internal builds also send the classified record without it. That
+/// default comes from the build, not from `settings.json`, so the one-shot v2
+/// reset of the timeline switch cannot turn it off on upgrade.
+pub fn failure_report_scope(
+    internal_build: bool,
+    audit_enabled: bool,
+    timeline_opted_in: bool,
+) -> Option<FailureReportScope> {
+    if !audit_enabled {
+        None
+    } else if timeline_opted_in {
+        Some(FailureReportScope::Full)
+    } else if internal_build {
+        Some(FailureReportScope::Classified)
+    } else {
+        None
+    }
+}
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct SettingsFile {
     #[serde(default = "default_true")]
@@ -746,6 +785,11 @@ impl Audit {
 
     pub fn periodic_telemetry_enabled(&self) -> bool {
         self.periodic_telemetry_enabled.load(Ordering::Acquire)
+    }
+
+    /// [`failure_report_scope`] for this build and the current switches.
+    pub fn failure_report_scope(&self) -> Option<FailureReportScope> {
+        failure_report_scope(internal_build(), self.enabled(), self.periodic_telemetry_enabled())
     }
 
     pub fn log_path(&self) -> &Path {
