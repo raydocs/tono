@@ -32,6 +32,28 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 登出时删除含账户出口凭据的 sing-box 运行时文件
+
+- **归属/来源**：G1 账户隔离；影响 macOS `ManagedExitCatalogOwnership`/`ConfigStorage`。
+  内部审查 H11-F1（macOS 部分），Issue #407。基线 main 833c0607 → 分支
+  `fix/macos-runtime-copy-20260923`；提交时未合 main。
+- **缺陷修复**：`CoreRuntimeManager` 把 sing-box 运行时写到
+  `~/Library/Application Support/Tono/config/config.json`，其中含节点 `uuid`、Reality 参数、
+  住宅 socks 用户名/密码和 clash_api secret。登出屏障 `purge` 只删目录缓存并丢弃托管地区，
+  该文件一直留到下一个账户连接时才被覆盖。现在所有权丢弃（`purge`：用户登出、账户丢失、
+  无 token 启动；`adopt` 到其他账户）同时删除该文件。helper 运行的是 `/var/run/tono-core`
+  下自己的 root 快照；每次 start/reload 都会先重写用户侧文件，因此删除不影响运行中的 Core。
+- **新增/优化**：无。
+- **工程与测试**：新增一个 XCTest
+  `ManagedExitCatalogOwnershipTests.testSignOutRemovesTheRuntimeBuiltFromTheAccountsCatalog`：
+  在 `runtimeConfigPath` 写入含住宅密码的文件，调用 `purge()`，断言文件已删除。旧实现不删，
+  断言失败。
+- **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests），结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：macOS 没有卸载器，拖走 App 后 App Support 仍会残留（平台惯例，未处理）。
+  未做实机验证。
+
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
 - **归属/来源**：G1–G3 审查与修复的可追溯性（工程流程与记录，非产品行为）；审查基线 main
