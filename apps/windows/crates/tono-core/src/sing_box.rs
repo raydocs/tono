@@ -165,6 +165,13 @@ pub fn build_synthetic_offline_draft(
 
     let document: Value = serde_json::from_str(&policy.json).map_err(|_| UnsupportedPolicy)?;
     let fields = document.as_object().ok_or(UnsupportedPolicy)?;
+    // A signed document may name its own revision (#317). It must be the
+    // envelope's; a different one means the envelope was relabelled.
+    let embeds_revision = match fields.get("revision") {
+        None => false,
+        Some(embedded) if embedded.as_i64() == Some(policy.revision) => true,
+        Some(_) => return Err(UntrustedSnapshot),
+    };
     if fields.keys().any(|key| {
         ![
             "version",
@@ -172,9 +179,10 @@ pub fn build_synthetic_offline_draft(
             "mediaEndpoints",
             "webDomains",
             "directSuffixes",
+            "revision",
         ]
         .contains(&key.as_str())
-    }) || fields.len() != 5
+    }) || fields.len() != 5 + usize::from(embeds_revision)
     {
         return Err(UnsupportedPolicy);
     }
@@ -586,6 +594,24 @@ mod tests {
         assert_eq!(
             build_synthetic_offline_draft(input).unwrap_err(),
             SingBoxError::UnsupportedPolicy
+        );
+    }
+
+    #[test]
+    fn signed_policy_revision_key_is_bound_to_the_envelope() {
+        // #317: the Worker will embed `revision` inside the signed json. The
+        // matching key is admitted; a different one means the envelope was
+        // relabelled and the snapshot is refused.
+        let mut fixture = Fixture::new();
+        let mut policy = fixture.reference["input"]["policy_document"].clone();
+        policy["revision"] = json!(fixture.policy.revision);
+        fixture.set_policy(policy.clone());
+        assert!(build_synthetic_offline_draft(fixture.input()).is_ok());
+        policy["revision"] = json!(fixture.policy.revision + 1);
+        fixture.set_policy(policy);
+        assert_eq!(
+            build_synthetic_offline_draft(fixture.input()).unwrap_err(),
+            SingBoxError::UntrustedSnapshot
         );
     }
 
