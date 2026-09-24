@@ -138,7 +138,12 @@ nonisolated enum HelperProtocolVersion {
     ///   to stop a stale core before releasing PF, so they now work after the
     ///   bound macOS account was deleted. A 4.9.0 daemon's recovery commands
     ///   fail there and leave PF fail-closed.
-    static let current = "4.41.0"
+    /// - 4.41.0 → 4.42.0 (provisional, renumber at merge): `--emergency-reset`
+    ///   takes Tono's marked block back out of /etc/pf.conf and deletes
+    ///   /etc/pf.conf.tono-backup and /etc/hosts.tono-backup once PF is
+    ///   released, keeping every line outside the markers. A 4.41.0 reset
+    ///   leaves the hook and both backups behind.
+    static let current = "4.42.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

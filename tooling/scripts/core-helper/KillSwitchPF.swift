@@ -238,6 +238,58 @@ extension KillSwitchManager {
         guard let original = String(data: originalData, encoding: .utf8) else {
             throw HelperFailure.invalid("The main PF configuration is not UTF-8.")
         }
+        let candidate = try hookedMainConfiguration(original)
+
+        // Second arm / reassert almost always leaves /etc/pf.conf unchanged.
+        // Re-validating the same text with two `pfctl -nf` runs does not
+        // change the hook and only delays the child-anchor reload.
+        if candidate == original {
+            return false
+        }
+
+        let candidatePath = "/etc/.tono-pf-\(UUID().uuidString)"
+        defer { unlink(candidatePath) }
+        try atomicWrite(
+            path: candidatePath,
+            data: Data(candidate.utf8),
+            permissions: 0o600
+        )
+        let candidateCheck = try run("/sbin/pfctl", ["-nf", candidatePath])
+        guard candidateCheck.status == 0 else {
+            throw HelperFailure.system(
+                candidateCheck.message.isEmpty
+                    ? "Main PF validation failed."
+                    : candidateCheck.message
+            )
+        }
+        if candidate != original {
+            if !FileManager.default.fileExists(atPath: killSwitchMainBackupPath) {
+                try atomicWrite(
+                    path: killSwitchMainBackupPath,
+                    data: originalData,
+                    permissions: 0o600
+                )
+            }
+            try atomicWrite(
+                path: killSwitchMainPFPath,
+                data: Data(candidate.utf8),
+                permissions: 0o644
+            )
+        }
+        let installedCheck = try run("/sbin/pfctl", ["-nf", killSwitchMainPFPath])
+        guard installedCheck.status == 0 else {
+            throw HelperFailure.system(
+                installedCheck.message.isEmpty
+                    ? "Installed PF configuration is invalid."
+                    : installedCheck.message
+            )
+        }
+        return candidate != original
+    }
+
+    /// /etc/pf.conf with Tono's marked hook in place: what an arm writes.
+    /// Pure, so removal can be checked against exactly this text.
+    static func hookedMainConfiguration(_ original: String) throws -> String {
         let hasBegin = original.contains(killSwitchBeginMarker)
         let hasEnd = original.contains(killSwitchEndMarker)
         guard hasBegin == hasEnd else {
@@ -290,52 +342,18 @@ extension KillSwitchManager {
             if original.hasSuffix("\n"), !cleaned.hasSuffix("\n") { cleaned += "\n" }
             candidate = cleaned
         }
+        return candidate
+    }
 
-        // Second arm / reassert almost always leaves /etc/pf.conf unchanged.
-        // Re-validating the same text with two `pfctl -nf` runs does not
-        // change the hook and only delays the child-anchor reload.
-        if candidate == original {
-            return false
-        }
-
-        let candidatePath = "/etc/.tono-pf-\(UUID().uuidString)"
-        defer { unlink(candidatePath) }
-        try atomicWrite(
-            path: candidatePath,
-            data: Data(candidate.utf8),
-            permissions: 0o600
-        )
-        let candidateCheck = try run("/sbin/pfctl", ["-nf", candidatePath])
-        guard candidateCheck.status == 0 else {
-            throw HelperFailure.system(
-                candidateCheck.message.isEmpty
-                    ? "Main PF validation failed."
-                    : candidateCheck.message
-            )
-        }
-        if candidate != original {
-            if !FileManager.default.fileExists(atPath: killSwitchMainBackupPath) {
-                try atomicWrite(
-                    path: killSwitchMainBackupPath,
-                    data: originalData,
-                    permissions: 0o600
-                )
-            }
-            try atomicWrite(
-                path: killSwitchMainPFPath,
-                data: Data(candidate.utf8),
-                permissions: 0o644
-            )
-        }
-        let installedCheck = try run("/sbin/pfctl", ["-nf", killSwitchMainPFPath])
-        guard installedCheck.status == 0 else {
-            throw HelperFailure.system(
-                installedCheck.message.isEmpty
-                    ? "Installed PF configuration is invalid."
-                    : installedCheck.message
-            )
-        }
-        return candidate != original
+    /// Full removal only (`--emergency-reset`), after PF is released: take
+    /// Tono's marked block back out of /etc/pf.conf and delete the two backups
+    /// this helper wrote before its first edits. A disarm never calls this; the
+    /// hook stays while Tono is installed. Every line outside the markers is
+    /// kept, and an old backup is never copied over the live file.
+    static func removeMainHookAndBackups(
+        mainPath: String = killSwitchMainPFPath,
+        backupPaths: [String] = [killSwitchMainBackupPath, killSwitchHostsBackupPath]
+    ) throws {
     }
 
     /// What to do about states established under rules that no longer exist.
