@@ -32,6 +32,28 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · 控制面：Tailscale 注册暂停时，未跑的 tailnet 吊销不再永久挡住账户恢复
+
+- **归属/来源**：ops 客户生命周期（控制面 Worker）；内部审查 H17-O-F5 / H17-G-F2，
+  Issue [#522](https://github.com/raydocs/tono/issues/522)；基线 origin/main `059a2ea2`，
+  分支 `fix/tailnet-revoke-reenable-20260924`；未合 main。
+- **缺陷修复**：生产 `TAILSCALE_ENROLLMENT_ENABLED=false` 时 `processRevocations` 直接返回，
+  停用/销户时为带 `tailscale_node_id` 的设备记下的 `revocation_jobs` 永远不完成；ops
+  `PATCH users/{id}` 与 token-admin `PATCH admin/users/{id}` 的恢复检查把这些任务算作「吊销进行中」，
+  恢复永久返回 409 `REVOCATION_PENDING`。改后：注册暂停时排队任务不再挡恢复（仍有 live 设备照旧 409）；
+  任务保持未完成，不伪装成已吊销，注册重新打开后照常执行；设备级注册围栏
+  （`issueEnrollment`）不变；ops 恢复时写审计 `user.tailnet-revocation-queued` 记下排队数。
+- **新增/优化**：无。
+- **工程与测试**：`test/ops-api.test.ts` 新增一个 `it`（注册关闭、已停用用户带排队任务 → 恢复 200、
+  任务仍未完成、审计行存在）；旧代码上实跑失败（`expected 409 to be 200`）。
+- **验证**：本机 MacBook `npx vitest run test/ops-api.test.ts`（39/39 通过）、
+  `test/worker.test.ts -t "re-enable|revocation|tailnet"`（11 通过）、`test/index-size.test.ts`、
+  `npm run typecheck`；完整套件以 PR CI 为准。
+- **候选/发布**：仅源码，无新候选；未部署。
+- **剩余限制**：未查生产 D1 中是否仍有带 `tailscale_node_id` 的设备行；注册暂停期间这些 tailnet
+  节点确实仍在 tailnet 上（审计行只是记录，不是撤销）。token-admin 路径无操作者身份，只放宽检查不写审计；
+  与 #406（把该处理器移出 `index.ts`）相邻冲突，后合者需把同一条件带过去。
+
 ## 2026-09-23 · 发现总账与审查流程记录
 
 - **归属/来源**：G1–G3 审查与修复的可追溯性（工程流程与记录，非产品行为）；基线 origin/main
