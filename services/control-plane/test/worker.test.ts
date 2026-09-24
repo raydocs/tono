@@ -7324,6 +7324,34 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     ).bind(segment.id).first()).toBeNull();
   });
 
+  it('deletes a raw log object whose index row was never written', async () => {
+    const account = await createAccount('log-orphan');
+    await enableDiagnosticsLogs(account);
+    await env.DB.prepare(
+      `CREATE TRIGGER test_fail_log_index BEFORE INSERT ON diagnostics_log_objects
+       BEGIN SELECT RAISE(ABORT, 'injected D1 failure'); END`,
+    ).run();
+    let failed: Response;
+    try {
+      failed = await logUpload(account.accessToken, await gzip('{"host":"secret.example"}\n'));
+    } finally {
+      await env.DB.prepare('DROP TRIGGER test_fail_log_index').run();
+    }
+    expect(failed.status).toBe(503);
+    const bucket = (env as unknown as Env).DIAGNOSTICS_LOGS;
+    expect((await bucket.list({ prefix: `logs/${account.user.id}/` })).objects).toHaveLength(1);
+
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 3 * 86_400_000);
+    try {
+      const later = createExecutionContext();
+      await worker.scheduled(createScheduledController(), env as unknown as Env, later);
+      await waitOnExecutionContext(later);
+    } finally {
+      clock.mockRestore();
+    }
+    expect((await bucket.list({ prefix: `logs/${account.user.id}/` })).objects).toHaveLength(0);
+  });
+
   it('deletes diagnostics reports once they pass retention', async () => {
     const account = await createAccount('diagnostics-retention');
     const upload = await api('diagnostics/reports', json(diagnosticsPayload(), account.accessToken));

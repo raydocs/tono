@@ -32,6 +32,33 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · 原始网络日志：索引没写成的 R2 对象也会被清理
+
+- **归属**：ops 任务（诊断日志保留期）；控制面 `services/control-plane`。不属客户发布门。
+- **来源**：内部审查 H14-F1，Issue #448；分支 `fix/raw-log-orphans-20260923`，基线 origin/main
+  bb2ed4e4。提交时未合 main。新增 migration `0088_diagnostics_log_pending_objects.sql`
+  （0077–0082 被在审 PR 占用，本轮按分配从 0088 起编号）。
+- **缺陷修复**：上传先写 R2、后写 `diagnostics_log_objects` 索引，保留期清理只按索引删。
+  索引插入失败或请求在两步之间被取消时，对象永远不会被删除（该桶存放未脱敏主机名，承诺
+  保留 14 天）。改后：上传在写 R2 前，用同一条语句完成重放检查并把 key 记入
+  `diagnostics_log_pending_objects`；索引行插入时由触发器清掉这条记录；定时清理把两天前仍未
+  清掉、且没有索引行指向的 key 从 R2 删除，再删记录（R2 删除失败时保留记录，下一轮重试）。
+  两天的界限来自 key 里的 UTC 日期：届时不会再有上传写同一个 key。跨 UTC 日的并发同序号
+  上传，输家的对象也按同一路径清理。
+- **新增/优化**：原索引保留期清理从 `src/index.ts` 原样移到 `sweepDiagnosticsLogs`
+  （`src/telemetry/routes.ts`），与孤儿清理放在一起；行为不变。
+- **工程与测试**：一个 Worker `it`（`test/worker.test.ts`
+  `deletes a raw log object whose index row was never written`）：临时触发器让索引插入失败，
+  上传得 503，时钟前推 3 天跑一次 `scheduled`，断言该用户前缀下没有 R2 对象。
+- **验证**：MacBook 本机 worktree：该 `it` 在旧代码上失败（R2 仍有 1 个对象），修复后通过；
+  `npx vitest run`（control-plane 全量）43 个文件、892 个测试通过；`npm run typecheck`、
+  `npm run check:budgets` 通过；上传路径的 prepare 数仍为 10（`ingest-budgets` 上限未改）。
+  未部署，未对 remote D1 执行 migration。
+- **候选/发布**：仅源码，无新候选；Worker 未部署。
+- **剩余限制**：migration 未部署前不生效；部署前已经孤立的对象没有记录，本改动删不到，
+  建议 owner 在 Cloudflare 控制台给 `tono-diagnostics-logs` 的 `logs/` 前缀设 lifecycle
+  规则（如 15 天）兜底（本 PR 未改任何远端配置）。清理每 5 分钟最多处理 50 条记录。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3

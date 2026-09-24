@@ -85,7 +85,7 @@ import {
   publicTelemetryWindow,
   normalizedReferenceCode,
   DIAGNOSTICS_RETENTION_DEFAULT_SECONDS,
-  DIAGNOSTICS_LOG_RETENTION_DEFAULT_SECONDS,
+  sweepDiagnosticsLogs,
   TELEMETRY_RETENTION_DEFAULT_SECONDS,
   OPS_AUDIT_RETENTION_SECONDS,
 } from './telemetry/routes';
@@ -1880,32 +1880,7 @@ async function enforceAll(e: Env) {
   await e.DB.prepare('DELETE FROM diagnostics_reports WHERE received_at <= ?')
     .bind(t - envInt(e, 'DIAGNOSTICS_RETENTION_SECONDS', DIAGNOSTICS_RETENTION_DEFAULT_SECONDS))
     .run();
-  // Raw log segments: delete the payload before the index row. Losing the row
-  // first would orphan the object with nothing left pointing at it, and this
-  // bucket is the one place in the system holding unredacted hostnames.
-  const logRetention = envInt(
-    e,
-    'DIAGNOSTICS_LOG_RETENTION_SECONDS',
-    DIAGNOSTICS_LOG_RETENTION_DEFAULT_SECONDS,
-  );
-  const expiredLogs = await e.DB.prepare(
-    'SELECT id, r2_key FROM diagnostics_log_objects WHERE received_at <= ? LIMIT 50',
-  ).bind(t - logRetention).all<Row>();
-  if (expiredLogs.results.length > 0) {
-    const keys = expiredLogs.results.map((r) => String(r.r2_key));
-    const ids = expiredLogs.results.map((r) => String(r.id));
-    try {
-      await e.DIAGNOSTICS_LOGS.delete(keys);
-      // Only delete index rows from D1 if R2 deletion succeeded.
-      // Retaining the rows on failure allows the next sweep to retry deletion,
-      // preventing unredacted logs from remaining orphaned in R2.
-      const placeholders = ids.map(() => '?').join(',');
-      await e.DB.prepare(`DELETE FROM diagnostics_log_objects WHERE id IN (${placeholders})`)
-        .bind(...ids).run();
-    } catch (x) {
-      console.error('batch r2 deletion failed', x instanceof Error ? x.message : String(x));
-    }
-  }
+  await sweepDiagnosticsLogs(e, t);
   await e.DB.prepare('DELETE FROM telemetry_windows WHERE received_at <= ?')
     .bind(t - envInt(e, 'TELEMETRY_RETENTION_SECONDS', TELEMETRY_RETENTION_DEFAULT_SECONDS))
     .run();
