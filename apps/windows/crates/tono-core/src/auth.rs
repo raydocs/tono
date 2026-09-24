@@ -890,7 +890,47 @@ pub enum SessionVerdict {
 /// identity the request was made under; a verdict for a retired identity is
 /// never reported. Called on the request path, so it must not block.
 pub trait SessionVerdictSink: Send + Sync {
+    /// Called with the client's identity lock held: must not block or call
+    /// back into the client.
     fn report(&self, identity_epoch: u64, verdict: SessionVerdict);
+}
+
+/// How one exchange's answer bears on the session (#582).
+#[derive(Debug, Clone, Copy)]
+enum SessionUse {
+    /// No session: sign-in endpoints.
+    None,
+    /// A first attempt with the held access token. Its 401 only means the
+    /// token is stale; the refresh that follows answers for the session.
+    Bearer(u64),
+    /// `auth/refresh`, or a replay with a freshly refreshed token: a 401 here
+    /// is the server refusing the session.
+    Decisive(u64),
+}
+
+impl SessionUse {
+    fn classify(self, response: &ApiResponse) -> Option<(u64, SessionVerdict)> {
+        let (identity, decisive) = match self {
+            SessionUse::None => return None,
+            SessionUse::Bearer(identity) => (identity, false),
+            SessionUse::Decisive(identity) => (identity, true),
+        };
+        let code = || {
+            serde_json::from_slice::<ErrorEnvelope>(&response.body)
+                .ok()
+                .and_then(|env| env.error.code)
+        };
+        let verdict = match response.status {
+            200..=299 => SessionVerdict::Verified,
+            401 if decisive => SessionVerdict::Refused { code: code() },
+            403 => match code() {
+                Some(code) if code == "USER_DISABLED" => SessionVerdict::Refused { code: Some(code) },
+                _ => SessionVerdict::Forbidden,
+            },
+            _ => return None,
+        };
+        Some((identity, verdict))
+    }
 }
 
 /// Account API client (§1): Bearer injection, one refresh-and-retry on 401,
@@ -1005,7 +1045,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
 
     pub async fn auth_methods(&self) -> Result<AuthMethodsResponse, ApiError> {
         let body = self
-            .call(HttpMethod::Get, endpoints::AUTH_METHODS, None, None)
+            .call(HttpMethod::Get, endpoints::AUTH_METHODS, None, None, SessionUse::None)
             .await?;
         decode_json(&body)
     }
@@ -1028,7 +1068,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         };
         let body = serde_json::to_string(&request).map_err(|_| ApiError::InvalidResponse)?;
         let response = self
-            .call(HttpMethod::Post, endpoints::EMAIL_START, Some(body), None)
+            .call(HttpMethod::Post, endpoints::EMAIL_START, Some(body), None, SessionUse::None)
             .await?;
         decode_json(&response)
     }
@@ -1045,7 +1085,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         };
         let body = serde_json::to_string(&request).map_err(|_| ApiError::InvalidResponse)?;
         let response = self
-            .call(HttpMethod::Post, endpoints::EMAIL_VERIFY, Some(body), None)
+            .call(HttpMethod::Post, endpoints::EMAIL_VERIFY, Some(body), None, SessionUse::None)
             .await?;
         decode_auth_response(&response)
     }
@@ -1306,7 +1346,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         // fail here without network I/O. This also preserves the normal pre-expiry renewal.
         self.current_access_token(identity).await?;
         let (token, epoch, body) = self.logout_request(identity).await?;
-        match self.call(HttpMethod::Post, endpoints::LOGOUT, Some(body), Some(&token)).await {
+        match self.call(HttpMethod::Post, endpoints::LOGOUT, Some(body), Some(&token), SessionUse::Bearer(identity)).await {
             Err(ApiError::Unauthorized) => {
                 let mut state = self.state.lock().await;
                 if state.identity_epoch != identity {
@@ -1321,7 +1361,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
                 // Rotation can replace the refresh token: capture bearer/body together again,
                 // but only for the original logout identity. No transport retry on this replay.
                 let (token, _, body) = self.logout_request(identity).await?;
-                self.send(HttpMethod::Post, endpoints::LOGOUT, Some(body), Some(&token)).await?;
+                self.send(HttpMethod::Post, endpoints::LOGOUT, Some(body), Some(&token), SessionUse::Decisive(identity)).await?;
                 Ok(())
             }
             result => result.map(|_| ()),
@@ -1357,7 +1397,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
     ) -> Result<Vec<u8>, ApiError> {
         let (token, epoch) = self.current_access_token(identity).await?;
         self.ensure_log_identity(identity).await?;
-        let response = self.call(method, path, body.clone(), Some(&token)).await;
+        let response = self.call(method, path, body.clone(), Some(&token), SessionUse::Bearer(identity)).await;
         self.ensure_log_identity(identity).await?;
         match response {
             Err(ApiError::Unauthorized) => {
@@ -1375,7 +1415,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
                 self.ensure_log_identity(identity).await?;
                 // No transport retry on the replay: the refresh just proved
                 // connectivity, and the budget is one retry per logical request.
-                let response = self.send(method, path, body, Some(&renewed)).await;
+                let response = self.send(method, path, body, Some(&renewed), SessionUse::Decisive(identity)).await;
                 self.ensure_log_identity(identity).await?;
                 response
             }
@@ -1407,7 +1447,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
             binary_body: Some(body.clone()),
             headers: headers.clone(),
         };
-        let result = map_status(self.transport.send(build(&token)).await?);
+        let result = self.exchange(build(&token), SessionUse::Bearer(identity_epoch)).await;
         self.ensure_log_identity(identity_epoch).await?;
         match result {
             Err(ApiError::Unauthorized) => {
@@ -1422,7 +1462,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
                 drop(state);
                 let renewed = self.refresh_access_token(epoch, identity_epoch).await?;
                 self.ensure_log_identity(identity_epoch).await?;
-                let replay = map_status(self.transport.send(build(&renewed)).await?);
+                let replay = self.exchange(build(&renewed), SessionUse::Decisive(identity_epoch)).await;
                 self.ensure_log_identity(identity_epoch).await?;
                 replay
             }
@@ -1459,7 +1499,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         })
         .map_err(|_| ApiError::InvalidResponse)?;
         let response = self
-            .call(HttpMethod::Post, endpoints::REFRESH, Some(body), None)
+            .call(HttpMethod::Post, endpoints::REFRESH, Some(body), None, SessionUse::Decisive(identity))
             .await?;
         let tokens: TokenResponse = decode_json(&response)?;
         // Commit critical section: adopt()/logout() may have installed a new
@@ -1502,13 +1542,14 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         path: &str,
         body: Option<String>,
         bearer: Option<&str>,
+        session: SessionUse,
     ) -> Result<Vec<u8>, ApiError> {
-        let first = self.send(method, path, body.clone(), bearer).await;
+        let first = self.send(method, path, body.clone(), bearer, session).await;
         match first {
             Err(err) if matches!(err, ApiError::Transport { kind, .. } if should_retry_transport(method, kind)) =>
             {
                 tokio::time::sleep(TRANSPORT_RETRY_DELAY).await;
-                match self.send(method, path, body, bearer).await {
+                match self.send(method, path, body, bearer, session).await {
                     Ok(response) => Ok(response),
                     // Propagate the original error: it is the more useful
                     // signal than a second, possibly different, failure.
@@ -1529,6 +1570,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         path: &str,
         body: Option<String>,
         bearer: Option<&str>,
+        session: SessionUse,
     ) -> Result<Vec<u8>, ApiError> {
         let request = ApiRequest {
             method,
@@ -1538,7 +1580,23 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
             binary_body: None,
             headers: catalog_accept_headers(path),
         };
-        map_status(self.transport.send(request).await?)
+        self.exchange(request, session).await
+    }
+
+    /// The one place a server answer is read (#582). It sits below `call`'s
+    /// transport retry and below renewal's swallowed refresh error, so every
+    /// answer is classified and reported, whatever its caller does with it.
+    async fn exchange(&self, request: ApiRequest, session: SessionUse) -> Result<Vec<u8>, ApiError> {
+        let response = self.transport.send(request).await?;
+        if let (Some(sink), Some((identity, verdict))) = (&self.verdict_sink, session.classify(&response)) {
+            // Under the identity lock: adopt/logout cannot retire this identity
+            // between the check and the report.
+            let state = self.state.lock().await;
+            if state.identity_epoch == identity {
+                sink.report(identity, verdict);
+            }
+        }
+        map_status(response)
     }
 }
 
