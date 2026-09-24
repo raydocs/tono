@@ -32,6 +32,32 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 升级恢复在停 Service 前只读判定，已完整发布不再停/起 Service
+
+- **归属/来源**：G3 受保护升级（安装后可用性）；Windows Service 升级执行器
+  （`apps/windows/service/src/bin/install_service/update_executor.rs`）。Issue #490（R4 组合审查 C1，
+  #301 遗留）。基线 main bb2ed4e4，叠在在审 #361（含 #359，提供逐成员 `plan_members_at` 判定）
+  之上 → 分支 `fix/update-recover-no-stop-20260923`；提交时均未合 main，须在 #359、#361 之后合并。
+  与 #488（同文件 `register_consumed_recovery` 段）不重叠，合并顺序不限。
+- **缺陷修复（源码推导，无保护绕过）**：`--update-recover` 在分类之前就 `stop_windows_service`。
+  Replaced 且 successor 未运行（用户在 commit 前关掉新 App，或重启）时，分类为 TargetVerified，
+  什么都不改，却已停掉 Service 再重启；重启后的 Service 又为同一 pending 记录 spawn 恢复，形成
+  停/起循环，期间 App `adopt()` 撞到停机窗口会失败。现在恢复在停 Service 之前先做只读分类
+  （已安装组件 + durable plan 逐成员 New），TargetVerified 只写 Replaced 标记并退出，不停
+  Service；NoPlan / Interrupted 仍按原流程停 Service、取得 owner 后再次分类并回滚。停 Service 之前
+  的读失败直接退出，不再把记录降为 Uncertain。U1（单次消费）、U3（高水位）、U4（Disconnect 不
+  伪造 commit）未触碰：本改动不调用 consume，不改序号，不涉及 Disconnect 分支。
+- **新增/优化**：无。
+- **工程与测试**：新增一个回归 `update_recovery_keeps_the_service_running_for_a_complete_publication`
+  （执行器 tests）；旧代码没有停 Service 前的判定入口（按构造编译失败）。停 Service 后的分类改为
+  调用同一只读函数 `classify_installed`，逻辑不变。
+- **验证**：本机（编辑机）未运行 cargo；委托本 PR 的 GitHub-hosted `windows-2025` CI（service
+  workspace `cargo test --locked`），结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：Replaced 记录仍 pending，每次 Service 启动仍会 spawn 一次恢复执行器（只读分类后
+  立即退出），直到 App 收养 successor 或 Disconnect 归档（#359）。未在 Windows 11 实机复现或验证，
+  实机验证属 G3 验收范围。
+
 ## 2026-09-23 · Windows 更新恢复任务注册失败不再让尝试停在 Consumed（X3-2 后续）
 
 - **归属/来源**：G3 原生升级链；Windows Service 更新协调器（`core/update.rs`）与独立执行器
