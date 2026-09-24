@@ -114,13 +114,15 @@ nonisolated enum ManagedTrafficPolicySignature {
     /// Derived from the document and its signature alone, so a cached copy
     /// answers the same after a restart as it did when it arrived.
     static func revisionIsAuthenticated(
-        _ cache: ManagedTrafficPolicyCache,
+        json: String,
+        revision: Int,
+        signature: String?,
         publicKeyBase64: String = Self.publicKeyBase64
     ) -> Bool {
-        embeddedRevision(in: cache.json) == .value(cache.revision)
+        embeddedRevision(in: json) == .value(revision)
             && verdict(
-                json: cache.json,
-                signature: cache.signature,
+                json: json,
+                signature: signature,
                 publicKeyBase64: publicKeyBase64
             ) == .trusted
     }

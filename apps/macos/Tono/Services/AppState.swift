@@ -238,6 +238,9 @@ final class AppState {
     /// Signature of the revision currently installed, so an unsigned copy of a
     /// revision the server has since signed is not mistaken for already applied.
     var managedTrafficPolicySignature: String?
+    /// The installed revision number was named inside verified signed bytes,
+    /// not only by the unsigned envelope (#317).
+    var managedTrafficPolicyRevisionAuthenticated = false
     var activeDirectPolicy: ConfigPipeline.ManagedDirectRuntimePolicy?
     var catalogSelectionRequiresChoice = false
     let initialDataLoader = InitialDataLoader()

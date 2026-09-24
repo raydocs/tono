@@ -32,6 +32,33 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 策略 revision 只认签名内的值（H3-F5 macOS 客户端侧）
+
+- **归属/来源**：G1 保护不放宽/签名信任边界；影响 macOS `ManagedTrafficPolicySignature.swift`、
+  `ManagedTrafficPolicyProcessor.swift`、`AppState+Catalog.swift`。基线 main bb2ed4e4，分支
+  `fix/macos-policy-revision-20260923`；Issue #317；与 Windows #342 同一规则；提交时未合 main。
+- **缺陷修复**：签名只覆盖 `v1\n + json`，revision 在签名外却是单调闸门；被攻破的 Worker 或
+  TLS 中间人可把历史真实签名策略配超大 revision 重放并写入磁盘缓存，此后真实新 revision
+  全被当作旧版丢弃。改后：json 内若带 `revision` 必须等于信封 revision，否则整份拒绝（记
+  `managed_direct_policy_revision_mismatch`）；只有"签名 Trusted 且 json 内 revision 等于信封"
+  才算已认证 revision；已认证 revision 无视数值替换未认证的当前/缓存 revision（已被钉住的客户端
+  借此恢复）；装入已认证 revision 后，未签名或旧式签名文档不能再推动闸门（静默保持）。
+  AppState 内存闸门、磁盘缓存比较与 processor `persistIfNewest` 统一走 `revisionOrder`；
+  认证状态只由文档与签名推出，磁盘缓存重启后结论不变。主机信任仍只由签名结论与编译期白名单
+  决定，未放宽。
+- **新增/优化**：无。
+- **工程与测试**：新增 XCTest `testSignedRevisionOutranksAnUnsignedRevisionPin`（一次性密钥）。
+- **验证**：红灯：只含测试与未接线辅助函数的提交 82cc2ede 在 GitHub-hosted macOS CI（run
+  35948917094）build 作业中该 XCTest 以断言失败（测试第 80 行：json 写 revision 4、信封 5 的文档被
+  接受），非编译错误。同一 run 的 policy-tests 作业因红灯提交里签名文件引用了独立编译清单外的
+  `ManagedTrafficPolicyCache` 而编译失败，修复提交把按缓存取值的重载移到 processor 文件解决（工程
+  修正，非产品缺陷）。修复后结果见 PR CI。本机未运行 xcodebuild/swift（AGENTS 执行地点约束）。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：Worker 尚未在 canonical json 中写入 revision（后续 PR，默认关闭开关），本修复
+  在服务端开启前处于休眠（旧文档行为与现状相同）；AccountSession 诊断显示的
+  `trafficPolicyRevision` 仍取历史最大值，被钉住后恢复时该显示值不回落（仅诊断，不影响闸门）；
+  无实机验证。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
