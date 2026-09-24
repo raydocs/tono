@@ -872,6 +872,27 @@ struct AuthState {
     identity_epoch: u64,
 }
 
+/// The server's answer about this session (#582), classified once per
+/// exchange that carried it: a bearer request or `auth/refresh`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionVerdict {
+    /// 2xx: the server accepted the session.
+    Verified,
+    /// The server refused the session: `auth/refresh` or a replay with a
+    /// freshly refreshed token answered 401, or a session request answered
+    /// 403 `USER_DISABLED`. A first attempt's 401 is only a stale access token.
+    Refused { code: Option<String> },
+    /// Any other 403: this request was not allowed; the session stands.
+    Forbidden,
+}
+
+/// Where [`ApiClient`] reports [`SessionVerdict`]s. `identity_epoch` is the
+/// identity the request was made under; a verdict for a retired identity is
+/// never reported. Called on the request path, so it must not block.
+pub trait SessionVerdictSink: Send + Sync {
+    fn report(&self, identity_epoch: u64, verdict: SessionVerdict);
+}
+
 /// Account API client (§1): Bearer injection, one refresh-and-retry on 401,
 /// and refresh coalescing — concurrent refreshes share a single in-flight
 /// request (parity with the macOS shared `refreshTask`).
@@ -881,6 +902,7 @@ pub struct ApiClient<T: HttpTransport, S: CredentialStore> {
     base_url: String,
     state: tokio::sync::Mutex<AuthState>,
     refresh_lock: tokio::sync::Mutex<()>,
+    verdict_sink: Option<Arc<dyn SessionVerdictSink>>,
 }
 
 impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
@@ -891,7 +913,14 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
             base_url: validate_base_url(base_url)?,
             state: tokio::sync::Mutex::new(AuthState::default()),
             refresh_lock: tokio::sync::Mutex::new(()),
+            verdict_sink: None,
         })
+    }
+
+    /// Install the sink that receives every classified server answer.
+    pub fn with_verdict_sink(mut self, sink: Arc<dyn SessionVerdictSink>) -> Self {
+        self.verdict_sink = Some(sink);
+        self
     }
 
     pub fn transport(&self) -> &T {
@@ -2385,6 +2414,111 @@ mod tests {
         store.set_refresh_token("refresh-1").unwrap();
         assert_eq!(client.me().await.unwrap_err(), ApiError::Unauthorized);
         assert_eq!(mock.count_to("auth/refresh"), 2, "one transport retry, then the refusal");
+    }
+
+    #[derive(Default)]
+    struct Verdicts(Mutex<Vec<(u64, SessionVerdict)>>);
+
+    impl SessionVerdictSink for Verdicts {
+        fn report(&self, identity_epoch: u64, verdict: SessionVerdict) {
+            self.0.lock().unwrap().push((identity_epoch, verdict));
+        }
+    }
+
+    const REFRESH_REFUSED: &str =
+        r#"{"error":{"message":"Invalid or expired refresh token","code":"INVALID_REFRESH_TOKEN"}}"#;
+
+    /// #582 T1: a refusal that only the transport retry heard still reaches the
+    /// sink, once; the first attempt's stale-token 401 is not a refusal.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_refresh_refused_on_the_transport_retry_reports_one_refusal() {
+        let mut refreshes = 0_usize;
+        let (client, mock, _store) = test_client(move |request| {
+            if request.url.ends_with("auth/refresh") {
+                refreshes += 1;
+                if refreshes == 1 {
+                    return Err(ApiError::Transport {
+                        kind: TransportKind::Connect,
+                        message: "connect".to_string(),
+                    });
+                }
+                return json(401, REFRESH_REFUSED);
+            }
+            json(401, r#"{"error":{"code":"UNAUTHORIZED","message":"stale"}}"#)
+        });
+        let verdicts = Arc::new(Verdicts::default());
+        let client = client.with_verdict_sink(verdicts.clone());
+        client.adopt(&auth_response("access", Some("refresh-1"))).await.unwrap();
+        let identity = client.diagnostics_log_identity().await;
+        assert_eq!(client.me().await.unwrap_err(), ApiError::Unauthorized);
+        assert_eq!(mock.count_to("auth/refresh"), 2, "one transport retry, then the refusal");
+        assert_eq!(
+            *verdicts.0.lock().unwrap(),
+            vec![(identity, SessionVerdict::Refused { code: Some("INVALID_REFRESH_TOKEN".to_string()) })],
+        );
+    }
+
+    /// #582 T2: early renewal swallows its refresh error so the request can go
+    /// out on the old token, but the refusal is still reported even when that
+    /// request then fails in transport. A retired identity's late refusal is not.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_refusal_during_early_renewal_is_reported_but_a_retired_identitys_is_not() {
+        use base64::Engine as _;
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(format!(r#"{{"exp":{}}}"#, unix_now_secs() + 30));
+        let expiring = format!("eyJhbGciOiJub25lIn0.{payload}.sig");
+        let (client, _mock, _store) = test_client(|request| {
+            if request.url.ends_with("auth/refresh") {
+                return json(401, REFRESH_REFUSED);
+            }
+            Err(ApiError::Transport {
+                kind: TransportKind::Timeout,
+                message: "timeout".to_string(),
+            })
+        });
+        let verdicts = Arc::new(Verdicts::default());
+        let client = client.with_verdict_sink(verdicts.clone());
+        client.adopt(&auth_response(&expiring, Some("refresh-1"))).await.unwrap();
+        let identity = client.diagnostics_log_identity().await;
+        assert!(matches!(client.me().await, Err(ApiError::Transport { .. })));
+        assert_eq!(
+            *verdicts.0.lock().unwrap(),
+            vec![(identity, SessionVerdict::Refused { code: Some("INVALID_REFRESH_TOKEN".to_string()) })],
+        );
+
+        // Account A's refresh is refused only after account B has signed in.
+        #[derive(Default)]
+        struct HeldRefresh {
+            started: tokio::sync::Notify,
+            release: tokio::sync::Notify,
+        }
+        #[async_trait]
+        impl HttpTransport for HeldRefresh {
+            async fn send(&self, request: ApiRequest) -> Result<ApiResponse, ApiError> {
+                if request.url.ends_with("auth/refresh") {
+                    self.started.notify_one();
+                    self.release.notified().await;
+                    return json(401, REFRESH_REFUSED);
+                }
+                json(401, r#"{"error":{"code":"UNAUTHORIZED","message":"stale"}}"#)
+            }
+        }
+        let transport = Arc::new(HeldRefresh::default());
+        let late = Arc::new(Verdicts::default());
+        let client = Arc::new(
+            ApiClient::new(DEFAULT_BASE_URL, transport.clone(), Arc::new(MemoryCredentialStore::new()))
+                .unwrap()
+                .with_verdict_sink(late.clone()),
+        );
+        client.adopt(&auth_response("a-access", Some("a-refresh"))).await.unwrap();
+        let request_client = client.clone();
+        let request = tokio::spawn(async move { request_client.me().await });
+        tokio::time::timeout(Duration::from_secs(2), transport.started.notified()).await.unwrap();
+        client.adopt(&auth_response("b-access", Some("b-refresh"))).await.unwrap();
+        transport.release.notify_one();
+        let result = tokio::time::timeout(Duration::from_secs(2), request).await.unwrap().unwrap();
+        assert_eq!(result.unwrap_err(), ApiError::Unauthorized);
+        assert!(late.0.lock().unwrap().is_empty(), "A's late refusal must not reach B's sink");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
