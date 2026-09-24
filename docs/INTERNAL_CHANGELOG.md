@@ -32,6 +32,35 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · macOS 连接首次布防不再在 TUN 出现前放行 root Web 端口
+
+- **归属/来源**：G1 连接保护；macOS `AppState+Connect`、`tono-core-helper` PF 规则。内部审查 H21-O-F5
+  （High，跨厂商源码级核实），Issue #586。基线 origin/main ca00a736；分支 `fix/issue-586-20260924`；
+  本 PR；未合 main。
+- **缺陷修复**：连接（及受保护重试）的第一次布防在 `.startingTunnel` 之前就带上
+  `reviewedBundleDirect`，Helper 在 `tunnelInterfaces` 为空时仍渲染不带地址的
+  `pass out … port { 80, 443, 8000, 8080 } user root`（`tono-bundle`）。TUN 出现前的这段时间，
+  root 进程可经物理网卡访问这些端口，界面却已显示保护中。现在：App 只在 TUN 存在后的锁定布防
+  发送该标志，第一次布防固定为 `false`；Helper 在没有隧道接口时不渲染该放行（直接丢弃，不报错：
+  报错会让发送该标志的连接全部失败；不放行时该流量仍 fail-closed）。精确地址、仅 root 的
+  `sessionDirectEndpoints` 首次布防行为不变。配置重载路径在 utun 不存在时传空接口列表，同样由
+  Helper 丢弃该放行。
+- **新增/优化**：无。
+- **工程与测试**：Helper 协议 4.22.0 → 4.45.0（远端分支最高为 4.44.0；按合并顺序重编号），
+  CONTRACT 哈希按 `build-core-helper.sh` 同一管道重算为 `51e335a1…`（先对 HEAD 复算出原记录值
+  `3f2459e2…` 以核对管道）。回归测试一条：`runSelfTests` 的 `bundleOffWithoutTunnel`——无隧道、
+  标志为真的状态渲染结果不得含 `label "tono-bundle"`。旧代码对该状态渲染两条 `tono-bundle`
+  放行，断言为假，`--self-test` 失败（按代码推理，未实跑）。测试修正：原 `required` 在同一无隧道
+  状态上要求这两条放行（即断言了缺陷形态），现改为对同一状态加 `utun199` 的 `tunneledRules`
+  检查形状与 `forbidden`，PF 语法检查也改用 `tunneledRules`（其规则是原 `rules` 的超集）。
+- **验证**：not run locally per execution-location rule; CI pending（GitHub-hosted `macos-26`：
+  `build-core-helper.sh` 编译后运行 `--self-test`，以及 root 下的 `--self-test` / `--lifecycle-self-test`
+  和 TonoTests）。本机只做了 CONTRACT 哈希的纯文本重算（未编译）。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：未在设备上复现或验证。首次布防到锁定布防之间，规则引擎直连的该 bundle 流量会被
+  PF 丢弃（fail-closed，持续到 TUN 就绪，通常几秒）。TUN 在会话中途消失而状态仍列有接口的情形
+  不在本修复范围内。
+
 ## 2026-09-24 · macOS 合并列车（#567）审查跟进：DNS 无法核实时仍做 PF 健康检查
 
 - **归属/来源**：G1 连接保护；macOS `AppState` 连接监控。合并列车 PR #567（`train/mac-20260924`，

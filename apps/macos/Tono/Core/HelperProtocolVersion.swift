@@ -170,7 +170,13 @@ nonisolated enum HelperProtocolVersion {
     ///   update ledger has a storage major (`schemaVersion`, absent = 1).
     ///   Additive keys from a newer helper are ignored instead of reading as
     ///   a corrupt ledger, and a higher major is refused as newer evidence.
-    static let current = "4.22.0"
+    /// - 4.22.0 → 4.45.0: PF renders the reviewed-bundle permit
+    ///   (`tono-bundle`) only while a tunnel interface is armed; a tunnel-less
+    ///   arm that asks for it gets no permit instead of root web-port egress
+    ///   on the physical interface. An older daemon renders it on the
+    ///   connect's first arm, before the TUN exists. (Number chosen past open
+    ///   PRs; renumber in merge order.)
+    static let current = "4.45.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
