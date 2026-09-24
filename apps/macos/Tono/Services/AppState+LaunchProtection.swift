@@ -7,6 +7,7 @@ extension AppState {
     /// not answer for stays unconfirmed. A session that is already running
     /// or tearing down publishes its own verdict.
     func adoptLaunchProtection(_ protection: RuntimeCleanup.LaunchProtection) {
+        launchProtectionSequence &+= 1
         guard !isConnected, !isConnecting, !isDisconnecting else { return }
         switch protection {
         case .held:
@@ -27,11 +28,14 @@ extension AppState {
 
     /// Folds a later authenticated helper answer into an unconfirmed launch
     /// verdict. Never prompts; an unavailable or rejected answer changes
-    /// nothing, and neither does a verdict some transition published meanwhile.
+    /// nothing, and neither does a verdict some transition published meanwhile
+    /// — including a launch verdict that leaves the launch still unconfirmed.
     func resolveUnconfirmedProtection() async {
         guard isProtectionUnconfirmed else { return }
+        let sequence = launchProtectionSequence
         let observation = await networkProtection.refreshKillSwitchStatus()
-        guard !Task.isCancelled, isProtectionUnconfirmed else { return }
+        guard !Task.isCancelled, isProtectionUnconfirmed,
+              launchProtectionSequence == sequence else { return }
         guard case .confirmed(let requiresProtectionRecovery) = observation else { return }
         KillSwitchService.isArmed = requiresProtectionRecovery
         adoptLaunchProtection(requiresProtectionRecovery ? .held : .released)

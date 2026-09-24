@@ -50,4 +50,25 @@ final class LaunchProtectionPresentationTests: XCTestCase {
         XCTAssertTrue(unanswered.isProtectionBlocked)
         XCTAssertEqual(MenuBarProtectionStatus(unanswered).kind, .blocked)
     }
+
+    func testAnActivationAnswerOlderThanTheLatestLaunchVerdictIsDropped() async {
+        let storedIntent = KillSwitchService.isArmed
+        defer { KillSwitchService.isArmed = storedIntent }
+        KillSwitchService.isArmed = true
+        let state = AppState()
+        XCTAssertTrue(RuntimeCleanup.adoptLaunchObservation(.unavailable, localIntent: true))
+        XCTAssertTrue(state.isProtectionUnconfirmed)
+        // Activation asks the helper. Before its answer lands, a launch pass
+        // (Retry on the gate) publishes a newer verdict and goes on to
+        // reassert the stored intent; the older answer must not retire it.
+        state.networkProtection.refreshKillSwitchStatus = {
+            await MainActor.run {
+                _ = RuntimeCleanup.adoptLaunchObservation(.unavailable, localIntent: true)
+            }
+            return .confirmed(requiresProtectionRecovery: false)
+        }
+        await state.resolveUnconfirmedProtection()
+        XCTAssertTrue(KillSwitchService.isArmed, "a stale answer must not retire the intent the launch is reasserting")
+        XCTAssertTrue(state.isProtectionUnconfirmed)
+    }
 }
