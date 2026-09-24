@@ -72,6 +72,13 @@ impl ServiceError {
         Self::new(ServiceErrorCode::StaleReleaseEpoch, message)
     }
 
+    pub(crate) fn protection_held_by_another_user() -> Self {
+        Self::new(
+            ServiceErrorCode::ProtectionHeldByAnotherUser,
+            "network protection is held by another local user who is still signed in",
+        )
+    }
+
     pub(crate) fn invalid_proxy_config(message: impl Into<String>) -> Self {
         Self::new(ServiceErrorCode::InvalidProxyConfig, message)
     }
