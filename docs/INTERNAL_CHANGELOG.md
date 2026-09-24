@@ -102,6 +102,27 @@
   重启时内存中保留它们的行为一致。副本是明文客户端凭据（0600）。停用节点删副本失败时副本
   仍在（只告警）。hy2 允许列表是文件，重启后仍在，不可达时不改动。与在审
   #375、#384、#389 修改同一 `run_once`，合并顺序与解决方式见 PR 正文。
+## 2026-09-23 · ops hub 执行前确认租约，等待中的 job 一并续租
+
+- **归属/来源**：ops 控制台节点作业（hub 执行器）；`ops-panel/jobs.py`。内部审查 H13-F6，
+  Issue #465。基线 main bb2ed4e4 → 分支 `fix/ops-jobs-lease-20260923`；提交时未合 main。
+- **缺陷修复**：hub 每次最多租 5 个 job，串行执行，只给正在执行的 job 续租，开始前也不
+  确认租约。排在长任务后面的 `xray_restart`（租约 60 s）过期后会被 Worker cron 放回队列，
+  hub 仍会执行它，下一轮又租到再执行一次，节点被连续重启两次。现在每个 job 开始前先发一次
+  心跳确认租约，409 或不可达就跳过，不执行、不上报；不可达时本轮以非零退出。执行期间的
+  心跳同时覆盖尚未开始的 job。
+- **新增/优化**：无。
+- **工程与测试**：`ops-panel/tests/test_jobs.py` 新增
+  `test_a_leased_job_whose_lease_was_lost_before_its_turn_never_runs`：假心跳对第二个
+  `xray_restart` 回 409，断言 SSH 只到第一个节点、只上报第一个结果。旧代码 SSH 到了两个
+  节点（`['A', 'B'] != ['A']`）。
+- **验证**：MacBook worktree：新测试在旧代码失败，修复后 `python3 -m unittest discover -s
+  ops-panel/tests -p 'test_*.py'` 26 个测试通过。scratchpad 模拟脚本 `sim_jobs.py`：旧代码
+  对 B 执行了 restart，新代码跳过 j2。未连接 hub 或任何节点，未部署。CI 结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码（ops-panel，需要在 hub 上部署后生效）。
+- **剩余限制**：Worker 侧租约与 cron 未改。hub 在执行期间与控制面断开时，等待中的 job 仍
+  可能过期被重新入队，本轮会在开始前发现并跳过。与在审 #377（重启目标改为
+  `tono-xray.service`）不改同一段代码；#377 合并后本修复才防止真实的二次重启。
 
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
