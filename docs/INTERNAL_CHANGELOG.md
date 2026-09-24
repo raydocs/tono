@@ -32,6 +32,32 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS preserve teardown 以 helper 回读判定"未 armed"
+
+- **归属/来源**：G1 保护状态一致性；macOS App `AppState+Connect.swift` 断开事务。#310（R1-F2，
+  已合 main）审查附注 §3，Issue #480。基线 main bb2ed4e4 → 分支
+  `fix/preserve-teardown-readback-20260923`；提交时未合 main。
+- **缺陷修复**：preserve teardown（健康失败、连接中策略更新、睡眠）在 `restrictToBootstrap`
+  空转成功后，仅凭 App 本地 `KillSwitchService.isArmed == false` 就发布非 blocked。本地记录
+  可能滞后于 helper（arm 回复丢失且补查不可达、helper 持久化后崩溃），此时 UI 显示未连接而
+  PF 仍在阻断，且 `reconcileExternalProtectionState()` 因非 blocked 不再对账。现在同一条件下
+  再经 `networkProtection.refreshKillSwitchStatus()` 回读 helper：仅
+  `.confirmed(requiresProtectionRecovery: false)` 才发布非 blocked，`.unavailable` /
+  `.rejected` / `.confirmed(true)` 保持 Protected Offline。armed 路径与不完整 release 语义
+  不变。保护不放宽。
+- **新增/优化**：无。
+- **工程与测试**：新增一个 XCTest
+  `PreserveTeardownReadbackTests.testNeverArmedPreserveTeardownOpensUIOnlyWhenHelperConfirmsNoKillSwitch`：
+  本地未 armed 的 preserve teardown，helper 回读 `.unavailable` 时断言保持 blocked；
+  `.confirmed(false)` 时断言非 blocked。旧代码第一段发布非 blocked，断言失败（构造推导，
+  本机未运行）。
+- **验证**：本机为编辑机，未运行 xcodebuild/swift。TonoTests 委托本 PR 的 GitHub-hosted
+  `macos-26` CI，结果以 PR 页为准。未在实机复现 arm 回复丢失。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：helper 暂不可达时，本来确实未 armed 的主机会先显示 Protected Offline，直到
+  下一次状态对账或重连（与 #310 之前的行为一致，属保守方向）。本地 `isArmed == true` 而
+  helper 已无状态的反向不一致不在本条范围。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3

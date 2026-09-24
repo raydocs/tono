@@ -864,7 +864,13 @@ extension AppState {
                         // session must not publish Protected Offline over an
                         // open host (R1-F2). Every armed path keeps the
                         // claim, and an incomplete release stays fail-closed.
-                        if !releaseKillSwitch, !KillSwitchService.isArmed {
+                        // The app's own `isArmed` can lag a helper that
+                        // persisted PF after a lost arm reply, so only the
+                        // helper confirming no kill-switch state opens the
+                        // UI; an unreachable or rejecting helper keeps it.
+                        if !releaseKillSwitch, !KillSwitchService.isArmed,
+                           await networkProtection.refreshKillSwitchStatus()
+                            == .confirmed(requiresProtectionRecovery: false) {
                             transitionLeavesProtectionBlocked = false
                         } else {
                             transitionLeavesProtectionBlocked = true
