@@ -32,6 +32,31 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 原生更新账本：schema 主版本 + 同主版本忽略新增字段
+
+- **归属/来源**：G3 原生更新 v1（面向 0.0.73 → 0.0.74 起的 N-1 执行器）；macOS
+  `tono-core-helper` `UpdateStorage`。内部审查 H15-F6，Issue #501。基线 origin/main bb2ed4e4；
+  分支 `fix/update-store-schema-macos-20260923`；未合 main。
+- **缺陷修复**：`UpdateStorage.load()` 要求 `canonical(ledger) == bytes`，任何新增键都会被旧版
+  执行器副本判成"ledger is corrupt"，而 blocked/corrupt 证据按设计不清理、重装也清不掉。改为：
+  先探测 `schemaVersion`（缺省 1）；高于本版主版本时以"written by a newer Tono (schema N)"拒绝并
+  保留字节；同主版本若字节不是规范编码，只有在确实存在本版不认识的键、且本版认识的每个键的值都与
+  规范重编码一致时才接受（`knownFieldsMatch`）。无新增键的非规范字节仍按损坏拒绝。写入端主版本为
+  1 时不写该字段，已有构建照常读取。规则文字在 `docs/UPDATE_PROTOCOL_V1.md`（随 Windows PR）。
+- **新增/优化**：无。
+- **工程与测试**：一个 helper 自测 `ledger-ignores-additive-fields-and-refuses-a-newer-schema-major`
+  （`--update-self-test` 计数 10→11）：顶层与 attempt 加未知键后 `load()` 成功且已知字段不变；
+  `schemaVersion: 2` 时以"newer"拒绝并保留原字节。旧实现在第一次 `load()` 报 corrupt。helper 源码
+  变更按契约门把 `HelperProtocolVersion` 4.21.0 → **4.22.0（合并列车按顺序编号，重算
+  CONTRACT.sha256）**；CONTRACT 以 build-core-helper.sh 同一 sed|shasum 管道重算（先对基线复现
+  4.9.0 的记录哈希自证）。
+- **验证**：本机未编译 helper、未运行 swift；回归交给本 PR 的 macos-26 CI（契约门 + root
+  `--update-self-test`），结果见 PR。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：只对含本改动的执行器生效；本 PR 之前构建的内部候选执行器仍会拒绝任何新增键。
+  重编号：本 PR 分支 CI 用过占位号 4.40.0；合并列车改为 4.22.0。装过该 PR 构建（4.40.0）的机器
+  不会被静默升级到 4.22.0（#350 只接受更高版本），需走管理员安装。
+
 ## 2026-09-23 · macOS 升级后归档 0.0.72 遗留的更新交接记录
 
 - **归属/来源**：G3 客户升级路径；macOS App。内部审查 H15-F3，Issue #496。基线 origin/main

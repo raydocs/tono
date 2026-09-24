@@ -381,6 +381,31 @@ func runUpdateSelfTests() -> Bool {
         try engine.commit(peer: relaunched)
         try check(store.load().attempt?.receipt.phase == .committed, "A relaunched successor must be able to commit")
     }
-    print("Update production-bound tests: \(10 - failures.count) passed, \(failures.count) failed; native-device acceptance NOT performed")
+    test("ledger-ignores-additive-fields-and-refuses-a-newer-schema-major") { directory in
+        let store = try UpdateStorage(root: directory)
+        try reserved(store, UpdateTransaction(storage: store, effects: effects()))
+        let path = directory + "/ledger.json"
+        let before = try store.load()
+        guard var file = try JSONSerialization.jsonObject(with: UpdateStorage.read(path, maximum: 128 * 1024)) as? [String: Any],
+              var attempt = file["attempt"] as? [String: Any] else { throw HelperFailure.invalid("Fixture ledger is not an object") }
+        // What a later helper may add within schema 1: optional, safe to drop.
+        attempt["futureFact"] = "x"
+        file["attempt"] = attempt
+        file["futureFact"] = true
+        try UpdateStorage.write(JSONSerialization.data(withJSONObject: file, options: [.sortedKeys]), to: path)
+        let loaded = try store.load()
+        try check(loaded.generation == before.generation && loaded.highWater == before.highWater
+                  && loaded.attempt?.receipt.attemptId == before.attempt?.receipt.attemptId
+                  && loaded.attempt?.execution == before.attempt?.execution,
+                  "Additive fields from a newer helper must not read as a corrupt ledger")
+        file["schemaVersion"] = 2
+        let newer = try JSONSerialization.data(withJSONObject: file, options: [.sortedKeys])
+        try UpdateStorage.write(newer, to: path)
+        var refusal = ""
+        do { _ = try store.load() } catch HelperFailure.invalid(let message) { refusal = message }
+        try check(refusal.contains("newer Tono (schema 2)"), "A newer schema major must be refused as newer, not corrupt")
+        try check(UpdateStorage.read(path, maximum: 128 * 1024) == newer, "Newer evidence must be retained")
+    }
+    print("Update production-bound tests: \(11 - failures.count) passed, \(failures.count) failed; native-device acceptance NOT performed")
     return failures.isEmpty
 }

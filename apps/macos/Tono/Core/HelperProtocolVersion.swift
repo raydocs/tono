@@ -166,7 +166,11 @@ nonisolated enum HelperProtocolVersion {
     ///   and the candidate helper and core against the installer's Developer ID
     ///   requirement. It refuses a helper that is not strictly newer than the
     ///   running one, so older builds need the administrator install.
-    static let current = "4.21.0"
+    /// - 4.21.0 → 4.22.0 (merge-train number): the
+    ///   update ledger has a storage major (`schemaVersion`, absent = 1).
+    ///   Additive keys from a newer helper are ignored instead of reading as
+    ///   a corrupt ledger, and a higher major is refused as newer evidence.
+    static let current = "4.22.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
