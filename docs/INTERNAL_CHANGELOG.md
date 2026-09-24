@@ -32,6 +32,25 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 会话拆除时清除 Recovering 状态
+
+- **归属/来源**：G1 保护状态呈现；macOS `AppState+Connect` 断开准备。内部审查 X1-6，
+  Issue #434。基线 main bb2ed4e4 → 分支 `fix/recovering-flag-reset-20260923`；提交时未合 main。
+- **缺陷修复**：核心监视器连续健康失败时把 `isRecoveringProtectedConnection` 置 true；
+  原地恢复和自动切换都失败后，它以保留拆除断开并安排重连，但这个标志只在重新连上、监视器
+  自愈或切换成功时清除。首页主按钮让它优先于 Protected Offline 和 Not Connected，于是
+  Protected Offline 期间、甚至用户点 Restore internet 之后，仍显示 "Recovering protected
+  connection…" 并转圈，直到下一次连接成功。现在断开准备与其他会话状态一起把它复位。
+- **新增/优化**：无。
+- **工程与测试**：新增 `RecoveringPresentationTests.testReleaseClearsRecoveringPresentation`
+  （一个 XCTest），沿用 `NetworkProtectionOperations` seam，已连接且处于 Recovering 时执行
+  `disconnectAndWait(releaseKillSwitch: true)`，断言标志已清除。旧代码仍为 true，断言失败。
+- **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests），结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：原生更新的专用断开（`suspendForNativeUpdate`）不走这条断开准备，也没有复位
+  该标志；该路径由更新流程自己的界面接管，本修复未改动。
+
 ## 2026-09-23 · macOS 从未 arm 的连接失败不再走显式释放修复
 
 - **归属/来源**：G1 保护恢复；macOS `AppState+Connect` 连接失败与拆除路径。内部审查 X1-4，

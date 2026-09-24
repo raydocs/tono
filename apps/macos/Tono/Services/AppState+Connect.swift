@@ -756,6 +756,10 @@ extension AppState {
                 self.isConnected = false
                 self.lastPhysicalFingerprint = nil
                 self.isProxyDegraded = false
+                // In-place recovery belongs to the session being torn down.
+                // Left set, it outranked Protected Offline and Not Connected on
+                // the dashboard until the next successful connect.
+                self.isRecoveringProtectedConnection = false
                 self.networkInfo = NetworkInfo()
                 self.trafficStats = TrafficStats()
                 self.trafficFeedLive = false
