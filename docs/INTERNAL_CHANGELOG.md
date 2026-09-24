@@ -65,6 +65,13 @@
   services/exit-agent 与 preview README、REVIEW_ROUNDS 中残留的停顿与矛盾。`.jev-route.json` 另加
   `ProtectedSystemResolver`、`protected_probe`。等待另一厂商核实的 Opus 单方发现（发布门勾选者与 SHA 绑定、
   路由配置来源、部署前备份与 preview 演练、保护执行代码覆盖、密钥范围、G4 顺序）本次未改文字。
+- **2026-09-24 续记 2（Opus 单方发现经 Codex 核实后）**：O-F1、O-F8 驳回，不改。已改：发布只用老板 G1–G3 证据所列候选
+  （源码 SHA、版本/build、包哈希），换候选需新证据（回滚重建除外，DECISIONS 暂定条目）；路由从最新 `origin/main`
+  检出跑、策略不取 PR 自身，改 `.jev-route.json` 的 PR 一律 dual_cross_family；每次生产部署前导出 D1、迁移先在
+  preview 演练；Tono 自管密钥可用 CSPRNG 值（任务点名、先协调使用方），第三方凭据不得编造（DECISIONS 暂定条目）；
+  G4 按 SHIP_PLAN §5 顺序（先 G4.2 老板内部设备，G4.3 前核对后台发布行 `verifiedAt`）；`.jev-route.json` 加五个保护执行
+  路径（dry-run 均为 `protected_area: true`，dashboard 对照为 false）；BUILD_AND_TEST 增加「PR 需要哪个工作流」表、
+  docs-only 定义与无工作流覆盖路径改走 dual_cross_family。
 
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 

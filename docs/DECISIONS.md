@@ -36,7 +36,8 @@ may reverse), `reversed` (keep the line; say what replaced it).
   owner has written `[x]` for G1, G2 and G3 in [SHIP_PLAN.md](SHIP_PLAN.md) §6 with
   evidence links; agents never edit those lines. Rejected: owner runs every deploy
   and publish.
-- Applied in: [AGENTS.md](../AGENTS.md) "Finish the work" item 2.
+- Applied in: [AGENTS.md](../AGENTS.md) "Finish the work" item 2. Agent-added limits on
+  secrets and candidate identity are the `provisional` entries below.
 
 ## 2026-09-24 · Who makes product decisions that used to wait for the owner?
 
@@ -54,3 +55,28 @@ may reverse), `reversed` (keep the line; say what replaced it).
   changing it. Rejected: publishing hy2 blocks to internal accounts first.
 - Why stricter: no customer sees a transport the shipped clients cannot admit.
 - Applied in: [SHIP_PLAN.md](SHIP_PLAN.md) §3 item 5.
+
+## 2026-09-24 · Where may a secret value come from?
+
+- Status: provisional
+- Chosen: `wrangler secret put` with an owner-supplied value, or a CSPRNG value
+  for a Tono-controlled secret the task names for creation or rotation, after
+  coordinating its consumers (a JWT key change signs users out; an admin token
+  change affects the hub and scripts). Third-party credentials (for example the
+  Telegram bot token) are never fabricated. No secret is printed or committed.
+  Rejected: every secret value supplied by the owner.
+- Why stricter: an agent never invents an external credential, and a rotation
+  never happens unless a task names it.
+- Applied in: [AGENTS.md](../AGENTS.md) "Finish the work" item 2.
+
+## 2026-09-24 · Does the G1–G3 acceptance cover a different candidate?
+
+- Status: provisional
+- Chosen: no. The owner's G1–G3 evidence names the candidate (source SHA,
+  version/build, package hashes); customer publish uses only that candidate. Any
+  other SHA or version needs new owner evidence, except rebuilding an
+  already-published good source as a higher build for rollback. Rejected: any
+  0.0.73 build inherits the ticks.
+- Why stricter: customers only receive bytes the owner accepted on a device.
+- Applied in: [AGENTS.md](../AGENTS.md) "Finish the work" item 2;
+  [RELEASE_LINES.md](RELEASE_LINES.md#customer-publish-g4).

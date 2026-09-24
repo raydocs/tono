@@ -95,6 +95,17 @@ When an agent may start is set in [AGENTS.md](../AGENTS.md) (owner-written G1–
 evidence in SHIP_PLAN §6). Record each step's run URL, SHA and artifact hashes in
 [INTERNAL_CHANGELOG.md](INTERNAL_CHANGELOG.md).
 
+- **Candidate identity.** Before customer promotion, match the release's source SHA,
+  version/build and package hashes to the candidate the owner's G1–G3 evidence names.
+  A changed candidate does not reuse that acceptance; it needs new owner evidence.
+  The one exception is rebuilding an already-published good source as a higher build
+  for rollback.
+- **Order (SHIP_PLAN §5).** G4.1 freeze → G4.2 on the owner's internal devices
+  first (through internal feeds if the customer feeds do not point there yet) →
+  G4.3 customer feeds (Windows: the back-office release row has `verifiedAt` before
+  promotion) → G4.4 small group. Checking the customer feed after G4.3 is a follow-up
+  check, not a substitute for G4.2.
+
 **macOS.** This composite is documented in `macos-release.yml`'s step summary and
 has not yet run end to end.
 

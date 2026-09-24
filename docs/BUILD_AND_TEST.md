@@ -76,6 +76,22 @@ GitHub standard hosted runner usage is free for public repositories; larger
 runners are paid. Manage artifact/cache retention and do not infer that every
 GitHub-hosted resource is free.
 
+### Which workflow must be green for a PR
+
+A PR needs a successful run on its exact head SHA (`gh pr view N --json headRefOid,statusCheckRollup`)
+of every workflow whose `paths:` filter matches a touched path. The filters are authoritative; in short:
+
+| Touched paths | Workflow |
+|---|---|
+| `apps/macos/**`, `tooling/scripts/**` | `macos-ci.yml` |
+| `apps/windows/**` (and the update-contract fixtures it lists) | `windows-ci.yml` |
+| `services/**`, `ops-panel/**` (and the tooling scripts it lists) | `services-ci.yml` |
+
+Docs-only means every touched path is `*.md` or under `docs/`; it needs no run. Paths no filter
+covers (for example `.jev-route.json`, `.agents/`, `.claude/`, release or promote workflows) need
+no CI run but need a dual_cross_family review. Dispatching a promote workflow to "get a check"
+publishes; never do it for that.
+
 ## Public repository and privileged boundaries
 
 - No persistent home runner registration is part of this plan. A future
