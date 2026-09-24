@@ -172,9 +172,12 @@ export const customerApi = {
   patchUser: (userId: string, patch: UserPatch) =>
     send('PATCH', path('users', userId), patch, nothing),
 
-  /** `reason` is kept on the audit line; the hub does the rest of the tear-down. */
-  closeUser: (userId: string, reason: string) =>
-    send('POST', `${path('users', userId)}/close`, { reason }, nothing),
+  /**
+   * `reason` is kept on the audit line; the hub does the rest of the
+   * tear-down. Only `refund: true` labels the record a refund close.
+   */
+  closeUser: (userId: string, reason: string, refund: boolean) =>
+    send('POST', `${path('users', userId)}/close`, { reason, refund }, nothing),
 
   accountDetail: (userId: string, signal?: AbortSignal): Promise<CustomerAccountDetail> =>
     send('GET', `${path('users', userId)}/detail`, undefined, readAccountDetail, { signal }),
