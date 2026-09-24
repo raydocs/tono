@@ -125,8 +125,15 @@ final class AccountSession {
     var lastTrafficPolicyRevision: Int?
     @ObservationIgnored let accountLifecycle = AccountLifecycleCoordinator()
     var authMethodsLoading = false
+    @ObservationIgnored var authMethodsLoadRevision: UInt64?
     var hasStartedRestore = false
     var shouldResumeProtection = false
+    /// The helper's kill-switch status, read before a sign-in consumes a kept
+    /// resume intent. Replaceable so tests never reach the privileged socket.
+    @ObservationIgnored var killSwitchStatusObservation:
+        () async -> KillSwitchService.StatusObservation = {
+            await PrivilegedRuntimeCoordinator.shared.refreshKillSwitchStatus()
+        }
 
     var deviceLimit: Int { user?.deviceLimit ?? TonoAccountRules.maximumDevices }
     var isAtDeviceLimit: Bool { devices.count >= deviceLimit }
