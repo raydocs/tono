@@ -1390,8 +1390,7 @@ extension AppState {
                 // suspended on an actor call still resumes.
                 let observedGeneration = self.connectionCoordinator.protectionOperationGeneration
                 let primaryService =
-                    await PrivilegedRuntimeCoordinator.shared
-                        .primaryNetworkService()
+                    await self.protectionAudits.primaryNetworkService()
                 guard !Task.isCancelled, self.isConnected,
                   self.connectionCoordinator.protectionOperationGeneration == observedGeneration
                 else { return .stopMonitoring }
@@ -1409,12 +1408,18 @@ extension AppState {
                 guard !Task.isCancelled, self.isConnected,
                   self.connectionCoordinator.protectionOperationGeneration == observedGeneration
                 else { return .stopMonitoring }
-                guard dnsIntegrity != .unverifiable else { return .continueMonitoring }
-                if case .supplementalConflict(let resolvers) = dnsIntegrity {
+                switch dnsIntegrity {
+                case .unverifiable:
+                    // Withholds only the DNS verdict. The PF health check
+                    // below runs on this same cadence and must not be skipped
+                    // with it, or a supervisor repair that dropped this
+                    // session's direct permits goes unnoticed while the UI
+                    // shows Connected.
+                    break
+                case .supplementalConflict(let resolvers):
                     self.holdProtectedDNSSupplementalConflict(resolvers)
                     return .stopMonitoring
-                }
-                guard dnsIntegrity == .intact else {
+                case .broken:
                     if self.pauseIfProtectedDNSKeepsFailing() { return .stopMonitoring }
                     self.disconnect(releaseKillSwitch: false)
                     self.errorMessage = String(
@@ -1422,8 +1427,9 @@ extension AppState {
                     )
                     self.scheduleProtectedReconnect()
                     return .stopMonitoring
+                case .intact:
+                    self.consecutiveProtectedDNSBrokenAudits = 0
                 }
-                self.consecutiveProtectedDNSBrokenAudits = 0
             }
         }
 
@@ -1440,7 +1446,7 @@ extension AppState {
            self.switchingNodeId == nil,
            self.connectionCoordinator.configReloadTask == nil {
             let observedGeneration = self.connectionCoordinator.protectionOperationGeneration
-            let health = await PrivilegedRuntimeCoordinator.shared.killSwitchHealth()
+            let health = await self.protectionAudits.killSwitchHealth()
             guard !Task.isCancelled, self.isConnected,
                   self.connectionCoordinator.protectionOperationGeneration == observedGeneration
             else { return .stopMonitoring }
@@ -1932,6 +1938,7 @@ extension AppState {
         protectedReconnectPauseLiftsOnNetworkChange = false
         lastProtectedFailureSignature = nil
         consecutiveProtectedFailureCount = 0
+        consecutiveProtectionRepairCount = 0
         consecutiveProtectedDNSBrokenAudits = 0
         consecutiveNoNetworkServiceFailures = 0
         self.connectionCoordinator.wakeRecoveryTask?.cancel()
@@ -2089,13 +2096,11 @@ extension AppState {
     func protectedDNSIntegrityConfirmingBroken(
         service: String
     ) async -> PrivilegedRuntimeCoordinator.ProtectedDNSIntegrity {
-        let first = await PrivilegedRuntimeCoordinator.shared
-            .protectedDNSIntegrity(service: service)
+        let first = await protectionAudits.protectedDNSIntegrity(service)
         guard first == .broken else { return first }
         try? await Task.sleep(for: Self.protectedDNSBrokenRecheckDelay)
         guard !Task.isCancelled else { return first }
-        return await PrivilegedRuntimeCoordinator.shared
-            .protectedDNSIntegrity(service: service)
+        return await protectionAudits.protectedDNSIntegrity(service)
     }
 
     /// Called for a `.broken` audit on an unchanged network. At the limit it
@@ -2122,6 +2127,12 @@ extension AppState {
     /// and cannot change that, and PF is not loosened to make those domains
     /// work: keep PF, stop the session, and pause until the user removes the
     /// rule or chooses Restore internet.
+    ///
+    /// This includes a corporate VPN's split DNS on its own utun. The helper's
+    /// LAN DNS block is scoped to physical interfaces so PF itself lets that
+    /// DNS through, but this audit still holds the session on it. Keeping the
+    /// stricter behavior (pause, PF held) over a "stay connected and warn"
+    /// mode is a provisional product decision pending the owner.
     func holdProtectedDNSSupplementalConflict(
         _ resolvers: [SystemNetworkObservation.SupplementalResolver]
     ) {

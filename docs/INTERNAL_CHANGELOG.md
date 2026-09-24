@@ -32,6 +32,41 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · macOS 合并列车（#567）审查跟进：DNS 无法核实时仍做 PF 健康检查
+
+- **归属/来源**：G1 连接保护；macOS `AppState` 连接监控。合并列车 PR #567（`train/mac-20260924`，
+  基线 167cbca6）交叉厂商审查的已确认项 TM-OpenAI-1（Opus 核实）、TM-claude-1（Codex 核实）、
+  TM-claude-5、TM-claude-3；分支 `fix/mac-train-20260924`；未合 main。
+- **缺陷修复**：
+  - TM-OpenAI-1（#421 × #458 合并产生）：监控每 12 个周期（约 60 s）先做 Protected DNS 审计、
+    再做 PF 健康检查。DNS 读回 `.unverifiable` 时直接 `return .continueMonitoring`，同一周期的
+    PF 检查被跳过；Helper 监督进程按持久状态重装 PF（不含本会话直连例外）后，只要 DNS 一直
+    读不到，App 就不会发现，界面仍显示已连接。现在 `.unverifiable` 只跳过 DNS 结论，继续执行
+    PF 检查；DNS 判定改为穷举 `switch`，其余三种结论行为不变。
+  - TM-claude-1：`acceptConfirmedExternalProtectionRelease()`（已确认的外部释放）没有清零
+    `consecutiveProtectionRepairCount`，此前累积的修复次数会带进下一次会话，提前触发 3 次暂停。
+    现在与“恢复正常网络”、“立即重试”一样清零。
+- **新增/优化**：无。
+- **工程与测试**：新增注入点 `ProtectionAuditOperations`（主服务、DNS 完整性读取、PF 健康读取；
+  生产默认仍走 `PrivilegedRuntimeCoordinator`）。一个 XCTest
+  `AppStateCoreMonitorTests.testUnverifiableDNSAuditStillRunsPFHealthCheck`：第 12 个周期，DNS 读回
+  `.unverifiable`、PF 健康报告 `repairedSinceArm`，断言本周期停止监控、修复计数为 1、断开并显示
+  “Network protection was interrupted…”。旧代码在 DNS 判定处返回 `.continueMonitoring`，会话保持
+  连接，第一条断言即失败（按代码推理，未实跑）。TM-claude-1 未加测试（规则 5）。
+- **文档**：`HelperManager` 中 `repairedSinceArm` 的版本注释 4.12.0 → 4.16.0（`/killswitch/health`
+  在合并列车编号 4.16.0 加入，见 `HelperProtocolVersion`）。#503 条目中“4.40.0 机器不能静默升级到
+  4.22.0”的说法已更正；#421 条目中“唤醒不看暂停”的限制已更正（#458 已修）。TM-claude-3：#458 的
+  split-DNS 冲突暂停覆盖了 #348 对公司 VPN utun DNS 的 PF 豁免；保留较严格行为（暂停、保留 PF），
+  在 `holdProtectedDNSSupplementalConflict`、`KillSwitchPF.swift` 注释和 #348 条目中注明这是暂定
+  产品决定。`KillSwitchPF.swift` 只改整行注释，CONTRACT 哈希按 build-core-helper.sh 同一管道重算
+  不变（4.22.0 `3f2459e2…`），不需要升 helper 版本。
+- **验证**：not run locally per execution-location rule; CI pending（GitHub-hosted `macos-26`
+  build + TonoTests）。本机只做了 CONTRACT 哈希的纯文本重算（未编译）。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：网络变化核对（`AppState.swift`）与连接流程中的 `primaryNetworkService` 调用仍直接走
+  协调器，未接入新注入点。TM-claude-3 待 owner 决定。#567 PR 正文“Deploy / release notes”中的
+  4.40.0 说法同样有误，需由 PR 作者更正。
+
 ## 2026-09-23 · macOS 启动时删除 0.0.72 遗留的 Mihomo 运行时文件
 
 - **归属/来源**：G1 账户隔离（升级维度）；macOS `ConfigStorage`。内部审查 H15-F4，Issue #504。
@@ -72,7 +107,10 @@
 - **候选/发布**：仅源码，无新候选。
 - **剩余限制**：只对含本改动的执行器生效；本 PR 之前构建的内部候选执行器仍会拒绝任何新增键。
   重编号：本 PR 分支 CI 用过占位号 4.40.0；合并列车改为 4.22.0。装过该 PR 构建（4.40.0）的机器
-  不会被静默升级到 4.22.0（#350 只接受更高版本），需走管理员安装。
+  **可以**被静默升级到 4.22.0（2026-09-24 更正：原文称“#350 只接受更高版本，需走管理员安装”，
+  不成立）。版本准入由正在运行的 helper 执行，而该 PR 构建基于 bb2ed4e4，不含 #350 的
+  `helperUpgradeAdmissible`；App 侧只比较版本字符串是否相等，不同即尝试 `/helper/upgrade`。
+  装上 4.22.0 之后，才只接受更高版本的静默升级。
 
 ## 2026-09-23 · macOS 升级后归档 0.0.72 遗留的更新交接记录
 
@@ -314,6 +352,10 @@
     共享），不作用于 utun、ipsec、ppp 等其他 VPN 接口，所以与 Tono 同时运行的公司 VPN
     （AnyConnect、GlobalProtect、WireGuard 等）推到自己 utun 上的 DNS 不会被挡。枚举不到任何
     物理接口时，阻断保持不限接口（fail-closed）。
+    （2026-09-24 合并列车说明：这只是 PF 层。#458 的 Protected DNS 审计把这类 VPN 的
+    split DNS（带匹配域、指向非 loopback 的补充解析器）判为 `.supplementalConflict`：拆会话、
+    保留 PF、暂停自动重试，所以合并后与公司 split-DNS VPN 并存时 Tono 不会保持连接。保留这一
+    较严格行为、不做“保持连接并提示”，是暂定产品决定，等 owner 确认。）
 - **新增/优化**：无。
 - **工程与测试**：helper 自测（`--self-test`）新增一个检查 `lanDNSBlockedFirst`：带 TUN 的规则集里
   LAN DNS 阻断出现在 `tono-lan` 放行之前；旧代码无此规则而失败。审查后同一检查改为用注入的
@@ -737,8 +779,9 @@
 - **剩余限制**：App 侧的重连分支与修复次数上限都没有单独的 XCTest（监控 tick 直接调用
   Helper，没有注入点）；复读与未记录令牌的处理也没有自检覆盖，审查修正本机未编译，委托 CI。
   修复计数不按时间衰减：跨越很长时间的零星修复累计到 3 次也会暂停（保持 fail-closed，
-  “立即重试”即可恢复）。唤醒路径 `resumeAfterSystemWake` 不看暂停标志（main 既有行为），
-  暂停后每次唤醒会再重连一次，再次修复后重新暂停。
+  “立即重试”即可恢复）。唤醒路径：本条提交时 `resumeAfterSystemWake` 不看暂停标志，暂停后
+  每次唤醒会再重连一次（2026-09-24 更正：合并列车中 #458 让唤醒在重新确认 PF 后保留网络变化
+  也不解除的暂停；修复次数上限的暂停属于这一类，唤醒后保持暂停、不再重连）。
   最坏情况下检测延迟为 Helper 10 秒加 App 60 秒；Helper 在 10 秒内修复 PF，App 的重连只负责
   恢复会话例外并提示用户。哪些系统组件用令牌启用 PF、XNU 引用计数的精确语义、PF 被关闭期间
   的实际泄漏面，都需要实机确认。另一个产品把自己的锚点插在 Tono 锚点之前的情况不在本条范围。

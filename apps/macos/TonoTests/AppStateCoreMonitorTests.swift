@@ -102,4 +102,58 @@ final class AppStateCoreMonitorTests: XCTestCase {
         app.connectionCoordinator.protectedReconnectTask = nil
         await app.connectionCoordinator.disconnectSequence?.value
     }
+
+    /// TM-OpenAI-1 regression: the one-minute tick runs the Protected DNS
+    /// audit and the PF health check together. A DNS read the helper could
+    /// not answer withholds only the DNS verdict; the PF check on the same
+    /// tick must still act on a supervisor repair, which reinstalled PF
+    /// without this session's direct permits.
+    func testUnverifiableDNSAuditStillRunsPFHealthCheck() async {
+        let app = AppState()
+        app.isConnected = true
+        app.coreRuntime.isRunning = true
+        app.config.tunEnabled = true
+        // The PF check runs only for the Tono-owned runtime.
+        app.tonoTransport = TonoTransportDescriptor(port: 1080)
+        app.protectedDNSService = "Wi-Fi"
+        let originalArmedState = KillSwitchService.isArmed
+        KillSwitchService.isArmed = true
+        // isArmed is UserDefaults-backed; do not leak it into other tests.
+        defer { KillSwitchService.isArmed = originalArmedState }
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { _ in true }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { true }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = {}
+        runtime.restrictToBootstrap = {}
+        app.networkProtection = runtime
+        app.tunInterfaceExists = { _ in true }
+        var audits = ProtectionAuditOperations()
+        audits.primaryNetworkService = { "Wi-Fi" }
+        audits.protectedDNSIntegrity = { _ in .unverifiable }
+        audits.killSwitchHealth = { (wanted: true, live: true, repairedSinceArm: true) }
+        app.protectionAudits = audits
+        var state = AppState.CoreMonitorState()
+        // This tick is the twelfth, so both one-minute audits are due.
+        state.healthCycle = 11
+
+        let outcome = await app.runCoreMonitorTick(state: &state)
+        XCTAssertEqual(
+            outcome, .stopMonitoring,
+            "an unverifiable DNS read must not skip the PF health check"
+        )
+        XCTAssertEqual(app.consecutiveProtectionRepairCount, 1)
+        XCTAssertFalse(app.isConnected)
+        XCTAssertEqual(
+            app.errorMessage,
+            String(localized: "Network protection was interrupted by another program; Kill Switch is blocking traffic while Tono reconnects.")
+        )
+
+        // Settle the queued teardown through the replaced seams, as above.
+        app.connectionCoordinator.protectedReconnectTask?.cancel()
+        app.connectionCoordinator.protectedReconnectTask = nil
+        await app.connectionCoordinator.disconnectSequence?.value
+    }
 }

@@ -31,7 +31,7 @@ nonisolated struct HelperManager {
         let live: Bool?
         let healed: Bool?
         /// Set by the helper's PF liveness supervisor after it had to reinstall
-        /// the kill switch; cleared by the next arm. Absent before 4.12.0.
+        /// the kill switch; cleared by the next arm. Absent before 4.16.0.
         let repairedSinceArm: Bool?
         let flushedStates: Bool?
         /// Addresses whose states were killed individually instead of flushing

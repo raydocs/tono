@@ -106,7 +106,8 @@ final class AppState {
     /// connected session. A successful reconnect does not reset it: another
     /// program that keeps stopping PF or reloading the main ruleset would
     /// otherwise disconnect the session every minute without end. Only an
-    /// explicit Retry now or Restore internet clears it.
+    /// explicit Retry now, Restore internet, or a confirmed external release
+    /// clears it.
     var consecutiveProtectionRepairCount = 0
     /// `.broken` Protected DNS audits since the last `.intact` one. A connect
     /// that succeeds does not reset it: the connect preflight cannot see the
@@ -280,6 +281,9 @@ final class AppState {
     /// interface index; tests substitute the syscall so a single monitor tick
     /// can be driven without the privileged helper.
     var tunInterfaceExists: (String) -> Bool = { KillSwitchService.interfaceExists($0) }
+    /// System boundary for the connected session's read-only DNS and PF
+    /// audits, the same pattern as `tunInterfaceExists`.
+    var protectionAudits = ProtectionAuditOperations()
     /// System boundary for the post-connect optional-policy background
     /// replacement. Production (nil) resolves the managed web-domain pins and
     /// performs the privileged arm → writeRuntimeConfig → /core/sync → reload

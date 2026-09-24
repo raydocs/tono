@@ -125,7 +125,10 @@ extension KillSwitchManager {
             // nothing protected needs plain DNS or DoT to the LAN. Scoped to the
             // physical interfaces so a company VPN running beside Tono keeps the
             // DNS it pushes to its own utun. With no physical interface found,
-            // the block stays unscoped: fail closed.
+            // the block stays unscoped: fail closed. PF only: the app's
+            // Protected DNS audit still holds the session on that VPN's split
+            // DNS (provisional product decision; see
+            // holdProtectedDNSSupplementalConflict).
             let lanDNSScope = physicalInterfaces.isEmpty
                 ? ""
                 : "on { \(physicalInterfaces.joined(separator: ", ")) } "
