@@ -79,7 +79,8 @@ extension AppState {
                     "connectBegin",
                     stage: ConnectionStage.preparing.rawValue,
                     node: selectedExit?.name,
-                    generation: Int(self.connectionCoordinator.protectionOperationGeneration),
+                    // executeConnect bumps right after this admission.
+                    generation: Int(self.connectionCoordinator.protectionOperationGeneration &+ 1),
                     transport: selectedExit?.catalogTransport
                 )
                 return (true, UUID())
@@ -975,8 +976,15 @@ extension AppState {
         _ = await pending?.value
     }
 
-    private func onCoreStarted(api: CoreControllerClient) async -> Bool {
+    func onCoreStarted(api: CoreControllerClient) async -> Bool {
         guard isConnecting, !Task.isCancelled else { return false }
+        let generation = connectionCoordinator.protectionOperationGeneration
+        // Disconnect and the native-update suspend both bump the generation
+        // and cancel this task, but neither can interrupt a helper IPC.
+        let attemptIsCurrent = {
+            !Task.isCancelled && self.isConnecting
+                && self.connectionCoordinator.protectionOperationGeneration == generation
+        }
         coreController = api
         proxyService.setAPI(api)
 
@@ -1020,8 +1028,13 @@ extension AppState {
             transport: selectedExitNode()?.catalogTransport
         )
         do {
-            if let pending = try await PrivilegedRuntimeCoordinator.shared.pendingNativeUpdate(), pending.pending {
-                _ = try await PrivilegedRuntimeCoordinator.shared.nativeUpdate("commit")
+            if let pending = try await nativeUpdateResume.pending(), pending.pending {
+                // The status query blocks until the helper answers. An attempt
+                // retired meanwhile must not commit the update: the user's
+                // Disconnect is still waiting for this task, and the helper
+                // would then refuse that update Disconnect as committed.
+                guard attemptIsCurrent() else { return false }
+                try await nativeUpdateResume.commit()
                 RuntimeCleanup.nativeUpdatePending = false
                 ConnectionTelemetryBuffer.shared.record(
                     "updateResumeOk",
@@ -1030,6 +1043,7 @@ extension AppState {
                 )
             }
         } catch {
+            guard attemptIsCurrent() else { return false }
             // A healthy App connection is not privileged update commit proof.
             updateIncomplete = true
             errorMessage = error.localizedDescription
@@ -1041,6 +1055,8 @@ extension AppState {
                 updateResume: true
             )
         }
+        // Nor may a retired attempt register monitors no teardown waits for.
+        guard attemptIsCurrent() else { return false }
         scheduleBackgroundOptionalPolicy()
         startCoreMonitor()
         if managedCatalogReloadPending {

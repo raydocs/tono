@@ -263,6 +263,9 @@ final class AppState {
     let coreRuntime = CoreRuntimeManager()
     let connectionCoordinator = ConnectionCoordinator()
     var networkProtection = NetworkProtectionOperations()
+    /// System boundary for the connect tail's native-update resume, the same
+    /// pattern as `networkProtection`.
+    var nativeUpdateResume = NativeUpdateResumeOperations()
     /// System boundary for the core monitor's owned-TUN existence probe, the
     /// same pattern as `networkProtection`: production reads the real
     /// interface index; tests substitute the syscall so a single monitor tick

@@ -184,9 +184,12 @@ final class ConnectionCoordinator {
             }
             return
         }
-        bumpGeneration()
         let (canProceed, attemptID) = prepare()
         guard canProceed else { return }
+        // Only an admitted attempt retires the previous generation. A connect
+        // refused by `prepare` (already connecting, no ready exit) must not
+        // retire the attempt in flight, whose tail compares the generation.
+        bumpGeneration()
         // An admitted connect is the user's newer intent; it retires a release
         // that could not confirm PF was released. A connect refused by
         // `prepare` is not, so the intent survives it.
