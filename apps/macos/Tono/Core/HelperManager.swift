@@ -982,6 +982,24 @@ nonisolated struct HelperManager {
         }
     }
 
+    /// The error for a failed connect to the helper socket (H19-O-F3).
+    static func connectFailure(
+        socketPath: String = HelperManager.socketPath,
+        currentUID: uid_t = getuid()
+    ) -> HelperIPCError {
+        .connectFailed
+    }
+
+    /// Shell run by root before the install replaces anything (H19-O-F3).
+    static func boundAccountGuard(uid: uid_t, allowedUIDPath: String) -> String {
+        ""
+    }
+
+    /// The account named by a refused root install, from osascript's error text.
+    static func boundAccount(inInstallerMessage message: String) -> String? {
+        nil
+    }
+
     // MARK: - Bounded Unix-socket HTTP client
 
     private static func sendRequest(
@@ -1096,6 +1114,9 @@ enum HelperIPCError: LocalizedError {
     case emptyResponse
     case invalidResponse
     case forbidden
+    /// The helper serves another macOS account on this Mac. Never repaired by
+    /// rebinding it to the calling account.
+    case boundToAnotherUser(String)
     case commandFailed(String, code: String? = nil)
 
     var errorDescription: String? {
@@ -1106,6 +1127,8 @@ enum HelperIPCError: LocalizedError {
         case .invalidResponse: String(localized: "The network helper returned an invalid response.")
         case .forbidden:
             String(localized: "The installed network helper rejected this copy of Tono.")
+        case .boundToAnotherUser(let account):
+            String(localized: "Tono's network helper on this Mac is set up for the macOS account “\(account)” and keeps that account's network protection. Use Tono from that account. To move Tono to this account, an administrator can run sudo /Library/PrivilegedHelperTools/tono-core-helper --emergency-reset in Terminal, then reopen Tono.")
         // commandFailed carries helper-produced text verbatim; not a catalog key.
         case .commandFailed(let message, _): message
         }
