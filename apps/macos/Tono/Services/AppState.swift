@@ -102,6 +102,12 @@ final class AppState {
     /// one first so a live session is not hit by three cold TLS races.
     var lastSuccessfulProbeOrigin: String?
     var consecutiveProtectedFailureCount = 0
+    /// Times the helper's PF supervisor had to reinstall protection under a
+    /// connected session. A successful reconnect does not reset it: another
+    /// program that keeps stopping PF or reloading the main ruleset would
+    /// otherwise disconnect the session every minute without end. Only an
+    /// explicit Retry now or Restore internet clears it.
+    var consecutiveProtectionRepairCount = 0
     /// The protected path failed and PF is intentionally still blocking direct
     /// egress. Keep this distinct from ordinary "Not Connected" so the user
     /// can explicitly restore normal Internet instead of unknowingly retrying

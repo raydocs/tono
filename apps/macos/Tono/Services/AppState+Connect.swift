@@ -688,6 +688,7 @@ extension AppState {
                     // the "repeated three times" pause.
                     self.lastProtectedFailureSignature = nil
                     self.consecutiveProtectedFailureCount = 0
+                    self.consecutiveProtectionRepairCount = 0
                     self.protectedReconnectPausedForUserAction = false
                     self.protectedReconnectPauseLiftsOnNetworkChange = false
                     self.isProtectedReconnectScheduled = false
@@ -1321,6 +1322,48 @@ extension AppState {
 
         guard self.isOwnedTonoMode else { return .continueMonitoring }
         if !self.config.tunEnabled { state.healthCycle += 1 }
+        // The helper supervises PF and reinstalls it when another program
+        // stops PF or reloads the main ruleset without the Tono anchor. PF was
+        // not filtering until then, and the reinstall comes from persisted
+        // state without this session's direct exceptions. Treat it like lost
+        // protected DNS: reconnect behind the kill switch, and say why. The
+        // endpoint is read-only; /killswitch/status would heal instead.
+        // Skipped while a node switch or reload re-arms, which clears it.
+        if state.healthCycle.isMultiple(of: 12), KillSwitchService.isArmed,
+           self.switchingNodeId == nil,
+           self.connectionCoordinator.configReloadTask == nil {
+            let observedGeneration = self.connectionCoordinator.protectionOperationGeneration
+            let health = await PrivilegedRuntimeCoordinator.shared.killSwitchHealth()
+            guard !Task.isCancelled, self.isConnected,
+                  self.connectionCoordinator.protectionOperationGeneration == observedGeneration
+            else { return .stopMonitoring }
+            if let health, health.wanted, health.repairedSinceArm || !health.live {
+                LocalTrafficAudit.shared.recordEvent(
+                    "killswitch_supervisor_repaired",
+                    details: [
+                        "live": String(health.live),
+                        "repaired": String(health.repairedSinceArm),
+                    ]
+                )
+                self.consecutiveProtectionRepairCount += 1
+                self.disconnect(releaseKillSwitch: false)
+                if self.consecutiveProtectionRepairCount >= 3 {
+                    // Stop in a fail-closed terminal state instead of
+                    // reconnecting into the same interference forever.
+                    self.protectedReconnectPausedForUserAction = true
+                    self.protectedReconnectPauseLiftsOnNetworkChange = false
+                    self.errorMessage = String(
+                        localized: "Protection problem: another program keeps turning off or replacing Tono's network protection. Kill Switch is blocking traffic and automatic reconnects are paused. Quit the other VPN or firewall, then click Retry now, or Restore internet to get back online."
+                    )
+                    return .stopMonitoring
+                }
+                self.errorMessage = String(
+                    localized: "Network protection was interrupted by another program; Kill Switch is blocking traffic while Tono reconnects."
+                )
+                self.scheduleProtectedReconnect()
+                return .stopMonitoring
+            }
+        }
         // Browser preferences can change after connect. Recheck on the
         // same one-minute cadence as protected system DNS so a newly
         // enabled explicit DoH mode cannot leave a residential claim
@@ -1904,6 +1947,7 @@ extension AppState {
         // single shot against a counter already sitting at the threshold.
         lastProtectedFailureSignature = nil
         consecutiveProtectedFailureCount = 0
+        consecutiveProtectionRepairCount = 0
         clearCatalogFailoverSweep()
         self.connectionCoordinator.protectedReconnectTask?.cancel()
         self.connectionCoordinator.protectedReconnectTask = nil

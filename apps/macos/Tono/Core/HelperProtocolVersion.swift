@@ -137,7 +137,13 @@ nonisolated enum HelperProtocolVersion {
     ///   the emergency block when protection is wanted (a requested stop
     ///   stays clean); and the emergency block falls back to a Tono-owned
     ///   main ruleset when /etc/pf.conf cannot be loaded.
-    static let current = "4.15.0"
+    /// - 4.15.0 → 4.16.0 (merge-train number): the helper
+    ///   holds its own `pfctl -E` enable reference (recorded, released on
+    ///   disarm) instead of enabling PF only when it was off, supervises PF
+    ///   liveness every ten seconds while armed and reinstalls it when it is
+    ///   not filtering, and adds the read-only `GET /killswitch/health`
+    ///   (`repairedSinceArm`) the connected app polls.
+    static let current = "4.16.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

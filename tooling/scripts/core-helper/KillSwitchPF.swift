@@ -425,14 +425,7 @@ extension KillSwitchManager {
                 loaded.message.isEmpty ? "Main PF load failed." : loaded.message
             )
         }
-        if !pfEnabled() {
-            let enabled = try run("/sbin/pfctl", ["-e"])
-            guard enabled.status == 0 || pfEnabled() else {
-                throw HelperFailure.system(
-                    enabled.message.isEmpty ? "PF enable failed." : enabled.message
-                )
-            }
-        }
+        try holdPFEnableReference()
         switch disposal {
         case .keep:
             break
@@ -512,6 +505,145 @@ extension KillSwitchManager {
 
     static func effectiveStatus() -> Bool {
         pfEnabled() && mainAnchorActive() && childAnchorActive()
+    }
+
+    // MARK: - PF enable reference
+
+    /// A token this helper acquired but could not record. Held in memory only,
+    /// so a failing record write costs one token per process, not one per check.
+    nonisolated(unsafe) static var unrecordedPFEnableReference: PFEnableReference?
+
+    /// A `pfctl -E` token and the boot it was issued in. Tokens are kernel
+    /// state: one recorded in an earlier boot means nothing now and must never
+    /// be released, because the same value may belong to another program.
+    struct PFEnableReference: Equatable {
+        let token: String
+        let boot: String
+    }
+
+    /// PF stays enabled while any enable reference is held. Enabling it only
+    /// when it was off meant this helper held none whenever something else had
+    /// enabled PF first, so that program releasing its own token (`pfctl -X`)
+    /// stopped PF under an armed kill switch and nothing noticed. This helper
+    /// now always holds a token of its own, recorded so disarm can release
+    /// exactly that one.
+    ///
+    /// The new token is recorded before the previous one is released, so this
+    /// helper never takes PF through a zero count itself.
+    static func holdPFEnableReference(
+        recordPath: String = killSwitchPFReferencePath
+    ) throws {
+        if heldPFEnableReference(recordPath: recordPath) != nil { return }
+        guard let boot = try? TonoAuthenticatedPeer.bootSession() else {
+            // Without a boot identity a token cannot be recorded safely, and
+            // taking an unrecorded one on every check would leak references.
+            // Keep the pre-reference behaviour for this unexpected case.
+            if !pfEnabled() { _ = try run("/sbin/pfctl", ["-e"]) }
+            guard pfEnabled() else { throw HelperFailure.system("PF enable failed.") }
+            return
+        }
+        let previous = readPFEnableReference(recordPath)
+        let token: String
+        if let pending = unrecordedPFEnableReference, pending.boot == boot,
+           pfEnabled(), pfEnableReferenceListed(pending.token) {
+            // A token from an earlier failed record write is still held.
+            // Retry recording that one instead of taking another.
+            token = pending.token
+        } else {
+            unrecordedPFEnableReference = nil
+            let acquired = try run("/sbin/pfctl", ["-E"])
+            guard acquired.status == 0,
+                  let issued = parsePFEnableToken(String(decoding: acquired.output, as: UTF8.self))
+            else {
+                throw HelperFailure.system(
+                    acquired.message.isEmpty ? "PF enable failed." : acquired.message
+                )
+            }
+            token = issued
+        }
+        let record = try JSONSerialization.data(
+            withJSONObject: ["token": token, "boot": boot],
+            options: [.sortedKeys]
+        )
+        do {
+            try atomicWrite(path: recordPath, data: record, permissions: 0o600)
+        } catch {
+            // PF is enabled and referenced, which is what protection needs.
+            // Keep the older record (and its token) rather than orphaning it.
+            // Releasing the new token here could stop PF under an armed kill
+            // switch when nothing else holds a reference, so keep it in memory:
+            // the next check retries this write with the same token instead
+            // of taking one more every ten seconds, and disarm releases it.
+            unrecordedPFEnableReference = .init(token: token, boot: boot)
+            FileHandle.standardError.write(Data(
+                "tono: PF enable reference could not be recorded\n".utf8
+            ))
+            return
+        }
+        unrecordedPFEnableReference = nil
+        if let previous, previous.boot == boot, previous.token != token,
+           pfEnableReferenceListed(previous.token) {
+            _ = try? run("/sbin/pfctl", ["-X", previous.token])
+        }
+    }
+
+    /// Releases the reference this helper recorded, if the kernel still holds
+    /// it in this boot, and forgets it either way. PF stops only if no other
+    /// program holds a reference, which is exactly the correct outcome.
+    static func releasePFEnableReference(
+        recordPath: String = killSwitchPFReferencePath
+    ) {
+        if let held = readPFEnableReference(recordPath),
+           held.boot == (try? TonoAuthenticatedPeer.bootSession()),
+           pfEnableReferenceListed(held.token) {
+            _ = try? run("/sbin/pfctl", ["-X", held.token])
+        }
+        if let pending = unrecordedPFEnableReference,
+           pending.boot == (try? TonoAuthenticatedPeer.bootSession()),
+           pfEnableReferenceListed(pending.token) {
+            _ = try? run("/sbin/pfctl", ["-X", pending.token])
+        }
+        unrecordedPFEnableReference = nil
+        unlink(recordPath)
+    }
+
+    /// The recorded reference, only if it was issued in this boot and the
+    /// kernel still lists it. `pfctl -d` invalidates every token.
+    static func heldPFEnableReference(
+        recordPath: String = killSwitchPFReferencePath
+    ) -> PFEnableReference? {
+        guard let held = readPFEnableReference(recordPath),
+              held.boot == (try? TonoAuthenticatedPeer.bootSession()),
+              pfEnabled(),
+              pfEnableReferenceListed(held.token) else { return nil }
+        return held
+    }
+
+    static func readPFEnableReference(_ path: String) -> PFEnableReference? {
+        guard let data = try? secureRead(path, maximumBytes: 4096),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let token = object["token"] as? String,
+              token.range(of: #"^[0-9]{1,20}$"#, options: .regularExpression) != nil,
+              let boot = object["boot"] as? String, !boot.isEmpty else { return nil }
+        return .init(token: token, boot: boot)
+    }
+
+    /// pfctl prints `Token : <n>` for `-E`.
+    static func parsePFEnableToken(_ output: String) -> String? {
+        guard let range = output.range(
+            of: #"(?<=Token : )[0-9]{1,20}"#,
+            options: .regularExpression
+        ) else { return nil }
+        return String(output[range])
+    }
+
+    static func pfEnableReferenceListed(_ token: String) -> Bool {
+        guard let result = try? run("/sbin/pfctl", ["-s", "References"]),
+              result.status == 0,
+              let text = String(data: result.output, encoding: .utf8) else {
+            return false
+        }
+        return text.split(whereSeparator: \.isWhitespace).contains { $0 == token }
     }
 
     // MARK: - Root-owned I/O and commands

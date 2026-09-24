@@ -73,7 +73,15 @@ final class SocketServer {
     }
 
     func run() {
+        var lastProtectionCheck = Date()
         while helperShutdownRequested == 0 {
+            // Low-frequency PF liveness check between requests. Under the update
+            // lock like every IPC mutation, so it cannot interleave with an
+            // out-of-process emergency disarm or an update transition.
+            if Date().timeIntervalSince(lastProtectionCheck) >= 10 {
+                lastProtectionCheck = Date()
+                try? updates.storage.locked { killSwitch.superviseProtection() }
+            }
             var descriptor = pollfd(
                 fd: serverFD,
                 events: Int16(POLLIN),
@@ -195,6 +203,9 @@ final class SocketServer {
             case ("GET", "/killswitch/status"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
                 sendResponse(client, status: 200, object: killSwitch.status())
+            case ("GET", "/killswitch/health"):
+                guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
+                sendResponse(client, status: 200, object: killSwitch.health())
             case ("POST", "/killswitch/arm"):
                 let object = try jsonObject(request.body)
                 try validateKillSwitchArmFields(object)

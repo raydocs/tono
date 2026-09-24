@@ -280,6 +280,39 @@ extension KillSwitchManager {
             check("standalone-emergency-main-written", false)
         }
 
+        // 9. The helper holds a PF enable reference of its own. Before, it ran
+        //    `pfctl -e` only when PF was off, so when another program had
+        //    enabled PF first the helper held nothing, and that program's
+        //    `pfctl -X` stopped PF under an armed kill switch. Unlike the checks
+        //    above this touches global PF state, so it is net-zero: both tokens
+        //    it takes are released, returning PF to whatever state it started in.
+        let referenceRecord = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-lifecycle-pf.reference").path
+        unlink(referenceRecord)
+        let startedEnabled = pfEnabled()
+        if let foreign = try? run("/sbin/pfctl", ["-E"]), foreign.status == 0,
+           let foreignToken = parsePFEnableToken(
+            String(decoding: foreign.output, as: UTF8.self)
+           ) {
+            let held = (try? holdPFEnableReference(recordPath: referenceRecord)) != nil
+            let recorded = readPFEnableReference(referenceRecord)
+            check("reference-recorded", held && recorded != nil && recorded?.token != foreignToken)
+            check("reference-listed", recorded.map { pfEnableReferenceListed($0.token) } == true)
+            _ = try? run("/sbin/pfctl", ["-X", foreignToken])
+            check("reference-survives-foreign-release", pfEnabled())
+            try? holdPFEnableReference(recordPath: referenceRecord)
+            check("reference-reused-while-live", readPFEnableReference(referenceRecord) == recorded)
+            releasePFEnableReference(recordPath: referenceRecord)
+            check(
+                "reference-released",
+                recorded.map { !pfEnableReferenceListed($0.token) } == true
+                    && readPFEnableReference(referenceRecord) == nil
+            )
+            check("reference-release-restores-pf", pfEnabled() == startedEnabled)
+        } else {
+            check("reference-foreign-token", false)
+        }
+
         if failures.isEmpty { return true }
         FileHandle.standardError.write(Data(
             "lifecycle self-test failed: \(failures.joined(separator: ", "))\n".utf8
