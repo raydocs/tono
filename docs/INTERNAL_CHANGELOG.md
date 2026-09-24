@@ -32,6 +32,17 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · 控制面：hy2 条目只下发给声明支持 hy2 的客户端
+
+- **归属**：hy2 灰度（SHIP_PLAN hy2 备用传输）；控制面 `services/control-plane`。只在设置了 `HY2_CATALOG_EMAILS` 时影响客户。
+- **来源**：内部审查 H15-F8，Issue #494；分支 `fix/hy2-capability-gate-20260923`，基线 origin/main bb2ed4e4。提交时未合 main。无 migration。
+- **缺陷修复**：`publicManagedCatalog` 的判断是「请求带 `X-Tono-Accept: hy2` **或** 邮箱在 `HY2_CATALOG_EMAILS` 里」。名单内账户用 0.0.72（不发该请求头）拉目录也会收到 ` · hy2` 块，而 0.0.72 两端遇到 `type: hysteria2` 就拒收整份目录。改后：必须请求头声明 hy2；名单设置时只在声明了 hy2 的客户端里再收窄，名单本身不再放行未声明的客户端。名单未设置时，带请求头的客户端照旧收到 hy2。
+- **新增/优化**：无。
+- **工程与测试**：改写原有的一个 Worker `it`（`test/worker.test.ts`，改名为 `serves hy2 catalog blocks only to clients that declare hy2, narrowed by the gray list`）。原用例把「名单内、无请求头也给 hy2」当作期望（正是本缺陷），现改为断言不给；「名单已设、未在名单、带请求头」改为不给；另加一条断言：名单未设、带请求头时给。`wrangler.jsonc` 注释同步新语义。
+- **验证**：MacBook 本机 worktree：改写后的 `it` 在旧 `catalog.ts` 上失败（名单内无请求头的账户收到 ` · hy2`），修复后通过。`npx vitest run`（control-plane 全量）43 个文件、891 个测试通过；`npx tsc --noEmit` 通过。未部署，未碰 remote D1。
+- **候选/发布**：仅源码，无新候选；Worker 未部署。
+- **剩余限制**：生产是否设置了 `HY2_CATALOG_EMAILS`、生产目录是否已有 hy2 块，均未核实，需 owner 只读检查。名单已设时，未在名单里的 0.0.73 客户端不再收到 hy2（此前收到），这是有意的收窄。部署后若名单内账户的服务端 YAML 变化，按 `wrangler.jsonc` 注释需要 bump catalog revision。`docs/SHIP_PLAN.md` 第 5 条对名单语义的描述未在本 PR 修改。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
