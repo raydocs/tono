@@ -37,6 +37,13 @@ final class AccountGateProtectionTests: XCTestCase {
             localIntent: true
         )
         session.state = .suspended
+        // Already loaded, so the release never reloads the sign-in methods
+        // through the default client, which would reach the production API.
+        session.authMethods = TonoAuthMethodsResponse(
+            email: TonoAuthMethod(enabled: false, clientId: nil),
+            apple: TonoAuthMethod(enabled: false, clientId: nil),
+            google: TonoAuthMethod(enabled: false, clientId: nil)
+        )
         XCTAssertEqual(app.gateProtectionNotice, .blocking)
 
         // What the mounted gate reads; SwiftUI re-evaluates it only on a change here.
