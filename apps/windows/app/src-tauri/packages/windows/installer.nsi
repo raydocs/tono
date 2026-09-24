@@ -189,6 +189,13 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 ; supported NSIS install is always upgraded/repaired in place: there is no ambiguous "uninstall
 ; first / do not uninstall" page. Update mode preserves AppData, shortcuts and the running
 ; fail-closed Service; passive mode closes the old GUI without another prompt.
+; A Quit from .onInit never reaches .onGUIEnd. Once the manual gate granted its lease, such an
+; exit must hand it back, or the Service keeps refusing Connect until another installer finishes.
+Function ReleaseManualLease
+  nsExec::ExecToLog '"$PLUGINSDIR\tono-gate\resources\tono-service-install.exe" --manual-update-finish'
+  Pop $0
+FunctionEnd
+
 Function DetectExistingInstall
   ; Prefer Tono's authoritative NSIS registry key. A stale legacy MSI record must never override
   ; a supported current install and trigger an unrelated migration path.
@@ -258,6 +265,7 @@ Function DetectExistingInstall
     ${IfNot} ${Silent}
       MessageBox MB_ICONSTOP "$(downgradeBlocked)"
     ${EndIf}
+    Call ReleaseManualLease
     SetErrorLevel 1638
     Quit
 
@@ -383,9 +391,9 @@ LangString legacyLocationAbort ${LANG_SIMPCHINESE} "检测到 ${PRODUCTNAME} 安
 LangString legacyLocationAbort ${LANG_ENGLISH} "${PRODUCTNAME} is installed in an unsupported location: $4$\r$\n$\r$\nThis version must be installed under Program Files. Uninstall the existing version first (do not select Delete application data), then run this installer again."
 LangString legacyLocationAbort ${LANG_RUSSIAN} "${PRODUCTNAME} установлен в неподдерживаемой папке: $4$\r$\n$\r$\nЭта версия должна быть установлена в Program Files. Сначала удалите текущую версию (не выбирайте удаление данных приложения), затем снова запустите этот установщик."
 
-LangString downgradeBlocked ${LANG_SIMPCHINESE} "检测到较新的 ${PRODUCTNAME} 版本（$ExistingVersion）。为了保护应用数据和系统服务，安装已停止。请使用较新版本的安装程序。"
-LangString downgradeBlocked ${LANG_ENGLISH} "A newer ${PRODUCTNAME} version ($ExistingVersion) is installed. Setup stopped to protect application data and the system Service. Use an installer for that version or newer."
-LangString downgradeBlocked ${LANG_RUSSIAN} "Установлена более новая версия ${PRODUCTNAME} ($ExistingVersion). Установка остановлена для защиты данных приложения и системной службы. Используйте установщик этой или более новой версии."
+LangString downgradeBlocked ${LANG_SIMPCHINESE} "检测到较新的 ${PRODUCTNAME} 版本（$ExistingVersion）。为了保护应用数据和系统服务，安装已停止。请使用该版本或更新版本的安装程序。$\r$\n$\r$\n如需退回旧版本：先在 Windows“已安装的应用”中卸载当前版本（不要删除应用数据），再运行旧版本的安装程序。不要把旧版本直接安装在新版本之上：旧版本无法还原新版本修改过的 DNS 设置。"
+LangString downgradeBlocked ${LANG_ENGLISH} "A newer ${PRODUCTNAME} version ($ExistingVersion) is installed. Setup stopped to protect application data and the system Service. Use an installer for that version or newer.$\r$\n$\r$\nTo go back to an older version, first uninstall this one from Windows Installed apps (do not delete application data), then run the older installer. Do not install an older version over a newer one: it cannot undo the DNS settings the newer version changed."
+LangString downgradeBlocked ${LANG_RUSSIAN} "Установлена более новая версия ${PRODUCTNAME} ($ExistingVersion). Установка остановлена для защиты данных приложения и системной службы. Используйте установщик этой или более новой версии.$\r$\n$\r$\nЧтобы вернуться к старой версии, сначала удалите текущую через список установленных приложений Windows (не удаляя данные приложения), затем запустите старый установщик. Не устанавливайте старую версию поверх новой: она не может отменить изменения DNS, сделанные новой версией."
 
 LangString invalidExistingVersion ${LANG_SIMPCHINESE} "检测到现有 ${PRODUCTNAME} 安装，但无法安全确认其版本。安装已停止，未删除应用数据。请先修复或卸载现有版本（不要选择删除应用数据），再重试。"
 LangString invalidExistingVersion ${LANG_ENGLISH} "An existing ${PRODUCTNAME} installation was found, but its version could not be verified safely. Setup stopped without deleting application data. Repair or uninstall the existing version (do not select Delete application data), then retry."

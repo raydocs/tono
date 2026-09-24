@@ -923,6 +923,30 @@
 - **剩余限制**：规则只对含本改动的执行器生效；本 PR 之前构建的内部候选执行器仍会拒绝任何新增
   字段。执行器自身的 `replacement.json`（同一副本写读）未改。
 
+## 2026-09-23 · Windows 安装器拒绝降级安装，并写明安全回退步骤
+
+- **归属/来源**：G3 客户升级/回退路径；Windows NSIS 配置与模板。内部审查 H15-F5，Issue #507。
+  基线 origin/main bb2ed4e4；分支 `fix/installer-downgrade-block-20260923`；未合 main。
+- **缺陷修复**：`tauri.windows.conf.json` 未设 `allowDowngrades`，tauri-utils 默认 true，
+  旧版安装器可直接装在新版之上；0.0.73+ 在受保护期间写入的 NRPT 全匹配规则与加密 DNS 抑制，
+  0.0.72 的 Service/卸载器都不认识，断开后遗留（整机解析失败、加密 DNS 被关）。0.0.72 已发出、
+  无法从新版一侧修复（0.0.73 Service 停止时分不清"被旧版替换"与"普通重启"，停止时撤销会削弱
+  受保护重启）。改为：从 0.0.73 起 `allowDowngrades: false`，旧于已装版本的安装器走既有
+  `downgrade_blocked` 并弹框；文案（中/英/俄）补充安全回退步骤（先卸载当前版本并保留应用数据，
+  再装旧版）。`downgrade_blocked` 在 `.onInit` 中 Quit，不会走到 `.onGUIEnd`，而此时手动门控已
+  发放租约；新增 `ReleaseManualLease` 在 Quit 前交还租约，避免 Service 之后一直拒绝连接。
+- **新增/优化**：`docs/RELEASE_LINES.md` 新增 "Going back to an older Windows build"。
+- **工程与测试**：一个 node 测试（`windows-packaging.test.mjs`
+  "Windows installers refuse to downgrade and hand back the manual lease on that exit"）：配置为
+  false、`downgrade_blocked` 在 Quit 前调用 `ReleaseManualLease`、该函数运行 bundled gate 的
+  `--manual-update-finish`。旧源码上实际运行为失败；改后 dev-control 套件 99/99 通过。
+- **验证**：MacBook 上 `node --test`（apps/windows/app，dev-control 六个文件）通过；NSIS 本机不能
+  编译，交给本 PR CI 与候选构建。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：对 0.0.72 安装器无效（旧模板已固化）；需候选构建 + 实机确认降级弹框与租约交还。
+  同类问题（未修）：`.onInit` 中门控成功后的其他退出（语言选择取消、`invalid_existing_version`、
+  `legacy_wix_blocked`、`legacyLocationAbort`）同样不交还租约，另行跟踪。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
