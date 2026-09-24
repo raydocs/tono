@@ -32,6 +32,36 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 终端诊断：按 Known Folder 找 PowerShell profile，带 BOM 的 profile 不再漏检
+
+- **归属/来源**：G2（失败看得到原因）；Windows App Support 页终端代理诊断
+  （`apps/windows/app/src-tauri/src/tono/commands/terminal.rs`）。内部审查 X3-3、X3-4，
+  Issue #477、#478。基线 main bb2ed4e4 → 分支 `fix/terminal-diag-20260923`；提交时未合 main。
+- **缺陷修复**：
+  - X3-3：当前用户 PowerShell profile 只在猜的 `%USERPROFILE%\Documents` 和
+    `%OneDrive*%\Documents` 下找。文档目录被移走或重定向时，真正的 `$PROFILE` 读不到，诊断显示
+    Ready。现在先用 `SHGetKnownFolderPath(FOLDERID_Documents)` 取实际文档目录，原来猜的位置作为
+    补充；取不到时整次检查返回错误（Support 页显示 Check Failed），不再显示 Ready。
+  - X3-4：profile/设置文件用 `read_to_string` 读取，UTF-8 BOM 作为 `U+FEFF` 留在首行，首行的
+    `$env:HTTPS_PROXY = ...` 所有规则都匹配不上，诊断显示 Ready；UTF-16 文件则直接读取失败。现在按
+    BOM 解码：去掉 UTF-8 BOM，解码 UTF-16 LE/BE；没有 BOM 的仍要求严格 UTF-8，解码失败照旧报检查失败。
+  - 两项都只影响诊断结果，不改 WFP 保护、流量或连接状态。
+- **新增/优化**：无。
+- **工程与测试**：App crate 的 `windows-sys` 增加 `Win32_System_Com`、`Win32_UI_Shell`
+  feature（不改 Cargo.lock）。`powershell_profile_roots` 改为接收注入的 Documents 目录。新增两个
+  `#[test]`（`commands/mod.rs`）：`terminal_proxy_scanner_reads_byte_order_marked_powershell_profiles`
+  用 UTF-8 BOM、UTF-16 LE、UTF-16 BE 三个 profile 各写一条代理，断言三个键都被发现（旧代码：UTF-8 BOM
+  一条漏检，UTF-16 读取报错）；`terminal_proxy_scanner_uses_the_documents_known_folder_or_fails`
+  断言注入的 `D:\工作资料\文档` 在扫描根里、取不到 Documents 时返回错误（旧代码没有这个注入点，
+  属构造性失败，不是实际跑出的红）。
+- **验证**：本机为编辑机，未运行 cargo；只确认新增代码行不产生 `rustfmt --check` 差异（这两个文件
+  原本就不是 rustfmt 干净的）。Windows 编译与两个测试交给本 PR 的 GitHub-hosted `windows-2025` CI
+  （"Test the Tauri crate" 步骤），结果以 PR 页为准。未在文档目录被重定向的实机上验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：X3-3 是否真能在"位置"选项卡迁移后触发（`%USERPROFILE%\Documents` 可能仍是指向新位置的
+  联接）没有在实机确认。`USERPROFILE` 缺失时整段用户 profile 扫描仍被跳过（原有行为，本 PR 未改）。
+  没有 BOM 的 GBK/ANSI profile 仍然只报检查失败，不按代码页解码。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
