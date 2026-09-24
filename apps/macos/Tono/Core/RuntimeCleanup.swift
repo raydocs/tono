@@ -8,6 +8,23 @@ enum RuntimeCleanup {
     static var nativeUpdatePending = false
     static var nativeUpdateRecovery: UpdateContractV1.Protection?
 
+    /// What launch recovery may tell the UI about a barrier an earlier
+    /// session left behind. The stored intent alone is proof of neither.
+    enum LaunchProtection: Equatable {
+        /// An authenticated helper status, or root's update receipt, says
+        /// the barrier is held.
+        case held
+        /// A fail-closed intent is stored, and no authenticated helper
+        /// answer has confirmed or cleared it.
+        case unconfirmed
+        /// An authenticated answer says no barrier is held.
+        case released
+    }
+
+    /// Receives each launch verdict. AppState registers itself on creation,
+    /// before account restoration can start.
+    static var launchProtectionConsumer: @MainActor (LaunchProtection) -> Void = { _ in }
+
     static func markCoreStarted(tunEnabled: Bool) {
         AppProfile.defaults.set(true, forKey: SettingsKey.didStartCore)
         AppProfile.defaults.set(tunEnabled, forKey: SettingsKey.lastTunEnabled)
@@ -23,6 +40,9 @@ enum RuntimeCleanup {
     /// PF stays armed with only Tono's bounded control-plane recovery exception
     /// until a verified session reconnects or the user explicitly disarms it.
     static func cleanupStaleRuntime() async throws -> Bool {
+        // Until the helper answers, including when a step below throws first,
+        // a stored fail-closed intent must not read as Standby.
+        if KillSwitchService.isArmed { launchProtectionConsumer(.unconfirmed) }
         let coordinator = PrivilegedRuntimeCoordinator.shared
         if let pending = try await coordinator.pendingNativeUpdate(), pending.pending {
             nativeUpdatePending = true
@@ -34,6 +54,7 @@ enum RuntimeCleanup {
             }
             nativeUpdateRecovery = receipt.requiredRecovery
             KillSwitchService.isArmed = receipt.requiredRecovery != .unprotected
+            launchProtectionConsumer(KillSwitchService.isArmed ? .held : .released)
             clearCoreStarted()
             if receipt.requiredRecovery == .connected {
                 nativeUpdateBlocksConnect = false // Root permits only this adopted incarnation.
@@ -160,8 +181,9 @@ enum RuntimeCleanup {
         return shouldResumeProtection
     }
 
-    /// Folds launch's helper answer into the stored fail-closed intent and
-    /// returns whether protection should resume.
+    /// Folds launch's helper answer into the stored fail-closed intent,
+    /// publishes what the UI may claim, and returns whether protection
+    /// should resume.
     static func adoptLaunchObservation(
         _ observation: KillSwitchService.StatusObservation,
         localIntent: Bool
@@ -173,10 +195,13 @@ enum RuntimeCleanup {
             // update this user's defaults; do not let that stale local bit
             // immediately re-arm the machine on reopen.
             KillSwitchService.isArmed = requiresProtectionRecovery
+            launchProtectionConsumer(requiresProtectionRecovery ? .held : .released)
             return requiresProtectionRecovery
         case .unavailable, .rejected:
             // Timeout, malformed status, and 403 are never evidence that PF is
-            // open. Preserve the last local fail-closed intent.
+            // open. Preserve the last local fail-closed intent. Nor are they
+            // evidence that PF is blocking: show the barrier as unconfirmed.
+            if localIntent { launchProtectionConsumer(.unconfirmed) }
             return localIntent
         }
     }

@@ -106,7 +106,14 @@ final class AppState {
     /// egress. Keep this distinct from ordinary "Not Connected" so the user
     /// can explicitly restore normal Internet instead of unknowingly retrying
     /// into another fail-closed transition.
-    var isProtectionBlocked: Bool = false
+    var isProtectionBlocked: Bool = false {
+        // Every write is a published verdict and replaces launch's doubt.
+        didSet { if isProtectionUnconfirmed { isProtectionUnconfirmed = false } }
+    }
+    /// Launch found a fail-closed intent from an earlier session that no
+    /// authenticated helper answer confirmed or cleared. Surfaces say the
+    /// protection state is unknown: neither Standby nor Protected Offline.
+    var isProtectionUnconfirmed = false
     var lastPhysicalFingerprint: PhysicalInterfaceFingerprint?
     var switchingNodeId: String? = nil
     var proxyMode: ProxyMode = .rule
@@ -295,6 +302,9 @@ final class AppState {
 
     init() {
         config.secret = Self.controllerSecret()
+        RuntimeCleanup.launchProtectionConsumer = { [weak self] protection in
+            self?.adoptLaunchProtection(protection)
+        }
         LocalTrafficAudit.shared.recordEvent(
             "app_state_initialized",
             details: [

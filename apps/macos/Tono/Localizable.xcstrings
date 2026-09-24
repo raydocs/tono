@@ -4309,6 +4309,16 @@
         }
       }
     },
+    "Protection unknown": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保护状态未知"
+          }
+        }
+      }
+    },
     "Proxied": {
       "extractionState": "manual",
       "localizations": {

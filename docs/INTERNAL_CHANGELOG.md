@@ -32,6 +32,33 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · macOS 启动把 helper 确认的屏障发布到界面
+
+- **归属/来源**：G2 客户端保护状态展示（macOS）。内部审查 H16-O-F5（= H16-C-F1），
+  Issue [#529](https://github.com/raydocs/tono/issues/529)。基线 origin/main 059a2ea2 → 分支
+  `fix/macos-launch-protection-20260924`；提交时未合 main。
+- **缺陷修复**：启动恢复（`RuntimeCleanup`）只把 helper 的屏障答复写进本地意图
+  `KillSwitchService.isArmed`，`AppState.isProtectionBlocked` 仍为 false：更新后须以
+  Protected Offline 恢复、或带着 PF 重启进入停用/错误/登出时，菜单栏、仪表盘徽标和连接按钮
+  都显示 Standby，而 PF 阻断全部流量；激活时 reconcile 和 Retry 都要求 `isProtectionBlocked`，
+  无法自行收敛。改后：helper 认证答复（或 root 的更新回执）确认屏障 → 发布 Protected Offline
+  （与会话内失败同一状态，横幅、Retry、Restore 均可用）；helper 未答复/拒绝而本地意图为
+  armed → 新的 `isProtectionUnconfirmed`，菜单栏显示「Protection unknown / 保护状态未知」，
+  既不显示 Standby，也不把本地意图当作屏障证明；启动第一步在 helper 答复前即按本地意图发布
+  unconfirmed，因此之后抛错的启动路径也不会显示 Standby。任何后续保护状态写入
+  （连接开始、拆除完成、释放、reconcile）都会清除 unconfirmed。
+- **新增/优化**：无。PF/helper、账户流程、保护策略均未改。
+- **工程与测试**：把启动的 helper 答复折叠抽成 `RuntimeCleanup.adoptLaunchObservation`
+  （先以不改行为的提交抽出）；新增一个 XCTest
+  `LaunchProtectionPresentationTests.testLaunchShowsTheHelperAnswerInsteadOfStandby`。
+- **验证**：本机未编译（MacBook 为编辑机）；TonoTests 在本 PR 的 GitHub-hosted `macos-26` CI 运行，
+  结果以 PR 检查中对应 head SHA 为准。测试仅抽取提交（产品行为未改）的 CI 运行结果见 PR 正文。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：未实机验证。unconfirmed 只在菜单栏图标/标题显示；仪表盘徽标和连接按钮只在
+  账户 ready 时可见，而 ready 的 unconfirmed 启动会立即自动恢复连接，未单独改。unconfirmed
+  不会被激活 reconcile 自动升级为已确认，需下一次保护操作或 Retry（重跑启动恢复）。账户 gate
+  的文案与菜单栏一致由后续 H16-C-F2 修复负责。
+
 ## 2026-09-23 · 发现总账与审查流程记录
 
 - **归属/来源**：G1–G3 审查与修复的可追溯性（工程流程与记录，非产品行为）；基线 origin/main

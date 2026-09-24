@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// One derivation for the menu-bar extra header and the status-item symbol.
-/// Five shapes carry state at a glance: MenuBarExtra renders template images,
+/// Six shapes carry state at a glance: MenuBarExtra renders template images,
 /// so color is not visible in the extra itself and must not be relied on there.
 struct MenuBarProtectionStatus {
     enum Kind: Hashable {
@@ -9,6 +9,7 @@ struct MenuBarProtectionStatus {
         case connecting
         case connected
         case degraded
+        case unconfirmed
         case standby
     }
 
@@ -53,6 +54,11 @@ struct MenuBarProtectionStatus {
             title = "Protected"
             color = TonoStatus.connected
             symbolName = Self.connectedSymbol
+        } else if appState.isProtectionUnconfirmed {
+            kind = .unconfirmed
+            title = "Protection unknown"
+            color = TonoStatus.blocked
+            symbolName = Self.unconfirmedSymbol
         } else {
             kind = .standby
             title = "Standby"
@@ -67,6 +73,8 @@ struct MenuBarProtectionStatus {
     private static let blockedSymbol = "shield.slash.fill"
     private static let degradedSymbol = "exclamationmark.shield.fill"
     private static let connectedSymbol = "checkmark.shield.fill"
+    /// Outline, not degraded's filled shield: no session is making a claim.
+    private static let unconfirmedSymbol = "exclamationmark.shield"
     private static let standbySymbol = "shield.lefthalf.filled"
 }
 
