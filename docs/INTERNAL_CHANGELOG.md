@@ -947,6 +947,30 @@
   同类问题（未修）：`.onInit` 中门控成功后的其他退出（语言选择取消、`invalid_existing_version`、
   `legacy_wix_blocked`、`legacyLocationAbort`）同样不交还租约，另行跟踪。
 
+## 2026-09-23 · Windows 地址无关直连规则不再接受裸 IP 的嗅探 SNI
+
+- **归属/来源**：G1 保护边界（内部审查 H1-F3）；影响 Windows `crates/tono-core`
+  运行时配置生成。基线 main b1b6fe6c（由 244075f2 rebase），分支 `fix/windows-sniff-direct-20260923`，
+  Issue [#338](https://github.com/raydocs/tono/issues/338)；提交时未合 main。
+- **缺陷修复**：带 pinned hosts 的 DirectPlan 开启 TLS sniffer（`parse-pure-ip: true`、
+  `override-destination: false`），同一运行时在发现签名 WeChat 路径后还会生成无地址、
+  无进程条件的 `DOMAIN-SUFFIX` 直连规则。Mihomo v1.19.30 中嗅探名只进 `SniffHost`
+  供规则匹配，拨号仍用原始 IP；WFP Rule H 按核心 app id 放行任意公网 IPv4 的审查端口，
+  因此裸 IP 连接只凭客户端提供的 SNI 就能走物理网卡。改后：凡运行时生成地址无关后缀规则，
+  sniffer 显式写 `parse-pure-ip: false`（Mihomo 默认 true）；无此类规则的运行时保持原样。
+- **新增/优化**：无。签名 WeChat 裸 IP 连接在该运行时仍由审查端口上的 `PROCESS-PATH-REGEX`
+  规则直连；pinned host 连接仍经 `force-domain`/DNS 映射嗅探，受 pinned 地址约束。
+- **工程与测试**：新增一个回归 `address_free_suffix_direct_never_matches_a_sniffed_raw_ip_dial`
+  （`config.rs`，`#[test]`）：签名路径 + 地址无关后缀时断言后缀直连规则存在且
+  `parse-pure-ip` 为 false；在旧代码上该断言读到 true 而失败。
+- **验证**：本机（MacBook）按 AGENTS.md 执行地点约束未运行 cargo；编译与测试委托本 PR 的
+  GitHub-hosted `windows-2025` CI（`crates/tono-core` `cargo test`）。Mihomo 语义依据上游
+  v1.19.30 源码（`component/sniffer/dispatcher.go`、`constant/metadata.go`、`tunnel/tunnel.go`）。
+- **候选/发布**：无新包，仅源码；不涉及 Sparkle/windows 更新源。
+- **剩余限制**：未实机复现。无签名路径（不生成后缀规则）时裸 IP 嗅探保留，只服务带地址约束的
+  pin 规则。非 WeChat 进程对 pinned 地址的裸 IP 连接在该运行时不再嗅探，改走隧道。
+  pinned 地址 DNS 映射窗口内的连接仍会被嗅探，伪造 SNI 只能把流量直连到已审查的 pinned 地址。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
