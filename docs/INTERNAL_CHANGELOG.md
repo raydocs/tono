@@ -70,6 +70,13 @@
   显式注入空的用户目录与“无进程”，保持与宿主无关。验证：本机未运行（不做本机 Swift 编译），以 PR CI 为准。
   剩余限制：P3 按更严一侧处理，`/Applications` 里任何没有 `Contents/Info.plist` 的 `.app`（例如 Apple 芯片上的
   iOS 包装 App）都会让 Helper 不再自行移除，只能用 `--emergency-reset`；只看绑定用户的 `~/Applications`。
+- **2026-09-24 第二轮跟进**（核验方 Codex 指出，Opus 读码确认，P2）：修复——`proc_pidpath` 失败时原先直接跳过，
+  没有确认进程已退出。现在进程扫描抽成 `tonoClientAmong`：路径或签名查询失败而进程仍存活（`proc_pidinfo`
+  BSD 信息可取且非僵尸）即算 Tono 在，只有已退出的 pid 才跳过。测试：扩展原 `--update-self-test` 用例，注入
+  “路径查询失败且存活”“签名查询失败且存活”必须保留保护，“已退出”“签名不符”不算。验证：本机未运行，以 PR CI 为准。
+  剩余限制：仓库里没有 App 之外可取得的 macOS 恢复说明（`--emergency-disarm/--emergency-reset` 只写在 App 的支持页），
+  因上述更严规则而不能自行移除的机器，在删除 App 后只能由支持人员提供命令；托管 runner 上若有存活但路径查询失败的
+  进程，真实扫描断言会失败，这同样意味着该类机器上 Helper 不会自行移除。
 
 ## 2026-09-24 · macOS Helper 完整移除时撤回 /etc/pf.conf 挂钩并删除 .tono-backup
 

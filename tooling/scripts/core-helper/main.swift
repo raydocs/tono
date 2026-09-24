@@ -775,7 +775,7 @@ func boundUserApplicationsDirectory() -> String? {
 /// executable at `<bundle>.app/Contents/MacOS/Tono` that satisfies
 /// `TonoPeerAuthorizer.clientRequirementText`. The name filter keeps this to a
 /// few Security lookups; renaming the executable breaks the signature anyway.
-/// A process that cannot be listed or looked up while alive counts as running.
+/// A pid listing that fails counts as running.
 func tonoClientProcessRunning() -> Bool {
     var requirement: SecRequirement?
     guard SecRequirementCreateWithString(
@@ -788,20 +788,55 @@ func tonoClientProcessRunning() -> Bool {
         proc_listallpids($0.baseAddress, Int32($0.count))
     }
     guard count > 0 else { return true }
-    var buffer = [CChar](repeating: 0, count: Int(PATH_MAX) * 4)
-    for pid in pids.prefix(Int(count)) where pid > 0 {
-        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0,
-              String(cString: buffer).hasSuffix(".app" + UpdatePackage.appExecutable) else { continue }
+    return tonoClientAmong(Array(pids.prefix(Int(count))), path: processExecutablePath,
+                           live: processIsLive) { pid in
         var code: SecCode?
         guard SecCodeCopyGuestWithAttributes(
             nil, [kSecGuestAttributePid: pid] as CFDictionary, SecCSFlags(rawValue: 0), &code
-        ) == errSecSuccess, let code else {
-            if kill(pid, 0) == 0 { return true }
+        ) == errSecSuccess, let code else { return nil }
+        return SecCodeCheckValidity(code, SecCSFlags(rawValue: 0), requirement) == errSecSuccess
+    }
+}
+
+/// The decision over one pid listing. `path` and `signed` return nil when the
+/// lookup fails. A pid whose lookup failed counts as a Tono client while `live`
+/// says it still runs: it may be Tono whose bundle was deleted under it, and
+/// doubt keeps protection. Only a pid that has exited is skipped.
+func tonoClientAmong(
+    _ pids: [Int32],
+    path: (Int32) -> String?,
+    live: (Int32) -> Bool,
+    signed: (Int32) -> Bool?
+) -> Bool {
+    for pid in pids where pid > 0 {
+        guard let executable = path(pid) else {
+            if live(pid) { return true }
             continue
         }
-        if SecCodeCheckValidity(code, SecCSFlags(rawValue: 0), requirement) == errSecSuccess { return true }
+        guard executable.hasSuffix(".app" + UpdatePackage.appExecutable) else { continue }
+        switch signed(pid) {
+        case .some(true): return true
+        case .some(false): continue
+        case .none: if live(pid) { return true }
+        }
     }
     return false
+}
+
+private func processExecutablePath(_ pid: Int32) -> String? {
+    var buffer = [CChar](repeating: 0, count: Int(PATH_MAX) * 4)
+    guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
+    return String(cString: buffer)
+}
+
+/// Live and not a zombie. BSD info with arg 0 finds no zombie; the status
+/// check covers a kernel that does. A pid it cannot find has exited.
+private func processIsLive(_ pid: Int32) -> Bool {
+    var info = proc_bsdinfo()
+    let size = withUnsafeMutablePointer(to: &info) {
+        proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, $0, Int32(MemoryLayout<proc_bsdinfo>.size))
+    }
+    return size == MemoryLayout<proc_bsdinfo>.size && info.pbi_status != UInt32(SZOMB)
 }
 
 /// At every helper start, after executor recovery (H19-O-F1). Dragging
