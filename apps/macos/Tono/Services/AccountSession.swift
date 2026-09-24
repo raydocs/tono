@@ -17,6 +17,16 @@ extension SettingsKey {
         "periodicTelemetryDefaultV2Applied"
 }
 
+/// What an immediate connect-failure report may carry.
+nonisolated enum ConnectFailureReportScope: Equatable, Sendable {
+    /// The user turned on the protection snapshot: error text and Core log
+    /// lines ride along, as before.
+    case full
+    /// Internal-build default (owner decision 2026-09-24): stage, error code,
+    /// version and node only. No error text, Core lines, URLs or addresses.
+    case classified
+}
+
 @MainActor @Observable
 final class AccountSession {
     enum State: Equatable { case restoring, signedOut, authenticating, enrolling, ready, suspended, error(String) }
@@ -162,6 +172,27 @@ final class AccountSession {
         return AppProfile.defaults.bool(
             forKey: SettingsKey.periodicTelemetryEnabled
         )
+    }
+
+    /// Internal candidate build: Info.plist `TonoBuildChannel` is `internal`
+    /// only when the candidate signing path sets the `TONO_BUILD_CHANNEL`
+    /// build setting. Release builds leave it empty.
+    nonisolated static func isInternalBuild(
+        _ info: [String: Any]? = Bundle.main.infoDictionary
+    ) -> Bool {
+        (info?["TonoBuildChannel"] as? String) == "internal"
+    }
+
+    /// Whether a connect failure is reported, and with what. Release builds
+    /// report only after the snapshot opt-in; internal builds also send the
+    /// classified record without it. That default comes from the build, not
+    /// from UserDefaults, so the one-shot v2 reset cannot turn it off on upgrade.
+    nonisolated static func failureReportScope(
+        internalBuild: Bool,
+        snapshotOptedIn: Bool
+    ) -> ConnectFailureReportScope? {
+        if snapshotOptedIn { return .full }
+        return internalBuild ? .classified : nil
     }
 
     init(api: TonoAPIClient = TonoAPIClient(), keychain: KeychainStore = KeychainStore(), sidecar: TonoSidecarService,

@@ -188,6 +188,12 @@ struct SettingsView: View {
             Text("Help fix problems")
                 .font(.system(size: 13, weight: .semibold))
 
+            if AccountSession.isInternalBuild() {
+                Text("Internal test build: failed connections are reported to Tono automatically (stage, error code, version and server only)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+
             SettingToggleRow(
                 label: "Crash reporting",
                 subtitle: "Tell Tono support when this app crashed",
