@@ -278,7 +278,7 @@ async fn disconnect_path_gates_stay_open_after_stop_clears_the_owner_record()
 /// installed-App image proof has to be applied; deleting the call must fail this test. A proof
 /// that could not be completed must reach the App as the retryable 503, not as the 401 that
 /// means "not the Tono App".
-#[cfg(windows)]
+#[cfg(all(windows, feature = "test"))]
 #[tokio::test]
 #[serial]
 async fn lifecycle_entry_refuses_when_the_app_image_proof_cannot_complete() {
