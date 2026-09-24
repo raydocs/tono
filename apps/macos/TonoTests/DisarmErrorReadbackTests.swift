@@ -1,11 +1,12 @@
 import XCTest
 @testable import Tono
 
-/// X1-8 regression: the helper removes PF before it deletes its persisted
-/// state, and a disarm reply can also be lost after a complete disarm. The
+/// X1-8 regression: a disarm reply can be lost after a complete disarm. The
 /// release teardown used to treat any disarm error as "Kill Switch still
 /// holds this host" and publish Protected Offline over an open host. It must
-/// read the helper back and publish what PF actually is.
+/// read the helper back and publish what PF actually is. (If the helper had
+/// instead failed to delete its persisted state, its status call reinstalls
+/// PF and the read-back reports armed; that case stays blocked.)
 final class DisarmErrorReadbackTests: XCTestCase {
 
     func testDisarmErrorAfterBarrierRemovalDoesNotPublishProtectedOffline() async {
@@ -23,7 +24,8 @@ final class DisarmErrorReadbackTests: XCTestCase {
         runtime.coreStatus = { (false, true) }
         runtime.restoreDNS = { true }
         runtime.disableSystemProxy = {}
-        // PF is flushed, then the state-file cleanup fails.
+        // The helper completed the disarm (PF and state gone), but the reply
+        // was lost, so the App sees an error.
         runtime.disarm = {
             pfLive = false
             throw KillSwitchService.Error.commandFailed("state cleanup failed")

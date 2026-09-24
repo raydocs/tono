@@ -48,6 +48,8 @@
 - **工程与测试**：新增 `DisarmErrorReadbackTests.testDisarmErrorAfterBarrierRemovalDoesNotPublishProtectedOffline`
   （一个 XCTest）：disarm 桩先把 `pfLive` 置 false 再抛错，status 回读返回 `pfLive`，断言
   `isProtectionBlocked == false` 且 `isArmed == false`。旧代码不回读，发布 blocked，断言失败。
+  桩模拟的是"完整 disarm 后回执丢失"；审查 R4 指出测试注释原写成"清 PF 后删 state 失败"，
+  与 helper 语义相反（该情形 status 会自愈装回 PF，回读为 true），已改注释，断言未变。
 - **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
   （TonoTests），结果以 PR 页为准。helper 状态删除失败场景未做实机复现。
 - **候选/发布**：无新包，仅源码。
