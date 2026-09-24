@@ -622,6 +622,28 @@ test('NSIS uninstall deletes in the approving account AppData only after the lin
   }
 })
 
+test('all-profile app data is deleted only inside the repair gate, under the uninstaller lease', () => {
+  const helperSource = readFileSync(
+    new URL('../../service/src/bin/uninstall_service.rs', import.meta.url),
+    'utf8',
+  )
+  const main =
+    helperSource.match(/#\[cfg\(windows\)\]\r?\nfn main\(\)([\s\S]*?)\r?\n\}\r?\n/)?.[1] ?? ''
+  const gateAt = main.indexOf('enter_repair_gate()?')
+  const deleteAt = main.indexOf('remove_app_data_in_profiles(')
+  // Same pending-update check and repair lock as every other cleanup mode of this helper.
+  assert.ok(gateAt >= 0 && deleteAt > gateAt, 'the app data delete must run after the repair gate')
+
+  const uninstall =
+    installerSource.match(/Section Uninstall\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  const ladderAt = uninstall.indexOf('!insertmacro RemoveVergeService')
+  const callAt = uninstall.indexOf('--delete-app-data-all-profiles')
+  // The gate admits the helper on the uninstaller's own lease, which is released only after
+  // this section (un.onUninstSuccess / un.onGUIEnd).
+  assert.ok(ladderAt >= 0 && callAt > ladderAt)
+  assert.doesNotMatch(uninstall, /--manual-update-finish/)
+})
+
 test('NSIS removes every known old payload on upgrade and uninstall', () => {
   const cleanup = [
     ...KNOWN_LEGACY_WINDOWS_PAYLOAD,

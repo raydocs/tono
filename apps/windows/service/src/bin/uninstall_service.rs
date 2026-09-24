@@ -301,11 +301,6 @@ fn main() -> Result<(), Error> {
 /// stop and uninstall the service
 #[cfg(windows)]
 fn main() -> anyhow::Result<()> {
-    if std::env::args().any(|argument| argument == DELETE_APP_DATA_ARG) {
-        let profiles = known_folder(windows_sys::Win32::UI::Shell::FOLDERID_UserProfiles)
-            .ok_or_else(|| anyhow::anyhow!("the user profiles folder is unavailable"))?;
-        return remove_app_data_in_profiles(&profiles);
-    }
     if std::env::args().any(|argument| argument == CHECK_CURRENT_APP_DATA_ARG) {
         anyhow::ensure!(
             current_account_app_data_plain(),
@@ -317,6 +312,13 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
     let _gate = enter_repair_gate()?;
+    // Deleting every account's data takes the same gate as the other cleanups: refused while an
+    // update is pending or another cleanup holds the lock; the uninstaller passes on its own lease.
+    if std::env::args().any(|argument| argument == DELETE_APP_DATA_ARG) {
+        let profiles = known_folder(windows_sys::Win32::UI::Shell::FOLDERID_UserProfiles)
+            .ok_or_else(|| anyhow::anyhow!("the user profiles folder is unavailable"))?;
+        return remove_app_data_in_profiles(&profiles);
+    }
 
     // The repair gate is an OS file lock, so `std::process::exit` releasing it via handle
     // close (not Drop) is safe here.
