@@ -375,14 +375,21 @@ pub(crate) async fn tono_prepare_core_start() -> Result<u32> {
 }
 
 /// A PrepareCoreStart / StartClash refusal as the connect flow reports it. The Service's code is
-/// otherwise dropped here, so the one refusal the UI must explain differently — armed protection
-/// held by another signed-in local user (H2-F2) — gets its stable marker; every other refusal
-/// keeps the Service's message untouched.
+/// otherwise dropped here, so the refusals the UI must explain differently — armed protection
+/// held by another signed-in local user (H2-F2), and a connect from a Remote Desktop session
+/// (TW-anthropic-1) — get their stable markers; every other refusal keeps the Service's message
+/// untouched.
 fn tono_start_refusal(code: u16, message: String) -> String {
     if code == tono_service_protocol::ServiceErrorCode::ProtectionHeldByAnotherUser as u16 {
         return format!(
             "{}: {message}",
             crate::tono::connection::PROTECTION_HELD_BY_ANOTHER_USER_PREFIX
+        );
+    }
+    if code == tono_service_protocol::ServiceErrorCode::RemoteSessionConnectRefused as u16 {
+        return format!(
+            "{}: {message}",
+            crate::tono::connection::REMOTE_SESSION_CONNECT_REFUSED_PREFIX
         );
     }
     message

@@ -1315,6 +1315,109 @@ pub(crate) fn authorize_takeover_for(
     }
 }
 
+/// The kind of Windows session the authenticated caller's process runs in.
+#[cfg_attr(not(any(all(windows, not(feature = "test")), test)), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CallerSession {
+    /// The physical console session.
+    Console,
+    /// A Remote Desktop (or other remoting protocol) session. It reaches this PC over the
+    /// physical interface that armed protection blocks, with no inbound exception.
+    Remote,
+    /// The session could not be read.
+    Unknown,
+}
+
+/// Whether a user-initiated connect (`StartClash` / `PrepareCoreStart`) must be refused because
+/// of the caller's session (TW-anthropic-1).
+///
+/// Arming protection from a Remote Desktop session cuts that session, and once the intent is
+/// verified the block is reinstalled at every boot; the emergency release refuses while the
+/// Service answers, and a disconnected owner still counts as signed in. A PC managed only over
+/// RDP could not be recovered. So a caller that is not provably on the console may not be the one
+/// that first arms protection. A caller that already holds armed protection keeps its existing
+/// fail-closed reconnect path unchanged; refusing it would not lift the block anyway. An
+/// unreadable session is refused like a remote one: the refusal leaves the network exactly as it
+/// was, while a wrong "console" answer could strand the machine.
+fn remote_session_connect_refused(session: CallerSession, caller_holds_armed_intent: bool) -> bool {
+    session != CallerSession::Console && !caller_holds_armed_intent
+}
+
+/// Refuse a connect from a non-console session unless the caller already holds armed protection.
+/// `caller_pid` is the kernel-reported named-pipe peer (`AuthenticatedOwner::peer_pid`), so the
+/// session is the calling App's, not this Service's Session 0.
+pub(crate) fn authorize_connect_session_for(
+    caller_key: &str,
+    caller_pid: Option<u32>,
+) -> std::result::Result<(), crate::core::auth::ServiceError> {
+    let caller_holds_armed_intent = armed_guard().as_ref().is_some_and(|armed| {
+        armed.intent.wanted && armed.intent.owner_key.as_deref() == Some(caller_key)
+    });
+    let session = caller_session(caller_pid);
+    if !remote_session_connect_refused(session, caller_holds_armed_intent) {
+        return Ok(());
+    }
+    tracing::warn!("connect refused: caller session is {session:?}, not the local console");
+    let message = if session == CallerSession::Remote {
+        "Connect is not allowed from a Remote Desktop session because protection would block this \
+         remote connection; connect from the local console"
+    } else {
+        "Connect is not allowed because this Windows session could not be confirmed as the local \
+         console, and protection would block a remote connection; connect from the local console"
+    };
+    Err(crate::core::auth::ServiceError::remote_session_connect_refused(message))
+}
+
+/// The session of process `pid`, read through `ProcessIdToSessionId` and that session's
+/// `WTSClientProtocolType` (0 = console; 1 = legacy ICA and 2 = RDP are both remote). Any failure,
+/// including an unnamed peer, answers `Unknown`.
+#[cfg(all(windows, not(feature = "test")))]
+fn caller_session(pid: Option<u32>) -> CallerSession {
+    use windows_sys::Win32::System::RemoteDesktop::{
+        ProcessIdToSessionId, WTS_CURRENT_SERVER_HANDLE, WTSClientProtocolType, WTSFreeMemory,
+        WTSQuerySessionInformationW,
+    };
+
+    let Some(pid) = pid else {
+        return CallerSession::Unknown;
+    };
+    let mut session_id = 0_u32;
+    if unsafe { ProcessIdToSessionId(pid, &mut session_id) } == 0 {
+        return CallerSession::Unknown;
+    }
+    let mut buffer: windows_sys::core::PWSTR = std::ptr::null_mut();
+    let mut returned = 0_u32;
+    if unsafe {
+        WTSQuerySessionInformationW(
+            WTS_CURRENT_SERVER_HANDLE,
+            session_id,
+            WTSClientProtocolType,
+            &mut buffer,
+            &mut returned,
+        )
+    } == 0
+        || buffer.is_null()
+    {
+        return CallerSession::Unknown;
+    }
+    // A USHORT; read unaligned because the buffer is typed as a wide string.
+    let protocol = (returned as usize >= std::mem::size_of::<u16>())
+        .then(|| unsafe { buffer.read_unaligned() });
+    unsafe { WTSFreeMemory(buffer.cast()) };
+    match protocol {
+        Some(0) => CallerSession::Console,
+        Some(_) => CallerSession::Remote,
+        None => CallerSession::Unknown,
+    }
+}
+
+/// Off Windows and in the lifecycle `test` build there is no WTS: every caller is on the console,
+/// so the gate never changes those builds' behavior.
+#[cfg(not(all(windows, not(feature = "test"))))]
+fn caller_session(_pid: Option<u32>) -> CallerSession {
+    CallerSession::Console
+}
+
 /// True unless every Windows session a user can be signed in to was inspected and none belongs to
 /// the user whose owner key is `owner_key`. Only sessions in the Active, Connected or
 /// Disconnected state can hold a signed-in user; listener, idle, reset, down and init sessions
@@ -4307,6 +4410,18 @@ mod tests {
         assert_eq!(on_disk.owner_key.as_deref(), Some("owner-alice"));
         cleanup().await;
         Ok(())
+    }
+
+    /// TW-anthropic-1: a first connect from a Remote Desktop (or unreadable) session would arm a
+    /// block that cuts that session and cannot be released remotely, so it is refused. The
+    /// console may connect, and a caller that already holds armed protection keeps its path.
+    #[test]
+    fn a_remote_session_cannot_be_the_first_to_arm_protection() {
+        use CallerSession::{Console, Remote, Unknown};
+        assert!(remote_session_connect_refused(Remote, false));
+        assert!(remote_session_connect_refused(Unknown, false));
+        assert!(!remote_session_connect_refused(Console, false));
+        assert!(!remote_session_connect_refused(Remote, true));
     }
 
     #[tokio::test]

@@ -763,6 +763,7 @@ enum OwnerLifecycleGate<'a> {
     ArmedPolicyOwner,
     /// `StartClash` and `PrepareCoreStart` make the caller the owner and may stop the running
     /// Core, so they must not run over armed protection that another local user still holds.
+    /// Nor may they first arm protection from a Remote Desktop session, which the arm would cut.
     ArmedPolicyTakeover,
     /// Proof of being the active owner, which is all the read-only log routes need.
     ActiveOwner,
@@ -803,7 +804,9 @@ async fn enter_owner_lifecycle(
             windows_kill_switch::authorize_write_for(&owner.key)
         }
         OwnerLifecycleGate::ArmedPolicyTakeover => {
-            windows_kill_switch::authorize_takeover_for(&owner.key)
+            windows_kill_switch::authorize_takeover_for(&owner.key).and_then(|()| {
+                windows_kill_switch::authorize_connect_session_for(&owner.key, owner.peer_pid)
+            })
         }
         OwnerLifecycleGate::ActiveOwner => require_active_owner(owner).await,
         OwnerLifecycleGate::ActiveSession(proof) => {
@@ -947,6 +950,7 @@ fn service_error(error: ServiceError) -> Result<HttpResponse> {
         // current state wins, exactly like the other 409 rejections.
         crate::ServiceErrorCode::StaleReleaseEpoch => StatusCode::CONFLICT,
         crate::ServiceErrorCode::ProtectionHeldByAnotherUser => StatusCode::CONFLICT,
+        crate::ServiceErrorCode::RemoteSessionConnectRefused => StatusCode::CONFLICT,
         _ => StatusCode::UNPROCESSABLE_ENTITY,
     };
     json_response::<()>(status, error.code as u16, error.message, None)

@@ -57,6 +57,33 @@
 - **剩余限制**：未合入 #203（draft）、#300（2 条未解决的 review thread）、#305（叠在 #300 上）、
   #352（PR 正文要求先取得设备 `icacls` 证据），以及在途、新开或 CI 未绿的 PR（见列车 PR 正文）。
   没有实机验收。
+- **续记（2026-09-24，TW-anthropic-1，P1，Codex 复核确认）**：分支 `fix/win-train-20260924`
+  （基于列车头 `b4ff7538`，PR #572）。
+  - 缺陷修复：#343 引入、#354 加重——保护一旦武装，物理网卡没有 RDP 入站例外，已验证 intent
+    开机重装；断开的 RDP 所有者仍算已登录（其他用户 1014），Service 在线时紧急解除拒绝执行。
+    只靠 RDP 管理的电脑按下连接就会切断自己的远程会话且无法远程恢复。现在 `StartClash` /
+    `PrepareCoreStart` 在生命周期锁内、任何副作用之前检查**调用方**会话：取命名管道内核报告的
+    peer PID（`AuthenticatedOwner::peer_pid`），`ProcessIdToSessionId` 后查该会话的
+    `WTSClientProtocolType`（0 = 控制台，其余为远程），不看 Service 自己的 Session 0。远程或读不出
+    会话、且调用方尚未持有已武装保护时，返回新错误码 1015 `RemoteSessionConnectRefused`（409）。
+    App 映射为 `TONO_REMOTE_SESSION_CONNECT_REFUSED` 并显示中英文专门提示；1014 的 Service 文案与
+    界面文案改为可操作的恢复步骤（原所有者在本机点「断开」或注销；否则本机管理员先停止
+    TonoService，再以管理员身份运行「恢复网络」开始菜单快捷方式）。断开的会话仍算已登录，
+    不新增任何非特权解除路径。
+  - 产品决定（暂定，待所有者复核）：采用更严格的选项 (b) 拒绝远程会话首次连接；不采用 (a)
+    局域网 RDP 放行，因其会放宽保护。
+  - 工程与测试：一个 Rust `#[test]`
+    `core::windows_kill_switch::tests::a_remote_session_cannot_be_the_first_to_arm_protection`
+    覆盖纯判定函数（远程/未知且未持有 → 拒绝；控制台 → 放行；已持有已武装保护 → 不变）。
+    lifecycle `test` feature 与非 Windows 构建的会话读取固定返回控制台，不改变现有集成测试。
+  - 验证：按执行位置规则本机未运行 cargo；Rust 编译与测试待列车 PR 的 GitHub-hosted
+    `windows-2025` CI。本机只跑 `apps/windows/app` `tsc --noEmit` 通过，`vitest run`
+    `src/services/tono.test.ts` `src/services/i18n.test.ts` 39 项通过，`generate-i18n-keys`
+    仅新增一个键。
+  - 候选/发布：无新包，仅源码。
+  - 剩余限制：已经由远程会话持有已武装保护的现有安装保持原行为（不自动解除，仍 fail-closed）；
+    断开状态 RDP 会话的 `WTSClientProtocolType` 取值、Hyper-V 增强会话（RDP 协议但不走网卡，会被
+    误拒）均未经实机确认；没有实机 RDP 验收。
 
 ## 2026-09-23 · Windows 发布 workflow 权限最小化（内部审查 H5-F1）
 

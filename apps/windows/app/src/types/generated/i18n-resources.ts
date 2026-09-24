@@ -1053,6 +1053,7 @@ export interface TranslationResources {
           protectionHeldByAnotherUser: string
           protectionReleaseFailed: string
           releaseReconciling: string
+          remoteSessionConnectRefused: string
           sendDiagnostics: string
           serviceBusy: string
           serviceNotRunning: string

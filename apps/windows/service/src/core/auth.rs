@@ -75,8 +75,15 @@ impl ServiceError {
     pub(crate) fn protection_held_by_another_user() -> Self {
         Self::new(
             ServiceErrorCode::ProtectionHeldByAnotherUser,
-            "network protection is held by another local user who is still signed in",
+            "network protection is held by another local user who is still signed in (a \
+             disconnected session counts); that user must press Disconnect in Tono or sign out, \
+             or a local administrator must stop TonoService and then run the Start-menu \
+             \"Restore Network\" shortcut as administrator",
         )
+    }
+
+    pub(crate) fn remote_session_connect_refused(message: impl Into<String>) -> Self {
+        Self::new(ServiceErrorCode::RemoteSessionConnectRefused, message)
     }
 
     pub(crate) fn invalid_proxy_config(message: impl Into<String>) -> Self {

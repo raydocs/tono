@@ -649,6 +649,11 @@ pub enum ServiceErrorCode {
     /// different local user whose Windows logon session still exists. Taking it over would stop
     /// that user's Core and hand their protection to the caller. Mapped to 409 Conflict.
     ProtectionHeldByAnotherUser = 1014,
+    /// `StartClash` / `PrepareCoreStart` refused: the caller's Windows session is a Remote
+    /// Desktop session (or cannot be confirmed as the console) and the caller holds no armed
+    /// protection yet. Arming would block the physical interface that session arrives on, and the
+    /// block cannot be released from outside the console. Mapped to 409 Conflict.
+    RemoteSessionConnectRefused = 1015,
 }
 
 pub fn owner_key(identity: &OwnerIdentity) -> String {
