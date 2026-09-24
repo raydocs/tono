@@ -942,7 +942,9 @@ test('Core plugin runtime registration matches its generated ACL namespace', () 
       'utf8',
     ),
   )
-  assert.ok(capability.permissions.includes(`${runtimeName}:default`))
+  assert.ok(
+    capability.permissions.some((p) => p.startsWith(`${runtimeName}:allow-`)),
+  )
 })
 
 for (const entrypoint of [
