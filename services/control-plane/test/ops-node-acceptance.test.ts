@@ -465,7 +465,9 @@ describe('nodes/{name}/acceptance and the 上架 gate', () => {
 
     // Re-enabled and relisted after a drain sweep read revision 2: its revoke must miss.
     await db().prepare("UPDATE exit_nodes SET status = 'active' WHERE name = ?").bind(NODE).run();
-    const block = `  - name: ${NODE}\n    type: vless\n    server: 203.0.113.10\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n`;
+    const block = `  - name: ${NODE}\n    type: vless\n    server: 203.0.113.10\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n`
+      + `    network: tcp\n    tls: true\n    flow: xtls-rprx-vision\n    servername: www.example.com\n`
+      + `    reality-opts:\n      public-key: ${'A'.repeat(43)}\n      short-id: 0123abcd\n`;
     expect((await relistFleetNode(e, ACCESS_ADMIN_EMAIL, NODE, { block })).revision).toBe(3);
     expect(await revokeExitToken(e, NODE, 'system', NOW, 2)).toBe(false);
     expect(await exitStatus()).toEqual({ status: 'active' });

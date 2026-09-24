@@ -49,6 +49,17 @@
 - **候选/发布**：无新包，仅文档。
 - **剩余限制**：H16/H17 条目全部是源码推导或阅读确认，回归草案均未运行；需实机的部分列在审查轮记录第 3 节。
 
+## 2026-09-23 · 重新上架：不再发布缺 Reality 设置的目录条目
+
+- **归属**：ops 任务（节点下架/上架流程）；控制面 `services/control-plane`。不属客户发布门，但影响所有客户端的目录更新。
+- **来源**：内部审查 H15-F7，Issue #492；分支 `fix/relist-complete-entry-20260923`，基线 origin/main bb2ed4e4。提交时未合 main。无 migration。
+- **缺陷修复**：控制台发起的 `catalog_relist` 任务不带条目（任务参数表为空），`relistFleetNode` 用 profile 的 IP 拼一个兜底条目，缺 `servername`、`reality-opts`、`flow`，照样发布并提升 revision；macOS 与 Windows 客户端都因一条不合格而拒收整份目录。改后：(1) 目录里没有该节点、也没有提供条目时，返回 422 `RELIST_NO_TEMPLATE`，不再猜测条目；(2) 提供的 VLESS 条目先按两端客户端的必需字段检查（`tls: true`、`servername`/`sni`、`reality-opts.public-key` 43 位 base64url、`reality-opts.short-id` 偶数位 hex ≤16，`flow`/`network` 有值时须为 `xtls-rprx-vision`/`tcp`），不完整返回 422 `CATALOG_ENTRY_INCOMPLETE` 并列出缺的字段。节点已在目录中时行为不变。
+- **新增/优化**：无。
+- **工程与测试**：一个 Worker `it`（`test/ops-jobs.test.ts` `relist refuses to publish an entry without the Reality settings clients require`）。fixture 修正：同文件 retire→drain→relist 用例原先靠兜底条目上架（正是本缺陷路径），改为直接用带 Reality 设置的完整条目调用 `relistFleetNode`。
+- **验证**：MacBook 本机 worktree：新 `it` 在旧代码上失败（任务状态 `succeeded`，期望 `failed`）；修复后通过。`npx vitest run`（control-plane 全量）43 个文件、892 个测试通过；`npx tsc --noEmit` 通过。未部署，未碰 remote D1。
+- **候选/发布**：仅源码，无新候选；Worker 未部署。
+- **剩余限制**：下架不保存原条目，控制台上架已下架节点现在会被明确拒绝，需用目录发布工具重新发布完整条目（保存原条目是后续工作）。PUT `exit-catalog` 与下架路径仍只校验结构、名字和身份占位符，未套用 Reality 字段检查（发布工具生成完整条目；全量套用需改约 24 个测试 fixture）。生产 D1 是否已有兜底模板生成的条目未核实，需 owner 只读检查。
+
 ## 2026-09-23 · Worker/发布工具把策略 revision 写进被签名 json（H3-F5 服务端，默认关闭）
 
 - **归属/来源**：G1 签名信任边界；影响控制面 `src/ops/shared-admin/traffic-policy.ts`、
