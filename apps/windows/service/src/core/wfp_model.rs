@@ -150,6 +150,9 @@ pub enum Condition {
     AleLoopback,
     /// `FwpmGetAppIdFromFileName` blob of the staged core binary; resolved by the engine.
     AleAppId,
+    /// `FwpmGetAppIdFromFileName` blob of the installed Tono app (`RuleConfig::tono_app_path`),
+    /// the only process that talks to the control plane; resolved by the engine.
+    AleAppIdTonoApp,
     /// WinTUN adapter LUID, matched at ALE authorization.
     LocalInterface(u64),
 }
@@ -185,6 +188,9 @@ pub struct RuleConfig {
     /// binary must rekey the permit (Proton's upgrade lesson — app-path filters silently die
     /// when the exe moves), which the add-before-remove plan then swaps atomically.
     pub app_path: String,
+    /// The installed Tono app image under Program Files. Scopes the bootstrap API channel (rule
+    /// C) and is folded into its key; empty means that channel is not rendered at all.
+    pub tono_app_path: String,
     /// Cloud-approved DIRECT endpoints (WeChat acceleration): exact `IP:port` tuples the staged
     /// core may reach on the physical NIC. Rendered **only in `Locked`** (see rule G);
     /// never persisted, never restored, never inherited by the next arm — omission = clear.
@@ -512,21 +518,29 @@ pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
 
     // C: the bounded bootstrap API channel. Open in bootstrap, retracted at lock, and open
     // again in blocked mode as the recovery channel.
-    if config.mode != KillSwitchStatusMode::Locked {
-        // One permit per pinned address per reachable port. The address set is what bounds
-        // this channel; the port was never doing security work, and pinning it to 443 alone
+    //
+    // Scoped to the installed Tono app. The pinned addresses are shared Cloudflare anycast, so
+    // an address-only permit let any local process reach any origin behind them from the
+    // physical NIC while the user was told nothing gets out. No app path, no channel.
+    if config.mode != KillSwitchStatusMode::Locked && !config.tono_app_path.is_empty() {
+        // One permit per pinned address per reachable port. The app id and the address set
+        // are what bound this channel; the port was never doing security work, and pinning it to 443 alone
         // meant the client could not use the alternate HTTPS ports the same Cloudflare zone
         // answers on — the one route around an SNI blocklist keyed on 443, and the difference
         // between a user stuck in Protected Offline being able to re-authenticate or not.
         for ip in &config.api_host_ips {
             for port in crate::CONTROL_PLANE_PORTS {
                 filters.push(spec(
-                    format!("session/permit-api/ale/{ip}/{port}"),
+                    format!(
+                        "session/permit-api/ale/{}/{ip}/{port}",
+                        config.tono_app_path
+                    ),
                     "session permit bootstrap API",
                     ale_layer_for(*ip),
                     WEIGHT_INFRA_PERMIT,
                     A::Permit,
                     vec![
+                        C::AleAppIdTonoApp,
                         remote_address_condition(*ip),
                         C::Protocol(IpProtocol::Tcp),
                         C::RemotePort(port),
@@ -795,6 +809,7 @@ mod tests {
             api_host_ips: vec!["1.1.1.1".parse().unwrap()],
             tun_luid: Some(0x1234_5678),
             app_path: r"C:\ProgramData\Tono\bin\mihomo.exe".to_owned(),
+            tono_app_path: r"C:\Program Files\Tono\Tono.exe".to_owned(),
             direct_endpoints: Vec::new(),
             reviewed_direct_ports: Vec::new(),
         }
@@ -1218,6 +1233,7 @@ mod tests {
         remote_port: u16,
         icmp_type: Option<u16>,
         app_id_matches: bool,
+        tono_app_id_matches: bool,
         local_interface: Option<u64>,
     }
 
@@ -1232,6 +1248,7 @@ mod tests {
             remote_port: port,
             icmp_type: None,
             app_id_matches: false,
+            tono_app_id_matches: false,
             local_interface: None,
         }
     }
@@ -1272,6 +1289,7 @@ mod tests {
                 .is_some_and(|ty| (*min..=*max).contains(&ty)),
             Condition::AleLoopback => packet.ale_loopback,
             Condition::AleAppId => packet.app_id_matches,
+            Condition::AleAppIdTonoApp => packet.tono_app_id_matches,
             Condition::LocalInterface(luid) => packet.local_interface == Some(*luid),
         }
     }
@@ -1297,7 +1315,8 @@ mod tests {
             Condition::RemotePort(_) => 4,
             Condition::IcmpV6TypeRange { .. } => 5,
             Condition::AleLoopback => 6,
-            Condition::AleAppId => 7,
+            // Same WFP field (`ALE_APP_ID`) as the core's app id.
+            Condition::AleAppId | Condition::AleAppIdTonoApp => 7,
             Condition::LocalInterface(_) => 8,
         }
     }
@@ -1639,21 +1658,25 @@ mod tests {
 
     #[test]
     fn arbitration_api_channel_open_in_bootstrap_and_blocked_retracted_in_locked() {
-        let packet = packet(LayerKind::AleAuthConnectV4, IpProtocol::Tcp, "1.1.1.1", 443);
-        assert_eq!(
-            arbitrate(
-                &expected_filters(&config(KillSwitchStatusMode::Bootstrap)),
-                &packet
-            ),
-            FilterAction::Permit
-        );
-        assert_eq!(
-            arbitrate(
-                &expected_filters(&config(KillSwitchStatusMode::Blocked)),
-                &packet
-            ),
-            FilterAction::Permit
-        );
+        let other_process = packet(LayerKind::AleAuthConnectV4, IpProtocol::Tcp, "1.1.1.1", 443);
+        let mut packet = other_process.clone();
+        packet.tono_app_id_matches = true;
+        for mode in [
+            KillSwitchStatusMode::Bootstrap,
+            KillSwitchStatusMode::Blocked,
+        ] {
+            let filters = expected_filters(&config(mode));
+            assert_eq!(
+                arbitrate(&filters, &packet),
+                FilterAction::Permit,
+                "{mode:?}"
+            );
+            assert_eq!(
+                arbitrate(&filters, &other_process),
+                FilterAction::Block,
+                "{mode:?}: another process cannot use the shared API addresses"
+            );
+        }
         assert_eq!(
             arbitrate(
                 &expected_filters(&config(KillSwitchStatusMode::Locked)),
