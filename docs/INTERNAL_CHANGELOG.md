@@ -63,6 +63,19 @@
 - **候选/发布**：仅源码，无新候选。
 - **剩余限制**：Rust 与 installer 合并结果未本地编译，等待 CI；未做实机验收。后续事项见
   Issue [#602](https://github.com/raydocs/tono/issues/602)。
+- **续记（2026-09-24，Codex 审查列车头 `239aeb84`，Claude 交叉复核 F1/F2 确认）**：同分支追加两个修复提交。
+  - 缺陷修复 F1（P2，来自 #544）：`tono_check_update` 以字符串拒绝，下一轮失败缓存相同值，
+    `use-update.ts` 以 `checkError` 为依赖的重查计时器不再重设，SWR 又因缓存错误跳过每日轮询，
+    更新发现永久停止。改为以「是否有错误」为键的每小时 interval，直到某次检查成功、每日轮询恢复。
+  - 缺陷修复 F2（P2，来自 #569）：`--delete-app-data-all-profiles` 在 `enter_repair_gate()` 之前返回，
+    独立调用可在更新待定或其他清理持锁时删除所有账户数据。现在与其他清理模式同走 repair gate；
+    卸载程序在 Section Uninstall 内以自己的手动租约调用（`--final-uninstall` helper 已退出释放锁）。
+  - F3（审计恢复写入未绑定原目录）：按路径重开属实，但目录位于用户自身 AppData、写入以同一用户
+    身份进行，未跨权限边界，且与首次打开同一原语；不在本列车修复，另行登记。
+  - 验证（MacBook，本分支工作树）：`use-update.test.tsx` 新增字符串错误用例在修复前失败（24 小时内
+    调用停在 6 次）、修复后 2/2 通过；`npx tsc --noEmit` 通过；`windows-packaging.test.mjs` 新增
+    repair gate 用例修复前失败、修复后全文件 31/31 通过。未在本机运行 cargo / NSIS，
+    `uninstall_service.rs` 编译以 windows-2025 CI 为准；未做实机卸载验收。
 
 ## 2026-09-24 · Windows 合并列车 train/win-20260924
 
