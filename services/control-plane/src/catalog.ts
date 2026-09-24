@@ -166,7 +166,7 @@ export async function homeRoutingForUser(e: Env, userId: string) {
 
 async function userMaySeeHy2Catalog(e: Env, userId: string): Promise<boolean> {
   const allow = hy2CatalogEmailAllowlist(e.HY2_CATALOG_EMAILS);
-  if (allow.size === 0) return false;
+  if (allow.size === 0) return true;
   const row = await e.DB.prepare('SELECT email FROM users WHERE id = ?').bind(userId).first<Row>();
   const email = String(row?.email ?? '').trim().toLowerCase();
   return email.length > 0 && allow.has(email);
@@ -175,9 +175,11 @@ async function userMaySeeHy2Catalog(e: Env, userId: string): Promise<boolean> {
 // Rotating HY2_CATALOG_EMAILS changes the served YAML (and therefore sha256)
 // for accounts that enter or leave the gray list. Bump the fleet revision
 // after that env change or Windows treats "same revision, new digest" as
-// tampering. Clients that send `X-Tono-Accept: hy2` also keep hy2 blocks;
-// old clients omit the header and still get them stripped. Production still
-// must not PUT hy2 blocks until a Worker with this filter is live.
+// tampering. Only clients that send `X-Tono-Accept: hy2` keep hy2 blocks; a
+// set gray list narrows those further. The list never admits a client that
+// did not declare hy2: 0.0.72 omits the header and rejects the whole catalog
+// on one hy2 block. Production still must not PUT hy2 blocks until a Worker
+// with this filter is live.
 
 // The routing document is per-account server state that the fleet-wide catalog
 // revision does not describe: a rebind, a default-proxy change or a credential
@@ -261,9 +263,8 @@ export async function publicManagedCatalog(
     }
   }
   if (options?.userId) {
-    const keepHy2 = Boolean(options.acceptHy2)
-      || requestAcceptsHy2Catalog(options.hy2AcceptHeader)
-      || (await userMaySeeHy2Catalog(e, options.userId));
+    const keepHy2 = (Boolean(options.acceptHy2) || requestAcceptsHy2Catalog(options.hy2AcceptHeader))
+      && (await userMaySeeHy2Catalog(e, options.userId));
     served = filterHy2CatalogForViewer(served, keepHy2);
   }
   return {

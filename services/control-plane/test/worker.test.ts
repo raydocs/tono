@@ -2867,7 +2867,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await utf8Oversized.json() as any).error.code).toBe('INVALID_CATALOG');
   });
 
-  it('strips hy2 catalog blocks unless the account email is gray-listed', async () => {
+  it('serves hy2 catalog blocks only to clients that declare hy2, narrowed by the gray list', async () => {
     const yaml = `proxies:
   - name: Tokyo · Sakura
     type: vless
@@ -2899,8 +2899,15 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const previous = (env as unknown as Env).HY2_CATALOG_EMAILS;
     try {
       (env as unknown as Env).HY2_CATALOG_EMAILS = allowed.email;
-      const allowedFetched = await api('exit-catalog', {
+      // A gray-listed account on a client that never declared hy2 (0.0.72).
+      const oldClient = await api('exit-catalog', {
         headers: { authorization: `Bearer ${allowed.accessToken}` },
+      });
+      expect(oldClient.status).toBe(200);
+      expect((await oldClient.json() as any).yaml).not.toContain(' · hy2');
+
+      const allowedFetched = await api('exit-catalog', {
+        headers: { authorization: `Bearer ${allowed.accessToken}`, 'X-Tono-Accept': 'hy2' },
       });
       expect(allowedFetched.status).toBe(200);
       const allowedBody = await allowedFetched.json() as any;
@@ -2908,21 +2915,21 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       expect(allowedBody.yaml).toContain('Tokyo · Sakura · hy2');
       expect(allowedBody.yaml).not.toContain('TONO_CLIENT_UUID');
 
-      const stillHidden = await api('exit-catalog', {
-        headers: { authorization: `Bearer ${hidden.accessToken}` },
+      const notListed = await api('exit-catalog', {
+        headers: { authorization: `Bearer ${hidden.accessToken}`, 'X-Tono-Accept': 'hy2' },
       });
-      expect((await stillHidden.json() as any).yaml).not.toContain('hysteria2');
-
-      const headerAdmit = await api('exit-catalog', {
-        headers: {
-          authorization: `Bearer ${hidden.accessToken}`,
-          'X-Tono-Accept': 'hy2',
-        },
-      });
-      expect((await headerAdmit.json() as any).yaml).toContain('type: hysteria2');
+      expect((await notListed.json() as any).yaml).not.toContain('hysteria2');
     } finally {
       (env as unknown as Env).HY2_CATALOG_EMAILS = previous;
     }
+
+    const headerAdmit = await api('exit-catalog', {
+      headers: {
+        authorization: `Bearer ${hidden.accessToken}`,
+        'X-Tono-Accept': 'hy2',
+      },
+    });
+    expect((await headerAdmit.json() as any).yaml).toContain('type: hysteria2');
 
     const adminFetched = await admin('exit-catalog', undefined, 'GET');
     expect((await adminFetched.json() as any).yaml).toContain('type: hysteria2');
