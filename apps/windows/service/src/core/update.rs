@@ -681,6 +681,24 @@ async fn manual_core_absent() -> Result<()> {
     tunnel_absent("Tono")
 }
 
+/// The manual gate refused only because Tono protection is still active: no
+/// update is pending and no other installer holds the lease. NSIS turns this
+/// into its own exit code so the customer is told to Disconnect instead of
+/// seeing the installer exit silently. It is never permission to proceed.
+#[derive(Debug)]
+pub struct ProtectionActive;
+
+impl std::fmt::Display for ProtectionActive {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Disconnect before manual installation")
+    }
+}
+
+impl std::error::Error for ProtectionActive {}
+
+/// Exit code of `--manual-update-gate` for [`ProtectionActive`]; kept in sync with installer.nsi.
+pub const MANUAL_GATE_PROTECTION_ACTIVE_EXIT: i32 = 77;
+
 /// NSIS calls this before *any* live or repair-resource mutation. The durable
 /// lease fences Service connect/restart even after the short-lived gate exits.
 pub async fn begin_manual() -> Result<()> {
@@ -697,10 +715,7 @@ pub async fn begin_manual() -> Result<()> {
     }
     drop(store);
     // No stale manual lease may turn armed/unknown protection into permission.
-    ensure!(
-        !wfp::residual_filters_present().await?,
-        "Disconnect before manual installation"
-    );
+    ensure!(!wfp::residual_filters_present().await?, ProtectionActive);
     let paths = crate::service_paths();
     if paths.active_owner_path().try_exists()? {
         let active: crate::ActiveOwnerState =
@@ -709,7 +724,7 @@ pub async fn begin_manual() -> Result<()> {
             !desired::load_owner_desired_state(&active.owner_key)
                 .await?
                 .core_should_be_running,
-            "Disconnect before manual installation"
+            ProtectionActive
         );
     }
     let restored = dns::restore_protected().await?;
@@ -719,6 +734,27 @@ pub async fn begin_manual() -> Result<()> {
     );
     manual_core_absent().await?;
     store = open_store()?;
+    let mut next = store.state.clone();
+    next.manual_installer = Some(installer);
+    store.save(next)
+}
+
+/// Uninstall only, after the user confirmed releasing active protection. The
+/// uninstaller's own ladder (`RemoveVergeService`) releases protection and
+/// deletes nothing unless WFP removal is proven, so this takes the same
+/// update/installer lease as [`begin_manual`] without requiring Disconnect.
+pub fn begin_manual_uninstall() -> Result<()> {
+    let installer = parent_image()?;
+    let _repair =
+        crate::acquire_service_repair_gate()?.context("another lifecycle writer is active")?;
+    let mut store = open_store()?;
+    ensure!(!store.pending(), "update evidence pending");
+    if let Some(previous) = &store.state.manual_installer {
+        ensure!(
+            security::process_matches(previous).is_err() || *previous == installer,
+            "another manual installer is active"
+        );
+    }
     let mut next = store.state.clone();
     next.manual_installer = Some(installer);
     store.save(next)

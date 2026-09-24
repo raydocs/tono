@@ -43,6 +43,10 @@ const windowsServiceInstallerSource = readFileSync(
   new URL('../../service/src/bin/install_service.rs', import.meta.url),
   'utf8',
 )
+const windowsServiceUpdateSource = readFileSync(
+  new URL('../../service/src/core/update.rs', import.meta.url),
+  'utf8',
+)
 const windowsReleaseShSource = readFileSync(
   new URL(
     '../../../../tooling/scripts/build-windows-release.sh',
@@ -422,6 +426,49 @@ test('privileged upgrade helper coordinates Service, Mihomo, and GUI publication
       ),
     ),
     /recovery suppressed/,
+  )
+})
+
+test('NSIS explains a refused gate and confirms before uninstall releases protection', () => {
+  const onInit =
+    installerSource.match(/Function \.onInit\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  const gate = onInit.slice(onInit.indexOf('--manual-update-gate'))
+  const refusal = gate.slice(0, gate.indexOf('SetErrorLevel 76'))
+  // .onInit never shows Abort text; a refusal without a dialog is a silent exit.
+  assert.match(
+    refusal,
+    /\$\{IfNot\} \$\{Silent\}\s+\$\{If\} \$0 == "77"\s+MessageBox [^\n]*"\$\(manualInstallNeedsDisconnect\)"\s+\$\{Else\}\s+MessageBox [^\n]*"\$\(manualInstallRefused\)"/,
+  )
+  assert.doesNotMatch(refusal, /--emergency-disarm|--manual-uninstall-gate/)
+
+  const unInit =
+    installerSource.match(/Function un\.onInit\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  const gateAt = unInit.indexOf('--manual-update-gate')
+  const confirmAt = unInit.indexOf('"$(uninstallReleasesProtection)"')
+  const leaseAt = unInit.indexOf('--manual-uninstall-gate')
+  assert.ok(gateAt >= 0 && gateAt < confirmAt && confirmAt < leaseAt)
+  assert.match(
+    unInit.slice(gateAt, confirmAt),
+    /\$\{If\} \$0 == "77"\s+\$\{AndIfNot\} \$\{Silent\}\s+MessageBox [^\n]*MB_YESNO\b/,
+  )
+  assert.match(unInit.slice(leaseAt), /MessageBox [^\n]*"\$\(manualUninstallRefused\)"/)
+
+  for (const name of [
+    'manualInstallNeedsDisconnect',
+    'manualInstallRefused',
+    'uninstallReleasesProtection',
+    'manualUninstallRefused',
+  ]) {
+    for (const language of ['SIMPCHINESE', 'ENGLISH', 'RUSSIAN']) {
+      assert.match(
+        installerSource,
+        new RegExp(`LangString ${name} \\$\\{LANG_${language}\\} "`),
+      )
+    }
+  }
+  assert.match(
+    windowsServiceUpdateSource,
+    /pub const MANUAL_GATE_PROTECTION_ACTIVE_EXIT: i32 = 77;/,
   )
 })
 
