@@ -11,7 +11,8 @@ Start here. Dated handoffs and one-off reviews live in [archive/](archive/).
 | [reports/REVIEW_ROUNDS_2026-09-23.md](reports/REVIEW_ROUNDS_2026-09-23.md) | Review → verify → fix → diff-review → merge method, coverage and gaps of the 2026-09-22/23 rounds, reusable review constraints |
 | [BUILD_AND_TEST.md](BUILD_AND_TEST.md) | GitHub-hosted CI, MacBook lightweight work, native-device acceptance and cache retention |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Contributor workflow and verification evidence |
-| [../AGENTS.md](../AGENTS.md) | Coding-agent rules; choose an execution host before compiling |
+| [../AGENTS.md](../AGENTS.md) | Agent rules: merge/deploy/publish conditions, invariants, verification hosts |
+| [DECISIONS.md](DECISIONS.md) | Owner and provisional product decisions (stricter option, recorded) |
 | [ENGINEERING_QUALITY_ACCEPTANCE.md](ENGINEERING_QUALITY_ACCEPTANCE.md) | Astra Max remediation scope, phased execution, diagnostic evidence and combined-source acceptance |
 
 Mac Studio no longer serves as a residential exit (owner confirmed 2026-09-14).

@@ -47,8 +47,9 @@ newer published installer from the source version.
 The first customer publication after 0.0.67 / 0.0.34 is gated by
 [SHIP_PLAN.md](SHIP_PLAN.md): Connected-means-usable, a next step on
 connect failure, a proven protected update journal, then feed promotion
-as **0.0.73**. Do not advance Sparkle or `windows-updates` while that
-plan's four gates are open. GitHub `v0.0.72` / `tono-macos-0.0.72-build72`
+as **0.0.73**. Sparkle and `windows-updates` advance only after the owner
+has recorded G1–G3 evidence in SHIP_PLAN §6; agents then run G4 per
+[AGENTS.md](../AGENTS.md). GitHub `v0.0.72` / `tono-macos-0.0.72-build72`
 tags are not those feeds.
 
 - `release/macos` contains the post-Build-62 product line. **Build 64 is the

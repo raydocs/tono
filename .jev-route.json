@@ -1,0 +1,7 @@
+{
+  "protectedPaths": [
+    "^apps/windows/service/",
+    "kill.?switch|wfp|nrpt|dns|(^|/)pf[/_.]|pf\\.swift$",
+    "^services/control-plane/public/(appcast\\.xml$|windows/)"
+  ]
+}

@@ -32,6 +32,25 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · Agent 规则精简与老板自动化决定落地
+
+- **归属/来源**：ops 任务（文档卫生），非产品行为；基线 origin/main
+  [059a2ea2](https://github.com/raydocs/tono/commit/059a2ea2)，分支 `docs/agents-md-simplify-20260924`。
+- **缺陷修复**：无。
+- **新增/优化**：`AGENTS.md` 重写为 70 行：保留保护面/目录不变量、单一窄回归、同 PR 更新本页、
+  MacBook 不跑原生构建；把老板 2026-09-24 的三条决定写成「条件即批准」（合并、部署与客户发布、
+  产品取舍），其余重复内容改为链接。新增 [DECISIONS](DECISIONS.md)（模板 + 三条 `owner` 决定）与
+  仓库根 `.jev-route.json`（Windows Service/WFP、kill switch/PF/DNS/NRPT、客户更新源计为受保护路径）。
+  两个节点/运维 skill 去掉「先取得批准」的停顿和已失效的 0012 迁移部署段。SHIP_PLAN、RELEASE_LINES、
+  BUILD_AND_TEST、CONTRIBUTING、docs/README 与三份 ops 文档中与新规则冲突的句子同步改写；
+  SHIP_PLAN §6 勾选行未改。
+- **工程与测试**：无代码、工作流或配置行为改动（`.jev-route.json` 只影响审查路由）。
+- **验证**：文档变更，未运行产品测试。`route.mjs review --paths apps/windows/service/src/core/manager.rs --dry-run`
+  报 `protected_area: true`（无该文件时为 `false`）；计划 §4 的 grep 结果贴在 PR 正文。
+- **候选/发布**：无新包，仅文档。
+- **剩余限制**：macOS「CI 产物 → release → appcast」组合发布路径仍未端到端跑过（AGENTS.md 已注明）；
+  gh token 能否自批 GitHub environment 部署未实测。
+
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
 - **归属/来源**：G1–G3 审查与修复的可追溯性（工程流程与记录，非产品行为）；审查基线 main

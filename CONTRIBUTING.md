@@ -25,7 +25,7 @@ not run on persistent home machines or receive publication/signing secrets.
 | Windows | [Platform development](apps/windows/README.md#development) and [app checks](apps/windows/app/CONTRIBUTING.md). Preserve separate App, Service and portable-core workspaces. |
 | Windows frontend only | In `apps/windows/app`, use `pnpm web:dev`, not `pnpm dev` (which starts native Tauri development). Browser preview is not IPC/Service qualification. |
 | Ops console | [Console README](services/ops-console/README.md); use fixtures and an isolated port. |
-| Control plane | [Worker README](services/control-plane/README.md); local checks do not authorize production deploy or remote migrations. |
+| Control plane | [Worker README](services/control-plane/README.md); local checks alone do not authorize production deploy or remote migrations; the conditions in [AGENTS.md](AGENTS.md) do. |
 
 Use each workspace's checked-in toolchain/package-manager pins and lockfiles.
 Do not install native build tools or download Core/Service artifacts merely to
@@ -66,4 +66,5 @@ macOS is released from `release/macos`, Windows from `release/windows`, and
 reviewed changes integrate normally into `main`. Only `main` may deploy the
 production Worker. See [release lines](docs/RELEASE_LINES.md) and
 [SHIP_PLAN](docs/SHIP_PLAN.md) for immutable history, update-channel ownership
-and release gates. Running a build or opening a PR never authorizes deployment.
+and release gates. Running a build or opening a PR never authorizes deployment; the merge, deploy
+and publish conditions are in [AGENTS.md](AGENTS.md).

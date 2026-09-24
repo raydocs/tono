@@ -1,6 +1,6 @@
 # 生产恢复流程（控制面）
 
-这份是「生产库没了 / 坏了 / 被写坏了」时的操作清单。所有步骤只有老板能跑：需要 Cloudflare 账号里的 D1、R2、Workers 与 Access，wrangler 登录在 `tono` 账号（主检出与 spookfish 目录绑定了这个 profile；其他工作树落到默认账号，会报「不存在」）。
+这份是「生产库没了 / 坏了 / 被写坏了」时的操作清单。只作为明确要求的恢复任务执行，执行前先导出生产库（条件见 [AGENTS.md](../../AGENTS.md)）：需要 Cloudflare 账号里的 D1、R2、Workers 与 Access，wrangler 登录在 `tono` 账号（主检出与 spookfish 目录绑定了这个 profile；其他工作树落到默认账号，会报「不存在」）。
 
 ## 0. 一句话
 
@@ -150,5 +150,5 @@ npx wrangler d1 execute tono-control-plane --remote --json --command \
 
 - 每季度一次 preview 演练（`d1-backups.md` 的清单，用 `restore-control-plane-d1-preview.sh`，它现在会先按依赖顺序清空 preview 再导入，再 `migrations apply`）；每次部署前的手工备份也要按脚本命名并传旁文件。
 - 每次改了 `wrangler*.jsonc` 的绑定 / 路由 / 密钥清单，同步改本文 §2 与 §4。
-- 老板做；总监会话只准备命令、不碰生产库（会话里的 `wrangler d1 * --remote` 对生产名是禁止项）。
+- 只在明确要求的恢复任务里对生产库执行，先导出；恢复以外的生产库 `wrangler d1 * --remote` 写操作只在任务点名时、先导出后执行（见 [AGENTS.md](../../AGENTS.md)）。
 - 下次真做之前要补的三件：R2 两桶的副本（§3）、密钥的存放位置（§2）、Access 应用的配置记录（§4）。

@@ -1,116 +1,70 @@
 # Tono — agent notes
 
-Cloud-managed VPN. Clients authenticate to the control plane, pull a per-device
-exit catalog and a signed traffic policy, then connect directly to VLESS Reality
-nodes. The Worker is not on the data plane. Product identity is Tono, not Clash
-Verge or LiquidClash.
+Tono is a cloud-managed VPN; clients pull a signed catalog and policy, then dial VLESS Reality nodes.
+Maps: [docs/README.md](docs/README.md), [docs/architecture.md](docs/architecture.md) (deployables,
+code map, do-not list). [docs/SHIP_PLAN.md](docs/SHIP_PLAN.md) owns customer 0.0.73 (gates G1–G4);
+[docs/ops/plan-2026-09-11.md](docs/ops/plan-2026-09-11.md) owns ops work (not a ship gate). Every
+PR names one ship gate or one ops task.
 
-Read [docs/README.md](docs/README.md) for the document map and
-[docs/architecture.md](docs/architecture.md) for the system map.
+## Invariants (never loosen)
 
-Before reviewing code or fixing a bug, read
-[docs/FINDINGS_LEDGER.md](docs/FINDINGS_LEDGER.md) to avoid re-reporting known,
-fixed or refuted findings; update its rows in the same PR that you deliver.
+- Fail-closed at PF / WFP. No `skip-cert-verify`. No unprivileged sidecar path.
+- The managed catalog holds Tono-issued exits only; ` · hy2` is a second block on the same node,
+  not a second identity (`services/control-plane/src/catalog-yaml.ts`).
 
-## Two living plans
+## Finish the work (owner decisions, 2026-09-24)
 
-| Plan | Owns | Do not |
-|---|---|---|
-| [docs/SHIP_PLAN.md](docs/SHIP_PLAN.md) | Customer 0.0.73. Four gates (G1–G4) | Promote Sparkle `appcast.xml` or `windows-updates` while any gate is open |
-| [docs/ops/plan-2026-09-11.md](docs/ops/plan-2026-09-11.md) | Ops console / control-plane ops | Treat ops leftover work as a customer-ship gate |
+These conditions are the approval: when they hold, act; do not stop to ask.
 
-A PR that cannot name a ship gate or an ops task does not belong on the current
-integration branch.
+**1. Merge** with `gh pr merge N --merge` when all hold:
+- CI is green on the exact head SHA for every tree the PR touches. Zero checks is green only for
+  docs-only; otherwise dispatch the missing workflow. Skipped is not green.
+- The jev-route review depth for the diff passed (`node ~/.agents/skills/jev-route/scripts/route.mjs
+  review`), cross-vendor for protected paths (global list plus [.jev-route.json](.jev-route.json)).
+  Every finding is fixed or refuted in the PR.
+- No unresolved review threads (GraphQL `reviewThreads.isResolved`), no `CHANGES_REQUESTED`.
+- Recorded merge order holds: "Stacked on #N" / "Merge after #N" waits for N; stacked PRs merge
+  base-first, then `gh pr edit --base main`.
+- After each merged batch: combined regression review on `main` (`route.mjs review --git
+  <pre>...main`), fixed forward. Never deploy an unreviewed batch.
 
-## Deployables
+**2. Deploy and publish.** Control plane: in the maintainer's `main` checkout bound to the `tono`
+wrangler profile, `git pull --ff-only`, export D1 if a migration is pending (ops plan §2 item 7),
+then `npm run deploy` in `services/control-plane`; it refuses anything but clean pushed `main` and
+applies migrations before both Workers (migrations only through it). Ad-hoc remote D1 writes only
+when the task names them, after an export. `wrangler secret put` only with an owner-supplied value;
+never invent, print or commit one. Rollback: `npx wrangler rollback` per Worker; not migrations.
 
-| Path | Role |
-|---|---|
-| `apps/macos/` | SwiftUI client + `tono-core-helper` (PF, DNS, sing-box) |
-| `apps/windows/app/` | Windows GUI (Tauri). `pages/tono/` is the product shell |
-| `apps/windows/service/` | Privileged service (WFP) |
-| `apps/windows/crates/tono-core/` | Portable catalog, policy, connect FSM, auth |
-| `services/control-plane/` | Cloudflare Worker, D1, static assets. Entry `src/index.ts` |
-| `services/ops-console/` | Operator UI |
-| `services/exit-agent/` | VPS Xray roster + metering |
-| `services/home-agent/` | Home exit-node usage reporter |
-| `ops-panel/` | SSH quality collector |
-| `tooling/scripts/` | Build, release, provision, tests |
+Customer channel publish only after the owner has written `[x]` for G1, G2 and G3 in SHIP_PLAN §6
+with evidence links; agents never edit those lines. Then G4 is the agent's:
+- macOS: tag `tono-macos-<v>-build<n>` on pushed `release/macos` → `.github/workflows/macos-release.yml`
+  → `gh release create` → `tooling/scripts/upload-release-asset.mjs` → `tooling/scripts/publish-macos-appcast.mjs`
+  (no `--dry-run`) → commit `services/control-plane/public/appcast.xml` on `main` → deploy. Not yet run
+  end to end; the proven path is `tooling/scripts/release-macos.sh --publish` on a Mac with the signing
+  identity. Rollback: ship the last good source as a higher build.
+- Windows: `.github/workflows/windows-release.yml` on `release/windows` (approve the environment
+  with your own token) → publish the draft → `tooling/scripts/upload-release-asset.mjs` →
+  `.github/workflows/windows-update-promote.yml` (advances `windows-updates` and
+  `services/control-plane/public/windows/latest.json`) → deploy. Rollback: promote a higher version.
 
-Do not merge macOS `Core/` into `Services/`. Do not merge `app/crates/` into
-`crates/` in the same change as a logic split. The three Windows Cargo
-workspaces stay separate.
-
-## Hard rules
-
-1. **No customer-channel publish** until SHIP_PLAN G1–G3 have evidence. Do not
-   edit `services/control-plane/public/appcast.xml` or
-   `services/control-plane/public/windows/latest.json`, or push `windows-updates`
-   for a ship. Internal tags only.
-2. **Protection must not loosen.** Fail-closed at PF / WFP. No
-   `skip-cert-verify`. No unprivileged sidecar path.
-3. **Catalog is Tono-issued only.** hy2 is a second block on the same node
-   (` · hy2`), not a second identity.
-4. **Leftover Clash Verge names** in the privileged path (`StartClash`, upgrade
-   process sweep) stay until a dedicated cleanup. Do not rename them inside a
-   product fix. Inventory: [docs/archive/reports/CLASH_VERGE_LEFTOVER.md](docs/archive/reports/CLASH_VERGE_LEFTOVER.md).
-5. **One narrow regression per behavior.** Windows one `#[test]`, macOS one
-   XCTest, Worker one `it`. Do not add table-driven suites to make a change look
-   complete.
-
-## Internal update record
-
-Every internal delivery with code, configuration, build/test tooling or
-release/acceptance changes must update [docs/INTERNAL_CHANGELOG.md](docs/INTERNAL_CHANGELOG.md)
-in the same PR. Follow its entry template: separate fixes from features and
-test/fixture corrections; record source/PR, actual verification, remaining
-limits, and candidate identity or explicitly no new package. Link detailed
-evidence instead of duplicating it. A green source PR is not a released build.
-Do not create empty entries for read-only reviews or formatting-only edits.
+**3. Product decisions that used to wait for the owner:** choose the stricter, non-leaking option
+(append over replace, default off, keep hy2 stripped, never remove a node or disable a user unless
+the task says so), record it in [docs/DECISIONS.md](docs/DECISIONS.md) as provisional, and continue.
 
 ## Verification
 
-Run the smallest check that covers the tree you touched.
-**Choose its execution host before running it.** The maintainer's MacBook is
-the editing/review machine, not the default native build worker. See
-[build and test execution](docs/BUILD_AND_TEST.md).
+Smallest check for the touched tree, on the right host ([docs/BUILD_AND_TEST.md](docs/BUILD_AND_TEST.md)):
+`apps/macos` the XCTest for the changed behavior; `apps/windows` `cargo test` in the edited workspace;
+`services/control-plane` `npm test` or the matching test file; `services/ops-console` vitest for the
+file, Playwright only for a changed page flow; docs only none. The MacBook edits and reviews; it
+does not run `xcodebuild`, `swift build/test`, native `cargo`, Tauri, Core builds or packaging
+(owner, 2026-09-14); hosted CI does. A check that cannot run remotely is reported as not run.
+One narrow regression per behavior: one `#[test]`, one XCTest, one `it`; no table-driven suites.
 
-| Tree | Check |
-|---|---|
-| `apps/macos` | The XCTest target for the changed behavior; full suite only if the helper or connect FSM moved |
-| `apps/windows` | `cargo test` in the workspace you edited (`app`, `service`, or `crates/tono-core`) |
-| `services/control-plane` | `npm test` / the matching `test/*.test.ts` |
-| `services/ops-console` | vitest for the file; Playwright only for a page flow you changed |
-| Docs-only | No test run |
+## Records and Git
 
-### Execution location (owner decision, 2026-09-14)
-
-- MacBook: editing, review, fixtures, focused frontend/Worker checks and
-  inspecting downloaded candidate apps. Do not automatically run `xcodebuild`,
-  `swift build/test`, native `cargo build/test/check/clippy`, Tauri dev/build,
-  Core builds or release packaging here. These commands recreate large caches.
-- Routine CI stays on GitHub-hosted `macos-26`, `windows-2025` and
-  `ubuntu-24.04`; the repository is public. Do not replace fixed OS labels with
-  `latest` or register persistent home runners as part of ordinary CI work.
-  `tono-build` remains retired.
-- Mac Studio is **no longer a residential exit**. It and the Windows machine
-  are native acceptance devices. Do not provision an exit or reuse an address
-  or tag from an archived handoff. Device access does not prove qualification.
-- If an exact check cannot run remotely, report it as not run and request a
-  bounded local exception; do not silently fall back to MacBook compilation or
-  call an untested change verified. Match evidence to the exact tested SHA.
-- Public PR code must not gain persistent-machine or signing privileges.
-  Keep privileged network/installer acceptance separate. Retain the
-  disposable-host guard on the Windows candidate-install smoke; hosted
-  Windows Server CI is not Windows 11 device acceptance.
-- Do not install toolchains, sync build caches, remove active worktrees or
-  delete retained evidence merely to make the default local command work.
-
-Do not run `wrangler deploy`, `wrangler secret`, or `d1 * --remote` unless the
-user asked to deploy.
-
-## Git
-
-- macOS: `release/macos`. Windows: `release/windows`. Control plane: `main`.
-- `main` is the only production Worker source. See [docs/RELEASE_LINES.md](docs/RELEASE_LINES.md).
-- Do not `git add` files you did not change. Do not rewrite release-line history.
+Every delivery updates [docs/INTERNAL_CHANGELOG.md](docs/INTERNAL_CHANGELOG.md) in the same PR (its
+template; deploys and publishes with source SHA and artifact hashes). Read [docs/FINDINGS_LEDGER.md](docs/FINDINGS_LEDGER.md)
+before a review or bug fix so known, fixed or refuted findings are not re-reported; update its rows
+in the delivering PR. Delete superseded docs. Lines: `release/macos`, `release/windows`, `main` (the
+only production Worker source; merge commits, no history rewrite): [docs/RELEASE_LINES.md](docs/RELEASE_LINES.md).

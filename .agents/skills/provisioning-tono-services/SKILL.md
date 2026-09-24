@@ -1,7 +1,7 @@
 ---
 name: provisioning-tono-services
 description: "Provisions, names, tunes, rotates, and diagnoses Tono VLESS Reality VPS nodes over SSH; validates Google/YouTube and egress without changing the Mac network; publishes the encrypted catalog; and manages Tono users. Use when adding or operating a Tono server or user."
-compatibility: "Requires macOS with ssh/scp, Ruby, Xcode, the project Mihomo binary, and the Tono admin token in Keychain. Fresh-node automation supports Ubuntu 22.04/24.04 or Debian 12 with systemd and root/passwordless sudo."
+compatibility: "Requires macOS with ssh/scp, Ruby, the pinned core that `tooling/scripts/test-isolated-data-plane.sh` uses, and the Tono admin token in Keychain. Fresh-node automation supports Ubuntu 22.04/24.04 or Debian 12 with systemd and root/passwordless sudo."
 argument-hint: "SSH alias and node name, or exact user email and requested entitlement change"
 ---
 
@@ -11,7 +11,7 @@ Operate Tono infrastructure as a staged transaction: inspect, plan, apply, verif
 
 ## Non-negotiable safety rules
 
-- Start with read-only preflight and a concrete plan. Obtain explicit approval immediately before remote mutation, firewall changes, D1 migration, Worker deployment, catalog publication, credential rotation, or user disablement.
+- Start read-only; dry-run every mutation first. Migrations and Worker deploys go only through `npm run deploy` from `main` (see `AGENTS.md`). Publish a tested node with `--append`. Full catalog replacement, credential rotation and user disablement only when the task names them; otherwise record the question in `docs/DECISIONS.md`.
 - Prefer an SSH alias from `~/.ssh/config` that references an existing private-key path. Never ask the user to paste a private key or password into chat, a command argument, the repository, or a log. If a fresh VPS has only password authentication, have the user copy the password to the local clipboard and use the bounded bootstrap below.
 - Never use `StrictHostKeyChecking=no`. For a new host, compare its key fingerprint with the VPS provider console before accepting it.
 - Never print or log VLESS UUIDs, Reality private keys, public keys, short IDs, admin tokens, full node YAML, authorization headers, or remote configuration bodies.
@@ -28,7 +28,7 @@ Require or establish:
 
 - SSH config alias or bounded `root@IPv4` target, independently recorded host-key fingerprint, and whether sudo is available.
 - Unique stable node name in `City · Codename` form, transport endpoint IPv4/DNS, expected final egress IPv4 when known, and TCP port (normally 443). Confirm the city using provider/looking-glass evidence, route evidence, and at least one current GeoIP source; do not name from one database alone. Never assume the VPS transport endpoint and final egress are identical.
-- Reality server name/destination approved by the operator.
+- Reality server name: the measured default in `tooling/scripts/reality-fronts.json`; do not pick another host unless it is re-measured there.
 - Path to the authoritative private `catalog.d` directory and whether this is add, replace, or rotate.
 
 Do not silently rename an existing catalog identity. A raw-name change can look like revocation to deployed clients; use a display alias until a stable node-ID migration exists.
@@ -72,29 +72,7 @@ The automated installer intentionally refuses an existing Tono service or occupi
 
 ### 4. Apply without exposing credentials
 
-After the dry-run plan and explicit remote-mutation approval, add `--apply` to the exact reviewed provisioner command. The provisioner downloads the pinned official archive on the Mac, verifies its embedded SHA-256, uploads only the verified binary over strict host-key-checked SSH, generates secrets on the VPS, config-tests before activation, and runs Xray as an unprivileged hardened systemd service. It writes the client source directly as a local mode-`0600` file without printing it. Any failed post-install test triggers an exact deployment-ID rollback. It never changes a firewall rule.
-
-Write one private Clash source file locally with this contract:
-
-```yaml
-proxies:
-  - name: UNIQUE NAME
-    type: vless
-    server: PUBLIC IPV4
-    port: 443
-    uuid: GENERATED UUID
-    network: tcp
-    tls: true
-    udp: true
-    servername: APPROVED REALITY SERVER NAME
-    client-fingerprint: chrome
-    flow: xtls-rprx-vision
-    reality-opts:
-      public-key: GENERATED REALITY PUBLIC KEY
-      short-id: GENERATED SHORT ID
-```
-
-Set mode `0600` immediately. Never show this completed file in the response.
+After the dry-run plan passes, add `--apply` to the exact reviewed provisioner command. The provisioner downloads the pinned official archive on the Mac, verifies its embedded SHA-256, uploads only the verified binary over strict host-key-checked SSH, generates secrets on the VPS, config-tests before activation, and runs Xray as an unprivileged hardened systemd service. It writes the client source directly as a local mode-`0600` file without printing it. Any failed post-install test triggers an exact deployment-ID rollback. It never changes a firewall rule.
 
 ### 5. Require real client-side verification
 
@@ -132,7 +110,7 @@ Apply with `modprobe tcp_bbr` and `sysctl --system`. Because `default_qdisc` doe
 
 ### 7. Publish as the final commit point
 
-Summarize the node name, pinned server version, non-secret config digest, health results, old/new catalog membership, and rollback plan. Ask for explicit publication approval.
+Summarize the node name, pinned server version, non-secret config digest, health results, old/new catalog membership, and rollback plan. Publish when the isolated test passed, and put this summary in the report.
 
 For a newly added uniquely named node, preserve the deployed catalog and append only the tested source:
 
@@ -142,7 +120,7 @@ ruby tooling/scripts/publish-managed-catalog.rb --append /absolute/private/catal
 
 `--append` needs the matching Worker, whose authenticated admin GET returns the encrypted catalog only after server-side decryption. It rejects a duplicate name and publishes with optimistic revision control. To deliberately replace the entire catalog, use `--publish` with every authoritative source only after reviewing the removal set.
 
-If `--append` reports that the deployed Worker lacks safe append support, do not redeploy shared infrastructure automatically. Proceed with `--publish` only when every authoritative current source plus the new source is available, a dry-run validates unique names, the expected old/new membership has no unintended removal, and the operator approved publication. The publisher's `expectedRevision` must reject concurrent catalog changes.
+If `--append` reports that the deployed Worker lacks safe append support, deploy `main` with `npm run deploy` (see `AGENTS.md`), then append. Use `--publish` only when every authoritative current source plus the new source is available, a dry-run validates unique names, and the removal set is empty or named by the task. The publisher's `expectedRevision` must reject concurrent catalog changes.
 
 The publisher reads the admin token from Keychain, uses `https://api.afk.ccwu.cc`, and performs optimistic revision control. If publication conflicts, stop and reconcile the authoritative catalog; never blindly retry a stale replacement.
 
@@ -150,7 +128,7 @@ After publication, verify the returned revision and perform an authenticated cat
 
 ## Remove or rotate a node
 
-Deleting a catalog entry does not erase credentials already delivered to clients. For removal, first provision a replacement if needed, publish the catalog without the old node, confirm clients have moved, then rotate or disable the old VPS UUID/Reality key. For suspected compromise, disable the old credential immediately and accept the availability impact. Never reuse a Reality private key or UUID across VPS hosts.
+Remove or rotate a node only when the task names it. Deleting a catalog entry does not erase credentials already delivered to clients. For removal, first provision a replacement if needed, publish the catalog without the old node, confirm clients have moved, then rotate or disable the old VPS UUID/Reality key. For suspected compromise, disable the old credential immediately and accept the availability impact. Never reuse a Reality private key or UUID across VPS hosts.
 
 ## Authorize and manage users
 
@@ -171,18 +149,7 @@ ruby tooling/scripts/manage-tono-user.rb set person@example.com --device-limit 2
 ruby tooling/scripts/manage-tono-user.rb set person@example.com --device-limit 2 --quota-bytes unlimited --apply
 ```
 
-Disabling a user revokes sessions/devices and can require asynchronous cleanup. Show the planned effect and obtain explicit approval before `--status disabled --apply`. Removing signup authorization does not disable an existing account.
-
-The managed signup API requires migration `0012_signup_allowlist.sql` and the matching Worker version. If they are not deployed, stop and request approval for this shared-infrastructure sequence:
-
-```sh
-cd services/control-plane
-npm test && npm run typecheck
-npx wrangler d1 migrations apply tono-control-plane --remote
-npx wrangler deploy
-```
-
-Never deploy merely because the skill loaded.
+Disabling a user revokes sessions/devices and can require asynchronous cleanup. Run `--status disabled --apply` only when the task names the user and the state; show the planned effect first. Removing signup authorization does not disable an existing account.
 
 ## Audit result
 
