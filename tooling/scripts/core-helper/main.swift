@@ -789,35 +789,42 @@ func tonoClientProcessRunning() -> Bool {
     }
     guard count > 0 else { return true }
     return tonoClientAmong(Array(pids.prefix(Int(count))), path: processExecutablePath,
-                           live: processIsLive) { pid in
+                           live: processLiveness) { pid in
         var code: SecCode?
         guard SecCodeCopyGuestWithAttributes(
             nil, [kSecGuestAttributePid: pid] as CFDictionary, SecCSFlags(rawValue: 0), &code
         ) == errSecSuccess, let code else { return nil }
-        return SecCodeCheckValidity(code, SecCSFlags(rawValue: 0), requirement) == errSecSuccess
+        switch SecCodeCheckValidity(code, SecCSFlags(rawValue: 0), requirement) {
+        case errSecSuccess: return true
+        // Only a definite requirement mismatch is "not Tono". Unsigned,
+        // invalidated or unreadable code is unknown, not a mismatch.
+        case errSecCSReqFailed: return false
+        default: return nil
+        }
     }
 }
 
 /// The decision over one pid listing. `path` and `signed` return nil when the
-/// lookup fails. A pid whose lookup failed counts as a Tono client while `live`
-/// says it still runs: it may be Tono whose bundle was deleted under it, and
-/// doubt keeps protection. Only a pid that has exited is skipped.
+/// lookup fails; `live` returns false only for a pid that has definitely
+/// exited, and nil when that cannot be told. A pid whose lookup failed counts
+/// as a Tono client unless it has definitely exited: it may be Tono whose
+/// bundle was deleted under it, and doubt keeps protection.
 func tonoClientAmong(
     _ pids: [Int32],
     path: (Int32) -> String?,
-    live: (Int32) -> Bool,
+    live: (Int32) -> Bool?,
     signed: (Int32) -> Bool?
 ) -> Bool {
     for pid in pids where pid > 0 {
         guard let executable = path(pid) else {
-            if live(pid) { return true }
+            if live(pid) != false { return true }
             continue
         }
         guard executable.hasSuffix(".app" + UpdatePackage.appExecutable) else { continue }
         switch signed(pid) {
         case .some(true): return true
         case .some(false): continue
-        case .none: if live(pid) { return true }
+        case .none: if live(pid) != false { return true }
         }
     }
     return false
@@ -829,14 +836,18 @@ private func processExecutablePath(_ pid: Int32) -> String? {
     return String(cString: buffer)
 }
 
-/// Live and not a zombie. BSD info with arg 0 finds no zombie; the status
-/// check covers a kernel that does. A pid it cannot find has exited.
-private func processIsLive(_ pid: Int32) -> Bool {
+/// true: live, not a zombie. false: definitely exited (a zombie, or no such
+/// process). nil: the lookup failed some other way.
+private func processLiveness(_ pid: Int32) -> Bool? {
     var info = proc_bsdinfo()
-    let size = withUnsafeMutablePointer(to: &info) {
-        proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, $0, Int32(MemoryLayout<proc_bsdinfo>.size))
+    let (size, lookupError) = withUnsafeMutablePointer(to: &info) { pointer -> (Int32, Int32) in
+        let size = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, pointer, Int32(MemoryLayout<proc_bsdinfo>.size))
+        return (size, errno)
     }
-    return size == MemoryLayout<proc_bsdinfo>.size && info.pbi_status != UInt32(SZOMB)
+    if size == MemoryLayout<proc_bsdinfo>.size { return info.pbi_status != UInt32(SZOMB) }
+    if size <= 0, lookupError == ESRCH { return false }
+    if kill(pid, 0) == -1, errno == ESRCH { return false }
+    return nil
 }
 
 /// At every helper start, after executor recovery (H19-O-F1). Dragging

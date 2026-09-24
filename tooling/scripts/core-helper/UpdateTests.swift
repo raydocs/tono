@@ -433,17 +433,20 @@ func runUpdateSelfTests() -> Bool {
                                            userApplicationsDirectory: userApplications, clientRunning: { false },
                                            release: release) && releases == 0,
                   "Tono.app in ~/Applications lost its protection")
-        // A live pid whose path or signature cannot be looked up may be Tono
-        // with its bundle deleted under it: doubt keeps protection. Only a pid
-        // that has exited is skipped.
+        // A pid whose path or signature cannot be looked up may be Tono with
+        // its bundle deleted under it: doubt keeps protection unless the pid
+        // definitely exited (live: false) or definitely fails the requirement
+        // (signed: false). A liveness or signature error is doubt (nil).
         let tono = "/Users/a/Applications/Tono.app" + UpdatePackage.appExecutable
         try check(tonoClientAmong([42], path: { _ in nil }, live: { _ in true }, signed: { _ in false }),
                   "A live process whose path lookup failed counted as no Tono client")
+        try check(tonoClientAmong([42], path: { _ in nil }, live: { _ in nil }, signed: { _ in false }),
+                  "A process whose liveness lookup failed counted as exited")
         try check(tonoClientAmong([42], path: { _ in tono }, live: { _ in true }, signed: { _ in nil }),
-                  "A live Tono-named process whose signature lookup failed counted as no Tono client")
+                  "A Tono-named process whose signature check errored counted as not Tono")
         try check(!tonoClientAmong([42], path: { _ in nil }, live: { _ in false }, signed: { _ in nil })
                   && !tonoClientAmong([42], path: { _ in tono }, live: { _ in true }, signed: { _ in false }),
-                  "An exited or unsigned process counted as a Tono client")
+                  "An exited process or a requirement mismatch counted as a Tono client")
         // Hosted runner: no signed Tono client runs, so the real scan must not
         // fall back to doubt (requirement, pid listing or lookup failure).
         try check(!tonoClientProcessRunning(), "The Tono process scan found a client on a host without Tono")
