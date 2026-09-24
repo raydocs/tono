@@ -246,6 +246,10 @@ pub struct TonoInner {
     /// Launch restore could not reach the control plane (#582); see `TonoStatus`. Cleared by the
     /// next restore, a sign-in, or a completed account close.
     pub control_plane_unreachable: bool,
+    /// The stored session was definitely refused (401/403, suspended). Offline admission stays
+    /// refused in this process even if the confirmation marker could not be deleted. Cleared by
+    /// a sign-in, which brings a new session.
+    pub session_catalog_revoked: bool,
     /// Read-only server reachability batch. It never changes selection or connection state.
     pub server_test_generation: u64,
     pub server_test_cancellation: Option<CancellationToken>,
@@ -599,6 +603,7 @@ impl TonoState {
                 catalog_last_synced_at_ms: None,
                 catalog_sync_error: None,
                 control_plane_unreachable: false,
+                session_catalog_revoked: false,
                 server_test_generation: 0,
                 server_test_cancellation: None,
                 fsm: ConnectionFsm::new(),

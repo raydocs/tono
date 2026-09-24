@@ -172,6 +172,25 @@ pub struct TonoTransport {
     /// as usual, so under an armed kill switch (pins permitted, DNS blocked) the cost is one
     /// failed resolution. Process memory only, like `alternate_port`.
     prefer_resolved: std::sync::atomic::AtomicBool,
+    /// `resolved` with the pinned attempt's connect budget, used only while `prefer_resolved` is
+    /// set, so a resolver that has become a blackhole costs 10 s before the pins, not 30 s.
+    resolved_first: reqwest::Client,
+}
+
+/// Holds `prefer_resolved` for one preferred attempt and clears it on drop unless the attempt
+/// was answered. A failure, and a cancellation by an outer deadline (launch restore), both
+/// clear it, so the next request goes to the pins first.
+struct PreferenceLease<'a> {
+    flag: &'a std::sync::atomic::AtomicBool,
+    answered: bool,
+}
+
+impl Drop for PreferenceLease<'_> {
+    fn drop(&mut self) {
+        if !self.answered {
+            self.flag.store(false, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
 }
 
 impl TonoTransport {
@@ -184,6 +203,9 @@ impl TonoTransport {
             resolved,
             alternate_port: std::sync::atomic::AtomicU16::new(0),
             prefer_resolved: std::sync::atomic::AtomicBool::new(false),
+            resolved_first: Self::pinned_builder()
+                .build()
+                .context("failed to build the Tono HTTP preferred-fallback client")?,
         })
     }
 
@@ -244,6 +266,10 @@ impl TonoTransport {
                 .context("failed to build the resolving test client")?,
             alternate_port: std::sync::atomic::AtomicU16::new(0),
             prefer_resolved: std::sync::atomic::AtomicBool::new(false),
+            resolved_first: quick()
+                .resolve_to_addrs(host, resolved)
+                .build()
+                .context("failed to build the preferred resolving test client")?,
         })
     }
 
@@ -481,18 +507,23 @@ impl HttpTransport for TonoTransport {
         }
 
         // The resolved client goes first once it has answered in place of dead pins (#583). Its
-        // failure moves on to the pins only when it proves nothing was delivered.
+        // failure moves on to the pins only when it proves nothing was delivered. Any failure or
+        // cancellation clears the preference (`PreferenceLease`).
         let mut resolved_failed = None;
         if self.prefer_resolved.load(std::sync::atomic::Ordering::Relaxed) {
-            match self.attempt(&self.resolved, &request).await {
+            let mut lease = PreferenceLease { flag: &self.prefer_resolved, answered: false };
+            match self.attempt(&self.resolved_first, &request).await {
                 Err(ApiError::Transport { kind, message })
                     if should_retry_transport(request.method, kind) =>
                 {
-                    self.prefer_resolved
-                        .store(false, std::sync::atomic::Ordering::Relaxed);
                     resolved_failed = Some(ApiError::Transport { kind, message });
                 }
-                other => return other,
+                // May already have been delivered: never re-sent to the pins.
+                Err(error @ ApiError::Transport { .. }) => return Err(error),
+                result => {
+                    lease.answered = true;
+                    return result;
+                }
             }
         }
 
@@ -872,6 +903,7 @@ mod tests {
             resolved: TonoTransport::builder().resolve_to_addrs(host, &live).build().unwrap(),
             alternate_port: std::sync::atomic::AtomicU16::new(0),
             prefer_resolved: std::sync::atomic::AtomicBool::new(false),
+            resolved_first: TonoTransport::pinned_builder().resolve_to_addrs(host, &live).build().unwrap(),
         };
         let store = std::sync::Arc::new(MemoryCredentialStore::new());
         store.set_refresh_token("refresh-1").unwrap();
@@ -885,6 +917,38 @@ mod tests {
         assert!(
             elapsed * 2 < crate::tono::commands::RESTORE_TRANSACTION_TIMEOUT,
             "refresh + me spent {elapsed:?}; the second request waited on the dead pins again"
+        );
+
+        // The learned preference must not outlive a cancelled attempt: the restore deadline
+        // dropping a request stuck on a resolver that became a blackhole leaves healthy pins
+        // to answer the next request (the retry path reuses this transport).
+        let flipped = TonoTransport {
+            client: tokio::sync::RwLock::new(
+                TonoTransport::pinned_builder().resolve_to_addrs(host, &live).build().unwrap(),
+            ),
+            resolved: TonoTransport::builder().resolve_to_addrs(host, &dead).build().unwrap(),
+            alternate_port: std::sync::atomic::AtomicU16::new(0),
+            prefer_resolved: std::sync::atomic::AtomicBool::new(true),
+            resolved_first: TonoTransport::pinned_builder().resolve_to_addrs(host, &dead).build().unwrap(),
+        };
+        let get = || ApiRequest {
+            method: HttpMethod::Get,
+            url: format!("http://{host}:{port}/api/v1/me"),
+            bearer: None,
+            json_body: None,
+            binary_body: None,
+            headers: Vec::new(),
+        };
+        tokio::time::timeout(Duration::from_millis(500), flipped.send(get()))
+            .await
+            .expect_err("the preferred attempt is stuck on the blackholed resolver");
+        let started = std::time::Instant::now();
+        let response = flipped.send(get()).await.expect("the pins answer");
+        assert_eq!(response.status, 200);
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "after a cancelled preferred attempt the next request waited {:?} before the pins",
+            started.elapsed()
         );
     }
 

@@ -240,6 +240,10 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
                 }
                 state.audit().activate_log_upload_owner(&me.user.id);
                 inner.account = Some(me.user);
+                if info.suspended {
+                    // A paused account must not come back from the cache offline (R607-F3).
+                    catalog_sync::revoke_session_catalog(&mut inner);
+                }
                 inner.account_state = if info.suspended {
                     AccountState::Suspended
                 } else {
@@ -336,6 +340,10 @@ fn settle_failed_restore(
     inner: &mut TonoInner, protection: &StoredProtection, session: Option<&str>,
     failure: Option<&ApiError>,
 ) -> FailedRestore {
+    // A definite refusal also withdraws offline admission for later launches (R607-F3).
+    if matches!(failure, Some(ApiError::Unauthorized | ApiError::Forbidden)) {
+        catalog_sync::revoke_session_catalog(inner);
+    }
     if matches!(failure, Some(ApiError::Unauthorized)) {
         return FailedRestore::Refused;
     }
@@ -460,14 +468,13 @@ mod failed_restore_tests {
     use super::*;
     use tono_core::{auth::TransportKind, node::{NodeProtocol, ValidatedNode}};
 
-    /// #582: an unreachable control plane admits the cached catalog only when the marker names
-    /// the stored session and the cache on disk; a refused session still goes to the
-    /// dead-session cleanup.
+    /// #582: an unreachable control plane admits the cached catalog only when a sync of the
+    /// stored session confirmed exactly the catalog on disk, and never after the session was
+    /// refused; a refused launch still goes to the dead-session cleanup.
     #[tokio::test]
     async fn an_unreachable_control_plane_admits_only_the_catalog_this_session_confirmed() {
         let state = TonoState::for_test();
         let mut inner = state.lock().await;
-        inner.account_state = AccountState::Restoring;
         inner.nodes = vec![ValidatedNode {
             name: "US Reality 01".to_string(),
             server: std::net::Ipv4Addr::new(203, 0, 113, 7),
@@ -481,31 +488,51 @@ mod failed_restore_tests {
             protocol: NodeProtocol::VlessReality,
             tls_fingerprint: None,
         }];
+        let catalog = |yaml: &str| tono_core::ExitCatalogResponse {
+            revision: 7,
+            yaml: yaml.to_string(),
+            sha256: tono_core::catalog::catalog_digest(yaml),
+            updated_at: None,
+            routing: None,
+        };
+        let (served_a, other_b) = (catalog("proxies: [a]"), catalog("proxies: [b]"));
         std::fs::create_dir_all(&inner.catalog_dir).unwrap();
         let cache = inner.catalog_cache().path().to_path_buf();
-        std::fs::write(&cache, b"account A catalog").unwrap();
+        let put = |response: &tono_core::ExitCatalogResponse| {
+            std::fs::write(&cache, serde_json::to_vec(response).unwrap()).unwrap();
+        };
+        let marker = inner.catalog_dir.join("managed-exit-catalog.session-confirmed");
         let dropped = ApiError::Transport { kind: TransportKind::Connect, message: "dropped".into() };
         let absent = StoredProtection::ProvenAbsent;
         let settle = |inner: &mut TonoInner, session: &str, failure: &ApiError| {
             inner.account_state = AccountState::Restoring;
             settle_failed_restore(inner, &absent, Some(session), Some(failure))
         };
+        inner.credentials.set_local(tono_core::credentials::CredentialKey::RefreshToken, "rt-A").unwrap();
+        put(&served_a);
+        inner.catalog_tracker = tono_core::CatalogTracker::from_cached(&served_a);
 
         assert_eq!(settle(&mut *inner, "rt-A", &dropped), FailedRestore::Error, "nothing confirmed yet");
-
-        inner.credentials.set_local(tono_core::credentials::CredentialKey::RefreshToken, "rt-A").unwrap();
-        catalog_sync::confirm_session_catalog(&inner).unwrap();
+        catalog_sync::confirm_session_catalog(&inner, &served_a).unwrap();
         // Another account's stored session, e.g. its adoption never became durable.
         assert_eq!(settle(&mut *inner, "rt-B", &dropped), FailedRestore::Error);
         assert_eq!(settle(&mut *inner, "rt-A", &dropped), FailedRestore::UnreachableCached);
         assert_eq!(inner.account_state, AccountState::Ready);
         assert!(inner.control_plane_unreachable);
 
+        // Another valid catalog on disk while the server reports A unchanged: not stamped as A's.
+        put(&other_b);
+        catalog_sync::confirm_session_catalog(&inner, &served_a).unwrap();
+        assert!(!marker.exists(), "an unchanged sync must not confirm a cache it did not serve");
+        assert_eq!(settle(&mut *inner, "rt-A", &dropped), FailedRestore::Error);
+
+        // A refusal is kept on disk: the same session never comes back offline.
+        put(&served_a);
+        catalog_sync::confirm_session_catalog(&inner, &served_a).unwrap();
         assert_eq!(settle(&mut *inner, "rt-A", &ApiError::Unauthorized), FailedRestore::Refused);
         assert_eq!(inner.account_state, AccountState::Restoring, "401 leaves the decision to the dead-session cleanup");
-
-        // Another valid catalog placed where this session's was.
-        std::fs::write(&cache, b"account B catalog").unwrap();
+        assert!(!marker.exists(), "the refusal must outlive this process");
+        inner.session_catalog_revoked = false; // a restart forgets memory; only the disk remains
         assert_eq!(settle(&mut *inner, "rt-A", &dropped), FailedRestore::Error);
         let _ = std::fs::remove_dir_all(&inner.catalog_dir);
     }

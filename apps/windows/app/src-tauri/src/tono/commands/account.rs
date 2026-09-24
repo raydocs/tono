@@ -342,6 +342,7 @@ pub(crate) async fn adopt_sign_in_response(
     inner.challenge_id = None;
     inner.account = Some(auth.user.clone());
     inner.control_plane_unreachable = false;
+    inner.session_catalog_revoked = false;
     // Attribute the first catalog/connect failures too, not only records
     // produced after the periodic uploader eventually starts.
     state.audit().activate_log_upload_owner(&auth.user.id);

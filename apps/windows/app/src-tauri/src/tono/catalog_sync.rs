@@ -93,6 +93,11 @@ fn suspend_rejected_session(inner: &mut TonoInner, auth_generation: u64) -> bool
 
 pub(crate) async fn note_session_rejected(state: &Arc<TonoState>, app: &AppHandle, auth_generation: u64) {
     let mut inner = state.lock().await;
+    // The refusal must outlive this process: a restart that cannot reach the control plane must
+    // not admit the refused session from the cache (R607-F3). Protection is untouched.
+    if inner.sign_in_generation == auth_generation {
+        revoke_session_catalog(&mut inner);
+    }
     if !suspend_rejected_session(&mut inner, auth_generation) {
         return;
     }
@@ -151,51 +156,91 @@ pub(crate) fn discard_account_catalog(inner: &mut TonoInner) {
     }
 }
 
-/// Marker beside the catalog cache: which session confirmed which cache file (#582).
+/// Marker beside the catalog cache: which session confirmed which catalog (#582).
 ///
 /// A launch that cannot reach the control plane may connect from the cache only when the marker
-/// names both the refresh token that is stored now and the cache file that is on disk now. A sync
-/// writes it only for its own session and the cache it just installed or confirmed, so neither a
-/// catalog cached under another account nor a token whose adoption never became durable (a crash
-/// or vault failure right after a replacement sign-in) can pair with it.
+/// names the refresh token stored now and the catalog on disk now. A sync writes it only when the
+/// file on disk holds exactly what the server just served this session, so neither a catalog
+/// cached under another account nor a token whose adoption never became durable can pair with
+/// it. A definite refusal of the session deletes it.
 const SESSION_CONFIRMED_MARKER: &str = "managed-exit-catalog.session-confirmed";
 
 #[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 struct SessionConfirmation {
     /// SHA-256 of the refresh token the confirming sync ran under; the token never reaches disk.
     session: String,
-    /// SHA-256 of the cache file that sync left on disk.
-    cache: String,
+    /// YAML digest of the confirmed catalog.
+    catalog: String,
+    /// Digest of its routing block, which the YAML digest does not cover.
+    routing: String,
 }
 
-fn cache_file_digest(inner: &TonoInner) -> Option<String> {
-    let body = std::fs::read_to_string(inner.catalog_cache().path()).ok()?;
-    Some(tono_core::catalog::catalog_digest(&body))
+/// `(catalog, routing)` digests of the cache file on disk, if it is readable and its YAML matches
+/// its own digest. Launch restore already admitted this file through the full cache checks.
+fn cache_file_digests(inner: &TonoInner) -> Option<(String, String)> {
+    let body = std::fs::read(inner.catalog_cache().path()).ok()?;
+    let cached: tono_core::ExitCatalogResponse = serde_json::from_slice(&body).ok()?;
+    (tono_core::catalog::catalog_digest(&cached.yaml) == cached.sha256)
+        .then(|| (cached.sha256, tono_core::catalog::routing_digest(cached.routing.as_ref())))
 }
 
-/// Record that the current session's sync served exactly the cache on disk.
-pub(crate) fn confirm_session_catalog(inner: &TonoInner) -> anyhow::Result<()> {
+fn remove_session_marker(inner: &TonoInner) -> std::io::Result<()> {
+    match std::fs::remove_file(inner.catalog_dir.join(SESSION_CONFIRMED_MARKER)) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
+}
+
+/// Confirm the cache for the current session after a sync that installed `served` or found it
+/// unchanged. Only when the file on disk holds exactly `served`; otherwise any earlier
+/// confirmation is withdrawn, since the tracker's `Unchanged` says nothing about the disk.
+pub(crate) fn confirm_session_catalog(
+    inner: &TonoInner, served: &tono_core::ExitCatalogResponse,
+) -> anyhow::Result<()> {
     use anyhow::Context as _;
     use tono_core::credentials::CredentialStore as _;
+    let served_digests = (served.sha256.clone(), tono_core::catalog::routing_digest(served.routing.as_ref()));
+    if inner.session_catalog_revoked || cache_file_digests(inner).as_ref() != Some(&served_digests) {
+        remove_session_marker(inner)?;
+        return Ok(());
+    }
     let session = inner.credentials.refresh_token()?.context("no stored session")?;
-    let cache = cache_file_digest(inner).context("no catalog cache on disk")?;
+    let (catalog, routing) = served_digests;
     let body = serde_json::to_vec(&SessionConfirmation {
         session: tono_core::catalog::catalog_digest(&session),
-        cache,
+        catalog,
+        routing,
     })?;
     crate::tono::state::write_private_file(&inner.catalog_dir.join(SESSION_CONFIRMED_MARKER), &body)
+}
+
+/// A definite refusal of the stored session (R607-F3): withdraw the offline confirmation. The
+/// in-memory flag keeps refusing offline admission, and deletion is retried, if removal fails.
+pub(crate) fn revoke_session_catalog(inner: &mut TonoInner) {
+    inner.session_catalog_revoked = true;
+    if let Err(error) = remove_session_marker(inner) {
+        logging!(warn, Type::Service, "Tono: offline catalog confirmation not withdrawn: {error}");
+    }
 }
 
 /// Whether the installed catalog, seeded from the verified cache, was confirmed by the session
 /// whose refresh token is `session`, and may be used while the control plane is unreachable.
 pub(crate) fn session_catalog_confirmed(inner: &TonoInner, session: &str) -> bool {
+    if inner.session_catalog_revoked {
+        let _ = remove_session_marker(inner);
+        return false;
+    }
     if inner.nodes.is_empty() {
         return false;
     }
-    let Some(cache) = cache_file_digest(inner) else {
+    let Some((catalog, routing)) = cache_file_digests(inner) else {
         return false;
     };
-    let expected = SessionConfirmation { session: tono_core::catalog::catalog_digest(session), cache };
+    // The nodes in memory were seeded from this catalog, not from a file swapped in since.
+    if inner.catalog_tracker.current_digest() != Some(catalog.as_str()) {
+        return false;
+    }
+    let expected = SessionConfirmation { session: tono_core::catalog::catalog_digest(session), catalog, routing };
     std::fs::read(inner.catalog_dir.join(SESSION_CONFIRMED_MARKER))
         .ok()
         .and_then(|body| serde_json::from_slice::<SessionConfirmation>(&body).ok())
@@ -282,7 +327,19 @@ pub fn install_and_persist(
 /// discarded before it can persist or publish data for a session that has already signed out.
 async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generation: u64) -> Result<(), SyncFailure> {
     let client = { state.lock().await.client.clone() };
-    let response = client.exit_catalog().await.map_err(SyncFailure::from_api)?;
+    let response = match client.exit_catalog().await {
+        Ok(response) => response,
+        Err(error) => {
+            // A 403 is a definite refusal too; a 401 is withdrawn in `note_session_rejected`.
+            if matches!(error, ApiError::Forbidden) {
+                let mut inner = state.lock().await;
+                if inner.sign_in_generation == auth_generation {
+                    revoke_session_catalog(&mut inner);
+                }
+            }
+            return Err(SyncFailure::from_api(error));
+        }
+    };
 
     let selection_vanished = {
         let mut inner = state.lock().await;
@@ -309,9 +366,9 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
             Err(CatalogError::StaleRevision) => (false, false),
             Err(err) => return Err(SyncFailure::Failed(err.to_string())),
         };
-        // Installed or unchanged: the cache now holds exactly what this session was served. A
+        // Installed or unchanged: confirm only if the disk holds what this session was served. A
         // stale revision confirms nothing about the cached copy.
-        if emit && let Err(error) = confirm_session_catalog(&inner) {
+        if emit && let Err(error) = confirm_session_catalog(&inner, &response) {
             logging!(warn, Type::Service, "Tono: offline catalog confirmation not recorded: {error:#}");
         }
         let vanished = (installed
