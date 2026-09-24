@@ -53,3 +53,7 @@ Ops tables after the sequence was unique. Applied in numeric order:
 - `0074_ops_daily_slo.sql` — `ops_daily_slo` daily SLO rollup per (day, platform, carrier, node), filled by cron
 - `0075_ops_node_capacity_users.sql` — `ops_node_profiles.capacity_users` for capacity-based node acceptance
 - `0076_ops_node_identity.sql` — immutable `ops_node_identity`; display name, failure domain, and which node it replaces
+
+## 0090
+
+- `0090_sessions_user_live_index.sql` — `sessions(user_id, revoked_at)` index for the cron enforcement scan, which only enforces ineligible users that still hold a live device or session

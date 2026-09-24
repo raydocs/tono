@@ -5463,6 +5463,50 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     }
   });
 
+  it('keeps cron enforcement cost flat as already-enforced users accumulate', async () => {
+    const tick = async () => {
+      let prepares = 0;
+      const base = env as unknown as Env;
+      const DB = new Proxy(base.DB, {
+        get(target, prop, receiver) {
+          if (prop === 'prepare') {
+            return (...args: Parameters<D1Database['prepare']>) => {
+              prepares += 1;
+              return target.prepare(...args);
+            };
+          }
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+        },
+      });
+      const context = createExecutionContext();
+      await worker.scheduled(createScheduledController(), { ...base, DB }, context);
+      await waitOnExecutionContext(context);
+      return prepares;
+    };
+    // Disabled long ago: no live device, no unrevoked session, nothing to revoke.
+    const seedEnforced = async (prefix: string, count: number) => {
+      const t = Math.floor(Date.now() / 1000);
+      await env.DB.batch(Array.from({ length: count }, (_, index) => env.DB.prepare(
+        `INSERT INTO users(id, email, password_hash, password_salt, status, usage_bytes, created_at, updated_at)
+         VALUES(?, ?, 'x', 'x', 'disabled', 0, ?, ?)`,
+      ).bind(`${prefix}-${index}`, `${prefix}-${index}@example.com`, t, t)));
+    };
+    await seedEnforced('enforced-early', 5);
+    await tick();
+    const baseline = await tick();
+    await seedEnforced('enforced-later', 40);
+    expect(await tick()).toBe(baseline);
+
+    // A user who just lost eligibility and still holds a device is enforced.
+    const account = await createAccount('cron-enforce-live');
+    await env.DB.prepare("UPDATE users SET status = 'disabled' WHERE id = ?")
+      .bind(account.user.id).run();
+    await tick();
+    expect(await env.DB.prepare('SELECT status FROM devices WHERE id = ?')
+      .bind(account.device.id).first<any>()).toMatchObject({ status: 'revoked' });
+  });
+
   it('processes durable revocations before retention housekeeping can fail', async () => {
     const account = await createAccount('revocation-before-retention');
     resetMockInventory(account.device.id, account.enrollment.hostname);
@@ -5479,10 +5523,16 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(pending.completed_at).toBeNull();
 
     // Force the first retention statement to abort. Security enforcement must
-    // already have retried the durable deletion when this failure surfaces.
+    // already have retried the durable deletion when this failure surfaces, and
+    // the retention steps after it must still run.
     await env.DB.prepare(
       "INSERT INTO rate_limits(key, count, window_start) VALUES('force-retention-failure', 1, 0)",
     ).run();
+    const longRevoked = Math.floor(Date.now() / 1000) - 2 * 86_400;
+    await env.DB.prepare(
+      `INSERT INTO sessions(id, user_id, refresh_hash, expires_at, revoked_at, created_at)
+       VALUES('retention-after-failure', ?, 'retention-after-failure', ?, ?, ?)`,
+    ).bind(account.user.id, longRevoked, longRevoked, longRevoked).run();
     await env.DB.prepare(
       `CREATE TRIGGER test_fail_retention
        BEFORE DELETE ON rate_limits
@@ -5493,7 +5543,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     try {
       const context = createExecutionContext();
       await worker.scheduled(createScheduledController(), env as unknown as Env, context);
-      await expect(waitOnExecutionContext(context)).rejects.toThrow(/TEST_RETENTION_FAILURE/);
+      await waitOnExecutionContext(context);
 
       const completed = await env.DB.prepare(
         'SELECT completed_at, last_error FROM revocation_jobs WHERE id = ?',
@@ -5501,6 +5551,8 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       expect(completed.completed_at).toBeTypeOf('number');
       expect(completed.last_error).toBeNull();
       expect(mockInventory.some((device) => device.id === MGMT_ID)).toBe(false);
+      expect(await env.DB.prepare("SELECT id FROM sessions WHERE id = 'retention-after-failure'")
+        .first()).toBeNull();
     } finally {
       await env.DB.prepare('DROP TRIGGER IF EXISTS test_fail_retention').run();
     }

@@ -32,6 +32,37 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · 控制面 cron：强制扫描有上限，每个清理步骤独立 try
+
+- **归属/来源**：ops 平台 cron 健康（`/system/pulse` 的 `cronAgeSec` 依赖 cron 跑完）；
+  控制面 Worker。内部审查 H13-F7，Issue #445。基线 main bb2ed4e4 → 分支
+  `fix/enforce-cron-bound-20260923`；提交时未合 main。
+- **缺陷修复**：`enforceAll` 每 5 分钟选出所有曾失去资格的用户（无 LIMIT），对每人执行
+  `enforceUser`（3 次查询），早已强制过的用户也不例外；用户从不删除，集合只增不减。其后的
+  保留期语句不在 try 里，一旦单次调用超过 D1 查询上限（约 330 个不合格用户），后续保留期、
+  `snapshotUserUsageHours`、`runOpsCron` 全部不再运行。现在：
+  - 只选仍持有 active/pending 设备或未吊销会话的不合格用户，每 tick 最多 25 人，其余下一
+    tick 处理。新 migration `0090_sessions_user_live_index.sql` 为该查询加
+    `sessions(user_id, revoked_at)` 索引。
+  - 强制扫描、stale pending 扫描和每条保留期语句都包进独立的 `cronStep`（记录错误后继续）。
+    为满足 `index.ts` 只减不增的行数限制，保留期语句原样移到新文件 `src/retention.ts`，
+    语句与顺序不变。
+- **新增/优化**：无。
+- **工程与测试**：`test/worker.test.ts` 新增一个 `it`：先有 5 个已强制过的禁用用户，
+  再加 40 个，cron 的 prepare 次数必须不变；随后一个刚被禁用、仍有设备的用户在下一 tick
+  被吊销。旧代码失败为 `expected 205 to be 85`（多出 40 × 3，本机先红后绿）。已有用例
+  「processes durable revocations before retention housekeeping can fail」原先断言 cron 在
+  保留期失败时整体 reject；改为断言不再 reject，且失败步骤之后的会话保留期仍然执行（测试
+  契约随行为修正）。
+- **验证**：MacBook worktree：control-plane 全量 vitest 43 文件 892 测试通过，
+  `tsc --noEmit`、`check:contract`、`check:budgets` 通过。migration 只在 vitest 本地 D1
+  应用过。CI 结果以 PR 页为准。未部署。
+- **候选/发布**：无新包，仅源码（Worker）。部署时先对 D1 应用 0090 再部署 Worker；
+  未应用时查询仍可运行，只是会话查找没有索引。
+- **剩余限制**：若有 25 个以上用户的 `enforceUser` 每次都失败，它们会一直占满每 tick 的
+  名额；日志里会有逐人错误。D1 单次调用查询上限的实际值未在本账户核对。`runOpsCron`
+  内部各步骤的预算不在本条范围。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
