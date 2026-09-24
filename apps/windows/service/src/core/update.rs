@@ -533,8 +533,8 @@ pub(crate) async fn request(
 }
 
 /// Read-only view of the executor's durable replacement plan
-/// (`install_service::update_executor::Plan`): only what the Service verifies
-/// and removes when a replaced attempt is released without commit.
+/// (`install_service::update_executor::Plan`): only what the Service and
+/// recovery verify or remove.
 #[derive(serde::Deserialize)]
 struct PlanView {
     attempt_id: String,
@@ -547,31 +547,30 @@ struct PlanMemberView {
     backup: PathBuf,
     restore: PathBuf,
     publish_scratch: PathBuf,
+    old_digest: [u8; 32],
     new_digest: [u8; 32],
 }
 
-/// Every plan member must already be the target bytes (the whole payload
-/// tree plus `core-sha256.txt`, not only three binaries) before any rollback
-/// copy is removed. Idempotent: an absent copy is already released.
-fn release_replaced_backups(plan_path: &Path, attempt_id: &str, install_root: &Path) -> Result<()> {
+/// Which side of every durable plan member the installation must equal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanSide {
+    Old,
+    New,
+}
+
+fn read_plan(plan_path: &Path, attempt_id: &str, roots: &[&Path]) -> Result<Vec<PlanMemberView>> {
     let plan: PlanView = serde_json::from_slice(&std::fs::read(plan_path)?)?;
     ensure!(
         plan.attempt_id == attempt_id,
         "replacement plan belongs to a different attempt"
     );
-    let service_dir = crate::service_paths().install_dir();
     for m in &plan.members {
         ensure!(
-            (m.target.starts_with(install_root) || m.target.starts_with(&service_dir))
+            roots.iter().any(|root| m.target.starts_with(root))
                 && m.target
                     .components()
                     .all(|c| !matches!(c, std::path::Component::ParentDir)),
             "replacement plan member is outside the installation"
-        );
-        let new: String = m.new_digest.iter().map(|b| format!("{b:02x}")).collect();
-        ensure!(
-            file_digest(&m.target)? == new,
-            "installed plan member is not the target; evidence cannot be released"
         );
         for (scratch, suffix) in [
             (&m.backup, ".rollback"),
@@ -586,7 +585,42 @@ fn release_replaced_backups(plan_path: &Path, attempt_id: &str, install_root: &P
             );
         }
     }
-    for m in &plan.members {
+    Ok(plan.members)
+}
+
+/// Every member of the durable plan (the whole payload tree plus
+/// `core-sha256.txt`, not only the three native binaries) must hash to its
+/// recorded old or new digest. Three-component identity alone cannot tell a
+/// complete publication/rollback from one interrupted between members.
+/// `Ok(false)` only when a member was read and differs; an unreadable plan or
+/// member (sharing violation, AV lock) is `Err`, never evidence of either side.
+pub fn plan_members_at(
+    plan_path: &Path,
+    attempt_id: &str,
+    roots: &[&Path],
+    side: PlanSide,
+) -> Result<bool> {
+    for m in read_plan(plan_path, attempt_id, roots)? {
+        let expected = match side {
+            PlanSide::Old => &m.old_digest,
+            PlanSide::New => &m.new_digest,
+        };
+        let expected: String = expected.iter().map(|b| format!("{b:02x}")).collect();
+        if file_digest(&m.target)? != expected {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Every plan member must already be the target bytes before any rollback
+/// copy is removed. Idempotent: an absent copy is already released.
+fn release_replaced_backups(plan_path: &Path, attempt_id: &str, roots: &[&Path]) -> Result<()> {
+    ensure!(
+        plan_members_at(plan_path, attempt_id, roots, PlanSide::New)?,
+        "installed plan member is not the target; evidence cannot be released"
+    );
+    for m in read_plan(plan_path, attempt_id, roots)? {
         for scratch in [&m.backup, &m.restore, &m.publish_scratch] {
             match std::fs::symlink_metadata(scratch) {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -639,6 +673,20 @@ fn retire_after_release(
             installed(&a.install_root)? == a.old_components,
             "rollback not proven complete; evidence cannot be retired"
         );
+        // Without a durable plan no publication started; with one,
+        // every member must be back at its original bytes.
+        let plan = store.attempt_dir()?.join("replacement.json");
+        if plan.try_exists()? {
+            ensure!(
+                plan_members_at(
+                    &plan,
+                    &a.receipt.attempt_id,
+                    &[a.install_root.as_path(), crate::service_paths().install_dir().as_path()],
+                    PlanSide::Old,
+                )?,
+                "rollback not proven complete for every plan member; evidence cannot be retired"
+            );
+        }
         store.retire_rolled_back(owner, peer)?;
     } else if a.execution == Execution::Replaced {
         // Installed and released: the publication is complete and the
@@ -651,8 +699,9 @@ fn retire_after_release(
         );
         let plan = store.attempt_dir()?.join("replacement.json");
         let (attempt_id, root) = (a.receipt.attempt_id.clone(), a.install_root.clone());
+        let service_dir = crate::service_paths().install_dir();
         store.retire_released_installation(owner, peer, || {
-            release_replaced_backups(&plan, &attempt_id, &root)
+            release_replaced_backups(&plan, &attempt_id, &[root.as_path(), service_dir.as_path()])
         })?;
     }
     // Records whose replacement is still in flight (Consumed, a live
@@ -972,6 +1021,82 @@ mod tests {
         assert_eq!(status.execution, "Uncertain");
         assert!(status.needs_attention.unwrap().contains("rollback not proven"));
         drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_plan_members_gate_recovery_and_rollback_on_every_member_not_three_binaries() {
+        use sha2::{Digest, Sha256};
+        let root = std::env::temp_dir().join(format!(
+            "tono-plan-members-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("resources")).unwrap();
+        let digest = |bytes: &str| {
+            let mut out = [0_u8; 32];
+            out.copy_from_slice(&Sha256::digest(bytes.as_bytes()));
+            out
+        };
+        // Same serialized shape the executor writes; core-sha256.txt is last.
+        let members = [
+            ("Tono.exe", "old-app", "new-app"),
+            ("resources/data.bin", "old-data", "new-data"),
+            ("core-sha256.txt", "old-pin", "new-pin"),
+        ]
+        .map(|(name, old, new)| {
+            let target = root.join(name);
+            let bound = |suffix: &str| {
+                let mut path = target.clone().into_os_string();
+                path.push(suffix);
+                PathBuf::from(path)
+            };
+            serde_json::json!({
+                "staged": root.join("payload").join(name),
+                "target": target,
+                "backup": bound(".rollback"),
+                "restore": bound(".restore"),
+                "publish_scratch": bound(".publish"),
+                "old_digest": digest(old),
+                "new_digest": digest(new),
+                "changed": true,
+                "published": false,
+            })
+        });
+        let plan = root.join("replacement.json");
+        std::fs::write(
+            &plan,
+            serde_json::to_vec(&serde_json::json!({"attempt_id": "a1", "members": members}))
+                .unwrap(),
+        )
+        .unwrap();
+        let roots = [root.as_path()];
+        let install = |app: &str, data: &str, pin: &str| {
+            std::fs::write(root.join("Tono.exe"), app).unwrap();
+            std::fs::write(root.join("resources/data.bin"), data).unwrap();
+            std::fs::write(root.join("core-sha256.txt"), pin).unwrap();
+        };
+        // Publication interrupted before the last member: not TargetVerified.
+        install("new-app", "new-data", "old-pin");
+        assert!(!plan_members_at(&plan, "a1", &roots, PlanSide::New).unwrap());
+        install("new-app", "new-data", "new-pin");
+        assert!(plan_members_at(&plan, "a1", &roots, PlanSide::New).unwrap());
+        assert!(plan_members_at(&plan, "other", &roots, PlanSide::New).is_err());
+        // Rollback restored the binaries but not a resource: not retirable.
+        install("old-app", "new-data", "old-pin");
+        assert!(!plan_members_at(&plan, "a1", &roots, PlanSide::Old).unwrap());
+        install("old-app", "old-data", "old-pin");
+        assert!(plan_members_at(&plan, "a1", &roots, PlanSide::Old).unwrap());
+        // A member that exists but cannot be read (a directory: open or read
+        // fails, like a sharing violation or AV lock) is an error, not a
+        // mismatch, so recovery cannot roll back a complete installation.
+        install("new-app", "new-data", "new-pin");
+        std::fs::remove_file(root.join("resources/data.bin")).unwrap();
+        std::fs::create_dir(root.join("resources/data.bin")).unwrap();
+        assert!(plan_members_at(&plan, "a1", &roots, PlanSide::New).is_err());
         std::fs::remove_dir_all(root).unwrap();
     }
 

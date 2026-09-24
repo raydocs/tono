@@ -20,9 +20,10 @@ struct Plan {
 enum RecoveryPublication {
     /// No durable replacement plan exists, so no publication can have started.
     NoPlan,
-    /// The installed identity equals the signed target: the publication
-    /// completed and was verified before. Recovery re-establishes the
-    /// successor path; it must not revert a complete installation.
+    /// The installed identity equals the signed target and every durable
+    /// plan member is at its new digest: the publication completed and was
+    /// verified before. Recovery re-establishes the successor path; it must
+    /// not revert a complete installation.
     TargetVerified,
     /// The installed identity is not the signed target: the publication is
     /// genuinely interrupted (or a previous rollback already restored the
@@ -32,12 +33,13 @@ enum RecoveryPublication {
 
 fn classify_recovery(
     plan_present: bool,
+    plan_members_new: bool,
     installed: &Components,
     target: &Components,
 ) -> RecoveryPublication {
     if !plan_present {
         RecoveryPublication::NoPlan
-    } else if installed == target {
+    } else if plan_members_new && installed == target {
         RecoveryPublication::TargetVerified
     } else {
         RecoveryPublication::Interrupted
@@ -204,8 +206,25 @@ fn execute(recovery: bool) -> Result<(), Error> {
             // interruption. A user closing the new App before commit or a
             // reboot must not revert a complete, verified publication.
             let installed = native::components(&a.install_root, &service_path)?;
+            let plan_present = plan_path.exists();
+            // Three binaries at the target do not prove later members (the
+            // payload tree, `core-sha256.txt`) were published too. Only a
+            // member read as different is an interruption; an unreadable
+            // member (sharing violation, AV lock) exits like an unreadable
+            // component, before any rollback touches a file.
+            let plan_members_new = plan_present
+                && native::plan_members_at(
+                    &plan_path,
+                    &a.receipt.attempt_id,
+                    &[
+                        a.install_root.as_path(),
+                        tono_service_protocol::service_paths().install_dir().as_path(),
+                    ],
+                    native::PlanSide::New,
+                )?;
             match classify_recovery(
-                plan_path.exists(),
+                plan_present,
+                plan_members_new,
                 &installed,
                 &tx::target(&a.manifest).components,
             ) {
@@ -562,7 +581,7 @@ mod tests {
         };
         // A complete verified installation survives its successor exiting first.
         assert_eq!(
-            classify_recovery(true, &target, &target),
+            classify_recovery(true, true, &target, &target),
             RecoveryPublication::TargetVerified
         );
         // A mid-flight publication (neither target nor fully restored) rolls back.
@@ -572,17 +591,17 @@ mod tests {
             privileged_sha256: "op".into(),
         };
         assert_eq!(
-            classify_recovery(true, &mixed, &target),
+            classify_recovery(true, false, &mixed, &target),
             RecoveryPublication::Interrupted
         );
         // An already-restored rollback re-runs the idempotent restore.
         assert_eq!(
-            classify_recovery(true, &old, &target),
+            classify_recovery(true, false, &old, &target),
             RecoveryPublication::Interrupted
         );
         // No durable plan means no publication can have started.
         assert_eq!(
-            classify_recovery(false, &old, &target),
+            classify_recovery(false, false, &old, &target),
             RecoveryPublication::NoPlan
         );
     }
