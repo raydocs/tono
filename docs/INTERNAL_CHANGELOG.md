@@ -49,6 +49,34 @@
 - **候选/发布**：无新包，仅文档。
 - **剩余限制**：H16/H17 条目全部是源码推导或阅读确认，回归草案均未运行；需实机的部分列在审查轮记录第 3 节。
 
+## 2026-09-23 · Worker/发布工具把策略 revision 写进被签名 json（H3-F5 服务端，默认关闭）
+
+- **归属/来源**：G1 签名信任边界；影响控制面 `src/ops/shared-admin/traffic-policy.ts`、
+  `src/traffic-policy.ts`、`src/env.ts`、共享编辑器解析 `admin/src/lib/traffic-policy.ts`，离线签名工具
+  `tooling/scripts/publish-traffic-policy.mjs` 与 `test-policy-signing-contract.sh`。基线 main bb2ed4e4，
+  分支 `fix/worker-policy-revision-20260923`；Issue #317；依赖客户端 #342、#472、#473 先发布普及；
+  提交时未合 main。
+- **缺陷修复**：策略 revision 在签名外，被重放的签名策略可任意声明 revision。新增开关
+  `TRAFFIC_POLICY_EMBED_REVISION`（仅 `'true'` 生效，未在 wrangler.jsonc 设置即关闭）：开启后
+  PUT 把即将分配的 revision（`expectedRevision + 1`）写入 canonical json，签名必须覆盖它，覆盖旧
+  字节的签名以 `TRAFFIC_POLICY_SIGNATURE_INVALID` 拒绝；dry run 用传入的 `expectedRevision`（未传则
+  用当前行 revision）绑定。读取路径不论开关：json 内若带 revision 必须等于行 revision，否则 503，
+  校验前剥离该键。签名上下文与 D1 列不变，无 migration。
+- **新增/优化**：发布工具在 dry run 前读取当前 revision 并随 dry run 与发布使用同一个
+  `expectedRevision`，并在 dry run 绑定了 revision 时核对其为 `expectedRevision + 1`；共享编辑器
+  解析忽略服务端 json 中的 `revision` 键（开启后编辑器仍能载入当前策略）。
+- **工程与测试**：新增 Worker 回归 `binds the assigned revision inside the signed policy json once
+  enabled`；签名契约脚本增加第 5 项：Worker 以 `revision` 键写入并在读取路径校验，且当 wrangler.jsonc
+  开启该开关时要求 macOS、Windows `policy.rs` 与 `sing_box.rs` 源码均绑定该键。
+- **验证**：本机新 `it` 在旧代码上失败（dry run json 无 revision：`expected undefined to be 1`），
+  修复后通过；`npx vitest run` 全量 43 文件 892 用例通过；`npm run typecheck` 通过；ops-console
+  `tsc --noEmit` 与 `vitest run src/lib/settings-publish` 通过；`test-policy-signing-contract.sh` 5/5，
+  并临时开启开关确认在 macOS 未绑定时失败（已还原）；`node --check` 发布工具。未部署。
+- **候选/发布**：无新包，仅源码；未部署 Worker，开关未开启。
+- **剩余限制**：开启顺序：先合并并发布客户端（#342、#472、#473），待其普及后再在 wrangler.jsonc 开启
+  开关并部署；契约检查只证明源码已绑定，不证明已普及。与 #470 在 `publicTrafficPolicy` 同一行
+  有文本冲突，后合者需保留两处改动（剥离 revision 后以 `admitStoredUnsignedMedia = true` 调用）。
+
 ## 2026-09-23 · Worker 拒绝未签名策略中的 TCP 端点（H3-F6 后续）
 
 - **归属/来源**：G1 保护不放宽（只有签名能扩大绕行面）；影响控制面
