@@ -35,6 +35,16 @@ final class UpdateStorage {
         var attempt: Attempt?
     }
 
+    /// Storage major of `ledger.json`. Absent means 1, the unversioned v1
+    /// layout; a writer emits `schemaVersion` only once it writes 2 or later.
+    /// Within one major an older executor copy ignores keys it does not know,
+    /// so additive fields must be optional and safe to drop. Anything else
+    /// bumps the major, which is refused as newer evidence (retained), not as
+    /// corruption. See docs/UPDATE_PROTOCOL_V1.md.
+    static let schemaVersion: UInt64 = 1
+
+    private struct SchemaProbe: Decodable { let schemaVersion: UInt64? }
+
     init(root: String = UpdateStorage.directory,
          synchronizeDirectory: @escaping (String) throws -> Void = UpdateStorage.syncDirectory) throws {
         self.root = root
@@ -81,8 +91,16 @@ final class UpdateStorage {
         var metadata = stat()
         if lstat(path, &metadata) != 0, errno == ENOENT { return Ledger() }
         let bytes = try Self.read(path, maximum: 128 * 1024)
+        guard let schema = try? JSONDecoder().decode(SchemaProbe.self, from: bytes).schemaVersion ?? 1,
+              schema >= 1 else {
+            throw HelperFailure.invalid("Update ledger is corrupt; retained for recovery.")
+        }
+        guard schema <= Self.schemaVersion else {
+            throw HelperFailure.invalid("Update ledger was written by a newer Tono (schema \(schema)); retained for that version.")
+        }
         let ledger = try JSONDecoder().decode(Ledger.self, from: bytes)
-        guard try UpdateContractV1.canonical(ledger) == bytes,
+        let canonical = try UpdateContractV1.canonical(ledger)
+        guard canonical == bytes || Self.knownFieldsMatch(bytes, canonical: canonical),
               ledger.generation <= UpdateContractV1.maxInteger,
               ledger.highWater <= UpdateContractV1.maxInteger else {
             throw HelperFailure.invalid("Update ledger is corrupt; retained for recovery.")
@@ -103,6 +121,23 @@ final class UpdateStorage {
         // acknowledge that visible candidate or retire its recovery entry.
         try synchronizeDirectory(root)
         return ledger
+    }
+
+    /// Keys this build does not know are skipped; every key it does know must
+    /// carry exactly the value that re-encodes canonically.
+    static func knownFieldsMatch(_ bytes: Data, canonical: Data) -> Bool {
+        func project(_ value: Any, onto reference: Any) -> Any {
+            guard let object = value as? [String: Any], let known = reference as? [String: Any] else { return value }
+            var kept = [String: Any]()
+            for (key, knownValue) in known { if let present = object[key] { kept[key] = project(present, onto: knownValue) } }
+            return kept
+        }
+        guard let file = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+              let known = try? JSONSerialization.jsonObject(with: canonical) as? [String: Any],
+              let projected = project(file, onto: known) as? [String: Any],
+              // Only keys this build does not know may make the bytes non-canonical.
+              !NSDictionary(dictionary: file).isEqual(to: projected) else { return false }
+        return NSDictionary(dictionary: projected).isEqual(to: known)
     }
 
     func save(_ ledger: Ledger) throws {

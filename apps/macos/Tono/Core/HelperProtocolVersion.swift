@@ -131,7 +131,11 @@ nonisolated enum HelperProtocolVersion {
     ///   provably gone (different boot, or its audit token resolves to no
     ///   live process), allocating a fresh successor generation without
     ///   changing the proof phase. A 4.8.0 daemon keeps both dead ends.
-    static let current = "4.9.0"
+    /// - 4.9.0 → 4.40.0 (provisional number; renumber in merge order): the
+    ///   update ledger has a storage major (`schemaVersion`, absent = 1).
+    ///   Additive keys from a newer helper are ignored instead of reading as
+    ///   a corrupt ledger, and a higher major is refused as newer evidence.
+    static let current = "4.40.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
