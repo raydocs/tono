@@ -1318,6 +1318,12 @@ class ReconcileSafety(unittest.TestCase):
         self.assertTrue(agent.removal_succeeded(missing, email))
         self.assertFalse(agent.removal_succeeded(wrong_tag, email))
         self.assertTrue(agent.removal_succeeded(removed, email))
+        # The original bug was the argv: Xray 26 rejects `--email=`.
+        self.reconcile([], {email}, None)
+        self.assertEqual(
+            self.calls[0], ["api", "rmu", "--server=127.0.0.1:10085", "-tag=tono-vless", email],
+        )
+        self.assertFalse(any("--email" in arg for arg in self.calls[0]))
 
     def test_the_installed_label_is_the_prefixed_one(self) -> None:
         self.reconcile(

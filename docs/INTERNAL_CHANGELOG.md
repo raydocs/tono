@@ -45,7 +45,8 @@
   `User <该 email> not found` 算已删；否则须 rc=0 且 `Removed N user(s)` 中 N≥1；其余一律计入 failures、阻止 ACK。
 - **新增/优化**：无。
 - **工程与测试**：回归 `test_rmu_success_is_read_from_its_output_not_its_exit_code` 用节点实测的三段 rc=0 输出
-  （用户不存在→已删，错误 tag→失败，`Removed 1`→已删），取代先前的 argv 断言测试。fixture 修正：原有测试中按
+  （用户不存在→已删，错误 tag→失败，`Removed 1`→已删），并断言 rmu argv 恰为
+  `api rmu --server=<addr> -tag=<tag> <email>`、不含 `--email`（取代先前单独的 argv 测试）。fixture 修正：原有测试中按
   `--email=` 解析 rmu 参数的 mock/断言改为位置参数；成功删除的 rmu mock 由空输出改为打印 `Removed 1 user(s) in total.`。
 - **验证**：MacBook 工作树 `cd services/exit-agent && python3 -m pytest -q`：90 passed, 7 subtests passed。
   输出样本来自 179.253.233.220（Xray 26.3.27）实测；修复本身未在节点上运行。
