@@ -512,6 +512,37 @@
   这一轮就不做封锁探测（记 `no_public_ip`，显示为基线失败）。`node_probe` 仍然沿用
   `SAFE_HOST`，本条没有改动。本条和 H7-F1 的 PR 都改了 `probe_cn_agents` 的相邻行，合并时
   可能需要解决文本冲突。
+## 2026-09-23 · ops 诊断/重启任务改用实际 Xray unit `tono-xray.service`（H7-F8）
+
+- **归属**：ops 任务（运维计划 3.4 hub 任务执行器；3.1 验收单报错证据），非客户 ship gate；`ops-panel/`。
+- **来源**：基线 main `e7c913e1` → 分支 `fix/ops-xray-unit-20260923`；Issue #376，内部审查 H7-F8；
+  提交时未合 main。
+- **缺陷修复**：
+  - **原问题**：`xray_dial_errors`/`xray_error_digest` 读的是 `journalctl -u xray`，
+    `xray_restart` 执行的是 `systemctl restart xray`，但部署脚本安装的都是 `tono-xray.service`。
+    journal 对不存在的 unit 通常返回 0 且没有输出，任务会报 `ok matched=0`，验收单可能把它
+    当作「无报错」证据。
+  - **修复**：新增常量 `XRAY_UNIT = "tono-xray.service"`，三个任务都改用它。journal 任务先确认
+    `LoadState=loaded`，否则以 rc=3 报 error，不再把空读当成功。
+  - **审查修正（R4）**：`provision-tono-node.py` 允许每个节点自定 `serviceName`（如 `extend` 模式下的
+    `xray.service`），写死 `tono-xray.service` 会把这类节点上原本可用的 `xray_restart` 改坏。现在三个任务
+    都读节点记录（`nodes.secrets.json`）里的 `serviceName`，缺省才用 `tono-xray.service`；值不是
+    `[A-Za-z0-9_.-]+.service`（与 provision 脚本同一规则）时直接报 error，不拼进远程 shell。
+- **新增/优化**：无。
+- **工程与测试**：`test_jobs.py:471` 原来把错误的 `journalctl -u xray` 写成断言，现改为
+  `journalctl -u tono-xray.service`。这条就是本修复的回归测试，没有新增其他测试。在旧代码上
+  它会失败（handler 返回 error，不是 ok）。审查修正后同一测试给节点记录 `serviceName: "xray.service"`，
+  断言 LoadState 检查和 journal 都用这个 unit；只还原 `jobs.py`（写死 tono-xray.service）时失败
+  （`'error' != 'ok'`）。缺省分支没有单独测试。
+- **验证**：MacBook `python3 -m unittest discover -s ops-panel/tests -p 'test_*.py'`：旧代码 25 项
+  1 失败，修复后 25 项 OK（审查修正后复跑 25 项 OK）。没有连接任何真实主机，也没有在节点上确认 `systemctl show -p LoadState`
+  的输出。CI 结果见 PR。
+- **候选/发布**：仅源码，无新候选；hub 部署需 owner 执行。
+- **剩余限制**：
+  - 如果某节点确实只跑旧的 `xray.service`（非 Tono 部署）而记录里没有 `serviceName`，journal 任务
+    会报 error、不再报 ok，这是有意的 fail-closed；在该节点的 `nodes.secrets.json` 记录里补
+    `serviceName` 即可。provision 脚本不会自动写 hub 上的这份记录，需要手工同步。
+  - 历史上 `ok` 的 journal 任务行不会追溯改判。
 
 ## 2026-09-23 · 永不 armed 的内部转换不得被重连 loop 判为外部 release
 
