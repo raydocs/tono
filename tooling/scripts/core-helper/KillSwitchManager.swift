@@ -109,6 +109,11 @@ final class KillSwitchManager {
     /// Cleared only by the next committed arm or a disarm, so the app can read
     /// it without mutating anything and must re-arm to clear it.
     var repairedSinceArm = false
+    /// Set when a failed reviewed-bundle withhold could not put the rule file
+    /// back either: the file may read as already withheld while the kernel
+    /// still holds the permit. Cleared only by the next committed arm, which
+    /// loads a ruleset it rendered in full; until then every withhold fails.
+    var reviewedBundleFileUnconfirmed = false
 
     init(allowedUID: uid_t) throws {
         self.allowedUID = allowedUID
@@ -309,6 +314,7 @@ final class KillSwitchManager {
         lastLoadedPassRules = passRules
         stateGeneration &+= 1
         repairedSinceArm = false
+        reviewedBundleFileUnconfirmed = false
         return response(
             armed: true,
             wanted: true,
@@ -354,18 +360,23 @@ final class KillSwitchManager {
 
     /// Takes the reviewed-bundle permit out of the loaded anchor while the
     /// Core has no tunnel (#608): from /core/sync after the new config passed
-    /// its check and before the old Core stops, and from the idle loop once
-    /// the Core has exited. With the Core goes its utun, and the address-free
-    /// permit is then root web-port egress on the physical interface. It
-    /// returns only through the app's next arm with the flag, which renders it
-    /// only while a tunnel exists.
+    /// its check and before the old Core stops, from /core/stop before it
+    /// stops, and from the idle loop once the Core has exited. With the Core
+    /// goes its utun, and the address-free permit is then root web-port egress
+    /// on the physical interface. It returns only through the app's next arm
+    /// with the flag, which renders it only while a tunnel exists.
     ///
     /// Throws while the permit may still be loaded, so /core/sync keeps the
-    /// old Core and its tunnel running instead of stopping it. A failure never
-    /// loosens the ruleset.
+    /// old Core and its tunnel running instead of stopping it; /core/stop
+    /// logs and stops anyway. A failure never loosens the ruleset.
     func withholdReviewedBundlePermit() throws {
         lock.lock()
         defer { lock.unlock() }
+        guard !reviewedBundleFileUnconfirmed else {
+            throw Self.withholdFailure(
+                HelperFailure.system("An earlier withhold could not restore the PF rule file.")
+            )
+        }
         guard let baseline = lastLoadedPassRules,
               baseline.contains(where: { $0.contains(Self.reviewedBundleLabel) }) else {
             return
@@ -397,11 +408,18 @@ final class KillSwitchManager {
                 // The narrowed file must not outlive a load the kernel may
                 // not have taken: it reads as already withheld and no later
                 // call would retry.
-                try? Self.atomicWrite(
-                    path: killSwitchPFPath,
-                    data: Data(rollback.utf8),
-                    permissions: 0o600
-                )
+                do {
+                    try Self.atomicWrite(
+                        path: killSwitchPFPath,
+                        data: Data(rollback.utf8),
+                        permissions: 0o600
+                    )
+                } catch {
+                    // Nothing on disk describes the kernel now. The next arm
+                    // takes the full flush, and nothing trusts the file first.
+                    lastLoadedPassRules = nil
+                    reviewedBundleFileUnconfirmed = true
+                }
                 throw Self.withholdFailure(error)
             }
         }
@@ -410,8 +428,7 @@ final class KillSwitchManager {
     static func withholdFailure(_ error: Error) -> HelperFailure {
         let detail = (error as? HelperFailure)?.message ?? String(describing: error)
         return .system(
-            "The reviewed-bundle permit could not be withheld; the running core was kept. "
-                + detail.prefixString(512)
+            "The reviewed-bundle permit could not be withheld: " + detail.prefixString(512)
         )
     }
 

@@ -176,8 +176,8 @@ nonisolated enum HelperProtocolVersion {
     ///   on the physical interface. An older daemon renders it on the
     ///   connect's first arm, before the TUN exists. (Number chosen past open
     ///   PRs; renumber in merge order.)
-    /// - 4.45.0 → 4.46.0: `/core/sync`, and the idle loop once the Core has
-    ///   exited, take the reviewed-bundle permit out of the loaded anchor
+    /// - 4.45.0 → 4.46.0: `/core/sync`, `/core/stop`, and the idle loop once
+    ///   the Core has exited, take the reviewed-bundle permit out of the loaded anchor
     ///   without a state flush while the Core has no utun; the app's next arm
     ///   with the flag restores it once the tunnel exists; if that fails,
     ///   `/core/sync` fails with the old Core still running. An older daemon

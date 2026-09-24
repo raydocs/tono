@@ -206,6 +206,14 @@ final class SocketServer {
                 sendResponse(client, status: 200, object: ["ok": true, "configPath": path])
             case ("DELETE", "/core/stop"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
+                // The Core's utun goes away with it (#608). Best effort: the
+                // stop must still happen, and the idle loop retries.
+                do {
+                    try killSwitch.withholdReviewedBundlePermit()
+                } catch {
+                    let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+                    FileHandle.standardError.write(Data("tono: \(detail)\n".utf8))
+                }
                 try core.stop()
                 sendResponse(client, status: 200, object: ["ok": true])
             case ("GET", "/killswitch/status"):
