@@ -98,8 +98,13 @@ enum RuntimeCleanup {
             // control-plane HTTPS addresses before stopping the old core. A
             // failed reassert leaves the previous PF block live, so cleanup can
             // still continue without ever opening unrestricted egress.
-            try? await PrivilegedRuntimeCoordinator.shared
-                .reassertKillSwitchIfNeeded()
+            do {
+                try await PrivilegedRuntimeCoordinator.shared
+                    .reassertKillSwitchIfNeeded()
+                // The arm returns only once the helper reports the barrier
+                // armed, wanted and live; an unconfirmed launch is now held.
+                launchProtectionConsumer(.held)
+            } catch {}
         }
 
         let didStartCore = AppProfile.defaults.bool(forKey: SettingsKey.didStartCore)

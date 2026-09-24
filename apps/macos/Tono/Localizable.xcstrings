@@ -2483,6 +2483,16 @@
         }
       }
     },
+    "Direct traffic may be blocked": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "直连可能仍被拦截"
+          }
+        }
+      }
+    },
     "Direct traffic remains blocked while Tono waits to retry.": {
       "localizations": {
         "zh-Hans": {

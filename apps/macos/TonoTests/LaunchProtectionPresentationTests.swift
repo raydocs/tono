@@ -4,10 +4,10 @@ import XCTest
 /// Launch recovery learns from the helper whether an earlier session's PF
 /// barrier is still held, but never told AppState: the menu bar said Standby
 /// over a blocking PF (internal review H16-O-F5 / H16-C-F1). Drives the
-/// production launch fold; only the helper's answer is supplied.
+/// production launch fold; only the helper's answers are supplied.
 @MainActor
 final class LaunchProtectionPresentationTests: XCTestCase {
-    func testLaunchShowsTheHelperAnswerInsteadOfStandby() {
+    func testLaunchShowsTheHelperAnswerInsteadOfStandby() async {
         let storedIntent = KillSwitchService.isArmed
         defer { KillSwitchService.isArmed = storedIntent }
 
@@ -22,6 +22,15 @@ final class LaunchProtectionPresentationTests: XCTestCase {
         XCTAssertTrue(held.isProtectionBlocked)
         XCTAssertEqual(MenuBarProtectionStatus(held).kind, .blocked)
 
+        // A later launch pass (Retry on the gate) hears that nothing is held:
+        // the earlier Protected Offline must not survive the helper's answer.
+        XCTAssertFalse(RuntimeCleanup.adoptLaunchObservation(
+            .confirmed(requiresProtectionRecovery: false),
+            localIntent: true
+        ))
+        XCTAssertFalse(held.isProtectionBlocked)
+        XCTAssertEqual(MenuBarProtectionStatus(held).kind, .standby)
+
         // No authenticated answer: the stored intent proves neither a barrier
         // nor an open host.
         let unanswered = AppState()
@@ -32,5 +41,13 @@ final class LaunchProtectionPresentationTests: XCTestCase {
         XCTAssertFalse(unanswered.isProtectionBlocked)
         XCTAssertNotEqual(MenuBarProtectionStatus(unanswered).kind, .standby)
         XCTAssertNotEqual(MenuBarProtectionStatus(unanswered).kind, .blocked)
+
+        // The helper answers later (app activation): the unknown resolves.
+        unanswered.networkProtection.refreshKillSwitchStatus = {
+            .confirmed(requiresProtectionRecovery: true)
+        }
+        await unanswered.resolveUnconfirmedProtection()
+        XCTAssertTrue(unanswered.isProtectionBlocked)
+        XCTAssertEqual(MenuBarProtectionStatus(unanswered).kind, .blocked)
     }
 }

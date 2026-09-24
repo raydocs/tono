@@ -14,7 +14,26 @@ extension AppState {
         case .unconfirmed:
             if !isProtectionBlocked { isProtectionUnconfirmed = true }
         case .released:
-            isProtectionUnconfirmed = false
+            if isProtectionBlocked {
+                // An authenticated answer says nothing is held: retire a
+                // stale Protected Offline the way the activation reconcile
+                // retires a confirmed external release.
+                acceptConfirmedExternalProtectionRelease()
+            } else {
+                isProtectionUnconfirmed = false
+            }
         }
+    }
+
+    /// Folds a later authenticated helper answer into an unconfirmed launch
+    /// verdict. Never prompts; an unavailable or rejected answer changes
+    /// nothing, and neither does a verdict some transition published meanwhile.
+    func resolveUnconfirmedProtection() async {
+        guard isProtectionUnconfirmed else { return }
+        let observation = await networkProtection.refreshKillSwitchStatus()
+        guard !Task.isCancelled, isProtectionUnconfirmed else { return }
+        guard case .confirmed(let requiresProtectionRecovery) = observation else { return }
+        KillSwitchService.isArmed = requiresProtectionRecovery
+        adoptLaunchProtection(requiresProtectionRecovery ? .held : .released)
     }
 }

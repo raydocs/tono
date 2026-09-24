@@ -47,17 +47,22 @@
   既不显示 Standby，也不把本地意图当作屏障证明；启动第一步在 helper 答复前即按本地意图发布
   unconfirmed，因此之后抛错的启动路径也不会显示 Standby。任何后续保护状态写入
   （连接开始、拆除完成、释放、reconcile）都会清除 unconfirmed。
+  评审续修（Opus + Codex 双方发现）：再次启动恢复（gate 上 Retry）得到 helper 确认「未持有」时，
+  按激活 reconcile 同一路径撤销此前的 Protected Offline，不再残留 blocked；unconfirmed 在 helper
+  之后给出认证答复时收敛——启动时 reassert 成功（arm 须读到 armed/wanted/live）发布 held，
+  App 激活时的 reconcile 也对 unconfirmed 查询一次（不弹授权、不动重连状态）；仪表盘徽标、
+  保护卡片与连接按钮显示「保护状态未知」，按钮与菜单栏在 ready 时也提供恢复正常网络。
 - **新增/优化**：无。PF/helper、账户流程、保护策略均未改。
 - **工程与测试**：把启动的 helper 答复折叠抽成 `RuntimeCleanup.adoptLaunchObservation`
   （先以不改行为的提交抽出）；新增一个 XCTest
-  `LaunchProtectionPresentationTests.testLaunchShowsTheHelperAnswerInsteadOfStandby`。
+  `LaunchProtectionPresentationTests.testLaunchShowsTheHelperAnswerInsteadOfStandby`（评审续修后
+  同一测试另断言：同一 AppState 先 held 后 released 不残留 blocked；unconfirmed 在 helper 之后答复时收敛）。
 - **验证**：本机未编译（MacBook 为编辑机）；TonoTests 在本 PR 的 GitHub-hosted `macos-26` CI 运行，
   结果以 PR 检查中对应 head SHA 为准。测试仅抽取提交（产品行为未改）的 CI 运行结果见 PR 正文。
 - **候选/发布**：无新包，仅源码。
-- **剩余限制**：未实机验证。unconfirmed 只在菜单栏图标/标题显示；仪表盘徽标和连接按钮只在
-  账户 ready 时可见，而 ready 的 unconfirmed 启动会立即自动恢复连接，未单独改。unconfirmed
-  不会被激活 reconcile 自动升级为已确认，需下一次保护操作或 Retry（重跑启动恢复）。账户 gate
-  的文案与菜单栏一致由后续 H16-C-F2 修复负责。
+- **剩余限制**：未实机验证。helper 一直不答复时 unconfirmed 保持（如实为未知）。启动确认屏障后
+  界面进入与会话内相同的 Protected Offline，点按连接按钮即恢复正常网络、激活 reconcile 会运行，
+  这是行为变化而非纯展示。账户 gate 的文案与菜单栏一致由后续 H16-C-F2 修复（#538）负责。
 
 ## 2026-09-23 · 发现总账与审查流程记录
 
