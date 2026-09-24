@@ -32,6 +32,70 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · 控制面列车 #570 审查续修：设备出口身份只等本次下发的节点
+
+- **归属/来源**：G1–G3 控制面（#323 退役共享凭据的续修）；`services/control-plane`。来源：列车 PR #570 审查发现
+  TC-anthropic-1（P1）与 TC-anthropic-2（P2），均经 Opus 与 Codex 核实；分支 `fix/cp-a-20260924`，基于 8fc72696；未合 main。
+- **缺陷修复**：
+  - TC-anthropic-1：`exitClientUUID` 要求**所有** active 的 `exit_nodes` 行都 ACK 过设备凭据。新建或重新启用的节点
+    `last_roster_at = 0`，于是只要有一个已登记、尚未上架的节点，所有共享凭据已退役（0077）的账户的全部设备都拿到
+    503 `EXIT_IDENTITY_PROPAGATING`。改后：`publicManagedCatalog` 先做家宽与 hy2 过滤，再从**本次下发**的目录取节点名
+    （` · hy2` 折回基名），只要求这些节点满足「有 active 的 `exit_nodes` 行且 `last_roster_at` 严格晚于凭据」。
+    目录名与 `exit_nodes.name` 的对应沿用 fleet/上架已有的按名匹配。下发了但未 ACK 的节点仍然挡住；未上架的节点不参与；
+    退役账户仍不回落共享凭据；下发目录里没有任何就绪节点时照旧 fail-closed。下发了但**没有 `exit_nodes` 行**的节点按
+    未就绪处理：它没有令牌，无法 ACK，没有任何证据表明它装上了设备凭据。
+- **新增/优化**：无。
+- **工程与测试**：
+  - 新增 `it`（`holds a retired account only on exit nodes its catalog serves`）：退役账户，目录内节点已 ACK，另有一个
+    未上架、`last_roster_at = 0` 的 active 节点，返回 200 并含设备 UUID；把该节点上架后返回 503。未改源码时先跑红：
+    `expected 503 to be 200`（第一次取目录）。
+  - TC-anthropic-2：#323 的用例删光出口后只断言响应里没有旧 UUID，503 也能过。现断言 503 `EXIT_IDENTITY_PROPAGATING`，
+    再登记 `Tono-Exit` 并以晚于凭据一秒的 `observedAt` ACK，断言 200 且含幸存设备的 UUID。
+  - fixture 修正：夹具出口名是 `Test exit-*`，与目录名对不上。`same-second`、`retires shared legacy …`（两组时钟偏移）、
+    `serves an exit identity roster …` 三个用例把 `exit-default` 改名为目录里的节点名；`retires shared legacy …` 原来
+    断言「未上架的 `Late Exit` 挡住目录」，这正是本次修掉的行为，改为先把它上架再断言 503。
+- **验证**：MacBook 本机 worktree `services/control-plane`：`npx vitest run test/worker.test.ts` 188 个用例通过（基线 187）；
+  `npx vitest run` 43 个文件 913 个用例通过；`npm run typecheck` 通过；`git diff --check` 通过。未部署，未碰远端 D1，无原生构建。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：
+  - 部署前需只读核对：目录里每个节点基名都有 active 的 `exit_nodes` 行且已 ACK。审查指出生产现有未登记的托管节点；
+    部署后，被下发该节点的退役账户会一直 503，直到节点登记并 ACK；dual 阶段未退役账户会改拿共享凭据（同 revision、
+    不同 digest，涉及 H3-F1/#316 的客户端处理）。本机无法查 D1，未核对。
+  - `device_only` 切换的预检与触发器仍看全部 active 出口，不看目录，未改。
+  - 先过滤再发身份带来两处顺序变化：家宽路由错误（503 `CATALOG_UNAVAILABLE`）先于身份错误返回；过滤后没有任何节点的
+    目录不再签发身份。
+- **续修（2026-09-24，二轮审查 Grok A1 / Codex A-F1，同分支）**：
+  - 缺陷修复（A1，P1，Opus 跨厂商核实成立）：上一版把已绑定用户自己的 catalog 家宽块（及其 ` · hy2` 孪生）也算进就绪集合；
+    家宽是 `home_exits` 行，没有任何代码把它和 `exit_nodes` 的 ACK 关联，于是该用户永远不就绪：退役账户一直 503，dual 未退役
+    账户改拿共享 UUID（同 revision、不同 digest）。8fc72696 上同一场景下发设备 UUID。改后：就绪集合排除家宽过滤器使用的同一组名字
+    （`home_exit_catalog_names`，即 `homeRoutingForUser().restricted`，按原名与 hy2 基名两种方式匹配）；出口节点仍按严格规则
+    （已登记、active、ACK 严格晚于凭据）。只剩家宽、没有出口节点的目录按零覆盖规则 fail-closed，因为家宽没有另一条 ACK 路径。
+  - 缺陷修复（A-F1，P3）：只含 hy2 块、尾部注释带占位符的模板，对不收 hy2 的客户端过滤成空列表后，文件级 `includes` 仍触发签发。
+    改为按过滤后的 proxies 列表判断：列表为空不签发（注释里的占位符原样保留）。
+  - 测试：新增两个 `it`：`serves the device identity to a bound catalog-home user once the served exit nodes ack`（断言设备 UUID）
+    与 `issues no exit identity when the served catalog filters down to no proxies`（退役账户 200、`proxies: []`）。
+    修复前在 8ea01b3f 上分别红（YAML 含共享 UUID 而非设备 UUID；`expected 503 to be 200`），修复后绿。
+  - 验证：MacBook 本机 worktree：`npx vitest run test/worker.test.ts test/ops-api.test.ts` 230 通过；`npx vitest run` 43 个文件
+    915 通过；`npm run typecheck` 通过。未部署，未碰远端 D1，无原生构建。
+  - 剩余限制：家宽节点自身是否装上设备凭据仍不在门控内（与 8fc72696 前相同）；非 `filterHomeExits` 的带 userId 调用不排除家宽
+    （当前没有这种调用方）。
+- **续修（2026-09-24，三轮审查 A-R2-F1，P2，Grok 与 Codex 各自发现、Codex 内存复现，同分支）**：
+  - 缺陷修复：`home_exits.proxy_name` 与 `exit_nodes.name` 分属两表、没有跨表唯一约束，发布也不拒重名块。上一版按家宽名排除
+    就绪集合时，与出口节点同名的家宽（`Collision`、`Collision · hy2`，或历史上的 `X · hy2` 家宽）会把该出口一并豁免：
+    出口缺行、disabled 或 ACK 为 0 时门控照样放行。改后：在同一条 `json_each` 就绪查询里，家宽块只有在原名与 hy2 基名都
+    **没有任何** `exit_nodes` 行（不论状态）时才排除；有同名出口行的一律按出口严格规则判定，仍是一次读。
+  - 有意保留（非缺陷）：dual 阶段未退役账户、下发目录只剩家宽时拿共享 UUID，是文档中的 dual 回落；退役账户与 `device_only` 仍 503。
+  - 测试：`test/worker.test.ts` 新增一个 `it`（`keeps an unacked exit node in readiness when a bound catalog home shares its name`：
+    退役账户，`Tono-Exit` 已 ACK，另登记 `Collision` 出口 ACK 为 0，并绑定同名 catalog 家宽）断言 503 `EXIT_IDENTITY_PROPAGATING`。
+    修复前在 b6c0a817 上红（`expected 200 to be 503`，即下发了设备 UUID），修复后绿。
+  - 验证：MacBook 本机 worktree：`npx vitest run test/worker.test.ts test/ops-api.test.ts` 231 通过；`npx vitest run` 43 个文件
+    916 通过；`npm run typecheck` 通过。未部署，未碰远端 D1，无原生构建。
+  - 剩余限制：未加跨表重名拒绝（建家宽时拒与出口同名、登记出口时拒与家宽同名），门控已不依赖它。
+  - 四轮（Codex 核实 a62703fe：B FIXED，A PARTIAL，A-R3-F1 P2）：出口行本身名为 `X · hy2`、只下发基名块 `X` 的同名家宽
+    仍被豁免（上一条「fail-closed」的说法不成立）。现在家宽排除条件也比对「家宽名 + ` · hy2`」；命中即纳入就绪集合，
+    按基名连接查不到出口行则记为未就绪。测试：在同一个 `it` 里把 `Collision` 出口改名为 `Collision · hy2` 再断言 503，
+    修复前红（`expected 200 to be 503`）。验证：两个文件 231 通过、全量与 typecheck 见提交。
+
 ## 2026-09-24 · 控制面列车 #570 审查续修：开户轮换预检、家宽名 hy2 后缀
 
 - **归属/来源**：控制面 ops 家宽线路（ops 任务，非客户 ship 门）；`services/control-plane`。来源：列车 PR #570
