@@ -32,6 +32,40 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows DNS 状态纳入实际生效的解析策略（NRPT 漂移不再显示为干净健康）
+
+- **归属/来源**：G1 保护可观测性；Windows Service `core/dns`（`mod.rs`、`engine.rs`、
+  `apply_test_io.rs`）与 App DNS 警告标记。内部审查 X2-2，Issue #467。基线 main bb2ed4e4 →
+  分支 `fix/nrpt-drift-health-20260923`；提交时未合 main。
+- **缺陷修复**：Service 的 DNS 健康只读各网卡注册表 `NameServer`/`ProfileNameServer`，连接后
+  不读实际生效的 NRPT，也不再做系统解析；加入公司网络、公司 VPN 或策略刷新让别的 NRPT 规则
+  生效后，状态仍是无错误的 enabled。现在 watchdog 每 30 s 在 DNS 操作锁之外读取实际生效的
+  NRPT（组策略库有规则时取组策略库，否则取本地库），并做一次绕过缓存和 hosts 的系统 A 解析
+  （同 App 连接期的探测名）；纯函数 `resolver_policy_conflict` 在 Tono 的 catch-all 不是生效
+  规则、另有规则把名字指向非 Tono 解析器、或系统解析失败/未返回 fake-ip 时给出
+  `TONO_DNS_POLICY_CONFLICT` 标记，状态观察在其他错误为空时带上它。它不是 watchdog 的修复工作
+  （重连无法改别人的策略，不会空转）；App 把它列为 DNS 警告（Support 单独一行），不拆会话。
+  保护不放宽：WFP、适配器 DNS 和自有 NRPT 规则的写入都不变；启动续接候选要求 DNS
+  `last_error` 为空，冲突时不续接，只会更严。
+- **新增/优化**：无。
+- **工程与测试**：native DNS 夹具（`test_io::Machine`）新增可注入的 `effective_nrpt` 与
+  `system_lookup`（默认健康）；新增一个 `#[tokio::test]`
+  `core::dns::engine::native_apply::tests::effective_resolver_policy_drift_cannot_read_as_healthy`：
+  真实 enable 后注入组策略 catch-all 指向 10.20.30.40 与系统查询失败，断言状态仍 enabled
+  但带冲突标记，且 `PROTECTION_WANTED` 保持。旧代码的状态观察没有这两个输入，只会给出无错误的
+  enabled，按构造必失败（未在本机执行）。Service `windows-sys` 增加
+  `Win32_NetworkManagement_Dns` 特性（Cargo.lock 不变）。本机只用 `rustc --test` 单独编译过纯函数
+  做语法与逻辑自查。
+- **验证**：本机为编辑机，未运行 cargo；Service 编译与 CI 步骤 "Test native DNS apply
+  orchestration"（`--features standalone,client --lib core::dns::engine::native_apply::tests::`）、
+  lifecycle 套件与 App `cargo test` 委托本 PR 的 GitHub-hosted `windows-2025` CI，结果以 PR 页为准。
+  Support 页改动本机 biome/eslint 单文件检查通过。未做实机验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：用户可见影响仍需 Issue #467 的实机 4 步清单。VPN 配置文件自带的 NRPT
+  （不在两个注册表库里）只能由系统解析这条腿间接发现，且只覆盖探测名；针对具体公司域名的规则由
+  规则读取覆盖。`enum_subkeys` 仍只枚举前 64 个子键（#300 另改）。冲突只在 Support 页显示，
+  仪表盘无提示；检测间隔 30 s。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3

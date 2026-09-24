@@ -249,10 +249,14 @@ pub fn kill_switch_unhealthy_for_monitor(
 ///
 /// `TONO_DNS_UNVERIFIED`: DNS was applied but the read-back could not confirm every adapter.
 /// `TONO_DNS_RESTORE_DEGRADED`: a restore was accepted on registry evidence alone.
+/// `TONO_DNS_POLICY_CONFLICT`: the adapters are protected, but the resolver policy Windows applies
+/// (NRPT, or a cache-bypassing system lookup) disagrees. A reconnect rewrites only Tono's own rule
+/// and cannot change another owner's policy, so this is surfaced, not torn down for.
 ///
 /// Treating these as unhealthy is not a cosmetic mistake: two consecutive samples invalidate
 /// Connected, and a machine that can never verify would then reconnect forever.
-const DNS_WARNING_MARKERS: [&str; 2] = ["TONO_DNS_UNVERIFIED", "TONO_DNS_RESTORE_DEGRADED"];
+const DNS_WARNING_MARKERS: [&str; 3] =
+    ["TONO_DNS_UNVERIFIED", "TONO_DNS_RESTORE_DEGRADED", "TONO_DNS_POLICY_CONFLICT"];
 
 /// Whether a `last_error` string reports an actual failure rather than an unproven-but-applied
 /// state. Substring, not prefix: the Service nests these markers inside its own context.

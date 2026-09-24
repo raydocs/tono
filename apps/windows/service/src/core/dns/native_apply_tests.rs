@@ -551,3 +551,40 @@ async fn mixed_protected_dns_cannot_prove_corrupt_snapshot_recovery() -> Result<
     assert_eq!(tokio::fs::read(&retained[0]).await?, corrupt);
     Ok(())
 }
+
+#[tokio::test]
+#[serial_test::serial]
+async fn effective_resolver_policy_drift_cannot_read_as_healthy() -> Result<()> {
+    use super::super::test_io::{self, Fixture};
+    use crate::core::dns as facade;
+    let a = effective(&entry(1), [9, 9, 9, 9], true);
+    let _fixture = Fixture::new(vec![a])?;
+    let connected = facade::enable().await?;
+    assert!(connected.enabled && connected.last_error.is_none());
+    // After Connect, a policy-store catch-all to a resolver outside the tunnel takes effect and the
+    // cache-bypassing system lookup fails, while every adapter still reads 198.18.0.2.
+    test_io::with(|io| {
+        io.effective_nrpt = Ok(vec![facade::EffectiveNrptRule {
+            namespaces: vec![".".to_owned()],
+            generic_dns_servers: vec!["10.20.30.40".to_owned()],
+            tono_owned: false,
+        }]);
+        io.system_lookup = Err("DnsQuery_W returned 1460".to_owned());
+    })
+    .unwrap();
+    facade::refresh_resolver_policy_observation().await;
+    let (status, _) = facade::observe_status_unlocked().await?;
+    assert!(status.enabled, "the adapter registry still reads protected");
+    assert!(
+        status
+            .last_error
+            .as_deref()
+            .is_some_and(|error| error.contains(facade::DNS_RESOLVER_POLICY_CONFLICT_PREFIX)),
+        "effective resolver policy drift must be reported, not a clean healthy status: {status:?}"
+    );
+    assert!(
+        facade::PROTECTION_WANTED.load(std::sync::atomic::Ordering::Acquire),
+        "reporting the conflict must not release protection"
+    );
+    Ok(())
+}

@@ -1345,6 +1345,110 @@ pub(crate) const DNS_RESTORE_DEGRADED_PREFIX: &str = "TONO_DNS_RESTORE_DEGRADED"
 /// explanation the user gets when the connect subsequently fails in the fake-ip probe.
 pub(crate) const DNS_PROTECTION_UNVERIFIED_PREFIX: &str = "TONO_DNS_UNVERIFIED";
 
+/// Stable marker for "protected DNS is applied, but the resolver policy Windows actually applies
+/// disagrees with it" (X2-2): another NRPT rule sends names to a non-Tono resolver, Tono's
+/// catch-all is not the rule in force, or a cache-bypassing system lookup did not come back from
+/// Tono DNS. Adapter registry health cannot see any of these, so the status stops reading clean.
+/// It is deliberately not repair work for the watchdog: `enable` rewrites only Tono's own rule and
+/// cannot change group policy or a VPN profile, so re-running it would only spin.
+pub(crate) const DNS_RESOLVER_POLICY_CONFLICT_PREFIX: &str = "TONO_DNS_POLICY_CONFLICT";
+
+/// One NRPT rule from the store the DNS Client applies (X2-2).
+#[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct EffectiveNrptRule {
+    /// `Name` namespaces; `"."` is the catch-all.
+    pub(crate) namespaces: Vec<String>,
+    /// `GenericDNSServers` of a rule whose options select them; empty otherwise.
+    pub(crate) generic_dns_servers: Vec<String>,
+    /// Tono's own catch-all key in the local store.
+    pub(crate) tono_owned: bool,
+}
+
+/// The name of the cache-bypassing system lookup: the same name the App's connect-time fake-ip
+/// proof uses, so a healthy answer is a Tono fake-ip.
+#[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
+const RESOLVER_POLICY_PROBE_HOST: &str = "www.google.com";
+/// How often the watchdog re-reads the effective policy and repeats the system lookup.
+const RESOLVER_POLICY_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+/// The last policy verdict, written by [`refresh_resolver_policy_observation`] and folded into
+/// every status observation while protection is wanted.
+static RESOLVER_POLICY_CONFLICT: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
+
+/// Pure X2-2 verdict over the effective NRPT and one cache-bypassing system lookup.
+#[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
+fn resolver_policy_conflict(
+    rules: std::result::Result<&[EffectiveNrptRule], &str>,
+    system_lookup: std::result::Result<&[std::net::Ipv4Addr], &str>,
+) -> Option<String> {
+    let mut reasons = Vec::new();
+    match rules {
+        Err(error) => reasons.push(format!("the effective NRPT could not be read ({error})")),
+        Ok(rules) => {
+            let catch_all_in_force = rules.iter().any(|rule| {
+                rule.tono_owned
+                    && rule.namespaces.iter().any(|name| name == ".")
+                    && !rule.generic_dns_servers.is_empty()
+                    && rule.generic_dns_servers.iter().all(|server| server == PROTECTED_DNS_V4)
+            });
+            if !catch_all_in_force {
+                reasons.push("Tono's NRPT catch-all is not the rule in force".to_owned());
+            }
+            let foreign = rules
+                .iter()
+                .filter(|rule| {
+                    !rule.tono_owned
+                        && rule.generic_dns_servers.iter().any(|server| server != PROTECTED_DNS_V4)
+                })
+                .count();
+            if foreign > 0 {
+                reasons.push(format!(
+                    "{foreign} other NRPT rule(s) send matching names to a non-Tono resolver"
+                ));
+            }
+        }
+    }
+    match system_lookup {
+        Err(error) => reasons.push(format!("a cache-bypassing system lookup failed ({error})")),
+        Ok(addresses) if !addresses.iter().any(|address| address.octets()[..2] == [198, 18]) => {
+            reasons.push("a cache-bypassing system lookup was not answered by Tono DNS".to_owned());
+        }
+        Ok(_) => {}
+    }
+    (!reasons.is_empty())
+        .then(|| format!("{DNS_RESOLVER_POLICY_CONFLICT_PREFIX}: {}", reasons.join("; ")))
+}
+
+/// Re-read the effective resolver policy and repeat one cache-bypassing system lookup. Runs
+/// outside `DNS_OPERATION`: a lookup that policy sends to a resolver WFP drops waits out the DNS
+/// Client's own timeout, and no restore or repair may queue behind it.
+async fn refresh_resolver_policy_observation() {
+    let verdict = if PROTECTION_WANTED.load(Ordering::Acquire) {
+        observe_resolver_policy().await
+    } else {
+        None
+    };
+    *RESOLVER_POLICY_CONFLICT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = verdict;
+}
+
+async fn observe_resolver_policy() -> Option<String> {
+    #[cfg(all(windows, not(feature = "test")))]
+    {
+        let rules = engine::effective_nrpt_rules().await;
+        let lookup = engine::system_lookup_a(RESOLVER_POLICY_PROBE_HOST).await;
+        return resolver_policy_conflict(
+            rules.as_deref().map_err(String::as_str),
+            lookup.as_deref().map_err(String::as_str),
+        );
+    }
+    #[cfg(not(all(windows, not(feature = "test"))))]
+    {
+        None
+    }
+}
+
 /// Budget for one *reading* DNS engine call (registry sweep + `GetAdaptersAddresses`). A
 /// healthy enumeration is milliseconds; 25 s is the same clock `WFP_CALL_TIMEOUT` uses, so the
 /// two modules give up on a wedged kernel/service at the same point, and it leaves the
@@ -2660,8 +2764,17 @@ pub fn spawn_status_watchdog() {
         // When the next repair may run. Backoff is expressed as a deadline rather than a sleep
         // so that no delay is ever awaited while holding `DNS_OPERATION`.
         let mut next_attempt = std::time::Instant::now();
+        let mut last_policy_check: Option<std::time::Instant> = None;
         loop {
             tokio::time::sleep(DNS_WATCHDOG_INTERVAL).await;
+            // X2-2: before taking the operation lock, never under it.
+            if !PROTECTION_WANTED.load(Ordering::Acquire) {
+                last_policy_check = None;
+                refresh_resolver_policy_observation().await;
+            } else if last_policy_check.is_none_or(|at| at.elapsed() >= RESOLVER_POLICY_CHECK_INTERVAL) {
+                last_policy_check = Some(std::time::Instant::now());
+                refresh_resolver_policy_observation().await;
+            }
             // One acquisition covers the observation *and* the repair. Reading the state, then
             // dropping the lock, then acting on what was read is how a concurrent release used
             // to turn a repair into an initial enable: the snapshot could be deleted in between,
@@ -2808,6 +2921,14 @@ async fn observe_status_unlocked() -> Result<(DnsProtectionStatus, bool)> {
         // Absence does not erase pending bits, but a note about inactive adapters must not
         // keep a healthy active set in a perpetual repair loop.
         last_error = None;
+    }
+    // X2-2: adapter registry health is not the resolver policy Windows applies. Report the
+    // watchdog's last policy verdict instead of a clean healthy status; never mask another error.
+    if enabled && snapshot.is_some() && last_error.is_none() && PROTECTION_WANTED.load(Ordering::Acquire) {
+        last_error = RESOLVER_POLICY_CONFLICT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
     }
     let status = DnsProtectionStatus {
         enabled,
