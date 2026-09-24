@@ -32,6 +32,40 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 首次 arm 结果未知时保持 fail-closed 意图
+
+- **归属/来源**：G1 保护恢复；macOS `KillSwitchService.arm`。内部审查 X1-7（降级：需三个条件
+  同时发生），Issue #432。基线 main bb2ed4e4 → 分支 `fix/arm-unknown-outcome-20260923`；
+  提交时未合 main。
+- **缺陷修复**：helper 先持久化 armed 状态并加载 PF，再回复成功。回复丢失（helper 崩溃、
+  重启或接收超时）且紧接的 status 补查也拿不到回答时，App 本地 `isArmed` 仍为 false，
+  连接失败清理据此走释放拆除，helper 恢复后自动解除已经提交的 PF。现在只要请求可能已送达
+  （除套接字连接被拒以外的 IPC 失败）且 status 无回答，就按"可能已 arm"处理，把 `isArmed`
+  置 true：连接失败走保留拆除，其中 `restrictToBootstrap` 把 PF 装成 bootstrap 模式（真实
+  fail-closed），随后进入受保护重连循环。连接被拒（helper 从未收到请求）保持原行为。
+- **缺陷修复（审查 R4）**：helper 回复了成功、但回执不满足 `armed && wanted && live`（例如
+  wanted=true、live=false）时，原先直接抛错，本地 `isArmed` 仍为 false，失败清理会走释放。
+  现在抛错前按回执同步：`wanted || armed` 时置 `isArmed = true`。同时修正 `arm` 中"由重连
+  循环释放"的误导性注释，改为实际路径（保留拆除 + `restrictToBootstrap` + 重连）。
+  至此 Issue #480 点名的两种来源（回执丢失且补查失败、helper 持久化后崩溃未回复）以及
+  guard 失败变体都在 arm 处把 `isArmed` 置 true，保留拆除不会在 helper 持 PF 时发布开放；
+  #480 的兜底 PR #482 因在"首次连接睡眠且 helper 安装提示打开"时回归 #310 修过的误报
+  Protected Offline 而关闭，不再合入。
+- **新增/优化**：无。
+- **工程与测试**：`KillSwitchService` 新增窄 IPC seam `armIPC`（`deliver` 包住真实
+  `/killswitch/arm` 请求，`status` 读 `/killswitch/status`），生产行为不变。新增
+  `KillSwitchArmOutcomeTests.testLostArmReplyWithUnavailableStatusKeepsFailClosedIntent`
+  （一个 XCTest）：arm 抛 `emptyResponse`，status 抛 `connectFailed`，断言 `isArmed == true`。
+  旧逻辑下为 false，断言失败。"成功回执但 wanted 无 live"的同步没有新增测试，结论来自源码推理。
+- **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests），结果以 PR 页为准。回执丢失场景未做实机复现。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：请求实际没被 helper 处理（例如 helper 读到半截请求就退出）时，保留拆除的
+  `restrictToBootstrap` 仍会把 PF 装成 bootstrap，主机进入 Protected Offline 并重连，直到用户
+  Restore internet 或连接成功。窄窗口（审查 R4 S5）：保留拆除时 helper 不可达、之后可达并确认
+  未 arm，重连循环会走"外部释放已确认"，静默丢掉连接意图并清掉错误；未在本 PR 修。
+  helper 协议未改，CONTRACT.sha256 与协议版本不变。
+
 ## 2026-09-23 · macOS helper 拒绝本 App（403）时，"修复并重连"能走到 helper 重装
 
 - **归属/来源**：G1 保护恢复；macOS `AppState+Connect` 受保护重连循环。内部审查 X1-3，
