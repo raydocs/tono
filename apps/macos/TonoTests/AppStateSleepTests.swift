@@ -48,6 +48,32 @@ final class AppStateSleepTests: XCTestCase {
         }
     }
 
+    /// H18-G-F1: the same failure three times paused automatic retries, and
+    /// the lid closed on Protected Offline. The strike count survived the
+    /// sleep, so the first identical failure after wake paused again with
+    /// nothing scheduled. Sleep ends the network those strikes were earned
+    /// on, so wake's connect gets a fresh budget, as a network change would.
+    func testSleepGivesWakeAFreshRepeatedFailureBudget() async {
+        let app = AppState()
+        app.isProtectionBlocked = true
+        app.lastProtectedFailureSignature = "handshake|The exit did not answer."
+        app.consecutiveProtectedFailureCount = 3
+        app.protectedReconnectPausedForUserAction = true
+        app.protectedReconnectPauseLiftsOnNetworkChange = true
+        // Unarmed, so the bootstrap restriction that sleep schedules for a
+        // blocked host returns before it reaches the privileged helper.
+        KillSwitchService.isArmed = false
+
+        app.prepareForSystemSleep()
+        _ = await app.connectionCoordinator.sleepRestrictTask?.value
+
+        XCTAssertTrue(app.resumeProtectionAfterWake)
+        XCTAssertEqual(app.consecutiveProtectedFailureCount, 0)
+        XCTAssertNil(app.lastProtectedFailureSignature)
+        XCTAssertFalse(app.protectedReconnectPausedForUserAction)
+        XCTAssertFalse(app.protectedReconnectPauseLiftsOnNetworkChange)
+    }
+
     func testSleepDuringExplicitReleaseDoesNotConvertItIntoWakeReconnect() async {
         let app = AppState()
         // Connected through an armed session, so Restore internet has real
