@@ -447,6 +447,94 @@ mod rejected_session_tests {
     }
 }
 
+#[cfg(test)]
+mod offline_admission_tests {
+    use super::*;
+    use crate::tono::offline_grant::{
+        GRANT_FILE_NAME,
+        test_support::{ACCOUNT_A_UUID, ACCOUNT_B_UUID, account_catalog, data_dir, leave_verified_session, store_catalog},
+    };
+
+    /// One launch over `dir` with the control plane unreachable: hydrate `refresh_token`, seed the
+    /// catalog from disk, optionally rewrite the disk after seeding, then restore while `me()`
+    /// fails in transport.
+    async fn restore_unreachable(
+        dir: &std::path::Path, refresh_token: &str, protection: StoredProtection,
+        disk_after_seed: Option<&tono_core::ExitCatalogResponse>,
+    ) -> (AccountState, Option<i64>) {
+        let state = Arc::new(TonoState::for_test_in(dir.to_path_buf()));
+        let generation = {
+            let mut inner = state.lock().await;
+            inner.credentials.set_local(CredentialKey::RefreshToken, refresh_token).unwrap();
+            catalog_sync::seed_from_cache(&mut inner);
+            inner.sign_in_generation
+        };
+        if let Some(catalog) = disk_after_seed {
+            store_catalog(dir, catalog).await;
+        }
+        let restored = restore_account_with(
+            &state, generation, &protection, tokio::time::Instant::now() + Duration::from_secs(10),
+            |_| async {
+                Err(ApiError::Transport {
+                    kind: tono_core::auth::TransportKind::Connect,
+                    message: "control plane blackholed".to_string(),
+                })
+            },
+            |_| async { Ok(()) },
+            |_| async { Ok(()) },
+            |_| {},
+        ).await;
+        let inner = state.lock().await;
+        assert_eq!(restored.is_some(), inner.account_state == AccountState::Ready,
+            "only an admitted launch goes on to sync");
+        (inner.account_state.clone(), status_of(&inner).offline_verified_at_ms)
+    }
+
+    /// #582 T3: with the control plane unreachable, restore is Ready (offline) only on a positive
+    /// grant bound to the session token in memory and to the catalog seeded into memory.
+    #[tokio::test]
+    async fn unreachable_restore_is_ready_offline_only_on_a_grant_matching_memory() {
+        let dir = data_dir("t3");
+        let (catalog_a, catalog_b) = (account_catalog(ACCOUNT_A_UUID), account_catalog(ACCOUNT_B_UUID));
+        leave_verified_session(&dir, &catalog_a, "session-a").await;
+        let grant_path = dir.join(GRANT_FILE_NAME);
+        let saved_grant = std::fs::read(&grant_path).unwrap();
+        let known = || StoredProtection::ProvenAbsent;
+
+        assert_eq!(restore_unreachable(&dir, "session-a", known(), None).await, (AccountState::Ready, Some(1_000)),
+            "a matching grant admits offline, verified when the online session confirmed the catalog");
+
+        std::fs::remove_file(&grant_path).unwrap();
+        let (account, offline) = restore_unreachable(&dir, "session-a", known(), None).await;
+        assert!(account != AccountState::Ready && offline.is_none(), "no grant: {account:?}");
+        crate::tono::state::write_private_file(&grant_path, &saved_grant).unwrap();
+
+        let (account, offline) = restore_unreachable(&dir, "session-b", known(), None).await;
+        assert!(account != AccountState::Ready && offline.is_none(), "another session's token: {account:?}");
+
+        // The disk catalog was replaced by account B's before this launch seeded it.
+        store_catalog(&dir, &catalog_b).await;
+        let (account, offline) = restore_unreachable(&dir, "session-a", known(), None).await;
+        assert!(account != AccountState::Ready && offline.is_none(), "B's catalog under A's grant: {account:?}");
+
+        // B's catalog was seeded, then the disk went back to A's: memory is what Connect dials.
+        let (account, offline) = restore_unreachable(&dir, "session-a", known(), Some(&catalog_a)).await;
+        assert!(account != AccountState::Ready && offline.is_none(), "disk re-read after seeding: {account:?}");
+
+        crate::tono::state::write_private_file(&grant_path, br#"{"verdict":"revoked","reason":"refused","at":2000}"#)
+            .unwrap();
+        assert_eq!(restore_unreachable(&dir, "session-a", known(), None).await.0, AccountState::Suspended,
+            "a revoked grant suspends");
+        crate::tono::state::write_private_file(&grant_path, &saved_grant).unwrap();
+
+        let (account, offline) =
+            restore_unreachable(&dir, "session-a", StoredProtection::Unknown("pipe not found".to_string()), None).await;
+        assert!(matches!(&account, AccountState::Error(message) if message.contains("emergency-disarm")) && offline.is_none(),
+            "an unknown barrier keeps its way-out error: {account:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
 /// L2: retry entry for the `error` account state — re-runs the startup
 /// restore flow (token probe → `me()` → catalog sync).
 #[tauri::command]

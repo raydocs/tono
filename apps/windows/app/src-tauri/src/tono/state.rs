@@ -368,6 +368,9 @@ pub struct TonoInner {
     pub last_tcp_delay_at_ms: Option<i64>,
     pub last_tcp_delay_node: Option<String>,
     pub tasks: TaskRegistry,
+    /// Offline admission and the server's verdicts on this session (#582). Shared with the
+    /// tono-core verdict sink, which cannot take this mutex.
+    pub offline: Arc<crate::tono::offline_grant::OfflineGate>,
 }
 
 fn now_ms() -> i64 {
@@ -553,7 +556,13 @@ impl TonoState {
     /// Diskless lifecycle fixture: no Tauri handle, credential vault, Service, or audit writer.
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
-        let catalog_dir = std::env::temp_dir().join(format!("tono-state-{}", new_installation_id()));
+        Self::for_test_in(std::env::temp_dir().join(format!("tono-state-{}", new_installation_id())))
+    }
+
+    /// The same fixture over a caller-owned directory: a second instance is a relaunch that reads
+    /// what the first one left on disk.
+    #[cfg(test)]
+    pub(crate) fn for_test_in(catalog_dir: PathBuf) -> Self {
         let (sender, _receiver) = tokio::sync::mpsc::channel(1);
         let audit = crate::tono::audit::Audit::for_test(sender, &catalog_dir, false);
         Self::with_catalog_dir(catalog_dir, audit, Arc::new(SessionCredentialStore::for_test())).unwrap()
@@ -574,6 +583,7 @@ impl TonoState {
         // forever). The startup load task hydrates the persisted id (or
         // persists this one) off-thread with a timeout.
         let installation_id = new_installation_id();
+        let offline = Arc::new(crate::tono::offline_grant::OfflineGate::new(catalog_dir.clone()));
 
         Ok(Self {
             inner: tokio::sync::Mutex::new(TonoInner {
@@ -640,6 +650,7 @@ impl TonoState {
                 last_tcp_delay_at_ms: None,
                 last_tcp_delay_node: None,
                 tasks: TaskRegistry::default(),
+                offline,
             }),
             audit,
             support_reports: parking_lot::Mutex::new(Default::default()),
