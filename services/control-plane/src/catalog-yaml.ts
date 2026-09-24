@@ -227,8 +227,9 @@ export function catalogProxyUsesManagedIdentity(block: string): boolean {
 }
 
 /**
- * Shared proxies stay for every authenticated user. Active home-exit proxy names
- * are withheld unless the user is bound to that exact home exit.
+ * Shared proxies stay for every authenticated user. Every name that has ever
+ * belonged to a catalog home exit, and its ` · hy2` twin, is withheld unless the
+ * user is bound to that exact (active) home exit.
  */
 export function filterCatalogYamlForUser(
   yaml: string,
@@ -238,9 +239,13 @@ export function filterCatalogYamlForUser(
   if (restrictedHomeNames.size === 0) return yaml;
   const { prefix, items, suffix } = splitManagedCatalogProxies(yaml);
   if (items.length === 0) return yaml;
-  const kept = items.filter(
-    (item) => !restrictedHomeNames.has(item.name) || allowedHomeNames.has(item.name),
-  );
+  const kept = items.filter((item) => {
+    // A home exit whose own name ends in ` · hy2` matches as is; the suffix
+    // is stripped only to find the twin of a restricted base name.
+    if (restrictedHomeNames.has(item.name)) return allowedHomeNames.has(item.name);
+    const homeName = catalogBaseName(item.name);
+    return !restrictedHomeNames.has(homeName) || allowedHomeNames.has(homeName);
+  });
   if (kept.length === items.length) return yaml;
   if (kept.length === 0) {
     const empty = 'proxies: []\n';

@@ -54,6 +54,10 @@ Ops tables after the sequence was unique. Applied in numeric order:
 - `0075_ops_node_capacity_users.sql` — `ops_node_profiles.capacity_users` for capacity-based node acceptance
 - `0076_ops_node_identity.sql` — immutable `ops_node_identity`; display name, failure domain, and which node it replaces
 
+## 0078
+
+- `0078_home_exit_name_history.sql` — every name ever used by a catalog home exit stays in the per-user catalog restriction set, whatever its status
+
 ## 0080
 
 - `0080_home_socks5_rotation_required.sql` — `home_exits.socks5_rotation_required_at`, set by triggers when a socks5 credential leaves a binding or its user is disabled; a flagged credential cannot be bound to another user until replaced
