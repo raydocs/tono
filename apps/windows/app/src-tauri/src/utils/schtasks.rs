@@ -450,50 +450,70 @@ fn xml_principal_is(xml: &str, sid: &str) -> bool {
     principals[value_start..value_end].trim().eq_ignore_ascii_case(sid)
 }
 
-/// Whether the machine-wide task an earlier build registered for `mode` belongs to `sid`.
-fn legacy_task_owned(mode: TaskMode, sid: &str) -> Result<bool> {
+/// What this user can learn about the task an earlier build registered under a machine-wide name.
+enum LegacyTask {
+    Absent,
+    /// Listed, but its definition could not be read: it may be this user's.
+    Unreadable,
+    Definition(String),
+}
+
+fn legacy_task(mode: TaskMode) -> Result<LegacyTask> {
     if !task_named_exists(mode.legacy_name())? {
-        return Ok(false);
+        return Ok(LegacyTask::Absent);
     }
     let output = schtasks_output({
         let mut cmd = schtasks_command();
         cmd.args(["/Query", "/TN", mode.legacy_name(), "/XML"]);
         cmd
     })?;
-    // An unreadable definition proves nothing about its owner, so it is not ours.
-    Ok(output.status.success() && xml_principal_is(&decode_task_xml(&output.stdout), sid))
+    if !output.status.success() {
+        return Ok(LegacyTask::Unreadable);
+    }
+    Ok(LegacyTask::Definition(decode_task_xml(&output.stdout)))
+}
+
+/// Whether the machine-wide task an earlier build registered for `mode` belongs to `sid`.
+fn legacy_task_owned(mode: TaskMode, sid: &str) -> Result<bool> {
+    // An unreadable definition proves nothing about its owner, so it is not reported as ours.
+    Ok(matches!(legacy_task(mode)?, LegacyTask::Definition(xml) if xml_principal_is(&xml, sid)))
 }
 
 /// Remove this user's own tasks under the earlier machine-wide names; another user's stay.
-fn retire_owned_legacy_tasks(sid: &str) {
+///
+/// A task that is (or may be) this user's and is still there after this is an error, not a log
+/// line: it keeps launching the app at logon whatever the setting says, so the caller must not
+/// report the change as done. Both names are always attempted; the first failure is returned.
+fn retire_owned_legacy_tasks(
+    sid: &str,
+    inspect: impl Fn(TaskMode) -> Result<LegacyTask>,
+    remove: impl Fn(TaskMode) -> Result<()>,
+) -> Result<()> {
+    let mut errors = Vec::new();
     for mode in [TaskMode::User, TaskMode::Admin] {
-        let owned = match legacy_task_owned(mode, sid) {
-            Ok(owned) => owned,
-            Err(err) => {
-                logging!(
-                    warn,
-                    Type::Setup,
-                    "Could not check the earlier {} task: {}",
-                    mode.label(),
-                    err
-                );
-                continue;
-            }
-        };
-        if !owned {
-            continue;
-        }
-        match remove_task_named(mode.legacy_name(), mode) {
-            Ok(()) => {}
-            Err(err) => logging!(
-                warn,
-                Type::Setup,
-                "Could not retire the earlier {} task: {}",
+        let retired = match inspect(mode) {
+            Ok(LegacyTask::Absent) => Ok(()),
+            Ok(LegacyTask::Definition(xml)) if !xml_principal_is(&xml, sid) => Ok(()),
+            Ok(LegacyTask::Definition(_)) => remove(mode)
+                .map_err(|err| anyhow!("could not retire the earlier {} auto-launch task: {err}", mode.label())),
+            Ok(LegacyTask::Unreadable) => Err(anyhow!(
+                "the earlier {} auto-launch task \"{}\" could not be read, so it may still launch the app at logon",
                 mode.label(),
-                err
-            ),
+                mode.legacy_name()
+            )),
+            Err(err) => Err(anyhow!(
+                "could not check the earlier {} auto-launch task: {err}",
+                mode.label()
+            )),
+        };
+        if let Err(err) = retired {
+            errors.push(err);
         }
     }
+    if let Some(err) = errors.into_iter().next() {
+        return Err(err);
+    }
+    Ok(())
 }
 
 /// Read the task-level `<Enabled>` flag out of a task definition.
@@ -625,10 +645,15 @@ pub async fn set_auto_launch(is_enable: bool, is_admin: bool) -> Result<()> {
         logging!(warn, Type::Setup, "Failed to cleanup legacy startup shortcuts: {}", err);
     }
     // Whatever this call decides, this user's own task under the earlier machine-wide names
-    // must not keep launching the app beside (or instead of) the per-user one.
-    retire_owned_legacy_tasks(&task_owner_sid()?);
+    // must not keep launching the app beside (or instead of) the per-user one. If one stays, the
+    // call fails: enabling stops before a second task would double-launch, and disabling still
+    // removes the per-user tasks before reporting it.
+    let legacy = retire_owned_legacy_tasks(&task_owner_sid()?, legacy_task, |mode| {
+        remove_task_named(mode.legacy_name(), mode)
+    });
 
     if is_enable {
+        legacy?;
         if is_admin {
             create_task(target)?;
             if let Err(err) = remove_task(other) {
@@ -659,7 +684,7 @@ pub async fn set_auto_launch(is_enable: bool, is_admin: bool) -> Result<()> {
             return Err(err);
         }
 
-        return Ok(());
+        return legacy;
     }
 
     remove_task(TaskMode::User)?;
@@ -669,7 +694,7 @@ pub async fn set_auto_launch(is_enable: bool, is_admin: bool) -> Result<()> {
         ));
     }
 
-    Ok(())
+    legacy
 }
 
 pub fn is_auto_launch_enabled() -> Result<bool> {
@@ -691,7 +716,9 @@ pub fn is_auto_launch_enabled() -> Result<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::{TaskMode, csv_line_names_task, xml_principal_is, xml_task_enabled};
+    use super::{
+        LegacyTask, TaskMode, csv_line_names_task, retire_owned_legacy_tasks, xml_principal_is, xml_task_enabled,
+    };
 
     #[test]
     fn autostart_tasks_of_two_windows_users_never_share_a_name() {
@@ -712,6 +739,36 @@ mod tests {
         );
         assert!(xml_principal_is(&legacy, first));
         assert!(!xml_principal_is(&legacy, second));
+    }
+
+    #[test]
+    fn a_legacy_task_this_user_may_own_that_stays_fails_the_autostart_change() {
+        let sid = "S-1-5-21-1111111111-2222222222-3333333333-1001";
+        let definition = |user: &str| {
+            format!("<Task><Principals><Principal><UserId>{user}</UserId></Principal></Principals></Task>")
+        };
+        // This user's task that could not be deleted keeps launching the app at logon.
+        assert!(
+            retire_owned_legacy_tasks(
+                sid,
+                |_| Ok(LegacyTask::Definition(definition(sid))),
+                |_| Err(anyhow::anyhow!("access denied")),
+            )
+            .is_err()
+        );
+        // A listed task whose definition cannot be read may be this user's.
+        assert!(retire_owned_legacy_tasks(sid, |_| Ok(LegacyTask::Unreadable), |_| Ok(())).is_err());
+        // Another user's task is not this user's to remove and does not fail the change.
+        assert!(
+            retire_owned_legacy_tasks(
+                sid,
+                |_| Ok(LegacyTask::Definition(definition(
+                    "S-1-5-21-1111111111-2222222222-3333333333-1002"
+                ))),
+                |_| unreachable!("another user's task was removed"),
+            )
+            .is_ok()
+        );
     }
 
     #[test]
