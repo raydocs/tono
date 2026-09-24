@@ -66,7 +66,7 @@ async function accessAssertion(accessEmail: string) {
   return `${header}.${payload}.${base64URL(new Uint8Array(signature))}`;
 }
 
-async function ops(path: string, init: RequestInit = {}) {
+async function ops(path: string, init: RequestInit = {}, testEnv: unknown = env) {
   const context = createExecutionContext();
   const headers = new Headers(init.headers);
   if (!headers.has('cf-access-jwt-assertion')) {
@@ -75,7 +75,7 @@ async function ops(path: string, init: RequestInit = {}) {
   if (init.body && !headers.has('content-type')) headers.set('content-type', 'application/json');
   const response = await worker.fetch(
     new Request(`https://test/api/v1/ops/${path}`, { ...init, headers }),
-    env as unknown as Env,
+    testEnv as Env,
     context,
   );
   await waitOnExecutionContext(context);
@@ -438,6 +438,55 @@ describe('ops v1 api', () => {
       expect(refused.status).toBe(409);
       expect(((await refused.json()) as { error: { code: string } }).error.code).toBe('SOCKS5_ROTATION_REQUIRED');
     }
+    expect((await db().prepare("SELECT notes FROM users WHERE id = 'u-1'").first<{ notes: string }>())!.notes)
+      .toBe('before');
+    expect(await db().prepare("SELECT email FROM signup_allowlist WHERE email = 'a@example.com'").first()).toBeNull();
+  });
+
+  it('POST users/onboard writes nothing when an unbind lands after its rotation pre-check', async () => {
+    await seedUser('u-1', 'a@example.com');
+    await db().prepare("UPDATE users SET notes = 'before' WHERE id = 'u-1'").run();
+    await db().prepare(
+      `INSERT INTO home_exits(
+         id, proxy_name, display_name, kind, socks5_host, socks5_port, socks5_username, socks5_password,
+         status, created_at, updated_at
+       ) VALUES('h-race', 'h-race', '家宽 Race', 'socks5', '203.0.113.62', 11092, 'resi-race', 'secret', 'active', ?, ?)`,
+    ).bind(NOW, NOW).run();
+    await db().prepare(
+      "INSERT INTO user_home_bindings(user_id, home_exit_id, created_at, updated_at) VALUES('u-1', 'h-race', ?, ?)",
+    ).bind(NOW, NOW).run();
+    // A concurrent unbind of u-1 runs right after the first bindability check
+    // returns; the unbind trigger marks h-race as awaiting rotation.
+    const real = db();
+    let unbound = false;
+    const racingDb = new Proxy(real, {
+      get(target, key) {
+        const value = Reflect.get(target, key, target);
+        if (key !== 'prepare') return typeof value === 'function' ? value.bind(target) : value;
+        return (sql: string) => {
+          const statement = target.prepare(sql);
+          if (unbound || !sql.includes('current_home_exit_id')) return statement;
+          return {
+            bind: (...values: unknown[]) => ({
+              first: async () => {
+                const row = await statement.bind(...values).first();
+                unbound = true;
+                await target.prepare("DELETE FROM user_home_bindings WHERE user_id = 'u-1'").run();
+                return row;
+              },
+            }),
+          };
+        };
+      },
+    });
+    const refused = await ops(
+      'users/onboard',
+      json({ email: 'a@example.com', notes: 'after', homeExitId: 'h-race' }),
+      { ...env, DB: racingDb },
+    );
+    expect(unbound).toBe(true);
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { error: { code: string } }).error.code).toBe('SOCKS5_ROTATION_REQUIRED');
     expect((await db().prepare("SELECT notes FROM users WHERE id = 'u-1'").first<{ notes: string }>())!.notes)
       .toBe('before');
     expect(await db().prepare("SELECT email FROM signup_allowlist WHERE email = 'a@example.com'").first()).toBeNull();

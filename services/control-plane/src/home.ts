@@ -339,10 +339,12 @@ export async function insertSocks5HomeExit(
 // same user's current binding exposes nothing new.
 export async function assertHomeExitBindable(e: Env, userId: string, homeExitId: string) {
   const row = await e.DB.prepare(
-    `SELECT home_exits.kind, home_exits.socks5_rotation_required_at,
+    `SELECT home_exits.kind, home_exits.proxy_name, home_exits.socks5_rotation_required_at,
             (SELECT home_exit_id FROM user_home_bindings WHERE user_id = ?) AS current_home_exit_id
      FROM home_exits WHERE home_exits.id = ?`,
   ).bind(userId, homeExitId).first<Row>();
+  // A row stored before create and PATCH refused the hy2 suffix.
+  if (row) assertCatalogHomeProxyName(String(row.kind ?? 'catalog'), String(row.proxy_name));
   if (
     row
     && String(row.kind ?? 'catalog') === 'socks5'
