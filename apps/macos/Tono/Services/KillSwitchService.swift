@@ -114,6 +114,12 @@ nonisolated enum KillSwitchService {
                 reviewedBundleDirect: reviewedBundleDirect
             )
             guard status.armed, status.wanted, status.live else {
+                // The helper answered, so the outcome is known: a reply that
+                // still reports armed intent (wanted without live PF) is a
+                // host the helper's status heal and monitor keep fail-closed.
+                // Mirror that intent so connect failure cleanup preserves
+                // protection instead of releasing it.
+                if status.wanted || status.armed { isArmed = true }
                 throw Error.commandFailed("The PF rules did not become active.")
             }
             if status.flushedStates {
@@ -162,8 +168,9 @@ nonisolated enum KillSwitchService {
                 // Neither the reply nor a status answer arrived, so PF may be
                 // live. Local false here let connect failure cleanup release
                 // committed protection automatically. Keep the fail-closed
-                // intent; the protected reconnect loop releases it once an
-                // authenticated status confirms nothing is armed.
+                // intent: connect failure cleanup then takes the preserve
+                // teardown, whose `restrictToBootstrap` holds PF in bootstrap
+                // mode, and the protected reconnect loop retries from there.
                 isArmed = true
             }
             throw Error.commandFailed(error.localizedDescription)
