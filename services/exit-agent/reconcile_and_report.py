@@ -385,6 +385,27 @@ def remove_inbound_user(
     return run_xray(binary, ["api", command, f"--server={address}", f"-tag={tag}", email])
 
 
+def removal_succeeded(result: subprocess.CompletedProcess[str], email: str) -> bool:
+    """Whether `rmu` removed `email` or it was already absent.
+
+    Xray 26 `rmu` exits 0 even when a removal fails, so the exit code alone
+    proves nothing. A wrong inbound tag prints "handler not found" and
+    "Removed 0 user(s)"; only the per-user "User <email> not found" line means
+    the identity is really gone.
+    """
+    output = f"{result.stdout or ''}\n{result.stderr or ''}"
+    if re.search(rf"\bUser {re.escape(email)} not found\b", output):
+        return True
+    if result.returncode != 0:
+        return False
+    count = re.search(r"Removed (\d+) user\(s\)", output)
+    return count is not None and int(count.group(1)) >= 1
+
+
+def removal_error(result: subprocess.CompletedProcess[str]) -> str:
+    return (result.stderr or "").strip() or (result.stdout or "").strip() or str(result.returncode)
+
+
 def supported_api_commands(binary: Path) -> set[str]:
     """What this xray's `api` subcommand actually offers.
 
@@ -920,13 +941,10 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
         result = remove_inbound_user(
             binary, commands["remove_user"], address, tag, LEGACY_CLIENT_EMAIL,
         )
-        output = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
-        if result.returncode != 0 and "not found" not in output:
+        if not removal_succeeded(result, LEGACY_CLIENT_EMAIL):
             # Like every other removal: reported with the rest, never a reason
             # to skip the revocations that follow.
-            failures.append(
-                f"removing {LEGACY_CLIENT_EMAIL} failed: {result.stderr.strip() or result.returncode}"
-            )
+            failures.append(f"removing {LEGACY_CLIENT_EMAIL} failed: {removal_error(result)}")
         if recorded is not None:
             recorded = recorded - {LEGACY_CLIENT_EMAIL}
     wanted = {
@@ -961,10 +979,9 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
             elif not label.startswith(CLIENT_LABEL_PREFIX):
                 continue
             result = remove_inbound_user(binary, commands["remove_user"], address, tag, label)
-            output = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
-            if result.returncode != 0 and "not found" not in output:
+            if not removal_succeeded(result, label):
                 # One failure must not leave every later revocation in place.
-                failures.append(f"removing {label} failed: {result.stderr.strip() or result.returncode}")
+                failures.append(f"removing {label} failed: {removal_error(result)}")
                 continue
             if known_installed is not None:
                 known_installed.discard(label)

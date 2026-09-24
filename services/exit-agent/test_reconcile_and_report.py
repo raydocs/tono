@@ -657,7 +657,8 @@ class RosterControlSignals(unittest.TestCase):
                 label = arguments[-1]
                 removals.append(label)
                 failed = label == "u:gone_1"
-            return type("Result", (), {"returncode": 1 if failed else 0, "stdout": "",
+            return type("Result", (), {"returncode": 1 if failed else 0,
+                                       "stdout": "" if failed or "rmu" not in arguments else "Removed 1 user(s) in total.",
                                        "stderr": "injected failure" if failed else ""})
 
         with patch.dict(agent.os.environ, {
@@ -694,7 +695,8 @@ class RosterControlSignals(unittest.TestCase):
         def fake_xray(_binary, arguments):
             if "rmu" in arguments:
                 removals.append(arguments[-1])
-            return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})
+            stdout = "Removed 1 user(s) in total." if "rmu" in arguments else ""
+            return type("Result", (), {"returncode": 0, "stdout": stdout, "stderr": ""})
 
         with patch.dict(agent.os.environ, {
                  "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "exit-node-a",
@@ -732,7 +734,7 @@ class RosterControlSignals(unittest.TestCase):
         def fake_xray(_binary, arguments):
             if "rmu" in arguments:
                 removed.append(arguments[-1])
-            stdout = listing if "inbounduser" in arguments else ""
+            stdout = listing if "inbounduser" in arguments else "Removed 1 user(s) in total." if "rmu" in arguments else ""
             return type("Result", (), {"returncode": 0, "stdout": stdout, "stderr": ""})
 
         def round_answering(body: bytes) -> None:
@@ -782,7 +784,7 @@ class RosterControlSignals(unittest.TestCase):
 
         def fake_xray(_binary, arguments):
             calls.append(arguments)
-            stdout = '{"stat": []}' if "statsquery" in arguments else ""
+            stdout = '{"stat": []}' if "statsquery" in arguments else "Removed 1 user(s) in total." if "rmu" in arguments else ""
             return type("Result", (), {"returncode": 0, "stdout": stdout, "stderr": ""})
 
         with patch.dict(agent.os.environ, {
@@ -1199,6 +1201,8 @@ class ReconcileSafety(unittest.TestCase):
             self.calls.append(arguments)
             if "adu" in arguments:
                 self.adu_docs.append(json.loads(Path(arguments[-1]).read_text()))
+            if "rmu" in arguments:
+                return type("Result", (), {"returncode": 0, "stdout": "Removed 1 user(s) in total.", "stderr": ""})
             return self.result
 
         patcher = patch.object(agent, "run_xray", fake_run)
@@ -1300,13 +1304,20 @@ class ReconcileSafety(unittest.TestCase):
         self.assertEqual(len(removals), 1)
         self.assertIn("u:usr_gone", removals[0])
 
-    def test_rmu_passes_the_email_positionally(self) -> None:
-        # Xray 26 `rmu` fails with "flag provided but not defined: -email".
-        self.reconcile([], {"u:usr_gone"}, None)
-        self.assertEqual(
-            self.calls[0],
-            ["api", "rmu", "--server=127.0.0.1:10085", "-tag=tono-vless", "u:usr_gone"],
-        )
+    def test_rmu_success_is_read_from_its_output_not_its_exit_code(self) -> None:
+        # Real Xray 26.3.27 outputs; every one exits 0.
+        def result(stdout: str):
+            return agent.subprocess.CompletedProcess([], 0, stdout, "")
+        email = "u:usr_gone"
+        missing = result(f"remove user: {email}\nrpc error: code = Unknown desc = "
+                         f"proxy/vless: User {email} not found.\nRemoved 0 user(s) in total.\n")
+        wrong_tag = result("rpc error: code = Unknown desc = app/proxyman/command: failed to get "
+                           "handler: no-such-tag > app/proxyman/inbound: handler not found: "
+                           "no-such-tag\nRemoved 0 user(s) in total.\n")
+        removed = result("Removed 1 user(s) in total.\n")
+        self.assertTrue(agent.removal_succeeded(missing, email))
+        self.assertFalse(agent.removal_succeeded(wrong_tag, email))
+        self.assertTrue(agent.removal_succeeded(removed, email))
 
     def test_the_installed_label_is_the_prefixed_one(self) -> None:
         self.reconcile(
@@ -1749,7 +1760,7 @@ class ApiHelpParsing(unittest.TestCase):
     def test_retire_shared_legacy_removes_shared_legacy_when_requested(self) -> None:
         class Result:
             returncode = 0
-            stdout = ""
+            stdout = "Removed 1 user(s) in total."
             stderr = ""
 
         removed_labels: list[str] = []

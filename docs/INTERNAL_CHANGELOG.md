@@ -39,12 +39,18 @@
 - **缺陷修复**：Xray 26.3.27 的 `xray api rmu` 只接受 `-tag=<tag> <email>...`，旧代码传 `--email=` 每轮报
   `flag provided but not defined: -email`，agent 拒绝本轮，吊销不执行、计量停止（179.253.233.220 自 2026-09-18 05:00 起）。
   两处删除（shared-legacy 与逐标签）改走同一 helper `remove_inbound_user`，生成
-  `api <cmd> --server=<addr> -tag=<tag> <email>`；`removeuser` 用同一形式。「not found」判定改为同时看 stdout 与 stderr（与 add 路径的「already exists」一致）。
+  `api <cmd> --server=<addr> -tag=<tag> <email>`；`removeuser` 用同一形式。
+  续修：Xray 26 `rmu` 删除失败也返回 0，旧判定（rc≠0 且无「not found」才算失败）会把 inbound tag 错误
+  （`handler not found`、`Removed 0 user(s)`）当作已删并 ACK roster。现由 `removal_succeeded` 判定：输出含
+  `User <该 email> not found` 算已删；否则须 rc=0 且 `Removed N user(s)` 中 N≥1；其余一律计入 failures、阻止 ACK。
 - **新增/优化**：无。
-- **工程与测试**：新增 1 个回归 `test_rmu_passes_the_email_positionally`（旧源码下失败）；原有测试中按 `--email=` 解析 rmu 参数的 mock/断言改为位置参数。
-- **验证**：MacBook 工作树 `cd services/exit-agent && python3 -m pytest -q`：90 passed。未连接真实节点。
+- **工程与测试**：回归 `test_rmu_success_is_read_from_its_output_not_its_exit_code` 用节点实测的三段 rc=0 输出
+  （用户不存在→已删，错误 tag→失败，`Removed 1`→已删），取代先前的 argv 断言测试。fixture 修正：原有测试中按
+  `--email=` 解析 rmu 参数的 mock/断言改为位置参数；成功删除的 rmu mock 由空输出改为打印 `Removed 1 user(s) in total.`。
+- **验证**：MacBook 工作树 `cd services/exit-agent && python3 -m pytest -q`：90 passed, 7 subtests passed。
+  输出样本来自 179.253.233.220（Xray 26.3.27）实测；修复本身未在节点上运行。
 - **候选/发布**：仅源码，无新候选。
-- **剩余限制**：节点部署待做；Xray 26 `rmu` 对不存在用户的真实输出未实测，「not found」字样沿用原判定。旧 `adduser`/`adi` 分支仍用 `--email=`/`--uuid=`，Xray 26 提供 `adu` 时不会走到。
+- **剩余限制**：节点部署待做；`DeadlineExceeded` 等其余错误输出按失败处理，未逐一实测。旧 `adduser`/`adi` 分支仍用 `--email=`/`--uuid=`，Xray 26 提供 `adu` 时不会走到。
 
 ## 2026-09-24 · fleet 合并列车（exit-agent #389→#375→#384→#464，ops-panel #466→#368→#373→#367→#377）
 
