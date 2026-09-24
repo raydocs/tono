@@ -1,9 +1,9 @@
 import {
   hmacSha256,
-  jwtSign,
   randomToken,
   sha256,
 } from './crypto';
+import { refreshSession, tokens } from './sessions';
 import {
   OidcVerificationError,
   verifyOidcIdToken,
@@ -1002,38 +1002,6 @@ async function completePasswordlessAuth(
 }
 
 // --- Tokens / devices ---------------------------------------------------------
-
-async function tokens(e: Env, user: string, device: string, installation: string) {
-  const refresh = randomToken();
-  const t = now();
-  const sid = id();
-  // Every API request re-checks the session, user and device rows in auth(), so
-  // revocation does not depend on JWT expiry. A one-day access token avoids
-  // rotating three D1 rows every fifteen minutes on every idle client.
-  const accessTTL = envInt(e, 'ACCESS_TOKEN_TTL_SECONDS', 86_400);
-  const refreshTTL = envInt(e, 'REFRESH_TOKEN_TTL_SECONDS', 2_592_000);
-  try {
-    await e.DB.prepare(
-      'INSERT INTO sessions(id, user_id, refresh_hash, expires_at, created_at, device_id) VALUES(?, ?, ?, ?, ?, ?)',
-    ).bind(sid, user, await sha256(refresh), t + refreshTTL, t, device).run();
-  } catch (x) {
-    if (String(x).includes('SESSION_DEVICE_INELIGIBLE')) {
-      throw new ApiError(
-        409,
-        'DEVICE_AUTHORIZATION_CHANGED',
-        'Device authorization changed during sign-in; start sign-in again',
-      );
-    }
-    throw x;
-  }
-  return {
-    accessToken: await jwtSign(
-      { sub: user, sid, did: device, iid: installation, iat: t, exp: t + accessTTL },
-      requiredSecret(e.JWT_SECRET),
-    ),
-    refreshToken: refresh,
-  };
-}
 
 async function authResult(e: Env, u: Row, d: Row) {
   const enrollment =
@@ -2477,32 +2445,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
 
   if (p === '/api/v1/auth/refresh' && m === 'POST') {
     const b = await body(req, 4 * 1024);
-    const raw = str(b.refreshToken, 'refreshToken', 20, 500);
-    const t = now();
-    const s = await e.DB.prepare(
-      `SELECT sessions.*, users.status user_status, users.quota_bytes, users.usage_bytes, users.expires_at user_expires_at,
-              devices.installation_id, devices.status device_status, devices.pending_expires_at
-       FROM sessions
-       JOIN users ON users.id = sessions.user_id
-       JOIN devices ON devices.id = sessions.device_id
-       WHERE refresh_hash = ? AND revoked_at IS NULL AND sessions.expires_at > ?`,
-    ).bind(await sha256(raw), t).first<Row>();
-    if (
-      !s ||
-      s.user_status !== 'active' ||
-      !['active', 'pending'].includes(s.device_status) ||
-      (s.device_status === 'pending' && s.pending_expires_at <= t) ||
-      (s.user_expires_at !== null && s.user_expires_at <= t) ||
-      (s.quota_bytes !== null && s.usage_bytes >= s.quota_bytes)
-    ) {
-      throw new ApiError(401, 'INVALID_REFRESH_TOKEN', 'Invalid or expired refresh token');
-    }
-    const rotated = await e.DB.batch([
-      e.DB.prepare('UPDATE sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL').bind(t, s.id),
-      e.DB.prepare('UPDATE devices SET last_seen_at = ?, updated_at = ? WHERE id = ?').bind(t, t, s.device_id),
-    ]);
-    if (!rotated[0].meta.changes) throw new ApiError(401, 'INVALID_REFRESH_TOKEN', 'Refresh token was already used');
-    return Response.json(await tokens(e, s.user_id, s.device_id, s.installation_id));
+    return Response.json(await refreshSession(e, str(b.refreshToken, 'refreshToken', 20, 500)));
   }
 
   if (p === '/api/v1/auth/logout' && m === 'POST') {

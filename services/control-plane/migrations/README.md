@@ -58,6 +58,10 @@ Ops tables after the sequence was unique. Applied in numeric order:
 
 - `0078_home_exit_name_history.sql` — every name ever used by a catalog home exit stays in the per-user catalog restriction set, whatever its status
 
+## 0079
+
+- `0079_session_rotation_successor.sql` — `sessions.rotated_at` / `successor_id` so a lost refresh response can be recovered once inside the grace window
+
 ## 0080
 
 - `0080_home_socks5_rotation_required.sql` — `home_exits.socks5_rotation_required_at`, set by triggers when a socks5 credential leaves a binding or its user is disabled; a flagged credential cannot be bound to another user until replaced

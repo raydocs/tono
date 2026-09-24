@@ -5053,7 +5053,6 @@ ${nameLine}
     const refresh = await api('auth/refresh', json({ refreshToken: first.refreshToken }));
     expect(refresh.status).toBe(200);
     const rotated = await refresh.json() as any;
-    expect((await api('auth/refresh', json({ refreshToken: first.refreshToken }))).status).toBe(401);
 
     const conf = await confirm({ ...first, accessToken: rotated.accessToken });
     expect(conf.status).toBe(200);
@@ -5156,6 +5155,30 @@ ${nameLine}
     const activeIds = active.results.map((r: any) => r.id);
     expect(activeIds).toContain(dev2.device.id);
     expect(activeIds).toContain(dev3.device.id);
+  });
+
+  it('honours one replay of a just-rotated refresh token whose response was lost', async () => {
+    const account = await createAccount('refresh-replay');
+    const bearer = (token: string) => ({ headers: { authorization: `Bearer ${token}` } });
+    const lost = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
+    expect(lost.status).toBe(200);
+    const undelivered = await lost.json() as any;
+
+    const replay = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
+    expect(replay.status).toBe(200);
+    const recovered = await replay.json() as any;
+    expect((await api('me', bearer(recovered.accessToken))).status).toBe(200);
+    // One live session per chain: the successor the client never received is superseded.
+    expect((await api('me', bearer(undelivered.accessToken))).status).toBe(401);
+    expect((await api('auth/refresh', json({ refreshToken: undelivered.refreshToken }))).status).toBe(401);
+    // A second replay is reuse, not recovery.
+    expect((await api('auth/refresh', json({ refreshToken: account.refreshToken }))).status).toBe(401);
+
+    // Outside the grace window a replay stays rejected.
+    expect((await api('auth/refresh', json({ refreshToken: recovered.refreshToken }))).status).toBe(200);
+    await env.DB.prepare('UPDATE sessions SET rotated_at = rotated_at - 3600 WHERE user_id = ? AND rotated_at IS NOT NULL')
+      .bind(account.user.id).run();
+    expect((await api('auth/refresh', json({ refreshToken: recovered.refreshToken }))).status).toBe(401);
   });
 
   it('rejects a session inserted after its device was revoked', async () => {
