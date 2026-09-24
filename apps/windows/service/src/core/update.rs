@@ -824,6 +824,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn update_manual_gate_names_an_orphaned_barrier_instead_of_asking_to_disconnect() {
+        // No filters: the gate does not even ask who owns them.
+        residual_filter_refusal(false, || panic!("no barrier to own")).unwrap();
+        // A registered Service re-arms its filters, so Disconnect stays the only answer.
+        let refusal = residual_filter_refusal(true, || Ok(true)).unwrap_err();
+        assert!(refusal.is::<ProtectionActive>());
+        let refusal =
+            residual_filter_refusal(true, || anyhow::bail!("SCM unreadable")).unwrap_err();
+        assert!(refusal.is::<ProtectionActive>());
+        // Filters with no Service left: Disconnect and Restore Network do not exist, so the
+        // refusal must be the one NSIS turns into the confirmed proven-removal install.
+        let refusal = residual_filter_refusal(true, || Ok(false)).unwrap_err();
+        assert!(refusal.is::<OrphanedProtection>());
+    }
+
+    #[test]
     fn update_recovery_registration_requires_durable_consumption() {
         use crate::update_transaction::tests::{authorize, reserved};
         let (root, mut store, peer, executor) = reserved();

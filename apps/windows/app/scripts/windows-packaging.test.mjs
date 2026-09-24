@@ -433,7 +433,14 @@ test('NSIS explains a refused gate and confirms before uninstall releases protec
   const onInit =
     installerSource.match(/Function \.onInit\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
   const gate = onInit.slice(onInit.indexOf('--manual-update-gate'))
-  const refusal = gate.slice(0, gate.indexOf('SetErrorLevel 76'))
+  // 78: filters with no Tono Service left. Before any refusal, a non-silent install offers the
+  // confirmed path into its own proven-removal ladder; No keeps the block and changes nothing.
+  const refusalAt = gate.indexOf('${If} $0 != "0"')
+  assert.match(
+    gate.slice(0, refusalAt),
+    /\$\{If\} \$0 == "78"\s+\$\{AndIfNot\} \$\{Silent\}\s+MessageBox [^\n]*MB_YESNO "\$\(installClearsOrphanedBlock\)" IDYES (\w+)\s+SetErrorLevel 76\s+Abort [^\n]*\s+\1:\s+nsExec::ExecToLog [^\n]*--manual-orphan-gate'\s+Pop \$0/,
+  )
+  const refusal = gate.slice(refusalAt, gate.indexOf('SetErrorLevel 76', refusalAt))
   // .onInit never shows Abort text; a refusal without a dialog is a silent exit.
   assert.match(
     refusal,
@@ -447,6 +454,8 @@ test('NSIS explains a refused gate and confirms before uninstall releases protec
   const confirmAt = unInit.indexOf('"$(uninstallReleasesProtection)"')
   const leaseAt = unInit.indexOf('--manual-uninstall-gate')
   assert.ok(gateAt >= 0 && gateAt < confirmAt && confirmAt < leaseAt)
+  // An orphaned barrier gets the same confirmed release on uninstall.
+  assert.match(unInit.slice(gateAt, confirmAt), /\$\{If\} \$0 == "78"\s+StrCpy \$0 "77"/)
   assert.match(
     unInit.slice(gateAt, confirmAt),
     /\$\{If\} \$0 == "77"\s+\$\{AndIfNot\} \$\{Silent\}\s+MessageBox [^\n]*MB_YESNO\b/,
@@ -458,6 +467,7 @@ test('NSIS explains a refused gate and confirms before uninstall releases protec
     'manualInstallRefused',
     'uninstallReleasesProtection',
     'manualUninstallRefused',
+    'installClearsOrphanedBlock',
   ]) {
     for (const language of ['SIMPCHINESE', 'ENGLISH', 'RUSSIAN']) {
       assert.match(
@@ -469,6 +479,10 @@ test('NSIS explains a refused gate and confirms before uninstall releases protec
   assert.match(
     windowsServiceUpdateSource,
     /pub const MANUAL_GATE_PROTECTION_ACTIVE_EXIT: i32 = 77;/,
+  )
+  assert.match(
+    windowsServiceUpdateSource,
+    /pub const MANUAL_GATE_ORPHANED_PROTECTION_EXIT: i32 = 78;/,
   )
 })
 
