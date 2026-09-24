@@ -181,7 +181,26 @@ fn execute(recovery: bool) -> Result<(), Error> {
         store.consume(&self_image, tx::now()?)?;
     }
     // From here every live/repair mutation has a durable consumed high-water.
-    native::register_consumed_recovery(&store)?;
+    if recovery {
+        // Classification and rollback do not run through the ONSTART task; it only re-arms the
+        // net for this run. An unavailable Task Scheduler must not strand the attempt (#484).
+        if let Err(error) = native::register_consumed_recovery(&store) {
+            eprintln!(
+                "update recovery task could not be registered; recovering without it: {error:#}"
+            );
+        }
+    } else {
+        // No publication without the net: nothing is replaced yet, so the attempt ends
+        // RolledBack against the retained original identity instead of staying Consumed.
+        native::register_recovery_before_publication(&mut store, || {
+            native::components(
+                &a.install_root,
+                &tono_service_protocol::service_paths()
+                    .install_dir()
+                    .join("tono-service.exe"),
+            )
+        })?;
+    }
     let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
     let service = manager.open_service(
         tono_service_protocol::WINDOWS_SERVICE_NAME,

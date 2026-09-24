@@ -32,6 +32,34 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 更新恢复任务注册失败不再让尝试停在 Consumed（X3-2 后续）
+
+- **归属/来源**：G3 原生升级链；Windows Service 更新协调器（`core/update.rs`）与独立执行器
+  （`bin/install_service/update_executor.rs`）。内部审查 X3-2 后续，Issue #484。基线 main
+  bb2ed4e4 → 分支 `fix/update-recovery-register-20260923`；提交时未合 main。与 #471（同函数附近）、
+  #361（执行器）可能文本冲突，后合并者 rebase。
+- **缺陷修复**：ONSTART 恢复任务注册被当成三处的前置条件：执行器 consume 后
+  `register_consumed_recovery(&store)?`、Service 启动 `reconcile_before_desired` 先注册再拉起
+  `--update-recover`、恢复模式自身也先注册。Task Scheduler 停用/禁止建任务时三处都提前返回，
+  尝试停在 Consumed，无进程能推进；更新一直 pending，手动安装/卸载被拒。改后：
+  - 首次执行（尚未替换任何文件）：注册失败时不发布（不在没有安全网时做 live 替换），验证已安装组件
+    仍等于保留的原始组件后把尝试记为 RolledBack 并返回错误；之后经已验证的 Disconnect 可按既有
+    `retire_rolled_back` 归档。
+  - 恢复模式与 Service 启动对账：注册失败只记警告，照常分类/回滚、照常拉起恢复执行器。
+  U1 单次消费、U3 高水位不回退、U4 Disconnect 不伪造提交均保持；保护不放宽。
+- **新增/优化**：无。
+- **工程与测试**：新增一个 `#[test]`
+  `core::update::tests::unregistrable_recovery_task_rolls_back_the_unpublished_attempt`：consume 后
+  注册失败，持久化状态必须是 RolledBack 且高水位仍为 74。旧代码的等价路径（`register_consumed_recovery(&store)?`
+  直接返回）使状态留在 Consumed，该断言不成立；新 seam 在旧代码上不存在（编译失败）。
+- **验证**：本机为编辑机，未运行 cargo；只对改动文件跑了 `rustfmt --check`（新增代码无差异）。Windows
+  编译与该测试委托本 PR 的 GitHub-hosted `windows-2025` CI，结果以 PR 页为准。未在 Task Scheduler
+  不可用的实机上验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：Service 无法加载且恢复任务未注册时仍无独立恢复（与现状相同，本 PR 不改）。首次执行注册
+  失败后 App 仍保持"更新恢复未完成"提示，直到用户 Disconnect 归档；需实机确认该提示与归档路径。
+  只在包含本改动的已安装版本起生效（执行器取自已安装版本）。
+
 ## 2026-09-23 · Windows 更新恢复任务按系统目录启动 schtasks
 
 - **归属/来源**：G3 原生升级链；Windows Service 更新协调器（`core/update.rs`、
