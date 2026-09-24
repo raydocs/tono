@@ -9,7 +9,8 @@ import XCTest
 ///
 /// The binding is process-global and `adopt`/`purge` reach `ConfigStorage`, so
 /// every test here ends signed out — the one resting state that refuses
-/// everything — and running them removes this machine's cached catalog file.
+/// everything — and running them removes this machine's cached catalog file
+/// and runtime config.
 /// Nothing else in this target installs a catalog, and the app refetches on the
 /// next signed-in launch.
 @MainActor
@@ -100,6 +101,21 @@ final class ManagedExitCatalogOwnershipTests: XCTestCase {
         // A refresh already in flight when the user signed out must not land.
         XCTAssertFalse(ManagedExitCatalogOwnership.accepts("user-a"))
         XCTAssertFalse(ManagedExitCatalogOwnership.accepts(nil))
+    }
+
+    func testSignOutRemovesTheRuntimeBuiltFromTheAccountsCatalog() throws {
+        let runtime = ConfigStorage.shared.runtimeConfigPath
+        try FileManager.default.createDirectory(
+            at: runtime.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data(#"{"outbounds":[{"type":"socks","password":"account-a-secret"}]}"#.utf8)
+            .write(to: runtime)
+        ManagedExitCatalogOwnership.purge()
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: runtime.path),
+            "the signed-out account's residential credentials must not stay on disk"
+        )
     }
 
     func testAnEntitlementFailureIsNotReportedAsAnExpiredSession() {

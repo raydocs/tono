@@ -262,6 +262,57 @@ extension KillSwitchManager {
             check("labels-are-queryable", false)
         }
 
+        // 8. The emergency block's standalone main ruleset, used when
+        //    /etc/pf.conf cannot be loaded, must itself parse, or the fallback
+        //    is as dead as the file it replaces. Parse-only (`-n`): nothing
+        //    is loaded and no packet decision changes.
+        let standaloneMain = scratch + ".main"
+        defer { try? FileManager.default.removeItem(atPath: standaloneMain) }
+        if (try? Data(renderRules(state: emergency, allowedUID: 501).utf8)
+                .write(to: URL(fileURLWithPath: scratch))) != nil,
+           (try? Data(renderStandaloneMain(childPath: scratch).utf8)
+                .write(to: URL(fileURLWithPath: standaloneMain))) != nil {
+            check(
+                "standalone-emergency-main-parses",
+                (try? run("/sbin/pfctl", ["-nf", standaloneMain]))?.status == 0
+            )
+        } else {
+            check("standalone-emergency-main-written", false)
+        }
+
+        // 9. The helper holds a PF enable reference of its own. Before, it ran
+        //    `pfctl -e` only when PF was off, so when another program had
+        //    enabled PF first the helper held nothing, and that program's
+        //    `pfctl -X` stopped PF under an armed kill switch. Unlike the checks
+        //    above this touches global PF state, so it is net-zero: both tokens
+        //    it takes are released, returning PF to whatever state it started in.
+        let referenceRecord = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-lifecycle-pf.reference").path
+        unlink(referenceRecord)
+        let startedEnabled = pfEnabled()
+        if let foreign = try? run("/sbin/pfctl", ["-E"]), foreign.status == 0,
+           let foreignToken = parsePFEnableToken(
+            String(decoding: foreign.output, as: UTF8.self)
+           ) {
+            let held = (try? holdPFEnableReference(recordPath: referenceRecord)) != nil
+            let recorded = readPFEnableReference(referenceRecord)
+            check("reference-recorded", held && recorded != nil && recorded?.token != foreignToken)
+            check("reference-listed", recorded.map { pfEnableReferenceListed($0.token) } == true)
+            _ = try? run("/sbin/pfctl", ["-X", foreignToken])
+            check("reference-survives-foreign-release", pfEnabled())
+            try? holdPFEnableReference(recordPath: referenceRecord)
+            check("reference-reused-while-live", readPFEnableReference(referenceRecord) == recorded)
+            releasePFEnableReference(recordPath: referenceRecord)
+            check(
+                "reference-released",
+                recorded.map { !pfEnableReferenceListed($0.token) } == true
+                    && readPFEnableReference(referenceRecord) == nil
+            )
+            check("reference-release-restores-pf", pfEnabled() == startedEnabled)
+        } else {
+            check("reference-foreign-token", false)
+        }
+
         if failures.isEmpty { return true }
         FileHandle.standardError.write(Data(
             "lifecycle self-test failed: \(failures.joined(separator: ", "))\n".utf8
@@ -451,7 +502,8 @@ extension KillSwitchManager {
                     sessionDirectEndpoints: [],
             reviewedBundleDirectEnabled: false
                 ),
-                allowedUID: 501
+                allowedUID: 501,
+                physicalInterfaces: ["en0", "en7"]
             )
             let inactiveState = KillSwitchState(
                 armed: true,
@@ -600,6 +652,14 @@ extension KillSwitchManager {
                 "to fe80::/10",
             ]
             let continuityOffWithoutTunnel = !continuityNeedles.contains(where: rules.contains)
+            // Scoped to the physical interfaces, so a company VPN's DNS on its
+            // own utun is not blocked.
+            let lanDNSBlock = "block drop out quick on { en0, en7 } inet proto { tcp, udp } to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } port { 53, 853 }"
+            let lanDNSBlockedFirst: Bool = {
+                guard let block = cloudRules.range(of: lanDNSBlock),
+                      let lan = cloudRules.range(of: "label \"tono-lan\"") else { return false }
+                return block.lowerBound < lan.lowerBound
+            }()
             let continuityOnWithTunnel = continuityNeedles.allSatisfy(cloudRules.contains)
             // Whole-string equality, so the class labels belong here too: this is
             // the one assertion that pins the emergency ruleset exactly, and it is
@@ -615,8 +675,14 @@ extension KillSwitchManager {
                 "pass in quick on utun199 all keep state (if-bound)",
                 "pass out quick on utun199 all keep state (if-bound)",
                 "to 1.1.1.1 port 443 user { 0, 501 } keep state (if-bound)",
+                // DHCP leaves only as a limited broadcast, and a reply creates no
+                // state that could carry port 68 back out to its sender.
+                "from any port 68 to 255.255.255.255 port 67 keep state (if-bound)",
+                "from any port 67 to any port 68 no state",
             ]
             let cloudForbidden = [
+                "from any port 68 to any port 67",
+                "from any port 67 to any port 68 keep state",
                 "pass in quick on en",
                 "pass out quick on en",
                 // Continuity emits mDNS UDP; a VLESS-only session still must
@@ -664,6 +730,7 @@ extension KillSwitchManager {
             return ruleShapesHold
                 && continuityOffWithoutTunnel
                 && continuityOnWithTunnel
+                && lanDNSBlockedFirst
                 && emergencyRules == emergencyExpected
                 && cloudShapesHold
                 && pfParses

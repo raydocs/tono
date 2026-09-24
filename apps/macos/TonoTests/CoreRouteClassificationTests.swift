@@ -384,24 +384,42 @@ final class CoreRouteClassificationTests: XCTestCase {
         )
     }
 
+    func testReviewedDirectPathRequiresSignedBundleAtStandardLocation() throws {
+        // An unsigned bundle carrying a reviewed name and identifier is not
+        // granted, even at the standard location.
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-direct-identity-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        for (name, identifier) in [("WeChat.app", "com.tencent.xinWeChat"), ("DingTalk.app", "com.alibaba.DingTalk")] {
+            let contents = root.appendingPathComponent(name, isDirectory: true)
+                .appendingPathComponent("Contents", isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: contents.appendingPathComponent("MacOS", isDirectory: true),
+                withIntermediateDirectories: true)
+            try PropertyListSerialization.data(fromPropertyList: [
+                "CFBundleIdentifier": identifier, "CFBundleExecutable": "app",
+                "CFBundlePackageType": "APPL",
+            ], format: .xml, options: 0).write(to: contents.appendingPathComponent("Info.plist"))
+            try FileManager.default.copyItem(
+                at: URL(fileURLWithPath: "/usr/bin/true"),
+                to: contents.appendingPathComponent("MacOS/app"))
+        }
+        let rootPath = root.resolvingSymlinksInPath().path
+        XCTAssertFalse(ConfigPipeline.managedDirectProcessBundlePaths(applicationsRoot: root)
+            .contains { $0.hasPrefix(rootPath) })
+
+        // Every path production grants is a bundle on disk with a reviewed
+        // signed identity, never a name taken on trust.
+        for path in ConfigPipeline.managedDirectProcessBundlePaths {
+            let url = URL(fileURLWithPath: path, isDirectory: true)
+            let identifier = Bundle(url: url)?.bundleIdentifier
+            XCTAssertTrue(identifier.map {
+                ConfigPipeline.isSignedReviewedDirectBundle(at: url, identifier: $0)
+            } ?? false, path)
+        }
+    }
+
     func testReviewedChinaOfficeAppsShareTheWeChatDirectBoundary() {
-        let bundlePaths = ConfigPipeline.managedDirectProcessBundlePaths
-        XCTAssertTrue(bundlePaths.contains("/Applications/WeChat.app/"))
-        XCTAssertTrue(bundlePaths.contains("/Applications/DingTalk.app/"))
-        XCTAssertTrue(bundlePaths.contains("/Applications/Feishu.app/"))
-        XCTAssertTrue(bundlePaths.contains("/Applications/Lark.app/"))
-
-        let regexes = ConfigPipeline.managedDirectProcessPathRegexes
-        XCTAssertTrue(regexes.contains(
-            ConfigPipeline.rulePathRegex(for: "/Applications/DingTalk.app/")
-        ))
-        XCTAssertTrue(regexes.contains(
-            ConfigPipeline.rulePathRegex(for: "/Applications/Feishu.app/")
-        ))
-        XCTAssertTrue(regexes.contains(
-            ConfigPipeline.rulePathRegex(for: "/Applications/Lark.app/")
-        ))
-
         XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectDomain(
             "open.dingtalk.com"
         ))
@@ -491,6 +509,9 @@ final class CoreRouteClassificationTests: XCTestCase {
             mediaEndpoints: [],
             directResolverHosts: ["open.dingtalk.com"]
         )
+        // Hosted CI has no DingTalk installed; supply the discovered path.
+        ConfigPipeline.managedDirectBundlePathsOverride = ["/Applications/DingTalk.app/"]
+        defer { ConfigPipeline.managedDirectBundlePathsOverride = nil }
         let runtime = try! Fixture.ownedRuntime(
             overlay: Fixture.overlay(selectedNodeName: node.name),
             nodes: [node],

@@ -122,6 +122,16 @@
         }
       }
     },
+    "DNS conflict: a corporate VPN, profile or /etc/resolver rule sends some domains to a DNS server outside Tono's protection. Kill Switch is blocking traffic and automatic retries are paused. Turn that rule off, then click Repair and reconnect, or Restore internet to get back online.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DNS 冲突：企业 VPN、描述文件或 /etc/resolver 规则把部分域名交给 Tono 保护之外的 DNS 服务器解析。断网保护正在拦住直连，自动重试已暂停。请先关闭该规则，再点按「修复并重新连接」，或点按「恢复正常网络」恢复上网。"
+          }
+        }
+      }
+    },
     "DNS ownership is unknown. Authorize the helper and check again; no resolver query was sent.": {
       "localizations": {
         "zh-Hans": {
@@ -222,6 +232,26 @@
         }
       }
     },
+    "Protection problem: another program keeps turning off or replacing Tono's network protection. Kill Switch is blocking traffic and automatic reconnects are paused. Quit the other VPN or firewall, then click Retry now, or Restore internet to get back online.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保护异常：另一个程序反复关闭或替换 Tono 的网络保护。断网保护正在阻断流量，自动重连已暂停。请退出其他 VPN 或防火墙后点按「立即重试」，或点按「恢复正常网络」恢复上网。"
+          }
+        }
+      }
+    },
+    "Network protection was interrupted by another program; Kill Switch is blocking traffic while Tono reconnects.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保护异常：另一个程序中断了网络保护。断网保护正在阻断流量，Tono 正在重新连接。"
+          }
+        }
+      }
+    },
     "No account-owned catalog is available. Open Nodes and refresh the catalog.": {
       "localizations": {
         "zh-Hans": {
@@ -308,6 +338,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "预览支持报告"
+          }
+        }
+      }
+    },
+    "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. Kill Switch is blocking traffic and automatic retries are paused. Click Repair and reconnect to try again, or Restore internet to get back online.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "多次重连后受保护 DNS 仍未生效：macOS 仍在使用其他 DNS 服务器解析。断网保护正在拦住直连，自动重试已暂停。点按「修复并重新连接」再试一次，或点按「恢复正常网络」恢复上网。"
           }
         }
       }
@@ -5979,6 +6019,36 @@
         }
       }
     },
+    "Tono's network helper is not running, so this Mac is not protected right now. Click Retry and approve the administrator prompt to repair it.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 的网络组件没有运行，这台 Mac 当前未受保护。点按「重试」并在管理员弹窗中确认以修复。"
+          }
+        }
+      }
+    },
+    "Tono's network helper is not responding, so this Mac may not be protected right now. Click Retry and approve the administrator prompt to repair it.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 的网络组件没有响应，这台 Mac 当前可能未受保护。点按「重试」并在管理员弹窗中确认以修复。"
+          }
+        }
+      }
+    },
+    "Tono's network helper is turned off in System Settings > General > Login Items & Extensions, so this Mac is not protected right now. Turn Tono on under Allow in the Background, then click Retry.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 的网络组件已在「系统设置 > 通用 > 登录项与扩展」中关闭，这台 Mac 当前未受保护。请在「允许在后台」中打开 Tono，然后点按「重试」。"
+          }
+        }
+      }
+    },
     "The installed network helper rejected this copy of Tono.": {
       "localizations": {
         "zh-Hans": {
@@ -6167,6 +6237,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "网络组件协议不匹配，需要先完成组件修复。"
+          }
+        }
+      }
+    },
+    "The network service whose DNS settings Tono saved has been deleted, so those DNS servers could not be put back. DNS is now obtained automatically. If your network needs manual DNS servers, set them again in System Settings > Network.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 保存的 DNS 设置所属的网络服务已被删除，原来的 DNS 服务器无法写回，现已改为自动获取 DNS。如果该网络需要手动填写 DNS 服务器，请在系统设置 > 网络中重新设置。"
           }
         }
       }
@@ -7110,6 +7190,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "macOS"
+          }
+        }
+      }
+    },
+    "macOS reports no active network service, so automatic retries are paused. Kill Switch is blocking traffic; Tono tries again when the network changes. Click Repair and reconnect to try now, or Restore internet to get back online.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS 报告当前没有可用的网络服务，自动重试已暂停。断网保护正在拦住直连；网络变化时 Tono 会再试一次。点按「修复并重新连接」立即重试，或点按「恢复正常网络」恢复上网。"
           }
         }
       }

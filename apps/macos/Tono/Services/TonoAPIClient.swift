@@ -202,12 +202,7 @@ actor TonoAPIClient {
             ],
             requestIsCurrent: requestIsCurrent
         )
-        guard receipt.wasStored else {
-            throw APIError.server(
-                status: 200,
-                message: String(localized: "Tono did not store this network log. Check the device's diagnostic collection authorization.")
-            )
-        }
+        guard receipt.wasStored else { throw DiagnosticsLogNotStoredError() }
         return receipt
     }
 

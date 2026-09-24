@@ -123,8 +123,152 @@ func runCoreLifecyclePolicySelfTests() -> Bool {
     ]) == [31, 34]
 }
 
+/// Folds an object key the way Go's JSON decoder matches it to a struct field
+/// (`bytes.EqualFold`). Every option name the core knows is ASCII, and the only
+/// non-ASCII letters whose simple fold reaches ASCII are U+017F (s) and U+212A (k).
+func goFoldedJSONKey(_ key: String) -> String {
+    var folded = String.UnicodeScalarView()
+    for scalar in key.unicodeScalars {
+        switch scalar.value {
+        case 0x41...0x5A: folded.append(Unicode.Scalar(UInt8(scalar.value + 0x20)))
+        case 0x017F: folded.append("s")
+        case 0x212A: folded.append("k")
+        default: folded.append(scalar)
+        }
+    }
+    return String(folded)
+}
+
+/// Foundation keeps the first of a repeated object key; the core's Go decoder
+/// keeps the last and also binds case-folded spellings to the same option.
+/// Refuse any object whose decoded keys collide after that folding, so the
+/// allowlist below and the core always read the same value. The input has
+/// already been accepted by `JSONSerialization`, so only strings and container
+/// punctuation need to be tracked here.
+///
+/// Deliberately stricter than Go: this folds the keys of every object,
+/// including map-typed ones (such as a hosts DNS server's `predefined`),
+/// whose keys Go matches exactly and never folds. The app's own config never
+/// has keys that differ only in case (option names are fixed lowercase ASCII,
+/// and the predefined host names are lowercased and deduplicated before
+/// writing), so nothing it generates is refused. A future map with such keys
+/// would be.
+func jsonObjectKeysAreUnambiguous(_ contents: String) -> Bool {
+    let bytes = Array(contents.utf8)
+    func hex4(_ start: Int) -> UInt32? {
+        guard start + 4 <= bytes.count else { return nil }
+        var value: UInt32 = 0
+        for byte in bytes[start..<start + 4] {
+            guard let digit = Character(Unicode.Scalar(byte)).hexDigitValue else { return nil }
+            value = value << 4 | UInt32(digit)
+        }
+        return value
+    }
+    // Decodes the string whose opening quote is at `start`, returning its value
+    // and the index after the closing quote. Lone surrogates decode to U+FFFD,
+    // as they do in Go.
+    func decodeString(_ start: Int) -> (String, Int)? {
+        var decoded: [UInt8] = []
+        var index = start + 1
+        while index < bytes.count {
+            let byte = bytes[index]
+            if byte == UInt8(ascii: "\"") { return (String(decoding: decoded, as: UTF8.self), index + 1) }
+            guard byte == UInt8(ascii: "\\") else {
+                decoded.append(byte)
+                index += 1
+                continue
+            }
+            guard index + 1 < bytes.count else { return nil }
+            let escape = bytes[index + 1]
+            index += 2
+            switch escape {
+            case UInt8(ascii: "\""), UInt8(ascii: "\\"), UInt8(ascii: "/"): decoded.append(escape)
+            case UInt8(ascii: "b"): decoded.append(0x08)
+            case UInt8(ascii: "f"): decoded.append(0x0C)
+            case UInt8(ascii: "n"): decoded.append(0x0A)
+            case UInt8(ascii: "r"): decoded.append(0x0D)
+            case UInt8(ascii: "t"): decoded.append(0x09)
+            case UInt8(ascii: "u"):
+                guard var value = hex4(index) else { return nil }
+                index += 4
+                if (0xD800...0xDBFF).contains(value), index + 6 <= bytes.count,
+                   bytes[index] == UInt8(ascii: "\\"), bytes[index + 1] == UInt8(ascii: "u"),
+                   let low = hex4(index + 2), (0xDC00...0xDFFF).contains(low) {
+                    value = 0x10000 + ((value - 0xD800) << 10) + (low - 0xDC00)
+                    index += 6
+                }
+                let scalar = Unicode.Scalar(value) ?? "\u{FFFD}"
+                decoded.append(contentsOf: String(Character(scalar)).utf8)
+            default: return nil
+            }
+        }
+        return nil
+    }
+    // One frame per open container: nil for an array, the folded keys seen so
+    // far for an object.
+    var frames: [Set<String>?] = []
+    var nextStringIsKey = false
+    var index = 0
+    while index < bytes.count {
+        switch bytes[index] {
+        case UInt8(ascii: "{"):
+            frames.append(Set<String>())
+            nextStringIsKey = true
+            index += 1
+        case UInt8(ascii: "["):
+            frames.append(nil)
+            nextStringIsKey = false
+            index += 1
+        case UInt8(ascii: "}"), UInt8(ascii: "]"):
+            guard frames.popLast() != nil else { return false }
+            nextStringIsKey = false
+            index += 1
+        case UInt8(ascii: ","):
+            nextStringIsKey = frames.last.map { $0 != nil } ?? false
+            index += 1
+        case UInt8(ascii: "\""):
+            guard let string = decodeString(index) else { return false }
+            if nextStringIsKey {
+                guard var keys = frames.last ?? nil,
+                      keys.insert(goFoldedJSONKey(string.0)).inserted else { return false }
+                frames[frames.count - 1] = keys
+                nextStringIsKey = false
+            }
+            index = string.1
+        default:
+            index += 1
+        }
+    }
+    return frames.isEmpty
+}
+
+/// The parsed document with every object key folded as the core folds it.
+/// Returns nil on a collision, which `jsonObjectKeysAreUnambiguous` has
+/// already refused; the helper never traps on its input.
+func goFoldedJSONKeys(_ value: Any) -> Any? {
+    if let dictionary = value as? [String: Any] {
+        var folded: [String: Any] = [:]
+        for (key, child) in dictionary {
+            guard let child = goFoldedJSONKeys(child),
+                  folded.updateValue(child, forKey: goFoldedJSONKey(key)) == nil else { return nil }
+        }
+        return folded
+    }
+    if let array = value as? [Any] {
+        var folded: [Any] = []
+        for child in array {
+            guard let child = goFoldedJSONKeys(child) else { return nil }
+            folded.append(child)
+        }
+        return folded
+    }
+    return value
+}
+
 func ownedRuntimeConfigIsSafe(_ contents: String) -> Bool {
-    guard let object = try? JSONSerialization.jsonObject(with: Data(contents.utf8)) as? [String: Any],
+    guard jsonObjectKeysAreUnambiguous(contents),
+          let parsed = try? JSONSerialization.jsonObject(with: Data(contents.utf8)),
+          let object = goFoldedJSONKeys(parsed) as? [String: Any],
           Set(object.keys).isSubset(of: ["log", "dns", "inbounds", "outbounds", "route", "experimental"]),
           let route = object["route"] as? [String: Any], route["final"] as? String == "Tono-Exit",
           route["rule_set"] == nil,
@@ -546,6 +690,77 @@ func runOwnedRuntimeContractSelfTests() -> Bool {
                 with: #""listen":"0.0.0.0""#
             )
         )
+        // Foundation keeps the first repeated key and the core keeps the last.
+        && !ownedRuntimeConfigIsSafe(
+            valid.replacingOccurrences(
+                of: #""route":{"final":"Tono-Exit""#,
+                with: #""route":{"final":"Tono-Exit","final":"direct""#
+            )
+        )
+}
+
+/// Daemon startup after executor recovery, in the order protection needs.
+///
+/// After a boot, macOS loads /etc/pf.conf with PF disabled; this daemon is the
+/// only thing that enables it. PF used to be restored only once the socket
+/// server had resolved the user's group and home, set up its directories and
+/// swept a stale core, and any failure on the way exited without touching PF,
+/// so an armed machine came up open and stayed open across every launchd
+/// retry. PF is now restored right after the allowed user is read, and any
+/// later failure installs the emergency block when protection was wanted.
+///
+/// A stop request is a clean stop, as in `UpdateExecutor.startup`: the
+/// executor's own bootout must not leave a barrier behind.
+func startHelperDaemon<KillSwitch, Server>(
+    readUID: () throws -> uid_t = {
+        guard geteuid() == 0 else {
+            throw HelperFailure.invalid("The helper must run as root.")
+        }
+        return try readAllowedUID()
+    },
+    restoreProtection: (uid_t) throws -> KillSwitch,
+    startServer: (uid_t, KillSwitch) throws -> Server,
+    secureFailedStartup: () -> Void,
+    stopRequested: () -> Bool = { helperShutdownRequested != 0 }
+) -> Server? {
+    do {
+        let allowedUID = try readUID()
+        let killSwitch = try restoreProtection(allowedUID)
+        return try startServer(allowedUID, killSwitch)
+    } catch {
+        if !stopRequested() { secureFailedStartup() }
+        return nil
+    }
+}
+
+/// PF is restored before the server initialises, a server failure leaves the
+/// machine fail-closed, and a requested stop does not (H12-F2).
+func runStartupOrderSelfTest() -> Bool {
+    struct StartupFailed: Error {}
+    var events: [String] = []
+    func start(stopRequested: Bool) -> Int? {
+        startHelperDaemon(
+            readUID: { 501 },
+            restoreProtection: { (_: uid_t) in events.append("restore") },
+            startServer: { (_: uid_t, _: Void) throws -> Int in
+                events.append("server")
+                throw StartupFailed()
+            },
+            secureFailedStartup: { events.append("secure") },
+            stopRequested: { stopRequested }
+        )
+    }
+    guard start(stopRequested: false) == nil,
+          events == ["restore", "server", "secure"] else {
+        FileHandle.standardError.write(Data("startup order: \(events)\n".utf8))
+        return false
+    }
+    events = []
+    guard start(stopRequested: true) == nil, events == ["restore", "server"] else {
+        FileHandle.standardError.write(Data("startup stop: \(events)\n".utf8))
+        return false
+    }
+    return true
 }
 
 func requestHelperShutdown(_ signal: Int32) {
@@ -941,6 +1156,7 @@ if CommandLine.arguments.dropFirst() == ["--lifecycle-self-test"] {
     let dnsPassed = ProtectedDNSManager.runRestoreReadFailureSelfTest()
         && ProtectedDNSManager.runStatusUnreadableServiceSelfTest()
         && ProtectedDNSManager.runCorruptSnapshotSelfTest()
+        && ProtectedDNSManager.runRenamedServiceRestoreSelfTest()
     exit(pfPassed && dnsPassed ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--self-test"] {
@@ -949,9 +1165,11 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && ProtectedDNSManager.runSelfTests()
             && TonoPeerAuthorizer.runSelfTests()
             && runRequestContractSelfTests()
+            && runHelperUpgradeAdmissionSelfTest()
             && runCoreLifecyclePolicySelfTests()
             && runOwnedRuntimeContractSelfTests()
             && PowerTransitionGate.runSelfTests()
+            && runStartupOrderSelfTest()
             ? 0 : 1
     )
 }
@@ -972,8 +1190,15 @@ do {
     // daemon behind the update lock — in that window the executor owns the
     // flow and no PF action is ours to take.
     if try UpdateExecutor.startup() { exit(0) }
-    let server = try SocketServer()
-    server.run()
 } catch {
+    exit(1)
+}
+if let server = startHelperDaemon(
+    restoreProtection: { uid in try KillSwitchManager(allowedUID: uid) },
+    startServer: { uid, killSwitch in try SocketServer(allowedUID: uid, killSwitch: killSwitch) },
+    secureFailedStartup: KillSwitchManager.secureFailedStartup
+) {
+    server.run()
+} else {
     exit(1)
 }
