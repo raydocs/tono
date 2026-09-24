@@ -80,6 +80,9 @@ Var ExistingUninstallCommand
 ; Unlike `/UPDATE`, this is set only after a complete installed-product record passes version
 ; validation. It prevents failure cleanup from disarming a Service owned by the previous install.
 Var ConfirmedExistingInstall
+; Set in .onInit once the user confirmed clearing a Tono block no Service owns (gate 78) and the
+; orphan lease was taken. Such an install is never an upgrade, even over a complete ARP record.
+Var ClearingOrphanedBlock
 Var OldMainBinaryName
 ; The single GUI launcher consumes this value. Empty for Finish-page/repair launches; `/ARGS`
 ; populates it only for an explicit fresh passive `/R` request.
@@ -259,6 +262,14 @@ Function DetectExistingInstall
     StrCmp $R0 0 legacy_wix_blocked wix_loop
 
   automatic_update:
+    ; A confirmed orphaned-block clear is not an upgrade. The upgrade path skips RemoveVergeService
+    ; and hands the runtime to --replace-runtime, whose gate refuses while the filters remain and
+    ; which cannot replace a Service that is gone. Leave every upgrade flag unset so the install
+    ; runs the full RemoveVergeService cleanup and then creates a new Service.
+    ${If} $ClearingOrphanedBlock = 1
+      DetailPrint "Reinstalling ${PRODUCTNAME} $ExistingVersion as ${VERSION} after clearing the leftover network block."
+      Return
+    ${EndIf}
     StrCpy $UpdateMode 1
     StrCpy $PassiveMode 1
     StrCpy $ConfirmedExistingInstall 1
@@ -426,6 +437,10 @@ LangString manualUninstallRefused ${LANG_SIMPCHINESE} "${PRODUCTNAME} 现在无�
 LangString manualUninstallRefused ${LANG_ENGLISH} "${PRODUCTNAME} cannot be uninstalled right now: a protected update may still be pending, or another installer may be running. Nothing was changed.$\r$\n$\r$\nOpen ${PRODUCTNAME}, finish or Disconnect and Retry the pending update from Check for Updates, then uninstall again."
 LangString manualUninstallRefused ${LANG_RUSSIAN} "Сейчас удалить ${PRODUCTNAME} нельзя: возможно, не завершено защищённое обновление или работает другой установщик. Ничего не изменено.$\r$\n$\r$\nОткройте ${PRODUCTNAME}, завершите незаконченное обновление или отключитесь и повторите его в разделе проверки обновлений, затем повторите удаление."
 
+LangString installClearsOrphanedBlock ${LANG_SIMPCHINESE} "此电脑上仍装有 ${PRODUCTNAME} 的网络拦截，但已没有 ${PRODUCTNAME} 服务可以解除它，因此“断开”和“恢复网络”快捷方式都不可用。$\r$\n$\r$\n继续安装会先解除这项拦截并恢复普通网络访问，然后重新安装 ${PRODUCTNAME}；如果无法确认拦截已解除，安装会停止，不会删除任何文件。安装完成后请重新连接以恢复保护。$\r$\n$\r$\n是否继续？"
+LangString installClearsOrphanedBlock ${LANG_ENGLISH} "A ${PRODUCTNAME} network block is still installed on this PC, but no ${PRODUCTNAME} Service is left to release it, so neither Disconnect nor the Restore Network shortcut can help.$\r$\n$\r$\nContinuing removes that block, restores normal internet access and reinstalls ${PRODUCTNAME}. If the block cannot be shown removed, the installation stops and nothing is deleted. Connect again afterwards to turn protection back on.$\r$\n$\r$\nContinue?"
+LangString installClearsOrphanedBlock ${LANG_RUSSIAN} "На этом компьютере всё ещё установлена сетевая блокировка ${PRODUCTNAME}, но не осталось службы ${PRODUCTNAME}, которая может её снять, поэтому ни «Отключить», ни ярлык «Восстановить сеть» не помогут.$\r$\n$\r$\nЕсли продолжить, блокировка будет снята, обычный доступ в интернет восстановлен, а ${PRODUCTNAME} установлен заново. Если не удастся подтвердить снятие блокировки, установка остановится и ничего не будет удалено. После установки подключитесь снова, чтобы включить защиту.$\r$\n$\r$\nПродолжить?"
+
 LangString restoreNetworkTooltip ${LANG_SIMPCHINESE} "当 ${PRODUCTNAME} 无法恢复网络时，解除网络保护（需要管理员权限）。"
 LangString restoreNetworkTooltip ${LANG_ENGLISH} "Restores your network if ${PRODUCTNAME} cannot. Requires administrator approval."
 LangString restoreNetworkTooltip ${LANG_RUSSIAN} "Восстанавливает сеть, если ${PRODUCTNAME} не может. Требуются права администратора."
@@ -459,6 +474,23 @@ Function .onInit
   {{/each}}
   nsExec::ExecToLog '"$PLUGINSDIR\tono-gate\resources\tono-service-install.exe" --manual-update-gate'
   Pop $0
+  ; 78: Tono's block filters remain but no Tono Service is left to own them, so neither Disconnect
+  ; nor the Restore Network shortcut exists. The Install section's RemoveVergeService ladder is
+  ; what clears them, and it stops the install unless WFP removal is proven. Only after the user
+  ; confirms is the lease taken without Disconnect (the gate re-checks that no Service appeared).
+  ; A silent install keeps refusing.
+  ${If} $0 == "78"
+  ${AndIfNot} ${Silent}
+    MessageBox MB_ICONEXCLAMATION|MB_YESNO "$(installClearsOrphanedBlock)" IDYES orphanBlockClearConfirmed
+    SetErrorLevel 76
+    Abort "Installation cancelled; the leftover Tono network block was kept."
+    orphanBlockClearConfirmed:
+    nsExec::ExecToLog '"$PLUGINSDIR\tono-gate\resources\tono-service-install.exe" --manual-orphan-gate'
+    Pop $0
+    ${If} $0 == "0"
+      StrCpy $ClearingOrphanedBlock 1
+    ${EndIf}
+  ${EndIf}
   ${If} $0 != "0"
     ; Abort text is never shown from .onInit, and a 0.0.72 settings-page update has already
     ; closed the App: without a dialog Tono just vanishes. 77 means only active protection
@@ -1023,6 +1055,10 @@ Section Install
   ; immediately before creating its recovery/uninstall path.
   File /a "/oname=${MAINBINARYNAME}.exe.next" "${MAINBINARYSRCPATH}"
   ${If} $ConfirmedExistingInstall <> 1
+    ; An orphaned-block clear reinstalls over the previous files, and Rename never overwrites.
+    ${If} $ClearingOrphanedBlock = 1
+      Delete "$INSTDIR\${MAINBINARYNAME}.exe"
+    ${EndIf}
     ClearErrors
     Rename "$INSTDIR\${MAINBINARYNAME}.exe.next" "$INSTDIR\${MAINBINARYNAME}.exe"
     ${If} ${Errors}
@@ -1048,6 +1084,9 @@ Section Install
   {{#each binaries}}
     File /a "/oname={{this}}.next" "{{no-escape @key}}"
     ${If} $ConfirmedExistingInstall <> 1
+      ${If} $ClearingOrphanedBlock = 1
+        Delete "$INSTDIR\\{{this}}"
+      ${EndIf}
       ClearErrors
       Rename "$INSTDIR\\{{this}}.next" "$INSTDIR\\{{this}}"
       ${If} ${Errors}
@@ -1116,6 +1155,17 @@ Section Install
   ; disarm helper here. UpdateMode deliberately keeps the Service in place, then the replacement
   ; helper preserves active protection or marks a proven-disconnected legacy state for cleanup.
   !insertmacro RemoveVergeService
+  ; A confirmed orphan clear: the owner that was connected when its Service went away still says
+  ; "core should run", and the Service installer's gate would refuse on it with Disconnect advice
+  ; nobody can follow. RemoveVergeService has just proven the filters gone (it aborts otherwise);
+  ; the helper proves it again, and that no Service exists, before retiring that state.
+  ${If} $ClearingOrphanedBlock = 1
+    nsExec::ExecToLog /TIMEOUT=60000 '"$INSTDIR\resources\tono-service-install.exe" --retire-orphaned-owner'
+    Pop $0
+    ${If} $0 != "0"
+      Abort "The leftover ${PRODUCTNAME} network block was removed, but the previous connection state could not be cleared (result $0). Run this installer again."
+    ${EndIf}
+  ${EndIf}
   !insertmacro StartVergeService
 
   ${If} $ConfirmedExistingInstall = 1
@@ -1261,6 +1311,11 @@ Function un.onInit
   ; Refuse pending v1 before the pre-uninstall hook or any App termination.
   nsExec::ExecToLog '"$INSTDIR\resources\tono-service-install.exe" --manual-update-gate'
   Pop $0
+  ; 78 (block filters with no Tono Service left to own them) needs the same confirmed release:
+  ; this uninstaller's RemoveVergeService ladder is the only thing left that can remove them.
+  ${If} $0 == "78"
+    StrCpy $0 "77"
+  ${EndIf}
   ; 77: no update is pending and no other installer holds the lease; only active protection
   ; stood in the way. RemoveVergeService exists for exactly that state: it releases protection
   ; (helper, then emergency disarm) and deletes nothing unless WFP removal is proven. After the

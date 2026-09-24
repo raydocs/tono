@@ -107,8 +107,20 @@ pub(super) fn dispatch() -> Result<bool, Error> {
                     eprintln!("Error: {error:#}");
                     std::process::exit(native::MANUAL_GATE_PROTECTION_ACTIVE_EXIT);
                 }
+                if error.is::<native::OrphanedProtection>() {
+                    eprintln!("Error: {error:#}");
+                    std::process::exit(native::MANUAL_GATE_ORPHANED_PROTECTION_EXIT);
+                }
                 return Err(error);
             }
+            Ok(true)
+        }
+        [mode] if mode == "--manual-orphan-gate" => {
+            native::begin_manual_orphan()?;
+            Ok(true)
+        }
+        [mode] if mode == "--retire-orphaned-owner" => {
+            tokio::runtime::Runtime::new()?.block_on(native::retire_orphaned_owner())?;
             Ok(true)
         }
         [mode] if mode == "--manual-uninstall-gate" => {

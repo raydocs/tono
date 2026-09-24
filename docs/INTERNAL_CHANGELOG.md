@@ -1932,6 +1932,46 @@
   改用同一 `redirected_folder`。测试：packaging 新增一个 `test`（`NSIS uninstall deletes in the approving account AppData only after the
   link check`），MacBook 上改前失败、改后 23/23 通过；Rust 由既有联接点测试覆盖共用检查。验证：Rust/NSIS 未在本机运行；CI 待定。
   限制：AppData 被重定向到配置文件外时本账户的窗口状态与旧 pins 不再删除；检查与删除之间的竞态同上；NSIS 未编译，未实机验证。
+## 2026-09-24 · Windows 安装器可在确认后清除无主的 Tono 拦截
+
+- **归属/来源**：G3 客户安装/修复路径（L3 死路、C5）；Windows NSIS 模板、Service 手动安装门控、恢复脚本。叠在 #500
+  （`fix/installer-filter-gate-20260923`，H15-F2）之上并合入当前 origin/main；分支 `fix/win-orphan-barrier-install-20260924`，
+  Issue #564（内部审查 H19-O-F2，跨厂商核实 confirmed）；未合 main。
+- **缺陷修复**：`.onInit` 的 `--manual-update-gate` 只要有 Tono WFP 过滤器就拒绝，不看是否还有 Tono Service 能拥有/解除它们；
+  旧卸载器、被强删或被隔离的二进制留下持久阻断且无 SCM 注册时，App 和「恢复网络」快捷方式都不存在，安装器又拒绝，
+  安装段里专为此写的 `RemoveVergeService` 清理到不了（#500 的提示仍让用户去断开）。改后：过滤器存在时按「是否仍有注册且
+  二进制在盘的 Tono Service」分类——有（含已停止、SCM 读不出）仍为 `ProtectionActive`（77，行为同 #500）；确认没有则为
+  新的 `OrphanedProtection`（78）。非静默安装在 78 时弹确认框：选「否」保留拦截并退出；选「是」调用新的
+  `--manual-orphan-gate`（再次确认没有 Service 出现后取与卸载相同的租约），安装继续进入既有 `RemoveVergeService`，
+  该阶梯只有证明 WFP 已移除才继续，否则中止且不删文件。静默安装仍拒绝。卸载器把 78 与 77 同样走 #500 的确认释放路径。
+  恢复脚本改为指向当前安装器与这一确认路径，并更正「先重启」的建议（持久阻断在重启后仍在、例外不在）。
+- **新增/优化**：无。**暂定决定（更严格）**：只有在证明没有 Tono Service 可再武装拦截、且用户确认时才由安装器清除；
+  静默安装不自动清除。
+- **工程与测试**：`core/update.rs` 一个 `#[test]`（`update_manual_gate_names_an_orphaned_barrier_instead_of_asking_to_disconnect`，
+  测 `begin_manual` 实际使用的 `residual_filter_refusal` 分类）；扩展 #500 的 packaging 测试断言 78 确认分支、卸载 78→77、
+  三语文案与退出码常量 78。
+- **验证**：MacBook `node --test scripts/windows-packaging.test.mjs`（apps/windows/app）：在 #500 基线上该测试失败，改后 23/23 通过；
+  Rust 仅 rustfmt 解析，未执行 cargo；NSIS 未编译。其余见 PR 的 Windows CI。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：须在 #500 之后合入；静默/无人值守安装遇到无主拦截仍是死路；SCM 注册存在且 `ProgramData\Tono\bin\tono-service.exe`
+  在盘但 Service 本身损坏时仍按 77 处理；只识别 Tono 自己的注册与二进制路径；未实机验证（AV 隔离、旧卸载器残留、重启后状态）。
+- **跟进 2026-09-24（跨厂商审查 WA-OpenAI-3）**：修复：用户确认 78 且取得孤儿租约后，若 ARP 记录完整，`DetectExistingInstall`
+  仍把本次安装归为升级（`$ConfirmedExistingInstall=1`），`RemoveVergeService` 跳过清理，`--replace-runtime` 的 `manual_gate()`
+  因过滤器仍在而拒绝，重试 3 次后安装中止。现 `.onInit` 在 `--manual-orphan-gate` 成功后置 `$ClearingOrphanedBlock=1`，
+  `automatic_update` 见此标志即返回、不设任何升级标志：走完整 `RemoveVergeService` 清理（仍须证明 WFP 已移除）与全新安装
+  Service 路径；全新路径发布 GUI/Mihomo 前先删旧文件（`Rename` 不覆盖）。测试：packaging 新增一个 `test`
+  （`a confirmed orphaned-block clear reinstalls through the fresh path, not the upgrade path`），MacBook 上改前失败、改后 24/24 通过。
+  验证：Rust/NSIS 未在本机运行；CI 待定。限制：此路径显示全新安装向导（不再是被动升级），App 由完成页启动而不是自动重开；旧 `tono-core` 若仍被占用，
+  删除失败，安装在创建 Service 前中止；#500 尚未进 main（已在 `train/win-20260924`）；NSIS 未编译，未实机验证。
+- **跟进 2026-09-24（Codex 新发现，Opus 核实 CONFIRMED）**：修复：Service 消失、WFP 残留且 `active_owner` 的
+  `core_should_be_running=true`（连接中二进制被隔离即是此态）时，孤儿租约与卸载助手的紧急解除都不清该期望状态，随后全新安装
+  Service 的 `manual_gate()` 以「Disconnect before manual installation」拒绝，安装仍中止。现安装段在 `RemoveVergeService`（未证明
+  WFP 已移除即中止）之后、`StartVergeService` 之前，仅当 `$ClearingOrphanedBlock=1` 调用新的
+  `tono-service-install.exe --retire-orphaned-owner`：`retire_orphaned_owner` 要求本安装器持有租约、无 Service、无残留过滤器，
+  再调用既有 `retire_legacy_active_owner`（期望状态置停止并清 active owner）；失败则中止安装。测试：packaging 新增一个 `test`
+  （`a confirmed orphan clear retires the stale connected owner only after the barrier is gone`），MacBook 上改前失败、改后 25/25 通过。
+  验证：Rust/NSIS 未在本机运行；CI 待定。限制：退役失败时安装中止，此时拦截已解除但无 Service，再次运行安装器会因期望状态仍为运行
+  而得到 77（Disconnect）提示；无实机验证。
 
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
