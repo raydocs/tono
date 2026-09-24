@@ -330,18 +330,18 @@ impl Store {
 
     /// Explicit release is not cancellation or successful recovery. Persist its
     /// request before touching protection and leave requiredRecovery unchanged.
+    /// Like the macOS helper, release grants nothing and is not gated on the
+    /// wall clock: a rollback must not strand the owner behind the only exit.
+    /// Recorded times never precede earlier durable evidence.
     pub fn request_disconnect(&mut self, owner: &str, peer: &Image, now: u64) -> Result<()> {
         let a = self.disconnect_peer(owner, peer)?;
-        ensure!(
-            now >= a.receipt.updated_at_unix,
-            "Disconnect clock is uncertain"
-        );
         if a.disconnect.is_some() {
             return Ok(());
         }
+        let requested_at_unix = now.max(a.receipt.updated_at_unix);
         let mut next = self.state.clone();
         next.attempt.as_mut().unwrap().disconnect = Some(DisconnectEvidence {
-            requested_at_unix: now,
+            requested_at_unix,
             verified_at_unix: None,
         });
         self.save(next)
@@ -360,9 +360,10 @@ impl Store {
             .as_ref()
             .context("Disconnect was not requested")?;
         ensure!(
-            observed == Protection::Unprotected && now >= requested.requested_at_unix,
+            observed == Protection::Unprotected,
             "fresh unprotected readback is required"
         );
+        let verified_at_unix = now.max(requested.requested_at_unix);
         let mut next = self.state.clone();
         next.attempt
             .as_mut()
@@ -370,7 +371,7 @@ impl Store {
             .disconnect
             .as_mut()
             .unwrap()
-            .verified_at_unix = Some(now);
+            .verified_at_unix = Some(verified_at_unix);
         self.save(next)
     }
 
@@ -1001,6 +1002,53 @@ pub(crate) mod tests {
             (store.state.consumed_sequence, store.state.generation),
             (74, 91)
         );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_explicit_disconnect_releases_after_wall_clock_rollback() {
+        let (root, mut store, peer, _) = reserved();
+        let owner = "windows:fixture-owner";
+        store
+            .observe(
+                owner,
+                &peer,
+                91,
+                1_900_000_010,
+                Observation::PreparationVerified {
+                    artifact_sha256: "b".repeat(64),
+                    protection: Protection::ProtectedOffline,
+                },
+            )
+            .unwrap();
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().executor = None;
+        store.save(next).unwrap();
+        assert_eq!(
+            store.attempt().unwrap().receipt.updated_at_unix,
+            1_900_000_010
+        );
+        // The wall clock is now behind both updatedAt and createdAt (manual
+        // change, dual-boot RTC, dead battery). Release grants nothing.
+        store
+            .request_disconnect(owner, &peer, 1_899_999_000)
+            .unwrap();
+        store
+            .request_disconnect(owner, &peer, 1_899_999_000)
+            .unwrap();
+        store
+            .verify_disconnect(owner, &peer, 1_899_999_001, Protection::Unprotected)
+            .unwrap();
+        drop(store);
+        let mut store = Store::open(&root).unwrap();
+        assert!(
+            store.live_attempt(1_899_999_001).is_err(),
+            "rollback still refuses further grants"
+        );
+        store.retire_unconsumed(owner, &peer).unwrap();
+        assert!(!store.pending());
+        assert_eq!(store.state.consumed_sequence, 73);
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
     }
