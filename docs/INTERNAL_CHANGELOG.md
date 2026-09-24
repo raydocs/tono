@@ -55,6 +55,11 @@
   开关「连接失败上报」（默认开，含简体中文）。已开启快照的用户仍按快照同意发送完整记录。测试：一个 XCTest
   （`testAnInternalBuildsSavedOptOutStopsClassifiedFailureReports`；旧代码无该键与参数，编译失败，旧逻辑对内部版恒返回
   `.classified`）。验证：本机未运行（不做本机 Swift 编译），以 PR CI 为准。剩余限制：开关只控制内部版默认上报，不影响快照。
+- **2026-09-24 第二轮跟进**（核验方 Codex 指出，Opus 读码确认，P2）：修复——同意只在入口检查一次，已通过检查的报告
+  在等待 token 刷新或网络重试期间用户关闭开关后仍会发送。现在 `reportConnectFailure` 把
+  `failureReportStillAllowed` 作为 `requestIsCurrent` 传给 API，每次发送前重读开关（完整记录还要求快照同意仍开）。
+  测试：一个 XCTest（`testAPendingFailureReportStopsOnceTheUserOptsOut`，旧代码无此判定）。验证：本机未运行，以 PR CI 为准。
+  剩余限制：已发出的请求不撤回。
 
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 

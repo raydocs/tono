@@ -207,6 +207,22 @@ final class AccountSession {
         return internalBuild && !internalOptedOut ? .classified : nil
     }
 
+    /// Re-checked before every send attempt of a report built with `built`: a
+    /// token refresh or network retry can wait, and a switch turned off in
+    /// that time must stop the report. Error text and Core lines need the
+    /// snapshot consent still on.
+    nonisolated static func failureReportStillAllowed(
+        builtAs built: ConnectFailureReportScope,
+        internalBuild: Bool
+    ) -> Bool {
+        let now = failureReportScope(
+            internalBuild: internalBuild,
+            snapshotOptedIn: isPeriodicTelemetryEnabled,
+            internalOptedOut: isInternalFailureReportsOptedOut
+        )
+        return now == .full || (built == .classified && now != nil)
+    }
+
     init(api: TonoAPIClient = TonoAPIClient(), keychain: KeychainStore = KeychainStore(), sidecar: TonoSidecarService,
          exitNode: String = Bundle.main.object(forInfoDictionaryKey: "TonoExitNode") as? String ?? "",
          descriptorConsumer: @escaping @MainActor (TonoTransportDescriptor?) async -> Void,

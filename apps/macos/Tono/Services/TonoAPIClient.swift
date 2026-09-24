@@ -222,9 +222,13 @@ actor TonoAPIClient {
     }
 
     func reportConnectFailure(
-        _ report: TonoConnectFailureReport
+        _ report: TonoConnectFailureReport,
+        requestIsCurrent: (@Sendable () -> Bool)? = nil
     ) async throws -> TonoConnectFailureReceipt {
-        try await authorizedRequest("telemetry/failures", method: "POST", body: report)
+        try await authorizedRequest(
+            "telemetry/failures", method: "POST", body: report,
+            requestIsCurrent: requestIsCurrent
+        )
     }
 
     func uploadSupportReport(

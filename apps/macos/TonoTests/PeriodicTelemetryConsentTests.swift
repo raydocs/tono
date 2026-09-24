@@ -97,6 +97,20 @@ final class PeriodicTelemetryConsentTests: XCTestCase {
         )
     }
 
+    /// A report that passed the consent check can still wait on a token
+    /// refresh or a network retry. Opting out in that time must stop it.
+    func testAPendingFailureReportStopsOnceTheUserOptsOut() {
+        defaults.set(true, forKey: SettingsKey.periodicTelemetryDefaultV2Applied)
+        defaults.set(false, forKey: SettingsKey.periodicTelemetryEnabled)
+        defaults.removeObject(forKey: SettingsKey.internalFailureReportsOptedOut)
+        XCTAssertTrue(AccountSession.failureReportStillAllowed(builtAs: .classified, internalBuild: true))
+        defaults.set(true, forKey: SettingsKey.internalFailureReportsOptedOut)
+        XCTAssertFalse(
+            AccountSession.failureReportStillAllowed(builtAs: .classified, internalBuild: true),
+            "an opt-out saved while the report waited must stop its next send attempt"
+        )
+    }
+
     func testTheSnapshotDoesNotRideOnAnotherConsent() {
         XCTAssertNotEqual(
             SettingsKey.periodicTelemetryEnabled,

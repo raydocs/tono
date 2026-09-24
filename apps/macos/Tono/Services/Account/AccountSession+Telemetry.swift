@@ -273,9 +273,10 @@ extension AccountSession {
     /// An internal build also sends the classified fields without that consent,
     /// until the user turns that off in Settings.
     func reportConnectFailure(_ notice: ConnectFailureNotice) async {
+        let internalBuild = Self.isInternalBuild()
         guard state == .ready, !systemSleeping, user != nil,
               let scope = Self.failureReportScope(
-                  internalBuild: Self.isInternalBuild(),
+                  internalBuild: internalBuild,
                   snapshotOptedIn: Self.isPeriodicTelemetryEnabled,
                   internalOptedOut: Self.isInternalFailureReportsOptedOut
               ) else { return }
@@ -304,7 +305,11 @@ extension AccountSession {
         )
         lastConnectFailureAt = Date()
         do {
-            _ = try await api.reportConnectFailure(report)
+            // Consent is re-read before each attempt, not only here: a token
+            // refresh or retry can wait while the user turns the switch off.
+            _ = try await api.reportConnectFailure(report, requestIsCurrent: {
+                AccountSession.failureReportStillAllowed(builtAs: scope, internalBuild: internalBuild)
+            })
         } catch {
             // Best effort: the window still carries the event, and a report
             // that did not land must never touch protection or the sign-in.
