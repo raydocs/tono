@@ -61,3 +61,7 @@ Ops tables after the sequence was unique. Applied in numeric order:
 ## 0082
 
 - `0082_customer_activity_windows.sql` — `customer_activity_windows` marks each telemetry window once it is added to activity hours, so the upload hook and the cron projection do not both count it
+
+## 0090
+
+- `0090_sessions_user_live_index.sql` — `sessions(user_id, revoked_at)` index for the cron enforcement scan, which only enforces ineligible users that still hold a live device or session

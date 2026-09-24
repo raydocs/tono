@@ -56,7 +56,7 @@ import {
   email,
   optionalText,
 } from './request';
-import { DIAGNOSTICS_DAY_SECONDS } from './diagnostics-limits';
+import { cronStep, runHousekeepingRetention } from './retention';
 import {
   sharedAdministrativeResource,
   backfillDeviceExitCredentials,
@@ -85,10 +85,6 @@ import {
   publicDiagnosticsReport,
   publicTelemetryWindow,
   normalizedReferenceCode,
-  DIAGNOSTICS_RETENTION_DEFAULT_SECONDS,
-  sweepDiagnosticsLogs,
-  TELEMETRY_RETENTION_DEFAULT_SECONDS,
-  OPS_AUDIT_RETENTION_SECONDS,
 } from './telemetry/routes';
 
 export { parseBytesRange } from './http';
@@ -1813,29 +1809,49 @@ async function enforceUser(e: Env, userId: string, processNow = true) {
   if (processNow && tailscaleEnrollmentEnabled(e)) await processRevocations(e);
 }
 
+// Users the cron enforces per tick. Each costs three queries plus one batch per
+// live device, so this keeps one invocation far below D1's per-invocation query
+// limit; users past the cap are picked up on the next tick.
+const ENFORCE_USERS_PER_TICK = 25;
+
 async function enforceAll(e: Env) {
   const t = now();
-  const q = await e.DB.prepare(
-    "SELECT id FROM users WHERE status != 'active' OR (expires_at IS NOT NULL AND expires_at <= ?) OR (quota_bytes IS NOT NULL AND usage_bytes >= quota_bytes)",
-  ).bind(t).all<Row>();
-  for (const u of q.results) {
-    try {
-      await enforceUser(e, u.id, false);
-    } catch (x) {
-      console.error('user enforcement failed', u.id, x instanceof Error ? x.message : String(x));
+  await cronStep('user enforcement scan', async () => {
+    // Only ineligible users that still hold a live device or session. Users are
+    // never deleted, so without this filter every user who ever expired or ran
+    // out of quota was re-enforced (three queries each) every five minutes.
+    const q = await e.DB.prepare(
+      `SELECT id FROM users
+       WHERE (status != 'active'
+              OR (expires_at IS NOT NULL AND expires_at <= ?)
+              OR (quota_bytes IS NOT NULL AND usage_bytes >= quota_bytes))
+         AND (EXISTS (SELECT 1 FROM devices
+                      WHERE devices.user_id = users.id AND devices.status IN ('active', 'pending'))
+              OR EXISTS (SELECT 1 FROM sessions
+                         WHERE sessions.user_id = users.id AND sessions.revoked_at IS NULL))
+       LIMIT ?`,
+    ).bind(t, ENFORCE_USERS_PER_TICK).all<Row>();
+    for (const u of q.results) {
+      try {
+        await enforceUser(e, u.id, false);
+      } catch (x) {
+        console.error('user enforcement failed', u.id, x instanceof Error ? x.message : String(x));
+      }
     }
-  }
+  });
   // Also expire any globally-stale pending devices (revocation outbox when management id present)
-  const stale = await e.DB.prepare(
-    "SELECT DISTINCT user_id FROM devices WHERE status = 'pending' AND pending_expires_at <= ?",
-  ).bind(t).all<Row>();
-  for (const row of stale.results) {
-    try {
-      await expirePending(e, row.user_id);
-    } catch (x) {
-      console.error('expirePending failed', row.user_id, x instanceof Error ? x.message : String(x));
+  await cronStep('stale pending scan', async () => {
+    const stale = await e.DB.prepare(
+      "SELECT DISTINCT user_id FROM devices WHERE status = 'pending' AND pending_expires_at <= ?",
+    ).bind(t).all<Row>();
+    for (const row of stale.results) {
+      try {
+        await expirePending(e, row.user_id);
+      } catch (x) {
+        console.error('expirePending failed', row.user_id, x instanceof Error ? x.message : String(x));
+      }
     }
-  }
+  });
   // Revocation is enforcement, not housekeeping. Run it before retention so a
   // transient failure deleting old diagnostics or telemetry cannot leave an
   // ineligible user's tailnet identity live until the next cron tick.
@@ -1852,60 +1868,7 @@ async function enforceAll(e: Env) {
       console.error('processRevocations failed', x instanceof Error ? x.message : String(x));
     }
   }
-  const rateWindow = envInt(e, 'RATE_LIMIT_WINDOW_SECONDS', 900);
-  // Diagnostics counters run on a day-long window, so pruning at twice the auth
-  // window would silently reset the per-day cap every five minutes.
-  const rateRetention = Math.max(rateWindow, DIAGNOSTICS_DAY_SECONDS) * 2;
-  await e.DB.prepare('DELETE FROM rate_limits WHERE window_start <= ?').bind(t - rateRetention).run();
-  await e.DB.prepare(
-    `DELETE FROM auth_challenges
-     WHERE expires_at <= ? OR (consumed_at IS NOT NULL AND consumed_at <= ?)`,
-  ).bind(t - 86_400, t - 86_400).run();
-  // Keep each retention branch indexable. The old OR made SQLite scan the whole
-  // sessions table every five minutes even though both predicates had indexes.
-  await e.DB.prepare(
-    `DELETE FROM sessions WHERE id IN (
-       SELECT id FROM sessions
-       WHERE revoked_at IS NOT NULL AND revoked_at <= ?
-       LIMIT 500
-     )`,
-  ).bind(t - 86_400).run();
-  await e.DB.prepare(
-    `DELETE FROM sessions WHERE id IN (
-       SELECT id FROM sessions
-       WHERE revoked_at IS NULL AND expires_at <= ?
-       LIMIT 500
-     )`,
-  ).bind(t).run();
-  // Diagnostics uploads are troubleshooting artifacts, not account records.
-  await e.DB.prepare('DELETE FROM diagnostics_reports WHERE received_at <= ?')
-    .bind(t - envInt(e, 'DIAGNOSTICS_RETENTION_SECONDS', DIAGNOSTICS_RETENTION_DEFAULT_SECONDS))
-    .run();
-  await sweepDiagnosticsLogs(e, t);
-  await e.DB.prepare('DELETE FROM telemetry_windows WHERE received_at <= ?')
-    .bind(t - envInt(e, 'TELEMETRY_RETENTION_SECONDS', TELEMETRY_RETENTION_DEFAULT_SECONDS))
-    .run();
-  // Individual report ids are bounded retry evidence, not the billing ledger.
-  // usage_report_sources retains the monotonic per-node totals, so deleting old
-  // ids cannot lower or double-count usage; a stale replay is ignored by that
-  // source's total/observed_at guards.
-  await e.DB.prepare(
-    `DELETE FROM usage_reports WHERE report_id IN (
-       SELECT report_id FROM usage_reports
-       WHERE created_at <= ?
-       ORDER BY created_at
-       LIMIT 500
-     )`,
-  ).bind(t - 14 * 86_400).run();
-  // The audit log had no retention at all — every operator action since
-  // migration 0023, forever. Half a year is the whole useful life of "who
-  // retired that node"; the LIMIT keeps the first sweep over an old backlog
-  // from being one giant delete.
-  await e.DB.prepare(
-    `DELETE FROM ops_audit WHERE id IN (
-       SELECT id FROM ops_audit WHERE at <= ? LIMIT 500
-     )`,
-  ).bind(t - OPS_AUDIT_RETENTION_SECONDS).run();
+  await runHousekeepingRetention(e, t);
   try {
     await retainOperationsTimeseries(e.DB, t);
   } catch (x) {
@@ -1925,8 +1888,9 @@ async function enforceAll(e: Env) {
     ),
     ROUTING_RESEARCH_RETENTION_MAX_SECONDS,
   );
-  await e.DB.prepare('DELETE FROM routing_research_snapshots WHERE received_at <= ?')
-    .bind(t - routingResearchRetention).run();
+  await cronStep('routing research retention', () =>
+    e.DB.prepare('DELETE FROM routing_research_snapshots WHERE received_at <= ?')
+      .bind(t - routingResearchRetention).run());
 }
 
 async function issueEnrollment(e: Env, d: Row) {
