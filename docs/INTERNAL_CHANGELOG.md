@@ -1836,6 +1836,27 @@
   仍是 `wanted && live`，对话框会说「保持受保护」，随后释放完成；此窗口未消除。其余 11 种托盘
   语言缺 `exitRefusal.*` 时按 rust-i18n 回退到 zh（与 #513 同一取舍）。对话框不再显示具体错误。
   与 #518 都改 `feat/window.rs` 的退出路径，改动不在同一行块。
+## 2026-09-24 · Windows 连接不再关闭非 Tono 的系统代理
+
+- **归属/来源**：G1 客户端保护边界（首次连接/断开对系统状态的改动）；Windows App。基线 origin/main
+  [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b)，分支 `fix/win-sysproxy-owner-20260924`，Issue #541
+  （内部审查 H19-C-F1，跨厂商核实 confirmed）；未合 main。
+- **缺陷修复**：每次连接在 Service 就绪后、WFP 武装前无条件把当前用户的 WinINET 代理（LAN 与全部 RAS/VPN 项）写成
+  直连，断开、停 Core、Service owner 丢失恢复再写一次，且从不保存或恢复原配置；公司代理/PAC 或其他产品的代理被
+  静默关闭并跨卸载保留。改后：Windows 上只有「当前设置的每个生效部分都指向本安装自己的回环监听」（手动代理为
+  `127.0.0.1`/`localhost` + 已配置 Mixed Port，或 PAC 为本实例 `http://127.0.0.1:<端口>/commands/pac`）才清除；
+  其他代理原样保留，因此无需保存/恢复。连接侧的清除移到 `run_stages` 成功（屏障已武装）之后；断开、停 Core、
+  owner 丢失恢复走同一所有权判定；设置读不出时不清除。
+- **新增/优化**：无。原生更新事务的前置条件不变：`tono_install_update` 与待定更新的显式 Disconnect 改调
+  `proxy_control::clear_for_update()`，仍无条件关闭（其 Service 在 `security::no_proxy` 拒绝代理开启时暂存）。
+- **工程与测试**：`core/sysopt.rs` 一个 `#[test]`（`only_a_proxy_naming_tono_listeners_is_cleared`）：公司代理、另一产品
+  回环端口、外部 PAC、Tono 端口+外部 PAC 均不算 Tono 所有；只有指向本安装监听的遗留才清除。
+- **验证**：见 PR；红：仅测试提交在 CI 编译失败（旧代码没有所有权判定）；绿：Windows CI `cargo test --locked`。
+  MacBook 未编译 Rust（仓库规则）。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：用户主动安装更新时仍会关闭非 Tono 代理（更新事务设计，非本修复范围）；不兼容隧道的外部代理不再被
+  清除，连接后该代理可能不可用，本修复不提示也不征求同意；RAS 项仍随 LAN 一起清（仅在 LAN 设置证明是 Tono 遗留时）；
+  未实机验证。
 
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
