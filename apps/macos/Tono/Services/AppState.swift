@@ -367,7 +367,10 @@ final class AppState {
             return
         }
         if !isConnected {
-            guard KillSwitchService.isArmed, isTonoReady else { return }
+            // PF still armed after the user's Restore internet failed is not
+            // a session to recover; only the user's next Connect is (X1-2).
+            guard KillSwitchService.isArmed, isTonoReady,
+                  !connectionCoordinator.disconnectQueueRequestsRelease else { return }
             // Wake recovery owns its barrier/retry sequence. Dynamic Store
             // emits several route and DNS notifications during the same wake;
             // they must not create a second coordinator that races its connect.
@@ -592,7 +595,9 @@ final class AppState {
         // read armed even though the user asked for an open host. Wake
         // recovery would enqueue a preserve teardown over the release and
         // reconnect — converting the explicit release into re-protection.
-        // Let the release finish; its completion publishes the outcome.
+        // Let the release finish; its completion publishes the outcome. A
+        // release the sleep gate refused keeps the intent too: PF still reads
+        // armed, but the user asked for an open host, not a reconnect (X1-2).
         let releaseInFlight = connectionCoordinator.disconnectQueueRequestsRelease
         let shouldResume = !releaseInFlight
             && (resumeProtectionAfterWake || KillSwitchService.isArmed)

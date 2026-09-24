@@ -17,7 +17,10 @@ final class ConnectionCoordinator {
     /// still in flight — a release can hold the queue for up to 180 s on the
     /// administrator repair prompt. The sleep/wake paths read it so a sleep
     /// cannot rewrite the user's pending release into preserve teardowns and
-    /// wake recovery (R1-F2).
+    /// wake recovery (R1-F2). A release that ends with PF still armed (the
+    /// helper's sleep gate refused its disarm, or any other failure) keeps
+    /// the intent until the user connects again, so wake and network-change
+    /// recovery cannot turn it into a reconnect (X1-2).
     private var disconnectQueueReleaseIntent = false
     var nodeSwitchTask: Task<Void, Never>?
     var protectedReconnectTask: Task<Void, Never>?
@@ -33,9 +36,10 @@ final class ConnectionCoordinator {
     private var deferredConnect: (id: UUID, task: Task<Void, Never>)?
 
     /// Whether the pending or in-flight teardown queue's newest request is an
-    /// explicit release. Newest-wins, matching `disconnectRequestID`: a later
-    /// teardown request replaces the intent, and completion of the newest
-    /// request retires it.
+    /// explicit release, or was one that could not release PF. Newest-wins,
+    /// matching `disconnectRequestID`: a later teardown request replaces the
+    /// intent, completion of the newest request retires it once the release
+    /// is confirmed, and a new Connect retires an unconfirmed one.
     var disconnectQueueRequestsRelease: Bool {
         disconnectQueueReleaseIntent
     }
@@ -62,9 +66,15 @@ final class ConnectionCoordinator {
 
     /// Earlier teardown still has to finish its privileged work, but cannot
     /// publish a stale result over a newer disconnect/release request's UI.
-    func completeDisconnect(_ requestID: Int, update: () -> Void) {
+    func completeDisconnect(
+        _ requestID: Int,
+        releaseUnconfirmed: Bool = false,
+        update: () -> Void
+    ) {
         guard requestID == disconnectRequestID else { return }
-        disconnectQueueReleaseIntent = false
+        if !releaseUnconfirmed {
+            disconnectQueueReleaseIntent = false
+        }
         update()
     }
 
@@ -175,6 +185,9 @@ final class ConnectionCoordinator {
             return
         }
         bumpGeneration()
+        // Connecting is the user's newer intent; it retires a release that
+        // could not confirm PF was released.
+        disconnectQueueReleaseIntent = false
         let (canProceed, attemptID) = prepare()
         guard canProceed else { return }
 

@@ -32,6 +32,29 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 被睡眠门拒绝的 Restore internet 不再在唤醒或网络变化时自动重连
+
+- **归属/来源**：G1 保护状态与用户意图；macOS `ConnectionCoordinator`、`AppState` 睡眠/唤醒与
+  网络变化路径。内部审查 X1-2（三名审查者独立发现），Issue #442，是 #310 的补全。基线 main
+  bb2ed4e4 → 分支 `fix/sleep-release-intent-20260923`；提交时未合 main。
+- **缺陷修复**：Restore internet 尚未走到 PF disarm 时合盖，helper 的睡眠门拒绝 disarm，
+  这次释放以"PF 仍 armed、Protected Offline"收尾。`completeDisconnect` 不管释放是否成功都
+  清掉释放意图，唤醒时 `resumeAfterSystemWake` 只剩 `KillSwitchService.isArmed == true`，
+  于是自动重连；不在唤醒恢复中时，随后的网络变化也会按 `isArmed` 触发重连。现在释放以 PF
+  仍 armed 收尾时保留释放意图，直到用户再次 Connect（`executeConnect` 清除）或新的拆除请求
+  替换它；唤醒和"未连接"的网络变化分支都尊重这个意图。主机保持 fail-closed（helper 睡眠时
+  写入的紧急阻断），用户再点 Restore internet 或 Connect 决定去向。
+- **新增/优化**：无。
+- **工程与测试**：`AppStateSleepTests.testSleepGateRefusedReleaseDoesNotReconnectOnWake`
+  （一个 XCTest，沿用 `NetworkProtectionOperations` seam）：释放停在 DNS 恢复时进入睡眠，
+  disarm 以睡眠门错误失败，拆除收尾后唤醒并触发一次网络变化，断言不建唤醒恢复任务、不排
+  重连。旧代码建出 `wakeRecoveryTask`，断言失败。
+- **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests），结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：唤醒后不会自动重试那次被拒的释放，需要用户再点一次 Restore internet；
+  睡眠门拒绝 disarm 的实际频率未在实机测量。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
