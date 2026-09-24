@@ -217,3 +217,52 @@ impl TraySpeedController {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{TRAY_SPEED_CONTROLLER_POLL, connect_when_published, owns_published_controller};
+    use crate::tono::state::TonoState;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    /// H18-O-F2: with no Core the old loop made one connect attempt, and wrote one INFO line,
+    /// every second. The task must wait for a published controller instead, then start.
+    #[tokio::test(start_paused = true)]
+    async fn speed_stream_waits_for_a_published_controller_before_connecting() {
+        let state = Arc::new(TonoState::for_test());
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let task = tokio::spawn({
+            let state = Arc::clone(&state);
+            let attempts = Arc::clone(&attempts);
+            async move {
+                connect_when_published(
+                    || {
+                        let state = Arc::clone(&state);
+                        async move { owns_published_controller(&*state.lock().await) }
+                    },
+                    move || async move { attempts.fetch_add(1, Ordering::SeqCst) + 1 },
+                    || false,
+                )
+                .await
+            }
+        });
+
+        tokio::time::sleep(Duration::from_secs(600)).await;
+        assert_eq!(attempts.load(Ordering::SeqCst), 0, "no controller, no connect attempt");
+
+        {
+            let mut inner = state.lock().await;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            inner.controller_secret = Some("published".into());
+        }
+        let started = tokio::time::timeout(TRAY_SPEED_CONTROLLER_POLL * 2, task)
+            .await
+            .expect("a published controller starts the stream within one poll")
+            .unwrap();
+        assert_eq!(started, Some(1));
+    }
+}
