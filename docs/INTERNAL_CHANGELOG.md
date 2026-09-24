@@ -1857,6 +1857,29 @@
 - **剩余限制**：用户主动安装更新时仍会关闭非 Tono 代理（更新事务设计，非本修复范围）；不兼容隧道的外部代理不再被
   清除，连接后该代理可能不可用，本修复不提示也不征求同意；RAS 项仍随 LAN 一起清（仅在 LAN 设置证明是 Tono 遗留时）；
   未实机验证。
+## 2026-09-24 · Windows 更新恢复任务在提交与最终卸载时退休
+
+- **归属/来源**：G3 原生升级链 + 卸载恢复原状（L1）；Windows Service 更新执行器、卸载助手与 NSIS 卸载段。
+  基线 origin/main [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b)，分支
+  `fix/win-update-recovery-task-20260924`，Issue #549（内部审查 H19-O-F5 = H19-C-F3 = H19-G-F3）；未合 main。
+- **缺陷修复**：原生更新注册的 SYSTEM `ONSTART` 任务 `Tono Update Recovery v1` 从不删除：提交后
+  `cleanup_committed` 只清备份，此后每次开机仍启动 SYSTEM 执行器；卸载只删两个自启动任务，任务与
+  `ProgramData\Tono\updates-v1\<attempt>` 下的执行器副本和暂存安装包在卸载后继续存在并开机运行。改后：
+  (1) 执行器在提交后的清理成功后删除该任务（同 macOS 提交时退休 launchd 项），失败只记日志，下次开机的同一路径重试；
+  (2) NSIS 卸载段在非更新模式下给卸载助手传 `--final-uninstall`；助手只在结果证明 WFP 已移除（非 StillProtected）
+  时删除任务并在存储锁下删除各 attempt 目录，保留存储自身文件（`state.json` 的已消费高水位与手动安装租约，
+  D3；租约在助手返回后由 `--manual-update-finish` 释放）。安装期清理、安装失败回滚与更新模式不传该参数，行为不变。
+  这些清理失败按「外观残留」处理（退出码 2，继续卸载），不会把已证明安全的卸载变成阻断。
+- **新增/优化**：无。
+- **工程与测试**：两个 `#[test]`，各对应一个行为：`update_executor.rs`
+  `update_commit_retires_the_recovery_task_after_cleanup`（无提交清理时不退休；清理后退休）；
+  `uninstall_service.rs` `final_uninstall_retires_update_executors_only_after_proven_removal`（StillProtected 时不动；
+  证明移除后退休任务、删执行器目录、保留 `state.json`）。
+- **验证**：见 PR；红：仅测试提交在 CI 编译失败（旧代码没有这两个决定）；绿：Windows CI。MacBook 未编译 Rust，NSIS 未编译。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：schtasks 路径沿用注册时的 `C:\Windows\System32`（#471 合入后应一并改为系统目录；只在注册成功的机器上才需要退休，
+  二者一致）；已提交 attempt 目录在提交时不删（执行器正在运行自身映像，按 D3 保留为证据），只在最终卸载时删；
+  回滚终态（RolledBack）的任务仍保留到最终卸载；未实机验证任务删除与卸载顺序。
 
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 

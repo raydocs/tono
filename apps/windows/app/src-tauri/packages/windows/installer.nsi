@@ -92,6 +92,9 @@ Var VC_RUNTIME_NEEDED
 ; down a registration this install could have created and never an unrelated healthy Service.
 Var ServiceInstallAttempted
 Var ServiceInstallRetries
+; `--final-uninstall` only in the Uninstall section outside update mode: the helper then also
+; retires the update recovery task and executors, after WFP removal is proven. Empty elsewhere.
+Var TonoUninstallScope
 
 Name "${PRODUCTNAME}"
 BrandingText "${COPYRIGHT}"
@@ -669,7 +672,7 @@ FunctionEnd
     ${EndIf}
     DetailPrint "Restoring network protection and removing ${PRODUCTNAME} Service..."
     ; Preserve the recovery files but return control instead of hanging forever if cleanup stalls.
-    nsExec::ExecToLog /TIMEOUT=180000 '"$INSTDIR\resources\tono-service-uninstall.exe"'
+    nsExec::ExecToLog /TIMEOUT=180000 '"$INSTDIR\resources\tono-service-uninstall.exe" $TonoUninstallScope'
     Pop $0
     ; Second chance for machines that fail the first pass (stuck owner lock, ProgramData ACL, or
     ; a wedged first disarm): run the Service binary's emergency disarm, then retry the helper.
@@ -683,7 +686,7 @@ FunctionEnd
         Pop $1
         DetailPrint "Emergency disarm finished (result $1)."
       ${EndIf}
-      nsExec::ExecToLog /TIMEOUT=180000 '"$INSTDIR\resources\tono-service-uninstall.exe"'
+      nsExec::ExecToLog /TIMEOUT=180000 '"$INSTDIR\resources\tono-service-uninstall.exe" $TonoUninstallScope'
       Pop $0
       DetailPrint "Second cleanup finished (result $0)."
     ${EndIf}
@@ -1302,6 +1305,9 @@ Section Uninstall
   !endif
 
   !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+  ${If} $UpdateMode <> 1
+    StrCpy $TonoUninstallScope "--final-uninstall"
+  ${EndIf}
   !insertmacro RemoveVergeService
 
   ; Remove cached window state files

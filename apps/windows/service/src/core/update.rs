@@ -840,6 +840,31 @@ pub fn unpack_gate(package: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The ONSTART task [`register_consumed_recovery`] creates.
+pub const RECOVERY_TASK_NAME: &str = "Tono Update Recovery v1";
+
+/// Remove the SYSTEM boot task. The executor retires it once the committed
+/// cleanup ran, as macOS retires its launchd job at commit; a final uninstall
+/// retires it after WFP removal is proven. A task that is already gone is not
+/// an error. Same scheduler binary as the registration.
+pub fn retire_recovery_task() -> Result<()> {
+    let schtasks = Path::new("C:\\Windows\\System32\\schtasks.exe");
+    let deleted = std::process::Command::new(schtasks)
+        .args(["/Delete", "/TN", RECOVERY_TASK_NAME, "/F"])
+        .output()?;
+    if deleted.status.success() {
+        return Ok(());
+    }
+    let present = std::process::Command::new(schtasks)
+        .args(["/Query", "/TN", RECOVERY_TASK_NAME])
+        .output()?;
+    ensure!(
+        !present.status.success(),
+        "could not retire the update recovery task"
+    );
+    Ok(())
+}
+
 /// Manual installation/repair has no protected transaction bridge. A missing,
 /// corrupt or armed marker cannot be converted to permission by an installer.
 pub fn maintenance_allowed() -> Result<()> {
