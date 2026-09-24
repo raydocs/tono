@@ -868,6 +868,36 @@
 - **剩余限制**：必须在 0.0.73 发给 0.0.72 客户之前合入。未在 Windows 11 上用 0.0.72 设置页
   升级实测。安装器在已连接时静默拒绝（H15-F2）另开 PR。
 
+## 2026-09-23 · Windows 安装/卸载门控拒绝时给出说明；确认后的卸载可释放保护
+
+- **归属/来源**：G3 客户升级路径；Windows NSIS 模板 + Service 手动安装门控。内部审查 H15-F2，
+  Issue #499。基线 origin/main bb2ed4e4；分支 `fix/installer-filter-gate-20260923`；未合 main。
+- **缺陷修复**：`--manual-update-gate`（`begin_manual`）在存在任何 Tono WFP 过滤器或 active
+  owner 仍要求 Core 运行时拒绝，NSIS 在 `.onInit`/`un.onInit` 里 `Abort` 且没有对话框：
+  0.0.72 已连接时从设置页更新 → App 退出、安装器静默退出；Protected Offline 卸载静默退出，
+  `RemoveVergeService` 的"卸载助手 → 紧急解除 → 再清理"阶梯永远到不了。改为：
+  (1) 这两种"仅因保护仍开启"的拒绝返回可区分的 `ProtectionActive`，门控以退出码 77 表达，
+  其他拒绝（更新 pending、另一个安装器持有租约、DNS/Core 状态无法确认）不变；
+  (2) 安装器非静默时弹框：77 提示在 Tono 中断开/恢复网络或以管理员运行"恢复网络"快捷方式，
+  其他提示有未完成更新或安装器；门控仍拒绝，安装器不自行释放保护；
+  (3) 卸载器仅在 77 且非静默时询问确认，确认后调用新的 `--manual-uninstall-gate`（只检查
+  更新 pending 与安装器租约并记录租约，不要求断开），随后由既有 `RemoveVergeService` 释放保护；
+  该阶梯仅在证明 WFP 已移除时继续删除文件。静默卸载在保护开启时仍拒绝（76）。
+- **新增/优化**：无。
+- **工程与测试**：一个 node 测试（`windows-packaging.test.mjs`
+  "NSIS explains a refused gate and confirms before uninstall releases protection"），断言两处
+  门控失败分支在非静默时有 MessageBox、卸载确认位于 `--manual-update-gate` 与
+  `--manual-uninstall-gate` 之间、四组文案三种语言齐全、Service 退出码常量为 77。本机在旧模板上
+  实际运行为失败，改后 23/23 通过。
+- **验证**：MacBook 上 `node --test scripts/windows-packaging.test.mjs`（apps/windows/app）通过；
+  Rust 仅用 rustfmt 做语法解析，未执行 cargo。NSIS 本机不能编译。Service 与模板改动交给本 PR
+  CI（windows-2025 Service/App 测试、ubuntu packaging 契约）。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：需候选构建 + Windows 11 实机验证：0.0.72 已连接时设置页更新、Protected Offline
+  卸载（确认/取消两条路径）、孤立过滤器卸载。安装路径没有提供"由安装器代为断开"：已安装 Service
+  在线时 `--emergency-disarm` 按设计拒绝，受支持的释放路径是 App 的认证管道，安装器代断开需要新的
+  Service 路由，待 owner 决定。0.0.72 更新失败后不会自动重新打开旧 App。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3

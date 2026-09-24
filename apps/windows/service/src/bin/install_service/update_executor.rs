@@ -102,7 +102,17 @@ pub(super) fn dispatch() -> Result<bool, Error> {
             Ok(true)
         }
         [mode] if mode == "--manual-update-gate" => {
-            tokio::runtime::Runtime::new()?.block_on(native::begin_manual())?;
+            if let Err(error) = tokio::runtime::Runtime::new()?.block_on(native::begin_manual()) {
+                if error.is::<native::ProtectionActive>() {
+                    eprintln!("Error: {error:#}");
+                    std::process::exit(native::MANUAL_GATE_PROTECTION_ACTIVE_EXIT);
+                }
+                return Err(error);
+            }
+            Ok(true)
+        }
+        [mode] if mode == "--manual-uninstall-gate" => {
+            native::begin_manual_uninstall()?;
             Ok(true)
         }
         [mode] if mode == "--manual-update-finish" => {

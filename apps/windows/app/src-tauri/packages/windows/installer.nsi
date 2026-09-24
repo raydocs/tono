@@ -395,6 +395,22 @@ LangString legacyWixManualMigration ${LANG_SIMPCHINESE} "检测到旧版 MSI/WiX
 LangString legacyWixManualMigration ${LANG_ENGLISH} "A legacy MSI/WiX ${PRODUCTNAME} installation was found. To avoid deleting application data accidentally, this installer will not remove it automatically. Uninstall the legacy version from Windows Installed apps without deleting application data, then run this installer again."
 LangString legacyWixManualMigration ${LANG_RUSSIAN} "Обнаружена устаревшая MSI/WiX-установка ${PRODUCTNAME}. Во избежание случайного удаления данных этот установщик не будет удалять её автоматически. Удалите старую версию через список установленных приложений Windows без удаления данных приложения, затем снова запустите этот установщик."
 
+LangString manualInstallNeedsDisconnect ${LANG_SIMPCHINESE} "${PRODUCTNAME} 仍在连接中，或网络保护仍处于开启状态，因此现在无法安装。没有做任何更改。$\r$\n$\r$\n请打开 ${PRODUCTNAME}，点击“断开”（在“保护离线”状态下点击“恢复网络”），然后重新运行此安装程序或再次检查更新。$\r$\n$\r$\n如果 ${PRODUCTNAME} 无法打开，请先以管理员身份运行“开始”菜单中的“${PRODUCTNAME} — 恢复网络 (Restore Network)”。"
+LangString manualInstallNeedsDisconnect ${LANG_ENGLISH} "${PRODUCTNAME} is still connected, or its network protection is still on, so it cannot be installed right now. Nothing was changed.$\r$\n$\r$\nOpen ${PRODUCTNAME} and choose Disconnect (or Restore internet if it shows Protected Offline), then run this installer or check for updates again.$\r$\n$\r$\nIf ${PRODUCTNAME} does not open, first run the Start-menu shortcut $\"${PRODUCTNAME} — 恢复网络 (Restore Network)$\" as administrator."
+LangString manualInstallNeedsDisconnect ${LANG_RUSSIAN} "${PRODUCTNAME} всё ещё подключён или его защита сети включена, поэтому установка сейчас невозможна. Ничего не изменено.$\r$\n$\r$\nОткройте ${PRODUCTNAME} и выберите «Отключить» (или «Восстановить интернет» в режиме Protected Offline), затем снова запустите этот установщик или проверьте обновления.$\r$\n$\r$\nЕсли ${PRODUCTNAME} не открывается, сначала запустите от имени администратора ярлык меню «Пуск» $\"${PRODUCTNAME} — 恢复网络 (Restore Network)$\"."
+
+LangString manualInstallRefused ${LANG_SIMPCHINESE} "${PRODUCTNAME} 现在无法安装：可能有受保护的更新尚未完成、另一个安装程序正在运行，或无法确认网络状态。没有做任何更改。$\r$\n$\r$\n请打开 ${PRODUCTNAME}，在“检查更新”中完成或断开并重试未完成的更新，然后再运行此安装程序。"
+LangString manualInstallRefused ${LANG_ENGLISH} "${PRODUCTNAME} cannot be installed right now: a protected update may still be pending, another installer may be running, or the network state could not be confirmed. Nothing was changed.$\r$\n$\r$\nOpen ${PRODUCTNAME}, finish or Disconnect and Retry the pending update from Check for Updates, then run this installer again."
+LangString manualInstallRefused ${LANG_RUSSIAN} "Сейчас установить ${PRODUCTNAME} нельзя: возможно, не завершено защищённое обновление, работает другой установщик или не удалось подтвердить состояние сети. Ничего не изменено.$\r$\n$\r$\nОткройте ${PRODUCTNAME}, завершите незаконченное обновление или отключитесь и повторите его в разделе проверки обновлений, затем снова запустите этот установщик."
+
+LangString uninstallReleasesProtection ${LANG_SIMPCHINESE} "${PRODUCTNAME} 仍在连接中，或网络保护仍处于开启状态。$\r$\n$\r$\n继续卸载会关闭 ${PRODUCTNAME} 的网络保护并恢复普通网络访问；如果无法确认拦截已解除，将不会删除任何文件。$\r$\n$\r$\n是否继续卸载？"
+LangString uninstallReleasesProtection ${LANG_ENGLISH} "${PRODUCTNAME} is still connected, or its network protection is still on.$\r$\n$\r$\nUninstalling turns ${PRODUCTNAME}'s protection off and restores normal internet access. If the block cannot be shown removed, nothing is deleted.$\r$\n$\r$\nContinue uninstalling?"
+LangString uninstallReleasesProtection ${LANG_RUSSIAN} "${PRODUCTNAME} всё ещё подключён или его защита сети включена.$\r$\n$\r$\nУдаление отключит защиту ${PRODUCTNAME} и восстановит обычный доступ в интернет. Если не удастся подтвердить снятие блокировки, ничего не будет удалено.$\r$\n$\r$\nПродолжить удаление?"
+
+LangString manualUninstallRefused ${LANG_SIMPCHINESE} "${PRODUCTNAME} 现在无法卸载：可能有受保护的更新尚未完成，或另一个安装程序正在运行。没有做任何更改。$\r$\n$\r$\n请打开 ${PRODUCTNAME}，在“检查更新”中完成或断开并重试未完成的更新，然后再卸载。"
+LangString manualUninstallRefused ${LANG_ENGLISH} "${PRODUCTNAME} cannot be uninstalled right now: a protected update may still be pending, or another installer may be running. Nothing was changed.$\r$\n$\r$\nOpen ${PRODUCTNAME}, finish or Disconnect and Retry the pending update from Check for Updates, then uninstall again."
+LangString manualUninstallRefused ${LANG_RUSSIAN} "Сейчас удалить ${PRODUCTNAME} нельзя: возможно, не завершено защищённое обновление или работает другой установщик. Ничего не изменено.$\r$\n$\r$\nОткройте ${PRODUCTNAME}, завершите незаконченное обновление или отключитесь и повторите его в разделе проверки обновлений, затем повторите удаление."
+
 LangString restoreNetworkTooltip ${LANG_SIMPCHINESE} "当 ${PRODUCTNAME} 无法恢复网络时，解除网络保护（需要管理员权限）。"
 LangString restoreNetworkTooltip ${LANG_ENGLISH} "Restores your network if ${PRODUCTNAME} cannot. Requires administrator approval."
 LangString restoreNetworkTooltip ${LANG_RUSSIAN} "Восстанавливает сеть, если ${PRODUCTNAME} не может. Требуются права администратора."
@@ -429,6 +445,16 @@ Function .onInit
   nsExec::ExecToLog '"$PLUGINSDIR\tono-gate\resources\tono-service-install.exe" --manual-update-gate'
   Pop $0
   ${If} $0 != "0"
+    ; Abort text is never shown from .onInit, and a 0.0.72 settings-page update has already
+    ; closed the App: without a dialog Tono just vanishes. 77 means only active protection
+    ; stood in the way. The gate still refuses; nothing here releases protection.
+    ${IfNot} ${Silent}
+      ${If} $0 == "77"
+        MessageBox MB_ICONEXCLAMATION|MB_OK "$(manualInstallNeedsDisconnect)"
+      ${Else}
+        MessageBox MB_ICONSTOP|MB_OK "$(manualInstallRefused)"
+      ${EndIf}
+    ${EndIf}
     SetErrorLevel 76
     Abort "Disconnect and resolve any pending protected update before manual installation. No installed files have been changed."
   ${EndIf}
@@ -1192,7 +1218,23 @@ Function un.onInit
   ; Refuse pending v1 before the pre-uninstall hook or any App termination.
   nsExec::ExecToLog '"$INSTDIR\resources\tono-service-install.exe" --manual-update-gate'
   Pop $0
+  ; 77: no update is pending and no other installer holds the lease; only active protection
+  ; stood in the way. RemoveVergeService exists for exactly that state: it releases protection
+  ; (helper, then emergency disarm) and deletes nothing unless WFP removal is proven. After the
+  ; user confirms, take only the update/installer lease and let that ladder run.
+  ${If} $0 == "77"
+  ${AndIfNot} ${Silent}
+    MessageBox MB_ICONEXCLAMATION|MB_YESNO "$(uninstallReleasesProtection)" IDYES uninstallReleaseConfirmed
+    SetErrorLevel 76
+    Abort "Uninstall cancelled while protection is active."
+    uninstallReleaseConfirmed:
+    nsExec::ExecToLog '"$INSTDIR\resources\tono-service-install.exe" --manual-uninstall-gate'
+    Pop $0
+  ${EndIf}
   ${If} $0 != "0"
+    ${IfNot} ${Silent}
+      MessageBox MB_ICONSTOP|MB_OK "$(manualUninstallRefused)"
+    ${EndIf}
     SetErrorLevel 76
     Abort "Disconnect and resolve any pending protected update before uninstalling."
   ${EndIf}
