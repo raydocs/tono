@@ -483,6 +483,11 @@ def load_state(path: Path) -> dict:
         return {"totals": {}, "counterBaseline": {}, "pendingReports": []}
     with path.open("r", encoding="utf-8") as handle:
         state = json.load(handle)
+    # Valid JSON that is not an object ([] or null) must be a refusal like any
+    # other corruption, not an AttributeError that ends the round before any
+    # client is removed.
+    if not isinstance(state, dict):
+        raise Refusal("state file is corrupt: not a JSON object")
     for key, kind in (("totals", dict), ("counterBaseline", dict), ("pendingReports", list)):
         if not isinstance(state.get(key), kind):
             raise Refusal(f"state file is corrupt: {key}")
@@ -492,6 +497,9 @@ def load_state(path: Path) -> dict:
                       ("lastReportObservedAt", int)):
         if key in state and not isinstance(state[key], kind):
             raise Refusal(f"state file is corrupt: {key}")
+    # Used as a set of labels before revocation; a non-string entry would crash it.
+    if not all(isinstance(label, str) for label in state.get("installedClients", [])):
+        raise Refusal("state file is corrupt: installedClients")
     last_report_at = state.get("lastReportObservedAt")
     if (
         isinstance(last_report_at, bool)
