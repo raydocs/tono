@@ -1035,6 +1035,37 @@
 - **续记（2026-09-23，第三轮审查）**：namespace 由 v10 改为 v11，避免与 #343 同值——同值时
   已装过另一版 v10 的机器会按 key 保留旧 DHCP 过滤器，收窄静默失效。本机未编译，委托本 PR CI。
 
+## 2026-09-23 · Windows runtime asset 从已校验的句柄复制（H2-F4）
+
+- **归属**：G1 保护不变量（特权端不跟随用户可写路径）；平台/模块：Windows Service
+  runtime generation（`apps/windows/service`），App 无代码改动。
+- **来源**：基线 main b1b6fe6c（2026-09-23 rebase 到 26d438c1）→ 分支 `fix/runtime-asset-reparse-20260923`；Issue #355；
+  PR 与准确源码 SHA 见 PR，提交本条时未合 main。
+- **缺陷修复（内部审查 H2-F4，源码推导，影响低）**：`validate_source` 在规划阶段按路径
+  校验，`copy_staged_file` 在停旧 Core 之后用 `tokio::fs::copy` 按路径重新打开，会跟随
+  中途换上的 junction/symlink。改后：复制只打开一次源文件，并证明该句柄仍解析到已校验
+  路径（Windows `GetFinalPathNameByHandleW`；Unix canonical + dev/ino），不一致即拒绝，
+  内容从同一句柄读取。StartClash 的 `materialize` 与 `stage_runtime` 共用此原语。打开、句柄
+  校验与整次复制在一次 `spawn_blocking` 内完成（`std::io::copy`，1 MiB 写缓冲），不再按 8 KiB
+  块在 tokio 阻塞线程间往返，缩短停旧 Core 后的断网窗口；复制最多读规划时记录的长度 +1 字节，
+  源文件在规划后变长即拒绝（不无界复制进 ProgramData，也不装入截断文件），变短则按完整内容
+  复制，由既有的复制后 re-stat 处理。
+- **新增/优化**：无。
+- **工程与测试**：新增 `#[tokio::test]`
+  `a_source_directory_swapped_for_a_link_after_validation_is_not_copied`（`staging.rs`）：
+  校验路径成立后把源目录换成 junction（Windows，`mklink /J`）或 symlink（Unix），复制
+  必须失败且目标不存在；旧代码会跟随链接复制成功，断言失败。链接另一端的文件与已校验文件
+  等长，确保拒绝来自句柄校验而不是新增的长度校验。长度上限本身没有单独测试。
+- **验证**：本机（MacBook）只做编辑与 `rustfmt --check`，未运行 cargo build/test；编译与
+  回归委托本 PR 的 GitHub-hosted `windows-2025` CI，结果以该 run 为准。
+- **候选/发布**：仅源码，无新候选、无新包；未触碰 `appcast.xml`/`latest.json` 或
+  `windows-updates`。
+- **剩余限制**：复制后目标文件不做摘要复核（句柄已固定，内容即该文件当前内容）；
+  StartClash 期间若资源文件在规划后被改写且变长，本次启动失败（此前会完整复制新内容）；
+  同长或变短的改写仍按原设计不致启动失败。断网窗口的缩短未实测。硬链接不在本修复范围内。
+- **续记（2026-09-23，第三轮审查）**：复制改为单次阻塞复制并按规划长度校验，见上。本机未
+  编译，委托本 PR CI。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
