@@ -331,7 +331,9 @@ def parse_quality(sc: str, bt: str) -> dict:
 
     risks = []
     if not sc or "missing" in sc:
-        return {"quality": "ok", "risk_keywords": [], "route_keywords": routes[:12]}
+        # No securityCheck output (download failed or the pinned digest no
+        # longer matches upstream) is not evidence of a clean IP.
+        return {"quality": "unknown", "risk_keywords": [], "route_keywords": routes[:12]}
 
     severe = 0
     for pat, tag in (

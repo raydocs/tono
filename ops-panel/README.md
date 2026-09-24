@@ -5,7 +5,7 @@
 ## 采集节奏
 
 - 默认全量：`python3 collect.py` — 12 小时串行 SSH（securityCheck、backtrace、大陆 agent / check-host 探测），写 `report.json` 并 `PUT /api/v1/ops-ingest/snapshot`。
-  securityCheck、backtrace 以 root 在节点上运行，按 `collect.py` 里的 sha256 固定；摘要不符就删除并报 missing，不回退镜像。换版本时同时改 URL 和摘要。
+  securityCheck、backtrace 以 root 在节点上运行，按 `collect.py` 里的 sha256 固定；摘要不符就删除并报 missing（节点质量记为 unknown，不是 ok），不回退镜像。换版本时同时改 URL 和摘要。
 - `--agents-only`：只拉 Komari 节点列表，推一份 `{"agents": ...}` 部分快照，给 1–5 分钟的 timeseries 用。
 
 仓库里没有全量采集的 unit 文件；部署时把 `collect.py` 拷到 `/opt/tono-ops/`，用本机已有的 collector timer 跑这两条节奏。

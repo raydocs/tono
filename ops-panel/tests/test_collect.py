@@ -22,11 +22,16 @@ class RemoteQualityScriptTests(unittest.TestCase):
 
         def fake_run(cmd, input=None, **kwargs):  # noqa: A002
             captured["script"] = input
-            return subprocess.CompletedProcess(cmd, 0, stdout="===END===\n", stderr="")
+            # A digest mismatch leaves the tool absent, so the script reports missing.
+            stdout = "===SECURITY_CHECK===\nmissing\n===BACKTRACE===\nmissing\n===END===\n"
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
 
         node = {"name": "n1", "host": "192.0.2.10", "password": "x"}
         with mock.patch.object(collect.subprocess, "run", side_effect=fake_run):
-            collect.run_on_node_via_ssh(node)
+            result = collect.run_on_node_via_ssh(node)
+
+        # A missing securityCheck is not evidence of a clean IP.
+        self.assertEqual(result["quality"], "unknown")
 
         script = captured["script"]
         downloads = re.findall(r'^dl (\S+) "([^"]+)" "([^"]*)"', script, re.M)
