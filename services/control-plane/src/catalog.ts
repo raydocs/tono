@@ -8,6 +8,7 @@ import {
   hy2CatalogEmailAllowlist,
   requestAcceptsHy2Catalog,
   splitManagedCatalogProxies,
+  HY2_NAME_SUFFIX,
 } from './catalog-yaml';
 import { ApiError } from './errors';
 
@@ -73,8 +74,9 @@ export async function exitClientUUID(
     // A served node without an active exit_nodes row has no token to
     // acknowledge a roster with, so nothing proves it holds the credential.
     // A served catalog home is left out only while no exit_nodes row (any
-    // status) carries its name or hy2 base name: the two tables share no
-    // uniqueness, so a home named like an exit must not exempt that exit.
+    // status) carries its name, its hy2 base name or that name plus the hy2
+    // suffix: the two tables share no uniqueness, so a home named like an
+    // exit must not exempt that exit.
     const readiness = await e.DB.prepare(
       `SELECT COUNT(*) AS served_nodes,
               SUM(CASE WHEN exit_nodes.status = 'active' AND exit_nodes.last_roster_at > ?
@@ -86,10 +88,14 @@ export async function exitClientUUID(
          WHERE EXISTS (
            SELECT 1 FROM exit_nodes named
            WHERE named.name IN (json_extract(home.value, '$.node'), json_extract(home.value, '$.name'))
+              OR named.name IN (json_extract(home.value, '$.node') || ?, json_extract(home.value, '$.name') || ?)
          )
        ) served
        LEFT JOIN exit_nodes ON exit_nodes.name = served.node`,
-    ).bind(Number(row.created_at), JSON.stringify(servedNodes), JSON.stringify(servedHomes)).first<Row>();
+    ).bind(
+      Number(row.created_at), JSON.stringify(servedNodes), JSON.stringify(servedHomes),
+      HY2_NAME_SUFFIX, HY2_NAME_SUFFIX,
+    ).first<Row>();
     if (Number(readiness?.served_nodes ?? 0) < 1 || Number(readiness?.unready_nodes ?? 0) > 0) {
       // During the dual phase, keep existing and newly logging-in clients on
       // the per-user credential until the device credential is confirmed on

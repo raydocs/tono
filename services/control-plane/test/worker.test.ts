@@ -1475,6 +1475,12 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     });
     expect(catalog.status).toBe(503);
     expect((await catalog.json() as any).error.code).toBe('EXIT_IDENTITY_PROPAGATING');
+    // Same when the exit row itself carries the hy2 suffix and only the base block is served.
+    await env.DB.prepare("UPDATE exit_nodes SET name = 'Collision · hy2' WHERE id = 'exit-collision'").run();
+    const suffixed = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(suffixed.status).toBe(503);
   });
 
   it('issues no exit identity when the served catalog filters down to no proxies', async () => {
