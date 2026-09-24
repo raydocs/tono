@@ -123,7 +123,7 @@ impl Sysopt {
 
 #[cfg(test)]
 mod tests {
-    use super::{ProxyApplyStep, proxy_apply_steps};
+    use super::{ProxyApplyStep, ProxyReading, proxy_apply_steps, tono_owns_proxy};
 
     #[test]
     fn pure_sysproxy_mode_clears_pac_before_enabling_global_proxy() {
@@ -147,5 +147,30 @@ mod tests {
             proxy_apply_steps(false, false),
             [ProxyApplyStep::Sysproxy, ProxyApplyStep::Autoproxy]
         );
+    }
+
+    #[test]
+    fn only_a_proxy_naming_tono_listeners_is_cleared() {
+        let reading = |manual: bool, server: &str, pac_url: &str| ProxyReading {
+            manual,
+            server: server.to_owned(),
+            pac_url: pac_url.to_owned(),
+        };
+        // Another product's or the user's proxy is never Tono's to turn off.
+        assert!(!tono_owns_proxy(&reading(true, "10.0.0.5:8080", ""), 17970, Some(33331)));
+        assert!(!tono_owns_proxy(&reading(true, "127.0.0.1:7897", ""), 17970, Some(33331)));
+        assert!(!tono_owns_proxy(&reading(false, "", "http://wpad.corp/proxy.pac"), 17970, Some(33331)));
+        assert!(!tono_owns_proxy(
+            &reading(true, "127.0.0.1:17970", "http://wpad.corp/proxy.pac"),
+            17970,
+            Some(33331)
+        ));
+        // A leftover that names this installation's own listeners is.
+        assert!(tono_owns_proxy(&reading(true, "127.0.0.1:17970", ""), 17970, Some(33331)));
+        assert!(tono_owns_proxy(
+            &reading(false, "", "http://127.0.0.1:33331/commands/pac"),
+            17970,
+            Some(33331)
+        ));
     }
 }
