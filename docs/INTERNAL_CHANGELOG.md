@@ -32,6 +32,32 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · mac3 列车 train/mac3-20260924
+
+- **归属/来源**：G2 macOS 账户状态与保护展示汇合（各 PR 归属见其自身条目）；基线 origin/main
+  [d98b217d](https://github.com/raydocs/tono/commit/d98b217d) → 分支 `train/mac3-20260924`，按序
+  `--no-ff` 合入 #516（fc33c9eb）、#537（a984c553）、#538（f8a3c16a，含 #537）；提交时未合 main。
+  mac2 列车 #605 尚未进 main，本列车不含它。
+- **缺陷修复**：无新增；各修复见对应 PR 条目。
+- **新增/优化**：无。
+- **工程与测试（合并时手工解决的冲突）**：
+  - #516 × #537：`AppState+Connect.swift` 同时保留 #516 新增的 `acceptConfirmedProtectionReleaseBeforeSignIn()`
+    与 #537 把 `acceptConfirmedExternalProtectionRelease()` 去掉 `private`（供 `AppState+LaunchProtection.swift` 调用）。
+  - 本文件：各合并两边条目全部保留，仅去掉冲突标记。`FINDINGS_LEDGER.md` 自动合并，无冲突。
+  - 未合入 #535：其新 head f587b441 基于 #516 旧 head，与 #516 现 head 在同一接缝上改法不同——#516
+    （fc8337ec/7b95aed4/fc33c9eb）用返回 Bool、在 AppState 保护代次下清除 armed 意图的
+    `protectionReleaseConsumer` 取代了 `killSwitchStatusObservation`；#535 让
+    `retireResumeIntentIfProtectionReleased()` 返回 helper 原始答复（Check again 需区分 `.rejected`），其测试仍设
+    `killSwitchStatusObservation`。合并需要重新设计该接口，不属于无歧义解决，故留出。
+  - 未合入 #539：叠在 #535 旧 head f814061e 上，含 #535 的提交，随 #535 一起留出。
+- **验证**：MacBook 列车工作树只做文本检查：无冲突标记（`git grep`）；`git diff --check origin/main HEAD` 通过；
+  `Localizable.xcstrings` JSON 解析通过；相对 origin/main 无 helper 源码（`tooling/scripts/core-helper/*`、
+  `helper-shared/*`、`HelperProtocolVersion.swift`）改动。未运行 xcodebuild/XCTest，编译与测试待列车 PR 的
+  GitHub-hosted `macos-26` CI。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：CI 待定；#535/#539 需先 rebase 到 #516 现 head 并统一 sign-in 释放接口后再进下一班列车；
+  其余跟进见 #601。没有实机验收。
+
 ## 2026-09-24 · Windows 合并列车 train/win-20260924
 
 - **归属/来源**：G1–G3 Windows 修复汇合（各 PR 归属见其自身条目）；基线 origin/main
