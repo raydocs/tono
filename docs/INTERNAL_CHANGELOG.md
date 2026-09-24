@@ -32,6 +32,24 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 周期目录/策略同步：长时间睡眠唤醒后只补跑一次
+
+- **归属/来源**：G2 客户端控制面调用；Windows App `tono/catalog_sync.rs`。内部审查 H13-F2，
+  Issue #455。基线 main bb2ed4e4 → 分支 `fix/win-sync-missed-tick-20260923`；提交时未合 main。
+- **缺陷修复**：300 s 周期同步的 tokio interval 未设 `MissedTickBehavior`，默认 `Burst`。
+  合盖 8 h（Modern Standby 下时钟照走）唤醒后，错过的约 96 个 tick 连续交付，每个 tick 跑一次
+  catalog 和一次 policy 同步（各最多 4 次），约 192 个鉴权 GET 集中打到 Worker。现在改为
+  `Delay`（与连接监视一致）：唤醒后补跑一次，下一次在其后 300 s。
+- **新增/优化**：无。
+- **工程与测试**：`catalog_sync.rs` 新增一个 `#[tokio::test(start_paused = true)]`
+  `periodic_sync_after_long_sleep_ticks_once_not_per_missed_period`：暂停时钟前进 8 h，唤醒
+  tick 之后 1 s 内不应再有 tick。旧代码（`Burst`）下第二个 tick 立即返回。
+- **验证**：本机（编辑机）未运行原生 cargo；Tauri crate `cargo test` 委托本 PR 的
+  GitHub-hosted `windows-2025` CI，结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：S3 睡眠下 tokio 时钟（QPC）是否计入睡眠时间需实机确认；无论哪种，改后最多补跑
+  一次。唤醒后的一次补跑仍不加随机偏移。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3

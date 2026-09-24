@@ -230,11 +230,21 @@ pub(crate) async fn spawn_periodic_for_auth_generation(state: &Arc<TonoState>, a
     spawn_periodic_inner(state, app, generation).await;
 }
 
+/// The periodic sync's tick source. `Delay` turns a long sleep (lid closed,
+/// Modern Standby) into one catch-up sync on wake instead of a burst of every
+/// missed 300 s period, each of which would be an authenticated catalog and
+/// policy fetch (internal review H13-F2).
+fn periodic_sync_interval() -> tokio::time::Interval {
+    let mut interval = tokio::time::interval(SYNC_INTERVAL);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    interval
+}
+
 async fn spawn_periodic_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generation: u64) {
     let task_state = state.clone();
     let task_app = app.clone();
     let handle = AsyncHandler::spawn(move || async move {
-        let mut interval = tokio::time::interval(SYNC_INTERVAL);
+        let mut interval = periodic_sync_interval();
         // The first tick fires immediately; the login/restore path already
         // synced, so skip it.
         interval.tick().await;
@@ -514,7 +524,7 @@ pub fn region_rank(name: &str) -> u8 {
 mod tests {
     use super::{
         default_usable_exit, install_and_persist, is_exit_blocked, is_legacy_wire_name,
-        names_equivalent, next_catalog_exit, region_rank, replacement_for_selection,
+        names_equivalent, next_catalog_exit, periodic_sync_interval, region_rank, replacement_for_selection,
         selected_exit_still_present, sort_server_names, tcp_probe_socket,
     };
     use std::collections::BTreeSet;
@@ -554,6 +564,18 @@ mod tests {
             protocol: NodeProtocol::Hysteria2,
             tls_fingerprint: Some("e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db".to_string()),
         }
+    }
+
+    /// H13-F2: waking from an 8 h sleep yields one catch-up sync, not one
+    /// authenticated catalog + policy round per missed 300 s period.
+    #[tokio::test(start_paused = true)]
+    async fn periodic_sync_after_long_sleep_ticks_once_not_per_missed_period() {
+        let mut interval = periodic_sync_interval();
+        interval.tick().await;
+        tokio::time::advance(std::time::Duration::from_secs(8 * 60 * 60)).await;
+        interval.tick().await;
+        let burst = tokio::time::timeout(std::time::Duration::from_secs(1), interval.tick()).await;
+        assert!(burst.is_err(), "missed periods must not fire again after the wake tick");
     }
 
     #[test]
