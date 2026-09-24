@@ -47,6 +47,13 @@ const windowsServiceUpdateSource = readFileSync(
   new URL('../../service/src/core/update.rs', import.meta.url),
   'utf8',
 )
+const windowsServiceUpdateExecutorSource = readFileSync(
+  new URL(
+    '../../service/src/bin/install_service/update_executor.rs',
+    import.meta.url,
+  ),
+  'utf8',
+)
 const windowsReleaseShSource = readFileSync(
   new URL(
     '../../../../tooling/scripts/build-windows-release.sh',
@@ -442,7 +449,14 @@ test('NSIS explains a refused gate and confirms before uninstall releases protec
   const onInit =
     installerSource.match(/Function \.onInit\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
   const gate = onInit.slice(onInit.indexOf('--manual-update-gate'))
-  const refusal = gate.slice(0, gate.indexOf('SetErrorLevel 76'))
+  // 78: filters with no Tono Service left. Before any refusal, a non-silent install offers the
+  // confirmed path into its own proven-removal ladder; No keeps the block and changes nothing.
+  const refusalAt = gate.indexOf('${If} $0 != "0"')
+  assert.match(
+    gate.slice(0, refusalAt),
+    /\$\{If\} \$0 == "78"\s+\$\{AndIfNot\} \$\{Silent\}\s+MessageBox [^\n]*MB_YESNO "\$\(installClearsOrphanedBlock\)" IDYES (\w+)\s+SetErrorLevel 76\s+Abort [^\n]*\s+\1:\s+nsExec::ExecToLog [^\n]*--manual-orphan-gate'\s+Pop \$0/,
+  )
+  const refusal = gate.slice(refusalAt, gate.indexOf('SetErrorLevel 76', refusalAt))
   // .onInit never shows Abort text; a refusal without a dialog is a silent exit.
   assert.match(
     refusal,
@@ -456,6 +470,8 @@ test('NSIS explains a refused gate and confirms before uninstall releases protec
   const confirmAt = unInit.indexOf('"$(uninstallReleasesProtection)"')
   const leaseAt = unInit.indexOf('--manual-uninstall-gate')
   assert.ok(gateAt >= 0 && gateAt < confirmAt && confirmAt < leaseAt)
+  // An orphaned barrier gets the same confirmed release on uninstall.
+  assert.match(unInit.slice(gateAt, confirmAt), /\$\{If\} \$0 == "78"\s+StrCpy \$0 "77"/)
   assert.match(
     unInit.slice(gateAt, confirmAt),
     /\$\{If\} \$0 == "77"\s+\$\{AndIfNot\} \$\{Silent\}\s+MessageBox [^\n]*MB_YESNO\b/,
@@ -467,6 +483,7 @@ test('NSIS explains a refused gate and confirms before uninstall releases protec
     'manualInstallRefused',
     'uninstallReleasesProtection',
     'manualUninstallRefused',
+    'installClearsOrphanedBlock',
   ]) {
     for (const language of ['SIMPCHINESE', 'ENGLISH', 'RUSSIAN']) {
       assert.match(
@@ -479,6 +496,71 @@ test('NSIS explains a refused gate and confirms before uninstall releases protec
     windowsServiceUpdateSource,
     /pub const MANUAL_GATE_PROTECTION_ACTIVE_EXIT: i32 = 77;/,
   )
+  assert.match(
+    windowsServiceUpdateSource,
+    /pub const MANUAL_GATE_ORPHANED_PROTECTION_EXIT: i32 = 78;/,
+  )
+})
+
+test('a confirmed orphaned-block clear reinstalls through the fresh path, not the upgrade path', () => {
+  // An upgrade skips RemoveVergeService and hands the runtime to --replace-runtime, whose gate
+  // refuses while the filters remain and which cannot replace a Service that is gone. Once the
+  // user confirmed 78, an existing ARP record must not turn the install into that upgrade.
+  const onInit =
+    installerSource.match(/Function \.onInit\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  assert.match(
+    onInit.slice(0, onInit.indexOf('Call DetectExistingInstall')),
+    /--manual-orphan-gate'\s+Pop \$0\s+\$\{If\} \$0 == "0"\s+StrCpy \$ClearingOrphanedBlock 1\s+\$\{EndIf\}/,
+  )
+  const detector =
+    installerSource.match(
+      /Function DetectExistingInstall\b([\s\S]*?)FunctionEnd/,
+    )?.[1] ?? ''
+  const automatic =
+    detector.match(/automatic_update:([\s\S]*?)downgrade_blocked:/)?.[1] ?? ''
+  assert.match(
+    automatic,
+    /^(?:\s*;[^\n]*)*\s*\$\{If\} \$ClearingOrphanedBlock = 1\s+(?:DetailPrint [^\n]*\s+)?Return\s+\$\{EndIf\}\s+StrCpy \$UpdateMode 1/,
+  )
+  // The fresh path publishes with Rename, which never overwrites the previous install's files.
+  const installSection =
+    installerSource.match(/Section Install\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  for (const live of ['$INSTDIR\\${MAINBINARYNAME}.exe', '$INSTDIR\\\\{{this}}']) {
+    assert.match(
+      installSection,
+      new RegExp(
+        `\\$\\{If\\} \\$ClearingOrphanedBlock = 1\\s+Delete "${escape(live)}"\\s+\\$\\{EndIf\\}\\s+ClearErrors\\s+Rename "${escape(live)}\\.next" "${escape(live)}"`,
+      ),
+    )
+  }
+})
+
+test('a confirmed orphan clear retires the stale connected owner only after the barrier is gone', () => {
+  // The owner that was connected when its Service went away still says "core should run", and
+  // the Service installer's manual gate refuses on that with Disconnect advice nobody can follow.
+  const installSection =
+    installerSource.match(/Section Install\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  const removeAt = installSection.indexOf('!insertmacro RemoveVergeService')
+  const startAt = installSection.indexOf('!insertmacro StartVergeService')
+  // RemoveVergeService aborts unless WFP removal is proven, so this runs on a proven-open machine.
+  assert.match(
+    installSection.slice(removeAt, startAt),
+    /\$\{If\} \$ClearingOrphanedBlock = 1\s+nsExec::ExecToLog [^\n]*tono-service-install\.exe" --retire-orphaned-owner'\s+Pop \$0\s+\$\{If\} \$0 != "0"\s+Abort /,
+  )
+  assert.match(
+    windowsServiceUpdateExecutorSource,
+    /\[mode\] if mode == "--retire-orphaned-owner" => \{[^}]*native::retire_orphaned_owner\(\)/,
+  )
+  // The helper re-proves it: no Service, no filter, then retire, never the other way round.
+  const retire =
+    windowsServiceUpdateSource.match(
+      /pub async fn retire_orphaned_owner\(\)[\s\S]*?\n\}/,
+    )?.[0] ?? ''
+  const serviceAt = retire.indexOf('barrier_service_present()')
+  const filtersAt = retire.indexOf('residual_filters_present()')
+  const retireAt = retire.indexOf('retire_legacy_active_owner()')
+  assert.ok(serviceAt > 0 && filtersAt > serviceAt && retireAt > filtersAt)
 })
 
 test('Windows installers refuse to downgrade and hand back the manual lease on that exit', () => {
@@ -511,6 +593,55 @@ test('NSIS uninstall removes leftover user control-plane pins', () => {
     installerSource,
     /Delete \/REBOOTOK "\$LOCALAPPDATA\\\$\{BUNDLEID\}\\tono\\control-plane-pins\.json"/,
   )
+})
+
+test('NSIS uninstall deletes in the approving account AppData only after the link check', () => {
+  const uninstall =
+    installerSource.match(/Section Uninstall\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  // No recursive NSIS delete of app data: the helper removes it from every profile, this one
+  // included, and never walks through a link or reparse point on the way.
+  assert.doesNotMatch(uninstall, /RmDir\s+\/r\s+"\$(?:LOCAL)?APPDATA/i)
+  const checkAt = uninstall.search(
+    /tono-service-uninstall\.exe" --check-current-app-data'\s+Pop \$AppDataPathPlain/,
+  )
+  assert.ok(checkAt >= 0, 'the helper must check this account AppData before any delete there')
+  const gated = [
+    ...uninstall.matchAll(
+      /\$\{(?:If|AndIf)\} \$AppDataPathPlain == "0"[\s\S]*?\$\{EndIf\}/g,
+    ),
+  ].map((block) => [block.index, block.index + block[0].length])
+  const deletes = [
+    ...uninstall.matchAll(/^\s*(?:Delete|RmDir)\b[^\n]*\$(?:LOCAL)?APPDATA[^\n]*/gim),
+  ]
+  assert.ok(deletes.length > 0)
+  for (const line of deletes) {
+    assert.ok(
+      gated.some(([start, end]) => checkAt < start && start < line.index && line.index < end),
+      `AppData delete outside the checked block: ${line[0].trim()}`,
+    )
+  }
+})
+
+test('all-profile app data is deleted only inside the repair gate, under the uninstaller lease', () => {
+  const helperSource = readFileSync(
+    new URL('../../service/src/bin/uninstall_service.rs', import.meta.url),
+    'utf8',
+  )
+  const main =
+    helperSource.match(/#\[cfg\(windows\)\]\r?\nfn main\(\)([\s\S]*?)\r?\n\}\r?\n/)?.[1] ?? ''
+  const gateAt = main.indexOf('enter_repair_gate()?')
+  const deleteAt = main.indexOf('remove_app_data_in_profiles(')
+  // Same pending-update check and repair lock as every other cleanup mode of this helper.
+  assert.ok(gateAt >= 0 && deleteAt > gateAt, 'the app data delete must run after the repair gate')
+
+  const uninstall =
+    installerSource.match(/Section Uninstall\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  const ladderAt = uninstall.indexOf('!insertmacro RemoveVergeService')
+  const callAt = uninstall.indexOf('--delete-app-data-all-profiles')
+  // The gate admits the helper on the uninstaller's own lease, which is released only after
+  // this section (un.onUninstSuccess / un.onGUIEnd).
+  assert.ok(ladderAt >= 0 && callAt > ladderAt)
+  assert.doesNotMatch(uninstall, /--manual-update-finish/)
 })
 
 test('NSIS removes every known old payload on upgrade and uninstall', () => {

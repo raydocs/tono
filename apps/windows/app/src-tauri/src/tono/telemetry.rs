@@ -3,7 +3,9 @@
 //! Every ~20 minutes while signed in, ship a short redacted audit window to
 //! the control plane so operators can reconstruct network anomalies before
 //! Claude bans. Users can disable this in Settings. A connectFail also posts
-//! immediately to `telemetry/failures` (same consent, not the 3.5 log).
+//! immediately to `telemetry/failures` (same consent, not the 3.5 log); an
+//! internal candidate build also posts a classified record without that
+//! consent (see [`crate::tono::audit::failure_report_scope`]).
 //! Failures never touch the connect / kill-switch path.
 
 use std::{path::Path, sync::Arc, time::Duration};
@@ -22,7 +24,7 @@ use tono_core::connection::UiState;
 use crate::{
     process::AsyncHandler,
     tono::{
-        audit::{AuditEvent, redact},
+        audit::{AuditEvent, FailureReportScope, redact},
         state::TonoState,
     },
 };
@@ -178,7 +180,8 @@ pub(crate) async fn spawn_periodic_for_auth_generation(state: &Arc<TonoState>, _
 
 /// Best-effort `POST telemetry/failures` for one connectFail. Never blocks
 /// connect / kill-switch, and never retries a timeout. Uses the same consent
-/// as the periodic window — this is not the 3.5 raw connection log.
+/// as the periodic window — this is not the 3.5 raw connection log — except
+/// that an internal build sends the classified fields without it.
 pub(crate) fn spawn_connect_failure_report(
     state: &Arc<TonoState>,
     account_owner: (u64, u64),
@@ -188,9 +191,7 @@ pub(crate) fn spawn_connect_failure_report(
     transport: Option<&'static str>,
     code: Option<&str>,
 ) -> Option<tauri::async_runtime::JoinHandle<()>> {
-    if !state.audit().periodic_telemetry_enabled() || !state.audit().enabled() {
-        return None;
-    }
+    let scope = state.audit().failure_report_scope()?;
     let Some(node) = node.filter(|name| !name.trim().is_empty()) else {
         return None;
     };
@@ -200,9 +201,12 @@ pub(crate) fn spawn_connect_failure_report(
         .filter(|value| !value.is_empty())
         .unwrap_or(UNKNOWN_CLASSIFIED_FAILURE)
         .to_string();
-    let error = {
+    // Free text stays behind the explicit timeline opt-in.
+    let error = if scope == FailureReportScope::Full {
         let clipped: String = redact(error).chars().take(200).collect();
         (!clipped.is_empty()).then_some(clipped)
+    } else {
+        None
     };
     let transport = transport
         .filter(|value| *value == "tcp" || *value == "hy2")

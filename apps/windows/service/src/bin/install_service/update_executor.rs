@@ -107,8 +107,20 @@ pub(super) fn dispatch() -> Result<bool, Error> {
                     eprintln!("Error: {error:#}");
                     std::process::exit(native::MANUAL_GATE_PROTECTION_ACTIVE_EXIT);
                 }
+                if error.is::<native::OrphanedProtection>() {
+                    eprintln!("Error: {error:#}");
+                    std::process::exit(native::MANUAL_GATE_ORPHANED_PROTECTION_EXIT);
+                }
                 return Err(error);
             }
+            Ok(true)
+        }
+        [mode] if mode == "--manual-orphan-gate" => {
+            native::begin_manual_orphan()?;
+            Ok(true)
+        }
+        [mode] if mode == "--retire-orphaned-owner" => {
+            tokio::runtime::Runtime::new()?.block_on(native::retire_orphaned_owner())?;
             Ok(true)
         }
         [mode] if mode == "--manual-uninstall-gate" => {
@@ -192,7 +204,7 @@ fn execute(recovery: bool) -> Result<(), Error> {
         "executor image binding changed"
     );
     if a.receipt.phase == Phase::Committed {
-        cleanup_committed(&plan_path)?;
+        finish_committed(&plan_path, native::retire_recovery_task)?;
         return Ok(());
     }
     if recovery {
@@ -420,7 +432,7 @@ fn execute(recovery: bool) -> Result<(), Error> {
         std::thread::sleep(Duration::from_secs(1));
         let store = open_waiting()?;
         if store.attempt()?.receipt.phase == Phase::Committed {
-            cleanup_committed(&plan_path)?;
+            finish_committed(&plan_path, native::retire_recovery_task)?;
             return Ok(());
         }
     }
@@ -468,6 +480,23 @@ fn rollback_plan(plan: &mut Plan) -> Result<(), Error> {
     Ok(())
 }
 
+/// Commit ends the boot task's job: once the committed cleanup ran there is
+/// nothing left for `--update-recover` to do, so the SYSTEM ONSTART task is
+/// retired, as macOS retires its launchd job. A failed retirement leaves the
+/// task for the next boot, which lands here again and retries.
+fn finish_committed(
+    plan_path: &Path,
+    retire: impl FnOnce() -> Result<(), Error>,
+) -> Result<(), Error> {
+    cleanup_committed(plan_path)?;
+    if let Err(error) = retire() {
+        eprintln!(
+            "committed update cleaned up; the recovery task stays until the next boot: {error:#}"
+        );
+    }
+    Ok(())
+}
+
 fn cleanup_committed(plan_path: &Path) -> Result<(), Error> {
     let plan: Plan = serde_json::from_slice(&std::fs::read(plan_path)?)?;
     for member in plan.members {
@@ -483,6 +512,47 @@ mod tests {
     use tono_service_protocol::update_contract::{
         Observation, Protection, Receipt, ReleaseManifest,
     };
+
+    #[test]
+    fn update_commit_retires_the_recovery_task_after_cleanup() {
+        let root = std::env::temp_dir().join(format!(
+            "tono-update-commit-retire-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let plan_path = root.join("replacement.json");
+        // Without the committed cleanup the boot task still has work left.
+        assert!(
+            finish_committed(&plan_path, || panic!(
+                "retired before the committed cleanup"
+            ))
+            .is_err()
+        );
+        tx::atomic_write(
+            &plan_path,
+            &serde_json::to_vec(&Plan {
+                attempt_id: "attempt".into(),
+                members: Vec::new(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let mut retired = false;
+        finish_committed(&plan_path, || {
+            retired = true;
+            Ok(())
+        })
+        .unwrap();
+        assert!(
+            retired,
+            "a committed update must not leave its SYSTEM boot task"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn update_executor_consumes_before_publication_and_reloads_interrupted_rollback() {

@@ -388,11 +388,6 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
             }
         }
 
-        #[cfg(windows)]
-        {
-            let _ = crate::core::sysopt::Sysopt::global().reset_sysproxy().await;
-        }
-
         match run_stages(
             state,
             app,
@@ -406,7 +401,15 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
         )
         .await
         {
-            Ok(()) => Attempt::Connected,
+            Ok(()) => {
+                // Only after the stages armed the barrier, and only a leftover
+                // naming Tono's own listeners: another product's proxy stays.
+                #[cfg(windows)]
+                {
+                    let _ = crate::core::sysopt::Sysopt::global().clear_owned_sysproxy().await;
+                }
+                Attempt::Connected
+            }
             Err(failure) => {
                 attempt_from_stage_failure(state, generation, &attempt_record, failure, account_owner).await
             }
