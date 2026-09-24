@@ -88,6 +88,14 @@
 - **剩余限制**：未实机验证。helper 一直不答复时 unconfirmed 保持（如实为未知）。启动确认屏障后
   界面进入与会话内相同的 Protected Offline，点按连接按钮即恢复正常网络、激活 reconcile 会运行，
   这是行为变化而非纯展示。账户 gate 的文案与菜单栏一致由后续 H16-C-F2 修复（#538）负责。
+- **后续（2026-09-24，PR 复审 537R-C-F1，Codex 发现、Opus 核实）**：启动 reassert 在本地意图已被
+  撤销时（`guard isArmed`）正常返回却什么都没 arm，启动仍发布 held，界面显示 Protected Offline
+  而 PF 实际未持有。现在 reassert 返回是否真的 arm，只有 arm 了才发布 held。启动裁决与激活时的
+  helper 答复共用一个序号：激活读取期间若有更新的启动裁决发布，旧答复丢弃，不再改写本地意图。
+  新增 XCTest `testAnActivationAnswerOlderThanTheLatestLaunchVerdictIsDropped`（激活读取期间
+  启动再发布 unconfirmed，随后到达的旧 `.confirmed(false)` 不得清掉意图）。旧代码上按流程
+  两处断言失败，这是推断，未跑红。reassert 返回值一支需要真实 helper，无单独测试。本机未运行
+  xcodebuild/swift，交 PR 的 GitHub-hosted `macos-26` CI。
 
 ## 2026-09-23 · 发现总账与审查流程记录
 

@@ -114,6 +114,9 @@ final class AppState {
     /// authenticated helper answer confirmed or cleared. Surfaces say the
     /// protection state is unknown: neither Standby nor Protected Offline.
     var isProtectionUnconfirmed = false
+    /// Orders launch verdicts and the activation answer that resolves one:
+    /// an answer read before a newer verdict was published is stale.
+    @ObservationIgnored var launchProtectionSequence: UInt64 = 0
     var lastPhysicalFingerprint: PhysicalInterfaceFingerprint?
     var switchingNodeId: String? = nil
     var proxyMode: ProxyMode = .rule
