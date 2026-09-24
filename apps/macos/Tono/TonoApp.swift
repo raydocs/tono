@@ -132,7 +132,8 @@ struct TonoApp: App {
                 if InterfaceLanguagePreference.hasChosen {
                     if WelcomeLaunchGate.showsIntro(
                         introSeen: introSeen,
-                        sessionState: accountSession.state
+                        sessionState: accountSession.state,
+                        protectionHeld: KillSwitchService.isArmed
                     ) {
                         WelcomeIntroView()
                     } else {

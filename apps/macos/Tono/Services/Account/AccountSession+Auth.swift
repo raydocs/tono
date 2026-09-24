@@ -99,10 +99,21 @@ extension AccountSession {
     }
 
     func loadAuthMethods() async {
-        guard user == nil, !authMethodsLoading else { return }
+        // A read retired by a newer presentation (a protection release, a
+        // sign-out) can no longer publish, so it must not hold off the read
+        // that replaces it either.
+        guard user == nil,
+              !authMethodsLoading || authMethodsLoadRevision != accountReadRevision
+        else { return }
         let revision = accountReadRevision
+        authMethodsLoadRevision = revision
         authMethodsLoading = true
-        defer { authMethodsLoading = false }
+        defer {
+            if authMethodsLoadRevision == revision {
+                authMethodsLoadRevision = nil
+                authMethodsLoading = false
+            }
+        }
         do {
             let methods = try await api.authMethods()
             guard !Task.isCancelled, user == nil, accountReadRevision == revision else { return }
@@ -561,6 +572,19 @@ extension AccountSession {
         } catch { await fail(error) }
     }
 
+    /// A resume intent can outlive the sign-out that kept protection (a launch
+    /// 401). The runtime this sign-in starts would consume it and reconnect,
+    /// re-arming PF, so first ask the helper: a confirmed release since then
+    /// (the root emergency disarm) retires it. An unreachable or rejecting
+    /// helper is no evidence of a release, and the intent stands.
+    func retireResumeIntentIfProtectionReleased() async {
+        guard shouldResumeProtection else { return }
+        if case .confirmed(requiresProtectionRecovery: false) =
+            await killSwitchStatusObservation() {
+            shouldResumeProtection = false
+        }
+    }
+
     func authenticate(_ operation: @escaping @MainActor () async throws -> TonoAuthResponse) async {
         await accountLifecycle.run { await self.performAuthentication(operation) }
     }
@@ -590,6 +614,7 @@ extension AccountSession {
                 state = .suspended
                 return
             }
+            await retireResumeIntentIfProtectionReleased()
             if !AppProfile.homeExitEnabled {
                 // Managed Reality exits authenticate directly with the Tono
                 // control plane. They never consume or wait for a Tailscale

@@ -717,6 +717,20 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertTrue(account.shouldResumeProtection)
     }
 
+    func testSignInKeepsAResumeIntentUnlessTheHelperConfirmsRelease() async {
+        let (account, transport, host, _) = fixture()
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
+        // A launch 401 kept crash recovery's intent; a root emergency disarm
+        // since then is known only to the helper.
+        account.shouldResumeProtection = true
+        account.killSwitchStatusObservation = { .unavailable }
+        await account.retireResumeIntentIfProtectionReleased()
+        XCTAssertTrue(account.shouldResumeProtection, "an unreachable helper is no evidence of a release")
+        account.killSwitchStatusObservation = { .confirmed(requiresProtectionRecovery: false) }
+        await account.retireResumeIntentIfProtectionReleased()
+        XCTAssertFalse(account.shouldResumeProtection, "a confirmed release must not be re-armed by the next sign-in")
+    }
+
     private func adoptReplacementCredentials(_ account: AccountSession) async throws {
         let replacement = try JSONDecoder().decode(TonoUser.self, from: Data(#"{"id":"replacement","email":"new@example.test"}"#.utf8))
         try await account.api.adopt(TonoAuthResponse(

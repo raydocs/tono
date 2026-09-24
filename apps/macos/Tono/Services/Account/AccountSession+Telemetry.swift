@@ -239,11 +239,12 @@ extension AccountSession {
             routeTelemetryCursor.forgetIntervalSupport(epoch: routeEpoch)
         } catch TonoAPIClient.APIError.unauthorized {
             guard !Task.isCancelled, accountReadRevision == accountRevision else { return }
-            // Refused after the client's own token renewal. The Worker answers
-            // an expired plan, a used-up allowance, a disabled account and a
-            // revoked device this way, so re-read the account as the catalog
-            // cadence does: suspended, protection left as it is.
-            await refreshAccount()
+            // Final: the client's own token renewal was refused too. The Worker
+            // answers an expired plan, a used-up allowance, a disabled account
+            // and a revoked device this way, so suspend as `refreshAccount`
+            // does, protection left as it is. Settled here, not by a further
+            // request whose transient failure would drop the refusal.
+            enterEntitlementBlock(detail: nil)
         } catch {
             // The next cadence retries. This path must not drop protection.
         }
@@ -346,6 +347,7 @@ extension AccountSession {
                 guard let self, state == .ready, !systemSleeping,
                       AppRoutingResearch.isCollectionActive else { return }
                 if let lease = await AppRoutingResearch.shared.readySnapshot() {
+                    let revision = accountReadRevision
                     do {
                         guard !Task.isCancelled,
                               AppRoutingResearch.shared.isCurrent(lease) else {
@@ -365,9 +367,11 @@ extension AccountSession {
                         }
                         AppRoutingResearch.shared.acknowledge(lease)
                     } catch TonoAPIClient.APIError.unauthorized {
-                        // As for the periodic window: suspend through the
-                        // account re-read, never sign out or release here.
-                        await refreshAccount()
+                        // As for the periodic window: a final refusal of this
+                        // account suspends it; never sign out or release here.
+                        guard !Task.isCancelled,
+                              accountReadRevision == revision else { return }
+                        enterEntitlementBlock(detail: nil)
                         return
                     } catch {
                         // The single persisted idempotent pending snapshot is
@@ -528,10 +532,10 @@ extension AccountSession {
         await descriptorConsumer(nil)
         // No failure disarms, a refused session included: the Worker refuses an
         // expired plan, a used-up allowance, a disabled account and a revoked
-        // device alike. Sign out with PF and DNS left as they are, like a launch
-        // without a stored session; the sign-in gate offers Restore internet
-        // while the kill switch holds, and the next sign-in still reconnects
-        // when crash recovery asked for it.
+        // device alike. Sign out with PF and DNS left as they are. While the
+        // kill switch holds, the sign-in gate says so and offers Restore
+        // internet; the kept resume intent reconnects at the next sign-in
+        // unless the helper has confirmed a release by then.
         if accountLost {
             await sidecar.stop()
             let resumeProtection = shouldResumeProtection
