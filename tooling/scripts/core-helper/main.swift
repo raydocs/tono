@@ -297,6 +297,23 @@ func runCoreLifecycleSelfTests() -> Bool {
         do { try body(); failures.append(name) } catch { }
     }
 
+    // `--emergency-disarm` and `--emergency-reset` build a CoreManager for the
+    // bound uid only to stop a stale core before PF is released. After that
+    // macOS account is deleted the uid no longer resolves, and recovery must
+    // still get past this step (H19-O-F4). Starting a core for it stays refused.
+    if let missingUID = (uid_t(2_000_000_000)...uid_t(2_000_000_100))
+        .first(where: { getpwuid($0) == nil }) {
+        if let orphaned = try? CoreManager(allowedUID: missingUID) {
+            refuses("deleted-user-start-refused") {
+                try orphaned.start(configDirectory: configDirectory, configSHA256: digest)
+            }
+        } else {
+            failures.append("deleted-user-recovery-constructs-core-manager")
+        }
+    } else {
+        failures.append("no-unresolvable-uid-for-deleted-user-check")
+    }
+
     guard let manager = try? CoreManager(allowedUID: allowedUID) else {
         FileHandle.standardError.write(Data("could not construct the core manager\n".utf8))
         return false

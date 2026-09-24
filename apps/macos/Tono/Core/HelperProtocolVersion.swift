@@ -131,7 +131,14 @@ nonisolated enum HelperProtocolVersion {
     ///   provably gone (different boot, or its audit token resolves to no
     ///   live process), allocating a fresh successor generation without
     ///   changing the proof phase. A 4.8.0 daemon keeps both dead ends.
-    static let current = "4.9.0"
+    /// - 4.9.0 → 4.41.0 (provisional, renumber at merge): `CoreManager` no
+    ///   longer resolves the bound user's home directory when it is
+    ///   constructed, only when a start or sync validates the config
+    ///   directory. `--emergency-disarm` and `--emergency-reset` build one only
+    ///   to stop a stale core before releasing PF, so they now work after the
+    ///   bound macOS account was deleted. A 4.9.0 daemon's recovery commands
+    ///   fail there and leave PF fail-closed.
+    static let current = "4.41.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
