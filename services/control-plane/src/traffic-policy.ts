@@ -359,7 +359,15 @@ export async function publicTrafficPolicy(e: Env) {
     // allowlist entry removed while the stored policy still uses it makes this
     // throw for every device. See the note on `allowedDirectSuffixes` before
     // narrowing anything.
-    canonicalTrafficPolicy(JSON.parse(json), Boolean(signature));
+    //
+    // A document may name its own revision inside the signed bytes (#317). It
+    // must be the row's; anything else means the envelope was relabelled.
+    const document = JSON.parse(json);
+    if (document && typeof document === 'object' && Object.hasOwn(document, 'revision')) {
+      if (document.revision !== Number(row.revision)) throw new Error('embedded revision mismatch');
+      delete document.revision;
+    }
+    canonicalTrafficPolicy(document, Boolean(signature));
     return {
       revision: Number(row.revision),
       json,

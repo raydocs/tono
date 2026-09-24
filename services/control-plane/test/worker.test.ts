@@ -4335,6 +4335,52 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await (await admin('traffic-policy', undefined, 'GET')).json() as any).revision).toBe(0);
   });
 
+  it('binds the assigned revision inside the signed policy json once enabled', async () => {
+    // #317: the envelope revision is outside the signature, so a replayed
+    // signed document could claim any revision. With the switch on, the
+    // revision this write will be assigned is part of the signed bytes.
+    const bound = { ...env, TRAFFIC_POLICY_EMBED_REVISION: 'true' } as unknown as Env;
+    const boundAdmin = async (value: unknown) => {
+      const context = createExecutionContext();
+      const response = await worker.fetch(new Request('https://test/api/v1/admin/traffic-policy', {
+        ...json(value), method: 'PUT',
+        headers: { authorization: `Bearer ${ADMIN_TOKEN}`, 'content-type': 'application/json' },
+      }), bound, context);
+      await waitOnExecutionContext(context);
+      return response;
+    };
+    const preview = await boundAdmin({ policy: unlistedPolicy, dryRun: true, expectedRevision: 0 });
+    const previewed = await preview.json() as any;
+    expect(JSON.parse(previewed.json).revision).toBe(1);
+
+    // A signature over the revision-free bytes no longer covers what is served.
+    const legacy = await admin('traffic-policy', { policy: unlistedPolicy, dryRun: true }, 'PUT');
+    const unbound = await boundAdmin({
+      policy: unlistedPolicy, expectedRevision: 0,
+      signature: await signPolicy((await legacy.json() as any).json),
+    });
+    expect((await unbound.json() as any).error.code).toBe('TRAFFIC_POLICY_SIGNATURE_INVALID');
+
+    const published = await boundAdmin({
+      policy: unlistedPolicy, expectedRevision: 0, signature: await signPolicy(previewed.json),
+    });
+    expect(published.status).toBe(200);
+    expect((await published.json() as any).json).toBe(previewed.json);
+
+    // Served whatever the switch says, with the embedded revision equal to the
+    // envelope's; a row whose envelope no longer matches is not served.
+    const account = await createAccount('embedded-policy-revision');
+    const read = () => api('traffic-policy', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    const delivered = await (await read()).json() as any;
+    expect(JSON.parse(delivered.json).revision).toBe(delivered.revision);
+    await env.DB.prepare(
+      'UPDATE managed_traffic_policy SET revision = 7 WHERE singleton_id = 1',
+    ).run();
+    expect((await read()).status).toBe(503);
+  });
+
   it('will not let a signature pull a protected host out of the tunnel', async () => {
     // The invariant that must survive a leaked key. A signature relaxes which
     // hosts may route direct; it must never relax which hosts may not. If this
