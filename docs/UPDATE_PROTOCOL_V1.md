@@ -213,6 +213,24 @@ its recorded incarnations died.
   `needs_attention`. An Err response means no protection release completed;
   only that makes the App keep Protected Offline. New archive checks added to
   this path follow the same rule.
+- **Installed and released (2026-09-23).** A `Replaced` attempt whose owner
+  then completes a verified explicit Disconnect (for example, the post-upgrade
+  reconnect failed and the user restored internet) also archives its full
+  record and clears the live slot, so connect, update, Quit/sign-out release
+  and uninstall are reachable again. Preconditions: the installed components
+  equal the signed target, every member of the durable replacement plan
+  (payload tree and `core-sha256.txt`) hashes to its `new_digest`, the
+  Disconnect readback is verified unprotected, and the requesting process is
+  a provable target-identity successor at the registered install root (old
+  App bytes may Disconnect but cannot end a replaced attempt). This is not
+  commit: phase, recorded obligation, successor evidence and the
+  sequence/generation high-water are archived unchanged, and the `Committed`
+  cleanup path is not taken. Backup ownership: because no commit or executor
+  will run for the attempt again, the Service removes the retained
+  `.rollback`/`.restore`/`.publish` copies bound to each plan member before
+  clearing the slot (otherwise they would refuse the next update's
+  preparation); private attempt evidence (payload, plan, executor, package)
+  is retained. A failed removal leaves the attempt pending and retryable.
 - **Launching without a live executor incarnation is provably unconsumed.**
   Consumption only accepts the exact recorded executor incarnation. When
   that incarnation is gone and the high-water still sits below the release,
@@ -232,18 +250,6 @@ Limits of this clarification (stated so it is not over-read):
   the post-publication part served by the new Service does. This is not G3
   evidence for the first hop from 0.0.73; it protects the next upgrade that
   starts from a build containing it.
-- **Replaced + verified Disconnect stays pending with no in-product exit
-  (open, pre-existing).** Neither terminal archive above covers `Replaced`.
-  When a completed installation is adopted, the post-upgrade automatic
-  reconnect fails and the user presses Restore internet, the verified
-  Disconnect releases protection but leaves the attempt pending; from then on
-  connect, adopt/commit, update, Quit/sign-out release and
-  uninstall/reinstall are all refused. Traffic does not leak (release has
-  already happened), but the product is locked. This path exists before this
-  clarification and is the most reachable lock of the set; it is tracked as a
-  separate unresolved issue and needs its own design decision (an
-  "installed and released" terminal state, with backup cleanup ownership),
-  not treating release as commit.
 - **Recovery and rolled-back retirement check three components, not the full
   durable plan (open).** `TargetVerified` recovery and `retire_rolled_back`
   compare only `Tono.exe`, `tono-core.exe` and `tono-service.exe` against the

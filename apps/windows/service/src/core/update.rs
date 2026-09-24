@@ -532,6 +532,78 @@ pub(crate) async fn request(
     status(&store)
 }
 
+/// Read-only view of the executor's durable replacement plan
+/// (`install_service::update_executor::Plan`): only what the Service verifies
+/// and removes when a replaced attempt is released without commit.
+#[derive(serde::Deserialize)]
+struct PlanView {
+    attempt_id: String,
+    members: Vec<PlanMemberView>,
+}
+
+#[derive(serde::Deserialize)]
+struct PlanMemberView {
+    target: PathBuf,
+    backup: PathBuf,
+    restore: PathBuf,
+    publish_scratch: PathBuf,
+    new_digest: [u8; 32],
+}
+
+/// Every plan member must already be the target bytes (the whole payload
+/// tree plus `core-sha256.txt`, not only three binaries) before any rollback
+/// copy is removed. Idempotent: an absent copy is already released.
+fn release_replaced_backups(plan_path: &Path, attempt_id: &str, install_root: &Path) -> Result<()> {
+    let plan: PlanView = serde_json::from_slice(&std::fs::read(plan_path)?)?;
+    ensure!(
+        plan.attempt_id == attempt_id,
+        "replacement plan belongs to a different attempt"
+    );
+    let service_dir = crate::service_paths().install_dir();
+    for m in &plan.members {
+        ensure!(
+            (m.target.starts_with(install_root) || m.target.starts_with(&service_dir))
+                && m.target
+                    .components()
+                    .all(|c| !matches!(c, std::path::Component::ParentDir)),
+            "replacement plan member is outside the installation"
+        );
+        let new: String = m.new_digest.iter().map(|b| format!("{b:02x}")).collect();
+        ensure!(
+            file_digest(&m.target)? == new,
+            "installed plan member is not the target; evidence cannot be released"
+        );
+        for (scratch, suffix) in [
+            (&m.backup, ".rollback"),
+            (&m.restore, ".restore"),
+            (&m.publish_scratch, ".publish"),
+        ] {
+            let mut bound = m.target.clone().into_os_string();
+            bound.push(suffix);
+            ensure!(
+                *scratch == PathBuf::from(bound),
+                "replacement scratch path is not bound to its member"
+            );
+        }
+    }
+    for m in &plan.members {
+        for scratch in [&m.backup, &m.restore, &m.publish_scratch] {
+            match std::fs::symlink_metadata(scratch) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
+                Ok(meta) => {
+                    ensure!(
+                        meta.file_type().is_file(),
+                        "refusing to remove non-file rollback copy"
+                    );
+                    std::fs::remove_file(scratch)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Update bookkeeping after an explicit Disconnect already released WFP:
 /// record the verified release, then archive a record whose installed
 /// identity proves it terminal.
@@ -568,11 +640,25 @@ fn retire_after_release(
             "rollback not proven complete; evidence cannot be retired"
         );
         store.retire_rolled_back(owner, peer)?;
+    } else if a.execution == Execution::Replaced {
+        // Installed and released: the publication is complete and the
+        // owner explicitly released protection. Archive it without
+        // turning release into commit; the Service removes the
+        // retained rollback copies because no commit/executor will.
+        ensure!(
+            installed(&a.install_root)? == target(&a.manifest).components,
+            "installed target not proven; evidence cannot be released"
+        );
+        let plan = store.attempt_dir()?.join("replacement.json");
+        let (attempt_id, root) = (a.receipt.attempt_id.clone(), a.install_root.clone());
+        store.retire_released_installation(owner, peer, || {
+            release_replaced_backups(&plan, &attempt_id, &root)
+        })?;
     }
-    // Records whose replacement is still in flight (Consumed/Replaced,
-    // a live executor, or an unproven rollback) stay pending after
-    // release. They cannot install, reconnect or commit by
-    // fabricating recovery.
+    // Records whose replacement is still in flight (Consumed, a live
+    // executor, or an unproven rollback) stay pending after release.
+    // They cannot install, reconnect or commit by fabricating
+    // recovery.
     Ok(())
 }
 
