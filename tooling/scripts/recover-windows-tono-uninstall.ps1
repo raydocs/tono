@@ -5,8 +5,9 @@
 
 .DESCRIPTION
   Stops TonoService, runs emergency disarm + uninstall helper, and reports DNS.
-  Run this from an elevated PowerShell on a stuck customer machine, then retry
-  Tono_0.0.14_x64-setup.exe (or newer).
+  Run this from an elevated PowerShell on a stuck customer machine, then run
+  the current Tono installer again. When no Tono binaries are left, this script
+  can do nothing; the current installer offers to remove a leftover Tono block.
 
   Does not delete Program Files until the helper proves the kill switch is gone.
 #>
@@ -60,7 +61,7 @@ if (Test-Path $uninstallExe) {
     & $uninstallExe 2>&1 | Out-Host
     Write-Host "ExitCode=$LASTEXITCODE  (0/2/4 = safe to continue install; 3 = still blocked)"
 } else {
-    Write-Host "tono-service-uninstall.exe not found."
+    Write-Host "tono-service-uninstall.exe not found. The current Tono installer can still clear a leftover Tono block: see Next steps."
 }
 
 Write-Step "DNS (should not be 198.18.0.2 / 127.0.0.1 for normal adapters)"
@@ -70,8 +71,12 @@ Get-DnsClientServerAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
 
 Write-Step "Next steps"
 Write-Host @"
-1. If ExitCode was 0, 2, or 4: run Tono_0.0.14_x64-setup.exe (or newer) again.
-2. If still 3: reboot Windows, run this script once more, then install again.
-3. If DNS is stuck on 198.18.0.2: Settings > Network & Internet > adapter > DNS > Automatic (DHCP).
-4. Send the full console output above to support if it still fails.
+1. If ExitCode was 0, 2, or 4: run the current Tono installer again.
+2. If the Tono binaries were not found above: run the current Tono installer. If it says a Tono
+   network block is still installed with no Tono Service left to release it, choose Yes. It
+   removes the block, stops without deleting anything if that cannot be proven, then reinstalls.
+3. If still 3: do not reboot first (the block survives a restart, its exceptions do not). Run
+   this script once more, then install again.
+4. If DNS is stuck on 198.18.0.2: Settings > Network & Internet > adapter > DNS > Automatic (DHCP).
+5. Send the full console output above to support if it still fails.
 "@

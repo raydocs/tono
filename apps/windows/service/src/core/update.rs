@@ -699,6 +699,66 @@ impl std::error::Error for ProtectionActive {}
 /// Exit code of `--manual-update-gate` for [`ProtectionActive`]; kept in sync with installer.nsi.
 pub const MANUAL_GATE_PROTECTION_ACTIVE_EXIT: i32 = 77;
 
+/// The manual gate refused because Tono filters remain but no Tono Service is left to own them
+/// (older uninstaller, quarantined or force-removed binaries). Neither Disconnect nor the Restore
+/// Network shortcut exists then; only the installer's own proven-removal ladder can clear them.
+/// NSIS offers that after the user confirms. It is never permission by itself.
+#[derive(Debug)]
+pub struct OrphanedProtection;
+
+impl std::fmt::Display for OrphanedProtection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Tono network block remains without a Tono Service to release it")
+    }
+}
+
+impl std::error::Error for OrphanedProtection {}
+
+/// Exit code of `--manual-update-gate` for [`OrphanedProtection`]; kept in sync with installer.nsi.
+pub const MANUAL_GATE_ORPHANED_PROTECTION_EXIT: i32 = 78;
+
+/// Residual Tono filters always refuse the manual gate; who can still own them decides how. A
+/// registered Service re-arms them on start, so the user must Disconnect ([`ProtectionActive`]).
+/// With none left, the refusal says so ([`OrphanedProtection`]) instead of a dead end.
+fn residual_filter_refusal(
+    residual_filters: bool,
+    service_present: impl FnOnce() -> Result<bool>,
+) -> Result<()> {
+    if !residual_filters {
+        return Ok(());
+    }
+    // An unreadable SCM keeps the Disconnect answer; only a proven absence is an orphan.
+    if service_present().unwrap_or(true) {
+        Err(ProtectionActive.into())
+    } else {
+        Err(OrphanedProtection.into())
+    }
+}
+
+/// Whether a Tono Service that can re-arm the barrier is installed: an SCM registration whose
+/// binary is still on disk. A stopped Service counts. Anything unreadable counts as present.
+fn barrier_service_present() -> Result<bool> {
+    use platform_lib::{
+        service::ServiceAccess,
+        service_manager::{ServiceManager, ServiceManagerAccess},
+    };
+    const ERROR_SERVICE_DOES_NOT_EXIST: i32 = 1060;
+    let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
+    match manager.open_service(crate::WINDOWS_SERVICE_NAME, ServiceAccess::QUERY_STATUS) {
+        Ok(_) => Ok(crate::service_paths()
+            .install_dir()
+            .join("tono-service.exe")
+            .try_exists()
+            .unwrap_or(true)),
+        Err(platform_lib::Error::Winapi(error))
+            if error.raw_os_error() == Some(ERROR_SERVICE_DOES_NOT_EXIST) =>
+        {
+            Ok(false)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
 /// NSIS calls this before *any* live or repair-resource mutation. The durable
 /// lease fences Service connect/restart even after the short-lived gate exits.
 pub async fn begin_manual() -> Result<()> {
@@ -715,7 +775,10 @@ pub async fn begin_manual() -> Result<()> {
     }
     drop(store);
     // No stale manual lease may turn armed/unknown protection into permission.
-    ensure!(!wfp::residual_filters_present().await?, ProtectionActive);
+    residual_filter_refusal(
+        wfp::residual_filters_present().await?,
+        barrier_service_present,
+    )?;
     let paths = crate::service_paths();
     if paths.active_owner_path().try_exists()? {
         let active: crate::ActiveOwnerState =
@@ -758,6 +821,18 @@ pub fn begin_manual_uninstall() -> Result<()> {
     let mut next = store.state.clone();
     next.manual_installer = Some(installer);
     store.save(next)
+}
+
+/// Install only, after the user confirmed clearing an orphaned barrier ([`OrphanedProtection`]).
+/// Re-checks that no Service appeared, then takes the same lease as [`begin_manual_uninstall`].
+/// The install's own `RemoveVergeService` ladder then removes the filters, and the install stops
+/// there unless that removal is proven.
+pub fn begin_manual_orphan() -> Result<()> {
+    ensure!(
+        !barrier_service_present()?,
+        "a Tono Service still owns the network barrier"
+    );
+    begin_manual_uninstall()
 }
 
 pub fn finish_manual() -> Result<()> {

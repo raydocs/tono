@@ -32,6 +32,30 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · Windows 安装器可在确认后清除无主的 Tono 拦截
+
+- **归属/来源**：G3 客户安装/修复路径（L3 死路、C5）；Windows NSIS 模板、Service 手动安装门控、恢复脚本。叠在 #500
+  （`fix/installer-filter-gate-20260923`，H15-F2）之上并合入当前 origin/main；分支 `fix/win-orphan-barrier-install-20260924`，
+  Issue #564（内部审查 H19-O-F2，跨厂商核实 confirmed）；未合 main。
+- **缺陷修复**：`.onInit` 的 `--manual-update-gate` 只要有 Tono WFP 过滤器就拒绝，不看是否还有 Tono Service 能拥有/解除它们；
+  旧卸载器、被强删或被隔离的二进制留下持久阻断且无 SCM 注册时，App 和「恢复网络」快捷方式都不存在，安装器又拒绝，
+  安装段里专为此写的 `RemoveVergeService` 清理到不了（#500 的提示仍让用户去断开）。改后：过滤器存在时按「是否仍有注册且
+  二进制在盘的 Tono Service」分类——有（含已停止、SCM 读不出）仍为 `ProtectionActive`（77，行为同 #500）；确认没有则为
+  新的 `OrphanedProtection`（78）。非静默安装在 78 时弹确认框：选「否」保留拦截并退出；选「是」调用新的
+  `--manual-orphan-gate`（再次确认没有 Service 出现后取与卸载相同的租约），安装继续进入既有 `RemoveVergeService`，
+  该阶梯只有证明 WFP 已移除才继续，否则中止且不删文件。静默安装仍拒绝。卸载器把 78 与 77 同样走 #500 的确认释放路径。
+  恢复脚本改为指向当前安装器与这一确认路径，并更正「先重启」的建议（持久阻断在重启后仍在、例外不在）。
+- **新增/优化**：无。**暂定决定（更严格）**：只有在证明没有 Tono Service 可再武装拦截、且用户确认时才由安装器清除；
+  静默安装不自动清除。
+- **工程与测试**：`core/update.rs` 一个 `#[test]`（`update_manual_gate_names_an_orphaned_barrier_instead_of_asking_to_disconnect`，
+  测 `begin_manual` 实际使用的 `residual_filter_refusal` 分类）；扩展 #500 的 packaging 测试断言 78 确认分支、卸载 78→77、
+  三语文案与退出码常量 78。
+- **验证**：MacBook `node --test scripts/windows-packaging.test.mjs`（apps/windows/app）：在 #500 基线上该测试失败，改后 23/23 通过；
+  Rust 仅 rustfmt 解析，未执行 cargo；NSIS 未编译。其余见 PR 的 Windows CI。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：须在 #500 之后合入；静默/无人值守安装遇到无主拦截仍是死路；SCM 注册存在且 `ProgramData\Tono\bin\tono-service.exe`
+  在盘但 Service 本身损坏时仍按 77 处理；只识别 Tono 自己的注册与二进制路径；未实机验证（AV 隔离、旧卸载器残留、重启后状态）。
+
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
 - **归属/来源**：G1–G3 审查与修复的可追溯性（工程流程与记录，非产品行为）；审查基线 main

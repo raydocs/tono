@@ -411,6 +411,10 @@ LangString manualUninstallRefused ${LANG_SIMPCHINESE} "${PRODUCTNAME} 现在无�
 LangString manualUninstallRefused ${LANG_ENGLISH} "${PRODUCTNAME} cannot be uninstalled right now: a protected update may still be pending, or another installer may be running. Nothing was changed.$\r$\n$\r$\nOpen ${PRODUCTNAME}, finish or Disconnect and Retry the pending update from Check for Updates, then uninstall again."
 LangString manualUninstallRefused ${LANG_RUSSIAN} "Сейчас удалить ${PRODUCTNAME} нельзя: возможно, не завершено защищённое обновление или работает другой установщик. Ничего не изменено.$\r$\n$\r$\nОткройте ${PRODUCTNAME}, завершите незаконченное обновление или отключитесь и повторите его в разделе проверки обновлений, затем повторите удаление."
 
+LangString installClearsOrphanedBlock ${LANG_SIMPCHINESE} "此电脑上仍装有 ${PRODUCTNAME} 的网络拦截，但已没有 ${PRODUCTNAME} 服务可以解除它，因此“断开”和“恢复网络”快捷方式都不可用。$\r$\n$\r$\n继续安装会先解除这项拦截并恢复普通网络访问，然后重新安装 ${PRODUCTNAME}；如果无法确认拦截已解除，安装会停止，不会删除任何文件。安装完成后请重新连接以恢复保护。$\r$\n$\r$\n是否继续？"
+LangString installClearsOrphanedBlock ${LANG_ENGLISH} "A ${PRODUCTNAME} network block is still installed on this PC, but no ${PRODUCTNAME} Service is left to release it, so neither Disconnect nor the Restore Network shortcut can help.$\r$\n$\r$\nContinuing removes that block, restores normal internet access and reinstalls ${PRODUCTNAME}. If the block cannot be shown removed, the installation stops and nothing is deleted. Connect again afterwards to turn protection back on.$\r$\n$\r$\nContinue?"
+LangString installClearsOrphanedBlock ${LANG_RUSSIAN} "На этом компьютере всё ещё установлена сетевая блокировка ${PRODUCTNAME}, но не осталось службы ${PRODUCTNAME}, которая может её снять, поэтому ни «Отключить», ни ярлык «Восстановить сеть» не помогут.$\r$\n$\r$\nЕсли продолжить, блокировка будет снята, обычный доступ в интернет восстановлен, а ${PRODUCTNAME} установлен заново. Если не удастся подтвердить снятие блокировки, установка остановится и ничего не будет удалено. После установки подключитесь снова, чтобы включить защиту.$\r$\n$\r$\nПродолжить?"
+
 LangString restoreNetworkTooltip ${LANG_SIMPCHINESE} "当 ${PRODUCTNAME} 无法恢复网络时，解除网络保护（需要管理员权限）。"
 LangString restoreNetworkTooltip ${LANG_ENGLISH} "Restores your network if ${PRODUCTNAME} cannot. Requires administrator approval."
 LangString restoreNetworkTooltip ${LANG_RUSSIAN} "Восстанавливает сеть, если ${PRODUCTNAME} не может. Требуются права администратора."
@@ -444,6 +448,20 @@ Function .onInit
   {{/each}}
   nsExec::ExecToLog '"$PLUGINSDIR\tono-gate\resources\tono-service-install.exe" --manual-update-gate'
   Pop $0
+  ; 78: Tono's block filters remain but no Tono Service is left to own them, so neither Disconnect
+  ; nor the Restore Network shortcut exists. The Install section's RemoveVergeService ladder is
+  ; what clears them, and it stops the install unless WFP removal is proven. Only after the user
+  ; confirms is the lease taken without Disconnect (the gate re-checks that no Service appeared).
+  ; A silent install keeps refusing.
+  ${If} $0 == "78"
+  ${AndIfNot} ${Silent}
+    MessageBox MB_ICONEXCLAMATION|MB_YESNO "$(installClearsOrphanedBlock)" IDYES orphanBlockClearConfirmed
+    SetErrorLevel 76
+    Abort "Installation cancelled; the leftover Tono network block was kept."
+    orphanBlockClearConfirmed:
+    nsExec::ExecToLog '"$PLUGINSDIR\tono-gate\resources\tono-service-install.exe" --manual-orphan-gate'
+    Pop $0
+  ${EndIf}
   ${If} $0 != "0"
     ; Abort text is never shown from .onInit, and a 0.0.72 settings-page update has already
     ; closed the App: without a dialog Tono just vanishes. 77 means only active protection
@@ -1218,6 +1236,11 @@ Function un.onInit
   ; Refuse pending v1 before the pre-uninstall hook or any App termination.
   nsExec::ExecToLog '"$INSTDIR\resources\tono-service-install.exe" --manual-update-gate'
   Pop $0
+  ; 78 (block filters with no Tono Service left to own them) needs the same confirmed release:
+  ; this uninstaller's RemoveVergeService ladder is the only thing left that can remove them.
+  ${If} $0 == "78"
+    StrCpy $0 "77"
+  ${EndIf}
   ; 77: no update is pending and no other installer holds the lease; only active protection
   ; stood in the way. RemoveVergeService exists for exactly that state: it releases protection
   ; (helper, then emergency disarm) and deletes nothing unless WFP removal is proven. After the
