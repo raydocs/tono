@@ -346,6 +346,10 @@ pub struct TonoInner {
     /// `optional_direct_skip` is the redacted skip reason when the overlay
     /// was not installed on an otherwise successful connect.
     pub optional_direct_active: bool,
+    /// X2-1: the physical adapter alias the committed DIRECT outbound is bound to
+    /// (`interface-name`). `None` whenever no overlay is committed. A network change may keep
+    /// the session in place only while this adapter is still a usable uplink.
+    pub applied_direct_interface: Option<String>,
     pub optional_direct_skip: Option<String>,
     /// Own DIRECT fail-closed bracket: `(connect_generation, deadline)`. While live, Blocked
     /// without a TUN permit is expected and must not tear the session down.
@@ -623,6 +627,7 @@ impl TonoState {
                 pending_policy_change: None,
                 applied_wechat_path_regexes: None,
                 optional_direct_active: false,
+                applied_direct_interface: None,
                 optional_direct_skip: None,
                 direct_reload_until: None,
                 exit_ip: None,

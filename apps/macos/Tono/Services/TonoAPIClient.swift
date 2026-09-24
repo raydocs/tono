@@ -202,12 +202,7 @@ actor TonoAPIClient {
             ],
             requestIsCurrent: requestIsCurrent
         )
-        guard receipt.wasStored else {
-            throw APIError.server(
-                status: 200,
-                message: String(localized: "Tono did not store this network log. Check the device's diagnostic collection authorization.")
-            )
-        }
+        guard receipt.wasStored else { throw DiagnosticsLogNotStoredError() }
         return receipt
     }
 
@@ -222,9 +217,13 @@ actor TonoAPIClient {
     }
 
     func reportConnectFailure(
-        _ report: TonoConnectFailureReport
+        _ report: TonoConnectFailureReport,
+        requestIsCurrent: (@Sendable () -> Bool)? = nil
     ) async throws -> TonoConnectFailureReceipt {
-        try await authorizedRequest("telemetry/failures", method: "POST", body: report)
+        try await authorizedRequest(
+            "telemetry/failures", method: "POST", body: report,
+            requestIsCurrent: requestIsCurrent
+        )
     }
 
     func uploadSupportReport(
@@ -354,7 +353,9 @@ actor TonoAPIClient {
         // credential orphaned server-side. The body is re-encoded per attempt:
         // a 401-triggered refresh rotates the token, and revoking the
         // pre-rotation value would orphan the freshly rotated one instead.
-        if currentRefreshToken() != nil {
+        // A token that cannot be read cannot be revoked; local deletion below
+        // is all that remains, as before.
+        if (try? currentRefreshToken()) != nil {
             do {
                 let token: String
                 if let accessToken {
@@ -409,7 +410,7 @@ actor TonoAPIClient {
 
     private func sendLogout(bearer: String) async throws {
         let body = try TonoCoding.encoder().encode(
-            TonoLogoutRequest(refreshToken: currentRefreshToken())
+            TonoLogoutRequest(refreshToken: try? currentRefreshToken())
         )
         _ = try await sendData(
             "auth/logout", method: "POST", body: body, bearer: bearer
@@ -418,8 +419,14 @@ actor TonoAPIClient {
 
     /// The freshest usable refresh token: a rotated-but-unpersisted value
     /// always wins over the keychain copy it failed to replace.
-    private func currentRefreshToken() -> String? {
-        unpersistedRefreshToken ?? (try? keychain.string(for: .refreshToken))
+    ///
+    /// Only a missing item means there is no session. Any other keychain
+    /// status (a locked login keychain, interaction not allowed) is thrown as
+    /// the local, retryable read failure it is. Reported as nil, it became
+    /// `.unauthorized` without asking the server, which suspends or signs out
+    /// an account the server never refused.
+    private func currentRefreshToken() throws -> String? {
+        try unpersistedRefreshToken ?? keychain.string(for: .refreshToken)
     }
 
     private func refreshAccessToken() async throws -> String {
@@ -432,7 +439,7 @@ actor TonoAPIClient {
                (try? keychain.set(pending, for: .refreshToken)) != nil {
                 unpersistedRefreshToken = nil
             }
-            guard let refresh = currentRefreshToken() else { throw APIError.unauthorized }
+            guard let refresh = try currentRefreshToken() else { throw APIError.unauthorized }
             let response: TonoTokenResponse = try await publicRequest("auth/refresh", body: TonoRefreshRequest(refreshToken: refresh))
             try requireCredentialGeneration(generation)
             accessToken = response.accessToken

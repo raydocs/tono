@@ -12,7 +12,6 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "resources/enableLoopback.exe",
       "resources/core-identity.json",
       "resources/tono-service.exe",
       "resources/tono-service-install.exe",
@@ -55,6 +54,9 @@
     }
   },
   "plugins": {
+    "shell": {
+      "open": "https://ip\\.cx/webrtc"
+    },
     "updater": {
       "endpoints": [],
       "pubkey": ""

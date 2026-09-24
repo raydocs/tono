@@ -15,6 +15,21 @@ extension SettingsKey {
         "periodicTelemetryEnabled"
     nonisolated static let periodicTelemetryDefaultV2Applied =
         "periodicTelemetryDefaultV2Applied"
+    /// Internal builds only: the user turned off the classified connect-failure
+    /// report that those builds send by default. Its own key because the
+    /// snapshot switch is off by default and cannot also mean "opted out".
+    nonisolated static let internalFailureReportsOptedOut =
+        "internalFailureReportsOptedOut"
+}
+
+/// What an immediate connect-failure report may carry.
+nonisolated enum ConnectFailureReportScope: Equatable, Sendable {
+    /// The user turned on the protection snapshot: error text and Core log
+    /// lines ride along, as before.
+    case full
+    /// Internal-build default (owner decision 2026-09-24): stage, error code,
+    /// version and node only. No error text, Core lines, URLs or addresses.
+    case classified
 }
 
 @MainActor @Observable
@@ -62,6 +77,10 @@ final class AccountSession {
     /// running. Only that session can be resumed by a re-read of the account;
     /// a block raised before the runtime came up still needs a full restore.
     var blockedWhileReady = false
+    /// Counts refusals, including one that lands while the account is already
+    /// suspended and so changes no state. A re-acceptance started before the
+    /// latest refusal belongs to an answer the control plane has withdrawn.
+    @ObservationIgnored var entitlementRefusals: UInt64 = 0
     var enrollmentAuthKey: String?
     var enrollmentHostname: String?
     let api: TonoAPIClient
@@ -82,6 +101,10 @@ final class AccountSession {
     let claudeTrafficResearchConsumer:
         @MainActor () async -> TonoClaudeTrafficResearchSnapshot
     let protectionBlockedConsumer: @MainActor () -> Bool
+    /// Whether automatic reconnects are paused until the user acts (a denied
+    /// administrator prompt, a failed helper install). No account path may
+    /// lift that pause by requesting a resume on its own.
+    let protectedReconnectPausedConsumer: @MainActor () -> Bool
     let protectedRetryConsumer: @MainActor () -> Void
     let appRoutingResearchActivationConsumer: @MainActor () -> Void
     let exitNode: String
@@ -125,8 +148,17 @@ final class AccountSession {
     var lastTrafficPolicyRevision: Int?
     @ObservationIgnored let accountLifecycle = AccountLifecycleCoordinator()
     var authMethodsLoading = false
+    @ObservationIgnored var authMethodsLoadRevision: UInt64?
     var hasStartedRestore = false
     var shouldResumeProtection = false
+    /// Before a sign-in or Check again consumes a kept resume intent: the
+    /// helper's answer. A release (`.confirmed(requiresProtectionRecovery:
+    /// false)`) only when AppState accepted it under its protection
+    /// generation, clearing the armed intent. Replaceable so tests never reach
+    /// the privileged socket; unwired, the helper is unavailable and no intent
+    /// is ever retired.
+    @ObservationIgnored var protectionReleaseConsumer:
+        @MainActor () async -> KillSwitchService.StatusObservation
 
     var deviceLimit: Int { user?.deviceLimit ?? TonoAccountRules.maximumDevices }
     var isAtDeviceLimit: Bool { devices.count >= deviceLimit }
@@ -164,6 +196,50 @@ final class AccountSession {
         )
     }
 
+    /// Internal candidate build: Info.plist `TonoBuildChannel` is `internal`
+    /// only when the candidate signing path sets the `TONO_BUILD_CHANNEL`
+    /// build setting. Release builds leave it empty.
+    nonisolated static func isInternalBuild(
+        _ info: [String: Any]? = Bundle.main.infoDictionary
+    ) -> Bool {
+        (info?["TonoBuildChannel"] as? String) == "internal"
+    }
+
+    /// The saved internal-build opt-out. Unset means the default stays on.
+    nonisolated static var isInternalFailureReportsOptedOut: Bool {
+        AppProfile.defaults.bool(forKey: SettingsKey.internalFailureReportsOptedOut)
+    }
+
+    /// Whether a connect failure is reported, and with what. Release builds
+    /// report only after the snapshot opt-in; internal builds also send the
+    /// classified record without it unless the user saved the opt-out. That
+    /// default comes from the build, not from UserDefaults, so the one-shot v2
+    /// reset cannot turn it off on upgrade.
+    nonisolated static func failureReportScope(
+        internalBuild: Bool,
+        snapshotOptedIn: Bool,
+        internalOptedOut: Bool
+    ) -> ConnectFailureReportScope? {
+        if snapshotOptedIn { return .full }
+        return internalBuild && !internalOptedOut ? .classified : nil
+    }
+
+    /// Re-checked before every send attempt of a report built with `built`: a
+    /// token refresh or network retry can wait, and a switch turned off in
+    /// that time must stop the report. Error text and Core lines need the
+    /// snapshot consent still on.
+    nonisolated static func failureReportStillAllowed(
+        builtAs built: ConnectFailureReportScope,
+        internalBuild: Bool
+    ) -> Bool {
+        let now = failureReportScope(
+            internalBuild: internalBuild,
+            snapshotOptedIn: isPeriodicTelemetryEnabled,
+            internalOptedOut: isInternalFailureReportsOptedOut
+        )
+        return now == .full || (built == .classified && now != nil)
+    }
+
     init(api: TonoAPIClient = TonoAPIClient(), keychain: KeychainStore = KeychainStore(), sidecar: TonoSidecarService,
          exitNode: String = Bundle.main.object(forInfoDictionaryKey: "TonoExitNode") as? String ?? "",
          descriptorConsumer: @escaping @MainActor (TonoTransportDescriptor?) async -> Void,
@@ -172,6 +248,8 @@ final class AccountSession {
          cloudFallbackPreferred: @escaping @MainActor () -> Bool = { false },
          cloudFallbackConsumer: @escaping @MainActor (Bool) throws -> Void = { _ in },
          killSwitchDisarmConsumer: @escaping @MainActor () async -> Void,
+         protectionReleaseConsumer: @escaping @MainActor ()
+            async -> KillSwitchService.StatusObservation = { .unavailable },
          diagnosticSnapshotConsumer: @escaping @MainActor () -> TonoDiagnosticSnapshot = {
              TonoDiagnosticSnapshot(
                  appVersion: "unknown", build: "unknown", connected: false,
@@ -218,6 +296,7 @@ final class AccountSession {
                 )
             },
          protectionBlockedConsumer: @escaping @MainActor () -> Bool = { false },
+         protectedReconnectPausedConsumer: @escaping @MainActor () -> Bool = { false },
          protectedRetryConsumer: @escaping @MainActor () -> Void = {},
          appRoutingResearchActivationConsumer: @escaping
             @MainActor () -> Void = {},
@@ -243,9 +322,11 @@ final class AccountSession {
         self.cloudFallbackPreferred = cloudFallbackPreferred
         self.cloudFallbackConsumer = cloudFallbackConsumer
         self.killSwitchDisarmConsumer = killSwitchDisarmConsumer
+        self.protectionReleaseConsumer = protectionReleaseConsumer
         self.diagnosticSnapshotConsumer = diagnosticSnapshotConsumer
         self.claudeTrafficResearchConsumer = claudeTrafficResearchConsumer
         self.protectionBlockedConsumer = protectionBlockedConsumer
+        self.protectedReconnectPausedConsumer = protectedReconnectPausedConsumer
         self.protectedRetryConsumer = protectedRetryConsumer
         self.appRoutingResearchActivationConsumer =
             appRoutingResearchActivationConsumer

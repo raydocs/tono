@@ -251,6 +251,11 @@
       "title": "账号已暂停",
       "description": "请联系客服。"
     },
+    "sessionEnded": {
+      "title": "登录已失效",
+      "description": "Tono 不再接受这次登录：可能已在别处退出，或套餐已暂停。请重新登录。",
+      "signIn": "重新登录"
+    },
     "restoreFailed": {
       "title": "登录状态已失效",
       "description": "请重试，或重新登录。",
@@ -260,7 +265,10 @@
       "title": "网络已被保护拦住",
       "description": "上次连接的防泄漏还在。先恢复网络，再登录。",
       "restore": "恢复网络",
-      "restoring": "正在恢复…"
+      "restoring": "正在恢复…",
+      "unverifiedDescription": "Tono 无法确认上次连接的防泄漏是否还在。先点「恢复网络」，再登录。",
+      "stillRunningTitle": "上次的连接仍在运行",
+      "stillRunningDescription": "上次会话的隧道仍在转发流量。恢复网络会停止它。"
     },
     "errors": {
       "unreachable": "连不上登录服务器。换可用网络（热点，或先开其他翻墙）登录一次即可。",
@@ -298,7 +306,7 @@
     "connected": "已连接",
     "disconnecting": "断开中…",
     "protectedOffline": "保护中，未连上",
-    "protectedOfflineDescription": "已拦住直连，正在换线重试。",
+    "protectedOfflineDescription": "已拦住直连，已安排自动重试。",
     "server": "节点",
     "noServer": "未选择节点",
     "killSwitchMode": "断网保护：{{mode}}",
@@ -346,6 +354,8 @@
       "wfpEngineWedged": "Windows 防火墙引擎没有响应，通常是第三方安全软件挂住了它。请重启电脑；若还是这样，先退出杀毒或防火墙软件再重试。",
       "releaseReconciling": "保护还在解除，请稍后再连。",
       "serviceTooOld": "服务版本过旧，请用最新安装包重装。",
+      "protectionHeldByAnotherUser": "本机另一位用户正在使用 Tono 的保护（即使其会话只是已断开）。需对方在这台电脑上点击「断开」或注销。若对方无法操作，本机管理员可先停止 Tono 服务（在管理员 PowerShell 中运行 sc.exe stop TonoService），再以管理员身份运行「开始」菜单中的「Tono — 恢复网络 (Restore Network)」。",
+      "remoteSessionConnectRefused": "不能在远程桌面会话中连接：Tono 的保护会阻断这条远程连接，且无法远程恢复。请在这台电脑本机的屏幕和键盘上连接。",
       "browserDnsPreflight": "无法连接 Claude 住宅专线，因为不能确认 Chrome / Edge 的「安全 DNS」配置安全。Tono 会统一路由 Chrome / Edge 的所有用户资料，不支持按资料单独路由。请将「安全 DNS」设为关闭，或自动且不指定自定义提供商；然后彻底重启浏览器，再重新连接 Tono。",
       "nodeUnreachable": "连不上这个节点。请重试或换节点。",
       "tunDataPlaneBroken": "节点是通的，但 Windows 没有转发隧道流量。换节点没用——请重启电脑后再连；若还是这样，请发诊断。",
@@ -582,6 +592,7 @@
       "title": "WebRTC 泄漏检测",
       "description": "连上后打开。正常应看不到家里公网 IP。",
       "open": "打开 ip.cx/webrtc",
+      "openFailed": "无法打开浏览器，请手动访问 https://ip.cx/webrtc。",
       "copyVersion": "复制版本号"
     }
   },

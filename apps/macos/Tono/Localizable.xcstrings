@@ -122,6 +122,16 @@
         }
       }
     },
+    "DNS conflict: a corporate VPN, profile or /etc/resolver rule sends some domains to a DNS server outside Tono's protection. Kill Switch is blocking traffic and automatic retries are paused. Turn that rule off, then click Repair and reconnect, or Restore internet to get back online.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DNS 冲突：企业 VPN、描述文件或 /etc/resolver 规则把部分域名交给 Tono 保护之外的 DNS 服务器解析。断网保护正在拦住直连，自动重试已暂停。请先关闭该规则，再点按「修复并重新连接」，或点按「恢复正常网络」恢复上网。"
+          }
+        }
+      }
+    },
     "DNS ownership is unknown. Authorize the helper and check again; no resolver query was sent.": {
       "localizations": {
         "zh-Hans": {
@@ -222,6 +232,26 @@
         }
       }
     },
+    "Protection problem: another program keeps turning off or replacing Tono's network protection. Kill Switch is blocking traffic and automatic reconnects are paused. Quit the other VPN or firewall, then click Retry now, or Restore internet to get back online.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保护异常：另一个程序反复关闭或替换 Tono 的网络保护。断网保护正在阻断流量，自动重连已暂停。请退出其他 VPN 或防火墙后点按「立即重试」，或点按「恢复正常网络」恢复上网。"
+          }
+        }
+      }
+    },
+    "Network protection was interrupted by another program; Kill Switch is blocking traffic while Tono reconnects.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保护异常：另一个程序中断了网络保护。断网保护正在阻断流量，Tono 正在重新连接。"
+          }
+        }
+      }
+    },
     "No account-owned catalog is available. Open Nodes and refresh the catalog.": {
       "localizations": {
         "zh-Hans": {
@@ -308,6 +338,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "预览支持报告"
+          }
+        }
+      }
+    },
+    "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. Kill Switch is blocking traffic and automatic retries are paused. Click Repair and reconnect to try again, or Restore internet to get back online.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "多次重连后受保护 DNS 仍未生效：macOS 仍在使用其他 DNS 服务器解析。断网保护正在拦住直连，自动重试已暂停。点按「修复并重新连接」再试一次，或点按「恢复正常网络」恢复上网。"
           }
         }
       }
@@ -682,6 +722,26 @@
         }
       }
     },
+    "Tono's network helper on this Mac is set up for another macOS account. Use Tono from that account.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台 Mac 上 Tono 的网络组件属于另一个 macOS 账户。请在该账户中使用 Tono。"
+          }
+        }
+      }
+    },
+    "Tono's network helper on this Mac is set up for the macOS account “%@” and keeps that account's network protection. Use Tono from that account. To move Tono to this account, an administrator can run sudo /Library/PrivilegedHelperTools/tono-core-helper --emergency-reset in Terminal, then reopen Tono.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台 Mac 上 Tono 的网络组件属于 macOS 账户“%@”，并保持着该账户的网络保护。请在该账户中使用 Tono。如需把 Tono 移到当前账户，请由管理员在“终端”中运行 sudo /Library/PrivilegedHelperTools/tono-core-helper --emergency-reset，然后重新打开 Tono。"
+          }
+        }
+      }
+    },
     "Unknown": {
       "localizations": {
         "zh-Hans": {
@@ -948,6 +1008,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "帮助排查问题"
+          }
+        }
+      }
+    },
+    "Failed connection reports": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连接失败上报"
+          }
+        }
+      }
+    },
+    "Internal test build, on by default: a failed connection is reported to Tono (stage, error code, version and server only). Turn it off here.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内部测试版默认开启：连接失败会上报给 Tono（仅含阶段、错误代码、版本和服务器）。可在此关闭。"
           }
         }
       }
@@ -2479,6 +2559,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "已拦住直连流量。需要上网的话，可以从这里恢复。"
+          }
+        }
+      }
+    },
+    "Direct traffic may be blocked": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "直连可能仍被拦截"
           }
         }
       }
@@ -4289,6 +4379,16 @@
         }
       }
     },
+    "Protection from an earlier session could not be confirmed. Direct Internet may still be blocked.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法确认上一次会话的保护状态，直接联网可能仍被拦截。"
+          }
+        }
+      }
+    },
     "Protection snapshot": {
       "localizations": {
         "zh-Hans": {
@@ -4305,6 +4405,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "连接保护启动失败：%@"
+          }
+        }
+      }
+    },
+    "Protection unknown": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保护状态未知"
           }
         }
       }
@@ -5979,6 +6089,36 @@
         }
       }
     },
+    "Tono's network helper is not running, so this Mac is not protected right now. Click Retry and approve the administrator prompt to repair it.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 的网络组件没有运行，这台 Mac 当前未受保护。点按「重试」并在管理员弹窗中确认以修复。"
+          }
+        }
+      }
+    },
+    "Tono's network helper is not responding, so this Mac may not be protected right now. Click Retry and approve the administrator prompt to repair it.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 的网络组件没有响应，这台 Mac 当前可能未受保护。点按「重试」并在管理员弹窗中确认以修复。"
+          }
+        }
+      }
+    },
+    "Tono's network helper is turned off in System Settings > General > Login Items & Extensions, so this Mac is not protected right now. Turn Tono on under Allow in the Background, then click Retry.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 的网络组件已在「系统设置 > 通用 > 登录项与扩展」中关闭，这台 Mac 当前未受保护。请在「允许在后台」中打开 Tono，然后点按「重试」。"
+          }
+        }
+      }
+    },
     "The installed network helper rejected this copy of Tono.": {
       "localizations": {
         "zh-Hans": {
@@ -6167,6 +6307,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "网络组件协议不匹配，需要先完成组件修复。"
+          }
+        }
+      }
+    },
+    "The network service whose DNS settings Tono saved has been deleted, so those DNS servers could not be put back. DNS is now obtained automatically. If your network needs manual DNS servers, set them again in System Settings > Network.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 保存的 DNS 设置所属的网络服务已被删除，原来的 DNS 服务器无法写回，现已改为自动获取 DNS。如果该网络需要手动填写 DNS 服务器，请在系统设置 > 网络中重新设置。"
           }
         }
       }
@@ -6982,12 +7132,12 @@
         }
       }
     },
-    "Wake protection is still being reasserted; Internet remains blocked. %@": {
+    "Wake protection could not be confirmed; Tono keeps retrying. Direct Internet may still be blocked. %@": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "唤醒后的保护仍在重新生效，网络仍处于阻断状态。%@"
+            "value": "无法确认唤醒后的保护状态，Tono 会继续重试。直接联网可能仍被拦截。%@"
           }
         }
       }
@@ -7110,6 +7260,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "macOS"
+          }
+        }
+      }
+    },
+    "macOS reports no active network service, so automatic retries are paused. Kill Switch is blocking traffic; Tono tries again when the network changes. Click Repair and reconnect to try now, or Restore internet to get back online.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS 报告当前没有可用的网络服务，自动重试已暂停。断网保护正在拦住直连；网络变化时 Tono 会再试一次。点按「修复并重新连接」立即重试，或点按「恢复正常网络」恢复上网。"
           }
         }
       }

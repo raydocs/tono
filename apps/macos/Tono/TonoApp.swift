@@ -17,6 +17,12 @@ struct TonoApp: App {
         // Before any service exists: a fault while constructing AppState or the
         // account session would otherwise leave no local trace at all.
         CrashReporter.shared.install()
+        // Before AppState reads the incomplete-update warning.
+        UpdateHandoffStore.retireCompletedLegacyJournal(
+            currentAppVersion: Bundle.main.object(
+                forInfoDictionaryKey: "CFBundleShortVersionString"
+            ) as? String ?? ""
+        )
         let appState = AppState()
         let sidecar = TonoSidecarService()
 #if DEBUG
@@ -58,6 +64,9 @@ struct TonoApp: App {
             killSwitchDisarmConsumer: {
                 await appState.disconnectAndWait(releaseKillSwitch: true)
             },
+            protectionReleaseConsumer: {
+                await appState.acceptConfirmedProtectionReleaseBeforeSignIn()
+            },
             diagnosticSnapshotConsumer: {
                 CrashReporter.shared.annotatedRemoteDiagnosticSnapshot(
                     appState.compactRemoteDiagnosticSnapshot()
@@ -67,7 +76,12 @@ struct TonoApp: App {
                 await appState.claudeTrafficResearchSnapshot()
             },
             protectionBlockedConsumer: { appState.isProtectionBlocked },
-            protectedRetryConsumer: { appState.retryProtectedConnectionNow() },
+            protectedReconnectPausedConsumer: {
+                appState.protectedReconnectPausedForUserAction
+            },
+            protectedRetryConsumer: {
+                appState.retryProtectedConnectionNow(repairHelper: false)
+            },
             appRoutingResearchActivationConsumer: {
                 appState.appRoutingResearchActivationChanged()
             },
@@ -132,7 +146,8 @@ struct TonoApp: App {
                 if InterfaceLanguagePreference.hasChosen {
                     if WelcomeLaunchGate.showsIntro(
                         introSeen: introSeen,
-                        sessionState: accountSession.state
+                        sessionState: accountSession.state,
+                        protectionHeld: KillSwitchService.isArmed
                     ) {
                         WelcomeIntroView()
                     } else {
@@ -142,6 +157,8 @@ struct TonoApp: App {
                                 .environment(accountSession)
                                 .environmentObject(updater)
                         }
+                        // The gate reads the protection state the menu bar reads.
+                        .environment(appState)
                     }
                 } else {
                     LanguageSetupView()

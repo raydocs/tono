@@ -36,6 +36,14 @@ pub const SERVICE_NOT_RUNNING_PREFIX: &str = "TONO_SERVICE_NOT_RUNNING";
 pub const TUN_DATA_PLANE_BROKEN_PREFIX: &str = "TONO_TUN_DATA_PLANE_BROKEN";
 pub const TUN_INGRESS_BROKEN_PREFIX: &str = "TONO_TUN_INGRESS_BROKEN";
 pub const NODE_OR_CORE_UNREACHABLE_PREFIX: &str = "TONO_NODE_OR_CORE_UNREACHABLE";
+/// The Service refused PrepareCoreStart / StartClash with `ProtectionHeldByAnotherUser` (1014):
+/// another local Windows user who is still signed in holds the armed protection. Not a failed
+/// attempt the user can retry; they must wait for that user to disconnect or sign out.
+pub const PROTECTION_HELD_BY_ANOTHER_USER_PREFIX: &str = "TONO_PROTECTION_HELD_BY_ANOTHER_USER";
+/// The Service refused PrepareCoreStart / StartClash with `RemoteSessionConnectRefused` (1015):
+/// this App runs in a Remote Desktop session (or one not confirmed as the console), and arming
+/// protection would cut that remote connection. Not retryable from here; connect at the console.
+pub const REMOTE_SESSION_CONNECT_REFUSED_PREFIX: &str = "TONO_REMOTE_SESSION_CONNECT_REFUSED";
 
 /// Translate the Service's stable WFP markers into an actionable message. Returns `None` for
 /// every other error so callers keep the original diagnostic text.

@@ -20,6 +20,8 @@
 	<false/>
 	<key>SUVerifyUpdateBeforeExtraction</key>
 	<true/>
+	<key>TonoBuildChannel</key>
+	<string>$(TONO_BUILD_CHANNEL)</string>
 	<key>TonoAPIBaseURL</key>
 	<string>https://api.afk.ccwu.cc</string>
 	<key>TonoAPIBootstrapAddresses</key>

@@ -13,6 +13,7 @@ use std::{
 };
 use tauri::{AppHandle, ipc::Channel};
 use tokio::{io::AsyncWriteExt as _, sync::Mutex};
+use tono_logging::{Type, logging};
 use tono_core::connection::ConnectionFsm;
 use tono_service_protocol::{
     update_contract::{Phase, Protection, ReleaseManifest, TargetId},
@@ -175,7 +176,7 @@ pub async fn tono_install_update(
         // These are user-context conveniences, not proof. Service independently
         // reads this authenticated user's proxy registry after private staging.
         crate::core::proxy_control::stop_guard().await;
-        crate::core::proxy_control::clear().await?;
+        crate::core::proxy_control::clear_for_update().await?;
         {
             let mut inner = state.lock().await;
             inner.invalidate_connection(false);
@@ -286,8 +287,14 @@ pub async fn disconnect_if_pending() -> Result<Option<tono_service_protocol::Kil
         return Ok(None);
     }
     crate::core::proxy_control::stop_guard().await;
-    crate::core::proxy_control::clear().await?;
-    request(UpdateRequest::Disconnect).await?;
+    crate::core::proxy_control::clear_for_update().await?;
+    // Err means the Service completed no protection release. A release whose
+    // update record could not be proven or archived returns Ok with
+    // `needs_attention`: the machine is open, so it must not read as armed.
+    let released = request(UpdateRequest::Disconnect).await?;
+    if let Some(reason) = released.needs_attention.as_deref() {
+        logging!(warn, Type::Service, "Tono: update Disconnect released protection; update record still pending: {reason}");
+    }
     // The Service command proves and records cleanup; this ordinary read also
     // supplies the released protection projection to the existing UI worker.
     let status = crate::core::service::tono_kill_switch_status().await?;
