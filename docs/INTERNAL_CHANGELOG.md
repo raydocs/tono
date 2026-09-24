@@ -32,6 +32,30 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 连接尾声在更新状态查询返回后重新核对代际再提交
+
+- **归属/来源**：G3 原生升级恢复 / G1 连接生命周期；macOS `AppState+Connect.onCoreStarted`。
+  内部审查 X1-9（降级），Issue #438。基线 main bb2ed4e4 → 分支
+  `fix/core-started-late-commit-20260923`；提交时未合 main。
+- **缺陷修复**：收养了 `.connected` 恢复义务的待定原生更新后，连接尾声先置 `isConnected`，
+  再阻塞等待 helper 的 `pendingNativeUpdate()`。这期间用户取消（走
+  `disconnectPendingNativeUpdate` → `suspendForNativeUpdate`：bump 代际、取消并等待连接任务）
+  后，查询返回时尾声不再检查取消、代际或连接意图，直接 `nativeUpdate("commit")`，并注册
+  后台策略和核心监视器。随后的 `/update/disconnect` 被 helper 以"已提交"拒绝，用户的恢复
+  网络请求以错误告终。现在 `onCoreStarted` 入口记录代际；状态查询返回后、以及注册尾声任务
+  之前，都要求任务未取消、仍在连接中且代际未变，否则返回 false，不提交、不注册。
+- **新增/优化**：无。
+- **工程与测试**：新增窄 seam `AppState.nativeUpdateResume`（`pending` / `commit`，生产走
+  `PrivilegedRuntimeCoordinator`）；`onCoreStarted` 由 private 改为 internal 以便测试调用。
+  新增 `ConnectTailRetirementTests.testRetiredAttemptDoesNotCommitUpdateAfterStatusQuery`
+  （一个 XCTest）：状态查询停在可控闸门，期间按 suspend 的前两步 bump 代际并取消任务，
+  放行后断言返回 false、commit 调用 0 次、未注册监视器。旧逻辑下会提交一次，断言失败。
+- **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests），结果以 PR 页为准。真实待定更新下的取消时序未做实机复现。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：commit 本身也是不可取消的阻塞 IPC；取消若恰好落在 commit 发出之后，提交
+  仍会发生，只是尾声不再注册任务。helper 侧未改，CONTRACT.sha256 与协议版本不变。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
