@@ -73,7 +73,7 @@ pub(crate) const AUDIT_FLUSH_BUDGET: std::time::Duration = std::time::Duration::
 /// Absolute budget for startup authentication restore and its two cloud refreshes. Credential
 /// hydration has its own three-second budget before this function starts. Read-only API work can
 /// be cancelled safely; protection release keeps its separate reconciliation semantics.
-const RESTORE_TRANSACTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+pub(crate) const RESTORE_TRANSACTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Emitted on `tono://status` after every state change.
 ///

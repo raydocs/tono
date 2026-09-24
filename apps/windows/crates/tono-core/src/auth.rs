@@ -1456,8 +1456,9 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
     /// One logical API call: the request plus at most one transport
     /// retry (the mainland-link policy, §1). The retry fires only when the
     /// first attempt failed in a way that provably never reached the
-    /// server (see [`should_retry_transport`]); a failed retry propagates
-    /// the *original* error, which is the more useful signal.
+    /// server (see [`should_retry_transport`]); a retry that fails in
+    /// transport too propagates the *original* error, the more useful
+    /// signal, but a retry the server answered propagates that answer.
     ///
     /// Interaction with the 401 replay (an independent mechanism): this
     /// budget is per logical request, so the worst case is first attempt
@@ -1482,7 +1483,11 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
                     Ok(response) => Ok(response),
                     // Propagate the original error: it is the more useful
                     // signal than a second, possibly different, failure.
-                    Err(_) => Err(err),
+                    Err(ApiError::Transport { .. }) => Err(err),
+                    // The server did answer. Reporting its 401/403/4xx/5xx as
+                    // "could not reach Tono" would read a refused session as an
+                    // unreachable one.
+                    Err(answer) => Err(answer),
                 }
             }
             result => result,
@@ -2366,6 +2371,20 @@ mod tests {
             }
         );
         assert_eq!(mock.count_to("auth/methods"), 2, "one retry, no more");
+    }
+
+    /// A refusal on the retry is the session's answer, not a transport failure:
+    /// reporting it as "could not reach Tono" hides a refused session.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_retry_the_server_refused_is_not_reported_as_unreachable() {
+        let (client, mock, store) = test_client(fail_then_ok(
+            TransportKind::Connect,
+            401,
+            r#"{"error":{"message":"revoked","code":"UNAUTHORIZED"}}"#,
+        ));
+        store.set_refresh_token("refresh-1").unwrap();
+        assert_eq!(client.me().await.unwrap_err(), ApiError::Unauthorized);
+        assert_eq!(mock.count_to("auth/refresh"), 2, "one transport retry, then the refusal");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
