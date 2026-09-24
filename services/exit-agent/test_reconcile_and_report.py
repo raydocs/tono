@@ -1349,6 +1349,15 @@ class ReconcileSafety(unittest.TestCase):
             self.calls[0], ["api", "rmu", "--server=127.0.0.1:10085", "-tag=tono-vless", email],
         )
         self.assertFalse(any("--email" in arg for arg in self.calls[0]))
+        # A NUL byte never reaches subprocess, so later removals still run,
+        # and a tag with a line break is refused before any Xray call.
+        with self.assertRaises(agent.Refusal):
+            self.reconcile([], {"u:a\x00bad", "u:z"}, None)
+        self.assertIn("u:z", self.calls[-1])
+        self.assertFalse(any("u:a\x00bad" in call for call in self.calls))
+        with patch.dict(os.environ, {"TONO_XRAY_INBOUND_TAG": "x\nRemoved 1 user(s) in total."}):
+            with self.assertRaises(agent.Refusal):
+                agent.inbound_tag()
 
     def test_an_adu_that_exits_0_after_an_rpc_error_is_a_failure(self) -> None:
         # Xray 26 `adu` exits 0 and prints "Added 0" when the add failed.

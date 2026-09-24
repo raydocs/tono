@@ -51,10 +51,13 @@
   续修 3（Codex 核实 42653897 为 PARTIAL）：含换行或其他不可打印字符的 email 回显后可拆出独立的整行成功文本，
   现在此类 email 的 `rmu`/`adu` 一律判为失败（不 ACK、不从清单删除）。旧 `removeuser` 恢复原判定
   （rc=0 或 stderr 含 not found 即已删），不再套用 Xray 26 的输出规则。
+  续修 4（Codex 核实 163cb823：RR2 FIXED，RR1 PARTIAL）：不可打印 email 不再交给 subprocess（NUL 字节曾抛
+  `ValueError` 并跳过其后所有删除），直接记为失败；`TONO_XRAY_INBOUND_TAG` 只允许字母、数字、`.`、`_`、`-`，
+  否则本轮拒绝（tag 回显同样可伪造整行成功文本）。
 - **新增/优化**：无。
 - **工程与测试**：回归 `test_rmu_success_is_read_from_its_output_not_its_exit_code` 用节点实测的三段 rc=0 输出
   （用户不存在→已删，错误 tag→失败，`Removed 1`→已删），并断言 rmu argv 恰为
-  `api rmu --server=<addr> -tag=<tag> <email>`、不含 `--email`（取代先前单独的 argv 测试）；另含两例回显伪造（均须失败），以及续修 3 的换行 email 伪造（rmu/adu 均须失败，在 42653897 上失败）和 `removeuser` rc=0 判已删。
+  `api rmu --server=<addr> -tag=<tag> <email>`、不含 `--email`（取代先前单独的 argv 测试）；另含两例回显伪造（均须失败），以及续修 3 的换行 email 伪造（rmu/adu 均须失败，在 42653897 上失败）和 `removeuser` rc=0 判已删；续修 4 的 NUL email 不进 Xray 且后续删除照常、换行 tag 被拒（在 163cb823 上失败）。
   新增 1 个 adu 回归：`Added 0` + RPC 错误 → 失败、reconcile 拒绝，不返回清单。fixture 修正：原有测试中按
   `--email=` 解析 rmu 参数的 mock/断言改为位置参数；成功删除的 rmu mock 由空输出改为打印 `Removed 1 user(s) in total.`；成功添加的 adu mock 改为打印
   `Added 1 user(s) in total.`，「已存在」mock 由 rc=1 `User already exists.` 改为 Xray 26 实际的 rc=0 逐用户行。

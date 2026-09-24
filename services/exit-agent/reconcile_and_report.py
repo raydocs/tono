@@ -229,7 +229,12 @@ def api_address() -> str:
 
 
 def inbound_tag() -> str:
-    return env("TONO_XRAY_INBOUND_TAG", required=False) or "tono-vless"
+    tag = env("TONO_XRAY_INBOUND_TAG", required=False) or "tono-vless"
+    # Xray echoes the tag in its errors; one with a line break could print a
+    # whole success line of its own.
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", tag):
+        raise Refusal("TONO_XRAY_INBOUND_TAG may only hold letters, digits, '.', '_' and '-'")
+    return tag
 
 
 def state_path() -> Path:
@@ -343,6 +348,8 @@ def add_inbound_user(
     binary: Path, command: str, address: str, tag: str, label: str, client_uuid: str,
 ) -> subprocess.CompletedProcess[str]:
     """Install one VLESS identity. Xray 26+ `adu` takes an inbound JSON snippet."""
+    if not _one_line(label):
+        return _refused(label)
     if command != "adu":
         return run_xray(binary, [
             "api", command, f"--server={address}",
@@ -382,6 +389,8 @@ def remove_inbound_user(
 ) -> subprocess.CompletedProcess[str]:
     """Remove one identity. Xray 26 `rmu` takes `-tag=` and positional emails;
     it rejects `--email=` outright. `removeuser` gets the same form."""
+    if not _one_line(email):
+        return _refused(email)
     return run_xray(binary, ["api", command, f"--server={address}", f"-tag={tag}", email])
 
 
@@ -406,6 +415,12 @@ def _one_line(email: str) -> bool:
     # Xray echoes the email; one with a line break could print a whole
     # success line of its own. Such an email is never judged a success.
     return email.isprintable()
+
+
+def _refused(email: str) -> subprocess.CompletedProcess[str]:
+    # Not run at all: a NUL byte would make subprocess raise and skip every
+    # later removal.
+    return subprocess.CompletedProcess([], 1, "", f"refused non-printable email {email!r}")
 
 
 def removal_succeeded(result: subprocess.CompletedProcess[str], email: str, command: str = "rmu") -> bool:
