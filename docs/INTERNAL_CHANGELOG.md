@@ -925,6 +925,62 @@
 - **候选/发布**：无新包，仅源码。
 - **剩余限制**：macOS 没有卸载器，拖走 App 后 App Support 仍会残留（平台惯例，未处理）。
   未做实机验证。
+## 2026-09-24 · exit-agent `rmu` 改为位置参数 email（Xray 26）
+
+- **归属**：ops 出口节点吊销与计量；`services/exit-agent/reconcile_and_report.py`。
+- **来源**：`train/fleet-20260924`（PR #563）上的续修提交；未合 main。
+- **缺陷修复**：Xray 26.3.27 的 `xray api rmu` 只接受 `-tag=<tag> <email>...`，旧代码传 `--email=` 每轮报
+  `flag provided but not defined: -email`，agent 拒绝本轮，吊销不执行、计量停止（179.253.233.220 自 2026-09-18 05:00 起）。
+  两处删除（shared-legacy 与逐标签）改走同一 helper `remove_inbound_user`，生成
+  `api <cmd> --server=<addr> -tag=<tag> <email>`；`removeuser` 用同一形式。
+  续修：Xray 26 `rmu` 删除失败也返回 0，旧判定（rc≠0 且无「not found」才算失败）会把 inbound tag 错误
+  （`handler not found`、`Removed 0 user(s)`）当作已删并 ACK roster。现由 `removal_succeeded` 判定：输出含
+  `User <该 email> not found` 算已删；否则须 rc=0 且 `Removed N user(s)` 中 N≥1；其余一律计入 failures、阻止 ACK。
+  续修 2（Codex 核实 b3299814 为 PARTIAL）：判定改为整行匹配（v26.3.27 `inbound_user_remove.go` / `inbound_user_add.go`
+  的原样输出），回显的 email 或 tag 不能再冒充总数行或逐用户行；出现 `failed to get handler` / `handler not found`
+  时不认逐用户 not-found。同类既有缺陷：`adu` 在 RPC 错误后同样 rc=0 并打印 `Added 0 user(s) in total.`，旧代码记为新增、
+  写入清单并可 ACK roster；现须整行 `Added N user(s) in total.`（N≥1），或该 email 的整行
+  `proxy/vless: User <email> already exists.`（视为已在）。旧 `adduser`/`adi` 路径（Xray 26 不可达）保留原判定。
+  续修 3（Codex 核实 42653897 为 PARTIAL）：含换行或其他不可打印字符的 email 回显后可拆出独立的整行成功文本，
+  现在此类 email 的 `rmu`/`adu` 一律判为失败（不 ACK、不从清单删除）。旧 `removeuser` 恢复原判定
+  （rc=0 或 stderr 含 not found 即已删），不再套用 Xray 26 的输出规则。
+  续修 4（Codex 核实 163cb823：RR2 FIXED，RR1 PARTIAL）：不可打印 email 不再交给 subprocess（NUL 字节曾抛
+  `ValueError` 并跳过其后所有删除），直接记为失败；`TONO_XRAY_INBOUND_TAG` 只允许字母、数字、`.`、`_`、`-`，
+  否则本轮拒绝（tag 回显同样可伪造整行成功文本）。
+  续修 5（Codex 核实 26dc5647：tag 与 NUL 已修，legacy 残留）：拒绝结果的 stderr 不再包含 email，否则旧
+  `adduser`/`adi` 的「already exists」判定会把 `u:a\x00already exists` 读成已在并 ACK。
+  续修 6（Codex 核实 4e3d6887：rmu/adu 已修，legacy 残留）：旧 `removeuser`/`adduser`/`adi` 不再在整段输出里找
+  「not found」/「already exists」子串，只认一整行 `…User <该 email> not found.` / `already exists.`；否则按退出码。
+  回显的 email 不能构成点名其自身的整行。舰队全部为 Xray 26.3.27，legacy 分支不可达，此项仅为防御。
+- **新增/优化**：无。
+- **工程与测试**：回归 `test_rmu_success_is_read_from_its_output_not_its_exit_code` 用节点实测的三段 rc=0 输出
+  （用户不存在→已删，错误 tag→失败，`Removed 1`→已删），并断言 rmu argv 恰为
+  `api rmu --server=<addr> -tag=<tag> <email>`、不含 `--email`（取代先前单独的 argv 测试）；另含两例回显伪造（均须失败），以及续修 3 的换行 email 伪造（rmu/adu 均须失败，在 42653897 上失败）和 `removeuser` rc=0 判已删；续修 4 的 NUL email 不进 Xray 且后续删除照常、换行 tag 被拒（在 163cb823 上失败）。
+  新增 1 个 adu 回归：`Added 0` + RPC 错误 → 失败、reconcile 拒绝，不返回清单。fixture 修正：原有测试中按
+  `--email=` 解析 rmu 参数的 mock/断言改为位置参数；成功删除的 rmu mock 由空输出改为打印 `Removed 1 user(s) in total.`；成功添加的 adu mock 改为打印
+  `Added 1 user(s) in total.`，「已存在」mock 由 rc=1 `User already exists.` 改为 Xray 26 实际的 rc=0 逐用户行。
+- **验证**：MacBook 工作树 `cd services/exit-agent && python3 -m pytest -q`：91 passed, 7 subtests passed（续修 3 后）。
+  rmu 输出样本来自 179.253.233.220（Xray 26.3.27）实测；adu 的 RPC 错误与 already-exists 行按 v26.3.27 源码
+  （`proxy/vless/validator.go`）构造，未在节点实测；修复本身未在节点上运行。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：节点部署待做；`DeadlineExceeded` 等其余错误输出按失败处理，未逐一实测。旧 `adduser`/`adi` 分支仍用 `--email=`/`--uuid=`，Xray 26 提供 `adu` 时不会走到。
+
+## 2026-09-24 · fleet 合并列车（exit-agent #389→#375→#384→#464，ops-panel #466→#368→#373→#367→#377）
+
+- **归属**：ops 控制面 / 出口节点吊销与计量、hub 运维任务；`services/exit-agent`、`ops-panel`，#375 附带控制面 migration 0081。
+- **来源**：origin/main 8dc79a5b → 分支 `train/fleet-20260924`，按记录顺序 `--no-ff` 合入 9 个 PR；各 PR 的缺陷与测试见下方各自条目。
+- **缺陷修复**：无新增；只有合并时的组合处理（按 r4 审查记录 `r4-fleet-merge.log` 与 #464 PR 正文）：
+  - `run_once` 经 `fetch_roster_or_discard_cache` 取 roster；#375 的 `except NodeDisabled` 在 #464 的 `except Exception` 之前，并先 `discard_roster_cache`，删除失败写进最终 Refusal，撤回照常执行。
+  - #375 停用分支自行容错加载 state（#389 已把 state 加载移到吊销之后），state 不可用时仍撤回，只是不写回清单。
+  - #384 的 `retire_override`（bool|None）替换旧字符串比较，也传给 #464 的 `run_outage_round`；#384 早期 `rmu shared-legacy` 失败改为计入 #389 的 failures，不再中断其余删除。
+  - #384 的静态配置持久化挪到 reconcile 之后、state/source/待发报告检查之前（#389「吊销先于计量检查」），失败仍按 #384 延到计量后才拒绝；#464 的 `cache_error` 放在它之后。
+  - `run_outage_round` 容错加载 state，先按缓存恢复客户端，再在 state 不可用时拒绝（与 #389 可达路径一致；#464 正文建议「state 不可用则不恢复」，此处按 r4 记录）。
+  - ops-panel `collect.py`：#368 的 `ssh_password_argv` 与 #373 的 `public_ip`/`probe_target` 取并集；`tests/test_collect.py` 两个测试类都保留。#373 条目中两行仅含空格的行去掉尾随空白。
+- **新增/优化**：无。
+- **工程与测试**：无新测试；各 PR 自带测试全部保留。
+- **验证**：MacBook 列车工作树 `python3 services/exit-agent/test_reconcile_and_report.py`（89 通过）；`python3 -m unittest discover -s ops-panel/tests -p 'test_*.py'`（29 通过）；home-agent 与 exit metering 配置脚本测试通过；`services/control-plane` `npm run typecheck` 通过、`npx vitest run` 892 通过。未连接真实节点、hub 或探针，未部署。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：部署前置——#368 需先在 hub 登记节点与探针 known_hosts；#377 需为自定 unit 的节点在 hub `nodes.secrets.json` 填 `serviceName`，并与 #466 同时或之后部署（hub 上 `jobs.py` 与 `collect.py` 一起更新）；#384 需先在真实 Xray 25.3.6/26.x 确认 vless `clients: []` 能通过 `run -test`。`state.json.roster` 为明文凭据。#375 与控制面 #451 的 `revokeExitToken` SQL 相邻，后合者手工保留两边。
 
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
@@ -958,6 +1014,65 @@
 - **候选/发布**：无新包，仅文档。
 - **剩余限制**：总账状态是写入时快照；并行进行中的合并与修复 PR 需由各自 PR 同步更新对应行。
   `fixed` 只表示源码进 main，不表示实机验收。
+## 2026-09-23 · exit-agent 在控制面不可达时从本地副本恢复 roster 并继续计量
+
+- **归属/来源**：ops 出口计量与吊销执行；`services/exit-agent`。内部审查 H13-F5，Issue #463。
+  基线 main bb2ed4e4 → 分支 `fix/exit-agent-roster-cache-20260923`；提交时未合 main。
+- **缺陷修复**：agent 只记录已安装标签，不保存凭据。控制面不可达（网络错误或 5xx）期间
+  Xray 一旦重启，经管理 API 加入的客户端全部丢失，节点上所有账户连不上，直到控制面恢复。
+  这期间计数器也不读，恢复后第一轮只按新进程读数计，重启前的增长不计费。现在每次拉到并
+  核对 nodeId 后，先把 roster 原子保存为 `state.json.roster`（0600、服务用户所有），再执行。
+  拉取失败且属于不可达时，若副本不超过 24 h，就按副本重装客户端；无论副本能否使用，都继续
+  把计数器折叠进持久 totals。本轮不 ACK、以非零退出，恢复后第一轮正常上报这段增长。副本
+  超龄、缺失、权限不对或损坏时不恢复任何客户端，并拒绝说明原因。控制面的其他任何回答都会先
+  删除副本，包括 401/403、roster 校验失败和 nodeId 不符。副本写入失败时删除旧副本；删除也
+  失败时本轮在执行后拒绝，不 ACK。
+  审查修正（R4）：删副本移进 `fetch_roster_or_discard_cache`，在 `run_once` 的任何 handler 之前完成；
+  并预留 `node_disabled_answer`：响应（或 #375 的 `NodeDisabled` 的 cause）是 403 且 body 为
+  `EXIT_NODE_DISABLED` 时先删副本，删除失败只告警、不替换原错误，撤除照常执行。这样 #375 的
+  `except NodeDisabled` 放在 `except Exception` 之前也不会留下副本（否则下一次网络错误会把停用
+  节点的全部客户端装回）。README 修正写反的论断：副本在执行前保存，是"不落后于"而不是"不新于"
+  已执行的 roster；并写明副本是明文 VLESS 凭据（0600，应排除出快照/备份）和 24 h 回填窗口。
+- **新增/优化**：无。
+- **工程与测试**：`test_reconcile_and_report.py` 新增一个测试
+  `test_an_outage_restores_the_last_verified_roster_and_keeps_metering`，连续跑 7 轮：成功；
+  不可达；不可达加 Xray 重启（客户端重装，重启前 4,000 字节保留）；25 h 后不可达（不恢复）；
+  成功（上报 5,300）；401（副本删除）；再次不可达（不恢复）。旧代码第一轮后不存在副本，
+  测试失败。
+  审查修正后第 6 轮由 401 改为经真实 `fetch_roster`（patch `build_opener`）得到的
+  403 `EXIT_NODE_DISABLED`，断言副本已删。单独在本分支上它和修正前一样通过（任何 403 都删）；
+  它守护的是与 #375 的合并：临时 worktree 里把本分支与 #375 合并、`except NodeDisabled` 放前面
+  且不加 discard（朴素解法），修正前的 #464 在该断言失败（`True is not false`），修正后 84 项通过。
+- **验证**：MacBook worktree：新测试在旧代码失败、修复后通过；exit-agent 全部 83 个测试
+  通过（`python3 test_reconcile_and_report.py`；审查修正后复跑 83 项通过）。未连接任何真实节点或 hub，未部署。CI 结果
+  以 PR 页为准。
+- **候选/发布**：无新包，仅源码（exit-agent）。
+- **剩余限制**：恢复要等到 Xray 重启后的下一次 timer 运行，本 PR 未给 `tono-xray` 加
+  `ExecStartPost`。控制面不可达期间被吊销的账户，在副本 24 h 期限内仍会被重装，与 Xray 不
+  重启时内存中保留它们的行为一致。副本是明文客户端凭据（0600）。停用节点删副本失败时副本
+  仍在（只告警）。hy2 允许列表是文件，重启后仍在，不可达时不改动。与在审
+  #375、#384、#389 修改同一 `run_once`，合并顺序与解决方式见 PR 正文。
+## 2026-09-23 · ops hub 执行前确认租约，等待中的 job 一并续租
+
+- **归属/来源**：ops 控制台节点作业（hub 执行器）；`ops-panel/jobs.py`。内部审查 H13-F6，
+  Issue #465。基线 main bb2ed4e4 → 分支 `fix/ops-jobs-lease-20260923`；提交时未合 main。
+- **缺陷修复**：hub 每次最多租 5 个 job，串行执行，只给正在执行的 job 续租，开始前也不
+  确认租约。排在长任务后面的 `xray_restart`（租约 60 s）过期后会被 Worker cron 放回队列，
+  hub 仍会执行它，下一轮又租到再执行一次，节点被连续重启两次。现在每个 job 开始前先发一次
+  心跳确认租约，409 或不可达就跳过，不执行、不上报；不可达时本轮以非零退出。执行期间的
+  心跳同时覆盖尚未开始的 job。
+- **新增/优化**：无。
+- **工程与测试**：`ops-panel/tests/test_jobs.py` 新增
+  `test_a_leased_job_whose_lease_was_lost_before_its_turn_never_runs`：假心跳对第二个
+  `xray_restart` 回 409，断言 SSH 只到第一个节点、只上报第一个结果。旧代码 SSH 到了两个
+  节点（`['A', 'B'] != ['A']`）。
+- **验证**：MacBook worktree：新测试在旧代码失败，修复后 `python3 -m unittest discover -s
+  ops-panel/tests -p 'test_*.py'` 26 个测试通过。scratchpad 模拟脚本 `sim_jobs.py`：旧代码
+  对 B 执行了 restart，新代码跳过 j2。未连接 hub 或任何节点，未部署。CI 结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码（ops-panel，需要在 hub 上部署后生效）。
+- **剩余限制**：Worker 侧租约与 cron 未改。hub 在执行期间与控制面断开时，等待中的 job 仍
+  可能过期被重新入队，本轮会在开始前发现并跳过。与在审 #377（重启目标改为
+  `tono-xray.service`）不改同一段代码；#377 合并后本修复才防止真实的二次重启。
 
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
@@ -1294,6 +1409,90 @@
 - **剩余限制**：失败触发为环境性（TUN 探测/`/core/sync` 超时的实机命中率未量化）；
   R1 审查其余发现（F2、F5、F6）不在本条范围；错误文案仍为内部原文（与
   `reloadCoreConfig` 的本地化文案对齐留待后续文案统一）。
+## 2026-09-23 · ops hub SSH 固定主机密钥（H7-F1）
+
+- **归属**：ops 任务（运维计划 §3 hub 部署 / 3.4 hub 任务执行器），非客户 ship gate；`ops-panel/`。
+- **来源**：基线 main `e7c913e1` → 分支 `fix/ops-ssh-hostkey-20260923`；Issue #365，
+  内部审查 H7-F1；提交时未合 main。
+- **缺陷修复**：`jobs.py` `ssh_exec`/`ssh_agent` 与 `collect.py` `probe_cn_agents`/
+  `run_on_node_via_ssh` 四处 SSH 原为 `StrictHostKeyChecking=no` + `/dev/null` known-hosts
+  后以 root 密码登录。现统一由 `collect.ssh_password_argv` 生成：`StrictHostKeyChecking=yes`、
+  `UserKnownHostsFile=/opt/tono-ops/tono-collector-known-hosts`（与 `check-node-in-fleet.py`
+  同一文件）、`GlobalKnownHostsFile=/dev/null`。未登记或变更的主机密钥连接失败，不自动接受。
+  主机密钥未验证的大陆探针不计入封锁判定（记 `host_key_unverified`；`node_probe` 带
+  `hostKeyUnverified` 计数），避免把未登记误报成「被墙」。
+- **新增/优化**：`ops-panel/README.md` 写明 known-hosts 登记流程（新增/重装节点、新增探针前
+  追加并与供应商控制台核对指纹）。
+- **工程与测试**：`test_jobs.py` 新增一个测试 `test_node_ssh_pins_the_hub_known_hosts_file`，
+  断言 `ssh_exec` argv 含严格校验与固定文件；旧代码上失败（argv 为 `StrictHostKeyChecking=no`）。
+- **验证**：MacBook `python3 -m unittest discover -s ops-panel/tests -p 'test_*.py'`：旧代码
+  26 项 1 失败（新测试），修复后 26 项 OK；另以打桩的 `subprocess.run` 手动确认主机密钥失败时
+  `probe_cn_agents` 返回 None（无大陆数据）。未连接任何真实主机。CI 结果见 PR。
+- **候选/发布**：仅源码，无新候选；hub 部署需 owner 执行。
+- **剩余限制**：部署前必须确认 hub 上 known-hosts 已登记全部 `nodes.secrets.json` 节点与
+  `mainland_probes`，否则对应节点采集/任务会 fail-closed 报错；仍使用 root 密码认证，
+  改为 key 认证未在本条范围；`onboard-node.rb` 不写 hub 这份文件，需单独登记。
+## 2026-09-23 · 节点上报的 public_ip 进入大陆探针前校验（H7-F2）
+
+- **归属**：ops 任务（运维计划 §3 hub 部署 / 3.4 hub 任务执行器；采集器封锁探测），非客户 ship gate；`ops-panel/`。
+- **来源**：基线 main `e7c913e1` → 分支 `fix/ops-probe-ip-20260923`；Issue #370，内部审查 H7-F2；
+  提交时未合 main。
+- **缺陷修复**：`run_on_node_via_ssh` 读到的节点自报 `public_ip` 原来不做校验，`main` 和
+  `collect_quality` 用它做探测目标，`probe_cn_agents` 把它拼进在大陆探针上以 root 执行的命令
+  （`node_probe` 已有 `SAFE_HOST`，这两条路径没有）。现在新增 `collect.public_ip`，只接受
+  `ipaddress` 能解析的公网 IPv4/IPv6 字面量，其余一律丢弃，并在三处使用：
+  - 入口 `run_on_node_via_ssh`；
+  - 目标选择 `probe_target`，节点自报值无效时回落到登记的 host，host 也要通过同一校验，
+    两者都无效就跳过全部封锁探测；
+  - 汇点 `probe_cn_agents`。
+
+  目标改为作为 `bash -c` 的位置参数传入（`shlex.quote`），不再拼进脚本文本。
+- **新增/优化**：无。
+- **工程与测试**：新增 `ops-panel/tests/test_collect.py` 的一个测试：`probe_cn_agents` 收到
+  非 IP 值（节点在 IP 回显失败时输出的 `unknown`）时不发起 SSH、返回 None。旧代码上失败
+  （会调用 ssh）。
+- **验证**：MacBook `python3 -m unittest discover -s ops-panel/tests -p 'test_*.py'`：
+  - 旧代码：26 项中 1 项失败，即新测试；
+  - 修复后：26 项全部通过。
+
+  另外打桩手动确认合法 IP 生成 `bash -c '…$0/$1' <ip> 443`，并且 `probe_target` 对私网
+  地址或主机名回落/返回 None。没有连接任何真实主机。CI 结果见 PR。
+- **候选/发布**：只有源码，没有新候选；hub 部署由 owner 执行。
+- **剩余限制**：如果节点在 `nodes.secrets.json` 里是用主机名而不是 IP 登记的，并且自报 IP 无效，
+  这一轮就不做封锁探测（记 `no_public_ip`，显示为基线失败）。`node_probe` 仍然沿用
+  `SAFE_HOST`，本条没有改动。本条和 H7-F1 的 PR 都改了 `probe_cn_agents` 的相邻行，合并时
+  可能需要解决文本冲突。
+## 2026-09-23 · ops 诊断/重启任务改用实际 Xray unit `tono-xray.service`（H7-F8）
+
+- **归属**：ops 任务（运维计划 3.4 hub 任务执行器；3.1 验收单报错证据），非客户 ship gate；`ops-panel/`。
+- **来源**：基线 main `e7c913e1` → 分支 `fix/ops-xray-unit-20260923`；Issue #376，内部审查 H7-F8；
+  提交时未合 main。
+- **缺陷修复**：
+  - **原问题**：`xray_dial_errors`/`xray_error_digest` 读的是 `journalctl -u xray`，
+    `xray_restart` 执行的是 `systemctl restart xray`，但部署脚本安装的都是 `tono-xray.service`。
+    journal 对不存在的 unit 通常返回 0 且没有输出，任务会报 `ok matched=0`，验收单可能把它
+    当作「无报错」证据。
+  - **修复**：新增常量 `XRAY_UNIT = "tono-xray.service"`，三个任务都改用它。journal 任务先确认
+    `LoadState=loaded`，否则以 rc=3 报 error，不再把空读当成功。
+  - **审查修正（R4）**：`provision-tono-node.py` 允许每个节点自定 `serviceName`（如 `extend` 模式下的
+    `xray.service`），写死 `tono-xray.service` 会把这类节点上原本可用的 `xray_restart` 改坏。现在三个任务
+    都读节点记录（`nodes.secrets.json`）里的 `serviceName`，缺省才用 `tono-xray.service`；值不是
+    `[A-Za-z0-9_.-]+.service`（与 provision 脚本同一规则）时直接报 error，不拼进远程 shell。
+- **新增/优化**：无。
+- **工程与测试**：`test_jobs.py:471` 原来把错误的 `journalctl -u xray` 写成断言，现改为
+  `journalctl -u tono-xray.service`。这条就是本修复的回归测试，没有新增其他测试。在旧代码上
+  它会失败（handler 返回 error，不是 ok）。审查修正后同一测试给节点记录 `serviceName: "xray.service"`，
+  断言 LoadState 检查和 journal 都用这个 unit；只还原 `jobs.py`（写死 tono-xray.service）时失败
+  （`'error' != 'ok'`）。缺省分支没有单独测试。
+- **验证**：MacBook `python3 -m unittest discover -s ops-panel/tests -p 'test_*.py'`：旧代码 25 项
+  1 失败，修复后 25 项 OK（审查修正后复跑 25 项 OK）。没有连接任何真实主机，也没有在节点上确认 `systemctl show -p LoadState`
+  的输出。CI 结果见 PR。
+- **候选/发布**：仅源码，无新候选；hub 部署需 owner 执行。
+- **剩余限制**：
+  - 如果某节点确实只跑旧的 `xray.service`（非 Tono 部署）而记录里没有 `serviceName`，journal 任务
+    会报 error、不再报 ok，这是有意的 fail-closed；在该节点的 `nodes.secrets.json` 记录里补
+    `serviceName` 即可。provision 脚本不会自动写 hub 上的这份记录，需要手工同步。
+  - 历史上 `ok` 的 journal 任务行不会追溯改判。
 
 ## 2026-09-23 · 永不 armed 的内部转换不得被重连 loop 判为外部 release
 
@@ -1348,6 +1547,46 @@
 - **剩余限制**：F2（睡眠改写显式 release / never-armed 的 Protected Offline 误报）与
   F4（后台可选策略失败漏调度重连）为不同根因（V2 判定），另行修复不在本条；替换窗口
   与外部 release 的实机量化未做。
+## 2026-09-23 · exit-agent 吊销执行先于计量检查、逐个删除（H7-F6）
+
+- **归属**：ops 控制面 / 出口节点吊销执行；`services/exit-agent`。
+- **来源**：基线 main def3dd79 → 分支 `fix/exit-agent-revoke-first-20260923`（提交时未合 main）；内部审查 H7-F6，Issue #388。
+- **缺陷修复**：状态文件损坏、durable source 不匹配、缺 stats 命令、队列 observedAt 超前等与吊销无关的检查原先都在应用 roster 之前，任一失败本轮 Xray 与 hy2 都不删用户；`reconcile` 首个 rmu 失败即中止后续删除；roster 超过 512 KiB 被截断后每轮 JSON 解析失败。现在：roster 的 nodeId 与配置的 source 一致（吊销唯一依赖的检查）后立即更新 hy2 并 reconcile Xray，计量相关检查放到之后，仍拒绝本轮、不 ack；删除与添加逐个尝试、最后汇总报错；roster 读取上限提到 8 MiB，超限显式 Refusal 且不应用任何变更（截断前缀无法证明谁缺席，因此不据此删除）；非 JSON roster 转为 Refusal。审查修正（R4）：state 是合法 JSON 但不是 object（`[]`/`null`）或 `installedClients` 含非字符串时，`load_state` 在吊销前就报 Refusal（原先 `AttributeError`/`TypeError` 让本轮在删除任何客户端之前崩溃），按"state 不可用"处理：照常吊销，之后拒绝本轮、不 ack；该文件原样保留、不读取也不覆盖（原地隔离）。没有把它改名移走：下一轮会从空 totals 重新计量，少计重启前的用量。
+- **新增/优化**：`require_commands` 把 stats 命令改为可选，缺失时在 reconcile 之后拒绝（不再挡住吊销）。
+- **工程与测试**：一个 unittest（队列中有超前 observedAt 的报告 + 记录清单两个待删 label、首个 rmu 失败 → hy2 仍更新、两个 label 都尝试删除、Refusal 且不 ack），在修复前代码上实际跑红。既有 `test_a_queued_future_timestamp_is_not_dropped_on_replay` 原断言 "reconcile 未调用" 固化的正是本缺陷，改为断言 reconcile 已执行，其余断言（报告不投递、状态不变）不变。审查修正新增一个窄测试 `test_a_state_file_that_is_not_an_object_still_lets_revocation_run`（state 为 `[]`、listing 有 `u:gone` → 仍 rmu、Refusal、不 ack、文件不变；只还原 `reconcile_and_report.py` 时报 `AttributeError: 'list' object has no attribute 'get'`）。
+- **验证**：MacBook 本机 `python3 -m unittest test_reconcile_and_report`（83 通过；审查修正后 `python3 test_reconcile_and_report.py` 84 通过）。未连接真实节点。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：hy2 发布失败仍会阻止本轮 Xray reconcile（既有行为与测试，未改）；roster 超过 8 MiB 仍需控制面分页。state 损坏时计量一直拒绝，直到运维修复或移走该文件（移走会从空 totals 重新计量）。
+## 2026-09-23 · 停用/退役的出口节点必须撤下全部客户端（H7-F4）
+
+- **归属**：ops 控制面 / 出口节点吊销执行；`services/control-plane`、`services/exit-agent`。
+- **来源**：基线 main def3dd79 → 分支 `fix/exit-agent-node-disabled-20260923`（提交时未合 main）；内部审查 H7-F4，Issue #371。
+- **缺陷修复**：节点被 PATCH 为 disabled 或经退役流程 `revokeExitToken`（同时轮换 token）后，Worker 对其 token 返回与未知 token 相同的 401，exit-agent 直接退出，不删 client、不更新 hy2，最后一份 roster 中的身份（含之后被吊销/过期/超额的）在该节点持续可用且不计量。现在：属于 disabled 节点的 token（含退役前被轮换掉的旧 token，存于新列 `revoked_token_hash`，只用于应答、不认证任何请求）得到 `403 EXIT_NODE_DISABLED`；未知 token 仍 401。exit-agent 只在收到这个确切的 403 body 时移除所有 `u:` client 与 `shared-legacy`、清空 hy2 allowlist、记录并以非零退出；普通 401/403、边缘拦截页、5xx 与网络错误维持原行为（保留 roster、下轮重试）。
+- **新增/优化**：migration `0081_exit_node_revoked_token.sql`（新增可空列，不改旧 migration）。手工添加的非 `u:` client 仍不动；节点无法列出也无记录的 client 清单时只能删 `shared-legacy`，退出信息提示运维停掉 `tono-xray`。
+- **工程与测试**：Worker 一个 `it`（disabled 与 retired 节点 token 得 403 `EXIT_NODE_DISABLED`，未知 token 仍 401）；exit-agent 一个 unittest（403 HTML 页不删任何 client；403 `EXIT_NODE_DISABLED` 删 `u:` 与 `shared-legacy`、保留手工 client、不 ack）。两者在修复前的代码上均实际跑红。
+- **验证**：MacBook 本机 `npx vitest run`（control-plane 全量 43 文件 892 通过）、`npm run typecheck`（首轮 CI 因测试中 `env` 未转 `Env` 类型检查失败，已修正）；`python3 -m unittest test_reconcile_and_report`（83 通过）。未连接任何真实节点，未部署，migration 未在远端 D1 执行。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：需部署 Worker 并执行 migration 后才生效；已在运行的旧 agent 需更新后才会响应该信号。退役前已被轮换且未经本改动记录旧 hash 的节点（改动部署前退役的）仍只得到 401，需人工停掉其 `tono-xray`。Xray 移除 client 不保证断开已建立的连接。
+## 2026-09-23 · shared-legacy 退役持久化到 Xray 静态配置（H7-F5）
+
+- **归属**：ops 控制面 / 出口节点吊销执行；`services/exit-agent`。
+- **来源**：基线 main def3dd79 → 分支 `fix/exit-agent-legacy-persist-20260923`（提交时未合 main）；内部审查 H7-F5，Issue #382。
+- **缺陷修复**：(a) `retireSharedLegacy` 只经 API 从运行中的 Xray 删除 `shared-legacy`，它仍在 `config.json`，Xray 每次重启复活；现在退役时同时从静态配置删除（同目录临时文件、保留属主/权限、`xray run -test` 通过后原子 rename 并 fsync 目录），每轮检查，失败则本轮最终 Refusal（见下）。(b) 拿不到 live 用户列表、只能用记录清单时（退役后记录中已无它）不再跳过：退役态下总是对 `shared-legacy` 执行 rmu（"not found" 视为成功），不改变其他 client 的"清单未知不删"规则。(c) `TONO_RETIRE_SHARED_LEGACY` 大小写不敏感，接受 `1/true/yes/on`、`0/false/no/off`（原先 `True` 等被当成 false）。审查修正（R4）：其他值告警并**保持现状**（本轮不退役）——退役持久化后是单向的，`false` 撤不回，回滚时拼错不能触发它。静态配置写入失败不再挡 roster ACK 与用量上报：失败先告警，本轮在计量完成后才以 Refusal 退出（超额吊销依赖用量上报）。
+- **新增/优化**：新环境变量 `TONO_XRAY_CONFIG`（默认 `/opt/tono-xray/current/config.json`），README 与 env 示例同步。
+- **工程与测试**：一个 unittest（override=`True`、无 list 能力、记录清单不含 shared-legacy、服务端信号为 false → 仍 rmu `shared-legacy` 且 config.json 中只剩手工 client），在修复前代码上实际跑红；既有 `RosterControlSignals` 测试夹具补一行 patch 持久化函数。审查修正新增两个窄测试（同一夹具加 `persist_error` 参数）：`test_an_unrecognized_override_leaves_shared_legacy_in_place`（`flase` → 不退役；旧实现 `True is not false`）、`test_a_failed_retirement_write_still_meters_before_refusing`（持久化抛 Refusal 时仍 ack roster 与 metering、state 已保存、最终仍 Refusal；旧实现 `acknowledge_roster` 调用 0 次）。两者只还原 `reconcile_and_report.py` 时均失败。
+- **验证**：MacBook 本机 `python3 -m unittest test_reconcile_and_report`（83 通过；审查修正后 `python3 test_reconcile_and_report.py` 85 通过）。未连接真实节点，未在真实 Xray 上验证空 clients 的 vless inbound 能否通过 `run -test`（不通过时 agent 不写入、告警，本轮在计量后以非零退出；计量不停）。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：agent 运行用户需对 release 目录可写；只跑 `--hy2-roster-only` 或未配置 exit_nodes/agent 的节点仍不会退役 Xray 上的 shared-legacy，`device_only` 就绪门看不到这些节点（未在本 PR 处理）。退役后重跑 `enable-tono-exit-metering.sh` 会因 vless 无 client 而拒绝。退役对每台节点是单向的，恢复需 `.pre-metering` 备份或重新配置。
+## 2026-09-23 · 出口节点质量工具按摘要固定，去掉第三方镜像兜底（H7-F3）
+
+- **归属**：ops 任务（采集器 / 运维面供应链）；`ops-panel/collect.py`，不影响客户端和 Worker。
+- **来源**：基线 main → 分支 `fix/node-diag-tools-20260923`；Issue #364；关联 PR，提交时未合 main；内部审查 H7-F3（源码推导）。
+- **缺陷修复**：质量采集在每台出口节点上以 root 下载并执行 `securityCheck`、`backtrace`，来源是可变 release tag `output`，GitHub 失败时回退第三方 CDN 镜像，不校验摘要；节点上已存在的文件以后每轮直接信任。现在两个工具各固定一个 sha256（记在 `collect.py`），`backtrace` 改用版本化的 `v0.0.21`；`securityCheck` 上游只发布 `output` tag，以摘要为固定点。下载只走 HTTPS，校验通过才赋可执行权限；每轮都重新校验节点上已有的文件，不符就删除并按 missing 上报；删除镜像兜底。securityCheck 缺失（下载失败或摘要不符）时 `parse_quality` 报 `quality: "unknown"`，不再报 `ok`（审查 R4：上游一换 `output` 资产，全舰队会永久显示 ok）。
+- **新增/优化**：无。工具仍然需要：`parse_quality` 用其输出生成节点质量、风险/线路关键词，供 Komari 标签、report.json、控制面快照和 ops console 节点抽屉使用。
+- **工程与测试**：新增一个窄测试 `ops-panel/tests/test_collect.py::test_node_tools_are_digest_pinned_and_github_only`（旧代码上第三个 `dl` 参数是 CDN 地址而不是摘要，断言失败）；审查后同一测试让假 SSH 输出 `missing` 并断言 `quality == "unknown"`（只还原 `collect.py` 时失败：`'ok' != 'unknown'`）。
+- **验证**：MacBook 本机 `python3 -m unittest discover -s ops-panel/tests -p 'test_*.py'`：修复前新测试失败，修复后 26 项通过（审查修正后复跑仍 26 项通过）。两个固定摘要由本机下载同一 URL 后 `shasum -a 256` 复核，与 GitHub release asset digest 一致（未执行二进制）。用本机 shim 演练 `dl()`：摘要相符安装、不符删除并返回 1、篡改后的已有文件被替换。未连接任何节点，未在 Linux 节点上运行远程脚本。
+- **候选/发布**：无新包，仅源码；hub 上的 `collect.py` 需按 README 手工部署后生效。
+- **剩余限制**：工具仍以 root 在节点上运行（固定摘要后的上游构建）；以低权限/沙箱运行、由 hub 分发（依赖 H7-F1 SSH 主机密钥校验）是后续项。上游更新 `output` 资产后，`securityCheck` 会显示 missing、质量为 unknown，直到有人审查并更新摘要；2026-09-23 核对上游 `oneclickvirt/securityCheck` 只有 `output` 一个 release/tag，没有可固定的版本，所以摘要仍是唯一固定点。
 
 ## 2026-09-23 · coreMonitor 不得把运行时替换的瞬时 utun 消失判为 TUN 死亡
 

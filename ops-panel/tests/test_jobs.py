@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
 import sys
 import time
 import unittest
 import urllib.error
 import urllib.parse
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -448,6 +450,41 @@ class RunJobsExitTests(unittest.TestCase):
         )
         self.assertEqual(code, 0)
 
+    def test_a_leased_job_whose_lease_was_lost_before_its_turn_never_runs(self):
+        # The hub leases a batch and runs it in order. While the first job ran,
+        # the second job's short xray_restart lease expired and the Worker put it
+        # back in the queue, so its heartbeat now answers 409. Running it anyway
+        # would restart the node now and again when the next pass leases it.
+        class LostSecond(FakeIngest):
+            def heartbeat(self, job_id: str, lease_id: str) -> str:
+                super().heartbeat(job_id, lease_id)
+                return "conflict" if job_id == "job-restart" else "ok"
+
+        ingest = LostSecond([
+            {"id": "job-digest", "nodeName": "A", "type": "xray_dial_errors", "params": {}},
+            {"id": "job-restart", "nodeName": "B", "type": "xray_restart", "params": {}},
+        ])
+        ssh_nodes = []
+
+        def ssh(node, _remote, timeout=60):
+            ssh_nodes.append(node["name"])
+            return 0, "===RC===\n0\n===SS===\nLISTEN 0 0 *:443 \n===END===\n"
+
+        code = jobs.run_jobs(
+            max_jobs=5,
+            collector=FakeCollector(),
+            client=ingest,
+            token="tok",
+            nodes=[{"name": "A", "host": "198.51.100.4"}, {"name": "B", "host": "198.51.100.5"}],
+            cn_agents=[],
+            heartbeat_interval=0.01,
+            ssh_fn=ssh,
+            acquire_lock=False,
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(ssh_nodes, ["A"])
+        self.assertEqual([result["id"] for result in ingest.results], ["job-digest"])
+
     def test_result_unreachable_is_nonzero(self):
         ingest = FakeIngest([{
             "id": "job-reinstall",
@@ -468,7 +505,9 @@ class RunJobsExitTests(unittest.TestCase):
 
     def test_dial_errors_handler_filters_and_redacts(self):
         def ssh(_node, remote, timeout=60):
-            self.assertIn("journalctl -u xray", remote)
+            # The node record names its own unit (provision-tono-node.py serviceName).
+            self.assertIn("LoadState --value xray.service)", remote)
+            self.assertIn("journalctl -u xray.service", remote)
             self.assertIn('--since "-15min"', remote)
             self.assertIn("-n 20", remote)
             return 0, "\n".join([
@@ -488,7 +527,8 @@ class RunJobsExitTests(unittest.TestCase):
             collector=FakeCollector(),
             client=ingest,
             token="tok",
-            nodes=[{"name": "Tokyo · Kite", "host": "198.51.100.4", "password": "x"}],
+            nodes=[{"name": "Tokyo · Kite", "host": "198.51.100.4", "password": "x",
+                    "serviceName": "xray.service"}],
             cn_agents=[],
             ssh_fn=ssh,
             acquire_lock=False,
@@ -533,6 +573,23 @@ class RunJobsExitTests(unittest.TestCase):
                        "upstream_reject": 0, "other": 0},
             "samples": {},
         })
+
+
+class SshHostKeyTests(unittest.TestCase):
+    def test_node_ssh_pins_the_hub_known_hosts_file(self):
+        seen: list[list[str]] = []
+
+        def fake_run(cmd, **_kwargs):
+            seen.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        with mock.patch("subprocess.run", fake_run):
+            jobs.ssh_exec({"host": "198.51.100.4", "password": "x"}, "true")
+        argv = seen[0]
+        self.assertIn("StrictHostKeyChecking=yes", argv)
+        self.assertIn("UserKnownHostsFile=/opt/tono-ops/tono-collector-known-hosts", argv)
+        self.assertNotIn("StrictHostKeyChecking=no", argv)
+        self.assertNotIn("UserKnownHostsFile=/dev/null", argv)
 
 
 if __name__ == "__main__":
