@@ -32,6 +32,26 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · 控制面：销户改为单个 D1 事务，中途失败不再留下「资源已回收、VPN 仍可用」
+
+- **归属/来源**：ops 客户生命周期（控制面 Worker）；内部审查 H17-C-F2，
+  Issue [#524](https://github.com/raydocs/tono/issues/524)；基线 origin/main `059a2ea2`，
+  分支 `fix/refund-close-atomic-20260924`；未合 main。
+- **缺陷修复**：`POST ops/users/{id}/close` 原先分多次独立提交（解绑家宽 → 目录版本 → 退役 Claude 号
+  与事件 → 删 allowlist → 最后才 `disabled`），任一步之后失败都会保留已回收的资源而用户仍 `active`，
+  鉴权与出口名单照常放行，cron 也不会补完。改后：停用与全部回收放进同一个 `DB.batch`（一个事务），
+  停用排第一；要么全部生效，要么全部回滚。目录版本只在确实删掉绑定时递增、产品事件只在确实退役时写入
+  （`changes() > 0`，与原来的条件一致）。设备/会话撤销仍在 batch 之后由 `enforceUser` 执行，
+  账户已停用时鉴权与名单立即拒绝，遗留部分由 cron 补完。
+- **新增/优化**：无。
+- **工程与测试**：`test/ops-api.test.ts` 新增一个 `it`：用测试触发器让「停用」写入失败，断言 Claude 号
+  仍为 `assigned`、allowlist 仍在、用户仍 `active`。旧代码上实跑失败（`expected 'retired' to be 'assigned'`）。
+- **验证**：本机 MacBook `npx vitest run`（control-plane 全套 43 文件 / 892 用例通过）、
+  `npm run typecheck`；另用一次性临时用例（未提交）确认目录版本递增与产品事件在成功路径上只发生一次。
+- **候选/发布**：仅源码，无新候选；未部署。
+- **剩余限制**：家宽 SOCKS5 口令轮换标记属 #381，不在本 PR；与同批的「销户保留原因」修复
+  改同一处理器，后合者需按本 PR 的 batch 结构 rebase。
+
 ## 2026-09-23 · 发现总账与审查流程记录
 
 - **归属/来源**：G1–G3 审查与修复的可追溯性（工程流程与记录，非产品行为）；基线 origin/main

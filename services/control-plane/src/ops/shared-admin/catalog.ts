@@ -9,16 +9,15 @@ import {
 import {
   type Env,
   type Row,
+  id,
   now,
   requiredCatalogKey,
 } from '../../env';
 import {
-  bumpCatalogRevision,
   publicManagedCatalog,
 } from '../../catalog';
 import {
   writeOpsAudit,
-  recordProductEvent,
   assignedProductForUser,
 } from '../../product-account';
 import { writeChangeReceipt } from '../change-receipts';
@@ -44,27 +43,42 @@ export async function catalogResource(
     const user = await e.DB.prepare('SELECT * FROM users WHERE id = ?').bind(mt[1]).first<Row>();
     if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
     const t = now();
-    const unbound = await e.DB.prepare(
-      'DELETE FROM user_home_bindings WHERE user_id = ?',
-    ).bind(mt[1]).run();
-    if (unbound.meta.changes) await bumpCatalogRevision(e);
     const assigned = await assignedProductForUser(e, mt[1]);
+    // One D1 batch is one transaction: the account is disabled together with
+    // the home line, Claude account and allowlist entry being reclaimed, or
+    // nothing changes. Separate commits could reclaim them and then fail
+    // before the disable, leaving the VPN working. Disable comes first, and
+    // device/session revocation below is also finished by the cron once the
+    // account is disabled.
+    const statements: D1PreparedStatement[] = [
+      e.DB.prepare(
+        `UPDATE users
+         SET status = 'disabled',
+             notes = CASE WHEN notes IS NULL OR notes = '' THEN '退款销户' ELSE notes END,
+             updated_at = ?
+         WHERE id = ?`,
+      ).bind(t, mt[1]),
+      e.DB.prepare('DELETE FROM user_home_bindings WHERE user_id = ?').bind(mt[1]),
+      e.DB.prepare(
+        `UPDATE managed_exit_catalog SET revision = revision + 1, updated_at = ?
+         WHERE singleton_id = 1 AND changes() > 0`,
+      ).bind(t),
+    ];
     if (assigned) {
-      await e.DB.prepare(
-        `UPDATE product_accounts
-         SET status = 'retired', closed_at = ?, close_reason = 'other', updated_at = ?
-         WHERE id = ? AND status = 'assigned'`,
-      ).bind(t, t, assigned.id).run();
-      await recordProductEvent(e, String(assigned.id), mt[1], 'note', 'refund close');
+      statements.push(
+        e.DB.prepare(
+          `UPDATE product_accounts
+           SET status = 'retired', closed_at = ?, close_reason = 'other', updated_at = ?
+           WHERE id = ? AND status = 'assigned'`,
+        ).bind(t, t, assigned.id),
+        e.DB.prepare(
+          `INSERT INTO product_account_events(id, account_id, user_id, type, at, detail)
+           SELECT ?, ?, ?, 'note', ?, 'refund close' WHERE changes() > 0`,
+        ).bind(id(), String(assigned.id), mt[1], t),
+      );
     }
-    await e.DB.prepare('DELETE FROM signup_allowlist WHERE email = ?').bind(user.email).run();
-    await e.DB.prepare(
-      `UPDATE users
-       SET status = 'disabled',
-           notes = CASE WHEN notes IS NULL OR notes = '' THEN '退款销户' ELSE notes END,
-           updated_at = ?
-       WHERE id = ?`,
-    ).bind(t, mt[1]).run();
+    statements.push(e.DB.prepare('DELETE FROM signup_allowlist WHERE email = ?').bind(user.email));
+    await e.DB.batch(statements);
     await deps.enforceUser(e, mt[1]);
     await writeOpsAudit(e, actorEmail, 'user.close', 'user', mt[1], `closed ${user.email}`);
     return Response.json({ ok: true, email: String(user.email), status: 'disabled' });
