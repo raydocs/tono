@@ -885,6 +885,44 @@ mod tests {
     }
 
     #[test]
+    fn final_uninstall_removes_owner_runtime_config_only_after_proven_removal() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "tono-final-uninstall-owners-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let config = state_dir
+            .join("users")
+            .join("owner")
+            .join("runtime")
+            .join("config.yaml");
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(&config, b"password: exit-credential").unwrap();
+
+        let outcome = final_uninstall_cleanup(
+            CleanupOutcome::StillProtected(anyhow::anyhow!("filters present")),
+            &state_dir,
+            || Ok(()),
+        );
+        assert!(matches!(outcome, CleanupOutcome::StillProtected(_)));
+        assert!(
+            config.exists(),
+            "state was removed while the barrier may be armed"
+        );
+
+        let outcome = final_uninstall_cleanup(CleanupOutcome::Clean, &state_dir, || Ok(()));
+        assert!(matches!(outcome, CleanupOutcome::Clean));
+        assert!(
+            !state_dir.join("users").exists(),
+            "the Service's runtime config with exit credentials survived uninstall"
+        );
+        std::fs::remove_dir_all(state_dir).unwrap();
+    }
+
+    #[test]
     fn clean_outcome_exits_zero() {
         assert_eq!(cleanup_exit_code(&CleanupOutcome::Clean), 0);
     }
