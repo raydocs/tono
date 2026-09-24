@@ -301,14 +301,35 @@ fn main() -> Result<(), Error> {
 /// stop and uninstall the service
 #[cfg(windows)]
 fn main() -> anyhow::Result<()> {
+    if std::env::args().any(|argument| argument == CHECK_CURRENT_APP_DATA_ARG) {
+        anyhow::ensure!(
+            current_account_app_data_plain(),
+            "this account's AppData is reached through a link or reparse point; its app data is left in place"
+        );
+        return Ok(());
+    }
     if run_maintenance_if_requested()? {
         return Ok(());
     }
     let _gate = enter_repair_gate()?;
+    // Deleting every account's data takes the same gate as the other cleanups: refused while an
+    // update is pending or another cleanup holds the lock; the uninstaller passes on its own lease.
+    if std::env::args().any(|argument| argument == DELETE_APP_DATA_ARG) {
+        let profiles = known_folder(windows_sys::Win32::UI::Shell::FOLDERID_UserProfiles)
+            .ok_or_else(|| anyhow::anyhow!("the user profiles folder is unavailable"))?;
+        return remove_app_data_in_profiles(&profiles);
+    }
 
     // The repair gate is an OS file lock, so `std::process::exit` releasing it via handle
     // close (not Drop) is safe here.
-    let outcome = windows_cleanup();
+    let mut outcome = windows_cleanup();
+    if std::env::args().any(|argument| argument == FINAL_UNINSTALL_ARG) {
+        outcome = final_uninstall_cleanup(
+            outcome,
+            tono_service_protocol::service_paths().persistent_state_dir(),
+            tono_service_protocol::update_native::retire_recovery_task,
+        );
+    }
     let code = cleanup_exit_code(&outcome);
     match outcome {
         CleanupOutcome::Clean => {
@@ -676,6 +697,68 @@ fn final_cleanup_outcome(
     }
 }
 
+/// Passed only by the uninstaller's own Uninstall section, never by an install, an update or
+/// an install rollback: those keep the update store, its executors and the manual lease.
+#[cfg(any(windows, test))]
+const FINAL_UNINSTALL_ARG: &str = "--final-uninstall";
+
+/// A final uninstall also removes what a native update leaves outside the product: the SYSTEM
+/// ONSTART recovery task and the private attempt directories holding its executor copy and
+/// staged payload. It removes every owner's Service state under `users` too: each runtime
+/// `config.yaml` there is the unredacted document the App sent, exit credentials included.
+/// None of it protects or unblocks anything, so it follows the uninstall's own rule: only on
+/// an outcome whose precondition is that the WFP filters are gone. The update store's files
+/// stay: the manual installer lease is released after this helper returns, and the consumed
+/// high-water is retained evidence. A failure here is cosmetic, like binary removal.
+#[cfg(any(windows, test))]
+fn final_uninstall_cleanup(
+    outcome: CleanupOutcome,
+    state_dir: &std::path::Path,
+    retire_recovery_task: impl FnOnce() -> Result<(), Error>,
+) -> CleanupOutcome {
+    if matches!(outcome, CleanupOutcome::StillProtected(_)) {
+        return outcome;
+    }
+    let retired = retire_recovery_task();
+    let removed = remove_update_executors(&state_dir.join("updates-v1"));
+    let owners = match std::fs::remove_dir_all(state_dir.join("users")) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(anyhow::anyhow!(
+            "could not remove owner Service state: {error}"
+        )),
+        _ => Ok(()),
+    };
+    let Some(error) = retired.err().or(removed.err()).or(owners.err()) else {
+        return outcome;
+    };
+    eprintln!("Update or owner Service leftovers could not all be removed: {error:#}");
+    match outcome {
+        CleanupOutcome::Clean => CleanupOutcome::CosmeticFailure(error),
+        other => other,
+    }
+}
+
+/// Remove each update attempt directory under the store lock, keeping the store's own files.
+/// Only a settled store qualifies; the uninstaller's gate already refused a pending update.
+#[cfg(any(windows, test))]
+fn remove_update_executors(root: &std::path::Path) -> Result<(), Error> {
+    if !root.try_exists()? {
+        return Ok(());
+    }
+    let store = tono_service_protocol::update_transaction::Store::open(root)?;
+    anyhow::ensure!(
+        !store.pending(),
+        "a native update is still pending; its executor stays"
+    );
+    for entry in std::fs::read_dir(root)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            std::fs::remove_dir_all(entry.path())?;
+        }
+    }
+    drop(store);
+    Ok(())
+}
+
 /// Whether any fail-closed recovery state may still exist. File names must match the library
 /// (`windows_kill_switch::intent_path`, `dns::snapshot_path`, `owner.rs`): the intent record
 /// and the DNS snapshot are the artifacts service-start recovery acts on, and a pid file means
@@ -733,18 +816,157 @@ fn remove_windows_service_binary() -> Result<(), Error> {
     Ok(())
 }
 
+/// Leftover pins older apps wrote under Roaming and Local AppData; the deepest path any uninstall
+/// delete reaches in the approving account's own AppData.
+#[cfg(windows)]
+const USER_PINS_RELATIVE: &str = r"com.raydocs.tono\tono\control-plane-pins.json";
+
 /// Older apps wrote learned pins into the user's AppData. That file is no
 /// longer read, but it must not survive uninstall either.
 #[cfg(windows)]
 fn remove_leftover_user_control_plane_pins() {
-    const RELATIVE: &str = r"com.raydocs.tono\tono\control-plane-pins.json";
+    if !current_account_app_data_plain() {
+        return;
+    }
     for folder in [
         windows_sys::Win32::UI::Shell::FOLDERID_RoamingAppData,
         windows_sys::Win32::UI::Shell::FOLDERID_LocalAppData,
     ] {
         if let Some(root) = known_folder(folder) {
-            let _ = std::fs::remove_file(root.join(RELATIVE));
+            let _ = std::fs::remove_file(root.join(USER_PINS_RELATIVE));
         }
+    }
+}
+
+/// Passed by the Uninstall section before any delete of its own under the approving account's
+/// AppData (window state, leftover pins): exit 0 means those deletes may run.
+#[cfg(windows)]
+const CHECK_CURRENT_APP_DATA_ARG: &str = "--check-current-app-data";
+
+/// Whether this elevated process may delete under its own account's Roaming and Local AppData:
+/// both lie inside the account's profile, and no folder from the profile down to the deepest
+/// file removed there is a link or reparse point. A redirected AppData, or a folder that cannot
+/// be resolved, answers no.
+#[cfg(windows)]
+fn current_account_app_data_plain() -> bool {
+    use windows_sys::Win32::UI::Shell::{
+        FOLDERID_LocalAppData, FOLDERID_Profile, FOLDERID_RoamingAppData,
+    };
+
+    let Some(profile) = known_folder(FOLDERID_Profile) else {
+        return false;
+    };
+    [FOLDERID_RoamingAppData, FOLDERID_LocalAppData]
+        .into_iter()
+        .all(|folder| {
+            known_folder(folder).is_some_and(|root| {
+                redirected_folder(&profile, &root.join(USER_PINS_RELATIVE)).is_none()
+            })
+        })
+}
+
+/// Passed by the Uninstall section only when "Delete app data" was ticked, and only after
+/// `RemoveVergeService` let the uninstall continue (the barrier was proven gone).
+#[cfg(any(windows, test))]
+const DELETE_APP_DATA_ARG: &str = "--delete-app-data-all-profiles";
+
+/// The App's data folder name under Roaming and Local AppData (`BUNDLEID` in installer.nsi).
+#[cfg(any(windows, test))]
+const APP_DATA_DIR_NAME: &str = "com.raydocs.tono";
+
+/// Remove Tono's app data from every profile under `profiles_root`. The elevated uninstaller
+/// runs as whichever administrator approved it, so its `$APPDATA` is that account's folder,
+/// not the folders of the users who signed in to Tono. Links are removed, never followed: a
+/// profile's own junction cannot point this elevated delete somewhere else. That covers every
+/// folder on the way, not only the last one: a profile whose `AppData`, `AppData\Roaming` or
+/// `AppData\Local` is a link or reparse point (or cannot be inspected) is skipped and reported.
+#[cfg(any(windows, test))]
+fn remove_app_data_in_profiles(profiles_root: &std::path::Path) -> Result<(), Error> {
+    let mut failures = Vec::new();
+    for entry in std::fs::read_dir(profiles_root)? {
+        let entry = entry?;
+        // Real profile directories only; "All Users" / "Default User" are junctions.
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let profile = entry.path();
+        let targets = ["Roaming", "Local"]
+            .map(|base| profile.join("AppData").join(base).join(APP_DATA_DIR_NAME));
+        if let Some(redirected) = targets
+            .iter()
+            .find_map(|target| redirected_folder(&profile, target))
+        {
+            failures.push(format!(
+                "{}: skipped, {} is a link or reparse point or could not be inspected",
+                profile.display(),
+                redirected.display()
+            ));
+            continue;
+        }
+        for target in &targets {
+            let removed = match std::fs::symlink_metadata(target) {
+                Ok(metadata) if metadata.is_file() => std::fs::remove_file(target),
+                Ok(_) => std::fs::remove_dir_all(target),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(error),
+            };
+            if let Err(error) = removed {
+                failures.push(format!("{}: {error}", target.display()));
+            }
+        }
+    }
+    anyhow::ensure!(
+        failures.is_empty(),
+        "app data could not be removed: {}",
+        failures.join("; ")
+    );
+    Ok(())
+}
+
+/// The first folder from `profile` down to `target`'s parent that an elevated delete must not walk
+/// through, or `target` itself when it is not inside `profile`. `None` means every folder on the
+/// way is plain. `target` itself is not checked: the deletes remove a link there, never follow it.
+#[cfg(any(windows, test))]
+fn redirected_folder(
+    profile: &std::path::Path,
+    target: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    let Ok(relative) = target.strip_prefix(profile) else {
+        return Some(target.to_path_buf());
+    };
+    let mut folder = profile.to_path_buf();
+    if !is_plain_path_component(&folder) {
+        return Some(folder);
+    }
+    let mut below: Vec<_> = relative.components().collect();
+    below.pop();
+    for component in below {
+        folder.push(component);
+        if !is_plain_path_component(&folder) {
+            return Some(folder);
+        }
+    }
+    None
+}
+
+/// Whether the elevated delete may walk through `path`: absent (nothing below it to delete), or
+/// present and neither a symlink, a junction nor any other reparse point. Metadata that cannot
+/// be read is not proof, so it counts as not plain.
+#[cfg(any(windows, test))]
+fn is_plain_path_component(path: &std::path::Path) -> bool {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::MetadataExt as _;
+                use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+                if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                    return false;
+                }
+            }
+            !metadata.file_type().is_symlink()
+        }
+        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
     }
 }
 
@@ -774,9 +996,92 @@ mod tests {
         CleanupOutcome, DNS_RESTORED_AUTOMATIC_MARKER, DNS_STILL_ON_LOOPBACK_MARKER,
         EXIT_COSMETIC_FAILURE, EXIT_RESTORED_AUTOMATIC, EXIT_STILL_PROTECTED,
         WFP_REMOVED_CONTINUE_MARKER, classify_disarm_failure, cleanup_exit_code,
-        cleanup_fast_path_allowed, final_cleanup_outcome, poll_until, uninstall_may_continue,
+        cleanup_fast_path_allowed, final_cleanup_outcome, final_uninstall_cleanup, poll_until,
+        uninstall_may_continue,
     };
     use std::cell::Cell;
+
+    #[test]
+    fn final_uninstall_retires_update_executors_only_after_proven_removal() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "tono-final-uninstall-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let updates = state_dir.join("updates-v1");
+        std::fs::create_dir_all(&updates).unwrap();
+        {
+            let mut store =
+                tono_service_protocol::update_transaction::Store::open(&updates).unwrap();
+            let settled = store.state.clone();
+            store.save(settled).unwrap();
+        }
+        let executor = updates.join("attempt").join("executor.exe");
+        std::fs::create_dir(executor.parent().unwrap()).unwrap();
+        std::fs::write(&executor, b"executor").unwrap();
+
+        // The barrier may still be armed: nothing outside the recovery files is touched.
+        let outcome = final_uninstall_cleanup(
+            CleanupOutcome::StillProtected(anyhow::anyhow!("filters present")),
+            &state_dir,
+            || panic!("retired the recovery task while still protected"),
+        );
+        assert!(matches!(outcome, CleanupOutcome::StillProtected(_)));
+        assert!(executor.exists());
+
+        // Proven removal: the SYSTEM boot task and the executor copy go; the store stays.
+        let retired = Cell::new(false);
+        let outcome = final_uninstall_cleanup(CleanupOutcome::Clean, &state_dir, || {
+            retired.set(true);
+            Ok(())
+        });
+        assert!(matches!(outcome, CleanupOutcome::Clean));
+        assert!(retired.get());
+        assert!(!executor.parent().unwrap().exists());
+        assert!(updates.join("state.json").exists());
+        std::fs::remove_dir_all(state_dir).unwrap();
+    }
+
+    #[test]
+    fn final_uninstall_removes_owner_runtime_config_only_after_proven_removal() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "tono-final-uninstall-owners-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let config = state_dir
+            .join("users")
+            .join("owner")
+            .join("runtime")
+            .join("config.yaml");
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(&config, b"password: exit-credential").unwrap();
+
+        let outcome = final_uninstall_cleanup(
+            CleanupOutcome::StillProtected(anyhow::anyhow!("filters present")),
+            &state_dir,
+            || Ok(()),
+        );
+        assert!(matches!(outcome, CleanupOutcome::StillProtected(_)));
+        assert!(
+            config.exists(),
+            "state was removed while the barrier may be armed"
+        );
+
+        let outcome = final_uninstall_cleanup(CleanupOutcome::Clean, &state_dir, || Ok(()));
+        assert!(matches!(outcome, CleanupOutcome::Clean));
+        assert!(
+            !state_dir.join("users").exists(),
+            "the Service's runtime config with exit credentials survived uninstall"
+        );
+        std::fs::remove_dir_all(state_dir).unwrap();
+    }
 
     #[test]
     fn clean_outcome_exits_zero() {
@@ -1020,5 +1325,92 @@ mod tests {
             final_cleanup_outcome(None, None, None),
             CleanupOutcome::Clean
         ));
+    }
+
+    #[test]
+    fn delete_app_data_reaches_every_profile_not_only_the_approving_admin() {
+        use super::remove_app_data_in_profiles;
+
+        let profiles = std::env::temp_dir().join(format!(
+            "tono-profiles-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let data = |user: &str, base: &str, name: &str| {
+            profiles.join(user).join("AppData").join(base).join(name)
+        };
+        for user in ["admin", "signed-in-user"] {
+            for base in ["Roaming", "Local"] {
+                std::fs::create_dir_all(data(user, base, "com.raydocs.tono")).unwrap();
+                std::fs::write(
+                    data(user, base, "com.raydocs.tono").join("runtime.yaml"),
+                    b"x",
+                )
+                .unwrap();
+            }
+            std::fs::create_dir_all(data(user, "Roaming", "another-app")).unwrap();
+        }
+
+        remove_app_data_in_profiles(&profiles).unwrap();
+
+        for user in ["admin", "signed-in-user"] {
+            for base in ["Roaming", "Local"] {
+                assert!(
+                    !data(user, base, "com.raydocs.tono").exists(),
+                    "{user} {base} Tono data survived"
+                );
+            }
+            assert!(data(user, "Roaming", "another-app").exists());
+        }
+        std::fs::remove_dir_all(profiles).unwrap();
+    }
+
+    /// A profile owner can turn `AppData\Local` into a junction to another volume. The elevated
+    /// delete must not follow it: `D:\Data\com.raydocs.tono` is not Tono's app data.
+    #[test]
+    fn delete_app_data_never_walks_through_a_redirected_app_data_folder() {
+        use super::remove_app_data_in_profiles;
+
+        let root = std::env::temp_dir().join(format!(
+            "tono-profiles-link-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let profiles = root.join("Users");
+        let elsewhere = root.join("D-Data");
+        let outside_data = elsewhere.join("com.raydocs.tono");
+        std::fs::create_dir_all(&outside_data).unwrap();
+        std::fs::write(outside_data.join("keep.txt"), b"x").unwrap();
+        let app_data = profiles.join("user").join("AppData");
+        std::fs::create_dir_all(&app_data).unwrap();
+        let local = app_data.join("Local");
+        #[cfg(windows)]
+        assert!(
+            std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(&local)
+                .arg(&elsewhere)
+                .status()
+                .unwrap()
+                .success(),
+            "creating the junction needs no privilege"
+        );
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&elsewhere, &local).unwrap();
+
+        let result = remove_app_data_in_profiles(&profiles);
+
+        assert!(
+            outside_data.join("keep.txt").exists(),
+            "the delete followed the junction out of the profile"
+        );
+        assert!(result.is_err(), "the skipped profile must be reported");
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

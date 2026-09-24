@@ -35,6 +35,10 @@ struct SettingsView: View {
         SettingsKey.periodicTelemetryEnabled,
         store: AppProfile.defaults
     ) private var periodicTelemetryEnabled = false
+    @AppStorage(
+        SettingsKey.internalFailureReportsOptedOut,
+        store: AppProfile.defaults
+    ) private var internalFailureReportsOptedOut = false
     @AppStorage(SettingsKey.themeMode) private var themeMode = "Adaptive"
     @State private var researchProgramsExpanded = false
 
@@ -187,6 +191,19 @@ struct SettingsView: View {
         SettingsCard(icon: "hand.raised", title: "Privacy") {
             Text("Help fix problems")
                 .font(.system(size: 13, weight: .semibold))
+
+            if AccountSession.isInternalBuild() {
+                SettingToggleRow(
+                    label: "Failed connection reports",
+                    subtitle: "Internal test build, on by default: a failed connection is reported to Tono (stage, error code, version and server only). Turn it off here.",
+                    isOn: Binding(
+                        get: { !internalFailureReportsOptedOut },
+                        set: { internalFailureReportsOptedOut = !$0 }
+                    )
+                )
+
+                settingDivider
+            }
 
             SettingToggleRow(
                 label: "Crash reporting",

@@ -313,6 +313,49 @@ extension KillSwitchManager {
             check("reference-foreign-token", false)
         }
 
+        // 10. Full removal (`--emergency-reset`) takes back exactly the hook an
+        //     arm wrote into /etc/pf.conf, keeps a line the user added later,
+        //     and deletes both `.tono-backup` files (H19-O-F6). Fixture paths
+        //     only; the live /etc files are never touched.
+        let removalRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-hook-removal-\(getpid())").path
+        defer { try? FileManager.default.removeItem(atPath: removalRoot) }
+        let unhooked = """
+        scrub-anchor "com.apple/*"
+        nat-anchor "com.apple/*"
+        rdr-anchor "com.apple/*"
+        dummynet-anchor "com.apple/*"
+        anchor "com.apple/*"
+        load anchor "com.apple" from "/etc/pf.anchors/com.apple"
+
+        """
+        let userAddition = "anchor \"user.custom\"\n"
+        do {
+            try FileManager.default.createDirectory(
+                atPath: removalRoot, withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
+            )
+            let firstArm = try hookedMainConfiguration(unhooked)
+            let reArm = try hookedMainConfiguration(firstArm)
+            for (name, hooked) in [("first-arm", firstArm), ("re-armed", reArm)] {
+                let main = "\(removalRoot)/pf.conf"
+                let backups = ["\(removalRoot)/pf.conf.tono-backup", "\(removalRoot)/hosts.tono-backup"]
+                try atomicWrite(path: main, data: Data((hooked + userAddition).utf8), permissions: 0o644)
+                for backup in backups {
+                    try atomicWrite(path: backup, data: Data(unhooked.utf8), permissions: 0o600)
+                }
+                try removeMainHookAndBackups(mainPath: main, backupPaths: backups)
+                let after = String(
+                    data: try secureRead(main, maximumBytes: 1024 * 1024), encoding: .utf8
+                )
+                check("\(name)-removal-restores-the-unhooked-file", after == unhooked + userAddition)
+                check("\(name)-removal-deletes-both-backups",
+                      backups.allSatisfy { !FileManager.default.fileExists(atPath: $0) })
+            }
+        } catch {
+            check("hook-removal-fixture-failed", false)
+        }
+
         if failures.isEmpty { return true }
         FileHandle.standardError.write(Data(
             "lifecycle self-test failed: \(failures.joined(separator: ", "))\n".utf8

@@ -16,7 +16,7 @@ nonisolated struct HelperManager {
     private static let helperInstallPath = "/Library/PrivilegedHelperTools/tono-core-helper"
     private static let mihomoInstallPath = "/Library/PrivilegedHelperTools/tono-sing-box"
     private static let allowedUIDPath = "/Library/PrivilegedHelperTools/tono.allowed-uid"
-    private static let plistInstallPath = "/Library/LaunchDaemons/com.raydocs.tono.core-helper.plist"
+    static let plistInstallPath = "/Library/LaunchDaemons/com.raydocs.tono.core-helper.plist"
     private static let plistLabel = "com.raydocs.tono.core-helper"
     private static let maximumResponseBytes = 64 * 1024
 
@@ -88,6 +88,7 @@ nonisolated struct HelperManager {
         /usr/bin/codesign --verify --strict --all-architectures -R='anchor apple generic and identifier "com.raydocs.tono.helper" and certificate leaf[subject.OU] = "YY57758GS7" and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and entitlement["com.apple.security.get-task-allow"] absent' "$guard_dir/guard"
         "$guard_dir/guard" --update-install-guard <<'TONO_INSTALL_UNDER_ROOT_UPDATE_LOCK'
         set -e
+        \(boundAccountGuard(uid: uid, allowedUIDPath: allowedUIDPath))
         /usr/bin/install -d -o root -g wheel -m 0755 /Library/PrivilegedHelperTools
         /usr/bin/install -d -o root -g wheel -m 0755 /var/run/tono-core
         /bin/rm -f '\(helperTemporaryPath)' '\(mihomoTemporaryPath)' '\(plistTemporaryPath)'
@@ -112,6 +113,9 @@ nonisolated struct HelperManager {
         /bin/rm -f /Library/PrivilegedHelperTools/tono-killswitch
         /bin/rm -f /var/run/tono-killswitch.sock
         /bin/launchctl bootout system/\(plistLabel) >/dev/null 2>&1 || true
+        # A reset by an older helper left the previous account's socket behind;
+        # the new daemon refuses to replace a socket another uid owns.
+        /bin/rm -f '\(socketPath)'
         /bin/mv -f '\(helperTemporaryPath)' '\(helperInstallPath)'
         /bin/mv -f '\(mihomoTemporaryPath)' '\(mihomoInstallPath)'
         /bin/mv -f '\(plistTemporaryPath)' '\(plistInstallPath)'
@@ -125,6 +129,12 @@ nonisolated struct HelperManager {
     }
 
     static func installIfNeeded() throws {
+        // A helper serving another account is not broken. Refuse by name
+        // before any probe, prompt or reinstall could rebind it.
+        if let account = helperBoundAccount() {
+            LocalTrafficAudit.shared.recordEvent("helper_bound_to_another_account")
+            throw HelperIPCError.boundToAnotherUser(account)
+        }
         let preparationStartedAt = Date()
         LocalTrafficAudit.shared.recordEvent(
             "helper_preparation_started",
@@ -315,6 +325,10 @@ nonisolated struct HelperManager {
         guard process.terminationStatus == 0 else {
             let data = errors.fileHandleForReading.readDataToEndOfFile()
             let message = String(data: data, encoding: .utf8) ?? ""
+            if let account = boundAccount(inInstallerMessage: message) {
+                LocalTrafficAudit.shared.recordEvent("helper_bound_to_another_account")
+                throw HelperIPCError.boundToAnotherUser(account)
+            }
             // AppleScript reports a dismissed credential dialog with the
             // localized "User canceled" text, so plain "cancel" matching both
             // misses non-English systems (zh-Hans emits "用户已取消") and
@@ -1109,6 +1123,73 @@ nonisolated struct HelperManager {
         }
     }
 
+    /// The account a live helper serves, when that is not the calling account.
+    /// The daemon hands its socket to the one uid it trusts, mode 0600, so
+    /// another account cannot connect at all. It used to see only "helper
+    /// unavailable", and a repair from that account could rebind the helper to
+    /// itself and take the first account's barrier with it (H19-O-F3).
+    /// A socket without the daemon's launchd plist is what `--emergency-reset`
+    /// leaves behind, not a helper serving anyone (MA-Codex-4).
+    static func helperBoundAccount(
+        socketPath: String = HelperManager.socketPath,
+        currentUID: uid_t = getuid(),
+        daemonPlistPath: String = HelperManager.plistInstallPath
+    ) -> String? {
+        var metadata = stat()
+        guard lstat(daemonPlistPath, &metadata) == 0,
+              lstat(socketPath, &metadata) == 0,
+              metadata.st_mode & mode_t(S_IFMT) == mode_t(S_IFSOCK),
+              metadata.st_uid != currentUID, metadata.st_uid != 0 else { return nil }
+        if let record = getpwuid(metadata.st_uid), let name = record.pointee.pw_name {
+            return String(cString: name)
+        }
+        return "UID \(metadata.st_uid)"
+    }
+
+    /// The error for a failed connect to the helper socket.
+    static func connectFailure(
+        socketPath: String = HelperManager.socketPath,
+        currentUID: uid_t = getuid(),
+        daemonPlistPath: String = HelperManager.plistInstallPath
+    ) -> HelperIPCError {
+        if let account = helperBoundAccount(
+            socketPath: socketPath, currentUID: currentUID, daemonPlistPath: daemonPlistPath
+        ) {
+            return .boundToAnotherUser(account)
+        }
+        return .connectFailed
+    }
+
+    private static let boundAccountMarker = "TONO_HELPER_BOUND_TO_ACCOUNT:"
+
+    /// Run by root under the helper's update lock (the same lock
+    /// `--emergency-reset` holds), before the install replaces anything, so the
+    /// record it reads is the one the install overwrites (MA-Codex-3). While
+    /// the trusted-user record names another account that still exists on this
+    /// Mac, refuse and name it: no install from this app, automatic or
+    /// explicit, rebinds the helper away from that account. Moving Tono to
+    /// another account is an administrator's `--emergency-reset`, which
+    /// releases that account's protection and removes the record. A record for
+    /// an account that no longer exists does not block the install.
+    static func boundAccountGuard(uid: uid_t, allowedUIDPath: String) -> String {
+        """
+        if [ -f '\(allowedUIDPath)' ]; then
+          tono_bound_uid=$(/usr/bin/tr -cd '0-9' < '\(allowedUIDPath)')
+          if [ -n "$tono_bound_uid" ] && [ "$tono_bound_uid" != '\(uid)' ] && tono_bound_name=$(/usr/bin/id -un "$tono_bound_uid" 2>/dev/null); then
+            /bin/echo "\(boundAccountMarker)$tono_bound_name" >&2
+            exit 75
+          fi
+        fi
+        """
+    }
+
+    /// The account named by a refused root install, from osascript's error text.
+    static func boundAccount(inInstallerMessage message: String) -> String? {
+        guard let marker = message.range(of: boundAccountMarker) else { return nil }
+        let name = message[marker.upperBound...].prefix { !$0.isWhitespace && $0 != "(" }
+        return name.isEmpty ? nil : String(name)
+    }
+
     // MARK: - Bounded Unix-socket HTTP client
 
     private static func sendRequest(
@@ -1149,7 +1230,7 @@ nonisolated struct HelperManager {
                 Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
-        guard connected == 0 else { throw HelperIPCError.connectFailed }
+        guard connected == 0 else { throw connectFailure() }
 
         let payload = body ?? Data()
         var request = Data(
@@ -1223,6 +1304,9 @@ enum HelperIPCError: LocalizedError {
     case emptyResponse
     case invalidResponse
     case forbidden
+    /// The helper serves another macOS account on this Mac. Never repaired by
+    /// rebinding it to the calling account.
+    case boundToAnotherUser(String)
     case commandFailed(String, code: String? = nil)
 
     var errorDescription: String? {
@@ -1233,6 +1317,8 @@ enum HelperIPCError: LocalizedError {
         case .invalidResponse: String(localized: "The network helper returned an invalid response.")
         case .forbidden:
             String(localized: "The installed network helper rejected this copy of Tono.")
+        case .boundToAnotherUser(let account):
+            String(localized: "Tono's network helper on this Mac is set up for the macOS account “\(account)” and keeps that account's network protection. Use Tono from that account. To move Tono to this account, an administrator can run sudo /Library/PrivilegedHelperTools/tono-core-helper --emergency-reset in Terminal, then reopen Tono.")
         // commandFailed carries helper-produced text verbatim; not a catalog key.
         case .commandFailed(let message, _): message
         }
