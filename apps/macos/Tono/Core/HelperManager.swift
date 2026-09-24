@@ -430,8 +430,8 @@ nonisolated struct HelperManager {
     }
 
     static func launchState() -> LaunchState {
-        if SMAppService.statusForLegacy(
-            plistURL: URL(fileURLWithPath: plistInstallPath)
+        if SMAppService.statusForLegacyPlist(
+            at: URL(fileURLWithPath: plistInstallPath)
         ) == .requiresApproval {
             return .backgroundDisabled
         }

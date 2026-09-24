@@ -40,7 +40,7 @@
 - **缺陷修复**：重启后只有 Helper 会启用 PF。Helper 在“登录项 > 允许在后台”中被关闭，或者
   launchd 根本没有这个任务时，PF 从开机起就是关闭的。App 这时只报泛化的修复错误（通常要等
   45 秒安装超时），不说明本机没有防护。现在本地保护意图为真且 Helper 状态不可达时，App 先
-  只读查询后台项状态（`SMAppService.statusForLegacy`）和 `launchctl print`：
+  只读查询后台项状态（`SMAppService.statusForLegacyPlist(at:)`）和 `launchctl print`：
   - 被关闭：立即显示“网络组件已在登录项中关闭，这台 Mac 当前未受保护”，并说明如何打开。
     App 无法启动用户关闭的任务，所以不做修复尝试。
   - 未加载：先走一次已有的鉴权安装修复；失败时显示“网络组件没有运行，这台 Mac 当前未受
@@ -56,7 +56,7 @@
   `launchctl print system/<label>` 可用（存在为 0，不存在为 113）。
 - **候选/发布**：无新包，仅源码。
 - **剩余限制**：测试只覆盖状态到提示的映射，没有覆盖 `recoverStaleRuntime` 的分支（该函数
-  没有注入点）。登录项开关对旧式 LaunchDaemon 的确切效果（是否让 `statusForLegacy` 返回
+  没有注入点）。登录项开关对旧式 LaunchDaemon 的确切效果（是否让 `statusForLegacyPlist(at:)` 返回
   `.requiresApproval`，开机是否跳过）需要实机确认。没有改用 `SMAppService.daemon` 注册。
 
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
