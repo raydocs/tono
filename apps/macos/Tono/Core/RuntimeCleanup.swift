@@ -24,7 +24,12 @@ enum RuntimeCleanup {
     /// until a verified session reconnects or the user explicitly disarms it.
     static func cleanupStaleRuntime() async throws -> Bool {
         let coordinator = PrivilegedRuntimeCoordinator.shared
-        if let pending = try await coordinator.pendingNativeUpdate(), pending.pending {
+        let pendingUpdate = try await queryPendingNativeUpdate(
+            query: { try await coordinator.pendingNativeUpdate() },
+            launchState: { await coordinator.helperLaunchState() },
+            repairHelper: { try await coordinator.prepareHelper() }
+        )
+        if let pending = pendingUpdate, pending.pending {
             nativeUpdatePending = true
             nativeUpdateBlocksConnect = true
             let adopted = try await coordinator.nativeUpdate("reconcile")
@@ -45,6 +50,45 @@ enum RuntimeCleanup {
             return false // Protected Offline must not silently become Connected.
         }
         return try await recoverStaleRuntime()
+    }
+
+    /// The native-update query is the first helper call at launch. When the
+    /// helper binary is installed but nothing answers its socket (turned off
+    /// under Allow in the Background, not loaded by launchd, crash-looping),
+    /// the query used to throw a generic "helper unavailable" before any
+    /// repair or notice in `recoverStaleRuntime` could run, and Retry repeated
+    /// it forever. Say that this Mac is not protected and repair the helper
+    /// here instead. The administrator install runs root's update-install
+    /// guard, which refuses while an update transaction is unfinished.
+    static func queryPendingNativeUpdate(
+        query: () async throws -> HelperManager.UpdateStatus?,
+        launchState: () async -> HelperManager.LaunchState,
+        repairHelper: () async throws -> Void
+    ) async throws -> HelperManager.UpdateStatus? {
+        do {
+            return try await query()
+        } catch HelperIPCError.connectFailed {
+            let state = await launchState()
+            if state == .loadedOrUnknown {
+                // launchd has the job; give a restarting helper one moment.
+                try? await Task.sleep(for: .seconds(2))
+                do {
+                    return try await query()
+                } catch HelperIPCError.connectFailed {}
+            }
+            let notice = HelperManager.unprotectedNotice(for: state)
+                ?? String(localized: "Tono's network helper is not responding, so this Mac may not be protected right now. Click Retry and approve the administrator prompt to repair it.")
+            // Nothing the app can run starts a job the user turned off.
+            if state == .backgroundDisabled {
+                throw CoreRuntimeError.startFailed(notice)
+            }
+            do {
+                try await repairHelper()
+            } catch {
+                throw CoreRuntimeError.startFailed(notice + " " + error.localizedDescription)
+            }
+            return try await query()
+        }
     }
 
     private static func recoverStaleRuntime() async throws -> Bool {

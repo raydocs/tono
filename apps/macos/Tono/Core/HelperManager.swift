@@ -540,7 +540,7 @@ nonisolated struct HelperManager {
         return process.terminationStatus == 0
     }
 
-    private static func installedArtifactVersion() -> String? {
+    static func installedArtifactVersion() -> String? {
         guard hasInstalledHelperArtifact else { return nil }
         let process = Process()
         let output = Pipe()
