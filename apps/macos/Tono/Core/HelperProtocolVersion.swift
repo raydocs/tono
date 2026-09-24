@@ -150,7 +150,10 @@ nonisolated enum HelperProtocolVersion {
     ///   deleted. When the recorded service no longer exists the snapshot is
     ///   archived aside and `/dns/restore` adds `originalDNSRestored: false`;
     ///   an enumeration without IDs keeps the snapshot and refuses release.
-    static let current = "4.17.0"
+    /// - 4.17.0 → 4.19.0 (merge-train number; 4.18.0 is reserved for the
+    ///   helper JSON-key change merged next): PF drops DNS (53/853) to LAN
+    ///   and link-local ranges while a tunnel is up.
+    static let current = "4.19.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

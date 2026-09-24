@@ -32,6 +32,41 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 保护期间阻断直连局域网 DNS（53/853）
+
+- **归属/来源**：G1 保护边界（内部审查 H1 报告中的未编号设计缺口）；影响 macOS root helper
+  PF 渲染。基线 main b1b6fe6c，分支 `fix/macos-lan-dns-20260923`，Issue
+  [#344](https://github.com/raydocs/tono/issues/344)；提交时未合 main。
+- **缺陷修复**：TUN 存在时 `tono-lan`/`tono-linklocal` 放行任意用户到私网、链路本地的任意端口，
+  而 sing-box 把这些网段排除出 TUN，所以直接发往路由器或其他 LAN 解析器的 DNS（53）/DoT（853）
+  碰不到 `hijack-dns`，查询名明文外泄。Windows 由 `dns-hijack any:53` 覆盖，两平台不一致。
+  改后：在这两组放行之前渲染 `tono-lan-dns` 的 `block drop out quick`，覆盖 IPv4 私网/169.254
+  与 IPv6 fe80::/10、fc00::/7、ff00::/8 的 TCP/UDP 53、853。系统 DNS（loopback 127.0.0.1）、
+  TUN、mDNS 5353 不受影响。
+  - 审查后补充（#348 第三轮审查）：阻断规则限定在物理出口接口 `on { enN, ... }`（渲染规则时
+    用 `getifaddrs` 枚举当前存在的 `en` + 数字接口，覆盖 Wi-Fi、有线、USB/雷雳网卡和 iPhone USB
+    共享），不作用于 utun、ipsec、ppp 等其他 VPN 接口，所以与 Tono 同时运行的公司 VPN
+    （AnyConnect、GlobalProtect、WireGuard 等）推到自己 utun 上的 DNS 不会被挡。枚举不到任何
+    物理接口时，阻断保持不限接口（fail-closed）。
+- **新增/优化**：无。
+- **工程与测试**：helper 自测（`--self-test`）新增一个检查 `lanDNSBlockedFirst`：带 TUN 的规则集里
+  LAN DNS 阻断出现在 `tono-lan` 放行之前；旧代码无此规则而失败。审查后同一检查改为用注入的
+  物理接口 `["en0", "en7"]` 渲染，并断言阻断带 `on { en0, en7 }` 限定；修改前的分支渲染的是
+  不限接口的阻断，匹配不到，检查失败。同一自测在 CI 以 root 做 pfctl
+  语法解析。HelperProtocolVersion 4.17.0 → 4.19.0（合并列车按顺序编号，4.18.0 留给随后合入的 #417），CONTRACT
+  已重算；与该链合并时需按合并顺序重算 CONTRACT。
+- **验证**：本机（MacBook）未编译 helper、未运行 pfctl（审查后的接口限定同样本机未编译）；编译、自测与 PF 解析委托本 PR 的
+  GitHub-hosted `macos-26` CI（privileged-tests）。
+- **候选/发布**：无新包，仅源码；不涉及 Sparkle 更新源。
+- **剩余限制**：未实机复现。只阻断 53/853；其他端口上的自定义 DNS 协议（如私网 DoH 443）仍经
+  `tono-lan` 放行。用户有意使用的局域网 DNS 服务器在保护期间不再可直连（系统解析本就走 loopback）。
+  - **已知取舍，需要 owner 决定是否接受**：仍会挡掉企业 split DNS。公司 Mac 通过
+    `/etc/resolver/<域>` 或配置描述文件下发的私网补充解析器（例如 `10.1.1.53`）经物理网卡
+    直连，Tono 连接期间这些内网域名会解析失败。在 main 上它们经 `tono-lan` 可以解析。
+  - 物理接口列表在每次写 PF 规则时确定。会话中途新接入的网卡（例如插上 USB 网卡）在下一次
+    重写规则之前不在阻断范围内，此时该网卡上的 LAN DNS 与 main 行为相同（经 `tono-lan` 放行）。
+  - 接口限定和公司 VPN 并存场景未做实机验证。
+
 ## 2026-09-23 · macOS 原 DNS 所属服务已删除时向用户提示
 
 - **归属/来源**：G1 保护恢复；macOS App `HelperManager` / `AppState+Connect` / `AppDelegate`。

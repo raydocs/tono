@@ -502,7 +502,8 @@ extension KillSwitchManager {
                     sessionDirectEndpoints: [],
             reviewedBundleDirectEnabled: false
                 ),
-                allowedUID: 501
+                allowedUID: 501,
+                physicalInterfaces: ["en0", "en7"]
             )
             let inactiveState = KillSwitchState(
                 armed: true,
@@ -651,6 +652,14 @@ extension KillSwitchManager {
                 "to fe80::/10",
             ]
             let continuityOffWithoutTunnel = !continuityNeedles.contains(where: rules.contains)
+            // Scoped to the physical interfaces, so a company VPN's DNS on its
+            // own utun is not blocked.
+            let lanDNSBlock = "block drop out quick on { en0, en7 } inet proto { tcp, udp } to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } port { 53, 853 }"
+            let lanDNSBlockedFirst: Bool = {
+                guard let block = cloudRules.range(of: lanDNSBlock),
+                      let lan = cloudRules.range(of: "label \"tono-lan\"") else { return false }
+                return block.lowerBound < lan.lowerBound
+            }()
             let continuityOnWithTunnel = continuityNeedles.allSatisfy(cloudRules.contains)
             // Whole-string equality, so the class labels belong here too: this is
             // the one assertion that pins the emergency ruleset exactly, and it is
@@ -715,6 +724,7 @@ extension KillSwitchManager {
             return ruleShapesHold
                 && continuityOffWithoutTunnel
                 && continuityOnWithTunnel
+                && lanDNSBlockedFirst
                 && emergencyRules == emergencyExpected
                 && cloudShapesHold
                 && pfParses
