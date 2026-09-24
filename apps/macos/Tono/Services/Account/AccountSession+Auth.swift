@@ -497,7 +497,9 @@ extension AccountSession {
     /// first suspension point, so no wake, reconnect or network-change path can
     /// start a Core with them, and the running Core is stopped with PF kept
     /// armed: the Mac stays Protected Offline and the suspended screen offers
-    /// Restore internet.
+    /// Restore internet. The network-log uploader stops too: every sweep would
+    /// only have its token renewal refused again. The runtime start that ends
+    /// the block starts it again.
     func enterEntitlementBlock(detail: String?) {
         entitlementDetail = detail
         if state == .ready { blockedWhileReady = true }
@@ -505,6 +507,7 @@ extension AccountSession {
         state = .suspended
         ManagedExitCatalogOwnership.purge()
         Task { [weak self] in await self?.descriptorConsumer(nil) }
+        updateDiagnosticsLogUploading()
     }
 
     /// The control plane accepted this account again, so the block is lifted

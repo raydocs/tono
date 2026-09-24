@@ -32,6 +32,28 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · macOS 账户 suspended 时停止网络日志上传
+
+- **归属/来源**：G2 客户端账户状态（macOS `AccountSession+Auth.swift`）。内部审查 H17-O-F7（另一审查方按
+  收窄条件确认）；Issue #536。叠在 #535（`fix/macos-suspended-stops-core-20260924`）之上；本条分支
+  `fix/macos-suspended-stops-log-upload-20260924`；提交时未合 main。
+- **缺陷修复**：上传器已在运行（上传开关默认开、账户 ready）且有待发日志时，账户被控制面拒绝进入
+  `.suspended`，`enterEntitlementBlock` 不停上传器；上传器运行中只按日志 ownership 判断是否继续，
+  不看账户状态。于是每轮上传都 401 → `auth/refresh` 401 → 退避重试（上限 960 s，无次数上限），
+  直到睡眠、退出或登出。现在进入 `.suspended` 时通过既有的 `updateDiagnosticsLogUploading()`
+  停止上传器；账户重新可用时运行时启动（`startCatalogSync`）照旧重新启动它。
+- **新增/优化**：无。
+- **工程与测试**：`AccountSessionRequestTests` 新增一个 XCTest
+  `testSuspensionStopsTheRunningNetworkLogUploader`：上传器已启动，账户重读与续期都回 401；断言状态为
+  `.suspended` 且上传循环已停止。`DiagnosticsLogUploader` 增加只读 `isRunning` 供断言，无行为变化。
+  只含测试（及该只读属性）的提交 c03c8c69（叠在 #535 上，本修复未加）在 GitHub-hosted macOS CI
+  run 35977822472 上实际跑红：build 作业只有这一个测试失败（`AccountSessionRequestTests` 51 项、
+  1 处断言失败：suspended 后上传循环仍在运行）。
+- **验证**：本机是编辑机，未运行 xcodebuild/swift。TonoTests 委托 PR 的 GitHub-hosted `macos-26`
+  CI，结果以 PR 页的准确 head SHA 为准。未实机验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：周期遥测任务句柄在 suspended 时未清空（#516 已记录的既有行为），不在本条范围。
+
 ## 2026-09-24 · macOS 账户进入 suspended 时停止 Core 并撤下缓存出口
 
 - **归属/来源**：G2 客户端账户状态与连接准入（macOS `AccountSession+Auth.swift`）。内部审查 H17-C-F3，
