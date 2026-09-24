@@ -22,7 +22,10 @@
   中 = 产品内锁死、保护状态失真（仍 fail-closed）、自愈缺失；低 = 显示、体验或前提很窄。
   核实度：已确认 / 推导（源码推导）/ 实机（需实机验证）。
 - **ID 保留原编号**：首轮 W/M/S；审查轮 R1–R4（`R<块>-F<n>`，`R3-O<n>` 为观察项）；
-  隐秘 bug 搜寻 H1–H15（`H<块>-F<n>`，`H6-C` 为功能缺陷）；内部复核轮 X1–X3（`X<轮>-<n>`，带连字符）。
+  隐秘 bug 搜寻 H1–H19（`H<块>-F<n>`，`H6-C` 为功能缺陷；H16 起多席位并行，写成
+  `H<块>-<席位>-F<n>`，O/C/G 分别为 Opus/Codex/Grok 席位，多个席位报同一问题时取一个 ID 为行 ID，
+  其余在问题栏以「=」列出；跨行合并修复用描述性 ID，如 `H17-AUTH-MAC`）；
+  内部复核轮 X1–X3（`X<轮>-<n>`，带连字符）。
   `-hint`、`-notice`、`-order` 后缀是同一发现派生出的独立缺陷，单列一行。首轮之后的零散修复用 I（安装/易用性）与
   N（连接等待/DNS）；没有轮次编号、直接以 issue 报告的用 issue 号（如 `#491`）；撤回/排除用不带连字符的
   X<n>（与复核轮 `X<轮>-<n>` 区分）；已交付结构与设计取舍用 D。
@@ -30,10 +33,11 @@
   详细分析留在 issue/内部报告。仓库是公开的。
 - 同一根因的续修、移植、补测试、cherry-pick 不算新条目，在原行「剩余限制」或链接里补充。
 - 工程/测试/文档修正（CI 覆盖、fixture、编译错误、截图等）不进本账，见 INTERNAL_CHANGELOG。
-- 方法与覆盖范围见 [2026-09-23 审查轮记录](reports/REVIEW_ROUNDS_2026-09-23.md)。
+- 方法与覆盖范围见 [2026-09-23 审查轮记录](reports/REVIEW_ROUNDS_2026-09-23.md) 与 [2026-09-24 审查轮记录](reports/REVIEW_ROUNDS_2026-09-24.md)。
 
-状态快照：2026-09-24，origin/main `bb2ed4e4`（R1–R4 修复已合入至 #311；#300、#305 仍在审；#312、#482 已关闭）。
-H5–H15 与 X1–X3 的修复 PR 均已开出、尚未合入；表中编号与状态为写入时 GitHub 的真实状态。
+状态快照：2026-09-24，origin/main `059a2ea2`（R1–R4 修复已合入至 #311；#300、#305 仍在审；#312、#482 已关闭）。
+H5–H15 与 X1–X3 的修复 PR 均已开出、尚未合入。H16/H17 已登记 15 行，均为 `open`；另外 5 条由各自修复 PR 登记：
+H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#516）、H17-AUTH-WIN（#515）。表中编号与状态为写入时 GitHub 的真实状态。
 
 ## 1. macOS 连接
 
@@ -57,6 +61,9 @@ H5–H15 与 X1–X3 的修复 PR 均已开出、尚未合入；表中编号与�
 | X1-7 | arm 结果未知被当作未 armed | in-PR | [#433](https://github.com/raydocs/tono/pull/433) | 中·推导 | 同一 PR 覆盖 R1-N1 |
 | X1-8 | disarm 出错后未读回 helper 就发布 blocked 状态 | in-PR | [#437](https://github.com/raydocs/tono/pull/437) | 低·推导 | — |
 | X1-9 | 更新状态查询返回后未复核连接 attempt 即提交 onCoreStarted | in-PR | [#439](https://github.com/raydocs/tono/pull/439) | 低·推导 | — |
+| H16-O-F5 | 启动时从 helper 收养已 armed 的 PF 屏障，但不设 isProtectionBlocked：菜单栏与主窗显示 Standby，激活对账与 Retry 都以该标志为前提（= H16-C-F1） | open | 待开 | 中·已确认 | 全程 fail-closed，无泄漏；直到一次 Connect 或网络变化才收敛；与 H17-AUTH-MAC（#516）同改文件，排在其后 |
+| H16-O-F3 | 空闲、未 armed 的 Mac 上所选服务器被移出目录时，错误横幅称「断网保护仍在拦住直连」 | open | 待开 | 低·已确认 | 屏障不存在而文案称在拦截；药丸同时显示未连接，无泄漏；未绑定住宅线的用户都会走到这条分支 |
+| H16-C-F2 | 从菜单栏 Restore internet 成功释放后，已显示的账户 gate（suspended）不失效，继续称 Kill Switch 在拦截 | open | 待开 | 中·推导 | gate 读取不可观察的静态 isArmed；登录卡同一读法；SwiftUI 实际重绘需实机；排在 H16-O-F5 之后 |
 
 ## 2. Windows 连接
 
@@ -86,6 +93,8 @@ H5–H15 与 X1–X3 的修复 PR 均已开出、尚未合入；表中编号与�
 | H13-F3 | 控制面拒绝会话后账户未进入挂起 | in-PR | [#459](https://github.com/raydocs/tono/issues/459)，[#460](https://github.com/raydocs/tono/pull/460) | 中·推导 | 与 #456 同文件，后合者需 rebase |
 | X2-1 | 网络变化后 DIRECT 仍绑定已不再是上行的适配器 | in-PR | [#461](https://github.com/raydocs/tono/issues/461)，[#462](https://github.com/raydocs/tono/pull/462) | 低·实机 | 核实后降级 |
 | H6-C | Support 页 WebRTC 检查按钮缺少打开其固定页面的权限 | in-PR | [#386](https://github.com/raydocs/tono/issues/386)，[#387](https://github.com/raydocs/tono/pull/387) | 低·已确认 | 功能缺陷，非安全项 |
+| H16-C-F3 | 退出登录发布最终状态后，周期目录同步在解锁后发布的旧 Ready/Connected 快照可以覆盖 tono_status 缓存且不再被纠正 | open | 待开 | 中·推导 | 窗口是解锁与发布之间几条指令，需要 worker 线程被抢占；未复现；与 H17-AUTH-WIN（#515）同改 account.rs，排在其后 |
+| H16-O-F7 | 冷启动恢复把已探测到的屏障状态压到 me() 返回之后才发布，期间托盘 flyout 显示 Standby 并提供 Connect | open | 待开 | 低·已确认 | 核实后收窄：仅初始未保护且持有 refresh token 的冷启动恢复、仅豁免恢复屏的托盘 flyout；Connect 会被账户准入拒绝；排在 #515 之后（restore.rs） |
 
 ## 3. DNS（两端）
 
@@ -147,6 +156,7 @@ H5–H15 与 X1–X3 的修复 PR 均已开出、尚未合入；表中编号与�
 | H15-F3 | 0.0.72 更新交接日记从不退役，永久显示「更新未完成」 | in-PR | [#496](https://github.com/raydocs/tono/issues/496)，[#497](https://github.com/raydocs/tono/pull/497)（macOS）、[#498](https://github.com/raydocs/tono/pull/498)（Windows） | 中·推导 | 未实跑 0.0.72→0.0.73 升级 |
 | H15-F5 | Windows 降级到 0.0.72 后残留 NRPT catch-all 且加密 DNS 关闭 | in-PR | [#507](https://github.com/raydocs/tono/issues/507)，[#508](https://github.com/raydocs/tono/pull/508) | 中·实机 | 安装器改为拒绝降级并记录安全回滚步骤；需候选包与实机 |
 | H15-F6 | 原生更新 store/账本无版本号，遇新版写入的未知字段即拒绝 | in-PR | [#501](https://github.com/raydocs/tono/issues/501)，[#502](https://github.com/raydocs/tono/pull/502)（Windows）、[#503](https://github.com/raydocs/tono/pull/503)（macOS） | 中·推导 | #503 的 helper 4.40.0 为临时编号，合并时重编号并重算 CONTRACT.sha256 |
+| H16-O-F4 | macOS 原生更新准备失败后 isConnected 已清、isProtectionBlocked 未设：各表面显示 Standby 而 PF 仍 armed，Connect 点击被静默丢弃（= H16-C-F6） | open | 待开 | 中·已确认 | 全程 fail-closed，无泄漏；本会话内不收敛；准备失败的频率需实机 |
 
 ## 5. 控制面（Worker）
 
@@ -165,6 +175,11 @@ H5–H15 与 X1–X3 的修复 PR 均已开出、尚未合入；表中编号与�
 | H14-F2 | 可重新上架退役时出口 token 已吊销的节点；drain 与吊销存在竞态 | in-PR | [#449](https://github.com/raydocs/tono/issues/449)，[#451](https://github.com/raydocs/tono/pull/451) | 中·推导 | 与 #375 在 revokeExitToken 同一 UPDATE 相邻行冲突，后合者保留双方 |
 | H15-F7 | 控制台重新上架会发布不完整的 Reality 条目，客户端整份目录不可用 | in-PR | [#492](https://github.com/raydocs/tono/issues/492)，[#493](https://github.com/raydocs/tono/pull/493) | 中·推导 | — |
 | H15-F8 | 未声明 hy2 能力的客户端也收到 hy2 条目 | in-PR | [#494](https://github.com/raydocs/tono/issues/494)，[#495](https://github.com/raydocs/tono/pull/495) | 中·推导 | — |
+| H17-O-F3 | 到期与超额在一个 cron 周期内吊销全部设备、会话与出口凭据，控制台却写「到期不撤设备」；续期或重置用量不能自行恢复服务 | open | 待开 | 中·已确认 | 需 owner 在两种修法间决定（只对非 active 账户吊销，或保留吊销并改文案、告知需重新登录）；修复队列暂按更严格的后者 |
+| H17-G-F2 | Tailscale enrollment 关闭（生产配置）时吊销任务永不执行，带 tailnet 绑定设备的账户停用或销户后重新启用永远返回 409（= H17-O-F5） | open | 待开 | 中·推导 | 取决于生产是否仍有带 tailscale_node_id 的设备行（未查 D1）；这些设备的 tailnet 节点也不会被删除 |
+| H17-C-F2 | 退款销户由多次独立提交组成，中途失败可留下「住宅线与产品账户已回收、VPN 仍有效」的账户 | open | 待开 | 中·推导 | 需故障注入确认；cron 不识别这种部分销户状态 |
+| H17-G-F5 | 同一设备再次登录或登出只作废当前会话，更早签发的 refresh token 仍然有效 | open | 待开 | 中·已确认 | refresh 有效期默认 30 天；显式吊销设备会作废该设备全部会话 |
+| H17-C-F1 | 调低账户设备上限不会移除已超出上限的设备，直到有新设备登录（= H17-G-F1） | open | 待开 | 低·已确认 | 超出部分在下一次新设备登录时才按 LRU 轮换 |
 
 ## 6. 客户端信任与账户隔离
 
@@ -185,6 +200,8 @@ H5–H15 与 X1–X3 的修复 PR 均已开出、尚未合入；表中编号与�
 | H11-F3 | 卸载保留 refresh token，重装后自动登录回原账户 | in-PR | [#408](https://github.com/raydocs/tono/issues/408)，[#412](https://github.com/raydocs/tono/pull/412) | 中·已确认 | — |
 | H15-F4 | macOS 0.0.72 遗留的含凭据 config/config.yaml 从未删除 | in-PR | [#504](https://github.com/raydocs/tono/issues/504)，[#505](https://github.com/raydocs/tono/pull/505) | 低·推导 | 与 #411 相关 |
 | #491 | Windows 从 Suspended/Error 换账户登录时保留上一账户的目录、runtime 副本与 Core | in-PR | [#491](https://github.com/raydocs/tono/issues/491)，[#506](https://github.com/raydocs/tono/pull/506) | 高·推导 | 叠在 #316 → #410 → #506 |
+| H17-C-F3 | macOS 账户进入 suspended 后不停止 Core、不作废缓存的设备出口凭据，唤醒恢复仍可用它连接（= H17-G-F3 第 3 步） | open | 待开 | 中·已确认 | 被吊销设备可用到出口应用新 roster 为止；实际 Core/PF 行为需实机；排在 H17-AUTH-MAC（#516）之后 |
+| H17-O-F7 | macOS 账户 suspended 后网络日志上传器不停止，持续用已被拒绝的 refresh 重试 | open | 待开 | 低·已确认 | 退避上限约 16 分钟一次；Windows 由 #460 处理 |
 
 ## 7. 数据面规则（PF / WFP / sing-box / mihomo）
 
@@ -233,7 +250,7 @@ H5–H15 与 X1–X3 的修复 PR 均已开出、尚未合入；表中编号与�
 | H7-F4 | 停用/退役的出口节点保留最后一份 roster | in-PR | [#371](https://github.com/raydocs/tono/issues/371)，[#375](https://github.com/raydocs/tono/pull/375) | 高·推导 | migration 0081；需 Worker、migration、agent 全部部署 |
 | H7-F5 | shared-legacy 退役只在运行时生效，未持久化 | in-PR | [#382](https://github.com/raydocs/tono/issues/382)，[#384](https://github.com/raydocs/tono/pull/384) | 中·推导 | — |
 | H7-F6 | 计量检查阻塞吊销执行 | in-PR | [#388](https://github.com/raydocs/tono/issues/388)，[#389](https://github.com/raydocs/tono/pull/389) | 中·推导 | — |
-| H7-F7 | 解绑后住宅 SOCKS5 凭据不轮换 | in-PR | [#379](https://github.com/raydocs/tono/issues/379)，[#381](https://github.com/raydocs/tono/pull/381) | 中·推导 | 控制面标记并阻止复用；上游改密仍手动；migration 0080 |
+| H7-F7 | 解绑后住宅 SOCKS5 凭据不轮换 | in-PR | [#379](https://github.com/raydocs/tono/issues/379)，[#381](https://github.com/raydocs/tono/pull/381) | 中·推导 | 控制面标记并阻止复用；上游改密仍手动；migration 0080；到期或超额而 status 未变时不标记（#381 正文已列，H17-G-F4 指的是同一缺口） |
 | H7-F8 | ops journal/重启作业指向错误的 xray unit | in-PR | [#376](https://github.com/raydocs/tono/issues/376)，[#377](https://github.com/raydocs/tono/pull/377) | 低·推导 | — |
 | H8-F1 | JPY 等零小数货币换算后存储值小 100 倍 | in-PR | [#391](https://github.com/raydocs/tono/issues/391)，[#394](https://github.com/raydocs/tono/pull/394) | 中·推导 | — |
 | H8-F2 | 已冲销的账本行可改变归属主体 | in-PR | [#398](https://github.com/raydocs/tono/issues/398)，[#400](https://github.com/raydocs/tono/pull/400) | 中·推导 | 关账计算与写入之间的窗口仍在；UTC 月归属见 #191 |
@@ -243,6 +260,8 @@ H5–H15 与 X1–X3 的修复 PR 均已开出、尚未合入；表中编号与�
 | H8-F6 | 影响客户的写操作缺少审计记录 | in-PR | [#405](https://github.com/raydocs/tono/issues/405)，[#406](https://github.com/raydocs/tono/pull/406) | 低·推导 | token-admin 路由移到 src/ops/token-admin.ts |
 | H13-F5 | Worker 不可达时 exit-agent 没有 roster 回退 | in-PR | [#463](https://github.com/raydocs/tono/issues/463)，[#464](https://github.com/raydocs/tono/pull/464) | 中·推导 | 与 #375/#384/#389 冲突，解决步骤写在 PR |
 | H13-F6 | hub 在租约丢失后仍执行作业（重复 xray_restart） | in-PR | [#465](https://github.com/raydocs/tono/issues/465)，[#466](https://github.com/raydocs/tono/pull/466) | 低·推导 | 应先于或同 #377 合并 |
+| H17-O-F4 | 为尚未注册的客户开通时，控制台填写的到期日与套餐被静默丢弃，账户首次登录后无到期、无配额 | open | 待开 | 中·已确认 | 之后没有任何提醒会发现（到期提醒与批量续期都要求已有日期） |
+| H17-O-F6 | 控制台「停用」调用退款销户接口：操作者填写的原因被丢弃，空备注被写成「退款销户」 | open | 待开 | 低·已确认 | 核实降级：恢复文案并未承诺可重绑原 Claude 号，停用确认已告知拆除范围；Claude 引用退役后不能经现有接口重新分配是否算缺陷待产品决定 |
 
 ## 10. 发布流水线与安装器
 
