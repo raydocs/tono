@@ -586,6 +586,12 @@ pub fn validate_policy_with_trust(
 
     let mut media: Vec<PolicyMedia> = Vec::new();
     for entry in policy_media {
+        // Mac parity (#318): the unsigned media IPv4 allowlist ships empty
+        // (`managedDirectIPv4Allowlist`), so only a signed document may take
+        // an exact IP:port out of the tunnel.
+        if !trusted {
+            continue;
+        }
         let Ok(address) = entry.address.parse::<Ipv4Addr>() else {
             continue;
         };
@@ -961,7 +967,10 @@ mod tests {
 
     #[test]
     fn accepts_valid_document_and_normalizes() {
-        let policy = validate_policy(&response(3, &good_document()), &no_protected()).unwrap();
+        // Signed: unsigned media endpoints are dropped (#318).
+        let policy =
+            validate_policy_with_trust(&response(3, &good_document()), &no_protected(), true)
+                .unwrap();
         assert_eq!(policy.version, 1);
         // Sorted by host; ports sorted.
         assert_eq!(policy.domains[0].host, "qpic.cn");
@@ -978,6 +987,15 @@ mod tests {
             policy.direct_suffixes.is_empty(),
             "old v1 decodes with no suffix list"
         );
+    }
+
+    #[test]
+    fn unsigned_policy_cannot_carve_media_endpoints() {
+        // Mac parity: the unsigned media allowlist ships empty, so only a
+        // signed document may take an exact IP:port out of the tunnel.
+        let doc = policy_json("", r#"{"address":"9.0.0.9","ports":[443]}"#);
+        let policy = validate_policy(&response(1, &doc), &no_protected()).unwrap();
+        assert!(policy.media_endpoints.is_empty());
     }
 
     #[test]
@@ -1125,7 +1143,8 @@ mod tests {
     fn rejects_media_port_and_duplicate_violations() {
         for ports in ["[443,443]", "[80]", "[]"] {
             let doc = policy_json("", &format!(r#"{{"address":"9.0.0.9","ports":{ports}}}"#));
-            let policy = validate_policy(&response(0, &doc), &no_protected()).unwrap();
+            let policy =
+                validate_policy_with_trust(&response(0, &doc), &no_protected(), true).unwrap();
             assert!(policy.media_endpoints.is_empty(), "{ports}");
         }
         let dup_domain = policy_json(
@@ -1140,14 +1159,15 @@ mod tests {
     fn rejects_disallowed_and_protected_addresses() {
         for address in ["10.0.0.1", "198.18.0.1", "1.1.1.1", "8.8.8.8", "not-an-ip"] {
             let doc = policy_json("", &format!(r#"{{"address":"{address}","ports":[443]}}"#));
-            let policy = validate_policy(&response(0, &doc), &no_protected()).unwrap();
+            let policy =
+                validate_policy_with_trust(&response(0, &doc), &no_protected(), true).unwrap();
             assert!(policy.media_endpoints.is_empty(), "{address}");
         }
         // The selected node's IP is protected at sync time.
         let mut protected = BTreeSet::new();
         protected.insert(Ipv4Addr::new(9, 0, 0, 7));
         let doc = policy_json("", r#"{"address":"9.0.0.7","ports":[443]}"#);
-        let policy = validate_policy(&response(0, &doc), &protected).unwrap();
+        let policy = validate_policy_with_trust(&response(0, &doc), &protected, true).unwrap();
         assert!(policy.media_endpoints.is_empty());
     }
 
