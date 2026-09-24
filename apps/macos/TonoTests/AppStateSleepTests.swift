@@ -126,4 +126,74 @@ final class AppStateSleepTests: XCTestCase {
         )
         XCTAssertFalse(app.isDisconnecting)
     }
+
+    /// X1-2: the lid closes before the release reaches its disarm, and the
+    /// helper's sleep gate refuses it. The release ends with PF still armed
+    /// and Protected Offline — before wake. Wake must not read that armed PF
+    /// as a session to recover and reconnect over the user's Restore internet.
+    func testSleepGateRefusedReleaseDoesNotReconnectOnWake() async {
+        let app = AppState()
+        app.isConnected = true
+        app.coreRuntime.isRunning = true
+        KillSwitchService.isArmed = true
+        // A ready catalog, so the network-change branch below reaches its
+        // reconnect decision instead of stopping at readiness.
+        app.proxyRegions = [
+            ProxyRegion(
+                id: AppState.managedCatalogRegionID,
+                name: "TONO CLOUD",
+                nodes: [Fixture.realityNode()]
+            )
+        ]
+        let lidClosed = ReleaseGate()
+        let dnsReached = ReleaseGate()
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { coreRuntime in
+            coreRuntime.isRunning = false
+            return true
+        }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = {
+            dnsReached.open()
+            await lidClosed.wait()
+            return true
+        }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = {
+            throw HelperIPCError.commandFailed(
+                "The system is entering sleep; network protection remains fail-closed."
+            )
+        }
+        runtime.restrictToBootstrap = {}
+        runtime.refreshKillSwitchStatus = {
+            .confirmed(requiresProtectionRecovery: true)
+        }
+        app.networkProtection = runtime
+        defer {
+            app.connectionCoordinator.cancelReconnectTasks()
+            KillSwitchService.isArmed = false
+            lidClosed.open()
+        }
+
+        app.disconnect(releaseKillSwitch: true)
+        await dnsReached.wait()
+        app.prepareForSystemSleep()
+        lidClosed.open()
+        await app.connectionCoordinator.disconnectSequence?.value
+        XCTAssertTrue(KillSwitchService.isArmed)
+        XCTAssertTrue(app.isProtectionBlocked)
+
+        app.resumeAfterSystemWake()
+        XCTAssertNil(
+            app.connectionCoordinator.wakeRecoveryTask,
+            "a release the sleep gate refused must not become a wake reconnect"
+        )
+        // Nor may the network change that follows every wake.
+        app.handleSystemNetworkChange()
+        XCTAssertNil(
+            app.connectionCoordinator.protectedReconnectTask,
+            "a network change must not reconnect over the refused release"
+        )
+    }
 }

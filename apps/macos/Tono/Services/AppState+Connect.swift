@@ -939,7 +939,10 @@ extension AppState {
 
             await MainActor.run {
                 guard let self else { return }
-                self.connectionCoordinator.completeDisconnect(requestID) {
+                self.connectionCoordinator.completeDisconnect(
+                    requestID,
+                    releaseUnconfirmed: releaseKillSwitch && transitionLeavesProtectionBlocked
+                ) {
                     self.isProtectionBlocked = transitionLeavesProtectionBlocked
                     if releaseKillSwitch, !transitionLeavesProtectionBlocked {
                         self.protectedDNSService = nil
