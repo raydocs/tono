@@ -4378,6 +4378,41 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(fetched.status).toBe(200);
   });
 
+  it('requires a signature before a TCP endpoint can leave the tunnel', async () => {
+    // Same rule as media endpoints: an exact IP:port carve-out is only
+    // reviewed by a signature. macOS's unsigned TCP allowlist is empty and
+    // Windows does not read tcpEndpoints, so an unsigned one is refused here.
+    const tcp = {
+      version: 4,
+      domains: [],
+      mediaEndpoints: [],
+      webDomains: [],
+      directSuffixes: [],
+      tcpEndpoints: [{ address: '49.51.67.253', ports: [443] }],
+    };
+    const unsigned = await admin('traffic-policy', { policy: tcp, expectedRevision: 0 }, 'PUT');
+    expect(unsigned.status).toBe(400);
+    expect((await unsigned.json() as any).error.code).toBe('VALIDATION_ERROR');
+    const preview = await admin('traffic-policy', { policy: tcp, dryRun: true }, 'PUT');
+    const previewed = await preview.json() as any;
+    expect(previewed.signatureRequired).toBe(true);
+
+    const signed = await admin('traffic-policy', {
+      policy: tcp, expectedRevision: 0, signature: await signPolicy(previewed.json),
+    }, 'PUT');
+    expect(signed.status).toBe(200);
+
+    // A row stored unsigned before this rule is still served.
+    await env.DB.prepare(
+      'UPDATE managed_traffic_policy SET signature = NULL WHERE singleton_id = 1',
+    ).run();
+    const account = await createAccount('unsigned-tcp-legacy-row');
+    const fetched = await api('traffic-policy', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(fetched.status).toBe(200);
+  });
+
   it('will not let a signature pull a protected host out of the tunnel', async () => {
     // The invariant that must survive a leaked key. A signature relaxes which
     // hosts may route direct; it must never relax which hosts may not. If this

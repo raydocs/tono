@@ -58,17 +58,24 @@ export function isPublicIPv4(address: string) {
 // allowlists are empty, so an unsigned publish carrying one is refused rather
 // than stored for macOS to drop and older Windows builds to honour. Checked
 // last, after every entry has passed its own validation, so a malformed entry
-// is still reported as itself. `admitStoredUnsignedMedia` exists only for the
-// read path: a row stored before this rule must keep being served, or every
+// is still reported as itself. `admitStoredUnsignedEndpoints` exists only for
+// the read path: a row stored before this rule must keep being served, or every
 // policy fetch becomes a 503; the clients drop those entries themselves.
+//
+// TCP endpoints follow the same rule: an exact IP:port on TCP 80/443 leaves the
+// tunnel, macOS's unsigned address allowlist is empty and Windows does not read
+// `tcpEndpoints` at all, so only a signature may publish one.
 export function canonicalTrafficPolicy(
   value: unknown,
   trusted = false,
-  admitStoredUnsignedMedia = false,
+  admitStoredUnsignedEndpoints = false,
 ): TrafficPolicy {
   const policy = canonicalTrafficPolicyEntries(value, trusted);
-  if (!trusted && !admitStoredUnsignedMedia && policy.mediaEndpoints.length) {
+  if (!trusted && !admitStoredUnsignedEndpoints && policy.mediaEndpoints.length) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Media endpoints require a signed policy');
+  }
+  if (!trusted && !admitStoredUnsignedEndpoints && policy.tcpEndpoints?.length) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'TCP endpoints require a signed policy');
   }
   return policy;
 }
