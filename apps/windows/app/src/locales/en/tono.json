@@ -251,6 +251,11 @@
       "title": "Account paused",
       "description": "Contact support."
     },
+    "sessionEnded": {
+      "title": "Session ended",
+      "description": "Tono no longer accepts this session. It may have been signed out elsewhere, or the plan may be paused. Sign in again.",
+      "signIn": "Sign in again"
+    },
     "restoreFailed": {
       "title": "Session expired",
       "description": "Retry, or sign in again.",

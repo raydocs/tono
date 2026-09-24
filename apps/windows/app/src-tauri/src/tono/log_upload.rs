@@ -24,7 +24,7 @@ use tono_core::auth::{ApiError, DiagnosticsLogSegment, MAX_DIAGNOSTICS_LOG_SEGME
 
 use crate::process::AsyncHandler;
 use crate::tono::audit::{AuditEvent, AUDIT_BACKUP_FILE_NAME};
-use crate::tono::state::TonoState;
+use crate::tono::state::{AccountState, TonoInner, TonoState};
 
 /// Spacing between sweeps. The server's per-account budget is 80 segments an
 /// hour, so this leaves room for a backup tail and a retry without approaching
@@ -204,6 +204,15 @@ fn read_segment(path: &Path, offset: u64) -> Option<Segment> {
     read_open_segment(&std::fs::File::open(path).ok()?, offset, None)
 }
 
+/// Whether the periodic upload for this authentication generation and account
+/// keeps running. A suspended account's session is refused, so every sweep
+/// would be a 401, a refresh and an upload-failure audit record.
+pub(crate) fn periodic_upload_continues(inner: &TonoInner, generation: u64, account: &str) -> bool {
+    inner.sign_in_generation == generation
+        && inner.account.as_ref().map(|user| user.id.as_str()) == Some(account)
+        && inner.account_state != AccountState::Suspended
+}
+
 pub(crate) async fn spawn_periodic_for_auth_generation(
     state: &Arc<TonoState>, _app: &AppHandle, generation: u64,
 ) {
@@ -220,11 +229,7 @@ pub(crate) async fn spawn_periodic_for_auth_generation(
         let mut queue: Option<UploadQueue> = None;
         let mut failures = 0_u32;
         loop {
-            {
-                let inner = task_state.lock().await;
-                if inner.sign_in_generation != generation
-                    || inner.account.as_ref().map(|user| &user.id) != Some(&account) { return; }
-            }
+            if !periodic_upload_continues(&*task_state.lock().await, generation, &account) { return; }
             let result = match task_state.audit().log_upload_scope() {
                 Some(scope) => {
                     if queue.as_ref().map(|q| &q.cursor.scope) != Some(&scope.id) {

@@ -107,7 +107,8 @@ pub(crate) async fn note_session_rejected(state: &Arc<TonoState>, app: &AppHandl
 }
 
 /// Whether the periodic sync for this authentication generation keeps running.
-fn periodic_sync_continues(inner: &TonoInner, auth_generation: u64) -> bool {
+/// The periodic telemetry uploader stops on the same predicate.
+pub(crate) fn periodic_sync_continues(inner: &TonoInner, auth_generation: u64) -> bool {
     inner.sign_in_generation == auth_generation
         && !matches!(
             inner.account_state,
@@ -643,7 +644,8 @@ mod tests {
     /// H13-F3: a session the control plane refuses (expired plan, used-up
     /// allowance, revoked device) costs one attempt, suspends the Ready
     /// account and ends the periodic sync, instead of four refreshes every
-    /// 300 s under a UI that still reads Ready.
+    /// 300 s under a UI that still reads Ready. The telemetry uploader shares
+    /// `periodic_sync_continues`; the network-log uploader stops too (W2).
     #[tokio::test(start_paused = true)]
     async fn rejected_session_is_not_retried_and_suspends_periodic_sync() {
         let mut attempts = 0;
@@ -659,9 +661,18 @@ mod tests {
         let mut inner = state.lock().await;
         inner.sign_in_generation = 4;
         inner.account_state = crate::tono::state::AccountState::Ready;
+        inner.account = Some(
+            serde_json::from_value(serde_json::json!({
+                "id": "fixture-owner", "email": "fixture@example.test",
+            }))
+            .unwrap(),
+        );
+        assert!(periodic_sync_continues(&inner, 4));
+        assert!(crate::tono::log_upload::periodic_upload_continues(&inner, 4, "fixture-owner"));
         assert!(suspend_rejected_session(&mut inner, 4));
         assert_eq!(inner.account_state, crate::tono::state::AccountState::Suspended);
         assert!(!periodic_sync_continues(&inner, 4));
+        assert!(!crate::tono::log_upload::periodic_upload_continues(&inner, 4, "fixture-owner"));
     }
 
     #[test]

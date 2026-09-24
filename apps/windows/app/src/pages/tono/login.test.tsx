@@ -11,11 +11,15 @@ const mocks = vi.hoisted(() => ({
   start: vi.fn(),
   verify: vi.fn(),
   mutate: vi.fn(),
+  status: {} as Record<string, unknown>,
 }))
 
 vi.mock('@/services/states', () => ({ useThemeMode: () => 'light' }))
 vi.mock('@/hooks/use-tono', () => ({
-  useTonoStatus: () => ({ status: {}, mutateTonoStatus: mocks.mutate }),
+  useTonoStatus: () => ({
+    status: mocks.status,
+    mutateTonoStatus: mocks.mutate,
+  }),
 }))
 vi.mock('@/services/tono', () => ({
   tonoSignInStart: mocks.start,
@@ -38,6 +42,7 @@ beforeEach(() => {
   mocks.start.mockReset().mockResolvedValue({ expiresIn: 600 })
   mocks.verify.mockReset()
   mocks.mutate.mockReset().mockResolvedValue(undefined)
+  mocks.status = {}
 })
 
 afterEach(() => {
@@ -241,5 +246,22 @@ describe('login request exclusion', () => {
       }),
     )
     expect(screen.getByText('Account paused')).toBeDefined()
+  })
+
+  it('shows a rejected session with a live tunnel as ended, not paused or blocked', () => {
+    mocks.status = {
+      accountState: 'suspended',
+      uiState: 'connected',
+      protectionBlocked: false,
+      killSwitch: { wanted: true },
+    }
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    )
+    expect(screen.getByText('Session ended')).toBeDefined()
+    expect(screen.queryByText('Account paused')).toBeNull()
+    expect(screen.queryByText('Internet is blocked')).toBeNull()
   })
 })

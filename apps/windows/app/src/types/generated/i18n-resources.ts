@@ -1244,6 +1244,11 @@ export interface TranslationResources {
         sending: string
         sendNewCode: string
         sent: string
+        sessionEnded: {
+          description: string
+          signIn: string
+          title: string
+        }
         stepCode: string
         stepEmail: string
         stillWaiting: string

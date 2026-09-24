@@ -35,8 +35,9 @@
 ## 2026-09-23 · Windows 运行期会话被拒：进入 Suspended，停止周期同步
 
 - **归属/来源**：G2 客户端账户状态与控制面调用；Windows App `tono/catalog_sync.rs`、
-  `tono/policy_sync.rs`。内部审查 H13-F3，Issue #459。基线 main bb2ed4e4 → 分支
-  `fix/win-account-suspended-20260923`；提交时未合 main。
+  `tono/policy_sync.rs`、`tono/telemetry.rs`、`tono/log_upload.rs`，前端 `pages/tono/login.tsx`
+  与 en/zh `tono.json`。内部审查 H13-F3，Issue #459；R4 审查 §1.7 / W1 / W2 的修正。基线 main
+  bb2ed4e4 → 分支 `fix/win-account-suspended-20260923`（PR #460）；提交时未合 main。
 - **缺陷修复**：套餐到期、流量用尽、账户停用、设备或会话吊销时，Worker 对鉴权路由和
   `auth/refresh` 都回 401。Windows 运行期对此没有任何账户状态变化：catalog/policy 同步对任何
   错误都重试 3 次，每 5 分钟约 8 次必然失败的 refresh，界面一直是 Ready，连接只在出口失败。
@@ -44,19 +45,37 @@
   `Suspended`（与 macOS `.suspended` 一致）：周期同步退出，connect/自动重连已有的守卫拒绝
   suspended 账户，界面转到已有的"账户已暂停"页。保护状态不变：不释放 WFP、不登出；该页已有的
   恢复网络入口照旧。重新登录（或下次启动 restore）重新读取账户。
+- **缺陷修复（R4 审查）**：遥测（约 20 分钟）与网络日志上传（2→16 分钟）循环原先只在
+  SignedOut/Restoring（日志上传只在代际或账户变化）时退出，Suspended 下继续 401→refresh，日志
+  上传每次还写一条 `NetworkLogSegmentUploadFail`。现在遥测复用 `periodic_sync_continues`（语义
+  与原条件相同，只多了 Suspended），日志上传用 `periodic_upload_continues`（原代际+账户条件再加
+  Suspended）；其他状态的行为不变。登录页：隧道仍是 connected 时不再显示"Internet is blocked /
+  Restore network"；由运行期会话被拒进入的 Suspended 改显示中性文案"Session ended / 登录已失效"
+  （可能在别处退出、设备被移除或套餐暂停，请重新登录），按钮为"Sign in again / 重新登录"。登录
+  验证返回 `suspended` 的套餐暂停场景仍显示原"Account paused / 账号已暂停"。
 - **新增/优化**：catalog 与 policy 共用一个重试函数 `run_with_retries`（预算不变：1 次 + 3 次
   重试、间隔 1 s）。
 - **工程与测试**：`catalog_sync.rs` 新增一个 `#[tokio::test]`
   `rejected_session_is_not_retried_and_suspends_periodic_sync`：会话被拒的尝试只跑 1 次；Ready
-  账户转为 Suspended；周期同步判定停止。旧代码下同类失败跑 4 次，账户保持 Ready，周期循环
-  不认 Suspended 继续运行。
-- **验证**：本机（编辑机）未运行原生 cargo；Tauri crate `cargo test` 委托本 PR 的
-  GitHub-hosted `windows-2025` CI，结果以 PR 页为准。
-- **候选/发布**：无新包，仅源码。
+  账户转为 Suspended；周期同步（遥测共用）与日志上传的判定在 Ready 时继续、Suspended 后停止。
+  旧代码下同类失败跑 4 次，账户保持 Ready，周期循环不认 Suspended 继续运行；R4 修正前的分支没有
+  `log_upload::periodic_upload_continues`，日志上传循环在 Suspended 下继续。前端 `login.test.tsx`
+  增加一个 `it`：Suspended + uiState connected + killSwitch.wanted 时显示"Session ended"，不显示
+  "Account paused"与"Internet is blocked"（修正前的 login.tsx 下该用例失败，已在本机确认）。
+  i18n 生成类型用 `node scripts/generate-i18n-keys.mjs` 重新生成。
+- **验证**：本机（编辑机）未编译 Rust、未运行原生 cargo，Tauri crate `cargo test` 委托本 PR 的
+  GitHub-hosted `windows-2025` CI，结果以 PR 页为准。前端本机：`vitest run
+  src/pages/tono/login.test.tsx` 8/8 通过、`tono-auth-guard.test.tsx` 17/17 通过、`tsc --noEmit`
+  通过、biome format 与 eslint 对改动文件无告警。
+- **候选/发布**：无新包，仅源码。**发布顺序**：含本改动的 Windows 客户端构建必须在 Worker
+  PR #329 上线之后才能发布（先对生产 D1 跑迁移 0079，再部署 Worker）。#329 未上线时，一次
+  refresh 响应丢失后的重放直接得到 401，客户端会进入 Suspended（旧行为是静默失败到重启）。
 - **剩余限制**：没有 macOS 那样在面板出现/唤醒时自动重探并恢复；续费后需重新登录或重启 App
-  （重启走 restore 已有的 401 登出路径）。网络日志上传、遥测、DIRECT 租约心跳在 Suspended 下
-  不停，仍可能各自发 refresh。#314/#329 合并前，refresh 响应丢失造成的假 401 也会进入
-  "账户已暂停"页（旧行为是静默失败）。
+  （重启走 restore 已有的 401 登出路径）。DIRECT 租约心跳在 Suspended 下不停，仍可能发
+  refresh；一次 sweep 进行中被判 Suspended 时，日志上传最多再失败一次后才退出。Suspended 不区分
+  子原因，restore 时服务端标记为 suspended 的账户也显示中性的"登录已失效"文案（重新登录后验证
+  返回 suspended 才显示"账号已暂停"）。从 Suspended 直接换号登录不清理旧账户的目录/运行时副本
+  （R4 审查 W4，未在本 PR 处理）。
 
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
