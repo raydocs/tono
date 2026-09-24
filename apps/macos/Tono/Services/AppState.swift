@@ -699,13 +699,18 @@ final class AppState {
                 guard !Task.isCancelled else { return }
                 if !barrierReady {
                     do {
-                        barrierArmed = try await PrivilegedRuntimeCoordinator.shared
-                            .reassertKillSwitchIfNeeded()
+                        barrierArmed = try await self.networkProtection.reassertKillSwitch()
                         barrierReady = true
                     } catch {
-                        self.isProtectionBlocked = true
+                        guard !Task.isCancelled else { return }
+                        // A failed reassert proves nothing about PF: the
+                        // stored intent can outlive a helper that is not
+                        // running. Show the unknown state launch uses, not
+                        // Protected Offline, and keep retrying (INT610-F1).
+                        self.isProtectionBlocked = false
+                        self.isProtectionUnconfirmed = true
                         self.errorMessage = String(
-                            localized: "Wake protection is still being reasserted; Internet remains blocked. \(error.localizedDescription)"
+                            localized: "Wake protection could not be confirmed; Tono keeps retrying. Direct Internet may still be blocked. \(error.localizedDescription)"
                         )
                         continue
                     }
@@ -757,8 +762,11 @@ final class AppState {
             // with nothing scheduled: sleep preparation cancelled the standard
             // reconnect loop, and on a stable network no route-change kick may
             // ever arrive. Hand ownership to the persistent loop, exactly as
-            // post-connect failures do.
-            if !Task.isCancelled, self.isProtectionBlocked, !self.isConnected {
+            // post-connect failures do. The wake owes its connect whether the
+            // barrier is armed, unconfirmed or was never armed (a connect the
+            // lid interrupted before its first arm); the loop needs no
+            // Protected Offline claim to retry.
+            if !Task.isCancelled, !self.isConnected {
                 self.scheduleProtectedReconnect()
             }
         }

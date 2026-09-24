@@ -37,26 +37,35 @@ final class KillSwitchArmOutcomeTests: XCTestCase {
 
     /// MAC3-ADD-F1: a suspension or Check again stops Core through the
     /// preserve teardown, whose bootstrap restriction prepared the helper
-    /// first — a helper rejecting this app then raised an administrator
-    /// prompt nobody asked for. The restriction goes straight to the helper
-    /// that holds PF; a rejection fails it and the armed intent stands.
-    func testBootstrapRestrictionNeverPreparesTheHelper() {
+    /// with the administrator prompt allowed — a helper rejecting this app
+    /// then raised a prompt nobody asked for. The restriction still prepares
+    /// the helper (version check, silent upgrade), only without the prompt;
+    /// a helper that needs it fails the restriction before any arm request,
+    /// and the armed intent stands.
+    func testBootstrapRestrictionNeverPromptsForTheHelper() {
         let savedIPC = KillSwitchService.armIPC
         KillSwitchService.isArmed = true
         defer {
             KillSwitchService.armIPC = savedIPC
             KillSwitchService.isArmed = false
         }
-        // The helper answers the arm request itself with a rejection. Only
-        // that request can surface `.helperRejected`; a helper preparation
-        // fails as an install error (or prompts) before any request is sent.
-        KillSwitchService.armIPC.deliver = { _ in throw HelperIPCError.forbidden }
+        var preparations: [Bool] = []
+        KillSwitchService.armIPC.prepare = { administratorPrompt in
+            preparations.append(administratorPrompt)
+            // What a rejecting helper answers once the prompt is withheld.
+            throw HelperIPCError.forbidden
+        }
+        KillSwitchService.armIPC.deliver = { _ in
+            XCTFail("a helper that needs repair must not be sent the restriction")
+            throw HelperIPCError.connectFailed
+        }
 
         XCTAssertThrowsError(try KillSwitchService.restrictToBootstrap()) { error in
             guard case KillSwitchService.Error.helperRejected = error else {
-                return XCTFail("the restriction must reach the helper without preparing it: \(error)")
+                return XCTFail("expected the helper's rejection: \(error)")
             }
         }
+        XCTAssertEqual(preparations, [false], "the restriction prepares the helper, never with the administrator prompt")
         XCTAssertTrue(KillSwitchService.isArmed)
     }
 }

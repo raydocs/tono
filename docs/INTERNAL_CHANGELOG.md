@@ -70,6 +70,16 @@
   `KillSwitchArmOutcomeTests.testBootstrapRestrictionNeverPreparesTheHelper`（失败前行为为推理：旧代码前者接受答复、
   后者先走 helper 安装而非 arm 请求），F2 无新测试。仅 `git diff --check`；未在 MacBook 编译或跑 XCTest，待 `macos-26`
   CI。剩余：wake 中 reassert 未武装且路由 48 s 内未就绪时不再移交重连循环；无实机验证。无新包。
+- **续记（2026-09-24，Codex 复核 60e70d55：F2 FIXED，F1 PARTIAL，另两项回归/过宽；Claude 读源码三项均确认）**：
+  (1) F1 残留（原有路径）：wake reassert 抛错仍发布 Protected Offline 和「网络仍处于阻断状态」→ 改为发布 #537 的
+  unconfirmed（「保护状态未知」），文案改为无法确认、继续重试；此状态下 activation 或重连循环读到 helper 确认解除时，
+  与 Protected Offline 一样走完整解除并结束 wake/重连恢复。(2) 上一续记引入的回归（即上条「剩余」）：未武装的
+  wake 在就绪超时后不再移交重连 → 恢复无条件移交，不再依赖 blocked 声明。(3) MAC3-ADD-F1 过宽：`helperPrepared: true`
+  让所有 `restrictToBootstrap` 调用跳过版本检查与静默升级 → 改为照常准备 helper，仅不弹管理员提示
+  （`installIfNeeded(administratorPrompt: false)`），需要提示时（拒绝本 App 或静默升级失败）失败、PF 维持 helper 现状。
+  测试：两个已加测试扩展——F1 测试改为驱动真实 wake（新增 `reassertKillSwitch` seam），另断言抛错时为 unknown 而非
+  Protected Offline；MAC3 测试改为断言准备只以不提示方式调用且不发 arm 请求。失败前行为为推理；未编译、未跑 XCTest，
+  待 `macos-26` CI；wake 移交（约 48 s）与 HelperManager 内部的提示前拦截无测试。无新包。
 ## 2026-09-24 · mac 独立列车 train/mac2-20260924
 
 - **归属/来源**：G1–G3 macOS 修复汇合（各 PR 归属见其自身条目）；基线 origin/main

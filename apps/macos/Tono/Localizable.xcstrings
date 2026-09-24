@@ -7132,12 +7132,12 @@
         }
       }
     },
-    "Wake protection is still being reasserted; Internet remains blocked. %@": {
+    "Wake protection could not be confirmed; Tono keeps retrying. Direct Internet may still be blocked. %@": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "唤醒后的保护仍在重新生效，网络仍处于阻断状态。%@"
+            "value": "无法确认唤醒后的保护状态，Tono 会继续重试。直接联网可能仍被拦截。%@"
           }
         }
       }

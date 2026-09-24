@@ -76,21 +76,36 @@ final class LaunchProtectionPresentationTests: XCTestCase {
     /// advances the protection generation, not the launch sequence. Accepting
     /// the older release cleared the armed intent under the wake's recovery,
     /// whose unarmed reassert then published Protected Offline over an open
-    /// host. The answer is dropped; the wake's recovery owns the verdict.
+    /// host. The answer is dropped and the wake owns the verdict — and a
+    /// reassert that fails proves nothing about PF either: it shows the
+    /// unknown state, not Protected Offline, while it keeps retrying.
     func testAnActivationAnswerAWakeOvertookIsDropped() async {
         let storedIntent = KillSwitchService.isArmed
         defer { KillSwitchService.isArmed = storedIntent }
         KillSwitchService.isArmed = true
         let state = AppState()
+        defer { state.connectionCoordinator.wakeRecoveryTask?.cancel() }
         XCTAssertTrue(RuntimeCleanup.adoptLaunchObservation(.unavailable, localIntent: true))
         XCTAssertTrue(state.isProtectionUnconfirmed)
+        // The helper cannot take the wake's reassert. The second attempt
+        // comes only after the first failure was published.
+        let (attempts, attempted) = AsyncStream<Int>.makeStream()
+        var reasserts = 0
+        state.networkProtection.reassertKillSwitch = {
+            reasserts += 1
+            attempted.yield(reasserts)
+            throw HelperIPCError.connectFailed
+        }
         state.networkProtection.refreshKillSwitchStatus = {
-            // The wake's own step: a new protection operation begins.
-            await MainActor.run { state.connectionCoordinator.bumpGeneration() }
+            await MainActor.run { state.resumeAfterSystemWake() }
             return .confirmed(requiresProtectionRecovery: false)
         }
         await state.resolveUnconfirmedProtection()
         XCTAssertTrue(KillSwitchService.isArmed, "an answer a wake overtook must not retire the intent the wake reasserts")
+
+        for await attempt in attempts where attempt == 2 { break }
+        XCTAssertFalse(state.isProtectionBlocked, "a failed wake reassert must not claim Protected Offline")
         XCTAssertTrue(state.isProtectionUnconfirmed)
+        XCTAssertNotNil(state.connectionCoordinator.wakeRecoveryTask, "the wake keeps retrying")
     }
 }

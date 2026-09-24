@@ -1870,7 +1870,8 @@ extension AppState {
     }
 
     /// Returns true only when a confirmed external release was accepted. Every
-    /// unavailable, malformed, or rejecting response remains fail-closed.
+    /// unavailable, malformed, or rejecting response remains fail-closed. The
+    /// unknown state a wake's failed reassert publishes counts as blocked.
     /// `protectionWasArmed` carries the app's armed intent from when the caller
     /// scheduled its recovery: a session this app itself tore down before the
     /// first arm (mid-connect policy update, the wake handoff after the sleep
@@ -1886,14 +1887,14 @@ extension AppState {
         protectionWasArmed: Bool = true,
         repairRequested: Bool = false
     ) async -> Bool {
-        guard protectionWasArmed, isProtectionBlocked, !isConnected, !isConnecting,
-              !isDisconnecting else { return false }
+        guard protectionWasArmed, isProtectionBlocked || isProtectionUnconfirmed,
+              !isConnected, !isConnecting, !isDisconnecting else { return false }
         let observedGeneration = self.connectionCoordinator.protectionOperationGeneration
         let networkProtection = self.networkProtection
         let observation = await networkProtection.refreshKillSwitchStatus()
         guard !Task.isCancelled,
               self.connectionCoordinator.protectionOperationGeneration == observedGeneration,
-              isProtectionBlocked, !isConnected, !isConnecting,
+              isProtectionBlocked || isProtectionUnconfirmed, !isConnected, !isConnecting,
               !isDisconnecting else { return false }
 
         switch observation {

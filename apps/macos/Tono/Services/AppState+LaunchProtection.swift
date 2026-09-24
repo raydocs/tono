@@ -43,6 +43,15 @@ extension AppState {
               connectionCoordinator.protectionOperationGeneration == generation else { return }
         guard case .confirmed(let requiresProtectionRecovery) = observation else { return }
         KillSwitchService.isArmed = requiresProtectionRecovery
+        if !requiresProtectionRecovery,
+           connectionCoordinator.wakeRecoveryTask != nil
+            || connectionCoordinator.protectedReconnectTask != nil {
+            // The unknown a wake's failed reassert published: a confirmed
+            // release retires that recovery as the Protected Offline
+            // reconcile does, or its reconnect re-arms PF over the release.
+            acceptConfirmedExternalProtectionRelease()
+            return
+        }
         adoptLaunchProtection(requiresProtectionRecovery ? .held : .released)
     }
 }
