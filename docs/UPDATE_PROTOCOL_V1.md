@@ -207,6 +207,12 @@ its recorded incarnations died.
   uncertain attempt whose installed components equal the retained originals,
   archive their full record and clear the live slot. The consumed high-water
   never lowers and explicit release never becomes commit.
+- **Bookkeeping after release is not a release failure.** Once Disconnect
+  has released WFP, a failure to prove that release for the evidence or to
+  archive the record leaves the attempt pending and returns success with
+  `needs_attention`. An Err response means no protection release completed;
+  only that makes the App keep Protected Offline. New archive checks added to
+  this path follow the same rule.
 - **Launching without a live executor incarnation is provably unconsumed.**
   Consumption only accepts the exact recorded executor incarnation. When
   that incarnation is gone and the high-water still sits below the release,

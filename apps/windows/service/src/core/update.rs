@@ -425,42 +425,26 @@ pub(crate) async fn request(
             desired::clear_active_owner().await?;
             tunnel_absent("Tono")?;
             wfp::release().await?;
-            owner_proxy_absent(owner)?;
-            let observed = protection(owner).await?;
-            ensure!(
-                app_image(peer.pid)? == peer,
-                "Disconnect peer changed before readback"
-            );
-            store.verify_disconnect(&owner.key, &peer, now()?, observed)?;
-            let a = store.attempt()?;
-            let executor_gone = a
-                .executor
-                .as_ref()
-                .is_none_or(|e| image(e.pid).ok().as_ref() != Some(e));
-            if matches!(
-                a.execution,
-                Execution::Reserved | Execution::Extracting | Execution::Staged | Execution::Launching
-            ) && executor_gone
-            {
+            // WFP is gone from here on. Proving the release for the update
+            // evidence and archiving the record are update bookkeeping: their
+            // failure keeps the record pending but is not a release failure.
+            // An Err would read as a refused release, and the App would show
+            // a machine that is already open as Protected Offline.
+            let proven = async {
+                owner_proxy_absent(owner)?;
+                let observed = protection(owner).await?;
                 ensure!(
-                    installed_components(&a.install_root)? == a.old_components,
-                    "original installed identity changed; evidence cannot be retired"
+                    app_image(peer.pid)? == peer,
+                    "Disconnect peer changed before readback"
                 );
-                store.retire_unconsumed(&owner.key, &peer)?;
-            } else if matches!(a.execution, Execution::RolledBack | Execution::Uncertain) {
-                // A proven rollback reaches a terminal archive without
-                // lowering the consumed high-water or rewriting the recorded
-                // obligation; an unproven one stays pending below.
-                ensure!(
-                    installed_components(&a.install_root)? == a.old_components,
-                    "rollback not proven complete; evidence cannot be retired"
-                );
-                store.retire_rolled_back(&owner.key, &peer)?;
+                Ok::<_, anyhow::Error>(observed)
             }
-            // Records whose replacement is still in flight (Consumed/Replaced,
-            // a live executor, or an unproven rollback) stay pending after
-            // release. They cannot install, reconnect or commit by
-            // fabricating recovery.
+            .await;
+            let settled = proven.and_then(|observed| {
+                let at = now()?;
+                retire_after_release(&mut store, &owner.key, &peer, at, observed, installed_components)
+            });
+            return released(&store, settled);
         }
         UpdateRequest::Adopt => {
             if !store.pending() {
@@ -548,6 +532,62 @@ pub(crate) async fn request(
     status(&store)
 }
 
+/// Update bookkeeping after an explicit Disconnect already released WFP:
+/// record the verified release, then archive a record whose installed
+/// identity proves it terminal.
+fn retire_after_release(
+    store: &mut Store,
+    owner: &str,
+    peer: &Image,
+    now: u64,
+    observed: Protection,
+    installed: impl Fn(&Path) -> Result<Components>,
+) -> Result<()> {
+    store.verify_disconnect(owner, peer, now, observed)?;
+    let a = store.attempt()?;
+    let executor_gone = a
+        .executor
+        .as_ref()
+        .is_none_or(|e| image(e.pid).ok().as_ref() != Some(e));
+    if matches!(
+        a.execution,
+        Execution::Reserved | Execution::Extracting | Execution::Staged | Execution::Launching
+    ) && executor_gone
+    {
+        ensure!(
+            installed(&a.install_root)? == a.old_components,
+            "original installed identity changed; evidence cannot be retired"
+        );
+        store.retire_unconsumed(owner, peer)?;
+    } else if matches!(a.execution, Execution::RolledBack | Execution::Uncertain) {
+        // A proven rollback reaches a terminal archive without
+        // lowering the consumed high-water or rewriting the recorded
+        // obligation; an unproven one stays pending below.
+        ensure!(
+            installed(&a.install_root)? == a.old_components,
+            "rollback not proven complete; evidence cannot be retired"
+        );
+        store.retire_rolled_back(owner, peer)?;
+    }
+    // Records whose replacement is still in flight (Consumed/Replaced,
+    // a live executor, or an unproven rollback) stay pending after
+    // release. They cannot install, reconnect or commit by
+    // fabricating recovery.
+    Ok(())
+}
+
+/// The Disconnect response once network protection is released. A
+/// bookkeeping failure travels as `needs_attention` beside the still-pending
+/// record, never as an Err: an Err means no protection release completed.
+fn released(store: &Store, settled: Result<()>) -> Result<UpdateStatus> {
+    let mut result = status(store)?;
+    if let Err(error) = settled {
+        tracing::warn!("update Disconnect released protection; record stays pending: {error:#}");
+        result.needs_attention = Some(format!("{error:#}"));
+    }
+    Ok(result)
+}
+
 fn status(store: &Store) -> Result<UpdateStatus> {
     Ok(UpdateStatus {
         receipt: store.state.attempt.as_ref().map(|a| a.receipt.clone()),
@@ -558,6 +598,7 @@ fn status(store: &Store) -> Result<UpdateStatus> {
             .map(|a| format!("{:?}", a.execution))
             .unwrap_or_else(|| "none".into()),
         offer: None,
+        needs_attention: None,
     })
 }
 
@@ -814,6 +855,36 @@ mod tests {
         let store = Store::open(&root).unwrap();
         register_recovery_with(&store, |_| atomic_write(&task, b"reconciled")).unwrap();
         assert_eq!(std::fs::read(task).unwrap(), b"reconciled");
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_disconnect_archive_refusal_after_release_is_not_a_release_failure() {
+        use crate::update_transaction::tests::{authorize, reserved};
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        // Executor rollback could not restore every file: the tree is mixed.
+        store.execution(Execution::Uncertain).unwrap();
+        let owner = "windows:fixture-owner";
+        store.request_disconnect(owner, &peer, 1_900_000_003).unwrap();
+        let mut mixed = store.attempt().unwrap().old_components.clone();
+        mixed.app_sha256 = "f".repeat(64);
+        // WFP is already released when the archive proof runs. Its refusal
+        // keeps the record pending but must not come back as a release Err.
+        let settled = retire_after_release(
+            &mut store,
+            owner,
+            &peer,
+            1_900_000_004,
+            Protection::Unprotected,
+            |_| Ok(mixed.clone()),
+        );
+        let status = released(&store, settled).unwrap();
+        assert!(store.pending());
+        assert_eq!(status.execution, "Uncertain");
+        assert!(status.needs_attention.unwrap().contains("rollback not proven"));
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
     }
