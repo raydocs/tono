@@ -311,9 +311,15 @@ pub fn build_report(sources: &DiagnosticsSources<'_>) -> DiagnosticsReport {
             .kill_switch
             .and_then(|status| scrub_opt_text(status.last_error.as_deref(), known)),
         dns_enabled: sources.dns.map(|status| status.enabled),
-        dns_last_error: sources
-            .dns
-            .and_then(|status| scrub_opt_text(status.last_error.as_deref(), known)),
+        // A resolver policy conflict arrives as the Service's advisory, never as its error. It
+        // shares this field only for display, where the Support page lists it on the DNS warning
+        // row by its `TONO_DNS_POLICY_CONFLICT` marker; a real error takes precedence.
+        dns_last_error: sources.dns.and_then(|status| {
+            scrub_opt_text(
+                status.last_error.as_deref().or(status.resolver_policy_warning.as_deref()),
+                known,
+            )
+        }),
         failed_stage: sources.failed_stage.map(str::to_string),
         error: scrub_opt_text(sources.connect_error, known),
         retry_attempt: sources.retry_attempt,
@@ -448,6 +454,7 @@ mod tests {
                     snapshot_present: true,
                     adapters: 3,
                     last_error: Some(format!("resolver {OTHER_NODE_IP} unreachable; token={REFRESH_TOKEN}")),
+                    resolver_policy_warning: None,
                 },
                 protocol: ProtocolInfo::current(),
                 known: [

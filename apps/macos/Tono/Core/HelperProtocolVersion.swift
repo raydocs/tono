@@ -170,12 +170,39 @@ nonisolated enum HelperProtocolVersion {
     ///   update ledger has a storage major (`schemaVersion`, absent = 1).
     ///   Additive keys from a newer helper are ignored instead of reading as
     ///   a corrupt ledger, and a higher major is refused as newer evidence.
-    /// - 4.22.0 → 4.45.0: PF renders the reviewed-bundle permit
+    /// - 4.22.0 → 4.41.0 (merge-train number): `CoreManager` no
+    ///   longer resolves the bound user's home directory when it is
+    ///   constructed, only when a start or sync validates the config
+    ///   directory. `--emergency-disarm` and `--emergency-reset` build one only
+    ///   to stop a stale core before releasing PF, so they now work after the
+    ///   bound macOS account was deleted. A 4.22.0 daemon's recovery commands
+    ///   fail there and leave PF fail-closed.
+    /// - 4.41.0 → 4.42.0 (merge-train number): `--emergency-reset`
+    ///   takes Tono's marked block back out of /etc/pf.conf and deletes
+    ///   /etc/pf.conf.tono-backup and /etc/hosts.tono-backup once PF is
+    ///   released, keeping every line outside the markers. A 4.41.0 reset
+    ///   leaves the hook and both backups behind.
+    /// - 4.42.0 → 4.43.0 (merge-train number): at every start,
+    ///   after executor recovery, the daemon checks whether Tono was removed —
+    ///   no running Tono client (by the client signing requirement), no Tono
+    ///   app in /Applications or the bound user's ~/Applications (by the
+    ///   registered name or by bundle identifier; a bundle whose Info.plist
+    ///   cannot be read counts as Tono) and no unfinished update attempt.
+    ///   Then it performs the `--emergency-reset` release and removal itself
+    ///   and unloads its job, instead of re-arming PF at every boot with no
+    ///   app left to release it.
+    ///   A 4.42.0 daemon keeps a Mac offline after Tono.app is deleted.
+    /// - 4.43.0 → 4.44.0 (merge-train number): `--emergency-reset`
+    ///   (and the start-time release after Tono.app was removed, which shares
+    ///   its removal step) also deletes /var/run/tono-core/service.sock. The
+    ///   socket is owned by the account the helper served, and the app reads
+    ///   that owner to refuse another account by name; a 4.43.0 reset leaves
+    ///   it until reboot.
+    /// - 4.44.0 → 4.45.0: PF renders the reviewed-bundle permit
     ///   (`tono-bundle`) only while a tunnel interface is armed; a tunnel-less
     ///   arm that asks for it gets no permit instead of root web-port egress
     ///   on the physical interface. An older daemon renders it on the
-    ///   connect's first arm, before the TUN exists. (Number chosen past open
-    ///   PRs; renumber in merge order.)
+    ///   connect's first arm, before the TUN exists.
     static let current = "4.45.0"
 }
 

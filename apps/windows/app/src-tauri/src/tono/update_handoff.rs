@@ -145,6 +145,19 @@ fn incomplete_at(path: &Path) -> bool {
     }
 }
 
+/// Startup: archive a 0.0.72 journal whose upgrade this build completed.
+pub fn retire_completed_legacy_journal(current_app_version: &str) {
+    match PROJECTION.with_write(|| update_journal::retire_completed_legacy(&current_path(), current_app_version)) {
+        Ok(true) => logging!(info, Type::System, "Tono: completed legacy update journal archived"),
+        Ok(false) => {}
+        Err(error) => logging!(
+            warn,
+            Type::System,
+            "Tono: legacy update journal not archived; evidence retained: {error}"
+        ),
+    }
+}
+
 pub fn save_prepared(journal: &UpdateHandoffJournal) -> std::io::Result<()> {
     PROJECTION.with_write(|| write_prepared(&current_path(), journal))
 }

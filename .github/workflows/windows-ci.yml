@@ -178,7 +178,6 @@ jobs:
             'resources/Country.mmdb',
             'resources/geoip.dat',
             'resources/geosite.dat',
-            'resources/enableLoopback.exe',
             'resources/tono-service.exe',
             'resources/tono-service-install.exe',
             'resources/tono-service-uninstall.exe',

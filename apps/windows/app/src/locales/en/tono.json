@@ -251,6 +251,11 @@
       "title": "Account paused",
       "description": "Contact support."
     },
+    "sessionEnded": {
+      "title": "Session ended",
+      "description": "Tono no longer accepts this session. It may have been signed out elsewhere, or the plan may be paused. Sign in again.",
+      "signIn": "Sign in again"
+    },
     "restoreFailed": {
       "title": "Session expired",
       "description": "Retry, or sign in again.",
@@ -260,7 +265,10 @@
       "title": "Internet is blocked",
       "description": "Leak protection from the last session is still on. Restore the network, then sign in.",
       "restore": "Restore network",
-      "restoring": "Restoring…"
+      "restoring": "Restoring…",
+      "unverifiedDescription": "Tono cannot confirm whether leak protection from the last session is still on. Choose Restore network, then sign in.",
+      "stillRunningTitle": "Previous connection still running",
+      "stillRunningDescription": "The last session's tunnel is still carrying traffic. Restore network stops it."
     },
     "errors": {
       "unreachable": "Can't reach the sign-in server. Use a working network (hotspot, or another VPN) once.",
@@ -298,7 +306,7 @@
     "connected": "Connected",
     "disconnecting": "Disconnecting…",
     "protectedOffline": "Protected, not connected",
-    "protectedOfflineDescription": "Direct traffic is blocked. Switching routes and retrying.",
+    "protectedOfflineDescription": "Direct traffic is blocked. A retry is scheduled.",
     "server": "Node",
     "noServer": "No server selected",
     "killSwitchMode": "Leak protection: {{mode}}",
@@ -346,6 +354,8 @@
       "wfpEngineWedged": "The Windows firewall engine is not responding, usually because security software is hooking it. Restart the PC; if it persists, quit your antivirus or firewall and retry.",
       "releaseReconciling": "Protection is still releasing. Wait, then connect.",
       "serviceTooOld": "Service is too old. Reinstall from the latest package.",
+      "protectionHeldByAnotherUser": "Another user on this PC is using Tono's protection, even if their session is only disconnected. They need to choose Disconnect in Tono at this PC, or sign out. If they cannot, a local administrator can stop the Tono service (sc.exe stop TonoService in an administrator PowerShell), then run the Start-menu shortcut \"Tono — 恢复网络 (Restore Network)\" as administrator.",
+      "remoteSessionConnectRefused": "Connect is not allowed from a Remote Desktop session: Tono's protection would block this remote connection, and it could not be undone remotely. Connect from this PC's own screen and keyboard instead.",
       "browserDnsPreflight": "Claude residential protection cannot connect because Chrome or Edge Secure DNS could not be proven safe. Tono routes all Chrome and Edge profiles together; profile-level routing is unavailable. Set Secure DNS to Off or Automatic without a custom provider, fully restart the browser, then reconnect Tono.",
       "nodeUnreachable": "This node is unreachable. Retry or switch.",
       "tunDataPlaneBroken": "The node answered, but Windows is not carrying the tunnel's traffic. Switching cities will not help — restart the PC and connect again, then send diagnostics to support if it persists.",
@@ -582,6 +592,7 @@
       "title": "WebRTC leak check",
       "description": "Open this page after Tono is connected. STUN should time out, and your home public IP should not appear.",
       "open": "Open ip.cx/webrtc",
+      "openFailed": "Could not open the browser. Visit https://ip.cx/webrtc manually.",
       "copyVersion": "Copy version"
     }
   },

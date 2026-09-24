@@ -294,6 +294,58 @@ extension KillSwitchManager {
         guard let original = String(data: originalData, encoding: .utf8) else {
             throw HelperFailure.invalid("The main PF configuration is not UTF-8.")
         }
+        let candidate = try hookedMainConfiguration(original)
+
+        // Second arm / reassert almost always leaves /etc/pf.conf unchanged.
+        // Re-validating the same text with two `pfctl -nf` runs does not
+        // change the hook and only delays the child-anchor reload.
+        if candidate == original {
+            return false
+        }
+
+        let candidatePath = "/etc/.tono-pf-\(UUID().uuidString)"
+        defer { unlink(candidatePath) }
+        try atomicWrite(
+            path: candidatePath,
+            data: Data(candidate.utf8),
+            permissions: 0o600
+        )
+        let candidateCheck = try run("/sbin/pfctl", ["-nf", candidatePath])
+        guard candidateCheck.status == 0 else {
+            throw HelperFailure.system(
+                candidateCheck.message.isEmpty
+                    ? "Main PF validation failed."
+                    : candidateCheck.message
+            )
+        }
+        if candidate != original {
+            if !FileManager.default.fileExists(atPath: killSwitchMainBackupPath) {
+                try atomicWrite(
+                    path: killSwitchMainBackupPath,
+                    data: originalData,
+                    permissions: 0o600
+                )
+            }
+            try atomicWrite(
+                path: killSwitchMainPFPath,
+                data: Data(candidate.utf8),
+                permissions: 0o644
+            )
+        }
+        let installedCheck = try run("/sbin/pfctl", ["-nf", killSwitchMainPFPath])
+        guard installedCheck.status == 0 else {
+            throw HelperFailure.system(
+                installedCheck.message.isEmpty
+                    ? "Installed PF configuration is invalid."
+                    : installedCheck.message
+            )
+        }
+        return candidate != original
+    }
+
+    /// /etc/pf.conf with Tono's marked hook in place: what an arm writes.
+    /// Pure, so removal can be checked against exactly this text.
+    static func hookedMainConfiguration(_ original: String) throws -> String {
         let hasBegin = original.contains(killSwitchBeginMarker)
         let hasEnd = original.contains(killSwitchEndMarker)
         guard hasBegin == hasEnd else {
@@ -346,52 +398,52 @@ extension KillSwitchManager {
             if original.hasSuffix("\n"), !cleaned.hasSuffix("\n") { cleaned += "\n" }
             candidate = cleaned
         }
+        return candidate
+    }
 
-        // Second arm / reassert almost always leaves /etc/pf.conf unchanged.
-        // Re-validating the same text with two `pfctl -nf` runs does not
-        // change the hook and only delays the child-anchor reload.
-        if candidate == original {
-            return false
+    /// Full removal only (`--emergency-reset`), after PF is released: take
+    /// Tono's marked block back out of /etc/pf.conf and delete the two backups
+    /// this helper wrote before its first edits. A disarm never calls this; the
+    /// hook stays while Tono is installed. Every line outside the markers is
+    /// kept, and an old backup is never copied over the live file.
+    static func removeMainHookAndBackups(
+        mainPath: String = killSwitchMainPFPath,
+        backupPaths: [String] = [killSwitchMainBackupPath, killSwitchHostsBackupPath]
+    ) throws {
+        let originalData = try secureRead(mainPath, maximumBytes: 1024 * 1024)
+        guard let original = String(data: originalData, encoding: .utf8) else {
+            throw HelperFailure.invalid("The main PF configuration is not UTF-8.")
         }
+        let unhooked = try unhookedMainConfiguration(original)
+        if unhooked != original {
+            try atomicWrite(path: mainPath, data: Data(unhooked.utf8), permissions: 0o644)
+        }
+        // Only once the hook is out: with malformed markers the backups are
+        // what a person would need to repair the file by hand.
+        for path in backupPaths {
+            try removeIfPresent(path, requiredType: mode_t(S_IFREG), allowedOwner: 0)
+        }
+    }
 
-        let candidatePath = "/etc/.tono-pf-\(UUID().uuidString)"
-        defer { unlink(candidatePath) }
-        try atomicWrite(
-            path: candidatePath,
-            data: Data(candidate.utf8),
-            permissions: 0o600
-        )
-        let candidateCheck = try run("/sbin/pfctl", ["-nf", candidatePath])
-        guard candidateCheck.status == 0 else {
-            throw HelperFailure.system(
-                candidateCheck.message.isEmpty
-                    ? "Main PF validation failed."
-                    : candidateCheck.message
-            )
+    /// The inverse of `hookedMainConfiguration`: drop the marked block and the
+    /// blank line a first arm leaves after it. Lines outside the markers stay.
+    static func unhookedMainConfiguration(_ hooked: String) throws -> String {
+        var lines = hooked.components(separatedBy: "\n")
+        let begins = lines.indices.filter { lines[$0] == killSwitchBeginMarker }
+        let ends = lines.indices.filter { lines[$0] == killSwitchEndMarker }
+        if begins.isEmpty, ends.isEmpty,
+           !hooked.contains(killSwitchBeginMarker), !hooked.contains(killSwitchEndMarker) {
+            return hooked
         }
-        if candidate != original {
-            if !FileManager.default.fileExists(atPath: killSwitchMainBackupPath) {
-                try atomicWrite(
-                    path: killSwitchMainBackupPath,
-                    data: originalData,
-                    permissions: 0o600
-                )
-            }
-            try atomicWrite(
-                path: killSwitchMainPFPath,
-                data: Data(candidate.utf8),
-                permissions: 0o644
-            )
+        guard begins.count == 1, ends.count == 1, begins[0] < ends[0] else {
+            throw HelperFailure.invalid("Malformed Tono PF markers.")
         }
-        let installedCheck = try run("/sbin/pfctl", ["-nf", killSwitchMainPFPath])
-        guard installedCheck.status == 0 else {
-            throw HelperFailure.system(
-                installedCheck.message.isEmpty
-                    ? "Installed PF configuration is invalid."
-                    : installedCheck.message
-            )
-        }
-        return candidate != original
+        var upper = ends[0] + 1
+        if upper < lines.count, lines[upper].isEmpty { upper += 1 }
+        lines.removeSubrange(begins[0]..<upper)
+        var unhooked = lines.joined(separator: "\n")
+        if hooked.hasSuffix("\n"), !unhooked.hasSuffix("\n") { unhooked += "\n" }
+        return unhooked
     }
 
     /// What to do about states established under rules that no longer exist.

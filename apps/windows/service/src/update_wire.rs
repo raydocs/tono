@@ -31,4 +31,9 @@ pub struct UpdateStatus {
     pub receipt: Option<Receipt>,
     pub execution: String,
     pub offer: Option<ReleaseManifest>,
+    /// Set only by a Disconnect that already released network protection but
+    /// could not prove or archive the update record, which stays pending. An
+    /// Err response means no release completed. Absent from older Services.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub needs_attention: Option<String>,
 }
