@@ -53,10 +53,15 @@ API_BASE = os.environ.get("TONO_API_BASE", "https://api.afk.ccwu.cc").rstrip("/"
 KNOWN_HOSTS = BASE / "tono-collector-known-hosts"
 HOST_KEY_FAILED = "Host key verification failed"
 
+# The quality sweep runs these two upstream tools as root on every exit node,
+# so each is pinned to one reviewed build by sha256. A digest mismatch leaves
+# the tool missing for that sweep instead of running an unknown binary; bump
+# the URL and digest together after reviewing a new upstream build.
+# securityCheck publishes only the moving "output" tag, so its digest is the pin.
 SC_URL = "https://github.com/oneclickvirt/securityCheck/releases/download/output/securityCheck-linux-amd64"
-BT_URL = "https://github.com/oneclickvirt/backtrace/releases/download/output/backtrace-linux-amd64"
-SC_CDN = "https://cdn.spiritlhl.net/https://github.com/oneclickvirt/securityCheck/releases/download/output/securityCheck-linux-amd64"
-BT_CDN = "https://cdn.spiritlhl.net/https://github.com/oneclickvirt/backtrace/releases/download/output/backtrace-linux-amd64"
+SC_SHA256 = "d0167485cbc858ce5f28f32123c4e89632fc589754e9abbfeb1d695eaf913725"
+BT_URL = "https://github.com/oneclickvirt/backtrace/releases/download/v0.0.21/backtrace-linux-amd64"
+BT_SHA256 = "cda36fa9bd5e0bda58d02113ac07c30a5ac3ed06a8fd44988a6b6930fb73ea82"
 
 # Public check-host nodes (no mainland China nodes available on this network).
 ASIA_EDGE_NODES = [
@@ -369,7 +374,9 @@ def parse_quality(sc: str, bt: str) -> dict:
 
     risks = []
     if not sc or "missing" in sc:
-        return {"quality": "ok", "risk_keywords": [], "route_keywords": routes[:12]}
+        # No securityCheck output (download failed or the pinned digest no
+        # longer matches upstream) is not evidence of a clean IP.
+        return {"quality": "unknown", "risk_keywords": [], "route_keywords": routes[:12]}
 
     severe = 0
     for pat, tag in (
@@ -410,13 +417,17 @@ DIR=/opt/tono-quality
 mkdir -p "$DIR"
 cd "$DIR"
 dl() {{
-  f="$1"; u="$2"; c="$3"
-  if [ -x "$f" ] && [ -s "$f" ]; then return 0; fi
-  curl -fsSL --retry 2 -o "$f.tmp" "$u" || curl -fsSL --retry 2 -o "$f.tmp" "$c" || return 1
-  mv "$f.tmp" "$f"; chmod 700 "$f"
+  f="$1"; u="$2"; h="$3"
+  if [ -f "$f" ] && echo "$h  $f" | sha256sum -c --status; then chmod 700 "$f"; return 0; fi
+  rm -f "$f" "$f.tmp"
+  curl -fsSL --proto '=https' --retry 2 -o "$f.tmp" "$u" || {{ rm -f "$f.tmp"; return 1; }}
+  if ! echo "$h  $f.tmp" | sha256sum -c --status; then
+    rm -f "$f.tmp"; echo "digest mismatch: $f" >&2; return 1
+  fi
+  chmod 700 "$f.tmp"; mv "$f.tmp" "$f"
 }}
-dl securityCheck "{SC_URL}" "{SC_CDN}" || true
-dl backtrace "{BT_URL}" "{BT_CDN}" || true
+dl securityCheck "{SC_URL}" "{SC_SHA256}" || true
+dl backtrace "{BT_URL}" "{BT_SHA256}" || true
 PUB=$(curl -4 -fsS --max-time 8 https://api.ipify.org 2>/dev/null || echo unknown)
 echo "===META==="
 echo "public_ip=$PUB"
