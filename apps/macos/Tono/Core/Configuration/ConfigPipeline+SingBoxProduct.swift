@@ -180,21 +180,24 @@ nonisolated extension ConfigPipeline {
                 dnsRules.append(["domain": plan.directResolverHosts, "action": "route", "server": "Tono-China-DNS"])
             }
             let suffixes = plan.effectiveWebDomainSuffixes
-            let resolverSuffixes = Array(Set(suffixes.map(\.host) + (plan.nativeAppDirect ? wechatDirectDNSSuffixes : []))).sorted()
+            // Sampled once. Empty when no reviewed bundle passes its signature
+            // check; an empty process_path_regex would match every process.
+            let appRegexes = plan.nativeAppDirect ? managedDirectProcessPathRegexes : []
+            let resolverSuffixes = Array(Set(suffixes.map(\.host) + (appRegexes.isEmpty ? [] : wechatDirectDNSSuffixes))).sorted()
             if !resolverSuffixes.isEmpty {
                 dnsRules.append(["domain_suffix": resolverSuffixes, "action": "route", "server": "Tono-China-DNS"])
             }
-            if plan.nativeAppDirect {
+            if !appRegexes.isEmpty {
                 // These are the helper's existing reviewed-bundle ports.
                 // Exact policy tuples below can authorize additional ports.
-                rules.append(["process_path_regex": managedDirectProcessPathRegexes,
+                rules.append(["process_path_regex": appRegexes,
                     "network": ["tcp", "udp"], "port": [80, 443, 8000, 8080], "action": "route", "outbound": appDirectGroupName])
                 for endpoint in plan.sessionEndpoints {
-                    rules.append(["process_path_regex": managedDirectProcessPathRegexes,
+                    rules.append(["process_path_regex": appRegexes,
                         "ip_cidr": ["\(endpoint.address)/32"], "network": endpoint.transport,
                         "port": [Int(endpoint.port)], "action": "route", "outbound": appDirectGroupName])
                 }
-                rules.append(["process_path_regex": managedDirectProcessPathRegexes, "action": "reject"])
+                rules.append(["process_path_regex": appRegexes, "action": "reject"])
             }
             for pin in plan.webDomainPins {
                 rules.append(["domain": [pin.host], "action": "resolve", "server": "Tono-Hosts", "strategy": "ipv4_only"])

@@ -32,6 +32,41 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 审阅直连 bundle 的标准路径也要校验签名身份
+
+- **归属/来源**：G1 连接保护；基线 main 244075f2，分支 `fix/reviewed-bundle-signature-20260923`，
+  [Issue #332](https://github.com/raydocs/tono/issues/332)（内部审查 H1-F2，macOS），本条提交时未合 main。
+  Windows 变体另记 [Issue #333](https://github.com/raydocs/tono/issues/333)，本 PR 未改。
+- **缺陷修复**：`/Applications/{WeChat,微信,DingTalk,钉钉,Feishu,飞书,Lark}.app/` 原本无条件
+  进入直连 `process_path_regex`，不检查是否存在、签名是否正确；`/Applications` 默认对 admin
+  免 sudo 可写。现在标准路径与迁移路径走同一身份校验：Apple 锚定、审阅过的 identifier、
+  已知 Team ID（Developer ID 叶证书 OU，或 App Store 代码目录中的 Team ID）。不通过则不生成
+  直连规则，流量留在隧道。sing-box 在没有任何 bundle 通过时不再输出空 `process_path_regex`
+  规则（空列表会匹配所有进程），WeChat DNS 后缀与此同条件，与 mihomo 路径一致。
+- **行为变化**：校验前本机确认 App Store 版 WeChat 的叶证书是 Apple 的，不含腾讯 OU。原
+  `isSignedWeChatBundle` 会拒绝它；新校验通过代码目录 Team ID 接纳它。Feishu/Lark 尚无
+  已采集的 Team ID，标准路径也改为失败即关闭，走隧道。
+  - **用户可见的功能回退（Feishu/Lark）**：开启国内直连策略时，飞书/Lark 全部流量改走海外
+    出口。影响：延迟上升；VLESS 模式下 UDP 被全局拒绝，飞书会议只能退到 TCP，可能失败；
+    飞书风控或企业登录 IP 限制可能把出口 IP 判为异地登录，要求二次验证。列表中的飞书/Lark
+    Bundle ID 也从未在真实安装上核对过。补齐 Identifier 和 TeamIdentifier（在装有飞书/Lark
+    的 Mac 上运行 `codesign -dvv` 采集，DMG 版和 App Store 版分别采）跟踪于
+    [Issue #422](https://github.com/raydocs/tono/issues/422)，目标是下一个 candidate 之前。
+    补齐前保持 fail-closed，不恢复按文件名信任。
+- **工程与测试**：新增 `CoreRouteClassificationTests.testReviewedDirectPathRequiresSignedBundleAtStandardLocation`
+  （临时目录中未签名的同名 bundle 不被授予；生产路径列表中每项都须通过签名校验。旧代码在
+  没装这些 App 的 CI 上因无条件的默认路径失败）。增加仅测试使用的
+  `managedDirectBundlePathsOverride`；4 处依赖“默认路径必在”的既有测试
+  （`testReviewedChinaOfficeAppsShareTheWeChatDirectBoundary`、`SingBoxConfigTests` 产品运行时、
+  `MultiExitPolicyTests`、`WeChatResolverPolicyTests`）改为显式注入路径，删除断言缺陷行为的默认路径断言。
+- **验证**：本机只做 diff 检查，并用 `codesign -v -R` 核对新 requirement：本机 App Store
+  WeChat 与 Developer ID 应用可通过，未签名的假 bundle 与 identifier 不符时被拒。XCTest、
+  multi-exit 脚本与 `sing-box check` 由 GitHub-hosted `macos-26` CI 执行，结果见 PR。
+- **新增/发布/限制**：无新包、无部署。签名在生成配置时校验，运行时按路径匹配，仍有 TOCTOU。
+  未实机复现；DingTalk App Store 版未实测。Feishu/Lark 直连需先在目标 Mac 上采集
+  Identifier 和 Team ID（#422）。本条随 PR 变基到 main bb2ed4e4，源码未改，
+  本机未编译，委托 CI。
+
 ## 2026-09-23 · macOS 控制面 PF 例外如实标注为 UID 边界（未修复）
 
 - **归属/来源**：G1 保护边界；基线 origin/main `244075f2`，分支

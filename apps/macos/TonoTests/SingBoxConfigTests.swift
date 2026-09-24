@@ -219,6 +219,9 @@ final class SingBoxConfigTests: XCTestCase {
         hy2.password = "11111111-1111-4111-8111-111111111111"
         hy2.tlsFingerprint = String(repeating: "ab", count: 32)
         values.append(hy2)
+        // Hosted CI has no reviewed app installed; supply the discovered path.
+        ConfigPipeline.managedDirectBundlePathsOverride = ["/Applications/WeChat.app/"]
+        defer { ConfigPipeline.managedDirectBundlePathsOverride = nil }
         let result = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: values, directPlan: plan)
         XCTAssertEqual(result.unavailableNodes, [hy2.name: "TONO_SINGBOX_HY2_DER_PIN_UNSUPPORTED"])
         XCTAssertEqual(Set(result.dialEndpoints.map(\.host)), Set([values[0].server, values[1].server]))
