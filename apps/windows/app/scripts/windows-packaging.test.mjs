@@ -43,6 +43,10 @@ const windowsServiceInstallerSource = readFileSync(
   new URL('../../service/src/bin/install_service.rs', import.meta.url),
   'utf8',
 )
+const windowsServiceUpdateSource = readFileSync(
+  new URL('../../service/src/core/update.rs', import.meta.url),
+  'utf8',
+)
 const windowsReleaseShSource = readFileSync(
   new URL(
     '../../../../tooling/scripts/build-windows-release.sh',
@@ -91,6 +95,15 @@ test('NSIS private extraction cannot bypass native admission or mutate the live 
     ),
     /only private payload files/,
   )
+})
+
+test('elevated setup never runs a Microsoft installer from the user temp directory', () => {
+  const code = installerSource
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*;/.test(line))
+    .join('\n')
+  assert.doesNotMatch(code, /(?:download\s+\S+|\/oname=)\s*"?\$TEMP\\/i)
+  assert.doesNotMatch(code, /ExecWait\s+['"`]"?\$TEMP\\/i)
 })
 
 test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
@@ -425,6 +438,70 @@ test('privileged upgrade helper coordinates Service, Mihomo, and GUI publication
   )
 })
 
+test('NSIS explains a refused gate and confirms before uninstall releases protection', () => {
+  const onInit =
+    installerSource.match(/Function \.onInit\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  const gate = onInit.slice(onInit.indexOf('--manual-update-gate'))
+  const refusal = gate.slice(0, gate.indexOf('SetErrorLevel 76'))
+  // .onInit never shows Abort text; a refusal without a dialog is a silent exit.
+  assert.match(
+    refusal,
+    /\$\{IfNot\} \$\{Silent\}\s+\$\{If\} \$0 == "77"\s+MessageBox [^\n]*"\$\(manualInstallNeedsDisconnect\)"\s+\$\{Else\}\s+MessageBox [^\n]*"\$\(manualInstallRefused\)"/,
+  )
+  assert.doesNotMatch(refusal, /--emergency-disarm|--manual-uninstall-gate/)
+
+  const unInit =
+    installerSource.match(/Function un\.onInit\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  const gateAt = unInit.indexOf('--manual-update-gate')
+  const confirmAt = unInit.indexOf('"$(uninstallReleasesProtection)"')
+  const leaseAt = unInit.indexOf('--manual-uninstall-gate')
+  assert.ok(gateAt >= 0 && gateAt < confirmAt && confirmAt < leaseAt)
+  assert.match(
+    unInit.slice(gateAt, confirmAt),
+    /\$\{If\} \$0 == "77"\s+\$\{AndIfNot\} \$\{Silent\}\s+MessageBox [^\n]*MB_YESNO\b/,
+  )
+  assert.match(unInit.slice(leaseAt), /MessageBox [^\n]*"\$\(manualUninstallRefused\)"/)
+
+  for (const name of [
+    'manualInstallNeedsDisconnect',
+    'manualInstallRefused',
+    'uninstallReleasesProtection',
+    'manualUninstallRefused',
+  ]) {
+    for (const language of ['SIMPCHINESE', 'ENGLISH', 'RUSSIAN']) {
+      assert.match(
+        installerSource,
+        new RegExp(`LangString ${name} \\$\\{LANG_${language}\\} "`),
+      )
+    }
+  }
+  assert.match(
+    windowsServiceUpdateSource,
+    /pub const MANUAL_GATE_PROTECTION_ACTIVE_EXIT: i32 = 77;/,
+  )
+})
+
+test('Windows installers refuse to downgrade and hand back the manual lease on that exit', () => {
+  const windowsConfig = JSON.parse(
+    readFileSync(
+      new URL('../src-tauri/tauri.windows.conf.json', import.meta.url),
+      'utf8',
+    ),
+  )
+  // Tauri defaults this to true; an older build cannot undo a newer build's DNS changes.
+  assert.equal(windowsConfig.bundle.windows.allowDowngrades, false)
+  const blocked =
+    installerSource.match(/downgrade_blocked:([\s\S]*?)invalid_existing_version:/)?.[1] ?? ''
+  const releaseAt = blocked.indexOf('Call ReleaseManualLease')
+  assert.ok(releaseAt >= 0 && releaseAt < blocked.indexOf('Quit'))
+  const release =
+    installerSource.match(/Function ReleaseManualLease\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  assert.match(
+    release,
+    /nsExec::ExecToLog '"\$PLUGINSDIR\\tono-gate\\resources\\tono-service-install\.exe" --manual-update-finish'/,
+  )
+})
+
 test('NSIS uninstall removes leftover user control-plane pins', () => {
   assert.match(
     installerSource,
@@ -733,6 +810,15 @@ test('resources whitelist rejects whole-directory packaging', () => {
   )
 })
 
+test('bundled resource executables are built from this repository', () => {
+  const executables = WINDOWS_RESOURCE_ALLOWLIST.filter((name) =>
+    /\.exe$/i.test(name),
+  )
+  for (const name of executables) {
+    assert.match(name, /^tono-service(?:-install|-uninstall)?\.exe$/)
+  }
+})
+
 test('payload validator requires staged executables and rejects legacy junk', () => {
   const good = [
     { name: 'Tono.exe.next' },
@@ -865,7 +951,9 @@ test('Core plugin runtime registration matches its generated ACL namespace', () 
       'utf8',
     ),
   )
-  assert.ok(capability.permissions.includes(`${runtimeName}:default`))
+  assert.ok(
+    capability.permissions.some((p) => p.startsWith(`${runtimeName}:allow-`)),
+  )
 })
 
 for (const entrypoint of [
@@ -885,3 +973,29 @@ for (const entrypoint of [
     assert.deepEqual([...new Set(namespaces)], [corePluginAclName])
   })
 }
+
+test('Support WebRTC check link is granted to the webview opener and nothing wider', () => {
+  const support = readFileSync(
+    new URL('../src/pages/tono/support.tsx', import.meta.url),
+    'utf8',
+  )
+  const urls = [...support.matchAll(/openUrl\('([^']+)'\)/g)].map((m) => m[1])
+  assert.deepEqual(urls, ['https://ip.cx/webrtc'])
+  const capability = JSON.parse(
+    readFileSync(
+      new URL('../src-tauri/capabilities/desktop.json', import.meta.url),
+      'utf8',
+    ),
+  )
+  assert.ok(capability.permissions.includes('shell:allow-open'))
+  const config = JSON.parse(
+    readFileSync(
+      new URL('../src-tauri/tauri.conf.json', import.meta.url),
+      'utf8',
+    ),
+  )
+  // tauri-plugin-shell anchors the configured regex as ^...$.
+  const scope = new RegExp(`^${config.plugins?.shell?.open}$`)
+  assert.ok(scope.test(urls[0]))
+  assert.equal(scope.test('https://example.com/'), false)
+})

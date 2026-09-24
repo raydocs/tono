@@ -1050,8 +1050,10 @@ export interface TranslationResources {
           encryptedDns: string
           nodeUnreachable: string
           protectedHttpsFailed: string
+          protectionHeldByAnotherUser: string
           protectionReleaseFailed: string
           releaseReconciling: string
+          remoteSessionConnectRefused: string
           sendDiagnostics: string
           serviceBusy: string
           serviceNotRunning: string
@@ -1244,6 +1246,11 @@ export interface TranslationResources {
         sending: string
         sendNewCode: string
         sent: string
+        sessionEnded: {
+          description: string
+          signIn: string
+          title: string
+        }
         stepCode: string
         stepEmail: string
         stillWaiting: string
@@ -1556,6 +1563,7 @@ export interface TranslationResources {
           copyVersion: string
           description: string
           open: string
+          openFailed: string
           title: string
         }
       }

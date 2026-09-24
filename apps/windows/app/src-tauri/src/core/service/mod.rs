@@ -369,9 +369,30 @@ pub(crate) async fn tono_prepare_core_start() -> Result<u32> {
         .await
         .context("无法连接到 Tono Service 以准备核心")?;
     if response.code > 0 {
-        bail!(response.message);
+        bail!(tono_start_refusal(response.code, response.message));
     }
     response.data.context("Tono Service 未返回核心准备结果")
+}
+
+/// A PrepareCoreStart / StartClash refusal as the connect flow reports it. The Service's code is
+/// otherwise dropped here, so the refusals the UI must explain differently — armed protection
+/// held by another signed-in local user (H2-F2), and a connect from a Remote Desktop session
+/// (TW-anthropic-1) — get their stable markers; every other refusal keeps the Service's message
+/// untouched.
+fn tono_start_refusal(code: u16, message: String) -> String {
+    if code == tono_service_protocol::ServiceErrorCode::ProtectionHeldByAnotherUser as u16 {
+        return format!(
+            "{}: {message}",
+            crate::tono::connection::PROTECTION_HELD_BY_ANOTHER_USER_PREFIX
+        );
+    }
+    if code == tono_service_protocol::ServiceErrorCode::RemoteSessionConnectRefused as u16 {
+        return format!(
+            "{}: {message}",
+            crate::tono::connection::REMOTE_SESSION_CONNECT_REFUSED_PREFIX
+        );
+    }
+    message
 }
 
 /// Core binary path for the Tono owned runtime: the same mihomo build the Service runs.
@@ -633,7 +654,7 @@ pub(crate) async fn tono_start_core_with_kill_switch(
     };
 
     if response.code > 0 {
-        let err_msg = response.message;
+        let err_msg = tono_start_refusal(response.code, response.message);
         logging!(error, Type::Service, "Tono: 启动核心失败: {}", err_msg);
         start_owner_monitor();
         bail!(err_msg);
