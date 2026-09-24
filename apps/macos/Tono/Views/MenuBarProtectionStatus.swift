@@ -34,6 +34,11 @@ struct MenuBarProtectionStatus {
             title = "Waiting to retry…"
             color = TonoStatus.blocked
             symbolName = Self.blockedSymbol
+        } else if appState.isProtectionUnconfirmed {
+            kind = .unconfirmed
+            title = "Protection unknown"
+            color = TonoStatus.blocked
+            symbolName = Self.unconfirmedSymbol
         } else if appState.protectedReconnectPausedForUserAction {
             kind = .blocked
             title = "Protected Offline · retries paused"
@@ -54,11 +59,6 @@ struct MenuBarProtectionStatus {
             title = "Protected"
             color = TonoStatus.connected
             symbolName = Self.connectedSymbol
-        } else if appState.isProtectionUnconfirmed {
-            kind = .unconfirmed
-            title = "Protection unknown"
-            color = TonoStatus.blocked
-            symbolName = Self.unconfirmedSymbol
         } else {
             kind = .standby
             title = "Standby"

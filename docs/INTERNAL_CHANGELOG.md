@@ -221,6 +221,14 @@
   测试：两个已加测试扩展——F1 测试改为驱动真实 wake（新增 `reassertKillSwitch` seam），另断言抛错时为 unknown 而非
   Protected Offline；MAC3 测试改为断言准备只以不提示方式调用且不发 arm 请求。失败前行为为推理；未编译、未跑 XCTest，
   待 `macos-26` CI；wake 移交（约 48 s）与 HelperManager 内部的提示前拦截无测试。无新包。
+- **续记（2026-09-24，PR #610，合并 main 后修复 F1/F2）**：基线 mac3 `b9bea67a`，以 `2ac94c30`
+  合入 origin/main `c9fe191e`；日志冲突按 main 条目在前、mac3 条目在后解决，逐节文本核对两侧原记录完整保留。
+  G2 缺陷修复：F1 菜单栏先判断 `isProtectionUnconfirmed`，再判断重试暂停，不再把未知保护显示成
+  Protected Offline；F2 wake 的 `reassertKillSwitch` 成功返回后立即检查取消，旧任务不得继续发布保护状态或发起连接。
+  新增/优化：无。工程与测试：`LaunchProtectionPresentationTests` 各新增一条回归，覆盖未知+暂停的菜单投影、
+  已取消的 reassert 成功返回不覆盖未知状态。验证：`git diff --check` 通过；按执行主机规则未运行 XCTest/原生编译，
+  修复前失败未实跑；待 GitHub-hosted `macos-26` CI。仅源码，无新包；无设备验收。
+
 ## 2026-09-24 · mac 独立列车 train/mac2-20260924
 
 - **归属/来源**：G1–G3 macOS 修复汇合（各 PR 归属见其自身条目）；基线 origin/main

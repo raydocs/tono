@@ -700,6 +700,7 @@ final class AppState {
                 if !barrierReady {
                     do {
                         barrierArmed = try await self.networkProtection.reassertKillSwitch()
+                        guard !Task.isCancelled else { return }
                         barrierReady = true
                     } catch {
                         guard !Task.isCancelled else { return }

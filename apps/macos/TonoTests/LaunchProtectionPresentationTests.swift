@@ -7,6 +7,41 @@ import XCTest
 /// production launch fold; only the helper's answers are supplied.
 @MainActor
 final class LaunchProtectionPresentationTests: XCTestCase {
+    func testUnknownProtectionTakesPrecedenceOverPausedRetries() {
+        let state = AppState()
+        state.protectedReconnectPausedForUserAction = true
+        state.isProtectionUnconfirmed = true
+
+        XCTAssertEqual(MenuBarProtectionStatus(state).kind, .unconfirmed)
+    }
+
+    func testCancelledWakeDoesNotPublishASuccessfulReassert() async {
+        let storedIntent = KillSwitchService.isArmed
+        defer { KillSwitchService.isArmed = storedIntent }
+        KillSwitchService.isArmed = true
+        let state = AppState()
+        XCTAssertFalse(state.isTonoReady)
+        state.isProtectionUnconfirmed = true
+        var reasserted = false
+        state.networkProtection.reassertKillSwitch = {
+            reasserted = true
+            // A successful helper reply does not imply the waiting wake
+            // still owns recovery: cancellation need not throw here.
+            withUnsafeCurrentTask { $0?.cancel() }
+            return true
+        }
+
+        state.resumeAfterSystemWake()
+        let recovery = state.connectionCoordinator.wakeRecoveryTask
+        XCTAssertNotNil(recovery)
+        await recovery?.value
+
+        XCTAssertTrue(reasserted)
+        XCTAssertFalse(state.isProtectionBlocked)
+        XCTAssertTrue(state.isProtectionUnconfirmed)
+        XCTAssertNil(state.errorMessage)
+    }
+
     func testLaunchShowsTheHelperAnswerInsteadOfStandby() async {
         let storedIntent = KillSwitchService.isArmed
         defer { KillSwitchService.isArmed = storedIntent }
