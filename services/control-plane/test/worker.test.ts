@@ -3954,6 +3954,38 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(detailBody.product.replaceCount).toBe(1);
   });
 
+  it('assigns a pooled Claude account to only one of two concurrent users', async () => {
+    const accessHeaders = {
+      'content-type': 'application/json',
+      'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+    };
+    const first = await createAccount('claude-pool-race-a');
+    const second = await createAccount('claude-pool-race-b');
+    const pooled = await api('ops/product-accounts', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ accountRef: 'acct-pool-race@example.com' }),
+    });
+    expect(pooled.status).toBe(201);
+    const assign = (userId: string) => api('ops/product-accounts', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ userId, accountRef: 'acct-pool-race@example.com' }),
+    });
+    const results = await Promise.all([assign(first.user.id), assign(second.user.id)]);
+    expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
+    const loser = results[0].status === 409 ? first : second;
+    expect((await results.find((r) => r.status === 409)!.json() as any).error.code).toBe('ACCOUNT_REF_IN_USE');
+    const loserRow = await env.DB.prepare(
+      'SELECT plan, first_entitled_at FROM users WHERE id = ?',
+    ).bind(loser.user.id).first<{ plan: string | null; first_entitled_at: number | null }>();
+    expect(loserRow).toEqual({ plan: null, first_entitled_at: null });
+    const loserEvents = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM product_account_events WHERE user_id = ? AND type = 'assigned'",
+    ).bind(loser.user.id).first<{ n: number }>();
+    expect(loserEvents!.n).toBe(0);
+  });
+
   it('stores a node billing profile and reports who is on a named node', async () => {
     const accessHeaders = {
       'content-type': 'application/json',
