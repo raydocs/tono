@@ -267,32 +267,9 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
       await exitClientUUID(e, String(user.id));
     }
     exitIdentityIssued = true;
-  }
-  await e.DB.prepare(
-    'INSERT OR IGNORE INTO signup_allowlist(email, created_at) VALUES(?, ?)',
-  ).bind(address, createdAt).run();
-  const incomplete: string[] = [];
-  if (!user) incomplete.push('user_not_registered');
-  const storeProfile = b.notes !== undefined || b.contact !== undefined || b.wechatId !== undefined;
-  const pendingProfile = !user && storeProfile;
-  let binding = null;
-  let account = null;
-  if (user) {
-    if (b.notes !== undefined || b.contact !== undefined || b.wechatId !== undefined) {
-      await e.DB.prepare(
-        `UPDATE users SET
-           notes = CASE WHEN ? THEN ? ELSE notes END,
-           contact = CASE WHEN ? THEN ? ELSE contact END,
-           wechat_id = CASE WHEN ? THEN ? ELSE wechat_id END,
-           updated_at = ?
-         WHERE id = ?`,
-      ).bind(
-        b.notes !== undefined, notes ?? null,
-        b.contact !== undefined, contact ?? null,
-        b.wechatId !== undefined, wechatId ?? null,
-        now(), user.id,
-      ).run();
-    }
+    // Bind before the allowlist and profile writes: the check above can go
+    // stale (a concurrent unbind flags the line for rotation), and the bind
+    // re-checks; its refusal must leave nothing else written.
     if (b.line !== undefined && b.line !== null && b.line !== '') {
       const assigned = await sharedAdministrativeResource(
         new Request(req.url, {
@@ -321,6 +298,32 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
       // Audited here, not only by the closing user.onboard row: a later
       // account-assignment 409 would otherwise leave this binding unrecorded.
       await writeOpsAudit(e, actor.email, 'home.assign', 'user', String(user.id), `onboard bound home for ${address}`);
+    }
+  }
+  await e.DB.prepare(
+    'INSERT OR IGNORE INTO signup_allowlist(email, created_at) VALUES(?, ?)',
+  ).bind(address, createdAt).run();
+  const incomplete: string[] = [];
+  if (!user) incomplete.push('user_not_registered');
+  const storeProfile = b.notes !== undefined || b.contact !== undefined || b.wechatId !== undefined;
+  const pendingProfile = !user && storeProfile;
+  let binding = null;
+  let account = null;
+  if (user) {
+    if (b.notes !== undefined || b.contact !== undefined || b.wechatId !== undefined) {
+      await e.DB.prepare(
+        `UPDATE users SET
+           notes = CASE WHEN ? THEN ? ELSE notes END,
+           contact = CASE WHEN ? THEN ? ELSE contact END,
+           wechat_id = CASE WHEN ? THEN ? ELSE wechat_id END,
+           updated_at = ?
+         WHERE id = ?`,
+      ).bind(
+        b.notes !== undefined, notes ?? null,
+        b.contact !== undefined, contact ?? null,
+        b.wechatId !== undefined, wechatId ?? null,
+        now(), user.id,
+      ).run();
     }
     binding = await loadHomeBinding(e, String(user.id));
     if (b.accountRef) {

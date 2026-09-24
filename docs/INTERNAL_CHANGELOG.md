@@ -56,6 +56,50 @@
 - **候选/发布**：无新包，仅源码。
 - **剩余限制**：`line` 路径贴入新密码时由 `home-exits/assign` 完成轮换，预检不拦；socks5 类名字不受后缀限制（未改）。
   已有的 hy2 后缀 catalog 行（若将来出现）在 PATCH 任意字段时会被拒，需先改名。
+- **续记（2026-09-24，复核 8fc72696：两条均 PARTIAL，P2）**：分支 `fix/cp-b-20260924`，基于 8fc72696；未合 main。
+  - 缺陷修复：
+    - TC-OpenAI-1：预检通过后，若同一用户被并发解绑（0080 触发器给该 socks5 家宽置轮换标记），onboard 仍先写
+      `signup_allowlist` 与 notes/contact/wechat，`upsertHomeBinding` 复查后才 409，且没有 `user.onboard` 审计；
+      解绑落在复查与绑定 INSERT 之间时由触发器中止，已提交的资料写入同样不回滚。改后：已注册用户的绑定
+      （`homeExitId` 路径的 `upsertHomeBinding`、`line` 路径的 `home-exits/assign`）移到 allowlist 与资料写入之前；
+      绑定被拒时这两项都未写入，绑定成功仍由 `home.assign` 审计。
+    - TC-Grok-1：库里已有的 hy2 后缀 catalog 行仍可经 onboard `homeExitId` 与 `PUT users/{id}/home-binding`
+      （按 id 或按名）绑定。改后：共享检查 `assertHomeExitBindable` 对该行套用同一 `assertCatalogHomeProxyName`，
+      所有绑定路径返回 400 `VALIDATION_ERROR`（onboard 在任何写入前）。
+  - 新增/优化：无。
+  - 工程与测试：`test/ops-api.test.ts` 一个 `it`（包装 D1，在第一次可绑定检查返回后删除该用户绑定，模拟并发解绑；
+    断言 409 `SOCKS5_ROTATION_REQUIRED`、notes 不变、allowlist 无行），测试辅助 `ops()` 加可选 env 参数；
+    `test/worker.test.ts` 一个 `it`（直接插入已存的 `Home Stored · hy2` catalog 行，PUT 按 id、按名与 onboard 均 400，
+    无绑定）。未改源码时先跑红（`expected 'after' to be 'before'`、`expected 201 to be 400`），修复后绿。
+  - 验证：MacBook 本机 worktree `services/control-plane`：两个改动测试文件 229 个用例通过（ops-api 41、worker 188）；
+    `npx vitest run` 43 个文件 914 个用例通过；`npm run typecheck` 通过。未部署，未碰远端 D1，无原生构建。
+  - 候选/发布：无新包，仅源码。
+  - 剩余限制：绑定与 allowlist/资料写入仍是分开的语句，不是一个 D1 batch；绑定成功后若其后的账户分配 409，
+    allowlist/资料已写而没有 `user.onboard` 行（改前即如此）。触发器在复查与 INSERT 之间中止时不映射为 409
+    `SOCKS5_ROTATION_REQUIRED`（此时无其他写入）。已绑定到 hy2 后缀 catalog 行的用户，重存同一绑定也被拒，需先改名。
+- **续修（2026-09-24，二轮审查 Codex B-F1，P2，8fc72696 前即存在）**：同分支。
+  - 缺陷修复：用户已有绑定时，`upsertHomeBinding` 读到 `created_at` 后执行 `UPDATE user_home_bindings`；并发解绑落在两者之间时
+    UPDATE 影响 0 行，旧代码不看 `meta.changes` 照常返回，onboard 随后写 allowlist、notes/contact/wechat 和 `home.assign`
+    审计，返回 202 且 `binding: null`。改后：0 行时按「解绑先发生」处理：再跑 `assertHomeExitBindable`（socks5 家宽已被
+    0080 触发器置轮换标记，返回 409 `SOCKS5_ROTATION_REQUIRED`，其后不再写任何东西）；复查通过（catalog 家宽）则走与
+    读不到旧行时相同的 INSERT。修在共享函数里，`home-exits/assign` 同样受益。
+  - 测试：`test/ops-api.test.ts` 新增一个 `it`（包装 D1，在读 `created_at` 之后删除绑定）；断言 409 `SOCKS5_ROTATION_REQUIRED`、
+    notes 不变、allowlist 无行、无 `home.assign` 审计。修复前在 00190396 上红（`expected 202 to be 409`），修复后绿。
+  - 验证：MacBook 本机 worktree：`npx vitest run test/worker.test.ts test/ops-api.test.ts` 230 通过；`npx vitest run` 43 个文件
+    915 通过；`npm run typecheck` 通过。未部署，未碰远端 D1，无原生构建。
+  - 剩余限制：shared-admin `PUT users/{id}/home-binding` 有自己的一份读后 UPDATE，未改；同一窗口下 0 行后仍会 bump revision、
+    写 `home.replace` 审计，再因读回的绑定为空而出错（按代码阅读，未测）。catalog 家宽在该窗口会被重新绑定（与解绑先发生的顺序一致）。
+- **续修（2026-09-24，二轮审查 B-F1-PUT，P2，Codex 复现，同分支）**：
+  - 缺陷修复：上条剩余限制所述的 `PUT users/{id}/home-binding` 已复现：读后 UPDATE 影响 0 行时读回 null，仍 bump revision、写
+    `home.replace` 审计，随后 `publicHomeBinding(null)` 抛错，返回 500。改后：该路由不再自带读后 UPDATE/INSERT，改调已修好的
+    `upsertHomeBinding`（其首行即 `assertHomeExitBindable`，故去掉路由里重复的一次调用），按返回的 `created` 决定 201/200 与
+    `home.assign`/`home.replace`。并发解绑时 socks5 家宽在 bump revision 与审计之前返回 409 `SOCKS5_ROTATION_REQUIRED`，与 onboard 一致。
+  - 测试：`test/ops-api.test.ts` 新增一个 `it`（`PUT users/{id}/home-binding refuses before revision and audit when an unbind lands before its update`，
+    同样包装 D1 在读 `created_at` 后删除绑定）断言 409 `SOCKS5_ROTATION_REQUIRED`、目录 revision 不变、无 `home.*` 审计。
+    修复前在 7ad62239 上红（`expected 500 to be 409`），修复后绿。
+  - 验证：MacBook 本机 worktree：`npx vitest run test/worker.test.ts test/ops-api.test.ts` 231 通过；`npx vitest run` 43 个文件
+    916 通过；`npm run typecheck` 通过。未部署，未碰远端 D1，无原生构建。
+  - 剩余限制：绑定写入与其后的读回、revision、审计仍是分开的语句；绑定成功后若再有并发解绑，读回仍可能为空（窗口更小，未改）。
 
 ## 2026-09-24 · 控制面合并列车 train/cp-20260924
 

@@ -66,7 +66,7 @@ async function accessAssertion(accessEmail: string) {
   return `${header}.${payload}.${base64URL(new Uint8Array(signature))}`;
 }
 
-async function ops(path: string, init: RequestInit = {}) {
+async function ops(path: string, init: RequestInit = {}, testEnv: unknown = env) {
   const context = createExecutionContext();
   const headers = new Headers(init.headers);
   if (!headers.has('cf-access-jwt-assertion')) {
@@ -75,7 +75,7 @@ async function ops(path: string, init: RequestInit = {}) {
   if (init.body && !headers.has('content-type')) headers.set('content-type', 'application/json');
   const response = await worker.fetch(
     new Request(`https://test/api/v1/ops/${path}`, { ...init, headers }),
-    env as unknown as Env,
+    testEnv as Env,
     context,
   );
   await waitOnExecutionContext(context);
@@ -441,6 +441,153 @@ describe('ops v1 api', () => {
     expect((await db().prepare("SELECT notes FROM users WHERE id = 'u-1'").first<{ notes: string }>())!.notes)
       .toBe('before');
     expect(await db().prepare("SELECT email FROM signup_allowlist WHERE email = 'a@example.com'").first()).toBeNull();
+  });
+
+  it('POST users/onboard writes nothing when an unbind lands after its rotation pre-check', async () => {
+    await seedUser('u-1', 'a@example.com');
+    await db().prepare("UPDATE users SET notes = 'before' WHERE id = 'u-1'").run();
+    await db().prepare(
+      `INSERT INTO home_exits(
+         id, proxy_name, display_name, kind, socks5_host, socks5_port, socks5_username, socks5_password,
+         status, created_at, updated_at
+       ) VALUES('h-race', 'h-race', '家宽 Race', 'socks5', '203.0.113.62', 11092, 'resi-race', 'secret', 'active', ?, ?)`,
+    ).bind(NOW, NOW).run();
+    await db().prepare(
+      "INSERT INTO user_home_bindings(user_id, home_exit_id, created_at, updated_at) VALUES('u-1', 'h-race', ?, ?)",
+    ).bind(NOW, NOW).run();
+    // A concurrent unbind of u-1 runs right after the first bindability check
+    // returns; the unbind trigger marks h-race as awaiting rotation.
+    const real = db();
+    let unbound = false;
+    const racingDb = new Proxy(real, {
+      get(target, key) {
+        const value = Reflect.get(target, key, target);
+        if (key !== 'prepare') return typeof value === 'function' ? value.bind(target) : value;
+        return (sql: string) => {
+          const statement = target.prepare(sql);
+          if (unbound || !sql.includes('current_home_exit_id')) return statement;
+          return {
+            bind: (...values: unknown[]) => ({
+              first: async () => {
+                const row = await statement.bind(...values).first();
+                unbound = true;
+                await target.prepare("DELETE FROM user_home_bindings WHERE user_id = 'u-1'").run();
+                return row;
+              },
+            }),
+          };
+        };
+      },
+    });
+    const refused = await ops(
+      'users/onboard',
+      json({ email: 'a@example.com', notes: 'after', homeExitId: 'h-race' }),
+      { ...env, DB: racingDb },
+    );
+    expect(unbound).toBe(true);
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { error: { code: string } }).error.code).toBe('SOCKS5_ROTATION_REQUIRED');
+    expect((await db().prepare("SELECT notes FROM users WHERE id = 'u-1'").first<{ notes: string }>())!.notes)
+      .toBe('before');
+    expect(await db().prepare("SELECT email FROM signup_allowlist WHERE email = 'a@example.com'").first()).toBeNull();
+  });
+
+  it('POST users/onboard writes nothing when an unbind lands between the binding read and its update', async () => {
+    await seedUser('u-1', 'a@example.com');
+    await db().prepare("UPDATE users SET notes = 'before' WHERE id = 'u-1'").run();
+    await db().prepare(
+      `INSERT INTO home_exits(
+         id, proxy_name, display_name, kind, socks5_host, socks5_port, socks5_username, socks5_password,
+         status, created_at, updated_at
+       ) VALUES('h-late', 'h-late', '家宽 Late', 'socks5', '203.0.113.63', 11093, 'resi-late', 'secret', 'active', ?, ?)`,
+    ).bind(NOW, NOW).run();
+    await db().prepare(
+      "INSERT INTO user_home_bindings(user_id, home_exit_id, created_at, updated_at) VALUES('u-1', 'h-late', ?, ?)",
+    ).bind(NOW, NOW).run();
+    // Both bindability checks pass; the unbind lands after the bind reads the
+    // existing row, so its UPDATE matches nothing.
+    const real = db();
+    let unbound = false;
+    const racingDb = new Proxy(real, {
+      get(target, key) {
+        const value = Reflect.get(target, key, target);
+        if (key !== 'prepare') return typeof value === 'function' ? value.bind(target) : value;
+        return (sql: string) => {
+          const statement = target.prepare(sql);
+          if (unbound || !sql.includes('SELECT created_at FROM user_home_bindings')) return statement;
+          return {
+            bind: (...values: unknown[]) => ({
+              first: async () => {
+                const row = await statement.bind(...values).first();
+                unbound = true;
+                await target.prepare("DELETE FROM user_home_bindings WHERE user_id = 'u-1'").run();
+                return row;
+              },
+            }),
+          };
+        };
+      },
+    });
+    const refused = await ops(
+      'users/onboard',
+      json({ email: 'a@example.com', notes: 'after', homeExitId: 'h-late' }),
+      { ...env, DB: racingDb },
+    );
+    expect(unbound).toBe(true);
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { error: { code: string } }).error.code).toBe('SOCKS5_ROTATION_REQUIRED');
+    expect((await db().prepare("SELECT notes FROM users WHERE id = 'u-1'").first<{ notes: string }>())!.notes)
+      .toBe('before');
+    expect(await db().prepare("SELECT email FROM signup_allowlist WHERE email = 'a@example.com'").first()).toBeNull();
+    expect(await db().prepare("SELECT 1 FROM ops_audit WHERE action = 'home.assign' AND target_id = 'u-1'").first())
+      .toBeNull();
+  });
+
+  it('PUT users/{id}/home-binding refuses before revision and audit when an unbind lands before its update', async () => {
+    await seedUser('u-1', 'a@example.com');
+    await db().prepare(
+      `INSERT OR REPLACE INTO managed_exit_catalog(singleton_id, revision, ciphertext, nonce, content_sha256, updated_at)
+       VALUES(1, 5, 'c', 'n', 's', ?)`,
+    ).bind(NOW).run();
+    await db().prepare(
+      `INSERT INTO home_exits(
+         id, proxy_name, display_name, kind, socks5_host, socks5_port, socks5_username, socks5_password,
+         status, created_at, updated_at
+       ) VALUES('h-late', 'h-late', '家宽 Late', 'socks5', '203.0.113.63', 11093, 'resi-late', 'secret', 'active', ?, ?)`,
+    ).bind(NOW, NOW).run();
+    await db().prepare(
+      "INSERT INTO user_home_bindings(user_id, home_exit_id, created_at, updated_at) VALUES('u-1', 'h-late', ?, ?)",
+    ).bind(NOW, NOW).run();
+    const real = db();
+    let unbound = false;
+    const racingDb = new Proxy(real, {
+      get(target, key) {
+        const value = Reflect.get(target, key, target);
+        if (key !== 'prepare') return typeof value === 'function' ? value.bind(target) : value;
+        return (sql: string) => {
+          const statement = target.prepare(sql);
+          if (unbound || !sql.includes('SELECT created_at FROM user_home_bindings')) return statement;
+          return {
+            bind: (...values: unknown[]) => ({
+              first: async () => {
+                const row = await statement.bind(...values).first();
+                unbound = true;
+                await target.prepare("DELETE FROM user_home_bindings WHERE user_id = 'u-1'").run();
+                return row;
+              },
+            }),
+          };
+        };
+      },
+    });
+    const refused = await ops('users/u-1/home-binding', json({ homeExitId: 'h-late' }, 'PUT'), { ...env, DB: racingDb });
+    expect(unbound).toBe(true);
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { error: { code: string } }).error.code).toBe('SOCKS5_ROTATION_REQUIRED');
+    expect(Number((await db().prepare('SELECT revision FROM managed_exit_catalog WHERE singleton_id = 1')
+      .first<{ revision: number }>())!.revision)).toBe(5);
+    expect(await db().prepare("SELECT 1 FROM ops_audit WHERE action LIKE 'home.%' AND target_id = 'u-1'").first())
+      .toBeNull();
   });
 
   it('GET customers?q= matches email or wechat id, and default list is unchanged', async () => {

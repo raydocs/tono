@@ -3653,6 +3653,29 @@ ${nameLine}
     expect(line.status).toBe(400);
   });
 
+  it('refuses to bind a stored catalog home exit whose proxyName ends with the hy2 suffix', async () => {
+    // A row stored before create and PATCH refused the suffix.
+    const t = Math.floor(Date.now() / 1_000);
+    await env.DB.prepare(
+      `INSERT INTO home_exits(id, proxy_name, display_name, kind, status, created_at, updated_at)
+       VALUES('h-stored-hy2', 'Home Stored · hy2', '家宽 Stored', 'catalog', 'active', ?, ?)`,
+    ).bind(t, t).run();
+    const account = await createAccount('stored-hy2-name');
+    for (const target of [{ homeExitId: 'h-stored-hy2' }, { proxyName: 'Home Stored · hy2' }]) {
+      const bound = await admin(`users/${account.user.id}/home-binding`, target, 'PUT');
+      expect(bound.status).toBe(400);
+      expect((await bound.json() as any).error.code).toBe('VALIDATION_ERROR');
+    }
+    const onboarded = await api('ops/users/onboard', {
+      method: 'POST',
+      headers: { 'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL), 'content-type': 'application/json' },
+      body: JSON.stringify({ email: account.email, homeExitId: 'h-stored-hy2' }),
+    });
+    expect(onboarded.status).toBe(400);
+    expect(await env.DB.prepare('SELECT 1 FROM user_home_bindings WHERE user_id = ?').bind(account.user.id).first())
+      .toBeNull();
+  });
+
   it('moves routingSha256 for a routing-only rotation that leaves revision and yaml untouched', async () => {
     const yaml = `proxies:
   - name: "Shared VPS JP"

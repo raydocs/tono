@@ -339,10 +339,12 @@ export async function insertSocks5HomeExit(
 // same user's current binding exposes nothing new.
 export async function assertHomeExitBindable(e: Env, userId: string, homeExitId: string) {
   const row = await e.DB.prepare(
-    `SELECT home_exits.kind, home_exits.socks5_rotation_required_at,
+    `SELECT home_exits.kind, home_exits.proxy_name, home_exits.socks5_rotation_required_at,
             (SELECT home_exit_id FROM user_home_bindings WHERE user_id = ?) AS current_home_exit_id
      FROM home_exits WHERE home_exits.id = ?`,
   ).bind(userId, homeExitId).first<Row>();
+  // A row stored before create and PATCH refused the hy2 suffix.
+  if (row) assertCatalogHomeProxyName(String(row.kind ?? 'catalog'), String(row.proxy_name));
   if (
     row
     && String(row.kind ?? 'catalog') === 'socks5'
@@ -369,12 +371,16 @@ export async function upsertHomeBinding(
     'SELECT created_at FROM user_home_bindings WHERE user_id = ?',
   ).bind(userId).first<Row>();
   if (existing) {
-    await e.DB.prepare(
+    const updated = await e.DB.prepare(
       `UPDATE user_home_bindings
        SET home_exit_id = ?, default_proxy_name = ?, updated_at = ?
        WHERE user_id = ?`,
     ).bind(homeExitId, defaultProxyName, t, userId).run();
-    return { created: false };
+    if (updated.meta.changes) return { created: false };
+    // An unbind landed after the read above. Continue as if it had landed
+    // first: its trigger may have flagged the line for rotation, which the
+    // re-check refuses before the caller writes anything else.
+    await assertHomeExitBindable(e, userId, homeExitId);
   }
   await e.DB.prepare(
     `INSERT INTO user_home_bindings(user_id, home_exit_id, default_proxy_name, created_at, updated_at)

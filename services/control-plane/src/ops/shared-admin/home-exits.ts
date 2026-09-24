@@ -430,23 +430,7 @@ export async function homeExitsResource(
       throw new ApiError(409, 'HOME_EXIT_INACTIVE', 'Home exit must be active before binding');
     }
     const defaultProxyName = await defaultProxyNameField(e, b.defaultProxyName);
-    await assertHomeExitBindable(e, mt[1], homeExitId);
-    const t = now();
-    const existing = await e.DB.prepare(
-      'SELECT created_at FROM user_home_bindings WHERE user_id = ?',
-    ).bind(mt[1]).first<Row>();
-    if (existing) {
-      await e.DB.prepare(
-        `UPDATE user_home_bindings
-         SET home_exit_id = ?, default_proxy_name = ?, updated_at = ?
-         WHERE user_id = ?`,
-      ).bind(homeExitId, defaultProxyName, t, mt[1]).run();
-    } else {
-      await e.DB.prepare(
-        `INSERT INTO user_home_bindings(user_id, home_exit_id, default_proxy_name, created_at, updated_at)
-         VALUES(?, ?, ?, ?, ?)`,
-      ).bind(mt[1], homeExitId, defaultProxyName, t, t).run();
-    }
+    const { created } = await upsertHomeBinding(e, mt[1], homeExitId, defaultProxyName);
     const row = await e.DB.prepare(
       `SELECT
          user_home_bindings.user_id,
@@ -469,10 +453,10 @@ export async function homeExitsResource(
     ).bind(mt[1]).first<Row>();
     await bumpCatalogRevision(e);
     await writeOpsAudit(
-      e, actorEmail, existing ? 'home.replace' : 'home.assign', 'user', mt[1],
-      existing ? `replaced home for ${user.email}` : `assigned home for ${user.email}`,
+      e, actorEmail, created ? 'home.assign' : 'home.replace', 'user', mt[1],
+      created ? `assigned home for ${user.email}` : `replaced home for ${user.email}`,
     );
-    return Response.json({ binding: publicHomeBinding(row!) }, { status: existing ? 200 : 201 });
+    return Response.json({ binding: publicHomeBinding(row!) }, { status: created ? 201 : 200 });
   }
   if (mt && m === 'DELETE') {
     const deleted = await e.DB.prepare(
