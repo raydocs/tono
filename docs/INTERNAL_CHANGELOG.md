@@ -32,6 +32,265 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · mac 独立列车 train/mac2-20260924
+
+- **归属/来源**：G1–G3 macOS 修复汇合（各 PR 归属见其自身条目）；基线 origin/main
+  [d98b217d](https://github.com/raydocs/tono/commit/d98b217d) → 分支 `train/mac2-20260924`，按顺序 `--no-ff` 合入：
+  #550 `fix/helper-recovery-no-user-20260924`（1c1b329f）、#562 `fix/pf-hook-removal-20260924`（097024ec）、
+  #546 `fix/macos-keychain-read-error-20260924`（551a7bdc）、#552 `fix/macos-wake-reconnect-budget-20260924`（f96c589f）、
+  #581 `fix/mac-candidate-telemetry-20260924`（e11e5399）、#566 `fix/helper-orphan-app-gone-20260924`（1f69a391）、
+  #579 `fix/helper-other-user-20260924`（11dd36d2）。无 PR 被排除。提交时未合 main。
+- **缺陷修复**：见各 PR 条目（本条之下）。冲突处理：
+  - Helper 协议版本：各 PR 基于 4.9.0 各自写了临时编号，main 已到 4.22.0。按合入顺序定为合并列车编号
+    4.22.0 → 4.41.0（#550）→ 4.42.0（#562）→ 4.43.0（#566）→ 4.44.0（#579）；最终只有一个版本 **4.44.0**，
+    版本历史注释逐段接在 4.22.0 之后，“A 4.9.0 daemon/reset” 改为对应前一版本号。
+  - `CONTRACT.sha256`：每个 Helper 合并提交都按 `build-core-helper.sh` 的同一文件清单与注释/空行过滤重算。
+    该管线先在 origin/main（`4.22.0 3f2459e2…`）及 #550/#566/#579 分支头上复现了各自记录的哈希。最终为
+    `4.44.0 007d78fcd0bbcb8593597913899aa6d7825b8d9e171dd778c62c17644db0a8e2`。
+  - `main.swift`（#566 × main）：main 已把 `SocketServer` 构造移到 `startHelperDaemon(...)`；保留 main 结构，
+    只在 `UpdateExecutor.startup()` 之后加入 #566 的 `if releaseIfTonoWasRemoved() { exit(0) }`（在恢复 PF 之前）。
+  - `main.swift`（#579 × #566）：#579 的 `socketPath` 删除（连同注释）放进 #566 的 `removeHelperInstallation()`，
+    因此 `--emergency-reset` 与启动时发现 Tono.app 已删除的释放路径都会删掉 socket。
+  - `KillSwitchTests.swift`（#562 × main）：main 的第 8、9 段与 #562 的移除挂钩段都保留，后者编号改为 10。
+  - `UpdateTests.swift`（#566 × main）：main 的 ledger schema 测试与 #566 的两个测试都保留，计数改为 13。
+  - `docs/INTERNAL_CHANGELOG.md`：两侧条目全部保留，只去掉冲突标记。
+- **新增/优化**：无（列车本身）。
+- **工程与测试**：无新测试；各 PR 自带测试全部保留。
+- **验证**：MacBook 列车工作树，未运行 xcodebuild/swift/swiftc（按执行位置规定）。`git grep` 冲突标记为空；
+  `git diff --check origin/main HEAD` 干净；`Localizable.xcstrings` JSON 解析、`Info.plist` `plutil -lint`、
+  `package-macos-test.sh` `bash -n`、`macos-release.yml` YAML 解析均通过；
+  `node --test tooling/scripts/tests/*.test.cjs *.test.mjs` 80 项中 79 通过，1 项失败为
+  `windows-ci-paths.test.cjs` 在本工作树缺 `js-yaml`（无 node_modules，本列车未改动）。**CI pending**：Helper 构建、
+  `--self-test`、root 自测与 XCTest 以本 PR 的 GitHub-hosted `macos-26` CI 为准。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：未在实机验证任何 Helper 行为（删除账户、删除 Tono.app、第二账户、pf.conf 挂钩移除）；
+  4.44.0 对已安装用户需要管理员重装或升级。P3 后续事项见 Issue [#601](https://github.com/raydocs/tono/issues/601)。
+
+## 2026-09-24 · macOS 第二个账户打开 Tono：按名称拒绝，绝不把 Helper 改绑到自己
+
+- **归属/来源**：G1 连接保护（多账户隔离）；macOS App `HelperManager`。内部审查 H19-O-F3 = H19-G-F2（两个 finder
+  独立发现，阅读确认），Issue [#561](https://github.com/raydocs/tono/issues/561)。基线 origin/main
+  [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b) → 分支 `fix/helper-other-user-20260924`；未合 main。
+  与 #425（启动时自动修复）协调：本改动让“属于别的账户”走独立错误，不进入 #425 的 `connectFailed` 修复分支。
+- **缺陷修复**：Helper 只服务一个 macOS 账户，socket 以 0600 交给该账户。第二个账户连接被权限拒绝，App 只报
+  “The authenticated network helper is unavailable”，Retry 永远重复；一旦走到管理员安装（App 附带的 Helper
+  更新、daemon 未登记，或 #425 那类启动时自动修复），批准后 Helper 被改绑到第二个账户，第一个账户的保护随之
+  失控。现在：
+  - 连接失败时若 socket 属于另一个 uid，报 `HelperIPCError.boundToAnotherUser`，文案点名该账户，说明在该账户中
+    使用 Tono，或由管理员运行 `--emergency-reset` 后再迁移。
+  - `installIfNeeded` 在任何探测、弹窗、重装之前做同样检查并拒绝。
+  - root 安装脚本最前面加守卫：allowed-uid 记录的是另一个仍存在的账户时拒绝并返回账户名，App 显示同一错误。
+    账户已不存在（被删除、迁移遗留）时不阻止安装。
+  **临时产品决定（取更严一侧，待所有者确认）**：App 内任何安装（自动或用户点击）都不改绑另一个现存账户的
+  Helper；迁移只能由管理员显式运行 `--emergency-reset`（会释放原账户的保护）。
+- **新增/优化**：无。
+- **工程与测试**：新增 XCTest `HelperBoundAccountTests.testAnotherAccountsHelperIsRefusedByNameAndNotRebound`：
+  绑定真实 Unix socket，以另一个 uid 调 `connectFailure` 必须得到点名的错误；用临时记录文件以 `/bin/sh`
+  实际执行 root 守卫片段：记录为另一个现存账户时非零退出且能解析出账户名，同账户或不存在的 uid 放行。
+  先推送只含测试与现状行为桩的提交让 CI 变红，再推修复。zh-Hans 文案已加入字符串目录。
+- **验证**：本机（编辑机）未编译、未运行 xcodebuild；以本 PR 的 GitHub-hosted `macos-26` CI（TonoTests，含
+  LocalizationCoverageTests）为准。本机确认 `id -un <uid>` 对存在的 uid 输出用户名、对不存在的 uid 退出 1。
+- **候选/发布**：无新包，仅源码。Helper 源码未改，不需要协议版本号。
+- **剩余限制**：未在实机上用两个账户验证；自动重连循环遇到此错误仍按可重试处理（不再弹管理员框，但会反复
+  快速失败）。daemon 未运行（没有 socket）时只能靠 root 守卫在管理员授权之后拒绝，用户会先看到一次授权框。
+  守卫把“记录中的 uid 能解析为账户”当作账户存在。
+- **2026-09-24 审查跟进**（MA-Codex-4，P2；MA-Codex-6 = MA-GROK-3，P2；MA-Codex-3，P3）：修复——
+  (1) 按提示运行 `--emergency-reset` 后 socket 仍属原账户，第二个账户照样被按原账户名拒绝：`--emergency-reset`
+  现在删除 `/var/run/tono-core/service.sock`；App 在 launchd plist 不存在时忽略 socket；安装脚本在停掉旧 daemon 后
+  删除残留 socket（旧版 Helper 做的 reset 留下的 socket 属于别的 uid，新 daemon 会拒绝替换它）。
+  (2) 连接路径把此错误记成 `HELPER_PROTOCOL_MISMATCH`（“请修复”）并继续自动重试：新增错误码
+  `HELPER_BOUND_TO_ANOTHER_ACCOUNT`，界面显示点名账户的错误原文，`failureRequiresUserAction` 暂停自动重试（取代上文
+  “自动重连循环遇到此错误仍按可重试处理”）。(3) P3：root 守卫移到 Helper 更新锁内的安装片段开头，与
+  `--emergency-reset` 同锁，读取的记录就是随后覆盖的记录。Helper 源码因此改动（取代上文“不需要协议版本号”）：
+  4.9.0 → 4.44.0（临时编号，合并时按顺序重编号），`CONTRACT.sha256` 按构建脚本清单重算。测试：两个 XCTest——
+  `testASocketLeftWithoutTheDaemonIsNotAnotherAccountsHelper`、`testAnotherAccountsHelperIsItsOwnFailureAndWaitsForTheUser`；
+  原测试改为显式传入存在的 plist 路径。验证：本机未运行（不做本机 Swift 编译），以 PR CI 为准。剩余限制：Helper 删除
+  socket 没有自测（reset 接线需要真实安装）；新错误码仅 macOS，Windows 分类与运维台文案未同步；与 #566 同改
+  `main.swift` 的移除列表，后合并者须把 `socketPath` 放进 #566 的 `removeHelperInstallation()`。
+- **2026-09-24 第二轮跟进**（核验方 Codex 指出，Opus 读码确认，P3）：修复——账户 B 首次连接失败后，清理路径
+  （`disconnect(releaseKillSwitch: true)` → 发布前修复探测 → 安装被守卫拒绝）用“需要修复、请批准管理员提示”覆盖了
+  点名账户的提示。现在 `repairHelperForExplicitReleaseIfNeeded` 在 Helper 属于另一个账户时直接抛出
+  `boundToAnotherUser`、不做探测和修复，清理路径保留该错误原文。保护行为不变（释放照旧中止）。测试：无（P3）。
+  验证：本机未运行，以 PR CI 为准。剩余限制：完整清理流程的提示文本没有测试覆盖。
+
+## 2026-09-24 · macOS 删除 Tono.app 后，Helper 在下次启动时释放保护并移除自身
+
+- **归属/来源**：G1 连接保护（删除 App 后的出口）；macOS `tono-core-helper`。内部审查 H19-O-F1 = H19-G-F1
+  （两个 finder 独立发现，阅读确认），Issue [#555](https://github.com/raydocs/tono/issues/555)。分支
+  `fix/helper-orphan-app-gone-20260924`，叠在 #550（H19-O-F4）与 H19-O-F6 分支之上；未合 main。
+- **缺陷修复**：Helper 是 `/Library/LaunchDaemons` 下 RunAtLoad + KeepAlive 的 daemon，每次启动都由
+  `restoreAtLaunch` 重新加载已 arm 的 PF 状态，从不检查还有没有 Tono App。用户在保护开启时退出（设计上保留）或
+  崩溃后，把 Tono.app 拖进废纸篓（macOS 唯一的移除方式），此后每次开机都断网，唯一的恢复说明在已删除的 App 里。
+  现在每次 Helper 启动（执行器恢复之后、开 socket 之前）检查：`/Applications` 里没有 Tono（按登记名
+  `Tono.app`，或任何声明 `com.raydocs.tono` 的改名副本），并且更新账本里没有未完成的尝试时，按
+  `--emergency-reset` 同一路径先停残留 Core、恢复 DNS、解除 PF，成功后撤回 pf.conf 挂钩与备份、删除安装文件，
+  最后 `launchctl bootout` 卸载自己。
+  **临时产品决定（取更严、不泄漏的一侧，待所有者确认）**：只要 App 可能回来就保持 fail-closed——App 仍在
+  `/Applications`、或有未完成的更新可能把它放回、或 `/Applications` 读不出来，都不释放；只在 Helper 启动时判断，
+  运行中 App 被移走不会立刻打开出口，要等下次重启。移除后留给用户的出口是“重启一次”，不依赖已删除的 App。
+  废纸篓里的 App 不算“仍可用”：Helper 不检查 `~/.Trash`（受 TCC 保护，daemon 无法可靠读取）。
+  Helper 协议版本 4.42.0 → 4.43.0（临时编号，合并时按顺序重编号），`CONTRACT.sha256` 按构建脚本清单重算。
+- **新增/优化**：`--emergency-reset` 的移除步骤抽成 `removeHelperInstallation()` 与启动释放共用，行为不变。
+- **工程与测试**：`--update-self-test`（root，CI privileged-tests）新增一例，用临时 Applications 目录与临时账本驱动
+  `releaseIfTonoWasRemoved`：改名的 Tono 副本、未完成的更新、读不出的目录都不释放；无 App 且无未完成更新时释放。
+  先推送只含测试与恒返回 false 的函数（即现状）的提交让 CI 变红，再推修复。
+- **验证**：本机（编辑机）未编译；以本 PR 的 GitHub-hosted `macos-26` CI 为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：未在实机上删除 App 并重启验证；`launchctl bootout` 由 daemon 自己发起、在 SIGTERM 下结束自身
+  的时序，以及“登录项与扩展”对删除 App 后这个旧式 daemon 的处理都需要实机确认。自测不执行真实的
+  DNS/PF 释放与 bootout（复用已有的 `runEmergencyDisarm`）。开发机若只从 DerivedData 运行 App、`/Applications`
+  没有 Tono，重启后 Helper 会自行移除，下次打开需重新授权安装。用户替换 App 的同一秒 Helper 恰好重启时，
+  会按“已移除”处理。
+- **2026-09-24 审查跟进**（MA-Codex-1 = MA-GROK-1，P2；MA-Codex-2，P3）：修复——原先只看 `/Applications`，
+  把运行中的 App 移到 `~/Applications` 后 Helper 一重启就释放保护并移除自身（取代上文“运行中 App 被移走……要等下次
+  重启”）。现在以下任一都算 Tono 仍在：有进程满足 Helper 的客户端签名要求（`TonoPeerAuthorizer.clientRequirementText`，
+  先按 `*.app/Contents/MacOS/Tono` 路径筛选；存活但查不到签名的也算在）；绑定用户的 `~/Applications` 里有 Tono.app 或
+  改名副本（该目录不存在则跳过，其他读取失败算在）。P3：`.app` 的 Info.plist 缺失、读不出或解析失败一律算 Tono 在。
+  4.43.0 仍未发布，按 b6b8df0d 的先例只改版本说明并重算 `CONTRACT.sha256`，不再升号。测试：`--update-self-test`
+  新增一例（运行中的客户端、`~/Applications/Tono.app` 都不释放；托管 runner 上真实进程扫描必须为 false），原例改为
+  显式注入空的用户目录与“无进程”，保持与宿主无关。验证：本机未运行（不做本机 Swift 编译），以 PR CI 为准。
+  剩余限制：P3 按更严一侧处理，`/Applications` 里任何没有 `Contents/Info.plist` 的 `.app`（例如 Apple 芯片上的
+  iOS 包装 App）都会让 Helper 不再自行移除，只能用 `--emergency-reset`；只看绑定用户的 `~/Applications`。
+- **2026-09-24 第二轮跟进**（核验方 Codex 指出，Opus 读码确认，P2）：修复——`proc_pidpath` 失败时原先直接跳过，
+  没有确认进程已退出。现在进程扫描抽成 `tonoClientAmong`：路径或签名查询失败而进程仍存活（`proc_pidinfo`
+  BSD 信息可取且非僵尸）即算 Tono 在，只有已退出的 pid 才跳过。测试：扩展原 `--update-self-test` 用例，注入
+  “路径查询失败且存活”“签名查询失败且存活”必须保留保护，“已退出”“签名不符”不算。验证：本机未运行，以 PR CI 为准。
+  剩余限制：仓库里没有 App 之外可取得的 macOS 恢复说明（`--emergency-disarm/--emergency-reset` 只写在 App 的支持页），
+  因上述更严规则而不能自行移除的机器，在删除 App 后只能由支持人员提供命令；托管 runner 上若有存活但路径查询失败的
+  进程，真实扫描断言会失败，这同样意味着该类机器上 Helper 不会自行移除。
+- **2026-09-24 第三轮跟进**（核验方 Codex 指出，P2）：修复——存活查询的任何失败都被当成“已退出”，签名校验的任何
+  非成功结果都被当成“不是 Tono”。现在只有确定的结论才跳过：`proc_pidinfo` 返回 ESRCH、`kill(pid, 0)` 返回 ESRCH
+  或进程为僵尸才算已退出；只有 `errSecCSReqFailed` 才算签名不符。其他查询错误（含未签名、签名失效、代码对象
+  不可读）一律视为不确定，按存在处理。测试：扩展同一 `--update-self-test` 用例，注入“存活查询出错”“签名校验出错”
+  必须保留保护，“确定已退出”“确定不符”才跳过。验证：本机未运行，以 PR CI 为准。剩余限制：`*.app/Contents/MacOS/Tono`
+  路径下未签名或签名失效的存活进程也会阻止 Helper 自行移除。
+- **2026-09-24 第四轮跟进**（mac2 train PR #605，run 36040386937，privileged-tests 失败，与上文预警一致）：修复——
+  CI 主机上有存活进程的路径/签名查询失败，被当成 Tono，真实扫描断言失败；真机上同样会让 Helper 永不自行移除。
+  现在只有内核短名（`proc_name`，即 p_name/p_comm，由 exec 按可执行文件名设定，删除 bundle 不改变）等于 `Tono`
+  的进程才是候选；非候选即使查询失败也跳过。候选的路径或签名查询不确定时仍按存在处理；确定已退出或
+  `errSecCSReqFailed` 才跳过。测试：扩展同一用例，加入“非候选且查询全失败”“名称查询失败”必须跳过；真实扫描断言保留。
+  验证：本机未运行，以 PR CI 为准。剩余限制：存活进程的名称查询本身失败时按非候选跳过（不能再算作存在）；
+  被改名为别的短名的 Tono 可执行文件不被识别（改名会破坏签名，正常安装不会出现）。
+
+## 2026-09-24 · macOS 内部候选版默认发送分类连接失败记录
+
+- **归属/来源**：G1–G3 候选验收的现场证据；影响 macOS App（`AccountSession`、设置页、Info.plist）、
+  `package-macos-test.sh` 与 `macos-release.yml` 的 `candidate_only` 路径。所有者决定 2026-09-24：内部候选/测试版默认开启
+  分类连接失败遥测，公开发布版保持现状（关）。基线 origin/main [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b)，
+  分支 `fix/mac-candidate-telemetry-20260924`，Issue #576，未合 main。
+- **缺陷修复**：无（行为变更来自所有者决定）。
+- **新增/优化**：a68d4e76 起 `reportConnectFailure` 与保护快照共用默认关闭的同意开关，升级时 v2 迁移会把旧的开启重置为关；
+  候选签名路径与正式发布构建同一 Release 配置，包内没有渠道标记，测试者失败连接从未到达运维。现在：构建设置 `TONO_BUILD_CHANNEL` 展开到 Info.plist `TonoBuildChannel`，只有 `candidate_only` 签名运行设为
+  `internal`；打包脚本校验产物中的渠道与请求一致（公开版必须为空）。内部版在未开启快照时也发送分类记录（阶段、错误代码、版本、
+  节点、OS、传输、路径延迟），错误原文与 Core 日志行仍只在用户显式开启后附带。默认值来自包而不是 UserDefaults，v2 重置无法在升级时
+  关掉它。内部版设置 → 隐私显示一行提示（含简体中文）。公开版逻辑不变。
+- **工程与测试**：一个 XCTest（`testInternalBuildsKeepClassifiedFailureReportsThroughTheUpgradeReset`）。
+- **验证**：本机 `ruby tooling/scripts/tests/macos-candidate-workflow.test.rb` 通过、`sh -n package-macos-test.sh` 通过、
+  xcstrings JSON 可解析；Swift 未在本机编译（按执行位置规定），以 PR CI 的 XCTest 为准，红→绿运行号见 PR。
+- **候选/发布**：无新包，仅源码；下一次 `candidate_only` 签名运行才会带内部标记。
+- **剩余限制**：未在真实签名候选包上验证提示与上报；快照窗口本身仍默认关闭；
+  维护者本地用 `package-macos-test.sh` 打的测试包需显式 `TONO_BUILD_CHANNEL=internal` 才算内部版。
+- **2026-09-24 审查跟进**（DG-OpenAI-1/DG-grok-1，P2）：修复——内部版原先没有任何关闭方式（快照开关默认即关，不能兼作退出）。
+  新增独立键 `internalFailureReportsOptedOut`，`failureReportScope` 在内部版且已保存退出时返回 nil；设置 → 隐私的提示行改为
+  开关「连接失败上报」（默认开，含简体中文）。已开启快照的用户仍按快照同意发送完整记录。测试：一个 XCTest
+  （`testAnInternalBuildsSavedOptOutStopsClassifiedFailureReports`；旧代码无该键与参数，编译失败，旧逻辑对内部版恒返回
+  `.classified`）。验证：本机未运行（不做本机 Swift 编译），以 PR CI 为准。剩余限制：开关只控制内部版默认上报，不影响快照。
+- **2026-09-24 第二轮跟进**（核验方 Codex 指出，Opus 读码确认，P2）：修复——同意只在入口检查一次，已通过检查的报告
+  在等待 token 刷新或网络重试期间用户关闭开关后仍会发送。现在 `reportConnectFailure` 把
+  `failureReportStillAllowed` 作为 `requestIsCurrent` 传给 API，每次发送前重读开关（完整记录还要求快照同意仍开）。
+  测试：一个 XCTest（`testAPendingFailureReportStopsOnceTheUserOptsOut`，旧代码无此判定）。验证：本机未运行，以 PR CI 为准。
+  剩余限制：已发出的请求不撤回。
+
+## 2026-09-24 · macOS 睡眠后唤醒重连获得新的重复失败预算
+
+- **归属/来源**：G1 连接恢复；macOS `AppState.prepareForSystemSleep()`。内部审查 H18-G-F1（交叉厂商核实降级为
+  已暂停会话的恢复预算问题，非永久锁死），Issue #542。基线 origin/main 8dc79a5b → 分支
+  `fix/macos-wake-reconnect-budget-20260924`；提交时未合 main。
+- **缺陷修复**：同一失败（阶段 + 文案）连续三次后，保护重连暂停自动重试。睡眠只清显示用的尝试次数，
+  保留失败计数和签名；唤醒 `connect()` 只清暂停标志。睡前已有两三次同样失败的 Protected Offline Mac，
+  唤醒后第一次同样失败就再次暂停，唤醒任务已返回，没有任何重试在排程（PF 保持，不泄漏），要等网络变化
+  或用户点 Retry now / Restore internet。现在睡眠把会话交给唤醒恢复时，清掉重复失败计数、签名和可由网络变化
+  解除的暂停，与网络变化 kick 的处理一致；需要用户处理的暂停（管理员授权被拒、helper 被拒）保留；显式
+  Restore internet 进行中时睡眠在此之前返回，行为不变。
+- **新增/优化**：无。
+- **工程与测试**：`AppStateSleepTests` 新增一个 XCTest `testSleepGivesWakeAFreshRepeatedFailureBudget`：
+  Protected Offline、PF 未武装（睡眠排程的 bootstrap 收紧在未武装时直接返回，不触达 helper）、同一失败三次
+  且可由网络变化解除的暂停；调用 `prepareForSystemSleep()`，断言计数归零、签名清空、两个暂停标志清除、
+  唤醒恢复仍被请求。只含测试的提交 a1cf8692 在 GitHub-hosted macOS CI run
+  [35981761856](https://github.com/raydocs/tono/actions/runs/35981761856) 实际跑红：只有该测试失败
+  （计数仍为 3、签名保留、两个暂停标志保留）。
+- **验证**：本机（编辑机）未运行 xcodebuild/swift；TonoTests 委托本 PR 的 GitHub-hosted `macos-26` CI，结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：测试驱动睡眠一侧的状态，未模拟唤醒后的实际重连与失败；睡眠通知丢失（只收到唤醒）时不重置。
+  唤醒后首次失败文案与睡前相同的频率未在实机测量。唤醒 `connect()` 会清除需要用户处理的暂停标志，这是既有行为，
+  本修复不改。
+
+## 2026-09-24 · macOS 续期时钥匙串读取失败不再当成会话被拒
+
+- **归属/来源**：G2 客户端账户状态；macOS `TonoAPIClient` 刷新令牌读取、`KeychainStore`。内部审查 H18-O-F3
+  （交叉厂商核实 confirmed，启动变体收窄），Issue #540。基线 origin/main 8dc79a5b → 分支
+  `fix/macos-keychain-read-error-20260924`；提交时未合 main。
+- **缺陷修复**：access token 过期（1 天）后续期要读钥匙串里的 refresh token。`currentRefreshToken()` 用 `try?`
+  读取，钥匙串锁定或不允许交互等任何非 `errSecItemNotFound` 状态都变成 nil，`refreshAccessToken()` 随即抛
+  `.unauthorized`，请求没发到服务端。于是周期账户重读把正常账户置为 `.suspended`；启动恢复（第一次读成功、
+  续期时第二次读失败）和遥测上传走账户丢失路径，删掉仍有效的 refresh token 并登出。现在只有"条目不存在"
+  表示无会话；其他钥匙串状态作为本地可重试错误抛出：账户重读和遥测按瞬时失败等下个周期，启动恢复进入
+  普通错误页（PF 保持），都不置 suspended、不登出、不释放保护。登出路径读不到令牌时仍只删本地副本，行为不变。
+- **新增/优化**：无。
+- **工程与测试**：`KeychainStore` 增加 `SecItemCopyMatching` 注入点（默认值不变）。新增
+  `RefreshTokenReadFailureTests.testUnreadableRefreshTokenDoesNotSuspendTheAccount`（一个 XCTest）：
+  读取返回 `errSecInteractionNotAllowed`，内存中无 access token，调用 `refreshAccount()`；断言状态仍为 `.ready`
+  且没有发出任何请求。只含注入点和测试的提交 c70616cd 在 GitHub-hosted macOS CI run
+  [35981508237](https://github.com/raydocs/tono/actions/runs/35981508237) 实际跑红：只有该测试失败，
+  `("suspended") is not equal to ("ready")`。
+- **验证**：本机（编辑机）未运行 xcodebuild/swift；TonoTests 委托本 PR 的 GitHub-hosted `macos-26` CI，结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：哪些实际钥匙串状态（睡眠锁定、智能卡、钥匙串密码不同步）会触发未在实机测量。启动恢复遇到该错误显示
+  通用错误文案（`KeychainStore.Error` 没有本地化描述），需用户点重试。#516、#535 给 `.unauthorized`/`.suspended` 增加
+  后果，本修复与它们无文件重叠。
+
+## 2026-09-24 · macOS Helper 完整移除时撤回 /etc/pf.conf 挂钩并删除 .tono-backup
+
+- **归属/来源**：G1 连接保护（移除后恢复原状）；macOS `tono-core-helper`。内部审查 H19-O-F6（跨厂商核实：
+  降级为残留问题），Issue [#551](https://github.com/raydocs/tono/issues/551)。分支 `fix/pf-hook-removal-20260924`，
+  叠在 #550（H19-O-F4，`fix/helper-recovery-no-user-20260924`）之上；未合 main。
+- **缺陷修复**：首次 arm 会在 `/etc/pf.conf` 写入带标记的挂钩（`# BEGIN/END TONO KILL SWITCH`），并保存
+  `/etc/pf.conf.tono-backup` 与 `/etc/hosts.tono-backup`；`--emergency-reset` 解除保护后只删除 plist、allowed-uid
+  和两个可执行文件，挂钩与两个备份永远留下。现在 reset 在 PF 已释放之后，只去掉标记块（及首次 arm 在其后
+  留下的空行），保留标记外的每一行，不把旧备份覆盖回去；挂钩去掉后再删除两个备份（标记损坏时保留备份以便
+  手工修复）。这一步失败只报告，不阻止移除：留下的挂钩只加载已解除的空锚点文件。普通 disarm 不变，仍保留挂钩。
+  Helper 协议版本 4.41.0 → 4.42.0（临时编号，合并时按顺序重编号），`CONTRACT.sha256` 按构建脚本清单重算。
+- **新增/优化**：无。
+- **工程与测试**：把 arm 对 `/etc/pf.conf` 的纯文本变换抽成 `hookedMainConfiguration`（行为不变），
+  `--lifecycle-self-test`（root，CI privileged-tests）第 8 段在临时目录用一次 arm 与两次 arm 的真实输出加上
+  用户后加的一行做夹具，断言移除后恰好回到“原文件 + 用户行”，且两个备份都被删除。先推送只含测试与空实现的
+  提交让 CI 变红，再推修复。
+- **验证**：本机（编辑机）未编译；以本 PR 的 GitHub-hosted `macos-26` CI 为准。本机用 Python 按同一算法模拟了
+  默认 pf.conf 的一次/两次 arm 往返。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：未在实机上跑 reset；自测不覆盖 `runEmergencyResetLocked` 的接线本身（它需要真实安装）。
+  没有重载内核里的主规则集（下次开机按去掉挂钩的文件加载），也没有删除 `/Library/Application Support/Tono`
+  下的状态文件。文件无尾换行、或挂钩位于没有任何 anchor/pass 行的文件末尾时，结果可能多一个空行或尾换行。
+
+## 2026-09-24 · macOS 绑定用户被删除后，Helper 紧急恢复命令仍能释放保护
+
+- **归属/来源**：G1 连接保护（恢复出口）；macOS `tono-core-helper`。内部审查 H19-O-F4（跨厂商核实：confirmed），
+  Issue [#545](https://github.com/raydocs/tono/issues/545)。基线 origin/main
+  [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b) → 分支 `fix/helper-recovery-no-user-20260924`；未合 main。
+- **缺陷修复**：`--emergency-disarm`（以及调用它的 `--emergency-reset`）在恢复 DNS、解除 PF 之前先构造
+  `CoreManager`，它的初始化用 `getpwuid` 解析绑定用户的 home 目录。绑定的 macOS 账户被删除后解析失败，两条文档化
+  恢复命令都只打印“PF remains fail-closed”，reset 也不会移除安装。现在 `CoreManager` 初始化不再查账户，只在
+  start/sync 校验配置目录时解析 home；恢复仍用原有的 pid 文件加进程身份核对停止残留 Core。Helper 协议版本
+  4.9.0 → 4.41.0（临时编号，合并时按顺序重编号），`CONTRACT.sha256` 按构建脚本清单重算。
+- **新增/优化**：无。
+- **工程与测试**：`--core-lifecycle-self-test`（root，CI privileged-tests）新增一段：为一个不存在的 uid 构造
+  `CoreManager` 必须成功，且为它启动 Core 仍被拒绝。先单独推送测试提交让 CI 变红，再推修复。
+- **验证**：本机（编辑机）未编译、未运行 swiftc/xcodebuild；结果以本 PR 的 GitHub-hosted `macos-26` CI 为准
+  （Helper 构建 + `--self-test` + root 自测）。本机只按 `build-core-helper.sh` 的同一清单重算了 `CONTRACT.sha256`。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：未在实机上删除账户验证。绑定用户不存在时 daemon 本身仍无法启动（`SocketServer` 需要该用户的组），
+  App 侧也无法修复；本修复只保证文档化的 root 恢复命令可用，`--emergency-reset` 之后重新打开 Tono 会按当前用户重装。
+
 ## 2026-09-24 · Windows 合并列车 train/win-20260924
 
 - **归属/来源**：G1–G3 Windows 修复汇合（各 PR 归属见其自身条目）；基线 origin/main
