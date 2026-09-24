@@ -623,7 +623,7 @@ async function exitCredentialRoster(e: Env, timestamp: number) {
               credentials.client_uuid AS client_uuid
          FROM exit_credentials credentials
          JOIN users ON users.id = credentials.user_id
-        WHERE users.status = 'active'
+        WHERE credentials.retired_at IS NULL AND users.status = 'active'
           AND (users.expires_at IS NULL OR users.expires_at > ?)
           AND (users.quota_bytes IS NULL OR users.usage_bytes < users.quota_bytes)
           AND (

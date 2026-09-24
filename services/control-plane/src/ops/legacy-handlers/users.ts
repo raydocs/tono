@@ -9,6 +9,7 @@ import {
   bumpCatalogRevision,
   enqueueRefreshCatalogForUser,
   exitClientUUID,
+  legacyExitCredentialRetired,
 } from '../../catalog';
 import {
   publicHomeBinding,
@@ -246,6 +247,16 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
     }
   }
   const createdAt = now();
+  let exitIdentityIssued = false;
+  if (user) {
+    // Before the first write, so a refusal leaves nothing behind. An account
+    // whose shared credential was retired by a device revocation (0077) is
+    // served per-device credentials only; asking for the shared one would 409.
+    if (!(await legacyExitCredentialRetired(e, String(user.id)))) {
+      await exitClientUUID(e, String(user.id));
+    }
+    exitIdentityIssued = true;
+  }
   await e.DB.prepare(
     'INSERT OR IGNORE INTO signup_allowlist(email, created_at) VALUES(?, ?)',
   ).bind(address, createdAt).run();
@@ -255,10 +266,7 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
   const pendingProfile = !user && storeProfile;
   let binding = null;
   let account = null;
-  let exitIdentityIssued = false;
   if (user) {
-    await exitClientUUID(e, String(user.id));
-    exitIdentityIssued = true;
     if (b.notes !== undefined || b.contact !== undefined || b.wechatId !== undefined) {
       await e.DB.prepare(
         `UPDATE users SET
