@@ -110,6 +110,11 @@
   AppState）；上文测试改名 `testSignInKeepsTheArmedAndResumeIntentsUnlessTheHelperConfirmsRelease`，经
   真实 AppState 与 `refreshKillSwitchStatus` 替身同时断言两个意图。旧代码缺新函数无法编译，未跑红；
   本机未构建，以 PR 的 `macos-26` CI 为准。
+- **后续（2026-09-24，N1 复核残留：Codex 发现）**：原生更新以 Protected Offline 恢复时 `isArmed` 为 true
+  但 resume 意图为 false；之后启动 401、root 紧急解除、不重启直接登录，检查因只看 resume 意图而跳过，
+  下次睡眠仍按遗留的 `isArmed` 重新 arm。登录前检查现在在 resume 意图或 `isArmed` 任一为真时都运行，
+  仍只有 helper 确认释放才清除。同一测试追加"只有 armed 意图"一段；在 7b95aed4 上该段断言会失败
+  （检查被跳过，`isArmed` 保持 true），系推理，未跑红；本机未构建，以 PR 的 `macos-26` CI 为准。
 
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 

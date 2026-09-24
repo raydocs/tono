@@ -579,9 +579,11 @@ extension AccountSession {
     /// helper: AppState accepts a confirmed release since then (the
     /// root emergency disarm), clearing the armed intent, and the resume
     /// intent retires with it. An unreachable or rejecting helper is no
-    /// evidence of a release, and both intents stand.
+    /// evidence of a release, and both intents stand. The armed intent alone
+    /// is enough to ask: a Protected Offline native-update recovery arms it
+    /// without a resume intent.
     func retireResumeIntentIfProtectionReleased() async {
-        guard shouldResumeProtection else { return }
+        guard shouldResumeProtection || KillSwitchService.isArmed else { return }
         if await protectionReleaseConsumer() {
             shouldResumeProtection = false
         }

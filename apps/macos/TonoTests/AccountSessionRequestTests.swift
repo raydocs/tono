@@ -738,6 +738,10 @@ final class AccountSessionRequestTests: XCTestCase {
         await account.retireResumeIntentIfProtectionReleased()
         XCTAssertFalse(account.shouldResumeProtection, "a confirmed release must not be re-armed by the next sign-in")
         XCTAssertFalse(KillSwitchService.isArmed, "a confirmed release must not be re-armed at the next sleep")
+        // A Protected Offline native-update recovery arms without a resume intent.
+        KillSwitchService.isArmed = true
+        await account.retireResumeIntentIfProtectionReleased()
+        XCTAssertFalse(KillSwitchService.isArmed, "an armed intent alone must still meet a confirmed release")
     }
 
     private func adoptReplacementCredentials(_ account: AccountSession) async throws {
