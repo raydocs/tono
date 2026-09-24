@@ -598,31 +598,6 @@ fn register_recovery_with(store: &Store, register: impl FnOnce(&Path) -> Result<
     register(&store.attempt_dir()?)
 }
 
-/// The ONSTART task [`register_consumed_recovery`] creates.
-pub const RECOVERY_TASK_NAME: &str = "Tono Update Recovery v1";
-
-/// Remove the SYSTEM boot task. The executor retires it once the committed
-/// cleanup ran, as macOS retires its launchd job at commit; a final uninstall
-/// retires it after WFP removal is proven. A task that is already gone is not
-/// an error. Same scheduler binary as the registration.
-pub fn retire_recovery_task() -> Result<()> {
-    let schtasks = Path::new("C:\\Windows\\System32\\schtasks.exe");
-    let deleted = std::process::Command::new(schtasks)
-        .args(["/Delete", "/TN", RECOVERY_TASK_NAME, "/F"])
-        .output()?;
-    if deleted.status.success() {
-        return Ok(());
-    }
-    let present = std::process::Command::new(schtasks)
-        .args(["/Query", "/TN", RECOVERY_TASK_NAME])
-        .output()?;
-    ensure!(
-        !present.status.success(),
-        "could not retire the update recovery task"
-    );
-    Ok(())
-}
-
 /// Called by NSIS before live or repair writes. Only the verified package in
 /// this attempt's private directory can use extraction mode; no live permission.
 pub fn unpack_gate(package: &Path) -> Result<()> {
@@ -645,6 +620,31 @@ pub fn unpack_gate(package: &Path) -> Result<()> {
     ensure!(
         file_digest(&package)? == target(&a.manifest).artifact_sha256,
         "NSIS package changed"
+    );
+    Ok(())
+}
+
+/// The ONSTART task [`register_consumed_recovery`] creates.
+pub const RECOVERY_TASK_NAME: &str = "Tono Update Recovery v1";
+
+/// Remove the SYSTEM boot task. The executor retires it once the committed
+/// cleanup ran, as macOS retires its launchd job at commit; a final uninstall
+/// retires it after WFP removal is proven. A task that is already gone is not
+/// an error. Same scheduler binary as the registration.
+pub fn retire_recovery_task() -> Result<()> {
+    let schtasks = Path::new("C:\\Windows\\System32\\schtasks.exe");
+    let deleted = std::process::Command::new(schtasks)
+        .args(["/Delete", "/TN", RECOVERY_TASK_NAME, "/F"])
+        .output()?;
+    if deleted.status.success() {
+        return Ok(());
+    }
+    let present = std::process::Command::new(schtasks)
+        .args(["/Query", "/TN", RECOVERY_TASK_NAME])
+        .output()?;
+    ensure!(
+        !present.status.success(),
+        "could not retire the update recovery task"
     );
     Ok(())
 }
