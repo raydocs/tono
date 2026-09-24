@@ -531,6 +531,50 @@ def discard_roster_cache(path: Path) -> None:
         raise Refusal(f"the saved roster could not be removed: {error}") from error
 
 
+def node_disabled_answer(error: BaseException) -> bool:
+    """Whether the control plane answered 403 EXIT_NODE_DISABLED.
+
+    Reserved for PR #375, which keeps that bounded error body as `tono_body`
+    and raises NodeDisabled from the HTTPError; either form counts. Without
+    #375 no error carries the body and this is always false; such a 403 is
+    still an answer and discards the copy like any other.
+    """
+    for candidate in (error, error.__cause__):
+        if not isinstance(candidate, urllib.error.HTTPError) or candidate.code != 403:
+            continue
+        try:
+            payload = json.loads(getattr(candidate, "tono_body", b"") or b"")
+        except (ValueError, UnicodeDecodeError):
+            continue
+        detail = payload.get("error") if isinstance(payload, dict) else None
+        if isinstance(detail, dict) and detail.get("code") == "EXIT_NODE_DISABLED":
+            return True
+    return False
+
+
+def fetch_roster_or_discard_cache(base: str, token: str, cache: Path):
+    """fetch_roster, deleting the saved roster on any answer from the control plane.
+
+    The copy goes here, before any caller's handler runs. A disabled node
+    withdraws every client; if its copy survived, the next network error would
+    reinstall them all from it. For that answer a failed removal is reported
+    but does not replace the error, so the withdrawal still runs.
+    """
+    try:
+        return fetch_roster(base, token)
+    except Exception as error:
+        if node_disabled_answer(error):
+            try:
+                discard_roster_cache(cache)
+            except Refusal as refusal:
+                print(f"{refusal}; this disabled node still holds its saved roster",
+                      file=sys.stderr)
+            raise
+        if not control_plane_unreachable(error):
+            discard_roster_cache(cache)
+        raise
+
+
 def save_roster_cache(path: Path, node_id: str, observed_at: int,
                       roster: list[dict[str, str]], retire_shared_legacy: bool) -> str | None:
     """Keep the roster just verified, for an Xray restart during an outage.
@@ -1114,10 +1158,10 @@ def run_outage_round(path: Path, state: dict, source: str, binary: Path,
 
     Xray loses every API-added client when it restarts, so without this a
     restart during an outage locks out every account on the node until the
-    control plane returns. The saved roster is the list the running Xray held
-    before the restart and nothing newer, so reinstalling it grants no one
-    anything a live process would not have kept. A copy older than a day, or
-    one that is missing or unreadable, restores nothing.
+    control plane returns. The saved roster is the newest one this node
+    fetched (saved before it was enforced), so it names no account a fetched
+    roster had already removed. A copy older than a day, or one that is
+    missing or unreadable, restores nothing.
 
     Counters are folded either way, so a restart cannot forgive the usage
     before it. Reports need the control plane's roster clock, so the growth is
@@ -1183,10 +1227,11 @@ def run_once(path: Path) -> None:
     retire_override = env("TONO_RETIRE_SHARED_LEGACY", required=False)
     cache = roster_cache_path(path)
     try:
-        node_id, observed_at, roster, server_retire_shared_legacy = fetch_roster(base, token)
+        node_id, observed_at, roster, server_retire_shared_legacy = fetch_roster_or_discard_cache(
+            base, token, cache,
+        )
     except Exception as error:
         if not control_plane_unreachable(error):
-            discard_roster_cache(cache)
             raise
         run_outage_round(path, state, source, binary, commands, address, tag,
                          retire_override, error)

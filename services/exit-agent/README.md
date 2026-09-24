@@ -89,11 +89,20 @@ folding Xray counters into the durable totals, and exits non-zero without any
 acknowledgement. The next round that reaches the control plane reports the
 growth. An older, missing or unreadable copy restores nothing, and the round
 refuses with the reason. Any other control-plane answer, including a rejected
-token, an invalid roster or another node's roster, deletes the copy first.
-The saved roster is never newer than the last one the node enforced, so it
-cannot reinstate an account that roster had already removed. The restore takes
-effect on the next timer run after the Xray restart. hy2's allowlist is a file
-and survives restarts, so it is not touched during an outage.
+token, an invalid roster or another node's roster, deletes the copy first; the
+403 `EXIT_NODE_DISABLED` answer for a disabled node deletes it before the
+node's clients are withdrawn. The copy is saved before the roster is
+enforced, so it is never older than the newest roster the node has fetched: it
+cannot reinstate an account a fetched roster had already removed. A revocation
+issued while the control plane is unreachable is not seen, so an Xray restart
+within 24 hours of the last successful fetch reinstalls that account (a running
+Xray keeps it in memory just the same). The restore takes effect on the next
+timer run after the Xray restart. hy2's allowlist is a file and survives
+restarts, so it is not touched during an outage.
+
+The copy holds every client UUID in plain text; these are the VLESS
+credentials (hy2's allowlist keeps only hashes). It is mode 0600 and owned by
+the agent's user; keep it out of VPS snapshots and backups.
 
 Run the regression suite with:
 

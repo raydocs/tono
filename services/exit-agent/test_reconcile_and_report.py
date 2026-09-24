@@ -1208,13 +1208,22 @@ class ControlPlaneOutage(unittest.TestCase):
         # Xray drops API-added clients when it restarts. While the control plane
         # cannot be reached, the node reinstalls its last verified roster for at
         # most a day and keeps folding counters. Any answer from the control
-        # plane, here a rejected token, discards the copy.
+        # plane, here the 403 EXIT_NODE_DISABLED a disabled node gets (#375),
+        # discards the copy before anything handles that answer.
+        import io
         client_uuid = "11111111-2222-4333-8444-555555555555"
         label = agent.client_label("usr_a", "dev_a", client_uuid)
         roster = [{"userId": "usr_a", "clientUUID": client_uuid, "deviceId": "dev_a"}]
         online = ("node-under-test", 1_700_000_000_000, roster, False)
         down = urllib.error.URLError("control plane unreachable")
-        rejected = urllib.error.HTTPError("https://control.example", 401, "Unauthorized", {}, None)
+        real_fetch = agent.fetch_roster
+        disabled_body = json.dumps({"error": {"code": "EXIT_NODE_DISABLED"}}).encode()
+
+        class DisabledOpener:
+            def open(self, request, timeout=None):  # noqa: ARG002
+                raise urllib.error.HTTPError(
+                    request.full_url, 403, "Forbidden", {}, io.BytesIO(disabled_body),
+                )
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         path = Path(directory.name) / "state.json"
@@ -1249,6 +1258,8 @@ class ControlPlaneOutage(unittest.TestCase):
              patch.object(agent, "fetch_roster") as fetch, \
              patch.object(agent, "installed_clients") as listing, \
              patch.object(agent, "add_inbound_user", side_effect=fake_add), \
+             patch.object(agent, "run_xray", return_value=agent.subprocess.CompletedProcess(
+                 [], 0, "", "")), \
              patch.object(agent, "read_counters") as counters, \
              patch.object(agent, "xray_start_marker") as marker, \
              patch.object(agent, "acknowledge_roster"), \
@@ -1257,7 +1268,7 @@ class ControlPlaneOutage(unittest.TestCase):
              patch.object(agent.time, "time") as clock:
             def run(at, outcome, listed, reading, start, raises=None):
                 clock.return_value = at
-                fetch.side_effect = [outcome]
+                fetch.side_effect = outcome if callable(outcome) else [outcome]
                 listing.return_value = listed
                 counters.return_value = {label: reading}
                 marker.return_value = start
@@ -1280,7 +1291,11 @@ class ControlPlaneOutage(unittest.TestCase):
             self.assertEqual(added, [label, label])
             run(1_090_060, online, set(), 300, "boot:2")
             self.assertEqual(delivered[-1]["totalBytes"], 5_300)
-            run(1_090_120, rejected, set(), 300, "boot:2", raises=urllib.error.HTTPError)
+            # The real fetch path, so a merged #375 raises NodeDisabled here and
+            # withdraws the clients; either way the copy must be gone.
+            with patch.object(agent.urllib.request, "build_opener", return_value=DisabledOpener()):
+                run(1_090_120, real_fetch, set(), 300, "boot:2",
+                    raises=(urllib.error.HTTPError, agent.Refusal))
             self.assertFalse(cache.exists())
             run(1_090_180, down, set(), 300, "boot:2", raises=agent.Refusal)
             self.assertEqual(added, [label, label, label])
