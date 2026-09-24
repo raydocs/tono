@@ -44,7 +44,9 @@
   改名存档为 `protected-dns.json.orphaned-<ts>`，`/dns/restore` 附带
   `originalDNSRestored: false`，loopback 清扫照常且需读回证明；枚举退回 `networksetup`
   （没有 ID）且按名字也找不到时，保留快照并拒绝释放（M2 语义）。旧格式快照（无 ID）照常读取，
-  按名字匹配。enable 判断"同一服务"也按 ID。保护不放宽。
+  按名字匹配。enable 判断"同一服务"也按 ID，改名后重连会把快照里的名字更新为当前名字（status
+  仍按名字读）。带 ID 的枚举不再丢弃名字不合 `validateService` 的服务（如改成超 128 字节的中文名），
+  恢复清扫能按 ID 触达它们。保护不放宽。
 - **新增/优化**：无。
 - **工程与测试**：helper 协议版本 4.9.0 → 4.14.0（占位，合并时按顺序重编号）并按 manifest
   重算 `CONTRACT.sha256`。现有两个 DNS self-test 适配新的服务类型（名字-only 枚举，行为不变）。
@@ -56,8 +58,10 @@
   `--lifecycle-self-test` 委托本 PR 的 GitHub-hosted `macos-26` CI（privileged-tests），结果以
   PR 页为准。未在实机上改名验证。
 - **候选/发布**：无新包，仅源码。
-- **剩余限制**：`/dns/status` 仍按快照里的名字读，改名后报 `ok: false, snapshotPresent: true`
-  （App 照常调用恢复，已足够）。App 不展示 `originalDNSRestored: false`，用户看不到"原 DNS
+- **剩余限制**：`/dns/status` 仍按快照里的名字读；连接中改名后报 `ok: false, snapshotPresent: true`，
+  App 判为 broken 并重连一次（重连时快照名字更新），或照常调用恢复。System Configuration 持续
+  不可用、只能用 `networksetup` 枚举且快照名字已不存在时，恢复与 `--emergency-disarm` 都会拒绝
+  （保持 fail-closed，不放宽）。App 不展示 `originalDNSRestored: false`，用户看不到"原 DNS
   所属服务已删除"的提示；存档文件只供诊断。服务被删除后又新建同名服务时按新 ID 视为不同服务，
   原值不会写到新服务。
 

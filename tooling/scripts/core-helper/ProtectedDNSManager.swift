@@ -109,6 +109,15 @@ final class ProtectedDNSManager {
                 }
                 try removeSnapshot()
             } else {
+                if previous.service != service {
+                    // Same service by ID, renamed since the snapshot. Status
+                    // reads by the recorded name, so record the current one.
+                    try save(Snapshot(
+                        service: service,
+                        serviceID: previous.serviceID ?? serviceID,
+                        servers: previous.servers
+                    ))
+                }
                 try Self.setDNS([Self.protectedDNSServer], for: service)
                 try verify([Self.protectedDNSServer], for: service)
                 return Self.response(
@@ -745,15 +754,15 @@ final class ProtectedDNSManager {
                     CFArrayGetValueAtIndex(array, index),
                     to: SCNetworkService.self
                 )
+                let id = SCNetworkServiceGetServiceID(service) as String?
+                // A service renamed to something `enable` would refuse can
+                // still hold our loopback DNS; with an ID, recovery reaches it.
                 guard let name = SCNetworkServiceGetName(service) as String?,
-                      (try? validateService(name)) != nil else { continue }
+                      id != nil || (try? validateService(name)) != nil else { continue }
                 if !includingDisabled, !SCNetworkServiceGetEnabled(service) {
                     continue
                 }
-                services.insert(NetworkService(
-                    id: SCNetworkServiceGetServiceID(service) as String?,
-                    name: name
-                ))
+                services.insert(NetworkService(id: id, name: name))
             }
             return services
         }
