@@ -6211,6 +6211,16 @@
         }
       }
     },
+    "The network service whose DNS settings Tono saved has been deleted, so those DNS servers could not be put back. DNS is now obtained automatically. If your network needs manual DNS servers, set them again in System Settings > Network.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 保存的 DNS 设置所属的网络服务已被删除，原来的 DNS 服务器无法写回，现已改为自动获取 DNS。如果该网络需要手动填写 DNS 服务器，请在系统设置 > 网络中重新设置。"
+          }
+        }
+      }
+    },
     "The update did not finish. Disconnect, then reinstall Tono.": {
       "localizations": {
         "zh-Hans": {

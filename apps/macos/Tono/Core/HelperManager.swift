@@ -43,6 +43,11 @@ nonisolated struct HelperManager {
         let configured: Bool?
         let snapshotPresent: Bool?
         let service: String?
+        /// `/dns/restore` only: `false` when the service that owned the
+        /// snapshot no longer exists, so the recorded servers were archived
+        /// instead of written back. A helper without service-ID snapshots
+        /// never sends it.
+        let originalDNSRestored: Bool?
         let lastError: String?
         let error: String?
     }
@@ -741,6 +746,43 @@ nonisolated struct HelperManager {
               envelope.snapshotPresent != true else {
             throw HelperIPCError.invalidResponse
         }
+        if protectedDNSRestoreNotice(restoreReply: result.body) != nil {
+            // The helper archives that snapshot, so no later restore reports
+            // it again. Keep the notice until a window has shown it: this
+            // restore may run at launch, on Quit or in update preparation.
+            AppProfile.defaults.set(true, forKey: protectedDNSOriginalLostKey)
+            LocalTrafficAudit.shared.recordEvent(
+                "protected_dns_original_service_missing",
+                details: ["service": envelope.service ?? ""]
+            )
+        }
+    }
+
+    private static let protectedDNSOriginalLostKey = "Tono_protectedDNSOriginalLost"
+
+    /// The user-facing notice for a successful `/dns/restore` reply, or nil
+    /// when the original servers went back (or the helper predates the
+    /// field). Success with `originalDNSRestored: false` means PF may be
+    /// released, but the user's saved DNS servers were not restored.
+    static func protectedDNSRestoreNotice(restoreReply body: Data) -> String? {
+        guard let envelope = try? JSONDecoder().decode(Envelope.self, from: body),
+              envelope.originalDNSRestored == false else { return nil }
+        return protectedDNSOriginalLostNotice
+    }
+
+    private static var protectedDNSOriginalLostNotice: String {
+        String(
+            localized: "The network service whose DNS settings Tono saved has been deleted, so those DNS servers could not be put back. DNS is now obtained automatically. If your network needs manual DNS servers, set them again in System Settings > Network."
+        )
+    }
+
+    /// Returns the pending original-DNS notice once and clears it.
+    static func takeProtectedDNSRestoreNotice() -> String? {
+        guard AppProfile.defaults.bool(forKey: protectedDNSOriginalLostKey) else {
+            return nil
+        }
+        AppProfile.defaults.removeObject(forKey: protectedDNSOriginalLostKey)
+        return protectedDNSOriginalLostNotice
     }
 
     /// Restore whenever the helper can inspect DNS. A missing snapshot used to
