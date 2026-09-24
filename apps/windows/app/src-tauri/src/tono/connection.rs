@@ -312,6 +312,7 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
         inner.connect_error_at_ms = None;
         inner.next_retry_at_ms = None;
         inner.optional_direct_active = false;
+        inner.applied_direct_interface = None;
         inner.optional_direct_skip = None;
         inner.direct_reload_until = None;
         commands::emit_status(app, &commands::status_of(&inner));

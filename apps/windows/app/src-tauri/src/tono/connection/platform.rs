@@ -52,11 +52,7 @@ pub(super) async fn detect_physical_interface_route_command() -> Result<String, 
 /// but Tono's optional DIRECT outbounds must bind to a real hardware interface.
 #[cfg(windows)]
 pub(super) fn detect_physical_interface_windows() -> Result<String, String> {
-    use windows_sys::Win32::NetworkManagement::IpHelper::{
-        GetBestRoute2, GetIfEntry2, IF_TYPE_ETHERNET_CSMACD, IF_TYPE_IEEE80211,
-        IF_TYPE_PROP_VIRTUAL, IF_TYPE_TUNNEL, MIB_IF_ROW2, MIB_IF_TYPE_LOOPBACK,
-        MIB_IPFORWARD_ROW2,
-    };
+    use windows_sys::Win32::NetworkManagement::IpHelper::{GetBestRoute2, MIB_IPFORWARD_ROW2};
     use windows_sys::Win32::Networking::WinSock::{AF_INET, IN_ADDR, SOCKADDR_INET};
 
     // 8.8.8.8 — byte-symmetric, so the S_addr value needs no byte swapping.
@@ -93,39 +89,10 @@ pub(super) fn detect_physical_interface_windows() -> Result<String, String> {
 
     let mut rejected = Vec::new();
     for luid in candidates {
-        let mut interface = MIB_IF_ROW2 {
-            InterfaceLuid: windows_sys::Win32::NetworkManagement::Ndis::NET_LUID_LH {
-                Value: luid,
-            },
-            ..Default::default()
-        };
-        // SAFETY: `interface` is initialized and the LUID came from IP Helper.
-        let status = unsafe { GetIfEntry2(&mut interface) };
-        if status != 0 {
-            rejected.push(format!("LUID {luid}: GetIfEntry2 failed ({status})"));
-            continue;
+        match hardware_uplink_alias(luid) {
+            Ok((alias, _)) => return Ok(alias),
+            Err(reason) => rejected.push(reason),
         }
-        let description = utf16_field(&interface.Description);
-        let alias = utf16_field(&interface.Alias);
-        if alias.is_empty() {
-            rejected.push(format!("LUID {luid}: empty interface alias"));
-            continue;
-        }
-        let hardware = interface.InterfaceAndOperStatusFlags._bitfield & 0x01 != 0;
-        let known_hardware_type = matches!(interface.Type, IF_TYPE_ETHERNET_CSMACD | IF_TYPE_IEEE80211);
-        let virtual_description = is_virtual_uplink_description(&description);
-        let forbidden_type = matches!(
-            interface.Type,
-            MIB_IF_TYPE_LOOPBACK | IF_TYPE_PROP_VIRTUAL | IF_TYPE_TUNNEL
-        );
-        if virtual_description || forbidden_type || (!hardware && !known_hardware_type) {
-            rejected.push(format!(
-                "{alias:?} ({description:?}, type {}, hardware={hardware})",
-                interface.Type
-            ));
-            continue;
-        }
-        return Ok(alias);
     }
 
     Err(format!(
@@ -136,6 +103,76 @@ pub(super) fn detect_physical_interface_windows() -> Result<String, String> {
             rejected.join("; ")
         }
     ))
+}
+
+/// X2-1: every hardware adapter that currently carries an IPv4 default route and is
+/// operationally up, by alias. Unlike [`detect_physical_interface`] this is safe after WinTUN
+/// starts: it never consults `GetBestRoute2` (which then resolves to Tono's own adapter), and the
+/// same filter that keeps Wintun/virtual adapters out of the DIRECT choice applies to each row.
+/// Used only to decide whether the committed DIRECT binding still names a live uplink.
+pub(super) async fn usable_physical_uplinks() -> Result<Vec<String>, String> {
+    #[cfg(windows)]
+    {
+        tokio::task::spawn_blocking(|| -> Result<Vec<String>, String> {
+            let mut uplinks = Vec::new();
+            for luid in default_route_interface_luids()? {
+                if let Ok((alias, true)) = hardware_uplink_alias(luid)
+                    && !uplinks.contains(&alias)
+                {
+                    uplinks.push(alias);
+                }
+            }
+            Ok(uplinks)
+        })
+        .await
+        .map_err(|error| format!("physical uplink enumeration worker failed: {error}"))?
+    }
+    #[cfg(not(windows))]
+    {
+        detect_physical_interface_route_command().await.map(|alias| vec![alias])
+    }
+}
+
+/// One default-route candidate: its alias and whether it is operationally up, or why it is not
+/// an acceptable hardware uplink for DIRECT.
+#[cfg(windows)]
+fn hardware_uplink_alias(luid: u64) -> Result<(String, bool), String> {
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        GetIfEntry2, IF_TYPE_ETHERNET_CSMACD, IF_TYPE_IEEE80211, IF_TYPE_PROP_VIRTUAL, IF_TYPE_TUNNEL, MIB_IF_ROW2,
+        MIB_IF_TYPE_LOOPBACK,
+    };
+    use windows_sys::Win32::NetworkManagement::Ndis::IfOperStatusUp;
+
+    let mut interface = MIB_IF_ROW2 {
+        InterfaceLuid: windows_sys::Win32::NetworkManagement::Ndis::NET_LUID_LH {
+            Value: luid,
+        },
+        ..Default::default()
+    };
+    // SAFETY: `interface` is initialized and the LUID came from IP Helper.
+    let status = unsafe { GetIfEntry2(&mut interface) };
+    if status != 0 {
+        return Err(format!("LUID {luid}: GetIfEntry2 failed ({status})"));
+    }
+    let description = utf16_field(&interface.Description);
+    let alias = utf16_field(&interface.Alias);
+    if alias.is_empty() {
+        return Err(format!("LUID {luid}: empty interface alias"));
+    }
+    let hardware = interface.InterfaceAndOperStatusFlags._bitfield & 0x01 != 0;
+    let known_hardware_type = matches!(interface.Type, IF_TYPE_ETHERNET_CSMACD | IF_TYPE_IEEE80211);
+    let virtual_description = is_virtual_uplink_description(&description);
+    let forbidden_type = matches!(
+        interface.Type,
+        MIB_IF_TYPE_LOOPBACK | IF_TYPE_PROP_VIRTUAL | IF_TYPE_TUNNEL
+    );
+    if virtual_description || forbidden_type || (!hardware && !known_hardware_type) {
+        return Err(format!(
+            "{alias:?} ({description:?}, type {}, hardware={hardware})",
+            interface.Type
+        ));
+    }
+    Ok((alias, interface.OperStatus == IfOperStatusUp))
 }
 
 /// The route chosen by Windows can point at a host-only/NAT adapter even while a real
