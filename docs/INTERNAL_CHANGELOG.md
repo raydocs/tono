@@ -32,6 +32,30 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS disarm 出错后先回读 PF 再决定是否发布 Protected Offline
+
+- **归属/来源**：G1 保护状态呈现；macOS `AppState+Connect` 释放拆除。内部审查 X1-8（降级：
+  触发面窄，下一次状态观测会自行纠正），Issue #436。基线 main bb2ed4e4 → 分支
+  `fix/disarm-error-readback-20260923`；提交时未合 main。
+- **缺陷修复**：helper disarm 先清掉 PF 锚点，再删除持久化状态；后者失败，或完整 disarm
+  成功但回执丢失时，App 收到错误，释放拆除的 catch 无条件发布 Protected Offline 和
+  "Kill switch transition failed"，而 PF 实际可能已解除、流量已直连。现在 disarm 抛错时
+  通过已有 `NetworkProtectionOperations.refreshKillSwitchStatus` 回读：只有
+  `.confirmed(requiresProtectionRecovery: false)` 才发布开放状态并清除本地 `isArmed`；
+  `.confirmed(true)`、`.unavailable`、`.rejected` 仍保持 fail-closed 声明。状态文件仍在的
+  情形，helper 的 status 会把 PF 重新装回，回读结果为 true，界面继续显示受保护，与实际一致。
+- **新增/优化**：无。
+- **工程与测试**：新增 `DisarmErrorReadbackTests.testDisarmErrorAfterBarrierRemovalDoesNotPublishProtectedOffline`
+  （一个 XCTest）：disarm 桩先把 `pfLive` 置 false 再抛错，status 回读返回 `pfLive`，断言
+  `isProtectionBlocked == false` 且 `isArmed == false`。旧代码不回读，发布 blocked，断言失败。
+  桩模拟的是"完整 disarm 后回执丢失"；审查 R4 指出测试注释原写成"清 PF 后删 state 失败"，
+  与 helper 语义相反（该情形 status 会自愈装回 PF，回读为 true），已改注释，断言未变。
+- **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests），结果以 PR 页为准。helper 状态删除失败场景未做实机复现。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：只处理释放路径的 disarm 出错；保留拆除中 `restrictToBootstrap` 出错仍按
+  受保护发布。回读本身拿不到回答时仍发布 Protected Offline，等下一次状态观测纠正。
+
 ## 2026-09-23 · macOS 会话拆除时清除 Recovering 状态
 
 - **归属/来源**：G1 保护状态呈现；macOS `AppState+Connect` 断开准备。内部审查 X1-6，

@@ -881,9 +881,10 @@ extension AppState {
                     self?.disconnectionStage = .restoringNetwork
                 }
             }
+            let disarming = releaseKillSwitch && coreStopped && protectedDNSRestored
             if helperReadyForRelease {
                 do {
-                    if releaseKillSwitch, coreStopped, protectedDNSRestored {
+                    if disarming {
                         try await networkProtection.disarm()
                         transitionLeavesProtectionBlocked = false
                     } else {
@@ -901,8 +902,24 @@ extension AppState {
                         }
                     }
                 } catch {
-                    transitionLeavesProtectionBlocked = true
-                    transitionError = String(localized: "Kill switch transition failed: \(error.localizedDescription)")
+                    // The helper flushes PF before it deletes its persisted
+                    // state, and a reply can be lost after a complete disarm.
+                    // A disarm error alone does not prove the Kill Switch still
+                    // holds this host, so read the helper back before claiming
+                    // it does. Only a confirmed release publishes an open host.
+                    if disarming,
+                       await networkProtection.refreshKillSwitchStatus()
+                        == .confirmed(requiresProtectionRecovery: false) {
+                        KillSwitchService.isArmed = false
+                        transitionLeavesProtectionBlocked = false
+                        LocalTrafficAudit.shared.recordEvent(
+                            "killswitch_disarm_error_released",
+                            details: ["error": error.localizedDescription]
+                        )
+                    } else {
+                        transitionLeavesProtectionBlocked = true
+                        transitionError = String(localized: "Kill switch transition failed: \(error.localizedDescription)")
+                    }
                 }
             } else {
                 transitionLeavesProtectionBlocked = true
