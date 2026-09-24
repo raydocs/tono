@@ -32,6 +32,27 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · 控制面合并列车 train/cp-20260924
+
+- **归属/来源**：G1–G3 控制面修复与 ops 任务的合并（各 PR 的条目见下方）；基线 origin/main
+  [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b)，分支 `train/cp-20260924`。按 PR 正文标记与
+  `prreview-r3-control-plane.md` 顺序依次 `--no-ff` 合入 23 个 PR：#349 #369 #395 → #394 #400 #402 #441 →
+  #406 #399 #381 → #451 → #404 #450 #447 → #326 #419 → #329 → #470 #486 #474 → #493 #495 → #323。
+  #375 未合：exit-agent 记录顺序是 #389→#375→#384→#464，#389 在 fleet 组。
+- **缺陷修复**：无新增修复。
+- **新增/优化**：无。
+- **工程与测试**：只做了已有记录的合并解法。#447 的 `retention.ts` 日志保留步骤改为调用 #450 的
+  `sweepDiagnosticsLogs`，这样孤儿 pending 清理不会丢。#406/#419、#486/#474 的相邻 `it` 都保留，并补回 `});`。
+  `publicTrafficPolicy` 先剥离内嵌 revision，再用 `admitStoredUnsignedEndpoints = true` 校验（#474 × #470/#486）。
+  `relistFleetNode` 保留 #451 的 `assertExitIdentityActive` 与 #493 的 `const block`；#451 的上架测试条目补上
+  Reality 字段。迁移号 0077–0082、0088、0090 各不相同，没有重编号。
+- **验证**：本机 `services/control-plane`：`npx vitest run` 43 个文件 910 个用例通过，`npm run typecheck`、
+  `check:budgets`、`check:contract` 通过；`test-policy-signing-contract.sh` 5/5 通过；
+  `macos-candidate-workflow.test.rb` 通过；`git diff --check` 通过。未做原生构建，未部署，未碰远端 D1。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：部署前的只读检查见列车 PR 正文：#323、#326、#419、#470、#486、#493、#495；另有 0077/0078
+  需在一次性远端 D1 上试跑、#329 必须先迁移，`TRAFFIC_POLICY_EMBED_REVISION` 保持关闭。
+
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
 - **归属/来源**：G1–G3 审查与修复的可追溯性（工程流程与记录，非产品行为）；审查基线 main
