@@ -254,7 +254,9 @@
     "restoreFailed": {
       "title": "登录状态已失效",
       "description": "请重试，或重新登录。",
-      "retry": "重试"
+      "retry": "重试",
+      "unreachableTitle": "连不上 Tono",
+      "unreachableDescription": "登录状态暂时无法核对。请检查网络后重试。"
     },
     "networkBlocked": {
       "title": "网络已被保护拦住",
@@ -337,6 +339,7 @@
     "copyDetails": "复制诊断信息",
     "catalogRequiresChoice": "当前节点已下线，请另选一个",
     "updateIncomplete": "更新恢复尚未完成，请保持 Tono 运行。如无法恢复，请先联系支持再重装；断开连接不会取消受保护的更新。",
+    "controlPlaneUnreachable": "暂时连不上 Tono 账号服务。仍可用上次验证过的节点列表连接。",
     "killSwitchError": "断网保护：{{message}}",
     "killSwitchErrorNote": "上次错误，可能已恢复。",
     "errors": {

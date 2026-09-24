@@ -254,7 +254,9 @@
     "restoreFailed": {
       "title": "Session expired",
       "description": "Retry, or sign in again.",
-      "retry": "Retry"
+      "retry": "Retry",
+      "unreachableTitle": "Can't reach Tono",
+      "unreachableDescription": "Your session could not be checked. Check your network, then retry."
     },
     "networkBlocked": {
       "title": "Internet is blocked",
@@ -337,6 +339,7 @@
     "copyDetails": "Copy details",
     "catalogRequiresChoice": "That node is gone — pick another",
     "updateIncomplete": "Update recovery is incomplete. Keep Tono open. If recovery does not finish, contact support before reinstalling; Disconnect does not cancel a protected update.",
+    "controlPlaneUnreachable": "Can't reach the Tono account service. Connect still works with your last verified node list.",
     "killSwitchError": "Leak protection: {{message}}",
     "killSwitchErrorNote": "Last error — it may already be clear.",
     "errors": {

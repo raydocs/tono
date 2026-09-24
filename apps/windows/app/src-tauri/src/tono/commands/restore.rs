@@ -100,7 +100,8 @@ pub(super) fn unknown_protection_message(reason: &str) -> String {
 /// Startup session restore (§2): load the persisted selection (L4), seed
 /// the catalog from the verified cache, then refresh + `me()`. A 401 means
 /// the session is dead (logout, disarm, clear); other errors keep the kill
-/// switch armed and enter the error state. If the Service still wants the
+/// switch armed and enter the error state, except that an unreachable control
+/// plane stays Ready on the catalog this session confirmed (#582). If the Service still wants the
 /// kill switch, first surface Protected Offline. Once account/catalog restore finishes, a fresh
 /// strongly proven same-owner active runtime is replaced behind the still-armed barrier so this
 /// process obtains a new Service session/controller; weaker evidence continues to wait for the
@@ -119,6 +120,7 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
         // Restore is an authentication transaction too. A retry supersedes an older restore,
         // while sign-in/sign-out already bump the same generation.
         inner.sign_in_generation = inner.sign_in_generation.wrapping_add(1);
+        inner.control_plane_unreachable = false;
         if let Some(selected) = crate::tono::state::load_selection(&inner.catalog_dir) {
             inner.selected_node = Some(selected);
         }
@@ -222,14 +224,7 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
     let account_result = match tokio::time::timeout_at(restore_deadline, client.me()).await {
         Ok(result) => result,
         Err(_) => {
-            let mut inner = state.lock().await;
-            if inner.sign_in_generation != generation {
-                return;
-            }
-            apply_stored_protection(&mut inner, &protection);
-            inner.account_state =
-                AccountState::Error(format!("session restore exceeded {RESTORE_TRANSACTION_TIMEOUT:?}"));
-            emit_status(&app, &status_of(&inner));
+            finish_failed_restore(state, app, generation, &protection, None).await;
             return;
         }
     };
@@ -315,7 +310,70 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
                 .await;
             }
         }
-        Err(ApiError::Unauthorized) => {
+        Err(err) => finish_failed_restore(state, app, generation, &protection, Some(err)).await,
+    }
+}
+
+/// How a launch restore whose account call failed settles (#582).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FailedRestore {
+    /// The server refused the session: the dead-session cleanup runs as before.
+    Refused,
+    /// The control plane was unreachable and this session's confirmed catalog is installed: stay
+    /// signed in so Connect can use it. The exits still admit only identities on their roster.
+    UnreachableCached,
+    /// Protection is kept and the retryable error state is entered.
+    Error,
+}
+
+/// The state half of a failed restore. `failure` is `None` when the restore budget expired
+/// before the account call answered, which is how a dropped control plane usually shows up.
+fn settle_failed_restore(
+    inner: &mut TonoInner, protection: &StoredProtection, failure: Option<&ApiError>,
+) -> FailedRestore {
+    if matches!(failure, Some(ApiError::Unauthorized)) {
+        return FailedRestore::Refused;
+    }
+    // Flaky network must never drop protection (§2).
+    apply_stored_protection(inner, protection);
+    let unreachable = matches!(failure, None | Some(ApiError::Transport { .. }));
+    inner.control_plane_unreachable = unreachable;
+    // An unknown barrier keeps the error state and its escape-hatch wording: admission never
+    // rests on a Service that is not answering.
+    if unreachable
+        && !matches!(protection, StoredProtection::Unknown(_))
+        && catalog_sync::session_catalog_confirmed(inner)
+    {
+        inner.account_state = AccountState::Ready;
+        return FailedRestore::UnreachableCached;
+    }
+    inner.account_state = match (failure, protection) {
+        (None, _) => AccountState::Error(format!("session restore exceeded {RESTORE_TRANSACTION_TIMEOUT:?}")),
+        (Some(err), StoredProtection::Unknown(reason)) => {
+            AccountState::Error(format!("{err}; {}", unknown_protection_message(reason)))
+        }
+        (Some(err), _) => AccountState::Error(err.to_string()),
+    };
+    FailedRestore::Error
+}
+
+async fn finish_failed_restore(
+    state: Arc<TonoState>, app: AppHandle, generation: u64, protection: &StoredProtection,
+    failure: Option<ApiError>,
+) {
+    let outcome = {
+        let mut inner = state.lock().await;
+        if inner.sign_in_generation != generation {
+            return;
+        }
+        let outcome = settle_failed_restore(&mut inner, protection, failure.as_ref());
+        if outcome != FailedRestore::Refused {
+            emit_status(&app, &status_of(&inner));
+        }
+        outcome
+    };
+    match outcome {
+        FailedRestore::Refused => {
             let release_app = app.clone();
             close_dead_restore_with(state, generation,
                 move |state| async move { connection::release_for_account(&state, &release_app).await },
@@ -323,21 +381,20 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
                 move |inner| emit_status(&app, &status_of(inner)),
             ).await;
         }
-        Err(err) => {
-            // Flaky network must never drop protection (§2).
-            let mut inner = state.lock().await;
-            if inner.sign_in_generation != generation {
-                return;
-            }
-            apply_stored_protection(&mut inner, &protection);
-            inner.account_state = match &protection {
-                StoredProtection::Unknown(reason) => {
-                    AccountState::Error(format!("{err}; {}", unknown_protection_message(reason)))
-                }
-                _ => AccountState::Error(err.to_string()),
-            };
-            emit_status(&app, &status_of(&inner));
+        FailedRestore::UnreachableCached => {
+            let reason = failure.map_or_else(
+                || format!("restore exceeded {RESTORE_TRANSACTION_TIMEOUT:?}"),
+                |error| error.to_string(),
+            );
+            logging!(
+                warn,
+                Type::Service,
+                "Tono: control plane unreachable at launch ({reason}); Connect uses the catalog this session confirmed"
+            );
+            // Refreshes the catalog and policy once the control plane answers again.
+            catalog_sync::spawn_periodic_for_auth_generation(&state, &app, generation).await;
         }
+        FailedRestore::Error => {}
     }
 }
 
@@ -389,6 +446,51 @@ mod account_close_tests {
             |_| async { panic!("stale restore cannot revoke replacement credentials") }, |_| {},
         ).await;
         assert_eq!(state.lock().await.sign_in_generation, 20);
+    }
+}
+
+#[cfg(test)]
+mod failed_restore_tests {
+    use super::*;
+    use tono_core::{auth::TransportKind, node::{NodeProtocol, ValidatedNode}};
+
+    /// #582: only an unreachable control plane admits the cached catalog, and only the one this
+    /// session confirmed; a refused session is still handed to the dead-session cleanup.
+    #[tokio::test]
+    async fn an_unreachable_control_plane_admits_only_this_sessions_catalog_and_401_still_refuses() {
+        let state = TonoState::for_test();
+        let mut inner = state.lock().await;
+        inner.account_state = AccountState::Restoring;
+        inner.nodes = vec![ValidatedNode {
+            name: "US Reality 01".to_string(),
+            server: std::net::Ipv4Addr::new(203, 0, 113, 7),
+            port: 443,
+            uuid: "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d".to_string(),
+            servername: "www.microsoft.com".to_string(),
+            flow: None,
+            client_fingerprint: None,
+            reality_public_key: "0123456789abcdef0123456789abcdef0123456789a".to_string(),
+            reality_short_id: "0123456789abcdef".to_string(),
+            protocol: NodeProtocol::VlessReality,
+            tls_fingerprint: None,
+        }];
+        let dropped = ApiError::Transport { kind: TransportKind::Connect, message: "dropped".into() };
+        let absent = StoredProtection::ProvenAbsent;
+
+        // Verified nodes that no sync of this session confirmed (e.g. an earlier account's).
+        assert_eq!(settle_failed_restore(&mut inner, &absent, Some(&dropped)), FailedRestore::Error);
+        assert!(matches!(inner.account_state, AccountState::Error(_)));
+
+        catalog_sync::confirm_session_catalog(&inner.catalog_dir).unwrap();
+        inner.account_state = AccountState::Restoring;
+        assert_eq!(settle_failed_restore(&mut inner, &absent, Some(&dropped)), FailedRestore::UnreachableCached);
+        assert_eq!(inner.account_state, AccountState::Ready);
+        assert!(inner.control_plane_unreachable);
+
+        inner.account_state = AccountState::Restoring;
+        assert_eq!(settle_failed_restore(&mut inner, &absent, Some(&ApiError::Unauthorized)), FailedRestore::Refused);
+        assert_eq!(inner.account_state, AccountState::Restoring, "401 leaves the decision to the dead-session cleanup");
+        let _ = std::fs::remove_dir_all(&inner.catalog_dir);
     }
 }
 

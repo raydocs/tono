@@ -69,6 +69,12 @@ const LoginPage = () => {
     (verifySuspended || status?.accountState === 'suspended')
 
   const restoreFailed = status?.accountState === 'error'
+  // An unreachable control plane left the session unchecked; it did not expire.
+  const restoreUnreachable =
+    restoreFailed && status?.controlPlaneUnreachable === true
+  const restoreFailedTitle = restoreUnreachable
+    ? t('tono.login.restoreFailed.unreachableTitle')
+    : t('tono.login.restoreFailed.title')
   const internetBlocked =
     status?.protectionBlocked === true || status?.killSwitch?.wanted === true
 
@@ -347,8 +353,10 @@ const LoginPage = () => {
             }}
           >
             <span>
-              <strong>{t('tono.login.restoreFailed.title')}</strong>{' '}
-              {t('tono.login.restoreFailed.description')}
+              <strong>{restoreFailedTitle}</strong>{' '}
+              {restoreUnreachable
+                ? t('tono.login.restoreFailed.unreachableDescription')
+                : t('tono.login.restoreFailed.description')}
             </span>
             <button
               type="button"
@@ -367,9 +375,7 @@ const LoginPage = () => {
             </button>
           </div>
         )}
-        {restoreFailed && (
-          <SupportContact extra={t('tono.login.restoreFailed.title')} />
-        )}
+        {restoreFailed && <SupportContact extra={restoreFailedTitle} />}
 
         <div
           style={{

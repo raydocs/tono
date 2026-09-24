@@ -32,6 +32,57 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · Windows 启动恢复：直连地址被丢包时仍走备用解析；控制面不可达时用本会话确认过的目录连接
+
+- **归属/来源**：G2 连不上有下一手；Windows `src-tauri/src/tono`（transport、restore、catalog_sync、
+  account）与仪表盘/登录页。Issue #583，Issue #582 的 Windows 部分（macOS 部分未改）。基线
+  origin/main ca00a736；分支 `fix/issue-583-20260924`；未合 main。
+- **缺陷修复**：
+  - #583：控制面直连（pinned）客户端的连接超时是共用的 30 s，等于启动恢复总预算
+    `RESTORE_TRANSACTION_TIMEOUT`。直连地址全被丢包时，恢复在直连这一步就用完预算，系统 DNS
+    备用路径在启动时从不运行（登录没有预算限制，约 31 s 后能成功）。现在只有直连一步的连接超时
+    改为 10 s（`PINNED_CONNECT_TIMEOUT`，仍覆盖两次 SYN 重传）；恢复要顺序发 refresh 和 `me`
+    两个请求，每个先付一次直连超时，两次合计仍在预算内。只限制连接阶段：连接超时说明请求没有发出，
+    备用路径的“是否可重发”规则不变。其它客户端（系统 DNS、备用端口）超时不变。
+  - #582（Windows）：启动恢复中任何非 401 失败都进入 error 状态，Connect 被拒，界面显示
+    “Session expired”。现在当 `me` 为传输失败或恢复预算用尽，且 (1) 保护状态已读到（不是
+    Unknown），(2) 已装目录来自已验证缓存（digest + 节点准入；目录本身不带签名，签名的是策略），
+    (3) 该缓存被**当前会话**的一次同步确认过时，保持 Ready（不填 `account`），仪表盘提示“连不上
+    Tono 账号服务，仍可用上次验证过的节点列表连接”，未连接时可点“重试”。条件不满足时仍是 error，
+    但登录页改为“连不上 Tono / 登录状态暂时无法核对”，不再说会话已失效。401 路径不变：同一个判定
+    函数对 401 直接交回原来的过期会话清理（释放、登出、SignedOut）；`me` 成功且 suspended 的路径
+    未改。
+  - 跨账户保护：目录缓存不按账户分目录，登出也保留它（防回滚）。新增标记文件
+    `managed-exit-catalog.session-confirmed`：本会话的一次目录同步成功（Installed 或 Unchanged）
+    后写入；StaleRevision 不写；登录采用新 token **之前**删除，删除失败则本次登录报错（宁可失败，
+    不让旧账户目录被新账户离线使用）。已装机器升级后第一次在线恢复/同步前没有标记，离线时仍走
+    error（安全方向）。
+- **新增/优化**：离线 Ready 时照常启动 300 s 周期目录/策略同步（控制面恢复或经隧道可达时刷新目录）；
+  不启动遥测、日志上传，不做启动自动续连（`schedule_startup_resume_if_proven`）和更新恢复续连，
+  用户需手动点连接。
+- **风险说明**：被吊销的设备在控制面不可达期间仍可用缓存目录发起连接。准入最终由出口节点花名册
+  决定（exit-agent 定时对账控制面花名册；规划方称约每分钟一次，本 PR 未核实间隔），因此吊销后的
+  可用时间以花名册对账为上限；账户信息（邮箱、设备列表、路线偏好）在离线 Ready 下不可用，直到
+  重试或下次启动 `me` 成功。
+- **工程与测试**：两个回归（规则 5）。
+  - `transport::tests::a_dropped_pin_leaves_the_fallback_inside_the_restore_budget`：两个客户端按
+    生产方式构建（只注入解析），直连指向丢包地址 10.255.255.1，断言一次请求在恢复预算一半内由
+    备用路径完成。旧代码直连用 30 s 连接超时，这一次请求就要 30 s，断言失败（按代码推理，未实跑）。
+    有隧道截获黑洞地址时跳过，与同文件其它黑洞测试一致；耗时约 10 s。
+  - `restore::failed_restore_tests::an_unreachable_control_plane_admits_only_this_sessions_catalog_and_401_still_refuses`：
+    无确认标记 → error；有标记 + 传输失败 → Ready 且 `control_plane_unreachable`；401 → Refused 且
+    不改状态。旧代码 `restore.rs` 对非 401 错误无条件设 `AccountState::Error`，Ready 断言失败
+    （按代码推理，未实跑）。
+  - `RESTORE_TRANSACTION_TIMEOUT` 改为 `pub(crate)` 供测试引用；`TonoStatus` 新增可省略字段
+    `controlPlaneUnreachable`；i18n 类型文件按 `scripts/generate-i18n-keys.mjs` 重新生成。
+- **验证**：本机未执行 cargo（执行位置规则）；Rust 回归交给本 PR 的 windows-2025 CI。本机只跑前端：
+  `tsc --noEmit` 通过；eslint（改动的三个文件）通过；biome format 检查通过；vitest
+  `login.test.tsx` + `dashboard.test.tsx` 29/29 通过（未为新横幅加前端测试）。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：未实机验证（未在直连地址被封、系统 DNS 可达的网络上跑启动恢复）。macOS 的 #582
+  未处理。离线 Ready 只能靠“重试”或重启重新核对账户，连接中不会自动核对。其它非传输错误
+  （5xx、403 等）仍进 error。
+
 ## 2026-09-24 · macOS 合并列车（#567）审查跟进：DNS 无法核实时仍做 PF 健康检查
 
 - **归属/来源**：G1 连接保护；macOS `AppState` 连接监控。合并列车 PR #567（`train/mac-20260924`，

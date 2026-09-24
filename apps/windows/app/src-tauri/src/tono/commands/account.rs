@@ -294,11 +294,16 @@ pub(crate) async fn adopt_sign_in_response(
     if inner.sign_in_generation != generation || inner.challenge_id.as_deref() != Some(challenge_id) {
         return Err("sign-in verification was superseded by a newer attempt".to_string());
     }
+    // #582: the catalog cache is not account-scoped. Withdraw the previous session's offline
+    // confirmation before this session's token is stored; only this session's sync restores it.
+    catalog_sync::forget_session_catalog(&inner.catalog_dir)
+        .map_err(|error| format!("could not reset the offline server list; try again: {error}"))?;
     // Keep the Tono state lock through adoption: a resend/sign-out cannot invalidate this
     // generation between the last check and the token write.
     client.adopt(auth).await.map_err(|err| err.to_string())?;
     inner.challenge_id = None;
     inner.account = Some(auth.user.clone());
+    inner.control_plane_unreachable = false;
     // Attribute the first catalog/connect failures too, not only records
     // produced after the periodic uploader eventually starts.
     state.audit().activate_log_upload_owner(&auth.user.id);
@@ -400,6 +405,7 @@ where
             inner.fsm.sign_out_or_quit();
             inner.account = None;
             inner.account_state = AccountState::SignedOut;
+            inner.control_plane_unreachable = false;
             inner.attempt_history = Default::default();
             inner.challenge_id = None;
             inner.controller_secret = None;

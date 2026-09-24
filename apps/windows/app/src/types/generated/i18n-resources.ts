@@ -1035,6 +1035,7 @@ export interface TranslationResources {
         connect: string
         connected: string
         connecting: string
+        controlPlaneUnreachable: string
         copyDetails: string
         directOn: string
         directSkipped: string
@@ -1237,6 +1238,8 @@ export interface TranslationResources {
           description: string
           retry: string
           title: string
+          unreachableDescription: string
+          unreachableTitle: string
         }
         restoreInternet: string
         restoringSession: string

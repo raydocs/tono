@@ -1,6 +1,7 @@
 //! `tono_core::HttpTransport` over the app's reqwest stack:
 //! redirects disabled, cookies disabled, 30 s connect / 45 s total timeouts (the
-//! mainland-link budget), and a 2 MiB response cap. The Bearer token is computed by
+//! mainland-link budget; the pinned attempt connects within 10 s so its fallback still fits the
+//! launch restore budget), and a 2 MiB response cap. The Bearer token is computed by
 //! `ApiClient` and carried on the request; this layer only passes it through.
 //!
 //! F1: the API hostname is DNS-pinned to the bootstrap IPs (see
@@ -31,6 +32,17 @@ const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 /// §1 mainland-link timeouts (connect 30 s / total 45 s).
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(45);
+/// Connect budget of the pinned attempt only (#583).
+///
+/// Every request tries the pinned addresses first, and a network that drops them costs this much
+/// before the system-resolver fallback may run. At the shared 30 s it equalled the whole launch
+/// restore budget (`RESTORE_TRANSACTION_TIMEOUT`), so restore expired inside the pinned connect and
+/// the fallback never ran at launch. Restore sends two requests in sequence (token refresh, then
+/// `me`) and each pays this once, so it stays well under half of that budget; 10 s still covers
+/// two SYN retransmissions on a lossy link (Windows retransmits at 3 s and 9 s). Only the connect
+/// phase is bounded: a connect that runs out of time delivered nothing, so the fallback's delivery
+/// rule is unchanged.
+const PINNED_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Map a reqwest failure onto the retry-policy classification (§1).
 ///
@@ -177,10 +189,15 @@ impl TonoTransport {
             .into_iter()
             .map(|ip| std::net::SocketAddr::new(std::net::IpAddr::V4(ip), 443))
             .collect();
-        Self::builder()
+        Self::pinned_builder()
             .resolve_to_addrs(bootstrap::API_HOST, &pinned)
             .build()
             .context("failed to build the Tono HTTP client")
+    }
+
+    /// The shared settings with the pinned attempt's shorter connect budget.
+    fn pinned_builder() -> reqwest::ClientBuilder {
+        Self::builder().connect_timeout(PINNED_CONNECT_TIMEOUT)
     }
 
     /// Same wiring, with both clients' resolution supplied.
@@ -759,6 +776,64 @@ mod tests {
             .expect("the fallback must carry the request");
         assert_eq!(response.status, 200);
         assert_eq!(response.body, b"hi");
+    }
+
+    /// #583: with the pinned addresses dropped, the fallback must answer inside half the launch
+    /// restore budget, because restore sends two requests in sequence (refresh, then `me`) and
+    /// each pays the pinned connect first. Both clients are built exactly as in production; only
+    /// name resolution is supplied.
+    #[tokio::test]
+    async fn a_dropped_pin_leaves_the_fallback_inside_the_restore_budget() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        if blackhole_is_intercepted() {
+            eprintln!("skipped: a tunnel is completing the blackhole connect; run without a VPN, as CI does");
+            return;
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut header = Vec::new();
+                    while !header.ends_with(b"\r\n\r\n") {
+                        let Ok(byte) = stream.read_u8().await else { return };
+                        header.push(byte);
+                    }
+                    let _ = stream
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi")
+                        .await;
+                    let _ = stream.shutdown().await;
+                });
+            }
+        });
+        let host = "tono-budget.test";
+        let dead = [std::net::SocketAddr::from(([10, 255, 255, 1], port))];
+        let live = [std::net::SocketAddr::from(([127, 0, 0, 1], port))];
+        let transport = TonoTransport {
+            client: tokio::sync::RwLock::new(
+                TonoTransport::pinned_builder().resolve_to_addrs(host, &dead).build().unwrap(),
+            ),
+            resolved: TonoTransport::builder().resolve_to_addrs(host, &live).build().unwrap(),
+            alternate_port: std::sync::atomic::AtomicU16::new(0),
+        };
+        let started = std::time::Instant::now();
+        let response = transport
+            .send(ApiRequest {
+                method: HttpMethod::Get,
+                url: format!("http://{host}:{port}/"),
+                bearer: None,
+                json_body: None,
+                binary_body: None,
+                headers: Vec::new(),
+            })
+            .await
+            .expect("the fallback must carry the request");
+        let elapsed = started.elapsed();
+        assert_eq!(response.status, 200);
+        assert!(
+            elapsed * 2 < crate::tono::commands::RESTORE_TRANSACTION_TIMEOUT,
+            "one request spent {elapsed:?}; refresh + me no longer fit the restore budget"
+        );
     }
 
     /// A POST is not re-sent when the failure might already have delivered it.

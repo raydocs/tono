@@ -73,7 +73,7 @@ pub(crate) const AUDIT_FLUSH_BUDGET: std::time::Duration = std::time::Duration::
 /// Absolute budget for startup authentication restore and its two cloud refreshes. Credential
 /// hydration has its own three-second budget before this function starts. Read-only API work can
 /// be cancelled safely; protection release keeps its separate reconciliation semantics.
-const RESTORE_TRANSACTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+pub(crate) const RESTORE_TRANSACTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Emitted on `tono://status` after every state change.
 ///
@@ -125,6 +125,11 @@ pub struct TonoStatus {
     /// disconnect and reinstall; a later connect must not hide this.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub update_incomplete: bool,
+    /// Launch restore could not reach the control plane (#582). With `ready`, Connect uses the
+    /// catalog this session last confirmed; with `error`, the sign-in page names this cause
+    /// instead of an expired session.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub control_plane_unreachable: bool,
 }
 
 /// Last published immutable UI snapshot. The status command reads this without joining the large
@@ -293,6 +298,7 @@ pub(crate) fn status_of(inner: &TonoInner) -> TonoStatus {
             None
         },
         update_incomplete: update::incomplete() || crate::tono::update_handoff::incomplete(),
+        control_plane_unreachable: inner.control_plane_unreachable,
     }
 }
 

@@ -23,6 +23,7 @@ import {
   tonoDiagnosticsReport,
   tonoDisconnect,
   tonoRetryNow,
+  tonoRetryRestore,
 } from '@/services/tono'
 import { ConnectPill } from '@/tono-ui/ConnectPill'
 import { GlassCard } from '@/tono-ui/GlassCard'
@@ -524,6 +525,15 @@ const DashboardPage = () => {
     }
   })
 
+  // The status push carries the outcome; the command itself never fails.
+  const handleRetryAccount = useLockFn(async () => {
+    try {
+      await tonoRetryRestore()
+    } finally {
+      await mutateTonoStatus()
+    }
+  })
+
   const protectionConfirmed = hasLiveProtection(status)
   const uiState = status?.uiState ?? 'notConnected'
   const connected = uiState === 'connected'
@@ -834,6 +844,43 @@ const DashboardPage = () => {
             >
               {t('tono.tray.disconnect')}
             </button>
+          </div>
+        </div>
+      )}
+      {status?.accountState === 'ready' && status.controlPlaneUnreachable && (
+        <div
+          role="status"
+          style={{
+            display: 'flex',
+            justifyContent: 'center',
+            flexShrink: 0,
+            marginBottom: 8,
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              fontSize: 12,
+              fontWeight: 500,
+              color: TONO_COLORS.protectedOffline,
+              borderRadius: 10,
+              padding: '8px 12px',
+              background: hex(TONO_COLORS.protectedOffline, 0.12),
+            }}
+          >
+            <span>{t('tono.dashboard.controlPlaneUnreachable')}</span>
+            {uiState === 'notConnected' && (
+              <button
+                type="button"
+                className="tono-button tono-action"
+                onClick={handleRetryAccount}
+                style={{ minHeight: 28, padding: '4px 10px', fontSize: 12 }}
+              >
+                {t('tono.dashboard.errorRetry')}
+              </button>
+            )}
           </div>
         </div>
       )}

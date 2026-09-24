@@ -115,6 +115,12 @@ export interface TonoStatus {
   claudeHomeHost?: string | null
   /** Failed update journal still on disk. Disconnect, then reinstall. */
   updateIncomplete?: boolean
+  /**
+   * Launch restore could not reach the control plane. With `ready`, Connect
+   * uses the last node list this session verified; with `error`, the session
+   * was not checked (not expired).
+   */
+  controlPlaneUnreachable?: boolean
 }
 
 export const TONO_STATUS_EVENT = 'tono://status'

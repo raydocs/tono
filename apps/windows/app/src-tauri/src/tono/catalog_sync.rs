@@ -40,6 +40,35 @@ pub fn seed_from_cache(inner: &mut TonoInner) {
     let _ = ensure_usable_selection(inner);
 }
 
+/// Marker beside the catalog cache: an authenticated sync of the session whose refresh token is
+/// stored has confirmed the cached catalog (#582).
+///
+/// The cache is not account-scoped, and sign-out keeps it for rollback protection. A launch that
+/// cannot reach the control plane may connect from the cache only while this marker exists. A
+/// sign-in removes it before adopting its token and only a sync of the signed-in session writes it
+/// back, so a catalog cached for an earlier account is never used with a later account's session.
+const SESSION_CONFIRMED_MARKER: &str = "managed-exit-catalog.session-confirmed";
+
+/// Record that the current session's sync served exactly the cached catalog.
+pub(crate) fn confirm_session_catalog(dir: &std::path::Path) -> anyhow::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    crate::tono::state::write_private_file(&dir.join(SESSION_CONFIRMED_MARKER), b"")
+}
+
+/// Withdraw the confirmation before a different session's token can be stored.
+pub(crate) fn forget_session_catalog(dir: &std::path::Path) -> std::io::Result<()> {
+    match std::fs::remove_file(dir.join(SESSION_CONFIRMED_MARKER)) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
+}
+
+/// Whether the installed catalog (seeded only from a verified cache) was confirmed by this
+/// session and may be used while the control plane is unreachable.
+pub(crate) fn session_catalog_confirmed(inner: &TonoInner) -> bool {
+    !inner.nodes.is_empty() && inner.catalog_dir.join(SESSION_CONFIRMED_MARKER).is_file()
+}
+
 /// Sanitize the catalog's split-routing directives against the admitted
 /// nodes, warning on dropped selection hints. Catalog/cache admission has
 /// already rejected any unusable declared home hop before this projection.
@@ -147,6 +176,11 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
             Err(CatalogError::StaleRevision) => (false, false),
             Err(err) => return Err(err.to_string()),
         };
+        // Installed or unchanged: the cache now holds exactly what this session was served. A
+        // stale revision confirms nothing about the cached copy.
+        if emit && let Err(error) = confirm_session_catalog(&inner.catalog_dir) {
+            logging!(warn, Type::Service, "Tono: offline catalog confirmation not recorded: {error:#}");
+        }
         let vanished = (installed
             && inner.catalog_requires_choice
             && (inner.fsm.status().is_connected || inner.fsm.status().is_connecting))

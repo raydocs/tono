@@ -243,6 +243,9 @@ pub struct TonoInner {
     pub catalog_last_synced_at_ms: Option<i64>,
     /// Latest catalog fetch/verification failure. The last verified catalog remains installed.
     pub catalog_sync_error: Option<String>,
+    /// Launch restore could not reach the control plane (#582); see `TonoStatus`. Cleared by the
+    /// next restore, a sign-in, or a completed account close.
+    pub control_plane_unreachable: bool,
     /// Read-only server reachability batch. It never changes selection or connection state.
     pub server_test_generation: u64,
     pub server_test_cancellation: Option<CancellationToken>,
@@ -591,6 +594,7 @@ impl TonoState {
                 catalog_requires_choice: false,
                 catalog_last_synced_at_ms: None,
                 catalog_sync_error: None,
+                control_plane_unreachable: false,
                 server_test_generation: 0,
                 server_test_cancellation: None,
                 fsm: ConnectionFsm::new(),
