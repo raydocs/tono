@@ -32,6 +32,28 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 升级后归档 0.0.72 遗留的更新交接记录
+
+- **归属/来源**：G3 客户升级路径；macOS App。内部审查 H15-F3，Issue #496。基线 origin/main
+  bb2ed4e4；分支 `fix/legacy-handoff-macos-20260923`；未合 main。
+- **缺陷修复**：0.0.72 的 Sparkle 更新在安装前把 `update-handoff.json` 推进到
+  `installStarted`；0.0.73 起不再推进、提交或删除它，但 Dashboard 仍读取它，48 h 过期后
+  永久显示"更新未完成，断开后重装"，断开/重装都清不掉。改为启动时（`TonoApp.init`，在
+  AppState 读取告警前）识别该记录：当前运行版本 ≥ 记录的 `nextAppVersion`，说明升级已完成，
+  把原字节归档到 `update-handoff.history/` 后删除记录；记录目标高于当前版本、内容无法解码或
+  版本号不是数字时保持原状（仍按原规则告警）。保护状态不依赖这份记录（启动恢复以 helper
+  kill switch 状态为准），不改变 PF 行为。
+- **新增/优化**：无。
+- **工程与测试**：一个 XCTest
+  `testCompletedLegacyUpgradeJournalIsArchivedAndStopsWarning`：0.0.72 写出的已过期
+  `installStarted` 记录在 0.0.72 下保留并告警，在 0.0.73 下归档原字节且不再告警。旧代码上
+  该入口不存在（编译失败即失败）。`writePrepared` 的归档代码抽成共用私有函数，行为不变。
+- **验证**：本机为编辑/审查机，未执行 xcodebuild/swift；回归交给本 PR 的 GitHub-hosted
+  macos-26 CI，结果见 PR。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：必须在 0.0.73 发给 0.0.72 客户之前合入，发出后无法从旧版一侧补救。未在真机
+  上用 0.0.72 → 0.0.73 Sparkle 升级实测。Windows 同类问题由单独 PR 处理。
+
 ## 2026-09-23 · macOS 静默 helper 升级与安装器使用同一准入（H2-F1）
 
 - **归属**：G1 保护完整性（root helper 替换路径）；平台/模块：macOS
