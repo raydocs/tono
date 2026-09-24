@@ -73,6 +73,11 @@
   原测试改为显式传入存在的 plist 路径。验证：本机未运行（不做本机 Swift 编译），以 PR CI 为准。剩余限制：Helper 删除
   socket 没有自测（reset 接线需要真实安装）；新错误码仅 macOS，Windows 分类与运维台文案未同步；与 #566 同改
   `main.swift` 的移除列表，后合并者须把 `socketPath` 放进 #566 的 `removeHelperInstallation()`。
+- **2026-09-24 第二轮跟进**（核验方 Codex 指出，Opus 读码确认，P3）：修复——账户 B 首次连接失败后，清理路径
+  （`disconnect(releaseKillSwitch: true)` → 发布前修复探测 → 安装被守卫拒绝）用“需要修复、请批准管理员提示”覆盖了
+  点名账户的提示。现在 `repairHelperForExplicitReleaseIfNeeded` 在 Helper 属于另一个账户时直接抛出
+  `boundToAnotherUser`、不做探测和修复，清理路径保留该错误原文。保护行为不变（释放照旧中止）。测试：无（P3）。
+  验证：本机未运行，以 PR CI 为准。剩余限制：完整清理流程的提示文本没有测试覆盖。
 
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 

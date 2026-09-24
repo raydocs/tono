@@ -767,9 +767,15 @@ extension AppState {
                     try await networkProtection.repairForRelease()
                 } catch {
                     helperReadyForRelease = false
-                    transitionError = String(
-                        localized: "Tono's network helper needs repair before protection can be released, so your traffic stays protected. Choose Restore internet again and approve the administrator prompt. If repair keeps failing, the Support page has a recovery command. \(error.localizedDescription)"
-                    )
+                    if case HelperIPCError.boundToAnotherUser(_) = error {
+                        // Keep the message that names the owning account; an
+                        // administrator prompt here would be refused.
+                        transitionError = error.localizedDescription
+                    } else {
+                        transitionError = String(
+                            localized: "Tono's network helper needs repair before protection can be released, so your traffic stays protected. Choose Restore internet again and approve the administrator prompt. If repair keeps failing, the Support page has a recovery command. \(error.localizedDescription)"
+                        )
+                    }
                     LocalTrafficAudit.shared.recordEvent(
                         "helper_release_repair_failed",
                         details: ["error": error.localizedDescription]
