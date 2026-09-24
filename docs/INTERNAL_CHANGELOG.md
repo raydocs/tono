@@ -32,6 +32,33 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 旧 helper 读不了 DNS 快照时不再阻止自身被替换
+
+- **归属/来源**：G1 保护恢复；macOS `HelperManager.installIfNeeded` 升级前检查。内部审查
+  X1-1（#303/#307 修复不完整），Issue #426。基线 main bb2ed4e4 → 分支
+  `fix/helper-upgrade-dns-preflight-20260923`；提交时未合 main。
+- **缺陷修复**：替换已认证的旧 helper 前，App 要求旧 helper 先恢复 DNS、停 core、并确认 PF
+  live，任一步失败都抛 `installFailed`，而且这一步排在静默升级和管理员安装之前。旧 helper
+  遇到损坏快照或快照所记服务已删除时（#307/#303 修的正是这一情形），每次恢复 DNS 都失败，
+  新 helper 因此永远装不上，主机停在 Protected Offline：Retry 和 Restore internet 都提示
+  "批准管理员提示"，但提示从不出现。现在升级前检查抽成
+  `prepareAuthenticatedHelperForReplacement`：旧 helper 恢复 DNS 失败只记审计事件
+  `helper_upgrade_dns_restore_deferred`，不再阻止升级；停 core 和"PF 需要时必须 live"仍是硬
+  条件（保护不放宽）。升级后由新 helper 的 `/dns/restore` 隔离损坏快照并清扫 loopback 解析器，
+  应用内 Retry / 管理员安装因此成为不依赖旧二进制的恢复出口。
+- **新增/优化**：无。
+- **工程与测试**：新增一个 XCTest
+  `HelperUpgradePreflightTests.testUnreadableDNSStateOnPreviousHelperDoesNotBlockItsReplacement`：
+  注入恢复 DNS 抛错、停 core 成功、PF armed/wanted/live，断言不抛错且 core 已停。旧代码没有
+  这个函数（测试无法编译，即失败）；按旧语义（恢复失败即抛）也会失败。未改 helper 源码，
+  CONTRACT.sha256 与协议版本不变。
+- **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests），结果以 PR 页为准。"旧 helper + 损坏快照 → 升级"未做实机验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：App 文案中的 sudo 应急命令仍调用已安装的二进制，对旧 helper 的损坏快照依旧
+  无效；应用内出口是 Retry 触发的升级。升级后到新 helper 恢复 DNS 之前，系统解析器可能仍指向
+  已停止的 loopback（无泄漏，PF 仍 fail-closed）。
+
 ## 2026-09-23 · macOS Helper 持有自己的 PF 启用引用，已连接期间监督 PF 是否仍在过滤
 
 - **归属/来源**：G1 连接保护；macOS `tono-core-helper` 的 PF 生命周期与 App 连接监控。
