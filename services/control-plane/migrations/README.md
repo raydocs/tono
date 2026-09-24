@@ -57,3 +57,7 @@ Ops tables after the sequence was unique. Applied in numeric order:
 ## 0080
 
 - `0080_home_socks5_rotation_required.sql` — `home_exits.socks5_rotation_required_at`, set by triggers when a socks5 credential leaves a binding or its user is disabled; a flagged credential cannot be bound to another user until replaced
+
+## 0082
+
+- `0082_customer_activity_windows.sql` — `customer_activity_windows` marks each telemetry window once it is added to activity hours, so the upload hook and the cron projection do not both count it

@@ -49,6 +49,36 @@
 - **候选/发布**：无新包，仅文档。
 - **剩余限制**：H16/H17 条目全部是源码推导或阅读确认，回归草案均未运行；需实机的部分列在审查轮记录第 3 节。
 
+## 2026-09-23 · 客户活动小时每个窗口只计一次；无字节时月结客户标为待核对（H8-F4）
+
+- **归属**：ops 任务（运维计划 §1.3 D1 月结汇总 / 客户 360 投影），非客户 ship gate；
+  `services/control-plane`，D1 migration `0082`。
+- **来源**：基线 main `18301fc5` → 分支 `fix/activity-hours-dedupe-20260923`；Issue #403，内部审查 H8-F4；
+  提交时未合 main。
+- **缺陷修复**：
+  - **原问题 1**：`accrueActivityHours` 用 `+=` 累加，上传钩子和 cron `projectBacklog` 对同一个
+    telemetry window 各执行一次，在线/连接分钟和窗口数翻倍（20 分钟变 40）。
+  - **修复 1**：新表 `customer_activity_windows`（0082）按 window id 记标记；标记的
+    `INSERT OR IGNORE` 与各小时 upsert 放在同一个 D1 batch，upsert 只在本次调用抢到标记时生效，
+    哪一路先到就由哪一路计一次。cron 保留 35 天标记（长于 telemetry_windows 默认 30 天）。
+    原来的分批 helper 已无调用方，一并删除。
+  - **原问题 2**：`bytes_up/bytes_down` 恒为 0，月结不分摊 server/home_line 成本，客户行却按
+    「无用量」给出确定毛利并在关账时冻结。
+  - **修复 2**：`loadMonthSummary` 对「在某节点有连接分钟但无字节记录」的客户标 `pending: true`、
+    `marginCnyMinor: null`（控制台已有待核对展示）。真实字节需要节点侧或客户端合同变更，
+    本次不补写，留在 #403。
+- **新增/优化**：无。`docs/ops/api-contract.md` 的 `GET months/{month}` 行补充缺测含义。
+- **工程与测试**：`test/ops-ingest-hooks.test.ts` 新增一个 `it`（上传窗口 → 跑 `projectBacklog` → 分钟
+  不变且该客户 `pending`）。旧代码上实际跑红（`expected 40 to be 20`），修复后绿。
+- **验证**：MacBook worktree focused vitest（ingest-hooks / customers / ledger / cron 4 文件 51 项）、
+  control-plane 全量 vitest 43 文件 892 项通过、`tsc --noEmit` 无错误。migration 只在 vitest 本地
+  D1 上应用过，未在 preview/生产 D1 演练。CI 结果见 PR。
+- **候选/发布**：仅源码，无新候选；上线需 owner 先应用 0082 再部署 Worker。
+- **剩余限制**：
+  - 成本仍无法按字节分摊，活跃客户在月结中会显示为待核对，直到有真实字节来源。
+  - 生产中已翻倍的分钟不会回写；已关账月的冻结客户行不变。
+  - 客户 360 的字节列仍显示 0。
+
 ## 2026-09-23 · 重新上架：出口令牌已吊销的节点不再能上架
 
 - **归属**：ops 任务（节点下架/上架流程）；控制面 `services/control-plane`。不属客户发布门。
