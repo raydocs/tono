@@ -354,6 +354,40 @@ extension KillSwitchManager {
         mainPath: String = killSwitchMainPFPath,
         backupPaths: [String] = [killSwitchMainBackupPath, killSwitchHostsBackupPath]
     ) throws {
+        let originalData = try secureRead(mainPath, maximumBytes: 1024 * 1024)
+        guard let original = String(data: originalData, encoding: .utf8) else {
+            throw HelperFailure.invalid("The main PF configuration is not UTF-8.")
+        }
+        let unhooked = try unhookedMainConfiguration(original)
+        if unhooked != original {
+            try atomicWrite(path: mainPath, data: Data(unhooked.utf8), permissions: 0o644)
+        }
+        // Only once the hook is out: with malformed markers the backups are
+        // what a person would need to repair the file by hand.
+        for path in backupPaths {
+            try removeIfPresent(path, requiredType: mode_t(S_IFREG), allowedOwner: 0)
+        }
+    }
+
+    /// The inverse of `hookedMainConfiguration`: drop the marked block and the
+    /// blank line a first arm leaves after it. Lines outside the markers stay.
+    static func unhookedMainConfiguration(_ hooked: String) throws -> String {
+        var lines = hooked.components(separatedBy: "\n")
+        let begins = lines.indices.filter { lines[$0] == killSwitchBeginMarker }
+        let ends = lines.indices.filter { lines[$0] == killSwitchEndMarker }
+        if begins.isEmpty, ends.isEmpty,
+           !hooked.contains(killSwitchBeginMarker), !hooked.contains(killSwitchEndMarker) {
+            return hooked
+        }
+        guard begins.count == 1, ends.count == 1, begins[0] < ends[0] else {
+            throw HelperFailure.invalid("Malformed Tono PF markers.")
+        }
+        var upper = ends[0] + 1
+        if upper < lines.count, lines[upper].isEmpty { upper += 1 }
+        lines.removeSubrange(begins[0]..<upper)
+        var unhooked = lines.joined(separator: "\n")
+        if hooked.hasSuffix("\n"), !unhooked.hasSuffix("\n") { unhooked += "\n" }
+        return unhooked
     }
 
     /// What to do about states established under rules that no longer exist.

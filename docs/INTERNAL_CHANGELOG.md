@@ -32,6 +32,29 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · macOS Helper 完整移除时撤回 /etc/pf.conf 挂钩并删除 .tono-backup
+
+- **归属/来源**：G1 连接保护（移除后恢复原状）；macOS `tono-core-helper`。内部审查 H19-O-F6（跨厂商核实：
+  降级为残留问题），Issue [#551](https://github.com/raydocs/tono/issues/551)。分支 `fix/pf-hook-removal-20260924`，
+  叠在 #550（H19-O-F4，`fix/helper-recovery-no-user-20260924`）之上；未合 main。
+- **缺陷修复**：首次 arm 会在 `/etc/pf.conf` 写入带标记的挂钩（`# BEGIN/END TONO KILL SWITCH`），并保存
+  `/etc/pf.conf.tono-backup` 与 `/etc/hosts.tono-backup`；`--emergency-reset` 解除保护后只删除 plist、allowed-uid
+  和两个可执行文件，挂钩与两个备份永远留下。现在 reset 在 PF 已释放之后，只去掉标记块（及首次 arm 在其后
+  留下的空行），保留标记外的每一行，不把旧备份覆盖回去；挂钩去掉后再删除两个备份（标记损坏时保留备份以便
+  手工修复）。这一步失败只报告，不阻止移除：留下的挂钩只加载已解除的空锚点文件。普通 disarm 不变，仍保留挂钩。
+  Helper 协议版本 4.41.0 → 4.42.0（临时编号，合并时按顺序重编号），`CONTRACT.sha256` 按构建脚本清单重算。
+- **新增/优化**：无。
+- **工程与测试**：把 arm 对 `/etc/pf.conf` 的纯文本变换抽成 `hookedMainConfiguration`（行为不变），
+  `--lifecycle-self-test`（root，CI privileged-tests）第 8 段在临时目录用一次 arm 与两次 arm 的真实输出加上
+  用户后加的一行做夹具，断言移除后恰好回到“原文件 + 用户行”，且两个备份都被删除。先推送只含测试与空实现的
+  提交让 CI 变红，再推修复。
+- **验证**：本机（编辑机）未编译；以本 PR 的 GitHub-hosted `macos-26` CI 为准。本机用 Python 按同一算法模拟了
+  默认 pf.conf 的一次/两次 arm 往返。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：未在实机上跑 reset；自测不覆盖 `runEmergencyResetLocked` 的接线本身（它需要真实安装）。
+  没有重载内核里的主规则集（下次开机按去掉挂钩的文件加载），也没有删除 `/Library/Application Support/Tono`
+  下的状态文件。文件无尾换行、或挂钩位于没有任何 anchor/pass 行的文件末尾时，结果可能多一个空行或尾换行。
+
 ## 2026-09-24 · macOS 绑定用户被删除后，Helper 紧急恢复命令仍能释放保护
 
 - **归属/来源**：G1 连接保护（恢复出口）；macOS `tono-core-helper`。内部审查 H19-O-F4（跨厂商核实：confirmed），

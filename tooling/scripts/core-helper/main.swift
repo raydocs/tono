@@ -687,6 +687,14 @@ private func runEmergencyResetLocked(_ storage: UpdateStorage) -> Bool {
         )
         return false
     }
+    // PF is released. Take Tono's hook back out of /etc/pf.conf and delete the
+    // backups written before its first edits. A hook left behind only loads the
+    // disarmed placeholder anchor, so a failure is reported, not fatal.
+    do {
+        try KillSwitchManager.removeMainHookAndBackups()
+    } catch {
+        fputs("Tono emergency reset left its /etc/pf.conf hook in place: \(error)\n", stderr)
+    }
     for path in [
         "/Library/LaunchDaemons/com.raydocs.tono.core-helper.plist",
         allowedUIDPath,
