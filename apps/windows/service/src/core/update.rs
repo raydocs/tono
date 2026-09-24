@@ -593,6 +593,11 @@ pub fn register_consumed_recovery(store: &Store) -> Result<()> {
     })
 }
 
+fn register_recovery_with(store: &Store, register: impl FnOnce(&Path) -> Result<()>) -> Result<()> {
+    store.consumed_attempt()?;
+    register(&store.attempt_dir()?)
+}
+
 /// The ONSTART task [`register_consumed_recovery`] creates.
 pub const RECOVERY_TASK_NAME: &str = "Tono Update Recovery v1";
 
@@ -616,11 +621,6 @@ pub fn retire_recovery_task() -> Result<()> {
         "could not retire the update recovery task"
     );
     Ok(())
-}
-
-fn register_recovery_with(store: &Store, register: impl FnOnce(&Path) -> Result<()>) -> Result<()> {
-    store.consumed_attempt()?;
-    register(&store.attempt_dir()?)
 }
 
 /// Called by NSIS before live or repair writes. Only the verified package in
