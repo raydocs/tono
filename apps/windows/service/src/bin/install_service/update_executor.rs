@@ -69,6 +69,10 @@ pub(super) fn dispatch() -> Result<bool, Error> {
             native::begin_manual_orphan()?;
             Ok(true)
         }
+        [mode] if mode == "--retire-orphaned-owner" => {
+            tokio::runtime::Runtime::new()?.block_on(native::retire_orphaned_owner())?;
+            Ok(true)
+        }
         [mode] if mode == "--manual-uninstall-gate" => {
             native::begin_manual_uninstall()?;
             Ok(true)

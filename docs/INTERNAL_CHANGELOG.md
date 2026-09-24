@@ -63,6 +63,15 @@
   （`a confirmed orphaned-block clear reinstalls through the fresh path, not the upgrade path`），MacBook 上改前失败、改后 24/24 通过。
   验证：Rust/NSIS 未在本机运行；CI 待定。限制：此路径显示全新安装向导（不再是被动升级），App 由完成页启动而不是自动重开；旧 `tono-core` 若仍被占用，
   删除失败，安装在创建 Service 前中止；#500 尚未进 main（已在 `train/win-20260924`）；NSIS 未编译，未实机验证。
+- **跟进 2026-09-24（Codex 新发现，Opus 核实 CONFIRMED）**：修复：Service 消失、WFP 残留且 `active_owner` 的
+  `core_should_be_running=true`（连接中二进制被隔离即是此态）时，孤儿租约与卸载助手的紧急解除都不清该期望状态，随后全新安装
+  Service 的 `manual_gate()` 以「Disconnect before manual installation」拒绝，安装仍中止。现安装段在 `RemoveVergeService`（未证明
+  WFP 已移除即中止）之后、`StartVergeService` 之前，仅当 `$ClearingOrphanedBlock=1` 调用新的
+  `tono-service-install.exe --retire-orphaned-owner`：`retire_orphaned_owner` 要求本安装器持有租约、无 Service、无残留过滤器，
+  再调用既有 `retire_legacy_active_owner`（期望状态置停止并清 active owner）；失败则中止安装。测试：packaging 新增一个 `test`
+  （`a confirmed orphan clear retires the stale connected owner only after the barrier is gone`），MacBook 上改前失败、改后 25/25 通过。
+  验证：Rust/NSIS 未在本机运行；CI 待定。限制：退役失败时安装中止，此时拦截已解除但无 Service，再次运行安装器会因期望状态仍为运行
+  而得到 77（Disconnect）提示；无实机验证。
 
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 

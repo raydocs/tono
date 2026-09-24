@@ -1112,6 +1112,17 @@ Section Install
   ; disarm helper here. UpdateMode deliberately keeps the Service in place, then the replacement
   ; helper preserves active protection or marks a proven-disconnected legacy state for cleanup.
   !insertmacro RemoveVergeService
+  ; A confirmed orphan clear: the owner that was connected when its Service went away still says
+  ; "core should run", and the Service installer's gate would refuse on it with Disconnect advice
+  ; nobody can follow. RemoveVergeService has just proven the filters gone (it aborts otherwise);
+  ; the helper proves it again, and that no Service exists, before retiring that state.
+  ${If} $ClearingOrphanedBlock = 1
+    nsExec::ExecToLog /TIMEOUT=60000 '"$INSTDIR\resources\tono-service-install.exe" --retire-orphaned-owner'
+    Pop $0
+    ${If} $0 != "0"
+      Abort "The leftover ${PRODUCTNAME} network block was removed, but the previous connection state could not be cleared (result $0). Run this installer again."
+    ${EndIf}
+  ${EndIf}
   !insertmacro StartVergeService
 
   ${If} $ConfirmedExistingInstall = 1

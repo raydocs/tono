@@ -47,6 +47,13 @@ const windowsServiceUpdateSource = readFileSync(
   new URL('../../service/src/core/update.rs', import.meta.url),
   'utf8',
 )
+const windowsServiceUpdateExecutorSource = readFileSync(
+  new URL(
+    '../../service/src/bin/install_service/update_executor.rs',
+    import.meta.url,
+  ),
+  'utf8',
+)
 const windowsReleaseShSource = readFileSync(
   new URL(
     '../../../../tooling/scripts/build-windows-release.sh',
@@ -518,6 +525,33 @@ test('a confirmed orphaned-block clear reinstalls through the fresh path, not th
       ),
     )
   }
+})
+
+test('a confirmed orphan clear retires the stale connected owner only after the barrier is gone', () => {
+  // The owner that was connected when its Service went away still says "core should run", and
+  // the Service installer's manual gate refuses on that with Disconnect advice nobody can follow.
+  const installSection =
+    installerSource.match(/Section Install\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  const removeAt = installSection.indexOf('!insertmacro RemoveVergeService')
+  const startAt = installSection.indexOf('!insertmacro StartVergeService')
+  // RemoveVergeService aborts unless WFP removal is proven, so this runs on a proven-open machine.
+  assert.match(
+    installSection.slice(removeAt, startAt),
+    /\$\{If\} \$ClearingOrphanedBlock = 1\s+nsExec::ExecToLog [^\n]*tono-service-install\.exe" --retire-orphaned-owner'\s+Pop \$0\s+\$\{If\} \$0 != "0"\s+Abort /,
+  )
+  assert.match(
+    windowsServiceUpdateExecutorSource,
+    /\[mode\] if mode == "--retire-orphaned-owner" => \{[^}]*native::retire_orphaned_owner\(\)/,
+  )
+  // The helper re-proves it: no Service, no filter, then retire, never the other way round.
+  const retire =
+    windowsServiceUpdateSource.match(
+      /pub async fn retire_orphaned_owner\(\)[\s\S]*?\n\}/,
+    )?.[0] ?? ''
+  const serviceAt = retire.indexOf('barrier_service_present()')
+  const filtersAt = retire.indexOf('residual_filters_present()')
+  const retireAt = retire.indexOf('retire_legacy_active_owner()')
+  assert.ok(serviceAt > 0 && filtersAt > serviceAt && retireAt > filtersAt)
 })
 
 test('NSIS uninstall removes leftover user control-plane pins', () => {

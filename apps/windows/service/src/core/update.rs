@@ -835,6 +835,33 @@ pub fn begin_manual_orphan() -> Result<()> {
     begin_manual_uninstall()
 }
 
+/// Install only, after a confirmed orphan clear ([`begin_manual_orphan`]) and once the install's
+/// own `RemoveVergeService` removed the filters. The owner that was connected when its Service
+/// went away still has a desired "core should run" state, and [`manual_gate`] refuses the fresh
+/// Service on it with Disconnect advice nobody can follow. It is retired only while this
+/// installer holds the lease, no Service exists and no Tono filter is left; never before.
+pub async fn retire_orphaned_owner() -> Result<()> {
+    let installer = parent_image()?;
+    let _repair =
+        crate::acquire_service_repair_gate()?.context("another lifecycle writer is active")?;
+    let store = open_store()?;
+    ensure!(!store.pending(), "update evidence pending");
+    ensure!(
+        store.state.manual_installer.as_ref() == Some(&installer),
+        "this installer does not hold the manual installer lease"
+    );
+    drop(store);
+    ensure!(
+        !barrier_service_present()?,
+        "a Tono Service still owns the network barrier"
+    );
+    ensure!(
+        !wfp::residual_filters_present().await?,
+        "Tono network filters remain; the previous connection state was kept"
+    );
+    desired::retire_legacy_active_owner().await
+}
+
 pub fn finish_manual() -> Result<()> {
     let mut store = open_store()?;
     ensure!(
