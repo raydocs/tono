@@ -8,6 +8,11 @@ extension KillSwitchManager {
         allowedUID: uid_t
     ) throws -> String {
         let rules = renderRules(state: state, allowedUID: allowedUID)
+        try writeRuleText(rules)
+        return rules
+    }
+
+    static func writeRuleText(_ rules: String) throws {
         try atomicWrite(
             path: killSwitchPFPath,
             data: Data(rules.utf8),
@@ -19,7 +24,6 @@ extension KillSwitchManager {
                 checked.message.isEmpty ? "PF rule validation failed." : checked.message
             )
         }
-        return rules
     }
 
     /// Wired and Wi-Fi interfaces present now (`enN`, which also covers USB
@@ -435,6 +439,39 @@ extension KillSwitchManager {
             hosts.insert(host)
         }
         return hosts.sorted()
+    }
+
+    static let reviewedBundleLabel = "label \"tono-bundle\""
+
+    /// The loaded anchor with the reviewed-bundle permit taken out while the
+    /// Core restarts and its tunnel is gone (#608).
+    struct ReviewedBundleWithholding: Equatable {
+        let rules: String
+        /// Always `.keep`. Dropping a `from any to any` permit through an arm
+        /// reduces to `.full` in `withdrawnHosts`, a machine-wide flush on
+        /// every reload and policy apply; this path narrows the ruleset only
+        /// to stop new states for the restart and leaves existing ones alone.
+        let disposal: StateDisposal
+        /// Unchanged from the arm that loaded the permit. The next arm is
+        /// measured against the full set, so one that really drops the
+        /// permit still sees it withdrawn and flushes, and the app's arm that
+        /// restores it once the tunnel exists withdraws nothing.
+        let baseline: Set<String>
+    }
+
+    /// nil when there is nothing to withhold, or when `loaded` is not the
+    /// ruleset the recorded baseline came from: an unknown baseline, a
+    /// partial commit, or a ruleset that is already withheld.
+    static func reviewedBundleWithholding(
+        loaded: String,
+        baseline: Set<String>?
+    ) -> ReviewedBundleWithholding? {
+        guard let baseline, passRules(in: loaded) == baseline,
+              baseline.contains(where: { $0.contains(reviewedBundleLabel) }) else { return nil }
+        let rules = loaded.split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.contains(reviewedBundleLabel) }
+            .joined(separator: "\n")
+        return .init(rules: rules, disposal: .keep, baseline: baseline)
     }
 
     static func ensureAnchorLoaded(flushStates: Bool) throws {

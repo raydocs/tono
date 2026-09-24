@@ -80,7 +80,12 @@ final class SocketServer {
             // out-of-process emergency disarm or an update transition.
             if Date().timeIntervalSince(lastProtectionCheck) >= 10 {
                 lastProtectionCheck = Date()
-                try? updates.storage.locked { killSwitch.superviseProtection() }
+                try? updates.storage.locked {
+                    killSwitch.superviseProtection()
+                    // A Core that exited took its utun with it (#608). Only
+                    // the app's next arm with a live tunnel restores the permit.
+                    if !core.status().running { killSwitch.withholdReviewedBundlePermit() }
+                }
             }
             var descriptor = pollfd(
                 fd: serverFD,
@@ -193,7 +198,9 @@ final class SocketServer {
                     configSHA256: digest,
                     startAllowed: {
                         transitionGate.isAwake() && killSwitch.status()["live"] as? Bool == true
-                    }
+                    },
+                    // The old Core's utun goes away with it (#608).
+                    beforeStop: { _ = killSwitch.withholdReviewedBundlePermit() }
                 )
                 sendResponse(client, status: 200, object: ["ok": true, "configPath": path])
             case ("DELETE", "/core/stop"):

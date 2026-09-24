@@ -352,6 +352,50 @@ final class KillSwitchManager {
         return withdrawnHosts(withdrawn).map { StateDisposal.targeted($0) } ?? .full
     }
 
+    /// Takes the reviewed-bundle permit out of the loaded anchor while the
+    /// Core has no tunnel (#608): from /core/sync after the new config passed
+    /// its check and before the old Core stops, and from the idle loop once
+    /// the Core has exited. With the Core goes its utun, and the address-free
+    /// permit is then root web-port egress on the physical interface. It
+    /// returns only through the app's next arm with the flag, which renders it
+    /// only while a tunnel exists.
+    ///
+    /// Best effort: a failure leaves a ruleset no looser than the one before,
+    /// and the restart goes ahead as it always did.
+    @discardableResult
+    func withholdReviewedBundlePermit() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let baseline = lastLoadedPassRules,
+              baseline.contains(where: { $0.contains(Self.reviewedBundleLabel) }) else {
+            return false
+        }
+        do {
+            let loaded = String(
+                decoding: try Self.secureRead(killSwitchPFPath, maximumBytes: 4 * 1024 * 1024),
+                as: UTF8.self
+            )
+            guard let plan = Self.reviewedBundleWithholding(loaded: loaded, baseline: baseline) else {
+                return false
+            }
+            // An arm prepared against the ruleset being narrowed must not
+            // commit it back while the tunnel is gone.
+            stateGeneration &+= 1
+            try Self.writeRuleText(plan.rules)
+            try Self.ensureAnchorLoaded(disposal: plan.disposal)
+            // The same full set, and left as it is when a step above throws:
+            // it is a superset of anything now loaded, so the next arm cannot
+            // under-count what it withdraws.
+            lastLoadedPassRules = plan.baseline
+            return true
+        } catch {
+            FileHandle.standardError.write(Data(
+                "tono: reviewed-bundle permit not withheld: \(error)\n".utf8
+            ))
+            return false
+        }
+    }
+
     /// Power transitions are secured inside the root helper rather than
     /// relying on a SwiftUI/NSWorkspace callback arriving before applications
     /// resume. Replace every tunnel, proxy, DNS-bootstrap, and control-plane

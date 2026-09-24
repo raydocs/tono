@@ -669,6 +669,28 @@ extension KillSwitchManager {
             // this address-free permit is root web-port egress on the physical
             // interface. A tunnel-less state that asks for it must not get it.
             let bundleOffWithoutTunnel = !rules.contains("label \"tono-bundle\"")
+            // #608: /core/sync withholds the permit while the Core restarts
+            // without its utun, with no state flush, and keeps the full set as
+            // the baseline. Against it, an arm that really drops the permit
+            // still flushes, and the app's arm restoring it once the tunnel
+            // exists withdraws nothing.
+            let tunneledPassRules = passRules(in: tunneledRules)
+            let bundleFreePassRules = tunneledPassRules.filter { !$0.contains("label \"tono-bundle\"") }
+            let withholding = reviewedBundleWithholding(loaded: tunneledRules, baseline: tunneledPassRules)
+            let withheldRules = withholding?.rules ?? ""
+            let withheldBaseline = withholding?.baseline
+            let withheldOnlyTheBundle: Bool = passRules(in: withheldRules) == bundleFreePassRules
+                && tunneledPassRules.count - bundleFreePassRules.count == 2
+                && withheldRules.contains("block drop out quick all")
+            let withheldWithoutFlush: Bool = withholding?.disposal == StateDisposal.keep
+            let realRemovalStillFlushes: Bool = withheldBaseline != nil
+                && stateDisposal(replacing: withheldBaseline, with: bundleFreePassRules) == .full
+            let restoreIsWidening: Bool = withheldBaseline != nil
+                && stateDisposal(replacing: withheldBaseline, with: tunneledPassRules) == .keep
+            let unknownBaselineUntouched: Bool =
+                reviewedBundleWithholding(loaded: tunneledRules, baseline: nil) == nil
+            let bundleWithheldForCoreSync = withheldOnlyTheBundle && withheldWithoutFlush
+                && realRemovalStillFlushes && restoreIsWidening && unknownBaselineUntouched
             // Continuity is TUN-scoped: empty tunnelInterfaces (this `state`)
             // must not keep Sidecar as a side channel; a live utun must.
             let continuityNeedles = [
@@ -758,6 +780,7 @@ extension KillSwitchManager {
             return ruleShapesHold
                 && bundleShapesHold
                 && bundleOffWithoutTunnel
+                && bundleWithheldForCoreSync
                 && continuityOffWithoutTunnel
                 && continuityOnWithTunnel
                 && lanDNSBlockedFirst
