@@ -249,6 +249,34 @@ Limits of this clarification (stated so it is not over-read):
   integrity gap, not a protection bypass; the fix is per-member digest
   verification against the plan.
 
+## Local store schema across versions (2026-09-23)
+
+The private stores (macOS helper `ledger.json`, Windows Service `state.json`)
+are read by an **older** binary after a newer one wrote them: the executor is a
+copy of the previous signed helper / `tono-service-install.exe`, and the new
+helper/Service keeps writing the store after publication. Wire documents above
+(manifest, receipt, requests) keep their exact-shape rules and
+`protocolVersion`; this section covers only the local store around them.
+
+- **Storage major.** `schemaVersion` (macOS) / `schema_version` (Windows) is an
+  integer major. Absent means `1`, the current unversioned layout. Writers emit
+  it only once they write `2` or later, so every build that already reads v1
+  stores keeps reading them.
+- **Same major: unknown fields are ignored.** A reader accepts fields it does
+  not know. macOS still requires every field it knows to carry exactly the
+  canonical value it decoded; only additive keys are skipped.
+- **Additive fields must be optional and safe to drop.** An N-1 executor may
+  rewrite the store without them, so their absence must mean the safe default.
+  A field whose loss or misreading could grant authority, clear an obligation,
+  or change recovery is not additive.
+- **Anything else bumps the major.** A reader refuses a higher major with a
+  distinct "written by a newer Tono" error and retains the bytes. That is not a
+  corrupt store, but it still blocks exactly like pending evidence until a build
+  that understands the major handles it.
+- **Release check.** Before shipping a store change, the previous release's
+  executor must read a ledger written by the candidate. A new major also needs a
+  plan for machines whose executor is the previous release.
+
 ## Automated conformance and its limits
 
 `tooling/scripts/tests/fixtures/update-protocol-v1/` contains synthetic manifest,
