@@ -150,10 +150,16 @@ nonisolated enum HelperProtocolVersion {
     ///   deleted. When the recorded service no longer exists the snapshot is
     ///   archived aside and `/dns/restore` adds `originalDNSRestored: false`;
     ///   an enumeration without IDs keeps the snapshot and refuses release.
-    /// - 4.17.0 → 4.19.0 (merge-train number; 4.18.0 is reserved for the
-    ///   helper JSON-key change merged next): PF drops DNS (53/853) to LAN
+    /// - 4.17.0 → 4.19.0 (merge-train number): PF drops DNS (53/853) to LAN
     ///   and link-local ranges while a tunnel is up.
-    static let current = "4.19.0"
+    /// - 4.19.0 → 4.18.0 (merge-train number from the recorded mapping,
+    ///   although it merged after 4.19.0; the app compares helper versions
+    ///   only for equality): the owned sing-box config check refuses any
+    ///   object whose keys repeat after JSON decoding and Go-style case
+    ///   folding, and evaluates its allowlist on the folded keys the core
+    ///   itself binds. An older daemon validates the first of a repeated key
+    ///   while the core runs the last.
+    static let current = "4.18.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

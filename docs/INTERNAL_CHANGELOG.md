@@ -32,6 +32,37 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS helper 的 sing-box 配置检查拒绝重复键与折叠键（H10-F2）
+
+- **归属**：G1 保护边界（纵深防御）；macOS `tono-core-helper` 的 `ownedRuntimeConfigIsSafe`。
+- **来源**：基线 main `be1c75d2`，第四轮审查后 rebase 到 main `bb2ed4e4` → 分支
+  `fix/helper-json-keys-20260923`；Issue #416，内部审查 H10-F2；提交时未合 main。
+- **缺陷修复**：helper 用 `JSONSerialization` 校验 root 快照（重复键保留第一个，键名精确
+  比较），root core 用 Go JSON 执行同一份字节（重复键取最后一个，结构体字段按
+  `EqualFold` 折叠匹配）。两者可以读出不同的值。现在先对原始字节做键扫描（JSON 字符串
+  转义按 Go 语义解码，按 Go 的折叠规则折叠键），任何对象内出现重复即拒绝；白名单与禁用键
+  检查改在折叠后的键上进行，与 core 实际绑定的选项名一致。今天只有已签名 App 能提交配置，
+  且 App 输出固定的小写 ASCII 键，所以没有真实输入可以触发；本项只收紧 App 失守时的最后
+  一道防线。
+- **新增/优化**：无。helper 协议版本 4.19.0 → 4.18.0（合并列车按记录的编号表取 4.18.0，
+  虽晚于 4.19.0 合入；App 只按字符串相等比较版本），并按 build-core-helper.sh 同一清单重算 `CONTRACT.sha256`。
+  rebase 后补注释：重复键检查对 map 类型对象的键同样按折叠比较（见剩余限制）。
+- **工程与测试**：`runOwnedRuntimeContractSelfTests`（`--self-test`）新增一条断言：
+  `route` 内重复 `final` 必须被拒；旧代码返回 true，该断言失败。
+- **验证**：MacBook 不编译 Swift（所有者决定 2026-09-14），helper 自测交由本 PR 的 macos-ci
+  （`sudo tono-core-helper --self-test`）执行，结果见 PR。本机只用 JXA 确认 Foundation 对重复键
+  保留第一个，用 Go `encoding/json` 确认 Go 取最后一个且按 U+017F 折叠；用 Python 镜像扫描器
+  确认生命周期 fixture 与 `tooling/scripts/sing-box/runtime-template.json` 通过、重复键和
+  转义形式的同名键被拒。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：扫描器依赖 `JSONSerialization` 已先拒绝语法错误的输入；折叠规则只覆盖能落到
+  ASCII 的字母（ASCII 大写、U+017F、U+212A），与 core 的 ASCII 选项名相符。Windows 的对应检查
+  （#357，mihomo YAML）需另行核对解码器的键折叠行为，已在 #357 留言。已知过严：Go 只对结构体
+  字段名折叠，map 类型对象（如 `predefined` hosts）的键不折叠，而本检查对所有对象都折叠比较。
+  第四轮审查确认 App 自生成的配置不受影响（键都是写死的小写 ASCII，`predefined` 先
+  `lowercased()` 再经 Dictionary 去重）；将来 App 若生成仅大小写不同的 map 键会被拒绝。
+  rebase 后本机未编译，委托 CI。
+
 ## 2026-09-23 · macOS 保护期间阻断直连局域网 DNS（53/853）
 
 - **归属/来源**：G1 保护边界（内部审查 H1 报告中的未编号设计缺口）；影响 macOS root helper
@@ -53,7 +84,7 @@
   LAN DNS 阻断出现在 `tono-lan` 放行之前；旧代码无此规则而失败。审查后同一检查改为用注入的
   物理接口 `["en0", "en7"]` 渲染，并断言阻断带 `on { en0, en7 }` 限定；修改前的分支渲染的是
   不限接口的阻断，匹配不到，检查失败。同一自测在 CI 以 root 做 pfctl
-  语法解析。HelperProtocolVersion 4.17.0 → 4.19.0（合并列车按顺序编号，4.18.0 留给随后合入的 #417），CONTRACT
+  语法解析。HelperProtocolVersion 4.17.0 → 4.19.0（合并列车按顺序编号），CONTRACT
   已重算；与该链合并时需按合并顺序重算 CONTRACT。
 - **验证**：本机（MacBook）未编译 helper、未运行 pfctl（审查后的接口限定同样本机未编译）；编译、自测与 PF 解析委托本 PR 的
   GitHub-hosted `macos-26` CI（privileged-tests）。
