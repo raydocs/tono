@@ -65,6 +65,11 @@ actor PrivilegedRuntimeCoordinator {
     /// helper repair. The actor keeps the probe and possible install ordered
     /// before core stop, DNS restoration, and PF disarm.
     func repairHelperForExplicitReleaseIfNeeded() throws {
+        // Another account's helper is not this account's to repair (the
+        // install refuses it anyway); report it as itself, not as "repair".
+        if let account = HelperManager.helperBoundAccount() {
+            throw HelperIPCError.boundToAnotherUser(account)
+        }
         guard HelperManager.explicitReleaseRequiresRepair() else { return }
         try KillSwitchService.installIfNeeded()
     }

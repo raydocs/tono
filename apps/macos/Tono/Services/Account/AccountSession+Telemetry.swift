@@ -272,9 +272,17 @@ extension AccountSession {
     /// consent as the protection snapshot — it is a slice of the same event
     /// ring — and the Worker keeps a separate budget for it, so a bad evening
     /// of retries cannot starve the heartbeat that would show the recovery.
+    /// An internal build also sends the classified fields without that consent,
+    /// until the user turns that off in Settings.
     func reportConnectFailure(_ notice: ConnectFailureNotice) async {
+        let internalBuild = Self.isInternalBuild()
         guard state == .ready, !systemSleeping, user != nil,
-              Self.isPeriodicTelemetryEnabled else { return }
+              let scope = Self.failureReportScope(
+                  internalBuild: internalBuild,
+                  snapshotOptedIn: Self.isPeriodicTelemetryEnabled,
+                  internalOptedOut: Self.isInternalFailureReportsOptedOut
+              ) else { return }
+        let full = scope == .full
         let snapshot = diagnosticSnapshotConsumer()
         // A failure before any node was chosen has nothing to pin to a machine;
         // the window still carries it, so nothing is lost by not sending now.
@@ -285,21 +293,25 @@ extension AccountSession {
             ts: notice.ts,
             stage: notice.stage,
             code: notice.code,
-            error: notice.error,
+            error: full ? notice.error : nil,
             node: String(node.prefix(120)),
             appVersion: String(snapshot.appVersion.prefix(40)),
             osVersion: String(
                 DiagnosticsLogUploader.compactOperatingSystemVersion().prefix(80)
             ),
             osArch: Self.osArch,
-            coreErrors: notice.coreErrors.isEmpty ? nil : notice.coreErrors,
+            coreErrors: full && !notice.coreErrors.isEmpty ? notice.coreErrors : nil,
             tcpDelayMs: path.tcpDelayMs,
             exitDelayMs: path.exitDelayMs,
             transport: notice.transport
         )
         lastConnectFailureAt = Date()
         do {
-            _ = try await api.reportConnectFailure(report)
+            // Consent is re-read before each attempt, not only here: a token
+            // refresh or retry can wait while the user turns the switch off.
+            _ = try await api.reportConnectFailure(report, requestIsCurrent: {
+                AccountSession.failureReportStillAllowed(builtAs: scope, internalBuild: internalBuild)
+            })
         } catch {
             // Best effort: the window still carries the event, and a report
             // that did not land must never touch protection or the sign-in.

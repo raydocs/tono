@@ -621,6 +621,19 @@ final class AppState {
         isProtectedReconnectScheduled = false
         protectedReconnectAttempt = 0
         protectedReconnectNextAttemptAt = nil
+        // Repeated-failure strikes describe the network they were earned on,
+        // and sleep ends it. Wake's connect gets a fresh budget of three, as
+        // a network-change kick would give it; otherwise its first identical
+        // failure pauses again with nothing scheduled. A pause that needs the
+        // user (a denied administrator prompt, a rejected helper) is not a
+        // network fact and is kept.
+        if !protectedReconnectPausedForUserAction
+            || protectedReconnectPauseLiftsOnNetworkChange {
+            protectedReconnectPausedForUserAction = false
+            protectedReconnectPauseLiftsOnNetworkChange = false
+            lastProtectedFailureSignature = nil
+            consecutiveProtectedFailureCount = 0
+        }
         if isConnected || isConnecting || coreRuntime.isRunning {
             disconnect(releaseKillSwitch: false)
         } else if KillSwitchService.isArmed || isProtectionBlocked {
