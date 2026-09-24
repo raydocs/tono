@@ -80,6 +80,9 @@ Var ExistingUninstallCommand
 ; Unlike `/UPDATE`, this is set only after a complete installed-product record passes version
 ; validation. It prevents failure cleanup from disarming a Service owned by the previous install.
 Var ConfirmedExistingInstall
+; Set in .onInit once the user confirmed clearing a Tono block no Service owns (gate 78) and the
+; orphan lease was taken. Such an install is never an upgrade, even over a complete ARP record.
+Var ClearingOrphanedBlock
 Var OldMainBinaryName
 ; The single GUI launcher consumes this value. Empty for Finish-page/repair launches; `/ARGS`
 ; populates it only for an explicit fresh passive `/R` request.
@@ -248,6 +251,14 @@ Function DetectExistingInstall
     StrCmp $R0 0 legacy_wix_blocked wix_loop
 
   automatic_update:
+    ; A confirmed orphaned-block clear is not an upgrade. The upgrade path skips RemoveVergeService
+    ; and hands the runtime to --replace-runtime, whose gate refuses while the filters remain and
+    ; which cannot replace a Service that is gone. Leave every upgrade flag unset so the install
+    ; runs the full RemoveVergeService cleanup and then creates a new Service.
+    ${If} $ClearingOrphanedBlock = 1
+      DetailPrint "Reinstalling ${PRODUCTNAME} $ExistingVersion as ${VERSION} after clearing the leftover network block."
+      Return
+    ${EndIf}
     StrCpy $UpdateMode 1
     StrCpy $PassiveMode 1
     StrCpy $ConfirmedExistingInstall 1
@@ -461,6 +472,9 @@ Function .onInit
     orphanBlockClearConfirmed:
     nsExec::ExecToLog '"$PLUGINSDIR\tono-gate\resources\tono-service-install.exe" --manual-orphan-gate'
     Pop $0
+    ${If} $0 == "0"
+      StrCpy $ClearingOrphanedBlock 1
+    ${EndIf}
   ${EndIf}
   ${If} $0 != "0"
     ; Abort text is never shown from .onInit, and a 0.0.72 settings-page update has already
@@ -998,6 +1012,10 @@ Section Install
   ; immediately before creating its recovery/uninstall path.
   File /a "/oname=${MAINBINARYNAME}.exe.next" "${MAINBINARYSRCPATH}"
   ${If} $ConfirmedExistingInstall <> 1
+    ; An orphaned-block clear reinstalls over the previous files, and Rename never overwrites.
+    ${If} $ClearingOrphanedBlock = 1
+      Delete "$INSTDIR\${MAINBINARYNAME}.exe"
+    ${EndIf}
     ClearErrors
     Rename "$INSTDIR\${MAINBINARYNAME}.exe.next" "$INSTDIR\${MAINBINARYNAME}.exe"
     ${If} ${Errors}
@@ -1023,6 +1041,9 @@ Section Install
   {{#each binaries}}
     File /a "/oname={{this}}.next" "{{no-escape @key}}"
     ${If} $ConfirmedExistingInstall <> 1
+      ${If} $ClearingOrphanedBlock = 1
+        Delete "$INSTDIR\\{{this}}"
+      ${EndIf}
       ClearErrors
       Rename "$INSTDIR\\{{this}}.next" "$INSTDIR\\{{this}}"
       ${If} ${Errors}

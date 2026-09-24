@@ -486,6 +486,40 @@ test('NSIS explains a refused gate and confirms before uninstall releases protec
   )
 })
 
+test('a confirmed orphaned-block clear reinstalls through the fresh path, not the upgrade path', () => {
+  // An upgrade skips RemoveVergeService and hands the runtime to --replace-runtime, whose gate
+  // refuses while the filters remain and which cannot replace a Service that is gone. Once the
+  // user confirmed 78, an existing ARP record must not turn the install into that upgrade.
+  const onInit =
+    installerSource.match(/Function \.onInit\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  assert.match(
+    onInit.slice(0, onInit.indexOf('Call DetectExistingInstall')),
+    /--manual-orphan-gate'\s+Pop \$0\s+\$\{If\} \$0 == "0"\s+StrCpy \$ClearingOrphanedBlock 1\s+\$\{EndIf\}/,
+  )
+  const detector =
+    installerSource.match(
+      /Function DetectExistingInstall\b([\s\S]*?)FunctionEnd/,
+    )?.[1] ?? ''
+  const automatic =
+    detector.match(/automatic_update:([\s\S]*?)downgrade_blocked:/)?.[1] ?? ''
+  assert.match(
+    automatic,
+    /^(?:\s*;[^\n]*)*\s*\$\{If\} \$ClearingOrphanedBlock = 1\s+(?:DetailPrint [^\n]*\s+)?Return\s+\$\{EndIf\}\s+StrCpy \$UpdateMode 1/,
+  )
+  // The fresh path publishes with Rename, which never overwrites the previous install's files.
+  const installSection =
+    installerSource.match(/Section Install\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  for (const live of ['$INSTDIR\\${MAINBINARYNAME}.exe', '$INSTDIR\\\\{{this}}']) {
+    assert.match(
+      installSection,
+      new RegExp(
+        `\\$\\{If\\} \\$ClearingOrphanedBlock = 1\\s+Delete "${escape(live)}"\\s+\\$\\{EndIf\\}\\s+ClearErrors\\s+Rename "${escape(live)}\\.next" "${escape(live)}"`,
+      ),
+    )
+  }
+})
+
 test('NSIS uninstall removes leftover user control-plane pins', () => {
   assert.match(
     installerSource,

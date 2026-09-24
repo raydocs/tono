@@ -55,6 +55,14 @@
 - **候选/发布**：仅源码，无新候选。
 - **剩余限制**：须在 #500 之后合入；静默/无人值守安装遇到无主拦截仍是死路；SCM 注册存在且 `ProgramData\Tono\bin\tono-service.exe`
   在盘但 Service 本身损坏时仍按 77 处理；只识别 Tono 自己的注册与二进制路径；未实机验证（AV 隔离、旧卸载器残留、重启后状态）。
+- **跟进 2026-09-24（跨厂商审查 WA-OpenAI-3）**：修复：用户确认 78 且取得孤儿租约后，若 ARP 记录完整，`DetectExistingInstall`
+  仍把本次安装归为升级（`$ConfirmedExistingInstall=1`），`RemoveVergeService` 跳过清理，`--replace-runtime` 的 `manual_gate()`
+  因过滤器仍在而拒绝，重试 3 次后安装中止。现 `.onInit` 在 `--manual-orphan-gate` 成功后置 `$ClearingOrphanedBlock=1`，
+  `automatic_update` 见此标志即返回、不设任何升级标志：走完整 `RemoveVergeService` 清理（仍须证明 WFP 已移除）与全新安装
+  Service 路径；全新路径发布 GUI/Mihomo 前先删旧文件（`Rename` 不覆盖）。测试：packaging 新增一个 `test`
+  （`a confirmed orphaned-block clear reinstalls through the fresh path, not the upgrade path`），MacBook 上改前失败、改后 24/24 通过。
+  验证：Rust/NSIS 未在本机运行；CI 待定。限制：此路径显示全新安装向导（不再是被动升级），App 由完成页启动而不是自动重开；旧 `tono-core` 若仍被占用，
+  删除失败，安装在创建 Service 前中止；#500 尚未进 main（已在 `train/win-20260924`）；NSIS 未编译，未实机验证。
 
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
