@@ -185,11 +185,12 @@ final class ConnectionCoordinator {
             return
         }
         bumpGeneration()
-        // Connecting is the user's newer intent; it retires a release that
-        // could not confirm PF was released.
-        disconnectQueueReleaseIntent = false
         let (canProceed, attemptID) = prepare()
         guard canProceed else { return }
+        // An admitted connect is the user's newer intent; it retires a release
+        // that could not confirm PF was released. A connect refused by
+        // `prepare` is not, so the intent survives it.
+        disconnectQueueReleaseIntent = false
 
         let currentGeneration = protectionOperationGeneration
         connectAttemptID = attemptID

@@ -42,7 +42,8 @@
   清掉释放意图，唤醒时 `resumeAfterSystemWake` 只剩 `KillSwitchService.isArmed == true`，
   于是自动重连；不在唤醒恢复中时，随后的网络变化也会按 `isArmed` 触发重连。现在释放以 PF
   仍 armed 收尾时保留释放意图，直到用户再次 Connect（`executeConnect` 清除）或新的拆除请求
-  替换它；唤醒和"未连接"的网络变化分支都尊重这个意图。主机保持 fail-closed（helper 睡眠时
+  替换它；只有通过 `prepare` 准入的 Connect 才清除，被拒的 connect（已在连接、无可用出口等）
+  不再提前清掉它（审查 R4 S13 说明 1）。唤醒和"未连接"的网络变化分支都尊重这个意图。主机保持 fail-closed（helper 睡眠时
   写入的紧急阻断），用户再点 Restore internet 或 Connect 决定去向。
 - **新增/优化**：无。
 - **工程与测试**：`AppStateSleepTests.testSleepGateRefusedReleaseDoesNotReconnectOnWake`
@@ -53,7 +54,11 @@
   （TonoTests），结果以 PR 页为准。
 - **候选/发布**：无新包，仅源码。
 - **剩余限制**：唤醒后不会自动重试那次被拒的释放，需要用户再点一次 Restore internet；
-  睡眠门拒绝 disarm 的实际频率未在实机测量。
+  睡眠门拒绝 disarm 的实际频率未在实机测量。释放意图只存在内存里：App 重启或重启机器后，
+  `performRestore` 经 `RuntimeCleanup` 读到 helper 仍 wanted，会置 `shouldResumeProtection`
+  并自动重连（main 已有行为，本 PR 未覆盖）。被拒 connect 提前清意图的问题已在本分支把清除
+  移到准入之后修掉；#439 在同一处把代际 bump 移到准入之后，两者合并时此处有一处文本冲突，
+  保留"准入后先 bump、再清意图"。清除移位没有新增测试，结论来自源码推理。
 
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
