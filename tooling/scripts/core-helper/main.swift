@@ -1006,8 +1006,8 @@ func tonoClientProcessRunning() -> Bool {
         proc_listallpids($0.baseAddress, Int32($0.count))
     }
     guard count > 0 else { return true }
-    return tonoClientAmong(Array(pids.prefix(Int(count))), path: processExecutablePath,
-                           live: processLiveness) { pid in
+    return tonoClientAmong(Array(pids.prefix(Int(count))), name: processShortName,
+                           path: processExecutablePath, live: processLiveness) { pid in
         var code: SecCode?
         guard SecCodeCopyGuestWithAttributes(
             nil, [kSecGuestAttributePid: pid] as CFDictionary, SecCSFlags(rawValue: 0), &code
@@ -1022,18 +1022,25 @@ func tonoClientProcessRunning() -> Bool {
     }
 }
 
-/// The decision over one pid listing. `path` and `signed` return nil when the
-/// lookup fails; `live` returns false only for a pid that has definitely
-/// exited, and nil when that cannot be told. A pid whose lookup failed counts
-/// as a Tono client unless it has definitely exited: it may be Tono whose
-/// bundle was deleted under it, and doubt keeps protection.
+/// The decision over one pid listing. Only a candidate — a process whose BSD
+/// short name is Tono's executable name, which exec sets from the file and a
+/// deleted bundle does not change — is looked at further; every other process
+/// is skipped even when its lookups fail, or any Mac with one unreadable
+/// process would keep the helper forever. A name lookup that fails also skips
+/// the pid. `path` and `signed` return nil when the lookup fails; `live`
+/// returns false only for a pid that has definitely exited, and nil when that
+/// cannot be told. A candidate whose lookup failed counts as a Tono client
+/// unless it has definitely exited: doubt keeps protection.
 func tonoClientAmong(
     _ pids: [Int32],
+    name: (Int32) -> String?,
     path: (Int32) -> String?,
     live: (Int32) -> Bool?,
     signed: (Int32) -> Bool?
 ) -> Bool {
+    let executableName = String(UpdatePackage.appExecutable.split(separator: "/").last ?? "")
     for pid in pids where pid > 0 {
+        guard name(pid) == executableName else { continue }
         guard let executable = path(pid) else {
             if live(pid) != false { return true }
             continue
@@ -1046,6 +1053,13 @@ func tonoClientAmong(
         }
     }
     return false
+}
+
+/// The kernel's short name for `pid` (p_name, else p_comm), or nil.
+private func processShortName(_ pid: Int32) -> String? {
+    var buffer = [CChar](repeating: 0, count: 64)
+    guard proc_name(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
+    return String(cString: buffer)
 }
 
 private func processExecutablePath(_ pid: Int32) -> String? {
