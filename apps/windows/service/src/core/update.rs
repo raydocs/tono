@@ -598,6 +598,38 @@ fn register_recovery_with(store: &Store, register: impl FnOnce(&Path) -> Result<
     register(&store.attempt_dir()?)
 }
 
+/// First execution only: after consumption, before any live mutation. The ONSTART task is the
+/// safety net for a publication the Service may not survive, so an attempt that cannot register
+/// it (Task Scheduler stopped or disabled, task creation refused) must not publish. It must not
+/// stay Consumed either, with no process left to finish it (#484). Nothing has been replaced
+/// yet, so it ends RolledBack once the installed identity is proven to be the retained original.
+/// The consumed high-water is untouched and nothing is re-granted.
+pub fn register_recovery_before_publication(
+    store: &mut Store,
+    installed: impl FnOnce() -> Result<Components>,
+) -> Result<()> {
+    register_or_roll_back_unpublished(store, installed, register_consumed_recovery)
+}
+
+fn register_or_roll_back_unpublished(
+    store: &mut Store,
+    installed: impl FnOnce() -> Result<Components>,
+    register: impl FnOnce(&Store) -> Result<()>,
+) -> Result<()> {
+    let Err(error) = register(&*store) else {
+        return Ok(());
+    };
+    ensure!(
+        store.consumed_attempt()?.execution == Execution::Consumed
+            && installed()? == store.attempt()?.old_components,
+        "recovery task unavailable and the unpublished attempt is not intact: {error:#}"
+    );
+    store.execution(Execution::RolledBack)?;
+    Err(error.context(
+        "independent recovery task unavailable; the consumed update ended RolledBack before any replacement",
+    ))
+}
+
 /// Called by NSIS before live or repair writes. Only the verified package in
 /// this attempt's private directory can use extraction mode; no live permission.
 pub fn unpack_gate(package: &Path) -> Result<()> {
@@ -770,7 +802,14 @@ pub fn reconcile_before_desired() -> Result<bool> {
         a.execution,
         Execution::Consumed | Execution::Replaced | Execution::Uncertain
     ) {
-        register_consumed_recovery(&store)?;
+        // Recovery itself does not run through the task; the task only covers a Service that
+        // cannot load. A failed registration must not keep the recovery executor from running
+        // and leave the attempt Consumed (#484).
+        if let Err(error) = register_consumed_recovery(&store) {
+            tracing::warn!(
+                "update recovery task could not be registered; recovering without it: {error:#}"
+            );
+        }
         if a.executor
             .as_ref()
             .is_none_or(|e| image(e.pid).ok().as_ref() != Some(e))
@@ -814,6 +853,31 @@ mod tests {
         let store = Store::open(&root).unwrap();
         register_recovery_with(&store, |_| atomic_write(&task, b"reconciled")).unwrap();
         assert_eq!(std::fs::read(task).unwrap(), b"reconciled");
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// #484: a consumed attempt whose recovery task cannot be registered, before anything was
+    /// replaced, ends RolledBack instead of staying Consumed with nobody left to finish it.
+    #[test]
+    fn unregistrable_recovery_task_rolls_back_the_unpublished_attempt() {
+        use crate::update_transaction::tests::{authorize, reserved};
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        let original = store.attempt().unwrap().old_components.clone();
+
+        let result = register_or_roll_back_unpublished(
+            &mut store,
+            || Ok(original),
+            |_| anyhow::bail!("task scheduler unavailable"),
+        );
+
+        assert!(result.is_err());
+        let durable: State =
+            serde_json::from_slice(&std::fs::read(root.join("state.json")).unwrap()).unwrap();
+        assert_eq!(durable.attempt.unwrap().execution, Execution::RolledBack);
+        assert_eq!(durable.consumed_sequence, 74);
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
     }
