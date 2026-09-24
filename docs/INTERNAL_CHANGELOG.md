@@ -32,6 +32,58 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · Windows 启动恢复遇 401：账户进入 Suspended，不再释放 WFP、不再登出；暂停页可退出登录
+
+- **归属/来源**：G2 客户端账户状态；Windows App `tono/commands/restore.rs`、`tono/commands/account.rs`，
+  前端 `pages/tono/login.tsx`。内部审查 H17-O-F2（Windows 部分，= H17-G-F3 第 2 步），Issue #512
+  （macOS 对应 #510）；含审查轮 515-O-F1/515-C-F2、515-O-F2/515-C-F1、515-O-F4 的修正。基线 origin/main
+  8dc79a5b（初版写于 bb2ed4e4，经 059a2ea2 rebase；三者之间 `apps/windows` 无差异）→ 分支
+  `fix/windows-auth-401-keeps-protection-20260924`（PR #515）；提交时未合 main。
+- **缺陷修复**：套餐到期、流量用尽、账户停用、设备或会话被吊销时，Worker 对 `me` 与
+  `auth/refresh` 一律回 401，tono-core 自己的 refresh 也被拒后返回 `Unauthorized`。启动恢复
+  （含重启后、错误页 Retry）把它当作"会话已死"：`close_account_with(Expired)` 先走
+  `release_for_account`（DNS → Core → WFP 有序释放），再登出并删掉保存的 refresh token，界面
+  落到不给原因的登录页。现在 `me()` 的任何失败都由 `settle_failed_restore` 处理：保护状态按
+  Service 读数原样保留（与非 401 错误分支相同），401 让账户进入已有的 `Suspended`，不登出、
+  不删保存的会话。已有守卫拒绝 suspended 账户的 connect 与自动重连；登录页的暂停页在保护阻断时
+  照旧提供"恢复网络"（显式 Disconnect）。保留会话是必要的：Windows 无 token 的启动路径会释放
+  已存的屏障，登出只会把释放推迟到下次启动。
+- **缺陷修复（审查轮）**：暂停页原先只有恢复网络、联系客服和"换邮箱"，而 Worker 不给不合格
+  账户发验证码，保留会话后用户无法回到已退出状态。暂停页新增"退出登录"，调用现有
+  `tono_sign_out`：与账户页相同，先释放保护，释放无法证明时保留账户并显示错误；成功后清掉账户
+  相关缓存再刷新状态。Service 仍持有上一会话的 Core 且隧道放行已渲染（`mode: locked`、
+  `tunnel_permit_rendered`）时，登录页的恢复提示原先写"网络已被保护拦住"，实际上一连接仍在
+  转发流量；该状态下改为"上次的连接仍在运行 / 恢复网络会停止它"（en、zh，i18n 类型已重新生成），
+  按钮与显式 Disconnect 不变。
+- **新增/优化**：无。
+- **工程与测试**：restore 在保护探测之后的部分（token 探测、预算内的 `me()`、结果分派与账户
+  落状态）移入 `restore_account_with`，只注入系统 I/O：`me()`、屏障释放、服务器登出与 UI emit；
+  生产传入 `client.me()`、`release_for_account`、`client.logout()`、`emit_status`。删除随 401 路径
+  失效的 `close_dead_restore_with`、其回归
+  `expired_restore_reserves_account_ownership_before_its_first_side_effect`（W11）与
+  `AccountCloseReason::Expired`；新路径在同一把锁内检查代际并落状态，没有 await 与副作用，W11
+  的竞态不再存在。Rust 一个 `#[tokio::test]` `rejected_restore_suspends_and_keeps_protection`：
+  真实 tono-core `ApiClient` 配对所有请求回 401 的 transport（先装 access token，请求顺序为
+  `me` → `auth/refresh`），经 `restore_account_with` 的真实分派；断言注入的 release 与 logout
+  都未被调用、账户 Suspended、kill switch 仍武装且 `is_protection_blocked`、Service 状态原样、
+  未开始 account close、保存的 refresh token 仍在。红：提交 59ce9fb1 只含 seam 与该测试
+  （行为未改），GitHub-hosted `windows-2025` CI（run 35978180190，app-rust）在该测试的 `restore.rs:475` 断言
+  "a refused session must not release WFP" 处失败（504 passed，1 failed），不是编译错误；修复提交后通过。前端
+  `login.test.tsx` 一个 `it`：暂停页点"Sign Out"调用 `tonoSignOut`（不调用 `tonoDisconnect`）
+  并刷新状态，状态取上一连接仍在运行的屏障，同时断言"Previous connection still running"而非
+  "Internet is blocked"；在本 PR 之前的 login.tsx 与只加了退出按钮的版本上都失败，本机确认。
+- **验证**：本机（编辑机）：`vitest run src/pages/tono/login.test.tsx` 8/8，改动文件的
+  `tsc --noEmit`、biome format、eslint 通过。Rust 未在本机编译，Tauri crate `cargo test` 委托
+  本 PR 的 GitHub-hosted `windows-2025` CI，结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：Worker 仍对所有不合格情况回 401，客户端分不清到期、停用与设备吊销（H17-O-F2
+  的 Worker 部分未修）；未合 #460 前暂停页文案是"账号已暂停"，#460 合入后为中性的"登录已失效"。
+  到期账户在登录页请求验证码得到 202 但收不到码（Worker 行为，未改）。保存的会话被服务器拒绝
+  后，每次启动仍会发一次注定失败的 refresh，直到重新登录或在暂停页退出登录。续费后若 cron 已
+  吊销会话，仍需重新登录。启动遇 401 时从缓存载入的目录保留到新登录（数据保留问题；其中出口
+  凭据已被服务端拒绝，connect 也拒绝 suspended 账户）。"上一连接仍在运行"只按 Service 报告的
+  屏障状态判断，未在 Windows 11 实机验证。
+
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
 - **归属/来源**：G1–G3 审查与修复的可追溯性（工程流程与记录，非产品行为）；审查基线 main
