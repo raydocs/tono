@@ -588,6 +588,7 @@
       "title": "WebRTC leak check",
       "description": "Open this page after Tono is connected. STUN should time out, and your home public IP should not appear.",
       "open": "Open ip.cx/webrtc",
+      "openFailed": "Could not open the browser. Visit https://ip.cx/webrtc manually.",
       "copyVersion": "Copy version"
     }
   },

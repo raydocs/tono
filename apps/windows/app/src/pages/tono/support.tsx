@@ -552,7 +552,7 @@ const SupportPage = () => {
             onClick={() => {
               void openUrl('https://ip.cx/webrtc').catch((error) => {
                 console.warn('[Support] open WebRTC check failed:', error)
-                showNotice.error('tono.support.copyFailed')
+                showNotice.error('tono.support.webrtc.openFailed')
               })
             }}
             style={buttonStyle}

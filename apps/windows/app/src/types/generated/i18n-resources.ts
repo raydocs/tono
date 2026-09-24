@@ -1562,6 +1562,7 @@ export interface TranslationResources {
           copyVersion: string
           description: string
           open: string
+          openFailed: string
           title: string
         }
       }

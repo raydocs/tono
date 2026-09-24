@@ -973,3 +973,29 @@ for (const entrypoint of [
     assert.deepEqual([...new Set(namespaces)], [corePluginAclName])
   })
 }
+
+test('Support WebRTC check link is granted to the webview opener and nothing wider', () => {
+  const support = readFileSync(
+    new URL('../src/pages/tono/support.tsx', import.meta.url),
+    'utf8',
+  )
+  const urls = [...support.matchAll(/openUrl\('([^']+)'\)/g)].map((m) => m[1])
+  assert.deepEqual(urls, ['https://ip.cx/webrtc'])
+  const capability = JSON.parse(
+    readFileSync(
+      new URL('../src-tauri/capabilities/desktop.json', import.meta.url),
+      'utf8',
+    ),
+  )
+  assert.ok(capability.permissions.includes('shell:allow-open'))
+  const config = JSON.parse(
+    readFileSync(
+      new URL('../src-tauri/tauri.conf.json', import.meta.url),
+      'utf8',
+    ),
+  )
+  // tauri-plugin-shell anchors the configured regex as ^...$.
+  const scope = new RegExp(`^${config.plugins?.shell?.open}$`)
+  assert.ok(scope.test(urls[0]))
+  assert.equal(scope.test('https://example.com/'), false)
+})

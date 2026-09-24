@@ -4,6 +4,7 @@
   "webviews": ["main", "tray-flyout"],
   "windows": ["main", "tray-flyout"],
   "permissions": [
+    "shell:allow-open",
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled",
