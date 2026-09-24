@@ -399,6 +399,8 @@ struct TonoMenuState {
     catalog_requires_choice: bool,
     release_in_progress: bool,
     protection_blocked: bool,
+    /// The Service reported a wanted and live barrier. Without it Protected Offline is intent only.
+    protection_live: bool,
 }
 
 impl Default for TonoMenuState {
@@ -411,6 +413,7 @@ impl Default for TonoMenuState {
             catalog_requires_choice: false,
             release_in_progress: false,
             protection_blocked: false,
+            protection_live: false,
         }
     }
 }
@@ -425,6 +428,7 @@ impl TonoMenuState {
             catalog_requires_choice: status.catalog_requires_choice,
             release_in_progress,
             protection_blocked: status.protection_blocked,
+            protection_live: status.kill_switch.as_ref().is_some_and(|ks| ks.wanted && ks.live),
         }
     }
 
@@ -432,7 +436,8 @@ impl TonoMenuState {
         tono_i18n::t!(match self.ui_state.as_str() {
             "connecting" => "tray.tono.state.connecting",
             "connected" => "tray.tono.state.connected",
-            "protectedOffline" => "tray.tono.state.protectedOffline",
+            "protectedOffline" if self.protection_live => "tray.tono.state.protectedOffline",
+            "protectedOffline" => "tray.tono.state.protectionUnknown",
             "disconnecting" => "tray.tono.state.disconnecting",
             _ => "tray.tono.state.notConnected",
         })
@@ -672,6 +677,7 @@ mod tests {
             catalog_requires_choice: false,
             release_in_progress: false,
             protection_blocked: blocked,
+            protection_live: blocked,
         }
     }
 
