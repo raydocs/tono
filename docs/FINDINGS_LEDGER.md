@@ -162,7 +162,7 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| H4-F1 | dual 阶段吊销设备不退役共享 legacy 出口凭据，被吊销设备仍可用出口并计入账户 | in-PR | [#313](https://github.com/raydocs/tono/issues/313)，[#323](https://github.com/raydocs/tono/pull/323) | 高·推导 | 暴露面取决于生产 rollout phase（本机无法查） |
+| H4-F1 | dual 阶段吊销设备不退役共享 legacy 出口凭据，被吊销设备仍可用出口并计入账户 | in-PR | [#313](https://github.com/raydocs/tono/issues/313)，[#323](https://github.com/raydocs/tono/pull/323) | 高·推导 | 暴露面取决于生产 rollout phase（本机无法查）；列车 #570 审查 TC-anthropic-1：退役账户的就绪判断看全部 active 出口，一个未上架的新节点就让所有退役账户 503，已在分支 `fix/cp-a-20260924` 改为只看本次下发目录中的节点（未合 main） |
 | H4-F2 | 停用/退役/删除/改名的住宅（catalog 型）home exit 及其 hy2 孪生块从限制名单掉出，下发给所有账户 | in-PR | [#322](https://github.com/raydocs/tono/issues/322)，[#326](https://github.com/raydocs/tono/pull/326) | 高·推导 | roster 不按节点隔离（身份隔离）列为后续 |
 | H4-F3 | ops 角色门不覆盖 shared-admin；另有原始日志读取与 signup-allowlist 写两处未拦截且文档未列 | open | 待开 | 低·推导 | shared-admin 不拦截是已记录限制；只有配置 OPS_ROLES 且有非 owner 角色时可利用 |
 | H3-F4 | refresh 严格单次轮换无宽限且非原子：响应丢失即产生伪 401，客户端登出并释放保护 | in-PR | [#314](https://github.com/raydocs/tono/issues/314)，[#329](https://github.com/raydocs/tono/pull/329) | 高·推导 | 修复在服务端，客户端「真 401 才释放」不变 |

@@ -1349,10 +1349,28 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     });
     const identities = (await roster.json() as any).identities.map((entry: any) => entry.clientUUID);
     expect(identities).not.toContain(leakedUUID);
+    // With no acknowledging exit the retired account waits; it never falls back.
     const survivorCatalog = await api('exit-catalog', {
       headers: { authorization: `Bearer ${survivor.accessToken}` },
     });
-    expect(await survivorCatalog.text()).not.toContain(leakedUUID);
+    expect(survivorCatalog.status).toBe(503);
+    expect((await survivorCatalog.json() as any).error.code).toBe('EXIT_IDENTITY_PROPAGATING');
+
+    const survivorCredential = await env.DB.prepare(
+      'SELECT client_uuid, created_at FROM device_exit_credentials WHERE device_id = ?',
+    ).bind(survivor.device.id).first<any>();
+    const node = await admin('exit-nodes', { id: 'exit-tono', name: 'Tono-Exit' });
+    const nodeToken = String((await node.json() as any).token);
+    expect((await api('home/roster-ack', json({
+      observedAt: Number(survivorCredential.created_at) + 1,
+    }, nodeToken))).status).toBe(200);
+    const acknowledged = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${survivor.accessToken}` },
+    });
+    expect(acknowledged.status).toBe(200);
+    const acknowledgedYaml = String((await acknowledged.json() as any).yaml);
+    expect(acknowledgedYaml).toContain(survivorCredential.client_uuid);
+    expect(acknowledgedYaml).not.toContain(leakedUUID);
 
     const onboarded = await api('ops/users/onboard', {
       method: 'POST',
@@ -1364,6 +1382,43 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     });
     expect(onboarded.status).toBe(202);
     expect((await onboarded.json() as any).exitIdentityIssued).toBe(true);
+  });
+
+  it('holds a retired account only on exit nodes its catalog serves', async () => {
+    const account = await createAccount('unpublished-exit');
+    await env.DB.prepare(
+      'INSERT INTO exit_credentials(user_id, client_uuid, created_at, retired_at) VALUES(?, ?, 1, 1)',
+    ).bind(account.user.id, crypto.randomUUID()).run();
+    const served = '  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n';
+    const published = await admin('exit-catalog', { yaml: `proxies:\n${served}`, expectedRevision: 0 }, 'PUT');
+    expect(published.status).toBe(200);
+    const timestamp = Math.floor(Date.now() / 1000);
+    await env.DB.prepare(
+      `INSERT INTO exit_nodes(id, name, token_hash, status, last_roster_at, created_at, updated_at)
+       VALUES('exit-served', 'Tono-Exit', ?, 'active', ?, ?, ?)`,
+    ).bind(await sha256('exit-served-token-with-at-least-32-characters'), timestamp + 3600, timestamp, timestamp).run();
+    // Registered and active (last_roster_at 0) but not yet published.
+    expect((await admin('exit-nodes', { id: 'exit-unpublished', name: 'Unpublished Exit' })).status).toBe(201);
+
+    const catalog = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(catalog.status).toBe(200);
+    const device = await env.DB.prepare(
+      'SELECT client_uuid FROM device_exit_credentials WHERE device_id = ?',
+    ).bind(account.device.id).first<any>();
+    expect((await catalog.json() as any).yaml).toContain(device.client_uuid);
+
+    const unpublished = served.replace('Tono-Exit', 'Unpublished Exit').replace('exit.example.com', 'late.example.com');
+    expect((await admin('exit-catalog', {
+      yaml: `proxies:\n${served}${unpublished}`,
+      expectedRevision: (await published.json() as any).revision,
+    }, 'PUT')).status).toBe(200);
+    const held = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(held.status).toBe(503);
+    expect((await held.json() as any).error.code).toBe('EXIT_IDENTITY_PROPAGATING');
   });
 
   it('provisions and rotates a node token that is bound to its usage source', async () => {
@@ -1518,6 +1573,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
   });
 
   it('does not treat a same-second roster acknowledgement as covering a new credential', async () => {
+    await env.DB.prepare("UPDATE exit_nodes SET name = 'Tono-Exit' WHERE id = 'exit-default'").run();
     const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
     expect((await admin('exit-credential-rollout', { phase: 'device_only' })).status).toBe(200);
@@ -1552,6 +1608,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const startedAt = Math.floor(Date.now() / 1_000) * 1_000 + offset;
     const clock = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
     try {
+      await env.DB.prepare("UPDATE exit_nodes SET name = 'Tono-Exit' WHERE id = 'exit-default'").run();
       const account = await createAccount('credential-rollout');
       const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
       expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
@@ -1566,10 +1623,14 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
         headers: { authorization: `Bearer ${HOME_TOKEN}` },
       })).status).toBe(401);
 
-      // Adding an unacknowledged node after cutover must hold new catalog
+      // Publishing an unacknowledged node after cutover must hold new catalog
       // credentials until that node has actually reconciled the roster.
       const late = await admin('exit-nodes', { id: 'exit-late', name: 'Late Exit' });
       const lateToken = String((await late.json() as any).token);
+      expect((await admin('exit-catalog', {
+        yaml: `${yaml}  - name: Late Exit\n    type: vless\n    server: late.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`,
+        expectedRevision: 1,
+      }, 'PUT')).status).toBe(200);
       const blocked = await api('exit-catalog', {
         headers: { authorization: `Bearer ${account.accessToken}` },
       });
@@ -6112,6 +6173,7 @@ ${nameLine}
   });
 
   it('serves an exit identity roster that excludes accounts an exit must drop', async () => {
+    await env.DB.prepare("UPDATE exit_nodes SET name = 'Metered' WHERE id = 'exit-default'").run();
     const yaml = `proxies:
   - name: "Metered"
     type: vless

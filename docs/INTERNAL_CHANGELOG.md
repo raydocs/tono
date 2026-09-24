@@ -32,6 +32,39 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · 控制面列车 #570 审查续修：设备出口身份只等本次下发的节点
+
+- **归属/来源**：G1–G3 控制面（#323 退役共享凭据的续修）；`services/control-plane`。来源：列车 PR #570 审查发现
+  TC-anthropic-1（P1）与 TC-anthropic-2（P2），均经 Opus 与 Codex 核实；分支 `fix/cp-a-20260924`，基于 8fc72696；未合 main。
+- **缺陷修复**：
+  - TC-anthropic-1：`exitClientUUID` 要求**所有** active 的 `exit_nodes` 行都 ACK 过设备凭据。新建或重新启用的节点
+    `last_roster_at = 0`，于是只要有一个已登记、尚未上架的节点，所有共享凭据已退役（0077）的账户的全部设备都拿到
+    503 `EXIT_IDENTITY_PROPAGATING`。改后：`publicManagedCatalog` 先做家宽与 hy2 过滤，再从**本次下发**的目录取节点名
+    （` · hy2` 折回基名），只要求这些节点满足「有 active 的 `exit_nodes` 行且 `last_roster_at` 严格晚于凭据」。
+    目录名与 `exit_nodes.name` 的对应沿用 fleet/上架已有的按名匹配。下发了但未 ACK 的节点仍然挡住；未上架的节点不参与；
+    退役账户仍不回落共享凭据；下发目录里没有任何就绪节点时照旧 fail-closed。下发了但**没有 `exit_nodes` 行**的节点按
+    未就绪处理：它没有令牌，无法 ACK，没有任何证据表明它装上了设备凭据。
+- **新增/优化**：无。
+- **工程与测试**：
+  - 新增 `it`（`holds a retired account only on exit nodes its catalog serves`）：退役账户，目录内节点已 ACK，另有一个
+    未上架、`last_roster_at = 0` 的 active 节点，返回 200 并含设备 UUID；把该节点上架后返回 503。未改源码时先跑红：
+    `expected 503 to be 200`（第一次取目录）。
+  - TC-anthropic-2：#323 的用例删光出口后只断言响应里没有旧 UUID，503 也能过。现断言 503 `EXIT_IDENTITY_PROPAGATING`，
+    再登记 `Tono-Exit` 并以晚于凭据一秒的 `observedAt` ACK，断言 200 且含幸存设备的 UUID。
+  - fixture 修正：夹具出口名是 `Test exit-*`，与目录名对不上。`same-second`、`retires shared legacy …`（两组时钟偏移）、
+    `serves an exit identity roster …` 三个用例把 `exit-default` 改名为目录里的节点名；`retires shared legacy …` 原来
+    断言「未上架的 `Late Exit` 挡住目录」，这正是本次修掉的行为，改为先把它上架再断言 503。
+- **验证**：MacBook 本机 worktree `services/control-plane`：`npx vitest run test/worker.test.ts` 188 个用例通过（基线 187）；
+  `npx vitest run` 43 个文件 913 个用例通过；`npm run typecheck` 通过；`git diff --check` 通过。未部署，未碰远端 D1，无原生构建。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：
+  - 部署前需只读核对：目录里每个节点基名都有 active 的 `exit_nodes` 行且已 ACK。审查指出生产现有未登记的托管节点；
+    部署后，被下发该节点的退役账户会一直 503，直到节点登记并 ACK；dual 阶段未退役账户会改拿共享凭据（同 revision、
+    不同 digest，涉及 H3-F1/#316 的客户端处理）。本机无法查 D1，未核对。
+  - `device_only` 切换的预检与触发器仍看全部 active 出口，不看目录，未改。
+  - 先过滤再发身份带来两处顺序变化：家宽路由错误（503 `CATALOG_UNAVAILABLE`）先于身份错误返回；过滤后没有任何节点的
+    目录不再签发身份。
+
 ## 2026-09-24 · 控制面列车 #570 审查续修：开户轮换预检、家宽名 hy2 后缀
 
 - **归属/来源**：控制面 ops 家宽线路（ops 任务，非客户 ship 门）；`services/control-plane`。来源：列车 PR #570
