@@ -67,20 +67,10 @@ enum RuntimeCleanup {
         let localProtectionIntent = KillSwitchService.isArmed
         let helperProtectionObservation =
             await PrivilegedRuntimeCoordinator.shared.refreshKillSwitchStatus()
-        let shouldResumeProtection: Bool
-        switch helperProtectionObservation {
-        case .confirmed(let requiresProtectionRecovery):
-            // An authenticated helper status is authoritative. In particular,
-            // root emergency recovery clears helper-owned PF state but cannot
-            // update this user's defaults; do not let that stale local bit
-            // immediately re-arm the machine on reopen.
-            KillSwitchService.isArmed = requiresProtectionRecovery
-            shouldResumeProtection = requiresProtectionRecovery
-        case .unavailable, .rejected:
-            // Timeout, malformed status, and 403 are never evidence that PF is
-            // open. Preserve the last local fail-closed intent.
-            shouldResumeProtection = localProtectionIntent
-        }
+        let shouldResumeProtection = adoptLaunchObservation(
+            helperProtectionObservation,
+            localIntent: localProtectionIntent
+        )
 
         if shouldResumeProtection {
             // Remove stale TUN/proxy exceptions and retain the persisted exact
@@ -168,5 +158,26 @@ enum RuntimeCleanup {
             }
         }
         return shouldResumeProtection
+    }
+
+    /// Folds launch's helper answer into the stored fail-closed intent and
+    /// returns whether protection should resume.
+    static func adoptLaunchObservation(
+        _ observation: KillSwitchService.StatusObservation,
+        localIntent: Bool
+    ) -> Bool {
+        switch observation {
+        case .confirmed(let requiresProtectionRecovery):
+            // An authenticated helper status is authoritative. In particular,
+            // root emergency recovery clears helper-owned PF state but cannot
+            // update this user's defaults; do not let that stale local bit
+            // immediately re-arm the machine on reopen.
+            KillSwitchService.isArmed = requiresProtectionRecovery
+            return requiresProtectionRecovery
+        case .unavailable, .rejected:
+            // Timeout, malformed status, and 403 are never evidence that PF is
+            // open. Preserve the last local fail-closed intent.
+            return localIntent
+        }
     }
 }
