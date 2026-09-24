@@ -687,6 +687,13 @@ private func runEmergencyResetLocked(_ storage: UpdateStorage) -> Bool {
         )
         return false
     }
+    removeHelperInstallation()
+    print("Tono helper installation removed. Reopen Tono to reinstall it.")
+    return true
+}
+
+/// Removal after a verified release. Callers have released PF first.
+private func removeHelperInstallation() {
     // PF is released. Take Tono's hook back out of /etc/pf.conf and delete the
     // backups written before its first edits. A hook left behind only loads the
     // disarmed placeholder anchor, so a failure is reported, not fatal.
@@ -703,18 +710,88 @@ private func runEmergencyResetLocked(_ storage: UpdateStorage) -> Bool {
     ] {
         unlink(path)
     }
-    print("Tono helper installation removed. Reopen Tono to reinstall it.")
-    return true
 }
 
-/// Whether this helper start finds Tono removed from this Mac, and if so
-/// releases protection and removes the installation (H19-O-F1).
+/// Whether a Tono app that can use this helper is still on this Mac: the
+/// registered /Applications/Tono.app, or a renamed copy directly in
+/// /Applications declaring Tono's bundle identifier (the release app runs only
+/// from there). Anything that cannot be read counts as present, so doubt keeps
+/// protection.
+func tonoAppPresent(applicationsDirectory: String = "/Applications") -> Bool {
+    var metadata = stat()
+    if lstat("\(applicationsDirectory)/Tono.app", &metadata) == 0 { return true }
+    guard errno == ENOENT,
+          let entries = try? FileManager.default.contentsOfDirectory(atPath: applicationsDirectory)
+    else { return true }
+    for entry in entries where entry.hasSuffix(".app") {
+        let infoPath = "\(applicationsDirectory)/\(entry)/Contents/Info.plist"
+        // Bounded and regular-file only: this runs as root at every start.
+        let fd = open(infoPath, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        if fd < 0 {
+            if errno == ENOENT || errno == ENOTDIR { continue }
+            return true
+        }
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        var info = stat()
+        guard fstat(fd, &info) == 0, fileType(info) == mode_t(S_IFREG),
+              info.st_size <= 1024 * 1024,
+              let data = try? handle.readToEnd()
+        else { return true }
+        let plist = try? PropertyListSerialization.propertyList(from: data, format: nil)
+            as? [String: Any]
+        if plist?["CFBundleIdentifier"] as? String == "com.raydocs.tono" { return true }
+    }
+    return false
+}
+
+/// At every helper start, after executor recovery (H19-O-F1). Dragging
+/// Tono.app to the Trash is the only way to remove Tono from a Mac, and it
+/// left this KeepAlive daemon re-arming PF at every boot with no app that could
+/// release it and no instructions outside the deleted app. The barrier stays
+/// while a Tono app can still use it: one is in /Applications, or an unfinished
+/// update attempt may be putting one back. When a start finds neither, release
+/// exactly as `--emergency-reset` does and remove this installation. Only at a
+/// start, never mid-session: an app moved away while the helper runs keeps
+/// protection until the next restart.
 func releaseIfTonoWasRemoved(
     storage suppliedStorage: UpdateStorage? = nil,
     applicationsDirectory: String = "/Applications",
-    release: (UpdateStorage) -> Bool = { _ in false }
+    release: (UpdateStorage) -> Bool = releaseRemovedInstallationLocked
 ) -> Bool {
-    false
+    guard !tonoAppPresent(applicationsDirectory: applicationsDirectory) else { return false }
+    do {
+        let storage = try suppliedStorage ?? UpdateStorage()
+        return try storage.locked {
+            let attempt = try storage.load().attempt
+            guard attempt == nil || attempt?.receipt.phase == .committed,
+                  !tonoAppPresent(applicationsDirectory: applicationsDirectory) else { return false }
+            return release(storage)
+        }
+    } catch {
+        return false
+    }
+}
+
+/// Nothing is removed unless the stale core stops, DNS is restored and PF is
+/// disarmed (`runEmergencyDisarm`); otherwise startup continues and restores
+/// protection as before. The daemon has not opened its socket yet, so no GUI
+/// arm can interleave, unlike the `--emergency-reset` tool.
+func releaseRemovedInstallationLocked(_ storage: UpdateStorage) -> Bool {
+    guard runEmergencyDisarm(underLock: storage) else { return false }
+    removeHelperInstallation()
+    // Unload this job last. launchd ends it with SIGTERM, which must now stop
+    // the process instead of setting the shutdown flag. If the bootout does
+    // not happen, the plist and executable are already gone, so nothing loads
+    // it at the next boot.
+    signal(SIGTERM, SIG_DFL)
+    let bootout = Process()
+    bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+    bootout.arguments = ["bootout", "system/com.raydocs.tono.core-helper"]
+    bootout.standardOutput = FileHandle.nullDevice
+    bootout.standardError = FileHandle.nullDevice
+    try? bootout.run()
+    bootout.waitUntilExit()
+    return true
 }
 
 func fileType(_ value: stat) -> mode_t {
@@ -1007,6 +1084,7 @@ do {
     // daemon behind the update lock — in that window the executor owns the
     // flow and no PF action is ours to take.
     if try UpdateExecutor.startup() { exit(0) }
+    if releaseIfTonoWasRemoved() { exit(0) }
     let server = try SocketServer()
     server.run()
 } catch {

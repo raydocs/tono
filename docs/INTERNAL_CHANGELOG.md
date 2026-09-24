@@ -32,6 +32,35 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · macOS 删除 Tono.app 后，Helper 在下次启动时释放保护并移除自身
+
+- **归属/来源**：G1 连接保护（删除 App 后的出口）；macOS `tono-core-helper`。内部审查 H19-O-F1 = H19-G-F1
+  （两个 finder 独立发现，阅读确认），Issue [#555](https://github.com/raydocs/tono/issues/555)。分支
+  `fix/helper-orphan-app-gone-20260924`，叠在 #550（H19-O-F4）与 H19-O-F6 分支之上；未合 main。
+- **缺陷修复**：Helper 是 `/Library/LaunchDaemons` 下 RunAtLoad + KeepAlive 的 daemon，每次启动都由
+  `restoreAtLaunch` 重新加载已 arm 的 PF 状态，从不检查还有没有 Tono App。用户在保护开启时退出（设计上保留）或
+  崩溃后，把 Tono.app 拖进废纸篓（macOS 唯一的移除方式），此后每次开机都断网，唯一的恢复说明在已删除的 App 里。
+  现在每次 Helper 启动（执行器恢复之后、开 socket 之前）检查：`/Applications` 里没有 Tono（按登记名
+  `Tono.app`，或任何声明 `com.raydocs.tono` 的改名副本），并且更新账本里没有未完成的尝试时，按
+  `--emergency-reset` 同一路径先停残留 Core、恢复 DNS、解除 PF，成功后撤回 pf.conf 挂钩与备份、删除安装文件，
+  最后 `launchctl bootout` 卸载自己。
+  **临时产品决定（取更严、不泄漏的一侧，待所有者确认）**：只要 App 可能回来就保持 fail-closed——App 仍在
+  `/Applications`、或有未完成的更新可能把它放回、或 `/Applications` 读不出来，都不释放；只在 Helper 启动时判断，
+  运行中 App 被移走不会立刻打开出口，要等下次重启。移除后留给用户的出口是“重启一次”，不依赖已删除的 App。
+  废纸篓里的 App 不算“仍可用”：Helper 不检查 `~/.Trash`（受 TCC 保护，daemon 无法可靠读取）。
+  Helper 协议版本 4.42.0 → 4.43.0（临时编号，合并时按顺序重编号），`CONTRACT.sha256` 按构建脚本清单重算。
+- **新增/优化**：`--emergency-reset` 的移除步骤抽成 `removeHelperInstallation()` 与启动释放共用，行为不变。
+- **工程与测试**：`--update-self-test`（root，CI privileged-tests）新增一例，用临时 Applications 目录与临时账本驱动
+  `releaseIfTonoWasRemoved`：改名的 Tono 副本、未完成的更新、读不出的目录都不释放；无 App 且无未完成更新时释放。
+  先推送只含测试与恒返回 false 的函数（即现状）的提交让 CI 变红，再推修复。
+- **验证**：本机（编辑机）未编译；以本 PR 的 GitHub-hosted `macos-26` CI 为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：未在实机上删除 App 并重启验证；`launchctl bootout` 由 daemon 自己发起、在 SIGTERM 下结束自身
+  的时序，以及“登录项与扩展”对删除 App 后这个旧式 daemon 的处理都需要实机确认。自测不执行真实的
+  DNS/PF 释放与 bootout（复用已有的 `runEmergencyDisarm`）。开发机若只从 DerivedData 运行 App、`/Applications`
+  没有 Tono，重启后 Helper 会自行移除，下次打开需重新授权安装。用户替换 App 的同一秒 Helper 恰好重启时，
+  会按“已移除”处理。
+
 ## 2026-09-24 · macOS Helper 完整移除时撤回 /etc/pf.conf 挂钩并删除 .tono-backup
 
 - **归属/来源**：G1 连接保护（移除后恢复原状）；macOS `tono-core-helper`。内部审查 H19-O-F6（跨厂商核实：
