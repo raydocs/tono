@@ -94,10 +94,20 @@ actor TonoAPIClient {
     /// in-memory (and be re-persisted at the next opportunity) or the user is
     /// irreversibly logged out by a transient keychain error.
     private var unpersistedRefreshToken: String?
+    /// Where every classified server answer about this session goes, and the
+    /// writer of the offline grant (#582). Read synchronously by the account
+    /// session and by Connect.
+    nonisolated let offlineGate: OfflineGrantGate
 
-    init(baseURL: URL = TonoAPIClient.configuredBaseURL(), keychain: KeychainStore = KeychainStore(), session: URLSession? = nil) {
+    init(
+        baseURL: URL = TonoAPIClient.configuredBaseURL(),
+        keychain: KeychainStore = KeychainStore(),
+        session: URLSession? = nil,
+        offlineGate: OfflineGrantGate = OfflineGrantGate(directory: ConfigStorage.shared.appSupportDirectory)
+    ) {
         self.baseURL = baseURL
         self.keychain = keychain
+        self.offlineGate = offlineGate
         if let session { self.session = session } else {
             let configuration = URLSessionConfiguration.ephemeral
             // Mainland cross-border paths can take several seconds to recover

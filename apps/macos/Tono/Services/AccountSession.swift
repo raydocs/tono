@@ -107,6 +107,17 @@ final class AccountSession {
     let protectedReconnectPausedConsumer: @MainActor () -> Bool
     let protectedRetryConsumer: @MainActor () -> Void
     let appRoutingResearchActivationConsumer: @MainActor () -> Void
+    /// What Connect would dial from memory now (#582): the digests an offline
+    /// grant is compared with, and recorded from once the server confirms
+    /// them. Nil while no managed exit is installed.
+    let installedCatalogConsumer: @MainActor () -> InstalledCatalogDigests?
+    /// Launch found a fail-closed intent no authenticated helper answer
+    /// confirmed or cleared. Offline admission keeps the error then: it
+    /// carries the way out of a barrier nobody can vouch for.
+    let protectionUnconfirmedConsumer: @MainActor () -> Bool
+    /// When Tono last verified the grant this session runs on while it cannot
+    /// reach Tono (#582). Nil online.
+    var offlineVerifiedAt: Date?
     let exitNode: String
     var runtimeMonitor: Task<Void, Never>?
     var catalogSyncTask: Task<Void, Never>?
@@ -305,7 +316,9 @@ final class AccountSession {
          },
          routeSplitConsumer: @escaping @MainActor () -> AppTrafficLedger.RouteSplit = {
              AppTrafficLedger.RouteSplit()
-         }) {
+         },
+         installedCatalogConsumer: @escaping @MainActor () -> InstalledCatalogDigests? = { nil },
+         protectionUnconfirmedConsumer: @escaping @MainActor () -> Bool = { false }) {
         // Apply the one-shot default-off migration before Settings can present
         // or change the AppStorage value. A later user opt-in then sees the v2
         // marker and is never reset on a subsequent callback or launch.
@@ -332,6 +345,8 @@ final class AccountSession {
             appRoutingResearchActivationConsumer
         self.pathLatencyConsumer = pathLatencyConsumer
         self.routeSplitConsumer = routeSplitConsumer
+        self.installedCatalogConsumer = installedCatalogConsumer
+        self.protectionUnconfirmedConsumer = protectionUnconfirmedConsumer
         installConnectFailureReporting()
     }
 }

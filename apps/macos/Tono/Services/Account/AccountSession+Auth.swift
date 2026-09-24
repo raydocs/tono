@@ -101,6 +101,11 @@ extension AccountSession {
         }
     }
 
+    /// Restore's answer when the stored session could not be validated.
+    func settleRestoreFailure(_ error: Error) async {
+        await fail(error, signsOutOnUnauthorized: true)
+    }
+
     func loadAuthMethods() async {
         // A read retired by a newer presentation (a protection release, a
         // sign-out) can no longer publish, so it must not hold off the read

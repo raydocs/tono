@@ -118,6 +118,67 @@ final class ManagedExitCatalogOwnershipTests: XCTestCase {
         )
     }
 
+    /// #582 M3: Ready on an offline grant that matches the catalog in memory,
+    /// then the server refuses a request of this session: Connect is refused
+    /// at once, before any connect state changes.
+    func testOfflineConnectIsRefusedAsSoonAsTheServerRevokesTheSession() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-offline-m3-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let gate = OfflineGrantGate(directory: directory)
+        let installed = InstalledCatalogDigests(catalogSha256: "catalog-a", routingSha256: "routing-a")
+        XCTAssertTrue(gate.writeGrant(OfflineGrant(
+            accountId: "user-a",
+            tokenSha256: OfflineGrantGate.tokenDigest("session-a"),
+            catalogSha256: installed.catalogSha256,
+            routingSha256: installed.routingSha256,
+            verifiedAt: 1_000
+        )))
+        let app = AppState()
+        KillSwitchService.isArmed = false
+        // Were Connect admitted, this exit (no uuid) fails before any helper
+        // preparation or PF arm, and the teardown below meets only stubs.
+        var catalogNode = Fixture.realityNode()
+        catalogNode.uuid = nil
+        app.proxyRegions = [
+            ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [catalogNode])
+        ]
+        app.managedCatalogDigest = installed.catalogSha256
+        app.managedCatalogRoutingToken = installed.routingSha256
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { _ in true }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { true }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = {}
+        runtime.restrictToBootstrap = {}
+        app.networkProtection = runtime
+        app.accountConnectRefusal = { gate.connectRefusal(catalogDigest: $0, routingToken: $1) }
+        defer {
+            AppProfile.defaults.removeObject(forKey: SettingsKey.selectedProxyTargetName)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let admission = gate.admit(tokenSha256: OfflineGrantGate.tokenDigest("session-a"), installed: installed)
+        let generation = app.connectionCoordinator.protectionOperationGeneration
+
+        gate.report(.forbidden, readScope: 0)
+        app.connect()
+
+        XCTAssertFalse(app.isConnecting, "a server refusal must block Connect before the UI catches up")
+        XCTAssertNotNil(app.errorMessage)
+        XCTAssertEqual(
+            app.errorMessage,
+            gate.connectRefusal(catalogDigest: installed.catalogSha256, routingToken: installed.routingSha256),
+            "the account gate refused it, not a missing exit"
+        )
+        XCTAssertEqual(app.connectionCoordinator.protectionOperationGeneration, generation, "refused before any connect state changed")
+        // Checked last so that old code fails on the refusal itself.
+        XCTAssertEqual(admission, .admitted(verifiedAt: Date(timeIntervalSince1970: 1)))
+        await app.connectionCoordinator.connectTask?.value
+        await app.finishPendingDisconnect()
+    }
+
     func testAnEntitlementFailureIsNotReportedAsAnExpiredSession() {
         let blocked = TonoAPIClient.APIError.entitlementBlocked(
             code: "ACCOUNT_EXPIRED",
