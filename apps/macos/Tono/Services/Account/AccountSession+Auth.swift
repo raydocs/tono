@@ -97,10 +97,21 @@ extension AccountSession {
     }
 
     func loadAuthMethods() async {
-        guard user == nil, !authMethodsLoading else { return }
+        // A read retired by a newer presentation (a protection release, a
+        // sign-out) can no longer publish, so it must not hold off the read
+        // that replaces it either.
+        guard user == nil,
+              !authMethodsLoading || authMethodsLoadRevision != accountReadRevision
+        else { return }
         let revision = accountReadRevision
+        authMethodsLoadRevision = revision
         authMethodsLoading = true
-        defer { authMethodsLoading = false }
+        defer {
+            if authMethodsLoadRevision == revision {
+                authMethodsLoadRevision = nil
+                authMethodsLoading = false
+            }
+        }
         do {
             let methods = try await api.authMethods()
             guard !Task.isCancelled, user == nil, accountReadRevision == revision else { return }
@@ -514,14 +525,48 @@ extension AccountSession {
     /// and the session it interrupted resumes. The block withdrew the exits and
     /// stopped the Core, so the runtime starts again from a freshly fetched
     /// catalog — the synchronization loop with it — and reconnects when
-    /// protection still holds this Mac offline.
+    /// protection still holds this Mac offline. Account lifecycle work, so a
+    /// sign-out or Restore internet cancels and drains it first.
     func leaveEntitlementBlock() async {
-        guard state == .suspended, blockedWhileReady, let user else { return }
+        guard state == .suspended, blockedWhileReady, user != nil else { return }
+        await accountLifecycle.run { await self.resumeAfterEntitlementBlock() }
+    }
+
+    private func resumeAfterEntitlementBlock() async {
+        guard state == .suspended, blockedWhileReady, let owner = user?.id else { return }
+        let revision = accountReadRevision
+        func isCurrent() -> Bool {
+            !Task.isCancelled && accountReadRevision == revision
+                && state == .suspended && user?.id == owner
+        }
+        func keepBlock() {
+            // No fresh exits: the refusal barrier and the block stand, and
+            // Check again retries the re-read.
+            guard state == .suspended, user?.id == owner else { return }
+            ManagedExitCatalogOwnership.purge()
+        }
+        // A catalog request still in flight from before the block belongs to
+        // reads the block retired. Joining it would hand back its discarded
+        // result instead of the fresh catalog this needs.
+        await cancelManagedCatalogRefresh()
+        guard isCurrent() else { return }
+        ManagedExitCatalogOwnership.adopt(owner)
+        guard await refreshManagedCatalog(attempts: 2), isCurrent() else {
+            keepBlock()
+            return
+        }
+        // The in-app flag can lag a release made outside the app (the root
+        // emergency disarm). Only a helper-confirmed release retires the
+        // intent; an unreachable or rejecting helper keeps it.
+        if protectionBlockedConsumer() { shouldResumeProtection = true }
+        await retireResumeIntentIfProtectionReleased()
+        guard isCurrent() else {
+            keepBlock()
+            return
+        }
         blockedWhileReady = false
         entitlementDetail = nil
-        ManagedExitCatalogOwnership.adopt(user.id)
-        if protectionBlockedConsumer() { shouldResumeProtection = true }
-        await retryRuntime()
+        await performRuntimeRetry()
     }
 
     /// Transfers the one-time enrollment material and immediately removes the
@@ -574,6 +619,19 @@ extension AccountSession {
         } catch { await fail(error) }
     }
 
+    /// A resume intent can outlive the sign-out that kept protection (a launch
+    /// 401). The runtime this sign-in starts would consume it and reconnect,
+    /// re-arming PF, so first ask the helper: a confirmed release since then
+    /// (the root emergency disarm) retires it. An unreachable or rejecting
+    /// helper is no evidence of a release, and the intent stands.
+    func retireResumeIntentIfProtectionReleased() async {
+        guard shouldResumeProtection else { return }
+        if case .confirmed(requiresProtectionRecovery: false) =
+            await killSwitchStatusObservation() {
+            shouldResumeProtection = false
+        }
+    }
+
     func authenticate(_ operation: @escaping @MainActor () async throws -> TonoAuthResponse) async {
         await accountLifecycle.run { await self.performAuthentication(operation) }
     }
@@ -602,6 +660,7 @@ extension AccountSession {
                 enterEntitlementBlock(detail: nil)
                 return
             }
+            await retireResumeIntentIfProtectionReleased()
             if !AppProfile.homeExitEnabled {
                 // Managed Reality exits authenticate directly with the Tono
                 // control plane. They never consume or wait for a Tailscale

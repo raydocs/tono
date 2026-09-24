@@ -45,6 +45,7 @@ final class AccountSessionRequestTests: XCTestCase {
         trafficPolicyConsumer: @escaping @MainActor (TonoTrafficPolicyResponse) async throws -> Int = { $0.revision },
         cloudFallbackConsumer: @escaping @MainActor (Bool) throws -> Void = { _ in },
         killSwitchDisarmConsumer: @escaping @MainActor () async -> Void = {},
+        protectionBlockedConsumer: @escaping @MainActor () -> Bool = { false },
         routeSplitConsumer: @escaping @MainActor () -> AppTrafficLedger.RouteSplit = { .init() }
     ) -> (AccountSession, URLSession, String, AsyncStream<HeldAccountProtocol>) {
         let host = "\(UUID().uuidString.lowercased()).invalid"
@@ -54,7 +55,7 @@ final class AccountSessionRequestTests: XCTestCase {
         config.protocolClasses = [HeldAccountProtocol.self]
         let transport = URLSession(configuration: config)
         let api = TonoAPIClient(baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport)
-        let account = AccountSession(api: api, keychain: testKeychain(host), sidecar: TonoSidecarService(), descriptorConsumer: descriptorConsumer, catalogConsumer: catalogConsumer, trafficPolicyConsumer: trafficPolicyConsumer, cloudFallbackConsumer: cloudFallbackConsumer, killSwitchDisarmConsumer: killSwitchDisarmConsumer, routeSplitConsumer: routeSplitConsumer)
+        let account = AccountSession(api: api, keychain: testKeychain(host), sidecar: TonoSidecarService(), descriptorConsumer: descriptorConsumer, catalogConsumer: catalogConsumer, trafficPolicyConsumer: trafficPolicyConsumer, cloudFallbackConsumer: cloudFallbackConsumer, killSwitchDisarmConsumer: killSwitchDisarmConsumer, protectionBlockedConsumer: protectionBlockedConsumer, routeSplitConsumer: routeSplitConsumer)
         account.state = .signedOut
         return (account, transport, host, requests)
     }
@@ -111,6 +112,23 @@ final class AccountSessionRequestTests: XCTestCase {
         let request = try await nextRequest(requests)
         request.respond(status: 200, body: Self.enabledMethods)
         await task.value
+        XCTAssertEqual(account.authMethods?.email.enabled, true)
+        XCTAssertEqual(account.state, .signedOut)
+        XCTAssertFalse(account.authMethodsLoading)
+    }
+
+    func testProtectionReleaseReloadsTheSignInMethodsItRetired() async throws {
+        let (account, transport, host, requests) = fixture()
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        let first = Task { await account.loadAuthMethods() }
+        let retired = try await nextRequest(requests)
+        // Restore internet clicked while the sign-in screen is still loading.
+        let release = Task { await account.restoreDirectInternet() }
+        let reload = try await nextRequest(requests)
+        reload.respond(status: 200, body: Self.enabledMethods)
+        await release.value
+        retired.respond(status: 400, body: #"{"error":{"message":"retired failure"}}"#)
+        await first.value
         XCTAssertEqual(account.authMethods?.email.enabled, true)
         XCTAssertEqual(account.state, .signedOut)
         XCTAssertFalse(account.authMethodsLoading)
@@ -515,19 +533,34 @@ final class AccountSessionRequestTests: XCTestCase {
         var released = false
         var coreStops = 0
         var exitsWithdrawn = false
+        var catalogsInstalled = 0
+        var resumes: [Bool] = []
         let (account, transport, host, requests) = fixture(
             descriptorConsumer: { descriptor in if descriptor == nil { coreStops += 1 } },
-            killSwitchDisarmConsumer: { released = true }
+            catalogConsumer: { _ in catalogsInstalled += 1 },
+            cloudFallbackConsumer: { resume in
+                // As in AppState: with no installed exit there is nothing to select.
+                guard catalogsInstalled > 0 else { throw TonoAPIClient.APIError.invalidResponse }
+                resumes.append(resume)
+            },
+            killSwitchDisarmConsumer: { released = true },
+            protectionBlockedConsumer: { true }
         )
+        let logUpload = SettingsKey.isNetworkLogUploadEnabled()
+        AppProfile.defaults.set(false, forKey: SettingsKey.networkLogUploadEnabled)
         defer {
             transport.invalidateAndCancel(); HeldAccountProtocol.remove(host)
             try? testKeychain(host).remove(.refreshToken)
             ManagedExitCatalogOwnership.purge()
+            AppProfile.defaults.set(logUpload, forKey: SettingsKey.networkLogUploadEnabled)
         }
         try await adoptTestAccount(account)
         // The running session's catalog carries this device's exit identity.
         ManagedExitCatalogOwnership.adopt("original")
         ManagedExitCatalogOwnership.recordInstalled(owner: "original", discard: { exitsWithdrawn = true })
+        // A catalog read still in flight when the refusal arrives.
+        let stale = Task { await account.refreshManagedCatalog() }
+        _ = try await nextRequest(requests)
         let task = Task { await account.refreshAccount() }
         // The Worker refuses a revoked device, an expired plan, a used-up
         // allowance and a disabled account alike: 401, and 401 on renewal.
@@ -545,6 +578,27 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertFalse(ManagedExitCatalogOwnership.accepts("original"), "no exit may be installed for a refused account")
         XCTAssertEqual(coreStops, 1, "the running Core must stop")
         XCTAssertFalse(released, "a suspension must not release PF/DNS protection")
+
+        // Renewed: the same session is accepted again. The in-app flag still
+        // says Protected Offline, but the helper confirms a release made
+        // outside the app, so the resume must not re-arm.
+        account.killSwitchStatusObservation = { .confirmed(requiresProtectionRecovery: false) }
+        let recheck = Task { await account.refreshAccount() }
+        let renewed = try await nextRequest(requests)
+        XCTAssertTrue(renewed.request.url?.path.hasSuffix("/auth/refresh") == true)
+        renewed.respond(status: 200, body: #"{"accessToken":"renewed-access","refreshToken":"renewed-refresh"}"#)
+        let reread = try await nextRequest(requests)
+        reread.respond(status: 200, body: #"{"user":{"id":"original","email":"old@example.test"}}"#)
+        let fresh = try await nextRequest(requests)
+        XCTAssertTrue(fresh.request.url?.path.hasSuffix("/exit-catalog") == true, "re-acceptance must fetch a fresh catalog, not join the read from before the block")
+        fresh.respond(status: 200, body: #"{"revision":1,"yaml":"fixture","sha256":"fixture"}"#)
+        await recheck.value
+        _ = await stale.value
+        XCTAssertEqual(account.state, .ready)
+        XCTAssertEqual(catalogsInstalled, 1, "only the fresh catalog may install")
+        XCTAssertEqual(resumes, [false], "a helper-confirmed release must not be re-armed")
+        XCTAssertFalse(released)
+        await account.stopRuntime()
     }
 
     func testSuspensionStopsTheRunningNetworkLogUploader() async throws {
@@ -722,6 +776,68 @@ final class AccountSessionRequestTests: XCTestCase {
         await task.value
         XCTAssertEqual(account.state, .signedOut)
         XCTAssertNil(account.entitlementDetail)
+    }
+
+    func testBackgroundUploadRefusedSessionSuspendsAndKeepsProtection() async throws {
+        var released = false
+        let (account, transport, host, requests) = fixture(killSwitchDisarmConsumer: { released = true })
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        try await adoptTestAccount(account)
+        account.periodicTelemetryConsent = { true }
+        let upload = Task { await account.uploadPeriodicTelemetryWindow() }
+        // The Worker refuses an expired plan, a used-up allowance, a disabled
+        // account and a revoked device alike: 401 on the request and on its
+        // token renewal.
+        let window = try await nextRequest(requests)
+        window.respond(status: 401, body: #"{"error":{"code":"UNAUTHORIZED"}}"#)
+        let renewal = try await nextRequest(requests)
+        XCTAssertTrue(renewal.request.url?.path.hasSuffix("/auth/refresh") == true)
+        // Whatever is sent after that refusal meets a transient outage, which
+        // must not undo the refusal already seen.
+        HeldAccountProtocol.install(host) { request in
+            request.respond(status: 503, body: #"{"error":{"message":"offline"}}"#)
+        }
+        renewal.respond(status: 401, body: #"{"error":{"code":"UNAUTHORIZED"}}"#)
+        await upload.value
+        XCTAssertFalse(released, "a refused session must not release PF/DNS protection")
+        XCTAssertEqual(account.state, .suspended)
+        XCTAssertTrue(account.blockedWhileReady)
+        XCTAssertEqual(account.user?.id, "original")
+    }
+
+    func testLaunchRefusedSessionSignsOutAndKeepsProtection() async throws {
+        var released = false
+        let (account, transport, host, _) = fixture(killSwitchDisarmConsumer: { released = true })
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        try await adoptTestAccount(account)
+        // Launch restore after crash cleanup kept protection armed and `me`
+        // plus its renewal were refused. restore() itself needs the privileged
+        // helper, so its catch is driven directly.
+        account.state = .restoring
+        account.shouldResumeProtection = true
+        HeldAccountProtocol.install(host) { request in
+            request.respond(status: 401, body: #"{"error":{"code":"UNAUTHORIZED"}}"#)
+        }
+        await account.fail(TonoAPIClient.APIError.unauthorized, signsOutOnUnauthorized: true)
+        XCTAssertFalse(released, "a refused session must not release PF/DNS protection")
+        XCTAssertEqual(account.state, .signedOut)
+        XCTAssertNil(account.user)
+        XCTAssertNil(try testKeychain(host).string(for: .refreshToken))
+        XCTAssertTrue(account.shouldResumeProtection)
+    }
+
+    func testSignInKeepsAResumeIntentUnlessTheHelperConfirmsRelease() async {
+        let (account, transport, host, _) = fixture()
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
+        // A launch 401 kept crash recovery's intent; a root emergency disarm
+        // since then is known only to the helper.
+        account.shouldResumeProtection = true
+        account.killSwitchStatusObservation = { .unavailable }
+        await account.retireResumeIntentIfProtectionReleased()
+        XCTAssertTrue(account.shouldResumeProtection, "an unreachable helper is no evidence of a release")
+        account.killSwitchStatusObservation = { .confirmed(requiresProtectionRecovery: false) }
+        await account.retireResumeIntentIfProtectionReleased()
+        XCTAssertFalse(account.shouldResumeProtection, "a confirmed release must not be re-armed by the next sign-in")
     }
 
     private func adoptReplacementCredentials(_ account: AccountSession) async throws {
