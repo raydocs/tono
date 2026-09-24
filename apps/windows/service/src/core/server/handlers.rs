@@ -609,6 +609,15 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             {
                 return service_error(ServiceError::invalid_proxy_config(error.to_string()));
             }
+            #[cfg(all(windows, not(feature = "test")))]
+            if let Err(error) = crate::core::runtime_generation::ensure_owned_runtime_config_is_safe(
+                &start_request.runtime.yaml,
+            ) {
+                return service_error(ServiceError::new(
+                    crate::ServiceErrorCode::InvalidRuntimeAsset,
+                    format!("Runtime config refused: {error}"),
+                ));
+            }
             if let Some(message) = start_clash_kill_switch_rejection(
                 std::env::consts::OS,
                 start_request
@@ -850,6 +859,15 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     ControlFlow::Continue(authenticated) => authenticated,
                     ControlFlow::Break(response) => return response,
                 };
+            #[cfg(all(windows, not(feature = "test")))]
+            if let Err(error) =
+                crate::core::runtime_generation::ensure_owned_runtime_config_is_safe(&request.payload.yaml)
+            {
+                return service_error(ServiceError::new(
+                    crate::ServiceErrorCode::InvalidRuntimeAsset,
+                    format!("Runtime config refused: {error}"),
+                ));
+            }
             // The guard is held for the whole operation, and for the same reason `StartClash`
             // holds it: a core must not be stopped, started, or handed to another owner while its
             // generation is being rewritten underneath it. Staging writes into the directory the
