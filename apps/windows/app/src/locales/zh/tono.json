@@ -346,6 +346,7 @@
       "wfpEngineWedged": "Windows 防火墙引擎没有响应，通常是第三方安全软件挂住了它。请重启电脑；若还是这样，先退出杀毒或防火墙软件再重试。",
       "releaseReconciling": "保护还在解除，请稍后再连。",
       "serviceTooOld": "服务版本过旧，请用最新安装包重装。",
+      "protectionHeldByAnotherUser": "本机另一位用户正在使用 Tono 的保护，需对方断开或注销后才能连接。",
       "browserDnsPreflight": "无法连接 Claude 住宅专线，因为不能确认 Chrome / Edge 的「安全 DNS」配置安全。Tono 会统一路由 Chrome / Edge 的所有用户资料，不支持按资料单独路由。请将「安全 DNS」设为关闭，或自动且不指定自定义提供商；然后彻底重启浏览器，再重新连接 Tono。",
       "nodeUnreachable": "连不上这个节点。请重试或换节点。",
       "tunDataPlaneBroken": "节点是通的，但 Windows 没有转发隧道流量。换节点没用——请重启电脑后再连；若还是这样，请发诊断。",

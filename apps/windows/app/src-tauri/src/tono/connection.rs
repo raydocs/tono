@@ -30,7 +30,7 @@ mod platform;
 // Compatibility surface for existing command and test callers. The transaction
 // and error modules do not import this orchestration facade.
 pub use failure::{
-    BFE_NOT_RUNNING_PREFIX, NODE_OR_CORE_UNREACHABLE_PREFIX,
+    BFE_NOT_RUNNING_PREFIX, NODE_OR_CORE_UNREACHABLE_PREFIX, PROTECTION_HELD_BY_ANOTHER_USER_PREFIX,
     RELEASE_RECONCILING_PREFIX, SERVICE_BUSY_PREFIX,
     SERVICE_TOO_OLD_PREFIX, TUN_DATA_PLANE_BROKEN_PREFIX, TUN_INGRESS_BROKEN_PREFIX,
     WFP_ENGINE_WEDGED_PREFIX, is_retryable_lock_error, map_service_ready_error,
