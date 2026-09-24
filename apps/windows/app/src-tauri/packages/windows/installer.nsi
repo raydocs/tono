@@ -329,6 +329,9 @@ FunctionEnd
 ; 1. Confirm uninstall page
 Var DeleteAppDataCheckbox
 Var DeleteAppDataCheckboxState
+; "0" only when the service uninstall helper found no link or reparse point on the way into the
+; approving account's own AppData. Every uninstall delete there is gated on it.
+Var AppDataPathPlain
 !define /ifndef WS_EX_LAYOUTRTL         0x00400000
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW un.ConfirmShow
 Function un.ConfirmShow ; Add add a `Delete app data` check box
@@ -1226,6 +1229,12 @@ Section Uninstall
   !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
   !insertmacro RemoveVergeService
 
+  ; Every delete below that reaches into the approving account's own AppData runs only when the
+  ; helper found no link or reparse point on the way there, the same check its all-profile removal
+  ; applies to every profile. Any other result, a missing helper included, leaves them in place.
+  nsExec::ExecToLog /TIMEOUT=30000 '"$INSTDIR\resources\tono-service-uninstall.exe" --check-current-app-data'
+  Pop $AppDataPathPlain
+
   ; "Delete app data" means every Windows account's Tono data. This elevated uninstaller runs as
   ; the administrator who approved it, so `$APPDATA` further down is only that account's folder.
   ; The helper removes com.raydocs.tono from each local profile (links are removed, never
@@ -1241,10 +1250,12 @@ Section Uninstall
   ${EndIf}
 
   ; Remove cached window state files
-  DetailPrint "Removing window-state.json / .window-state.json"
-  SetShellVarContext current
-  Delete "$APPDATA\com.raydocs.tono\window-state.json"
-  Delete "$APPDATA\com.raydocs.tono\.window-state.json"
+  ${If} $AppDataPathPlain == "0"
+    DetailPrint "Removing window-state.json / .window-state.json"
+    SetShellVarContext current
+    Delete "$APPDATA\com.raydocs.tono\window-state.json"
+    Delete "$APPDATA\com.raydocs.tono\.window-state.json"
+  ${EndIf}
 
   !insertmacro SetContext
 
@@ -1339,6 +1350,7 @@ Section Uninstall
   ; Learned control-plane pins used to live in user AppData. They are no longer
   ; trusted; delete the leftover even when the user keeps the rest of AppData.
   ${If} $UpdateMode <> 1
+  ${AndIf} $AppDataPathPlain == "0"
     SetShellVarContext current
     Delete /REBOOTOK "$APPDATA\${BUNDLEID}\tono\control-plane-pins.json"
     Delete /REBOOTOK "$LOCALAPPDATA\${BUNDLEID}\tono\control-plane-pins.json"
@@ -1375,10 +1387,8 @@ Section Uninstall
     DeleteRegValue HKCU "${MANUPRODUCTKEY}" "Installer Language"
     DeleteRegKey /ifempty HKCU "${MANUPRODUCTKEY}"
     DeleteRegKey /ifempty HKCU "${MANUKEY}"
-
-    SetShellVarContext current
-    RmDir /r "$APPDATA\${BUNDLEID}"
-    RmDir /r "$LOCALAPPDATA\${BUNDLEID}"
+    ; This account's $APPDATA/$LOCALAPPDATA folders were removed with every other profile's by the
+    ; helper above. A recursive NSIS delete here would walk through a junction the helper skipped.
   ${EndIf}
 
   !ifmacrodef NSIS_HOOK_POSTUNINSTALL

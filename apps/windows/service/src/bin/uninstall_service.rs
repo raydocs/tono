@@ -306,6 +306,13 @@ fn main() -> anyhow::Result<()> {
             .ok_or_else(|| anyhow::anyhow!("the user profiles folder is unavailable"))?;
         return remove_app_data_in_profiles(&profiles);
     }
+    if std::env::args().any(|argument| argument == CHECK_CURRENT_APP_DATA_ARG) {
+        anyhow::ensure!(
+            current_account_app_data_plain(),
+            "this account's AppData is reached through a link or reparse point; its app data is left in place"
+        );
+        return Ok(());
+    }
     if run_maintenance_if_requested()? {
         return Ok(());
     }
@@ -738,19 +745,53 @@ fn remove_windows_service_binary() -> Result<(), Error> {
     Ok(())
 }
 
+/// Leftover pins older apps wrote under Roaming and Local AppData; the deepest path any uninstall
+/// delete reaches in the approving account's own AppData.
+#[cfg(windows)]
+const USER_PINS_RELATIVE: &str = r"com.raydocs.tono\tono\control-plane-pins.json";
+
 /// Older apps wrote learned pins into the user's AppData. That file is no
 /// longer read, but it must not survive uninstall either.
 #[cfg(windows)]
 fn remove_leftover_user_control_plane_pins() {
-    const RELATIVE: &str = r"com.raydocs.tono\tono\control-plane-pins.json";
+    if !current_account_app_data_plain() {
+        return;
+    }
     for folder in [
         windows_sys::Win32::UI::Shell::FOLDERID_RoamingAppData,
         windows_sys::Win32::UI::Shell::FOLDERID_LocalAppData,
     ] {
         if let Some(root) = known_folder(folder) {
-            let _ = std::fs::remove_file(root.join(RELATIVE));
+            let _ = std::fs::remove_file(root.join(USER_PINS_RELATIVE));
         }
     }
+}
+
+/// Passed by the Uninstall section before any delete of its own under the approving account's
+/// AppData (window state, leftover pins): exit 0 means those deletes may run.
+#[cfg(windows)]
+const CHECK_CURRENT_APP_DATA_ARG: &str = "--check-current-app-data";
+
+/// Whether this elevated process may delete under its own account's Roaming and Local AppData:
+/// both lie inside the account's profile, and no folder from the profile down to the deepest
+/// file removed there is a link or reparse point. A redirected AppData, or a folder that cannot
+/// be resolved, answers no.
+#[cfg(windows)]
+fn current_account_app_data_plain() -> bool {
+    use windows_sys::Win32::UI::Shell::{
+        FOLDERID_LocalAppData, FOLDERID_Profile, FOLDERID_RoamingAppData,
+    };
+
+    let Some(profile) = known_folder(FOLDERID_Profile) else {
+        return false;
+    };
+    [FOLDERID_RoamingAppData, FOLDERID_LocalAppData]
+        .into_iter()
+        .all(|folder| {
+            known_folder(folder).is_some_and(|root| {
+                redirected_folder(&profile, &root.join(USER_PINS_RELATIVE)).is_none()
+            })
+        })
 }
 
 /// Passed by the Uninstall section only when "Delete app data" was ticked, and only after
@@ -778,12 +819,11 @@ fn remove_app_data_in_profiles(profiles_root: &std::path::Path) -> Result<(), Er
             continue;
         }
         let profile = entry.path();
-        let app_data = profile.join("AppData");
-        let bases = ["Roaming", "Local"].map(|base| app_data.join(base));
-        if let Some(redirected) = [&profile, &app_data]
-            .into_iter()
-            .chain(&bases)
-            .find(|component| !is_plain_path_component(component))
+        let targets = ["Roaming", "Local"]
+            .map(|base| profile.join("AppData").join(base).join(APP_DATA_DIR_NAME));
+        if let Some(redirected) = targets
+            .iter()
+            .find_map(|target| redirected_folder(&profile, target))
         {
             failures.push(format!(
                 "{}: skipped, {} is a link or reparse point or could not be inspected",
@@ -792,11 +832,10 @@ fn remove_app_data_in_profiles(profiles_root: &std::path::Path) -> Result<(), Er
             ));
             continue;
         }
-        for base in &bases {
-            let target = base.join(APP_DATA_DIR_NAME);
-            let removed = match std::fs::symlink_metadata(&target) {
-                Ok(metadata) if metadata.is_file() => std::fs::remove_file(&target),
-                Ok(_) => std::fs::remove_dir_all(&target),
+        for target in &targets {
+            let removed = match std::fs::symlink_metadata(target) {
+                Ok(metadata) if metadata.is_file() => std::fs::remove_file(target),
+                Ok(_) => std::fs::remove_dir_all(target),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
                 Err(error) => Err(error),
             };
@@ -811,6 +850,32 @@ fn remove_app_data_in_profiles(profiles_root: &std::path::Path) -> Result<(), Er
         failures.join("; ")
     );
     Ok(())
+}
+
+/// The first folder from `profile` down to `target`'s parent that an elevated delete must not walk
+/// through, or `target` itself when it is not inside `profile`. `None` means every folder on the
+/// way is plain. `target` itself is not checked: the deletes remove a link there, never follow it.
+#[cfg(any(windows, test))]
+fn redirected_folder(
+    profile: &std::path::Path,
+    target: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    let Ok(relative) = target.strip_prefix(profile) else {
+        return Some(target.to_path_buf());
+    };
+    let mut folder = profile.to_path_buf();
+    if !is_plain_path_component(&folder) {
+        return Some(folder);
+    }
+    let mut below: Vec<_> = relative.components().collect();
+    below.pop();
+    for component in below {
+        folder.push(component);
+        if !is_plain_path_component(&folder) {
+            return Some(folder);
+        }
+    }
+    None
 }
 
 /// Whether the elevated delete may walk through `path`: absent (nothing below it to delete), or

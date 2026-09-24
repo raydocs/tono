@@ -58,6 +58,14 @@
   配置文件并在返回错误中报告（NSIS 仅记日志）。测试：`delete_app_data_never_walks_through_a_redirected_app_data_folder`
   （Windows 用 `mklink /J` 建联接点，无需特权）；旧代码会经联接点删掉外部目录，断言失败。验证：未在本机运行；CI 待定。
   限制：检查与删除之间仍有竞态（配置文件所有者可在检查后改成联接点），未用句柄逐级打开消除；未实机验证。
+- **跟进 2026-09-24（Codex 复核 WA-OpenAI-1 PARTIAL，未闭合路径）**：修复：助手跳过某配置文件后，NSIS 仍对批准卸载的管理员
+  执行 `RmDir /r "$APPDATA|$LOCALAPPDATA\${BUNDLEID}"`，并直接删除窗口状态与旧 pins，绕过逐级检查。现删掉这两条 `RmDir /r`
+  （该账户的目录已由 `--delete-app-data-all-profiles` 在检查下删除）；卸载段先调用新的 `--check-current-app-data`，只有退出码为 0
+  （本账户 Roaming/Local AppData 位于其配置文件内，且从配置文件到最深删除路径 `com.raydocs.tono\tono` 的每级都不是链接/重解析点）
+  才删窗口状态与旧 pins；助手缺失、超时或失败都保留。Rust 侧 `remove_leftover_user_control_plane_pins` 用同一检查；配置文件循环
+  改用同一 `redirected_folder`。测试：packaging 新增一个 `test`（`NSIS uninstall deletes in the approving account AppData only after the
+  link check`），MacBook 上改前失败、改后 23/23 通过；Rust 由既有联接点测试覆盖共用检查。验证：Rust/NSIS 未在本机运行；CI 待定。
+  限制：AppData 被重定向到配置文件外时本账户的窗口状态与旧 pins 不再删除；检查与删除之间的竞态同上；NSIS 未编译，未实机验证。
 
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
