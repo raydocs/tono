@@ -219,10 +219,15 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
   if (b.homeExitId !== undefined && b.homeExitId !== null && b.homeExitId !== '') {
     const homeExitId = str(b.homeExitId, 'homeExitId', 1, 100);
     const home = await e.DB.prepare(
-      'SELECT id FROM home_exits WHERE id = ?',
+      'SELECT id, status FROM home_exits WHERE id = ?',
     ).bind(homeExitId).first<Row>();
     if (!home) {
       throw new ApiError(400, 'HOME_ASSIGN_FAILED', 'Could not assign the pasted home line');
+    }
+    // Same rule as PUT users/{id}/home-binding: binding a non-active line
+    // would fail the user's whole catalog closed.
+    if (String(home.status) !== 'active') {
+      throw new ApiError(409, 'HOME_EXIT_INACTIVE', 'Home exit must be active before binding');
     }
   }
   const parsedLine = b.line !== undefined && b.line !== null && b.line !== ''

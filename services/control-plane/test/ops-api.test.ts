@@ -605,6 +605,33 @@ describe('ops v1 api', () => {
     expect(closed).toBeTruthy();
   });
 
+  it('home-lines create and retire move the catalog revision and refuse a bound line', async () => {
+    await db().prepare(
+      `INSERT OR REPLACE INTO managed_exit_catalog(singleton_id, revision, ciphertext, nonce, content_sha256, updated_at)
+       VALUES(1, 5, 'c', 'n', 's', ?)`,
+    ).bind(NOW).run();
+    const revision = async () => Number((await db().prepare(
+      'SELECT revision FROM managed_exit_catalog WHERE singleton_id = 1',
+    ).first<{ revision: number }>())!.revision);
+    await seedUser('u-home', 'home@example.com');
+    const created = await ops('home-lines', json({ proxyName: 'home-guard', displayName: '家宽 G' }));
+    expect(created.status).toBe(201);
+    const line = assertHomeLine(await created.json());
+    expect(await revision()).toBe(6);
+    await db().prepare(
+      'INSERT INTO user_home_bindings(user_id, home_exit_id, created_at, updated_at) VALUES(?, ?, ?, ?)',
+    ).bind('u-home', line.id, NOW, NOW).run();
+    const refused = await ops(`home-lines/${line.id}`, { method: 'DELETE' });
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { error: { code: string } }).error.code).toBe('HOME_EXIT_IN_USE');
+    expect((await db().prepare('SELECT status FROM home_exits WHERE id = ?').bind(line.id).first<{ status: string }>())!.status)
+      .toBe('active');
+    await db().prepare('DELETE FROM user_home_bindings WHERE user_id = ?').bind('u-home').run();
+    const retired = assertHomeLine(await (await ops(`home-lines/${line.id}`, { method: 'DELETE' })).json());
+    expect(retired.status).toBe('retired');
+    expect(await revision()).toBe(7);
+  });
+
   it('alert-rules CRUD, test, deliveries', async () => {
     const created = await ops('alert-rules', json({
       name: 'down', channel: 'webhook', target: 'https://hooks.example.com/in',

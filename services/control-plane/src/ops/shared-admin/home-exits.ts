@@ -12,6 +12,7 @@ import {
   enqueueRefreshCatalogForUser,
 } from '../../catalog';
 import {
+  assertHomeExitUnbound,
   optionalIpv4,
   proxyNameField,
   defaultProxyNameField,
@@ -283,6 +284,7 @@ export async function homeExitsResource(
     if (!['active', 'disabled', 'retired'].includes(status)) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
     }
+    if (status === 'retired' && String(existing.status) !== 'retired') await assertHomeExitUnbound(e, mt[1]);
     const kind = b.kind === undefined ? String(existing.kind ?? 'catalog') : str(b.kind, 'kind', 1, 20);
     if (!['catalog', 'socks5'].includes(kind)) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid kind');
@@ -330,12 +332,7 @@ export async function homeExitsResource(
     return Response.json({ homeExit: publicHomeExit(row!) });
   }
   if (mt && m === 'DELETE') {
-    const bound = await e.DB.prepare(
-      'SELECT 1 FROM user_home_bindings WHERE home_exit_id = ? LIMIT 1',
-    ).bind(mt[1]).first<Row>();
-    if (bound) {
-      throw new ApiError(409, 'HOME_EXIT_IN_USE', 'Unbind all users before deleting this home exit');
-    }
+    await assertHomeExitUnbound(e, mt[1]);
     const deleted = await e.DB.prepare('DELETE FROM home_exits WHERE id = ?').bind(mt[1]).run();
     if (!deleted.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
     await bumpCatalogRevision(e);

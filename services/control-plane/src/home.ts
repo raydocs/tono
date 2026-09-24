@@ -252,6 +252,26 @@ export async function loadHomeBinding(e: Env, userId: string) {
   return e.DB.prepare(`${HOME_BINDING_SELECT} WHERE user_home_bindings.user_id = ?`).bind(userId).first<Row>();
 }
 
+export function homeExitStatusField(value: unknown): string {
+  const status = str(value, 'status', 1, 20);
+  if (!['active', 'disabled', 'retired'].includes(status)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
+  }
+  return status;
+}
+
+// Retiring or deleting a line that a user is still bound to would leave that
+// user's whole catalog failing closed (503) until someone rebinds them. Every
+// write path that takes a line out of service refuses while it is bound.
+export async function assertHomeExitUnbound(e: Env, homeExitId: string) {
+  const bound = await e.DB.prepare(
+    'SELECT 1 FROM user_home_bindings WHERE home_exit_id = ? LIMIT 1',
+  ).bind(homeExitId).first<Row>();
+  if (bound) {
+    throw new ApiError(409, 'HOME_EXIT_IN_USE', 'Unbind all users before retiring or deleting this home exit');
+  }
+}
+
 export async function findSocks5Home(e: Env, host: string, port: number, username: string) {
   return e.DB.prepare(
     `SELECT * FROM home_exits
