@@ -898,6 +898,31 @@
   在线时 `--emergency-disarm` 按设计拒绝，受支持的释放路径是 App 的认证管道，安装器代断开需要新的
   Service 路由，待 owner 决定。0.0.72 更新失败后不会自动重新打开旧 App。
 
+## 2026-09-23 · Windows 原生更新存储：schema 主版本 + 同主版本忽略未知字段
+
+- **归属/来源**：G3 原生更新 v1（面向 0.0.73 → 0.0.74 起的 N-1 执行器）；Windows Service
+  `update_transaction.rs`。内部审查 H15-F6，Issue #501。基线 origin/main bb2ed4e4；分支
+  `fix/update-store-schema-windows-20260923`；未合 main。
+- **缺陷修复**：`State`/`Attempt`/`Image`/`DisconnectEvidence` 均为 `deny_unknown_fields`，
+  而按设计旧版执行器副本会读新版 Service 写的 `state.json`；任何加字段都会让旧执行器报
+  "corrupt update evidence retained"，且这类证据不会被清理或被重装清除。改为：读取前先探测
+  `schema_version`（缺省为 1）；高于本版支持的主版本时以"written by a newer Tono (schema N)"
+  拒绝并保留原字节（与损坏区分，仍按 pending 证据阻断）；同主版本去掉四个本地结构的
+  `deny_unknown_fields`，忽略新增字段。写入端在主版本为 1 时不写该字段，已有构建照常读取。
+  内嵌的 manifest/receipt 仍按线协议严格校验，不受影响。
+- **新增/优化**：`docs/UPDATE_PROTOCOL_V1.md` 新增 "Local store schema across versions"，
+  写明两端规则（新增字段须可选且可丢弃；其余变更升主版本；发布前用上一版执行器读候选写出的
+  账本）。macOS 实现见单独 PR。
+- **工程与测试**：一个 `#[test]`
+  `newer_store_fields_are_ignored_and_a_newer_major_is_refused_not_corrupt`：在顶层、attempt、
+  initiating_image 加未知字段后 `Store::open` 仍成功；`schema_version: 2` 时拒绝且错误可区分、
+  原字节保留。旧代码在第一次打开处因 `deny_unknown_fields` 失败。
+- **验证**：本机未执行 cargo；rustfmt 仅做语法解析。回归交给本 PR 的 windows-2025 Service CI，
+  结果见 PR。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：规则只对含本改动的执行器生效；本 PR 之前构建的内部候选执行器仍会拒绝任何新增
+  字段。执行器自身的 `replacement.json`（同一副本写读）未改。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3

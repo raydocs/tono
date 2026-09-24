@@ -14,8 +14,22 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Storage major of `state.json`. Absent means 1, the unversioned v1 layout;
+/// a writer emits `schema_version` only once it writes 2 or later. Within one
+/// major, readers ignore fields they do not know: an older executor copy reads
+/// what a newer Service wrote. Additive fields must be optional and safe to
+/// drop, because that older copy may rewrite the record without them. Anything
+/// else bumps the major, which an older reader refuses as newer evidence
+/// (retained), not as corruption. See docs/UPDATE_PROTOCOL_V1.md.
+pub const STATE_SCHEMA_VERSION: u64 = 1;
+
+#[derive(Deserialize)]
+struct SchemaProbe {
+    #[serde(default)]
+    schema_version: Option<u64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Image {
     pub pid: u32,
     pub started_at: u64,
@@ -36,14 +50,12 @@ pub enum Execution {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct DisconnectEvidence {
     pub requested_at_unix: u64,
     pub verified_at_unix: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Attempt {
     pub manifest: ReleaseManifest,
     pub receipt: Receipt,
@@ -58,7 +70,6 @@ pub struct Attempt {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct State {
     pub consumed_sequence: u64,
     pub generation: u64,
@@ -171,6 +182,15 @@ impl Store {
                 ensure!(
                     bytes.len() <= 65_536,
                     "update state exceeds limit; evidence retained"
+                );
+                let schema = serde_json::from_slice::<SchemaProbe>(&bytes)
+                    .context("corrupt update evidence retained")?
+                    .schema_version
+                    .unwrap_or(1);
+                ensure!(schema >= 1, "corrupt update evidence retained");
+                ensure!(
+                    schema <= STATE_SCHEMA_VERSION,
+                    "update evidence written by a newer Tono (schema {schema}) retained for that version"
                 );
                 let state: State =
                     serde_json::from_slice(&bytes).context("corrupt update evidence retained")?;
@@ -764,6 +784,32 @@ pub(crate) mod tests {
             )
             .unwrap();
         store.execution(Execution::Launching).unwrap();
+    }
+
+    #[test]
+    fn newer_store_fields_are_ignored_and_a_newer_major_is_refused_not_corrupt() {
+        let (root, store, _, _) = reserved();
+        drop(store);
+        let path = root.join("state.json");
+        let mut newer: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        // What a later Service may add within schema 1: optional, safe to drop.
+        newer["future_fact"] = serde_json::json!(true);
+        newer["attempt"]["future_fact"] = serde_json::json!("x");
+        newer["attempt"]["initiating_image"]["future_fact"] = serde_json::json!(1);
+        std::fs::write(&path, serde_json::to_vec(&newer).unwrap()).unwrap();
+        let store = Store::open(&root).expect("an older reader must accept additive fields");
+        assert_eq!(store.state.generation, 91);
+        assert_eq!(store.attempt().unwrap().execution, Execution::Staged);
+        drop(store);
+
+        newer["schema_version"] = serde_json::json!(2);
+        let bytes = serde_json::to_vec(&newer).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+        let refused = Store::open(&root).err().expect("a newer major must be refused");
+        assert!(format!("{refused:#}").contains("newer Tono (schema 2)"), "{refused:#}");
+        assert_eq!(std::fs::read(&path).unwrap(), bytes, "newer evidence is retained");
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
