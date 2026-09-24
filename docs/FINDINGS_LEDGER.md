@@ -297,5 +297,48 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | D3 | 原生升级 v1：canonical manifest 绑定两端包、摘要、签名 releaseSequence；root helper / SYSTEM 独立执行器；私有暂存、消费前持久化、单次消费、successor 身份、回滚、高水位保留 | accepted-design | [#282](https://github.com/raydocs/tono/pull/282) 模型、[#283](https://github.com/raydocs/tono/pull/283) 接入，经 #289 进 main；不代表受保护装机升级已验收 |
 | D4 | Disconnect 不伪造恢复/提交，不删除已消费或不确定事务；保留证据并拒绝新 offer | accepted-design | 文档化设计；「没有任何出口」的部分是 R4-F2/R4-F7 的缺陷 |
 
+
+## 11. 2026-09-24 晚轮（H19–H22、候选诊断、合并列车）
+
+详见 [交接记录](reports/HANDOFF_2026-09-24.md)。
+
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| H19-C-F1 | 连接在 WFP 武装前关闭非 Tono 代理且不恢复 | in-PR | [#541](https://github.com/raydocs/tono/issues/541) / [#557](https://github.com/raydocs/tono/issues/557) | 高·已确认(写入与顺序) | 安装更新仍清代理；未实机 |
+| H19-O-F5=C-F3=G-F3 | 更新恢复任务与执行器跨提交/卸载存活 | in-PR | [#549](https://github.com/raydocs/tono/issues/549) / [#565](https://github.com/raydocs/tono/issues/565) | 中·已确认 | #471 后改系统目录；未实机 |
+| H19-O-F7=C-F2 | 删除应用数据只删批准 UAC 的账户 | in-PR | [#559](https://github.com/raydocs/tono/issues/559) / [#569](https://github.com/raydocs/tono/issues/569) | 中·推导 | 重定向 AppData 不覆盖；未实机 |
+| H19-G-F4 | 卸载保留 Service 运行时配置出口凭据 | in-PR | [#560](https://github.com/raydocs/tono/issues/560) / [#571](https://github.com/raydocs/tono/issues/571)(叠 [#565](https://github.com/raydocs/tono/issues/565)) | 低·已确认 | 未实机 |
+| H19-O-F2 | 无主 WFP 拦截时安装门禁死路 | in-PR | [#564](https://github.com/raydocs/tono/issues/564) / [#573](https://github.com/raydocs/tono/issues/573)(叠 [#500](https://github.com/raydocs/tono/issues/500)) | 中·已确认 | 静默安装仍拒绝；未实机 |
+| H19-C-F4 | 自启任务全机同名 | in-PR | [#568](https://github.com/raydocs/tono/issues/568) / [#577](https://github.com/raydocs/tono/issues/577) | 低·已确认 | DOMAIN\user 旧任务不识别；未实机 |
+| H19-O-F4 | 绑定用户被删后 `--emergency-disarm/reset` 因查 home 失败 | in-PR | [#545](https://github.com/raydocs/tono/issues/545)/[#550](https://github.com/raydocs/tono/issues/550) | 中·已确认 | 用户不存在时 daemon 仍起不来；未实机 |
+| H19-O-F6 | reset 留下 pf.conf 挂钩与两个 `.tono-backup` | in-PR | [#551](https://github.com/raydocs/tono/issues/551)/[#562](https://github.com/raydocs/tono/issues/562) | 低·已确认（降级） | 不重载主规则集；reset 接线未被自测覆盖 |
+| H19-O-F1 = H19-G-F1 | 删 Tono.app 后 helper 每次开机重新 arm | in-PR | [#555](https://github.com/raydocs/tono/issues/555)/[#566](https://github.com/raydocs/tono/issues/566) | 中·已确认 | 需实机验证 bootout/登录项；dev 机无 /Applications 副本会自移除 |
+| H19-O-F3 = H19-G-F2 | 第二账户可改绑 helper，或只报 connectFailed | in-PR | [#561](https://github.com/raydocs/tono/issues/561)/[#579](https://github.com/raydocs/tono/issues/579) | 中·已确认 | 无 socket 时授权后才拒绝；自动重连仍重试 |
+| OD-0924-W | Worker 不记录设备客户端版本 | in-PR | [#574](https://github.com/raydocs/tono/issues/574) / [#578](https://github.com/raydocs/tono/issues/578) | 源码推导 | 控制台未展示；旧客户端 NULL；与 #329 冲突；0092 需重编号 |
+| OD-0924-Win | Windows 内部候选版失败记录默认关且升级被 v2 重置 | in-PR | [#575](https://github.com/raydocs/tono/issues/575) / [#580](https://github.com/raydocs/tono/issues/580) | 源码推导 | 未在真实候选包验证；无单独关闭开关 |
+| OD-0924-Mac | macOS 内部候选版失败记录默认关且升级被 v2 重置 | in-PR | [#576](https://github.com/raydocs/tono/issues/576) / [#581](https://github.com/raydocs/tono/issues/581) | 源码推导 | 未在签名候选包验证；无单独关闭开关 |
+| H21-O-F1 | 控制面不可达而出口可达时，重启后已登录用户无法连接（有已验证缓存目录） | open | [#582](https://github.com/raydocs/tono/issues/582) | 中·已确认 | Windows 显示「登录状态已失效」 |
+| H21-O-F2 | Windows 恢复 30 s 预算被 pinned 连接耗尽，系统 DNS 回退不执行 | open | [#583](https://github.com/raydocs/tono/issues/583) | 中·已确认 | 与 F1 症状重叠 |
+| H21-O-F3 = H21-C-F1 | macOS 控制面客户端无 pinned 地址/备用端口/DNS 回退 | open | [#584](https://github.com/raydocs/tono/issues/584) | 中·已确认 | |
+| H21-O-F4 | macOS「试用备用通道」提供核心不可用的 hy2，受保护重连无限循环 | open | [#585](https://github.com/raydocs/tono/issues/585) | 中·已确认 | |
+| H21-O-F5 | macOS 每次连接首次 arm 在无 TUN 时放行 root web 端口 | open | [#586](https://github.com/raydocs/tono/issues/586) | 高·已确认 | 仅存在 DIRECT plan 时；泄漏量需实机 |
+| H21-O-F6 | macOS 控制面请求继承他人系统代理，受保护离线下被 PF 挡 | open | [#587](https://github.com/raydocs/tono/issues/587) | 中·已确认 | |
+| H21-O-F7 | 其他 VPN/TUN 未识别，失败归因错误 | open | 待开 | 中·推导(PLAUSIBLE) | #458/#468 部分覆盖 |
+| H21-O-F8 | 强制门户/TLS 拦截代理未识别 | open | 待开 | 低·推导(PLAUSIBLE) | |
+| H21-O-F9 | 系统时钟错误不被点名，保护期间无法校时 | open | [#588](https://github.com/raydocs/tono/issues/588) | 低·已确认 | Windows hy2 不拒 NTP |
+| H21-C-F2 | 受保护离线时更新发现失败且不说明原因 | accepted-design | — | 低·推导 | fail-closed 设计；只改文案 |
+| H21-C-F3 | Windows 检查更新失败时显示「已是最新版」 | open | [#589](https://github.com/raydocs/tono/issues/589) | 中·已确认 | |
+| H20-C-F1 = H20-O-F2 | Windows 目录刷新失败显示「详情见下」但无详情 | open | [#590](https://github.com/raydocs/tono/issues/590) | 中·已确认 | |
+| H20-C-F2 = H20-O-F10 | macOS 浏览器加密 DNS 冲突显示通用文案并持续自动重试 | open | [#591](https://github.com/raydocs/tono/issues/591) | 中·已确认 | |
+| H20-C-F3 = H20-O-F9 | macOS 拒绝管理员授权被报成 helper 版本不匹配 | open | [#592](https://github.com/raydocs/tono/issues/592) | 中·已确认 | |
+| H20-C-F4 | Windows WFP 锁定校验失败被报成「重启电脑」 | open | [#593](https://github.com/raydocs/tono/issues/593) | 中·已确认(代码路径) | 频率需实机 |
+| H20-C-F5 | Windows 上传诊断缺上一次失败记录 | open | [#594](https://github.com/raydocs/tono/issues/594) | 低·已确认 | #580 仅内部版自动报告 |
+| H20-C-F6 = H20-O-F13 | 验证码错误/过期被显示为「会话过期」 | open | [#595](https://github.com/raydocs/tono/issues/595) | 中·已确认 | |
+| H22-C-F2 = H22-O-F6 | 验证码未送达时两端没有求助/诊断出口 | open | [#596](https://github.com/raydocs/tono/issues/596) | 中·已确认 | |
+| H22-C-F1 | Windows 欢迎页吞掉存储失败导致循环 | open | 待开 | 低·推导(PLAUSIBLE) | 触发条件未证实 |
+| H20-O-*, H22-O-* | Opus 席位 H20（15 条）与 H22（8 条，含 H22-O-F1 BFE 关闭时无法安装、H22-O-F2 VC++ 运行库缺失时安装门禁失败）| open（待核实）| 待开 | 待 Codex 异厂商核实 | 见交接文档 |
+| XRAY26-RMU | exit-agent 用 `--email=` 调 Xray 26 `rmu` 被拒，自 2026-09-18 起吊销不执行、计量停报；`rmu` 失败也退出 0 | in-PR | [#563](https://github.com/raydocs/tono/pull/563)（5bcc6b9d/924cafb3/b3299814）| 高·已确认(实机输出) | 未部署到节点 |
+| TC-anthropic-1 | `dual` 阶段新建/重新启用出口节点使所有已退役账户设备目录 503 | open | [#570](https://github.com/raydocs/tono/pull/570) 评论 | 高·推导 | 阻塞 #570 合并与部署 |
+
 测试覆盖缺口（夹具未跨真实 DLL、无断电/睡眠/多网卡实机、无 parser fuzz 等）不是本账条目，
 见 [审查轮记录](reports/REVIEW_ROUNDS_2026-09-23.md) 的「未覆盖」一节；找到具体失败再作为新条目上报。
