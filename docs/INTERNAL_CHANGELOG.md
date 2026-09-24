@@ -627,10 +627,7 @@
   仍会漏过（与 rev 16 相同）。Service 重启会把 epoch 归零，快照于重启前的请求
   被拒绝并表现为一次连接失败（fail-closed，重试即恢复）。第二轮修正同样
   本机未编译，委托 CI；已有回归测试走 Freshness 路径，不受本修正影响，未改。
-- **剩余限制**：不 bump epoch 的拆臂路径（如 StopClash(release=true) 在无 armed
-  时为空操作）不刷新令牌——经这些变体取消的 attempt 其迟到 prepare 仍可能通过
-  门，但触发条件比已修的 Disconnect→重连序列更窄；Service 重启会把 epoch 归零，
-  快照于重启前的请求被拒绝并表现为一次连接失败（fail-closed，重试即恢复）。
+
 ## 2026-09-23 · Windows connecting 期间到达的 policy 行为变更不再丢弃
 
 - **归属**：G1「已连接=能用」——已连接会话应按最新已安装 policy 提供 DIRECT/WeChat
@@ -677,9 +674,9 @@
   `windows-updates`。
 - **剩余限制**：只修 connecting 窗口的丢弃/延迟。兜底任务的代际检查与
   `handle_network_change_inner` 再次捕获代际之间仍有一个很小的锁释放窗口（与 policy_sync
-  调用方同一纪律）。`directOverlay==='off'` 在其它 Err
-  路径被前端渲染为 directOn 的问题仍独立存在（V5 旁注，不在本条范围）；Windows 11
-  实机行为未验证，夹具结论不等于设备验收。
+  调用方同一纪律）。V5 旁注的 `directOverlay==='off'` 被前端渲染为 directOn 已由
+  #296 修复（仪表盘只在 `directOverlay==='on'` 时显示 directOn），不再是剩余限制；
+  Windows 11 实机行为未验证，夹具结论不等于设备验收。
 
 ## 2026-09-23 · Windows 监视器重连成功后不再自中断丢失连接尾部
 
