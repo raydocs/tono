@@ -774,9 +774,49 @@ mod tests {
         CleanupOutcome, DNS_RESTORED_AUTOMATIC_MARKER, DNS_STILL_ON_LOOPBACK_MARKER,
         EXIT_COSMETIC_FAILURE, EXIT_RESTORED_AUTOMATIC, EXIT_STILL_PROTECTED,
         WFP_REMOVED_CONTINUE_MARKER, classify_disarm_failure, cleanup_exit_code,
-        cleanup_fast_path_allowed, final_cleanup_outcome, poll_until, uninstall_may_continue,
+        cleanup_fast_path_allowed, final_cleanup_outcome, poll_until, remove_app_data_in_profiles,
+        uninstall_may_continue,
     };
     use std::cell::Cell;
+
+    #[test]
+    fn delete_app_data_reaches_every_profile_not_only_the_approving_admin() {
+        let profiles = std::env::temp_dir().join(format!(
+            "tono-profiles-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let data = |user: &str, base: &str, name: &str| {
+            profiles.join(user).join("AppData").join(base).join(name)
+        };
+        for user in ["admin", "signed-in-user"] {
+            for base in ["Roaming", "Local"] {
+                std::fs::create_dir_all(data(user, base, "com.raydocs.tono")).unwrap();
+                std::fs::write(
+                    data(user, base, "com.raydocs.tono").join("runtime.yaml"),
+                    b"x",
+                )
+                .unwrap();
+            }
+            std::fs::create_dir_all(data(user, "Roaming", "another-app")).unwrap();
+        }
+
+        remove_app_data_in_profiles(&profiles).unwrap();
+
+        for user in ["admin", "signed-in-user"] {
+            for base in ["Roaming", "Local"] {
+                assert!(
+                    !data(user, base, "com.raydocs.tono").exists(),
+                    "{user} {base} Tono data survived"
+                );
+            }
+            assert!(data(user, "Roaming", "another-app").exists());
+        }
+        std::fs::remove_dir_all(profiles).unwrap();
+    }
 
     #[test]
     fn clean_outcome_exits_zero() {
