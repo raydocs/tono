@@ -49,6 +49,27 @@
 - **候选/发布**：无新包，仅文档。
 - **剩余限制**：H16/H17 条目全部是源码推导或阅读确认，回归草案均未运行；需实机的部分列在审查轮记录第 3 节。
 
+## 2026-09-23 · 账目按币种小数位折算人民币（H8-F1）
+
+- **归属**：ops 任务（运维计划 §1.3 D1 账目/月结），非客户 ship gate；`services/control-plane`。
+- **来源**：基线 main `18301fc5` → 分支 `fix/ledger-fx-decimals-20260923`；Issue #391，内部审查 H8-F1；
+  提交时未合 main。
+- **缺陷修复**：
+  - **原问题**：`cnyMinorFrom(amountMinor, rate)` 按两位小数算，JPY（零小数）入库少乘 100：
+    JPY 10000、汇率 0.0489 存成 489 分（¥4.89），控制台预览是 ¥489。成本、分摊、对账和
+    月结冻结值都按 1/100 计。
+  - **修复**：`fx.ts` 新增 `currencyDecimals`（JPY/KRW 为 0，其余 2，与控制台 `DECIMALS`
+    一致），`cnyMinorFrom` 按币种缩放；`ledger-recon.ts` 改用同一定义，不再自带一份。
+    `weekly-picks.ts` 只对 CNY/USD 调用，行为不变。
+- **新增/优化**：无。
+- **工程与测试**：`test/ops-ledger.test.ts` 新增一个 `it`（JPY 10000 @0.0489 → 48900）。旧代码上
+  实际跑红（收到 489），修复后绿。
+- **验证**：MacBook worktree `npx vitest run test/ops-ledger.test.ts`（21 项通过）、control-plane
+  全量 vitest 43 文件 892 项通过、`tsc --noEmit` 无错误。CI 结果见 PR。
+- **候选/发布**：仅源码，无新候选；Worker 部署需 owner 执行。
+- **剩余限制**：没有生产 D1 访问，不知道是否已有 JPY 行。已入库的错误行不自动改写；未关账月
+  可由运营冲正后重录，已关账月需 owner 决定。
+
 ## 2026-09-23 · macOS 签名/公证/Sparkle workflow 凭据范围（内部审查 H5-F2）
 
 - **归属**：发布工具链加固（非客户可见行为）；`.github/workflows/macos-release.yml`。

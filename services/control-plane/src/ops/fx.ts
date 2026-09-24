@@ -75,8 +75,17 @@ export function monthBounds(month: string): { start: number; end: number } {
   return { start, end };
 }
 
-export function cnyMinorFrom(amountMinor: number, rate: number): number {
-  return Math.round(amountMinor * rate);
+// ISO 4217 minor units for the currencies the ledger accepts. Everything not
+// listed has two decimals. Matches ops-console `lib/ledger.ts` DECIMALS.
+const ZERO_DECIMALS = new Set(['JPY', 'KRW']);
+
+export function currencyDecimals(currency: string | null): number {
+  return ZERO_DECIMALS.has((currency ?? '').toUpperCase()) ? 0 : 2;
+}
+
+/** `amountMinor` is in `currency`'s own minor unit; the result is CNY fen. */
+export function cnyMinorFrom(amountMinor: number, currency: string, rate: number): number {
+  return Math.round(amountMinor * 10 ** (2 - currencyDecimals(currency)) * rate);
 }
 
 export function fxDto(row: StoredFxRate): FxRateDto {

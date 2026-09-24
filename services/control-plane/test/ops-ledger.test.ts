@@ -164,6 +164,16 @@ describe('ops ledger, month close, live FX', () => {
     expect(audit?.action).toBe('ledger.create');
   });
 
+  it('converts a zero-decimal JPY cost to CNY fen at whole-yen scale', async () => {
+    await seedRate(DAY(), 'JPY', 0.0489);
+    const res = await ops('ledger', json({
+      kind: 'cost', category: 'server', subjectType: 'node', subjectId: NODE,
+      amountMinor: 10000, currency: 'JPY', month: MONTH(),
+    }));
+    expect(res.status).toBe(201);
+    expect(assertLedgerEntry(await res.json()).cnyMinor).toBe(48900);
+  });
+
   it('rejects USD revenue with 收款只收人民币', async () => {
     await seedRate(DAY(), 'USD', 7.2);
     const res = await ops('ledger', json({
