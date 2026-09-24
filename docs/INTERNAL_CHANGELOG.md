@@ -32,6 +32,25 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS helper PF DHCP 放行收窄（H1-F6 macOS）
+
+- **归属/来源**：G1 保护一致性；影响 macOS root helper（`tooling/scripts/core-helper`）。基线 main
+  da7bad1b → 分支 `fix/dhcp-scope-macos-20260923`；Issue #341；提交时未合 main。
+- **缺陷修复**：TUN 存在时的 `tono-dhcp` 规则为 `pass out … from any port 68 to any port 67 keep
+  state` 与 `pass in … from any port 67 to any port 68 keep state`，无目的/用户限制，入向规则还会
+  建立 state，让 68 端口回包给任意发送方。改后出向只到 `255.255.255.255`（私网服务器单播续租
+  已由 `tono-lan` 覆盖），入向改为 `no state`。`HelperProtocolVersion` 4.18.0 → 4.20.0
+  （合并列车按顺序编号），CONTRACT.sha256 用脚本同一 sed|shasum 管道重算（未编译）。
+- **新增/优化**：无。
+- **工程与测试**：`--self-test` 的 cloudRules 断言新增 DHCP 必需/禁止形状；该 self-test 在
+  CI 以 root 运行并经 `pfctl -nf` 解析 cloudRules。在旧规则上的实测失败：仅加断言（及版本/契约）
+  的一次性分支经 macOS CI（run 35843126003）在 `build-core-helper.sh` 调用 `--self-test` 时失败退出。
+- **验证**：本机未运行 swift/xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：未实机确认 DHCP 续租行为；公网地址或 100.64/10 的 DHCP 服务器单播续租被拒，
+  依赖广播 rebind。未加 `user root`（IPConfiguration 发包归属未实机确认）。与在审 helper PR 的
+  版本号/契约哈希会冲突，合并顺序确定后需重算。
+
 ## 2026-09-23 · macOS 审阅直连 bundle 的标准路径也要校验签名身份
 
 - **归属/来源**：G1 连接保护；基线 main 244075f2，分支 `fix/reviewed-bundle-signature-20260923`，

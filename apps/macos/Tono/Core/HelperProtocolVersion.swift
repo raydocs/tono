@@ -159,7 +159,10 @@ nonisolated enum HelperProtocolVersion {
     ///   folding, and evaluates its allowlist on the folded keys the core
     ///   itself binds. An older daemon validates the first of a repeated key
     ///   while the core runs the last.
-    static let current = "4.18.0"
+    /// - 4.18.0 → 4.20.0 (merge-train number): PF DHCP permit sends only to the limited broadcast and
+    ///   the inbound reply permit keeps no state. An older daemon keeps the
+    ///   any-destination DHCP permit.
+    static let current = "4.20.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

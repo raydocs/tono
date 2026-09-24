@@ -675,8 +675,14 @@ extension KillSwitchManager {
                 "pass in quick on utun199 all keep state (if-bound)",
                 "pass out quick on utun199 all keep state (if-bound)",
                 "to 1.1.1.1 port 443 user { 0, 501 } keep state (if-bound)",
+                // DHCP leaves only as a limited broadcast, and a reply creates no
+                // state that could carry port 68 back out to its sender.
+                "from any port 68 to 255.255.255.255 port 67 keep state (if-bound)",
+                "from any port 67 to any port 68 no state",
             ]
             let cloudForbidden = [
+                "from any port 68 to any port 67",
+                "from any port 67 to any port 68 keep state",
                 "pass in quick on en",
                 "pass out quick on en",
                 // Continuity emits mDNS UDP; a VLESS-only session still must
