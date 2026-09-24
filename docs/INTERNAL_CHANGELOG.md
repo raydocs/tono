@@ -64,6 +64,21 @@
   - `device_only` 切换的预检与触发器仍看全部 active 出口，不看目录，未改。
   - 先过滤再发身份带来两处顺序变化：家宽路由错误（503 `CATALOG_UNAVAILABLE`）先于身份错误返回；过滤后没有任何节点的
     目录不再签发身份。
+- **续修（2026-09-24，二轮审查 Grok A1 / Codex A-F1，同分支）**：
+  - 缺陷修复（A1，P1，Opus 跨厂商核实成立）：上一版把已绑定用户自己的 catalog 家宽块（及其 ` · hy2` 孪生）也算进就绪集合；
+    家宽是 `home_exits` 行，没有任何代码把它和 `exit_nodes` 的 ACK 关联，于是该用户永远不就绪：退役账户一直 503，dual 未退役
+    账户改拿共享 UUID（同 revision、不同 digest）。8fc72696 上同一场景下发设备 UUID。改后：就绪集合排除家宽过滤器使用的同一组名字
+    （`home_exit_catalog_names`，即 `homeRoutingForUser().restricted`，按原名与 hy2 基名两种方式匹配）；出口节点仍按严格规则
+    （已登记、active、ACK 严格晚于凭据）。只剩家宽、没有出口节点的目录按零覆盖规则 fail-closed，因为家宽没有另一条 ACK 路径。
+  - 缺陷修复（A-F1，P3）：只含 hy2 块、尾部注释带占位符的模板，对不收 hy2 的客户端过滤成空列表后，文件级 `includes` 仍触发签发。
+    改为按过滤后的 proxies 列表判断：列表为空不签发（注释里的占位符原样保留）。
+  - 测试：新增两个 `it`：`serves the device identity to a bound catalog-home user once the served exit nodes ack`（断言设备 UUID）
+    与 `issues no exit identity when the served catalog filters down to no proxies`（退役账户 200、`proxies: []`）。
+    修复前在 8ea01b3f 上分别红（YAML 含共享 UUID 而非设备 UUID；`expected 503 to be 200`），修复后绿。
+  - 验证：MacBook 本机 worktree：`npx vitest run test/worker.test.ts test/ops-api.test.ts` 230 通过；`npx vitest run` 43 个文件
+    915 通过；`npm run typecheck` 通过。未部署，未碰远端 D1，无原生构建。
+  - 剩余限制：家宽节点自身是否装上设备凭据仍不在门控内（与 8fc72696 前相同）；非 `filterHomeExits` 的带 userId 调用不排除家宽
+    （当前没有这种调用方）。
 
 ## 2026-09-24 · 控制面列车 #570 审查续修：开户轮换预检、家宽名 hy2 后缀
 

@@ -279,10 +279,12 @@ export async function publicManagedCatalog(
   }
   let served = yaml;
   let routing: CatalogRouting | undefined;
+  let homeNames = new Set<string>();
   const routedUserId = options?.filterHomeExits ? options.userId : undefined;
   if (routedUserId) {
     const home = await homeRoutingForUser(e, routedUserId);
     routing = home.routing;
+    homeNames = home.restricted;
     if (home.restricted.size > 0) {
       served = filterCatalogYamlForUser(served, home.restricted, home.allowed);
     }
@@ -295,10 +297,19 @@ export async function publicManagedCatalog(
   // The stored digest authenticates the catalog template. Authenticated clients
   // receive a stable per-account identity, so recompute the digest after
   // substitution and any per-user filtering. The identity is issued after
-  // filtering so its readiness covers exactly the nodes this response serves.
-  if (options?.userId && served.includes(CLIENT_UUID_PLACEHOLDER)) {
+  // filtering so its readiness covers exactly the exit nodes this response
+  // serves. A catalog home (a name the home filter restricts) is a home_exits
+  // row, and nothing ties it to an exit_nodes acknowledgement, so it is left
+  // out; a catalog that serves no exit node stays fail-closed. A served list
+  // with no proxies issues nothing, even if a comment keeps the placeholder.
+  const servedItems = options?.userId && served.includes(CLIENT_UUID_PLACEHOLDER)
+    ? splitManagedCatalogProxies(served).items
+    : [];
+  if (options?.userId && servedItems.length > 0) {
     const servedNodes = new Set(
-      splitManagedCatalogProxies(served).items.map((item) => catalogBaseName(item.name)),
+      servedItems
+        .filter((item) => !homeNames.has(item.name) && !homeNames.has(catalogBaseName(item.name)))
+        .map((item) => catalogBaseName(item.name)),
     );
     const issued = await exitClientUUID(e, options.userId, options.deviceId, [...servedNodes]);
     served = served.split(CLIENT_UUID_PLACEHOLDER).join(issued);

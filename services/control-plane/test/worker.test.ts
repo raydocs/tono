@@ -1421,6 +1421,59 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await held.json() as any).error.code).toBe('EXIT_IDENTITY_PROPAGATING');
   });
 
+  it('serves the device identity to a bound catalog-home user once the served exit nodes ack', async () => {
+    const account = await createAccount('catalog-home-ready');
+    const block = (name: string, server: string) => `  - name: ${name}\n    type: vless\n    server: ${server}\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
+    expect((await admin('exit-catalog', {
+      yaml: `proxies:\n${block('Tono-Exit', 'exit.example.com')}${block('Home Residential A', 'home.example.com')}`,
+      expectedRevision: 0,
+    }, 'PUT')).status).toBe(200);
+    // exit-default is seeded active with an acknowledgement an hour ahead.
+    await env.DB.prepare("UPDATE exit_nodes SET name = 'Tono-Exit' WHERE id = 'exit-default'").run();
+    const home = await admin('home-exits', { proxyName: 'Home Residential A', displayName: 'Home A' });
+    expect((await admin(
+      `users/${account.user.id}/home-binding`,
+      { homeExitId: ((await home.json()) as any).homeExit.id },
+      'PUT',
+    )).status).toBe(201);
+
+    const catalog = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(catalog.status).toBe(200);
+    const yaml = String((await catalog.json() as any).yaml);
+    const device = await env.DB.prepare(
+      'SELECT client_uuid FROM device_exit_credentials WHERE device_id = ?',
+    ).bind(account.device.id).first<any>();
+    expect(yaml).toContain('Home Residential A');
+    expect(yaml).toContain(device.client_uuid);
+  });
+
+  it('issues no exit identity when the served catalog filters down to no proxies', async () => {
+    const account = await createAccount('empty-served');
+    await env.DB.prepare(
+      'INSERT INTO exit_credentials(user_id, client_uuid, created_at, retired_at) VALUES(?, ?, 1, 1)',
+    ).bind(account.user.id, crypto.randomUUID()).run();
+    const yaml = `proxies:
+  - name: Tono-Exit · hy2
+    type: hysteria2
+    server: 8.8.8.8
+    port: 443
+    password: {{TONO_CLIENT_UUID}}
+    sni: www.microsoft.com
+    fingerprint: e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db
+rules: []
+# identity placeholder: {{TONO_CLIENT_UUID}}
+`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+
+    const catalog = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(catalog.status).toBe(200);
+    expect(String((await catalog.json() as any).yaml)).toMatch(/^proxies: \[\]\n/);
+  });
+
   it('provisions and rotates a node token that is bound to its usage source', async () => {
     const created = await admin('exit-nodes', { id: 'exit-new', name: 'New Exit' });
     expect(created.status).toBe(201);
