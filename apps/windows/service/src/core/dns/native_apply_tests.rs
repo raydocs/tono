@@ -557,31 +557,53 @@ async fn mixed_protected_dns_cannot_prove_corrupt_snapshot_recovery() -> Result<
 async fn effective_resolver_policy_drift_cannot_read_as_healthy() -> Result<()> {
     use super::super::test_io::{self, Fixture};
     use crate::core::dns as facade;
+    use crate::core::structure::DnsProtectionStatus;
     let a = effective(&entry(1), [9, 9, 9, 9], true);
     let _fixture = Fixture::new(vec![a])?;
     let connected = facade::enable().await?;
     assert!(connected.enabled && connected.last_error.is_none());
-    // After Connect, a policy-store catch-all to a resolver outside the tunnel takes effect and the
-    // cache-bypassing system lookup fails, while every adapter still reads 198.18.0.2.
+    assert!(connected.resolver_policy_warning.is_none());
+    let conflict = |status: &DnsProtectionStatus| {
+        status
+            .resolver_policy_warning
+            .as_deref()
+            .is_some_and(|warning| warning.contains(facade::DNS_RESOLVER_POLICY_CONFLICT_PREFIX))
+    };
+    // The update Prepare gate (`protection()`), the startup takeover candidate and the App's
+    // lost-response read-back all require exactly this: an enabled status with no error.
+    let no_error = |status: &DnsProtectionStatus| status.enabled && status.last_error.is_none();
+
+    // Tono's catch-all is still the rule in force, but a cache-bypassing lookup was answered from
+    // outside the tunnel: a conflict, reported beside the error rather than as one.
+    test_io::with(|io| io.system_lookup = Ok(vec![std::net::Ipv4Addr::new(142, 250, 72, 4)])).unwrap();
+    facade::refresh_resolver_policy_observation().await;
+    let status = facade::observe_for_update().await?;
+    assert!(conflict(&status) && no_error(&status), "{status:?}");
+
+    // A protected reconnect restarts Core and both observations fail for a few seconds. That
+    // decides nothing, so it is neither a conflict nor an error.
+    test_io::with(|io| {
+        io.effective_nrpt = Err("NRPT read exceeded 5s".to_owned());
+        io.system_lookup = Err("DnsQuery_W returned 1460".to_owned());
+    })
+    .unwrap();
+    facade::refresh_resolver_policy_observation().await;
+    let status = facade::observe_for_update().await?;
+    assert!(!conflict(&status) && no_error(&status), "{status:?}");
+
+    // A policy-store catch-all to a resolver outside the tunnel takes effect while every adapter
+    // still reads 198.18.0.2; the failing lookup beside it does not hide the rule.
     test_io::with(|io| {
         io.effective_nrpt = Ok(vec![facade::EffectiveNrptRule {
             namespaces: vec![".".to_owned()],
             generic_dns_servers: vec!["10.20.30.40".to_owned()],
             tono_owned: false,
         }]);
-        io.system_lookup = Err("DnsQuery_W returned 1460".to_owned());
     })
     .unwrap();
     facade::refresh_resolver_policy_observation().await;
-    let (status, _) = facade::observe_status_unlocked().await?;
-    assert!(status.enabled, "the adapter registry still reads protected");
-    assert!(
-        status
-            .last_error
-            .as_deref()
-            .is_some_and(|error| error.contains(facade::DNS_RESOLVER_POLICY_CONFLICT_PREFIX)),
-        "effective resolver policy drift must be reported, not a clean healthy status: {status:?}"
-    );
+    let status = facade::observe_for_update().await?;
+    assert!(conflict(&status) && no_error(&status), "{status:?}");
     assert!(
         facade::PROTECTION_WANTED.load(std::sync::atomic::Ordering::Acquire),
         "reporting the conflict must not release protection"

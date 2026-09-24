@@ -35,36 +35,56 @@
 ## 2026-09-23 · Windows DNS 状态纳入实际生效的解析策略（NRPT 漂移不再显示为干净健康）
 
 - **归属/来源**：G1 保护可观测性；Windows Service `core/dns`（`mod.rs`、`engine.rs`、
-  `apply_test_io.rs`）与 App DNS 警告标记。内部审查 X2-2，Issue #467。基线 main bb2ed4e4 →
-  分支 `fix/nrpt-drift-health-20260923`；提交时未合 main。
+  `apply_test_io.rs`）、共享 wire 结构 `DnsProtectionStatus`（`core/structure.rs`）与 App 诊断报告
+  （`diagnostics.rs`）。内部审查 X2-2，Issue #467；R4 审查 Part C #468 第 1–2 点与跨 PR 发现 2
+  （P2）已在同一 PR 修正。基线 main bb2ed4e4 → 分支 `fix/nrpt-drift-health-20260923`；提交时未合 main。
 - **缺陷修复**：Service 的 DNS 健康只读各网卡注册表 `NameServer`/`ProfileNameServer`，连接后
   不读实际生效的 NRPT，也不再做系统解析；加入公司网络、公司 VPN 或策略刷新让别的 NRPT 规则
   生效后，状态仍是无错误的 enabled。现在 watchdog 每 30 s 在 DNS 操作锁之外读取实际生效的
   NRPT（组策略库有规则时取组策略库，否则取本地库），并做一次绕过缓存和 hosts 的系统 A 解析
-  （同 App 连接期的探测名）；纯函数 `resolver_policy_conflict` 在 Tono 的 catch-all 不是生效
-  规则、另有规则把名字指向非 Tono 解析器、或系统解析失败/未返回 fake-ip 时给出
-  `TONO_DNS_POLICY_CONFLICT` 标记，状态观察在其他错误为空时带上它。它不是 watchdog 的修复工作
-  （重连无法改别人的策略，不会空转）；App 把它列为 DNS 警告（Support 单独一行），不拆会话。
-  保护不放宽：WFP、适配器 DNS 和自有 NRPT 规则的写入都不变；启动续接候选要求 DNS
-  `last_error` 为空，冲突时不续接，只会更严。
+  （同 App 连接期的探测名）；纯函数 `resolver_policy_conflict` 只在读取成功且与保护矛盾时给出
+  `TONO_DNS_POLICY_CONFLICT` 标记：Tono 的 catch-all 不是生效规则、另有规则把名字指向非 Tono
+  解析器，或系统解析成功但答案不在 fake-ip 198.18/16。NRPT 读取失败或系统解析失败只算无法判定，
+  不算冲突（受保护重连期间 Core 重启几秒内查询必然失败；Core 长时间起不来也不是别人的解析策略）。
+  标记放在 DNS status 的独立咨询字段 `resolver_policy_warning`（`serde(default)` + 为空不序列化，
+  wire 结构无 `deny_unknown_fields`，新旧 App/Service 双向兼容），不进 `last_error`。它不是
+  watchdog 的修复工作（重连无法改别人的策略，不会空转）。App 健康判定不读该字段，不拆会话；
+  诊断报告在无真实错误时把它并入 `dnsLastError`，Support 页按标记列在 DNS 警告行。
+  保护不放宽：WFP、适配器 DNS 和自有 NRPT 规则的写入都不变；`last_error` 仍只承载真实错误。
+  **审查修正**：本 PR 初版把标记写进 `last_error`，而原生更新 Prepare 的 `protection()`
+  （`update.rs` 要求 `dns.last_error.is_none()`）、启动接管候选（`structure.rs`）和 App DNS
+  enable 响应丢失后的状态读回（`core/service/mod.rs`）都要求 `last_error` 为空：加入域且有 GPO
+  NRPT 的机器在 Connected 时原生更新会一直被拒（"network protection is uncertain"）。初版
+  "冲突时不续接，只会更严"的说法因此作废；初版还把任何查询失败算作冲突。两处均已改正，App
+  `DNS_WARNING_MARKERS` 恢复为原来两项。
 - **新增/优化**：无。
 - **工程与测试**：native DNS 夹具（`test_io::Machine`）新增可注入的 `effective_nrpt` 与
   `system_lookup`（默认健康）；新增一个 `#[tokio::test]`
   `core::dns::engine::native_apply::tests::effective_resolver_policy_drift_cannot_read_as_healthy`：
-  真实 enable 后注入组策略 catch-all 指向 10.20.30.40 与系统查询失败，断言状态仍 enabled
-  但带冲突标记，且 `PROTECTION_WANTED` 保持。旧代码的状态观察没有这两个输入，只会给出无错误的
-  enabled，按构造必失败（未在本机执行）。Service `windows-sys` 增加
+  真实 enable 后经更新准入的读取路径 `observe_for_update()` 分三段断言：NRPT 健康但系统解析返回
+  非 fake-ip → 冲突出现在 `resolver_policy_warning`，`last_error` 仍为空；NRPT 读取与系统解析都失败
+  → 无冲突、无错误；组策略 catch-all 指向 10.20.30.40（解析仍失败）→ 冲突且 `last_error` 为空，
+  `PROTECTION_WANTED` 保持。在初版分支上它失败：初版把标记写进 `last_error`（第一段
+  `last_error.is_none()` 失败），且查询失败即冲突（第二段失败）；初版结构也没有该字段，按构造编译
+  失败。在 bb2ed4e4 上状态观察没有这两个输入，同样按构造失败（均未在本机执行）。其余测试中
+  `DnsProtectionStatus` 的完整字面量补上新字段（`None`）。Service `windows-sys` 增加
   `Win32_NetworkManagement_Dns` 特性（Cargo.lock 不变）。本机只用 `rustc --test` 单独编译过纯函数
   做语法与逻辑自查。
 - **验证**：本机为编辑机，未运行 cargo；Service 编译与 CI 步骤 "Test native DNS apply
   orchestration"（`--features standalone,client --lib core::dns::engine::native_apply::tests::`）、
   lifecycle 套件与 App `cargo test` 委托本 PR 的 GitHub-hosted `windows-2025` CI，结果以 PR 页为准。
-  Support 页改动本机 biome/eslint 单文件检查通过。未做实机验证。
+  Support 页改动本机 biome/eslint 单文件检查通过。审查修正这一轮同样本机未编译，委托 CI；
+  `support.tsx` 本轮只改注释，worktree 无 `node_modules`，未跑 vitest/tsc。未做实机验证。
 - **候选/发布**：无新包，仅源码。
 - **剩余限制**：用户可见影响仍需 Issue #467 的实机 4 步清单。VPN 配置文件自带的 NRPT
   （不在两个注册表库里）只能由系统解析这条腿间接发现，且只覆盖探测名；针对具体公司域名的规则由
   规则读取覆盖。`enum_subkeys` 仍只枚举前 64 个子键（#300 另改）。冲突只在 Support 页显示，
-  仪表盘无提示；检测间隔 30 s。
+  仪表盘无提示；检测间隔 30 s。旧 App 读新 Service 时忽略新字段，不显示该警告。读取或解析一直失败时
+  不给任何提示（与 main 相同）。R4 审查第 3 点未改：检测仍在 watchdog 循环内联执行，冲突场景下
+  NRPT 读取（上限 5 s）加系统解析（上限 5 s）每 30 s 最多让 2 s 一次的适配器 DNS 漂移修复停顿
+  约 10 s（最坏约 12 s）。第 4 点未改：restore 与 enable 落在同一个 2 s tick 内时上一会话的结论
+  可能在新会话里保留至多 30 s（只影响提示）。与 #305 的文本冲突现在只在 `support.tsx` 标记列表
+  （合并时保留四项）。
 
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 

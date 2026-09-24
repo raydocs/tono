@@ -1348,7 +1348,10 @@ pub(crate) const DNS_PROTECTION_UNVERIFIED_PREFIX: &str = "TONO_DNS_UNVERIFIED";
 /// Stable marker for "protected DNS is applied, but the resolver policy Windows actually applies
 /// disagrees with it" (X2-2): another NRPT rule sends names to a non-Tono resolver, Tono's
 /// catch-all is not the rule in force, or a cache-bypassing system lookup did not come back from
-/// Tono DNS. Adapter registry health cannot see any of these, so the status stops reading clean.
+/// Tono DNS. Adapter registry health cannot see any of these, so the status carries the verdict
+/// in its advisory `resolver_policy_warning`, never in `last_error`: the adapters are still
+/// protected, and every gate that reads `last_error` (update admission, startup takeover, the
+/// App's lost-response read-back) must not close over a policy Tono cannot change.
 /// It is deliberately not repair work for the watchdog: `enable` rewrites only Tono's own rule and
 /// cannot change group policy or a VPN profile, so re-running it would only spin.
 pub(crate) const DNS_RESOLVER_POLICY_CONFLICT_PREFIX: &str = "TONO_DNS_POLICY_CONFLICT";
@@ -1375,45 +1378,45 @@ const RESOLVER_POLICY_CHECK_INTERVAL: std::time::Duration = std::time::Duration:
 /// every status observation while protection is wanted.
 static RESOLVER_POLICY_CONFLICT: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
 
-/// Pure X2-2 verdict over the effective NRPT and one cache-bypassing system lookup.
+/// Pure X2-2 verdict over the effective NRPT and one cache-bypassing system lookup. Only an
+/// observation that succeeded and contradicts protected DNS is a conflict. A read or lookup that
+/// failed proves nothing either way: during a protected reconnect Core restarts and every lookup
+/// fails for a few seconds, and a Core that stays down is not another owner's resolver policy.
 #[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
 fn resolver_policy_conflict(
     rules: std::result::Result<&[EffectiveNrptRule], &str>,
     system_lookup: std::result::Result<&[std::net::Ipv4Addr], &str>,
 ) -> Option<String> {
     let mut reasons = Vec::new();
-    match rules {
-        Err(error) => reasons.push(format!("the effective NRPT could not be read ({error})")),
-        Ok(rules) => {
-            let catch_all_in_force = rules.iter().any(|rule| {
-                rule.tono_owned
-                    && rule.namespaces.iter().any(|name| name == ".")
-                    && !rule.generic_dns_servers.is_empty()
-                    && rule.generic_dns_servers.iter().all(|server| server == PROTECTED_DNS_V4)
-            });
-            if !catch_all_in_force {
-                reasons.push("Tono's NRPT catch-all is not the rule in force".to_owned());
-            }
-            let foreign = rules
-                .iter()
-                .filter(|rule| {
-                    !rule.tono_owned
-                        && rule.generic_dns_servers.iter().any(|server| server != PROTECTED_DNS_V4)
-                })
-                .count();
-            if foreign > 0 {
-                reasons.push(format!(
-                    "{foreign} other NRPT rule(s) send matching names to a non-Tono resolver"
-                ));
-            }
+    // An NRPT read that failed is undecidable, not a conflict.
+    if let Ok(rules) = rules {
+        let catch_all_in_force = rules.iter().any(|rule| {
+            rule.tono_owned
+                && rule.namespaces.iter().any(|name| name == ".")
+                && !rule.generic_dns_servers.is_empty()
+                && rule.generic_dns_servers.iter().all(|server| server == PROTECTED_DNS_V4)
+        });
+        if !catch_all_in_force {
+            reasons.push("Tono's NRPT catch-all is not the rule in force".to_owned());
+        }
+        let foreign = rules
+            .iter()
+            .filter(|rule| {
+                !rule.tono_owned
+                    && rule.generic_dns_servers.iter().any(|server| server != PROTECTED_DNS_V4)
+            })
+            .count();
+        if foreign > 0 {
+            reasons.push(format!(
+                "{foreign} other NRPT rule(s) send matching names to a non-Tono resolver"
+            ));
         }
     }
-    match system_lookup {
-        Err(error) => reasons.push(format!("a cache-bypassing system lookup failed ({error})")),
-        Ok(addresses) if !addresses.iter().any(|address| address.octets()[..2] == [198, 18]) => {
-            reasons.push("a cache-bypassing system lookup was not answered by Tono DNS".to_owned());
-        }
-        Ok(_) => {}
+    // Likewise a failed lookup: only an answer that did not come from Tono DNS is a conflict.
+    if system_lookup
+        .is_ok_and(|addresses| !addresses.iter().any(|address| address.octets()[..2] == [198, 18]))
+    {
+        reasons.push("a cache-bypassing system lookup was not answered by Tono DNS".to_owned());
     }
     (!reasons.is_empty())
         .then(|| format!("{DNS_RESOLVER_POLICY_CONFLICT_PREFIX}: {}", reasons.join("; ")))
@@ -2923,13 +2926,15 @@ async fn observe_status_unlocked() -> Result<(DnsProtectionStatus, bool)> {
         last_error = None;
     }
     // X2-2: adapter registry health is not the resolver policy Windows applies. Report the
-    // watchdog's last policy verdict instead of a clean healthy status; never mask another error.
-    if enabled && snapshot.is_some() && last_error.is_none() && PROTECTION_WANTED.load(Ordering::Acquire) {
-        last_error = RESOLVER_POLICY_CONFLICT
+    // watchdog's last policy verdict as an advisory beside `last_error`, never inside it.
+    let resolver_policy_warning = if enabled && snapshot.is_some() && PROTECTION_WANTED.load(Ordering::Acquire) {
+        RESOLVER_POLICY_CONFLICT
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
-    }
+            .clone()
+    } else {
+        None
+    };
     let status = DnsProtectionStatus {
         enabled,
         snapshot_present: snapshot.is_some(),
@@ -2937,6 +2942,7 @@ async fn observe_status_unlocked() -> Result<(DnsProtectionStatus, bool)> {
             .as_ref()
             .map_or(0, |snapshot| snapshot.adapters.len() as u32),
         last_error,
+        resolver_policy_warning,
     };
     publish_status(&status);
     Ok((status, !active_pending.is_empty()))

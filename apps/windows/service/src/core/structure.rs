@@ -478,6 +478,13 @@ pub struct DnsProtectionStatus {
     pub adapters: u32,
     #[serde(default)]
     pub last_error: Option<String>,
+    /// Advisory only (X2-2, `TONO_DNS_POLICY_CONFLICT: …`): the adapters are protected, but the
+    /// resolver policy Windows applies was observed to disagree. Never an error: update
+    /// admission, startup takeover and the App's lost-response read-back decide on `last_error`
+    /// alone, and a group-policy NRPT Tono cannot change must not close them. Omitted when absent
+    /// so an older App or Service reads this status unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolver_policy_warning: Option<String>,
 }
 
 /// The service's network-change feed, aggregated into `/status`.
