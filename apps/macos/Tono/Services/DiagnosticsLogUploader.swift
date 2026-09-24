@@ -3,6 +3,15 @@ import Darwin
 import OSLog
 import zlib
 
+/// The control plane answered 200 but did not store the segment: no ops
+/// collection window is open for this device. This is the server's decision,
+/// not a transport failure, so the uploader stands down instead of resending.
+nonisolated struct DiagnosticsLogNotStoredError: LocalizedError, Equatable {
+    var errorDescription: String? {
+        String(localized: "Tono did not store this network log. Check the device's diagnostic collection authorization.")
+    }
+}
+
 /// Uploads the local audit log to the control plane in gzip segments while the
 /// test programme runs.
 ///
@@ -32,6 +41,14 @@ actor DiagnosticsLogUploader {
     /// with `compressedLimitBytes` as the check that catches the exception.
     static let readChunkBytes = 4 * 1_024 * 1_024
     static let compressedLimitBytes = 2 * 1_024 * 1_024
+    /// After the server declines storage (no collection window for this
+    /// device, the usual case since upload is on by default), check back at
+    /// this interval with a probe of at most `declinedProbeBytes` raw bytes.
+    /// Resending the full segment every 16 minutes cost up to 2 MiB a time,
+    /// through the exit node and the user's quota, for nothing. The cursor
+    /// stays put, so once ops opens a window the log is sent from where it was.
+    static let declinedIntervalSeconds: UInt64 = 1_800
+    static let declinedProbeBytes = 64 * 1_024
 
     private let logger = Logger(subsystem: "com.raydocs.tono", category: "log-upload")
     private let fileManager = FileManager.default
@@ -64,6 +81,7 @@ actor DiagnosticsLogUploader {
     private var sweepTask: Task<Void, Never>?
     private var uploadEpoch: UInt64 = 0
     private var consecutiveFailures = 0
+    private var serverDeclined = false
     private var unreadableBackupSweeps = 0
     /// How long to keep believing a rotated file's tail will become readable.
     /// The only writer that can still complete it is the flush that was already
@@ -135,6 +153,7 @@ actor DiagnosticsLogUploader {
         cursor = Cursor(inode: inode(of: auditLogURL), offset: size)
         persistCursor()
         consecutiveFailures = 0
+        serverDeclined = false
     }
 
     /// Header values are rejected unless they are 1...max printable ASCII.
@@ -177,7 +196,8 @@ actor DiagnosticsLogUploader {
     /// Retrying every couple of seconds costs ~225 attempts an hour against an
     /// 80/hour account budget and spends the day's 800 on rejections, so the
     /// account is rate limited exactly when support asks for a log.
-    private func sleepInterval(after outcome: SweepOutcome) -> UInt64 {
+    func sleepInterval(after outcome: SweepOutcome) -> UInt64 {
+        if serverDeclined { return Self.declinedIntervalSeconds }
         if consecutiveFailures > 0 {
             let scaled = Self.sweepIntervalSeconds << min(consecutiveFailures - 1, 3)
             return min(scaled, Self.sweepIntervalSeconds * 8)
@@ -248,6 +268,14 @@ actor DiagnosticsLogUploader {
                 clientVersion,
                 osVersion
             )
+        } catch let declined as DiagnosticsLogNotStoredError {
+            guard uploadPermitted(epoch: epoch) else { return "Log upload was cancelled." }
+            // The server said it did not store this key, so dropping the
+            // payload cannot orphan a stored receipt. The cursor stays.
+            serverDeclined = true
+            consecutiveFailures = 0
+            pendingSegment = nil
+            return declined.errorDescription
         } catch {
             guard uploadPermitted(epoch: epoch) else { return "Log upload was cancelled." }
             consecutiveFailures += 1
@@ -259,6 +287,7 @@ actor DiagnosticsLogUploader {
         // A late success must not rewind that account boundary or send another chunk.
         guard uploadPermitted(epoch: epoch) else { return "Log upload was cancelled." }
         consecutiveFailures = 0
+        serverDeclined = false
         sequence += 1
         pendingSegment = nil
         cursor = segment.nextCursor
@@ -306,7 +335,12 @@ actor DiagnosticsLogUploader {
             // cursor cannot leave a backup on its own and `pendingCurrentSegment`
             // refuses to run while it points at one, so retrying forever is not
             // "keep trying": it is the upload silently stopping for good.
-            let segment = readSegment(from: backup, offset: cursor.offset, expectedInode: recorded)
+            let segment = readSegment(
+                from: backup,
+                offset: cursor.offset,
+                expectedInode: recorded,
+                maxChunk: readChunkLimit
+            )
             guard let segment else {
                 unreadableBackupSweeps += 1
                 if unreadableBackupSweeps >= Self.unreadableBackupSweepLimit {
@@ -349,13 +383,22 @@ actor DiagnosticsLogUploader {
         }
         // First run, or the file was replaced while we had no unsent bytes.
         let offset = cursor.inode == live ? cursor.offset : 0
-        guard let read = readSegment(from: auditLogURL, offset: offset, expectedInode: live) else { return nil }
+        guard let read = readSegment(
+            from: auditLogURL,
+            offset: offset,
+            expectedInode: live,
+            maxChunk: readChunkLimit
+        ) else { return nil }
         return Segment(
             payload: read.payload,
             lineCount: read.lineCount,
             nextCursor: Cursor(inode: live, offset: read.nextOffset),
             remainingBytes: read.remainingBytes
         )
+    }
+
+    private var readChunkLimit: Int {
+        serverDeclined ? Self.declinedProbeBytes : Self.readChunkBytes
     }
 
     private struct Read {
@@ -386,7 +429,12 @@ actor DiagnosticsLogUploader {
     /// Reads up to one chunk from `offset`, trimmed to the last complete line so
     /// a segment is always whole JSONL records, then gzips it. Returns nil when
     /// there is nothing complete to send yet.
-    private func readSegment(from url: URL, offset: UInt64, expectedInode: UInt64) -> Read? {
+    private func readSegment(
+        from url: URL,
+        offset: UInt64,
+        expectedInode: UInt64,
+        maxChunk: Int
+    ) -> Read? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
         // Measure the opened file, not a path that may now name a fresh rotation.
@@ -412,7 +460,7 @@ actor DiagnosticsLogUploader {
         // to a small tail would stop the ordinary case — a log that grew by a
         // few thousand bytes since the last sweep — from ever being sent.
         let readable = Int(clamping: size - offset)
-        var chunk = Self.readChunkBytes
+        var chunk = maxChunk
         while chunk >= 64 * 1_024 {
             guard let raw = try? handle.read(upToCount: min(chunk, readable)),
                   !raw.isEmpty else { return nil }

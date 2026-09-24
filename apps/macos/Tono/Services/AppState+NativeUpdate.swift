@@ -128,3 +128,14 @@ enum NativeUpdatePreparation {
         return consumed
     }
 }
+
+/// Helper I/O of the connect tail that resumes an adopted native update.
+/// Tests replace it to hold the status query while the attempt is retired.
+struct NativeUpdateResumeOperations {
+    var pending: () async throws -> HelperManager.UpdateStatus? = {
+        try await PrivilegedRuntimeCoordinator.shared.pendingNativeUpdate()
+    }
+    var commit: () async throws -> Void = {
+        _ = try await PrivilegedRuntimeCoordinator.shared.nativeUpdate("commit")
+    }
+}

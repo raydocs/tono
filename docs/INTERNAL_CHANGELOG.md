@@ -32,6 +32,899 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · macOS 合并列车（#567）审查跟进：DNS 无法核实时仍做 PF 健康检查
+
+- **归属/来源**：G1 连接保护；macOS `AppState` 连接监控。合并列车 PR #567（`train/mac-20260924`，
+  基线 167cbca6）交叉厂商审查的已确认项 TM-OpenAI-1（Opus 核实）、TM-claude-1（Codex 核实）、
+  TM-claude-5、TM-claude-3；分支 `fix/mac-train-20260924`；未合 main。
+- **缺陷修复**：
+  - TM-OpenAI-1（#421 × #458 合并产生）：监控每 12 个周期（约 60 s）先做 Protected DNS 审计、
+    再做 PF 健康检查。DNS 读回 `.unverifiable` 时直接 `return .continueMonitoring`，同一周期的
+    PF 检查被跳过；Helper 监督进程按持久状态重装 PF（不含本会话直连例外）后，只要 DNS 一直
+    读不到，App 就不会发现，界面仍显示已连接。现在 `.unverifiable` 只跳过 DNS 结论，继续执行
+    PF 检查；DNS 判定改为穷举 `switch`，其余三种结论行为不变。
+  - TM-claude-1：`acceptConfirmedExternalProtectionRelease()`（已确认的外部释放）没有清零
+    `consecutiveProtectionRepairCount`，此前累积的修复次数会带进下一次会话，提前触发 3 次暂停。
+    现在与“恢复正常网络”、“立即重试”一样清零。
+- **新增/优化**：无。
+- **工程与测试**：新增注入点 `ProtectionAuditOperations`（主服务、DNS 完整性读取、PF 健康读取；
+  生产默认仍走 `PrivilegedRuntimeCoordinator`）。一个 XCTest
+  `AppStateCoreMonitorTests.testUnverifiableDNSAuditStillRunsPFHealthCheck`：第 12 个周期，DNS 读回
+  `.unverifiable`、PF 健康报告 `repairedSinceArm`，断言本周期停止监控、修复计数为 1、断开并显示
+  “Network protection was interrupted…”。旧代码在 DNS 判定处返回 `.continueMonitoring`，会话保持
+  连接，第一条断言即失败（按代码推理，未实跑）。TM-claude-1 未加测试（规则 5）。
+- **文档**：`HelperManager` 中 `repairedSinceArm` 的版本注释 4.12.0 → 4.16.0（`/killswitch/health`
+  在合并列车编号 4.16.0 加入，见 `HelperProtocolVersion`）。#503 条目中“4.40.0 机器不能静默升级到
+  4.22.0”的说法已更正；#421 条目中“唤醒不看暂停”的限制已更正（#458 已修）。TM-claude-3：#458 的
+  split-DNS 冲突暂停覆盖了 #348 对公司 VPN utun DNS 的 PF 豁免；保留较严格行为（暂停、保留 PF），
+  在 `holdProtectedDNSSupplementalConflict`、`KillSwitchPF.swift` 注释和 #348 条目中注明这是暂定
+  产品决定。`KillSwitchPF.swift` 只改整行注释，CONTRACT 哈希按 build-core-helper.sh 同一管道重算
+  不变（4.22.0 `3f2459e2…`），不需要升 helper 版本。
+- **验证**：not run locally per execution-location rule; CI pending（GitHub-hosted `macos-26`
+  build + TonoTests）。本机只做了 CONTRACT 哈希的纯文本重算（未编译）。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：网络变化核对（`AppState.swift`）与连接流程中的 `primaryNetworkService` 调用仍直接走
+  协调器，未接入新注入点。TM-claude-3 待 owner 决定。#567 PR 正文“Deploy / release notes”中的
+  4.40.0 说法同样有误，需由 PR 作者更正。
+
+## 2026-09-23 · macOS 启动时删除 0.0.72 遗留的 Mihomo 运行时文件
+
+- **归属/来源**：G1 账户隔离（升级维度）；macOS `ConfigStorage`。内部审查 H15-F4，Issue #504。
+  基线 origin/main bb2ed4e4；分支 `fix/legacy-runtime-yaml-20260923`；未合 main。
+- **缺陷修复**：0.0.72 把 Mihomo 运行时写在 `Application Support/Tono/config/config.yaml`，
+  内含出口参数、住宅 SOCKS5 凭据和 controller secret；0.0.73 起运行时改为 `config.json`，
+  旧文件再无任何读、写或删除，升级后永久残留。现在 `ConfigStorage` 初始化（进程启动时首次
+  使用）删除该文件。与在审 #411（登出时删除 `config.json`）互补：#411 管新文件的账户边界，
+  本条管升级遗留；两者不改同一行。
+- **新增/优化**：无。
+- **工程与测试**：一个 XCTest `RuntimeConfigTests.testLaunchRemovesThe0072MihomoRuntimeWithItsCredentials`：
+  临时目录中的 `config/config.yaml` 被删除，`config.json` 保留。旧代码无此入口（编译失败即失败）。
+- **验证**：本机未执行 xcodebuild/swift；回归交给本 PR 的 macos-26 CI（TonoTests），结果见 PR。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：未实机验证；root 所有的 `/Library/PrivilegedHelperTools/tono-mihomo` 旧二进制
+  仍残留（不含凭据，仅整洁问题，未处理）。
+
+## 2026-09-23 · macOS 原生更新账本：schema 主版本 + 同主版本忽略新增字段
+
+- **归属/来源**：G3 原生更新 v1（面向 0.0.73 → 0.0.74 起的 N-1 执行器）；macOS
+  `tono-core-helper` `UpdateStorage`。内部审查 H15-F6，Issue #501。基线 origin/main bb2ed4e4；
+  分支 `fix/update-store-schema-macos-20260923`；未合 main。
+- **缺陷修复**：`UpdateStorage.load()` 要求 `canonical(ledger) == bytes`，任何新增键都会被旧版
+  执行器副本判成"ledger is corrupt"，而 blocked/corrupt 证据按设计不清理、重装也清不掉。改为：
+  先探测 `schemaVersion`（缺省 1）；高于本版主版本时以"written by a newer Tono (schema N)"拒绝并
+  保留字节；同主版本若字节不是规范编码，只有在确实存在本版不认识的键、且本版认识的每个键的值都与
+  规范重编码一致时才接受（`knownFieldsMatch`）。无新增键的非规范字节仍按损坏拒绝。写入端主版本为
+  1 时不写该字段，已有构建照常读取。规则文字在 `docs/UPDATE_PROTOCOL_V1.md`（随 Windows PR）。
+- **新增/优化**：无。
+- **工程与测试**：一个 helper 自测 `ledger-ignores-additive-fields-and-refuses-a-newer-schema-major`
+  （`--update-self-test` 计数 10→11）：顶层与 attempt 加未知键后 `load()` 成功且已知字段不变；
+  `schemaVersion: 2` 时以"newer"拒绝并保留原字节。旧实现在第一次 `load()` 报 corrupt。helper 源码
+  变更按契约门把 `HelperProtocolVersion` 4.21.0 → **4.22.0（合并列车按顺序编号，重算
+  CONTRACT.sha256）**；CONTRACT 以 build-core-helper.sh 同一 sed|shasum 管道重算（先对基线复现
+  4.9.0 的记录哈希自证）。
+- **验证**：本机未编译 helper、未运行 swift；回归交给本 PR 的 macos-26 CI（契约门 + root
+  `--update-self-test`），结果见 PR。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：只对含本改动的执行器生效；本 PR 之前构建的内部候选执行器仍会拒绝任何新增键。
+  重编号：本 PR 分支 CI 用过占位号 4.40.0；合并列车改为 4.22.0。装过该 PR 构建（4.40.0）的机器
+  **可以**被静默升级到 4.22.0（2026-09-24 更正：原文称“#350 只接受更高版本，需走管理员安装”，
+  不成立）。版本准入由正在运行的 helper 执行，而该 PR 构建基于 bb2ed4e4，不含 #350 的
+  `helperUpgradeAdmissible`；App 侧只比较版本字符串是否相等，不同即尝试 `/helper/upgrade`。
+  装上 4.22.0 之后，才只接受更高版本的静默升级。
+
+## 2026-09-23 · macOS 升级后归档 0.0.72 遗留的更新交接记录
+
+- **归属/来源**：G3 客户升级路径；macOS App。内部审查 H15-F3，Issue #496。基线 origin/main
+  bb2ed4e4；分支 `fix/legacy-handoff-macos-20260923`；未合 main。
+- **缺陷修复**：0.0.72 的 Sparkle 更新在安装前把 `update-handoff.json` 推进到
+  `installStarted`；0.0.73 起不再推进、提交或删除它，但 Dashboard 仍读取它，48 h 过期后
+  永久显示"更新未完成，断开后重装"，断开/重装都清不掉。改为启动时（`TonoApp.init`，在
+  AppState 读取告警前）识别该记录：当前运行版本 ≥ 记录的 `nextAppVersion`，说明升级已完成，
+  把原字节归档到 `update-handoff.history/` 后删除记录；记录目标高于当前版本、内容无法解码或
+  版本号不是数字时保持原状（仍按原规则告警）。保护状态不依赖这份记录（启动恢复以 helper
+  kill switch 状态为准），不改变 PF 行为。
+- **新增/优化**：无。
+- **工程与测试**：一个 XCTest
+  `testCompletedLegacyUpgradeJournalIsArchivedAndStopsWarning`：0.0.72 写出的已过期
+  `installStarted` 记录在 0.0.72 下保留并告警，在 0.0.73 下归档原字节且不再告警。旧代码上
+  该入口不存在（编译失败即失败）。`writePrepared` 的归档代码抽成共用私有函数，行为不变。
+- **验证**：本机为编辑/审查机，未执行 xcodebuild/swift；回归交给本 PR 的 GitHub-hosted
+  macos-26 CI，结果见 PR。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：必须在 0.0.73 发给 0.0.72 客户之前合入，发出后无法从旧版一侧补救。未在真机
+  上用 0.0.72 → 0.0.73 Sparkle 升级实测。Windows 同类问题由单独 PR 处理。
+
+## 2026-09-23 · macOS 静默 helper 升级与安装器使用同一准入（H2-F1）
+
+- **归属**：G1 保护完整性（root helper 替换路径）；平台/模块：macOS
+  `tooling/scripts/core-helper`（`SocketServer.stageAndUpgrade`）、`HelperProtocolVersion`。
+- **来源**：基线 main b1b6fe6c → 分支 `fix/helper-upgrade-admission-20260923`；
+  Issue #337；PR 与准确源码 SHA 见 PR，提交本条时未合 main。
+- **缺陷修复（内部审查 H2-F1，源码推导）**：`/helper/upgrade` 无需管理员同意就替换
+  root helper 和 root sing-box，但缺少另外两条安装路径已有的约束：没有版本下限；
+  签名要求缺少 Developer ID CA，也不要求 get-task-allow 不存在；候选没有绑定到发起
+  App 的签名封存。修复后：
+  - 候选路径必须等于发起 bundle 的 `Contents/Resources/tono-core-helper` 和
+    `Contents/Resources/sing-box`。
+  - 发起 bundle 本身要通过 `UpdatePackage.verifyCode`（Developer ID，strict，
+    nested code）。
+  - 源文件和 root 私有副本都复用同一个 `UpdatePackage.verifyCode`，删除了较弱的
+    `verifyEmbeddedSignature`。
+  - 读取已校验的 root 私有副本的 `--version`。候选版本必须严格高于运行中的
+    `HelperProtocolVersion`（三段数字比较，格式不合法时拒绝）。
+  - 被拒绝时 App 仍然回退到管理员安装，所以合法降级仍然可以在管理员同意后进行。
+  - 审查后补充（#350 第三轮审查）：`--version` 探测只读 stdout，stderr 丢弃。原先复用
+    `KillSwitchManager.run`，它把 stderr 合进同一个管道；候选 helper 在 stderr 打出任何
+    警告（例如运行时的重复类警告）都会让版本文本变成多行、解析失败，合法升级被拒并退回
+    管理员提示。
+- **新增/优化**：无。
+- **工程与测试**：helper 契约 4.20.0 → 4.21.0（合并列车按顺序编号），并重算 `CONTRACT.sha256`。`--self-test`
+  增加 `runHelperUpgradeAdmissionSelfTest`，断言降级和同版本候选被拒、4.9.0 → 4.10.0
+  被接受。旧代码没有这个准入函数，所以这项 self-test 在旧代码上无法编译。
+- **验证**：本机只做编辑和源码自查，没有运行 swiftc 或 xcodebuild。helper 编译和
+  `sudo tono-core-helper --self-test` 由本 PR 的 macOS CI（GitHub-hosted `macos-26`）
+  执行，结果以该 run 为准。真实 Developer ID 包之间的静默升级和降级拒绝没有做实机验证。
+  审查后补充的 stdout 修正同样本机未编译，委托 CI。
+- **候选/发布**：仅源码，无新候选；未改动 PF 规则、`appcast.xml` 和 `latest.json`。
+- **剩余限制**：
+  - bundle 封存校验和复制之间仍然有文件替换窗口。root 私有副本会再按 Developer ID
+    要求校验，并检查版本下限，所以替换进来的文件只能是更新的正式签名 helper。
+  - 管理员安装路径本身没有版本下限，这是有意保留的：它需要管理员同意。
+  - 测试只覆盖纯比较函数 `helperUpgradeAdmissible`。生产接线没有测试覆盖，也没有实机验证：
+    候选路径必须等于发起 bundle 的 `Contents/Resources` 资源、发起 bundle 的封存校验
+    （`UpdatePackage.verifyCode`）、对 root 私有副本的再次校验，以及只读 stdout 的
+    `--version` 探测。
+  - 标准（非管理员）用户不能再静默回滚 helper，降级需要管理员同意。
+  - `--version` 探测没有超时：候选 helper 卡住时，accept 循环会一起卡住，直到 App 的 30 s
+    超时后走管理员安装、由 launchctl bootout 恢复。
+  - helper 版本号已在合并列车中按顺序重排为 4.21.0，并重算 `CONTRACT.sha256`。
+
+## 2026-09-23 · macOS helper PF DHCP 放行收窄（H1-F6 macOS）
+
+- **归属/来源**：G1 保护一致性；影响 macOS root helper（`tooling/scripts/core-helper`）。基线 main
+  da7bad1b → 分支 `fix/dhcp-scope-macos-20260923`；Issue #341；提交时未合 main。
+- **缺陷修复**：TUN 存在时的 `tono-dhcp` 规则为 `pass out … from any port 68 to any port 67 keep
+  state` 与 `pass in … from any port 67 to any port 68 keep state`，无目的/用户限制，入向规则还会
+  建立 state，让 68 端口回包给任意发送方。改后出向只到 `255.255.255.255`（私网服务器单播续租
+  已由 `tono-lan` 覆盖），入向改为 `no state`。`HelperProtocolVersion` 4.18.0 → 4.20.0
+  （合并列车按顺序编号），CONTRACT.sha256 用脚本同一 sed|shasum 管道重算（未编译）。
+- **新增/优化**：无。
+- **工程与测试**：`--self-test` 的 cloudRules 断言新增 DHCP 必需/禁止形状；该 self-test 在
+  CI 以 root 运行并经 `pfctl -nf` 解析 cloudRules。在旧规则上的实测失败：仅加断言（及版本/契约）
+  的一次性分支经 macOS CI（run 35843126003）在 `build-core-helper.sh` 调用 `--self-test` 时失败退出。
+- **验证**：本机未运行 swift/xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：未实机确认 DHCP 续租行为；公网地址或 100.64/10 的 DHCP 服务器单播续租被拒，
+  依赖广播 rebind。未加 `user root`（IPConfiguration 发包归属未实机确认）。与在审 helper PR 的
+  版本号/契约哈希会冲突，合并顺序确定后需重算。
+
+## 2026-09-23 · macOS 审阅直连 bundle 的标准路径也要校验签名身份
+
+- **归属/来源**：G1 连接保护；基线 main 244075f2，分支 `fix/reviewed-bundle-signature-20260923`，
+  [Issue #332](https://github.com/raydocs/tono/issues/332)（内部审查 H1-F2，macOS），本条提交时未合 main。
+  Windows 变体另记 [Issue #333](https://github.com/raydocs/tono/issues/333)，本 PR 未改。
+- **缺陷修复**：`/Applications/{WeChat,微信,DingTalk,钉钉,Feishu,飞书,Lark}.app/` 原本无条件
+  进入直连 `process_path_regex`，不检查是否存在、签名是否正确；`/Applications` 默认对 admin
+  免 sudo 可写。现在标准路径与迁移路径走同一身份校验：Apple 锚定、审阅过的 identifier、
+  已知 Team ID（Developer ID 叶证书 OU，或 App Store 代码目录中的 Team ID）。不通过则不生成
+  直连规则，流量留在隧道。sing-box 在没有任何 bundle 通过时不再输出空 `process_path_regex`
+  规则（空列表会匹配所有进程），WeChat DNS 后缀与此同条件，与 mihomo 路径一致。
+- **行为变化**：校验前本机确认 App Store 版 WeChat 的叶证书是 Apple 的，不含腾讯 OU。原
+  `isSignedWeChatBundle` 会拒绝它；新校验通过代码目录 Team ID 接纳它。Feishu/Lark 尚无
+  已采集的 Team ID，标准路径也改为失败即关闭，走隧道。
+  - **用户可见的功能回退（Feishu/Lark）**：开启国内直连策略时，飞书/Lark 全部流量改走海外
+    出口。影响：延迟上升；VLESS 模式下 UDP 被全局拒绝，飞书会议只能退到 TCP，可能失败；
+    飞书风控或企业登录 IP 限制可能把出口 IP 判为异地登录，要求二次验证。列表中的飞书/Lark
+    Bundle ID 也从未在真实安装上核对过。补齐 Identifier 和 TeamIdentifier（在装有飞书/Lark
+    的 Mac 上运行 `codesign -dvv` 采集，DMG 版和 App Store 版分别采）跟踪于
+    [Issue #422](https://github.com/raydocs/tono/issues/422)，目标是下一个 candidate 之前。
+    补齐前保持 fail-closed，不恢复按文件名信任。
+- **工程与测试**：新增 `CoreRouteClassificationTests.testReviewedDirectPathRequiresSignedBundleAtStandardLocation`
+  （临时目录中未签名的同名 bundle 不被授予；生产路径列表中每项都须通过签名校验。旧代码在
+  没装这些 App 的 CI 上因无条件的默认路径失败）。增加仅测试使用的
+  `managedDirectBundlePathsOverride`；4 处依赖“默认路径必在”的既有测试
+  （`testReviewedChinaOfficeAppsShareTheWeChatDirectBoundary`、`SingBoxConfigTests` 产品运行时、
+  `MultiExitPolicyTests`、`WeChatResolverPolicyTests`）改为显式注入路径，删除断言缺陷行为的默认路径断言。
+- **验证**：本机只做 diff 检查，并用 `codesign -v -R` 核对新 requirement：本机 App Store
+  WeChat 与 Developer ID 应用可通过，未签名的假 bundle 与 identifier 不符时被拒。XCTest、
+  multi-exit 脚本与 `sing-box check` 由 GitHub-hosted `macos-26` CI 执行，结果见 PR。
+- **新增/发布/限制**：无新包、无部署。签名在生成配置时校验，运行时按路径匹配，仍有 TOCTOU。
+  未实机复现；DingTalk App Store 版未实测。Feishu/Lark 直连需先在目标 Mac 上采集
+  Identifier 和 Team ID（#422）。本条随 PR 变基到 main bb2ed4e4，源码未改，
+  本机未编译，委托 CI。
+
+## 2026-09-23 · macOS 控制面 PF 例外如实标注为 UID 边界（未修复）
+
+- **归属/来源**：G1 保护边界；基线 origin/main `244075f2`，分支
+  `fix/macos-bootstrap-pf-scope-20260923`，Issue #331（内部审查 H1-F5 macOS 部分）。未合 main。
+- **缺陷修复**：无行为修复。`tono-control` 规则的 `user { 0, uid }` 只按 UID 匹配，PF 没有进程或
+  签名条件，交互用户的任何进程都与签名 App 同样命中；原注释称该规则只允许“signed app”，与实际不符，
+  现已更正。端口已经只有 TCP 443，地址也已经只有钉住的主机，没有可以在不影响恢复的前提下继续收窄的部分。
+- **工程与测试**：只改注释，不加测试（规则文本不变，PF 也无法表达程序身份）。
+- **验证**：本机只检查 diff；PF 规则输出与改动前逐字相同。
+- **新增/发布/限制**：无新包、无部署。剩余风险：Protected Offline 期间，以登录用户身份运行的进程仍能从
+  物理网卡访问钉住的控制面地址的 443 端口。真正修复需要改为由 root helper（或专用身份）发起引导请求，
+  并让规则只匹配该身份，设计见 #331，需要实机证明恢复路径仍然可用。
+
+
+## 2026-09-23 · macOS Continuity 直连改为按系统路径匹配
+
+- **归属/来源**：G1 连接保护；基线 main 244075f2，分支 `fix/continuity-direct-path-20260923`，
+  [Issue #325](https://github.com/raydocs/tono/issues/325)（内部审查 H1-F1），本条提交时未合 main。
+- **缺陷修复**：sing-box 产品规则按可执行文件名把 4 个 Continuity 守护进程送 `DIRECT`
+  （1e69b137 引入）。国内直连策略激活时 PF 放行 root 的 80/443/8000/8080，文件名不是身份。
+  现改为 `process_path` 精确匹配 SIP 密封系统卷上的路径（`/usr/libexec/sharingd`、
+  `rapportd`、`SidecarDisplayAgent`、IDS.framework 内的 `identityservicesd`）。PF 不变：
+  它只能按 UID 区分，进程边界在 sing-box 路由。
+- **工程与测试**：`SingBoxConfigTests.testDirectRoutesNeverMatchOnProcessName`，旧代码上
+  因 `DIRECT` 规则含 `process_name` 失败。
+- **验证**：本机只做 diff 检查，路径在 macOS 26 上用 `ps`/`ls` 核对；XCTest 与 emitted
+  runtime 的 `sing-box check` 由 GitHub-hosted `macos-26` CI 执行，结果见 PR。
+- **新增/发布/限制**：无新功能、无新包、无部署。未做实机复现；旧系统版本若路径不同，
+  规则不匹配，流量留在隧道。Windows sing-box 草稿的 `direct_process_names` 输入生产未接线，未改。
+
+## 2026-09-23 · macOS Helper 被关闭、未加载或不响应时，App 明确提示“这台 Mac 当前未受保护”并进入修复
+
+- **归属/来源**：G1 连接保护（重启后保持保护）；macOS App 启动恢复 `RuntimeCleanup`。
+  内部审查 H12-F2 的 App 部分，Issue #423（Helper 部分见 #424）；第四轮 macOS 审查 S14 与
+  H15-F1 指出第一版走不到。基线 main bb2ed4e4 → 分支 `fix/helper-unloaded-notice-20260923`；
+  提交时未合 main。
+- **缺陷修复**：重启后只有 Helper 会启用 PF。Helper 二进制已安装、但 socket 没有进程应答时
+  （“登录项 > 允许在后台”中被关闭、launchd 没有这个任务、崩溃循环，也包括 0.0.72 的旧
+  Helper），App 启动的第一步 `pendingNativeUpdate()` 就抛出 `connectFailed`。用户只看到
+  “Secure sign-in service is unavailable”，Retry 每次重复同一错误，`recoverStaleRuntime` 里的
+  修复分支和本 PR 第一版加的提示都到不了。现在：
+  - 启动的更新查询改为 `RuntimeCleanup.queryPendingNativeUpdate`。查询因 `connectFailed`
+    失败时，先只读查询后台项状态（`SMAppService.statusForLegacyPlist(at:)`）和
+    `launchctl print`：
+    - 被关闭：立即显示“网络组件已在登录项中关闭，这台 Mac 当前未受保护”，并说明如何打开。
+      App 无法启动用户关闭的任务，不做修复尝试。
+    - 未加载：走一次已有的鉴权安装修复，成功后重新查询；失败时显示“网络组件没有运行，这台
+      Mac 当前未受保护”，后接原始错误。
+    - 已加载或无法判断：等 2 秒再查一次；仍不应答（崩溃循环）时同样走鉴权安装修复，失败时
+      显示“网络组件没有响应，这台 Mac 当前可能未受保护”。
+    管理员安装由 root 端 `--update-install-guard` 把关，有未完成的更新事务时拒绝。
+  - Helper 不应答时，若已安装二进制的 `--version` 低于 4.5.0（0.0.72 为 3.15.0），按旧版
+    Helper 处理：它没有更新账本，不再查询，直接进入 `recoverStaleRuntime`。
+  - `recoverStaleRuntime` 中第一版加的判断保留，覆盖二进制缺失或旧版 Helper 的情况。
+- **新增/优化**：无。
+- **工程与测试**：修改 XCTest
+  `HelperUnprotectedNoticeTests.testAHelperLaunchdDoesNotRunSaysThisMacIsNotProtected`，改为驱动
+  生产函数 `queryPendingNativeUpdate`：查询抛 `connectFailed` 且后台项被关闭时，抛出含“not
+  protected right now”和“Allow in the Background”的错误，且不修复；未加载时修复一次后重新
+  查询并返回。第一版测试只测“状态 → 文案”的纯映射，所以没发现提示走不到。修改前的分支上
+  这个测试无法编译（函数不存在），不是实跑失败；按旧顺序推理，查询错误会原样抛出，第一个
+  断言会失败。zh-Hans 文案已加入字符串目录。
+- **验证**：本机（编辑机）未编译，未运行 xcodebuild，委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests，含 LocalizationCoverageTests），结果以 PR 页为准。本机只确认了普通用户执行
+  `launchctl print system/<label>` 可用（存在为 0，不存在为 113）。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：未加载或崩溃循环时，App 启动即弹管理员授权框，不经用户操作（与已有的
+  `daemonRejectsClient` 先例一致）；修复成功后界面没有说明。旧版判断依赖以普通用户运行已安装
+  二进制的 `--version`。登录项开关对旧式 LaunchDaemon 的确切效果（`statusForLegacyPlist(at:)`
+  是否返回 `.requiresApproval`、开机是否跳过）和崩溃循环的触发频率都需要实机确认。没有改用
+  `SMAppService.daemon` 注册。
+
+## 2026-09-23 · macOS helper 的 sing-box 配置检查拒绝重复键与折叠键（H10-F2）
+
+- **归属**：G1 保护边界（纵深防御）；macOS `tono-core-helper` 的 `ownedRuntimeConfigIsSafe`。
+- **来源**：基线 main `be1c75d2`，第四轮审查后 rebase 到 main `bb2ed4e4` → 分支
+  `fix/helper-json-keys-20260923`；Issue #416，内部审查 H10-F2；提交时未合 main。
+- **缺陷修复**：helper 用 `JSONSerialization` 校验 root 快照（重复键保留第一个，键名精确
+  比较），root core 用 Go JSON 执行同一份字节（重复键取最后一个，结构体字段按
+  `EqualFold` 折叠匹配）。两者可以读出不同的值。现在先对原始字节做键扫描（JSON 字符串
+  转义按 Go 语义解码，按 Go 的折叠规则折叠键），任何对象内出现重复即拒绝；白名单与禁用键
+  检查改在折叠后的键上进行，与 core 实际绑定的选项名一致。今天只有已签名 App 能提交配置，
+  且 App 输出固定的小写 ASCII 键，所以没有真实输入可以触发；本项只收紧 App 失守时的最后
+  一道防线。
+- **新增/优化**：无。helper 协议版本 4.19.0 → 4.18.0（合并列车按记录的编号表取 4.18.0，
+  虽晚于 4.19.0 合入；App 只按字符串相等比较版本），并按 build-core-helper.sh 同一清单重算 `CONTRACT.sha256`。
+  rebase 后补注释：重复键检查对 map 类型对象的键同样按折叠比较（见剩余限制）。
+- **工程与测试**：`runOwnedRuntimeContractSelfTests`（`--self-test`）新增一条断言：
+  `route` 内重复 `final` 必须被拒；旧代码返回 true，该断言失败。
+- **验证**：MacBook 不编译 Swift（所有者决定 2026-09-14），helper 自测交由本 PR 的 macos-ci
+  （`sudo tono-core-helper --self-test`）执行，结果见 PR。本机只用 JXA 确认 Foundation 对重复键
+  保留第一个，用 Go `encoding/json` 确认 Go 取最后一个且按 U+017F 折叠；用 Python 镜像扫描器
+  确认生命周期 fixture 与 `tooling/scripts/sing-box/runtime-template.json` 通过、重复键和
+  转义形式的同名键被拒。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：扫描器依赖 `JSONSerialization` 已先拒绝语法错误的输入；折叠规则只覆盖能落到
+  ASCII 的字母（ASCII 大写、U+017F、U+212A），与 core 的 ASCII 选项名相符。Windows 的对应检查
+  （#357，mihomo YAML）需另行核对解码器的键折叠行为，已在 #357 留言。已知过严：Go 只对结构体
+  字段名折叠，map 类型对象（如 `predefined` hosts）的键不折叠，而本检查对所有对象都折叠比较。
+  第四轮审查确认 App 自生成的配置不受影响（键都是写死的小写 ASCII，`predefined` 先
+  `lowercased()` 再经 Dictionary 去重）；将来 App 若生成仅大小写不同的 map 键会被拒绝。
+  rebase 后本机未编译，委托 CI。
+
+## 2026-09-23 · macOS 保护期间阻断直连局域网 DNS（53/853）
+
+- **归属/来源**：G1 保护边界（内部审查 H1 报告中的未编号设计缺口）；影响 macOS root helper
+  PF 渲染。基线 main b1b6fe6c，分支 `fix/macos-lan-dns-20260923`，Issue
+  [#344](https://github.com/raydocs/tono/issues/344)；提交时未合 main。
+- **缺陷修复**：TUN 存在时 `tono-lan`/`tono-linklocal` 放行任意用户到私网、链路本地的任意端口，
+  而 sing-box 把这些网段排除出 TUN，所以直接发往路由器或其他 LAN 解析器的 DNS（53）/DoT（853）
+  碰不到 `hijack-dns`，查询名明文外泄。Windows 由 `dns-hijack any:53` 覆盖，两平台不一致。
+  改后：在这两组放行之前渲染 `tono-lan-dns` 的 `block drop out quick`，覆盖 IPv4 私网/169.254
+  与 IPv6 fe80::/10、fc00::/7、ff00::/8 的 TCP/UDP 53、853。系统 DNS（loopback 127.0.0.1）、
+  TUN、mDNS 5353 不受影响。
+  - 审查后补充（#348 第三轮审查）：阻断规则限定在物理出口接口 `on { enN, ... }`（渲染规则时
+    用 `getifaddrs` 枚举当前存在的 `en` + 数字接口，覆盖 Wi-Fi、有线、USB/雷雳网卡和 iPhone USB
+    共享），不作用于 utun、ipsec、ppp 等其他 VPN 接口，所以与 Tono 同时运行的公司 VPN
+    （AnyConnect、GlobalProtect、WireGuard 等）推到自己 utun 上的 DNS 不会被挡。枚举不到任何
+    物理接口时，阻断保持不限接口（fail-closed）。
+    （2026-09-24 合并列车说明：这只是 PF 层。#458 的 Protected DNS 审计把这类 VPN 的
+    split DNS（带匹配域、指向非 loopback 的补充解析器）判为 `.supplementalConflict`：拆会话、
+    保留 PF、暂停自动重试，所以合并后与公司 split-DNS VPN 并存时 Tono 不会保持连接。保留这一
+    较严格行为、不做“保持连接并提示”，是暂定产品决定，等 owner 确认。）
+- **新增/优化**：无。
+- **工程与测试**：helper 自测（`--self-test`）新增一个检查 `lanDNSBlockedFirst`：带 TUN 的规则集里
+  LAN DNS 阻断出现在 `tono-lan` 放行之前；旧代码无此规则而失败。审查后同一检查改为用注入的
+  物理接口 `["en0", "en7"]` 渲染，并断言阻断带 `on { en0, en7 }` 限定；修改前的分支渲染的是
+  不限接口的阻断，匹配不到，检查失败。同一自测在 CI 以 root 做 pfctl
+  语法解析。HelperProtocolVersion 4.17.0 → 4.19.0（合并列车按顺序编号），CONTRACT
+  已重算；与该链合并时需按合并顺序重算 CONTRACT。
+- **验证**：本机（MacBook）未编译 helper、未运行 pfctl（审查后的接口限定同样本机未编译）；编译、自测与 PF 解析委托本 PR 的
+  GitHub-hosted `macos-26` CI（privileged-tests）。
+- **候选/发布**：无新包，仅源码；不涉及 Sparkle 更新源。
+- **剩余限制**：未实机复现。只阻断 53/853；其他端口上的自定义 DNS 协议（如私网 DoH 443）仍经
+  `tono-lan` 放行。用户有意使用的局域网 DNS 服务器在保护期间不再可直连（系统解析本就走 loopback）。
+  - **已知取舍，需要 owner 决定是否接受**：仍会挡掉企业 split DNS。公司 Mac 通过
+    `/etc/resolver/<域>` 或配置描述文件下发的私网补充解析器（例如 `10.1.1.53`）经物理网卡
+    直连，Tono 连接期间这些内网域名会解析失败。在 main 上它们经 `tono-lan` 可以解析。
+  - 物理接口列表在每次写 PF 规则时确定。会话中途新接入的网卡（例如插上 USB 网卡）在下一次
+    重写规则之前不在阻断范围内，此时该网卡上的 LAN DNS 与 main 行为相同（经 `tono-lan` 放行）。
+  - 接口限定和公司 VPN 并存场景未做实机验证。
+
+## 2026-09-23 · macOS 原 DNS 所属服务已删除时向用户提示
+
+- **归属/来源**：G1 保护恢复；macOS App `HelperManager` / `AppState+Connect` / `AppDelegate`。
+  X3-1 后续，Issue #487（根因 #475 / PR #476）。基线 main bb2ed4e4 → 分支
+  `fix/dns-original-lost-notice-20260923`；提交时未合 main。字段 `originalDNSRestored` 由
+  #476 的 helper 产生；本条无编译依赖，#476 合并前旧 helper 不发该字段，行为不变。
+- **缺陷修复**：`/dns/restore` 成功但带 `originalDNSRestored: false`（原 DNS 所属服务已删除、
+  快照已存档、loopback 已清为自动获取）时，App 只检查 `configured`/`snapshotPresent`，把它当
+  普通成功，用户不知道原静态 DNS 没有写回。现在 `restoreProtectedDNS()` 解码该字段，为
+  `false` 时在 UserDefaults 记一次性提示并写本地审计 `protected_dns_original_service_missing`
+  （helper 会把快照移走，只报告一次；恢复可能发生在启动恢复、退出、更新准备等无窗口时刻）。
+  显式 Restore internet 干净完成时（无 transitionError、未保持 blocked）显示提示；否则在下次
+  App 激活且没有其他消息时显示。新增中英文案："原 DNS 设置所属的网络服务已被删除……现已改为
+  自动获取 DNS"，更新 `Localizable.xcstrings`。保护与释放判定不变。
+- **新增/优化**：无。
+- **工程与测试**：新增一个 XCTest
+  `ProtectedDNSRestoreNoticeTests.testRestoreReplyWithoutOriginalDNSMapsToUserNotice`：
+  `originalDNSRestored:false` 的回复映射为提示，`true` 与缺字段映射为 nil。映射函数在旧
+  main 上不存在，测试在旧代码上无法编译（未实际跑红）。
+- **验证**：本机为编辑机，未运行 xcodebuild/swift；`Localizable.xcstrings` 本机 JSON 解析通过。
+  TonoTests 委托本 PR 的 GitHub-hosted `macos-26` CI，结果以 PR 页为准。未在实机删除网络服务
+  验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：提示只说明未写回，不展示存档中的原 DNS 值（存档文件只供诊断）。提示落在
+  共享的错误横幅上，可被随后的其他错误覆盖；激活时只在横幅为空时显示。消费提示与 AppState
+  状态之间没有自动化测试，只覆盖回复映射。
+
+## 2026-09-23 · macOS DNS 快照按服务 ID 恢复，改名不再丢原 DNS
+
+- **归属/来源**：G1 保护恢复；macOS `tono-core-helper` `ProtectedDNSManager`。内部审查
+  X3-1，Issue #475。基线 main bb2ed4e4 → 分支 `fix/dns-service-id-20260923`；提交时未合 main。
+- **缺陷修复**：快照只存服务显示名。保护期间用户在系统设置里给同一服务改名后，恢复按名字
+  找不到快照服务，把仍指向 `127.0.0.1` 的改名服务写成 `[]`（自动获取），读回成功后删掉快照并
+  报告成功，App 解除 PF；原来的静态 DNS 永久丢失。现在 enable 时额外记录
+  `SCNetworkServiceGetServiceID`（显示名保留作诊断和旧快照匹配），恢复按 ID 找服务写回原值，
+  写回读回确认后才删快照。快照服务在带 ID 的完整枚举里已不存在（服务被删除）时，不删快照而是
+  改名存档为 `protected-dns.json.orphaned-<ts>`，`/dns/restore` 附带
+  `originalDNSRestored: false`，loopback 清扫照常且需读回证明；枚举退回 `networksetup`
+  （没有 ID）且按名字也找不到时，保留快照并拒绝释放（M2 语义）。旧格式快照（无 ID）照常读取，
+  按名字匹配。enable 判断"同一服务"也按 ID，改名后重连会把快照里的名字更新为当前名字（status
+  仍按名字读）。带 ID 的枚举不再丢弃名字不合 `validateService` 的服务（如改成超 128 字节的中文名），
+  恢复清扫能按 ID 触达它们。保护不放宽。
+- **新增/优化**：无。
+- **工程与测试**：helper 协议版本 4.16.0 → 4.17.0（合并列车按顺序编号）并按 manifest
+  重算 `CONTRACT.sha256`。现有两个 DNS self-test 适配新的服务类型（名字-only 枚举，行为不变）。
+  新增一项 `--lifecycle-self-test`：`runRenamedServiceRestoreSelfTest`，服务 `S1` 由 `Wi-Fi`
+  改名为 `办公无线` 后恢复，断言 DNS 回到 `["10.0.0.53"]`、快照在读回确认之后才删除、其他服务
+  不动。旧代码会写成 `[]` 并删快照（该测试依赖新增的 ID 注入点，旧代码上的失败为构造推导，未实际
+  跑红）。
+- **验证**：本机为编辑机，未运行 swiftc/xcodebuild。helper 编译、`--self-test` 与
+  `--lifecycle-self-test` 委托本 PR 的 GitHub-hosted `macos-26` CI（privileged-tests），结果以
+  PR 页为准。未在实机上改名验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：`/dns/status` 仍按快照里的名字读；连接中改名后报 `ok: false, snapshotPresent: true`，
+  App 判为 broken 并重连一次（重连时快照名字更新），或照常调用恢复。System Configuration 持续
+  不可用、只能用 `networksetup` 枚举且快照名字已不存在时，恢复与 `--emergency-disarm` 都会拒绝
+  （保持 fail-closed，不放宽）。App 不展示 `originalDNSRestored: false`，用户看不到"原 DNS
+  所属服务已删除"的提示；存档文件只供诊断。服务被删除后又新建同名服务时按新 ID 视为不同服务，
+  原值不会写到新服务。
+
+## 2026-09-23 · macOS Protected DNS 按系统主服务选服务，并核对实际生效的解析器
+
+- **归属/来源**：G1 保护；macOS `SystemProxy` 服务选择、`PrivilegedRuntimeCoordinator`
+  DNS 完整性判定与 `AppState` 审计后的重连策略。内部审查 X2-3，Issue #457；第二轮按
+  #458 独立审查（Codex，只读）修改。基线 main bb2ed4e4 → 分支
+  `fix/dns-primary-service-20260923`；提交时未合 main。
+- **缺陷修复**：
+  - 服务选择：旧代码把 IPv4 默认接口经 `networksetup -listnetworkserviceorder` 映射成服务，
+    但解析器把所有以 "(" 开头的行都当服务标题，设备行 `(Hardware Port: …, Device: en7)`
+    被吞掉，映射**总是**失败，于是回退到第一个名为 Wi-Fi 的服务——有线为主、Wi-Fi
+    同时开启的常见拓扑里，DNS 被写到空闲的 Wi-Fi，完整性检查也只读 Wi-Fi 自己存的设置就判
+    intact。现在服务取自 SCDynamicStore `State:/Network/Global/IPv4` 的 `PrimaryService`
+    （无 IPv4 主服务时取 IPv6；IPv4 主服务存在但无名字时不改用 IPv6，理由见代码注释），经
+    `SCNetworkServiceGetName` 映射为 helper 使用的名字；拿不到时返回 nil，连接以既有的
+    `noNetworkService` 失败、不写 DNS。系统代理模式共用同一选择函数。
+  - 完整性判定：helper 读回通过后，`State:/Network/Global/DNS` 的 `ServerAddresses` 必须
+    全部为 `127.0.0.1`，否则 `.broken`。另枚举补充解析器：`State:/Network/Service/*/DNS`
+    中带 `SupplementalMatchDomains` 的项与 `/etc/resolver/*`；只要有指向非 loopback 的，
+    判为新的 `.supplementalConflict`（既不 intact，也不当 broken 重连）：保持 PF 拆会话，
+    暂停自动重试（网络变化不解除），提示"DNS 冲突"并在横幅与本地审计
+    `protected_dns_supplemental_conflict` 中列出域名 → 服务器。不放宽 PF。
+  - 重连有界：审计判 `.broken`（且网络未变）计入独立计数，连接成功**不**清零、仅 `.intact`
+    审计/立即重试/释放清零；连续 3 次即停在"保护保持、DNS 未生效"并暂停自动重试
+    （`protected_dns_broken_retries_exhausted`）。`noNetworkService` 另计：连续 5 次（约 1 分钟
+    退避）后暂停并提示；网络变化可解除暂停，但计数不清零，所以每次网络变化只换一次尝试。
+  - 二次确认（第四轮审查）：周期审计与网络变化核对读到 `.broken` 时，先等 2 s 重读一次，
+    以第二次结果为准，DHCP 续租等造成的一次短暂坏读不再立即拆会话。PF 全程保持。
+  - 唤醒尊重暂停终态（第四轮审查）：唤醒恢复在重新确认 PF 后，若已处于"等用户处理"的暂停
+    （DNS 冲突、Protected DNS 反复失效、需用户操作的失败，即网络变化也不解除的那类），就保持
+    Protected Offline 与原提示、不再 connect；网络变化可解除的暂停照旧由唤醒解除。此前每次
+    唤醒都会重连一次再被审计暂停。
+- **新增/优化**：无。
+- **工程与测试**：`SystemNetworkObservation`（含补充解析器）；`primaryNetworkService(observe:)`
+  注入点，生产默认读实时动态存储。一个 XCTest
+  `ProtectedDNSServiceSelectionTests.testWiredIPv4PrimaryIsSelectedWhileWiFiIsAlsoUp`，
+  走生产 `SystemProxy.primaryNetworkService(observe:)`，拓扑为 IPv4 有效、有线为主、Wi-Fi
+  同时存在。**旧代码上没有行为失败的实跑**：旧代码没有注入点，测试只会编译失败；旧逻辑
+  为何选 Wi-Fi 是按上面的解析缺陷推理得出（见测试注释中的 networksetup 输出）。冲突判定与
+  有界重连、`.broken` 二次确认与唤醒暂停判断均未加测试（AGENTS 规则 5，审查未要求；
+  完整性读取与唤醒的 PF 重申都直接调用 `PrivilegedRuntimeCoordinator`，没有现成 seam）。
+  新增三条 zh-Hans 文案。删除无用的
+  `networkService(for:)`。未改 helper 源码，协议版本与 CONTRACT.sha256 不变。
+- **验证**：本机（编辑机）未编译、未运行 xcodebuild/swift，委托本 PR 的 GitHub-hosted
+  `macos-26` CI（build + TonoTests），结果以 PR 页为准。本机只读 `scutil` 核对了键布局
+  （`State:/Network/Service/<id>/DNS` 普通项无 `SupplementalMatchDomains`）。实机清单写在
+  PR 中，尚未执行。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：用户可见影响需实机确认。补充解析器只看上述两处来源；NetworkExtension/描述
+  文件下发的加密 DNS（DoH/DoT）设置、应用自带解析器不在观测内。非主服务的普通
+  `ServerAddresses`（只服务于指定接口的查询）不算冲突。冲突在连接后才由审计（网络变化
+  750 ms 或约 60 s 周期，读到 broken 时再加 2 s 复核）发现，连接期不预检。真实持续的
+  broken 因复核晚 2 s 才拆会话（PF 期间一直生效）。与全隧道 VPN 共存时若其动态服务成为 IPv4
+  主服务，连接以 `noNetworkService` 拒绝。直连策略的物理网卡仍由 `route -n get default`
+  取得（IPv4 only）。`apps/windows/app/scripts/unset_dns.sh` 的旧服务选择未改：它只随 Tauri
+  应用打包，而 Tauri 应用只出 Windows 包，且 Windows 打包显式禁止该脚本，生产不可达。
+
+## 2026-09-23 · macOS 连接尾声在更新状态查询返回后重新核对代际再提交
+
+- **归属/来源**：G3 原生升级恢复 / G1 连接生命周期；macOS `AppState+Connect.onCoreStarted`。
+  内部审查 X1-9（降级），Issue #438。基线 main bb2ed4e4 → 分支
+  `fix/core-started-late-commit-20260923`；提交时未合 main。
+- **缺陷修复**：收养了 `.connected` 恢复义务的待定原生更新后，连接尾声先置 `isConnected`，
+  再阻塞等待 helper 的 `pendingNativeUpdate()`。这期间用户取消（走
+  `disconnectPendingNativeUpdate` → `suspendForNativeUpdate`：bump 代际、取消并等待连接任务）
+  后，查询返回时尾声不再检查取消、代际或连接意图，直接 `nativeUpdate("commit")`，并注册
+  后台策略和核心监视器。随后的 `/update/disconnect` 被 helper 以"已提交"拒绝，用户的恢复
+  网络请求以错误告终。现在 `onCoreStarted` 入口记录代际；状态查询返回后、以及注册尾声任务
+  之前，都要求任务未取消、仍在连接中且代际未变，否则返回 false，不提交、不注册。
+- **缺陷修复（审查 R4 S13）**：`ConnectionCoordinator.executeConnect` 原先在 `prepare()` 准入检查之前
+  就 bump 代际，一次被拒的 `connect()`（已在连接、无可用出口等）也会让在途尝试的代际失效；与上面的
+  代际比较组合后，尾声返回 false 但 `isConnected` 已置位，界面同时显示 connecting 与 connected，
+  直到 240 s 看门狗。现在只有通过准入的尝试才 bump 代际（`connectBegin` 遥测相应记录 bump 后的代际）。
+  对 #443 的影响：#443 在同一处清除"释放未确认"意图，同样位于准入之前；该清除语句在 #443 分支上一并
+  移到准入之后，两 PR 合并时此处会有一处文本冲突，保留"准入后先 bump、再清意图"即可。
+- **新增/优化**：无。
+- **工程与测试**：新增窄 seam `AppState.nativeUpdateResume`（`pending` / `commit`，生产走
+  `PrivilegedRuntimeCoordinator`）；`onCoreStarted` 由 private 改为 internal 以便测试调用。
+  新增 `ConnectTailRetirementTests.testRetiredAttemptDoesNotCommitUpdateAfterStatusQuery`
+  （一个 XCTest）：状态查询停在可控闸门，期间按 suspend 的前两步 bump 代际并取消任务，
+  放行后断言返回 false、commit 调用 0 次、未注册监视器。旧逻辑下会提交一次，断言失败。
+- **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests），结果以 PR 页为准。真实待定更新下的取消时序未做实机复现。准入后 bump 的调整
+  没有新增测试，结论来自源码推理（`prepare` 与 bump 同在主 actor 上同步执行，中间无挂起点）。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：commit 本身也是不可取消的阻塞 IPC；取消若恰好落在 commit 发出之后，提交
+  仍会发生，只是尾声不再注册任务。helper 侧未改，CONTRACT.sha256 与协议版本不变。
+  被拒的 connect 不再取消排队中的延迟 connect（`bumpGeneration` 附带的动作）；延迟 connect
+  触发时自身会再检查状态。
+
+## 2026-09-23 · macOS 睡眠取消的节点切换在唤醒后连到切换目标
+
+- **归属/来源**：G1 连接意图；macOS `AppState+Proxy` 节点切换任务。内部审查 X1-5，Issue #444。
+  基线 main bb2ed4e4 → 分支 `fix/sleep-node-switch-20260923`；提交时未合 main。
+- **缺陷修复**：已连接时切换到 Y，切换只在 commit 时写入并持久化 Y。切换完成前合盖，睡眠
+  先 bump 代际再做保留拆除，切换任务被退休，所有退出分支都不保留 Y；唤醒 `connect()` 读到的
+  仍是旧出口 X。网络环境对账等其他内部保留拆除落在切换中途时同样丢失 Y。现在切换任务被保留
+  拆除退休时（代际已变、会话已断开、拆除不是显式释放），把 Y 记为下一次连接目标；会话仍在
+  时不提前宣称 Y 为活动出口，显式 Restore internet 的行为不变。
+- **新增/优化**：无。
+- **工程与测试**：新增 `NodeSwitchSleepTests.testSleepDuringNodeSwitchKeepsTheSwitchTargetForWake`
+  （一个 XCTest，沿用 `NetworkProtectionOperations` seam）：已连接 X，选 Y 后立即
+  `prepareForSystemSleep()` 并等拆除完成，断言 `preferManagedCatalogExitForConnect()` 为 Y。
+  旧代码返回 X，断言失败。
+- **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests），结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：原生更新挂起路径（`suspendForNativeUpdate`）退休切换时会话可能仍显示已连接，
+  不在此处记住 Y；未实机验证睡眠与 helper 睡眠门的先后顺序。
+
+## 2026-09-23 · macOS 被睡眠门拒绝的 Restore internet 不再在唤醒或网络变化时自动重连
+
+- **归属/来源**：G1 保护状态与用户意图；macOS `ConnectionCoordinator`、`AppState` 睡眠/唤醒与
+  网络变化路径。内部审查 X1-2（三名审查者独立发现），Issue #442，是 #310 的补全。基线 main
+  bb2ed4e4 → 分支 `fix/sleep-release-intent-20260923`；提交时未合 main。
+- **缺陷修复**：Restore internet 尚未走到 PF disarm 时合盖，helper 的睡眠门拒绝 disarm，
+  这次释放以"PF 仍 armed、Protected Offline"收尾。`completeDisconnect` 不管释放是否成功都
+  清掉释放意图，唤醒时 `resumeAfterSystemWake` 只剩 `KillSwitchService.isArmed == true`，
+  于是自动重连；不在唤醒恢复中时，随后的网络变化也会按 `isArmed` 触发重连。现在释放以 PF
+  仍 armed 收尾时保留释放意图，直到用户再次 Connect（`executeConnect` 清除）或新的拆除请求
+  替换它；只有通过 `prepare` 准入的 Connect 才清除，被拒的 connect（已在连接、无可用出口等）
+  不再提前清掉它（审查 R4 S13 说明 1）。唤醒和"未连接"的网络变化分支都尊重这个意图。主机保持 fail-closed（helper 睡眠时
+  写入的紧急阻断），用户再点 Restore internet 或 Connect 决定去向。
+- **新增/优化**：无。
+- **工程与测试**：`AppStateSleepTests.testSleepGateRefusedReleaseDoesNotReconnectOnWake`
+  （一个 XCTest，沿用 `NetworkProtectionOperations` seam）：释放停在 DNS 恢复时进入睡眠，
+  disarm 以睡眠门错误失败，拆除收尾后唤醒并触发一次网络变化，断言不建唤醒恢复任务、不排
+  重连。旧代码建出 `wakeRecoveryTask`，断言失败。
+- **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests），结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：唤醒后不会自动重试那次被拒的释放，需要用户再点一次 Restore internet；
+  睡眠门拒绝 disarm 的实际频率未在实机测量。释放意图只存在内存里：App 重启或重启机器后，
+  `performRestore` 经 `RuntimeCleanup` 读到 helper 仍 wanted，会置 `shouldResumeProtection`
+  并自动重连（main 已有行为，本 PR 未覆盖）。被拒 connect 提前清意图的问题已在本分支把清除
+  移到准入之后修掉；#439 在同一处把代际 bump 移到准入之后，两者合并时此处有一处文本冲突，
+  保留"准入后先 bump、再清意图"。清除移位没有新增测试，结论来自源码推理。
+
+## 2026-09-23 · macOS disarm 出错后先回读 PF 再决定是否发布 Protected Offline
+
+- **归属/来源**：G1 保护状态呈现；macOS `AppState+Connect` 释放拆除。内部审查 X1-8（降级：
+  触发面窄，下一次状态观测会自行纠正），Issue #436。基线 main bb2ed4e4 → 分支
+  `fix/disarm-error-readback-20260923`；提交时未合 main。
+- **缺陷修复**：helper disarm 先清掉 PF 锚点，再删除持久化状态；后者失败，或完整 disarm
+  成功但回执丢失时，App 收到错误，释放拆除的 catch 无条件发布 Protected Offline 和
+  "Kill switch transition failed"，而 PF 实际可能已解除、流量已直连。现在 disarm 抛错时
+  通过已有 `NetworkProtectionOperations.refreshKillSwitchStatus` 回读：只有
+  `.confirmed(requiresProtectionRecovery: false)` 才发布开放状态并清除本地 `isArmed`；
+  `.confirmed(true)`、`.unavailable`、`.rejected` 仍保持 fail-closed 声明。状态文件仍在的
+  情形，helper 的 status 会把 PF 重新装回，回读结果为 true，界面继续显示受保护，与实际一致。
+- **新增/优化**：无。
+- **工程与测试**：新增 `DisarmErrorReadbackTests.testDisarmErrorAfterBarrierRemovalDoesNotPublishProtectedOffline`
+  （一个 XCTest）：disarm 桩先把 `pfLive` 置 false 再抛错，status 回读返回 `pfLive`，断言
+  `isProtectionBlocked == false` 且 `isArmed == false`。旧代码不回读，发布 blocked，断言失败。
+  桩模拟的是"完整 disarm 后回执丢失"；审查 R4 指出测试注释原写成"清 PF 后删 state 失败"，
+  与 helper 语义相反（该情形 status 会自愈装回 PF，回读为 true），已改注释，断言未变。
+- **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests），结果以 PR 页为准。helper 状态删除失败场景未做实机复现。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：只处理释放路径的 disarm 出错；保留拆除中 `restrictToBootstrap` 出错仍按
+  受保护发布。回读本身拿不到回答时仍发布 Protected Offline，等下一次状态观测纠正。
+
+## 2026-09-23 · macOS 会话拆除时清除 Recovering 状态
+
+- **归属/来源**：G1 保护状态呈现；macOS `AppState+Connect` 断开准备。内部审查 X1-6，
+  Issue #434。基线 main bb2ed4e4 → 分支 `fix/recovering-flag-reset-20260923`；提交时未合 main。
+- **缺陷修复**：核心监视器连续健康失败时把 `isRecoveringProtectedConnection` 置 true；
+  原地恢复和自动切换都失败后，它以保留拆除断开并安排重连，但这个标志只在重新连上、监视器
+  自愈或切换成功时清除。首页主按钮让它优先于 Protected Offline 和 Not Connected，于是
+  Protected Offline 期间、甚至用户点 Restore internet 之后，仍显示 "Recovering protected
+  connection…" 并转圈，直到下一次连接成功。现在断开准备与其他会话状态一起把它复位。
+- **新增/优化**：无。
+- **工程与测试**：新增 `RecoveringPresentationTests.testReleaseClearsRecoveringPresentation`
+  （一个 XCTest），沿用 `NetworkProtectionOperations` seam，已连接且处于 Recovering 时执行
+  `disconnectAndWait(releaseKillSwitch: true)`，断言标志已清除。旧代码仍为 true，断言失败。
+- **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests），结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：原生更新的专用断开（`suspendForNativeUpdate`）不走这条断开准备，也没有复位
+  该标志；该路径由更新流程自己的界面接管，本修复未改动。
+
+## 2026-09-23 · macOS 从未 arm 的连接失败不再走显式释放修复
+
+- **归属/来源**：G1 保护恢复；macOS `AppState+Connect` 连接失败与拆除路径。内部审查 X1-4，
+  Issue #430。基线 main bb2ed4e4 → 分支 `fix/unarmed-connect-failure-20260923`；提交时未合 main。
+- **缺陷修复**：连接在首次 PF arm 之前失败时（例如 helper 准备失败、用户取消管理员提示，
+  或看门狗在 helper 准备阶段触发），失败清理调用 `disconnect(releaseKillSwitch: true)`，
+  释放路径无条件先跑显式释放用的 helper 修复。结果是：马上再弹一次用户没要求的管理员提示；
+  如果这次也失败，界面停在 Protected Offline，并提示 "traffic stays protected"，可本会话
+  从未 arm PF。没有 helper 时，释放路径还会去停一个本次从未启动的 core，停不掉同样发布
+  Protected Offline。现在这两处自动清理带上 `afterUnarmedConnectFailure`：等待中的连接
+  工作收尾后，如果 `KillSwitchService.isArmed` 仍为 false，就跳过显式释放修复，helper 清理
+  步骤只做尽力而为，不发布 Protected Offline，也不用拆除错误覆盖连接失败信息。取消过程中
+  arm 已完成的，仍走完整释放。用户主动 Restore internet 的路径不变。
+- **缺陷修复（审查 R4）**：上一版在该路径无条件 `transitionError = nil`，把真实的 DNS 恢复失败
+  一起吞掉（例如上次崩溃留下 127.0.0.1 与快照、`restoreDNS` 失败时，界面只剩连接失败与
+  Not connected）。现在只去掉与 Kill Switch 相关的拆除文案；DNS 恢复失败换成不提 Kill Switch
+  的提示保留（"may be unable to resolve names"，指向 Support 页恢复命令）。
+- **新增/优化**：无。
+- **工程与测试**：新增 `UnarmedConnectFailureTests.testUnarmedConnectFailureDoesNotRunExplicitReleaseRepair`
+  （一个 XCTest），沿用已有 `NetworkProtectionOperations` seam 和"缺 uuid 的目录节点在
+  helper 之前失败"的写法，修复桩计数并抛 `userDenied`。旧代码修复被调用一次，且
+  `isProtectionBlocked == true`，断言失败。审查后同一测试改为预置 `didStartCore`、让
+  `restoreDNS` 抛错，并断言 `errorMessage` 以 "Protected DNS restore failed" 开头且不提
+  Kill Switch；上一版（`transitionError = nil`）下 `errorMessage` 是连接失败文案，该断言失败
+  （推理得出，未实跑）。
+- **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests），结果以 PR 页为准。第二次管理员提示的实际弹出未做实机复现。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：本修复把"失败时 `isArmed` 为 false"视为"从未 arm"。首次 arm 回执丢失且
+  状态补查也失败时，`isArmed` 目前也是 false（X1-7，另一个 PR 修为按可能已 arm 处理），
+  两者都合入后这一判定才可靠。
+
+## 2026-09-23 · macOS 首次 arm 结果未知时保持 fail-closed 意图
+
+- **归属/来源**：G1 保护恢复；macOS `KillSwitchService.arm`。内部审查 X1-7（降级：需三个条件
+  同时发生），Issue #432。基线 main bb2ed4e4 → 分支 `fix/arm-unknown-outcome-20260923`；
+  提交时未合 main。
+- **缺陷修复**：helper 先持久化 armed 状态并加载 PF，再回复成功。回复丢失（helper 崩溃、
+  重启或接收超时）且紧接的 status 补查也拿不到回答时，App 本地 `isArmed` 仍为 false，
+  连接失败清理据此走释放拆除，helper 恢复后自动解除已经提交的 PF。现在只要请求可能已送达
+  （除套接字连接被拒以外的 IPC 失败）且 status 无回答，就按"可能已 arm"处理，把 `isArmed`
+  置 true：连接失败走保留拆除，其中 `restrictToBootstrap` 把 PF 装成 bootstrap 模式（真实
+  fail-closed），随后进入受保护重连循环。连接被拒（helper 从未收到请求）保持原行为。
+- **缺陷修复（审查 R4）**：helper 回复了成功、但回执不满足 `armed && wanted && live`（例如
+  wanted=true、live=false）时，原先直接抛错，本地 `isArmed` 仍为 false，失败清理会走释放。
+  现在抛错前按回执同步：`wanted || armed` 时置 `isArmed = true`。同时修正 `arm` 中"由重连
+  循环释放"的误导性注释，改为实际路径（保留拆除 + `restrictToBootstrap` + 重连）。
+  至此 Issue #480 点名的两种来源（回执丢失且补查失败、helper 持久化后崩溃未回复）以及
+  guard 失败变体都在 arm 处把 `isArmed` 置 true，保留拆除不会在 helper 持 PF 时发布开放；
+  #480 的兜底 PR #482 因在"首次连接睡眠且 helper 安装提示打开"时回归 #310 修过的误报
+  Protected Offline 而关闭，不再合入。
+- **新增/优化**：无。
+- **工程与测试**：`KillSwitchService` 新增窄 IPC seam `armIPC`（`deliver` 包住真实
+  `/killswitch/arm` 请求，`status` 读 `/killswitch/status`），生产行为不变。新增
+  `KillSwitchArmOutcomeTests.testLostArmReplyWithUnavailableStatusKeepsFailClosedIntent`
+  （一个 XCTest）：arm 抛 `emptyResponse`，status 抛 `connectFailed`，断言 `isArmed == true`。
+  旧逻辑下为 false，断言失败。"成功回执但 wanted 无 live"的同步没有新增测试，结论来自源码推理。
+- **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests），结果以 PR 页为准。回执丢失场景未做实机复现。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：请求实际没被 helper 处理（例如 helper 读到半截请求就退出）时，保留拆除的
+  `restrictToBootstrap` 仍会把 PF 装成 bootstrap，主机进入 Protected Offline 并重连，直到用户
+  Restore internet 或连接成功。窄窗口（审查 R4 S5）：保留拆除时 helper 不可达、之后可达并确认
+  未 arm，重连循环会走"外部释放已确认"，静默丢掉连接意图并清掉错误；未在本 PR 修。
+  helper 协议未改，CONTRACT.sha256 与协议版本不变。
+
+## 2026-09-23 · macOS helper 拒绝本 App（403）时，"修复并重连"能走到 helper 重装
+
+- **归属/来源**：G1 保护恢复；macOS `AppState+Connect` 受保护重连循环。内部审查 X1-3，
+  Issue #428。基线 main bb2ed4e4 → 分支 `fix/helper-rejected-repair-20260923`；提交时未合 main。
+- **缺陷修复**：PF 已 armed、helper 对本 App 返回 403 时，App 进入 Protected Offline 并暂停
+  自动重试，提示用户点"Repair and reconnect"。这个按钮启动的重连循环在调用 `connect()` 之前
+  先做外部释放对账，对账又读到 `.rejected`，于是重新暂停、清空循环。`connect()` →
+  `prepareHelper()` 里的管理员重装因此永远走不到，点多少次都一样，唯一出口是关掉保护的
+  Restore internet（#304 的 `protectionWasArmed` 守卫只覆盖从未 arm 的情形）。现在用户显式
+  重试把循环的第一次尝试标为修复请求：这次尝试遇到 `.rejected` 时不再暂停，继续进入
+  `connect()`，由 helper 准备阶段弹出管理员重装。自动重试、前台激活对账和 Support 远程重试
+  （`retryProtectedConnectionNow(repairHelper: false)`）遇到拒绝仍然暂停，不会自行弹出管理员
+  提示。PF 全程保持 fail-closed。
+- **新增/优化**：无。
+- **工程与测试**：`ProtectedReconnectTests` 新增一个 XCTest
+  `testRepairAndReconnectReachesConnectWhenHelperRejectsThisApp`，用已有的
+  `NetworkProtectionOperations.refreshKillSwitchStatus` seam 固定返回 `.rejected`，PF armed、
+  处于用户操作暂停状态，调用 `retryProtectedConnectionNow()`。断言连接尝试确实发生
+  （`lastConnectionFailure` 非空，沿用同文件"缺 uuid 的目录节点在 helper 之前快速失败"的
+  写法），且之后的自动尝试仍因拒绝暂停。旧代码在第一次尝试就暂停，`lastConnectionFailure`
+  为空，断言失败。未改 helper 源码，CONTRACT.sha256 与协议版本不变。
+- **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests），结果以 PR 页为准。真实 403 下的管理员重装未做实机验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：如果 403 的原因是运行中的 App 包已被替换，重装 helper 也无效（需要重启 App），
+  现有文案仍指向重装。重装被用户取消或失败时，仍按既有规则暂停，等待用户下一次操作。
+
+## 2026-09-23 · macOS 旧 helper 读不了 DNS 快照时不再阻止自身被替换
+
+- **归属/来源**：G1 保护恢复；macOS `HelperManager.installIfNeeded` 升级前检查。内部审查
+  X1-1（#303/#307 修复不完整），Issue #426。基线 main bb2ed4e4 → 分支
+  `fix/helper-upgrade-dns-preflight-20260923`；提交时未合 main。
+- **缺陷修复**：替换已认证的旧 helper 前，App 要求旧 helper 先恢复 DNS、停 core、并确认 PF
+  live，任一步失败都抛 `installFailed`，而且这一步排在静默升级和管理员安装之前。旧 helper
+  遇到损坏快照或快照所记服务已删除时（#307/#303 修的正是这一情形），每次恢复 DNS 都失败，
+  新 helper 因此永远装不上，主机停在 Protected Offline：Retry 和 Restore internet 都提示
+  "批准管理员提示"，但提示从不出现。现在升级前检查抽成
+  `prepareAuthenticatedHelperForReplacement`：旧 helper 恢复 DNS 失败只记审计事件
+  `helper_upgrade_dns_restore_deferred`，不再阻止升级；停 core 和"PF 需要时必须 live"仍是硬
+  条件（保护不放宽）。升级后由新 helper 的 `/dns/restore` 隔离损坏快照并清扫 loopback 解析器，
+  应用内 Retry / 管理员安装因此成为不依赖旧二进制的恢复出口。
+- **新增/优化**：无。
+- **工程与测试**：新增一个 XCTest
+  `HelperUpgradePreflightTests.testUnreadableDNSStateOnPreviousHelperDoesNotBlockItsReplacement`：
+  注入恢复 DNS 抛错、停 core 成功、PF armed/wanted/live，断言不抛错且 core 已停。旧代码没有
+  这个函数（测试无法编译，即失败）；按旧语义（恢复失败即抛）也会失败。未改 helper 源码，
+  CONTRACT.sha256 与协议版本不变。
+- **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests），结果以 PR 页为准。"旧 helper + 损坏快照 → 升级"未做实机验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：App 文案中的 sudo 应急命令仍调用已安装的二进制，对旧 helper 的损坏快照依旧
+  无效；应用内出口是 Retry 触发的升级。升级后到新 helper 恢复 DNS 之前，系统解析器可能仍指向
+  已停止的 loopback（无泄漏，PF 仍 fail-closed）。
+
+## 2026-09-23 · macOS Helper 持有自己的 PF 启用引用，已连接期间监督 PF 是否仍在过滤
+
+- **归属/来源**：G1 连接保护；macOS `tono-core-helper` 的 PF 生命周期与 App 连接监控。
+  内部审查 H12-F1，Issue #420，PR #421。基线 main bb2ed4e4（含 #311）→ 分支
+  `fix/pf-enable-ref-20260923`；提交时未合 main。
+- **缺陷修复**：`ensureAnchorLoaded` 只在 PF 关闭时执行 `pfctl -e`。如果别的程序已经用引用
+  令牌启用了 PF，Helper 自己不持有任何引用，对方释放令牌后 PF 停止。另外，已连接期间没有
+  任何地方检查 PF：`status()` 只在被调用时修复，而已连接的 App 不调用它。结果是 kill switch
+  可能不再过滤，UI 仍显示已连接，直到下一次 arm。现在：
+  - 每次 arm 都用 `pfctl -E` 取得 Helper 自己的引用，令牌连同 boot session 记录在
+    `/Library/Application Support/Tono/pf.reference`。先记录新令牌再释放旧令牌。disarm 在
+    清空锚点、删除意图之后，只释放本次开机记录且内核仍列出的那一个令牌。
+  - Helper 空闲循环每 10 秒检查一次（在更新锁内）。armed 时如果 PF 未启用、主规则集缺少
+    Tono 锚点或规则不在，就按持久状态重装（失败则装紧急阻断），并置 `repairedSinceArm`。
+    只丢了引用时重新取得引用。
+  - 新增只读 `GET /killswitch/health`（不加载规则、不 flush）。App 已连接时每 60 秒读取一次。
+    如果 Helper 报告修复过 PF 或 PF 不生效，App 在断网保护下重连，并显示“保护异常：另一个
+    程序中断了网络保护”。重连会恢复本会话的直连例外，持久状态不含这些例外。
+- **审查修正（第四轮 macOS 审查 #421 三点）**：
+  - 误判：监督第一次读到 PF 不生效后，在锁内间隔 200 ms 再读一次，两次都不生效才修复。
+    `effectiveStatus()` 由三次 pfctl 组成，单次读失败或超时不再触发清空全机连接状态和 App 重连。
+  - 上限：App 用独立计数 `consecutiveProtectionRepairCount` 记录监督修复次数，重连成功不清零。
+    第 3 次时不再重连，停在断网保护下的暂停终态，显示“保护异常：另一个程序反复关闭或替换
+    Tono 的网络保护……自动重连已暂停”，网络变化不解除；只有“立即重试”或“恢复正常网络”
+    清零。之前另一款 PF 类 VPN/防火墙周期性重载规则集时，每约 60 秒断线重连一次，没有终点。
+  - 令牌泄漏：记录写入失败时，不再每 10 秒取一个新令牌。刚取得的令牌保存在 Helper 进程内存，
+    下一次检查用同一令牌重试写入，disarm 同时释放它。没有照审查字面“写入失败就 `-X` 释放”：
+    没有其他引用时，这样做会让 armed 状态下的 PF 停止（保护变松）。每个 Helper 进程最多遗留
+    一个未记录令牌（进程重启后到重启机器前 PF 保持启用、锚点为空，无害）。
+- **新增/优化**：无独立新功能。`/killswitch/health` 只服务于上述检测。
+- **工程与测试**：`--lifecycle-self-test` 新增一组引用检查（CI privileged-tests 以 root 真实
+  运行 pfctl）：先模拟另一个程序 `-E` 取得令牌，Helper 取得并记录自己的令牌，释放对方令牌后
+  PF 仍启用，重复调用复用同一令牌，释放后令牌不再列出、记录已删除，PF 恢复到测试开始时的
+  状态。旧实现没有这些函数（无法编译）；按旧语义（PF 已启用就跳过），对方释放后 PF 会停止。
+  Helper 源码变更按契约门推进 `HelperProtocolVersion` 4.15.0 → 4.16.0（合并列车按顺序编号），CONTRACT.sha256 按 build-core-helper.sh 同一清单与管道本机重算（纯文本哈希，
+  未编译）。
+- **验证**：本机（编辑机）未运行 swift/xcodebuild；Helper 编译、`--lifecycle-self-test`
+  与 App 编译/TonoTests 委托本 PR 的 GitHub-hosted `macos-26` CI，结果以 PR 页为准。
+  本机只确认了 `/sbin/pfctl` 含 `Token : %llu`、`TOKENS:`、`pf: token invalid` 等字符串
+  （`-E`/`-X`/`-s References` 存在），没有在本机改动 PF。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：App 侧的重连分支与修复次数上限都没有单独的 XCTest（监控 tick 直接调用
+  Helper，没有注入点）；复读与未记录令牌的处理也没有自检覆盖，审查修正本机未编译，委托 CI。
+  修复计数不按时间衰减：跨越很长时间的零星修复累计到 3 次也会暂停（保持 fail-closed，
+  “立即重试”即可恢复）。唤醒路径：本条提交时 `resumeAfterSystemWake` 不看暂停标志，暂停后
+  每次唤醒会再重连一次（2026-09-24 更正：合并列车中 #458 让唤醒在重新确认 PF 后保留网络变化
+  也不解除的暂停；修复次数上限的暂停属于这一类，唤醒后保持暂停、不再重连）。
+  最坏情况下检测延迟为 Helper 10 秒加 App 60 秒；Helper 在 10 秒内修复 PF，App 的重连只负责
+  恢复会话例外并提示用户。哪些系统组件用令牌启用 PF、XNU 引用计数的精确语义、PF 被关闭期间
+  的实际泄漏面，都需要实机确认。另一个产品把自己的锚点插在 Tono 锚点之前的情况不在本条范围。
+
+## 2026-09-23 · macOS Helper 启动先恢复 PF，启动失败装紧急阻断，紧急阻断不依赖 /etc/pf.conf
+
+- **归属/来源**：G1 连接保护（重启后保持保护）；macOS `tono-core-helper` 启动顺序与紧急阻断。
+  内部审查 H12-F2，Issue #423（Helper 部分；App 侧“当前未受保护”提示另行 PR）。基线 main
+  bb2ed4e4（含 #311）→ 分支 `fix/boot-protection-first-20260923`；提交时未合 main。
+- **缺陷修复**：开机时 `com.apple.pfctl` 只加载 `/etc/pf.conf`，不启用 PF；只有 Helper 会启用。
+  此前 Helper 在 `SocketServer.init` 里先解析用户组、建鉴权器、建 `/var/run/tono-core`、构造
+  `CoreManager`（查 home、清理旧 core），最后才构造 `KillSwitchManager` 恢复 PF。前面任何一步
+  抛错，main 的 catch 直接退出，PF 保持关闭，KeepAlive 反复重试同一失败。紧急阻断也走
+  `/etc/pf.conf`，该文件无法解析时同样失败。现在：
+  - main 在执行器恢复（`UpdateExecutor.startup`，#308 行为不变）之后，读取 allowed-uid 后立即
+    构造 `KillSwitchManager` 恢复 PF，再构造其余服务（`startHelperDaemon`）。
+  - 之后任何启动失败，只要持久保护意图（`killswitch.state`）存在，就装紧急阻断
+    （`secureFailedStartup`，读不到 allowed-uid 也装，紧急规则不含按用户的规则）。收到停止
+    请求时视为干净停止，不装阻断，与 #308 一致。
+  - 紧急阻断在正常路径失败时改载 Tono 自有的最小主规则集
+    `/Library/Application Support/Tono/pf.tono-main.conf`（只含 Tono 锚点与 load）。
+    `/etc/pf.conf` 恢复可用后，下一次正常加载会重新载入主规则集并删除该文件。
+- **新增/优化**：无。
+- **工程与测试**：`--self-test` 新增 `runStartupOrderSelfTest`：注入的启动步骤中服务端构造
+  抛错，断言顺序为恢复 → 服务端 → 紧急阻断；收到停止请求时不装阻断。旧代码没有这个启动
+  函数，失败时也不装阻断（无法编译，即失败）。`--lifecycle-self-test` 新增一条只解析
+  （`pfctl -nf`）的检查，确认独立主规则集能被 pfctl 接受。Helper 源码变更按契约门推进
+  `HelperProtocolVersion` 4.9.0 → 4.15.0（合并列车按顺序编号；4.10.0–4.14.0 已被 PR CI 构建用过，跳过），CONTRACT.sha256 按
+  build-core-helper.sh 同一清单与管道本机重算（纯文本哈希，未编译）。
+- **验证**：本机（编辑机）未运行 swift/xcodebuild；Helper 编译、`--self-test`、
+  `--lifecycle-self-test` 委托本 PR 的 GitHub-hosted `macos-26` CI，结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：Helper 根本没被 launchd 加载（登录项中关闭后台）时，本条无法起作用，由 App 侧
+  提示覆盖（另行 PR）。紧急阻断的独立主规则集在 CI 上只做了解析检查，没有在真实机器上以
+  损坏的 `/etc/pf.conf` 实际加载。与 #421（H12-F1）在 `ensureAnchorLoaded` 附近有文本重叠，
+  合并时需 rebase 并重算契约哈希。
+
+## 2026-09-23 · macOS 迁移到另一台 Mac 的会话按硬件锚点丢弃，按新设备登录
+
+- **归属/来源**：G1 账户/设备身份；影响 macOS `KeychainStore` 与 `AccountSession.restore`。
+  内部审查 H11-F2（macOS 最小部分），Issue #409。基线 main 833c0607 → 分支
+  `fix/macos-device-anchor-20260923`；提交时未合 main。
+- **缺陷修复**：refresh token 和 installationId 的 Keychain 项虽然设了 `ThisDeviceOnly`，但没有
+  `kSecUseDataProtectionKeychain`，App 也没有 access group，项目落在文件型 login keychain 中，
+  该属性不生效。迁移助理或 Time Machine 恢复会把它们带到新 Mac，两台机器共用一个设备身份
+  和一个单次使用的 refresh token，一台轮换后另一台被判会话死亡而登出。现在 Keychain 里另存
+  `SHA256(IOPlatformUUID)` 锚点，restore 最先比对：锚点不符就删除本机副本的 refresh token 和
+  installationId 并记下新锚点，随后走既有的无 token 路径（purge 托管目录、显示未登录），用户
+  按新设备登录，原 Mac 的会话不受影响。旧版本存储没有锚点时直接采纳当前锚点。硬件 UUID
+  读不到时不做判断。
+  - 审查后补充（#414 第三轮审查的非阻断建议）：首次写入锚点失败时只记日志并保留会话，
+    restore 继续，下次启动重试写入；此前该错误会让 restore 进入 `.error` 状态（保护保留、
+    不登出，但无法恢复会话）。锚点不符后的删除 token、删除 installationId 和写入新锚点失败
+    仍然抛错。
+- **新增/优化**：无。
+- **工程与测试**：新增一个 XCTest
+  `KeychainDeviceAnchorTests.testASessionCarriedToAnotherMacIsDroppedAndGetsANewDeviceIdentity`：
+  用注入的锚点 "mac-a" 建立会话，再用 "mac-b" 调用，断言 refresh token 已删除、installationId
+  已更换，同锚点重复调用则保留会话。旧代码没有这个检查（测试无法编译，即失败）。
+  审查后在同一个测试开头补了断言：首次写入锚点被注入的写入函数拒绝时，函数返回 false 且
+  不抛错，锚点仍为空（下次启动重试）。修改前的分支上首次写入失败会直接抛错，且没有
+  `recordAnchor` 参数，测试无法编译，即失败。
+- **验证**：本机（编辑机）未运行 xcodebuild，审查后的修正同样本机未编译；委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests），结果以 PR 页为准。迁移助理 / Time Machine 场景未做实机验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：修复前已经克隆的两台 Mac 都会采纳各自的锚点，无法识别（需要服务端或用户
+  操作处理）。更换主板会改变 IOPlatformUUID，这时会登出一次。改用 data protection keychain
+  （需要 provisioning profile 和 access group，属于签名链变更）以及 Windows 变体
+  （`CRED_PERSIST_LOCAL_MACHINE`、会话标记放到 `%LOCALAPPDATA%`）另行跟踪，见 #409。
+
+## 2026-09-23 · macOS 策略 revision 只认签名内的值（H3-F5 macOS 客户端侧）
+
+- **归属/来源**：G1 保护不放宽/签名信任边界；影响 macOS `ManagedTrafficPolicySignature.swift`、
+  `ManagedTrafficPolicyProcessor.swift`、`AppState+Catalog.swift`。基线 main bb2ed4e4，分支
+  `fix/macos-policy-revision-20260923`；Issue #317；与 Windows #342 同一规则；提交时未合 main。
+- **缺陷修复**：签名只覆盖 `v1\n + json`，revision 在签名外却是单调闸门；被攻破的 Worker 或
+  TLS 中间人可把历史真实签名策略配超大 revision 重放并写入磁盘缓存，此后真实新 revision
+  全被当作旧版丢弃。改后：json 内若带 `revision` 必须等于信封 revision，否则整份拒绝（记
+  `managed_direct_policy_revision_mismatch`）；只有"签名 Trusted 且 json 内 revision 等于信封"
+  才算已认证 revision；已认证 revision 无视数值替换未认证的当前/缓存 revision（已被钉住的客户端
+  借此恢复）；装入已认证 revision 后，未签名或旧式签名文档不能再推动闸门（静默保持）。
+  AppState 内存闸门、磁盘缓存比较与 processor `persistIfNewest` 统一走 `revisionOrder`；
+  认证状态只由文档与签名推出，磁盘缓存重启后结论不变。主机信任仍只由签名结论与编译期白名单
+  决定，未放宽。
+- **新增/优化**：无。
+- **工程与测试**：新增 XCTest `testSignedRevisionOutranksAnUnsignedRevisionPin`（一次性密钥）。
+- **验证**：红灯：只含测试与未接线辅助函数的提交 82cc2ede 在 GitHub-hosted macOS CI（run
+  35948917094）build 作业中该 XCTest 以断言失败（测试第 80 行：json 写 revision 4、信封 5 的文档被
+  接受），非编译错误。同一 run 的 policy-tests 作业因红灯提交里签名文件引用了独立编译清单外的
+  `ManagedTrafficPolicyCache` 而编译失败，修复提交把按缓存取值的重载移到 processor 文件解决（工程
+  修正，非产品缺陷）。修复后结果见 PR CI。本机未运行 xcodebuild/swift（AGENTS 执行地点约束）。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：Worker 尚未在 canonical json 中写入 revision（后续 PR，默认关闭开关），本修复
+  在服务端开启前处于休眠（旧文档行为与现状相同）；AccountSession 诊断显示的
+  `trafficPolicyRevision` 仍取历史最大值，被钉住后恢复时该显示值不回落（仅诊断，不影响闸门）；
+  无实机验证。
+
+## 2026-09-23 · macOS 网络日志上传：服务器明确不存储时停驻，不再重发整段
+
+- **归属/来源**：G2（客户端 3.5 网络日志上传，#137）；macOS App `DiagnosticsLogUploader`。
+  内部审查 H13-F1，Issue #452（Windows 对应修复另开 PR）。基线 main bb2ed4e4 → 分支
+  `fix/log-upload-standdown-macos-20260923`；提交时未合 main。
+- **缺陷修复**：上传默认开，Worker 只为 ops 打开采集窗口的设备存储，其余返回 200
+  `stored:false`。App 把它当普通失败：保留整段、游标不动，按 120→960 s 退避后重发同一段
+  （最多 2 MiB gzip），无限期；已连接时这些字节经出口节点计入用户配额。现在
+  `uploadDiagnosticsLogSegment` 对不存储回执抛出专用 `DiagnosticsLogNotStoredError`
+  （文案不变），上传器收到后丢弃内存中的段（服务器已说明未存该键）、游标保持不动、进入停驻：
+  每 30 分钟用不超过 64 KiB 原始数据的小段探测一次；任何一次成功存储即结束停驻并恢复正常
+  分段。手动“立即上传”仍显示“未存储”的原因。
+- **新增/优化**：无。
+- **工程与测试**：`DiagnosticsLogUploadOutcomeTests` 新增一个 XCTest
+  `testANotStoredReceiptStandsDownToASmallProbe`：约 280 KB 日志，首段 1,200 行被拒后，
+  下一次间隔为停驻间隔，第二次只发不超过 64 KiB 的探测段。旧代码下第二次会重发同样的
+  1,200 行整段（新测试引用的错误类型与间隔常量在旧代码中不存在）。已有
+  `testNoStoreLogReceiptReportsFailureAndRetainsTheUploadCursor` 语义不变（拒收后同一序号
+  重试、存储后游标前进）。
+- **验证**：本机（编辑机）未运行 swift/xcodebuild；编译与 TonoTests 委托本 PR 的
+  GitHub-hosted `macos-26` CI，结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：停驻状态只在内存中，App 重启后第一次仍会发一个完整段再进入停驻。ops 打开
+  采集窗口后最长约 30 分钟才开始上传。实际上行字节量需实机抓包确认。
+
+## 2026-09-23 · macOS 登出时删除含账户出口凭据的 sing-box 运行时文件
+
+- **归属/来源**：G1 账户隔离；影响 macOS `ManagedExitCatalogOwnership`/`ConfigStorage`。
+  内部审查 H11-F1（macOS 部分），Issue #407。基线 main 833c0607 → 分支
+  `fix/macos-runtime-copy-20260923`；提交时未合 main。
+- **缺陷修复**：`CoreRuntimeManager` 把 sing-box 运行时写到
+  `~/Library/Application Support/Tono/config/config.json`，其中含节点 `uuid`、Reality 参数、
+  住宅 socks 用户名/密码和 clash_api secret。登出屏障 `purge` 只删目录缓存并丢弃托管地区，
+  该文件一直留到下一个账户连接时才被覆盖。现在所有权丢弃（`purge`：用户登出、账户丢失、
+  无 token 启动；`adopt` 到其他账户）同时删除该文件。helper 运行的是 `/var/run/tono-core`
+  下自己的 root 快照；每次 start/reload 都会先重写用户侧文件，因此删除不影响运行中的 Core。
+- **新增/优化**：无。
+- **工程与测试**：新增一个 XCTest
+  `ManagedExitCatalogOwnershipTests.testSignOutRemovesTheRuntimeBuiltFromTheAccountsCatalog`：
+  在 `runtimeConfigPath` 写入含住宅密码的文件，调用 `purge()`，断言文件已删除。旧实现不删，
+  断言失败。
+- **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests），结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：macOS 没有卸载器，拖走 App 后 App Support 仍会残留（平台惯例，未处理）。
+  未做实机验证。
 ## 2026-09-24 · exit-agent `rmu` 改为位置参数 email（Xray 26）
 
 - **归属**：ops 出口节点吊销与计量；`services/exit-agent/reconcile_and_report.py`。

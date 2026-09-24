@@ -17,6 +17,12 @@ struct TonoApp: App {
         // Before any service exists: a fault while constructing AppState or the
         // account session would otherwise leave no local trace at all.
         CrashReporter.shared.install()
+        // Before AppState reads the incomplete-update warning.
+        UpdateHandoffStore.retireCompletedLegacyJournal(
+            currentAppVersion: Bundle.main.object(
+                forInfoDictionaryKey: "CFBundleShortVersionString"
+            ) as? String ?? ""
+        )
         let appState = AppState()
         let sidecar = TonoSidecarService()
 #if DEBUG
@@ -67,7 +73,9 @@ struct TonoApp: App {
                 await appState.claudeTrafficResearchSnapshot()
             },
             protectionBlockedConsumer: { appState.isProtectionBlocked },
-            protectedRetryConsumer: { appState.retryProtectedConnectionNow() },
+            protectedRetryConsumer: {
+                appState.retryProtectedConnectionNow(repairHelper: false)
+            },
             appRoutingResearchActivationConsumer: {
                 appState.appRoutingResearchActivationChanged()
             },

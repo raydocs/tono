@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 import Security
+import ServiceManagement
 
 /// Installs and talks to the narrowly scoped privileged Mihomo launcher.
 ///
@@ -29,6 +30,9 @@ nonisolated struct HelperManager {
         let wantArmed: Bool?
         let live: Bool?
         let healed: Bool?
+        /// Set by the helper's PF liveness supervisor after it had to reinstall
+        /// the kill switch; cleared by the next arm. Absent before 4.16.0.
+        let repairedSinceArm: Bool?
         let flushedStates: Bool?
         /// Addresses whose states were killed individually instead of flushing
         /// the machine. Absent from a pre-3.11.0 daemon, which only had the
@@ -40,6 +44,11 @@ nonisolated struct HelperManager {
         let configured: Bool?
         let snapshotPresent: Bool?
         let service: String?
+        /// `/dns/restore` only: `false` when the service that owned the
+        /// snapshot no longer exists, so the recorded servers were archived
+        /// instead of written back. A helper without service-ID snapshots
+        /// never sends it.
+        let originalDNSRestored: Bool?
         let lastError: String?
         let error: String?
     }
@@ -221,22 +230,19 @@ nonisolated struct HelperManager {
         // after this method returns.
         if installedVersion != nil {
             do {
-                _ = try restoreProtectedDNSIfConfigured()
-                try stopCore()
-                let status = try killSwitchStatus()
-                if status.armed || status.wanted, !status.live {
-                    throw HelperIPCError.commandFailed(
-                        "The previous helper could not keep PF fail-closed during its upgrade."
-                    )
-                }
+                try prepareAuthenticatedHelperForReplacement(
+                    restoreDNS: { _ = try restoreProtectedDNSIfConfigured() },
+                    stopCore: stopCore,
+                    killSwitchStatus: killSwitchStatus
+                )
             } catch {
                 LocalTrafficAudit.shared.recordEvent(
                     "helper_upgrade_preflight_failed",
                     details: ["error": error.localizedDescription]
                 )
                 throw HelperInstallError.installFailed(
-                    "The previous network helper could not restore DNS, stop "
-                        + "the core, and retain firewall protection safely. "
+                    "The previous network helper could not stop the core and "
+                        + "retain firewall protection safely. "
                         + error.localizedDescription
                 )
             }
@@ -409,8 +415,76 @@ nonisolated struct HelperManager {
         """
     }
 
+    /// Readies an authenticated older helper for replacement. Stopping the
+    /// core and confirming that any wanted PF state is live are required: PF
+    /// is the leak boundary while the daemon is swapped. DNS recovery is
+    /// attempted but does not gate the swap. An older helper that cannot read
+    /// its own DNS snapshot (corrupt, or naming a service that no longer
+    /// exists) fails this step on every attempt, and the replacement helper
+    /// is the component that can quarantine that snapshot and sweep the
+    /// loopback resolver. Refusing the upgrade here left such a host in
+    /// Protected Offline with no in-product way out.
+    static func prepareAuthenticatedHelperForReplacement(
+        restoreDNS: () throws -> Void,
+        stopCore: () throws -> Void,
+        killSwitchStatus: () throws -> (armed: Bool, wanted: Bool, live: Bool, healed: Bool)
+    ) throws {
+        do {
+            try restoreDNS()
+        } catch {
+            LocalTrafficAudit.shared.recordEvent(
+                "helper_upgrade_dns_restore_deferred",
+                details: ["error": error.localizedDescription]
+            )
+        }
+        try stopCore()
+        let status = try killSwitchStatus()
+        if status.armed || status.wanted, !status.live {
+            throw HelperIPCError.commandFailed(
+                "The previous helper could not keep PF fail-closed during its upgrade."
+            )
+        }
+    }
+
     static func isHelperRunning() -> Bool {
         currentVersion() == helperVersion
+    }
+
+    /// Read-only launchd view of the helper, used to explain an unreachable
+    /// helper while this Mac should be protected. Neither query needs
+    /// privileges.
+    enum LaunchState: Equatable {
+        /// Turned off under Login Items › Allow in the Background. launchd will
+        /// not start it, and no repair from the app works until it is back on.
+        case backgroundDisabled
+        /// launchd has no such job, so nothing restored PF after the last
+        /// restart: macOS loads the PF rules at boot but leaves PF disabled.
+        case notLoaded
+        /// Loaded (an unreachable helper is then busy or restarting, and its PF
+        /// rules stay in the kernel), or launchd could not say.
+        case loadedOrUnknown
+    }
+
+    static func launchState() -> LaunchState {
+        if SMAppService.statusForLegacyPlist(
+            at: URL(fileURLWithPath: plistInstallPath)
+        ) == .requiresApproval {
+            return .backgroundDisabled
+        }
+        return daemonRegisteredWithLaunchd() ? .loadedOrUnknown : .notLoaded
+    }
+
+    /// What to tell the user instead of a generic repair error. nil when the
+    /// launch state is no evidence that protection is off.
+    static func unprotectedNotice(for state: LaunchState) -> String? {
+        switch state {
+        case .backgroundDisabled:
+            String(localized: "Tono's network helper is turned off in System Settings > General > Login Items & Extensions, so this Mac is not protected right now. Turn Tono on under Allow in the Background, then click Retry.")
+        case .notLoaded:
+            String(localized: "Tono's network helper is not running, so this Mac is not protected right now. Click Retry and approve the administrator prompt to repair it.")
+        case .loadedOrUnknown:
+            nil
+        }
     }
 
     static var hasInstalledHelperArtifact: Bool {
@@ -502,7 +576,7 @@ nonisolated struct HelperManager {
         return process.terminationStatus == 0
     }
 
-    private static func installedArtifactVersion() -> String? {
+    static func installedArtifactVersion() -> String? {
         guard hasInstalledHelperArtifact else { return nil }
         let process = Process()
         let output = Pipe()
@@ -664,6 +738,22 @@ nonisolated struct HelperManager {
         return (reply.armed, reply.wanted, reply.live, reply.healed)
     }
 
+    /// Read-only PF liveness for a connected session. Unlike
+    /// `killSwitchStatus()`, the helper loads nothing and flushes nothing to
+    /// answer it.
+    static func killSwitchHealth() throws -> (
+        wanted: Bool, live: Bool, repairedSinceArm: Bool
+    ) {
+        let result = try sendRequest(method: "GET", path: "/killswitch/health")
+        let envelope = try requireSuccess(result, operation: "kill switch health")
+        guard let wanted = envelope.wantArmed,
+              let live = envelope.live,
+              let repaired = envelope.repairedSinceArm else {
+            throw HelperIPCError.invalidResponse
+        }
+        return (wanted, live, repaired)
+    }
+
     /// Whether any daemon answered the socket at all, regardless of the reply's
     /// success. Distinguishes "helper busy or unhappy but present" from
     /// "nothing is listening" — only the latter justifies notInstalled.
@@ -694,6 +784,43 @@ nonisolated struct HelperManager {
               envelope.snapshotPresent != true else {
             throw HelperIPCError.invalidResponse
         }
+        if protectedDNSRestoreNotice(restoreReply: result.body) != nil {
+            // The helper archives that snapshot, so no later restore reports
+            // it again. Keep the notice until a window has shown it: this
+            // restore may run at launch, on Quit or in update preparation.
+            AppProfile.defaults.set(true, forKey: protectedDNSOriginalLostKey)
+            LocalTrafficAudit.shared.recordEvent(
+                "protected_dns_original_service_missing",
+                details: ["service": envelope.service ?? ""]
+            )
+        }
+    }
+
+    private static let protectedDNSOriginalLostKey = "Tono_protectedDNSOriginalLost"
+
+    /// The user-facing notice for a successful `/dns/restore` reply, or nil
+    /// when the original servers went back (or the helper predates the
+    /// field). Success with `originalDNSRestored: false` means PF may be
+    /// released, but the user's saved DNS servers were not restored.
+    static func protectedDNSRestoreNotice(restoreReply body: Data) -> String? {
+        guard let envelope = try? JSONDecoder().decode(Envelope.self, from: body),
+              envelope.originalDNSRestored == false else { return nil }
+        return protectedDNSOriginalLostNotice
+    }
+
+    private static var protectedDNSOriginalLostNotice: String {
+        String(
+            localized: "The network service whose DNS settings Tono saved has been deleted, so those DNS servers could not be put back. DNS is now obtained automatically. If your network needs manual DNS servers, set them again in System Settings > Network."
+        )
+    }
+
+    /// Returns the pending original-DNS notice once and clears it.
+    static func takeProtectedDNSRestoreNotice() -> String? {
+        guard AppProfile.defaults.bool(forKey: protectedDNSOriginalLostKey) else {
+            return nil
+        }
+        AppProfile.defaults.removeObject(forKey: protectedDNSOriginalLostKey)
+        return protectedDNSOriginalLostNotice
     }
 
     /// Restore whenever the helper can inspect DNS. A missing snapshot used to

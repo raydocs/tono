@@ -31,3 +31,23 @@ struct NetworkProtectionOperations {
             await PrivilegedRuntimeCoordinator.shared.refreshKillSwitchStatus()
         }
 }
+
+/// System boundary for the read-only audits a connected session runs: the
+/// primary network service, the Protected DNS integrity read and the
+/// helper's PF health. Production asks the privileged coordinator; tests
+/// substitute the replies so one core monitor tick's DNS and PF audits run
+/// without the helper.
+@MainActor
+struct ProtectionAuditOperations {
+    var primaryNetworkService: () async -> String? = {
+        await PrivilegedRuntimeCoordinator.shared.primaryNetworkService()
+    }
+    var protectedDNSIntegrity:
+        (String) async -> PrivilegedRuntimeCoordinator.ProtectedDNSIntegrity = {
+            await PrivilegedRuntimeCoordinator.shared.protectedDNSIntegrity(service: $0)
+        }
+    var killSwitchHealth:
+        () async -> (wanted: Bool, live: Bool, repairedSinceArm: Bool)? = {
+            await PrivilegedRuntimeCoordinator.shared.killSwitchHealth()
+        }
+}

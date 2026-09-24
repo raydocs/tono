@@ -79,7 +79,8 @@ extension AppState {
                     "connectBegin",
                     stage: ConnectionStage.preparing.rawValue,
                     node: selectedExit?.name,
-                    generation: Int(self.connectionCoordinator.protectionOperationGeneration),
+                    // executeConnect bumps right after this admission.
+                    generation: Int(self.connectionCoordinator.protectionOperationGeneration &+ 1),
                     transport: selectedExit?.catalogTransport
                 )
                 return (true, UUID())
@@ -114,7 +115,10 @@ extension AppState {
                     self.scheduleProtectedReconnect()
                 } else {
                     self.errorMessage = stalledMessage
-                    self.disconnect(releaseKillSwitch: true)
+                    self.disconnect(
+                        releaseKillSwitch: true,
+                        afterUnarmedConnectFailure: true
+                    )
                 }
             },
             perform: { [weak self, coreRuntime] attemptID, generation in
@@ -475,6 +479,7 @@ extension AppState {
                 self.connectionStage = .preparing
                 self.lastProtectedFailureSignature = nil
                 self.consecutiveProtectedFailureCount = 0
+                self.consecutiveNoNetworkServiceFailures = 0
                 self.connectionCoordinator.connectWatchdogTask?.cancel()
                 self.connectionCoordinator.connectWatchdogTask = nil
                 self.connectionCoordinator.connectTask = nil
@@ -553,7 +558,9 @@ extension AppState {
                     }
                     if environmentalFailure {
                         // Leave the counter untouched either way.
+                        self.consecutiveNoNetworkServiceFailures += 1
                     } else {
+                        self.consecutiveNoNetworkServiceFailures = 0
                         let failureSignature =
                             "\(failedStage.rawValue)|\(failureMessage.prefix(120))"
                         if failureSignature == self.lastProtectedFailureSignature {
@@ -586,6 +593,20 @@ extension AppState {
                             self.protectedReconnectPauseLiftsOnNetworkChange = true
                             self.errorMessage = failureMessage + " "
                                 + String(localized: "The same failure repeated three times, so automatic retries are paused. Click Retry now to try again, or Restore internet to get back online.")
+                        } else if environmentalFailure,
+                                  self.consecutiveNoNetworkServiceFailures
+                                    >= Self.noNetworkServiceRetryLimit {
+                            // Still self-healing, but no longer on a timer: a
+                            // network-change kick lifts this pause, and the
+                            // counter is left in place so each such kick buys
+                            // one attempt, not another full round.
+                            self.protectedReconnectPausedForUserAction = true
+                            self.protectedReconnectPauseLiftsOnNetworkChange = true
+                            LocalTrafficAudit.shared.recordEvent(
+                                "no_network_service_retries_paused",
+                                details: ["attempts": String(self.consecutiveNoNetworkServiceFailures)]
+                            )
+                            self.errorMessage = String(localized: "macOS reports no active network service, so automatic retries are paused. Kill Switch is blocking traffic; Tono tries again when the network changes. Click Repair and reconnect to try now, or Restore internet to get back online.")
                         } else {
                             self.errorMessage = failureMessage + " "
                                 + String(localized: "Kill Switch is blocking traffic while Tono retries. Click Restore internet to get back online.")
@@ -600,7 +621,10 @@ extension AppState {
                         self.errorMessage = failureMessage
                         let preservedFailure = self.lastConnectionFailure
                         let preservedStages = self.completedConnectionStages
-                        self.disconnect(releaseKillSwitch: true)
+                        self.disconnect(
+                            releaseKillSwitch: true,
+                            afterUnarmedConnectFailure: true
+                        )
                         self.lastConnectionFailure = preservedFailure
                         self.completedConnectionStages = preservedStages
                     }
@@ -613,7 +637,14 @@ extension AppState {
     /// Stops Mihomo/TUN. Kill switch is NOT disarmed here — that only happens on
     /// intentional logout / user "turn off protection" so a crash or health failure
     /// leaves the host fail-closed via Kill Switch.
-    func disconnect(releaseKillSwitch: Bool = false) {
+    ///
+    /// `afterUnarmedConnectFailure` marks the automatic cleanup of a connect
+    /// attempt that failed before its first arm. It is a release, but not the
+    /// user's explicit one: see the operation below.
+    func disconnect(
+        releaseKillSwitch: Bool = false,
+        afterUnarmedConnectFailure: Bool = false
+    ) {
         if nativeUpdatePending || RuntimeCleanup.nativeUpdateBlocksConnect
             || (releaseKillSwitch && RuntimeCleanup.nativeUpdatePending) {
             if releaseKillSwitch { disconnectPendingNativeUpdate() }
@@ -688,6 +719,9 @@ extension AppState {
                     // the "repeated three times" pause.
                     self.lastProtectedFailureSignature = nil
                     self.consecutiveProtectedFailureCount = 0
+                    self.consecutiveProtectionRepairCount = 0
+                    self.consecutiveProtectedDNSBrokenAudits = 0
+                    self.consecutiveNoNetworkServiceFailures = 0
                     self.protectedReconnectPausedForUserAction = false
                     self.protectedReconnectPauseLiftsOnNetworkChange = false
                     self.isProtectedReconnectScheduled = false
@@ -742,6 +776,10 @@ extension AppState {
                 self.isConnected = false
                 self.lastPhysicalFingerprint = nil
                 self.isProxyDegraded = false
+                // In-place recovery belongs to the session being torn down.
+                // Left set, it outranked Protected Offline and Not Connected on
+                // the dashboard until the next successful connect.
+                self.isRecoveringProtectedConnection = false
                 self.networkInfo = NetworkInfo()
                 self.trafficStats = TrafficStats()
                 self.trafficFeedLive = false
@@ -760,7 +798,17 @@ extension AppState {
             operation: { [weak self, coreRuntime] requestID in
             var transitionError: String?
             var helperReadyForRelease = true
-            if releaseKillSwitch {
+            // A connect attempt that failed before its first arm owes no
+            // release: Core start and protected DNS both follow that arm. Its
+            // helper usually just failed preparation, so the explicit-release
+            // repair would raise an administrator prompt nobody asked for, and
+            // a failed repair would publish "traffic stays protected" over a
+            // host PF never held. This runs after the queue drained the
+            // cancelled attempt, so an arm that completed while it was being
+            // cancelled still gets the full release.
+            let unarmedFailureCleanup = afterUnarmedConnectFailure
+                && !KillSwitchService.isArmed
+            if releaseKillSwitch, !unarmedFailureCleanup {
                 do {
                     // A helper that rejects this GUI will also reject core stop,
                     // DNS restoration, and disarm; one on an older protocol
@@ -802,6 +850,7 @@ extension AppState {
             }
 
             var protectedDNSRestored = !releaseKillSwitch
+            var dnsRestoreFailure: String?
             if releaseKillSwitch {
                 await MainActor.run {
                     self?.disconnectionStage = .restoringDNS
@@ -817,6 +866,7 @@ extension AppState {
                         // helper as "nothing to restore."
                         protectedDNSRestored = !runtimeMayOwnNetwork
                         if !protectedDNSRestored {
+                            dnsRestoreFailure = error.localizedDescription
                             transitionError =
                                 "Protected DNS restore failed; Kill Switch remains active. \(error.localizedDescription)"
                         }
@@ -851,9 +901,10 @@ extension AppState {
                     self?.disconnectionStage = .restoringNetwork
                 }
             }
+            let disarming = releaseKillSwitch && coreStopped && protectedDNSRestored
             if helperReadyForRelease {
                 do {
-                    if releaseKillSwitch, coreStopped, protectedDNSRestored {
+                    if disarming {
                         try await networkProtection.disarm()
                         transitionLeavesProtectionBlocked = false
                     } else {
@@ -871,16 +922,47 @@ extension AppState {
                         }
                     }
                 } catch {
-                    transitionLeavesProtectionBlocked = true
-                    transitionError = String(localized: "Kill switch transition failed: \(error.localizedDescription)")
+                    // The helper flushes PF before it deletes its persisted
+                    // state, and a reply can be lost after a complete disarm.
+                    // A disarm error alone does not prove the Kill Switch still
+                    // holds this host, so read the helper back before claiming
+                    // it does. Only a confirmed release publishes an open host.
+                    if disarming,
+                       await networkProtection.refreshKillSwitchStatus()
+                        == .confirmed(requiresProtectionRecovery: false) {
+                        KillSwitchService.isArmed = false
+                        transitionLeavesProtectionBlocked = false
+                        LocalTrafficAudit.shared.recordEvent(
+                            "killswitch_disarm_error_released",
+                            details: ["error": error.localizedDescription]
+                        )
+                    } else {
+                        transitionLeavesProtectionBlocked = true
+                        transitionError = String(localized: "Kill switch transition failed: \(error.localizedDescription)")
+                    }
                 }
             } else {
                 transitionLeavesProtectionBlocked = true
             }
+            if unarmedFailureCleanup, !KillSwitchService.isArmed {
+                // The helper steps above are best-effort cleanup here. No Kill
+                // Switch holds this host, so do not publish Protected Offline,
+                // and keep the connect failure the user needs instead of a
+                // teardown message about a runtime this attempt never started.
+                // A failed DNS restore is real, though: an earlier session's
+                // loopback DNS may still be applied with no PF behind it.
+                transitionLeavesProtectionBlocked = false
+                transitionError = dnsRestoreFailure.map {
+                    "Protected DNS restore failed, so this Mac may be unable to resolve names. The Support page has a recovery command. \($0)"
+                }
+            }
 
             await MainActor.run {
                 guard let self else { return }
-                self.connectionCoordinator.completeDisconnect(requestID) {
+                self.connectionCoordinator.completeDisconnect(
+                    requestID,
+                    releaseUnconfirmed: releaseKillSwitch && transitionLeavesProtectionBlocked
+                ) {
                     self.isProtectionBlocked = transitionLeavesProtectionBlocked
                     if releaseKillSwitch, !transitionLeavesProtectionBlocked {
                         self.protectedDNSService = nil
@@ -888,6 +970,12 @@ extension AppState {
                     }
                     if let transitionError {
                         self.errorMessage = transitionError
+                    } else if releaseKillSwitch, !transitionLeavesProtectionBlocked,
+                              let notice = HelperManager.takeProtectedDNSRestoreNotice() {
+                        // Released, but the user's saved DNS servers had no
+                        // service left to go back to (X3-1): say so instead
+                        // of a silent success.
+                        self.errorMessage = notice
                     }
                     self.isDisconnecting = false
                     self.disconnectionStartedAt = nil
@@ -913,8 +1001,15 @@ extension AppState {
         _ = await pending?.value
     }
 
-    private func onCoreStarted(api: CoreControllerClient) async -> Bool {
+    func onCoreStarted(api: CoreControllerClient) async -> Bool {
         guard isConnecting, !Task.isCancelled else { return false }
+        let generation = connectionCoordinator.protectionOperationGeneration
+        // Disconnect and the native-update suspend both bump the generation
+        // and cancel this task, but neither can interrupt a helper IPC.
+        let attemptIsCurrent = {
+            !Task.isCancelled && self.isConnecting
+                && self.connectionCoordinator.protectionOperationGeneration == generation
+        }
         coreController = api
         proxyService.setAPI(api)
 
@@ -958,8 +1053,13 @@ extension AppState {
             transport: selectedExitNode()?.catalogTransport
         )
         do {
-            if let pending = try await PrivilegedRuntimeCoordinator.shared.pendingNativeUpdate(), pending.pending {
-                _ = try await PrivilegedRuntimeCoordinator.shared.nativeUpdate("commit")
+            if let pending = try await nativeUpdateResume.pending(), pending.pending {
+                // The status query blocks until the helper answers. An attempt
+                // retired meanwhile must not commit the update: the user's
+                // Disconnect is still waiting for this task, and the helper
+                // would then refuse that update Disconnect as committed.
+                guard attemptIsCurrent() else { return false }
+                try await nativeUpdateResume.commit()
                 RuntimeCleanup.nativeUpdatePending = false
                 ConnectionTelemetryBuffer.shared.record(
                     "updateResumeOk",
@@ -968,6 +1068,7 @@ extension AppState {
                 )
             }
         } catch {
+            guard attemptIsCurrent() else { return false }
             // A healthy App connection is not privileged update commit proof.
             updateIncomplete = true
             errorMessage = error.localizedDescription
@@ -979,6 +1080,8 @@ extension AppState {
                 updateResume: true
             )
         }
+        // Nor may a retired attempt register monitors no teardown waits for.
+        guard attemptIsCurrent() else { return false }
         scheduleBackgroundOptionalPolicy()
         startCoreMonitor()
         if managedCatalogReloadPending {
@@ -1287,8 +1390,7 @@ extension AppState {
                 // suspended on an actor call still resumes.
                 let observedGeneration = self.connectionCoordinator.protectionOperationGeneration
                 let primaryService =
-                    await PrivilegedRuntimeCoordinator.shared
-                        .primaryNetworkService()
+                    await self.protectionAudits.primaryNetworkService()
                 guard !Task.isCancelled, self.isConnected,
                   self.connectionCoordinator.protectionOperationGeneration == observedGeneration
                 else { return .stopMonitoring }
@@ -1302,25 +1404,79 @@ extension AppState {
                     return .stopMonitoring
                 }
                 let dnsIntegrity =
-                    await PrivilegedRuntimeCoordinator.shared
-                        .protectedDNSIntegrity(service: service)
+                    await self.protectedDNSIntegrityConfirmingBroken(service: service)
                 guard !Task.isCancelled, self.isConnected,
                   self.connectionCoordinator.protectionOperationGeneration == observedGeneration
                 else { return .stopMonitoring }
-                guard dnsIntegrity != .unverifiable else { return .continueMonitoring }
-                guard dnsIntegrity == .intact else {
+                switch dnsIntegrity {
+                case .unverifiable:
+                    // Withholds only the DNS verdict. The PF health check
+                    // below runs on this same cadence and must not be skipped
+                    // with it, or a supervisor repair that dropped this
+                    // session's direct permits goes unnoticed while the UI
+                    // shows Connected.
+                    break
+                case .supplementalConflict(let resolvers):
+                    self.holdProtectedDNSSupplementalConflict(resolvers)
+                    return .stopMonitoring
+                case .broken:
+                    if self.pauseIfProtectedDNSKeepsFailing() { return .stopMonitoring }
                     self.disconnect(releaseKillSwitch: false)
                     self.errorMessage = String(
                         localized: "Protected DNS stopped; Kill Switch is blocking traffic while Tono retries."
                     )
                     self.scheduleProtectedReconnect()
                     return .stopMonitoring
+                case .intact:
+                    self.consecutiveProtectedDNSBrokenAudits = 0
                 }
             }
         }
 
         guard self.isOwnedTonoMode else { return .continueMonitoring }
         if !self.config.tunEnabled { state.healthCycle += 1 }
+        // The helper supervises PF and reinstalls it when another program
+        // stops PF or reloads the main ruleset without the Tono anchor. PF was
+        // not filtering until then, and the reinstall comes from persisted
+        // state without this session's direct exceptions. Treat it like lost
+        // protected DNS: reconnect behind the kill switch, and say why. The
+        // endpoint is read-only; /killswitch/status would heal instead.
+        // Skipped while a node switch or reload re-arms, which clears it.
+        if state.healthCycle.isMultiple(of: 12), KillSwitchService.isArmed,
+           self.switchingNodeId == nil,
+           self.connectionCoordinator.configReloadTask == nil {
+            let observedGeneration = self.connectionCoordinator.protectionOperationGeneration
+            let health = await self.protectionAudits.killSwitchHealth()
+            guard !Task.isCancelled, self.isConnected,
+                  self.connectionCoordinator.protectionOperationGeneration == observedGeneration
+            else { return .stopMonitoring }
+            if let health, health.wanted, health.repairedSinceArm || !health.live {
+                LocalTrafficAudit.shared.recordEvent(
+                    "killswitch_supervisor_repaired",
+                    details: [
+                        "live": String(health.live),
+                        "repaired": String(health.repairedSinceArm),
+                    ]
+                )
+                self.consecutiveProtectionRepairCount += 1
+                self.disconnect(releaseKillSwitch: false)
+                if self.consecutiveProtectionRepairCount >= 3 {
+                    // Stop in a fail-closed terminal state instead of
+                    // reconnecting into the same interference forever.
+                    self.protectedReconnectPausedForUserAction = true
+                    self.protectedReconnectPauseLiftsOnNetworkChange = false
+                    self.errorMessage = String(
+                        localized: "Protection problem: another program keeps turning off or replacing Tono's network protection. Kill Switch is blocking traffic and automatic reconnects are paused. Quit the other VPN or firewall, then click Retry now, or Restore internet to get back online."
+                    )
+                    return .stopMonitoring
+                }
+                self.errorMessage = String(
+                    localized: "Network protection was interrupted by another program; Kill Switch is blocking traffic while Tono reconnects."
+                )
+                self.scheduleProtectedReconnect()
+                return .stopMonitoring
+            }
+        }
         // Browser preferences can change after connect. Recheck on the
         // same one-minute cadence as protected system DNS so a newly
         // enabled explicit DoH mode cannot leave a residential claim
@@ -1684,6 +1840,15 @@ extension AppState {
         return true
     }
 
+    /// A restore at launch, on Quit or in update preparation had no window
+    /// to tell that the original DNS servers were not put back (X3-1). Show
+    /// that notice on activation once no other message is on screen.
+    func showPendingProtectedDNSRestoreNotice() {
+        guard errorMessage == nil, !isDisconnecting,
+              let notice = HelperManager.takeProtectedDNSRestoreNotice() else { return }
+        errorMessage = notice
+    }
+
     /// Non-prompting foreground reconciliation for the documented root
     /// emergency recovery path. Only an authenticated helper response that
     /// confirms both armed=false and wanted=false may clear Protected Offline.
@@ -1703,10 +1868,14 @@ extension AppState {
     /// path already disarmed) also leaves `isProtectionBlocked` set, and a
     /// helper that was never asked to arm answers with no persisted state —
     /// reading that as an external release silently drops the connect intent
-    /// the recovery exists to fulfill.
+    /// the recovery exists to fulfill. `repairRequested` marks the first
+    /// attempt of a loop the user started with Repair and reconnect: a
+    /// rejection then continues into connect(), whose helper preparation is
+    /// the administrator reinstall that answers it.
     @discardableResult
     private func reconcileConfirmedExternalProtectionRelease(
-        protectionWasArmed: Bool = true
+        protectionWasArmed: Bool = true,
+        repairRequested: Bool = false
     ) async -> Bool {
         guard protectionWasArmed, isProtectionBlocked, !isConnected, !isConnecting,
               !isDisconnecting else { return false }
@@ -1724,7 +1893,15 @@ extension AppState {
         case .rejected:
             // No automatic retry can make an identity/UID rejection succeed.
             // Do not prompt on activation; the explicit Protected Offline
-            // action owns the one administrator repair attempt.
+            // action owns the one administrator repair attempt. Pausing that
+            // explicit attempt here as well ended it before connect() could
+            // reach the reinstall, so the repair was unreachable.
+            if repairRequested {
+                LocalTrafficAudit.shared.recordEvent(
+                    "helper_rejected_repair_requested"
+                )
+                return false
+            }
             protectedReconnectPausedForUserAction = true
             protectedReconnectPauseLiftsOnNetworkChange = false
             self.connectionCoordinator.protectedReconnectTask?.cancel()
@@ -1761,6 +1938,9 @@ extension AppState {
         protectedReconnectPauseLiftsOnNetworkChange = false
         lastProtectedFailureSignature = nil
         consecutiveProtectedFailureCount = 0
+        consecutiveProtectionRepairCount = 0
+        consecutiveProtectedDNSBrokenAudits = 0
+        consecutiveNoNetworkServiceFailures = 0
         self.connectionCoordinator.wakeRecoveryTask?.cancel()
         self.connectionCoordinator.wakeRecoveryTask = nil
         self.connectionCoordinator.sleepRestrictTask?.cancel()
@@ -1798,7 +1978,10 @@ extension AppState {
         }
     }
 
-    func scheduleProtectedReconnect(immediate: Bool = false) {
+    func scheduleProtectedReconnect(
+        immediate: Bool = false,
+        repairRequested: Bool = false
+    ) {
         guard !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
         // A network-change kick carries new information: a repeated-failure
         // pause may be lifted (the environment changed, the outcome can
@@ -1864,7 +2047,9 @@ extension AppState {
                 // release during the backoff is still honored.
                 if await self.reconcileConfirmedExternalProtectionRelease(
                     protectionWasArmed: protectionWasArmedWhenScheduled
-                        || KillSwitchService.isArmed
+                        || KillSwitchService.isArmed,
+                    repairRequested: repairRequested
+                        && self.protectedReconnectAttempt == 1
                 ) {
                     return true
                 }
@@ -1893,10 +2078,88 @@ extension AppState {
         )
     }
 
+    /// Three `.broken` audits with no `.intact` between them: each reconnect
+    /// passed its own preflight yet macOS still did not resolve through the
+    /// protected listener, so a fourth will not differ.
+    static let protectedDNSBrokenAuditLimit = 3
+    /// About a minute of the reconnect schedule (2+5+10+20+30 s).
+    static let noNetworkServiceRetryLimit = 5
+
+    /// A DHCP renewal or service reconfiguration can drop the Global DNS
+    /// key for a moment, so one `.broken` read is not a verdict.
+    static let protectedDNSBrokenRecheckDelay: Duration = .seconds(2)
+
+    /// Reads Protected DNS integrity and, when the first read is `.broken`,
+    /// reads it once more after a short delay. The second read is the
+    /// verdict, so a momentary bad read does not tear the session down.
+    /// PF stays armed throughout; this only delays a teardown.
+    func protectedDNSIntegrityConfirmingBroken(
+        service: String
+    ) async -> PrivilegedRuntimeCoordinator.ProtectedDNSIntegrity {
+        let first = await protectionAudits.protectedDNSIntegrity(service)
+        guard first == .broken else { return first }
+        try? await Task.sleep(for: Self.protectedDNSBrokenRecheckDelay)
+        guard !Task.isCancelled else { return first }
+        return await protectionAudits.protectedDNSIntegrity(service)
+    }
+
+    /// Called for a `.broken` audit on an unchanged network. At the limit it
+    /// tears the session down with PF kept and pauses automatic retries until
+    /// the user acts; returns true so the caller does not reconnect.
+    func pauseIfProtectedDNSKeepsFailing() -> Bool {
+        consecutiveProtectedDNSBrokenAudits += 1
+        guard consecutiveProtectedDNSBrokenAudits >= Self.protectedDNSBrokenAuditLimit else {
+            return false
+        }
+        LocalTrafficAudit.shared.recordEvent(
+            "protected_dns_broken_retries_exhausted",
+            details: ["audits": String(consecutiveProtectedDNSBrokenAudits)]
+        )
+        disconnect(releaseKillSwitch: false)
+        protectedReconnectPausedForUserAction = true
+        protectedReconnectPauseLiftsOnNetworkChange = false
+        errorMessage = String(localized: "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. Kill Switch is blocking traffic and automatic retries are paused. Click Repair and reconnect to try again, or Restore internet to get back online.")
+        return true
+    }
+
+    /// Split-DNS rules send some domains to a server off this Mac, past the
+    /// protected listener. A reconnect rewrites the same default resolver
+    /// and cannot change that, and PF is not loosened to make those domains
+    /// work: keep PF, stop the session, and pause until the user removes the
+    /// rule or chooses Restore internet.
+    ///
+    /// This includes a corporate VPN's split DNS on its own utun. The helper's
+    /// LAN DNS block is scoped to physical interfaces so PF itself lets that
+    /// DNS through, but this audit still holds the session on it. Keeping the
+    /// stricter behavior (pause, PF held) over a "stay connected and warn"
+    /// mode is a provisional product decision pending the owner.
+    func holdProtectedDNSSupplementalConflict(
+        _ resolvers: [SystemNetworkObservation.SupplementalResolver]
+    ) {
+        let summary = resolvers.map {
+            "\($0.domains.joined(separator: ", ")) → \($0.servers.joined(separator: ", "))"
+        }.joined(separator: "; ")
+        LocalTrafficAudit.shared.recordEvent(
+            "protected_dns_supplemental_conflict",
+            details: [
+                "sources": resolvers.map(\.source).joined(separator: "; "),
+                "resolvers": summary,
+            ]
+        )
+        disconnect(releaseKillSwitch: false)
+        protectedReconnectPausedForUserAction = true
+        protectedReconnectPauseLiftsOnNetworkChange = false
+        errorMessage = String(localized: "DNS conflict: a corporate VPN, profile or /etc/resolver rule sends some domains to a DNS server outside Tono's protection. Kill Switch is blocking traffic and automatic retries are paused. Turn that rule off, then click Repair and reconnect, or Restore internet to get back online.")
+            + " (" + summary + ")"
+    }
+
     /// Let the user bypass the weak-network backoff without weakening PF. The
     /// previous recovery loop is cancelled by ID before a new immediate loop
     /// waits for any in-flight teardown and starts the same full transaction.
-    func retryProtectedConnectionNow() {
+    /// `repairHelper` is false only for the Support remote retry: a helper
+    /// rejection must not put an administrator prompt in front of a user who
+    /// did not ask for it.
+    func retryProtectedConnectionNow(repairHelper: Bool = true) {
         guard isProtectionBlocked, !isConnected, !isConnecting else { return }
         protectedReconnectPausedForUserAction = false
         protectedReconnectPauseLiftsOnNetworkChange = false
@@ -1904,6 +2167,9 @@ extension AppState {
         // single shot against a counter already sitting at the threshold.
         lastProtectedFailureSignature = nil
         consecutiveProtectedFailureCount = 0
+        consecutiveProtectionRepairCount = 0
+        consecutiveProtectedDNSBrokenAudits = 0
+        consecutiveNoNetworkServiceFailures = 0
         clearCatalogFailoverSweep()
         self.connectionCoordinator.protectedReconnectTask?.cancel()
         self.connectionCoordinator.protectedReconnectTask = nil
@@ -1911,7 +2177,7 @@ extension AppState {
         self.connectionCoordinator.lastProtectedReconnectKick = nil
         isProtectedReconnectScheduled = false
         protectedReconnectNextAttemptAt = nil
-        scheduleProtectedReconnect(immediate: true)
+        scheduleProtectedReconnect(immediate: true, repairRequested: repairHelper)
     }
 
     /// Catalog hy2 the user can pick by hand. Prefer same-city; otherwise

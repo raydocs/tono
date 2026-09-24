@@ -34,6 +34,12 @@ actor PrivilegedRuntimeCoordinator {
         if let version, version.compare("4.5.0", options: .numeric) == .orderedAscending { return nil }
         guard version != nil else {
             if HelperManager.hasInstalledHelperArtifact {
+                // A silent helper whose installed binary predates the update
+                // contract (0.0.72 ships 3.15.0) has no ledger to ask about.
+                if let installed = HelperManager.installedArtifactVersion(),
+                   installed.compare("4.5.0", options: .numeric) == .orderedAscending {
+                    return nil
+                }
                 // Query anyway: a restarting v1 helper must not be mistaken
                 // for a legacy helper on a version-probe timeout.
                 return try HelperManager.updateRequest("status")
@@ -49,6 +55,10 @@ actor PrivilegedRuntimeCoordinator {
 
     func daemonRejectsClient() -> Bool {
         HelperManager.daemonRejectsClient()
+    }
+
+    func helperLaunchState() -> HelperManager.LaunchState {
+        HelperManager.launchState()
     }
 
     /// Explicit user-requested release is the one safe place to prompt for a
@@ -163,6 +173,11 @@ actor PrivilegedRuntimeCoordinator {
         KillSwitchService.refreshStatus()
     }
 
+    /// nil when the helper did not answer, which is evidence of nothing.
+    func killSwitchHealth() -> (wanted: Bool, live: Bool, repairedSinceArm: Bool)? {
+        try? HelperManager.killSwitchHealth()
+    }
+
     func cleanupStaleSystemProxy() {
         SystemProxy.cleanupIfStale()
     }
@@ -196,16 +211,35 @@ actor PrivilegedRuntimeCoordinator {
     /// every 60s of connected time, and again on every network change. PF is
     /// the leak boundary, so withholding a verdict until the next cycle is not
     /// fail-open.
-    enum ProtectedDNSIntegrity {
+    nonisolated enum ProtectedDNSIntegrity: Equatable {
         case intact
         case broken
         case unverifiable
+        /// The default resolver is protected, but split-DNS rules (a
+        /// corporate VPN, a profile, `/etc/resolver`) send matching names to
+        /// servers off this Mac. Reconnecting cannot change that, so this is
+        /// not `.broken`; and it is not `.intact` either.
+        case supplementalConflict([SystemNetworkObservation.SupplementalResolver])
     }
 
     func protectedDNSIntegrity(service: String) -> ProtectedDNSIntegrity {
         let status = HelperManager.protectedDNSStatus()
         guard status.available else { return .unverifiable }
-        return status.configured && status.service == service ? .intact : .broken
+        guard status.configured && status.service == service else { return .broken }
+        // The helper reads back only what is stored on `service`. That is
+        // still "configured" when macOS resolves through a different
+        // service, so the verdict also needs the resolver macOS actually
+        // uses. A store that cannot be read is withheld, like the helper.
+        guard let observation = SystemNetworkObservation.current() else {
+            return .unverifiable
+        }
+        // The default resolver is only part of it: split-DNS rules answer
+        // their domains without ever reaching the default resolver.
+        if let conflicts = observation.conflictingSupplementalResolvers, !conflicts.isEmpty {
+            return .supplementalConflict(conflicts)
+        }
+        guard observation.effectiveResolverIsProtected else { return .broken }
+        return observation.conflictingSupplementalResolvers == nil ? .unverifiable : .intact
     }
 
     func protectedDNSStatus() -> (
