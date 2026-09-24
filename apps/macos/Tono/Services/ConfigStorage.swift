@@ -32,6 +32,20 @@ nonisolated final class ConfigStorage: @unchecked Sendable {
         }
         try? fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
         appSupportDirectory = url
+        Self.removeLegacyRuntimeConfig(in: url, fileManager: fileManager)
+    }
+
+    /// 0.0.72's Mihomo runtime (`config/config.yaml`) holds that account's exit
+    /// credentials, residential SOCKS5 password and controller secret. The
+    /// sing-box runtime moved to `config.json`, so nothing reads, rewrites or
+    /// deletes the old file any more; remove it on the first launch after the
+    /// upgrade.
+    static func removeLegacyRuntimeConfig(in appSupportDirectory: URL, fileManager: FileManager = .default) {
+        try? fileManager.removeItem(
+            at: appSupportDirectory
+                .appendingPathComponent("config", isDirectory: true)
+                .appendingPathComponent("config.yaml")
+        )
     }
 
     /// Config file path

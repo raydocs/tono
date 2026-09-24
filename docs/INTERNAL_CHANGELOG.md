@@ -32,6 +32,23 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 启动时删除 0.0.72 遗留的 Mihomo 运行时文件
+
+- **归属/来源**：G1 账户隔离（升级维度）；macOS `ConfigStorage`。内部审查 H15-F4，Issue #504。
+  基线 origin/main bb2ed4e4；分支 `fix/legacy-runtime-yaml-20260923`；未合 main。
+- **缺陷修复**：0.0.72 把 Mihomo 运行时写在 `Application Support/Tono/config/config.yaml`，
+  内含出口参数、住宅 SOCKS5 凭据和 controller secret；0.0.73 起运行时改为 `config.json`，
+  旧文件再无任何读、写或删除，升级后永久残留。现在 `ConfigStorage` 初始化（进程启动时首次
+  使用）删除该文件。与在审 #411（登出时删除 `config.json`）互补：#411 管新文件的账户边界，
+  本条管升级遗留；两者不改同一行。
+- **新增/优化**：无。
+- **工程与测试**：一个 XCTest `RuntimeConfigTests.testLaunchRemovesThe0072MihomoRuntimeWithItsCredentials`：
+  临时目录中的 `config/config.yaml` 被删除，`config.json` 保留。旧代码无此入口（编译失败即失败）。
+- **验证**：本机未执行 xcodebuild/swift；回归交给本 PR 的 macos-26 CI（TonoTests），结果见 PR。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：未实机验证；root 所有的 `/Library/PrivilegedHelperTools/tono-mihomo` 旧二进制
+  仍残留（不含凭据，仅整洁问题，未处理）。
+
 ## 2026-09-23 · macOS 原生更新账本：schema 主版本 + 同主版本忽略新增字段
 
 - **归属/来源**：G3 原生更新 v1（面向 0.0.73 → 0.0.74 起的 N-1 执行器）；macOS
