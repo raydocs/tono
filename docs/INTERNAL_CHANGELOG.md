@@ -32,6 +32,26 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 睡眠取消的节点切换在唤醒后连到切换目标
+
+- **归属/来源**：G1 连接意图；macOS `AppState+Proxy` 节点切换任务。内部审查 X1-5，Issue #444。
+  基线 main bb2ed4e4 → 分支 `fix/sleep-node-switch-20260923`；提交时未合 main。
+- **缺陷修复**：已连接时切换到 Y，切换只在 commit 时写入并持久化 Y。切换完成前合盖，睡眠
+  先 bump 代际再做保留拆除，切换任务被退休，所有退出分支都不保留 Y；唤醒 `connect()` 读到的
+  仍是旧出口 X。网络环境对账等其他内部保留拆除落在切换中途时同样丢失 Y。现在切换任务被保留
+  拆除退休时（代际已变、会话已断开、拆除不是显式释放），把 Y 记为下一次连接目标；会话仍在
+  时不提前宣称 Y 为活动出口，显式 Restore internet 的行为不变。
+- **新增/优化**：无。
+- **工程与测试**：新增 `NodeSwitchSleepTests.testSleepDuringNodeSwitchKeepsTheSwitchTargetForWake`
+  （一个 XCTest，沿用 `NetworkProtectionOperations` seam）：已连接 X，选 Y 后立即
+  `prepareForSystemSleep()` 并等拆除完成，断言 `preferManagedCatalogExitForConnect()` 为 Y。
+  旧代码返回 X，断言失败。
+- **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests），结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：原生更新挂起路径（`suspendForNativeUpdate`）退休切换时会话可能仍显示已连接，
+  不在此处记住 Y；未实机验证睡眠与 helper 睡眠门的先后顺序。
+
 ## 2026-09-23 · macOS 被睡眠门拒绝的 Restore internet 不再在唤醒或网络变化时自动重连
 
 - **归属/来源**：G1 保护状态与用户意图；macOS `ConnectionCoordinator`、`AppState` 睡眠/唤醒与
