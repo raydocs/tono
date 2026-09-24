@@ -436,8 +436,7 @@ final class AppState {
             let primaryService =
                 await PrivilegedRuntimeCoordinator.shared.primaryNetworkService()
             let dnsIntegrity = if let service = self.protectedDNSService {
-                await PrivilegedRuntimeCoordinator.shared
-                    .protectedDNSIntegrity(service: service)
+                await self.protectedDNSIntegrityConfirmingBroken(service: service)
             } else {
                 PrivilegedRuntimeCoordinator.ProtectedDNSIntegrity.broken
             }
@@ -655,6 +654,19 @@ final class AppState {
                         )
                         continue
                     }
+                }
+                // A pause that waits for the user (a DNS conflict, Protected
+                // DNS that kept failing, a failure that needs their action)
+                // survives sleep: a wake reconnect would only reach the same
+                // verdict again. PF is reasserted above and the pause message
+                // stays. Pauses that lift on a network change do not stop here.
+                if self.protectedReconnectPausedForUserAction,
+                   !self.protectedReconnectPauseLiftsOnNetworkChange {
+                    if !Task.isCancelled {
+                        self.isProtectionBlocked = true
+                        self.connectionCoordinator.wakeRecoveryTask = nil
+                    }
+                    return
                 }
                 guard self.isTonoReady else {
                     self.isProtectionBlocked = true

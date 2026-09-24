@@ -1321,8 +1321,7 @@ extension AppState {
                     return .stopMonitoring
                 }
                 let dnsIntegrity =
-                    await PrivilegedRuntimeCoordinator.shared
-                        .protectedDNSIntegrity(service: service)
+                    await self.protectedDNSIntegrityConfirmingBroken(service: service)
                 guard !Task.isCancelled, self.isConnected,
                   self.connectionCoordinator.protectionOperationGeneration == observedGeneration
                 else { return .stopMonitoring }
@@ -1926,6 +1925,26 @@ extension AppState {
     static let protectedDNSBrokenAuditLimit = 3
     /// About a minute of the reconnect schedule (2+5+10+20+30 s).
     static let noNetworkServiceRetryLimit = 5
+
+    /// A DHCP renewal or service reconfiguration can drop the Global DNS
+    /// key for a moment, so one `.broken` read is not a verdict.
+    static let protectedDNSBrokenRecheckDelay: Duration = .seconds(2)
+
+    /// Reads Protected DNS integrity and, when the first read is `.broken`,
+    /// reads it once more after a short delay. The second read is the
+    /// verdict, so a momentary bad read does not tear the session down.
+    /// PF stays armed throughout; this only delays a teardown.
+    func protectedDNSIntegrityConfirmingBroken(
+        service: String
+    ) async -> PrivilegedRuntimeCoordinator.ProtectedDNSIntegrity {
+        let first = await PrivilegedRuntimeCoordinator.shared
+            .protectedDNSIntegrity(service: service)
+        guard first == .broken else { return first }
+        try? await Task.sleep(for: Self.protectedDNSBrokenRecheckDelay)
+        guard !Task.isCancelled else { return first }
+        return await PrivilegedRuntimeCoordinator.shared
+            .protectedDNSIntegrity(service: service)
+    }
 
     /// Called for a `.broken` audit on an unchanged network. At the limit it
     /// tears the session down with PF kept and pauses automatic retries until
