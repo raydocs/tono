@@ -35,8 +35,9 @@
 ## 2026-09-24 · macOS 账户进入 suspended 时停止 Core 并撤下缓存出口
 
 - **归属/来源**：G2 客户端账户状态与连接准入（macOS `AccountSession+Auth.swift`）。内部审查 H17-C-F3，
-  另一审查方 H17-G-F3 第 3 步为同一缺口；Issue #526。基线 origin/main 059a2ea2 → 分支
-  `fix/macos-suspended-stops-core-20260924`；提交时未合 main。
+  另一审查方 H17-G-F3 第 3 步为同一缺口；PR 双厂商审查 535-O-F2..F4、535-C-F1..F2。Issue #526，
+  PR #535。基线 origin/main 059a2ea2 → 分支 `fix/macos-suspended-stops-core-20260924`，叠在 #516
+  （合入其 cd94a22f，复用 helper 确认的恢复意图规则）；提交时未合 main。
 - **缺陷修复**：套餐到期、流量用尽、账户停用或设备被吊销后，账户重读收到 401（请求与续期都拒绝），
   账户进入 `.suspended`。原来 `enterEntitlementBlock` 只改状态：正在运行的 Core 继续用本设备的
   出口身份走流量；缓存目录（内存与磁盘）保留；连接层只按缓存判断就绪，唤醒恢复、保护重连循环、
@@ -47,13 +48,22 @@
   - 停止正在运行的 Core，PF 保持武装：Mac 停在 Protected Offline，suspended 页面在 kill switch
     武装时已提供"恢复网络"。任何 suspended 路径都不释放 PF。
   - 启动与登录时直接进入 suspended 的三处（服务端目前不发 `suspended: true`）也走同一入口。
-  - 控制面重新接受账户时（`leaveEntitlementBlock`），重新绑定 ownership，从新拉的目录重启运行时；
-    若保护仍处于 Protected Offline 则自动重连，用户已恢复网络则只回到 ready。
+  - 控制面重新接受账户时（`leaveEntitlementBlock`，作为账户生命周期工作运行，登出或恢复网络会先
+    取消并排空它）：先取消挂起前仍在途的目录请求（否则会加入它并拿到被丢弃的结果，进入 `.error`），
+    重新绑定 ownership 并拉取新目录；拉取失败则保持 suspended 与撤销屏障，"再次检查"可重试。
+    是否自动重连先按应用内的 Protected Offline 状态，再问 helper：只有 helper 确认保护已解除
+    （例如外部紧急解除）才放弃重连意图，helper 不可达或拒绝时保持（与 #516 同一规则）。之后从新
+    目录重启运行时并回到 ready。
 - **新增/优化**：无。
 - **工程与测试**：`AccountSessionRequestTests` 新增一个 XCTest
   `testRefusedSessionStopsTheCoreAndWithdrawsItsExitsWithProtectionKept`：账户重读与续期都回 401；
   断言状态为 `.suspended`、已安装目录被撤下、该账户的目录不再被接受、Core 停止一次、disarm
-  consumer 未被调用。测试 fixture 增加可注入的 `descriptorConsumer`。只含测试的提交 febea58a
+  consumer 未被调用。审查后同一测试延伸到重新接受：挂起前有一个在途目录请求，续期与重读都成功、
+  应用内仍显示 Protected Offline 而 helper 确认已解除；断言重新接受另发新的目录请求、只安装新目录、
+  回到 `.ready`、恢复时不请求自动重连。测试 fixture 增加可注入的 `descriptorConsumer` 与
+  `protectionBlockedConsumer`。延伸部分的只含测试提交 7615d579 在修复前的 head 上跑红（run 35984764434：
+  只有这一个测试失败，重读成功后等待请求约 5 s 超时，按流程即没有发出新的目录请求；自动重连一项
+  因此未执行到）。最初只含测试的提交 febea58a
   （产品代码未改）在 GitHub-hosted macOS CI run 35976604824 上实际跑红：build 作业只有这一个测试
   失败（`AccountSessionRequestTests` 50 项、3 处断言失败：目录未撤下、目录仍被接受、Core 未停止；
   "不释放 PF"一项在旧代码上本来成立）。

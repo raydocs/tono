@@ -522,14 +522,48 @@ extension AccountSession {
     /// and the session it interrupted resumes. The block withdrew the exits and
     /// stopped the Core, so the runtime starts again from a freshly fetched
     /// catalog — the synchronization loop with it — and reconnects when
-    /// protection still holds this Mac offline.
+    /// protection still holds this Mac offline. Account lifecycle work, so a
+    /// sign-out or Restore internet cancels and drains it first.
     func leaveEntitlementBlock() async {
-        guard state == .suspended, blockedWhileReady, let user else { return }
+        guard state == .suspended, blockedWhileReady, user != nil else { return }
+        await accountLifecycle.run { await self.resumeAfterEntitlementBlock() }
+    }
+
+    private func resumeAfterEntitlementBlock() async {
+        guard state == .suspended, blockedWhileReady, let owner = user?.id else { return }
+        let revision = accountReadRevision
+        func isCurrent() -> Bool {
+            !Task.isCancelled && accountReadRevision == revision
+                && state == .suspended && user?.id == owner
+        }
+        func keepBlock() {
+            // No fresh exits: the refusal barrier and the block stand, and
+            // Check again retries the re-read.
+            guard state == .suspended, user?.id == owner else { return }
+            ManagedExitCatalogOwnership.purge()
+        }
+        // A catalog request still in flight from before the block belongs to
+        // reads the block retired. Joining it would hand back its discarded
+        // result instead of the fresh catalog this needs.
+        await cancelManagedCatalogRefresh()
+        guard isCurrent() else { return }
+        ManagedExitCatalogOwnership.adopt(owner)
+        guard await refreshManagedCatalog(attempts: 2), isCurrent() else {
+            keepBlock()
+            return
+        }
+        // The in-app flag can lag a release made outside the app (the root
+        // emergency disarm). Only a helper-confirmed release retires the
+        // intent; an unreachable or rejecting helper keeps it.
+        if protectionBlockedConsumer() { shouldResumeProtection = true }
+        await retireResumeIntentIfProtectionReleased()
+        guard isCurrent() else {
+            keepBlock()
+            return
+        }
         blockedWhileReady = false
         entitlementDetail = nil
-        ManagedExitCatalogOwnership.adopt(user.id)
-        if protectionBlockedConsumer() { shouldResumeProtection = true }
-        await retryRuntime()
+        await performRuntimeRetry()
     }
 
     /// Transfers the one-time enrollment material and immediately removes the
