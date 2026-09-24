@@ -142,6 +142,8 @@ struct TonoApp: App {
                                 .environment(accountSession)
                                 .environmentObject(updater)
                         }
+                        // The gate reads the protection state the menu bar reads.
+                        .environment(appState)
                     }
                 } else {
                     LanguageSetupView()
