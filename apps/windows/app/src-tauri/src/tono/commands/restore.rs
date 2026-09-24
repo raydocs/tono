@@ -98,9 +98,9 @@ pub(super) fn unknown_protection_message(reason: &str) -> String {
 }
 
 /// Startup session restore (§2): load the persisted selection (L4), seed
-/// the catalog from the verified cache, then refresh + `me()`. A 401 means
-/// the session is dead (logout, disarm, clear); other errors keep the kill
-/// switch armed and enter the error state. If the Service still wants the
+/// the catalog from the verified cache, then refresh + `me()`. A 401 suspends
+/// the account and other errors enter the error state; neither releases the
+/// kill switch or signs out. If the Service still wants the
 /// kill switch, first surface Protected Offline. Once account/catalog restore finishes, a fresh
 /// strongly proven same-owner active runtime is replaced behind the still-armed barrier so this
 /// process obtains a new Service session/controller; weaker evidence continues to wait for the
@@ -346,78 +346,39 @@ where
             emit(&inner);
             Some(info)
         }
-        Err(ApiError::Unauthorized) => {
-            close_dead_restore_with(Arc::clone(state), generation, release, logout, emit).await;
-            None
-        }
-        Err(err) => {
-            // Flaky network must never drop protection (§2).
+        Err(error) => {
             let mut inner = state.lock().await;
             if inner.sign_in_generation != generation {
                 return None;
             }
-            apply_stored_protection(&mut inner, protection);
-            inner.account_state = match protection {
-                StoredProtection::Unknown(reason) => {
-                    AccountState::Error(format!("{err}; {}", unknown_protection_message(reason)))
-                }
-                _ => AccountState::Error(err.to_string()),
-            };
+            settle_failed_restore(&mut inner, protection, &error);
             emit(&inner);
             None
         }
     }
 }
 
-/// The actual expired-session cleanup; only system I/O is injected by regressions.
-async fn close_dead_restore_with<R, RF, L, LF, E>(
-    state: Arc<TonoState>, generation: u64, release: R, logout: L, emit: E,
-) where
-    R: FnOnce(Arc<TonoState>) -> RF + Send + 'static,
-    RF: std::future::Future<Output = Result<(), String>> + Send + 'static,
-    L: FnOnce(Arc<crate::tono::state::TonoApiClient>) -> LF + Send + 'static,
-    LF: std::future::Future<Output = Result<(), String>> + Send + 'static,
-    E: Fn(&TonoInner) + Send + Sync + 'static,
-{
-    if let Err(error) = super::account::close_account_with(
-        state, super::account::AccountCloseReason::Expired { generation },
-        release, logout, |_, _| async {}, emit,
-    ).await {
-        logging!(error, Type::Service, "Tono: expired-session cleanup not complete: {error}");
-    }
-}
-
-#[cfg(test)]
-mod account_close_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn expired_restore_reserves_account_ownership_before_its_first_side_effect() {
-        let state = Arc::new(TonoState::for_test());
-        state.lock().await.sign_in_generation = 7;
-        let (entered, at_release) = tokio::sync::oneshot::channel();
-        let (resume, resumed) = tokio::sync::oneshot::channel();
-        let task = tokio::spawn(close_dead_restore_with(Arc::clone(&state), 7,
-            move |state| async move {
-                entered.send(()).unwrap();
-                resumed.await.unwrap();
-                state.lock().await.fsm.sign_out_or_quit();
-                Ok(())
-            }, |_| async { Ok(()) }, |_| {},
-        ));
-        at_release.await.unwrap();
-        let closed = state.lock().await.account_close.is_some();
-        resume.send(()).unwrap();
-        task.await.unwrap();
-        assert!(closed, "restore cannot allow a replacement account before release/logout settles");
-        assert_eq!(state.lock().await.account_state, AccountState::SignedOut);
-        state.lock().await.sign_in_generation = 20;
-        close_dead_restore_with(Arc::clone(&state), 7,
-            |_| async { panic!("stale restore cannot release replacement resources") },
-            |_| async { panic!("stale restore cannot revoke replacement credentials") }, |_| {},
-        ).await;
-        assert_eq!(state.lock().await.sign_in_generation, 20);
-    }
+/// Restore's answer when `me()` fails. Nothing here releases protection, signs out or deletes
+/// the stored session: the barrier stays exactly as the Service holds it, with Disconnect
+/// ("Restore internet") still offered while it blocks.
+fn settle_failed_restore(inner: &mut TonoInner, protection: &StoredProtection, error: &ApiError) {
+    apply_stored_protection(inner, protection);
+    inner.account_state = match (error, protection) {
+        // tono-core reports `Unauthorized` only after its own refresh was refused too. The Worker
+        // answers that way for an expired plan, a used-up allowance, a disabled account and a
+        // revoked device or session alike, so it is not proof the user wants protection gone.
+        // The stored session is kept on purpose: without it the next launch would take the
+        // no-token path, which releases the stored barrier.
+        (ApiError::Unauthorized, _) => {
+            logging!(warn, Type::Service, "Tono: the control plane refused the restored session; account suspended, protection kept");
+            AccountState::Suspended
+        }
+        // Flaky network must never drop protection (§2).
+        (_, StoredProtection::Unknown(reason)) => {
+            AccountState::Error(format!("{error}; {}", unknown_protection_message(reason)))
+        }
+        _ => AccountState::Error(error.to_string()),
+    };
 }
 
 #[cfg(test)]
@@ -524,7 +485,7 @@ pub async fn restore_session_guarded(app: AppHandle, state: Arc<TonoState>) {
     }
     // R2-F2: startup restore is the surviving-App entry into armed-unverified Protected
     // Offline (`apply_stored_protection` on an Armed/Unknown probe, an account error that
-    // keeps protection, or a release the dead-session cleanup failed to prove). Whatever
+    // keeps protection, or a release the signed-out recovery failed to prove). Whatever
     // idle blocked state restore settled on must hold its Service-truth poll: a later
     // Service restart retires an unverified barrier and nothing else would re-read that.
     connection::ensure_protection_resync(&state, &app).await;

@@ -333,9 +333,6 @@ pub async fn tono_sign_out(state: tauri::State<'_, Arc<TonoState>>, app: AppHand
 #[derive(Clone, Copy)]
 pub(super) enum AccountCloseReason {
     User,
-    /// Restore has already established this session is absent/dead. Even on failed release,
-    /// clear the dead account but keep protection visible. Never act on a newer generation.
-    Expired { generation: u64 },
     /// No token was loaded. Failed stored-protection release remains a retryable restore error.
     Missing { generation: u64 },
 }
@@ -353,10 +350,9 @@ where
     E: Fn(&TonoInner) + Send + Sync + 'static,
 {
     use futures::FutureExt as _;
-    let expired = matches!(reason, AccountCloseReason::Expired { .. });
     let (client, credentials, generation, protected, operation) = {
         let mut inner = state.lock().await;
-        if let AccountCloseReason::Expired { generation } | AccountCloseReason::Missing { generation } = reason {
+        if let AccountCloseReason::Missing { generation } = reason {
             if inner.sign_in_generation != generation {
                 return Ok(());
             }
@@ -384,13 +380,13 @@ where
         let mut finalized = false;
         let result = std::panic::AssertUnwindSafe(async {
             let release_result = if protected { release(Arc::clone(&state)).await } else { Ok(()) };
-            if release_result.is_err() && !expired {
+            if release_result.is_err() {
                 resume_account = matches!(reason, AccountCloseReason::User);
                 // The Service refused the release, so the barrier is still up even when this
                 // attempt never latched armed locally (the sign-out raced an in-flight
-                // StartClash). Mark from the refusal — like the Expired tail below — so the
-                // closing `initial_release_failed` keeps protection visible instead of
-                // reporting Not Connected over a still-blocking WFP filter.
+                // StartClash). Mark from the refusal so the closing `initial_release_failed`
+                // keeps protection visible instead of reporting Not Connected over a
+                // still-blocking WFP filter.
                 state.lock().await.fsm.mark_kill_switch_armed();
                 return release_result;
             }
