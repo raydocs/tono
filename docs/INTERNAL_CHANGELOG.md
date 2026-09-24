@@ -32,6 +32,30 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · macOS 睡眠后唤醒重连获得新的重复失败预算
+
+- **归属/来源**：G1 连接恢复；macOS `AppState.prepareForSystemSleep()`。内部审查 H18-G-F1（交叉厂商核实降级为
+  已暂停会话的恢复预算问题，非永久锁死），Issue #542。基线 origin/main 8dc79a5b → 分支
+  `fix/macos-wake-reconnect-budget-20260924`；提交时未合 main。
+- **缺陷修复**：同一失败（阶段 + 文案）连续三次后，保护重连暂停自动重试。睡眠只清显示用的尝试次数，
+  保留失败计数和签名；唤醒 `connect()` 只清暂停标志。睡前已有两三次同样失败的 Protected Offline Mac，
+  唤醒后第一次同样失败就再次暂停，唤醒任务已返回，没有任何重试在排程（PF 保持，不泄漏），要等网络变化
+  或用户点 Retry now / Restore internet。现在睡眠把会话交给唤醒恢复时，清掉重复失败计数、签名和可由网络变化
+  解除的暂停，与网络变化 kick 的处理一致；需要用户处理的暂停（管理员授权被拒、helper 被拒）保留；显式
+  Restore internet 进行中时睡眠在此之前返回，行为不变。
+- **新增/优化**：无。
+- **工程与测试**：`AppStateSleepTests` 新增一个 XCTest `testSleepGivesWakeAFreshRepeatedFailureBudget`：
+  Protected Offline、PF 未武装（睡眠排程的 bootstrap 收紧在未武装时直接返回，不触达 helper）、同一失败三次
+  且可由网络变化解除的暂停；调用 `prepareForSystemSleep()`，断言计数归零、签名清空、两个暂停标志清除、
+  唤醒恢复仍被请求。只含测试的提交 a1cf8692 在 GitHub-hosted macOS CI run
+  [35981761856](https://github.com/raydocs/tono/actions/runs/35981761856) 实际跑红：只有该测试失败
+  （计数仍为 3、签名保留、两个暂停标志保留）。
+- **验证**：本机（编辑机）未运行 xcodebuild/swift；TonoTests 委托本 PR 的 GitHub-hosted `macos-26` CI，结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：测试驱动睡眠一侧的状态，未模拟唤醒后的实际重连与失败；睡眠通知丢失（只收到唤醒）时不重置。
+  唤醒后首次失败文案与睡前相同的频率未在实机测量。唤醒 `connect()` 会清除需要用户处理的暂停标志，这是既有行为，
+  本修复不改。
+
 ## 2026-09-24 · macOS 续期时钥匙串读取失败不再当成会话被拒
 
 - **归属/来源**：G2 客户端账户状态；macOS `TonoAPIClient` 刷新令牌读取、`KeychainStore`。内部审查 H18-O-F3
