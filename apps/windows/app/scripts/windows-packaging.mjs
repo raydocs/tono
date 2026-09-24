@@ -11,7 +11,6 @@
  */
 
 export const WINDOWS_RESOURCE_ALLOWLIST = Object.freeze([
-  'enableLoopback.exe',
   'tono-service.exe',
   'tono-service-install.exe',
   'tono-service-uninstall.exe',
@@ -58,6 +57,7 @@ export const KNOWN_LEGACY_WINDOWS_PAYLOAD = Object.freeze([
   'resources/Country.mmdb',
   'resources/geoip.dat',
   'resources/geosite.dat',
+  'resources/enableLoopback.exe',
 ])
 
 export const WINDOWS_RUNTIME_REPAIR_ARTIFACTS = Object.freeze([
