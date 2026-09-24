@@ -1203,6 +1203,89 @@ class StableXrayRead(unittest.TestCase):
         self.assertEqual(reconcile.call_count, 2)
 
 
+class ControlPlaneOutage(unittest.TestCase):
+    def test_an_outage_restores_the_last_verified_roster_and_keeps_metering(self) -> None:
+        # Xray drops API-added clients when it restarts. While the control plane
+        # cannot be reached, the node reinstalls its last verified roster for at
+        # most a day and keeps folding counters. Any answer from the control
+        # plane, here a rejected token, discards the copy.
+        client_uuid = "11111111-2222-4333-8444-555555555555"
+        label = agent.client_label("usr_a", "dev_a", client_uuid)
+        roster = [{"userId": "usr_a", "clientUUID": client_uuid, "deviceId": "dev_a"}]
+        online = ("node-under-test", 1_700_000_000_000, roster, False)
+        down = urllib.error.URLError("control plane unreachable")
+        rejected = urllib.error.HTTPError("https://control.example", 401, "Unauthorized", {}, None)
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        path.write_text(
+            json.dumps({**fresh_state(), "sourceId": "node-under-test"}), encoding="utf-8",
+        )
+        cache = agent.roster_cache_path(path)
+        added: list[str] = []
+        delivered: list[dict] = []
+
+        def fake_add(_binary, _command, _address, _tag, added_label, _uuid):
+            added.append(added_label)
+            return agent.subprocess.CompletedProcess([], 0, "", "")
+
+        def fake_deliver(_base, _token, queue_path, state):
+            count = len(state["pendingReports"])
+            delivered.extend(state["pendingReports"])
+            state["pendingReports"] = []
+            agent.save_state(queue_path, state)
+            return count, 0
+
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-token",
+                 "TONO_SOURCE_ID": "node-under-test",
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "require_commands", return_value={
+                 "add_user": "adu", "remove_user": "rmu",
+                 "stats_query": "statsquery", "list_users": "inbounduser",
+             }), \
+             patch.object(agent, "fetch_roster") as fetch, \
+             patch.object(agent, "installed_clients") as listing, \
+             patch.object(agent, "add_inbound_user", side_effect=fake_add), \
+             patch.object(agent, "read_counters") as counters, \
+             patch.object(agent, "xray_start_marker") as marker, \
+             patch.object(agent, "acknowledge_roster"), \
+             patch.object(agent, "acknowledge_metering"), \
+             patch.object(agent, "deliver_queue", side_effect=fake_deliver), \
+             patch.object(agent.time, "time") as clock:
+            def run(at, outcome, listed, reading, start, raises=None):
+                clock.return_value = at
+                fetch.side_effect = [outcome]
+                listing.return_value = listed
+                counters.return_value = {label: reading}
+                marker.return_value = start
+                if raises is None:
+                    agent.run_once(path)
+                else:
+                    with self.assertRaises(raises):
+                        agent.run_once(path)
+
+            run(1_000_000, online, set(), 1_000, "boot:1")
+            self.assertEqual(added, [label])
+            self.assertEqual(cache.stat().st_mode & 0o777, 0o600)
+            # Down, then Xray restarts and forgets the client: it comes back
+            # from the copy, and the 4,000 bytes before the restart are kept.
+            run(1_000_060, down, {label}, 5_000, "boot:1", raises=agent.Unreachable)
+            run(1_000_120, down, set(), 200, "boot:2", raises=agent.Unreachable)
+            self.assertEqual(added, [label, label])
+            # A copy older than a day restores nothing.
+            run(1_090_000, down, set(), 250, "boot:2", raises=agent.Refusal)
+            self.assertEqual(added, [label, label])
+            run(1_090_060, online, set(), 300, "boot:2")
+            self.assertEqual(delivered[-1]["totalBytes"], 5_300)
+            run(1_090_120, rejected, set(), 300, "boot:2", raises=urllib.error.HTTPError)
+            self.assertFalse(cache.exists())
+            run(1_090_180, down, set(), 300, "boot:2", raises=agent.Refusal)
+            self.assertEqual(added, [label, label, label])
+
+
 class Delivery(unittest.TestCase):
     def setUp(self) -> None:
         self.sent: list[list[dict]] = []

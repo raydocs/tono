@@ -80,6 +80,21 @@ old report IDs safe after a counter reset.
 control plane's `retireSharedLegacy` signal. Set it to `false` to block automatic
 retirement during rollback, or to `true` to force retirement.
 
+Xray drops every client added over its management API when it restarts. Each
+verified roster is therefore saved beside the state file as `state.json.roster`
+(mode 0600, service-owned, replaced atomically) before it is enforced. When the
+control plane cannot be reached (a network error or a 5xx/408/425/429 answer),
+the round reinstalls that saved roster if it is at most 24 hours old, keeps
+folding Xray counters into the durable totals, and exits non-zero without any
+acknowledgement. The next round that reaches the control plane reports the
+growth. An older, missing or unreadable copy restores nothing, and the round
+refuses with the reason. Any other control-plane answer, including a rejected
+token, an invalid roster or another node's roster, deletes the copy first.
+The saved roster is never newer than the last one the node enforced, so it
+cannot reinstate an account that roster had already removed. The restore takes
+effect on the next timer run after the Xray restart. hy2's allowlist is a file
+and survives restarts, so it is not touched during an outage.
+
 Run the regression suite with:
 
 ```bash
