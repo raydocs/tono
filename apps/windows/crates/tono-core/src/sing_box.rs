@@ -589,6 +589,24 @@ mod tests {
     }
 
     #[test]
+    fn signed_policy_revision_key_is_bound_to_the_envelope() {
+        // #317: the Worker will embed `revision` inside the signed json. The
+        // matching key is admitted; a different one means the envelope was
+        // relabelled and the snapshot is refused.
+        let mut fixture = Fixture::new();
+        let mut policy = fixture.reference["input"]["policy_document"].clone();
+        policy["revision"] = json!(fixture.policy.revision);
+        fixture.set_policy(policy.clone());
+        assert!(build_synthetic_offline_draft(fixture.input()).is_ok());
+        policy["revision"] = json!(fixture.policy.revision + 1);
+        fixture.set_policy(policy);
+        assert_eq!(
+            build_synthetic_offline_draft(fixture.input()).unwrap_err(),
+            SingBoxError::UntrustedSnapshot
+        );
+    }
+
+    #[test]
     fn duplicate_policy_key_cannot_hide_a_requirement() {
         let mut fixture = Fixture::new();
         fixture.policy.json = r#"{"version":3,"domains":[{"host":"example.com","ports":[443]}],"domains":[],"mediaEndpoints":[],"webDomains":[],"directSuffixes":[]}"#.into();
