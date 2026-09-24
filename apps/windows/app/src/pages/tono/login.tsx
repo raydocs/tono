@@ -3,7 +3,13 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 
-import { useTonoStatus } from '@/hooks/use-tono'
+import {
+  tonoAccountQueryKey,
+  tonoDevicesQueryKey,
+  tonoServersQueryKey,
+  useTonoStatus,
+} from '@/hooks/use-tono'
+import { removeCacheData } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
 import {
   formatTonoActionError,
@@ -11,6 +17,7 @@ import {
   tonoRetryRestore,
   tonoSignInStart,
   tonoSignInVerify,
+  tonoSignOut,
 } from '@/services/tono'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import { SupportContact } from '@/tono-ui/SupportContact'
@@ -44,6 +51,8 @@ const LoginPage = () => {
   const [verifying, setVerifying] = useState(false)
   const [retrying, setRetrying] = useState(false)
   const [restoringInternet, setRestoringInternet] = useState(false)
+  const [signingOut, setSigningOut] = useState(false)
+  const [signOutError, setSignOutError] = useState<string | null>(null)
   const [verifySuspended, setVerifySuspended] = useState(false)
   const [suspendedDismissed, setSuspendedDismissed] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -189,6 +198,30 @@ const LoginPage = () => {
     }
   })
 
+  // A paused account is sent no sign-in code, so "Use another email" cannot
+  // replace a session the control plane refuses; signing out is the way off
+  // this screen. As on the Account page, it releases protection first and
+  // keeps the account when that release cannot be proven.
+  const handleSignOut = useLockFn(async () => {
+    setSigningOut(true)
+    setSignOutError(null)
+    try {
+      await tonoSignOut()
+    } catch (error) {
+      setSignOutError(formatTonoActionError(error, t))
+      return
+    } finally {
+      setSigningOut(false)
+    }
+    removeCacheData(tonoAccountQueryKey)
+    removeCacheData(tonoDevicesQueryKey)
+    removeCacheData(tonoServersQueryKey)
+    setVerifySuspended(false)
+    setSuspendedDismissed(false)
+    resetToStart()
+    await mutateTonoStatus()
+  })
+
   const inputStyle: React.CSSProperties = {
     background: 'var(--tono-surface-input)',
     border: '1px solid var(--tono-surface-input-border)',
@@ -301,6 +334,24 @@ const LoginPage = () => {
           >
             {t('tono.login.changeEmail')}
           </button>
+
+          <button
+            type="button"
+            className="tono-link"
+            style={{ fontSize: 13, color: text.secondary }}
+            onClick={handleSignOut}
+            disabled={signingOut}
+          >
+            {t('tono.account.signOut')}
+          </button>
+          {signOutError && (
+            <span
+              role="alert"
+              style={{ fontSize: 12, color: 'var(--tono-text-error)' }}
+            >
+              {signOutError}
+            </span>
+          )}
         </GlassCard>
       </div>
     )

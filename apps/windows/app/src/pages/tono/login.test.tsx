@@ -11,16 +11,27 @@ const mocks = vi.hoisted(() => ({
   start: vi.fn(),
   verify: vi.fn(),
   mutate: vi.fn(),
+  status: {} as Record<string, unknown>,
+  signOut: vi.fn(),
+  disconnect: vi.fn(),
 }))
 
 vi.mock('@/services/states', () => ({ useThemeMode: () => 'light' }))
 vi.mock('@/hooks/use-tono', () => ({
-  useTonoStatus: () => ({ status: {}, mutateTonoStatus: mocks.mutate }),
+  useTonoStatus: () => ({
+    status: mocks.status,
+    mutateTonoStatus: mocks.mutate,
+  }),
+  tonoAccountQueryKey: ['tonoAccount'],
+  tonoDevicesQueryKey: ['tonoDevices'],
+  tonoServersQueryKey: ['tonoServers'],
 }))
+vi.mock('@/services/query-client', () => ({ removeCacheData: vi.fn() }))
 vi.mock('@/services/tono', () => ({
   tonoSignInStart: mocks.start,
   tonoSignInVerify: mocks.verify,
-  tonoDisconnect: vi.fn(),
+  tonoSignOut: mocks.signOut,
+  tonoDisconnect: mocks.disconnect,
   tonoRetryRestore: vi.fn(),
   formatTonoActionError: (error: Error) => error.message,
 }))
@@ -38,6 +49,9 @@ beforeEach(() => {
   mocks.start.mockReset().mockResolvedValue({ expiresIn: 600 })
   mocks.verify.mockReset()
   mocks.mutate.mockReset().mockResolvedValue(undefined)
+  mocks.status = {}
+  mocks.signOut.mockReset().mockResolvedValue(undefined)
+  mocks.disconnect.mockReset().mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -241,5 +255,25 @@ describe('login request exclusion', () => {
       }),
     )
     expect(screen.getByText('Account paused')).toBeDefined()
+  })
+
+  it('offers sign-out from the paused screen of a refused session', async () => {
+    mocks.status = {
+      accountState: 'suspended',
+      protectionBlocked: true,
+      killSwitch: { wanted: true },
+    }
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    )
+    expect(screen.getByText('Account paused')).toBeDefined()
+    await act(async () =>
+      fireEvent.click(screen.getByRole('button', { name: 'Sign Out' })),
+    )
+    expect(mocks.signOut).toHaveBeenCalledTimes(1)
+    expect(mocks.disconnect).not.toHaveBeenCalled()
+    expect(mocks.mutate).toHaveBeenCalledTimes(1)
   })
 })
