@@ -167,6 +167,26 @@ describe('ops onboard pending profile', () => {
     const user = await db().prepare('SELECT expires_at, plan FROM users WHERE email = ?')
       .bind(email).first<{ expires_at: number | null; plan: string | null }>();
     expect(user).toEqual({ expires_at: expiresAt, plan: 'claude_20x' });
+
+    // A first sign-in that creates the account after onboarding looked the
+    // email up, copying the allowlist row before the expiry reached it.
+    const raced = 'raced-expiry@example.com';
+    await db().prepare(
+      `CREATE TRIGGER test_onboard_signup_race AFTER INSERT ON signup_allowlist
+       WHEN NEW.email = '${raced}'
+       BEGIN
+         INSERT INTO users(id, email, password_hash, password_salt, created_at, updated_at, expires_at, plan)
+         VALUES('u-raced', NEW.email, 'x', 'y', NEW.created_at, NEW.created_at, NEW.expires_at, NEW.plan);
+       END`,
+    ).run();
+    try {
+      expect((await ops('users/onboard', json({ email: raced, expiresAt, plan: 'claude_20x' }))).status).toBe(202);
+    } finally {
+      await db().prepare('DROP TRIGGER IF EXISTS test_onboard_signup_race').run();
+    }
+    const racedUser = await db().prepare('SELECT expires_at, plan FROM users WHERE email = ?')
+      .bind(raced).first<{ expires_at: number | null; plan: string | null }>();
+    expect(racedUser).toEqual({ expires_at: expiresAt, plan: 'claude_20x' });
   });
 
   it('does not allowlist an email when wechatId is too long', async () => {

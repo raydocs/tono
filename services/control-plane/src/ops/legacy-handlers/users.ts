@@ -256,14 +256,52 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
     }
   }
   const createdAt = now();
-  await e.DB.prepare(
-    'INSERT OR IGNORE INTO signup_allowlist(email, created_at) VALUES(?, ?)',
-  ).bind(address, createdAt).run();
   const incomplete: string[] = [];
   if (!user) incomplete.push('user_not_registered');
   const storeProfile = b.notes !== undefined || b.contact !== undefined || b.wechatId !== undefined
     || expiresAt !== undefined || b.plan !== undefined;
   const pendingProfile = !user && storeProfile;
+  // The sign-up grant, the pending profile and the same values on any account
+  // created since the lookup above commit together. A first sign-in racing
+  // this request either created the account already (the users UPDATE covers
+  // it) or copies the finished allowlist row, so the expiry cannot be lost.
+  const allowlistWrites: D1PreparedStatement[] = [
+    e.DB.prepare(
+      'INSERT OR IGNORE INTO signup_allowlist(email, created_at) VALUES(?, ?)',
+    ).bind(address, createdAt),
+  ];
+  if (pendingProfile) {
+    const profile = [
+      b.wechatId !== undefined, wechatId ?? null,
+      b.contact !== undefined, contact ?? null,
+      b.notes !== undefined, notes ?? null,
+      expiresAt !== undefined, expiresAt ?? null,
+      b.plan !== undefined, plan,
+    ];
+    allowlistWrites.push(
+      e.DB.prepare(
+        `UPDATE signup_allowlist SET
+           wechat_id = CASE WHEN ? THEN ? ELSE wechat_id END,
+           contact = CASE WHEN ? THEN ? ELSE contact END,
+           notes = CASE WHEN ? THEN ? ELSE notes END,
+           expires_at = CASE WHEN ? THEN ? ELSE expires_at END,
+           plan = CASE WHEN ? THEN ? ELSE plan END
+         WHERE email = ?`,
+      ).bind(...profile, address),
+      e.DB.prepare(
+        `UPDATE users SET
+           wechat_id = CASE WHEN ? THEN ? ELSE wechat_id END,
+           contact = CASE WHEN ? THEN ? ELSE contact END,
+           notes = CASE WHEN ? THEN ? ELSE notes END,
+           expires_at = CASE WHEN ? THEN ? ELSE expires_at END,
+           plan = CASE WHEN ? THEN ? ELSE plan END,
+           updated_at = ?
+         WHERE email = ?`,
+      ).bind(...profile, createdAt, address),
+    );
+  }
+  const written = await e.DB.batch(allowlistWrites);
+  const registeredMeanwhile = pendingProfile && Number(written[2]?.meta.changes ?? 0) > 0;
   let binding = null;
   let account = null;
   let exitIdentityIssued = false;
@@ -336,23 +374,6 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
       account = await assignedProductForUser(e, String(user.id));
     }
     if (!account) incomplete.push('claude');
-  } else if (pendingProfile) {
-    await e.DB.prepare(
-      `UPDATE signup_allowlist SET
-         wechat_id = CASE WHEN ? THEN ? ELSE wechat_id END,
-         contact = CASE WHEN ? THEN ? ELSE contact END,
-         notes = CASE WHEN ? THEN ? ELSE notes END,
-         expires_at = CASE WHEN ? THEN ? ELSE expires_at END,
-         plan = CASE WHEN ? THEN ? ELSE plan END
-       WHERE email = ?`,
-    ).bind(
-      b.wechatId !== undefined, wechatId ?? null,
-      b.contact !== undefined, contact ?? null,
-      b.notes !== undefined, notes ?? null,
-      expiresAt !== undefined, expiresAt ?? null,
-      b.plan !== undefined, plan,
-      address,
-    ).run();
   }
   const entitlement = [
     expiresAt !== undefined ? 'expiresAt' : null,
@@ -363,7 +384,10 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
     entitlement.length ? `${address} (set ${entitlement.join(', ')})` : address,
   );
   // A past expiry set on a registered customer takes effect now, as PATCH does.
-  if (user && expiresAt !== undefined) await deps.sharedAdminDeps.enforceUser(e, String(user.id));
+  if (expiresAt !== undefined && (user || registeredMeanwhile)) {
+    const target = user ?? await e.DB.prepare('SELECT id FROM users WHERE email = ?').bind(address).first<Row>();
+    if (target) await deps.sharedAdminDeps.enforceUser(e, String(target.id));
+  }
   return Response.json({
     email: address,
     userId: user ? String(user.id) : null,
