@@ -32,6 +32,33 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 原 DNS 所属服务已删除时向用户提示
+
+- **归属/来源**：G1 保护恢复；macOS App `HelperManager` / `AppState+Connect` / `AppDelegate`。
+  X3-1 后续，Issue #487（根因 #475 / PR #476）。基线 main bb2ed4e4 → 分支
+  `fix/dns-original-lost-notice-20260923`；提交时未合 main。字段 `originalDNSRestored` 由
+  #476 的 helper 产生；本条无编译依赖，#476 合并前旧 helper 不发该字段，行为不变。
+- **缺陷修复**：`/dns/restore` 成功但带 `originalDNSRestored: false`（原 DNS 所属服务已删除、
+  快照已存档、loopback 已清为自动获取）时，App 只检查 `configured`/`snapshotPresent`，把它当
+  普通成功，用户不知道原静态 DNS 没有写回。现在 `restoreProtectedDNS()` 解码该字段，为
+  `false` 时在 UserDefaults 记一次性提示并写本地审计 `protected_dns_original_service_missing`
+  （helper 会把快照移走，只报告一次；恢复可能发生在启动恢复、退出、更新准备等无窗口时刻）。
+  显式 Restore internet 干净完成时（无 transitionError、未保持 blocked）显示提示；否则在下次
+  App 激活且没有其他消息时显示。新增中英文案："原 DNS 设置所属的网络服务已被删除……现已改为
+  自动获取 DNS"，更新 `Localizable.xcstrings`。保护与释放判定不变。
+- **新增/优化**：无。
+- **工程与测试**：新增一个 XCTest
+  `ProtectedDNSRestoreNoticeTests.testRestoreReplyWithoutOriginalDNSMapsToUserNotice`：
+  `originalDNSRestored:false` 的回复映射为提示，`true` 与缺字段映射为 nil。映射函数在旧
+  main 上不存在，测试在旧代码上无法编译（未实际跑红）。
+- **验证**：本机为编辑机，未运行 xcodebuild/swift；`Localizable.xcstrings` 本机 JSON 解析通过。
+  TonoTests 委托本 PR 的 GitHub-hosted `macos-26` CI，结果以 PR 页为准。未在实机删除网络服务
+  验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：提示只说明未写回，不展示存档中的原 DNS 值（存档文件只供诊断）。提示落在
+  共享的错误横幅上，可被随后的其他错误覆盖；激活时只在横幅为空时显示。消费提示与 AppState
+  状态之间没有自动化测试，只覆盖回复映射。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3

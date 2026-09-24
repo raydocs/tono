@@ -888,6 +888,12 @@ extension AppState {
                     }
                     if let transitionError {
                         self.errorMessage = transitionError
+                    } else if releaseKillSwitch, !transitionLeavesProtectionBlocked,
+                              let notice = HelperManager.takeProtectedDNSRestoreNotice() {
+                        // Released, but the user's saved DNS servers had no
+                        // service left to go back to (X3-1): say so instead
+                        // of a silent success.
+                        self.errorMessage = notice
                     }
                     self.isDisconnecting = false
                     self.disconnectionStartedAt = nil
@@ -1682,6 +1688,15 @@ extension AppState {
             details: ["selected_exit": candidate.name]
         )
         return true
+    }
+
+    /// A restore at launch, on Quit or in update preparation had no window
+    /// to tell that the original DNS servers were not put back (X3-1). Show
+    /// that notice on activation once no other message is on screen.
+    func showPendingProtectedDNSRestoreNotice() {
+        guard errorMessage == nil, !isDisconnecting,
+              let notice = HelperManager.takeProtectedDNSRestoreNotice() else { return }
+        errorMessage = notice
     }
 
     /// Non-prompting foreground reconciliation for the documented root
