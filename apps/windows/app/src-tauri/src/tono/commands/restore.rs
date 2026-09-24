@@ -311,6 +311,8 @@ where
             return None;
         }
         inner.account_state = AccountState::Restoring;
+        // A new restore decides afresh whether this launch runs offline.
+        inner.offline.leave_offline();
         emit(&inner);
     }
 
@@ -322,6 +324,11 @@ where
                 return None;
             }
             apply_stored_protection(&mut inner, protection);
+            // #582: the budget elapsed without any server answer, so the control plane is unreachable.
+            if let Some(admitted) = settle_unreachable_restore(&mut inner, protection) {
+                emit(&inner);
+                return admitted.then(offline_account_info);
+            }
             inner.account_state =
                 AccountState::Error(format!("session restore exceeded {RESTORE_TRANSACTION_TIMEOUT:?}"));
             emit(&inner);
@@ -352,18 +359,26 @@ where
             if inner.sign_in_generation != generation {
                 return None;
             }
-            settle_failed_restore(&mut inner, protection, &error);
+            let admitted = settle_failed_restore(&mut inner, protection, &error);
             emit(&inner);
-            None
+            admitted.then(offline_account_info)
         }
     }
 }
 
-/// Restore's answer when `me()` fails. Nothing here releases protection, signs out or deletes
-/// the stored session: the barrier stays exactly as the Service holds it, with Disconnect
-/// ("Restore internet") still offered while it blocks.
-fn settle_failed_restore(inner: &mut TonoInner, protection: &StoredProtection, error: &ApiError) {
+/// Restore's answer when `me()` fails; true when the account was admitted offline (#582).
+/// Nothing here releases protection, signs out or deletes the stored session: the barrier stays
+/// exactly as the Service holds it, with Disconnect ("Restore internet") still offered while it
+/// blocks.
+fn settle_failed_restore(inner: &mut TonoInner, protection: &StoredProtection, error: &ApiError) -> bool {
     apply_stored_protection(inner, protection);
+    // #582: only an unreachable control plane may fall back to the offline grant. Any server
+    // answer (401, 403, 5xx, an invalid body) keeps its own meaning below.
+    if matches!(error, ApiError::Transport { .. })
+        && let Some(admitted) = settle_unreachable_restore(inner, protection)
+    {
+        return admitted;
+    }
     inner.account_state = match (error, protection) {
         // tono-core reports `Unauthorized` only after its own refresh was refused too. The Worker
         // answers that way for an expired plan, a used-up allowance, a disabled account and a
@@ -380,6 +395,47 @@ fn settle_failed_restore(inner: &mut TonoInner, protection: &StoredProtection, e
         }
         _ => AccountState::Error(error.to_string()),
     };
+    false
+}
+
+/// #582: the control plane could not be reached. `Some(true)`: Ready on a grant that matches
+/// memory (offline verification). `Some(false)`: the grant records a revocation (Suspended).
+/// `None`: no positive grant, so restore keeps its ordinary error. An unknown protection state
+/// keeps that error too: it carries the only way out of a possibly live barrier.
+fn settle_unreachable_restore(inner: &mut TonoInner, protection: &StoredProtection) -> Option<bool> {
+    use crate::tono::offline_grant::OfflineAdmission;
+
+    if matches!(protection, StoredProtection::Unknown(_)) {
+        return None;
+    }
+    let token = inner.credentials.refresh_token().ok().flatten();
+    let admission = inner.offline.admit(token.as_deref(), &inner.catalog_tracker, !inner.nodes.is_empty());
+    match admission {
+        OfflineAdmission::Admitted => {
+            logging!(warn, Type::Service, "Tono: the control plane is unreachable; ready on the offline grant, protection kept");
+            inner.account_state = AccountState::Ready;
+            Some(true)
+        }
+        OfflineAdmission::Revoked(reason) => {
+            logging!(warn, Type::Service, "Tono: the offline grant was revoked ({reason}); account suspended, protection kept");
+            inner.account_state = AccountState::Suspended;
+            Some(false)
+        }
+        OfflineAdmission::Refused(reason) => {
+            logging!(info, Type::Service, "Tono: offline admission refused: {reason}");
+            None
+        }
+    }
+}
+
+/// Offline there is no `me()`. Restore goes on as for a Ready account, so the periodic sync runs
+/// and the first server answer ends offline mode; nothing downstream reads the email.
+fn offline_account_info() -> TonoAccountInfo {
+    TonoAccountInfo {
+        email: String::new(),
+        suspended: false,
+        device_limit: i64::from(DEFAULT_DEVICE_LIMIT),
+    }
 }
 
 #[cfg(test)]
@@ -555,6 +611,15 @@ pub async fn tono_retry_restore(state: tauri::State<'_, Arc<TonoState>>, app: Ap
 pub async fn restore_session_guarded(app: AppHandle, state: Arc<TonoState>) {
     use futures::FutureExt as _;
 
+    // #582: carries the tono-core verdict sink's refusals into the account state for the life of
+    // this `TonoState` (this function runs once per state).
+    let applier_app = app.clone();
+    let applier_state = Arc::clone(&state);
+    AsyncHandler::spawn(move || {
+        crate::tono::offline_grant::apply_verdicts(applier_state, move |inner| {
+            emit_status(&applier_app, &status_of(inner));
+        })
+    });
     crate::tono::update_handoff::retire_completed_legacy_journal(env!("CARGO_PKG_VERSION"));
     load_credentials(&state).await;
     crate::tono::bootstrap::hydrate_learned_pins_from_service().await;

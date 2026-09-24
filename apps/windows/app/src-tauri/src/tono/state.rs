@@ -572,18 +572,19 @@ impl TonoState {
         catalog_dir: PathBuf, audit: Arc<crate::tono::audit::Audit>, credentials: Arc<SessionCredentialStore>,
     ) -> Result<Self> {
         let transport = TonoTransport::new()?;
-        let client = Arc::new(TonoApiClient::new(
-            tono_core::auth::DEFAULT_BASE_URL,
-            transport,
-            credentials.clone(),
-        )?);
+        // The production client is built only here: every server answer on this session reaches
+        // the offline gate (#582).
+        let offline = Arc::new(crate::tono::offline_grant::OfflineGate::new(catalog_dir.clone()));
+        let client = Arc::new(
+            TonoApiClient::new(tono_core::auth::DEFAULT_BASE_URL, transport, credentials.clone())?
+                .with_verdict_sink(offline.verdict_sink()),
+        );
 
         // installationId: a fresh in-memory UUID for now — NO vault I/O on
         // the setup thread (a prompting macOS securityd blocked setup
         // forever). The startup load task hydrates the persisted id (or
         // persists this one) off-thread with a timeout.
         let installation_id = new_installation_id();
-        let offline = Arc::new(crate::tono::offline_grant::OfflineGate::new(catalog_dir.clone()));
 
         Ok(Self {
             inner: tokio::sync::Mutex::new(TonoInner {

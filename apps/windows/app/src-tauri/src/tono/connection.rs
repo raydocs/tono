@@ -207,6 +207,9 @@ pub async fn connect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String
             AccountState::Suspended => return Err("account is suspended".to_string()),
             _ => return Err("not signed in".to_string()),
         }
+        if let Some(refusal) = crate::tono::offline_grant::connect_refusal(&inner) {
+            return Err(refusal.to_string());
+        }
         if inner.fsm.status().is_connected {
             return Err("already connected".to_string());
         }
@@ -501,6 +504,10 @@ async fn guard_snapshot(
         AccountState::Ready => {}
         AccountState::Suspended => return Err("account is suspended".to_string()),
         _ => return Err("not signed in".to_string()),
+    }
+    // #582: a server refusal blocks Connect (and reconnect) before the UI catches up.
+    if let Some(refusal) = crate::tono::offline_grant::connect_refusal(&inner) {
+        return Err(refusal.to_string());
     }
     let status = inner.fsm.status();
     if status.is_connecting || status.is_connected || status.is_disconnecting {

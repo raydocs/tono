@@ -880,7 +880,7 @@ pub enum SessionVerdict {
     Verified,
     /// The server refused the session: `auth/refresh` or a replay with a
     /// freshly refreshed token answered 401, or a session request answered
-    /// 403 `USER_DISABLED`. A first attempt's 401 is only a stale access token.
+    /// 403 with an entitlement code. A first attempt's 401 is only a stale access token.
     Refused { code: Option<String> },
     /// Any other 403: this request was not allowed; the session stands.
     Forbidden,
@@ -894,6 +894,17 @@ pub trait SessionVerdictSink: Send + Sync {
     /// back into the client.
     fn report(&self, identity_epoch: u64, verdict: SessionVerdict);
 }
+
+/// 403 codes that refuse the session itself rather than one request (parity with the macOS
+/// `TonoAPIClient.entitlementCodes`).
+const ENTITLEMENT_CODES: &[&str] = &[
+    "ACCOUNT_DISABLED",
+    "ACCOUNT_EXPIRED",
+    "ACCOUNT_SUSPENDED",
+    "ENTITLEMENT_REQUIRED",
+    "QUOTA_EXCEEDED",
+    "USER_DISABLED",
+];
 
 /// How one exchange's answer bears on the session (#582).
 #[derive(Debug, Clone, Copy)]
@@ -924,7 +935,7 @@ impl SessionUse {
             200..=299 => SessionVerdict::Verified,
             401 if decisive => SessionVerdict::Refused { code: code() },
             403 => match code() {
-                Some(code) if code == "USER_DISABLED" => SessionVerdict::Refused { code: Some(code) },
+                Some(code) if ENTITLEMENT_CODES.contains(&code.as_str()) => SessionVerdict::Refused { code: Some(code) },
                 _ => SessionVerdict::Forbidden,
             },
             _ => return None,

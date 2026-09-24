@@ -139,6 +139,9 @@ pub(crate) fn discard_account_catalog(inner: &mut TonoInner) {
     inner.nodes = Vec::new();
     inner.routing = None;
     inner.catalog_tracker = tono_core::CatalogTracker::new();
+    // An offline verification described this catalog. The grant file stays: it binds the
+    // discarded session's token hash and this catalog's digests, so no later session matches it.
+    inner.offline.leave_offline();
     let cache = inner.catalog_cache();
     match std::fs::remove_file(cache.path()) {
         Ok(()) => {}
@@ -233,7 +236,7 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
     let client = { state.lock().await.client.clone() };
     let response = client.exit_catalog().await.map_err(SyncFailure::from_api)?;
 
-    let selection_vanished = {
+    let (selection_vanished, server_confirmed) = {
         let mut inner = state.lock().await;
         if inner.sign_in_generation != auth_generation {
             return Ok(());
@@ -267,8 +270,13 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
         if let Some(snapshot) = snapshot {
             commands::emit_status(app, &snapshot);
         }
-        vanished
+        (vanished, emit)
     };
+
+    // #582: Installed or Unchanged, the server has just confirmed exactly the catalog in memory.
+    if server_confirmed {
+        crate::tono::offline_grant::record_server_verified_catalog(state, auth_generation, &response).await;
+    }
 
     if let Some(generation) = selection_vanished {
         if state.lock().await.sign_in_generation == auth_generation {

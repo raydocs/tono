@@ -274,17 +274,23 @@ pub async fn quit_release(app: AppHandle) -> Result<(), String> {
     let Some(state) = app.try_state::<Arc<TonoState>>().map(|state| state.inner().clone()) else {
         return Ok(());
     };
-    let protected = {
+    let (protected, offline) = {
         let mut inner = state.lock().await;
         inner.invalidate_connection(true);
         inner.tasks.abort_catalog_sync();
-        fsm_reports_protection(&inner.fsm)
+        (fsm_reports_protection(&inner.fsm), Arc::clone(&inner.offline))
     };
-    if protected {
+    let result = if protected {
         connection::release_explicit(&state, &app).await
     } else {
         Ok(())
+    };
+    // #582: a revocation still waiting for the disk must land before exit, or the next offline
+    // launch reads the grant it revoked. Bounded: Quit never hangs on a failing disk.
+    if result.is_ok() && !offline.wait_durable(crate::tono::offline_grant::QUIT_DURABILITY_BUDGET).await {
+        logging!(warn, Type::Service, "Tono: the offline revocation did not reach the disk before quit");
     }
+    result
 }
 
 /// M3: exit is *committed* (RunEvent::Exit) — close the audit channel so

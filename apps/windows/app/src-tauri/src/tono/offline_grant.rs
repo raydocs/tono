@@ -9,21 +9,49 @@
 //! variant. No client file is entitlement (the exit roster is), so there is no client-side offline
 //! age limit.
 
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering},
+    },
+    time::Duration,
+};
 
 use serde::{Deserialize, Serialize};
 use tono_core::{
     CatalogTracker,
     auth::{SessionVerdict, SessionVerdictSink},
+    credentials::CredentialStore as _,
 };
+use tono_logging::{Type, logging};
 
-use crate::tono::state::TonoInner;
+use crate::tono::state::{AccountState, TonoInner, TonoState};
 
 /// Beside the catalog cache, in the per-user Tono data directory.
 pub const GRANT_FILE_NAME: &str = "offline-grant.json";
 
-/// First retry delay of a tombstone the disk refused.
+/// How long Quit waits for a revocation that has not reached the disk yet. Quit never hangs on a
+/// failing disk; past this budget the revocation is lost with the process (a remaining limit).
+pub const QUIT_DURABILITY_BUDGET: Duration = Duration::from_secs(3);
+
+/// First retry delay of a tombstone the disk refused; doubles up to [`TOMBSTONE_RETRY_MAX`].
 const TOMBSTONE_RETRY_INITIAL: Duration = Duration::from_secs(1);
+const TOMBSTONE_RETRY_MAX: Duration = Duration::from_secs(30);
+
+/// Offline eligibility in memory, ordered by severity. A later `Verified` for the same identity
+/// lifts `FORBIDDEN`: the server accepted the session and only refused one request. `REFUSED`
+/// lifts only when a sign-in adopts a new identity; the refused session is dead.
+const ELIGIBLE: u8 = 0;
+const FORBIDDEN: u8 = 1;
+const REFUSED: u8 = 2;
+
+const REASON_REFUSED: &str = "refused";
+const REASON_FORBIDDEN: &str = "forbidden";
+
+const REVOKED_REJECTION: &str = "Tono did not accept this session; Connect stays blocked until Tono verifies it again";
+const OFFLINE_MISMATCH_REJECTION: &str =
+    "this session no longer matches what Tono last verified offline; retry when Tono is reachable";
 
 /// What the last verified online session proved: bound to its refresh token and to the exact
 /// catalog the server confirmed. Never holds the token itself.
@@ -51,6 +79,13 @@ enum GrantFile {
     Revoked { reason: String, at: i64 },
 }
 
+/// A revocation that the disk has not acknowledged yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Tombstone {
+    reason: String,
+    at: i64,
+}
+
 /// Restore's offline answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OfflineAdmission {
@@ -67,18 +102,69 @@ pub fn token_digest(refresh_token: &str) -> String {
     tono_core::catalog::catalog_digest(refresh_token)
 }
 
-/// Offline eligibility of this process's session, shared with the tono-core verdict sink.
+fn read_grant_file(path: &Path) -> Option<GrantFile> {
+    serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+}
+
+/// Why `grant` does not describe what is in memory, if it does not.
+fn grant_mismatch(grant: &OfflineGrant, refresh_token: Option<&str>, tracker: &CatalogTracker) -> Option<&'static str> {
+    let Some(token) = refresh_token else {
+        return Some("no session token in memory");
+    };
+    if token_digest(token) != grant.token_sha256 {
+        return Some("the grant belongs to another session token");
+    }
+    if tracker.current_digest() != Some(grant.catalog_sha256.as_str())
+        || tracker.current_routing() != Some(grant.routing_sha256.as_str())
+    {
+        return Some("the catalog in memory is not the one the grant verified");
+    }
+    None
+}
+
+/// Offline eligibility of this process's session, shared with the tono-core verdict sink. The
+/// sink runs under tono-core's identity lock, so everything it touches here is an atomic, a
+/// short synchronous lock or a spawn; the product mutex is reached only by [`apply_verdicts`].
 pub struct OfflineGate {
     path: PathBuf,
-    /// Serializes every write of the grant file.
+    /// `ELIGIBLE`, `FORBIDDEN` or `REFUSED`. Set synchronously at report time, so Connect refuses
+    /// before any UI or disk catches up.
+    revocation: AtomicU8,
+    /// The grant this session was admitted on while no server answer has arrived yet.
+    offline: parking_lot::Mutex<Option<OfflineGrant>>,
+    /// The newest revocation the disk has not acknowledged.
+    tombstone: parking_lot::Mutex<Option<Tombstone>>,
+    /// One tombstone writer at a time; it always writes the newest pending tombstone.
+    tombstone_writer: AtomicBool,
+    tombstone_attempts: AtomicU32,
+    /// Serializes every write of the grant file, so a grant whose revocation check passed cannot
+    /// land after the tombstone of a revocation that came later.
     file: parking_lot::Mutex<()>,
+    /// Woken when the tombstone slot drains.
+    durable: tokio::sync::Notify,
+    /// Wakes [`apply_verdicts`].
+    changed: tokio::sync::Notify,
+    /// tono-core identity epoch of the latest refusal not yet applied to the account state.
+    pending_refusal: parking_lot::Mutex<Option<u64>>,
+    left_offline: AtomicBool,
+    applier: AtomicBool,
 }
 
 impl OfflineGate {
     pub fn new(dir: PathBuf) -> Self {
         Self {
             path: dir.join(GRANT_FILE_NAME),
+            revocation: AtomicU8::new(ELIGIBLE),
+            offline: parking_lot::Mutex::new(None),
+            tombstone: parking_lot::Mutex::new(None),
+            tombstone_writer: AtomicBool::new(false),
+            tombstone_attempts: AtomicU32::new(0),
             file: parking_lot::Mutex::new(()),
+            durable: tokio::sync::Notify::new(),
+            changed: tokio::sync::Notify::new(),
+            pending_refusal: parking_lot::Mutex::new(None),
+            left_offline: AtomicBool::new(false),
+            applier: AtomicBool::new(false),
         }
     }
 
@@ -89,47 +175,293 @@ impl OfflineGate {
 
     /// Whether the server refused or forbade this session since it was adopted.
     pub fn revoked(&self) -> bool {
-        false
+        self.revocation.load(Ordering::Acquire) != ELIGIBLE
     }
 
     /// The grant's server confirmation time while this session runs on it offline.
     pub fn offline_verified_at_ms(&self) -> Option<i64> {
-        None
+        self.offline.lock().as_ref().map(|grant| grant.verified_at)
     }
 
-    /// Offline admission: compare the grant with what is in memory now.
-    pub fn admit(&self, _refresh_token: Option<&str>, _tracker: &CatalogTracker, _has_nodes: bool) -> OfflineAdmission {
-        OfflineAdmission::Refused("offline admission is not implemented")
+    /// End offline mode. Returns whether the session was offline.
+    pub fn leave_offline(&self) -> bool {
+        self.offline.lock().take().is_some()
     }
 
-    /// Record a server-verified session.
+    /// A sign-in adopted a new identity (tono-core retired the previous one first): nothing the
+    /// server told the previous identity applies to it. A tombstone still waiting for the disk
+    /// keeps retrying; if it lands after the new grant, offline admission fails closed until the
+    /// next sync rewrites the grant.
+    pub fn adopt_new_identity(&self) {
+        self.revocation.store(ELIGIBLE, Ordering::Release);
+        self.leave_offline();
+    }
+
+    /// Offline admission (#582 rule 4): compare the grant with what is in memory now — the
+    /// hydrated refresh token and the tracker `seed_from_cache` installed. The catalog cache is
+    /// never re-read here: memory is what Connect dials. Reading the grant file is the only I/O.
+    pub fn admit(&self, refresh_token: Option<&str>, tracker: &CatalogTracker, has_nodes: bool) -> OfflineAdmission {
+        match self.revocation.load(Ordering::Acquire) {
+            ELIGIBLE => {}
+            REFUSED => return OfflineAdmission::Revoked(REASON_REFUSED.to_string()),
+            _ => return OfflineAdmission::Refused("the server forbade this session"),
+        }
+        let grant = match read_grant_file(&self.path) {
+            Some(GrantFile::Granted(grant)) => grant,
+            // Another 403 revokes offline eligibility only; it never suspends the account.
+            Some(GrantFile::Revoked { reason, .. }) if reason == REASON_FORBIDDEN => {
+                return OfflineAdmission::Refused("the server forbade this session");
+            }
+            Some(GrantFile::Revoked { reason, .. }) => return OfflineAdmission::Revoked(reason),
+            None => return OfflineAdmission::Refused("no readable offline grant"),
+        };
+        if let Some(mismatch) = grant_mismatch(&grant, refresh_token, tracker) {
+            return OfflineAdmission::Refused(mismatch);
+        }
+        if !has_nodes {
+            return OfflineAdmission::Refused("no installed exits");
+        }
+        *self.offline.lock() = Some(grant);
+        OfflineAdmission::Admitted
+    }
+
+    /// Connect's gate (#582 rule 5): a revoked session is refused whatever its state, and an
+    /// offline session must still hold exactly what its admitted grant verified.
+    pub fn connect_refusal(&self, refresh_token: Option<&str>, tracker: &CatalogTracker) -> Option<&'static str> {
+        if self.revoked() {
+            return Some(REVOKED_REJECTION);
+        }
+        let offline = self.offline.lock();
+        let grant = offline.as_ref()?;
+        grant_mismatch(grant, refresh_token, tracker).map(|_| OFFLINE_MISMATCH_REJECTION)
+    }
+
+    /// Record a server-verified session (#582 rule 1). Skipped while this session is revoked; the
+    /// check runs under the file lock, so a grant can never land after a later tombstone.
     pub fn write_grant(&self, grant: &OfflineGrant) -> anyhow::Result<bool> {
         let bytes = serde_json::to_vec(&GrantFile::Granted(grant.clone()))?;
         let _file = self.file.lock();
+        if self.revoked() {
+            return Ok(false);
+        }
         crate::tono::state::write_private_file(&self.path, &bytes)?;
         Ok(true)
     }
 
-    /// Wait, bounded, until no revocation is waiting for the disk.
-    pub async fn wait_durable(&self, _budget: Duration) -> bool {
-        true
+    /// Wait, bounded, until no revocation is waiting for the disk. The quit path calls it.
+    pub async fn wait_durable(&self, budget: Duration) -> bool {
+        tokio::time::timeout(budget, async {
+            loop {
+                let notified = self.durable.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                let drained = self.tombstone.lock().is_none();
+                if drained {
+                    return;
+                }
+                notified.as_mut().await;
+            }
+        })
+        .await
+        .is_ok()
     }
 
     #[cfg(test)]
     pub(crate) fn tombstone_attempts(&self) -> u32 {
-        0
+        self.tombstone_attempts.load(Ordering::Acquire)
+    }
+
+    /// #582 rule 3: memory first (Connect refuses from here on), then the durable overwrite on a
+    /// writer that retries until the disk acknowledges it. Never a delete.
+    fn revoke(self: &Arc<Self>, level: u8, reason: String) {
+        self.revocation.fetch_max(level, Ordering::AcqRel);
+        *self.tombstone.lock() = Some(Tombstone { reason, at: crate::tono::commands::epoch_millis() });
+        if self.tombstone_writer.swap(true, Ordering::AcqRel) {
+            // The running writer picks up the newest tombstone.
+            return;
+        }
+        let gate = Arc::clone(self);
+        let writer = async move { gate.write_tombstone_until_durable().await };
+        // The reporting request runs on the product runtime; spawn there (tests: the test runtime).
+        match tokio::runtime::Handle::try_current() {
+            Ok(runtime) => {
+                runtime.spawn(writer);
+            }
+            Err(_) => {
+                tauri::async_runtime::spawn(writer);
+            }
+        }
+    }
+
+    async fn write_tombstone_until_durable(self: Arc<Self>) {
+        let mut delay = TOMBSTONE_RETRY_INITIAL;
+        loop {
+            let pending = self.tombstone.lock().clone();
+            let Some(tombstone) = pending else {
+                self.tombstone_writer.store(false, Ordering::Release);
+                // A revocation recorded between the empty read and the release saw the flag still
+                // set and left its tombstone to this writer.
+                let stranded = self.tombstone.lock().is_some();
+                if stranded && !self.tombstone_writer.swap(true, Ordering::AcqRel) {
+                    continue;
+                }
+                self.durable.notify_waiters();
+                return;
+            };
+            let attempt = self.tombstone_attempts.fetch_add(1, Ordering::AcqRel).saturating_add(1);
+            match self.write_tombstone(&tombstone) {
+                Ok(()) => {
+                    let mut slot = self.tombstone.lock();
+                    if slot.as_ref() == Some(&tombstone) {
+                        *slot = None;
+                    }
+                    delay = TOMBSTONE_RETRY_INITIAL;
+                }
+                Err(error) => {
+                    logging!(
+                        warn,
+                        Type::Service,
+                        "Tono: the offline revocation is not on disk yet (attempt {attempt}); retrying: {error:#}"
+                    );
+                    tokio::time::sleep(delay).await;
+                    delay = delay.saturating_mul(2).min(TOMBSTONE_RETRY_MAX);
+                }
+            }
+        }
+    }
+
+    fn write_tombstone(&self, tombstone: &Tombstone) -> anyhow::Result<()> {
+        let bytes = serde_json::to_vec(&GrantFile::Revoked {
+            reason: tombstone.reason.clone(),
+            at: tombstone.at,
+        })?;
+        let _file = self.file.lock();
+        crate::tono::state::write_private_file(&self.path, &bytes)
     }
 }
 
 struct OfflineVerdictSink(Arc<OfflineGate>);
 
 impl SessionVerdictSink for OfflineVerdictSink {
-    fn report(&self, _identity_epoch: u64, _verdict: SessionVerdict) {}
+    /// Runs under tono-core's identity lock, for the current identity only: atomics, short
+    /// synchronous locks and a spawn. Never the product mutex, never the client.
+    fn report(&self, identity_epoch: u64, verdict: SessionVerdict) {
+        let gate = &self.0;
+        let refused = matches!(verdict, SessionVerdict::Refused { .. });
+        match verdict {
+            SessionVerdict::Verified => {
+                let _ = gate.revocation.compare_exchange(FORBIDDEN, ELIGIBLE, Ordering::AcqRel, Ordering::Acquire);
+            }
+            SessionVerdict::Forbidden => gate.revoke(FORBIDDEN, REASON_FORBIDDEN.to_string()),
+            SessionVerdict::Refused { code } => {
+                let reason = code.map_or_else(|| REASON_REFUSED.to_string(), |code| format!("{REASON_REFUSED}: {code}"));
+                gate.revoke(REFUSED, reason);
+                *gate.pending_refusal.lock() = Some(identity_epoch);
+            }
+        }
+        // #582 rule 5: offline mode ends at the first server answer, whatever it says.
+        let left_offline = gate.leave_offline();
+        if left_offline {
+            gate.left_offline.store(true, Ordering::Release);
+        }
+        if left_offline || refused {
+            gate.changed.notify_one();
+        }
+    }
 }
 
-/// Connect's account gate for a Ready account.
-pub(crate) fn connect_refusal(_inner: &TonoInner) -> Option<&'static str> {
-    None
+/// Connect's account gate for a Ready account, run by `connect` and `guard_snapshot` against the
+/// session token in memory and the tracker Connect is about to dial from.
+pub(crate) fn connect_refusal(inner: &TonoInner) -> Option<&'static str> {
+    let token = inner.credentials.refresh_token().ok().flatten();
+    inner.offline.connect_refusal(token.as_deref(), &inner.catalog_tracker)
+}
+
+/// Record the grant for a catalog the server has just installed or confirmed (`sync_once_inner`,
+/// Installed or Unchanged). The digests come from that server response, never from the disk
+/// cache, and the grant binds only a refresh token the credential store acknowledged. Tokens
+/// rotate on refresh, so a grant is stale after a rotation until the next sync rewrites it; a
+/// stale grant fails closed.
+pub(crate) async fn record_server_verified_catalog(
+    state: &Arc<TonoState>, auth_generation: u64, response: &tono_core::ExitCatalogResponse,
+) {
+    let catalog_sha256 = response.sha256.clone();
+    let routing_sha256 = tono_core::catalog::routing_digest(response.routing.as_ref());
+    let (credentials, token) = {
+        let inner = state.lock().await;
+        if inner.sign_in_generation != auth_generation {
+            return;
+        }
+        (Arc::clone(&inner.credentials), inner.credentials.refresh_token().ok().flatten())
+    };
+    let Some(token) = token else {
+        return;
+    };
+    // Every mutation before this barrier, including the write of `token`, is acknowledged.
+    if let Err(error) = credentials.flush().await {
+        logging!(warn, Type::Service, "Tono: offline grant not recorded; the session token is not durable: {error}");
+        return;
+    }
+    let inner = state.lock().await;
+    let token_now = inner.credentials.refresh_token().ok().flatten();
+    if inner.sign_in_generation != auth_generation
+        || token_now.as_deref() != Some(token.as_str())
+        || inner.catalog_tracker.current_digest() != Some(catalog_sha256.as_str())
+        || inner.catalog_tracker.current_routing() != Some(routing_sha256.as_str())
+    {
+        return;
+    }
+    let grant = OfflineGrant {
+        account_id: inner.account.as_ref().map(|user| user.id.clone()),
+        token_sha256: token_digest(&token),
+        catalog_sha256,
+        routing_sha256,
+        verified_at: crate::tono::commands::epoch_millis(),
+    };
+    if let Err(error) = inner.offline.write_grant(&grant) {
+        logging!(warn, Type::Service, "Tono: failed to record the offline grant: {error:#}");
+    }
+}
+
+/// Carry what the sink recorded into the product state: a refusal suspends the account (from any
+/// state but signed out, mid-sign-in or closing; never touching protection) and leaving offline
+/// mode republishes the status. Started once per `TonoState` by the startup restore.
+pub(crate) async fn apply_verdicts<E>(state: Arc<TonoState>, emit: E)
+where
+    E: Fn(&TonoInner),
+{
+    let gate = Arc::clone(&state.lock().await.offline);
+    if gate.applier.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    loop {
+        gate.changed.notified().await;
+        let refused = gate.pending_refusal.lock().take();
+        let left_offline = gate.left_offline.swap(false, Ordering::AcqRel);
+        let mut inner = state.lock().await;
+        // A refusal of an identity a sign-in has since replaced is not this account's.
+        let current = inner.client.diagnostics_log_identity().await;
+        let suspended = refused == Some(current) && suspend_refused_session(&mut inner);
+        if suspended {
+            logging!(warn, Type::Service, "Tono: the control plane refused this session; account suspended, protection kept");
+        }
+        if suspended || left_offline {
+            emit(&inner);
+        }
+    }
+}
+
+fn suspend_refused_session(inner: &mut TonoInner) -> bool {
+    if inner.account_close.is_some()
+        || matches!(
+            inner.account_state,
+            AccountState::SignedOut | AccountState::Authenticating | AccountState::Suspended
+        )
+    {
+        return false;
+    }
+    inner.account_state = AccountState::Suspended;
+    true
 }
 
 /// Fixtures shared by the #582 admission tests (T3 restore, T4 here, T5 connection).

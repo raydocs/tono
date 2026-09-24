@@ -347,6 +347,11 @@ impl CatalogTracker {
         self.current_digest.as_deref()
     }
 
+    /// [`routing_digest`] of the installed catalog's routing document.
+    pub fn current_routing(&self) -> Option<&str> {
+        self.current_routing.as_deref()
+    }
+
     /// Validate `catalog` (steps 1-3) and commit it unless its revision is
     /// older. Equal revision with the same digest and routing digest is an
     /// idempotent no-op; a routing-only change at the same revision installs.
