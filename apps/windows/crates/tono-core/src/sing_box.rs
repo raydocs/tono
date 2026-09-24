@@ -165,6 +165,13 @@ pub fn build_synthetic_offline_draft(
 
     let document: Value = serde_json::from_str(&policy.json).map_err(|_| UnsupportedPolicy)?;
     let fields = document.as_object().ok_or(UnsupportedPolicy)?;
+    // A signed document may name its own revision (#317). It must be the
+    // envelope's; a different one means the envelope was relabelled.
+    let embeds_revision = match fields.get("revision") {
+        None => false,
+        Some(embedded) if embedded.as_i64() == Some(policy.revision) => true,
+        Some(_) => return Err(UntrustedSnapshot),
+    };
     if fields.keys().any(|key| {
         ![
             "version",
@@ -172,9 +179,10 @@ pub fn build_synthetic_offline_draft(
             "mediaEndpoints",
             "webDomains",
             "directSuffixes",
+            "revision",
         ]
         .contains(&key.as_str())
-    }) || fields.len() != 5
+    }) || fields.len() != 5 + usize::from(embeds_revision)
     {
         return Err(UnsupportedPolicy);
     }

@@ -32,6 +32,24 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 离线 sing-box 草稿接受签名内 revision 键（H3-F5 过渡前置）
+
+- **归属/来源**：G1 签名信任边界的过渡前置；影响 Windows tono-core
+  `apps/windows/crates/tono-core/src/sing_box.rs`（`build_synthetic_offline_draft` 的精确键白名单）。
+  基线 main bb2ed4e4，分支 `fix/policy-revision-singbox-20260923`；Issue #317；与 #342（`policy.rs`
+  闸门）互补、互不依赖；提交时未合 main。
+- **缺陷修复**：服务端开始在策略 json 内写入 `revision` 后，该精确键白名单会把整份策略判为
+  `UnsupportedPolicy`（fail-closed，但会让离线草稿路径全部失效）。改后接受 `revision` 键，且必须等于
+  信封 revision，否则按 `UntrustedSnapshot` 拒绝；其余键与"策略必须为空"的约束不变。
+- **新增/优化**：无。
+- **工程与测试**：新增回归 `signed_policy_revision_key_is_bound_to_the_envelope`。
+- **验证**：红灯：只含测试的提交 96d3b102 在 GitHub-hosted Windows CI core 作业（run 35948789260）
+  以断言失败（`sing_box.rs:600`，265 过 1 败），非编译错误；修复后结果见 PR CI。本机仅对该文件运行
+  `rustfmt --check`，未运行 cargo。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：该路径是冻结的 M0 离线草稿，不是产品入口；服务端写入 revision 仍由后续 Worker PR
+  的默认关闭开关控制。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
