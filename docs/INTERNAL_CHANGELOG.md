@@ -82,6 +82,40 @@
 - **剩余限制**：未实机验证（未在直连地址被封、系统 DNS 可达的网络上跑启动恢复）。macOS 的 #582
   未处理。离线 Ready 只能靠“重试”或重启重新核对账户，连接中不会自动核对。其它非传输错误
   （5xx、403 等）仍进 error。
+- **续记（2026-09-24，Codex 审查 fd87cc82 → 本分支跟进；Anthropic 逐条核实）**：先合入当时的
+  origin/main（含 Windows 列车 #572：#506 登录替换时丢弃旧账户目录、H13-F3 会话被拒即暂停），
+  再修下列已确认项。上文与此不符之处以本续记为准。
+  - R607-F1（确认，`tono-core/src/auth.rs` `ApiClient::call`）：首次请求为可重试的传输错误、重试
+    收到 401/403 等明确答复时，原实现丢弃重试结果、返回第一次的传输错误；新离线分支因此会把被拒
+    会话当作“控制面不可达”放行。改为：重试仍是传输错误才返回原错误，服务器给出的任何答复
+    （401/403/其它 4xx/5xx）优先。启动恢复据此对 401 走原过期会话清理，对 403/5xx 进 error。
+  - R607-F2（确认）：标记原为空文件，只看“存在 + 有节点”，可与另一账户的有效缓存或未落盘的替换
+    token 组合。标记改为记录两项摘要：同步时的 refresh token 的 SHA-256（token 本身不落盘）和同步后
+    磁盘缓存文件的 SHA-256。离线准入要求两项都与“本次启动时存储的 token”和“当前磁盘缓存”一致。
+    替换登录后若新 token 未持久化（崩溃/vault 失败），启动时读到的是旧 token，与标记不符即拒绝；
+    因此不再需要、也已撤销上文“登录前删除标记、删除失败则登录报错”的做法（main 的 #506 已在登录
+    替换时删除旧目录缓存）。token 轮换后到下一次成功同步（≤300 s）之间标记会过期，这段时间退出再
+    离线启动会走 error（安全方向）。
+  - #583 未闭合（确认）：refresh 付 10 s 直连超时后，`me` 仍要再付一次，若备用路径较慢（审查按
+    约 11 s 推算），预算在 `me` 的备用路径前耗尽。新增进程内记忆：系统 DNS 客户端在直连失败后
+    答复成功，之后的请求先走它；它以“可证明未送达”的方式失败时清除记忆并照常走直连（kill switch
+    武装、DNS 被封时多付一次解析失败）。POST 的送达判断不变。
+  - I6 / H13-F3（确认，已由 main 闭合）：合入 main 后，离线 Ready 启动的周期目录/策略同步遇到 401
+    返回 `SessionRejected`，`note_session_rejected` 把 Ready 改为 Suspended（停止周期同步，Connect
+    与重连拒绝，保护保持原状），与其它 Ready 会话一致；本 PR 未另加路径。R607-F1 修复后，重试中收到
+    的 401 也能被识别。
+  - H3-F1 / #491（既有问题，仅核对）：main 的 #506（9efdd80d，经 #572 合入）在采用替换登录前
+    `discard_account_catalog` 清空内存节点并删除缓存文件，B 首次同步失败时没有可用出口，Connect
+    被拒；#491 已关闭。本 PR 未改。
+  - 测试（规则 5，共四个；均未在本机运行，交 windows-2025 CI）：
+    `tono-core auth::tests::a_retry_the_server_refused_is_not_reported_as_unreachable`（旧代码返回
+    Transport，断言 Unauthorized 失败）；`transport::tests::restores_refresh_and_me_pay_the_dropped_pins_once`
+    替换上文单次 GET 测试，经真实 `ApiClient::me()` 走 refresh（POST）+ `me`（GET），直连丢包，断言
+    两次合计小于预算一半（fd87cc82 约 20 s、原 main 约 60 s，均失败；现约 10 s）；restore 测试改名为
+    `an_unreachable_control_plane_admits_only_the_catalog_this_session_confirmed`，增加“另一账户
+    token”“缓存被替换”两种拒绝。I6 未新增测试（行为由 main 的 H13-F3 代码与测试承担）。
+  - 验证：本机仅前端，合入 main 后重跑 `tsc --noEmit`、eslint、biome format 通过，vitest
+    `login.test.tsx` + `dashboard.test.tsx` 30/30 通过；i18n 类型重新生成无差异。
 
 ## 2026-09-24 · Windows 合并列车 train/win-20260924
 

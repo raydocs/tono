@@ -163,6 +163,15 @@ pub struct TonoTransport {
     /// reset, that failure costs the full connect timeout. A fresh start re-tries 443 first,
     /// so a network that recovers is not stuck on an alternate for ever.
     alternate_port: std::sync::atomic::AtomicU16,
+    /// The system-resolved client answered after the pinned addresses failed (#583).
+    ///
+    /// Later requests try it first. Launch restore sends a token refresh and then `me` inside
+    /// one budget; without this, `me` paid the pinned connect budget a second time before
+    /// reaching the path that had just worked, and the budget ran out before its fallback.
+    /// Cleared by a failure that proves nothing was delivered, after which the pinned path runs
+    /// as usual, so under an armed kill switch (pins permitted, DNS blocked) the cost is one
+    /// failed resolution. Process memory only, like `alternate_port`.
+    prefer_resolved: std::sync::atomic::AtomicBool,
 }
 
 impl TonoTransport {
@@ -174,6 +183,7 @@ impl TonoTransport {
             client: tokio::sync::RwLock::new(Self::build_pinned_client()?),
             resolved,
             alternate_port: std::sync::atomic::AtomicU16::new(0),
+            prefer_resolved: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -233,6 +243,7 @@ impl TonoTransport {
                 .build()
                 .context("failed to build the resolving test client")?,
             alternate_port: std::sync::atomic::AtomicU16::new(0),
+            prefer_resolved: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -469,6 +480,22 @@ impl HttpTransport for TonoTransport {
             }
         }
 
+        // The resolved client goes first once it has answered in place of dead pins (#583). Its
+        // failure moves on to the pins only when it proves nothing was delivered.
+        let mut resolved_failed = None;
+        if self.prefer_resolved.load(std::sync::atomic::Ordering::Relaxed) {
+            match self.attempt(&self.resolved, &request).await {
+                Err(ApiError::Transport { kind, message })
+                    if should_retry_transport(request.method, kind) =>
+                {
+                    self.prefer_resolved
+                        .store(false, std::sync::atomic::Ordering::Relaxed);
+                    resolved_failed = Some(ApiError::Transport { kind, message });
+                }
+                other => return other,
+            }
+        }
+
         let pinned = {
             // Each attempt keeps its own pool/pin snapshot. Publishing fresh pins must not
             // wait for a slow response, nor cancel or replay an already delivered request.
@@ -486,8 +513,17 @@ impl HttpTransport for TonoTransport {
         if !should_retry_transport(request.method, kind) {
             return Err(ApiError::Transport { kind, message });
         }
-        match self.attempt(&self.resolved, &request).await {
-            Ok(response) => Ok(response),
+        let fallback = match resolved_failed {
+            // Already tried for this request, just before the pins.
+            Some(failure) => Err(failure),
+            None => self.attempt(&self.resolved, &request).await,
+        };
+        match fallback {
+            Ok(response) => {
+                self.prefer_resolved
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                Ok(response)
+            }
             // Both paths are named. Which one failed and how is the whole
             // diagnostic: "pinned addresses unreachable, system DNS fine" and
             // "nothing reachable at all" call for completely different actions,
@@ -778,13 +814,14 @@ mod tests {
         assert_eq!(response.body, b"hi");
     }
 
-    /// #583: with the pinned addresses dropped, the fallback must answer inside half the launch
-    /// restore budget, because restore sends two requests in sequence (refresh, then `me`) and
-    /// each pays the pinned connect first. Both clients are built exactly as in production; only
-    /// name resolution is supplied.
+    /// #583: launch restore's own sequence, a token refresh (POST) and then `me` (GET), through
+    /// clients built exactly as in production with the pinned addresses dropped. Only the first
+    /// request may pay the pinned connect budget; the pair must leave the fallbacks more than
+    /// half of the restore budget. Before, each request waited out the pins again.
     #[tokio::test]
-    async fn a_dropped_pin_leaves_the_fallback_inside_the_restore_budget() {
+    async fn restores_refresh_and_me_pay_the_dropped_pins_once() {
         use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        use tono_core::credentials::{CredentialStore as _, MemoryCredentialStore};
         if blackhole_is_intercepted() {
             eprintln!("skipped: a tunnel is completing the blackhole connect; run without a VPN, as CI does");
             return;
@@ -799,14 +836,33 @@ mod tests {
                         let Ok(byte) = stream.read_u8().await else { return };
                         header.push(byte);
                     }
-                    let _ = stream
-                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi")
-                        .await;
+                    // Drain the body so closing the socket cannot reset the reply.
+                    let head = String::from_utf8_lossy(&header).to_ascii_lowercase();
+                    let length = head
+                        .lines()
+                        .find_map(|line| line.strip_prefix("content-length:"))
+                        .and_then(|value| value.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    let mut body = vec![0; length];
+                    if stream.read_exact(&mut body).await.is_err() {
+                        return;
+                    }
+                    let json = if head.contains("auth/refresh") {
+                        r#"{"accessToken":"access-2","refreshToken":"refresh-2"}"#
+                    } else {
+                        r#"{"user":{"id":"u1","email":"user@example.com"}}"#
+                    };
+                    let reply = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{json}",
+                        json.len()
+                    );
+                    let _ = stream.write_all(reply.as_bytes()).await;
                     let _ = stream.shutdown().await;
                 });
             }
         });
-        let host = "tono-budget.test";
+        // `localhost` because the API client admits plain http only for loopback names.
+        let host = "localhost";
         let dead = [std::net::SocketAddr::from(([10, 255, 255, 1], port))];
         let live = [std::net::SocketAddr::from(([127, 0, 0, 1], port))];
         let transport = TonoTransport {
@@ -815,24 +871,20 @@ mod tests {
             ),
             resolved: TonoTransport::builder().resolve_to_addrs(host, &live).build().unwrap(),
             alternate_port: std::sync::atomic::AtomicU16::new(0),
+            prefer_resolved: std::sync::atomic::AtomicBool::new(false),
         };
+        let store = std::sync::Arc::new(MemoryCredentialStore::new());
+        store.set_refresh_token("refresh-1").unwrap();
+        let client = tono_core::auth::ApiClient::new(&format!("http://{host}:{port}"), transport, store)
+            .expect("loopback base URL");
+
         let started = std::time::Instant::now();
-        let response = transport
-            .send(ApiRequest {
-                method: HttpMethod::Get,
-                url: format!("http://{host}:{port}/"),
-                bearer: None,
-                json_body: None,
-                binary_body: None,
-                headers: Vec::new(),
-            })
-            .await
-            .expect("the fallback must carry the request");
+        let me = client.me().await.expect("refresh and me must both reach the fallback");
         let elapsed = started.elapsed();
-        assert_eq!(response.status, 200);
+        assert_eq!(me.user.id, "u1");
         assert!(
             elapsed * 2 < crate::tono::commands::RESTORE_TRANSACTION_TIMEOUT,
-            "one request spent {elapsed:?}; refresh + me no longer fit the restore budget"
+            "refresh + me spent {elapsed:?}; the second request waited on the dead pins again"
         );
     }
 
