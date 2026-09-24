@@ -67,10 +67,20 @@ const LoginPage = () => {
   const suspended =
     !suspendedDismissed &&
     (verifySuspended || status?.accountState === 'suspended')
+  // Only the sign-in response says the account itself is paused. A session the
+  // control plane stopped accepting (revoked device, signed out elsewhere, a
+  // lapsed plan) also reads as suspended; signing in again is the way out.
+  const sessionEnded = suspended && !verifySuspended
+  const suspendedTitle = sessionEnded
+    ? t('tono.login.sessionEnded.title')
+    : t('tono.login.suspended.title')
 
   const restoreFailed = status?.accountState === 'error'
+  // A tunnel that is still connected carries traffic; the barrier only blocks
+  // the internet once the tunnel is gone.
   const internetBlocked =
-    status?.protectionBlocked === true || status?.killSwitch?.wanted === true
+    status?.uiState !== 'connected' &&
+    (status?.protectionBlocked === true || status?.killSwitch?.wanted === true)
 
   const resetToStart = () => {
     setCodeSent(false)
@@ -280,15 +290,14 @@ const LoginPage = () => {
           {internetRecovery}
           <TonoLogo connected={false} size={56} />
           <h1 className="tono-page-title" style={{ color: text.primary }}>
-            {t('tono.login.suspended.title')}
+            {suspendedTitle}
           </h1>
           <p style={{ margin: 0, fontSize: 13, color: text.secondary }}>
-            {t('tono.login.suspended.description')}
+            {sessionEnded
+              ? t('tono.login.sessionEnded.description')
+              : t('tono.login.suspended.description')}
           </p>
-          <SupportContact
-            email={email}
-            extra={t('tono.login.suspended.title')}
-          />
+          <SupportContact email={email} extra={suspendedTitle} />
           <button
             type="button"
             className="tono-link"
@@ -299,7 +308,9 @@ const LoginPage = () => {
               resetToStart()
             }}
           >
-            {t('tono.login.changeEmail')}
+            {sessionEnded
+              ? t('tono.login.sessionEnded.signIn')
+              : t('tono.login.changeEmail')}
           </button>
         </GlassCard>
       </div>

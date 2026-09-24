@@ -126,17 +126,10 @@ pub(crate) async fn spawn_periodic_for_auth_generation(state: &Arc<TonoState>, _
         let mut consecutive_not_found = 0_u32;
         tokio::time::sleep(PERIODIC_TELEMETRY_FIRST_DELAY).await;
         loop {
-            {
-                let inner = task_state.lock().await;
-                if inner.sign_in_generation != generation {
-                    return;
-                }
-                if matches!(
-                    inner.account_state,
-                    crate::tono::state::AccountState::SignedOut | crate::tono::state::AccountState::Restoring
-                ) {
-                    return;
-                }
+            // Same exit as the catalog/policy sync: a suspended account's
+            // session is refused, so every upload would be a 401 and a refresh.
+            if !crate::tono::catalog_sync::periodic_sync_continues(&*task_state.lock().await, generation) {
+                return;
             }
             match upload_once(&task_state, generation).await {
                 Ok(()) => consecutive_not_found = 0,
