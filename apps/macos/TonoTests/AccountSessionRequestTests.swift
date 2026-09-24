@@ -652,6 +652,46 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertNil(account.entitlementDetail)
     }
 
+    func testBackgroundUploadRefusedSessionSuspendsAndKeepsProtection() async throws {
+        var released = false
+        let (account, transport, host, _) = fixture(killSwitchDisarmConsumer: { released = true })
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        try await adoptTestAccount(account)
+        account.periodicTelemetryConsent = { true }
+        // The Worker refuses an expired plan, a used-up allowance, a disabled
+        // account and a revoked device alike: 401 on the request and on its
+        // token renewal.
+        HeldAccountProtocol.install(host) { request in
+            request.respond(status: 401, body: #"{"error":{"code":"UNAUTHORIZED"}}"#)
+        }
+        await account.uploadPeriodicTelemetryWindow()
+        XCTAssertFalse(released, "a refused session must not release PF/DNS protection")
+        XCTAssertEqual(account.state, .suspended)
+        XCTAssertTrue(account.blockedWhileReady)
+        XCTAssertEqual(account.user?.id, "original")
+    }
+
+    func testLaunchRefusedSessionSignsOutAndKeepsProtection() async throws {
+        var released = false
+        let (account, transport, host, _) = fixture(killSwitchDisarmConsumer: { released = true })
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        try await adoptTestAccount(account)
+        // Launch restore after crash cleanup kept protection armed and `me`
+        // plus its renewal were refused. restore() itself needs the privileged
+        // helper, so its catch is driven directly.
+        account.state = .restoring
+        account.shouldResumeProtection = true
+        HeldAccountProtocol.install(host) { request in
+            request.respond(status: 401, body: #"{"error":{"code":"UNAUTHORIZED"}}"#)
+        }
+        await account.fail(TonoAPIClient.APIError.unauthorized, signsOutOnUnauthorized: true)
+        XCTAssertFalse(released, "a refused session must not release PF/DNS protection")
+        XCTAssertEqual(account.state, .signedOut)
+        XCTAssertNil(account.user)
+        XCTAssertNil(try testKeychain(host).string(for: .refreshToken))
+        XCTAssertTrue(account.shouldResumeProtection)
+    }
+
     private func adoptReplacementCredentials(_ account: AccountSession) async throws {
         let replacement = try JSONDecoder().decode(TonoUser.self, from: Data(#"{"id":"replacement","email":"new@example.test"}"#.utf8))
         try await account.api.adopt(TonoAuthResponse(
