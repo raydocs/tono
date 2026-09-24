@@ -6,14 +6,25 @@ nonisolated struct KeychainStore: Sendable {
     enum Error: Swift.Error { case unexpectedStatus(OSStatus), invalidData }
 
     private let service: String
-    init(service: String = Bundle.main.bundleIdentifier.map { "\($0).tono" } ?? "app.tono.account") { self.service = service }
+    /// `SecItemCopyMatching`, unless a test stands in for a keychain that
+    /// refuses a read (locked, or interaction not allowed).
+    private let copyMatching: @Sendable (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus
+    init(
+        service: String = Bundle.main.bundleIdentifier.map { "\($0).tono" } ?? "app.tono.account",
+        copyMatching: @escaping @Sendable (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus = {
+            SecItemCopyMatching($0, $1)
+        }
+    ) {
+        self.service = service
+        self.copyMatching = copyMatching
+    }
 
     func data(for key: Key) throws -> Data? {
         var query = base(key)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        let status = copyMatching(query as CFDictionary, &item)
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess else { throw Error.unexpectedStatus(status) }
         guard let data = item as? Data else { throw Error.invalidData }
