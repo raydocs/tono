@@ -18,9 +18,9 @@ final class HelperBoundAccountTests: XCTestCase {
 
         // A live socket owned by this account, seen from another uid.
         let socketPath = directory + "/service.sock"
-        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
         XCTAssertGreaterThanOrEqual(fd, 0)
-        defer { close(fd) }
+        defer { Darwin.close(fd) }
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
         _ = socketPath.withCString { source in
@@ -30,7 +30,7 @@ final class HelperBoundAccountTests: XCTestCase {
         }
         let bound = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+                Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
         XCTAssertEqual(bound, 0)
