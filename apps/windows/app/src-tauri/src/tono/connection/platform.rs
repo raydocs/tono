@@ -1,20 +1,6 @@
-//! Physical interface detection and the non-critical redacted runtime copy.
+//! Physical interface detection and removal of the legacy runtime copy.
 
-use std::sync::Arc;
-use std::time::Duration;
 use tono_logging::{Type, logging};
-use crate::tono::state::TonoState;
-
-/// One absolute budget covers service readiness, the cold Core start, controller/DNS
-/// verification, fail-closed cloud-policy hot reload, locking, and the post-lock verification
-/// group. Per-stage retries never reset this clock.
-///
-/// The redacted runtime copy is a diagnostics convenience, but it lands under `%APPDATA%`,
-/// which enterprise policy can redirect to a UNC share or a sync-provider placeholder folder.
-/// `OpenOptions::open`/`write_all` then have no timeout of their own, so an offline share can
-/// park the write for minutes. Bound it well under the transaction budget: a diagnostics file
-/// must never be the reason a connect spends its clock.
-pub(super) const REDACTED_COPY_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The physical interface carrying the default route. Windows uses
 /// `GetBestRoute2` (runtime-unverified here; covered by the xwin check and
@@ -222,74 +208,23 @@ pub(super) fn is_virtual_uplink_description(description: &str) -> bool {
     MARKERS.iter().any(|marker| lowered.contains(marker))
 }
 
-/// Open the redacted copy with the per-user DACL the rest of Tono's private files get.
-///
-/// It was the one file in the set written through plain `OpenOptions`, so it inherited whatever
-/// the parent directory grants while `selection.json` and the owner token did not — and it is
-/// the file that describes the selected node. A copy left by an earlier build fails the
-/// private-file validation on its inherited ACL; replacing it once is how those converge.
-#[cfg(windows)]
-pub(super) fn open_private_redacted_copy(path: &std::path::Path) -> std::io::Result<std::fs::File> {
-    let open = || crate::core::owner_identity::open_or_create_private_current_user_file(path);
-    let file = match open() {
-        Ok(file) => file,
-        Err(error) => {
-            if !path.exists() {
-                // Nothing to converge — the create itself failed, so report that.
-                return Err(std::io::Error::other(error));
-            }
-            std::fs::remove_file(path)?;
-            open().map_err(std::io::Error::other)?
-        }
-    };
-    // The helper opens without truncating; this file is always rewritten whole.
-    file.set_len(0)?;
-    Ok(file)
-}
+/// Earlier builds wrote each connect's runtime to this file in the Tono data directory. Only the
+/// controller secret was blanked: exit UUIDs, Reality parameters and the residential SOCKS5
+/// username and password stayed as issued to the account. Nothing read it (the runtime reaches
+/// the Service over IPC), so it is no longer written.
+const LEGACY_RUNTIME_COPY: &str = "owned-runtime.redacted.yaml";
 
-/// Persist the redacted runtime copy (§5: the secret never touches disk).
-///
-/// Never fails the connect. The copy is a diagnostics convenience — the runtime the core
-/// actually receives travels over IPC and never through this file — so refusing an otherwise
-/// healthy connect because a support artefact could not be written trades availability for
-/// nothing. Skipping is also the safe direction for §5: not writing cannot leak. It is loud in
-/// the log instead, and the timeout is reported separately from a write error so a stalled
-/// redirected AppData is diagnosable rather than looking like a permissions problem.
-pub(super) async fn write_redacted_copy(state: &Arc<TonoState>, redacted: &str) {
-    let path = { state.lock().await.catalog_dir.join("owned-runtime.redacted.yaml") };
-    let write = tokio::task::spawn_blocking({
-        let redacted = redacted.to_string();
-        move || -> std::io::Result<()> {
-            #[cfg(windows)]
-            let mut file = open_private_redacted_copy(&path)?;
-            #[cfg(not(windows))]
-            let mut file = {
-                let mut options = std::fs::OpenOptions::new();
-                options.write(true).create(true).truncate(true);
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::OpenOptionsExt as _;
-                    options.mode(0o600);
-                }
-                options.open(&path)?
-            };
-            use std::io::Write as _;
-            file.write_all(redacted.as_bytes())
-        }
-    });
-    // Abandoning the JoinHandle cannot stop the blocking thread — a thread parked inside a UNC
-    // `open` stays parked until the redirector gives up. It commits nothing the connect depends
-    // on, so leaving it behind is safe; what matters is that this future returns.
-    match tokio::time::timeout(REDACTED_COPY_WRITE_TIMEOUT, write).await {
-        Ok(Ok(Ok(()))) => {}
-        // Previously dropped on the floor: only the JoinError was reported, so a failed write
-        // was silent.
-        Ok(Ok(Err(err))) => logging!(warn, Type::Service, "Tono: 写入 redacted 运行时副本失败: {err}"),
-        Ok(Err(err)) => logging!(warn, Type::Service, "Tono: 写入 redacted 运行时副本失败: {err}"),
-        Err(_elapsed) => logging!(
+/// Remove a runtime copy an earlier build left behind. Called at startup and when an account
+/// closes, so the copy never outlives the account whose catalog it was built from. A failed
+/// delete is logged; nothing recreates the file.
+pub(crate) fn remove_legacy_runtime_copy(catalog_dir: &std::path::Path) {
+    match std::fs::remove_file(catalog_dir.join(LEGACY_RUNTIME_COPY)) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => logging!(
             warn,
             Type::Service,
-            "Tono: 写入 redacted 运行时副本超时 ({REDACTED_COPY_WRITE_TIMEOUT:?})，跳过；连接继续"
+            "Tono: failed to delete the previous build's runtime copy: {error}"
         ),
     }
 }

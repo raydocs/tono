@@ -27,7 +27,6 @@ use super::controller::{
 };
 use super::controller_error_detail;
 use super::failure::StageFailure;
-use super::platform::write_redacted_copy;
 use super::probes::verify_tun_data_plane;
 
 /// The WFP model has a hard endpoint budget. The runtime DIRECT plan and its permits must be
@@ -540,7 +539,6 @@ pub(super) async fn apply_cloud_policy(
             return Ok(None);
         }
     };
-    write_redacted_copy(state, &runtime.redacted_yaml()).await;
     ensure_fresh(state, generation).await?;
     let core_path = match service::tono_core_binary_path().await {
         Ok(path) => path,

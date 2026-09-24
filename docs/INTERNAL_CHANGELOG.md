@@ -32,6 +32,30 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 不再写入含账户出口凭据的运行时副本，登出时删除旧副本
+
+- **归属/来源**：G1 账户隔离；影响 Windows App 连接阶段与账户关闭。内部审查 H11-F1
+  （Windows 部分），Issue #407。基线 main 833c0607 → 分支 `fix/win-runtime-copy-20260923`；
+  提交时未合 main。与在审 #316（登出删除目录缓存）互补，互不依赖。
+- **缺陷修复**：每次连接和 DIRECT 重载都把运行时写到
+  `%APPDATA%\com.raydocs.tono\tono\owned-runtime.redacted.yaml`。所谓 redacted 只抹顶层
+  controller `secret`，节点 UUID、Reality 参数和住宅 SOCKS5 用户名/密码原样落盘，登出与
+  会话过期都不删。该文件全仓无读取方（运行时经 IPC 交给 Service）。现在 App 不再写这个
+  文件（删除 `write_redacted_copy` 及其两处调用）；账户关闭收尾（用户登出、restore 的
+  Expired/Missing）和启动 restore 删除旧版本留下的副本（`remove_legacy_runtime_copy`，
+  NotFound 忽略，其他错误记日志）。
+- **新增/优化**：无。
+- **工程与测试**：新增一个回归
+  `sign_out_removes_the_runtime_copy_that_holds_the_account_exit_credentials`
+  （`commands/account.rs` lifecycle_tests）：数据目录放一份含住宅密码的副本，走用户登出，
+  断言文件已删除。旧实现不删，断言失败。
+- **验证**：本机（编辑机）未运行 cargo；委托本 PR 的 GitHub-hosted `windows-2025` CI
+  （app workspace `cargo test --locked`），结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：tono-core `OwnedRuntime::redacted_yaml()` 仍只抹 secret，App 已不再调用，
+  未改库接口。Service 私有目录 `ProgramData\Tono\users\<sidhash>\runtime*`（仅 SY/BA 可读）
+  保留最后一次运行时，不在本条范围。未做实机验证。
+
 ## 2026-09-23 · Windows 目录新鲜度纳入 routingSha256
 
 - **归属/来源**：G1 连接正确性（住宅出口授权回收与凭据轮换）；影响 Windows tono-core 目录追踪与
