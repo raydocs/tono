@@ -34,6 +34,12 @@ actor PrivilegedRuntimeCoordinator {
         if let version, version.compare("4.5.0", options: .numeric) == .orderedAscending { return nil }
         guard version != nil else {
             if HelperManager.hasInstalledHelperArtifact {
+                // A silent helper whose installed binary predates the update
+                // contract (0.0.72 ships 3.15.0) has no ledger to ask about.
+                if let installed = HelperManager.installedArtifactVersion(),
+                   installed.compare("4.5.0", options: .numeric) == .orderedAscending {
+                    return nil
+                }
                 // Query anyway: a restarting v1 helper must not be mistaken
                 // for a legacy helper on a version-probe timeout.
                 return try HelperManager.updateRequest("status")
@@ -49,6 +55,10 @@ actor PrivilegedRuntimeCoordinator {
 
     func daemonRejectsClient() -> Bool {
         HelperManager.daemonRejectsClient()
+    }
+
+    func helperLaunchState() -> HelperManager.LaunchState {
+        HelperManager.launchState()
     }
 
     /// Explicit user-requested release is the one safe place to prompt for a

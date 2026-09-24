@@ -32,6 +32,48 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS Helper 被关闭、未加载或不响应时，App 明确提示“这台 Mac 当前未受保护”并进入修复
+
+- **归属/来源**：G1 连接保护（重启后保持保护）；macOS App 启动恢复 `RuntimeCleanup`。
+  内部审查 H12-F2 的 App 部分，Issue #423（Helper 部分见 #424）；第四轮 macOS 审查 S14 与
+  H15-F1 指出第一版走不到。基线 main bb2ed4e4 → 分支 `fix/helper-unloaded-notice-20260923`；
+  提交时未合 main。
+- **缺陷修复**：重启后只有 Helper 会启用 PF。Helper 二进制已安装、但 socket 没有进程应答时
+  （“登录项 > 允许在后台”中被关闭、launchd 没有这个任务、崩溃循环，也包括 0.0.72 的旧
+  Helper），App 启动的第一步 `pendingNativeUpdate()` 就抛出 `connectFailed`。用户只看到
+  “Secure sign-in service is unavailable”，Retry 每次重复同一错误，`recoverStaleRuntime` 里的
+  修复分支和本 PR 第一版加的提示都到不了。现在：
+  - 启动的更新查询改为 `RuntimeCleanup.queryPendingNativeUpdate`。查询因 `connectFailed`
+    失败时，先只读查询后台项状态（`SMAppService.statusForLegacyPlist(at:)`）和
+    `launchctl print`：
+    - 被关闭：立即显示“网络组件已在登录项中关闭，这台 Mac 当前未受保护”，并说明如何打开。
+      App 无法启动用户关闭的任务，不做修复尝试。
+    - 未加载：走一次已有的鉴权安装修复，成功后重新查询；失败时显示“网络组件没有运行，这台
+      Mac 当前未受保护”，后接原始错误。
+    - 已加载或无法判断：等 2 秒再查一次；仍不应答（崩溃循环）时同样走鉴权安装修复，失败时
+      显示“网络组件没有响应，这台 Mac 当前可能未受保护”。
+    管理员安装由 root 端 `--update-install-guard` 把关，有未完成的更新事务时拒绝。
+  - Helper 不应答时，若已安装二进制的 `--version` 低于 4.5.0（0.0.72 为 3.15.0），按旧版
+    Helper 处理：它没有更新账本，不再查询，直接进入 `recoverStaleRuntime`。
+  - `recoverStaleRuntime` 中第一版加的判断保留，覆盖二进制缺失或旧版 Helper 的情况。
+- **新增/优化**：无。
+- **工程与测试**：修改 XCTest
+  `HelperUnprotectedNoticeTests.testAHelperLaunchdDoesNotRunSaysThisMacIsNotProtected`，改为驱动
+  生产函数 `queryPendingNativeUpdate`：查询抛 `connectFailed` 且后台项被关闭时，抛出含“not
+  protected right now”和“Allow in the Background”的错误，且不修复；未加载时修复一次后重新
+  查询并返回。第一版测试只测“状态 → 文案”的纯映射，所以没发现提示走不到。修改前的分支上
+  这个测试无法编译（函数不存在），不是实跑失败；按旧顺序推理，查询错误会原样抛出，第一个
+  断言会失败。zh-Hans 文案已加入字符串目录。
+- **验证**：本机（编辑机）未编译，未运行 xcodebuild，委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests，含 LocalizationCoverageTests），结果以 PR 页为准。本机只确认了普通用户执行
+  `launchctl print system/<label>` 可用（存在为 0，不存在为 113）。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：未加载或崩溃循环时，App 启动即弹管理员授权框，不经用户操作（与已有的
+  `daemonRejectsClient` 先例一致）；修复成功后界面没有说明。旧版判断依赖以普通用户运行已安装
+  二进制的 `--version`。登录项开关对旧式 LaunchDaemon 的确切效果（`statusForLegacyPlist(at:)`
+  是否返回 `.requiresApproval`、开机是否跳过）和崩溃循环的触发频率都需要实机确认。没有改用
+  `SMAppService.daemon` 注册。
+
 ## 2026-09-23 · macOS helper 的 sing-box 配置检查拒绝重复键与折叠键（H10-F2）
 
 - **归属**：G1 保护边界（纵深防御）；macOS `tono-core-helper` 的 `ownedRuntimeConfigIsSafe`。

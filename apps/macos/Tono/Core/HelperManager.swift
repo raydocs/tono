@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 import Security
+import ServiceManagement
 
 /// Installs and talks to the narrowly scoped privileged Mihomo launcher.
 ///
@@ -449,6 +450,43 @@ nonisolated struct HelperManager {
         currentVersion() == helperVersion
     }
 
+    /// Read-only launchd view of the helper, used to explain an unreachable
+    /// helper while this Mac should be protected. Neither query needs
+    /// privileges.
+    enum LaunchState: Equatable {
+        /// Turned off under Login Items › Allow in the Background. launchd will
+        /// not start it, and no repair from the app works until it is back on.
+        case backgroundDisabled
+        /// launchd has no such job, so nothing restored PF after the last
+        /// restart: macOS loads the PF rules at boot but leaves PF disabled.
+        case notLoaded
+        /// Loaded (an unreachable helper is then busy or restarting, and its PF
+        /// rules stay in the kernel), or launchd could not say.
+        case loadedOrUnknown
+    }
+
+    static func launchState() -> LaunchState {
+        if SMAppService.statusForLegacyPlist(
+            at: URL(fileURLWithPath: plistInstallPath)
+        ) == .requiresApproval {
+            return .backgroundDisabled
+        }
+        return daemonRegisteredWithLaunchd() ? .loadedOrUnknown : .notLoaded
+    }
+
+    /// What to tell the user instead of a generic repair error. nil when the
+    /// launch state is no evidence that protection is off.
+    static func unprotectedNotice(for state: LaunchState) -> String? {
+        switch state {
+        case .backgroundDisabled:
+            String(localized: "Tono's network helper is turned off in System Settings > General > Login Items & Extensions, so this Mac is not protected right now. Turn Tono on under Allow in the Background, then click Retry.")
+        case .notLoaded:
+            String(localized: "Tono's network helper is not running, so this Mac is not protected right now. Click Retry and approve the administrator prompt to repair it.")
+        case .loadedOrUnknown:
+            nil
+        }
+    }
+
     static var hasInstalledHelperArtifact: Bool {
         FileManager.default.fileExists(atPath: helperInstallPath)
     }
@@ -538,7 +576,7 @@ nonisolated struct HelperManager {
         return process.terminationStatus == 0
     }
 
-    private static func installedArtifactVersion() -> String? {
+    static func installedArtifactVersion() -> String? {
         guard hasInstalledHelperArtifact else { return nil }
         let process = Process()
         let output = Pipe()
