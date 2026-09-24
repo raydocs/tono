@@ -222,6 +222,16 @@
         }
       }
     },
+    "Protection problem: another program keeps turning off or replacing Tono's network protection. Kill Switch is blocking traffic and automatic reconnects are paused. Quit the other VPN or firewall, then click Retry now, or Restore internet to get back online.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保护异常：另一个程序反复关闭或替换 Tono 的网络保护。断网保护正在阻断流量，自动重连已暂停。请退出其他 VPN 或防火墙后点按「立即重试」，或点按「恢复正常网络」恢复上网。"
+          }
+        }
+      }
+    },
     "Network protection was interrupted by another program; Kill Switch is blocking traffic while Tono reconnects.": {
       "localizations": {
         "zh-Hans": {

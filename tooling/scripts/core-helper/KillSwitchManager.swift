@@ -475,7 +475,15 @@ final class KillSwitchManager {
         guard Self.stateFileExists() else { return }
         lock.lock()
         defer { lock.unlock() }
-        let live = Self.effectiveStatus()
+        var live = Self.effectiveStatus()
+        if !live {
+            // effectiveStatus() is three pfctl reads; any one failing or
+            // timing out once reads as "not filtering". A repair flushes every
+            // state on the machine and makes the app reconnect, so require a
+            // second read to agree first.
+            usleep(200_000)
+            live = Self.effectiveStatus()
+        }
         let referenced = Self.heldPFEnableReference() != nil
         guard !live || !referenced else { return }
         do {

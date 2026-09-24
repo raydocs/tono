@@ -478,6 +478,10 @@ extension KillSwitchManager {
 
     // MARK: - PF enable reference
 
+    /// A token this helper acquired but could not record. Held in memory only,
+    /// so a failing record write costs one token per process, not one per check.
+    nonisolated(unsafe) static var unrecordedPFEnableReference: PFEnableReference?
+
     /// A `pfctl -E` token and the boot it was issued in. Tokens are kernel
     /// state: one recorded in an earlier boot means nothing now and must never
     /// be released, because the same value may belong to another program.
@@ -508,13 +512,23 @@ extension KillSwitchManager {
             return
         }
         let previous = readPFEnableReference(recordPath)
-        let acquired = try run("/sbin/pfctl", ["-E"])
-        guard acquired.status == 0,
-              let token = parsePFEnableToken(String(decoding: acquired.output, as: UTF8.self))
-        else {
-            throw HelperFailure.system(
-                acquired.message.isEmpty ? "PF enable failed." : acquired.message
-            )
+        let token: String
+        if let pending = unrecordedPFEnableReference, pending.boot == boot,
+           pfEnabled(), pfEnableReferenceListed(pending.token) {
+            // A token from an earlier failed record write is still held.
+            // Retry recording that one instead of taking another.
+            token = pending.token
+        } else {
+            unrecordedPFEnableReference = nil
+            let acquired = try run("/sbin/pfctl", ["-E"])
+            guard acquired.status == 0,
+                  let issued = parsePFEnableToken(String(decoding: acquired.output, as: UTF8.self))
+            else {
+                throw HelperFailure.system(
+                    acquired.message.isEmpty ? "PF enable failed." : acquired.message
+                )
+            }
+            token = issued
         }
         let record = try JSONSerialization.data(
             withJSONObject: ["token": token, "boot": boot],
@@ -525,11 +539,17 @@ extension KillSwitchManager {
         } catch {
             // PF is enabled and referenced, which is what protection needs.
             // Keep the older record (and its token) rather than orphaning it.
+            // Releasing the new token here could stop PF under an armed kill
+            // switch when nothing else holds a reference, so keep it in memory:
+            // the next check retries this write with the same token instead
+            // of taking one more every ten seconds, and disarm releases it.
+            unrecordedPFEnableReference = .init(token: token, boot: boot)
             FileHandle.standardError.write(Data(
                 "tono: PF enable reference could not be recorded\n".utf8
             ))
             return
         }
+        unrecordedPFEnableReference = nil
         if let previous, previous.boot == boot, previous.token != token,
            pfEnableReferenceListed(previous.token) {
             _ = try? run("/sbin/pfctl", ["-X", previous.token])
@@ -547,6 +567,12 @@ extension KillSwitchManager {
            pfEnableReferenceListed(held.token) {
             _ = try? run("/sbin/pfctl", ["-X", held.token])
         }
+        if let pending = unrecordedPFEnableReference,
+           pending.boot == (try? TonoAuthenticatedPeer.bootSession()),
+           pfEnableReferenceListed(pending.token) {
+            _ = try? run("/sbin/pfctl", ["-X", pending.token])
+        }
+        unrecordedPFEnableReference = nil
         unlink(recordPath)
     }
 

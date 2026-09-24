@@ -688,6 +688,7 @@ extension AppState {
                     // the "repeated three times" pause.
                     self.lastProtectedFailureSignature = nil
                     self.consecutiveProtectedFailureCount = 0
+                    self.consecutiveProtectionRepairCount = 0
                     self.protectedReconnectPausedForUserAction = false
                     self.protectedReconnectPauseLiftsOnNetworkChange = false
                     self.isProtectedReconnectScheduled = false
@@ -1344,7 +1345,18 @@ extension AppState {
                         "repaired": String(health.repairedSinceArm),
                     ]
                 )
+                self.consecutiveProtectionRepairCount += 1
                 self.disconnect(releaseKillSwitch: false)
+                if self.consecutiveProtectionRepairCount >= 3 {
+                    // Stop in a fail-closed terminal state instead of
+                    // reconnecting into the same interference forever.
+                    self.protectedReconnectPausedForUserAction = true
+                    self.protectedReconnectPauseLiftsOnNetworkChange = false
+                    self.errorMessage = String(
+                        localized: "Protection problem: another program keeps turning off or replacing Tono's network protection. Kill Switch is blocking traffic and automatic reconnects are paused. Quit the other VPN or firewall, then click Retry now, or Restore internet to get back online."
+                    )
+                    return .stopMonitoring
+                }
                 self.errorMessage = String(
                     localized: "Network protection was interrupted by another program; Kill Switch is blocking traffic while Tono reconnects."
                 )
@@ -1935,6 +1947,7 @@ extension AppState {
         // single shot against a counter already sitting at the threshold.
         lastProtectedFailureSignature = nil
         consecutiveProtectedFailureCount = 0
+        consecutiveProtectionRepairCount = 0
         clearCatalogFailoverSweep()
         self.connectionCoordinator.protectedReconnectTask?.cancel()
         self.connectionCoordinator.protectedReconnectTask = nil
