@@ -85,7 +85,7 @@ Var OldMainBinaryName
 ; populates it only for an explicit fresh passive `/R` request.
 Var MainBinaryArgs
 Var VC_REDIST_URL
-Var VC_REDIST_EXE
+Var TonoSetupFile
 Var VC_RUNTIME_READY
 Var VC_RUNTIME_NEEDED
 ; Set once this run has handed control to the Service installer, so `.onInstFailed` only tears
@@ -714,6 +714,27 @@ FunctionEnd
 ; means Tauri's generated uninstall loop cannot know they exist. Remove the exact historical
 ; names on both upgrade and uninstall; /REBOOTOK covers an old core image that Windows still has
 ; mapped without broadening the target beyond Tono's own install directory.
+; Elevated setup must not execute a file that the unelevated user can replace. Every process
+; of that user can write %TEMP%, so a Microsoft installer saved there could be swapped between
+; download and ExecWait. GetTempFileName creates a new file in the Windows temp directory, whose
+; inherited ACL gives standard users no access to files created there. Renaming within that
+; directory keeps the ACL and fails rather than reuse a name that already exists.
+!macro TonoAdminOnlySetupFile
+  StrCpy $TonoSetupFile ""
+  ClearErrors
+  GetTempFileName $R8 "$WINDIR\Temp"
+  ${IfNot} ${Errors}
+  ${AndIf} $R8 != ""
+    ClearErrors
+    Rename "$R8" "$R8.exe"
+    ${If} ${Errors}
+      Delete "$R8"
+    ${Else}
+      StrCpy $TonoSetupFile "$R8.exe"
+    ${EndIf}
+  ${EndIf}
+!macroend
+
 !macro RemoveKnownLegacyPayload
   Delete /REBOOTOK "$INSTDIR\verge-mihomo.exe"
   Delete /REBOOTOK "$INSTDIR\verge-mihomo-alpha.exe"
@@ -755,7 +776,6 @@ Section CheckAndInstallVSRuntime
 
   ${If} ${IsNativeARM64}
     StrCpy $VC_REDIST_URL "https://aka.ms/vs/17/release/vc_redist.arm64.exe"
-    StrCpy $VC_REDIST_EXE "vc_redist.arm64.exe"
     Call CheckVCRuntime64
     ${If} $VC_RUNTIME_READY != "1"
       StrCpy $VC_RUNTIME_NEEDED "1"
@@ -763,7 +783,6 @@ Section CheckAndInstallVSRuntime
 
   ${ElseIf} ${RunningX64}
     StrCpy $VC_REDIST_URL "https://aka.ms/vs/17/release/vc_redist.x64.exe"
-    StrCpy $VC_REDIST_EXE "vc_redist.x64.exe"
     Call CheckVCRuntime64
     ${If} $VC_RUNTIME_READY != "1"
       StrCpy $VC_RUNTIME_NEEDED "1"
@@ -771,7 +790,6 @@ Section CheckAndInstallVSRuntime
 
   ${Else}
     StrCpy $VC_REDIST_URL "https://aka.ms/vs/17/release/vc_redist.x86.exe"
-    StrCpy $VC_REDIST_EXE "vc_redist.x86.exe"
 
     IfFileExists "$SYSDIR\vcruntime140.dll" 0 filesMissing32
     IfFileExists "$SYSDIR\msvcp140.dll" 0 filesMissing32
@@ -820,12 +838,17 @@ Section CheckAndInstallVSRuntime
     Goto done_vc
   ${EndIf}
 
+  !insertmacro TonoAdminOnlySetupFile
+  ${If} $TonoSetupFile == ""
+    DetailPrint "无法创建仅管理员可写的临时文件，跳过 Visual C++ Redistributable 安装"
+    Goto done_vc
+  ${EndIf}
   DetailPrint "正在下载 Visual C++ Redistributable..."
-  nsisdl::download "$VC_REDIST_URL" "$TEMP\$VC_REDIST_EXE"
+  nsisdl::download "$VC_REDIST_URL" "$TonoSetupFile"
   Pop $0
   ${If} $0 == "success"
     DetailPrint "正在安装 Visual C++ Redistributable..."
-    ExecWait '"$TEMP\$VC_REDIST_EXE" /quiet /norestart' $0
+    ExecWait '"$TonoSetupFile" /quiet /norestart' $0
     ${If} $0 == 0
       DetailPrint "Visual C++ Redistributable 安装成功"
     ${ElseIf} $0 == 3010
@@ -838,10 +861,10 @@ Section CheckAndInstallVSRuntime
     ${Else}
       DetailPrint "Visual C++ Redistributable 安装失败"
     ${EndIf}
-    Delete "$TEMP\$VC_REDIST_EXE"
   ${Else}
     DetailPrint "Visual C++ Redistributable 下载失败"
   ${EndIf}
+  Delete "$TonoSetupFile"
 
   done_vc:
 SectionEnd
@@ -870,43 +893,47 @@ Section WebView2
     ;
     ; Skip if updating
     ${If} $UpdateMode <> 1
+      !insertmacro TonoAdminOnlySetupFile
+      ${If} $TonoSetupFile == ""
+        Abort "$(webview2AbortError)"
+      ${EndIf}
       !if "${INSTALLWEBVIEW2MODE}" == "downloadBootstrapper"
-        Delete "$TEMP\MicrosoftEdgeWebview2Setup.exe"
         DetailPrint "$(webview2Downloading)"
-        NSISdl::download "https://go.microsoft.com/fwlink/p/?LinkId=2124703" "$TEMP\MicrosoftEdgeWebview2Setup.exe"
+        NSISdl::download "https://go.microsoft.com/fwlink/p/?LinkId=2124703" "$TonoSetupFile"
         Pop $0
         ${If} $0 == "success"
           DetailPrint "$(webview2DownloadSuccess)"
         ${Else}
           DetailPrint "$(webview2DownloadError)"
+          Delete "$TonoSetupFile"
           Abort "$(webview2AbortError)"
         ${EndIf}
-        StrCpy $6 "$TEMP\MicrosoftEdgeWebview2Setup.exe"
+        StrCpy $6 "$TonoSetupFile"
         Goto install_webview2
       !endif
 
       !if "${INSTALLWEBVIEW2MODE}" == "embedBootstrapper"
-        Delete "$TEMP\MicrosoftEdgeWebview2Setup.exe"
-        File "/oname=$TEMP\MicrosoftEdgeWebview2Setup.exe" "${WEBVIEW2BOOTSTRAPPERPATH}"
+        File "/oname=$TonoSetupFile" "${WEBVIEW2BOOTSTRAPPERPATH}"
         DetailPrint "$(installingWebview2)"
-        StrCpy $6 "$TEMP\MicrosoftEdgeWebview2Setup.exe"
+        StrCpy $6 "$TonoSetupFile"
         Goto install_webview2
       !endif
 
       !if "${INSTALLWEBVIEW2MODE}" == "offlineInstaller"
-        Delete "$TEMP\MicrosoftEdgeWebView2RuntimeInstaller.exe"
-        File "/oname=$TEMP\MicrosoftEdgeWebView2RuntimeInstaller.exe" "${WEBVIEW2INSTALLERPATH}"
+        File "/oname=$TonoSetupFile" "${WEBVIEW2INSTALLERPATH}"
         DetailPrint "$(installingWebview2)"
-        StrCpy $6 "$TEMP\MicrosoftEdgeWebView2RuntimeInstaller.exe"
+        StrCpy $6 "$TonoSetupFile"
         Goto install_webview2
       !endif
 
+      Delete "$TonoSetupFile"
       Goto webview2_done
 
       install_webview2:
         DetailPrint "$(installingWebview2)"
-        ; $6 holds the path to the webview2 installer; quote it, $TEMP routinely has a space.
+        ; $6 holds the path to the webview2 installer; always quote it.
         ExecWait '"$6" ${WEBVIEW2INSTALLERARGS} /install' $1
+        Delete "$TonoSetupFile"
         ${If} $1 = 0
           DetailPrint "$(webview2InstallSuccess)"
         ${Else}
