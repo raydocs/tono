@@ -8,12 +8,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import enTono from '@/locales/en/tono.json'
 
 const mocks = vi.hoisted(() => ({
+  signOut: vi.fn(),
+  disconnect: vi.fn(),
   start: vi.fn(),
   verify: vi.fn(),
   mutate: vi.fn(),
   status: {} as Record<string, unknown>,
-  signOut: vi.fn(),
-  disconnect: vi.fn(),
 }))
 
 vi.mock('@/services/states', () => ({ useThemeMode: () => 'light' }))
@@ -46,12 +46,12 @@ void i18n.use(initReactI18next).init({
 
 beforeEach(() => {
   vi.useFakeTimers()
+  mocks.signOut.mockReset().mockResolvedValue(undefined)
+  mocks.disconnect.mockReset().mockResolvedValue(undefined)
   mocks.start.mockReset().mockResolvedValue({ expiresIn: 600 })
   mocks.verify.mockReset()
   mocks.mutate.mockReset().mockResolvedValue(undefined)
   mocks.status = {}
-  mocks.signOut.mockReset().mockResolvedValue(undefined)
-  mocks.disconnect.mockReset().mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -90,6 +90,33 @@ describe('login welcome v2', () => {
       ),
     ).toBeDefined()
     expect(screen.getByRole('button', { name: 'Send code' })).toBeDefined()
+  })
+})
+
+describe('login paused screen', () => {
+  it('offers sign-out and names a still-running tunnel on the paused screen of a refused session', async () => {
+    mocks.status = {
+      accountState: 'suspended',
+      protectionBlocked: true,
+      killSwitch: {
+        wanted: true,
+        mode: 'locked',
+        tunnel_permit_rendered: true,
+      },
+    }
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    )
+    expect(screen.getByText('Previous connection still running')).toBeDefined()
+    expect(screen.queryByText('Internet is blocked')).toBeNull()
+    await act(async () =>
+      fireEvent.click(screen.getByRole('button', { name: 'Sign Out' })),
+    )
+    expect(mocks.signOut).toHaveBeenCalledTimes(1)
+    expect(mocks.disconnect).not.toHaveBeenCalled()
+    expect(mocks.mutate).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -255,25 +282,5 @@ describe('login request exclusion', () => {
       }),
     )
     expect(screen.getByText('Account paused')).toBeDefined()
-  })
-
-  it('offers sign-out from the paused screen of a refused session', async () => {
-    mocks.status = {
-      accountState: 'suspended',
-      protectionBlocked: true,
-      killSwitch: { wanted: true },
-    }
-    render(
-      <MemoryRouter>
-        <LoginPage />
-      </MemoryRouter>,
-    )
-    expect(screen.getByText('Account paused')).toBeDefined()
-    await act(async () =>
-      fireEvent.click(screen.getByRole('button', { name: 'Sign Out' })),
-    )
-    expect(mocks.signOut).toHaveBeenCalledTimes(1)
-    expect(mocks.disconnect).not.toHaveBeenCalled()
-    expect(mocks.mutate).toHaveBeenCalledTimes(1)
   })
 })

@@ -236,6 +236,13 @@ const LoginPage = () => {
     background: 'var(--tono-action-fill)',
   }
 
+  // A restore that did not take over the Service's barrier leaves it as it is.
+  // A locked barrier that still renders the tunnel permit is the previous
+  // session's connection carrying traffic, not a blocked machine.
+  const previousTunnelRunning =
+    status?.killSwitch?.mode === 'locked' &&
+    status.killSwitch.tunnel_permit_rendered === true
+
   const internetRecovery = internetBlocked ? (
     <div
       role="alert"
@@ -254,10 +261,14 @@ const LoginPage = () => {
       }}
     >
       <span style={{ fontSize: 13, fontWeight: 650 }}>
-        {t('tono.login.networkBlocked.title')}
+        {previousTunnelRunning
+          ? t('tono.login.networkBlocked.stillRunningTitle')
+          : t('tono.login.networkBlocked.title')}
       </span>
       <span style={{ fontSize: 12, lineHeight: 1.45, color: text.secondary }}>
-        {t('tono.login.networkBlocked.description')}
+        {previousTunnelRunning
+          ? t('tono.login.networkBlocked.stillRunningDescription')
+          : t('tono.login.networkBlocked.description')}
       </span>
       <button
         type="button"
