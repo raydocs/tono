@@ -32,13 +32,17 @@ final class UnarmedConnectFailureTests: XCTestCase {
         }
         runtime.stopCore = { _ in true }
         runtime.coreStatus = { (false, true) }
-        runtime.restoreDNS = { true }
+        // An earlier session left its core marker and loopback DNS behind,
+        // and restoring that DNS fails: a real failure with no PF behind it.
+        AppProfile.defaults.set(true, forKey: SettingsKey.didStartCore)
+        runtime.restoreDNS = { throw KillSwitchService.Error.notInstalled }
         runtime.disableSystemProxy = {}
         runtime.disarm = {}
         runtime.restrictToBootstrap = {}
         app.networkProtection = runtime
         defer {
             AppProfile.defaults.removeObject(forKey: SettingsKey.selectedProxyTargetName)
+            AppProfile.defaults.removeObject(forKey: SettingsKey.didStartCore)
         }
 
         app.connect()
@@ -50,5 +54,8 @@ final class UnarmedConnectFailureTests: XCTestCase {
         XCTAssertFalse(app.isProtectionBlocked, "PF never armed, so the host is not Protected Offline")
         XCTAssertFalse(app.isDisconnecting)
         XCTAssertNotNil(app.lastConnectionFailure, "the connect failure stays on the record")
+        let message = app.errorMessage ?? ""
+        XCTAssertTrue(message.hasPrefix("Protected DNS restore failed"), "a real DNS restore failure stays visible")
+        XCTAssertFalse(message.contains("Kill Switch"), "no Kill Switch holds this host")
     }
 }

@@ -825,6 +825,7 @@ extension AppState {
             }
 
             var protectedDNSRestored = !releaseKillSwitch
+            var dnsRestoreFailure: String?
             if releaseKillSwitch {
                 await MainActor.run {
                     self?.disconnectionStage = .restoringDNS
@@ -840,6 +841,7 @@ extension AppState {
                         // helper as "nothing to restore."
                         protectedDNSRestored = !runtimeMayOwnNetwork
                         if !protectedDNSRestored {
+                            dnsRestoreFailure = error.localizedDescription
                             transitionError =
                                 "Protected DNS restore failed; Kill Switch remains active. \(error.localizedDescription)"
                         }
@@ -905,8 +907,12 @@ extension AppState {
                 // Switch holds this host, so do not publish Protected Offline,
                 // and keep the connect failure the user needs instead of a
                 // teardown message about a runtime this attempt never started.
+                // A failed DNS restore is real, though: an earlier session's
+                // loopback DNS may still be applied with no PF behind it.
                 transitionLeavesProtectionBlocked = false
-                transitionError = nil
+                transitionError = dnsRestoreFailure.map {
+                    "Protected DNS restore failed, so this Mac may be unable to resolve names. The Support page has a recovery command. \($0)"
+                }
             }
 
             await MainActor.run {

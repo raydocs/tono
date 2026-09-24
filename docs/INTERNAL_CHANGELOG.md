@@ -45,11 +45,18 @@
   工作收尾后，如果 `KillSwitchService.isArmed` 仍为 false，就跳过显式释放修复，helper 清理
   步骤只做尽力而为，不发布 Protected Offline，也不用拆除错误覆盖连接失败信息。取消过程中
   arm 已完成的，仍走完整释放。用户主动 Restore internet 的路径不变。
+- **缺陷修复（审查 R4）**：上一版在该路径无条件 `transitionError = nil`，把真实的 DNS 恢复失败
+  一起吞掉（例如上次崩溃留下 127.0.0.1 与快照、`restoreDNS` 失败时，界面只剩连接失败与
+  Not connected）。现在只去掉与 Kill Switch 相关的拆除文案；DNS 恢复失败换成不提 Kill Switch
+  的提示保留（"may be unable to resolve names"，指向 Support 页恢复命令）。
 - **新增/优化**：无。
 - **工程与测试**：新增 `UnarmedConnectFailureTests.testUnarmedConnectFailureDoesNotRunExplicitReleaseRepair`
   （一个 XCTest），沿用已有 `NetworkProtectionOperations` seam 和"缺 uuid 的目录节点在
   helper 之前失败"的写法，修复桩计数并抛 `userDenied`。旧代码修复被调用一次，且
-  `isProtectionBlocked == true`，断言失败。
+  `isProtectionBlocked == true`，断言失败。审查后同一测试改为预置 `didStartCore`、让
+  `restoreDNS` 抛错，并断言 `errorMessage` 以 "Protected DNS restore failed" 开头且不提
+  Kill Switch；上一版（`transitionError = nil`）下 `errorMessage` 是连接失败文案，该断言失败
+  （推理得出，未实跑）。
 - **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
   （TonoTests），结果以 PR 页为准。第二次管理员提示的实际弹出未做实机复现。
 - **候选/发布**：无新包，仅源码。
