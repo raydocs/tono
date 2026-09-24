@@ -174,9 +174,12 @@ final class ConnectionCoordinator {
             }
             return
         }
-        bumpGeneration()
         let (canProceed, attemptID) = prepare()
         guard canProceed else { return }
+        // Only an admitted attempt retires the previous generation. A connect
+        // refused by `prepare` (already connecting, no ready exit) must not
+        // retire the attempt in flight, whose tail compares the generation.
+        bumpGeneration()
 
         let currentGeneration = protectionOperationGeneration
         connectAttemptID = attemptID

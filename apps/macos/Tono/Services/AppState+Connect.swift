@@ -79,7 +79,8 @@ extension AppState {
                     "connectBegin",
                     stage: ConnectionStage.preparing.rawValue,
                     node: selectedExit?.name,
-                    generation: Int(self.connectionCoordinator.protectionOperationGeneration),
+                    // executeConnect bumps right after this admission.
+                    generation: Int(self.connectionCoordinator.protectionOperationGeneration &+ 1),
                     transport: selectedExit?.catalogTransport
                 )
                 return (true, UUID())

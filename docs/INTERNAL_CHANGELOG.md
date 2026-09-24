@@ -44,6 +44,12 @@
   后台策略和核心监视器。随后的 `/update/disconnect` 被 helper 以"已提交"拒绝，用户的恢复
   网络请求以错误告终。现在 `onCoreStarted` 入口记录代际；状态查询返回后、以及注册尾声任务
   之前，都要求任务未取消、仍在连接中且代际未变，否则返回 false，不提交、不注册。
+- **缺陷修复（审查 R4 S13）**：`ConnectionCoordinator.executeConnect` 原先在 `prepare()` 准入检查之前
+  就 bump 代际，一次被拒的 `connect()`（已在连接、无可用出口等）也会让在途尝试的代际失效；与上面的
+  代际比较组合后，尾声返回 false 但 `isConnected` 已置位，界面同时显示 connecting 与 connected，
+  直到 240 s 看门狗。现在只有通过准入的尝试才 bump 代际（`connectBegin` 遥测相应记录 bump 后的代际）。
+  对 #443 的影响：#443 在同一处清除"释放未确认"意图，同样位于准入之前；该清除语句在 #443 分支上一并
+  移到准入之后，两 PR 合并时此处会有一处文本冲突，保留"准入后先 bump、再清意图"即可。
 - **新增/优化**：无。
 - **工程与测试**：新增窄 seam `AppState.nativeUpdateResume`（`pending` / `commit`，生产走
   `PrivilegedRuntimeCoordinator`）；`onCoreStarted` 由 private 改为 internal 以便测试调用。
@@ -51,10 +57,13 @@
   （一个 XCTest）：状态查询停在可控闸门，期间按 suspend 的前两步 bump 代际并取消任务，
   放行后断言返回 false、commit 调用 0 次、未注册监视器。旧逻辑下会提交一次，断言失败。
 - **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
-  （TonoTests），结果以 PR 页为准。真实待定更新下的取消时序未做实机复现。
+  （TonoTests），结果以 PR 页为准。真实待定更新下的取消时序未做实机复现。准入后 bump 的调整
+  没有新增测试，结论来自源码推理（`prepare` 与 bump 同在主 actor 上同步执行，中间无挂起点）。
 - **候选/发布**：无新包，仅源码。
 - **剩余限制**：commit 本身也是不可取消的阻塞 IPC；取消若恰好落在 commit 发出之后，提交
   仍会发生，只是尾声不再注册任务。helper 侧未改，CONTRACT.sha256 与协议版本不变。
+  被拒的 connect 不再取消排队中的延迟 connect（`bumpGeneration` 附带的动作）；延迟 connect
+  触发时自身会再检查状态。
 
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
