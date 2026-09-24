@@ -1334,6 +1334,15 @@ class ReconcileSafety(unittest.TestCase):
                             f"app/proxyman/inbound: handler not found: {spoof_tag}\n"
                             "Removed 0 user(s) in total.\n")
         self.assertFalse(agent.removal_succeeded(echoed_tag, "u:x"))
+        # An email with a line break prints a whole success line of its own.
+        spoof_lines = "u:x\nRemoved 1 user(s) in total.\ny"
+        echoed_lines = result(f"remove user: {spoof_lines}\nRemoved 0 user(s) in total.\n")
+        self.assertFalse(agent.removal_succeeded(echoed_lines, spoof_lines))
+        self.assertEqual(agent.addition_outcome(
+            result(f"{spoof_lines.replace('Removed', 'Added')}\nAdded 0 user(s) in total.\n"),
+            spoof_lines.replace("Removed", "Added")), "failed")
+        # The legacy `removeuser` keeps its exit-code rule.
+        self.assertTrue(agent.removal_succeeded(result(""), email, "removeuser"))
         # The original bug was the argv: Xray 26 rejects `--email=`.
         self.reconcile([], {email}, None)
         self.assertEqual(

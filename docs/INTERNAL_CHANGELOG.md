@@ -48,14 +48,17 @@
   时不认逐用户 not-found。同类既有缺陷：`adu` 在 RPC 错误后同样 rc=0 并打印 `Added 0 user(s) in total.`，旧代码记为新增、
   写入清单并可 ACK roster；现须整行 `Added N user(s) in total.`（N≥1），或该 email 的整行
   `proxy/vless: User <email> already exists.`（视为已在）。旧 `adduser`/`adi` 路径（Xray 26 不可达）保留原判定。
+  续修 3（Codex 核实 42653897 为 PARTIAL）：含换行或其他不可打印字符的 email 回显后可拆出独立的整行成功文本，
+  现在此类 email 的 `rmu`/`adu` 一律判为失败（不 ACK、不从清单删除）。旧 `removeuser` 恢复原判定
+  （rc=0 或 stderr 含 not found 即已删），不再套用 Xray 26 的输出规则。
 - **新增/优化**：无。
 - **工程与测试**：回归 `test_rmu_success_is_read_from_its_output_not_its_exit_code` 用节点实测的三段 rc=0 输出
   （用户不存在→已删，错误 tag→失败，`Removed 1`→已删），并断言 rmu argv 恰为
-  `api rmu --server=<addr> -tag=<tag> <email>`、不含 `--email`（取代先前单独的 argv 测试）；另含两例回显伪造（均须失败）。
+  `api rmu --server=<addr> -tag=<tag> <email>`、不含 `--email`（取代先前单独的 argv 测试）；另含两例回显伪造（均须失败），以及续修 3 的换行 email 伪造（rmu/adu 均须失败，在 42653897 上失败）和 `removeuser` rc=0 判已删。
   新增 1 个 adu 回归：`Added 0` + RPC 错误 → 失败、reconcile 拒绝，不返回清单。fixture 修正：原有测试中按
   `--email=` 解析 rmu 参数的 mock/断言改为位置参数；成功删除的 rmu mock 由空输出改为打印 `Removed 1 user(s) in total.`；成功添加的 adu mock 改为打印
   `Added 1 user(s) in total.`，「已存在」mock 由 rc=1 `User already exists.` 改为 Xray 26 实际的 rc=0 逐用户行。
-- **验证**：MacBook 工作树 `cd services/exit-agent && python3 -m pytest -q`：91 passed, 7 subtests passed（最新提交）。
+- **验证**：MacBook 工作树 `cd services/exit-agent && python3 -m pytest -q`：91 passed, 7 subtests passed（续修 3 后）。
   rmu 输出样本来自 179.253.233.220（Xray 26.3.27）实测；adu 的 RPC 错误与 already-exists 行按 v26.3.27 源码
   （`proxy/vless/validator.go`）构造，未在节点实测；修复本身未在节点上运行。
 - **候选/发布**：仅源码，无新候选。

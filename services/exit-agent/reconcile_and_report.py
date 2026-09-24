@@ -402,15 +402,26 @@ def _vless_user_error(lines: list[str], email: str, outcome: str) -> bool:
     return any(re.fullmatch(pattern, line.strip()) for line in lines)
 
 
-def removal_succeeded(result: subprocess.CompletedProcess[str], email: str) -> bool:
+def _one_line(email: str) -> bool:
+    # Xray echoes the email; one with a line break could print a whole
+    # success line of its own. Such an email is never judged a success.
+    return email.isprintable()
+
+
+def removal_succeeded(result: subprocess.CompletedProcess[str], email: str, command: str = "rmu") -> bool:
     """Whether `rmu` removed `email` or it was already absent.
 
     Xray 26 `rmu` exits 0 even when a removal fails, so the exit code alone
     proves nothing. Only whole lines count (main/commands/all/api/
     inbound_user_remove.go, v26.3.27): an echoed email or tag must not pass as
     a total or a per-user result. A wrong inbound tag prints "handler not
-    found" and "Removed 0 user(s) in total.".
+    found" and "Removed 0 user(s) in total.". The legacy `removeuser` keeps
+    its exit-code rule.
     """
+    if not _one_line(email):
+        return False
+    if command != "rmu":
+        return result.returncode == 0 or "not found" in (result.stderr or "").lower()
     lines = _output_lines(result)
     if result.returncode == 0 and _total_at_least_one(lines, "Removed"):
         return True
@@ -425,6 +436,8 @@ def addition_outcome(result: subprocess.CompletedProcess[str], email: str) -> st
     Like `rmu`, `adu` exits 0 after an RPC error and prints "Added 0 user(s)
     in total." (main/commands/all/api/inbound_user_add.go, v26.3.27).
     """
+    if not _one_line(email):
+        return "failed"
     lines = _output_lines(result)
     if _vless_user_error(lines, email, "already exists"):
         return "present"
@@ -972,7 +985,7 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
         result = remove_inbound_user(
             binary, commands["remove_user"], address, tag, LEGACY_CLIENT_EMAIL,
         )
-        if not removal_succeeded(result, LEGACY_CLIENT_EMAIL):
+        if not removal_succeeded(result, LEGACY_CLIENT_EMAIL, commands["remove_user"]):
             # Like every other removal: reported with the rest, never a reason
             # to skip the revocations that follow.
             failures.append(f"removing {LEGACY_CLIENT_EMAIL} failed: {api_error(result)}")
@@ -1010,7 +1023,7 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
             elif not label.startswith(CLIENT_LABEL_PREFIX):
                 continue
             result = remove_inbound_user(binary, commands["remove_user"], address, tag, label)
-            if not removal_succeeded(result, label):
+            if not removal_succeeded(result, label, commands["remove_user"]):
                 # One failure must not leave every later revocation in place.
                 failures.append(f"removing {label} failed: {api_error(result)}")
                 continue
