@@ -381,6 +381,34 @@ func runUpdateSelfTests() -> Bool {
         try engine.commit(peer: relaunched)
         try check(store.load().attempt?.receipt.phase == .committed, "A relaunched successor must be able to commit")
     }
-    print("Update production-bound tests: \(10 - failures.count) passed, \(failures.count) failed; native-device acceptance NOT performed")
+    // Tono.app dragged to the Trash left a KeepAlive helper that re-armed PF
+    // at every boot with no app left to release it (H19-O-F1). A helper start
+    // releases and removes the installation only when no Tono app is left in
+    // Applications and no update attempt could be putting one back.
+    test("helper-start-releases-only-when-tono-was-removed") { directory in
+        let applications = directory + "/Applications"
+        try FileManager.default.createDirectory(atPath: applications, withIntermediateDirectories: true)
+        var releases = 0
+        let release: (UpdateStorage) -> Bool = { _ in releases += 1; return true }
+        let idle = try UpdateStorage(root: directory + "/idle")
+        let renamed = applications + "/Tono Beta.app/Contents"
+        try FileManager.default.createDirectory(atPath: renamed, withIntermediateDirectories: true)
+        try PropertyListSerialization.data(fromPropertyList: ["CFBundleIdentifier": "com.raydocs.tono"],
+                                           format: .xml, options: 0)
+            .write(to: URL(fileURLWithPath: renamed + "/Info.plist"))
+        try check(!releaseIfTonoWasRemoved(storage: idle, applicationsDirectory: applications, release: release)
+                  && releases == 0, "A renamed Tono app in Applications lost its protection")
+        try FileManager.default.removeItem(atPath: applications + "/Tono Beta.app")
+        let updating = try UpdateStorage(root: directory + "/updating")
+        try reserved(updating, UpdateTransaction(storage: updating, effects: effects()))
+        try check(!releaseIfTonoWasRemoved(storage: updating, applicationsDirectory: applications, release: release)
+                  && releases == 0, "An unfinished update lost its protection while the app was away")
+        try check(!releaseIfTonoWasRemoved(storage: idle, applicationsDirectory: directory + "/unreadable",
+                                           release: release) && releases == 0,
+                  "An Applications folder that cannot be read counted as no app")
+        try check(releaseIfTonoWasRemoved(storage: idle, applicationsDirectory: applications, release: release)
+                  && releases == 1, "A helper whose app was removed kept its installation")
+    }
+    print("Update production-bound tests: \(11 - failures.count) passed, \(failures.count) failed; native-device acceptance NOT performed")
     return failures.isEmpty
 }

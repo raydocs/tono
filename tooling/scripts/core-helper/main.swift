@@ -707,6 +707,16 @@ private func runEmergencyResetLocked(_ storage: UpdateStorage) -> Bool {
     return true
 }
 
+/// Whether this helper start finds Tono removed from this Mac, and if so
+/// releases protection and removes the installation (H19-O-F1).
+func releaseIfTonoWasRemoved(
+    storage suppliedStorage: UpdateStorage? = nil,
+    applicationsDirectory: String = "/Applications",
+    release: (UpdateStorage) -> Bool = { _ in false }
+) -> Bool {
+    false
+}
+
 func fileType(_ value: stat) -> mode_t {
     value.st_mode & mode_t(S_IFMT)
 }
