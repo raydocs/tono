@@ -453,17 +453,28 @@ impl RotatingWriter {
     }
 
     /// current → `.1` (single retained generation), fresh current file.
+    ///
+    /// A missing current path means an earlier rotation renamed it but could not create the
+    /// next file (disk full), so `file` still points at the backup. Then only the current file
+    /// is recreated: removing the backup and renaming a missing path failed on every later
+    /// rotation until restart, and cost the retained generation.
     fn rotate(&mut self) -> std::io::Result<()> {
         use std::io::Write as _;
 
         self.file.flush()?;
-        let backup = self.backup_path();
-        match std::fs::remove_file(&backup) {
-            Ok(()) => {}
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-            Err(err) => return Err(err),
+        let current_missing = matches!(
+            std::fs::symlink_metadata(&self.path),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound
+        );
+        if !current_missing {
+            let backup = self.backup_path();
+            match std::fs::remove_file(&backup) {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => return Err(err),
+            }
+            std::fs::rename(&self.path, &backup)?;
         }
-        std::fs::rename(&self.path, &backup)?;
         self.file = state::open_private_append(&self.path).map_err(|err| std::io::Error::other(err.to_string()))?;
         self.written = 0;
         Ok(())
@@ -1280,6 +1291,33 @@ mod tests {
                 assert_eq!(std::fs::metadata(file).unwrap().permissions().mode() & 0o777, 0o600);
             }
         }
+    }
+
+    /// H18-C-F2: a rotation that renamed the current file but could not create the next one
+    /// (disk full) left the handle on the backup. Once space returns, the next rotation must
+    /// recreate the current file instead of deleting the backup and renaming a missing path.
+    #[test]
+    fn rotation_recreates_the_current_file_after_a_failed_reopen() {
+        let dir = TempDir::new("rotate-reopen");
+        let path = log_path(&dir);
+        let backup = dir.path().join(super::AUDIT_BACKUP_FILE_NAME);
+        let cap = 512_u64;
+        let line = |counter| serde_json::to_string(&AuditRecord::now(AuditEvent::NetworkChange { counter })).unwrap();
+        let mut writer = RotatingWriter::open(&path, cap).unwrap();
+        let mut counter = 0;
+        while writer.written + line(counter).len() as u64 + 1 <= cap {
+            writer.write_line(&line(counter), true).unwrap();
+            counter += 1;
+        }
+        // The failed rotation's state: renamed away, handle still open on the backup.
+        std::fs::rename(&path, &backup).unwrap();
+
+        writer.write_line(&line(counter), true).unwrap();
+
+        assert!(backup.exists(), "the retained generation must survive");
+        let current = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(current.lines().count(), 1);
+        assert!(current.contains(&format!("\"counter\":{counter}")));
     }
 
     #[test]
