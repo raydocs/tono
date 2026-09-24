@@ -58,8 +58,7 @@ extension AccountSession {
                 DiagnosticsLogOwnership.shared.activate(owner: restoredUser.id)
                 ManagedExitCatalogOwnership.adopt(restoredUser.id)
                 guard restoredUser.suspended != true else {
-                    pauseAppRoutingResearch()
-                    state = .suspended
+                    enterEntitlementBlock(detail: nil)
                     return
                 }
                 await startCloudOnlyRuntime()
@@ -81,8 +80,7 @@ extension AccountSession {
             devices = restoredDevices
             ManagedExitCatalogOwnership.adopt(restoredUser.id)
             guard user?.suspended != true else {
-                pauseAppRoutingResearch()
-                state = .suspended
+                enterEntitlementBlock(detail: nil)
                 return
             }
             device = devices.first(where: { $0.current == true })
@@ -135,8 +133,8 @@ extension AccountSession {
         case .suspended:
             // A block raised over a running session is an account fact, not a
             // broken session. Re-read the account instead of re-running the
-            // launch sequence, whose first step stops the core this Mac is
-            // still protected by.
+            // launch sequence, whose first step is crash cleanup of the
+            // runtime this session still owns; leaving the block restarts it.
             if blockedWhileReady {
                 await refreshAccount()
                 return
@@ -462,7 +460,7 @@ extension AccountSession {
             if refreshed.suspended == true {
                 enterEntitlementBlock(detail: nil)
             } else {
-                leaveEntitlementBlock()
+                await leaveEntitlementBlock()
             }
         } catch is CancellationError {
             return
@@ -493,22 +491,34 @@ extension AccountSession {
     /// which — expiry, allowance or a disabled account — instead of being signed
     /// out with a session-expired message, and protection is left exactly as it
     /// is. A nil detail falls back to the screen's own general copy.
+    ///
+    /// The exits in the cached catalog carry this device's client identity,
+    /// which the control plane has just refused. They are withdrawn before the
+    /// first suspension point, so no wake, reconnect or network-change path can
+    /// start a Core with them, and the running Core is stopped with PF kept
+    /// armed: the Mac stays Protected Offline and the suspended screen offers
+    /// Restore internet.
     func enterEntitlementBlock(detail: String?) {
         entitlementDetail = detail
         if state == .ready { blockedWhileReady = true }
         pauseAppRoutingResearch()
         state = .suspended
+        ManagedExitCatalogOwnership.purge()
+        Task { [weak self] in await self?.descriptorConsumer(nil) }
     }
 
     /// The control plane accepted this account again, so the block is lifted
-    /// and the running session it interrupted resumes where it paused —
-    /// including the synchronization loop, which stops outside `.ready`.
-    func leaveEntitlementBlock() {
-        guard state == .suspended, blockedWhileReady else { return }
+    /// and the session it interrupted resumes. The block withdrew the exits and
+    /// stopped the Core, so the runtime starts again from a freshly fetched
+    /// catalog — the synchronization loop with it — and reconnects when
+    /// protection still holds this Mac offline.
+    func leaveEntitlementBlock() async {
+        guard state == .suspended, blockedWhileReady, let user else { return }
         blockedWhileReady = false
         entitlementDetail = nil
-        state = .ready
-        startCatalogSync()
+        ManagedExitCatalogOwnership.adopt(user.id)
+        if protectionBlockedConsumer() { shouldResumeProtection = true }
+        await retryRuntime()
     }
 
     /// Transfers the one-time enrollment material and immediately removes the
@@ -586,8 +596,7 @@ extension AccountSession {
             adoptEnrollment(response.enrollment)
             try await reloadDevices()
             if response.user.suspended == true {
-                pauseAppRoutingResearch()
-                state = .suspended
+                enterEntitlementBlock(detail: nil)
                 return
             }
             if !AppProfile.homeExitEnabled {

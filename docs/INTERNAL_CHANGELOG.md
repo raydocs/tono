@@ -32,6 +32,41 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · macOS 账户进入 suspended 时停止 Core 并撤下缓存出口
+
+- **归属/来源**：G2 客户端账户状态与连接准入（macOS `AccountSession+Auth.swift`）。内部审查 H17-C-F3，
+  另一审查方 H17-G-F3 第 3 步为同一缺口；Issue #526。基线 origin/main 059a2ea2 → 分支
+  `fix/macos-suspended-stops-core-20260924`；提交时未合 main。
+- **缺陷修复**：套餐到期、流量用尽、账户停用或设备被吊销后，账户重读收到 401（请求与续期都拒绝），
+  账户进入 `.suspended`。原来 `enterEntitlementBlock` 只改状态：正在运行的 Core 继续用本设备的
+  出口身份走流量；缓存目录（内存与磁盘）保留；连接层只按缓存判断就绪，唤醒恢复、保护重连循环、
+  网络变化和自动连接都不看账户状态，睡眠唤醒后可用同一凭据再起 Core，直到出口下次刷新名单。
+  现在进入 `.suspended` 时：
+  - 在第一个挂起点之前撤下缓存目录（与登出同一道 ownership 屏障：内存与磁盘都清，期间任何目录
+    都装不上），连接层不再有可用的出口；
+  - 停止正在运行的 Core，PF 保持武装：Mac 停在 Protected Offline，suspended 页面在 kill switch
+    武装时已提供"恢复网络"。任何 suspended 路径都不释放 PF。
+  - 启动与登录时直接进入 suspended 的三处（服务端目前不发 `suspended: true`）也走同一入口。
+  - 控制面重新接受账户时（`leaveEntitlementBlock`），重新绑定 ownership，从新拉的目录重启运行时；
+    若保护仍处于 Protected Offline 则自动重连，用户已恢复网络则只回到 ready。
+- **新增/优化**：无。
+- **工程与测试**：`AccountSessionRequestTests` 新增一个 XCTest
+  `testRefusedSessionStopsTheCoreAndWithdrawsItsExitsWithProtectionKept`：账户重读与续期都回 401；
+  断言状态为 `.suspended`、已安装目录被撤下、该账户的目录不再被接受、Core 停止一次、disarm
+  consumer 未被调用。测试 fixture 增加可注入的 `descriptorConsumer`。只含测试的提交 febea58a
+  （产品代码未改）在 GitHub-hosted macOS CI run 35976604824 上实际跑红：build 作业只有这一个测试
+  失败（`AccountSessionRequestTests` 50 项、3 处断言失败：目录未撤下、目录仍被接受、Core 未停止；
+  "不释放 PF"一项在旧代码上本来成立）。
+- **验证**：本机是编辑机，未运行 xcodebuild/swift。TonoTests 委托 PR 的 GitHub-hosted `macos-26`
+  CI，结果以 PR 页的准确 head SHA 为准。未实机验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：
+  - 出口对已建立连接的处理未实机验证；本修复只保证客户端在有界时间内停用凭据。
+  - 保护重连循环在 suspended 期间可能继续按退避计时，但没有目录可用，不发起连接。
+  - 恢复路径（`leaveEntitlementBlock`）只在控制面重新接受同一会话时可达；被吊销的会话仍需
+    登出再登录。
+  - 网络日志上传在 suspended 下继续尝试 refresh（H17-O-F7），单独修。
+
 ## 2026-09-23 · 发现总账与审查流程记录
 
 - **归属/来源**：G1–G3 审查与修复的可追溯性（工程流程与记录，非产品行为）；基线 origin/main
