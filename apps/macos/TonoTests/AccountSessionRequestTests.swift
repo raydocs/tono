@@ -45,6 +45,7 @@ final class AccountSessionRequestTests: XCTestCase {
         trafficPolicyConsumer: @escaping @MainActor (TonoTrafficPolicyResponse) async throws -> Int = { $0.revision },
         cloudFallbackConsumer: @escaping @MainActor (Bool) throws -> Void = { _ in },
         killSwitchDisarmConsumer: @escaping @MainActor () async -> Void = {},
+        protectionBlockedConsumer: @escaping @MainActor () -> Bool = { false },
         routeSplitConsumer: @escaping @MainActor () -> AppTrafficLedger.RouteSplit = { .init() }
     ) -> (AccountSession, URLSession, String, AsyncStream<HeldAccountProtocol>) {
         let host = "\(UUID().uuidString.lowercased()).invalid"
@@ -54,7 +55,7 @@ final class AccountSessionRequestTests: XCTestCase {
         config.protocolClasses = [HeldAccountProtocol.self]
         let transport = URLSession(configuration: config)
         let api = TonoAPIClient(baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport)
-        let account = AccountSession(api: api, keychain: testKeychain(host), sidecar: TonoSidecarService(), descriptorConsumer: descriptorConsumer, catalogConsumer: catalogConsumer, trafficPolicyConsumer: trafficPolicyConsumer, cloudFallbackConsumer: cloudFallbackConsumer, killSwitchDisarmConsumer: killSwitchDisarmConsumer, routeSplitConsumer: routeSplitConsumer)
+        let account = AccountSession(api: api, keychain: testKeychain(host), sidecar: TonoSidecarService(), descriptorConsumer: descriptorConsumer, catalogConsumer: catalogConsumer, trafficPolicyConsumer: trafficPolicyConsumer, cloudFallbackConsumer: cloudFallbackConsumer, killSwitchDisarmConsumer: killSwitchDisarmConsumer, protectionBlockedConsumer: protectionBlockedConsumer, routeSplitConsumer: routeSplitConsumer)
         account.state = .signedOut
         return (account, transport, host, requests)
     }
@@ -532,19 +533,34 @@ final class AccountSessionRequestTests: XCTestCase {
         var released = false
         var coreStops = 0
         var exitsWithdrawn = false
+        var catalogsInstalled = 0
+        var resumes: [Bool] = []
         let (account, transport, host, requests) = fixture(
             descriptorConsumer: { descriptor in if descriptor == nil { coreStops += 1 } },
-            killSwitchDisarmConsumer: { released = true }
+            catalogConsumer: { _ in catalogsInstalled += 1 },
+            cloudFallbackConsumer: { resume in
+                // As in AppState: with no installed exit there is nothing to select.
+                guard catalogsInstalled > 0 else { throw TonoAPIClient.APIError.invalidResponse }
+                resumes.append(resume)
+            },
+            killSwitchDisarmConsumer: { released = true },
+            protectionBlockedConsumer: { true }
         )
+        let logUpload = SettingsKey.isNetworkLogUploadEnabled()
+        AppProfile.defaults.set(false, forKey: SettingsKey.networkLogUploadEnabled)
         defer {
             transport.invalidateAndCancel(); HeldAccountProtocol.remove(host)
             try? testKeychain(host).remove(.refreshToken)
             ManagedExitCatalogOwnership.purge()
+            AppProfile.defaults.set(logUpload, forKey: SettingsKey.networkLogUploadEnabled)
         }
         try await adoptTestAccount(account)
         // The running session's catalog carries this device's exit identity.
         ManagedExitCatalogOwnership.adopt("original")
         ManagedExitCatalogOwnership.recordInstalled(owner: "original", discard: { exitsWithdrawn = true })
+        // A catalog read still in flight when the refusal arrives.
+        let stale = Task { await account.refreshManagedCatalog() }
+        _ = try await nextRequest(requests)
         let task = Task { await account.refreshAccount() }
         // The Worker refuses a revoked device, an expired plan, a used-up
         // allowance and a disabled account alike: 401, and 401 on renewal.
@@ -562,6 +578,27 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertFalse(ManagedExitCatalogOwnership.accepts("original"), "no exit may be installed for a refused account")
         XCTAssertEqual(coreStops, 1, "the running Core must stop")
         XCTAssertFalse(released, "a suspension must not release PF/DNS protection")
+
+        // Renewed: the same session is accepted again. The in-app flag still
+        // says Protected Offline, but the helper confirms a release made
+        // outside the app, so the resume must not re-arm.
+        account.killSwitchStatusObservation = { .confirmed(requiresProtectionRecovery: false) }
+        let recheck = Task { await account.refreshAccount() }
+        let renewed = try await nextRequest(requests)
+        XCTAssertTrue(renewed.request.url?.path.hasSuffix("/auth/refresh") == true)
+        renewed.respond(status: 200, body: #"{"accessToken":"renewed-access","refreshToken":"renewed-refresh"}"#)
+        let reread = try await nextRequest(requests)
+        reread.respond(status: 200, body: #"{"user":{"id":"original","email":"old@example.test"}}"#)
+        let fresh = try await nextRequest(requests)
+        XCTAssertTrue(fresh.request.url?.path.hasSuffix("/exit-catalog") == true, "re-acceptance must fetch a fresh catalog, not join the read from before the block")
+        fresh.respond(status: 200, body: #"{"revision":1,"yaml":"fixture","sha256":"fixture"}"#)
+        await recheck.value
+        _ = await stale.value
+        XCTAssertEqual(account.state, .ready)
+        XCTAssertEqual(catalogsInstalled, 1, "only the fresh catalog may install")
+        XCTAssertEqual(resumes, [false], "a helper-confirmed release must not be re-armed")
+        XCTAssertFalse(released)
+        await account.stopRuntime()
     }
 
     func testExplicitInvalidationRetiresReadBeforeUserIsCleared() async throws {
