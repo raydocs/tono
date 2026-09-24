@@ -184,8 +184,13 @@ nonisolated struct SystemProxy {
     /// Protected DNS was written to an idle adapter while the one in use kept
     /// its own resolver. There is no guess any more: with no primary service
     /// the caller gets nil and refuses to write DNS.
-    static func primaryNetworkService() -> String? {
-        SystemNetworkObservation.current()?.primaryServiceName
+    ///
+    /// `observe` exists so a test can drive this exact entry point with a
+    /// captured observation; production always reads the live store.
+    static func primaryNetworkService(
+        observe: () -> SystemNetworkObservation? = { SystemNetworkObservation.current() }
+    ) -> String? {
+        observe()?.primaryServiceName
     }
 
     /// Resolve the saved service name, falling back to primary if the saved one no longer exists
@@ -453,11 +458,33 @@ nonisolated struct SystemNetworkObservation: Equatable {
     /// `State:/Network/Global/DNS` → `ServerAddresses`: the default resolver
     /// macOS is really querying. Nil when there is none.
     var effectiveDNSServers: [String]?
+    /// Split-DNS resolvers macOS consults *instead of* the default resolver
+    /// for matching domains, restricted to those with a server that is not
+    /// loopback: `State:/Network/Service/*/DNS` entries that carry
+    /// `SupplementalMatchDomains` (VPN and profile split DNS) and
+    /// `/etc/resolver/*` files. Nil when they could not be enumerated.
+    ///
+    /// A non-primary service's plain `ServerAddresses` are deliberately not
+    /// listed: they only answer queries explicitly scoped to that interface,
+    /// and every host with Wi-Fi and Ethernet both up carries one.
+    var conflictingSupplementalResolvers: [SupplementalResolver]? = []
+
+    /// One split-DNS rule that sends matching names past the protected
+    /// listener. Carried for the user message and the audit log.
+    nonisolated struct SupplementalResolver: Equatable {
+        /// The dynamic-store key or `/etc/resolver` file it came from.
+        var source: String
+        var domains: [String]
+        /// Only the non-loopback servers.
+        var servers: [String]
+    }
 
     /// The IPv4 primary when macOS has one, otherwise the IPv6 primary. An
     /// IPv4 primary without a name (a VPN's dynamic service, a half-written
-    /// setup) is not skipped in favour of IPv6: that would protect a service
-    /// macOS is not resolving through. Nil means "do not write DNS".
+    /// setup) is not skipped in favour of IPv6: macOS routes and resolves
+    /// IPv4 through that IPv4 primary, so writing 127.0.0.1 to the IPv6
+    /// primary instead would protect a service the default resolver is not
+    /// taken from. Nil means "do not write DNS".
     var primaryServiceName: String? {
         guard let serviceID = ipv4PrimaryServiceID ?? ipv6PrimaryServiceID,
               let name = serviceNames[serviceID],
@@ -472,6 +499,67 @@ nonisolated struct SystemNetworkObservation: Equatable {
     var effectiveResolverIsProtected: Bool {
         guard let servers = effectiveDNSServers, !servers.isEmpty else { return false }
         return servers.allSatisfy { $0 == ProtectedDNSContract.server }
+    }
+
+    /// 127.0.0.0/8 and ::1 stay on this Mac (a local dnsmasq for `.test`, the
+    /// protected listener itself); anything else leaves it.
+    static func isLoopback(_ server: String) -> Bool {
+        let address = server.split(separator: "%", maxSplits: 1).first.map(String.init) ?? server
+        if address == "::1" { return true }
+        var ipv4 = in_addr()
+        return inet_pton(AF_INET, address, &ipv4) == 1 && address.hasPrefix("127.")
+    }
+
+    /// The nameservers an `/etc/resolver/<domain>` file names; the file name
+    /// is the match domain unless a `domain` line overrides it.
+    static func supplementalResolver(
+        resolverFile contents: String,
+        named fileName: String
+    ) -> SupplementalResolver? {
+        var domain = fileName
+        var servers: [String] = []
+        for line in contents.components(separatedBy: .newlines) {
+            let fields = line.split(whereSeparator: { $0 == " " || $0 == "\t" })
+            guard fields.count >= 2, !fields[0].hasPrefix("#") else { continue }
+            switch fields[0] {
+            case "nameserver": servers.append(String(fields[1]))
+            case "domain": domain = String(fields[1])
+            default: continue
+            }
+        }
+        let leaving = servers.filter { !isLoopback($0) }
+        guard !leaving.isEmpty else { return nil }
+        return SupplementalResolver(
+            source: "/etc/resolver/\(fileName)",
+            domains: [domain],
+            servers: leaving
+        )
+    }
+
+    /// Nil when `/etc/resolver` exists but cannot be read; an absent
+    /// directory is the ordinary case and has no resolvers.
+    static func resolverDirectoryConflicts(
+        at directory: String = "/etc/resolver"
+    ) -> [SupplementalResolver]? {
+        let fileManager = FileManager.default
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: directory, isDirectory: &isDirectory) else {
+            return []
+        }
+        guard isDirectory.boolValue,
+              let names = try? fileManager.contentsOfDirectory(atPath: directory)
+        else { return nil }
+        var found: [SupplementalResolver] = []
+        for name in names.sorted() where !name.hasPrefix(".") {
+            guard let contents = try? String(
+                contentsOfFile: (directory as NSString).appendingPathComponent(name),
+                encoding: .utf8
+            ) else { return nil }
+            if let resolver = supplementalResolver(resolverFile: contents, named: name) {
+                found.append(resolver)
+            }
+        }
+        return found
     }
 
     /// Nil only when the dynamic store cannot be opened or read.
@@ -491,10 +579,13 @@ nonisolated struct SystemNetworkObservation: Equatable {
         let dnsKey = SCDynamicStoreKeyCreateNetworkGlobalEntity(
             nil, kSCDynamicStoreDomainState, kSCEntNetDNS
         ) as String
+        let serviceDNSPattern = SCDynamicStoreKeyCreateNetworkServiceEntity(
+            nil, kSCDynamicStoreDomainState, kSCCompAnyRegex, kSCEntNetDNS
+        ) as String
         guard let values = SCDynamicStoreCopyMultiple(
             store,
             [ipv4Key, ipv6Key, dnsKey] as CFArray,
-            nil
+            [serviceDNSPattern] as CFArray
         ) as? [String: Any] else { return nil }
 
         func primaryService(_ key: String) -> String? {
@@ -512,13 +603,30 @@ nonisolated struct SystemNetworkObservation: Equatable {
                 names[serviceID] = name
             }
         }
+        // Every per-service DNS entry comes back from the pattern; only the
+        // ones with match domains are split DNS.
+        var supplemental: [SupplementalResolver] = []
+        for key in values.keys.sorted() where key != dnsKey {
+            guard let entry = values[key] as? [String: Any],
+                  let domains = entry[kSCPropNetDNSSupplementalMatchDomains as String] as? [String],
+                  !domains.isEmpty
+            else { continue }
+            let servers = (entry[kSCPropNetDNSServerAddresses as String] as? [String] ?? [])
+                .filter { !isLoopback($0) }
+            guard !servers.isEmpty else { continue }
+            supplemental.append(
+                SupplementalResolver(source: key, domains: domains, servers: servers)
+            )
+        }
+        let fileResolvers = resolverDirectoryConflicts()
         return SystemNetworkObservation(
             ipv4PrimaryServiceID: primaryService(ipv4Key),
             ipv6PrimaryServiceID: primaryService(ipv6Key),
             serviceNames: names,
             effectiveDNSServers: (values[dnsKey] as? [String: Any])?[
                 kSCPropNetDNSServerAddresses as String
-            ] as? [String]
+            ] as? [String],
+            conflictingSupplementalResolvers: fileResolvers.map { supplemental + $0 }
         )
     }
 }

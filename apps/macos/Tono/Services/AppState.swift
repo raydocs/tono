@@ -102,6 +102,15 @@ final class AppState {
     /// one first so a live session is not hit by three cold TLS races.
     var lastSuccessfulProbeOrigin: String?
     var consecutiveProtectedFailureCount = 0
+    /// `.broken` Protected DNS audits since the last `.intact` one. A connect
+    /// that succeeds does not reset it: the connect preflight cannot see the
+    /// default resolver the audit checks, so a mismatch that outlives
+    /// reconnects would otherwise tear the tunnel down forever.
+    var consecutiveProtectedDNSBrokenAudits = 0
+    /// Connect attempts in a row that found no primary network service.
+    /// Kept apart from `consecutiveProtectedFailureCount`, which exempts
+    /// this environmental failure from its three-strike pause.
+    var consecutiveNoNetworkServiceFailures = 0
     /// The protected path failed and PF is intentionally still blocking direct
     /// egress. Keep this distinct from ordinary "Not Connected" so the user
     /// can explicitly restore normal Internet instead of unknowingly retrying
@@ -442,9 +451,20 @@ final class AppState {
             }
             let currentFingerprint = PhysicalInterfaceFingerprint.current()
             let physicalChanged = (self.lastPhysicalFingerprint != nil && self.lastPhysicalFingerprint != currentFingerprint)
-            guard primaryService != self.protectedDNSService
-                    || dnsIntegrity == .broken
-                    || physicalChanged else {
+            let networkMoved = primaryService != self.protectedDNSService || physicalChanged
+            if dnsIntegrity == .intact { self.consecutiveProtectedDNSBrokenAudits = 0 }
+            if !networkMoved, case .supplementalConflict(let resolvers) = dnsIntegrity {
+                self.connectionCoordinator.networkEnvironmentTask = nil
+                self.holdProtectedDNSSupplementalConflict(resolvers)
+                return
+            }
+            guard networkMoved || dnsIntegrity == .broken else {
+                self.connectionCoordinator.networkEnvironmentTask = nil
+                return
+            }
+            // Only a mismatch on an unchanged network counts: a moved
+            // network is new information a reconnect can act on.
+            if !networkMoved, self.pauseIfProtectedDNSKeepsFailing() {
                 self.connectionCoordinator.networkEnvironmentTask = nil
                 return
             }
