@@ -584,7 +584,28 @@ pub fn is_auto_launch_enabled() -> Result<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::{csv_line_names_task, xml_task_enabled};
+    use super::{TaskMode, csv_line_names_task, xml_principal_is, xml_task_enabled};
+
+    #[test]
+    fn autostart_tasks_of_two_windows_users_never_share_a_name() {
+        let first = "S-1-5-21-1111111111-2222222222-3333333333-1001";
+        let second = "S-1-5-21-1111111111-2222222222-3333333333-1002";
+        for mode in [TaskMode::User, TaskMode::Admin] {
+            // A second user's create (/F) or remove must not select the first user's task.
+            assert_ne!(mode.name_for(first), mode.name_for(second));
+            assert_ne!(mode.name_for(first), mode.legacy_name());
+            let listing = format!(r#""\{}","N/A","Ready""#, mode.name_for(first));
+            assert!(csv_line_names_task(&listing, &mode.name_for(first)));
+            assert!(!csv_line_names_task(&listing, &mode.name_for(second)));
+        }
+        // A task under the earlier shared name is only the second user's to retire if its
+        // principal is that user.
+        let legacy = format!(
+            "<Task><Principals><Principal id=\"Author\"><UserId>{first}</UserId></Principal></Principals></Task>"
+        );
+        assert!(xml_principal_is(&legacy, first));
+        assert!(!xml_principal_is(&legacy, second));
+    }
 
     #[test]
     fn csv_listing_matches_the_task_path_case_insensitively() {
