@@ -1358,6 +1358,18 @@ class ReconcileSafety(unittest.TestCase):
         # The legacy adduser/adi check reads "already exists" from stderr.
         self.assertNotIn("already exists", agent.add_inbound_user(
             Path("/unused"), "adduser", "a", "t", "u:a\x00already exists", "x").stderr)
+        # Legacy commands: only a whole line naming this email counts, never
+        # an echo of an email that merely contains the phrase.
+        failed = agent.subprocess.CompletedProcess([], 1, "", "remove user: u:not found\n")
+        self.assertFalse(agent.removal_succeeded(failed, "u:not found", "removeuser"))
+        absent = agent.subprocess.CompletedProcess([], 1, "", "rpc error: User u:x not found.\n")
+        self.assertTrue(agent.removal_succeeded(absent, "u:x", "removeuser"))
+        self.result = type("Result", (), {"returncode": 1, "stdout": "add user: u:already exists", "stderr": ""})
+        with self.assertRaises(agent.Refusal):
+            agent.reconcile(Path("/unused"), {"add_user": "adduser", "remove_user": "removeuser"},
+                            "127.0.0.1:10085", "tono-vless",
+                            [{"userId": "already exists", "clientUUID": "11111111-1111-4111-8111-111111111111"}],
+                            set(), None)
         with patch.dict(os.environ, {"TONO_XRAY_INBOUND_TAG": "x\nRemoved 1 user(s) in total."}):
             with self.assertRaises(agent.Refusal):
                 agent.inbound_tag()

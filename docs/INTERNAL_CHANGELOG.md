@@ -56,6 +56,9 @@
   否则本轮拒绝（tag 回显同样可伪造整行成功文本）。
   续修 5（Codex 核实 26dc5647：tag 与 NUL 已修，legacy 残留）：拒绝结果的 stderr 不再包含 email，否则旧
   `adduser`/`adi` 的「already exists」判定会把 `u:a\x00already exists` 读成已在并 ACK。
+  续修 6（Codex 核实 4e3d6887：rmu/adu 已修，legacy 残留）：旧 `removeuser`/`adduser`/`adi` 不再在整段输出里找
+  「not found」/「already exists」子串，只认一整行 `…User <该 email> not found.` / `already exists.`；否则按退出码。
+  回显的 email 不能构成点名其自身的整行。舰队全部为 Xray 26.3.27，legacy 分支不可达，此项仅为防御。
 - **新增/优化**：无。
 - **工程与测试**：回归 `test_rmu_success_is_read_from_its_output_not_its_exit_code` 用节点实测的三段 rc=0 输出
   （用户不存在→已删，错误 tag→失败，`Removed 1`→已删），并断言 rmu argv 恰为

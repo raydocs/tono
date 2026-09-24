@@ -406,6 +406,14 @@ def _total_at_least_one(lines: list[str], verb: str) -> bool:
     return False
 
 
+def _legacy_user_line(lines: list[str], email: str, outcome: str) -> bool:
+    # Pre-26 removeuser/adduser/adi print "... User <email> <outcome>." with a
+    # non-zero exit. Only a whole line naming this email counts: an echoed
+    # email cannot contain a line that names itself.
+    pattern = rf"(?:.*: )?User {re.escape(email)} {outcome}\.?"
+    return any(re.fullmatch(pattern, line.strip(), re.IGNORECASE) for line in lines)
+
+
 def _vless_user_error(lines: list[str], email: str, outcome: str) -> bool:
     pattern = rf"rpc error: code = \w+ desc = proxy/vless: User {re.escape(email)} {outcome}\."
     return any(re.fullmatch(pattern, line.strip()) for line in lines)
@@ -437,7 +445,7 @@ def removal_succeeded(result: subprocess.CompletedProcess[str], email: str, comm
     if not _one_line(email):
         return False
     if command != "rmu":
-        return result.returncode == 0 or "not found" in (result.stderr or "").lower()
+        return result.returncode == 0 or _legacy_user_line(_output_lines(result), email, "not found")
     lines = _output_lines(result)
     if result.returncode == 0 and _total_at_least_one(lines, "Removed"):
         return True
@@ -1066,8 +1074,8 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
         if commands["add_user"] == "adu":
             outcome = addition_outcome(result, label)
         else:
-            output = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
-            outcome = ("present" if "already exists" in output
+            outcome = ("present" if _one_line(label) and _legacy_user_line(
+                           _output_lines(result), label, "already exists")
                        else "failed" if result.returncode != 0 else "added")
         if outcome == "failed":
             failures.append(f"adding {label} failed: {api_error(result)}")
