@@ -32,6 +32,29 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 网络日志上传：服务器明确不存储时停驻，不再重发整段
+
+- **归属/来源**：G2（客户端 3.5 网络日志上传，#138）；Windows App `tono/log_upload.rs`。
+  内部审查 H13-F1，Issue #452（macOS 对应修复另开 PR）。基线 main bb2ed4e4 → 分支
+  `fix/log-upload-standdown-windows-20260923`；提交时未合 main。
+- **缺陷修复**：上传默认开，Worker 只为 ops 打开采集窗口的设备存储，其余返回 200
+  `stored:false`，tono-core 映射为 `ApiError::Server { status: 200 }`。上传循环把它当普通
+  失败：保留整段、游标不动，按 120 s × 2^min(n,3) 退避后重发同一段（最多 2 MiB gzip），
+  无限期，且每次写一条 `NetworkLogSegmentUploadFail` 审计。现在收到不存储回执时丢弃内存中的
+  段（服务器已说明未存该键）、游标保持不动、进入停驻：每 30 分钟用不超过 64 KiB 原始数据的
+  小段探测一次；只有真正存储的上传才结束停驻。审计只在进入停驻时记一次。tono-core 未改。
+- **新增/优化**：无。
+- **工程与测试**：`log_upload.rs` 新增一个 `#[test]`
+  `a_not_stored_receipt_stands_down_to_a_small_probe`：1,200 行日志首段被拒后，下次间隔为
+  停驻间隔，下一段不超过 64 KiB，游标与序号不变。旧代码下被拒段原样保留并重发（新测试
+  引用的 `decline` 与间隔函数在旧代码中不存在）。
+- **验证**：本机（编辑机）未运行原生 cargo；Tauri crate `cargo test` 委托本 PR 的
+  GitHub-hosted `windows-2025` CI，结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：停驻状态只在内存中，App 重启或重新登录后第一次仍会发一个完整段。ops 打开
+  采集窗口后最长约 30 分钟才开始上传。识别依赖 tono-core 把不存储回执映射为 status 200
+  的现有约定。实际上行字节量需实机抓包确认。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
