@@ -170,7 +170,14 @@ nonisolated enum HelperProtocolVersion {
     ///   update ledger has a storage major (`schemaVersion`, absent = 1).
     ///   Additive keys from a newer helper are ignored instead of reading as
     ///   a corrupt ledger, and a higher major is refused as newer evidence.
-    static let current = "4.22.0"
+    /// - 4.22.0 → 4.41.0 (merge-train number): `CoreManager` no
+    ///   longer resolves the bound user's home directory when it is
+    ///   constructed, only when a start or sync validates the config
+    ///   directory. `--emergency-disarm` and `--emergency-reset` build one only
+    ///   to stop a stale core before releasing PF, so they now work after the
+    ///   bound macOS account was deleted. A 4.22.0 daemon's recovery commands
+    ///   fail there and leave PF fail-closed.
+    static let current = "4.41.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

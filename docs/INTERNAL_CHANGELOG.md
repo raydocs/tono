@@ -32,6 +32,25 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · macOS 绑定用户被删除后，Helper 紧急恢复命令仍能释放保护
+
+- **归属/来源**：G1 连接保护（恢复出口）；macOS `tono-core-helper`。内部审查 H19-O-F4（跨厂商核实：confirmed），
+  Issue [#545](https://github.com/raydocs/tono/issues/545)。基线 origin/main
+  [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b) → 分支 `fix/helper-recovery-no-user-20260924`；未合 main。
+- **缺陷修复**：`--emergency-disarm`（以及调用它的 `--emergency-reset`）在恢复 DNS、解除 PF 之前先构造
+  `CoreManager`，它的初始化用 `getpwuid` 解析绑定用户的 home 目录。绑定的 macOS 账户被删除后解析失败，两条文档化
+  恢复命令都只打印“PF remains fail-closed”，reset 也不会移除安装。现在 `CoreManager` 初始化不再查账户，只在
+  start/sync 校验配置目录时解析 home；恢复仍用原有的 pid 文件加进程身份核对停止残留 Core。Helper 协议版本
+  4.9.0 → 4.41.0（临时编号，合并时按顺序重编号），`CONTRACT.sha256` 按构建脚本清单重算。
+- **新增/优化**：无。
+- **工程与测试**：`--core-lifecycle-self-test`（root，CI privileged-tests）新增一段：为一个不存在的 uid 构造
+  `CoreManager` 必须成功，且为它启动 Core 仍被拒绝。先单独推送测试提交让 CI 变红，再推修复。
+- **验证**：本机（编辑机）未编译、未运行 swiftc/xcodebuild；结果以本 PR 的 GitHub-hosted `macos-26` CI 为准
+  （Helper 构建 + `--self-test` + root 自测）。本机只按 `build-core-helper.sh` 的同一清单重算了 `CONTRACT.sha256`。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：未在实机上删除账户验证。绑定用户不存在时 daemon 本身仍无法启动（`SocketServer` 需要该用户的组），
+  App 侧也无法修复；本修复只保证文档化的 root 恢复命令可用，`--emergency-reset` 之后重新打开 Tono 会按当前用户重装。
+
 ## 2026-09-24 · Windows 合并列车 train/win-20260924
 
 - **归属/来源**：G1–G3 Windows 修复汇合（各 PR 归属见其自身条目）；基线 origin/main
