@@ -32,6 +32,27 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 目录新鲜度纳入 routingSha256
+
+- **归属/来源**：G1 连接正确性（住宅出口授权回收与凭据轮换）；影响 Windows tono-core 目录追踪与
+  App 目录同步。分支 `fix/win-catalog-routing-freshness-20260923`，叠在 #316
+  （`fix/win-catalog-account-20260923`）之上；Issue #321；提交时未合 main。
+- **缺陷修复**：只改 routing 的变更（家宽解绑/改绑、SOCKS5 密码轮换）不动 revision 和 `sha256`，
+  Worker 另发 `routingSha256`，Windows 丢弃该字段，tracker 返回 `Unchanged`，`inner.routing` 与缓存
+  保持旧值。现在 `ExitCatalogResponse` 解析 `routingSha256`，客户端按控制面同一配方本地计算
+  `routing_digest`，下发值存在时必须一致（否则 `InvalidResponse`，与 YAML digest 同级）；tracker 以
+  (revision, sha256, routing digest) 为键，routing 变化即安装并写缓存；重启用 `from_cached` 连同
+  routing digest 播种。对齐 macOS `catalogRoutingToken`。
+- **新增/优化**：无。
+- **工程与测试**：新增一个回归 `routing_only_rotation_replaces_routing_at_same_revision`
+  （`catalog_sync.rs`），使用控制面配方算出的 `routingSha256` 值；旧代码上编译失败（字段与
+  `from_cached` 不存在），行为层面对应旧实现返回 `installed == false`。
+- **验证**：本机未运行 cargo；委托本 PR 的 GitHub-hosted `windows-2025` CI，结果以 PR 页为准。
+  `routingSha256` 期望值由本机 Node 按 `catalog.ts` 配方计算。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：已连接会话不因 routing 变化自动重载运行时（与既有 revision 更新一致，下次连接/重连
+  生效；macOS 会重载）。未做实机验证。
+
 ## 2026-09-23 · Windows 登出丢弃账户目录，同 revision 新正文不再判篡改
 
 - **归属/来源**：G1 连接正确性（账户隔离）；影响 Windows tono-core 目录追踪与 Windows App
