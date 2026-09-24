@@ -32,6 +32,33 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 更新恢复任务按系统目录启动 schtasks
+
+- **归属/来源**：G3 原生升级链；Windows Service 更新协调器（`core/update.rs`、
+  `core/update/security.rs`）。内部审查 X3-2，Issue #469。基线 main bb2ed4e4 → 分支
+  `fix/update-recovery-sysdir-20260923`；提交时未合 main。
+- **缺陷修复**：`register_consumed_recovery` 用写死的 `C:\Windows\System32\schtasks.exe`
+  注册 ONSTART 恢复任务。Windows 装在其他盘时启动失败：执行器在 consume 后报错，Service 启动的
+  `reconcile_before_desired` 与 `--update-recover` 也都先卡在这一步，尝试停在 Consumed，
+  `RolledBack`/`Replaced` 都到不了，更新一直 pending。现在用 `GetSystemDirectoryW` 取系统目录
+  （新增 `security::system_directory()`，不写死盘符，也不读可继承的环境变量），命令构造抽成
+  `recovery_task_registration(system_directory, attempt_dir)`，参数不变。保护不放宽。
+- **新增/优化**：无。同类排查：`apps/windows` 特权代码里没有其他写死 `C:\Windows` /
+  `C:\Program Files` 的路径（其余为测试夹具；Program Files 已用 `SHGetKnownFolderPath`，
+  NSIS 用 `$WINDIR`/`$PROGRAMFILES64`）。
+- **工程与测试**：`windows-sys` 增加 `Win32_System_SystemInformation` feature（不改 Cargo.lock）。
+  新增一个 `#[test]`
+  `core::update::tests::update_recovery_registration_uses_the_os_system_directory`：真实
+  API 返回的目录里有 `schtasks.exe`；系统目录为 `D:\Windows\System32` 时命令程序必须是
+  `D:\Windows\System32\schtasks.exe`。旧代码无论系统目录都用 `C:\...`，该断言失败。
+- **验证**：本机为编辑机，未运行 cargo；只对改动文件跑了 `rustfmt --check`。Windows 编译与
+  该测试委托本 PR 的 GitHub-hosted `windows-2025` CI（"Test native update admission and
+  independent executor" 步骤），结果以 PR 页为准。未在系统盘非 C: 的实机上验证。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：Task Scheduler 本身不可用（服务停止等）时，注册仍失败，恢复仍会停在
+  Consumed；这是恢复注册顺序的设计问题，本 PR 不改。App 侧自启动 `utils/schtasks.rs` 仍按
+  `%SystemRoot%` 取路径（用户权限进程，非特权路径，未改）。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3

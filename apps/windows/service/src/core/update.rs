@@ -565,32 +565,39 @@ fn status(store: &Store) -> Result<UpdateStatus> {
 /// behind durable consumption. Startup uses this same boundary after reopen.
 pub fn register_consumed_recovery(store: &Store) -> Result<()> {
     register_recovery_with(store, |dir| {
-        let command = format!(
-            "\"{}\" --update-recover",
-            dir.join("executor.exe").display()
-        );
-        let result = std::process::Command::new("C:\\Windows\\System32\\schtasks.exe")
-            .args([
-                "/Create",
-                "/TN",
-                "Tono Update Recovery v1",
-                "/SC",
-                "ONSTART",
-                "/RU",
-                "SYSTEM",
-                "/RL",
-                "HIGHEST",
-                "/TR",
-                &command,
-                "/F",
-            ])
-            .output()?;
+        let result = recovery_task_registration(&security::system_directory()?, dir).output()?;
         ensure!(
             result.status.success(),
             "could not register independent SYSTEM recovery executor"
         );
         Ok(())
     })
+}
+
+/// `schtasks.exe` comes from the OS-reported system directory, not a fixed
+/// `C:\Windows`, so a Windows installed on another volume can still register
+/// the recovery of a consumed attempt.
+fn recovery_task_registration(system_directory: &Path, dir: &Path) -> std::process::Command {
+    let command = format!(
+        "\"{}\" --update-recover",
+        dir.join("executor.exe").display()
+    );
+    let mut registration = std::process::Command::new(system_directory.join("schtasks.exe"));
+    registration.args([
+        "/Create",
+        "/TN",
+        "Tono Update Recovery v1",
+        "/SC",
+        "ONSTART",
+        "/RU",
+        "SYSTEM",
+        "/RL",
+        "HIGHEST",
+        "/TR",
+        &command,
+        "/F",
+    ]);
+    registration
 }
 
 fn register_recovery_with(store: &Store, register: impl FnOnce(&Path) -> Result<()>) -> Result<()> {
@@ -816,6 +823,23 @@ mod tests {
         assert_eq!(std::fs::read(task).unwrap(), b"reconciled");
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_recovery_registration_uses_the_os_system_directory() {
+        // The OS reports the real directory, and it holds the scheduler CLI.
+        let system = security::system_directory().unwrap();
+        assert!(system.join("schtasks.exe").is_file());
+        // Windows on another volume: the scheduler comes from that directory,
+        // never a fixed C:\Windows.
+        let registration = recovery_task_registration(
+            Path::new(r"D:\Windows\System32"),
+            Path::new(r"D:\ProgramData\Tono\updates-v1\attempt"),
+        );
+        assert_eq!(
+            Path::new(registration.get_program()),
+            Path::new(r"D:\Windows\System32\schtasks.exe")
+        );
     }
 
     #[test]
