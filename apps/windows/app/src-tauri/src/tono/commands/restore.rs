@@ -133,10 +133,105 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
     // "there is no barrier" everywhere below.
     let protection = probe_stored_protection(restore_deadline).await;
 
+    let release_app = app.clone();
+    let emit_app = app.clone();
+    let Some(info) = restore_account_with(
+        &state, generation, &protection, restore_deadline,
+        |client| async move { client.me().await },
+        move |state| async move { connection::release_for_account(&state, &release_app).await },
+        |client| async move { client.logout().await.map_err(|error| error.to_string()) },
+        move |inner| emit_status(&emit_app, &status_of(inner)),
+    )
+    .await
+    else {
+        return;
+    };
+    if !info.suspended {
+        match tokio::time::timeout_at(
+            restore_deadline,
+            catalog_sync::sync_with_retries_for_auth_generation(&state, &app, generation),
+        )
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => logging!(warn, Type::Service, "Tono: 会话恢复后的目录同步失败: {err}"),
+            Err(_) => logging!(
+                warn,
+                Type::Service,
+                "Tono: 会话恢复目录同步达到 {RESTORE_TRANSACTION_TIMEOUT:?} 总预算；继续使用已验证缓存"
+            ),
+        }
+        if state.lock().await.sign_in_generation != generation {
+            return;
+        }
+        match tokio::time::timeout_at(
+            restore_deadline,
+            crate::tono::policy_sync::sync_with_retries_for_auth_generation(&state, &app, generation),
+        )
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => logging!(warn, Type::Service, "Tono: 会话恢复后的策略同步失败: {err}"),
+            Err(_) => logging!(
+                warn,
+                Type::Service,
+                "Tono: 会话恢复策略同步达到 {RESTORE_TRANSACTION_TIMEOUT:?} 总预算；继续使用已验证缓存"
+            ),
+        }
+        if state.lock().await.sign_in_generation != generation {
+            return;
+        }
+        catalog_sync::spawn_periodic_for_auth_generation(&state, &app, generation).await;
+        // A repair/restart deliberately preserves active intent, but this process no
+        // longer has the old session token or controller secret. Re-prove the live
+        // current-owner runtime, then schedule the ordinary fully verified replacement;
+        // the restore task does not await that potentially long connection transaction.
+        match update_recovery {
+            Ok(Some(tono_service_protocol::update_contract::Protection::Connected)) => {
+                let state = state.clone();
+                let app = app.clone();
+                AsyncHandler::spawn(move || async move {
+                    if let Err(error) = connection::connect(state, app).await {
+                        logging!(warn, Type::Service, "Update recovery remains incomplete: {error}");
+                    }
+                });
+            }
+            Ok(None) => connection::schedule_startup_resume_if_proven(&state, &app, generation).await,
+            // An offline obligation must stay offline. Failed adoption
+            // cannot grant reconnect by falling through legacy restore.
+            _ => {}
+        }
+        crate::tono::telemetry::spawn_periodic_for_auth_generation(&state, &app, generation)
+            .await;
+        crate::tono::log_upload::spawn_periodic_for_auth_generation(
+            &state, &app, generation,
+        )
+        .await;
+    }
+}
+
+/// Restore from the protection probe to the committed account state: the token probe, `me()`
+/// inside the restore budget, and the dispatch of its result. Returns the restored account when
+/// restore goes on to sync it. Only system I/O is injected: `me()`, the ordered barrier release,
+/// the server logout and the UI emit.
+#[allow(clippy::too_many_arguments, reason = "restore's system I/O is injected one boundary at a time")]
+async fn restore_account_with<M, MF, R, RF, L, LF, E>(
+    state: &Arc<TonoState>, generation: u64, protection: &StoredProtection,
+    deadline: tokio::time::Instant, fetch_me: M, release: R, logout: L, emit: E,
+) -> Option<TonoAccountInfo>
+where
+    M: FnOnce(Arc<crate::tono::state::TonoApiClient>) -> MF,
+    MF: std::future::Future<Output = Result<tono_core::auth::MeResponse, ApiError>>,
+    R: FnOnce(Arc<TonoState>) -> RF + Send + 'static,
+    RF: std::future::Future<Output = Result<(), String>> + Send + 'static,
+    L: FnOnce(Arc<crate::tono::state::TonoApiClient>) -> LF + Send + 'static,
+    LF: std::future::Future<Output = Result<(), String>> + Send + 'static,
+    E: Fn(&TonoInner) + Send + Sync + 'static,
+{
     let (client, probe) = {
         let inner = state.lock().await;
         if inner.sign_in_generation != generation {
-            return;
+            return None;
         }
         let refresh = inner.credentials.refresh_token().ok().flatten();
         let probe = token_probe(inner.credential_error.as_ref(), refresh.as_ref());
@@ -149,14 +244,14 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
         TokenProbe::StoreError => {
             let mut inner = state.lock().await;
             if inner.sign_in_generation != generation {
-                return;
+                return None;
             }
-            apply_stored_protection(&mut inner, &protection);
+            apply_stored_protection(&mut inner, protection);
             let detail = inner
                 .credential_error
                 .clone()
                 .unwrap_or_else(|| "unknown credential error".to_string());
-            inner.account_state = match &protection {
+            inner.account_state = match protection {
                 // Two unknowns at once (a slow vault and a Service that is not up yet) is the
                 // common boot case; report both rather than only the one we noticed first.
                 StoredProtection::Unknown(reason) => AccountState::Error(format!(
@@ -165,11 +260,11 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
                 )),
                 _ => AccountState::Error(format!("credential store unreadable: {detail}")),
             };
-            emit_status(&app, &status_of(&inner));
-            return;
+            emit(&inner);
+            return None;
         }
         TokenProbe::NoToken => {
-            if let StoredProtection::Unknown(reason) = &protection {
+            if let StoredProtection::Unknown(reason) = protection {
                 // Never the silent signed-out path. Unknown here was the worst of the lot: it
                 // skipped the release entirely and reported SignedOut over a possibly-live WFP
                 // block, after which Disconnect was a success no-op and Quit exited computing
@@ -177,35 +272,34 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
                 // reachable, and say plainly that we do not know.
                 let mut inner = state.lock().await;
                 if inner.sign_in_generation != generation {
-                    return;
+                    return None;
                 }
-                apply_stored_protection(&mut inner, &protection);
+                apply_stored_protection(&mut inner, protection);
                 inner.account_state = AccountState::Error(unknown_protection_message(reason));
-                emit_status(&app, &status_of(&inner));
-                return;
+                emit(&inner);
+                return None;
             }
             let release_needed = matches!(protection, StoredProtection::Armed(_));
             if release_needed {
                 let mut inner = state.lock().await;
                 if inner.sign_in_generation != generation {
-                    return;
+                    return None;
                 }
-                apply_stored_protection(&mut inner, &protection);
+                apply_stored_protection(&mut inner, protection);
             }
-            let release_app = app.clone();
             if let Err(error) = super::account::close_account_with(
-                state, super::account::AccountCloseReason::Missing { generation },
+                Arc::clone(state), super::account::AccountCloseReason::Missing { generation },
                 move |state| async move {
-                    if release_needed { connection::release_for_account(&state, &release_app).await }
+                    if release_needed { release(state).await }
                     else { Ok(()) }
                 },
-                |client| async move { client.logout().await.map_err(|error| error.to_string()) },
+                logout,
                 |_, _| async {},
-                move |inner| emit_status(&app, &status_of(inner)),
+                emit,
             ).await {
                 logging!(error, Type::Service, "Tono: signed-out recovery incomplete: {error}");
             }
-            return;
+            return None;
         }
         TokenProbe::HasToken => {}
     }
@@ -213,130 +307,64 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
     {
         let mut inner = state.lock().await;
         if inner.sign_in_generation != generation {
-            return;
+            return None;
         }
         inner.account_state = AccountState::Restoring;
-        emit_status(&app, &status_of(&inner));
+        emit(&inner);
     }
 
-    let account_result = match tokio::time::timeout_at(restore_deadline, client.me()).await {
+    let account_result = match tokio::time::timeout_at(deadline, fetch_me(client)).await {
         Ok(result) => result,
         Err(_) => {
             let mut inner = state.lock().await;
             if inner.sign_in_generation != generation {
-                return;
+                return None;
             }
-            apply_stored_protection(&mut inner, &protection);
+            apply_stored_protection(&mut inner, protection);
             inner.account_state =
                 AccountState::Error(format!("session restore exceeded {RESTORE_TRANSACTION_TIMEOUT:?}"));
-            emit_status(&app, &status_of(&inner));
-            return;
+            emit(&inner);
+            return None;
         }
     };
 
     match account_result {
         Ok(me) => {
             let info = account_info_of(&me.user);
-            {
-                let mut inner = state.lock().await;
-                if inner.sign_in_generation != generation {
-                    return;
-                }
-                state.audit().activate_log_upload_owner(&me.user.id);
-                inner.account = Some(me.user);
-                inner.account_state = if info.suspended {
-                    AccountState::Suspended
-                } else {
-                    AccountState::Ready
-                };
-                apply_stored_protection(&mut inner, &protection);
-                emit_status(&app, &status_of(&inner));
+            let mut inner = state.lock().await;
+            if inner.sign_in_generation != generation {
+                return None;
             }
-            if !info.suspended {
-                match tokio::time::timeout_at(
-                    restore_deadline,
-                    catalog_sync::sync_with_retries_for_auth_generation(&state, &app, generation),
-                )
-                .await
-                {
-                    Ok(Ok(())) => {}
-                    Ok(Err(err)) => logging!(warn, Type::Service, "Tono: 会话恢复后的目录同步失败: {err}"),
-                    Err(_) => logging!(
-                        warn,
-                        Type::Service,
-                        "Tono: 会话恢复目录同步达到 {RESTORE_TRANSACTION_TIMEOUT:?} 总预算；继续使用已验证缓存"
-                    ),
-                }
-                if state.lock().await.sign_in_generation != generation {
-                    return;
-                }
-                match tokio::time::timeout_at(
-                    restore_deadline,
-                    crate::tono::policy_sync::sync_with_retries_for_auth_generation(&state, &app, generation),
-                )
-                .await
-                {
-                    Ok(Ok(())) => {}
-                    Ok(Err(err)) => logging!(warn, Type::Service, "Tono: 会话恢复后的策略同步失败: {err}"),
-                    Err(_) => logging!(
-                        warn,
-                        Type::Service,
-                        "Tono: 会话恢复策略同步达到 {RESTORE_TRANSACTION_TIMEOUT:?} 总预算；继续使用已验证缓存"
-                    ),
-                }
-                if state.lock().await.sign_in_generation != generation {
-                    return;
-                }
-                catalog_sync::spawn_periodic_for_auth_generation(&state, &app, generation).await;
-                // A repair/restart deliberately preserves active intent, but this process no
-                // longer has the old session token or controller secret. Re-prove the live
-                // current-owner runtime, then schedule the ordinary fully verified replacement;
-                // the restore task does not await that potentially long connection transaction.
-                match update_recovery {
-                    Ok(Some(tono_service_protocol::update_contract::Protection::Connected)) => {
-                        let state = state.clone();
-                        let app = app.clone();
-                        AsyncHandler::spawn(move || async move {
-                            if let Err(error) = connection::connect(state, app).await {
-                                logging!(warn, Type::Service, "Update recovery remains incomplete: {error}");
-                            }
-                        });
-                    }
-                    Ok(None) => connection::schedule_startup_resume_if_proven(&state, &app, generation).await,
-                    // An offline obligation must stay offline. Failed adoption
-                    // cannot grant reconnect by falling through legacy restore.
-                    _ => {}
-                }
-                crate::tono::telemetry::spawn_periodic_for_auth_generation(&state, &app, generation)
-                    .await;
-                crate::tono::log_upload::spawn_periodic_for_auth_generation(
-                    &state, &app, generation,
-                )
-                .await;
-            }
+            state.audit().activate_log_upload_owner(&me.user.id);
+            inner.account = Some(me.user);
+            inner.account_state = if info.suspended {
+                AccountState::Suspended
+            } else {
+                AccountState::Ready
+            };
+            apply_stored_protection(&mut inner, protection);
+            emit(&inner);
+            Some(info)
         }
         Err(ApiError::Unauthorized) => {
-            let release_app = app.clone();
-            close_dead_restore_with(state, generation,
-                move |state| async move { connection::release_for_account(&state, &release_app).await },
-                |client| async move { client.logout().await.map_err(|error| error.to_string()) },
-                move |inner| emit_status(&app, &status_of(inner)),
-            ).await;
+            close_dead_restore_with(Arc::clone(state), generation, release, logout, emit).await;
+            None
         }
         Err(err) => {
             // Flaky network must never drop protection (§2).
             let mut inner = state.lock().await;
             if inner.sign_in_generation != generation {
-                return;
+                return None;
             }
-            apply_stored_protection(&mut inner, &protection);
-            inner.account_state = match &protection {
+            apply_stored_protection(&mut inner, protection);
+            inner.account_state = match protection {
                 StoredProtection::Unknown(reason) => {
                     AccountState::Error(format!("{err}; {}", unknown_protection_message(reason)))
                 }
                 _ => AccountState::Error(err.to_string()),
             };
-            emit_status(&app, &status_of(&inner));
+            emit(&inner);
+            None
         }
     }
 }
@@ -389,6 +417,71 @@ mod account_close_tests {
             |_| async { panic!("stale restore cannot revoke replacement credentials") }, |_| {},
         ).await;
         assert_eq!(state.lock().await.sign_in_generation, 20);
+    }
+}
+
+#[cfg(test)]
+mod rejected_session_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tono_core::auth::{ApiClient, ApiRequest, ApiResponse, AuthResponse, HttpTransport};
+    use tono_core::credentials::CredentialStore as _;
+
+    /// Answers every request as the Worker answers an ineligible account: 401.
+    struct Rejecting(std::sync::Mutex<Vec<String>>);
+
+    #[async_trait::async_trait]
+    impl HttpTransport for Rejecting {
+        async fn send(&self, request: ApiRequest) -> Result<ApiResponse, ApiError> {
+            self.0.lock().unwrap().push(request.url);
+            Ok(ApiResponse { status: 401, body: br#"{"error":{"message":"Session is no longer active","code":"UNAUTHORIZED"}}"#.to_vec() })
+        }
+    }
+
+    /// H17-O-F2: the Worker answers 401 on `me` and on the refresh behind it for an expired
+    /// plan, a used-up allowance, a disabled account and a revoked device alike. Restore must
+    /// keep the barrier and the stored session, not run the release/logout it holds for the
+    /// no-token path.
+    #[tokio::test]
+    async fn rejected_restore_suspends_and_keeps_protection() {
+        let state = Arc::new(TonoState::for_test());
+        let credentials = Arc::clone(&state.lock().await.credentials);
+        let rejecting = ApiClient::new("https://api.example.test", Rejecting(Default::default()), credentials).unwrap();
+        let auth: AuthResponse = serde_json::from_value(serde_json::json!({
+            "accessToken": "fixture-access", "refreshToken": "persisted-session",
+            "user": { "id": "fixture-owner", "email": "fixture@example.test" },
+        })).unwrap();
+        rejecting.adopt(&auth).await.unwrap();
+        let barrier: KillSwitchStatus = serde_json::from_value(serde_json::json!({
+            "wanted": true, "verified": true, "live": true, "mode": "blocked",
+        })).unwrap();
+        let generation = state.lock().await.sign_in_generation;
+        let (released, logged_out) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+        let (release_seen, logout_seen) = (Arc::clone(&released), Arc::clone(&logged_out));
+
+        let restored = restore_account_with(
+            &state, generation, &StoredProtection::Armed(Box::new(barrier.clone())),
+            tokio::time::Instant::now() + Duration::from_secs(10),
+            |_| rejecting.me(),
+            move |_| async move { release_seen.store(true, Ordering::SeqCst); Ok(()) },
+            move |_| async move { logout_seen.store(true, Ordering::SeqCst); Ok(()) },
+            |_| {},
+        ).await;
+
+        let requests = rejecting.transport().0.lock().unwrap().clone();
+        assert!(matches!(requests.as_slice(), [me, refresh] if me.ends_with("/me") && refresh.ends_with("/auth/refresh")),
+            "{requests:?}");
+        assert!(restored.is_none());
+        assert!(!released.load(Ordering::SeqCst), "a refused session must not release WFP");
+        assert!(!logged_out.load(Ordering::SeqCst), "a refused session must not sign out");
+        let inner = state.lock().await;
+        assert_eq!(inner.account_state, AccountState::Suspended);
+        assert!(inner.fsm.kill_switch_armed());
+        assert!(inner.fsm.status().is_protection_blocked, "Restore internet stays offered");
+        assert_eq!(inner.kill_switch.as_ref(), Some(&barrier));
+        assert!(inner.account_close.is_none());
+        assert_eq!(inner.credentials.refresh_token().unwrap().as_deref(), Some("persisted-session"),
+            "the next launch must re-check this session, not take the no-token release path");
     }
 }
 
