@@ -1,5 +1,6 @@
 use crate::core::handle;
 use crate::process::AsyncHandler;
+use crate::tono::state::{TonoInner, TonoState};
 use crate::utils::connections_stream;
 #[cfg(target_os = "windows")]
 use crate::utils::speed::format_bytes_per_second;
@@ -7,8 +8,10 @@ use crate::utils::speed::format_bytes_per_second;
 use crate::utils::tray_speed;
 use crate::{Type, logging};
 use parking_lot::Mutex;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
+use tauri::Manager as _;
 use tauri::async_runtime::JoinHandle;
 use tono_plugin_core::models::WsConnectionId;
 
@@ -18,6 +21,47 @@ const TRAY_SPEED_RETRY_DELAY: Duration = Duration::from_secs(1);
 const TRAY_SPEED_IDLE_POLL_INTERVAL: Duration = Duration::from_millis(200);
 /// 托盘速率流在此时间内收不到有效数据时，触发重连并降级到 0/0。
 const TRAY_SPEED_STALE_TIMEOUT: Duration = Duration::from_secs(5);
+/// How often an idle speed task looks for a published controller. Reading the product state
+/// costs no I/O and writes no log line, unlike a connect attempt.
+const TRAY_SPEED_CONTROLLER_POLL: Duration = Duration::from_secs(1);
+
+/// Only a connected session publishes an owned Core controller to the plugin; the plugin's
+/// startup named-pipe context is never served. Without one, every `/traffic` attempt fails.
+fn owns_published_controller(inner: &TonoInner) -> bool {
+    inner.fsm.status().is_connected && inner.controller_secret.is_some()
+}
+
+async fn controller_published() -> bool {
+    let Some(state) = handle::Handle::app_handle().try_state::<Arc<TonoState>>() else {
+        return false;
+    };
+    owns_published_controller(&*state.lock().await)
+}
+
+/// Wait for a published controller, then make one connect attempt. `None` means `should_stop`
+/// ended the wait. With no Core the task polls the product state rather than retrying the
+/// socket every second, which wrote a connect log line per attempt (H18-O-F2).
+async fn connect_when_published<T, Published, PublishedFut, Connect, ConnectFut>(
+    mut published: Published,
+    connect: Connect,
+    should_stop: impl Fn() -> bool,
+) -> Option<T>
+where
+    Published: FnMut() -> PublishedFut,
+    PublishedFut: Future<Output = bool>,
+    Connect: FnOnce() -> ConnectFut,
+    ConnectFut: Future<Output = T>,
+{
+    loop {
+        if should_stop() {
+            return None;
+        }
+        if published().await {
+            return Some(connect().await);
+        }
+        tokio::time::sleep(TRAY_SPEED_CONTROLLER_POLL).await;
+    }
+}
 
 /// macOS 托盘速率任务控制器。
 #[derive(Clone)]
@@ -77,7 +121,16 @@ impl TraySpeedController {
                     break;
                 }
 
-                let stream_connect_result = connections_stream::connect_traffic_stream().await;
+                let Some(stream_connect_result) = connect_when_published(
+                    controller_published,
+                    connections_stream::connect_traffic_stream,
+                    || handle::Handle::global().is_exiting() || !Self::has_main_tray(),
+                )
+                .await
+                else {
+                    // The checks at the top of the loop end the task and say why.
+                    continue;
+                };
                 let mut speed_stream = match stream_connect_result {
                     Ok(stream) => stream,
                     Err(err) => {

@@ -32,6 +32,29 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · Windows 托盘速率：无 Core 时不再每秒重连并写 INFO 日志
+
+- **归属/来源**：G2 客户端诊断可用性（App 日志保留）；Windows App `core/tray/speed_task.rs`、
+  `crates/tono-plugin-core/src/mihomo.rs`。内部审查 H18-O-F2，Issue #547。基线 origin/main 8dc79a5b →
+  分支 `fix/win-tray-speed-idle-20260924`，PR #548；提交时未合 main。与 #518（同文件，仅改 tooltip 投影）
+  用 `git merge-tree` 试合无冲突。
+- **缺陷修复**：托盘速率任务默认开启，启动即运行，不看有没有 Core：未连接时插件上下文是产品从不提供的命名管道，
+  断开后仍指向已退役的 HTTP 控制器，每次连接失败后固定睡 1 s 再试；插件在连接前写一行
+  `log::info!("connecting to websocket…")`，默认构建不过滤。空闲时约每秒一行 INFO，按大小轮转的 App 日志几小时内
+  就被冲掉有用记录。现在任务只在本 App 已发布自有控制器（会话 Connected 且持有控制器 secret）时连接，空闲时每秒只读
+  一次产品状态，不连 socket、不写日志；连上后行为不变（失败 1 s 重试、Stale/Closed 重连）。每次 WebSocket 连接的
+  那行日志降为 debug。
+- **新增/优化**：无。
+- **工程与测试**：`speed_task.rs` 新增一个 `#[tokio::test(start_paused = true)]`
+  `speed_stream_waits_for_a_published_controller_before_connecting`：用真实 `TonoState::for_test()` 驱动新的
+  「等控制器再连」步骤，无控制器 10 min 内连接次数必须为 0，发布控制器后一个轮询周期内开始连接。先推只含测试的提交
+  （该步骤尚不存在，编译失败即红）。
+- **验证**：本机为编辑机，未运行原生 cargo；Tauri crate `cargo test` 委托本 PR 的 GitHub-hosted `windows-2025`
+  CI，结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：已连接但 Core 崩溃、FSM 尚未离开 Connected 的窗口内仍按 1 s 重试（日志已是 debug）；实际每行字节数与
+  修复前可保留的日志小时数仍是估算，未实测。
+
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
 - **归属/来源**：G1–G3 审查与修复的可追溯性（工程流程与记录，非产品行为）；审查基线 main
