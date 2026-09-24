@@ -46,6 +46,33 @@ final class PeriodicTelemetryConsentTests: XCTestCase {
         )
     }
 
+    /// Owner decision 2026-09-24: internal candidate builds report classified
+    /// connect failures by default, and an upgrade's snapshot reset must not
+    /// turn that off. Release builds keep the opt-in.
+    func testInternalBuildsKeepClassifiedFailureReportsThroughTheUpgradeReset() {
+        defaults.set(true, forKey: SettingsKey.periodicTelemetryEnabled)
+        defaults.removeObject(forKey: SettingsKey.periodicTelemetryDefaultV2Applied)
+        let snapshot = AccountSession.isPeriodicTelemetryEnabled
+        XCTAssertFalse(snapshot, "the upgrade still resets the snapshot switch")
+        XCTAssertTrue(AccountSession.isInternalBuild(["TonoBuildChannel": "internal"]))
+        XCTAssertFalse(
+            AccountSession.isInternalBuild(["TonoBuildChannel": ""]),
+            "a release build's unset build setting expands to an empty string"
+        )
+        XCTAssertEqual(
+            AccountSession.failureReportScope(internalBuild: true, snapshotOptedIn: snapshot),
+            .classified
+        )
+        XCTAssertNil(
+            AccountSession.failureReportScope(internalBuild: false, snapshotOptedIn: snapshot),
+            "release builds keep today's opt-in"
+        )
+        XCTAssertEqual(
+            AccountSession.failureReportScope(internalBuild: false, snapshotOptedIn: true),
+            .full
+        )
+    }
+
     func testTheSnapshotDoesNotRideOnAnotherConsent() {
         XCTAssertNotEqual(
             SettingsKey.periodicTelemetryEnabled,
