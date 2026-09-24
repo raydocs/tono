@@ -192,7 +192,13 @@ nonisolated enum HelperProtocolVersion {
     ///   and unloads its job, instead of re-arming PF at every boot with no
     ///   app left to release it.
     ///   A 4.42.0 daemon keeps a Mac offline after Tono.app is deleted.
-    static let current = "4.43.0"
+    /// - 4.43.0 → 4.44.0 (merge-train number): `--emergency-reset`
+    ///   (and the start-time release after Tono.app was removed, which shares
+    ///   its removal step) also deletes /var/run/tono-core/service.sock. The
+    ///   socket is owned by the account the helper served, and the app reads
+    ///   that owner to refuse another account by name; a 4.43.0 reset leaves
+    ///   it until reboot.
+    static let current = "4.44.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

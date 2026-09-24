@@ -918,11 +918,14 @@ private func removeHelperInstallation() {
     } catch {
         fputs("Tono emergency reset left its /etc/pf.conf hook in place: \(error)\n", stderr)
     }
+    // The socket goes too: it is still owned by the account this helper
+    // served, and another account's app reads that owner as "bound to them".
     for path in [
         "/Library/LaunchDaemons/com.raydocs.tono.core-helper.plist",
         allowedUIDPath,
         mihomoPath,
         "/Library/PrivilegedHelperTools/tono-core-helper",
+        socketPath,
     ] {
         unlink(path)
     }

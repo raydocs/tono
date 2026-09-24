@@ -722,6 +722,26 @@
         }
       }
     },
+    "Tono's network helper on this Mac is set up for another macOS account. Use Tono from that account.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台 Mac 上 Tono 的网络组件属于另一个 macOS 账户。请在该账户中使用 Tono。"
+          }
+        }
+      }
+    },
+    "Tono's network helper on this Mac is set up for the macOS account “%@” and keeps that account's network protection. Use Tono from that account. To move Tono to this account, an administrator can run sudo /Library/PrivilegedHelperTools/tono-core-helper --emergency-reset in Terminal, then reopen Tono.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台 Mac 上 Tono 的网络组件属于 macOS 账户“%@”，并保持着该账户的网络保护。请在该账户中使用 Tono。如需把 Tono 移到当前账户，请由管理员在“终端”中运行 sudo /Library/PrivilegedHelperTools/tono-core-helper --emergency-reset，然后重新打开 Tono。"
+          }
+        }
+      }
+    },
     "Unknown": {
       "localizations": {
         "zh-Hans": {

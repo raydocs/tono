@@ -32,6 +32,53 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · macOS 第二个账户打开 Tono：按名称拒绝，绝不把 Helper 改绑到自己
+
+- **归属/来源**：G1 连接保护（多账户隔离）；macOS App `HelperManager`。内部审查 H19-O-F3 = H19-G-F2（两个 finder
+  独立发现，阅读确认），Issue [#561](https://github.com/raydocs/tono/issues/561)。基线 origin/main
+  [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b) → 分支 `fix/helper-other-user-20260924`；未合 main。
+  与 #425（启动时自动修复）协调：本改动让“属于别的账户”走独立错误，不进入 #425 的 `connectFailed` 修复分支。
+- **缺陷修复**：Helper 只服务一个 macOS 账户，socket 以 0600 交给该账户。第二个账户连接被权限拒绝，App 只报
+  “The authenticated network helper is unavailable”，Retry 永远重复；一旦走到管理员安装（App 附带的 Helper
+  更新、daemon 未登记，或 #425 那类启动时自动修复），批准后 Helper 被改绑到第二个账户，第一个账户的保护随之
+  失控。现在：
+  - 连接失败时若 socket 属于另一个 uid，报 `HelperIPCError.boundToAnotherUser`，文案点名该账户，说明在该账户中
+    使用 Tono，或由管理员运行 `--emergency-reset` 后再迁移。
+  - `installIfNeeded` 在任何探测、弹窗、重装之前做同样检查并拒绝。
+  - root 安装脚本最前面加守卫：allowed-uid 记录的是另一个仍存在的账户时拒绝并返回账户名，App 显示同一错误。
+    账户已不存在（被删除、迁移遗留）时不阻止安装。
+  **临时产品决定（取更严一侧，待所有者确认）**：App 内任何安装（自动或用户点击）都不改绑另一个现存账户的
+  Helper；迁移只能由管理员显式运行 `--emergency-reset`（会释放原账户的保护）。
+- **新增/优化**：无。
+- **工程与测试**：新增 XCTest `HelperBoundAccountTests.testAnotherAccountsHelperIsRefusedByNameAndNotRebound`：
+  绑定真实 Unix socket，以另一个 uid 调 `connectFailure` 必须得到点名的错误；用临时记录文件以 `/bin/sh`
+  实际执行 root 守卫片段：记录为另一个现存账户时非零退出且能解析出账户名，同账户或不存在的 uid 放行。
+  先推送只含测试与现状行为桩的提交让 CI 变红，再推修复。zh-Hans 文案已加入字符串目录。
+- **验证**：本机（编辑机）未编译、未运行 xcodebuild；以本 PR 的 GitHub-hosted `macos-26` CI（TonoTests，含
+  LocalizationCoverageTests）为准。本机确认 `id -un <uid>` 对存在的 uid 输出用户名、对不存在的 uid 退出 1。
+- **候选/发布**：无新包，仅源码。Helper 源码未改，不需要协议版本号。
+- **剩余限制**：未在实机上用两个账户验证；自动重连循环遇到此错误仍按可重试处理（不再弹管理员框，但会反复
+  快速失败）。daemon 未运行（没有 socket）时只能靠 root 守卫在管理员授权之后拒绝，用户会先看到一次授权框。
+  守卫把“记录中的 uid 能解析为账户”当作账户存在。
+- **2026-09-24 审查跟进**（MA-Codex-4，P2；MA-Codex-6 = MA-GROK-3，P2；MA-Codex-3，P3）：修复——
+  (1) 按提示运行 `--emergency-reset` 后 socket 仍属原账户，第二个账户照样被按原账户名拒绝：`--emergency-reset`
+  现在删除 `/var/run/tono-core/service.sock`；App 在 launchd plist 不存在时忽略 socket；安装脚本在停掉旧 daemon 后
+  删除残留 socket（旧版 Helper 做的 reset 留下的 socket 属于别的 uid，新 daemon 会拒绝替换它）。
+  (2) 连接路径把此错误记成 `HELPER_PROTOCOL_MISMATCH`（“请修复”）并继续自动重试：新增错误码
+  `HELPER_BOUND_TO_ANOTHER_ACCOUNT`，界面显示点名账户的错误原文，`failureRequiresUserAction` 暂停自动重试（取代上文
+  “自动重连循环遇到此错误仍按可重试处理”）。(3) P3：root 守卫移到 Helper 更新锁内的安装片段开头，与
+  `--emergency-reset` 同锁，读取的记录就是随后覆盖的记录。Helper 源码因此改动（取代上文“不需要协议版本号”）：
+  4.9.0 → 4.44.0（临时编号，合并时按顺序重编号），`CONTRACT.sha256` 按构建脚本清单重算。测试：两个 XCTest——
+  `testASocketLeftWithoutTheDaemonIsNotAnotherAccountsHelper`、`testAnotherAccountsHelperIsItsOwnFailureAndWaitsForTheUser`；
+  原测试改为显式传入存在的 plist 路径。验证：本机未运行（不做本机 Swift 编译），以 PR CI 为准。剩余限制：Helper 删除
+  socket 没有自测（reset 接线需要真实安装）；新错误码仅 macOS，Windows 分类与运维台文案未同步；与 #566 同改
+  `main.swift` 的移除列表，后合并者须把 `socketPath` 放进 #566 的 `removeHelperInstallation()`。
+- **2026-09-24 第二轮跟进**（核验方 Codex 指出，Opus 读码确认，P3）：修复——账户 B 首次连接失败后，清理路径
+  （`disconnect(releaseKillSwitch: true)` → 发布前修复探测 → 安装被守卫拒绝）用“需要修复、请批准管理员提示”覆盖了
+  点名账户的提示。现在 `repairHelperForExplicitReleaseIfNeeded` 在 Helper 属于另一个账户时直接抛出
+  `boundToAnotherUser`、不做探测和修复，清理路径保留该错误原文。保护行为不变（释放照旧中止）。测试：无（P3）。
+  验证：本机未运行，以 PR CI 为准。剩余限制：完整清理流程的提示文本没有测试覆盖。
+
 ## 2026-09-24 · macOS 删除 Tono.app 后，Helper 在下次启动时释放保护并移除自身
 
 - **归属/来源**：G1 连接保护（删除 App 后的出口）；macOS `tono-core-helper`。内部审查 H19-O-F1 = H19-G-F1
