@@ -31,7 +31,32 @@
 - 候选/发布：无新包，或标签、包源码、下载入口、SHA-256、签名及发布状态。
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
-## 2026-09-23 · Windows 策略 revision 只认签名内的值（H3-F5 客户端侧）
+
+## 2026-09-24 · Windows 合并列车 train/win-20260924
+
+- **归属/来源**：G1–G3 Windows 修复汇合（各 PR 归属见其自身条目）；基线 origin/main
+  [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b) → 分支 `train/win-20260924`，逐个
+  `--no-ff` 合入 40 个 PR（顺序与 head SHA 见列车 PR 正文）；提交时未合 main。
+- **缺陷修复**：无新增；各修复见对应 PR 条目。
+- **新增/优化**：无。
+- **工程与测试（合并时手工解决的冲突）**：
+  - #359/#361 × #396：按 R4 审查，把 #359 的 `Replaced` 归档分支与 #361 的 RolledBack/Uncertain
+    逐成员 `old_digest` 校验移进 #396 的 `retire_after_release`（组件用注入的 `installed` 读取；
+    #361 现版 `plan_members_at` 返回 `Result<bool>`，按 `ensure!(…?)` 调用）。
+    `UPDATE_PROTOCOL_V1.md` 取 #361 的 Terminal archives 新文字，删掉旧文字的三行碎片（R4 C3），
+    保留 #396 的簿记条目。
+  - #471、#460、#508、#345：相邻新增测试两边保留；#460 的测试 `use` 列表取并集。
+  - #345 × #343：WFP `FILTER_NAMESPACE` 按两 PR 的约定取 v11（`…9e0a…`；#343 为 v10），注释合写；
+    `intent_floor` 同时保留 #345 的 DHCP 出站目的地限制与 #343 的入站默认拒绝。
+  - 本文件两边保留；修正一次合并把 #342 条目标题与正文拆开的问题。
+- **验证**：编辑机（MacBook）未运行 cargo 或原生构建。本机只跑前端与脚本检查：`apps/windows/app`
+  `tsc --noEmit` 通过；`vitest run` 36 个文件 283 项通过；`test:dev-control` 103 项通过；
+  `windows-ci-paths.test.cjs` 12 项、`desktop-update-v1.test.mjs` 4 项通过；`generate-i18n-keys`
+  重新生成无差异；`git diff --check` 通过。Rust 编译与测试以列车 PR 的 GitHub-hosted Windows CI 为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：未合入 #203（draft）、#300（2 条未解决的 review thread）、#305（叠在 #300 上）、
+  #352（PR 正文要求先取得设备 `icacls` 证据），以及在途、新开或 CI 未绿的 PR（见列车 PR 正文）。
+  没有实机验收。
 
 ## 2026-09-23 · Windows 发布 workflow 权限最小化（内部审查 H5-F1）
 
@@ -61,6 +86,8 @@
 - **候选/发布**：无新包，仅源码。
 - **剩余限制**：Tauri 更新签名私钥仍须注入运行构建代码的作业（`tauri build` 内签名）；
   草稿复用逻辑依赖 `gh release` 按 tag 解析草稿。
+
+## 2026-09-23 · Windows 策略 revision 只认签名内的值（H3-F5 客户端侧）
 
 - **归属/来源**：G1 保护不放宽/签名信任边界；影响 Windows tono-core `policy.rs` 与 App
   `policy_sync.rs`。基线 main 49c82dde，分支 `fix/policy-revision-binding-20260923`；
