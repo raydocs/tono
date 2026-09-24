@@ -52,6 +52,12 @@
 - **剩余限制**：不在 `FOLDERID_UserProfiles` 下的配置文件、文件夹重定向到别处的 AppData 不覆盖；各账户 Credential Manager
   中的会话仍按 H11-F3/#412 处理，提权进程不能删他人凭据库；另一账户会话中 Tono 仍在运行时其被占用的文件可能删不掉；
   不改 Tauri 自带的复选框文案；未实机验证。
+- **跟进 2026-09-24（跨厂商审查 WA-OpenAI-1）**：修复：原只对最后一级 `com.raydocs.tono` 不跟随链接，
+  `AppData\Local` 若是指向 `D:\Data` 的联接点，提权删除会删掉 `D:\Data\com.raydocs.tono`。现逐级检查配置文件目录、
+  `AppData`、`AppData\Roaming`、`AppData\Local`：任何一级是符号链接/联接点/其他重解析点或无法读取元数据，就跳过整个
+  配置文件并在返回错误中报告（NSIS 仅记日志）。测试：`delete_app_data_never_walks_through_a_redirected_app_data_folder`
+  （Windows 用 `mklink /J` 建联接点，无需特权）；旧代码会经联接点删掉外部目录，断言失败。验证：未在本机运行；CI 待定。
+  限制：检查与删除之间仍有竞态（配置文件所有者可在检查后改成联接点），未用句柄逐级打开消除；未实机验证。
 
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 

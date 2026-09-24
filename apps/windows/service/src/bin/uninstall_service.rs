@@ -765,7 +765,9 @@ const APP_DATA_DIR_NAME: &str = "com.raydocs.tono";
 /// Remove Tono's app data from every profile under `profiles_root`. The elevated uninstaller
 /// runs as whichever administrator approved it, so its `$APPDATA` is that account's folder,
 /// not the folders of the users who signed in to Tono. Links are removed, never followed: a
-/// profile's own junction cannot point this elevated delete somewhere else.
+/// profile's own junction cannot point this elevated delete somewhere else. That covers every
+/// folder on the way, not only the last one: a profile whose `AppData`, `AppData\Roaming` or
+/// `AppData\Local` is a link or reparse point (or cannot be inspected) is skipped and reported.
 #[cfg(any(windows, test))]
 fn remove_app_data_in_profiles(profiles_root: &std::path::Path) -> Result<(), Error> {
     let mut failures = Vec::new();
@@ -775,12 +777,23 @@ fn remove_app_data_in_profiles(profiles_root: &std::path::Path) -> Result<(), Er
         if !entry.file_type()?.is_dir() {
             continue;
         }
-        for base in ["Roaming", "Local"] {
-            let target = entry
-                .path()
-                .join("AppData")
-                .join(base)
-                .join(APP_DATA_DIR_NAME);
+        let profile = entry.path();
+        let app_data = profile.join("AppData");
+        let bases = ["Roaming", "Local"].map(|base| app_data.join(base));
+        if let Some(redirected) = [&profile, &app_data]
+            .into_iter()
+            .chain(&bases)
+            .find(|component| !is_plain_path_component(component))
+        {
+            failures.push(format!(
+                "{}: skipped, {} is a link or reparse point or could not be inspected",
+                profile.display(),
+                redirected.display()
+            ));
+            continue;
+        }
+        for base in &bases {
+            let target = base.join(APP_DATA_DIR_NAME);
             let removed = match std::fs::symlink_metadata(&target) {
                 Ok(metadata) if metadata.is_file() => std::fs::remove_file(&target),
                 Ok(_) => std::fs::remove_dir_all(&target),
@@ -798,6 +811,27 @@ fn remove_app_data_in_profiles(profiles_root: &std::path::Path) -> Result<(), Er
         failures.join("; ")
     );
     Ok(())
+}
+
+/// Whether the elevated delete may walk through `path`: absent (nothing below it to delete), or
+/// present and neither a symlink, a junction nor any other reparse point. Metadata that cannot
+/// be read is not proof, so it counts as not plain.
+#[cfg(any(windows, test))]
+fn is_plain_path_component(path: &std::path::Path) -> bool {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::MetadataExt as _;
+                use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+                if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                    return false;
+                }
+            }
+            !metadata.file_type().is_symlink()
+        }
+        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+    }
 }
 
 #[cfg(windows)]
@@ -1113,5 +1147,51 @@ mod tests {
             assert!(data(user, "Roaming", "another-app").exists());
         }
         std::fs::remove_dir_all(profiles).unwrap();
+    }
+
+    /// A profile owner can turn `AppData\Local` into a junction to another volume. The elevated
+    /// delete must not follow it: `D:\Data\com.raydocs.tono` is not Tono's app data.
+    #[test]
+    fn delete_app_data_never_walks_through_a_redirected_app_data_folder() {
+        use super::remove_app_data_in_profiles;
+
+        let root = std::env::temp_dir().join(format!(
+            "tono-profiles-link-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let profiles = root.join("Users");
+        let elsewhere = root.join("D-Data");
+        let outside_data = elsewhere.join("com.raydocs.tono");
+        std::fs::create_dir_all(&outside_data).unwrap();
+        std::fs::write(outside_data.join("keep.txt"), b"x").unwrap();
+        let app_data = profiles.join("user").join("AppData");
+        std::fs::create_dir_all(&app_data).unwrap();
+        let local = app_data.join("Local");
+        #[cfg(windows)]
+        assert!(
+            std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(&local)
+                .arg(&elsewhere)
+                .status()
+                .unwrap()
+                .success(),
+            "creating the junction needs no privilege"
+        );
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&elsewhere, &local).unwrap();
+
+        let result = remove_app_data_in_profiles(&profiles);
+
+        assert!(
+            outside_data.join("keep.txt").exists(),
+            "the delete followed the junction out of the profile"
+        );
+        assert!(result.is_err(), "the skipped profile must be reported");
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
