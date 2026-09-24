@@ -38,6 +38,7 @@ import {
   sharedAdministrativeResource,
   type SharedAdminDeps,
 } from '../shared-admin';
+import { onboardEntitlement, pendingProfileWrites } from './onboard-profile';
 import {
   liveQualityNodeNamed,
   nodeHealthFromQuality,
@@ -206,21 +207,9 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
   const notes = b.notes !== undefined ? optionalNotes(b.notes) : undefined;
   const contact = b.contact !== undefined ? optionalNotes(b.contact, 'contact', 200) : undefined;
   const openedAt = b.openedAt !== undefined ? optionalUnix(b.openedAt, 'openedAt') : undefined;
-  // Same rules as PATCH users/{id}. For a customer who has not registered yet
-  // they wait on the allowlist row and are copied at first sign-in, so the
-  // account is never created without the expiry the operator entered.
-  const expiresAt = b.expiresAt;
-  if (
-    expiresAt !== undefined &&
-    expiresAt !== null &&
-    (!Number.isSafeInteger(expiresAt) || expiresAt <= 0)
-  ) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid expiresAt');
-  }
-  if (b.plan !== undefined && b.plan !== null && b.plan !== '' && b.plan !== PRODUCT_CLAUDE) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid plan');
-  }
-  const plan = b.plan === undefined || b.plan === null || b.plan === '' ? null : PRODUCT_CLAUDE;
+  // For a customer who has not registered yet these wait on the allowlist row
+  // and are copied at first sign-in, so the account keeps the operator's expiry.
+  const { expiresAt, plan } = onboardEntitlement(b);
   if (b.accountRef !== undefined && b.accountRef !== null && b.accountRef !== '') {
     accountRefField(b.accountRef);
   }
@@ -271,34 +260,13 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
     ).bind(address, createdAt),
   ];
   if (pendingProfile) {
-    const profile = [
+    allowlistWrites.push(...pendingProfileWrites(e, address, [
       b.wechatId !== undefined, wechatId ?? null,
       b.contact !== undefined, contact ?? null,
       b.notes !== undefined, notes ?? null,
       expiresAt !== undefined, expiresAt ?? null,
       b.plan !== undefined, plan,
-    ];
-    allowlistWrites.push(
-      e.DB.prepare(
-        `UPDATE signup_allowlist SET
-           wechat_id = CASE WHEN ? THEN ? ELSE wechat_id END,
-           contact = CASE WHEN ? THEN ? ELSE contact END,
-           notes = CASE WHEN ? THEN ? ELSE notes END,
-           expires_at = CASE WHEN ? THEN ? ELSE expires_at END,
-           plan = CASE WHEN ? THEN ? ELSE plan END
-         WHERE email = ?`,
-      ).bind(...profile, address),
-      e.DB.prepare(
-        `UPDATE users SET
-           wechat_id = CASE WHEN ? THEN ? ELSE wechat_id END,
-           contact = CASE WHEN ? THEN ? ELSE contact END,
-           notes = CASE WHEN ? THEN ? ELSE notes END,
-           expires_at = CASE WHEN ? THEN ? ELSE expires_at END,
-           plan = CASE WHEN ? THEN ? ELSE plan END,
-           updated_at = ?
-         WHERE email = ?`,
-      ).bind(...profile, createdAt, address),
-    );
+    ], createdAt));
   }
   const written = await e.DB.batch(allowlistWrites);
   const registeredMeanwhile = pendingProfile && Number(written[2]?.meta.changes ?? 0) > 0;

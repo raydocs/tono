@@ -58,7 +58,9 @@
   恰好首次登录，账户会按旧 allowlist 行建成、到期丢失。改为 allowlist 授权、待开通资料和「按邮箱更新已存在的
   用户」同一个 `DB.batch` 提交，后者命中时对该用户 `enforceUser`；同时消除了「授权已提交、资料写入失败」的
   中间态。原 `it` 追加竞态段（测试触发器在 allowlist 插入时建号）：上一版 `a0703722` 源码实跑失败
-  （`expires_at: null`），修复后通过；control-plane 全套 892 用例、typecheck 通过。
+  （`expires_at: null`），修复后通过；control-plane 全套 892 用例、typecheck 通过。CI `ops-contract` 的
+  ops 行数预算（每模块 ≤500 行）因此超限，已把到期/套餐校验与待开通资料语句移到同目录
+  `onboard-profile.ts`（`users.ts` 486 行），`check:budgets`/`check:contract` 本机通过。
 
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
