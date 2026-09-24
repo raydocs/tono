@@ -89,6 +89,17 @@
     915 通过；`npm run typecheck` 通过。未部署，未碰远端 D1，无原生构建。
   - 剩余限制：shared-admin `PUT users/{id}/home-binding` 有自己的一份读后 UPDATE，未改；同一窗口下 0 行后仍会 bump revision、
     写 `home.replace` 审计，再因读回的绑定为空而出错（按代码阅读，未测）。catalog 家宽在该窗口会被重新绑定（与解绑先发生的顺序一致）。
+- **续修（2026-09-24，二轮审查 B-F1-PUT，P2，Codex 复现，同分支）**：
+  - 缺陷修复：上条剩余限制所述的 `PUT users/{id}/home-binding` 已复现：读后 UPDATE 影响 0 行时读回 null，仍 bump revision、写
+    `home.replace` 审计，随后 `publicHomeBinding(null)` 抛错，返回 500。改后：该路由不再自带读后 UPDATE/INSERT，改调已修好的
+    `upsertHomeBinding`（其首行即 `assertHomeExitBindable`，故去掉路由里重复的一次调用），按返回的 `created` 决定 201/200 与
+    `home.assign`/`home.replace`。并发解绑时 socks5 家宽在 bump revision 与审计之前返回 409 `SOCKS5_ROTATION_REQUIRED`，与 onboard 一致。
+  - 测试：`test/ops-api.test.ts` 新增一个 `it`（`PUT users/{id}/home-binding refuses before revision and audit when an unbind lands before its update`，
+    同样包装 D1 在读 `created_at` 后删除绑定）断言 409 `SOCKS5_ROTATION_REQUIRED`、目录 revision 不变、无 `home.*` 审计。
+    修复前在 7ad62239 上红（`expected 500 to be 409`），修复后绿。
+  - 验证：MacBook 本机 worktree：`npx vitest run test/worker.test.ts test/ops-api.test.ts` 231 通过；`npx vitest run` 43 个文件
+    916 通过；`npm run typecheck` 通过。未部署，未碰远端 D1，无原生构建。
+  - 剩余限制：绑定写入与其后的读回、revision、审计仍是分开的语句；绑定成功后若再有并发解绑，读回仍可能为空（窗口更小，未改）。
 
 ## 2026-09-24 · 控制面合并列车 train/cp-20260924
 
