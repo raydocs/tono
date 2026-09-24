@@ -32,6 +32,26 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · 控制面按设备记录客户端版本（X-Tono-Client）
+
+- **归属/来源**：G1–G3 候选验收的现场证据（ops 可见性）；影响控制面 Worker 与 macOS/Windows 请求头。
+  所有者决定 2026-09-24（内部版默认开启分类连接失败遥测）的配套项。基线 origin/main
+  [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b)，分支 `fix/cp-client-version-20260924`，Issue #574，未合 main。
+- **缺陷修复**：无。
+- **新增/优化**：此前登录（邮箱/OIDC verify）、`auth/refresh`、`exit-catalog` 只更新 `last_seen_at`，客户端版本只存在于
+  默认关闭的遥测窗口/失败上报里，D1 无法回答设备跑 0.0.72 还是 0.0.73。现在两端每个控制面请求带
+  `X-Tono-Client: <macos|windows>/<版本>`，Worker 严格解析（仅 macos/windows，版本 ≤40 字符且只含
+  `[0-9A-Za-z.+-]`，其余忽略），在这三处写入 `devices.client_platform` / `client_version`，值不变时不写行。
+  新 migration `0092_device_client_version.sql`（仅加两列 + CHECK；合并时如编号被占按顺序重编号）。
+  不新增账号、网络或自由文本数据；缺头或格式不符保持上次值。
+- **工程与测试**：`index.ts` 行数预算不变（登录函数签名收成一行抵消新增调用）。
+- **验证**：本机 `services/control-plane` `npx vitest run test/worker.test.ts -t "records the client build"`：旧代码红
+  （无列 `no such column: client_platform`；仅加 migration 时读到 `null`），修复后绿；全量 `npx vitest run` 43 文件
+  892 用例通过，`npx tsc --noEmit` 通过。macOS/Windows 请求头改动未在本机编译，以 PR CI 为准。
+- **候选/发布**：无新包，仅源码；未部署 Worker，未对远端 D1 执行 migration。
+- **剩余限制**：运维控制台尚未展示这两列；旧客户端不带头，其设备保持 NULL 直到升级；与 #329（refresh 移入
+  `sessions.ts`）合并时需把 refresh 处的记录调用随之移动。
+
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
 - **归属/来源**：G1–G3 审查与修复的可追溯性（工程流程与记录，非产品行为）；审查基线 main

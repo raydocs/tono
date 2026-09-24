@@ -31,6 +31,10 @@ const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 /// §1 mainland-link timeouts (connect 30 s / total 45 s).
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(45);
+/// Platform and app version on every request, so the control plane can record
+/// which build signs in, refreshes and fetches the catalog even when no
+/// telemetry is sent. Nothing account- or network-specific.
+const CLIENT_HEADER: &str = concat!("windows/", env!("CARGO_PKG_VERSION"));
 
 /// Map a reqwest failure onto the retry-policy classification (§1).
 ///
@@ -257,7 +261,9 @@ impl TonoTransport {
             kind: classify(err),
             message: describe(err),
         };
-        let mut builder = client.request(method_of(request.method), &request.url);
+        let mut builder = client
+            .request(method_of(request.method), &request.url)
+            .header("X-Tono-Client", CLIENT_HEADER);
         if let Some(bearer) = &request.bearer {
             builder = builder.bearer_auth(bearer);
         }

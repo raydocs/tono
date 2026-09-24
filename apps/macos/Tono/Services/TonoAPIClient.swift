@@ -89,6 +89,12 @@ actor TonoAPIClient {
     /// claims are only a client refresh clock because the server still checks
     /// session, user and device state in D1 on every protected request.
     private static let accessTokenRenewalWindow: TimeInterval = 60
+    /// Platform and marketing version on every request, so the control plane
+    /// can record which build signs in, refreshes and fetches the catalog even
+    /// when no telemetry is sent. Nothing account- or network-specific.
+    private static let clientHeader = "macos/" + (
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+    )
     /// A rotated refresh token whose keychain write failed. The server has
     /// already invalidated the previous token, so this value must stay usable
     /// in-memory (and be re-persisted at the next opportunity) or the user is
@@ -638,6 +644,7 @@ actor TonoAPIClient {
         // TLS/timeout failure from China while TCP HTTPS still works.
         request.assumesHTTP3Capable = false
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(Self.clientHeader, forHTTPHeaderField: "X-Tono-Client")
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         if let bearer { request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization") }
         for (field, value) in additionalHeaders {
