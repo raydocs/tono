@@ -32,6 +32,24 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · Windows 最终卸载删除 Service 的 owner 运行时配置
+
+- **归属/来源**：卸载恢复原状/凭据残留（L1、C4）；Windows 卸载助手。叠在 #549 修复分支
+  `fix/win-update-recovery-task-20260924`（`--final-uninstall` 机制）之上；本分支
+  `fix/win-uninstall-runtime-config-20260924`，Issue #560（内部审查 H19-G-F4，跨厂商核实 confirmed）；未合 main。
+- **缺陷修复**：Service 把 App 发来的未脱敏运行时文档（含各出口 `password`/`uuid`）持久化到
+  `ProgramData\Tono\users\<owner>\runtime\config.yaml`，成功卸载（即使先断开并勾选删除数据）从不删除该树。
+  改后：最终卸载（`--final-uninstall`）且结果证明 WFP 已移除时，删除整个 `ProgramData\Tono\users`（各 owner 的
+  desired state、运行时配置、日志）；StillProtected、安装期清理、安装回滚、更新模式都不删。失败按外观残留处理。
+- **新增/优化**：无。
+- **工程与测试**：`uninstall_service.rs` 一个 `#[test]`（`final_uninstall_removes_owner_runtime_config_only_after_proven_removal`）：
+  StillProtected 时 `config.yaml` 保留，Clean 时 `users` 不存在。
+- **验证**：见 PR；红：仅测试提交叠在 #549 修复上，CI 运行时断言失败（旧的最终清理不删 `users`）；绿：Windows CI。
+  MacBook 未编译 Rust。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：须在 #549 之后合入；`ProgramData\Tono` 根下的 `active-owner.json`、`desired-state.json` 等非凭据状态保留；
+  非最终卸载（修复安装、更新）按设计保留运行时配置；未实机验证。
+
 ## 2026-09-24 · Windows 更新恢复任务在提交与最终卸载时退休
 
 - **归属/来源**：G3 原生升级链 + 卸载恢复原状（L1）；Windows Service 更新执行器、卸载助手与 NSIS 卸载段。

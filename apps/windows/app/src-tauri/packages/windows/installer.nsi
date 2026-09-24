@@ -93,7 +93,8 @@ Var VC_RUNTIME_NEEDED
 Var ServiceInstallAttempted
 Var ServiceInstallRetries
 ; `--final-uninstall` only in the Uninstall section outside update mode: the helper then also
-; retires the update recovery task and executors, after WFP removal is proven. Empty elsewhere.
+; retires the update recovery task and executors and removes every owner's Service state (with
+; the runtime config's exit credentials), after WFP removal is proven. Empty elsewhere.
 Var TonoUninstallScope
 
 Name "${PRODUCTNAME}"

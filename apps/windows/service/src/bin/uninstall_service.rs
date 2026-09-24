@@ -690,10 +690,12 @@ const FINAL_UNINSTALL_ARG: &str = "--final-uninstall";
 
 /// A final uninstall also removes what a native update leaves outside the product: the SYSTEM
 /// ONSTART recovery task and the private attempt directories holding its executor copy and
-/// staged payload. None of it protects or unblocks anything, so it follows the uninstall's own
-/// rule: only on an outcome whose precondition is that the WFP filters are gone. The store's
-/// files stay: the manual installer lease is released after this helper returns, and the
-/// consumed high-water is retained evidence. A failure here is cosmetic, like binary removal.
+/// staged payload. It removes every owner's Service state under `users` too: each runtime
+/// `config.yaml` there is the unredacted document the App sent, exit credentials included.
+/// None of it protects or unblocks anything, so it follows the uninstall's own rule: only on
+/// an outcome whose precondition is that the WFP filters are gone. The update store's files
+/// stay: the manual installer lease is released after this helper returns, and the consumed
+/// high-water is retained evidence. A failure here is cosmetic, like binary removal.
 #[cfg(any(windows, test))]
 fn final_uninstall_cleanup(
     outcome: CleanupOutcome,
@@ -705,10 +707,16 @@ fn final_uninstall_cleanup(
     }
     let retired = retire_recovery_task();
     let removed = remove_update_executors(&state_dir.join("updates-v1"));
-    let Some(error) = retired.err().or(removed.err()) else {
+    let owners = match std::fs::remove_dir_all(state_dir.join("users")) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(anyhow::anyhow!(
+            "could not remove owner Service state: {error}"
+        )),
+        _ => Ok(()),
+    };
+    let Some(error) = retired.err().or(removed.err()).or(owners.err()) else {
         return outcome;
     };
-    eprintln!("Native update leftovers could not all be removed: {error:#}");
+    eprintln!("Update or owner Service leftovers could not all be removed: {error:#}");
     match outcome {
         CleanupOutcome::Clean => CleanupOutcome::CosmeticFailure(error),
         other => other,
