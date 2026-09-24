@@ -3,6 +3,7 @@ import Darwin
 import CryptoKit
 import IOKit
 import IOKit.pwr_mgt
+import Security
 
 let helperVersion = HelperProtocolVersion.current
 let socketDirectory = "/var/run/tono-core"
@@ -712,12 +713,30 @@ private func removeHelperInstallation() {
     }
 }
 
-/// Whether a Tono app that can use this helper is still on this Mac: the
-/// registered /Applications/Tono.app, or a renamed copy directly in
-/// /Applications declaring Tono's bundle identifier (the release app runs only
-/// from there). Anything that cannot be read counts as present, so doubt keeps
-/// protection.
-func tonoAppPresent(applicationsDirectory: String = "/Applications") -> Bool {
+/// Whether a Tono app that can use this helper is still on this Mac: a Tono
+/// client process is running (wherever its bundle now is), or a Tono app sits
+/// in /Applications or the bound user's ~/Applications — as Tono.app or as a
+/// renamed copy declaring Tono's bundle identifier. Anything that cannot be
+/// read counts as present, so doubt keeps protection.
+func tonoAppPresent(
+    applicationsDirectory: String = "/Applications",
+    userApplicationsDirectory: String? = boundUserApplicationsDirectory(),
+    clientRunning: () -> Bool = tonoClientProcessRunning
+) -> Bool {
+    if tonoAppIn(applicationsDirectory) { return true }
+    if let userApplicationsDirectory {
+        var metadata = stat()
+        // No ~/Applications folder is no app there; any other failure is doubt.
+        if lstat(userApplicationsDirectory, &metadata) == 0 {
+            if tonoAppIn(userApplicationsDirectory) { return true }
+        } else if errno != ENOENT {
+            return true
+        }
+    }
+    return clientRunning()
+}
+
+private func tonoAppIn(_ applicationsDirectory: String) -> Bool {
     var metadata = stat()
     if lstat("\(applicationsDirectory)/Tono.app", &metadata) == 0 { return true }
     guard errno == ENOENT,
@@ -725,21 +744,62 @@ func tonoAppPresent(applicationsDirectory: String = "/Applications") -> Bool {
     else { return true }
     for entry in entries where entry.hasSuffix(".app") {
         let infoPath = "\(applicationsDirectory)/\(entry)/Contents/Info.plist"
-        // Bounded and regular-file only: this runs as root at every start.
+        // Bounded and regular-file only: this runs as root at every start. A
+        // bundle whose Info.plist is missing or unreadable may be a renamed
+        // Tono mid-copy, so it counts as present too.
         let fd = open(infoPath, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
-        if fd < 0 {
-            if errno == ENOENT || errno == ENOTDIR { continue }
-            return true
-        }
+        if fd < 0 { return true }
         let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
         var info = stat()
         guard fstat(fd, &info) == 0, fileType(info) == mode_t(S_IFREG),
               info.st_size <= 1024 * 1024,
-              let data = try? handle.readToEnd()
+              let data = try? handle.readToEnd(),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil)
+                as? [String: Any]
         else { return true }
-        let plist = try? PropertyListSerialization.propertyList(from: data, format: nil)
-            as? [String: Any]
-        if plist?["CFBundleIdentifier"] as? String == "com.raydocs.tono" { return true }
+        if plist["CFBundleIdentifier"] as? String == "com.raydocs.tono" { return true }
+    }
+    return false
+}
+
+/// The bound user's ~/Applications, or nil when no bound user resolves (no
+/// allowed-uid file, or the account was deleted).
+func boundUserApplicationsDirectory() -> String? {
+    guard let uid = try? readAllowedUID(), let account = getpwuid(uid),
+          let home = account.pointee.pw_dir else { return nil }
+    let path = String(cString: home)
+    return path.hasPrefix("/") ? path + "/Applications" : nil
+}
+
+/// Whether any running process is a Tono client this helper would accept: an
+/// executable at `<bundle>.app/Contents/MacOS/Tono` that satisfies
+/// `TonoPeerAuthorizer.clientRequirementText`. The name filter keeps this to a
+/// few Security lookups; renaming the executable breaks the signature anyway.
+/// A process that cannot be listed or looked up while alive counts as running.
+func tonoClientProcessRunning() -> Bool {
+    var requirement: SecRequirement?
+    guard SecRequirementCreateWithString(
+        TonoPeerAuthorizer.clientRequirementText as CFString, SecCSFlags(rawValue: 0), &requirement
+    ) == errSecSuccess, let requirement else { return true }
+    let capacity = proc_listallpids(nil, 0)
+    guard capacity > 0 else { return true }
+    var pids = [Int32](repeating: 0, count: Int(capacity) + 32)
+    let count = pids.withUnsafeMutableBytes {
+        proc_listallpids($0.baseAddress, Int32($0.count))
+    }
+    guard count > 0 else { return true }
+    var buffer = [CChar](repeating: 0, count: Int(PATH_MAX) * 4)
+    for pid in pids.prefix(Int(count)) where pid > 0 {
+        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0,
+              String(cString: buffer).hasSuffix(".app" + UpdatePackage.appExecutable) else { continue }
+        var code: SecCode?
+        guard SecCodeCopyGuestWithAttributes(
+            nil, [kSecGuestAttributePid: pid] as CFDictionary, SecCSFlags(rawValue: 0), &code
+        ) == errSecSuccess, let code else {
+            if kill(pid, 0) == 0 { return true }
+            continue
+        }
+        if SecCodeCheckValidity(code, SecCSFlags(rawValue: 0), requirement) == errSecSuccess { return true }
     }
     return false
 }
@@ -748,23 +808,29 @@ func tonoAppPresent(applicationsDirectory: String = "/Applications") -> Bool {
 /// Tono.app to the Trash is the only way to remove Tono from a Mac, and it
 /// left this KeepAlive daemon re-arming PF at every boot with no app that could
 /// release it and no instructions outside the deleted app. The barrier stays
-/// while a Tono app can still use it: one is in /Applications, or an unfinished
-/// update attempt may be putting one back. When a start finds neither, release
-/// exactly as `--emergency-reset` does and remove this installation. Only at a
-/// start, never mid-session: an app moved away while the helper runs keeps
-/// protection until the next restart.
+/// while a Tono app can still use it (`tonoAppPresent`: running, or in
+/// /Applications or ~/Applications), or an unfinished update attempt may be
+/// putting one back. When a start finds neither, release exactly as
+/// `--emergency-reset` does and remove this installation. Only at a start,
+/// never mid-session.
 func releaseIfTonoWasRemoved(
     storage suppliedStorage: UpdateStorage? = nil,
     applicationsDirectory: String = "/Applications",
+    userApplicationsDirectory: String? = boundUserApplicationsDirectory(),
+    clientRunning: () -> Bool = tonoClientProcessRunning,
     release: (UpdateStorage) -> Bool = releaseRemovedInstallationLocked
 ) -> Bool {
-    guard !tonoAppPresent(applicationsDirectory: applicationsDirectory) else { return false }
+    guard !tonoAppPresent(applicationsDirectory: applicationsDirectory,
+                          userApplicationsDirectory: userApplicationsDirectory,
+                          clientRunning: clientRunning) else { return false }
     do {
         let storage = try suppliedStorage ?? UpdateStorage()
         return try storage.locked {
             let attempt = try storage.load().attempt
             guard attempt == nil || attempt?.receipt.phase == .committed,
-                  !tonoAppPresent(applicationsDirectory: applicationsDirectory) else { return false }
+                  !tonoAppPresent(applicationsDirectory: applicationsDirectory,
+                                  userApplicationsDirectory: userApplicationsDirectory,
+                                  clientRunning: clientRunning) else { return false }
             return release(storage)
         }
     } catch {

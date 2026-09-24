@@ -145,10 +145,13 @@ nonisolated enum HelperProtocolVersion {
     ///   leaves the hook and both backups behind.
     /// - 4.42.0 → 4.43.0 (provisional, renumber at merge): at every start,
     ///   after executor recovery, the daemon checks whether Tono was removed —
-    ///   no Tono app in /Applications (by the registered name or by bundle
-    ///   identifier) and no unfinished update attempt. Then it performs the
-    ///   `--emergency-reset` release and removal itself and unloads its job,
-    ///   instead of re-arming PF at every boot with no app left to release it.
+    ///   no running Tono client (by the client signing requirement), no Tono
+    ///   app in /Applications or the bound user's ~/Applications (by the
+    ///   registered name or by bundle identifier; a bundle whose Info.plist
+    ///   cannot be read counts as Tono) and no unfinished update attempt.
+    ///   Then it performs the `--emergency-reset` release and removal itself
+    ///   and unloads its job, instead of re-arming PF at every boot with no
+    ///   app left to release it.
     ///   A 4.42.0 daemon keeps a Mac offline after Tono.app is deleted.
     static let current = "4.43.0"
 }

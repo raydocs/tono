@@ -396,19 +396,47 @@ func runUpdateSelfTests() -> Bool {
         try PropertyListSerialization.data(fromPropertyList: ["CFBundleIdentifier": "com.raydocs.tono"],
                                            format: .xml, options: 0)
             .write(to: URL(fileURLWithPath: renamed + "/Info.plist"))
-        try check(!releaseIfTonoWasRemoved(storage: idle, applicationsDirectory: applications, release: release)
+        try check(!releaseIfTonoWasRemoved(storage: idle, applicationsDirectory: applications,
+                                           userApplicationsDirectory: nil, clientRunning: { false }, release: release)
                   && releases == 0, "A renamed Tono app in Applications lost its protection")
         try FileManager.default.removeItem(atPath: applications + "/Tono Beta.app")
         let updating = try UpdateStorage(root: directory + "/updating")
         try reserved(updating, UpdateTransaction(storage: updating, effects: effects()))
-        try check(!releaseIfTonoWasRemoved(storage: updating, applicationsDirectory: applications, release: release)
+        try check(!releaseIfTonoWasRemoved(storage: updating, applicationsDirectory: applications,
+                                           userApplicationsDirectory: nil, clientRunning: { false }, release: release)
                   && releases == 0, "An unfinished update lost its protection while the app was away")
         try check(!releaseIfTonoWasRemoved(storage: idle, applicationsDirectory: directory + "/unreadable",
+                                           userApplicationsDirectory: nil, clientRunning: { false },
                                            release: release) && releases == 0,
                   "An Applications folder that cannot be read counted as no app")
-        try check(releaseIfTonoWasRemoved(storage: idle, applicationsDirectory: applications, release: release)
+        try check(releaseIfTonoWasRemoved(storage: idle, applicationsDirectory: applications,
+                                          userApplicationsDirectory: nil, clientRunning: { false }, release: release)
                   && releases == 1, "A helper whose app was removed kept its installation")
     }
-    print("Update production-bound tests: \(11 - failures.count) passed, \(failures.count) failed; native-device acceptance NOT performed")
+    // The running app moved to ~/Applications and a helper restart released
+    // PF under it; a later launch from there refused to start and reinstall
+    // looped. A running Tono client or Tono.app in the bound user's
+    // ~/Applications keeps the installation (MA-Codex-1).
+    test("helper-start-keeps-protection-for-a-running-or-user-folder-tono") { directory in
+        let applications = directory + "/Applications"
+        let userApplications = directory + "/home/Applications"
+        try FileManager.default.createDirectory(atPath: applications, withIntermediateDirectories: true)
+        var releases = 0
+        let release: (UpdateStorage) -> Bool = { _ in releases += 1; return true }
+        let idle = try UpdateStorage(root: directory + "/idle")
+        try check(!releaseIfTonoWasRemoved(storage: idle, applicationsDirectory: applications,
+                                           userApplicationsDirectory: nil, clientRunning: { true }, release: release)
+                  && releases == 0, "A running Tono client lost its protection at a helper restart")
+        try FileManager.default.createDirectory(atPath: userApplications + "/Tono.app/Contents",
+                                                withIntermediateDirectories: true)
+        try check(!releaseIfTonoWasRemoved(storage: idle, applicationsDirectory: applications,
+                                           userApplicationsDirectory: userApplications, clientRunning: { false },
+                                           release: release) && releases == 0,
+                  "Tono.app in ~/Applications lost its protection")
+        // Hosted runner: no signed Tono client runs, so the real scan must not
+        // fall back to doubt (requirement, pid listing or lookup failure).
+        try check(!tonoClientProcessRunning(), "The Tono process scan found a client on a host without Tono")
+    }
+    print("Update production-bound tests: \(12 - failures.count) passed, \(failures.count) failed; native-device acceptance NOT performed")
     return failures.isEmpty
 }

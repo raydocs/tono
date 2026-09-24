@@ -60,6 +60,16 @@
   DNS/PF 释放与 bootout（复用已有的 `runEmergencyDisarm`）。开发机若只从 DerivedData 运行 App、`/Applications`
   没有 Tono，重启后 Helper 会自行移除，下次打开需重新授权安装。用户替换 App 的同一秒 Helper 恰好重启时，
   会按“已移除”处理。
+- **2026-09-24 审查跟进**（MA-Codex-1 = MA-GROK-1，P2；MA-Codex-2，P3）：修复——原先只看 `/Applications`，
+  把运行中的 App 移到 `~/Applications` 后 Helper 一重启就释放保护并移除自身（取代上文“运行中 App 被移走……要等下次
+  重启”）。现在以下任一都算 Tono 仍在：有进程满足 Helper 的客户端签名要求（`TonoPeerAuthorizer.clientRequirementText`，
+  先按 `*.app/Contents/MacOS/Tono` 路径筛选；存活但查不到签名的也算在）；绑定用户的 `~/Applications` 里有 Tono.app 或
+  改名副本（该目录不存在则跳过，其他读取失败算在）。P3：`.app` 的 Info.plist 缺失、读不出或解析失败一律算 Tono 在。
+  4.43.0 仍未发布，按 b6b8df0d 的先例只改版本说明并重算 `CONTRACT.sha256`，不再升号。测试：`--update-self-test`
+  新增一例（运行中的客户端、`~/Applications/Tono.app` 都不释放；托管 runner 上真实进程扫描必须为 false），原例改为
+  显式注入空的用户目录与“无进程”，保持与宿主无关。验证：本机未运行（不做本机 Swift 编译），以 PR CI 为准。
+  剩余限制：P3 按更严一侧处理，`/Applications` 里任何没有 `Contents/Info.plist` 的 `.app`（例如 Apple 芯片上的
+  iOS 包装 App）都会让 Helper 不再自行移除，只能用 `--emergency-reset`；只看绑定用户的 `~/Applications`。
 
 ## 2026-09-24 · macOS Helper 完整移除时撤回 /etc/pf.conf 挂钩并删除 .tono-backup
 
