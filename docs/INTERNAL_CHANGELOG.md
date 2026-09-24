@@ -32,6 +32,30 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 替换式登录先退役前一账户的运行时并丢弃其目录
+
+- **归属/来源**：G1 连接正确性（账户隔离）；影响 Windows App 登录验证与账户采纳。
+  Issue #491（R4 组合审查 W4）。基线 main bb2ed4e4，叠在在审 #316（登出丢弃账户目录，提供
+  `discard_account_catalog`）与 #410（运行时副本，提供 `remove_legacy_runtime_copy`）之上 →
+  分支 `fix/win-replacement-sign-in-20260923`；提交时三者均未合 main，须在 #316、#410 之后合并。
+- **缺陷修复**：从 Suspended / Error 界面不登出直接用另一邮箱登录时，`adopt_sign_in_response`
+  只替换账户与令牌：前一账户的 `nodes`/`routing`/tracker/`managed-exit-catalog.json`、运行时副本
+  以及仍在运行的 Core 都保留。新账户首次同步失败时 Connect 使用前一账户的出口凭据；前一账户
+  隧道仍在时新账户界面直接显示 Connected。现在 (1) 采纳任何登录前都丢弃账户目录（内存、
+  tracker、缓存文件）并删除运行时副本，首次同步成功前 Connect 没有出口；(2) 验证码校验成功后、
+  采纳前，若前一账户的连接处于 Connected/Connecting/Disconnecting，按登出语义先使连接代失效，
+  再走 DNS → Core → WFP 顺序释放；释放失败则拒绝采纳，保护保持 armed。仅 armed 的
+  Protected Offline（没有运行时）不释放，屏障保持。
+- **新增/优化**：无。
+- **工程与测试**：新增一个回归 `replacement_sign_in_retires_the_previous_account_before_adopting`
+  （`commands/account.rs` lifecycle_tests）；旧代码没有采纳前的退役入口（按构造编译失败），
+  若只去掉目录丢弃则 `inner.nodes.is_empty()` 断言失败，若去掉退役则 `released` 断言失败。
+- **验证**：本机（编辑机）未运行 cargo；委托本 PR 的 GitHub-hosted `windows-2025` CI（app
+  workspace `cargo test --locked`），结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：释放失败时新账户的服务端会话已签发但未采纳（用户需重新获取验证码）。同账户
+  重新登录也会丢弃缓存目录，需要一次成功同步才能连接。未做实机验证。
+
 ## 2026-09-23 · Windows 不再写入含账户出口凭据的运行时副本，登出时删除旧副本
 
 - **归属/来源**：G1 账户隔离；影响 Windows App 连接阶段与账户关闭。内部审查 H11-F1

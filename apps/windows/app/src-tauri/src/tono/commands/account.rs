@@ -238,7 +238,9 @@ pub async fn tono_sign_in_verify(
             auth_error(&err)
         })?;
 
-    let info = adopt_sign_in_response(state.inner(), &client, generation, &challenge_id, &auth,
+    let release_app = app.clone();
+    let info = adopt_replacing_with(state.inner(), &client, generation, &challenge_id, &auth,
+        move |state| async move { connection::release_for_account(&state, &release_app).await },
         |inner| emit_status(&app, &status_of(inner)),
     ).await?;
     state.audit().log(AuditEvent::SignInOk {
@@ -271,7 +273,8 @@ pub async fn tono_sign_in_verify(
 }
 
 /// Account admission and adoption remain shared with the command path; only server/UI I/O
-/// lives outside these boundaries. In particular, a replacement sign-in does not retire Core.
+/// lives outside these boundaries. A replacement sign-in retires the previous account's runtime
+/// in [`adopt_replacing_with`], after the new session is verified, not here.
 pub(crate) async fn begin_sign_in(
     state: &Arc<TonoState>,
 ) -> Result<(Arc<crate::tono::state::TonoApiClient>, String, u64), String> {
@@ -294,6 +297,13 @@ pub(crate) async fn adopt_sign_in_response(
     if inner.sign_in_generation != generation || inner.challenge_id.as_deref() != Some(challenge_id) {
         return Err("sign-in verification was superseded by a newer attempt".to_string());
     }
+    // This sign-in may replace an account that never signed out ("use another email" from the
+    // Suspended or Error screen), or follow a restore that seeded the previous account's cache.
+    // That catalog carries the previous account's client UUIDs and residential SOCKS5
+    // credentials: drop it as sign-out does, so Connect has no exits until this account's own
+    // first sync installs them.
+    catalog_sync::discard_account_catalog(&mut inner);
+    connection::remove_legacy_runtime_copy(&inner.catalog_dir);
     // Keep the Tono state lock through adoption: a resend/sign-out cannot invalidate this
     // generation between the last check and the token write.
     client.adopt(auth).await.map_err(|err| err.to_string())?;
@@ -307,6 +317,41 @@ pub(crate) async fn adopt_sign_in_response(
     inner.account_state = if info.suspended { AccountState::Suspended } else { AccountState::Ready };
     emit(&inner);
     Ok(info)
+}
+
+/// Adopt a verified sign-in that may replace an account which never signed out. A tunnel still
+/// running (or starting, or releasing) the previous account's runtime is retired first with
+/// sign-out semantics: the connection generation is invalidated and `release` runs the ordered
+/// DNS → Core → WFP release. A failed release refuses the adoption and keeps that protection
+/// armed. An idle armed barrier (Protected Offline) has no runtime to retire and stays up.
+pub(crate) async fn adopt_replacing_with<R, RF>(
+    state: &Arc<TonoState>, client: &Arc<crate::tono::state::TonoApiClient>,
+    generation: u64, challenge_id: &str, auth: &tono_core::auth::AuthResponse,
+    release: R, emit: impl FnOnce(&TonoInner),
+) -> Result<TonoAccountInfo, String>
+where
+    R: FnOnce(Arc<TonoState>) -> RF,
+    RF: std::future::Future<Output = Result<(), String>>,
+{
+    let retire = {
+        let mut inner = state.lock().await;
+        if inner.sign_in_generation != generation || inner.challenge_id.as_deref() != Some(challenge_id) {
+            return Err("sign-in verification was superseded by a newer attempt".to_string());
+        }
+        let status = inner.fsm.status();
+        let live = status.is_connected || status.is_connecting || status.is_disconnecting;
+        if live {
+            inner.invalidate_connection(true);
+            inner.cancel_server_tests();
+        }
+        live
+    };
+    if retire {
+        release(Arc::clone(state)).await.map_err(|error| {
+            format!("the previous account's connection was not released, so this sign-in was not adopted: {error}")
+        })?;
+    }
+    adopt_sign_in_response(state, client, generation, challenge_id, auth, emit).await
 }
 
 /// Sign out: bump the connect generation and abort every background task
@@ -675,6 +720,78 @@ mod lifecycle_tests {
         let inner = state.lock().await;
         assert_eq!(inner.account_state, AccountState::SignedOut);
         assert!(!copy.exists(), "the signed-out account's residential credentials must not stay on disk");
+        let _ = std::fs::remove_dir_all(&inner.catalog_dir);
+    }
+
+    #[tokio::test]
+    async fn replacement_sign_in_retires_the_previous_account_before_adopting() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let state = Arc::new(TonoState::for_test());
+        let (cache_path, copy) = {
+            let mut inner = state.lock().await;
+            // Account A was suspended while its tunnel was up; the user signs in as B from the
+            // paused-account screen without signing out.
+            inner.account = Some(serde_json::from_value(serde_json::json!({
+                "id": "account-a", "email": "a@example.test",
+            })).unwrap());
+            inner.account_state = AccountState::Suspended;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            inner.catalog_tracker = tono_core::CatalogTracker::from_installed(7, "account-a".into());
+            inner.nodes = vec![tono_core::node::ValidatedNode {
+                name: "Tokyo · Sakura".into(),
+                server: std::net::Ipv4Addr::new(8, 8, 8, 8),
+                port: 443,
+                uuid: "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d".into(),
+                servername: "www.microsoft.com".into(),
+                flow: None,
+                client_fingerprint: None,
+                reality_public_key: "0123456789abcdef0123456789abcdef0123456789a".into(),
+                reality_short_id: "0123456789abcdef".into(),
+                protocol: tono_core::node::NodeProtocol::VlessReality,
+                tls_fingerprint: None,
+            }];
+            inner.routing = Some(tono_core::CatalogRouting {
+                home_socks5: Some(tono_core::CatalogHomeSocks5 {
+                    host: "203.0.113.9".into(), port: 1080,
+                    username: "account-a".into(), password: "account-a-secret".into(),
+                }),
+                ..Default::default()
+            });
+            let cache_path = inner.catalog_cache().path().to_path_buf();
+            std::fs::create_dir_all(cache_path.parent().unwrap()).unwrap();
+            std::fs::write(&cache_path, b"{}").unwrap();
+            let copy = inner.catalog_dir.join("owned-runtime.redacted.yaml");
+            std::fs::write(&copy, b"proxies:\n- username: account-a\n  password: account-a-secret\n").unwrap();
+            (cache_path, copy)
+        };
+        let (client, _, generation) = begin_sign_in(&state).await.unwrap();
+        state.lock().await.challenge_id = Some("challenge-b".into());
+        let auth: tono_core::auth::AuthResponse = serde_json::from_value(serde_json::json!({
+            "accessToken": "fixture-access-b",
+            "user": { "id": "account-b", "email": "b@example.test" },
+        })).unwrap();
+        let released = Arc::new(AtomicBool::new(false));
+        let release_seen = Arc::clone(&released);
+        adopt_replacing_with(&state, &client, generation, "challenge-b", &auth,
+            move |state| async move {
+                release_seen.store(true, Ordering::SeqCst);
+                state.lock().await.fsm.sign_out_or_quit(); // Service proved the release.
+                Ok(())
+            },
+            |_| {},
+        ).await.unwrap();
+        let inner = state.lock().await;
+        assert!(released.load(Ordering::SeqCst), "A's running Core must be released before B is adopted");
+        assert_eq!(inner.account.as_ref().unwrap().id, "account-b");
+        assert!(!inner.fsm.status().is_connected, "B must not show A's tunnel as its own");
+        assert!(inner.nodes.is_empty(), "B's Connect must not dial A's exits before B's first sync");
+        assert!(inner.routing.is_none(), "A's residential credentials must not reach B");
+        assert_eq!(inner.catalog_tracker.current_revision(), -1);
+        assert!(!cache_path.exists(), "a restart must not reseed A's catalog under B");
+        assert!(!copy.exists(), "A's runtime copy must not outlive the replacement sign-in");
         let _ = std::fs::remove_dir_all(&inner.catalog_dir);
     }
 }
