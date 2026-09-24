@@ -260,7 +260,8 @@
       "title": "网络已被保护拦住",
       "description": "上次连接的防泄漏还在。先恢复网络，再登录。",
       "restore": "恢复网络",
-      "restoring": "正在恢复…"
+      "restoring": "正在恢复…",
+      "unverifiedDescription": "Tono 无法确认上次连接的防泄漏是否还在。先点「恢复网络」，再登录。"
     },
     "errors": {
       "unreachable": "连不上登录服务器。换可用网络（热点，或先开其他翻墙）登录一次即可。",
@@ -298,7 +299,7 @@
     "connected": "已连接",
     "disconnecting": "断开中…",
     "protectedOffline": "保护中，未连上",
-    "protectedOfflineDescription": "已拦住直连，正在换线重试。",
+    "protectedOfflineDescription": "已拦住直连，已安排自动重试。",
     "server": "节点",
     "noServer": "未选择节点",
     "killSwitchMode": "断网保护：{{mode}}",

@@ -260,7 +260,8 @@
       "title": "Internet is blocked",
       "description": "Leak protection from the last session is still on. Restore the network, then sign in.",
       "restore": "Restore network",
-      "restoring": "Restoring…"
+      "restoring": "Restoring…",
+      "unverifiedDescription": "Tono cannot confirm whether leak protection from the last session is still on. Choose Restore network, then sign in."
     },
     "errors": {
       "unreachable": "Can't reach the sign-in server. Use a working network (hotspot, or another VPN) once.",
@@ -298,7 +299,7 @@
     "connected": "Connected",
     "disconnecting": "Disconnecting…",
     "protectedOffline": "Protected, not connected",
-    "protectedOfflineDescription": "Direct traffic is blocked. Switching routes and retrying.",
+    "protectedOfflineDescription": "Direct traffic is blocked. A retry is scheduled.",
     "server": "Node",
     "noServer": "No server selected",
     "killSwitchMode": "Leak protection: {{mode}}",

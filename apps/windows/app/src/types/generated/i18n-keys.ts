@@ -772,6 +772,7 @@ export const translationKeys = [
   'tono.login.networkBlocked.description',
   'tono.login.networkBlocked.restore',
   'tono.login.networkBlocked.restoring',
+  'tono.login.networkBlocked.unverifiedDescription',
   'tono.login.errors.unreachable',
   'tono.login.errors.rateLimited',
   'tono.login.errors.deviceLimit',

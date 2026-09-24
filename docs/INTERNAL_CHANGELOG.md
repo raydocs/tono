@@ -32,6 +32,38 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · Windows 横幅、登录卡与托盘提示只在 Service 确认屏障时说「已拦住」
+
+- **归属/来源**：G2 保护状态真实性；Windows App 前端与托盘。内部审查 H16-O-F1（= H16-C-F5），
+  Issue [#511](https://github.com/raydocs/tono/issues/511)。基线 main 8dc79a5b（2026-09-24 rebase）→ 分支
+  `fix/win-blocked-evidence-20260924`，PR [#513](https://github.com/raydocs/tono/pull/513)；提交时未合 main。
+- **缺陷修复**：b489ea16 已让仪表盘 pill、进度卡、仪表盘提示和托盘面板在
+  `killSwitch.wanted && live` 不成立时显示「保护状态未确认」，但三个表面仍只看状态机锁存：
+  非仪表盘页的 Protected Offline 横幅（「已拦住直连，正在换线重试」）、登录页「网络已被拦截」卡片、
+  原生托盘提示（「保护已开启，当前未连接」）。启动时 Service 探测不到（`kill_switch = None`）时，
+  这些表面与仪表盘互相矛盾，并声称正在换线重试，而 Windows 从不自动换线，未验证会话也没有排程重试。
+  现在三处都用同一证据规则：无 live 屏障时标题改为「保护状态未确认」并复用
+  `tono.progress.protectionUnknownBody`（托盘新增 `tray.tono.state.protectionUnknown`，仅 en/zh）；
+  横幅只在 `nextRetryAtMs` 存在时说「已安排自动重试」，否则用「连接不可用期间直连已被拦住」，
+  并删去「换线」。卡片可见性、登录输入禁用、恢复网络与重试按钮不变，保护不放松。
+  审查续修（513-O-F1）：登录卡的未确认说明不再复用提到「恢复正常网络」的通用文案，改用新键
+  `tono.login.networkBlocked.unverifiedDescription`（en/zh），点名卡片上的「恢复网络」按钮并说明之后
+  可登录。
+- **新增/优化**：无。
+- **工程与测试**：`ProtectedOfflineBanner.test.tsx` 原 fixture 没有 `killSwitch` 却断言
+  「Protected offline」，固定了缺陷；改为默认带 `wanted/live=true`，并新增一个 `it`：
+  `{uiState:'protectedOffline', killSwitch:null}` 在 `/servers` 必须显示
+  `tono.pill.title.protectionUnknown` 且不得出现 `protectedOfflineDescription`。托盘测试 fixture
+  补新字段 `protection_live`，不新增托盘测试。
+- **验证**：MacBook worktree（node_modules 软链主仓库）：新 `it` 在旧代码上失败（1 failed / 4 passed），
+  修复后 `vitest run` 该文件 5/5 通过；`ProtectedOfflineBanner`、`login`、`tono-auth-guard` 三个文件
+  29/29 通过；`tsc --noEmit` 通过；三个 tsx 文件 eslint 通过。托盘 Rust 改动未在本机编译，
+  以 PR 的 Windows CI（`cargo test --locked`）为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：托盘提示在开启速率显示时仍会被速率文字覆盖，托盘图标也不随状态刷新
+  （H16-O-F2，另一 PR）。其余 11 种托盘语言缺新键时按 rust-i18n 回退到 zh。与在审 #460 同改
+  `login.tsx`，但不在同一行块；合并顺序见 PR 正文。
+
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 
 - **归属/来源**：G1–G3 审查与修复的可追溯性（工程流程与记录，非产品行为）；审查基线 main

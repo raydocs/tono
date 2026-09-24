@@ -81,6 +81,7 @@ tray:
       connecting: 正在连接
       connected: 保护中
       protectedOffline: 保护已开启，当前未连接
+      protectionUnknown: 保护状态未确认
       disconnecting: 正在断开
   ruleMode: 规则模式
   globalMode: 全局模式

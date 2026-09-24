@@ -95,6 +95,7 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | H6-C | Support 页 WebRTC 检查按钮缺少打开其固定页面的权限 | in-PR | [#386](https://github.com/raydocs/tono/issues/386)，[#387](https://github.com/raydocs/tono/pull/387) | 低·已确认 | 功能缺陷，非安全项 |
 | H16-C-F3 | 退出登录发布最终状态后，周期目录同步在解锁后发布的旧 Ready/Connected 快照可以覆盖 tono_status 缓存且不再被纠正 | open | 待开 | 中·推导 | 窗口是解锁与发布之间几条指令，需要 worker 线程被抢占；未复现；与 H17-AUTH-WIN（#515）同改 account.rs，排在其后 |
 | H16-O-F7 | 冷启动恢复把已探测到的屏障状态压到 me() 返回之后才发布，期间托盘 flyout 显示 Standby 并提供 Connect | open | 待开 | 低·已确认 | 核实后收窄：仅初始未保护且持有 refresh token 的冷启动恢复、仅豁免恢复屏的托盘 flyout；Connect 会被账户准入拒绝；排在 #515 之后（restore.rs） |
+| H16-O-F1 | Protected Offline 横幅、登录「网络已被拦截」卡片与托盘提示只凭状态机锁存声称已拦截，未看 Service 的 live 屏障（= H16-C-F5） | in-PR | [#511](https://github.com/raydocs/tono/issues/511)，[#513](https://github.com/raydocs/tono/pull/513) | 高·已确认 | 仪表盘、进度卡、托盘面板已由 b489ea16 修正；托盘提示被速率覆盖、图标不刷新见 H16-O-F2 |
 
 ## 3. DNS（两端）
 

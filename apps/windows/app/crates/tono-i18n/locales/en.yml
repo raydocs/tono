@@ -81,6 +81,7 @@ tray:
       connecting: Connecting
       connected: Protected
       protectedOffline: Protected, not connected
+      protectionUnknown: Protection not verified
       disconnecting: Disconnecting
   ruleMode: Rule Mode
   globalMode: Global Mode

@@ -13,6 +13,7 @@ import {
   tonoSignInVerify,
 } from '@/services/tono'
 import { GlassCard } from '@/tono-ui/GlassCard'
+import { hasLiveProtection } from '@/tono-ui/protection-evidence'
 import { SupportContact } from '@/tono-ui/SupportContact'
 import {
   TONO_COLORS,
@@ -220,11 +221,17 @@ const LoginPage = () => {
         border: `1px solid ${TONO_COLORS.protectedOffline}4D`,
       }}
     >
+      {/* The card and its sign-in gate follow the fail-closed intent; the
+          "still blocked" claim needs the Service's live barrier. */}
       <span style={{ fontSize: 13, fontWeight: 650 }}>
-        {t('tono.login.networkBlocked.title')}
+        {hasLiveProtection(status)
+          ? t('tono.login.networkBlocked.title')
+          : t('tono.pill.title.protectionUnknown')}
       </span>
       <span style={{ fontSize: 12, lineHeight: 1.45, color: text.secondary }}>
-        {t('tono.login.networkBlocked.description')}
+        {hasLiveProtection(status)
+          ? t('tono.login.networkBlocked.description')
+          : t('tono.login.networkBlocked.unverifiedDescription')}
       </span>
       <button
         type="button"

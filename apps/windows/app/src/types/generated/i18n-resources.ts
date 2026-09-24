@@ -1230,6 +1230,7 @@ export interface TranslationResources {
           restore: string
           restoring: string
           title: string
+          unverifiedDescription: string
         }
         resendIn: string
         restartTono: string
