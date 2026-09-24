@@ -99,7 +99,7 @@ describe('Activity connections WebSocket recovery', () => {
     })
     const listener = vi.mocked(live.addListener).mock.calls[0][0]
     const frame = (uploadTotal: number) => ({
-      type: 'Text',
+      type: 'Text' as const,
       data: JSON.stringify({ uploadTotal, downloadTotal: 0, connections: [] }),
     })
 
