@@ -82,6 +82,27 @@ enum RuntimeCleanup {
             shouldResumeProtection = localProtectionIntent
         }
 
+        // An unreachable helper is usually busy or restarting, and its PF
+        // rules stay in the kernel. But after a restart only the helper enables
+        // PF, so a helper launchd never started means this Mac is not protected
+        // at all. Say that instead of a generic repair error.
+        if helperProtectionObservation == .unavailable, localProtectionIntent {
+            let launchState = await PrivilegedRuntimeCoordinator.shared.helperLaunchState()
+            if let notice = HelperManager.unprotectedNotice(for: launchState) {
+                // Nothing the app can run starts a job the user turned off.
+                if launchState == .backgroundDisabled {
+                    throw CoreRuntimeError.startFailed(notice)
+                }
+                do {
+                    try await PrivilegedRuntimeCoordinator.shared.prepareHelper()
+                } catch {
+                    throw CoreRuntimeError.startFailed(
+                        notice + " " + error.localizedDescription
+                    )
+                }
+            }
+        }
+
         if shouldResumeProtection {
             // Remove stale TUN/proxy exceptions and retain the persisted exact
             // control-plane HTTPS addresses before stopping the old core. A

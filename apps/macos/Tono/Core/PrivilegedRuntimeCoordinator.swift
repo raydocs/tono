@@ -51,6 +51,10 @@ actor PrivilegedRuntimeCoordinator {
         HelperManager.daemonRejectsClient()
     }
 
+    func helperLaunchState() -> HelperManager.LaunchState {
+        HelperManager.launchState()
+    }
+
     /// Explicit user-requested release is the one safe place to prompt for a
     /// helper repair. The actor keeps the probe and possible install ordered
     /// before core stop, DNS restoration, and PF disarm.

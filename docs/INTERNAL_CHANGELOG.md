@@ -32,6 +32,33 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS Helper 被关闭或未加载时，App 明确提示“这台 Mac 当前未受保护”
+
+- **归属/来源**：G1 连接保护（重启后保持保护）；macOS App 启动恢复 `RuntimeCleanup`。
+  内部审查 H12-F2 的 App 部分，Issue #423（Helper 部分见 #424）。基线 main bb2ed4e4 →
+  分支 `fix/helper-unloaded-notice-20260923`；提交时未合 main。
+- **缺陷修复**：重启后只有 Helper 会启用 PF。Helper 在“登录项 > 允许在后台”中被关闭，或者
+  launchd 根本没有这个任务时，PF 从开机起就是关闭的。App 这时只报泛化的修复错误（通常要等
+  45 秒安装超时），不说明本机没有防护。现在本地保护意图为真且 Helper 状态不可达时，App 先
+  只读查询后台项状态（`SMAppService.statusForLegacy`）和 `launchctl print`：
+  - 被关闭：立即显示“网络组件已在登录项中关闭，这台 Mac 当前未受保护”，并说明如何打开。
+    App 无法启动用户关闭的任务，所以不做修复尝试。
+  - 未加载：先走一次已有的鉴权安装修复；失败时显示“网络组件没有运行，这台 Mac 当前未受
+    保护”，后接原始错误。
+  Helper 已加载但暂时不响应时，PF 规则仍在内核中，行为不变。
+- **新增/优化**：无。
+- **工程与测试**：新增 XCTest
+  `HelperUnprotectedNoticeTests.testAHelperLaunchdDoesNotRunSaysThisMacIsNotProtected`：被关闭和
+  未加载两种状态都给出“not protected right now”，已加载或状态未知时不给提示。旧代码没有这个
+  判断（无法编译，即失败）。zh-Hans 文案已加入字符串目录。
+- **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests，含 LocalizationCoverageTests），结果以 PR 页为准。本机只确认了普通用户执行
+  `launchctl print system/<label>` 可用（存在为 0，不存在为 113）。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：测试只覆盖状态到提示的映射，没有覆盖 `recoverStaleRuntime` 的分支（该函数
+  没有注入点）。登录项开关对旧式 LaunchDaemon 的确切效果（是否让 `statusForLegacy` 返回
+  `.requiresApproval`，开机是否跳过）需要实机确认。没有改用 `SMAppService.daemon` 注册。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3

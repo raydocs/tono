@@ -5979,6 +5979,26 @@
         }
       }
     },
+    "Tono's network helper is not running, so this Mac is not protected right now. Click Retry and approve the administrator prompt to repair it.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 的网络组件没有运行，这台 Mac 当前未受保护。点按「重试」并在管理员弹窗中确认以修复。"
+          }
+        }
+      }
+    },
+    "Tono's network helper is turned off in System Settings > General > Login Items & Extensions, so this Mac is not protected right now. Turn Tono on under Allow in the Background, then click Retry.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 的网络组件已在「系统设置 > 通用 > 登录项与扩展」中关闭，这台 Mac 当前未受保护。请在「允许在后台」中打开 Tono，然后点按「重试」。"
+          }
+        }
+      }
+    },
     "The installed network helper rejected this copy of Tono.": {
       "localizations": {
         "zh-Hans": {
