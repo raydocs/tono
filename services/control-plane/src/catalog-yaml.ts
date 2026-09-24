@@ -240,6 +240,9 @@ export function filterCatalogYamlForUser(
   const { prefix, items, suffix } = splitManagedCatalogProxies(yaml);
   if (items.length === 0) return yaml;
   const kept = items.filter((item) => {
+    // A home exit whose own name ends in ` · hy2` matches as is; the suffix
+    // is stripped only to find the twin of a restricted base name.
+    if (restrictedHomeNames.has(item.name)) return allowedHomeNames.has(item.name);
     const homeName = catalogBaseName(item.name);
     return !restrictedHomeNames.has(homeName) || allowedHomeNames.has(homeName);
   });

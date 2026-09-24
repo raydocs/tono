@@ -3089,10 +3089,24 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     password: {{TONO_CLIENT_UUID}}
     sni: www.microsoft.com
     fingerprint: e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db
+  - name: "Home Residential B"
+    type: vless
+    server: 9.9.9.9
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+    tls: true
+  - name: "Home Residential B · hy2"
+    type: hysteria2
+    server: 9.9.9.9
+    port: 443
+    password: {{TONO_CLIENT_UUID}}
+    sni: www.microsoft.com
+    fingerprint: e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db
 `;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
     const home = await admin('home-exits', { proxyName: 'Home Residential A', displayName: '家庭 A' });
     expect(home.status).toBe(201);
+    expect((await admin('home-exits', { proxyName: 'Home Residential B · hy2', displayName: '家庭 B' })).status).toBe(201);
     const homeId = ((await home.json()) as any).homeExit.id;
     const owner = await createAccount('retired-home-owner');
     const other = await createAccount('retired-home-other');
@@ -3103,6 +3117,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
     expect(await catalogFor(owner.accessToken)).toContain('Home Residential A · hy2');
     expect(await catalogFor(other.accessToken)).not.toContain('Home Residential A');
+    expect(await catalogFor(other.accessToken)).not.toContain('Home Residential B · hy2');
 
     expect((await admin(`users/${owner.user.id}/home-binding`, undefined, 'DELETE')).status).toBe(204);
     expect((await admin(`home-exits/${homeId}`, { status: 'retired' }, 'PATCH')).status).toBe(200);

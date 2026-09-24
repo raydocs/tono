@@ -31,41 +31,18 @@ UPDATE home_exit_catalog_names
 
 -- Trigger bodies avoid OR IGNORE: an outer UPSERT's conflict policy overrides
 -- it (SQLite), which would abort the operator's home_exits write.
-CREATE TRIGGER home_exit_catalog_names_insert
-AFTER INSERT ON home_exits
-WHEN NEW.kind = 'catalog'
-BEGIN
-  INSERT INTO home_exit_catalog_name_history(proxy_name, recorded_at)
-  SELECT NEW.proxy_name, unixepoch()
-  WHERE NOT EXISTS (
-    SELECT 1 FROM home_exit_catalog_name_history WHERE proxy_name = NEW.proxy_name
-  );
-  UPDATE home_exit_catalog_names
-     SET proxy_names_json = COALESCE((
-           SELECT json_group_array(proxy_name) FROM home_exit_catalog_name_history
-         ), '[]'),
-         updated_at = unixepoch()
-   WHERE singleton_id = 1;
-END;
+--
+-- One statement per trigger, each on one line: remote D1 migration ingestion
+-- cannot parse multiline trigger bodies (see 0015, 0021). The home_exits
+-- triggers only record names; the published set is rebuilt by the triggers on
+-- the history table, so it follows every recorded name and every deliberate
+-- operator removal.
+CREATE TRIGGER home_exit_catalog_names_insert AFTER INSERT ON home_exits WHEN NEW.kind = 'catalog' BEGIN INSERT INTO home_exit_catalog_name_history(proxy_name, recorded_at) SELECT NEW.proxy_name, unixepoch() WHERE NOT EXISTS (SELECT 1 FROM home_exit_catalog_name_history WHERE proxy_name = NEW.proxy_name); END;
 
-CREATE TRIGGER home_exit_catalog_names_update
-AFTER UPDATE OF proxy_name, kind ON home_exits
-WHEN NEW.kind = 'catalog' OR OLD.kind = 'catalog'
-BEGIN
-  INSERT INTO home_exit_catalog_name_history(proxy_name, recorded_at)
-  SELECT OLD.proxy_name, unixepoch()
-  WHERE OLD.kind = 'catalog' AND NOT EXISTS (
-    SELECT 1 FROM home_exit_catalog_name_history WHERE proxy_name = OLD.proxy_name
-  );
-  INSERT INTO home_exit_catalog_name_history(proxy_name, recorded_at)
-  SELECT NEW.proxy_name, unixepoch()
-  WHERE NEW.kind = 'catalog' AND NOT EXISTS (
-    SELECT 1 FROM home_exit_catalog_name_history WHERE proxy_name = NEW.proxy_name
-  );
-  UPDATE home_exit_catalog_names
-     SET proxy_names_json = COALESCE((
-           SELECT json_group_array(proxy_name) FROM home_exit_catalog_name_history
-         ), '[]'),
-         updated_at = unixepoch()
-   WHERE singleton_id = 1;
-END;
+CREATE TRIGGER home_exit_catalog_names_update_old AFTER UPDATE OF proxy_name, kind ON home_exits WHEN OLD.kind = 'catalog' BEGIN INSERT INTO home_exit_catalog_name_history(proxy_name, recorded_at) SELECT OLD.proxy_name, unixepoch() WHERE NOT EXISTS (SELECT 1 FROM home_exit_catalog_name_history WHERE proxy_name = OLD.proxy_name); END;
+
+CREATE TRIGGER home_exit_catalog_names_update_new AFTER UPDATE OF proxy_name, kind ON home_exits WHEN NEW.kind = 'catalog' BEGIN INSERT INTO home_exit_catalog_name_history(proxy_name, recorded_at) SELECT NEW.proxy_name, unixepoch() WHERE NOT EXISTS (SELECT 1 FROM home_exit_catalog_name_history WHERE proxy_name = NEW.proxy_name); END;
+
+CREATE TRIGGER home_exit_catalog_name_history_publish_insert AFTER INSERT ON home_exit_catalog_name_history BEGIN UPDATE home_exit_catalog_names SET proxy_names_json = COALESCE((SELECT json_group_array(proxy_name) FROM home_exit_catalog_name_history), '[]'), updated_at = unixepoch() WHERE singleton_id = 1; END;
+
+CREATE TRIGGER home_exit_catalog_name_history_publish_delete AFTER DELETE ON home_exit_catalog_name_history BEGIN UPDATE home_exit_catalog_names SET proxy_names_json = COALESCE((SELECT json_group_array(proxy_name) FROM home_exit_catalog_name_history), '[]'), updated_at = unixepoch() WHERE singleton_id = 1; END;
