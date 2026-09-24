@@ -654,17 +654,25 @@ final class AccountSessionRequestTests: XCTestCase {
 
     func testBackgroundUploadRefusedSessionSuspendsAndKeepsProtection() async throws {
         var released = false
-        let (account, transport, host, _) = fixture(killSwitchDisarmConsumer: { released = true })
+        let (account, transport, host, requests) = fixture(killSwitchDisarmConsumer: { released = true })
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
         try await adoptTestAccount(account)
         account.periodicTelemetryConsent = { true }
+        let upload = Task { await account.uploadPeriodicTelemetryWindow() }
         // The Worker refuses an expired plan, a used-up allowance, a disabled
         // account and a revoked device alike: 401 on the request and on its
         // token renewal.
+        let window = try await nextRequest(requests)
+        window.respond(status: 401, body: #"{"error":{"code":"UNAUTHORIZED"}}"#)
+        let renewal = try await nextRequest(requests)
+        XCTAssertTrue(renewal.request.url?.path.hasSuffix("/auth/refresh") == true)
+        // Whatever is sent after that refusal meets a transient outage, which
+        // must not undo the refusal already seen.
         HeldAccountProtocol.install(host) { request in
-            request.respond(status: 401, body: #"{"error":{"code":"UNAUTHORIZED"}}"#)
+            request.respond(status: 503, body: #"{"error":{"message":"offline"}}"#)
         }
-        await account.uploadPeriodicTelemetryWindow()
+        renewal.respond(status: 401, body: #"{"error":{"code":"UNAUTHORIZED"}}"#)
+        await upload.value
         XCTAssertFalse(released, "a refused session must not release PF/DNS protection")
         XCTAssertEqual(account.state, .suspended)
         XCTAssertTrue(account.blockedWhileReady)
