@@ -1736,6 +1736,27 @@ final class AppState {
                 nodes: runtimeNodes,
                 digest: digest
             )
+            // /core/sync withheld the reviewed-bundle permit while the Core
+            // restarted without its utun (#608). It returns only through an
+            // arm with the flag once the new tunnel exists.
+            if resolved.requiresAddressFreeDirectPermit {
+                guard await Self.waitForOwnedTunnelInterface() else {
+                    throw KillSwitchService.Error.commandFailed(
+                        "Mihomo did not recreate the owned \(ConfigPipeline.tonoTunInterface) interface."
+                    )
+                }
+                try await PrivilegedRuntimeCoordinator.shared.armKillSwitch(
+                    apiHosts: [],
+                    tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
+                    proxyEndpoints: currentProxyEndpoints(),
+                    sessionDirectEndpoints: resolved.sessionEndpoints,
+                    tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && tonoTransport != nil,
+                    helperPrepared: true,
+                    reviewedBundleDirect: true
+                )
+                guard generation == connectionCoordinator.protectionOperationGeneration,
+                      !Task.isCancelled else { return }
+            }
             let tun = await ProtectedConnectivityVerifier.raceSystemTUNProbes(timeoutSeconds: 8)
             guard generation == connectionCoordinator.protectionOperationGeneration else { return }
             if case .lost = tun {

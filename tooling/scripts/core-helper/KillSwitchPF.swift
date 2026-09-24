@@ -8,6 +8,11 @@ extension KillSwitchManager {
         allowedUID: uid_t
     ) throws -> String {
         let rules = renderRules(state: state, allowedUID: allowedUID)
+        try writeRuleText(rules)
+        return rules
+    }
+
+    static func writeRuleText(_ rules: String) throws {
         try atomicWrite(
             path: killSwitchPFPath,
             data: Data(rules.utf8),
@@ -19,7 +24,6 @@ extension KillSwitchManager {
                 checked.message.isEmpty ? "PF rule validation failed." : checked.message
             )
         }
-        return rules
     }
 
     /// Wired and Wi-Fi interfaces present now (`enN`, which also covers USB
@@ -487,6 +491,48 @@ extension KillSwitchManager {
             hosts.insert(host)
         }
         return hosts.sorted()
+    }
+
+    static let reviewedBundleLabel = "label \"tono-bundle\""
+
+    /// Whether the Core may stop without its utun while the reviewed-bundle
+    /// permit is loaded (#608), judged from the anchor file and the recorded
+    /// baseline. The baseline is never changed here: the next arm is measured
+    /// against the full set, so one that really drops the permit still sees
+    /// it withdrawn and flushes, and the app's arm restoring it once the
+    /// tunnel exists withdraws nothing.
+    enum ReviewedBundleWithholding: Equatable {
+        /// No permit in the baseline (none recorded counts as none), or the
+        /// file is the baseline without it: an earlier withhold completed.
+        case notLoaded
+        /// Load `rules`, the file without the permit. `disposal` is always
+        /// `.keep`: dropping a `from any to any` permit through an arm reduces
+        /// to `.full` in `withdrawnHosts`, a machine-wide flush on every
+        /// reload and policy apply, while this only stops new states for the
+        /// restart. If writing or loading fails, `rollback` (the file as read)
+        /// goes back on disk so file, kernel and baseline agree again and the
+        /// idle loop can retry; the Core must not stop.
+        case withhold(rules: String, disposal: StateDisposal, rollback: String)
+        /// The file is not the ruleset the baseline came from, so the permit
+        /// may be loaded and cannot be taken out safely: the Core must not stop.
+        case unknown
+    }
+
+    static func reviewedBundleWithholding(
+        loaded: String,
+        baseline: Set<String>?
+    ) -> ReviewedBundleWithholding {
+        guard let baseline,
+              baseline.contains(where: { $0.contains(reviewedBundleLabel) }) else { return .notLoaded }
+        let loadedPassRules = passRules(in: loaded)
+        if loadedPassRules == baseline.filter({ !$0.contains(reviewedBundleLabel) }) {
+            return .notLoaded
+        }
+        guard loadedPassRules == baseline else { return .unknown }
+        let rules = loaded.split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.contains(reviewedBundleLabel) }
+            .joined(separator: "\n")
+        return .withhold(rules: rules, disposal: .keep, rollback: loaded)
     }
 
     static func ensureAnchorLoaded(flushStates: Bool) throws {

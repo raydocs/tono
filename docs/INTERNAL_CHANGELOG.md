@@ -32,6 +32,60 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · macOS Core 重启期间撤下 reviewed-bundle PF 放行（不清空状态）
+
+- **归属/来源**：G1 连接保护；`tono-core-helper`（`/core/sync`、空闲监督循环）、macOS `AppState+Proxy`
+  配置重载与 `AppState` 策略应用。#604 审查发现 R604-F1（High，Codex 发现、Opus 源码核实），Issue #608。
+  基线 `fix/issue-586-20260924` 17f2d71d（#604，未合 main）；分支 `fix/issue-608-20260924`；本 PR 叠在
+  #604 上；未合 main。
+- **缺陷修复**：服务器切换、配置重载、策略应用都先以 `utun199` + bundle 标志布防，再调 `/core/sync`；
+  Helper 先停旧 Core 再启动新 Core，utun 随之消失，但不带地址的 `tono-bundle` 放行仍留在锚点里，
+  Core 重启期间（约 1–2 s）root 进程可经物理网卡访问 Web 端口；Core 崩溃时同样如此。现在：
+  `/core/sync` 在新配置通过检查之后、停旧 Core 之前，只把两条 `tono-bundle` 从已加载的锚点撤下，
+  不清空 PF 状态，并递增 `stateGeneration`（在途 arm 会被拒绝）；`lastLoadedPassRules` 仍是原完整集合。
+  放行只能由 App 在隧道存在后带标志重新布防恢复：相对该基线没有撤回，不清空状态；之后真正去掉
+  该放行的 arm 相对基线仍算撤回，照旧全机清空。App：配置重载（非 pins-only）与策略应用在
+  `/core/sync` + reload 之后等 `utun199` 出现，再补一次带标志的布防；pins-only 收敛布防与切换路径的
+  收敛布防原本就带标志（已核对）。Core 崩溃：Helper 空闲循环（每 10 s）发现 Core 未运行时走同一
+  撤下路径。撤下为尽力而为：读取、校验或加载失败时保留原规则（不比原来更松），照常重启 Core，只写 stderr。
+- **新增/优化**：无。
+- **工程与测试**：Helper 协议 4.45.0 → 4.46.0（叠在 #604 的 4.45.0 上；按合并顺序重编号）；
+  CONTRACT 按 `build-core-helper.sh` 同一管道重算为 `42a3e809…`（先对 17f2d71d 复算出记录值
+  `51e335a1…` 以核对管道）。`writeRules` 拆出 `writeRuleText`，行为不变。回归测试一条：`runSelfTests`
+  的 `bundleWithheldForCoreSync`——对带隧道、带标志的规则集，撤下计划只去掉两条 `tono-bundle`、
+  仍保留 `block drop out quick all`、`disposal == .keep`；以计划保留的基线衡量，去掉放行的 arm 为
+  `.full`，恢复放行的 arm 为 `.keep`；基线未知时不撤。17f2d71d 上没有这条撤下路径
+  （`reviewedBundleWithholding` 不存在，自测编译失败）；那里唯一能去掉该放行的是不带标志的 arm，
+  相对同一基线为 `.full`（全机清空），正是 `.keep` 断言排除的结果（按代码推理，未实跑）。
+- **验证**：not run locally per execution-location rule; CI pending（GitHub-hosted `macos-26`：
+  `build-core-helper.sh` 编译后运行 `--self-test`，以及 root 下的 `--self-test` / `--lifecycle-self-test`
+  和 TonoTests）。本机只做了 CONTRACT 哈希的纯文本重算（未编译）。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：未在设备上验证。撤下期间，规则引擎直连的 bundle 流量被 PF 丢弃（fail-closed）：
+  重载/策略路径持续到新 TUN 出现后的补布防，切换路径持续到出口验证之后的收敛布防。已建立的
+  bundle 状态不清空，可持续到对应连接结束（与原来相同，不更松）。Core 崩溃时仍有至多约 10 s 的
+  监督周期窗口（App 侧 TUN 缺失判定约 5–10 s 后也会 fail-closed 拆除）；Core 仍在运行而 utun 消失
+  的情形不覆盖。只有本进程记录了基线且锚点文件与基线一致时才撤下；部分提交后（基线为 nil）不撤。
+- **续记（2026-09-24，#609 审查 R609-F1，Codex High / Grok low，源码推导）**：上文「撤下失败时照常重启 Core」
+  已改。原实现把收窄后的规则写盘、`pfctl -nf` 通过后若 `pfctl -f` 失败，只返回 false：内核仍有放行，
+  `/core/sync` 照样停旧 Core（无隧道窗口照旧），而磁盘上已是收窄文件，与基线不一致，空闲循环再也
+  不会重试，直到下一次 arm。现在：（a）写入或加载失败时把读到的原文件写回，磁盘、内核、基线重新一致，
+  空闲循环可以重试；（b）撤下失败，或锚点文件既不是基线也不是已撤下的版本（放行可能仍在）时，
+  `/core/sync` 在停旧 Core 之前报错返回，旧 Core 和隧道保持运行，App 按现有失败分支 fail-closed 拆除并
+  重连。已撤下的文件识别为完成，照常重启。没选「退回不带放行的完整 arm（全机清空）」：同一个
+  `pfctl -f` 失败时它同样会失败，且会清空全部连接。同一条自测扩展了三项断言：回滚内容等于读到的原文件、
+  已撤下的文件判为无需撤下、不一致的文件判为不可停 Core；`/core/sync` 与失败注入的接线没有测试替身，
+  未覆盖。Helper 版本仍为 4.46.0（未发布），CONTRACT 按同一管道重算为 `d386cfb4…`（先对 214330dc 复算出
+  `42a3e809…`）。仍未本地构建或运行测试。剩余：`/core/sync` 失败后 App 的保留拆除通过 `/core/stop`
+  停 Core，该路径不撤放行，放行在无隧道时保留到空闲循环重试（至多约 10 s）或重连的第一次布防。
+- **续记二（2026-09-24，协调人批准）**：上条剩余项已处理。`/core/stop` 在停 Core 之前也走同一撤下
+  （不清空状态）；尽力而为，失败只写 stderr，照常停 Core，空闲循环重试兜底。撤下失败且原文件也写
+  不回去时（磁盘上的收窄文件会被误判为「已撤下」），清空内存基线（下一次 arm 走全机清空）并置
+  `reviewedBundleFileUnconfirmed`：在下一次成功提交的 arm 之前，任何撤下都报错，`/core/sync` 因此
+  不停旧 Core，`/core/stop` 记录后照停，空闲循环忽略。这两处都是有副作用的 manager/IPC 代码，没有
+  测试替身，自测未扩展。Helper 版本仍为 4.46.0，CONTRACT 按同一管道重算为 `69ea0498…`（先对
+  549f546d 复算出 `d386cfb4…`）。仍未本地构建或运行测试。
+
 ## 2026-09-24 · macOS 连接首次布防不再在 TUN 出现前放行 root Web 端口
 
 - **归属/来源**：G1 连接保护；macOS `AppState+Connect`、`tono-core-helper` PF 规则。内部审查 H21-O-F5
