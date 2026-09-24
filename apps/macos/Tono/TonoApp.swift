@@ -58,6 +58,9 @@ struct TonoApp: App {
             killSwitchDisarmConsumer: {
                 await appState.disconnectAndWait(releaseKillSwitch: true)
             },
+            protectionReleaseConsumer: {
+                await appState.acceptConfirmedProtectionReleaseBeforeSignIn()
+            },
             diagnosticSnapshotConsumer: {
                 CrashReporter.shared.annotatedRemoteDiagnosticSnapshot(
                     appState.compactRemoteDiagnosticSnapshot()

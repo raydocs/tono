@@ -89,6 +89,17 @@
   - 剩余：暂停标志一支、F2、F3 没有单独测试。最后一次当前性检查之后、运行时启动期间到达的
     拒绝不经计数拦截（此时目录已撤下），其结果未逐步验证。本机未运行 xcodebuild/swift，
     交 PR 的 GitHub-hosted `macos-26` CI。
+- **后续（2026-09-24，与 #516 当前设计对齐）**：合入 #516 的 fc33c9eb（N1 修复把
+  `killSwitchStatusObservation` 换为 `protectionReleaseConsumer`，helper 确认释放时经 AppState 清掉
+  `isArmed`）。两边改写的 `retireResumeIntentIfProtectionReleased` 合为一个：resume 意图或 `isArmed`
+  任一为真时询问，返回 helper 的完整回答（`KillSwitchService.StatusObservation`：已释放 / 仍需保护 /
+  拒绝 / 不可达），两个意图都没有时返回 nil。`protectionReleaseConsumer` 与
+  `AppState.acceptConfirmedProtectionReleaseBeforeSignIn` 改为返回该回答而非 Bool：只有在当前保护代际内
+  被 AppState 接受的释放才以"已释放"返回，并清掉 armed 与 resume 意图；被保护操作赶超、或因操作在途
+  而未询问的回答报 `.unavailable`，什么都不清。登录照 #516 使用；"再次检查"用同一回答做 F1，其确认
+  释放现在也清 `isArmed`（原先只放弃 resume 意图）。#535 的两个测试改用新钩子
+  （`protectionReleaseConsumer` 直接返回 `.confirmed(requiresProtectionRecovery: false)` / `.rejected`），
+  #516 的测试不变，未新增测试。本机未构建，以 PR 的 `macos-26` CI 为准。
 
 ## 2026-09-24 · macOS 会话被拒（401）不再释放 PF/DNS 保护
 
@@ -159,6 +170,20 @@
     PR 修复启动时 AppState 的保护真值（H16-O-F5 / H16-C-F1），本条不改。
   - 引导页判断读 `KillSwitchService.isArmed`（非 observable）；在登录页点"恢复网络"后若再
     出现 `.error`，从未看过引导的用户会重新看到引导页（既有行为）。
+- **后续（2026-09-24，PR 审查 N1：Codex 发现，Opus 复核）**：登录前 helper 确认已释放时，原先只放弃
+  resume 意图，`KillSwitchService.isArmed` 仍为 true（root 紧急解除改不了该用户的 defaults，启动 401
+  路径也不设 `isProtectionBlocked`，激活对账不运行），下次睡眠重新 arm PF，唤醒后重连。现在由 AppState
+  新增的 `acceptConfirmedProtectionReleaseBeforeSignIn` 读 helper：未连接/连接中/断开中且保护代际未变时，
+  确认释放才走既有 `acceptConfirmedExternalProtectionRelease`，一并清掉 armed 意图；不可达、拒绝或仍需
+  保护时两个意图都保留。`killSwitchStatusObservation` 换为 `protectionReleaseConsumer`（TonoApp 接到
+  AppState）；上文测试改名 `testSignInKeepsTheArmedAndResumeIntentsUnlessTheHelperConfirmsRelease`，经
+  真实 AppState 与 `refreshKillSwitchStatus` 替身同时断言两个意图。旧代码缺新函数无法编译，未跑红；
+  本机未构建，以 PR 的 `macos-26` CI 为准。
+- **后续（2026-09-24，N1 复核残留：Codex 发现）**：原生更新以 Protected Offline 恢复时 `isArmed` 为 true
+  但 resume 意图为 false；之后启动 401、root 紧急解除、不重启直接登录，检查因只看 resume 意图而跳过，
+  下次睡眠仍按遗留的 `isArmed` 重新 arm。登录前检查现在在 resume 意图或 `isArmed` 任一为真时都运行，
+  仍只有 helper 确认释放才清除。同一测试追加"只有 armed 意图"一段；在 7b95aed4 上该段断言会失败
+  （检查被跳过，`isArmed` 保持 true），系推理，未跑红；本机未构建，以 PR 的 `macos-26` CI 为准。
 
 ## 2026-09-24 · H16/H17 审查轮与仓库清理记录
 

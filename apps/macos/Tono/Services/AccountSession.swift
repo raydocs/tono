@@ -136,12 +136,14 @@ final class AccountSession {
     @ObservationIgnored var authMethodsLoadRevision: UInt64?
     var hasStartedRestore = false
     var shouldResumeProtection = false
-    /// The helper's kill-switch status, read before a sign-in consumes a kept
-    /// resume intent. Replaceable so tests never reach the privileged socket.
-    @ObservationIgnored var killSwitchStatusObservation:
-        () async -> KillSwitchService.StatusObservation = {
-            await PrivilegedRuntimeCoordinator.shared.refreshKillSwitchStatus()
-        }
+    /// Before a sign-in or Check again consumes a kept resume intent: the
+    /// helper's answer. A release (`.confirmed(requiresProtectionRecovery:
+    /// false)`) only when AppState accepted it under its protection
+    /// generation, clearing the armed intent. Replaceable so tests never reach
+    /// the privileged socket; unwired, the helper is unavailable and no intent
+    /// is ever retired.
+    @ObservationIgnored var protectionReleaseConsumer:
+        @MainActor () async -> KillSwitchService.StatusObservation
 
     var deviceLimit: Int { user?.deviceLimit ?? TonoAccountRules.maximumDevices }
     var isAtDeviceLimit: Bool { devices.count >= deviceLimit }
@@ -187,6 +189,8 @@ final class AccountSession {
          cloudFallbackPreferred: @escaping @MainActor () -> Bool = { false },
          cloudFallbackConsumer: @escaping @MainActor (Bool) throws -> Void = { _ in },
          killSwitchDisarmConsumer: @escaping @MainActor () async -> Void,
+         protectionReleaseConsumer: @escaping @MainActor ()
+            async -> KillSwitchService.StatusObservation = { .unavailable },
          diagnosticSnapshotConsumer: @escaping @MainActor () -> TonoDiagnosticSnapshot = {
              TonoDiagnosticSnapshot(
                  appVersion: "unknown", build: "unknown", connected: false,
@@ -259,6 +263,7 @@ final class AccountSession {
         self.cloudFallbackPreferred = cloudFallbackPreferred
         self.cloudFallbackConsumer = cloudFallbackConsumer
         self.killSwitchDisarmConsumer = killSwitchDisarmConsumer
+        self.protectionReleaseConsumer = protectionReleaseConsumer
         self.diagnosticSnapshotConsumer = diagnosticSnapshotConsumer
         self.claudeTrafficResearchConsumer = claudeTrafficResearchConsumer
         self.protectionBlockedConsumer = protectionBlockedConsumer
