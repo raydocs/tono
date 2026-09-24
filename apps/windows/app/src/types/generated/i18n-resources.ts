@@ -1050,6 +1050,7 @@ export interface TranslationResources {
           encryptedDns: string
           nodeUnreachable: string
           protectedHttpsFailed: string
+          protectionHeldByAnotherUser: string
           protectionReleaseFailed: string
           releaseReconciling: string
           sendDiagnostics: string

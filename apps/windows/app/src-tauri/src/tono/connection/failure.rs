@@ -36,6 +36,10 @@ pub const SERVICE_NOT_RUNNING_PREFIX: &str = "TONO_SERVICE_NOT_RUNNING";
 pub const TUN_DATA_PLANE_BROKEN_PREFIX: &str = "TONO_TUN_DATA_PLANE_BROKEN";
 pub const TUN_INGRESS_BROKEN_PREFIX: &str = "TONO_TUN_INGRESS_BROKEN";
 pub const NODE_OR_CORE_UNREACHABLE_PREFIX: &str = "TONO_NODE_OR_CORE_UNREACHABLE";
+/// The Service refused PrepareCoreStart / StartClash with `ProtectionHeldByAnotherUser` (1014):
+/// another local Windows user who is still signed in holds the armed protection. Not a failed
+/// attempt the user can retry; they must wait for that user to disconnect or sign out.
+pub const PROTECTION_HELD_BY_ANOTHER_USER_PREFIX: &str = "TONO_PROTECTION_HELD_BY_ANOTHER_USER";
 
 /// Translate the Service's stable WFP markers into an actionable message. Returns `None` for
 /// every other error so callers keep the original diagnostic text.

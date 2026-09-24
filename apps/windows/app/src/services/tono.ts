@@ -164,6 +164,12 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
     prefix: 'TONO_SERVICE_TOO_OLD',
     key: 'tono.dashboard.errors.serviceTooOld',
   },
+  // Service code 1014: another signed-in Windows user holds the armed protection.
+  // Retrying cannot help, so it must not read as an ordinary failed connect.
+  {
+    prefix: 'TONO_PROTECTION_HELD_BY_ANOTHER_USER',
+    key: 'tono.dashboard.errors.protectionHeldByAnotherUser',
+  },
   {
     prefix: 'TONO_BROWSER_DNS_PREFLIGHT',
     key: 'tono.dashboard.errors.browserDnsPreflight',

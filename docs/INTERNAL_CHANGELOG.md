@@ -728,6 +728,30 @@
   联接）没有在实机确认。`USERPROFILE` 缺失时整段用户 profile 扫描仍被跳过（原有行为，本 PR 未改）。
   没有 BOM 的 GBK/ANSI profile 仍然只报检查失败，不按代码页解码。
 
+## 2026-09-23 · Windows App 为"另一用户正在使用保护"(1014) 给出专门提示（H2-F2 后续）
+
+- **归属/来源**：G1 保护不变量的用户侧提示；Windows App（`apps/windows/app`）。内部审查 H2-F2
+  后续，Issue #481。分支 `fix/protection-held-hint-20260923` **叠在 #354
+  （`fix/wfp-owner-takeover-20260923`，d3535b5b）之上**，依赖其新增的
+  `ServiceErrorCode::ProtectionHeldByAnotherUser`(1014)；须在 #354 之后合并。提交时未合 main。
+- **缺陷修复**：`tono_prepare_core_start` 与 `tono_start_core_with_kill_switch` 把 Service
+  拒绝一律 `bail!(response.message)`，错误码丢失，前端只能显示通用"未知操作失败"。现在两处经
+  `tono_start_refusal` 把 1014 转成稳定标记 `TONO_PROTECTION_HELD_BY_ANOTHER_USER`，前端
+  `STABLE_ERROR_KEYS` 映射到 `tono.dashboard.errors.protectionHeldByAnotherUser`（中英）：
+  "本机另一位用户正在使用 Tono 的保护，需对方断开或注销后才能连接。" 其他拒绝原样保留。
+  Service 端拒绝行为不变，保护不放宽。
+- **新增/优化**：无。
+- **工程与测试**：新增一个 `#[test]`
+  `core::service::tests::protection_held_by_another_user_refusal_carries_its_marker`：1014
+  拒绝必须以该标记开头。旧代码没有这层映射（只返回原消息），断言不成立。i18n 类型文件用
+  `generate-i18n-keys.mjs` 重新生成。
+- **验证**：本机（MacBook）只做前端检查：`tsc --noEmit` 通过，`eslint src/services/tono.ts`
+  通过，`vitest run src/services` 4 个文件 51 项通过；Rust 只跑了 `rustfmt --check`（新增代码无差异），
+  未运行 cargo。App 编译与该测试委托本 PR 的 GitHub-hosted `windows-2025` CI，结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：未在多用户 Windows 11 实机上看到该提示。提示只覆盖连接路径；第二个用户的
+  Restore/Release 被既有 owner 检查拒绝时的提示未改。依赖 #354 先合并。
+
 ## 2026-09-23 · Windows 另一登录用户不得接管已武装的保护（H2-F2）
 
 - **归属**：G1 保护不变量（fail-closed；"不同本地用户不得释放他人保护"）；平台/模块：

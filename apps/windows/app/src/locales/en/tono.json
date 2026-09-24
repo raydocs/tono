@@ -351,6 +351,7 @@
       "wfpEngineWedged": "The Windows firewall engine is not responding, usually because security software is hooking it. Restart the PC; if it persists, quit your antivirus or firewall and retry.",
       "releaseReconciling": "Protection is still releasing. Wait, then connect.",
       "serviceTooOld": "Service is too old. Reinstall from the latest package.",
+      "protectionHeldByAnotherUser": "Another user on this PC is using Tono's protection. They need to disconnect or sign out before you can connect.",
       "browserDnsPreflight": "Claude residential protection cannot connect because Chrome or Edge Secure DNS could not be proven safe. Tono routes all Chrome and Edge profiles together; profile-level routing is unavailable. Set Secure DNS to Off or Automatic without a custom provider, fully restart the browser, then reconnect Tono.",
       "nodeUnreachable": "This node is unreachable. Retry or switch.",
       "tunDataPlaneBroken": "The node answered, but Windows is not carrying the tunnel's traffic. Switching cities will not help — restart the PC and connect again, then send diagnostics to support if it persists.",
