@@ -32,6 +32,38 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS 从未 arm 的连接失败不再走显式释放修复
+
+- **归属/来源**：G1 保护恢复；macOS `AppState+Connect` 连接失败与拆除路径。内部审查 X1-4，
+  Issue #430。基线 main bb2ed4e4 → 分支 `fix/unarmed-connect-failure-20260923`；提交时未合 main。
+- **缺陷修复**：连接在首次 PF arm 之前失败时（例如 helper 准备失败、用户取消管理员提示，
+  或看门狗在 helper 准备阶段触发），失败清理调用 `disconnect(releaseKillSwitch: true)`，
+  释放路径无条件先跑显式释放用的 helper 修复。结果是：马上再弹一次用户没要求的管理员提示；
+  如果这次也失败，界面停在 Protected Offline，并提示 "traffic stays protected"，可本会话
+  从未 arm PF。没有 helper 时，释放路径还会去停一个本次从未启动的 core，停不掉同样发布
+  Protected Offline。现在这两处自动清理带上 `afterUnarmedConnectFailure`：等待中的连接
+  工作收尾后，如果 `KillSwitchService.isArmed` 仍为 false，就跳过显式释放修复，helper 清理
+  步骤只做尽力而为，不发布 Protected Offline，也不用拆除错误覆盖连接失败信息。取消过程中
+  arm 已完成的，仍走完整释放。用户主动 Restore internet 的路径不变。
+- **缺陷修复（审查 R4）**：上一版在该路径无条件 `transitionError = nil`，把真实的 DNS 恢复失败
+  一起吞掉（例如上次崩溃留下 127.0.0.1 与快照、`restoreDNS` 失败时，界面只剩连接失败与
+  Not connected）。现在只去掉与 Kill Switch 相关的拆除文案；DNS 恢复失败换成不提 Kill Switch
+  的提示保留（"may be unable to resolve names"，指向 Support 页恢复命令）。
+- **新增/优化**：无。
+- **工程与测试**：新增 `UnarmedConnectFailureTests.testUnarmedConnectFailureDoesNotRunExplicitReleaseRepair`
+  （一个 XCTest），沿用已有 `NetworkProtectionOperations` seam 和"缺 uuid 的目录节点在
+  helper 之前失败"的写法，修复桩计数并抛 `userDenied`。旧代码修复被调用一次，且
+  `isProtectionBlocked == true`，断言失败。审查后同一测试改为预置 `didStartCore`、让
+  `restoreDNS` 抛错，并断言 `errorMessage` 以 "Protected DNS restore failed" 开头且不提
+  Kill Switch；上一版（`transitionError = nil`）下 `errorMessage` 是连接失败文案，该断言失败
+  （推理得出，未实跑）。
+- **验证**：本机（编辑机）未运行 xcodebuild；委托本 PR 的 GitHub-hosted `macos-26` CI
+  （TonoTests），结果以 PR 页为准。第二次管理员提示的实际弹出未做实机复现。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：本修复把"失败时 `isArmed` 为 false"视为"从未 arm"。首次 arm 回执丢失且
+  状态补查也失败时，`isArmed` 目前也是 false（X1-7，另一个 PR 修为按可能已 arm 处理），
+  两者都合入后这一判定才可靠。
+
 ## 2026-09-23 · macOS 首次 arm 结果未知时保持 fail-closed 意图
 
 - **归属/来源**：G1 保护恢复；macOS `KillSwitchService.arm`。内部审查 X1-7（降级：需三个条件

@@ -114,7 +114,10 @@ extension AppState {
                     self.scheduleProtectedReconnect()
                 } else {
                     self.errorMessage = stalledMessage
-                    self.disconnect(releaseKillSwitch: true)
+                    self.disconnect(
+                        releaseKillSwitch: true,
+                        afterUnarmedConnectFailure: true
+                    )
                 }
             },
             perform: { [weak self, coreRuntime] attemptID, generation in
@@ -600,7 +603,10 @@ extension AppState {
                         self.errorMessage = failureMessage
                         let preservedFailure = self.lastConnectionFailure
                         let preservedStages = self.completedConnectionStages
-                        self.disconnect(releaseKillSwitch: true)
+                        self.disconnect(
+                            releaseKillSwitch: true,
+                            afterUnarmedConnectFailure: true
+                        )
                         self.lastConnectionFailure = preservedFailure
                         self.completedConnectionStages = preservedStages
                     }
@@ -613,7 +619,14 @@ extension AppState {
     /// Stops Mihomo/TUN. Kill switch is NOT disarmed here — that only happens on
     /// intentional logout / user "turn off protection" so a crash or health failure
     /// leaves the host fail-closed via Kill Switch.
-    func disconnect(releaseKillSwitch: Bool = false) {
+    ///
+    /// `afterUnarmedConnectFailure` marks the automatic cleanup of a connect
+    /// attempt that failed before its first arm. It is a release, but not the
+    /// user's explicit one: see the operation below.
+    func disconnect(
+        releaseKillSwitch: Bool = false,
+        afterUnarmedConnectFailure: Bool = false
+    ) {
         if nativeUpdatePending || RuntimeCleanup.nativeUpdateBlocksConnect
             || (releaseKillSwitch && RuntimeCleanup.nativeUpdatePending) {
             if releaseKillSwitch { disconnectPendingNativeUpdate() }
@@ -761,7 +774,17 @@ extension AppState {
             operation: { [weak self, coreRuntime] requestID in
             var transitionError: String?
             var helperReadyForRelease = true
-            if releaseKillSwitch {
+            // A connect attempt that failed before its first arm owes no
+            // release: Core start and protected DNS both follow that arm. Its
+            // helper usually just failed preparation, so the explicit-release
+            // repair would raise an administrator prompt nobody asked for, and
+            // a failed repair would publish "traffic stays protected" over a
+            // host PF never held. This runs after the queue drained the
+            // cancelled attempt, so an arm that completed while it was being
+            // cancelled still gets the full release.
+            let unarmedFailureCleanup = afterUnarmedConnectFailure
+                && !KillSwitchService.isArmed
+            if releaseKillSwitch, !unarmedFailureCleanup {
                 do {
                     // A helper that rejects this GUI will also reject core stop,
                     // DNS restoration, and disarm; one on an older protocol
@@ -803,6 +826,7 @@ extension AppState {
             }
 
             var protectedDNSRestored = !releaseKillSwitch
+            var dnsRestoreFailure: String?
             if releaseKillSwitch {
                 await MainActor.run {
                     self?.disconnectionStage = .restoringDNS
@@ -818,6 +842,7 @@ extension AppState {
                         // helper as "nothing to restore."
                         protectedDNSRestored = !runtimeMayOwnNetwork
                         if !protectedDNSRestored {
+                            dnsRestoreFailure = error.localizedDescription
                             transitionError =
                                 "Protected DNS restore failed; Kill Switch remains active. \(error.localizedDescription)"
                         }
@@ -877,6 +902,18 @@ extension AppState {
                 }
             } else {
                 transitionLeavesProtectionBlocked = true
+            }
+            if unarmedFailureCleanup, !KillSwitchService.isArmed {
+                // The helper steps above are best-effort cleanup here. No Kill
+                // Switch holds this host, so do not publish Protected Offline,
+                // and keep the connect failure the user needs instead of a
+                // teardown message about a runtime this attempt never started.
+                // A failed DNS restore is real, though: an earlier session's
+                // loopback DNS may still be applied with no PF behind it.
+                transitionLeavesProtectionBlocked = false
+                transitionError = dnsRestoreFailure.map {
+                    "Protected DNS restore failed, so this Mac may be unable to resolve names. The Support page has a recovery command. \($0)"
+                }
             }
 
             await MainActor.run {
