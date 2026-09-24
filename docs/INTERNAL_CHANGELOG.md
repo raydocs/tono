@@ -482,6 +482,36 @@
 - **剩余限制**：部署前必须确认 hub 上 known-hosts 已登记全部 `nodes.secrets.json` 节点与
   `mainland_probes`，否则对应节点采集/任务会 fail-closed 报错；仍使用 root 密码认证，
   改为 key 认证未在本条范围；`onboard-node.rb` 不写 hub 这份文件，需单独登记。
+## 2026-09-23 · 节点上报的 public_ip 进入大陆探针前校验（H7-F2）
+
+- **归属**：ops 任务（运维计划 §3 hub 部署 / 3.4 hub 任务执行器；采集器封锁探测），非客户 ship gate；`ops-panel/`。
+- **来源**：基线 main `e7c913e1` → 分支 `fix/ops-probe-ip-20260923`；Issue #370，内部审查 H7-F2；
+  提交时未合 main。
+- **缺陷修复**：`run_on_node_via_ssh` 读到的节点自报 `public_ip` 原来不做校验，`main` 和
+  `collect_quality` 用它做探测目标，`probe_cn_agents` 把它拼进在大陆探针上以 root 执行的命令
+  （`node_probe` 已有 `SAFE_HOST`，这两条路径没有）。现在新增 `collect.public_ip`，只接受
+  `ipaddress` 能解析的公网 IPv4/IPv6 字面量，其余一律丢弃，并在三处使用：
+  - 入口 `run_on_node_via_ssh`；
+  - 目标选择 `probe_target`，节点自报值无效时回落到登记的 host，host 也要通过同一校验，
+    两者都无效就跳过全部封锁探测；
+  - 汇点 `probe_cn_agents`。
+  
+  目标改为作为 `bash -c` 的位置参数传入（`shlex.quote`），不再拼进脚本文本。
+- **新增/优化**：无。
+- **工程与测试**：新增 `ops-panel/tests/test_collect.py` 的一个测试：`probe_cn_agents` 收到
+  非 IP 值（节点在 IP 回显失败时输出的 `unknown`）时不发起 SSH、返回 None。旧代码上失败
+  （会调用 ssh）。
+- **验证**：MacBook `python3 -m unittest discover -s ops-panel/tests -p 'test_*.py'`：
+  - 旧代码：26 项中 1 项失败，即新测试；
+  - 修复后：26 项全部通过。
+  
+  另外打桩手动确认合法 IP 生成 `bash -c '…$0/$1' <ip> 443`，并且 `probe_target` 对私网
+  地址或主机名回落/返回 None。没有连接任何真实主机。CI 结果见 PR。
+- **候选/发布**：只有源码，没有新候选；hub 部署由 owner 执行。
+- **剩余限制**：如果节点在 `nodes.secrets.json` 里是用主机名而不是 IP 登记的，并且自报 IP 无效，
+  这一轮就不做封锁探测（记 `no_public_ip`，显示为基线失败）。`node_probe` 仍然沿用
+  `SAFE_HOST`，本条没有改动。本条和 H7-F1 的 PR 都改了 `probe_cn_agents` 的相邻行，合并时
+  可能需要解决文本冲突。
 
 ## 2026-09-23 · 永不 armed 的内部转换不得被重连 loop 判为外部 release
 

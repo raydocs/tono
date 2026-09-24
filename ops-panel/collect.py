@@ -22,9 +22,11 @@ import argparse
 import concurrent.futures
 import fcntl
 import http.cookiejar
+import ipaddress
 import json
 import os
 import re
+import shlex
 import socket
 import subprocess
 import sys
@@ -207,9 +209,33 @@ def ssh_password_argv(host: str, port: int, connect_timeout: int) -> list[str]:
     ]
 
 
+def public_ip(value: object) -> str | None:
+    """A globally routable IPv4/IPv6 literal, else None.
+
+    `public_ip` is printed by the node itself, so it is untrusted input that
+    ends up in a root command on every mainland probe host.
+    """
+    try:
+        addr = ipaddress.ip_address(str(value or "").strip())
+    except ValueError:
+        return None
+    if not addr.is_global or addr.is_multicast:
+        return None
+    return str(addr)
+
+
+def probe_target(quality: dict, node: dict) -> str | None:
+    """The address block probes dial: the node's reported IP, else its registered host."""
+    return public_ip(quality.get("public_ip")) or public_ip(node.get("host"))
+
+
 def probe_cn_agents(ip: str, agents: list[dict], port: int = 443) -> dict | None:
     """Authoritative mainland probe: SSH to CT/CU/CM hosts and TCP-connect to target:port."""
     if not agents:
+        return None
+    target = public_ip(ip)
+    if target is None:
+        log(f"  mainland probe skipped: {ip!r} is not a public IP")
         return None
     detail = {}
     ok_n = fail_n = 0
@@ -221,8 +247,10 @@ def probe_cn_agents(ip: str, agents: list[dict], port: int = 443) -> dict | None
         if not host or not password:
             continue
         # Bash /dev/tcp is enough; no extra packages on agent.
+        # Target and port are positional arguments to bash -c, not script text.
         remote = (
-            f"timeout 5 bash -c 'echo >/dev/tcp/{ip}/{port}' >/dev/null 2>&1; echo EXIT:$?"
+            "timeout 5 bash -c 'echo >/dev/tcp/$0/$1' "
+            f"{shlex.quote(target)} {int(port)} >/dev/null 2>&1; echo EXIT:$?"
         )
         env = os.environ.copy()
         env["SSHPASS"] = password
@@ -419,7 +447,7 @@ echo "===END==="
     pub = ""
     for line in meta.splitlines():
         if line.startswith("public_ip="):
-            pub = line.split("=", 1)[1].strip()
+            pub = public_ip(line.split("=", 1)[1]) or ""
     q = parse_quality(sc, bt)
     return {
         "name": name,
@@ -688,13 +716,18 @@ def main() -> None:
     for node in nodes_cfg:
         log(f"collect {node['name']}")
         q = run_on_node_via_ssh(node)
-        ip = str(q.get("public_ip") or node["host"])
-        time.sleep(0.5)
-        overseas = check_host_tcp_nodes(ip, OVERSEAS_NODES, port=443)
-        time.sleep(1.0)
-        asia = check_host_tcp_nodes(ip, ASIA_EDGE_NODES, port=443)
-        time.sleep(0.5)
-        cn = probe_cn_agents(ip, cn_agents, port=443)
+        ip = probe_target(q, node)
+        if ip is None:
+            log("  no public IP to probe; block probes skipped")
+            overseas = asia = {"ok": False, "error": "no_public_ip"}
+            cn = None
+        else:
+            time.sleep(0.5)
+            overseas = check_host_tcp_nodes(ip, OVERSEAS_NODES, port=443)
+            time.sleep(1.0)
+            asia = check_host_tcp_nodes(ip, ASIA_EDGE_NODES, port=443)
+            time.sleep(0.5)
+            cn = probe_cn_agents(ip, cn_agents, port=443)
         block = classify_block(cn, asia, overseas)
         q["block"] = block
         # Keep legacy field for older UI: status is still the machine-readable code.
