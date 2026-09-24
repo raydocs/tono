@@ -5,6 +5,9 @@ let killSwitchStatePath = "/Library/Application Support/Tono/killswitch.state"
 let killSwitchPFPath = "/Library/Application Support/Tono/pf.tono.conf"
 let killSwitchMainPFPath = "/etc/pf.conf"
 let killSwitchMainBackupPath = "/etc/pf.conf.tono-backup"
+/// Main ruleset loaded instead of /etc/pf.conf when the emergency block cannot
+/// be installed through it. Present only while that fallback is active.
+let killSwitchStandaloneMainPath = "/Library/Application Support/Tono/pf.tono-main.conf"
 let killSwitchHostsPath = "/etc/hosts"
 let killSwitchHostsBackupPath = "/etc/hosts.tono-backup"
 let killSwitchAnchor = "tono.killswitch"
@@ -504,7 +507,21 @@ final class KillSwitchManager {
     static func installEmergencyBlock(allowedUID: uid_t) throws {
         let state = emergencyState(preserving: nil)
         try writeRules(state: state, allowedUID: allowedUID)
-        try ensureAnchorLoaded(flushStates: true)
+        do {
+            try ensureAnchorLoaded(flushStates: true)
+        } catch {
+            try ensureAnchorLoaded(disposal: .full, standaloneMain: true)
+        }
+    }
+
+    /// The daemon failed to start after (or instead of) restoring PF, and
+    /// launchd will retry into the same failure. If protection was wanted,
+    /// leave the machine fail-closed rather than open until someone repairs
+    /// it. The emergency ruleset renders no per-user rule, so an allowed UID
+    /// that could not be read does not matter here.
+    static func secureFailedStartup() {
+        guard stateFileExists() else { return }
+        try? installEmergencyBlock(allowedUID: (try? readAllowedUID()) ?? 0)
     }
 
     static func emergencyState(

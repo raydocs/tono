@@ -32,6 +32,39 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · macOS Helper 启动先恢复 PF，启动失败装紧急阻断，紧急阻断不依赖 /etc/pf.conf
+
+- **归属/来源**：G1 连接保护（重启后保持保护）；macOS `tono-core-helper` 启动顺序与紧急阻断。
+  内部审查 H12-F2，Issue #423（Helper 部分；App 侧“当前未受保护”提示另行 PR）。基线 main
+  bb2ed4e4（含 #311）→ 分支 `fix/boot-protection-first-20260923`；提交时未合 main。
+- **缺陷修复**：开机时 `com.apple.pfctl` 只加载 `/etc/pf.conf`，不启用 PF；只有 Helper 会启用。
+  此前 Helper 在 `SocketServer.init` 里先解析用户组、建鉴权器、建 `/var/run/tono-core`、构造
+  `CoreManager`（查 home、清理旧 core），最后才构造 `KillSwitchManager` 恢复 PF。前面任何一步
+  抛错，main 的 catch 直接退出，PF 保持关闭，KeepAlive 反复重试同一失败。紧急阻断也走
+  `/etc/pf.conf`，该文件无法解析时同样失败。现在：
+  - main 在执行器恢复（`UpdateExecutor.startup`，#308 行为不变）之后，读取 allowed-uid 后立即
+    构造 `KillSwitchManager` 恢复 PF，再构造其余服务（`startHelperDaemon`）。
+  - 之后任何启动失败，只要持久保护意图（`killswitch.state`）存在，就装紧急阻断
+    （`secureFailedStartup`，读不到 allowed-uid 也装，紧急规则不含按用户的规则）。收到停止
+    请求时视为干净停止，不装阻断，与 #308 一致。
+  - 紧急阻断在正常路径失败时改载 Tono 自有的最小主规则集
+    `/Library/Application Support/Tono/pf.tono-main.conf`（只含 Tono 锚点与 load）。
+    `/etc/pf.conf` 恢复可用后，下一次正常加载会重新载入主规则集并删除该文件。
+- **新增/优化**：无。
+- **工程与测试**：`--self-test` 新增 `runStartupOrderSelfTest`：注入的启动步骤中服务端构造
+  抛错，断言顺序为恢复 → 服务端 → 紧急阻断；收到停止请求时不装阻断。旧代码没有这个启动
+  函数，失败时也不装阻断（无法编译，即失败）。`--lifecycle-self-test` 新增一条只解析
+  （`pfctl -nf`）的检查，确认独立主规则集能被 pfctl 接受。Helper 源码变更按契约门推进
+  `HelperProtocolVersion` 4.9.0 → 4.15.0（合并列车按顺序编号；4.10.0–4.14.0 已被 PR CI 构建用过，跳过），CONTRACT.sha256 按
+  build-core-helper.sh 同一清单与管道本机重算（纯文本哈希，未编译）。
+- **验证**：本机（编辑机）未运行 swift/xcodebuild；Helper 编译、`--self-test`、
+  `--lifecycle-self-test` 委托本 PR 的 GitHub-hosted `macos-26` CI，结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：Helper 根本没被 launchd 加载（登录项中关闭后台）时，本条无法起作用，由 App 侧
+  提示覆盖（另行 PR）。紧急阻断的独立主规则集在 CI 上只做了解析检查，没有在真实机器上以
+  损坏的 `/etc/pf.conf` 实际加载。与 #421（H12-F1）在 `ensureAnchorLoaded` 附近有文本重叠，
+  合并时需 rebase 并重算契约哈希。
+
 ## 2026-09-23 · macOS 迁移到另一台 Mac 的会话按硬件锚点丢弃，按新设备登录
 
 - **归属/来源**：G1 账户/设备身份；影响 macOS `KeychainStore` 与 `AccountSession.restore`。

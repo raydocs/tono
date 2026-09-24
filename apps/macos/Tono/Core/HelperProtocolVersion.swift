@@ -131,7 +131,13 @@ nonisolated enum HelperProtocolVersion {
     ///   provably gone (different boot, or its audit token resolves to no
     ///   live process), allocating a fresh successor generation without
     ///   changing the proof phase. A 4.8.0 daemon keeps both dead ends.
-    static let current = "4.9.0"
+    /// - 4.9.0 → 4.15.0 (merge-train number; 4.10.0–4.14.0 skipped): startup
+    ///   restores PF right after reading the allowed user, before the socket
+    ///   server's other initialisation; any later startup failure installs
+    ///   the emergency block when protection is wanted (a requested stop
+    ///   stays clean); and the emergency block falls back to a Tono-owned
+    ///   main ruleset when /etc/pf.conf cannot be loaded.
+    static let current = "4.15.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

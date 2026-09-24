@@ -385,14 +385,35 @@ extension KillSwitchManager {
         try ensureAnchorLoaded(disposal: flushStates ? .full : .keep)
     }
 
-    static func ensureAnchorLoaded(disposal: StateDisposal) throws {
-        let mainChanged = try ensureMainHook()
+    /// `standaloneMain` loads a Tono-owned main ruleset that references only
+    /// the Tono anchor instead of hooking `/etc/pf.conf`. Only the emergency
+    /// block uses it, and only after the normal path failed: that file can be
+    /// unparseable (another product's `load anchor` left pointing at a deleted
+    /// file), and the block must not depend on it. At boot nothing else would
+    /// enable PF, so a block that failed with `/etc/pf.conf` left the machine
+    /// unprotected until repaired.
+    static func ensureAnchorLoaded(
+        disposal: StateDisposal,
+        standaloneMain: Bool = false
+    ) throws {
+        let mainChanged = try standaloneMain ? false : ensureMainHook()
         let loaded: HelperCommandResult
-        if mainChanged || !mainAnchorActive() {
+        if standaloneMain {
+            try atomicWrite(
+                path: killSwitchStandaloneMainPath,
+                data: Data(renderStandaloneMain(childPath: killSwitchPFPath).utf8),
+                permissions: 0o600
+            )
+            loaded = try run("/sbin/pfctl", ["-f", killSwitchStandaloneMainPath])
+        } else if mainChanged || !mainAnchorActive()
+                    || FileManager.default.fileExists(atPath: killSwitchStandaloneMainPath) {
             // Installing/recovering the anchor point requires one main ruleset
             // load. Normal arm/reassert operations must not flush unrelated
-            // dynamic macOS anchors.
+            // dynamic macOS anchors. A standalone emergency main is replaced
+            // the first time `/etc/pf.conf` loads again, so the system anchors
+            // it left out come back.
             loaded = try run("/sbin/pfctl", ["-f", killSwitchMainPFPath])
+            if loaded.status == 0 { unlink(killSwitchStandaloneMainPath) }
         } else {
             loaded = try run(
                 "/sbin/pfctl",
@@ -448,6 +469,16 @@ extension KillSwitchManager {
         guard effectiveStatus() else {
             throw HelperFailure.system("Kill Switch verification failed.")
         }
+    }
+
+    static func renderStandaloneMain(childPath: String) -> String {
+        """
+        # Managed by Tono Kill Switch — emergency main ruleset, used only while
+        # \(killSwitchMainPFPath) cannot be loaded
+        anchor "\(killSwitchAnchor)"
+        load anchor "\(killSwitchAnchor)" from "\(childPath)"
+
+        """
     }
 
     static func pfEnabled() -> Bool {
