@@ -32,6 +32,38 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · Windows 独立列车 train/win2-20260924
+
+- **归属/来源**：G1–G3 Windows 独立修复汇合（各 PR 归属见其自身条目）；基线 origin/main
+  [d98b217d](https://github.com/raydocs/tono/commit/d98b217d) → 分支 `train/win2-20260924`，按序
+  `--no-ff` 合入 15 个 PR：#513 (bfba4799)、#518 (35ef2230，含 #513)、#515 (8cab7ed3)、#520 (fd4a0f4b)、
+  #557 (c62ae4fe)、#565 (9def4537)、#571 (c2734825)、#569 (bc64320d)、#573 (aeb3445e)、#577 (128892ab)、
+  #580 (d132b0e8)、#544 (3b49c752)、#548 (407d57c1)、#554 (77169a16)、#558 (3d53a413)；无 PR 被剔除；提交时未合 main。
+- **缺陷修复**：见各 PR 条目；列车本身不改产品行为，只做冲突合并：
+  - `login.tsx`（#513 × #515）：登录页拦截卡片标题/说明三分支——Service 报告上次隧道仍在运行
+    （`mode: locked` 且 `tunnel_permit_rendered`）时显示 #515 的「上次的连接仍在运行」；否则有 live 屏障
+    时显示「网络已被拦截」；再否则显示 #513 的「保护状态未确认」与 `unverifiedDescription`。
+  - `login.test.tsx`（#515 × main）：保留 #515 的三个 query-key mock（`tonoAccountQueryKey`、
+    `tonoDevicesQueryKey`、`tonoServersQueryKey`）。
+  - en/zh `tono.json`（#513 × #515）：`unverifiedDescription` 与 `stillRunningTitle`/`stillRunningDescription`
+    取并集；`i18n-keys.ts`、`i18n-resources.ts` 用 `node scripts/generate-i18n-keys.mjs` 重新生成（最终 1085 键）。
+  - `tono/commands/update.rs`（#557 × main）：`disconnect_if_pending` 用 #557 的
+    `proxy_control::clear_for_update()`，保留 main 的 `released.needs_attention` 告警。
+  - `installer.nsi`（#569 × main/#571）：删 data 分支采用 #569——不再对本账户 `$APPDATA`/`$LOCALAPPDATA`
+    做 NSIS 递归 `RmDir /r`（由 helper 按全部 profile 删除，不穿越 junction）；保留 main 的
+    `cmdkey /delete:refresh-token.tono`。#571 的 `$TonoUninstallScope`、#569 的 `$AppDataPathPlain`
+    门控与 #573 的改动均保留（后两者文本上无冲突）。
+  - `docs/INTERNAL_CHANGELOG.md` 与 `docs/FINDINGS_LEDGER.md`：两边条目/行全部保留，只删冲突标记。
+- **新增/优化**：无。
+- **工程与测试**：无新测试；各 PR 自带测试全部保留。
+- **验证**：MacBook 列车工作树（node_modules 软链主仓库）：`apps/windows/app` `npx tsc --noEmit` 通过；
+  `npx vitest run` 37 文件 287 通过；`node --test tooling/scripts/tests/windows-ci-paths.test.cjs` 12 通过；
+  `npm run test:dev-control`（打包/发布脚本 node 测试）106 通过；无冲突标记；`git diff --check origin/main HEAD`
+  无输出。未在本机运行 cargo / Tauri / NSIS 构建，Rust 与安装器改动以 PR 的 Windows CI 为准（CI pending）。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：Rust 与 installer 合并结果未本地编译，等待 CI；未做实机验收。后续事项见
+  Issue [#602](https://github.com/raydocs/tono/issues/602)。
+
 ## 2026-09-24 · Windows 合并列车 train/win-20260924
 
 - **归属/来源**：G1–G3 Windows 修复汇合（各 PR 归属见其自身条目）；基线 origin/main
