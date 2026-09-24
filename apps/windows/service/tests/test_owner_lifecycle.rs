@@ -12,7 +12,7 @@ use tono_service_protocol::{
     get_status as client_get_status, get_version, load_active_owner, load_owner_desired_state,
     owner_key, release_kill_switch as client_release_kill_switch, run_ipc_server,
     start_clash as client_start_clash, stop_clash as client_stop_clash, stop_ipc_server,
-    test_client,
+    test_client, update_transaction, update_wire::UpdateRequest,
 };
 #[cfg(unix)]
 use tono_service_protocol::{
@@ -732,6 +732,97 @@ async fn late_prepare_core_start_superseded_by_release_cannot_stop_the_successor
     assert!(after.is_active);
 
     assert_eq!(stop_clash(&credentials, &second_session).await?.code, 0);
+    stop_ipc_server().await?;
+    server_handle.await??;
+    Ok(())
+}
+
+/// H9-F3: a native update takeover cancels the connecting attempt without an explicit
+/// release, and the App then lets the user start a successor connection directly. The
+/// takeover's Prepare — refused here, as when its signature or preconditions fail — must
+/// still supersede the cancelled attempt's PrepareCoreStart snapshot. Before the fix only an
+/// explicit release did, so the late request passed the gate and stopped the successor Core.
+#[tokio::test]
+#[serial]
+async fn late_prepare_core_start_superseded_by_update_takeover_cannot_stop_the_successor_core()
+-> Result<()> {
+    common::init_tracing_for_tests();
+    let _ = stop_ipc_server().await;
+    let server_handle = run_ipc_server().await?;
+    common::wait_for_ipc().await?;
+
+    let credentials = common::owner_credentials();
+    let bundle = RuntimeBundle {
+        yaml: "mode: rule\n".to_string(),
+        assets: vec![],
+        remote_providers: Vec::new(),
+        core_path: common::test_bin_path("mock_binary")
+            .to_string_lossy()
+            .into_owned(),
+    };
+
+    // Attempt A's client-side freshness snapshot, read before its request goes out.
+    let stale_epoch = current_release_epoch().await?;
+
+    // The update takes over: the App has invalidated A, and the Service refuses Prepare.
+    let prepared = update_transaction(
+        &credentials,
+        UpdateRequest::Prepare {
+            manifest: "{}".to_string(),
+            signature: String::new(),
+            package_path: String::new(),
+        },
+    )
+    .await?;
+    assert_ne!(prepared.code, 0, "the unsigned Prepare must be refused");
+
+    // Attempt B, started by the user without a Disconnect: its Core is running, unverified.
+    let token = "e3".repeat(32);
+    let start = start_clash(&credentials, &bundle, &token).await?;
+    assert_eq!(start.code, 0, "{}", start.message);
+    let session = session_from_start(&start, &token)?;
+    let successor_pid = get_status(&credentials)
+        .await?
+        .data
+        .context("successor status omitted data")?
+        .core_pid
+        .context("successor start omitted core PID")?;
+
+    // A's PrepareCoreStart finally arrives with the pre-takeover snapshot.
+    let client = test_client().await?;
+    let body = serde_json::to_value(AuthenticatedRequest {
+        credentials: credentials.clone(),
+        payload: PrepareCoreStartFreshness {
+            release_epoch: stale_epoch,
+        },
+    })?;
+    let response = client
+        .post(IpcCommand::PrepareCoreStart.as_ref())
+        .header(
+            SERVICE_PROTOCOL_HEADER,
+            ProtocolVersion::current().header_value(),
+        )
+        .json_body(&body)
+        .send()
+        .await?
+        .json::<WireResponse<u32>>()?;
+    assert_eq!(
+        response.code,
+        ServiceErrorCode::StaleReleaseEpoch as u16,
+        "{}",
+        response.message
+    );
+    let after = get_status(&credentials)
+        .await?
+        .data
+        .context("post-rejection status omitted data")?;
+    assert_eq!(
+        after.core_pid,
+        Some(successor_pid),
+        "a PrepareCoreStart superseded by an update takeover must not stop the successor Core"
+    );
+
+    assert_eq!(stop_clash(&credentials, &session).await?.code, 0);
     stop_ipc_server().await?;
     server_handle.await??;
     Ok(())

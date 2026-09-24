@@ -30,8 +30,8 @@ mod platform;
 // Compatibility surface for existing command and test callers. The transaction
 // and error modules do not import this orchestration facade.
 pub use failure::{
-    BFE_NOT_RUNNING_PREFIX, NODE_OR_CORE_UNREACHABLE_PREFIX,
-    RELEASE_RECONCILING_PREFIX, SERVICE_BUSY_PREFIX,
+    BFE_NOT_RUNNING_PREFIX, NODE_OR_CORE_UNREACHABLE_PREFIX, PROTECTION_HELD_BY_ANOTHER_USER_PREFIX,
+    RELEASE_RECONCILING_PREFIX, REMOTE_SESSION_CONNECT_REFUSED_PREFIX, SERVICE_BUSY_PREFIX,
     SERVICE_TOO_OLD_PREFIX, TUN_DATA_PLANE_BROKEN_PREFIX, TUN_INGRESS_BROKEN_PREFIX,
     WFP_ENGINE_WEDGED_PREFIX, is_retryable_lock_error, map_service_ready_error,
     map_wfp_engine_error,
@@ -139,7 +139,8 @@ use direct::{
     prove_service_endpoint_digest, prove_service_reload_mode, spawn_optional_direct_after_connected,
     validate_direct_reload_result,
 };
-use platform::{detect_physical_interface, is_virtual_uplink_description, write_redacted_copy};
+use platform::{detect_physical_interface, is_virtual_uplink_description};
+pub(crate) use platform::remove_legacy_runtime_copy;
 
 /// Drop the ConnectOk session clock. A new connect attempt is not the session
 /// that last reached ConnectOk, so disconnectOk must not report `elapsedMs`
@@ -311,6 +312,7 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
         inner.connect_error_at_ms = None;
         inner.next_retry_at_ms = None;
         inner.optional_direct_active = false;
+        inner.applied_direct_interface = None;
         inner.optional_direct_skip = None;
         inner.direct_reload_until = None;
         commands::emit_status(app, &commands::status_of(&inner));
@@ -1666,6 +1668,7 @@ mod tests {
             snapshot_present: true,
             adapters: 3,
             last_error: None,
+            resolver_policy_warning: None,
         };
         assert!(!protected_dns_unhealthy(Some(&healthy)));
 
@@ -1738,6 +1741,7 @@ mod tests {
                 snapshot_present: true,
                 adapters: 1,
                 last_error: None,
+                resolver_policy_warning: None,
             },
         )
     }
@@ -2279,6 +2283,7 @@ mod tests {
             snapshot_present: true,
             adapters: 2,
             last_error: None,
+            resolver_policy_warning: None,
         };
         assert!(!protected_dns_unhealthy(Some(&healthy)));
         assert!(protected_dns_unhealthy(None));
