@@ -59,13 +59,17 @@ export const useUpdate = (enabled: boolean = true) => {
     refetchOnReconnect: true,
   })
 
+  // Keyed on whether an error is cached, not on which one: the native command rejects with a
+  // String, so the next failed cycle caches an identical value that would not re-run this effect.
+  // The interval keeps rechecking until a check succeeds, which lets SWR's daily poll resume.
+  const hasCheckError = checkError !== undefined
   useEffect(() => {
-    if (!shouldCheck || checkError === undefined) return undefined
-    const timer = window.setTimeout(() => {
+    if (!shouldCheck || !hasCheckError) return undefined
+    const timer = window.setInterval(() => {
       void revalidateCheck()
     }, UPDATE_RECHECK_AFTER_ERROR_MS)
-    return () => window.clearTimeout(timer)
-  }, [shouldCheck, checkError, revalidateCheck])
+    return () => window.clearInterval(timer)
+  }, [shouldCheck, hasCheckError, revalidateCheck])
 
   // Shared last check timestamp
   const { data: lastCheckUpdate } = useQuery({

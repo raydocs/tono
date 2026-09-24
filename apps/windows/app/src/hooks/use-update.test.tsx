@@ -49,4 +49,23 @@ describe('useUpdate discovery schedule', () => {
     expect(checkUpdateSafeMock.mock.calls.length).toBeGreaterThanOrEqual(4)
     expect(result.current.updateInfo).toEqual(offer)
   })
+
+  it('keeps rechecking when every failed cycle rejects with the same native error string', async () => {
+    vi.useFakeTimers()
+    const offer: UpdateOffer = { version: '0.0.74', manifestSha256: 'cd'.repeat(32) }
+    // `tono_check_update` rejects with a String, so consecutive failures are identical values.
+    const failure = 'Protected update discovery failed: offline'
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      checkUpdateSafeMock.mockRejectedValueOnce(failure)
+    }
+    checkUpdateSafeMock.mockResolvedValue(offer)
+
+    const { result } = renderHook(() => useUpdate(true), { wrapper: freshSWR })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1000 + 60 * 1000)
+    })
+
+    expect(checkUpdateSafeMock.mock.calls.length).toBeGreaterThanOrEqual(7)
+    expect(result.current.updateInfo).toEqual(offer)
+  })
 })
