@@ -77,6 +77,18 @@
   - 剩余限制：绑定与 allowlist/资料写入仍是分开的语句，不是一个 D1 batch；绑定成功后若其后的账户分配 409，
     allowlist/资料已写而没有 `user.onboard` 行（改前即如此）。触发器在复查与 INSERT 之间中止时不映射为 409
     `SOCKS5_ROTATION_REQUIRED`（此时无其他写入）。已绑定到 hy2 后缀 catalog 行的用户，重存同一绑定也被拒，需先改名。
+- **续修（2026-09-24，二轮审查 Codex B-F1，P2，8fc72696 前即存在）**：同分支。
+  - 缺陷修复：用户已有绑定时，`upsertHomeBinding` 读到 `created_at` 后执行 `UPDATE user_home_bindings`；并发解绑落在两者之间时
+    UPDATE 影响 0 行，旧代码不看 `meta.changes` 照常返回，onboard 随后写 allowlist、notes/contact/wechat 和 `home.assign`
+    审计，返回 202 且 `binding: null`。改后：0 行时按「解绑先发生」处理：再跑 `assertHomeExitBindable`（socks5 家宽已被
+    0080 触发器置轮换标记，返回 409 `SOCKS5_ROTATION_REQUIRED`，其后不再写任何东西）；复查通过（catalog 家宽）则走与
+    读不到旧行时相同的 INSERT。修在共享函数里，`home-exits/assign` 同样受益。
+  - 测试：`test/ops-api.test.ts` 新增一个 `it`（包装 D1，在读 `created_at` 之后删除绑定）；断言 409 `SOCKS5_ROTATION_REQUIRED`、
+    notes 不变、allowlist 无行、无 `home.assign` 审计。修复前在 00190396 上红（`expected 202 to be 409`），修复后绿。
+  - 验证：MacBook 本机 worktree：`npx vitest run test/worker.test.ts test/ops-api.test.ts` 230 通过；`npx vitest run` 43 个文件
+    915 通过；`npm run typecheck` 通过。未部署，未碰远端 D1，无原生构建。
+  - 剩余限制：shared-admin `PUT users/{id}/home-binding` 有自己的一份读后 UPDATE，未改；同一窗口下 0 行后仍会 bump revision、
+    写 `home.replace` 审计，再因读回的绑定为空而出错（按代码阅读，未测）。catalog 家宽在该窗口会被重新绑定（与解绑先发生的顺序一致）。
 
 ## 2026-09-24 · 控制面合并列车 train/cp-20260924
 

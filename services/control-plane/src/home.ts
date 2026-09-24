@@ -371,12 +371,16 @@ export async function upsertHomeBinding(
     'SELECT created_at FROM user_home_bindings WHERE user_id = ?',
   ).bind(userId).first<Row>();
   if (existing) {
-    await e.DB.prepare(
+    const updated = await e.DB.prepare(
       `UPDATE user_home_bindings
        SET home_exit_id = ?, default_proxy_name = ?, updated_at = ?
        WHERE user_id = ?`,
     ).bind(homeExitId, defaultProxyName, t, userId).run();
-    return { created: false };
+    if (updated.meta.changes) return { created: false };
+    // An unbind landed after the read above. Continue as if it had landed
+    // first: its trigger may have flagged the line for rotation, which the
+    // re-check refuses before the caller writes anything else.
+    await assertHomeExitBindable(e, userId, homeExitId);
   }
   await e.DB.prepare(
     `INSERT INTO user_home_bindings(user_id, home_exit_id, default_proxy_name, created_at, updated_at)

@@ -492,6 +492,57 @@ describe('ops v1 api', () => {
     expect(await db().prepare("SELECT email FROM signup_allowlist WHERE email = 'a@example.com'").first()).toBeNull();
   });
 
+  it('POST users/onboard writes nothing when an unbind lands between the binding read and its update', async () => {
+    await seedUser('u-1', 'a@example.com');
+    await db().prepare("UPDATE users SET notes = 'before' WHERE id = 'u-1'").run();
+    await db().prepare(
+      `INSERT INTO home_exits(
+         id, proxy_name, display_name, kind, socks5_host, socks5_port, socks5_username, socks5_password,
+         status, created_at, updated_at
+       ) VALUES('h-late', 'h-late', '家宽 Late', 'socks5', '203.0.113.63', 11093, 'resi-late', 'secret', 'active', ?, ?)`,
+    ).bind(NOW, NOW).run();
+    await db().prepare(
+      "INSERT INTO user_home_bindings(user_id, home_exit_id, created_at, updated_at) VALUES('u-1', 'h-late', ?, ?)",
+    ).bind(NOW, NOW).run();
+    // Both bindability checks pass; the unbind lands after the bind reads the
+    // existing row, so its UPDATE matches nothing.
+    const real = db();
+    let unbound = false;
+    const racingDb = new Proxy(real, {
+      get(target, key) {
+        const value = Reflect.get(target, key, target);
+        if (key !== 'prepare') return typeof value === 'function' ? value.bind(target) : value;
+        return (sql: string) => {
+          const statement = target.prepare(sql);
+          if (unbound || !sql.includes('SELECT created_at FROM user_home_bindings')) return statement;
+          return {
+            bind: (...values: unknown[]) => ({
+              first: async () => {
+                const row = await statement.bind(...values).first();
+                unbound = true;
+                await target.prepare("DELETE FROM user_home_bindings WHERE user_id = 'u-1'").run();
+                return row;
+              },
+            }),
+          };
+        };
+      },
+    });
+    const refused = await ops(
+      'users/onboard',
+      json({ email: 'a@example.com', notes: 'after', homeExitId: 'h-late' }),
+      { ...env, DB: racingDb },
+    );
+    expect(unbound).toBe(true);
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { error: { code: string } }).error.code).toBe('SOCKS5_ROTATION_REQUIRED');
+    expect((await db().prepare("SELECT notes FROM users WHERE id = 'u-1'").first<{ notes: string }>())!.notes)
+      .toBe('before');
+    expect(await db().prepare("SELECT email FROM signup_allowlist WHERE email = 'a@example.com'").first()).toBeNull();
+    expect(await db().prepare("SELECT 1 FROM ops_audit WHERE action = 'home.assign' AND target_id = 'u-1'").first())
+      .toBeNull();
+  });
+
   it('GET customers?q= matches email or wechat id, and default list is unchanged', async () => {
     await seedUser('u-1', 'a@example.com');
     await seedUser('u-2', 'b@example.com');
