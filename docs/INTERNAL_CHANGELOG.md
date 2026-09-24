@@ -49,6 +49,35 @@
 - **候选/发布**：无新包，仅文档。
 - **剩余限制**：H16/H17 条目全部是源码推导或阅读确认，回归草案均未运行；需实机的部分列在审查轮记录第 3 节。
 
+## 2026-09-23 · 重新上架：出口令牌已吊销的节点不再能上架
+
+- **归属**：ops 任务（节点下架/上架流程）；控制面 `services/control-plane`。不属客户发布门。
+- **来源**：内部审查 H14-F2，Issue #449；分支 `fix/relist-revoked-exit-20260923`，基线
+  origin/main bb2ed4e4。提交时未合 main。无 migration。与在审 #375 在 `revokeExitToken`
+  的同一条 UPDATE 上文本相邻，后合并者需保留双方改动（#375 的 `revoked_token_hash` 赋值与
+  本 PR 的目录 revision 条件）。
+- **缺陷修复**：没有在线客户的节点下架时立即吊销出口令牌并置 `exit_nodes` 为 disabled，
+  重新上架只恢复目录与 profile，节点回到所有账户的目录里却没有有效令牌；验收单按
+  `last_roster_at` 判断「出口令牌」「身份同步」，15 分钟内仍显示通过。改后：
+  (1) `bindingsOf` 对非 active 的出口节点不再认最近一次 roster，两项判为不通过；
+  (2) 上架在入队（`relistGate`，不可 override）和执行（`relistFleetNode` 前置检查，并在目录
+  CAS 写里加同一条件）两处拒绝，返回 409 `EXIT_TOKEN_REVOKED`，提示先启用出口节点、重新签发
+  令牌并部署；(3) `finishDrainedRetires` 先读目录 revision，吊销 UPDATE 以该 revision 为条件，
+  两次 cron 重叠时不会撤销期间已提交的上架。
+- **新增/优化**：无。
+- **工程与测试**：一个 Worker `it`（`test/ops-node-acceptance.test.ts` `a node whose exit token
+  retirement revoked cannot be relisted, and a stale drain cannot revoke a relisted one`）。
+  fixture 修正：`test/ops-jobs.test.ts` 的 retire→drain→relist 用例原先直接上架已吊销节点
+  （正是本缺陷路径），改为上架前先把出口节点恢复为 active，对应运营的恢复步骤。
+- **验证**：MacBook 本机 worktree：新 `it` 在旧代码上失败（验收阻塞项只有
+  `binding.catalog`）；分别只回退吊销条件或上架拒绝时，也在对应断言处失败；修复后通过。
+  `npx vitest run`（control-plane 全量）43 个文件、892 个测试通过；`npm run typecheck`、
+  `npm run check:budgets` 通过。未部署，未碰 remote D1。
+- **候选/发布**：仅源码，无新候选；Worker 未部署。
+- **剩余限制**：恢复仍需三步手工操作（PATCH `exit-nodes/{id}` 为 active、POST
+  `exit-nodes/{id}/token`、把新令牌部署到节点），上架流程只给出提示，不自动签发。
+  下架路径本身（非 drain）的即时吊销没有加 revision 条件；上架侧的写条件覆盖了它与上架的交错。
+
 ## 2026-09-23 · 住宅 SOCKS5 凭据在持有人失去绑定后标记待轮换（H7-F7）
 
 - **归属**：ops 任务（家宽线路 / 控制面）；`services/control-plane`，D1 migration `0080`。
