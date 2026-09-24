@@ -47,6 +47,10 @@
   wanted=true、live=false）时，原先直接抛错，本地 `isArmed` 仍为 false，失败清理会走释放。
   现在抛错前按回执同步：`wanted || armed` 时置 `isArmed = true`。同时修正 `arm` 中"由重连
   循环释放"的误导性注释，改为实际路径（保留拆除 + `restrictToBootstrap` + 重连）。
+  至此 Issue #480 点名的两种来源（回执丢失且补查失败、helper 持久化后崩溃未回复）以及
+  guard 失败变体都在 arm 处把 `isArmed` 置 true，保留拆除不会在 helper 持 PF 时发布开放；
+  #480 的兜底 PR #482 因在"首次连接睡眠且 helper 安装提示打开"时回归 #310 修过的误报
+  Protected Offline 而关闭，不再合入。
 - **新增/优化**：无。
 - **工程与测试**：`KillSwitchService` 新增窄 IPC seam `armIPC`（`deliver` 包住真实
   `/killswitch/arm` 请求，`status` 读 `/killswitch/status`），生产行为不变。新增
