@@ -32,6 +32,58 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · macOS 删除 Tono.app 后，Helper 在下次启动时释放保护并移除自身
+
+- **归属/来源**：G1 连接保护（删除 App 后的出口）；macOS `tono-core-helper`。内部审查 H19-O-F1 = H19-G-F1
+  （两个 finder 独立发现，阅读确认），Issue [#555](https://github.com/raydocs/tono/issues/555)。分支
+  `fix/helper-orphan-app-gone-20260924`，叠在 #550（H19-O-F4）与 H19-O-F6 分支之上；未合 main。
+- **缺陷修复**：Helper 是 `/Library/LaunchDaemons` 下 RunAtLoad + KeepAlive 的 daemon，每次启动都由
+  `restoreAtLaunch` 重新加载已 arm 的 PF 状态，从不检查还有没有 Tono App。用户在保护开启时退出（设计上保留）或
+  崩溃后，把 Tono.app 拖进废纸篓（macOS 唯一的移除方式），此后每次开机都断网，唯一的恢复说明在已删除的 App 里。
+  现在每次 Helper 启动（执行器恢复之后、开 socket 之前）检查：`/Applications` 里没有 Tono（按登记名
+  `Tono.app`，或任何声明 `com.raydocs.tono` 的改名副本），并且更新账本里没有未完成的尝试时，按
+  `--emergency-reset` 同一路径先停残留 Core、恢复 DNS、解除 PF，成功后撤回 pf.conf 挂钩与备份、删除安装文件，
+  最后 `launchctl bootout` 卸载自己。
+  **临时产品决定（取更严、不泄漏的一侧，待所有者确认）**：只要 App 可能回来就保持 fail-closed——App 仍在
+  `/Applications`、或有未完成的更新可能把它放回、或 `/Applications` 读不出来，都不释放；只在 Helper 启动时判断，
+  运行中 App 被移走不会立刻打开出口，要等下次重启。移除后留给用户的出口是“重启一次”，不依赖已删除的 App。
+  废纸篓里的 App 不算“仍可用”：Helper 不检查 `~/.Trash`（受 TCC 保护，daemon 无法可靠读取）。
+  Helper 协议版本 4.42.0 → 4.43.0（临时编号，合并时按顺序重编号），`CONTRACT.sha256` 按构建脚本清单重算。
+- **新增/优化**：`--emergency-reset` 的移除步骤抽成 `removeHelperInstallation()` 与启动释放共用，行为不变。
+- **工程与测试**：`--update-self-test`（root，CI privileged-tests）新增一例，用临时 Applications 目录与临时账本驱动
+  `releaseIfTonoWasRemoved`：改名的 Tono 副本、未完成的更新、读不出的目录都不释放；无 App 且无未完成更新时释放。
+  先推送只含测试与恒返回 false 的函数（即现状）的提交让 CI 变红，再推修复。
+- **验证**：本机（编辑机）未编译；以本 PR 的 GitHub-hosted `macos-26` CI 为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：未在实机上删除 App 并重启验证；`launchctl bootout` 由 daemon 自己发起、在 SIGTERM 下结束自身
+  的时序，以及“登录项与扩展”对删除 App 后这个旧式 daemon 的处理都需要实机确认。自测不执行真实的
+  DNS/PF 释放与 bootout（复用已有的 `runEmergencyDisarm`）。开发机若只从 DerivedData 运行 App、`/Applications`
+  没有 Tono，重启后 Helper 会自行移除，下次打开需重新授权安装。用户替换 App 的同一秒 Helper 恰好重启时，
+  会按“已移除”处理。
+- **2026-09-24 审查跟进**（MA-Codex-1 = MA-GROK-1，P2；MA-Codex-2，P3）：修复——原先只看 `/Applications`，
+  把运行中的 App 移到 `~/Applications` 后 Helper 一重启就释放保护并移除自身（取代上文“运行中 App 被移走……要等下次
+  重启”）。现在以下任一都算 Tono 仍在：有进程满足 Helper 的客户端签名要求（`TonoPeerAuthorizer.clientRequirementText`，
+  先按 `*.app/Contents/MacOS/Tono` 路径筛选；存活但查不到签名的也算在）；绑定用户的 `~/Applications` 里有 Tono.app 或
+  改名副本（该目录不存在则跳过，其他读取失败算在）。P3：`.app` 的 Info.plist 缺失、读不出或解析失败一律算 Tono 在。
+  4.43.0 仍未发布，按 b6b8df0d 的先例只改版本说明并重算 `CONTRACT.sha256`，不再升号。测试：`--update-self-test`
+  新增一例（运行中的客户端、`~/Applications/Tono.app` 都不释放；托管 runner 上真实进程扫描必须为 false），原例改为
+  显式注入空的用户目录与“无进程”，保持与宿主无关。验证：本机未运行（不做本机 Swift 编译），以 PR CI 为准。
+  剩余限制：P3 按更严一侧处理，`/Applications` 里任何没有 `Contents/Info.plist` 的 `.app`（例如 Apple 芯片上的
+  iOS 包装 App）都会让 Helper 不再自行移除，只能用 `--emergency-reset`；只看绑定用户的 `~/Applications`。
+- **2026-09-24 第二轮跟进**（核验方 Codex 指出，Opus 读码确认，P2）：修复——`proc_pidpath` 失败时原先直接跳过，
+  没有确认进程已退出。现在进程扫描抽成 `tonoClientAmong`：路径或签名查询失败而进程仍存活（`proc_pidinfo`
+  BSD 信息可取且非僵尸）即算 Tono 在，只有已退出的 pid 才跳过。测试：扩展原 `--update-self-test` 用例，注入
+  “路径查询失败且存活”“签名查询失败且存活”必须保留保护，“已退出”“签名不符”不算。验证：本机未运行，以 PR CI 为准。
+  剩余限制：仓库里没有 App 之外可取得的 macOS 恢复说明（`--emergency-disarm/--emergency-reset` 只写在 App 的支持页），
+  因上述更严规则而不能自行移除的机器，在删除 App 后只能由支持人员提供命令；托管 runner 上若有存活但路径查询失败的
+  进程，真实扫描断言会失败，这同样意味着该类机器上 Helper 不会自行移除。
+- **2026-09-24 第三轮跟进**（核验方 Codex 指出，P2）：修复——存活查询的任何失败都被当成“已退出”，签名校验的任何
+  非成功结果都被当成“不是 Tono”。现在只有确定的结论才跳过：`proc_pidinfo` 返回 ESRCH、`kill(pid, 0)` 返回 ESRCH
+  或进程为僵尸才算已退出；只有 `errSecCSReqFailed` 才算签名不符。其他查询错误（含未签名、签名失效、代码对象
+  不可读）一律视为不确定，按存在处理。测试：扩展同一 `--update-self-test` 用例，注入“存活查询出错”“签名校验出错”
+  必须保留保护，“确定已退出”“确定不符”才跳过。验证：本机未运行，以 PR CI 为准。剩余限制：`*.app/Contents/MacOS/Tono`
+  路径下未签名或签名失效的存活进程也会阻止 Helper 自行移除。
+
 ## 2026-09-24 · macOS 内部候选版默认发送分类连接失败记录
 
 - **归属/来源**：G1–G3 候选验收的现场证据；影响 macOS App（`AccountSession`、设置页、Info.plist）、

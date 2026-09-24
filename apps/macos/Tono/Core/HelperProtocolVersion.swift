@@ -182,7 +182,17 @@ nonisolated enum HelperProtocolVersion {
     ///   /etc/pf.conf.tono-backup and /etc/hosts.tono-backup once PF is
     ///   released, keeping every line outside the markers. A 4.41.0 reset
     ///   leaves the hook and both backups behind.
-    static let current = "4.42.0"
+    /// - 4.42.0 → 4.43.0 (merge-train number): at every start,
+    ///   after executor recovery, the daemon checks whether Tono was removed —
+    ///   no running Tono client (by the client signing requirement), no Tono
+    ///   app in /Applications or the bound user's ~/Applications (by the
+    ///   registered name or by bundle identifier; a bundle whose Info.plist
+    ///   cannot be read counts as Tono) and no unfinished update attempt.
+    ///   Then it performs the `--emergency-reset` release and removal itself
+    ///   and unloads its job, instead of re-arming PF at every boot with no
+    ///   app left to release it.
+    ///   A 4.42.0 daemon keeps a Mac offline after Tono.app is deleted.
+    static let current = "4.43.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
