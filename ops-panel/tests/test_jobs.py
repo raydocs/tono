@@ -468,7 +468,9 @@ class RunJobsExitTests(unittest.TestCase):
 
     def test_dial_errors_handler_filters_and_redacts(self):
         def ssh(_node, remote, timeout=60):
-            self.assertIn("journalctl -u tono-xray.service", remote)
+            # The node record names its own unit (provision-tono-node.py serviceName).
+            self.assertIn("LoadState --value xray.service)", remote)
+            self.assertIn("journalctl -u xray.service", remote)
             self.assertIn('--since "-15min"', remote)
             self.assertIn("-n 20", remote)
             return 0, "\n".join([
@@ -488,7 +490,8 @@ class RunJobsExitTests(unittest.TestCase):
             collector=FakeCollector(),
             client=ingest,
             token="tok",
-            nodes=[{"name": "Tokyo · Kite", "host": "198.51.100.4", "password": "x"}],
+            nodes=[{"name": "Tokyo · Kite", "host": "198.51.100.4", "password": "x",
+                    "serviceName": "xray.service"}],
             cn_agents=[],
             ssh_fn=ssh,
             acquire_lock=False,

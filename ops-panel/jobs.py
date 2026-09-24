@@ -87,7 +87,12 @@ TCP_TUNING_KEYS = (
 
 EXIT_AGENT_UNIT = "tono-exit-agent.service"
 # The unit every provisioning script installs (manage-tono-reality-node.sh et al.).
+# A node provisioned by provision-tono-node.py may name its own unit; its
+# record in nodes.secrets.json then carries that "serviceName".
 XRAY_UNIT = "tono-xray.service"
+# Same shape provision-tono-node.py accepts; the name is interpolated into a
+# remote shell, so anything else is refused.
+SAFE_UNIT = re.compile(r"^[A-Za-z0-9_.-]+\.service$")
 EXIT_AGENT_STATE = "/var/lib/tono-exit-agent/state.json"
 
 NEEDS_NODE = frozenset({
@@ -478,19 +483,34 @@ class IngestClient:
         return "conflict" if code == 409 else "ok"
 
 
-def _journal_remote(since_minutes: int, max_lines: int) -> str:
+def xray_unit(node: dict | None) -> str | None:
+    """The node's recorded Xray unit, tono-xray.service when none is recorded.
+
+    None means the record names something that is not a plain systemd unit.
+    """
+    unit = (node or {}).get("serviceName")
+    if unit is None or unit == "":
+        return XRAY_UNIT
+    unit = str(unit)
+    return unit if SAFE_UNIT.match(unit) else None
+
+
+def _journal_remote(unit: str, since_minutes: int, max_lines: int) -> str:
     # journalctl exits 0 with no lines for a unit that does not exist, which
     # would read as a clean node. Refuse that instead of reporting it.
     return (
-        f'[ "$(systemctl show -p LoadState --value {XRAY_UNIT})" = loaded ] || exit 3\n'
-        f'journalctl -u {XRAY_UNIT} --since "-{int(since_minutes)}min" -n {int(max_lines)} --no-pager'
+        f'[ "$(systemctl show -p LoadState --value {unit})" = loaded ] || exit 3\n'
+        f'journalctl -u {unit} --since "-{int(since_minutes)}min" -n {int(max_lines)} --no-pager'
     )
 
 
 def handle_xray_dial_errors(params: dict, ctx: JobContext) -> tuple[str, str, dict]:
     since = as_int(params.get("sinceMinutes"), 60, 0, 240)
     max_lines = as_int(params.get("maxLines"), 400, 1, 400)
-    rc, text = ctx.ssh(ctx.node, _journal_remote(since, max_lines), 100)
+    unit = xray_unit(ctx.node)
+    if unit is None:
+        return "error", "invalid serviceName in node record", {}
+    rc, text = ctx.ssh(ctx.node, _journal_remote(unit, since, max_lines), 100)
     if rc == 124:
         return "timeout", "ssh timeout reading xray journal", {}
     if rc != 0:
@@ -509,7 +529,10 @@ def handle_xray_dial_errors(params: dict, ctx: JobContext) -> tuple[str, str, di
 
 def handle_xray_error_digest(params: dict, ctx: JobContext) -> tuple[str, str, dict]:
     since = as_int(params.get("sinceMinutes"), 60, 0, 240)
-    rc, text = ctx.ssh(ctx.node, _journal_remote(since, 400), 100)
+    unit = xray_unit(ctx.node)
+    if unit is None:
+        return "error", "invalid serviceName in node record", {}
+    rc, text = ctx.ssh(ctx.node, _journal_remote(unit, since, 400), 100)
     if rc == 124:
         return "timeout", "ssh timeout reading xray journal", {}
     if rc != 0:
@@ -717,8 +740,11 @@ echo "===END==="
 
 
 def handle_xray_restart(params: dict, ctx: JobContext) -> tuple[str, str, dict]:
+    unit = xray_unit(ctx.node)
+    if unit is None:
+        return "error", "invalid serviceName in node record", {}
     remote = f"""set +e
-systemctl restart {XRAY_UNIT}
+systemctl restart {unit}
 RC=$?
 sleep 1
 echo "===RC==="
