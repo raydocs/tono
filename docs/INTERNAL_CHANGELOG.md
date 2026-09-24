@@ -32,6 +32,43 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · Windows 托盘图标随每次状态发布刷新，提示不再被速率覆盖
+
+- **归属/来源**：G2 保护状态真实性；Windows App 原生托盘（`core/tray`、`tono/commands/mod.rs`）。
+  内部审查 H16-O-F2（= H16-C-F4），Issue [#517](https://github.com/raydocs/tono/issues/517)。
+  基线 main 8dc79a5b（2026-09-24 rebase），叠在 #513 之上 → 分支 `fix/win-tray-icon-state-20260924`，
+  PR [#518](https://github.com/raydocs/tono/pull/518)；提交时未合 main。
+- **缺陷修复**：托盘图标只在创建托盘、启动时一次性 `update_part` 和前端从不发送的图标偏好补丁时
+  取样；`emit_status` 只刷新菜单（Windows 上为空操作）和提示。连接、Protected Offline、恢复网络后
+  图标都停在启动时的样子（通常灰色）。另外 connecting/disconnecting 映射到绿色「已连接」图标；
+  默认开启的速率显示每秒用速率文字整段替换提示，关闭时又设为「Tono」，保护状态行消失。
+  现在 `emit_status` 只调用 `Tray::refresh_status`：在 `projection_lock` 下读取一次状态，同一快照
+  设置菜单、图标和提示；偏好路径的 `update_icon` 也取同一把锁，旧刷新不能盖回新图标。connecting/
+  disconnecting 改为灰色图标。提示由状态行和可选速率行组成，状态在前（Windows 只保留前 128 个
+  UTF-16 单元）；速率任务只更新速率行，两边都在同一把锁内写原生提示。
+  审查续修（518-O-F1 = 518-C-F1）：退出/重启期间 `is_exiting` 使状态发布跳过托盘，用户在拒绝
+  对话框选「保持打开」后托盘仍停在退出前的图标和「已保护」。现在每个取消分支清除标志后都重新
+  投影一次托盘（`surface_cancelled_quit` 与重启清理失败分支）。速率任务在退出开始后永久结束，
+  取消后提示会一直带着最后一次速率（518-O-F2，经核实）：任务结束时清掉缓存的速率行，取消后按偏好
+  重新启动速率任务。
+- **新增/优化**：无。
+- **工程与测试**：托盘刷新改经 `TrayProjectionTarget` 接缝（App 实现写 Tauri 托盘）。新增一个
+  `#[tokio::test]`：经 `emit_status` 所用的 `refresh_status_on` 发布 Connected 状态，再经速率任务
+  所用的 `show_speed` 写一次速率，断言菜单刷新一次、记录到 Tun 图标、第一次提示含保护状态行、
+  第二次提示为「状态行 + 速率行」（审查续修 518-O-F3 = 518-C-F2：原测试直接调用私有投影并手工
+  设置速率字段）。`emit_status` 到 `refresh_status` 的一行与 `AppTray` 绑定需要 Tauri AppHandle，
+  未被测试覆盖。原有图标映射测试把 connecting 固定为 Tun，改为断言 connecting/disconnecting 为 Common。
+- **验证**：本机（编辑机）未运行原生 cargo；Tauri crate `cargo test --locked` 委托本 PR 的
+  GitHub-hosted `windows-2025` CI，结果以 PR 页为准。新测试在旧代码上的失败未运行（旧代码无此
+  接缝，发布路径没有图标步骤）。改动文件的新增行用 rustfmt `--check` 核对无新增格式差异。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：未在实机上观察图标与提示；自定义托盘图标偏好与状态投影共用 `latest_arc`。
+  对话框显示期间托盘仍是退出前的样子，取消后才重投影；确认退出则不再刷新。本 PR 叠在 #513
+  （托盘提示按 live 证据显示「保护状态未确认」）之上，含其提交，不能单独合入。
+  与 #520 都改 `feat/window.rs` 的取消路径，但改动不在同一行块。
+  未验证的 Protected Offline 仍用橙色图标，与 flyout 一致（518-O-F4 经核实驳回，不改）。
+  取消恰好发生在速率任务收尾的毫秒级窗口内时，任务不会重启，直到下次启动。
+
 ## 2026-09-24 · Windows 横幅、登录卡与托盘提示只在 Service 确认屏障时说「已拦住」
 
 - **归属/来源**：G2 保护状态真实性；Windows App 前端与托盘。内部审查 H16-O-F1（= H16-C-F5），

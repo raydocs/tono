@@ -304,12 +304,10 @@ pub(crate) fn emit_status(app: &AppHandle, status: &TonoStatus) {
     // The tray is another projection of this same product state. Rebuild it asynchronously so
     // callers may continue publishing while holding the state mutex; the tray snapshot will run
     // after that guard is released and therefore cannot deadlock the connection transaction.
+    // Menu, icon and tooltip are one projection: the icon was only sampled at startup.
     AsyncHandler::spawn(|| async {
-        if let Err(err) = crate::core::tray::Tray::global().update_menu().await {
+        if let Err(err) = crate::core::tray::Tray::global().refresh_status().await {
             logging!(warn, Type::Tray, "Tono: failed to refresh tray status: {err:#}");
-        }
-        if let Err(err) = crate::core::tray::Tray::global().update_tooltip().await {
-            logging!(warn, Type::Tray, "Tono: failed to refresh tray tooltip: {err:#}");
         }
     });
 }

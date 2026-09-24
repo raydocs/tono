@@ -17,6 +17,7 @@ use tokio::fs;
 
 use super::handle;
 use anyhow::Result;
+use async_trait::async_trait;
 use std::borrow::Cow;
 use std::time::Duration;
 use tauri::{AppHandle, Manager as _, Wry, menu::MenuEvent};
@@ -38,6 +39,7 @@ pub const TRAY_ID: &str = "tono-tray";
 #[derive(Clone)]
 struct TrayState {}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum IconKind {
     Common,
     SysProxy,
@@ -46,8 +48,9 @@ enum IconKind {
 
 fn tray_icon_kind(ui_state: &str) -> IconKind {
     match ui_state {
-        "connected" | "connecting" | "disconnecting" => IconKind::Tun,
+        "connected" => IconKind::Tun,
         "protectedOffline" => IconKind::SysProxy,
+        // Connecting and disconnecting have no verified tunnel: never show the connected icon.
         _ => IconKind::Common,
     }
 }
@@ -90,7 +93,113 @@ pub struct Tray {
     /// Serializes native menu/tooltip snapshots. The guard is acquired before reading TonoState,
     /// so an older status refresh can never overwrite a newer projection after being suspended.
     projection_lock: tokio::sync::Mutex<()>,
+    /// The tooltip's status lines and optional speed line. The speed display adds to the status
+    /// instead of replacing it; both writers set the native tooltip while holding this lock.
+    tooltip: parking_lot::Mutex<TrayTooltip>,
     speed_controller: speed_task::TraySpeedController,
+}
+
+#[derive(Debug, Default)]
+struct TrayTooltip {
+    status: String,
+    speed: Option<String>,
+}
+
+impl TrayTooltip {
+    fn text(&self) -> String {
+        match &self.speed {
+            // Status first: Windows keeps only the first 128 UTF-16 units.
+            Some(speed) if !self.status.is_empty() => format!("{}\n{speed}", self.status),
+            Some(speed) => speed.clone(),
+            None if self.status.is_empty() => "Tono".to_string(),
+            None => self.status.clone(),
+        }
+    }
+}
+
+/// The native half of one tray status projection. The app writes the Tauri tray; tests record.
+#[async_trait]
+trait TrayProjectionTarget: Sync {
+    /// The product state to project, read after the projection guard is held.
+    async fn snapshot(&self) -> TonoMenuState;
+    async fn set_menu(&self) -> Result<()>;
+    async fn set_icon(&self, kind: IconKind) -> Result<()>;
+    fn set_tooltip(&self, text: &str) -> Result<()>;
+}
+
+struct AppTray(&'static AppHandle);
+
+#[async_trait]
+impl TrayProjectionTarget for AppTray {
+    async fn snapshot(&self) -> TonoMenuState {
+        tono_menu_state(self.0).await
+    }
+
+    async fn set_menu(&self) -> Result<()> {
+        apply_menu(self.0).await
+    }
+
+    async fn set_icon(&self, kind: IconKind) -> Result<()> {
+        // `latest_arc`, as the tray-icon preference path uses, so a publish during a preference
+        // patch does not put back the icon choice being replaced.
+        let verge = Config::preferences().await.latest_arc();
+        apply_icon(self.0, &verge, kind).await
+    }
+
+    fn set_tooltip(&self, text: &str) -> Result<()> {
+        let Some(tray) = self.0.tray_by_id(TRAY_ID) else {
+            logging!(warn, Type::Tray, "Failed to update tray tooltip: tray not found");
+            return Ok(());
+        };
+        logging_error!(Type::Tray, tray.set_tooltip(Some(text)));
+        Ok(())
+    }
+}
+
+async fn apply_menu(app_handle: &AppHandle) -> Result<()> {
+    let Some(tray) = app_handle.tray_by_id(TRAY_ID) else {
+        logging!(warn, Type::Tray, "Failed to update tray menu: tray not found");
+        return Ok(());
+    };
+
+    #[cfg(target_os = "windows")]
+    {
+        // Native Win32 tray menus cannot carry Tono chrome. The flyout is
+        // the product surface; skip the system context menu entirely.
+        let _ = tray.set_menu(None::<tauri::menu::Menu<Wry>>);
+        let _ = app_handle;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        logging_error!(Type::Tray, tray.set_menu(Some(create_tray_menu(app_handle).await?)));
+        logging!(debug, Type::Tray, "托盘菜单更新成功");
+    }
+    Ok(())
+}
+
+async fn apply_icon(app_handle: &AppHandle, verge: &TonoPreferences, kind: IconKind) -> Result<()> {
+    let Some(tray) = app_handle.tray_by_id(TRAY_ID) else {
+        logging!(warn, Type::Tray, "Failed to update tray icon: tray not found");
+        return Ok(());
+    };
+
+    let (_is_custom_icon, icon_bytes) = TrayState::load_icon(verge, kind).await;
+
+    let template = {
+        #[cfg(target_os = "macos")]
+        {
+            verge.tray_icon.as_ref().is_none_or(|v| v == "monochrome")
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    };
+    let icon = Some(tauri::image::Image::from_bytes(&icon_bytes)?);
+
+    logging_error!(Type::Tray, tray.set_icon_with_as_template(icon, template));
+
+    Ok(())
 }
 
 impl TrayState {
@@ -154,6 +263,7 @@ impl Default for Tray {
         Self {
             limiter: Limiter::new(Duration::from_millis(TRAY_CLICK_DEBOUNCE_MS), SystemClock),
             projection_lock: tokio::sync::Mutex::new(()),
+            tooltip: parking_lot::Mutex::new(TrayTooltip::default()),
             speed_controller: speed_task::TraySpeedController::new(),
         }
     }
@@ -222,25 +332,7 @@ impl Tray {
 
     async fn update_menu_internal(&self, app_handle: &AppHandle, _include_proxy_groups: bool) -> Result<()> {
         let _projection = self.projection_lock.lock().await;
-        let Some(tray) = app_handle.tray_by_id(TRAY_ID) else {
-            logging!(warn, Type::Tray, "Failed to update tray menu: tray not found");
-            return Ok(());
-        };
-
-        #[cfg(target_os = "windows")]
-        {
-            // Native Win32 tray menus cannot carry Tono chrome. The flyout is
-            // the product surface; skip the system context menu entirely.
-            let _ = tray.set_menu(None::<tauri::menu::Menu<Wry>>);
-            let _ = app_handle;
-            let _ = _include_proxy_groups;
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            logging_error!(Type::Tray, tray.set_menu(Some(create_tray_menu(app_handle).await?)));
-            logging!(debug, Type::Tray, "托盘菜单更新成功");
-        }
-        Ok(())
+        apply_menu(app_handle).await
     }
 
     /// 更新托盘图标
@@ -251,65 +343,56 @@ impl Tray {
         }
 
         let app_handle = handle::Handle::app_handle();
-
-        let Some(tray) = app_handle.tray_by_id(TRAY_ID) else {
-            logging!(warn, Type::Tray, "Failed to update tray icon: tray not found");
-            return Ok(());
-        };
-
+        // Same guard as the status projection, so a preference refresh cannot put back the icon
+        // of a state that a newer publish has already replaced.
+        let _projection = self.projection_lock.lock().await;
         let menu_state = tono_menu_state(app_handle).await;
-        let (_is_custom_icon, icon_bytes) =
-            TrayState::get_tray_icon(verge, &menu_state.ui_state).await;
-
-        let template = {
-            #[cfg(target_os = "macos")]
-            {
-                verge.tray_icon.as_ref().is_none_or(|v| v == "monochrome")
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                false
-            }
-        };
-        let icon = Some(tauri::image::Image::from_bytes(&icon_bytes)?);
-
-        logging_error!(Type::Tray, tray.set_icon_with_as_template(icon, template));
-
-        Ok(())
+        apply_icon(app_handle, verge, tray_icon_kind(&menu_state.ui_state)).await
     }
 
     /// 更新托盘提示
     pub async fn update_tooltip(&self) -> Result<()> {
+        self.refresh_status().await
+    }
+
+    /// The tray half of every status publish (`emit_status`), and of a cancelled Quit/Restart.
+    pub async fn refresh_status(&self) -> Result<()> {
+        self.refresh_status_on(&AppTray(handle::Handle::app_handle())).await
+    }
+
+    /// One serialized status projection: menu, icon and tooltip come from the same snapshot,
+    /// read after the guard is held, so an older publish cannot overwrite a newer one. Skipped
+    /// while exiting; a cancelled exit calls this again once the flag is cleared.
+    async fn refresh_status_on(&self, target: &impl TrayProjectionTarget) -> Result<()> {
         if handle::Handle::global().is_exiting() {
-            logging!(debug, Type::Tray, "应用正在退出，跳过托盘提示更新");
+            logging!(debug, Type::Tray, "应用正在退出，跳过托盘状态更新");
             return Ok(());
         }
-
-        let app_handle = handle::Handle::app_handle();
         let _projection = self.projection_lock.lock().await;
+        let menu_state = target.snapshot().await;
+        let menu = target.set_menu().await;
+        let icon = target.set_icon(tray_icon_kind(&menu_state.ui_state)).await;
+        let mut guard = self.tooltip.lock();
+        guard.status = menu_state.tooltip_status();
+        let tooltip = target.set_tooltip(&guard.text());
+        menu.and(icon).and(tooltip)
+    }
 
-        let menu_state = tono_menu_state(app_handle).await;
+    /// The speed task has ended: drop its last line so later projections do not repeat a frozen
+    /// value (it ends for good when an exit starts, even one the user then cancels).
+    fn forget_speed(&self) {
+        self.tooltip.lock().speed = None;
+    }
 
-        let v = env!("CARGO_PKG_VERSION");
-        let reassembled_version = v.split_once('+').map_or_else(
-            || v.into(),
-            |(main, rest)| format!("{main}+{}", rest.split('.').next().unwrap_or("")),
-        );
-
-        let tooltip = format!(
-            "Tono {reassembled_version}\n{}\n{}",
-            menu_state.protection_text(),
-            menu_state.server_text()
-        );
-
-        let Some(tray) = app_handle.tray_by_id(TRAY_ID) else {
-            logging!(warn, Type::Tray, "Failed to update tray tooltip: tray not found");
-            return Ok(());
-        };
-
-        logging_error!(Type::Tray, tray.set_tooltip(Some(&tooltip)));
-
-        Ok(())
+    /// The speed display's tooltip write (Windows): the speed line goes under the status lines,
+    /// never in their place, and is written under the same lock as the status projection.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    fn show_speed(&self, speed: Option<String>, set_tooltip: impl FnOnce(&str) -> Result<()>) {
+        let mut tooltip = self.tooltip.lock();
+        tooltip.speed = speed;
+        if let Err(err) = set_tooltip(&tooltip.text()) {
+            logging!(warn, Type::Tray, "设置托盘速率提示失败: {err}");
+        }
     }
 
     pub async fn update_part(&self) -> Result<()> {
@@ -445,6 +528,19 @@ impl TonoMenuState {
 
     fn protection_text(&self) -> String {
         tono_i18n::t!("tray.tono.protectionValue", value = self.protection_label()).into_owned()
+    }
+
+    fn tooltip_status(&self) -> String {
+        let v = env!("CARGO_PKG_VERSION");
+        let reassembled_version = v.split_once('+').map_or_else(
+            || v.into(),
+            |(main, rest)| format!("{main}+{}", rest.split('.').next().unwrap_or("")),
+        );
+        format!(
+            "Tono {reassembled_version}\n{}\n{}",
+            self.protection_text(),
+            self.server_text()
+        )
     }
 
     fn server_text(&self) -> String {
@@ -685,11 +781,69 @@ mod tests {
     fn tray_icon_follows_protection_state_not_legacy_proxy_modes() {
         assert!(matches!(super::tray_icon_kind("notConnected"), super::IconKind::Common));
         assert!(matches!(super::tray_icon_kind("connected"), super::IconKind::Tun));
-        assert!(matches!(super::tray_icon_kind("connecting"), super::IconKind::Tun));
+        assert!(matches!(super::tray_icon_kind("connecting"), super::IconKind::Common));
+        assert!(matches!(
+            super::tray_icon_kind("disconnecting"),
+            super::IconKind::Common
+        ));
         assert!(matches!(
             super::tray_icon_kind("protectedOffline"),
             super::IconKind::SysProxy
         ));
+    }
+
+    /// Records what one status projection would write to the native tray.
+    struct RecordingTray {
+        state: TonoMenuState,
+        menus: parking_lot::Mutex<usize>,
+        icons: parking_lot::Mutex<Vec<super::IconKind>>,
+        tooltips: parking_lot::Mutex<Vec<String>>,
+    }
+
+    #[async_trait::async_trait]
+    impl super::TrayProjectionTarget for RecordingTray {
+        async fn snapshot(&self) -> TonoMenuState {
+            self.state.clone()
+        }
+
+        async fn set_menu(&self) -> anyhow::Result<()> {
+            *self.menus.lock() += 1;
+            Ok(())
+        }
+
+        async fn set_icon(&self, kind: super::IconKind) -> anyhow::Result<()> {
+            self.icons.lock().push(kind);
+            Ok(())
+        }
+
+        fn set_tooltip(&self, text: &str) -> anyhow::Result<()> {
+            self.tooltips.lock().push(text.to_string());
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_connected_publish_shows_the_connected_icon_and_a_later_speed_keeps_the_status() {
+        let tray = super::Tray::default();
+        let target = RecordingTray {
+            state: state("connected", false),
+            menus: parking_lot::Mutex::new(0),
+            icons: parking_lot::Mutex::new(Vec::new()),
+            tooltips: parking_lot::Mutex::new(Vec::new()),
+        };
+
+        // The publish path `emit_status` runs, then the speed display's own write.
+        assert!(tray.refresh_status_on(&target).await.is_ok());
+        tray.show_speed(Some("speed".to_string()), |text| {
+            super::TrayProjectionTarget::set_tooltip(&target, text)
+        });
+
+        assert_eq!(*target.menus.lock(), 1);
+        assert_eq!(*target.icons.lock(), vec![super::IconKind::Tun]);
+        let tooltips = target.tooltips.lock();
+        assert_eq!(tooltips.len(), 2);
+        assert!(tooltips[0].contains(&target.state.protection_text()));
+        assert_eq!(tooltips[1], format!("{}\nspeed", tooltips[0]));
     }
 
     #[test]

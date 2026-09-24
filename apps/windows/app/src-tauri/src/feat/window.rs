@@ -159,6 +159,7 @@ pub async fn restart_app() {
 
     if should_abort_exit_after_cleanup(cleanup_result.core_stopped, confirmed_protected_exit) {
         handle::Handle::global().clear_is_exiting();
+        refresh_tray_after_cancelled_exit().await;
         handle::Handle::notice_message("app_restart::core_stop_failed", "");
         return;
     }
@@ -173,12 +174,34 @@ pub async fn restart_app() {
 /// operation debouncer may swallow it right after another window action, and that is still
 /// better than the previous silent refusal.
 async fn surface_cancelled_quit() {
+    refresh_tray_after_cancelled_exit().await;
     let result = WindowManager::show_main_window().await;
     logging!(
         info,
         Type::Window,
         "Quit was cancelled; restoring the main window so the reason is visible: {result:?}"
     );
+}
+
+/// Status publishes skip the tray while `is_exiting` is set, so a release that completed (or was
+/// refused) while Quit/Restart waited left the tray on its pre-exit icon and tooltip. Once a
+/// cancel has cleared the flag, project the current state again, and restart the speed display,
+/// which stops for good when an exit starts.
+async fn refresh_tray_after_cancelled_exit() {
+    let tray = crate::core::tray::Tray::global();
+    if let Err(err) = tray.refresh_status().await {
+        logging!(
+            warn,
+            Type::Tray,
+            "Tono: failed to refresh the tray after a cancelled exit: {err:#}"
+        );
+    }
+    let enable_tray_speed = Config::preferences()
+        .await
+        .latest_arc()
+        .enable_tray_speed
+        .unwrap_or(true);
+    tray.update_speed_task(enable_tray_speed);
 }
 
 /// Interactive Quit and Restart's own budget for *proving* the release.
