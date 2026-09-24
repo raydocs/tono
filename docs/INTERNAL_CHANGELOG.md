@@ -32,6 +32,31 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-23 · Windows 登出丢弃账户目录，同 revision 新正文不再判篡改
+
+- **归属/来源**：G1 连接正确性（账户隔离）；影响 Windows tono-core 目录追踪与 Windows App
+  账户关闭。基线 main 244075f2 → 分支 `fix/win-catalog-account-20260923`，Issue #315；
+  提交时未合 main。
+- **缺陷修复**：控制面 revision 全机群共享、正文与 `sha256` 按账户下发，Windows
+  `CatalogTracker::install` 却把「同 revision、不同 digest」判为 `InvalidResponse`，而登出又不清
+  `nodes`/`routing`/tracker/`managed-exit-catalog.json`。A 登出后 B 在下一次 fleet revision 前登录时，
+  B 的目录被拒，Connect 沿用 A 的 VLESS UUID 与住宅 SOCKS5 凭据；同账户设备凭据重发也会一直拨
+  已退役 UUID。现在 (1) 同 revision 不同 digest 按新正文安装（仍须完整校验：digest、节点准入、
+  住宅路由），只有 digest 相同才是 `Unchanged`，旧 revision 仍是 `StaleRevision`；(2) 账户关闭
+  收尾（用户登出、restore 的 Expired/Missing）调用 `discard_account_catalog`，清内存节点/路由、
+  重置 tracker 并删除缓存文件。对齐 macOS。
+- **新增/优化**：无。
+- **工程与测试**：新增一个回归 `sign_out_discards_the_account_issued_catalog`
+  （`commands/account.rs` lifecycle_tests）；旧实现在 `inner.nodes.is_empty()` 断言失败。
+  契约修正：tono-core `tracker_same_revision_different_digest_is_invalid` 把错误语义写成契约，
+  改为 `tracker_same_revision_different_digest_installs_the_new_body`（不新增测试）。
+- **验证**：本机（编辑机）未运行 cargo；委托本 PR 的 GitHub-hosted `windows-2025` CI
+  （`tono-core` 与 app workspace `cargo test --locked`），结果以 PR 页为准。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：缓存删除失败只记日志（下一会话首次同步仍会替换）；缓存未记录 owner，restore
+  依赖登出/Expired/Missing 收尾清理而非 owner 比对。只改 routing 的轮换（`routingSha256`）另案处理。
+  旧 Windows 客户端仍需控制面 bump revision（`catalog.ts` 注释说明不变）。未做实机验证。
+
 ## 2026-09-23 · macOS 升级事务终态：consumed 后可达归档 + successor 合法重绑
 
 - **归属/来源**：G3 原生升级链；macOS `tono-core-helper` 升级账本。R4-F2 与 R4-F3
