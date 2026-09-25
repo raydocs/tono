@@ -452,6 +452,8 @@ struct MultiExitPolicyTests {
         guard validatedDirectPolicy?.sessionEndpoints.count == 6 else {
             throw TestFailure("managed direct policy did not produce exact PF tuples")
         }
+        // Hosted CI has no WeChat installed; supply the discovered bundle path.
+        ConfigPipeline.managedDirectBundlePathsOverride = ["/Applications/WeChat.app/"]
         let managedDirectRuntime = try ConfigPipeline.buildOwnedTonoRuntime(
             subscriptionYAML: "proxies: []\n",
             overlay: cloudOnlyOverlay,

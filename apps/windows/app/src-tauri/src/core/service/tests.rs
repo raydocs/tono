@@ -4,7 +4,7 @@ use super::{
     claim_owner_recovery_generation, forget_failed_service_repair, generate_service_session_token,
     macos_install_shell, mark_service_unavailable_after_owner_loss, mark_verified_committed,
     owner_recovery_policy, record_service_repair, service_core_path_for, service_repair_is_worth_prompting,
-    session_matches_status, watchdog_action_after_tono_stop_failure,
+    session_matches_status, tono_start_refusal, watchdog_action_after_tono_stop_failure,
 };
 #[cfg(unix)]
 use super::{service_core_path_for_with_publisher, service_tool_path_for};
@@ -723,4 +723,17 @@ fn a_service_that_came_back_ready_is_never_shadowed_by_a_restored_sidecar() {
     assert!(!store.restore_sidecar_allowance());
     assert!(!store.state().sidecar_allowed);
     assert_eq!(status_of(&store), ServiceStatus::Ready);
+}
+
+/// H2-F2 follow-up: the Service refuses a start with 1014 while another signed-in local user holds
+/// the armed protection. That code must reach the UI as its stable marker, not as a bare message
+/// the dashboard can only show as an unknown connect failure.
+#[test]
+fn protection_held_by_another_user_refusal_carries_its_marker() {
+    let code = tono_service_protocol::ServiceErrorCode::ProtectionHeldByAnotherUser as u16;
+    let reported = tono_start_refusal(code, "held by another user".to_owned());
+    assert!(reported.starts_with(&format!(
+        "{}:",
+        crate::tono::connection::PROTECTION_HELD_BY_ANOTHER_USER_PREFIX
+    )));
 }

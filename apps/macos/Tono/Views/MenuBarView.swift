@@ -19,7 +19,7 @@ struct MenuBarView: View {
                     .padding(.horizontal, 16)
                     .padding(.bottom, appState.recoveryFeedback == nil ? 0 : 10)
                 primaryAction
-                if appState.isProtectionBlocked
+                if appState.isProtectionBlocked || appState.isProtectionUnconfirmed
                     || (KillSwitchService.isArmed && accountSession.state != .ready) {
                     restoreAction
                 }

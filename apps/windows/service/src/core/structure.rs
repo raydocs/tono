@@ -41,10 +41,11 @@ pub struct ProtocolInfo {
     pub build_version: String,
     pub protocol: ProtocolVersion,
     pub min_client_revision: u16,
-    /// The Service's explicit-release epoch at the moment of this response (filled only by the
-    /// serving side of the pipe). A destructive owner-gated request that carries a snapshot of
-    /// this value older than the live epoch belongs to an attempt an explicit release already
-    /// superseded, and the Service refuses it. `#[serde(default)]` so a client still parses an
+    /// The Service's attempt epoch at the moment of this response (filled only by the serving
+    /// side of the pipe; bumped by every explicit release and by an update takeover's Prepare).
+    /// A destructive owner-gated request that carries a snapshot of this value older than the
+    /// live epoch belongs to an attempt one of those already superseded, and the Service
+    /// refuses it. `#[serde(default)]` so a client still parses an
     /// older Service's answer, which never carries the field — and such a Service also fails
     /// [`ProtocolInfo::supports_prepare_start_epoch`], so the defaulted zero is never sent as a
     /// freshness proof.
@@ -478,6 +479,13 @@ pub struct DnsProtectionStatus {
     pub adapters: u32,
     #[serde(default)]
     pub last_error: Option<String>,
+    /// Advisory only (X2-2, `TONO_DNS_POLICY_CONFLICT: …`): the adapters are protected, but the
+    /// resolver policy Windows applies was observed to disagree. Never an error: update
+    /// admission, startup takeover and the App's lost-response read-back decide on `last_error`
+    /// alone, and a group-policy NRPT Tono cannot change must not close them. Omitted when absent
+    /// so an older App or Service reads this status unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolver_policy_warning: Option<String>,
 }
 
 /// The service's network-change feed, aggregated into `/status`.
@@ -529,9 +537,10 @@ impl StopClashPayload {
 }
 
 /// `POST /clash/prepare-start` freshness proof: the client's snapshot of the Service's
-/// explicit-release epoch, read from `GET /version` immediately before the mutating request.
-/// The same `RELEASE_EPOCH` StartClash snapshots itself inside the Service (see
-/// `windows_kill_switch::release_epoch`); carrying the client's copy is what makes the gate
+/// attempt epoch, read from `GET /version` immediately before the mutating request.
+/// Every explicit release bumps it together with the `RELEASE_EPOCH` StartClash snapshots
+/// itself inside the Service, and an update takeover's Prepare bumps it too (see
+/// `windows_kill_switch::attempt_epoch`); carrying the client's copy is what makes the gate
 /// catch a request that was already in flight when the release completed — the in-Service
 /// snapshot is only taken once the request arrives, which is too late for exactly that case.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -636,6 +645,15 @@ pub enum ServiceErrorCode {
     /// own arrival-time snapshot). The refusal happens before any Core is touched. Mapped to
     /// 409 Conflict.
     StaleReleaseEpoch = 1013,
+    /// `StartClash` / `PrepareCoreStart` refused: the armed network protection belongs to a
+    /// different local user whose Windows logon session still exists. Taking it over would stop
+    /// that user's Core and hand their protection to the caller. Mapped to 409 Conflict.
+    ProtectionHeldByAnotherUser = 1014,
+    /// `StartClash` / `PrepareCoreStart` refused: the caller's Windows session is a Remote
+    /// Desktop session (or cannot be confirmed as the console) and the caller holds no armed
+    /// protection yet. Arming would block the physical interface that session arrives on, and the
+    /// block cannot be released from outside the console. Mapped to 409 Conflict.
+    RemoteSessionConnectRefused = 1015,
 }
 
 pub fn owner_key(identity: &OwnerIdentity) -> String {

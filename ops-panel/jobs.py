@@ -86,6 +86,13 @@ TCP_TUNING_KEYS = (
 )
 
 EXIT_AGENT_UNIT = "tono-exit-agent.service"
+# The unit every provisioning script installs (manage-tono-reality-node.sh et al.).
+# A node provisioned by provision-tono-node.py may name its own unit; its
+# record in nodes.secrets.json then carries that "serviceName".
+XRAY_UNIT = "tono-xray.service"
+# Same shape provision-tono-node.py accepts; the name is interpolated into a
+# remote shell, so anything else is refused.
+SAFE_UNIT = re.compile(r"^[A-Za-z0-9_.-]+\.service$")
 EXIT_AGENT_STATE = "/var/lib/tono-exit-agent/state.json"
 
 NEEDS_NODE = frozenset({
@@ -263,22 +270,9 @@ def ssh_exec(node: dict, remote: str, timeout: int = 60) -> tuple[int, str]:
     password = str(node["password"])
     env = os.environ.copy()
     env["SSHPASS"] = password
-    cmd = [
-        "sshpass",
-        "-e",
-        "ssh",
-        "-o",
-        "StrictHostKeyChecking=no",
-        "-o",
-        "UserKnownHostsFile=/dev/null",
-        "-o",
-        "ConnectTimeout=15",
-        "-p",
-        str(port),
-        f"root@{host}",
-        "bash",
-        "-s",
-    ]
+    import collect  # type: ignore
+
+    cmd = [*collect.ssh_password_argv(host, port, 15), "bash", "-s"]
     try:
         proc = subprocess.run(
             cmd,
@@ -306,21 +300,9 @@ def ssh_agent(agent: dict, remote: str, timeout: int = 25) -> tuple[int, str]:
         return 1, "missing_agent_credentials"
     env = os.environ.copy()
     env["SSHPASS"] = password
-    cmd = [
-        "sshpass",
-        "-e",
-        "ssh",
-        "-o",
-        "StrictHostKeyChecking=no",
-        "-o",
-        "UserKnownHostsFile=/dev/null",
-        "-o",
-        "ConnectTimeout=12",
-        "-p",
-        str(port),
-        f"root@{host}",
-        remote,
-    ]
+    import collect  # type: ignore
+
+    cmd = [*collect.ssh_password_argv(host, port, 12), remote]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
         return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
@@ -476,14 +458,34 @@ class IngestClient:
         return "conflict" if code == 409 else "ok"
 
 
-def _journal_remote(since_minutes: int, max_lines: int) -> str:
-    return f'journalctl -u xray --since "-{int(since_minutes)}min" -n {int(max_lines)} --no-pager'
+def xray_unit(node: dict | None) -> str | None:
+    """The node's recorded Xray unit, tono-xray.service when none is recorded.
+
+    None means the record names something that is not a plain systemd unit.
+    """
+    unit = (node or {}).get("serviceName")
+    if unit is None or unit == "":
+        return XRAY_UNIT
+    unit = str(unit)
+    return unit if SAFE_UNIT.match(unit) else None
+
+
+def _journal_remote(unit: str, since_minutes: int, max_lines: int) -> str:
+    # journalctl exits 0 with no lines for a unit that does not exist, which
+    # would read as a clean node. Refuse that instead of reporting it.
+    return (
+        f'[ "$(systemctl show -p LoadState --value {unit})" = loaded ] || exit 3\n'
+        f'journalctl -u {unit} --since "-{int(since_minutes)}min" -n {int(max_lines)} --no-pager'
+    )
 
 
 def handle_xray_dial_errors(params: dict, ctx: JobContext) -> tuple[str, str, dict]:
     since = as_int(params.get("sinceMinutes"), 60, 0, 240)
     max_lines = as_int(params.get("maxLines"), 400, 1, 400)
-    rc, text = ctx.ssh(ctx.node, _journal_remote(since, max_lines), 100)
+    unit = xray_unit(ctx.node)
+    if unit is None:
+        return "error", "invalid serviceName in node record", {}
+    rc, text = ctx.ssh(ctx.node, _journal_remote(unit, since, max_lines), 100)
     if rc == 124:
         return "timeout", "ssh timeout reading xray journal", {}
     if rc != 0:
@@ -502,7 +504,10 @@ def handle_xray_dial_errors(params: dict, ctx: JobContext) -> tuple[str, str, di
 
 def handle_xray_error_digest(params: dict, ctx: JobContext) -> tuple[str, str, dict]:
     since = as_int(params.get("sinceMinutes"), 60, 0, 240)
-    rc, text = ctx.ssh(ctx.node, _journal_remote(since, 400), 100)
+    unit = xray_unit(ctx.node)
+    if unit is None:
+        return "error", "invalid serviceName in node record", {}
+    rc, text = ctx.ssh(ctx.node, _journal_remote(unit, since, 400), 100)
     if rc == 124:
         return "timeout", "ssh timeout reading xray journal", {}
     if rc != 0:
@@ -516,13 +521,17 @@ def handle_collect_quality(params: dict, ctx: JobContext) -> tuple[str, str, dic
     col = ctx.collector
     node = ctx.node
     quality = col.run_on_node_via_ssh(node)
-    ip = str(quality.get("public_ip") or node["host"])
-    time.sleep(0.5)
-    overseas = col.check_host_tcp_nodes(ip, col.OVERSEAS_NODES, port=443)
-    time.sleep(1.0)
-    asia = col.check_host_tcp_nodes(ip, col.ASIA_EDGE_NODES, port=443)
-    time.sleep(0.5)
-    mainland = col.probe_cn_agents(ip, ctx.cn_agents, port=443)
+    ip = col.probe_target(quality, node)
+    if ip is None:
+        overseas = asia = {"ok": False, "error": "no_public_ip"}
+        mainland = None
+    else:
+        time.sleep(0.5)
+        overseas = col.check_host_tcp_nodes(ip, col.OVERSEAS_NODES, port=443)
+        time.sleep(1.0)
+        asia = col.check_host_tcp_nodes(ip, col.ASIA_EDGE_NODES, port=443)
+        time.sleep(0.5)
+        mainland = col.probe_cn_agents(ip, ctx.cn_agents, port=443)
     block = col.classify_block(mainland, asia, overseas)
     quality["block"] = block
     report = {
@@ -569,6 +578,7 @@ def handle_node_probe(params: dict, ctx: JobContext) -> tuple[str, str, dict]:
             out[carrier] = {"reachable": False}
             continue
         reachable = False
+        unverified = 0
         latency_ms: int | None = None
         for agent in agents[:6]:
             remote = (
@@ -578,6 +588,9 @@ def handle_node_probe(params: dict, ctx: JobContext) -> tuple[str, str, dict]:
                 f"echo EXIT:$EC MS:$(( (END-START)/1000000 ))"
             )
             _rc, text = ssh_agent(agent, remote, timeout=25)
+            if "Host key verification failed" in text and "EXIT:" not in text:
+                unverified += 1
+                continue
             match = re.search(r"EXIT:(\d+)", text)
             code = int(match.group(1)) if match else _rc
             ms_match = re.search(r"MS:(\d+)", text)
@@ -588,6 +601,8 @@ def handle_node_probe(params: dict, ctx: JobContext) -> tuple[str, str, dict]:
                     latency_ms = ms if latency_ms is None else min(latency_ms, ms)
             time.sleep(0.4)
         entry: dict[str, Any] = {"reachable": reachable}
+        if unverified:
+            entry["hostKeyUnverified"] = unverified
         if reachable and latency_ms is not None:
             entry["latencyMs"] = latency_ms
         out[carrier] = entry
@@ -710,8 +725,11 @@ echo "===END==="
 
 
 def handle_xray_restart(params: dict, ctx: JobContext) -> tuple[str, str, dict]:
-    remote = """set +e
-systemctl restart xray
+    unit = xray_unit(ctx.node)
+    if unit is None:
+        return "error", "invalid serviceName in node record", {}
+    remote = f"""set +e
+systemctl restart {unit}
 RC=$?
 sleep 1
 echo "===RC==="
@@ -905,12 +923,36 @@ def run_jobs(
 
         by_name = {str(node.get("name")): node for node in nodes or []}
         runner = ssh_fn or ssh_exec
+        # Jobs run one after another, but each carries its own lease: 60 s for
+        # xray_restart. Every renewal also covers the jobs still waiting, and
+        # each job is claimed again right before it starts. A lease the Worker
+        # has already expired and requeued answers 409, and that job is skipped:
+        # the pass that leases it next runs it once.
+        waiting = [
+            str(job.get("id") or "") for job in leased
+            if isinstance(job, dict) and job.get("id")
+        ]
+
+        def renew(job_id: str) -> str:
+            try:
+                return ingest.heartbeat(job_id, lease_id)
+            except ControlPlaneUnreachable as exc:
+                col.log(f"jobs: heartbeat failed {job_id} {exc}")
+                return "unreachable"
 
         for job in leased:
             if not isinstance(job, dict):
                 continue
             job_id = str(job.get("id") or "")
             if not job_id:
+                continue
+            if job_id in waiting:
+                waiting.remove(job_id)
+            claimed = renew(job_id)
+            if claimed != "ok":
+                col.log(f"jobs: lease not held at start, skipped {job_id} ({claimed})")
+                if claimed == "unreachable":
+                    unreachable = True
                 continue
             node_name = str(job.get("nodeName") or "")
             node = by_name.get(node_name)
@@ -919,10 +961,8 @@ def run_jobs(
             allow_ip = node_allow_ip(node)
 
             def heartbeat(job_id: str = job_id) -> None:
-                try:
-                    ingest.heartbeat(job_id, lease_id)
-                except ControlPlaneUnreachable as exc:
-                    col.log(f"jobs: heartbeat failed {job_id} {exc}")
+                for held in [job_id, *waiting]:
+                    renew(held)
 
             def run_handler(
                 job_type: str = job_type,

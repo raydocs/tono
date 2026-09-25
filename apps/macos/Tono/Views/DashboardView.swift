@@ -51,7 +51,8 @@ struct DashboardView: View {
                                     return
                                 }
                                 appState.disconnect(releaseKillSwitch: true)
-                            } else if appState.isProtectionBlocked {
+                            } else if appState.isProtectionBlocked
+                                        || appState.isProtectionUnconfirmed {
                                 appState.disconnect(releaseKillSwitch: true)
                             } else if newValue {
                                 appState.connect()
@@ -62,6 +63,7 @@ struct DashboardView: View {
                     ), isConnecting: appState.isConnecting,
                        isDisconnecting: appState.isDisconnecting,
                        isProtectionBlocked: appState.isProtectionBlocked,
+                       isProtectionUnconfirmed: appState.isProtectionUnconfirmed,
                        isRecovering: appState.isRecoveringProtectedConnection,
                        connectionStage: appState.connectionStage,
                        disconnectionStage: appState.disconnectionStage,
@@ -205,13 +207,16 @@ struct DashboardView: View {
         if appState.isConnecting { return "Connecting" }
         if appState.isDisconnecting { return "Disconnecting" }
         if appState.isProtectionBlocked { return "Protected offline" }
+        if appState.isProtectionUnconfirmed { return "Protection unknown" }
         if isDegradedWhileConnected { return "Protected — exit degraded" }
         return appState.isConnected ? "Protected" : "Standby"
     }
 
     private var statusBadgeColor: Color {
         if appState.isConnecting || appState.isDisconnecting { return TonoBrand.accent }
-        if appState.isProtectionBlocked { return TonoStatus.blocked }
+        if appState.isProtectionBlocked || appState.isProtectionUnconfirmed {
+            return TonoStatus.blocked
+        }
         if isDegradedWhileConnected { return TonoStatus.blocked }
         return appState.isConnected ? TonoStatus.positive : TonoStatus.neutral
     }
@@ -230,6 +235,7 @@ struct DashboardView: View {
         if appState.isConnecting { return String(localized: "Connecting") }
         if appState.isDisconnecting { return String(localized: "Finishing") }
         if appState.isProtectionBlocked { return String(localized: "Offline") }
+        if appState.isProtectionUnconfirmed { return String(localized: "Unknown") }
         if isDegradedWhileConnected { return String(localized: "Degraded") }
         return appState.isConnected
             ? String(localized: "Protected")
@@ -239,6 +245,9 @@ struct DashboardView: View {
     private var protectionDetail: String {
         if appState.isProtectionBlocked {
             return String(localized: "Direct traffic blocked")
+        }
+        if appState.isProtectionUnconfirmed {
+            return String(localized: "Direct traffic may be blocked")
         }
         if isDegradedWhileConnected {
             return String(localized: "Exit not responding — checking")
