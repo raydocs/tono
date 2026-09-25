@@ -20,6 +20,7 @@ pub mod diagnostics;
 pub(crate) mod local_evidence;
 pub(crate) mod encrypted_dns;
 mod integration_profile;
+pub mod offline_grant;
 pub mod policy_sync;
 pub mod protected_probe;
 mod signed_apps;

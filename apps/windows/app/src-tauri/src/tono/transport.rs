@@ -1,6 +1,7 @@
 //! `tono_core::HttpTransport` over the app's reqwest stack:
 //! redirects disabled, cookies disabled, 30 s connect / 45 s total timeouts (the
-//! mainland-link budget), and a 2 MiB response cap. The Bearer token is computed by
+//! mainland-link budget; the pinned attempt connects within 10 s so its fallback still fits the
+//! launch restore budget), and a 2 MiB response cap. The Bearer token is computed by
 //! `ApiClient` and carried on the request; this layer only passes it through.
 //!
 //! F1: the API hostname is DNS-pinned to the bootstrap IPs (see
@@ -30,7 +31,18 @@ use crate::tono::bootstrap;
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 /// §1 mainland-link timeouts (connect 30 s / total 45 s).
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
-const TOTAL_TIMEOUT: Duration = Duration::from_secs(45);
+pub(crate) const TOTAL_TIMEOUT: Duration = Duration::from_secs(45);
+/// Connect budget of the pinned attempt only (#583).
+///
+/// Every request tries the pinned addresses first, and a network that drops them costs this much
+/// before the system-resolver fallback may run. At the shared 30 s it equalled the whole launch
+/// restore budget (`RESTORE_TRANSACTION_TIMEOUT`), so restore expired inside the pinned connect and
+/// the fallback never ran at launch. Restore sends two requests in sequence (token refresh, then
+/// `me`) and each pays this once, so it stays well under half of that budget; 10 s still covers
+/// two SYN retransmissions on a lossy link (Windows retransmits at 3 s and 9 s). Only the connect
+/// phase is bounded: a connect that runs out of time delivered nothing, so the fallback's delivery
+/// rule is unchanged.
+const PINNED_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Map a reqwest failure onto the retry-policy classification (§1).
 ///
@@ -118,7 +130,64 @@ fn describe(err: &reqwest::Error) -> String {
         source = cause.source();
         depth += 1;
     }
-    text
+    mark_clock_skew(err, text)
+}
+
+/// Stable marker for a certificate the system clock cannot date (#588).
+///
+/// A clock far off makes every certificate look expired or not yet valid, and NTP is
+/// blocked while protection is on, so "could not reach Tono" leaves the user nothing to
+/// fix. The kind is left as it was: the failure is still a transport failure for the retry
+/// policy and for offline admission (no status line arrived), and only the text the user
+/// reads changes. The frontend matches `TONO_CLOCK_SKEW:` anywhere in an error, ahead of
+/// the surface's own prefix.
+pub(crate) const CLOCK_SKEW: &str = "TONO_CLOCK_SKEW";
+
+/// `text`, marked with [`CLOCK_SKEW`] when `err` carries a rustls certificate-validity
+/// failure.
+pub(crate) fn mark_clock_skew(err: &(dyn std::error::Error + 'static), text: String) -> String {
+    if is_certificate_time_error(err) {
+        format!("{CLOCK_SKEW}: {text}")
+    } else {
+        text
+    }
+}
+
+/// Whether the chain holds rustls's expired / not-yet-valid certificate error, from webpki
+/// (`*Context`) or the Windows platform verifier (`CERT_E_EXPIRED` → `Expired`).
+///
+/// `io::Error::source` skips the error it wraps, and hyper-rustls wraps tokio-rustls's
+/// `io::Error` in another, so each `io::Error` is opened with `get_ref` as well.
+fn is_certificate_time_error(err: &(dyn std::error::Error + 'static)) -> bool {
+    use rustls::CertificateError as Certificate;
+    let mut current = Some(err);
+    let mut depth = 0;
+    while let Some(cause) = current {
+        // Bounded like `describe`: a chain is short.
+        if depth >= 8 {
+            break;
+        }
+        if let Some(rustls::Error::InvalidCertificate(certificate)) =
+            cause.downcast_ref::<rustls::Error>()
+        {
+            return matches!(
+                certificate,
+                Certificate::Expired
+                    | Certificate::ExpiredContext { .. }
+                    | Certificate::NotValidYet
+                    | Certificate::NotValidYetContext { .. }
+            );
+        }
+        if let Some(io) = cause.downcast_ref::<std::io::Error>()
+            && let Some(inner) = io.get_ref()
+            && is_certificate_time_error(inner)
+        {
+            return true;
+        }
+        current = cause.source();
+        depth += 1;
+    }
+    false
 }
 
 pub struct TonoTransport {
@@ -151,6 +220,37 @@ pub struct TonoTransport {
     /// reset, that failure costs the full connect timeout. A fresh start re-tries 443 first,
     /// so a network that recovers is not stuck on an alternate for ever.
     alternate_port: std::sync::atomic::AtomicU16,
+    /// The system-resolved client answered after the pinned addresses failed (#583).
+    ///
+    /// Later requests try it first. Launch restore sends a token refresh and then `me` inside
+    /// one budget; without this, `me` paid the pinned connect budget a second time before
+    /// reaching the path that had just worked, and the budget ran out before its fallback.
+    /// Cleared when a preferred attempt fails or is cancelled (`PreferenceLease`), after which
+    /// the pinned path runs as usual, so under an armed kill switch (pins permitted, DNS blocked)
+    /// the cost is one failed resolution. Process memory only, like `alternate_port`.
+    prefer_resolved: std::sync::atomic::AtomicBool,
+    /// `resolved` with the pinned attempt's connect budget, used only while `prefer_resolved` is
+    /// set, so a resolver that has become a blackhole costs 10 s before the pins, not 30 s.
+    resolved_first: reqwest::Client,
+    /// Responses whose status line arrived (#582). Launch restore reads it around a budget
+    /// timeout: an unchanged count is the only proof that the control plane gave no answer.
+    answers: std::sync::atomic::AtomicU64,
+}
+
+/// Holds `prefer_resolved` for one preferred attempt and clears it on drop unless the attempt
+/// was answered. A failure, and a cancellation by an outer deadline (launch restore), both
+/// clear it, so the next request goes to the pins first.
+struct PreferenceLease<'a> {
+    flag: &'a std::sync::atomic::AtomicBool,
+    answered: bool,
+}
+
+impl Drop for PreferenceLease<'_> {
+    fn drop(&mut self) {
+        if !self.answered {
+            self.flag.store(false, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
 }
 
 impl TonoTransport {
@@ -162,7 +262,17 @@ impl TonoTransport {
             client: tokio::sync::RwLock::new(Self::build_pinned_client()?),
             resolved,
             alternate_port: std::sync::atomic::AtomicU16::new(0),
+            prefer_resolved: std::sync::atomic::AtomicBool::new(false),
+            answers: std::sync::atomic::AtomicU64::new(0),
+            resolved_first: Self::pinned_builder()
+                .build()
+                .context("failed to build the Tono HTTP preferred-fallback client")?,
         })
+    }
+
+    /// How many responses have delivered a status line so far (#582).
+    pub fn answers_seen(&self) -> u64 {
+        self.answers.load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// Rebuild the pinned client from the current compiled + learned set.
@@ -177,10 +287,15 @@ impl TonoTransport {
             .into_iter()
             .map(|ip| std::net::SocketAddr::new(std::net::IpAddr::V4(ip), 443))
             .collect();
-        Self::builder()
+        Self::pinned_builder()
             .resolve_to_addrs(bootstrap::API_HOST, &pinned)
             .build()
             .context("failed to build the Tono HTTP client")
+    }
+
+    /// The shared settings with the pinned attempt's shorter connect budget.
+    fn pinned_builder() -> reqwest::ClientBuilder {
+        Self::builder().connect_timeout(PINNED_CONNECT_TIMEOUT)
     }
 
     /// Same wiring, with both clients' resolution supplied.
@@ -216,6 +331,12 @@ impl TonoTransport {
                 .build()
                 .context("failed to build the resolving test client")?,
             alternate_port: std::sync::atomic::AtomicU16::new(0),
+            prefer_resolved: std::sync::atomic::AtomicBool::new(false),
+            answers: std::sync::atomic::AtomicU64::new(0),
+            resolved_first: quick()
+                .resolve_to_addrs(host, resolved)
+                .build()
+                .context("failed to build the preferred resolving test client")?,
         })
     }
 
@@ -278,6 +399,7 @@ impl TonoTransport {
         }
 
         let mut response = builder.send().await.map_err(|err| transport(&err))?;
+        self.answers.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         let status = response.status().as_u16();
         if response
             .content_length()
@@ -288,7 +410,17 @@ impl TonoTransport {
         // Stream the body with a hard cap: a missing or lying Content-Length
         // must not turn into an unbounded read.
         let mut body = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(|err| transport(&err))? {
+        loop {
+            let chunk = match response.chunk().await {
+                Ok(Some(chunk)) => chunk,
+                Ok(None) => break,
+                // #582: a non-2xx status is the server's answer even when its body
+                // is cut off. It goes up as that status, with what arrived, so
+                // tono-core classifies it (401/403) or reports it as a server error,
+                // never as an unreachable control plane that offline admission accepts.
+                Err(_) if !(200..300).contains(&status) => break,
+                Err(err) => return Err(transport(&err)),
+            };
             if body.len() + chunk.len() > MAX_RESPONSE_BYTES {
                 return Err(ApiError::InvalidResponse);
             }
@@ -452,6 +584,27 @@ impl HttpTransport for TonoTransport {
             }
         }
 
+        // The resolved client goes first once it has answered in place of dead pins (#583). Its
+        // failure moves on to the pins only when it proves nothing was delivered. Any failure or
+        // cancellation clears the preference (`PreferenceLease`).
+        let mut resolved_failed = None;
+        if self.prefer_resolved.load(std::sync::atomic::Ordering::Relaxed) {
+            let mut lease = PreferenceLease { flag: &self.prefer_resolved, answered: false };
+            match self.attempt(&self.resolved_first, &request).await {
+                Err(ApiError::Transport { kind, message })
+                    if should_retry_transport(request.method, kind) =>
+                {
+                    resolved_failed = Some(ApiError::Transport { kind, message });
+                }
+                // May already have been delivered: never re-sent to the pins.
+                Err(error @ ApiError::Transport { .. }) => return Err(error),
+                result => {
+                    lease.answered = true;
+                    return result;
+                }
+            }
+        }
+
         let pinned = {
             // Each attempt keeps its own pool/pin snapshot. Publishing fresh pins must not
             // wait for a slow response, nor cancel or replay an already delivered request.
@@ -469,8 +622,17 @@ impl HttpTransport for TonoTransport {
         if !should_retry_transport(request.method, kind) {
             return Err(ApiError::Transport { kind, message });
         }
-        match self.attempt(&self.resolved, &request).await {
-            Ok(response) => Ok(response),
+        let fallback = match resolved_failed {
+            // Already tried for this request, just before the pins.
+            Some(failure) => Err(failure),
+            None => self.attempt(&self.resolved, &request).await,
+        };
+        match fallback {
+            Ok(response) => {
+                self.prefer_resolved
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                Ok(response)
+            }
             // Both paths are named. Which one failed and how is the whole
             // diagnostic: "pinned addresses unreachable, system DNS fine" and
             // "nothing reachable at all" call for completely different actions,
@@ -557,6 +719,44 @@ mod tests {
             .await.unwrap().unwrap().unwrap();
         assert_eq!(response.status, 200);
         assert_eq!(response.body, b"hi");
+    }
+
+    /// #582: a 401 whose body is cut off is still the server's answer, so it
+    /// reaches tono-core's classifier as a status, not as a transport failure.
+    #[tokio::test]
+    async fn a_refusal_whose_body_is_cut_off_is_still_an_answer() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut header = Vec::new();
+            while !header.ends_with(b"\r\n\r\n") {
+                let Ok(byte) = stream.read_u8().await else { return };
+                header.push(byte);
+            }
+            // Promise more body than is sent, then close mid-body.
+            let _ = stream
+                .write_all(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 64\r\nConnection: close\r\n\r\n{\"error\"")
+                .await;
+            let _ = stream.shutdown().await;
+        });
+        let transport = TonoTransport::new().unwrap();
+        let client = TonoTransport::builder().build().unwrap();
+        let request = ApiRequest {
+            method: HttpMethod::Get,
+            url: format!("http://{address}/"),
+            bearer: None,
+            json_body: None,
+            binary_body: None,
+            headers: Vec::new(),
+        };
+        let response = tokio::time::timeout(Duration::from_secs(5), transport.attempt(&client, &request))
+            .await
+            .expect("the fixture answers at once")
+            .expect("a cut-off 401 is the server's answer, not a transport failure");
+        assert_eq!(response.status, 401);
     }
 
     /// Whether something in the network path accepts a connection to an address
@@ -759,6 +959,115 @@ mod tests {
             .expect("the fallback must carry the request");
         assert_eq!(response.status, 200);
         assert_eq!(response.body, b"hi");
+    }
+
+    /// #583: launch restore's own sequence, a token refresh (POST) and then `me` (GET), through
+    /// clients built exactly as in production with the pinned addresses dropped. Only the first
+    /// request may pay the pinned connect budget; the pair must leave the fallbacks more than
+    /// half of the restore budget. Before, each request waited out the pins again.
+    #[tokio::test]
+    async fn restores_refresh_and_me_pay_the_dropped_pins_once() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        use tono_core::credentials::{CredentialStore as _, MemoryCredentialStore};
+        if blackhole_is_intercepted() {
+            eprintln!("skipped: a tunnel is completing the blackhole connect; run without a VPN, as CI does");
+            return;
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut header = Vec::new();
+                    while !header.ends_with(b"\r\n\r\n") {
+                        let Ok(byte) = stream.read_u8().await else { return };
+                        header.push(byte);
+                    }
+                    // Drain the body so closing the socket cannot reset the reply.
+                    let head = String::from_utf8_lossy(&header).to_ascii_lowercase();
+                    let length = head
+                        .lines()
+                        .find_map(|line| line.strip_prefix("content-length:"))
+                        .and_then(|value| value.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    let mut body = vec![0; length];
+                    if stream.read_exact(&mut body).await.is_err() {
+                        return;
+                    }
+                    let json = if head.contains("auth/refresh") {
+                        r#"{"accessToken":"access-2","refreshToken":"refresh-2"}"#
+                    } else {
+                        r#"{"user":{"id":"u1","email":"user@example.com"}}"#
+                    };
+                    let reply = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{json}",
+                        json.len()
+                    );
+                    let _ = stream.write_all(reply.as_bytes()).await;
+                    let _ = stream.shutdown().await;
+                });
+            }
+        });
+        // `localhost` because the API client admits plain http only for loopback names.
+        let host = "localhost";
+        let dead = [std::net::SocketAddr::from(([10, 255, 255, 1], port))];
+        let live = [std::net::SocketAddr::from(([127, 0, 0, 1], port))];
+        let transport = TonoTransport {
+            client: tokio::sync::RwLock::new(
+                TonoTransport::pinned_builder().resolve_to_addrs(host, &dead).build().unwrap(),
+            ),
+            resolved: TonoTransport::builder().resolve_to_addrs(host, &live).build().unwrap(),
+            alternate_port: std::sync::atomic::AtomicU16::new(0),
+            prefer_resolved: std::sync::atomic::AtomicBool::new(false),
+            answers: std::sync::atomic::AtomicU64::new(0),
+            resolved_first: TonoTransport::pinned_builder().resolve_to_addrs(host, &live).build().unwrap(),
+        };
+        let store = std::sync::Arc::new(MemoryCredentialStore::new());
+        store.set_refresh_token("refresh-1").unwrap();
+        let client = tono_core::auth::ApiClient::new(&format!("http://{host}:{port}"), transport, store)
+            .expect("loopback base URL");
+
+        let started = std::time::Instant::now();
+        let me = client.me().await.expect("refresh and me must both reach the fallback");
+        let elapsed = started.elapsed();
+        assert_eq!(me.user.id, "u1");
+        assert!(
+            elapsed * 2 < crate::tono::commands::RESTORE_TRANSACTION_TIMEOUT,
+            "refresh + me spent {elapsed:?}; the second request waited on the dead pins again"
+        );
+
+        // The learned preference must not outlive a cancelled attempt: the restore deadline
+        // dropping a request stuck on a resolver that became a blackhole leaves healthy pins
+        // to answer the next request (the retry path reuses this transport).
+        let flipped = TonoTransport {
+            client: tokio::sync::RwLock::new(
+                TonoTransport::pinned_builder().resolve_to_addrs(host, &live).build().unwrap(),
+            ),
+            resolved: TonoTransport::builder().resolve_to_addrs(host, &dead).build().unwrap(),
+            alternate_port: std::sync::atomic::AtomicU16::new(0),
+            prefer_resolved: std::sync::atomic::AtomicBool::new(true),
+            answers: std::sync::atomic::AtomicU64::new(0),
+            resolved_first: TonoTransport::pinned_builder().resolve_to_addrs(host, &dead).build().unwrap(),
+        };
+        let get = || ApiRequest {
+            method: HttpMethod::Get,
+            url: format!("http://{host}:{port}/api/v1/me"),
+            bearer: None,
+            json_body: None,
+            binary_body: None,
+            headers: Vec::new(),
+        };
+        tokio::time::timeout(Duration::from_millis(500), flipped.send(get()))
+            .await
+            .expect_err("the preferred attempt is stuck on the blackholed resolver");
+        let started = std::time::Instant::now();
+        let response = flipped.send(get()).await.expect("the pins answer");
+        assert_eq!(response.status, 200);
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "after a cancelled preferred attempt the next request waited {:?} before the pins",
+            started.elapsed()
+        );
     }
 
     /// A POST is not re-sent when the failure might already have delivered it.

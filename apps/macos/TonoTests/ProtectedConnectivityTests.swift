@@ -205,6 +205,32 @@ final class ProtectedConnectivityTests: XCTestCase {
         XCTAssertNotEqual(report.failureMessage, blockingReport.failureMessage)
     }
 
+    /// The connect path showed the generic "wait and reconnect" DNS text for a
+    /// browser Secure DNS conflict and retried it until the three-strike pause
+    /// (H20-C-F2). Only the user can change the browser: show its steps and wait.
+    func testBrowserSecureDNSConflictShowsItsStepsAndWaitsForTheUser() {
+        let blocking = BrowserDNSDiagnostics.BrowserResult(
+            outcome: .blocking, source: .localState, preferenceStoreCount: 1
+        )
+        let clear = BrowserDNSDiagnostics.BrowserResult(
+            outcome: .clear, source: .none, preferenceStoreCount: 0
+        )
+        let report = BrowserDNSDiagnostics.Report(chrome: blocking, edge: clear)
+        let failure = AppState.browserDNSFailure(
+            report, stage: "securingDNS", attempt: 3, generation: 1
+        )
+        XCTAssertEqual(
+            ConnectionFailurePresentation.userFacingMessage(classified: failure),
+            report.failureMessage
+        )
+        XCTAssertTrue(
+            AppState.failureRequiresUserAction(
+                BrowserDNSDiagnostics.ConflictError(message: report.failureMessage)
+            ),
+            "a timed retry cannot change the browser's Secure DNS setting"
+        )
+    }
+
     private func writeJSON(_ value: Any, to url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try JSONSerialization.data(withJSONObject: value).write(to: url)

@@ -24,7 +24,7 @@ use tono_core::auth::{ApiError, DiagnosticsLogSegment, MAX_DIAGNOSTICS_LOG_SEGME
 
 use crate::process::AsyncHandler;
 use crate::tono::audit::{AuditEvent, AUDIT_BACKUP_FILE_NAME};
-use crate::tono::state::TonoState;
+use crate::tono::state::{AccountState, TonoInner, TonoState};
 
 /// Spacing between sweeps. The server's per-account budget is 80 segments an
 /// hour, so this leaves room for a backup tail and a retry without approaching
@@ -37,6 +37,14 @@ pub const FIRST_DELAY: Duration = Duration::from_secs(90);
 /// this lands far below the server's 2 MiB compressed cap; `gzip_within_limit`
 /// is the check for the exception rather than the assumption.
 const READ_CHUNK_BYTES: usize = 4 * 1024 * 1024;
+/// After the server declines storage (no ops collection window for this
+/// device, the usual case since upload is on by default), check back at this
+/// interval with a probe of at most `DECLINED_PROBE_BYTES` raw bytes. Resending
+/// the full segment every 16 minutes cost up to 2 MiB a time, through the exit
+/// node and the user's quota, for nothing. The cursor stays put, so once ops
+/// opens a window the log is sent from where it was.
+const DECLINED_INTERVAL: Duration = Duration::from_secs(30 * 60);
+const DECLINED_PROBE_BYTES: usize = 64 * 1024;
 const CURSOR_FILE_NAME: &str = "traffic-audit.upload-cursor.json";
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -84,6 +92,7 @@ struct UploadQueue {
     session_id: String,
     sequence: u32,
     pending: Option<PendingSegment>,
+    declined: bool,
 }
 
 impl UploadQueue {
@@ -94,7 +103,8 @@ impl UploadQueue {
             Cursor { scope: scope.to_string(), ..Cursor::default() }
         };
         Self { log_path, cursor_path, cursor,
-            session_id: tono_core::auth::new_installation_id(), sequence: 0, pending: None }
+            session_id: tono_core::auth::new_installation_id(), sequence: 0, pending: None,
+            declined: false }
     }
 
     fn prepare(&mut self) -> Option<&PendingSegment> {
@@ -122,15 +132,26 @@ impl UploadQueue {
         let offset = if self.cursor.file_id.as_ref() == Some(&id) && size >= self.cursor.offset {
             self.cursor.offset
         } else { 0 };
-        let segment = read_open_segment(file, offset, Some(&self.cursor.scope))?;
+        let max_chunk = if self.declined { DECLINED_PROBE_BYTES } else { READ_CHUNK_BYTES };
+        let segment = read_open_segment(file, offset, Some(&self.cursor.scope), max_chunk)?;
         let next_cursor = Cursor { scope: self.cursor.scope.clone(), file_id: Some(id),
             offset: offset + segment.consumed };
         Some(PendingSegment { segment, next_cursor })
     }
 
+    /// The server said it did not store this receipt key, so the bytes can be
+    /// dropped without orphaning a stored segment. The cursor does not move.
+    fn decline(&mut self) {
+        self.pending = None;
+        self.declined = true;
+    }
+
     fn acknowledge(&mut self) {
         if let Some(pending) = self.pending.take() {
             if pending.segment.line_count > 0 {
+                // Only a stored upload ends the stand-down; skipping lines
+                // that belong to another scope is not an answer from the server.
+                self.declined = false;
                 // Never wrap or saturate into a previously used receipt key.
                 if let Some(next) = self.sequence.checked_add(1) { self.sequence = next; }
                 else { self.session_id = tono_core::auth::new_installation_id(); self.sequence = 0; }
@@ -172,10 +193,12 @@ fn gzip_within_limit(raw: &[u8]) -> Option<Vec<u8>> {
 
 /// None is used only by the low-level unfiltered reader tests. Production must
 /// supply an authenticated scope: legacy/unattributed records remain local.
-fn read_open_segment(mut file: &std::fs::File, offset: u64, scope: Option<&str>) -> Option<Segment> {
+fn read_open_segment(
+    mut file: &std::fs::File, offset: u64, scope: Option<&str>, max_chunk: usize,
+) -> Option<Segment> {
     let size = file.metadata().ok()?.len();
     if size <= offset { return None; }
-    let mut chunk = READ_CHUNK_BYTES;
+    let mut chunk = max_chunk;
     while chunk >= 64 * 1024 {
         file.seek(SeekFrom::Start(offset)).ok()?;
         let mut raw = vec![0_u8; chunk.min((size - offset) as usize)];
@@ -201,7 +224,16 @@ fn read_open_segment(mut file: &std::fs::File, offset: u64, scope: Option<&str>)
 
 #[cfg(test)]
 fn read_segment(path: &Path, offset: u64) -> Option<Segment> {
-    read_open_segment(&std::fs::File::open(path).ok()?, offset, None)
+    read_open_segment(&std::fs::File::open(path).ok()?, offset, None, READ_CHUNK_BYTES)
+}
+
+/// Whether the periodic upload for this authentication generation and account
+/// keeps running. A suspended account's session is refused, so every sweep
+/// would be a 401, a refresh and an upload-failure audit record.
+pub(crate) fn periodic_upload_continues(inner: &TonoInner, generation: u64, account: &str) -> bool {
+    inner.sign_in_generation == generation
+        && inner.account.as_ref().map(|user| user.id.as_str()) == Some(account)
+        && inner.account_state != AccountState::Suspended
 }
 
 pub(crate) async fn spawn_periodic_for_auth_generation(
@@ -220,11 +252,7 @@ pub(crate) async fn spawn_periodic_for_auth_generation(
         let mut queue: Option<UploadQueue> = None;
         let mut failures = 0_u32;
         loop {
-            {
-                let inner = task_state.lock().await;
-                if inner.sign_in_generation != generation
-                    || inner.account.as_ref().map(|user| &user.id) != Some(&account) { return; }
-            }
+            if !periodic_upload_continues(&*task_state.lock().await, generation, &account) { return; }
             let result = match task_state.audit().log_upload_scope() {
                 Some(scope) => {
                     if queue.as_ref().map(|q| &q.cursor.scope) != Some(&scope.id) {
@@ -234,11 +262,23 @@ pub(crate) async fn spawn_periodic_for_auth_generation(
                 }
                 None => { queue = None; Ok(()) }
             };
-            failures = if result.is_ok() { 0 } else { failures.saturating_add(1) };
-            tokio::time::sleep(SWEEP_INTERVAL * 2_u32.pow(failures.min(3))).await;
+            let declined = queue.as_ref().is_some_and(|q| q.declined);
+            failures = if result.is_ok() || declined { 0 } else { failures.saturating_add(1) };
+            tokio::time::sleep(next_sweep_delay(failures, declined)).await;
         }
     });
     if state.lock().await.sign_in_generation != generation { handle.abort(); }
+}
+
+fn next_sweep_delay(failures: u32, declined: bool) -> Duration {
+    if declined { DECLINED_INTERVAL } else { SWEEP_INTERVAL * 2_u32.pow(failures.min(3)) }
+}
+
+/// tono-core maps the server's "not stored" receipt (HTTP 200, no ops
+/// collection window for this device) to `Server { status: 200 }`. No other
+/// response on this endpoint produces a 200 error.
+fn is_not_stored(err: &ApiError) -> bool {
+    matches!(err, ApiError::Server { status: 200, .. })
 }
 
 async fn sweep(
@@ -268,7 +308,11 @@ async fn sweep(
                 }, identity) => result,
             };
             if let Err(err) = result {
-                state.audit().log(AuditEvent::NetworkLogSegmentUploadFail { error: err.to_string() });
+                let newly_declined = is_not_stored(&err) && !queue.declined;
+                if is_not_stored(&err) { queue.decline(); }
+                if !is_not_stored(&err) || newly_declined {
+                    state.audit().log(AuditEvent::NetworkLogSegmentUploadFail { error: err.to_string() });
+                }
                 return Err(err);
             }
         }
@@ -448,6 +492,28 @@ mod tests {
         assert_eq!(gunzip(&segment.gzip), "{\"_uploadScope\":\"new\",\"host\":\"new.example\"}\n");
         queue.acknowledge();
         assert_eq!(queue.cursor.offset, std::fs::metadata(live).unwrap().len());
+    }
+
+    #[test]
+    fn a_not_stored_receipt_stands_down_to_a_small_probe() {
+        // Upload is on by default and the server stores nothing unless ops
+        // opened a collection window. Treating that answer as a failed send
+        // resent the same full segment every 16 minutes, forever.
+        let dir = Dir::new("declined");
+        let live = dir.join("traffic-audit.jsonl");
+        let scoped = |n| format!("{{\"_uploadScope\":\"a\",\"n\":{n},\"pad\":\"{}\"}}\n", "x".repeat(200));
+        std::fs::write(&live, (1..=1200).map(scoped).collect::<String>()).unwrap();
+        let mut queue = UploadQueue::new(live.clone(), "a");
+        assert_eq!(queue.prepare().unwrap().segment.line_count, 1200);
+        assert!(is_not_stored(&ApiError::Server { status: 200, message: String::new() }));
+
+        queue.decline();
+        assert_eq!(next_sweep_delay(0, queue.declined), DECLINED_INTERVAL);
+        let probe = &queue.prepare().unwrap().segment;
+        assert!(probe.consumed as usize <= DECLINED_PROBE_BYTES, "probe read {} bytes", probe.consumed);
+        assert!(probe.line_count > 0);
+        assert_eq!(queue.cursor.offset, 0);
+        assert_eq!(queue.sequence, 0);
     }
 
     #[test]
