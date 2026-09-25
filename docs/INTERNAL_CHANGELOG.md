@@ -32,6 +32,187 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-25 · 两端：系统时钟错误导致证书日期校验失败时点名时钟
+
+- **归属/来源**：G2 连不上有下一手（失败要说清原因）；Issue #588（总账 H21-O-F9）。基线 origin/main 630d9e66（含 #622）；
+  分支 `fix/clock-skew-classification-20260925`（红分支 `wip/clock-skew-classification-20260925-red`）；PR 待开；未合 main。
+  macOS `ControlPlanePath.swift`、`TonoAPIClient.swift`、`ProtectedConnectivity.swift`、`ProtectedConnectivityVerifier.swift`、
+  `AccountSession+Auth.swift`、`Localizable.xcstrings`；Windows `tono/transport.rs`、`tono/commands/diagnostics.rs`、
+  `services/tono.ts`、en/zh `tono.json` 与生成的 i18n 类型。
+- **缺陷修复**：#588：时钟偏差大时所有证书都显示过期或尚未生效，而保护期间 NTP 被拦，用户只看到「无法连接 Tono」或出口不可达，
+  不知道该校时。macOS：新增 `CertificateClock`，识别 URLSession 的 `NSURLErrorServerCertificateHasBadDate`/`NotYetValid`
+  及其背后的 Secure Transport/`SecTrust` 状态（pinned 路径的 `NWError.tls`）；控制面客户端改抛 `APIError.clockSkew`，pinned 路径
+  证书日期握手失败报 `serverCertificateHasBadDate`；连接后探测新增 `.clock` 类别，任一探测为 `.clock` 时保留原失败码（遥测不变），
+  只把用户文案换成时钟提示（mixed 探测已成功时不换：它经同一出口完成了默认证书校验，说明时钟没问题）。控制面在系统 DNS 与 pinned
+  两条路径间保留证书日期证据：任一路径因证书日期失败且没有路径答复时，按时钟错误报告。Windows：传输层在 rustls `Expired`/`NotValidYet`（webpki 或平台校验器）错误链上加 `TONO_CLOCK_SKEW`
+  标记，`auth_error` 映射为该前缀；前端把它排在最前，出现在任何界面错误里都显示时钟文案。
+  准入选择：时钟错误仍是「收到状态行之前失败」，Windows 保持原 `TransportKind`（重试与回退规则不变），macOS `isUnreachable`
+  视为不可达，离线授权照常判定；从不当作会话拒绝（#582 sink 不变）。未新增任何 PF/WFP NTP 放行，保护不放松。
+- **新增/优化**：无。
+- **工程与测试**：两条回归，各平台一条。macOS `AccountSessionRequestTests.testACertificateTheClockCannotDateNamesTheMacClock`
+  （登录 POST 遇 `serverCertificateHasBadDate`，错误文案须含 date and time）；Windows `commands::diagnostics::tests::
+  a_certificate_the_clock_cannot_date_is_named_as_the_clock`（hyper-rustls 形状的 io::Error 链包 rustls `Expired`，
+  `auth_error` 须以 `TONO_CLOCK_SKEW: ` 开头）。红分支只含两条测试与 Windows `mark_clock_skew` 原样返回的骨架，预期以断言失败。
+- **验证**：未在本机编译或运行 Swift/Rust（执行位置规则）；编译、XCTest、`cargo test` 以 PR CI `macos-26`/`windows-2025` 为准。
+  本机仅运行 `node scripts/generate-i18n-keys.mjs`（生成类型只多出新键）与 locale/xcstrings JSON 解析检查。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：Network.framework 对证书日期失败实际给出的 `NWError.tls` 状态（-9814/-9815/-67818/-67819）未实机确认；
+  若系统报为通用信任失败则仍显示原文案。macOS 在离线授权下进入 Ready 时不单独提示时钟（仅连接后探测与无授权失败时提示）。
+  保护期间仍无法自动校时（产品决定，另议）。
+  Windows 连接后探测未改。
+
+## 2026-09-25 · macOS：控制面请求系统 DNS 失败时改走 pinned 地址
+
+- **归属/来源**：G2 连不上有下一手（控制面域名被污染时仍能登录、恢复）；Issue #584（总账 H21-O-F3 = H21-C-F1）。
+  `apps/macos/Tono/Services/ControlPlanePath.swift`（新）、`TonoAPIClient.swift`、`KillSwitchService.swift`（仅
+  `configuredBootstrapPins` 改为 internal）。基线 origin/main 8fb73d84；分支 `fix/macos-control-plane-fallback-20260925`
+  （红分支 `wip/macos-control-plane-fallback-20260925-red`）；PR [#622](https://github.com/raydocs/tono/pull/622)；未合 main。
+- **缺陷修复**：#584：`TonoAPIClient` 只用 URLSession 按域名访问控制面，内置 pinned 地址只用于 PF。域名被污染时首次登录、
+  干净退出后的每次启动和每次恢复都只显示通用的「无法连接 Tono」。现在每次交换先走原有的系统 DNS URLSession（健康网络行为不变，
+  已连接时也照旧先走系统 DNS）；只有它在收到状态行前传输失败、且 `shouldRetry` 允许重放（GET 任何失败；POST/DELETE 仅限未建立连接）
+  时，才改走 pinned：Network.framework TLS 直连 helper PF 为 API 主机放行的地址（编译进来的 `TonoAPIBootstrapAddresses`，再加受保护解析学到的地址），
+  SNI 为真实主机名，证书仍由系统默认信任评估按该主机名校验，没有自定义校验块；不走代理；HTTP/1.1 `Connection: close`；
+  TCP+TLS 共 10 s、按地址平分；响应上限 2 MiB。收到状态行即是回答，不会在另一条路径重发；pinned 路径状态行一完整即记下，
+  其后头部/正文中断、超时或请求被取消，仍按该状态交给 #582 判定（非 2xx 按状态报错，不当作不可达）。pinned 在系统 DNS 失败后
+  完整答复时，后续请求先走 pinned（对应 Windows 学到的首选），该首选尝试失败、取消或正文失败即恢复系统 DNS 在前（仅进程内存）。新 HTTP/1.1 客户端
+  未经实机验证，因此只作回退、不作主路径。#582 判定、#587 无代理、凭据代际守卫不变；成功/拒绝审计事件增加 `path`，
+  换路径时记 `control_plane_path_failed`。
+- **新增/优化**：无。
+- **工程与测试**：一条回归：`AccountSessionRequestTests.testASystemResolverThatFailsAtConnectHandsTheRequestToThePinnedAddressesOnce`
+  （系统 DNS 路径在连接阶段失败，登录 POST 由 pinned 桩恰好收到一次，系统路径只试一次）。红分支只含该测试、
+  `ControlPlanePath`/`ControlPlaneAnswer` 骨架和未使用的 `pinnedPath` 参数，预期以断言失败（无回退：拿不到 challenge，
+  系统路径被重试 2 次，pinned 进入 0 次）。
+- **验证**：未在本机编译或运行（执行位置规则：MacBook 不跑 xcodebuild/swift）；编译与 XCTest 以 PR CI `macos-26` 为准，红/绿以 CI 为准。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：系统 DNS 连到被污染地址而连接超时，URLSession 报 `NSURLErrorTimedOut`，按 `shouldRetry` 规则 POST 不回退
+  （GET 会回退；GET 经 pinned 答复后首选翻转，此后 POST 也先走 pinned）；每次回退前要先等系统路径失败（最长 30 s 空闲超时）。
+  未实现备用端口——helper PF 只放行控制面 TCP 443，加端口需新 PF 放行，本 PR 不动。pinned TLS 直连未在实机或真实控制面验证。
+
+## 2026-09-25 · 两端：验证码错误/过期不再显示「会话过期」；收不到验证码时给求助出口
+
+- **归属/来源**：G2 连不上有下一手（登录失败说清原因、给下一步）；Issue #595（总账 H20-C-F6）、#596（H22-C-F2）。
+  Windows `apps/windows/crates/tono-core/src/auth.rs`、`app/src-tauri/src/tono/commands/diagnostics.rs`、
+  `app/src/services/tono.ts`、`app/src/pages/tono/login.tsx`、`app/src/locales/{zh,en}/tono.json` 与生成的 i18n 类型；
+  macOS `Tono/Services/TonoAPIClient.swift`、`Tono/Views/LoginView.swift`、`Tono/Views/AccountGateSupport.swift`、
+  `Tono/Localizable.xcstrings`。基线 origin/main 52e67294；分支 `fix/signin-code-errors-and-help-20260925`
+  （红分支 `wip/signin-code-errors-and-help-20260925-red`）；PR [#620](https://github.com/raydocs/tono/pull/620)；未合 main。
+- **缺陷修复**：
+  - #595：Worker 对错误或过期的验证码返回 401 `INVALID_OR_EXPIRED_CODE`，两端都走通用 401，显示成「会话过期」
+    （Windows 审计日志与错误串、macOS 登录页）。现在两端只把带 `INVALID_OR_EXPIRED_CODE` 错误码的 401 改成专门错误
+    （Windows 在 `map_status`，macOS 在 `sendData` 读错误码处；审查发现 verify 在验证码已消费后还可能回普通 401
+    `AUTHENTICATION_FAILED`，不能一概当作验证码错误）：Windows `ApiError::InvalidOrExpiredCode` → `TONO_AUTH_INVALID_CODE` →
+    「验证码错误或已过期，请重新获取。」；macOS `APIError.invalidOrExpiredCode`，同样文案。带令牌请求的 401
+    （刷新、重放、#582 的 `SessionUse`/`SessionVerdict` 判定）不变；登录端点仍是 `SessionUse::None` / `.noSession`，不参与判定。
+  - #596：`/auth/email/start` 对任何地址都回 202，投递失败按设计静默，验证码没到时两端都没有求助出口。现在验证码页等满
+    60 秒（Windows 与「重新发送」解锁同时；macOS 按每个验证码单独计时，重发即重新计时）显示「还没收到邮件？」，并复用已有
+    求助动作：Windows `SupportContact`（复制信息给客服；已有错误自带求助时不重复）；macOS 新的
+    `SignInCodeNotReceivedHint`，含「复制详情」（版本、构建号、邮箱，不含验证码或 challenge）与已有的「在访达中显示诊断日志」。
+- **新增/优化**：无。
+- **工程与测试**：两条回归，各一：tono-core `verify_reports_a_refused_code_as_a_code_error_not_an_expired_session`；
+  `login.test.tsx` 的 `offers support once the code has had a minute to arrive`（`SupportContact` 测试桩改为渲染标记）。
+  红分支只含两条测试和 `InvalidOrExpiredCode` 变体骨架；vitest 在红提交上以断言失败（`expected null not to be null`）。
+- **验证**：本机（链接主工作树已有 node_modules，未安装）Windows 前端 `vitest run` 38 个文件 291 条通过；`tsc --noEmit`、
+  改动文件的 eslint 与 biome 均无问题。未跑 cargo 与 macOS 构建/测试（执行位置规则），以 PR CI 为准；Rust 测试的红/绿以 CI 为准。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：macOS 两处改动没有单独的 XCTest（本单元按 Issue 各一条）；菜单栏（`MenuBarView.swift`）未加求助入口。未在实机复现。
+
+## 2026-09-25 · macOS：浏览器加密 DNS 冲突与拒绝管理员授权改为提示用户操作
+
+- **归属/来源**：G2 连不上有下一手（失败看得到可执行的原因）；Issue #591（总账 H20-C-F2）、#592（H20-C-F3）。
+  `apps/macos/Tono/Services/AppState+Connect.swift`、`ProtectedConnectivity.swift`、`ProtectedDNSProbe.swift`、
+  `Localizable.xcstrings`。基线 origin/main 52e67294（含 #617）；分支 `fix/macos-browser-dns-and-helper-denied-20260925`
+  （红分支 `wip/macos-browser-dns-and-helper-denied-20260925-red`）；PR [#619](https://github.com/raydocs/tono/pull/619)；未合 main。
+- **缺陷修复**：
+  - #591：住宅路由连接时浏览器 Secure DNS 扫描不通过，抛出的专用文案被 catch 丢弃，界面只显示
+    `PROTECTED_DNS_NOT_READY` 的通用「稍候再重连」；抛出的 `CoreControllerError.protectionFailed` 也不在
+    `failureRequiresUserAction` 中，自动重试一直跑到三次暂停。现在分类失败的 `userMessage` 使用扫描自身的步骤文案
+    （代码仍为 `PROTECTED_DNS_NOT_READY`），连接路径改抛 `BrowserDNSDiagnostics.ConflictError`，按需用户操作处理：
+    立即暂停自动重试，PF 保持，只有 Retry now 解除。连接后的健康复查路径未改（原本已显示专用文案）。
+  - #592：`prepareHelper()` 的所有错误（除另一账户外）都被分类为 `HELPER_PROTOCOL_MISMATCH`，拒绝管理员弹窗后显示
+    「网络组件与这份 Tono 不匹配，请修复」。现在 `HelperInstallError.userDenied`（拒绝或弹窗超时）归为新的仅 macOS
+    代码 `HELPER_AUTHORIZATION_DENIED`，文案「Tono 需要你的管理员批准才能保护连接——请再次点按「连接」并批准。」
+    （已加 zh-Hans）。重试行为不变：该错误原本就在 `failureRequiresUserAction` 中。
+- **新增/优化**：无。
+- **工程与测试**：两条回归，各一：`ProtectedConnectivityTests.testBrowserSecureDNSConflictShowsItsStepsAndWaitsForTheUser`、
+  `HelperBoundAccountTests.testDeclinedAdministratorPromptIsNotAHelperMismatch`。红分支只含测试与最小骨架
+  （错误类型、保持旧分类的辅助函数）。
+- **验证**：本机未编译、未跑测试（执行位置规则）；以 PR 的 `macos-26` CI 为准。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：未实机复现；运维台 `copy/customers.ts` 的失败代码文案表没有新代码（与其他 helper 代码一样走回退）。
+
+## 2026-09-25 · Windows：检查更新失败不再报「已是最新版」；节点刷新失败显示原因
+
+- **归属/来源**：G2 连不上有下一手（失败看得到原因）；Issue #589（总账 H21-C-F3）、#590（H20-C-F1）。
+  `apps/windows/app/src/services/query-client.ts`、`src/pages/settings.tsx`、`src/pages/tono/servers.tsx`、
+  `src/locales/{zh,en}/tono.json` 与生成的 i18n 类型。基线 origin/main ef6d09db；分支
+  `fix/win-update-check-catalog-error-20260925`（红分支 `wip/win-update-check-catalog-error-20260925-red`）；
+  PR [#618](https://github.com/raydocs/tono/pull/618)；未合 main。
+- **缺陷修复**：
+  - #589：SWR 的 `mutate()` 在请求失败时不抛错，而是返回缓存数据（空缓存即 `undefined`），设置页因此把失败的
+    「检查更新」显示成「已是最新版」，有旧结果时还会打开更新对话框。现在 `refetch()` 额外返回本次重新验证写入
+    SWR 缓存的 `error`；设置页遇到错误显示新文案 `checkFailed`（「检查更新失败。请检查网络连接后重试。」）。
+    其他只读 `data` 的调用方不变。
+  - #590：节点页「刷新」失败时 `formatTonoActionError` 丢掉 `detail`，只剩「出了点问题。详情见下方」却没有详情。
+    现在刷新区在「最近一次刷新失败：…」下方显示 Rust 侧已有的原因（`catalog_sync_error` / 命令返回的错误串，
+    与现有 UI 下发的是同一串，不含 bearer 令牌）。同步失败取自目录状态，之后同步成功即消失；同步之前就被拒
+    （未登录、账号切换抢占）的错误在本页保留。该失败不再重复出现在底部的选择错误框。
+- **新增/优化**：无。
+- **工程与测试**：两条回归，各一：`reports a failed refetch instead of resolving with the cached data`
+  （`src/services/query-client.test.tsx`）、`shows the recorded cause under a failed catalog refresh`
+  （`src/pages/tono/servers.test.tsx`，测试桩补 `tonoRefreshCatalog`）。两条在红分支上均以断言失败。
+- **验证**：本机（链接主工作树已有 node_modules，未安装）`npm test` 38 个文件 290 条通过；`npm run typecheck`、
+  改动文件的 eslint 与 biome 均无问题；`node scripts/generate-i18n-keys.mjs` 仅新增一键。未跑 cargo（无 Rust 改动）。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：#590 提到的目录同步传输错误没有稳定 `TONO_*` 键、诊断报告无目录同步字段，本 PR 未改。未在实机复现。
+
+## 2026-09-25 · macOS 控制面请求不走系统代理；备用通道只给核心可用的块，prepare 拒绝计入三次暂停
+
+- **归属/来源**：G2 连不上有下一手；Issue #587（总账 H21-O-F6）、#585（H21-O-F4）。
+  `apps/macos/Tono/Services/TonoAPIClient.swift`、`AppState+Connect.swift`。基线 origin/main 46dde442；
+  分支 `fix/macos-backup-channel-and-proxy-20260925`，PR [#617](https://github.com/raydocs/tono/pull/617)，未合 main。
+- **缺陷修复**：
+  - #587：控制面 `URLSession` 原先继承系统代理/PAC；另一代理软件设为系统代理时，账户请求走该代理，而受保护离线下
+    PF 挡住它的上游，账户落入通用错误。现在生产配置 `connectionProxyDictionary = [:]`（与 Windows no_proxy 一致）；
+    测试注入的 session 照旧使用。其它 `URLSession`（本机控制器、mixed 端口探测、OAuth 换票、更新下载）不属控制面客户端，未改。
+  - #585：「试用备用通道」只按名字匹配 hy2，会提供内置 sing-box 拒绝的证书 pin hy2 块；`connect()` 在 prepare 拒绝、
+    不计失败，受保护离线每 30 s 重试且永不暂停，保存的 hy2 选择重启后仍在。现在备用通道只从
+    `singBoxUnavailableReason` 为空的块中选；保护已阻断时，这类 prepare 拒绝按同签名计数，第三次暂停自动重试
+    （网络变化不解除），沿用已有的「同一失败重复三次」本地化文案。PF 保持；Retry now 或改选出口照旧重置计数。
+- **新增/优化**：无。
+- **工程与测试**：新回归 `AccountSessionRequestTests.testControlPlaneSessionIgnoresTheSystemProxy`、
+  `ProtectedReconnectTests.testProtectedReconnectPausesWhenPrepareKeepsRefusingTheSelectedExit`（约 15 s，30 s 看门狗）。
+  红分支 `wip/macos-backup-channel-and-proxy-20260925-red` 只含测试与配置工厂骨架。
+- **验证**：本机未编译、未跑测试（执行位置规则）；以 PR 的 `macos-26` CI 为准。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：客户端仍发 `X-Tono-Accept: hy2`，证书 pin hy2 仍在目录里（不提供、连接拒绝，但未剔除）；未实机复现。
+
+## 2026-09-25 · Windows：WFP 锁定校验失败单独分类；上传诊断带上一次失败
+
+- **归属/来源**：G2 连不上有下一手（错误可诊断）；Issue #593（总账 H20-C-F4）、#594（H20-C-F5）。
+  `apps/windows/app/src-tauri/src/tono/connection/{probes,failure}.rs`、`tono/diagnostics.rs`、
+  `tono/commands/diagnostics.rs`、`src/services/tono.ts`、`src/locales/{zh,en}/tono.json` 与生成的 i18n 类型。
+  基线 origin/main 5ca17af3；分支 `fix/win-wfp-error-diagnostics-20260925`（红分支 `wip/win-wfp-error-diagnostics-20260925-red`）；PR [#616](https://github.com/raydocs/tono/pull/616)；未合 main。
+- **缺陷修复**：
+  - #593：锁定后验证里 `verify_locked()` 失败时根本没跑 TUN 探测，却被归成 `TONO_TUN_DATA_PLANE_BROKEN`
+    （「请重启电脑」），Service 的 `status.last_error` 也被丢掉。现在这类失败带新前缀 `TONO_WFP_LOCK_UNVERIFIED`，
+    正文保留 Service 的 wanted/live/mode 与 `last_error`，并附回环代理交叉检查结果；前端映射到新文案
+    `wfpLockUnverified`。若 `last_error` 本身是 `TONO_WFP_ENGINE_WEDGED`/`TONO_BFE_NOT_RUNNING`，仍按原漏斗
+    （`StageFailure::error`）显示对应的引擎文案。连接判定、保护与释放路径不变。
+  - #594：新一次尝试会清空 `failed_stage`/`connect_error`，上传的诊断里就没有上一次失败。现在当前无错误而
+    `attempt_history.last_failure` 存在时，上传的 `failedStage` 取其阶段，`error` 写
+    「last failed attempt, Ns before this report: <稳定错误码>」；只带阶段键和 `TONO_*`/`CORE_*` 码，
+    本地 `error_detail` 仍只在复制诊断里。不加新字段（控制面 intake 拒绝未知键），schema 不变。
+- **新增/优化**：无。
+- **工程与测试**：两条回归，各一：`unverified_wfp_lock_carries_the_service_error_instead_of_a_tun_verdict`
+  （`connection.rs`）、`a_retry_that_cleared_the_live_error_still_uploads_the_last_classified_failure`（`diagnostics.rs`）。
+  红分支只含测试和保持原行为的骨架（`verify_locked` 消息拆成两个辅助函数；`DiagnosticsSources` 加未读取的 `last_failure`）。
+- **验证**：本机未跑 cargo（执行位置规则），编译与红/绿结果以 PR 的 Windows CI 为准。本机
+  `node scripts/generate-i18n-keys.mjs` 重新生成类型（仅新增一键），两份 locale JSON 可解析；未跑 vitest/tsc（工作树无 node_modules）。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：测试员看到的「上次错误，可能已恢复」横幅读的是 Service 的 `last_error`：看门狗重装失败时写入，
+  自行恢复后不清除，要等下一次成功的 arm/lock（`record_outcome`）才清。这是 Service 看门狗路径，与 #593 的 App
+  分类路径不同，本 PR 未改，另需记录。未在实机复现。
+
 ## 2026-09-24 · 控制面列车 #570 审查续修：设备出口身份只等本次下发的节点
 
 - **归属/来源**：G1–G3 控制面（#323 退役共享凭据的续修）；`services/control-plane`。来源：列车 PR #570 审查发现
@@ -185,6 +366,191 @@
 - **候选/发布**：无新包，仅源码。
 - **剩余限制**：部署前的只读检查见列车 PR 正文：#323、#326、#419、#470、#486、#493、#495；另有 0077/0078
   需在一次性远端 D1 上试跑、#329 必须先迁移，`TRAFFIC_POLICY_EMBED_REVISION` 保持关闭。
+
+## 2026-09-24 · Windows 候选包构建：私有解包分支写出 live `Tono.exe`，载荷门拒绝
+
+- **归属/来源**：G3 发出去还能再发（候选包打包）；`apps/windows/app/src-tauri/packages/windows/installer.nsi`
+  （Section Install 私有解包分支）、`apps/windows/app/scripts/windows-packaging.mjs` 及其测试。
+  基线 origin/main 536ee977；分支 `fix/windows-private-unpack-staged-gui-20260924`。
+- **缺陷修复**：b6b42ea0（2026-09-22，Service 受保护更新事务 v1）加入的 `$TonoPrivateUnpack = 1` 分支以 live 名
+  解出 GUI（`Tono.exe`）和 Mihomo（`tono-core.exe`），安装包因此同时含 `Tono.exe` 与 `Tono.exe.next`；
+  `release:preflight --payload-only` 按 2026-08 起的规则（GUI 只能以唯一的 `Tono.exe.next` 出现）拒绝，此后每个
+  Windows 候选包都失败（run 36095249694；最后成功 569ce865）。现在私有分支与 live 分支一样以 `.next` 名解出，
+  再在私有 payload 目录内改名为 Service 校验的 `Tono.exe`/`tono-core.exe`；改名失败即 `Abort`（非零退出），
+  Service 不会读到半个 payload。载荷门未放宽。除私有解包的命名外无产品行为变化，Service 契约不变。
+  两个分支对同一源文件、同一 `SetOutPath $INSTDIR`、同一 `/oname` 各有一条 File 指令；7-Zip 对同数据块、同名同前缀的
+  成员只列一次（run 36095249694 的列表里两分支都写的 `resources/*` 各只出现一次），所以 `.next` 成员仍各一个，
+  门的「恰好一个」检查不改。
+- **新增/优化**：无。
+- **工程与测试**：`validateNsisAutomaticUpgradeFlow`（config-only preflight 也跑）现在要求私有分支只以 `.next` 名解出
+  GUI 与 Mihomo、只在 `$INSTDIR` 内改名、改名失败 `Abort`，构建前即可拦住。新回归
+  `NSIS private extraction never extracts a live GUI member`。三处原有 live 路径变异断言（`$APPDATA` 删除、GUI 与外部
+  二进制的 `File`）按首次出现替换，现在私有分支先出现同一行，改为只替换 live 段（`replaceInLiveInstall`），意图不变。
+- **验证**：本机 `node --test scripts/windows-packaging.test.mjs`：LF 32/32；`installer.nsi` 临时转 CRLF 后 32/32，已按副本
+  原样还原；新回归对 origin/main 的 `installer.nsi` 以断言失败。本机未跑 NSIS/cargo/tauri（执行位置规则）。
+  Windows 候选包 run 36098008549（d17b672c）构建与 `release:preflight --payload-only` 均通过，`.next` 成员未重复。
+  增量审查（Opus+Codex）PASSED，1 项 minor：私有分支 lint 未禁止 binaries 循环内多出的 live 名成员，`Rename` 放行
+  `$INSTDIR\..\`；已收紧为 binaries 循环逐行精确匹配、`Rename` 路径禁止 `..`，本机注入两种变异均被拒，LF/CRLF 32/32。
+- **候选/发布**：Windows 0.0.73 候选安装包（run 36098008549，源 d17b672c，未签名、`candidateOnly`，未推更新源），
+  `Tono_0.0.73_x64-setup.exe` SHA-256 `756145b7878c17de82ad6e64ec12a126213840bc85cc8f95db0c431793caceb9`，已交所有者分发测试。
+- **剩余限制**：私有解包未在实机由 Service 执行（受保护更新 G3.3 真机流程仍待）。
+
+## 2026-09-24 · Windows 候选包构建：NSIS 打包测试在 CRLF 检出下失败
+
+- **归属/来源**：G3 发出去还能再发（候选包构建）；`apps/windows/app/scripts/windows-packaging.test.mjs`。
+  基线 origin/main e0b7be4a；分支 `fix/windows-packaging-crlf-20260924`。
+- **缺陷修复**：无产品行为变化。
+- **工程与测试**：669113eb（2026-09-22）加入的变异断言用含 `\n` 的字符串锚点替换 `installer.nsi` 片段；
+  `windows-2025` 检出为 CRLF，锚点不匹配、替换落空、校验返回 null，`NSIS automatically upgrades…` 失败，
+  Windows 候选包构建（run 36094398670）因此中止。该测试只在候选包构建里跑（普通 CI 在 Linux，LF），所以此前未暴露；
+  上一次成功的候选包 569ce865 早于它。三处字符串锚点改为 `\r?\n` 正则，与同文件其它断言一致。
+- **验证**：本机 `node --test scripts/windows-packaging.test.mjs`：LF 31/31；把 `installer.nsi` 临时转 CRLF 后新版 31/31、
+  旧版 30/31（同一断言失败），已还原文件。Windows 候选包在本分支重跑见 PR。
+- **候选/发布**：macOS 0.0.73 build73 签名公证测试包（run 36094396395，源 e0b7be4a，`candidateOnly`，未签 Sparkle，
+  未推更新源）；Windows 候选包待本修复后的构建。
+- **剩余限制**：无。
+
+## 2026-09-24 · 控制面不可达时凭离线授权进入 Ready；服务端拒绝统一经单一漏斗吊销（Windows + macOS）
+
+- **归属/来源**：G2 连不上有下一手；Issue #582（总账 H21-O-F1）。Windows `crates/tono-core/src/auth.rs`、
+  `src-tauri/src/tono/`（新 `offline_grant.rs`，`state.rs`、`catalog_sync.rs`、`commands/restore.rs`、
+  `commands/account.rs`、`commands/quit.rs`、`commands/mod.rs`、`connection.rs`），tono-core `catalog.rs`
+  加 `current_routing()`；macOS `Tono/Services/`（新 `Account/OfflineGrant.swift`，`TonoAPIClient.swift`、
+  `AccountSession*.swift`、`AppState*.swift`、`ConfigStorage.swift`、`TonoApp.swift`、`Localizable.xcstrings`）。
+  基线 origin/main a4284413；分支 `fix/issue-582-offline-admission-20260924`，源码 a0a6244e；PR #612；未合 main。
+  取代 #607 的删除式标记方案。
+- **缺陷修复**：
+  - #582：已登录、有已验证目录缓存的用户在控制面不可达（出口可达）时重启，恢复失败进 error，无法连接。
+    现在：`me()` 仅因传输错误或恢复预算耗尽而失败时，若保护状态已知、`offline-grant.json` 为 granted、
+    其 refresh token 摘要与内存中水合的 token 相同、catalog/routing 摘要与内存 tracker 相同且有节点，
+    进 Ready 并标记离线（Windows 状态字段 `offlineVerifiedAtMs`）；401/403/5xx/无效响应不走此路。
+    比对只用内存，不重读目录缓存。授权只在本进程目录同步拿到服务端响应（安装或未变）且凭据存储确认
+    token 已落盘后写入，摘要取自该服务端响应，不取启动时从磁盘种下的 tracker。
+  - 服务端拒绝的识别此前分散在各调用点、依赖 `ApiError::Unauthorized`（本地也会产生），重试收到的
+    401、提前续期被吞掉的 refresh 401 会漏掉。现在 Windows 的 `ApiClient::exchange` 与 macOS 的
+    `TonoAPIClient.sendData` 是读取服务端答复的唯一位置（在传输重试与续期吞错之下），按请求用途分类：
+    2xx→Verified；refresh 或用新 token 重放的 401、带权益码（6 个，两端一致）的 403→Refused（macOS 首次请求
+    带权益码的 401 也算 Refused，Windows 不算；Worker 的 401 目前不带权益码，无实际差别）；
+    其它 403→Forbidden；首次请求的 401 只表示 access token 过期，不算拒绝。判决带发起时的身份代次，
+    身份已更替的迟到答复丢弃。
+  - 吊销：Refused/Forbidden 先在内存置位（Connect 与自动重连立即拒绝），再把授权文件**覆盖写**为
+    `{verdict:"revoked",reason,at}`，失败按 1 s→30 s 退避重试；Windows 退出时最多等 3 s。Refused
+    挂起账户（保护不动），Forbidden 只取消离线资格。离线模式在收到第一个分类答复时结束。
+- **新增/优化**：离线 Ready 期间 Connect 前再次比对授权与内存；macOS 离线期间每 60 s 重试 `me()`。
+  无前端改动：两端都没有「无法连接 Tono，使用 <日期> 验证的出口」+ 重试的界面（Windows 的
+  `offlineVerifiedAtMs` 与 macOS 的 `offlineVerifiedAt` 都未被界面读取）。
+- **工程与测试**：每个行为一个回归（规则 5），均先在 CI 上红、再转绿。
+  - tono-core T1 `a_refresh_refused_on_the_transport_retry_reports_one_refusal`、
+    T2 `a_refusal_during_early_renewal_is_reported_but_a_retired_identitys_is_not`。
+  - Windows app T3 `restore::offline_admission_tests::unreachable_restore_is_ready_offline_only_on_a_grant_matching_memory`、
+    T4 `offline_grant::tests::refusal_revokes_memory_at_once_and_retries_the_tombstone_until_it_lands`、
+    T5 `connection::tests::offline_ready_connect_is_refused_as_soon_as_the_server_forbids_the_session`。
+  - macOS M1 `testUnreachableRestoreIsReadyOfflineOnlyOnAGrantMatchingMemory`、
+    M2 `testARefusedRenewalOverwritesTheOfflineGrantAsRevoked`（AccountSessionRequestTests）、
+    M3 `testOfflineConnectIsRefusedAsSoonAsTheServerRevokesTheSession`（ManagedExitCatalogOwnershipTests）。
+  - 15dad8f0 在 macOS 编译失败（新参数 `session` 遮蔽 `URLSession` 属性），a0a6244e 修正；属编译错误，
+    非运行时缺陷。
+- **验证**：本机未执行 cargo/xcodebuild（执行位置规则）。
+  - 红：Windows CI 36070390689（19370636，`core` 仅 T1/T2 断言失败，271 通过）；36073146186（0b97c3ff，
+    `app-rust` 仅 T3/T4/T5 断言失败，526 通过）；macOS CI 36075897145（3fea479a，仅 M1–M3 断言失败）。
+  - 绿：Windows CI 36070556159（bd124d1f，四作业全绿，`core` 273 通过）；36074223673（fda90ebb，四作业全绿，
+    `app-rust` 529 通过）；macOS CI 36077017209（a0a6244e，四作业全绿，TonoTests 428 例 0 失败）。
+    a0a6244e 之后的提交只改 macOS 与文档，Windows 结果沿用 fda90ebb。
+  - 未实机：设计文档的完成条件（黑洞控制面后启动→离线 Ready→连接；服务端吊销后恢复连通→挂起；
+    B 覆盖 A 缓存后离线重启被拒）未在设备上执行。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：
+  - refresh token 每次续期都会轮换；轮换后到下一次目录同步（≤300 s）之间授权失配，离线启动被拒（fail-closed）。
+  - 退出等待有上限（Windows 3 s，退出时唤醒写入器立即重试；关机路径总预算 2.5 s 可能截断；macOS 不等待）；
+    超出时旧授权可能留在磁盘，
+    下次离线启动仍可准入，直到首个服务端答复。授权文件读取未做属主/ACL 校验（Windows）；macOS 读取校验 0600 与属主。
+  - Forbidden 会挡住在线 Connect 直到下一个 2xx（最长约一个同步周期）；Worker 目前在客户端端点不返回此类 403。
+  - 换账户时不丢弃旧账户未落盘的 tombstone，由新账户的第一次授权写入取代；吊销记录带 token 摘要，
+    与内存 token 不符或无摘要时按「无授权」处理（普通错误），不再挂起新账户。
+  - macOS：`me()` 重新接受账户时解除 Refused（Windows 只在重新登录时解除）。离线启动后账户为空：Windows 在
+    离线被 Verified 结束后每 60 s 补读 `me()` 直到成功（期间状态保持 Ready 时无上限）；macOS 离线期间每 60 s
+    重试 `me()`，挂起后该循环仍在运行。
+  - 真正的授权来源是出口 roster；客户端文件不是权益凭证，未加客户端离线时长上限。
+- **续记（2026-09-24，审查修复）**：`review-run`（55c23f9a）中 Grok 发现与复核均因 jev-route 的空闲看门狗
+  超时（`--output-format json` 结束前不写字节，5 分钟即被结束，且其 json 信封无法解析；工具侧另行修正），
+  由 Codex（发现）+ Opus（复核与独立发现）+ Codex（复核 Opus 发现）替代。确认项均为 minor/major·低概率，无阻断：
+  - 缺陷修复（总账 R612-*）：F1/O1 401/403 答复头已到而 body 中断时按该状态分类并抛出状态错误，不再当作
+    不可达（ac1de43d，两端）；F2 macOS 离线准入会话的 Check again 走完整恢复（2c41bf8a）；F3 Windows 先处理
+    消失出口再记授权，flush 限 2 s（313a6e05）；F4 Windows 离线被 Verified 结束后补读 `me()` 并启动日志上传
+    （35cb2a08）；O2 待写 tombstone 保留最强原因、解除或新授权落盘后丢弃（b662119e）；O3 吊销记录绑定 token
+    摘要（e1d61944）；O4 Windows 退出唤醒 tombstone 写入器（f124c0b7）。O5（macOS 受保护重连无授权仍拨缓存出口）
+    为 origin/main 既有问题，记总账 open，不在本 PR。
+  - 工程与测试：新增 3 个回归，均先红后绿。红：`wip/582-fa-red`（仅测试，基于 e681db2f，不合入）Windows CI
+    36081983790（`transport::tests::a_refusal_whose_body_is_cut_off_is_still_an_answer` 断言失败，529 通过）、
+    macOS CI 36081983804（`testARefusedRenewalWithACutOffBodyStillRevokesTheOfflineGrant` 断言失败）、
+    Windows CI 36082901027（c5045f1e，`restore::offline_admission_tests::unreachable_restore_is_not_suspended_by_another_sessions_revocation`
+    得到 Suspended）。F2/F3/F4/O2/O4 无回归（需 helper IPC、可阻塞的凭据库或 AppHandle，无便宜接口）。
+  - 验证：35cb2a08 Windows CI 36081986829、macOS CI 36081986834 全绿；f124c0b7 Windows CI 36082799227 全绿
+    （`app-rust` 531 通过）、macOS CI 36082799183 全绿。本机未编译。
+- **续记（2026-09-24 晚，第 2–6 轮审查）**：jev-route 改为 Opus+Codex 双发现者、异厂商流水化复核、
+  增量 `--since` 审查（第 2 轮起每轮 2–6 分钟）。各轮均 PASSED、无阻断；确认的问题：
+  - 缺陷修复：
+    - 36a43680：恢复预算超时时若已收到任何响应状态行，不再按不可达离线准入（`TonoTransport` 新增答复计数）；
+      两端 body 中断的非 2xx 按该状态处理（不再只限 401/403）；`lift_forbidden` 先取文件锁（第 2 轮 Codex F1=Grok G1、
+      G2、G3）。
+    - f594995a：`lift_forbidden` 只在确为 FORBIDDEN 时取锁，sink 在 2xx 常规路径不再等文件锁；超时后已答复的请求
+      给予宽限（第 3 轮）。bf5980c2、01399288：宽限先后改为 transport 总超时、5 倍总超时（第 4、5 轮指出仍不够）。
+    - 380fe8e3：已收到答复后不设上限，等 `me()` 调用链自然结束，由 tono-core 分类每个答复（第 6 轮指出一次
+      `send` 内会串行多条路径，固定上限都不成立）。链有限、每次 attempt 受 transport 超时约束；罕见情况下
+      Restoring 会持续较久，保护不变。
+  - 接受不改：2xx body 中断仍按传输失败（服务端已接受会话，不会放行被拒会话）；答复计数不按身份区分
+    （只会让结果偏向 Error，fail-closed）；真正解除 FORBIDDEN 时 sink 可能等一次写盘（罕见、有界）。
+  - 工程与测试：本轮修复无新增回归（需 AppHandle、可阻塞 transport 或并发时序夹具）。
+  - 工程与测试：36a43680 漏改一处测试里的 `TonoTransport` 结构体字面量，app 测试目标在 Windows 编译失败；
+    其后各次 Windows 运行都被下一次推送取消，直到 380fe8e3 的 CI 才暴露，c258bb46 修正（编译错误，非运行时缺陷）。
+  - 验证：c258bb46 Windows CI 36091919930 全绿（四作业）、macOS CI 36091919923 全绿；第 7 轮增量审查（Opus+Codex）
+    无发现。本机未编译。
+
+## 2026-09-24 · Windows 启动恢复的备用路径在预算内运行；重试收到的拒绝不再被当作网络失败
+
+- **归属/来源**：G2 连不上有下一手；Windows `src-tauri/src/tono/transport.rs` 与
+  `crates/tono-core/src/auth.rs`。Issue #583；审查项 R607-F1。从 #607 拆出：#607 的离线准入部分
+  （#582）按所有者决定另行重设计（单一拒绝入口 + 持久化拒绝，Windows 与 macOS 一起），本 PR
+  不含标记文件、离线 Ready、目录同步/恢复的离线改动和对应界面文字。基线 origin/main bf177a10，
+  后并入 main 3c3f9b95（合并提交 aea51516）；分支 `fix/issue-583-transport-20260924`；PR #611。
+- **缺陷修复**：
+  - #583：控制面直连（pinned）客户端的连接超时是共用的 30 s，等于启动恢复总预算
+    `RESTORE_TRANSACTION_TIMEOUT`。直连地址被丢包时，恢复在直连这一步就用完预算，系统 DNS 备用
+    路径在启动时从不运行。现在：直连一步的连接超时为 10 s（`PINNED_CONNECT_TIMEOUT`）；系统 DNS
+    客户端在直连失败后答复成功，之后的请求先走它（同为 10 s 连接预算的独立 client），所以恢复的
+    `me` 不再在 refresh 之后又等一次直连。首选尝试失败或被外层截止时间取消时，由租约在 drop 时清除
+    偏好，下一次请求先走直连（kill switch 武装、DNS 被封时多付一次解析失败）。只限制连接阶段，
+    POST/DELETE 的送达判断不变；其它客户端（fallback 的系统 DNS、备用端口）超时不变。
+  - R607-F1：`ApiClient::call` 在首次请求为可重试的传输错误、重试收到服务器答复（401/403/其它
+    4xx/5xx）时，丢弃答复并返回第一次的传输错误。现在重试仍为传输错误才返回原错误，服务器的答复
+    优先。影响：启动恢复中重试收到的 401 进 Suspended（保留保护与已存会话，提示重新登录；此前进 error），
+    403/5xx 仍进 error；
+    传输失败仍进 error（本 PR 不改为 Ready）。
+- **新增/优化**：无。
+- **工程与测试**：两个回归（规则 5）。
+  - `transport::tests::restores_refresh_and_me_pay_the_dropped_pins_once`：直连指向丢包地址
+    10.255.255.1、系统 DNS 路径指向本机夹具，经真实 `ApiClient::me()` 走 refresh（POST）+ `me`（GET），
+    断言两次合计小于恢复预算一半；再构造“偏好已学到、DNS 路径变黑洞、直连健康”的 transport，
+    首选请求被 500 ms 超时取消后，下一次请求须在 5 s 内由直连答复。旧代码直连 30 s、无偏好，
+    第一段约 60 s；有偏好但取消不清除时第二段约 10 s（超过 5 s 上限）；均失败（按代码推理，未实跑）。有隧道截获
+    黑洞地址时跳过；耗时约 11 s。
+  - `tono-core auth::tests::a_retry_the_server_refused_is_not_reported_as_unreachable`：refresh 首次
+    Connect 失败、重试 401，断言 `me()` 返回 `Unauthorized`；旧代码返回 Transport（按代码推理，未实跑）。
+  - `RESTORE_TRANSACTION_TIMEOUT` 改为 `pub(crate)` 供测试引用。
+- **验证**：本机未执行 cargo（执行位置规则）。Windows CI run 36058698693 在 aea51516 上全绿：
+  transport 回归在 windows-2025 `app-rust` 作业通过（实跑约 13 s，未走隧道跳过分支）；tono-core
+  回归在 ubuntu-24.04 `core` 作业通过（windows-2025 只跑 tono-core 的 `update_journal` 过滤）。
+  两个回归在旧代码上的失败未实跑。未改前端。双厂商审查：Codex 无发现；Opus 报告 F1/F2（见剩余限制）
+  及本条文字错误（已改），F1/F2 尚待异厂商复核。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：未实机验证。#582（控制面不可达时用缓存连接）不在本 PR，另行重设计；启动时控制面
+  不可达仍进 error 状态并显示“Session expired”。系统 DNS 路径本身较慢时（审查按约 11 s 推算），
+  refresh 的直连 10 s + 备用路径 + `me` 的备用路径仍可能超出 30 s 预算，本 PR 只去掉了第二次直连等待。
+  审查 F1（Opus 发现，待复核）：hyper-util 0.1.20 把 connect 超时按地址数均分并逐个尝试，10 s 在两个
+  编译期 pin 下每个地址只有 5 s（只覆盖 0 s/3 s 两次 SYN），学到更多 pin 时更少；此前 30 s 每地址 15 s。
+  丢包链路 + Protected Offline 下，旧代码可能在 9 s 重传时连上而新代码失败（仍 fail-closed）。上文
+  「10 s 覆盖两次重传」的注释不成立。审查 F2：`restore_deadline` 在保护探测之前设定，探测最坏约 14 s
+  也计入 30 s；`me` 走 `resolved_first` 是独立连接池，不复用 refresh 的连接。
 
 ## 2026-09-24 · macOS Core 重启期间撤下 reviewed-bundle PF 放行（不清空状态）
 

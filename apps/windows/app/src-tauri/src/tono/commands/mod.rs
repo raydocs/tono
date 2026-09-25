@@ -73,7 +73,7 @@ pub(crate) const AUDIT_FLUSH_BUDGET: std::time::Duration = std::time::Duration::
 /// Absolute budget for startup authentication restore and its two cloud refreshes. Credential
 /// hydration has its own three-second budget before this function starts. Read-only API work can
 /// be cancelled safely; protection release keeps its separate reconciliation semantics.
-const RESTORE_TRANSACTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+pub(crate) const RESTORE_TRANSACTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Emitted on `tono://status` after every state change.
 ///
@@ -125,6 +125,10 @@ pub struct TonoStatus {
     /// disconnect and reinstall; a later connect must not hide this.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub update_incomplete: bool,
+    /// Ready on an offline grant (#582): when the server last verified this session and its
+    /// catalog. Absent once any server answer arrives.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offline_verified_at_ms: Option<i64>,
 }
 
 /// Last published immutable UI snapshot. The status command reads this without joining the large
@@ -293,6 +297,7 @@ pub(crate) fn status_of(inner: &TonoInner) -> TonoStatus {
             None
         },
         update_incomplete: update::incomplete() || crate::tono::update_handoff::incomplete(),
+        offline_verified_at_ms: inner.offline.offline_verified_at_ms(),
     }
 }
 

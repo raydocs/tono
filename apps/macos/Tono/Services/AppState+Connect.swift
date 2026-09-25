@@ -25,8 +25,43 @@ extension AppState {
                     self.errorMessage = String(localized: "No protected Tono cloud exit is ready.")
                     return (false, UUID())
                 }
+                // #582: a server refusal blocks Connect before the UI catches
+                // up, and an offline session must still hold exactly the
+                // catalog its grant verified.
+                if let refusal = self.accountConnectRefusal(
+                    self.managedCatalogDigest,
+                    self.managedCatalogRoutingToken
+                ) {
+                    self.errorMessage = refusal
+                    return (false, UUID())
+                }
                 if let selected = self.selectedExitNode(), let reason = ConfigPipeline.singBoxUnavailableReason(selected) {
                     self.errorMessage = reason + ": this sing-box build cannot authenticate the catalog's HY2 certificate pin. Choose Reality."
+                    // #585: while protection holds (Protected Offline, or an
+                    // unconfirmed barrier after a failed wake reassert, which
+                    // the same loop retries) this refusal is a failed attempt,
+                    // so the three-strike pause stops the loop. PF stays as it
+                    // is; only the user's choice lifts it.
+                    if self.isProtectionBlocked || self.isProtectionUnconfirmed {
+                        let signature = "\(ConnectionStage.preparing.rawValue)|\(reason)"
+                        if signature == self.lastProtectedFailureSignature {
+                            self.consecutiveProtectedFailureCount += 1
+                        } else {
+                            self.lastProtectedFailureSignature = signature
+                            self.consecutiveProtectedFailureCount = 1
+                        }
+                        if self.consecutiveProtectedFailureCount >= 3 {
+                            self.protectedReconnectPausedForUserAction = true
+                            self.protectedReconnectPauseLiftsOnNetworkChange = false
+                            // Retry now exists only in Protected Offline; with an
+                            // unconfirmed barrier the "Choose Reality" above is
+                            // the action to take.
+                            if self.isProtectionBlocked {
+                                self.errorMessage = (self.errorMessage ?? reason) + " "
+                                    + String(localized: "The same failure repeated three times, so automatic retries are paused. Click Retry now to try again, or Restore internet to get back online.")
+                            }
+                        }
+                    }
                     return (false, UUID())
                 }
                 self.isProtectionBlocked = false
@@ -389,15 +424,14 @@ extension AppState {
                     let browserDNS = await self.scanBrowserProtectedDNS()
                     self.recordBrowserDNSPreflight(browserDNS)
                     guard browserDNS.outcome == .clear else {
-                        self.lastClassifiedFailure = ProtectedConnectivity.failure(
-                            .protectedDnsNotReady,
+                        self.lastClassifiedFailure = Self.browserDNSFailure(
+                            browserDNS,
                             stage: "securingDNS",
                             attempt: 3,
-                            generation: self.connectionCoordinator.protectionOperationGeneration,
-                            detail: browserDNS.diagnosticDetail
+                            generation: self.connectionCoordinator.protectionOperationGeneration
                         )
-                        throw CoreControllerError.protectionFailed(
-                            browserDNS.failureMessage
+                        throw BrowserDNSDiagnostics.ConflictError(
+                            message: browserDNS.failureMessage
                         )
                     }
                 }
@@ -2012,7 +2046,8 @@ extension AppState {
 
     /// A `prepareHelper` failure. Another account's helper is its own code and
     /// shows the error's text, which names that account; it is not a helper to
-    /// repair. Every other install or identity failure stays a mismatch.
+    /// repair. A declined administrator prompt asks for the approval instead.
+    /// Every other install or identity failure stays a mismatch.
     static func helperPreparationFailure(_ error: Error, generation: UInt64) -> ProtectedFailure {
         let anotherAccount: Bool
         if case HelperIPCError.boundToAnotherUser(_) = error {
@@ -2020,8 +2055,16 @@ extension AppState {
         } else {
             anotherAccount = false
         }
+        let code: ProtectedFailureCode
+        if anotherAccount {
+            code = .helperBoundToAnotherAccount
+        } else if case HelperInstallError.userDenied = error {
+            code = .helperAuthorizationDenied
+        } else {
+            code = .helperProtocolMismatch
+        }
         var failure = ProtectedConnectivity.failure(
-            anotherAccount ? .helperBoundToAnotherAccount : .helperProtocolMismatch,
+            code,
             stage: "preparingHelper",
             attempt: 1,
             generation: generation,
@@ -2031,11 +2074,32 @@ extension AppState {
         return failure
     }
 
+    /// A browser Secure DNS scan that is not clear. The card shows the scan's
+    /// own steps (turn off Secure DNS, or quit the browsers), not the generic
+    /// "wait and reconnect" text of a system resolver that is still settling.
+    static func browserDNSFailure(
+        _ report: BrowserDNSDiagnostics.Report,
+        stage: String,
+        attempt: Int,
+        generation: UInt64
+    ) -> ProtectedFailure {
+        var failure = ProtectedConnectivity.failure(
+            .protectedDnsNotReady,
+            stage: stage,
+            attempt: attempt,
+            generation: generation,
+            detail: report.diagnosticDetail
+        )
+        failure.userMessage = report.failureMessage
+        return failure
+    }
+
     /// Failures the automatic reconnect loop can never resolve: repeating the
     /// identical transaction would re-raise the same administrator prompt or
     /// fail installation the same way. Weak-network and transient helper
     /// errors deliberately stay retryable. Another account's helper stays
-    /// refused until that account or an administrator acts.
+    /// refused until that account or an administrator acts, and a browser
+    /// Secure DNS conflict until the user changes the browser.
     static func failureRequiresUserAction(_ error: Error) -> Bool {
         switch error {
         case KillSwitchService.Error.userDenied,
@@ -2046,6 +2110,8 @@ extension AppState {
              HelperInstallError.installFailed,
              HelperIPCError.forbidden,
              HelperIPCError.boundToAnotherUser(_):
+            true
+        case is BrowserDNSDiagnostics.ConflictError:
             true
         default:
             false
@@ -2272,7 +2338,10 @@ extension AppState {
         }
         let selected = currentProxySelectionTarget() ?? activeNode?.name
         guard let selected else { return nil }
-        let names = Set(importedExitNodes.map(\.name))
+        // #585: only blocks the bundled sing-box core can use.
+        let names = Set(importedExitNodes.filter {
+            ConfigPipeline.singBoxUnavailableReason($0) == nil
+        }.map(\.name))
         return ProxyNode.backupChannelName(selected: selected, catalogNames: names)
     }
 

@@ -332,9 +332,15 @@ pub(crate) async fn adopt_sign_in_response(
     // first sync installs them.
     catalog_sync::discard_account_catalog(&mut inner);
     connection::remove_legacy_runtime_copy(&inner.catalog_dir);
+    // The retained connect failure belongs to the previous account too: diagnostics fall back to
+    // it (#594), so clear it as sign-out does, or this account's report carries that account's
+    // failure.
+    inner.attempt_history = Default::default();
     // Keep the Tono state lock through adoption: a resend/sign-out cannot invalidate this
     // generation between the last check and the token write.
     client.adopt(auth).await.map_err(|err| err.to_string())?;
+    // tono-core has retired the previous identity: its verdicts no longer apply (#582).
+    inner.offline.adopt_new_identity();
     if let Err(error) = crate::tono::credentials::mark_vault_session_owned(&inner.catalog_dir) {
         // Not fatal: the next launch just asks this user to sign in again.
         logging!(warn, Type::Service, "Tono: failed to record the vault session marker: {error}");

@@ -1062,6 +1062,7 @@ export interface TranslationResources {
           tunDataPlaneBroken: string
           tunIngressBroken: string
           wfpEngineWedged: string
+          wfpLockUnverified: string
         }
         errorSwitchServer: string
         info: {
@@ -1218,6 +1219,8 @@ export interface TranslationResources {
         emailLabel: string
         emailPlaceholder: string
         errors: {
+          clockSkew: string
+          codeRejected: string
           deviceLimit: string
           rateLimited: string
           serverError: string
@@ -1236,6 +1239,10 @@ export interface TranslationResources {
           stillRunningTitle: string
           title: string
           unverifiedDescription: string
+        }
+        noEmail: {
+          description: string
+          title: string
         }
         resendIn: string
         restartTono: string
@@ -1465,6 +1472,7 @@ export interface TranslationResources {
       }
       settings: {
         about: {
+          checkFailed: string
           checkUpdates: string
           description: string
           latestVersion: string

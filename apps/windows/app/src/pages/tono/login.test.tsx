@@ -35,7 +35,11 @@ vi.mock('@/services/tono', () => ({
   tonoRetryRestore: vi.fn(),
   formatTonoActionError: (error: Error) => error.message,
 }))
-vi.mock('@/tono-ui/SupportContact', () => ({ SupportContact: () => null }))
+vi.mock('@/tono-ui/SupportContact', () => ({
+  SupportContact: ({ extra }: { extra?: string }) => (
+    <div data-testid="support-contact" data-extra={extra} />
+  ),
+}))
 
 import LoginPage from './login'
 
@@ -90,6 +94,31 @@ describe('login welcome v2', () => {
       ),
     ).toBeDefined()
     expect(screen.getByRole('button', { name: 'Send code' })).toBeDefined()
+  })
+})
+
+describe('login code not received', () => {
+  it('offers support once the code has had a minute to arrive', async () => {
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    )
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: 'person@example.com' },
+    })
+    await act(async () =>
+      fireEvent.click(screen.getByRole('button', { name: 'Send code' })),
+    )
+    for (let second = 0; second < 59; second++) {
+      await act(async () => vi.advanceTimersByTime(1000))
+    }
+    expect(screen.queryByText('No email yet?')).toBeNull()
+    await act(async () => vi.advanceTimersByTime(1000))
+    expect(screen.queryByText('No email yet?')).not.toBeNull()
+    expect(
+      screen.getByTestId('support-contact').getAttribute('data-extra'),
+    ).toBe('No email yet?')
   })
 })
 

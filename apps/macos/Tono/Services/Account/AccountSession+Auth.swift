@@ -66,6 +66,9 @@ extension AccountSession {
                     enterEntitlementBlock(detail: nil)
                     return
                 }
+                // Tono accepts this account: a refusal heard earlier in this
+                // process no longer blocks Connect (#582).
+                api.offlineGate.readmit()
                 await startCloudOnlyRuntime()
                 try Task.checkCancellation()
                 if !Task.isCancelled, state == .ready { refreshDevicesInBackground() }
@@ -88,6 +91,7 @@ extension AccountSession {
                 enterEntitlementBlock(detail: nil)
                 return
             }
+            api.offlineGate.readmit()
             device = devices.first(where: { $0.current == true })
             await resumeOrEnrollRuntime()
             try Task.checkCancellation()
@@ -97,8 +101,117 @@ extension AccountSession {
             // instead of stranding the session behind hasStartedRestore.
             hasStartedRestore = false
         } catch {
+            await settleRestoreFailure(error)
+        }
+    }
+
+    /// Restore's answer when the stored session could not be validated. Only
+    /// an unreachable control plane may fall back to the offline grant
+    /// (#582); any server answer (401, 403, 5xx, an invalid body) keeps the
+    /// meaning it has always had here, a refused launch included.
+    func settleRestoreFailure(_ error: Error) async {
+        offlineVerifiedAt = nil
+        guard Self.isUnreachable(error), !protectionUnconfirmedConsumer() else {
+            await fail(error, signsOutOnUnauthorized: true)
+            return
+        }
+        let tokenSha256 = await api.currentRefreshTokenDigest()
+        guard !Task.isCancelled else {
+            hasStartedRestore = false
+            return
+        }
+        // Memory only: the token as hydrated and the catalog the launch
+        // installed, never a re-read of the cache on disk.
+        let admission = api.offlineGate.admit(
+            tokenSha256: tokenSha256,
+            installed: installedCatalogConsumer()
+        )
+        switch admission {
+        case let .admitted(verifiedAt):
+            LocalTrafficAudit.shared.recordEvent("offline_admission", details: ["result": "admitted"])
+            do {
+                try await sidecar.prepareCloudOnly()
+                try Task.checkCancellation()
+                try cloudFallbackConsumer(shouldResumeProtection)
+            } catch is CancellationError {
+                api.offlineGate.leaveOffline()
+                hasStartedRestore = false
+                return
+            } catch {
+                api.offlineGate.leaveOffline()
+                await fail(error, signsOutOnUnauthorized: true)
+                return
+            }
+            shouldResumeProtection = false
+            offlineVerifiedAt = verifiedAt
+            state = .ready
+            startOfflineVerification()
+        case let .revoked(reason):
+            LocalTrafficAudit.shared.recordEvent(
+                "offline_admission", details: ["result": "revoked", "reason": reason]
+            )
+            enterEntitlementBlock(detail: nil)
+        case let .refused(reason):
+            LocalTrafficAudit.shared.recordEvent(
+                "offline_admission", details: ["result": "refused", "reason": reason]
+            )
             await fail(error, signsOutOnUnauthorized: true)
         }
+    }
+
+    private static func isUnreachable(_ error: Error) -> Bool {
+        guard let apiError = error as? TonoAPIClient.APIError else { return false }
+        switch apiError {
+        // #588: a clock error is also a failure before any status line; the
+        // offline grant, not a refusal, decides.
+        case .transport, .clockSkew: return true
+        default: return false
+        }
+    }
+
+    static let offlineVerificationInterval: Duration = .seconds(60)
+
+    /// #582: Ready offline asks Tono for the account again on a fixed cadence.
+    /// The first server answer ends offline mode: a refusal suspends through
+    /// the verdict sink, which retires this loop with the state change, and an
+    /// accepted account finishes the restore the unreachable launch could not.
+    func startOfflineVerification() {
+        offlineVerificationTask?.cancel()
+        let revision = accountReadRevision
+        offlineVerificationTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: AccountSession.offlineVerificationInterval)
+                guard let self, !Task.isCancelled, accountReadRevision == revision else { return }
+                let restoredUser: TonoUser
+                do {
+                    restoredUser = try await api.me().user
+                } catch {
+                    // Still unreachable, or no answer for the account yet. A
+                    // refusal has already reached the verdict sink.
+                    continue
+                }
+                guard !Task.isCancelled, accountReadRevision == revision else { return }
+                completeOfflineRestore(restoredUser)
+                return
+            }
+        }
+    }
+
+    /// Tono answered for an account an unreachable launch admitted offline.
+    /// Finish that restore as it would have finished online; a connection the
+    /// user made offline is left exactly as it is.
+    private func completeOfflineRestore(_ restoredUser: TonoUser) {
+        api.offlineGate.leaveOffline()
+        offlineVerifiedAt = nil
+        user = restoredUser
+        DiagnosticsLogOwnership.shared.activate(owner: restoredUser.id)
+        ManagedExitCatalogOwnership.adopt(restoredUser.id)
+        guard restoredUser.suspended != true else {
+            enterEntitlementBlock(detail: nil)
+            return
+        }
+        startCatalogSync(refreshImmediately: true)
+        refreshDevicesInBackground()
     }
 
     func loadAuthMethods() async {
@@ -151,7 +264,9 @@ extension AccountSession {
             // broken session. Re-read the account instead of re-running the
             // launch sequence, whose first step is crash cleanup of the
             // runtime this session still owns; leaving the block restarts it.
-            if blockedWhileReady {
+            // A session admitted offline (#582) has no account to re-read yet,
+            // so it runs the full restore instead.
+            if blockedWhileReady, user != nil {
                 await refreshAccount()
                 return
             }
@@ -340,6 +455,7 @@ extension AccountSession {
                 try Task.checkCancellation()
                 guard accountReadRevision == accountRevision else { return false }
                 lastCatalogFailureMessage = nil
+                await recordOfflineGrant(confirming: catalog)
                 return true
             } catch is CancellationError {
                 return false
@@ -361,6 +477,20 @@ extension AccountSession {
             }
         }
         return false
+    }
+
+    /// #582: the server has just confirmed `catalog`. When it is exactly what
+    /// memory holds (installed now, or already installed and unchanged),
+    /// record the offline grant from this response's digests — never from the
+    /// cache a launch loaded from disk.
+    private func recordOfflineGrant(confirming catalog: TonoExitCatalogResponse) async {
+        guard let owner = user?.id else { return }
+        let confirmed = InstalledCatalogDigests(
+            catalogSha256: catalog.sha256,
+            routingSha256: AppState.catalogRoutingToken(routing: catalog.routing)
+        )
+        guard installedCatalogConsumer() == confirmed else { return }
+        await api.recordOfflineGrant(accountId: owner, confirmed: confirmed)
     }
 
     func cancelManagedCatalogRefresh() async {
@@ -480,6 +610,9 @@ extension AccountSession {
             if refreshed.suspended == true {
                 enterEntitlementBlock(detail: nil)
             } else {
+                // Accepted again (Check again): an earlier refusal no longer
+                // blocks the Connect the resume below may start (#582).
+                api.offlineGate.readmit()
                 await leaveEntitlementBlock()
             }
         } catch is CancellationError {
@@ -529,6 +662,39 @@ extension AccountSession {
         ManagedExitCatalogOwnership.purge()
         Task { [weak self] in await self?.descriptorConsumer(nil) }
         updateDiagnosticsLogUploading()
+    }
+
+    /// #582: the account side of the verdict sink `TonoAPIClient.sendData`
+    /// reports every classified server answer to. Memory and disk have taken
+    /// it already (Connect is refused from there on); here it reaches the
+    /// account.
+    func installSessionVerdictSink() {
+        api.offlineGate.noteReadScope(accountReadRevision)
+        api.offlineGate.setVerdictHandler { [weak self] report in
+            Task { @MainActor in self?.applySessionVerdict(report) }
+        }
+    }
+
+    /// Generalises the refusal handling above to every endpoint: a refusal of
+    /// this session suspends the account from any state but signed out or
+    /// mid-sign-in, protection left as it is. Only the presentation the
+    /// request started under is suspended; a refusal a caller settles itself
+    /// (`refreshAccount`) moves that presentation first, so it is never
+    /// applied twice. Any answer ends offline mode.
+    func applySessionVerdict(_ report: SessionVerdictReport) {
+        if offlineVerifiedAt != nil { offlineVerifiedAt = api.offlineGate.offlineVerifiedAt }
+        guard case let .refused(code) = report.verdict,
+              report.readScope == accountReadRevision else { return }
+        switch state {
+        case .signedOut, .authenticating: return
+        default: break
+        }
+        let detail = code.flatMap { code in
+            TonoAPIClient.entitlementCodes.contains(code)
+                ? TonoAPIClient.APIError.entitlementBlocked(code: code, message: nil).errorDescription
+                : nil
+        }
+        enterEntitlementBlock(detail: detail)
     }
 
     /// The control plane accepted this account again, so the block is lifted

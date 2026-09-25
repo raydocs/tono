@@ -207,6 +207,9 @@ pub async fn connect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String
             AccountState::Suspended => return Err("account is suspended".to_string()),
             _ => return Err("not signed in".to_string()),
         }
+        if let Some(refusal) = crate::tono::offline_grant::connect_refusal(&inner) {
+            return Err(refusal.to_string());
+        }
         if inner.fsm.status().is_connected {
             return Err("already connected".to_string());
         }
@@ -501,6 +504,10 @@ async fn guard_snapshot(
         AccountState::Ready => {}
         AccountState::Suspended => return Err("account is suspended".to_string()),
         _ => return Err("not signed in".to_string()),
+    }
+    // #582: a server refusal blocks Connect (and reconnect) before the UI catches up.
+    if let Some(refusal) = crate::tono::offline_grant::connect_refusal(&inner) {
+        return Err(refusal.to_string());
     }
     let status = inner.fsm.status();
     if status.is_connecting || status.is_connected || status.is_disconnecting {
@@ -1366,6 +1373,34 @@ mod tests {
                 .unwrap()
                 .is_err()
         );
+    }
+
+    /// #593: a failed WFP lock proof never ran a TUN probe, so it must not become
+    /// `TONO_TUN_DATA_PLANE_BROKEN`, and the Service's own `last_error` must survive.
+    #[test]
+    fn unverified_wfp_lock_carries_the_service_error_instead_of_a_tun_verdict() {
+        use super::classify_exhausted_data_plane;
+        use super::probes::{kill_switch_not_locked, lock_unverified_error};
+        use tono_service_protocol::{KillSwitchStatus, KillSwitchStatusMode};
+
+        let status = KillSwitchStatus {
+            wanted: true,
+            verified: true,
+            live: false,
+            mode: KillSwitchStatusMode::Locked,
+            tunnel_permit_rendered: true,
+            endpoints: Vec::new(),
+            direct_endpoint_digest: String::new(),
+            last_error: Some(
+                "Windows kill-switch reconciliation failed: FwpmTransactionCommit0 returned 0x80320017".into(),
+            ),
+        };
+        let data_plane = lock_unverified_error(&kill_switch_not_locked(&status));
+        let last = classify_exhausted_data_plane(Ok(()), data_plane, Ok(()));
+        assert!(last.starts_with("TONO_WFP_LOCK_UNVERIFIED:"), "{last}");
+        assert!(!last.contains("TONO_TUN_DATA_PLANE_BROKEN"), "{last}");
+        assert!(last.contains("live=false"), "{last}");
+        assert!(last.contains("FwpmTransactionCommit0 returned 0x80320017"), "{last}");
     }
 
     #[test]
@@ -3479,5 +3514,48 @@ mod tests {
             .expect_err("a partial WFP permit set must never be emitted");
 
         assert!(error.contains("257 unique endpoints"));
+    }
+
+    /// #582 T5: Ready on an offline grant, then the server forbids a request of this session:
+    /// Connect is refused at once, before any FSM, generation or account change.
+    #[tokio::test]
+    async fn offline_ready_connect_is_refused_as_soon_as_the_server_forbids_the_session() {
+        use crate::tono::offline_grant::{
+            OfflineAdmission,
+            test_support::{ACCOUNT_A_UUID, account_catalog, data_dir, leave_verified_session},
+        };
+        use tono_core::credentials::CredentialStore as _;
+
+        let dir = data_dir("t5");
+        leave_verified_session(&dir, &account_catalog(ACCOUNT_A_UUID), "session-a").await;
+        let state = std::sync::Arc::new(crate::tono::state::TonoState::for_test_in(dir.clone()));
+        let admitted = {
+            let mut inner = state.lock().await;
+            inner.credentials.set_local(tono_core::CredentialKey::RefreshToken, "session-a").unwrap();
+            crate::tono::catalog_sync::seed_from_cache(&mut inner);
+            let token = inner.credentials.refresh_token().unwrap();
+            let admitted = inner.offline.admit(token.as_deref(), &inner.catalog_tracker, !inner.nodes.is_empty());
+            inner.account_state = crate::tono::state::AccountState::Ready;
+            admitted
+        };
+        assert!(super::guard_snapshot(&state).await.is_ok(), "offline Ready connects on its grant");
+        let (gate, before) = {
+            let inner = state.lock().await;
+            (std::sync::Arc::clone(&inner.offline), (inner.fsm.status().clone(), inner.connect_generation))
+        };
+
+        gate.verdict_sink().report(1, tono_core::auth::SessionVerdict::Forbidden);
+
+        let rejection = super::guard_snapshot(&state).await.err();
+        assert!(rejection.is_some(), "a server 403 must block Connect before the UI catches up");
+        let inner = state.lock().await;
+        assert!(crate::tono::offline_grant::connect_refusal(&inner).is_some(), "connect() runs the same gate");
+        assert_eq!((inner.fsm.status().clone(), inner.connect_generation), before, "refused before any FSM change");
+        assert_eq!(inner.account_state, crate::tono::state::AccountState::Ready, "Forbidden does not suspend");
+        // Checked last so that old code fails on the refusal itself: the 403 hit an offline-Ready session.
+        assert_eq!(admitted, OfflineAdmission::Admitted);
+        drop(inner);
+        let _ = gate.wait_durable(Duration::from_secs(5)).await;
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

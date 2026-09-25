@@ -1112,6 +1112,36 @@
         }
       }
     },
+    "No email yet?": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "还没收到邮件？"
+          }
+        }
+      }
+    },
+    "Check spam and the address above, or send a new code. If it still does not arrive, copy the details for Tono support.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请查看垃圾箱并核对上面的邮箱地址，或重新发送验证码。仍然收不到的话，复制详情发给 Tono 客服。"
+          }
+        }
+      }
+    },
+    "That code is wrong or expired. Request a new one.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "验证码错误或已过期，请重新获取。"
+          }
+        }
+      }
+    },
     "YOUR EVERYDAY CONNECTION": {
       "localizations": {
         "zh-Hans": {
@@ -6059,6 +6089,16 @@
         }
       }
     },
+    "The cloud servers no longer match what Tono last verified. Connect again when Tono is reachable.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "云端节点与 Tono 上次验证的内容不一致。请在能连接 Tono 时再连接。"
+          }
+        }
+      }
+    },
     "The connection attempt stalled and was stopped.": {
       "localizations": {
         "zh-Hans": {
@@ -6563,6 +6603,16 @@
         }
       }
     },
+    "Tono did not accept this session. Connect stays blocked until Tono verifies it again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 未接受此会话。在 Tono 重新验证之前，无法连接。"
+          }
+        }
+      }
+    },
     "Tono did not store this network log. Check the device's diagnostic collection authorization.": {
       "localizations": {
         "zh-Hans": {
@@ -6630,6 +6680,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tono 可能会请求管理员权限来安装签名网络组件——它负责路由并保护你的流量。"
+          }
+        }
+      }
+    },
+    "Tono needs your administrator approval to protect the connection. Try again and approve the macOS prompt.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 需要你的管理员批准才能保护连接。请重试，并在 macOS 弹出的提示中批准。"
           }
         }
       }
@@ -7209,6 +7269,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "会话已过期，请重新登录。"
+          }
+        }
+      }
+    },
+    "Your Mac's date and time look wrong, so Tono cannot verify secure connections. Set the correct date and time in System Settings > General > Date & Time, then retry.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台 Mac 的日期和时间不对，Tono 无法验证安全连接。请在“系统设置 > 通用 > 日期与时间”中改为正确的日期和时间，然后重试。"
           }
         }
       }

@@ -16,6 +16,9 @@ nonisolated enum ProtectedFailureCode: String, CaseIterable, Sendable {
     /// macOS only: the helper serves another macOS account on this Mac. Not a
     /// repair; the user acts (switch account, or an administrator reset).
     case helperBoundToAnotherAccount = "HELPER_BOUND_TO_ANOTHER_ACCOUNT"
+    /// macOS only: the user declined (or walked away from) the administrator
+    /// prompt that installs the helper. Nothing is broken; the user approves.
+    case helperAuthorizationDenied = "HELPER_AUTHORIZATION_DENIED"
     case updateRecoveryFailed = "UPDATE_RECOVERY_FAILED"
     case catalogNodeRemoved = "CATALOG_NODE_REMOVED"
     case unknownClassifiedFailure = "UNKNOWN_CLASSIFIED_FAILURE"
@@ -45,6 +48,8 @@ nonisolated enum ProtectedFailureCode: String, CaseIterable, Sendable {
             // Fallback only: the connect path shows the helper error's own
             // text, which names the account.
             return String(localized: "Tono's network helper on this Mac is set up for another macOS account. Use Tono from that account.")
+        case .helperAuthorizationDenied:
+            return String(localized: "Tono needs your administrator approval to protect the connection. Try again and approve the macOS prompt.")
         case .updateRecoveryFailed:
             return String(localized: "The protected connection did not come back after the update. Reconnect to restore protection.")
         case .catalogNodeRemoved:
@@ -60,6 +65,8 @@ nonisolated enum ProbeFailureCategory: String, Sendable {
     case dns
     case tcp
     case tls
+    /// #588: TLS refused a certificate on its dates: this Mac's clock is wrong.
+    case clock
     case http
     case timeout
     case cancelled
@@ -251,14 +258,23 @@ nonisolated enum ProtectedConnectivity {
             detail = "controller=\(controllerError); TUN=\(tunDetail)"
         }
 
-        return .retry(failure(
+        var decided = failure(
             code,
             stage: stage,
             attempt: attempt,
             generation: generation,
             detail: detail,
             probes: probes
-        ))
+        )
+        // #588: an origin's certificate failed on its dates through the
+        // tunnel, so the exit answered and the clock is what is wrong. The
+        // code (and its telemetry) stays; only the sentence names the clock.
+        // A mixed probe that succeeded validated a certificate (dates and
+        // host name) through the same exit, so the clock is fine then.
+        if mixed != .some(.ok), probes.contains(where: { $0.category == .clock }) {
+            decided.userMessage = CertificateClock.userMessage
+        }
+        return .retry(decided)
     }
 
     static func failure(

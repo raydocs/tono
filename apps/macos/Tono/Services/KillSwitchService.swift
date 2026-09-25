@@ -274,7 +274,7 @@ nonisolated enum KillSwitchService {
         AppProfile.defaults.set(cache, forKey: pinCacheKey)
     }
 
-    private static func configuredBootstrapPins(
+    static func configuredBootstrapPins(
         for apiHosts: [String]?
     ) -> [String: [String]] {
         guard let apiHosts, !apiHosts.isEmpty,
