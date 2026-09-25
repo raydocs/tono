@@ -357,6 +357,11 @@ const ServersPage = () => {
   })
 
   const selected = (servers ?? []).find((server) => server.selected)
+  // #590: this page's own refresh failure is superseded by any later sync (the periodic one, or
+  // a switched account's first): the backend's `catalog.error` speaks for the catalog from then on.
+  useEffect(() => {
+    setRefreshError(null)
+  }, [catalog?.lastSyncedAtMs])
   const catalogFailure =
     refreshError ??
     (catalog?.error ? describeTonoActionError(catalog.error, t) : null)

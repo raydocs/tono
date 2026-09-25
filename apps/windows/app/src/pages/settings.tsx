@@ -6,7 +6,7 @@ import type { DialogRef } from '@/components/base'
 import { UpdateViewer } from '@/components/setting/mods/update-viewer'
 import { useI18n } from '@/hooks/use-i18n'
 import { useTonoPreferences } from '@/hooks/use-tono-preferences'
-import { useUpdate } from '@/hooks/use-update'
+import { updateLastCheckTime, useUpdate } from '@/hooks/use-update'
 import { resolveLanguage, supportedLanguages } from '@/services/i18n'
 import { showNotice } from '@/services/notice-service'
 import { setCacheData, useQuery } from '@/services/query-client'
@@ -22,7 +22,7 @@ import {
   tonoSetNetworkLogUploadEnabled,
   formatTonoActionError,
 } from '@/services/tono'
-import { TONO_UPDATES_CONFIGURED } from '@/services/update'
+import { TONO_UPDATES_CONFIGURED, checkUpdateSafe } from '@/services/update'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import { PageHeader } from '@/tono-ui/PageHeader'
 import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
@@ -397,7 +397,19 @@ const AboutCard = () => {
       return
     }
     try {
-      const result = await checkUpdate()
+      let result = await checkUpdate()
+      if (result.data === undefined && result.error === undefined) {
+        // #589: with automatic checks off the query is disabled and refetch sends nothing, so a
+        // manual check asks directly instead of reading "no answer" as "up to date".
+        try {
+          const offer = await checkUpdateSafe()
+          updateLastCheckTime()
+          setCacheData(['checkUpdate'], offer)
+          result = { data: offer ?? undefined, error: undefined }
+        } catch (error) {
+          result = { data: undefined, error }
+        }
+      }
       if (result.error !== undefined) {
         showNotice.error('tono.settings.about.checkFailed')
       } else if (result.data) {
