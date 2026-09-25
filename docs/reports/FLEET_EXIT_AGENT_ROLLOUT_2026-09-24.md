@@ -72,6 +72,7 @@
      `ops_audit`（`exit-node.create`，actor `claude-session@ops`，type `system`）；会话内仍无 admin token，故直接写 D1。
    - 装 agent（`aecb4cec`）与 unit/timer，首轮 `+7 -2`（补齐离线期间新增身份、移除 2 个），ACK 成功，
      `metering_protocol_version` 自动升为 2。之后 D1 共 14 个 active 节点，最慢 ACK 55 秒。
-3. **仍需**：目录中 Sakura 的 `server` 仍为旧 IP，需受审计 catalog PUT 改为 `162.4.194.103`（与 #570 部署后必做的
-   revision bump 同一次 PUT，需 Cloudflare Access 登录）；hub `/opt/tono-ops/nodes.secrets.json` 的 Sakura 条目仍是旧 IP；
+3. **目录**：同日经 Cloudflare Access 登录的控制台做受审计 `PUT exit-catalog`，只改 Sakura 的 `server` 为 `162.4.194.103`
+   （r54 → r55，逐行比对仅第 130 行变化；目录中的 Reality 公钥/short-id/SNI 与节点私钥核对一致）。#570 部署后另做一次
+   内容不变的 bump（r60 → r61）。**仍需**：hub `/opt/tono-ops/nodes.secrets.json` 的 Sakura 条目仍是旧 IP；
    未做客户端实机连接验证。
