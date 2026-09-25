@@ -152,6 +152,9 @@ pub struct OfflineGate {
     /// tono-core identity epoch of the latest refusal not yet applied to the account state.
     pending_refusal: parking_lot::Mutex<Option<u64>>,
     left_offline: AtomicBool,
+    /// Whether the answer that ended offline mode was `Verified`: the server accepted a session
+    /// admitted without an account, so [`apply_verdicts`] has the account read now.
+    left_offline_verified: AtomicBool,
     applier: AtomicBool,
 }
 
@@ -169,6 +172,7 @@ impl OfflineGate {
             changed: tokio::sync::Notify::new(),
             pending_refusal: parking_lot::Mutex::new(None),
             left_offline: AtomicBool::new(false),
+            left_offline_verified: AtomicBool::new(false),
             applier: AtomicBool::new(false),
         }
     }
@@ -353,6 +357,7 @@ impl SessionVerdictSink for OfflineVerdictSink {
     fn report(&self, identity_epoch: u64, verdict: SessionVerdict) {
         let gate = &self.0;
         let refused = matches!(verdict, SessionVerdict::Refused { .. });
+        let verified = matches!(verdict, SessionVerdict::Verified);
         match verdict {
             SessionVerdict::Verified => {
                 let _ = gate.revocation.compare_exchange(FORBIDDEN, ELIGIBLE, Ordering::AcqRel, Ordering::Acquire);
@@ -367,6 +372,8 @@ impl SessionVerdictSink for OfflineVerdictSink {
         // #582 rule 5: offline mode ends at the first server answer, whatever it says.
         let left_offline = gate.leave_offline();
         if left_offline {
+            // Before the flag it qualifies, so the applier that takes the flag also sees it.
+            gate.left_offline_verified.store(verified, Ordering::Release);
             gate.left_offline.store(true, Ordering::Release);
         }
         if left_offline || refused {
@@ -437,10 +444,13 @@ pub(crate) async fn record_server_verified_catalog(
 
 /// Carry what the sink recorded into the product state: a refusal suspends the account (from any
 /// state but signed out, mid-sign-in or closing; never touching protection) and leaving offline
-/// mode republishes the status. Started once per `TonoState` by the startup restore.
-pub(crate) async fn apply_verdicts<E>(state: Arc<TonoState>, emit: E)
+/// mode republishes the status. When the server's acceptance ended offline mode for a Ready
+/// session that has no account yet, `complete_account` is handed its sign-in generation to read
+/// it. Started once per `TonoState` by the startup restore.
+pub(crate) async fn apply_verdicts<E, C>(state: Arc<TonoState>, emit: E, complete_account: C)
 where
     E: Fn(&TonoInner),
+    C: Fn(u64),
 {
     let gate = Arc::clone(&state.lock().await.offline);
     if gate.applier.swap(true, Ordering::AcqRel) {
@@ -450,6 +460,8 @@ where
         gate.changed.notified().await;
         let refused = gate.pending_refusal.lock().take();
         let left_offline = gate.left_offline.swap(false, Ordering::AcqRel);
+        // Taken only with its flag, so an earlier wake cannot consume it ahead of that flag.
+        let left_on_verified = left_offline && gate.left_offline_verified.swap(false, Ordering::AcqRel);
         let mut inner = state.lock().await;
         // A refusal of an identity a sign-in has since replaced is not this account's.
         let current = inner.client.diagnostics_log_identity().await;
@@ -459,6 +471,9 @@ where
         }
         if suspended || left_offline {
             emit(&inner);
+        }
+        if left_on_verified && inner.account.is_none() && inner.account_state == AccountState::Ready {
+            complete_account(inner.sign_in_generation);
         }
     }
 }

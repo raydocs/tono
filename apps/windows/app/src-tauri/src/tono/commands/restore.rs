@@ -136,7 +136,7 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
 
     let release_app = app.clone();
     let emit_app = app.clone();
-    let Some(info) = restore_account_with(
+    let Some((info, offline)) = restore_account_with(
         &state, generation, &protection, restore_deadline,
         |client| async move { client.me().await },
         move |state| async move { connection::release_for_account(&state, &release_app).await },
@@ -204,22 +204,84 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
         }
         crate::tono::telemetry::spawn_periodic_for_auth_generation(&state, &app, generation)
             .await;
-        crate::tono::log_upload::spawn_periodic_for_auth_generation(
-            &state, &app, generation,
-        )
-        .await;
+        // An offline launch has no account to upload for yet. The account read that follows the
+        // server accepting the session starts it (#582), so it is never started twice.
+        if !offline {
+            crate::tono::log_upload::spawn_periodic_for_auth_generation(
+                &state, &app, generation,
+            )
+            .await;
+        }
+    }
+}
+
+/// Commit a `me()` answer as this session's account: its log-upload owner, the payload, and
+/// Suspended when the payload says so.
+fn commit_account(state: &TonoState, inner: &mut TonoInner, user: User, suspended: bool) {
+    state.audit().activate_log_upload_owner(&user.id);
+    inner.account = Some(user);
+    inner.account_state = if suspended {
+        AccountState::Suspended
+    } else {
+        AccountState::Ready
+    };
+}
+
+/// How often a session that has left offline mode retries reading its account.
+const OFFLINE_ACCOUNT_RETRY: Duration = Duration::from_secs(60);
+
+/// Whether the account read of an offline admission is still owed to `generation`: the Ready
+/// session it admitted, with no account. A refusal, a sign-out or a new sign-in ends it.
+fn offline_account_owed(inner: &TonoInner, generation: u64) -> bool {
+    inner.sign_in_generation == generation && inner.account.is_none() && inner.account_state == AccountState::Ready
+}
+
+/// #582: an offline admission has no account (`offline_account_info`). Once the server accepts
+/// the session, finish what restore's `me()` would have: commit the account, publish it, and
+/// start the log upload restore could not start without it, for this sign-in generation only.
+async fn complete_offline_account(state: Arc<TonoState>, app: AppHandle, generation: u64) {
+    let me = loop {
+        let client = {
+            let inner = state.lock().await;
+            if !offline_account_owed(&inner, generation) {
+                return;
+            }
+            inner.client.clone()
+        };
+        match client.me().await {
+            Ok(me) => break me,
+            // Unreachable again, or refused: a refusal suspends the account through the verdict
+            // sink, which ends this loop at its next check.
+            Err(error) => {
+                logging!(warn, Type::Service, "Tono: the account was not read after leaving offline mode: {error}");
+                tokio::time::sleep(OFFLINE_ACCOUNT_RETRY).await;
+            }
+        }
+    };
+    let info = account_info_of(&me.user);
+    {
+        let mut inner = state.lock().await;
+        if !offline_account_owed(&inner, generation) {
+            return;
+        }
+        commit_account(&state, &mut inner, me.user, info.suspended);
+        emit_status(&app, &status_of(&inner));
+    }
+    if !info.suspended {
+        crate::tono::log_upload::spawn_periodic_for_auth_generation(&state, &app, generation).await;
     }
 }
 
 /// Restore from the protection probe to the committed account state: the token probe, `me()`
 /// inside the restore budget, and the dispatch of its result. Returns the restored account when
-/// restore goes on to sync it. Only system I/O is injected: `me()`, the ordered barrier release,
-/// the server logout and the UI emit.
+/// restore goes on to sync it, and whether it was admitted offline (no account read yet). Only
+/// system I/O is injected: `me()`, the ordered barrier release, the server logout and the UI
+/// emit.
 #[allow(clippy::too_many_arguments, reason = "restore's system I/O is injected one boundary at a time")]
 async fn restore_account_with<M, MF, R, RF, L, LF, E>(
     state: &Arc<TonoState>, generation: u64, protection: &StoredProtection,
     deadline: tokio::time::Instant, fetch_me: M, release: R, logout: L, emit: E,
-) -> Option<TonoAccountInfo>
+) -> Option<(TonoAccountInfo, bool)>
 where
     M: FnOnce(Arc<crate::tono::state::TonoApiClient>) -> MF,
     MF: std::future::Future<Output = Result<tono_core::auth::MeResponse, ApiError>>,
@@ -327,7 +389,7 @@ where
             // #582: the budget elapsed without any server answer, so the control plane is unreachable.
             if let Some(admitted) = settle_unreachable_restore(&mut inner, protection) {
                 emit(&inner);
-                return admitted.then(offline_account_info);
+                return admitted.then(|| (offline_account_info(), true));
             }
             inner.account_state =
                 AccountState::Error(format!("session restore exceeded {RESTORE_TRANSACTION_TIMEOUT:?}"));
@@ -343,16 +405,10 @@ where
             if inner.sign_in_generation != generation {
                 return None;
             }
-            state.audit().activate_log_upload_owner(&me.user.id);
-            inner.account = Some(me.user);
-            inner.account_state = if info.suspended {
-                AccountState::Suspended
-            } else {
-                AccountState::Ready
-            };
+            commit_account(state, &mut inner, me.user, info.suspended);
             apply_stored_protection(&mut inner, protection);
             emit(&inner);
-            Some(info)
+            Some((info, false))
         }
         Err(error) => {
             let mut inner = state.lock().await;
@@ -361,7 +417,7 @@ where
             }
             let admitted = settle_failed_restore(&mut inner, protection, &error);
             emit(&inner);
-            admitted.then(offline_account_info)
+            admitted.then(|| (offline_account_info(), true))
         }
     }
 }
@@ -615,10 +671,16 @@ pub async fn restore_session_guarded(app: AppHandle, state: Arc<TonoState>) {
     // this `TonoState` (this function runs once per state).
     let applier_app = app.clone();
     let applier_state = Arc::clone(&state);
+    let (account_app, account_state) = (app.clone(), Arc::clone(&state));
     AsyncHandler::spawn(move || {
-        crate::tono::offline_grant::apply_verdicts(applier_state, move |inner| {
-            emit_status(&applier_app, &status_of(inner));
-        })
+        crate::tono::offline_grant::apply_verdicts(
+            applier_state,
+            move |inner| emit_status(&applier_app, &status_of(inner)),
+            move |generation| {
+                let (state, app) = (Arc::clone(&account_state), account_app.clone());
+                AsyncHandler::spawn(move || complete_offline_account(state, app, generation));
+            },
+        )
     });
     crate::tono::update_handoff::retire_completed_legacy_journal(env!("CARGO_PKG_VERSION"));
     load_credentials(&state).await;
