@@ -565,6 +565,7 @@ mod offline_admission_tests {
     use crate::tono::offline_grant::{
         GRANT_FILE_NAME,
         test_support::{ACCOUNT_A_UUID, ACCOUNT_B_UUID, account_catalog, data_dir, leave_verified_session, store_catalog},
+        token_digest,
     };
 
     /// One launch over `dir` with the control plane unreachable: hydrate `refresh_token`, seed the
@@ -633,8 +634,11 @@ mod offline_admission_tests {
         let (account, offline) = restore_unreachable(&dir, "session-a", known(), Some(&catalog_a)).await;
         assert!(account != AccountState::Ready && offline.is_none(), "disk re-read after seeding: {account:?}");
 
-        crate::tono::state::write_private_file(&grant_path, br#"{"verdict":"revoked","reason":"refused","at":2000}"#)
-            .unwrap();
+        let revoked_a = format!(
+            r#"{{"verdict":"revoked","reason":"refused","at":2000,"token_sha256":"{}"}}"#,
+            token_digest("session-a")
+        );
+        crate::tono::state::write_private_file(&grant_path, revoked_a.as_bytes()).unwrap();
         assert_eq!(restore_unreachable(&dir, "session-a", known(), None).await.0, AccountState::Suspended,
             "a revoked grant suspends");
         crate::tono::state::write_private_file(&grant_path, &saved_grant).unwrap();
@@ -643,6 +647,26 @@ mod offline_admission_tests {
             restore_unreachable(&dir, "session-a", StoredProtection::Unknown("pipe not found".to_string()), None).await;
         assert!(matches!(&account, AccountState::Error(message) if message.contains("emergency-disarm")) && offline.is_none(),
             "an unknown barrier keeps its way-out error: {account:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #582 O3: a revocation binds the session it revoked. Session B launching offline over the
+    /// tombstone of session A is neither suspended nor admitted: it keeps the ordinary error.
+    #[tokio::test]
+    async fn unreachable_restore_is_not_suspended_by_another_sessions_revocation() {
+        let dir = data_dir("o3");
+        store_catalog(&dir, &account_catalog(ACCOUNT_A_UUID)).await;
+        let revoked_a = format!(
+            r#"{{"verdict":"revoked","reason":"refused","at":2000,"token_sha256":"{}"}}"#,
+            token_digest("session-a")
+        );
+        crate::tono::state::write_private_file(&dir.join(GRANT_FILE_NAME), revoked_a.as_bytes()).unwrap();
+
+        let (account, offline) = restore_unreachable(&dir, "session-b", StoredProtection::ProvenAbsent, None).await;
+        assert!(
+            account != AccountState::Suspended && account != AccountState::Ready && offline.is_none(),
+            "A's revocation must not decide B's launch: {account:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

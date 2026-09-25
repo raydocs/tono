@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use tono_core::{
     CatalogTracker,
     auth::{SessionVerdict, SessionVerdictSink},
-    credentials::CredentialStore as _,
+    credentials::CredentialStore,
 };
 use tono_logging::{Type, logging};
 
@@ -81,7 +81,14 @@ pub struct OfflineGrant {
 #[serde(tag = "verdict", rename_all = "lowercase")]
 enum GrantFile {
     Granted(OfflineGrant),
-    Revoked { reason: String, at: i64 },
+    Revoked {
+        reason: String,
+        at: i64,
+        /// [`token_digest`] of the session the server revoked. A record without one (older, or
+        /// written with no session token in memory) revokes no session it can name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        token_sha256: Option<String>,
+    },
 }
 
 /// A revocation that the disk has not acknowledged yet.
@@ -89,6 +96,7 @@ enum GrantFile {
 struct Tombstone {
     reason: String,
     at: i64,
+    token_sha256: Option<String>,
     /// Unique per revocation: a writer or a grant write tells the tombstone it saw from a newer one.
     generation: u64,
 }
@@ -113,6 +121,15 @@ fn read_grant_file(path: &Path) -> Option<GrantFile> {
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
 
+/// Whether a revocation recorded for `revoked_sha256` names the session whose refresh token is
+/// `refresh_token`.
+fn revokes_session(revoked_sha256: Option<&str>, refresh_token: Option<&str>) -> bool {
+    match (revoked_sha256, refresh_token) {
+        (Some(revoked), Some(token)) => token_digest(token) == revoked,
+        _ => false,
+    }
+}
+
 /// Why `grant` does not describe what is in memory, if it does not.
 fn grant_mismatch(grant: &OfflineGrant, refresh_token: Option<&str>, tracker: &CatalogTracker) -> Option<&'static str> {
     let Some(token) = refresh_token else {
@@ -134,6 +151,9 @@ fn grant_mismatch(grant: &OfflineGrant, refresh_token: Option<&str>, tracker: &C
 /// short synchronous lock or a spawn; the product mutex is reached only by [`apply_verdicts`].
 pub struct OfflineGate {
     path: PathBuf,
+    /// The session's credential store, read synchronously (memory) at report time: a tombstone
+    /// binds the refresh token it revoked.
+    credentials: Arc<dyn CredentialStore>,
     /// `ELIGIBLE`, `FORBIDDEN` or `REFUSED`. Set synchronously at report time, so Connect refuses
     /// before any UI or disk catches up.
     revocation: AtomicU8,
@@ -164,9 +184,10 @@ pub struct OfflineGate {
 }
 
 impl OfflineGate {
-    pub fn new(dir: PathBuf) -> Self {
+    pub fn new(dir: PathBuf, credentials: Arc<dyn CredentialStore>) -> Self {
         Self {
             path: dir.join(GRANT_FILE_NAME),
+            credentials,
             revocation: AtomicU8::new(ELIGIBLE),
             offline: parking_lot::Mutex::new(None),
             tombstone: parking_lot::Mutex::new(None),
@@ -222,6 +243,13 @@ impl OfflineGate {
         }
         let grant = match read_grant_file(&self.path) {
             Some(GrantFile::Granted(grant)) => grant,
+            // A revocation binds the session it revoked. Another session's, or one that names none,
+            // is no positive grant and nothing more: it never suspends this session.
+            Some(GrantFile::Revoked { token_sha256, .. })
+                if !revokes_session(token_sha256.as_deref(), refresh_token) =>
+            {
+                return OfflineAdmission::Refused("the revocation belongs to another session token");
+            }
             // Another 403 revokes offline eligibility only; it never suspends the account.
             Some(GrantFile::Revoked { reason, .. }) if reason == REASON_FORBIDDEN => {
                 return OfflineAdmission::Refused("the server forbade this session");
@@ -297,6 +325,8 @@ impl OfflineGate {
     /// #582 rule 3: memory first (Connect refuses from here on), then the durable overwrite on a
     /// writer that retries until the disk acknowledges it. Never a delete.
     fn revoke(self: &Arc<Self>, level: u8, reason: String) {
+        // The session this answer revoked: the refresh token in memory now (a memory read).
+        let token_sha256 = self.credentials.refresh_token().ok().flatten().map(|token| token_digest(&token));
         {
             let mut pending = self.tombstone.lock();
             let previous = self.revocation.fetch_max(level, Ordering::AcqRel);
@@ -306,7 +336,7 @@ impl OfflineGate {
                 return;
             }
             let generation = self.tombstone_generation.fetch_add(1, Ordering::AcqRel);
-            *pending = Some(Tombstone { reason, at: crate::tono::commands::epoch_millis(), generation });
+            *pending = Some(Tombstone { reason, at: crate::tono::commands::epoch_millis(), token_sha256, generation });
         }
         if self.tombstone_writer.swap(true, Ordering::AcqRel) {
             // The running writer picks up the newest tombstone.
@@ -369,6 +399,7 @@ impl OfflineGate {
         let bytes = serde_json::to_vec(&GrantFile::Revoked {
             reason: tombstone.reason.clone(),
             at: tombstone.at,
+            token_sha256: tombstone.token_sha256.clone(),
         })?;
         crate::tono::state::write_private_file(&self.path, &bytes)?;
         self.drop_tombstone(tombstone.generation);
@@ -544,9 +575,12 @@ fn suspend_refused_session(inner: &mut TonoInner) -> bool {
 /// Fixtures shared by the #582 admission tests (T3 restore, T4 here, T5 connection).
 #[cfg(test)]
 pub(crate) mod test_support {
-    use std::path::{Path, PathBuf};
+    use std::{
+        path::{Path, PathBuf},
+        sync::Arc,
+    };
 
-    use tono_core::{ExitCatalogResponse, catalog::catalog_digest};
+    use tono_core::{ExitCatalogResponse, catalog::catalog_digest, credentials::MemoryCredentialStore};
 
     use super::{OfflineGate, OfflineGrant, token_digest};
 
@@ -595,7 +629,8 @@ pub(crate) mod test_support {
     /// What a verified online session leaves on disk: the catalog cache and its grant.
     pub(crate) async fn leave_verified_session(dir: &Path, catalog: &ExitCatalogResponse, refresh_token: &str) {
         store_catalog(dir, catalog).await;
-        let written = OfflineGate::new(dir.to_path_buf()).write_grant(&grant_for(catalog, refresh_token)).unwrap();
+        let gate = OfflineGate::new(dir.to_path_buf(), Arc::new(MemoryCredentialStore::new()));
+        let written = gate.write_grant(&grant_for(catalog, refresh_token)).unwrap();
         assert!(written, "a session nothing revoked records its grant");
     }
 }
@@ -641,7 +676,11 @@ mod tests {
         assert_eq!(file_verdict(&path), "granted");
 
         let state = TonoState::for_test_in(dir.clone());
-        let gate = Arc::clone(&state.lock().await.offline);
+        let gate = {
+            let inner = state.lock().await;
+            inner.credentials.set_local(CredentialKey::RefreshToken, "session-a").unwrap();
+            Arc::clone(&inner.offline)
+        };
         set_readonly(&path, true);
         gate.verdict_sink().report(1, SessionVerdict::Refused { code: Some("INVALID_REFRESH_TOKEN".to_string()) });
         assert!(gate.revoked(), "the refusal must block offline admission in memory at report time");

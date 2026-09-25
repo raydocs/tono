@@ -845,7 +845,10 @@ actor TonoAPIClient {
                 return
             }
         }
-        offlineGate.report(verdict, readScope: scope.readScope)
+        // A revocation binds the session it revoked: the refresh token this
+        // actor holds now, which is the one the refused exchange carried.
+        let tokenSha256 = verdict == .verified ? nil : currentRefreshTokenDigest()
+        offlineGate.report(verdict, readScope: scope.readScope, tokenSha256: tokenSha256)
     }
 
     /// #582: the digest of the refresh token this session holds now, as it

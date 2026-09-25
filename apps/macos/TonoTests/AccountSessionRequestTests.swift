@@ -919,8 +919,10 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertEqual(account.state, .ready, "a grant matching memory restores Ready offline")
         XCTAssertEqual(account.offlineVerifiedAt, Date(timeIntervalSince1970: 1))
 
+        let revokedThisSession = #"{"verdict":"revoked","reason":"refused","at":2000,"tokenSha256":""#
+            + OfflineGrantGate.tokenDigest("test-only-refresh") + #""}"#
         try ConfigStorage.shared.writeSensitive(
-            Data(#"{"verdict":"revoked","reason":"refused","at":2000}"#.utf8),
+            Data(revokedThisSession.utf8),
             to: directory.appendingPathComponent(OfflineGrantGate.fileName)
         )
         account.state = .restoring

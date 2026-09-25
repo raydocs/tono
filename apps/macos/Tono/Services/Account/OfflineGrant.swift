@@ -68,9 +68,11 @@ nonisolated enum OfflineAdmission: Equatable, Sendable {
 }
 
 /// `offline-grant.json`: `{"verdict":"granted",...}` or
-/// `{"verdict":"revoked","reason":..,"at":..}`. Anything else — a missing
-/// file, a torn write, an unknown verdict — is unreadable, and unreadable
-/// refuses.
+/// `{"verdict":"revoked","reason":..,"at":..,"tokenSha256":..}`. Anything
+/// else — a missing file, a torn write, an unknown verdict — is unreadable,
+/// and unreadable refuses. A revoked record's `tokenSha256` binds the session
+/// the server revoked; one without it (older, or written with no session
+/// token in memory) revokes no session it can name.
 nonisolated private struct OfflineGrantRecord: Codable {
     var verdict: String
     var accountId: String?
@@ -90,10 +92,11 @@ nonisolated private struct OfflineGrantRecord: Codable {
         verifiedAt = grant.verifiedAt
     }
 
-    init(revokedFor reason: String, at: Int64) {
+    init(revokedFor reason: String, at: Int64, tokenSha256: String?) {
         verdict = "revoked"
         self.reason = reason
         self.at = at
+        self.tokenSha256 = tokenSha256
     }
 
     var grant: OfflineGrant? {
@@ -235,6 +238,12 @@ nonisolated final class OfflineGrantGate: @unchecked Sendable {
         }
         guard let record = readLocked() else { return .refused("no readable offline grant") }
         if let reason = record.revocationReason {
+            // A revocation binds the session it revoked. Another session's,
+            // or one that names none, is no positive grant and nothing more:
+            // it never suspends this session.
+            guard let revokedToken = record.tokenSha256, revokedToken == tokenSha256 else {
+                return .refused("the revocation belongs to another session token")
+            }
             return reason == Self.forbiddenReason
                 ? .refused("the server forbade this session")
                 : .revoked(reason: reason)
@@ -283,8 +292,9 @@ nonisolated final class OfflineGrantGate: @unchecked Sendable {
     /// `TonoAPIClient`'s actor. Memory first (Connect refuses from here on),
     /// then the durable overwrite, then the account session, which hears a
     /// refusal and the end of offline mode. Offline mode ends at the first
-    /// server answer, whatever it says.
-    func report(_ verdict: TonoSessionVerdict, readScope: UInt64) {
+    /// server answer, whatever it says. `tokenSha256` is the digest of the
+    /// refresh token the answer was about; a tombstone binds it.
+    func report(_ verdict: TonoSessionVerdict, readScope: UInt64, tokenSha256: String?) {
         lock.lock()
         var startWriter = false
         var refused = false
@@ -297,11 +307,15 @@ nonisolated final class OfflineGrantGate: @unchecked Sendable {
                 pendingTombstone = nil
             }
         case .forbidden:
-            startWriter = revokeLocked(.forbidden, reason: OfflineGrantGate.forbiddenReason)
+            startWriter = revokeLocked(
+                .forbidden, reason: OfflineGrantGate.forbiddenReason, tokenSha256: tokenSha256
+            )
         case let .refused(code):
             refused = true
             let reason = code.map { "\(OfflineGrantGate.refusedReason): \($0)" }
-            startWriter = revokeLocked(.refused, reason: reason ?? OfflineGrantGate.refusedReason)
+            startWriter = revokeLocked(
+                .refused, reason: reason ?? OfflineGrantGate.refusedReason, tokenSha256: tokenSha256
+            )
         }
         let leftOffline = admittedGrant != nil
         admittedGrant = nil
@@ -315,12 +329,14 @@ nonisolated final class OfflineGrantGate: @unchecked Sendable {
 
     /// #582 rule 3: overwrite the grant with the verdict, never delete it.
     /// Returns whether a retry writer has to start for a disk that refused.
-    private func revokeLocked(_ level: Revocation, reason: String) -> Bool {
+    private func revokeLocked(_ level: Revocation, reason: String, tokenSha256: String?) -> Bool {
         let previous = revocation
         revocation = max(revocation, level)
         // Another 403 after a refusal must not record a lesser verdict.
         guard level >= previous else { return false }
-        let tombstone = OfflineGrantRecord(revokedFor: reason, at: Self.nowMilliseconds())
+        let tombstone = OfflineGrantRecord(
+            revokedFor: reason, at: Self.nowMilliseconds(), tokenSha256: tokenSha256
+        )
         do {
             try writeLocked(tombstone)
             pendingTombstone = nil

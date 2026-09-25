@@ -574,7 +574,7 @@ impl TonoState {
         let transport = TonoTransport::new()?;
         // The production client is built only here: every server answer on this session reaches
         // the offline gate (#582).
-        let offline = Arc::new(crate::tono::offline_grant::OfflineGate::new(catalog_dir.clone()));
+        let offline = Arc::new(crate::tono::offline_grant::OfflineGate::new(catalog_dir.clone(), credentials.clone()));
         let client = Arc::new(
             TonoApiClient::new(tono_core::auth::DEFAULT_BASE_URL, transport, credentials.clone())?
                 .with_verdict_sink(offline.verdict_sink()),

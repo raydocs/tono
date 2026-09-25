@@ -162,7 +162,7 @@ final class ManagedExitCatalogOwnershipTests: XCTestCase {
         let admission = gate.admit(tokenSha256: OfflineGrantGate.tokenDigest("session-a"), installed: installed)
         let generation = app.connectionCoordinator.protectionOperationGeneration
 
-        gate.report(.forbidden, readScope: 0)
+        gate.report(.forbidden, readScope: 0, tokenSha256: OfflineGrantGate.tokenDigest("session-a"))
         app.connect()
 
         XCTAssertFalse(app.isConnecting, "a server refusal must block Connect before the UI catches up")
