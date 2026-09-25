@@ -1646,6 +1646,10 @@ def run_once(path: Path) -> None:
         sync_hy2_roster(roster)
     except Refusal as error:
         hy2_error = error
+    except OSError as error:
+        # A filesystem failure (lstat, unlink of the temporary allowlist) is a hy2 failure
+        # too; it must not skip the Xray revocation and counter read below.
+        hy2_error = Refusal(f"hy2 roster not published: {error}")
     try:
         added, removed, installed, counters, settled_marker = reconcile_and_read_stable(
             binary, commands, address, tag, roster,
@@ -1675,7 +1679,7 @@ def run_once(path: Path) -> None:
             raise Refusal(f"{hy2_error}; the state file is unusable: {state_error}")
         try:
             keep_usage_locally(path, state, installed, counters, settled_marker)
-        except Refusal as error:
+        except (Refusal, OSError) as error:
             raise Refusal(f"{hy2_error}; usage not kept: {error}") from error
         raise hy2_error
     if cache_error:
