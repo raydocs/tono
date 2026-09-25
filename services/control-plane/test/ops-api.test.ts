@@ -520,6 +520,33 @@ describe('ops v1 api', () => {
     expect(user).toEqual({ status: 'disabled', notes: null });
   });
 
+  it('close reclaims nothing when disabling the account fails', async () => {
+    await seedUser();
+    await db().prepare("INSERT INTO signup_allowlist(email, created_at) VALUES('a@example.com', ?)").bind(NOW).run();
+    await db().prepare(
+      `INSERT INTO product_accounts(id, user_id, account_ref, status, opened_at, created_at, updated_at)
+       VALUES('pa-1', 'u-1', 'acct-close@example.com', 'assigned', ?, ?, ?)`,
+    ).bind(NOW, NOW, NOW).run();
+    await db().prepare(
+      `CREATE TRIGGER test_fail_close_disable BEFORE UPDATE OF status ON users
+       WHEN NEW.status = 'disabled' BEGIN SELECT RAISE(ABORT, 'injected'); END`,
+    ).run();
+    try {
+      const closed = await ops('users/u-1/close', json({ reason: 'refund' }));
+      expect(closed.status).toBe(500);
+    } finally {
+      await db().prepare('DROP TRIGGER IF EXISTS test_fail_close_disable').run();
+    }
+    const account = await db().prepare("SELECT status FROM product_accounts WHERE id = 'pa-1'")
+      .first<{ status: string }>();
+    expect(account?.status).toBe('assigned');
+    const allowlisted = await db().prepare("SELECT email FROM signup_allowlist WHERE email = 'a@example.com'")
+      .first<{ email: string }>();
+    expect(allowlisted?.email).toBe('a@example.com');
+    const user = await db().prepare("SELECT status FROM users WHERE id = 'u-1'").first<{ status: string }>();
+    expect(user?.status).toBe('active');
+  });
+
   it('incidents list, detail, ack, snooze, resolve, notes', async () => {
     await db().prepare(
       `INSERT INTO ops_incidents(
