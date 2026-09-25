@@ -325,7 +325,7 @@ test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
       installerSource.replace(
         // Mutate the live install branch without invalidating the earlier
         // private-extraction gate: this regression targets GUI launch policy.
-        '  SetOutPath $INSTDIR\n\n  !ifmacrodef NSIS_HOOK_PREINSTALL',
+        /  SetOutPath \$INSTDIR\r?\n\r?\n  !ifmacrodef NSIS_HOOK_PREINSTALL/,
         '  SetOutPath $INSTDIR\n  nsis_tauri_utils::RunAsUser "$INSTDIR\\${MAINBINARYNAME}.exe" ""\n\n  !ifmacrodef NSIS_HOOK_PREINSTALL',
       ),
     ),
@@ -366,7 +366,7 @@ test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
           `  ;${canonicalGuiLaunchLine.trimStart()}`,
         )
         .replace(
-          '  SetOutPath $INSTDIR\n\n  !ifmacrodef NSIS_HOOK_PREINSTALL',
+          /  SetOutPath \$INSTDIR\r?\n\r?\n  !ifmacrodef NSIS_HOOK_PREINSTALL/,
           `  SetOutPath $INSTDIR\n${canonicalGuiLaunchLine}\n\n  !ifmacrodef NSIS_HOOK_PREINSTALL`,
         ),
     ),
@@ -680,7 +680,7 @@ test('NSIS removes every known old payload on upgrade and uninstall', () => {
   assert.match(
     validateNsisLegacyCleanup(
       template.replace(
-        '!insertmacro RemoveVergeService\n!insertmacro StartVergeService',
+        /!insertmacro RemoveVergeService\r?\n!insertmacro StartVergeService/,
         '!insertmacro StartVergeService',
       ),
     ),

@@ -32,6 +32,21 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · Windows 候选包构建：NSIS 打包测试在 CRLF 检出下失败
+
+- **归属/来源**：G3 发出去还能再发（候选包构建）；`apps/windows/app/scripts/windows-packaging.test.mjs`。
+  基线 origin/main e0b7be4a；分支 `fix/windows-packaging-crlf-20260924`。
+- **缺陷修复**：无产品行为变化。
+- **工程与测试**：669113eb（2026-09-22）加入的变异断言用含 `\n` 的字符串锚点替换 `installer.nsi` 片段；
+  `windows-2025` 检出为 CRLF，锚点不匹配、替换落空、校验返回 null，`NSIS automatically upgrades…` 失败，
+  Windows 候选包构建（run 36094398670）因此中止。该测试只在候选包构建里跑（普通 CI 在 Linux，LF），所以此前未暴露；
+  上一次成功的候选包 569ce865 早于它。三处字符串锚点改为 `\r?\n` 正则，与同文件其它断言一致。
+- **验证**：本机 `node --test scripts/windows-packaging.test.mjs`：LF 31/31；把 `installer.nsi` 临时转 CRLF 后新版 31/31、
+  旧版 30/31（同一断言失败），已还原文件。Windows 候选包在本分支重跑见 PR。
+- **候选/发布**：macOS 0.0.73 build73 签名公证测试包（run 36094396395，源 e0b7be4a，`candidateOnly`，未签 Sparkle，
+  未推更新源）；Windows 候选包待本修复后的构建。
+- **剩余限制**：无。
+
 ## 2026-09-24 · 控制面不可达时凭离线授权进入 Ready；服务端拒绝统一经单一漏斗吊销（Windows + macOS）
 
 - **归属/来源**：G2 连不上有下一手；Issue #582（总账 H21-O-F1）。Windows `crates/tono-core/src/auth.rs`、
