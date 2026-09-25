@@ -130,7 +130,64 @@ fn describe(err: &reqwest::Error) -> String {
         source = cause.source();
         depth += 1;
     }
-    text
+    mark_clock_skew(err, text)
+}
+
+/// Stable marker for a certificate the system clock cannot date (#588).
+///
+/// A clock far off makes every certificate look expired or not yet valid, and NTP is
+/// blocked while protection is on, so "could not reach Tono" leaves the user nothing to
+/// fix. The kind is left as it was: the failure is still a transport failure for the retry
+/// policy and for offline admission (no status line arrived), and only the text the user
+/// reads changes. The frontend matches `TONO_CLOCK_SKEW:` anywhere in an error, ahead of
+/// the surface's own prefix.
+pub(crate) const CLOCK_SKEW: &str = "TONO_CLOCK_SKEW";
+
+/// `text`, marked with [`CLOCK_SKEW`] when `err` carries a rustls certificate-validity
+/// failure.
+pub(crate) fn mark_clock_skew(err: &(dyn std::error::Error + 'static), text: String) -> String {
+    if is_certificate_time_error(err) {
+        format!("{CLOCK_SKEW}: {text}")
+    } else {
+        text
+    }
+}
+
+/// Whether the chain holds rustls's expired / not-yet-valid certificate error, from webpki
+/// (`*Context`) or the Windows platform verifier (`CERT_E_EXPIRED` → `Expired`).
+///
+/// `io::Error::source` skips the error it wraps, and hyper-rustls wraps tokio-rustls's
+/// `io::Error` in another, so each `io::Error` is opened with `get_ref` as well.
+fn is_certificate_time_error(err: &(dyn std::error::Error + 'static)) -> bool {
+    use rustls::CertificateError as Certificate;
+    let mut current = Some(err);
+    let mut depth = 0;
+    while let Some(cause) = current {
+        // Bounded like `describe`: a chain is short.
+        if depth >= 8 {
+            break;
+        }
+        if let Some(rustls::Error::InvalidCertificate(certificate)) =
+            cause.downcast_ref::<rustls::Error>()
+        {
+            return matches!(
+                certificate,
+                Certificate::Expired
+                    | Certificate::ExpiredContext { .. }
+                    | Certificate::NotValidYet
+                    | Certificate::NotValidYetContext { .. }
+            );
+        }
+        if let Some(io) = cause.downcast_ref::<std::io::Error>()
+            && let Some(inner) = io.get_ref()
+            && is_certificate_time_error(inner)
+        {
+            return true;
+        }
+        current = cause.source();
+        depth += 1;
+    }
+    false
 }
 
 pub struct TonoTransport {

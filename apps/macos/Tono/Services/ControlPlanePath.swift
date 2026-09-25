@@ -122,6 +122,7 @@ nonisolated enum PinnedControlPlaneExchange {
         }
         let started = Date()
         var failures: [String] = []
+        var clockRejected = false
         for (index, address) in addresses.enumerated() {
             try Task.checkCancellation()
             let remaining = connectBudget - Date().timeIntervalSince(started)
@@ -147,10 +148,14 @@ nonisolated enum PinnedControlPlaneExchange {
                 throw CancellationError()
             case let .notConnected(detail):
                 failures.append("\(address) \(detail)")
+            case let .clockRejected(detail):
+                // #588: named as the clock by `TonoAPIClient`.
+                clockRejected = true
+                failures.append("\(address) \(detail)")
             }
         }
         // No pin reached TLS, so no request byte left this Mac.
-        throw URLError(.cannotConnectToHost, userInfo: [
+        throw URLError(clockRejected ? .serverCertificateHasBadDate : .cannotConnectToHost, userInfo: [
             NSLocalizedDescriptionKey: "pinned: " + (failures.isEmpty
                 ? "connect budget spent" : failures.joined(separator: "; ")),
         ])
@@ -199,6 +204,9 @@ nonisolated private enum PinnedOutcome: Sendable {
     /// No TLS connection within the budget, or it failed first: no request
     /// byte was sent.
     case notConnected(String)
+    /// #588: TLS failed on a certificate date, before any request byte was
+    /// sent. The clock, not the address, is at fault.
+    case clockRejected(String)
     /// The request may have reached the server and no status line came back.
     case failedAfterConnect(any Error)
     case answered(ControlPlaneAnswer)
@@ -307,9 +315,18 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
                 receive()
             })
         case let .waiting(error):
+            // A certificate the clock cannot date will not pass on a retry.
+            if !connected, CertificateClock.isDateFailure(error) {
+                finish(.clockRejected("\(error)"))
+                return
+            }
             // Still trying; the connect budget decides.
             lastWaiting = "\(error)"
         case let .failed(error):
+            if !connected, CertificateClock.isDateFailure(error) {
+                finish(.clockRejected("\(error)"))
+                return
+            }
             finish(connected
                 ? ending(with: URLError(.networkConnectionLost, userInfo: [
                     NSLocalizedDescriptionKey: "pinned: \(error)",

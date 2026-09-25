@@ -138,6 +138,38 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertEqual(pinnedAttempts.count, 1, "the pinned addresses receive the request exactly once")
     }
 
+    /// #588: a server certificate this Mac's clock cannot date names the
+    /// clock. NTP is blocked while protection is on, so the generic
+    /// "could not reach Tono" leaves the user nothing to fix.
+    func testACertificateTheClockCannotDateNamesTheMacClock() async throws {
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        HeldAccountProtocol.install(host) { request in
+            request.client?.urlProtocol(request, didFailWithError: URLError(.serverCertificateHasBadDate))
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
+        let api = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory)
+        )
+
+        var message: String?
+        do {
+            _ = try await api.startEmailSignIn(TonoEmailStartRequest(
+                email: "clock@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+            ))
+        } catch {
+            message = (error as? LocalizedError)?.errorDescription
+        }
+
+        XCTAssertTrue(
+            message?.contains("date and time") == true,
+            "a certificate date failure must name the clock, got: \(message ?? "no error")"
+        )
+    }
+
     func testLateAuthMethodsFailureDoesNotReplaceAuthenticatedState() async throws {
         let (account, transport, host, requests) = fixture()
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }

@@ -393,6 +393,13 @@ pub async fn tono_upload_diagnostics(
 /// enough. That is what the mapped message says.
 pub(super) fn auth_error(err: &ApiError) -> String {
     let prefix = match err {
+        // #588: a certificate the clock cannot date. Still a transport failure (no status
+        // line arrived), but the clock is what the user has to fix.
+        ApiError::Transport { message, .. }
+            if message.contains(crate::tono::transport::CLOCK_SKEW) =>
+        {
+            crate::tono::transport::CLOCK_SKEW
+        }
         ApiError::Transport { .. } => "TONO_AUTH_UNREACHABLE",
         ApiError::RateLimited => "TONO_AUTH_RATE_LIMITED",
         ApiError::DeviceLimit => "TONO_AUTH_DEVICE_LIMIT",
@@ -423,6 +430,26 @@ fn diagnostics_upload_error(err: &ApiError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #588: a certificate the system clock cannot date is named as the clock, not as an
+    /// unreachable server. The chain is the one hyper-rustls hands reqwest: its
+    /// `io::Error::other` around tokio-rustls's `io::Error` around the rustls error.
+    #[test]
+    fn a_certificate_the_clock_cannot_date_is_named_as_the_clock() {
+        let handshake = std::io::Error::other(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            rustls::Error::InvalidCertificate(rustls::CertificateError::Expired),
+        ));
+        let message = crate::tono::transport::mark_clock_skew(
+            &handshake,
+            "connect: error sending request".to_string(),
+        );
+        let shown = auth_error(&ApiError::Transport {
+            kind: tono_core::auth::TransportKind::Connect,
+            message,
+        });
+        assert!(shown.starts_with("TONO_CLOCK_SKEW: "), "{shown}");
+    }
 
     #[tokio::test(start_paused = true)]
     async fn stalled_system_probe_times_out_without_queueing_another_native_walk() {

@@ -344,7 +344,7 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | H21-O-F6 | macOS 控制面请求继承他人系统代理，受保护离线下被 PF 挡 | in-PR | [#587](https://github.com/raydocs/tono/issues/587)，[#617](https://github.com/raydocs/tono/pull/617) | 中·已确认 | 控制面 session 空 `connectionProxyDictionary` |
 | H21-O-F7 | 其他 VPN/TUN 未识别，失败归因错误 | open | 待开 | 中·推导(PLAUSIBLE) | #458/#468 部分覆盖 |
 | H21-O-F8 | 强制门户/TLS 拦截代理未识别 | open | 待开 | 低·推导(PLAUSIBLE) | |
-| H21-O-F9 | 系统时钟错误不被点名，保护期间无法校时 | open | [#588](https://github.com/raydocs/tono/issues/588) | 低·已确认 | Windows hy2 不拒 NTP |
+| H21-O-F9 | 系统时钟错误不被点名，保护期间无法校时 | in-PR | [#588](https://github.com/raydocs/tono/issues/588)，分支 `fix/clock-skew-classification-20260925`（PR 待开） | 低·已确认 | 只做分类与文案：macOS `APIError.clockSkew` 与探测 `.clock`，Windows `TONO_CLOCK_SKEW`；按传输失败参与离线准入；未开 NTP 放行；Windows hy2 不拒 NTP |
 | H21-C-F2 | 受保护离线时更新发现失败且不说明原因 | accepted-design | — | 低·推导 | fail-closed 设计；只改文案 |
 | H21-C-F3 | Windows 检查更新失败时显示「已是最新版」 | in-PR | [#589](https://github.com/raydocs/tono/issues/589)，[#618](https://github.com/raydocs/tono/pull/618) | 中·已确认 | |
 | H20-C-F1 = H20-O-F2 | Windows 目录刷新失败显示「详情见下」但无详情 | in-PR | [#590](https://github.com/raydocs/tono/issues/590)，[#618](https://github.com/raydocs/tono/pull/618) | 中·已确认 | 稳定错误键与诊断字段未做 |

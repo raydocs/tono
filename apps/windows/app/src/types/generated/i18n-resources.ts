@@ -1219,6 +1219,7 @@ export interface TranslationResources {
         emailLabel: string
         emailPlaceholder: string
         errors: {
+          clockSkew: string
           codeRejected: string
           deviceLimit: string
           rateLimited: string

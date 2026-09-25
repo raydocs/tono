@@ -786,6 +786,7 @@ export const translationKeys = [
   'tono.login.errors.deviceLimit',
   'tono.login.errors.sessionExpired',
   'tono.login.errors.codeRejected',
+  'tono.login.errors.clockSkew',
   'tono.login.errors.serverError',
   'tono.pill.title.notConnected',
   'tono.pill.title.connecting',

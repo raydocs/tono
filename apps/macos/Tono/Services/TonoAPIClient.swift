@@ -48,6 +48,10 @@ actor TonoAPIClient {
         /// its validity window. No session is involved, so it must not read
         /// as an expired session (#595).
         case invalidOrExpiredCode
+        /// #588: TLS refused the control plane's certificate on its dates, so
+        /// this Mac's clock is wrong. No status line arrived: offline
+        /// admission reads it as unreachable, but the user is told the clock.
+        case clockSkew
 
         var errorDescription: String? {
             switch self {
@@ -62,6 +66,7 @@ actor TonoAPIClient {
             case .invalidResponse: String(localized: "Tono returned an invalid response.")
             case let .entitlementBlocked(code, _): Self.entitlementDescription(code)
             case .invalidOrExpiredCode: String(localized: "That code is wrong or expired. Request a new one.")
+            case .clockSkew: CertificateClock.userMessage
             }
         }
 
@@ -850,6 +855,9 @@ actor TonoAPIClient {
         }
         let pinnedFirst = prefersPinnedAddresses
         let order = pinnedFirst ? [pinnedPath, systemPath] : [systemPath, pinnedPath]
+        // #588: a path that failed on a certificate date is the cause to
+        // report when no path answers, whatever the next path failed on.
+        var clockFailure: (any Error)?
         for (index, path) in order.enumerated() {
             if index > 0 { try Self.requireCurrent(requestIsCurrent) }
             do {
@@ -867,6 +875,7 @@ actor TonoAPIClient {
                 // A preferred attempt that fails or is cancelled puts the
                 // system resolver back in front for the next request.
                 if index == 0, pinnedFirst { prefersPinnedAddresses = false }
+                if CertificateClock.isDateFailure(error) { clockFailure = error }
                 guard index + 1 < order.count,
                       !(error is ControlPlaneExchangeError),
                       !Self.isCancellation(error),
@@ -879,7 +888,13 @@ actor TonoAPIClient {
                         attempt: 1,
                         maximumAttempts: 2
                       )
-                else { throw error }
+                else {
+                    if let clockFailure, !(error is ControlPlaneExchangeError),
+                       !Self.isCancellation(error) {
+                        throw clockFailure
+                    }
+                    throw error
+                }
                 let failure = error as NSError
                 LocalTrafficAudit.shared.recordEvent(
                     "control_plane_path_failed",
@@ -1008,6 +1023,7 @@ actor TonoAPIClient {
             details: failureDetails
         )
         guard willRetry else {
+            if CertificateClock.isDateFailure(error) { throw APIError.clockSkew }
             throw APIError.transport(error.localizedDescription)
         }
         try await Task.sleep(for: .seconds(1))

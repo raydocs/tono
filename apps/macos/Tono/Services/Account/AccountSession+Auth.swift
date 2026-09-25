@@ -160,9 +160,13 @@ extension AccountSession {
     }
 
     private static func isUnreachable(_ error: Error) -> Bool {
-        guard let apiError = error as? TonoAPIClient.APIError,
-              case .transport = apiError else { return false }
-        return true
+        guard let apiError = error as? TonoAPIClient.APIError else { return false }
+        switch apiError {
+        // #588: a clock error is also a failure before any status line; the
+        // offline grant, not a refusal, decides.
+        case .transport, .clockSkew: return true
+        default: return false
+        }
     }
 
     static let offlineVerificationInterval: Duration = .seconds(60)
