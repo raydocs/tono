@@ -32,6 +32,53 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-25 · Windows：更新生命周期审查跟进（恢复标记、epoch 准入、ARP 版本、安装器租约）
+
+- **归属/来源**：G3 发出去还能再发（更新事务与手动安装器）；TW-anthropic-4 兼及 G1 连接生命周期。Issue #602
+  （合并列车 #572 审查跟进，总账 TW-*）。基线 origin/main f5c31d58；分支 `fix/win-update-lifecycle-followups-20260925`
+  （红分支 `wip/win-update-lifecycle-followups-20260925-red`）；PR 待开；未合 main。`apps/windows/service`
+  （`bin/install_service/update_executor.rs`、`core/update.rs`、`core/update/security.rs`、`core/server/handlers.rs`、
+  `core/windows_kill_switch.rs` 注释、`tests/test_owner_lifecycle.rs`）、`apps/windows/app`（`installer.nsi`、
+  `scripts/windows-packaging.test.mjs`）、`docs/UPDATE_PROTOCOL_V1.md`。
+- **缺陷修复**：
+  - TW-OpenAI-2 = TW-G-1（及 TW-anthropic-3 文档）：恢复在停 Service 之前读不出已安装组件或计划成员时直接退出，
+    `Consumed` 原样悬挂；而 Disconnect 只能在证明原件完整后退役 `Uncertain`/`RolledBack`。现在这一出口把 `Consumed`
+    写成 `Uncertain`，`Replaced`（已登记后继）与 `Uncertain` 不变，不停 Service、不动文件，下次恢复重新分类。
+    `UPDATE_PROTOCOL_V1.md` 原写「留下 `Uncertain`」与代码不符，已按此改写。
+  - TW-anthropic-4：更新路由原在 owner 认证后、`update::request` 的准入前就推进全局 attempt epoch，任何本地已认证
+    调用方发一个未签名 Prepare 就能让他人在途 PrepareCoreStart 被判 `StaleReleaseEpoch`。现在推进移入
+    `update::request`，在 App 映像、无手动安装/修复、待决事务属同一 owner、签名校验都通过后才推进，仍在同一
+    lifecycle 锁内；准入后的拒绝（重放/降级、保护状态、活动 owner 等）照旧推进，保留 H9-F3 语义。
+  - TW-anthropic-5：核对 main 后确认 eef9d2ce（#508）只加了降级阻断，没有任何原生路径写 ARP `DisplayVersion`，
+    原生更新后降级检查比较的是旧版本。现在目标成为已定安装时写入：Service 在提交持久化后写（失败只告警，不撤销
+    提交）；执行器提交清理在退役开机任务前再写一次，且只在已安装身份仍是该目标时写（避免提交后手动装了别的版本、
+    开机重试把旧版本写回），失败保留任务；「已安装已释放」归档前由 Service 写，失败保持记录待决。回滚与其它归档
+    从未写过，原版本保持。待决期间手动安装器与卸载器被 gate 拦住，读不到未定版本。
+  - TW-anthropic-6 = TW-G-2：`.onInit` 取得手动租约后，`invalid_existing_version`、`legacy_wix_blocked` 与旧自定义
+    位置 `legacyLocationAbort` 三个无修改退出现在先 `Call ReleaseManualLease`。语言选择框取消在
+    `MUI_LANGDLL_DISPLAY` 内部 Abort，无处交还租约，因此把语言选择移到 gate 之前（gate 的对话框因此也用所选语言）。
+  - 未修：TW-OpenAI-1 = TW-anthropic-2（DHCPv4 放行限定 Dhcp 服务 SID）。需 WFP 引擎新增 `ALE_USER_ID` 安全描述符
+    条件；Dhcp 客户端流量（含取得地址前的 DISCOVER、服务 SID 类型可配置）是否带该 SID 只能实机确认，错配会在保护
+    期间丢 DHCP 租约，比这条 P3 加固的风险更大。保持 open。
+- **新增/优化**：无。
+- **工程与测试**：四条回归，红分支只含测试与骨架（`classify_before_stop` 原样传播错误、`finish_committed` 忽略版本
+  记录），预期以断言失败：`update_executor::tests::update_recovery_marks_a_consumed_attempt_uncertain_when_it_cannot_classify`、
+  `update_executor::tests::update_commit_records_the_installed_version_before_retiring_the_task`、
+  `test_owner_lifecycle::update_prepare_refused_at_admission_does_not_supersede_a_connect_attempt`、
+  `windows-packaging.test.mjs`「every installer init exit after the manual gate hands the lease back」。
+  第三条替换 H9-F3 的 `late_prepare_core_start_superseded_by_update_takeover_cannot_stop_the_successor_core`：
+  那条的前提（未准入的 Prepare 也推进 epoch）正是本次报告的缺陷；CI 无已安装 App 与固定更新公钥，构造不出已准入
+  Prepare，H9-F3 正向路径改由源码保证。`finish_committed` 增加版本记录参数，原有测试随签名更新。
+- **验证**：本机未编译或运行 Rust（执行位置规则）；编译与 `cargo test` 以 PR CI `windows-2025` 为准。本机：
+  `node --test` 跑 `apps/windows/app` 六个脚本测试文件 109/109 通过；新 node 测试在红分支状态以断言失败
+  （the language dialog must precede the gate）；`rustfmt --check` 改动区无差异（文件里原有的格式差异未动）。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：执行器取自升级前已安装版本，TW-OpenAI-2 与执行器侧 ARP 重试只对从含本改动的版本发起的升级生效；
+  提交与「已安装已释放」的 ARP 写入由新 Service 执行，首次升级到本版即生效。提交时 ARP 写入失败且执行器 120 s
+  等待已结束时，版本要到下次开机才补写。卸载器 `un.onInit` 的 `MUI_UNGETLANGUAGE` 在当前用户无记忆语言时可能
+  弹出语言框，其取消同样不会交还租约（按 MUI2 源码推断，未核实、未处理）。
+  DHCP SID 未做（见上）。均未实机。
+
 ## 2026-09-25 · exit-agent：停用轮保留最后计数；hy2 出错不再跳过 Xray 吊销
 
 - **归属/来源**：ops 任务（出口计量与吊销，#563 合并车审查后续）；Issue #600 的 TF-opus-4 与 TF-opus-8（其余条目仍开）。

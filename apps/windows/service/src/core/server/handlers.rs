@@ -13,13 +13,9 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 ControlFlow::Continue(value) => value,
                 ControlFlow::Break(response) => return response,
             };
+            // A Prepare supersedes in-flight connect attempts only once `update::request` has
+            // admitted it, still under this lock (TW-anthropic-4).
             let _lifecycle = OWNER_LIFECYCLE_LOCK.lock().await;
-            // The App invalidated its connecting attempt before sending Prepare, whatever the
-            // Service then decides. Supersede that attempt's PrepareCoreStart snapshot here, so a
-            // late request cannot stop a successor Core the user started after the takeover.
-            if matches!(request.payload, crate::update_wire::UpdateRequest::Prepare { .. }) {
-                windows_kill_switch::note_attempt_superseded();
-            }
             #[cfg(windows)]
             return match crate::core::update::request(&owner, request.payload).await {
                 Ok(status) => ok_json(status),

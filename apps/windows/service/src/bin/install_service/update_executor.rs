@@ -94,12 +94,26 @@ fn classify_installed(
     Ok((installed, publication))
 }
 
-/// Recovery's first read, before the Service is stopped.
+/// Recovery's first read, before the Service is stopped. When it cannot
+/// classify the installation at all (an unreadable component or plan member),
+/// nothing is stopped or changed and the next recovery retries. A `Consumed`
+/// marker becomes `Uncertain`, the only in-flight state a verified Disconnect
+/// can retire once the retained originals are proven; `Replaced` keeps its
+/// registered successor and `Uncertain` stays as it is.
 fn classify_before_stop(
-    _store: &mut tx::Store,
+    store: &mut tx::Store,
     classify: impl FnOnce() -> Result<(Components, RecoveryPublication), Error>,
 ) -> Result<RecoveryPublication, Error> {
-    classify().map(|(_, publication)| publication)
+    let error = match classify() {
+        Ok((_, publication)) => return Ok(publication),
+        Err(error) => error,
+    };
+    if store.attempt()?.execution == tx::Execution::Consumed {
+        store
+            .execution(tx::Execution::Uncertain)
+            .with_context(|| format!("unclassified recovery ({error:#}) was not recorded"))?;
+    }
+    Err(error)
 }
 
 pub(super) fn dispatch() -> Result<bool, Error> {
@@ -212,7 +226,11 @@ fn execute(recovery: bool) -> Result<(), Error> {
         "executor image binding changed"
     );
     if a.receipt.phase == Phase::Committed {
-        finish_committed(&plan_path, || Ok(()), native::retire_recovery_task)?;
+        finish_committed(
+            &plan_path,
+            || record_committed_version(&a),
+            native::retire_recovery_task,
+        )?;
         return Ok(());
     }
     if recovery {
@@ -440,7 +458,11 @@ fn execute(recovery: bool) -> Result<(), Error> {
         std::thread::sleep(Duration::from_secs(1));
         let store = open_waiting()?;
         if store.attempt()?.receipt.phase == Phase::Committed {
-            finish_committed(&plan_path, || Ok(()), native::retire_recovery_task)?;
+            finish_committed(
+                &plan_path,
+                || record_committed_version(&a),
+                native::retire_recovery_task,
+            )?;
             return Ok(());
         }
     }
@@ -492,16 +514,35 @@ fn rollback_plan(plan: &mut Plan) -> Result<(), Error> {
 /// nothing left for `--update-recover` to do, so the SYSTEM ONSTART task is
 /// retired, as macOS retires its launchd job. A failed retirement leaves the
 /// task for the next boot, which lands here again and retries.
+///
+/// The committed target is also named in Add/Remove Programs first: the
+/// manual installer's downgrade check reads that version, and no NSIS section
+/// ran for a native update. The Service writes it at commit; this is the retry
+/// for a write that failed there, so a failed write keeps the task.
 fn finish_committed(
     plan_path: &Path,
-    _record_version: impl FnOnce() -> Result<(), Error>,
+    record_version: impl FnOnce() -> Result<(), Error>,
     retire: impl FnOnce() -> Result<(), Error>,
 ) -> Result<(), Error> {
     cleanup_committed(plan_path)?;
+    record_version()?;
     if let Err(error) = retire() {
         eprintln!(
             "committed update cleaned up; the recovery task stays until the next boot: {error:#}"
         );
+    }
+    Ok(())
+}
+
+/// Only while the committed target is still what is installed: a manual
+/// install after the commit wrote its own version, and a boot-time retry must
+/// not name an older one over it.
+fn record_committed_version(a: &tx::Attempt) -> Result<(), Error> {
+    let service_path = tono_service_protocol::service_paths()
+        .install_dir()
+        .join("tono-service.exe");
+    if native::components(&a.install_root, &service_path)? == tx::target(&a.manifest).components {
+        native::record_installed_version(&a.manifest.app_version)?;
     }
     Ok(())
 }

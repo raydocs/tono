@@ -12,7 +12,7 @@ use crate::update_wire::{UpdateRequest, UpdateStatus};
 use anyhow::{Context as _, Result, ensure};
 pub use security::{
     UserLaunch, app_image, image, install_root, parent_image, pin_path, program_files,
-    tunnel_absent, verify_tree,
+    record_installed_version, tunnel_absent, verify_tree,
 };
 use std::{
     fs::OpenOptions,
@@ -237,6 +237,13 @@ pub(crate) async fn request(
             package_path,
         } => {
             let manifest = verify_manifest(manifest.as_bytes(), &signature)?;
+            // Admitted: the registered App image, no manual installer or repair, the pending
+            // attempt's own owner and a signed manifest. The App invalidated its connecting
+            // attempt before sending Prepare, so supersede that attempt's PrepareCoreStart
+            // snapshot whatever is decided from here: a late request must not stop a successor
+            // Core started after the takeover (H9-F3). A request refused above supersedes
+            // nothing, or any local caller could fail another user's connect (TW-anthropic-4).
+            wfp::note_attempt_superseded();
             if store.pending() {
                 let a = store.attempt()?;
                 ensure!(
@@ -495,6 +502,7 @@ pub(crate) async fn request(
                 .receipt
                 .successor_generation
                 .context("missing successor generation")?;
+            let version = a.manifest.app_version.clone();
             owner_proxy_absent(owner)?;
             let actual = installed_components(&a.install_root)?;
             let observed = protection(owner).await?;
@@ -528,6 +536,12 @@ pub(crate) async fn request(
                 },
             )?;
             // Executor/recovery task owns deleting backups, only after this write.
+            // The committed target is now the installed version. A failed write does not undo
+            // the commit: the executor's committed cleanup writes it again before the boot
+            // task is retired.
+            if let Err(error) = record_installed_version(&version) {
+                tracing::warn!("update committed; installed version not recorded yet: {error:#}");
+            }
         }
     }
     status(&store)
@@ -698,6 +712,9 @@ fn retire_after_release(
             installed(&a.install_root)? == target(&a.manifest).components,
             "installed target not proven; evidence cannot be released"
         );
+        // No commit will record the target version, and the archive ends the record that
+        // carries it. Name it first; a failed write keeps the record pending.
+        record_installed_version(&a.manifest.app_version)?;
         let plan = store.attempt_dir()?.join("replacement.json");
         let (attempt_id, root) = (a.receipt.attempt_id.clone(), a.install_root.clone());
         let service_dir = crate::service_paths().install_dir();
