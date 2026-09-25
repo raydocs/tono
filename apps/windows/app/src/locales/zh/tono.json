@@ -631,6 +631,7 @@
       "description": "认证云线路；断线拦住直连。",
       "checkUpdates": "检查更新",
       "latestVersion": "已是最新版",
+      "checkFailed": "检查更新失败。请检查网络连接后重试。",
       "updatesUnavailable": "测试版需手动安装，应用内更新尚未开放。",
       "unsigned": "安装包未签名，Windows 可能拦截。过 SmartScreen 后即可安装。"
     }

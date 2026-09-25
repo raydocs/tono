@@ -631,6 +631,7 @@
       "description": "Signed cloud route. A drop will not leak.",
       "checkUpdates": "Check for updates",
       "latestVersion": "You're on the latest version",
+      "checkFailed": "Couldn't check for updates. Check your internet connection, then try again.",
       "updatesUnavailable": "This test build does not auto-update. Install the new package manually.",
       "unsigned": "This installer is unsigned. Windows SmartScreen may warn; continue to install."
     }
