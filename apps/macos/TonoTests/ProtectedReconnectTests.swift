@@ -197,9 +197,10 @@ final class ProtectedReconnectTests: XCTestCase {
 
         app.retryProtectedConnectionNow()
         let loop = app.connectionCoordinator.protectedReconnectTask
-        // Three attempts take 0 + 2 + 5 s; a loop that never pauses runs on.
+        // Three attempts take 0 + 5 + 10 s (`delays[attempt]`, only attempt 0 is
+        // immediate); a loop that never pauses runs on.
         let watchdog = Task {
-            try? await Task.sleep(for: .seconds(20))
+            try? await Task.sleep(for: .seconds(30))
             loop?.cancel()
         }
         await loop?.value

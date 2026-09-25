@@ -47,7 +47,7 @@
     （网络变化不解除），沿用已有的「同一失败重复三次」本地化文案。PF 保持；Retry now 或改选出口照旧重置计数。
 - **新增/优化**：无。
 - **工程与测试**：新回归 `AccountSessionRequestTests.testControlPlaneSessionIgnoresTheSystemProxy`、
-  `ProtectedReconnectTests.testProtectedReconnectPausesWhenPrepareKeepsRefusingTheSelectedExit`（约 7 s，20 s 看门狗）。
+  `ProtectedReconnectTests.testProtectedReconnectPausesWhenPrepareKeepsRefusingTheSelectedExit`（约 15 s，30 s 看门狗）。
   红分支 `wip/macos-backup-channel-and-proxy-20260925-red` 只含测试与配置工厂骨架。
 - **验证**：本机未编译、未跑测试（执行位置规则）；以 PR 的 `macos-26` CI 为准。
 - **候选/发布**：仅源码，无新候选。

@@ -37,10 +37,12 @@ extension AppState {
                 }
                 if let selected = self.selectedExitNode(), let reason = ConfigPipeline.singBoxUnavailableReason(selected) {
                     self.errorMessage = reason + ": this sing-box build cannot authenticate the catalog's HY2 certificate pin. Choose Reality."
-                    // #585: in Protected Offline this refusal is a failed
-                    // attempt, so the three-strike pause stops the loop.
-                    // PF stays as it is; only the user's choice lifts it.
-                    if self.isProtectionBlocked {
+                    // #585: while protection holds (Protected Offline, or an
+                    // unconfirmed barrier after a failed wake reassert, which
+                    // the same loop retries) this refusal is a failed attempt,
+                    // so the three-strike pause stops the loop. PF stays as it
+                    // is; only the user's choice lifts it.
+                    if self.isProtectionBlocked || self.isProtectionUnconfirmed {
                         let signature = "\(ConnectionStage.preparing.rawValue)|\(reason)"
                         if signature == self.lastProtectedFailureSignature {
                             self.consecutiveProtectedFailureCount += 1
