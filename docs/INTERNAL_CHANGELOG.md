@@ -275,7 +275,7 @@
   - 四轮（Codex 核实 a62703fe：B FIXED，A PARTIAL，A-R3-F1 P2）：出口行本身名为 `X · hy2`、只下发基名块 `X` 的同名家宽
     仍被豁免（上一条「fail-closed」的说法不成立）。现在家宽排除条件也比对「家宽名 + ` · hy2`」；命中即纳入就绪集合，
     按基名连接查不到出口行则记为未就绪。测试：在同一个 `it` 里把 `Collision` 出口改名为 `Collision · hy2` 再断言 503，
-    修复前红（`expected 200 to be 503`）。验证：两个文件 231 通过、全量与 typecheck 见提交。
+    修复前红（`expected 200 to be 503`）。验证：两个文件 231 通过；列车 head 05c3c9d4 上本机 `npx vitest run` 43 文件 921 通过、`npm run typecheck` 通过（2026-09-25）。
 
 ## 2026-09-24 · 控制面列车 #570 审查续修：开户轮换预检、家宽名 hy2 后缀
 

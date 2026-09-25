@@ -357,7 +357,10 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | H22-C-F1 | Windows 欢迎页吞掉存储失败导致循环 | open | 待开 | 低·推导(PLAUSIBLE) | 触发条件未证实 |
 | H20-O-*, H22-O-* | Opus 席位 H20（15 条）与 H22（8 条，含 H22-O-F1 BFE 关闭时无法安装、H22-O-F2 VC++ 运行库缺失时安装门禁失败）| open（待核实）| 待开 | 待 Codex 异厂商核实 | 见交接文档 |
 | XRAY26-RMU | exit-agent 用 `--email=` 调 Xray 26 `rmu` 被拒，自 2026-09-18 起吊销不执行、计量停报；`rmu` 失败也退出 0 | in-PR | [#563](https://github.com/raydocs/tono/pull/563)（5bcc6b9d/924cafb3/b3299814）| 高·已确认(实机输出) | 未部署到节点 |
-| TC-anthropic-1 | `dual` 阶段新建/重新启用出口节点使所有已退役账户设备目录 503 | open | [#570](https://github.com/raydocs/tono/pull/570) 评论 | 高·推导 | 阻塞 #570 合并与部署 |
+| TC-anthropic-1 | `dual` 阶段新建/重新启用出口节点使所有已退役账户设备目录 503 | in-PR | [#570](https://github.com/raydocs/tono/pull/570)（8ea01b3f、b6c0a817、a62703fe、f775a895）| 高·已确认(Codex) | 就绪门只看本次下发目录中的节点（hy2 归并基名、目录内家宽不计）；jev-route 7a7e1e73/bb710dc6（Opus+Codex）复审修复提交通过；**部署仍须按交接顺序：LA 节点恢复 ACK、第二节点先登记** |
+| TC-anthropic-2 | 零 active 节点时退役账户永久 503；测试未断言成功路径 | in-PR | [#570](https://github.com/raydocs/tono/pull/570) | 中·已确认(Codex，条件性) | 生产有 1 个 active 节点；`worker.test.ts` 已断言 ACK 前 503、ACK 后 200 且为设备 UUID |
+| TC-anthropic-3 | 0078 改变过滤集合但不 bump 目录 revision，Windows 拒收同 revision 不同 digest | in-PR | [#570](https://github.com/raydocs/tono/pull/570) | 中·已确认(Codex) | 运维步骤：部署且节点拉取新 roster 后，无条件用带 `expectedRevision` 的受审计 catalog PUT bump revision（写入列车 changelog 与 PR 描述）|
+| TC-anthropic-4 | migrations README 缺 0077、0088 | in-PR | [#570](https://github.com/raydocs/tono/pull/570) | 低 | README 补 0077/0081/0088 |
 
 测试覆盖缺口（夹具未跨真实 DLL、无断电/睡眠/多网卡实机、无 parser fuzz 等）不是本账条目，
 见 [审查轮记录](reports/REVIEW_ROUNDS_2026-09-23.md) 的「未覆盖」一节；找到具体失败再作为新条目上报。
