@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 import Security
+import ServiceManagement
 
 /// Installs and talks to the narrowly scoped privileged Mihomo launcher.
 ///
@@ -15,7 +16,7 @@ nonisolated struct HelperManager {
     private static let helperInstallPath = "/Library/PrivilegedHelperTools/tono-core-helper"
     private static let mihomoInstallPath = "/Library/PrivilegedHelperTools/tono-sing-box"
     private static let allowedUIDPath = "/Library/PrivilegedHelperTools/tono.allowed-uid"
-    private static let plistInstallPath = "/Library/LaunchDaemons/com.raydocs.tono.core-helper.plist"
+    static let plistInstallPath = "/Library/LaunchDaemons/com.raydocs.tono.core-helper.plist"
     private static let plistLabel = "com.raydocs.tono.core-helper"
     private static let maximumResponseBytes = 64 * 1024
 
@@ -29,6 +30,9 @@ nonisolated struct HelperManager {
         let wantArmed: Bool?
         let live: Bool?
         let healed: Bool?
+        /// Set by the helper's PF liveness supervisor after it had to reinstall
+        /// the kill switch; cleared by the next arm. Absent before 4.16.0.
+        let repairedSinceArm: Bool?
         let flushedStates: Bool?
         /// Addresses whose states were killed individually instead of flushing
         /// the machine. Absent from a pre-3.11.0 daemon, which only had the
@@ -40,6 +44,11 @@ nonisolated struct HelperManager {
         let configured: Bool?
         let snapshotPresent: Bool?
         let service: String?
+        /// `/dns/restore` only: `false` when the service that owned the
+        /// snapshot no longer exists, so the recorded servers were archived
+        /// instead of written back. A helper without service-ID snapshots
+        /// never sends it.
+        let originalDNSRestored: Bool?
         let lastError: String?
         let error: String?
     }
@@ -79,6 +88,7 @@ nonisolated struct HelperManager {
         /usr/bin/codesign --verify --strict --all-architectures -R='anchor apple generic and identifier "com.raydocs.tono.helper" and certificate leaf[subject.OU] = "YY57758GS7" and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and entitlement["com.apple.security.get-task-allow"] absent' "$guard_dir/guard"
         "$guard_dir/guard" --update-install-guard <<'TONO_INSTALL_UNDER_ROOT_UPDATE_LOCK'
         set -e
+        \(boundAccountGuard(uid: uid, allowedUIDPath: allowedUIDPath))
         /usr/bin/install -d -o root -g wheel -m 0755 /Library/PrivilegedHelperTools
         /usr/bin/install -d -o root -g wheel -m 0755 /var/run/tono-core
         /bin/rm -f '\(helperTemporaryPath)' '\(mihomoTemporaryPath)' '\(plistTemporaryPath)'
@@ -103,6 +113,9 @@ nonisolated struct HelperManager {
         /bin/rm -f /Library/PrivilegedHelperTools/tono-killswitch
         /bin/rm -f /var/run/tono-killswitch.sock
         /bin/launchctl bootout system/\(plistLabel) >/dev/null 2>&1 || true
+        # A reset by an older helper left the previous account's socket behind;
+        # the new daemon refuses to replace a socket another uid owns.
+        /bin/rm -f '\(socketPath)'
         /bin/mv -f '\(helperTemporaryPath)' '\(helperInstallPath)'
         /bin/mv -f '\(mihomoTemporaryPath)' '\(mihomoInstallPath)'
         /bin/mv -f '\(plistTemporaryPath)' '\(plistInstallPath)'
@@ -115,7 +128,13 @@ nonisolated struct HelperManager {
         """
     }
 
-    static func installIfNeeded() throws {
+    static func installIfNeeded(administratorPrompt: Bool = true) throws {
+        // A helper serving another account is not broken. Refuse by name
+        // before any probe, prompt or reinstall could rebind it.
+        if let account = helperBoundAccount() {
+            LocalTrafficAudit.shared.recordEvent("helper_bound_to_another_account")
+            throw HelperIPCError.boundToAnotherUser(account)
+        }
         let preparationStartedAt = Date()
         LocalTrafficAudit.shared.recordEvent(
             "helper_preparation_started",
@@ -221,22 +240,19 @@ nonisolated struct HelperManager {
         // after this method returns.
         if installedVersion != nil {
             do {
-                _ = try restoreProtectedDNSIfConfigured()
-                try stopCore()
-                let status = try killSwitchStatus()
-                if status.armed || status.wanted, !status.live {
-                    throw HelperIPCError.commandFailed(
-                        "The previous helper could not keep PF fail-closed during its upgrade."
-                    )
-                }
+                try prepareAuthenticatedHelperForReplacement(
+                    restoreDNS: { _ = try restoreProtectedDNSIfConfigured() },
+                    stopCore: stopCore,
+                    killSwitchStatus: killSwitchStatus
+                )
             } catch {
                 LocalTrafficAudit.shared.recordEvent(
                     "helper_upgrade_preflight_failed",
                     details: ["error": error.localizedDescription]
                 )
                 throw HelperInstallError.installFailed(
-                    "The previous network helper could not restore DNS, stop "
-                        + "the core, and retain firewall protection safely. "
+                    "The previous network helper could not stop the core and "
+                        + "retain firewall protection safely. "
                         + error.localizedDescription
                 )
             }
@@ -255,6 +271,24 @@ nonisolated struct HelperManager {
             ) {
                 return
             }
+        }
+
+        // A caller that did not ask for a repair stops before the prompt
+        // (MAC3-ADD-F1). Nothing above released PF, so it stays as the helper
+        // holds it; Connect and Restore internet own the prompt.
+        guard administratorPrompt else {
+            LocalTrafficAudit.shared.recordEvent(
+                "helper_administrator_prompt_withheld",
+                details: [
+                    "installed_version": installedVersion
+                        ?? (daemonRejected ? "rejected_client" : "unavailable"),
+                    "expected_version": helperVersion,
+                ]
+            )
+            if daemonRejected { throw HelperIPCError.forbidden }
+            throw HelperInstallError.installFailed(
+                "The network helper needs administrator approval, which only Connect or Restore internet asks for."
+            )
         }
 
         try verifyEmbeddedExecutable(
@@ -309,6 +343,10 @@ nonisolated struct HelperManager {
         guard process.terminationStatus == 0 else {
             let data = errors.fileHandleForReading.readDataToEndOfFile()
             let message = String(data: data, encoding: .utf8) ?? ""
+            if let account = boundAccount(inInstallerMessage: message) {
+                LocalTrafficAudit.shared.recordEvent("helper_bound_to_another_account")
+                throw HelperIPCError.boundToAnotherUser(account)
+            }
             // AppleScript reports a dismissed credential dialog with the
             // localized "User canceled" text, so plain "cancel" matching both
             // misses non-English systems (zh-Hans emits "用户已取消") and
@@ -409,8 +447,76 @@ nonisolated struct HelperManager {
         """
     }
 
+    /// Readies an authenticated older helper for replacement. Stopping the
+    /// core and confirming that any wanted PF state is live are required: PF
+    /// is the leak boundary while the daemon is swapped. DNS recovery is
+    /// attempted but does not gate the swap. An older helper that cannot read
+    /// its own DNS snapshot (corrupt, or naming a service that no longer
+    /// exists) fails this step on every attempt, and the replacement helper
+    /// is the component that can quarantine that snapshot and sweep the
+    /// loopback resolver. Refusing the upgrade here left such a host in
+    /// Protected Offline with no in-product way out.
+    static func prepareAuthenticatedHelperForReplacement(
+        restoreDNS: () throws -> Void,
+        stopCore: () throws -> Void,
+        killSwitchStatus: () throws -> (armed: Bool, wanted: Bool, live: Bool, healed: Bool)
+    ) throws {
+        do {
+            try restoreDNS()
+        } catch {
+            LocalTrafficAudit.shared.recordEvent(
+                "helper_upgrade_dns_restore_deferred",
+                details: ["error": error.localizedDescription]
+            )
+        }
+        try stopCore()
+        let status = try killSwitchStatus()
+        if status.armed || status.wanted, !status.live {
+            throw HelperIPCError.commandFailed(
+                "The previous helper could not keep PF fail-closed during its upgrade."
+            )
+        }
+    }
+
     static func isHelperRunning() -> Bool {
         currentVersion() == helperVersion
+    }
+
+    /// Read-only launchd view of the helper, used to explain an unreachable
+    /// helper while this Mac should be protected. Neither query needs
+    /// privileges.
+    enum LaunchState: Equatable {
+        /// Turned off under Login Items › Allow in the Background. launchd will
+        /// not start it, and no repair from the app works until it is back on.
+        case backgroundDisabled
+        /// launchd has no such job, so nothing restored PF after the last
+        /// restart: macOS loads the PF rules at boot but leaves PF disabled.
+        case notLoaded
+        /// Loaded (an unreachable helper is then busy or restarting, and its PF
+        /// rules stay in the kernel), or launchd could not say.
+        case loadedOrUnknown
+    }
+
+    static func launchState() -> LaunchState {
+        if SMAppService.statusForLegacyPlist(
+            at: URL(fileURLWithPath: plistInstallPath)
+        ) == .requiresApproval {
+            return .backgroundDisabled
+        }
+        return daemonRegisteredWithLaunchd() ? .loadedOrUnknown : .notLoaded
+    }
+
+    /// What to tell the user instead of a generic repair error. nil when the
+    /// launch state is no evidence that protection is off.
+    static func unprotectedNotice(for state: LaunchState) -> String? {
+        switch state {
+        case .backgroundDisabled:
+            String(localized: "Tono's network helper is turned off in System Settings > General > Login Items & Extensions, so this Mac is not protected right now. Turn Tono on under Allow in the Background, then click Retry.")
+        case .notLoaded:
+            String(localized: "Tono's network helper is not running, so this Mac is not protected right now. Click Retry and approve the administrator prompt to repair it.")
+        case .loadedOrUnknown:
+            nil
+        }
     }
 
     static var hasInstalledHelperArtifact: Bool {
@@ -502,7 +608,7 @@ nonisolated struct HelperManager {
         return process.terminationStatus == 0
     }
 
-    private static func installedArtifactVersion() -> String? {
+    static func installedArtifactVersion() -> String? {
         guard hasInstalledHelperArtifact else { return nil }
         let process = Process()
         let output = Pipe()
@@ -664,6 +770,22 @@ nonisolated struct HelperManager {
         return (reply.armed, reply.wanted, reply.live, reply.healed)
     }
 
+    /// Read-only PF liveness for a connected session. Unlike
+    /// `killSwitchStatus()`, the helper loads nothing and flushes nothing to
+    /// answer it.
+    static func killSwitchHealth() throws -> (
+        wanted: Bool, live: Bool, repairedSinceArm: Bool
+    ) {
+        let result = try sendRequest(method: "GET", path: "/killswitch/health")
+        let envelope = try requireSuccess(result, operation: "kill switch health")
+        guard let wanted = envelope.wantArmed,
+              let live = envelope.live,
+              let repaired = envelope.repairedSinceArm else {
+            throw HelperIPCError.invalidResponse
+        }
+        return (wanted, live, repaired)
+    }
+
     /// Whether any daemon answered the socket at all, regardless of the reply's
     /// success. Distinguishes "helper busy or unhappy but present" from
     /// "nothing is listening" — only the latter justifies notInstalled.
@@ -694,6 +816,43 @@ nonisolated struct HelperManager {
               envelope.snapshotPresent != true else {
             throw HelperIPCError.invalidResponse
         }
+        if protectedDNSRestoreNotice(restoreReply: result.body) != nil {
+            // The helper archives that snapshot, so no later restore reports
+            // it again. Keep the notice until a window has shown it: this
+            // restore may run at launch, on Quit or in update preparation.
+            AppProfile.defaults.set(true, forKey: protectedDNSOriginalLostKey)
+            LocalTrafficAudit.shared.recordEvent(
+                "protected_dns_original_service_missing",
+                details: ["service": envelope.service ?? ""]
+            )
+        }
+    }
+
+    private static let protectedDNSOriginalLostKey = "Tono_protectedDNSOriginalLost"
+
+    /// The user-facing notice for a successful `/dns/restore` reply, or nil
+    /// when the original servers went back (or the helper predates the
+    /// field). Success with `originalDNSRestored: false` means PF may be
+    /// released, but the user's saved DNS servers were not restored.
+    static func protectedDNSRestoreNotice(restoreReply body: Data) -> String? {
+        guard let envelope = try? JSONDecoder().decode(Envelope.self, from: body),
+              envelope.originalDNSRestored == false else { return nil }
+        return protectedDNSOriginalLostNotice
+    }
+
+    private static var protectedDNSOriginalLostNotice: String {
+        String(
+            localized: "The network service whose DNS settings Tono saved has been deleted, so those DNS servers could not be put back. DNS is now obtained automatically. If your network needs manual DNS servers, set them again in System Settings > Network."
+        )
+    }
+
+    /// Returns the pending original-DNS notice once and clears it.
+    static func takeProtectedDNSRestoreNotice() -> String? {
+        guard AppProfile.defaults.bool(forKey: protectedDNSOriginalLostKey) else {
+            return nil
+        }
+        AppProfile.defaults.removeObject(forKey: protectedDNSOriginalLostKey)
+        return protectedDNSOriginalLostNotice
     }
 
     /// Restore whenever the helper can inspect DNS. A missing snapshot used to
@@ -982,6 +1141,73 @@ nonisolated struct HelperManager {
         }
     }
 
+    /// The account a live helper serves, when that is not the calling account.
+    /// The daemon hands its socket to the one uid it trusts, mode 0600, so
+    /// another account cannot connect at all. It used to see only "helper
+    /// unavailable", and a repair from that account could rebind the helper to
+    /// itself and take the first account's barrier with it (H19-O-F3).
+    /// A socket without the daemon's launchd plist is what `--emergency-reset`
+    /// leaves behind, not a helper serving anyone (MA-Codex-4).
+    static func helperBoundAccount(
+        socketPath: String = HelperManager.socketPath,
+        currentUID: uid_t = getuid(),
+        daemonPlistPath: String = HelperManager.plistInstallPath
+    ) -> String? {
+        var metadata = stat()
+        guard lstat(daemonPlistPath, &metadata) == 0,
+              lstat(socketPath, &metadata) == 0,
+              metadata.st_mode & mode_t(S_IFMT) == mode_t(S_IFSOCK),
+              metadata.st_uid != currentUID, metadata.st_uid != 0 else { return nil }
+        if let record = getpwuid(metadata.st_uid), let name = record.pointee.pw_name {
+            return String(cString: name)
+        }
+        return "UID \(metadata.st_uid)"
+    }
+
+    /// The error for a failed connect to the helper socket.
+    static func connectFailure(
+        socketPath: String = HelperManager.socketPath,
+        currentUID: uid_t = getuid(),
+        daemonPlistPath: String = HelperManager.plistInstallPath
+    ) -> HelperIPCError {
+        if let account = helperBoundAccount(
+            socketPath: socketPath, currentUID: currentUID, daemonPlistPath: daemonPlistPath
+        ) {
+            return .boundToAnotherUser(account)
+        }
+        return .connectFailed
+    }
+
+    private static let boundAccountMarker = "TONO_HELPER_BOUND_TO_ACCOUNT:"
+
+    /// Run by root under the helper's update lock (the same lock
+    /// `--emergency-reset` holds), before the install replaces anything, so the
+    /// record it reads is the one the install overwrites (MA-Codex-3). While
+    /// the trusted-user record names another account that still exists on this
+    /// Mac, refuse and name it: no install from this app, automatic or
+    /// explicit, rebinds the helper away from that account. Moving Tono to
+    /// another account is an administrator's `--emergency-reset`, which
+    /// releases that account's protection and removes the record. A record for
+    /// an account that no longer exists does not block the install.
+    static func boundAccountGuard(uid: uid_t, allowedUIDPath: String) -> String {
+        """
+        if [ -f '\(allowedUIDPath)' ]; then
+          tono_bound_uid=$(/usr/bin/tr -cd '0-9' < '\(allowedUIDPath)')
+          if [ -n "$tono_bound_uid" ] && [ "$tono_bound_uid" != '\(uid)' ] && tono_bound_name=$(/usr/bin/id -un "$tono_bound_uid" 2>/dev/null); then
+            /bin/echo "\(boundAccountMarker)$tono_bound_name" >&2
+            exit 75
+          fi
+        fi
+        """
+    }
+
+    /// The account named by a refused root install, from osascript's error text.
+    static func boundAccount(inInstallerMessage message: String) -> String? {
+        guard let marker = message.range(of: boundAccountMarker) else { return nil }
+        let name = message[marker.upperBound...].prefix { !$0.isWhitespace && $0 != "(" }
+        return name.isEmpty ? nil : String(name)
+    }
+
     // MARK: - Bounded Unix-socket HTTP client
 
     private static func sendRequest(
@@ -1022,7 +1248,7 @@ nonisolated struct HelperManager {
                 Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
-        guard connected == 0 else { throw HelperIPCError.connectFailed }
+        guard connected == 0 else { throw connectFailure() }
 
         let payload = body ?? Data()
         var request = Data(
@@ -1096,6 +1322,9 @@ enum HelperIPCError: LocalizedError {
     case emptyResponse
     case invalidResponse
     case forbidden
+    /// The helper serves another macOS account on this Mac. Never repaired by
+    /// rebinding it to the calling account.
+    case boundToAnotherUser(String)
     case commandFailed(String, code: String? = nil)
 
     var errorDescription: String? {
@@ -1106,6 +1335,8 @@ enum HelperIPCError: LocalizedError {
         case .invalidResponse: String(localized: "The network helper returned an invalid response.")
         case .forbidden:
             String(localized: "The installed network helper rejected this copy of Tono.")
+        case .boundToAnotherUser(let account):
+            String(localized: "Tono's network helper on this Mac is set up for the macOS account “\(account)” and keeps that account's network protection. Use Tono from that account. To move Tono to this account, an administrator can run sudo /Library/PrivilegedHelperTools/tono-core-helper --emergency-reset in Terminal, then reopen Tono.")
         // commandFailed carries helper-produced text verbatim; not a catalog key.
         case .commandFailed(let message, _): message
         }

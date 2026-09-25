@@ -12,7 +12,6 @@ struct AccountBlockedView: View {
     /// carries its own progress rather than reading a session state that this
     /// screen can never be shown in.
     @State private var rechecking = false
-    @State private var restoredInternetFromGate = false
 
     private var explanation: String {
         // A nil detail means the control plane refused this session without
@@ -74,28 +73,9 @@ struct AccountBlockedView: View {
 
             Button("Sign Out", role: .destructive) { Task { await session.logout() } }
 
-            if KillSwitchService.isArmed, !restoredInternetFromGate {
-                // Renewing a plan needs a browser, and this screen is reachable
-                // with protection armed and no exit running. Signing out is the
-                // only other way off a fail-closed host, and it should not be
-                // the price of reading the renewal page. isArmed is a plain
-                // static (not observable), so the local flag forces the section
-                // to update once the restore completes.
-                Divider().padding(.vertical, 4)
-                Label(
-                    "Kill Switch is blocking direct Internet from an earlier session.",
-                    systemImage: "shield.slash"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                Button("Restore internet (turn off protection)") {
-                    Task {
-                        await session.restoreDirectInternet()
-                        restoredInternetFromGate = !KillSwitchService.isArmed
-                    }
-                }
-                .disabled(rechecking)
-            }
+            // Renewing a plan needs a browser, and this screen is reachable
+            // with protection armed and no exit running.
+            GateProtectionSection(session: session, disabled: rechecking)
         }
         .padding(.horizontal, 20)
         .frame(width: 360)
@@ -169,6 +149,55 @@ struct GateSecondaryButtonStyle: ButtonStyle {
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.985 : 1)
             .animation(TonoMotion.easeOut(0.12, reduceMotion: reduceMotion), value: configuration.isPressed)
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+/// The code step's way out when no email arrives (#596). `auth/email/start`
+/// answers 202 for every address and a failed delivery is silent by design,
+/// so the gate offers the same support actions it offers for a failed launch.
+struct SignInCodeNotReceivedHint: View {
+    static let delay: Duration = .seconds(60)
+
+    let email: String
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Text("No email yet?")
+                .font(.caption.weight(.semibold))
+            Text("Check spam and the address above, or send a new code. If it still does not arrive, copy the details for Tono support.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 14) {
+                Button {
+                    copyDetails()
+                } label: {
+                    Label("Copy details", systemImage: "doc.on.doc")
+                }
+                Button("Show Diagnostics Log in Finder") {
+                    let url = LocalTrafficAudit.shared.prepareForReveal()
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                }
+            }
+            .buttonStyle(.link)
+            .font(.caption)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func copyDetails() {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "unknown"
+        let build = info?["CFBundleVersion"] as? String ?? "unknown"
+        let summary = """
+        Tono sign-in code not received
+        Version: \(version) (\(build))
+        Email: \(email)
+        """
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(summary, forType: .string)
+        ToastCenter.shared.show(String(localized: "Copied"), systemImage: "doc.on.doc.fill")
     }
 }
 

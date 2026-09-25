@@ -8,6 +8,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { jwtSign, sha256 } from '../src/crypto';
 import worker, { parseBytesRange, retirementCatalogPlan, type Env } from '../src/index';
 import adminWorker from '../src/admin-worker';
+import { revokeExitToken } from '../src/ops/retire-dependencies';
 
 const ADMIN_TOKEN = 'admin-test-token-with-at-least-32-characters';
 const HOME_TOKEN = 'home-test-token-with-at-least-32-characters';
@@ -1455,6 +1456,20 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(await env.DB.prepare(
       "SELECT last_roster_at FROM exit_nodes WHERE id = 'exit-default'",
     ).first<any>()).toMatchObject({ last_roster_at: 0 });
+  });
+
+  it('tells a disabled or retired exit node apart from an unknown token', async () => {
+    const roster = (token: string) => api('home/exit-identities', {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect((await admin('exit-nodes/exit-a', { status: 'disabled' }, 'PATCH')).status).toBe(200);
+    expect(await revokeExitToken(env as unknown as Env, 'Test exit-b', 'ops@example.com', 1)).toBe(true);
+    for (const token of [EXIT_NODE_TOKENS['exit-a'], EXIT_NODE_TOKENS['exit-b']]) {
+      const response = await roster(token);
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({ error: { code: 'EXIT_NODE_DISABLED' } });
+    }
+    expect((await roster('unknown-exit-token-with-at-least-32-characters')).status).toBe(401);
   });
 
   it('enforces device-only rollout readiness at the database boundary', async () => {

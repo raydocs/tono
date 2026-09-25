@@ -3,6 +3,7 @@ import useSWR, {
   type SWRConfiguration,
   type SWRResponse,
   mutate as swrMutate,
+  useSWRConfig,
 } from 'swr'
 
 type QueryKey = string | readonly unknown[]
@@ -30,7 +31,12 @@ type QueryOptions<T> = {
 type QueryResult<T> = SWRResponse<T> & {
   isFetching: boolean
   isPending: boolean
-  refetch: () => Promise<{ data: T | undefined }>
+  /**
+   * `error` is the failure of this revalidation. SWR's mutate never rejects: on a failed
+   * fetch it resolves with the cached data, so `data` alone cannot tell "nothing new" from
+   * "the check failed".
+   */
+  refetch: () => Promise<{ data: T | undefined; error: unknown }>
 }
 
 const serializeQueryKey = (queryKey: QueryKey) => unstable_serialize(queryKey)
@@ -145,6 +151,7 @@ export function useQuery<T>(options: QueryOptions<T>): QueryResult<T> {
       ? (fallbackDataSource as () => T | undefined)()
       : fallbackDataSource
   const serializedKey = serializeQueryKey(queryKey)
+  const { cache } = useSWRConfig()
   if (enabled && fallbackData !== undefined && !queryCache.has(serializedKey)) {
     setCachedData(queryKey, fallbackData)
   }
@@ -187,10 +194,13 @@ export function useQuery<T>(options: QueryOptions<T>): QueryResult<T> {
     isPending: swr.isLoading,
     refetch: async () => {
       const data = await swr.mutate()
+      // The revalidation stored its outcome in the SWR cache: a failure sets `error`, a
+      // success clears it.
+      const error = enabled ? cache.get(serializedKey)?.error : undefined
       if (data !== undefined) {
         setCachedData(queryKey, data)
       }
-      return { data }
+      return { data, error }
     },
   }
 }

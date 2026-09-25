@@ -377,7 +377,7 @@ impl Mihomo {
         } else {
             url.clone()
         };
-        log::info!("connecting to websocket: {safe_url}, id: {id}");
+        log::debug!("connecting to websocket: {safe_url}, id: {id}");
         let manager = Arc::clone(&self.connection_manager);
 
         match ctx.protocol {
