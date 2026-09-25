@@ -8,9 +8,13 @@ Verge or LiquidClash.
 Read [docs/README.md](docs/README.md) for the document map and
 [docs/architecture.md](docs/architecture.md) for the system map.
 
-Before reviewing code or fixing a bug, read
-[docs/FINDINGS_LEDGER.md](docs/FINDINGS_LEDGER.md) to avoid re-reporting known,
-fixed or refuted findings; update its rows in the same PR that you deliver.
+Before reviewing code or fixing a bug, read the findings ledger
+(`node tooling/scripts/records.mjs findings`, which merges
+[docs/FINDINGS_LEDGER.md](docs/FINDINGS_LEDGER.md) with `docs/findings.d/`) to
+avoid re-reporting known, fixed or refuted findings. In the same PR you deliver,
+add one `docs/findings.d/<ID>.md` per new finding and update status in that
+fragment, or in the ledger table row if the ID has no fragment
+([format](docs/findings.d/README.md)).
 
 ## Two living plans
 
@@ -61,10 +65,13 @@ workspaces stay separate.
 ## Internal update record
 
 Every internal delivery with code, configuration, build/test tooling or
-release/acceptance changes must update [docs/INTERNAL_CHANGELOG.md](docs/INTERNAL_CHANGELOG.md)
-in the same PR. Follow its entry template: separate fixes from features and
-test/fixture corrections; record source/PR, actual verification, remaining
-limits, and candidate identity or explicitly no new package. Link detailed
+release/acceptance changes must add one entry file
+`docs/changelog.d/YYYY-MM-DD-<slug>.md` in the same PR (continuations edit that
+same file; [docs/INTERNAL_CHANGELOG.md](docs/INTERNAL_CHANGELOG.md) is frozen
+history). Follow the template in [docs/changelog.d/README.md](docs/changelog.d/README.md):
+separate fixes from features and test/fixture corrections; record source/PR,
+actual verification, remaining limits, and candidate identity or explicitly no
+new package. Read everything with `node tooling/scripts/records.mjs changelog`. Link detailed
 evidence instead of duplicating it. A green source PR is not a released build.
 Do not create empty entries for read-only reviews or formatting-only edits.
 

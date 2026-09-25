@@ -5,10 +5,18 @@
 还剩什么限制」。它不取代 [INTERNAL_CHANGELOG](INTERNAL_CHANGELOG.md)（交付和验证记录）、
 [SHIP_PLAN](SHIP_PLAN.md)（发布门）或 GitHub issue/PR 正文（详细分析）。
 
+## 新条目写在哪里（2026-09-25 起）
+
+新发现不再加到本页表格。每个新 ID 在 [findings.d/](findings.d/) 新建一个文件 `<ID>.md`，
+格式见 [findings.d/README.md](findings.d/README.md)。已有行的状态变化：该 ID 有分片就改分片，
+否则仍改本页表格中的原行（历史不搬家）。分片与本页同 ID 时以分片为准。合并阅读用
+`node tooling/scripts/records.mjs findings [--status open|in-PR|fixed] [--id X]`。
+下面的维护规则同样适用于分片。
+
 ## 维护规则
 
 - **同 PR 更新**：每个修复 PR、审查 PR 都要同步更新对应条目的状态和链接。
-  新发现加新行；开出 issue/PR 后把「待开」改成真实编号。
+  新发现加新分片文件；开出 issue/PR 后把「待开」改成真实编号。
 - **驳回的也要留一行**：被核实推翻、撤回或排除的结论记为 `refuted`，写一句依据，
   防止以后重复上报。重报必须给出推翻依据失效的新反例。
 - **状态值只有五种**：
