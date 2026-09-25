@@ -338,10 +338,10 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | R612-G3 | Windows 解除 FORBIDDEN 与 tombstone 写入器的快照-写盘之间有缝，已解除的 tombstone 仍可落盘 | fixed(e0b7be4a) | [#612](https://github.com/raydocs/tono/pull/612) | 低·已确认 | 36a43680 + f594995a（只在真正解除时取文件锁）；该罕见路径 sink 可能等一次写盘 |
 | H21-O-F2 | Windows 恢复 30 s 预算被 pinned 连接耗尽，系统 DNS 回退不执行 | open | [#583](https://github.com/raydocs/tono/issues/583) | 中·已确认 | 与 F1 症状重叠 |
 | H21-O-F3 = H21-C-F1 | macOS 控制面客户端无 pinned 地址/备用端口/DNS 回退 | open | [#584](https://github.com/raydocs/tono/issues/584) | 中·已确认 | |
-| H21-O-F4 | macOS「试用备用通道」提供核心不可用的 hy2，受保护重连无限循环 | open | [#585](https://github.com/raydocs/tono/issues/585) | 中·已确认 | |
+| H21-O-F4 | macOS「试用备用通道」提供核心不可用的 hy2，受保护重连无限循环 | in-PR | [#585](https://github.com/raydocs/tono/issues/585)，[#617](https://github.com/raydocs/tono/pull/617) | 中·已确认 | 备用通道按 `singBoxUnavailableReason` 过滤；prepare 拒绝计入三次暂停，PF 保持；仍请求 hy2 |
 | H21-O-F5 | macOS 每次连接首次 arm 在无 TUN 时放行 root web 端口 | open | [#586](https://github.com/raydocs/tono/issues/586) | 高·已确认 | 仅存在 DIRECT plan 时；泄漏量需实机 |
 | R604-F1 | macOS Core 重启（`/core/sync`、崩溃）期间无隧道，reviewed-bundle 放行仍在 | in-PR | [#608](https://github.com/raydocs/tono/issues/608) | 高·已确认 | 叠在 #604 上；崩溃窗口至多约 10 s；Core 运行中 utun 消失不覆盖；需实机 |
-| H21-O-F6 | macOS 控制面请求继承他人系统代理，受保护离线下被 PF 挡 | open | [#587](https://github.com/raydocs/tono/issues/587) | 中·已确认 | |
+| H21-O-F6 | macOS 控制面请求继承他人系统代理，受保护离线下被 PF 挡 | in-PR | [#587](https://github.com/raydocs/tono/issues/587)，[#617](https://github.com/raydocs/tono/pull/617) | 中·已确认 | 控制面 session 空 `connectionProxyDictionary` |
 | H21-O-F7 | 其他 VPN/TUN 未识别，失败归因错误 | open | 待开 | 中·推导(PLAUSIBLE) | #458/#468 部分覆盖 |
 | H21-O-F8 | 强制门户/TLS 拦截代理未识别 | open | 待开 | 低·推导(PLAUSIBLE) | |
 | H21-O-F9 | 系统时钟错误不被点名，保护期间无法校时 | open | [#588](https://github.com/raydocs/tono/issues/588) | 低·已确认 | Windows hy2 不拒 NTP |
