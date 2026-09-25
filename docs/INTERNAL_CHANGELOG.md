@@ -37,7 +37,7 @@
 - **归属/来源**：G2 连不上有下一手（错误可诊断）；Issue #593（总账 H20-C-F4）、#594（H20-C-F5）。
   `apps/windows/app/src-tauri/src/tono/connection/{probes,failure}.rs`、`tono/diagnostics.rs`、
   `tono/commands/diagnostics.rs`、`src/services/tono.ts`、`src/locales/{zh,en}/tono.json` 与生成的 i18n 类型。
-  基线 origin/main 5ca17af3；分支 `fix/win-wfp-error-diagnostics-20260925`（红分支 `wip/win-wfp-error-diagnostics-20260925-red`）；PR 见总账行；未合 main。
+  基线 origin/main 5ca17af3；分支 `fix/win-wfp-error-diagnostics-20260925`（红分支 `wip/win-wfp-error-diagnostics-20260925-red`）；PR [#616](https://github.com/raydocs/tono/pull/616)；未合 main。
 - **缺陷修复**：
   - #593：锁定后验证里 `verify_locked()` 失败时根本没跑 TUN 探测，却被归成 `TONO_TUN_DATA_PLANE_BROKEN`
     （「请重启电脑」），Service 的 `status.last_error` 也被丢掉。现在这类失败带新前缀 `TONO_WFP_LOCK_UNVERIFIED`，
