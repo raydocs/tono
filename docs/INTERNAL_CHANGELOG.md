@@ -32,6 +32,34 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-25 · 两端：系统时钟错误导致证书日期校验失败时点名时钟
+
+- **归属/来源**：G2 连不上有下一手（失败要说清原因）；Issue #588（总账 H21-O-F9）。基线 origin/main 630d9e66（含 #622）；
+  分支 `fix/clock-skew-classification-20260925`（红分支 `wip/clock-skew-classification-20260925-red`）；PR 待开；未合 main。
+  macOS `ControlPlanePath.swift`、`TonoAPIClient.swift`、`ProtectedConnectivity.swift`、`ProtectedConnectivityVerifier.swift`、
+  `AccountSession+Auth.swift`、`Localizable.xcstrings`；Windows `tono/transport.rs`、`tono/commands/diagnostics.rs`、
+  `services/tono.ts`、en/zh `tono.json` 与生成的 i18n 类型。
+- **缺陷修复**：#588：时钟偏差大时所有证书都显示过期或尚未生效，而保护期间 NTP 被拦，用户只看到「无法连接 Tono」或出口不可达，
+  不知道该校时。macOS：新增 `CertificateClock`，识别 URLSession 的 `NSURLErrorServerCertificateHasBadDate`/`NotYetValid`
+  及其背后的 Secure Transport/`SecTrust` 状态（pinned 路径的 `NWError.tls`）；控制面客户端改抛 `APIError.clockSkew`，pinned 路径
+  证书日期握手失败报 `serverCertificateHasBadDate`；连接后探测新增 `.clock` 类别，任一探测为 `.clock` 时保留原失败码（遥测不变），
+  只把用户文案换成时钟提示。Windows：传输层在 rustls `Expired`/`NotValidYet`（webpki 或平台校验器）错误链上加 `TONO_CLOCK_SKEW`
+  标记，`auth_error` 映射为该前缀；前端把它排在最前，出现在任何界面错误里都显示时钟文案。
+  准入选择：时钟错误仍是「收到状态行之前失败」，Windows 保持原 `TransportKind`（重试与回退规则不变），macOS `isUnreachable`
+  视为不可达，离线授权照常判定；从不当作会话拒绝（#582 sink 不变）。未新增任何 PF/WFP NTP 放行，保护不放松。
+- **新增/优化**：无。
+- **工程与测试**：两条回归，各平台一条。macOS `AccountSessionRequestTests.testACertificateTheClockCannotDateNamesTheMacClock`
+  （登录 POST 遇 `serverCertificateHasBadDate`，错误文案须含 date and time）；Windows `commands::diagnostics::tests::
+  a_certificate_the_clock_cannot_date_is_named_as_the_clock`（hyper-rustls 形状的 io::Error 链包 rustls `Expired`，
+  `auth_error` 须以 `TONO_CLOCK_SKEW: ` 开头）。红分支只含两条测试与 Windows `mark_clock_skew` 原样返回的骨架，预期以断言失败。
+- **验证**：未在本机编译或运行 Swift/Rust（执行位置规则）；编译、XCTest、`cargo test` 以 PR CI `macos-26`/`windows-2025` 为准。
+  本机仅运行 `node scripts/generate-i18n-keys.mjs`（生成类型只多出新键）与 locale/xcstrings JSON 解析检查。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：Network.framework 对证书日期失败实际给出的 `NWError.tls` 状态（-9814/-9815/-67818/-67819）未实机确认；
+  若系统报为通用信任失败则仍显示原文案。macOS 在离线授权下进入 Ready 时不单独提示时钟（仅连接后探测与无授权失败时提示）；
+  系统 DNS 路径报时钟错误而 pinned 路径随后仅超时时，最终错误按不可达显示。保护期间仍无法自动校时（产品决定，另议）。
+  Windows 连接后探测未改。
+
 ## 2026-09-25 · macOS：控制面请求系统 DNS 失败时改走 pinned 地址
 
 - **归属/来源**：G2 连不上有下一手（控制面域名被污染时仍能登录、恢复）；Issue #584（总账 H21-O-F3 = H21-C-F1）。
