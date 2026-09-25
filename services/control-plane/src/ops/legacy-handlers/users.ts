@@ -4,6 +4,7 @@ import {
   type Row,
   now,
   str,
+  tailscaleEnrollmentEnabled,
 } from '../../env';
 import {
   bumpCatalogRevision,
@@ -414,6 +415,11 @@ export async function patchOpsUser(req: Request, e: Env, actor: { email: string 
   ) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'status, expiresAt, notes, contact, plan, wechatId or resetUsage is required');
   }
+  // Tailnet revocation jobs only run while enrollment is on. With it paused
+  // they stay queued (the node really is still on the tailnet), so waiting on
+  // them would refuse the re-enable forever; they are recorded on the audit
+  // line instead, and the per-device enrollment fence still holds them.
+  let queuedTailnetRevocations = 0;
   if (status === 'active') {
     const residual = await e.DB.prepare(
       `SELECT
@@ -426,11 +432,15 @@ export async function patchOpsUser(req: Request, e: Env, actor: { email: string 
        FROM users WHERE users.id = ?`,
     ).bind(mt[1], mt[1], mt[1]).first<Row>();
     if (!residual) throw new ApiError(404, 'NOT_FOUND', 'User not found');
+    const enrollmentEnabled = tailscaleEnrollmentEnabled(e);
     if (
       residual.current_status !== 'active' &&
-      ((residual.live_devices ?? 0) > 0 || (residual.pending_jobs ?? 0) > 0)
+      ((residual.live_devices ?? 0) > 0 || (enrollmentEnabled && (residual.pending_jobs ?? 0) > 0))
     ) {
       throw new ApiError(409, 'REVOCATION_PENDING', 'Wait for tailnet device revocation before re-enabling this user');
+    }
+    if (residual.current_status !== 'active' && !enrollmentEnabled) {
+      queuedTailnetRevocations = Number(residual.pending_jobs ?? 0);
     }
   }
   if (b.plan !== undefined && b.plan !== null && b.plan !== '' && b.plan !== PRODUCT_CLAUDE) {
@@ -485,6 +495,13 @@ export async function patchOpsUser(req: Request, e: Env, actor: { email: string 
   ].filter((name): name is string => name !== null);
   if (changedFields.length) {
     await writeOpsAudit(e, actor.email, 'user.update', 'user', mt[1], `changed ${changedFields.join(', ')}`);
+  }
+  if (queuedTailnetRevocations > 0) {
+    await writeOpsAudit(
+      e, actor.email, 'user.tailnet-revocation-queued', 'user', mt[1],
+      `re-enabled with ${queuedTailnetRevocations} tailnet node revocation(s) still queued; `
+        + 'they run when Tailscale enrollment is turned back on',
+    );
   }
   await deps.enforceUser(e, mt[1]);
   return Response.json({ ok: true });

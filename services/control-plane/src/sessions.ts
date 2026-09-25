@@ -1,6 +1,7 @@
 import { jwtSign, randomToken, sha256 } from './crypto';
 import { type Env, type Row, now, id, envInt, requiredSecret } from './env';
 import { ApiError } from './errors';
+import { recordClient } from './client-identity';
 
 // Long enough to cover a 45 s request timeout plus the clients' next five-minute
 // sync, short enough that an old copy of a rotated token is not a standing credential.
@@ -60,7 +61,7 @@ export async function tokens(
   };
 }
 
-export async function refreshSession(e: Env, raw: string) {
+export async function refreshSession(e: Env, req: Request, raw: string) {
   const t = now();
   const session = (where: string, key: string) => e.DB.prepare(
     `SELECT sessions.*, users.status user_status, users.quota_bytes, users.usage_bytes, users.expires_at user_expires_at,
@@ -92,9 +93,12 @@ export async function refreshSession(e: Env, raw: string) {
   ) {
     throw new ApiError(401, 'INVALID_REFRESH_TOKEN', 'Invalid or expired refresh token');
   }
-  return tokens(e, s.user_id, s.device_id, s.installation_id, {
+  const issued = await tokens(e, s.user_id, s.device_id, s.installation_id, {
     from: s.id,
     replay,
     also: [e.DB.prepare('UPDATE devices SET last_seen_at = ?, updated_at = ? WHERE id = ?').bind(t, t, s.device_id)],
   });
+  // Only after the rotation committed, as on the pre-#329 path (#578).
+  await recordClient(e, req, String(s.device_id));
+  return issued;
 }

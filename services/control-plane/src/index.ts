@@ -23,6 +23,7 @@ import { consumeRateLimit } from './ops/ingest-limits';
 import { opsIngestRoutes } from './ops/ingest';
 import { tokenAdminWrite } from './ops/token-admin';
 import { ApiError } from './errors';
+import { recordClient } from './client-identity';
 import { parseBytesRange } from './http';
 import {
   type Env,
@@ -991,14 +992,11 @@ async function accountForOidcIdentity(
   }
 }
 
-async function completePasswordlessAuth(
-  e: Env,
-  user: Row,
-  deviceName: string,
-  installationId: string,
-) {
+async function completePasswordlessAuth(e: Env, req: Request, user: Row, deviceName: string, installationId: string) {
   if (ineligible(user)) throw new ApiError(403, 'USER_DISABLED', 'User is disabled');
-  return authResult(e, user, await ensureDevice(e, user.id, deviceName, installationId));
+  const device = await ensureDevice(e, user.id, deviceName, installationId);
+  await recordClient(e, req, String(device.id));
+  return authResult(e, user, device);
 }
 
 // --- Tokens / devices ---------------------------------------------------------
@@ -2328,7 +2326,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       String(claimed.email).toLowerCase(),
     );
     return Response.json(await completePasswordlessAuth(
-      e,
+      e, req,
       user,
       String(claimed.device_name),
       String(claimed.installation_id),
@@ -2425,7 +2423,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     }
     const user = await accountForOidcIdentity(e, identity);
     return Response.json(await completePasswordlessAuth(
-      e,
+      e, req,
       user,
       String(reserved.device_name),
       String(reserved.installation_id),
@@ -2445,7 +2443,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
 
   if (p === '/api/v1/auth/refresh' && m === 'POST') {
     const b = await body(req, 4 * 1024);
-    return Response.json(await refreshSession(e, str(b.refreshToken, 'refreshToken', 20, 500)));
+    return Response.json(await refreshSession(e, req, str(b.refreshToken, 'refreshToken', 20, 500)));
   }
 
   if (p === '/api/v1/auth/logout' && m === 'POST') {
@@ -2477,6 +2475,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
 
   if (p === '/api/v1/exit-catalog' && m === 'GET') {
     const a = await auth(req, e);
+    await recordClient(e, req, a.deviceId);
     return Response.json(await publicManagedCatalog(e, {
       userId: a.userId, deviceId: a.deviceId, filterHomeExits: true,
       hy2AcceptHeader: req.headers.get('X-Tono-Accept'),

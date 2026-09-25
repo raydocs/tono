@@ -673,6 +673,65 @@ describe('ops v1 api', () => {
     expect(detail.notes).toBe('vip');
   });
 
+  it('close reclaims nothing when disabling the account fails', async () => {
+    await seedUser();
+    await db().prepare("INSERT INTO signup_allowlist(email, created_at) VALUES('a@example.com', ?)").bind(NOW).run();
+    await db().prepare(
+      `INSERT INTO product_accounts(id, user_id, account_ref, status, opened_at, created_at, updated_at)
+       VALUES('pa-1', 'u-1', 'acct-close@example.com', 'assigned', ?, ?, ?)`,
+    ).bind(NOW, NOW, NOW).run();
+    await db().prepare(
+      `CREATE TRIGGER test_fail_close_disable BEFORE UPDATE OF status ON users
+       WHEN NEW.status = 'disabled' BEGIN SELECT RAISE(ABORT, 'injected'); END`,
+    ).run();
+    try {
+      const closed = await ops('users/u-1/close', json({ reason: 'refund' }));
+      expect(closed.status).toBe(500);
+    } finally {
+      await db().prepare('DROP TRIGGER IF EXISTS test_fail_close_disable').run();
+    }
+    const account = await db().prepare("SELECT status FROM product_accounts WHERE id = 'pa-1'")
+      .first<{ status: string }>();
+    expect(account?.status).toBe('assigned');
+    const allowlisted = await db().prepare("SELECT email FROM signup_allowlist WHERE email = 'a@example.com'")
+      .first<{ email: string }>();
+    expect(allowlisted?.email).toBe('a@example.com');
+    const user = await db().prepare("SELECT status FROM users WHERE id = 'u-1'").first<{ status: string }>();
+    expect(user?.status).toBe('active');
+  });
+
+  it('re-enables a user while enrollment is paused and keeps the unrun tailnet revocation queued and audited', async () => {
+    const e = env as unknown as Env;
+    const enrollment = e.TAILSCALE_ENROLLMENT_ENABLED;
+    e.TAILSCALE_ENROLLMENT_ENABLED = 'false';
+    try {
+      await seedUser();
+      await db().prepare("UPDATE users SET status = 'disabled' WHERE id = 'u-1'").run();
+      await db().prepare(
+        `INSERT INTO devices(id, user_id, installation_id, name, status, tailscale_node_id, created_at, updated_at)
+         VALUES('d-1', 'u-1', 'i-1', 'Mac', 'revoked', 'mgmt-legacy', ?, ?)`,
+      ).bind(NOW, NOW).run();
+      await db().prepare(
+        `INSERT INTO revocation_jobs(id, device_id, tailscale_node_id, created_at, reason)
+         VALUES('job-1', 'd-1', 'mgmt-legacy', ?, 'device_revoked')`,
+      ).bind(NOW).run();
+
+      const restored = await ops('users/u-1', json({ status: 'active' }, 'PATCH'));
+      expect(restored.status).toBe(200);
+      const user = await db().prepare("SELECT status FROM users WHERE id = 'u-1'").first<{ status: string }>();
+      expect(user?.status).toBe('active');
+      const job = await db().prepare("SELECT completed_at FROM revocation_jobs WHERE id = 'job-1'")
+        .first<{ completed_at: number | null }>();
+      expect(job?.completed_at).toBeNull();
+      const audit = await db().prepare(
+        "SELECT summary FROM ops_audit WHERE action = 'user.tailnet-revocation-queued' AND target_id = 'u-1'",
+      ).first<{ summary: string }>();
+      expect(audit?.summary).toContain('1 tailnet node revocation(s) still queued');
+    } finally {
+      e.TAILSCALE_ENROLLMENT_ENABLED = enrollment;
+    }
+  });
+
   it('incidents list, detail, ack, snooze, resolve, notes', async () => {
     await db().prepare(
       `INSERT INTO ops_incidents(

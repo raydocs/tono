@@ -32,6 +32,44 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-25 · 运维：控制面部署 f5c31d58；exit-agent #624 上 14 个节点；Tokyo · Sakura 换 IP 后接入
+- 归属：ops 任务（控制面部署、出口计量与吊销）；不改客户端。
+- 来源：main `f5c31d58`（含 #624）；无代码改动，本条只记录运维动作，详细见
+  [舰队 exit-agent 接入记录 · 续记 2026-09-25](reports/FLEET_EXIT_AGENT_ROLLOUT_2026-09-24.md) 与
+  [runbook §0.1 第十五次](ops/rollout-ops2.md)。
+- 缺陷修复：TF-opus-4/8（#624）在节点上生效；`Tokyo · Sakura` 因换 IP 对客户不可达 → 已迁到 Xray 26.3.27 新布局并登记、
+  agent 运行（目录 IP 仍待修，见剩余限制）。
+- 新增/优化：无。
+- 工程与测试：无。
+- 验证：部署脚本内 control-plane 测试 892 通过；`/api/v1/system/version` = `f5c31d58`；D1 迁移至 0081；14 个节点 ACK ≤ 62 秒；
+  各节点手动一轮 `result=success`；Sakura 443 外部可达、API 应答。未做客户端实机连接验证，未在 preview 演练迁移。
+- 候选/发布：仅运维，无新候选。
+- 剩余限制：目录中 Sakura 仍为旧 IP（需受审计 catalog PUT，与 #570 部署后的 revision bump 合并）；hub
+  `nodes.secrets.json` 的 Sakura 条目仍为旧 IP；#570 未部署。
+
+## 2026-09-25 · exit-agent：停用轮保留最后计数；hy2 出错不再跳过 Xray 吊销
+
+- **归属/来源**：ops 任务（出口计量与吊销，#563 合并车审查后续）；Issue #600 的 TF-opus-4 与 TF-opus-8（其余条目仍开）。
+  基线 origin/main 13983688；分支 `fix/exit-agent-disable-counters-hy2-20260925`（红分支 `wip/exit-agent-disable-counters-hy2-20260925-red`）；
+  PR [#624](https://github.com/raydocs/tono/pull/624)；未合 main。只改 `services/exit-agent/reconcile_and_report.py`、其测试与 README。
+- **缺陷修复**：TF-opus-4：控制面答复 `EXIT_NODE_DISABLED` 的停用轮只撤客户端、不读计数，上次正常轮到停机之间的流量丢失
+  （1000→1500 仍记 1000）。改后：撤除完成（或失败）后再尽力读一次计数（同一 Xray 进程代际），折入本地状态总量，由下一次可上报的轮次报出；
+  计数读取或状态写入失败只追加到拒绝说明里，永不阻挡或替换撤除结果。TF-opus-8：hy2 目录权限不对或 allowlist 缺失时在 Xray 对账前就抛出，
+  该轮 Xray 吊销 0、计数 0、无 ACK。改后：先记下 hy2 错误，照常做 Xray 对账与计数读取并存入状态，再以 hy2 错误拒绝本轮，不发 roster/计量 ACK、
+  不上报用量，控制面仍视该节点未收敛。停用轮与 hy2 失败轮与控制面不可达轮共用新提取的 `keep_usage_locally`（行为同原不可达轮）。
+  续：adca10ac 把 hy2 的文件系统 `OSError` 也按 hy2 失败处理；增量审查（jev-route f4e3ecab，Opus 发现、Codex 核实）指出停用轮
+  `withdraw_disabled_node` 仍只接 `Refusal`，`OSError` 会跳过 Xray 撤除，已同样处理（仍以 hy2 错误拒绝该轮）。
+- **新增/优化**：无。
+- **工程与测试**：两条回归：`test_a_disabled_round_still_folds_the_final_counter_sample`（新增）；
+  `test_a_failed_hy2_publish_still_revokes_xray_and_keeps_usage_but_is_never_acknowledged` 替换原
+  `test_a_failed_hy2_publish_is_never_acknowledged`（原测试断言「hy2 失败不做 Xray 对账、不写状态」，正是本缺陷）；`run_round` 增加 `counters` 参数；
+  `test_a_hy2_filesystem_error_still_withdraws_xray_clients`（停用轮，修复前断言失败）。
+- **验证**：本机 `cd services/exit-agent && python3 -m pytest -q`：红分支两条新测试均以断言失败（2 failed, 90 passed）；修复分支 92 passed；停用轮续修后 93 passed（新测试在修复前失败）。
+  `python3 services/exit-agent/test_reconcile_and_report.py`（CI 同命令）续修后（c82ac4aa）93 OK。未在任何节点运行。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：**节点需部署新 agent 才生效（运维步骤，本 PR 未做，未 SSH、未部署）**。停用轮的计数由下一次能上报的轮次报出；
+  节点被永久退役则这段用量仍不会上报。#600 的 TF-opus-3/5/6/7 未处理。
+
 ## 2026-09-25 · 两端：系统时钟错误导致证书日期校验失败时点名时钟
 
 - **归属/来源**：G2 连不上有下一手（失败要说清原因）；Issue #588（总账 H21-O-F9）。基线 origin/main 630d9e66（含 #622）；
@@ -379,6 +417,93 @@
   - 验证：本机 worktree `services/control-plane`：`npm test`（`vitest run`）43 个文件 921 个用例通过。
     未部署，未碰远端 D1，无原生构建。
   - 候选/发布：无新包，仅源码。
+
+## 2026-09-24 · 控制面按设备记录客户端版本（X-Tono-Client）
+
+- **归属/来源**：G1–G3 候选验收的现场证据（ops 可见性）；影响控制面 Worker 与 macOS/Windows 请求头。
+  所有者决定 2026-09-24（内部版默认开启分类连接失败遥测）的配套项。基线 origin/main
+  [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b)，分支 `fix/cp-client-version-20260924`，Issue #574，未合 main。
+- **缺陷修复**：无。
+- **新增/优化**：此前登录（邮箱/OIDC verify）、`auth/refresh`、`exit-catalog` 只更新 `last_seen_at`，客户端版本只存在于
+  默认关闭的遥测窗口/失败上报里，D1 无法回答设备跑 0.0.72 还是 0.0.73。现在两端每个控制面请求带
+  `X-Tono-Client: <macos|windows>/<版本>`，Worker 严格解析（仅 macos/windows，版本 ≤40 字符且只含
+  `[0-9A-Za-z.+-]`，其余忽略），在这三处写入 `devices.client_platform` / `client_version`，值不变时不写行。
+  新 migration `0092_device_client_version.sql`（仅加两列 + CHECK；合并时如编号被占按顺序重编号）。
+  不新增账号、网络或自由文本数据；缺头或格式不符保持上次值。
+- **工程与测试**：`index.ts` 行数预算不变（登录函数签名收成一行抵消新增调用）。
+- **验证**：本机 `services/control-plane` `npx vitest run test/worker.test.ts -t "records the client build"`：旧代码红
+  （无列 `no such column: client_platform`；仅加 migration 时读到 `null`），修复后绿；全量 `npx vitest run` 43 文件
+  892 用例通过，`npx tsc --noEmit` 通过。macOS/Windows 请求头改动未在本机编译，以 PR CI 为准。
+- **候选/发布**：无新包，仅源码；未部署 Worker，未对远端 D1 执行 migration。
+- **剩余限制**：运维控制台尚未展示这两列；旧客户端不带头，其设备保持 NULL 直到升级；与 #329（refresh 移入
+  `sessions.ts`）合并时需把 refresh 处的记录调用随之移动。
+
+## 2026-09-24 · ops 控制台：到期/超额会撤销设备，续期后要逐台重新登录（文案改为实情）
+
+- **归属/来源**：ops 客户生命周期（ops 控制台文案 + 控制面回归）；内部审查 H17-O-F3，
+  Issue [#530](https://github.com/raydocs/tono/issues/530)；基线 origin/main `8dc79a5b`，
+  分支 `fix/expiry-revoke-copy-20260924`；未合 main。临时产品决定（2026-09-24，待 `docs/DECISIONS.md` 统一补录）：
+  保留到期/超额撤销，续期或清零不自动恢复，每台设备重新登录后恢复。
+- **缺陷修复**：到期后 cron 一个周期内、超额上报时立即撤销名下全部设备、会话与设备级出口凭据，
+  续期/清零只改 `users`，原刷新令牌仍 401；控制台却写「到期只挡登录和取目录，不删数据，也不撤设备」。
+  改后：改到期抽屉说明、设到期/续 30 天/批量续期/改账务/清零用量的确认文案都写明设备会被撤销、
+  续期或清零后要请客户在每台设备上重新登录。Worker 行为不变。
+- **新增/优化**：无。
+- **工程与测试**：`test/worker.test.ts` 新增一个 `it`：到期 → `scheduled` → 设备 `revoked`、凭据删除 →
+  续期后原刷新令牌仍 401 → 同一安装重新登录复用同一设备、`me` 200、凭据重新生成。它钉住文案承诺的
+  现有行为，在旧代码上同样通过（本项不改 Worker 行为，没有红灯阶段）。
+- **验证**：本机 MacBook control-plane `npx vitest run test/worker.test.ts`、`npm run typecheck`；
+  ops-console `npm run typecheck`、`npx vitest run`（26 文件 / 310 用例通过）、文案文件 eslint。
+- **候选/发布**：仅源码，无新候选；未部署。
+- **剩余限制**：客户端靠被拒的会话得知（macOS Suspended 文案含「退出再登录」；Windows 见 #460/#515）；
+  具名原因码由单独的权益码改动负责，本 PR 不改 `auth.ts`、刷新语义或客户端。
+- **续记（2026-09-24，双厂商评审 531-O-F1 ≈ 531-C-F1）**：「已经到期过」不能推出「设备已被撤销」（cron 前续期、
+  逐台撤销中途续期都不会撤销或只撤一部分），且设到期、取消到期两个确认原先没提已撤销的设备。文案改为按实际状态的
+  条件句「若有设备已因到期/超额被撤销，续期/改日期/取消到期/清零不会恢复它们，要请客户在这些设备上重新登录」，
+  覆盖改到期抽屉说明、续 30 天、设到期、取消到期、批量续期、改账务、清零用量；ops-console typecheck、
+  eslint、vitest（310 用例）通过。
+
+## 2026-09-24 · 控制面：Tailscale 注册暂停时，未跑的 tailnet 吊销不再永久挡住账户恢复
+
+- **归属/来源**：ops 客户生命周期（控制面 Worker）；内部审查 H17-O-F5 / H17-G-F2，
+  Issue [#522](https://github.com/raydocs/tono/issues/522)；基线 origin/main `059a2ea2`，
+  分支 `fix/tailnet-revoke-reenable-20260924`；未合 main。
+- **缺陷修复**：生产 `TAILSCALE_ENROLLMENT_ENABLED=false` 时 `processRevocations` 直接返回，
+  停用/销户时为带 `tailscale_node_id` 的设备记下的 `revocation_jobs` 永远不完成；ops
+  `PATCH users/{id}` 与 token-admin `PATCH admin/users/{id}` 的恢复检查把这些任务算作「吊销进行中」，
+  恢复永久返回 409 `REVOCATION_PENDING`。改后：注册暂停时排队任务不再挡恢复（仍有 live 设备照旧 409）；
+  任务保持未完成，不伪装成已吊销，注册重新打开后照常执行；设备级注册围栏
+  （`issueEnrollment`）不变；ops 恢复时写审计 `user.tailnet-revocation-queued` 记下排队数。
+- **新增/优化**：无。
+- **工程与测试**：`test/ops-api.test.ts` 新增一个 `it`（注册关闭、已停用用户带排队任务 → 恢复 200、
+  任务仍未完成、审计行存在）；旧代码上实跑失败（`expected 409 to be 200`）。
+- **验证**：本机 MacBook `npx vitest run test/ops-api.test.ts`（39/39 通过）、
+  `test/worker.test.ts -t "re-enable|revocation|tailnet"`（11 通过）、`test/index-size.test.ts`、
+  `npm run typecheck`；完整套件以 PR CI 为准。
+- **候选/发布**：仅源码，无新候选；未部署。
+- **剩余限制**：未查生产 D1 中是否仍有带 `tailscale_node_id` 的设备行；注册暂停期间这些 tailnet
+  节点确实仍在 tailnet 上（审计行只是记录，不是撤销）。token-admin 路径无操作者身份，只放宽检查不写审计；
+  与 #406（把该处理器移出 `index.ts`）相邻冲突，后合者需把同一条件带过去。
+
+## 2026-09-24 · 控制面：销户改为单个 D1 事务，中途失败不再留下「资源已回收、VPN 仍可用」
+
+- **归属/来源**：ops 客户生命周期（控制面 Worker）；内部审查 H17-C-F2，
+  Issue [#524](https://github.com/raydocs/tono/issues/524)；基线 origin/main `059a2ea2`，
+  分支 `fix/refund-close-atomic-20260924`；未合 main。
+- **缺陷修复**：`POST ops/users/{id}/close` 原先分多次独立提交（解绑家宽 → 目录版本 → 退役 Claude 号
+  与事件 → 删 allowlist → 最后才 `disabled`），任一步之后失败都会保留已回收的资源而用户仍 `active`，
+  鉴权与出口名单照常放行，cron 也不会补完。改后：停用与全部回收放进同一个 `DB.batch`（一个事务），
+  停用排第一；要么全部生效，要么全部回滚。目录版本只在确实删掉绑定时递增、产品事件只在确实退役时写入
+  （`changes() > 0`，与原来的条件一致）。设备/会话撤销仍在 batch 之后由 `enforceUser` 执行，
+  账户已停用时鉴权与名单立即拒绝，遗留部分由 cron 补完。
+- **新增/优化**：无。
+- **工程与测试**：`test/ops-api.test.ts` 新增一个 `it`：用测试触发器让「停用」写入失败，断言 Claude 号
+  仍为 `assigned`、allowlist 仍在、用户仍 `active`。旧代码上实跑失败（`expected 'retired' to be 'assigned'`）。
+- **验证**：本机 MacBook `npx vitest run`（control-plane 全套 43 文件 / 892 用例通过）、
+  `npm run typecheck`；另用一次性临时用例（未提交）确认目录版本递增与产品事件在成功路径上只发生一次。
+- **候选/发布**：仅源码，无新候选；未部署。
+- **剩余限制**：家宽 SOCKS5 口令轮换标记属 #381，不在本 PR；与同批的「销户保留原因」修复
+  改同一处理器，后合者需按本 PR 的 batch 结构 rebase。
 
 ## 2026-09-24 · Windows 候选包构建：私有解包分支写出 live `Tono.exe`，载荷门拒绝
 

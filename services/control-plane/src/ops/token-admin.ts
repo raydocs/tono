@@ -3,7 +3,7 @@
 // with actor `token-admin`, like the Access console's equivalent writes.
 import { randomToken, sha256 } from '../crypto';
 import { ApiError } from '../errors';
-import { type Env, type Row, now, id } from '../env';
+import { type Env, type Row, now, id, tailscaleEnrollmentEnabled } from '../env';
 import { rejectUnexpectedKeys, body, email } from '../request';
 import { writeOpsAudit } from '../product-account';
 
@@ -107,7 +107,7 @@ export async function tokenAdminWrite(
       if (!residual) throw new ApiError(404, 'NOT_FOUND', 'User not found');
       if (
         residual.current_status !== 'active' &&
-        ((residual.live_devices ?? 0) > 0 || (residual.pending_jobs ?? 0) > 0)
+        ((residual.live_devices ?? 0) > 0 || (tailscaleEnrollmentEnabled(e) && (residual.pending_jobs ?? 0) > 0))
       ) {
         throw new ApiError(409, 'REVOCATION_PENDING', 'Wait for tailnet device revocation before re-enabling this user');
       }
