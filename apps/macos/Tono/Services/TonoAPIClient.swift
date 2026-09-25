@@ -104,7 +104,7 @@ actor TonoAPIClient {
     private let pinnedPath: ControlPlanePath?
     /// #584: the pinned addresses answered where the system resolver failed,
     /// so later requests try them first. Cleared when a preferred attempt
-    /// fails or is cancelled. Process memory only, like the Windows
+    /// fails, is cancelled or its body fails. Process memory only, like the Windows
     /// client's learned preference (#583).
     private var prefersPinnedAddresses = false
     private let keychain: KeychainStore
@@ -854,8 +854,14 @@ actor TonoAPIClient {
             if index > 0 { try Self.requireCurrent(requestIsCurrent) }
             do {
                 let answer = try await path.exchange(request, maximumResponseBytes)
-                // The pins answered where the system resolver could not.
-                if index > 0, !pinnedFirst { prefersPinnedAddresses = true }
+                if answer.bodyFailure != nil {
+                    // A body that failed after the status line, or was
+                    // cancelled, neither keeps nor earns the preference.
+                    if index == 0, pinnedFirst { prefersPinnedAddresses = false }
+                } else if index > 0, !pinnedFirst {
+                    // The pins answered where the system resolver could not.
+                    prefersPinnedAddresses = true
+                }
                 return (answer, path.label)
             } catch {
                 // A preferred attempt that fails or is cancelled puts the

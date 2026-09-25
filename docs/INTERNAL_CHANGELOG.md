@@ -43,8 +43,9 @@
   已连接时也照旧先走系统 DNS）；只有它在收到状态行前传输失败、且 `shouldRetry` 允许重放（GET 任何失败；POST/DELETE 仅限未建立连接）
   时，才改走 pinned：Network.framework TLS 直连 helper PF 为 API 主机放行的地址（编译进来的 `TonoAPIBootstrapAddresses`，再加受保护解析学到的地址），
   SNI 为真实主机名，证书仍由系统默认信任评估按该主机名校验，没有自定义校验块；不走代理；HTTP/1.1 `Connection: close`；
-  TCP+TLS 共 10 s、按地址平分；响应上限 2 MiB。收到状态行即是回答，不会在另一条路径重发。pinned 在系统 DNS 失败后答复时，
-  后续请求先走 pinned（对应 Windows 学到的首选），该首选尝试失败或取消即恢复系统 DNS 在前（仅进程内存）。新 HTTP/1.1 客户端
+  TCP+TLS 共 10 s、按地址平分；响应上限 2 MiB。收到状态行即是回答，不会在另一条路径重发；pinned 路径状态行一完整即记下，
+  其后头部/正文中断、超时或请求被取消，仍按该状态交给 #582 判定（非 2xx 按状态报错，不当作不可达）。pinned 在系统 DNS 失败后
+  完整答复时，后续请求先走 pinned（对应 Windows 学到的首选），该首选尝试失败、取消或正文失败即恢复系统 DNS 在前（仅进程内存）。新 HTTP/1.1 客户端
   未经实机验证，因此只作回退、不作主路径。#582 判定、#587 无代理、凭据代际守卫不变；成功/拒绝审计事件增加 `path`，
   换路径时记 `control_plane_path_failed`。
 - **新增/优化**：无。

@@ -243,7 +243,8 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
                 self.start(continuation, connectBudget: connectBudget, exchangeBudget: exchangeBudget)
             }
         } onCancel: {
-            self.finish(.cancelled)
+            // The parse state lives on `queue`.
+            self.queue.async { self.finish(self.cancellation()) }
         }
     }
 
@@ -355,9 +356,19 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
         }
     }
 
+    /// A cancelled exchange keeps a status line that already arrived, so a
+    /// refusal still reaches the session verdict (#582) as it does on the
+    /// system path. Before one, it is only cancelled.
+    private func cancellation() -> PinnedOutcome {
+        if case let .answered(answer) = ending(with: CancellationError()) {
+            return .answered(answer)
+        }
+        return .cancelled
+    }
+
     /// The outcome when the exchange stops here with `error`. Once a status
     /// line has arrived it is the server's answer, whatever follows (#582).
-    private func ending(with error: URLError) -> PinnedOutcome {
+    private func ending(with error: any Error) -> PinnedOutcome {
         guard connected else { return .notConnected(error.localizedDescription) }
         switch PinnedResponse.interpret(received, atEnd: false, limit: maximumResponseBytes) {
         case let .complete(status, body):
@@ -388,43 +399,59 @@ nonisolated private enum PinnedResponse {
         let bytes = [UInt8](received)
         var start = 0
         while true {
-            guard let headEnd = find([13, 10, 13, 10], in: bytes, from: start) else {
+            // The status is the server's answer as soon as its line is
+            // complete (#582): a header block that never finishes, or fails
+            // to parse, still surfaces as that status.
+            guard let lineEnd = find([13, 10], in: bytes, from: start) else {
                 return bytes.count - start > headLimit
                     ? .malformedHead : .incomplete(status: nil, body: Data())
             }
+            guard let status = parseStatusLine(bytes[start..<lineEnd]) else { return .malformedHead }
+            // An interim response such as 103 is not the answer; the final
+            // one follows it.
+            let interim = (100..<200).contains(status)
+            let unreadable: Reading = interim ? .malformedHead : .malformedBody(status: status, body: Data())
+            guard let headEnd = find([13, 10, 13, 10], in: bytes, from: lineEnd) else {
+                return bytes.count - start > headLimit
+                    ? unreadable : .incomplete(status: interim ? nil : status, body: Data())
+            }
             guard headEnd - start <= headLimit,
-                  let head = parseHead(bytes[start..<headEnd]) else { return .malformedHead }
+                  let headers = parseHeaders(bytes[min(lineEnd + 2, headEnd)..<headEnd]) else {
+                return unreadable
+            }
             let bodyStart = headEnd + 4
-            if (100..<200).contains(head.status) {
-                // An interim response such as 103; the final one follows.
-                guard head.status != 101 else { return .malformedHead }
+            if interim {
+                guard status != 101 else { return .malformedHead }
                 start = bodyStart
                 continue
             }
             return readBody(
-                status: head.status, headers: head.headers,
+                status: status, headers: headers,
                 body: bytes[bodyStart...], atEnd: atEnd, limit: limit
             )
         }
     }
 
-    private static func parseHead(_ bytes: ArraySlice<UInt8>) -> (status: Int, headers: [String: String])? {
-        var lines = String(decoding: bytes, as: UTF8.self).components(separatedBy: "\r\n")
-        guard !lines.isEmpty else { return nil }
-        let statusLine = lines.removeFirst()
-        let parts = statusLine.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: false)
+    private static func parseStatusLine(_ bytes: ArraySlice<UInt8>) -> Int? {
+        let parts = String(decoding: bytes, as: UTF8.self)
+            .split(separator: " ", maxSplits: 2, omittingEmptySubsequences: false)
         guard parts.count >= 2, parts[0].hasPrefix("HTTP/1."), parts[1].count == 3,
               parts[1].allSatisfy(\.isASCII), let status = Int(parts[1]),
               (100...599).contains(status) else { return nil }
+        return status
+    }
+
+    private static func parseHeaders(_ bytes: ArraySlice<UInt8>) -> [String: String]? {
         var headers: [String: String] = [:]
-        for line in lines {
+        guard !bytes.isEmpty else { return headers }
+        for line in String(decoding: bytes, as: UTF8.self).components(separatedBy: "\r\n") {
             guard let colon = line.firstIndex(of: ":") else { return nil }
             let name = line[..<colon].trimmingCharacters(in: .whitespaces).lowercased()
             let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
             guard !name.isEmpty else { return nil }
             headers[name] = headers[name].map { "\($0), \(value)" } ?? value
         }
-        return (status, headers)
+        return headers
     }
 
     private static func readBody(
