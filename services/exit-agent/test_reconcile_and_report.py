@@ -853,6 +853,18 @@ class RosterControlSignals(unittest.TestCase):
         self.assertEqual([client["email"] for client in clients], ["operator"])
 
 
+class DisabledNodeWithdrawal(unittest.TestCase):
+    def test_a_hy2_filesystem_error_still_withdraws_xray_clients(self) -> None:
+        # A disabled node must pull every Xray client even when the hy2 allowlist
+        # cannot be rewritten; the hy2 failure is still reported.
+        with patch.object(agent, "sync_hy2_roster", side_effect=PermissionError("injected lstat failure")), \
+             patch.object(agent, "installed_clients", return_value={"tono-usr_1"}), \
+             patch.object(agent, "reconcile", return_value=(0, 2, set())) as reconcile:
+            with self.assertRaisesRegex(agent.Refusal, "injected lstat failure"):
+                agent.withdraw_disabled_node(Path("/unused/xray"), {}, "127.0.0.1:1", "tag", None)
+        reconcile.assert_called_once()
+
+
 class Hy2RosterAuthorization(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()

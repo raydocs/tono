@@ -1416,6 +1416,9 @@ def withdraw_disabled_node(binary: Path, commands: dict[str, str], address: str,
         sync_hy2_roster([])
     except Refusal as error:
         failures.append(str(error))
+    except OSError as error:
+        # As in a normal round: a hy2 filesystem failure must not skip the Xray withdrawal.
+        failures.append(f"hy2 roster not withdrawn: {error}")
     listed = installed_clients(binary, commands, address, tag)
     inventory = listed if listed is not None else recorded
     # shared-legacy lives in the static config and is never recorded, so it is

@@ -42,11 +42,14 @@
   计数读取或状态写入失败只追加到拒绝说明里，永不阻挡或替换撤除结果。TF-opus-8：hy2 目录权限不对或 allowlist 缺失时在 Xray 对账前就抛出，
   该轮 Xray 吊销 0、计数 0、无 ACK。改后：先记下 hy2 错误，照常做 Xray 对账与计数读取并存入状态，再以 hy2 错误拒绝本轮，不发 roster/计量 ACK、
   不上报用量，控制面仍视该节点未收敛。停用轮与 hy2 失败轮与控制面不可达轮共用新提取的 `keep_usage_locally`（行为同原不可达轮）。
+  续：adca10ac 把 hy2 的文件系统 `OSError` 也按 hy2 失败处理；增量审查（jev-route f4e3ecab，Opus 发现、Codex 核实）指出停用轮
+  `withdraw_disabled_node` 仍只接 `Refusal`，`OSError` 会跳过 Xray 撤除，已同样处理（仍以 hy2 错误拒绝该轮）。
 - **新增/优化**：无。
 - **工程与测试**：两条回归：`test_a_disabled_round_still_folds_the_final_counter_sample`（新增）；
   `test_a_failed_hy2_publish_still_revokes_xray_and_keeps_usage_but_is_never_acknowledged` 替换原
-  `test_a_failed_hy2_publish_is_never_acknowledged`（原测试断言「hy2 失败不做 Xray 对账、不写状态」，正是本缺陷）；`run_round` 增加 `counters` 参数。
-- **验证**：本机 `cd services/exit-agent && python3 -m pytest -q`：红分支两条新测试均以断言失败（2 failed, 90 passed）；修复分支 92 passed。
+  `test_a_failed_hy2_publish_is_never_acknowledged`（原测试断言「hy2 失败不做 Xray 对账、不写状态」，正是本缺陷）；`run_round` 增加 `counters` 参数；
+  `test_a_hy2_filesystem_error_still_withdraws_xray_clients`（停用轮，修复前断言失败）。
+- **验证**：本机 `cd services/exit-agent && python3 -m pytest -q`：红分支两条新测试均以断言失败（2 failed, 90 passed）；修复分支 92 passed；停用轮续修后 93 passed（新测试在修复前失败）。
   `python3 services/exit-agent/test_reconcile_and_report.py`（CI 同命令）92 OK。未在任何节点运行。
 - **候选/发布**：仅源码，无新候选。
 - **剩余限制**：**节点需部署新 agent 才生效（运维步骤，本 PR 未做，未 SSH、未部署）**。停用轮的计数由下一次能上报的轮次报出；
