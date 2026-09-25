@@ -1067,6 +1067,7 @@ export const translationKeys = [
   'tono.settings.about.description',
   'tono.settings.about.checkUpdates',
   'tono.settings.about.latestVersion',
+  'tono.settings.about.checkFailed',
   'tono.settings.about.updatesUnavailable',
   'tono.settings.about.unsigned',
   'tono.cities.losAngeles',

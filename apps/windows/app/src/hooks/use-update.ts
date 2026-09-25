@@ -35,7 +35,8 @@ export const useUpdate = (enabled: boolean = true) => {
   // Determine if we should check for updates
   // If enabled is explicitly false, don't check
   // Otherwise, respect the auto_check_update setting (or default to true if null/undefined for manual triggers)
-  const shouldCheck = enabled && auto_check_update !== false
+  const autoCheck = auto_check_update !== false
+  const shouldCheck = enabled && autoCheck
 
   const {
     data: updateInfo,
@@ -50,13 +51,17 @@ export const useUpdate = (enabled: boolean = true) => {
       updateLastCheckTime()
       return result
     },
-    enabled: shouldCheck,
+    // #589: the key stays live with automatic checks off, so a manual check (refetch) really
+    // asks and the update dialog, which reads this same query, sees its answer. Only the
+    // automatic triggers follow the preference.
+    enabled,
+    revalidateOnMount: autoCheck,
     retry: 2,
     staleTime: 60 * 60 * 1000,
-    refetchInterval: 24 * 60 * 60 * 1000,
+    refetchInterval: autoCheck ? 24 * 60 * 60 * 1000 : 0,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
-    refetchOnReconnect: true,
+    refetchOnReconnect: autoCheck,
   })
 
   // Keyed on whether an error is cached, not on which one: the native command rejects with a

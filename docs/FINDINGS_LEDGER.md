@@ -346,8 +346,8 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | H21-O-F8 | 强制门户/TLS 拦截代理未识别 | open | 待开 | 低·推导(PLAUSIBLE) | |
 | H21-O-F9 | 系统时钟错误不被点名，保护期间无法校时 | open | [#588](https://github.com/raydocs/tono/issues/588) | 低·已确认 | Windows hy2 不拒 NTP |
 | H21-C-F2 | 受保护离线时更新发现失败且不说明原因 | accepted-design | — | 低·推导 | fail-closed 设计；只改文案 |
-| H21-C-F3 | Windows 检查更新失败时显示「已是最新版」 | open | [#589](https://github.com/raydocs/tono/issues/589) | 中·已确认 | |
-| H20-C-F1 = H20-O-F2 | Windows 目录刷新失败显示「详情见下」但无详情 | open | [#590](https://github.com/raydocs/tono/issues/590) | 中·已确认 | |
+| H21-C-F3 | Windows 检查更新失败时显示「已是最新版」 | in-PR | [#589](https://github.com/raydocs/tono/issues/589)，[#618](https://github.com/raydocs/tono/pull/618) | 中·已确认 | |
+| H20-C-F1 = H20-O-F2 | Windows 目录刷新失败显示「详情见下」但无详情 | in-PR | [#590](https://github.com/raydocs/tono/issues/590)，[#618](https://github.com/raydocs/tono/pull/618) | 中·已确认 | 稳定错误键与诊断字段未做 |
 | H20-C-F2 = H20-O-F10 | macOS 浏览器加密 DNS 冲突显示通用文案并持续自动重试 | open | [#591](https://github.com/raydocs/tono/issues/591) | 中·已确认 | |
 | H20-C-F3 = H20-O-F9 | macOS 拒绝管理员授权被报成 helper 版本不匹配 | open | [#592](https://github.com/raydocs/tono/issues/592) | 中·已确认 | |
 | H20-C-F4 | Windows WFP 锁定校验失败被报成「重启电脑」 | in-PR | [#593](https://github.com/raydocs/tono/issues/593) · [#616](https://github.com/raydocs/tono/pull/616) | 中·已确认(代码路径) | 新前缀 `TONO_WFP_LOCK_UNVERIFIED` 带 Service `last_error`；频率需实机；看门狗恢复后不清 `last_error` 的旧横幅另记 |

@@ -1466,6 +1466,7 @@ export interface TranslationResources {
       }
       settings: {
         about: {
+          checkFailed: string
           checkUpdates: string
           description: string
           latestVersion: string

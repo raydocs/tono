@@ -398,7 +398,9 @@ const AboutCard = () => {
     }
     try {
       const result = await checkUpdate()
-      if (result.data) {
+      if (result.error !== undefined) {
+        showNotice.error('tono.settings.about.checkFailed')
+      } else if (result.data) {
         updateRef.current?.open()
       } else {
         showNotice.success('tono.settings.about.latestVersion')
