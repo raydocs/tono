@@ -133,6 +133,11 @@ fn describe(err: &reqwest::Error) -> String {
     text
 }
 
+/// #588 skeleton: leaves the description unchanged.
+pub(crate) fn mark_clock_skew(_err: &(dyn std::error::Error + 'static), text: String) -> String {
+    text
+}
+
 pub struct TonoTransport {
     /// Reaches the control plane only at the pinned bootstrap addresses.
     ///
