@@ -3345,7 +3345,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         if (!residual) throw new ApiError(404, 'NOT_FOUND', 'User not found');
         if (
           residual.current_status !== 'active' &&
-          ((residual.live_devices ?? 0) > 0 || (residual.pending_jobs ?? 0) > 0)
+          ((residual.live_devices ?? 0) > 0 || (tailscaleEnrollmentEnabled(e) && (residual.pending_jobs ?? 0) > 0))
         ) {
           throw new ApiError(409, 'REVOCATION_PENDING', 'Wait for tailnet device revocation before re-enabling this user');
         }

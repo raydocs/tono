@@ -534,6 +534,38 @@ describe('ops v1 api', () => {
     expect(user?.status).toBe('active');
   });
 
+  it('re-enables a user while enrollment is paused and keeps the unrun tailnet revocation queued and audited', async () => {
+    const e = env as unknown as Env;
+    const enrollment = e.TAILSCALE_ENROLLMENT_ENABLED;
+    e.TAILSCALE_ENROLLMENT_ENABLED = 'false';
+    try {
+      await seedUser();
+      await db().prepare("UPDATE users SET status = 'disabled' WHERE id = 'u-1'").run();
+      await db().prepare(
+        `INSERT INTO devices(id, user_id, installation_id, name, status, tailscale_node_id, created_at, updated_at)
+         VALUES('d-1', 'u-1', 'i-1', 'Mac', 'revoked', 'mgmt-legacy', ?, ?)`,
+      ).bind(NOW, NOW).run();
+      await db().prepare(
+        `INSERT INTO revocation_jobs(id, device_id, tailscale_node_id, created_at, reason)
+         VALUES('job-1', 'd-1', 'mgmt-legacy', ?, 'device_revoked')`,
+      ).bind(NOW).run();
+
+      const restored = await ops('users/u-1', json({ status: 'active' }, 'PATCH'));
+      expect(restored.status).toBe(200);
+      const user = await db().prepare("SELECT status FROM users WHERE id = 'u-1'").first<{ status: string }>();
+      expect(user?.status).toBe('active');
+      const job = await db().prepare("SELECT completed_at FROM revocation_jobs WHERE id = 'job-1'")
+        .first<{ completed_at: number | null }>();
+      expect(job?.completed_at).toBeNull();
+      const audit = await db().prepare(
+        "SELECT summary FROM ops_audit WHERE action = 'user.tailnet-revocation-queued' AND target_id = 'u-1'",
+      ).first<{ summary: string }>();
+      expect(audit?.summary).toContain('1 tailnet node revocation(s) still queued');
+    } finally {
+      e.TAILSCALE_ENROLLMENT_ENABLED = enrollment;
+    }
+  });
+
   it('incidents list, detail, ack, snooze, resolve, notes', async () => {
     await db().prepare(
       `INSERT INTO ops_incidents(
