@@ -57,6 +57,27 @@
 - **候选/发布**：仅源码，无新候选。
 - **剩余限制**：#590 提到的目录同步传输错误没有稳定 `TONO_*` 键、诊断报告无目录同步字段，本 PR 未改。未在实机复现。
 
+## 2026-09-25 · macOS 控制面请求不走系统代理；备用通道只给核心可用的块，prepare 拒绝计入三次暂停
+
+- **归属/来源**：G2 连不上有下一手；Issue #587（总账 H21-O-F6）、#585（H21-O-F4）。
+  `apps/macos/Tono/Services/TonoAPIClient.swift`、`AppState+Connect.swift`。基线 origin/main 46dde442；
+  分支 `fix/macos-backup-channel-and-proxy-20260925`，PR [#617](https://github.com/raydocs/tono/pull/617)，未合 main。
+- **缺陷修复**：
+  - #587：控制面 `URLSession` 原先继承系统代理/PAC；另一代理软件设为系统代理时，账户请求走该代理，而受保护离线下
+    PF 挡住它的上游，账户落入通用错误。现在生产配置 `connectionProxyDictionary = [:]`（与 Windows no_proxy 一致）；
+    测试注入的 session 照旧使用。其它 `URLSession`（本机控制器、mixed 端口探测、OAuth 换票、更新下载）不属控制面客户端，未改。
+  - #585：「试用备用通道」只按名字匹配 hy2，会提供内置 sing-box 拒绝的证书 pin hy2 块；`connect()` 在 prepare 拒绝、
+    不计失败，受保护离线每 30 s 重试且永不暂停，保存的 hy2 选择重启后仍在。现在备用通道只从
+    `singBoxUnavailableReason` 为空的块中选；保护已阻断时，这类 prepare 拒绝按同签名计数，第三次暂停自动重试
+    （网络变化不解除），沿用已有的「同一失败重复三次」本地化文案。PF 保持；Retry now 或改选出口照旧重置计数。
+- **新增/优化**：无。
+- **工程与测试**：新回归 `AccountSessionRequestTests.testControlPlaneSessionIgnoresTheSystemProxy`、
+  `ProtectedReconnectTests.testProtectedReconnectPausesWhenPrepareKeepsRefusingTheSelectedExit`（约 15 s，30 s 看门狗）。
+  红分支 `wip/macos-backup-channel-and-proxy-20260925-red` 只含测试与配置工厂骨架。
+- **验证**：本机未编译、未跑测试（执行位置规则）；以 PR 的 `macos-26` CI 为准。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：客户端仍发 `X-Tono-Accept: hy2`，证书 pin hy2 仍在目录里（不提供、连接拒绝，但未剔除）；未实机复现。
+
 ## 2026-09-25 · Windows：WFP 锁定校验失败单独分类；上传诊断带上一次失败
 
 - **归属/来源**：G2 连不上有下一手（错误可诊断）；Issue #593（总账 H20-C-F4）、#594（H20-C-F5）。

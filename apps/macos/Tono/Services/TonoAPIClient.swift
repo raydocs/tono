@@ -130,22 +130,32 @@ actor TonoAPIClient {
         self.keychain = keychain
         self.offlineGate = offlineGate
         if let session { self.session = session } else {
-            let configuration = URLSessionConfiguration.ephemeral
-            // Mainland cross-border paths can take several seconds to recover
-            // DNS, TLS, or connectivity. Keep the wait bounded, but do not
-            // turn a short network transition into an immediate login error.
-            configuration.timeoutIntervalForRequest = 30
-            configuration.timeoutIntervalForResource = 45
-            configuration.waitsForConnectivity = true
-            configuration.allowsExpensiveNetworkAccess = true
-            configuration.httpCookieStorage = nil
-            configuration.httpShouldSetCookies = false
             self.session = URLSession(
-                configuration: configuration,
+                configuration: Self.controlPlaneSessionConfiguration(),
                 delegate: TonoNoRedirectDelegate(),
                 delegateQueue: nil
             )
         }
+    }
+
+    /// The production control-plane session configuration. An injected
+    /// session (tests) is used as given.
+    nonisolated static func controlPlaneSessionConfiguration() -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.ephemeral
+        // Mainland cross-border paths can take several seconds to recover
+        // DNS, TLS, or connectivity. Keep the wait bounded, but do not
+        // turn a short network transition into an immediate login error.
+        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = 45
+        configuration.waitsForConnectivity = true
+        configuration.allowsExpensiveNetworkAccess = true
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        // #587: no system proxy or PAC. Another app's local proxy set as the
+        // system proxy would carry account calls, and PF blocks its upstream
+        // in Protected Offline. Windows uses no_proxy for the same reason.
+        configuration.connectionProxyDictionary = [:]
+        return configuration
     }
 
     nonisolated static func configuredBaseURL(bundle: Bundle = .main, environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
