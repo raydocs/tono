@@ -12,6 +12,16 @@ final class ConnectionCoordinator {
     var protectionOperationGeneration: UInt64 = 0
     private(set) var disconnectSequence: Task<Void, Never>?
     private var disconnectRequestID = 0
+    /// True while the serialized teardown queue's newest request is an
+    /// explicit release (Restore internet), including while that teardown is
+    /// still in flight — a release can hold the queue for up to 180 s on the
+    /// administrator repair prompt. The sleep/wake paths read it so a sleep
+    /// cannot rewrite the user's pending release into preserve teardowns and
+    /// wake recovery (R1-F2). A release that ends with PF still armed (the
+    /// helper's sleep gate refused its disarm, or any other failure) keeps
+    /// the intent until the user connects again, so wake and network-change
+    /// recovery cannot turn it into a reconnect (X1-2).
+    private var disconnectQueueReleaseIntent = false
     var nodeSwitchTask: Task<Void, Never>?
     var protectedReconnectTask: Task<Void, Never>?
     var protectedReconnectID: UUID?
@@ -25,16 +35,27 @@ final class ConnectionCoordinator {
 
     private var deferredConnect: (id: UUID, task: Task<Void, Never>)?
 
+    /// Whether the pending or in-flight teardown queue's newest request is an
+    /// explicit release, or was one that could not release PF. Newest-wins,
+    /// matching `disconnectRequestID`: a later teardown request replaces the
+    /// intent, completion of the newest request retires it once the release
+    /// is confirmed, and a new Connect retires an unconfirmed one.
+    var disconnectQueueRequestsRelease: Bool {
+        disconnectQueueReleaseIntent
+    }
+
     /// All teardown requests share one queue. Drain cancelled connection work
     /// before executing privileged stop/DNS/PF operations; cancelling a Task
     /// does not mean an in-flight helper request has stopped mutating the host.
     func enqueueDisconnect(
         waitingFor pendingTasks: [Task<Void, Never>] = [],
+        releaseIntent: Bool = false,
         operation: @escaping @MainActor (Int) async -> Void
     ) {
         cancelDeferredConnect()
         disconnectRequestID &+= 1
         let requestID = disconnectRequestID
+        disconnectQueueReleaseIntent = releaseIntent
         let previousDisconnect = disconnectSequence
         disconnectSequence = Task {
             await previousDisconnect?.value
@@ -45,8 +66,15 @@ final class ConnectionCoordinator {
 
     /// Earlier teardown still has to finish its privileged work, but cannot
     /// publish a stale result over a newer disconnect/release request's UI.
-    func completeDisconnect(_ requestID: Int, update: () -> Void) {
+    func completeDisconnect(
+        _ requestID: Int,
+        releaseUnconfirmed: Bool = false,
+        update: () -> Void
+    ) {
         guard requestID == disconnectRequestID else { return }
+        if !releaseUnconfirmed {
+            disconnectQueueReleaseIntent = false
+        }
         update()
     }
 
@@ -156,9 +184,16 @@ final class ConnectionCoordinator {
             }
             return
         }
-        bumpGeneration()
         let (canProceed, attemptID) = prepare()
         guard canProceed else { return }
+        // Only an admitted attempt retires the previous generation. A connect
+        // refused by `prepare` (already connecting, no ready exit) must not
+        // retire the attempt in flight, whose tail compares the generation.
+        bumpGeneration()
+        // An admitted connect is the user's newer intent; it retires a release
+        // that could not confirm PF was released. A connect refused by
+        // `prepare` is not, so the intent survives it.
+        disconnectQueueReleaseIntent = false
 
         let currentGeneration = protectionOperationGeneration
         connectAttemptID = attemptID
@@ -193,7 +228,11 @@ final class ConnectionCoordinator {
             cancelReconnectTasks()
         }
         prepare()
-        enqueueDisconnect(waitingFor: pendingTasks, operation: operation)
+        enqueueDisconnect(
+            waitingFor: pendingTasks,
+            releaseIntent: releaseKillSwitch,
+            operation: operation
+        )
     }
 
     /// Coordinates scheduling a protected reconnect attempt with exponential backoff and debouncing.

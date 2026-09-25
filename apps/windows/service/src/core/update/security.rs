@@ -175,6 +175,22 @@ pub fn program_files() -> Result<PathBuf> {
     Ok(path)
 }
 
+/// The Windows system directory as the OS reports it (`GetSystemDirectoryW`).
+/// Never a fixed drive letter: Windows may be installed on any volume.
+pub fn system_directory() -> Result<PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW;
+    let mut buffer = [0_u16; windows_sys::Win32::Foundation::MAX_PATH as usize];
+    let len = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) } as usize;
+    ensure!(
+        len > 0 && len < buffer.len(),
+        "system directory unavailable"
+    );
+    let path = PathBuf::from(std::ffi::OsString::from_wide(&buffer[..len]));
+    ensure!(path.is_absolute(), "system directory is not absolute");
+    Ok(path)
+}
+
 pub fn registry_string(root: HKEY, key: &str, name: &str) -> Result<Option<String>> {
     let (key, name) = (wide(key), wide(name));
     let mut bytes = [0_u16; 16_384];

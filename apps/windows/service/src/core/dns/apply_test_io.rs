@@ -40,6 +40,9 @@ pub(crate) struct Machine {
     pub effective_reads: usize,
     pub policy_restores: usize,
     pub before_write: Vec<DnsSnapshot>,
+    /// X2-2: what the effective-NRPT read and the cache-bypassing system lookup return.
+    pub effective_nrpt: std::result::Result<Vec<facade::EffectiveNrptRule>, String>,
+    pub system_lookup: std::result::Result<Vec<std::net::Ipv4Addr>, String>,
 }
 
 impl Machine {
@@ -237,6 +240,13 @@ impl Fixture {
             effective_reads: 0,
             policy_restores: 0,
             before_write: Vec::new(),
+            // Tono's catch-all in force and a fake-ip answer: the healthy default.
+            effective_nrpt: Ok(vec![facade::EffectiveNrptRule {
+                namespaces: vec![".".to_owned()],
+                generic_dns_servers: vec![facade::PROTECTED_DNS_V4.to_owned()],
+                tono_owned: true,
+            }]),
+            system_lookup: Ok(vec![std::net::Ipv4Addr::new(198, 18, 0, 9)]),
         });
         Ok(Self { root, originals })
     }
@@ -273,6 +283,9 @@ pub(crate) fn reset_memory() {
     facade::CONSECUTIVE_LIVE_FAILURES.store(0, Ordering::Relaxed);
     facade::PROTECTION_WANTED.store(false, Ordering::Release);
     facade::SELF_WRITE_TAIL_UNTIL.store(0, Ordering::Relaxed);
+    *facade::RESOLVER_POLICY_CONFLICT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
 }
 
 impl Drop for Fixture {

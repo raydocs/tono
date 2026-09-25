@@ -205,6 +205,16 @@ pub fn commit_verified_recovery(path: &Path, current_app_version: &str) -> io::R
     store::commit_verified_recovery(path, current_app_version)
 }
 
+/// Journals from the 0.0.72 Tauri updater are never advanced or committed by
+/// later builds. A running build at or past `next_app_version` proves that
+/// install finished: archive the exact bytes next to the journal and remove
+/// it. Returns `Ok(false)` and keeps the file for a newer target, unreadable
+/// bytes or an unsupported schema.
+pub fn retire_completed_legacy(path: &Path, current_app_version: &str) -> io::Result<bool> {
+    let _transaction = store::transaction()?;
+    store::retire_completed_legacy(path, current_app_version)
+}
+
 fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -216,6 +226,29 @@ fn unix_now() -> u64 {
 mod tests {
     use super::*;
     use std::env;
+
+    #[test]
+    fn completed_legacy_upgrade_journal_is_archived_and_no_longer_incomplete() {
+        let dir = env::temp_dir().join(format!("tono-legacy-journal-{}", uuid::Uuid::new_v4()));
+        let path = journal_path(&dir);
+        // 0.0.72's updater left ConnectionQuiescing; 48 hours later it expired.
+        let mut journal = UpdateHandoffJournal::new("0.0.72", "0.0.73", 3, true, true);
+        journal.phase = UpdateHandoffPhase::ConnectionQuiescing;
+        journal.expires_at_unix = 1;
+        write_atomic(&path, &journal).unwrap();
+        let legacy = fs::read(&path).unwrap();
+        assert!(!retire_completed_legacy(&path, "0.0.72").unwrap());
+        assert!(load(&path).is_err(), "an unfinished update keeps warning");
+
+        assert!(retire_completed_legacy(&path, "0.0.73").unwrap());
+        assert!(load(&path).unwrap().is_none(), "a finished upgrade no longer warns");
+        let archived: Vec<_> = fs::read_dir(path.with_extension("history"))
+            .unwrap()
+            .map(|entry| fs::read(entry.unwrap().path()).unwrap())
+            .collect();
+        assert_eq!(archived, vec![legacy]);
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn protected_update_cannot_take_unprotected_phase_shortcuts() {

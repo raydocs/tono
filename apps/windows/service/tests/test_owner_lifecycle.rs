@@ -6,11 +6,13 @@ use anyhow::{Context as _, Result};
 #[cfg(windows)]
 use tono_service_protocol::service_paths;
 use tono_service_protocol::{
-    IpcCommand, OwnerCredentials, OwnerSessionProof, RuntimeBundle, ServiceErrorCode,
-    ServiceStatusSnapshot, StartClashRequest, StartClashResult, get_status as client_get_status,
-    load_active_owner, load_owner_desired_state, owner_key, run_ipc_server,
+    AuthenticatedRequest, IpcCommand, OwnerCredentials, OwnerSessionProof,
+    PrepareCoreStartFreshness, ProtocolVersion, RuntimeBundle, SERVICE_PROTOCOL_HEADER,
+    ServiceErrorCode, ServiceStatusSnapshot, StartClashRequest, StartClashResult,
+    get_status as client_get_status, get_version, load_active_owner, load_owner_desired_state,
+    owner_key, release_kill_switch as client_release_kill_switch, run_ipc_server,
     start_clash as client_start_clash, stop_clash as client_stop_clash, stop_ipc_server,
-    test_client,
+    test_client, update_transaction, update_wire::UpdateRequest,
 };
 #[cfg(unix)]
 use tono_service_protocol::{
@@ -366,6 +368,16 @@ async fn get_status(credentials: &OwnerCredentials) -> Result<WireResponse<Servi
     })
 }
 
+/// The Service's live explicit-release epoch, as a client sees it through `GET /version`.
+async fn current_release_epoch() -> Result<u64> {
+    let response = get_version().await?;
+    anyhow::ensure!(response.code == 0, "{}", response.message);
+    Ok(response
+        .data
+        .context("version response omitted protocol info")?
+        .release_epoch)
+}
+
 #[cfg(unix)]
 async fn get_clash_logs(credentials: &OwnerCredentials) -> Result<WireResponse<Vec<String>>> {
     let response = client_get_clash_logs(credentials).await?;
@@ -618,6 +630,199 @@ async fn same_owner_restart_concurrent_start_and_failed_update_remain_atomic() -
     assert!(load_owner_desired_state(&key).await?.core_should_be_running);
 
     assert_eq!(stop_clash(&credentials, &active_session).await?.code, 0);
+    stop_ipc_server().await?;
+    server_handle.await??;
+    Ok(())
+}
+
+/// R2-F6: a cancelled attempt's `PrepareCoreStart` can arrive seconds late, after the user's
+/// Disconnect already released and a successor connection started its own not-yet-verified
+/// Core. The route is the one destructive owner-gated request with no session, so its
+/// freshness token is the client-snapshotted release epoch: a request whose snapshot an
+/// explicit release has superseded must be refused without stopping the successor's Core.
+/// Before the gate, the late request stopped that Core and the new connection failed
+/// inexplicably; if the gate is ever removed, the successor PID assertion fails here.
+#[tokio::test]
+#[serial]
+async fn late_prepare_core_start_superseded_by_release_cannot_stop_the_successor_core()
+-> Result<()> {
+    common::init_tracing_for_tests();
+    let _ = stop_ipc_server().await;
+    let server_handle = run_ipc_server().await?;
+    common::wait_for_ipc().await?;
+
+    let credentials = common::owner_credentials();
+    let bundle = RuntimeBundle {
+        yaml: "mode: rule\n".to_string(),
+        assets: vec![],
+        remote_providers: Vec::new(),
+        core_path: common::test_bin_path("mock_binary")
+            .to_string_lossy()
+            .into_owned(),
+    };
+
+    // Attempt A's client-side freshness snapshot, read before its request goes out.
+    let stale_epoch = current_release_epoch().await?;
+
+    // The session attempt A was going to replace: start it, then Disconnect. On Windows the
+    // App's explicit Disconnect is the owner-gated release route, and a successful release is
+    // exactly what bumps the epoch A's snapshot now misses.
+    let first_token = "e1".repeat(32);
+    let first_start = start_clash(&credentials, &bundle, &first_token).await?;
+    assert_eq!(first_start.code, 0, "{}", first_start.message);
+    let released = client_release_kill_switch(&credentials).await?;
+    assert_eq!(released.code, 0, "{}", released.message);
+    let bumped_epoch = current_release_epoch().await?;
+    assert_ne!(
+        bumped_epoch, stale_epoch,
+        "the explicit release must have superseded attempt A's snapshot"
+    );
+
+    // Attempt B commits its own owner session. Its Core is running and unverified —
+    // MarkKillSwitchVerified is never reached in this window.
+    let second_token = "e2".repeat(32);
+    let second_start = start_clash(&credentials, &bundle, &second_token).await?;
+    assert_eq!(second_start.code, 0, "{}", second_start.message);
+    let second_session = session_from_start(&second_start, &second_token)?;
+    let successor = get_status(&credentials)
+        .await?
+        .data
+        .context("successor status omitted data")?;
+    let successor_pid = successor
+        .core_pid
+        .context("successor start omitted core PID")?;
+    assert!(successor.is_active);
+
+    // A's PrepareCoreStart finally arrives, still carrying the pre-release snapshot. It must
+    // be refused with the distinguishable stale-epoch error and must leave B's Core running.
+    let client = test_client().await?;
+    let body = serde_json::to_value(AuthenticatedRequest {
+        credentials: credentials.clone(),
+        payload: PrepareCoreStartFreshness {
+            release_epoch: stale_epoch,
+        },
+    })?;
+    let response = client
+        .post(IpcCommand::PrepareCoreStart.as_ref())
+        .header(
+            SERVICE_PROTOCOL_HEADER,
+            ProtocolVersion::current().header_value(),
+        )
+        .json_body(&body)
+        .send()
+        .await?
+        .json::<WireResponse<u32>>()?;
+    assert_eq!(
+        response.code,
+        ServiceErrorCode::StaleReleaseEpoch as u16,
+        "{}",
+        response.message
+    );
+    assert!(response.data.is_none());
+
+    let after = get_status(&credentials)
+        .await?
+        .data
+        .context("post-rejection status omitted data")?;
+    assert_eq!(
+        after.core_pid,
+        Some(successor_pid),
+        "a superseded PrepareCoreStart must not stop the successor Core"
+    );
+    assert!(after.is_active);
+
+    assert_eq!(stop_clash(&credentials, &second_session).await?.code, 0);
+    stop_ipc_server().await?;
+    server_handle.await??;
+    Ok(())
+}
+
+/// H9-F3: a native update takeover cancels the connecting attempt without an explicit
+/// release, and the App then lets the user start a successor connection directly. The
+/// takeover's Prepare — refused here, as when its signature or preconditions fail — must
+/// still supersede the cancelled attempt's PrepareCoreStart snapshot. Before the fix only an
+/// explicit release did, so the late request passed the gate and stopped the successor Core.
+#[tokio::test]
+#[serial]
+async fn late_prepare_core_start_superseded_by_update_takeover_cannot_stop_the_successor_core()
+-> Result<()> {
+    common::init_tracing_for_tests();
+    let _ = stop_ipc_server().await;
+    let server_handle = run_ipc_server().await?;
+    common::wait_for_ipc().await?;
+
+    let credentials = common::owner_credentials();
+    let bundle = RuntimeBundle {
+        yaml: "mode: rule\n".to_string(),
+        assets: vec![],
+        remote_providers: Vec::new(),
+        core_path: common::test_bin_path("mock_binary")
+            .to_string_lossy()
+            .into_owned(),
+    };
+
+    // Attempt A's client-side freshness snapshot, read before its request goes out.
+    let stale_epoch = current_release_epoch().await?;
+
+    // The update takes over: the App has invalidated A, and the Service refuses Prepare.
+    let prepared = update_transaction(
+        &credentials,
+        UpdateRequest::Prepare {
+            manifest: "{}".to_string(),
+            signature: String::new(),
+            package_path: String::new(),
+        },
+    )
+    .await?;
+    assert_ne!(prepared.code, 0, "the unsigned Prepare must be refused");
+
+    // Attempt B, started by the user without a Disconnect: its Core is running, unverified.
+    let token = "e3".repeat(32);
+    let start = start_clash(&credentials, &bundle, &token).await?;
+    assert_eq!(start.code, 0, "{}", start.message);
+    let session = session_from_start(&start, &token)?;
+    let successor_pid = get_status(&credentials)
+        .await?
+        .data
+        .context("successor status omitted data")?
+        .core_pid
+        .context("successor start omitted core PID")?;
+
+    // A's PrepareCoreStart finally arrives with the pre-takeover snapshot.
+    let client = test_client().await?;
+    let body = serde_json::to_value(AuthenticatedRequest {
+        credentials: credentials.clone(),
+        payload: PrepareCoreStartFreshness {
+            release_epoch: stale_epoch,
+        },
+    })?;
+    let response = client
+        .post(IpcCommand::PrepareCoreStart.as_ref())
+        .header(
+            SERVICE_PROTOCOL_HEADER,
+            ProtocolVersion::current().header_value(),
+        )
+        .json_body(&body)
+        .send()
+        .await?
+        .json::<WireResponse<u32>>()?;
+    assert_eq!(
+        response.code,
+        ServiceErrorCode::StaleReleaseEpoch as u16,
+        "{}",
+        response.message
+    );
+    let after = get_status(&credentials)
+        .await?
+        .data
+        .context("post-rejection status omitted data")?;
+    assert_eq!(
+        after.core_pid,
+        Some(successor_pid),
+        "a PrepareCoreStart superseded by an update takeover must not stop the successor Core"
+    );
+
+    assert_eq!(stop_clash(&credentials, &session).await?.code, 0);
     stop_ipc_server().await?;
     server_handle.await??;
     Ok(())

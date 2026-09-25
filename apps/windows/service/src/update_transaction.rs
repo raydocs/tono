@@ -14,8 +14,22 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Storage major of `state.json`. Absent means 1, the unversioned v1 layout;
+/// a writer emits `schema_version` only once it writes 2 or later. Within one
+/// major, readers ignore fields they do not know: an older executor copy reads
+/// what a newer Service wrote. Additive fields must be optional and safe to
+/// drop, because that older copy may rewrite the record without them. Anything
+/// else bumps the major, which an older reader refuses as newer evidence
+/// (retained), not as corruption. See docs/UPDATE_PROTOCOL_V1.md.
+pub const STATE_SCHEMA_VERSION: u64 = 1;
+
+#[derive(Deserialize)]
+struct SchemaProbe {
+    #[serde(default)]
+    schema_version: Option<u64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Image {
     pub pid: u32,
     pub started_at: u64,
@@ -36,14 +50,12 @@ pub enum Execution {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct DisconnectEvidence {
     pub requested_at_unix: u64,
     pub verified_at_unix: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Attempt {
     pub manifest: ReleaseManifest,
     pub receipt: Receipt,
@@ -58,7 +70,6 @@ pub struct Attempt {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct State {
     pub consumed_sequence: u64,
     pub generation: u64,
@@ -102,12 +113,14 @@ impl State {
                 );
             }
             if a.execution == Execution::Replaced {
+                // An absent successor means recovery measured the verified
+                // target on disk after the executor-launched successor was
+                // never durably registered; the first authenticated
+                // target-identity App re-proves it on adoption.
                 ensure!(
-                    a.successor_image
-                        .as_ref()
-                        .is_some_and(|s| s.path == a.initiating_image.path
-                            && s.sha256 == target(&a.manifest).components.app_sha256),
-                    "successor evidence missing"
+                    a.successor_image.as_ref().is_none_or(|s| s.path == a.initiating_image.path
+                        && s.sha256 == target(&a.manifest).components.app_sha256),
+                    "successor evidence conflicts"
                 );
             }
             if matches!(
@@ -169,6 +182,15 @@ impl Store {
                 ensure!(
                     bytes.len() <= 65_536,
                     "update state exceeds limit; evidence retained"
+                );
+                let schema = serde_json::from_slice::<SchemaProbe>(&bytes)
+                    .context("corrupt update evidence retained")?
+                    .schema_version
+                    .unwrap_or(1);
+                ensure!(schema >= 1, "corrupt update evidence retained");
+                ensure!(
+                    schema <= STATE_SCHEMA_VERSION,
+                    "update evidence written by a newer Tono (schema {schema}) retained for that version"
                 );
                 let state: State =
                     serde_json::from_slice(&bytes).context("corrupt update evidence retained")?;
@@ -310,27 +332,36 @@ impl Store {
         );
         let a = self.attempt()?;
         ensure!(a.receipt.owner == owner, "Disconnect owner mismatch");
+        // Identity, not incarnation: the executor terminates the initiating
+        // process and successors exit before commit, so requiring the exact
+        // recorded pid+started_at strands the transaction with no provable
+        // peer. The Service derives `peer` from the authenticated pipe, so a
+        // passing process is the owner's live App at the registered install
+        // root running known bytes (original or target).
         ensure!(
-            a.initiating_image == *peer || a.successor_image.as_ref() == Some(peer),
-            "Disconnect requires the original or executor-launched incarnation"
+            peer.path == a.initiating_image.path
+                && (peer.sha256 == a.initiating_image.sha256
+                    || peer.sha256 == a.old_components.app_sha256
+                    || peer.sha256 == target(&a.manifest).components.app_sha256),
+            "Disconnect requires the registered App identity"
         );
         Ok(a)
     }
 
     /// Explicit release is not cancellation or successful recovery. Persist its
     /// request before touching protection and leave requiredRecovery unchanged.
+    /// Like the macOS helper, release grants nothing and is not gated on the
+    /// wall clock: a rollback must not strand the owner behind the only exit.
+    /// Recorded times never precede earlier durable evidence.
     pub fn request_disconnect(&mut self, owner: &str, peer: &Image, now: u64) -> Result<()> {
         let a = self.disconnect_peer(owner, peer)?;
-        ensure!(
-            now >= a.receipt.updated_at_unix,
-            "Disconnect clock is uncertain"
-        );
         if a.disconnect.is_some() {
             return Ok(());
         }
+        let requested_at_unix = now.max(a.receipt.updated_at_unix);
         let mut next = self.state.clone();
         next.attempt.as_mut().unwrap().disconnect = Some(DisconnectEvidence {
-            requested_at_unix: now,
+            requested_at_unix,
             verified_at_unix: None,
         });
         self.save(next)
@@ -349,9 +380,10 @@ impl Store {
             .as_ref()
             .context("Disconnect was not requested")?;
         ensure!(
-            observed == Protection::Unprotected && now >= requested.requested_at_unix,
+            observed == Protection::Unprotected,
             "fresh unprotected readback is required"
         );
+        let verified_at_unix = now.max(requested.requested_at_unix);
         let mut next = self.state.clone();
         next.attempt
             .as_mut()
@@ -359,7 +391,27 @@ impl Store {
             .disconnect
             .as_mut()
             .unwrap()
-            .verified_at_unix = Some(now);
+            .verified_at_unix = Some(verified_at_unix);
+        self.save(next)
+    }
+
+    /// Archive the full durable state and clear the live slot. The original
+    /// obligation, private payload and sequence/generation high-water remain.
+    fn archive_attempt(
+        &mut self,
+        attempt_id: &str,
+        archive: impl FnOnce(&Path, &[u8]) -> Result<()>,
+    ) -> Result<()> {
+        let path = self
+            .root
+            .join(format!("retired-{attempt_id}.json"));
+        if let Err(error) = archive(&path, &serde_json::to_vec(&self.state)?) {
+            self.write_failed = true;
+            return Err(error);
+        }
+        // Never lower sequence/generation or turn explicit release into commit.
+        let mut next = self.state.clone();
+        next.attempt = None;
         self.save(next)
     }
 
@@ -374,44 +426,130 @@ impl Store {
         archive: impl FnOnce(&Path, &[u8]) -> Result<()>,
     ) -> Result<()> {
         let a = self.disconnect_peer(owner, peer)?;
+        // Consumption is impossible when the durable high-water still sits
+        // below the release AND the recorded executor incarnation is gone
+        // (never registered, or provably dead): `consume_with` only accepts
+        // that exact executor incarnation.
         ensure!(
-            a.initiating_image == *peer
-                && a.executor.is_none()
+            a.executor
+                .as_ref()
+                .is_none_or(|e| !incarnation_live(e))
                 && matches!(
                     a.execution,
                     Execution::Reserved | Execution::Extracting | Execution::Staged
+                        | Execution::Launching
                 )
                 && self.state.consumed_sequence < a.manifest.release_sequence
                 && a.disconnect
                     .as_ref()
                     .is_some_and(|d| d.verified_at_unix.is_some()),
-            "consumed, launch-uncertain or unverified evidence cannot be retired"
+            "consumed, live-executor or unverified evidence cannot be retired"
         );
-        let path = self
-            .root
-            .join(format!("retired-{}.json", a.receipt.attempt_id));
-        if let Err(error) = archive(&path, &serde_json::to_vec(&self.state)?) {
-            self.write_failed = true;
-            return Err(error);
-        }
-        // The full original obligation and private payload remain as evidence.
-        // Never lower sequence/generation or turn explicit release into commit.
-        let mut next = self.state.clone();
-        next.attempt = None;
-        self.save(next)
+        let attempt_id = a.receipt.attempt_id.clone();
+        self.archive_attempt(&attempt_id, archive)
     }
 
-    /// Only the executor-created, initially suspended process can adopt. A path
-    /// now naming new bytes says nothing about a second old mapped App image.
-    pub fn authenticate_successor(&self, peer: &Image) -> Result<()> {
+    /// Terminal archive for an attempt whose physical replacement already
+    /// undid itself (or never happened). Requires the same verified explicit
+    /// Disconnect as unconsumed retirement; the caller separately proves the
+    /// installed components equal the retained originals. The consumed
+    /// high-water is never lowered and no recovery is fabricated.
+    pub fn retire_rolled_back(&mut self, owner: &str, peer: &Image) -> Result<()> {
+        let a = self.disconnect_peer(owner, peer)?;
+        ensure!(
+            matches!(a.execution, Execution::RolledBack | Execution::Uncertain)
+                && a.disconnect
+                    .as_ref()
+                    .is_some_and(|d| d.verified_at_unix.is_some()),
+            "only a verified Disconnect of a rolled-back attempt can be retired"
+        );
+        let attempt_id = a.receipt.attempt_id.clone();
+        self.archive_attempt(&attempt_id, atomic_write)
+    }
+
+    /// "Installed and released" terminal for a completed replacement whose
+    /// owner then released protection with a verified explicit Disconnect.
+    /// This is not commit: the phase, recorded obligation, successor evidence
+    /// and consumed/generation high-water are archived unchanged. Only a
+    /// provable target-identity successor may end it; the caller separately
+    /// proves the installed plan equals the target. `release_backups` removes
+    /// the retained rollback copies before the slot clears (the Service owns
+    /// that cleanup here, because no executor or commit will ever run for
+    /// this attempt); it must be idempotent so a failure leaves a retryable
+    /// pending record.
+    pub fn retire_released_installation(
+        &mut self,
+        owner: &str,
+        peer: &Image,
+        release_backups: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
+        self.retire_released_installation_with(owner, peer, release_backups, atomic_write)
+    }
+
+    fn retire_released_installation_with(
+        &mut self,
+        owner: &str,
+        peer: &Image,
+        release_backups: impl FnOnce() -> Result<()>,
+        archive: impl FnOnce(&Path, &[u8]) -> Result<()>,
+    ) -> Result<()> {
+        let a = self.disconnect_peer(owner, peer)?;
+        ensure!(
+            a.execution == Execution::Replaced
+                && a.disconnect
+                    .as_ref()
+                    .is_some_and(|d| d.verified_at_unix.is_some()),
+            "only a verified Disconnect of a replaced attempt can be released"
+        );
+        // Same proof as adoption: target bytes at the registered path, and
+        // either the recorded successor or a later incarnation superseding it.
+        self.authenticate_successor(peer)?;
+        release_backups()?;
+        let attempt_id = self.attempt()?.receipt.attempt_id.clone();
+        self.archive_attempt(&attempt_id, archive)
+    }
+
+    /// Only a target-identity App at the registered installation can adopt:
+    /// the executor-created successor directly, or — once that recorded
+    /// incarnation is gone — a later process whose current bytes are the
+    /// verified target. A path now naming new bytes says nothing about a
+    /// second old mapped App image, so a rebinding peer must postdate the
+    /// recorded successor and must not recycle its pid.
+    pub fn authenticate_successor(&mut self, peer: &Image) -> Result<()> {
         let a = self.attempt()?;
         ensure!(
             a.execution == Execution::Replaced
-                && a.successor_image.as_ref() == Some(peer)
+                && peer.path == a.initiating_image.path
                 && peer.sha256 == target(&a.manifest).components.app_sha256,
-            "peer is not the executor-launched target incarnation"
+            "peer is not a target-identity App at the registered location"
         );
-        Ok(())
+        match a.successor_image.as_ref() {
+            Some(recorded) if recorded == peer => Ok(()),
+            Some(recorded) => {
+                ensure!(
+                    peer.pid != recorded.pid
+                        && peer.started_at > recorded.started_at
+                        && !incarnation_live(recorded),
+                    "recorded successor incarnation is live or not superseded"
+                );
+                let mut next = self.state.clone();
+                next.attempt.as_mut().unwrap().successor_image = Some(peer.clone());
+                self.save(next)
+            }
+            None => {
+                // Recovery measured the verified target on disk after the
+                // executor-launched successor was never durably registered.
+                // Adoption is measured identity; the initiating incarnation
+                // must be gone so it cannot re-enter as its own successor.
+                ensure!(
+                    peer != &a.initiating_image && !incarnation_live(&a.initiating_image),
+                    "initiating incarnation is still live"
+                );
+                let mut next = self.state.clone();
+                next.attempt.as_mut().unwrap().successor_image = Some(peer.clone());
+                self.save(next)
+            }
+        }
     }
 
     pub fn execution(&mut self, execution: Execution) -> Result<()> {
@@ -457,6 +595,24 @@ pub fn target(manifest: &ReleaseManifest) -> &Target {
         .iter()
         .find(|t| t.id == TargetId::WindowsX86_64)
         .unwrap()
+}
+
+/// Whether the recorded process incarnation still runs this exact image.
+/// Windows re-derives pid + kernel creation time + image digest through the
+/// native probe; the store contract also compiles off Windows, where tests
+/// drive dead-incarnation branches through explicit store fields.
+#[cfg(windows)]
+fn incarnation_live(recorded: &Image) -> bool {
+    crate::core::update::security::image(recorded.pid)
+        .ok()
+        .as_ref()
+        == Some(recorded)
+}
+
+#[cfg(not(windows))]
+fn incarnation_live(recorded: &Image) -> bool {
+    let _ = recorded;
+    false
 }
 
 pub fn digest(bytes: &[u8]) -> String {
@@ -628,6 +784,32 @@ pub(crate) mod tests {
             )
             .unwrap();
         store.execution(Execution::Launching).unwrap();
+    }
+
+    #[test]
+    fn newer_store_fields_are_ignored_and_a_newer_major_is_refused_not_corrupt() {
+        let (root, store, _, _) = reserved();
+        drop(store);
+        let path = root.join("state.json");
+        let mut newer: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        // What a later Service may add within schema 1: optional, safe to drop.
+        newer["future_fact"] = serde_json::json!(true);
+        newer["attempt"]["future_fact"] = serde_json::json!("x");
+        newer["attempt"]["initiating_image"]["future_fact"] = serde_json::json!(1);
+        std::fs::write(&path, serde_json::to_vec(&newer).unwrap()).unwrap();
+        let store = Store::open(&root).expect("an older reader must accept additive fields");
+        assert_eq!(store.state.generation, 91);
+        assert_eq!(store.attempt().unwrap().execution, Execution::Staged);
+        drop(store);
+
+        newer["schema_version"] = serde_json::json!(2);
+        let bytes = serde_json::to_vec(&newer).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+        let refused = Store::open(&root).err().expect("a newer major must be refused");
+        assert!(format!("{refused:#}").contains("newer Tono (schema 2)"), "{refused:#}");
+        assert_eq!(std::fs::read(&path).unwrap(), bytes, "newer evidence is retained");
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -823,11 +1005,15 @@ pub(crate) mod tests {
         next.attempt.as_mut().unwrap().execution = Execution::Reserved;
         store.save(next).unwrap();
         let original = store.attempt().unwrap().receipt.clone();
-        let mut other_peer = peer.clone();
-        other_peer.started_at += 1;
+        // Disconnect is bound to the registered installation identity, not to
+        // one process incarnation: a relaunched App at the same install root
+        // with known bytes passes, so the rejected peer below is one whose
+        // image lives outside that registered identity.
+        let mut foreign_peer = peer.clone();
+        foreign_peer.path = root.join("elsewhere").join("Tono.exe");
         assert!(
             store
-                .request_disconnect(owner, &other_peer, 1_900_000_001)
+                .request_disconnect(owner, &foreign_peer, 1_900_000_001)
                 .is_err()
         );
         assert!(
@@ -909,6 +1095,53 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn update_explicit_disconnect_releases_after_wall_clock_rollback() {
+        let (root, mut store, peer, _) = reserved();
+        let owner = "windows:fixture-owner";
+        store
+            .observe(
+                owner,
+                &peer,
+                91,
+                1_900_000_010,
+                Observation::PreparationVerified {
+                    artifact_sha256: "b".repeat(64),
+                    protection: Protection::ProtectedOffline,
+                },
+            )
+            .unwrap();
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().executor = None;
+        store.save(next).unwrap();
+        assert_eq!(
+            store.attempt().unwrap().receipt.updated_at_unix,
+            1_900_000_010
+        );
+        // The wall clock is now behind both updatedAt and createdAt (manual
+        // change, dual-boot RTC, dead battery). Release grants nothing.
+        store
+            .request_disconnect(owner, &peer, 1_899_999_000)
+            .unwrap();
+        store
+            .request_disconnect(owner, &peer, 1_899_999_000)
+            .unwrap();
+        store
+            .verify_disconnect(owner, &peer, 1_899_999_001, Protection::Unprotected)
+            .unwrap();
+        drop(store);
+        let mut store = Store::open(&root).unwrap();
+        assert!(
+            store.live_attempt(1_899_999_001).is_err(),
+            "rollback still refuses further grants"
+        );
+        store.retire_unconsumed(owner, &peer).unwrap();
+        assert!(!store.pending());
+        assert_eq!(store.state.consumed_sequence, 73);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn update_expired_corrupt_and_orphaned_evidence_stays_closed() {
         let (root, mut store, peer, executor) = reserved();
         authorize(&mut store, &peer);
@@ -929,6 +1162,175 @@ pub(crate) mod tests {
             Store::open(&root).is_err(),
             "absence cannot erase orphan evidence"
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_fresh_registered_app_incarnation_can_disconnect_and_retire_unconsumed_attempt() {
+        let (root, mut store, peer, _) = reserved();
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().executor = None;
+        store.save(next).unwrap();
+        let owner = "windows:fixture-owner";
+        // The initiating process exited (crash, user close, executor
+        // termination); a relaunched App at the same registered path with the
+        // same known bytes re-proves the installation identity.
+        let relaunched = Image {
+            pid: 77,
+            started_at: 999,
+            path: peer.path.clone(),
+            sha256: peer.sha256.clone(),
+        };
+        store
+            .request_disconnect(owner, &relaunched, 1_900_000_010)
+            .unwrap();
+        store
+            .verify_disconnect(owner, &relaunched, 1_900_000_011, Protection::Unprotected)
+            .unwrap();
+        store.retire_unconsumed(owner, &relaunched).unwrap();
+        assert!(!store.pending());
+        assert_eq!(store.state.consumed_sequence, 73);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_app_started_after_replacement_with_target_identity_is_an_adoptable_successor() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        let launched = Image {
+            pid: 30,
+            started_at: 400,
+            path: peer.path.clone(),
+            sha256: target(&store.attempt().unwrap().manifest)
+                .components
+                .app_sha256
+                .clone(),
+        };
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().execution = Execution::Replaced;
+        next.attempt.as_mut().unwrap().successor_image = Some(launched.clone());
+        store.save(next).unwrap();
+        // The user exited the executor-launched successor before commit and
+        // relaunched: a later incarnation at the registered path whose bytes
+        // are the verified target re-binds as the provable successor.
+        let relaunched = Image {
+            pid: 31,
+            started_at: 500,
+            ..launched.clone()
+        };
+        store.authenticate_successor(&relaunched).unwrap();
+        assert_eq!(
+            store.attempt().unwrap().successor_image,
+            Some(relaunched.clone())
+        );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_launching_without_live_executor_incarnation_is_retirable_after_verified_disconnect() {
+        let (root, mut store, peer, _) = reserved();
+        authorize(&mut store, &peer); // Launching with a registered executor
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().executor = None; // spawn failed / mirror write lost
+        store.save(next).unwrap();
+        let owner = "windows:fixture-owner";
+        store.request_disconnect(owner, &peer, 1_900_000_003).unwrap();
+        store
+            .verify_disconnect(owner, &peer, 1_900_000_004, Protection::Unprotected)
+            .unwrap();
+        store.retire_unconsumed(owner, &peer).unwrap();
+        assert!(!store.pending());
+        assert_eq!(store.state.consumed_sequence, 73);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_replaced_attempt_released_by_verified_disconnect_reaches_archive_without_commit() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        let components = target(&store.attempt().unwrap().manifest)
+            .components
+            .clone();
+        let successor = Image {
+            pid: 30,
+            started_at: 400,
+            path: peer.path.clone(),
+            sha256: components.app_sha256.clone(),
+        };
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().execution = Execution::Replaced;
+        next.attempt.as_mut().unwrap().successor_image = Some(successor.clone());
+        store.save(next).unwrap();
+        let owner = "windows:fixture-owner";
+        store
+            .observe(
+                owner,
+                &successor,
+                92,
+                1_900_000_003,
+                Observation::InstalledIdentityVerified { components },
+            )
+            .unwrap();
+        // Post-upgrade reconnect failed; the user pressed Restore internet.
+        store
+            .request_disconnect(owner, &successor, 1_900_000_004)
+            .unwrap();
+        store
+            .verify_disconnect(owner, &successor, 1_900_000_005, Protection::Unprotected)
+            .unwrap();
+        let original = store.attempt().unwrap().receipt.clone();
+        // Old App bytes at the same path may Disconnect but cannot end a
+        // replaced attempt; a failed backup release leaves it retryable.
+        assert!(
+            store
+                .retire_released_installation(owner, &peer, || panic!("unauthenticated release"))
+                .is_err()
+        );
+        assert!(
+            store
+                .retire_released_installation(owner, &successor, || anyhow::bail!("backup busy"))
+                .is_err()
+        );
+        assert!(store.pending());
+        let mut released = false;
+        store
+            .retire_released_installation_with(
+                owner,
+                &successor,
+                || {
+                    released = true;
+                    Ok(())
+                },
+                |path, bytes| {
+                    let current: State =
+                        serde_json::from_slice(&std::fs::read(root.join("state.json"))?)?;
+                    assert!(current.attempt.is_some(), "archive must precede release");
+                    atomic_write(path, bytes)
+                },
+            )
+            .unwrap();
+        assert!(released, "backup cleanup ownership is exercised before archive");
+        let archive: State = serde_json::from_slice(
+            &std::fs::read(root.join(format!("retired-{}.json", original.attempt_id))).unwrap(),
+        )
+        .unwrap();
+        let archived = archive.attempt.unwrap();
+        assert_eq!(archived.receipt, original, "release is not commit");
+        assert_eq!(archived.receipt.phase, Phase::InstalledIdentityVerified);
+        assert_eq!(archived.successor_image, Some(successor));
+        drop(store);
+        let store = Store::open(&root).unwrap();
+        assert!(!store.pending());
+        assert_eq!(
+            (store.state.consumed_sequence, store.state.generation),
+            (74, 92)
+        );
+        drop(store);
         std::fs::remove_dir_all(root).unwrap();
     }
 }

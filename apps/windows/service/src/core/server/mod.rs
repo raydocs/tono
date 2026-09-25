@@ -25,8 +25,9 @@ use crate::{
     AuthenticatedRequest, AuthenticatedSessionRequest, BootstrapPins,
     FinalizeDirectRuntimeReloadRequest, IpcCommand, KillSwitchLockRequest,
     MIN_SUPPORTED_CLIENT_REVISION, MacosProxyConfig,
-    OwnerSessionHandle, ProtocolInfo, ProtocolVersion, ProxyApplyOutcome,
-    RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, ReplaceProxyEndpointsRequest,
+    OwnerSessionHandle, PrepareCoreStartPayload, ProtocolInfo, ProtocolVersion,
+    ProxyApplyOutcome, RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest,
+    ReplaceProxyEndpointsRequest,
     RuntimeBundle,
     LEGACY_SERVICE_PROTOCOL_HEADER, SERVICE_PROTOCOL_HEADER, ServiceOperationKind,
     StartClashRequest, StartClashResult,
@@ -753,13 +754,17 @@ where
 
 /// What a route requires of the owner once the lifecycle lock is held.
 enum OwnerLifecycleGate<'a> {
-    /// `Status` reports inactivity as data rather than as an error, and `StartClash` is the
-    /// request that makes an owner active in the first place. Neither can demand one.
+    /// `Status` reports inactivity as data rather than as an error, and owner-goodbye applies
+    /// its own still-protected verdict. Neither can demand an active owner.
     Unchecked,
     /// Proof that this caller owns the machine-wide armed WFP policy. This check belongs inside
     /// the lifecycle lock: checking before waiting for the lock creates a stale-authorization
     /// window in which a queued StartClash can replace the owner.
     ArmedPolicyOwner,
+    /// `StartClash` and `PrepareCoreStart` make the caller the owner and may stop the running
+    /// Core, so they must not run over armed protection that another local user still holds.
+    /// Nor may they first arm protection from a Remote Desktop session, which the arm would cut.
+    ArmedPolicyTakeover,
     /// Proof of being the active owner, which is all the read-only log routes need.
     ActiveOwner,
     /// Proof of the current session, not merely of the owner: a second instance of the same
@@ -797,6 +802,14 @@ async fn enter_owner_lifecycle(
         OwnerLifecycleGate::Unchecked => Ok(()),
         OwnerLifecycleGate::ArmedPolicyOwner => {
             windows_kill_switch::authorize_write_for(&owner.key)
+        }
+        OwnerLifecycleGate::ArmedPolicyTakeover => {
+            windows_kill_switch::authorize_takeover_for(&owner.key).and_then(|()| {
+                windows_kill_switch::authorize_connect_session_for(
+                    &owner.key,
+                    owner.peer_session_id,
+                )
+            })
         }
         OwnerLifecycleGate::ActiveOwner => require_active_owner(owner).await,
         OwnerLifecycleGate::ActiveSession(proof) => {
@@ -936,6 +949,11 @@ fn service_error(error: ServiceError) -> Result<HttpResponse> {
         crate::ServiceErrorCode::UnauthorizedOwner => StatusCode::UNAUTHORIZED,
         crate::ServiceErrorCode::NotActive => StatusCode::CONFLICT,
         crate::ServiceErrorCode::StillProtected => StatusCode::CONFLICT,
+        // The request describes an attempt an explicit release already superseded: the
+        // current state wins, exactly like the other 409 rejections.
+        crate::ServiceErrorCode::StaleReleaseEpoch => StatusCode::CONFLICT,
+        crate::ServiceErrorCode::ProtectionHeldByAnotherUser => StatusCode::CONFLICT,
+        crate::ServiceErrorCode::RemoteSessionConnectRefused => StatusCode::CONFLICT,
         _ => StatusCode::UNPROCESSABLE_ENTITY,
     };
     json_response::<()>(status, error.code as u16, error.message, None)

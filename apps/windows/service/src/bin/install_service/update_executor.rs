@@ -2,15 +2,96 @@
 //! App journal, an installer-supplied path, or version-string adoption.
 use super::*;
 use anyhow::ensure;
-use tono_service_protocol::{
-    update_contract::Phase, update_native as native, update_transaction as tx,
-};
+use tono_service_protocol::update_contract::{Components, Phase};
+use tono_service_protocol::{update_native as native, update_transaction as tx};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Plan {
     attempt_id: String,
     members: Vec<CoordinatedBinaryReplacement>,
+}
+
+/// What recovery may conclude about an interrupted installation once the
+/// recorded executor incarnation is gone. Successor process liveness is
+/// deliberately not an input: a user closing the new App before commit, or a
+/// reboot, is not an interrupted publication.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecoveryPublication {
+    /// No durable replacement plan exists, so no publication can have started.
+    NoPlan,
+    /// The installed identity equals the signed target and every durable
+    /// plan member is at its new digest: the publication completed and was
+    /// verified before. Recovery re-establishes the successor path; it must
+    /// not revert a complete installation.
+    TargetVerified,
+    /// The installed identity is not the signed target: the publication is
+    /// genuinely interrupted (or a previous rollback already restored the
+    /// retained originals). Restore from the retained backups.
+    Interrupted,
+}
+
+fn classify_recovery(
+    plan_present: bool,
+    plan_members_new: bool,
+    installed: &Components,
+    target: &Components,
+) -> RecoveryPublication {
+    if !plan_present {
+        RecoveryPublication::NoPlan
+    } else if plan_members_new && installed == target {
+        RecoveryPublication::TargetVerified
+    } else {
+        RecoveryPublication::Interrupted
+    }
+}
+
+impl RecoveryPublication {
+    /// Only a recovery that restores retained originals or records the old
+    /// identity needs the Service stopped. A complete, verified publication
+    /// whose successor is simply not running changes no file; stopping the
+    /// Service there restarted it, and every Service start spawns recovery
+    /// again for the still-pending attempt.
+    fn requires_service_stop(self) -> bool {
+        !matches!(self, Self::TargetVerified)
+    }
+}
+
+/// Read-only: the installed identity and the durable plan members decide
+/// what recovery may conclude. Nothing here stops the Service or writes.
+fn classify_installed(
+    a: &tx::Attempt,
+    plan_path: &Path,
+) -> Result<(Components, RecoveryPublication), Error> {
+    let service_path = tono_service_protocol::service_paths()
+        .install_dir()
+        .join("tono-service.exe");
+    let installed = native::components(&a.install_root, &service_path)?;
+    let plan_present = plan_path.exists();
+    // Three binaries at the target do not prove later members (the
+    // payload tree, `core-sha256.txt`) were published too. Only a
+    // member read as different is an interruption; an unreadable
+    // member (sharing violation, AV lock) exits like an unreadable
+    // component, before any rollback touches a file.
+    let plan_members_new = plan_present
+        && native::plan_members_at(
+            plan_path,
+            &a.receipt.attempt_id,
+            &[
+                a.install_root.as_path(),
+                tono_service_protocol::service_paths()
+                    .install_dir()
+                    .as_path(),
+            ],
+            native::PlanSide::New,
+        )?;
+    let publication = classify_recovery(
+        plan_present,
+        plan_members_new,
+        &installed,
+        &tx::target(&a.manifest).components,
+    );
+    Ok((installed, publication))
 }
 
 pub(super) fn dispatch() -> Result<bool, Error> {
@@ -21,7 +102,29 @@ pub(super) fn dispatch() -> Result<bool, Error> {
             Ok(true)
         }
         [mode] if mode == "--manual-update-gate" => {
-            tokio::runtime::Runtime::new()?.block_on(native::begin_manual())?;
+            if let Err(error) = tokio::runtime::Runtime::new()?.block_on(native::begin_manual()) {
+                if error.is::<native::ProtectionActive>() {
+                    eprintln!("Error: {error:#}");
+                    std::process::exit(native::MANUAL_GATE_PROTECTION_ACTIVE_EXIT);
+                }
+                if error.is::<native::OrphanedProtection>() {
+                    eprintln!("Error: {error:#}");
+                    std::process::exit(native::MANUAL_GATE_ORPHANED_PROTECTION_EXIT);
+                }
+                return Err(error);
+            }
+            Ok(true)
+        }
+        [mode] if mode == "--manual-orphan-gate" => {
+            native::begin_manual_orphan()?;
+            Ok(true)
+        }
+        [mode] if mode == "--retire-orphaned-owner" => {
+            tokio::runtime::Runtime::new()?.block_on(native::retire_orphaned_owner())?;
+            Ok(true)
+        }
+        [mode] if mode == "--manual-uninstall-gate" => {
+            native::begin_manual_uninstall()?;
             Ok(true)
         }
         [mode] if mode == "--manual-update-finish" => {
@@ -101,7 +204,7 @@ fn execute(recovery: bool) -> Result<(), Error> {
         "executor image binding changed"
     );
     if a.receipt.phase == Phase::Committed {
-        cleanup_committed(&plan_path)?;
+        finish_committed(&plan_path, native::retire_recovery_task)?;
         return Ok(());
     }
     if recovery {
@@ -111,8 +214,9 @@ fn execute(recovery: bool) -> Result<(), Error> {
         {
             return Ok(()); // Live original executor, not an interrupted install.
         }
-        // Never resume forward execution after restart. The stored physical
-        // replacement plan restores old bytes, preserving the consumed sequence.
+        // A dead executor must not re-execute a live publication below. The
+        // installed identity — not successor liveness — then classifies the
+        // interruption: only an incomplete publication rolls back.
         if a.successor_image
             .as_ref()
             .is_some_and(|e| native::image(e.pid).ok().as_ref() == Some(e))
@@ -123,6 +227,15 @@ fn execute(recovery: bool) -> Result<(), Error> {
             a.execution,
             tx::Execution::Consumed | tx::Execution::Replaced | tx::Execution::Uncertain
         ) {
+            return Ok(());
+        }
+        // Classify before touching the Service: a complete publication keeps
+        // the running Service and only records the Replaced marker.
+        let (_, publication) = classify_installed(&a, &plan_path)?;
+        if !publication.requires_service_stop() {
+            if a.execution != tx::Execution::Replaced {
+                store.execution(tx::Execution::Replaced)?;
+            }
             return Ok(());
         }
     } else {
@@ -147,7 +260,26 @@ fn execute(recovery: bool) -> Result<(), Error> {
         store.consume(&self_image, tx::now()?)?;
     }
     // From here every live/repair mutation has a durable consumed high-water.
-    native::register_consumed_recovery(&store)?;
+    if recovery {
+        // Classification and rollback do not run through the ONSTART task; it only re-arms the
+        // net for this run. An unavailable Task Scheduler must not strand the attempt (#484).
+        if let Err(error) = native::register_consumed_recovery(&store) {
+            eprintln!(
+                "update recovery task could not be registered; recovering without it: {error:#}"
+            );
+        }
+    } else {
+        // No publication without the net: nothing is replaced yet, so the attempt ends
+        // RolledBack against the retained original identity instead of staying Consumed.
+        native::register_recovery_before_publication(&mut store, || {
+            native::components(
+                &a.install_root,
+                &tono_service_protocol::service_paths()
+                    .install_dir()
+                    .join("tono-service.exe"),
+            )
+        })?;
+    }
     let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
     let service = manager.open_service(
         tono_service_protocol::WINDOWS_SERVICE_NAME,
@@ -167,14 +299,35 @@ fn execute(recovery: bool) -> Result<(), Error> {
         let service_path = tono_service_protocol::service_paths()
             .install_dir()
             .join("tono-service.exe");
-        if recovery && !plan_path.exists() {
-            // There cannot have been a publication without the durable plan.
-            ensure!(
-                native::components(&a.install_root, &service_path)? == a.old_components,
-                "no replacement plan and old identity is not intact"
-            );
-            store.execution(tx::Execution::RolledBack)?;
-            return Ok(None);
+        if recovery {
+            // The installed identity — not successor liveness — classifies the
+            // interruption. A user closing the new App before commit or a
+            // reboot must not revert a complete, verified publication.
+            let (installed, publication) = classify_installed(&a, &plan_path)?;
+            match publication {
+                RecoveryPublication::NoPlan => {
+                    // There cannot have been a publication without the durable plan.
+                    ensure!(
+                        installed == a.old_components,
+                        "no replacement plan and old identity is not intact"
+                    );
+                    store.execution(tx::Execution::RolledBack)?;
+                    return Ok(None);
+                }
+                RecoveryPublication::TargetVerified => {
+                    // Keep the complete installation. When the successor launch
+                    // never durably registered (consumed/uncertain marker), a
+                    // measured target on disk is the publication proof: the
+                    // first authenticated target-identity App adopts on next
+                    // start. An already registered successor is re-proved the
+                    // same way after its recorded incarnation exited.
+                    if a.execution != tx::Execution::Replaced {
+                        store.execution(tx::Execution::Replaced)?;
+                    }
+                    return Ok(None);
+                }
+                RecoveryPublication::Interrupted => {}
+            }
         }
         let mut plan = if recovery {
             serde_json::from_slice::<Plan>(&std::fs::read(&plan_path)?)?
@@ -254,18 +407,32 @@ fn execute(recovery: bool) -> Result<(), Error> {
     configure_windows_service_recovery(&service)?;
     drop(store);
     drop(repair);
-    service.start(&Vec::<&std::ffi::OsStr>::new())?;
-    wait_for_service_ready()?;
-    if let Some(child) = outcome? {
+    // Resume the durable successor even when the restarted Service is slow or
+    // failed to become ready: a suspended child dropped at this point would
+    // terminate the registered successor of a complete, verified installation
+    // and leave the next recovery a state it would otherwise roll back.
+    let restart = (|| -> Result<(), Error> {
+        service.start(&Vec::<&std::ffi::OsStr>::new())?;
+        wait_for_service_ready()
+    })();
+    let successor = match outcome {
+        Ok(child) => child,
+        Err(error) => {
+            restart?;
+            return Err(error);
+        }
+    };
+    if let Some(child) = successor {
         child.resume()?;
     }
+    restart?;
     // Backups are not freed on IPC readiness. Only durable recovery commit
     // permits cleanup; the boot task handles a later commit after this wait.
     for _ in 0..120 {
         std::thread::sleep(Duration::from_secs(1));
         let store = open_waiting()?;
         if store.attempt()?.receipt.phase == Phase::Committed {
-            cleanup_committed(&plan_path)?;
+            finish_committed(&plan_path, native::retire_recovery_task)?;
             return Ok(());
         }
     }
@@ -313,6 +480,23 @@ fn rollback_plan(plan: &mut Plan) -> Result<(), Error> {
     Ok(())
 }
 
+/// Commit ends the boot task's job: once the committed cleanup ran there is
+/// nothing left for `--update-recover` to do, so the SYSTEM ONSTART task is
+/// retired, as macOS retires its launchd job. A failed retirement leaves the
+/// task for the next boot, which lands here again and retries.
+fn finish_committed(
+    plan_path: &Path,
+    retire: impl FnOnce() -> Result<(), Error>,
+) -> Result<(), Error> {
+    cleanup_committed(plan_path)?;
+    if let Err(error) = retire() {
+        eprintln!(
+            "committed update cleaned up; the recovery task stays until the next boot: {error:#}"
+        );
+    }
+    Ok(())
+}
+
 fn cleanup_committed(plan_path: &Path) -> Result<(), Error> {
     let plan: Plan = serde_json::from_slice(&std::fs::read(plan_path)?)?;
     for member in plan.members {
@@ -328,6 +512,47 @@ mod tests {
     use tono_service_protocol::update_contract::{
         Observation, Protection, Receipt, ReleaseManifest,
     };
+
+    #[test]
+    fn update_commit_retires_the_recovery_task_after_cleanup() {
+        let root = std::env::temp_dir().join(format!(
+            "tono-update-commit-retire-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let plan_path = root.join("replacement.json");
+        // Without the committed cleanup the boot task still has work left.
+        assert!(
+            finish_committed(&plan_path, || panic!(
+                "retired before the committed cleanup"
+            ))
+            .is_err()
+        );
+        tx::atomic_write(
+            &plan_path,
+            &serde_json::to_vec(&Plan {
+                attempt_id: "attempt".into(),
+                members: Vec::new(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let mut retired = false;
+        finish_committed(&plan_path, || {
+            retired = true;
+            Ok(())
+        })
+        .unwrap();
+        assert!(
+            retired,
+            "a committed update must not leave its SYSTEM boot task"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn update_executor_consumes_before_publication_and_reloads_interrupted_rollback() {
@@ -475,5 +700,64 @@ mod tests {
         );
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_recovery_classifies_publication_by_installed_identity_not_successor_liveness() {
+        let target = Components {
+            app_sha256: "t".into(),
+            core_sha256: "tc".into(),
+            privileged_sha256: "tp".into(),
+        };
+        let old = Components {
+            app_sha256: "o".into(),
+            core_sha256: "oc".into(),
+            privileged_sha256: "op".into(),
+        };
+        // A complete verified installation survives its successor exiting first.
+        assert_eq!(
+            classify_recovery(true, true, &target, &target),
+            RecoveryPublication::TargetVerified
+        );
+        // A mid-flight publication (neither target nor fully restored) rolls back.
+        let mixed = Components {
+            app_sha256: "t".into(),
+            core_sha256: "oc".into(),
+            privileged_sha256: "op".into(),
+        };
+        assert_eq!(
+            classify_recovery(true, false, &mixed, &target),
+            RecoveryPublication::Interrupted
+        );
+        // An already-restored rollback re-runs the idempotent restore.
+        assert_eq!(
+            classify_recovery(true, false, &old, &target),
+            RecoveryPublication::Interrupted
+        );
+        // No durable plan means no publication can have started.
+        assert_eq!(
+            classify_recovery(false, false, &old, &target),
+            RecoveryPublication::NoPlan
+        );
+    }
+
+    #[test]
+    fn update_recovery_keeps_the_service_running_for_a_complete_publication() {
+        let target = Components {
+            app_sha256: "t".into(),
+            core_sha256: "tc".into(),
+            privileged_sha256: "tp".into(),
+        };
+        let old = Components {
+            app_sha256: "o".into(),
+            core_sha256: "oc".into(),
+            privileged_sha256: "op".into(),
+        };
+        // Replaced, successor closed before commit: nothing to restore, so the
+        // Service is not stopped (a stop/start would spawn recovery again).
+        assert!(!classify_recovery(true, true, &target, &target).requires_service_stop());
+        // Rollback and the no-plan identity check still run with the Service stopped.
+        assert!(classify_recovery(true, false, &target, &target).requires_service_stop());
+        assert!(classify_recovery(false, false, &old, &target).requires_service_stop());
     }
 }

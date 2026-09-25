@@ -78,6 +78,18 @@ tags are not those feeds.
 - `main` integrates both lines and is the only source allowed to deploy the
   shared control plane.
 
+## Going back to an older Windows build
+
+From 0.0.73 the Windows installer refuses to run over a newer installed
+version (`allowDowngrades: false`) and says so. An older build cannot undo
+system changes a newer build made. 0.0.73+ suppresses encrypted DNS and
+installs a catch-all NRPT rule while protected, and the 0.0.72 Service and
+uninstaller know neither (H15-F5, #507). To go back, uninstall the newer
+version first (keep application data; its uninstaller restores NRPT and
+encrypted DNS), then run the older installer. Never run a 0.0.72 installer
+over 0.0.73+: that installer predates this block and allows the downgrade.
+If it already happened, reinstalling 0.0.73+ repairs NRPT and encrypted DNS.
+
 ## Merge and release gates
 
 1. Run the affected platform CI and Services CI on the release line.

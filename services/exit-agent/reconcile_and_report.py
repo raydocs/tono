@@ -50,6 +50,7 @@ import argparse
 import errno
 import fcntl
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -80,7 +81,15 @@ RETRYABLE_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
 REJECTED_STATUSES = frozenset({400, 409, 413, 422})
 MAX_SAFE_INTEGER = (1 << 53) - 1
 MAX_RESPONSE_BYTES = 512 * 1024
+# The roster grows with the fleet's devices (~150 bytes each). A cut-off body
+# is never acted on, so the limit is set well above today's size.
+MAX_ROSTER_BYTES = 8 * 1024 * 1024
 STATE_MODE = 0o600
+# How long the last verified roster may stand in for an unreachable control
+# plane. Past this the node restores nothing: a day-old list is too likely to
+# name accounts that have since been revoked, expired or run out of quota.
+ROSTER_CACHE_MAX_AGE_SECONDS = 24 * 60 * 60
+ROSTER_CACHE_VERSION = 1
 HY2_AUTH_ALLOWLIST = Path("/opt/tono-hy2/auth-allow.sha256")
 HY2_ROSTER_MARKER = "# tono-exit-agent roster v1"
 # Label written by enable-tono-exit-metering.sh for the credential every
@@ -91,6 +100,10 @@ LEGACY_CLIENT_EMAIL = "shared-legacy"
 # mistaken for the still-installed previous generation.
 CLIENT_LABEL_PREFIX = "u:"
 SOURCE_ID_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,64}")
+# The control plane's answer for a token that belongs to a disabled or retired
+# node. Only this exact 403 body withdraws clients; a bare 401/403, an edge
+# block page or a network failure keeps the last roster and retries.
+EXIT_NODE_DISABLED_CODE = "EXIT_NODE_DISABLED"
 REQUEST_HEADERS = {
     "accept": "application/json",
     # Zone browser-integrity rejects a bare urllib UA with CF 403/1010.
@@ -108,6 +121,10 @@ class Rejection(RuntimeError):
 
 class Unreachable(RuntimeError):
     """Delivery did not get through. The queue keeps it for the next run."""
+
+
+class NodeDisabled(RuntimeError):
+    """The control plane says this exit node is disabled or retired."""
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -151,8 +168,25 @@ def open_control_plane(request: urllib.request.Request, timeout: int):
     try:
         return urllib.request.build_opener(NoRedirect).open(request, timeout=timeout)
     except urllib.error.HTTPError as error:
+        # Keep a bounded error body so a caller can tell an explicit control
+        # plane answer from an edge page; the response itself is closed here.
+        try:
+            error.tono_body = error.read(4096) if error.fp else b""
+        except OSError:
+            error.tono_body = b""
         error.close()
         raise
+
+
+def is_node_disabled(error: urllib.error.HTTPError) -> bool:
+    if error.code != 403:
+        return False
+    try:
+        payload = json.loads(getattr(error, "tono_body", b"") or b"")
+    except (ValueError, UnicodeDecodeError):
+        return False
+    detail = payload.get("error") if isinstance(payload, dict) else None
+    return isinstance(detail, dict) and detail.get("code") == EXIT_NODE_DISABLED_CODE
 
 
 def xray_binary() -> Path:
@@ -162,6 +196,32 @@ def xray_binary() -> Path:
     return path
 
 
+def xray_config_path() -> Path:
+    # The static config tono-xray loads at start. shared-legacy lives here, so a
+    # retirement that only reaches the running process is undone by a restart.
+    return Path(env("TONO_XRAY_CONFIG", required=False) or "/opt/tono-xray/current/config.json")
+
+
+def retire_override(raw: str) -> bool | None:
+    """The operator's TONO_RETIRE_SHARED_LEGACY, or None when unset.
+
+    Case and common spellings are accepted. Anything else keeps shared-legacy
+    as it is this round and warns: retirement is persisted to the static
+    config and cannot be undone by a later `false`, so a typo during rollback
+    must not trigger it.
+    """
+    value = raw.strip().lower()
+    if not value:
+        return None
+    if value in ("1", "true", "yes", "on"):
+        return True
+    if value in ("0", "false", "no", "off"):
+        return False
+    print(f"TONO_RETIRE_SHARED_LEGACY={raw!r} is not true/false; leaving shared-legacy as it is",
+          file=sys.stderr)
+    return False
+
+
 def api_address() -> str:
     # The management inbound. Localhost-only by design: this is the interface that
     # can add and remove accounts.
@@ -169,7 +229,12 @@ def api_address() -> str:
 
 
 def inbound_tag() -> str:
-    return env("TONO_XRAY_INBOUND_TAG", required=False) or "tono-vless"
+    tag = env("TONO_XRAY_INBOUND_TAG", required=False) or "tono-vless"
+    # Xray echoes the tag in its errors; one with a line break could print a
+    # whole success line of its own.
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", tag):
+        raise Refusal("TONO_XRAY_INBOUND_TAG may only hold letters, digits, '.', '_' and '-'")
+    return tag
 
 
 def state_path() -> Path:
@@ -210,6 +275,22 @@ def source_id(state: dict) -> str:
     history, while dropping it can lose usage. Existing nodes must therefore be
     provisioned under the source identity already recorded in this state file.
     """
+    source = configured_source()
+    recorded = state.get("sourceId")
+    if isinstance(recorded, str) and recorded and recorded != source:
+        raise Refusal(
+            f"TONO_SOURCE_ID {source!r} does not match durable source {recorded!r}; "
+            "provision the exit node with the durable source id"
+        )
+    for report in state["pendingReports"]:
+        if not isinstance(report, dict) or report.get("sourceId") != source:
+            raise Refusal("a queued usage report does not match the durable source id")
+    state["sourceId"] = source
+    return source
+
+
+def configured_source() -> str:
+    """This exit's configured name, before any comparison with durable state."""
     configured = env("TONO_SOURCE_ID", required=False) or machine_identity()
     normalized = re.sub(r"[^A-Za-z0-9._-]", "-", configured).strip("-")
     # Preserve both halves of a long default identity. Left-truncating at 64
@@ -225,16 +306,6 @@ def source_id(state: dict) -> str:
         raise Refusal(
             "this exit has no stable identity to report under; set TONO_SOURCE_ID"
         )
-    recorded = state.get("sourceId")
-    if isinstance(recorded, str) and recorded and recorded != source:
-        raise Refusal(
-            f"TONO_SOURCE_ID {source!r} does not match durable source {recorded!r}; "
-            "provision the exit node with the durable source id"
-        )
-    for report in state["pendingReports"]:
-        if not isinstance(report, dict) or report.get("sourceId") != source:
-            raise Refusal("a queued usage report does not match the durable source id")
-    state["sourceId"] = source
     return source
 
 
@@ -277,6 +348,8 @@ def add_inbound_user(
     binary: Path, command: str, address: str, tag: str, label: str, client_uuid: str,
 ) -> subprocess.CompletedProcess[str]:
     """Install one VLESS identity. Xray 26+ `adu` takes an inbound JSON snippet."""
+    if not _one_line(label):
+        return _refused(label)
     if command != "adu":
         return run_xray(binary, [
             "api", command, f"--server={address}",
@@ -311,6 +384,96 @@ def add_inbound_user(
             pass
 
 
+def remove_inbound_user(
+    binary: Path, command: str, address: str, tag: str, email: str,
+) -> subprocess.CompletedProcess[str]:
+    """Remove one identity. Xray 26 `rmu` takes `-tag=` and positional emails;
+    it rejects `--email=` outright. `removeuser` gets the same form."""
+    if not _one_line(email):
+        return _refused(email)
+    return run_xray(binary, ["api", command, f"--server={address}", f"-tag={tag}", email])
+
+
+def _output_lines(result: subprocess.CompletedProcess[str]) -> list[str]:
+    return f"{result.stdout or ''}\n{result.stderr or ''}".splitlines()
+
+
+def _total_at_least_one(lines: list[str], verb: str) -> bool:
+    for line in lines:
+        match = re.fullmatch(rf"{verb} (\d+) user\(s\) in total\.", line.strip())
+        if match and int(match.group(1)) >= 1:
+            return True
+    return False
+
+
+def _legacy_user_line(lines: list[str], email: str, outcome: str) -> bool:
+    # Pre-26 removeuser/adduser/adi print "... User <email> <outcome>." with a
+    # non-zero exit. Only a whole line naming this email counts: an echoed
+    # email cannot contain a line that names itself.
+    pattern = rf"(?:.*: )?User {re.escape(email)} {outcome}\.?"
+    return any(re.fullmatch(pattern, line.strip(), re.IGNORECASE) for line in lines)
+
+
+def _vless_user_error(lines: list[str], email: str, outcome: str) -> bool:
+    pattern = rf"rpc error: code = \w+ desc = proxy/vless: User {re.escape(email)} {outcome}\."
+    return any(re.fullmatch(pattern, line.strip()) for line in lines)
+
+
+def _one_line(email: str) -> bool:
+    # Xray echoes the email; one with a line break could print a whole
+    # success line of its own. Such an email is never judged a success.
+    return email.isprintable()
+
+
+def _refused(email: str) -> subprocess.CompletedProcess[str]:
+    # Not run at all: a NUL byte would make subprocess raise and skip every
+    # later removal. The email stays out of the message, or the legacy
+    # "already exists"/"not found" checks would read it as a result.
+    return subprocess.CompletedProcess([], 1, "", "refused a non-printable email")
+
+
+def removal_succeeded(result: subprocess.CompletedProcess[str], email: str, command: str = "rmu") -> bool:
+    """Whether `rmu` removed `email` or it was already absent.
+
+    Xray 26 `rmu` exits 0 even when a removal fails, so the exit code alone
+    proves nothing. Only whole lines count (main/commands/all/api/
+    inbound_user_remove.go, v26.3.27): an echoed email or tag must not pass as
+    a total or a per-user result. A wrong inbound tag prints "handler not
+    found" and "Removed 0 user(s) in total.". The legacy `removeuser` keeps
+    its exit-code rule.
+    """
+    if not _one_line(email):
+        return False
+    if command != "rmu":
+        return result.returncode == 0 or _legacy_user_line(_output_lines(result), email, "not found")
+    lines = _output_lines(result)
+    if result.returncode == 0 and _total_at_least_one(lines, "Removed"):
+        return True
+    if any("failed to get handler" in line or "handler not found" in line for line in lines):
+        return False
+    return _vless_user_error(lines, email, "not found")
+
+
+def addition_outcome(result: subprocess.CompletedProcess[str], email: str) -> str:
+    """"added", "present" or "failed" for one `adu` run.
+
+    Like `rmu`, `adu` exits 0 after an RPC error and prints "Added 0 user(s)
+    in total." (main/commands/all/api/inbound_user_add.go, v26.3.27).
+    """
+    if not _one_line(email):
+        return "failed"
+    lines = _output_lines(result)
+    if _vless_user_error(lines, email, "already exists"):
+        return "present"
+    if result.returncode == 0 and _total_at_least_one(lines, "Added"):
+        return "added"
+    return "failed"
+
+
+def api_error(result: subprocess.CompletedProcess[str]) -> str:
+    return (result.stderr or "").strip() or (result.stdout or "").strip() or str(result.returncode)
+
+
 def supported_api_commands(binary: Path) -> set[str]:
     """What this xray's `api` subcommand actually offers.
 
@@ -331,12 +494,13 @@ def require_commands(binary: Path) -> dict[str, str]:
     wanted = {
         "add_user": ("adu", "adduser", "adi"),
         "remove_user": ("rmu", "removeuser"),
-        "stats_query": ("statsquery", "stats"),
     }
     # Listing the inbound's clients is what makes a removal safe, and older
     # builds do not have it — so it is looked up and lived without rather than
-    # required, and its absence makes this agent remove nothing.
-    optional = {"list_users": ("inbounduser", "iu")}
+    # required, and its absence makes this agent remove nothing. Counters are
+    # required for metering, which refuses after enforcement when they are
+    # missing; their absence must not hold back a revocation.
+    optional = {"list_users": ("inbounduser", "iu"), "stats_query": ("statsquery", "stats")}
     resolved: dict[str, str] = {}
     missing: list[str] = []
     for role, candidates in wanted.items():
@@ -369,8 +533,29 @@ def fetch_roster(base: str, token: str) -> tuple[str, int, list[dict[str, str]],
         method="GET",
     )
     request.add_unredirected_header("Authorization", f"Bearer {token}")
-    with open_control_plane(request, timeout=20) as response:
-        payload = json.loads(response.read(MAX_RESPONSE_BYTES).decode("utf-8"))
+    try:
+        response = open_control_plane(request, timeout=20)
+    except urllib.error.HTTPError as error:
+        if is_node_disabled(error):
+            raise NodeDisabled("the control plane reports this exit node disabled") from error
+        raise
+    with response as opened:
+        raw = opened.read(MAX_ROSTER_BYTES + 1)
+    if len(raw) > MAX_ROSTER_BYTES:
+        # A prefix proves nothing about who is absent, so nothing is removed on
+        # it; the round refuses loudly instead of failing to parse every time.
+        raise Refusal(f"roster response exceeds {MAX_ROSTER_BYTES} bytes; nothing was applied")
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except ValueError as error:
+        raise Refusal(f"roster response is not JSON: {error}") from error
+    if not isinstance(payload, dict):
+        raise Refusal("roster response is not the documented shape")
+    return parse_roster(payload)
+
+
+def parse_roster(payload: dict) -> tuple[str, int, list[dict[str, str]], bool]:
+    """Validate a roster document, fresh from the control plane or its saved copy."""
     node_id = payload.get("nodeId")
     observed_at = payload.get("observedAt")
     identities = payload.get("identities")
@@ -463,6 +648,11 @@ def load_state(path: Path) -> dict:
         return {"totals": {}, "counterBaseline": {}, "pendingReports": []}
     with path.open("r", encoding="utf-8") as handle:
         state = json.load(handle)
+    # Valid JSON that is not an object ([] or null) must be a refusal like any
+    # other corruption, not an AttributeError that ends the round before any
+    # client is removed.
+    if not isinstance(state, dict):
+        raise Refusal("state file is corrupt: not a JSON object")
     for key, kind in (("totals", dict), ("counterBaseline", dict), ("pendingReports", list)):
         if not isinstance(state.get(key), kind):
             raise Refusal(f"state file is corrupt: {key}")
@@ -472,6 +662,9 @@ def load_state(path: Path) -> dict:
                       ("lastReportObservedAt", int)):
         if key in state and not isinstance(state[key], kind):
             raise Refusal(f"state file is corrupt: {key}")
+    # Used as a set of labels before revocation; a non-string entry would crash it.
+    if not all(isinstance(label, str) for label in state.get("installedClients", [])):
+        raise Refusal("state file is corrupt: installedClients")
     last_report_at = state.get("lastReportObservedAt")
     if (
         isinstance(last_report_at, bool)
@@ -492,6 +685,151 @@ def save_state(path: Path, state: dict) -> None:
     # lifetime totals truncated, and truncated totals bill nobody for what they
     # already used.
     temporary.replace(path)
+
+
+def roster_cache_path(path: Path) -> Path:
+    return path.with_name(f"{path.name}.roster")
+
+
+def control_plane_unreachable(error: BaseException) -> bool:
+    """Whether a roster fetch failed without the control plane answering it.
+
+    Only then may the node fall back to its last verified roster. Any other
+    answer, such as a rejected or disabled token, a roster that fails validation
+    or another node's roster, is the control plane speaking, and it discards
+    the copy.
+    """
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code in RETRYABLE_STATUSES or error.code >= 500
+    return isinstance(error, (OSError, http.client.HTTPException))
+
+
+def discard_roster_cache(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        raise Refusal(f"the saved roster could not be removed: {error}") from error
+
+
+def node_disabled_answer(error: BaseException) -> bool:
+    """Whether the control plane answered 403 EXIT_NODE_DISABLED.
+
+    Reserved for PR #375, which keeps that bounded error body as `tono_body`
+    and raises NodeDisabled from the HTTPError; either form counts. Without
+    #375 no error carries the body and this is always false; such a 403 is
+    still an answer and discards the copy like any other.
+    """
+    for candidate in (error, error.__cause__):
+        if not isinstance(candidate, urllib.error.HTTPError) or candidate.code != 403:
+            continue
+        try:
+            payload = json.loads(getattr(candidate, "tono_body", b"") or b"")
+        except (ValueError, UnicodeDecodeError):
+            continue
+        detail = payload.get("error") if isinstance(payload, dict) else None
+        if isinstance(detail, dict) and detail.get("code") == "EXIT_NODE_DISABLED":
+            return True
+    return False
+
+
+def fetch_roster_or_discard_cache(base: str, token: str, cache: Path):
+    """fetch_roster, deleting the saved roster on any answer from the control plane.
+
+    The copy goes here, before any caller's handler runs. A disabled node
+    withdraws every client; if its copy survived, the next network error would
+    reinstall them all from it. For that answer a failed removal is reported
+    but does not replace the error, so the withdrawal still runs.
+    """
+    try:
+        return fetch_roster(base, token)
+    except Exception as error:
+        if node_disabled_answer(error):
+            try:
+                discard_roster_cache(cache)
+            except Refusal as refusal:
+                print(f"{refusal}; this disabled node still holds its saved roster",
+                      file=sys.stderr)
+            raise
+        if not control_plane_unreachable(error):
+            discard_roster_cache(cache)
+        raise
+
+
+def save_roster_cache(path: Path, node_id: str, observed_at: int,
+                      roster: list[dict[str, str]], retire_shared_legacy: bool) -> str | None:
+    """Keep the roster just verified, for an Xray restart during an outage.
+
+    The copy holds client credentials, so it is owner-only from creation and
+    replaced atomically. If it cannot be written, the previous copy is removed:
+    an older list may still name an account this roster has revoked. Returns an
+    error only when even that removal failed.
+    """
+    document = {
+        "version": ROSTER_CACHE_VERSION,
+        "savedAt": int(time.time()),
+        "nodeId": node_id,
+        "observedAt": observed_at,
+        "retireSharedLegacy": retire_shared_legacy,
+        "identities": roster,
+    }
+    temporary: str | None = None
+    try:
+        descriptor, temporary = tempfile.mkstemp(prefix=".roster-", dir=path.parent)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            os.fchmod(output.fileno(), STATE_MODE)
+            json.dump(document, output, sort_keys=True)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+        temporary = None
+        return None
+    except OSError as error:
+        print(f"the roster could not be saved for outages: {error}", file=sys.stderr)
+        try:
+            discard_roster_cache(path)
+        except Refusal as refusal:
+            return str(refusal)
+        return None
+    finally:
+        if temporary is not None:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+
+
+def load_roster_cache(path: Path, source: str) -> tuple[list[dict[str, str]], bool, int]:
+    """The last verified roster and its age, or a Refusal saying why not."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except FileNotFoundError as error:
+        raise Refusal("there is no saved roster") from error
+    except OSError as error:
+        raise Refusal(f"the saved roster cannot be read: {error}") from error
+    with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+        info = os.fstat(handle.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                or info.st_mode & 0o077):
+            raise Refusal("the saved roster is not a private service-owned file")
+        try:
+            document = json.load(handle)
+        except ValueError as error:
+            raise Refusal("the saved roster is corrupt") from error
+    if not isinstance(document, dict) or document.get("version") != ROSTER_CACHE_VERSION:
+        raise Refusal("the saved roster is not a version this agent reads")
+    saved_at = document.get("savedAt")
+    if not isinstance(saved_at, int) or isinstance(saved_at, bool):
+        raise Refusal("the saved roster has no valid savedAt")
+    age = int(time.time()) - saved_at
+    # A clock that moved backwards gives no usable age either.
+    if not 0 <= age <= ROSTER_CACHE_MAX_AGE_SECONDS:
+        raise Refusal(f"the saved roster is {age}s old, outside 0-{ROSTER_CACHE_MAX_AGE_SECONDS}s")
+    node_id, _, roster, retire_shared_legacy = parse_roster(document)
+    if node_id != source:
+        raise Refusal("the saved roster belongs to another exit node")
+    return roster, retire_shared_legacy, age
 
 
 @contextmanager
@@ -661,8 +999,22 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
     Removal is the enforcement path, and a wrong one disconnects a paying
     customer. So it runs off what the node holds, or failing that off the labels
     this agent recorded installing, and never off counters. When neither is
-    known, nothing is removed.
+    known, nothing is removed — except shared-legacy under an explicit
+    retirement, which lives in the static config and so may be back after a
+    restart even though no inventory still names it.
     """
+    removed = 0
+    failures: list[str] = []
+    if retire_shared_legacy and listed is None:
+        result = remove_inbound_user(
+            binary, commands["remove_user"], address, tag, LEGACY_CLIENT_EMAIL,
+        )
+        if not removal_succeeded(result, LEGACY_CLIENT_EMAIL, commands["remove_user"]):
+            # Like every other removal: reported with the rest, never a reason
+            # to skip the revocations that follow.
+            failures.append(f"removing {LEGACY_CLIENT_EMAIL} failed: {api_error(result)}")
+        if recorded is not None:
+            recorded = recorded - {LEGACY_CLIENT_EMAIL}
     wanted = {
         client_label(entry["userId"], entry.get("deviceId"), entry["clientUUID"]): entry["clientUUID"]
         for entry in roster
@@ -674,13 +1026,14 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
     # fail-safe and remove nothing; the shared legacy identity is outside the
     # namespace in either case.
     if not wanted and listed is None and recorded is None:
+        if failures:
+            raise Refusal("; ".join(failures))
         return 0, 0, None
     installed = listed if listed is not None else recorded
     known_installed = None if installed is None else {
         label for label in installed
         if label == LEGACY_CLIENT_EMAIL or label.startswith(CLIENT_LABEL_PREFIX)
     }
-    removed = 0
     if installed is None:
         print("this exit cannot say which clients it holds; removed nothing")
     else:
@@ -693,12 +1046,11 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
                     continue
             elif not label.startswith(CLIENT_LABEL_PREFIX):
                 continue
-            result = run_xray(binary, [
-                "api", commands["remove_user"], f"--server={address}",
-                f"--tag={tag}", f"--email={label}",
-            ])
-            if result.returncode != 0 and "not found" not in (result.stderr or "").lower():
-                raise Refusal(f"removing {label} failed: {result.stderr.strip() or result.returncode}")
+            result = remove_inbound_user(binary, commands["remove_user"], address, tag, label)
+            if not removal_succeeded(result, label, commands["remove_user"]):
+                # One failure must not leave every later revocation in place.
+                failures.append(f"removing {label} failed: {api_error(result)}")
+                continue
             if known_installed is not None:
                 known_installed.discard(label)
             removed += 1
@@ -717,16 +1069,23 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
         # Already-present is success, not failure: two agents on one timer, or a
         # retry after a lost response, must not turn into an error loop. It is
         # not an addition either, or every round would report the whole roster.
-        # Xray 26 `adu` prints "already exists" on stdout and may still exit 0.
-        output = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
-        if "already exists" in output:
-            pass
-        elif result.returncode != 0:
-            raise Refusal(f"adding {label} failed: {result.stderr.strip() or result.returncode}")
+        # Xray 26 `adu` prints its per-user result on stdout and exits 0 even
+        # when the add failed; the legacy commands keep the exit-code rule.
+        if commands["add_user"] == "adu":
+            outcome = addition_outcome(result, label)
         else:
+            outcome = ("present" if _one_line(label) and _legacy_user_line(
+                           _output_lines(result), label, "already exists")
+                       else "failed" if result.returncode != 0 else "added")
+        if outcome == "failed":
+            failures.append(f"adding {label} failed: {api_error(result)}")
+            continue
+        if outcome == "added":
             added += 1
         if known_installed is not None:
             known_installed.add(label)
+    if failures:
+        raise Refusal("; ".join(failures))
     return added, removed, known_installed
 
 
@@ -886,7 +1245,7 @@ def reconcile_and_read_stable(
     commands: dict[str, str],
     address: str,
     tag: str,
-    roster: list[dict[str, str]],
+    roster: list[dict[str, str]] | None,
     recorded: set[str] | None,
     retire_shared_legacy: bool = False,
 ) -> tuple[int, int, set[str] | None, dict[str, int], str | None]:
@@ -898,14 +1257,23 @@ def reconcile_and_read_stable(
     that baseline: it looks like a small increase and silently forgives the
     bytes before it. Retry the whole mutation/read once against the new process;
     a node that keeps restarting is unknown rather than billable guesswork.
+    A `None` roster changes no client and only reads the counters.
     """
     for attempt in range(2):
         marker_before = xray_start_marker(binary)
-        listed = installed_clients(binary, commands, address, tag)
-        added, removed, installed = reconcile(
-            binary, commands, address, tag, roster, listed, recorded,
-            retire_shared_legacy=retire_shared_legacy,
-        )
+        if roster is None:
+            added, removed, installed = 0, 0, None
+        else:
+            listed = installed_clients(binary, commands, address, tag)
+            added, removed, installed = reconcile(
+                binary, commands, address, tag, roster, listed, recorded,
+                retire_shared_legacy=retire_shared_legacy,
+            )
+        if "stats_query" not in commands:
+            raise Refusal(
+                "clients were reconciled, but this xray offers no stats command "
+                "(tried statsquery, stats); usage cannot be metered"
+            )
         counters = read_counters(binary, commands["stats_query"], address)
         marker_after = xray_start_marker(binary)
         if marker_before and marker_after and marker_before != marker_after:
@@ -918,6 +1286,66 @@ def reconcile_and_read_stable(
         # a later process is not compared with stale evidence and folded twice.
         return added, removed, installed, counters, marker_after
     raise AssertionError("bounded xray reconciliation loop did not return")
+
+
+def persist_shared_legacy_retirement(binary: Path, config: Path) -> bool:
+    """Remove shared-legacy from the static Xray config so a restart cannot revive it.
+
+    Written beside the original with its owner and mode, checked by the
+    installed xray, then renamed into place; a failure leaves the old file and
+    is a refusal, never a silent success. Returns whether the file changed.
+    """
+    try:
+        info = config.stat()
+        document = json.loads(config.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise Refusal(f"cannot read {config} to retire {LEGACY_CLIENT_EMAIL}: {error}") from error
+    changed = False
+    for inbound in document.get("inbounds", []) if isinstance(document, dict) else []:
+        if not isinstance(inbound, dict) or inbound.get("protocol") != "vless":
+            continue
+        settings = inbound.get("settings")
+        clients = settings.get("clients") if isinstance(settings, dict) else None
+        if not isinstance(clients, list):
+            continue
+        kept = [c for c in clients
+                if not (isinstance(c, dict) and c.get("email") == LEGACY_CLIENT_EMAIL)]
+        if len(kept) != len(clients):
+            settings["clients"] = kept
+            changed = True
+    if not changed:
+        return False
+    temporary: str | None = None
+    try:
+        descriptor, temporary = tempfile.mkstemp(prefix=".config-", suffix=".json",
+                                                 dir=config.parent)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            os.fchown(output.fileno(), info.st_uid, info.st_gid)
+            os.fchmod(output.fileno(), stat.S_IMODE(info.st_mode))
+            json.dump(document, output, indent=2)
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        checked = run_xray(binary, ["run", "-test", "-config", temporary])
+        if checked.returncode != 0:
+            raise Refusal(
+                f"xray rejected {config} without {LEGACY_CLIENT_EMAIL}: "
+                f"{(checked.stderr or checked.stdout or '').strip() or checked.returncode}"
+            )
+        os.replace(temporary, config)
+        temporary = None
+        directory_fd = os.open(config.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except OSError as error:
+        raise Refusal(f"cannot persist {LEGACY_CLIENT_EMAIL} retirement to {config}: {error}") from error
+    finally:
+        if temporary is not None:
+            os.unlink(temporary)
+    print(f"removed {LEGACY_CLIENT_EMAIL} from {config}")
+    return True
 
 
 def sync_hy2_roster(roster: list[dict[str, str]]) -> bool:
@@ -972,6 +1400,39 @@ def sync_hy2_roster(roster: list[dict[str, str]]) -> bool:
 
 
 
+def withdraw_disabled_node(binary: Path, commands: dict[str, str], address: str, tag: str,
+                           recorded: set[str] | None) -> tuple[int, set[str] | None]:
+    """Fail closed after the control plane says this node is disabled or retired.
+
+    The roster it last served still names every account, including ones revoked,
+    expired or over quota since. Keeping them installed would leave revocation
+    unenforced on a node nobody meters. Remove every client in this agent's
+    namespace plus shared-legacy and empty hy2; hand-added clients stay, as in a
+    normal reconcile. Returns the removal count and the remaining inventory, or
+    None when the node could not say what it holds.
+    """
+    failures: list[str] = []
+    try:
+        sync_hy2_roster([])
+    except Refusal as error:
+        failures.append(str(error))
+    listed = installed_clients(binary, commands, address, tag)
+    inventory = listed if listed is not None else recorded
+    # shared-legacy lives in the static config and is never recorded, so it is
+    # always a candidate; "not found" counts as removed.
+    candidates = set(inventory or ()) | {LEGACY_CLIENT_EMAIL}
+    try:
+        _, removed, remaining = reconcile(
+            binary, commands, address, tag, [], None, candidates, retire_shared_legacy=True,
+        )
+    except Refusal as error:
+        failures.append(str(error))
+        removed, remaining = 0, None
+    if failures:
+        raise Refusal("disabled exit node could not withdraw every client: " + "; ".join(failures))
+    return removed, remaining if inventory is not None else None
+
+
 def run_hy2_roster_once() -> None:
     """Enforce hy2 only; never opt a VLESS node into a metering migration.
 
@@ -983,12 +1444,87 @@ def run_hy2_roster_once() -> None:
     expected = env("TONO_SOURCE_ID")
     if not SOURCE_ID_PATTERN.fullmatch(expected):
         raise Refusal("hy2-only sync requires an explicit valid TONO_SOURCE_ID")
-    node_id, observed_at, roster, _ = fetch_roster(base, token)
+    try:
+        node_id, observed_at, roster, _ = fetch_roster(base, token)
+    except NodeDisabled:
+        sync_hy2_roster([])
+        raise Refusal("the control plane reports this exit node disabled; hy2 allowlist emptied")
     if node_id != expected:
         raise Refusal("hy2 roster node identity does not match TONO_SOURCE_ID")
     if not sync_hy2_roster(roster):
         raise Refusal("hy2-only sync requires an installed auth checker")
     print(f"hy2 roster applied: observedAt={observed_at}, identities={len(roster)}; no node-wide ACK or usage report")
+
+
+def run_outage_round(path: Path, configured: str, binary: Path,
+                     commands: dict[str, str], address: str, tag: str,
+                     override: bool | None, failure: BaseException) -> None:
+    """Serve and meter the last verified roster while the control plane is down.
+
+    Xray loses every API-added client when it restarts, so without this a
+    restart during an outage locks out every account on the node until the
+    control plane returns. The saved roster is the newest one this node
+    fetched (saved before it was enforced), so it names no account a fetched
+    roster had already removed. A copy older than a day, or one that is
+    missing or unreadable, restores nothing.
+
+    Counters are folded either way, so a restart cannot forgive the usage
+    before it. Reports need the control plane's roster clock, so the growth is
+    kept in the durable totals and reported by the next round that reaches it.
+    Nothing is acknowledged, and the round always exits non-zero.
+    """
+    # As in a reachable round, the roster is applied before any metering-side
+    # check: a damaged state file must not decide which clients are installed.
+    try:
+        state = load_state(path)
+        state_error: Exception | None = None
+    except (Refusal, ValueError, OSError) as error:
+        state, state_error = None, error
+    try:
+        roster, server_retire, age = load_roster_cache(roster_cache_path(path), configured)
+    except Refusal as refusal:
+        roster, server_retire, age, unusable = None, False, 0, refusal
+    retire_shared_legacy = server_retire if override is None else override
+    remembered = state.get("installedClients") if state else None
+    added, removed, installed, counters, settled_marker = reconcile_and_read_stable(
+        binary, commands, address, tag, roster,
+        set(remembered) if isinstance(remembered, list) else None,
+        retire_shared_legacy=retire_shared_legacy,
+    )
+    if state is None:
+        raise Refusal(
+            f"control plane unreachable ({failure}); the state file is unusable: {state_error}"
+        ) from failure
+    source_id(state)
+    if installed is not None:
+        state["installedClients"] = sorted(installed)
+    recorded_marker = state.get("startMarker")
+    restarted = bool(
+        settled_marker
+        and isinstance(recorded_marker, str)
+        and recorded_marker
+        and settled_marker != recorded_marker
+    )
+    if not isinstance(state.get("userTotals"), dict):
+        # The next reporting round compares against this; without it, that
+        # round would treat the growth folded here as already reported.
+        state["userTotals"] = aggregate_user_totals(state["totals"])
+    totals = lifetime_totals(state, counters, restarted=restarted)
+    state["totals"] = {label: int(value) for label, value in totals.items()}
+    if settled_marker:
+        state["startMarker"] = settled_marker
+    else:
+        state.pop("startMarker", None)
+    save_state(path, state)
+    if roster is None:
+        raise Refusal(
+            f"control plane unreachable ({failure}) and {unusable}; restored no clients."
+            " Usage is kept locally"
+        ) from failure
+    raise Unreachable(
+        f"control plane unreachable ({failure}); applied the roster verified {age}s ago"
+        f" (+{added} -{removed}). Usage is kept locally"
+    ) from failure
 
 
 def run_once(path: Path) -> None:
@@ -997,16 +1533,107 @@ def run_once(path: Path) -> None:
     binary = xray_binary()
     address = api_address()
     tag = inbound_tag()
-    state = load_state(path)
-    source = source_id(state)
     commands = require_commands(binary)
+    configured = configured_source()
 
-    retire_override = env("TONO_RETIRE_SHARED_LEGACY", required=False)
-    node_id, observed_at, roster, server_retire_shared_legacy = fetch_roster(base, token)
-    if node_id != source:
-        raise Refusal(
-            f"authenticated exit node {node_id!r} does not match durable source {source!r}"
+    override = retire_override(os.environ.get("TONO_RETIRE_SHARED_LEGACY", ""))
+    cache = roster_cache_path(path)
+    try:
+        node_id, observed_at, roster, server_retire_shared_legacy = fetch_roster_or_discard_cache(
+            base, token, cache,
         )
+    except NodeDisabled:
+        # The control plane has spoken: the saved roster must not outlive the
+        # node, or a later outage round would reinstall it on a disabled node.
+        # fetch_roster_or_discard_cache has normally removed it already; a
+        # failure here is reported with the withdrawal, never instead of it.
+        try:
+            discard_roster_cache(cache)
+            cache_note = ""
+        except Refusal as refusal:
+            cache_note = f"; {refusal}"
+        # Withdrawal is revocation: a damaged state file only costs it the
+        # durable inventory, never the removal itself.
+        try:
+            state = load_state(path)
+        except (Refusal, ValueError, OSError):
+            state = None
+        remembered = state.get("installedClients") if state else None
+        try:
+            removed, remaining = withdraw_disabled_node(
+                binary, commands, address, tag,
+                set(remembered) if isinstance(remembered, list) else None,
+            )
+        except Refusal as refusal:
+            raise Refusal(f"{refusal}{cache_note}") from refusal
+        if remaining is not None and state is not None:
+            state["installedClients"] = sorted(remaining)
+            save_state(path, state)
+        # Never a success: the node is out of service and an operator should
+        # stop tono-xray. Usage and acknowledgements are not sent.
+        raise Refusal(
+            f"the control plane reports this exit node disabled; removed {removed} client(s)"
+            " and emptied hy2"
+            + ("" if remaining is not None else
+               "; the client inventory is unknown, so stop tono-xray on this node")
+            + cache_note
+        )
+    except Exception as error:
+        if not control_plane_unreachable(error):
+            raise
+        run_outage_round(path, configured, binary, commands, address, tag,
+                         override, error)
+        raise
+    # The one check revocation depends on: this roster is for this node.
+    if node_id != configured:
+        discard_roster_cache(cache)
+        raise Refusal(
+            f"authenticated exit node {node_id!r} does not match source {configured!r}"
+        )
+    # Saved before anything is enforced, so the copy never trails a revocation
+    # this round has already seen.
+    cache_error = save_roster_cache(
+        cache, node_id, observed_at, roster, server_retire_shared_legacy,
+    )
+    # Revocation runs before every metering check below. A damaged state file,
+    # a source mismatch or a queued report ahead of the clock must not keep a
+    # revoked, expired or over-quota account connected; the round still refuses
+    # afterwards and is never acknowledged.
+    try:
+        state = load_state(path)
+        state_error: Exception | None = None
+    except (Refusal, ValueError, OSError) as error:
+        state, state_error = None, error
+    remembered = state.get("installedClients") if state else None
+    # An explicit environment value wins in both directions so an operator can
+    # stop an automatic retirement. An unset value follows the control plane.
+    retire_shared_legacy = server_retire_shared_legacy if override is None else override
+    # Revocations must reach hy2 even if the following Xray reconciliation
+    # fails. Never ACK the roster unless both installed transports were updated.
+    sync_hy2_roster(roster)
+    added, removed, installed, counters, settled_marker = reconcile_and_read_stable(
+        binary, commands, address, tag, roster,
+        set(remembered) if isinstance(remembered, list) else None,
+        retire_shared_legacy=retire_shared_legacy,
+    )
+    persist_error: Refusal | None = None
+    if retire_shared_legacy:
+        # Checked every round: a hand edit or reprovision can put it back.
+        # The running Xray is already reconciled; a static-config write failure
+        # must not stop the roster ACK or usage reporting (quota enforcement
+        # depends on it), so it fails the round only after metering.
+        try:
+            persist_shared_legacy_retirement(binary, xray_config_path())
+        except Refusal as error:
+            print(f"shared-legacy retirement not persisted: {error}", file=sys.stderr)
+            persist_error = error
+    if cache_error:
+        # An older saved roster is still on disk and may name an account this
+        # roster revoked. Never report the round as complete while it is.
+        raise Refusal(cache_error)
+    if state is None:
+        raise Refusal(f"clients were reconciled, but the state file is unusable: {state_error}")
+    source = source_id(state)
     for report in state["pendingReports"]:
         pending_at = report.get("observedAt")
         if (
@@ -1021,22 +1648,6 @@ def run_once(path: Path) -> None:
             # server window, though, so retain it until the server clock catches
             # up instead of silently losing the last growth for an idle account.
             raise Refusal("queued usage is more than five minutes ahead of the roster clock")
-    # An explicit environment value wins in both directions so an operator can
-    # stop an automatic retirement. An unset value follows the control plane.
-    retire_shared_legacy = (
-        server_retire_shared_legacy
-        if not retire_override
-        else retire_override in ("1", "true", "yes")
-    )
-    # Revocations must reach hy2 even if the following Xray reconciliation
-    # fails. Never ACK the roster unless both installed transports were updated.
-    sync_hy2_roster(roster)
-    remembered = state.get("installedClients")
-    added, removed, installed, counters, settled_marker = reconcile_and_read_stable(
-        binary, commands, address, tag, roster,
-        set(remembered) if isinstance(remembered, list) else None,
-        retire_shared_legacy=retire_shared_legacy,
-    )
     if installed is None:
         # Additions can be attempted safely without a live listing, but they do
         # not prove that an old credential generation or shared-legacy client
@@ -1128,10 +1739,12 @@ def run_once(path: Path) -> None:
     if not state["pendingReports"]:
         acknowledge_metering(base, token, observed_at)
         print("no new usage to report")
-        return
-    delivered, dropped = deliver_queue(base, token, path, state)
-    acknowledge_metering(base, token, observed_at)
-    print(f"reported usage for {delivered} accounts as {source}, dropped {dropped}")
+    else:
+        delivered, dropped = deliver_queue(base, token, path, state)
+        acknowledge_metering(base, token, observed_at)
+        print(f"reported usage for {delivered} accounts as {source}, dropped {dropped}")
+    if persist_error is not None:
+        raise persist_error
 
 
 def main(*, hy2_roster_only: bool = False) -> None:

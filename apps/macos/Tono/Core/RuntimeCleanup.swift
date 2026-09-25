@@ -8,6 +8,23 @@ enum RuntimeCleanup {
     static var nativeUpdatePending = false
     static var nativeUpdateRecovery: UpdateContractV1.Protection?
 
+    /// What launch recovery may tell the UI about a barrier an earlier
+    /// session left behind. The stored intent alone is proof of neither.
+    enum LaunchProtection: Equatable {
+        /// An authenticated helper status, or root's update receipt, says
+        /// the barrier is held.
+        case held
+        /// A fail-closed intent is stored, and no authenticated helper
+        /// answer has confirmed or cleared it.
+        case unconfirmed
+        /// An authenticated answer says no barrier is held.
+        case released
+    }
+
+    /// Receives each launch verdict. AppState registers itself on creation,
+    /// before account restoration can start.
+    static var launchProtectionConsumer: @MainActor (LaunchProtection) -> Void = { _ in }
+
     static func markCoreStarted(tunEnabled: Bool) {
         AppProfile.defaults.set(true, forKey: SettingsKey.didStartCore)
         AppProfile.defaults.set(tunEnabled, forKey: SettingsKey.lastTunEnabled)
@@ -23,17 +40,26 @@ enum RuntimeCleanup {
     /// PF stays armed with only Tono's bounded control-plane recovery exception
     /// until a verified session reconnects or the user explicitly disarms it.
     static func cleanupStaleRuntime() async throws -> Bool {
+        // Until the helper answers, including when a step below throws first,
+        // a stored fail-closed intent must not read as Standby.
+        if KillSwitchService.isArmed { launchProtectionConsumer(.unconfirmed) }
         let coordinator = PrivilegedRuntimeCoordinator.shared
-        if let pending = try await coordinator.pendingNativeUpdate(), pending.pending {
+        let pendingUpdate = try await queryPendingNativeUpdate(
+            query: { try await coordinator.pendingNativeUpdate() },
+            launchState: { await coordinator.helperLaunchState() },
+            repairHelper: { try await coordinator.prepareHelper() }
+        )
+        if let pending = pendingUpdate, pending.pending {
             nativeUpdatePending = true
             nativeUpdateBlocksConnect = true
             let adopted = try await coordinator.nativeUpdate("reconcile")
             guard let receipt = adopted.receipt, receipt.blockedReason == nil,
                   receipt.phase == .installedIdentityVerified || receipt.phase == .recoveryVerified else {
-                throw NativeUpdateDownload.failure("The pending update cannot authenticate this successor.")
+                throw NativeUpdateDownload.failure(String(localized: "The pending update cannot be resumed by this copy of Tono. Choose Check for Updates, then Disconnect and Retry, to restore Internet access and end this update attempt."))
             }
             nativeUpdateRecovery = receipt.requiredRecovery
             KillSwitchService.isArmed = receipt.requiredRecovery != .unprotected
+            launchProtectionConsumer(KillSwitchService.isArmed ? .held : .released)
             clearCoreStarted()
             if receipt.requiredRecovery == .connected {
                 nativeUpdateBlocksConnect = false // Root permits only this adopted incarnation.
@@ -45,6 +71,45 @@ enum RuntimeCleanup {
             return false // Protected Offline must not silently become Connected.
         }
         return try await recoverStaleRuntime()
+    }
+
+    /// The native-update query is the first helper call at launch. When the
+    /// helper binary is installed but nothing answers its socket (turned off
+    /// under Allow in the Background, not loaded by launchd, crash-looping),
+    /// the query used to throw a generic "helper unavailable" before any
+    /// repair or notice in `recoverStaleRuntime` could run, and Retry repeated
+    /// it forever. Say that this Mac is not protected and repair the helper
+    /// here instead. The administrator install runs root's update-install
+    /// guard, which refuses while an update transaction is unfinished.
+    static func queryPendingNativeUpdate(
+        query: () async throws -> HelperManager.UpdateStatus?,
+        launchState: () async -> HelperManager.LaunchState,
+        repairHelper: () async throws -> Void
+    ) async throws -> HelperManager.UpdateStatus? {
+        do {
+            return try await query()
+        } catch HelperIPCError.connectFailed {
+            let state = await launchState()
+            if state == .loadedOrUnknown {
+                // launchd has the job; give a restarting helper one moment.
+                try? await Task.sleep(for: .seconds(2))
+                do {
+                    return try await query()
+                } catch HelperIPCError.connectFailed {}
+            }
+            let notice = HelperManager.unprotectedNotice(for: state)
+                ?? String(localized: "Tono's network helper is not responding, so this Mac may not be protected right now. Click Retry and approve the administrator prompt to repair it.")
+            // Nothing the app can run starts a job the user turned off.
+            if state == .backgroundDisabled {
+                throw CoreRuntimeError.startFailed(notice)
+            }
+            do {
+                try await repairHelper()
+            } catch {
+                throw CoreRuntimeError.startFailed(notice + " " + error.localizedDescription)
+            }
+            return try await query()
+        }
     }
 
     private static func recoverStaleRuntime() async throws -> Bool {
@@ -67,19 +132,30 @@ enum RuntimeCleanup {
         let localProtectionIntent = KillSwitchService.isArmed
         let helperProtectionObservation =
             await PrivilegedRuntimeCoordinator.shared.refreshKillSwitchStatus()
-        let shouldResumeProtection: Bool
-        switch helperProtectionObservation {
-        case .confirmed(let requiresProtectionRecovery):
-            // An authenticated helper status is authoritative. In particular,
-            // root emergency recovery clears helper-owned PF state but cannot
-            // update this user's defaults; do not let that stale local bit
-            // immediately re-arm the machine on reopen.
-            KillSwitchService.isArmed = requiresProtectionRecovery
-            shouldResumeProtection = requiresProtectionRecovery
-        case .unavailable, .rejected:
-            // Timeout, malformed status, and 403 are never evidence that PF is
-            // open. Preserve the last local fail-closed intent.
-            shouldResumeProtection = localProtectionIntent
+        let shouldResumeProtection = adoptLaunchObservation(
+            helperProtectionObservation,
+            localIntent: localProtectionIntent
+        )
+
+        // An unreachable helper is usually busy or restarting, and its PF
+        // rules stay in the kernel. But after a restart only the helper enables
+        // PF, so a helper launchd never started means this Mac is not protected
+        // at all. Say that instead of a generic repair error.
+        if helperProtectionObservation == .unavailable, localProtectionIntent {
+            let launchState = await PrivilegedRuntimeCoordinator.shared.helperLaunchState()
+            if let notice = HelperManager.unprotectedNotice(for: launchState) {
+                // Nothing the app can run starts a job the user turned off.
+                if launchState == .backgroundDisabled {
+                    throw CoreRuntimeError.startFailed(notice)
+                }
+                do {
+                    try await PrivilegedRuntimeCoordinator.shared.prepareHelper()
+                } catch {
+                    throw CoreRuntimeError.startFailed(
+                        notice + " " + error.localizedDescription
+                    )
+                }
+            }
         }
 
         if shouldResumeProtection {
@@ -87,8 +163,16 @@ enum RuntimeCleanup {
             // control-plane HTTPS addresses before stopping the old core. A
             // failed reassert leaves the previous PF block live, so cleanup can
             // still continue without ever opening unrestricted egress.
-            try? await PrivilegedRuntimeCoordinator.shared
-                .reassertKillSwitchIfNeeded()
+            do {
+                // The arm returns only once the helper reports the barrier
+                // armed, wanted and live; an unconfirmed launch is now held.
+                // An intent retired meanwhile (an activation answer confirmed
+                // a release) arms nothing, and then nothing is held.
+                if try await PrivilegedRuntimeCoordinator.shared
+                    .reassertKillSwitchIfNeeded() {
+                    launchProtectionConsumer(.held)
+                }
+            } catch {}
         }
 
         let didStartCore = AppProfile.defaults.bool(forKey: SettingsKey.didStartCore)
@@ -168,5 +252,30 @@ enum RuntimeCleanup {
             }
         }
         return shouldResumeProtection
+    }
+
+    /// Folds launch's helper answer into the stored fail-closed intent,
+    /// publishes what the UI may claim, and returns whether protection
+    /// should resume.
+    static func adoptLaunchObservation(
+        _ observation: KillSwitchService.StatusObservation,
+        localIntent: Bool
+    ) -> Bool {
+        switch observation {
+        case .confirmed(let requiresProtectionRecovery):
+            // An authenticated helper status is authoritative. In particular,
+            // root emergency recovery clears helper-owned PF state but cannot
+            // update this user's defaults; do not let that stale local bit
+            // immediately re-arm the machine on reopen.
+            KillSwitchService.isArmed = requiresProtectionRecovery
+            launchProtectionConsumer(requiresProtectionRecovery ? .held : .released)
+            return requiresProtectionRecovery
+        case .unavailable, .rejected:
+            // Timeout, malformed status, and 403 are never evidence that PF is
+            // open. Preserve the last local fail-closed intent. Nor are they
+            // evidence that PF is blocking: show the barrier as unconfirmed.
+            if localIntent { launchProtectionConsumer(.unconfirmed) }
+            return localIntent
+        }
     }
 }

@@ -74,8 +74,14 @@ async fn start_explicit_release(
             run_release_sequence(&worker_state, &worker_app, guard, explicit_disconnect).await
         },
         move || async move {
-            let inner = task_state.lock().await;
+            let mut inner = task_state.lock().await;
             commands::emit_status(&task_app, &commands::status_of(&inner));
+            // R2-F2: a failed release leaves an armed machine idle in Protected Offline, and
+            // after this repaint nothing re-reads the Service. Register the Service-truth
+            // poll for exactly that outcome; a successful release is a no-op (not watching).
+            super::monitor::ensure_protection_resync_locked(&mut inner, || {
+                super::monitor::spawn_protection_resync(&task_state, &task_app)
+            });
         },
     ).await
 }
@@ -160,7 +166,18 @@ where
                 .map_err(|error| format!("release reconciliation task failed: {error}"))
                 .and_then(|result| result);
             if let Err(message) = &result {
-                task_state.lock().await.fsm.initial_release_failed();
+                {
+                    let mut inner = task_state.lock().await;
+                    // The refusal is the fact, not this attempt's local armed latch. A Disconnect
+                    // that races an in-flight StartClash retires the generation before
+                    // `mark_kill_switch_armed` ever runs, yet the Service armed behind that IPC and
+                    // just refused to disarm. Latch from the refusal so the closing
+                    // `initial_release_failed` reports the still-blocking barrier instead of
+                    // Not Connected — otherwise `disconnect()` early-returns as a no-op and the
+                    // tray disables the only control that can retry the release.
+                    inner.fsm.mark_kill_switch_armed();
+                    inner.fsm.initial_release_failed();
+                }
                 task_state
                     .audit()
                     .log(AuditEvent::ReleaseFail { error: message.clone() });
@@ -244,7 +261,7 @@ async fn run_release_sequence(
 
     #[cfg(windows)]
     {
-        let _ = crate::core::sysopt::Sysopt::global().reset_sysproxy().await;
+        let _ = crate::core::sysopt::Sysopt::global().clear_owned_sysproxy().await;
     }
 
     let mut inner = state.lock().await;
@@ -398,5 +415,31 @@ mod tests {
             assert_eq!(failure.wait().await, Err("release denied".into()));
             assert_eq!(disconnect.wait().await, failure.wait().await);
         }).await.expect("guard transfer and both coordinator join orders must not deadlock");
+    }
+
+    /// R2-F1: a Disconnect that races an in-flight StartClash retires the attempt before
+    /// `mark_kill_switch_armed` ever runs, so the local armed latch is still clear when the
+    /// Service refuses the release. `initial_release_failed` used to fold that clear latch into
+    /// Not Connected while WFP kept blocking: `disconnect()` then early-returned as a no-op and
+    /// the tray disabled Disconnect. The refusal itself must keep protection visible.
+    #[tokio::test]
+    async fn refused_release_after_an_unarmed_connect_race_keeps_protection_visible() {
+        let state = Arc::new(TonoState::for_test());
+        {
+            // Disconnect raced StartClash before run_stages could mark_kill_switch_armed.
+            let mut inner = state.lock().await;
+            inner.fsm.begin_connect();
+            inner.fsm.begin_disconnect();
+            assert!(!inner.fsm.kill_switch_armed());
+        }
+        let operation = coordinate_release(&state, None,
+            |_guard| async { Err("kill switch release failed; protection stays on".into()) },
+            || async {},
+        ).await;
+        assert!(operation.wait().await.is_err());
+        let inner = state.lock().await;
+        // The Service refused to disarm, so the machine is still blocked; the FSM must say so,
+        // otherwise `disconnect()` early-returns and the tray disables Disconnect.
+        assert!(inner.fsm.status().is_protection_blocked && inner.fsm.kill_switch_armed());
     }
 }

@@ -1381,3 +1381,153 @@ pub(super) fn restore_encrypted_dns() -> Result<()> {
     }
     Ok(())
 }
+
+/// Group Policy's NRPT store. Whenever it holds any rule, the DNS Client applies it alone and
+/// ignores the local store under [`NRPT_ROOT`], where Tono's catch-all lives.
+const NRPT_POLICY_ROOT: &str = r"SOFTWARE\Policies\Microsoft\Windows NT\DNSClient\DnsPolicyConfig";
+const RESOLVER_POLICY_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+const SYSTEM_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+static SYSTEM_LOOKUP_IN_FLIGHT: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+fn read_nrpt_store(root: &str) -> Result<Vec<super::EffectiveNrptRule>> {
+    let mut rules = Vec::new();
+    for name in enum_subkeys(root)? {
+        let key = format!(r"{root}\{name}");
+        let namespaces = read_sz(&key, "Name")?
+            .map(|value| {
+                value
+                    .split('\0')
+                    .filter(|entry| !entry.is_empty())
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
+        // Only a rule whose options select generic DNS servers redirects resolution; the value
+        // alone (left behind, or on a DNSSEC-only rule) does not.
+        let generic = read_dword(&key, "ConfigOptions")?
+            .is_some_and(|options| options & NRPT_CONFIG_DNS != 0);
+        let generic_dns_servers = if generic {
+            read_sz(&key, "GenericDNSServers")?
+                .map(|value| {
+                    value
+                        .split(|c: char| c == ';' || c == ',' || c == '\0' || c.is_whitespace())
+                        .filter(|entry| !entry.is_empty())
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        rules.push(super::EffectiveNrptRule {
+            namespaces,
+            generic_dns_servers,
+            tono_owned: root == NRPT_ROOT && name.eq_ignore_ascii_case(NRPT_RULE_GUID),
+        });
+    }
+    Ok(rules)
+}
+
+fn effective_nrpt_rules_blocking() -> Result<Vec<super::EffectiveNrptRule>> {
+    let policy = read_nrpt_store(NRPT_POLICY_ROOT)?;
+    if !policy.is_empty() {
+        return Ok(policy);
+    }
+    read_nrpt_store(NRPT_ROOT)
+}
+
+/// X2-2: the NRPT rules the DNS Client applies now — the Group Policy store when it has any rule,
+/// the local store otherwise. Read-only and bounded; runs outside the DNS operation lock.
+pub(super) async fn effective_nrpt_rules() -> std::result::Result<Vec<super::EffectiveNrptRule>, String> {
+    #[cfg(test)]
+    if let Some(injected) = test_io::with(|io| io.effective_nrpt.clone()) {
+        return injected;
+    }
+    match tokio::time::timeout(
+        RESOLVER_POLICY_READ_TIMEOUT,
+        tokio::task::spawn_blocking(effective_nrpt_rules_blocking),
+    )
+    .await
+    {
+        Ok(Ok(Ok(rules))) => Ok(rules),
+        Ok(Ok(Err(error))) => Err(format!("{error:#}")),
+        Ok(Err(error)) => Err(format!("NRPT read worker failed: {error}")),
+        Err(_) => Err(format!(
+            "NRPT read exceeded {}s",
+            RESOLVER_POLICY_READ_TIMEOUT.as_secs()
+        )),
+    }
+}
+
+/// X2-2: one A lookup through the Windows DNS Client with its cache and hosts file bypassed, so
+/// the answer comes from whichever resolver the effective policy selects right now. At most one
+/// lookup is outstanding: a query sent to a resolver WFP drops can outlive the bound, and the
+/// next observation must not pile another blocked thread behind it.
+pub(super) async fn system_lookup_a(host: &'static str) -> std::result::Result<Vec<std::net::Ipv4Addr>, String> {
+    use std::sync::atomic::Ordering;
+    #[cfg(test)]
+    if let Some(injected) = test_io::with(|io| io.system_lookup.clone()) {
+        return injected;
+    }
+    if SYSTEM_LOOKUP_IN_FLIGHT.swap(true, Ordering::AcqRel) {
+        return Err("the previous system lookup has still not returned".to_owned());
+    }
+    let worker = tokio::task::spawn_blocking(move || {
+        let result = system_lookup_a_blocking(host);
+        SYSTEM_LOOKUP_IN_FLIGHT.store(false, Ordering::Release);
+        result
+    });
+    match tokio::time::timeout(SYSTEM_LOOKUP_TIMEOUT, worker).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(error)) => {
+            SYSTEM_LOOKUP_IN_FLIGHT.store(false, Ordering::Release);
+            Err(format!("system lookup worker failed: {error}"))
+        }
+        Err(_) => Err(format!(
+            "the system lookup exceeded {}s",
+            SYSTEM_LOOKUP_TIMEOUT.as_secs()
+        )),
+    }
+}
+
+fn system_lookup_a_blocking(host: &str) -> std::result::Result<Vec<std::net::Ipv4Addr>, String> {
+    use windows_sys::Win32::NetworkManagement::Dns::{
+        DNS_QUERY_BYPASS_CACHE, DNS_QUERY_NO_HOSTS_FILE, DNS_QUERY_TREAT_AS_FQDN, DNS_RECORDA,
+        DNS_TYPE_A, DnsFree, DnsFreeRecordList, DnsQuery_W,
+    };
+    let name = super_wide(host);
+    let mut records: *mut DNS_RECORDA = std::ptr::null_mut();
+    // SAFETY: `name` is NUL-terminated and alive for the call; `records` is a valid out-pointer
+    // whose list, when returned, is released exactly once below.
+    let status = unsafe {
+        DnsQuery_W(
+            name.as_ptr(),
+            DNS_TYPE_A,
+            DNS_QUERY_BYPASS_CACHE | DNS_QUERY_NO_HOSTS_FILE | DNS_QUERY_TREAT_AS_FQDN,
+            std::ptr::null_mut(),
+            &mut records,
+            std::ptr::null_mut(),
+        )
+    };
+    let mut addresses = Vec::new();
+    let mut cursor = records;
+    while status == 0 && !cursor.is_null() {
+        // SAFETY: DNSAPI returned a well-formed list that stays alive until `DnsFree` below.
+        let record = unsafe { &*cursor };
+        if record.wType == DNS_TYPE_A {
+            // SAFETY: an A record's data is `DNS_A_DATA`; the address is in network order.
+            let raw = unsafe { record.Data.A.IpAddress };
+            addresses.push(std::net::Ipv4Addr::from(raw.to_ne_bytes()));
+        }
+        cursor = record.pNext;
+    }
+    if !records.is_null() {
+        // SAFETY: the list came from `DnsQuery_W` and is freed once.
+        unsafe { DnsFree(records.cast_const().cast(), DnsFreeRecordList) };
+    }
+    if status != 0 {
+        return Err(format!("DnsQuery_W returned {status}"));
+    }
+    Ok(addresses)
+}

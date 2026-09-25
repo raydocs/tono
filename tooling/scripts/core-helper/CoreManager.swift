@@ -8,15 +8,18 @@ final class CoreManager {
     private let lock = NSLock()
     private let diagnosticLock = NSLock()
     private let allowedUID: uid_t
-    private let allowedHome: String
     private var process: Process?
     private var diagnosticPipe: Pipe?
     private var diagnosticData = Data()
     private var lastFailure: String?
 
     init(allowedUID: uid_t) throws {
+        // No account lookup here. Recovery (`--emergency-disarm`, `--emergency-reset`,
+        // executor recovery) constructs this only to stop a stale core before PF
+        // is released, and it must still work after the bound macOS user was
+        // deleted. The home directory is resolved where it is needed: when a
+        // start or sync validates the user's config directory.
         self.allowedUID = allowedUID
-        self.allowedHome = try homeDirectory(for: allowedUID)
         try ensureRootDirectory(runtimeDirectory, permissions: 0o700)
         try terminateStaleCore()
     }
@@ -25,6 +28,7 @@ final class CoreManager {
         guard let requestedPath = canonicalPath(requested) else {
             throw HelperFailure.invalid("Configuration directory does not exist.")
         }
+        let allowedHome = try homeDirectory(for: allowedUID)
         let candidates = ["Tono", "Tono-Dev"].compactMap {
             canonicalPath("\(allowedHome)/Library/Application Support/\($0)/config")
         }
@@ -172,7 +176,8 @@ final class CoreManager {
     /// Serialized protected replacement. The caller keeps PF and system DNS
     /// armed throughout; failure never restarts an older configuration.
     func sync(configDirectory: String, configSHA256: String,
-              startAllowed: () -> Bool = { true }) throws -> String {
+              startAllowed: () -> Bool = { true },
+              beforeStop: () throws -> Void = {}) throws -> String {
         lock.lock()
         defer { lock.unlock() }
         guard process?.isRunning == true else {
@@ -180,6 +185,7 @@ final class CoreManager {
         }
         // Refuse malformed or swapped bytes before disrupting the live child.
         _ = try snapshot(configDirectory, expectedSHA256: configSHA256)
+        try beforeStop()
         try stopLocked()
         try startLocked(configDirectory: configDirectory, configSHA256: configSHA256,
                         startAllowed: startAllowed)

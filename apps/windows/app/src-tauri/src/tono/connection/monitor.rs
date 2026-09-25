@@ -15,12 +15,13 @@ use crate::tono::{
     connection_health::{
         CoreSample, HealthLegs, NetworkChangeOutcome, classify_core_sample, connection_loop_continues,
         core_change_fires, health_threshold_reached, kill_switch_unhealthy_for_monitor,
-        monitor_requires_reconnect, owned_direct_reload_in_flight,
+        may_recover_in_place, monitor_requires_reconnect, owned_direct_reload_in_flight,
         network_event_fires, protected_dns_unhealthy,
     },
     connection_plan::{guard_rejection_is_transient, reconnect_allowed},
-    state::TonoState,
+    state::{TonoInner, TonoState},
 };
+use tono_core::connection::ConnectionStatus;
 use super::{
     Attempt, BoxedTask, MAX_DIRECT_SAMPLES, MAX_PROTECTED_ROUTE_SAMPLES, ProtectedRouteAggregate,
     fail_connect, kill_switch_mode_key, new_direct_samples, observe_protected_routes,
@@ -30,6 +31,7 @@ use super::direct::dns_query_a;
 use super::reconnect::schedule_reconnect_for_generation;
 use super::controller::{CONTROLLER_HTTP_TIMEOUT, controller_client, controller_url, fetch_connections};
 use super::probes::{verify_locked, verify_tun_data_plane};
+use super::platform::usable_physical_uplinks;
 
 /// `lookup_host` delegates to the OS resolver and has no Tokio timeout of its own. Bound every
 /// lookup so a broken adapter/resolver cannot strand Connecting forever.
@@ -119,6 +121,47 @@ mod sample_commit_tests {
         assert!(super::sample_commit_is_current(started, started, true));
         // In-place controller replacement need not change the connect generation.
         assert!(!super::sample_commit_is_current(started, (7, 13), true));
+    }
+}
+
+#[cfg(test)]
+mod monitor_registration_tests {
+    use crate::tono::state::TaskRegistry;
+
+    /// A monitor-driven reconnect runs inline in the old monitor's own task, so the
+    /// connect tail that replaces the monitor registration executes inside the very
+    /// task the slot still holds. The replacement must not abort that handle: tokio
+    /// only marks a running task cancelled and destroys it at its next Pending await —
+    /// in production the `state.lock().await` of `spawn_control_plane_pin_refresh` —
+    /// silently dropping the session's optional DIRECT overlay after the FSM already
+    /// committed Connected. Under the previous unconditional `abort_network_monitor()`
+    /// the fixture task dies at the `yield_now().await` below, the send never runs,
+    /// and this assertion fails.
+    #[tokio::test]
+    async fn a_monitor_replacing_its_own_registration_finishes_the_connect_tail() {
+        let (self_handle_tx, self_handle_rx) = tokio::sync::oneshot::channel();
+        let (tail_tx, tail_rx) = tokio::sync::oneshot::channel::<()>();
+        let monitored = tokio::spawn(async move {
+            let mut tasks = TaskRegistry::default();
+            // The slot exactly as the recovered session left it: this very task.
+            tasks.network_monitor = Some(self_handle_rx.await.expect("fixture handle must arrive"));
+            // What `spawn_network_monitor` performs once the fresh monitor is spawned.
+            let replacement = tauri::async_runtime::JoinHandle::Tokio(tokio::spawn(async {}));
+            tasks.register_network_monitor(replacement);
+            // First Pending point after the self-replacement, standing in for the
+            // awaited state lock in the connect tail.
+            tokio::task::yield_now().await;
+            tail_tx
+                .send(())
+                .expect("the connect tail must survive replacing its own monitor registration");
+        });
+        self_handle_tx
+            .send(tauri::async_runtime::JoinHandle::Tokio(monitored))
+            .expect("fixture task must still be awaiting its handle");
+        assert!(
+            tail_rx.await.is_ok(),
+            "a monitor replacing its own registration must not abort itself at the next await"
+        );
     }
 }
 
@@ -476,8 +519,190 @@ pub(super) async fn spawn_network_monitor(state: &Arc<TonoState>, app: &AppHandl
     // its opaque type here would make the async types infinitely recursive.
     let handle = AsyncHandler::spawn(move || Box::pin(network_monitor_loop(task_state, task_app)) as BoxedTask);
     let mut inner = state.lock().await;
-    inner.tasks.abort_network_monitor();
-    inner.tasks.network_monitor = Some(handle);
+    // Slot replacement, not a blind abort: this call also runs from the connect
+    // tail of a monitor-driven reconnect, i.e. from inside the very task the slot
+    // still holds. See `TaskRegistry::register_network_monitor`.
+    inner.tasks.register_network_monitor(handle);
+}
+
+/// R2-F2: Service-truth poll cadence while the FSM idles in Protected Offline. The
+/// connected-lifetime monitor above is the opposite regime (it runs only while
+/// `is_connected`), and the reconnect ladder needs `session_verified` — so an armed but
+/// unverified barrier sat unwatched, and a Service restart that retired it
+/// (`retire_unverified_on_service_start`) left the UI claiming "blocked" over an open
+/// machine for as long as the app lived. One bounded local IPC read per interval, alive
+/// only while the state holds.
+pub(super) const PROTECTION_RESYNC_INTERVAL: Duration = Duration::from_secs(30);
+
+/// The state the Service-truth poll watches: Protected Offline with no transaction in flight
+/// (armed-unverified in the defect's original shape; verified sessions cost nothing extra and
+/// their Service truth deserves the same answer). Exactly the state whose "this machine is
+/// blocked" claim can outlive the barrier itself.
+pub(super) fn protection_resync_watches(status: &tono_core::connection::ConnectionStatus) -> bool {
+    status.is_protection_blocked
+        && !status.is_connected
+        && !status.is_connecting
+        && !status.is_disconnecting
+}
+
+/// Construct the Service-truth poll task. Split from [`ensure_protection_resync_locked`] so
+/// regressions can register a fixture task without a Tauri `AppHandle`.
+pub(crate) fn spawn_protection_resync(
+    state: &Arc<TonoState>,
+    app: &AppHandle,
+) -> tauri::async_runtime::JoinHandle<()> {
+    let task_state = Arc::clone(state);
+    let task_app = app.clone();
+    AsyncHandler::spawn(move || Box::pin(protection_resync_loop(task_state, task_app)) as BoxedTask)
+}
+
+/// Register the Service-truth poll when the FSM idles in Protected Offline, retire it when it
+/// does not. Idempotent: a live poll is left alone and a finished handle is replaced. The
+/// registry abort plus the loop's own exit check (defense in depth) keep this from ever
+/// becoming a resident task.
+pub(crate) fn ensure_protection_resync_locked(
+    inner: &mut TonoInner,
+    spawn: impl FnOnce() -> tauri::async_runtime::JoinHandle<()>,
+) {
+    if !protection_resync_watches(inner.fsm.status()) {
+        inner.tasks.abort_protection_resync();
+        return;
+    }
+    if inner
+        .tasks
+        .protection_resync
+        .as_ref()
+        .is_some_and(|handle| !handle.inner().is_finished())
+    {
+        return;
+    }
+    inner.tasks.abort_protection_resync();
+    inner.tasks.protection_resync = Some(spawn());
+}
+
+/// Lock-free-caller wrapper for tails that do not hold the product guard (startup restore).
+pub(crate) async fn ensure_protection_resync(state: &Arc<TonoState>, app: &AppHandle) {
+    let mut inner = state.lock().await;
+    ensure_protection_resync_locked(&mut inner, || spawn_protection_resync(state, app));
+}
+
+/// The bounded Service-truth poll for idle Protected Offline (R2-F2). Every tick reads the
+/// Service's own kill-switch verdict and folds it through the same
+/// `apply_service_kill_switch` the cancelled-quit resync uses. Convergence is strictly
+/// Service-proven — `wanted=false` is the only reading that releases the UI, and an
+/// unanswered Service changes nothing — so this can never loosen protection; it only stops
+/// the UI from claiming a barrier the Service already retired. Exits when the state is left;
+/// a generation move during an in-flight read defers to the next tick instead of folding
+/// stale evidence.
+async fn protection_resync_loop(state: Arc<TonoState>, app: AppHandle) {
+    let mut interval = tokio::time::interval(PROTECTION_RESYNC_INTERVAL);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // Consume the immediate first tick: the entry path just took its own Service reading (a
+    // refused release, a startup protection probe), so the first poll belongs one interval out.
+    interval.tick().await;
+    loop {
+        interval.tick().await;
+        let generation = {
+            let inner = state.lock().await;
+            if !protection_resync_watches(inner.fsm.status()) {
+                // Left idle Protected Offline (Connected, a new attempt, a release): its owner
+                // retires this task; nothing here may outlive the state that justified it.
+                return;
+            }
+            inner.connect_generation
+        };
+        let kill_switch = service::tono_service_status_snapshot()
+            .await
+            .ok()
+            .and_then(|snapshot| snapshot.kill_switch);
+        let mut inner = state.lock().await;
+        if inner.connect_generation != generation {
+            // A transition was admitted while the IPC was in flight. Folding a pre-transition
+            // reading could release the UI over a barrier that was re-armed in between; the
+            // next tick re-reads under the new generation instead.
+            continue;
+        }
+        if !protection_resync_watches(inner.fsm.status()) {
+            return;
+        }
+        let previous_kill_switch = inner.kill_switch.clone();
+        let previous_status = inner.fsm.status().clone();
+        let service_disarmed = matches!(&kill_switch, Some(status) if !status.wanted);
+        commands::quit::apply_service_kill_switch(&mut inner, kill_switch);
+        if service_disarmed {
+            logging!(
+                info,
+                Type::Service,
+                "Tono: Service 已证明 WFP 解除（服务重启退休了未验证屏障，或释放已完成），Protected Offline 收敛为未连接"
+            );
+        }
+        if inner.kill_switch != previous_kill_switch || inner.fsm.status() != &previous_status {
+            commands::emit_status(&app, &commands::status_of(&inner));
+        }
+        if service_disarmed {
+            return;
+        }
+    }
+}
+
+#[cfg(test)]
+mod protection_resync_tests {
+    use super::*;
+    use tono_core::connection::UiState;
+    use tono_service_protocol::{KillSwitchStatus, KillSwitchStatusMode};
+
+    /// R2-F2 regression, both halves of the fix:
+    /// (a) the trigger — entering armed-unverified idle Protected Offline must leave a
+    ///     registered Service-truth poll handle in the task registry (the defect: the slot did
+    ///     not exist and nothing ever re-read the Service while the app lived);
+    /// (b) the fold — a Service reading of `wanted=false` is the only reading that converges
+    ///     this FSM to Not Connected with the armed latch cleared (the quit path's semantics,
+    ///     now shared by the poll).
+    #[tokio::test]
+    async fn protected_offline_converges_when_the_service_proves_the_barrier_gone() {
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            // First connect armed the barrier, the session never verified, and the initial
+            // full release was refused: the exact fixture of the defect.
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.initial_release_failed();
+            assert_eq!(inner.fsm.status().ui_state(), UiState::ProtectedOffline);
+            assert!(!inner.fsm.session_verified());
+            ensure_protection_resync_locked(&mut inner, || {
+                tauri::async_runtime::spawn(std::future::pending::<()>())
+            });
+        }
+        {
+            let inner = state.lock().await;
+            assert!(
+                inner.tasks.protection_resync.is_some(),
+                "idle Protected Offline must hold a registered Service-truth poll handle"
+            );
+        }
+        state.lock().await.tasks.abort_protection_resync();
+
+        // The Service restarted and retired the unverified barrier: its own reading says the
+        // barrier is not wanted, and only that reading may release the UI.
+        let service_disarmed = KillSwitchStatus {
+            wanted: false,
+            verified: false,
+            live: false,
+            mode: KillSwitchStatusMode::Blocked,
+            tunnel_permit_rendered: false,
+            endpoints: Vec::new(),
+            direct_endpoint_digest: String::new(),
+            last_error: None,
+        };
+        let mut inner = state.lock().await;
+        crate::tono::commands::quit::apply_service_kill_switch(&mut inner, Some(service_disarmed));
+        assert!(
+            !inner.fsm.kill_switch_armed(),
+            "the Service proved the barrier gone; the armed latch must clear"
+        );
+        assert_eq!(inner.fsm.status().ui_state(), UiState::NotConnected);
+    }
 }
 
 /// F2 leg 2: periodically repeat the same authoritative multi-origin real App request used at
@@ -734,7 +959,17 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
             let inner = state.lock().await;
             owned_direct_reload_in_flight(inner.direct_reload_until, inner.connect_generation, std::time::Instant::now())
         };
-        if invalidate && network_changed && !core_changed && !health_invalid && !event_probe_failed && !owned_direct_reload {
+        let keeps_in_place =
+            invalidate && network_changed && !core_changed && !health_invalid && !event_probe_failed && !owned_direct_reload;
+        // X2-1: the proof above covers the tunnel only. A DIRECT overlay bound to an adapter
+        // that no longer carries a default route needs the protected rebuild, not "keep".
+        if keeps_in_place && !may_keep_session_in_place(&state, true).await {
+            if !connection_loop_continues(handle_network_change_inner(&state, &app, false).await) {
+                return;
+            }
+            continue;
+        }
+        if keeps_in_place {
             logging!(
                 info,
                 Type::Service,
@@ -780,12 +1015,129 @@ pub(crate) async fn handle_network_change(state: &Arc<TonoState>, app: &AppHandl
 pub(crate) async fn handle_policy_behavior_change(
     state: &Arc<TonoState>,
     app: &AppHandle,
+    auth_generation: u64,
 ) -> NetworkChangeOutcome {
+    // F5: while the FSM is Connecting there is no live session to tear down — the
+    // entry guard inside `handle_network_change_inner` would silently drop the
+    // change, leaving the committing session on the policy snapshot captured
+    // before the first Core start. Record the deferral instead; the connect
+    // commit consumes it and re-runs the optional-DIRECT decision with the
+    // latest installed policy.
+    {
+        let mut inner = state.lock().await;
+        // The caller's account check ran under an earlier lock; a sign-out or
+        // account switch since then must not act on (or defer into) the new
+        // account's attempt.
+        if inner.sign_in_generation != auth_generation {
+            return NetworkChangeOutcome::Handled;
+        }
+        match apply_policy_change_disposition(&mut inner) {
+            PolicyChangeDisposition::ReconnectNow => {}
+            PolicyChangeDisposition::DeferUntilConnected => {
+                logging!(
+                    info,
+                    Type::Service,
+                    "Tono: deferring policy behavior change that arrived during connect"
+                );
+                return NetworkChangeOutcome::Handled;
+            }
+            PolicyChangeDisposition::Ignore => return NetworkChangeOutcome::Handled,
+        }
+    }
     handle_network_change_inner(state, app, policy_behavior_change_allows_in_place_recovery()).await
+}
+
+/// What a traffic-policy behavior change should do when it arrives, given the
+/// connect FSM's current state (F5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PolicyChangeDisposition {
+    /// Connected: schedule the protected teardown + reconnect now.
+    ReconnectNow,
+    /// Connecting: record the deferral; the connect commit consumes it.
+    DeferUntilConnected,
+    /// Idle, or a release is in flight: the next connect captures the new
+    /// policy on its own, and a teardown during Disconnect is never ours to run.
+    Ignore,
+}
+
+/// The pure verdict for a policy behavior change against one FSM snapshot.
+pub(super) fn policy_change_disposition(status: &ConnectionStatus) -> PolicyChangeDisposition {
+    if status.is_disconnecting {
+        PolicyChangeDisposition::Ignore
+    } else if status.is_connecting {
+        PolicyChangeDisposition::DeferUntilConnected
+    } else if status.is_connected {
+        PolicyChangeDisposition::ReconnectNow
+    } else {
+        PolicyChangeDisposition::Ignore
+    }
+}
+
+/// Decide a policy behavior change under the state lock and record the
+/// deferral when it lands while Connecting. `Connecting` wins over a leftover
+/// `Connected` flag: a forming attempt is already carrying its own snapshot,
+/// and tearing the tunnel down from underneath it is never this path's call.
+pub(super) fn apply_policy_change_disposition(inner: &mut TonoInner) -> PolicyChangeDisposition {
+    match policy_change_disposition(inner.fsm.status()) {
+        PolicyChangeDisposition::DeferUntilConnected => {
+            inner.record_pending_policy_change();
+            PolicyChangeDisposition::DeferUntilConnected
+        }
+        other => other,
+    }
+}
+
+/// F5 fallback: a deferred policy change whose refreshed document needs a
+/// pre-TUN physical egress snapshot that the committing attempt never captured
+/// (the policy went from no DIRECT content to some) cannot be applied in
+/// place — the interface must be discovered before the first Core start.
+/// Schedule the same protected teardown + reconnect a connected-session change
+/// gets; the fresh transaction rediscovers the interface and installs the new
+/// policy. Spawned detached for the same reasons as the account-scoped policy
+/// sync caller. Carries the committing attempt's `generation` and drops out at
+/// entry once that session is no longer the Connected one, so a Disconnect
+/// followed by a new Connect is never torn down by this task.
+pub(super) fn spawn_deferred_policy_reconnect(state: &Arc<TonoState>, app: &AppHandle, generation: u64) {
+    let state = Arc::clone(state);
+    let app = app.clone();
+    AsyncHandler::spawn(move || async move {
+        let auth_generation = {
+            let inner = state.lock().await;
+            if inner.connect_generation != generation || !inner.fsm.status().is_connected {
+                return;
+            }
+            inner.sign_in_generation
+        };
+        handle_policy_behavior_change(&state, &app, auth_generation).await;
+    });
 }
 
 pub(crate) const fn policy_behavior_change_allows_in_place_recovery() -> bool {
     false
+}
+
+/// X2-1: apply [`may_recover_in_place`] to the live session. The uplinks are read only when a
+/// DIRECT overlay is committed, so a full-tunnel session pays nothing for it.
+async fn may_keep_session_in_place(state: &Arc<TonoState>, tunnel_proven: bool) -> bool {
+    let committed = if tunnel_proven {
+        state.lock().await.applied_direct_interface.clone()
+    } else {
+        None
+    };
+    let uplinks = if committed.is_some() {
+        usable_physical_uplinks().await.ok()
+    } else {
+        None
+    };
+    let keep = may_recover_in_place(tunnel_proven, committed.as_deref(), uplinks.as_deref());
+    if tunnel_proven && !keep {
+        logging!(
+            warn,
+            Type::Service,
+            "Tono: DIRECT is bound to an adapter that no longer carries a usable default route; rebuilding the session under the locked barrier"
+        );
+    }
+    keep
 }
 
 pub(super) async fn handle_network_change_inner(
@@ -821,7 +1173,7 @@ pub(super) async fn handle_network_change_inner(
     // Sleep/Wi-Fi flaps used to stop the core unconditionally, then burn the
     // first reconnect on "DNS 53 busy" because the just-killed listener was
     // the one we needed.
-    if allow_in_place && verify_tun_data_plane().await.is_ok() {
+    if allow_in_place && may_keep_session_in_place(state, verify_tun_data_plane().await.is_ok()).await {
         let inner = state.lock().await;
         if inner.connect_generation != generation || !inner.fsm.status().is_connected {
             return NetworkChangeOutcome::Handled;
@@ -921,4 +1273,59 @@ pub(super) async fn bootstrap_hosts() -> Vec<String> {
             Ok(Err(_)) | Err(_) => Vec::new(),
         };
     bootstrap::merge_bootstrap_hosts(&dynamic)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PolicyChangeDisposition, apply_policy_change_disposition};
+    use crate::tono::state::TonoState;
+    use std::sync::Arc;
+
+    /// F5: a policy behavior change that lands while Connecting is deferred to
+    /// that attempt's commit, and only that attempt's. A deferral left behind by
+    /// an attempt the user disconnected (or that failed, or whose account was
+    /// closed) must be discarded, never consumed by the next session's commit —
+    /// there it could schedule an unexplained protected teardown + reconnect.
+    #[tokio::test]
+    async fn a_policy_change_deferred_during_connecting_is_consumed_only_by_that_attempt() {
+        let state = Arc::new(TonoState::for_test());
+        let mut inner = state.lock().await;
+        inner.retire_connection_generation(false);
+        let abandoned = inner.connect_generation;
+        inner.fsm.begin_connect();
+        assert_eq!(
+            apply_policy_change_disposition(&mut inner),
+            PolicyChangeDisposition::DeferUntilConnected
+        );
+        // Disconnect, as `disconnect()` drives it.
+        inner.invalidate_connection(true);
+        inner.fsm.begin_disconnect();
+        inner.fsm.finish_disconnect();
+
+        // The next attempt is admitted (`begin_attempt` retires once more) and commits.
+        inner.retire_connection_generation(false);
+        let next = inner.connect_generation;
+        assert_ne!(next, abandoned);
+        inner.fsm.begin_connect();
+        inner.fsm.mark_kill_switch_armed();
+        inner.fsm.mark_session_verified();
+        inner.fsm.connect_succeeded().unwrap();
+        assert!(
+            !inner.take_pending_policy_change(next),
+            "a deferral from a disconnected attempt must not reach the next session"
+        );
+
+        // A deferral recorded by the committing attempt itself is still consumed, once.
+        inner.fsm.begin_disconnect();
+        inner.fsm.finish_disconnect();
+        inner.retire_connection_generation(false);
+        let current = inner.connect_generation;
+        inner.fsm.begin_connect();
+        apply_policy_change_disposition(&mut inner);
+        inner.fsm.mark_kill_switch_armed();
+        inner.fsm.mark_session_verified();
+        inner.fsm.connect_succeeded().unwrap();
+        assert!(inner.take_pending_policy_change(current));
+        assert!(!inner.take_pending_policy_change(current), "consumption is once");
+    }
 }
