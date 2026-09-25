@@ -32,6 +32,29 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-25 · exit-agent：停用轮保留最后计数；hy2 出错不再跳过 Xray 吊销
+
+- **归属/来源**：ops 任务（出口计量与吊销，#563 合并车审查后续）；Issue #600 的 TF-opus-4 与 TF-opus-8（其余条目仍开）。
+  基线 origin/main 13983688；分支 `fix/exit-agent-disable-counters-hy2-20260925`（红分支 `wip/exit-agent-disable-counters-hy2-20260925-red`）；
+  PR [#624](https://github.com/raydocs/tono/pull/624)；未合 main。只改 `services/exit-agent/reconcile_and_report.py`、其测试与 README。
+- **缺陷修复**：TF-opus-4：控制面答复 `EXIT_NODE_DISABLED` 的停用轮只撤客户端、不读计数，上次正常轮到停机之间的流量丢失
+  （1000→1500 仍记 1000）。改后：撤除完成（或失败）后再尽力读一次计数（同一 Xray 进程代际），折入本地状态总量，由下一次可上报的轮次报出；
+  计数读取或状态写入失败只追加到拒绝说明里，永不阻挡或替换撤除结果。TF-opus-8：hy2 目录权限不对或 allowlist 缺失时在 Xray 对账前就抛出，
+  该轮 Xray 吊销 0、计数 0、无 ACK。改后：先记下 hy2 错误，照常做 Xray 对账与计数读取并存入状态，再以 hy2 错误拒绝本轮，不发 roster/计量 ACK、
+  不上报用量，控制面仍视该节点未收敛。停用轮与 hy2 失败轮与控制面不可达轮共用新提取的 `keep_usage_locally`（行为同原不可达轮）。
+  续：adca10ac 把 hy2 的文件系统 `OSError` 也按 hy2 失败处理；增量审查（jev-route f4e3ecab，Opus 发现、Codex 核实）指出停用轮
+  `withdraw_disabled_node` 仍只接 `Refusal`，`OSError` 会跳过 Xray 撤除，已同样处理（仍以 hy2 错误拒绝该轮）。
+- **新增/优化**：无。
+- **工程与测试**：两条回归：`test_a_disabled_round_still_folds_the_final_counter_sample`（新增）；
+  `test_a_failed_hy2_publish_still_revokes_xray_and_keeps_usage_but_is_never_acknowledged` 替换原
+  `test_a_failed_hy2_publish_is_never_acknowledged`（原测试断言「hy2 失败不做 Xray 对账、不写状态」，正是本缺陷）；`run_round` 增加 `counters` 参数；
+  `test_a_hy2_filesystem_error_still_withdraws_xray_clients`（停用轮，修复前断言失败）。
+- **验证**：本机 `cd services/exit-agent && python3 -m pytest -q`：红分支两条新测试均以断言失败（2 failed, 90 passed）；修复分支 92 passed；停用轮续修后 93 passed（新测试在修复前失败）。
+  `python3 services/exit-agent/test_reconcile_and_report.py`（CI 同命令）续修后（c82ac4aa）93 OK。未在任何节点运行。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：**节点需部署新 agent 才生效（运维步骤，本 PR 未做，未 SSH、未部署）**。停用轮的计数由下一次能上报的轮次报出；
+  节点被永久退役则这段用量仍不会上报。#600 的 TF-opus-3/5/6/7 未处理。
+
 ## 2026-09-25 · 两端：系统时钟错误导致证书日期校验失败时点名时钟
 
 - **归属/来源**：G2 连不上有下一手（失败要说清原因）；Issue #588（总账 H21-O-F9）。基线 origin/main 630d9e66（含 #622）；
@@ -256,6 +279,26 @@
   `src/pages/customer/OnboardDrawer.test.tsx` 一个 `it`（未提交到期/套餐时不显示该句），无条件显示时实跑失败。
   本机：control-plane 相关 4 个测试文件 356 用例、`typecheck`、`check:budgets`（`users.ts` 492 行）、`check:contract`
   通过；ops-console `typecheck`、相关文件 eslint、该测试与 `test/lint-rules.test.ts`、`test/ops-fixtures.test.ts` 通过。
+
+## 2026-09-24 · 控制面：销户改为单个 D1 事务，中途失败不再留下「资源已回收、VPN 仍可用」
+
+- **归属/来源**：ops 客户生命周期（控制面 Worker）；内部审查 H17-C-F2，
+  Issue [#524](https://github.com/raydocs/tono/issues/524)；基线 origin/main `059a2ea2`，
+  分支 `fix/refund-close-atomic-20260924`；未合 main。
+- **缺陷修复**：`POST ops/users/{id}/close` 原先分多次独立提交（解绑家宽 → 目录版本 → 退役 Claude 号
+  与事件 → 删 allowlist → 最后才 `disabled`），任一步之后失败都会保留已回收的资源而用户仍 `active`，
+  鉴权与出口名单照常放行，cron 也不会补完。改后：停用与全部回收放进同一个 `DB.batch`（一个事务），
+  停用排第一；要么全部生效，要么全部回滚。目录版本只在确实删掉绑定时递增、产品事件只在确实退役时写入
+  （`changes() > 0`，与原来的条件一致）。设备/会话撤销仍在 batch 之后由 `enforceUser` 执行，
+  账户已停用时鉴权与名单立即拒绝，遗留部分由 cron 补完。
+- **新增/优化**：无。
+- **工程与测试**：`test/ops-api.test.ts` 新增一个 `it`：用测试触发器让「停用」写入失败，断言 Claude 号
+  仍为 `assigned`、allowlist 仍在、用户仍 `active`。旧代码上实跑失败（`expected 'retired' to be 'assigned'`）。
+- **验证**：本机 MacBook `npx vitest run`（control-plane 全套 43 文件 / 892 用例通过）、
+  `npm run typecheck`；另用一次性临时用例（未提交）确认目录版本递增与产品事件在成功路径上只发生一次。
+- **候选/发布**：仅源码，无新候选；未部署。
+- **剩余限制**：家宽 SOCKS5 口令轮换标记属 #381，不在本 PR；与同批的「销户保留原因」修复
+  改同一处理器，后合者需按本 PR 的 batch 结构 rebase。
 
 ## 2026-09-24 · Windows 候选包构建：私有解包分支写出 live `Tono.exe`，载荷门拒绝
 

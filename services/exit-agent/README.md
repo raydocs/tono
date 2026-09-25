@@ -40,7 +40,10 @@ The roster cycle is ordered deliberately:
 2. If hy2 is installed, atomically replace its HTTP auth allowlist with exactly
    the verified roster, including an empty roster. Then fully reconcile Xray and
    read counters from one stable Xray process. Neither transport can be skipped
-   while claiming a complete roster ACK.
+   while claiming a complete roster ACK. A hy2 failure (unsafe directory,
+   missing allowlist, failed write) still lets the Xray reconcile and counter
+   read run; the counters are kept in the state file and the round then exits
+   non-zero with no ACK or usage report.
 3. POST the roster's `observedAt` to `/api/v1/home/roster-ack` with the same
    bearer token.
 4. Persist and deliver usage state.
@@ -94,7 +97,9 @@ running.
 
 A disabled or retired node gets `403 EXIT_NODE_DISABLED` on the roster. Only
 that answer makes the agent remove every `u:` client and `shared-legacy`,
-empty the hy2 allowlist and exit non-zero; stop `tono-xray` afterwards. Any
+empty the hy2 allowlist, take a best-effort final counter sample into the
+state file (reported by the next round that may report) and exit non-zero;
+stop `tono-xray` afterwards. Any
 other HTTP error or network failure keeps the last roster and retries.
 
 Xray drops every client added over its management API when it restarts. Each
