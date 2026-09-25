@@ -133,6 +133,9 @@ const toError = (error: unknown): Error => {
 
 /** Stable Rust prefixes → i18n keys for Connect/Disconnect action errors. */
 const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
+  // #588: a certificate the PC's clock cannot date. First, so it wins wherever the
+  // transport marked it inside another surface's error (sign-in, diagnostics, catalog).
+  { prefix: 'TONO_CLOCK_SKEW', key: 'tono.login.errors.clockSkew' },
   // Sign-in could not reach the control plane. Both transport paths carry the same
   // hostname and TLS SNI, so when both fail the failure is about reaching the server at
   // all — not the account, the code, or the app. Without this entry the raw Rust error

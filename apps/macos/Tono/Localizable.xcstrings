@@ -7273,6 +7273,16 @@
         }
       }
     },
+    "Your Mac's date and time look wrong, so Tono cannot verify secure connections. Set the correct date and time in System Settings > General > Date & Time, then retry.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台 Mac 的日期和时间不对，Tono 无法验证安全连接。请在“系统设置 > 通用 > 日期与时间”中改为正确的日期和时间，然后重试。"
+          }
+        }
+      }
+    },
     "active": {
       "localizations": {
         "zh-Hans": {

@@ -65,6 +65,8 @@ nonisolated enum ProbeFailureCategory: String, Sendable {
     case dns
     case tcp
     case tls
+    /// #588: TLS refused a certificate on its dates: this Mac's clock is wrong.
+    case clock
     case http
     case timeout
     case cancelled
@@ -256,14 +258,21 @@ nonisolated enum ProtectedConnectivity {
             detail = "controller=\(controllerError); TUN=\(tunDetail)"
         }
 
-        return .retry(failure(
+        var decided = failure(
             code,
             stage: stage,
             attempt: attempt,
             generation: generation,
             detail: detail,
             probes: probes
-        ))
+        )
+        // #588: an origin's certificate failed on its dates through the
+        // tunnel, so the exit answered and the clock is what is wrong. The
+        // code (and its telemetry) stays; only the sentence names the clock.
+        if probes.contains(where: { $0.category == .clock }) {
+            decided.userMessage = CertificateClock.userMessage
+        }
+        return .retry(decided)
     }
 
     static func failure(

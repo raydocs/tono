@@ -393,6 +393,13 @@ pub async fn tono_upload_diagnostics(
 /// enough. That is what the mapped message says.
 pub(super) fn auth_error(err: &ApiError) -> String {
     let prefix = match err {
+        // #588: a certificate the clock cannot date. Still a transport failure (no status
+        // line arrived), but the clock is what the user has to fix.
+        ApiError::Transport { message, .. }
+            if message.contains(crate::tono::transport::CLOCK_SKEW) =>
+        {
+            crate::tono::transport::CLOCK_SKEW
+        }
         ApiError::Transport { .. } => "TONO_AUTH_UNREACHABLE",
         ApiError::RateLimited => "TONO_AUTH_RATE_LIMITED",
         ApiError::DeviceLimit => "TONO_AUTH_DEVICE_LIMIT",

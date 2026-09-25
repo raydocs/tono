@@ -48,6 +48,10 @@ actor TonoAPIClient {
         /// its validity window. No session is involved, so it must not read
         /// as an expired session (#595).
         case invalidOrExpiredCode
+        /// #588: TLS refused the control plane's certificate on its dates, so
+        /// this Mac's clock is wrong. No status line arrived: offline
+        /// admission reads it as unreachable, but the user is told the clock.
+        case clockSkew
 
         var errorDescription: String? {
             switch self {
@@ -62,6 +66,7 @@ actor TonoAPIClient {
             case .invalidResponse: String(localized: "Tono returned an invalid response.")
             case let .entitlementBlocked(code, _): Self.entitlementDescription(code)
             case .invalidOrExpiredCode: String(localized: "That code is wrong or expired. Request a new one.")
+            case .clockSkew: CertificateClock.userMessage
             }
         }
 
@@ -1008,6 +1013,7 @@ actor TonoAPIClient {
             details: failureDetails
         )
         guard willRetry else {
+            if CertificateClock.isDateFailure(error) { throw APIError.clockSkew }
             throw APIError.transport(error.localizedDescription)
         }
         try await Task.sleep(for: .seconds(1))

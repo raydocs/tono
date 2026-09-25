@@ -248,9 +248,11 @@ nonisolated enum ProtectedConnectivityVerifier {
             case NSURLErrorCancelled: category = .cancelled
             case NSURLErrorTimedOut: category = .timeout
             case NSURLErrorCannotFindHost, NSURLErrorDNSLookupFailed: category = .dns
-            case NSURLErrorSecureConnectionFailed, NSURLErrorServerCertificateHasBadDate,
+            case NSURLErrorServerCertificateHasBadDate, NSURLErrorServerCertificateNotYetValid:
+                category = .clock
+            case NSURLErrorSecureConnectionFailed,
                  NSURLErrorServerCertificateUntrusted, NSURLErrorServerCertificateHasUnknownRoot,
-                 NSURLErrorServerCertificateNotYetValid, NSURLErrorClientCertificateRejected,
+                 NSURLErrorClientCertificateRejected,
                  NSURLErrorClientCertificateRequired: category = .tls
             case NSURLErrorCannotConnectToHost, NSURLErrorNetworkConnectionLost: category = .tcp
             default: category = .unknown
@@ -365,6 +367,9 @@ nonisolated enum ProtectedConnectivityVerifier {
     }
 
     static func classifyNWError(_ error: Error) -> ProbeFailureCategory {
+        if CertificateClock.isDateFailure(error) {
+            return .clock
+        }
         let posix = (error as NSError).code
         if posix == 60 || posix == ETIMEDOUT {
             return .timeout
@@ -389,9 +394,11 @@ nonisolated enum ProtectedConnectivityVerifier {
         case .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet,
              .dataNotAllowed:
             return .tcp
-        case .secureConnectionFailed, .serverCertificateHasBadDate,
+        case .serverCertificateHasBadDate, .serverCertificateNotYetValid:
+            return .clock
+        case .secureConnectionFailed,
              .serverCertificateUntrusted, .serverCertificateHasUnknownRoot,
-             .serverCertificateNotYetValid, .clientCertificateRejected,
+             .clientCertificateRejected,
              .clientCertificateRequired,
              .appTransportSecurityRequiresSecureConnection:
             return .tls
