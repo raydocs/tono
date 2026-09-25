@@ -366,6 +366,19 @@
 - **候选/发布**：无新包，仅源码。
 - **剩余限制**：部署前的只读检查见列车 PR 正文：#323、#326、#419、#470、#486、#493、#495；另有 0077/0078
   需在一次性远端 D1 上试跑、#329 必须先迁移，`TRAFFIC_POLICY_EMBED_REVISION` 保持关闭。
+- **续记（2026-09-25，再次合入 main 13983688；TC-anthropic-2/3）**：
+  - 合并：`git merge origin/main`（merge commit，不 rebase）。只有本页冲突，两边按条目保留、新日期在前；
+    FINDINGS_LEDGER 自动合并。main 自上次合入以来没有改 `services/control-plane`，迁移号无冲突，无代码冲突。
+  - TC-anthropic-2：列车已有断言，未新增用例。`removes the shared legacy credential …`（dual，退役账户，目录内
+    `Tono-Exit` 未 ACK）断言 503 `EXIT_IDENTITY_PROPAGATING`，ACK 晚于凭据后 200 且含设备 UUID、不含旧共享 UUID；
+    `holds a retired account only on exit nodes its catalog serves` 断言目录内 `last_roster_at = 0` 的节点挡住时 503。
+  - TC-anthropic-3（部署后必做，无条件）：0078（#326）改变家宽过滤集合但不推进目录 revision，#495 的 hy2 过滤同理；
+    Windows 把同 revision、不同 digest 当作篡改拒收。部署并让出口节点拉取、应用新 Worker 的 roster 之后，**无论**
+    `HY2_CATALOG_EMAILS` 是否设置、目录里有没有 ` · hy2` 块，都用受审计的 `PUT exit-catalog`（原 YAML，带当前
+    `expectedRevision`；写 `catalog.publish` 审计与 `catalog_publish` 回执）推进一次 revision，再确认客户端刷新。
+  - 验证：本机 worktree `services/control-plane`：`npm test`（`vitest run`）43 个文件 921 个用例通过。
+    未部署，未碰远端 D1，无原生构建。
+  - 候选/发布：无新包，仅源码。
 
 ## 2026-09-24 · Windows 候选包构建：私有解包分支写出 live `Tono.exe`，载荷门拒绝
 
