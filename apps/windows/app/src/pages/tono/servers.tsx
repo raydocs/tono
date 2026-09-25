@@ -357,8 +357,9 @@ const ServersPage = () => {
   })
 
   const selected = (servers ?? []).find((server) => server.selected)
-  // #590: this page's own refresh failure is superseded by any later sync (the periodic one, or
-  // a switched account's first): the backend's `catalog.error` speaks for the catalog from then on.
+  // #590: this page's own refresh failure is superseded once the last successful sync moves (a
+  // later periodic or manual success, or sign-in/out resetting it): the backend's `catalog.error`
+  // speaks for the catalog from then on. A later failed sync does not move it.
   useEffect(() => {
     setRefreshError(null)
   }, [catalog?.lastSyncedAtMs])
