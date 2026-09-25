@@ -363,6 +363,9 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | TC-anthropic-2 | 零 active 节点时退役账户永久 503；测试未断言成功路径 | in-PR | [#570](https://github.com/raydocs/tono/pull/570) | 中·已确认(Codex，条件性) | 生产有 1 个 active 节点；`worker.test.ts` 已断言 ACK 前 503、ACK 后 200 且为设备 UUID |
 | TC-anthropic-3 | 0078 改变过滤集合但不 bump 目录 revision，Windows 拒收同 revision 不同 digest | in-PR | [#570](https://github.com/raydocs/tono/pull/570) | 中·已确认(Codex) | 运维步骤：部署且节点拉取新 roster 后，无条件用带 `expectedRevision` 的受审计 catalog PUT bump revision（写入列车 changelog 与 PR 描述）|
 | TC-anthropic-4 | migrations README 缺 0077、0088 | in-PR | [#570](https://github.com/raydocs/tono/pull/570) | 低 | README 补 0077/0081/0088 |
+| TM-claude-2 | macOS 当前版本 helper 崩溃循环时修复是空操作，启动只报通用「helper 不可用」，无提示、无管理员修复 | in-PR | [#601](https://github.com/raydocs/tono/issues/601)，[#625](https://github.com/raydocs/tono/pull/625) | 中·已确认 | Opus 发现，Codex 复核；可弹提示的调用在 25 s 窗口内见 launchd `runs` 增 ≥2 且无应答即走管理员重装；依赖 `launchctl print` 字段；未实机 |
+| TM-claude-4 | macOS 原生更新准备与 `--emergency-disarm/reset` 自行恢复 DNS 时丢掉 `originalDNSRestored:false`，用户不知原 DNS 未放回 | in-PR | [#601](https://github.com/raydocs/tono/issues/601)，[#625](https://github.com/raydocs/tono/pull/625) | 低·已确认 | 记录在 root 目录，下一次 `/dns/restore` 报一次；紧急命令终端打印；要等 App 下一次 restore |
+| TM-claude-6 | helper 记录 PF 引用写失败 + 崩溃循环时每次重启多取一个 `pfctl -E` token 且永不释放 | in-PR | [#601](https://github.com/raydocs/tono/issues/601)，[#625](https://github.com/raydocs/tono/pull/625) | 低·已确认 | 改由内核唯一匿名引用（`pfctl -e`）持有后释放新 token；解除后 PF 仍开（无 Tono 规则）至 `pfctl -d`/重启 |
 
 测试覆盖缺口（夹具未跨真实 DLL、无断电/睡眠/多网卡实机、无 parser fuzz 等）不是本账条目，
 见 [审查轮记录](reports/REVIEW_ROUNDS_2026-09-23.md) 的「未覆盖」一节；找到具体失败再作为新条目上报。

@@ -67,6 +67,10 @@ final class ProtectedDNSManager {
 
     private static let supportDirectory = "/Library/Application Support/Tono"
     private static let statePath = "\(supportDirectory)/protected-dns.json"
+    /// Left by a release no app reply carries (native update preparation,
+    /// `--emergency-disarm`, `--emergency-reset`) when the original servers
+    /// had no service to go back to. Presence is the record (TM-claude-4).
+    private static let originalLossNoticePath = "\(supportDirectory)/protected-dns.original-not-restored"
     static let protectedDNSServer = ProtectedDNSContract.server
     private static let maximumStateBytes = 16 * 1024
     private let lock = NSLock()
@@ -182,7 +186,11 @@ final class ProtectedDNSManager {
     /// permission drift, truncation) that no retry can repair, and refusing
     /// here used to leave PF fail-closed with no outlet at all, not even
     /// `--emergency-disarm`. See `restoreTransaction`.
-    func restore() throws -> [String: Any] {
+    ///
+    /// `deferringLossNotice` is for a release no app reply carries (native
+    /// update preparation, emergency recovery): a lost original is recorded
+    /// for the app's next `/dns/restore` reply instead of reaching nobody.
+    func restore(deferringLossNotice: Bool = false) throws -> [String: Any] {
         lock.lock()
         defer { lock.unlock() }
         let outcome = try Self.restoreTransaction(
@@ -199,7 +207,11 @@ final class ProtectedDNSManager {
             snapshotPresent: false,
             service: outcome.snapshot?.service
         )
-        if !outcome.originalRestored {
+        if Self.reportsOriginalLoss(
+            originalRestored: outcome.originalRestored,
+            deferred: deferringLossNotice,
+            noticePath: Self.originalLossNoticePath
+        ) {
             // The loopback sweep is proven, so release is safe, but the
             // recorded servers had no service left to go back to. They stay
             // on disk beside the state file, not claimed as restored.
@@ -1076,6 +1088,60 @@ final class ProtectedDNSManager {
             return false
         }
         print("DNS renamed-service regression passed: a renamed service gets its original DNS back by service ID")
+        return true
+    }
+
+    /// Whether a restore reply carries `originalDNSRestored: false`. A
+    /// deferred release also records its loss at `noticePath`; any other
+    /// reply reports its own loss or a recorded one, and removes the record
+    /// so the app is told once.
+    static func reportsOriginalLoss(
+        originalRestored: Bool,
+        deferred: Bool,
+        noticePath: String
+    ) -> Bool {
+        if deferred {
+            if !originalRestored {
+                let fd = open(noticePath, O_WRONLY | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0o600)
+                if fd >= 0 {
+                    close(fd)
+                } else {
+                    FileHandle.standardError.write(Data(
+                        "tono: the unrestored original DNS could not be recorded for the app\n".utf8
+                    ))
+                }
+            }
+            return !originalRestored
+        }
+        let recorded = unlink(noticePath) == 0
+        return !originalRestored || recorded
+    }
+
+    /// A loss recorded by a deferred release that no `/dns/restore` reply
+    /// has reported yet.
+    static var originalLossRecorded: Bool {
+        access(originalLossNoticePath, F_OK) == 0
+    }
+
+    /// TM-claude-4: native update preparation and emergency recovery release
+    /// DNS with no app reply to carry `originalDNSRestored: false`. Their loss
+    /// must reach the app's next `/dns/restore` reply, and only that one.
+    static func runDeferredOriginalLossSelfTest() -> Bool {
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-dns-original-loss-\(getpid())").path
+        unlink(path)
+        defer { unlink(path) }
+        let deferred = reportsOriginalLoss(originalRestored: false, deferred: true, noticePath: path)
+        let nextReply = reportsOriginalLoss(originalRestored: true, deferred: false, noticePath: path)
+        let laterReply = reportsOriginalLoss(originalRestored: true, deferred: false, noticePath: path)
+        guard deferred, nextReply, !laterReply else {
+            print(
+                "DNS deferred-loss regression FAILED: deferred=\(deferred), "
+                    + "nextReply=\(nextReply), laterReply=\(laterReply)"
+            )
+            return false
+        }
+        print("DNS deferred-loss regression passed: a loss with no app reply reaches the next /dns/restore once")
         return true
     }
 

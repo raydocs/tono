@@ -32,6 +32,44 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-25 · macOS：helper 崩溃循环可修复、自行释放 DNS 时的原始 DNS 丢失会告知、PF 引用不再逐次泄漏
+
+- **归属/来源**：G2 连不上有下一手（helper 坏了要能修、要说清）；Issue #601（macOS 合并列车审查 TM-claude-2/4/6，总账同名三行）。
+  macOS `Core/HelperManager.swift`、`Core/RuntimeCleanup.swift`、`Core/HelperProtocolVersion.swift`；helper
+  `KillSwitchPF.swift`、`ProtectedDNSManager.swift`、`UpdateRuntime.swift`、`main.swift`、`KillSwitchTests.swift`、`CONTRACT.sha256`。
+  基线 origin/main f5c31d58；分支 `fix/macos-helper-followups-20260925`（红分支 `wip/macos-helper-followups-20260925-red`）；PR [#625](https://github.com/raydocs/tono/pull/625)；未合 main。
+- **缺陷修复**：
+  - TM-claude-2：当前版本 helper 启动失败（PF 恢复后任一步失败会装紧急拦截再退出）时，launchd KeepAlive 每约 10 s 重启一次，永远不应答。
+    `installIfNeeded` 看到版本正确、launchd 已注册就直接返回，修复是空操作；启动时的查询随后抛出通用「helper 不可用」，#425 的提示和管理员提示都不出现。
+    现在对可以弹管理员提示的调用（Connect、Restore internet、启动修复）在该分支上做有界检测：25 s 内每秒探测 socket，
+    socket 一应答即按原路返回；`launchctl print` 的 `runs` 在窗口内增加 ≥2 次仍无应答则判定崩溃循环，走已有的管理员重装。
+    不弹提示的调用（睡眠、退出、更新准备里的 `restrictToBootstrap`）不做检测，行为不变。启动修复返回后若 helper 仍不应答，
+    改为抛出 #425 的「未在保护中，点重试并批准管理员提示」提示，而不是通用错误。PF 不放松：重装走原安装脚本，内核规则在换 daemon 期间保留。
+  - TM-claude-4：原生更新准备（含执行器回滚）和 `--emergency-disarm`/`--emergency-reset` 在 helper 内部恢复 DNS，丢掉了
+    `originalDNSRestored: false`，之后快照已归档，App 再也不会收到（对照 #487/#489）。现在这些路径把丢失记在
+    `/Library/Application Support/Tono/protected-dns.original-not-restored`（root 目录，reset 不删）；下一次 `/dns/restore` 回复带上
+    `originalDNSRestored: false` 并删除记录，App 沿用 #489 的一次性提示。两个紧急命令成功后还在终端打印同一说明。
+  - TM-claude-6：`pf.reference` 记录写失败时，新取的 `pfctl -E` token 只存在进程内存；崩溃循环下每次重启都再取一个且永不释放。
+    现在写失败时先用 `pfctl -e` 让内核持有唯一的匿名引用（xnu `DIOCSTART`：PF 已开时仅在没有匿名引用时加一，重复调用不叠加），
+    确认成功（退出码 0 或「already enabled」，且 PF 仍开）后才 `pfctl -X` 释放新 token，引用计数不经过零；确认不了则保持原行为（token 留在内存重试）。
+- **新增/优化**：无。helper 协议 4.46.0 → 4.47.0，CONTRACT 哈希按 `build-core-helper.sh` 同一管线重算（先复现 main 记录的 4.46.0 哈希）。
+- **工程与测试**：三条回归，各对应一个行为，红分支只含测试、骨架（`launchdShowsCrashLoop` 恒 false；`reportsOriginalLoss` 保持 main 行为）
+  与协议号，预期以断言失败：
+  XCTest `HelperUnprotectedNoticeTests.testLaunchdRestartingTheHelperTwiceIsACrashLoop`（`runs` 增 2 为崩溃循环、增 1 不是、无计数不算）；
+  helper `--lifecycle-self-test` 的 `ProtectedDNSManager.runDeferredOriginalLossSelfTest`（延后记录的丢失只在下一次回复报告一次）
+  与 PF 检查 9b `unrecorded-reference-not-kept`（记录路径不可写时调用后 `pfctl -s References` 不出现新的数字词（token）且 PF 仍开；
+没有任何 token 时内核回 ENOENT，所以不看退出码；
+  若测试开始时 PF 是关的，结束时 `pfctl -d` 去掉测试留下的匿名引用）。启动提示改动无单独测试。
+- **验证**：未在本机编译或运行 Swift（执行位置规则）；编译、XCTest 与需 root 的 `--lifecycle-self-test` 以 PR CI `macos-26` 为准。
+  本机只做了：`launchctl print system/com.raydocs.tono.core-helper` 以普通用户可读、含顶层 `\truns = N`（与测试夹具形状一致）；
+  `verify-swift-balance.py`（改动文件仅有 main 上已存在的两处误报）；xnu `bsd/net/pf_ioctl.c` 源码核对 `DIOCSTART`/`DIOCSTOPREF` 语义。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：崩溃循环检测依赖 `launchctl print` 的 `runs` 字段（非稳定接口），最坏多等 25 s；启动步骤慢于约 12 s 才失败的循环
+  可能一轮测不到，下次 Retry 再测；重装修不了 helper 自身启动缺陷时，用户看到「helper 未启动」加提示。DNS 丢失提示要等 App 下一次
+  `/dns/restore`（Restore internet、退出、启动清理、升级前准备），旧版 App 会消费记录而不提示。PF 记录写失败后匿名引用在解除保护后仍让
+  PF 保持开启（Tono anchor 已清空，无放行变化），直到 `pfctl -d` 或重启；若本机 `pfctl -e` 输出不含「already enabled」，退回原行为（仍泄漏），
+  以 CI 上 9b 的结果为准。均未实机验证。
+
 ## 2026-09-25 · 运维：控制面部署 f5c31d58；exit-agent #624 上 14 个节点；Tokyo · Sakura 换 IP 后接入
 - 归属：ops 任务（控制面部署、出口计量与吊销）；不改客户端。
 - 来源：main `f5c31d58`（含 #624）；无代码改动，本条只记录运维动作，详细见

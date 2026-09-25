@@ -36,4 +36,35 @@ final class HelperUnprotectedNoticeTests: XCTestCase {
         XCTAssertTrue(repaired)
         XCTAssertNil(status)
     }
+
+    /// TM-claude-2: a current helper whose startup keeps failing exits, and
+    /// launchd restarts it every ten seconds forever. Installation saw a
+    /// current, registered binary and returned, so no repair ever ran.
+    /// launchd's run count is the evidence: two restarts inside the window
+    /// while the socket never answers is a crash loop; one is a restart.
+    func testLaunchdRestartingTheHelperTwiceIsACrashLoop() {
+        func printed(runs: Int) -> String {
+            """
+            system/com.raydocs.tono.core-helper = {
+            \tactive count = 0
+            \tstate = not running
+            \truns = \(runs)
+            \tlast exit code = 1
+            \tresource coalition = {
+            \t\tstate = active
+            \t}
+            }
+            """
+        }
+        XCTAssertTrue(
+            HelperManager.launchdShowsCrashLoop(before: printed(runs: 7), after: printed(runs: 9))
+        )
+        XCTAssertFalse(
+            HelperManager.launchdShowsCrashLoop(before: printed(runs: 7), after: printed(runs: 8))
+        )
+        XCTAssertFalse(
+            HelperManager.launchdShowsCrashLoop(before: "", after: printed(runs: 9)),
+            "no run count is no evidence"
+        )
+    }
 }

@@ -724,14 +724,24 @@ extension KillSwitchManager {
         } catch {
             // PF is enabled and referenced, which is what protection needs.
             // Keep the older record (and its token) rather than orphaning it.
-            // Releasing the new token here could stop PF under an armed kill
-            // switch when nothing else holds a reference, so keep it in memory:
-            // the next check retries this write with the same token instead
-            // of taking one more every ten seconds, and disarm releases it.
-            unrecordedPFEnableReference = .init(token: token, boot: boot)
             FileHandle.standardError.write(Data(
                 "tono: PF enable reference could not be recorded\n".utf8
             ))
+            // A token on no record outlives this process, so a helper whose
+            // startup kept failing took one more at every launchd restart
+            // (TM-claude-6). Hold PF with the kernel's anonymous reference
+            // first, then release the new token: the count never reaches zero.
+            if holdAnonymousPFEnableReference() {
+                _ = try? run("/sbin/pfctl", ["-X", token])
+                unrecordedPFEnableReference = nil
+                return
+            }
+            // Unconfirmed, releasing the new token here could stop PF under an
+            // armed kill switch when nothing else holds a reference, so keep
+            // it in memory: the next check retries this write with the same
+            // token instead of taking one more every ten seconds, and disarm
+            // releases it.
+            unrecordedPFEnableReference = .init(token: token, boot: boot)
             return
         }
         unrecordedPFEnableReference = nil
@@ -739,6 +749,19 @@ extension KillSwitchManager {
            pfEnableReferenceListed(previous.token) {
             _ = try? run("/sbin/pfctl", ["-X", previous.token])
         }
+    }
+
+    /// `pfctl -e` holds PF with the kernel's one anonymous enable reference:
+    /// xnu's `DIOCSTART` starts PF with it, or, while PF runs, adds it unless
+    /// it is already held ("pf already enabled"). Asking again never adds a
+    /// second, and only `pfctl -d` drops it, so after a record failure PF
+    /// stays enabled (with Tono's anchor emptied) past disarm.
+    static func holdAnonymousPFEnableReference() -> Bool {
+        guard let enabled = try? run("/sbin/pfctl", ["-e"]),
+              enabled.status == 0 || enabled.message.contains("already enabled") else {
+            return false
+        }
+        return pfEnabled()
     }
 
     /// Releases the reference this helper recorded, if the kernel still holds

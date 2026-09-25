@@ -313,6 +313,35 @@ extension KillSwitchManager {
             check("reference-foreign-token", false)
         }
 
+        // 9b. A token whose record cannot be written must not outlive the call
+        //     (TM-claude-6): a helper whose startup keeps failing took one more
+        //     at every launchd restart. PF stays enabled, on the kernel's one
+        //     anonymous reference, which only `pfctl -d` drops — so this check
+        //     disables PF again only if it started disabled. The listing is
+        //     compared by its numeric words, as `pfEnableReferenceListed` reads
+        //     a token: with no token at all the kernel answers ENOENT, so
+        //     pfctl's exit status is no signal here.
+        func listedReferenceWords() -> Set<String>? {
+            guard let listed = try? run("/sbin/pfctl", ["-s", "References"]) else { return nil }
+            return Set(
+                String(decoding: listed.output, as: UTF8.self)
+                    .split(whereSeparator: \.isWhitespace)
+                    .filter { $0.allSatisfy(\.isWholeNumber) }
+                    .map(String.init)
+            )
+        }
+        let unwritableRecord = "/nonexistent-tono-\(getpid())/pf.reference"
+        let listedBefore = listedReferenceWords()
+        try? holdPFEnableReference(recordPath: unwritableRecord)
+        let listedAfter = listedReferenceWords()
+        check(
+            "unrecorded-reference-not-kept",
+            listedBefore != nil && listedAfter != nil
+                && listedAfter!.subtracting(listedBefore!).isEmpty && pfEnabled()
+        )
+        releasePFEnableReference(recordPath: unwritableRecord)
+        if !startedEnabled { _ = try? run("/sbin/pfctl", ["-d"]) }
+
         // 10. Full removal (`--emergency-reset`) takes back exactly the hook an
         //     arm wrote into /etc/pf.conf, keeps a line the user added later,
         //     and deletes both `.tono-backup` files (H19-O-F6). Fixture paths

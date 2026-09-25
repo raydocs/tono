@@ -831,10 +831,18 @@ func runEmergencyDisarm(underLock suppliedStorage: UpdateStorage? = nil) -> Bool
                 fputs("Tono emergency recovery disarmed PF but could not archive the resolved update attempt: \(error)\n", stderr)
             }
         } else {
-            _ = try dns.restore()
+            _ = try dns.restore(deferringLossNotice: true)
             _ = try manager.disarm()
         }
         print("Tono network protection is disarmed.")
+        if ProtectedDNSManager.originalLossRecorded {
+            // Either branch above; the record stays for the app's next restore.
+            print(
+                "The network service whose DNS settings Tono saved no longer exists, so those "
+                    + "DNS servers were not put back and DNS is now obtained automatically. If your "
+                    + "network needs manual DNS servers, set them again in System Settings > Network."
+            )
+        }
         return true
         }
         return try suppliedStorage == nil ? storage.locked(disarm) : disarm()
@@ -1398,6 +1406,7 @@ if CommandLine.arguments.dropFirst() == ["--lifecycle-self-test"] {
         && ProtectedDNSManager.runStatusUnreadableServiceSelfTest()
         && ProtectedDNSManager.runCorruptSnapshotSelfTest()
         && ProtectedDNSManager.runRenamedServiceRestoreSelfTest()
+        && ProtectedDNSManager.runDeferredOriginalLossSelfTest()
     exit(pfPassed && dnsPassed ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--self-test"] {

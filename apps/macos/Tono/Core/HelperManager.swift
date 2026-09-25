@@ -190,23 +190,32 @@ nonisolated struct HelperManager {
                 // failed during a previous upgrade), no retry of the socket
                 // will ever succeed and this early return would wedge every
                 // connect forever — fall through to the full install instead.
+                // So does a daemon launchd keeps restarting, when this caller
+                // may prompt; a prompt-free caller could not repair it anyway.
                 if daemonRegisteredWithLaunchd() {
+                    if !(administratorPrompt && daemonKeepsRestarting()) {
+                        LocalTrafficAudit.shared.recordEvent(
+                            "helper_artifact_current",
+                            details: [
+                                "version": helperVersion,
+                                "daemon_probe": "temporarily_unavailable",
+                                "duration_ms": Self.durationMilliseconds(
+                                    since: preparationStartedAt
+                                ),
+                            ]
+                        )
+                        return
+                    }
                     LocalTrafficAudit.shared.recordEvent(
-                        "helper_artifact_current",
-                        details: [
-                            "version": helperVersion,
-                            "daemon_probe": "temporarily_unavailable",
-                            "duration_ms": Self.durationMilliseconds(
-                                since: preparationStartedAt
-                            ),
-                        ]
+                        "helper_crash_loop_reinstall_required",
+                        details: ["artifact_version": helperVersion]
                     )
-                    return
+                } else {
+                    LocalTrafficAudit.shared.recordEvent(
+                        "helper_daemon_unregistered_reinstall_required",
+                        details: ["artifact_version": helperVersion]
+                    )
                 }
-                LocalTrafficAudit.shared.recordEvent(
-                    "helper_daemon_unregistered_reinstall_required",
-                    details: ["artifact_version": helperVersion]
-                )
             }
             if installedVersion == helperVersion {
                 LocalTrafficAudit.shared.recordEvent(
@@ -517,6 +526,65 @@ nonisolated struct HelperManager {
         case .loadedOrUnknown:
             nil
         }
+    }
+
+    /// launchd restarts a KeepAlive job no sooner than ten seconds after its
+    /// last launch (`minimum runtime`), so a crash loop shows two restarts
+    /// well inside this window.
+    static let crashLoopRestarts = 2
+    static let crashLoopWindowSeconds: TimeInterval = 25
+
+    /// Whether launchd restarted the helper job at least `crashLoopRestarts`
+    /// times between two `launchctl print system/<label>` samples. Reads the
+    /// job's top-level `runs = N`; a missing count on either side is no
+    /// evidence.
+    static func launchdShowsCrashLoop(before: String, after: String) -> Bool {
+        guard let first = launchdRunCount(before),
+              let last = launchdRunCount(after) else { return false }
+        return last - first >= crashLoopRestarts
+    }
+
+    private static func launchdRunCount(_ printed: String) -> Int? {
+        let prefix = "\truns = "
+        guard let line = printed.split(separator: "\n").first(where: { $0.hasPrefix(prefix) }) else {
+            return nil
+        }
+        return Int(line.dropFirst(prefix.count).trimmingCharacters(in: .whitespaces))
+    }
+
+    /// A current, registered helper that answers nothing is busy, starting,
+    /// or crash-looping: a startup failure after the PF restore installs the
+    /// emergency block and exits, and KeepAlive restarts it forever. Only the
+    /// administrator reinstall can change that (TM-claude-2). Bounded: the
+    /// socket answering ends the wait, and so does the window.
+    private static func daemonKeepsRestarting() -> Bool {
+        guard let before = launchctlPrint() else { return false }
+        let deadline = Date().addingTimeInterval(crashLoopWindowSeconds)
+        while Date() < deadline {
+            usleep(1_000_000)
+            if probeDaemon() != .unreachable { return false }
+            guard let after = launchctlPrint() else { return false }
+            if launchdShowsCrashLoop(before: before, after: after) { return true }
+        }
+        return false
+    }
+
+    private static func launchctlPrint() -> String? {
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        process.arguments = ["print", "system/\(plistLabel)"]
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        return String(decoding: data, as: UTF8.self)
     }
 
     static var hasInstalledHelperArtifact: Bool {
