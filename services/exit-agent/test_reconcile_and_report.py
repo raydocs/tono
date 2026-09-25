@@ -515,6 +515,7 @@ class RosterControlSignals(unittest.TestCase):
         inventory_known: bool = True,
         hy2_error: Exception | None = None,
         persist_error: Exception | None = None,
+        counters: dict[str, int] | None = None,
     ):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -526,7 +527,7 @@ class RosterControlSignals(unittest.TestCase):
         if override is not None:
             environment["TONO_RETIRE_SHARED_LEGACY"] = override
 
-        reconcile_result = (0, 0, set() if inventory_known else None, {}, None)
+        reconcile_result = (0, 0, set() if inventory_known else None, counters or {}, None)
         with patch.dict(agent.os.environ, environment, clear=True), \
              patch.object(agent, "api_base", return_value="https://control.example"), \
              patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
@@ -594,13 +595,18 @@ class RosterControlSignals(unittest.TestCase):
         )
         acknowledge.assert_not_called()
 
-    def test_a_failed_hy2_publish_is_never_acknowledged(self) -> None:
+    def test_a_failed_hy2_publish_still_revokes_xray_and_keeps_usage_but_is_never_acknowledged(self) -> None:
+        # TF-opus-8: a hy2 error used to end the round before the Xray
+        # reconcile, so revoked accounts stayed on VLESS and no counter was read.
+        label = agent.client_label("usr_1")
         path, reconcile, acknowledge = self.run_round(
             server_retire=False, hy2_error=agent.Refusal("injected hy2 write failure"),
+            counters={label: 1_500},
         )
-        reconcile.assert_not_called()
+        reconcile.assert_called_once()
         acknowledge.assert_not_called()
-        self.assertFalse(path.exists())
+        self.acknowledge_metering.assert_not_called()
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["totals"], {label: 1_500})
 
     def test_an_unverifiable_live_client_inventory_is_never_acknowledged(self) -> None:
         path, _, acknowledge = self.run_round(
@@ -764,6 +770,40 @@ class RosterControlSignals(unittest.TestCase):
         self.assertEqual(removed, [])
         round_answering(json.dumps({"error": {"code": "EXIT_NODE_DISABLED"}}).encode())
         self.assertEqual(sorted(removed), sorted(["u:usr_1", agent.LEGACY_CLIENT_EMAIL]))
+
+    def test_a_disabled_round_still_folds_the_final_counter_sample(self) -> None:
+        # TF-opus-4: the withdrawal round never read the counters, so traffic
+        # since the last active round (1000 -> 1500) was never kept.
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        label = agent.client_label("usr_1")
+        path.write_text(json.dumps({
+            **fresh_state(), "sourceId": "exit-node-a", "installedClients": [label],
+            "totals": {label: 1_000}, "counterBaseline": {label: 1_000},
+            "userTotals": {"usr_1": 1_000},
+        }), encoding="utf-8")
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "exit-node-a",
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "xray_start_marker", return_value=None), \
+             patch.object(agent, "require_commands", return_value={
+                 "add_user": "adu", "remove_user": "rmu", "stats_query": "statsquery",
+             }), \
+             patch.object(agent, "fetch_roster",
+                          side_effect=agent.NodeDisabled("disabled")), \
+             patch.object(agent, "withdraw_disabled_node", return_value=(1, set())), \
+             patch.object(agent, "read_counters", return_value={label: 1_500}), \
+             patch.object(agent, "acknowledge_roster") as acknowledge:
+            with self.assertRaisesRegex(agent.Refusal, "disabled"):
+                agent.run_once(path)
+
+        acknowledge.assert_not_called()
+        state = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(state["totals"], {label: 1_500})
+        self.assertEqual(state["userTotals"], {"usr_1": 1_000})
 
     def test_shared_legacy_retirement_survives_an_xray_restart(self) -> None:
         # Mixed-case override, no live listing, and a durable inventory that no
