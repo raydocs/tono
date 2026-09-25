@@ -36,7 +36,7 @@
 
 - **归属/来源**：G3 发出去还能再发（更新事务与手动安装器）；TW-anthropic-4 兼及 G1 连接生命周期。Issue #602
   （合并列车 #572 审查跟进，总账 TW-*）。基线 origin/main f5c31d58；分支 `fix/win-update-lifecycle-followups-20260925`
-  （红分支 `wip/win-update-lifecycle-followups-20260925-red`）；PR 待开；未合 main。`apps/windows/service`
+  （红分支 `wip/win-update-lifecycle-followups-20260925-red`）；PR [#626](https://github.com/raydocs/tono/pull/626)；未合 main。`apps/windows/service`
   （`bin/install_service/update_executor.rs`、`core/update.rs`、`core/update/security.rs`、`core/server/handlers.rs`、
   `core/windows_kill_switch.rs` 注释、`tests/test_owner_lifecycle.rs`）、`apps/windows/app`（`installer.nsi`、
   `scripts/windows-packaging.test.mjs`）、`docs/UPDATE_PROTOCOL_V1.md`。
