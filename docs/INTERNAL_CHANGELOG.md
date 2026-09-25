@@ -251,6 +251,38 @@
   自行恢复后不清除，要等下一次成功的 arm/lock（`record_outcome`）才清。这是 Service 看门狗路径，与 #593 的 App
   分类路径不同，本 PR 未改，另需记录。未在实机复现。
 
+## 2026-09-24 · 控制面 + ops 控制台：销户保留停用原因，只有退款才记「退款销户」
+
+- **归属/来源**：ops 客户生命周期（控制面 Worker + ops 控制台）；内部审查 H17-O-F6（核实降级为低），
+  Issue [#532](https://github.com/raydocs/tono/issues/532)；基线 origin/main `8dc79a5b`，
+  分支 `fix/close-reason-audit-20260924`；未合 main。
+- **缺陷修复**：控制台「停用」调用 `POST users/{id}/close` 并带原因，Worker 接收后丢弃（且只有带正数
+  `content-length` 才读请求体），审计固定 `closed <email>`，空备注一律写「退款销户」、产品事件一律
+  `refund close`。改后：有请求体就读；原因（≤200 字）写进 `user.close` 审计行；新增可选 `refund: true`，
+  只有它才写「退款销户」备注、`refund close` 事件和审计里的 `(refund)`，否则事件记 `account closed`、
+  备注不动。控制台停用对话框加「这是退款销户」勾选。回收范围（家宽、Claude 号、allowlist、设备）不变。
+- **新增/优化**：控制台停用对话框的退款勾选（为上述修复服务）。
+- **工程与测试**：`test/ops-api.test.ts` 新增一个 `it`（非退款停用带原因 → 审计含原因、备注仍为空）；
+  旧代码上实跑失败（`expected 'closed a@example.com' to contain '客户要求暂停'`）。
+- **验证**：本机 MacBook control-plane `npx vitest run`（43 文件 / 892 用例通过）、`npm run typecheck`；
+  ops-console `npm run typecheck`、`npx vitest run`（26 文件 / 310 用例通过）、改动文件 eslint。
+  停用流程 Playwright 未在本机跑，以 PR CI `ops-console-e2e` 为准。
+- **候选/发布**：仅源码，无新候选；未部署。
+- **剩余限制**：旧版 admin 控制台「注销账号」发 `{}`，改后记为非退款；Claude 号退役后能否重绑仍待产品决定；
+  与同批 #525（销户单事务）改同一处理器，后合者按对方结构 rebase（本 PR 的原因/退款条件套进 batch 语句）。
+- **续记（2026-09-25，双厂商评审 jev-route `44cc9516`：O-F1 = C-F1、O-F2；合入 origin/main）**：
+  合入已进 main 的 #525：退款条件改为套进单个 batch 的停用语句（备注 `CASE WHEN ?`）与产品事件
+  （`refund close` / `account closed` 作为绑定参数），两边测试都保留。① 读体条件只排除了 null 与
+  `content-length: 0`，无 Content-Length 的零字节流（chunked 空体等）会进 `body()` 被判 400/415，
+  而旧代码会照常停用。`request.ts` 的 `body()` 加可选 `allowEmpty`（默认关，其他调用方不变）：
+  零字节体不论如何发送都读成 `{}`，非空体仍要求 JSON 类型；销户改为始终经它读体。② 控制台停用对话框
+  取消时复位退款勾选（对话框关闭时不卸载，状态会留到下次打开）。测试：`test/ops-api.test.ts` 新增一个
+  `it`（无 Content-Length 的空流 POST close → 200 且已停用），修复前实跑 `expected 400 to be 200`；
+  `e2e/customers-actions.spec.ts` 新增一个 test（勾退款 → 取消 → 再打开未勾选），修复前实跑失败
+  （`Received: checked`）。本机：control-plane 全套 895 用例、`typecheck`、`check:budgets`、`check:contract`
+  通过；ops-console `typecheck`、改动文件 eslint、`customers-actions.spec.ts` 中停用两条 light/dark 共 4 例通过。
+  评审建议 O-F3（原因 200 字上限前端未限）为未核实建议，本轮未改。
+
 ## 2026-09-24 · 控制面 + ops 控制台：未注册客户开通时填的到期与套餐不再丢失
 
 - **归属/来源**：ops 客户生命周期（控制面 Worker + ops 控制台）；内部审查 H17-O-F4，

@@ -110,6 +110,8 @@ export const customerActionCopy = {
   suspendTitle: '停用账号',
   suspendBody: (email: string) => `${email} 马上不能登录，名下设备会被撤销，家宽退回库存，在用的 Claude 号退出。确认后才会执行。`,
   suspendReason: '停用原因',
+  suspendRefund: '这是退款销户',
+  suspendRefundHint: '勾上后空备注记成「退款销户」，审计里也注明退款。只是暂停就别勾。',
   suspendConfirm: '停用',
   restoreTitle: '恢复账号',
   restoreBody: (email: string) => `${email} 可以重新登录。设备要自己再登一次，家宽和 Claude 号不会自动绑回来。`,

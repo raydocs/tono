@@ -91,6 +91,18 @@ test.describe('客户写动作', () => {
     await expect(page.getByRole('button', { name: '恢复' })).toBeVisible();
   });
 
+  test('停用对话框取消之后，退款勾选不会留到下一次', async ({ page }, testInfo) => {
+    const session = fresh('close-cancel', testInfo);
+    await open(page, '/customers/u-02', 'default', session);
+    await page.getByRole('button', { name: '停用', exact: true }).click();
+    const ask = gate(page, /马上不能登录/);
+    await ask.getByLabel('这是退款销户').check();
+    await ask.getByRole('button', { name: '取消', exact: true }).click();
+
+    await page.getByRole('button', { name: '停用', exact: true }).click();
+    await expect(gate(page, /马上不能登录/).getByLabel('这是退款销户')).not.toBeChecked();
+  });
+
   test('绑上一条家宽之后家宽这一节写的是它', async ({ page }, testInfo) => {
     const session = fresh('home', testInfo);
     await open(page, '/customers/u-02', 'default', session);
