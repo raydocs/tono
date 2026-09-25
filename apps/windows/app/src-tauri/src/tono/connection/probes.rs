@@ -21,7 +21,8 @@ use super::controller::{
 };
 use super::controller_error_detail;
 use super::failure::{
-    NODE_OR_CORE_UNREACHABLE_PREFIX, TUN_DATA_PLANE_BROKEN_PREFIX, TUN_INGRESS_BROKEN_PREFIX, StageFailure,
+    NODE_OR_CORE_UNREACHABLE_PREFIX, TUN_DATA_PLANE_BROKEN_PREFIX, TUN_INGRESS_BROKEN_PREFIX,
+    WFP_LOCK_UNVERIFIED_PREFIX, StageFailure,
 };
 use super::status::set_stage;
 use super::transaction::ConnectTransaction;
@@ -312,6 +313,15 @@ pub(super) fn classify_exhausted_data_plane(
     data_plane: String,
     proxy_cross_check: Result<(), String>,
 ) -> String {
+    // #593: the WFP lock proof failed before any TUN probe ran, so a TUN verdict (and its
+    // "restart the PC" advice) would misstate the failure. Keep the Service's real answer.
+    if data_plane.starts_with(WFP_LOCK_UNVERIFIED_PREFIX) {
+        let proxy = match proxy_cross_check {
+            Ok(()) => "passed".to_string(),
+            Err(error) => error,
+        };
+        return format!("{data_plane}; loopback proxy: {proxy}");
+    }
     let (code, _) = tono_core::classify_exhausted_data_plane(
         controller_probe.clone(),
         data_plane.clone(),
@@ -582,16 +592,24 @@ pub(super) async fn verify_locked() -> Result<KillSwitchStatus, String> {
     Err(lock_unverified_error(&last))
 }
 
+/// The Service's answer when it is not Locked, with its own `last_error`: without it a WFP
+/// failure (reconciliation, engine timeout) reached the user as `live=false` and nothing more.
 pub(super) fn kill_switch_not_locked(status: &KillSwitchStatus) -> String {
-    format!(
+    let mut message = format!(
         "kill switch not locked (wanted={}, live={}, mode={:?})",
         status.wanted, status.live, status.mode
-    )
+    );
+    if let Some(error) = status.last_error.as_deref().filter(|error| !error.is_empty()) {
+        message.push_str("; service last error: ");
+        message.push_str(error);
+    }
+    message
 }
 
+/// #593: a failed lock proof is its own classification, never a TUN data-plane verdict.
 pub(super) fn lock_unverified_error(last: &str) -> String {
     format!(
-        "{last} (after {VERIFY_LOCK_ATTEMPTS} samples over {:?})",
+        "{WFP_LOCK_UNVERIFIED_PREFIX}: {last} (after {VERIFY_LOCK_ATTEMPTS} samples over {:?})",
         verify_lock_retry_window()
     )
 }

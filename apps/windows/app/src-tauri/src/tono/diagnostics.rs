@@ -288,6 +288,20 @@ pub fn build_report(sources: &DiagnosticsSources<'_>) -> DiagnosticsReport {
         .collect();
     let total_elapsed_ms = crate::tono::steps::total_elapsed_ms(sources.steps);
     let known = sources.known_secrets;
+    // #594: a newer attempt clears the live stage/error, which left the upload with no failure
+    // at all. Fall back to the retained last failure — its stage key and stable code only; the
+    // local `error_detail` stays in Copy details. No new field: the intake rejects unknown keys.
+    let (failed_stage, error) = match (sources.connect_error, sources.last_failure) {
+        (None, Some(last)) => (
+            sources.failed_stage.or(last.failed_stage),
+            Some(format!(
+                "last failed attempt, {}s before this report: {}",
+                sources.reported_at_ms.saturating_sub(last.failed_at_ms).max(0) / 1000,
+                last.error_code.as_deref().unwrap_or("unclassified"),
+            )),
+        ),
+        (connect_error, _) => (sources.failed_stage, scrub_opt_text(connect_error, known)),
+    };
 
     DiagnosticsReport {
         schema_version: DIAGNOSTICS_SCHEMA_VERSION,
@@ -321,8 +335,8 @@ pub fn build_report(sources: &DiagnosticsSources<'_>) -> DiagnosticsReport {
                 known,
             )
         }),
-        failed_stage: sources.failed_stage.map(str::to_string),
-        error: scrub_opt_text(sources.connect_error, known),
+        failed_stage: failed_stage.map(str::to_string),
+        error,
         retry_attempt: sources.retry_attempt,
         total_elapsed_ms,
         steps,

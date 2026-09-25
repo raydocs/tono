@@ -36,6 +36,10 @@ pub const SERVICE_NOT_RUNNING_PREFIX: &str = "TONO_SERVICE_NOT_RUNNING";
 pub const TUN_DATA_PLANE_BROKEN_PREFIX: &str = "TONO_TUN_DATA_PLANE_BROKEN";
 pub const TUN_INGRESS_BROKEN_PREFIX: &str = "TONO_TUN_INGRESS_BROKEN";
 pub const NODE_OR_CORE_UNREACHABLE_PREFIX: &str = "TONO_NODE_OR_CORE_UNREACHABLE";
+/// Post-lock verification could not confirm the Service's WFP lock (`wanted && live && Locked`),
+/// so no TUN probe ran. Carries the Service's own answer and `last_error`; it must not be read as
+/// a TUN data-plane verdict.
+pub const WFP_LOCK_UNVERIFIED_PREFIX: &str = "TONO_WFP_LOCK_UNVERIFIED";
 /// The Service refused PrepareCoreStart / StartClash with `ProtectionHeldByAnotherUser` (1014):
 /// another local Windows user who is still signed in holds the armed protection. Not a failed
 /// attempt the user can retry; they must wait for that user to disconnect or sign out.
