@@ -143,6 +143,11 @@ pub enum ApiError {
     },
     #[error("your session has expired; please sign in again")]
     Unauthorized,
+    /// `auth/email/verify` refused the code: it is wrong, already used, or
+    /// past its validity window. No session is involved, so this must not
+    /// read as an expired session (#595).
+    #[error("that sign-in code is wrong or expired; request a new one")]
+    InvalidOrExpiredCode,
     #[error("this account does not have permission for that action")]
     Forbidden,
     #[error("the requested item no longer exists")]
@@ -2215,6 +2220,18 @@ mod tests {
         });
         let auth = client.verify_email_sign_in("c1", "123456").await.unwrap();
         assert_eq!(auth.access_token, "a1");
+    }
+
+    #[tokio::test]
+    async fn verify_reports_a_refused_code_as_a_code_error_not_an_expired_session() {
+        let (client, _mock, _store) = test_client(|_| {
+            json(
+                401,
+                r#"{"error":{"message":"The sign-in code is invalid or expired","code":"INVALID_OR_EXPIRED_CODE"}}"#,
+            )
+        });
+        let result = client.verify_email_sign_in("c1", "123456").await;
+        assert_eq!(result.err(), Some(ApiError::InvalidOrExpiredCode));
     }
 
     #[tokio::test]
