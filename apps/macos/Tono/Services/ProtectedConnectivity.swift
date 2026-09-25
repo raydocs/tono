@@ -49,7 +49,7 @@ nonisolated enum ProtectedFailureCode: String, CaseIterable, Sendable {
             // text, which names the account.
             return String(localized: "Tono's network helper on this Mac is set up for another macOS account. Use Tono from that account.")
         case .helperAuthorizationDenied:
-            return String(localized: "Tono needs your administrator approval to protect the connection — click Connect again and approve.")
+            return String(localized: "Tono needs your administrator approval to protect the connection. Try again and approve the macOS prompt.")
         case .updateRecoveryFailed:
             return String(localized: "The protected connection did not come back after the update. Reconnect to restore protection.")
         case .catalogNodeRemoved:

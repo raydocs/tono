@@ -105,7 +105,7 @@ final class HelperBoundAccountTests: XCTestCase {
         XCTAssertEqual(failure.code.rawValue, "HELPER_AUTHORIZATION_DENIED")
         XCTAssertEqual(
             failure.userMessage,
-            String(localized: "Tono needs your administrator approval to protect the connection — click Connect again and approve.")
+            String(localized: "Tono needs your administrator approval to protect the connection. Try again and approve the macOS prompt.")
         )
         XCTAssertTrue(AppState.failureRequiresUserAction(error))
     }
