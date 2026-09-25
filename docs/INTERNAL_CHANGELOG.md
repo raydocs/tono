@@ -32,6 +32,33 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-25 · Windows：WFP 锁定校验失败单独分类；上传诊断带上一次失败
+
+- **归属/来源**：G2 连不上有下一手（错误可诊断）；Issue #593（总账 H20-C-F4）、#594（H20-C-F5）。
+  `apps/windows/app/src-tauri/src/tono/connection/{probes,failure}.rs`、`tono/diagnostics.rs`、
+  `tono/commands/diagnostics.rs`、`src/services/tono.ts`、`src/locales/{zh,en}/tono.json` 与生成的 i18n 类型。
+  基线 origin/main 5ca17af3；分支 `fix/win-wfp-error-diagnostics-20260925`（红分支 `wip/win-wfp-error-diagnostics-20260925-red`）；PR [#616](https://github.com/raydocs/tono/pull/616)；未合 main。
+- **缺陷修复**：
+  - #593：锁定后验证里 `verify_locked()` 失败时根本没跑 TUN 探测，却被归成 `TONO_TUN_DATA_PLANE_BROKEN`
+    （「请重启电脑」），Service 的 `status.last_error` 也被丢掉。现在这类失败带新前缀 `TONO_WFP_LOCK_UNVERIFIED`，
+    正文保留 Service 的 wanted/live/mode 与 `last_error`，并附回环代理交叉检查结果；前端映射到新文案
+    `wfpLockUnverified`。若 `last_error` 本身是 `TONO_WFP_ENGINE_WEDGED`/`TONO_BFE_NOT_RUNNING`，仍按原漏斗
+    （`StageFailure::error`）显示对应的引擎文案。连接判定、保护与释放路径不变。
+  - #594：新一次尝试会清空 `failed_stage`/`connect_error`，上传的诊断里就没有上一次失败。现在当前无错误而
+    `attempt_history.last_failure` 存在时，上传的 `failedStage` 取其阶段，`error` 写
+    「last failed attempt, Ns before this report: <稳定错误码>」；只带阶段键和 `TONO_*`/`CORE_*` 码，
+    本地 `error_detail` 仍只在复制诊断里。不加新字段（控制面 intake 拒绝未知键），schema 不变。
+- **新增/优化**：无。
+- **工程与测试**：两条回归，各一：`unverified_wfp_lock_carries_the_service_error_instead_of_a_tun_verdict`
+  （`connection.rs`）、`a_retry_that_cleared_the_live_error_still_uploads_the_last_classified_failure`（`diagnostics.rs`）。
+  红分支只含测试和保持原行为的骨架（`verify_locked` 消息拆成两个辅助函数；`DiagnosticsSources` 加未读取的 `last_failure`）。
+- **验证**：本机未跑 cargo（执行位置规则），编译与红/绿结果以 PR 的 Windows CI 为准。本机
+  `node scripts/generate-i18n-keys.mjs` 重新生成类型（仅新增一键），两份 locale JSON 可解析；未跑 vitest/tsc（工作树无 node_modules）。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：测试员看到的「上次错误，可能已恢复」横幅读的是 Service 的 `last_error`：看门狗重装失败时写入，
+  自行恢复后不清除，要等下一次成功的 arm/lock（`record_outcome`）才清。这是 Service 看门狗路径，与 #593 的 App
+  分类路径不同，本 PR 未改，另需记录。未在实机复现。
+
 ## 2026-09-24 · Windows 候选包构建：私有解包分支写出 live `Tono.exe`，载荷门拒绝
 
 - **归属/来源**：G3 发出去还能再发（候选包打包）；`apps/windows/app/src-tauri/packages/windows/installer.nsi`

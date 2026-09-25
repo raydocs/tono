@@ -846,6 +846,7 @@ export const translationKeys = [
   'tono.dashboard.errors.serviceNotRunning',
   'tono.dashboard.errors.bfeNotRunning',
   'tono.dashboard.errors.wfpEngineWedged',
+  'tono.dashboard.errors.wfpLockUnverified',
   'tono.dashboard.errors.releaseReconciling',
   'tono.dashboard.errors.serviceTooOld',
   'tono.dashboard.errors.protectionHeldByAnotherUser',
