@@ -2066,6 +2066,22 @@ extension AppState {
         return failure
     }
 
+    /// A browser Secure DNS scan that is not clear.
+    static func browserDNSFailure(
+        _ report: BrowserDNSDiagnostics.Report,
+        stage: String,
+        attempt: Int,
+        generation: UInt64
+    ) -> ProtectedFailure {
+        ProtectedConnectivity.failure(
+            .protectedDnsNotReady,
+            stage: stage,
+            attempt: attempt,
+            generation: generation,
+            detail: report.diagnosticDetail
+        )
+    }
+
     /// Failures the automatic reconnect loop can never resolve: repeating the
     /// identical transaction would re-raise the same administrator prompt or
     /// fail installation the same way. Weak-network and transient helper

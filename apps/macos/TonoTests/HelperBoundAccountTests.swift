@@ -96,6 +96,20 @@ final class HelperBoundAccountTests: XCTestCase {
         )
     }
 
+    /// Declining the administrator prompt was filed as a helper mismatch and
+    /// told the user to repair a helper that is fine (H20-C-F3). It has its
+    /// own code, asks for the approval, and is not retried on a timer.
+    func testDeclinedAdministratorPromptIsNotAHelperMismatch() {
+        let error = HelperInstallError.userDenied
+        let failure = AppState.helperPreparationFailure(error, generation: 1)
+        XCTAssertEqual(failure.code.rawValue, "HELPER_AUTHORIZATION_DENIED")
+        XCTAssertEqual(
+            failure.userMessage,
+            String(localized: "Tono needs your administrator approval to protect the connection — click Connect again and approve.")
+        )
+        XCTAssertTrue(AppState.failureRequiresUserAction(error))
+    }
+
     /// A Unix socket bound at `path`, owned by this account.
     private static func bindSocket(_ path: String) -> Int32 {
         let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
