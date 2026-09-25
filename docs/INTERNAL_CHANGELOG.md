@@ -32,6 +32,33 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-25 · macOS：控制面请求系统 DNS 失败时改走 pinned 地址
+
+- **归属/来源**：G2 连不上有下一手（控制面域名被污染时仍能登录、恢复）；Issue #584（总账 H21-O-F3 = H21-C-F1）。
+  `apps/macos/Tono/Services/ControlPlanePath.swift`（新）、`TonoAPIClient.swift`、`KillSwitchService.swift`（仅
+  `configuredBootstrapPins` 改为 internal）。基线 origin/main 8fb73d84；分支 `fix/macos-control-plane-fallback-20260925`
+  （红分支 `wip/macos-control-plane-fallback-20260925-red`）；PR [#622](https://github.com/raydocs/tono/pull/622)；未合 main。
+- **缺陷修复**：#584：`TonoAPIClient` 只用 URLSession 按域名访问控制面，内置 pinned 地址只用于 PF。域名被污染时首次登录、
+  干净退出后的每次启动和每次恢复都只显示通用的「无法连接 Tono」。现在每次交换先走原有的系统 DNS URLSession（健康网络行为不变，
+  已连接时也照旧先走系统 DNS）；只有它在收到状态行前传输失败、且 `shouldRetry` 允许重放（GET 任何失败；POST/DELETE 仅限未建立连接）
+  时，才改走 pinned：Network.framework TLS 直连 helper PF 为 API 主机放行的地址（编译进来的 `TonoAPIBootstrapAddresses`，再加受保护解析学到的地址），
+  SNI 为真实主机名，证书仍由系统默认信任评估按该主机名校验，没有自定义校验块；不走代理；HTTP/1.1 `Connection: close`；
+  TCP+TLS 共 10 s、按地址平分；响应上限 2 MiB。收到状态行即是回答，不会在另一条路径重发；pinned 路径状态行一完整即记下，
+  其后头部/正文中断、超时或请求被取消，仍按该状态交给 #582 判定（非 2xx 按状态报错，不当作不可达）。pinned 在系统 DNS 失败后
+  完整答复时，后续请求先走 pinned（对应 Windows 学到的首选），该首选尝试失败、取消或正文失败即恢复系统 DNS 在前（仅进程内存）。新 HTTP/1.1 客户端
+  未经实机验证，因此只作回退、不作主路径。#582 判定、#587 无代理、凭据代际守卫不变；成功/拒绝审计事件增加 `path`，
+  换路径时记 `control_plane_path_failed`。
+- **新增/优化**：无。
+- **工程与测试**：一条回归：`AccountSessionRequestTests.testASystemResolverThatFailsAtConnectHandsTheRequestToThePinnedAddressesOnce`
+  （系统 DNS 路径在连接阶段失败，登录 POST 由 pinned 桩恰好收到一次，系统路径只试一次）。红分支只含该测试、
+  `ControlPlanePath`/`ControlPlaneAnswer` 骨架和未使用的 `pinnedPath` 参数，预期以断言失败（无回退：拿不到 challenge，
+  系统路径被重试 2 次，pinned 进入 0 次）。
+- **验证**：未在本机编译或运行（执行位置规则：MacBook 不跑 xcodebuild/swift）；编译与 XCTest 以 PR CI `macos-26` 为准，红/绿以 CI 为准。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：系统 DNS 连到被污染地址而连接超时，URLSession 报 `NSURLErrorTimedOut`，按 `shouldRetry` 规则 POST 不回退
+  （GET 会回退；GET 经 pinned 答复后首选翻转，此后 POST 也先走 pinned）；每次回退前要先等系统路径失败（最长 30 s 空闲超时）。
+  未实现备用端口——helper PF 只放行控制面 TCP 443，加端口需新 PF 放行，本 PR 不动。pinned TLS 直连未在实机或真实控制面验证。
+
 ## 2026-09-25 · 两端：验证码错误/过期不再显示「会话过期」；收不到验证码时给求助出口
 
 - **归属/来源**：G2 连不上有下一手（登录失败说清原因、给下一步）；Issue #595（总账 H20-C-F6）、#596（H22-C-F2）。
