@@ -70,6 +70,14 @@ const windowsReleasePs1Source = readFileSync(
 )
 const canonicalGuiLaunchLine =
   '  nsis_tauri_utils::RunAsUser "$INSTDIR\\${MAINBINARYNAME}.exe" "$MainBinaryArgs"'
+// The private-extraction branch stages the same `.next` members first; mutate the live path only.
+const replaceInLiveInstall = (from, to) => {
+  const liveAt = installerSource.indexOf('!ifmacrodef NSIS_HOOK_PREINSTALL')
+  return (
+    installerSource.slice(0, liveAt) +
+    installerSource.slice(liveAt).replace(from, to)
+  )
+}
 
 test('NSIS private extraction cannot bypass native admission or mutate the live installation', () => {
   assert.match(
@@ -101,6 +109,17 @@ test('NSIS private extraction cannot bypass native admission or mutate the live 
       ),
     ),
     /only private payload files/,
+  )
+})
+
+test('NSIS private extraction never extracts a live GUI member', () => {
+  // A live `Tono.exe` member from this branch failed the candidate payload gate (run 36095249694).
+  const privateGui =
+    /(\$\{If\} \$TonoPrivateUnpack = 1\s+SetOutPath \$INSTDIR\s+(?:;[^\n]*\s+)*File \/a "\/oname=\$\{MAINBINARYNAME\}\.exe)\.next"/
+  assert.match(installerSource, privateGui)
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(installerSource.replace(privateGui, '$1"')),
+    /private extraction must stage the GUI and Mihomo under \.next names/,
   )
 })
 
@@ -190,7 +209,7 @@ test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
   )
   assert.match(
     validateNsisAutomaticUpgradeFlow(
-      installerSource.replace(
+      replaceInLiveInstall(
         '  File /a "/oname=${MAINBINARYNAME}.exe.next" "${MAINBINARYSRCPATH}"',
         '  Delete "$APPDATA\\com.raydocs.tono\\owner-token"\n  File /a "/oname=${MAINBINARYNAME}.exe.next" "${MAINBINARYSRCPATH}"',
       ),
@@ -244,7 +263,7 @@ test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
   )
   assert.match(
     validateNsisAutomaticUpgradeFlow(
-      installerSource.replace(
+      replaceInLiveInstall(
         'File /a "/oname=${MAINBINARYNAME}.exe.next" "${MAINBINARYSRCPATH}"',
         'File "${MAINBINARYSRCPATH}"',
       ),
@@ -262,7 +281,7 @@ test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
   )
   assert.match(
     validateNsisAutomaticUpgradeFlow(
-      installerSource.replace(
+      replaceInLiveInstall(
         'File /a "/oname={{this}}.next"',
         'File /a "/oname={{this}}"',
       ),
