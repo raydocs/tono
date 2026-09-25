@@ -96,6 +96,39 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertTrue(proxies.isEmpty)
     }
 
+    /// #584: the pinned addresses go first, and one that fails at connect
+    /// hands the request to the system resolver, which receives it exactly
+    /// once. A sign-in POST: it may move on only because nothing was sent.
+    func testAPinnedAddressThatFailsAtConnectHandsTheRequestToTheSystemResolverOnce() async throws {
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        let systemRequests = PathCallCounter()
+        HeldAccountProtocol.install(host) { request in
+            systemRequests.record()
+            request.respond(status: 202, body: #"{"challengeId":"c-584","expiresIn":600,"message":"sent"}"#)
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
+        let pinnedAttempts = PathCallCounter()
+        let api = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory),
+            pinnedPath: ControlPlanePath(label: "pinned") { _, _ in
+                pinnedAttempts.record()
+                throw URLError(.cannotConnectToHost)
+            }
+        )
+
+        let challenge = try await api.startEmailSignIn(TonoEmailStartRequest(
+            email: "fallback@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+        ))
+
+        XCTAssertEqual(challenge.challengeId, "c-584")
+        XCTAssertEqual(pinnedAttempts.count, 1, "the pinned addresses are tried first")
+        XCTAssertEqual(systemRequests.count, 1, "the system resolver receives the request exactly once")
+    }
+
     func testLateAuthMethodsFailureDoesNotReplaceAuthenticatedState() async throws {
         let (account, transport, host, requests) = fixture()
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
@@ -1437,6 +1470,20 @@ final class AccountSessionRequestTests: XCTestCase {
 
     private static let enabledMethods = #"{"email":{"enabled":true},"apple":{"enabled":false},"google":{"enabled":false}}"#
 
+}
+
+/// How often one control-plane path was entered (#584).
+nonisolated private final class PathCallCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    func record() {
+        lock.lock(); defer { lock.unlock() }
+        value += 1
+    }
+    var count: Int {
+        lock.lock(); defer { lock.unlock() }
+        return value
+    }
 }
 
 @MainActor

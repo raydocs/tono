@@ -129,7 +129,8 @@ actor TonoAPIClient {
         baseURL: URL = TonoAPIClient.configuredBaseURL(),
         keychain: KeychainStore = KeychainStore(),
         session: URLSession? = nil,
-        offlineGate: OfflineGrantGate = OfflineGrantGate(directory: ConfigStorage.shared.appSupportDirectory)
+        offlineGate: OfflineGrantGate = OfflineGrantGate(directory: ConfigStorage.shared.appSupportDirectory),
+        pinnedPath: ControlPlanePath? = nil
     ) {
         self.baseURL = baseURL
         self.keychain = keychain
