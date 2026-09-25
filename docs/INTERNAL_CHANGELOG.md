@@ -236,6 +236,73 @@
   自行恢复后不清除，要等下一次成功的 arm/lock（`record_outcome`）才清。这是 Service 看门狗路径，与 #593 的 App
   分类路径不同，本 PR 未改，另需记录。未在实机复现。
 
+## 2026-09-24 · 控制面按设备记录客户端版本（X-Tono-Client）
+
+- **归属/来源**：G1–G3 候选验收的现场证据（ops 可见性）；影响控制面 Worker 与 macOS/Windows 请求头。
+  所有者决定 2026-09-24（内部版默认开启分类连接失败遥测）的配套项。基线 origin/main
+  [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b)，分支 `fix/cp-client-version-20260924`，Issue #574，未合 main。
+- **缺陷修复**：无。
+- **新增/优化**：此前登录（邮箱/OIDC verify）、`auth/refresh`、`exit-catalog` 只更新 `last_seen_at`，客户端版本只存在于
+  默认关闭的遥测窗口/失败上报里，D1 无法回答设备跑 0.0.72 还是 0.0.73。现在两端每个控制面请求带
+  `X-Tono-Client: <macos|windows>/<版本>`，Worker 严格解析（仅 macos/windows，版本 ≤40 字符且只含
+  `[0-9A-Za-z.+-]`，其余忽略），在这三处写入 `devices.client_platform` / `client_version`，值不变时不写行。
+  新 migration `0092_device_client_version.sql`（仅加两列 + CHECK；合并时如编号被占按顺序重编号）。
+  不新增账号、网络或自由文本数据；缺头或格式不符保持上次值。
+- **工程与测试**：`index.ts` 行数预算不变（登录函数签名收成一行抵消新增调用）。
+- **验证**：本机 `services/control-plane` `npx vitest run test/worker.test.ts -t "records the client build"`：旧代码红
+  （无列 `no such column: client_platform`；仅加 migration 时读到 `null`），修复后绿；全量 `npx vitest run` 43 文件
+  892 用例通过，`npx tsc --noEmit` 通过。macOS/Windows 请求头改动未在本机编译，以 PR CI 为准。
+- **候选/发布**：无新包，仅源码；未部署 Worker，未对远端 D1 执行 migration。
+- **剩余限制**：运维控制台尚未展示这两列；旧客户端不带头，其设备保持 NULL 直到升级；与 #329（refresh 移入
+  `sessions.ts`）合并时需把 refresh 处的记录调用随之移动。
+
+## 2026-09-24 · ops 控制台：到期/超额会撤销设备，续期后要逐台重新登录（文案改为实情）
+
+- **归属/来源**：ops 客户生命周期（ops 控制台文案 + 控制面回归）；内部审查 H17-O-F3，
+  Issue [#530](https://github.com/raydocs/tono/issues/530)；基线 origin/main `8dc79a5b`，
+  分支 `fix/expiry-revoke-copy-20260924`；未合 main。临时产品决定（2026-09-24，待 `docs/DECISIONS.md` 统一补录）：
+  保留到期/超额撤销，续期或清零不自动恢复，每台设备重新登录后恢复。
+- **缺陷修复**：到期后 cron 一个周期内、超额上报时立即撤销名下全部设备、会话与设备级出口凭据，
+  续期/清零只改 `users`，原刷新令牌仍 401；控制台却写「到期只挡登录和取目录，不删数据，也不撤设备」。
+  改后：改到期抽屉说明、设到期/续 30 天/批量续期/改账务/清零用量的确认文案都写明设备会被撤销、
+  续期或清零后要请客户在每台设备上重新登录。Worker 行为不变。
+- **新增/优化**：无。
+- **工程与测试**：`test/worker.test.ts` 新增一个 `it`：到期 → `scheduled` → 设备 `revoked`、凭据删除 →
+  续期后原刷新令牌仍 401 → 同一安装重新登录复用同一设备、`me` 200、凭据重新生成。它钉住文案承诺的
+  现有行为，在旧代码上同样通过（本项不改 Worker 行为，没有红灯阶段）。
+- **验证**：本机 MacBook control-plane `npx vitest run test/worker.test.ts`、`npm run typecheck`；
+  ops-console `npm run typecheck`、`npx vitest run`（26 文件 / 310 用例通过）、文案文件 eslint。
+- **候选/发布**：仅源码，无新候选；未部署。
+- **剩余限制**：客户端靠被拒的会话得知（macOS Suspended 文案含「退出再登录」；Windows 见 #460/#515）；
+  具名原因码由单独的权益码改动负责，本 PR 不改 `auth.ts`、刷新语义或客户端。
+- **续记（2026-09-24，双厂商评审 531-O-F1 ≈ 531-C-F1）**：「已经到期过」不能推出「设备已被撤销」（cron 前续期、
+  逐台撤销中途续期都不会撤销或只撤一部分），且设到期、取消到期两个确认原先没提已撤销的设备。文案改为按实际状态的
+  条件句「若有设备已因到期/超额被撤销，续期/改日期/取消到期/清零不会恢复它们，要请客户在这些设备上重新登录」，
+  覆盖改到期抽屉说明、续 30 天、设到期、取消到期、批量续期、改账务、清零用量；ops-console typecheck、
+  eslint、vitest（310 用例）通过。
+
+## 2026-09-24 · 控制面：Tailscale 注册暂停时，未跑的 tailnet 吊销不再永久挡住账户恢复
+
+- **归属/来源**：ops 客户生命周期（控制面 Worker）；内部审查 H17-O-F5 / H17-G-F2，
+  Issue [#522](https://github.com/raydocs/tono/issues/522)；基线 origin/main `059a2ea2`，
+  分支 `fix/tailnet-revoke-reenable-20260924`；未合 main。
+- **缺陷修复**：生产 `TAILSCALE_ENROLLMENT_ENABLED=false` 时 `processRevocations` 直接返回，
+  停用/销户时为带 `tailscale_node_id` 的设备记下的 `revocation_jobs` 永远不完成；ops
+  `PATCH users/{id}` 与 token-admin `PATCH admin/users/{id}` 的恢复检查把这些任务算作「吊销进行中」，
+  恢复永久返回 409 `REVOCATION_PENDING`。改后：注册暂停时排队任务不再挡恢复（仍有 live 设备照旧 409）；
+  任务保持未完成，不伪装成已吊销，注册重新打开后照常执行；设备级注册围栏
+  （`issueEnrollment`）不变；ops 恢复时写审计 `user.tailnet-revocation-queued` 记下排队数。
+- **新增/优化**：无。
+- **工程与测试**：`test/ops-api.test.ts` 新增一个 `it`（注册关闭、已停用用户带排队任务 → 恢复 200、
+  任务仍未完成、审计行存在）；旧代码上实跑失败（`expected 409 to be 200`）。
+- **验证**：本机 MacBook `npx vitest run test/ops-api.test.ts`（39/39 通过）、
+  `test/worker.test.ts -t "re-enable|revocation|tailnet"`（11 通过）、`test/index-size.test.ts`、
+  `npm run typecheck`；完整套件以 PR CI 为准。
+- **候选/发布**：仅源码，无新候选；未部署。
+- **剩余限制**：未查生产 D1 中是否仍有带 `tailscale_node_id` 的设备行；注册暂停期间这些 tailnet
+  节点确实仍在 tailnet 上（审计行只是记录，不是撤销）。token-admin 路径无操作者身份，只放宽检查不写审计；
+  与 #406（把该处理器移出 `index.ts`）相邻冲突，后合者需把同一条件带过去。
+
 ## 2026-09-24 · 控制面：销户改为单个 D1 事务，中途失败不再留下「资源已回收、VPN 仍可用」
 
 - **归属/来源**：ops 客户生命周期（控制面 Worker）；内部审查 H17-C-F2，

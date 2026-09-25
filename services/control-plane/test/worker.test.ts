@@ -2742,6 +2742,41 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(tailscaleRequests).toEqual([]);
   });
 
+  it('records the client build from X-Tono-Client on sign-in, token refresh and catalog fetch', async () => {
+    // With telemetry off by default, nothing else tells operations which build a
+    // device runs. Only a platform and a version are kept; anything else is dropped.
+    const as = (init: RequestInit, client: string): RequestInit => ({
+      ...init, headers: { ...init.headers as Record<string, string>, 'x-tono-client': client },
+    });
+    const started = await startEmailSignIn({
+      email: `client-build-${++sequence}@example.com`,
+      deviceName: 'Build Mac',
+      installationId: 'client-build-installation',
+    });
+    const signedIn = await api('auth/email/verify', as(json({
+      challengeId: started.challengeId, code: started.code,
+    }), 'macos/0.0.72'));
+    expect(signedIn.status).toBe(200);
+    const account = await signedIn.json() as any;
+    const build = () => env.DB.prepare('SELECT client_platform, client_version FROM devices WHERE id = ?')
+      .bind(account.device.id).first();
+    expect(await build()).toEqual({ client_platform: 'macos', client_version: '0.0.72' });
+
+    const refreshed = await api('auth/refresh', as(json({ refreshToken: account.refreshToken }), 'macos/0.0.73'));
+    expect(refreshed.status).toBe(200);
+    const { accessToken } = await refreshed.json() as any;
+    expect(await build()).toEqual({ client_platform: 'macos', client_version: '0.0.73' });
+
+    const catalog = (client: string) => api('exit-catalog', {
+      headers: { authorization: `Bearer ${accessToken}`, 'x-tono-client': client },
+    });
+    expect((await catalog('macos/0.0.74')).status).toBe(200);
+    expect(await build()).toEqual({ client_platform: 'macos', client_version: '0.0.74' });
+    expect((await catalog('macos/0.0.75 user@example.com')).status).toBe(200);
+    expect((await catalog('linux/0.0.75')).status).toBe(200);
+    expect(await build()).toEqual({ client_platform: 'macos', client_version: '0.0.74' });
+  });
+
   it('encrypts, versions, and serves the managed exit catalog only to authenticated users', async () => {
     // Identities are placeholders now: one catalog served verbatim to everyone is
     // how every account came to present the same identity at the exit, which is
@@ -5747,6 +5782,41 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     row = await env.DB.prepare('SELECT expires_at FROM users WHERE id = ?')
       .bind(account.user.id).first<any>();
     expect(row.expires_at).toBeNull();
+  });
+
+  // Provisional policy (2026-09-24): expiry revokes every device, session and
+  // exit credential; renewing restores nothing by itself, and each device
+  // signing in again does. The ops console copy promises exactly this.
+  it('expiry revokes every device within a cron tick and only a fresh sign-in restores service after renewal', async () => {
+    (env as unknown as Env).TAILSCALE_ENROLLMENT_ENABLED = 'false';
+    const account = await createAccount('expiry-renew');
+    await env.DB.prepare('UPDATE users SET expires_at = ? WHERE id = ?')
+      .bind(Math.floor(Date.now() / 1000) - 60, account.user.id).run();
+    const context = createExecutionContext();
+    await worker.scheduled(createScheduledController(), env as unknown as Env, context);
+    await waitOnExecutionContext(context);
+    const credentials = () => env.DB.prepare('SELECT COUNT(*) AS count FROM device_exit_credentials WHERE device_id = ?')
+      .bind(account.device.id).first<any>();
+    expect((await env.DB.prepare('SELECT status FROM devices WHERE id = ?').bind(account.device.id).first<any>()).status)
+      .toBe('revoked');
+    expect((await credentials()).count).toBe(0);
+
+    const renewed = await admin(`users/${account.user.id}`, {
+      expiresAt: Math.floor(Date.now() / 1000) + 30 * 86_400,
+    }, 'PATCH');
+    expect(renewed.status).toBe(200);
+    expect((await api('auth/refresh', json({ refreshToken: account.refreshToken }))).status).toBe(401);
+
+    const again = await emailSignIn({
+      email: account.email,
+      deviceName: 'Primary Mac',
+      installationId: 'expiry-renew-installation-one',
+    });
+    expect(again.status).toBe(200);
+    const signedIn = await again.json() as any;
+    expect(signedIn.device.id).toBe(account.device.id);
+    expect((await api('me', { headers: { authorization: `Bearer ${signedIn.accessToken}` } })).status).toBe(200);
+    expect((await credentials()).count).toBe(1);
   });
 
   it('rejects invalid expiresAt values with 400', async () => {
