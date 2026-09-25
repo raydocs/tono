@@ -1398,6 +1398,7 @@ if CommandLine.arguments.dropFirst() == ["--lifecycle-self-test"] {
         && ProtectedDNSManager.runStatusUnreadableServiceSelfTest()
         && ProtectedDNSManager.runCorruptSnapshotSelfTest()
         && ProtectedDNSManager.runRenamedServiceRestoreSelfTest()
+        && ProtectedDNSManager.runDeferredOriginalLossSelfTest()
     exit(pfPassed && dnsPassed ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--self-test"] {

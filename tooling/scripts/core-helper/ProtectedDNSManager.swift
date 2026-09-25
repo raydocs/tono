@@ -1079,6 +1079,36 @@ final class ProtectedDNSManager {
         return true
     }
 
+    static func reportsOriginalLoss(
+        originalRestored: Bool,
+        deferred: Bool,
+        noticePath: String
+    ) -> Bool {
+        !originalRestored
+    }
+
+    /// TM-claude-4: native update preparation and emergency recovery release
+    /// DNS with no app reply to carry `originalDNSRestored: false`. Their loss
+    /// must reach the app's next `/dns/restore` reply, and only that one.
+    static func runDeferredOriginalLossSelfTest() -> Bool {
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-dns-original-loss-\(getpid())").path
+        unlink(path)
+        defer { unlink(path) }
+        let deferred = reportsOriginalLoss(originalRestored: false, deferred: true, noticePath: path)
+        let nextReply = reportsOriginalLoss(originalRestored: true, deferred: false, noticePath: path)
+        let laterReply = reportsOriginalLoss(originalRestored: true, deferred: false, noticePath: path)
+        guard deferred, nextReply, !laterReply else {
+            print(
+                "DNS deferred-loss regression FAILED: deferred=\(deferred), "
+                    + "nextReply=\(nextReply), laterReply=\(laterReply)"
+            )
+            return false
+        }
+        print("DNS deferred-loss regression passed: a loss with no app reply reaches the next /dns/restore once")
+        return true
+    }
+
     static func runSelfTests() -> Bool {
         do {
             guard try validateService("Wi-Fi") == "Wi-Fi",

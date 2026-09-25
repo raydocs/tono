@@ -519,6 +519,10 @@ nonisolated struct HelperManager {
         }
     }
 
+    static func launchdShowsCrashLoop(before: String, after: String) -> Bool {
+        false
+    }
+
     static var hasInstalledHelperArtifact: Bool {
         FileManager.default.fileExists(atPath: helperInstallPath)
     }
