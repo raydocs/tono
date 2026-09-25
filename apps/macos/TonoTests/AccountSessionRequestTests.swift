@@ -96,15 +96,15 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertTrue(proxies.isEmpty)
     }
 
-    /// #584: the pinned addresses go first, and one that fails at connect
-    /// hands the request to the system resolver, which receives it exactly
+    /// #584: the system resolver goes first, and a failure there at connect
+    /// hands the request to the pinned addresses, which receive it exactly
     /// once. A sign-in POST: it may move on only because nothing was sent.
-    func testAPinnedAddressThatFailsAtConnectHandsTheRequestToTheSystemResolverOnce() async throws {
+    func testASystemResolverThatFailsAtConnectHandsTheRequestToThePinnedAddressesOnce() async throws {
         let host = "\(UUID().uuidString.lowercased()).invalid"
         let systemRequests = PathCallCounter()
         HeldAccountProtocol.install(host) { request in
             systemRequests.record()
-            request.respond(status: 202, body: #"{"challengeId":"c-584","expiresIn":600,"message":"sent"}"#)
+            request.client?.urlProtocol(request, didFailWithError: URLError(.cannotConnectToHost))
         }
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [HeldAccountProtocol.self]
@@ -116,17 +116,26 @@ final class AccountSessionRequestTests: XCTestCase {
             offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory),
             pinnedPath: ControlPlanePath(label: "pinned") { _, _ in
                 pinnedAttempts.record()
-                throw URLError(.cannotConnectToHost)
+                return ControlPlaneAnswer(
+                    status: 202,
+                    body: Data(#"{"challengeId":"c-584","expiresIn":600,"message":"sent"}"#.utf8),
+                    bodyFailure: nil
+                )
             }
         )
 
-        let challenge = try await api.startEmailSignIn(TonoEmailStartRequest(
-            email: "fallback@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
-        ))
+        var challengeId: String?
+        do {
+            challengeId = try await api.startEmailSignIn(TonoEmailStartRequest(
+                email: "fallback@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+            )).challengeId
+        } catch {
+            challengeId = nil
+        }
 
-        XCTAssertEqual(challenge.challengeId, "c-584")
-        XCTAssertEqual(pinnedAttempts.count, 1, "the pinned addresses are tried first")
-        XCTAssertEqual(systemRequests.count, 1, "the system resolver receives the request exactly once")
+        XCTAssertEqual(challengeId, "c-584", "the pinned addresses answer the sign-in")
+        XCTAssertEqual(systemRequests.count, 1, "the system resolver is tried first, once")
+        XCTAssertEqual(pinnedAttempts.count, 1, "the pinned addresses receive the request exactly once")
     }
 
     func testLateAuthMethodsFailureDoesNotReplaceAuthenticatedState() async throws {
