@@ -936,6 +936,41 @@
         Ok(())
     }
 
+    /// R3-F1 review (#300): the in-session face of the orphan heal resets the unrecorded adapter
+    /// and nothing else. With a snapshot in force the Tono NRPT catch-all and the DoH suppression
+    /// are live protection, not leftovers, so a heal whose re-check still refuses must leave
+    /// them armed — there is no re-arm on the refusal exit.
+    #[tokio::test]
+    #[serial]
+    async fn an_in_session_orphan_heal_leaves_the_resolver_policy_armed() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        test_hooks::set_collected_adapters(vec![
+            adapter("{A}", Some(PROTECTED_DNS_V4)),
+            adapter("{B}", Some(PROTECTED_DNS_V4)),
+        ]);
+        let enable_error = enable()
+            .await
+            .expect_err("the stubbed heal cannot clear {B}, so the re-check refuses");
+        let enable_message = format!("{enable_error:#}");
+        assert!(
+            enable_message.contains(DNS_ORPHANED_ADAPTER_PREFIX),
+            "{enable_message}"
+        );
+        assert_eq!(
+            test_hooks::take_automatic_resets(),
+            1,
+            "the unrecorded adapter is still reset to DHCP"
+        );
+        assert_eq!(
+            test_hooks::take_encrypted_restores(),
+            0,
+            "an in-session heal must not remove the NRPT catch-all or restore DoH"
+        );
+        reset_dns_state().await;
+        Ok(())
+    }
+
     /// The pure half of the P0 fix: what the window says, given only the four observable
     /// values. In particular an open window that has aged past the cap stops suppressing —
     /// a leaked depth cannot mute the machine's network events for the life of the service.
@@ -1047,6 +1082,7 @@
         test_hooks::set_apply_batch_unavailable(false);
         test_hooks::set_encrypted_restore_fails(false);
         test_hooks::take_automatic_resets();
+        test_hooks::take_encrypted_restores();
         test_hooks::set_collected_adapters(Vec::new());
         // The tail of an earlier test's write window would otherwise still be running.
         SELF_WRITE_TAIL_UNTIL.store(0, Ordering::Relaxed);

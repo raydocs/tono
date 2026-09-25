@@ -751,6 +751,42 @@ fn a_capture_quarantined_by_suppress_is_still_reported_by_restore() -> Result<()
     Ok(())
 }
 
+/// R3-F1 review (#300): the recovery's WinTUN exclusion reads "the TUN address in IPv4
+/// `NameServer` and nothing else" as the removed tunnel's own key. Tono's protected apply must
+/// never leave a real adapter in that shape when it is stopped between its two IPv4 writes,
+/// or a corrupt snapshot would let the half-redirected adapter drop out of the evidence. The
+/// stop is injected at the IPv4 `ProfileNameServer` write, the second one in the old order.
+#[tokio::test]
+#[serial_test::serial]
+async fn an_interrupted_protected_apply_never_leaves_the_tunnel_key_shape() -> Result<()> {
+    use super::super::{
+        PROFILE_NAME_SERVER, read_adapter,
+        test_io::{self, Fixture},
+        v4_key, v6_key,
+    };
+    use crate::core::dns as facade;
+
+    let a = effective(&entry(1), [9, 9, 9, 9], false);
+    let guid = a.guid.clone();
+    let _fixture = Fixture::new(vec![a])?;
+    test_io::with(|io| {
+        // DHCP on the IPv6 side: nothing there tells the key apart from the tunnel's.
+        io.keys.get_mut(&v6_key(&guid)).unwrap().clear();
+        io.fail_write = Some((v4_key(&guid), PROFILE_NAME_SERVER.into()));
+    })
+    .unwrap();
+    facade::enable()
+        .await
+        .expect_err("the injected registry failure stops the protected apply");
+    let left = read_adapter(&guid, None)?;
+    assert!(
+        !facade::is_inactive_tunnel_interface_key(&left, &[]),
+        "a stopped protected apply left the WinTUN key shape on a real adapter: {left:?}"
+    );
+    test_io::with(|io| io.fail_write = None);
+    Ok(())
+}
+
 #[tokio::test]
 #[serial_test::serial]
 async fn effective_resolver_policy_drift_cannot_read_as_healthy() -> Result<()> {
