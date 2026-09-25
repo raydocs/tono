@@ -50,7 +50,7 @@
   `test_a_failed_hy2_publish_is_never_acknowledged`（原测试断言「hy2 失败不做 Xray 对账、不写状态」，正是本缺陷）；`run_round` 增加 `counters` 参数；
   `test_a_hy2_filesystem_error_still_withdraws_xray_clients`（停用轮，修复前断言失败）。
 - **验证**：本机 `cd services/exit-agent && python3 -m pytest -q`：红分支两条新测试均以断言失败（2 failed, 90 passed）；修复分支 92 passed；停用轮续修后 93 passed（新测试在修复前失败）。
-  `python3 services/exit-agent/test_reconcile_and_report.py`（CI 同命令）92 OK。未在任何节点运行。
+  `python3 services/exit-agent/test_reconcile_and_report.py`（CI 同命令）续修后（c82ac4aa）93 OK。未在任何节点运行。
 - **候选/发布**：仅源码，无新候选。
 - **剩余限制**：**节点需部署新 agent 才生效（运维步骤，本 PR 未做，未 SSH、未部署）**。停用轮的计数由下一次能上报的轮次报出；
   节点被永久退役则这段用量仍不会上报。#600 的 TF-opus-3/5/6/7 未处理。
