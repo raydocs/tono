@@ -36,7 +36,7 @@
 
 - **归属/来源**：ops 任务（出口计量与吊销，#563 合并车审查后续）；Issue #600 的 TF-opus-4 与 TF-opus-8（其余条目仍开）。
   基线 origin/main 13983688；分支 `fix/exit-agent-disable-counters-hy2-20260925`（红分支 `wip/exit-agent-disable-counters-hy2-20260925-red`）；
-  PR 待开；未合 main。只改 `services/exit-agent/reconcile_and_report.py`、其测试与 README。
+  PR [#624](https://github.com/raydocs/tono/pull/624)；未合 main。只改 `services/exit-agent/reconcile_and_report.py`、其测试与 README。
 - **缺陷修复**：TF-opus-4：控制面答复 `EXIT_NODE_DISABLED` 的停用轮只撤客户端、不读计数，上次正常轮到停机之间的流量丢失
   （1000→1500 仍记 1000）。改后：撤除完成（或失败）后再尽力读一次计数（同一 Xray 进程代际），折入本地状态总量，由下一次可上报的轮次报出；
   计数读取或状态写入失败只追加到拒绝说明里，永不阻挡或替换撤除结果。TF-opus-8：hy2 目录权限不对或 allowlist 缺失时在 Xray 对账前就抛出，
