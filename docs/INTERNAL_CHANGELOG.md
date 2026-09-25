@@ -417,6 +417,20 @@
   - 验证：本机 worktree `services/control-plane`：`npm test`（`vitest run`）43 个文件 921 个用例通过。
     未部署，未碰远端 D1，无原生构建。
   - 候选/发布：无新包，仅源码。
+- **续记（2026-09-25，合入 main 8ee20a9a：#624、#525、小列车 #627（#523、#531、#578）、#628）**：
+  - 合并：`git merge origin/main`（merge commit，不 rebase）。代码冲突两处，均在 `src/index.ts`：
+    刷新路由：#329 把刷新移到 `sessions.ts` 的 `refreshSession`，#578 的 `recordClient` 改在其中 `tokens()`
+    提交轮换之后调用（`refreshSession` 增加 `req` 参数），#329 的重放宽限不变；admin 用户 PATCH：#406 已把它
+    移到 `ops/token-admin.ts`，此处删去 main 的副本，#523 的放宽（Tailscale 注册暂停时排队的吊销不挡恢复）
+    改在 `token-admin.ts` 生效。本页与 FINDINGS_LEDGER 两边按条目/行保留；TC-anthropic-1 取列车的当前行。
+  - 合并后 `legacy-handlers/users.ts` 为 508 行，超过 ops 500 行预算（main 与列车各自未超）；只读的
+    `getOpsUserHomeBinding` 原样移到 `legacy-handlers/user-home-binding.ts`，不改逻辑。
+  - 迁移号：main 0081、0092，列车 0077–0080、0082、0088、0090，互不重复。
+  - 验证：本机 worktree `services/control-plane`：`npx vitest run` 43 个文件 925 个用例通过；`npm run typecheck`、
+    `check:budgets`、`check:contract` 通过。临时去掉 `refreshSession` 里的 `recordClient` 时，#578 的
+    `records the client build …` 用例失败，恢复后通过。`token-admin.ts` 的 #523 放宽没有专门用例（#523 的用例走
+    ops 路径）。未部署，未碰远端 D1，无原生构建。
+  - 候选/发布：无新包，仅源码。
 
 ## 2026-09-24 · 控制面按设备记录客户端版本（X-Tono-Client）
 
