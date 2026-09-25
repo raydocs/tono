@@ -21,6 +21,9 @@ use crate::{
 };
 use super::*;
 
+/// Extra time restore gives an answer whose status line arrived before the budget ran out (#582).
+const ANSWERED_BODY_GRACE: Duration = Duration::from_secs(10);
+
 /// How many times restore asks the Service about the stored barrier before giving up.
 const PROTECTION_PROBE_ATTEMPTS: usize = 5;
 const PROTECTION_PROBE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
@@ -382,9 +385,19 @@ where
     // arrived meanwhile; one that did (a 401 whose body is still pending) may be a refusal.
     let answers_before = client.transport().answers_seen();
     let answer_probe = Arc::clone(&client);
-    let account_result = match tokio::time::timeout_at(deadline, fetch_me(client)).await {
-        Ok(result) => result,
-        Err(_) => {
+    let mut me = std::pin::pin!(fetch_me(client));
+    let outcome = match tokio::time::timeout_at(deadline, me.as_mut()).await {
+        Ok(result) => Some(result),
+        // A status line already arrived (say a refresh 401 whose body is still pending): let that
+        // answer finish, bounded, so tono-core classifies it instead of it being dropped unheard.
+        Err(_) if answer_probe.transport().answers_seen() != answers_before => {
+            tokio::time::timeout(ANSWERED_BODY_GRACE, me.as_mut()).await.ok()
+        }
+        Err(_) => None,
+    };
+    let account_result = match outcome {
+        Some(result) => result,
+        None => {
             let mut inner = state.lock().await;
             if inner.sign_in_generation != generation {
                 return None;
