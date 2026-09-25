@@ -352,8 +352,8 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | H20-C-F3 = H20-O-F9 | macOS 拒绝管理员授权被报成 helper 版本不匹配 | open | [#592](https://github.com/raydocs/tono/issues/592) | 中·已确认 | |
 | H20-C-F4 | Windows WFP 锁定校验失败被报成「重启电脑」 | in-PR | [#593](https://github.com/raydocs/tono/issues/593) · [#616](https://github.com/raydocs/tono/pull/616) | 中·已确认(代码路径) | 新前缀 `TONO_WFP_LOCK_UNVERIFIED` 带 Service `last_error`；频率需实机；看门狗恢复后不清 `last_error` 的旧横幅另记 |
 | H20-C-F5 | Windows 上传诊断缺上一次失败记录 | in-PR | [#594](https://github.com/raydocs/tono/issues/594) · [#616](https://github.com/raydocs/tono/pull/616) | 低·已确认 | 当前无错误时上传上一次失败的阶段与稳定码（不含本地详情）；#580 仅内部版自动报告 |
-| H20-C-F6 = H20-O-F13 | 验证码错误/过期被显示为「会话过期」 | open | [#595](https://github.com/raydocs/tono/issues/595) | 中·已确认 | |
-| H22-C-F2 = H22-O-F6 | 验证码未送达时两端没有求助/诊断出口 | open | [#596](https://github.com/raydocs/tono/issues/596) | 中·已确认 | |
+| H20-C-F6 = H20-O-F13 | 验证码错误/过期被显示为「会话过期」 | in-PR | [#595](https://github.com/raydocs/tono/issues/595)，[#620](https://github.com/raydocs/tono/pull/620) | 中·已确认 | 仅 verify 调用的 401 改为专门错误；带令牌请求的 401 不变 |
+| H22-C-F2 = H22-O-F6 | 验证码未送达时两端没有求助/诊断出口 | in-PR | [#596](https://github.com/raydocs/tono/issues/596)，[#620](https://github.com/raydocs/tono/pull/620) | 中·已确认 | 验证码页 60 秒后给出求助；菜单栏入口未加 |
 | H22-C-F1 | Windows 欢迎页吞掉存储失败导致循环 | open | 待开 | 低·推导(PLAUSIBLE) | 触发条件未证实 |
 | H20-O-*, H22-O-* | Opus 席位 H20（15 条）与 H22（8 条，含 H22-O-F1 BFE 关闭时无法安装、H22-O-F2 VC++ 运行库缺失时安装门禁失败）| open（待核实）| 待开 | 待 Codex 异厂商核实 | 见交接文档 |
 | XRAY26-RMU | exit-agent 用 `--email=` 调 Xray 26 `rmu` 被拒，自 2026-09-18 起吊销不执行、计量停报；`rmu` 失败也退出 0 | in-PR | [#563](https://github.com/raydocs/tono/pull/563)（5bcc6b9d/924cafb3/b3299814）| 高·已确认(实机输出) | 未部署到节点 |
