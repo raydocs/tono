@@ -39,6 +39,11 @@ pub const QUIT_DURABILITY_BUDGET: Duration = Duration::from_secs(3);
 const TOMBSTONE_RETRY_INITIAL: Duration = Duration::from_secs(1);
 const TOMBSTONE_RETRY_MAX: Duration = Duration::from_secs(30);
 
+/// How long a catalog sync waits for the credential store to acknowledge the token a grant binds.
+/// The sync holds the catalog-sync lock, so a stalled vault must not stall it; a flush past this
+/// budget records no grant.
+const GRANT_FLUSH_BUDGET: Duration = Duration::from_secs(2);
+
 /// Offline eligibility in memory, ordered by severity. A later `Verified` for the same identity
 /// lifts `FORBIDDEN`: the server accepted the session and only refused one request. `REFUSED`
 /// lifts only when a sign-in adopts a new identity; the refused session is dead.
@@ -398,9 +403,16 @@ pub(crate) async fn record_server_verified_catalog(
         return;
     };
     // Every mutation before this barrier, including the write of `token`, is acknowledged.
-    if let Err(error) = credentials.flush().await {
-        logging!(warn, Type::Service, "Tono: offline grant not recorded; the session token is not durable: {error}");
-        return;
+    match tokio::time::timeout(GRANT_FLUSH_BUDGET, credentials.flush()).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            logging!(warn, Type::Service, "Tono: offline grant not recorded; the session token is not durable: {error}");
+            return;
+        }
+        Err(_) => {
+            logging!(warn, Type::Service, "Tono: offline grant not recorded; the credential store did not acknowledge in time");
+            return;
+        }
     }
     let inner = state.lock().await;
     let token_now = inner.credentials.refresh_token().ok().flatten();

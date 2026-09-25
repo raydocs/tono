@@ -273,15 +273,17 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
         (vanished, emit)
     };
 
-    // #582: Installed or Unchanged, the server has just confirmed exactly the catalog in memory.
-    if server_confirmed {
-        crate::tono::offline_grant::record_server_verified_catalog(state, auth_generation, &response).await;
-    }
-
     if let Some(generation) = selection_vanished {
         if state.lock().await.sign_in_generation == auth_generation {
             connection::selected_node_vanished(state.clone(), app.clone(), generation).await;
         }
+    }
+
+    // #582: Installed or Unchanged, the server has just confirmed exactly the catalog in memory.
+    // After the vanished-exit handling, and bounded, so a stalled credential store never holds
+    // up either while this sync owns the catalog-sync lock.
+    if server_confirmed {
+        crate::tono::offline_grant::record_server_verified_catalog(state, auth_generation, &response).await;
     }
     Ok(())
 }
