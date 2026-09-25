@@ -178,13 +178,7 @@ actor TonoAPIClient {
         try await publicRequest("auth/email/start", body: body)
     }
     func verifyEmailSignIn(_ body: TonoEmailVerifyRequest) async throws -> TonoAuthResponse {
-        // No session rides on this request, so its 401 is the Worker refusing
-        // the code (`INVALID_OR_EXPIRED_CODE`), never an expired session (#595).
-        do {
-            return try await publicAuthRequest("auth/email/verify", body: body)
-        } catch APIError.unauthorized {
-            throw APIError.invalidOrExpiredCode
-        }
+        try await publicAuthRequest("auth/email/verify", body: body)
     }
     func oidcChallenge(_ body: TonoOIDCChallengeRequest) async throws -> TonoOIDCChallengeResponse {
         try await publicRequest("auth/oidc/challenge", body: body)
@@ -810,6 +804,9 @@ actor TonoAPIClient {
                         code: code, message: envelope?.error.message
                     )
                 }
+                // #595: the Worker's refusal of a sign-in code, not an expired session. Keyed on
+                // the code: the verify endpoint also answers a plain 401 (AUTHENTICATION_FAILED).
+                if http.statusCode == 401, envelope?.error.code == "INVALID_OR_EXPIRED_CODE" { throw APIError.invalidOrExpiredCode }
                 if http.statusCode == 401 { throw APIError.unauthorized }; if http.statusCode == 403 { throw APIError.forbidden }
                 if http.statusCode == 404 { throw APIError.notFound }
                 if http.statusCode == 409 && envelope?.error.code == "DEVICE_LIMIT" { throw APIError.deviceLimit }
