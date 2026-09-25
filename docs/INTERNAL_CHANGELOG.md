@@ -109,6 +109,24 @@
     得到 Suspended）。F2/F3/F4/O2/O4 无回归（需 helper IPC、可阻塞的凭据库或 AppHandle，无便宜接口）。
   - 验证：35cb2a08 Windows CI 36081986829、macOS CI 36081986834 全绿；f124c0b7 Windows CI 36082799227 全绿
     （`app-rust` 531 通过）、macOS CI 36082799183 全绿。本机未编译。
+- **续记（2026-09-24 晚，第 2–6 轮审查）**：jev-route 改为 Opus+Codex 双发现者、异厂商流水化复核、
+  增量 `--since` 审查（第 2 轮起每轮 2–6 分钟）。各轮均 PASSED、无阻断；确认的问题：
+  - 缺陷修复：
+    - 36a43680：恢复预算超时时若已收到任何响应状态行，不再按不可达离线准入（`TonoTransport` 新增答复计数）；
+      两端 body 中断的非 2xx 按该状态处理（不再只限 401/403）；`lift_forbidden` 先取文件锁（第 2 轮 Codex F1=Grok G1、
+      G2、G3）。
+    - f594995a：`lift_forbidden` 只在确为 FORBIDDEN 时取锁，sink 在 2xx 常规路径不再等文件锁；超时后已答复的请求
+      给予宽限（第 3 轮）。bf5980c2、01399288：宽限先后改为 transport 总超时、5 倍总超时（第 4、5 轮指出仍不够）。
+    - 380fe8e3：已收到答复后不设上限，等 `me()` 调用链自然结束，由 tono-core 分类每个答复（第 6 轮指出一次
+      `send` 内会串行多条路径，固定上限都不成立）。链有限、每次 attempt 受 transport 超时约束；罕见情况下
+      Restoring 会持续较久，保护不变。
+  - 接受不改：2xx body 中断仍按传输失败（服务端已接受会话，不会放行被拒会话）；答复计数不按身份区分
+    （只会让结果偏向 Error，fail-closed）；真正解除 FORBIDDEN 时 sink 可能等一次写盘（罕见、有界）。
+  - 工程与测试：本轮修复无新增回归（需 AppHandle、可阻塞 transport 或并发时序夹具）。
+  - 工程与测试：36a43680 漏改一处测试里的 `TonoTransport` 结构体字面量，app 测试目标在 Windows 编译失败；
+    其后各次 Windows 运行都被下一次推送取消，直到 380fe8e3 的 CI 才暴露，c258bb46 修正（编译错误，非运行时缺陷）。
+  - 验证：c258bb46 Windows CI 36091919930 全绿（四作业）、macOS CI 36091919923 全绿；第 7 轮增量审查（Opus+Codex）
+    无发现。本机未编译。
 
 ## 2026-09-24 · Windows 启动恢复的备用路径在预算内运行；重试收到的拒绝不再被当作网络失败
 

@@ -333,6 +333,9 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | R612-O3 | tombstone 未绑定被吊销的会话，新会话离线启动被旧会话的拒绝挂起（macOS 还会清掉目录缓存） | in-PR | [#612](https://github.com/raydocs/tono/pull/612) | 低·已确认 | Opus 发现，Codex 复核；修复 e1d61944，吊销记录带 token 摘要，不匹配或无摘要按无授权处理 |
 | R612-O4 | Windows 退出只等待 tombstone，不触发写入；写入器处于长退避时 3 s 预算内无新尝试 | in-PR | [#612](https://github.com/raydocs/tono/pull/612) | 低·已确认 | Opus 发现，Codex 复核；修复 f124c0b7（退出唤醒写入器）；无回归 |
 | R612-O5 | macOS 受保护重连只看 kill switch 与缓存目录，控制面不可达且无授权（账户 error）时网络变化仍会拨缓存出口 | open | 待开 | 低·已确认 | Opus 发现，Codex 复核：origin/main 已存在，非 #612 引入；需在共享 Connect 入口要求在线验证或离线准入 |
+| R612-G1 | Windows 恢复预算超时时，已收到的 refresh 401（body 未完）被丢弃并按不可达离线准入 | in-PR | [#612](https://github.com/raydocs/tono/pull/612) | 低·已确认 | 第 2–6 轮逐步收紧，终版 380fe8e3：收到状态行后等 `me()` 链结束；罕见情况 Restoring 较久 |
+| R612-G2 | 两端 body 中断的非 401/403 非 2xx 状态被当作不可达 | in-PR | [#612](https://github.com/raydocs/tono/pull/612) | 低·已确认 | 36a43680；2xx 中断仍按传输失败（接受，服务端已接受会话） |
+| R612-G3 | Windows 解除 FORBIDDEN 与 tombstone 写入器的快照-写盘之间有缝，已解除的 tombstone 仍可落盘 | in-PR | [#612](https://github.com/raydocs/tono/pull/612) | 低·已确认 | 36a43680 + f594995a（只在真正解除时取文件锁）；该罕见路径 sink 可能等一次写盘 |
 | H21-O-F2 | Windows 恢复 30 s 预算被 pinned 连接耗尽，系统 DNS 回退不执行 | open | [#583](https://github.com/raydocs/tono/issues/583) | 中·已确认 | 与 F1 症状重叠 |
 | H21-O-F3 = H21-C-F1 | macOS 控制面客户端无 pinned 地址/备用端口/DNS 回退 | open | [#584](https://github.com/raydocs/tono/issues/584) | 中·已确认 | |
 | H21-O-F4 | macOS「试用备用通道」提供核心不可用的 hy2，受保护重连无限循环 | open | [#585](https://github.com/raydocs/tono/issues/585) | 中·已确认 | |
