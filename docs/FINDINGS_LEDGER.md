@@ -350,8 +350,8 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | H20-C-F1 = H20-O-F2 | Windows 目录刷新失败显示「详情见下」但无详情 | open | [#590](https://github.com/raydocs/tono/issues/590) | 中·已确认 | |
 | H20-C-F2 = H20-O-F10 | macOS 浏览器加密 DNS 冲突显示通用文案并持续自动重试 | open | [#591](https://github.com/raydocs/tono/issues/591) | 中·已确认 | |
 | H20-C-F3 = H20-O-F9 | macOS 拒绝管理员授权被报成 helper 版本不匹配 | open | [#592](https://github.com/raydocs/tono/issues/592) | 中·已确认 | |
-| H20-C-F4 | Windows WFP 锁定校验失败被报成「重启电脑」 | open | [#593](https://github.com/raydocs/tono/issues/593) | 中·已确认(代码路径) | 频率需实机 |
-| H20-C-F5 | Windows 上传诊断缺上一次失败记录 | open | [#594](https://github.com/raydocs/tono/issues/594) | 低·已确认 | #580 仅内部版自动报告 |
+| H20-C-F4 | Windows WFP 锁定校验失败被报成「重启电脑」 | in-PR | [#593](https://github.com/raydocs/tono/issues/593) · [#616](https://github.com/raydocs/tono/pull/616) | 中·已确认(代码路径) | 新前缀 `TONO_WFP_LOCK_UNVERIFIED` 带 Service `last_error`；频率需实机；看门狗恢复后不清 `last_error` 的旧横幅另记 |
+| H20-C-F5 | Windows 上传诊断缺上一次失败记录 | in-PR | [#594](https://github.com/raydocs/tono/issues/594) · [#616](https://github.com/raydocs/tono/pull/616) | 低·已确认 | 当前无错误时上传上一次失败的阶段与稳定码（不含本地详情）；#580 仅内部版自动报告 |
 | H20-C-F6 = H20-O-F13 | 验证码错误/过期被显示为「会话过期」 | open | [#595](https://github.com/raydocs/tono/issues/595) | 中·已确认 | |
 | H22-C-F2 = H22-O-F6 | 验证码未送达时两端没有求助/诊断出口 | open | [#596](https://github.com/raydocs/tono/issues/596) | 中·已确认 | |
 | H22-C-F1 | Windows 欢迎页吞掉存储失败导致循环 | open | 待开 | 低·推导(PLAUSIBLE) | 触发条件未证实 |

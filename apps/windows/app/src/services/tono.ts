@@ -158,6 +158,12 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
     prefix: 'TONO_WFP_ENGINE_WEDGED',
     key: 'tono.dashboard.errors.wfpEngineWedged',
   },
+  // Post-lock verification could not confirm the WFP lock, so no TUN probe ran.
+  // Listed after the two engine markers: a nested BFE/wedged cause wins.
+  {
+    prefix: 'TONO_WFP_LOCK_UNVERIFIED',
+    key: 'tono.dashboard.errors.wfpLockUnverified',
+  },
   {
     prefix: 'TONO_RELEASE_RECONCILING',
     key: 'tono.dashboard.errors.releaseReconciling',

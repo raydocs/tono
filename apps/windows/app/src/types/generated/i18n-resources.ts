@@ -1062,6 +1062,7 @@ export interface TranslationResources {
           tunDataPlaneBroken: string
           tunIngressBroken: string
           wfpEngineWedged: string
+          wfpLockUnverified: string
         }
         errorSwitchServer: string
         info: {
