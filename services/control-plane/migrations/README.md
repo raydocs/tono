@@ -54,6 +54,38 @@ Ops tables after the sequence was unique. Applied in numeric order:
 - `0075_ops_node_capacity_users.sql` — `ops_node_profiles.capacity_users` for capacity-based node acceptance
 - `0076_ops_node_identity.sql` — immutable `ops_node_identity`; display name, failure domain, and which node it replaces
 
+## 0077
+
+- `0077_retire_legacy_exit_credential_on_revoke.sql` — the first revocation of any device of an account retires the account-wide shared legacy exit credential for good (dual rollout), bumps the catalog and queues a client refresh
+
+## 0078
+
+- `0078_home_exit_name_history.sql` — every name ever used by a catalog home exit stays in the per-user catalog restriction set, whatever its status
+
+## 0079
+
+- `0079_session_rotation_successor.sql` — `sessions.rotated_at` / `successor_id` so a lost refresh response can be recovered once inside the grace window
+
+## 0080
+
+- `0080_home_socks5_rotation_required.sql` — `home_exits.socks5_rotation_required_at`, set by triggers when a socks5 credential leaves a binding or its user is disabled; a flagged credential cannot be bound to another user until replaced
+
+## 0081
+
+- `0081_exit_node_revoked_token.sql` — `exit_nodes.revoked_token_hash` keeps the token hash rotated away at retirement, answer-only, so the still-running exit agent is told "this node is disabled" (403) and withdraws its clients
+
+## 0082
+
+- `0082_customer_activity_windows.sql` — `customer_activity_windows` marks each telemetry window once it is added to activity hours, so the upload hook and the cron projection do not both count it
+
+## 0088
+
+- `0088_diagnostics_log_pending_objects.sql` — write-ahead record for raw log uploads, so retention can delete an R2 object whose index row never landed
+
+## 0090
+
+- `0090_sessions_user_live_index.sql` — `sessions(user_id, revoked_at)` index for the cron enforcement scan, which only enforces ineligible users that still hold a live device or session
+
 ## 0091
 
 - `0091_signup_allowlist_entitlement.sql` — `signup_allowlist.expires_at` / `plan` set at onboard before register, copied onto `users` at first sign-in

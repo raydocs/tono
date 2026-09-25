@@ -10,6 +10,7 @@ import {
   bumpCatalogRevision,
   enqueueRefreshCatalogForUser,
   exitClientUUID,
+  legacyExitCredentialRetired,
 } from '../../catalog';
 import {
   publicHomeBinding,
@@ -17,6 +18,7 @@ import {
   upsertHomeBinding,
   parseHomeLine,
   findSocks5Home,
+  assertHomeExitBindable,
 } from '../../home';
 import {
   PRODUCT_CLAUDE,
@@ -39,7 +41,7 @@ import {
   sharedAdministrativeResource,
   type SharedAdminDeps,
 } from '../shared-admin';
-import { onboardEntitlement, pendingProfileWrites } from './onboard-profile';
+import { accountProfileWrite, onboardEntitlement, pendingProfileWrites } from './onboard-profile';
 import {
   liveQualityNodeNamed,
   nodeHealthFromQuality,
@@ -81,32 +83,6 @@ export async function getOpsUsers(req: Request, e: Env): Promise<Response> {
     cursor = { createdAt: Number(parsed[1]), id: parsed[2] };
   }
   return Response.json(await operationsUsers(e, { cursor, limit }));
-}
-
-export async function getOpsUserHomeBinding(e: Env, mt: RegExpMatchArray): Promise<Response> {
-  const user = await e.DB.prepare('SELECT id FROM users WHERE id = ?').bind(mt[1]).first<Row>();
-  if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
-  const row = await e.DB.prepare(
-    `SELECT
-       user_home_bindings.user_id,
-       users.email,
-       user_home_bindings.home_exit_id,
-       user_home_bindings.default_proxy_name,
-       home_exits.proxy_name,
-       home_exits.display_name,
-       home_exits.kind,
-       home_exits.socks5_host,
-       home_exits.socks5_port,
-       home_exits.egress_ipv4,
-       home_exits.status AS home_status,
-       user_home_bindings.created_at,
-       user_home_bindings.updated_at
-     FROM user_home_bindings
-     JOIN users ON users.id = user_home_bindings.user_id
-     JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
-     WHERE user_home_bindings.user_id = ?`,
-  ).bind(mt[1]).first<Row>();
-  return Response.json({ binding: row ? publicHomeBinding(row) : null });
 }
 
 export async function getOpsUserDetail(e: Env, mt: RegExpMatchArray, deps: { freshestProtectedRouteProof: (action: Row | null | undefined, telemetry: Row | null | undefined) => unknown }): Promise<Response> {
@@ -224,10 +200,15 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
   if (b.homeExitId !== undefined && b.homeExitId !== null && b.homeExitId !== '') {
     const homeExitId = str(b.homeExitId, 'homeExitId', 1, 100);
     const home = await e.DB.prepare(
-      'SELECT id FROM home_exits WHERE id = ?',
+      'SELECT id, status FROM home_exits WHERE id = ?',
     ).bind(homeExitId).first<Row>();
     if (!home) {
       throw new ApiError(400, 'HOME_ASSIGN_FAILED', 'Could not assign the pasted home line');
+    }
+    // Same rule as PUT users/{id}/home-binding: binding a non-active line
+    // would fail the user's whole catalog closed.
+    if (String(home.status) !== 'active') {
+      throw new ApiError(409, 'HOME_EXIT_INACTIVE', 'Home exit must be active before binding');
     }
   }
   const parsedLine = b.line !== undefined && b.line !== null && b.line !== ''
@@ -243,46 +224,45 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
       if (owner && (!user || String(owner.user_id) !== String(user.id))) {
         throw new ApiError(400, 'HOME_ASSIGN_FAILED', 'Could not assign the pasted home line');
       }
+      // home-exits/assign clears a rotation flag only for a new password, then
+      // refuses a flagged line; refuse the reused password here, before any write.
+      if (user && parsedLine.password === String(home.socks5_password)) {
+        await assertHomeExitBindable(e, String(user.id), String(home.id));
+      }
     }
+  }
+  if (user && !parsedLine && b.homeExitId) {
+    // upsertHomeBinding below refuses a line awaiting rotation; refuse it
+    // here instead, before the allowlist and profile writes.
+    await assertHomeExitBindable(e, String(user.id), String(b.homeExitId));
   }
   const createdAt = now();
   const storeProfile = b.notes !== undefined || b.contact !== undefined || b.wechatId !== undefined
     || expiresAt !== undefined || b.plan !== undefined;
   const pendingProfile = !user && storeProfile;
-  // The sign-up grant, the pending profile and the same values on any account
-  // created since the lookup above commit together. A first sign-in racing
-  // this request either created the account already (the users UPDATE covers
-  // it) or copies the finished allowlist row, so the expiry cannot be lost.
-  const allowlistWrites: D1PreparedStatement[] = [
-    e.DB.prepare(
-      'INSERT OR IGNORE INTO signup_allowlist(email, created_at) VALUES(?, ?)',
-    ).bind(address, createdAt),
+  // (sent, value) pairs for wechat_id, contact, notes, expires_at and plan.
+  const profile = [
+    b.wechatId !== undefined, wechatId ?? null,
+    b.contact !== undefined, contact ?? null,
+    b.notes !== undefined, notes ?? null,
+    expiresAt !== undefined, expiresAt ?? null,
+    b.plan !== undefined, plan,
   ];
-  if (pendingProfile) {
-    allowlistWrites.push(...pendingProfileWrites(e, address, [
-      b.wechatId !== undefined, wechatId ?? null,
-      b.contact !== undefined, contact ?? null,
-      b.notes !== undefined, notes ?? null,
-      expiresAt !== undefined, expiresAt ?? null,
-      b.plan !== undefined, plan,
-    ], createdAt));
-  }
-  const written = await e.DB.batch(allowlistWrites);
-  // A first sign-in between the lookup and the batch: the profile landed on
-  // that account, so the audit, enforceUser and the answer name it.
-  const raced = pendingProfile && Number(written[2]?.meta.changes ?? 0) > 0
-    ? await e.DB.prepare('SELECT id FROM users WHERE email = ?').bind(address).first<Row>()
-    : null;
-  const userId = user ? String(user.id) : raced ? String(raced.id) : null;
-  const incomplete: string[] = [];
-  if (!userId) incomplete.push('user_not_registered');
-  else if (!user) incomplete.push('registered_during_onboard');
   let binding = null;
   let account = null;
   let exitIdentityIssued = false;
+  const incomplete: string[] = [];
   if (user) {
-    await exitClientUUID(e, String(user.id));
+    // Before the first write, so a refusal leaves nothing behind. An account
+    // whose shared credential was retired by a device revocation (0077) is
+    // served per-device credentials only; asking for the shared one would 409.
+    if (!(await legacyExitCredentialRetired(e, String(user.id)))) {
+      await exitClientUUID(e, String(user.id));
+    }
     exitIdentityIssued = true;
+    // Bind before the allowlist and profile writes: the check above can go
+    // stale (a concurrent unbind flags the line for rotation), and the bind
+    // re-checks; its refusal must leave nothing else written.
     if (b.line !== undefined && b.line !== null && b.line !== '') {
       const assigned = await sharedAdministrativeResource(
         new Request(req.url, {
@@ -308,6 +288,9 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
       );
       await bumpCatalogRevision(e);
       await enqueueRefreshCatalogForUser(e, String(user.id));
+      // Audited here, not only by the closing user.onboard row: a later
+      // account-assignment 409 would otherwise leave this binding unrecorded.
+      await writeOpsAudit(e, actor.email, 'home.assign', 'user', String(user.id), `onboard bound home for ${address}`);
     }
     binding = await loadHomeBinding(e, String(user.id));
     if (b.accountRef) {
@@ -330,29 +313,33 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
       account = await assignedProductForUser(e, String(user.id));
     }
     if (!account) incomplete.push('claude');
-    // Written only after the home line and Claude account went through, so a
-    // failed onboard leaves the profile, expiry and plan as they were, and the
-    // audit and enforceUser below always follow this write.
-    if (storeProfile) {
-      await e.DB.prepare(
-        `UPDATE users SET
-           notes = CASE WHEN ? THEN ? ELSE notes END,
-           contact = CASE WHEN ? THEN ? ELSE contact END,
-           wechat_id = CASE WHEN ? THEN ? ELSE wechat_id END,
-           expires_at = CASE WHEN ? THEN ? ELSE expires_at END,
-           plan = CASE WHEN ? THEN ? ELSE plan END,
-           updated_at = ?
-         WHERE id = ?`,
-      ).bind(
-        b.notes !== undefined, notes ?? null,
-        b.contact !== undefined, contact ?? null,
-        b.wechatId !== undefined, wechatId ?? null,
-        expiresAt !== undefined, expiresAt ?? null,
-        b.plan !== undefined, plan,
-        now(), user.id,
-      ).run();
-    }
   }
+  // Written only after the home line and Claude account went through, so a
+  // failed onboard leaves the allowlist, profile, expiry and plan as they
+  // were, and the audit and enforceUser below always follow this batch. With
+  // no account at lookup, the sign-up grant, the pending profile and the same
+  // values on any account created since commit together: a racing first
+  // sign-in either created the account (the users UPDATE covers it) or copies
+  // the finished allowlist row, so the expiry cannot be lost.
+  const allowlistWrites: D1PreparedStatement[] = [
+    e.DB.prepare(
+      'INSERT OR IGNORE INTO signup_allowlist(email, created_at) VALUES(?, ?)',
+    ).bind(address, createdAt),
+  ];
+  if (pendingProfile) {
+    allowlistWrites.push(...pendingProfileWrites(e, address, profile, createdAt));
+  } else if (user && storeProfile) {
+    allowlistWrites.push(accountProfileWrite(e, String(user.id), profile, now()));
+  }
+  const written = await e.DB.batch(allowlistWrites);
+  // A first sign-in between the lookup and the batch: the profile landed on
+  // that account, so the audit, enforceUser and the answer name it.
+  const raced = pendingProfile && Number(written[2]?.meta.changes ?? 0) > 0
+    ? await e.DB.prepare('SELECT id FROM users WHERE email = ?').bind(address).first<Row>()
+    : null;
+  const userId = user ? String(user.id) : raced ? String(raced.id) : null;
+  if (!userId) incomplete.push('user_not_registered');
+  else if (!user) incomplete.push('registered_during_onboard');
   const entitlement = [
     expiresAt !== undefined ? 'expiresAt' : null,
     b.plan !== undefined ? 'plan' : null,

@@ -22,6 +22,12 @@ export function onboardEntitlement(b: Record<string, unknown>) {
   return { expiresAt, plan };
 }
 
+const PROFILE_SET = `wechat_id = CASE WHEN ? THEN ? ELSE wechat_id END,
+     contact = CASE WHEN ? THEN ? ELSE contact END,
+     notes = CASE WHEN ? THEN ? ELSE notes END,
+     expires_at = CASE WHEN ? THEN ? ELSE expires_at END,
+     plan = CASE WHEN ? THEN ? ELSE plan END`;
+
 /**
  * The pending profile for an email with no account at lookup time: kept on
  * the allowlist row for first sign-in, and written onto an account with that
@@ -31,13 +37,13 @@ export function onboardEntitlement(b: Record<string, unknown>) {
  * and plan, in that order.
  */
 export function pendingProfileWrites(e: Env, address: string, profile: unknown[], t: number) {
-  const set = `wechat_id = CASE WHEN ? THEN ? ELSE wechat_id END,
-     contact = CASE WHEN ? THEN ? ELSE contact END,
-     notes = CASE WHEN ? THEN ? ELSE notes END,
-     expires_at = CASE WHEN ? THEN ? ELSE expires_at END,
-     plan = CASE WHEN ? THEN ? ELSE plan END`;
   return [
-    e.DB.prepare(`UPDATE signup_allowlist SET ${set} WHERE email = ?`).bind(...profile, address),
-    e.DB.prepare(`UPDATE users SET ${set}, updated_at = ? WHERE email = ?`).bind(...profile, t, address),
+    e.DB.prepare(`UPDATE signup_allowlist SET ${PROFILE_SET} WHERE email = ?`).bind(...profile, address),
+    e.DB.prepare(`UPDATE users SET ${PROFILE_SET}, updated_at = ? WHERE email = ?`).bind(...profile, t, address),
   ];
+}
+
+/** The same `profile` pairs on an account that existed at lookup time. */
+export function accountProfileWrite(e: Env, userId: string, profile: unknown[], t: number) {
+  return e.DB.prepare(`UPDATE users SET ${PROFILE_SET}, updated_at = ? WHERE id = ?`).bind(...profile, t, userId);
 }

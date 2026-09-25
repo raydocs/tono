@@ -53,6 +53,17 @@ export function managedCatalogYAML(value: unknown): string {
   } catch {
     throw new ApiError(400, 'INVALID_CATALOG', 'Catalog must contain a readable proxies list');
   }
+  // The per-account home-exit and hy2 filters read names with the line regex in
+  // catalogProxyName; clients read them with a YAML parser. Accept only names
+  // both readers decode identically, so a filter can never keep a block that a
+  // client then admits under a restricted name.
+  if (items.some(({ name, block }) => catalogProxyPlainName(block) !== name)) {
+    throw new ApiError(
+      400,
+      'INVALID_CATALOG',
+      'Every catalog proxy must start with its name as single-line plain text in NFC (no escapes, quotes inside, comments, anchors, tags or block scalars)',
+    );
+  }
   if (items.some(({ block }) => !catalogProxyUsesManagedIdentity(block))) {
     throw new ApiError(
       400,
@@ -84,6 +95,43 @@ export function catalogProxyName(block: string): string | null {
     return raw.replace(/\\(["'\\])/g, '$1');
   }
   return null;
+}
+
+// Text that means the same thing to the line regex and to any YAML parser:
+// no escape or quote characters, no comment, flow, anchor, alias, tag, block
+// scalar or key indicators, no leading/trailing or tab whitespace.
+const PLAIN_CATALOG_NAME = /^[^\s\\"'#&*!|>%@`?:,[\]{}-](?:[^\t\\"'#:,[\]{}]*[^\s\\"'#:,[\]{}])?$/u;
+
+// Any key position holding a quoted, escaped, aliased, tagged, anchored or
+// explicit (`?`) key, or a literal `name` key. More than one `name` key hit
+// means a second key a YAML parser may read as the proxy name.
+const NAME_KEY = /(?:^[ \t]*(?:-[ \t]+)?|[{,][ \t]*)(?:[&!][^ \t]*[ \t]+)*["']?name["']?[ \t]*:/gm;
+const UNREADABLE_KEY = /(?:^[ \t]*(?:-[ \t]+)*|[{,][ \t]*)(?:\?(?:[ \t]|$)|\*|(?:[&!][^ \t]*[ \t]+)*"[^"\n]*\\[^"\n]*"[ \t]*:)/m;
+
+/**
+ * The proxy name, only when it is written so that a YAML parser and
+ * catalogProxyName read the same string: the first key of the list item
+ * (`- name: X` or `- {name: X, …}`), X plain or simply quoted text on that one
+ * line, nothing after it but the flow separator, NFC, and exactly one `name`
+ * key in the block. Anything else returns null.
+ */
+export function catalogProxyPlainName(block: string): string | null {
+  const lines = block.split('\n');
+  const first = lines[0] ?? '';
+  const blockStyle = first.match(/^( *- +)name: +(?:"([^"\n]*)"|'([^'\n]*)'|([^"'\n]*?)) *$/);
+  const flowStyle = first.match(/^ *- +\{ *name: +(?:"([^"\n]*)"|'([^'\n]*)'|([^"',}\n]*?)) *[,}]/);
+  const raw = blockStyle
+    ? blockStyle[2] ?? blockStyle[3] ?? blockStyle[4]
+    : flowStyle?.[1] ?? flowStyle?.[2] ?? flowStyle?.[3];
+  if (raw === undefined || !PLAIN_CATALOG_NAME.test(raw) || raw !== raw.normalize('NFC')) return null;
+  if (blockStyle) {
+    // A deeper line after a plain value continues it (`name: Home` + `  A`).
+    const keyColumn = blockStyle[1].length;
+    const next = lines.slice(1).find((line) => line.trim() !== '' && !/^\s*#/.test(line));
+    if (next !== undefined && (next.match(/^ */)?.[0].length ?? 0) !== keyColumn) return null;
+  }
+  if ((block.match(NAME_KEY) ?? []).length !== 1 || UNREADABLE_KEY.test(block)) return null;
+  return raw;
 }
 
 /**
@@ -206,6 +254,41 @@ function catalogSkipsCertVerify(block: string): boolean {
   return raw !== 'false' && raw !== 'no' && raw !== 'off' && raw !== 'n';
 }
 
+/** One scalar value for `key` in block (`key: v`) or flow (`{key: v, …}`) form. */
+function catalogScalar(block: string, key: string): string | null {
+  const escaped = escapeRegExp(key);
+  const line = block.match(new RegExp(String.raw`^\s*(?:-\s+)?${escaped}\s*:\s*(.*?)\s*(?:#.*)?$`, 'm'));
+  const flow = block.match(new RegExp(String.raw`[{,]\s*${escaped}\s*:\s*([^,}\n]*)`));
+  const raw = (line?.[1] ?? flow?.[1] ?? '').trim();
+  if (!line && !flow) return null;
+  return raw.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1').trim();
+}
+
+/**
+ * The VLESS fields both clients require before they admit a node (macOS
+ * `validatedOwnedNode`, Windows `admit_node`). One inadmissible entry makes
+ * each client refuse the whole catalog, so the Worker must refuse to publish
+ * it. Returns the missing or unusable fields; empty means admissible.
+ * Hysteria2 blocks are checked by catalogProxyUsesManagedIdentity instead.
+ */
+export function catalogEntryMissingClientFields(block: string): string[] {
+  if (catalogProxyType(block) !== 'vless') return [];
+  const missing: string[] = [];
+  if (!/^true$/i.test(catalogScalar(block, 'tls') ?? '')) missing.push('tls: true');
+  if (!catalogScalar(block, 'servername') && !catalogScalar(block, 'sni')) missing.push('servername');
+  if (catalogScalar(block, 'reality-opts') === null) missing.push('reality-opts');
+  if (!/^[A-Za-z0-9_-]{43}$/.test(catalogScalar(block, 'public-key') ?? '')) {
+    missing.push('reality-opts.public-key');
+  }
+  const shortId = catalogScalar(block, 'short-id') ?? '';
+  if (!/^(?:[0-9A-Fa-f]{2}){1,8}$/.test(shortId)) missing.push('reality-opts.short-id');
+  const flow = catalogScalar(block, 'flow');
+  if (flow && flow !== 'xtls-rprx-vision') missing.push('flow: xtls-rprx-vision');
+  const network = catalogScalar(block, 'network');
+  if (network && network.toLowerCase() !== 'tcp') missing.push('network: tcp');
+  return missing;
+}
+
 /**
  * A proxy block has exactly one managed identity placeholder.
  * VLESS: `uuid: {{TONO_CLIENT_UUID}}`. Hysteria2: `password: {{TONO_CLIENT_UUID}}`,
@@ -227,8 +310,9 @@ export function catalogProxyUsesManagedIdentity(block: string): boolean {
 }
 
 /**
- * Shared proxies stay for every authenticated user. Active home-exit proxy names
- * are withheld unless the user is bound to that exact home exit.
+ * Shared proxies stay for every authenticated user. Every name that has ever
+ * belonged to a catalog home exit, and its ` · hy2` twin, is withheld unless the
+ * user is bound to that exact (active) home exit.
  */
 export function filterCatalogYamlForUser(
   yaml: string,
@@ -238,9 +322,13 @@ export function filterCatalogYamlForUser(
   if (restrictedHomeNames.size === 0) return yaml;
   const { prefix, items, suffix } = splitManagedCatalogProxies(yaml);
   if (items.length === 0) return yaml;
-  const kept = items.filter(
-    (item) => !restrictedHomeNames.has(item.name) || allowedHomeNames.has(item.name),
-  );
+  const kept = items.filter((item) => {
+    // A home exit whose own name ends in ` · hy2` matches as is; the suffix
+    // is stripped only to find the twin of a restricted base name.
+    if (restrictedHomeNames.has(item.name)) return allowedHomeNames.has(item.name);
+    const homeName = catalogBaseName(item.name);
+    return !restrictedHomeNames.has(homeName) || allowedHomeNames.has(homeName);
+  });
   if (kept.length === items.length) return yaml;
   if (kept.length === 0) {
     const empty = 'proxies: []\n';

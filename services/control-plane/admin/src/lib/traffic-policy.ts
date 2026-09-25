@@ -50,8 +50,11 @@ function isEndpointList(value: unknown): value is PolicyEndpoint[] {
   ));
 }
 
-export function parseTrafficPolicy(value: unknown): PolicyParse {
-  if (!isObject(value)) return { ok: false, reason: '不是对象' };
+export function parseTrafficPolicy(input: unknown): PolicyParse {
+  if (!isObject(input)) return { ok: false, reason: '不是对象' };
+  // The served json may name its own revision (#317). The hub assigns it on
+  // every publish, so an edited draft never carries it forward.
+  const { revision: _servedRevision, ...value } = input;
   if (!isHostList(value.domains) || !isEndpointList(value.mediaEndpoints)) {
     return { ok: false, reason: 'domains 或 mediaEndpoints 不合法' };
   }
