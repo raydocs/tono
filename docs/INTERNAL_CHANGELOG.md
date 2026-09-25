@@ -42,8 +42,9 @@
   （红分支 `wip/signin-code-errors-and-help-20260925-red`）；PR [#620](https://github.com/raydocs/tono/pull/620)；未合 main。
 - **缺陷修复**：
   - #595：Worker 对错误或过期的验证码返回 401 `INVALID_OR_EXPIRED_CODE`，两端都走通用 401，显示成「会话过期」
-    （Windows 审计日志与错误串、macOS 登录页）。`auth/email/verify` 不带会话，它的 401 只可能是验证码被拒，现在两端只在
-    这一调用上改成专门错误：Windows `ApiError::InvalidOrExpiredCode` → `TONO_AUTH_INVALID_CODE` →
+    （Windows 审计日志与错误串、macOS 登录页）。现在两端只把带 `INVALID_OR_EXPIRED_CODE` 错误码的 401 改成专门错误
+    （Windows 在 `map_status`，macOS 在 `sendData` 读错误码处；审查发现 verify 在验证码已消费后还可能回普通 401
+    `AUTHENTICATION_FAILED`，不能一概当作验证码错误）：Windows `ApiError::InvalidOrExpiredCode` → `TONO_AUTH_INVALID_CODE` →
     「验证码错误或已过期，请重新获取。」；macOS `APIError.invalidOrExpiredCode`，同样文案。带令牌请求的 401
     （刷新、重放、#582 的 `SessionUse`/`SessionVerdict` 判定）不变；登录端点仍是 `SessionUse::None` / `.noSession`，不参与判定。
   - #596：`/auth/email/start` 对任何地址都回 202，投递失败按设计静默，验证码没到时两端都没有求助出口。现在验证码页等满
