@@ -1015,7 +1015,16 @@ SectionEnd
 Section Install
   ${If} $TonoPrivateUnpack = 1
     SetOutPath $INSTDIR
-    File /a "/oname=${MAINBINARYNAME}.exe" "${MAINBINARYSRCPATH}"
+    ; The package carries the GUI and Mihomo only under their staged names; the payload gate
+    ; rejects a live archive member. $INSTDIR is the Service's private attempt payload here, so
+    ; renaming to the names the Service verifies is private. A failed rename aborts (nonzero
+    ; exit) so the Service never reads a partial payload.
+    File /a "/oname=${MAINBINARYNAME}.exe.next" "${MAINBINARYSRCPATH}"
+    ClearErrors
+    Rename "$INSTDIR\${MAINBINARYNAME}.exe.next" "$INSTDIR\${MAINBINARYNAME}.exe"
+    ${If} ${Errors}
+      Abort "Could not stage the private Tono application payload."
+    ${EndIf}
     {{#each resources_dirs}}
       CreateDirectory "$INSTDIR\\{{this}}"
     {{/each}}
@@ -1023,7 +1032,12 @@ Section Install
       File /a "/oname={{this.[1]}}" "{{no-escape @key}}"
     {{/each}}
     {{#each binaries}}
-      File /a "/oname={{this}}" "{{no-escape @key}}"
+      File /a "/oname={{this}}.next" "{{no-escape @key}}"
+      ClearErrors
+      Rename "$INSTDIR\\{{this}}.next" "$INSTDIR\\{{this}}"
+      ${If} ${Errors}
+        Abort "Could not stage the private Tono runtime payload."
+      ${EndIf}
     {{/each}}
     ; No installed path, SCM, ARP, shortcut, redist, hook or cleanup mutation.
     Return

@@ -32,6 +32,34 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · Windows 候选包构建：私有解包分支写出 live `Tono.exe`，载荷门拒绝
+
+- **归属/来源**：G3 发出去还能再发（候选包打包）；`apps/windows/app/src-tauri/packages/windows/installer.nsi`
+  （Section Install 私有解包分支）、`apps/windows/app/scripts/windows-packaging.mjs` 及其测试。
+  基线 origin/main 536ee977；分支 `fix/windows-private-unpack-staged-gui-20260924`。
+- **缺陷修复**：b6b42ea0（2026-09-22，Service 受保护更新事务 v1）加入的 `$TonoPrivateUnpack = 1` 分支以 live 名
+  解出 GUI（`Tono.exe`）和 Mihomo（`tono-core.exe`），安装包因此同时含 `Tono.exe` 与 `Tono.exe.next`；
+  `release:preflight --payload-only` 按 2026-08 起的规则（GUI 只能以唯一的 `Tono.exe.next` 出现）拒绝，此后每个
+  Windows 候选包都失败（run 36095249694；最后成功 569ce865）。现在私有分支与 live 分支一样以 `.next` 名解出，
+  再在私有 payload 目录内改名为 Service 校验的 `Tono.exe`/`tono-core.exe`；改名失败即 `Abort`（非零退出），
+  Service 不会读到半个 payload。载荷门未放宽。除私有解包的命名外无产品行为变化，Service 契约不变。
+  两个分支对同一源文件、同一 `SetOutPath $INSTDIR`、同一 `/oname` 各有一条 File 指令；7-Zip 对同数据块、同名同前缀的
+  成员只列一次（run 36095249694 的列表里两分支都写的 `resources/*` 各只出现一次），所以 `.next` 成员仍各一个，
+  门的「恰好一个」检查不改。
+- **新增/优化**：无。
+- **工程与测试**：`validateNsisAutomaticUpgradeFlow`（config-only preflight 也跑）现在要求私有分支只以 `.next` 名解出
+  GUI 与 Mihomo、只在 `$INSTDIR` 内改名、改名失败 `Abort`，构建前即可拦住。新回归
+  `NSIS private extraction never extracts a live GUI member`。三处原有 live 路径变异断言（`$APPDATA` 删除、GUI 与外部
+  二进制的 `File`）按首次出现替换，现在私有分支先出现同一行，改为只替换 live 段（`replaceInLiveInstall`），意图不变。
+- **验证**：本机 `node --test scripts/windows-packaging.test.mjs`：LF 32/32；`installer.nsi` 临时转 CRLF 后 32/32，已按副本
+  原样还原；新回归对 origin/main 的 `installer.nsi` 以断言失败。本机未跑 NSIS/cargo/tauri（执行位置规则）。
+  Windows 候选包 run 36098008549（d17b672c）构建与 `release:preflight --payload-only` 均通过，`.next` 成员未重复。
+  增量审查（Opus+Codex）PASSED，1 项 minor：私有分支 lint 未禁止 binaries 循环内多出的 live 名成员，`Rename` 放行
+  `$INSTDIR\..\`；已收紧为 binaries 循环逐行精确匹配、`Rename` 路径禁止 `..`，本机注入两种变异均被拒，LF/CRLF 32/32。
+- **候选/发布**：Windows 0.0.73 候选安装包（run 36098008549，源 d17b672c，未签名、`candidateOnly`，未推更新源），
+  `Tono_0.0.73_x64-setup.exe` SHA-256 `756145b7878c17de82ad6e64ec12a126213840bc85cc8f95db0c431793caceb9`，已交所有者分发测试。
+- **剩余限制**：私有解包未在实机由 Service 执行（受保护更新 G3.3 真机流程仍待）。
+
 ## 2026-09-24 · Windows 候选包构建：NSIS 打包测试在 CRLF 检出下失败
 
 - **归属/来源**：G3 发出去还能再发（候选包构建）；`apps/windows/app/scripts/windows-packaging.test.mjs`。

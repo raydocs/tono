@@ -315,12 +315,39 @@ export function validateNsisAutomaticUpgradeFlow(source) {
   if (
     privateLines.some(
       (line) =>
-        !/^(?:File \/a |CreateDirectory "\$INSTDIR\\|\{\{#each (?:resources_dirs|resources|binaries)\}\}|\{\{\/each\}\})/.test(
+        !/^(?:File \/a |CreateDirectory "\$INSTDIR\\|\{\{#each (?:resources_dirs|resources|binaries)\}\}|\{\{\/each\}\}|ClearErrors$|Rename "\$INSTDIR\\(?![^"]*\.\.)[^"]+" "\$INSTDIR\\(?![^"]*\.\.)[^"]+"$|\$\{If\} \$\{Errors\}$|Abort "|\$\{EndIf\}$)/.test(
           line,
         ),
     )
   ) {
     return 'v1 private extraction must contain only private payload files, never live mutation'
+  }
+  // The payload gate admits the GUI and Mihomo only as staged `.next` members, so the private
+  // branch must extract those names too and rename them inside the private payload directory.
+  const privateText = privateLines.join('\n')
+  const privateGuiLines = privateLines.filter((line) =>
+    line.includes('MAINBINARYSRCPATH'),
+  )
+  if (
+    /\/oname=(?:\$\{MAINBINARYNAME\}\.exe|\{\{this\}\})"/.test(privateText) ||
+    privateGuiLines.length !== 1 ||
+    privateGuiLines[0] !==
+      'File /a "/oname=${MAINBINARYNAME}.exe.next" "${MAINBINARYSRCPATH}"' ||
+    !/ClearErrors\nRename "\$INSTDIR\\\$\{MAINBINARYNAME\}\.exe\.next" "\$INSTDIR\\\$\{MAINBINARYNAME\}\.exe"\n\$\{If\} \$\{Errors\}\nAbort "/.test(
+      privateText,
+    ) ||
+    // The binaries loop must be exactly the staged extract-and-rename, with no other member.
+    privateText.match(/\{\{#each binaries\}\}\n([\s\S]*?)\n\{\{\/each\}\}/)?.[1]?.replace(/^Abort "[^\n]*$/m, 'Abort') !==
+      [
+        'File /a "/oname={{this}}.next" "{{no-escape @key}}"',
+        'ClearErrors',
+        'Rename "$INSTDIR\\\\{{this}}.next" "$INSTDIR\\\\{{this}}"',
+        '${If} ${Errors}',
+        'Abort',
+        '${EndIf}',
+      ].join('\n')
+  ) {
+    return 'v1 private extraction must stage the GUI and Mihomo under .next names and abort if the private rename fails'
   }
   const uninstallInit =
     text.match(/Function un\.onInit\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
