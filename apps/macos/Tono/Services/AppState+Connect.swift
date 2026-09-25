@@ -424,15 +424,14 @@ extension AppState {
                     let browserDNS = await self.scanBrowserProtectedDNS()
                     self.recordBrowserDNSPreflight(browserDNS)
                     guard browserDNS.outcome == .clear else {
-                        self.lastClassifiedFailure = ProtectedConnectivity.failure(
-                            .protectedDnsNotReady,
+                        self.lastClassifiedFailure = Self.browserDNSFailure(
+                            browserDNS,
                             stage: "securingDNS",
                             attempt: 3,
-                            generation: self.connectionCoordinator.protectionOperationGeneration,
-                            detail: browserDNS.diagnosticDetail
+                            generation: self.connectionCoordinator.protectionOperationGeneration
                         )
-                        throw CoreControllerError.protectionFailed(
-                            browserDNS.failureMessage
+                        throw BrowserDNSDiagnostics.ConflictError(
+                            message: browserDNS.failureMessage
                         )
                     }
                 }
@@ -2047,7 +2046,8 @@ extension AppState {
 
     /// A `prepareHelper` failure. Another account's helper is its own code and
     /// shows the error's text, which names that account; it is not a helper to
-    /// repair. Every other install or identity failure stays a mismatch.
+    /// repair. A declined administrator prompt asks for the approval instead.
+    /// Every other install or identity failure stays a mismatch.
     static func helperPreparationFailure(_ error: Error, generation: UInt64) -> ProtectedFailure {
         let anotherAccount: Bool
         if case HelperIPCError.boundToAnotherUser(_) = error {
@@ -2055,8 +2055,16 @@ extension AppState {
         } else {
             anotherAccount = false
         }
+        let code: ProtectedFailureCode
+        if anotherAccount {
+            code = .helperBoundToAnotherAccount
+        } else if case HelperInstallError.userDenied = error {
+            code = .helperAuthorizationDenied
+        } else {
+            code = .helperProtocolMismatch
+        }
         var failure = ProtectedConnectivity.failure(
-            anotherAccount ? .helperBoundToAnotherAccount : .helperProtocolMismatch,
+            code,
             stage: "preparingHelper",
             attempt: 1,
             generation: generation,
@@ -2066,11 +2074,32 @@ extension AppState {
         return failure
     }
 
+    /// A browser Secure DNS scan that is not clear. The card shows the scan's
+    /// own steps (turn off Secure DNS, or quit the browsers), not the generic
+    /// "wait and reconnect" text of a system resolver that is still settling.
+    static func browserDNSFailure(
+        _ report: BrowserDNSDiagnostics.Report,
+        stage: String,
+        attempt: Int,
+        generation: UInt64
+    ) -> ProtectedFailure {
+        var failure = ProtectedConnectivity.failure(
+            .protectedDnsNotReady,
+            stage: stage,
+            attempt: attempt,
+            generation: generation,
+            detail: report.diagnosticDetail
+        )
+        failure.userMessage = report.failureMessage
+        return failure
+    }
+
     /// Failures the automatic reconnect loop can never resolve: repeating the
     /// identical transaction would re-raise the same administrator prompt or
     /// fail installation the same way. Weak-network and transient helper
     /// errors deliberately stay retryable. Another account's helper stays
-    /// refused until that account or an administrator acts.
+    /// refused until that account or an administrator acts, and a browser
+    /// Secure DNS conflict until the user changes the browser.
     static func failureRequiresUserAction(_ error: Error) -> Bool {
         switch error {
         case KillSwitchService.Error.userDenied,
@@ -2081,6 +2110,8 @@ extension AppState {
              HelperInstallError.installFailed,
              HelperIPCError.forbidden,
              HelperIPCError.boundToAnotherUser(_):
+            true
+        case is BrowserDNSDiagnostics.ConflictError:
             true
         default:
             false

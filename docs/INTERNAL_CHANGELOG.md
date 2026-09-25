@@ -59,6 +59,30 @@
 - **候选/发布**：仅源码，无新候选。
 - **剩余限制**：macOS 两处改动没有单独的 XCTest（本单元按 Issue 各一条）；菜单栏（`MenuBarView.swift`）未加求助入口。未在实机复现。
 
+## 2026-09-25 · macOS：浏览器加密 DNS 冲突与拒绝管理员授权改为提示用户操作
+
+- **归属/来源**：G2 连不上有下一手（失败看得到可执行的原因）；Issue #591（总账 H20-C-F2）、#592（H20-C-F3）。
+  `apps/macos/Tono/Services/AppState+Connect.swift`、`ProtectedConnectivity.swift`、`ProtectedDNSProbe.swift`、
+  `Localizable.xcstrings`。基线 origin/main 52e67294（含 #617）；分支 `fix/macos-browser-dns-and-helper-denied-20260925`
+  （红分支 `wip/macos-browser-dns-and-helper-denied-20260925-red`）；PR [#619](https://github.com/raydocs/tono/pull/619)；未合 main。
+- **缺陷修复**：
+  - #591：住宅路由连接时浏览器 Secure DNS 扫描不通过，抛出的专用文案被 catch 丢弃，界面只显示
+    `PROTECTED_DNS_NOT_READY` 的通用「稍候再重连」；抛出的 `CoreControllerError.protectionFailed` 也不在
+    `failureRequiresUserAction` 中，自动重试一直跑到三次暂停。现在分类失败的 `userMessage` 使用扫描自身的步骤文案
+    （代码仍为 `PROTECTED_DNS_NOT_READY`），连接路径改抛 `BrowserDNSDiagnostics.ConflictError`，按需用户操作处理：
+    立即暂停自动重试，PF 保持，只有 Retry now 解除。连接后的健康复查路径未改（原本已显示专用文案）。
+  - #592：`prepareHelper()` 的所有错误（除另一账户外）都被分类为 `HELPER_PROTOCOL_MISMATCH`，拒绝管理员弹窗后显示
+    「网络组件与这份 Tono 不匹配，请修复」。现在 `HelperInstallError.userDenied`（拒绝或弹窗超时）归为新的仅 macOS
+    代码 `HELPER_AUTHORIZATION_DENIED`，文案「Tono 需要你的管理员批准才能保护连接——请再次点按「连接」并批准。」
+    （已加 zh-Hans）。重试行为不变：该错误原本就在 `failureRequiresUserAction` 中。
+- **新增/优化**：无。
+- **工程与测试**：两条回归，各一：`ProtectedConnectivityTests.testBrowserSecureDNSConflictShowsItsStepsAndWaitsForTheUser`、
+  `HelperBoundAccountTests.testDeclinedAdministratorPromptIsNotAHelperMismatch`。红分支只含测试与最小骨架
+  （错误类型、保持旧分类的辅助函数）。
+- **验证**：本机未编译、未跑测试（执行位置规则）；以 PR 的 `macos-26` CI 为准。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：未实机复现；运维台 `copy/customers.ts` 的失败代码文案表没有新代码（与其他 helper 代码一样走回退）。
+
 ## 2026-09-25 · Windows：检查更新失败不再报「已是最新版」；节点刷新失败显示原因
 
 - **归属/来源**：G2 连不上有下一手（失败看得到原因）；Issue #589（总账 H21-C-F3）、#590（H20-C-F1）。
