@@ -286,7 +286,8 @@ pub async fn quit_release(app: AppHandle) -> Result<(), String> {
         Ok(())
     };
     // #582: a revocation still waiting for the disk must land before exit, or the next offline
-    // launch reads the grant it revoked. Bounded: Quit never hangs on a failing disk.
+    // launch reads the grant it revoked. The wait wakes the writer out of its retry backoff for an
+    // immediate attempt. Bounded: Quit never hangs on a failing disk.
     if result.is_ok() && !offline.wait_durable(crate::tono::offline_grant::QUIT_DURABILITY_BUDGET).await {
         logging!(warn, Type::Service, "Tono: the offline revocation did not reach the disk before quit");
     }

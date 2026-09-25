@@ -167,6 +167,8 @@ pub struct OfflineGate {
     /// One tombstone writer at a time; it always writes the newest pending tombstone.
     tombstone_writer: AtomicBool,
     tombstone_attempts: AtomicU32,
+    /// Wakes a writer sleeping in its retry backoff for an immediate attempt.
+    retry_now: tokio::sync::Notify,
     /// Serializes every write of the grant file, so a grant whose revocation check passed cannot
     /// land after the tombstone of a revocation that came later.
     file: parking_lot::Mutex<()>,
@@ -194,6 +196,7 @@ impl OfflineGate {
             tombstone_generation: AtomicU64::new(0),
             tombstone_writer: AtomicBool::new(false),
             tombstone_attempts: AtomicU32::new(0),
+            retry_now: tokio::sync::Notify::new(),
             file: parking_lot::Mutex::new(()),
             durable: tokio::sync::Notify::new(),
             changed: tokio::sync::Notify::new(),
@@ -299,8 +302,15 @@ impl OfflineGate {
         Ok(true)
     }
 
-    /// Wait, bounded, until no revocation is waiting for the disk. The quit path calls it.
+    /// Wait, bounded, until no revocation is waiting for the disk. The quit path calls it. A writer
+    /// sleeping in its retry backoff is woken first for an immediate attempt, so the budget is not
+    /// spent on a backoff that outlasts it.
     pub async fn wait_durable(&self, budget: Duration) -> bool {
+        let pending = self.tombstone.lock().is_some();
+        if pending {
+            // A stored permit: a writer between its failed attempt and its sleep still sees it.
+            self.retry_now.notify_one();
+        }
         tokio::time::timeout(budget, async {
             loop {
                 let notified = self.durable.notified();
@@ -381,7 +391,8 @@ impl OfflineGate {
                         Type::Service,
                         "Tono: the offline revocation is not on disk yet (attempt {attempt}); retrying: {error:#}"
                     );
-                    tokio::time::sleep(delay).await;
+                    // Ends early when a durability wait asks for an immediate attempt.
+                    let _ = tokio::time::timeout(delay, self.retry_now.notified()).await;
                     delay = delay.saturating_mul(2).min(TOMBSTONE_RETRY_MAX);
                 }
             }
