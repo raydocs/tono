@@ -32,6 +32,31 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-25 · Windows：检查更新失败不再报「已是最新版」；节点刷新失败显示原因
+
+- **归属/来源**：G2 连不上有下一手（失败看得到原因）；Issue #589（总账 H21-C-F3）、#590（H20-C-F1）。
+  `apps/windows/app/src/services/query-client.ts`、`src/pages/settings.tsx`、`src/pages/tono/servers.tsx`、
+  `src/locales/{zh,en}/tono.json` 与生成的 i18n 类型。基线 origin/main ef6d09db；分支
+  `fix/win-update-check-catalog-error-20260925`（红分支 `wip/win-update-check-catalog-error-20260925-red`）；
+  PR [#618](https://github.com/raydocs/tono/pull/618)；未合 main。
+- **缺陷修复**：
+  - #589：SWR 的 `mutate()` 在请求失败时不抛错，而是返回缓存数据（空缓存即 `undefined`），设置页因此把失败的
+    「检查更新」显示成「已是最新版」，有旧结果时还会打开更新对话框。现在 `refetch()` 额外返回本次重新验证写入
+    SWR 缓存的 `error`；设置页遇到错误显示新文案 `checkFailed`（「检查更新失败。请检查网络连接后重试。」）。
+    其他只读 `data` 的调用方不变。
+  - #590：节点页「刷新」失败时 `formatTonoActionError` 丢掉 `detail`，只剩「出了点问题。详情见下方」却没有详情。
+    现在刷新区在「最近一次刷新失败：…」下方显示 Rust 侧已有的原因（`catalog_sync_error` / 命令返回的错误串，
+    与现有 UI 下发的是同一串，不含 bearer 令牌）。同步失败取自目录状态，之后同步成功即消失；同步之前就被拒
+    （未登录、账号切换抢占）的错误在本页保留。该失败不再重复出现在底部的选择错误框。
+- **新增/优化**：无。
+- **工程与测试**：两条回归，各一：`reports a failed refetch instead of resolving with the cached data`
+  （`src/services/query-client.test.tsx`）、`shows the recorded cause under a failed catalog refresh`
+  （`src/pages/tono/servers.test.tsx`，测试桩补 `tonoRefreshCatalog`）。两条在红分支上均以断言失败。
+- **验证**：本机（链接主工作树已有 node_modules，未安装）`npm test` 38 个文件 290 条通过；`npm run typecheck`、
+  改动文件的 eslint 与 biome 均无问题；`node scripts/generate-i18n-keys.mjs` 仅新增一键。未跑 cargo（无 Rust 改动）。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：#590 提到的目录同步传输错误没有稳定 `TONO_*` 键、诊断报告无目录同步字段，本 PR 未改。未在实机复现。
+
 ## 2026-09-25 · Windows：WFP 锁定校验失败单独分类；上传诊断带上一次失败
 
 - **归属/来源**：G2 连不上有下一手（错误可诊断）；Issue #593（总账 H20-C-F4）、#594（H20-C-F5）。
