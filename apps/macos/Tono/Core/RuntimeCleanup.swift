@@ -108,7 +108,13 @@ enum RuntimeCleanup {
             } catch {
                 throw CoreRuntimeError.startFailed(notice + " " + error.localizedDescription)
             }
-            return try await query()
+            do {
+                return try await query()
+            } catch HelperIPCError.connectFailed {
+                // The repair returned and nothing answers yet (a restart loop
+                // it did not catch): say so, with the Retry that repairs it.
+                throw CoreRuntimeError.startFailed(notice)
+            }
         }
     }
 

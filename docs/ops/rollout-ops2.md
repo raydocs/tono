@@ -43,6 +43,13 @@
 `/api/v1/system/version` 的 `buildSha` 为 `f5c31d58…`，`d1_migrations` 最新 0081，13 个出口节点均在 62 秒内 ACK。
 未在 preview 库演练这 5 个迁移（均为只增列/表）；`/ops2/` 五个入口未逐一重载核对。cp 列车 #570（0077–0090）尚未部署。
 
+第十六次 `6cfa4d9e`（2026-09-25，cp 列车 #570：迁移 0077–0080、0082、0088、0090、0092）：部署前按交接顺序确认 14 个出口节点
+（含 2026-09-25 接入的 `Tokyo · Sakura`）全部 active 且 ACK ≤ 60 秒、目录 r55 的 14 个基名全部在 `exit_nodes` 中，
+TC-anthropic-1 的就绪门不会拦下退役账户。部署前备份 `backups/control-plane-d1/2026-09-25T22:41:55Z.sql.gz`（sha256 `49c243fa…`）。
+部署后 `buildSha` = `6cfa4d9e…`（边缘传播约一分钟），`exit_credentials` 有 5 个共享凭据由 0077 退役，rollout 仍为 `dual`；
+节点在新 Worker 上 `+0 -0` 正常 ACK。迁移把目录 revision 从 55 推到 60；新 Worker 上线后按 TC-anthropic-3 在控制台做了
+一次内容不变的受审计 `PUT exit-catalog`（r60 → r61，Cloudflare Access 登录的所有者账号）。未做客户端实机连接验证。
+
 ## 0.2 恢复演练结论（2026-09-10，详见 `docs/archive/ops/restore-drill-2026-09-10.md`）
 
 今天的备份 `backups/control-plane-d1/20260910T085207Z.sql.gz` 能恢复、恢复后能当数据用（20 用户 / 27 设备 / 7533 遥测窗口，`quick_check` ok，外键零违例），导入 28 秒，全流程 wrangler 时间约 1.5 分钟。几条要记住的：

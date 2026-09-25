@@ -209,7 +209,16 @@ nonisolated enum HelperProtocolVersion {
     ///   with the flag restores it once the tunnel exists; if that fails,
     ///   `/core/sync` fails with the old Core still running. An older daemon
     ///   keeps the permit loaded through every Core restart.
-    static let current = "4.46.0"
+    /// - 4.46.0 → 4.47.0: a DNS release no app reply carries (native update
+    ///   preparation, `--emergency-disarm`, `--emergency-reset`) records an
+    ///   original that had no service to go back to; the next `/dns/restore`
+    ///   reply reports `originalDNSRestored: false` once, and the emergency
+    ///   commands print it. When the PF enable-reference record cannot be
+    ///   written, the helper holds PF with the kernel's one anonymous
+    ///   `pfctl -e` reference and releases the new token. A 4.46.0 daemon
+    ///   drops that DNS report and, restarting in a loop, leaks one token per
+    ///   start.
+    static let current = "4.47.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

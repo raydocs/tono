@@ -215,6 +215,45 @@ pub fn registry_string(root: HKEY, key: &str, name: &str) -> Result<Option<Strin
     )?))
 }
 
+/// Name `version` as the installed version in Tono's Add/Remove Programs
+/// record, which the manual installer's downgrade check reads. A native update
+/// runs no NSIS section, so the settled update writes it. Only an existing
+/// record is updated; a missing one is not created.
+pub fn record_installed_version(version: &str) -> Result<()> {
+    let key = wide("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Tono");
+    let (name, data) = (wide("DisplayVersion"), wide(version));
+    let mut handle = std::ptr::null_mut();
+    // SAFETY: NUL-terminated key path and a valid out-pointer.
+    let status = unsafe {
+        RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            key.as_ptr(),
+            0,
+            KEY_SET_VALUE | KEY_WOW64_64KEY,
+            &mut handle,
+        )
+    };
+    ensure!(
+        status == 0,
+        "Tono Add/Remove Programs record unavailable ({status})"
+    );
+    // SAFETY: `handle` is open; `data` is a NUL-terminated UTF-16 buffer of `len * 2` bytes.
+    let status = unsafe {
+        RegSetValueExW(
+            handle,
+            name.as_ptr(),
+            0,
+            REG_SZ,
+            data.as_ptr().cast(),
+            (data.len() * 2) as u32,
+        )
+    };
+    // SAFETY: the handle opened above, closed exactly once.
+    unsafe { RegCloseKey(handle) };
+    ensure!(status == 0, "installed version was not recorded ({status})");
+    Ok(())
+}
+
 pub fn install_root() -> Result<PathBuf> {
     let expected = program_files()?.join("Tono");
     let registered = registry_string(

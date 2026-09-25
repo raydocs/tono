@@ -32,6 +32,102 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-25 · 运维：cp 列车 #570 部署（main 6cfa4d9e）；Sakura 目录 IP 修正
+- 归属：ops 任务（控制面部署）；随列车上线的缺陷修复见 #570 条目与 TC-anthropic-1..4。
+- 来源：main `6cfa4d9e`（#570 合并）；无代码改动，本条只记录运维动作；详见 [runbook §0.1 第十六次](ops/rollout-ops2.md)。
+- 缺陷修复：TC-anthropic-1..4 随部署生效；`Tokyo · Sakura` 目录 IP 改为 `162.4.194.103`（r55），客户可再次连接该节点。
+- 新增/优化：无。
+- 工程与测试：无。
+- 验证：部署脚本内全量测试通过；`buildSha` = `6cfa4d9e`；D1 迁移至 0092；14 个节点 ACK ≤ 65 秒；目录 r61 内容与 r55 逐字相同。
+  未做客户端实机连接验证。
+- 候选/发布：仅运维，无新候选。
+- 剩余限制：hub `nodes.secrets.json` 的 Sakura 条目仍为旧 IP；rollout 仍为 `dual`（进入 `device_only` 是单独决定）。
+
+## 2026-09-25 · Windows：更新生命周期审查跟进（恢复标记、epoch 准入、ARP 版本、安装器租约）
+
+- **归属/来源**：G3 发出去还能再发（更新事务与手动安装器）；TW-anthropic-4 兼及 G1 连接生命周期。Issue #602
+  （合并列车 #572 审查跟进，总账 TW-*）。基线 origin/main f5c31d58；分支 `fix/win-update-lifecycle-followups-20260925`
+  （红分支 `wip/win-update-lifecycle-followups-20260925-red`）；PR [#626](https://github.com/raydocs/tono/pull/626)；未合 main。`apps/windows/service`
+  （`bin/install_service/update_executor.rs`、`core/update.rs`、`core/update/security.rs`、`core/server/handlers.rs`、
+  `core/windows_kill_switch.rs` 注释、`tests/test_owner_lifecycle.rs`）、`apps/windows/app`（`installer.nsi`、
+  `scripts/windows-packaging.test.mjs`）、`docs/UPDATE_PROTOCOL_V1.md`。
+- **缺陷修复**：
+  - TW-OpenAI-2 = TW-G-1（及 TW-anthropic-3 文档）：恢复在停 Service 之前读不出已安装组件或计划成员时直接退出，
+    `Consumed` 原样悬挂；而 Disconnect 只能在证明原件完整后退役 `Uncertain`/`RolledBack`。现在这一出口把 `Consumed`
+    写成 `Uncertain`，`Replaced`（已登记后继）与 `Uncertain` 不变，不停 Service、不动文件，下次恢复重新分类。
+    `UPDATE_PROTOCOL_V1.md` 原写「留下 `Uncertain`」与代码不符，已按此改写。
+  - TW-anthropic-4：更新路由原在 owner 认证后、`update::request` 的准入前就推进全局 attempt epoch，任何本地已认证
+    调用方发一个未签名 Prepare 就能让他人在途 PrepareCoreStart 被判 `StaleReleaseEpoch`。现在推进移入
+    `update::request`，在 App 映像、无手动安装/修复、待决事务属同一 owner、签名校验都通过后才推进，仍在同一
+    lifecycle 锁内；准入后的拒绝（重放/降级、保护状态、活动 owner 等）照旧推进，保留 H9-F3 语义。
+  - TW-anthropic-5：核对 main 后确认 eef9d2ce（#508）只加了降级阻断，没有任何原生路径写 ARP `DisplayVersion`，
+    原生更新后降级检查比较的是旧版本。现在目标成为已定安装时写入：Service 在提交持久化后写（失败只告警，不撤销
+    提交）；执行器提交清理在退役开机任务前再写一次，且只在已安装身份仍是该目标时写（避免提交后手动装了别的版本、
+    开机重试把旧版本写回），失败保留任务；「已安装已释放」归档前由 Service 写，失败保持记录待决。回滚与其它归档
+    从未写过，原版本保持。待决期间手动安装器与卸载器被 gate 拦住，读不到未定版本。
+  - TW-anthropic-6 = TW-G-2：`.onInit` 取得手动租约后，`invalid_existing_version`、`legacy_wix_blocked` 与旧自定义
+    位置 `legacyLocationAbort` 三个无修改退出现在先 `Call ReleaseManualLease`。语言选择框取消在
+    `MUI_LANGDLL_DISPLAY` 内部 Abort，无处交还租约，因此把语言选择移到 gate 之前（gate 的对话框因此也用所选语言）。
+  - 未修：TW-OpenAI-1 = TW-anthropic-2（DHCPv4 放行限定 Dhcp 服务 SID）。需 WFP 引擎新增 `ALE_USER_ID` 安全描述符
+    条件；Dhcp 客户端流量（含取得地址前的 DISCOVER、服务 SID 类型可配置）是否带该 SID 只能实机确认，错配会在保护
+    期间丢 DHCP 租约，比这条 P3 加固的风险更大。保持 open。
+- **新增/优化**：无。
+- **工程与测试**：四条回归，红分支只含测试与骨架（`classify_before_stop` 原样传播错误、`finish_committed` 忽略版本
+  记录），预期以断言失败：`update_executor::tests::update_recovery_marks_a_consumed_attempt_uncertain_when_it_cannot_classify`、
+  `update_executor::tests::update_commit_records_the_installed_version_before_retiring_the_task`、
+  `test_owner_lifecycle::update_prepare_refused_at_admission_does_not_supersede_a_connect_attempt`、
+  `windows-packaging.test.mjs`「every installer init exit after the manual gate hands the lease back」。
+  第三条替换 H9-F3 的 `late_prepare_core_start_superseded_by_update_takeover_cannot_stop_the_successor_core`：
+  那条的前提（未准入的 Prepare 也推进 epoch）正是本次报告的缺陷；CI 无已安装 App 与固定更新公钥，构造不出已准入
+  Prepare，H9-F3 正向路径改由源码保证。`finish_committed` 增加版本记录参数，原有测试随签名更新。
+- **验证**：本机未编译或运行 Rust（执行位置规则）；编译与 `cargo test` 以 PR CI `windows-2025` 为准。本机：
+  `node --test` 跑 `apps/windows/app` 六个脚本测试文件 109/109 通过；新 node 测试在红分支状态以断言失败
+  （the language dialog must precede the gate）；`rustfmt --check` 改动区无差异（文件里原有的格式差异未动）。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：执行器取自升级前已安装版本，TW-OpenAI-2 与执行器侧 ARP 重试只对从含本改动的版本发起的升级生效；
+  提交与「已安装已释放」的 ARP 写入由新 Service 执行，首次升级到本版即生效。提交时 ARP 写入失败且执行器 120 s
+  等待已结束时，版本要到下次开机才补写。卸载器 `un.onInit` 的 `MUI_UNGETLANGUAGE` 在当前用户无记忆语言时可能
+  弹出语言框，其取消同样不会交还租约（按 MUI2 源码推断，未核实、未处理）。
+  DHCP SID 未做（见上）。均未实机。
+
+## 2026-09-25 · macOS：helper 崩溃循环可修复、自行释放 DNS 时的原始 DNS 丢失会告知、PF 引用不再逐次泄漏
+
+- **归属/来源**：G2 连不上有下一手（helper 坏了要能修、要说清）；Issue #601（macOS 合并列车审查 TM-claude-2/4/6，总账同名三行）。
+  macOS `Core/HelperManager.swift`、`Core/RuntimeCleanup.swift`、`Core/HelperProtocolVersion.swift`；helper
+  `KillSwitchPF.swift`、`ProtectedDNSManager.swift`、`UpdateRuntime.swift`、`main.swift`、`KillSwitchTests.swift`、`CONTRACT.sha256`。
+  基线 origin/main f5c31d58；分支 `fix/macos-helper-followups-20260925`（红分支 `wip/macos-helper-followups-20260925-red`）；PR [#625](https://github.com/raydocs/tono/pull/625)；未合 main。
+- **缺陷修复**：
+  - TM-claude-2：当前版本 helper 启动失败（PF 恢复后任一步失败会装紧急拦截再退出）时，launchd KeepAlive 每约 10 s 重启一次，永远不应答。
+    `installIfNeeded` 看到版本正确、launchd 已注册就直接返回，修复是空操作；启动时的查询随后抛出通用「helper 不可用」，#425 的提示和管理员提示都不出现。
+    现在对可以弹管理员提示的调用（Connect、Restore internet、启动修复）在该分支上做有界检测：25 s 内每秒探测 socket，
+    socket 一应答即按原路返回；`launchctl print` 的 `runs` 在窗口内增加 ≥2 次仍无应答则判定崩溃循环，走已有的管理员重装。
+    不弹提示的调用（睡眠、退出、更新准备里的 `restrictToBootstrap`）不做检测，行为不变。启动修复返回后若 helper 仍不应答，
+    改为抛出 #425 的「未在保护中，点重试并批准管理员提示」提示，而不是通用错误。PF 不放松：重装走原安装脚本，内核规则在换 daemon 期间保留。
+  - TM-claude-4：原生更新准备（含执行器回滚）和 `--emergency-disarm`/`--emergency-reset` 在 helper 内部恢复 DNS，丢掉了
+    `originalDNSRestored: false`，之后快照已归档，App 再也不会收到（对照 #487/#489）。现在这些路径把丢失记在
+    `/Library/Application Support/Tono/protected-dns.original-not-restored`（root 目录，reset 不删）；下一次 `/dns/restore` 回复带上
+    `originalDNSRestored: false` 并删除记录，App 沿用 #489 的一次性提示。两个紧急命令成功后还在终端打印同一说明。
+  - TM-claude-6：`pf.reference` 记录写失败时，新取的 `pfctl -E` token 只存在进程内存；崩溃循环下每次重启都再取一个且永不释放。
+    现在写失败时先用 `pfctl -e` 让内核持有唯一的匿名引用（xnu `DIOCSTART`：PF 已开时仅在没有匿名引用时加一，重复调用不叠加），
+    确认成功（退出码 0 或「already enabled」，且 PF 仍开）后才 `pfctl -X` 释放新 token，引用计数不经过零；确认不了则保持原行为（token 留在内存重试）。
+- **新增/优化**：无。helper 协议 4.46.0 → 4.47.0，CONTRACT 哈希按 `build-core-helper.sh` 同一管线重算（先复现 main 记录的 4.46.0 哈希）。
+- **工程与测试**：三条回归，各对应一个行为，红分支只含测试、骨架（`launchdShowsCrashLoop` 恒 false；`reportsOriginalLoss` 保持 main 行为）
+  与协议号，预期以断言失败：
+  XCTest `HelperUnprotectedNoticeTests.testLaunchdRestartingTheHelperTwiceIsACrashLoop`（`runs` 增 2 为崩溃循环、增 1 不是、无计数不算）；
+  helper `--lifecycle-self-test` 的 `ProtectedDNSManager.runDeferredOriginalLossSelfTest`（延后记录的丢失只在下一次回复报告一次）
+  与 PF 检查 9b `unrecorded-reference-not-kept`（记录路径不可写时调用后 `pfctl -s References` 不出现新的数字词（token）且 PF 仍开；
+没有任何 token 时内核回 ENOENT，所以不看退出码；
+  若测试开始时 PF 是关的，结束时 `pfctl -d` 去掉测试留下的匿名引用）。启动提示改动无单独测试。
+- **验证**：未在本机编译或运行 Swift（执行位置规则）；编译、XCTest 与需 root 的 `--lifecycle-self-test` 以 PR CI `macos-26` 为准。
+  本机只做了：`launchctl print system/com.raydocs.tono.core-helper` 以普通用户可读、含顶层 `\truns = N`（与测试夹具形状一致）；
+  `verify-swift-balance.py`（改动文件仅有 main 上已存在的两处误报）；xnu `bsd/net/pf_ioctl.c` 源码核对 `DIOCSTART`/`DIOCSTOPREF` 语义。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：崩溃循环检测依赖 `launchctl print` 的 `runs` 字段（非稳定接口），最坏多等 25 s；启动步骤慢于约 12 s 才失败的循环
+  可能一轮测不到，下次 Retry 再测；重装修不了 helper 自身启动缺陷时，用户看到「helper 未启动」加提示。DNS 丢失提示要等 App 下一次
+  `/dns/restore`（Restore internet、退出、启动清理、升级前准备），旧版 App 会消费记录而不提示。PF 记录写失败后匿名引用在解除保护后仍让
+  PF 保持开启（Tono anchor 已清空，无放行变化），直到 `pfctl -d` 或重启；若本机 `pfctl -e` 输出不含「already enabled」，退回原行为（仍泄漏），
+  以 CI 上 9b 的结果为准。均未实机验证。
+
 ## 2026-09-25 · 运维：控制面部署 f5c31d58；exit-agent #624 上 14 个节点；Tokyo · Sakura 换 IP 后接入
 - 归属：ops 任务（控制面部署、出口计量与吊销）；不改客户端。
 - 来源：main `f5c31d58`（含 #624）；无代码改动，本条只记录运维动作，详细见

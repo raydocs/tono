@@ -46,7 +46,9 @@ final class UpdateRuntime {
         guard !core.status().running else { throw HelperFailure.invalid("Update Core stop was not observed.") }
         for _ in 0..<50 where if_nametoindex("utun199") != 0 { usleep(100_000) }
         guard if_nametoindex("utun199") == 0 else { throw HelperFailure.invalid("Update TUN stop was not observed.") }
-        _ = try dns.restore() // Includes per-service readback; failure retains snapshot.
+        // Includes per-service readback; failure retains snapshot. No app reply
+        // carries this restore, so a lost original is recorded for the next one.
+        _ = try dns.restore(deferringLossNotice: true)
         try verifyProxyRestored()
         // configd's active store converges asynchronously after commit/apply.
         for _ in 0..<30 {
