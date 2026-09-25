@@ -151,6 +151,10 @@ actor TonoAPIClient {
         configuration.allowsExpensiveNetworkAccess = true
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false
+        // #587: no system proxy or PAC. Another app's local proxy set as the
+        // system proxy would carry account calls, and PF blocks its upstream
+        // in Protected Offline. Windows uses no_proxy for the same reason.
+        configuration.connectionProxyDictionary = [:]
         return configuration
     }
 

@@ -37,6 +37,24 @@ extension AppState {
                 }
                 if let selected = self.selectedExitNode(), let reason = ConfigPipeline.singBoxUnavailableReason(selected) {
                     self.errorMessage = reason + ": this sing-box build cannot authenticate the catalog's HY2 certificate pin. Choose Reality."
+                    // #585: in Protected Offline this refusal is a failed
+                    // attempt, so the three-strike pause stops the loop.
+                    // PF stays as it is; only the user's choice lifts it.
+                    if self.isProtectionBlocked {
+                        let signature = "\(ConnectionStage.preparing.rawValue)|\(reason)"
+                        if signature == self.lastProtectedFailureSignature {
+                            self.consecutiveProtectedFailureCount += 1
+                        } else {
+                            self.lastProtectedFailureSignature = signature
+                            self.consecutiveProtectedFailureCount = 1
+                        }
+                        if self.consecutiveProtectedFailureCount >= 3 {
+                            self.protectedReconnectPausedForUserAction = true
+                            self.protectedReconnectPauseLiftsOnNetworkChange = false
+                            self.errorMessage = (self.errorMessage ?? reason) + " "
+                                + String(localized: "The same failure repeated three times, so automatic retries are paused. Click Retry now to try again, or Restore internet to get back online.")
+                        }
+                    }
                     return (false, UUID())
                 }
                 self.isProtectionBlocked = false
@@ -2282,7 +2300,10 @@ extension AppState {
         }
         let selected = currentProxySelectionTarget() ?? activeNode?.name
         guard let selected else { return nil }
-        let names = Set(importedExitNodes.map(\.name))
+        // #585: only blocks the bundled sing-box core can use.
+        let names = Set(importedExitNodes.filter {
+            ConfigPipeline.singBoxUnavailableReason($0) == nil
+        }.map(\.name))
         return ProxyNode.backupChannelName(selected: selected, catalogNames: names)
     }
 
