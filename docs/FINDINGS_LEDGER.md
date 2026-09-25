@@ -267,8 +267,8 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | H8-F6 | 影响客户的写操作缺少审计记录 | in-PR | [#405](https://github.com/raydocs/tono/issues/405)，[#406](https://github.com/raydocs/tono/pull/406) | 低·推导 | token-admin 路由移到 src/ops/token-admin.ts |
 | H13-F5 | Worker 不可达时 exit-agent 没有 roster 回退 | in-PR | [#463](https://github.com/raydocs/tono/issues/463)，[#464](https://github.com/raydocs/tono/pull/464) | 中·推导 | 与 #375/#384/#389 冲突，解决步骤写在 PR |
 | H13-F6 | hub 在租约丢失后仍执行作业（重复 xray_restart） | in-PR | [#465](https://github.com/raydocs/tono/issues/465)，[#466](https://github.com/raydocs/tono/pull/466) | 低·推导 | 应先于或同 #377 合并 |
-| H17-O-F4 | 为尚未注册的客户开通时，控制台填写的到期日与套餐被静默丢弃，账户首次登录后无到期、无配额 | open | 待开 | 中·已确认 | 之后没有任何提醒会发现（到期提醒与批量续期都要求已有日期） |
-| H17-O-F6 | 控制台「停用」调用退款销户接口：操作者填写的原因被丢弃，空备注被写成「退款销户」 | open | 待开 | 低·已确认 | 核实降级：恢复文案并未承诺可重绑原 Claude 号，停用确认已告知拆除范围；Claude 引用退役后不能经现有接口重新分配是否算缺陷待产品决定 |
+| H17-O-F4 | 为尚未注册的客户开通时，控制台填写的到期日与套餐被静默丢弃，账户首次登录后无到期、无配额 | in-PR | [#527](https://github.com/raydocs/tono/issues/527)，[#528](https://github.com/raydocs/tono/pull/528) | 中·已确认 | 此前开通时已丢了到期的客户不追溯补上；migration 0091 为临时编号，合并时需确认未被占用 |
+| H17-O-F6 | 控制台「停用」调用退款销户接口：操作者填写的原因被丢弃，空备注被写成「退款销户」 | in-PR | [#532](https://github.com/raydocs/tono/issues/532)，[#534](https://github.com/raydocs/tono/pull/534) | 低·已确认 | 核实降级：恢复文案并未承诺可重绑原 Claude 号，停用确认已告知拆除范围；Claude 引用退役后不能经现有接口重新分配是否算缺陷待产品决定 |
 
 ## 10. 发布流水线与安装器
 
@@ -363,6 +363,8 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | TC-anthropic-2 | 零 active 节点时退役账户永久 503；测试未断言成功路径 | fixed | [#570](https://github.com/raydocs/tono/pull/570)（6cfa4d9e，2026-09-25 已部署） | 中·已确认(Codex，条件性) | 生产有 1 个 active 节点；`worker.test.ts` 已断言 ACK 前 503、ACK 后 200 且为设备 UUID |
 | TC-anthropic-3 | 0078 改变过滤集合但不 bump 目录 revision，Windows 拒收同 revision 不同 digest | fixed | [#570](https://github.com/raydocs/tono/pull/570)（6cfa4d9e，2026-09-25 已部署） | 中·已确认(Codex) | 运维步骤：部署且节点拉取新 roster 后，无条件用带 `expectedRevision` 的受审计 catalog PUT bump revision（写入列车 changelog 与 PR 描述）|
 | TC-anthropic-4 | migrations README 缺 0077、0088 | fixed | [#570](https://github.com/raydocs/tono/pull/570)（6cfa4d9e，2026-09-25 已部署） | 低 | README 补 0077/0081/0088 |
+| TC2-opus-1 = TC2-grok-1 | 已注册客户开通时家宽绑定先于 Claude 号分配提交，分配只读即可判定的 409（`PRODUCT_ALREADY_ASSIGNED`/`ACCOUNT_REF_IN_USE`）会留下绑定、revision 与 refresh | in-PR | [#629](https://github.com/raydocs/tono/pull/629) | 中·已确认(Opus+Grok) | 两项检查在第一次写入前预跑；预检后被并发分配抢先仍会 409 并留下绑定，此时有 `home.assign` 审计，不回滚 |
+| TC2-grok-2 | 开通的 `HOME_EXIT_INACTIVE` 在查用户前检查，未注册邮箱带停用家宽被整单拒绝（未注册路径本不绑定） | in-PR | [#629](https://github.com/raydocs/tono/pull/629) | 低·已确认 | 同时带 `line` 时以 `line` 为准，不再检查 `homeExitId` 状态 |
 | TM-claude-2 | macOS 当前版本 helper 崩溃循环时修复是空操作，启动只报通用「helper 不可用」，无提示、无管理员修复 | in-PR | [#601](https://github.com/raydocs/tono/issues/601)，[#625](https://github.com/raydocs/tono/pull/625) | 中·已确认 | Opus 发现，Codex 复核；可弹提示的调用在 25 s 窗口内见 launchd `runs` 增 ≥2 且无应答即走管理员重装；依赖 `launchctl print` 字段；未实机 |
 | TM-claude-4 | macOS 原生更新准备与 `--emergency-disarm/reset` 自行恢复 DNS 时丢掉 `originalDNSRestored:false`，用户不知原 DNS 未放回 | in-PR | [#601](https://github.com/raydocs/tono/issues/601)，[#625](https://github.com/raydocs/tono/pull/625) | 低·已确认 | 记录在 root 目录，下一次 `/dns/restore` 报一次；紧急命令终端打印；要等 App 下一次 restore |
 | TM-claude-6 | helper 记录 PF 引用写失败 + 崩溃循环时每次重启多取一个 `pfctl -E` token 且永不释放 | in-PR | [#601](https://github.com/raydocs/tono/issues/601)，[#625](https://github.com/raydocs/tono/pull/625) | 低·已确认 | 改由内核唯一匿名引用（`pfctl -e`）持有后释放新 token；解除后 PF 仍开（无 Tono 规则）至 `pfctl -d`/重启 |

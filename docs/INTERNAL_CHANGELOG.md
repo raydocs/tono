@@ -347,6 +347,106 @@
   自行恢复后不清除，要等下一次成功的 arm/lock（`record_outcome`）才清。这是 Service 看门狗路径，与 #593 的 App
   分类路径不同，本 PR 未改，另需记录。未在实机复现。
 
+## 2026-09-24 · 控制面 + ops 控制台：销户保留停用原因，只有退款才记「退款销户」
+
+- **归属/来源**：ops 客户生命周期（控制面 Worker + ops 控制台）；内部审查 H17-O-F6（核实降级为低），
+  Issue [#532](https://github.com/raydocs/tono/issues/532)；基线 origin/main `8dc79a5b`，
+  分支 `fix/close-reason-audit-20260924`；未合 main。
+- **缺陷修复**：控制台「停用」调用 `POST users/{id}/close` 并带原因，Worker 接收后丢弃（且只有带正数
+  `content-length` 才读请求体），审计固定 `closed <email>`，空备注一律写「退款销户」、产品事件一律
+  `refund close`。改后：有请求体就读；原因（≤200 字）写进 `user.close` 审计行；新增可选 `refund: true`，
+  只有它才写「退款销户」备注、`refund close` 事件和审计里的 `(refund)`，否则事件记 `account closed`、
+  备注不动。控制台停用对话框加「这是退款销户」勾选。回收范围（家宽、Claude 号、allowlist、设备）不变。
+- **新增/优化**：控制台停用对话框的退款勾选（为上述修复服务）。
+- **工程与测试**：`test/ops-api.test.ts` 新增一个 `it`（非退款停用带原因 → 审计含原因、备注仍为空）；
+  旧代码上实跑失败（`expected 'closed a@example.com' to contain '客户要求暂停'`）。
+- **验证**：本机 MacBook control-plane `npx vitest run`（43 文件 / 892 用例通过）、`npm run typecheck`；
+  ops-console `npm run typecheck`、`npx vitest run`（26 文件 / 310 用例通过）、改动文件 eslint。
+  停用流程 Playwright 未在本机跑，以 PR CI `ops-console-e2e` 为准。
+- **候选/发布**：仅源码，无新候选；未部署。
+- **剩余限制**：旧版 admin 控制台「注销账号」发 `{}`，改后记为非退款；Claude 号退役后能否重绑仍待产品决定；
+  与同批 #525（销户单事务）改同一处理器，后合者按对方结构 rebase（本 PR 的原因/退款条件套进 batch 语句）。
+- **续记（2026-09-25，双厂商评审 jev-route `44cc9516`：O-F1 = C-F1、O-F2；合入 origin/main）**：
+  合入已进 main 的 #525：退款条件改为套进单个 batch 的停用语句（备注 `CASE WHEN ?`）与产品事件
+  （`refund close` / `account closed` 作为绑定参数），两边测试都保留。① 读体条件只排除了 null 与
+  `content-length: 0`，无 Content-Length 的零字节流（chunked 空体等）会进 `body()` 被判 400/415，
+  而旧代码会照常停用。`request.ts` 的 `body()` 加可选 `allowEmpty`（默认关，其他调用方不变）：
+  零字节体不论如何发送都读成 `{}`，非空体仍要求 JSON 类型；销户改为始终经它读体。② 控制台停用对话框
+  取消时复位退款勾选（对话框关闭时不卸载，状态会留到下次打开）。测试：`test/ops-api.test.ts` 新增一个
+  `it`（无 Content-Length 的空流 POST close → 200 且已停用），修复前实跑 `expected 400 to be 200`；
+  `e2e/customers-actions.spec.ts` 新增一个 test（勾退款 → 取消 → 再打开未勾选），修复前实跑失败
+  （`Received: checked`）。本机：control-plane 全套 895 用例、`typecheck`、`check:budgets`、`check:contract`
+  通过；ops-console `typecheck`、改动文件 eslint、`customers-actions.spec.ts` 中停用两条 light/dark 共 4 例通过。
+  评审建议 O-F3（原因 200 字上限前端未限）为未核实建议，本轮未改。
+
+## 2026-09-24 · 控制面 + ops 控制台：未注册客户开通时填的到期与套餐不再丢失
+
+- **归属/来源**：ops 客户生命周期（控制面 Worker + ops 控制台）；内部审查 H17-O-F4，
+  Issue [#527](https://github.com/raydocs/tono/issues/527)；基线 origin/main `8dc79a5b`，
+  分支 `fix/onboard-expiry-carry-20260924`；未合 main。
+- **缺陷修复**：开通抽屉只在客户已注册时才补发到期/套餐（第二次 `PATCH`），未注册邮箱直接跳过；
+  Worker 的 `users/onboard` 也拒收这两个字段，首次登录只带 wechat/contact/notes，账户建成后无到期。
+  改后：`users/onboard` 接受 `expiresAt`/`plan`（与 `PATCH users/{id}` 同样校验）；未注册时记在
+  `signup_allowlist`（新 migration `0091_signup_allowlist_entitlement.sql`），首次登录一起写进 `users`；
+  已注册时直接写 `users`，到期设为过去时间与 PATCH 一样立即 `enforceUser`；审计 `user.onboard`
+  注明设了哪些字段。控制台开通改为一次调用带上到期/套餐（去掉只对已注册客户生效的第二次调用），
+  未注册提示补一句「套餐和到期已经记下，客户第一次登录时生效」；fixture hub 同步接受到期。
+- **新增/优化**：无。
+- **工程与测试**：`test/ops-onboard-profile.test.ts` 新增一个 `it`（未注册邮箱带到期+套餐开通 →
+  邮箱验证码首次登录 → `users.expires_at/plan` 等于开通值）；旧代码上实跑失败（`expected 400 to be 202`）。
+- **验证**：本机 MacBook control-plane `npx vitest run`（43 文件 / 892 用例通过）、`npm run typecheck`、
+  `node tooling/scripts/check-migration-numbers.mjs`（唯一性通过，仅缺号告警）；ops-console
+  `npm run typecheck`、相关文件 eslint、`vitest run src/lib/customer-batch.test.ts test/ops-fixtures.test.ts
+  test/lint-rules.test.ts`（64 通过）。开通流程 Playwright 未在本机跑，以 PR CI `ops-console-e2e` 为准。
+- **候选/发布**：仅源码，无新候选；未部署；migration 未在远端 D1 应用。
+- **剩余限制**：migration 编号 0091 为临时取号（0077–0082、0088、0090 已被在审 PR 占用），合并时若已被占用
+  需顺延并同步 README；已在 allowlist 上但此前开通时丢了到期的客户不会被追溯补上。
+- **续记（2026-09-24，双厂商评审 528-O-F2 = 528-C-F1）**：开通查到「未注册」之后、写入待开通资料之前若客户
+  恰好首次登录，账户会按旧 allowlist 行建成、到期丢失。改为 allowlist 授权、待开通资料和「按邮箱更新已存在的
+  用户」同一个 `DB.batch` 提交，后者命中时对该用户 `enforceUser`；同时消除了「授权已提交、资料写入失败」的
+  中间态。原 `it` 追加竞态段（测试触发器在 allowlist 插入时建号）：上一版 `a0703722` 源码实跑失败
+  （`expires_at: null`），修复后通过；control-plane 全套 892 用例、typecheck 通过。CI `ops-contract` 的
+  ops 行数预算（每模块 ≤500 行）因此超限，已把到期/套餐校验与待开通资料语句移到同目录
+  `onboard-profile.ts`（`users.ts` 486 行），`check:budgets`/`check:contract` 本机通过。
+- **续记（2026-09-25，双厂商评审第二轮 jev-route `fa5ff8f9`：O-F1 = C-F1、O-F2、O-F3、O-F4）**：
+  ① 已注册客户开通时，资料/到期/套餐的 `UPDATE users` 原先排在家宽分配与 Claude 号分配之前单独提交，
+  后者抛 409（`PRODUCT_ALREADY_ASSIGNED` 等）时到期已改、却没有 `user.onboard` 审计也没有 `enforceUser`。
+  改为在分配全部成功后才写，失败的开通不改这几列，审计和 `enforceUser` 总跟在写入之后。
+  注意：带 `accountRef` 且显式传 `plan: null` 时，现在以显式值为准（原先会被分配时的 `markFirstEntitled` 补成 Claude）。
+  ② 竞态路径（查询后客户恰好首次登录）审计 `target_id` 与响应 `userId` 改为实际落到的账户 id，
+  `incomplete` 用 `registered_during_onboard` 代替 `user_not_registered`（家宽/Claude 号这次未处理，需再开通一次）。
+  ③ `FINDINGS_LEDGER.md` H17-O-F4 标为 in-PR 并关联 #527/#528。④ 控制台未注册提示拆成两句，
+  「套餐和到期已经记下」只在这次确实提交了套餐或到期时显示。测试：`ops-onboard-profile.test.ts` 新增一个 `it`
+  （已分配 Claude 号的客户再次开通带新 `accountRef`+到期+备注 → 409 且 `expires_at`/`notes` 不变），原竞态段追加
+  响应 `userId` 与审计 `target_id` 断言，两者在上一版源码实跑失败、修复后通过；ops-console 新增
+  `src/pages/customer/OnboardDrawer.test.tsx` 一个 `it`（未提交到期/套餐时不显示该句），无条件显示时实跑失败。
+  本机：control-plane 相关 4 个测试文件 356 用例、`typecheck`、`check:budgets`（`users.ts` 492 行）、`check:contract`
+  通过；ops-console `typecheck`、相关文件 eslint、该测试与 `test/lint-rules.test.ts`、`test/ops-fixtures.test.ts` 通过。
+- **续记（2026-09-25，列车 #629 重新合并 origin/main `6cfa4d9e`，含 #570）**：`users.ts` 开通冲突按两边意图合并：
+  已注册客户先签发出口身份（0077 已退役共享凭据时跳过）、再绑定家宽（main 的 `upsertHomeBinding` 零行 UPDATE
+  拒绝与 `home.assign` 审计不变）、再分配 Claude 号；之后 allowlist 授权与资料/到期/套餐的 `UPDATE users` 放进同一个
+  `DB.batch`，所以绑定或分配失败时 allowlist、资料、到期、套餐都不提交（原先 allowlist 在分配前提交），审计与
+  `enforceUser` 仍跟在这次提交之后；未注册与竞态路径不变。按 id 更新的语句移到 `onboard-profile.ts`
+  （`accountProfileWrite`，与待开通资料共用 SET），`users.ts` 496 行。0091 在 main 上未被占用（main 有 0090、0092）。
+  验证：`services/control-plane` `npx vitest run` 43 文件 / 929 用例通过；`typecheck`、`check:budgets`、`check:contract`、
+  `check-migration-numbers` 通过（仅缺号告警）。「分配 409 时 allowlist 不提交」没有专门用例。未部署。
+- **续记（2026-09-25，列车 #629 在 `cd3e8776` 上的双厂商评审 Opus+Grok 交叉核实；jev-route `cf9d375d`）**：
+  ① `TC2-opus-1 = TC2-grok-1`：已注册客户开通时，家宽绑定（`homeExitId` 的 `upsertHomeBinding`+revision+`refresh_catalog`；
+  粘贴线路的 `home-exits/assign`，可能新建家宽行、轮换密码、退役旧线路）先于 Claude 号分配提交，而分配的两个 409
+  （`PRODUCT_ALREADY_ASSIGNED`、`ACCOUNT_REF_IN_USE`）只靠只读查询即可判定，失败的开通会留下绑定。改为把这两项检查
+  抽成 `assertProductAssignable`（`createAssignedProductAccount` 仍调用同一函数），开通在第一次写入（出口身份签发）之前
+  先跑；`productAccountId` 预检顺带取出 `account_ref`（`onboard-profile.ts` 的 `onboardAllocationRef`，`accountRef`
+  优先，与分配一致）。main 的先绑定后分配顺序、`upsertHomeBinding` 零行拒绝、分配的零行 409 都不变；预检之后仍被并发
+  抢先而 409 时，已提交的绑定有 `home.assign`（或 `home-exits/assign` 自带）审计，不回滚。
+  ② `TC2-grok-2`：`HOME_EXIT_INACTIVE` 原先在查用户之前检查，未注册邮箱带停用家宽会被整单拒绝；改为只在已注册且按
+  `homeExitId` 绑定时检查，未注册路径仍只写 allowlist 与待开通资料。
+  测试：`ops-onboard-profile.test.ts` 扩两个原有 `it`（已分配客户再开通带 `homeExitId` → 409 `PRODUCT_ALREADY_ASSIGNED`，
+  且绑定为空、revision 仍为 5、资料不变；未注册邮箱带 `disabled` 家宽 → 202），在 `cd3e8776` 源码实跑分别失败
+  （`expected { '1': 1 } to be null`、`expected 409 to be 202`），修复后通过。`users.ts` 因此超 500 行预算，
+  ref 解析移到 `onboard-profile.ts`（`users.ts` 497 行）。之后合并 origin/main `33745f7d`（#630，无冲突）。
+  验证（合并后）：`services/control-plane` `npx vitest run` 43 文件 / 929 用例通过；`typecheck`、`check:budgets`、
+  `check:contract` 通过。未部署。
+
 ## 2026-09-24 · 控制面列车 #570 审查续修：设备出口身份只等本次下发的节点
 
 - **归属/来源**：G1–G3 控制面（#323 退役共享凭据的续修）；`services/control-plane`。来源：列车 PR #570 审查发现

@@ -31,6 +31,7 @@ import {
   assignedProductForUser,
   replaceCountForUser,
   createAssignedProductAccount,
+  assertProductAssignable,
 } from '../../product-account';
 import {
   rejectUnexpectedKeys,
@@ -41,6 +42,7 @@ import {
   sharedAdministrativeResource,
   type SharedAdminDeps,
 } from '../shared-admin';
+import { accountProfileWrite, onboardAllocationRef, onboardEntitlement, pendingProfileWrites } from './onboard-profile';
 import {
   liveQualityNodeNamed,
   nodeHealthFromQuality,
@@ -176,23 +178,18 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
   const b = await body(req, 16 * 1024);
   rejectUnexpectedKeys(b, [
     'email', 'line', 'homeExitId', 'accountRef', 'productAccountId', 'openedAt', 'notes', 'contact',
-    'wechatId',
+    'wechatId', 'expiresAt', 'plan',
   ]);
   const address = email(b.email);
   const wechatId = b.wechatId !== undefined ? optionalWechatId(b.wechatId) : undefined;
   const notes = b.notes !== undefined ? optionalNotes(b.notes) : undefined;
   const contact = b.contact !== undefined ? optionalNotes(b.contact, 'contact', 200) : undefined;
   const openedAt = b.openedAt !== undefined ? optionalUnix(b.openedAt, 'openedAt') : undefined;
-  if (b.accountRef !== undefined && b.accountRef !== null && b.accountRef !== '') {
-    accountRefField(b.accountRef);
-  }
-  if (b.productAccountId !== undefined && b.productAccountId !== null && b.productAccountId !== '') {
-    const productAccountId = str(b.productAccountId, 'productAccountId', 1, 100);
-    const pooled = await e.DB.prepare(
-      'SELECT id FROM product_accounts WHERE id = ?',
-    ).bind(productAccountId).first<Row>();
-    if (!pooled) throw new ApiError(404, 'NOT_FOUND', 'Product account not found');
-  }
+  // For a customer who has not registered yet these wait on the allowlist row
+  // and are copied at first sign-in, so the account keeps the operator's expiry.
+  const { expiresAt, plan } = onboardEntitlement(b);
+  const allocationRef = await onboardAllocationRef(e, b);
+  let homeExitActive = true;
   if (b.homeExitId !== undefined && b.homeExitId !== null && b.homeExitId !== '') {
     const homeExitId = str(b.homeExitId, 'homeExitId', 1, 100);
     const home = await e.DB.prepare(
@@ -201,11 +198,7 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
     if (!home) {
       throw new ApiError(400, 'HOME_ASSIGN_FAILED', 'Could not assign the pasted home line');
     }
-    // Same rule as PUT users/{id}/home-binding: binding a non-active line
-    // would fail the user's whole catalog closed.
-    if (String(home.status) !== 'active') {
-      throw new ApiError(409, 'HOME_EXIT_INACTIVE', 'Home exit must be active before binding');
-    }
+    homeExitActive = String(home.status) === 'active';
   }
   const parsedLine = b.line !== undefined && b.line !== null && b.line !== ''
     ? parseHomeLine(b.line)
@@ -228,12 +221,37 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
     }
   }
   if (user && !parsedLine && b.homeExitId) {
+    // Same rule as PUT users/{id}/home-binding: binding a non-active line
+    // would fail the user's whole catalog closed. Only a registered customer
+    // is bound, so an unregistered email still gets the grant and profile.
+    if (!homeExitActive) {
+      throw new ApiError(409, 'HOME_EXIT_INACTIVE', 'Home exit must be active before binding');
+    }
     // upsertHomeBinding below refuses a line awaiting rotation; refuse it
     // here instead, before the allowlist and profile writes.
     await assertHomeExitBindable(e, String(user.id), String(b.homeExitId));
   }
+  if (user && allocationRef !== null) {
+    // The allocation's 409s, before the exit identity and the home binding
+    // below commit, so a request that will be refused changes nothing.
+    await assertProductAssignable(e, String(user.id), allocationRef);
+  }
   const createdAt = now();
+  const storeProfile = b.notes !== undefined || b.contact !== undefined || b.wechatId !== undefined
+    || expiresAt !== undefined || b.plan !== undefined;
+  const pendingProfile = !user && storeProfile;
+  // (sent, value) pairs for wechat_id, contact, notes, expires_at and plan.
+  const profile = [
+    b.wechatId !== undefined, wechatId ?? null,
+    b.contact !== undefined, contact ?? null,
+    b.notes !== undefined, notes ?? null,
+    expiresAt !== undefined, expiresAt ?? null,
+    b.plan !== undefined, plan,
+  ];
+  let binding = null;
+  let account = null;
   let exitIdentityIssued = false;
+  const incomplete: string[] = [];
   if (user) {
     // Before the first write, so a refusal leaves nothing behind. An account
     // whose shared credential was retired by a device revocation (0077) is
@@ -270,35 +288,10 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
       );
       await bumpCatalogRevision(e);
       await enqueueRefreshCatalogForUser(e, String(user.id));
-      // Audited here, not only by the closing user.onboard row: a later
-      // account-assignment 409 would otherwise leave this binding unrecorded.
+      // Audited here, not only by the closing user.onboard row: an assignment
+      // that races past the check above and 409s would otherwise leave this
+      // binding unrecorded.
       await writeOpsAudit(e, actor.email, 'home.assign', 'user', String(user.id), `onboard bound home for ${address}`);
-    }
-  }
-  await e.DB.prepare(
-    'INSERT OR IGNORE INTO signup_allowlist(email, created_at) VALUES(?, ?)',
-  ).bind(address, createdAt).run();
-  const incomplete: string[] = [];
-  if (!user) incomplete.push('user_not_registered');
-  const storeProfile = b.notes !== undefined || b.contact !== undefined || b.wechatId !== undefined;
-  const pendingProfile = !user && storeProfile;
-  let binding = null;
-  let account = null;
-  if (user) {
-    if (b.notes !== undefined || b.contact !== undefined || b.wechatId !== undefined) {
-      await e.DB.prepare(
-        `UPDATE users SET
-           notes = CASE WHEN ? THEN ? ELSE notes END,
-           contact = CASE WHEN ? THEN ? ELSE contact END,
-           wechat_id = CASE WHEN ? THEN ? ELSE wechat_id END,
-           updated_at = ?
-         WHERE id = ?`,
-      ).bind(
-        b.notes !== undefined, notes ?? null,
-        b.contact !== undefined, contact ?? null,
-        b.wechatId !== undefined, wechatId ?? null,
-        now(), user.id,
-      ).run();
     }
     binding = await loadHomeBinding(e, String(user.id));
     if (b.accountRef) {
@@ -321,24 +314,46 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
       account = await assignedProductForUser(e, String(user.id));
     }
     if (!account) incomplete.push('claude');
-  } else if (pendingProfile) {
-    await e.DB.prepare(
-      `UPDATE signup_allowlist SET
-         wechat_id = CASE WHEN ? THEN ? ELSE wechat_id END,
-         contact = CASE WHEN ? THEN ? ELSE contact END,
-         notes = CASE WHEN ? THEN ? ELSE notes END
-       WHERE email = ?`,
-    ).bind(
-      b.wechatId !== undefined, wechatId ?? null,
-      b.contact !== undefined, contact ?? null,
-      b.notes !== undefined, notes ?? null,
-      address,
-    ).run();
   }
-  await writeOpsAudit(e, actor.email, 'user.onboard', 'user', user ? String(user.id) : null, address);
+  // Written only after the home line and Claude account went through, so a
+  // failed onboard leaves the allowlist, profile, expiry and plan as they
+  // were, and the audit and enforceUser below always follow this batch. With
+  // no account at lookup, the sign-up grant, the pending profile and the same
+  // values on any account created since commit together: a racing first
+  // sign-in either created the account (the users UPDATE covers it) or copies
+  // the finished allowlist row, so the expiry cannot be lost.
+  const allowlistWrites: D1PreparedStatement[] = [
+    e.DB.prepare(
+      'INSERT OR IGNORE INTO signup_allowlist(email, created_at) VALUES(?, ?)',
+    ).bind(address, createdAt),
+  ];
+  if (pendingProfile) {
+    allowlistWrites.push(...pendingProfileWrites(e, address, profile, createdAt));
+  } else if (user && storeProfile) {
+    allowlistWrites.push(accountProfileWrite(e, String(user.id), profile, now()));
+  }
+  const written = await e.DB.batch(allowlistWrites);
+  // A first sign-in between the lookup and the batch: the profile landed on
+  // that account, so the audit, enforceUser and the answer name it.
+  const raced = pendingProfile && Number(written[2]?.meta.changes ?? 0) > 0
+    ? await e.DB.prepare('SELECT id FROM users WHERE email = ?').bind(address).first<Row>()
+    : null;
+  const userId = user ? String(user.id) : raced ? String(raced.id) : null;
+  if (!userId) incomplete.push('user_not_registered');
+  else if (!user) incomplete.push('registered_during_onboard');
+  const entitlement = [
+    expiresAt !== undefined ? 'expiresAt' : null,
+    b.plan !== undefined ? 'plan' : null,
+  ].filter((name): name is string => name !== null);
+  await writeOpsAudit(
+    e, actor.email, 'user.onboard', 'user', userId,
+    entitlement.length ? `${address} (set ${entitlement.join(', ')})` : address,
+  );
+  // A past expiry set on a registered customer takes effect now, as PATCH does.
+  if (expiresAt !== undefined && userId) await deps.sharedAdminDeps.enforceUser(e, userId);
   return Response.json({
     email: address,
-    userId: user ? String(user.id) : null,
+    userId,
     allowlisted: true,
     exitIdentityIssued,
     binding: binding ? publicHomeBinding(binding) : null,

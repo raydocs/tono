@@ -62,6 +62,7 @@ export const customerActionCopy = {
   onboardConfirmBody: (email: string) => `${email} 会进允许登录的名单，客户端登录之后就能连。填了的家宽和 Claude 号一起记在这位客户名下。`,
   onboardDone: (email: string) => `${email} 已经可以用了`,
   onboardExtrasIgnored: '这次填的家宽和 Claude 号没有保存，等客户登录后再开通一次。',
+  onboardEntitlementKept: '套餐和到期已经记下，客户第一次登录时生效。',
   onboardPlanNone: '不填',
 
   /* -------------------------------------------------------- 批量动作 */
@@ -109,6 +110,8 @@ export const customerActionCopy = {
   suspendTitle: '停用账号',
   suspendBody: (email: string) => `${email} 马上不能登录，名下设备会被撤销，家宽退回库存，在用的 Claude 号退出。确认后才会执行。`,
   suspendReason: '停用原因',
+  suspendRefund: '这是退款销户',
+  suspendRefundHint: '勾上后空备注记成「退款销户」，审计里也注明退款。只是暂停就别勾。',
   suspendConfirm: '停用',
   restoreTitle: '恢复账号',
   restoreBody: (email: string) => `${email} 可以重新登录。设备要自己再登一次，家宽和 Claude 号不会自动绑回来。`,

@@ -297,14 +297,9 @@ function assignmentConflict(error: unknown): ApiError {
   return new ApiError(409, 'ACCOUNT_REF_IN_USE', 'This Claude account is already registered');
 }
 
-export async function createAssignedProductAccount(
-  e: Env,
-  userId: string,
-  accountRef: string,
-  openedAt: number,
-  notes: string | null,
-  actorEmail: string | undefined,
-) {
+// The read-only refusals of createAssignedProductAccount. Onboarding runs them
+// before its first write, so a request that will 409 changes nothing.
+export async function assertProductAssignable(e: Env, userId: string, accountRef: string) {
   const current = await assignedProductForUser(e, userId);
   if (current) {
     throw new ApiError(409, 'PRODUCT_ALREADY_ASSIGNED', 'User already has an assigned Claude account; replace it instead');
@@ -315,6 +310,18 @@ export async function createAssignedProductAccount(
   if (clash && String(clash.status) !== 'pooled') {
     throw new ApiError(409, 'ACCOUNT_REF_IN_USE', 'This Claude account is already registered');
   }
+  return clash;
+}
+
+export async function createAssignedProductAccount(
+  e: Env,
+  userId: string,
+  accountRef: string,
+  openedAt: number,
+  notes: string | null,
+  actorEmail: string | undefined,
+) {
+  const clash = await assertProductAssignable(e, userId, accountRef);
   const assignment = productAssignment(
     e, userId, accountRef, clash ? String(clash.id) : null, openedAt, notes, actorEmail, now(), false,
   );

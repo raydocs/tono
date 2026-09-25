@@ -21,14 +21,18 @@ export const error = (e: unknown) => {
   }, { status: x.status });
 };
 
-export async function body(req: Request, maxBytes = 1024 * 1024) {
+/**
+ * `allowEmpty` is for an endpoint whose fields are all optional: a body with
+ * no bytes, however it was sent (no stream, `content-length: 0`, or a
+ * zero-length stream with no length at all), reads as `{}` instead of failing.
+ */
+export async function body(req: Request, maxBytes = 1024 * 1024, allowEmpty = false) {
   // A cross-site form POST (enctype=text/plain) is a no-preflight simple
   // request; requiring the JSON media type means every write that reaches a
   // parse is either same-origin or has already survived a CORS preflight.
   const mediaType = (req.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
-  if (mediaType !== 'application/json') {
-    throw new ApiError(415, 'UNSUPPORTED_MEDIA_TYPE', 'Expected content-type application/json');
-  }
+  const unsupported = new ApiError(415, 'UNSUPPORTED_MEDIA_TYPE', 'Expected content-type application/json');
+  if (mediaType !== 'application/json' && !allowEmpty) throw unsupported;
   const declared = Number(req.headers.get('content-length') ?? '0');
   const declaredTooLarge = Number.isFinite(declared) && declared > maxBytes;
   try {
@@ -36,7 +40,10 @@ export async function body(req: Request, maxBytes = 1024 * 1024) {
     if (!reader && declaredTooLarge) {
       throw new ApiError(413, 'PAYLOAD_TOO_LARGE', 'Request body is too large');
     }
-    if (!reader) throw new ApiError(400, 'INVALID_JSON', 'Expected a JSON body');
+    if (!reader) {
+      if (allowEmpty) return {} as Row;
+      throw new ApiError(400, 'INVALID_JSON', 'Expected a JSON body');
+    }
     const chunks: Uint8Array[] = [];
     let total = 0;
     let tooLarge = declaredTooLarge;
@@ -62,6 +69,8 @@ export async function body(req: Request, maxBytes = 1024 * 1024) {
     if (tooLarge) {
       throw new ApiError(413, 'PAYLOAD_TOO_LARGE', 'Request body is too large');
     }
+    if (allowEmpty && total === 0) return {} as Row;
+    if (mediaType !== 'application/json') throw unsupported;
     const raw = new Uint8Array(total);
     let offset = 0;
     for (const chunk of chunks) {

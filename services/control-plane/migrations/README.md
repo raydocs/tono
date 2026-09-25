@@ -85,3 +85,7 @@ Ops tables after the sequence was unique. Applied in numeric order:
 ## 0090
 
 - `0090_sessions_user_live_index.sql` — `sessions(user_id, revoked_at)` index for the cron enforcement scan, which only enforces ineligible users that still hold a live device or session
+
+## 0091
+
+- `0091_signup_allowlist_entitlement.sql` — `signup_allowlist.expires_at` / `plan` set at onboard before register, copied onto `users` at first sign-in

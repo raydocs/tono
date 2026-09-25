@@ -19,6 +19,7 @@ import {
 import {
   writeOpsAudit,
   assignedProductForUser,
+  optionalNotes,
 } from '../../product-account';
 import { writeChangeReceipt } from '../change-receipts';
 import { rejectUnexpectedKeys, body, email } from '../../request';
@@ -36,10 +37,19 @@ export async function catalogResource(
   let mt: RegExpMatchArray | null;
   mt = resource.match(/^users\/([^/]+)\/close$/);
   if (mt && m === 'POST') {
-    if (req.headers.get('content-length') && Number(req.headers.get('content-length')) > 0) {
-      const b = await body(req, 4 * 1024);
-      rejectUnexpectedKeys(b, ['reason']);
+    // The console's only "suspend" is this endpoint. The operator's reason
+    // goes on the audit line, and the refund label is written only when the
+    // caller says this close is a refund. The body is always read: requiring
+    // a positive content-length skipped one sent without it, and the reason
+    // was dropped. An empty body, however it was sent, is a close with no
+    // reason, as before.
+    const b = await body(req, 4 * 1024, true);
+    rejectUnexpectedKeys(b, ['reason', 'refund']);
+    const reason = optionalNotes(b.reason, 'reason', 200);
+    if (b.refund !== undefined && typeof b.refund !== 'boolean') {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'refund must be a boolean');
     }
+    const refund = b.refund === true;
     const user = await e.DB.prepare('SELECT * FROM users WHERE id = ?').bind(mt[1]).first<Row>();
     if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
     const t = now();
@@ -54,10 +64,10 @@ export async function catalogResource(
       e.DB.prepare(
         `UPDATE users
          SET status = 'disabled',
-             notes = CASE WHEN notes IS NULL OR notes = '' THEN '退款销户' ELSE notes END,
+             notes = CASE WHEN ? AND (notes IS NULL OR notes = '') THEN '退款销户' ELSE notes END,
              updated_at = ?
          WHERE id = ?`,
-      ).bind(t, mt[1]),
+      ).bind(refund ? 1 : 0, t, mt[1]),
       e.DB.prepare('DELETE FROM user_home_bindings WHERE user_id = ?').bind(mt[1]),
       e.DB.prepare(
         `UPDATE managed_exit_catalog SET revision = revision + 1, updated_at = ?
@@ -73,14 +83,17 @@ export async function catalogResource(
         ).bind(t, t, assigned.id),
         e.DB.prepare(
           `INSERT INTO product_account_events(id, account_id, user_id, type, at, detail)
-           SELECT ?, ?, ?, 'note', ?, 'refund close' WHERE changes() > 0`,
-        ).bind(id(), String(assigned.id), mt[1], t),
+           SELECT ?, ?, ?, 'note', ?, ? WHERE changes() > 0`,
+        ).bind(id(), String(assigned.id), mt[1], t, refund ? 'refund close' : 'account closed'),
       );
     }
     statements.push(e.DB.prepare('DELETE FROM signup_allowlist WHERE email = ?').bind(user.email));
     await e.DB.batch(statements);
     await deps.enforceUser(e, mt[1]);
-    await writeOpsAudit(e, actorEmail, 'user.close', 'user', mt[1], `closed ${user.email}`);
+    await writeOpsAudit(
+      e, actorEmail, 'user.close', 'user', mt[1],
+      `closed ${user.email}${refund ? ' (refund)' : ''}${reason ? `: ${reason}` : ''}`,
+    );
     return Response.json({ ok: true, email: String(user.email), status: 'disabled' });
   }
   if (resource === 'signup-allowlist' && m === 'POST') {
