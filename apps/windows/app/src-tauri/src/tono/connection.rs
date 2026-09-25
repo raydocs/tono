@@ -1375,6 +1375,34 @@ mod tests {
         );
     }
 
+    /// #593: a failed WFP lock proof never ran a TUN probe, so it must not become
+    /// `TONO_TUN_DATA_PLANE_BROKEN`, and the Service's own `last_error` must survive.
+    #[test]
+    fn unverified_wfp_lock_carries_the_service_error_instead_of_a_tun_verdict() {
+        use super::classify_exhausted_data_plane;
+        use super::probes::{kill_switch_not_locked, lock_unverified_error};
+        use tono_service_protocol::{KillSwitchStatus, KillSwitchStatusMode};
+
+        let status = KillSwitchStatus {
+            wanted: true,
+            verified: true,
+            live: false,
+            mode: KillSwitchStatusMode::Locked,
+            tunnel_permit_rendered: true,
+            endpoints: Vec::new(),
+            direct_endpoint_digest: String::new(),
+            last_error: Some(
+                "Windows kill-switch reconciliation failed: FwpmTransactionCommit0 returned 0x80320017".into(),
+            ),
+        };
+        let data_plane = lock_unverified_error(&kill_switch_not_locked(&status));
+        let last = classify_exhausted_data_plane(Ok(()), data_plane, Ok(()));
+        assert!(last.starts_with("TONO_WFP_LOCK_UNVERIFIED:"), "{last}");
+        assert!(!last.contains("TONO_TUN_DATA_PLANE_BROKEN"), "{last}");
+        assert!(last.contains("live=false"), "{last}");
+        assert!(last.contains("FwpmTransactionCommit0 returned 0x80320017"), "{last}");
+    }
+
     #[test]
     fn controller_504_is_advisory_but_real_data_plane_remains_mandatory() {
         use super::{PostLockVerification, classify_post_lock_verification};

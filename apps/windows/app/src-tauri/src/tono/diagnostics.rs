@@ -255,6 +255,7 @@ pub struct DiagnosticsSources<'a> {
     pub dns: Option<&'a DnsProtectionStatus>,
     pub failed_stage: Option<&'a str>,
     pub connect_error: Option<&'a str>,
+    pub last_failure: Option<&'a crate::tono::local_evidence::FailedAttempt>,
     pub retry_attempt: u32,
     pub steps: &'a [StepRecord],
     /// Raw adapter names in; only class tokens come out.
@@ -492,6 +493,7 @@ mod tests {
                 dns: Some(&self.dns),
                 failed_stage: Some("securingDNS"),
                 connect_error: Some(&self.connect_error),
+                last_failure: None,
                 retry_attempt: 2,
                 steps: &self.steps,
                 adapter_names: &self.adapters,
@@ -519,6 +521,40 @@ mod tests {
             step_keys.sort_unstable();
             assert_eq!(step_keys, ["elapsedMs", "key", "state"]);
         }
+    }
+
+    /// #594: a retry clears the live `failed_stage`/`connect_error`; the upload must still
+    /// carry the last classified failure, as its stable code only (never the local detail).
+    #[test]
+    fn a_retry_that_cleared_the_live_error_still_uploads_the_last_classified_failure() {
+        let fixture = Fixture::new(&["Ethernet"]);
+        let attempt = crate::tono::local_evidence::AttemptHistory::default().begin(
+            1_712_345_600_000,
+            "US West 1".into(),
+            "hy2",
+            12,
+        );
+        let failed = crate::tono::local_evidence::FailedAttempt {
+            attempt,
+            connection_generation: 7,
+            failed_at_ms: 1_712_345_630_901,
+            failed_stage: Some("verifyingTraffic"),
+            error_code: Some("TONO_WFP_LOCK_UNVERIFIED".into()),
+            error_detail: format!("TONO_WFP_LOCK_UNVERIFIED: kill switch not locked; node {NODE_IP}"),
+            steps: Vec::new(),
+            probe_outcomes: Vec::new(),
+        };
+        let report = build_report(&DiagnosticsSources {
+            failed_stage: None,
+            connect_error: None,
+            last_failure: Some(&failed),
+            ..fixture.sources()
+        });
+        assert_eq!(report.failed_stage.as_deref(), Some("verifyingTraffic"));
+        let error = report.error.expect("the last failed attempt must reach the upload");
+        assert!(error.contains("TONO_WFP_LOCK_UNVERIFIED"), "{error}");
+        assert!(error.contains("48s"), "{error}");
+        assert!(!error.contains(NODE_IP) && !error.contains("kill switch not locked"), "{error}");
     }
 
     #[test]

@@ -571,10 +571,7 @@ pub(super) async fn verify_locked() -> Result<KillSwitchStatus, String> {
                 if status.wanted && status.live && status.mode == KillSwitchStatusMode::Locked {
                     return Ok(status);
                 }
-                last = format!(
-                    "kill switch not locked (wanted={}, live={}, mode={:?})",
-                    status.wanted, status.live, status.mode
-                );
+                last = kill_switch_not_locked(&status);
             }
             Err(err) => last = err.to_string(),
         }
@@ -582,10 +579,21 @@ pub(super) async fn verify_locked() -> Result<KillSwitchStatus, String> {
             tokio::time::sleep(VERIFY_LOCK_RETRY_INTERVAL).await;
         }
     }
-    Err(format!(
+    Err(lock_unverified_error(&last))
+}
+
+pub(super) fn kill_switch_not_locked(status: &KillSwitchStatus) -> String {
+    format!(
+        "kill switch not locked (wanted={}, live={}, mode={:?})",
+        status.wanted, status.live, status.mode
+    )
+}
+
+pub(super) fn lock_unverified_error(last: &str) -> String {
+    format!(
         "{last} (after {VERIFY_LOCK_ATTEMPTS} samples over {:?})",
         verify_lock_retry_window()
-    ))
+    )
 }
 
 /// The authoritative connection verdict: an ordinary fresh App flow must traverse the protected

@@ -191,6 +191,7 @@ pub(super) async fn collect_diagnostics_report(
         dns: dns.as_ref(),
         failed_stage: inner.failed_stage,
         connect_error: inner.connect_error.as_deref(),
+        last_failure: inner.attempt_history.last_failure.as_ref(),
         retry_attempt: inner.retry_attempt,
         steps: &steps,
         adapter_names: &adapters,
