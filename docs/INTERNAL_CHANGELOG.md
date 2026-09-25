@@ -32,6 +32,21 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-25 · 运维：控制面部署 f5c31d58；exit-agent #624 上 14 个节点；Tokyo · Sakura 换 IP 后接入
+- 归属：ops 任务（控制面部署、出口计量与吊销）；不改客户端。
+- 来源：main `f5c31d58`（含 #624）；无代码改动，本条只记录运维动作，详细见
+  [舰队 exit-agent 接入记录 · 续记 2026-09-25](reports/FLEET_EXIT_AGENT_ROLLOUT_2026-09-24.md) 与
+  [runbook §0.1 第十五次](ops/rollout-ops2.md)。
+- 缺陷修复：TF-opus-4/8（#624）在节点上生效；`Tokyo · Sakura` 因换 IP 对客户不可达 → 已迁到 Xray 26.3.27 新布局并登记、
+  agent 运行（目录 IP 仍待修，见剩余限制）。
+- 新增/优化：无。
+- 工程与测试：无。
+- 验证：部署脚本内 control-plane 测试 892 通过；`/api/v1/system/version` = `f5c31d58`；D1 迁移至 0081；14 个节点 ACK ≤ 62 秒；
+  各节点手动一轮 `result=success`；Sakura 443 外部可达、API 应答。未做客户端实机连接验证，未在 preview 演练迁移。
+- 候选/发布：仅运维，无新候选。
+- 剩余限制：目录中 Sakura 仍为旧 IP（需受审计 catalog PUT，与 #570 部署后的 revision bump 合并）；hub
+  `nodes.secrets.json` 的 Sakura 条目仍为旧 IP；#570 未部署。
+
 ## 2026-09-25 · exit-agent：停用轮保留最后计数；hy2 出错不再跳过 Xray 吊销
 
 - **归属/来源**：ops 任务（出口计量与吊销，#563 合并车审查后续）；Issue #600 的 TF-opus-4 与 TF-opus-8（其余条目仍开）。
