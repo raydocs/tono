@@ -737,34 +737,26 @@ async fn late_prepare_core_start_superseded_by_release_cannot_stop_the_successor
     Ok(())
 }
 
-/// H9-F3: a native update takeover cancels the connecting attempt without an explicit
-/// release, and the App then lets the user start a successor connection directly. The
-/// takeover's Prepare — refused here, as when its signature or preconditions fail — must
-/// still supersede the cancelled attempt's PrepareCoreStart snapshot. Before the fix only an
-/// explicit release did, so the late request passed the gate and stopped the successor Core.
+/// TW-anthropic-4: the update epoch supersedes every connect attempt in flight on this machine,
+/// and any authenticated local caller can reach the update route. Only a Prepare the Service
+/// admits (the registered App image, no manual installer or repair, the pending attempt's own
+/// owner, a signed manifest) may advance it. This one is refused at that admission, as a
+/// request from anything but the installed App is, so a legitimate attempt's PrepareCoreStart
+/// must still be served. Before the fix the route advanced the epoch on owner authentication
+/// alone and the attempt was refused as stale. An admitted takeover still supersedes the
+/// cancelled attempt (H9-F3); this runner has no installed App or pinned key to admit one.
 #[tokio::test]
 #[serial]
-async fn late_prepare_core_start_superseded_by_update_takeover_cannot_stop_the_successor_core()
--> Result<()> {
+async fn update_prepare_refused_at_admission_does_not_supersede_a_connect_attempt() -> Result<()> {
     common::init_tracing_for_tests();
     let _ = stop_ipc_server().await;
     let server_handle = run_ipc_server().await?;
     common::wait_for_ipc().await?;
 
     let credentials = common::owner_credentials();
-    let bundle = RuntimeBundle {
-        yaml: "mode: rule\n".to_string(),
-        assets: vec![],
-        remote_providers: Vec::new(),
-        core_path: common::test_bin_path("mock_binary")
-            .to_string_lossy()
-            .into_owned(),
-    };
+    // A connect attempt's client-side freshness snapshot, read before its request goes out.
+    let epoch = current_release_epoch().await?;
 
-    // Attempt A's client-side freshness snapshot, read before its request goes out.
-    let stale_epoch = current_release_epoch().await?;
-
-    // The update takes over: the App has invalidated A, and the Service refuses Prepare.
     let prepared = update_transaction(
         &credentials,
         UpdateRequest::Prepare {
@@ -774,26 +766,17 @@ async fn late_prepare_core_start_superseded_by_update_takeover_cannot_stop_the_s
         },
     )
     .await?;
-    assert_ne!(prepared.code, 0, "the unsigned Prepare must be refused");
+    assert_ne!(
+        prepared.code, 0,
+        "an unsigned Prepare from outside the App must be refused"
+    );
 
-    // Attempt B, started by the user without a Disconnect: its Core is running, unverified.
-    let token = "e3".repeat(32);
-    let start = start_clash(&credentials, &bundle, &token).await?;
-    assert_eq!(start.code, 0, "{}", start.message);
-    let session = session_from_start(&start, &token)?;
-    let successor_pid = get_status(&credentials)
-        .await?
-        .data
-        .context("successor status omitted data")?
-        .core_pid
-        .context("successor start omitted core PID")?;
-
-    // A's PrepareCoreStart finally arrives with the pre-takeover snapshot.
+    // The attempt's PrepareCoreStart arrives with that snapshot.
     let client = test_client().await?;
     let body = serde_json::to_value(AuthenticatedRequest {
         credentials: credentials.clone(),
         payload: PrepareCoreStartFreshness {
-            release_epoch: stale_epoch,
+            release_epoch: epoch,
         },
     })?;
     let response = client
@@ -807,22 +790,11 @@ async fn late_prepare_core_start_superseded_by_update_takeover_cannot_stop_the_s
         .await?
         .json::<WireResponse<u32>>()?;
     assert_eq!(
-        response.code,
-        ServiceErrorCode::StaleReleaseEpoch as u16,
-        "{}",
+        response.code, 0,
+        "a Prepare refused at admission must not supersede a connect attempt: {}",
         response.message
     );
-    let after = get_status(&credentials)
-        .await?
-        .data
-        .context("post-rejection status omitted data")?;
-    assert_eq!(
-        after.core_pid,
-        Some(successor_pid),
-        "a PrepareCoreStart superseded by an update takeover must not stop the successor Core"
-    );
 
-    assert_eq!(stop_clash(&credentials, &session).await?.code, 0);
     stop_ipc_server().await?;
     server_handle.await??;
     Ok(())

@@ -44,10 +44,11 @@ fn note_explicit_release() {
 }
 
 /// The `PrepareCoreStart` freshness epoch (what `GET /version` reports as `release_epoch`).
-/// Bumped by every explicit release and by a native update takeover: the App invalidates its
-/// in-flight connect attempt before it sends `UpdateRequest::Prepare`, and from then on the
-/// user can start a successor connection without a Disconnect. StartClash keeps comparing
-/// `RELEASE_EPOCH` only — an update is not a Disconnect and must not make a late arm retract.
+/// Bumped by every explicit release and by an admitted native update takeover: the App
+/// invalidates its in-flight connect attempt before it sends `UpdateRequest::Prepare`, and from
+/// then on the user can start a successor connection without a Disconnect. StartClash keeps
+/// comparing `RELEASE_EPOCH` only — an update is not a Disconnect and must not make a late arm
+/// retract.
 static ATTEMPT_EPOCH: AtomicU64 = AtomicU64::new(0);
 
 /// Snapshot copied by clients into `PrepareCoreStart` (via `GET /version`).
