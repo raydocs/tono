@@ -255,6 +255,18 @@
 - **候选/发布**：仅源码，无新候选；未部署。
 - **剩余限制**：旧版 admin 控制台「注销账号」发 `{}`，改后记为非退款；Claude 号退役后能否重绑仍待产品决定；
   与同批 #525（销户单事务）改同一处理器，后合者按对方结构 rebase（本 PR 的原因/退款条件套进 batch 语句）。
+- **续记（2026-09-25，双厂商评审 jev-route `44cc9516`：O-F1 = C-F1、O-F2；合入 origin/main）**：
+  合入已进 main 的 #525：退款条件改为套进单个 batch 的停用语句（备注 `CASE WHEN ?`）与产品事件
+  （`refund close` / `account closed` 作为绑定参数），两边测试都保留。① 读体条件只排除了 null 与
+  `content-length: 0`，无 Content-Length 的零字节流（chunked 空体等）会进 `body()` 被判 400/415，
+  而旧代码会照常停用。`request.ts` 的 `body()` 加可选 `allowEmpty`（默认关，其他调用方不变）：
+  零字节体不论如何发送都读成 `{}`，非空体仍要求 JSON 类型；销户改为始终经它读体。② 控制台停用对话框
+  取消时复位退款勾选（对话框关闭时不卸载，状态会留到下次打开）。测试：`test/ops-api.test.ts` 新增一个
+  `it`（无 Content-Length 的空流 POST close → 200 且已停用），修复前实跑 `expected 400 to be 200`；
+  `e2e/customers-actions.spec.ts` 新增一个 test（勾退款 → 取消 → 再打开未勾选），修复前实跑失败
+  （`Received: checked`）。本机：control-plane 全套 895 用例、`typecheck`、`check:budgets`、`check:contract`
+  通过；ops-console `typecheck`、改动文件 eslint、`customers-actions.spec.ts` 中停用两条 light/dark 共 4 例通过。
+  评审建议 O-F3（原因 200 字上限前端未限）为未核实建议，本轮未改。
 
 ## 2026-09-24 · 控制面：销户改为单个 D1 事务，中途失败不再留下「资源已回收、VPN 仍可用」
 

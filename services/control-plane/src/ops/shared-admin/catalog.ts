@@ -39,20 +39,17 @@ export async function catalogResource(
   if (mt && m === 'POST') {
     // The console's only "suspend" is this endpoint. The operator's reason
     // goes on the audit line, and the refund label is written only when the
-    // caller says this close is a refund. The body is read whenever one was
-    // sent: requiring a positive content-length skipped it for a body sent
-    // without one, and the reason was dropped.
-    let reason: string | null = null;
-    let refund = false;
-    if (req.body !== null && req.headers.get('content-length') !== '0') {
-      const b = await body(req, 4 * 1024);
-      rejectUnexpectedKeys(b, ['reason', 'refund']);
-      reason = optionalNotes(b.reason, 'reason', 200);
-      if (b.refund !== undefined && typeof b.refund !== 'boolean') {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'refund must be a boolean');
-      }
-      refund = b.refund === true;
+    // caller says this close is a refund. The body is always read: requiring
+    // a positive content-length skipped one sent without it, and the reason
+    // was dropped. An empty body, however it was sent, is a close with no
+    // reason, as before.
+    const b = await body(req, 4 * 1024, true);
+    rejectUnexpectedKeys(b, ['reason', 'refund']);
+    const reason = optionalNotes(b.reason, 'reason', 200);
+    if (b.refund !== undefined && typeof b.refund !== 'boolean') {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'refund must be a boolean');
     }
+    const refund = b.refund === true;
     const user = await e.DB.prepare('SELECT * FROM users WHERE id = ?').bind(mt[1]).first<Row>();
     if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
     const t = now();

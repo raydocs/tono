@@ -520,6 +520,17 @@ describe('ops v1 api', () => {
     expect(user).toEqual({ status: 'disabled', notes: null });
   });
 
+  it('close treats a zero-byte body sent without a content-length as an empty close', async () => {
+    await seedUser();
+    const closed = await ops('users/u-1/close', {
+      method: 'POST',
+      body: new ReadableStream<Uint8Array>({ start(controller) { controller.close(); } }),
+    });
+    expect(closed.status).toBe(200);
+    const user = await db().prepare("SELECT status FROM users WHERE id = 'u-1'").first<{ status: string }>();
+    expect(user?.status).toBe('disabled');
+  });
+
   it('close reclaims nothing when disabling the account fails', async () => {
     await seedUser();
     await db().prepare("INSERT INTO signup_allowlist(email, created_at) VALUES('a@example.com', ?)").bind(NOW).run();

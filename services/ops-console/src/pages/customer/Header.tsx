@@ -268,6 +268,9 @@ function SuspendDialog({
       }}
       onCancel={() => {
         ask.clearError();
+        // The dialog stays mounted while closed, so a refund ticked and then
+        // cancelled would otherwise still be ticked the next time it opens.
+        setRefund(false);
         onClose();
       }}
     >
