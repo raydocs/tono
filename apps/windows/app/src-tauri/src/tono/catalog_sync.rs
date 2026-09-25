@@ -7,7 +7,7 @@
 use std::{sync::Arc, time::Duration};
 
 use tauri::AppHandle;
-use tono_core::{CatalogError, InstallOutcome, node::ValidatedNode};
+use tono_core::{CatalogError, InstallOutcome, auth::ApiError, node::ValidatedNode};
 
 use tono_logging::{Type, logging};
 
@@ -15,7 +15,7 @@ use crate::{
     process::AsyncHandler,
     tono::{
         commands, connection,
-        state::{TonoInner, TonoState},
+        state::{AccountState, TonoInner, TonoState},
     },
 };
 
@@ -25,6 +25,97 @@ pub const SYNC_INTERVAL: Duration = Duration::from_secs(300);
 const MAX_RETRIES: u32 = 3;
 const RETRY_DELAY: Duration = Duration::from_secs(1);
 
+/// Why one catalog or policy sync attempt failed.
+pub(crate) enum SyncFailure {
+    /// The control plane refused this session after tono-core's own token
+    /// renewal was refused too. The Worker answers that way for an expired
+    /// plan, a used-up allowance, a disabled account and a revoked device or
+    /// session; retrying only repeats a refresh that must fail.
+    SessionRejected,
+    Failed(String),
+}
+
+impl SyncFailure {
+    pub(crate) fn from_api(err: ApiError) -> Self {
+        match err {
+            ApiError::Unauthorized => Self::SessionRejected,
+            other => Self::Failed(other.to_string()),
+        }
+    }
+}
+
+impl std::fmt::Display for SyncFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SessionRejected => f.write_str("Tono no longer accepts this session"),
+            Self::Failed(message) => f.write_str(message),
+        }
+    }
+}
+
+/// §3 retry budget shared by the catalog and policy syncs. A session
+/// rejection ends it at once (internal review H13-F3).
+pub(crate) async fn run_with_retries<F, Fut>(mut attempt: F) -> Result<(), SyncFailure>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<(), SyncFailure>>,
+{
+    let mut last = SyncFailure::Failed(String::new());
+    for n in 0..=MAX_RETRIES {
+        match attempt().await {
+            Ok(()) => return Ok(()),
+            Err(SyncFailure::SessionRejected) => return Err(SyncFailure::SessionRejected),
+            Err(failure) => {
+                last = failure;
+                if n < MAX_RETRIES {
+                    tokio::time::sleep(RETRY_DELAY).await;
+                }
+            }
+        }
+    }
+    Err(last)
+}
+
+/// A rejected session suspends a Ready account, as macOS does: the periodic
+/// sync stops, connect and reconnect already refuse a suspended account, and
+/// the UI shows the paused-account screen. Protection is left exactly as it
+/// is. Signing in again, or the next restore, re-reads the account.
+fn suspend_rejected_session(inner: &mut TonoInner, auth_generation: u64) -> bool {
+    if inner.sign_in_generation != auth_generation
+        || inner.account_close.is_some()
+        || inner.account_state != AccountState::Ready
+    {
+        return false;
+    }
+    inner.account_state = AccountState::Suspended;
+    true
+}
+
+pub(crate) async fn note_session_rejected(state: &Arc<TonoState>, app: &AppHandle, auth_generation: u64) {
+    let mut inner = state.lock().await;
+    if !suspend_rejected_session(&mut inner, auth_generation) {
+        return;
+    }
+    let snapshot = commands::status_of(&inner);
+    drop(inner);
+    logging!(
+        warn,
+        Type::Service,
+        "Tono: the control plane rejected this session; account suspended"
+    );
+    commands::emit_status(app, &snapshot);
+}
+
+/// Whether the periodic sync for this authentication generation keeps running.
+/// The periodic telemetry uploader stops on the same predicate.
+pub(crate) fn periodic_sync_continues(inner: &TonoInner, auth_generation: u64) -> bool {
+    inner.sign_in_generation == auth_generation
+        && !matches!(
+            inner.account_state,
+            AccountState::SignedOut | AccountState::Restoring | AccountState::Suspended
+        )
+}
+
 /// Seed the tracker and node list from the last verified on-disk cache so a
 /// fresh download can never roll back across restarts (§3). Safe to call
 /// before any session exists; a missing or corrupt cache is simply absent.
@@ -32,12 +123,35 @@ pub fn seed_from_cache(inner: &mut TonoInner) {
     let Some(cached) = inner.catalog_cache().load() else {
         return;
     };
-    inner.catalog_tracker =
-        tono_core::CatalogTracker::from_installed(cached.response.revision, cached.response.sha256.clone());
+    inner.catalog_tracker = tono_core::CatalogTracker::from_cached(&cached.response);
     inner.nodes = cached.nodes;
     inner.routing = sanitized_routing(cached.response.routing.as_ref(), &inner.nodes);
     enforce_selection_survival(inner);
     let _ = ensure_usable_selection(inner);
+}
+
+/// Drop the signed-out account's catalog from memory and disk. The body is
+/// issued per account (client UUID, residential SOCKS5 credentials), so the
+/// next account must never start from it, and the tracker must not compare
+/// the next account's payload against it. A failed delete is logged: the
+/// next session's catalog still replaces it on first sync.
+pub(crate) fn discard_account_catalog(inner: &mut TonoInner) {
+    inner.nodes = Vec::new();
+    inner.routing = None;
+    inner.catalog_tracker = tono_core::CatalogTracker::new();
+    // An offline verification described this catalog. The grant file stays: it binds the
+    // discarded session's token hash and this catalog's digests, so no later session matches it.
+    inner.offline.leave_offline();
+    let cache = inner.catalog_cache();
+    match std::fs::remove_file(cache.path()) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => logging!(
+            warn,
+            Type::Service,
+            "Tono: failed to delete the signed-out account's catalog cache: {err}"
+        ),
+    }
 }
 
 /// Sanitize the catalog's split-routing directives against the admitted
@@ -118,11 +232,11 @@ pub fn install_and_persist(
 
 /// An account-scoped fetch + install cycle. A late response from login/session restore is
 /// discarded before it can persist or publish data for a session that has already signed out.
-async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generation: u64) -> Result<(), String> {
+async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generation: u64) -> Result<(), SyncFailure> {
     let client = { state.lock().await.client.clone() };
-    let response = client.exit_catalog().await.map_err(|err| err.to_string())?;
+    let response = client.exit_catalog().await.map_err(SyncFailure::from_api)?;
 
-    let selection_vanished = {
+    let (selection_vanished, server_confirmed) = {
         let mut inner = state.lock().await;
         if inner.sign_in_generation != auth_generation {
             return Ok(());
@@ -145,7 +259,7 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
             Ok(_) => (false, true),
             // Benign out-of-order delivery (tono-core L5): never an error.
             Err(CatalogError::StaleRevision) => (false, false),
-            Err(err) => return Err(err.to_string()),
+            Err(err) => return Err(SyncFailure::Failed(err.to_string())),
         };
         let vanished = (installed
             && inner.catalog_requires_choice
@@ -156,13 +270,20 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
         if let Some(snapshot) = snapshot {
             commands::emit_status(app, &snapshot);
         }
-        vanished
+        (vanished, emit)
     };
 
     if let Some(generation) = selection_vanished {
         if state.lock().await.sign_in_generation == auth_generation {
             connection::selected_node_vanished(state.clone(), app.clone(), generation).await;
         }
+    }
+
+    // #582: Installed or Unchanged, the server has just confirmed exactly the catalog in memory.
+    // After the vanished-exit handling, and bounded, so a stalled credential store never holds
+    // up either while this sync owns the catalog-sync lock.
+    if server_confirmed {
+        crate::tono::offline_grant::record_server_verified_catalog(state, auth_generation, &response).await;
     }
     Ok(())
 }
@@ -181,28 +302,25 @@ async fn sync_with_retries_inner(state: &Arc<TonoState>, app: &AppHandle, auth_g
     if state.lock().await.sign_in_generation != auth_generation {
         return Ok(());
     }
-    let mut last_error = String::new();
-    for attempt in 0..=MAX_RETRIES {
+    let result = run_with_retries(|| async move {
         if state.lock().await.sign_in_generation != auth_generation {
             return Ok(());
         }
-        match sync_once_inner(state, app, auth_generation).await {
-            Ok(_) => {
-                let mut inner = state.lock().await;
-                if inner.sign_in_generation == auth_generation {
-                    inner.catalog_last_synced_at_ms = Some(unix_time_ms());
-                    inner.catalog_sync_error = None;
-                }
-                return Ok(());
+        sync_once_inner(state, app, auth_generation).await
+    })
+    .await;
+    let failure = match result {
+        Ok(()) => {
+            let mut inner = state.lock().await;
+            if inner.sign_in_generation == auth_generation {
+                inner.catalog_last_synced_at_ms = Some(unix_time_ms());
+                inner.catalog_sync_error = None;
             }
-            Err(err) => {
-                last_error = err;
-                if attempt < MAX_RETRIES {
-                    tokio::time::sleep(RETRY_DELAY).await;
-                }
-            }
+            return Ok(());
         }
-    }
+        Err(failure) => failure,
+    };
+    let last_error = failure.to_string();
     let mut inner = state.lock().await;
     if inner.sign_in_generation != auth_generation {
         return Ok(());
@@ -212,6 +330,9 @@ async fn sync_with_retries_inner(state: &Arc<TonoState>, app: &AppHandle, auth_g
     state.audit().log(crate::tono::audit::AuditEvent::SyncFail {
         error: last_error.clone(),
     });
+    if matches!(failure, SyncFailure::SessionRejected) {
+        note_session_rejected(state, app, auth_generation).await;
+    }
     Err(last_error)
 }
 
@@ -230,31 +351,35 @@ pub(crate) async fn spawn_periodic_for_auth_generation(state: &Arc<TonoState>, a
     spawn_periodic_inner(state, app, generation).await;
 }
 
+/// The periodic sync's tick source. `Delay` turns a long sleep (lid closed,
+/// Modern Standby) into one catch-up sync on wake instead of a burst of every
+/// missed 300 s period, each of which would be an authenticated catalog and
+/// policy fetch (internal review H13-F2).
+fn periodic_sync_interval() -> tokio::time::Interval {
+    let mut interval = tokio::time::interval(SYNC_INTERVAL);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    interval
+}
+
 async fn spawn_periodic_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generation: u64) {
     let task_state = state.clone();
     let task_app = app.clone();
     let handle = AsyncHandler::spawn(move || async move {
-        let mut interval = tokio::time::interval(SYNC_INTERVAL);
+        let mut interval = periodic_sync_interval();
         // The first tick fires immediately; the login/restore path already
         // synced, so skip it.
         interval.tick().await;
         loop {
             interval.tick().await;
-            {
-                let inner = task_state.lock().await;
-                if inner.sign_in_generation != auth_generation {
-                    return;
-                }
-                if matches!(
-                    inner.account_state,
-                    crate::tono::state::AccountState::SignedOut | crate::tono::state::AccountState::Restoring
-                ) {
-                    return;
-                }
+            if !periodic_sync_continues(&*task_state.lock().await, auth_generation) {
+                return;
             }
             // A failing sync never replaces the last verified copy (§3) and
             // never surfaces to the UI beyond the log.
             let _ = sync_with_retries_inner(&task_state, &task_app, auth_generation).await;
+            if !periodic_sync_continues(&*task_state.lock().await, auth_generation) {
+                return;
+            }
             // The cloud traffic policy rides the same cadence (Build 28).
             let _ = crate::tono::policy_sync::sync_with_retries_for_auth_generation(
                 &task_state,
@@ -513,9 +638,9 @@ pub fn region_rank(name: &str) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_usable_exit, install_and_persist, is_exit_blocked, is_legacy_wire_name,
-        names_equivalent, next_catalog_exit, region_rank, replacement_for_selection,
-        selected_exit_still_present, sort_server_names, tcp_probe_socket,
+        SyncFailure, default_usable_exit, install_and_persist, is_exit_blocked, is_legacy_wire_name, names_equivalent,
+        next_catalog_exit, periodic_sync_continues, periodic_sync_interval, region_rank, replacement_for_selection,
+        run_with_retries, selected_exit_still_present, sort_server_names, suspend_rejected_session, tcp_probe_socket,
     };
     use std::collections::BTreeSet;
     use std::net::Ipv4Addr;
@@ -554,6 +679,52 @@ mod tests {
             protocol: NodeProtocol::Hysteria2,
             tls_fingerprint: Some("e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db".to_string()),
         }
+    }
+
+    /// H13-F2: waking from an 8 h sleep yields one catch-up sync, not one
+    /// authenticated catalog + policy round per missed 300 s period.
+    #[tokio::test(start_paused = true)]
+    async fn periodic_sync_after_long_sleep_ticks_once_not_per_missed_period() {
+        let mut interval = periodic_sync_interval();
+        interval.tick().await;
+        tokio::time::advance(std::time::Duration::from_secs(8 * 60 * 60)).await;
+        interval.tick().await;
+        let burst = tokio::time::timeout(std::time::Duration::from_secs(1), interval.tick()).await;
+        assert!(burst.is_err(), "missed periods must not fire again after the wake tick");
+    }
+
+    /// H13-F3: a session the control plane refuses (expired plan, used-up
+    /// allowance, revoked device) costs one attempt, suspends the Ready
+    /// account and ends the periodic sync, instead of four refreshes every
+    /// 300 s under a UI that still reads Ready. The telemetry uploader shares
+    /// `periodic_sync_continues`; the network-log uploader stops too (W2).
+    #[tokio::test(start_paused = true)]
+    async fn rejected_session_is_not_retried_and_suspends_periodic_sync() {
+        let mut attempts = 0;
+        let result = run_with_retries(|| {
+            attempts += 1;
+            async { Err(SyncFailure::SessionRejected) }
+        })
+        .await;
+        assert!(matches!(result, Err(SyncFailure::SessionRejected)));
+        assert_eq!(attempts, 1, "a rejected session must not be retried");
+
+        let state = crate::tono::state::TonoState::for_test();
+        let mut inner = state.lock().await;
+        inner.sign_in_generation = 4;
+        inner.account_state = crate::tono::state::AccountState::Ready;
+        inner.account = Some(
+            serde_json::from_value(serde_json::json!({
+                "id": "fixture-owner", "email": "fixture@example.test",
+            }))
+            .unwrap(),
+        );
+        assert!(periodic_sync_continues(&inner, 4));
+        assert!(crate::tono::log_upload::periodic_upload_continues(&inner, 4, "fixture-owner"));
+        assert!(suspend_rejected_session(&mut inner, 4));
+        assert_eq!(inner.account_state, crate::tono::state::AccountState::Suspended);
+        assert!(!periodic_sync_continues(&inner, 4));
+        assert!(!crate::tono::log_upload::periodic_upload_continues(&inner, 4, "fixture-owner"));
     }
 
     #[test]
@@ -764,6 +935,7 @@ mod tests {
             yaml,
             updated_at: None,
             routing: None,
+            routing_sha256: None,
         }
     }
 
@@ -841,6 +1013,39 @@ mod tests {
         let effect = install_and_persist(&effect.tracker, &cache, &catalog(3)).unwrap();
         assert!(!effect.installed, "same revision + digest is idempotent");
         assert_eq!(effect.tracker.current_revision(), 3);
+    }
+
+    #[test]
+    fn routing_only_rotation_replaces_routing_at_same_revision() {
+        let dir = TempDir::new("persist-routing");
+        let cache = CatalogCache::new(dir.path(), Box::new(NoopCheck));
+        let with_password = |password: &str, served: &str| {
+            let mut response = catalog(5);
+            response.routing = Some(tono_core::CatalogRouting {
+                home_socks5: Some(tono_core::CatalogHomeSocks5 {
+                    host: "resi-gateway.example.com".into(),
+                    port: 11080,
+                    username: "resi-user".into(),
+                    password: password.into(),
+                }),
+                ..Default::default()
+            });
+            // Values produced by the control plane's `routingSha256` recipe.
+            response.routing_sha256 = Some(served.into());
+            response
+        };
+        let old = with_password("old-secret", "atX8ZGZ9FW7hp6tffFfundGCRMyiLyyDrpyrI-kZjVw");
+        let installed = install_and_persist(&CatalogTracker::new(), &cache, &old).unwrap();
+        assert!(installed.installed);
+
+        // Same revision, same YAML digest: only the credential rotated.
+        let rotated = with_password("new-secret", "NTPLX5Abvy0EPlYHQiEBDfgIUJ00gDWr-4RolAQdJVs");
+        let effect = install_and_persist(&installed.tracker, &cache, &rotated).unwrap();
+        assert!(effect.installed, "a routing-only rotation must not read as unchanged");
+        let cached = cache.load().unwrap().response;
+        assert_eq!(cached.routing.as_ref().unwrap().home_socks5.as_ref().unwrap().password, "new-secret");
+        let restarted = tono_core::CatalogTracker::from_cached(&cached);
+        assert!(!install_and_persist(&restarted, &cache, &rotated).unwrap().installed);
     }
 
     #[test]

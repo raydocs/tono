@@ -270,6 +270,42 @@ enum UpdateHandoffStore {
         }
     }
 
+    /// 0.0.72's Sparkle updater wrote this journal and nothing in this build
+    /// advances or commits it, so after an upgrade it would expire into a
+    /// permanent incomplete-update warning. A running build at or past the
+    /// journal's target is proof that the install finished: archive the exact
+    /// bytes and remove the journal. Unreadable evidence, and a journal for a
+    /// newer build than this one, stay where they are.
+    @discardableResult
+    static func retireCompletedLegacyJournal(currentAppVersion: String, at location: URL? = nil) -> Bool {
+        let url = location ?? fileURL
+        guard let data = try? Data(contentsOf: url) else { return false }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let journal = try? decoder.decode(UpdateHandoffJournal.self, from: data),
+              currentAppVersion.first?.isNumber == true,
+              journal.nextAppVersion.first?.isNumber == true,
+              currentAppVersion.compare(journal.nextAppVersion, options: .numeric) != .orderedAscending
+        else { return false }
+        do {
+            try archive(data, besides: url)
+            try FileManager.default.removeItem(at: url)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private static func archive(_ data: Data, besides url: URL) throws {
+        let history = url.deletingPathExtension().appendingPathExtension("history")
+        try FileManager.default.createDirectory(at: history, withIntermediateDirectories: true)
+        let archive = history.appendingPathComponent("\(UUID().uuidString).json")
+        try data.write(to: archive, options: .atomic)
+        let handle = try FileHandle(forWritingTo: archive)
+        defer { try? handle.close() }
+        try handle.synchronize()
+    }
+
     static let incompleteUpdateCopy = String(
         localized: "The update did not finish. Disconnect, then reinstall Tono."
     )
@@ -282,13 +318,7 @@ enum UpdateHandoffStore {
             previous = nil
         }
         if let previous {
-            let history = url.deletingPathExtension().appendingPathExtension("history")
-            try FileManager.default.createDirectory(at: history, withIntermediateDirectories: true)
-            let archive = history.appendingPathComponent("\(UUID().uuidString).json")
-            try previous.write(to: archive, options: .atomic)
-            let handle = try FileHandle(forWritingTo: archive)
-            defer { try? handle.close() }
-            try handle.synchronize()
+            try archive(previous, besides: url)
         }
         try write(journal, at: url)
     }

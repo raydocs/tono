@@ -34,6 +34,22 @@ notifications:
 service:
   adminInstallPrompt: Installing the Tono service requires administrator privileges.
   adminUninstallPrompt: Uninstalling the Tono service requires administrator privileges.
+exitRefusal:
+  titleHeld: Network protection is still active
+  titleReleaseMayComplete: Network protection release not confirmed
+  titleUnconfirmed: Network protection not confirmed
+  intro: Tono could not confirm that network protection was released. The details are in the Tono log.
+  held: 'This machine stays protected: no traffic leaves it while protection is armed. If you {action} now, it stays that way.'
+  releaseMayComplete: The Tono Service may still be finishing the release, so protection may be released after you {action}, or may stay on and keep blocking traffic.
+  unconfirmed: The Tono Service did not confirm that protection is still armed, so this machine may already be open, or may still be blocked.
+  recovery: If the internet stays blocked, start Tono again and disconnect, or run `tono-service.exe --emergency-disarm` as Administrator from the Tono installation folder.
+  quitAction: quit
+  restartAction: restart
+  quitQuestion: Quit anyway?
+  restartQuestion: Restart anyway?
+  quitButton: Quit anyway
+  restartButton: Restart anyway
+  stayOpen: Stay open
 launchGuard:
   currentExeError: 'Unable to determine the application location: {error}'
   homeDirError: 'Unable to determine the current user''s home directory. The application will exit: {error}'
@@ -81,6 +97,7 @@ tray:
       connecting: Connecting
       connected: Protected
       protectedOffline: Protected, not connected
+      protectionUnknown: Protection not verified
       disconnecting: Disconnecting
   ruleMode: Rule Mode
   globalMode: Global Mode

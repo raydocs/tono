@@ -8,23 +8,38 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import enTono from '@/locales/en/tono.json'
 
 const mocks = vi.hoisted(() => ({
+  signOut: vi.fn(),
+  disconnect: vi.fn(),
   start: vi.fn(),
   verify: vi.fn(),
   mutate: vi.fn(),
+  status: {} as Record<string, unknown>,
 }))
 
 vi.mock('@/services/states', () => ({ useThemeMode: () => 'light' }))
 vi.mock('@/hooks/use-tono', () => ({
-  useTonoStatus: () => ({ status: {}, mutateTonoStatus: mocks.mutate }),
+  useTonoStatus: () => ({
+    status: mocks.status,
+    mutateTonoStatus: mocks.mutate,
+  }),
+  tonoAccountQueryKey: ['tonoAccount'],
+  tonoDevicesQueryKey: ['tonoDevices'],
+  tonoServersQueryKey: ['tonoServers'],
 }))
+vi.mock('@/services/query-client', () => ({ removeCacheData: vi.fn() }))
 vi.mock('@/services/tono', () => ({
   tonoSignInStart: mocks.start,
   tonoSignInVerify: mocks.verify,
-  tonoDisconnect: vi.fn(),
+  tonoSignOut: mocks.signOut,
+  tonoDisconnect: mocks.disconnect,
   tonoRetryRestore: vi.fn(),
   formatTonoActionError: (error: Error) => error.message,
 }))
-vi.mock('@/tono-ui/SupportContact', () => ({ SupportContact: () => null }))
+vi.mock('@/tono-ui/SupportContact', () => ({
+  SupportContact: ({ extra }: { extra?: string }) => (
+    <div data-testid="support-contact" data-extra={extra} />
+  ),
+}))
 
 import LoginPage from './login'
 
@@ -35,9 +50,12 @@ void i18n.use(initReactI18next).init({
 
 beforeEach(() => {
   vi.useFakeTimers()
+  mocks.signOut.mockReset().mockResolvedValue(undefined)
+  mocks.disconnect.mockReset().mockResolvedValue(undefined)
   mocks.start.mockReset().mockResolvedValue({ expiresIn: 600 })
   mocks.verify.mockReset()
   mocks.mutate.mockReset().mockResolvedValue(undefined)
+  mocks.status = {}
 })
 
 afterEach(() => {
@@ -76,6 +94,58 @@ describe('login welcome v2', () => {
       ),
     ).toBeDefined()
     expect(screen.getByRole('button', { name: 'Send code' })).toBeDefined()
+  })
+})
+
+describe('login code not received', () => {
+  it('offers support once the code has had a minute to arrive', async () => {
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    )
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: 'person@example.com' },
+    })
+    await act(async () =>
+      fireEvent.click(screen.getByRole('button', { name: 'Send code' })),
+    )
+    for (let second = 0; second < 59; second++) {
+      await act(async () => vi.advanceTimersByTime(1000))
+    }
+    expect(screen.queryByText('No email yet?')).toBeNull()
+    await act(async () => vi.advanceTimersByTime(1000))
+    expect(screen.queryByText('No email yet?')).not.toBeNull()
+    expect(
+      screen.getByTestId('support-contact').getAttribute('data-extra'),
+    ).toBe('No email yet?')
+  })
+})
+
+describe('login paused screen', () => {
+  it('offers sign-out and names a still-running tunnel on the paused screen of a refused session', async () => {
+    mocks.status = {
+      accountState: 'suspended',
+      protectionBlocked: true,
+      killSwitch: {
+        wanted: true,
+        mode: 'locked',
+        tunnel_permit_rendered: true,
+      },
+    }
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    )
+    expect(screen.getByText('Previous connection still running')).toBeDefined()
+    expect(screen.queryByText('Internet is blocked')).toBeNull()
+    await act(async () =>
+      fireEvent.click(screen.getByRole('button', { name: 'Sign Out' })),
+    )
+    expect(mocks.signOut).toHaveBeenCalledTimes(1)
+    expect(mocks.disconnect).not.toHaveBeenCalled()
+    expect(mocks.mutate).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -241,5 +311,22 @@ describe('login request exclusion', () => {
       }),
     )
     expect(screen.getByText('Account paused')).toBeDefined()
+  })
+
+  it('shows a rejected session with a live tunnel as ended, not paused or blocked', () => {
+    mocks.status = {
+      accountState: 'suspended',
+      uiState: 'connected',
+      protectionBlocked: false,
+      killSwitch: { wanted: true },
+    }
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    )
+    expect(screen.getByText('Session ended')).toBeDefined()
+    expect(screen.queryByText('Account paused')).toBeNull()
+    expect(screen.queryByText('Internet is blocked')).toBeNull()
   })
 })

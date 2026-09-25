@@ -381,6 +381,114 @@ func runUpdateSelfTests() -> Bool {
         try engine.commit(peer: relaunched)
         try check(store.load().attempt?.receipt.phase == .committed, "A relaunched successor must be able to commit")
     }
-    print("Update production-bound tests: \(10 - failures.count) passed, \(failures.count) failed; native-device acceptance NOT performed")
+    test("ledger-ignores-additive-fields-and-refuses-a-newer-schema-major") { directory in
+        let store = try UpdateStorage(root: directory)
+        try reserved(store, UpdateTransaction(storage: store, effects: effects()))
+        let path = directory + "/ledger.json"
+        let before = try store.load()
+        guard var file = try JSONSerialization.jsonObject(with: UpdateStorage.read(path, maximum: 128 * 1024)) as? [String: Any],
+              var attempt = file["attempt"] as? [String: Any] else { throw HelperFailure.invalid("Fixture ledger is not an object") }
+        // What a later helper may add within schema 1: optional, safe to drop.
+        attempt["futureFact"] = "x"
+        file["attempt"] = attempt
+        file["futureFact"] = true
+        try UpdateStorage.write(JSONSerialization.data(withJSONObject: file, options: [.sortedKeys]), to: path)
+        let loaded = try store.load()
+        try check(loaded.generation == before.generation && loaded.highWater == before.highWater
+                  && loaded.attempt?.receipt.attemptId == before.attempt?.receipt.attemptId
+                  && loaded.attempt?.execution == before.attempt?.execution,
+                  "Additive fields from a newer helper must not read as a corrupt ledger")
+        file["schemaVersion"] = 2
+        let newer = try JSONSerialization.data(withJSONObject: file, options: [.sortedKeys])
+        try UpdateStorage.write(newer, to: path)
+        var refusal = ""
+        do { _ = try store.load() } catch HelperFailure.invalid(let message) { refusal = message }
+        try check(refusal.contains("newer Tono (schema 2)"), "A newer schema major must be refused as newer, not corrupt")
+        try check(UpdateStorage.read(path, maximum: 128 * 1024) == newer, "Newer evidence must be retained")
+    }
+    // Tono.app dragged to the Trash left a KeepAlive helper that re-armed PF
+    // at every boot with no app left to release it (H19-O-F1). A helper start
+    // releases and removes the installation only when no Tono app is left in
+    // Applications and no update attempt could be putting one back.
+    test("helper-start-releases-only-when-tono-was-removed") { directory in
+        let applications = directory + "/Applications"
+        try FileManager.default.createDirectory(atPath: applications, withIntermediateDirectories: true)
+        var releases = 0
+        let release: (UpdateStorage) -> Bool = { _ in releases += 1; return true }
+        let idle = try UpdateStorage(root: directory + "/idle")
+        let renamed = applications + "/Tono Beta.app/Contents"
+        try FileManager.default.createDirectory(atPath: renamed, withIntermediateDirectories: true)
+        try PropertyListSerialization.data(fromPropertyList: ["CFBundleIdentifier": "com.raydocs.tono"],
+                                           format: .xml, options: 0)
+            .write(to: URL(fileURLWithPath: renamed + "/Info.plist"))
+        try check(!releaseIfTonoWasRemoved(storage: idle, applicationsDirectory: applications,
+                                           userApplicationsDirectory: nil, clientRunning: { false }, release: release)
+                  && releases == 0, "A renamed Tono app in Applications lost its protection")
+        try FileManager.default.removeItem(atPath: applications + "/Tono Beta.app")
+        let updating = try UpdateStorage(root: directory + "/updating")
+        try reserved(updating, UpdateTransaction(storage: updating, effects: effects()))
+        try check(!releaseIfTonoWasRemoved(storage: updating, applicationsDirectory: applications,
+                                           userApplicationsDirectory: nil, clientRunning: { false }, release: release)
+                  && releases == 0, "An unfinished update lost its protection while the app was away")
+        try check(!releaseIfTonoWasRemoved(storage: idle, applicationsDirectory: directory + "/unreadable",
+                                           userApplicationsDirectory: nil, clientRunning: { false },
+                                           release: release) && releases == 0,
+                  "An Applications folder that cannot be read counted as no app")
+        try check(releaseIfTonoWasRemoved(storage: idle, applicationsDirectory: applications,
+                                          userApplicationsDirectory: nil, clientRunning: { false }, release: release)
+                  && releases == 1, "A helper whose app was removed kept its installation")
+    }
+    // The running app moved to ~/Applications and a helper restart released
+    // PF under it; a later launch from there refused to start and reinstall
+    // looped. A running Tono client or Tono.app in the bound user's
+    // ~/Applications keeps the installation (MA-Codex-1).
+    test("helper-start-keeps-protection-for-a-running-or-user-folder-tono") { directory in
+        let applications = directory + "/Applications"
+        let userApplications = directory + "/home/Applications"
+        try FileManager.default.createDirectory(atPath: applications, withIntermediateDirectories: true)
+        var releases = 0
+        let release: (UpdateStorage) -> Bool = { _ in releases += 1; return true }
+        let idle = try UpdateStorage(root: directory + "/idle")
+        try check(!releaseIfTonoWasRemoved(storage: idle, applicationsDirectory: applications,
+                                           userApplicationsDirectory: nil, clientRunning: { true }, release: release)
+                  && releases == 0, "A running Tono client lost its protection at a helper restart")
+        try FileManager.default.createDirectory(atPath: userApplications + "/Tono.app/Contents",
+                                                withIntermediateDirectories: true)
+        try check(!releaseIfTonoWasRemoved(storage: idle, applicationsDirectory: applications,
+                                           userApplicationsDirectory: userApplications, clientRunning: { false },
+                                           release: release) && releases == 0,
+                  "Tono.app in ~/Applications lost its protection")
+        // Only a process whose kernel short name is "Tono" is a candidate. A
+        // candidate whose path or signature cannot be looked up may be Tono
+        // with its bundle deleted under it: doubt keeps protection unless it
+        // definitely exited (live: false) or definitely fails the requirement
+        // (signed: false). Any other process, or a failed name lookup, is
+        // skipped even when its other lookups fail.
+        let tono = "/Users/a/Applications/Tono.app" + UpdatePackage.appExecutable
+        let candidate: (Int32) -> String? = { _ in "Tono" }
+        try check(tonoClientAmong([42], name: candidate, path: { _ in nil }, live: { _ in true },
+                                  signed: { _ in false }),
+                  "A live candidate whose path lookup failed counted as no Tono client")
+        try check(tonoClientAmong([42], name: candidate, path: { _ in nil }, live: { _ in nil },
+                                  signed: { _ in false }),
+                  "A candidate whose liveness lookup failed counted as exited")
+        try check(tonoClientAmong([42], name: candidate, path: { _ in tono }, live: { _ in true },
+                                  signed: { _ in nil }),
+                  "A candidate whose signature check errored counted as not Tono")
+        try check(!tonoClientAmong([42], name: candidate, path: { _ in nil }, live: { _ in false },
+                                   signed: { _ in nil })
+                  && !tonoClientAmong([42], name: candidate, path: { _ in tono }, live: { _ in true },
+                                      signed: { _ in false }),
+                  "An exited candidate or a requirement mismatch counted as a Tono client")
+        try check(!tonoClientAmong([42], name: { _ in "mdworker" }, path: { _ in nil }, live: { _ in nil },
+                                   signed: { _ in nil })
+                  && !tonoClientAmong([42], name: { _ in nil }, path: { _ in nil }, live: { _ in true },
+                                      signed: { _ in nil }),
+                  "A non-candidate or unnamed process with failing lookups counted as a Tono client")
+        // Hosted runner: no signed Tono client runs, so the real scan must not
+        // fall back to doubt (requirement, pid listing or lookup failure).
+        try check(!tonoClientProcessRunning(), "The Tono process scan found a client on a host without Tono")
+    }
+    print("Update production-bound tests: \(13 - failures.count) passed, \(failures.count) failed; native-device acceptance NOT performed")
     return failures.isEmpty
 }
