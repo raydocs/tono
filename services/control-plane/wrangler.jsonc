@@ -32,8 +32,9 @@
     // Optional: OPS_COLLECTOR_TOKEN — VPS collector PUT /api/v1/ops-ingest/snapshot.
     // Unset keeps /ops/live on the legacy ops/quality host fetch.
     // Optional: HY2_CATALOG_EMAILS — comma-separated customer emails that may
-    // receive ` · hy2` blocks. Unset = strip hy2 from every authenticated catalog.
-    // After changing it, bump the catalog revision. Still do not PUT hy2.
+    // receive ` · hy2` blocks, and only on clients that send X-Tono-Accept: hy2.
+    // Unset = every client that sends the header. After changing it, bump the
+    // catalog revision. Still do not PUT hy2.
   },
   "d1_databases": [{
     "binding": "DB", "database_name": "tono-control-plane",
@@ -79,7 +80,6 @@
     "RATE_LIMIT_OIDC_START_INSTALLATION": "10",
     "RATE_LIMIT_OIDC_VERIFY_IP": "30",
     "RATE_LIMIT_OIDC_VERIFY_CHALLENGE": "5",
-    "RATE_LIMIT_DIAGNOSTICS_IP_HOUR": "30",
     "RATE_LIMIT_DIAGNOSTICS_USER_HOUR": "5",
     "RATE_LIMIT_DIAGNOSTICS_USER_DAY": "20",
     "DIAGNOSTICS_RETENTION_SECONDS": "2592000",

@@ -167,7 +167,7 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| H4-F1 | dual 阶段吊销设备不退役共享 legacy 出口凭据，被吊销设备仍可用出口并计入账户 | in-PR | [#313](https://github.com/raydocs/tono/issues/313)，[#323](https://github.com/raydocs/tono/pull/323) | 高·推导 | 暴露面取决于生产 rollout phase（本机无法查） |
+| H4-F1 | dual 阶段吊销设备不退役共享 legacy 出口凭据，被吊销设备仍可用出口并计入账户 | in-PR | [#313](https://github.com/raydocs/tono/issues/313)，[#323](https://github.com/raydocs/tono/pull/323) | 高·推导 | 暴露面取决于生产 rollout phase（本机无法查）；列车 #570 审查 TC-anthropic-1：退役账户的就绪判断看全部 active 出口，一个未上架的新节点就让所有退役账户 503，已在分支 `fix/cp-a-20260924` 改为只看本次下发目录中的节点（未合 main） |
 | H4-F2 | 停用/退役/删除/改名的住宅（catalog 型）home exit 及其 hy2 孪生块从限制名单掉出，下发给所有账户 | in-PR | [#322](https://github.com/raydocs/tono/issues/322)，[#326](https://github.com/raydocs/tono/pull/326) | 高·推导 | roster 不按节点隔离（身份隔离）列为后续 |
 | H4-F3 | ops 角色门不覆盖 shared-admin；另有原始日志读取与 signup-allowlist 写两处未拦截且文档未列 | open | 待开 | 低·推导 | shared-admin 不拦截是已记录限制；只有配置 OPS_ROLES 且有非 owner 角色时可利用 |
 | H3-F4 | refresh 严格单次轮换无宽限且非原子：响应丢失即产生伪 401，客户端登出并释放保护 | in-PR | [#314](https://github.com/raydocs/tono/issues/314)，[#329](https://github.com/raydocs/tono/pull/329) | 高·推导 | 修复在服务端，客户端「真 401 才释放」不变；Windows 启动恢复遇 401 已不再释放（[#515](https://github.com/raydocs/tono/pull/515)） |
@@ -359,7 +359,10 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | XRAY26-RMU | exit-agent 用 `--email=` 调 Xray 26 `rmu` 被拒，自 2026-09-18 起吊销不执行、计量停报；`rmu` 失败也退出 0 | in-PR | [#563](https://github.com/raydocs/tono/pull/563)（5bcc6b9d/924cafb3/b3299814）| 高·已确认(实机输出) | 未部署到节点 |
 | TF-opus-4 | exit-agent 停用轮不读计数，上次正常轮到停机之间的流量丢失 | fixed | [#600](https://github.com/raydocs/tono/issues/600)，[#624](https://github.com/raydocs/tono/pull/624)（f5c31d58，2026-09-25 已部署到 14 个节点） | 中·已确认 | 撤除后尽力折入最后计数，下一次可上报的轮次报出；永久退役节点仍不上报；需部署到节点 |
 | TF-opus-8 | exit-agent hy2 出错时整轮跳过 Xray 吊销与计数 | fixed | [#600](https://github.com/raydocs/tono/issues/600)，[#624](https://github.com/raydocs/tono/pull/624)（f5c31d58，2026-09-25 已部署到 14 个节点） | 中·已确认 | hy2 错误后仍做 Xray 对账并保存计数，再拒绝本轮、不 ACK；需部署到节点 |
-| TC-anthropic-1 | `dual` 阶段新建/重新启用出口节点使所有已退役账户设备目录 503 | open | [#570](https://github.com/raydocs/tono/pull/570) 评论 | 高·推导 | 阻塞 #570 合并与部署 |
+| TC-anthropic-1 | `dual` 阶段新建/重新启用出口节点使所有已退役账户设备目录 503 | in-PR | [#570](https://github.com/raydocs/tono/pull/570)（8ea01b3f、b6c0a817、a62703fe、f775a895）| 高·已确认(Codex) | 就绪门只看本次下发目录中的节点（hy2 归并基名、目录内家宽不计）；jev-route 7a7e1e73/bb710dc6（Opus+Codex）复审修复提交通过；**部署仍须按交接顺序：LA 节点恢复 ACK、第二节点先登记** |
+| TC-anthropic-2 | 零 active 节点时退役账户永久 503；测试未断言成功路径 | in-PR | [#570](https://github.com/raydocs/tono/pull/570) | 中·已确认(Codex，条件性) | 生产有 1 个 active 节点；`worker.test.ts` 已断言 ACK 前 503、ACK 后 200 且为设备 UUID |
+| TC-anthropic-3 | 0078 改变过滤集合但不 bump 目录 revision，Windows 拒收同 revision 不同 digest | in-PR | [#570](https://github.com/raydocs/tono/pull/570) | 中·已确认(Codex) | 运维步骤：部署且节点拉取新 roster 后，无条件用带 `expectedRevision` 的受审计 catalog PUT bump revision（写入列车 changelog 与 PR 描述）|
+| TC-anthropic-4 | migrations README 缺 0077、0088 | in-PR | [#570](https://github.com/raydocs/tono/pull/570) | 低 | README 补 0077/0081/0088 |
 
 测试覆盖缺口（夹具未跨真实 DLL、无断电/睡眠/多网卡实机、无 parser fuzz 等）不是本账条目，
 见 [审查轮记录](reports/REVIEW_ROUNDS_2026-09-23.md) 的「未覆盖」一节；找到具体失败再作为新条目上报。

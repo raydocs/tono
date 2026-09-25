@@ -31,9 +31,12 @@ worker_policy="$repo_root/services/control-plane/src/traffic-policy.ts"
 wrangler="$repo_root/services/control-plane/wrangler.jsonc"
 swift="$repo_root/apps/macos/Tono/Core/ManagedTrafficPolicySignature.swift"
 windows_policy="$repo_root/apps/windows/crates/tono-core/src/policy.rs"
+windows_draft="$repo_root/apps/windows/crates/tono-core/src/sing_box.rs"
 publisher="$repo_root/tooling/scripts/publish-traffic-policy.mjs"
+worker_publish="$repo_root/services/control-plane/src/ops/shared-admin/traffic-policy.ts"
 
-for file in "$worker" "$worker_policy" "$wrangler" "$swift" "$windows_policy" "$publisher"; do
+for file in "$worker" "$worker_policy" "$wrangler" "$swift" "$windows_policy" "$windows_draft" \
+            "$publisher" "$worker_publish"; do
   [[ -f $file ]] || fail "missing $(basename -- "$file"); the contract cannot be checked"
 done
 
@@ -132,4 +135,27 @@ expected_protected="anthropic.ai anthropic.com browser-intake-ap1-datadoghq.com 
   || fail "Windows protects [$protected_windows], the control plane protects [$protected_worker]"
 ok "the control plane, macOS and Windows protect exactly [$expected_protected] from any signed policy"
 
-printf 'policy signing contract: %s/4 checks passed\n' "$checks"
+# --- the revision inside the signed bytes (#317) -------------------------------
+# With TRAFFIC_POLICY_EMBED_REVISION on, the served json names its own revision.
+# A client that does not bind that key to the envelope either ignores it (the
+# replay stays possible) or, for Windows' exact-key synthetic draft, refuses the
+# whole document. So the switch may only be on in wrangler.jsonc while every
+# client source binds the same key. Source is not rollout: the switch still waits
+# until those clients are deployed widely. This check is the floor, not the gate.
+/usr/bin/grep -Fq 'revision: boundRevision' "$worker_publish" \
+  || fail "the control plane no longer embeds the revision under the key 'revision'"
+/usr/bin/grep -Fq "Object.hasOwn(document, 'revision')" "$worker_policy" \
+  || fail "the control plane's read path no longer checks an embedded 'revision'"
+if /usr/bin/grep -Eq '"TRAFFIC_POLICY_EMBED_REVISION": *"true"' "$wrangler"; then
+  /usr/bin/grep -Fq 'case revision' "$swift" \
+    || fail "the deployment embeds the policy revision and macOS does not bind it"
+  /usr/bin/grep -Fq 'object.get("revision")' "$windows_policy" \
+    || fail "the deployment embeds the policy revision and Windows does not bind it"
+  /usr/bin/grep -Fq 'fields.get("revision")' "$windows_draft" \
+    || fail "the deployment embeds the policy revision and the Windows draft refuses it"
+  ok "the deployment embeds the policy revision and every client binds it"
+else
+  ok "the policy revision is not embedded by default; clients bind it before it is"
+fi
+
+printf 'policy signing contract: %s/5 checks passed\n' "$checks"

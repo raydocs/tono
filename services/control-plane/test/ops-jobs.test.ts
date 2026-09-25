@@ -18,6 +18,7 @@ import {
 } from '../src/ops/jobs';
 import { redactJobResult } from '../src/ops/job-redaction';
 import { runWorkerJobs } from '../src/ops/jobs-worker';
+import { relistFleetNode } from '../src/ops/reads/fleet';
 import { retirePendingDedupeKey } from '../src/ops/retire-dependencies';
 import { runVerdictPass } from '../src/ops/verdict-run';
 
@@ -361,6 +362,24 @@ describe('ops node jobs', () => {
     ).items.map((item) => item.name);
   }
 
+  function realityBlock(name: string, ip: string): string {
+    return [
+      `  - name: ${name}`,
+      '    type: vless',
+      `    server: ${ip}`,
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '    network: tcp',
+      '    tls: true',
+      '    flow: xtls-rprx-vision',
+      '    servername: www.example.com',
+      '    reality-opts:',
+      `      public-key: ${'A'.repeat(43)}`,
+      '      short-id: 0123abcd',
+      '',
+    ].join('\n');
+  }
+
   async function exitStatus(name: string) {
     return db().prepare('SELECT status, token_hash FROM exit_nodes WHERE name = ?')
       .bind(name).first<{ status: string; token_hash: string }>();
@@ -464,16 +483,42 @@ describe('ops node jobs', () => {
     expect((await exitStatus(kite))?.status).toBe('disabled');
     expect((await exitStatus(kite))?.token_hash).not.toBe(hash);
 
-    const relist = await enqueue('catalog_relist', t + 3, { nodeName: kite, idempotencyKey: 'relist-kite' });
-    expect(await runWorkerJobs(e, t + 3, 5)).toBe(1);
-    const relistRow = await db().prepare('SELECT status FROM ops_node_jobs WHERE id = ?')
-      .bind(relist.job.id).first<{ status: string }>();
-    expect(relistRow?.status).toBe('succeeded');
+    // Relisting a revoked node is refused; the operator re-enables it and
+    // deploys a newly issued token first (PATCH exit-nodes/{id}, POST …/token).
+    await db().prepare("UPDATE exit_nodes SET status = 'active' WHERE name = ?").bind(kite).run();
+    await relistFleetNode(e, 'ops@example.com', kite, { block: realityBlock(kite, '203.0.113.9') });
+    expect(await listedNames(e)).toContain(kite);
     await runVerdictPass(e, t + 4);
     const afterRelist = await db().prepare(
       `SELECT COUNT(*) AS n FROM ops_incidents WHERE dedupe_key = ? AND status <> 'resolved'`,
     ).bind(retirePendingDedupeKey(kite)).first<{ n: number }>();
     expect(Number(afterRelist?.n)).toBe(0);
+  });
+
+  it('relist refuses to publish an entry without the Reality settings clients require', async () => {
+    const e = env as unknown as Env;
+    const t = 1_800_001_000;
+    const kite = 'Tokyo · Kite';
+    await seedTwoNodeCatalog(e, t, kite, 'Tokyo · Fuji');
+    await enqueue('catalog_retire', t, { nodeName: kite, idempotencyKey: 'retire-bare' });
+    expect(await runWorkerJobs(e, t, 5)).toBe(1);
+    const retired = await db().prepare('SELECT revision FROM managed_exit_catalog WHERE singleton_id = 1')
+      .first<{ revision: number }>();
+
+    // The console relists with no entry; the profile holds only the address.
+    const relist = await enqueue('catalog_relist', t + 1, { nodeName: kite, idempotencyKey: 'relist-bare' });
+    expect(await runWorkerJobs(e, t + 1, 5)).toBe(1);
+    const row = await db().prepare('SELECT status, result_summary FROM ops_node_jobs WHERE id = ?')
+      .bind(relist.job.id).first<{ status: string; result_summary: string }>();
+    expect(row?.status).toBe('failed');
+    expect(row?.result_summary).toMatch(/No stored catalog entry/);
+    const bare = `  - name: ${kite}\n    type: vless\n    server: 203.0.113.9\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
+    await expect(relistFleetNode(e, 'ops@example.com', kite, { block: bare }))
+      .rejects.toMatchObject({ status: 422, code: 'CATALOG_ENTRY_INCOMPLETE' });
+    const after = await db().prepare('SELECT revision FROM managed_exit_catalog WHERE singleton_id = 1')
+      .first<{ revision: number }>();
+    expect(after?.revision).toBe(retired?.revision);
+    expect(await listedNames(e)).not.toContain(kite);
   });
 
   it('records a change receipt after catalog_retire with incremented revision', async () => {

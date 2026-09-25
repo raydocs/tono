@@ -12,6 +12,8 @@ import {
   enqueueRefreshCatalogForUser,
 } from '../../catalog';
 import {
+  assertCatalogHomeProxyName,
+  assertHomeExitUnbound,
   optionalIpv4,
   proxyNameField,
   defaultProxyNameField,
@@ -25,6 +27,7 @@ import {
   findSocks5Home,
   insertSocks5HomeExit,
   upsertHomeBinding,
+  assertHomeExitBindable,
 } from '../../home';
 import {
   writeOpsAudit,
@@ -95,6 +98,7 @@ export async function homeExitsResource(
     if (!['catalog', 'socks5'].includes(kind)) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid kind');
     }
+    assertCatalogHomeProxyName(kind, proxyName);
     const socks5Host = b.socks5Host === undefined || b.socks5Host === null || b.socks5Host === ''
       ? null
       : socks5HostField(b.socks5Host);
@@ -171,6 +175,14 @@ export async function homeExitsResource(
       if (owner && String(owner.user_id) !== userId) {
         throw new ApiError(409, 'HOME_EXIT_IN_USE', 'This home line is already assigned to another user');
       }
+      if (home.socks5_rotation_required_at != null && parsed.password !== String(home.socks5_password)) {
+        // The pasted line carries a new upstream password: that is the rotation.
+        await e.DB.prepare(
+          'UPDATE home_exits SET socks5_password = ?, socks5_rotation_required_at = NULL, updated_at = ? WHERE id = ?',
+        ).bind(parsed.password, now(), home.id).run();
+        home = (await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(home.id).first<Row>())!;
+      }
+      await assertHomeExitBindable(e, userId, String(home.id));
       if (String(home.status) !== 'active') {
         await e.DB.prepare(
           'UPDATE home_exits SET status = ?, display_name = ?, notes = ?, updated_at = ? WHERE id = ?',
@@ -283,10 +295,12 @@ export async function homeExitsResource(
     if (!['active', 'disabled', 'retired'].includes(status)) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
     }
+    if (status === 'retired' && String(existing.status) !== 'retired') await assertHomeExitUnbound(e, mt[1]);
     const kind = b.kind === undefined ? String(existing.kind ?? 'catalog') : str(b.kind, 'kind', 1, 20);
     if (!['catalog', 'socks5'].includes(kind)) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid kind');
     }
+    assertCatalogHomeProxyName(kind, proxyName);
     // Omitted socks5 fields keep their stored values; switching back to
     // catalog wipes them.
     const keep = kind === 'socks5';
@@ -303,17 +317,25 @@ export async function homeExitsResource(
       ? (keep && existing.socks5_password != null ? String(existing.socks5_password) : null)
       : (b.socks5Password === null || b.socks5Password === '' ? null : str(b.socks5Password, 'socks5Password', 1, 255));
     validateHomeSocks5(kind, socks5Host, socks5Port, socks5Username, socks5Password);
+    // Only a different upstream password (or leaving socks5 entirely) ends
+    // the exposure recorded when a previous holder lost the binding.
+    const rotationRequiredAt = kind !== 'socks5'
+      || (existing.socks5_password != null && socks5Password !== String(existing.socks5_password))
+      ? null
+      : (existing.socks5_rotation_required_at == null ? null : Number(existing.socks5_rotation_required_at));
     const t = now();
     try {
       const updated = await e.DB.prepare(
         `UPDATE home_exits
          SET proxy_name = ?, display_name = ?, egress_ipv4 = ?, kind = ?,
              socks5_host = ?, socks5_port = ?, socks5_username = ?, socks5_password = ?,
+             socks5_rotation_required_at = ?,
              status = ?, notes = ?, updated_at = ?
          WHERE id = ?`,
       ).bind(
         proxyName, displayName, egressIpv4, kind,
         socks5Host, socks5Port, socks5Username, socks5Password,
+        rotationRequiredAt,
         status, notes, t, mt[1],
       ).run();
       if (!updated.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
@@ -323,18 +345,18 @@ export async function homeExitsResource(
     }
     const row = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(mt[1]).first<Row>();
     await bumpCatalogRevision(e);
+    // Field names only: the SOCKS5 credential itself never enters the audit log.
+    const changed = ['proxyName', 'displayName', 'egressIpv4', 'kind', 'socks5Host', 'socks5Port',
+      'socks5Username', 'socks5Password', 'status', 'notes'].filter((field) => b[field] !== undefined);
+    await writeOpsAudit(e, actorEmail, 'home.update', 'home_exit', mt[1], `${displayName}: changed ${changed.join(', ') || 'nothing'}`);
     return Response.json({ homeExit: publicHomeExit(row!) });
   }
   if (mt && m === 'DELETE') {
-    const bound = await e.DB.prepare(
-      'SELECT 1 FROM user_home_bindings WHERE home_exit_id = ? LIMIT 1',
-    ).bind(mt[1]).first<Row>();
-    if (bound) {
-      throw new ApiError(409, 'HOME_EXIT_IN_USE', 'Unbind all users before deleting this home exit');
-    }
+    await assertHomeExitUnbound(e, mt[1]);
     const deleted = await e.DB.prepare('DELETE FROM home_exits WHERE id = ?').bind(mt[1]).run();
     if (!deleted.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
     await bumpCatalogRevision(e);
+    await writeOpsAudit(e, actorEmail, 'home.delete', 'home_exit', mt[1], 'deleted');
     return new Response(null, { status: 204 });
   }
   if (resource === 'home-bindings' && m === 'GET') {
@@ -408,22 +430,7 @@ export async function homeExitsResource(
       throw new ApiError(409, 'HOME_EXIT_INACTIVE', 'Home exit must be active before binding');
     }
     const defaultProxyName = await defaultProxyNameField(e, b.defaultProxyName);
-    const t = now();
-    const existing = await e.DB.prepare(
-      'SELECT created_at FROM user_home_bindings WHERE user_id = ?',
-    ).bind(mt[1]).first<Row>();
-    if (existing) {
-      await e.DB.prepare(
-        `UPDATE user_home_bindings
-         SET home_exit_id = ?, default_proxy_name = ?, updated_at = ?
-         WHERE user_id = ?`,
-      ).bind(homeExitId, defaultProxyName, t, mt[1]).run();
-    } else {
-      await e.DB.prepare(
-        `INSERT INTO user_home_bindings(user_id, home_exit_id, default_proxy_name, created_at, updated_at)
-         VALUES(?, ?, ?, ?, ?)`,
-      ).bind(mt[1], homeExitId, defaultProxyName, t, t).run();
-    }
+    const { created } = await upsertHomeBinding(e, mt[1], homeExitId, defaultProxyName);
     const row = await e.DB.prepare(
       `SELECT
          user_home_bindings.user_id,
@@ -446,10 +453,10 @@ export async function homeExitsResource(
     ).bind(mt[1]).first<Row>();
     await bumpCatalogRevision(e);
     await writeOpsAudit(
-      e, actorEmail, existing ? 'home.replace' : 'home.assign', 'user', mt[1],
-      existing ? `replaced home for ${user.email}` : `assigned home for ${user.email}`,
+      e, actorEmail, created ? 'home.assign' : 'home.replace', 'user', mt[1],
+      created ? `assigned home for ${user.email}` : `replaced home for ${user.email}`,
     );
-    return Response.json({ binding: publicHomeBinding(row!) }, { status: existing ? 200 : 201 });
+    return Response.json({ binding: publicHomeBinding(row!) }, { status: created ? 201 : 200 });
   }
   if (mt && m === 'DELETE') {
     const deleted = await e.DB.prepare(

@@ -164,6 +164,16 @@ describe('ops ledger, month close, live FX', () => {
     expect(audit?.action).toBe('ledger.create');
   });
 
+  it('converts a zero-decimal JPY cost to CNY fen at whole-yen scale', async () => {
+    await seedRate(DAY(), 'JPY', 0.0489);
+    const res = await ops('ledger', json({
+      kind: 'cost', category: 'server', subjectType: 'node', subjectId: NODE,
+      amountMinor: 10000, currency: 'JPY', month: MONTH(),
+    }));
+    expect(res.status).toBe(201);
+    expect(assertLedgerEntry(await res.json()).cnyMinor).toBe(48900);
+  });
+
   it('rejects USD revenue with 收款只收人民币', async () => {
     await seedRate(DAY(), 'USD', 7.2);
     const res = await ops('ledger', json({
@@ -239,6 +249,19 @@ describe('ops ledger, month close, live FX', () => {
     expect(current.items.some((row) => row.id === reverse.id)).toBe(true);
     const original = assertList(await (await ops(`ledger?month=${prev}`)).json(), assertLedgerEntry);
     expect(original.items[0].reversedBy).toBe(reverse.id);
+  });
+
+  it('keeps the subject of a reversed entry and of its reversal fixed', async () => {
+    const created = await ops('ledger', json({
+      kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-A',
+      amountMinor: 10000, currency: 'CNY', month: MONTH(),
+    }));
+    const entry = assertLedgerEntry(await created.json());
+    const reverse = assertLedgerEntry(await (await ops(`ledger/${entry.id}/reverse`, json({}))).json());
+    for (const target of [entry.id, reverse.id]) {
+      const moved = await ops(`ledger/${encodeURIComponent(target)}`, json({ subjectId: 'u-B' }, 'PATCH'));
+      expect(moved.status).toBe(409);
+    }
   });
 
   it('summarises two customers on one node at a 3:1 byte split plus one Claude account', async () => {

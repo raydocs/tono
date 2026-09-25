@@ -24,11 +24,11 @@ import {
 } from './legacy-handlers/fleet-nodes';
 import {
   getOpsUsers,
-  getOpsUserHomeBinding,
   getOpsUserDetail,
   postOpsUserOnboard,
   patchOpsUser,
 } from './legacy-handlers/users';
+import { getOpsUserHomeBinding } from './legacy-handlers/user-home-binding';
 import {
   getOpsSignupAllowlist,
   deleteOpsSignupAllowlist,
