@@ -430,6 +430,22 @@
   （`accountProfileWrite`，与待开通资料共用 SET），`users.ts` 496 行。0091 在 main 上未被占用（main 有 0090、0092）。
   验证：`services/control-plane` `npx vitest run` 43 文件 / 929 用例通过；`typecheck`、`check:budgets`、`check:contract`、
   `check-migration-numbers` 通过（仅缺号告警）。「分配 409 时 allowlist 不提交」没有专门用例。未部署。
+- **续记（2026-09-25，列车 #629 在 `cd3e8776` 上的双厂商评审 Opus+Grok 交叉核实；jev-route `cf9d375d`）**：
+  ① `TC2-opus-1 = TC2-grok-1`：已注册客户开通时，家宽绑定（`homeExitId` 的 `upsertHomeBinding`+revision+`refresh_catalog`；
+  粘贴线路的 `home-exits/assign`，可能新建家宽行、轮换密码、退役旧线路）先于 Claude 号分配提交，而分配的两个 409
+  （`PRODUCT_ALREADY_ASSIGNED`、`ACCOUNT_REF_IN_USE`）只靠只读查询即可判定，失败的开通会留下绑定。改为把这两项检查
+  抽成 `assertProductAssignable`（`createAssignedProductAccount` 仍调用同一函数），开通在第一次写入（出口身份签发）之前
+  先跑；`productAccountId` 预检顺带取出 `account_ref`（`onboard-profile.ts` 的 `onboardAllocationRef`，`accountRef`
+  优先，与分配一致）。main 的先绑定后分配顺序、`upsertHomeBinding` 零行拒绝、分配的零行 409 都不变；预检之后仍被并发
+  抢先而 409 时，已提交的绑定有 `home.assign`（或 `home-exits/assign` 自带）审计，不回滚。
+  ② `TC2-grok-2`：`HOME_EXIT_INACTIVE` 原先在查用户之前检查，未注册邮箱带停用家宽会被整单拒绝；改为只在已注册且按
+  `homeExitId` 绑定时检查，未注册路径仍只写 allowlist 与待开通资料。
+  测试：`ops-onboard-profile.test.ts` 扩两个原有 `it`（已分配客户再开通带 `homeExitId` → 409 `PRODUCT_ALREADY_ASSIGNED`，
+  且绑定为空、revision 仍为 5、资料不变；未注册邮箱带 `disabled` 家宽 → 202），在 `cd3e8776` 源码实跑分别失败
+  （`expected { '1': 1 } to be null`、`expected 409 to be 202`），修复后通过。`users.ts` 因此超 500 行预算，
+  ref 解析移到 `onboard-profile.ts`（`users.ts` 497 行）。之后合并 origin/main `33745f7d`（#630，无冲突）。
+  验证（合并后）：`services/control-plane` `npx vitest run` 43 文件 / 929 用例通过；`typecheck`、`check:budgets`、
+  `check:contract` 通过。未部署。
 
 ## 2026-09-24 · 控制面列车 #570 审查续修：设备出口身份只等本次下发的节点
 
