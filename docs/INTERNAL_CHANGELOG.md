@@ -39,7 +39,7 @@
   `commands/account.rs`、`commands/quit.rs`、`commands/mod.rs`、`connection.rs`），tono-core `catalog.rs`
   加 `current_routing()`；macOS `Tono/Services/`（新 `Account/OfflineGrant.swift`，`TonoAPIClient.swift`、
   `AccountSession*.swift`、`AppState*.swift`、`ConfigStorage.swift`、`TonoApp.swift`、`Localizable.xcstrings`）。
-  基线 origin/main a4284413；分支 `fix/issue-582-offline-admission-20260924`，源码 a0a6244e；未合 main。
+  基线 origin/main a4284413；分支 `fix/issue-582-offline-admission-20260924`，源码 a0a6244e；PR #612；未合 main。
   取代 #607 的删除式标记方案。
 - **缺陷修复**：
   - #582：已登录、有已验证目录缓存的用户在控制面不可达（出口可达）时重启，恢复失败进 error，无法连接。
