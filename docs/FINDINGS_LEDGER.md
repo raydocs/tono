@@ -360,6 +360,9 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | TF-opus-4 | exit-agent 停用轮不读计数，上次正常轮到停机之间的流量丢失 | in-PR | [#600](https://github.com/raydocs/tono/issues/600)，[#624](https://github.com/raydocs/tono/pull/624) | 中·已确认 | 撤除后尽力折入最后计数，下一次可上报的轮次报出；永久退役节点仍不上报；需部署到节点 |
 | TF-opus-8 | exit-agent hy2 出错时整轮跳过 Xray 吊销与计数 | in-PR | [#600](https://github.com/raydocs/tono/issues/600)，[#624](https://github.com/raydocs/tono/pull/624) | 中·已确认 | hy2 错误后仍做 Xray 对账并保存计数，再拒绝本轮、不 ACK；需部署到节点 |
 | TC-anthropic-1 | `dual` 阶段新建/重新启用出口节点使所有已退役账户设备目录 503 | open | [#570](https://github.com/raydocs/tono/pull/570) 评论 | 高·推导 | 阻塞 #570 合并与部署 |
+| TM-claude-2 | macOS 当前版本 helper 崩溃循环时修复是空操作，启动只报通用「helper 不可用」，无提示、无管理员修复 | in-PR | [#601](https://github.com/raydocs/tono/issues/601)，PR 待开 | 中·已确认 | Opus 发现，Codex 复核；可弹提示的调用在 25 s 窗口内见 launchd `runs` 增 ≥2 且无应答即走管理员重装；依赖 `launchctl print` 字段；未实机 |
+| TM-claude-4 | macOS 原生更新准备与 `--emergency-disarm/reset` 自行恢复 DNS 时丢掉 `originalDNSRestored:false`，用户不知原 DNS 未放回 | in-PR | [#601](https://github.com/raydocs/tono/issues/601)，PR 待开 | 低·已确认 | 记录在 root 目录，下一次 `/dns/restore` 报一次；紧急命令终端打印；要等 App 下一次 restore |
+| TM-claude-6 | helper 记录 PF 引用写失败 + 崩溃循环时每次重启多取一个 `pfctl -E` token 且永不释放 | in-PR | [#601](https://github.com/raydocs/tono/issues/601)，PR 待开 | 低·已确认 | 改由内核唯一匿名引用（`pfctl -e`）持有后释放新 token；解除后 PF 仍开（无 Tono 规则）至 `pfctl -d`/重启 |
 
 测试覆盖缺口（夹具未跨真实 DLL、无断电/睡眠/多网卡实机、无 parser fuzz 等）不是本账条目，
 见 [审查轮记录](reports/REVIEW_ROUNDS_2026-09-23.md) 的「未覆盖」一节；找到具体失败再作为新条目上报。
