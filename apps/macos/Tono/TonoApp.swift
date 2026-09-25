@@ -35,7 +35,7 @@ struct TonoApp: App {
         )
         _appState = State(initialValue: appState)
         _sidecar = State(initialValue: sidecar)
-        _accountSession = State(initialValue: AccountSession(
+        let accountSession = AccountSession(
             sidecar: sidecar,
             descriptorConsumer: { descriptor in
                 await appState.acceptTonoTransport(descriptor)
@@ -98,8 +98,16 @@ struct TonoApp: App {
                     exitDelayAtMs: Int64(sample.at.timeIntervalSince1970 * 1_000)
                 )
             },
-            routeSplitConsumer: { appState.appTrafficLedger.cumulative }
-        ))
+            routeSplitConsumer: { appState.appTrafficLedger.cumulative },
+            installedCatalogConsumer: { appState.installedManagedCatalogDigests },
+            protectionUnconfirmedConsumer: { appState.isProtectionUnconfirmed }
+        )
+        _accountSession = State(initialValue: accountSession)
+        // #582: Connect asks the account session's offline grant gate first.
+        let offlineGate = accountSession.api.offlineGate
+        appState.accountConnectRefusal = { catalogDigest, routingToken in
+            offlineGate.connectRefusal(catalogDigest: catalogDigest, routingToken: routingToken)
+        }
         // CRITICAL: Purge saved window frames BEFORE SwiftUI's scene management
         // reads them. SwiftUI reads NSWindow Frame / NSSplitView Subview Frames
         // during scene initialization (before applicationDidFinishLaunching),

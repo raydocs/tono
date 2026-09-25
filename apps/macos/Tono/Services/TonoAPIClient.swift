@@ -14,6 +14,27 @@ nonisolated private final class TonoNoRedirectDelegate: NSObject, URLSessionTask
     }
 }
 
+/// The credentials and the account read revision a request started under
+/// (#582). An answer counts for the session only while those credentials are
+/// still the current ones.
+nonisolated private struct SessionScope: Sendable {
+    let generation: UInt64
+    let readScope: UInt64
+}
+
+/// How one exchange's answer bears on the session (#582). Parity with the
+/// Windows `SessionUse`.
+nonisolated private enum SessionUse: Sendable {
+    /// No session: sign-in and other public endpoints.
+    case noSession
+    /// A first attempt with the held access token. Its bare 401 only means
+    /// the token is stale; the renewal that follows answers for the session.
+    case bearer(SessionScope)
+    /// `auth/refresh`, or a replay with a freshly renewed token: a 401 here
+    /// is the server refusing the session.
+    case decisive(SessionScope)
+}
+
 actor TonoAPIClient {
     enum APIError: LocalizedError, Equatable {
         case invalidConfiguration, transport(String), unauthorized, forbidden, notFound
@@ -58,7 +79,7 @@ actor TonoAPIClient {
     /// it names today — expiry and quota still answer 401 `UNAUTHORIZED`, which
     /// is indistinguishable from a stale access token — so the rest are accepted
     /// ahead of that server change instead of needing another client release.
-    private static let entitlementCodes: Set<String> = [
+    static let entitlementCodes: Set<String> = [
         "ACCOUNT_DISABLED",
         "ACCOUNT_EXPIRED",
         "ACCOUNT_SUSPENDED",
@@ -281,6 +302,8 @@ actor TonoAPIClient {
             throw APIError.invalidResponse
         }
         retireCredentialGeneration()
+        // Nothing the server told the previous identity applies to this one.
+        offlineGate.adoptNewIdentity()
         accessToken = auth.accessToken
         accessTokenExpiry = Self.expiry(ofJWT: auth.accessToken)
         do {
@@ -366,6 +389,7 @@ actor TonoAPIClient {
         // A token that cannot be read cannot be revoked; local deletion below
         // is all that remains, as before.
         if (try? currentRefreshToken()) != nil {
+            let scope = SessionScope(generation: generation, readScope: offlineGate.readScope)
             do {
                 let token: String
                 if let accessToken {
@@ -375,14 +399,14 @@ actor TonoAPIClient {
                 }
                 guard generation == credentialGeneration else { return }
                 do {
-                    try await sendLogout(bearer: token)
+                    try await sendLogout(bearer: token, session: .bearer(scope))
                 } catch APIError.unauthorized {
                     guard generation == credentialGeneration else { return }
                     accessToken = nil
                     accessTokenExpiry = nil
                     let renewed = try await refreshAccessToken()
                     guard generation == credentialGeneration else { return }
-                    try await sendLogout(bearer: renewed)
+                    try await sendLogout(bearer: renewed, session: .decisive(scope))
                 }
             } catch {
                 // Refresh or revoke failed: the token is already dead
@@ -418,12 +442,12 @@ actor TonoAPIClient {
         guard !isLoggingOut else { throw CancellationError() }
     }
 
-    private func sendLogout(bearer: String) async throws {
+    private func sendLogout(bearer: String, session: SessionUse) async throws {
         let body = try TonoCoding.encoder().encode(
             TonoLogoutRequest(refreshToken: try? currentRefreshToken())
         )
         _ = try await sendData(
-            "auth/logout", method: "POST", body: body, bearer: bearer
+            "auth/logout", method: "POST", body: body, bearer: bearer, session: session
         )
     }
 
@@ -443,6 +467,7 @@ actor TonoAPIClient {
         if let refreshTask { return try await refreshTask.task.value }
         let id = UUID()
         let generation = credentialGeneration
+        let scope = SessionScope(generation: generation, readScope: offlineGate.readScope)
         let task = Task<String, Error> {
             try requireCredentialGeneration(generation)
             if let pending = unpersistedRefreshToken,
@@ -450,7 +475,12 @@ actor TonoAPIClient {
                 unpersistedRefreshToken = nil
             }
             guard let refresh = try currentRefreshToken() else { throw APIError.unauthorized }
-            let response: TonoTokenResponse = try await publicRequest("auth/refresh", body: TonoRefreshRequest(refreshToken: refresh))
+            // The renewal answers for the session: its 401 is the server refusing it.
+            let response: TonoTokenResponse = try await publicRequest(
+                "auth/refresh",
+                body: TonoRefreshRequest(refreshToken: refresh),
+                session: .decisive(scope)
+            )
             try requireCredentialGeneration(generation)
             accessToken = response.accessToken
             accessTokenExpiry = Self.expiry(ofJWT: response.accessToken)
@@ -472,11 +502,13 @@ actor TonoAPIClient {
         return try await task.value
     }
 
-    private func publicRequest<Response: Decodable, Body: Encodable>(_ path: String, body: Body) async throws -> Response {
-        try await send(path, method: "POST", body: TonoCoding.encoder().encode(body), bearer: nil)
+    private func publicRequest<Response: Decodable, Body: Encodable>(
+        _ path: String, body: Body, session: SessionUse = .noSession
+    ) async throws -> Response {
+        try await send(path, method: "POST", body: TonoCoding.encoder().encode(body), bearer: nil, session: session)
     }
     private func publicGet<Response: Decodable>(_ path: String) async throws -> Response {
-        try await send(path, method: "GET", body: nil, bearer: nil)
+        try await send(path, method: "GET", body: nil, bearer: nil, session: .noSession)
     }
     private func publicAuthRequest<Body: Encodable>(_ path: String, body: Body) async throws -> TonoAuthResponse {
         let envelope: TonoAuthEnvelope = try await publicRequest(path, body: body)
@@ -508,6 +540,7 @@ actor TonoAPIClient {
         requestIsCurrent: (@Sendable () -> Bool)? = nil
     ) async throws -> Response {
         let generation = credentialGeneration
+        let scope = SessionScope(generation: generation, readScope: offlineGate.readScope)
         try requireAuthenticatedRequest(generation)
         try Self.requireCurrent(requestIsCurrent)
         let token = try await currentAccessToken()
@@ -520,6 +553,7 @@ actor TonoAPIClient {
                 method: method,
                 body: bodyData,
                 bearer: token,
+                session: .bearer(scope),
                 additionalHeaders: additionalHeaders,
                 requestIsCurrent: requestIsCurrent
             )
@@ -540,6 +574,7 @@ actor TonoAPIClient {
                     method: method,
                     body: bodyData,
                     bearer: renewed,
+                    session: .decisive(scope),
                     additionalHeaders: additionalHeaders,
                     requestIsCurrent: requestIsCurrent
                 )
@@ -556,34 +591,36 @@ actor TonoAPIClient {
     }
     private func authorizedVoid(_ path: String, method: String) async throws {
         let generation = credentialGeneration
+        let scope = SessionScope(generation: generation, readScope: offlineGate.readScope)
         try requireAuthenticatedRequest(generation)
         let token = try await currentAccessToken()
         try requireAuthenticatedRequest(generation)
-        do { _ = try await sendData(path, method: method, body: nil, bearer: token) }
+        do { _ = try await sendData(path, method: method, body: nil, bearer: token, session: .bearer(scope)) }
         catch APIError.unauthorized {
             try requireAuthenticatedRequest(generation)
             accessToken = nil
             accessTokenExpiry = nil
             let renewed = try await refreshAccessToken()
             try requireAuthenticatedRequest(generation)
-            _ = try await sendData(path, method: method, body: nil, bearer: renewed)
+            _ = try await sendData(path, method: method, body: nil, bearer: renewed, session: .decisive(scope))
         }
         try requireAuthenticatedRequest(generation)
     }
     private func authorizedVoid<Body: Encodable>(_ path: String, method: String, body: Body) async throws {
         let generation = credentialGeneration
+        let scope = SessionScope(generation: generation, readScope: offlineGate.readScope)
         try requireAuthenticatedRequest(generation)
         let token = try await currentAccessToken()
         try requireAuthenticatedRequest(generation)
         let bodyData = try TonoCoding.encoder().encode(body)
-        do { _ = try await sendData(path, method: method, body: bodyData, bearer: token) }
+        do { _ = try await sendData(path, method: method, body: bodyData, bearer: token, session: .bearer(scope)) }
         catch APIError.unauthorized {
             try requireAuthenticatedRequest(generation)
             accessToken = nil
             accessTokenExpiry = nil
             let renewed = try await refreshAccessToken()
             try requireAuthenticatedRequest(generation)
-            _ = try await sendData(path, method: method, body: bodyData, bearer: renewed)
+            _ = try await sendData(path, method: method, body: bodyData, bearer: renewed, session: .decisive(scope))
         }
         try requireAuthenticatedRequest(generation)
     }
@@ -593,6 +630,7 @@ actor TonoAPIClient {
         method: String,
         body: Data?,
         bearer: String?,
+        session: SessionUse,
         additionalHeaders: [String: String] = [:],
         requestIsCurrent: (@Sendable () -> Bool)? = nil
     ) async throws -> Response {
@@ -601,6 +639,7 @@ actor TonoAPIClient {
             method: method,
             body: body,
             bearer: bearer,
+            session: session,
             additionalHeaders: additionalHeaders,
             requestIsCurrent: requestIsCurrent
         )
@@ -612,6 +651,7 @@ actor TonoAPIClient {
         method: String,
         body: Data?,
         bearer: String?,
+        session: SessionUse,
         additionalHeaders: [String: String] = [:],
         requestIsCurrent: (@Sendable () -> Bool)? = nil
     ) async throws -> Data {
@@ -714,6 +754,7 @@ actor TonoAPIClient {
                 )
                 continue
             }
+            reportSessionAnswer(status: http.statusCode, body: data, session: session)
             guard (200..<300).contains(http.statusCode) else {
                 var rejectionDetails = auditDetails.merging([
                     "duration_ms": Self.durationMilliseconds(since: requestStartedAt),
@@ -755,6 +796,71 @@ actor TonoAPIClient {
             return data
         }
         throw APIError.transport("Retry attempts exhausted.")
+    }
+
+    /// #582: the one place this client reads the server's answer about the
+    /// session. It sits below the transport retry and below every renewal, so
+    /// each answer is classified and reported whatever its caller then does
+    /// with it (a logout that swallows it, a catalog read that keeps the last
+    /// cache). Only an HTTP answer is classified: an `unauthorized` this client
+    /// throws on its own (no stored token) never reaches the sink.
+    private func reportSessionAnswer(status: Int, body: Data, session: SessionUse) {
+        let scope: SessionScope
+        let decisive: Bool
+        switch session {
+        case .noSession:
+            return
+        case let .bearer(value):
+            scope = value
+            decisive = false
+        case let .decisive(value):
+            scope = value
+            decisive = true
+        }
+        // A retired identity's late answer must never reach its replacement.
+        guard scope.generation == credentialGeneration else { return }
+        let verdict: TonoSessionVerdict
+        if (200..<300).contains(status) {
+            verdict = .verified
+        } else {
+            let code = (try? TonoCoding.decoder().decode(ErrorEnvelope.self, from: body))?.error.code
+            if status == 401 || status == 403, let code, Self.entitlementCodes.contains(code) {
+                verdict = .refused(code: code)
+            } else if status == 401, decisive {
+                verdict = .refused(code: code)
+            } else if status == 403 {
+                verdict = .forbidden
+            } else {
+                // A first attempt's bare 401 is only a stale access token, and
+                // any other status says nothing about the session.
+                return
+            }
+        }
+        offlineGate.report(verdict, readScope: scope.readScope)
+    }
+
+    /// #582: the digest of the refresh token this session holds now, as it
+    /// was hydrated (a rotated token still in memory first), for offline
+    /// admission.
+    func currentRefreshTokenDigest() -> String? {
+        guard let token = try? currentRefreshToken() else { return nil }
+        return OfflineGrantGate.tokenDigest(token)
+    }
+
+    /// #582: record the offline grant for a catalog the server has just
+    /// confirmed. It binds only a refresh token the keychain acknowledged: a
+    /// rotated token that is only in memory would leave a grant no relaunch
+    /// could match, and a logout in progress owns these credentials.
+    func recordOfflineGrant(accountId: String, confirmed digests: InstalledCatalogDigests) {
+        guard unpersistedRefreshToken == nil, !isLoggingOut,
+              let token = try? keychain.string(for: .refreshToken) else { return }
+        offlineGate.writeGrant(OfflineGrant(
+            accountId: accountId,
+            tokenSha256: OfflineGrantGate.tokenDigest(token),
+            catalogSha256: digests.catalogSha256,
+            routingSha256: digests.routingSha256,
+            verifiedAt: Int64(Date().timeIntervalSince1970 * 1_000)
+        ))
     }
 
     nonisolated private static func requireCurrent(

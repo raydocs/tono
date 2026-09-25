@@ -234,7 +234,7 @@ extension AppState {
     /// proxies digest, and that is the change that leaves a client dialing
     /// retired credentials. The credential is hashed, never stored or logged in
     /// the clear.
-    private static func catalogRoutingToken(
+    static func catalogRoutingToken(
         routing: TonoExitCatalogRouting?
     ) -> String {
         var homeSocks5 = ""
@@ -257,6 +257,15 @@ extension AppState {
             .replacingOccurrences(of: "=", with: "")
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
+    }
+
+    /// #582: what Connect would dial from memory now, as an offline grant
+    /// records it. Nil while no managed exit is installed.
+    var installedManagedCatalogDigests: InstalledCatalogDigests? {
+        guard managedCatalogNodeCount > 0,
+              let digest = managedCatalogDigest,
+              let routing = managedCatalogRoutingToken else { return nil }
+        return InstalledCatalogDigests(catalogSha256: digest, routingSha256: routing)
     }
 
     /// True only when every part of the freshness key matches what is already

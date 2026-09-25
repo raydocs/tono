@@ -597,5 +597,8 @@ extension AccountSession {
         deviceActionError = nil
         entitlementDetail = nil
         blockedWhileReady = false
+        // An offline admission described the account just cleared (#582).
+        api.offlineGate.leaveOffline()
+        offlineVerifiedAt = nil
     }
 }

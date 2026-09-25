@@ -6059,6 +6059,16 @@
         }
       }
     },
+    "The cloud servers no longer match what Tono last verified. Connect again when Tono is reachable.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "云端节点与 Tono 上次验证的内容不一致。请在能连接 Tono 时再连接。"
+          }
+        }
+      }
+    },
     "The connection attempt stalled and was stopped.": {
       "localizations": {
         "zh-Hans": {
@@ -6559,6 +6569,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tono 无法解除上一次会话遗留的保护状态。请运行文档中的 sudo 紧急解除命令，然后重新打开 Tono。%@"
+          }
+        }
+      }
+    },
+    "Tono did not accept this session. Connect stays blocked until Tono verifies it again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 未接受此会话。在 Tono 重新验证之前，无法连接。"
           }
         }
       }

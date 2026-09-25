@@ -27,6 +27,14 @@ nonisolated enum TonoSessionVerdict: Equatable, Sendable {
     case forbidden
 }
 
+/// One classified answer, tagged with the account read revision its request
+/// started under: a refusal that belongs to a retired presentation must not
+/// suspend the one that replaced it.
+nonisolated struct SessionVerdictReport: Sendable {
+    let verdict: TonoSessionVerdict
+    let readScope: UInt64
+}
+
 /// What Connect dials from memory: the installed catalog's digest and its
 /// routing token.
 nonisolated struct InstalledCatalogDigests: Equatable, Sendable {
@@ -81,15 +89,75 @@ nonisolated private struct OfflineGrantRecord: Codable {
         routingSha256 = grant.routingSha256
         verifiedAt = grant.verifiedAt
     }
+
+    init(revokedFor reason: String, at: Int64) {
+        verdict = "revoked"
+        self.reason = reason
+        self.at = at
+    }
+
+    var grant: OfflineGrant? {
+        guard verdict == "granted", let tokenSha256, let catalogSha256,
+              let routingSha256, let verifiedAt else { return nil }
+        return OfflineGrant(
+            accountId: accountId,
+            tokenSha256: tokenSha256,
+            catalogSha256: catalogSha256,
+            routingSha256: routingSha256,
+            verifiedAt: verifiedAt
+        )
+    }
+
+    var revocationReason: String? {
+        guard verdict == "revoked", at != nil else { return nil }
+        return reason
+    }
 }
 
 /// Offline eligibility of this process's session, and the one writer of
-/// `offline-grant.json`.
+/// `offline-grant.json`. `TonoAPIClient` reports every classified server
+/// answer here from its own actor; the account session and Connect read it on
+/// the main actor. One lock guards all of it and the file is written under
+/// that lock, so a grant whose revocation check passed can never land after
+/// the tombstone of a revocation that came later.
 nonisolated final class OfflineGrantGate: @unchecked Sendable {
     static let fileName = "offline-grant.json"
 
+    /// Offline eligibility in memory, ordered by severity. A later `verified`
+    /// answer lifts `forbidden`: the server accepted the session and refused
+    /// only one request. `refused` lifts only when a sign-in adopts a new
+    /// identity or `me()` accepts the account again (`readmit`).
+    nonisolated private enum Revocation: Int, Comparable {
+        case eligible, forbidden, refused
+
+        static func < (lhs: Revocation, rhs: Revocation) -> Bool {
+            lhs.rawValue < rhs.rawValue
+        }
+    }
+
+    private static let refusedReason = "refused"
+    /// A tombstone for another 403 revokes offline eligibility only; it never
+    /// suspends the account.
+    private static let forbiddenReason = "forbidden"
+    private static let maximumFileBytes = 64 * 1024
+    private static let tombstoneRetryInitial: Duration = .seconds(1)
+    private static let tombstoneRetryMaximum: Duration = .seconds(30)
+
     let fileURL: URL
     private let lock = NSLock()
+    /// Set synchronously when an answer is reported, so Connect refuses
+    /// before any UI or disk catches up.
+    private var revocation = Revocation.eligible
+    /// The grant this session was admitted on while no server answer has
+    /// arrived yet. Nil online.
+    private var admittedGrant: OfflineGrant?
+    /// The newest revocation the disk has not acknowledged.
+    private var pendingTombstone: OfflineGrantRecord?
+    private var tombstoneWriterRunning = false
+    /// The account session's read revision, mirrored so each request carries
+    /// the one it started under.
+    private var accountReadScope: UInt64 = 0
+    private var verdictHandler: (@Sendable (SessionVerdictReport) -> Void)?
 
     init(directory: URL) {
         fileURL = directory.appendingPathComponent(Self.fileName)
@@ -102,27 +170,218 @@ nonisolated final class OfflineGrantGate: @unchecked Sendable {
             .joined()
     }
 
-    /// Record a server-verified session.
+    // MARK: Account side
+
+    var readScope: UInt64 {
+        lock.lock(); defer { lock.unlock() }
+        return accountReadScope
+    }
+
+    func noteReadScope(_ scope: UInt64) {
+        lock.lock(); defer { lock.unlock() }
+        accountReadScope = scope
+    }
+
+    /// Who hears each classified answer, after memory and disk took it. The
+    /// account session installs it and carries a refusal into its state.
+    func setVerdictHandler(_ handler: (@Sendable (SessionVerdictReport) -> Void)?) {
+        lock.lock(); defer { lock.unlock() }
+        verdictHandler = handler
+    }
+
+    /// When Tono verified the grant this session was admitted on, while no
+    /// server answer has ended offline mode.
+    var offlineVerifiedAt: Date? {
+        lock.lock(); defer { lock.unlock() }
+        return admittedGrant.map(Self.date(of:))
+    }
+
+    func leaveOffline() {
+        lock.lock(); defer { lock.unlock() }
+        admittedGrant = nil
+    }
+
+    /// A sign-in adopted a new identity: nothing the server told the previous
+    /// one applies to it. A tombstone still waiting for the disk keeps
+    /// retrying; landing after the new grant, it fails closed until the next
+    /// catalog sync records the grant again.
+    func adoptNewIdentity() {
+        lock.lock(); defer { lock.unlock() }
+        revocation = .eligible
+        admittedGrant = nil
+    }
+
+    /// `me()` accepted the account again (a launch, Check again): a refusal
+    /// this process heard earlier no longer stands.
+    func readmit() {
+        lock.lock(); defer { lock.unlock() }
+        revocation = .eligible
+    }
+
+    /// Offline admission (#582): compare the grant with what is in memory
+    /// now — the hydrated refresh token and the catalog the launch installed.
+    /// The catalog cache is never re-read here: memory is what Connect dials.
+    /// Reading the grant file is the only I/O.
+    func admit(tokenSha256: String?, installed: InstalledCatalogDigests?) -> OfflineAdmission {
+        lock.lock(); defer { lock.unlock() }
+        // A new restore decides afresh whether this launch runs offline.
+        admittedGrant = nil
+        switch revocation {
+        case .eligible: break
+        case .forbidden: return .refused("the server forbade this session")
+        case .refused: return .revoked(reason: Self.refusedReason)
+        }
+        guard let record = readLocked() else { return .refused("no readable offline grant") }
+        if let reason = record.revocationReason {
+            return reason == Self.forbiddenReason
+                ? .refused("the server forbade this session")
+                : .revoked(reason: reason)
+        }
+        guard let grant = record.grant else { return .refused("no readable offline grant") }
+        if let mismatch = Self.mismatch(grant, tokenSha256: tokenSha256, installed: installed) {
+            return .refused(mismatch)
+        }
+        admittedGrant = grant
+        return .admitted(verifiedAt: Self.date(of: grant))
+    }
+
+    /// Connect's account gate (#582 rule 5): a revoked session is refused in
+    /// any state, and an offline session must still hold exactly the catalog
+    /// its grant verified. The token is not compared again: offline nothing
+    /// rotates it, and a renewal that could is a server answer that ended
+    /// offline mode.
+    func connectRefusal(catalogDigest: String?, routingToken: String?) -> String? {
+        lock.lock(); defer { lock.unlock() }
+        if revocation != .eligible {
+            return String(localized: "Tono did not accept this session. Connect stays blocked until Tono verifies it again.")
+        }
+        guard let grant = admittedGrant else { return nil }
+        guard grant.catalogSha256 == catalogDigest, grant.routingSha256 == routingToken else {
+            return String(localized: "The cloud servers no longer match what Tono last verified. Connect again when Tono is reachable.")
+        }
+        return nil
+    }
+
+    /// Record a server-verified session (#582 rule 1). Skipped while this
+    /// session is revoked.
     @discardableResult
     func writeGrant(_ grant: OfflineGrant) -> Bool {
         lock.lock(); defer { lock.unlock() }
+        guard revocation == .eligible else { return false }
         return (try? writeLocked(OfflineGrantRecord(granted: grant))) != nil
     }
 
-    /// Offline admission. Not implemented yet: every launch keeps its error.
-    func admit(tokenSha256: String?, installed: InstalledCatalogDigests?) -> OfflineAdmission {
-        .refused("offline admission is not implemented")
+    // MARK: Sink side
+
+    /// One classified answer for the current credentials, from
+    /// `TonoAPIClient`'s actor. Memory first (Connect refuses from here on),
+    /// then the durable overwrite, then the account session, which hears a
+    /// refusal and the end of offline mode. Offline mode ends at the first
+    /// server answer, whatever it says.
+    func report(_ verdict: TonoSessionVerdict, readScope: UInt64) {
+        lock.lock()
+        var startWriter = false
+        var refused = false
+        switch verdict {
+        case .verified:
+            if revocation == .forbidden { revocation = .eligible }
+        case .forbidden:
+            startWriter = revokeLocked(.forbidden, reason: OfflineGrantGate.forbiddenReason)
+        case let .refused(code):
+            refused = true
+            let reason = code.map { "\(OfflineGrantGate.refusedReason): \($0)" }
+            startWriter = revokeLocked(.refused, reason: reason ?? OfflineGrantGate.refusedReason)
+        }
+        let leftOffline = admittedGrant != nil
+        admittedGrant = nil
+        let handler = refused || leftOffline ? verdictHandler : nil
+        lock.unlock()
+        if startWriter {
+            Task.detached { [self] in await self.writeTombstoneUntilDurable() }
+        }
+        handler?(SessionVerdictReport(verdict: verdict, readScope: readScope))
     }
 
-    /// Connect's account gate. Not implemented yet: nothing is refused here.
-    func connectRefusal(catalogDigest: String?, routingToken: String?) -> String? {
-        nil
+    /// #582 rule 3: overwrite the grant with the verdict, never delete it.
+    /// Returns whether a retry writer has to start for a disk that refused.
+    private func revokeLocked(_ level: Revocation, reason: String) -> Bool {
+        let previous = revocation
+        revocation = max(revocation, level)
+        // Another 403 after a refusal must not record a lesser verdict.
+        guard level >= previous else { return false }
+        let tombstone = OfflineGrantRecord(revokedFor: reason, at: Self.nowMilliseconds())
+        do {
+            try writeLocked(tombstone)
+            pendingTombstone = nil
+            return false
+        } catch {
+            pendingTombstone = tombstone
+            LocalTrafficAudit.shared.recordEvent(
+                "offline_grant_revocation_not_durable",
+                details: ["reason": reason, "error": String(describing: error)]
+            )
+            guard !tombstoneWriterRunning else { return false }
+            tombstoneWriterRunning = true
+            return true
+        }
     }
 
-    /// The verdict sink. Not implemented yet: answers change nothing.
-    func report(_ verdict: TonoSessionVerdict, readScope: UInt64) {}
+    private func writeTombstoneUntilDurable() async {
+        var delay = Self.tombstoneRetryInitial
+        while true {
+            try? await Task.sleep(for: delay)
+            if writePendingTombstone() { return }
+            delay = min(delay * 2, Self.tombstoneRetryMaximum)
+        }
+    }
+
+    /// True once no revocation waits for the disk; the writer then stops.
+    private func writePendingTombstone() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if let tombstone = pendingTombstone {
+            guard (try? writeLocked(tombstone)) != nil else { return false }
+            pendingTombstone = nil
+        }
+        tombstoneWriterRunning = false
+        return true
+    }
+
+    // MARK: File
+
+    private func readLocked() -> OfflineGrantRecord? {
+        guard let data = ConfigStorage.shared.readSensitive(
+            at: fileURL,
+            maximumBytes: Self.maximumFileBytes
+        ) else { return nil }
+        return try? JSONDecoder().decode(OfflineGrantRecord.self, from: data)
+    }
 
     private func writeLocked(_ record: OfflineGrantRecord) throws {
         try ConfigStorage.shared.writeSensitive(JSONEncoder().encode(record), to: fileURL)
+    }
+
+    private static func mismatch(
+        _ grant: OfflineGrant,
+        tokenSha256: String?,
+        installed: InstalledCatalogDigests?
+    ) -> String? {
+        guard let tokenSha256 else { return "no session token in memory" }
+        guard tokenSha256 == grant.tokenSha256 else {
+            return "the grant belongs to another session token"
+        }
+        guard let installed else { return "no installed exits" }
+        guard installed.catalogSha256 == grant.catalogSha256,
+              installed.routingSha256 == grant.routingSha256 else {
+            return "the catalog in memory is not the one the grant verified"
+        }
+        return nil
+    }
+
+    private static func date(of grant: OfflineGrant) -> Date {
+        Date(timeIntervalSince1970: TimeInterval(grant.verifiedAt) / 1_000)
+    }
+
+    private static func nowMilliseconds() -> Int64 {
+        Int64(Date().timeIntervalSince1970 * 1_000)
     }
 }

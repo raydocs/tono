@@ -844,6 +844,7 @@ final class AppState {
     func attemptAutomaticConnect() {
         guard !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect,
               autoConnectRequested, initialDataLoaded, isTonoReady,
+              accountConnectRefusal(managedCatalogDigest, managedCatalogRoutingToken) == nil,
               !catalogSelectionRequiresChoice, !isConnected, !isConnecting else { return }
         // connect() silently no-ops while a previous disconnect drains. The
         // intent flag must survive that window, or a crash-recovery launch

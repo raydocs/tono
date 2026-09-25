@@ -53,6 +53,9 @@ final class AccountSession {
     var uploadingSupportReportID: UUID?
     func invalidateAccountReads() {
         accountReadRevision &+= 1
+        // Each request carries the revision it started under, so a refusal of
+        // a retired presentation cannot suspend the one replacing it (#582).
+        api.offlineGate.noteReadScope(accountReadRevision)
         discardSupportReport()
     }
 
@@ -118,6 +121,8 @@ final class AccountSession {
     /// When Tono last verified the grant this session runs on while it cannot
     /// reach Tono (#582). Nil online.
     var offlineVerifiedAt: Date?
+    /// Asks Tono for the account again while Ready offline, until it answers.
+    var offlineVerificationTask: Task<Void, Never>?
     let exitNode: String
     var runtimeMonitor: Task<Void, Never>?
     var catalogSyncTask: Task<Void, Never>?
@@ -348,5 +353,6 @@ final class AccountSession {
         self.installedCatalogConsumer = installedCatalogConsumer
         self.protectionUnconfirmedConsumer = protectionUnconfirmedConsumer
         installConnectFailureReporting()
+        installSessionVerdictSink()
     }
 }
