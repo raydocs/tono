@@ -32,6 +32,63 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-24 · 控制面不可达时凭离线授权进入 Ready；服务端拒绝统一经单一漏斗吊销（Windows + macOS）
+
+- **归属/来源**：G2 连不上有下一手；Issue #582（总账 H21-O-F1）。Windows `crates/tono-core/src/auth.rs`、
+  `src-tauri/src/tono/`（新 `offline_grant.rs`，`state.rs`、`catalog_sync.rs`、`commands/restore.rs`、
+  `commands/account.rs`、`commands/quit.rs`、`commands/mod.rs`、`connection.rs`），tono-core `catalog.rs`
+  加 `current_routing()`；macOS `Tono/Services/`（新 `Account/OfflineGrant.swift`，`TonoAPIClient.swift`、
+  `AccountSession*.swift`、`AppState*.swift`、`ConfigStorage.swift`、`TonoApp.swift`、`Localizable.xcstrings`）。
+  基线 origin/main a4284413；分支 `fix/issue-582-offline-admission-20260924`，源码 a0a6244e；未合 main。
+  取代 #607 的删除式标记方案。
+- **缺陷修复**：
+  - #582：已登录、有已验证目录缓存的用户在控制面不可达（出口可达）时重启，恢复失败进 error，无法连接。
+    现在：`me()` 仅因传输错误或恢复预算耗尽而失败时，若保护状态已知、`offline-grant.json` 为 granted、
+    其 refresh token 摘要与内存中水合的 token 相同、catalog/routing 摘要与内存 tracker 相同且有节点，
+    进 Ready 并标记离线（Windows 状态字段 `offlineVerifiedAtMs`）；401/403/5xx/无效响应不走此路。
+    比对只用内存，不重读目录缓存。授权只在本进程目录同步拿到服务端响应（安装或未变）且凭据存储确认
+    token 已落盘后写入，摘要取自该服务端响应，不取启动时从磁盘种下的 tracker。
+  - 服务端拒绝的识别此前分散在各调用点、依赖 `ApiError::Unauthorized`（本地也会产生），重试收到的
+    401、提前续期被吞掉的 refresh 401 会漏掉。现在 Windows 的 `ApiClient::exchange` 与 macOS 的
+    `TonoAPIClient.sendData` 是读取服务端答复的唯一位置（在传输重试与续期吞错之下），按请求用途分类：
+    2xx→Verified；refresh 或用新 token 重放的 401、带权益码（6 个，两端一致）的 401/403→Refused；
+    其它 403→Forbidden；首次请求的 401 只表示 access token 过期，不算拒绝。判决带发起时的身份代次，
+    身份已更替的迟到答复丢弃。
+  - 吊销：Refused/Forbidden 先在内存置位（Connect 与自动重连立即拒绝），再把授权文件**覆盖写**为
+    `{verdict:"revoked",reason,at}`，失败按 1 s→30 s 退避重试；Windows 退出时最多等 3 s。Refused
+    挂起账户（保护不动），Forbidden 只取消离线资格。离线模式在收到第一个分类答复时结束。
+- **新增/优化**：离线 Ready 期间 Connect 前再次比对授权与内存；macOS 离线期间每 60 s 重试 `me()`。
+  无前端改动（Windows 未展示 `offlineVerifiedAtMs`）。
+- **工程与测试**：每个行为一个回归（规则 5），均先在 CI 上红、再转绿。
+  - tono-core T1 `a_refresh_refused_on_the_transport_retry_reports_one_refusal`、
+    T2 `a_refusal_during_early_renewal_is_reported_but_a_retired_identitys_is_not`。
+  - Windows app T3 `restore::offline_admission_tests::unreachable_restore_is_ready_offline_only_on_a_grant_matching_memory`、
+    T4 `offline_grant::tests::refusal_revokes_memory_at_once_and_retries_the_tombstone_until_it_lands`、
+    T5 `connection::tests::offline_ready_connect_is_refused_as_soon_as_the_server_forbids_the_session`。
+  - macOS M1 `testUnreachableRestoreIsReadyOfflineOnlyOnAGrantMatchingMemory`、
+    M2 `testARefusedRenewalOverwritesTheOfflineGrantAsRevoked`（AccountSessionRequestTests）、
+    M3 `testOfflineConnectIsRefusedAsSoonAsTheServerRevokesTheSession`（ManagedExitCatalogOwnershipTests）。
+  - 15dad8f0 在 macOS 编译失败（新参数 `session` 遮蔽 `URLSession` 属性），a0a6244e 修正；属编译错误，
+    非运行时缺陷。
+- **验证**：本机未执行 cargo/xcodebuild（执行位置规则）。
+  - 红：Windows CI 36070390689（19370636，`core` 仅 T1/T2 断言失败，271 通过）；36073146186（0b97c3ff，
+    `app-rust` 仅 T3/T4/T5 断言失败，526 通过）；macOS CI 36075897145（3fea479a，仅 M1–M3 断言失败）。
+  - 绿：Windows CI 36070556159（bd124d1f，四作业全绿，`core` 273 通过）；36074223673（fda90ebb，四作业全绿，
+    `app-rust` 529 通过）；macOS CI 36077017209（a0a6244e，四作业全绿，TonoTests 428 例 0 失败）。
+    a0a6244e 之后的提交只改 macOS 与文档，Windows 结果沿用 fda90ebb。
+  - 未实机：设计文档的完成条件（黑洞控制面后启动→离线 Ready→连接；服务端吊销后恢复连通→挂起；
+    B 覆盖 A 缓存后离线重启被拒）未在设备上执行。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：
+  - refresh token 每次续期都会轮换；轮换后到下一次目录同步（≤300 s）之间授权失配，离线启动被拒（fail-closed）。
+  - 退出等待有上限（Windows 3 s，且关机路径总预算 2.5 s 可能截断；macOS 不等待）；超出时旧授权可能留在磁盘，
+    下次离线启动仍可准入，直到首个服务端答复。授权文件读取未做属主/ACL 校验（Windows）；macOS 读取校验 0600 与属主。
+  - Forbidden 会挡住在线 Connect 直到下一个 2xx（最长约一个同步周期）；Worker 目前在客户端端点不返回此类 403。
+  - 旧账户未落盘的 tombstone 可能在新账户授权之后写入，新账户离线启动失败（fail-closed），下一次同步重写。
+  - macOS：`me()` 重新接受账户时解除 Refused（Windows 只在重新登录时解除）；离线启动后 `inner.account`/`user`
+    为空，直到联网后刷新账户。
+  - 真正的授权来源是出口 roster；客户端文件不是权益凭证，未加客户端离线时长上限。
+
 ## 2026-09-24 · Windows 启动恢复的备用路径在预算内运行；重试收到的拒绝不再被当作网络失败
 
 - **归属/来源**：G2 连不上有下一手；Windows `src-tauri/src/tono/transport.rs` 与
