@@ -31,6 +31,7 @@ import {
   assignedProductForUser,
   replaceCountForUser,
   createAssignedProductAccount,
+  assertProductAssignable,
 } from '../../product-account';
 import {
   rejectUnexpectedKeys,
@@ -187,16 +188,21 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
   // For a customer who has not registered yet these wait on the allowlist row
   // and are copied at first sign-in, so the account keeps the operator's expiry.
   const { expiresAt, plan } = onboardEntitlement(b);
+  // The account_ref the Claude allocation below would take, checked before
+  // any write; accountRef wins over productAccountId, as it does there.
+  let allocationRef: string | null = null;
   if (b.accountRef !== undefined && b.accountRef !== null && b.accountRef !== '') {
-    accountRefField(b.accountRef);
+    allocationRef = accountRefField(b.accountRef);
   }
   if (b.productAccountId !== undefined && b.productAccountId !== null && b.productAccountId !== '') {
     const productAccountId = str(b.productAccountId, 'productAccountId', 1, 100);
     const pooled = await e.DB.prepare(
-      'SELECT id FROM product_accounts WHERE id = ?',
+      'SELECT id, account_ref FROM product_accounts WHERE id = ?',
     ).bind(productAccountId).first<Row>();
     if (!pooled) throw new ApiError(404, 'NOT_FOUND', 'Product account not found');
+    allocationRef ??= String(pooled.account_ref);
   }
+  let homeExitActive = true;
   if (b.homeExitId !== undefined && b.homeExitId !== null && b.homeExitId !== '') {
     const homeExitId = str(b.homeExitId, 'homeExitId', 1, 100);
     const home = await e.DB.prepare(
@@ -205,11 +211,7 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
     if (!home) {
       throw new ApiError(400, 'HOME_ASSIGN_FAILED', 'Could not assign the pasted home line');
     }
-    // Same rule as PUT users/{id}/home-binding: binding a non-active line
-    // would fail the user's whole catalog closed.
-    if (String(home.status) !== 'active') {
-      throw new ApiError(409, 'HOME_EXIT_INACTIVE', 'Home exit must be active before binding');
-    }
+    homeExitActive = String(home.status) === 'active';
   }
   const parsedLine = b.line !== undefined && b.line !== null && b.line !== ''
     ? parseHomeLine(b.line)
@@ -232,9 +234,20 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
     }
   }
   if (user && !parsedLine && b.homeExitId) {
+    // Same rule as PUT users/{id}/home-binding: binding a non-active line
+    // would fail the user's whole catalog closed. Only a registered customer
+    // is bound, so an unregistered email still gets the grant and profile.
+    if (!homeExitActive) {
+      throw new ApiError(409, 'HOME_EXIT_INACTIVE', 'Home exit must be active before binding');
+    }
     // upsertHomeBinding below refuses a line awaiting rotation; refuse it
     // here instead, before the allowlist and profile writes.
     await assertHomeExitBindable(e, String(user.id), String(b.homeExitId));
+  }
+  if (user && allocationRef !== null) {
+    // The allocation's 409s, before the exit identity and the home binding
+    // below commit, so a request that will be refused changes nothing.
+    await assertProductAssignable(e, String(user.id), allocationRef);
   }
   const createdAt = now();
   const storeProfile = b.notes !== undefined || b.contact !== undefined || b.wechatId !== undefined
@@ -288,8 +301,9 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
       );
       await bumpCatalogRevision(e);
       await enqueueRefreshCatalogForUser(e, String(user.id));
-      // Audited here, not only by the closing user.onboard row: a later
-      // account-assignment 409 would otherwise leave this binding unrecorded.
+      // Audited here, not only by the closing user.onboard row: an assignment
+      // that races past the check above and 409s would otherwise leave this
+      // binding unrecorded.
       await writeOpsAudit(e, actor.email, 'home.assign', 'user', String(user.id), `onboard bound home for ${address}`);
     }
     binding = await loadHomeBinding(e, String(user.id));

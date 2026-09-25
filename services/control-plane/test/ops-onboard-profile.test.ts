@@ -111,8 +111,13 @@ describe('ops onboard pending profile', () => {
 
   it('stores wechatId/contact/notes on the allowlist until the customer registers', async () => {
     const email = 'pending-profile@example.com';
+    // Nothing is bound before registration, so a disabled line does not block the grant.
+    await db().prepare(
+      `INSERT INTO home_exits(id, proxy_name, display_name, status, created_at, updated_at)
+       VALUES('h-off', 'h-off', '家宽 Off', 'disabled', ?, ?)`,
+    ).bind(NOW, NOW).run();
     const onboarded = await ops('users/onboard', json({
-      email, wechatId: 'wxid_pending', contact: 'wechat-phone', notes: 'vip drawer',
+      email, wechatId: 'wxid_pending', contact: 'wechat-phone', notes: 'vip drawer', homeExitId: 'h-off',
     }));
     expect(onboarded.status).toBe(202);
     const onboardBody = await onboarded.json() as {
@@ -198,17 +203,30 @@ describe('ops onboard pending profile', () => {
     expect(audit?.target_id).toBe('u-raced');
   });
 
-  it('leaves the profile and expiry untouched when the Claude account assignment fails', async () => {
+  it('leaves the binding, catalog revision, profile and expiry untouched when the Claude account assignment fails', async () => {
     await seedUser('u-assigned', 'assigned@example.com');
+    await db().prepare(
+      `INSERT OR REPLACE INTO managed_exit_catalog(singleton_id, revision, ciphertext, nonce, content_sha256, updated_at)
+       VALUES(1, 5, 'c', 'n', 's', ?)`,
+    ).bind(NOW).run();
+    await db().prepare(
+      `INSERT INTO home_exits(id, proxy_name, display_name, status, created_at, updated_at)
+       VALUES('h-assign', 'h-assign', '家宽 Assign', 'active', ?, ?)`,
+    ).bind(NOW, NOW).run();
     const first = await ops('users/onboard', json({ email: 'assigned@example.com', accountRef: 'acct-a@example.com' }));
     expect(first.status).toBe(200);
     const failed = await ops('users/onboard', json({
-      email: 'assigned@example.com', accountRef: 'acct-b@example.com', expiresAt: 1_900_000_000, notes: 'lost',
+      email: 'assigned@example.com', accountRef: 'acct-b@example.com', homeExitId: 'h-assign',
+      expiresAt: 1_900_000_000, notes: 'lost',
     }));
     expect(failed.status).toBe(409);
+    expect(((await failed.json()) as { error: { code: string } }).error.code).toBe('PRODUCT_ALREADY_ASSIGNED');
     const row = await db().prepare('SELECT expires_at, notes FROM users WHERE id = ?')
       .bind('u-assigned').first<{ expires_at: number | null; notes: string | null }>();
     expect(row).toEqual({ expires_at: null, notes: null });
+    expect(await db().prepare("SELECT 1 FROM user_home_bindings WHERE user_id = 'u-assigned'").first()).toBeNull();
+    expect(Number((await db().prepare('SELECT revision FROM managed_exit_catalog WHERE singleton_id = 1')
+      .first<{ revision: number }>())!.revision)).toBe(5);
   });
 
   it('does not allowlist an email when wechatId is too long', async () => {
