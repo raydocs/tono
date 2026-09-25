@@ -31,7 +31,7 @@ use crate::tono::bootstrap;
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 /// §1 mainland-link timeouts (connect 30 s / total 45 s).
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
-const TOTAL_TIMEOUT: Duration = Duration::from_secs(45);
+pub(crate) const TOTAL_TIMEOUT: Duration = Duration::from_secs(45);
 /// Connect budget of the pinned attempt only (#583).
 ///
 /// Every request tries the pinned addresses first, and a network that drops them costs this much

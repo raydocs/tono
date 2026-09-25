@@ -22,7 +22,9 @@ use crate::{
 use super::*;
 
 /// Extra time restore gives an answer whose status line arrived before the budget ran out (#582).
-const ANSWERED_BODY_GRACE: Duration = Duration::from_secs(10);
+/// The transport's own total timeout bounds that request, and a non-2xx whose body then fails is
+/// returned as its status, so waiting that long guarantees the answer is classified.
+const ANSWERED_BODY_GRACE: Duration = Duration::from_secs(crate::tono::transport::TOTAL_TIMEOUT.as_secs() + 1);
 
 /// How many times restore asks the Service about the stored barrier before giving up.
 const PROTECTION_PROBE_ATTEMPTS: usize = 5;
