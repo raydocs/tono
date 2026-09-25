@@ -4778,6 +4778,58 @@
 - **剩余限制**：旧版本 build 不认识 `.lost.json` 记录（回退安装会忽略它，回到修复前的
   静默行为，不会阻断）；损坏文件原值仍不可恢复；未实机验证。
 
+### 2026-09-25 续记 2 · 审查运行 a894f160：丢失证据保留到恢复提交之后
+
+先把 #300 分支（含其审查修复 `12e9ceae`）合入本分支；`native_apply_tests.rs` 冲突两边测试
+全部保留。
+
+- **缺陷修复（opus:F2 major = codex:F2 minor）**：engine 的 restore 在整个恢复提交前就
+  破坏性消费丢失证据——不可读捕获被改名隔离、`.lost.json` 被删除；随后接口 DoH 腿写入
+  失败、facade 删快照失败或 `bounded_dns_call` 超时丢弃返回值，重试都只看到“无捕获、无
+  记录”并报告干净恢复。现在 `restore_encrypted_dns` / `restore_interface_doh` 对丢失证据
+  **只读不消费**（不可读捕获留在原位、记录只检查存在）；新 engine 函数
+  `retire_lost_captures`（隔离仍不可读的捕获、删除记录，尽力而为）只由 facade 的
+  `settle_capture_loss` 在恢复提交（快照已删、附注已写入 `last_error`）之后调用。退役
+  失败只会让下一次恢复再次报告，方向安全。无快照时的孤儿 heal 调用恢复也不再悄悄消费
+  证据。
+- **缺陷修复（codex:F1 major）**：正常 Disconnect 执行两次恢复（release 处理器一次、
+  disarm 门的无快照一次），第二次清掉第一次的附注。现在第一次恢复提交后把附注记入
+  进程内 `CAPTURE_LOSS_NOTE`，下一次**没有自身丢失**的恢复接过它再透出一次；之后与
+  degraded 附注相同，由下一次成功的 DNS 操作清除（更新 Prepare 的严格
+  `last_error.is_none()` 判定因此不会被长期卡住），下一次显式 `enable` 丢弃它。
+- **缺陷修复（opus:F1，降为 minor）**：enable 的损坏快照恢复路径丢弃附注，而旧注释
+  声称“下一次 restore 会透出”并不成立（证据已被消费）。现在该路径只读证据、不调用
+  settle，证据留在磁盘；同一次 enable 的 suppress 会先写丢失记录再隔离，下一次恢复据此
+  报告。注释改为如实描述。
+- **缺陷修复（opus:F3 = codex:F3，minor）**：证明路径 `degraded.or(capture_note)` 在两者
+  同时存在时丢掉加密 DNS 丢失附注。现在用 `join_notes` 拼接（两条描述不同的损失），
+  与卸载 rung 2 的拼接一致。
+- **缺陷修复（opus:F4，minor）**：suppress 先改名隔离、后写丢失记录；记录写失败时唯一
+  证据已被移走。现在两个 suppress（`EnableAutoDoh` 与接口 DoH）都先写记录、后隔离；
+  记录写失败时直接返回错误，不可读文件留在原位，由下一次恢复报告。
+- **测试**：新增四个窄回归（native 域，native_apply_tests.rs）：
+  `a_failed_policy_restore_keeps_the_capture_loss_for_the_retry`（全局捕获 0 字节 + 接口
+  DoH 写入注入失败 → 第一次 `restore_encrypted_dns` 报错，重试必须返回 `true`；旧实现
+  重试返回 `false`）；`the_second_restore_of_a_disconnect_keeps_the_capture_loss_note`
+  （连续两次 `restore_protected`，第二次的 `last_error` 仍含标记）；
+  `a_capture_loss_met_by_the_enable_recovery_reaches_the_next_restore`（损坏快照 + 0 字节
+  接口捕获 → enable 恢复完成 → 随后的恢复必须报告标记）；
+  `an_unwritable_lost_record_keeps_the_unreadable_capture_in_place`（记录路径被目录占据
+  → suppress 报错且 0 字节捕获仍在原位）。opus:F3/codex:F3 未加测试：degraded 出口需要
+  持续的 live-apply 失败，native 夹具不支持非空 Restore 批，stub 引擎又不会产生捕获
+  附注；改动是两个 `Option` 的拼接。**测试修正**：既有
+  `a_capture_quarantined_by_suppress_is_still_reported_by_restore` 的第二个断言由“再次
+  restore 返回 false”改为“退役前再次 restore 仍返回 true，`retire_lost_captures` 之后返回
+  false”，对应“恢复不消费证据”的新语义。夹具 `reset_memory` 同时清空
+  `CAPTURE_LOSS_NOTE`。以上测试在修复前代码上的失败均为源码推导，未实际运行。
+- **验证**：本机（MacBook）未编译、未运行 cargo，只用 `rustfmt --check` 确认无语法
+  错误；委托本 PR 的 `windows-2025` CI。提交时未获得结果。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：`CAPTURE_LOSS_NOTE` 在进程内，Service 在两次恢复之间重启会丢失它（证据
+  已退役，此时状态不再提示）；只有一次恢复的路径（如更新 Prepare 自己发现丢失）留下的
+  附注会再被下一次恢复透出一次，更新可能多被拒绝一次；损坏文件原值仍不可恢复；合入前
+  仍需 Windows 验收机检查 wintun 接口键（见 #300 条续记 2）。
+
 ## 2026-09-22 · Windows 快照合并与损坏恢复不再把 TUN DNS 地址记为原始值
 
 - **归属/来源**：G1 断开与恢复（Disconnect 不得被污染快照永久拒绝）；缺陷编号 R3-F1

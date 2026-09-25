@@ -306,6 +306,9 @@ pub(crate) fn reset_memory() {
     *facade::RESOLVER_POLICY_CONFLICT
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    *facade::CAPTURE_LOSS_NOTE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
 }
 
 impl Drop for Fixture {

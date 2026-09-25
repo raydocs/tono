@@ -2166,6 +2166,24 @@ async fn engine_restore_encrypted_dns() -> Result<bool> {
     }
 }
 
+/// Retire capture-loss evidence after a committed restore surfaced it (see
+/// [`settle_capture_loss`]). File moves only; no resolver policy is touched.
+async fn engine_retire_lost_captures() -> Result<()> {
+    #[cfg(all(windows, not(feature = "test")))]
+    {
+        return bounded_dns_call(
+            DNS_CALL_TIMEOUT,
+            "retire lost encrypted-DNS captures",
+            engine::retire_lost_captures,
+        )
+        .await;
+    }
+    #[cfg(not(all(windows, not(feature = "test"))))]
+    {
+        Ok(())
+    }
+}
+
 // --- Facade ---
 
 /// Whether the state machine runs on this build (real service on Windows; stubbed engine
@@ -2218,6 +2236,53 @@ fn surface_success_note(note: &str) {
     *DNS_LAST_ERROR
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(note.to_owned());
+}
+
+/// A capture-loss note a committed restore surfaced after retiring its on-disk evidence. Every
+/// Disconnect runs two restores — the release handler's, then the disarm gate's (snapshot-less)
+/// one — and the second, finding the evidence already retired, would otherwise clear
+/// `last_error` and publish a clean result over the loss. The note is handed to exactly one
+/// following restore that has no loss of its own; after that it follows the other success notes
+/// (degraded restore): the next successful DNS operation clears it. The next explicit `enable`
+/// drops it.
+static CAPTURE_LOSS_NOTE: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
+
+/// Settle a *committed* restore's capture-loss note: remember it, then retire the on-disk
+/// evidence (quarantine the unreadable capture, drop the lost-originals records). Call it only
+/// after every step that can still fail the restore, so a failed or abandoned attempt keeps the
+/// evidence for its retry. With no note of its own, a restore takes over the one the previous
+/// restore surfaced (see [`CAPTURE_LOSS_NOTE`]). Returns the note to surface.
+async fn settle_capture_loss(note: Option<String>) -> Option<String> {
+    let Some(note) = note else {
+        return CAPTURE_LOSS_NOTE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+    };
+    // Remember first: once the evidence is retired, this is what keeps the loss visible.
+    *CAPTURE_LOSS_NOTE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(note.clone());
+    if let Err(error) = engine_retire_lost_captures().await {
+        tracing::warn!(
+            "dns: the capture-loss evidence could not be retired ({error:#}); the next restore \
+             reports the loss again"
+        );
+    }
+    Some(note)
+}
+
+/// Join the notes of one successful restore: each names a different loss (the degraded-restore
+/// trade on adapter DNS, the unrecoverable Encrypted DNS setting), so neither may hide the other.
+fn join_notes(first: Option<String>, second: Option<String>) -> Option<String> {
+    match (first, second) {
+        (Some(mut first), Some(second)) => {
+            first.push(' ');
+            first.push_str(&second);
+            Some(first)
+        }
+        (first, second) => first.or(second),
+    }
 }
 
 /// Record per-adapter outcomes or reserve an unfinished apply before mutation. Omitted adapters
@@ -2344,6 +2409,10 @@ async fn enable_unlocked(trigger: EnableTrigger) -> Result<DnsProtectionStatus> 
         // From here until an explicit restore, drift is worth repairing. Set before any work so
         // that a half-applied enable is still repaired by the watchdog.
         PROTECTION_WANTED.store(true, Ordering::Release);
+        // A new session: the previous disconnected period's capture-loss note has been shown.
+        *CAPTURE_LOSS_NOTE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
     let existing = match tokio::fs::read(snapshot_path()).await {
         Ok(bytes) => match parse_snapshot(&bytes) {
@@ -2362,9 +2431,11 @@ async fn enable_unlocked(trigger: EnableTrigger) -> Result<DnsProtectionStatus> 
             // an unreadable snapshot without that proof would record our own loopback values as
             // the originals and destroy the way back.
             Err(reason) => {
-                // A quarantined capture note cannot survive the rest of `enable` (every later
-                // successful `record_outcome` clears `last_error`); the engine already logged it,
-                // and the next restore surfaces the state through the same marker if it persists.
+                // A capture-loss note cannot survive the rest of `enable` (every later
+                // successful `record_outcome` clears `last_error`), so it is deliberately not
+                // settled here: the evidence is only read by this recovery and stays on disk —
+                // the suppress below turns an unreadable capture into a lost-originals record
+                // before moving it aside — and the next restore reports it under the marker.
                 let _ = record_outcome(recover_unreadable_snapshot(&reason).await)?;
                 None
             }
@@ -2536,8 +2607,10 @@ impl std::fmt::Display for ResolverPolicyRestoreFailed {
 // Typed context preserves the cause and phase without matching diagnostic strings. A policy
 // failure must not reset already-restored static adapter DNS to DHCP during uninstall.
 //
-// `Some(note)` on success = an unreadable capture was quarantined and the in-place values stand
-// as the restore result; the note rides in `last_error` exactly like the degraded-restore note.
+// `Some(note)` on success = a capture was unreadable (or recorded lost by an earlier suppress)
+// and the in-place values stand as the restore result; the note rides in `last_error` exactly
+// like the degraded-restore note. The evidence stays on disk until the caller has committed the
+// whole restore and hands the note to `settle_capture_loss`.
 async fn restore_resolver_policy() -> Result<Option<String>> {
     let quarantined = engine_restore_encrypted_dns().await.context(ResolverPolicyRestoreFailed)?;
     Ok(quarantined.then(|| {
@@ -2574,7 +2647,7 @@ pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
             // Older builds could delete this snapshot before NRPT cleanup succeeded.
             // Reconcile the independently owned rule and DoH captures on every retry.
             let capture_note = record_outcome(restore_resolver_policy().await)?;
-            if let Some(note) = capture_note {
+            if let Some(note) = settle_capture_loss(capture_note).await {
                 surface_success_note(&note);
             }
             if let Err(error) = engine_flush_cache().await {
@@ -2592,7 +2665,7 @@ pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
         // closed with the marker and the two documented ways forward.
         Err(reason) => {
             let capture_note = record_outcome(recover_unreadable_snapshot(&reason).await)?;
-            if let Some(note) = capture_note {
+            if let Some(note) = settle_capture_loss(capture_note).await {
                 surface_success_note(&note);
             }
             // Same reasoning as the proven path below: answers collected while DNS pointed at
@@ -2699,9 +2772,9 @@ pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error.into()),
     }
-    // The degraded-restore note names the exact trade that was accepted; the capture note the
-    // milder one. Either way the success must not be silent.
-    if let Some(note) = degraded.or(capture_note) {
+    // Committed: the snapshot is gone. The degraded-restore note (adapter DNS) and the capture
+    // note (Encrypted DNS) describe different losses, so both reach `last_error`.
+    if let Some(note) = join_notes(degraded, settle_capture_loss(capture_note).await) {
         surface_success_note(&note);
     }
     if let Err(error) = engine_flush_cache().await {
@@ -2858,8 +2931,10 @@ pub(crate) async fn restore_for_uninstall() -> Result<UninstallDnsRestore> {
             // DHCP does not restore NRPT/DoH. Retain recovery evidence and report the cause
             // instead of publishing success or quarantining the snapshot on policy failure.
             // A capture-quarantine note is folded into the rung note below rather than dropped:
-            // this arm always reports a trade, so the note that is always written wins.
-            let capture_note = record_outcome(restore_resolver_policy().await)?;
+            // this arm always reports a trade, so the note that is always written wins. Nothing
+            // after the policy restore can fail this rung, so its loss is settled right away.
+            let capture_note =
+                settle_capture_loss(record_outcome(restore_resolver_policy().await)?).await;
             let mut note = format!(
                 "{DNS_RESTORED_AUTOMATIC_PREFIX}: the saved DNS servers could not be proven \
                  restored ({exact_error:#}), so {} adapter(s) were set back to automatic (DHCP) \

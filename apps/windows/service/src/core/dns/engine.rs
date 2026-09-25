@@ -374,8 +374,9 @@ fn quarantine_capture(path: &std::path::Path, reason: &str) {
 
 /// The durable "originals lost" record kept next to a capture. Suppress writes it when it had
 /// to quarantine an unreadable capture and could not re-read the originals because the live
-/// values were already Tono's own (`EnableAutoDoh=0`, zeroed `DohFlags`); restore consumes it
-/// and reports the loss. Without it the loss lived only in the Connect that found it, and the
+/// values were already Tono's own (`EnableAutoDoh=0`, zeroed `DohFlags`); restore reports the
+/// loss while the record exists, and [`retire_lost_captures`] removes it after a committed
+/// restore surfaced it. Without it the loss lived only in the Connect that found it, and the
 /// following restore — seeing no capture at all — reported a clean result.
 fn lost_capture_marker(capture: &std::path::Path) -> std::path::PathBuf {
     capture.with_extension("lost.json")
@@ -388,9 +389,27 @@ fn record_lost_capture(capture: &std::path::Path) -> Result<()> {
     )
 }
 
-/// Consume the lost-originals record, if any. A marker that cannot be deleted still counts as
-/// present: it is reported again on the next restore, never silently dropped, and never a
-/// refusal of the release itself.
+/// Whether a lost-originals record exists. Read-only: restore reports it on every attempt until
+/// it is retired. A marker whose presence cannot be determined counts as present — the loss is
+/// over-reported, never silently dropped.
+fn lost_capture_recorded(capture: &std::path::Path) -> bool {
+    let marker = lost_capture_marker(capture);
+    match std::fs::symlink_metadata(&marker) {
+        Ok(_) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => {
+            tracing::warn!(
+                "dns: the lost-capture record {} could not be checked: {error:#}",
+                marker.display()
+            );
+            true
+        }
+    }
+}
+
+/// Remove the lost-originals record, if any. A marker that cannot be deleted stays present: it
+/// is reported again on the next restore, never silently dropped, and never a refusal of the
+/// release itself.
 fn take_lost_capture(capture: &std::path::Path) -> bool {
     let marker = lost_capture_marker(capture);
     match std::fs::remove_file(&marker) {
@@ -404,6 +423,31 @@ fn take_lost_capture(capture: &std::path::Path) -> bool {
             true
         }
     }
+}
+
+/// Retire the capture-loss evidence a committed restore has just surfaced: move a capture that
+/// still cannot be read aside for diagnosis and remove the lost-originals records. The facade
+/// calls this only after the whole restore succeeded and its note reached `last_error`;
+/// [`restore_encrypted_dns`] itself only reads the evidence. Best-effort: anything left behind
+/// is reported again by the next restore, which is the safe direction.
+pub(super) fn retire_lost_captures() -> Result<()> {
+    let global = super::encrypted_dns_capture_path();
+    if let Err(error) = read_capture_file() {
+        quarantine_capture(
+            &global,
+            &format!("encrypted DNS capture could not be read ({error:#})"),
+        );
+    }
+    take_lost_capture(&global);
+    let interface = super::interface_doh_capture_path();
+    if let Err(error) = read_interface_doh_capture() {
+        quarantine_capture(
+            &interface,
+            &format!("interface DoH capture could not be read ({error:#})"),
+        );
+    }
+    take_lost_capture(&interface);
+    Ok(())
 }
 
 fn write_interface_doh_capture(entries: &[super::InterfaceDohEntry]) -> Result<()> {
@@ -442,13 +486,15 @@ fn suppress_interface_doh() -> Result<()> {
         unreadable => {
             if let Err(error) = unreadable {
                 let path = super::interface_doh_capture_path();
+                // Templates an earlier session already zeroed are gone from the live set, so
+                // whatever is captured below can be incomplete: the loss must reach restore.
+                // Record first, rename second: until the record is durable the unreadable file
+                // in place is the only evidence of the loss, and a failed record keeps it there.
+                record_lost_capture(&path)?;
                 quarantine_capture(
                     &path,
                     &format!("interface DoH capture could not be read ({error:#})"),
                 );
-                // Templates an earlier session already zeroed are gone from the live set, so
-                // whatever is captured below can be incomplete: the loss must reach restore.
-                record_lost_capture(&path)?;
             }
             // Only a non-empty live set is a capture worth writing: this build zeroes
             // `DohFlags` and `collect_interface_doh` reports only enabled templates, so an
@@ -470,13 +516,16 @@ fn suppress_interface_doh() -> Result<()> {
 }
 
 /// Put the captured per-adapter flags back and delete the capture. An unreadable capture is
-/// quarantined and treated as "no capture": the templates it named are unrecoverable from
-/// its bytes, so the in-place (suppressed) flags stand as the restore result — reported to
-/// the caller via the `true` return, never as a permanent refusal. Idempotent when no
-/// capture exists.
+/// treated as "no capture": the templates it named are unrecoverable from its bytes, so the
+/// in-place (suppressed) flags stand as the restore result — reported to the caller via the
+/// `true` return, never as a permanent refusal. The loss evidence (the unreadable file, a
+/// lost-originals record) is only read here, never consumed: the facade retires it with
+/// [`retire_lost_captures`] once the whole restore has committed and the loss was surfaced,
+/// so a restore that fails on a later leg, or whose result is dropped, cannot erase it.
+/// Idempotent when no capture exists.
 fn restore_interface_doh() -> Result<bool> {
     let path = super::interface_doh_capture_path();
-    let quarantined = match read_interface_doh_capture() {
+    let unreadable = match read_interface_doh_capture() {
         Ok(Some(entries)) => {
             for entry in entries {
                 write_qword(
@@ -490,16 +539,14 @@ fn restore_interface_doh() -> Result<bool> {
         }
         Ok(None) => false,
         Err(error) => {
-            quarantine_capture(
-                &path,
-                &format!("interface DoH capture could not be read ({error:#})"),
+            tracing::error!(
+                "dns: interface DoH capture could not be read ({error:#}); the in-place flags \
+                 stand and the loss is reported"
             );
             true
         }
     };
-    // Consumed only after the capture was handled: a failed write above keeps the record for
-    // the retry.
-    Ok(take_lost_capture(&path) | quarantined)
+    Ok(unreadable | lost_capture_recorded(&path))
 }
 
 /// One adapter that can actually carry a resolver, with the interface indices its live
@@ -1494,20 +1541,23 @@ pub(super) fn suppress_encrypted_dns() -> Result<()> {
     match read_capture_file() {
         Ok(Some(_)) => {}
         unreadable => {
-            let quarantined = unreadable.is_err();
+            let current = read_dword(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH)?;
+            let live_is_ours = current == Some(super::ENABLE_AUTO_DOH_OFF);
             if let Err(error) = unreadable {
+                if live_is_ours {
+                    // The live `0` is ours from an earlier session: the original is gone, and
+                    // the restore that follows must say so instead of finding no capture.
+                    // Record first, rename second: a failed record keeps the unreadable file
+                    // in place as the evidence.
+                    record_lost_capture(&super::encrypted_dns_capture_path())?;
+                }
                 quarantine_capture(
                     &super::encrypted_dns_capture_path(),
                     &format!("encrypted DNS capture could not be read ({error:#})"),
                 );
             }
-            let current = read_dword(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH)?;
-            if current != Some(super::ENABLE_AUTO_DOH_OFF) {
+            if !live_is_ours {
                 write_capture_file(current)?;
-            } else if quarantined {
-                // The live `0` is ours from an earlier session: the original is gone, and the
-                // restore that follows must say so instead of finding no capture.
-                record_lost_capture(&super::encrypted_dns_capture_path())?;
             }
         }
     }
@@ -1520,11 +1570,14 @@ pub(super) fn suppress_encrypted_dns() -> Result<()> {
 }
 
 /// Put `EnableAutoDoh` back, restore per-adapter DoH flags, and delete our NRPT rule.
-/// Idempotent when no capture exists. Returns `true` when an unreadable capture was
-/// quarantined, here or by an earlier suppress that left a lost-originals record: the in-place (suppressed) values then stand as the restore result — the
-/// saved originals are unrecoverable — and the caller must surface that loss instead of
-/// reporting a clean restore. An unreadable capture must never refuse the release itself:
-/// that refusal was permanent, because the file was neither rewritten nor removed.
+/// Idempotent when no capture exists. Returns `true` when a capture is unreadable, or an
+/// earlier suppress left a lost-originals record: the in-place (suppressed) values then stand
+/// as the restore result — the saved originals are unrecoverable — and the caller must surface
+/// that loss instead of reporting a clean restore. An unreadable capture must never refuse the
+/// release itself: that refusal was permanent, because the file was neither rewritten nor
+/// removed. The loss evidence is only read here; it stays in place for every retry until the
+/// facade calls [`retire_lost_captures`] after the whole restore committed, so a failure on a
+/// later leg or in the facade, or a timed-out call whose result is dropped, cannot erase it.
 pub(super) fn restore_encrypted_dns() -> Result<bool> {
     // Fixture-isolated recovery tests still count policy restores. The registry legs below
     // (NRPT delete, EnableAutoDoh, per-adapter DohFlags) route into the fixture's key map,
@@ -1536,7 +1589,7 @@ pub(super) fn restore_encrypted_dns() -> Result<bool> {
         tracing::error!("dns: Tono NRPT rule could not be removed: {error:#}");
         return Err(error);
     }
-    let mut quarantined = false;
+    let mut lost = false;
     match read_capture_file() {
         Ok(Some(saved)) => {
             match saved {
@@ -1547,22 +1600,22 @@ pub(super) fn restore_encrypted_dns() -> Result<bool> {
         }
         Ok(None) => {}
         Err(error) => {
-            quarantine_capture(
-                &super::encrypted_dns_capture_path(),
-                &format!("encrypted DNS capture could not be read ({error:#})"),
+            tracing::error!(
+                "dns: encrypted DNS capture could not be read ({error:#}); the in-place value \
+                 stands and the loss is reported"
             );
-            quarantined = true;
+            lost = true;
         }
     }
-    quarantined |= take_lost_capture(&super::encrypted_dns_capture_path());
+    lost |= lost_capture_recorded(&super::encrypted_dns_capture_path());
     match restore_interface_doh() {
         Err(error) => {
             tracing::error!("dns: per-adapter Encrypted DNS restore failed: {error:#}");
             return Err(error);
         }
-        Ok(interface_quarantined) => quarantined |= interface_quarantined,
+        Ok(interface_lost) => lost |= interface_lost,
     }
-    Ok(quarantined)
+    Ok(lost)
 }
 
 /// Group Policy's NRPT store. Whenever it holds any rule, the DNS Client applies it alone and

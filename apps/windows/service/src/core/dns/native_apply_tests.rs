@@ -730,7 +730,10 @@ async fn corrupt_interface_doh_capture_is_quarantined_not_a_permanent_refusal() 
 #[test]
 #[serial_test::serial]
 fn a_capture_quarantined_by_suppress_is_still_reported_by_restore() -> Result<()> {
-    use super::super::{restore_interface_doh, suppress_interface_doh, test_io::{self, Fixture}};
+    use super::super::{
+        restore_interface_doh, retire_lost_captures, suppress_interface_doh,
+        test_io::{self, Fixture},
+    };
 
     let _fixture = Fixture::new(vec![effective(&entry(1), [9, 9, 9, 9], false)])?;
     let capture_path =
@@ -744,9 +747,165 @@ fn a_capture_quarantined_by_suppress_is_still_reported_by_restore() -> Result<()
         restore_interface_doh()?,
         "a capture lost during suppress must reach the restore result, not read as clean"
     );
+    // Restore only reads the evidence; the facade retires it once a restore has committed and
+    // surfaced the loss (#305 review: a failed attempt must not have consumed it).
+    assert!(
+        restore_interface_doh()?,
+        "the record stays until a committed restore retires it"
+    );
+    retire_lost_captures()?;
     assert!(
         !restore_interface_doh()?,
-        "the loss is reported once, by the restore that consumed it"
+        "a retired loss is not reported again by the engine"
+    );
+    Ok(())
+}
+
+/// #305 review (opus:F2 / codex:F2): the loss evidence must survive a restore that fails on a
+/// later leg. The unreadable `EnableAutoDoh` capture used to be renamed away (and a lost record
+/// deleted) before the per-adapter leg ran; when that leg then failed, the error dropped the
+/// loss, and the retry — finding no capture at all — reported a clean restore.
+#[test]
+#[serial_test::serial]
+fn a_failed_policy_restore_keeps_the_capture_loss_for_the_retry() -> Result<()> {
+    use super::super::{DOH_FLAGS, interface_doh_key, restore_encrypted_dns, test_io::{self, Fixture}};
+    use crate::core::dns as facade;
+
+    let _fixture = Fixture::new(vec![effective(&entry(1), [9, 9, 9, 9], false)])?;
+    let doh_key = interface_doh_key("{A}", "Doh", "1.1.1.1");
+    let (snapshot, global, interface) = test_io::with(|io| {
+        io.keys.insert(doh_key.clone(), Default::default());
+        io.fail_write = Some((doh_key.clone(), DOH_FLAGS.into()));
+        (
+            io.snapshot_path.clone(),
+            io.capture_dir.join("protected-secure-dns.json"),
+            io.capture_dir.join("protected-interface-doh.json"),
+        )
+    })
+    .unwrap();
+    // The fixture inspects the durable snapshot at every registry write.
+    std::fs::write(
+        &snapshot,
+        serde_json::to_vec(&facade::DnsSnapshot {
+            version: 1,
+            taken_at: 0,
+            adapters: Vec::new(),
+        })?,
+    )?;
+    // The global capture went zero-length; the per-adapter one is intact.
+    std::fs::write(&global, b"")?;
+    let body = facade::format_interface_doh_capture(&[facade::InterfaceDohEntry {
+        guid: "{A}".into(),
+        family: "Doh".into(),
+        server: "1.1.1.1".into(),
+        flags: 1,
+    }])
+    .map_err(anyhow::Error::msg)?;
+    std::fs::write(&interface, body)?;
+
+    restore_encrypted_dns().expect_err("the per-adapter leg fails this attempt");
+    test_io::with(|io| io.fail_write = None);
+    assert!(
+        restore_encrypted_dns()?,
+        "the retry must still report the unrecoverable EnableAutoDoh original"
+    );
+    Ok(())
+}
+
+/// #305 review (codex:F1): a normal Disconnect runs two restores — the release handler's, then
+/// the disarm gate's snapshot-less one. The second used to find the evidence already consumed,
+/// clear `last_error` and publish a clean result over the loss the first one had reported.
+#[tokio::test]
+#[serial_test::serial]
+async fn the_second_restore_of_a_disconnect_keeps_the_capture_loss_note() -> Result<()> {
+    use super::super::test_io::{self, Fixture};
+    use crate::core::dns as facade;
+
+    let a = effective(&entry(1), [9, 9, 9, 9], false);
+    let guid = a.guid.clone();
+    let _fixture = Fixture::new(vec![a])?;
+    assert!(facade::enable().await?.enabled);
+    let capture_path = test_io::with(|io| {
+        // Vanished mid-session, as in the R3-F2 restore test: the proven path needs no live apply.
+        io.absent.insert(guid.clone());
+        io.capture_dir.join("protected-interface-doh.json")
+    })
+    .unwrap();
+    std::fs::write(&capture_path, b"")?;
+    let reports_loss = |status: &crate::core::structure::DnsProtectionStatus| {
+        status
+            .last_error
+            .as_deref()
+            .is_some_and(|note| note.contains(facade::DNS_CAPTURE_QUARANTINED_PREFIX))
+    };
+
+    let first = facade::restore_protected().await?;
+    assert!(reports_loss(&first), "{first:?}");
+    let second = facade::restore_protected().await?;
+    assert!(
+        reports_loss(&second),
+        "the disarm gate's restore must not publish a clean result: {second:?}"
+    );
+    Ok(())
+}
+
+/// #305 review (opus:F1): a capture found unreadable by the corrupt-snapshot recovery inside
+/// Connect must still reach the next restore. The recovery used to move it aside while
+/// `enable` dropped its note, so the following Disconnect reported a clean restore.
+#[tokio::test]
+#[serial_test::serial]
+async fn a_capture_loss_met_by_the_enable_recovery_reaches_the_next_restore() -> Result<()> {
+    use super::super::test_io::{self, Fixture};
+    use crate::core::dns as facade;
+
+    let a = effective(&entry(1), [9, 9, 9, 9], false);
+    let guid = a.guid.clone();
+    let _fixture = Fixture::new(vec![a])?;
+    let (snapshot, capture) = test_io::with(|io| {
+        (
+            io.snapshot_path.clone(),
+            io.capture_dir.join("protected-interface-doh.json"),
+        )
+    })
+    .unwrap();
+    std::fs::write(&snapshot, b"{invalid DNS recovery snapshot")?;
+    std::fs::write(&capture, b"")?;
+    assert!(
+        facade::enable().await?.enabled,
+        "the recovery completes on a clean registry"
+    );
+
+    test_io::with(|io| io.absent.insert(guid.clone()));
+    let restored = facade::restore_protected().await?;
+    assert!(
+        restored
+            .last_error
+            .as_deref()
+            .is_some_and(|note| note.contains(facade::DNS_CAPTURE_QUARANTINED_PREFIX)),
+        "the loss met during Connect must reach the Disconnect: {restored:?}"
+    );
+    Ok(())
+}
+
+/// #305 review (opus:F4): suppress must not move an unreadable capture aside before the
+/// lost-originals record is durable. When the record cannot be written, the unreadable file is
+/// the only evidence of the loss, so it has to stay where the next restore reads it.
+#[test]
+#[serial_test::serial]
+fn an_unwritable_lost_record_keeps_the_unreadable_capture_in_place() -> Result<()> {
+    use super::super::{suppress_interface_doh, test_io::{self, Fixture}};
+
+    let _fixture = Fixture::new(vec![effective(&entry(1), [9, 9, 9, 9], false)])?;
+    let capture =
+        test_io::with(|io| io.capture_dir.join("protected-interface-doh.json")).unwrap();
+    std::fs::write(&capture, b"")?;
+    // A directory where the record belongs: the atomic replace onto it fails.
+    std::fs::create_dir(capture.with_extension("lost.json"))?;
+    suppress_interface_doh().expect_err("the lost record cannot be committed");
+    assert_eq!(
+        std::fs::read(&capture)?,
+        b"",
+        "the unreadable capture must stay in place as the evidence"
     );
     Ok(())
 }

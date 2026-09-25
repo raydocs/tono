@@ -118,7 +118,7 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | N8 | Windows IPv4 已写、IPv6 失败时无 pending，下一次被当作已配置 | fixed(1ca878cf) | [#289](https://github.com/raydocs/tono/pull/289)（含 #290） | 中·已确认 | 同上 |
 | N9 | Windows 快照损坏时混合 DNS（公共 + TUN 地址）被漏判，错误接受恢复 | fixed(576d7087) | [#293](https://github.com/raydocs/tono/pull/293) | 中·已确认 | — |
 | R3-F1 | Windows 快照存在时，已带 TUN DNS 地址的新/重激活适配器被记为原始 DNS；损坏快照恢复只读 active 适配器，Disconnect 永久被拒 | in-PR | [#300](https://github.com/raydocs/tono/pull/300) | 中·已确认 | 区别于 N9；审查 c7463149 两条已在 PR 内修：快照存在时的孤儿 heal 只重置该适配器、不再撤 NRPT/恢复 DoH；protected apply 改为先写 `ProfileNameServer`，中断不再留下 TUN 键形状。验收机仍需核实 wintun 删除后接口键残留 |
-| R3-F2 | Windows 加密 DNS 旁路捕获文件非原子落盘，损坏后释放永久硬拒 | in-PR | [#305](https://github.com/raydocs/tono/pull/305)（叠在 #300 上） | 中·推导 | 需持久记录隔离证据；文件跨卸载存活 |
+| R3-F2 | Windows 加密 DNS 旁路捕获文件非原子落盘，损坏后释放永久硬拒 | in-PR | [#305](https://github.com/raydocs/tono/pull/305)（叠在 #300 上） | 中·推导 | 需持久记录隔离证据；文件跨卸载存活。审查 a894f160 五条已在 PR 内修：恢复只读不消费丢失证据，提交后才退役；Disconnect 第二次恢复保留附注；enable 恢复路径证据留给下一次恢复；degraded 与捕获附注拼接；suppress 先写记录后隔离。附注保留在进程内，Service 重启会丢 |
 | R3-F3 | macOS `protected-dns.json` 损坏/权限异常时 restore、紧急解除、卸载、启动清理全被阻 | fixed(05c58d5d) | [#307](https://github.com/raydocs/tono/pull/307) | 中·推导 | 审查要求：DNS 恢复失败时紧急出口不得顺带拆 PF（M2） |
 | R3-F4 | macOS status() 把「快照有效但服务不可读」报成无快照，App 不再调用 restore | fixed(be1c75d2) | [#303](https://github.com/raydocs/tono/pull/303) | 低·已确认 | helper 契约版本级联（4.6.0 起） |
 | R3-O1 | Windows 恢复证明通过后删快照失败即拒绝拆 WFP，重试同样失败（ACL/AV 锁文件） | open | 待开 | 低·推导 | 观察项，未核实 |
