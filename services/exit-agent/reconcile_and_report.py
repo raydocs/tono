@@ -1456,6 +1456,37 @@ def run_hy2_roster_once() -> None:
     print(f"hy2 roster applied: observedAt={observed_at}, identities={len(roster)}; no node-wide ACK or usage report")
 
 
+def keep_usage_locally(path: Path, state: dict, installed: set[str] | None,
+                       counters: dict[str, int], settled_marker: str | None) -> None:
+    """Fold one counter reading into the durable totals without reporting it.
+
+    For rounds that must not report or acknowledge: the growth waits in the
+    totals for the next round that reaches the control plane, so a later Xray
+    restart or stop cannot forgive it.
+    """
+    source_id(state)
+    if installed is not None:
+        state["installedClients"] = sorted(installed)
+    recorded_marker = state.get("startMarker")
+    restarted = bool(
+        settled_marker
+        and isinstance(recorded_marker, str)
+        and recorded_marker
+        and settled_marker != recorded_marker
+    )
+    if not isinstance(state.get("userTotals"), dict):
+        # The next reporting round compares against this; without it, that
+        # round would treat the growth folded here as already reported.
+        state["userTotals"] = aggregate_user_totals(state["totals"])
+    totals = lifetime_totals(state, counters, restarted=restarted)
+    state["totals"] = {label: int(value) for label, value in totals.items()}
+    if settled_marker:
+        state["startMarker"] = settled_marker
+    else:
+        state.pop("startMarker", None)
+    save_state(path, state)
+
+
 def run_outage_round(path: Path, configured: str, binary: Path,
                      commands: dict[str, str], address: str, tag: str,
                      override: bool | None, failure: BaseException) -> None:
@@ -1495,27 +1526,7 @@ def run_outage_round(path: Path, configured: str, binary: Path,
         raise Refusal(
             f"control plane unreachable ({failure}); the state file is unusable: {state_error}"
         ) from failure
-    source_id(state)
-    if installed is not None:
-        state["installedClients"] = sorted(installed)
-    recorded_marker = state.get("startMarker")
-    restarted = bool(
-        settled_marker
-        and isinstance(recorded_marker, str)
-        and recorded_marker
-        and settled_marker != recorded_marker
-    )
-    if not isinstance(state.get("userTotals"), dict):
-        # The next reporting round compares against this; without it, that
-        # round would treat the growth folded here as already reported.
-        state["userTotals"] = aggregate_user_totals(state["totals"])
-    totals = lifetime_totals(state, counters, restarted=restarted)
-    state["totals"] = {label: int(value) for label, value in totals.items()}
-    if settled_marker:
-        state["startMarker"] = settled_marker
-    else:
-        state.pop("startMarker", None)
-    save_state(path, state)
+    keep_usage_locally(path, state, installed, counters, settled_marker)
     if roster is None:
         raise Refusal(
             f"control plane unreachable ({failure}) and {unusable}; restored no clients."
@@ -1559,16 +1570,34 @@ def run_once(path: Path) -> None:
         except (Refusal, ValueError, OSError):
             state = None
         remembered = state.get("installedClients") if state else None
+        withdrawal_error: Refusal | None = None
         try:
             removed, remaining = withdraw_disabled_node(
                 binary, commands, address, tag,
                 set(remembered) if isinstance(remembered, list) else None,
             )
         except Refusal as refusal:
-            raise Refusal(f"{refusal}{cache_note}") from refusal
+            withdrawal_error, removed, remaining = refusal, 0, None
         if remaining is not None and state is not None:
             state["installedClients"] = sorted(remaining)
             save_state(path, state)
+        # A final best-effort counter sample, taken after the withdrawal so it
+        # can never delay it: the traffic since the last active round is kept
+        # in the durable totals for the next round that may report. A metering
+        # failure is only noted; it never replaces the withdrawal result.
+        metering_note = ""
+        if state is None:
+            metering_note = "; usage since the last round is not kept: the state file is unusable"
+        else:
+            try:
+                _, _, _, counters, settled_marker = reconcile_and_read_stable(
+                    binary, commands, address, tag, None, None,
+                )
+                keep_usage_locally(path, state, None, counters, settled_marker)
+            except Exception as error:  # noqa: BLE001 - best effort after withdrawal
+                metering_note = f"; usage since the last round is not kept: {error}"
+        if withdrawal_error is not None:
+            raise Refusal(f"{withdrawal_error}{cache_note}{metering_note}") from withdrawal_error
         # Never a success: the node is out of service and an operator should
         # stop tono-xray. Usage and acknowledgements are not sent.
         raise Refusal(
@@ -1577,6 +1606,7 @@ def run_once(path: Path) -> None:
             + ("" if remaining is not None else
                "; the client inventory is unknown, so stop tono-xray on this node")
             + cache_note
+            + metering_note
         )
     except Exception as error:
         if not control_plane_unreachable(error):
@@ -1609,13 +1639,23 @@ def run_once(path: Path) -> None:
     # stop an automatic retirement. An unset value follows the control plane.
     retire_shared_legacy = server_retire_shared_legacy if override is None else override
     # Revocations must reach hy2 even if the following Xray reconciliation
-    # fails. Never ACK the roster unless both installed transports were updated.
-    sync_hy2_roster(roster)
-    added, removed, installed, counters, settled_marker = reconcile_and_read_stable(
-        binary, commands, address, tag, roster,
-        set(remembered) if isinstance(remembered, list) else None,
-        retire_shared_legacy=retire_shared_legacy,
-    )
+    # fails, and a hy2 failure must not skip the Xray revocation or the counter
+    # read. Never ACK the roster unless both installed transports were updated.
+    hy2_error: Refusal | None = None
+    try:
+        sync_hy2_roster(roster)
+    except Refusal as error:
+        hy2_error = error
+    try:
+        added, removed, installed, counters, settled_marker = reconcile_and_read_stable(
+            binary, commands, address, tag, roster,
+            set(remembered) if isinstance(remembered, list) else None,
+            retire_shared_legacy=retire_shared_legacy,
+        )
+    except Refusal as error:
+        if hy2_error is None:
+            raise
+        raise Refusal(f"{hy2_error}; {error}") from error
     persist_error: Refusal | None = None
     if retire_shared_legacy:
         # Checked every round: a hand edit or reprovision can put it back.
@@ -1627,6 +1667,17 @@ def run_once(path: Path) -> None:
         except Refusal as error:
             print(f"shared-legacy retirement not persisted: {error}", file=sys.stderr)
             persist_error = error
+    if hy2_error is not None:
+        # Xray is reconciled, but hy2 may still admit a revoked account: keep
+        # the usage locally and refuse, so the control plane never sees this
+        # node as converged and nothing is reported or acknowledged.
+        if state is None:
+            raise Refusal(f"{hy2_error}; the state file is unusable: {state_error}")
+        try:
+            keep_usage_locally(path, state, installed, counters, settled_marker)
+        except Refusal as error:
+            raise Refusal(f"{hy2_error}; usage not kept: {error}") from error
+        raise hy2_error
     if cache_error:
         # An older saved roster is still on disk and may name an account this
         # roster revoked. Never report the round as complete while it is.
