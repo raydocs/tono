@@ -378,6 +378,10 @@ where
         emit(&inner);
     }
 
+    // #582: a budget timeout proves the control plane unreachable only if no response status
+    // arrived meanwhile; one that did (a 401 whose body is still pending) may be a refusal.
+    let answers_before = client.transport().answers_seen();
+    let answer_probe = Arc::clone(&client);
     let account_result = match tokio::time::timeout_at(deadline, fetch_me(client)).await {
         Ok(result) => result,
         Err(_) => {
@@ -387,7 +391,8 @@ where
             }
             apply_stored_protection(&mut inner, protection);
             // #582: the budget elapsed without any server answer, so the control plane is unreachable.
-            if let Some(admitted) = settle_unreachable_restore(&mut inner, protection) {
+            let unanswered = answer_probe.transport().answers_seen() == answers_before;
+            if let Some(admitted) = unanswered.then(|| settle_unreachable_restore(&mut inner, protection)).flatten() {
                 emit(&inner);
                 return admitted.then(|| (offline_account_info(), true));
             }

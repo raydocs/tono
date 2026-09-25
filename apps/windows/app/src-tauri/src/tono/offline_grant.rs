@@ -431,6 +431,9 @@ impl OfflineGate {
     /// for the disk is stale from then on: dropped, so its writer never lands it over a grant
     /// recorded after the lift.
     fn lift_forbidden(&self) {
+        // The file lock first (the writer's order): a writer that already snapshotted this
+        // tombstone finishes its write before the lift, so the lift's drop is never overtaken.
+        let _file = self.file.lock();
         let mut pending = self.tombstone.lock();
         let lifted = self
             .revocation

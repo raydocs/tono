@@ -175,6 +175,9 @@ pub struct TonoTransport {
     /// `resolved` with the pinned attempt's connect budget, used only while `prefer_resolved` is
     /// set, so a resolver that has become a blackhole costs 10 s before the pins, not 30 s.
     resolved_first: reqwest::Client,
+    /// Responses whose status line arrived (#582). Launch restore reads it around a budget
+    /// timeout: an unchanged count is the only proof that the control plane gave no answer.
+    answers: std::sync::atomic::AtomicU64,
 }
 
 /// Holds `prefer_resolved` for one preferred attempt and clears it on drop unless the attempt
@@ -203,10 +206,16 @@ impl TonoTransport {
             resolved,
             alternate_port: std::sync::atomic::AtomicU16::new(0),
             prefer_resolved: std::sync::atomic::AtomicBool::new(false),
+            answers: std::sync::atomic::AtomicU64::new(0),
             resolved_first: Self::pinned_builder()
                 .build()
                 .context("failed to build the Tono HTTP preferred-fallback client")?,
         })
+    }
+
+    /// How many responses have delivered a status line so far (#582).
+    pub fn answers_seen(&self) -> u64 {
+        self.answers.load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// Rebuild the pinned client from the current compiled + learned set.
@@ -266,6 +275,7 @@ impl TonoTransport {
                 .context("failed to build the resolving test client")?,
             alternate_port: std::sync::atomic::AtomicU16::new(0),
             prefer_resolved: std::sync::atomic::AtomicBool::new(false),
+            answers: std::sync::atomic::AtomicU64::new(0),
             resolved_first: quick()
                 .resolve_to_addrs(host, resolved)
                 .build()
@@ -332,6 +342,7 @@ impl TonoTransport {
         }
 
         let mut response = builder.send().await.map_err(|err| transport(&err))?;
+        self.answers.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         let status = response.status().as_u16();
         if response
             .content_length()
@@ -346,11 +357,11 @@ impl TonoTransport {
             let chunk = match response.chunk().await {
                 Ok(Some(chunk)) => chunk,
                 Ok(None) => break,
-                // #582: a 401/403 is the server's answer about the session even
-                // when its body is cut off. It goes up as that status, with what
-                // arrived, so tono-core classifies it instead of reading it as an
-                // unreachable control plane that offline admission accepts.
-                Err(_) if status == 401 || status == 403 => break,
+                // #582: a non-2xx status is the server's answer even when its body
+                // is cut off. It goes up as that status, with what arrived, so
+                // tono-core classifies it (401/403) or reports it as a server error,
+                // never as an unreachable control plane that offline admission accepts.
+                Err(_) if !(200..300).contains(&status) => break,
                 Err(err) => return Err(transport(&err)),
             };
             if body.len() + chunk.len() > MAX_RESPONSE_BYTES {
@@ -951,6 +962,7 @@ mod tests {
             resolved: TonoTransport::builder().resolve_to_addrs(host, &live).build().unwrap(),
             alternate_port: std::sync::atomic::AtomicU16::new(0),
             prefer_resolved: std::sync::atomic::AtomicBool::new(false),
+            answers: std::sync::atomic::AtomicU64::new(0),
             resolved_first: TonoTransport::pinned_builder().resolve_to_addrs(host, &live).build().unwrap(),
         };
         let store = std::sync::Arc::new(MemoryCredentialStore::new());
