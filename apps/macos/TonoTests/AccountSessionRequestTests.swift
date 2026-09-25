@@ -85,6 +85,17 @@ final class AccountSessionRequestTests: XCTestCase {
         verifiedAt: 1_000
     )
 
+    /// #587: another app's system proxy / PAC must not carry account calls.
+    /// PF blocks that proxy's upstream in Protected Offline, and Windows
+    /// already uses no_proxy for the control plane.
+    func testControlPlaneSessionIgnoresTheSystemProxy() throws {
+        let proxies = try XCTUnwrap(
+            TonoAPIClient.controlPlaneSessionConfiguration().connectionProxyDictionary,
+            "nil inherits the system proxy settings"
+        )
+        XCTAssertTrue(proxies.isEmpty)
+    }
+
     func testLateAuthMethodsFailureDoesNotReplaceAuthenticatedState() async throws {
         let (account, transport, host, requests) = fixture()
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
