@@ -13,7 +13,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -89,6 +89,8 @@ enum GrantFile {
 struct Tombstone {
     reason: String,
     at: i64,
+    /// Unique per revocation: a writer or a grant write tells the tombstone it saw from a newer one.
+    generation: u64,
 }
 
 /// Restore's offline answer.
@@ -137,8 +139,11 @@ pub struct OfflineGate {
     revocation: AtomicU8,
     /// The grant this session was admitted on while no server answer has arrived yet.
     offline: parking_lot::Mutex<Option<OfflineGrant>>,
-    /// The newest revocation the disk has not acknowledged.
+    /// The newest revocation the disk has not acknowledged. A revocation and a lift change
+    /// `revocation` under this lock, so a grant write that checks it here sees either the lift or
+    /// the tombstone of a revocation after it.
     tombstone: parking_lot::Mutex<Option<Tombstone>>,
+    tombstone_generation: AtomicU64,
     /// One tombstone writer at a time; it always writes the newest pending tombstone.
     tombstone_writer: AtomicBool,
     tombstone_attempts: AtomicU32,
@@ -165,6 +170,7 @@ impl OfflineGate {
             revocation: AtomicU8::new(ELIGIBLE),
             offline: parking_lot::Mutex::new(None),
             tombstone: parking_lot::Mutex::new(None),
+            tombstone_generation: AtomicU64::new(0),
             tombstone_writer: AtomicBool::new(false),
             tombstone_attempts: AtomicU32::new(0),
             file: parking_lot::Mutex::new(()),
@@ -199,8 +205,7 @@ impl OfflineGate {
 
     /// A sign-in adopted a new identity (tono-core retired the previous one first): nothing the
     /// server told the previous identity applies to it. A tombstone still waiting for the disk
-    /// keeps retrying; if it lands after the new grant, offline admission fails closed until the
-    /// next sync rewrites the grant.
+    /// keeps retrying until the new identity's first grant supersedes it.
     pub fn adopt_new_identity(&self) {
         self.revocation.store(ELIGIBLE, Ordering::Release);
         self.leave_offline();
@@ -246,14 +251,23 @@ impl OfflineGate {
     }
 
     /// Record a server-verified session (#582 rule 1). Skipped while this session is revoked; the
-    /// check runs under the file lock, so a grant can never land after a later tombstone.
+    /// check runs under the file lock, so a grant can never land after a later tombstone. A grant
+    /// that lands supersedes a tombstone still waiting from before this session became eligible:
+    /// its writer must not land it over this grant.
     pub fn write_grant(&self, grant: &OfflineGrant) -> anyhow::Result<bool> {
         let bytes = serde_json::to_vec(&GrantFile::Granted(grant.clone()))?;
         let _file = self.file.lock();
-        if self.revoked() {
-            return Ok(false);
-        }
+        let superseded = {
+            let pending = self.tombstone.lock();
+            if self.revoked() {
+                return Ok(false);
+            }
+            pending.as_ref().map(|tombstone| tombstone.generation)
+        };
         crate::tono::state::write_private_file(&self.path, &bytes)?;
+        if let Some(generation) = superseded {
+            self.drop_tombstone(generation);
+        }
         Ok(true)
     }
 
@@ -283,8 +297,17 @@ impl OfflineGate {
     /// #582 rule 3: memory first (Connect refuses from here on), then the durable overwrite on a
     /// writer that retries until the disk acknowledges it. Never a delete.
     fn revoke(self: &Arc<Self>, level: u8, reason: String) {
-        self.revocation.fetch_max(level, Ordering::AcqRel);
-        *self.tombstone.lock() = Some(Tombstone { reason, at: crate::tono::commands::epoch_millis() });
+        {
+            let mut pending = self.tombstone.lock();
+            let previous = self.revocation.fetch_max(level, Ordering::AcqRel);
+            // A lesser verdict after a stronger one records nothing: another 403 after a refusal
+            // must not replace the refusal, pending or on disk.
+            if level < previous {
+                return;
+            }
+            let generation = self.tombstone_generation.fetch_add(1, Ordering::AcqRel);
+            *pending = Some(Tombstone { reason, at: crate::tono::commands::epoch_millis(), generation });
+        }
         if self.tombstone_writer.swap(true, Ordering::AcqRel) {
             // The running writer picks up the newest tombstone.
             return;
@@ -305,8 +328,8 @@ impl OfflineGate {
     async fn write_tombstone_until_durable(self: Arc<Self>) {
         let mut delay = TOMBSTONE_RETRY_INITIAL;
         loop {
-            let pending = self.tombstone.lock().clone();
-            let Some(tombstone) = pending else {
+            let drained = self.tombstone.lock().is_none();
+            if drained {
                 self.tombstone_writer.store(false, Ordering::Release);
                 // A revocation recorded between the empty read and the release saw the flag still
                 // set and left its tombstone to this writer.
@@ -316,14 +339,10 @@ impl OfflineGate {
                 }
                 self.durable.notify_waiters();
                 return;
-            };
+            }
             let attempt = self.tombstone_attempts.fetch_add(1, Ordering::AcqRel).saturating_add(1);
-            match self.write_tombstone(&tombstone) {
+            match self.write_pending_tombstone() {
                 Ok(()) => {
-                    let mut slot = self.tombstone.lock();
-                    if slot.as_ref() == Some(&tombstone) {
-                        *slot = None;
-                    }
                     delay = TOMBSTONE_RETRY_INITIAL;
                 }
                 Err(error) => {
@@ -339,13 +358,46 @@ impl OfflineGate {
         }
     }
 
-    fn write_tombstone(&self, tombstone: &Tombstone) -> anyhow::Result<()> {
+    /// Write the pending tombstone as it stands under the file lock, so one that a lift or a grant
+    /// write has since dropped is never written, and clear it once the disk acknowledged it.
+    fn write_pending_tombstone(&self) -> anyhow::Result<()> {
+        let _file = self.file.lock();
+        let snapshot = self.tombstone.lock().clone();
+        let Some(tombstone) = snapshot else {
+            return Ok(());
+        };
         let bytes = serde_json::to_vec(&GrantFile::Revoked {
             reason: tombstone.reason.clone(),
             at: tombstone.at,
         })?;
-        let _file = self.file.lock();
-        crate::tono::state::write_private_file(&self.path, &bytes)
+        crate::tono::state::write_private_file(&self.path, &bytes)?;
+        self.drop_tombstone(tombstone.generation);
+        Ok(())
+    }
+
+    /// Drop the pending tombstone if it is still revocation `generation`.
+    fn drop_tombstone(&self, generation: u64) {
+        let mut pending = self.tombstone.lock();
+        if pending.as_ref().is_some_and(|tombstone| tombstone.generation == generation) {
+            *pending = None;
+            drop(pending);
+            self.durable.notify_waiters();
+        }
+    }
+
+    /// A later `Verified` for this identity lifts `FORBIDDEN`. The forbidden verdict still waiting
+    /// for the disk is stale from then on: dropped, so its writer never lands it over a grant
+    /// recorded after the lift.
+    fn lift_forbidden(&self) {
+        let mut pending = self.tombstone.lock();
+        let lifted = self
+            .revocation
+            .compare_exchange(FORBIDDEN, ELIGIBLE, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok();
+        if lifted && pending.take().is_some() {
+            drop(pending);
+            self.durable.notify_waiters();
+        }
     }
 }
 
@@ -359,9 +411,7 @@ impl SessionVerdictSink for OfflineVerdictSink {
         let refused = matches!(verdict, SessionVerdict::Refused { .. });
         let verified = matches!(verdict, SessionVerdict::Verified);
         match verdict {
-            SessionVerdict::Verified => {
-                let _ = gate.revocation.compare_exchange(FORBIDDEN, ELIGIBLE, Ordering::AcqRel, Ordering::Acquire);
-            }
+            SessionVerdict::Verified => gate.lift_forbidden(),
             SessionVerdict::Forbidden => gate.revoke(FORBIDDEN, REASON_FORBIDDEN.to_string()),
             SessionVerdict::Refused { code } => {
                 let reason = code.map_or_else(|| REASON_REFUSED.to_string(), |code| format!("{REASON_REFUSED}: {code}"));

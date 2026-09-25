@@ -203,8 +203,7 @@ nonisolated final class OfflineGrantGate: @unchecked Sendable {
 
     /// A sign-in adopted a new identity: nothing the server told the previous
     /// one applies to it. A tombstone still waiting for the disk keeps
-    /// retrying; landing after the new grant, it fails closed until the next
-    /// catalog sync records the grant again.
+    /// retrying until the new identity's first grant supersedes it.
     func adoptNewIdentity() {
         lock.lock(); defer { lock.unlock() }
         revocation = .eligible
@@ -212,9 +211,12 @@ nonisolated final class OfflineGrantGate: @unchecked Sendable {
     }
 
     /// `me()` accepted the account again (a launch, Check again): a refusal
-    /// this process heard earlier no longer stands.
+    /// this process heard earlier no longer stands, nor does its tombstone
+    /// still waiting for the disk, which must not land over a grant recorded
+    /// after this.
     func readmit() {
         lock.lock(); defer { lock.unlock() }
+        if revocation != .eligible { pendingTombstone = nil }
         revocation = .eligible
     }
 
@@ -263,12 +265,16 @@ nonisolated final class OfflineGrantGate: @unchecked Sendable {
     }
 
     /// Record a server-verified session (#582 rule 1). Skipped while this
-    /// session is revoked.
+    /// session is revoked. A grant that lands supersedes a tombstone still
+    /// waiting from before this session became eligible: its writer must not
+    /// land it over this grant.
     @discardableResult
     func writeGrant(_ grant: OfflineGrant) -> Bool {
         lock.lock(); defer { lock.unlock() }
         guard revocation == .eligible else { return false }
-        return (try? writeLocked(OfflineGrantRecord(granted: grant))) != nil
+        guard (try? writeLocked(OfflineGrantRecord(granted: grant))) != nil else { return false }
+        pendingTombstone = nil
+        return true
     }
 
     // MARK: Sink side
@@ -284,7 +290,12 @@ nonisolated final class OfflineGrantGate: @unchecked Sendable {
         var refused = false
         switch verdict {
         case .verified:
-            if revocation == .forbidden { revocation = .eligible }
+            // The lifted 403's tombstone, if the disk has not taken it yet,
+            // is stale: it must not land over a grant recorded after this.
+            if revocation == .forbidden {
+                revocation = .eligible
+                pendingTombstone = nil
+            }
         case .forbidden:
             startWriter = revokeLocked(.forbidden, reason: OfflineGrantGate.forbiddenReason)
         case let .refused(code):
@@ -336,6 +347,8 @@ nonisolated final class OfflineGrantGate: @unchecked Sendable {
     }
 
     /// True once no revocation waits for the disk; the writer then stops.
+    /// It writes the pending tombstone as it stands under the lock, so one a
+    /// lift or a grant has since dropped is never written.
     private func writePendingTombstone() -> Bool {
         lock.lock(); defer { lock.unlock() }
         if let tombstone = pendingTombstone {
