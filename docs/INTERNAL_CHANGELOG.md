@@ -37,7 +37,7 @@
 - **归属/来源**：G2 连不上有下一手（helper 坏了要能修、要说清）；Issue #601（macOS 合并列车审查 TM-claude-2/4/6，总账同名三行）。
   macOS `Core/HelperManager.swift`、`Core/RuntimeCleanup.swift`、`Core/HelperProtocolVersion.swift`；helper
   `KillSwitchPF.swift`、`ProtectedDNSManager.swift`、`UpdateRuntime.swift`、`main.swift`、`KillSwitchTests.swift`、`CONTRACT.sha256`。
-  基线 origin/main f5c31d58；分支 `fix/macos-helper-followups-20260925`（红分支 `wip/macos-helper-followups-20260925-red`）；PR 待开；未合 main。
+  基线 origin/main f5c31d58；分支 `fix/macos-helper-followups-20260925`（红分支 `wip/macos-helper-followups-20260925-red`）；PR [#625](https://github.com/raydocs/tono/pull/625)；未合 main。
 - **缺陷修复**：
   - TM-claude-2：当前版本 helper 启动失败（PF 恢复后任一步失败会装紧急拦截再退出）时，launchd KeepAlive 每约 10 s 重启一次，永远不应答。
     `installIfNeeded` 看到版本正确、launchd 已注册就直接返回，修复是空操作；启动时的查询随后抛出通用「helper 不可用」，#425 的提示和管理员提示都不出现。
