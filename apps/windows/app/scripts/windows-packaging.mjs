@@ -315,7 +315,7 @@ export function validateNsisAutomaticUpgradeFlow(source) {
   if (
     privateLines.some(
       (line) =>
-        !/^(?:File \/a |CreateDirectory "\$INSTDIR\\|\{\{#each (?:resources_dirs|resources|binaries)\}\}|\{\{\/each\}\}|ClearErrors$|Rename "\$INSTDIR\\[^"]+" "\$INSTDIR\\[^"]+"$|\$\{If\} \$\{Errors\}$|Abort "|\$\{EndIf\}$)/.test(
+        !/^(?:File \/a |CreateDirectory "\$INSTDIR\\|\{\{#each (?:resources_dirs|resources|binaries)\}\}|\{\{\/each\}\}|ClearErrors$|Rename "\$INSTDIR\\(?![^"]*\.\.)[^"]+" "\$INSTDIR\\(?![^"]*\.\.)[^"]+"$|\$\{If\} \$\{Errors\}$|Abort "|\$\{EndIf\}$)/.test(
           line,
         ),
     )
@@ -336,9 +336,16 @@ export function validateNsisAutomaticUpgradeFlow(source) {
     !/ClearErrors\nRename "\$INSTDIR\\\$\{MAINBINARYNAME\}\.exe\.next" "\$INSTDIR\\\$\{MAINBINARYNAME\}\.exe"\n\$\{If\} \$\{Errors\}\nAbort "/.test(
       privateText,
     ) ||
-    !/\{\{#each binaries\}\}\nFile \/a "\/oname=\{\{this\}\}\.next" [^\n]+\nClearErrors\nRename "\$INSTDIR\\\\\{\{this\}\}\.next" "\$INSTDIR\\\\\{\{this\}\}"\n\$\{If\} \$\{Errors\}\nAbort "/.test(
-      privateText,
-    )
+    // The binaries loop must be exactly the staged extract-and-rename, with no other member.
+    privateText.match(/\{\{#each binaries\}\}\n([\s\S]*?)\n\{\{\/each\}\}/)?.[1]?.replace(/^Abort "[^\n]*$/m, 'Abort') !==
+      [
+        'File /a "/oname={{this}}.next" "{{no-escape @key}}"',
+        'ClearErrors',
+        'Rename "$INSTDIR\\\\{{this}}.next" "$INSTDIR\\\\{{this}}"',
+        '${If} ${Errors}',
+        'Abort',
+        '${EndIf}',
+      ].join('\n')
   ) {
     return 'v1 private extraction must stage the GUI and Mihomo under .next names and abort if the private rename fails'
   }
