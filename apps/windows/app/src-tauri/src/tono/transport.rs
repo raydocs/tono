@@ -342,7 +342,17 @@ impl TonoTransport {
         // Stream the body with a hard cap: a missing or lying Content-Length
         // must not turn into an unbounded read.
         let mut body = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(|err| transport(&err))? {
+        loop {
+            let chunk = match response.chunk().await {
+                Ok(Some(chunk)) => chunk,
+                Ok(None) => break,
+                // #582: a 401/403 is the server's answer about the session even
+                // when its body is cut off. It goes up as that status, with what
+                // arrived, so tono-core classifies it instead of reading it as an
+                // unreachable control plane that offline admission accepts.
+                Err(_) if status == 401 || status == 403 => break,
+                Err(err) => return Err(transport(&err)),
+            };
             if body.len() + chunk.len() > MAX_RESPONSE_BYTES {
                 return Err(ApiError::InvalidResponse);
             }
@@ -641,6 +651,44 @@ mod tests {
             .await.unwrap().unwrap().unwrap();
         assert_eq!(response.status, 200);
         assert_eq!(response.body, b"hi");
+    }
+
+    /// #582: a 401 whose body is cut off is still the server's answer, so it
+    /// reaches tono-core's classifier as a status, not as a transport failure.
+    #[tokio::test]
+    async fn a_refusal_whose_body_is_cut_off_is_still_an_answer() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut header = Vec::new();
+            while !header.ends_with(b"\r\n\r\n") {
+                let Ok(byte) = stream.read_u8().await else { return };
+                header.push(byte);
+            }
+            // Promise more body than is sent, then close mid-body.
+            let _ = stream
+                .write_all(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 64\r\nConnection: close\r\n\r\n{\"error\"")
+                .await;
+            let _ = stream.shutdown().await;
+        });
+        let transport = TonoTransport::new().unwrap();
+        let client = TonoTransport::builder().build().unwrap();
+        let request = ApiRequest {
+            method: HttpMethod::Get,
+            url: format!("http://{address}/"),
+            bearer: None,
+            json_body: None,
+            binary_body: None,
+            headers: Vec::new(),
+        };
+        let response = tokio::time::timeout(Duration::from_secs(5), transport.attempt(&client, &request))
+            .await
+            .expect("the fixture answers at once")
+            .expect("a cut-off 401 is the server's answer, not a transport failure");
+        assert_eq!(response.status, 401);
     }
 
     /// Whether something in the network path accepts a connection to an address

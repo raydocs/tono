@@ -742,6 +742,15 @@ actor TonoAPIClient {
                 }
             } catch let apiError as APIError {
                 throw apiError
+            } catch let error where http.statusCode == 401 || http.statusCode == 403 {
+                // #582: the status line is the server's answer about the
+                // session even when its body is cut off. It is classified from
+                // what arrived and thrown as that status below, never as an
+                // unreachable control plane that offline admission accepts.
+                if Self.isCancellation(error) {
+                    reportSessionAnswer(status: http.statusCode, body: data, session: session)
+                    throw CancellationError()
+                }
             } catch {
                 try await handleTransportFailure(
                     error,

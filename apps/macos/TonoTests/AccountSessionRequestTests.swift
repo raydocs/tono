@@ -955,6 +955,38 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertEqual(record["verdict"] as? String, "revoked", "the refusal must overwrite the grant on disk")
     }
 
+    /// #582: a refused renewal whose body is cut off is still the server's
+    /// answer. It revokes the offline grant and is not an unreachable Tono.
+    func testARefusedRenewalWithACutOffBodyStillRevokesTheOfflineGrant() async throws {
+        let directory = Self.offlineGrantDirectory("cut-off")
+        let (account, transport, host, requests) = fixture(offlineGate: OfflineGrantGate(directory: directory))
+        defer {
+            transport.invalidateAndCancel(); HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            ManagedExitCatalogOwnership.purge()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        try await adoptTestAccount(account)
+        XCTAssertTrue(account.api.offlineGate.writeGrant(Self.adoptedSessionGrant))
+        let read = Task { try await account.api.me() }
+        let me = try await nextRequest(requests)
+        me.respond(status: 401, body: #"{"error":{"code":"UNAUTHORIZED"}}"#)
+        let renewal = try await nextRequest(requests)
+        XCTAssertTrue(renewal.request.url?.path.hasSuffix("/auth/refresh") == true)
+        let refused = HTTPURLResponse(url: renewal.request.url!, statusCode: 401, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
+        renewal.client?.urlProtocol(renewal, didReceive: refused, cacheStoragePolicy: .notAllowed)
+        renewal.client?.urlProtocol(renewal, didFailWithError: URLError(.networkConnectionLost))
+        let outcome = await read.result
+        if case let .failure(error) = outcome,
+           let apiError = error as? TonoAPIClient.APIError, case .transport = apiError {
+            XCTFail("a refused renewal is not an unreachable Tono")
+        }
+
+        let written = try Data(contentsOf: directory.appendingPathComponent(OfflineGrantGate.fileName))
+        let record = try XCTUnwrap(JSONSerialization.jsonObject(with: written) as? [String: Any])
+        XCTAssertEqual(record["verdict"] as? String, "revoked", "the cut-off refusal must overwrite the grant on disk")
+    }
+
     func testSignInKeepsTheArmedAndResumeIntentsUnlessTheHelperConfirmsRelease() async {
         let (account, transport, host, _) = fixture()
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); KillSwitchService.isArmed = false }
