@@ -43,7 +43,8 @@
   不知道该校时。macOS：新增 `CertificateClock`，识别 URLSession 的 `NSURLErrorServerCertificateHasBadDate`/`NotYetValid`
   及其背后的 Secure Transport/`SecTrust` 状态（pinned 路径的 `NWError.tls`）；控制面客户端改抛 `APIError.clockSkew`，pinned 路径
   证书日期握手失败报 `serverCertificateHasBadDate`；连接后探测新增 `.clock` 类别，任一探测为 `.clock` 时保留原失败码（遥测不变），
-  只把用户文案换成时钟提示。Windows：传输层在 rustls `Expired`/`NotValidYet`（webpki 或平台校验器）错误链上加 `TONO_CLOCK_SKEW`
+  只把用户文案换成时钟提示（mixed 探测已成功时不换：它经同一出口完成了默认证书校验，说明时钟没问题）。控制面在系统 DNS 与 pinned
+  两条路径间保留证书日期证据：任一路径因证书日期失败且没有路径答复时，按时钟错误报告。Windows：传输层在 rustls `Expired`/`NotValidYet`（webpki 或平台校验器）错误链上加 `TONO_CLOCK_SKEW`
   标记，`auth_error` 映射为该前缀；前端把它排在最前，出现在任何界面错误里都显示时钟文案。
   准入选择：时钟错误仍是「收到状态行之前失败」，Windows 保持原 `TransportKind`（重试与回退规则不变），macOS `isUnreachable`
   视为不可达，离线授权照常判定；从不当作会话拒绝（#582 sink 不变）。未新增任何 PF/WFP NTP 放行，保护不放松。
@@ -56,8 +57,8 @@
   本机仅运行 `node scripts/generate-i18n-keys.mjs`（生成类型只多出新键）与 locale/xcstrings JSON 解析检查。
 - **候选/发布**：仅源码，无新候选。
 - **剩余限制**：Network.framework 对证书日期失败实际给出的 `NWError.tls` 状态（-9814/-9815/-67818/-67819）未实机确认；
-  若系统报为通用信任失败则仍显示原文案。macOS 在离线授权下进入 Ready 时不单独提示时钟（仅连接后探测与无授权失败时提示）；
-  系统 DNS 路径报时钟错误而 pinned 路径随后仅超时时，最终错误按不可达显示。保护期间仍无法自动校时（产品决定，另议）。
+  若系统报为通用信任失败则仍显示原文案。macOS 在离线授权下进入 Ready 时不单独提示时钟（仅连接后探测与无授权失败时提示）。
+  保护期间仍无法自动校时（产品决定，另议）。
   Windows 连接后探测未改。
 
 ## 2026-09-25 · macOS：控制面请求系统 DNS 失败时改走 pinned 地址

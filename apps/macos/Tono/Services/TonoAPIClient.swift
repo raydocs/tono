@@ -855,6 +855,9 @@ actor TonoAPIClient {
         }
         let pinnedFirst = prefersPinnedAddresses
         let order = pinnedFirst ? [pinnedPath, systemPath] : [systemPath, pinnedPath]
+        // #588: a path that failed on a certificate date is the cause to
+        // report when no path answers, whatever the next path failed on.
+        var clockFailure: (any Error)?
         for (index, path) in order.enumerated() {
             if index > 0 { try Self.requireCurrent(requestIsCurrent) }
             do {
@@ -872,6 +875,7 @@ actor TonoAPIClient {
                 // A preferred attempt that fails or is cancelled puts the
                 // system resolver back in front for the next request.
                 if index == 0, pinnedFirst { prefersPinnedAddresses = false }
+                if CertificateClock.isDateFailure(error) { clockFailure = error }
                 guard index + 1 < order.count,
                       !(error is ControlPlaneExchangeError),
                       !Self.isCancellation(error),
@@ -884,7 +888,13 @@ actor TonoAPIClient {
                         attempt: 1,
                         maximumAttempts: 2
                       )
-                else { throw error }
+                else {
+                    if let clockFailure, !(error is ControlPlaneExchangeError),
+                       !Self.isCancellation(error) {
+                        throw clockFailure
+                    }
+                    throw error
+                }
                 let failure = error as NSError
                 LocalTrafficAudit.shared.recordEvent(
                     "control_plane_path_failed",

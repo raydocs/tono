@@ -269,7 +269,9 @@ nonisolated enum ProtectedConnectivity {
         // #588: an origin's certificate failed on its dates through the
         // tunnel, so the exit answered and the clock is what is wrong. The
         // code (and its telemetry) stays; only the sentence names the clock.
-        if probes.contains(where: { $0.category == .clock }) {
+        // A mixed probe that succeeded validated a certificate (dates and
+        // host name) through the same exit, so the clock is fine then.
+        if mixed != .some(.ok), probes.contains(where: { $0.category == .clock }) {
             decided.userMessage = CertificateClock.userMessage
         }
         return .retry(decided)
