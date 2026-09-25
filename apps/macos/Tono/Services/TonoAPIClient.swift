@@ -706,7 +706,7 @@ actor TonoAPIClient {
             let bytes: URLSession.AsyncBytes
             let response: URLResponse
             do {
-                (bytes, response) = try await session.bytes(for: request)
+                (bytes, response) = try await self.session.bytes(for: request)
             } catch {
                 try await handleTransportFailure(
                     error,
