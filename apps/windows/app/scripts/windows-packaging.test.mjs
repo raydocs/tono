@@ -603,6 +603,32 @@ test('Windows installers refuse to downgrade and hand back the manual lease on t
   )
 })
 
+test('every installer init exit after the manual gate hands the lease back', () => {
+  // TW-anthropic-6: a Quit or Abort from .onInit never reaches .onGUIEnd, and a lease left
+  // behind keeps the Service refusing Connect and skipping recovery until another installer runs.
+  const onInit =
+    installerSource.match(/Function \.onInit\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  const gateAt = onInit.indexOf('--manual-update-gate')
+  // The language dialog's Cancel Aborts inside MUI_LANGDLL_DISPLAY, where nothing can hand the
+  // lease back, so the dialog has to run before the gate takes it.
+  const languageAt = onInit.indexOf('!insertmacro MUI_LANGDLL_DISPLAY')
+  assert.ok(languageAt >= 0 && gateAt > languageAt, 'the language dialog must precede the gate')
+  const legacyLocation =
+    onInit.slice(gateAt).match(/"\$\(legacyLocationAbort\)"([\s\S]*?)\bAbort\b/)?.[1] ?? ''
+  assert.match(legacyLocation, /Call ReleaseManualLease/)
+  const detector =
+    installerSource.match(/Function DetectExistingInstall\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  for (const [label, next] of [
+    ['downgrade_blocked', 'invalid_existing_version'],
+    ['invalid_existing_version', 'legacy_wix_blocked'],
+    ['legacy_wix_blocked', 'no_existing_install'],
+  ]) {
+    const block = detector.match(new RegExp(`\\n  ${label}:([\\s\\S]*?)\\n  ${next}:`))?.[1] ?? ''
+    const releaseAt = block.indexOf('Call ReleaseManualLease')
+    assert.ok(releaseAt >= 0 && releaseAt < block.indexOf('Quit'), `${label} keeps the lease`)
+  }
+})
+
 test('NSIS uninstall removes leftover user control-plane pins', () => {
   assert.match(
     installerSource,
