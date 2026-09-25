@@ -44,6 +44,10 @@ actor TonoAPIClient {
         /// `unauthorized` so it is neither retried behind a token refresh nor
         /// reported to the user as an expired session.
         case entitlementBlocked(code: String, message: String?)
+        /// `auth/email/verify` refused the code: wrong, already used, or past
+        /// its validity window. No session is involved, so it must not read
+        /// as an expired session (#595).
+        case invalidOrExpiredCode
 
         var errorDescription: String? {
             switch self {
@@ -57,6 +61,7 @@ actor TonoAPIClient {
             case let .server(_, message): message
             case .invalidResponse: String(localized: "Tono returned an invalid response.")
             case let .entitlementBlocked(code, _): Self.entitlementDescription(code)
+            case .invalidOrExpiredCode: String(localized: "That code is wrong or expired. Request a new one.")
             }
         }
 
@@ -173,7 +178,13 @@ actor TonoAPIClient {
         try await publicRequest("auth/email/start", body: body)
     }
     func verifyEmailSignIn(_ body: TonoEmailVerifyRequest) async throws -> TonoAuthResponse {
-        try await publicAuthRequest("auth/email/verify", body: body)
+        // No session rides on this request, so its 401 is the Worker refusing
+        // the code (`INVALID_OR_EXPIRED_CODE`), never an expired session (#595).
+        do {
+            return try await publicAuthRequest("auth/email/verify", body: body)
+        } catch APIError.unauthorized {
+            throw APIError.invalidOrExpiredCode
+        }
     }
     func oidcChallenge(_ body: TonoOIDCChallengeRequest) async throws -> TonoOIDCChallengeResponse {
         try await publicRequest("auth/oidc/challenge", body: body)

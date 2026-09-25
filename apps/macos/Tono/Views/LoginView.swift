@@ -22,6 +22,8 @@ struct LoginView: View {
     /// After a successful send, hold the "sent" pill for 1.5 s before the code step.
     @State private var revealCodeStep = false
     @State private var sentHoldTask: Task<Void, Never>?
+    /// A code that has not arrived a minute after it was sent (#596).
+    @State private var showNoEmailHint = false
     @FocusState private var focusedField: Field?
     private enum Field { case email, code }
 
@@ -317,7 +319,22 @@ struct LoginView: View {
                                     .foregroundStyle(.secondary)
                                     .multilineTextAlignment(.center)
                                     .textSelection(.enabled)
+                                    // `auth/email/start` answers 202 for every
+                                    // address and a failed delivery is silent, so
+                                    // each challenge gets its own one-minute clock.
+                                    .task(id: session.emailChallenge?.challengeId) {
+                                        showNoEmailHint = false
+                                        try? await Task.sleep(for: SignInCodeNotReceivedHint.delay)
+                                        guard !Task.isCancelled else { return }
+                                        withAnimation(TonoMotion.easeOut(0.25, reduceMotion: reduceMotion)) {
+                                            showNoEmailHint = true
+                                        }
+                                    }
+                                if showNoEmailHint {
+                                    SignInCodeNotReceivedHint(email: email)
+                                }
                                 Button("Use another email") {
+                                    showNoEmailHint = false
                                     session.resetEmailSignIn()
                                     emailCode = ""
                                     autoSubmittedCode = nil

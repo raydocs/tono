@@ -397,6 +397,7 @@ pub(super) fn auth_error(err: &ApiError) -> String {
         ApiError::RateLimited => "TONO_AUTH_RATE_LIMITED",
         ApiError::DeviceLimit => "TONO_AUTH_DEVICE_LIMIT",
         ApiError::Unauthorized => "TONO_AUTH_UNAUTHORIZED",
+        ApiError::InvalidOrExpiredCode => "TONO_AUTH_INVALID_CODE",
         _ => return err.to_string(),
     };
     format!("{prefix}: {err}")

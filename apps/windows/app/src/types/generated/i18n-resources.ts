@@ -1219,6 +1219,7 @@ export interface TranslationResources {
         emailLabel: string
         emailPlaceholder: string
         errors: {
+          codeRejected: string
           deviceLimit: string
           rateLimited: string
           serverError: string
@@ -1237,6 +1238,10 @@ export interface TranslationResources {
           stillRunningTitle: string
           title: string
           unverifiedDescription: string
+        }
+        noEmail: {
+          description: string
+          title: string
         }
         resendIn: string
         restartTono: string

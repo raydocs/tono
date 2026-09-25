@@ -141,6 +141,9 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
   { prefix: 'TONO_AUTH_RATE_LIMITED', key: 'tono.login.errors.rateLimited' },
   { prefix: 'TONO_AUTH_DEVICE_LIMIT', key: 'tono.login.errors.deviceLimit' },
   { prefix: 'TONO_AUTH_UNAUTHORIZED', key: 'tono.login.errors.sessionExpired' },
+  // The Worker's 401 INVALID_OR_EXPIRED_CODE on verify: a wrong or stale code,
+  // not a session (#595).
+  { prefix: 'TONO_AUTH_INVALID_CODE', key: 'tono.login.errors.codeRejected' },
   { prefix: 'TONO_SERVICE_BUSY', key: 'tono.dashboard.errors.serviceBusy' },
   // TonoService itself is down. It is AutoStart and depends on BFE, so this is almost
   // always BFE having been switched off by a third-party "network optimiser".

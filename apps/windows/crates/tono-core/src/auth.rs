@@ -1100,9 +1100,15 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
             code: code.to_string(),
         };
         let body = serde_json::to_string(&request).map_err(|_| ApiError::InvalidResponse)?;
+        // No session rides on this request, so its 401 is the Worker refusing
+        // the code (`INVALID_OR_EXPIRED_CODE`), never an expired session (#595).
         let response = self
             .call(HttpMethod::Post, endpoints::EMAIL_VERIFY, Some(body), None, SessionUse::None)
-            .await?;
+            .await
+            .map_err(|err| match err {
+                ApiError::Unauthorized => ApiError::InvalidOrExpiredCode,
+                other => other,
+            })?;
         decode_auth_response(&response)
     }
 
