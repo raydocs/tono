@@ -989,6 +989,7 @@ mod tests {
             resolved: TonoTransport::builder().resolve_to_addrs(host, &dead).build().unwrap(),
             alternate_port: std::sync::atomic::AtomicU16::new(0),
             prefer_resolved: std::sync::atomic::AtomicBool::new(true),
+            answers: std::sync::atomic::AtomicU64::new(0),
             resolved_first: TonoTransport::pinned_builder().resolve_to_addrs(host, &dead).build().unwrap(),
         };
         let get = || ApiRequest {
