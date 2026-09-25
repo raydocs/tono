@@ -232,6 +232,30 @@ nonisolated final class ConfigStorage: @unchecked Sendable {
         try data.write(to: url, options: .atomic)
         try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
+
+    /// Reads back a file `writeSensitive` wrote, with the checks
+    /// `loadManagedExitCatalog` applies: no group or other permission bits,
+    /// owned by this user, a regular file and not a symbolic link, non-empty
+    /// and at most `maximumBytes`. Anything else reads as absent.
+    func readSensitive(at url: URL, maximumBytes: Int) -> Data? {
+        guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),
+              let permissions = (attributes[.posixPermissions] as? NSNumber)?.uint16Value,
+              permissions & 0o077 == 0,
+              let owner = (attributes[.ownerAccountID] as? NSNumber)?.uint32Value,
+              owner == getuid(),
+              let values = try? url.resourceValues(forKeys: [
+                  .isRegularFileKey,
+                  .isSymbolicLinkKey,
+                  .fileSizeKey,
+              ]),
+              values.isRegularFile == true,
+              values.isSymbolicLink != true,
+              let size = values.fileSize,
+              size > 0,
+              size <= maximumBytes
+        else { return nil }
+        return try? Data(contentsOf: url, options: .mappedIfSafe)
+    }
 }
 
 nonisolated struct ManagedExitCatalogCache: Codable, Sendable, Equatable {

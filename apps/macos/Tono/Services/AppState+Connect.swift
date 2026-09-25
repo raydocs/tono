@@ -25,6 +25,16 @@ extension AppState {
                     self.errorMessage = String(localized: "No protected Tono cloud exit is ready.")
                     return (false, UUID())
                 }
+                // #582: a server refusal blocks Connect before the UI catches
+                // up, and an offline session must still hold exactly the
+                // catalog its grant verified.
+                if let refusal = self.accountConnectRefusal(
+                    self.managedCatalogDigest,
+                    self.managedCatalogRoutingToken
+                ) {
+                    self.errorMessage = refusal
+                    return (false, UUID())
+                }
                 if let selected = self.selectedExitNode(), let reason = ConfigPipeline.singBoxUnavailableReason(selected) {
                     self.errorMessage = reason + ": this sing-box build cannot authenticate the catalog's HY2 certificate pin. Choose Reality."
                     return (false, UUID())

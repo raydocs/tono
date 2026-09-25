@@ -46,7 +46,9 @@ final class AccountSessionRequestTests: XCTestCase {
         cloudFallbackConsumer: @escaping @MainActor (Bool) throws -> Void = { _ in },
         killSwitchDisarmConsumer: @escaping @MainActor () async -> Void = {},
         protectionBlockedConsumer: @escaping @MainActor () -> Bool = { false },
-        routeSplitConsumer: @escaping @MainActor () -> AppTrafficLedger.RouteSplit = { .init() }
+        routeSplitConsumer: @escaping @MainActor () -> AppTrafficLedger.RouteSplit = { .init() },
+        offlineGate: OfflineGrantGate? = nil,
+        installedCatalogConsumer: @escaping @MainActor () -> InstalledCatalogDigests? = { nil }
     ) -> (AccountSession, URLSession, String, AsyncStream<HeldAccountProtocol>) {
         let host = "\(UUID().uuidString.lowercased()).invalid"
         let (requests, continuation) = AsyncStream<HeldAccountProtocol>.makeStream()
@@ -54,11 +56,34 @@ final class AccountSessionRequestTests: XCTestCase {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [HeldAccountProtocol.self]
         let transport = URLSession(configuration: config)
-        let api = TonoAPIClient(baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport)
-        let account = AccountSession(api: api, keychain: testKeychain(host), sidecar: TonoSidecarService(), descriptorConsumer: descriptorConsumer, catalogConsumer: catalogConsumer, trafficPolicyConsumer: trafficPolicyConsumer, cloudFallbackConsumer: cloudFallbackConsumer, killSwitchDisarmConsumer: killSwitchDisarmConsumer, protectionBlockedConsumer: protectionBlockedConsumer, routeSplitConsumer: routeSplitConsumer)
+        let api = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: offlineGate ?? OfflineGrantGate(directory: Self.fixtureGrantDirectory)
+        )
+        let account = AccountSession(api: api, keychain: testKeychain(host), sidecar: TonoSidecarService(), descriptorConsumer: descriptorConsumer, catalogConsumer: catalogConsumer, trafficPolicyConsumer: trafficPolicyConsumer, cloudFallbackConsumer: cloudFallbackConsumer, killSwitchDisarmConsumer: killSwitchDisarmConsumer, protectionBlockedConsumer: protectionBlockedConsumer, routeSplitConsumer: routeSplitConsumer, installedCatalogConsumer: installedCatalogConsumer)
         account.state = .signedOut
         return (account, transport, host, requests)
     }
+
+    /// A refused fixture session revokes its offline grant here, never in this
+    /// Mac's own Tono directory.
+    private static let fixtureGrantDirectory: URL = AccountSessionRequestTests.offlineGrantDirectory("fixtures")
+
+    private static func offlineGrantDirectory(_ tag: String) -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-offline-\(tag)-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    /// What a verified online session for the adopted test account leaves behind.
+    private static let adoptedSessionGrant = OfflineGrant(
+        accountId: "original",
+        tokenSha256: OfflineGrantGate.tokenDigest("test-only-refresh"),
+        catalogSha256: "catalog-a",
+        routingSha256: "routing-a",
+        verifiedAt: 1_000
+    )
 
     func testLateAuthMethodsFailureDoesNotReplaceAuthenticatedState() async throws {
         let (account, transport, host, requests) = fixture()
@@ -855,6 +880,113 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertNil(account.user)
         XCTAssertNil(try testKeychain(host).string(for: .refreshToken))
         XCTAssertTrue(account.shouldResumeProtection)
+    }
+
+    /// #582 M1: a launch that cannot reach Tono restores Ready, offline, on a
+    /// grant bound to this session's token and to the catalog in memory; a
+    /// grant that records a refusal keeps it from Ready.
+    func testUnreachableRestoreIsReadyOfflineOnlyOnAGrantMatchingMemory() async throws {
+        let directory = Self.offlineGrantDirectory("m1")
+        let installed = InstalledCatalogDigests(catalogSha256: "catalog-a", routingSha256: "routing-a")
+        let (account, transport, host, _) = fixture(
+            offlineGate: OfflineGrantGate(directory: directory),
+            installedCatalogConsumer: { installed }
+        )
+        defer {
+            transport.invalidateAndCancel(); HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            ManagedExitCatalogOwnership.purge()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        try await adoptTestAccount(account)
+        XCTAssertTrue(account.api.offlineGate.writeGrant(Self.adoptedSessionGrant))
+        // Relaunch: the session token is hydrated, the account is not known
+        // yet, and the control plane is blackholed.
+        account.user = nil
+        account.state = .restoring
+        HeldAccountProtocol.install(host) { request in
+            request.client?.urlProtocol(request, didFailWithError: URLError(.cannotConnectToHost))
+        }
+        let unreachable: Error
+        do {
+            _ = try await account.api.me()
+            return XCTFail("a blackholed control plane cannot answer")
+        } catch {
+            unreachable = error
+        }
+
+        await account.settleRestoreFailure(unreachable)
+        XCTAssertEqual(account.state, .ready, "a grant matching memory restores Ready offline")
+        XCTAssertEqual(account.offlineVerifiedAt, Date(timeIntervalSince1970: 1))
+
+        let revokedThisSession = #"{"verdict":"revoked","reason":"refused","at":2000,"tokenSha256":""#
+            + OfflineGrantGate.tokenDigest("test-only-refresh") + #""}"#
+        try ConfigStorage.shared.writeSensitive(
+            Data(revokedThisSession.utf8),
+            to: directory.appendingPathComponent(OfflineGrantGate.fileName)
+        )
+        account.state = .restoring
+        await account.settleRestoreFailure(unreachable)
+        XCTAssertEqual(account.state, .suspended, "a revoked grant is not Ready")
+        XCTAssertNil(account.offlineVerifiedAt)
+    }
+
+    /// #582 M2: the server refusing this session's own renewal overwrites the
+    /// offline grant with a revoked verdict. The file is never deleted.
+    func testARefusedRenewalOverwritesTheOfflineGrantAsRevoked() async throws {
+        let directory = Self.offlineGrantDirectory("m2")
+        let (account, transport, host, requests) = fixture(offlineGate: OfflineGrantGate(directory: directory))
+        defer {
+            transport.invalidateAndCancel(); HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            ManagedExitCatalogOwnership.purge()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        try await adoptTestAccount(account)
+        XCTAssertTrue(account.api.offlineGate.writeGrant(Self.adoptedSessionGrant))
+        let read = Task { try await account.api.me() }
+        let me = try await nextRequest(requests)
+        me.respond(status: 401, body: #"{"error":{"code":"UNAUTHORIZED"}}"#)
+        let renewal = try await nextRequest(requests)
+        XCTAssertTrue(renewal.request.url?.path.hasSuffix("/auth/refresh") == true)
+        renewal.respond(status: 401, body: #"{"error":{"code":"INVALID_REFRESH_TOKEN","message":"Invalid or expired refresh token"}}"#)
+        _ = await read.result
+
+        let written = try Data(contentsOf: directory.appendingPathComponent(OfflineGrantGate.fileName))
+        let record = try XCTUnwrap(JSONSerialization.jsonObject(with: written) as? [String: Any])
+        XCTAssertEqual(record["verdict"] as? String, "revoked", "the refusal must overwrite the grant on disk")
+    }
+
+    /// #582: a refused renewal whose body is cut off is still the server's
+    /// answer. It revokes the offline grant and is not an unreachable Tono.
+    func testARefusedRenewalWithACutOffBodyStillRevokesTheOfflineGrant() async throws {
+        let directory = Self.offlineGrantDirectory("cut-off")
+        let (account, transport, host, requests) = fixture(offlineGate: OfflineGrantGate(directory: directory))
+        defer {
+            transport.invalidateAndCancel(); HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            ManagedExitCatalogOwnership.purge()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        try await adoptTestAccount(account)
+        XCTAssertTrue(account.api.offlineGate.writeGrant(Self.adoptedSessionGrant))
+        let read = Task { try await account.api.me() }
+        let me = try await nextRequest(requests)
+        me.respond(status: 401, body: #"{"error":{"code":"UNAUTHORIZED"}}"#)
+        let renewal = try await nextRequest(requests)
+        XCTAssertTrue(renewal.request.url?.path.hasSuffix("/auth/refresh") == true)
+        let refused = HTTPURLResponse(url: renewal.request.url!, statusCode: 401, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
+        renewal.client?.urlProtocol(renewal, didReceive: refused, cacheStoragePolicy: .notAllowed)
+        renewal.client?.urlProtocol(renewal, didFailWithError: URLError(.networkConnectionLost))
+        let outcome = await read.result
+        if case let .failure(error) = outcome,
+           let apiError = error as? TonoAPIClient.APIError, case .transport = apiError {
+            XCTFail("a refused renewal is not an unreachable Tono")
+        }
+
+        let written = try Data(contentsOf: directory.appendingPathComponent(OfflineGrantGate.fileName))
+        let record = try XCTUnwrap(JSONSerialization.jsonObject(with: written) as? [String: Any])
+        XCTAssertEqual(record["verdict"] as? String, "revoked", "the cut-off refusal must overwrite the grant on disk")
     }
 
     func testSignInKeepsTheArmedAndResumeIntentsUnlessTheHelperConfirmsRelease() async {

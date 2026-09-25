@@ -31,7 +31,7 @@ use crate::tono::bootstrap;
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 /// §1 mainland-link timeouts (connect 30 s / total 45 s).
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
-const TOTAL_TIMEOUT: Duration = Duration::from_secs(45);
+pub(crate) const TOTAL_TIMEOUT: Duration = Duration::from_secs(45);
 /// Connect budget of the pinned attempt only (#583).
 ///
 /// Every request tries the pinned addresses first, and a network that drops them costs this much
@@ -175,6 +175,9 @@ pub struct TonoTransport {
     /// `resolved` with the pinned attempt's connect budget, used only while `prefer_resolved` is
     /// set, so a resolver that has become a blackhole costs 10 s before the pins, not 30 s.
     resolved_first: reqwest::Client,
+    /// Responses whose status line arrived (#582). Launch restore reads it around a budget
+    /// timeout: an unchanged count is the only proof that the control plane gave no answer.
+    answers: std::sync::atomic::AtomicU64,
 }
 
 /// Holds `prefer_resolved` for one preferred attempt and clears it on drop unless the attempt
@@ -203,10 +206,16 @@ impl TonoTransport {
             resolved,
             alternate_port: std::sync::atomic::AtomicU16::new(0),
             prefer_resolved: std::sync::atomic::AtomicBool::new(false),
+            answers: std::sync::atomic::AtomicU64::new(0),
             resolved_first: Self::pinned_builder()
                 .build()
                 .context("failed to build the Tono HTTP preferred-fallback client")?,
         })
+    }
+
+    /// How many responses have delivered a status line so far (#582).
+    pub fn answers_seen(&self) -> u64 {
+        self.answers.load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// Rebuild the pinned client from the current compiled + learned set.
@@ -266,6 +275,7 @@ impl TonoTransport {
                 .context("failed to build the resolving test client")?,
             alternate_port: std::sync::atomic::AtomicU16::new(0),
             prefer_resolved: std::sync::atomic::AtomicBool::new(false),
+            answers: std::sync::atomic::AtomicU64::new(0),
             resolved_first: quick()
                 .resolve_to_addrs(host, resolved)
                 .build()
@@ -332,6 +342,7 @@ impl TonoTransport {
         }
 
         let mut response = builder.send().await.map_err(|err| transport(&err))?;
+        self.answers.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         let status = response.status().as_u16();
         if response
             .content_length()
@@ -342,7 +353,17 @@ impl TonoTransport {
         // Stream the body with a hard cap: a missing or lying Content-Length
         // must not turn into an unbounded read.
         let mut body = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(|err| transport(&err))? {
+        loop {
+            let chunk = match response.chunk().await {
+                Ok(Some(chunk)) => chunk,
+                Ok(None) => break,
+                // #582: a non-2xx status is the server's answer even when its body
+                // is cut off. It goes up as that status, with what arrived, so
+                // tono-core classifies it (401/403) or reports it as a server error,
+                // never as an unreachable control plane that offline admission accepts.
+                Err(_) if !(200..300).contains(&status) => break,
+                Err(err) => return Err(transport(&err)),
+            };
             if body.len() + chunk.len() > MAX_RESPONSE_BYTES {
                 return Err(ApiError::InvalidResponse);
             }
@@ -643,6 +664,44 @@ mod tests {
         assert_eq!(response.body, b"hi");
     }
 
+    /// #582: a 401 whose body is cut off is still the server's answer, so it
+    /// reaches tono-core's classifier as a status, not as a transport failure.
+    #[tokio::test]
+    async fn a_refusal_whose_body_is_cut_off_is_still_an_answer() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut header = Vec::new();
+            while !header.ends_with(b"\r\n\r\n") {
+                let Ok(byte) = stream.read_u8().await else { return };
+                header.push(byte);
+            }
+            // Promise more body than is sent, then close mid-body.
+            let _ = stream
+                .write_all(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 64\r\nConnection: close\r\n\r\n{\"error\"")
+                .await;
+            let _ = stream.shutdown().await;
+        });
+        let transport = TonoTransport::new().unwrap();
+        let client = TonoTransport::builder().build().unwrap();
+        let request = ApiRequest {
+            method: HttpMethod::Get,
+            url: format!("http://{address}/"),
+            bearer: None,
+            json_body: None,
+            binary_body: None,
+            headers: Vec::new(),
+        };
+        let response = tokio::time::timeout(Duration::from_secs(5), transport.attempt(&client, &request))
+            .await
+            .expect("the fixture answers at once")
+            .expect("a cut-off 401 is the server's answer, not a transport failure");
+        assert_eq!(response.status, 401);
+    }
+
     /// Whether something in the network path accepts a connection to an address
     /// that must not be reachable.
     ///
@@ -903,6 +962,7 @@ mod tests {
             resolved: TonoTransport::builder().resolve_to_addrs(host, &live).build().unwrap(),
             alternate_port: std::sync::atomic::AtomicU16::new(0),
             prefer_resolved: std::sync::atomic::AtomicBool::new(false),
+            answers: std::sync::atomic::AtomicU64::new(0),
             resolved_first: TonoTransport::pinned_builder().resolve_to_addrs(host, &live).build().unwrap(),
         };
         let store = std::sync::Arc::new(MemoryCredentialStore::new());
@@ -929,6 +989,7 @@ mod tests {
             resolved: TonoTransport::builder().resolve_to_addrs(host, &dead).build().unwrap(),
             alternate_port: std::sync::atomic::AtomicU16::new(0),
             prefer_resolved: std::sync::atomic::AtomicBool::new(true),
+            answers: std::sync::atomic::AtomicU64::new(0),
             resolved_first: TonoTransport::pinned_builder().resolve_to_addrs(host, &dead).build().unwrap(),
         };
         let get = || ApiRequest {

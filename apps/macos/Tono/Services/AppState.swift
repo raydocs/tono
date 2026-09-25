@@ -295,6 +295,12 @@ final class AppState {
     /// interface index; tests substitute the syscall so a single monitor tick
     /// can be driven without the privileged helper.
     var tunInterfaceExists: (String) -> Bool = { KillSwitchService.interfaceExists($0) }
+    /// The account's say over Connect (#582), given the catalog digest and
+    /// routing token Connect would dial: nil lets it proceed, a message
+    /// refuses it. The app installs the account session's offline grant gate;
+    /// the same pattern as `networkProtection`, so AppState never reaches
+    /// into the account.
+    var accountConnectRefusal: (_ catalogDigest: String?, _ routingToken: String?) -> String? = { _, _ in nil }
     /// System boundary for the connected session's read-only DNS and PF
     /// audits, the same pattern as `tunInterfaceExists`.
     var protectionAudits = ProtectionAuditOperations()
@@ -838,6 +844,7 @@ final class AppState {
     func attemptAutomaticConnect() {
         guard !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect,
               autoConnectRequested, initialDataLoaded, isTonoReady,
+              accountConnectRefusal(managedCatalogDigest, managedCatalogRoutingToken) == nil,
               !catalogSelectionRequiresChoice, !isConnected, !isConnecting else { return }
         // connect() silently no-ops while a previous disconnect drains. The
         // intent flag must survive that window, or a crash-recovery launch

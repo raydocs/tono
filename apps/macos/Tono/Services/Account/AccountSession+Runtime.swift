@@ -16,6 +16,8 @@ extension AccountSession {
         appRoutingResearchTask = nil
         periodicTelemetryTask?.cancel()
         periodicTelemetryTask = nil
+        offlineVerificationTask?.cancel()
+        offlineVerificationTask = nil
         await cancelManagedCatalogRefresh()
         await cancelRuntimeMonitor()
         if logOutIdentity {
