@@ -260,7 +260,9 @@ extension AccountSession {
             // broken session. Re-read the account instead of re-running the
             // launch sequence, whose first step is crash cleanup of the
             // runtime this session still owns; leaving the block restarts it.
-            if blockedWhileReady {
+            // A session admitted offline (#582) has no account to re-read yet,
+            // so it runs the full restore instead.
+            if blockedWhileReady, user != nil {
                 await refreshAccount()
                 return
             }
