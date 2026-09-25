@@ -118,6 +118,13 @@ pub struct TaskRegistry {
     pub direct_lease_heartbeat: Option<JoinHandle<()>>,
     pub pin_refresh: Option<JoinHandle<()>>,
     pub switch: Option<JoinHandle<()>>,
+    /// R2-F2: bounded Service-truth poll while the FSM idles in Protected Offline (armed but
+    /// unverified in the defect's original shape). The connected-lifetime monitor only runs
+    /// while `is_connected`, so after a Service restart retired an unverified barrier nothing
+    /// re-read that verdict and the UI kept claiming a block over an open machine. Registered
+    /// on entry to that state, retired on exit; the loop itself also stops once the state is
+    /// gone, so it is never a resident task.
+    pub protection_resync: Option<JoinHandle<()>>,
 }
 
 impl TaskRegistry {
@@ -139,6 +146,31 @@ impl TaskRegistry {
         Self::abort(&mut self.network_monitor);
     }
 
+    /// Replace the monitor slot with a freshly spawned monitor loop.
+    ///
+    /// A monitor-driven reconnect runs inline in the old monitor's own task, so by the time
+    /// the connect tail registers the new monitor, this slot can still hold the calling
+    /// task itself. Aborting that handle cancels the caller at its next await — after the
+    /// FSM already committed Connected — dropping the pin-refresh registration and the
+    /// optional DIRECT overlay for this session (`abort_network_monitor` has no way to
+    /// know the handle is the caller; `retire_connection_generation` documents the same
+    /// constraint for the generation bump). When the slot holds the current task, swap the
+    /// slot only: the caller finishes its connect tail and then exits its loop on its own
+    /// (`connection_loop_continues` is false once the reconnect is handed to the new
+    /// session's monitor). Every other replacement — user Connect, reconnect backoff,
+    /// node switch — still aborts the displaced monitor.
+    pub fn register_network_monitor(&mut self, handle: JoinHandle<()>) {
+        let replacing_itself = tokio::task::try_id().is_some_and(|current| {
+            self.network_monitor
+                .as_ref()
+                .is_some_and(|registered| registered.inner().id() == current)
+        });
+        if !replacing_itself {
+            self.abort_network_monitor();
+        }
+        self.network_monitor = Some(handle);
+    }
+
     pub fn abort_direct_lease_heartbeat(&mut self) {
         Self::abort(&mut self.direct_lease_heartbeat);
     }
@@ -151,6 +183,10 @@ impl TaskRegistry {
         Self::abort(&mut self.switch);
     }
 
+    pub fn abort_protection_resync(&mut self) {
+        Self::abort(&mut self.protection_resync);
+    }
+
     /// Connection-scoped tasks: everything that drives the connect
     /// transaction or reacts to the tunnel. Aborted on disconnect and on a
     /// node switch; the catalog sync is account-scoped and survives both.
@@ -160,6 +196,7 @@ impl TaskRegistry {
         self.abort_direct_lease_heartbeat();
         self.abort_pin_refresh();
         self.abort_switch();
+        self.abort_protection_resync();
     }
 }
 
@@ -290,6 +327,16 @@ pub struct TonoInner {
     /// and safety checks (`managed-traffic-policy.json`).
     pub policy_tracker: tono_core::policy::PolicyTracker,
     pub traffic_policy: Option<tono_core::policy::TonoTrafficPolicy>,
+    /// A policy *behavior change* that arrived while the FSM was Connecting
+    /// (F5). `handle_network_change_inner` has nothing to act on mid-connect —
+    /// no session exists to tear down — so the change is recorded here and the
+    /// connect commit consumes it, re-running the optional-DIRECT decision
+    /// against the latest installed policy. Holds the `connect_generation` at
+    /// the time of deferral. Every generation retirement (Disconnect, a failed
+    /// attempt, account close, the next attempt's admission) clears it, and
+    /// the commit consumes it only for its own generation, so a record can
+    /// never reach a later session or another account.
+    pending_policy_change: Option<u64>,
     /// Signed WeChat PROCESS-PATH-REGEX rows last committed with the optional
     /// DIRECT overlay. `None` means the overlay is not active, so a later
     /// discovery must not force a reconnect.
@@ -299,6 +346,10 @@ pub struct TonoInner {
     /// `optional_direct_skip` is the redacted skip reason when the overlay
     /// was not installed on an otherwise successful connect.
     pub optional_direct_active: bool,
+    /// X2-1: the physical adapter alias the committed DIRECT outbound is bound to
+    /// (`interface-name`). `None` whenever no overlay is committed. A network change may keep
+    /// the session in place only while this adapter is still a usable uplink.
+    pub applied_direct_interface: Option<String>,
     pub optional_direct_skip: Option<String>,
     /// Own DIRECT fail-closed bracket: `(connect_generation, deadline)`. While live, Blocked
     /// without a TUN permit is expected and must not tear the session down.
@@ -317,6 +368,9 @@ pub struct TonoInner {
     pub last_tcp_delay_at_ms: Option<i64>,
     pub last_tcp_delay_node: Option<String>,
     pub tasks: TaskRegistry,
+    /// Offline admission and the server's verdicts on this session (#582). Shared with the
+    /// tono-core verdict sink, which cannot take this mutex.
+    pub offline: Arc<crate::tono::offline_grant::OfflineGate>,
 }
 
 fn now_ms() -> i64 {
@@ -410,6 +464,8 @@ impl TonoInner {
         let retired = self.connect_generation;
         self.connect_generation = self.connect_generation.wrapping_add(1);
         self.release_on_stale = release_on_stale;
+        // A deferred policy change belongs to the attempt being retired (F5).
+        self.pending_policy_change = None;
         if self.retired_intents.len() == RETIRED_INTENT_HISTORY {
             self.retired_intents.pop_front();
         }
@@ -442,6 +498,22 @@ impl TonoInner {
     /// platform safety policy as the catalog cache).
     pub fn policy_cache(&self) -> tono_core::policy::PolicyCache {
         policy_cache_at(&self.catalog_dir)
+    }
+
+    /// Record a policy behavior change that landed while Connecting (F5).
+    /// Called under the state lock by the policy-change disposition path.
+    pub fn record_pending_policy_change(&mut self) {
+        self.pending_policy_change = Some(self.connect_generation);
+    }
+
+    /// Consume a deferred policy behavior change (F5). The connect commit
+    /// calls this right after `connect_succeeded` with its own attempt
+    /// generation; only a deferral recorded for that generation counts, and
+    /// then the commit re-runs the optional-DIRECT decision with the latest
+    /// installed policy instead of the snapshot captured before the first
+    /// Core start. A record from any other generation is discarded.
+    pub fn take_pending_policy_change(&mut self, generation: u64) -> bool {
+        self.pending_policy_change.take() == Some(generation)
     }
 }
 
@@ -484,7 +556,13 @@ impl TonoState {
     /// Diskless lifecycle fixture: no Tauri handle, credential vault, Service, or audit writer.
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
-        let catalog_dir = std::env::temp_dir().join(format!("tono-state-{}", new_installation_id()));
+        Self::for_test_in(std::env::temp_dir().join(format!("tono-state-{}", new_installation_id())))
+    }
+
+    /// The same fixture over a caller-owned directory: a second instance is a relaunch that reads
+    /// what the first one left on disk.
+    #[cfg(test)]
+    pub(crate) fn for_test_in(catalog_dir: PathBuf) -> Self {
         let (sender, _receiver) = tokio::sync::mpsc::channel(1);
         let audit = crate::tono::audit::Audit::for_test(sender, &catalog_dir, false);
         Self::with_catalog_dir(catalog_dir, audit, Arc::new(SessionCredentialStore::for_test())).unwrap()
@@ -494,11 +572,13 @@ impl TonoState {
         catalog_dir: PathBuf, audit: Arc<crate::tono::audit::Audit>, credentials: Arc<SessionCredentialStore>,
     ) -> Result<Self> {
         let transport = TonoTransport::new()?;
-        let client = Arc::new(TonoApiClient::new(
-            tono_core::auth::DEFAULT_BASE_URL,
-            transport,
-            credentials.clone(),
-        )?);
+        // The production client is built only here: every server answer on this session reaches
+        // the offline gate (#582).
+        let offline = Arc::new(crate::tono::offline_grant::OfflineGate::new(catalog_dir.clone(), credentials.clone()));
+        let client = Arc::new(
+            TonoApiClient::new(tono_core::auth::DEFAULT_BASE_URL, transport, credentials.clone())?
+                .with_verdict_sink(offline.verdict_sink()),
+        );
 
         // installationId: a fresh in-memory UUID for now — NO vault I/O on
         // the setup thread (a prompting macOS securityd blocked setup
@@ -555,8 +635,10 @@ impl TonoState {
                 catalog_failover_tried: std::collections::BTreeSet::new(),
                 policy_tracker: tono_core::policy::PolicyTracker::new(),
                 traffic_policy: None,
+                pending_policy_change: None,
                 applied_wechat_path_regexes: None,
                 optional_direct_active: false,
+                applied_direct_interface: None,
                 optional_direct_skip: None,
                 direct_reload_until: None,
                 exit_ip: None,
@@ -569,6 +651,7 @@ impl TonoState {
                 last_tcp_delay_at_ms: None,
                 last_tcp_delay_node: None,
                 tasks: TaskRegistry::default(),
+                offline,
             }),
             audit,
             support_reports: parking_lot::Mutex::new(Default::default()),

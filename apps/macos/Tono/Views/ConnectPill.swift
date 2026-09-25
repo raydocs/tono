@@ -38,6 +38,9 @@ struct ConnectPill: View {
     var isConnecting: Bool = false
     var isDisconnecting: Bool = false
     var isProtectionBlocked: Bool = false
+    /// Launch could not confirm an earlier session's barrier: offer the
+    /// restore a blocked pill offers, without claiming the block.
+    var isProtectionUnconfirmed: Bool = false
     var isRecovering: Bool = false
     var connectionStage: ConnectionStage = .preparing
     var disconnectionStage: DisconnectionStage = .finishingOperation
@@ -49,7 +52,7 @@ struct ConnectPill: View {
 
     private var accentColor: Color {
         if isConnecting || isDisconnecting || isRecovering { return TonoBrand.accent }
-        if isProtectionBlocked { return TonoStatus.blocked }
+        if isProtectionBlocked || isProtectionUnconfirmed { return TonoStatus.blocked }
         return isConnected ? TonoStatus.connected : TonoStatus.standby
     }
 
@@ -180,7 +183,7 @@ struct ConnectPill: View {
     /// Identity for the headline crossfade; `LocalizedStringKey` is not
     /// `Equatable`, so the state tuple stands in for it.
     private var statusID: String {
-        "\(isConnecting)-\(isDisconnecting)-\(isRecovering)-\(isProtectionBlocked)-\(isConnected)"
+        "\(isConnecting)-\(isDisconnecting)-\(isRecovering)-\(isProtectionBlocked)-\(isProtectionUnconfirmed)-\(isConnected)"
     }
 
     // MARK: - Copy
@@ -190,6 +193,7 @@ struct ConnectPill: View {
         if isDisconnecting { return "Disconnecting…" }
         if isRecovering { return "Recovering protected connection…" }
         if isProtectionBlocked { return "Protected Offline" }
+        if isProtectionUnconfirmed { return "Protection unknown" }
         return isConnected ? "Connected" : "Not Connected"
     }
 
@@ -202,7 +206,9 @@ struct ConnectPill: View {
         if isConnecting { return String(localized: String.LocalizationValue(connectionStage.rawValue)) }
         if isDisconnecting { return String(localized: String.LocalizationValue(disconnectionStage.rawValue)) }
         if isRecovering { return String(localized: "Recovering protected connection…") }
-        if isProtectionBlocked { return String(localized: "Click to restore internet") }
+        if isProtectionBlocked || isProtectionUnconfirmed {
+            return String(localized: "Click to restore internet")
+        }
         if isConnected {
             if let nodeDisplay, nodeLatency > 0 {
                 return "\(nodeDisplay) — \(LatencyLevel.spokenTitle(for: nodeLatency, kind: .exit))"
@@ -218,7 +224,7 @@ struct ConnectPill: View {
 
     private var statusColor: Color {
         if isConnecting || isDisconnecting { return TonoBrand.accent }
-        if isProtectionBlocked { return TonoStatus.blocked }
+        if isProtectionBlocked || isProtectionUnconfirmed { return TonoStatus.blocked }
         return isConnected ? TonoStatus.connected : Color.primary
     }
 }

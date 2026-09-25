@@ -1227,6 +1227,7 @@
             snapshot_present: true,
             adapters: 1,
             last_error: unverified_note(&["{A}".to_owned()], 1, LoopbackReadBack::Verified),
+            resolver_policy_warning: None,
         };
         assert!(status_is_unverified(&unverified));
         assert!(

@@ -3,6 +3,7 @@
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tauri::{AppHandle, Manager as _};
 use tono_logging::{Type, logging};
+use tono_service_protocol::KillSwitchStatus;
 use tono_core::{
     auth::{ApiError, DEFAULT_DEVICE_LIMIT, User, normalize_installation_id},
     connection::{ConnectStage, ConnectionFsm, UiState},
@@ -15,7 +16,7 @@ use crate::{
         audit::AuditEvent,
         catalog_sync, connection,
         credentials::TonoCredentialStore,
-        state::{AccountState, TonoState},
+        state::{AccountState, TonoInner, TonoState},
     },
 };
 use super::*;
@@ -273,17 +274,24 @@ pub async fn quit_release(app: AppHandle) -> Result<(), String> {
     let Some(state) = app.try_state::<Arc<TonoState>>().map(|state| state.inner().clone()) else {
         return Ok(());
     };
-    let protected = {
+    let (protected, offline) = {
         let mut inner = state.lock().await;
         inner.invalidate_connection(true);
         inner.tasks.abort_catalog_sync();
-        fsm_reports_protection(&inner.fsm)
+        (fsm_reports_protection(&inner.fsm), Arc::clone(&inner.offline))
     };
-    if protected {
+    let result = if protected {
         connection::release_explicit(&state, &app).await
     } else {
         Ok(())
+    };
+    // #582: a revocation still waiting for the disk must land before exit, or the next offline
+    // launch reads the grant it revoked. The wait wakes the writer out of its retry backoff for an
+    // immediate attempt. Bounded: Quit never hangs on a failing disk.
+    if result.is_ok() && !offline.wait_durable(crate::tono::offline_grant::QUIT_DURABILITY_BUDGET).await {
+        logging!(warn, Type::Service, "Tono: the offline revocation did not reach the disk before quit");
     }
+    result
 }
 
 /// M3: exit is *committed* (RunEvent::Exit) — close the audit channel so
@@ -311,9 +319,33 @@ pub async fn resync_after_cancelled_quit(app: AppHandle) {
         .ok()
         .and_then(|snapshot| snapshot.kill_switch);
     let mut inner = state.lock().await;
+    if matches!(&kill_switch, Some(status) if status.wanted) {
+        // Quit-specific side effect of a retained barrier: no read-only probing should keep
+        // running over it while the user decides their next move.
+        inner.cancel_server_tests();
+    }
+    apply_service_kill_switch(&mut inner, kill_switch);
+    // The quit was cancelled into (or out of) an armed state: whatever idle Protected Offline
+    // remains must keep polling the Service's own verdict (R2-F2) — a Service restart can
+    // retire an unverified barrier and nothing else would ever re-read that here. A
+    // Service-proven disarm is a no-op (nothing left to watch).
+    connection::ensure_protection_resync_locked(&mut inner, || {
+        connection::spawn_protection_resync(&state, &app)
+    });
+    emit_status(&app, &status_of(&inner));
+}
+
+/// Fold a Service kill-switch reading into the product state. Extracted from the
+/// cancelled-quit resync above so the Protected Offline Service-truth poll
+/// (`connection`'s `protection_resync_loop`, R2-F2) applies the exact same semantics:
+/// `Some(wanted=true)` re-asserts the armed (and, when the Service says so, verified)
+/// latches; `Some(wanted=false)` — the Service's own proof the barrier is gone — converges
+/// the FSM to released; `None` (other platform, Service down, IPC unanswered) keeps every
+/// local claim, because an unreadable barrier is never proof of an absent one. Protection is
+/// only ever loosened by the Service's explicit answer, never by the absence of one.
+pub(crate) fn apply_service_kill_switch(inner: &mut TonoInner, kill_switch: Option<KillSwitchStatus>) {
     match kill_switch {
         Some(status) if status.wanted => {
-            inner.cancel_server_tests();
             // Still armed (the release failed or never ran): reflect it.
             if status.verified {
                 inner.fsm.mark_session_verified();
@@ -334,9 +366,7 @@ pub async fn resync_after_cancelled_quit(app: AppHandle) {
             }
         }
         None => {
-            // No WFP answer (other platform or IPC down): keep the local
-            // view and just re-emit below.
+            // No WFP answer (other platform or IPC down): keep the local view.
         }
     }
-    emit_status(&app, &status_of(&inner));
 }

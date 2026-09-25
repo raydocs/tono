@@ -32,6 +32,20 @@ nonisolated final class ConfigStorage: @unchecked Sendable {
         }
         try? fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
         appSupportDirectory = url
+        Self.removeLegacyRuntimeConfig(in: url, fileManager: fileManager)
+    }
+
+    /// 0.0.72's Mihomo runtime (`config/config.yaml`) holds that account's exit
+    /// credentials, residential SOCKS5 password and controller secret. The
+    /// sing-box runtime moved to `config.json`, so nothing reads, rewrites or
+    /// deletes the old file any more; remove it on the first launch after the
+    /// upgrade.
+    static func removeLegacyRuntimeConfig(in appSupportDirectory: URL, fileManager: FileManager = .default) {
+        try? fileManager.removeItem(
+            at: appSupportDirectory
+                .appendingPathComponent("config", isDirectory: true)
+                .appendingPathComponent("config.yaml")
+        )
     }
 
     /// Config file path
@@ -89,6 +103,14 @@ nonisolated final class ConfigStorage: @unchecked Sendable {
     var runtimeConfigPath: URL {
         appSupportDirectory.appendingPathComponent("config", isDirectory: true)
             .appendingPathComponent("config.json")
+    }
+
+    /// The sing-box runtime carries the account's exit credentials (client
+    /// UUID, Reality parameters, residential SOCKS5 username and password), so
+    /// it goes with the catalog it was built from. The helper runs its own
+    /// root-owned snapshot, and every start or reload rewrites this file first.
+    func removeRuntimeConfig() {
+        try? fileManager.removeItem(at: runtimeConfigPath)
     }
 
     // MARK: - Subscription YAML (immutable, stored as-is)
@@ -210,6 +232,30 @@ nonisolated final class ConfigStorage: @unchecked Sendable {
         try data.write(to: url, options: .atomic)
         try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
+
+    /// Reads back a file `writeSensitive` wrote, with the checks
+    /// `loadManagedExitCatalog` applies: no group or other permission bits,
+    /// owned by this user, a regular file and not a symbolic link, non-empty
+    /// and at most `maximumBytes`. Anything else reads as absent.
+    func readSensitive(at url: URL, maximumBytes: Int) -> Data? {
+        guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),
+              let permissions = (attributes[.posixPermissions] as? NSNumber)?.uint16Value,
+              permissions & 0o077 == 0,
+              let owner = (attributes[.ownerAccountID] as? NSNumber)?.uint32Value,
+              owner == getuid(),
+              let values = try? url.resourceValues(forKeys: [
+                  .isRegularFileKey,
+                  .isSymbolicLinkKey,
+                  .fileSizeKey,
+              ]),
+              values.isRegularFile == true,
+              values.isSymbolicLink != true,
+              let size = values.fileSize,
+              size > 0,
+              size <= maximumBytes
+        else { return nil }
+        return try? Data(contentsOf: url, options: .mappedIfSafe)
+    }
 }
 
 nonisolated struct ManagedExitCatalogCache: Codable, Sendable, Equatable {
@@ -314,6 +360,7 @@ enum ManagedExitCatalogOwnership {
         discardInstalledCatalog = nil
         discard?()
         ConfigStorage.shared.removeManagedExitCatalog()
+        ConfigStorage.shared.removeRuntimeConfig()
     }
 }
 

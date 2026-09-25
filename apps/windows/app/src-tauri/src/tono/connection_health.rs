@@ -169,6 +169,26 @@ pub fn monitor_requires_reconnect(
     health_invalid || (event_invalidated && (core_changed || (event_probe_failed && !owned_direct_reload)))
 }
 
+/// X2-1: whether a session whose network changed may stay in place.
+///
+/// The TUN proof covers only the tunnel: Mihomo re-detects the tunnel's own uplink, but the
+/// optional DIRECT outbound is bound by name (`interface-name`) to the adapter captured before
+/// the first Core start, and nothing re-binds it afterwards. A proven tunnel therefore keeps the
+/// session only while that adapter is still one of the usable hardware uplinks. Otherwise — the
+/// adapter is gone, or the uplinks could not be read (`None`) — the caller must run the same
+/// protected teardown + reconnect as any other invalidation, which rediscovers the adapter before
+/// the next Core start. A session without a committed DIRECT overlay has no such binding.
+pub fn may_recover_in_place(
+    tunnel_proven: bool,
+    committed_direct_interface: Option<&str>,
+    usable_uplinks: Option<&[String]>,
+) -> bool {
+    tunnel_proven
+        && committed_direct_interface.is_none_or(|committed| {
+            usable_uplinks.is_some_and(|uplinks| uplinks.iter().any(|uplink| uplink == committed))
+        })
+}
+
 /// What one [`handle_network_change`] call did to the session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetworkChangeOutcome {
@@ -316,4 +336,18 @@ pub const fn startup_resume_guards_hold(
 /// F2: threshold test shared by the kill-switch and exit-probe legs.
 pub const fn health_threshold_reached(consecutive_failures: u32) -> bool {
     consecutive_failures >= HEALTH_FAILURE_THRESHOLD
+}
+
+#[cfg(test)]
+mod tests {
+    use super::may_recover_in_place;
+
+    #[test]
+    fn a_direct_overlay_bound_to_a_lost_adapter_cannot_recover_in_place() {
+        let uplinks = vec!["Wi-Fi".to_string()];
+        assert!(
+            !may_recover_in_place(true, Some("Ethernet"), Some(&uplinks)),
+            "DIRECT bound to Ethernet while only Wi-Fi carries a default route must be rebuilt, even though the tunnel probe succeeded"
+        );
+    }
 }

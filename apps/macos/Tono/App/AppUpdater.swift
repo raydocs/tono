@@ -69,11 +69,11 @@ final class AppUpdater: ObservableObject {
                 appState.errorMessage = error.localizedDescription
                 let pending = try? await PrivilegedRuntimeCoordinator.shared.pendingNativeUpdate()
                 appState.updateIncomplete = pending?.pending ?? appState.nativeUpdatePending
-                let retryable = pending?.pending == true && ["reserved", "staged"].contains(pending?.execution ?? "")
+                let retryable = Self.disconnectRetriable(pending)
                 let alert = Self.failureAlert(detail: error.localizedDescription, retryable: retryable)
                 if alert.runModal() == .alertSecondButtonReturn && retryable {
                     do {
-                        try await appState.retireUnconsumedNativeUpdate()
+                        try await appState.retireDisconnectedNativeUpdate()
                         retryRequested = true
                     } catch {
                         appState.errorMessage = error.localizedDescription
@@ -81,6 +81,25 @@ final class AppUpdater: ObservableObject {
                     }
                 }
             }
+        }
+    }
+
+    /// An attempt is disconnect-retriable only when the privileged retire can
+    /// actually archive it: unconsumed reservations, and consumed-side
+    /// attempts that are no longer executable forward — blocked, rolled back,
+    /// expired, already explicitly disconnected, or an abandoned replacement.
+    /// A healthy in-flight or successor-recoverable attempt stays protected.
+    nonisolated static func disconnectRetriable(_ pending: HelperManager.UpdateStatus?) -> Bool {
+        guard let pending, pending.pending else { return false }
+        switch pending.execution ?? "" {
+        case "reserved", "staged":
+            return true
+        case "consumed", "rolledBack", "replaced":
+            return pending.receipt?.blockedReason != nil
+                || pending.disconnectVerified == true
+                || pending.diagnostic != nil
+        default:
+            return false
         }
     }
 
@@ -99,7 +118,7 @@ final class AppUpdater: ObservableObject {
         alert.messageText = String(localized: "Update not completed")
         alert.informativeText = detail
         if retryable {
-            alert.informativeText += "\n\n" + String(localized: "Disconnect and Retry restores Internet access before retiring this unconsumed attempt. Failed update evidence will be retained.")
+            alert.informativeText += "\n\n" + String(localized: "Disconnect and Retry restores Internet access before retiring this attempt. Failed update evidence will be retained.")
             alert.addButton(withTitle: String(localized: "Keep Protection"))
             alert.addButton(withTitle: String(localized: "Disconnect and Retry"))
         } else {

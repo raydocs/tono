@@ -39,6 +39,9 @@ jobs:
         working-directory: apps/windows/app
         shell: pwsh
     env:
+      # Internal build channel (owner decision 2026-09-24): classified connect-failure
+      # reports default on. Only this workflow sets it; windows-release.yml never does.
+      TONO_BUILD_CHANNEL: internal
       TONO_UPDATE_RELEASE_SEQUENCE: ${{ inputs.update_release_sequence || '' }}
       TONO_UPDATER_PUBLIC_KEY: ${{ inputs.update_release_sequence != '' && vars.TONO_UPDATER_PUBLIC_KEY || '' }}
       VITE_TONO_UPDATES_CONFIGURED: ${{ inputs.update_release_sequence != '' && vars.TONO_UPDATER_PUBLIC_KEY != '' && 'true' || 'false' }}

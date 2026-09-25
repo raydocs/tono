@@ -12,7 +12,6 @@ struct LoginView: View {
     @State private var emailCode = ""
     @State private var deviceName = Host.current().localizedName ?? "Mac"
     @State private var isDeviceNameExpanded = false
-    @State private var restoredInternetFromGate = false
     /// Guards the six-digit auto-submit against firing twice for the same code
     /// (error state flips, focus loss, re-entrant onChange from filtering).
     @State private var autoSubmittedCode: String?
@@ -23,6 +22,8 @@ struct LoginView: View {
     /// After a successful send, hold the "sent" pill for 1.5 s before the code step.
     @State private var revealCodeStep = false
     @State private var sentHoldTask: Task<Void, Never>?
+    /// A code that has not arrived a minute after it was sent (#596).
+    @State private var showNoEmailHint = false
     @FocusState private var focusedField: Field?
     private enum Field { case email, code }
 
@@ -318,7 +319,22 @@ struct LoginView: View {
                                     .foregroundStyle(.secondary)
                                     .multilineTextAlignment(.center)
                                     .textSelection(.enabled)
+                                    // `auth/email/start` answers 202 for every
+                                    // address and a failed delivery is silent, so
+                                    // each challenge gets its own one-minute clock.
+                                    .task(id: session.emailChallenge?.challengeId) {
+                                        showNoEmailHint = false
+                                        try? await Task.sleep(for: SignInCodeNotReceivedHint.delay)
+                                        guard !Task.isCancelled else { return }
+                                        withAnimation(TonoMotion.easeOut(0.25, reduceMotion: reduceMotion)) {
+                                            showNoEmailHint = true
+                                        }
+                                    }
+                                if showNoEmailHint {
+                                    SignInCodeNotReceivedHint(email: email)
+                                }
                                 Button("Use another email") {
+                                    showNoEmailHint = false
                                     session.resetEmailSignIn()
                                     emailCode = ""
                                     autoSubmittedCode = nil
@@ -418,29 +434,9 @@ struct LoginView: View {
                         .font(.caption)
                     }
                 }
-                if KillSwitchService.isArmed, !restoredInternetFromGate {
-                    // A fail-closed host whose session cannot reach .ready
-                    // (crash recovery + unreachable control plane) previously
-                    // had NO restore-internet control anywhere: the dashboard
-                    // needs .ready and the menu-bar toggle is disabled. This
-                    // is the explicit escape hatch. isArmed is a plain static
-                    // (not observable), so the local flag forces the section
-                    // to update once the restore completes.
-                    Divider().padding(.vertical, 4)
-                    Label(
-                        "Kill Switch is blocking direct Internet from an earlier session.",
-                        systemImage: "shield.slash"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    Button("Restore internet (turn off protection)") {
-                        Task {
-                            await session.restoreDirectInternet()
-                            restoredInternetFromGate = !KillSwitchService.isArmed
-                        }
-                    }
-                    .disabled(busy)
-                }
+                // The dashboard needs .ready, so this is the explicit escape
+                // hatch for a fail-closed host stuck at sign-in.
+                GateProtectionSection(session: session, disabled: busy)
             }
         }
         .padding(28)
@@ -736,6 +732,7 @@ struct LoginErrorPreviewCard: View {
                 killSwitchDisarmConsumer: {}
             )
         )
+        .environment(AppState())
     }
     .frame(width: 720, height: 640)
     .preferredColorScheme(.light)
@@ -751,6 +748,7 @@ struct LoginErrorPreviewCard: View {
                 killSwitchDisarmConsumer: {}
             )
         )
+        .environment(AppState())
     }
     .frame(width: 720, height: 640)
     .preferredColorScheme(.dark)
