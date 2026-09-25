@@ -62,6 +62,7 @@ export const customerActionCopy = {
   onboardConfirmBody: (email: string) => `${email} 会进允许登录的名单，客户端登录之后就能连。填了的家宽和 Claude 号一起记在这位客户名下。`,
   onboardDone: (email: string) => `${email} 已经可以用了`,
   onboardExtrasIgnored: '这次填的家宽和 Claude 号没有保存，等客户登录后再开通一次。',
+  onboardEntitlementKept: '套餐和到期已经记下，客户第一次登录时生效。',
   onboardPlanNone: '不填',
 
   /* -------------------------------------------------------- 批量动作 */

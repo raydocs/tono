@@ -2,7 +2,7 @@ import { type Env } from './env';
 
 const PASSWORD_AUTH_DISABLED = 'PASSWORD_AUTH_DISABLED';
 
-/** First sign-in: copy onboard wechat/contact/notes off the allowlist row. */
+/** First sign-in: copy onboard wechat/contact/notes/expiry/plan off the allowlist row. */
 export async function insertUserCarryingAllowlistProfile(
   e: Env,
   userId: string,
@@ -12,8 +12,8 @@ export async function insertUserCarryingAllowlistProfile(
   await e.DB.prepare(
     `INSERT OR IGNORE INTO users(
        id, email, password_hash, password_salt, created_at, updated_at,
-       wechat_id, contact, notes
-     ) SELECT ?, ?, ?, ?, ?, ?, a.wechat_id, a.contact, a.notes
+       wechat_id, contact, notes, expires_at, plan
+     ) SELECT ?, ?, ?, ?, ?, ?, a.wechat_id, a.contact, a.notes, a.expires_at, a.plan
        FROM (SELECT 1) LEFT JOIN signup_allowlist a ON a.email = ?`,
   ).bind(
     userId,

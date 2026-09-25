@@ -141,6 +141,12 @@ export type OnboardInput = {
   productAccountId?: string;
   notes?: string;
   contact?: string;
+  /**
+   * Kept on the sign-up list until the customer first signs in, then copied
+   * onto the account, so an onboarding before registration keeps them too.
+   */
+  plan?: string;
+  expiresAt?: number;
 };
 
 /**

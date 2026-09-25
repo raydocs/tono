@@ -251,6 +251,50 @@
   自行恢复后不清除，要等下一次成功的 arm/lock（`record_outcome`）才清。这是 Service 看门狗路径，与 #593 的 App
   分类路径不同，本 PR 未改，另需记录。未在实机复现。
 
+## 2026-09-24 · 控制面 + ops 控制台：未注册客户开通时填的到期与套餐不再丢失
+
+- **归属/来源**：ops 客户生命周期（控制面 Worker + ops 控制台）；内部审查 H17-O-F4，
+  Issue [#527](https://github.com/raydocs/tono/issues/527)；基线 origin/main `8dc79a5b`，
+  分支 `fix/onboard-expiry-carry-20260924`；未合 main。
+- **缺陷修复**：开通抽屉只在客户已注册时才补发到期/套餐（第二次 `PATCH`），未注册邮箱直接跳过；
+  Worker 的 `users/onboard` 也拒收这两个字段，首次登录只带 wechat/contact/notes，账户建成后无到期。
+  改后：`users/onboard` 接受 `expiresAt`/`plan`（与 `PATCH users/{id}` 同样校验）；未注册时记在
+  `signup_allowlist`（新 migration `0091_signup_allowlist_entitlement.sql`），首次登录一起写进 `users`；
+  已注册时直接写 `users`，到期设为过去时间与 PATCH 一样立即 `enforceUser`；审计 `user.onboard`
+  注明设了哪些字段。控制台开通改为一次调用带上到期/套餐（去掉只对已注册客户生效的第二次调用），
+  未注册提示补一句「套餐和到期已经记下，客户第一次登录时生效」；fixture hub 同步接受到期。
+- **新增/优化**：无。
+- **工程与测试**：`test/ops-onboard-profile.test.ts` 新增一个 `it`（未注册邮箱带到期+套餐开通 →
+  邮箱验证码首次登录 → `users.expires_at/plan` 等于开通值）；旧代码上实跑失败（`expected 400 to be 202`）。
+- **验证**：本机 MacBook control-plane `npx vitest run`（43 文件 / 892 用例通过）、`npm run typecheck`、
+  `node tooling/scripts/check-migration-numbers.mjs`（唯一性通过，仅缺号告警）；ops-console
+  `npm run typecheck`、相关文件 eslint、`vitest run src/lib/customer-batch.test.ts test/ops-fixtures.test.ts
+  test/lint-rules.test.ts`（64 通过）。开通流程 Playwright 未在本机跑，以 PR CI `ops-console-e2e` 为准。
+- **候选/发布**：仅源码，无新候选；未部署；migration 未在远端 D1 应用。
+- **剩余限制**：migration 编号 0091 为临时取号（0077–0082、0088、0090 已被在审 PR 占用），合并时若已被占用
+  需顺延并同步 README；已在 allowlist 上但此前开通时丢了到期的客户不会被追溯补上。
+- **续记（2026-09-24，双厂商评审 528-O-F2 = 528-C-F1）**：开通查到「未注册」之后、写入待开通资料之前若客户
+  恰好首次登录，账户会按旧 allowlist 行建成、到期丢失。改为 allowlist 授权、待开通资料和「按邮箱更新已存在的
+  用户」同一个 `DB.batch` 提交，后者命中时对该用户 `enforceUser`；同时消除了「授权已提交、资料写入失败」的
+  中间态。原 `it` 追加竞态段（测试触发器在 allowlist 插入时建号）：上一版 `a0703722` 源码实跑失败
+  （`expires_at: null`），修复后通过；control-plane 全套 892 用例、typecheck 通过。CI `ops-contract` 的
+  ops 行数预算（每模块 ≤500 行）因此超限，已把到期/套餐校验与待开通资料语句移到同目录
+  `onboard-profile.ts`（`users.ts` 486 行），`check:budgets`/`check:contract` 本机通过。
+- **续记（2026-09-25，双厂商评审第二轮 jev-route `fa5ff8f9`：O-F1 = C-F1、O-F2、O-F3、O-F4）**：
+  ① 已注册客户开通时，资料/到期/套餐的 `UPDATE users` 原先排在家宽分配与 Claude 号分配之前单独提交，
+  后者抛 409（`PRODUCT_ALREADY_ASSIGNED` 等）时到期已改、却没有 `user.onboard` 审计也没有 `enforceUser`。
+  改为在分配全部成功后才写，失败的开通不改这几列，审计和 `enforceUser` 总跟在写入之后。
+  注意：带 `accountRef` 且显式传 `plan: null` 时，现在以显式值为准（原先会被分配时的 `markFirstEntitled` 补成 Claude）。
+  ② 竞态路径（查询后客户恰好首次登录）审计 `target_id` 与响应 `userId` 改为实际落到的账户 id，
+  `incomplete` 用 `registered_during_onboard` 代替 `user_not_registered`（家宽/Claude 号这次未处理，需再开通一次）。
+  ③ `FINDINGS_LEDGER.md` H17-O-F4 标为 in-PR 并关联 #527/#528。④ 控制台未注册提示拆成两句，
+  「套餐和到期已经记下」只在这次确实提交了套餐或到期时显示。测试：`ops-onboard-profile.test.ts` 新增一个 `it`
+  （已分配 Claude 号的客户再次开通带新 `accountRef`+到期+备注 → 409 且 `expires_at`/`notes` 不变），原竞态段追加
+  响应 `userId` 与审计 `target_id` 断言，两者在上一版源码实跑失败、修复后通过；ops-console 新增
+  `src/pages/customer/OnboardDrawer.test.tsx` 一个 `it`（未提交到期/套餐时不显示该句），无条件显示时实跑失败。
+  本机：control-plane 相关 4 个测试文件 356 用例、`typecheck`、`check:budgets`（`users.ts` 492 行）、`check:contract`
+  通过；ops-console `typecheck`、相关文件 eslint、该测试与 `test/lint-rules.test.ts`、`test/ops-fixtures.test.ts` 通过。
+
 ## 2026-09-24 · 控制面按设备记录客户端版本（X-Tono-Client）
 
 - **归属/来源**：G1–G3 候选验收的现场证据（ops 可见性）；影响控制面 Worker 与 macOS/Windows 请求头。

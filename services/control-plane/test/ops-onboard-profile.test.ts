@@ -150,6 +150,67 @@ describe('ops onboard pending profile', () => {
     expect(detail.notes).toBe('vip drawer');
   });
 
+  it('carries the onboard expiry and plan onto the account created at first sign-in', async () => {
+    const email = 'pending-expiry@example.com';
+    const expiresAt = 1_900_000_000;
+    const onboarded = await ops('users/onboard', json({ email, expiresAt, plan: 'claude_20x' }));
+    expect(onboarded.status).toBe(202);
+    expect((await onboarded.json() as { pendingProfile: boolean }).pendingProfile).toBe(true);
+
+    const started = await fetchApi('auth/email/start', json({
+      email, deviceName: 'Primary Mac', installationId: 'pending-expiry-install',
+    }));
+    expect(started.status).toBe(202);
+    const { challengeId } = await started.json() as { challengeId: string };
+    const verified = await fetchApi('auth/email/verify', json({ challengeId, code: emailCodes.get(challengeId) }));
+    expect(verified.status).toBe(200);
+    const user = await db().prepare('SELECT expires_at, plan FROM users WHERE email = ?')
+      .bind(email).first<{ expires_at: number | null; plan: string | null }>();
+    expect(user).toEqual({ expires_at: expiresAt, plan: 'claude_20x' });
+
+    // A first sign-in that creates the account after onboarding looked the
+    // email up, copying the allowlist row before the expiry reached it.
+    const raced = 'raced-expiry@example.com';
+    await db().prepare(
+      `CREATE TRIGGER test_onboard_signup_race AFTER INSERT ON signup_allowlist
+       WHEN NEW.email = '${raced}'
+       BEGIN
+         INSERT INTO users(id, email, password_hash, password_salt, created_at, updated_at, expires_at, plan)
+         VALUES('u-raced', NEW.email, 'x', 'y', NEW.created_at, NEW.created_at, NEW.expires_at, NEW.plan);
+       END`,
+    ).run();
+    let racedBody: { userId: string | null };
+    try {
+      const racedOnboard = await ops('users/onboard', json({ email: raced, expiresAt, plan: 'claude_20x' }));
+      expect(racedOnboard.status).toBe(202);
+      racedBody = await racedOnboard.json() as { userId: string | null };
+    } finally {
+      await db().prepare('DROP TRIGGER IF EXISTS test_onboard_signup_race').run();
+    }
+    const racedUser = await db().prepare('SELECT expires_at, plan FROM users WHERE email = ?')
+      .bind(raced).first<{ expires_at: number | null; plan: string | null }>();
+    expect(racedUser).toEqual({ expires_at: expiresAt, plan: 'claude_20x' });
+    // The answer and the audit name the account the expiry landed on.
+    expect(racedBody.userId).toBe('u-raced');
+    const audit = await db().prepare(
+      "SELECT target_id FROM ops_audit WHERE action = 'user.onboard' AND summary LIKE ?",
+    ).bind(`${raced}%`).first<{ target_id: string | null }>();
+    expect(audit?.target_id).toBe('u-raced');
+  });
+
+  it('leaves the profile and expiry untouched when the Claude account assignment fails', async () => {
+    await seedUser('u-assigned', 'assigned@example.com');
+    const first = await ops('users/onboard', json({ email: 'assigned@example.com', accountRef: 'acct-a@example.com' }));
+    expect(first.status).toBe(200);
+    const failed = await ops('users/onboard', json({
+      email: 'assigned@example.com', accountRef: 'acct-b@example.com', expiresAt: 1_900_000_000, notes: 'lost',
+    }));
+    expect(failed.status).toBe(409);
+    const row = await db().prepare('SELECT expires_at, notes FROM users WHERE id = ?')
+      .bind('u-assigned').first<{ expires_at: number | null; notes: string | null }>();
+    expect(row).toEqual({ expires_at: null, notes: null });
+  });
+
   it('does not allowlist an email when wechatId is too long', async () => {
     const email = 'too-long-wechat@example.com';
     const onboarded = await ops('users/onboard', json({

@@ -267,7 +267,7 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | H8-F6 | 影响客户的写操作缺少审计记录 | in-PR | [#405](https://github.com/raydocs/tono/issues/405)，[#406](https://github.com/raydocs/tono/pull/406) | 低·推导 | token-admin 路由移到 src/ops/token-admin.ts |
 | H13-F5 | Worker 不可达时 exit-agent 没有 roster 回退 | in-PR | [#463](https://github.com/raydocs/tono/issues/463)，[#464](https://github.com/raydocs/tono/pull/464) | 中·推导 | 与 #375/#384/#389 冲突，解决步骤写在 PR |
 | H13-F6 | hub 在租约丢失后仍执行作业（重复 xray_restart） | in-PR | [#465](https://github.com/raydocs/tono/issues/465)，[#466](https://github.com/raydocs/tono/pull/466) | 低·推导 | 应先于或同 #377 合并 |
-| H17-O-F4 | 为尚未注册的客户开通时，控制台填写的到期日与套餐被静默丢弃，账户首次登录后无到期、无配额 | open | 待开 | 中·已确认 | 之后没有任何提醒会发现（到期提醒与批量续期都要求已有日期） |
+| H17-O-F4 | 为尚未注册的客户开通时，控制台填写的到期日与套餐被静默丢弃，账户首次登录后无到期、无配额 | in-PR | [#527](https://github.com/raydocs/tono/issues/527)，[#528](https://github.com/raydocs/tono/pull/528) | 中·已确认 | 此前开通时已丢了到期的客户不追溯补上；migration 0091 为临时编号，合并时需确认未被占用 |
 | H17-O-F6 | 控制台「停用」调用退款销户接口：操作者填写的原因被丢弃，空备注被写成「退款销户」 | open | 待开 | 低·已确认 | 核实降级：恢复文案并未承诺可重绑原 Claude 号，停用确认已告知拆除范围；Claude 引用退役后不能经现有接口重新分配是否算缺陷待产品决定 |
 
 ## 10. 发布流水线与安装器
