@@ -328,6 +328,9 @@ jobs:
         env:
           TONO_MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_DEVELOPER_ID_APPLICATION_IDENTITY }}
           TONO_MACOS_NOTARIZE: '1'
+          # Internal build channel (owner decision 2026-09-24): only a candidate_only
+          # run is internal; a release build stays empty and keeps today's defaults.
+          TONO_BUILD_CHANNEL: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_only && 'internal' || '' }}
           ARTIFACT_NAME: ${{ steps.release-version.outputs.artifact_name }}
         run: |
           set -eu

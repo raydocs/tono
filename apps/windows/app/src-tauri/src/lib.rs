@@ -169,6 +169,7 @@ mod app_init {
             tono::commands::diagnostics::tono_set_audit_enabled,
             tono::commands::diagnostics::tono_periodic_telemetry_enabled,
             tono::commands::diagnostics::tono_set_periodic_telemetry_enabled,
+            tono::commands::diagnostics::tono_internal_build,
             tono::commands::account::tono_service_prerequisites,
             tono::commands::account::tono_repair_service,
             tono::commands::diagnostics::tono_network_log_upload_enabled,

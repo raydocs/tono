@@ -198,15 +198,48 @@ its recorded incarnations died.
 - **Recovery classifies by installed identity, not successor liveness.** A
   reboot, or a user closing the new App before commit, is not an interrupted
   publication. Recovery rolls back only when no durable plan exists or the
-  installed components are not the signed target. A complete, verified
-  publication stays installed; a successor that was never durably registered
-  is replaced by measured-target evidence and the first authenticated
-  target-identity App adopts it.
+  installed components are not the signed target. `TargetVerified` also
+  requires every member of the durable replacement plan (the payload tree,
+  `tono-service.exe` and `core-sha256.txt`) to hash to its `new_digest`;
+  three matching binaries with a later member still old is an interrupted
+  publication and rolls back (2026-09-23). A member that cannot be read
+  (sharing violation, AV lock) is not a mismatch: recovery exits with the
+  error before any rollback touches a file, leaving the attempt `Uncertain`
+  for the next recovery, as an unreadable binary already did. A complete,
+  verified publication stays installed; a successor that was never durably
+  registered is replaced by measured-target evidence and the first
+  authenticated target-identity App adopts it.
 - **Terminal archives after verified Disconnect.** An unconsumed attempt
   whose recorded executor incarnation is provably gone, and a rolled-back or
-  uncertain attempt whose installed components equal the retained originals,
-  archive their full record and clear the live slot. The consumed high-water
-  never lowers and explicit release never becomes commit.
+  uncertain attempt whose installed components equal the retained originals
+  — and, when a durable plan exists, whose every plan member hashes to its
+  `old_digest` (2026-09-23) — archive their full record and clear the live
+  slot. The consumed high-water never lowers and explicit release never
+  becomes commit.
+- **Bookkeeping after release is not a release failure.** Once Disconnect
+  has released WFP, a failure to prove that release for the evidence or to
+  archive the record leaves the attempt pending and returns success with
+  `needs_attention`. An Err response means no protection release completed;
+  only that makes the App keep Protected Offline. New archive checks added to
+  this path follow the same rule.
+- **Installed and released (2026-09-23).** A `Replaced` attempt whose owner
+  then completes a verified explicit Disconnect (for example, the post-upgrade
+  reconnect failed and the user restored internet) also archives its full
+  record and clears the live slot, so connect, update, Quit/sign-out release
+  and uninstall are reachable again. Preconditions: the installed components
+  equal the signed target, every member of the durable replacement plan
+  (payload tree and `core-sha256.txt`) hashes to its `new_digest`, the
+  Disconnect readback is verified unprotected, and the requesting process is
+  a provable target-identity successor at the registered install root (old
+  App bytes may Disconnect but cannot end a replaced attempt). This is not
+  commit: phase, recorded obligation, successor evidence and the
+  sequence/generation high-water are archived unchanged, and the `Committed`
+  cleanup path is not taken. Backup ownership: because no commit or executor
+  will run for the attempt again, the Service removes the retained
+  `.rollback`/`.restore`/`.publish` copies bound to each plan member before
+  clearing the slot (otherwise they would refuse the next update's
+  preparation); private attempt evidence (payload, plan, executor, package)
+  is retained. A failed removal leaves the attempt pending and retryable.
 - **Launching without a live executor incarnation is provably unconsumed.**
   Consumption only accepts the exact recorded executor incarnation. When
   that incarnation is gone and the high-water still sits below the release,
@@ -226,28 +259,34 @@ Limits of this clarification (stated so it is not over-read):
   the post-publication part served by the new Service does. This is not G3
   evidence for the first hop from 0.0.73; it protects the next upgrade that
   starts from a build containing it.
-- **Replaced + verified Disconnect stays pending with no in-product exit
-  (open, pre-existing).** Neither terminal archive above covers `Replaced`.
-  When a completed installation is adopted, the post-upgrade automatic
-  reconnect fails and the user presses Restore internet, the verified
-  Disconnect releases protection but leaves the attempt pending; from then on
-  connect, adopt/commit, update, Quit/sign-out release and
-  uninstall/reinstall are all refused. Traffic does not leak (release has
-  already happened), but the product is locked. This path exists before this
-  clarification and is the most reachable lock of the set; it is tracked as a
-  separate unresolved issue and needs its own design decision (an
-  "installed and released" terminal state, with backup cleanup ownership),
-  not treating release as commit.
-- **Recovery and rolled-back retirement check three components, not the full
-  durable plan (open).** `TargetVerified` recovery and `retire_rolled_back`
-  compare only `Tono.exe`, `tono-core.exe` and `tono-service.exe` against the
-  target/original digests, while the durable plan covers the whole payload
-  tree plus `core-sha256.txt`, each member with `old_digest`/`new_digest`. A
-  publication interrupted after the binaries but before a later member, or a
-  rollback that restores the binaries but not a resource, can be classified
-  as fully published or fully rolled back. This is a narrow installation
-  integrity gap, not a protection bypass; the fix is per-member digest
-  verification against the plan.
+
+## Local store schema across versions (2026-09-23)
+
+The private stores (macOS helper `ledger.json`, Windows Service `state.json`)
+are read by an **older** binary after a newer one wrote them: the executor is a
+copy of the previous signed helper / `tono-service-install.exe`, and the new
+helper/Service keeps writing the store after publication. Wire documents above
+(manifest, receipt, requests) keep their exact-shape rules and
+`protocolVersion`; this section covers only the local store around them.
+
+- **Storage major.** `schemaVersion` (macOS) / `schema_version` (Windows) is an
+  integer major. Absent means `1`, the current unversioned layout. Writers emit
+  it only once they write `2` or later, so every build that already reads v1
+  stores keeps reading them.
+- **Same major: unknown fields are ignored.** A reader accepts fields it does
+  not know. macOS still requires every field it knows to carry exactly the
+  canonical value it decoded; only additive keys are skipped.
+- **Additive fields must be optional and safe to drop.** An N-1 executor may
+  rewrite the store without them, so their absence must mean the safe default.
+  A field whose loss or misreading could grant authority, clear an obligation,
+  or change recovery is not additive.
+- **Anything else bumps the major.** A reader refuses a higher major with a
+  distinct "written by a newer Tono" error and retains the bytes. That is not a
+  corrupt store, but it still blocks exactly like pending evidence until a build
+  that understands the major handles it.
+- **Release check.** Before shipping a store change, the previous release's
+  executor must read a ledger written by the candidate. A new major also needs a
+  plan for machines whose executor is the previous release.
 
 ## Automated conformance and its limits
 

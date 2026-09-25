@@ -23,6 +23,11 @@ pub struct AuthenticatedOwner {
     pub identity: OwnerIdentity,
     pub app_data_root: PathBuf,
     pub peer_pid: Option<u32>,
+    /// The Windows session of the pipe-peer process, read from that process's token during
+    /// authentication while the handle whose SID was just verified is still open. Unlike
+    /// `peer_pid` it cannot come to name another process if the id is reused later. `None` off
+    /// Windows and wherever it could not be read.
+    pub peer_session_id: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,6 +75,20 @@ impl ServiceError {
 
     pub(crate) fn stale_release_epoch(message: impl Into<String>) -> Self {
         Self::new(ServiceErrorCode::StaleReleaseEpoch, message)
+    }
+
+    pub(crate) fn protection_held_by_another_user() -> Self {
+        Self::new(
+            ServiceErrorCode::ProtectionHeldByAnotherUser,
+            "network protection is held by another local user who is still signed in (a \
+             disconnected session counts); that user must press Disconnect in Tono or sign out, \
+             or a local administrator must stop TonoService and then run the Start-menu \
+             \"Restore Network\" shortcut as administrator",
+        )
+    }
+
+    pub(crate) fn remote_session_connect_refused(message: impl Into<String>) -> Self {
+        Self::new(ServiceErrorCode::RemoteSessionConnectRefused, message)
     }
 
     pub(crate) fn invalid_proxy_config(message: impl Into<String>) -> Self {
@@ -376,6 +395,7 @@ fn authenticate_owner(
             identity: credentials.identity.clone(),
             app_data_root,
             peer_pid: None,
+            peer_session_id: None,
         })
     }
 
@@ -436,6 +456,7 @@ fn authenticate_synthetic_test_owner(
         identity: credentials.identity.clone(),
         app_data_root,
         peer_pid: None,
+        peer_session_id: None,
     }))
 }
 
@@ -457,8 +478,8 @@ mod windows_auth {
         GetSecurityDescriptorControl, GetTokenInformation, IsValidSid, IsWellKnownSid,
         OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED,
         TOKEN_ELEVATION_TYPE, TOKEN_GROUPS, TOKEN_QUERY, TOKEN_USER, TokenElevationType,
-        TokenElevationTypeFull, TokenGroups, TokenUser, WinBuiltinAdministratorsSid,
-        WinLocalSystemSid,
+        TokenElevationTypeFull, TokenGroups, TokenSessionId, TokenUser,
+        WinBuiltinAdministratorsSid, WinLocalSystemSid,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ALL_ACCESS, FILE_ATTRIBUTE_DIRECTORY,
@@ -493,7 +514,8 @@ mod windows_auth {
         // consulting until the connection itself has been bound to the declared owner. Placing it
         // here also means an unidentifiable peer costs no filesystem work at all.
         let peer_pid = peer.process_id;
-        let peer = classify_peer(peer, declared_sid.as_ptr());
+        let mut peer_session_id = None;
+        let peer = classify_peer(peer, declared_sid.as_ptr(), &mut peer_session_id);
         super::require_declared_owner_peer(&credentials.identity, peer)?;
         // Windows records Builtin Administrators — not the user — as the owner of everything an
         // elevated administrator creates without an explicit owner (the token's default owner is
@@ -547,6 +569,7 @@ mod windows_auth {
             identity: credentials.identity.clone(),
             app_data_root,
             peer_pid,
+            peer_session_id,
         })
     }
 
@@ -561,7 +584,14 @@ mod windows_auth {
     /// is process-id reuse, which needs the peer to have exited while its pipe handle survived in
     /// another process; a stale id then names either nothing (`Unopenable`) or an unrelated
     /// process (`OtherPrincipal`), both of which are refused.
-    fn classify_peer(peer: PeerIdentity, declared_sid: PSID) -> WindowsPeer {
+    ///
+    /// For a `DeclaredOwner`, `session_id` receives the Windows session from that same token, so
+    /// the session belongs to the process instance whose SID was verified.
+    fn classify_peer(
+        peer: PeerIdentity,
+        declared_sid: PSID,
+        session_id: &mut Option<u32>,
+    ) -> WindowsPeer {
         let Some(process_id) = peer.process_id else {
             return WindowsPeer::Unnamed;
         };
@@ -615,9 +645,26 @@ mod windows_auth {
         if unsafe { EqualSid(user.User.Sid, declared_sid) } == 0 {
             return WindowsPeer::OtherPrincipal;
         }
+        *session_id = token_session_id(token.as_raw_handle());
         WindowsPeer::DeclaredOwner {
             elevated_administrator: token_is_elevated_administrator(token.as_raw_handle()),
         }
+    }
+
+    /// The Windows session a process token runs in (`TokenSessionId`), or `None` if unreadable.
+    fn token_session_id(token: *mut c_void) -> Option<u32> {
+        let mut session_id = 0_u32;
+        let mut returned = std::mem::size_of::<u32>() as u32;
+        let read = unsafe {
+            GetTokenInformation(
+                token,
+                TokenSessionId,
+                std::ptr::addr_of_mut!(session_id).cast(),
+                returned,
+                &mut returned,
+            )
+        } != 0;
+        read.then_some(session_id)
     }
 
     /// Whether the peer's process token is a full administrator token.

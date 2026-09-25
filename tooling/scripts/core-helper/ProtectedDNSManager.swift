@@ -13,8 +13,51 @@ import SystemConfiguration
 /// recovery.
 final class ProtectedDNSManager {
     private struct Snapshot: Codable, Equatable {
+        /// Display name when the snapshot was taken. Kept for diagnosis and
+        /// for snapshots without `serviceID`; macOS lets the user rename a
+        /// service while Tono holds its DNS, so the name alone cannot find
+        /// the service these servers belong to.
         let service: String
+        /// `SCNetworkServiceGetServiceID`, stable across renames. Absent in
+        /// snapshots written by older helpers, and when System Configuration
+        /// could not name the service at enable time.
+        var serviceID: String? = nil
         let servers: [String]
+    }
+
+    /// A network service as one enumeration saw it. `id` is nil only when
+    /// enumeration fell back to `networksetup`, which lists names alone.
+    private struct NetworkService: Hashable {
+        let id: String?
+        let name: String
+    }
+
+    /// Where a snapshot's original servers go back to.
+    private enum SnapshotOwner {
+        case service(NetworkService)
+        /// No service can take them: an enumeration that carries IDs has no
+        /// service with the recorded ID (macOS deleted it), or a name-only
+        /// snapshot's name is gone.
+        case missing
+        /// The enumeration has no IDs, so a renamed service cannot be told
+        /// apart from a deleted one. A retry with System Configuration can.
+        case unresolved
+    }
+
+    /// How System Configuration finds a service: by its recorded ID when
+    /// there is one, otherwise by display name.
+    private enum ServiceKey {
+        case name(String)
+        case id(String)
+
+        func resolve(in prefs: SCPreferences) -> SCNetworkService? {
+            switch self {
+            case .name(let name):
+                return ProtectedDNSManager.namedService(prefs, name)
+            case .id(let id):
+                return SCNetworkServiceCopy(prefs, id as CFString)
+            }
+        }
     }
 
     private struct CommandResult {
@@ -50,12 +93,31 @@ final class ProtectedDNSManager {
             throw error
         }
 
+        let serviceID = try? Self.scServiceID(named: service)
+
         if let previous = try loadSnapshotQuarantiningCorruption() {
-            if previous.service != service {
-                try Self.setDNS(previous.servers, for: previous.service)
-                try verify(previous.servers, for: previous.service)
+            if !Self.isSameService(previous, name: service, id: serviceID) {
+                let services = try Self.allServices()
+                guard case .service(let owner) = Self.owner(of: previous, in: services) else {
+                    throw HelperFailure.invalid(
+                        "The previously protected network service is unavailable."
+                    )
+                }
+                try Self.writeDNS(previous.servers, on: owner)
+                guard try Self.readDNS(on: owner) == previous.servers else {
+                    throw HelperFailure.system("The protected DNS transition did not commit.")
+                }
                 try removeSnapshot()
             } else {
+                if previous.service != service {
+                    // Same service by ID, renamed since the snapshot. Status
+                    // reads by the recorded name, so record the current one.
+                    try save(Snapshot(
+                        service: service,
+                        serviceID: previous.serviceID ?? serviceID,
+                        servers: previous.servers
+                    ))
+                }
                 try Self.setDNS([Self.protectedDNSServer], for: service)
                 try verify([Self.protectedDNSServer], for: service)
                 return Self.response(
@@ -75,6 +137,7 @@ final class ProtectedDNSManager {
         }
         let snapshot = Snapshot(
             service: service,
+            serviceID: serviceID,
             servers: servers
         )
         // Persist recovery state before changing the first system setting.
@@ -122,19 +185,27 @@ final class ProtectedDNSManager {
     func restore() throws -> [String: Any] {
         lock.lock()
         defer { lock.unlock() }
-        let snapshot = try Self.restoreTransaction(
+        let outcome = try Self.restoreTransaction(
             snapshotResult: Result(catching: loadSnapshot),
             services: try Self.allServices(),
-            read: Self.currentDNS,
-            write: Self.setDNS,
+            read: Self.readDNS,
+            write: Self.writeDNS,
             removeSnapshot: removeSnapshot,
+            archiveSnapshot: { try Self.quarantineSnapshot(reason: "orphaned") },
             quarantine: { try Self.quarantineSnapshot() }
         )
-        return Self.response(
+        var object = Self.response(
             configured: false,
             snapshotPresent: false,
-            service: snapshot?.service
+            service: outcome.snapshot?.service
         )
+        if !outcome.originalRestored {
+            // The loopback sweep is proven, so release is safe, but the
+            // recorded servers had no service left to go back to. They stay
+            // on disk beside the state file, not claimed as restored.
+            object["originalDNSRestored"] = false
+        }
+        return object
     }
 
     /// Update admission/commit cannot infer restored DNS from an absent
@@ -144,7 +215,7 @@ final class ProtectedDNSManager {
         defer { lock.unlock() }
         guard try loadSnapshot() == nil else { throw HelperFailure.invalid("DNS recovery is still pending.") }
         for service in try Self.allServices() {
-            guard try !Self.currentDNS(for: service).contains(Self.protectedDNSServer) else {
+            guard try !Self.readDNS(on: service).contains(Self.protectedDNSServer) else {
                 throw HelperFailure.invalid("A network service still uses the stopped Tono resolver.")
             }
         }
@@ -164,16 +235,24 @@ final class ProtectedDNSManager {
     /// The same recovery transaction runs against either System Configuration
     /// or controlled I/O. Snapshot removal is part of the transaction, not a
     /// decision a test or caller can make independently of service readback.
+    ///
+    /// The snapshot's service is found by its recorded ID, not its display
+    /// name. Matching by name turned a rename into "not our service": the
+    /// sweep reset it to automatic DNS and the snapshot holding its static
+    /// servers was deleted. Returns false when no service can take the
+    /// original servers; the snapshot is then archived, not deleted.
+    @discardableResult
     private static func restoreServices(
         snapshot: Snapshot?,
-        services: Set<String>,
-        read: (String) throws -> [String],
-        write: ([String], String) throws -> Void,
-        removeSnapshot: () throws -> Void
-    ) throws {
+        services: Set<NetworkService>,
+        read: (NetworkService) throws -> [String],
+        write: ([String], NetworkService) throws -> Void,
+        removeSnapshot: () throws -> Void,
+        archiveSnapshot: () throws -> Void
+    ) throws -> Bool {
         var failure: Error?
 
-        func attempt(_ servers: [String], for service: String) {
+        func attempt(_ servers: [String], for service: NetworkService) {
             do {
                 try write(servers, service)
                 guard try read(service) == servers else {
@@ -184,8 +263,22 @@ final class ProtectedDNSManager {
             }
         }
 
-        if let snapshot, services.contains(snapshot.service) {
-            attempt(snapshot.servers, for: snapshot.service)
+        var target: NetworkService?
+        var ownerMissing = false
+        if let snapshot {
+            switch owner(of: snapshot, in: services) {
+            case .service(let service):
+                target = service
+                attempt(snapshot.servers, for: service)
+            case .missing:
+                ownerMissing = true
+            case .unresolved:
+                // Not proof of anything: keep the snapshot where it is and
+                // refuse release until an enumeration with IDs can decide.
+                failure = failure ?? HelperFailure.system(
+                    "The protected DNS service cannot be identified."
+                )
+            }
         }
         for service in services {
             let current: [String]
@@ -202,12 +295,41 @@ final class ProtectedDNSManager {
             // Only loopback is swept. A service the user pointed somewhere of
             // their own is not ours to rewrite.
             guard current == [Self.protectedDNSServer] else { continue }
-            attempt(snapshot?.service == service ? snapshot!.servers : [], for: service)
+            attempt(service == target ? snapshot?.servers ?? [] : [], for: service)
         }
         if let failure {
             throw failure
         }
+        if ownerMissing {
+            try archiveSnapshot()
+            return false
+        }
         try removeSnapshot()
+        return true
+    }
+
+    private static func owner(
+        of snapshot: Snapshot,
+        in services: Set<NetworkService>
+    ) -> SnapshotOwner {
+        if let id = snapshot.serviceID, !services.isEmpty,
+           services.allSatisfy({ $0.id != nil }) {
+            guard let service = services.first(where: { $0.id == id }) else {
+                return .missing
+            }
+            return .service(service)
+        }
+        if let service = services.first(where: { $0.name == snapshot.service }) {
+            return .service(service)
+        }
+        return snapshot.serviceID == nil ? .missing : .unresolved
+    }
+
+    private static func isSameService(_ snapshot: Snapshot, name: String, id: String?) -> Bool {
+        if let recorded = snapshot.serviceID, let id {
+            return recorded == id
+        }
+        return snapshot.service == name
     }
 
     /// The restore transaction over an injected snapshot outcome, mirroring
@@ -233,12 +355,13 @@ final class ProtectedDNSManager {
     /// contract stays meaningful for them.
     private static func restoreTransaction(
         snapshotResult: Result<Snapshot?, Error>,
-        services: Set<String>,
-        read: (String) throws -> [String],
-        write: ([String], String) throws -> Void,
+        services: Set<NetworkService>,
+        read: (NetworkService) throws -> [String],
+        write: ([String], NetworkService) throws -> Void,
         removeSnapshot: () throws -> Void,
+        archiveSnapshot: () throws -> Void,
         quarantine: () throws -> Void
-    ) throws -> Snapshot? {
+    ) throws -> (snapshot: Snapshot?, originalRestored: Bool) {
         let snapshot: Snapshot?
         switch snapshotResult {
         case .success(let loaded):
@@ -250,14 +373,15 @@ final class ProtectedDNSManager {
             try quarantine()
             snapshot = nil
         }
-        try restoreServices(
+        let originalRestored = try restoreServices(
             snapshot: snapshot,
             services: services,
             read: read,
             write: write,
-            removeSnapshot: removeSnapshot
+            removeSnapshot: removeSnapshot,
+            archiveSnapshot: archiveSnapshot
         )
-        return snapshot
+        return (snapshot, originalRestored)
     }
 
     func status() -> [String: Any] {
@@ -408,6 +532,7 @@ final class ProtectedDNSManager {
         guard data.count <= Self.maximumStateBytes,
               let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data),
               (try? Self.validateService(snapshot.service)) != nil,
+              snapshot.serviceID.map({ (try? Self.validateService($0)) != nil }) ?? true,
               snapshot.servers.count <= 8,
               snapshot.servers.allSatisfy(Self.isIPAddress) else {
             throw HelperFailure.invalid("Protected DNS state is invalid.")
@@ -485,9 +610,10 @@ final class ProtectedDNSManager {
     /// file stays unreachable whatever metadata made it unworthy of trust;
     /// root ownership is re-asserted anyway because losing it is one of the
     /// corruption modes. ENOENT — nothing to quarantine — is not an error:
-    /// the caller proceeds as a plain missing snapshot.
-    private static func quarantineSnapshot() throws {
-        let quarantined = "\(statePath).corrupt-\(Int(Date().timeIntervalSince1970))"
+    /// the caller proceeds as a plain missing snapshot. `orphaned` sets aside
+    /// a valid snapshot whose service no longer exists, for the same reason.
+    private static func quarantineSnapshot(reason: String = "corrupt") throws {
+        let quarantined = "\(statePath).\(reason)-\(Int(Date().timeIntervalSince1970))"
         guard rename(statePath, quarantined) == 0 else {
             if errno == ENOENT { return }
             throw HelperFailure.system("Could not quarantine protected DNS state.")
@@ -499,7 +625,7 @@ final class ProtectedDNSManager {
     // MARK: - System Configuration (networksetup fallback)
 
     private static func currentDNS(for service: String) throws -> [String] {
-        if let servers = try? scCurrentDNS(for: service) {
+        if let servers = try? scCurrentDNS(.name(service)) {
             return servers
         }
         let result = try runNetworkSetup(["-getdnsservers", service])
@@ -513,7 +639,7 @@ final class ProtectedDNSManager {
         guard servers.count <= 8, servers.allSatisfy(isIPAddress) else {
             throw HelperFailure.invalid("A protected DNS snapshot is invalid.")
         }
-        if (try? scSetDNS(servers, for: service)) != nil {
+        if (try? scSetDNS(servers, .name(service))) != nil {
             return
         }
         let values = servers.isEmpty ? ["Empty"] : servers
@@ -523,19 +649,38 @@ final class ProtectedDNSManager {
         }
     }
 
+    /// By service ID when the enumeration supplied one. The name, current
+    /// as of that same enumeration, is the `networksetup` fallback.
+    private static func readDNS(on service: NetworkService) throws -> [String] {
+        if let id = service.id, let servers = try? scCurrentDNS(.id(id)) {
+            return servers
+        }
+        return try currentDNS(for: service.name)
+    }
+
+    private static func writeDNS(_ servers: [String], on service: NetworkService) throws {
+        guard servers.count <= 8, servers.allSatisfy(isIPAddress) else {
+            throw HelperFailure.invalid("A protected DNS snapshot is invalid.")
+        }
+        if let id = service.id, (try? scSetDNS(servers, .id(id))) != nil {
+            return
+        }
+        try setDNS(servers, for: service.name)
+    }
+
     /// Services macOS currently has enabled. Protecting a disabled adapter is
     /// meaningless, so `enable` validates against this narrower set.
     private static func availableServices() throws -> Set<String> {
-        try listServices(includingDisabled: false)
+        try Set(listServices(includingDisabled: false).map(\.name))
     }
 
     /// Every service in the configuration, disabled ones included. Recovery has
     /// to reach those: a disabled adapter keeps whatever DNS it was left with.
-    private static func allServices() throws -> Set<String> {
+    private static func allServices() throws -> Set<NetworkService> {
         try listServices(includingDisabled: true)
     }
 
-    private static func listServices(includingDisabled: Bool) throws -> Set<String> {
+    private static func listServices(includingDisabled: Bool) throws -> Set<NetworkService> {
         if let services = try? scListServices(includingDisabled: includingDisabled),
            !services.isEmpty {
             return services
@@ -544,21 +689,32 @@ final class ProtectedDNSManager {
         guard result.status == 0 else {
             throw HelperFailure.system("Could not enumerate network services.")
         }
-        return parseServices(result.output, includingDisabled: includingDisabled)
+        return Set(
+            parseServices(result.output, includingDisabled: includingDisabled)
+                .map { NetworkService(id: nil, name: $0) }
+        )
     }
 
-    private static func scCurrentDNS(for service: String) throws -> [String] {
+    private static func scServiceID(named service: String) throws -> String? {
         try withPreferences(lock: false) { prefs in
-            guard let networkService = namedService(prefs, service) else {
+            namedService(prefs, service).flatMap {
+                SCNetworkServiceGetServiceID($0) as String?
+            }
+        }
+    }
+
+    private static func scCurrentDNS(_ key: ServiceKey) throws -> [String] {
+        try withPreferences(lock: false) { prefs in
+            guard let networkService = key.resolve(in: prefs) else {
                 throw HelperFailure.invalid("The selected network service is unavailable.")
             }
             return dnsServers(on: networkService)
         }
     }
 
-    private static func scSetDNS(_ servers: [String], for service: String) throws {
+    private static func scSetDNS(_ servers: [String], _ key: ServiceKey) throws {
         try withPreferences(lock: true) { prefs in
-            guard let networkService = namedService(prefs, service) else {
+            guard let networkService = key.resolve(in: prefs) else {
                 throw HelperFailure.invalid("The selected network service is unavailable.")
             }
             guard let protocolRef = SCNetworkServiceCopyProtocol(
@@ -586,24 +742,27 @@ final class ProtectedDNSManager {
         }
     }
 
-    private static func scListServices(includingDisabled: Bool) throws -> Set<String> {
+    private static func scListServices(includingDisabled: Bool) throws -> Set<NetworkService> {
         try withPreferences(lock: false) { prefs in
             guard let array = SCNetworkServiceCopyAll(prefs) else {
                 throw HelperFailure.system("Could not enumerate network services.")
             }
-            var services = Set<String>()
+            var services = Set<NetworkService>()
             let count = CFArrayGetCount(array)
             for index in 0..<count {
                 let service = unsafeBitCast(
                     CFArrayGetValueAtIndex(array, index),
                     to: SCNetworkService.self
                 )
+                let id = SCNetworkServiceGetServiceID(service) as String?
+                // A service renamed to something `enable` would refuse can
+                // still hold our loopback DNS; with an ID, recovery reaches it.
                 guard let name = SCNetworkServiceGetName(service) as String?,
-                      (try? validateService(name)) != nil else { continue }
+                      id != nil || (try? validateService(name)) != nil else { continue }
                 if !includingDisabled, !SCNetworkServiceGetEnabled(service) {
                     continue
                 }
-                services.insert(name)
+                services.insert(NetworkService(id: id, name: name))
             }
             return services
         }
@@ -767,13 +926,14 @@ final class ProtectedDNSManager {
         func restore() throws {
             try restoreServices(
                 snapshot: snapshot,
-                services: Set(settings.keys),
+                services: Set(settings.keys.map { NetworkService(id: nil, name: $0) }),
                 read: { service in
-                    if service == "Disabled Ethernet", unreadable { throw ReadFailure.injected }
-                    return settings[service]!
+                    if service.name == "Disabled Ethernet", unreadable { throw ReadFailure.injected }
+                    return settings[service.name]!
                 },
-                write: { settings[$1] = $0 },
-                removeSnapshot: { snapshotRemoved = true }
+                write: { settings[$1.name] = $0 },
+                removeSnapshot: { snapshotRemoved = true },
+                archiveSnapshot: {}
             )
         }
         var refused = false
@@ -833,10 +993,11 @@ final class ProtectedDNSManager {
         do {
             _ = try restoreTransaction(
                 snapshotResult: .failure(HelperFailure.invalid("Protected DNS state is invalid.")),
-                services: Set(settings.keys),
-                read: { settings[$0]! },
-                write: { settings[$1] = $0 },
+                services: Set(settings.keys.map { NetworkService(id: nil, name: $0) }),
+                read: { settings[$0.name]! },
+                write: { settings[$1.name] = $0 },
                 removeSnapshot: {},
+                archiveSnapshot: {},
                 quarantine: { quarantined = true }
             )
         } catch {
@@ -864,6 +1025,57 @@ final class ProtectedDNSManager {
             "DNS corrupt-snapshot regression passed: an unreadable snapshot is quarantined "
                 + "and the snapshotless loopback sweep still runs; status keeps it visible"
         )
+        return true
+    }
+
+    /// Fault-injected rename regression (X3-1). No live DNS preferences or
+    /// root snapshot are changed; production restoreServices owns every
+    /// decision.
+    ///
+    /// The user renames the protected service while Tono holds its DNS; its
+    /// service ID stays. Matched by display name, restore reset the renamed
+    /// service to automatic DNS and deleted the only record of its static
+    /// resolvers, then reported success.
+    static func runRenamedServiceRestoreSelfTest() -> Bool {
+        let snapshot = Snapshot(service: "Wi-Fi", serviceID: "S1", servers: ["10.0.0.53"])
+        let renamed = NetworkService(id: "S1", name: "办公无线")
+        let other = NetworkService(id: "S2", name: "Ethernet")
+        var settings = [renamed: [protectedDNSServer], other: ["8.8.4.4"]]
+        var readBack = false
+        var removedBeforeReadBack = false
+        var snapshotRemoved = false
+        var restoredOriginal = false
+        do {
+            restoredOriginal = try restoreServices(
+                snapshot: snapshot,
+                services: Set(settings.keys),
+                read: { service in
+                    let servers = settings[service]!
+                    if service == renamed, servers == ["10.0.0.53"] { readBack = true }
+                    return servers
+                },
+                write: { settings[$1] = $0 },
+                removeSnapshot: {
+                    removedBeforeReadBack = !readBack
+                    snapshotRemoved = true
+                },
+                archiveSnapshot: {}
+            )
+        } catch {
+            print("DNS renamed-service regression FAILED: restore threw \(error)")
+            return false
+        }
+        guard settings[renamed] == ["10.0.0.53"],
+              settings[other] == ["8.8.4.4"],
+              restoredOriginal, snapshotRemoved, !removedBeforeReadBack else {
+            print(
+                "DNS renamed-service regression FAILED: renamed=\(settings[renamed] ?? []), "
+                    + "restoredOriginal=\(restoredOriginal), snapshotRemoved=\(snapshotRemoved), "
+                    + "removedBeforeReadBack=\(removedBeforeReadBack)"
+            )
+            return false
+        }
+        print("DNS renamed-service regression passed: a renamed service gets its original DNS back by service ID")
         return true
     }
 

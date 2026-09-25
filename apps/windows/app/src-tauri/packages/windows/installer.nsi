@@ -80,18 +80,25 @@ Var ExistingUninstallCommand
 ; Unlike `/UPDATE`, this is set only after a complete installed-product record passes version
 ; validation. It prevents failure cleanup from disarming a Service owned by the previous install.
 Var ConfirmedExistingInstall
+; Set in .onInit once the user confirmed clearing a Tono block no Service owns (gate 78) and the
+; orphan lease was taken. Such an install is never an upgrade, even over a complete ARP record.
+Var ClearingOrphanedBlock
 Var OldMainBinaryName
 ; The single GUI launcher consumes this value. Empty for Finish-page/repair launches; `/ARGS`
 ; populates it only for an explicit fresh passive `/R` request.
 Var MainBinaryArgs
 Var VC_REDIST_URL
-Var VC_REDIST_EXE
+Var TonoSetupFile
 Var VC_RUNTIME_READY
 Var VC_RUNTIME_NEEDED
 ; Set once this run has handed control to the Service installer, so `.onInstFailed` only tears
 ; down a registration this install could have created and never an unrelated healthy Service.
 Var ServiceInstallAttempted
 Var ServiceInstallRetries
+; `--final-uninstall` only in the Uninstall section outside update mode: the helper then also
+; retires the update recovery task and executors and removes every owner's Service state (with
+; the runtime config's exit credentials), after WFP removal is proven. Empty elsewhere.
+Var TonoUninstallScope
 
 Name "${PRODUCTNAME}"
 BrandingText "${COPYRIGHT}"
@@ -189,6 +196,13 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 ; supported NSIS install is always upgraded/repaired in place: there is no ambiguous "uninstall
 ; first / do not uninstall" page. Update mode preserves AppData, shortcuts and the running
 ; fail-closed Service; passive mode closes the old GUI without another prompt.
+; A Quit from .onInit never reaches .onGUIEnd. Once the manual gate granted its lease, such an
+; exit must hand it back, or the Service keeps refusing Connect until another installer finishes.
+Function ReleaseManualLease
+  nsExec::ExecToLog '"$PLUGINSDIR\tono-gate\resources\tono-service-install.exe" --manual-update-finish'
+  Pop $0
+FunctionEnd
+
 Function DetectExistingInstall
   ; Prefer Tono's authoritative NSIS registry key. A stale legacy MSI record must never override
   ; a supported current install and trigger an unrelated migration path.
@@ -248,6 +262,14 @@ Function DetectExistingInstall
     StrCmp $R0 0 legacy_wix_blocked wix_loop
 
   automatic_update:
+    ; A confirmed orphaned-block clear is not an upgrade. The upgrade path skips RemoveVergeService
+    ; and hands the runtime to --replace-runtime, whose gate refuses while the filters remain and
+    ; which cannot replace a Service that is gone. Leave every upgrade flag unset so the install
+    ; runs the full RemoveVergeService cleanup and then creates a new Service.
+    ${If} $ClearingOrphanedBlock = 1
+      DetailPrint "Reinstalling ${PRODUCTNAME} $ExistingVersion as ${VERSION} after clearing the leftover network block."
+      Return
+    ${EndIf}
     StrCpy $UpdateMode 1
     StrCpy $PassiveMode 1
     StrCpy $ConfirmedExistingInstall 1
@@ -258,6 +280,7 @@ Function DetectExistingInstall
     ${IfNot} ${Silent}
       MessageBox MB_ICONSTOP "$(downgradeBlocked)"
     ${EndIf}
+    Call ReleaseManualLease
     SetErrorLevel 1638
     Quit
 
@@ -329,6 +352,9 @@ FunctionEnd
 ; 1. Confirm uninstall page
 Var DeleteAppDataCheckbox
 Var DeleteAppDataCheckboxState
+; "0" only when the service uninstall helper found no link or reparse point on the way into the
+; approving account's own AppData. Every uninstall delete there is gated on it.
+Var AppDataPathPlain
 !define /ifndef WS_EX_LAYOUTRTL         0x00400000
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW un.ConfirmShow
 Function un.ConfirmShow ; Add add a `Delete app data` check box
@@ -383,9 +409,9 @@ LangString legacyLocationAbort ${LANG_SIMPCHINESE} "检测到 ${PRODUCTNAME} 安
 LangString legacyLocationAbort ${LANG_ENGLISH} "${PRODUCTNAME} is installed in an unsupported location: $4$\r$\n$\r$\nThis version must be installed under Program Files. Uninstall the existing version first (do not select Delete application data), then run this installer again."
 LangString legacyLocationAbort ${LANG_RUSSIAN} "${PRODUCTNAME} установлен в неподдерживаемой папке: $4$\r$\n$\r$\nЭта версия должна быть установлена в Program Files. Сначала удалите текущую версию (не выбирайте удаление данных приложения), затем снова запустите этот установщик."
 
-LangString downgradeBlocked ${LANG_SIMPCHINESE} "检测到较新的 ${PRODUCTNAME} 版本（$ExistingVersion）。为了保护应用数据和系统服务，安装已停止。请使用较新版本的安装程序。"
-LangString downgradeBlocked ${LANG_ENGLISH} "A newer ${PRODUCTNAME} version ($ExistingVersion) is installed. Setup stopped to protect application data and the system Service. Use an installer for that version or newer."
-LangString downgradeBlocked ${LANG_RUSSIAN} "Установлена более новая версия ${PRODUCTNAME} ($ExistingVersion). Установка остановлена для защиты данных приложения и системной службы. Используйте установщик этой или более новой версии."
+LangString downgradeBlocked ${LANG_SIMPCHINESE} "检测到较新的 ${PRODUCTNAME} 版本（$ExistingVersion）。为了保护应用数据和系统服务，安装已停止。请使用该版本或更新版本的安装程序。$\r$\n$\r$\n如需退回旧版本：先在 Windows“已安装的应用”中卸载当前版本（不要删除应用数据），再运行旧版本的安装程序。不要把旧版本直接安装在新版本之上：旧版本无法还原新版本修改过的 DNS 设置。"
+LangString downgradeBlocked ${LANG_ENGLISH} "A newer ${PRODUCTNAME} version ($ExistingVersion) is installed. Setup stopped to protect application data and the system Service. Use an installer for that version or newer.$\r$\n$\r$\nTo go back to an older version, first uninstall this one from Windows Installed apps (do not delete application data), then run the older installer. Do not install an older version over a newer one: it cannot undo the DNS settings the newer version changed."
+LangString downgradeBlocked ${LANG_RUSSIAN} "Установлена более новая версия ${PRODUCTNAME} ($ExistingVersion). Установка остановлена для защиты данных приложения и системной службы. Используйте установщик этой или более новой версии.$\r$\n$\r$\nЧтобы вернуться к старой версии, сначала удалите текущую через список установленных приложений Windows (не удаляя данные приложения), затем запустите старый установщик. Не устанавливайте старую версию поверх новой: она не может отменить изменения DNS, сделанные новой версией."
 
 LangString invalidExistingVersion ${LANG_SIMPCHINESE} "检测到现有 ${PRODUCTNAME} 安装，但无法安全确认其版本。安装已停止，未删除应用数据。请先修复或卸载现有版本（不要选择删除应用数据），再重试。"
 LangString invalidExistingVersion ${LANG_ENGLISH} "An existing ${PRODUCTNAME} installation was found, but its version could not be verified safely. Setup stopped without deleting application data. Repair or uninstall the existing version (do not select Delete application data), then retry."
@@ -394,6 +420,26 @@ LangString invalidExistingVersion ${LANG_RUSSIAN} "Обнаружена суще
 LangString legacyWixManualMigration ${LANG_SIMPCHINESE} "检测到旧版 MSI/WiX ${PRODUCTNAME}。为了避免误删应用数据，此安装程序不会自动卸载它。请从 Windows“已安装的应用”中卸载旧版（不要删除应用数据），然后重新运行此安装程序。"
 LangString legacyWixManualMigration ${LANG_ENGLISH} "A legacy MSI/WiX ${PRODUCTNAME} installation was found. To avoid deleting application data accidentally, this installer will not remove it automatically. Uninstall the legacy version from Windows Installed apps without deleting application data, then run this installer again."
 LangString legacyWixManualMigration ${LANG_RUSSIAN} "Обнаружена устаревшая MSI/WiX-установка ${PRODUCTNAME}. Во избежание случайного удаления данных этот установщик не будет удалять её автоматически. Удалите старую версию через список установленных приложений Windows без удаления данных приложения, затем снова запустите этот установщик."
+
+LangString manualInstallNeedsDisconnect ${LANG_SIMPCHINESE} "${PRODUCTNAME} 仍在连接中，或网络保护仍处于开启状态，因此现在无法安装。没有做任何更改。$\r$\n$\r$\n请打开 ${PRODUCTNAME}，点击“断开”（在“保护离线”状态下点击“恢复网络”），然后重新运行此安装程序或再次检查更新。$\r$\n$\r$\n如果 ${PRODUCTNAME} 无法打开，请先以管理员身份运行“开始”菜单中的“${PRODUCTNAME} — 恢复网络 (Restore Network)”。"
+LangString manualInstallNeedsDisconnect ${LANG_ENGLISH} "${PRODUCTNAME} is still connected, or its network protection is still on, so it cannot be installed right now. Nothing was changed.$\r$\n$\r$\nOpen ${PRODUCTNAME} and choose Disconnect (or Restore internet if it shows Protected Offline), then run this installer or check for updates again.$\r$\n$\r$\nIf ${PRODUCTNAME} does not open, first run the Start-menu shortcut $\"${PRODUCTNAME} — 恢复网络 (Restore Network)$\" as administrator."
+LangString manualInstallNeedsDisconnect ${LANG_RUSSIAN} "${PRODUCTNAME} всё ещё подключён или его защита сети включена, поэтому установка сейчас невозможна. Ничего не изменено.$\r$\n$\r$\nОткройте ${PRODUCTNAME} и выберите «Отключить» (или «Восстановить интернет» в режиме Protected Offline), затем снова запустите этот установщик или проверьте обновления.$\r$\n$\r$\nЕсли ${PRODUCTNAME} не открывается, сначала запустите от имени администратора ярлык меню «Пуск» $\"${PRODUCTNAME} — 恢复网络 (Restore Network)$\"."
+
+LangString manualInstallRefused ${LANG_SIMPCHINESE} "${PRODUCTNAME} 现在无法安装：可能有受保护的更新尚未完成、另一个安装程序正在运行，或无法确认网络状态。没有做任何更改。$\r$\n$\r$\n请打开 ${PRODUCTNAME}，在“检查更新”中完成或断开并重试未完成的更新，然后再运行此安装程序。"
+LangString manualInstallRefused ${LANG_ENGLISH} "${PRODUCTNAME} cannot be installed right now: a protected update may still be pending, another installer may be running, or the network state could not be confirmed. Nothing was changed.$\r$\n$\r$\nOpen ${PRODUCTNAME}, finish or Disconnect and Retry the pending update from Check for Updates, then run this installer again."
+LangString manualInstallRefused ${LANG_RUSSIAN} "Сейчас установить ${PRODUCTNAME} нельзя: возможно, не завершено защищённое обновление, работает другой установщик или не удалось подтвердить состояние сети. Ничего не изменено.$\r$\n$\r$\nОткройте ${PRODUCTNAME}, завершите незаконченное обновление или отключитесь и повторите его в разделе проверки обновлений, затем снова запустите этот установщик."
+
+LangString uninstallReleasesProtection ${LANG_SIMPCHINESE} "${PRODUCTNAME} 仍在连接中，或网络保护仍处于开启状态。$\r$\n$\r$\n继续卸载会关闭 ${PRODUCTNAME} 的网络保护并恢复普通网络访问；如果无法确认拦截已解除，将不会删除任何文件。$\r$\n$\r$\n是否继续卸载？"
+LangString uninstallReleasesProtection ${LANG_ENGLISH} "${PRODUCTNAME} is still connected, or its network protection is still on.$\r$\n$\r$\nUninstalling turns ${PRODUCTNAME}'s protection off and restores normal internet access. If the block cannot be shown removed, nothing is deleted.$\r$\n$\r$\nContinue uninstalling?"
+LangString uninstallReleasesProtection ${LANG_RUSSIAN} "${PRODUCTNAME} всё ещё подключён или его защита сети включена.$\r$\n$\r$\nУдаление отключит защиту ${PRODUCTNAME} и восстановит обычный доступ в интернет. Если не удастся подтвердить снятие блокировки, ничего не будет удалено.$\r$\n$\r$\nПродолжить удаление?"
+
+LangString manualUninstallRefused ${LANG_SIMPCHINESE} "${PRODUCTNAME} 现在无法卸载：可能有受保护的更新尚未完成，或另一个安装程序正在运行。没有做任何更改。$\r$\n$\r$\n请打开 ${PRODUCTNAME}，在“检查更新”中完成或断开并重试未完成的更新，然后再卸载。"
+LangString manualUninstallRefused ${LANG_ENGLISH} "${PRODUCTNAME} cannot be uninstalled right now: a protected update may still be pending, or another installer may be running. Nothing was changed.$\r$\n$\r$\nOpen ${PRODUCTNAME}, finish or Disconnect and Retry the pending update from Check for Updates, then uninstall again."
+LangString manualUninstallRefused ${LANG_RUSSIAN} "Сейчас удалить ${PRODUCTNAME} нельзя: возможно, не завершено защищённое обновление или работает другой установщик. Ничего не изменено.$\r$\n$\r$\nОткройте ${PRODUCTNAME}, завершите незаконченное обновление или отключитесь и повторите его в разделе проверки обновлений, затем повторите удаление."
+
+LangString installClearsOrphanedBlock ${LANG_SIMPCHINESE} "此电脑上仍装有 ${PRODUCTNAME} 的网络拦截，但已没有 ${PRODUCTNAME} 服务可以解除它，因此“断开”和“恢复网络”快捷方式都不可用。$\r$\n$\r$\n继续安装会先解除这项拦截并恢复普通网络访问，然后重新安装 ${PRODUCTNAME}；如果无法确认拦截已解除，安装会停止，不会删除任何文件。安装完成后请重新连接以恢复保护。$\r$\n$\r$\n是否继续？"
+LangString installClearsOrphanedBlock ${LANG_ENGLISH} "A ${PRODUCTNAME} network block is still installed on this PC, but no ${PRODUCTNAME} Service is left to release it, so neither Disconnect nor the Restore Network shortcut can help.$\r$\n$\r$\nContinuing removes that block, restores normal internet access and reinstalls ${PRODUCTNAME}. If the block cannot be shown removed, the installation stops and nothing is deleted. Connect again afterwards to turn protection back on.$\r$\n$\r$\nContinue?"
+LangString installClearsOrphanedBlock ${LANG_RUSSIAN} "На этом компьютере всё ещё установлена сетевая блокировка ${PRODUCTNAME}, но не осталось службы ${PRODUCTNAME}, которая может её снять, поэтому ни «Отключить», ни ярлык «Восстановить сеть» не помогут.$\r$\n$\r$\nЕсли продолжить, блокировка будет снята, обычный доступ в интернет восстановлен, а ${PRODUCTNAME} установлен заново. Если не удастся подтвердить снятие блокировки, установка остановится и ничего не будет удалено. После установки подключитесь снова, чтобы включить защиту.$\r$\n$\r$\nПродолжить?"
 
 LangString restoreNetworkTooltip ${LANG_SIMPCHINESE} "当 ${PRODUCTNAME} 无法恢复网络时，解除网络保护（需要管理员权限）。"
 LangString restoreNetworkTooltip ${LANG_ENGLISH} "Restores your network if ${PRODUCTNAME} cannot. Requires administrator approval."
@@ -428,7 +474,34 @@ Function .onInit
   {{/each}}
   nsExec::ExecToLog '"$PLUGINSDIR\tono-gate\resources\tono-service-install.exe" --manual-update-gate'
   Pop $0
+  ; 78: Tono's block filters remain but no Tono Service is left to own them, so neither Disconnect
+  ; nor the Restore Network shortcut exists. The Install section's RemoveVergeService ladder is
+  ; what clears them, and it stops the install unless WFP removal is proven. Only after the user
+  ; confirms is the lease taken without Disconnect (the gate re-checks that no Service appeared).
+  ; A silent install keeps refusing.
+  ${If} $0 == "78"
+  ${AndIfNot} ${Silent}
+    MessageBox MB_ICONEXCLAMATION|MB_YESNO "$(installClearsOrphanedBlock)" IDYES orphanBlockClearConfirmed
+    SetErrorLevel 76
+    Abort "Installation cancelled; the leftover Tono network block was kept."
+    orphanBlockClearConfirmed:
+    nsExec::ExecToLog '"$PLUGINSDIR\tono-gate\resources\tono-service-install.exe" --manual-orphan-gate'
+    Pop $0
+    ${If} $0 == "0"
+      StrCpy $ClearingOrphanedBlock 1
+    ${EndIf}
+  ${EndIf}
   ${If} $0 != "0"
+    ; Abort text is never shown from .onInit, and a 0.0.72 settings-page update has already
+    ; closed the App: without a dialog Tono just vanishes. 77 means only active protection
+    ; stood in the way. The gate still refuses; nothing here releases protection.
+    ${IfNot} ${Silent}
+      ${If} $0 == "77"
+        MessageBox MB_ICONEXCLAMATION|MB_OK "$(manualInstallNeedsDisconnect)"
+      ${Else}
+        MessageBox MB_ICONSTOP|MB_OK "$(manualInstallRefused)"
+      ${EndIf}
+    ${EndIf}
     SetErrorLevel 76
     Abort "Disconnect and resolve any pending protected update before manual installation. No installed files have been changed."
   ${EndIf}
@@ -635,7 +708,7 @@ FunctionEnd
     ${EndIf}
     DetailPrint "Restoring network protection and removing ${PRODUCTNAME} Service..."
     ; Preserve the recovery files but return control instead of hanging forever if cleanup stalls.
-    nsExec::ExecToLog /TIMEOUT=180000 '"$INSTDIR\resources\tono-service-uninstall.exe"'
+    nsExec::ExecToLog /TIMEOUT=180000 '"$INSTDIR\resources\tono-service-uninstall.exe" $TonoUninstallScope'
     Pop $0
     ; Second chance for machines that fail the first pass (stuck owner lock, ProgramData ACL, or
     ; a wedged first disarm): run the Service binary's emergency disarm, then retry the helper.
@@ -649,7 +722,7 @@ FunctionEnd
         Pop $1
         DetailPrint "Emergency disarm finished (result $1)."
       ${EndIf}
-      nsExec::ExecToLog /TIMEOUT=180000 '"$INSTDIR\resources\tono-service-uninstall.exe"'
+      nsExec::ExecToLog /TIMEOUT=180000 '"$INSTDIR\resources\tono-service-uninstall.exe" $TonoUninstallScope'
       Pop $0
       DetailPrint "Second cleanup finished (result $0)."
     ${EndIf}
@@ -680,6 +753,27 @@ FunctionEnd
 ; means Tauri's generated uninstall loop cannot know they exist. Remove the exact historical
 ; names on both upgrade and uninstall; /REBOOTOK covers an old core image that Windows still has
 ; mapped without broadening the target beyond Tono's own install directory.
+; Elevated setup must not execute a file that the unelevated user can replace. Every process
+; of that user can write %TEMP%, so a Microsoft installer saved there could be swapped between
+; download and ExecWait. GetTempFileName creates a new file in the Windows temp directory, whose
+; inherited ACL gives standard users no access to files created there. Renaming within that
+; directory keeps the ACL and fails rather than reuse a name that already exists.
+!macro TonoAdminOnlySetupFile
+  StrCpy $TonoSetupFile ""
+  ClearErrors
+  GetTempFileName $R8 "$WINDIR\Temp"
+  ${IfNot} ${Errors}
+  ${AndIf} $R8 != ""
+    ClearErrors
+    Rename "$R8" "$R8.exe"
+    ${If} ${Errors}
+      Delete "$R8"
+    ${Else}
+      StrCpy $TonoSetupFile "$R8.exe"
+    ${EndIf}
+  ${EndIf}
+!macroend
+
 !macro RemoveKnownLegacyPayload
   Delete /REBOOTOK "$INSTDIR\verge-mihomo.exe"
   Delete /REBOOTOK "$INSTDIR\verge-mihomo-alpha.exe"
@@ -705,6 +799,7 @@ FunctionEnd
   Delete /REBOOTOK "$INSTDIR\resources\Country.mmdb"
   Delete /REBOOTOK "$INSTDIR\resources\geoip.dat"
   Delete /REBOOTOK "$INSTDIR\resources\geosite.dat"
+  Delete /REBOOTOK "$INSTDIR\resources\enableLoopback.exe"
   Delete /REBOOTOK "$INSTDIR\tono-core.exe.next"
   Delete /REBOOTOK "$INSTDIR\tono-core.exe.rollback"
   Delete /REBOOTOK "$INSTDIR\tono-core.exe.restore"
@@ -720,7 +815,6 @@ Section CheckAndInstallVSRuntime
 
   ${If} ${IsNativeARM64}
     StrCpy $VC_REDIST_URL "https://aka.ms/vs/17/release/vc_redist.arm64.exe"
-    StrCpy $VC_REDIST_EXE "vc_redist.arm64.exe"
     Call CheckVCRuntime64
     ${If} $VC_RUNTIME_READY != "1"
       StrCpy $VC_RUNTIME_NEEDED "1"
@@ -728,7 +822,6 @@ Section CheckAndInstallVSRuntime
 
   ${ElseIf} ${RunningX64}
     StrCpy $VC_REDIST_URL "https://aka.ms/vs/17/release/vc_redist.x64.exe"
-    StrCpy $VC_REDIST_EXE "vc_redist.x64.exe"
     Call CheckVCRuntime64
     ${If} $VC_RUNTIME_READY != "1"
       StrCpy $VC_RUNTIME_NEEDED "1"
@@ -736,7 +829,6 @@ Section CheckAndInstallVSRuntime
 
   ${Else}
     StrCpy $VC_REDIST_URL "https://aka.ms/vs/17/release/vc_redist.x86.exe"
-    StrCpy $VC_REDIST_EXE "vc_redist.x86.exe"
 
     IfFileExists "$SYSDIR\vcruntime140.dll" 0 filesMissing32
     IfFileExists "$SYSDIR\msvcp140.dll" 0 filesMissing32
@@ -785,12 +877,17 @@ Section CheckAndInstallVSRuntime
     Goto done_vc
   ${EndIf}
 
+  !insertmacro TonoAdminOnlySetupFile
+  ${If} $TonoSetupFile == ""
+    DetailPrint "无法创建仅管理员可写的临时文件，跳过 Visual C++ Redistributable 安装"
+    Goto done_vc
+  ${EndIf}
   DetailPrint "正在下载 Visual C++ Redistributable..."
-  nsisdl::download "$VC_REDIST_URL" "$TEMP\$VC_REDIST_EXE"
+  nsisdl::download "$VC_REDIST_URL" "$TonoSetupFile"
   Pop $0
   ${If} $0 == "success"
     DetailPrint "正在安装 Visual C++ Redistributable..."
-    ExecWait '"$TEMP\$VC_REDIST_EXE" /quiet /norestart' $0
+    ExecWait '"$TonoSetupFile" /quiet /norestart' $0
     ${If} $0 == 0
       DetailPrint "Visual C++ Redistributable 安装成功"
     ${ElseIf} $0 == 3010
@@ -803,10 +900,10 @@ Section CheckAndInstallVSRuntime
     ${Else}
       DetailPrint "Visual C++ Redistributable 安装失败"
     ${EndIf}
-    Delete "$TEMP\$VC_REDIST_EXE"
   ${Else}
     DetailPrint "Visual C++ Redistributable 下载失败"
   ${EndIf}
+  Delete "$TonoSetupFile"
 
   done_vc:
 SectionEnd
@@ -835,43 +932,47 @@ Section WebView2
     ;
     ; Skip if updating
     ${If} $UpdateMode <> 1
+      !insertmacro TonoAdminOnlySetupFile
+      ${If} $TonoSetupFile == ""
+        Abort "$(webview2AbortError)"
+      ${EndIf}
       !if "${INSTALLWEBVIEW2MODE}" == "downloadBootstrapper"
-        Delete "$TEMP\MicrosoftEdgeWebview2Setup.exe"
         DetailPrint "$(webview2Downloading)"
-        NSISdl::download "https://go.microsoft.com/fwlink/p/?LinkId=2124703" "$TEMP\MicrosoftEdgeWebview2Setup.exe"
+        NSISdl::download "https://go.microsoft.com/fwlink/p/?LinkId=2124703" "$TonoSetupFile"
         Pop $0
         ${If} $0 == "success"
           DetailPrint "$(webview2DownloadSuccess)"
         ${Else}
           DetailPrint "$(webview2DownloadError)"
+          Delete "$TonoSetupFile"
           Abort "$(webview2AbortError)"
         ${EndIf}
-        StrCpy $6 "$TEMP\MicrosoftEdgeWebview2Setup.exe"
+        StrCpy $6 "$TonoSetupFile"
         Goto install_webview2
       !endif
 
       !if "${INSTALLWEBVIEW2MODE}" == "embedBootstrapper"
-        Delete "$TEMP\MicrosoftEdgeWebview2Setup.exe"
-        File "/oname=$TEMP\MicrosoftEdgeWebview2Setup.exe" "${WEBVIEW2BOOTSTRAPPERPATH}"
+        File "/oname=$TonoSetupFile" "${WEBVIEW2BOOTSTRAPPERPATH}"
         DetailPrint "$(installingWebview2)"
-        StrCpy $6 "$TEMP\MicrosoftEdgeWebview2Setup.exe"
+        StrCpy $6 "$TonoSetupFile"
         Goto install_webview2
       !endif
 
       !if "${INSTALLWEBVIEW2MODE}" == "offlineInstaller"
-        Delete "$TEMP\MicrosoftEdgeWebView2RuntimeInstaller.exe"
-        File "/oname=$TEMP\MicrosoftEdgeWebView2RuntimeInstaller.exe" "${WEBVIEW2INSTALLERPATH}"
+        File "/oname=$TonoSetupFile" "${WEBVIEW2INSTALLERPATH}"
         DetailPrint "$(installingWebview2)"
-        StrCpy $6 "$TEMP\MicrosoftEdgeWebView2RuntimeInstaller.exe"
+        StrCpy $6 "$TonoSetupFile"
         Goto install_webview2
       !endif
 
+      Delete "$TonoSetupFile"
       Goto webview2_done
 
       install_webview2:
         DetailPrint "$(installingWebview2)"
-        ; $6 holds the path to the webview2 installer; quote it, $TEMP routinely has a space.
+        ; $6 holds the path to the webview2 installer; always quote it.
         ExecWait '"$6" ${WEBVIEW2INSTALLERARGS} /install' $1
+        Delete "$TonoSetupFile"
         ${If} $1 = 0
           DetailPrint "$(webview2InstallSuccess)"
         ${Else}
@@ -914,7 +1015,16 @@ SectionEnd
 Section Install
   ${If} $TonoPrivateUnpack = 1
     SetOutPath $INSTDIR
-    File /a "/oname=${MAINBINARYNAME}.exe" "${MAINBINARYSRCPATH}"
+    ; The package carries the GUI and Mihomo only under their staged names; the payload gate
+    ; rejects a live archive member. $INSTDIR is the Service's private attempt payload here, so
+    ; renaming to the names the Service verifies is private. A failed rename aborts (nonzero
+    ; exit) so the Service never reads a partial payload.
+    File /a "/oname=${MAINBINARYNAME}.exe.next" "${MAINBINARYSRCPATH}"
+    ClearErrors
+    Rename "$INSTDIR\${MAINBINARYNAME}.exe.next" "$INSTDIR\${MAINBINARYNAME}.exe"
+    ${If} ${Errors}
+      Abort "Could not stage the private Tono application payload."
+    ${EndIf}
     {{#each resources_dirs}}
       CreateDirectory "$INSTDIR\\{{this}}"
     {{/each}}
@@ -922,7 +1032,12 @@ Section Install
       File /a "/oname={{this.[1]}}" "{{no-escape @key}}"
     {{/each}}
     {{#each binaries}}
-      File /a "/oname={{this}}" "{{no-escape @key}}"
+      File /a "/oname={{this}}.next" "{{no-escape @key}}"
+      ClearErrors
+      Rename "$INSTDIR\\{{this}}.next" "$INSTDIR\\{{this}}"
+      ${If} ${Errors}
+        Abort "Could not stage the private Tono runtime payload."
+      ${EndIf}
     {{/each}}
     ; No installed path, SCM, ARP, shortcut, redist, hook or cleanup mutation.
     Return
@@ -954,6 +1069,10 @@ Section Install
   ; immediately before creating its recovery/uninstall path.
   File /a "/oname=${MAINBINARYNAME}.exe.next" "${MAINBINARYSRCPATH}"
   ${If} $ConfirmedExistingInstall <> 1
+    ; An orphaned-block clear reinstalls over the previous files, and Rename never overwrites.
+    ${If} $ClearingOrphanedBlock = 1
+      Delete "$INSTDIR\${MAINBINARYNAME}.exe"
+    ${EndIf}
     ClearErrors
     Rename "$INSTDIR\${MAINBINARYNAME}.exe.next" "$INSTDIR\${MAINBINARYNAME}.exe"
     ${If} ${Errors}
@@ -979,6 +1098,9 @@ Section Install
   {{#each binaries}}
     File /a "/oname={{this}}.next" "{{no-escape @key}}"
     ${If} $ConfirmedExistingInstall <> 1
+      ${If} $ClearingOrphanedBlock = 1
+        Delete "$INSTDIR\\{{this}}"
+      ${EndIf}
       ClearErrors
       Rename "$INSTDIR\\{{this}}.next" "$INSTDIR\\{{this}}"
       ${If} ${Errors}
@@ -1047,6 +1169,17 @@ Section Install
   ; disarm helper here. UpdateMode deliberately keeps the Service in place, then the replacement
   ; helper preserves active protection or marks a proven-disconnected legacy state for cleanup.
   !insertmacro RemoveVergeService
+  ; A confirmed orphan clear: the owner that was connected when its Service went away still says
+  ; "core should run", and the Service installer's gate would refuse on it with Disconnect advice
+  ; nobody can follow. RemoveVergeService has just proven the filters gone (it aborts otherwise);
+  ; the helper proves it again, and that no Service exists, before retiring that state.
+  ${If} $ClearingOrphanedBlock = 1
+    nsExec::ExecToLog /TIMEOUT=60000 '"$INSTDIR\resources\tono-service-install.exe" --retire-orphaned-owner'
+    Pop $0
+    ${If} $0 != "0"
+      Abort "The leftover ${PRODUCTNAME} network block was removed, but the previous connection state could not be cleared (result $0). Run this installer again."
+    ${EndIf}
+  ${EndIf}
   !insertmacro StartVergeService
 
   ${If} $ConfirmedExistingInstall = 1
@@ -1192,7 +1325,28 @@ Function un.onInit
   ; Refuse pending v1 before the pre-uninstall hook or any App termination.
   nsExec::ExecToLog '"$INSTDIR\resources\tono-service-install.exe" --manual-update-gate'
   Pop $0
+  ; 78 (block filters with no Tono Service left to own them) needs the same confirmed release:
+  ; this uninstaller's RemoveVergeService ladder is the only thing left that can remove them.
+  ${If} $0 == "78"
+    StrCpy $0 "77"
+  ${EndIf}
+  ; 77: no update is pending and no other installer holds the lease; only active protection
+  ; stood in the way. RemoveVergeService exists for exactly that state: it releases protection
+  ; (helper, then emergency disarm) and deletes nothing unless WFP removal is proven. After the
+  ; user confirms, take only the update/installer lease and let that ladder run.
+  ${If} $0 == "77"
+  ${AndIfNot} ${Silent}
+    MessageBox MB_ICONEXCLAMATION|MB_YESNO "$(uninstallReleasesProtection)" IDYES uninstallReleaseConfirmed
+    SetErrorLevel 76
+    Abort "Uninstall cancelled while protection is active."
+    uninstallReleaseConfirmed:
+    nsExec::ExecToLog '"$INSTDIR\resources\tono-service-install.exe" --manual-uninstall-gate'
+    Pop $0
+  ${EndIf}
   ${If} $0 != "0"
+    ${IfNot} ${Silent}
+      MessageBox MB_ICONSTOP|MB_OK "$(manualUninstallRefused)"
+    ${EndIf}
     SetErrorLevel 76
     Abort "Disconnect and resolve any pending protected update before uninstalling."
   ${EndIf}
@@ -1224,13 +1378,38 @@ Section Uninstall
   !endif
 
   !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+  ${If} $UpdateMode <> 1
+    StrCpy $TonoUninstallScope "--final-uninstall"
+  ${EndIf}
   !insertmacro RemoveVergeService
 
+  ; Every delete below that reaches into the approving account's own AppData runs only when the
+  ; helper found no link or reparse point on the way there, the same check its all-profile removal
+  ; applies to every profile. Any other result, a missing helper included, leaves them in place.
+  nsExec::ExecToLog /TIMEOUT=30000 '"$INSTDIR\resources\tono-service-uninstall.exe" --check-current-app-data'
+  Pop $AppDataPathPlain
+
+  ; "Delete app data" means every Windows account's Tono data. This elevated uninstaller runs as
+  ; the administrator who approved it, so `$APPDATA` further down is only that account's folder.
+  ; The helper removes com.raydocs.tono from each local profile (links are removed, never
+  ; followed). It runs here, after RemoveVergeService proved the barrier gone and before the
+  ; helper itself is deleted with the resources.
+  ${If} $DeleteAppDataCheckboxState = 1
+  ${AndIf} $UpdateMode <> 1
+    nsExec::ExecToLog /TIMEOUT=120000 '"$INSTDIR\resources\tono-service-uninstall.exe" --delete-app-data-all-profiles'
+    Pop $0
+    ${If} $0 != "0"
+      DetailPrint "Some ${PRODUCTNAME} data in other Windows accounts could not be removed (result $0)."
+    ${EndIf}
+  ${EndIf}
+
   ; Remove cached window state files
-  DetailPrint "Removing window-state.json / .window-state.json"
-  SetShellVarContext current
-  Delete "$APPDATA\com.raydocs.tono\window-state.json"
-  Delete "$APPDATA\com.raydocs.tono\.window-state.json"
+  ${If} $AppDataPathPlain == "0"
+    DetailPrint "Removing window-state.json / .window-state.json"
+    SetShellVarContext current
+    Delete "$APPDATA\com.raydocs.tono\window-state.json"
+    Delete "$APPDATA\com.raydocs.tono\.window-state.json"
+  ${EndIf}
 
   !insertmacro SetContext
 
@@ -1325,6 +1504,7 @@ Section Uninstall
   ; Learned control-plane pins used to live in user AppData. They are no longer
   ; trusted; delete the leftover even when the user keeps the rest of AppData.
   ${If} $UpdateMode <> 1
+  ${AndIf} $AppDataPathPlain == "0"
     SetShellVarContext current
     Delete /REBOOTOK "$APPDATA\${BUNDLEID}\tono\control-plane-pins.json"
     Delete /REBOOTOK "$LOCALAPPDATA\${BUNDLEID}\tono\control-plane-pins.json"
@@ -1338,7 +1518,7 @@ Section Uninstall
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${PRODUCTNAME}"
 
     ; The Run value above is inherited plumbing that the Windows build never writes — auto
-    ; launch is a scheduled task (utils/schtasks.rs, TASK_NAME_USER / TASK_NAME_ADMIN), and
+    ; launch is a scheduled task (utils/schtasks.rs, LEGACY_TASK_NAME_USER / _ADMIN), and
     ; nothing removed it. A user who had turned auto launch on kept a task pointing at a
     ; deleted Tono.exe, which Task Scheduler retries and fails at every logon, silently,
     ; for ever. `update_launch` only runs on a settings toggle, so a later reinstall does
@@ -1346,6 +1526,10 @@ Section Uninstall
     nsExec::ExecToLog /TIMEOUT=30000 '"$SYSDIR\schtasks.exe" /Delete /TN "Tono" /F'
     Pop $0
     nsExec::ExecToLog /TIMEOUT=30000 '"$SYSDIR\schtasks.exe" /Delete /TN "Tono (Admin)" /F'
+    Pop $0
+    ; Current builds scope the name by the owner's SID ("Tono <SID>", "Tono (Admin) <SID>") so
+    ; Windows users no longer replace each other's task. Remove every user's, and nothing else.
+    nsExec::ExecToLog /TIMEOUT=60000 `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "Get-ScheduledTask -TaskPath '\' -ErrorAction SilentlyContinue | Where-Object { $$_.TaskName -match '^Tono (\(Admin\) )?S-1-[0-9-]+$$' } | Unregister-ScheduledTask -Confirm:$$false"`
     Pop $0
   ${EndIf}
 
@@ -1361,10 +1545,15 @@ Section Uninstall
     DeleteRegValue HKCU "${MANUPRODUCTKEY}" "Installer Language"
     DeleteRegKey /ifempty HKCU "${MANUPRODUCTKEY}"
     DeleteRegKey /ifempty HKCU "${MANUKEY}"
+    ; This account's $APPDATA/$LOCALAPPDATA folders were removed with every other profile's by the
+    ; helper above. A recursive NSIS delete here would walk through a junction the helper skipped.
 
-    SetShellVarContext current
-    RmDir /r "$APPDATA\${BUNDLEID}"
-    RmDir /r "$LOCALAPPDATA\${BUNDLEID}"
+    ; The account session is not in AppData: keyring stores it in Credential Manager as
+    ; `refresh-token.tono` (tono-core WINDOWS_CRED_TARGET_REFRESH_TOKEN). Delete it so a reinstall
+    ; does not come back signed in. The App also refuses a vault session its data directory did
+    ; not adopt, so a missing entry or a failed delete here is not fatal.
+    nsExec::ExecToLog /TIMEOUT=30000 '"$SYSDIR\cmdkey.exe" /delete:refresh-token.tono'
+    Pop $0
   ${EndIf}
 
   !ifmacrodef NSIS_HOOK_POSTUNINSTALL

@@ -32,8 +32,9 @@ use windows_sys::Win32::NetworkManagement::WindowsFilteringPlatform::{
     FWPM_CONDITION_IP_REMOTE_ADDRESS, FWPM_CONDITION_IP_REMOTE_PORT, FWPM_DISPLAY_DATA0,
     FWPM_FILTER_CONDITION0, FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT, FWPM_FILTER_FLAG_PERSISTENT,
     FWPM_FILTER0, FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_CONNECT_V6,
-    FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6, FWPM_PROVIDER_FLAG_PERSISTENT, FWPM_PROVIDER0,
-    FWPM_SUBLAYER_FLAG_PERSISTENT, FWPM_SUBLAYER0, FwpmEngineClose0, FwpmEngineOpen0,
+    FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6,
+    FWPM_PROVIDER_FLAG_PERSISTENT, FWPM_PROVIDER0, FWPM_SUBLAYER_FLAG_PERSISTENT, FWPM_SUBLAYER0,
+    FwpmEngineClose0, FwpmEngineOpen0,
     FwpmFilterAdd0, FwpmFilterCreateEnumHandle0, FwpmFilterDeleteByKey0,
     FwpmFilterDestroyEnumHandle0, FwpmFilterEnum0, FwpmFilterGetByKey0, FwpmFreeMemory0,
     FwpmGetAppIdFromFileName0, FwpmProviderAdd0, FwpmProviderDeleteByKey0, FwpmProviderGetByKey0,
@@ -269,9 +270,16 @@ fn condition_value_u16(value: u16) -> FWP_CONDITION_VALUE0 {
     }
 }
 
+/// Resolved `ALE_APP_ID` blobs for one transaction; null where not resolved.
+#[derive(Clone, Copy)]
+struct AppIdBlobs {
+    core: *mut FWP_BYTE_BLOB,
+    tono_app: *mut FWP_BYTE_BLOB,
+}
+
 fn build_condition(
     condition: &Condition,
-    app_id: *mut FWP_BYTE_BLOB,
+    app_ids: AppIdBlobs,
     keep: &mut Keepalive,
 ) -> Result<FWPM_FILTER_CONDITION0> {
     let built = match condition {
@@ -365,9 +373,14 @@ fn build_condition(
                 },
             },
         ),
-        Condition::AleAppId => {
+        Condition::AleAppId | Condition::AleAppIdTonoApp => {
+            let (app_id, label) = if *condition == Condition::AleAppId {
+                (app_ids.core, "staged core")
+            } else {
+                (app_ids.tono_app, "installed Tono app")
+            };
             if app_id.is_null() {
-                bail!("filter requires the staged core app-id, which was not resolved");
+                bail!("filter requires the {label} app-id, which was not resolved");
             }
             (
                 FWPM_CONDITION_ALE_APP_ID,
@@ -402,16 +415,17 @@ fn layer_key(layer: LayerKind) -> GUID {
     match layer {
         LayerKind::AleAuthConnectV4 => FWPM_LAYER_ALE_AUTH_CONNECT_V4,
         LayerKind::AleAuthConnectV6 => FWPM_LAYER_ALE_AUTH_CONNECT_V6,
+        LayerKind::AleAuthRecvAcceptV4 => FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4,
         LayerKind::AleAuthRecvAcceptV6 => FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6,
     }
 }
 
-fn add_filter(engine: &Engine, spec: &FilterSpec, app_id: *mut FWP_BYTE_BLOB) -> Result<()> {
+fn add_filter(engine: &Engine, spec: &FilterSpec, app_ids: AppIdBlobs) -> Result<()> {
     let mut keep = Keepalive::default();
     let mut conditions = spec
         .conditions
         .iter()
-        .map(|condition| build_condition(condition, app_id, &mut keep))
+        .map(|condition| build_condition(condition, app_ids, &mut keep))
         .collect::<Result<Vec<_>>>()?;
     keep.u64s.push(Box::new(spec.weight));
     let weight_ptr = keep.u64s.last_mut().map(|v| &mut **v).expect("pushed");
@@ -798,14 +812,22 @@ fn provider_exists(engine: &Engine) -> Result<bool> {
     ))
 }
 
-fn apply_plan(engine: &Engine, plan: &model::ChangePlan, app_id: Option<&AppId>) -> Result<()> {
+fn apply_plan(
+    engine: &Engine,
+    plan: &model::ChangePlan,
+    app_id: Option<&AppId>,
+    tono_app_id: Option<&AppId>,
+) -> Result<()> {
     transaction(engine, |engine| {
         // Installs strictly before removes (the plan's ordering contract): a new endpoint
         // permit is committed together with the old one's removal, so the switch is atomic
         // and never passes through a direct-traffic window.
-        let blob = app_id.map_or(std::ptr::null_mut(), AppId::ptr);
+        let blobs = AppIdBlobs {
+            core: app_id.map_or(std::ptr::null_mut(), AppId::ptr),
+            tono_app: tono_app_id.map_or(std::ptr::null_mut(), AppId::ptr),
+        };
         for spec in &plan.install {
-            add_filter(engine, spec, blob)?;
+            add_filter(engine, spec, blobs)?;
         }
         for key in &plan.remove {
             delete_filter_if_exists(engine, *key)?;
@@ -863,50 +885,80 @@ fn verify_by_key(engine: &Engine, expected: &[FilterSpec]) -> Result<()> {
 
 /// Install exactly `expected`: ensure provider + sublayer, add missing filters, remove stale
 /// ones (single transaction), then verify every expected object by key.
-pub(crate) fn install(expected: &[FilterSpec], app_path: &str) -> Result<()> {
+pub(crate) fn install(expected: &[FilterSpec], app_path: &str, tono_app_path: &str) -> Result<()> {
     let engine = Engine::open()?;
     ensure_provider_and_sublayer(&engine)?;
     let current = enumerate_our_filter_keys(&engine)?;
     let plan = model::diff(&current, expected);
 
-    let needs_app_id = plan
-        .install
-        .iter()
-        .any(|spec| spec.conditions.contains(&Condition::AleAppId));
-    let app_id = if needs_app_id {
-        // `Ok(None)` (no recorded path) is as fatal as a resolve failure once the plan actually
-        // contains an app-scoped rule, and it must take the same fail-closed fallback: handing
-        // `apply_plan` a null blob makes `build_condition` bail *inside* the transaction, which
-        // aborts the whole commit — the block-all floor included — and leaves the machine fully
-        // open while the intent still says wanted. Collapse it into the error case here.
-        match AppId::resolve(app_path).and_then(|resolved| {
-            resolved.context("no staged core path is recorded for the app-scoped permit")
-        }) {
-            Ok(app_id) => Some(app_id),
-            Err(error) => {
-                // Fail closed: install everything except the app-scoped permits so the block
-                // is live, then surface why the endpoint permit is missing. The watchdog will
-                // keep retrying the full set.
-                let without_app_rules = model::ChangePlan {
-                    install: plan
-                        .install
-                        .iter()
-                        .filter(|spec| !spec.conditions.contains(&Condition::AleAppId))
-                        .cloned()
-                        .collect(),
-                    remove: plan.remove.clone(),
-                };
-                apply_plan(&engine, &without_app_rules, None)?;
-                return Err(error).context(
-                    "installed the block without the core endpoint permit; traffic stays blocked",
-                );
-            }
+    // `Ok(None)` (no recorded path) is as fatal as a resolve failure once the plan actually
+    // contains an app-scoped rule, and it must take the same fail-closed fallback: handing
+    // `apply_plan` a null blob makes `build_condition` bail *inside* the transaction, which
+    // aborts the whole commit — the block-all floor included — and leaves the machine fully
+    // open while the intent still says wanted. Collapse it into the error case here.
+    let resolve_if_needed = |condition: &Condition, path: &str, missing: &'static str| {
+        if !plan
+            .install
+            .iter()
+            .any(|spec| spec.conditions.contains(condition))
+        {
+            return Ok(None);
         }
-    } else {
-        None
+        AppId::resolve(path)
+            .and_then(|resolved| resolved.context(missing))
+            .map(Some)
     };
+    let app_id = resolve_if_needed(
+        &Condition::AleAppId,
+        app_path,
+        "no staged core path is recorded for the app-scoped permit",
+    );
+    let tono_app_id = resolve_if_needed(
+        &Condition::AleAppIdTonoApp,
+        tono_app_path,
+        "no installed Tono app path is recorded for the bootstrap API permit",
+    );
 
-    apply_plan(&engine, &plan, app_id.as_ref())?;
+    if app_id.is_err() || tono_app_id.is_err() {
+        // Fail closed: install everything except the permits whose app id did not resolve so
+        // the block is live, then surface why they are missing. The watchdog will keep
+        // retrying the full set.
+        let unresolved = |spec: &FilterSpec| {
+            (app_id.is_err() && spec.conditions.contains(&Condition::AleAppId))
+                || (tono_app_id.is_err() && spec.conditions.contains(&Condition::AleAppIdTonoApp))
+        };
+        let without_app_rules = model::ChangePlan {
+            install: plan
+                .install
+                .iter()
+                .filter(|spec| !unresolved(spec))
+                .cloned()
+                .collect(),
+            remove: plan.remove.clone(),
+        };
+        apply_plan(
+            &engine,
+            &without_app_rules,
+            app_id.as_ref().ok().and_then(Option::as_ref),
+            tono_app_id.as_ref().ok().and_then(Option::as_ref),
+        )?;
+        return Err(match (app_id, tono_app_id) {
+            (Err(error), _) => error.context(
+                "installed the block without the core endpoint permit; traffic stays blocked",
+            ),
+            (_, Err(error)) => error.context(
+                "installed the block without the bootstrap API permit; traffic stays blocked",
+            ),
+            _ => unreachable!("one of the app ids failed to resolve"),
+        });
+    }
+
+    apply_plan(
+        &engine,
+        &plan,
+        app_id.as_ref().ok().and_then(Option::as_ref),
+        tono_app_id.as_ref().ok().and_then(Option::as_ref),
+    )?;
     verify_by_key(&engine, expected)
 }
 
@@ -919,8 +971,6 @@ pub(crate) fn verify(expected: &[FilterSpec]) -> Result<()> {
     }
     verify_by_key(&engine, expected)
 }
-
-
 
 /// Remove every Tono filter; provider and sublayer stay, inert — the counterpart of the macOS
 /// helper keeping its empty anchor attached during normal operation.

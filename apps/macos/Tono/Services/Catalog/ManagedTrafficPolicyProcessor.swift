@@ -4,6 +4,7 @@ import CryptoKit
 actor ManagedTrafficPolicyProcessor {
     private var persistedRevision = -1
     private var persistedDigest: String?
+    private var persistedRevisionAuthenticated = false
 
     func validate(
         _ cache: ManagedTrafficPolicyCache,
@@ -26,6 +27,24 @@ actor ManagedTrafficPolicyProcessor {
               // version does not promise are ignored below rather than required to
               // be absent.
               policy.version >= 1 else {
+            throw TonoAPIClient.APIError.invalidResponse
+        }
+        // A revision inside the document is covered by its signature; the
+        // envelope's is not. When both exist they must agree, or the envelope
+        // was relabelled and the whole response is refused (#317).
+        switch ManagedTrafficPolicySignature.embeddedRevision(in: cache.json) {
+        case .absent:
+            break
+        case .value(let embedded) where embedded == cache.revision:
+            break
+        case .value, .malformed:
+            LocalTrafficAudit.shared.recordEvent(
+                "managed_direct_policy_revision_mismatch",
+                details: [
+                    "revision": String(cache.revision),
+                    "policy_version": String(policy.version),
+                ]
+            )
             throw TonoAPIClient.APIError.invalidResponse
         }
         let verdict = ManagedTrafficPolicySignature.verdict(
@@ -195,14 +214,23 @@ actor ManagedTrafficPolicyProcessor {
         // without one, and skipping the write here would leave every upgraded
         // install permanently reading it as unsigned — so the first policy that
         // needs a signature would be dropped on exactly those machines.
+        // Only a revision inside verified signed bytes orders against one that
+        // is not; see `ManagedTrafficPolicySignature.revisionOrder` (#317).
+        let authenticated = ManagedTrafficPolicySignature.revisionIsAuthenticated(cache)
         var signatureIsNew = false
         if let persisted = ConfigStorage.shared.loadManagedTrafficPolicy() {
-            if persisted.revision > cache.revision { return }
-            if persisted.revision == cache.revision,
+            let order = ManagedTrafficPolicySignature.revisionOrder(
+                candidate: cache.revision,
+                candidateAuthenticated: authenticated,
+                current: persisted.revision,
+                currentAuthenticated: ManagedTrafficPolicySignature.revisionIsAuthenticated(persisted)
+            )
+            if order == .stale { return }
+            if order == .same,
                persisted.sha256 != cache.sha256 {
                 throw TonoAPIClient.APIError.invalidResponse
             }
-            if persisted.revision == cache.revision {
+            if order == .same {
                 switch ManagedTrafficPolicySignature.sameRevisionTransition(
                     from: persisted.signature,
                     to: cache.signature
@@ -220,8 +248,14 @@ actor ManagedTrafficPolicyProcessor {
                 }
             }
         }
-        if cache.revision < persistedRevision { return }
-        if cache.revision == persistedRevision, !signatureIsNew {
+        let order = ManagedTrafficPolicySignature.revisionOrder(
+            candidate: cache.revision,
+            candidateAuthenticated: authenticated,
+            current: persistedRevision,
+            currentAuthenticated: persistedRevisionAuthenticated
+        )
+        if order == .stale { return }
+        if order == .same, !signatureIsNew {
             guard persistedDigest == cache.sha256 else {
                 throw TonoAPIClient.APIError.invalidResponse
             }
@@ -230,6 +264,7 @@ actor ManagedTrafficPolicyProcessor {
         try ConfigStorage.shared.saveManagedTrafficPolicy(cache)
         persistedRevision = cache.revision
         persistedDigest = cache.sha256
+        persistedRevisionAuthenticated = authenticated
     }
 
     private static func digest(_ value: String) -> String {
@@ -239,5 +274,21 @@ actor ManagedTrafficPolicyProcessor {
             .replacingOccurrences(of: "=", with: "")
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
+    }
+}
+
+extension ManagedTrafficPolicySignature {
+    /// `revisionIsAuthenticated` for a response or its disk cache, which carry
+    /// the same three fields.
+    nonisolated static func revisionIsAuthenticated(
+        _ cache: ManagedTrafficPolicyCache,
+        publicKeyBase64: String = Self.publicKeyBase64
+    ) -> Bool {
+        revisionIsAuthenticated(
+            json: cache.json,
+            revision: cache.revision,
+            signature: cache.signature,
+            publicKeyBase64: publicKeyBase64
+        )
     }
 }

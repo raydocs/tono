@@ -15,7 +15,7 @@ use crate::tono::{
     connection_health::{
         CoreSample, HealthLegs, NetworkChangeOutcome, classify_core_sample, connection_loop_continues,
         core_change_fires, health_threshold_reached, kill_switch_unhealthy_for_monitor,
-        monitor_requires_reconnect, owned_direct_reload_in_flight,
+        may_recover_in_place, monitor_requires_reconnect, owned_direct_reload_in_flight,
         network_event_fires, protected_dns_unhealthy,
     },
     connection_plan::{guard_rejection_is_transient, reconnect_allowed},
@@ -31,6 +31,7 @@ use super::direct::dns_query_a;
 use super::reconnect::schedule_reconnect_for_generation;
 use super::controller::{CONTROLLER_HTTP_TIMEOUT, controller_client, controller_url, fetch_connections};
 use super::probes::{verify_locked, verify_tun_data_plane};
+use super::platform::usable_physical_uplinks;
 
 /// `lookup_host` delegates to the OS resolver and has no Tokio timeout of its own. Bound every
 /// lookup so a broken adapter/resolver cannot strand Connecting forever.
@@ -958,7 +959,17 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
             let inner = state.lock().await;
             owned_direct_reload_in_flight(inner.direct_reload_until, inner.connect_generation, std::time::Instant::now())
         };
-        if invalidate && network_changed && !core_changed && !health_invalid && !event_probe_failed && !owned_direct_reload {
+        let keeps_in_place =
+            invalidate && network_changed && !core_changed && !health_invalid && !event_probe_failed && !owned_direct_reload;
+        // X2-1: the proof above covers the tunnel only. A DIRECT overlay bound to an adapter
+        // that no longer carries a default route needs the protected rebuild, not "keep".
+        if keeps_in_place && !may_keep_session_in_place(&state, true).await {
+            if !connection_loop_continues(handle_network_change_inner(&state, &app, false).await) {
+                return;
+            }
+            continue;
+        }
+        if keeps_in_place {
             logging!(
                 info,
                 Type::Service,
@@ -1105,6 +1116,30 @@ pub(crate) const fn policy_behavior_change_allows_in_place_recovery() -> bool {
     false
 }
 
+/// X2-1: apply [`may_recover_in_place`] to the live session. The uplinks are read only when a
+/// DIRECT overlay is committed, so a full-tunnel session pays nothing for it.
+async fn may_keep_session_in_place(state: &Arc<TonoState>, tunnel_proven: bool) -> bool {
+    let committed = if tunnel_proven {
+        state.lock().await.applied_direct_interface.clone()
+    } else {
+        None
+    };
+    let uplinks = if committed.is_some() {
+        usable_physical_uplinks().await.ok()
+    } else {
+        None
+    };
+    let keep = may_recover_in_place(tunnel_proven, committed.as_deref(), uplinks.as_deref());
+    if tunnel_proven && !keep {
+        logging!(
+            warn,
+            Type::Service,
+            "Tono: DIRECT is bound to an adapter that no longer carries a usable default route; rebuilding the session under the locked barrier"
+        );
+    }
+    keep
+}
+
 pub(super) async fn handle_network_change_inner(
     state: &Arc<TonoState>,
     app: &AppHandle,
@@ -1138,7 +1173,7 @@ pub(super) async fn handle_network_change_inner(
     // Sleep/Wi-Fi flaps used to stop the core unconditionally, then burn the
     // first reconnect on "DNS 53 busy" because the just-killed listener was
     // the one we needed.
-    if allow_in_place && verify_tun_data_plane().await.is_ok() {
+    if allow_in_place && may_keep_session_in_place(state, verify_tun_data_plane().await.is_ok()).await {
         let inner = state.lock().await;
         if inner.connect_generation != generation || !inner.fsm.status().is_connected {
             return NetworkChangeOutcome::Handled;
