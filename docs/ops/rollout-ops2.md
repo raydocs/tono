@@ -37,6 +37,12 @@
 
 第十四次 `2cef4eac`（PR #140；迁移 0068 `client_releases` 校验列、0069 `ops_month_close.summary_json`，均先在 preview 演练）：关月冻结客户 / 节点行与 CSV 签名修正；月结对账两栏；发布前校验 R2 对象并按更新器门控「发布」；早报末尾本周三件事；今天页覆盖率句；`POST ops/replay` 只读回放；captured 夹具重捕。
 
+第十五次 `f5c31d58`（2026-09-25，上一次代码部署是 09-11 的 `7c38521c`，其间 main 累积两周未上线；迁移 0073–0076、0081）：
+按 `deploy-control-plane-main.sh` 从 `/Users/ruirui/Downloads/GitHub/tono` 的 main 部署，脚本内 `npm test` 43 文件 892 通过。
+部署前备份 `backups/control-plane-d1/2026-09-25T16:54:59Z.sql.gz`（sha256 `03c83dc4…`，带 `.sha256`）。部署后
+`/api/v1/system/version` 的 `buildSha` 为 `f5c31d58…`，`d1_migrations` 最新 0081，13 个出口节点均在 62 秒内 ACK。
+未在 preview 库演练这 5 个迁移（均为只增列/表）；`/ops2/` 五个入口未逐一重载核对。cp 列车 #570（0077–0090）尚未部署。
+
 ## 0.2 恢复演练结论（2026-09-10，详见 `docs/archive/ops/restore-drill-2026-09-10.md`）
 
 今天的备份 `backups/control-plane-d1/20260910T085207Z.sql.gz` 能恢复、恢复后能当数据用（20 用户 / 27 设备 / 7533 遥测窗口，`quick_check` ok，外键零违例），导入 28 秒，全流程 wrangler 时间约 1.5 分钟。几条要记住的：
