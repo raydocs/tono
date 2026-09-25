@@ -82,7 +82,7 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | W14 | A 连接失败等 Service status 期间 B 登录，失败归给 B | fixed(0e20f2df) | [#267](https://github.com/raydocs/tono/pull/267) | 中·已确认 | — |
 | I4 | Activity 把只有 selector 的链当作已观测终端出口 | fixed(569ce865) | [#279](https://github.com/raydocs/tono/pull/279) | 低·已确认 | — |
 | #241 | 过期策略恢复在拆除期间借用替换中的 Core 会话 | fixed(基线 576d7087 已含) | [#241](https://github.com/raydocs/tono/issues/241) | 中·已确认 | issue 保持开放等设备证据 |
-| #171 | 热切换端点收敛失败时两端都必须撤回 Connected | open | [#171](https://github.com/raydocs/tono/issues/171) | 中·实机 | 两端；需原生验收 |
+| #171 | 热切换端点收敛失败时两端都必须撤回 Connected | fixed(d769e134) | [#171](https://github.com/raydocs/tono/issues/171)，[#174](https://github.com/raydocs/tono/pull/174) | 中·实机 | 两端源码已修；issue 保持开放等已安装设备验收 |
 | R2-F1 | Disconnect/登出与进行中的 StartClash 竞争且释放被拒：UI 报 Not Connected 而 WFP 仍封锁，Disconnect 成空操作 | fixed(3d957265) | [#295](https://github.com/raydocs/tono/pull/295) | 中·已确认 | 含登出第二路径；实机未复现 |
 | R2-F2 | 未验证 Protected Offline 期间 Service 重启解除 WFP，App 无再同步，UI 持续显示已封锁 | fixed(244075f2) | [#299](https://github.com/raydocs/tono/pull/299) | 高·已确认 | 30 s 轮询；已验证会话进入 idle 且未排程重连时不注册轮询；无「Service 重启+存活 App」实机夹具 |
 | R2-F3 | 原生更新安装落在连接早期，失败后 FSM 卡在 Connecting | fixed(16032c48) | [#294](https://github.com/raydocs/tono/pull/294) | 中·已确认 | 收敛前比对代际；实机未复现 |
@@ -143,7 +143,7 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | I2 | macOS 候选签名准入固定在 0.0.72 | fixed(f1c1c9d9) | [#276](https://github.com/raydocs/tono/pull/276)，[#273](https://github.com/raydocs/tono/issues/273) | 中·已确认 | #273 开放：最新分支的新包/已装 helper 资格未建立 |
 | I3 | macOS 签名链同一 run 重复生产同名 Core artifact | fixed(f1c1c9d9) | [#276](https://github.com/raydocs/tono/pull/276) | 低·已确认 | — |
 | #26 | Windows 受保护升级需安装器绑定的交接身份和装机证明 | fixed(1ca878cf) | [#26](https://github.com/raydocs/tono/issues/26)（已关闭） | 高·实机 | 协议源码已接入；已装 macOS/Windows 11 的升级/中断恢复实机验收仍缺 |
-| #181 | 共享更新日记临时文件可被并发写坏 | open | [#181](https://github.com/raydocs/tono/issues/181) | 低·推导 | — |
+| #181 | 共享更新日记临时文件可被并发写坏 | fixed(34e5619b) | [#181](https://github.com/raydocs/tono/issues/181)，[#184](https://github.com/raydocs/tono/pull/184) | 低·推导 | 唯一 scratch + `create_new` + 回归已在 main；issue 保持开放等 Windows 原生验收 |
 | R4-F1 | Windows 更新事务权限绑定单一 App incarnation，发起 App 退出/被杀/回滚后所有出口被拒 | fixed(498ed426) | [#301](https://github.com/raydocs/tono/pull/301) | 中·已确认 | 与 F4/F6 同根因合修；对 0.0.73 首跳不生效 |
 | R4-F4 | Windows 恢复执行器把「Replaced 且 successor 不活」一律当中断安装回滚，撤销完整安装 | fixed(498ed426) | [#301](https://github.com/raydocs/tono/pull/301) | 中·已确认 | 慢机服务就绪超时是第三个入口 |
 | R4-F6 | Windows Launching 且执行器登记为空/已死的事务既不退休也不对账 | fixed(498ed426) | [#301](https://github.com/raydocs/tono/pull/301) | 中·已确认 | 网络可在产品内恢复，锁死的是产品本身 |
