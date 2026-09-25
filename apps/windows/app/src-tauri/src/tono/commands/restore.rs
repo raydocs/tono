@@ -21,13 +21,6 @@ use crate::{
 };
 use super::*;
 
-/// How long restore keeps waiting once the control plane has answered before the budget ran out
-/// (#582). It waits for the whole `me()` chain, not one request: the first attempt, its one
-/// transport retry, a refresh with its retry, and the replay can each run to the transport's total
-/// timeout, after which a non-2xx whose body failed is returned as its status. Waiting for the
-/// chain to end guarantees every answer it received is classified; this cap only backs that up.
-const ANSWERED_BODY_GRACE: Duration =
-    Duration::from_secs(5 * crate::tono::transport::TOTAL_TIMEOUT.as_secs() + 5);
 
 /// How many times restore asks the Service about the stored barrier before giving up.
 const PROTECTION_PROBE_ATTEMPTS: usize = 5;
@@ -393,12 +386,12 @@ where
     let mut me = std::pin::pin!(fetch_me(client));
     let outcome = match tokio::time::timeout_at(deadline, me.as_mut()).await {
         Ok(result) => Some(result),
-        // A status line already arrived (say a refresh 401 whose body is still pending): let the
-        // whole call chain finish, bounded, so tono-core classifies every answer instead of one
-        // being dropped unheard.
-        Err(_) if answer_probe.transport().answers_seen() != answers_before => {
-            tokio::time::timeout(ANSWERED_BODY_GRACE, me.as_mut()).await.ok()
-        }
+        // A status line already arrived (say a refresh 401 whose body is still pending): the
+        // control plane is reachable, so let the whole `me()` chain finish and tono-core classify
+        // every answer, instead of dropping one unheard. No extra cap: every attempt the chain
+        // makes is bounded by the transport's own timeouts, and the chain is finite (first
+        // attempt, retry, refresh, retry, replay). Protection is untouched while it runs.
+        Err(_) if answer_probe.transport().answers_seen() != answers_before => Some(me.as_mut().await),
         Err(_) => None,
     };
     let account_result = match outcome {
