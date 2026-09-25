@@ -71,6 +71,9 @@ export function OnboardDrawer({
   const ask = useAsk(onSaved);
   const [draft, setDraft] = useState<Draft>(BLANK);
   const [outcome, setOutcome] = useState<OnboardOutcome | null>(null);
+  // Whether the last onboard sent a plan or an expiry, so the checklist only
+  // says they were kept when there was something to keep.
+  const [sentEntitlement, setSentEntitlement] = useState(false);
   const [fault, setFault] = useState<string | null>(null);
 
   const exits = useResource(open ? 'home-exits' : null, (signal) => hubApi.homeExits(signal));
@@ -106,7 +109,9 @@ export function OnboardDrawer({
     if (draft.plan !== '') input.plan = draft.plan;
     const expiresAt = draft.expiresAt.trim() === '' ? null : fromDateInput(draft.expiresAt);
     if (expiresAt !== null) input.expiresAt = expiresAt;
-    setOutcome(await customerApi.onboard(input));
+    const answer = await customerApi.onboard(input);
+    setSentEntitlement(input.plan !== undefined || input.expiresAt !== undefined);
+    setOutcome(answer);
   }
 
   function submit() {
@@ -253,7 +258,7 @@ export function OnboardDrawer({
           <p className="panel-error rounded-[8px] px-3 py-2 text-body" role="alert">{fault}</p>
         )}
 
-        {outcome === null ? null : <Checklist outcome={outcome} />}
+        {outcome === null ? null : <Checklist outcome={outcome} sentEntitlement={sentEntitlement} />}
       </DetailDrawer>
       {ask.dialog}
     </>
@@ -261,7 +266,7 @@ export function OnboardDrawer({
 }
 
 /** What the hub managed, and what it is still waiting on the customer for. */
-function Checklist({ outcome }: { outcome: OnboardOutcome }) {
+export function Checklist({ outcome, sentEntitlement }: { outcome: OnboardOutcome; sentEntitlement: boolean }) {
   const privacy = usePrivacy();
   const registered = outcome.userId !== null;
   const steps: Array<{ done: boolean; word: string }> = [
@@ -301,6 +306,7 @@ function Checklist({ outcome }: { outcome: OnboardOutcome }) {
       {!registered ? (
         <p className="text-micro normal-case tracking-normal text-[var(--muted-foreground)]">
           {copy.onboardExtrasIgnored}
+          {sentEntitlement ? copy.onboardEntitlementKept : null}
         </p>
       ) : null}
     </div>

@@ -242,6 +242,20 @@
   （`expires_at: null`），修复后通过；control-plane 全套 892 用例、typecheck 通过。CI `ops-contract` 的
   ops 行数预算（每模块 ≤500 行）因此超限，已把到期/套餐校验与待开通资料语句移到同目录
   `onboard-profile.ts`（`users.ts` 486 行），`check:budgets`/`check:contract` 本机通过。
+- **续记（2026-09-25，双厂商评审第二轮 jev-route `fa5ff8f9`：O-F1 = C-F1、O-F2、O-F3、O-F4）**：
+  ① 已注册客户开通时，资料/到期/套餐的 `UPDATE users` 原先排在家宽分配与 Claude 号分配之前单独提交，
+  后者抛 409（`PRODUCT_ALREADY_ASSIGNED` 等）时到期已改、却没有 `user.onboard` 审计也没有 `enforceUser`。
+  改为在分配全部成功后才写，失败的开通不改这几列，审计和 `enforceUser` 总跟在写入之后。
+  注意：带 `accountRef` 且显式传 `plan: null` 时，现在以显式值为准（原先会被分配时的 `markFirstEntitled` 补成 Claude）。
+  ② 竞态路径（查询后客户恰好首次登录）审计 `target_id` 与响应 `userId` 改为实际落到的账户 id，
+  `incomplete` 用 `registered_during_onboard` 代替 `user_not_registered`（家宽/Claude 号这次未处理，需再开通一次）。
+  ③ `FINDINGS_LEDGER.md` H17-O-F4 标为 in-PR 并关联 #527/#528。④ 控制台未注册提示拆成两句，
+  「套餐和到期已经记下」只在这次确实提交了套餐或到期时显示。测试：`ops-onboard-profile.test.ts` 新增一个 `it`
+  （已分配 Claude 号的客户再次开通带新 `accountRef`+到期+备注 → 409 且 `expires_at`/`notes` 不变），原竞态段追加
+  响应 `userId` 与审计 `target_id` 断言，两者在上一版源码实跑失败、修复后通过；ops-console 新增
+  `src/pages/customer/OnboardDrawer.test.tsx` 一个 `it`（未提交到期/套餐时不显示该句），无条件显示时实跑失败。
+  本机：control-plane 相关 4 个测试文件 356 用例、`typecheck`、`check:budgets`（`users.ts` 492 行）、`check:contract`
+  通过；ops-console `typecheck`、相关文件 eslint、该测试与 `test/lint-rules.test.ts`、`test/ops-fixtures.test.ts` 通过。
 
 ## 2026-09-24 · Windows 候选包构建：私有解包分支写出 live `Tono.exe`，载荷门拒绝
 

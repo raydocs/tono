@@ -245,8 +245,6 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
     }
   }
   const createdAt = now();
-  const incomplete: string[] = [];
-  if (!user) incomplete.push('user_not_registered');
   const storeProfile = b.notes !== undefined || b.contact !== undefined || b.wechatId !== undefined
     || expiresAt !== undefined || b.plan !== undefined;
   const pendingProfile = !user && storeProfile;
@@ -269,32 +267,21 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
     ], createdAt));
   }
   const written = await e.DB.batch(allowlistWrites);
-  const registeredMeanwhile = pendingProfile && Number(written[2]?.meta.changes ?? 0) > 0;
+  // A first sign-in between the lookup and the batch: the profile landed on
+  // that account, so the audit, enforceUser and the answer name it.
+  const raced = pendingProfile && Number(written[2]?.meta.changes ?? 0) > 0
+    ? await e.DB.prepare('SELECT id FROM users WHERE email = ?').bind(address).first<Row>()
+    : null;
+  const userId = user ? String(user.id) : raced ? String(raced.id) : null;
+  const incomplete: string[] = [];
+  if (!userId) incomplete.push('user_not_registered');
+  else if (!user) incomplete.push('registered_during_onboard');
   let binding = null;
   let account = null;
   let exitIdentityIssued = false;
   if (user) {
     await exitClientUUID(e, String(user.id));
     exitIdentityIssued = true;
-    if (storeProfile) {
-      await e.DB.prepare(
-        `UPDATE users SET
-           notes = CASE WHEN ? THEN ? ELSE notes END,
-           contact = CASE WHEN ? THEN ? ELSE contact END,
-           wechat_id = CASE WHEN ? THEN ? ELSE wechat_id END,
-           expires_at = CASE WHEN ? THEN ? ELSE expires_at END,
-           plan = CASE WHEN ? THEN ? ELSE plan END,
-           updated_at = ?
-         WHERE id = ?`,
-      ).bind(
-        b.notes !== undefined, notes ?? null,
-        b.contact !== undefined, contact ?? null,
-        b.wechatId !== undefined, wechatId ?? null,
-        expiresAt !== undefined, expiresAt ?? null,
-        b.plan !== undefined, plan,
-        now(), user.id,
-      ).run();
-    }
     if (b.line !== undefined && b.line !== null && b.line !== '') {
       const assigned = await sharedAdministrativeResource(
         new Request(req.url, {
@@ -342,23 +329,42 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
       account = await assignedProductForUser(e, String(user.id));
     }
     if (!account) incomplete.push('claude');
+    // Written only after the home line and Claude account went through, so a
+    // failed onboard leaves the profile, expiry and plan as they were, and the
+    // audit and enforceUser below always follow this write.
+    if (storeProfile) {
+      await e.DB.prepare(
+        `UPDATE users SET
+           notes = CASE WHEN ? THEN ? ELSE notes END,
+           contact = CASE WHEN ? THEN ? ELSE contact END,
+           wechat_id = CASE WHEN ? THEN ? ELSE wechat_id END,
+           expires_at = CASE WHEN ? THEN ? ELSE expires_at END,
+           plan = CASE WHEN ? THEN ? ELSE plan END,
+           updated_at = ?
+         WHERE id = ?`,
+      ).bind(
+        b.notes !== undefined, notes ?? null,
+        b.contact !== undefined, contact ?? null,
+        b.wechatId !== undefined, wechatId ?? null,
+        expiresAt !== undefined, expiresAt ?? null,
+        b.plan !== undefined, plan,
+        now(), user.id,
+      ).run();
+    }
   }
   const entitlement = [
     expiresAt !== undefined ? 'expiresAt' : null,
     b.plan !== undefined ? 'plan' : null,
   ].filter((name): name is string => name !== null);
   await writeOpsAudit(
-    e, actor.email, 'user.onboard', 'user', user ? String(user.id) : null,
+    e, actor.email, 'user.onboard', 'user', userId,
     entitlement.length ? `${address} (set ${entitlement.join(', ')})` : address,
   );
   // A past expiry set on a registered customer takes effect now, as PATCH does.
-  if (expiresAt !== undefined && (user || registeredMeanwhile)) {
-    const target = user ?? await e.DB.prepare('SELECT id FROM users WHERE email = ?').bind(address).first<Row>();
-    if (target) await deps.sharedAdminDeps.enforceUser(e, String(target.id));
-  }
+  if (expiresAt !== undefined && userId) await deps.sharedAdminDeps.enforceUser(e, userId);
   return Response.json({
     email: address,
-    userId: user ? String(user.id) : null,
+    userId,
     allowlisted: true,
     exitIdentityIssued,
     binding: binding ? publicHomeBinding(binding) : null,

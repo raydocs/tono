@@ -179,14 +179,36 @@ describe('ops onboard pending profile', () => {
          VALUES('u-raced', NEW.email, 'x', 'y', NEW.created_at, NEW.created_at, NEW.expires_at, NEW.plan);
        END`,
     ).run();
+    let racedBody: { userId: string | null };
     try {
-      expect((await ops('users/onboard', json({ email: raced, expiresAt, plan: 'claude_20x' }))).status).toBe(202);
+      const racedOnboard = await ops('users/onboard', json({ email: raced, expiresAt, plan: 'claude_20x' }));
+      expect(racedOnboard.status).toBe(202);
+      racedBody = await racedOnboard.json() as { userId: string | null };
     } finally {
       await db().prepare('DROP TRIGGER IF EXISTS test_onboard_signup_race').run();
     }
     const racedUser = await db().prepare('SELECT expires_at, plan FROM users WHERE email = ?')
       .bind(raced).first<{ expires_at: number | null; plan: string | null }>();
     expect(racedUser).toEqual({ expires_at: expiresAt, plan: 'claude_20x' });
+    // The answer and the audit name the account the expiry landed on.
+    expect(racedBody.userId).toBe('u-raced');
+    const audit = await db().prepare(
+      "SELECT target_id FROM ops_audit WHERE action = 'user.onboard' AND summary LIKE ?",
+    ).bind(`${raced}%`).first<{ target_id: string | null }>();
+    expect(audit?.target_id).toBe('u-raced');
+  });
+
+  it('leaves the profile and expiry untouched when the Claude account assignment fails', async () => {
+    await seedUser('u-assigned', 'assigned@example.com');
+    const first = await ops('users/onboard', json({ email: 'assigned@example.com', accountRef: 'acct-a@example.com' }));
+    expect(first.status).toBe(200);
+    const failed = await ops('users/onboard', json({
+      email: 'assigned@example.com', accountRef: 'acct-b@example.com', expiresAt: 1_900_000_000, notes: 'lost',
+    }));
+    expect(failed.status).toBe(409);
+    const row = await db().prepare('SELECT expires_at, notes FROM users WHERE id = ?')
+      .bind('u-assigned').first<{ expires_at: number | null; notes: string | null }>();
+    expect(row).toEqual({ expires_at: null, notes: null });
   });
 
   it('does not allowlist an email when wechatId is too long', async () => {
