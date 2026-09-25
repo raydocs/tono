@@ -16,6 +16,9 @@ nonisolated enum ProtectedFailureCode: String, CaseIterable, Sendable {
     /// macOS only: the helper serves another macOS account on this Mac. Not a
     /// repair; the user acts (switch account, or an administrator reset).
     case helperBoundToAnotherAccount = "HELPER_BOUND_TO_ANOTHER_ACCOUNT"
+    /// macOS only: the user declined (or walked away from) the administrator
+    /// prompt that installs the helper. Nothing is broken; the user approves.
+    case helperAuthorizationDenied = "HELPER_AUTHORIZATION_DENIED"
     case updateRecoveryFailed = "UPDATE_RECOVERY_FAILED"
     case catalogNodeRemoved = "CATALOG_NODE_REMOVED"
     case unknownClassifiedFailure = "UNKNOWN_CLASSIFIED_FAILURE"
@@ -45,6 +48,8 @@ nonisolated enum ProtectedFailureCode: String, CaseIterable, Sendable {
             // Fallback only: the connect path shows the helper error's own
             // text, which names the account.
             return String(localized: "Tono's network helper on this Mac is set up for another macOS account. Use Tono from that account.")
+        case .helperAuthorizationDenied:
+            return String(localized: "Tono needs your administrator approval to protect the connection. Try again and approve the macOS prompt.")
         case .updateRecoveryFailed:
             return String(localized: "The protected connection did not come back after the update. Reconnect to restore protection.")
         case .catalogNodeRemoved:

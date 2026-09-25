@@ -6654,6 +6654,16 @@
         }
       }
     },
+    "Tono needs your administrator approval to protect the connection. Try again and approve the macOS prompt.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 需要你的管理员批准才能保护连接。请重试，并在 macOS 弹出的提示中批准。"
+          }
+        }
+      }
+    },
     "Tono quit unexpectedly on %@ · %@ · build %@": {
       "localizations": {
         "zh-Hans": {

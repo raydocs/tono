@@ -259,6 +259,12 @@ nonisolated enum BrowserDNSDiagnostics {
             }
         }
     }
+    /// A connect refused because a browser may bypass protected DNS. Only the
+    /// user can change the browser setting, so a timed retry cannot clear it.
+    nonisolated struct ConflictError: LocalizedError {
+        let message: String
+        var errorDescription: String? { message }
+    }
 
     static func classify(mode: String?, templates: String?) -> Outcome {
         let normalized = mode?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
