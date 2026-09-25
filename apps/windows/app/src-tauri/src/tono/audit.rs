@@ -47,6 +47,10 @@ pub struct AuditRecord {
     /// Captured before queuing: a late disk write cannot acquire a new owner.
     #[serde(rename = "_uploadScope", skip_serializing_if = "Option::is_none")]
     pub upload_scope: Option<String>,
+    /// Consent-independent account boundary: periodic telemetry uploads only
+    /// records stamped with the currently signed-in account's scope.
+    #[serde(rename = "_accountScope", skip_serializing_if = "Option::is_none")]
+    pub account_scope: Option<String>,
     #[serde(flatten)]
     pub event: AuditEvent,
 }
@@ -57,7 +61,12 @@ impl AuditRecord {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|duration| duration.as_millis() as i64)
             .unwrap_or(0);
-        Self { ts, event, upload_scope: None }
+        Self {
+            ts,
+            event,
+            upload_scope: None,
+            account_scope: None,
+        }
     }
 }
 
@@ -444,17 +453,28 @@ impl RotatingWriter {
     }
 
     /// current → `.1` (single retained generation), fresh current file.
+    ///
+    /// A missing current path means an earlier rotation renamed it but could not create the
+    /// next file (disk full), so `file` still points at the backup. Then only the current file
+    /// is recreated: removing the backup and renaming a missing path failed on every later
+    /// rotation until restart, and cost the retained generation.
     fn rotate(&mut self) -> std::io::Result<()> {
         use std::io::Write as _;
 
         self.file.flush()?;
-        let backup = self.backup_path();
-        match std::fs::remove_file(&backup) {
-            Ok(()) => {}
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-            Err(err) => return Err(err),
+        let current_missing = matches!(
+            std::fs::symlink_metadata(&self.path),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound
+        );
+        if !current_missing {
+            let backup = self.backup_path();
+            match std::fs::remove_file(&backup) {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => return Err(err),
+            }
+            std::fs::rename(&self.path, &backup)?;
         }
-        std::fs::rename(&self.path, &backup)?;
         self.file = state::open_private_append(&self.path).map_err(|err| std::io::Error::other(err.to_string()))?;
         self.written = 0;
         Ok(())
@@ -500,6 +520,45 @@ fn default_true() -> bool {
 /// if the owner decides this must not stay default-on.
 pub const NETWORK_LOG_UPLOAD_DEFAULT: bool = true;
 
+/// Internal candidate build: `TONO_BUILD_CHANNEL=internal` at compile time,
+/// which only the Windows candidate workflow sets. Release builds never carry
+/// it, so their consent defaults stay as they are.
+pub fn internal_build() -> bool {
+    option_env!("TONO_BUILD_CHANNEL") == Some("internal")
+}
+
+/// What an immediate connect-failure report (`telemetry/failures`) may carry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailureReportScope {
+    /// The user opted into the diagnostic timeline: the redacted error text
+    /// rides along, as before.
+    Full,
+    /// Internal-build default (owner decision 2026-09-24): stage, error code,
+    /// version and node only. No error text, URLs, addresses or account data.
+    Classified,
+}
+
+/// Whether a connect failure is reported, and with what. The local log switch
+/// still stops every report. Release builds report only after the timeline
+/// opt-in; internal builds also send the classified record without it. That
+/// default comes from the build, not from `settings.json`, so the one-shot v2
+/// reset of the timeline switch cannot turn it off on upgrade.
+pub fn failure_report_scope(
+    internal_build: bool,
+    audit_enabled: bool,
+    timeline_opted_in: bool,
+) -> Option<FailureReportScope> {
+    if !audit_enabled {
+        None
+    } else if timeline_opted_in {
+        Some(FailureReportScope::Full)
+    } else if internal_build {
+        Some(FailureReportScope::Classified)
+    } else {
+        None
+    }
+}
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct SettingsFile {
     #[serde(default = "default_true")]
@@ -528,12 +587,28 @@ struct SettingsFile {
     network_log_upload_user_chosen: bool,
     #[serde(default)]
     network_log_upload_scope: Option<PersistedUploadScope>,
+    #[serde(default)]
+    account_scope: Option<PersistedAccountScope>,
 }
 
 #[derive(Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct PersistedUploadScope {
     owner: String,
     id: String,
+}
+
+/// Periodic-telemetry account boundary, stable per account across restarts.
+/// Never stores the account id: only a SHA-256 of `"{id}:{account}"`, salted
+/// by the random scope id itself, so a different account cannot match it.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct PersistedAccountScope {
+    owner_digest: String,
+    id: String,
+}
+
+fn account_scope_owner_digest(id: &str, account: &str) -> String {
+    // `catalog_digest` is plain SHA-256 of the UTF-8 bytes, base64url.
+    tono_core::catalog::catalog_digest(&format!("{id}:{account}"))
 }
 
 #[derive(Clone)]
@@ -546,6 +621,9 @@ pub(crate) struct LogUploadScope {
 struct UploadOwner {
     owner: Option<String>,
     scope: Option<LogUploadScope>,
+    /// Reused per account across restarts (see `PersistedAccountScope`);
+    /// cleared in memory on abandon.
+    account_scope: Option<String>,
 }
 
 // Serialize all settings read/modify/write operations, including migration.
@@ -564,6 +642,7 @@ impl Default for SettingsFile {
             network_log_default_v3: true,
             network_log_upload_user_chosen: false,
             network_log_upload_scope: None,
+            account_scope: None,
         }
     }
 }
@@ -748,6 +827,11 @@ impl Audit {
         self.periodic_telemetry_enabled.load(Ordering::Acquire)
     }
 
+    /// [`failure_report_scope`] for this build and the current switches.
+    pub fn failure_report_scope(&self) -> Option<FailureReportScope> {
+        failure_report_scope(internal_build(), self.enabled(), self.periodic_telemetry_enabled())
+    }
+
     pub fn log_path(&self) -> &Path {
         &self.log_path
     }
@@ -764,6 +848,9 @@ impl Audit {
     /// without a scope are retained locally, never silently attributed at upload.
     pub(crate) fn activate_log_upload_owner(&self, account: &str) {
         let mut owner = self.upload_owner.lock();
+        if owner.owner.as_deref() != Some(account) || owner.account_scope.is_none() {
+            owner.account_scope = Some(self.stable_account_scope(account));
+        }
         owner.owner = Some(account.to_string());
         self.refresh_upload_scope(&mut owner);
     }
@@ -771,6 +858,7 @@ impl Audit {
     pub(crate) fn abandon_log_upload_owner(&self) {
         let mut owner = self.upload_owner.lock();
         owner.owner = None;
+        owner.account_scope = None;
         self.refresh_upload_scope(&mut owner);
     }
 
@@ -800,6 +888,38 @@ impl Audit {
                 id: saved.id, cancelled: tokio_util::sync::CancellationToken::new(),
             });
         }
+    }
+
+    /// The same account gets the same scope after a relaunch, so records it
+    /// wrote before a crash or restart still ride its telemetry window; any
+    /// other account replaces the saved scope with a fresh id.
+    fn stable_account_scope(&self, account: &str) -> String {
+        let _settings_guard = SETTINGS_LOCK.lock();
+        // Like `refresh_upload_scope`: never rewrite an unreadable/malformed settings file.
+        let rewritable = match std::fs::read_to_string(self.settings_dir.join(SETTINGS_FILE_NAME)) {
+            Ok(body) => serde_json::from_str::<SettingsFile>(&body).is_ok(),
+            Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+        };
+        let mut settings = load_settings_locked(&self.settings_dir);
+        if let Some(saved) = settings.account_scope.as_ref()
+            && saved.owner_digest == account_scope_owner_digest(&saved.id, account)
+        {
+            return saved.id.clone();
+        }
+        let id = tono_core::auth::new_installation_id();
+        if rewritable {
+            settings.account_scope = Some(PersistedAccountScope {
+                owner_digest: account_scope_owner_digest(&id, account),
+                id: id.clone(),
+            });
+            // Best effort: an unsaved scope still stamps this run; the next launch starts a new one.
+            let _ = save_settings(&self.settings_dir, &settings);
+        }
+        id
+    }
+
+    pub(crate) fn account_scope(&self) -> Option<String> {
+        self.upload_owner.lock().account_scope.clone()
     }
 
     pub(crate) fn log_upload_scope(&self) -> Option<LogUploadScope> {
@@ -837,6 +957,7 @@ impl Audit {
         let owner = self.upload_owner.lock();
         let mut record = AuditRecord::now(event.redacted());
         record.upload_scope = owner.scope.as_ref().map(|scope| scope.id.clone());
+        record.account_scope = owner.account_scope.clone();
         let sender = self.sender.lock();
         if let Some(sender) = sender.as_ref()
             && sender.try_send(record).is_err()
@@ -922,9 +1043,10 @@ impl Audit {
 #[cfg(test)]
 mod tests {
     use super::{
-        Audit, AuditEvent, AuditRecord, MAX_AUDIT_FILE_BYTES, RotatingWriter, audit_enabled_from_settings,
-        network_log_upload_enabled_from_settings, periodic_telemetry_enabled_from_settings, redact,
-        save_network_log_upload_enabled, save_periodic_telemetry_enabled,
+        Audit, AuditEvent, AuditRecord, FailureReportScope, MAX_AUDIT_FILE_BYTES, RotatingWriter,
+        audit_enabled_from_settings, failure_report_scope, network_log_upload_enabled_from_settings,
+        periodic_telemetry_enabled_from_settings, redact, save_network_log_upload_enabled,
+        save_periodic_telemetry_enabled,
     };
     use std::path::{Path, PathBuf};
 
@@ -1171,6 +1293,33 @@ mod tests {
         }
     }
 
+    /// H18-C-F2: a rotation that renamed the current file but could not create the next one
+    /// (disk full) left the handle on the backup. Once space returns, the next rotation must
+    /// recreate the current file instead of deleting the backup and renaming a missing path.
+    #[test]
+    fn rotation_recreates_the_current_file_after_a_failed_reopen() {
+        let dir = TempDir::new("rotate-reopen");
+        let path = log_path(&dir);
+        let backup = dir.path().join(super::AUDIT_BACKUP_FILE_NAME);
+        let cap = 512_u64;
+        let line = |counter| serde_json::to_string(&AuditRecord::now(AuditEvent::NetworkChange { counter })).unwrap();
+        let mut writer = RotatingWriter::open(&path, cap).unwrap();
+        let mut counter = 0;
+        while writer.written + line(counter).len() as u64 + 1 <= cap {
+            writer.write_line(&line(counter), true).unwrap();
+            counter += 1;
+        }
+        // The failed rotation's state: renamed away, handle still open on the backup.
+        std::fs::rename(&path, &backup).unwrap();
+
+        writer.write_line(&line(counter), true).unwrap();
+
+        assert!(backup.exists(), "the retained generation must survive");
+        let current = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(current.lines().count(), 1);
+        assert!(current.contains(&format!("\"counter\":{counter}")));
+    }
+
     #[test]
     fn rotation_size_cap_constant_is_10_mib() {
         assert_eq!(MAX_AUDIT_FILE_BYTES, 10 * 1024 * 1024);
@@ -1289,6 +1438,36 @@ mod tests {
         assert!(
             periodic_telemetry_enabled_from_settings(legacy.path()),
             "a post-migration explicit opt-in must survive every later load"
+        );
+    }
+
+    #[test]
+    fn internal_builds_keep_classified_failure_reports_through_the_timeline_reset() {
+        // An upgraded install: the v2 migration resets the legacy default-on timeline switch.
+        let upgraded = TempDir::new("failure-report-upgrade");
+        std::fs::write(
+            upgraded.path().join(super::SETTINGS_FILE_NAME),
+            r#"{"audit_enabled":true,"periodic_telemetry_enabled":true,"network_log_default_v2":true}"#,
+        )
+        .unwrap();
+        let timeline = periodic_telemetry_enabled_from_settings(upgraded.path());
+        let audit = audit_enabled_from_settings(upgraded.path());
+        assert!(!timeline && audit);
+        assert_eq!(
+            failure_report_scope(true, audit, timeline),
+            Some(FailureReportScope::Classified),
+            "an internal build must keep reporting classified failures after the upgrade reset"
+        );
+        assert_eq!(
+            failure_report_scope(false, audit, timeline),
+            None,
+            "release builds keep the opt-in"
+        );
+        assert_eq!(failure_report_scope(false, audit, true), Some(FailureReportScope::Full));
+        assert_eq!(
+            failure_report_scope(true, false, true),
+            None,
+            "the local log switch stops every report"
         );
     }
 

@@ -84,6 +84,8 @@ export interface TonoKillSwitch {
   // `KillSwitchStatus` in the service crate carries no serde rename, so this
   // one field stays snake_case on the wire.
   last_error: string | null
+  /** Same snake_case wire name: the last render included the tunnel permit. */
+  tunnel_permit_rendered?: boolean
 }
 
 export interface TonoStatus {
@@ -131,6 +133,9 @@ const toError = (error: unknown): Error => {
 
 /** Stable Rust prefixes → i18n keys for Connect/Disconnect action errors. */
 const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
+  // #588: a certificate the PC's clock cannot date. First, so it wins wherever the
+  // transport marked it inside another surface's error (sign-in, diagnostics, catalog).
+  { prefix: 'TONO_CLOCK_SKEW', key: 'tono.login.errors.clockSkew' },
   // Sign-in could not reach the control plane. Both transport paths carry the same
   // hostname and TLS SNI, so when both fail the failure is about reaching the server at
   // all — not the account, the code, or the app. Without this entry the raw Rust error
@@ -139,6 +144,9 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
   { prefix: 'TONO_AUTH_RATE_LIMITED', key: 'tono.login.errors.rateLimited' },
   { prefix: 'TONO_AUTH_DEVICE_LIMIT', key: 'tono.login.errors.deviceLimit' },
   { prefix: 'TONO_AUTH_UNAUTHORIZED', key: 'tono.login.errors.sessionExpired' },
+  // The Worker's 401 INVALID_OR_EXPIRED_CODE on verify: a wrong or stale code,
+  // not a session (#595).
+  { prefix: 'TONO_AUTH_INVALID_CODE', key: 'tono.login.errors.codeRejected' },
   { prefix: 'TONO_SERVICE_BUSY', key: 'tono.dashboard.errors.serviceBusy' },
   // TonoService itself is down. It is AutoStart and depends on BFE, so this is almost
   // always BFE having been switched off by a third-party "network optimiser".
@@ -156,6 +164,12 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
     prefix: 'TONO_WFP_ENGINE_WEDGED',
     key: 'tono.dashboard.errors.wfpEngineWedged',
   },
+  // Post-lock verification could not confirm the WFP lock, so no TUN probe ran.
+  // Listed after the two engine markers: a nested BFE/wedged cause wins.
+  {
+    prefix: 'TONO_WFP_LOCK_UNVERIFIED',
+    key: 'tono.dashboard.errors.wfpLockUnverified',
+  },
   {
     prefix: 'TONO_RELEASE_RECONCILING',
     key: 'tono.dashboard.errors.releaseReconciling',
@@ -163,6 +177,18 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
   {
     prefix: 'TONO_SERVICE_TOO_OLD',
     key: 'tono.dashboard.errors.serviceTooOld',
+  },
+  // Service code 1014: another signed-in Windows user holds the armed protection.
+  // Retrying cannot help, so it must not read as an ordinary failed connect.
+  {
+    prefix: 'TONO_PROTECTION_HELD_BY_ANOTHER_USER',
+    key: 'tono.dashboard.errors.protectionHeldByAnotherUser',
+  },
+  // Service code 1015: Connect from a Remote Desktop session. Protection would cut
+  // that session, so the user must connect at the PC's own console instead.
+  {
+    prefix: 'TONO_REMOTE_SESSION_CONNECT_REFUSED',
+    key: 'tono.dashboard.errors.remoteSessionConnectRefused',
   },
   {
     prefix: 'TONO_BROWSER_DNS_PREFLIGHT',
@@ -504,6 +530,8 @@ export const tonoPeriodicTelemetryEnabled = () =>
 
 export const tonoSetPeriodicTelemetryEnabled = (enabled: boolean) =>
   call<void>('tono_set_periodic_telemetry_enabled', { enabled })
+
+export const tonoInternalBuild = () => call<boolean>('tono_internal_build')
 
 export const tonoNetworkLogUploadEnabled = () =>
   call<boolean>('tono_network_log_upload_enabled')

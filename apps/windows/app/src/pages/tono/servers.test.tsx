@@ -28,6 +28,7 @@ const {
   preferencesMock,
   updatePreferencesMock,
   catalogStatusMock,
+  refreshCatalogMock,
   testServersMock,
 } = vi.hoisted(() => ({
   serversMock: vi.fn(),
@@ -41,6 +42,7 @@ const {
   preferencesMock: vi.fn(),
   updatePreferencesMock: vi.fn(),
   catalogStatusMock: vi.fn(),
+  refreshCatalogMock: vi.fn(),
   testServersMock: vi.fn(),
 }))
 vi.mock('@/services/tono', async (original) => ({
@@ -52,6 +54,7 @@ vi.mock('@/services/tono', async (original) => ({
   tonoRoutePreferences: preferencesMock,
   tonoUpdateRoutePreferences: updatePreferencesMock,
   tonoCatalogStatus: catalogStatusMock,
+  tonoRefreshCatalog: refreshCatalogMock,
   tonoTestAvailableServers: testServersMock,
   tonoCancelServerTests: async () => {},
 }))
@@ -111,6 +114,24 @@ it('does not claim the node list is synced before the first catalog sync', async
   renderPage()
   expect(await screen.findByText('No servers available')).toBeDefined()
   expect(screen.queryByText('Node list synced')).toBeNull()
+})
+
+// #590: the catalog refresh failure said "Details are below" while showing none.
+it('shows the recorded cause under a failed catalog refresh', async () => {
+  const cause =
+    'could not reach Tono: connect: error sending request <- connection refused'
+  serversMock.mockResolvedValue([])
+  renderPage()
+  expect(await screen.findByText('No servers available')).toBeDefined()
+  refreshCatalogMock.mockRejectedValue(new Error(cause))
+  catalogStatusMock.mockResolvedValue({
+    revision: null,
+    nodeCount: 0,
+    lastSyncedAtMs: null,
+    error: cause,
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+  expect(await screen.findByText(cause)).toBeDefined()
 })
 
 it('does not claim an empty list while the first server read is pending', async () => {

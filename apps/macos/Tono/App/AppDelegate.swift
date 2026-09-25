@@ -120,6 +120,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // the background. Reconcile only an authenticated, confirmed unarmed
         // helper state; this callback never raises an administrator prompt.
         appState?.reconcileExternalProtectionState()
+        appState?.showPendingProtectedDNSRestoreNotice()
     }
 
     @objc private func systemWillSleep(_ notification: Notification) {

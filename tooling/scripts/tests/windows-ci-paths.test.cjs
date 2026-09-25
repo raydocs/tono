@@ -215,3 +215,26 @@ test('paired candidates share one source and sequence without granting signing o
     }
   }
 })
+
+test('Windows release jobs that run third-party build code never hold a writable token', () => {
+  const read = name => load(readFileSync(path.join(root, '.github/workflows', name), 'utf8'))
+  const writes = permissions => Object.values(permissions ?? {}).includes('write') || permissions === 'write-all'
+  for (const name of ['windows-release.yml', 'windows-update-promote.yml']) {
+    const release = read(name)
+    assert.ok(!writes(release.permissions), `${name} grants write at workflow level`)
+    for (const [id, job] of Object.entries(release.jobs)) {
+      const steps = job.steps ?? []
+      for (const step of steps) {
+        if (step.uses?.startsWith('actions/checkout@')) {
+          assert.equal(step.with?.['persist-credentials'], false, `${name}:${id} leaves the token in .git/config`)
+        }
+      }
+      const runsBuildCode = steps.some(step =>
+        /\b(pnpm|npm|cargo|npx)\b/.test(step.run ?? '') || step.uses?.startsWith('tauri-apps/'))
+      if (runsBuildCode) assert.ok(!writes(job.permissions), `${name}:${id} runs build code with a writable token`)
+    }
+  }
+  const publish = read('windows-release.yml').jobs['publish-draft']
+  assert.equal(publish?.permissions?.contents, 'write')
+  assert.ok(publish.needs.includes('build-draft'))
+})

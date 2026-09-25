@@ -755,6 +755,7 @@ export interface TranslationResources {
             label: string
             pathLabel: string
           }
+          internalDiagnostics: string
           networkLogUpload: {
             description: string
             label: string
@@ -1050,8 +1051,10 @@ export interface TranslationResources {
           encryptedDns: string
           nodeUnreachable: string
           protectedHttpsFailed: string
+          protectionHeldByAnotherUser: string
           protectionReleaseFailed: string
           releaseReconciling: string
+          remoteSessionConnectRefused: string
           sendDiagnostics: string
           serviceBusy: string
           serviceNotRunning: string
@@ -1059,6 +1062,7 @@ export interface TranslationResources {
           tunDataPlaneBroken: string
           tunIngressBroken: string
           wfpEngineWedged: string
+          wfpLockUnverified: string
         }
         errorSwitchServer: string
         info: {
@@ -1215,6 +1219,8 @@ export interface TranslationResources {
         emailLabel: string
         emailPlaceholder: string
         errors: {
+          clockSkew: string
+          codeRejected: string
           deviceLimit: string
           rateLimited: string
           serverError: string
@@ -1229,6 +1235,13 @@ export interface TranslationResources {
           description: string
           restore: string
           restoring: string
+          stillRunningDescription: string
+          stillRunningTitle: string
+          title: string
+          unverifiedDescription: string
+        }
+        noEmail: {
+          description: string
           title: string
         }
         resendIn: string
@@ -1244,6 +1257,11 @@ export interface TranslationResources {
         sending: string
         sendNewCode: string
         sent: string
+        sessionEnded: {
+          description: string
+          signIn: string
+          title: string
+        }
         stepCode: string
         stepEmail: string
         stillWaiting: string
@@ -1454,6 +1472,7 @@ export interface TranslationResources {
       }
       settings: {
         about: {
+          checkFailed: string
           checkUpdates: string
           description: string
           latestVersion: string
@@ -1556,6 +1575,7 @@ export interface TranslationResources {
           copyVersion: string
           description: string
           open: string
+          openFailed: string
           title: string
         }
       }

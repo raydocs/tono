@@ -3,8 +3,13 @@ import Darwin
 
 let killSwitchStatePath = "/Library/Application Support/Tono/killswitch.state"
 let killSwitchPFPath = "/Library/Application Support/Tono/pf.tono.conf"
+/// The `pfctl -E` token this helper holds, bound to its boot session.
+let killSwitchPFReferencePath = "/Library/Application Support/Tono/pf.reference"
 let killSwitchMainPFPath = "/etc/pf.conf"
 let killSwitchMainBackupPath = "/etc/pf.conf.tono-backup"
+/// Main ruleset loaded instead of /etc/pf.conf when the emergency block cannot
+/// be installed through it. Present only while that fallback is active.
+let killSwitchStandaloneMainPath = "/Library/Application Support/Tono/pf.tono-main.conf"
 let killSwitchHostsPath = "/etc/hosts"
 let killSwitchHostsBackupPath = "/etc/hosts.tono-backup"
 let killSwitchAnchor = "tono.killswitch"
@@ -99,6 +104,16 @@ final class KillSwitchManager {
     /// skip the machine-wide state flush that would otherwise sever every
     /// established flow on the host. nil always forces the safe full flush.
     var lastLoadedPassRules: Set<String>?
+    /// Set when the liveness supervisor had to reinstall PF because it was no
+    /// longer filtering (disabled, or the Tono anchor was gone) while armed.
+    /// Cleared only by the next committed arm or a disarm, so the app can read
+    /// it without mutating anything and must re-arm to clear it.
+    var repairedSinceArm = false
+    /// Set when a failed reviewed-bundle withhold could not put the rule file
+    /// back either: the file may read as already withheld while the kernel
+    /// still holds the permit. Cleared only by the next committed arm, which
+    /// loads a ruleset it rendered in full; until then every withhold fails.
+    var reviewedBundleFileUnconfirmed = false
 
     init(allowedUID: uid_t) throws {
         self.allowedUID = allowedUID
@@ -298,6 +313,8 @@ final class KillSwitchManager {
         try Self.ensureAnchorLoaded(disposal: disposal)
         lastLoadedPassRules = passRules
         stateGeneration &+= 1
+        repairedSinceArm = false
+        reviewedBundleFileUnconfirmed = false
         return response(
             armed: true,
             wanted: true,
@@ -339,6 +356,80 @@ final class KillSwitchManager {
         // minutes, mostly from node switches; each of those took every unrelated
         // connection on the host down with it.
         return withdrawnHosts(withdrawn).map { StateDisposal.targeted($0) } ?? .full
+    }
+
+    /// Takes the reviewed-bundle permit out of the loaded anchor while the
+    /// Core has no tunnel (#608): from /core/sync after the new config passed
+    /// its check and before the old Core stops, from /core/stop before it
+    /// stops, and from the idle loop once the Core has exited. With the Core
+    /// goes its utun, and the address-free permit is then root web-port egress
+    /// on the physical interface. It returns only through the app's next arm
+    /// with the flag, which renders it only while a tunnel exists.
+    ///
+    /// Throws while the permit may still be loaded, so /core/sync keeps the
+    /// old Core and its tunnel running instead of stopping it; /core/stop
+    /// logs and stops anyway. A failure never loosens the ruleset.
+    func withholdReviewedBundlePermit() throws {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !reviewedBundleFileUnconfirmed else {
+            throw Self.withholdFailure(
+                HelperFailure.system("An earlier withhold could not restore the PF rule file.")
+            )
+        }
+        guard let baseline = lastLoadedPassRules,
+              baseline.contains(where: { $0.contains(Self.reviewedBundleLabel) }) else {
+            return
+        }
+        let loaded: String
+        do {
+            loaded = String(
+                decoding: try Self.secureRead(killSwitchPFPath, maximumBytes: 4 * 1024 * 1024),
+                as: UTF8.self
+            )
+        } catch {
+            throw Self.withholdFailure(error)
+        }
+        switch Self.reviewedBundleWithholding(loaded: loaded, baseline: baseline) {
+        case .notLoaded:
+            return
+        case .unknown:
+            throw Self.withholdFailure(
+                HelperFailure.system("The PF rule file does not match the loaded ruleset.")
+            )
+        case .withhold(let rules, let disposal, let rollback):
+            // An arm prepared against the ruleset being narrowed must not
+            // commit it back while the tunnel is gone.
+            stateGeneration &+= 1
+            do {
+                try Self.writeRuleText(rules)
+                try Self.ensureAnchorLoaded(disposal: disposal)
+            } catch {
+                // The narrowed file must not outlive a load the kernel may
+                // not have taken: it reads as already withheld and no later
+                // call would retry.
+                do {
+                    try Self.atomicWrite(
+                        path: killSwitchPFPath,
+                        data: Data(rollback.utf8),
+                        permissions: 0o600
+                    )
+                } catch {
+                    // Nothing on disk describes the kernel now. The next arm
+                    // takes the full flush, and nothing trusts the file first.
+                    lastLoadedPassRules = nil
+                    reviewedBundleFileUnconfirmed = true
+                }
+                throw Self.withholdFailure(error)
+            }
+        }
+    }
+
+    static func withholdFailure(_ error: Error) -> HelperFailure {
+        let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+        return .system(
+            "The reviewed-bundle permit could not be withheld: " + detail.prefixString(512)
+        )
     }
 
     /// Power transitions are secured inside the root helper rather than
@@ -405,8 +496,12 @@ final class KillSwitchManager {
             throw HelperFailure.system("PF child anchor remained active.")
         }
         try Self.removeStateIfPresent()
+        // Only after the anchor is empty and the intent is gone. If no other
+        // program holds a reference, PF stops, which is the pre-arm state.
+        Self.releasePFEnableReference()
         stateGeneration &+= 1
         lastLoadedPassRules = nil
+        repairedSinceArm = false
         return response(armed: false, wanted: false, live: false)
     }
 
@@ -452,6 +547,65 @@ final class KillSwitchManager {
             result["error"] = String(describing: error).prefixString(1024)
             return result
         }
+    }
+
+    /// Periodic check from the helper's idle loop. Nothing else looks at PF
+    /// while a session is connected: `status()` heals, but only when someone
+    /// calls it, and the connected app does not. Another program releasing its
+    /// PF reference, a `pfctl -d`, or a main-ruleset reload without the Tono
+    /// anchor left the kill switch off until the next arm.
+    func superviseProtection() {
+        guard Self.stateFileExists() else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        var live = Self.effectiveStatus()
+        if !live {
+            // effectiveStatus() is three pfctl reads; any one failing or
+            // timing out once reads as "not filtering". A repair flushes every
+            // state on the machine and makes the app reconnect, so require a
+            // second read to agree first.
+            usleep(200_000)
+            live = Self.effectiveStatus()
+        }
+        let referenced = Self.heldPFEnableReference() != nil
+        guard !live || !referenced else { return }
+        do {
+            guard let state = try loadState(), state.armed else { return }
+            if live {
+                // Still filtering, but on someone else's reference (PF was
+                // stopped and re-enabled by another program). Take ours back
+                // before that program releases its own.
+                try Self.holdPFEnableReference()
+                return
+            }
+            try Self.writeRules(state: state, allowedUID: allowedUID)
+            try Self.ensureHostsMappings(state: state)
+            try Self.ensureAnchorLoaded(flushStates: true)
+        } catch {
+            guard !live else { return }
+            try? Self.installEmergencyBlock(allowedUID: allowedUID)
+        }
+        // The persisted state omits the session's direct exceptions, so the
+        // app has to re-arm; the flag is how it finds out.
+        lastLoadedPassRules = nil
+        repairedSinceArm = true
+        let message = "tono: kill switch was not filtering while armed; reinstalled "
+            + "(live: \(Self.effectiveStatus()))\n"
+        FileHandle.standardError.write(Data(message.utf8))
+    }
+
+    /// Read-only view for the connected app. Unlike `status()`, this never
+    /// loads rules or flushes states.
+    func health() -> [String: Any] {
+        lock.lock()
+        defer { lock.unlock() }
+        return [
+            "ok": true,
+            "wantArmed": Self.stateFileExists(),
+            "live": Self.effectiveStatus(),
+            "repairedSinceArm": repairedSinceArm,
+            "version": helperVersion,
+        ]
     }
 
     func response(
@@ -504,7 +658,21 @@ final class KillSwitchManager {
     static func installEmergencyBlock(allowedUID: uid_t) throws {
         let state = emergencyState(preserving: nil)
         try writeRules(state: state, allowedUID: allowedUID)
-        try ensureAnchorLoaded(flushStates: true)
+        do {
+            try ensureAnchorLoaded(flushStates: true)
+        } catch {
+            try ensureAnchorLoaded(disposal: .full, standaloneMain: true)
+        }
+    }
+
+    /// The daemon failed to start after (or instead of) restoring PF, and
+    /// launchd will retry into the same failure. If protection was wanted,
+    /// leave the machine fail-closed rather than open until someone repairs
+    /// it. The emergency ruleset renders no per-user rule, so an allowed UID
+    /// that could not be read does not matter here.
+    static func secureFailedStartup() {
+        guard stateFileExists() else { return }
+        try? installEmergencyBlock(allowedUID: (try? readAllowedUID()) ?? 0)
     }
 
     static func emergencyState(

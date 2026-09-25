@@ -19,8 +19,13 @@ const SCHTASKS_TIMEOUT: Duration = Duration::from_secs(10);
 const SCHTASKS_POLL_INTERVAL: Duration = Duration::from_millis(20);
 // Scheduled-task names carry the Tono identity; there is no upgrade path
 // from Clash Verge, so no legacy names are registered or preserved.
-const TASK_NAME_USER: &str = "Tono";
-const TASK_NAME_ADMIN: &str = "Tono (Admin)";
+//
+// Task names are machine-wide. Each Windows user's logon task therefore carries that user's
+// SID (`Tono <SID>`, `Tono (Admin) <SID>`): with one shared name, a second user's first
+// connect replaced or deleted the first user's task. The shared names below are what earlier
+// builds registered; only the caller's own task under them is migrated, never another user's.
+const LEGACY_TASK_NAME_USER: &str = "Tono";
+const LEGACY_TASK_NAME_ADMIN: &str = "Tono (Admin)";
 const TASK_XML_DIR: &str = "tasks";
 const TASK_XML_USER: &str = "tono-task-user.xml";
 const TASK_XML_ADMIN: &str = "tono-task-admin.xml";
@@ -32,10 +37,18 @@ pub enum TaskMode {
 }
 
 impl TaskMode {
-    const fn name(self) -> &'static str {
+    /// This user's task: the machine-wide name is scoped by the owner's SID.
+    fn name_for(self, sid: &str) -> String {
         match self {
-            Self::User => TASK_NAME_USER,
-            Self::Admin => TASK_NAME_ADMIN,
+            Self::User => format!("{LEGACY_TASK_NAME_USER} {sid}"),
+            Self::Admin => format!("{LEGACY_TASK_NAME_ADMIN} {sid}"),
+        }
+    }
+
+    const fn legacy_name(self) -> &'static str {
+        match self {
+            Self::User => LEGACY_TASK_NAME_USER,
+            Self::Admin => LEGACY_TASK_NAME_ADMIN,
         }
     }
 
@@ -392,6 +405,10 @@ fn csv_line_names_task(line: &str, name: &str) -> bool {
 /// guards silently answered no, letting a user task and an admin task co-exist (double launch).
 /// A successful listing is proof either way; a failed listing is an error and now says so.
 pub fn task_exists(mode: TaskMode) -> Result<bool> {
+    task_named_exists(&mode.name_for(&task_owner_sid()?))
+}
+
+fn task_named_exists(name: &str) -> Result<bool> {
     let output = schtasks_output({
         let mut cmd = schtasks_command();
         cmd.args(["/Query", "/FO", "CSV", "/NH"]);
@@ -403,7 +420,100 @@ pub fn task_exists(mode: TaskMode) -> Result<bool> {
     }
 
     let listing = decode_console_output(&output.stdout);
-    Ok(listing.lines().any(|line| csv_line_names_task(line, mode.name())))
+    Ok(listing.lines().any(|line| csv_line_names_task(line, name)))
+}
+
+/// The SID every task name and principal of this process is scoped to.
+fn task_owner_sid() -> Result<String> {
+    crate::core::owner_identity::current_sid()
+}
+
+/// Whether a task definition's principal is `sid`. Only a principal recorded as a SID proves
+/// ownership; anything else is not the caller's to change.
+fn xml_principal_is(xml: &str, sid: &str) -> bool {
+    let Some(start) = xml.find("<Principals>") else {
+        return false;
+    };
+    let Some(end) = xml[start..].find("</Principals>").map(|offset| offset + start) else {
+        return false;
+    };
+    let principals = &xml[start..end];
+    let Some(value_start) = principals.find("<UserId>").map(|offset| offset + "<UserId>".len()) else {
+        return false;
+    };
+    let Some(value_end) = principals[value_start..]
+        .find("</UserId>")
+        .map(|offset| offset + value_start)
+    else {
+        return false;
+    };
+    principals[value_start..value_end].trim().eq_ignore_ascii_case(sid)
+}
+
+/// What this user can learn about the task an earlier build registered under a machine-wide name.
+enum LegacyTask {
+    Absent,
+    /// Listed, but its definition could not be read: it may be this user's.
+    Unreadable,
+    Definition(String),
+}
+
+fn legacy_task(mode: TaskMode) -> Result<LegacyTask> {
+    if !task_named_exists(mode.legacy_name())? {
+        return Ok(LegacyTask::Absent);
+    }
+    let output = schtasks_output({
+        let mut cmd = schtasks_command();
+        cmd.args(["/Query", "/TN", mode.legacy_name(), "/XML"]);
+        cmd
+    })?;
+    if !output.status.success() {
+        return Ok(LegacyTask::Unreadable);
+    }
+    Ok(LegacyTask::Definition(decode_task_xml(&output.stdout)))
+}
+
+/// Whether the machine-wide task an earlier build registered for `mode` belongs to `sid`.
+fn legacy_task_owned(mode: TaskMode, sid: &str) -> Result<bool> {
+    // An unreadable definition proves nothing about its owner, so it is not reported as ours.
+    Ok(matches!(legacy_task(mode)?, LegacyTask::Definition(xml) if xml_principal_is(&xml, sid)))
+}
+
+/// Remove this user's own tasks under the earlier machine-wide names; another user's stay.
+///
+/// A task that is (or may be) this user's and is still there after this is an error, not a log
+/// line: it keeps launching the app at logon whatever the setting says, so the caller must not
+/// report the change as done. Both names are always attempted; the first failure is returned.
+fn retire_owned_legacy_tasks(
+    sid: &str,
+    inspect: impl Fn(TaskMode) -> Result<LegacyTask>,
+    remove: impl Fn(TaskMode) -> Result<()>,
+) -> Result<()> {
+    let mut errors = Vec::new();
+    for mode in [TaskMode::User, TaskMode::Admin] {
+        let retired = match inspect(mode) {
+            Ok(LegacyTask::Absent) => Ok(()),
+            Ok(LegacyTask::Definition(xml)) if !xml_principal_is(&xml, sid) => Ok(()),
+            Ok(LegacyTask::Definition(_)) => remove(mode)
+                .map_err(|err| anyhow!("could not retire the earlier {} auto-launch task: {err}", mode.label())),
+            Ok(LegacyTask::Unreadable) => Err(anyhow!(
+                "the earlier {} auto-launch task \"{}\" could not be read, so it may still launch the app at logon",
+                mode.label(),
+                mode.legacy_name()
+            )),
+            Err(err) => Err(anyhow!(
+                "could not check the earlier {} auto-launch task: {err}",
+                mode.label()
+            )),
+        };
+        if let Err(err) = retired {
+            errors.push(err);
+        }
+    }
+    if let Some(err) = errors.into_iter().next() {
+        return Err(err);
+    }
+    Ok(())
 }
 
 /// Read the task-level `<Enabled>` flag out of a task definition.
@@ -446,13 +556,13 @@ fn decode_task_xml(bytes: &[u8]) -> String {
 ///
 /// `/Query` succeeds for a task the user disabled in the Task Scheduler UI, so existence alone
 /// reported auto-launch as on for a task that will never run.
-fn task_enabled(mode: TaskMode) -> Result<bool> {
-    if !task_exists(mode)? {
+fn task_enabled(mode: TaskMode, name: &str) -> Result<bool> {
+    if !task_named_exists(name)? {
         return Ok(false);
     }
     let output = schtasks_output({
         let mut cmd = schtasks_command();
-        cmd.args(["/Query", "/TN", mode.name(), "/XML"]);
+        cmd.args(["/Query", "/TN", name, "/XML"]);
         cmd
     })?;
     if !output.status.success() {
@@ -472,10 +582,11 @@ fn task_enabled(mode: TaskMode) -> Result<bool> {
 }
 
 pub fn create_task(mode: TaskMode) -> Result<()> {
+    let name = mode.name_for(&task_owner_sid()?);
     let task_xml_path = write_task_xml(mode)?;
     let output = schtasks_output({
         let mut cmd = schtasks_command();
-        cmd.args(["/Create", "/TN", mode.name(), "/XML"]);
+        cmd.args(["/Create", "/TN", name.as_str(), "/XML"]);
         cmd.arg(&task_xml_path);
         cmd.arg("/F");
         cmd
@@ -494,9 +605,13 @@ pub fn create_task(mode: TaskMode) -> Result<()> {
 }
 
 pub fn remove_task(mode: TaskMode) -> Result<()> {
+    remove_task_named(&mode.name_for(&task_owner_sid()?), mode)
+}
+
+fn remove_task_named(name: &str, mode: TaskMode) -> Result<()> {
     let output = schtasks_output({
         let mut cmd = schtasks_command();
-        cmd.args(["/Delete", "/TN", mode.name(), "/F"]);
+        cmd.args(["/Delete", "/TN", name, "/F"]);
         cmd
     })?;
 
@@ -505,7 +620,7 @@ pub fn remove_task(mode: TaskMode) -> Result<()> {
         return Ok(());
     }
 
-    if !task_exists(mode)? {
+    if !task_named_exists(name)? {
         logging!(
             info,
             Type::Setup,
@@ -529,8 +644,16 @@ pub async fn set_auto_launch(is_enable: bool, is_admin: bool) -> Result<()> {
     if let Err(err) = cleanup_legacy_shortcuts().await {
         logging!(warn, Type::Setup, "Failed to cleanup legacy startup shortcuts: {}", err);
     }
+    // Whatever this call decides, this user's own task under the earlier machine-wide names
+    // must not keep launching the app beside (or instead of) the per-user one. If one stays, the
+    // call fails: enabling stops before a second task would double-launch, and disabling still
+    // removes the per-user tasks before reporting it.
+    let legacy = retire_owned_legacy_tasks(&task_owner_sid()?, legacy_task, |mode| {
+        remove_task_named(mode.legacy_name(), mode)
+    });
 
     if is_enable {
+        legacy?;
         if is_admin {
             create_task(target)?;
             if let Err(err) = remove_task(other) {
@@ -561,7 +684,7 @@ pub async fn set_auto_launch(is_enable: bool, is_admin: bool) -> Result<()> {
             return Err(err);
         }
 
-        return Ok(());
+        return legacy;
     }
 
     remove_task(TaskMode::User)?;
@@ -571,20 +694,82 @@ pub async fn set_auto_launch(is_enable: bool, is_admin: bool) -> Result<()> {
         ));
     }
 
-    Ok(())
+    legacy
 }
 
 pub fn is_auto_launch_enabled() -> Result<bool> {
-    if task_enabled(TaskMode::Admin)? {
-        return Ok(true);
+    let sid = task_owner_sid()?;
+    for mode in [TaskMode::Admin, TaskMode::User] {
+        if task_enabled(mode, &mode.name_for(&sid))? {
+            return Ok(true);
+        }
     }
-
-    task_enabled(TaskMode::User)
+    // An upgraded install still launches through this user's own task under the earlier name
+    // until the setting is next changed.
+    for mode in [TaskMode::Admin, TaskMode::User] {
+        if legacy_task_owned(mode, &sid)? && task_enabled(mode, mode.legacy_name())? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{csv_line_names_task, xml_task_enabled};
+    use super::{
+        LegacyTask, TaskMode, csv_line_names_task, retire_owned_legacy_tasks, xml_principal_is, xml_task_enabled,
+    };
+
+    #[test]
+    fn autostart_tasks_of_two_windows_users_never_share_a_name() {
+        let first = "S-1-5-21-1111111111-2222222222-3333333333-1001";
+        let second = "S-1-5-21-1111111111-2222222222-3333333333-1002";
+        for mode in [TaskMode::User, TaskMode::Admin] {
+            // A second user's create (/F) or remove must not select the first user's task.
+            assert_ne!(mode.name_for(first), mode.name_for(second));
+            assert_ne!(mode.name_for(first), mode.legacy_name());
+            let listing = format!(r#""\{}","N/A","Ready""#, mode.name_for(first));
+            assert!(csv_line_names_task(&listing, &mode.name_for(first)));
+            assert!(!csv_line_names_task(&listing, &mode.name_for(second)));
+        }
+        // A task under the earlier shared name is only the second user's to retire if its
+        // principal is that user.
+        let legacy = format!(
+            "<Task><Principals><Principal id=\"Author\"><UserId>{first}</UserId></Principal></Principals></Task>"
+        );
+        assert!(xml_principal_is(&legacy, first));
+        assert!(!xml_principal_is(&legacy, second));
+    }
+
+    #[test]
+    fn a_legacy_task_this_user_may_own_that_stays_fails_the_autostart_change() {
+        let sid = "S-1-5-21-1111111111-2222222222-3333333333-1001";
+        let definition = |user: &str| {
+            format!("<Task><Principals><Principal><UserId>{user}</UserId></Principal></Principals></Task>")
+        };
+        // This user's task that could not be deleted keeps launching the app at logon.
+        assert!(
+            retire_owned_legacy_tasks(
+                sid,
+                |_| Ok(LegacyTask::Definition(definition(sid))),
+                |_| Err(anyhow::anyhow!("access denied")),
+            )
+            .is_err()
+        );
+        // A listed task whose definition cannot be read may be this user's.
+        assert!(retire_owned_legacy_tasks(sid, |_| Ok(LegacyTask::Unreadable), |_| Ok(())).is_err());
+        // Another user's task is not this user's to remove and does not fail the change.
+        assert!(
+            retire_owned_legacy_tasks(
+                sid,
+                |_| Ok(LegacyTask::Definition(definition(
+                    "S-1-5-21-1111111111-2222222222-3333333333-1002"
+                ))),
+                |_| unreachable!("another user's task was removed"),
+            )
+            .is_ok()
+        );
+    }
 
     #[test]
     fn csv_listing_matches_the_task_path_case_insensitively() {
