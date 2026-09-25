@@ -53,8 +53,13 @@ extension AppState {
                         if self.consecutiveProtectedFailureCount >= 3 {
                             self.protectedReconnectPausedForUserAction = true
                             self.protectedReconnectPauseLiftsOnNetworkChange = false
-                            self.errorMessage = (self.errorMessage ?? reason) + " "
-                                + String(localized: "The same failure repeated three times, so automatic retries are paused. Click Retry now to try again, or Restore internet to get back online.")
+                            // Retry now exists only in Protected Offline; with an
+                            // unconfirmed barrier the "Choose Reality" above is
+                            // the action to take.
+                            if self.isProtectionBlocked {
+                                self.errorMessage = (self.errorMessage ?? reason) + " "
+                                    + String(localized: "The same failure repeated three times, so automatic retries are paused. Click Retry now to try again, or Restore internet to get back online.")
+                            }
                         }
                     }
                     return (false, UUID())
