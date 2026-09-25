@@ -1,6 +1,27 @@
 import { ApiError } from '../../errors';
-import { type Env } from '../../env';
-import { PRODUCT_CLAUDE } from '../../product-account';
+import { type Env, type Row, str } from '../../env';
+import { PRODUCT_CLAUDE, accountRefField } from '../../product-account';
+
+/**
+ * The account_ref the onboard's Claude allocation would take, validated
+ * before any write so its 409s can be checked first. accountRef wins over
+ * productAccountId, as it does in the allocation.
+ */
+export async function onboardAllocationRef(e: Env, b: Record<string, unknown>): Promise<string | null> {
+  let ref: string | null = null;
+  if (b.accountRef !== undefined && b.accountRef !== null && b.accountRef !== '') {
+    ref = accountRefField(b.accountRef);
+  }
+  if (b.productAccountId !== undefined && b.productAccountId !== null && b.productAccountId !== '') {
+    const productAccountId = str(b.productAccountId, 'productAccountId', 1, 100);
+    const pooled = await e.DB.prepare(
+      'SELECT id, account_ref FROM product_accounts WHERE id = ?',
+    ).bind(productAccountId).first<Row>();
+    if (!pooled) throw new ApiError(404, 'NOT_FOUND', 'Product account not found');
+    ref ??= String(pooled.account_ref);
+  }
+  return ref;
+}
 
 /**
  * Expiry and plan on `users/onboard`, with the same rules as PATCH

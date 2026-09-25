@@ -42,7 +42,7 @@ import {
   sharedAdministrativeResource,
   type SharedAdminDeps,
 } from '../shared-admin';
-import { accountProfileWrite, onboardEntitlement, pendingProfileWrites } from './onboard-profile';
+import { accountProfileWrite, onboardAllocationRef, onboardEntitlement, pendingProfileWrites } from './onboard-profile';
 import {
   liveQualityNodeNamed,
   nodeHealthFromQuality,
@@ -188,20 +188,7 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
   // For a customer who has not registered yet these wait on the allowlist row
   // and are copied at first sign-in, so the account keeps the operator's expiry.
   const { expiresAt, plan } = onboardEntitlement(b);
-  // The account_ref the Claude allocation below would take, checked before
-  // any write; accountRef wins over productAccountId, as it does there.
-  let allocationRef: string | null = null;
-  if (b.accountRef !== undefined && b.accountRef !== null && b.accountRef !== '') {
-    allocationRef = accountRefField(b.accountRef);
-  }
-  if (b.productAccountId !== undefined && b.productAccountId !== null && b.productAccountId !== '') {
-    const productAccountId = str(b.productAccountId, 'productAccountId', 1, 100);
-    const pooled = await e.DB.prepare(
-      'SELECT id, account_ref FROM product_accounts WHERE id = ?',
-    ).bind(productAccountId).first<Row>();
-    if (!pooled) throw new ApiError(404, 'NOT_FOUND', 'Product account not found');
-    allocationRef ??= String(pooled.account_ref);
-  }
+  const allocationRef = await onboardAllocationRef(e, b);
   let homeExitActive = true;
   if (b.homeExitId !== undefined && b.homeExitId !== null && b.homeExitId !== '') {
     const homeExitId = str(b.homeExitId, 'homeExitId', 1, 100);
