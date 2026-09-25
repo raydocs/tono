@@ -234,7 +234,7 @@ extension AppState {
     /// proxies digest, and that is the change that leaves a client dialing
     /// retired credentials. The credential is hashed, never stored or logged in
     /// the clear.
-    private static func catalogRoutingToken(
+    static func catalogRoutingToken(
         routing: TonoExitCatalogRouting?
     ) -> String {
         var homeSocks5 = ""
@@ -257,6 +257,15 @@ extension AppState {
             .replacingOccurrences(of: "=", with: "")
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
+    }
+
+    /// #582: what Connect would dial from memory now, as an offline grant
+    /// records it. Nil while no managed exit is installed.
+    var installedManagedCatalogDigests: InstalledCatalogDigests? {
+        guard managedCatalogNodeCount > 0,
+              let digest = managedCatalogDigest,
+              let routing = managedCatalogRoutingToken else { return nil }
+        return InstalledCatalogDigests(catalogSha256: digest, routingSha256: routing)
     }
 
     /// True only when every part of the freshness key matches what is already
@@ -414,9 +423,35 @@ extension AppState {
         // mode-0600 disk cache may contain a newer policy than a delayed or
         // stale control-plane response. Never let that response downgrade
         // the active policy (or overwrite the newer cache) during startup.
+        //
+        // "Newer" is `ManagedTrafficPolicySignature.revisionOrder`: a revision
+        // named inside verified signed bytes outranks one that is not,
+        // whatever the numbers (#317).
+        let authenticated = ManagedTrafficPolicySignature.revisionIsAuthenticated(cache)
+        func orderAgainstInstalled() -> ManagedTrafficPolicySignature.RevisionOrder {
+            ManagedTrafficPolicySignature.revisionOrder(
+                candidate: cache.revision,
+                candidateAuthenticated: authenticated,
+                current: managedTrafficPolicyRevision,
+                currentAuthenticated: managedTrafficPolicyRevisionAuthenticated
+            )
+        }
         if let persisted = ConfigStorage.shared.loadManagedTrafficPolicy() {
-            if persisted.revision > cache.revision {
-                if persisted.revision > managedTrafficPolicyRevision {
+            let persistedAuthenticated =
+                ManagedTrafficPolicySignature.revisionIsAuthenticated(persisted)
+            let order = ManagedTrafficPolicySignature.revisionOrder(
+                candidate: cache.revision,
+                candidateAuthenticated: authenticated,
+                current: persisted.revision,
+                currentAuthenticated: persistedAuthenticated
+            )
+            if order == .stale {
+                if ManagedTrafficPolicySignature.revisionOrder(
+                    candidate: persisted.revision,
+                    candidateAuthenticated: persistedAuthenticated,
+                    current: managedTrafficPolicyRevision,
+                    currentAuthenticated: managedTrafficPolicyRevisionAuthenticated
+                ) == .newer {
                     try await installManagedTrafficPolicy(
                         persisted,
                         persistCache: false,
@@ -425,7 +460,7 @@ extension AppState {
                 }
                 return
             }
-            if persisted.revision == cache.revision {
+            if order == .same {
                 guard persisted.sha256 == cache.sha256 else {
                     throw TonoAPIClient.APIError.invalidResponse
                 }
@@ -446,8 +481,8 @@ extension AppState {
                 }
             }
         }
-        if cache.revision < managedTrafficPolicyRevision { return }
-        if cache.revision == managedTrafficPolicyRevision {
+        if orderAgainstInstalled() == .stale { return }
+        if orderAgainstInstalled() == .same {
             guard managedTrafficPolicyDigest == cache.sha256 else {
                 throw TonoAPIClient.APIError.invalidResponse
             }
@@ -485,8 +520,8 @@ extension AppState {
         // These two ask whether another task installed this document while this one
         // was validating. A document includes its signature, so an unsigned copy of
         // the same revision does not count as having installed the signed one.
-        if cache.revision < managedTrafficPolicyRevision { return }
-        if cache.revision == managedTrafficPolicyRevision {
+        if orderAgainstInstalled() == .stale { return }
+        if orderAgainstInstalled() == .same {
             guard managedTrafficPolicyDigest == cache.sha256 else {
                 throw TonoAPIClient.APIError.invalidResponse
             }
@@ -506,8 +541,8 @@ extension AppState {
         }
         if persistCache {
             try await managedTrafficPolicyProcessor.persistIfNewest(cache)
-            if cache.revision < managedTrafficPolicyRevision { return }
-            if cache.revision == managedTrafficPolicyRevision {
+            if orderAgainstInstalled() == .stale { return }
+            if orderAgainstInstalled() == .same {
                 guard managedTrafficPolicyDigest == cache.sha256 else {
                     throw TonoAPIClient.APIError.invalidResponse
                 }
@@ -532,6 +567,7 @@ extension AppState {
         managedTrafficPolicyRevision = cache.revision
         managedTrafficPolicyDigest = cache.sha256
         managedTrafficPolicySignature = cache.signature
+        managedTrafficPolicyRevisionAuthenticated = authenticated
 
         guard allowRuntimeTransition, behaviorChanged,
               isConnected || isConnecting else { return }

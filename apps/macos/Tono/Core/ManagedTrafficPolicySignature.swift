@@ -89,8 +89,95 @@ nonisolated enum ManagedTrafficPolicySignature {
         return key.isValidSignature(signatureData, for: message) ? .trusted : .untrustworthy
     }
 
+    /// The revision a policy document names for itself inside the signed json.
+    /// The envelope `revision` is outside the signature; this one is not (#317).
+    enum EmbeddedRevision: Equatable {
+        case absent
+        case value(Int)
+        /// The key is present but is not an integer. Read as a mismatch.
+        case malformed
+    }
+
+    static func embeddedRevision(in json: String) -> EmbeddedRevision {
+        guard let data = json.data(using: .utf8),
+              let probe = try? JSONDecoder().decode(
+                ManagedTrafficPolicyRevisionProbe.self,
+                from: data
+              ) else {
+            return .absent
+        }
+        return probe.embedded
+    }
+
+    /// Whether the revision *number* is evidence of order: the document was
+    /// signed by the expected key and the signed bytes name this revision.
+    /// Derived from the document and its signature alone, so a cached copy
+    /// answers the same after a restart as it did when it arrived.
+    static func revisionIsAuthenticated(
+        json: String,
+        revision: Int,
+        signature: String?,
+        publicKeyBase64: String = Self.publicKeyBase64
+    ) -> Bool {
+        embeddedRevision(in: json) == .value(revision)
+            && verdict(
+                json: json,
+                signature: signature,
+                publicKeyBase64: publicKeyBase64
+            ) == .trusted
+    }
+
+    enum RevisionOrder: Equatable {
+        case newer
+        case same
+        case stale
+    }
+
+    /// Only a revision inside verified signed bytes is evidence of order. A
+    /// signed revision replaces one nobody signed whatever the two numbers are
+    /// — that is how a client pinned by a replayed document under a forged
+    /// revision recovers — and once a signed revision is installed an unsigned
+    /// number can no longer move the gate. Otherwise the numbers decide, as
+    /// before. Host trust is not affected: it still comes from `verdict` and
+    /// the compiled allowlists alone.
+    static func revisionOrder(
+        candidate: Int,
+        candidateAuthenticated: Bool,
+        current: Int,
+        currentAuthenticated: Bool
+    ) -> RevisionOrder {
+        if candidateAuthenticated != currentAuthenticated {
+            return candidateAuthenticated ? .newer : .stale
+        }
+        if candidate == current { return .same }
+        return candidate > current ? .newer : .stale
+    }
+
     private static func normalized(_ signature: String?) -> String? {
         guard let signature, !signature.isEmpty else { return nil }
         return signature
+    }
+}
+
+/// Reads only the `revision` key of a policy document, telling an absent key
+/// apart from one that is present but not an integer.
+nonisolated private struct ManagedTrafficPolicyRevisionProbe: Decodable {
+    let embedded: ManagedTrafficPolicySignature.EmbeddedRevision
+
+    private enum CodingKeys: String, CodingKey {
+        case revision
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        guard container.contains(.revision) else {
+            embedded = .absent
+            return
+        }
+        if let value = try? container.decode(Int.self, forKey: .revision) {
+            embedded = .value(value)
+        } else {
+            embedded = .malformed
+        }
     }
 }

@@ -8,6 +8,17 @@ import XCTest
 /// list, so its name was resolved through the exit and the direct dial waited
 /// on a lookup that crossed the Pacific first.
 final class WeChatResolverPolicyTests: XCTestCase {
+    // Hosted CI has no WeChat installed; supply the discovered bundle path.
+    override func setUp() {
+        super.setUp()
+        ConfigPipeline.managedDirectBundlePathsOverride = ["/Applications/WeChat.app/"]
+    }
+
+    override func tearDown() {
+        ConfigPipeline.managedDirectBundlePathsOverride = nil
+        super.tearDown()
+    }
+
     private func runtime(
         directPolicy: ConfigPipeline.ManagedDirectRuntimePolicy?
     ) throws -> String {

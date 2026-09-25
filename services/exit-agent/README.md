@@ -78,7 +78,48 @@ old report IDs safe after a counter reset.
 
 `TONO_RETIRE_SHARED_LEGACY` is optional. When unset, the agent follows the
 control plane's `retireSharedLegacy` signal. Set it to `false` to block automatic
-retirement during rollback, or to `true` to force retirement.
+retirement during rollback, or to `true` to force retirement. Case does not
+matter (`1/true/yes/on`, `0/false/no/off`); any other value is logged and
+leaves `shared-legacy` as it is (no retirement that round).
+
+Retirement removes `shared-legacy` from the running Xray and from the static
+config (`TONO_XRAY_CONFIG`, default `/opt/tono-xray/current/config.json`), so
+a restart cannot bring it back. The file is replaced atomically with its owner
+and mode after `xray run -test` accepts it; the agent must be able to write it.
+Retirement is one-way per node: once persisted, a later `false` does not put
+`shared-legacy` back. Restoring it takes the `config.json.pre-metering.*` backup or a
+reprovision. A failed config write is reported and fails the round, but only
+after the roster ACK and usage report, so metering and quota enforcement keep
+running.
+
+A disabled or retired node gets `403 EXIT_NODE_DISABLED` on the roster. Only
+that answer makes the agent remove every `u:` client and `shared-legacy`,
+empty the hy2 allowlist and exit non-zero; stop `tono-xray` afterwards. Any
+other HTTP error or network failure keeps the last roster and retries.
+
+Xray drops every client added over its management API when it restarts. Each
+verified roster is therefore saved beside the state file as `state.json.roster`
+(mode 0600, service-owned, replaced atomically) before it is enforced. When the
+control plane cannot be reached (a network error or a 5xx/408/425/429 answer),
+the round reinstalls that saved roster if it is at most 24 hours old, keeps
+folding Xray counters into the durable totals, and exits non-zero without any
+acknowledgement. The next round that reaches the control plane reports the
+growth. An older, missing or unreadable copy restores nothing, and the round
+refuses with the reason. Any other control-plane answer, including a rejected
+token, an invalid roster or another node's roster, deletes the copy first; the
+403 `EXIT_NODE_DISABLED` answer for a disabled node deletes it before the
+node's clients are withdrawn. The copy is saved before the roster is
+enforced, so it is never older than the newest roster the node has fetched: it
+cannot reinstate an account a fetched roster had already removed. A revocation
+issued while the control plane is unreachable is not seen, so an Xray restart
+within 24 hours of the last successful fetch reinstalls that account (a running
+Xray keeps it in memory just the same). The restore takes effect on the next
+timer run after the Xray restart. hy2's allowlist is a file and survives
+restarts, so it is not touched during an outage.
+
+The copy holds every client UUID in plain text; these are the VLESS
+credentials (hy2's allowlist keeps only hashes). It is mode 0600 and owned by
+the agent's user; keep it out of VPS snapshots and backups.
 
 Run the regression suite with:
 

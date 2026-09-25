@@ -56,6 +56,7 @@ extension AppState {
                 managedTrafficPolicyRevision = -1
                 managedTrafficPolicyDigest = nil
                 managedTrafficPolicySignature = nil
+                managedTrafficPolicyRevisionAuthenticated = false
             }
         }
         print("[Tono] loadInitialData: \(proxyRegions.count) regions, \(rules.count) rules from disk")

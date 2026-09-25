@@ -261,7 +261,7 @@ async fn run_release_sequence(
 
     #[cfg(windows)]
     {
-        let _ = crate::core::sysopt::Sysopt::global().reset_sysproxy().await;
+        let _ = crate::core::sysopt::Sysopt::global().clear_owned_sysproxy().await;
     }
 
     let mut inner = state.lock().await;

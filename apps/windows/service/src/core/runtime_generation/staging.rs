@@ -289,7 +289,7 @@ pub(crate) async fn stage_runtime(
 
     for copy in &plan.copies {
         let target = resolve_in_generation(&generation, &copy.destination)?;
-        if let Err(error) = copy_staged_file(&copy.source, &target).await {
+        if let Err(error) = copy_staged_file(&copy.source, copy.identity.len, &target).await {
             return Ok(StageRuntimeOutcome::RestartRequired {
                 reason: StageRejection::RuntimeUnwritable {
                     detail: format!(
@@ -533,16 +533,111 @@ async fn replace_staged_file(staged: &Path, destination: &Path) -> std::io::Resu
     result
 }
 
-pub(super) async fn copy_staged_file(source: &str, destination: &Path) -> std::io::Result<()> {
+/// Copy `source`, which planning saw at `planned_len` bytes, into place at `destination`.
+///
+/// The open, the handle check and the whole copy run as one blocking call: a start copies after
+/// the previous core has stopped, so every round trip here is time without a tunnel.
+pub(super) async fn copy_staged_file(
+    source: &str,
+    planned_len: u64,
+    destination: &Path,
+) -> std::io::Result<()> {
     if let Some(parent) = destination.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
+    let requested = source.to_owned();
     let staged = staging_temp_path(destination);
-    if let Err(error) = tokio::fs::copy(source, &staged).await {
+    let target = staged.clone();
+    let copied = tokio::task::spawn_blocking(move || {
+        let reader = open_validated_source(&requested)?;
+        copy_from_handle(reader, planned_len, &target)
+    })
+    .await
+    .map_err(std::io::Error::other)
+    .and_then(|copied| copied);
+    if let Err(error) = copied {
         let _ = tokio::fs::remove_file(&staged).await;
         return Err(error);
     }
     replace_staged_file(&staged, destination).await
+}
+
+/// Open a validated asset source and prove the handle is the file validation approved.
+///
+/// `validate_source` checks a symlink-free canonical path while planning, but the copy runs
+/// later — after the previous core has been stopped — and every open by path resolves the path
+/// again. A directory the owner can write may have become a junction or symlink in between,
+/// which would have the service copy a file from outside the owner's roots. So the copy reads
+/// from this one handle, and the handle must still resolve to exactly the validated path.
+fn open_validated_source(source: &str) -> std::io::Result<std::fs::File> {
+    let file = std::fs::File::open(source)?;
+    if !file.metadata()?.is_file() || !handle_is_at(&file, Path::new(source))? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "runtime asset source no longer resolves to its validated path",
+        ));
+    }
+    Ok(file)
+}
+
+#[cfg(windows)]
+fn handle_is_at(file: &std::fs::File, path: &Path) -> std::io::Result<bool> {
+    use std::os::windows::ffi::OsStringExt as _;
+    use std::os::windows::io::AsRawHandle as _;
+    use windows_sys::Win32::Storage::FileSystem::GetFinalPathNameByHandleW;
+
+    // Flags 0 is FILE_NAME_NORMALIZED | VOLUME_NAME_DOS: the same `\\?\C:\...` form
+    // `std::fs::canonicalize` produced for the validated path.
+    let mut buffer = vec![0_u16; 512];
+    loop {
+        let written = unsafe {
+            GetFinalPathNameByHandleW(
+                file.as_raw_handle(),
+                buffer.as_mut_ptr(),
+                buffer.len() as u32,
+                0,
+            )
+        } as usize;
+        if written == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if written < buffer.len() {
+            let resolved = PathBuf::from(std::ffi::OsString::from_wide(&buffer[..written]));
+            return Ok(resolved == path);
+        }
+        buffer.resize(written, 0);
+    }
+}
+
+#[cfg(unix)]
+fn handle_is_at(file: &std::fs::File, path: &Path) -> std::io::Result<bool> {
+    use std::os::unix::fs::MetadataExt as _;
+
+    let opened = file.metadata()?;
+    let named = std::fs::symlink_metadata(path)?;
+    Ok(std::fs::canonicalize(path)? == path
+        && named.dev() == opened.dev()
+        && named.ino() == opened.ino())
+}
+
+/// Copy at most the length planning recorded. The owner can still append to the file it named
+/// after the handle was pinned; a source that grew is refused rather than copied without bound
+/// into the Service's data (or cut short into a truncated asset). A shorter source is whole
+/// content and is copied; the caller's re-stat sees its changed identity.
+fn copy_from_handle(reader: std::fs::File, planned_len: u64, staged: &Path) -> std::io::Result<()> {
+    use std::io::{Read as _, Write as _};
+
+    // A large buffer keeps a geo database to a few dozen reads.
+    let mut writer = std::io::BufWriter::with_capacity(1 << 20, std::fs::File::create(staged)?);
+    // One byte past the plan is enough to see growth without copying it.
+    let copied = std::io::copy(&mut reader.take(planned_len.saturating_add(1)), &mut writer)?;
+    if copied > planned_len {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("runtime asset source grew past the {planned_len} bytes it was planned at"),
+        ));
+    }
+    writer.flush()
 }
 
 pub(super) async fn commit_staged_config(
@@ -599,6 +694,45 @@ static STAGING_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// H2-F4: the copy happens after the previous core is stopped, well after the source was
+    /// validated. A source directory swapped for a junction (a symlink off Windows) in between
+    /// must make the copy fail, not follow the link out of the owner's roots.
+    #[tokio::test]
+    async fn a_source_directory_swapped_for_a_link_after_validation_is_not_copied()
+    -> anyhow::Result<()> {
+        let raw = std::env::temp_dir().join(format!("service-asset-relink-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&raw);
+        std::fs::create_dir_all(raw.join("providers"))?;
+        std::fs::create_dir_all(raw.join("elsewhere"))?;
+        std::fs::write(raw.join("providers/rules.yaml"), b"validated")?;
+        // Same length as the validated file, so only the handle check can refuse the copy.
+        std::fs::write(raw.join("elsewhere/rules.yaml"), b"elsewhere")?;
+        // What `validate_source` would have approved: the canonical path, as it stood.
+        let root = std::fs::canonicalize(&raw)?;
+        let validated = root.join("providers").join("rules.yaml");
+        let destination = root.join("generation").join("rules.yaml");
+
+        std::fs::rename(raw.join("providers"), raw.join("providers-before"))?;
+        #[cfg(windows)]
+        {
+            let status = std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(raw.join("providers"))
+                .arg(raw.join("elsewhere"))
+                .status()?;
+            anyhow::ensure!(status.success(), "junction could not be created");
+        }
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(raw.join("elsewhere"), raw.join("providers"))?;
+
+        let result = copy_staged_file(&validated.to_string_lossy(), 9, &destination).await;
+
+        assert!(result.is_err(), "a relinked source must not be copied");
+        assert!(!destination.exists());
+        std::fs::remove_dir_all(&raw)?;
+        Ok(())
+    }
 
     fn identity(source: &str, len: u64, mtime_ns: u128) -> SourceIdentity {
         SourceIdentity {

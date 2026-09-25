@@ -1,20 +1,6 @@
-//! Physical interface detection and the non-critical redacted runtime copy.
+//! Physical interface detection and removal of the legacy runtime copy.
 
-use std::sync::Arc;
-use std::time::Duration;
 use tono_logging::{Type, logging};
-use crate::tono::state::TonoState;
-
-/// One absolute budget covers service readiness, the cold Core start, controller/DNS
-/// verification, fail-closed cloud-policy hot reload, locking, and the post-lock verification
-/// group. Per-stage retries never reset this clock.
-///
-/// The redacted runtime copy is a diagnostics convenience, but it lands under `%APPDATA%`,
-/// which enterprise policy can redirect to a UNC share or a sync-provider placeholder folder.
-/// `OpenOptions::open`/`write_all` then have no timeout of their own, so an offline share can
-/// park the write for minutes. Bound it well under the transaction budget: a diagnostics file
-/// must never be the reason a connect spends its clock.
-pub(super) const REDACTED_COPY_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The physical interface carrying the default route. Windows uses
 /// `GetBestRoute2` (runtime-unverified here; covered by the xwin check and
@@ -66,11 +52,7 @@ pub(super) async fn detect_physical_interface_route_command() -> Result<String, 
 /// but Tono's optional DIRECT outbounds must bind to a real hardware interface.
 #[cfg(windows)]
 pub(super) fn detect_physical_interface_windows() -> Result<String, String> {
-    use windows_sys::Win32::NetworkManagement::IpHelper::{
-        GetBestRoute2, GetIfEntry2, IF_TYPE_ETHERNET_CSMACD, IF_TYPE_IEEE80211,
-        IF_TYPE_PROP_VIRTUAL, IF_TYPE_TUNNEL, MIB_IF_ROW2, MIB_IF_TYPE_LOOPBACK,
-        MIB_IPFORWARD_ROW2,
-    };
+    use windows_sys::Win32::NetworkManagement::IpHelper::{GetBestRoute2, MIB_IPFORWARD_ROW2};
     use windows_sys::Win32::Networking::WinSock::{AF_INET, IN_ADDR, SOCKADDR_INET};
 
     // 8.8.8.8 — byte-symmetric, so the S_addr value needs no byte swapping.
@@ -107,39 +89,10 @@ pub(super) fn detect_physical_interface_windows() -> Result<String, String> {
 
     let mut rejected = Vec::new();
     for luid in candidates {
-        let mut interface = MIB_IF_ROW2 {
-            InterfaceLuid: windows_sys::Win32::NetworkManagement::Ndis::NET_LUID_LH {
-                Value: luid,
-            },
-            ..Default::default()
-        };
-        // SAFETY: `interface` is initialized and the LUID came from IP Helper.
-        let status = unsafe { GetIfEntry2(&mut interface) };
-        if status != 0 {
-            rejected.push(format!("LUID {luid}: GetIfEntry2 failed ({status})"));
-            continue;
+        match hardware_uplink_alias(luid) {
+            Ok((alias, _)) => return Ok(alias),
+            Err(reason) => rejected.push(reason),
         }
-        let description = utf16_field(&interface.Description);
-        let alias = utf16_field(&interface.Alias);
-        if alias.is_empty() {
-            rejected.push(format!("LUID {luid}: empty interface alias"));
-            continue;
-        }
-        let hardware = interface.InterfaceAndOperStatusFlags._bitfield & 0x01 != 0;
-        let known_hardware_type = matches!(interface.Type, IF_TYPE_ETHERNET_CSMACD | IF_TYPE_IEEE80211);
-        let virtual_description = is_virtual_uplink_description(&description);
-        let forbidden_type = matches!(
-            interface.Type,
-            MIB_IF_TYPE_LOOPBACK | IF_TYPE_PROP_VIRTUAL | IF_TYPE_TUNNEL
-        );
-        if virtual_description || forbidden_type || (!hardware && !known_hardware_type) {
-            rejected.push(format!(
-                "{alias:?} ({description:?}, type {}, hardware={hardware})",
-                interface.Type
-            ));
-            continue;
-        }
-        return Ok(alias);
     }
 
     Err(format!(
@@ -150,6 +103,76 @@ pub(super) fn detect_physical_interface_windows() -> Result<String, String> {
             rejected.join("; ")
         }
     ))
+}
+
+/// X2-1: every hardware adapter that currently carries an IPv4 default route and is
+/// operationally up, by alias. Unlike [`detect_physical_interface`] this is safe after WinTUN
+/// starts: it never consults `GetBestRoute2` (which then resolves to Tono's own adapter), and the
+/// same filter that keeps Wintun/virtual adapters out of the DIRECT choice applies to each row.
+/// Used only to decide whether the committed DIRECT binding still names a live uplink.
+pub(super) async fn usable_physical_uplinks() -> Result<Vec<String>, String> {
+    #[cfg(windows)]
+    {
+        tokio::task::spawn_blocking(|| -> Result<Vec<String>, String> {
+            let mut uplinks = Vec::new();
+            for luid in default_route_interface_luids()? {
+                if let Ok((alias, true)) = hardware_uplink_alias(luid)
+                    && !uplinks.contains(&alias)
+                {
+                    uplinks.push(alias);
+                }
+            }
+            Ok(uplinks)
+        })
+        .await
+        .map_err(|error| format!("physical uplink enumeration worker failed: {error}"))?
+    }
+    #[cfg(not(windows))]
+    {
+        detect_physical_interface_route_command().await.map(|alias| vec![alias])
+    }
+}
+
+/// One default-route candidate: its alias and whether it is operationally up, or why it is not
+/// an acceptable hardware uplink for DIRECT.
+#[cfg(windows)]
+fn hardware_uplink_alias(luid: u64) -> Result<(String, bool), String> {
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        GetIfEntry2, IF_TYPE_ETHERNET_CSMACD, IF_TYPE_IEEE80211, IF_TYPE_PROP_VIRTUAL, IF_TYPE_TUNNEL, MIB_IF_ROW2,
+        MIB_IF_TYPE_LOOPBACK,
+    };
+    use windows_sys::Win32::NetworkManagement::Ndis::IfOperStatusUp;
+
+    let mut interface = MIB_IF_ROW2 {
+        InterfaceLuid: windows_sys::Win32::NetworkManagement::Ndis::NET_LUID_LH {
+            Value: luid,
+        },
+        ..Default::default()
+    };
+    // SAFETY: `interface` is initialized and the LUID came from IP Helper.
+    let status = unsafe { GetIfEntry2(&mut interface) };
+    if status != 0 {
+        return Err(format!("LUID {luid}: GetIfEntry2 failed ({status})"));
+    }
+    let description = utf16_field(&interface.Description);
+    let alias = utf16_field(&interface.Alias);
+    if alias.is_empty() {
+        return Err(format!("LUID {luid}: empty interface alias"));
+    }
+    let hardware = interface.InterfaceAndOperStatusFlags._bitfield & 0x01 != 0;
+    let known_hardware_type = matches!(interface.Type, IF_TYPE_ETHERNET_CSMACD | IF_TYPE_IEEE80211);
+    let virtual_description = is_virtual_uplink_description(&description);
+    let forbidden_type = matches!(
+        interface.Type,
+        MIB_IF_TYPE_LOOPBACK | IF_TYPE_PROP_VIRTUAL | IF_TYPE_TUNNEL
+    );
+    if virtual_description || forbidden_type || (!hardware && !known_hardware_type) {
+        return Err(format!(
+            "{alias:?} ({description:?}, type {}, hardware={hardware})",
+            interface.Type
+        ));
+    }
+    Ok((alias, interface.OperStatus == IfOperStatusUp))
 }
 
 /// The route chosen by Windows can point at a host-only/NAT adapter even while a real
@@ -222,74 +245,23 @@ pub(super) fn is_virtual_uplink_description(description: &str) -> bool {
     MARKERS.iter().any(|marker| lowered.contains(marker))
 }
 
-/// Open the redacted copy with the per-user DACL the rest of Tono's private files get.
-///
-/// It was the one file in the set written through plain `OpenOptions`, so it inherited whatever
-/// the parent directory grants while `selection.json` and the owner token did not — and it is
-/// the file that describes the selected node. A copy left by an earlier build fails the
-/// private-file validation on its inherited ACL; replacing it once is how those converge.
-#[cfg(windows)]
-pub(super) fn open_private_redacted_copy(path: &std::path::Path) -> std::io::Result<std::fs::File> {
-    let open = || crate::core::owner_identity::open_or_create_private_current_user_file(path);
-    let file = match open() {
-        Ok(file) => file,
-        Err(error) => {
-            if !path.exists() {
-                // Nothing to converge — the create itself failed, so report that.
-                return Err(std::io::Error::other(error));
-            }
-            std::fs::remove_file(path)?;
-            open().map_err(std::io::Error::other)?
-        }
-    };
-    // The helper opens without truncating; this file is always rewritten whole.
-    file.set_len(0)?;
-    Ok(file)
-}
+/// Earlier builds wrote each connect's runtime to this file in the Tono data directory. Only the
+/// controller secret was blanked: exit UUIDs, Reality parameters and the residential SOCKS5
+/// username and password stayed as issued to the account. Nothing read it (the runtime reaches
+/// the Service over IPC), so it is no longer written.
+const LEGACY_RUNTIME_COPY: &str = "owned-runtime.redacted.yaml";
 
-/// Persist the redacted runtime copy (§5: the secret never touches disk).
-///
-/// Never fails the connect. The copy is a diagnostics convenience — the runtime the core
-/// actually receives travels over IPC and never through this file — so refusing an otherwise
-/// healthy connect because a support artefact could not be written trades availability for
-/// nothing. Skipping is also the safe direction for §5: not writing cannot leak. It is loud in
-/// the log instead, and the timeout is reported separately from a write error so a stalled
-/// redirected AppData is diagnosable rather than looking like a permissions problem.
-pub(super) async fn write_redacted_copy(state: &Arc<TonoState>, redacted: &str) {
-    let path = { state.lock().await.catalog_dir.join("owned-runtime.redacted.yaml") };
-    let write = tokio::task::spawn_blocking({
-        let redacted = redacted.to_string();
-        move || -> std::io::Result<()> {
-            #[cfg(windows)]
-            let mut file = open_private_redacted_copy(&path)?;
-            #[cfg(not(windows))]
-            let mut file = {
-                let mut options = std::fs::OpenOptions::new();
-                options.write(true).create(true).truncate(true);
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::OpenOptionsExt as _;
-                    options.mode(0o600);
-                }
-                options.open(&path)?
-            };
-            use std::io::Write as _;
-            file.write_all(redacted.as_bytes())
-        }
-    });
-    // Abandoning the JoinHandle cannot stop the blocking thread — a thread parked inside a UNC
-    // `open` stays parked until the redirector gives up. It commits nothing the connect depends
-    // on, so leaving it behind is safe; what matters is that this future returns.
-    match tokio::time::timeout(REDACTED_COPY_WRITE_TIMEOUT, write).await {
-        Ok(Ok(Ok(()))) => {}
-        // Previously dropped on the floor: only the JoinError was reported, so a failed write
-        // was silent.
-        Ok(Ok(Err(err))) => logging!(warn, Type::Service, "Tono: 写入 redacted 运行时副本失败: {err}"),
-        Ok(Err(err)) => logging!(warn, Type::Service, "Tono: 写入 redacted 运行时副本失败: {err}"),
-        Err(_elapsed) => logging!(
+/// Remove a runtime copy an earlier build left behind. Called at startup and when an account
+/// closes, so the copy never outlives the account whose catalog it was built from. A failed
+/// delete is logged; nothing recreates the file.
+pub(crate) fn remove_legacy_runtime_copy(catalog_dir: &std::path::Path) {
+    match std::fs::remove_file(catalog_dir.join(LEGACY_RUNTIME_COPY)) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => logging!(
             warn,
             Type::Service,
-            "Tono: 写入 redacted 运行时副本超时 ({REDACTED_COPY_WRITE_TIMEOUT:?})，跳过；连接继续"
+            "Tono: failed to delete the previous build's runtime copy: {error}"
         ),
     }
 }

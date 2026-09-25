@@ -16,6 +16,11 @@ extension AccountSession {
             // immediately instead of blocking AppKit's launch callback.
             shouldResumeProtection =
                 try await RuntimeCleanup.cleanupStaleRuntime()
+            // A session carried over from another Mac is that Mac's; drop it
+            // before anything uses it, and sign in here as a new device.
+            try keychain.discardSessionCopiedFromAnotherMac(
+                currentAnchor: KeychainStore.hardwareAnchor()
+            )
             guard try keychain.string(for: .refreshToken) != nil else {
                 deactivateAppRoutingResearch()
                 // No account owns this launch, so the cache loaded from disk a
@@ -58,10 +63,12 @@ extension AccountSession {
                 DiagnosticsLogOwnership.shared.activate(owner: restoredUser.id)
                 ManagedExitCatalogOwnership.adopt(restoredUser.id)
                 guard restoredUser.suspended != true else {
-                    pauseAppRoutingResearch()
-                    state = .suspended
+                    enterEntitlementBlock(detail: nil)
                     return
                 }
+                // Tono accepts this account: a refusal heard earlier in this
+                // process no longer blocks Connect (#582).
+                api.offlineGate.readmit()
                 await startCloudOnlyRuntime()
                 try Task.checkCancellation()
                 if !Task.isCancelled, state == .ready { refreshDevicesInBackground() }
@@ -81,10 +88,10 @@ extension AccountSession {
             devices = restoredDevices
             ManagedExitCatalogOwnership.adopt(restoredUser.id)
             guard user?.suspended != true else {
-                pauseAppRoutingResearch()
-                state = .suspended
+                enterEntitlementBlock(detail: nil)
                 return
             }
+            api.offlineGate.readmit()
             device = devices.first(where: { $0.current == true })
             await resumeOrEnrollRuntime()
             try Task.checkCancellation()
@@ -94,15 +101,135 @@ extension AccountSession {
             // instead of stranding the session behind hasStartedRestore.
             hasStartedRestore = false
         } catch {
+            await settleRestoreFailure(error)
+        }
+    }
+
+    /// Restore's answer when the stored session could not be validated. Only
+    /// an unreachable control plane may fall back to the offline grant
+    /// (#582); any server answer (401, 403, 5xx, an invalid body) keeps the
+    /// meaning it has always had here, a refused launch included.
+    func settleRestoreFailure(_ error: Error) async {
+        offlineVerifiedAt = nil
+        guard Self.isUnreachable(error), !protectionUnconfirmedConsumer() else {
+            await fail(error, signsOutOnUnauthorized: true)
+            return
+        }
+        let tokenSha256 = await api.currentRefreshTokenDigest()
+        guard !Task.isCancelled else {
+            hasStartedRestore = false
+            return
+        }
+        // Memory only: the token as hydrated and the catalog the launch
+        // installed, never a re-read of the cache on disk.
+        let admission = api.offlineGate.admit(
+            tokenSha256: tokenSha256,
+            installed: installedCatalogConsumer()
+        )
+        switch admission {
+        case let .admitted(verifiedAt):
+            LocalTrafficAudit.shared.recordEvent("offline_admission", details: ["result": "admitted"])
+            do {
+                try await sidecar.prepareCloudOnly()
+                try Task.checkCancellation()
+                try cloudFallbackConsumer(shouldResumeProtection)
+            } catch is CancellationError {
+                api.offlineGate.leaveOffline()
+                hasStartedRestore = false
+                return
+            } catch {
+                api.offlineGate.leaveOffline()
+                await fail(error, signsOutOnUnauthorized: true)
+                return
+            }
+            shouldResumeProtection = false
+            offlineVerifiedAt = verifiedAt
+            state = .ready
+            startOfflineVerification()
+        case let .revoked(reason):
+            LocalTrafficAudit.shared.recordEvent(
+                "offline_admission", details: ["result": "revoked", "reason": reason]
+            )
+            enterEntitlementBlock(detail: nil)
+        case let .refused(reason):
+            LocalTrafficAudit.shared.recordEvent(
+                "offline_admission", details: ["result": "refused", "reason": reason]
+            )
             await fail(error, signsOutOnUnauthorized: true)
         }
     }
 
-    func loadAuthMethods() async {
-        guard user == nil, !authMethodsLoading else { return }
+    private static func isUnreachable(_ error: Error) -> Bool {
+        guard let apiError = error as? TonoAPIClient.APIError else { return false }
+        switch apiError {
+        // #588: a clock error is also a failure before any status line; the
+        // offline grant, not a refusal, decides.
+        case .transport, .clockSkew: return true
+        default: return false
+        }
+    }
+
+    static let offlineVerificationInterval: Duration = .seconds(60)
+
+    /// #582: Ready offline asks Tono for the account again on a fixed cadence.
+    /// The first server answer ends offline mode: a refusal suspends through
+    /// the verdict sink, which retires this loop with the state change, and an
+    /// accepted account finishes the restore the unreachable launch could not.
+    func startOfflineVerification() {
+        offlineVerificationTask?.cancel()
         let revision = accountReadRevision
+        offlineVerificationTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: AccountSession.offlineVerificationInterval)
+                guard let self, !Task.isCancelled, accountReadRevision == revision else { return }
+                let restoredUser: TonoUser
+                do {
+                    restoredUser = try await api.me().user
+                } catch {
+                    // Still unreachable, or no answer for the account yet. A
+                    // refusal has already reached the verdict sink.
+                    continue
+                }
+                guard !Task.isCancelled, accountReadRevision == revision else { return }
+                completeOfflineRestore(restoredUser)
+                return
+            }
+        }
+    }
+
+    /// Tono answered for an account an unreachable launch admitted offline.
+    /// Finish that restore as it would have finished online; a connection the
+    /// user made offline is left exactly as it is.
+    private func completeOfflineRestore(_ restoredUser: TonoUser) {
+        api.offlineGate.leaveOffline()
+        offlineVerifiedAt = nil
+        user = restoredUser
+        DiagnosticsLogOwnership.shared.activate(owner: restoredUser.id)
+        ManagedExitCatalogOwnership.adopt(restoredUser.id)
+        guard restoredUser.suspended != true else {
+            enterEntitlementBlock(detail: nil)
+            return
+        }
+        startCatalogSync(refreshImmediately: true)
+        refreshDevicesInBackground()
+    }
+
+    func loadAuthMethods() async {
+        // A read retired by a newer presentation (a protection release, a
+        // sign-out) can no longer publish, so it must not hold off the read
+        // that replaces it either.
+        guard user == nil,
+              !authMethodsLoading || authMethodsLoadRevision != accountReadRevision
+        else { return }
+        let revision = accountReadRevision
+        authMethodsLoadRevision = revision
         authMethodsLoading = true
-        defer { authMethodsLoading = false }
+        defer {
+            if authMethodsLoadRevision == revision {
+                authMethodsLoadRevision = nil
+                authMethodsLoading = false
+            }
+        }
         do {
             let methods = try await api.authMethods()
             guard !Task.isCancelled, user == nil, accountReadRevision == revision else { return }
@@ -135,9 +262,11 @@ extension AccountSession {
         case .suspended:
             // A block raised over a running session is an account fact, not a
             // broken session. Re-read the account instead of re-running the
-            // launch sequence, whose first step stops the core this Mac is
-            // still protected by.
-            if blockedWhileReady {
+            // launch sequence, whose first step is crash cleanup of the
+            // runtime this session still owns; leaving the block restarts it.
+            // A session admitted offline (#582) has no account to re-read yet,
+            // so it runs the full restore instead.
+            if blockedWhileReady, user != nil {
                 await refreshAccount()
                 return
             }
@@ -263,6 +392,10 @@ extension AccountSession {
         // into a later account even when server logout is slow or unavailable.
         deactivateAppRoutingResearch()
         ManagedExitCatalogOwnership.purge()
+        // A catalog request in flight is a detached task that cancelling the
+        // account work does not reach; the cleanup would otherwise wait out
+        // its network timeout. The slot stays so the cleanup still drains it.
+        catalogRefreshTask?.task.cancel()
         await accountLifecycle.enqueueCleanup(kind: .signOut) {
             await self.stopRuntime(logOutIdentity: true, releaseKillSwitch: true)
             await self.api.logout()
@@ -322,6 +455,7 @@ extension AccountSession {
                 try Task.checkCancellation()
                 guard accountReadRevision == accountRevision else { return false }
                 lastCatalogFailureMessage = nil
+                await recordOfflineGrant(confirming: catalog)
                 return true
             } catch is CancellationError {
                 return false
@@ -343,6 +477,20 @@ extension AccountSession {
             }
         }
         return false
+    }
+
+    /// #582: the server has just confirmed `catalog`. When it is exactly what
+    /// memory holds (installed now, or already installed and unchanged),
+    /// record the offline grant from this response's digests — never from the
+    /// cache a launch loaded from disk.
+    private func recordOfflineGrant(confirming catalog: TonoExitCatalogResponse) async {
+        guard let owner = user?.id else { return }
+        let confirmed = InstalledCatalogDigests(
+            catalogSha256: catalog.sha256,
+            routingSha256: AppState.catalogRoutingToken(routing: catalog.routing)
+        )
+        guard installedCatalogConsumer() == confirmed else { return }
+        await api.recordOfflineGrant(accountId: owner, confirmed: confirmed)
     }
 
     func cancelManagedCatalogRefresh() async {
@@ -462,7 +610,10 @@ extension AccountSession {
             if refreshed.suspended == true {
                 enterEntitlementBlock(detail: nil)
             } else {
-                leaveEntitlementBlock()
+                // Accepted again (Check again): an earlier refusal no longer
+                // blocks the Connect the resume below may start (#582).
+                api.offlineGate.readmit()
+                await leaveEntitlementBlock()
             }
         } catch is CancellationError {
             return
@@ -493,22 +644,114 @@ extension AccountSession {
     /// which — expiry, allowance or a disabled account — instead of being signed
     /// out with a session-expired message, and protection is left exactly as it
     /// is. A nil detail falls back to the screen's own general copy.
+    ///
+    /// The exits in the cached catalog carry this device's client identity,
+    /// which the control plane has just refused. They are withdrawn before the
+    /// first suspension point, so no wake, reconnect or network-change path can
+    /// start a Core with them, and the running Core is stopped with PF kept
+    /// armed: the Mac stays Protected Offline and the suspended screen offers
+    /// Restore internet. The network-log uploader stops too: every sweep would
+    /// only have its token renewal refused again. The runtime start that ends
+    /// the block starts it again.
     func enterEntitlementBlock(detail: String?) {
+        entitlementRefusals &+= 1
         entitlementDetail = detail
         if state == .ready { blockedWhileReady = true }
         pauseAppRoutingResearch()
         state = .suspended
+        ManagedExitCatalogOwnership.purge()
+        Task { [weak self] in await self?.descriptorConsumer(nil) }
+        updateDiagnosticsLogUploading()
+    }
+
+    /// #582: the account side of the verdict sink `TonoAPIClient.sendData`
+    /// reports every classified server answer to. Memory and disk have taken
+    /// it already (Connect is refused from there on); here it reaches the
+    /// account.
+    func installSessionVerdictSink() {
+        api.offlineGate.noteReadScope(accountReadRevision)
+        api.offlineGate.setVerdictHandler { [weak self] report in
+            Task { @MainActor in self?.applySessionVerdict(report) }
+        }
+    }
+
+    /// Generalises the refusal handling above to every endpoint: a refusal of
+    /// this session suspends the account from any state but signed out or
+    /// mid-sign-in, protection left as it is. Only the presentation the
+    /// request started under is suspended; a refusal a caller settles itself
+    /// (`refreshAccount`) moves that presentation first, so it is never
+    /// applied twice. Any answer ends offline mode.
+    func applySessionVerdict(_ report: SessionVerdictReport) {
+        if offlineVerifiedAt != nil { offlineVerifiedAt = api.offlineGate.offlineVerifiedAt }
+        guard case let .refused(code) = report.verdict,
+              report.readScope == accountReadRevision else { return }
+        switch state {
+        case .signedOut, .authenticating: return
+        default: break
+        }
+        let detail = code.flatMap { code in
+            TonoAPIClient.entitlementCodes.contains(code)
+                ? TonoAPIClient.APIError.entitlementBlocked(code: code, message: nil).errorDescription
+                : nil
+        }
+        enterEntitlementBlock(detail: detail)
     }
 
     /// The control plane accepted this account again, so the block is lifted
-    /// and the running session it interrupted resumes where it paused —
-    /// including the synchronization loop, which stops outside `.ready`.
-    func leaveEntitlementBlock() {
-        guard state == .suspended, blockedWhileReady else { return }
+    /// and the session it interrupted resumes. The block withdrew the exits and
+    /// stopped the Core, so the runtime starts again from a freshly fetched
+    /// catalog — the synchronization loop with it — and reconnects when
+    /// protection still holds this Mac offline. Account lifecycle work, so a
+    /// sign-out or Restore internet cancels and drains it first.
+    func leaveEntitlementBlock() async {
+        guard state == .suspended, blockedWhileReady, user != nil else { return }
+        await accountLifecycle.run { await self.resumeAfterEntitlementBlock() }
+    }
+
+    private func resumeAfterEntitlementBlock() async {
+        guard state == .suspended, blockedWhileReady, let owner = user?.id else { return }
+        let revision = accountReadRevision
+        let refusals = entitlementRefusals
+        func isCurrent() -> Bool {
+            !Task.isCancelled && accountReadRevision == revision
+                && entitlementRefusals == refusals
+                && state == .suspended && user?.id == owner
+        }
+        func keepBlock() {
+            // No fresh exits: the refusal barrier and the block stand, and
+            // Check again retries the re-read.
+            guard state == .suspended, user?.id == owner else { return }
+            ManagedExitCatalogOwnership.purge()
+        }
+        // A catalog request still in flight from before the block belongs to
+        // reads the block retired. Joining it would hand back its discarded
+        // result instead of the fresh catalog this needs.
+        await cancelManagedCatalogRefresh()
+        guard isCurrent() else { return }
+        ManagedExitCatalogOwnership.adopt(owner)
+        guard await refreshManagedCatalog(attempts: 2), isCurrent() else {
+            keepBlock()
+            return
+        }
+        // The in-app flag can lag a release made outside the app (the root
+        // emergency disarm). Only a helper-confirmed release retires the
+        // intent; an unreachable helper keeps it.
+        if protectionBlockedConsumer() { shouldResumeProtection = true }
+        let helperAnswer = await retireResumeIntentIfProtectionReleased()
+        guard isCurrent() else {
+            keepBlock()
+            return
+        }
+        // Check again asked for the account, not for a helper repair. A
+        // rejecting helper, or reconnects paused until the user acts, would
+        // turn the resume into an administrator prompt nobody asked for;
+        // the runtime starts without it and PF stays exactly as it is.
+        if helperAnswer == .rejected || protectedReconnectPausedConsumer() {
+            shouldResumeProtection = false
+        }
         blockedWhileReady = false
         entitlementDetail = nil
-        state = .ready
-        startCatalogSync()
+        await performRuntimeRetry()
     }
 
     /// Transfers the one-time enrollment material and immediately removes the
@@ -561,6 +804,28 @@ extension AccountSession {
         } catch { await fail(error) }
     }
 
+    /// A resume intent can outlive the sign-out that kept protection (a launch
+    /// 401), and so can the armed intent behind it. The runtime this sign-in
+    /// starts would consume the resume intent and reconnect, re-arming PF, and
+    /// a stale armed intent re-arms it at the next sleep. So first ask the
+    /// helper: AppState accepts a confirmed release since then (the
+    /// root emergency disarm), clearing the armed intent, and the resume
+    /// intent retires with it. An unreachable or rejecting helper is no
+    /// evidence of a release, and both intents stand. The armed intent alone
+    /// is enough to ask: a Protected Offline native-update recovery arms it
+    /// without a resume intent. Returns the helper's answer (released, still
+    /// armed, rejected or unavailable), or nil when neither intent was set.
+    @discardableResult
+    func retireResumeIntentIfProtectionReleased() async
+        -> KillSwitchService.StatusObservation? {
+        guard shouldResumeProtection || KillSwitchService.isArmed else { return nil }
+        let answer = await protectionReleaseConsumer()
+        if case .confirmed(requiresProtectionRecovery: false) = answer {
+            shouldResumeProtection = false
+        }
+        return answer
+    }
+
     func authenticate(_ operation: @escaping @MainActor () async throws -> TonoAuthResponse) async {
         await accountLifecycle.run { await self.performAuthentication(operation) }
     }
@@ -586,10 +851,10 @@ extension AccountSession {
             adoptEnrollment(response.enrollment)
             try await reloadDevices()
             if response.user.suspended == true {
-                pauseAppRoutingResearch()
-                state = .suspended
+                enterEntitlementBlock(detail: nil)
                 return
             }
+            await retireResumeIntentIfProtectionReleased()
             if !AppProfile.homeExitEnabled {
                 // Managed Reality exits authenticate directly with the Tono
                 // control plane. They never consume or wait for a Tailscale
