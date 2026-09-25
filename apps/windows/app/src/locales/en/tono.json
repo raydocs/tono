@@ -247,6 +247,10 @@
     "changeEmail": "Use another email",
     "invalidEmail": "Enter a valid email",
     "invalidCode": "Enter the 6-digit code",
+    "noEmail": {
+      "title": "No email yet?",
+      "description": "Check spam and the address above, or send again. If it still doesn't arrive, copy the details below for support."
+    },
     "suspended": {
       "title": "Account paused",
       "description": "Contact support."
@@ -275,6 +279,7 @@
       "rateLimited": "Too many tries. Wait a few minutes.",
       "deviceLimit": "Device limit reached. Remove one from a signed-in device.",
       "sessionExpired": "That code expired. Request a new one.",
+      "codeRejected": "That code is wrong or expired. Request a new one.",
       "serverError": "Sign-in service is temporarily busy or unavailable. Please try again later or contact support."
     }
   },

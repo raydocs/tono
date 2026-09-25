@@ -92,6 +92,16 @@ const LoginPage = () => {
     status?.uiState !== 'connected' &&
     (status?.protectionBlocked === true || status?.killSwitch?.wanted === true)
 
+  const errorOffersSupport =
+    Boolean(error) &&
+    error !== t('tono.login.invalidEmail') &&
+    error !== t('tono.login.invalidCode')
+  // `auth/email/start` answers 202 for every address and a failed delivery is
+  // silent, so a code that has not arrived by the time resend opens (60 s) gets
+  // its own way to support (#596). An error already carrying support wins.
+  const showNoEmailHint =
+    codeSent && countdown === 0 && !sending && !errorOffersSupport
+
   const resetToStart = () => {
     setCodeSent(false)
     setSentAck(false)
@@ -688,11 +698,9 @@ const LoginPage = () => {
             {error}
           </p>
         )}
-        {error &&
-          error !== t('tono.login.invalidEmail') &&
-          error !== t('tono.login.invalidCode') && (
-            <SupportContact email={email} extra={error} />
-          )}
+        {errorOffersSupport && (
+          <SupportContact email={email} extra={error ?? undefined} />
+        )}
         {codeSent && (
           <div
             id="tono-code-help"
@@ -733,6 +741,30 @@ const LoginPage = () => {
             >
               {t('tono.login.codeFrom')}
             </p>
+          </div>
+        )}
+        {showNoEmailHint && (
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              alignItems: 'center',
+              textAlign: 'center',
+            }}
+          >
+            <strong style={{ fontSize: 12, color: text.primary }}>
+              {t('tono.login.noEmail.title')}
+            </strong>
+            <span
+              style={{ fontSize: 12, lineHeight: 1.45, color: text.secondary }}
+            >
+              {t('tono.login.noEmail.description')}
+            </span>
+            <SupportContact
+              email={email}
+              extra={t('tono.login.noEmail.title')}
+            />
           </div>
         )}
       </GlassCard>

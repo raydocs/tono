@@ -44,6 +44,10 @@ actor TonoAPIClient {
         /// `unauthorized` so it is neither retried behind a token refresh nor
         /// reported to the user as an expired session.
         case entitlementBlocked(code: String, message: String?)
+        /// `auth/email/verify` refused the code: wrong, already used, or past
+        /// its validity window. No session is involved, so it must not read
+        /// as an expired session (#595).
+        case invalidOrExpiredCode
 
         var errorDescription: String? {
             switch self {
@@ -57,6 +61,7 @@ actor TonoAPIClient {
             case let .server(_, message): message
             case .invalidResponse: String(localized: "Tono returned an invalid response.")
             case let .entitlementBlocked(code, _): Self.entitlementDescription(code)
+            case .invalidOrExpiredCode: String(localized: "That code is wrong or expired. Request a new one.")
             }
         }
 
@@ -799,6 +804,9 @@ actor TonoAPIClient {
                         code: code, message: envelope?.error.message
                     )
                 }
+                // #595: the Worker's refusal of a sign-in code, not an expired session. Keyed on
+                // the code: the verify endpoint also answers a plain 401 (AUTHENTICATION_FAILED).
+                if http.statusCode == 401, envelope?.error.code == "INVALID_OR_EXPIRED_CODE" { throw APIError.invalidOrExpiredCode }
                 if http.statusCode == 401 { throw APIError.unauthorized }; if http.statusCode == 403 { throw APIError.forbidden }
                 if http.statusCode == 404 { throw APIError.notFound }
                 if http.statusCode == 409 && envelope?.error.code == "DEVICE_LIMIT" { throw APIError.deviceLimit }

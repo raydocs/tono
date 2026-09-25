@@ -152,6 +152,55 @@ struct GateSecondaryButtonStyle: ButtonStyle {
     }
 }
 
+/// The code step's way out when no email arrives (#596). `auth/email/start`
+/// answers 202 for every address and a failed delivery is silent by design,
+/// so the gate offers the same support actions it offers for a failed launch.
+struct SignInCodeNotReceivedHint: View {
+    static let delay: Duration = .seconds(60)
+
+    let email: String
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Text("No email yet?")
+                .font(.caption.weight(.semibold))
+            Text("Check spam and the address above, or send a new code. If it still does not arrive, copy the details for Tono support.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 14) {
+                Button {
+                    copyDetails()
+                } label: {
+                    Label("Copy details", systemImage: "doc.on.doc")
+                }
+                Button("Show Diagnostics Log in Finder") {
+                    let url = LocalTrafficAudit.shared.prepareForReveal()
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                }
+            }
+            .buttonStyle(.link)
+            .font(.caption)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func copyDetails() {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "unknown"
+        let build = info?["CFBundleVersion"] as? String ?? "unknown"
+        let summary = """
+        Tono sign-in code not received
+        Version: \(version) (\(build))
+        Email: \(email)
+        """
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(summary, forType: .string)
+        ToastCenter.shared.show(String(localized: "Copied"), systemImage: "doc.on.doc.fill")
+    }
+}
+
 /// Restoring overlay copy lives on its own glass card so Dashboard type
 /// behind the scrim cannot interleave with the caption.
 struct RestoringSessionCard: View {

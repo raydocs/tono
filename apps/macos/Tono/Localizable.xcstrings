@@ -1112,6 +1112,36 @@
         }
       }
     },
+    "No email yet?": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "还没收到邮件？"
+          }
+        }
+      }
+    },
+    "Check spam and the address above, or send a new code. If it still does not arrive, copy the details for Tono support.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请查看垃圾箱并核对上面的邮箱地址，或重新发送验证码。仍然收不到的话，复制详情发给 Tono 客服。"
+          }
+        }
+      }
+    },
+    "That code is wrong or expired. Request a new one.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "验证码错误或已过期，请重新获取。"
+          }
+        }
+      }
+    },
     "YOUR EVERYDAY CONNECTION": {
       "localizations": {
         "zh-Hans": {

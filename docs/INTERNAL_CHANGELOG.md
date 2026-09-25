@@ -32,6 +32,34 @@
 - 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
 ```
 
+## 2026-09-25 · 两端：验证码错误/过期不再显示「会话过期」；收不到验证码时给求助出口
+
+- **归属/来源**：G2 连不上有下一手（登录失败说清原因、给下一步）；Issue #595（总账 H20-C-F6）、#596（H22-C-F2）。
+  Windows `apps/windows/crates/tono-core/src/auth.rs`、`app/src-tauri/src/tono/commands/diagnostics.rs`、
+  `app/src/services/tono.ts`、`app/src/pages/tono/login.tsx`、`app/src/locales/{zh,en}/tono.json` 与生成的 i18n 类型；
+  macOS `Tono/Services/TonoAPIClient.swift`、`Tono/Views/LoginView.swift`、`Tono/Views/AccountGateSupport.swift`、
+  `Tono/Localizable.xcstrings`。基线 origin/main 52e67294；分支 `fix/signin-code-errors-and-help-20260925`
+  （红分支 `wip/signin-code-errors-and-help-20260925-red`）；PR [#620](https://github.com/raydocs/tono/pull/620)；未合 main。
+- **缺陷修复**：
+  - #595：Worker 对错误或过期的验证码返回 401 `INVALID_OR_EXPIRED_CODE`，两端都走通用 401，显示成「会话过期」
+    （Windows 审计日志与错误串、macOS 登录页）。现在两端只把带 `INVALID_OR_EXPIRED_CODE` 错误码的 401 改成专门错误
+    （Windows 在 `map_status`，macOS 在 `sendData` 读错误码处；审查发现 verify 在验证码已消费后还可能回普通 401
+    `AUTHENTICATION_FAILED`，不能一概当作验证码错误）：Windows `ApiError::InvalidOrExpiredCode` → `TONO_AUTH_INVALID_CODE` →
+    「验证码错误或已过期，请重新获取。」；macOS `APIError.invalidOrExpiredCode`，同样文案。带令牌请求的 401
+    （刷新、重放、#582 的 `SessionUse`/`SessionVerdict` 判定）不变；登录端点仍是 `SessionUse::None` / `.noSession`，不参与判定。
+  - #596：`/auth/email/start` 对任何地址都回 202，投递失败按设计静默，验证码没到时两端都没有求助出口。现在验证码页等满
+    60 秒（Windows 与「重新发送」解锁同时；macOS 按每个验证码单独计时，重发即重新计时）显示「还没收到邮件？」，并复用已有
+    求助动作：Windows `SupportContact`（复制信息给客服；已有错误自带求助时不重复）；macOS 新的
+    `SignInCodeNotReceivedHint`，含「复制详情」（版本、构建号、邮箱，不含验证码或 challenge）与已有的「在访达中显示诊断日志」。
+- **新增/优化**：无。
+- **工程与测试**：两条回归，各一：tono-core `verify_reports_a_refused_code_as_a_code_error_not_an_expired_session`；
+  `login.test.tsx` 的 `offers support once the code has had a minute to arrive`（`SupportContact` 测试桩改为渲染标记）。
+  红分支只含两条测试和 `InvalidOrExpiredCode` 变体骨架；vitest 在红提交上以断言失败（`expected null not to be null`）。
+- **验证**：本机（链接主工作树已有 node_modules，未安装）Windows 前端 `vitest run` 38 个文件 291 条通过；`tsc --noEmit`、
+  改动文件的 eslint 与 biome 均无问题。未跑 cargo 与 macOS 构建/测试（执行位置规则），以 PR CI 为准；Rust 测试的红/绿以 CI 为准。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：macOS 两处改动没有单独的 XCTest（本单元按 Issue 各一条）；菜单栏（`MenuBarView.swift`）未加求助入口。未在实机复现。
+
 ## 2026-09-25 · macOS：浏览器加密 DNS 冲突与拒绝管理员授权改为提示用户操作
 
 - **归属/来源**：G2 连不上有下一手（失败看得到可执行的原因）；Issue #591（总账 H20-C-F2）、#592（H20-C-F3）。

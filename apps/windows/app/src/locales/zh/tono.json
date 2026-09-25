@@ -247,6 +247,10 @@
     "changeEmail": "换邮箱",
     "invalidEmail": "请输入有效邮箱",
     "invalidCode": "请输入 6 位验证码",
+    "noEmail": {
+      "title": "还没收到邮件？",
+      "description": "请查看垃圾箱并核对上面的邮箱地址，或重新发送。仍然收不到的话，复制下面的信息发给客服。"
+    },
     "suspended": {
       "title": "账号已暂停",
       "description": "请联系客服。"
@@ -275,6 +279,7 @@
       "rateLimited": "尝试过多，请稍后再试。",
       "deviceLimit": "设备数已满。请先在已登录设备上移除一台。",
       "sessionExpired": "验证码已过期，请重新获取。",
+      "codeRejected": "验证码错误或已过期，请重新获取。",
       "serverError": "登录服务暂时繁忙或不可用，请稍后重试或联系客服。"
     }
   },
