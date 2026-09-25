@@ -325,6 +325,14 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | OD-0924-Win | Windows 内部候选版失败记录默认关且升级被 v2 重置 | in-PR | [#575](https://github.com/raydocs/tono/issues/575) / [#580](https://github.com/raydocs/tono/issues/580) | 源码推导 | 未在真实候选包验证；无单独关闭开关 |
 | OD-0924-Mac | macOS 内部候选版失败记录默认关且升级被 v2 重置 | in-PR | [#576](https://github.com/raydocs/tono/issues/576) / [#581](https://github.com/raydocs/tono/issues/581) | 源码推导 | 未在签名候选包验证；无单独关闭开关 |
 | H21-O-F1 | 控制面不可达而出口可达时，重启后已登录用户无法连接（有已验证缓存目录） | in-PR | [#582](https://github.com/raydocs/tono/issues/582) / [#612](https://github.com/raydocs/tono/pull/612) | 中·已确认 | Windows+macOS 离线授权准入与单一拒绝漏斗；未实机；token 轮换后至下次同步（≤300 s）离线启动被拒 |
+| R612-F1 | 401/403 答复头已到、body 读取中断时按传输失败处理，refresh 拒绝可被当作控制面不可达而离线准入（macOS；Windows 同类 = R612-O1） | in-PR | [#612](https://github.com/raydocs/tono/pull/612) | 中·已确认 | Codex 发现，Opus 复核；Opus O1 为 Windows 同根，Codex 复核；修复 ac1de43d，两端红绿已跑 |
+| R612-F2 | macOS 离线准入后 `user` 为空，收到拒绝后 Check again 不做任何事 | in-PR | [#612](https://github.com/raydocs/tono/pull/612) | 低·已确认 | 修复 2c41bf8a；无回归（完整 restore 需 helper IPC） |
+| R612-F3 | Windows 目录同步在未限时的凭据 flush 上等待授权写入，且排在消失出口处理之前；凭据库卡住时拖住同步与登录 | in-PR | [#612](https://github.com/raydocs/tono/pull/612) | 低·已确认 | 修复 313a6e05（先处理消失出口，flush 限 2 s）；无回归 |
+| R612-F4 | Windows 离线结束后不再读取账户，`inner.account` 为空，日志上传与路由偏好不恢复 | in-PR | [#612](https://github.com/raydocs/tono/pull/612) | 低·已确认 | 修复 35cb2a08（Verified 结束离线后每 60 s 补读 `me()`）；无回归 |
+| R612-O2 | 待写 tombstone 内容过期：后到的 forbidden 覆盖 refused；解除后的旧 tombstone 仍可覆盖新授权 | in-PR | [#612](https://github.com/raydocs/tono/pull/612) | 低·已确认 | Opus 发现，Codex 复核；修复 b662119e；无回归 |
+| R612-O3 | tombstone 未绑定被吊销的会话，新会话离线启动被旧会话的拒绝挂起（macOS 还会清掉目录缓存） | in-PR | [#612](https://github.com/raydocs/tono/pull/612) | 低·已确认 | Opus 发现，Codex 复核；修复 e1d61944，吊销记录带 token 摘要，不匹配或无摘要按无授权处理 |
+| R612-O4 | Windows 退出只等待 tombstone，不触发写入；写入器处于长退避时 3 s 预算内无新尝试 | in-PR | [#612](https://github.com/raydocs/tono/pull/612) | 低·已确认 | Opus 发现，Codex 复核；修复 f124c0b7（退出唤醒写入器）；无回归 |
+| R612-O5 | macOS 受保护重连只看 kill switch 与缓存目录，控制面不可达且无授权（账户 error）时网络变化仍会拨缓存出口 | open | 待开 | 低·已确认 | Opus 发现，Codex 复核：origin/main 已存在，非 #612 引入；需在共享 Connect 入口要求在线验证或离线准入 |
 | H21-O-F2 | Windows 恢复 30 s 预算被 pinned 连接耗尽，系统 DNS 回退不执行 | open | [#583](https://github.com/raydocs/tono/issues/583) | 中·已确认 | 与 F1 症状重叠 |
 | H21-O-F3 = H21-C-F1 | macOS 控制面客户端无 pinned 地址/备用端口/DNS 回退 | open | [#584](https://github.com/raydocs/tono/issues/584) | 中·已确认 | |
 | H21-O-F4 | macOS「试用备用通道」提供核心不可用的 hy2，受保护重连无限循环 | open | [#585](https://github.com/raydocs/tono/issues/585) | 中·已确认 | |

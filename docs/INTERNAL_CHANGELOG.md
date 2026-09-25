@@ -51,14 +51,16 @@
   - 服务端拒绝的识别此前分散在各调用点、依赖 `ApiError::Unauthorized`（本地也会产生），重试收到的
     401、提前续期被吞掉的 refresh 401 会漏掉。现在 Windows 的 `ApiClient::exchange` 与 macOS 的
     `TonoAPIClient.sendData` 是读取服务端答复的唯一位置（在传输重试与续期吞错之下），按请求用途分类：
-    2xx→Verified；refresh 或用新 token 重放的 401、带权益码（6 个，两端一致）的 401/403→Refused；
+    2xx→Verified；refresh 或用新 token 重放的 401、带权益码（6 个，两端一致）的 403→Refused（macOS 首次请求
+    带权益码的 401 也算 Refused，Windows 不算；Worker 的 401 目前不带权益码，无实际差别）；
     其它 403→Forbidden；首次请求的 401 只表示 access token 过期，不算拒绝。判决带发起时的身份代次，
     身份已更替的迟到答复丢弃。
   - 吊销：Refused/Forbidden 先在内存置位（Connect 与自动重连立即拒绝），再把授权文件**覆盖写**为
     `{verdict:"revoked",reason,at}`，失败按 1 s→30 s 退避重试；Windows 退出时最多等 3 s。Refused
     挂起账户（保护不动），Forbidden 只取消离线资格。离线模式在收到第一个分类答复时结束。
 - **新增/优化**：离线 Ready 期间 Connect 前再次比对授权与内存；macOS 离线期间每 60 s 重试 `me()`。
-  无前端改动（Windows 未展示 `offlineVerifiedAtMs`）。
+  无前端改动：两端都没有「无法连接 Tono，使用 <日期> 验证的出口」+ 重试的界面（Windows 的
+  `offlineVerifiedAtMs` 与 macOS 的 `offlineVerifiedAt` 都未被界面读取）。
 - **工程与测试**：每个行为一个回归（规则 5），均先在 CI 上红、再转绿。
   - tono-core T1 `a_refresh_refused_on_the_transport_retry_reports_one_refusal`、
     T2 `a_refusal_during_early_renewal_is_reported_but_a_retired_identitys_is_not`。
@@ -81,13 +83,32 @@
 - **候选/发布**：仅源码，无新候选。
 - **剩余限制**：
   - refresh token 每次续期都会轮换；轮换后到下一次目录同步（≤300 s）之间授权失配，离线启动被拒（fail-closed）。
-  - 退出等待有上限（Windows 3 s，且关机路径总预算 2.5 s 可能截断；macOS 不等待）；超出时旧授权可能留在磁盘，
+  - 退出等待有上限（Windows 3 s，退出时唤醒写入器立即重试；关机路径总预算 2.5 s 可能截断；macOS 不等待）；
+    超出时旧授权可能留在磁盘，
     下次离线启动仍可准入，直到首个服务端答复。授权文件读取未做属主/ACL 校验（Windows）；macOS 读取校验 0600 与属主。
   - Forbidden 会挡住在线 Connect 直到下一个 2xx（最长约一个同步周期）；Worker 目前在客户端端点不返回此类 403。
-  - 旧账户未落盘的 tombstone 可能在新账户授权之后写入，新账户离线启动失败（fail-closed），下一次同步重写。
-  - macOS：`me()` 重新接受账户时解除 Refused（Windows 只在重新登录时解除）；离线启动后 `inner.account`/`user`
-    为空，直到联网后刷新账户。
+  - 换账户时不丢弃旧账户未落盘的 tombstone，由新账户的第一次授权写入取代；吊销记录带 token 摘要，
+    与内存 token 不符或无摘要时按「无授权」处理（普通错误），不再挂起新账户。
+  - macOS：`me()` 重新接受账户时解除 Refused（Windows 只在重新登录时解除）。离线启动后账户为空：Windows 在
+    离线被 Verified 结束后每 60 s 补读 `me()` 直到成功（期间状态保持 Ready 时无上限）；macOS 离线期间每 60 s
+    重试 `me()`，挂起后该循环仍在运行。
   - 真正的授权来源是出口 roster；客户端文件不是权益凭证，未加客户端离线时长上限。
+- **续记（2026-09-24，审查修复）**：`review-run`（55c23f9a）中 Grok 发现与复核均因 jev-route 的空闲看门狗
+  超时（`--output-format json` 结束前不写字节，5 分钟即被结束，且其 json 信封无法解析；工具侧另行修正），
+  由 Codex（发现）+ Opus（复核与独立发现）+ Codex（复核 Opus 发现）替代。确认项均为 minor/major·低概率，无阻断：
+  - 缺陷修复（总账 R612-*）：F1/O1 401/403 答复头已到而 body 中断时按该状态分类并抛出状态错误，不再当作
+    不可达（ac1de43d，两端）；F2 macOS 离线准入会话的 Check again 走完整恢复（2c41bf8a）；F3 Windows 先处理
+    消失出口再记授权，flush 限 2 s（313a6e05）；F4 Windows 离线被 Verified 结束后补读 `me()` 并启动日志上传
+    （35cb2a08）；O2 待写 tombstone 保留最强原因、解除或新授权落盘后丢弃（b662119e）；O3 吊销记录绑定 token
+    摘要（e1d61944）；O4 Windows 退出唤醒 tombstone 写入器（f124c0b7）。O5（macOS 受保护重连无授权仍拨缓存出口）
+    为 origin/main 既有问题，记总账 open，不在本 PR。
+  - 工程与测试：新增 3 个回归，均先红后绿。红：`wip/582-fa-red`（仅测试，基于 e681db2f，不合入）Windows CI
+    36081983790（`transport::tests::a_refusal_whose_body_is_cut_off_is_still_an_answer` 断言失败，529 通过）、
+    macOS CI 36081983804（`testARefusedRenewalWithACutOffBodyStillRevokesTheOfflineGrant` 断言失败）、
+    Windows CI 36082901027（c5045f1e，`restore::offline_admission_tests::unreachable_restore_is_not_suspended_by_another_sessions_revocation`
+    得到 Suspended）。F2/F3/F4/O2/O4 无回归（需 helper IPC、可阻塞的凭据库或 AppHandle，无便宜接口）。
+  - 验证：35cb2a08 Windows CI 36081986829、macOS CI 36081986834 全绿；f124c0b7 Windows CI 36082799227 全绿
+    （`app-rust` 531 通过）、macOS CI 36082799183 全绿。本机未编译。
 
 ## 2026-09-24 · Windows 启动恢复的备用路径在预算内运行；重试收到的拒绝不再被当作网络失败
 
