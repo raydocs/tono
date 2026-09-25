@@ -96,7 +96,15 @@ actor TonoAPIClient {
     private struct APIErrorBody: Decodable { let message: String?; let code: String? }
     private struct ErrorEnvelope: Decodable { let error: APIErrorBody }
     private let baseURL: URL
-    private let session: URLSession
+    /// The control-plane `URLSession`, which resolves the host through the
+    /// system resolver.
+    private let systemPath: ControlPlanePath
+    /// #584: the bundled pinned addresses, tried before the system resolver.
+    private let pinnedPath: ControlPlanePath?
+    /// #584: the system resolver answered after the pinned addresses failed,
+    /// so later requests try it first. Cleared when a preferred attempt fails
+    /// or is cancelled. Process memory only, like the Windows client (#583).
+    private var prefersSystemResolution = false
     private let keychain: KeychainStore
     private var accessToken: String?
     private var refreshTask: (id: UUID, task: Task<String, Error>)?
@@ -135,13 +143,16 @@ actor TonoAPIClient {
         self.baseURL = baseURL
         self.keychain = keychain
         self.offlineGate = offlineGate
-        if let session { self.session = session } else {
-            self.session = URLSession(
-                configuration: Self.controlPlaneSessionConfiguration(),
-                delegate: TonoNoRedirectDelegate(),
-                delegateQueue: nil
-            )
-        }
+        let urlSession = session ?? URLSession(
+            configuration: Self.controlPlaneSessionConfiguration(),
+            delegate: TonoNoRedirectDelegate(),
+            delegateQueue: nil
+        )
+        systemPath = ControlPlanePath.systemResolver(urlSession)
+        // #584: production dials the pinned addresses first. An injected
+        // session (tests) has none unless one is passed.
+        self.pinnedPath = pinnedPath
+            ?? (session == nil ? ControlPlanePath.pinnedAddresses(for: baseURL) : nil)
     }
 
     /// The production control-plane session configuration. An injected
@@ -719,10 +730,17 @@ actor TonoAPIClient {
         let maximumAttempts = 2
         for attempt in 1...maximumAttempts {
             try Self.requireCurrent(requestIsCurrent)
-            let bytes: URLSession.AsyncBytes
-            let response: URLResponse
+            let answer: ControlPlaneAnswer
+            let pathLabel: String
             do {
-                (bytes, response) = try await self.session.bytes(for: request)
+                (answer, pathLabel) = try await exchangeOverPaths(
+                    request,
+                    method: method,
+                    auditDetails: auditDetails,
+                    requestIsCurrent: requestIsCurrent
+                )
+            } catch ControlPlaneExchangeError.invalidResponse {
+                throw APIError.invalidResponse
             } catch {
                 try await handleTransportFailure(
                     error,
@@ -734,63 +752,43 @@ actor TonoAPIClient {
                 )
                 continue
             }
-            guard let http = response as? HTTPURLResponse else {
-                throw APIError.invalidResponse
-            }
-            let maximumResponseBytes = 2 * 1024 * 1024
-            if let declared = http.value(forHTTPHeaderField: "Content-Length").flatMap(Int.init),
-               declared < 0 || declared > maximumResponseBytes {
-                throw APIError.invalidResponse
-            }
-            var data = Data()
-            data.reserveCapacity(
-                min(
-                    http.value(forHTTPHeaderField: "Content-Length").flatMap(Int.init) ?? 0,
-                    maximumResponseBytes
-                )
-            )
-            do {
-                for try await byte in bytes {
-                    guard data.count < maximumResponseBytes else {
-                        throw APIError.invalidResponse
-                    }
-                    data.append(byte)
+            let status = answer.status
+            let data = answer.body
+            if let failure = answer.bodyFailure {
+                guard !(200..<300).contains(status) else {
+                    try await handleTransportFailure(
+                        failure,
+                        method: method,
+                        attempt: attempt,
+                        maximumAttempts: maximumAttempts,
+                        requestStartedAt: requestStartedAt,
+                        auditDetails: auditDetails,
+                        httpStatus: status
+                    )
+                    continue
                 }
-            } catch let apiError as APIError {
-                throw apiError
-            } catch let error where !(200..<300).contains(http.statusCode) {
                 // #582: a non-2xx status line is the server's answer even when
                 // its body is cut off. It is classified from what arrived and
                 // thrown as that status below, never as an unreachable control
                 // plane that offline admission accepts.
-                if Self.isCancellation(error) {
-                    reportSessionAnswer(status: http.statusCode, body: data, session: session)
+                if Self.isCancellation(failure) {
+                    reportSessionAnswer(status: status, body: data, session: session)
                     throw CancellationError()
                 }
-            } catch {
-                try await handleTransportFailure(
-                    error,
-                    method: method,
-                    attempt: attempt,
-                    maximumAttempts: maximumAttempts,
-                    requestStartedAt: requestStartedAt,
-                    auditDetails: auditDetails,
-                    httpStatus: http.statusCode
-                )
-                continue
             }
-            reportSessionAnswer(status: http.statusCode, body: data, session: session)
-            guard (200..<300).contains(http.statusCode) else {
+            reportSessionAnswer(status: status, body: data, session: session)
+            guard (200..<300).contains(status) else {
                 var rejectionDetails = auditDetails.merging([
                     "duration_ms": Self.durationMilliseconds(since: requestStartedAt),
-                    "http_status": String(http.statusCode),
+                    "http_status": String(status),
+                    "path": pathLabel,
                     // This event describes one HTTP exchange. In particular,
                     // an authenticated 401 can be followed by token refresh
                     // and a successful retry; it is not yet an operation-level
                     // control-plane failure.
                     "scope": "http_exchange",
                 ]) { _, new in new }
-                if http.statusCode == 401 {
+                if status == 401 {
                     rejectionDetails["auth_recovery_eligible"] = String(bearer != nil)
                 }
                 LocalTrafficAudit.shared.recordEvent(
@@ -798,7 +796,7 @@ actor TonoAPIClient {
                     details: rejectionDetails
                 )
                 let envelope = try? TonoCoding.decoder().decode(ErrorEnvelope.self, from: data)
-                if http.statusCode == 401 || http.statusCode == 403,
+                if status == 401 || status == 403,
                    let code = envelope?.error.code,
                    Self.entitlementCodes.contains(code) {
                     throw APIError.entitlementBlocked(
@@ -807,23 +805,87 @@ actor TonoAPIClient {
                 }
                 // #595: the Worker's refusal of a sign-in code, not an expired session. Keyed on
                 // the code: the verify endpoint also answers a plain 401 (AUTHENTICATION_FAILED).
-                if http.statusCode == 401, envelope?.error.code == "INVALID_OR_EXPIRED_CODE" { throw APIError.invalidOrExpiredCode }
-                if http.statusCode == 401 { throw APIError.unauthorized }; if http.statusCode == 403 { throw APIError.forbidden }
-                if http.statusCode == 404 { throw APIError.notFound }
-                if http.statusCode == 409 && envelope?.error.code == "DEVICE_LIMIT" { throw APIError.deviceLimit }
-                throw APIError.server(status: http.statusCode, message: envelope?.error.message ?? "Tono request failed (\(http.statusCode)).")
+                if status == 401, envelope?.error.code == "INVALID_OR_EXPIRED_CODE" { throw APIError.invalidOrExpiredCode }
+                if status == 401 { throw APIError.unauthorized }; if status == 403 { throw APIError.forbidden }
+                if status == 404 { throw APIError.notFound }
+                if status == 409 && envelope?.error.code == "DEVICE_LIMIT" { throw APIError.deviceLimit }
+                throw APIError.server(status: status, message: envelope?.error.message ?? "Tono request failed (\(status)).")
             }
             LocalTrafficAudit.shared.recordEvent(
                 "control_plane_request_succeeded",
                 details: auditDetails.merging([
                     "attempt": String(attempt),
                     "duration_ms": Self.durationMilliseconds(since: requestStartedAt),
-                    "http_status": String(http.statusCode),
+                    "http_status": String(status),
+                    "path": pathLabel,
                 ]) { _, new in new }
             )
             return data
         }
         throw APIError.transport("Retry attempts exhausted.")
+    }
+
+    /// #584: one exchange, over the pinned addresses first and then the
+    /// system resolver — the order and rules of the Windows client (#583).
+    ///
+    /// A request moves to the next path only on a failure `shouldRetry`
+    /// would replay for its method: a read after any failure, a mutating
+    /// request only when no connection was made. An exchange that may have
+    /// reached the server is never sent again elsewhere, and an answered one
+    /// (any status line) is returned as it came. The caller's retry wraps
+    /// the whole walk, as `ApiClient` wraps the Windows transport.
+    private func exchangeOverPaths(
+        _ request: URLRequest,
+        method: String,
+        auditDetails: [String: String],
+        requestIsCurrent: (@Sendable () -> Bool)?
+    ) async throws -> (ControlPlaneAnswer, String) {
+        let maximumResponseBytes = 2 * 1024 * 1024
+        guard let pinnedPath else {
+            let answer = try await systemPath.exchange(request, maximumResponseBytes)
+            return (answer, systemPath.label)
+        }
+        let systemFirst = prefersSystemResolution
+        let order = systemFirst ? [systemPath, pinnedPath] : [pinnedPath, systemPath]
+        for (index, path) in order.enumerated() {
+            if index > 0 { try Self.requireCurrent(requestIsCurrent) }
+            do {
+                let answer = try await path.exchange(request, maximumResponseBytes)
+                // The system resolver answered where the pins could not.
+                if index > 0, !systemFirst { prefersSystemResolution = true }
+                return (answer, path.label)
+            } catch {
+                // A preferred attempt that fails or is cancelled puts the
+                // pins back in front for the next request.
+                if index == 0, systemFirst { prefersSystemResolution = false }
+                guard index + 1 < order.count,
+                      !(error is ControlPlaneExchangeError),
+                      !Self.isCancellation(error),
+                      // The retry rule itself, as if this were a first attempt
+                      // with one retry left.
+                      Self.shouldRetry(
+                        method: method,
+                        error: error as NSError,
+                        responseReceived: false,
+                        attempt: 1,
+                        maximumAttempts: 2
+                      )
+                else { throw error }
+                let failure = error as NSError
+                LocalTrafficAudit.shared.recordEvent(
+                    "control_plane_path_failed",
+                    details: auditDetails.merging([
+                        "path": path.label,
+                        "next_path": order[index + 1].label,
+                        "error_domain": failure.domain,
+                        "error_code": String(failure.code),
+                        "detail": String(failure.localizedDescription.prefix(300)),
+                    ]) { _, new in new }
+                )
+            }
+        }
+        // Unreachable: the last path either answers or throws above.
+        throw APIError.transport("No control-plane path answered.")
     }
 
     /// #582: the one place this client reads the server's answer about the
