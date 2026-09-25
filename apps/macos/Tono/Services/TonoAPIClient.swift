@@ -99,12 +99,14 @@ actor TonoAPIClient {
     /// The control-plane `URLSession`, which resolves the host through the
     /// system resolver.
     private let systemPath: ControlPlanePath
-    /// #584: the bundled pinned addresses, tried before the system resolver.
+    /// #584: the bundled pinned addresses, tried when the system resolver
+    /// fails before any status line.
     private let pinnedPath: ControlPlanePath?
-    /// #584: the system resolver answered after the pinned addresses failed,
-    /// so later requests try it first. Cleared when a preferred attempt fails
-    /// or is cancelled. Process memory only, like the Windows client (#583).
-    private var prefersSystemResolution = false
+    /// #584: the pinned addresses answered where the system resolver failed,
+    /// so later requests try them first. Cleared when a preferred attempt
+    /// fails or is cancelled. Process memory only, like the Windows
+    /// client's learned preference (#583).
+    private var prefersPinnedAddresses = false
     private let keychain: KeychainStore
     private var accessToken: String?
     private var refreshTask: (id: UUID, task: Task<String, Error>)?
@@ -149,7 +151,7 @@ actor TonoAPIClient {
             delegateQueue: nil
         )
         systemPath = ControlPlanePath.systemResolver(urlSession)
-        // #584: production dials the pinned addresses first. An injected
+        // #584: production falls back to the pinned addresses. An injected
         // session (tests) has none unless one is passed.
         self.pinnedPath = pinnedPath
             ?? (session == nil ? ControlPlanePath.pinnedAddresses(for: baseURL) : nil)
@@ -825,15 +827,16 @@ actor TonoAPIClient {
         throw APIError.transport("Retry attempts exhausted.")
     }
 
-    /// #584: one exchange, over the pinned addresses first and then the
-    /// system resolver — the order and rules of the Windows client (#583).
+    /// #584: one exchange, over the system resolver first and then the
+    /// pinned addresses. A healthy network keeps today's path; the pinned
+    /// client only runs where the system resolver could not deliver.
     ///
     /// A request moves to the next path only on a failure `shouldRetry`
     /// would replay for its method: a read after any failure, a mutating
     /// request only when no connection was made. An exchange that may have
     /// reached the server is never sent again elsewhere, and an answered one
     /// (any status line) is returned as it came. The caller's retry wraps
-    /// the whole walk, as `ApiClient` wraps the Windows transport.
+    /// the whole walk, as `ApiClient` wraps the Windows transport (#583).
     private func exchangeOverPaths(
         _ request: URLRequest,
         method: String,
@@ -845,19 +848,19 @@ actor TonoAPIClient {
             let answer = try await systemPath.exchange(request, maximumResponseBytes)
             return (answer, systemPath.label)
         }
-        let systemFirst = prefersSystemResolution
-        let order = systemFirst ? [systemPath, pinnedPath] : [pinnedPath, systemPath]
+        let pinnedFirst = prefersPinnedAddresses
+        let order = pinnedFirst ? [pinnedPath, systemPath] : [systemPath, pinnedPath]
         for (index, path) in order.enumerated() {
             if index > 0 { try Self.requireCurrent(requestIsCurrent) }
             do {
                 let answer = try await path.exchange(request, maximumResponseBytes)
-                // The system resolver answered where the pins could not.
-                if index > 0, !systemFirst { prefersSystemResolution = true }
+                // The pins answered where the system resolver could not.
+                if index > 0, !pinnedFirst { prefersPinnedAddresses = true }
                 return (answer, path.label)
             } catch {
                 // A preferred attempt that fails or is cancelled puts the
-                // pins back in front for the next request.
-                if index == 0, systemFirst { prefersSystemResolution = false }
+                // system resolver back in front for the next request.
+                if index == 0, pinnedFirst { prefersPinnedAddresses = false }
                 guard index + 1 < order.count,
                       !(error is ControlPlaneExchangeError),
                       !Self.isCancellation(error),

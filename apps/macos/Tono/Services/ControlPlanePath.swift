@@ -100,8 +100,9 @@ nonisolated struct ControlPlanePath: Sendable {
 /// the same response cap as the system path.
 nonisolated enum PinnedControlPlaneExchange {
     /// Connect budget, TCP and TLS, across all pinned addresses and split
-    /// between them like the Windows client (#583): the system-resolver
-    /// fallback must not wait behind a dropped pin for the mainland timeout.
+    /// between them like the Windows client (#583). Dropped pins cost at most
+    /// this, whether they are the fallback or, once preferred, stand in front
+    /// of the system resolver.
     static let connectBudget: TimeInterval = 10
     /// One whole exchange, like the session's `timeoutIntervalForResource`.
     static let exchangeBudget: TimeInterval = 45
