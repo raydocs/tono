@@ -478,3 +478,51 @@ nonisolated private final class MixedProbeNoRedirectDelegate: NSObject, URLSessi
         completionHandler(nil)
     }
 }
+
+// Shared with ControlPlanePath.swift; kept here because the standalone mixed-probe policy test
+// (tooling/scripts/tests/test_macos_mixed_probe.py) compiles this file without ControlPlanePath.swift.
+/// #588: a TLS failure that says this Mac's clock is outside the server
+/// certificate's validity period. A clock far off makes every certificate
+/// look expired or not yet valid, and NTP is blocked while protection is on,
+/// so the user has to be told it is the clock. Classification only: trust
+/// evaluation is the system default everywhere and is never relaxed.
+nonisolated enum CertificateClock {
+    static var userMessage: String {
+        String(localized: "Your Mac's date and time look wrong, so Tono cannot verify secure connections. Set the correct date and time in System Settings > General > Date & Time, then retry.")
+    }
+
+    /// `NSURLErrorServerCertificateHasBadDate` / `NotYetValid` from
+    /// URLSession, and the Secure Transport / `SecTrust` statuses behind them
+    /// that Network.framework reports as `NWError.tls`.
+    static func isDateFailure(_ error: any Error) -> Bool {
+        if let error = error as? NWError {
+            if case let .tls(status) = error { return dateStatuses.contains(status) }
+            return false
+        }
+        let error = error as NSError
+        if error.domain == NSURLErrorDomain,
+           error.code == NSURLErrorServerCertificateHasBadDate
+            || error.code == NSURLErrorServerCertificateNotYetValid {
+            return true
+        }
+        if error.domain == NSOSStatusErrorDomain, dateStatuses.contains(OSStatus(truncatingIfNeeded: error.code)) {
+            return true
+        }
+        // URLSession carries the Secure Transport status of a failed handshake here.
+        if let stream = error.userInfo["_kCFStreamErrorCodeKey"] as? Int,
+           dateStatuses.contains(OSStatus(truncatingIfNeeded: stream)) {
+            return true
+        }
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? any Error {
+            return isDateFailure(underlying)
+        }
+        return false
+    }
+
+    private static let dateStatuses: Set<OSStatus> = [
+        -9814, // errSSLCertExpired
+        -9815, // errSSLCertNotYetValid
+        errSecCertificateExpired,
+        errSecCertificateNotValidYet,
+    ]
+}
