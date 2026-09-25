@@ -4782,6 +4782,38 @@ DNS 上”不再被听见——损坏快照被误判可以隔离，disarm 门随
   是否消失。若 TUN 键实际带有 `ProfileNameServer` 或 IPv6 值，本排除不生效，损坏快照
   后 Connect 仍会被拒（fail-closed，不泄漏），需改为持久化 TUN GUID 的排除。
 
+### 2026-09-25 续记 3 · 审查运行 c7463149：会话内孤儿 heal 不再撤 NRPT；apply 写入顺序
+
+- **缺陷修复（codex:F1 = opus:F1，major）**：(a) 让快照存在的 enable 复用了
+  `heal_orphaned_protected_dns_without_snapshot`，而它在重置适配器后无条件调用
+  `engine_restore_encrypted_dns`：保护会话进行中删掉 Tono NRPT catch-all、恢复 DoH；
+  heal 后复检仍拒绝（或后续落盘失败）时直接返回，末尾的 `engine_suppress_encrypted_dns`
+  不可达，NRPT 保持被撤状态。现在 heal 带 `OrphanHealScope`：无快照（无会话）时行为
+  不变；快照存在时只把传入的孤儿适配器重置为 DHCP 并刷新缓存，从不触碰 NRPT/DoH，
+  任何失败出口都保持会话原有的解析策略。
+- **缺陷修复（codex:F2，降为 minor）**：注册表视图的 TUN 排除只凭值形状（IPv4
+  `NameServer` 恰为 `198.18.0.2`、其余为空）。`engine::apply_protected` 原先先写
+  `NameServer` 再写 `ProfileNameServer`，两次写入之间中断的真实适配器正是这个形状，
+  会被排除出损坏快照恢复的证据。没有采用“按 LUID/连接名确认是 TUN”：注册表视图
+  没有 LUID，wintun 设备删除后连接名也可能消失，持久化 TUN GUID 超出本次范围。改为
+  调换两次写入顺序（先 `ProfileNameServer`）：中断后要么原值未动，要么
+  `ProfileNameServer` 已带 TUN 地址而继续计入证据。最终写入结果、写入次数与保护状态
+  不变。
+- **测试**：两个窄回归。stub 域 `an_in_session_orphan_heal_leaves_the_resolver_policy_armed`
+  （dns/tests.rs；快照 {A}、未记录的 {B} 带 TUN 地址、stub heal 无法清除 → enable 以
+  `TONO_DNS_ORPHANED_ADAPTER` 拒绝，DHCP 重置 1 次，NRPT/DoH 恢复 0 次；为此 test_hooks
+  增加 `#[cfg(test)]` 计数 `take_encrypted_restores`）。native 域
+  `an_interrupted_protected_apply_never_leaves_the_tunnel_key_shape`
+  （native_apply_tests.rs；IPv6 为 DHCP，在 IPv4 `ProfileNameServer` 写入处注入失败 →
+  读回的适配器不得被 `is_inactive_tunnel_interface_key` 判为 TUN 键；旧顺序下 `NameServer`
+  已写入，断言失败）。两个测试在修复前的代码上的失败均为源码推导，未实际运行。
+- **验证**：本机（MacBook）未编译、未运行 cargo，只用 `rustfmt --check` 确认无语法
+  错误；委托本 PR 的 `windows-2025` CI（lifecycle 与 native DNS 前缀两步）。提交时未获得
+  结果。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：TUN 键形状仍未实机核实（见续记 2 的 `reg query` 清单），合入前需在
+  Windows 验收机上检查。
+
 ## 2026-09-23 · Windows 混合 DNS 残留不能证明恢复成功
 
 - **归属/来源**：G1 断开与恢复；从已合入的

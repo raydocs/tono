@@ -1004,8 +1004,13 @@ fn key_exists(subkey: &str) -> Result<bool> {
 /// snapshot by exact string — while `active` only supplies the live interface indices.
 fn apply_protected(guid: &str, active: &ActiveAdapter) -> Result<LiveApplyEntry> {
     if key_exists(&v4_key(guid))? {
-        write_sz(&v4_key(guid), NAME_SERVER, super::PROTECTED_DNS_V4)?;
+        // `ProfileNameServer` first: an apply stopped between these two writes must never leave
+        // the TUN address in IPv4 `NameServer` alone, which is the WinTUN interface key's own
+        // shape and is excluded from the corrupt-snapshot recovery's evidence
+        // (`is_inactive_tunnel_interface_key`). Stopped here, the adapter keeps either its
+        // untouched originals or a `ProfileNameServer` that keeps it in that evidence.
         write_sz(&v4_key(guid), PROFILE_NAME_SERVER, super::PROTECTED_DNS_V4)?;
+        write_sz(&v4_key(guid), NAME_SERVER, super::PROTECTED_DNS_V4)?;
     }
     if key_exists(&v6_key(guid))? {
         // Empty, not `::1`: an adapter pointed at `::1` has a configured IPv6 resolver that
