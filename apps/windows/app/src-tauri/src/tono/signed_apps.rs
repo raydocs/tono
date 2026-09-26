@@ -569,6 +569,12 @@ const DIRECTORY_WRITE_CLASS_RIGHTS: u32 = 0x0000_0002
     | 0x1000_0000
     | 0x4000_0000;
 
+/// Rights on a parent that let the holder delete, rename or re-permission an
+/// existing child it cannot write itself: FILE_DELETE_CHILD, WRITE_DAC,
+/// WRITE_OWNER and GENERIC_ALL. GENERIC_WRITE maps to FILE_GENERIC_WRITE, which
+/// has no delete-child right; creating folders only adds new names.
+const CHILD_REPLACE_RIGHTS: u32 = 0x0000_0040 | 0x0004_0000 | 0x0008_0000 | 0x1000_0000;
+
 /// Owner and access-allowed ACEs of one directory, as string SIDs.
 #[cfg_attr(not(windows), allow(dead_code))]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -585,6 +591,18 @@ impl DirectorySecurity {
         is_admin_only_writer(&self.owner_sid)
             && self.allowed_aces.iter().all(|(sid, mask)| {
                 mask & DIRECTORY_WRITE_CLASS_RIGHTS == 0
+                    || is_admin_only_writer(sid)
+                    || sid.as_str() == CREATOR_OWNER_SID
+            })
+    }
+
+    /// For the drive root above `X:\Program Files`: it may let anyone create new
+    /// folders, but only [`ADMIN_ONLY_WRITER_SIDS`] may own it or hold a right
+    /// that replaces an existing child.
+    fn protects_existing_children(&self) -> bool {
+        is_admin_only_writer(&self.owner_sid)
+            && self.allowed_aces.iter().all(|(sid, mask)| {
+                mask & CHILD_REPLACE_RIGHTS == 0
                     || is_admin_only_writer(sid)
                     || sid.as_str() == CREATOR_OWNER_SID
             })
@@ -607,7 +625,8 @@ trait DirectorySecuritySource {
 
 /// `X:\Program Files` and `X:\Program Files (x86)`: the walk stops here after
 /// checking it, because the drive root above lets Authenticated Users create
-/// folders by default.
+/// folders by default. The root is then held only to
+/// [`DirectorySecurity::protects_existing_children`].
 #[cfg_attr(not(windows), allow(dead_code))]
 fn is_known_system_root(directory: &str) -> bool {
     let Some((drive, rest)) = directory.split_once('\\') else {
@@ -620,7 +639,8 @@ fn is_known_system_root(directory: &str) -> bool {
 
 /// True only when `directory` and each ancestor up to a known system root (or
 /// the drive root) are owned by, and grant write-class rights only to,
-/// Administrators, SYSTEM and TrustedInstaller. A path that is not a plain
+/// Administrators, SYSTEM and TrustedInstaller. Above a known system root, the
+/// drive root must also protect existing children. A path that is not a plain
 /// drive path, or any error reading a DACL, answers false.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn is_admin_only_install_chain(directory: &str, source: &impl DirectorySecuritySource) -> bool {
@@ -649,8 +669,15 @@ fn is_admin_only_install_chain(directory: &str, source: &impl DirectorySecurityS
             Ok(security) if security.is_admin_only_writable() => {}
             _ => return false,
         }
-        if drive_root || is_known_system_root(current) {
+        if drive_root {
             return true;
+        }
+        if is_known_system_root(current) {
+            let root = format!("{}\\", &current[..2]);
+            return matches!(
+                source.read_directory_security(&root),
+                Ok(security) if security.protects_existing_children()
+            );
         }
         let Some(parent) = parent_directory(current) else {
             return false;
