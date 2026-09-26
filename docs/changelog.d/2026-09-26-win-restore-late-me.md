@@ -1,7 +1,7 @@
 ## 2026-09-26 · Windows：启动恢复在 me() 之前发布已存屏障，迟到的 me() 不再把已释放的屏障写回
 - 归属：G1（Windows 启动会话恢复）；Windows App `tono/commands/restore.rs` 的 `restore_account_with`。
 - 来源：基线 origin/main `3470dd68`；红分支 `wip/win-restore-late-me-20260926-red`（`4b0e7b99`），修复分支
-  `fix/win-restore-late-me-20260926`，PR 待开（Part of [#602](https://github.com/raydocs/tono/issues/602)）；未合 main。
+  `fix/win-restore-late-me-20260926`，[#651](https://github.com/raydocs/tono/pull/651)（Part of [#602](https://github.com/raydocs/tono/issues/602)）；未合 main。
 - 缺陷修复：
   - H16-O-F7：持有 refresh token 的冷启动恢复先向 Service 探测屏障，却把探测结果压到 `me()` 返回之后才写进状态机，
     `me()` 进行期间托盘 flyout 显示 Standby 并提供 Connect。改后：进入 Restoring 时，在同一把锁里先
