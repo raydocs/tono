@@ -1,7 +1,7 @@
 ## 2026-09-26 · macOS：原生更新断开/准备失败与目录移除横幅按真实保护状态显示
 - 归属：G1；macOS App `AppState+NativeUpdate.swift`、`AppState+Catalog.swift`。Part of [#601](https://github.com/raydocs/tono/issues/601)。
 - 来源：基线 origin/main `3470dd68`；红分支 `wip/mac-update-catalog-state-20260926-red`（`0879264c`），修复分支
-  `fix/mac-update-catalog-state-20260926`；未合 main。
+  `fix/mac-update-catalog-state-20260926`，[#649](https://github.com/raydocs/tono/pull/649)；未合 main。
 - 缺陷修复：
   - TM-claude-1-native-update：原生更新「已验证断开」与「退役重试」放开连接时不清 `consecutiveProtectionRepairCount`，
     旧的保护修复计数会带进下一次会话，一次修复就可能触发「连续三次」暂停。改后两条路径与普通放开一样清零。
