@@ -11,8 +11,8 @@ use crate::update_transaction::*;
 use crate::update_wire::{UpdateRequest, UpdateStatus};
 use anyhow::{Context as _, Result, ensure};
 pub use security::{
-    UserLaunch, app_image, image, install_root, parent_image, pin_path, program_files,
-    record_installed_version, tunnel_absent, verify_tree,
+    NotRegisteredApp, UserLaunch, app_image, image, install_root, parent_image, pin_path,
+    program_files, record_installed_version, tunnel_absent, verify_tree,
 };
 use std::{
     fs::OpenOptions,
