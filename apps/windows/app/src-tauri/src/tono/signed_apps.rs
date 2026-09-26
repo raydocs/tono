@@ -538,6 +538,29 @@ pub fn regex_for_verified_feishu_exe(path: &str) -> Option<String> {
     regex_for_verified_reviewed_direct_exe(path, ReviewedDirectProduct::Feishu)
 }
 
+/// Owner and access-allowed ACEs of one directory, as string SIDs.
+#[cfg_attr(not(windows), allow(dead_code))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DirectorySecurity {
+    owner_sid: String,
+    allowed_aces: Vec<(String, u32)>,
+}
+
+/// Reads a directory's security descriptor.
+#[cfg_attr(not(windows), allow(dead_code))]
+trait DirectorySecuritySource {
+    fn read_directory_security(&self, directory: &str) -> Result<DirectorySecurity, String>;
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn regex_for_verified_exe_on_admin_only_tree(
+    path: &str,
+    product: ReviewedDirectProduct,
+    _security: &impl DirectorySecuritySource,
+) -> Option<String> {
+    regex_for_verified_reviewed_direct_exe(path, product)
+}
+
 #[cfg(windows)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct WitnessFingerprint {
@@ -1210,6 +1233,72 @@ mod tests {
             dingtalk.starts_with('^') && !dingtalk.ends_with('$'),
             "expected AnchoredPrefix, got {dingtalk}"
         );
+    }
+
+    #[test]
+    fn directory_prefix_requires_an_admin_only_install_chain() {
+        struct FakeSecurity<F>(F);
+        impl<F: Fn(&str) -> Result<DirectorySecurity, String>> DirectorySecuritySource for FakeSecurity<F> {
+            fn read_directory_security(&self, directory: &str) -> Result<DirectorySecurity, String> {
+                (self.0)(directory)
+            }
+        }
+        // Program Files defaults: TrustedInstaller owns it; SYSTEM, Administrators and
+        // TrustedInstaller write; CREATOR OWNER is inherit-only; Users read and execute.
+        // The drive root also lets Authenticated Users create folders, so the walk must
+        // stop at the system root instead of reaching `C:\`.
+        fn modeled(directory: &str) -> DirectorySecurity {
+            let mut security = DirectorySecurity {
+                owner_sid: "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
+                    .to_string(),
+                allowed_aces: vec![
+                    ("S-1-5-18".to_string(), 0x001f_01ff),
+                    ("S-1-5-32-544".to_string(), 0x001f_01ff),
+                    ("S-1-3-0".to_string(), 0x1000_0000),
+                    ("S-1-5-32-545".to_string(), 0x0012_00a9),
+                ],
+            };
+            if directory.trim_end_matches('\\').eq_ignore_ascii_case("C:") {
+                security.allowed_aces.push(("S-1-5-11".to_string(), 0x0000_0004));
+            }
+            security
+        }
+        let exe = r"C:\Program Files\Tencent\WeChat\WeChat.exe";
+
+        let admin_only =
+            FakeSecurity(|directory: &str| -> Result<DirectorySecurity, String> { Ok(modeled(directory)) });
+        let prefix =
+            regex_for_verified_exe_on_admin_only_tree(exe, ReviewedDirectProduct::WeChat, &admin_only)
+                .unwrap();
+        assert!(!prefix.ends_with('$'), "admin-only tree keeps the prefix: {prefix}");
+
+        // Authenticated Users may modify an ancestor: anything can be planted in the tree.
+        let user_writable = FakeSecurity(|directory: &str| -> Result<DirectorySecurity, String> {
+            let mut security = modeled(directory);
+            if directory.eq_ignore_ascii_case(r"C:\Program Files\Tencent") {
+                security.allowed_aces.push(("S-1-5-11".to_string(), 0x0013_01bf));
+            }
+            Ok(security)
+        });
+        let exact = regex_for_verified_exe_on_admin_only_tree(
+            exe,
+            ReviewedDirectProduct::WeChat,
+            &user_writable,
+        )
+        .unwrap();
+        assert!(exact.ends_with('$'), "user-writable tree must be exact: {exact}");
+
+        let unreadable = FakeSecurity(|directory: &str| -> Result<DirectorySecurity, String> {
+            if directory.eq_ignore_ascii_case(r"C:\Program Files\Tencent\WeChat") {
+                Err("access denied".to_string())
+            } else {
+                Ok(modeled(directory))
+            }
+        });
+        let exact =
+            regex_for_verified_exe_on_admin_only_tree(exe, ReviewedDirectProduct::WeChat, &unreadable)
+                .unwrap();
+        assert!(exact.ends_with('$'), "unreadable DACL must be exact: {exact}");
     }
 
     #[test]
