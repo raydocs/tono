@@ -69,3 +69,26 @@
     失败状态回答时会是一份不完整的集合，此时退回到只靠年龄窗口的规则。子进程在内核里卡住、SIGKILL 后超过 5 s 才退出时，本子进程的
     token 也不认领（泄漏，PF 在 disarm 后保持开启）。被替换列表非空时，每次巡检在锁内最多多等一次列出加一次 `-X` 的期限。9e 在起始
     为关时仍需测试自己 `pfctl -d` 才回到起始状态（匿名引用）。未本地编译，以 macOS CI 为准；未实机。
+- **2026-09-26 续记 3（`dbc3ca42` 续审 run `b6e9e6a2` 通过，确认 minor 续修）**：
+  - 依据：本机 macOS 26.5.2 `/sbin/pfctl` 反汇编（只读，未运行特权命令）：`-s References` 第一次 `DIOCGETSTARTERS` 返回 ENOENT
+    时打印 `No pf starter references held`、退出 0；其它 ioctl 错误只 `warn("DIOCGETSTARTERS")` 且返回值被调用方忽略，仍退出 0；
+    打不开 /dev/pf 时退出 1（本机非 root 实测 `pfctl: /dev/pf: Permission denied`，退出 1）。成功时先打印 `TOKENS:` 标题再逐行
+    打印，TIMESTAMP 由 pfctl 以 `time(NULL)` 减内核记录的签发秒得出，确为年龄（此前「未实机核对」的格式判断由此得到二进制佐证）。
+  - 缺陷修复（grok:F1，confirmed minor）：`-E` 前的快照只在「退出 0 且含 `TOKENS:` 行」或「退出 0 且为 `No pf starter references
+    held`（空集）」时成立（新 `pfReferenceSnapshot`）；其它回答（含退出 0 的 `DIOCGETSTARTERS: <错误>`）一律为 nil，超时找回不认领。
+  - 缺陷修复（opus:F1/F2，inconclusive，按更严规则处理）：被替换 token 第一次 `-X` 之前记下它在 References 中的行（PID、进程名、
+    按年龄推算的签发秒区间）；该 `-X` 没有回答后再重试时，只有列表中的行仍为同一 PID、同一进程名且签发秒区间重叠才再 `-X`，否则
+    （行不同、解析不了或有多行）只遗忘、不 `-X`，并写 stderr 日志。宁可泄漏（PF 在 disarm 后保持开启、锚点已空），不释放证明不了
+    是自己的 token。
+  - 缺陷修复（opus:F2 建议）：disarm（`releasePFEnableReference`）读不到开机标识时，此前仍会 unlink 记录、清空未记录 token（只有被替换
+    列表保留），与注释不符。改为结算待定获取之后，boot 为 nil 即抛错，记录、未记录 token 与被替换列表全部保留；disarm 照旧记日志。
+  - 工程与测试（opus:F3）：特权 `--lifecycle-self-test` 新增三项：`reference-snapshot-only-from-full-listing`（9d 旁，纯解析）、
+    9g `reissued-superseded-token-not-released`（真实持有的 token 放入被替换列表并标为已试过 `-X`、行为别的 PID，注入的释放不得被调用，
+    条目被遗忘，token 仍被列出）、9h `unknown-boot-release-keeps-references`（`releasePFEnableReference` 新增仅供自测替换的
+    `bootSession` 参数；虚构 token、不跑 pfctl）。9f 改为比较 `.reference`。红分支 `wip/macos-pf-token-recovery-20260926-red2`
+    （`2cc94370`，只加检查和能编译的骨架），红 run 36222599329。
+  - helper 协议仍为 4.49.0；CONTRACT 哈希按 `build-core-helper.sh` 同一管线重算（先复现 `dbc3ca42` 记录的哈希）。
+  - 剩余限制（补充）：同值再签发的防护只覆盖被替换 token 的重试；记录的 token 与未记录 token 在一次没有回答的 `-X` 之后，下一次
+    arm/disarm 仍只按数值匹配（同类风险，未改）。第一次 `-X` 仍只按数值：别的程序先 `-X` 掉本 helper 的 token、同值再签发给别人时
+    仍可能误释放（与本 PR 之前相同）。签发秒同一秒内的再签发、且 PID 与进程名都相同时无法区分。快照规则依赖 macOS 26 pfctl 的
+    这两种输出；别的输出只会不认领（泄漏），不会误领。未本地编译，以 macOS CI 为准；未实机。

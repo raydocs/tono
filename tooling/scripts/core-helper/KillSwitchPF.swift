@@ -701,7 +701,8 @@ extension KillSwitchManager {
         let spawned: time_t
         let child: PFEnableChildExit
         /// Every word `pfctl -s References` printed just before the child
-        /// was spawned, or nil when that listing gave no answer. No token in
+        /// was spawned, or nil when that listing did not list every token
+        /// (`pfReferenceSnapshot`). No token in
         /// it can be the child's, however the wall clock moved (#643 review,
         /// opus:F3).
         let listedBefore: Set<String>?
@@ -751,7 +752,9 @@ extension KillSwitchManager {
     nonisolated(unsafe) static var supersededPFEnableReferences: [SupersededPFEnableReference] = []
 
     /// A replaced token, whether its `-X` has run, and the row listed just
-    /// before that `-X`.
+    /// before that `-X`. A `-X` with no answer may have released it after all,
+    /// and xnu may then issue the same value to another program, so a retry
+    /// is only as good as that row (#643 review, opus:F1/F2).
     struct SupersededPFEnableReference: Equatable {
         let reference: PFEnableReference
         var releaseTried = false
@@ -759,12 +762,20 @@ extension KillSwitchManager {
     }
 
     /// A `pfctl -s References` row's PID and process name, and the calendar
-    /// seconds its age places the issue in.
+    /// seconds its age places the issue in. pfctl prints the age as `time()`
+    /// minus the kernel's stamp, so a row listed between `listedFrom` and
+    /// `listedTo` was issued between `listedFrom - age` and `listedTo - age`.
     struct PFEnableRow: Equatable {
         let pid: String
         let process: String
         let issuedFrom: time_t
         let issuedTo: time_t
+
+        /// The same issue: same PID and process, overlapping issue seconds.
+        func sameIssue(as other: PFEnableRow) -> Bool {
+            pid == other.pid && process == other.process
+                && issuedFrom <= other.issuedTo && other.issuedFrom <= issuedTo
+        }
     }
 
     /// PF stays enabled while any enable reference is held. Enabling it only
@@ -827,15 +838,14 @@ extension KillSwitchManager {
             token = pending.token
         } else {
             unrecordedPFEnableReference = nil
-            // Status ignored, as in `settlePFEnableAcquire`: with no token at
-            // all the kernel answers ENOENT.
             let listedBefore = (try? run(
                 "/sbin/pfctl", ["-s", "References"],
                 deadline: pfctlQueryDeadline
-            )).map {
-                Set(String(decoding: $0.output, as: UTF8.self)
-                    .split(whereSeparator: \.isWhitespace)
-                    .map(String.init))
+            )).flatMap {
+                pfReferenceSnapshot(
+                    status: $0.status,
+                    output: String(decoding: $0.output, as: UTF8.self)
+                )
             }
             var child: pid_t = 0
             let spawned = time(nil)
@@ -937,7 +947,10 @@ extension KillSwitchManager {
     /// token `keeping` still holds PF with must not be released: both are
     /// only forgotten. A boot that could not be read (nil) is not another
     /// boot: nothing is forgotten on it, and this throws (#643 review,
-    /// grok:F3 = codex:F6).
+    /// grok:F3 = codex:F6). A token whose `-X` already ran is released again
+    /// only while the listing shows the row seen before that `-X`; any other
+    /// row, or none that parses, may be another program's token under the
+    /// same value, so it is forgotten with no `-X` (#643 review, opus:F1/F2).
     static func releaseSupersededPFEnableReferences(
         boot: String?,
         keeping: String?,
@@ -950,10 +963,32 @@ extension KillSwitchManager {
         guard boot != nil else {
             throw HelperFailure.system("Boot session unknown; replaced PF references kept.")
         }
-        while let superseded = supersededPFEnableReferences.first?.reference {
-            if superseded.boot == boot, superseded.token != keeping,
-               try pfEnableReferenceListed(superseded.token, deadline: queryDeadline) {
-                try releaseToken(superseded.token)
+        while let superseded = supersededPFEnableReferences.first {
+            let token = superseded.reference.token
+            if superseded.reference.boot == boot, token != keeping {
+                let listedFrom = time(nil)
+                let listing = try pfctlQuery(["-s", "References"], deadline: queryDeadline)
+                let listedTo = time(nil)
+                if let listing,
+                   listing.split(whereSeparator: \.isWhitespace).contains(where: { $0 == token }) {
+                    let row = pfEnableRow(
+                        of: token,
+                        listedFrom: listedFrom,
+                        listedTo: listedTo,
+                        in: listing
+                    )
+                    if !superseded.releaseTried {
+                        supersededPFEnableReferences[0].releaseTried = true
+                        supersededPFEnableReferences[0].row = row
+                        try releaseToken(token)
+                    } else if let seen = superseded.row, let row, seen.sameIssue(as: row) {
+                        try releaseToken(token)
+                    } else {
+                        FileHandle.standardError.write(Data(
+                            "tono: replaced PF token no longer proven ours; forgotten unreleased\n".utf8
+                        ))
+                    }
+                }
             }
             supersededPFEnableReferences.removeFirst()
         }
@@ -980,13 +1015,19 @@ extension KillSwitchManager {
     /// listing or a `-X` that never reported back it may still be held, so
     /// this throws and keeps the record (and any unrecorded token) for the
     /// next arm to reuse or the next disarm to release (#639 review, opus:F2).
+    /// Without a readable boot no token can be told from another boot's, so
+    /// the record, the unrecorded token and the replaced ones all stay and
+    /// this throws, as for replaced ones alone (#643 review, opus:F2).
+    /// `bootSession` is replaced only by the self-test.
     static func releasePFEnableReference(
         recordPath: String = killSwitchPFReferencePath,
         queryDeadline: TimeInterval = KillSwitchManager.pfctlQueryDeadline,
         bootSession: () throws -> String = { try TonoAuthenticatedPeer.bootSession() }
     ) throws {
-        let boot = try? TonoAuthenticatedPeer.bootSession()
         try settlePFEnableAcquire(deadline: queryDeadline)
+        guard let boot = try? bootSession() else {
+            throw HelperFailure.system("Boot session unknown; PF enable references kept.")
+        }
         if let held = readPFEnableReference(recordPath), held.boot == boot,
            try pfEnableReferenceListed(held.token, deadline: queryDeadline) {
             _ = try run("/sbin/pfctl", ["-X", held.token])
@@ -1044,9 +1085,47 @@ extension KillSwitchManager {
         unsettledPFEnableAcquire = nil
     }
 
-    /// Red skeleton: every word of the answer, whatever pfctl answered.
+    /// Every word of a `pfctl -s References` answer that listed all tokens,
+    /// or nil for any other answer. macOS 26 pfctl prints its `TOKENS:`
+    /// table, or "No pf starter references held" when `DIOCGETSTARTERS`
+    /// answers ENOENT (the kernel holds none); on any other ioctl error it
+    /// warns and still exits 0, and it exits 1 when /dev/pf will not open.
+    /// A failed answer lists none of the tokens already held, so taken as a
+    /// snapshot it would let a clock stepped back place one of them in the
+    /// recovery window (#643 review, grok:F1).
     static func pfReferenceSnapshot(status: Int32, output: String) -> Set<String>? {
-        Set(output.split(whereSeparator: \.isWhitespace).map(String.init))
+        guard status == 0 else { return nil }
+        let lines = output.split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        if lines.contains("TOKENS:") {
+            return Set(output.split(whereSeparator: \.isWhitespace).map(String.init))
+        }
+        return lines.contains("No pf starter references held") ? [] : nil
+    }
+
+    /// The one row `listing` shows for `token`, or nil when no row of the
+    /// `PID  Process Name  TOKEN  <d> days HH:MM:SS` shape does, or several do.
+    static func pfEnableRow(
+        of token: String,
+        listedFrom: time_t,
+        listedTo: time_t,
+        in listing: String
+    ) -> PFEnableRow? {
+        var found: [PFEnableRow] = []
+        for line in listing.split(separator: "\n") {
+            let words = line.split(whereSeparator: \.isWhitespace)
+            guard words.count == 6, words[2] == token, words[4] == "days",
+                  let age = pfEnableTokenAge(days: words[3], clock: words[5]) else {
+                continue
+            }
+            found.append(.init(
+                pid: String(words[0]),
+                process: String(words[1]),
+                issuedFrom: listedFrom - age,
+                issuedTo: listedTo - age
+            ))
+        }
+        return found.count == 1 ? found[0] : nil
     }
 
     /// The token `pfctl -s References` lists for the pfctl process `pid`, only
