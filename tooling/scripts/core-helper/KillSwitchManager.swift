@@ -588,6 +588,7 @@ final class KillSwitchManager {
         defer { lock.unlock() }
         let live: Bool
         let referenced: Bool
+        let held: PFEnableReference?
         do {
             var filtering = try Self.effectiveStatus()
             if !filtering {
@@ -599,7 +600,8 @@ final class KillSwitchManager {
                 filtering = try Self.effectiveStatus()
             }
             live = filtering
-            referenced = try Self.heldPFEnableReference() != nil
+            held = try Self.heldPFEnableReference()
+            referenced = held != nil
         } catch {
             // No answer says nothing about PF, and every further pfctl here
             // would wait out its own deadline behind the same /dev/pf. Leave
@@ -608,7 +610,18 @@ final class KillSwitchManager {
             FileHandle.standardError.write(Data("tono: PF check skipped: \(detail)\n".utf8))
             return
         }
-        guard !live || !referenced else { return }
+        guard !live || !referenced else {
+            // Protection holds on the recorded token, so a token it replaced
+            // whose release got no answer is retried here, not left until
+            // the next arm or disarm (#643 review, opus:F1 = codex:F3).
+            if let held, !Self.supersededPFEnableReferences.isEmpty {
+                try? Self.releaseSupersededPFEnableReferences(
+                    boot: held.boot,
+                    keeping: held.token
+                )
+            }
+            return
+        }
         do {
             guard let state = try loadState(), state.armed else { return }
             if live {

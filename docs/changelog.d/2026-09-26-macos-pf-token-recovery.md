@@ -1,0 +1,113 @@
+## 2026-09-26 · macOS：`-E` 超时找回只认本子进程的 token，记录失败回退不遗忘未确认释放的 token
+- 归属：G1（断开收回保护，PF 引用不误释放、不泄漏）；Issue #601 条目 R609-F2 的 #639 复核续修（R639-O1、R639-F2）。helper
+  `KillSwitchPF.swift`、`KillSwitchTests.swift`、`CONTRACT.sha256`；App `Core/HelperProtocolVersion.swift`。
+- 来源：基线 origin/main `42e3afd6`；红分支 `wip/macos-pf-token-recovery-20260926-red`（`0c932dcc`），修复分支
+  `fix/macos-pf-token-recovery-20260926`，[#643](https://github.com/raydocs/tono/pull/643)；未合 main。
+- 缺陷修复：
+  - R639-O1（opus:F1 = codex:F1；合并回归审查 run `4459fadd` 复报）：#639 的 `-E` 超时找回只按 PID + 进程名 `pfctl` 认领
+    `pfctl -s References` 的行。token 比取得它的 pfctl 活得久，PID 会回绕：同次开机更早别的程序在同一 PID 下取得的 token
+    会被认成本 helper 的，disarm 时被 `-X`；PID 被无关长寿进程复用时 `kill(pid, 0)` 一直成功，待定获取永不结算，hold 一直走匿名
+    `pfctl -e`。改后：`-E` 启动前记墙钟秒，子进程被回收后由它自己的终止回调记退出秒（`run` 新增 `ended` 回调）。子进程退出前不结算，
+    hold 照旧用匿名引用；退出后第一次有回答的列表即结算：只认领 PID、进程名相符，且按 TIMESTAMP 年龄（`<d> days HH:MM:SS`）
+    推算的签发秒整段落在 [启动, 退出] 内的唯一一行。证明不了（更早或更晚的持有者、窗口内两行、时钟回拨、格式不符）就不认领：
+    宁可泄漏一个 token（PF 在解除后保持开启、锚点已空，与匿名引用的已接受状态相同），也不释放可能属于别人的 token。
+  - R639-F2（codex:F2；合并回归审查复报 codex:F3）：引用记录写失败时的匿名回退用 `try?` 吞掉新 token 的 `-X` 超时，并清掉唯一的
+    内存 token，重新造成 TM-claude-6 类累积。改后：`-X` 有回答才遗忘；没有回答时 token 留作未记录引用，下次巡检重试，disarm 释放。
+- 新增/优化：无。helper 协议 4.48.0 → 4.49.0（fb5e8485 的内部候选带 4.48.0），CONTRACT 哈希按 `build-core-helper.sh` 同一管线重算
+  （先复现 main 记录的 4.48.0 哈希）。
+- 工程与测试：特权 `--lifecycle-self-test` 新增两项。`recovered-token-only-within-child-lifetime`（9d，纯解析，不跑 pfctl）：同一 PID
+  两小时前的行不认领，40 s 前、落在子进程存活期内的行认领。`unanswered-fallback-release-keeps-token`（9e）：记录路径不可写（同 9b），
+  注入的释放按 `run` 超时的方式抛错，token 必须留在内存且仍被内核列出；随后 disarm 释放，PF 起始为关时 `pfctl -d` 复原。9e 用注入
+  代替 0 s 期限，没有 codex:F4 指出的时序竞争。红分支只加这两项检查、忽略窗口的 `pfEnableToken` 重载和被忽略的 `releaseToken:`
+  参数，应以断言失败（返回旧持有者的 token；真实 `-X` 有回答，token 被释放并遗忘）。`-E` 超时后的完整找回（内核在期限后才发
+  token）仍无法在 CI 复现，只覆盖认领规则。
+- 验证：未在本地编译（MacBook 不是构建机）；以 macOS CI（`macos-26`，`build-core-helper.sh` 内的 `--self-test`、特权 `--self-test` 与
+  `--lifecycle-self-test`）为准。红 run 36213252890 记录时仍在运行；修复分支 CI 结果未出。
+- 候选/发布：仅源码，无新候选。
+- 剩余限制：TIMESTAMP 是年龄的判断来自 macOS 26 `pfctl` 的格式串（`%-u days %.2u:%.2u:%.2u`）、xnu 按日历秒记 token 时间
+  （`pf_calendar_time_second`）和公开样例，未在实机 root 下核对；若不是年龄，推算的签发秒落不进窗口，只会不认领，不会误领。
+  整秒精度下，列表恰好跨秒且 token 与退出同一秒签发时，自己的 token 也会不认领（泄漏）。别的程序取 token 之后墙钟回拨、且 PID
+  回绕到本子进程时，旧行可能落进窗口，未防。结算依赖 Foundation 在 `run` 放弃之后仍回收子进程并调用终止回调；不调用或子进程永远
+  卡在内核时，待定获取不结算，hold 一直用匿名引用（不误释放）。待定获取与未记录 token 仍只在内存里。9c 的 0 s 期限竞态（codex:F4）
+  未改。未实机。
+- **2026-09-26 续记（#643 审查 run `2427b88c` 通过，确认 minor 续修）**：
+  - 缺陷修复（grok:F2 = opus:F2）：`holdPFEnableReference` 在记录已写成新 token、内存槽已清空之后才 `try?` 列出并 `-X` 旧 token，
+    列表或 `-X` 没有回答时旧 token 被遗忘，disarm 后仍被内核持有（#639 之前就存在的旧代码缺陷）。改后按 R639-F2 同一规则：旧 token
+    进入内存列表 `supersededPFEnableReferences`，只有 pfctl 回答（已释放或已不在列表中）才遗忘；没有回答的留着，下次巡检（记录的 token
+    仍被列出时）重试，disarm 释放。释放只在新 token 已记录且持有时发生；值等于当前持有 token 的旧项只遗忘、不释放；超时不算释放。
+  - 工程与测试（codex:F3）：TIMESTAMP 年龄解析改为严格形状：天数 1–6 位数字，`HH:MM:SS` 每段恰好两位并检查范围；`00::00:40`、
+    `0:00:40`、带符号的天数都不算年龄，不认领。
+  - 工程与测试（grok:F3）：9d 增加窗口内两行（不认领）、跨秒列表使签发秒超出退出一秒（不认领）及恰好落入的对照行（认领）；新增
+    `recovered-token-age-shape-strict`。9e 新增 `unanswered-fallback-token-released-at-disarm`：disarm 必须成功（不再 `try?`）、
+    token 不再被列出、PF 回到起始状态。新增 9f `unanswered-superseded-release-keeps-token`：一个真实旧 token 放进被替换列表，注入的
+    `-X` 无回答时它必须留在列表且仍被列出，下一次巡检用真实 `-X` 释放。9f 直接放入列表，不经记录写入覆盖旧记录的路径（该路径需要
+    `heldPFEnableReference` 对仍被列出的记录回答否，CI 上无法廉价造出）。
+  - helper 协议仍为 4.49.0（本 PR 未合入）；CONTRACT 哈希按 `build-core-helper.sh` 同一管线重算（先复现上一版记录的哈希）。
+  - 剩余限制（补充）：`spawned` 读取之前墙钟被回拨时，别的程序更早签发的 token 可能落进窗口并被认领（grok:F1 / codex:F1，仍未防）。
+    保留下来的未回答 token 之后只按数值在列表中匹配；xnu 的 token 值在释放后可能被再次签发给别的程序，此时可能误释放（opus:F1，
+    未能确证）。`exited` 是终止回调运行的时刻，不是子进程被回收的时刻，二者间隔无上界（codex:F2，按回收后需整轮 PID 回绕才会误认领判断为
+    极难触发）。被替换 token 列表同样只在内存里，helper 退出即丢。未本地编译，以 macOS CI 为准；未实机。
+- **2026-09-26 续记 2（`3911934a` CI 通过；续审 run `aa24f337` 通过，确认 minor 续修）**：
+  - 缺陷修复（opus:F1 = codex:F3）：周期巡检 `superviseProtection` 在 PF 在过滤且记录的 token 被持有时提前返回，被替换列表只能等下次
+    arm 或 disarm。改后在这个提前返回里，列表非空时以记录的 token 为保留项重试释放；其它情况不变。
+  - 缺陷修复（grok:F3 = codex:F6）：disarm 读不到开机标识（nil）时，被替换 token 不经列出和 `-X` 就被遗忘。改后 nil 视为未知，
+    列表原样保留并抛错，disarm 按其它释放失败的方式记日志。
+  - 缺陷修复（opus:F3 / grok:F1 / codex:F1，墙钟回拨）：`-E` 前先取一份 `pfctl -s References` 快照；超时找回只认领快照里没有的行，
+    PID、进程名、年龄窗口和唯一行检查照旧。快照没有回答时超时找回什么也不认领（正常 `-E` 路径不受影响）。
+  - 缺陷修复（codex:F4）：`atomicWrite` 可能在 rename 之后（`fsyncParent`）抛错，此时记录已不再指向旧 token。改为写入之前就把旧 token
+    加入被替换列表；记录仍指向它时，所有释放都以记录的 token 为保留项，只遗忘不释放。
+  - 缺陷修复（opus:F4 / codex:F2 / grok:F2）：终止回调同时记单调时钟（`CLOCK_MONOTONIC`）；回调晚于 `run` 放弃子进程超过 5 s 时结算但不认领。
+  - 工程与测试（codex:F5 / grok:F4 / opus:F5）：9e 在断言之前不再 `pfctl -d`：先断言该 token 已不在 References 中；PF 在这次 disarm 后
+    由回退取得的匿名引用保持开启（设计如此，只有 `pfctl -d` 能去掉），所以断言 PF 为开启，之后才清理。9f 改走真实 hold 路径：先正常
+    hold 记录 token，再以注入的「持有检查答否」（模拟 `pfctl -s info` 以失败状态回答）让 hold 换新 token 并把旧 token 追加进列表，
+    注入的旧 token `-X` 无回答；断言旧 token 仍被列出且在列表中，随后 disarm 必须成功、两个 token 都不再列出、PF 不经清理即回到起始
+    状态（新检查 `superseded-token-released-at-disarm`）。9d 新增 `recovered-token-not-listed-before-spawn`。hold 为此新增仅供自测
+    替换的 `heldReference` 参数。
+  - helper 协议仍为 4.49.0；CONTRACT 哈希按同一管线重算。
+  - 剩余限制（补充）：opus:F2（未能确证）：一个没有回答的 `-X` 可能已在内核生效，之后若同值 token 签发给别的程序，保留的 token 只按
+    数值匹配，重试或 disarm 可能释放别人的 token；快照只防超时找回，不防这条。快照只按「列表里的所有词」排除，快照查询以非 ENOENT 的
+    失败状态回答时会是一份不完整的集合，此时退回到只靠年龄窗口的规则。子进程在内核里卡住、SIGKILL 后超过 5 s 才退出时，本子进程的
+    token 也不认领（泄漏，PF 在 disarm 后保持开启）。被替换列表非空时，每次巡检在锁内最多多等一次列出加一次 `-X` 的期限。9e 在起始
+    为关时仍需测试自己 `pfctl -d` 才回到起始状态（匿名引用）。未本地编译，以 macOS CI 为准；未实机。
+- **2026-09-26 续记 3（`dbc3ca42` 续审 run `b6e9e6a2` 通过，确认 minor 续修）**：
+  - 依据：本机 macOS 26.5.2 `/sbin/pfctl` 反汇编（只读，未运行特权命令）：`-s References` 第一次 `DIOCGETSTARTERS` 返回 ENOENT
+    时打印 `No pf starter references held`、退出 0；其它 ioctl 错误只 `warn("DIOCGETSTARTERS")` 且返回值被调用方忽略，仍退出 0；
+    打不开 /dev/pf 时退出 1（本机非 root 实测 `pfctl: /dev/pf: Permission denied`，退出 1）。成功时先打印 `TOKENS:` 标题再逐行
+    打印，TIMESTAMP 由 pfctl 以 `time(NULL)` 减内核记录的签发秒得出，确为年龄（此前「未实机核对」的格式判断由此得到二进制佐证）。
+  - 缺陷修复（grok:F1，confirmed minor）：`-E` 前的快照只在「退出 0 且含 `TOKENS:` 行」或「退出 0 且为 `No pf starter references
+    held`（空集）」时成立（新 `pfReferenceSnapshot`）；其它回答（含退出 0 的 `DIOCGETSTARTERS: <错误>`）一律为 nil，超时找回不认领。
+  - 缺陷修复（opus:F1/F2，inconclusive，按更严规则处理）：被替换 token 第一次 `-X` 之前记下它在 References 中的行（PID、进程名、
+    按年龄推算的签发秒区间）；该 `-X` 没有回答后再重试时，只有列表中的行仍为同一 PID、同一进程名且签发秒区间重叠才再 `-X`，否则
+    （行不同、解析不了或有多行）只遗忘、不 `-X`，并写 stderr 日志。宁可泄漏（PF 在 disarm 后保持开启、锚点已空），不释放证明不了
+    是自己的 token。
+  - 缺陷修复（opus:F2 建议）：disarm（`releasePFEnableReference`）读不到开机标识时，此前仍会 unlink 记录、清空未记录 token（只有被替换
+    列表保留），与注释不符。改为结算待定获取之后，boot 为 nil 即抛错，记录、未记录 token 与被替换列表全部保留；disarm 照旧记日志。
+  - 工程与测试（opus:F3）：特权 `--lifecycle-self-test` 新增三项：`reference-snapshot-only-from-full-listing`（9d 旁，纯解析）、
+    9g `reissued-superseded-token-not-released`（真实持有的 token 放入被替换列表并标为已试过 `-X`、行为别的 PID，注入的释放不得被调用，
+    条目被遗忘，token 仍被列出）、9h `unknown-boot-release-keeps-references`（`releasePFEnableReference` 新增仅供自测替换的
+    `bootSession` 参数；虚构 token、不跑 pfctl）。9f 改为比较 `.reference`。红分支 `wip/macos-pf-token-recovery-20260926-red2`
+    （`2cc94370`，只加检查和能编译的骨架），红 run 36222599329。
+  - helper 协议仍为 4.49.0；CONTRACT 哈希按 `build-core-helper.sh` 同一管线重算（先复现 `dbc3ca42` 记录的哈希）。
+  - 剩余限制（补充）：同值再签发的防护只覆盖被替换 token 的重试；记录的 token 与未记录 token 在一次没有回答的 `-X` 之后，下一次
+    arm/disarm 仍只按数值匹配（同类风险，未改）。第一次 `-X` 仍只按数值：别的程序先 `-X` 掉本 helper 的 token、同值再签发给别人时
+    仍可能误释放（与本 PR 之前相同）。签发秒同一秒内的再签发、且 PID 与进程名都相同时无法区分。快照规则依赖 macOS 26 pfctl 的
+    这两种输出；别的输出只会不认领（泄漏），不会误领。未本地编译，以 macOS CI 为准；未实机。
+- **2026-09-26 续记 4（`09a17347` CI 通过；续审 run `8fa64f3b` 通过，确认 minor 续修）**：
+  - 缺陷修复（grok:F1）：`releaseSupersededPFEnableReferences` 与 `releasePFEnableReference` 把「这次回答里没有该 token」当作已不在，
+    包括 pfctl 以退出 0 回答 `DIOCGETSTARTERS: <错误>`、或以非 0 状态回答的情形，于是遗忘被替换 token、unlink 记录、清空未记录 token。
+    改为只有完整列表（与 `pfReferenceSnapshot` 同一判定：退出 0 且含 `TOKENS:` 行，或 `No pf starter references held`）才能证明不在
+    （新 `pfEnableReferenceListing`）；其它回答与没有回答一样抛错，记录、未记录 token 与被替换列表全部保留，下次重试。arm 路径的
+    `heldPFEnableReference` 未改（「未持有」只会多取一个 token，旧 token 进入被替换列表，按本规则释放）。
+  - 缺陷修复（grok:F2 + codex:F1）：被替换 token 这一轮读不出行（行解析不了、多行，或查询途中墙钟回拨使窗口颠倒）时不再遗忘：
+    条目保留、本轮不 `-X` 并抛错。`pfEnableRow` 与 `pfEnableToken` 一样拒绝 `listedFrom > listedTo`。只有读得出、且 PID 或进程名
+    不同或签发秒区间不重叠的行才算另一次签发，遗忘、不 `-X`（同前）。第一次 `-X` 也要求本轮读得出行，否则保留下一轮再试。
+  - 工程与测试：两个释放函数与 `releasePFEnableReference` 新增仅供自测替换的 `listReferences` 参数（默认 `pfctl -s References`）。
+    特权 `--lifecycle-self-test` 新增 9i `unlisted-references-kept`（注入退出 0 的 `DIOCGETSTARTERS` 警告，disarm 必须抛错并保留三类
+    引用）与 9j `unreadable-superseded-row-kept`（注入格式不符的行，条目保留、注入的释放不被调用；颠倒窗口 `pfEnableRow` 为 nil），
+    均不跑 pfctl。红分支 `wip/macos-pf-token-recovery-20260926-red3`（`dce332ad`），红 run 36224373692。
+  - helper 协议仍为 4.49.0；CONTRACT 哈希按同一管线重算。
+  - 剩余限制（补充，范围外、未改）：记录的 token 与未记录 token 在一次没有回答的 `-X` 之后，下一次 arm（`heldPFEnableReference`）与
+    disarm 仍只按数值匹配（opus:F1 / codex:F3，#639 之前就有的同类路径）。`gaveUp` 仍在 `catch` 中才取样，早于取样的终止回调无条件
+    通过 5 s 检查（codex:F2 / grok:F3，未证实）。行不可读的被替换条目会一直保留并让每次巡检与 disarm 抛错记日志，直到读得出行
+    （泄漏方向，不误释放）。pfctl 输出若与 macOS 26 这两种形状都不同，释放一律保留（PF 在 disarm 后保持开启、锚点已空）。
+    未本地编译，以 macOS CI 为准；未实机。
