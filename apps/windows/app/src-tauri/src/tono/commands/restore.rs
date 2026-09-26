@@ -221,10 +221,14 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
     }
 }
 
-/// Whether update recovery's automatic Connect still belongs to this restore.
+/// Whether update recovery's automatic Connect still belongs to this restore. Restore internet
+/// does not change `sign_in_generation` but always retires the connection generation, so any
+/// connection transition since restore began (a Disconnect, a node switch, a quit) or a release
+/// still in flight wins: the user's choice stands and recovery waits for them.
 fn update_recovery_connect_allowed(inner: &TonoInner, generation: u64, connect_epoch: u64) -> bool {
-    let _ = connect_epoch;
     inner.sign_in_generation == generation
+        && inner.connect_generation == connect_epoch
+        && !inner.fsm.status().is_disconnecting
 }
 
 /// Commit a `me()` answer as this session's account: its log-upload owner, the payload, and

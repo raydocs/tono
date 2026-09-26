@@ -18,3 +18,11 @@
 - 验证：未在本地编译或运行（MacBook 不是构建机）；以 `windows-ci`（`windows-2025`）为准，尚未出结果。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：用户在 `me()` 期间释放后，恢复流程其余步骤（目录/策略同步、`schedule_startup_resume_if_proven`）照旧执行，本修复未改；未实机验证。
+- 续记 2026-09-26（审查 opus:F1，已确认小项）：红分支 CI 两个测试均按断言失败，PR CI 通过。审查指出受保护更新恢复（`update_recovery` 为 Connected）时，
+  恢复末尾无条件派生 `connection::connect()`，只以 `sign_in_generation` 把关；`me()` 期间用户完成的「恢复网络」会被一次完整重连
+  （重新武装 WFP 并连接）推翻，本 PR 让 `me()` 期间显示被拦截并提供「恢复网络」后更容易走到。改后：恢复开始时记下
+  `connect_generation`，新增 `update_recovery_connect_allowed`，只有登录代、连接代都未变且没有释放在进行时才自动连接；
+  否则跳过并记日志，保留用户选择的已释放状态（更严格，拿不准就不自动连接）。新增一个 `#[tokio::test]`
+  `restore_internet_during_restore_skips_update_recovery_connect`：未动的恢复允许，走 `disconnect()` 的步骤并完成释放后拒绝；
+  红骨架（保留原判定）提交 `b7e50b39` 上应按断言失败。H16-O-F7 改回总账原行（in-PR，#651），删除其分片。未在本地编译。
+  剩余：判定与派生的 `connect()` 真正准入之间仍有极短窗口，未把连接代传入 `connect()`（需改 `connection.rs`，超出本单元）。
