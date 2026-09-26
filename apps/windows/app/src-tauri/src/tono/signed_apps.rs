@@ -14,6 +14,10 @@
 //!    (`…\Tencent\WeChat`, `%LOCALAPPDATA%\Programs\wechatapp`, …). A folder
 //!    that is merely named WeChat — including `C:\Users\me\WeChat` and
 //!    `C:\Users\me\evil\Tencent\WeChat` — gets one exact PROCESS-PATH.
+//! 5. The directory grant also needs the install directory and its ancestors
+//!    to be writable only by Administrators, SYSTEM and TrustedInstaller.
+//!    Per-user and default non-system-drive installs, or any DACL read error,
+//!    get one exact PROCESS-PATH instead.
 //!
 //! A portable `D:\Apps\WeChat.exe` becomes one exact PROCESS-PATH. Failure
 //! to discover anything keeps the existing PROCESS-NAME list.
@@ -538,6 +542,269 @@ pub fn regex_for_verified_feishu_exe(path: &str) -> Option<String> {
     regex_for_verified_reviewed_direct_exe(path, ReviewedDirectProduct::Feishu)
 }
 
+/// The only principals that may add, replace or re-permission anything in a
+/// prefix-granted install tree: Administrators, SYSTEM, TrustedInstaller.
+const ADMIN_ONLY_WRITER_SIDS: [&str; 3] = [
+    "S-1-5-32-544",
+    "S-1-5-18",
+    "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
+];
+
+/// CREATOR OWNER only appears on inheritable ACEs and becomes the SID of
+/// whoever creates the child. Creating requires a write-class right on the
+/// parent, which this check restricts to [`ADMIN_ONLY_WRITER_SIDS`].
+const CREATOR_OWNER_SID: &str = "S-1-3-0";
+
+/// FILE_WRITE_DATA/ADD_FILE, FILE_APPEND_DATA/ADD_SUBDIRECTORY, FILE_WRITE_EA,
+/// FILE_DELETE_CHILD, FILE_WRITE_ATTRIBUTES, DELETE, WRITE_DAC, WRITE_OWNER,
+/// GENERIC_ALL and GENERIC_WRITE.
+const DIRECTORY_WRITE_CLASS_RIGHTS: u32 = 0x0000_0002
+    | 0x0000_0004
+    | 0x0000_0010
+    | 0x0000_0040
+    | 0x0000_0100
+    | 0x0001_0000
+    | 0x0004_0000
+    | 0x0008_0000
+    | 0x1000_0000
+    | 0x4000_0000;
+
+/// Owner and access-allowed ACEs of one directory, as string SIDs.
+#[cfg_attr(not(windows), allow(dead_code))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DirectorySecurity {
+    owner_sid: String,
+    /// Every access-allowed ACE with its mask, inherit-only ones included:
+    /// they decide what the children, which the prefix also covers, grant.
+    allowed_aces: Vec<(String, u32)>,
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+impl DirectorySecurity {
+    fn is_admin_only_writable(&self) -> bool {
+        is_admin_only_writer(&self.owner_sid)
+            && self.allowed_aces.iter().all(|(sid, mask)| {
+                mask & DIRECTORY_WRITE_CLASS_RIGHTS == 0
+                    || is_admin_only_writer(sid)
+                    || sid.as_str() == CREATOR_OWNER_SID
+            })
+    }
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn is_admin_only_writer(sid: &str) -> bool {
+    ADMIN_ONLY_WRITER_SIDS
+        .iter()
+        .any(|writer| writer.eq_ignore_ascii_case(sid))
+}
+
+/// Reads a directory's security descriptor. A trait so the admin-only decision
+/// can be tested with fake ACLs. An `Err` never counts as admin-only.
+#[cfg_attr(not(windows), allow(dead_code))]
+trait DirectorySecuritySource {
+    fn read_directory_security(&self, directory: &str) -> Result<DirectorySecurity, String>;
+}
+
+/// `X:\Program Files` and `X:\Program Files (x86)`: the walk stops here after
+/// checking it, because the drive root above lets Authenticated Users create
+/// folders by default.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn is_known_system_root(directory: &str) -> bool {
+    let Some((drive, rest)) = directory.split_once('\\') else {
+        return false;
+    };
+    drive.len() == 2
+        && (rest.eq_ignore_ascii_case("Program Files")
+            || rest.eq_ignore_ascii_case("Program Files (x86)"))
+}
+
+/// True only when `directory` and each ancestor up to a known system root (or
+/// the drive root) are owned by, and grant write-class rights only to,
+/// Administrators, SYSTEM and TrustedInstaller. A path that is not a plain
+/// drive path, or any error reading a DACL, answers false.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn is_admin_only_install_chain(directory: &str, source: &impl DirectorySecuritySource) -> bool {
+    let normalized = normalize_windows_display_path(directory);
+    let mut current = normalized.trim_end_matches('\\');
+    let drive_path = matches!(
+        current.as_bytes(),
+        [drive, b':'] | [drive, b':', b'\\', ..] if drive.is_ascii_alphabetic()
+    );
+    if !drive_path
+        || current
+            .split('\\')
+            .skip(1)
+            .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        return false;
+    }
+    loop {
+        let drive_root = current.len() == 2;
+        let query = if drive_root {
+            format!("{current}\\")
+        } else {
+            current.to_string()
+        };
+        match source.read_directory_security(&query) {
+            Ok(security) if security.is_admin_only_writable() => {}
+            _ => return false,
+        }
+        if drive_root || is_known_system_root(current) {
+            return true;
+        }
+        let Some(parent) = parent_directory(current) else {
+            return false;
+        };
+        current = parent;
+    }
+}
+
+/// [`regex_for_verified_reviewed_direct_exe`] behind a directory-security gate.
+/// The layout decides whether a prefix is possible; the prefix survives only
+/// when the install tree is admin-only writable. Otherwise, including any DACL
+/// read error, the verified file gets its exact regex.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn regex_for_verified_exe_on_admin_only_tree(
+    path: &str,
+    product: ReviewedDirectProduct,
+    security: &impl DirectorySecuritySource,
+) -> Option<String> {
+    let layout_regex = regex_for_verified_reviewed_direct_exe(path, product)?;
+    let normalized = normalize_windows_display_path(path);
+    let layout_prefix = if product == ReviewedDirectProduct::WeChat {
+        allows_wechat_directory_prefix(&normalized)
+    } else {
+        allows_reviewed_direct_directory_prefix(product, &normalized)
+    };
+    if !layout_prefix {
+        return Some(layout_regex);
+    }
+    let parent = parent_directory(&normalized)?;
+    if is_admin_only_install_chain(parent, security) {
+        return Some(layout_regex);
+    }
+    if product == ReviewedDirectProduct::WeChat {
+        wechat_file_path_regex(&normalized)
+    } else {
+        windows_path_regex(&normalized, WindowsPathRegexKind::ExactFile)
+    }
+}
+
+/// Reads the owner and DACL with `GetNamedSecurityInfoW`. A NULL DACL, an
+/// unreadable ACE, or an ACE type other than (callback) allow/deny is an error.
+#[cfg(windows)]
+struct WindowsDirectorySecurity;
+
+#[cfg(windows)]
+impl DirectorySecuritySource for WindowsDirectorySecurity {
+    fn read_directory_security(&self, directory: &str) -> Result<DirectorySecurity, String> {
+        windows_directory_security::read(directory)
+    }
+}
+
+#[cfg(windows)]
+mod windows_directory_security {
+    use super::DirectorySecurity;
+    use std::ffi::c_void;
+    use std::os::windows::ffi::OsStrExt as _;
+    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Authorization::{
+        ConvertSidToStringSidW, GetNamedSecurityInfoW, SE_FILE_OBJECT,
+    };
+    use windows_sys::Win32::Security::{
+        ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, DACL_SECURITY_INFORMATION, GetAce, IsValidSid,
+        OWNER_SECURITY_INFORMATION, PSID,
+    };
+
+    const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
+    const ACCESS_DENIED_ACE_TYPE: u8 = 1;
+    const ACCESS_ALLOWED_CALLBACK_ACE_TYPE: u8 = 9;
+    const ACCESS_DENIED_CALLBACK_ACE_TYPE: u8 = 10;
+
+    struct LocalAllocation(*mut c_void);
+
+    impl Drop for LocalAllocation {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe { LocalFree(self.0) };
+            }
+        }
+    }
+
+    pub(super) fn read(directory: &str) -> Result<DirectorySecurity, String> {
+        let wide: Vec<u16> = std::ffi::OsStr::new(directory)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let mut owner: PSID = std::ptr::null_mut();
+        let mut dacl: *mut ACL = std::ptr::null_mut();
+        let mut descriptor = std::ptr::null_mut();
+        let status = unsafe {
+            GetNamedSecurityInfoW(
+                wide.as_ptr(),
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                &mut owner,
+                std::ptr::null_mut(),
+                &mut dacl,
+                std::ptr::null_mut(),
+                &mut descriptor,
+            )
+        };
+        if status != 0 || descriptor.is_null() {
+            return Err(format!("GetNamedSecurityInfoW failed: Windows error {status}"));
+        }
+        let _descriptor = LocalAllocation(descriptor);
+        if owner.is_null() {
+            return Err("directory has no owner".to_string());
+        }
+        if dacl.is_null() {
+            return Err("directory has a NULL DACL".to_string());
+        }
+        let owner_sid = sid_string(owner)?;
+        let ace_count = u32::from(unsafe { (*dacl).AceCount });
+        let mut allowed_aces = Vec::new();
+        for index in 0..ace_count {
+            let mut ace: *mut c_void = std::ptr::null_mut();
+            if unsafe { GetAce(dacl, index, &mut ace) } == 0 || ace.is_null() {
+                return Err(format!("ACE {index} could not be read"));
+            }
+            let header = unsafe { &*ace.cast::<ACE_HEADER>() };
+            match header.AceType {
+                ACCESS_DENIED_ACE_TYPE | ACCESS_DENIED_CALLBACK_ACE_TYPE => {}
+                ACCESS_ALLOWED_ACE_TYPE | ACCESS_ALLOWED_CALLBACK_ACE_TYPE => {
+                    let allowed = unsafe { &*ace.cast::<ACCESS_ALLOWED_ACE>() };
+                    let sid = std::ptr::addr_of!(allowed.SidStart)
+                        .cast_mut()
+                        .cast::<c_void>();
+                    if unsafe { IsValidSid(sid) } == 0 {
+                        return Err(format!("ACE {index} has an invalid SID"));
+                    }
+                    allowed_aces.push((sid_string(sid)?, allowed.Mask));
+                }
+                other => return Err(format!("ACE {index} has unsupported type {other}")),
+            }
+        }
+        Ok(DirectorySecurity {
+            owner_sid,
+            allowed_aces,
+        })
+    }
+
+    fn sid_string(sid: PSID) -> Result<String, String> {
+        let mut value: *mut u16 = std::ptr::null_mut();
+        if unsafe { ConvertSidToStringSidW(sid, &mut value) } == 0 || value.is_null() {
+            return Err("ConvertSidToStringSidW failed".to_string());
+        }
+        let _value = LocalAllocation(value.cast());
+        let length = (0..)
+            .take_while(|index| unsafe { *value.add(*index) } != 0)
+            .count();
+        String::from_utf16(unsafe { std::slice::from_raw_parts(value, length) })
+            .map_err(|_| "SID is not valid UTF-16".to_string())
+    }
+}
+
 #[cfg(windows)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct WitnessFingerprint {
@@ -602,7 +869,11 @@ fn discover_signed_wechat_path_regexes_windows() -> Vec<String> {
         let Some(display) = canonical.to_str() else {
             continue;
         };
-        if let Some(regex) = regex_for_verified_wechat_exe(&normalize_windows_display_path(display)) {
+        if let Some(regex) = regex_for_verified_exe_on_admin_only_tree(
+            &normalize_windows_display_path(display),
+            ReviewedDirectProduct::WeChat,
+            &WindowsDirectorySecurity,
+        ) {
             regexes.insert(regex);
         }
     }
@@ -649,7 +920,9 @@ fn discover_signed_reviewed_direct_path_regexes_windows() -> Vec<String> {
         let Some(display) = canonical.to_str() else {
             continue;
         };
-        if let Some(regex) = regex_for_verified_reviewed_direct_exe(display, product) {
+        if let Some(regex) =
+            regex_for_verified_exe_on_admin_only_tree(display, product, &WindowsDirectorySecurity)
+        {
             regexes.insert(regex);
         }
     }
@@ -1210,6 +1483,72 @@ mod tests {
             dingtalk.starts_with('^') && !dingtalk.ends_with('$'),
             "expected AnchoredPrefix, got {dingtalk}"
         );
+    }
+
+    #[test]
+    fn directory_prefix_requires_an_admin_only_install_chain() {
+        struct FakeSecurity<F>(F);
+        impl<F: Fn(&str) -> Result<DirectorySecurity, String>> DirectorySecuritySource for FakeSecurity<F> {
+            fn read_directory_security(&self, directory: &str) -> Result<DirectorySecurity, String> {
+                (self.0)(directory)
+            }
+        }
+        // Program Files defaults: TrustedInstaller owns it; SYSTEM, Administrators and
+        // TrustedInstaller write; CREATOR OWNER is inherit-only; Users read and execute.
+        // The drive root also lets Authenticated Users create folders, so the walk must
+        // stop at the system root instead of reaching `C:\`.
+        fn modeled(directory: &str) -> DirectorySecurity {
+            let mut security = DirectorySecurity {
+                owner_sid: "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
+                    .to_string(),
+                allowed_aces: vec![
+                    ("S-1-5-18".to_string(), 0x001f_01ff),
+                    ("S-1-5-32-544".to_string(), 0x001f_01ff),
+                    ("S-1-3-0".to_string(), 0x1000_0000),
+                    ("S-1-5-32-545".to_string(), 0x0012_00a9),
+                ],
+            };
+            if directory.trim_end_matches('\\').eq_ignore_ascii_case("C:") {
+                security.allowed_aces.push(("S-1-5-11".to_string(), 0x0000_0004));
+            }
+            security
+        }
+        let exe = r"C:\Program Files\Tencent\WeChat\WeChat.exe";
+
+        let admin_only =
+            FakeSecurity(|directory: &str| -> Result<DirectorySecurity, String> { Ok(modeled(directory)) });
+        let prefix =
+            regex_for_verified_exe_on_admin_only_tree(exe, ReviewedDirectProduct::WeChat, &admin_only)
+                .unwrap();
+        assert!(!prefix.ends_with('$'), "admin-only tree keeps the prefix: {prefix}");
+
+        // Authenticated Users may modify an ancestor: anything can be planted in the tree.
+        let user_writable = FakeSecurity(|directory: &str| -> Result<DirectorySecurity, String> {
+            let mut security = modeled(directory);
+            if directory.eq_ignore_ascii_case(r"C:\Program Files\Tencent") {
+                security.allowed_aces.push(("S-1-5-11".to_string(), 0x0013_01bf));
+            }
+            Ok(security)
+        });
+        let exact = regex_for_verified_exe_on_admin_only_tree(
+            exe,
+            ReviewedDirectProduct::WeChat,
+            &user_writable,
+        )
+        .unwrap();
+        assert!(exact.ends_with('$'), "user-writable tree must be exact: {exact}");
+
+        let unreadable = FakeSecurity(|directory: &str| -> Result<DirectorySecurity, String> {
+            if directory.eq_ignore_ascii_case(r"C:\Program Files\Tencent\WeChat") {
+                Err("access denied".to_string())
+            } else {
+                Ok(modeled(directory))
+            }
+        });
+        let exact =
+            regex_for_verified_exe_on_admin_only_tree(exe, ReviewedDirectProduct::WeChat, &unreadable)
+                .unwrap();
+        assert!(exact.ends_with('$'), "unreadable DACL must be exact: {exact}");
     }
 
     #[test]
