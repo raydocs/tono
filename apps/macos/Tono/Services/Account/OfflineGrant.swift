@@ -230,10 +230,11 @@ nonisolated final class OfflineGrantGate: @unchecked Sendable {
         acceptedOnline = true
     }
 
-    /// A restore could not verify this session (R612-O5): an acceptance
-    /// heard earlier in this process no longer lets Connect dial. A new
-    /// server acceptance or an offline admission does.
-    func restoreUnverified() {
+    /// A restore could not verify this session, the account was cleared
+    /// (sign-out, account loss) or suspended (R612-O5): an acceptance heard
+    /// earlier in this process no longer lets Connect dial. A new server
+    /// acceptance or an offline admission does.
+    func withdrawAcceptance() {
         lock.lock(); defer { lock.unlock() }
         acceptedOnline = false
     }

@@ -113,7 +113,7 @@ extension AccountSession {
         offlineVerifiedAt = nil
         // R612-O5: until Tono accepts the session again, only the offline
         // admission below lets Connect dial the cached catalog.
-        api.offlineGate.restoreUnverified()
+        api.offlineGate.withdrawAcceptance()
         guard Self.isUnreachable(error), !protectionUnconfirmedConsumer() else {
             await fail(error, signsOutOnUnauthorized: true)
             return
@@ -663,6 +663,8 @@ extension AccountSession {
         pauseAppRoutingResearch()
         state = .suspended
         ManagedExitCatalogOwnership.purge()
+        // R612-O5: only `me()` accepting the account again lifts this.
+        api.offlineGate.withdrawAcceptance()
         Task { [weak self] in await self?.descriptorConsumer(nil) }
         updateDiagnosticsLogUploading()
     }
