@@ -2,7 +2,7 @@
 - 归属：G3（同一设备先失败后成功的更新验收）；影响 Windows Service 安装器 `apps/windows/service/src/bin/install_service.rs`
   （`CoordinatedBinaryReplacement::prepare`），经 `install_service/update_executor.rs` 的原生更新执行器调用。发现 WIN-UPD-RETIRED-ROLLBACK。
 - 来源：基线 origin/main `f15e95a7`；红分支 `wip/win-update-after-rollback-red`（`c306b0e9`，仅测试）；
-  修复分支 `fix/win-update-after-rollback-20260926`；PR 待开；未合 main。
+  修复分支 `fix/win-update-after-rollback-20260926`；[#657](https://github.com/raydocs/tono/pull/657)；未合 main。
 - 缺陷修复：发布失败时 `rollback_plan` 从 `.rollback` 复制还原并保留副本（设计如此），已验证 Disconnect 的 `retire_rolled_back`
   只归档记录不动文件，于是副本留在安装目录。下一次更新在 consume 之后调用 `prepare`，对残留副本严格拒绝，
   执行器转为 Uncertain，该设备此后每次原生更新都失败。现在 `prepare` 对 `.rollback`/`.restore`/`.publish` 走已有的
