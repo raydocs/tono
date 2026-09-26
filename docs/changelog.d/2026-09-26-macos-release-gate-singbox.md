@@ -1,6 +1,6 @@
 ## 2026-09-26 · macOS 发布门改查实际嵌入的 sing-box 核心
 - 归属：SHIP_PLAN G3/G4（客户 0.0.74 发布前置）；影响 `tooling/scripts/verify-release-gate.sh`、macOS CI policy-tests。发现 REL-GATE-MAC。
-- 来源：基线 origin/main `184b1a0c`；分支 `fix/macos-release-gate-singbox-20260926`（红 `b81e0c82`，仅测试，macOS CI run 36228978135 的 policy-tests 以该断言失败），PR 待开；未合 main。
+- 来源：基线 origin/main `184b1a0c`；分支 `fix/macos-release-gate-singbox-20260926`（红 `b81e0c82`，仅测试，macOS CI run 36228978135 的 policy-tests 以该断言失败），[#659](https://github.com/raydocs/tono/pull/659)（修复 `6e930bc3`）；未合 main。
 - 缺陷修复：发布门对嵌入可执行文件逐个核对 Developer ID 签名，清单仍是 `tono-core-helper` 与 `mihomo`；App 的 Embed Executables
   （`project.pbxproj`，dstSubfolderSpec 7 即 Resources）只嵌入 `sing-box` 与 `tono-core-helper`，于是任何真实发布包都会报
   「missing embedded executable: Contents/Resources/mihomo」。现在清单改为 `sing-box`，并对它额外要求签名标识 `sing-box` 与 hardened runtime
