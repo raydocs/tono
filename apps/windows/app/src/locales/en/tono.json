@@ -280,6 +280,7 @@
       "deviceLimit": "Device limit reached. Remove one from a signed-in device.",
       "sessionExpired": "That code expired. Request a new one.",
       "codeRejected": "That code is wrong or expired. Request a new one.",
+      "signInNotSaved": "Couldn't save the sign-in on this PC. Request a new code and try again.",
       "clockSkew": "This PC's date and time look wrong, so Tono cannot verify its server. Set the correct date and time in Settings > Time & language > Date & time, then retry.",
       "serverError": "Sign-in service is temporarily busy or unavailable. Please try again later or contact support."
     }

@@ -33,6 +33,18 @@ const SERVICE_NAME: &str = "tono";
 /// vouches for is bound to this machine, so the marker must not roam either (H11-F2, #409).
 const VAULT_SESSION_MARKER: &str = "vault-session.marker";
 
+/// A marker that vouches for the stored session. Every earlier build wrote this, so any content
+/// that is not [`PENDING_MARKER`] (an earlier build's marker, or an empty one) still vouches.
+const COMMITTED_MARKER: &[u8] = b"1";
+
+/// Prefix of the marker a sign-in writes before it stores its session. It vouches for nothing until
+/// that session is durable and the marker is committed: the sign-in may have failed or the process
+/// died first, or the vault never accepted the session.
+const PENDING_MARKER: &[u8] = b"pending";
+
+/// Where a marker is staged before it replaces [`VAULT_SESSION_MARKER`] ([`replace_marker`]).
+const STAGED_MARKER: &str = "vault-session.marker.staged";
+
 /// The directory that holds [`VAULT_SESSION_MARKER`] for `data_dir`. A data directory under the
 /// roaming `%APPDATA%` maps to the same relative path under `%LOCALAPPDATA%`, which does not roam.
 /// Any other directory (portable installs, test fixtures, other platforms) holds its own marker.
@@ -51,7 +63,202 @@ fn vault_marker_dir(data_dir: &std::path::Path) -> std::path::PathBuf {
 pub(crate) fn mark_vault_session_owned(data_dir: &std::path::Path) -> std::io::Result<()> {
     let marker_dir = vault_marker_dir(data_dir);
     std::fs::create_dir_all(&marker_dir)?;
-    std::fs::write(marker_dir.join(VAULT_SESSION_MARKER), b"1")
+    std::fs::write(marker_dir.join(VAULT_SESSION_MARKER), COMMITTED_MARKER)
+}
+
+/// What the local marker says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MarkerState {
+    Absent,
+    /// A sign-in wrote it and has not committed it ([`PENDING_MARKER`]).
+    Pending,
+    /// It vouches for the vault session.
+    Committed,
+}
+
+fn marker_state(data_dir: &std::path::Path) -> std::io::Result<MarkerState> {
+    match std::fs::read(vault_marker_dir(data_dir).join(VAULT_SESSION_MARKER)) {
+        Ok(content) if content.starts_with(PENDING_MARKER) => Ok(MarkerState::Pending),
+        Ok(_) => Ok(MarkerState::Committed),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(MarkerState::Absent),
+        Err(error) => Err(error),
+    }
+}
+
+/// Replaces the local marker with `content` in one step: a crash leaves the old marker or the new
+/// one, never a partial file (an empty marker reads as committed).
+fn replace_marker(data_dir: &std::path::Path, content: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let marker_dir = vault_marker_dir(data_dir);
+    std::fs::create_dir_all(&marker_dir)?;
+    let staged = marker_dir.join(STAGED_MARKER);
+    let mut file = std::fs::File::create(&staged)?;
+    file.write_all(content)?;
+    file.sync_all()?;
+    drop(file);
+    std::fs::rename(&staged, marker_dir.join(VAULT_SESSION_MARKER))
+}
+
+/// What a sign-in's session marker step found ([`record_sign_in_marker`]). Either way the marker is
+/// now this sign-in's pending one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SignInMarker {
+    /// A marker was already there, with its content. `None`: it could not be read, so an undo
+    /// leaves the marker pending and the next launch asks for a sign-in.
+    Existing { previous: Option<Vec<u8>> },
+    /// No marker was there.
+    Created,
+}
+
+/// The pending marker sign-in `generation` writes ([`PENDING_MARKER`]).
+fn pending_marker(generation: u64) -> Vec<u8> {
+    [PENDING_MARKER, format!(":{generation}").as_bytes()].concat()
+}
+
+/// Whether the local marker still reads sign-in `generation`'s pending content. Other content, or
+/// no marker, is `false`. A marker that cannot be read is an error, not an answer.
+fn holds_pending_marker(data_dir: &std::path::Path, generation: u64) -> std::io::Result<bool> {
+    match std::fs::read(vault_marker_dir(data_dir).join(VAULT_SESSION_MARKER)) {
+        Ok(content) => Ok(content == pending_marker(generation)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+/// Writes the local marker pending for sign-in `generation`, before the sign-in does anything it
+/// cannot undo (retiring the previous account's connection, dropping its catalog). Only a committed
+/// local marker vouches for a vault session ([`data_dir_owns_vault_session`]), and this one vouches
+/// only once [`SessionMarker::commit`] runs after the session is durable. It replaces whatever
+/// marker was there, a committed one included: once a switch has stored its session, a session
+/// that never lands must not leave the previous account's marker to restore that account on the
+/// next launch. A marker that cannot be written refuses the sign-in.
+fn record_sign_in_marker(data_dir: &std::path::Path, generation: u64) -> Result<SignInMarker, String> {
+    let found = match std::fs::read(vault_marker_dir(data_dir).join(VAULT_SESSION_MARKER)) {
+        Ok(previous) => SignInMarker::Existing { previous: Some(previous) },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => SignInMarker::Created,
+        Err(_) => SignInMarker::Existing { previous: None },
+    };
+    sign_in_marker_verdict(found, || replace_marker(data_dir, &pending_marker(generation)))
+}
+
+/// [`record_sign_in_marker`]'s decision: `write` must succeed, whatever marker was `found`.
+fn sign_in_marker_verdict(
+    found: SignInMarker,
+    write: impl FnOnce() -> std::io::Result<()>,
+) -> Result<SignInMarker, String> {
+    write().map(|()| found).map_err(|error| {
+        format!("TONO_SIGN_IN_NOT_SAVED: could not record this installation's session, so this sign-in was not adopted: {error}")
+    })
+}
+
+/// This process's side of the local marker, kept in `TonoInner` so every step runs under the Tono
+/// state lock; the file is what a relaunch reads ([`data_dir_owns_vault_session`]). While the
+/// process runs, every pending marker it writes has exactly one owner: the sign-in in flight,
+/// which either adopts or puts back what the marker held before any sign-in was in flight, or
+/// else the adopted sign-in awaiting its commit, whose commit task ends only once the file holds a
+/// committed marker, a newer sign-in adopts, or the process exits. Outside this type only the
+/// load's one-time upgrade writes the marker, and only an absent one.
+#[derive(Debug, Default)]
+pub(crate) struct SessionMarker {
+    /// The sign-in whose pending marker the file holds and which has stored no session yet, with
+    /// what the marker goes back to if it never does.
+    in_flight: Option<(u64, Restore)>,
+    /// The adopted sign-in whose marker is not committed on disk yet.
+    awaiting_commit: Option<u64>,
+}
+
+/// What an undone sign-in puts back ([`SessionMarker::undo`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Restore {
+    /// No marker was there.
+    Remove,
+    /// This content was there. A pending one still vouches for nothing.
+    Content(Vec<u8>),
+    /// It could not be read: the marker stays pending, and the next launch asks for a sign-in.
+    KeepPending,
+}
+
+impl SessionMarker {
+    /// Marks the local marker pending for sign-in `generation` ([`record_sign_in_marker`]: a marker
+    /// that cannot be written refuses the sign-in, and nothing here changes). If this sign-in
+    /// stores no session, the marker goes back to what it held before any sign-in was in flight. A
+    /// sign-in this one displaces never stored a session and can no longer adopt (its generation is
+    /// gone), so this one takes over its undo. An adopted sign-in still awaiting its commit gets
+    /// its pending marker back, which its commit task still answers for.
+    pub(crate) fn begin(&mut self, data_dir: &std::path::Path, generation: u64) -> Result<(), String> {
+        let found = record_sign_in_marker(data_dir, generation)?;
+        let restore = match (self.in_flight.take(), self.awaiting_commit) {
+            (Some((_, restore)), _) => restore,
+            (None, Some(adopted)) => Restore::Content(pending_marker(adopted)),
+            (None, None) => match found {
+                SignInMarker::Created => Restore::Remove,
+                SignInMarker::Existing { previous: Some(previous) } => Restore::Content(previous),
+                SignInMarker::Existing { previous: None } => Restore::KeepPending,
+            },
+        };
+        self.in_flight = Some((generation, restore));
+        Ok(())
+    }
+
+    /// Sign-in `generation` handed its session to the vault (`client.adopt`, under the same lock):
+    /// its marker now waits for that session to be durable. An earlier adopted sign-in's commit is
+    /// moot, as its session is no longer the vault's.
+    pub(crate) fn adopted(&mut self, generation: u64) {
+        self.in_flight = None;
+        self.awaiting_commit = Some(generation);
+    }
+
+    /// Whether adopted sign-in `generation`'s marker still waits for its commit.
+    pub(crate) fn awaits_commit(&self, generation: u64) -> bool {
+        self.awaiting_commit == Some(generation)
+    }
+
+    /// Sign-in `generation` stored no session (`client.adopt` fails before queuing the vault write),
+    /// so the vault still holds what the marker described before any sign-in was in flight. If this
+    /// is still the sign-in in flight and the marker still reads its exact pending content, that
+    /// marker is put back. A sign-in a newer one displaced leaves the marker to that one.
+    pub(crate) fn undo(&mut self, data_dir: &std::path::Path, generation: u64) {
+        if !matches!(&self.in_flight, Some((in_flight, _)) if *in_flight == generation) {
+            return;
+        }
+        let Some((_, restore)) = self.in_flight.take() else { return };
+        if !matches!(holds_pending_marker(data_dir, generation), Ok(true)) {
+            return;
+        }
+        let undone = match restore {
+            Restore::Remove => std::fs::remove_file(vault_marker_dir(data_dir).join(VAULT_SESSION_MARKER)),
+            Restore::Content(content) => replace_marker(data_dir, &content),
+            Restore::KeepPending => Ok(()),
+        };
+        if let Err(error) = undone {
+            // Still pending, so it vouches for nothing.
+            tono_logging::logging!(warn, tono_logging::Type::Service,
+                "Tono: failed to undo the session marker of a sign-in that was not adopted: {error}");
+        }
+    }
+
+    /// Adopted sign-in `generation`'s session is durable (the vault writer acknowledged every
+    /// earlier write), so its marker commits. `Ok(true)`: nothing is left to do, as the file holds a
+    /// committed marker or a newer sign-in adopted. `Ok(false)`: a sign-in is in flight and the
+    /// marker is that one's to write. It now puts back a committed marker if it stores no session,
+    /// and this sign-in keeps the commit until the file shows it: a write-back that fails leaves a
+    /// pending marker, which the next try commits. `Err`: the marker could not be read or written.
+    /// Until `Ok(true)` the commit task tries again.
+    pub(crate) fn commit(&mut self, data_dir: &std::path::Path, generation: u64) -> std::io::Result<bool> {
+        if !self.awaits_commit(generation) {
+            return Ok(true);
+        }
+        if let Some((_, restore)) = &mut self.in_flight {
+            *restore = Restore::Content(COMMITTED_MARKER.to_vec());
+            return Ok(false);
+        }
+        // No sign-in in flight answers for a pending marker, so it is this one's.
+        if marker_state(data_dir)? == MarkerState::Pending {
+            replace_marker(data_dir, COMMITTED_MARKER)?;
+        }
+        self.awaiting_commit = None;
+        Ok(true)
+    }
 }
 
 /// Whether the refresh token in the vault belongs to this data directory. Only the local marker
@@ -67,8 +274,17 @@ pub(crate) fn data_dir_owns_vault_session(
     legacy_roaming_session: bool,
 ) -> VaultSessionOwnership {
     let marker = vault_marker_dir(data_dir).join(VAULT_SESSION_MARKER);
-    if marker.exists() {
-        return VaultSessionOwnership::Owned { rebind: legacy_roaming_session };
+    match marker_state(data_dir) {
+        Ok(MarkerState::Committed) => return VaultSessionOwnership::Owned { rebind: legacy_roaming_session },
+        // No sign-in committed it (the sign-in failed or the process ended first, or its session
+        // never became durable): it vouches for nothing the vault holds.
+        Ok(MarkerState::Pending) => return VaultSessionOwnership::NotOwned,
+        Ok(MarkerState::Absent) => {}
+        Err(error) => {
+            tono_logging::logging!(warn, tono_logging::Type::Service,
+                "Tono: failed to read the vault session marker: {error}");
+            return VaultSessionOwnership::Unrecorded;
+        }
     }
     let legacy_marker = data_dir.join(VAULT_SESSION_MARKER);
     let legacy_marker = (legacy_marker != marker && legacy_marker.exists()).then_some(legacy_marker);
@@ -102,7 +318,8 @@ pub(crate) enum VaultSessionOwnership {
     /// The one-time upgrade from a roaming session could not write the local marker. That roaming
     /// credential is its only evidence and the first refresh-token rotation would rewrite it
     /// local-machine, so the load answers nothing: a retry, or the next launch, upgrades again
-    /// instead of signing the user out.
+    /// instead of signing the user out. The same answer when the local marker cannot be read: it
+    /// may vouch, or be a sign-in's pending marker that must not.
     Unrecorded,
 }
 
@@ -708,6 +925,46 @@ mod tests {
         // The roaming marker is removed only after the local one is written, so it still answers.
         assert_eq!(ownership(true, true, false, || false), Ownership::Owned { rebind: true });
         assert_eq!(ownership(false, false, true, || true), Ownership::NotOwned);
+    }
+
+    #[test]
+    fn a_sign_in_whose_local_marker_cannot_be_written_is_refused() {
+        // Only the local marker vouches for a vault session (#635). A sign-in that stored its
+        // session without one was disowned by the next launch: signed out, protection released.
+        use super::{SignInMarker, sign_in_marker_verdict as verdict};
+        let unwritable = || -> std::io::Result<()> { Err(std::io::Error::other("marker directory is read-only")) };
+        assert!(verdict(SignInMarker::Created, unwritable).is_err(), "a sign-in stored a session its next launch will not own");
+        assert_eq!(verdict(SignInMarker::Created, || Ok(())), Ok(SignInMarker::Created));
+        // A marker this machine already held is replaced by the pending one too, so a switch that
+        // cannot write it is refused like any other sign-in.
+        let held = SignInMarker::Existing { previous: Some(b"1".to_vec()) };
+        assert!(verdict(held.clone(), unwritable).is_err(), "a switch left the previous account's marker vouching");
+        assert_eq!(verdict(held.clone(), || Ok(())), Ok(held));
+    }
+
+    #[test]
+    fn a_durable_session_keeps_its_commit_when_a_refused_switch_cannot_put_its_marker_back() {
+        use super::{STAGED_MARKER, SessionMarker, VaultSessionOwnership, data_dir_owns_vault_session};
+        let directory = std::env::temp_dir().join(format!("tono-marker-{}", tono_core::auth::new_installation_id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let mut marker = SessionMarker::default();
+        // Sign-in 1 adopted its session, and switch 2 is in flight when 1's session proves durable.
+        marker.begin(&directory, 1).unwrap();
+        marker.adopted(1);
+        marker.begin(&directory, 2).unwrap();
+        let _ = marker.commit(&directory, 1);
+        // The Service refuses switch 2, and putting the marker back fails once: the staged marker
+        // cannot be created.
+        let staged = directory.join(STAGED_MARKER);
+        std::fs::create_dir(&staged).unwrap();
+        marker.undo(&directory, 2);
+        std::fs::remove_dir(&staged).unwrap();
+        // Sign-in 1's commit task tries again.
+        let _ = marker.commit(&directory, 1);
+        let ownership = data_dir_owns_vault_session(&directory, &[], false);
+        let _ = std::fs::remove_dir_all(&directory);
+        assert_eq!(ownership, VaultSessionOwnership::Owned { rebind: false },
+            "a session proven durable must not lose its marker to one failed write");
     }
 
     #[test]

@@ -222,6 +222,9 @@ pub struct TonoInner {
     /// Generation of the current email-auth transaction. Starting/resending, signing out, or
     /// replacing a challenge invalidates network responses from every older transaction.
     pub sign_in_generation: u64,
+    /// Who in this process answers for a pending session marker: the sign-in in flight, or the
+    /// adopted sign-in whose commit task waits for its session to be durable.
+    pub session_marker: crate::tono::credentials::SessionMarker,
     pub installation_id: String,
     pub catalog_tracker: CatalogTracker,
     /// Directory holding `managed-exit-catalog.json` (`app_home_dir()/tono`).
@@ -597,6 +600,7 @@ impl TonoState {
                 account: None,
                 challenge_id: None,
                 sign_in_generation: 0,
+                session_marker: Default::default(),
                 installation_id,
                 catalog_tracker: CatalogTracker::new(),
                 catalog_dir,

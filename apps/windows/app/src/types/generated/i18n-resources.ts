@@ -1225,6 +1225,7 @@ export interface TranslationResources {
           rateLimited: string
           serverError: string
           sessionExpired: string
+          signInNotSaved: string
           unreachable: string
         }
         inboxInstructions: string
