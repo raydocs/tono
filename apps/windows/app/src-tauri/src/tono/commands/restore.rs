@@ -190,12 +190,17 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
         // the restore task does not await that potentially long connection transaction.
         match update_recovery {
             Ok(Some(tono_service_protocol::update_contract::Protection::Connected)) => {
-                let allowed = update_recovery_connect_allowed(&state.lock().await, generation, connect_epoch);
+                let allowed = {
+                    let inner = state.lock().await;
+                    update_recovery_connect_allowed(&inner, generation, connect_epoch)
+                };
                 if allowed {
                     let state = state.clone();
                     let app = app.clone();
                     AsyncHandler::spawn(move || async move {
-                        if let Err(error) = connection::connect(state, app).await {
+                        // Admission re-checks `connect_epoch` under the lock that starts the
+                        // attempt: a Restore internet after the check above still wins.
+                        if let Err(error) = connection::connect_for_generation(state, app, Some(connect_epoch)).await {
                             logging!(warn, Type::Service, "Update recovery remains incomplete: {error}");
                         }
                     });

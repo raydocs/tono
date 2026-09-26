@@ -26,3 +26,12 @@
   `restore_internet_during_restore_skips_update_recovery_connect`：未动的恢复允许，走 `disconnect()` 的步骤并完成释放后拒绝；
   红骨架（保留原判定）提交 `b7e50b39` 上应按断言失败。H16-O-F7 改回总账原行（in-PR，#651），删除其分片。未在本地编译。
   剩余：判定与派生的 `connect()` 真正准入之间仍有极短窗口，未把连接代传入 `connect()`（需改 `connection.rs`，超出本单元）。
+- 续记 2026-09-26（编译修正 + 审查 codex:F1）：`1849d7f7` 在 Windows CI app-rust 编译失败（run 36216436362，E0308：
+  `&state.lock().await` 不会解引用成 `&TonoInner`），红骨架 `b7e50b39` 同样编译失败（run 36216457875），属编译错误，不是产品缺陷。
+  改为先把锁守卫绑定到局部变量。新红分支 `wip/win-restore-late-me-20260926-red3`（`2b4f71d3` = 测试 + 骨架 + 编译修正），
+  dispatch run [36217075103](https://github.com/raydocs/tono/actions/runs/36217075103)，提交时尚未出结果。
+  codex:F1（建议，采纳）：上面的判定放锁后才派生任务，`connect()` 拿不到恢复记下的连接代，判定之后完成的「恢复网络」仍会被重连推翻。
+  改后：`connection.rs` 新增 `connect_for_generation(state, app, expected_generation)`，`connect()` 以 `None` 委托给它（行为不变），
+  删去因此不再使用的私有 `attempt()`；更新恢复传入 `Some(connect_epoch)`，由已有的 `attempt_for_generation` 在快照时和
+  准入锁内（`single_flight_begin`）再核对连接代，变了即 Stale、不连接。上一条续记所说的极短窗口因此关闭。没有新增释放路径。
+  这一步没有单独测试：`connect_for_generation` 需要 `AppHandle`，单元测试里构造不了；核对沿用 `attempt_for_generation` 已有的恢复/重连路径。
