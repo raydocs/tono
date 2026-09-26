@@ -16,6 +16,22 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Applied in: PR / commit / command
 ```
 
+## 2026-09-26 · Does 0.0.74 wait for the G3 protected-update device test?
+
+- Status: owner
+- Chosen: no. G3 (protected v1 update: success + interrupted rollback) moves to the 0.0.75
+  cycle, where the installed 0.0.74 is the bootstrap and 0.0.75 the update target. 0.0.74 ships
+  after the owner's G1 + G2 device round on ONE package per platform (release sequence 7411,
+  built from one frozen source). Rejected: the three-package kit (bootstrap / failure target /
+  success target) and the signed v1 pointer steps for this release.
+- Why: owner, 2026-09-26. Customers uninstall and install 0.0.74 by hand, so no customer takes
+  the v1 update path in this release; the first real v1 update is 0.0.74 → 0.0.75. Cost: a
+  defect in 0.0.74's update path would surface only then, and customers would reinstall by hand
+  again. The SHIP_PLAN §6 G3 lines stay unticked until the 0.0.75 round (agents never edit them).
+- Supersedes: the kit parts of "May the G3 test kit use the production v1 update pointer" and
+  "May the agent approve windows-release for test-kit signing" for this release (the uploaded
+  7402/7403 objects stay immutable and unreferenced; `desktop/v1/latest` stays unset).
+
 ## 2026-09-26 · Which version is the customer release?
 
 - Status: owner
