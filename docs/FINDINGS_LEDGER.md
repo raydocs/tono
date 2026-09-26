@@ -256,7 +256,7 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | #5 | home-agent 无法识别高于旧水位的计数器重置 | open | [#5](https://github.com/raydocs/tono/issues/5) | 中·已确认 | — |
 | OPS-1 | ops 观测表达/freshness 后续项 | open | [ops 计划](ops/plan-2026-09-11.md) | 低 | 不是客户发布门 |
 | #208 | 定时 D1 备份在导出前因缺 Cloudflare 凭据失败 | open | [#208](https://github.com/raydocs/tono/issues/208) | 中·已确认 | — |
-| #191 | D1 当月冲销警告需吸收且不覆盖 Batch 8 Ledger | open | [#191](https://github.com/raydocs/tono/issues/191) | 低 | — |
+| #191 | D1 当月冲销警告需吸收且不覆盖 Batch 8 Ledger | in-PR | [#191](https://github.com/raydocs/tono/issues/191)，[#647](https://github.com/raydocs/tono/pull/647) | 低 | 目标月锁定为读取快照，最终以后端 MONTH_CLOSED 为准；未做浏览器实机截图验收 |
 | #188 | #187 集成被 Batch 8 UI 冻结与 migration 0072 冲突阻塞 | open | [#188](https://github.com/raydocs/tono/issues/188) | 低 | — |
 | #183 | Today 之外 18 个既有 Mac 截图失败待对账 | open | [#183](https://github.com/raydocs/tono/issues/183) | 低 | 测试/fixture 类 |
 | H7-F1 | ops SSH 未校验主机密钥 | in-PR | [#365](https://github.com/raydocs/tono/issues/365)，[#368](https://github.com/raydocs/tono/pull/368) | 中·推导 | 部署前 hub known-hosts 需含全部节点与探针 |
