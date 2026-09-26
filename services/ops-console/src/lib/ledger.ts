@@ -47,9 +47,10 @@ export function monthOf(seconds: number): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}`;
 }
 
-/** Red skeleton: the month main uses for reversals today (local clock). */
+/** Reversals are posted to the Worker's current UTC month, not the local calendar month. */
 export function reversalMonth(seconds: number): string {
-  return monthOf(seconds);
+  const date = new Date(seconds * 1_000);
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}`;
 }
 
 export function dayOf(seconds: number): string {

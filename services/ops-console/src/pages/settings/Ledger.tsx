@@ -18,6 +18,7 @@ import {
   monthWords,
   pendingCustomers,
   pendingNodes,
+  reversalMonth,
 } from '@/lib/ledger';
 import { useResource } from '@/lib/use-resource';
 import '@/styles/settings-ledger.css';
@@ -57,12 +58,25 @@ export function Ledger() {
    * lock guards below see no valid summary until a fresh one arrives.
    */
   const [summaryNonce, setSummaryNonce] = useState(0);
+  /** Reversals land in the Worker's current UTC month, whichever month is on screen. */
+  const currentMonth = reversalMonth(nowSec());
+  const [targetRevision, setTargetRevision] = useState(0);
 
   const summary = useResource(`ledger-month-${month}#${summaryNonce}`, (signal) => ledgerApi.month(month, signal));
   const entries = useResource(`ledger-entries-${month}`, (signal) => ledgerApi.entries(month, signal));
+  // Invalidate the target after writes: a failed refresh must not retain a
+  // previously open month as permission to reverse, even when viewing history.
+  const target = useResource(`ledger-target-${currentMonth}-${targetRevision}`, async (signal) => ({
+    ...await ledgerApi.month(currentMonth, signal), revision: targetRevision,
+  }));
+  const targetMonth = target.status === 'ready' && target.data.month === currentMonth
+    && target.data.revision === targetRevision ? target.data : null;
+  const reverseReason = targetMonth?.closedAt === null ? null
+    : typeof targetMonth?.closedAt === 'number' ? words.reverseLocked : words.reverseWaiting;
   const reload = useCallback(() => {
     setClosing(false);
     setSummaryNonce((n) => n + 1);
+    setTargetRevision((revision) => revision + 1);
     summary.reload();
     entries.reload();
   }, [summary, entries]);
@@ -189,7 +203,8 @@ export function Ledger() {
               : rows.length === 0 ? 'empty' : 'ready'}
           message={entries.status === 'error' ? entries.message : undefined}
           locked={locked}
-          currentMonth={monthOf(nowSec())}
+          currentMonth={currentMonth}
+          reverseReason={reverseReason}
           nameOf={nameOf}
           onChanged={reload}
         />
@@ -211,6 +226,7 @@ export function Ledger() {
           formatCny(month0.costCnyMinor) ?? copy.missing,
           formatCny(month0.marginCnyMinor) ?? copy.missing,
           month0.unreconciled === 0 ? words.pendingNone : words.pendingCount(month0.unreconciled),
+          month0.month === currentMonth,
         )}
         confirm={words.closeConfirm}
         pending={write.pending}
