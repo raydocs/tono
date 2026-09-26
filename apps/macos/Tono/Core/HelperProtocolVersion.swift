@@ -218,7 +218,14 @@ nonisolated enum HelperProtocolVersion {
     ///   `pfctl -e` reference and releases the new token. A 4.46.0 daemon
     ///   drops that DNS report and, restarting in a loop, leaks one token per
     ///   start.
-    static let current = "4.47.0"
+    /// - 4.47.0 → 4.48.0: every command the helper runs (`pfctl`, the
+    ///   relay-map `curl`) has a 15 s deadline, 3 s for a read-only `pfctl`
+    ///   query; past it the child gets SIGTERM, then SIGKILL, and the call
+    ///   fails like any other command failure. A query with no answer is never
+    ///   read as "no": it stops the chain, and nothing is released, forgotten
+    ///   or disabled on it. A 4.47.0 daemon waits on a wedged `pfctl` forever,
+    ///   holding its single request thread and with it `/core/stop`.
+    static let current = "4.48.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

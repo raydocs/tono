@@ -289,7 +289,11 @@ extension KillSwitchManager {
         let referenceRecord = FileManager.default.temporaryDirectory
             .appendingPathComponent("tono-lifecycle-pf.reference").path
         unlink(referenceRecord)
-        let startedEnabled = pfEnabled()
+        // A start state pfctl did not answer for reads as enabled, so nothing
+        // below may disable PF on it (#639 review, codex:F2).
+        let startedState = try? pfEnabled()
+        check("reference-start-state-read", startedState != nil)
+        let startedEnabled = startedState ?? true
         if let foreign = try? run("/sbin/pfctl", ["-E"]), foreign.status == 0,
            let foreignToken = parsePFEnableToken(
             String(decoding: foreign.output, as: UTF8.self)
@@ -297,18 +301,21 @@ extension KillSwitchManager {
             let held = (try? holdPFEnableReference(recordPath: referenceRecord)) != nil
             let recorded = readPFEnableReference(referenceRecord)
             check("reference-recorded", held && recorded != nil && recorded?.token != foreignToken)
-            check("reference-listed", recorded.map { pfEnableReferenceListed($0.token) } == true)
+            check(
+                "reference-listed",
+                recorded.map { (try? pfEnableReferenceListed($0.token)) == true } == true
+            )
             _ = try? run("/sbin/pfctl", ["-X", foreignToken])
-            check("reference-survives-foreign-release", pfEnabled())
+            check("reference-survives-foreign-release", (try? pfEnabled()) == true)
             try? holdPFEnableReference(recordPath: referenceRecord)
             check("reference-reused-while-live", readPFEnableReference(referenceRecord) == recorded)
-            releasePFEnableReference(recordPath: referenceRecord)
+            try? releasePFEnableReference(recordPath: referenceRecord)
             check(
                 "reference-released",
-                recorded.map { !pfEnableReferenceListed($0.token) } == true
+                recorded.map { (try? pfEnableReferenceListed($0.token)) == false } == true
                     && readPFEnableReference(referenceRecord) == nil
             )
-            check("reference-release-restores-pf", pfEnabled() == startedEnabled)
+            check("reference-release-restores-pf", (try? pfEnabled()) == startedEnabled)
         } else {
             check("reference-foreign-token", false)
         }
@@ -337,10 +344,37 @@ extension KillSwitchManager {
         check(
             "unrecorded-reference-not-kept",
             listedBefore != nil && listedAfter != nil
-                && listedAfter!.subtracting(listedBefore!).isEmpty && pfEnabled()
+                && listedAfter!.subtracting(listedBefore!).isEmpty && (try? pfEnabled()) == true
         )
-        releasePFEnableReference(recordPath: unwritableRecord)
+        try? releasePFEnableReference(recordPath: unwritableRecord)
         if !startedEnabled { _ = try? run("/sbin/pfctl", ["-d"]) }
+
+        // 9c. A release must not forget a token it could not check (#639
+        //     review, opus:F2 and codex:F1). The reference query runs past a
+        //     zero deadline, so pfctl gives no answer: that is not "no longer
+        //     listed", and the record must outlive the call. The token is a
+        //     made-up number, and no `-X` runs.
+        let unansweredRecord = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-lifecycle-unanswered.reference").path
+        unlink(unansweredRecord)
+        if let boot = try? TonoAuthenticatedPeer.bootSession(),
+           let record = try? JSONSerialization.data(
+            withJSONObject: ["token": "4294967311", "boot": boot],
+            options: [.sortedKeys]
+           ),
+           (try? atomicWrite(path: unansweredRecord, data: record, permissions: 0o600)) != nil {
+            let released = (try? releasePFEnableReference(
+                recordPath: unansweredRecord,
+                queryDeadline: 0
+            )) != nil
+            check(
+                "reference-kept-past-unanswered-query",
+                !released && readPFEnableReference(unansweredRecord)?.token == "4294967311"
+            )
+        } else {
+            check("reference-unanswered-record-written", false)
+        }
+        unlink(unansweredRecord)
 
         // 10. Full removal (`--emergency-reset`) takes back exactly the hook an
         //     arm wrote into /etc/pf.conf, keeps a line the user added later,
@@ -865,6 +899,25 @@ extension KillSwitchManager {
             case let (armed?, bootstrap?):
                 pfParses = armed && bootstrap
             }
+            // R609-F2: a command past its deadline is killed and fails. It
+            // must never hold the helper's request thread, nor read as done.
+            let deadlineStarted = Date()
+            let overranFailed: Bool
+            do {
+                _ = try run("/bin/sleep", ["6.0417"], deadline: 0.5)
+                overranFailed = false
+            } catch {
+                overranFailed = true
+            }
+            let deadlineElapsed = Date().timeIntervalSince(deadlineStarted)
+            let overranChildGone =
+                (try? run("/usr/bin/pgrep", ["-f", "^/bin/sleep 6.0417$"]))?.status == 1
+            let commandDeadlineHolds = overranFailed && deadlineElapsed < 4 && overranChildGone
+            if !commandDeadlineHolds {
+                let failure = "self-test: command-deadline failed (threw \(overranFailed), "
+                    + "\(deadlineElapsed) s, child gone \(overranChildGone))\n"
+                FileHandle.standardError.write(Data(failure.utf8))
+            }
             return ruleShapesHold
                 && bundleShapesHold
                 && bundleOffWithoutTunnel
@@ -882,6 +935,7 @@ extension KillSwitchManager {
                 && rejectedPrivateTarget
                 && acceptedUDPProxyTarget
                 && rejectedQuicProxyTarget
+                && commandDeadlineHolds
         } catch {
             return false
         }
