@@ -1,0 +1,7 @@
+# H22-O-F2: NSIS runs `tono-service-install.exe --manual-update-gate` from `.onInit`, before the
+# installer's VC++ runtime section, so the privileged helpers must not import VCRUNTIME140.dll.
+# Link the CRT statically. Cargo reads this file only when invoked from this directory (or below):
+# every build of these binaries runs here, and `release:preflight --payload-only` rejects a
+# packaged helper that still imports the Visual C++ runtime.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

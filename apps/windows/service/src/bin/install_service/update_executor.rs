@@ -116,13 +116,14 @@ fn classify_before_stop(
     Err(error)
 }
 
-/// RED seam, main's order extracted unchanged: `--manual-update-gate` goes straight to
-/// `begin_manual`, whose first refusal reads WFP; nothing brings BFE up first.
-#[allow(dead_code)]
+/// `--manual-update-gate`: every refusal in `begin_manual` starts with a WFP read, an RPC to BFE,
+/// so BFE comes up first. Reading first refused a merely stopped BFE as an unconfirmable network
+/// state, before the install could ever repair it (H22-O-F1).
 fn manual_update_gate(
-    _bfe_up: impl FnOnce() -> Result<(), Error>,
+    bfe_up: impl FnOnce() -> Result<(), Error>,
     begin: impl FnOnce() -> Result<(), Error>,
 ) -> Result<(), Error> {
+    bfe_up()?;
     begin()
 }
 
@@ -134,7 +135,10 @@ pub(super) fn dispatch() -> Result<bool, Error> {
             Ok(true)
         }
         [mode] if mode == "--manual-update-gate" => {
-            if let Err(error) = tokio::runtime::Runtime::new()?.block_on(native::begin_manual()) {
+            let gate = manual_update_gate(bring_scm_bfe_up, || {
+                tokio::runtime::Runtime::new()?.block_on(native::begin_manual())
+            });
+            if let Err(error) = gate {
                 if error.is::<native::ProtectionActive>() {
                     eprintln!("Error: {error:#}");
                     std::process::exit(native::MANUAL_GATE_PROTECTION_ACTIVE_EXIT);
@@ -142,6 +146,10 @@ pub(super) fn dispatch() -> Result<bool, Error> {
                 if error.is::<native::OrphanedProtection>() {
                     eprintln!("Error: {error:#}");
                     std::process::exit(native::MANUAL_GATE_ORPHANED_PROTECTION_EXIT);
+                }
+                if error.is::<BfeUnavailable>() {
+                    eprintln!("Error: {error:#}");
+                    std::process::exit(MANUAL_GATE_BFE_UNAVAILABLE_EXIT);
                 }
                 return Err(error);
             }

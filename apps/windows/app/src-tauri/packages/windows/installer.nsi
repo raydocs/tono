@@ -430,6 +430,9 @@ LangString manualInstallNeedsDisconnect ${LANG_RUSSIAN} "${PRODUCTNAME} всё �
 LangString manualInstallRefused ${LANG_SIMPCHINESE} "${PRODUCTNAME} 现在无法安装：可能有受保护的更新尚未完成、另一个安装程序正在运行，或无法确认网络状态。没有做任何更改。$\r$\n$\r$\n请打开 ${PRODUCTNAME}，在“检查更新”中完成或断开并重试未完成的更新，然后再运行此安装程序。"
 LangString manualInstallRefused ${LANG_ENGLISH} "${PRODUCTNAME} cannot be installed right now: a protected update may still be pending, another installer may be running, or the network state could not be confirmed. Nothing was changed.$\r$\n$\r$\nOpen ${PRODUCTNAME}, finish or Disconnect and Retry the pending update from Check for Updates, then run this installer again."
 LangString manualInstallRefused ${LANG_RUSSIAN} "Сейчас установить ${PRODUCTNAME} нельзя: возможно, не завершено защищённое обновление, работает другой установщик или не удалось подтвердить состояние сети. Ничего не изменено.$\r$\n$\r$\nОткройте ${PRODUCTNAME}, завершите незаконченное обновление или отключитесь и повторите его в разделе проверки обновлений, затем снова запустите этот установщик."
+LangString manualInstallNeedsBfe ${LANG_SIMPCHINESE} "${PRODUCTNAME} 现在无法安装：Windows 的基础筛选引擎（BFE）已关闭或无法启动，${PRODUCTNAME} 需要它来检查和保护网络。没有做任何更改。$\r$\n$\r$\n请以管理员身份打开 PowerShell，依次运行：$\r$\n    sc.exe config BFE start= auto$\r$\n    sc.exe start BFE$\r$\n然后重新运行此安装程序。BFE 通常是被安全软件或“网络加速器”类工具关掉的。"
+LangString manualInstallNeedsBfe ${LANG_ENGLISH} "${PRODUCTNAME} cannot be installed right now: Windows Base Filtering Engine (BFE) is turned off or would not start, and ${PRODUCTNAME} needs it to check and protect your network. Nothing was changed.$\r$\n$\r$\nOpen PowerShell as administrator and run:$\r$\n    sc.exe config BFE start= auto$\r$\n    sc.exe start BFE$\r$\nthen run this installer again. Security software and network accelerator tools are the usual reason BFE is turned off."
+LangString manualInstallNeedsBfe ${LANG_RUSSIAN} "Сейчас установить ${PRODUCTNAME} нельзя: служба Windows «Служба базовой фильтрации» (BFE) отключена или не запускается, а ${PRODUCTNAME} нужна она, чтобы проверить и защитить сеть. Ничего не изменено.$\r$\n$\r$\nОткройте PowerShell от имени администратора и выполните:$\r$\n    sc.exe config BFE start= auto$\r$\n    sc.exe start BFE$\r$\nзатем снова запустите этот установщик. Обычно BFE отключают защитные программы и «ускорители сети»."
 
 LangString uninstallReleasesProtection ${LANG_SIMPCHINESE} "${PRODUCTNAME} 仍在连接中，或网络保护仍处于开启状态。$\r$\n$\r$\n继续卸载会关闭 ${PRODUCTNAME} 的网络保护并恢复普通网络访问；如果无法确认拦截已解除，将不会删除任何文件。$\r$\n$\r$\n是否继续卸载？"
 LangString uninstallReleasesProtection ${LANG_ENGLISH} "${PRODUCTNAME} is still connected, or its network protection is still on.$\r$\n$\r$\nUninstalling turns ${PRODUCTNAME}'s protection off and restores normal internet access. If the block cannot be shown removed, nothing is deleted.$\r$\n$\r$\nContinue uninstalling?"
@@ -517,9 +520,13 @@ Function .onInit
     ; Abort text is never shown from .onInit, and a 0.0.72 settings-page update has already
     ; closed the App: without a dialog Tono just vanishes. 77 means only active protection
     ; stood in the way. The gate still refuses; nothing here releases protection.
+    ; 79 (H22-O-F1): BFE is Disabled or would not start, so WFP cannot be read and the gate
+    ; refuses. The helper never re-enables a Disabled BFE (docs/DECISIONS.md); the dialog says how.
     ${IfNot} ${Silent}
       ${If} $0 == "77"
         MessageBox MB_ICONEXCLAMATION|MB_OK "$(manualInstallNeedsDisconnect)"
+      ${ElseIf} $0 == "79"
+        MessageBox MB_ICONSTOP|MB_OK "$(manualInstallNeedsBfe)"
       ${Else}
         MessageBox MB_ICONSTOP|MB_OK "$(manualInstallRefused)"
       ${EndIf}
