@@ -376,6 +376,11 @@ where
         inner.account_state = AccountState::Restoring;
         // A new restore decides afresh whether this launch runs offline.
         inner.offline.leave_offline();
+        // H16-O-F7: publish the stored barrier before the network call, never Standby over a
+        // live block while `me()` runs. F515-1: this path applies it only here. A Restore internet
+        // (or a Service re-read) during `me()` owns the newer truth, so no `me()` branch below
+        // re-applies this older reading.
+        apply_stored_protection(&mut inner, protection);
         emit(&inner);
     }
 
@@ -401,7 +406,6 @@ where
             if inner.sign_in_generation != generation {
                 return None;
             }
-            apply_stored_protection(&mut inner, protection);
             // #582: the budget elapsed without any server answer, so the control plane is unreachable.
             let unanswered = answer_probe.transport().answers_seen() == answers_before;
             if let Some(admitted) = unanswered.then(|| settle_unreachable_restore(&mut inner, protection)).flatten() {
@@ -423,7 +427,6 @@ where
                 return None;
             }
             commit_account(state, &mut inner, me.user, info.suspended);
-            apply_stored_protection(&mut inner, protection);
             emit(&inner);
             Some((info, false))
         }
@@ -441,10 +444,9 @@ where
 
 /// Restore's answer when `me()` fails; true when the account was admitted offline (#582).
 /// Nothing here releases protection, signs out or deletes the stored session: the barrier stays
-/// exactly as the Service holds it, with Disconnect ("Restore internet") still offered while it
-/// blocks.
+/// exactly as the Service holds it (applied before `me()`), with Disconnect ("Restore internet")
+/// still offered while it blocks.
 fn settle_failed_restore(inner: &mut TonoInner, protection: &StoredProtection, error: &ApiError) -> bool {
-    apply_stored_protection(inner, protection);
     // #582: only an unreachable control plane may fall back to the offline grant. Any server
     // answer (401, 403, 5xx, an invalid body) keeps its own meaning below.
     if matches!(error, ApiError::Transport { .. })
