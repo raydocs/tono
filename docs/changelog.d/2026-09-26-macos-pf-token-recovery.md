@@ -30,3 +30,20 @@
   回绕到本子进程时，旧行可能落进窗口，未防。结算依赖 Foundation 在 `run` 放弃之后仍回收子进程并调用终止回调；不调用或子进程永远
   卡在内核时，待定获取不结算，hold 一直用匿名引用（不误释放）。待定获取与未记录 token 仍只在内存里。9c 的 0 s 期限竞态（codex:F4）
   未改。未实机。
+- **2026-09-26 续记（#643 审查 run `2427b88c` 通过，确认 minor 续修）**：
+  - 缺陷修复（grok:F2 = opus:F2）：`holdPFEnableReference` 在记录已写成新 token、内存槽已清空之后才 `try?` 列出并 `-X` 旧 token，
+    列表或 `-X` 没有回答时旧 token 被遗忘，disarm 后仍被内核持有（#639 之前就存在的旧代码缺陷）。改后按 R639-F2 同一规则：旧 token
+    进入内存列表 `supersededPFEnableReferences`，只有 pfctl 回答（已释放或已不在列表中）才遗忘；没有回答的留着，下次巡检（记录的 token
+    仍被列出时）重试，disarm 释放。释放只在新 token 已记录且持有时发生；值等于当前持有 token 的旧项只遗忘、不释放；超时不算释放。
+  - 工程与测试（codex:F3）：TIMESTAMP 年龄解析改为严格形状：天数 1–6 位数字，`HH:MM:SS` 每段恰好两位并检查范围；`00::00:40`、
+    `0:00:40`、带符号的天数都不算年龄，不认领。
+  - 工程与测试（grok:F3）：9d 增加窗口内两行（不认领）、跨秒列表使签发秒超出退出一秒（不认领）及恰好落入的对照行（认领）；新增
+    `recovered-token-age-shape-strict`。9e 新增 `unanswered-fallback-token-released-at-disarm`：disarm 必须成功（不再 `try?`）、
+    token 不再被列出、PF 回到起始状态。新增 9f `unanswered-superseded-release-keeps-token`：一个真实旧 token 放进被替换列表，注入的
+    `-X` 无回答时它必须留在列表且仍被列出，下一次巡检用真实 `-X` 释放。9f 直接放入列表，不经记录写入覆盖旧记录的路径（该路径需要
+    `heldPFEnableReference` 对仍被列出的记录回答否，CI 上无法廉价造出）。
+  - helper 协议仍为 4.49.0（本 PR 未合入）；CONTRACT 哈希按 `build-core-helper.sh` 同一管线重算（先复现上一版记录的哈希）。
+  - 剩余限制（补充）：`spawned` 读取之前墙钟被回拨时，别的程序更早签发的 token 可能落进窗口并被认领（grok:F1 / codex:F1，仍未防）。
+    保留下来的未回答 token 之后只按数值在列表中匹配；xnu 的 token 值在释放后可能被再次签发给别的程序，此时可能误释放（opus:F1，
+    未能确证）。`exited` 是终止回调运行的时刻，不是子进程被回收的时刻，二者间隔无上界（codex:F2，按回收后需整轮 PID 回绕才会误认领判断为
+    极难触发）。被替换 token 列表同样只在内存里，helper 退出即丢。未本地编译，以 macOS CI 为准；未实机。

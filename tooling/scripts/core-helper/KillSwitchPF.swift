@@ -726,6 +726,12 @@ extension KillSwitchManager {
     /// Held in memory only, like `unrecordedPFEnableReference`.
     nonisolated(unsafe) static var unsettledPFEnableAcquire: PFEnableAcquire?
 
+    /// Tokens a newer recorded one replaced that pfctl has not yet answered
+    /// for: their listing or their `-X` gave no answer, so they may still be
+    /// held. Held in memory only, like `unrecordedPFEnableReference`; the next
+    /// check retries them and disarm releases them (#643 review, grok:F2).
+    nonisolated(unsafe) static var supersededPFEnableReferences: [PFEnableReference] = []
+
     /// PF stays enabled while any enable reference is held. Enabling it only
     /// when it was off meant this helper held none whenever something else had
     /// enabled PF first, so that program releasing its own token (`pfctl -X`)
@@ -736,15 +742,23 @@ extension KillSwitchManager {
     /// The new token is recorded before the previous one is released, so this
     /// helper never takes PF through a zero count itself.
     ///
-    /// `releaseToken` releases a token no record could hold, and throws, as
-    /// `run` does, when pfctl gave no answer.
+    /// `releaseToken` releases a token no record could hold, or one a newer
+    /// record replaced, and throws, as `run` does, when pfctl gave no answer.
     static func holdPFEnableReference(
         recordPath: String = killSwitchPFReferencePath,
         releaseToken: (String) throws -> Void = {
             _ = try KillSwitchManager.run("/sbin/pfctl", ["-X", $0])
         }
     ) throws {
-        if try heldPFEnableReference(recordPath: recordPath) != nil { return }
+        if let held = try heldPFEnableReference(recordPath: recordPath) {
+            // The recorded token holds PF, so one it replaced can go now.
+            try? releaseSupersededPFEnableReferences(
+                boot: held.boot,
+                keeping: held.token,
+                releaseToken: releaseToken
+            )
+            return
+        }
         guard let boot = try? TonoAuthenticatedPeer.bootSession() else {
             // Without a boot identity a token cannot be recorded safely, and
             // taking an unrecorded one on every check would leak references.
@@ -841,11 +855,42 @@ extension KillSwitchManager {
             return
         }
         unrecordedPFEnableReference = nil
-        // The new token is held and recorded; a listing with no answer only
-        // leaves the previous one held.
+        // The new token is held and recorded. The previous one is forgotten
+        // only once pfctl has answered for it: a listing or `-X` with no
+        // answer leaves it held, and forgotten here nothing would release it
+        // (#643 review, grok:F2).
         if let previous, previous.boot == boot, previous.token != token,
-           (try? pfEnableReferenceListed(previous.token)) == true {
-            _ = try? run("/sbin/pfctl", ["-X", previous.token])
+           !supersededPFEnableReferences.contains(previous) {
+            supersededPFEnableReferences.append(previous)
+        }
+        try? releaseSupersededPFEnableReferences(
+            boot: boot,
+            keeping: token,
+            releaseToken: releaseToken
+        )
+    }
+
+    /// Releases the tokens a newer recorded one replaced, oldest first. Each
+    /// is forgotten once pfctl has answered for it: released, or no longer
+    /// listed. The first that gets no answer may still be held, so it and
+    /// those after it stay for the next check or disarm, and this throws. A
+    /// token from another boot means nothing now, and one whose value is the
+    /// token `keeping` still holds PF with must not be released: both are
+    /// only forgotten.
+    static func releaseSupersededPFEnableReferences(
+        boot: String?,
+        keeping: String?,
+        queryDeadline: TimeInterval = KillSwitchManager.pfctlQueryDeadline,
+        releaseToken: (String) throws -> Void = {
+            _ = try KillSwitchManager.run("/sbin/pfctl", ["-X", $0])
+        }
+    ) throws {
+        while let superseded = supersededPFEnableReferences.first {
+            if superseded.boot == boot, superseded.token != keeping,
+               try pfEnableReferenceListed(superseded.token, deadline: queryDeadline) {
+                try releaseToken(superseded.token)
+            }
+            supersededPFEnableReferences.removeFirst()
         }
     }
 
@@ -886,6 +931,11 @@ extension KillSwitchManager {
             _ = try run("/sbin/pfctl", ["-X", pending.token])
         }
         unrecordedPFEnableReference = nil
+        try releaseSupersededPFEnableReferences(
+            boot: boot,
+            keeping: nil,
+            queryDeadline: queryDeadline
+        )
     }
 
     /// Settles a `pfctl -E` that ran past its deadline, once its child has
@@ -961,10 +1011,18 @@ extension KillSwitchManager {
         return found.count == 1 ? found[0] : nil
     }
 
-    /// Seconds in pfctl's `<d> days HH:MM:SS`, or nil for any other shape.
+    /// Seconds in pfctl's `<d> days HH:MM:SS`, or nil for any other shape:
+    /// the day count is 1 to 6 digits and each clock field exactly two, so a
+    /// sign, an empty field (`00::00:40`) or a short one (`0:00:40`) is no age
+    /// and claims nothing (#643 review, codex:F3).
     static func pfEnableTokenAge(days: Substring, clock: Substring) -> time_t? {
+        guard days.range(of: #"^[0-9]{1,6}$"#, options: .regularExpression) != nil,
+              clock.range(of: #"^[0-9]{2}:[0-9]{2}:[0-9]{2}$"#, options: .regularExpression) != nil
+        else {
+            return nil
+        }
         let parts = clock.split(separator: ":")
-        guard days.count <= 6, let dayCount = time_t(days), dayCount >= 0,
+        guard let dayCount = time_t(days),
               parts.count == 3,
               let hours = time_t(parts[0]), (0..<24).contains(hours),
               let minutes = time_t(parts[1]), (0..<60).contains(minutes),

@@ -388,20 +388,45 @@ extension KillSwitchManager {
             "4242     pfctl                        1111111111111111111      0 days 02:00:00\n"
         let childRow =
             "4242     pfctl                        2222222222222222222      0 days 00:00:40\n"
-        func recoveredToken(_ rows: String) -> String? {
+        func recoveredToken(_ rows: String, listedTo: time_t = 10_000) -> String? {
             pfEnableToken(
                 takenBy: 4242,
                 spawned: 9_950,
                 exited: 9_970,
                 listedFrom: 10_000,
-                listedTo: 10_000,
+                listedTo: listedTo,
                 in: referenceHeader + rows
             )
         }
+        // One `-E` takes at most one token, so a second row inside the
+        // lifetime proves neither. A listing spanning 10_000...10_001 places
+        // a 30 s row at 9_970...9_971, one second past the exit, and a 31 s
+        // row wholly inside it (#643 review, grok:F3).
+        let secondChildRow =
+            "4242     pfctl                        3333333333333333333      0 days 00:00:45\n"
+        let straddlingRow =
+            "4242     pfctl                        4444444444444444444      0 days 00:00:30\n"
+        let fittingRow =
+            "4242     pfctl                        5555555555555555555      0 days 00:00:31\n"
         check(
             "recovered-token-only-within-child-lifetime",
             recoveredToken(olderHolderRow) == nil
                 && recoveredToken(childRow + olderHolderRow) == "2222222222222222222"
+                && recoveredToken(childRow + secondChildRow) == nil
+                && recoveredToken(straddlingRow, listedTo: 10_001) == nil
+                && recoveredToken(fittingRow, listedTo: 10_001) == "5555555555555555555"
+        )
+        // pfctl prints each clock field as two digits. An empty or short
+        // field is another shape, not 40 s, and claims nothing (#643 review,
+        // codex:F3).
+        check(
+            "recovered-token-age-shape-strict",
+            recoveredToken(
+                "4242     pfctl                        2222222222222222222      0 days 00::00:40\n"
+            ) == nil
+                && recoveredToken(
+                    "4242     pfctl                        2222222222222222222      0 days 0:00:40\n"
+                ) == nil
         )
 
         // 9e. A token the record-failure fallback could not confirm releasing
@@ -422,7 +447,54 @@ extension KillSwitchManager {
             "unanswered-fallback-release-keeps-token",
             keptToken.map { (try? pfEnableReferenceListed($0.token)) == true } == true
         )
-        try? releasePFEnableReference(recordPath: unwritableRecord)
+        //     Disarm must then actually release it, and PF end where it
+        //     started (#643 review, grok:F3).
+        let keptTokenReleased = (try? releasePFEnableReference(recordPath: unwritableRecord)) != nil
+        if !startedEnabled { _ = try? run("/sbin/pfctl", ["-d"]) }
+        check(
+            "unanswered-fallback-token-released-at-disarm",
+            keptTokenReleased && unrecordedPFEnableReference == nil
+                && keptToken.map { (try? pfEnableReferenceListed($0.token)) == false } == true
+                && (try? pfEnabled()) == startedEnabled
+        )
+
+        // 9f. A token a newer recorded one replaced is forgotten only once
+        //     pfctl has answered for it (#643 review, grok:F2). Its `-X` ran
+        //     under `try?` after the record already named the new token, so
+        //     one with no answer leaked with nothing left to release it. The
+        //     replaced token is a real one taken here and placed where a hold
+        //     puts it; the injected release gives no answer, and the next
+        //     check, with a real release, must release it. Net-zero like 9.
+        let supersedingRecord = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-lifecycle-superseding.reference").path
+        unlink(supersedingRecord)
+        supersededPFEnableReferences = []
+        if let boot = try? TonoAuthenticatedPeer.bootSession(),
+           let older = try? run("/sbin/pfctl", ["-E"]), older.status == 0,
+           let olderToken = parsePFEnableToken(String(decoding: older.output, as: UTF8.self)) {
+            supersededPFEnableReferences = [.init(token: olderToken, boot: boot)]
+            try? holdPFEnableReference(
+                recordPath: supersedingRecord,
+                releaseToken: { _ in
+                    throw HelperFailure.system("pfctl did not finish within 15 seconds.")
+                }
+            )
+            let kept = readPFEnableReference(supersedingRecord) != nil
+                && supersededPFEnableReferences.map(\.token) == [olderToken]
+                && (try? pfEnableReferenceListed(olderToken)) == true
+            try? holdPFEnableReference(recordPath: supersedingRecord)
+            let retried = supersededPFEnableReferences.isEmpty
+                && (try? pfEnableReferenceListed(olderToken)) == false
+            check("unanswered-superseded-release-keeps-token", kept && retried)
+            try? releasePFEnableReference(recordPath: supersedingRecord)
+            if (try? pfEnableReferenceListed(olderToken)) == true {
+                _ = try? run("/sbin/pfctl", ["-X", olderToken])
+            }
+        } else {
+            check("superseded-older-token", false)
+        }
+        supersededPFEnableReferences = []
+        unlink(supersedingRecord)
         if !startedEnabled { _ = try? run("/sbin/pfctl", ["-d"]) }
 
         // 10. Full removal (`--emergency-reset`) takes back exactly the hook an

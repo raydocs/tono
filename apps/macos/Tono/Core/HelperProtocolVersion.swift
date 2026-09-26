@@ -229,9 +229,10 @@ nonisolated enum HelperProtocolVersion {
     ///   once that child has exited, and claims a listed token only when the
     ///   token's age places it inside the child's lifetime. When the reference
     ///   record cannot be written and the release of the new token gives no
-    ///   answer, the token stays in memory for disarm. A 4.48.0 daemon can
+    ///   answer, the token stays in memory for disarm, as does a token a newer
+    ///   record replaced whose release gives no answer. A 4.48.0 daemon can
     ///   claim, and at disarm release, another program's token under a reused
-    ///   PID, and forgets that unanswered token.
+    ///   PID, and forgets both unanswered tokens.
     static let current = "4.49.0"
 }
 
