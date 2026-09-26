@@ -16,6 +16,40 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Applied in: PR / commit / command
 ```
 
+## 2026-09-26 · Which version is the customer release?
+
+- Status: owner
+- Chosen: 0.0.74 / macOS build 74 (owner: "74"). The `tono-macos-0.0.73-build73` tag and the
+  0.0.73 internal candidates stay as history. Rejected: reusing build 73 (its tag already
+  points at another commit).
+- Applied in: [#660](https://github.com/raydocs/tono/pull/660).
+
+## 2026-09-26 · Does #352 / H2-F3 (Windows Service IPC not bound to the Tono image) block 0.0.74?
+
+- Status: owner
+- Chosen: no. 0.0.74 ships H2-F3 as a known limitation; #352 merges after the owner's Win11
+  `icacls` / owner evidence (last step of the device round), for 0.0.75. Rejected: holding the
+  release for that evidence.
+- Why: owner, 2026-09-26. Not a regression; the caller must already run code as the signed-in user.
+
+## 2026-09-26 · G4.2 for 0.0.74: is an old-client first hop required before the customer feeds move?
+
+- Status: owner
+- Chosen: no. The owner has no device kept on 0.0.67 / 0.0.34; customers uninstall and install
+  0.0.74 directly. G4 publishes the owner-accepted kit bytes (success target) to the customer
+  feeds, then the owner checks the published build; Windows still requires the release row's
+  `verifiedAt` before promotion. Rejected: holding the Windows publish for a pre-promotion
+  old-client path (0.0.34's update endpoint is fixed in production).
+- Why: owner, 2026-09-26.
+
+## 2026-09-26 · SHIP_PLAN §6 "macOS Sparkle 真机一次成功更新" under the v1 update path
+
+- Status: owner
+- Chosen: the macOS v1 protected update success in the G3.3 device round satisfies that line;
+  the §6 checkbox text itself is unchanged (agents never edit it). Rejected: a separate
+  Sparkle-only device test.
+- Why: owner, 2026-09-26.
+
 ## 2026-09-26 · May the G3 test kit use the production v1 update pointer before G4?
 
 - Status: owner
@@ -39,12 +73,12 @@ may reverse), `reversed` (keep the line; say what replaced it).
   at the computer.
 - Applied in: G1–G3 test kit (this session).
 
-## 2026-09-26 · Does #331 (macOS bootstrap exception not bound to Tono) block 0.0.73?
+## 2026-09-26 · Does #331 (macOS bootstrap exception not bound to Tono) block the customer release?
 
 - Status: owner
-- Chosen: no. 0.0.73 ships with H1-F5 (macOS half) as a known limitation in the release
-  notes; #331 continues from plan v5 for 0.0.74. Rejected: holding 0.0.73 for a helper/PF
-  redesign rejected five times in plan review.
+- Chosen: no. The customer release (0.0.74, see below) ships with H1-F5 (macOS half) as a
+  known limitation in the release notes; #331 continues from plan v5 for 0.0.75. Rejected:
+  holding the release for a helper/PF redesign rejected five times in plan review.
 - Why: owner, 2026-09-26. Not a regression (present since 0.0.67); reach is limited to
   shared control-plane anycast addresses while Protected Offline.
 
