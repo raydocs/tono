@@ -445,6 +445,23 @@ extension KillSwitchManager {
                     listedBefore: ["3333333333333333333"]
                 ) == "2222222222222222222"
         )
+        // The snapshot before `-E` counts only when pfctl listed every
+        // token: its `TOKENS:` table, or the line it prints when the kernel
+        // holds none. pfctl exits 0 after failing to list (`DIOCGETSTARTERS:
+        // <error>`) and 1 when /dev/pf will not open; neither answer is a
+        // snapshot, and with none the recovery claims nothing (#643 review,
+        // grok:F1).
+        check(
+            "reference-snapshot-only-from-full-listing",
+            pfReferenceSnapshot(
+                status: 0,
+                output: "pfctl: DIOCGETSTARTERS: Operation not permitted\n"
+            ) == nil
+                && pfReferenceSnapshot(status: 1, output: "pfctl: /dev/pf: Permission denied\n") == nil
+                && pfReferenceSnapshot(status: 0, output: "No pf starter references held\n") == []
+                && pfReferenceSnapshot(status: 0, output: referenceHeader + childRow)?
+                    .contains("2222222222222222222") == true
+        )
 
         // 9e. A token the record-failure fallback could not confirm releasing
         //     stays in memory for the next check and disarm (#639 review,
@@ -508,7 +525,7 @@ extension KillSwitchManager {
             check(
                 "unanswered-superseded-release-keeps-token",
                 newer != nil && newer?.token != older.token
-                    && supersededPFEnableReferences == [older]
+                    && supersededPFEnableReferences.map(\.reference) == [older]
                     && (try? pfEnableReferenceListed(older.token)) == true
             )
             let supersededReleased =
@@ -531,6 +548,81 @@ extension KillSwitchManager {
         supersededPFEnableReferences = []
         unlink(supersedingRecord)
         if !startedEnabled { _ = try? run("/sbin/pfctl", ["-d"]) }
+
+        // 9g. A replaced token whose `-X` went unanswered may have been
+        //     released after all, and xnu can then issue the same value to
+        //     another program (#643 review, opus:F1/F2). A retry releases it
+        //     only while the listing still shows the row seen before that
+        //     `-X`; under another PID it is someone else's, and it is
+        //     forgotten with no `-X`. The token is a real one this helper
+        //     holds, so it is listed, and the injected release only records
+        //     that it was asked.
+        let reissuedRecord = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-lifecycle-reissued.reference").path
+        unlink(reissuedRecord)
+        supersededPFEnableReferences = []
+        unrecordedPFEnableReference = nil
+        try? holdPFEnableReference(recordPath: reissuedRecord)
+        if let held = readPFEnableReference(reissuedRecord),
+           (try? pfEnableReferenceListed(held.token)) == true {
+            supersededPFEnableReferences = [.init(
+                reference: held,
+                releaseTried: true,
+                row: .init(pid: "1", process: "launchd", issuedFrom: 0, issuedTo: 0)
+            )]
+            var releasedAgain = false
+            try? releaseSupersededPFEnableReferences(
+                boot: held.boot,
+                keeping: nil,
+                releaseToken: { _ in releasedAgain = true }
+            )
+            check(
+                "reissued-superseded-token-not-released",
+                !releasedAgain && supersededPFEnableReferences.isEmpty
+                    && (try? pfEnableReferenceListed(held.token)) == true
+            )
+        } else {
+            check("reissued-superseded-held-token", false)
+        }
+        supersededPFEnableReferences = []
+        try? releasePFEnableReference(recordPath: reissuedRecord)
+        unlink(reissuedRecord)
+        if !startedEnabled { _ = try? run("/sbin/pfctl", ["-d"]) }
+
+        // 9h. A disarm that cannot read the boot identity cannot tell this
+        //     boot's tokens from another's, so it forgets none of them: the
+        //     record, the unrecorded token and the replaced ones all stay
+        //     for a later disarm (#643 review, opus:F2). Made-up tokens from
+        //     a made-up boot; no pfctl runs.
+        let unknownBootRecord = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-lifecycle-unknown-boot.reference").path
+        unlink(unknownBootRecord)
+        let unknownBootRecorded = PFEnableReference(token: "4294967313", boot: "tono-self-test-boot")
+        let unknownBootPending = PFEnableReference(token: "4294967317", boot: "tono-self-test-boot")
+        let unknownBootReplaced = PFEnableReference(token: "4294967319", boot: "tono-self-test-boot")
+        if let record = try? JSONSerialization.data(
+            withJSONObject: ["token": unknownBootRecorded.token, "boot": unknownBootRecorded.boot],
+            options: [.sortedKeys]
+           ),
+           (try? atomicWrite(path: unknownBootRecord, data: record, permissions: 0o600)) != nil {
+            unrecordedPFEnableReference = unknownBootPending
+            supersededPFEnableReferences = [.init(reference: unknownBootReplaced)]
+            let released = (try? releasePFEnableReference(
+                recordPath: unknownBootRecord,
+                bootSession: { throw HelperFailure.system("Boot session unavailable.") }
+            )) != nil
+            check(
+                "unknown-boot-release-keeps-references",
+                !released && readPFEnableReference(unknownBootRecord) == unknownBootRecorded
+                    && unrecordedPFEnableReference == unknownBootPending
+                    && supersededPFEnableReferences.map(\.reference) == [unknownBootReplaced]
+            )
+        } else {
+            check("unknown-boot-record-written", false)
+        }
+        unrecordedPFEnableReference = nil
+        supersededPFEnableReferences = []
+        unlink(unknownBootRecord)
 
         // 10. Full removal (`--emergency-reset`) takes back exactly the hook an
         //     arm wrote into /etc/pf.conf, keeps a line the user added later,

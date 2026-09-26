@@ -748,7 +748,24 @@ extension KillSwitchManager {
     /// held. Held in memory only, like `unrecordedPFEnableReference`; the next
     /// hold and the periodic check retry them while the recorded token holds
     /// PF, and disarm releases them (#643 review, grok:F2, opus:F1).
-    nonisolated(unsafe) static var supersededPFEnableReferences: [PFEnableReference] = []
+    nonisolated(unsafe) static var supersededPFEnableReferences: [SupersededPFEnableReference] = []
+
+    /// A replaced token, whether its `-X` has run, and the row listed just
+    /// before that `-X`.
+    struct SupersededPFEnableReference: Equatable {
+        let reference: PFEnableReference
+        var releaseTried = false
+        var row: PFEnableRow?
+    }
+
+    /// A `pfctl -s References` row's PID and process name, and the calendar
+    /// seconds its age places the issue in.
+    struct PFEnableRow: Equatable {
+        let pid: String
+        let process: String
+        let issuedFrom: time_t
+        let issuedTo: time_t
+    }
 
     /// PF stays enabled while any enable reference is held. Enabling it only
     /// when it was off meant this helper held none whenever something else had
@@ -864,8 +881,8 @@ extension KillSwitchManager {
         // (#643 review, codex:F4). While the record still names it, every
         // release of replaced tokens keeps the recorded one.
         if let previous, previous.boot == boot, previous.token != token,
-           !supersededPFEnableReferences.contains(previous) {
-            supersededPFEnableReferences.append(previous)
+           !supersededPFEnableReferences.contains(where: { $0.reference == previous }) {
+            supersededPFEnableReferences.append(.init(reference: previous))
         }
         do {
             try atomicWrite(path: recordPath, data: record, permissions: 0o600)
@@ -933,7 +950,7 @@ extension KillSwitchManager {
         guard boot != nil else {
             throw HelperFailure.system("Boot session unknown; replaced PF references kept.")
         }
-        while let superseded = supersededPFEnableReferences.first {
+        while let superseded = supersededPFEnableReferences.first?.reference {
             if superseded.boot == boot, superseded.token != keeping,
                try pfEnableReferenceListed(superseded.token, deadline: queryDeadline) {
                 try releaseToken(superseded.token)
@@ -965,7 +982,8 @@ extension KillSwitchManager {
     /// next arm to reuse or the next disarm to release (#639 review, opus:F2).
     static func releasePFEnableReference(
         recordPath: String = killSwitchPFReferencePath,
-        queryDeadline: TimeInterval = KillSwitchManager.pfctlQueryDeadline
+        queryDeadline: TimeInterval = KillSwitchManager.pfctlQueryDeadline,
+        bootSession: () throws -> String = { try TonoAuthenticatedPeer.bootSession() }
     ) throws {
         let boot = try? TonoAuthenticatedPeer.bootSession()
         try settlePFEnableAcquire(deadline: queryDeadline)
@@ -1024,6 +1042,11 @@ extension KillSwitchManager {
             unrecordedPFEnableReference = .init(token: token, boot: acquire.boot)
         }
         unsettledPFEnableAcquire = nil
+    }
+
+    /// Red skeleton: every word of the answer, whatever pfctl answered.
+    static func pfReferenceSnapshot(status: Int32, output: String) -> Set<String>? {
+        Set(output.split(whereSeparator: \.isWhitespace).map(String.init))
     }
 
     /// The token `pfctl -s References` lists for the pfctl process `pid`, only
