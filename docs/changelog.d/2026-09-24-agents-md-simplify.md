@@ -1,4 +1,4 @@
-# 2026-09-24 · Agent 规则精简与老板自动化决定落地
+## 2026-09-24 · Agent 规则精简与老板自动化决定落地
 
 - **归属/来源**：ops 任务（文档卫生），非产品行为；基线 origin/main
   [059a2ea2](https://github.com/raydocs/tono/commit/059a2ea2)，分支 `docs/agents-md-simplify-20260924`。
