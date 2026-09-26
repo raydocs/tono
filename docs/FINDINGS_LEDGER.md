@@ -228,7 +228,7 @@
 | H1-F3 | Windows TLS 嗅探对裸 IP 生效，与无 IP/进程条件的域名后缀直连规则组合，直连目的不受 pinned 地址约束 | fixed(d98b217d) | [#338](https://github.com/raydocs/tono/issues/338)，[#339](https://github.com/raydocs/tono/pull/339) | 高·推导 | 依赖 mihomo 嗅探语义，需实机；macOS 无嗅探，行为不同 |
 | H1-F4 | Windows WFP 只在出向授权层阻断，入向接受层无 block-all，外部发起的入向流不经隧道也不被阻断 | fixed(d98b217d) | [#328](https://github.com/raydocs/tono/issues/328)，[#343](https://github.com/raydocs/tono/pull/343) | 高·推导 | 全局 IPv6 场景最现实；macOS PF 行为不同；FILTER_NAMESPACE 与 #345 冲突，后合者需 rebase |
 | H1-F6 | 两端 DHCP 放行只按端口，不限目的地址、接口和进程 | fixed(1c211a3e) | [#341](https://github.com/raydocs/tono/issues/341)，[#345](https://github.com/raydocs/tono/pull/345)（Windows）、[#347](https://github.com/raydocs/tono/pull/347)（macOS） | 中·实机 | 取决于非特权进程能否占用 DHCP 客户端端口 |
-| D7 | macOS 连接中 `tono-lan` 对私网任意端口、任意用户放行（含直连 LAN DNS） | in-PR | [#344](https://github.com/raydocs/tono/issues/344)，[#348](https://github.com/raydocs/tono/pull/348) | 中·推导 | 内部编号 H1-macDNS；#348 只收紧 LAN DNS，helper 4.10.0 合并时需重编号；其余私网放行仍是设计残留，Windows 无此放行 |
+| D7 | macOS 连接中 `tono-lan` 对私网任意端口、任意用户放行（含直连 LAN DNS） | open | [#344](https://github.com/raydocs/tono/issues/344)，[#348](https://github.com/raydocs/tono/pull/348) | 中·推导 | 内部编号 H1-macDNS；#348 只收紧 LAN DNS，helper 4.10.0 合并时需重编号；其余私网放行仍是设计残留，Windows 无此放行；#348 已合入（只收紧 LAN DNS），其余私网放行尚无修复 PR |
 | H12-F1 | macOS 未持有 PF enable 引用，kill switch 存活无人监督 | fixed(ca00a736) | [#420](https://github.com/raydocs/tono/issues/420)，[#421](https://github.com/raydocs/tono/pull/421) | 高·推导 | — |
 | H12-F2 | macOS helper 启动时未优先恢复 PF，且依赖 /etc/pf.conf | fixed(ca00a736) | [#423](https://github.com/raydocs/tono/issues/423)，[#424](https://github.com/raydocs/tono/pull/424)（helper）、[#425](https://github.com/raydocs/tono/pull/425)（App 显示未受保护） | 高·推导 | 两个 PR 都合入才闭合 |
 
@@ -269,7 +269,7 @@
 | H8-F1 | JPY 等零小数货币换算后存储值小 100 倍 | fixed(6cfa4d9e) | [#391](https://github.com/raydocs/tono/issues/391)，[#394](https://github.com/raydocs/tono/pull/394) | 中·推导 | — |
 | H8-F2 | 已冲销的账本行可改变归属主体 | fixed(6cfa4d9e) | [#398](https://github.com/raydocs/tono/issues/398)，[#400](https://github.com/raydocs/tono/pull/400) | 中·推导 | 关账计算与写入之间的窗口仍在；UTC 月归属见 #191 |
 | H8-F3 | v1 home-lines 退役绕过使用中/解绑/revision 守卫 | fixed(6cfa4d9e) | [#397](https://github.com/raydocs/tono/issues/397)，[#399](https://github.com/raydocs/tono/pull/399) | 中·推导 | 退役改为拒绝，需先手动解绑 |
-| H8-F4 | telemetry 窗口重复计入活动时长；字节数从未写入 | in-PR | [#403](https://github.com/raydocs/tono/issues/403)，[#404](https://github.com/raydocs/tono/pull/404) | 低·推导 | migration 0082；字节来源缺失，客户端显示 pending |
+| H8-F4 | telemetry 窗口重复计入活动时长；字节数从未写入 | open | [#403](https://github.com/raydocs/tono/issues/403)，[#404](https://github.com/raydocs/tono/pull/404) | 低·推导 | migration 0082；字节来源缺失，客户端显示 pending；#404 已合入（只修重复计时），真实字节来源留在 #403，尚无修复 PR |
 | H8-F5 | 账号池分配存在并发重复分配 | fixed(6cfa4d9e) | [#401](https://github.com/raydocs/tono/issues/401)，[#402](https://github.com/raydocs/tono/pull/402) | 中·推导 | — |
 | H8-F6 | 影响客户的写操作缺少审计记录 | fixed(6cfa4d9e) | [#405](https://github.com/raydocs/tono/issues/405)，[#406](https://github.com/raydocs/tono/pull/406) | 低·推导 | token-admin 路由移到 src/ops/token-admin.ts |
 | H13-F5 | Worker 不可达时 exit-agent 没有 roster 回退 | fixed(85ba3945) | [#463](https://github.com/raydocs/tono/issues/463)，[#464](https://github.com/raydocs/tono/pull/464) | 中·推导 | 与 #375/#384/#389 冲突，解决步骤写在 PR |
