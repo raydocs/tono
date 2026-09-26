@@ -155,8 +155,10 @@ the owner's step.
 Both environments list reviewer `raydocs`, the same account as the agents' token,
 so an agent approving them removes the only human check there. Whether that token
 can approve its own deployment is untested as of 2026-09-24. Self-approve only for
-the G4 publish; a signed candidate for G3 waits for the owner's approval. Record
-each approval (environment, run URL, SHA) in the changelog.
+the G4 publish and, by owner decision of 2026-09-26 ([DECISIONS.md](DECISIONS.md)), for the
+`windows-release` signing runs of the one-round G1–G3 test kit; any other signed G3
+candidate waits for the owner's approval. Record each approval (environment, run URL,
+SHA) in the changelog.
 
 **Rollback.** Moving a feed back to the last good entry only stops machines that
 have not updated yet. Updated machines refuse a lower build or release sequence on
