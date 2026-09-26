@@ -1,6 +1,6 @@
 # Tono — agent notes
 
-Cloud-managed VPN: clients pull a per-device exit catalog and a signed traffic policy, then dial VLESS
+Cloud-managed VPN (product identity is Tono, not Clash Verge or LiquidClash): clients pull a per-device exit catalog and a signed traffic policy, then dial VLESS
 Reality nodes. Maps: [docs/README.md](docs/README.md), [docs/architecture.md](docs/architecture.md) (deployables, code map, do-not list).
 [docs/SHIP_PLAN.md](docs/SHIP_PLAN.md) owns customer 0.0.73 (G1–G4); [docs/ops/plan-2026-09-11.md](docs/ops/plan-2026-09-11.md) owns ops work (not a
 ship gate). Every PR names one of them; during the G4 freeze only SHIP_PLAN §2 item 10 fixes merge.
@@ -59,7 +59,8 @@ for the changed behavior (full suite only if the helper or connect FSM moved); `
 edited workspace; `services/control-plane` `npm test` or the matching test file; `services/ops-console` vitest for
 the file, Playwright only for a changed page flow; docs only none. The MacBook edits and reviews; it does not
 run `xcodebuild`, `swift build/test`, native `cargo`, Tauri, Core builds or packaging (owner, 2026-09-14); hosted
-CI does. Unrunnable checks are reported as not run. One narrow regression per behavior: one `#[test]`, one XCTest,
+CI does. Do not install toolchains, sync build caches, remove active worktrees or delete retained evidence to
+make a default local command work. Unrunnable checks are reported as not run. One narrow regression per behavior: one `#[test]`, one XCTest,
 one `it`; no tables.
 
 ## Records and Git

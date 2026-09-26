@@ -52,9 +52,9 @@ caches, private credentials or unredacted diagnostic captures.
 
 ## Record each internal update
 
-Maintain the [internal changelog](docs/INTERNAL_CHANGELOG.md) in the same PR as
+Add one entry file under [docs/changelog.d/](docs/changelog.d/README.md) in the same PR as
 each internal code, configuration, build/test tooling or release/acceptance
-delivery. Use its template to distinguish fixes, new behavior, verification
+delivery. ([docs/INTERNAL_CHANGELOG.md](docs/INTERNAL_CHANGELOG.md) is frozen history.) Use the template to distinguish fixes, new behavior, verification
 and unverified limits. Record which exact candidate contains the change, or
 say that no new package exists. Link detailed reports rather than copying
 their evidence; preserve historical failures and source identities. Read-only

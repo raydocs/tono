@@ -104,8 +104,8 @@ If it already happened, reinstalling 0.0.73+ repairs NRPT and encrypted DNS.
 ## Customer publish (G4)
 
 When an agent may start is set in [AGENTS.md](../AGENTS.md) (owner-written G1–G3
-evidence in SHIP_PLAN §6). Record each step's run URL, SHA and artifact hashes in
-[INTERNAL_CHANGELOG.md](INTERNAL_CHANGELOG.md).
+evidence in SHIP_PLAN §6). Record each step's run URL, SHA and artifact hashes in the publish's
+`docs/changelog.d/` entry ([format](changelog.d/README.md)).
 
 - **Candidate identity.** Before customer promotion, match the release's source SHA,
   version/build and package hashes to the candidate the owner's G1–G3 evidence names.
