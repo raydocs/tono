@@ -6,7 +6,7 @@ description: Bring a fresh VPS into the Tono fleet end to end, finish a half-add
 # Adding a node to the Tono fleet
 
 A node is not added when it passes a data-plane test. It is added when it appears in
-**five** places, and **none of them errors if you skip it**:
+**six** places, and **none of them errors if you skip it**:
 
 | System | What it does | Skipping it looks like |
 |---|---|---|
@@ -23,6 +23,14 @@ unreachable for a day without a single error anywhere.
 
 ## Use the script
 
+The onboarding repo lives on the ops machine, not on every checkout; run
+`ls ~/Downloads/Project/tono-node-provisioning/bin` first. If it is absent, use the in-repo
+scripts: `tooling/scripts/provision-reality-node.rb` (preflight/apply) and
+`tooling/scripts/check-node-in-fleet.py` (audit). They cover only Xray and the catalog:
+do not run `tooling/scripts/publish-managed-catalog.rb --append` until the audit reports
+every other place present; otherwise stop after provisioning and record the gap in
+`docs/DECISIONS.md`.
+
 ```sh
 cd ~/Downloads/Project/tono-node-provisioning
 bin/onboard-node.rb --host <ip> --name "City · Landmark"      # add, or finish a partial add
@@ -31,7 +39,7 @@ bin/onboard-node.rb --host <ip> --name "City · Landmark" --check   # audit only
 
 Every step is idempotent and verifies by reading state back, so running it against a
 half-finished node finishes it. `--check` changes nothing and is safe to loop over the whole
-fleet:
+fleet (`tono-199.30.91.172` must be an SSH alias on the machine you run this from):
 
 ```sh
 ssh tono-199.30.91.172 'python3 -c "
@@ -86,13 +94,12 @@ Each of these is a trap that cost real downtime before it was automated.
   provider console. If a pin already exists and differs, it refuses — a changed key is what
   a reinstall looks like and also what a man-in-the-middle looks like. Delete the line from
   `~/.ssh/tono-fleet-known-hosts` only if you know the machine was reinstalled.
-- **`publish-managed-catalog.rb` reads a stale Keychain entry.**
-  `com.raydocs.tono.staging.admin-api-token` 401s; `tono-admin` works. `onboard-node.rb`
-  uses the working one. Whether to fix the older script or the Keychain entry is a decision
-  nobody has made.
-- **Names must match exactly** between `nodes.secrets.json` and the catalog.
-  `Los Angeles · Lagoon（家宽测试）` versus `Los Angeles · Lagoon` is a real mismatch the
-  audit reports today.
+- **Keychain entry for the admin token.** `publish-managed-catalog.rb` and
+  `manage-tono-user.rb` read `com.raydocs.tono.staging.admin-api-token`; `onboard-node.rb`
+  reads `tono-admin`. If the older entry 401s, use the entry that works, record the choice
+  in `docs/DECISIONS.md`, and open the one-line script fix.
+- **Names must match exactly** between `nodes.secrets.json` and the catalog; a suffix
+  such as `（家宽测试）` on one side is a mismatch the audit reports.
 
 ## Replacing a machine
 
@@ -112,11 +119,11 @@ change and costs one ~2 second restart.
 
 Reverse order, so customers stop selecting it before it stops answering: catalog → hub
 registry → Komari → the box itself. A node left in the catalog but unreachable is the worst
-state — `Tokyo · Sakura` is in exactly that state today.
+state. Remove a node only when the task names it.
 
 ## Verifying for real
 
-`--check` reads state back from all five systems, but it does not prove a customer can
+`--check` reads state back from all six systems, but it does not prove a customer can
 connect. For that, drive a real account through the node:
 
 ```sh

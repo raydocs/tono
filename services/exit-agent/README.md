@@ -195,5 +195,5 @@ Register the existing catalog node name/source ID, not a second ` · hy2`
 node identity. Do not borrow or rotate another node's token. Give the timer
 only write access to `/opt/tono-hy2` and its lock directory; keep its credential
 file root-owned mode 0600. The existing checker-directory binding/restart
-preflight above still applies. Registration and node deployment require the
-operator's explicit approval; neither publishes a catalog or changes a feed.
+preflight above still applies. Register and deploy a node only when the task
+names it (see the repository `AGENTS.md`); neither publishes a catalog or changes a feed.

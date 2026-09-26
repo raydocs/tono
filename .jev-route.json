@@ -1,0 +1,8 @@
+{
+  "protectedPaths": [
+    "^apps/windows/service/",
+    "kill.?switch|wfp|nrpt|dns|(^|/)pf[/_.]|pf\\.swift$|ProtectedSystemResolver|protected_probe",
+    "^services/control-plane/public/(appcast\\.xml$|windows/)",
+    "(^|/)ConfigPipeline\\+Nodes\\.swift$|NetworkProtectionOperations\\.swift$|^apps/windows/crates/tono-core/src/node\\.rs$|/tono/connection/endpoints\\.rs$|^services/control-plane/src/catalog-yaml\\.ts$"
+  ]
+}

@@ -1,6 +1,6 @@
 # 生产恢复流程（控制面）
 
-这份是「生产库没了 / 坏了 / 被写坏了」时的操作清单。所有步骤只有老板能跑：需要 Cloudflare 账号里的 D1、R2、Workers 与 Access，wrangler 登录在 `tono` 账号（主检出与 spookfish 目录绑定了这个 profile；其他工作树落到默认账号，会报「不存在」）。
+这份是「生产库没了 / 坏了 / 被写坏了」时的操作清单。只作为明确要求的恢复任务执行，执行前先导出生产库（条件见 [AGENTS.md](../../AGENTS.md)）：需要 Cloudflare 账号里的 D1、R2、Workers 与 Access，wrangler 登录在 `tono` 账号（主检出与 spookfish 目录绑定了这个 profile；其他工作树落到默认账号，会报「不存在」）。
 
 ## 0. 一句话
 
@@ -90,14 +90,13 @@ cd services/control-plane
 npx wrangler d1 create tono-control-plane          # 记下新的 database_id
 # 把 wrangler.jsonc 与 wrangler.admin.jsonc 里的 database_id 都改成新值，提交到 main（PR，CI 绿）
 npx wrangler d1 execute tono-control-plane --remote -y --file /tmp/restore.sql        # 不带 --config
-npx wrangler d1 migrations apply tono-control-plane --remote --config wrangler.jsonc  # 备份之后合并的迁移会在这里补上
 ```
 
-然后在主检出跑 `tooling/scripts/deploy-control-plane-main.sh`（它会再跑一次 `migrations list / apply`，再依次部署 API 与 admin 两个 Worker，带 `BUILD_SHA`）。旧库不要立刻删：留到 §6 验证通过后一周。
+然后在主检出跑 `tooling/scripts/deploy-control-plane-main.sh`（备份之后合并的迁移由它 `migrations list / apply` 补上，再依次部署 API 与 admin 两个 Worker，带 `BUILD_SHA`）。生产迁移只经这个脚本，不单独跑 `migrations apply`。旧库不要立刻删：留到 §6 验证通过后一周。
 
 注意：旧库还在时不要用同一个名字建新库；用别的名字并同步改两个配置里的 `database_name`，或先在控制台把旧库改名。
 
-### (b) 原地清空再导入（`database_id` 不变，不用重新部署）
+### (b) 原地清空再导入（`database_id` 不变）
 
 D1 不能关外键、不允许 `integrity_check`、不允许动 `_cf_KV`，所以清空只能按依赖顺序：先触发器、再索引、再子表先于父表。`tooling/scripts/wipe-d1-in-order.mjs` 就是干这个的；对生产名它默认拒绝，需要两道门都在：
 
@@ -113,8 +112,9 @@ TONO_ALLOW_PRODUCTION_WIPE=1 node tooling/scripts/wipe-d1-in-order.mjs --apply -
 ```sh
 cd services/control-plane
 npx wrangler d1 execute tono-control-plane --remote -y --file /tmp/restore.sql        # 不带 --config
-npx wrangler d1 migrations apply tono-control-plane --remote --config wrangler.jsonc
 ```
+
+然后在主检出跑 `tooling/scripts/deploy-control-plane-main.sh`，由它补上备份之后的迁移并重新部署两个 Worker。
 
 导入约 30 秒（09-10 演练：28 秒、721,917 行）。`d1 execute` 出错时**先** `d1 migrations list`，不要手工补 SQL，也不要重复导入（会撞主键）；重复导入前先再跑一次清空。
 
@@ -150,5 +150,5 @@ npx wrangler d1 execute tono-control-plane --remote --json --command \
 
 - 每季度一次 preview 演练（`d1-backups.md` 的清单，用 `restore-control-plane-d1-preview.sh`，它现在会先按依赖顺序清空 preview 再导入，再 `migrations apply`）；每次部署前的手工备份也要按脚本命名并传旁文件。
 - 每次改了 `wrangler*.jsonc` 的绑定 / 路由 / 密钥清单，同步改本文 §2 与 §4。
-- 老板做；总监会话只准备命令、不碰生产库（会话里的 `wrangler d1 * --remote` 对生产名是禁止项）。
+- 只在明确要求的恢复任务里对生产库执行，先导出；恢复以外的生产库 `wrangler d1 * --remote` 写操作只在任务点名时、先导出后执行（见 [AGENTS.md](../../AGENTS.md)）。
 - 下次真做之前要补的三件：R2 两桶的副本（§3）、密钥的存放位置（§2）、Access 应用的配置记录（§4）。

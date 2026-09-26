@@ -47,8 +47,9 @@ newer published installer from the source version.
 The first customer publication after 0.0.67 / 0.0.34 is gated by
 [SHIP_PLAN.md](SHIP_PLAN.md): Connected-means-usable, a next step on
 connect failure, a proven protected update journal, then feed promotion
-as **0.0.73**. Do not advance Sparkle or `windows-updates` while that
-plan's four gates are open. GitHub `v0.0.72` / `tono-macos-0.0.72-build72`
+as **0.0.73**. Sparkle and `windows-updates` advance only after the owner
+has recorded G1–G3 evidence in SHIP_PLAN §6; agents then run G4 per
+[AGENTS.md](../AGENTS.md). GitHub `v0.0.72` / `tono-macos-0.0.72-build72`
 tags are not those feeds.
 
 - `release/macos` contains the post-Build-62 product line. **Build 64 is the
@@ -99,3 +100,66 @@ If it already happened, reinstalling 0.0.73+ repairs NRPT and encrypted DNS.
    from `release/windows`.
 5. Verify the immutable tag resolves to the source SHA before advancing an
    update feed or channel.
+
+## Customer publish (G4)
+
+When an agent may start is set in [AGENTS.md](../AGENTS.md) (owner-written G1–G3
+evidence in SHIP_PLAN §6). Record each step's run URL, SHA and artifact hashes in the publish's
+`docs/changelog.d/` entry ([format](changelog.d/README.md)).
+
+- **Candidate identity.** Before customer promotion, match the release's source SHA,
+  version/build and package hashes to the candidate the owner's G1–G3 evidence names.
+  A changed candidate does not reuse that acceptance; it needs new owner evidence.
+  The one exception is rebuilding an already-published good source as a higher build
+  for rollback.
+- **Order (SHIP_PLAN §5).** G4.1 freeze → G4.2 on the owner's internal devices
+  first (through internal feeds if the customer feeds do not point there yet) →
+  G4.3 customer feeds (Windows: the back-office release row has `verifiedAt` before
+  promotion) → G4.4 small group. Checking the customer feed after G4.3 is a follow-up
+  check, not a substitute for G4.2.
+
+**macOS.** This composite is documented in `macos-release.yml`'s step summary and
+has not yet run end to end.
+
+1. Tag `tono-macos-<version>-build<build>` on pushed `release/macos`.
+   `macos-release.yml` signs and notarises, and uploads the zip plus
+   `macos-release-proof-<sha>` (holding `enclosure.sig`) as Actions artifacts that
+   expire after 7 days.
+2. `gh release create <tag> --prerelease --target <sha> <zip>`; confirm it is not a
+   draft and that `gh api repos/raydocs/tono/commits/<tag> --jq .sha` is the built SHA.
+3. `node tooling/scripts/upload-release-asset.mjs --tag <tag>`, run from the root of
+   the checkout bound to the `tono` wrangler profile.
+4. `node tooling/scripts/publish-macos-appcast.mjs` with the argv of the workflow's
+   "Validate the appcast entry" step (`--signature-file` pointing at that run's
+   `enclosure.sig`), without `--dry-run`.
+5. `git fetch origin windows-updates`, then `node tooling/scripts/generate-release-center.mjs`
+   (the deploy script refuses a stale release centre); commit
+   `services/control-plane/public/` on `main`; deploy per AGENTS.md.
+
+The proven path is `tooling/scripts/release-macos.sh --version <v> --build <n>
+--publish --lifecycle-token <token>`, which does steps 2–5 except the deploy. It
+builds and packages natively, so it runs on the Mac Studio, never the MacBook. The
+token comes from `sudo tooling/scripts/test-helper-install-lifecycle.sh`, which is
+the owner's step.
+
+**Windows.**
+
+1. `windows-release.yml` on `release/windows` builds the signed draft; its job waits
+   on environment `windows-release`.
+2. `gh release edit v<version> --draft=false`, then
+   `node tooling/scripts/upload-release-asset.mjs --tag v<version>`.
+3. `windows-update-promote.yml` validates the bytes, advances `windows-updates` and
+   commits `services/control-plane/public/windows/latest.json` to `main`; its job
+   waits on environment `windows-update-channel`. Then deploy per AGENTS.md.
+
+Both environments list reviewer `raydocs`, the same account as the agents' token,
+so an agent approving them removes the only human check there. Whether that token
+can approve its own deployment is untested as of 2026-09-24. Self-approve only for
+the G4 publish; a signed candidate for G3 waits for the owner's approval. Record
+each approval (environment, run URL, SHA) in the changelog.
+
+**Rollback.** Moving a feed back to the last good entry only stops machines that
+have not updated yet. Updated machines refuse a lower build or release sequence on
+both platforms, so recover them by shipping the last good source as a higher macOS
+build or a higher Windows version. Worker rollback is `npx wrangler rollback` for
+each Worker config; migrations never roll back.
