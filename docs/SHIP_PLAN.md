@@ -49,7 +49,7 @@
 - 控制面目录合同已接受同节点 hy2 块（`password: {{TONO_CLIENT_UUID}}` + fingerprint，禁止 skip-cert-verify；迁移 0072）。**生产目录仍不塞块**，直到客户端准入合入。
 - 杭州 `47.110.84.71` 只出站：东京 VLESS TCP 通（SNI `www.bing.com` 仍是微软 `CN=r.bing.com`）；五台 Dedirock hy2 官方 `hysteria ping` 均为 EXIT 0。**客户端 runtime 形状**（mihomo v1.19.30，`fingerprint`、不写 `skip-cert-verify`）从杭州经 Niagara hy2 打 `https://www.google.com/generate_204` 得 **HTTP 204**，出口 IP `23.94.79.123`。缺 fingerprint 或钉扎错误则握手失败。Panstar 东京入站 UDP 被商家拦住（工单 #529）。自动切换默认关。客户目录默认剥掉 ` · hy2`（`HY2_CATALOG_EMAILS` 或 `X-Tono-Accept: hy2`）。**生产目录仍不塞块。** 生产 Worker 已是 `main` `7c38521c`（#145 已合已部署）。旧客户端无 `X-Tono-Accept: hy2` 时仍剥 ` · hy2`。下一步是本机 `--append` 五块。本分支节点页顶部有独立「备用 UDP」栏。测 hy2 用 §10，不要用仍 REJECT UDP 的 §9。
 - **2026-09-11：** 杭州阿里云（非移动）打东京/Dedirock Reality dest SNI，拿到微软 `r.bing.com` 证书。出口没挂。「移动用不了」要用移动家宽测；东京 hy2 仍进不来，大陆 hy2 备用目前是 Dedirock。Dedirock 手工 hy2 原先是共享口令，目录 UUID 登不上；本分支改为 HTTP 鉴权吃全部 VLESS UUID。
-- **0.0.74 发布说明**已写在 `apps/macos/release-notes/build74.md` 与 `apps/windows/release-notes/0.0.74.md`（含中文）：**本版备用通道仅手动。** 另含 B0 日志默认口径和已知限制（#331 macOS、#352 Windows）。源码版本已是 **0.0.74**（见 [RELEASE_LINES](RELEASE_LINES.md)）。appcast / `windows-updates` 等老板在 §6 写下 G1–G3 证据后才推进（§2.2）。
+- **0.0.74 发布说明**已写在 `apps/macos/release-notes/build74.md` 与 `apps/windows/release-notes/0.0.74.md`（含中文）：**本版备用通道仅手动。** 另含 B0 日志默认口径和已知限制（#331 macOS、#352 Windows）。源码版本已是 **0.0.74**（见 [RELEASE_LINES](RELEASE_LINES.md)）。appcast / `windows-updates` 等老板在 §6 写下 G1–G3 证据（0.0.74 为 G1、G2；G3 推迟到 0.0.75）后才推进（§2.2）。
 - **G3.1 Failed 日记：** 两端仪表盘在日记为 Failed 时提示「更新未完成，请手动断开后重装」；文件留下。真机 G3.3 之前仍不算过门。
 - **G2 手选备用通道：** 握手 eof / `CORE_EXIT_UNREACHABLE` 时，失败卡片、托盘、菜单栏、非首页横幅在目录有 ` · hy2` 时提供「试用备用通道」。同城 hy2 优先，但东京 hy2 入站 UDP 被商家拦：目录里还有其它城 hy2（Dedirock）时跳过东京那条。用户点击才切到 hy2 并重试。未连接时在设置页/托盘选城（含 hy2）会真正发起连接。macOS 不再在 `CORE_EXIT_UNREACHABLE` 上自动换城。G2.8 自动切换仍关。生产目录仍不塞块。
 
@@ -100,7 +100,7 @@
 3. macOS 真机：Developer ID、公证、Sparkle EdDSA、`tooling/scripts/verify-release-gate.sh /path/to/Tono.app`、Helper 安装。
 4. hy2 三网证明（T0）：在 **vm-Gk43AX**（东京 JP Plus，`45.8.173.206`）手工装 hysteria2，电信/联通/移动各 5 次握手 + 30 秒下载；同一套配置再在 **vm-nvLHV3**（洛杉矶，`144.225.255.38`）各测一轮。结果写 `docs/ops/transport-hy2.md`。不通就执行 §2.6 的降级，不要让 agent 猜。
 5. 内部账号灰度：`HY2_CATALOG_EMAILS`（逗号分隔）的邮箱值由老板提供，不写进仓库。其余按 [DECISIONS](DECISIONS.md) 的暂定口径：客户目录默认剥掉 ` · hy2`（未设变量则谁也看不见；Ops/admin 明文目录不剥），不 PUT hy2 块，直到客户端准入合进 `main` 且变量已设。改这个变量之后必须 bump catalog revision（Windows 把同 revision 不同 digest 当篡改）。
-6. 在 §6 为 G1–G3 勾 `[x]` 并附证据链接。之后推 Sparkle / `windows-updates` / R2 `tono-releases`（G4）由 agent 执行。
+6. 在 §6 为 G1–G3 勾 `[x]` 并附证据链接（0.0.74 为 G1、G2；G3 推迟到 0.0.75）。之后推 Sparkle / `windows-updates` / R2 `tono-releases`（G4）由 agent 执行。
 7. 小范围朋友：名单由老板给；看哪些失败率、何时扩大按 G4.4，拿不准时取更保守的一侧并记入 [DECISIONS](DECISIONS.md)。
 
 ---
@@ -427,5 +427,5 @@ G3 不要与 G1 并行改同一份 Windows 连接/更新代码；G3.1 基于已�
 1. 每条任务开分支 `cursor/<gate>-<slug>-d57f` 或沿用已有 PR 分支，PR 标题写 `G1.x:` / `G2.x:` / `G3.x:`。
 2. PR 说明：服务哪一扇门、原始测试输出、真机笔录链接或「待老板 G1 清单」、触碰的共享合同（`catalog-yaml.ts`、`telemetry-window.ts`、Helper 协议）。
 3. 控制面迁移 0072 先在 preview apply，再进生产部署脚本。
-4. 需要老板的只有 §3 所列：真机、三网测试、朋友名单与 §6 G1–G3 勾选。其余按本计划与 [AGENTS.md](../AGENTS.md) 推进，产品取舍记入 [DECISIONS](DECISIONS.md)。
+4. 需要老板的只有 §3 所列：真机、三网测试、朋友名单与 §6 G1–G3 勾选（0.0.74 为 G1、G2）。其余按本计划与 [AGENTS.md](../AGENTS.md) 推进，产品取舍记入 [DECISIONS](DECISIONS.md)。
 5. 与 `docs/ops/plan-2026-09-11.md` 冲突时：客户发布门优先。不要把 ChangeReceipt / 角色 / 分页塞进 0.0.74。
