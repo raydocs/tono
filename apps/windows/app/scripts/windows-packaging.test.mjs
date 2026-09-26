@@ -479,7 +479,7 @@ test('NSIS explains a refused gate and confirms before uninstall releases protec
   // .onInit never shows Abort text; a refusal without a dialog is a silent exit.
   assert.match(
     refusal,
-    /\$\{IfNot\} \$\{Silent\}\s+\$\{If\} \$0 == "77"\s+MessageBox [^\n]*"\$\(manualInstallNeedsDisconnect\)"\s+\$\{Else\}\s+MessageBox [^\n]*"\$\(manualInstallRefused\)"/,
+    /\$\{IfNot\} \$\{Silent\}\s+\$\{If\} \$0 == "77"\s+MessageBox [^\n]*"\$\(manualInstallNeedsDisconnect\)"\s+\$\{ElseIf\} \$0 == "79"\s+MessageBox [^\n]*"\$\(manualInstallNeedsBfe\)"\s+\$\{Else\}\s+MessageBox [^\n]*"\$\(manualInstallRefused\)"/,
   )
   assert.doesNotMatch(refusal, /--emergency-disarm|--manual-uninstall-gate/)
 
@@ -499,6 +499,7 @@ test('NSIS explains a refused gate and confirms before uninstall releases protec
 
   for (const name of [
     'manualInstallNeedsDisconnect',
+    'manualInstallNeedsBfe',
     'manualInstallRefused',
     'uninstallReleasesProtection',
     'manualUninstallRefused',
@@ -518,6 +519,10 @@ test('NSIS explains a refused gate and confirms before uninstall releases protec
   assert.match(
     windowsServiceUpdateSource,
     /pub const MANUAL_GATE_ORPHANED_PROTECTION_EXIT: i32 = 78;/,
+  )
+  assert.match(
+    windowsServiceInstallerSource,
+    /const MANUAL_GATE_BFE_UNAVAILABLE_EXIT: i32 = 79;/,
   )
 })
 

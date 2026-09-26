@@ -1,0 +1,778 @@
+name: Desktop update sign
+
+# Signs one paired v1 update manifest (docs/UPDATE_INTEGRATION_V1.md) for packages
+# that macos-release.yml and windows-release.yml already built, and returns the
+# bundle as a workflow artifact. It cannot publish: the token reads contents and
+# actions only, and there is no release, tag, feed, bucket or promote step. Putting
+# the bundle under desktop/v1/ is a separate, owner-authorized operation.
+#
+# Several release builds share one source SHA on purpose (one per sequence), so
+# "a green run at that SHA" does not identify a package. Before anything is
+# measured or signed, each producer run is bound to its workflow file, event, ref,
+# SHA and conclusion; its exact artifact by id and digest; and the sequence,
+# version and channel inside the package itself (macOS: the sealed
+# tono-build-source.json and Info.plist; Windows: the build job env, the floor and
+# updater key compiled into tono-service.exe, and the version resources).
+#
+# Each private key is visible to one step of one job that declares its
+# environment: the Sparkle key in macos-appcast, the Tauri updater key in
+# windows-release (whose branch policy admits only release/windows). Keys travel
+# through env or stdin, never arguments, files or logs. Both signatures are
+# verified under the keys the native code pins before the bundle is uploaded.
+
+on:
+  workflow_dispatch:
+    inputs:
+      macos_run_id:
+        description: macos-release.yml run (workflow_dispatch on release/macos) that built the macOS package
+        required: true
+        type: string
+      windows_run_id:
+        description: windows-release.yml run (release/windows) that built the Windows package
+        required: true
+        type: string
+      source_sha:
+        description: Exact 40-hex source SHA both producer runs built
+        required: true
+        type: string
+      release_sequence:
+        description: v1 release sequence both packages carry (positive safe integer)
+        required: true
+        type: string
+      version:
+        description: App version both packages carry, e.g. 0.0.74
+        required: true
+        type: string
+      channel:
+        description: Build channel both packages carry; only customer release builds are signed
+        required: true
+        type: choice
+        default: release
+        options:
+          - release
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: desktop-update-sign
+  cancel-in-progress: false
+
+jobs:
+  # No condition: a skipped job is recorded as success, so a guard that could be
+  # skipped would let a wrong ref run green. Every other job needs this one.
+  guard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      release_id: ${{ steps.inputs.outputs.release_id }}
+      bundle_name: ${{ steps.inputs.outputs.bundle_name }}
+      macos_public_key: ${{ steps.source.outputs.macos_public_key }}
+      macos_build: ${{ steps.producers.outputs.macos_build }}
+      macos_package_artifact_id: ${{ steps.producers.outputs.macos_package_artifact_id }}
+      macos_package_sha256: ${{ steps.producers.outputs.macos_package_sha256 }}
+      macos_proof_artifact_id: ${{ steps.producers.outputs.macos_proof_artifact_id }}
+      macos_proof_sha256: ${{ steps.producers.outputs.macos_proof_sha256 }}
+      windows_payload_artifact_id: ${{ steps.producers.outputs.windows_payload_artifact_id }}
+      windows_payload_sha256: ${{ steps.producers.outputs.windows_payload_sha256 }}
+    steps:
+      - name: Refuse a ref that is not the Windows release line
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF" != refs/heads/release/windows ]; then
+            echo "::error::Signing runs only from refs/heads/release/windows, the windows-release environment's only branch; this run is on $GITHUB_REF. Nothing was signed."
+            exit 1
+          fi
+
+      - name: Validate the dispatch inputs
+        id: inputs
+        env:
+          MACOS_RUN_ID: ${{ inputs.macos_run_id }}
+          WINDOWS_RUN_ID: ${{ inputs.windows_run_id }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SEQUENCE: ${{ inputs.release_sequence }}
+          VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+          [[ "$MACOS_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]] || fail 'macos_run_id is not a run id'
+          [[ "$WINDOWS_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]] || fail 'windows_run_id is not a run id'
+          [ "$MACOS_RUN_ID" != "$WINDOWS_RUN_ID" ] || fail 'the two producer runs must differ'
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || fail 'source_sha must be a full lowercase commit SHA'
+          [[ "$SEQUENCE" =~ ^[1-9][0-9]{0,15}$ ]] && [ "$SEQUENCE" -le 9007199254740991 ] \
+            || fail 'release_sequence must be a positive safe integer'
+          [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || fail 'version must be a release SemVer'
+          [ "$CHANNEL" = release ] || fail 'only release-channel builds are signed'
+          {
+            echo "release_id=tono-$VERSION-s$SEQUENCE-${SOURCE_SHA:0:8}"
+            echo "bundle_name=desktop-update-bundle-$VERSION-s$SEQUENCE-$SOURCE_SHA"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Bind the source to this line and read the Helper's compiled update key
+        id: source
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          if ! git merge-base --is-ancestor "$SOURCE_SHA" "$GITHUB_SHA"; then
+            echo "::error::$SOURCE_SHA is not in the history of this release/windows commit $GITHUB_SHA."
+            exit 1
+          fi
+          # The macOS trust root is the key compiled into the Helper at the source
+          # SHA, never a key that travels with the offer.
+          key=$(git show "$SOURCE_SHA:tooling/scripts/core-helper/UpdatePackage.swift" \
+            | sed -n 's|^ *static let publicKey = "\([A-Za-z0-9+/]\{43\}=\)"$|\1|p')
+          if [ "$(printf '%s\n' "$key" | grep -c .)" -ne 1 ]; then
+            echo "::error::Could not read exactly one UpdatePackage.publicKey at $SOURCE_SHA."
+            exit 1
+          fi
+          echo "macos_public_key=$key" >> "$GITHUB_OUTPUT"
+
+      - name: Bind both producer runs, their build logs and their exact artifacts
+        id: producers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MACOS_RUN_ID: ${{ inputs.macos_run_id }}
+          WINDOWS_RUN_ID: ${{ inputs.windows_run_id }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SEQUENCE: ${{ inputs.release_sequence }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+          repo=$GITHUB_REPOSITORY
+          work=$RUNNER_TEMP/producers
+          mkdir "$work"
+          get() { gh api -H 'X-GitHub-Api-Version: 2022-11-28' "repos/$repo/$1"; }
+          # Logs redirect to blob storage; curl drops the Authorization header on
+          # the cross-host redirect, and the token stays off the command line.
+          download() {
+            curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+              --config - --output "$2" "$GITHUB_API_URL/repos/$repo/$1" \
+              <<<"header = \"Authorization: Bearer $GH_TOKEN\""
+          }
+          check_run() { # run-id workflow-path branch
+            local run
+            run=$(get "actions/runs/$1")
+            printf '%s\n' "$run" | jq -c '{id, path, event, head_branch, head_sha, status, conclusion, run_attempt}'
+            printf '%s\n' "$run" | jq -e --arg path "$2" --arg branch "$3" --arg sha "$SOURCE_SHA" --arg repo "$repo" '
+              .path == $path and .event == "workflow_dispatch" and .head_branch == $branch
+              and .head_sha == $sha and .status == "completed" and .conclusion == "success"
+              and .repository.full_name == $repo and .head_repository.full_name == $repo' > /dev/null \
+              || fail "run $1 is not a successful workflow_dispatch of $2 on $3 at $SOURCE_SHA"
+          }
+          job_log() { # run-id job-name output
+            local id
+            id=$(get "actions/runs/$1/jobs?filter=latest&per_page=100" | jq -er --arg name "$2" '
+              [.jobs[] | select(.name == $name)]
+              | if length == 1 and .[0].conclusion == "success" then .[0].id
+                else error("run has no single successful \($name) job") end')
+            download "actions/jobs/$id/logs" "$3"
+          }
+          env_line() { # log key expected required(0|1): every job-env line for key equals expected
+            python3 - "$@" <<'PY'
+          import re, sys
+          log, key, expected, required = sys.argv[1:]
+          line = re.compile(r'\d{4}-\d{2}-\d{2}T[\d:.]+Z   ' + re.escape(key) + r':(?: (.*))?')
+          values = []
+          with open(log, encoding='utf-8-sig', errors='replace') as stream:
+              for text in stream:
+                  match = line.fullmatch(text.rstrip('\r\n'))
+                  if match:
+                      values.append((match.group(1) or '').strip())
+          if required == '1' and not values:
+              sys.exit(f'::error::{key} does not appear in the build job env of {log}')
+          wrong = sorted({value for value in values if value != expected})
+          if wrong:
+              sys.exit(f'::error::{key} was {wrong} in {log}, expected {expected!r}')
+          print(f'{key}: {len(values)} build env line(s), all {expected!r}')
+          PY
+          }
+          artifact() { # run-id exact-name-regex -> "id sha256 name"
+            get "actions/runs/$1/artifacts?per_page=100" | jq -er --arg pattern "$2" --argjson run "$1" --arg sha "$SOURCE_SHA" '
+              [.artifacts[] | select(.name | test($pattern))]
+              | if length != 1 then error("expected one artifact matching \($pattern), found \(length)") else .[0] end
+              | if .expired then error("\(.name) has expired") else . end
+              | if .workflow_run.id != $run or .workflow_run.head_sha != $sha then error("\(.name) is not from run \($run) at \($sha)") else . end
+              | if ((.digest // "") | test("^sha256:[0-9a-f]{64}$")) then . else error("\(.name) has no sha256 digest") end
+              | "\(.id) \(.digest | ltrimstr("sha256:")) \(.name)"'
+          }
+
+          check_run "$MACOS_RUN_ID" .github/workflows/macos-release.yml release/macos
+          check_run "$WINDOWS_RUN_ID" .github/workflows/windows-release.yml release/windows
+
+          # The sealed package files below are the proof; the job env is the
+          # operator-visible record of the same input and must not disagree.
+          job_log "$MACOS_RUN_ID" build "$work/macos-build.log"
+          env_line "$work/macos-build.log" TONO_UPDATE_RELEASE_SEQUENCE "$SEQUENCE" 1
+          env_line "$work/macos-build.log" TONO_BUILD_CHANNEL '' 0
+          job_log "$WINDOWS_RUN_ID" build-draft "$work/windows-build.log"
+          env_line "$work/windows-build.log" TONO_UPDATE_RELEASE_SEQUENCE "$SEQUENCE" 1
+          env_line "$work/windows-build.log" RELEASE_VERSION "$VERSION" 1
+          env_line "$work/windows-build.log" TONO_BUILD_CHANNEL '' 0
+
+          macos_package=$(artifact "$MACOS_RUN_ID" "^Tono-${VERSION//./\\.}-build[1-9][0-9]*-arm64\$")
+          macos_proof=$(artifact "$MACOS_RUN_ID" "^macos-release-proof-$SOURCE_SHA\$")
+          windows_payload=$(artifact "$WINDOWS_RUN_ID" "^windows-release-payload-$SOURCE_SHA\$")
+          read -r package_id package_sha256 package_name <<<"$macos_package"
+          read -r proof_id proof_sha256 proof_name <<<"$macos_proof"
+          read -r payload_id payload_sha256 payload_name <<<"$windows_payload"
+          build=${package_name#"Tono-$VERSION-build"}
+          build=${build%-arm64}
+          [[ "$build" =~ ^[1-9][0-9]*$ ]] || fail "cannot read the macOS build number from $package_name"
+          {
+            echo "macos_build=$build"
+            echo "macos_package_artifact_id=$package_id"
+            echo "macos_package_sha256=$package_sha256"
+            echo "macos_proof_artifact_id=$proof_id"
+            echo "macos_proof_sha256=$proof_sha256"
+            echo "windows_payload_artifact_id=$payload_id"
+            echo "windows_payload_sha256=$payload_sha256"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Producer binding"
+            echo
+            echo "| | run | artifact | id | sha256 |"
+            echo "|---|---|---|---|---|"
+            echo "| macOS package | $MACOS_RUN_ID | $package_name | $package_id | \`$package_sha256\` |"
+            echo "| macOS proof | $MACOS_RUN_ID | $proof_name | $proof_id | \`$proof_sha256\` |"
+            echo "| Windows payload | $WINDOWS_RUN_ID | $payload_name | $payload_id | \`$payload_sha256\` |"
+            echo
+            echo "Source \`$SOURCE_SHA\`, sequence $SEQUENCE, version $VERSION, macOS build $build, release channel."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  macos-verify:
+    needs: guard
+    runs-on: macos-26
+    timeout-minutes: 30
+    outputs:
+      measurement: ${{ steps.measure.outputs.measurement }}
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      SEQUENCE: ${{ inputs.release_sequence }}
+      VERSION: ${{ inputs.version }}
+      CHANNEL: ${{ inputs.channel }}
+      MACOS_BUILD: ${{ needs.guard.outputs.macos_build }}
+      MACOS_PUBLIC_KEY: ${{ needs.guard.outputs.macos_public_key }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Fetch the exact macOS producer artifacts by id and digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_ID: ${{ needs.guard.outputs.macos_package_artifact_id }}
+          PACKAGE_SHA256: ${{ needs.guard.outputs.macos_package_sha256 }}
+          PROOF_ID: ${{ needs.guard.outputs.macos_proof_artifact_id }}
+          PROOF_SHA256: ${{ needs.guard.outputs.macos_proof_sha256 }}
+        run: |
+          set -euo pipefail
+          work=$RUNNER_TEMP/macos-producer
+          mkdir "$work"
+          fetch() { # artifact-id sha256 output
+            curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+              --config - --output "$work/$3" \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/artifacts/$1/zip" \
+              <<<"header = \"Authorization: Bearer $GH_TOKEN\""
+            echo "$2  $work/$3" | shasum -a 256 -c -
+          }
+          fetch "$PACKAGE_ID" "$PACKAGE_SHA256" package-artifact.zip
+          fetch "$PROOF_ID" "$PROOF_SHA256" proof-artifact.zip
+          name="Tono-$VERSION-build$MACOS_BUILD-arm64"
+          test "$(unzip -Z1 "$work/package-artifact.zip")" = "$name.zip"
+          test "$(unzip -Z1 "$work/proof-artifact.zip" | LC_ALL=C sort | paste -sd, -)" = enclosure.sig,release-receipt.json
+          unzip -q "$work/package-artifact.zip" -d "$work/package"
+          unzip -q "$work/proof-artifact.zip" -d "$work/proof"
+          ditto -x -k "$work/package/$name.zip" "$work/app"
+          test "$(ls -A "$work/app")" = Tono.app
+          {
+            echo "PACKAGE=$work/package/$name.zip"
+            echo "RECEIPT=$work/proof/release-receipt.json"
+            echo "APP=$work/app/Tono.app"
+          } >> "$GITHUB_ENV"
+
+      - name: Check the receipt, sealed build source, Info.plist and pinned key
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, plistlib, sys
+          env = os.environ
+          def need(ok, message):
+              if not ok:
+                  sys.exit(f'::error::{message}')
+          package = pathlib.Path(env['PACKAGE'])
+          app = pathlib.Path(env['APP'])
+          receipt = json.loads(pathlib.Path(env['RECEIPT']).read_text())
+          expected = {'source': env['SOURCE_SHA'], 'ref': 'refs/heads/release/macos', 'version': env['VERSION'],
+                      'build': env['MACOS_BUILD'], 'archive': package.name,
+                      'sha256': hashlib.sha256(package.read_bytes()).hexdigest(), 'published': False}
+          for key, value in expected.items():
+              need(receipt.get(key) == value, f'release receipt {key} is {receipt.get(key)!r}, expected {value!r}')
+          source = json.loads((app / 'Contents/Resources/tono-build-source.json').read_text())
+          need(source.get('commit') == env['SOURCE_SHA'], f"sealed build commit is {source.get('commit')!r}")
+          sequence = source.get('releaseSequence')
+          need(type(sequence) is int and sequence == int(env['SEQUENCE']), f'sealed release sequence is {sequence!r}')
+          with (app / 'Contents/Info.plist').open('rb') as stream:
+              info = plistlib.load(stream)
+          need(info.get('CFBundleShortVersionString') == env['VERSION'], 'Info.plist version differs')
+          need(str(info.get('CFBundleVersion')) == env['MACOS_BUILD'], 'Info.plist build differs')
+          channel = {'release': ''}[env['CHANNEL']]
+          need(info.get('TonoBuildChannel', '') == channel, f"TonoBuildChannel is {info.get('TonoBuildChannel')!r}")
+          need(info.get('SUPublicEDKey') == env['MACOS_PUBLIC_KEY'], 'SUPublicEDKey differs from the Helper key')
+          helper = (app / 'Contents/Resources/tono-core-helper').read_bytes()
+          need(env['MACOS_PUBLIC_KEY'].encode() in helper, 'the packaged Helper does not pin the update key')
+          print(f"receipt, sealed source {env['SOURCE_SHA']} / sequence {sequence}, version, channel and key match")
+          PY
+
+      - name: Check signing, notarization and the release gate on the exact package
+        run: |
+          set -euo pipefail
+          /usr/bin/codesign --verify --deep --strict --all-architectures "$APP"
+          /usr/bin/xcrun stapler validate "$APP"
+          /usr/sbin/spctl -a -t exec -vv "$APP"
+          sh tooling/scripts/verify-release-gate.sh "$APP"
+
+      - name: Measure the package and its App, Core and Helper
+        id: measure
+        run: |
+          set -euo pipefail
+          output=$RUNNER_TEMP/update-target.macos-arm64.json
+          node tooling/scripts/desktop-update-v1.mjs measure \
+            --version "$VERSION" --source "$SOURCE_SHA" --sequence "$SEQUENCE" \
+            --target macos-arm64 --artifact "$PACKAGE" \
+            --app "$APP/Contents/MacOS/Tono" \
+            --core "$APP/Contents/Resources/sing-box" \
+            --privileged "$APP/Contents/Resources/tono-core-helper" \
+            --output "$output"
+          echo "measurement=$(base64 < "$output" | tr -d '\n')" >> "$GITHUB_OUTPUT"
+
+  windows-verify:
+    needs: guard
+    runs-on: windows-2025
+    timeout-minutes: 30
+    outputs:
+      measurement: ${{ steps.measure.outputs.measurement }}
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      SEQUENCE: ${{ inputs.release_sequence }}
+      VERSION: ${{ inputs.version }}
+      TONO_UPDATER_PUBLIC_KEY: ${{ vars.TONO_UPDATER_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Fetch the exact Windows payload artifact by id and digest
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PAYLOAD_ID: ${{ needs.guard.outputs.windows_payload_artifact_id }}
+          PAYLOAD_SHA256: ${{ needs.guard.outputs.windows_payload_sha256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $work = Join-Path $env:RUNNER_TEMP 'windows-producer'
+          New-Item -ItemType Directory $work | Out-Null
+          $zip = Join-Path $work 'payload-artifact.zip'
+          # Invoke-WebRequest strips Authorization on the redirect to blob storage.
+          Invoke-WebRequest -OutFile $zip `
+            -Uri "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/actions/artifacts/$env:PAYLOAD_ID/zip" `
+            -Headers @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json' }
+          $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $env:PAYLOAD_SHA256) { throw "Payload artifact digest $actual is not $env:PAYLOAD_SHA256" }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+          try { $names = @($archive.Entries | ForEach-Object FullName) } finally { $archive.Dispose() }
+          $installers = @($names | Where-Object { $_ -match '^[A-Za-z0-9._-]+-setup\.exe$' })
+          if ($installers.Count -ne 1 -or $names.Count -ne 2 -or $names -notcontains "$($installers[0]).sig") {
+            throw "The payload artifact must hold exactly one setup executable and its .sig; found: $($names -join ', ')"
+          }
+          $payload = Join-Path $work 'payload'
+          [IO.Compression.ZipFile]::ExtractToDirectory($zip, $payload)
+          "INSTALLER=$(Join-Path $payload $installers[0])" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Check the installer signature, versions, compiled floor and pinned key
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          node apps/windows/app/scripts/prepare-updater-config.mjs --verify $env:INSTALLER "$env:INSTALLER.sig"
+          $setupVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($env:INSTALLER).ProductVersion
+          if ($setupVersion -ne $env:VERSION) { throw "Installer ProductVersion is $setupVersion, expected $env:VERSION" }
+          $extracted = Join-Path $env:RUNNER_TEMP 'windows-payload-unpacked'
+          7z x -y "-o$extracted" $env:INSTALLER | Out-Null
+          $components = @{}
+          foreach ($name in @('Tono.exe.next', 'tono-core.exe.next', 'tono-service.exe')) {
+            $found = @(Get-ChildItem -LiteralPath $extracted -Recurse -File | Where-Object Name -eq $name)
+            if ($found.Count -ne 1) { throw "Expected one packaged $name, found $($found.Count)" }
+            $components[$name] = $found[0].FullName
+          }
+          $appVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($components['Tono.exe.next']).ProductVersion
+          if ($appVersion -ne $env:VERSION) { throw "Tono.exe ProductVersion is $appVersion, expected $env:VERSION" }
+          # windows-release.yml sets no TONO_BUILD_CHANNEL (the guard checked its job env), so
+          # the App is a release-channel build. The Service carries the v1 floor and the
+          # updater key it will verify this manifest with, both compiled from the build env.
+          $service = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($components['tono-service.exe']))
+          if (-not $service.Contains($env:SEQUENCE)) { throw "tono-service.exe does not contain the compiled floor $env:SEQUENCE" }
+          $key = "$env:TONO_UPDATER_PUBLIC_KEY".Trim()
+          if ($key.Length -eq 0 -or -not $service.Contains($key)) { throw 'tono-service.exe does not pin TONO_UPDATER_PUBLIC_KEY' }
+          @(
+            "WINDOWS_APP=$($components['Tono.exe.next'])",
+            "WINDOWS_CORE=$($components['tono-core.exe.next'])",
+            "WINDOWS_SERVICE=$($components['tono-service.exe'])"
+          ) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "installer $setupVersion, App $appVersion, floor $env:SEQUENCE and updater key match"
+
+      - name: Measure the installer and its App, Core and Service
+        id: measure
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $output = Join-Path $env:RUNNER_TEMP 'update-target.windows-x86_64.json'
+          node tooling/scripts/desktop-update-v1.mjs measure `
+            --version $env:VERSION --source $env:SOURCE_SHA --sequence $env:SEQUENCE `
+            --target windows-x86_64 --artifact $env:INSTALLER `
+            --app $env:WINDOWS_APP --core $env:WINDOWS_CORE --privileged $env:WINDOWS_SERVICE `
+            --output $output
+          "measurement=$([Convert]::ToBase64String([IO.File]::ReadAllBytes($output)))" |
+            Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+  assemble:
+    needs: [guard, macos-verify, windows-verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      manifest: ${{ steps.assemble.outputs.manifest }}
+      manifest_sha256: ${{ steps.assemble.outputs.manifest_sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Assemble the canonical unsigned manifest
+        id: assemble
+        env:
+          MACOS_MEASUREMENT: ${{ needs.macos-verify.outputs.measurement }}
+          WINDOWS_MEASUREMENT: ${{ needs.windows-verify.outputs.measurement }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SEQUENCE: ${{ inputs.release_sequence }}
+          VERSION: ${{ inputs.version }}
+          RELEASE_ID: ${{ needs.guard.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          work=$RUNNER_TEMP/assemble
+          mkdir "$work"
+          printf '%s' "$MACOS_MEASUREMENT" | base64 --decode > "$work/update-target.macos-arm64.json"
+          printf '%s' "$WINDOWS_MEASUREMENT" | base64 --decode > "$work/update-target.windows-x86_64.json"
+          node tooling/scripts/desktop-update-v1.mjs assemble \
+            --macos "$work/update-target.macos-arm64.json" \
+            --windows "$work/update-target.windows-x86_64.json" \
+            --source "$SOURCE_SHA" --sequence "$SEQUENCE" --release-id "$RELEASE_ID" \
+            --output "$work/manifest.json"
+          jq -e --arg version "$VERSION" '.appVersion == $version' "$work/manifest.json" > /dev/null
+          {
+            echo "manifest=$(base64 -w0 "$work/manifest.json")"
+            echo "manifest_sha256=$(sha256sum "$work/manifest.json" | cut -d' ' -f1)"
+          } >> "$GITHUB_OUTPUT"
+
+  sign-macos:
+    needs: [guard, assemble]
+    runs-on: macos-26
+    environment: macos-appcast
+    timeout-minutes: 15
+    outputs:
+      signature: ${{ steps.verify.outputs.signature }}
+    env:
+      MANIFEST: ${{ needs.assemble.outputs.manifest }}
+      MANIFEST_SHA256: ${{ needs.assemble.outputs.manifest_sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Restore the exact unsigned manifest
+        run: |
+          set -euo pipefail
+          printf '%s' "$MANIFEST" | base64 --decode > "$RUNNER_TEMP/manifest.json"
+          echo "$MANIFEST_SHA256  $RUNNER_TEMP/manifest.json" | shasum -a 256 -c -
+
+      - name: Locate the pinned Sparkle 2.9.6 sign_update tool
+        run: |
+          set -euo pipefail
+          # Same checksum-pinned offline signer as macos-release.yml validate-appcast.
+          archive="$RUNNER_TEMP/Sparkle-for-Swift-Package-Manager.zip"
+          curl --fail --location --proto '=https' --proto-redir '=https' \
+            'https://github.com/sparkle-project/Sparkle/releases/download/2.9.6/Sparkle-for-Swift-Package-Manager.zip' \
+            --output "$archive"
+          printf '%s  %s\n' \
+            '8d5fb41d960b43f4a68aa14126bf62b098544ec8d191cdcc73eb14e63a8e7606' "$archive" \
+            | shasum -a 256 -c -
+          mkdir "$RUNNER_TEMP/sparkle-signing-2.9.6"
+          ditto -x -k "$archive" "$RUNNER_TEMP/sparkle-signing-2.9.6"
+          sign_update=$(python3 tooling/scripts/find-sparkle-sign-update.py \
+            "$RUNNER_TEMP/sparkle-signing-2.9.6")
+          codesign --verify --strict "$sign_update"
+          echo "SIGN_UPDATE=$sign_update" >> "$GITHUB_ENV"
+
+      - name: Sign the manifest bytes with the Sparkle key
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SPARKLE_ED_PRIVATE_KEY-}" ]; then
+            echo "::error::The macos-appcast environment has no SPARKLE_ED_PRIVATE_KEY."
+            exit 1
+          fi
+          manifest=$RUNNER_TEMP/manifest.json
+          # The key reaches sign_update on stdin. Its output is captured, never
+          # printed: sign_update echoes an undecodable key in its error message.
+          if ! signature=$(printf '%s\n' "$SPARKLE_ED_PRIVATE_KEY" | "$SIGN_UPDATE" --ed-key-file - -p "$manifest"); then
+            echo "::error::sign_update failed; its output is withheld because it can contain key material."
+            exit 1
+          fi
+          if ! [[ "$signature" =~ ^[A-Za-z0-9+/]{86}==$ ]]; then
+            echo "::error::sign_update did not return one Ed25519 signature; its output is withheld."
+            exit 1
+          fi
+          echo "$MANIFEST_SHA256  $manifest" | shasum -a 256 -c -
+          printf '%s' "$signature" > "$RUNNER_TEMP/manifest.macos-arm64.sig"
+
+      - name: Verify the signature under the Helper's compiled key
+        id: verify
+        env:
+          MACOS_PUBLIC_KEY: ${{ needs.guard.outputs.macos_public_key }}
+        run: |
+          set -euo pipefail
+          node --input-type=module - <<'NODE'
+          import { appendFileSync, readFileSync } from 'node:fs'
+          import { readSparklePublicKey, verifyEnclosureSignature } from './tooling/scripts/publish-macos-appcast.mjs'
+          const temp = process.env.RUNNER_TEMP
+          const signature = readFileSync(`${temp}/manifest.macos-arm64.sig`, 'utf8')
+          verifyEnclosureSignature(readSparklePublicKey({ SUPublicEDKey: process.env.MACOS_PUBLIC_KEY }),
+            signature, readFileSync(`${temp}/manifest.json`), { fileName: 'manifest.json' })
+          appendFileSync(process.env.GITHUB_OUTPUT, `signature=${signature}\n`)
+          console.log('macOS manifest signature verifies under the Helper key')
+          NODE
+
+  sign-windows:
+    needs: [guard, assemble]
+    runs-on: ubuntu-24.04
+    environment: windows-release
+    timeout-minutes: 20
+    outputs:
+      signature: ${{ steps.verify.outputs.signature }}
+    defaults:
+      run:
+        working-directory: apps/windows/app
+    env:
+      MANIFEST: ${{ needs.assemble.outputs.manifest }}
+      MANIFEST_SHA256: ${{ needs.assemble.outputs.manifest_sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+        with:
+          version: 11.3.0
+
+      # No dependency cache: this job holds the updater key.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Install the lockfile's Tauri CLI without running package scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Restore the exact unsigned manifest
+        run: |
+          set -euo pipefail
+          printf '%s' "$MANIFEST" | base64 --decode > "$RUNNER_TEMP/manifest.json"
+          echo "$MANIFEST_SHA256  $RUNNER_TEMP/manifest.json" | sha256sum --check --strict
+
+      - name: Sign the manifest bytes with the Tauri updater key
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY-}" ] || [ -z "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD-}" ]; then
+            echo "::error::The windows-release environment lacks the Tauri updater key or its password."
+            exit 1
+          fi
+          # Key and password reach the CLI through env only; stdout is dropped.
+          pnpm tauri signer sign "$RUNNER_TEMP/manifest.json" > /dev/null
+          echo "$MANIFEST_SHA256  $RUNNER_TEMP/manifest.json" | sha256sum --check --strict
+
+      - name: Verify the signature under the pinned updater key
+        id: verify
+        env:
+          TONO_UPDATER_PUBLIC_KEY: ${{ vars.TONO_UPDATER_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          node scripts/prepare-updater-config.mjs --verify "$RUNNER_TEMP/manifest.json" "$RUNNER_TEMP/manifest.json.sig"
+          signature=$(tr -d '\r\n' < "$RUNNER_TEMP/manifest.json.sig")
+          if ! [[ "$signature" =~ ^[A-Za-z0-9+/]+={0,2}$ ]] || [ "${#signature}" -gt 4096 ]; then
+            echo "::error::The Tauri signature file is not one bounded Base64 signature box."
+            exit 1
+          fi
+          echo "signature=$signature" >> "$GITHUB_OUTPUT"
+
+  bundle:
+    needs: [guard, assemble, sign-macos, sign-windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Fetch both producer packages again by id and digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          MACOS_BUILD: ${{ needs.guard.outputs.macos_build }}
+          MACOS_ID: ${{ needs.guard.outputs.macos_package_artifact_id }}
+          MACOS_SHA256: ${{ needs.guard.outputs.macos_package_sha256 }}
+          WINDOWS_ID: ${{ needs.guard.outputs.windows_payload_artifact_id }}
+          WINDOWS_SHA256: ${{ needs.guard.outputs.windows_payload_sha256 }}
+        run: |
+          set -euo pipefail
+          work=$RUNNER_TEMP/bundle-input
+          mkdir "$work"
+          fetch() { # artifact-id sha256 output
+            curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+              --config - --output "$work/$3" \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/artifacts/$1/zip" \
+              <<<"header = \"Authorization: Bearer $GH_TOKEN\""
+            echo "$2  $work/$3" | sha256sum --check --strict
+          }
+          fetch "$MACOS_ID" "$MACOS_SHA256" macos-artifact.zip
+          fetch "$WINDOWS_ID" "$WINDOWS_SHA256" windows-artifact.zip
+          package="Tono-$VERSION-build$MACOS_BUILD-arm64.zip"
+          test "$(unzip -Z1 "$work/macos-artifact.zip")" = "$package"
+          installer=$(unzip -Z1 "$work/windows-artifact.zip" | grep -E '^[A-Za-z0-9._-]+-setup\.exe$')
+          test "$(printf '%s\n' "$installer" | wc -l)" -eq 1
+          unzip -q "$work/macos-artifact.zip" "$package" -d "$work/macos"
+          unzip -q "$work/windows-artifact.zip" "$installer" -d "$work/windows"
+          {
+            echo "MACOS_PACKAGE=$work/macos/$package"
+            echo "WINDOWS_PACKAGE=$work/windows/$installer"
+          } >> "$GITHUB_ENV"
+
+      - name: Verify both signatures and package digests, then write the bundle
+        env:
+          MANIFEST: ${{ needs.assemble.outputs.manifest }}
+          MANIFEST_SHA256: ${{ needs.assemble.outputs.manifest_sha256 }}
+          MACOS_SIGNATURE: ${{ needs.sign-macos.outputs.signature }}
+          WINDOWS_SIGNATURE: ${{ needs.sign-windows.outputs.signature }}
+          MACOS_PUBLIC_KEY: ${{ needs.guard.outputs.macos_public_key }}
+          TONO_UPDATER_PUBLIC_KEY: ${{ vars.TONO_UPDATER_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          signed=$RUNNER_TEMP/signed
+          mkdir "$signed"
+          printf '%s' "$MANIFEST" | base64 --decode > "$signed/manifest.json"
+          echo "$MANIFEST_SHA256  $signed/manifest.json" | sha256sum --check --strict
+          printf '%s' "$MACOS_SIGNATURE" > "$signed/manifest.macos-arm64.sig"
+          printf '%s' "$WINDOWS_SIGNATURE" > "$signed/manifest.windows-x86_64.sig"
+          # Public keys the native code pins: the Helper constant at the source SHA
+          # and the updater key compiled into tono-service.exe (checked above).
+          printf '%s' "$MACOS_PUBLIC_KEY" > "$signed/macos-update-public-key.txt"
+          printf '%s' "$TONO_UPDATER_PUBLIC_KEY" > "$signed/windows-update-public-key.txt"
+          node tooling/scripts/desktop-update-v1.mjs bundle \
+            --manifest "$signed/manifest.json" \
+            --macos-artifact "$MACOS_PACKAGE" --windows-artifact "$WINDOWS_PACKAGE" \
+            --macos-signature "$signed/manifest.macos-arm64.sig" \
+            --windows-signature "$signed/manifest.windows-x86_64.sig" \
+            --macos-public-key "$signed/macos-update-public-key.txt" \
+            --windows-public-key "$signed/windows-update-public-key.txt" \
+            --output "$RUNNER_TEMP/desktop-update-bundle"
+          test -f "$RUNNER_TEMP/desktop-update-bundle/desktop/v1/$MANIFEST_SHA256/manifest.json"
+
+      - name: Record what was signed and from where
+        env:
+          MACOS_RUN_ID: ${{ inputs.macos_run_id }}
+          WINDOWS_RUN_ID: ${{ inputs.windows_run_id }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SEQUENCE: ${{ inputs.release_sequence }}
+          VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel }}
+          RELEASE_ID: ${{ needs.guard.outputs.release_id }}
+          MANIFEST_SHA256: ${{ needs.assemble.outputs.manifest_sha256 }}
+          MACOS_BUILD: ${{ needs.guard.outputs.macos_build }}
+          MACOS_ID: ${{ needs.guard.outputs.macos_package_artifact_id }}
+          MACOS_SHA256: ${{ needs.guard.outputs.macos_package_sha256 }}
+          PROOF_ID: ${{ needs.guard.outputs.macos_proof_artifact_id }}
+          PROOF_SHA256: ${{ needs.guard.outputs.macos_proof_sha256 }}
+          WINDOWS_ID: ${{ needs.guard.outputs.windows_payload_artifact_id }}
+          WINDOWS_SHA256: ${{ needs.guard.outputs.windows_payload_sha256 }}
+        run: |
+          set -euo pipefail
+          out=$RUNNER_TEMP/desktop-update-bundle
+          files=$(cd "$out/desktop/v1/$MANIFEST_SHA256" && for name in *; do
+            jq -n --arg name "$name" --arg sha256 "$(sha256sum "$name" | cut -d' ' -f1)" \
+              --argjson size "$(stat -c %s "$name")" '{name: $name, sha256: $sha256, size: $size}'
+          done | jq -s .)
+          jq -n --argjson files "$files" \
+            --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg sha "$GITHUB_SHA" --arg ref "$GITHUB_REF" \
+            --arg source "$SOURCE_SHA" --arg sequence "$SEQUENCE" --arg version "$VERSION" --arg channel "$CHANNEL" \
+            --arg releaseId "$RELEASE_ID" --arg manifest "$MANIFEST_SHA256" --arg build "$MACOS_BUILD" \
+            --arg macRun "$MACOS_RUN_ID" --arg macId "$MACOS_ID" --arg macSha "$MACOS_SHA256" \
+            --arg proofId "$PROOF_ID" --arg proofSha "$PROOF_SHA256" \
+            --arg winRun "$WINDOWS_RUN_ID" --arg winId "$WINDOWS_ID" --arg winSha "$WINDOWS_SHA256" '{
+              signRun: {id: $run, attempt: $attempt, sha: $sha, ref: $ref},
+              source: $source, releaseSequence: ($sequence | tonumber), appVersion: $version, channel: $channel,
+              releaseId: $releaseId, manifestSha256: $manifest,
+              producers: {
+                macos: {run: $macRun, build: $build, packageArtifact: {id: $macId, sha256: $macSha},
+                        proofArtifact: {id: $proofId, sha256: $proofSha}},
+                windows: {run: $winRun, payloadArtifact: {id: $winId, sha256: $winSha}}},
+              immutableFiles: $files, published: false}' > "$out/signing-record.json"
+          {
+            echo "### Signed desktop update bundle (not published)"
+            echo
+            echo "Release \`$RELEASE_ID\`, manifest \`$MANIFEST_SHA256\`."
+            echo
+            echo "| desktop/v1/$MANIFEST_SHA256/ | sha256 | bytes |"
+            echo "|---|---|---|"
+            jq -r '.immutableFiles[] | "| \(.name) | `\(.sha256)` | \(.size) |"' "$out/signing-record.json"
+            echo
+            echo "Uploading these files and moving \`desktop/v1/latest\` is a separate, owner-authorized step."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ${{ needs.guard.outputs.bundle_name }}
+          path: ${{ runner.temp }}/desktop-update-bundle/
+          if-no-files-found: error
+          retention-days: 30
