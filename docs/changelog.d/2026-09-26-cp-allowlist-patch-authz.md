@@ -1,7 +1,7 @@
 ## 2026-09-26 · 控制面：ops PATCH signup-allowlist/{id} 补角色门
 - 归属：ops 计划（[docs/ops/plan-2026-09-11.md](../ops/plan-2026-09-11.md)），非发布门；`services/control-plane` ops 路由 `src/ops/router.ts`。
 - 来源：基线 origin/main `3470dd68`；红分支 `wip/cp-allowlist-patch-authz-20260926-red`（`0672b51b`），修复分支
-  `fix/cp-allowlist-patch-authz-20260926`；未合 main。
+  `fix/cp-allowlist-patch-authz-20260926`，[#646](https://github.com/raydocs/tono/pull/646)；未合 main。
 - 缺陷修复：发现 H4-F3 的 signup-allowlist 写一项。同一路径的 DELETE 要求 `customers.write`，PATCH `signup-allowlist/{id}`
   却不查角色，配置了 OPS_ROLES 的 viewer 也能改白名单条目。改后 PATCH 与 DELETE 一样先 `requireCan('customers.write', role)`，
   无权返回 403 `ROLE_FORBIDDEN`。未配置 OPS_ROLES 时所有人仍按 owner 处理，行为不变。
