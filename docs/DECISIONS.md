@@ -16,6 +16,27 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Applied in: PR / commit / command
 ```
 
+## 2026-09-26 · Does 0.0.74 wait for the G3 protected-update device test?
+
+- Status: owner
+- Chosen: no. G3 (protected v1 update: success + interrupted rollback) moves to the 0.0.75
+  cycle, where the installed 0.0.74 is the bootstrap and 0.0.75 the update target. 0.0.74 ships
+  after the owner's G1 + G2 device round on ONE package per platform (release sequence 7411,
+  built from one frozen source). Rejected: the three-package kit (bootstrap / failure target /
+  success target) and the signed v1 pointer steps for this release.
+- Why: owner, 2026-09-26. Customers uninstall and install 0.0.74 by hand, so no customer takes
+  the v1 update path in this release; the first real v1 update is 0.0.74 → 0.0.75. Cost: a
+  defect in 0.0.74's update path would surface only then, and customers would reinstall by hand
+  again. The SHIP_PLAN §6 G3 lines stay unticked until the 0.0.75 round (agents never edit them).
+- Supersedes for 0.0.74: "May an agent deploy and publish?" (2026-09-24) — its publish gate
+  needs G1 and G2 only for this release; "May the G3 test kit use the production v1 update
+  pointer before G4?" and "May the agent approve the `windows-release` environment for
+  test-kit signing?" — no kit this release (the uploaded 7402/7403 objects stay immutable and
+  unreferenced; `desktop/v1/latest` stays unset; release-build approvals still follow
+  RELEASE_LINES); the G4.2 entry — G4 publishes the owner-accepted 7411 packages; the SHIP_PLAN §6
+  macOS Sparkle line entry — that line is part of G3 and moves to 0.0.75 with it.
+  AGENTS.md, SHIP_PLAN and RELEASE_LINES carry the 0.0.74 exception next to each G1–G3 gate.
+
 ## 2026-09-26 · Which version is the customer release?
 
 - Status: owner
