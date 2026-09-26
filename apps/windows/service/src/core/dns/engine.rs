@@ -174,11 +174,18 @@ fn delete_value(subkey: &str, value: &str) -> Result<()> {
 }
 
 fn enum_subkeys(subkey: &str) -> Result<Vec<String>> {
+    #[cfg(test)]
+    if let Some(names) = test_io::with(|io| io.subkeys(subkey)) {
+        return Ok(names);
+    }
     let Some(key) = RegKey::open(subkey, false)? else {
         return Ok(Vec::new());
     };
     let mut names = Vec::new();
-    for index in 0_u32..64 {
+    // No upper bound: `Parameters\Interfaces` routinely holds more than 64 GUIDs on Hyper-V /
+    // WSL / Docker machines, and the corrupt-snapshot recovery treats this list as the complete
+    // registry record. The loop ends on ERROR_NO_MORE_ITEMS or fails on any other status.
+    for index in 0_u32.. {
         let mut buf = [0_u16; 256];
         let mut len = buf.len() as u32;
         // SAFETY: `buf` is the name out-buffer; `len` is its capacity in characters.
@@ -538,6 +545,25 @@ pub(super) fn collect_adapters() -> Result<Vec<AdapterDnsSnapshot>> {
         .iter()
         .map(|adapter| read_adapter(&adapter.guid, Some(adapter.luid)))
         .collect()
+}
+
+/// Every interface subkey in both `Parameters\Interfaces` key spaces — the registry's own
+/// record, which `active_adapters` deliberately narrows to live adapters but which outlives
+/// them: disabled, unplugged and removed interfaces keep their last written DNS values. The
+/// corrupt-snapshot recovery needs exactly this longer memory, because a TUN endpoint left on
+/// an inactive adapter is invisible to [`collect_adapters`] and re-enters the next enable as a
+/// poisoned "original" the moment the adapter comes back. Reads only; healing stays a decision
+/// for the facade.
+pub(super) fn collect_interface_key_adapters() -> Result<Vec<AdapterDnsSnapshot>> {
+    let mut guids: Vec<String> = Vec::new();
+    for root in [TCPIP4_INTERFACES, TCPIP6_INTERFACES] {
+        for guid in enum_subkeys(root)? {
+            if !guids.iter().any(|known| known.eq_ignore_ascii_case(&guid)) {
+                guids.push(guid);
+            }
+        }
+    }
+    guids.iter().map(|guid| read_adapter(guid, None)).collect()
 }
 
 /// Per-family inputs for native protected apply or legacy apply/restore. The latter batches
@@ -978,8 +1004,13 @@ fn key_exists(subkey: &str) -> Result<bool> {
 /// snapshot by exact string — while `active` only supplies the live interface indices.
 fn apply_protected(guid: &str, active: &ActiveAdapter) -> Result<LiveApplyEntry> {
     if key_exists(&v4_key(guid))? {
-        write_sz(&v4_key(guid), NAME_SERVER, super::PROTECTED_DNS_V4)?;
+        // `ProfileNameServer` first: an apply stopped between these two writes must never leave
+        // the TUN address in IPv4 `NameServer` alone, which is the WinTUN interface key's own
+        // shape and is excluded from the corrupt-snapshot recovery's evidence
+        // (`is_inactive_tunnel_interface_key`). Stopped here, the adapter keeps either its
+        // untouched originals or a `ProfileNameServer` that keeps it in that evidence.
         write_sz(&v4_key(guid), PROFILE_NAME_SERVER, super::PROTECTED_DNS_V4)?;
+        write_sz(&v4_key(guid), NAME_SERVER, super::PROTECTED_DNS_V4)?;
     }
     if key_exists(&v6_key(guid))? {
         // Empty, not `::1`: an adapter pointed at `::1` has a configured IPv6 resolver that

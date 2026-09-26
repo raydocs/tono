@@ -53,6 +53,18 @@ impl Machine {
             .cloned()
     }
 
+    /// The fixture registry is a flat key map, so enumeration is a path split: the direct
+    /// children of `root` are the next path segment of every stored key below it.
+    pub fn subkeys(&self, root: &str) -> Vec<String> {
+        let prefix = format!("{root}\\");
+        self.keys
+            .keys()
+            .filter_map(|key| key.strip_prefix(&prefix))
+            .filter(|rest| !rest.contains('\\'))
+            .map(str::to_owned)
+            .collect()
+    }
+
     pub fn write(&mut self, key: &str, value: &str, data: &str) -> Result<()> {
         // Inspect the actual durable file at the mutation boundary, not a supplied expectation.
         self.before_write.push(
