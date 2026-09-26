@@ -569,6 +569,12 @@ const DIRECTORY_WRITE_CLASS_RIGHTS: u32 = 0x0000_0002
     | 0x1000_0000
     | 0x4000_0000;
 
+/// Rights on a parent that let the holder delete, rename or re-permission an
+/// existing child it cannot write itself: FILE_DELETE_CHILD, WRITE_DAC,
+/// WRITE_OWNER and GENERIC_ALL. GENERIC_WRITE maps to FILE_GENERIC_WRITE, which
+/// has no delete-child right; creating folders only adds new names.
+const CHILD_REPLACE_RIGHTS: u32 = 0x0000_0040 | 0x0004_0000 | 0x0008_0000 | 0x1000_0000;
+
 /// Owner and access-allowed ACEs of one directory, as string SIDs.
 #[cfg_attr(not(windows), allow(dead_code))]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -585,6 +591,18 @@ impl DirectorySecurity {
         is_admin_only_writer(&self.owner_sid)
             && self.allowed_aces.iter().all(|(sid, mask)| {
                 mask & DIRECTORY_WRITE_CLASS_RIGHTS == 0
+                    || is_admin_only_writer(sid)
+                    || sid.as_str() == CREATOR_OWNER_SID
+            })
+    }
+
+    /// For the drive root above `X:\Program Files`: it may let anyone create new
+    /// folders, but only [`ADMIN_ONLY_WRITER_SIDS`] may own it or hold a right
+    /// that replaces an existing child.
+    fn protects_existing_children(&self) -> bool {
+        is_admin_only_writer(&self.owner_sid)
+            && self.allowed_aces.iter().all(|(sid, mask)| {
+                mask & CHILD_REPLACE_RIGHTS == 0
                     || is_admin_only_writer(sid)
                     || sid.as_str() == CREATOR_OWNER_SID
             })
@@ -607,7 +625,8 @@ trait DirectorySecuritySource {
 
 /// `X:\Program Files` and `X:\Program Files (x86)`: the walk stops here after
 /// checking it, because the drive root above lets Authenticated Users create
-/// folders by default.
+/// folders by default. The root is then held only to
+/// [`DirectorySecurity::protects_existing_children`].
 #[cfg_attr(not(windows), allow(dead_code))]
 fn is_known_system_root(directory: &str) -> bool {
     let Some((drive, rest)) = directory.split_once('\\') else {
@@ -620,7 +639,8 @@ fn is_known_system_root(directory: &str) -> bool {
 
 /// True only when `directory` and each ancestor up to a known system root (or
 /// the drive root) are owned by, and grant write-class rights only to,
-/// Administrators, SYSTEM and TrustedInstaller. A path that is not a plain
+/// Administrators, SYSTEM and TrustedInstaller. Above a known system root, the
+/// drive root must also protect existing children. A path that is not a plain
 /// drive path, or any error reading a DACL, answers false.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn is_admin_only_install_chain(directory: &str, source: &impl DirectorySecuritySource) -> bool {
@@ -649,8 +669,15 @@ fn is_admin_only_install_chain(directory: &str, source: &impl DirectorySecurityS
             Ok(security) if security.is_admin_only_writable() => {}
             _ => return false,
         }
-        if drive_root || is_known_system_root(current) {
+        if drive_root {
             return true;
+        }
+        if is_known_system_root(current) {
+            let root = format!("{}\\", &current[..2]);
+            return matches!(
+                source.read_directory_security(&root),
+                Ok(security) if security.protects_existing_children()
+            );
         }
         let Some(parent) = parent_directory(current) else {
             return false;
@@ -1549,6 +1576,62 @@ mod tests {
             regex_for_verified_exe_on_admin_only_tree(exe, ReviewedDirectProduct::WeChat, &unreadable)
                 .unwrap();
         assert!(exact.ends_with('$'), "unreadable DACL must be exact: {exact}");
+    }
+
+    #[test]
+    fn program_files_prefix_requires_a_drive_root_that_cannot_replace_it() {
+        struct RootAcl(Result<DirectorySecurity, String>);
+        impl DirectorySecuritySource for RootAcl {
+            fn read_directory_security(&self, directory: &str) -> Result<DirectorySecurity, String> {
+                if directory.eq_ignore_ascii_case(r"C:\") {
+                    return self.0.clone();
+                }
+                Ok(DirectorySecurity {
+                    owner_sid: "S-1-5-18".to_string(),
+                    allowed_aces: vec![
+                        ("S-1-5-18".to_string(), 0x001f_01ff),
+                        ("S-1-5-32-544".to_string(), 0x001f_01ff),
+                        ("S-1-5-32-545".to_string(), 0x0012_00a9),
+                    ],
+                })
+            }
+        }
+        // Default `C:\`: Authenticated Users may create folders and hold an inherit-only
+        // DELETE | GENERIC_WRITE | GENERIC_READ | GENERIC_EXECUTE ACE. Neither lets them
+        // replace the existing Program Files.
+        fn root(owner: &str, extra: Option<(&str, u32)>) -> RootAcl {
+            let mut allowed_aces = vec![
+                ("S-1-5-18".to_string(), 0x001f_01ff),
+                ("S-1-5-32-544".to_string(), 0x001f_01ff),
+                ("S-1-3-0".to_string(), 0x1000_0000),
+                ("S-1-5-32-545".to_string(), 0x0012_00a9),
+                ("S-1-5-11".to_string(), 0x0000_0004),
+                ("S-1-5-11".to_string(), 0xe001_0000),
+            ];
+            allowed_aces.extend(extra.map(|(sid, mask)| (sid.to_string(), mask)));
+            RootAcl(Ok(DirectorySecurity {
+                owner_sid: owner.to_string(),
+                allowed_aces,
+            }))
+        }
+        let install = r"C:\Program Files\Tencent\WeChat";
+        assert!(is_admin_only_install_chain(install, &root("S-1-5-18", None)));
+        // FILE_DELETE_CHILD, WRITE_DAC, WRITE_OWNER and GENERIC_ALL on the root can each
+        // delete, rename or re-permission Program Files.
+        for mask in [0x0000_0040, 0x0004_0000, 0x0008_0000, 0x1000_0000] {
+            assert!(
+                !is_admin_only_install_chain(install, &root("S-1-5-18", Some(("S-1-5-11", mask)))),
+                "root grants {mask:#x} to Authenticated Users"
+            );
+        }
+        assert!(
+            !is_admin_only_install_chain(install, &root("S-1-5-21-1-2-3-1001", None)),
+            "a user owns the drive root"
+        );
+        assert!(
+            !is_admin_only_install_chain(install, &RootAcl(Err("access denied".to_string()))),
+            "unreadable drive root"
+        );
     }
 
     #[test]
