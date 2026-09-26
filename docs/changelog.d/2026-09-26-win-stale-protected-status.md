@@ -24,3 +24,13 @@
   「App handle not initialized」；修复分支改为传 `&TonoInner`（与 `close_account_with` 的 `emit` 相同），测试不再调用 `status_of`。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：未实机复现两处交错；Service 快照本身仍分两次采样（未改协议），拒绝框靠两次读数的代际比较收窄；`/status` 读不到时仍为「未确认」。
+- 续记 2026-09-26（审查 671f72f1 codex:F1，minor，停止规则下的一轮修复）：
+  - 缺陷修复：原生更新的 `UpdateRequest::Disconnect` 在 `update::request` 里调用 `wfp::release()`，但 `UpdateTransaction`
+    处理器只持生命周期锁、不注册 `OperationGuard`，这次释放既不出现在 `active_operation` 里，也不推进 `snapshot_generation`，
+    两次读数检查在它之后仍可能判 `Held`。现在处理器对 Disconnect 在整个 `update::request` 期间注册 `ReleaseKillSwitch` 标记
+    （`server/handlers.rs` 的 `update_operation`）；App 看到它归为 `ReleaseMayComplete`，它的开始和结束都推进代际。没有待处理更新的
+    Disconnect 什么都不释放，那一瞬间也显示为释放，只会让文案变弱。`update.rs` 与协议未改。
+  - 工程与测试：新增 `#[test]` `update_disconnect_is_published_as_a_kill_switch_release`（`server/handlers.rs`，`#[serial]`）。
+    红分支 `wip/win-stale-protected-red2`（`41fd56b4`，基于 `525e19a8`）只含测试和返回 `None` 的骨架（即现状），修复在其上快进。
+  - 验证：红分支与修复分支的 run 编号与结果记在 #656。
+  - 剩余限制：测试直接调用 `update_operation`，处理器里的接线由审查确认，没有端到端测试。

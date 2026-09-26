@@ -6,9 +6,14 @@ use crate::core::windows_kill_switch;
 use crate::core::structure::is_protected_startup_replacement_candidate;
 use tracing::{info, trace, warn};
 
-/// The operation marker an update transaction publishes in `/status` while it runs.
-fn update_operation(_request: &crate::update_wire::UpdateRequest) -> Option<OperationGuard> {
-    None
+/// The operation marker an update transaction publishes in `/status` while it runs. A Disconnect
+/// stops the Core and calls `wfp::release()` inside `update::request`, so it is published as the
+/// kill-switch release it is: readers see it running, and its start and end advance
+/// `snapshot_generation` (F520-1). A Disconnect with nothing pending releases nothing; showing
+/// it as a release for that moment only weakens what the App may promise.
+fn update_operation(request: &crate::update_wire::UpdateRequest) -> Option<OperationGuard> {
+    matches!(request, crate::update_wire::UpdateRequest::Disconnect)
+        .then(|| OperationGuard::begin(ServiceOperationKind::ReleaseKillSwitch, IPC_HANDLER_TIMEOUT))
 }
 
 pub(super) fn create_ipc_router() -> Result<Router> {
