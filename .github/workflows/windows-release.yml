@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       update_release_sequence:
-        description: Optional v1 installed floor; must match the paired macOS build (positive safe integer)
+        description: Required v1 installed floor; must match the paired macOS build (positive safe integer)
         required: false
         type: string
 
@@ -39,10 +39,16 @@ jobs:
       - name: Refuse a ref that is not the release line
         env:
           EXPECTED: refs/heads/release/windows
+          UPDATE_RELEASE_SEQUENCE: ${{ inputs.update_release_sequence || '' }}
         run: |
           set -euo pipefail
           if [ "$GITHUB_REF" != "$EXPECTED" ]; then
             echo "::error::Building a Windows release must run from $EXPECTED, but this run is on $GITHUB_REF. Nothing was done."
+            exit 1
+          fi
+          # Without a floor the Service has no installed_floor() and refuses every v1 update.
+          if [ -z "$UPDATE_RELEASE_SEQUENCE" ]; then
+            echo "::error::A Windows release build needs update_release_sequence (the v1 installed floor, same as the paired macOS build). Nothing was done."
             exit 1
           fi
           echo "running from $GITHUB_REF"

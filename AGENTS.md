@@ -2,7 +2,7 @@
 
 Cloud-managed VPN (product identity is Tono, not Clash Verge or LiquidClash): clients pull a per-device exit catalog and a signed traffic policy, then dial VLESS
 Reality nodes. Maps: [docs/README.md](docs/README.md), [docs/architecture.md](docs/architecture.md) (deployables, code map, do-not list).
-[docs/SHIP_PLAN.md](docs/SHIP_PLAN.md) owns customer 0.0.73 (G1–G4); [docs/ops/plan-2026-09-11.md](docs/ops/plan-2026-09-11.md) owns ops work (not a
+[docs/SHIP_PLAN.md](docs/SHIP_PLAN.md) owns customer 0.0.74 (G1–G4); [docs/ops/plan-2026-09-11.md](docs/ops/plan-2026-09-11.md) owns ops work (not a
 ship gate). Every PR names one of them; during the G4 freeze only SHIP_PLAN §2 item 10 fixes merge.
 
 ## Invariants (never loosen)

@@ -48,24 +48,24 @@ on:
         default: false
         type: boolean
       update_release_sequence:
-        description: Optional v1 installed floor; must match the paired Windows build (positive safe integer)
+        description: v1 installed floor, required unless candidate_only; must match the paired Windows build (positive safe integer)
         required: false
         type: string
-  push:
-    tags:
-      - tono-macos-*-build*
+  # No tag-push trigger: a tag build has no update_release_sequence input, so its bytes
+  # carry no installed floor and every later v1 update would refuse them. Creating the
+  # tono-macos-<version>-build<N> release at publish time must not start a build.
 
 permissions:
   contents: read
 
 # Advance the reviewed candidate contract together; never admit arbitrary PR refs.
 env:
-  CANDIDATE_REF: refs/heads/stability/desktop-0.0.73-20260922
-  CANDIDATE_VERSION: '0.0.73'
-  CANDIDATE_BUILD: '73'
+  CANDIDATE_REF: refs/heads/stability/desktop-0.0.74-20260926
+  CANDIDATE_VERSION: '0.0.74'
+  CANDIDATE_BUILD: '74'
 
 concurrency:
-  group: macos-release-${{ inputs.version || github.ref_name }}
+  group: macos-release-${{ inputs.version }}
   cancel-in-progress: false
 
 jobs:
@@ -84,6 +84,7 @@ jobs:
       - name: Refuse a ref that is not the release line
         env:
           CANDIDATE_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_only }}
+          UPDATE_RELEASE_SEQUENCE: ${{ inputs.update_release_sequence || '' }}
         run: |
           set -euo pipefail
           if [ "$CANDIDATE_ONLY" = true ]; then
@@ -94,16 +95,19 @@ jobs:
             echo "candidate only: no appcast job or release publication"
             exit 0
           fi
-          if [ "$GITHUB_REF_TYPE" != tag ] \
-            && [ "$GITHUB_REF" != refs/heads/release/macos ]; then
-            echo "::error::A macOS release must run from refs/heads/release/macos or a tono-macos-*-build* tag, but this run is on $GITHUB_REF. Nothing was built."
+          if [ "$GITHUB_REF" != refs/heads/release/macos ]; then
+            echo "::error::A macOS release must run from refs/heads/release/macos, but this run is on $GITHUB_REF. Nothing was built."
+            exit 1
+          fi
+          if [ -z "$UPDATE_RELEASE_SEQUENCE" ]; then
+            echo "::error::A macOS release build needs update_release_sequence (the v1 installed floor, same as the paired Windows build). Nothing was built."
             exit 1
           fi
           echo "running from $GITHUB_REF"
 
   build:
-    # Manual releases belong to the macOS release line. A tag is accepted only
-    # after the ancestry check below proves it names a commit on that line.
+    # Manual releases belong to the macOS release line; the ancestry check below
+    # proves the dispatched commit is on that line.
     # branch waits for qualify, which already uploads the verified immutable Core.
     # Consume those same bytes rather than conflicting with its artifact name.
     needs: branch
@@ -210,21 +214,7 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
           set -eu
-          if [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ]; then
-            short_version=$INPUT_VERSION
-            expected_build=
-          else
-            case "$GITHUB_REF_NAME" in
-              tono-macos-*-build*) ;;
-              *)
-                echo "FATAL: tag $GITHUB_REF_NAME is not tono-macos-<short-version>-build<build>." >&2
-                exit 1
-                ;;
-            esac
-            short_version=${GITHUB_REF_NAME#tono-macos-}
-            short_version=${short_version%-build*}
-            expected_build=${GITHUB_REF_NAME##*-build}
-          fi
+          short_version=$INPUT_VERSION
           case "$short_version" in
             *[!0-9.]*|''|.*|*.)
               echo "FATAL: $short_version is not a dotted numeric CFBundleShortVersionString." >&2
@@ -251,10 +241,6 @@ jobs:
               exit 1
               ;;
           esac
-          if [ -n "$expected_build" ] && [ "$expected_build" != "$project_build" ]; then
-            echo "FATAL: tag $GITHUB_REF_NAME claims build $expected_build but the project builds $project_build." >&2
-            exit 1
-          fi
           artifact_name="Tono-$short_version-build$project_build-arm64"
           tag="tono-macos-$short_version-build$project_build"
           {

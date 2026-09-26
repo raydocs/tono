@@ -32,12 +32,14 @@ format and the release script passes and verifies the exact source commit.
 
 ## Current source and published state
 
-Source versions in this tree are **macOS 0.0.73 (build 73)** and **Windows
-0.0.73**. That is not a claim that either candidate is notarised, signed for
+Source versions in this tree are **macOS 0.0.74 (build 74)** and **Windows
+0.0.74**. That is not a claim that either candidate is notarised, signed for
 customers, or present on a live update feed. Publication and channel
 promotion are separate gated operations; see
-`apps/macos/release-notes/build73.md` and
-`apps/windows/release-notes/0.0.73.md`.
+`apps/macos/release-notes/build74.md` and
+`apps/windows/release-notes/0.0.74.md`. The customer release is 0.0.74 because
+`tono-macos-0.0.73-build73` already points at older source (`bdc75a4e`) and
+`v0.0.73` holds an older draft; neither is moved or reused.
 
 In-tree customer feeds in this checkout (what a control-plane deploy of
 *this* commit would serve) are Sparkle `public/appcast.xml` at **0.0.67**
@@ -47,7 +49,7 @@ newer published installer from the source version.
 The first customer publication after 0.0.67 / 0.0.34 is gated by
 [SHIP_PLAN.md](SHIP_PLAN.md): Connected-means-usable, a next step on
 connect failure, a proven protected update journal, then feed promotion
-as **0.0.73**. Sparkle and `windows-updates` advance only after the owner
+as **0.0.74**. Sparkle and `windows-updates` advance only after the owner
 has recorded G1–G3 evidence in SHIP_PLAN §6; agents then run G4 per
 [AGENTS.md](../AGENTS.md). GitHub `v0.0.72` / `tono-macos-0.0.72-build72`
 tags are not those feeds.
@@ -118,15 +120,23 @@ evidence in SHIP_PLAN §6). Record each step's run URL, SHA and artifact hashes 
   promotion) → G4.4 small group. Checking the customer feed after G4.3 is a follow-up
   check, not a substitute for G4.2.
 
+Both platforms publish the accepted bytes; nothing is rebuilt at publish time. Release
+builds are dispatched with `update_release_sequence` (both workflows refuse an empty
+value, because bytes without a v1 installed floor refuse every later v1 update). For
+0.0.74 the tags are `tono-macos-0.0.74-build74` and `v0.0.74`.
+
 **macOS.** This composite is documented in `macos-release.yml`'s step summary and
 has not yet run end to end.
 
-1. Tag `tono-macos-<version>-build<build>` on pushed `release/macos`.
-   `macos-release.yml` signs and notarises, and uploads the zip plus
-   `macos-release-proof-<sha>` (holding `enclosure.sig`) as Actions artifacts that
-   expire after 7 days.
-2. `gh release create <tag> --prerelease --target <sha> <zip>`; confirm it is not a
-   draft and that `gh api repos/raydocs/tono/commits/<tag> --jq .sha` is the built SHA.
+1. The accepted candidate is a `macos-release.yml` run dispatched on pushed
+   `release/macos` with `version` and `update_release_sequence`. It signs and
+   notarises, and uploads the zip plus `macos-release-proof-<sha>` (holding
+   `enclosure.sig`) as Actions artifacts that expire after 7 days; keep copies. The
+   workflow has no tag trigger, so creating the tag below starts no build.
+2. Tag only now: `gh release create tono-macos-<version>-build<build> --prerelease
+   --target <sha> <accepted zip>`, after checking the zip's SHA-256 against the owner's
+   evidence. Confirm it is not a draft and that
+   `gh api repos/raydocs/tono/commits/<tag> --jq .sha` is the built SHA.
 3. `node tooling/scripts/upload-release-asset.mjs --tag <tag>`, run from the root of
    the checkout bound to the `tono` wrangler profile.
 4. `node tooling/scripts/publish-macos-appcast.mjs` with the argv of the workflow's
@@ -138,15 +148,20 @@ has not yet run end to end.
 
 The proven path is `tooling/scripts/release-macos.sh --version <v> --build <n>
 --publish --lifecycle-token <token>`, which does steps 2–5 except the deploy. It
-builds and packages natively, so it runs on the Mac Studio, never the MacBook. The
+builds and packages natively, so it runs on the Mac Studio, never the MacBook. Its
+bytes are a new candidate, so it does not publish an accepted workflow candidate; use
+it only where the candidate identity rule above allows a rebuild. The
 token comes from `sudo tooling/scripts/test-helper-install-lifecycle.sh`, which is
 the owner's step.
 
 **Windows.**
 
-1. `windows-release.yml` on `release/windows` builds the signed draft; its job waits
-   on environment `windows-release`.
-2. `gh release edit v<version> --draft=false`, then
+1. `windows-release.yml` on `release/windows`, dispatched with `version` and
+   `update_release_sequence`, builds the signed draft `v<version>`; its job waits on
+   environment `windows-release`. Each run for a version overwrites that draft, so the
+   accepted run must be the last one for its version.
+2. Check the draft's installer and `.sig` hashes against the owner's evidence, then
+   `gh release edit v<version> --draft=false`, then
    `node tooling/scripts/upload-release-asset.mjs --tag v<version>`.
 3. `windows-update-promote.yml` validates the bytes, advances `windows-updates` and
    commits `services/control-plane/public/windows/latest.json` to `main`; its job
