@@ -1021,9 +1021,11 @@ impl CoordinatedBinaryReplacement {
         let backup = path_with_suffix(target, ROLLBACK_SUFFIX);
         let restore = path_with_suffix(target, RESTORE_SUFFIX);
         let publish_scratch = path_with_suffix(target, PUBLISH_SUFFIX);
-        ensure_update_scratch_absent(&backup)?;
-        ensure_update_scratch_absent(&restore)?;
-        ensure_update_scratch_absent(&publish_scratch)?;
+        // The native update executor has no discovery pass: a retired rollback leaves copies
+        // equal to the restored target, and only those are cleared. Any other bytes still refuse.
+        adopt_or_refuse_update_scratch(target, &backup)?;
+        adopt_or_refuse_update_scratch(target, &restore)?;
+        adopt_or_refuse_update_scratch(target, &publish_scratch)?;
         let changed = old_digest != measured_new_digest;
         if changed {
             copy_ordinary_file_exclusive(target, &backup)?;
