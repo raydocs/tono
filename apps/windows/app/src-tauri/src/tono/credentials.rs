@@ -90,6 +90,30 @@ pub(crate) fn data_dir_owns_vault_session(
     true
 }
 
+/// Red skeleton: today's outcome for a data directory without the local marker. It adopts
+/// whenever the evidence allows, whether or not the local marker was written.
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VaultSessionOwnership {
+    NotOwned,
+    Owned { rebind: bool },
+    Unrecorded,
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn unmarked_vault_session_ownership(
+    legacy_marker: bool,
+    legacy_roaming_session: bool,
+    account_traces: bool,
+    record_marker: impl FnOnce() -> bool,
+) -> VaultSessionOwnership {
+    if !adopts_unmarked_vault_session(legacy_marker, legacy_roaming_session, account_traces) {
+        return VaultSessionOwnership::NotOwned;
+    }
+    let _ = record_marker();
+    VaultSessionOwnership::Owned { rebind: legacy_roaming_session }
+}
+
 /// Whether a data directory without the local marker adopts the vault session (H11-F2, #409).
 /// Both signals roam, so they only upgrade an installation from before the local marker, once: a
 /// marker an earlier Windows build left in the roaming data directory, or account traces (files
@@ -633,6 +657,21 @@ mod tests {
         assert!(!adopts(false, true, false));
         // A marker an earlier build left in the roaming data directory still answers once.
         assert!(adopts(true, false, false));
+    }
+
+    #[test]
+    fn a_roaming_session_upgrade_is_rebound_only_once_a_marker_vouches_for_it() {
+        use super::{VaultSessionOwnership as Ownership, unmarked_vault_session_ownership as ownership};
+        // Arguments: legacy roaming marker, session stored CRED_PERSIST_ENTERPRISE, account traces,
+        // and the local marker write. The roaming credential is the upgrade's only evidence and the
+        // first token rotation rewrites it local-machine: without the local marker the load answers
+        // nothing, so a retry upgrades again (protection kept) instead of signing the user out.
+        assert_eq!(ownership(false, true, true, || false), Ownership::Unrecorded,
+            "the upgrade adopted a session it could not record");
+        assert_eq!(ownership(false, true, true, || true), Ownership::Owned { rebind: true });
+        // The roaming marker is removed only after the local one is written, so it still answers.
+        assert_eq!(ownership(true, true, false, || false), Ownership::Owned { rebind: true });
+        assert_eq!(ownership(false, false, true, || true), Ownership::NotOwned);
     }
 
     #[test]
