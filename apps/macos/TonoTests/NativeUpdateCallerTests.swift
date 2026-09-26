@@ -33,6 +33,22 @@ final class NativeUpdateCallerTests: XCTestCase {
         XCTAssertEqual(calls, ["private-stage", "suspend", "prepare"])
     }
 
+    func testFailedPreparationWithArmedBarrierReadsAsBlocked() async {
+        // H16-O-F4: after suspension the session reads offline while PF stays armed.
+        let armed = KillSwitchService.isArmed
+        defer { KillSwitchService.isArmed = armed }
+        KillSwitchService.isArmed = true
+        let app = AppState()
+        app.isConnected = false
+        app.isProtectionBlocked = false
+        let missing = FileManager.default.temporaryDirectory.appendingPathComponent("tono-missing-" + UUID().uuidString)
+        do {
+            try await app.installNativeUpdate(manifest: Data(), signature: Data(), package: missing)
+            XCTFail("A missing package must fail before installation")
+        } catch {}
+        XCTAssertTrue(app.isProtectionBlocked, "an armed barrier must not read as Standby")
+    }
+
     func testLostConsumptionAcknowledgementQueriesWithoutSecondExecution() async throws {
         var executions = 0
         var queries = 0

@@ -4,7 +4,7 @@
 - 来源：基线 origin/main `3470dd68`；分支 `docs/findings-status-sync-20260926`。
 - 记录同步：`docs/FINDINGS_LEDGER.md` 中 105 行 `in-PR` 所引 PR 已全部合入 main，改为 `fixed(<该修复落到 main 第一父链上的合并提交>)`（经合并列车进入的记列车合入 main 的提交）；D7、H8-F4 仅部分修复，保持原状态；
   另 8 行（H21-O-F2 #611、H21-O-F5 #604、R604-F1 #609、H21-O-F9 #623、H16-O-F5 #537、H16-C-F2 #538、H17-C-F3 #535、H17-O-F7 #539）
-  由 open/in-PR 改为 fixed 并补 PR 链接。`fixed` 只表示源码进 main，不表示实机验收。未动：H2-F3（#352 仍开）、H19-* 与 OD-0924-* 等无 PR 链接的行。
+  由 open/in-PR 改为 fixed 并补 PR 链接；合入 main 时 H4-F3（#646，4597446a）、H16-O-F3/F4（#649，2ba08b9b）改为 fixed。`fixed` 只表示源码进 main，不表示实机验收。未动：H2-F3（#352 仍开）、H19-* 与 OD-0924-* 等无 PR 链接的行。
 - 合并回归审查：区间 `fb5e8485...3470dd68`（#640、#641、#644），jev-route 双厂商（opus + codex）run `026ef1c5`，PASSED，0 发现。
 - Issue 清理（所有者 2026-09-26 同意按已修关闭，实机验证在候选验收清单跟进，失败则重开）：关闭 #249、#241、#259（#267）、#171（#174）、#181（#184）、
   #273（#276）、#600（#624/#638/#641；TF-opus-7 测试缺口仍在总账 open）；#317 三项勾选，保留到 `TRAFFIC_POLICY_EMBED_REVISION` 开启。

@@ -668,6 +668,28 @@ extension AppState {
     )
 }
 
+    /// A released host starts a genuinely new story; stale failure history
+    /// must not let a single failure in a future session trip the "repeated
+    /// three times" pause. Shared by every path that releases the barrier.
+    func resetReleasedSessionHistory() {
+        lastProtectedFailureSignature = nil
+        consecutiveProtectedFailureCount = 0
+        consecutiveProtectionRepairCount = 0
+        consecutiveProtectedDNSBrokenAudits = 0
+        consecutiveNoNetworkServiceFailures = 0
+        protectedReconnectPausedForUserAction = false
+        protectedReconnectPauseLiftsOnNetworkChange = false
+        isProtectedReconnectScheduled = false
+        protectedReconnectAttempt = 0
+        protectedReconnectNextAttemptAt = nil
+        resumeProtectionAfterWake = false
+        autoConnectRequested = false
+        connectionStartedAt = nil
+        connectionStageStartedAt = nil
+        completedConnectionStages = []
+        lastConnectionFailure = nil
+    }
+
     /// Stops Mihomo/TUN. Kill switch is NOT disarmed here — that only happens on
     /// intentional logout / user "turn off protection" so a crash or health failure
     /// leaves the host fail-closed via Kill Switch.
@@ -748,25 +770,7 @@ extension AppState {
                 // restoration, and PF disarm have all committed.
                 self.isProtectionBlocked = !releaseKillSwitch || protectionMayBeActive
                 if releaseKillSwitch {
-                    // A released host starts a genuinely new story; stale failure
-                    // history must not let a single failure in a future session trip
-                    // the "repeated three times" pause.
-                    self.lastProtectedFailureSignature = nil
-                    self.consecutiveProtectedFailureCount = 0
-                    self.consecutiveProtectionRepairCount = 0
-                    self.consecutiveProtectedDNSBrokenAudits = 0
-                    self.consecutiveNoNetworkServiceFailures = 0
-                    self.protectedReconnectPausedForUserAction = false
-                    self.protectedReconnectPauseLiftsOnNetworkChange = false
-                    self.isProtectedReconnectScheduled = false
-                    self.protectedReconnectAttempt = 0
-                    self.protectedReconnectNextAttemptAt = nil
-                    self.resumeProtectionAfterWake = false
-                    self.autoConnectRequested = false
-                    self.connectionStartedAt = nil
-                    self.connectionStageStartedAt = nil
-                    self.completedConnectionStages = []
-                    self.lastConnectionFailure = nil
+                    self.resetReleasedSessionHistory()
                 }
                 // Connection-scoped observations. `/connections` stops arriving once the
                 // core is gone, so leaving these set would have the next session judge a
