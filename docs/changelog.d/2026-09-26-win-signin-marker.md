@@ -30,3 +30,19 @@
   未运行 cargo，以 PR #642 的 windows-ci 为准。标记步骤的调用位置与撤销路径没有单元测试覆盖。
   剩余限制更新：写入标记之后、会话存入之前进程崩溃，标记留下并为凭据库原有内容作证（与此前「标记写入后异步写库失败或写库前崩溃」同类，本 PR 不能消除）；
   被取代的登录不撤销它新写的标记；撤销时删除失败只记日志。
+- **续记（2026-09-26，#642 续审 ad7be8fc 确认 opus:F1 / codex:F1，同一根因）**：标记只表示「文件存在」，没有绑定到本次登录已存下的会话。
+  `adopt_replacing_with` 在写标记与存会话之间释放锁；新的登录或 `restore_session` 的重试在此间隙提升 `sign_in_generation`，
+  被取代的登录因代次已变保留自己新写的标记，下一次登录又按「文件存在」判成 `Existing`，失败也不撤销，
+  于是一个从未存下会话的登录所写的标记长期为凭据库原有内容作证。现在 `TonoInner.sign_in_marker_pending` 记录写了标记、
+  尚未存下会话的登录代次：写标记（`Created`）时置为本次代次；`adopt_sign_in_response` 在 `client.adopt` 成功后清空；
+  登录未存下会话时，只要标记仍归本次登录（pending 等于本次代次）就撤销，不再看代次是否已变。后来的登录遇到仍待定的标记，
+  不当作本机已有归属，而是重写并接管（`Created`，pending 改为自己的代次），由它存会话或撤销；原登录见 pending 已不是自己则不删。
+  撤销时删除失败则 pending 保留，本进程内的下一次登录仍接管而不当作 `Existing`。登录前已有的真实标记（pending 为空时已存在的文件）
+  仍为 `Existing`，不重写、不删除；拒绝点、防护与上一账户的处理不变。
+  测试：新增 `tono::commands::account::lifecycle_tests::a_superseded_sign_in_leaves_no_marker_vouching_for_the_vault`
+  （隧道启动中，释放期间开始新的登录使 A 被取代，断言下次启动对凭据库的归属判定为 `NotOwned`）；红分支
+  `wip/win-signin-marker-20260926-red2`（`77ec5dcf`，基于 `3b9ad5f7`，仅测试，windows-ci run 36214673497）。
+  「后来的登录接管待定标记」与「存下会话时清空」没有单元测试覆盖。MacBook 未运行 cargo，以 PR #642 的 windows-ci 为准。
+  剩余限制更新：写入标记之后、会话存入之前进程崩溃，标记仍留下并为凭据库原有内容作证（pending 只在内存）；撤销时删除失败，
+  下次启动仍认该标记；登录待定期间若有凭据加载读到该标记（`tono_retry_restore` 或新登录开始时的 `load_credentials`，
+  只在此前读库失败、凭据尚未载入时发生），本进程仍当作本机归属载入库中旧令牌，撤销后下次启动不再认。

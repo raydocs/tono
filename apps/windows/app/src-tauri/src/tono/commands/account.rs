@@ -365,6 +365,8 @@ pub(crate) async fn adopt_sign_in_response(
     // Keep the Tono state lock through adoption: a resend/sign-out cannot invalidate this
     // generation between the last check and the token write.
     client.adopt(auth).await.map_err(|err| err.to_string())?;
+    // The session is stored: the marker now vouches for it, and no failure path removes it.
+    inner.sign_in_marker_pending = None;
     // tono-core has retired the previous identity: its verdicts no longer apply (#582).
     inner.offline.adopt_new_identity();
     inner.challenge_id = None;
@@ -393,7 +395,7 @@ where
     R: FnOnce(Arc<TonoState>) -> RF,
     RF: std::future::Future<Output = Result<(), String>>,
 {
-    let (retire, marker) = {
+    let retire = {
         let mut inner = state.lock().await;
         if inner.sign_in_generation != generation || inner.challenge_id.as_deref() != Some(challenge_id) {
             return Err("sign-in verification was superseded by a newer attempt".to_string());
@@ -401,17 +403,22 @@ where
         // The session marker before anything this sign-in cannot undo (retiring the previous
         // account's connection, dropping its catalog): a marker that cannot be written refuses
         // the sign-in with protection and the previous account untouched.
-        let marker = crate::tono::credentials::record_sign_in_marker(&inner.catalog_dir).map_err(|error| {
+        let pending = inner.sign_in_marker_pending.is_some();
+        let marker = crate::tono::credentials::record_sign_in_marker(&inner.catalog_dir, pending).map_err(|error| {
             logging!(warn, Type::Service, "Tono: {error}");
             error
         })?;
+        if marker == crate::tono::credentials::SignInMarker::Created {
+            // Until this sign-in stores its session or removes the marker, the marker is its own.
+            inner.sign_in_marker_pending = Some(generation);
+        }
         let status = inner.fsm.status();
         let live = status.is_connected || status.is_connecting || status.is_disconnecting;
         if live {
             inner.invalidate_connection(true);
             inner.cancel_server_tests();
         }
-        (live, marker)
+        live
     };
     let released = if retire {
         release(Arc::clone(state)).await.map_err(|error| {
@@ -426,10 +433,13 @@ where
     };
     if adopted.is_err() {
         // No session was stored, so a marker this sign-in created must not vouch for what the
-        // vault already held. Kept once a newer sign-in began: that one may stand on it.
-        let inner = state.lock().await;
-        if inner.sign_in_generation == generation {
-            crate::tono::credentials::undo_sign_in_marker(&inner.catalog_dir, marker);
+        // vault already held, even when a newer sign-in or restore superseded it. Kept only when
+        // a newer sign-in took the marker over: that one stores its session on it or removes it.
+        let mut inner = state.lock().await;
+        if inner.sign_in_marker_pending == Some(generation)
+            && crate::tono::credentials::undo_sign_in_marker(&inner.catalog_dir)
+        {
+            inner.sign_in_marker_pending = None;
         }
     }
     adopted

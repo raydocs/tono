@@ -60,7 +60,8 @@ pub(crate) enum SignInMarker {
     /// This machine already held the local marker. A sign-in replaces the session it vouches for,
     /// not the ownership, so nothing was written and nothing is undone.
     Existing,
-    /// This sign-in wrote the marker; [`undo_sign_in_marker`] removes it if no session is stored.
+    /// This sign-in wrote the marker, or took over one an earlier sign-in wrote without storing its
+    /// session; [`undo_sign_in_marker`] removes it if no session is stored.
     Created,
 }
 
@@ -68,10 +69,12 @@ pub(crate) enum SignInMarker {
 /// does anything it cannot undo (retiring the previous account's connection, dropping its catalog).
 /// Only the local marker vouches for a vault session ([`data_dir_owns_vault_session`]): a session
 /// stored without it is disowned by the next launch, which signs the user out and releases their
-/// protection. A marker that cannot be written therefore refuses the sign-in.
-pub(crate) fn record_sign_in_marker(data_dir: &std::path::Path) -> Result<SignInMarker, String> {
+/// protection. A marker that cannot be written therefore refuses the sign-in. `pending`: the marker
+/// on disk is an earlier sign-in's that has not stored its session, so it is not ownership this
+/// machine held and this sign-in writes it as its own.
+pub(crate) fn record_sign_in_marker(data_dir: &std::path::Path, pending: bool) -> Result<SignInMarker, String> {
     let marker = vault_marker_dir(data_dir).join(VAULT_SESSION_MARKER);
-    sign_in_marker_verdict(marker.exists(), || mark_vault_session_owned(data_dir))
+    sign_in_marker_verdict(marker.exists() && !pending, || mark_vault_session_owned(data_dir))
 }
 
 /// [`record_sign_in_marker`]'s decision: a local marker already held vouches as it is (a roaming
@@ -88,13 +91,16 @@ fn sign_in_marker_verdict(
     })
 }
 
-/// Removes the marker of a sign-in that stored no session, so it cannot vouch for whatever the
-/// vault already held. A marker this machine held before the sign-in stays.
-pub(crate) fn undo_sign_in_marker(data_dir: &std::path::Path, marker: SignInMarker) {
-    if marker == SignInMarker::Created {
-        if let Err(error) = std::fs::remove_file(vault_marker_dir(data_dir).join(VAULT_SESSION_MARKER)) {
+/// Removes the marker a sign-in created ([`SignInMarker::Created`]) and stored no session behind,
+/// so it cannot vouch for whatever the vault already held. Returns whether the marker is gone.
+pub(crate) fn undo_sign_in_marker(data_dir: &std::path::Path) -> bool {
+    match std::fs::remove_file(vault_marker_dir(data_dir).join(VAULT_SESSION_MARKER)) {
+        Ok(()) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+        Err(error) => {
             tono_logging::logging!(warn, tono_logging::Type::Service,
                 "Tono: failed to remove the session marker of a sign-in that was not adopted: {error}");
+            false
         }
     }
 }
