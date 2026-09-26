@@ -6,7 +6,7 @@ use crate::utils::window_manager::WindowManager;
 use std::sync::Arc;
 use tauri::Manager as _;
 use tono_logging::{Type, logging};
-use tono_service_protocol::KillSwitchStatus;
+use tono_service_protocol::{KillSwitchStatus, ServiceStatusSnapshot};
 use tokio::time::Duration;
 #[cfg(target_os = "macos")]
 use tokio::time::timeout;
@@ -235,11 +235,12 @@ fn interactive_release_wait_error<E>(wait: Result<Result<(), String>, E>) -> Opt
 /// release, or wedged, answers nothing in time, and that reads as "not confirmed".
 const REFUSAL_PROTECTION_READ_BUDGET: Duration = Duration::from_secs(2);
 
-/// The Service's own kill-switch reading for the refusal dialog; `None` when it did not answer.
-async fn protection_for_refusal_dialog() -> Option<KillSwitchStatus> {
+/// The Service's own status aggregate (kill switch plus any lifecycle mutation it is running) for
+/// the refusal dialog; `None` when it did not answer.
+async fn protection_for_refusal_dialog() -> Option<ServiceStatusSnapshot> {
     tokio::time::timeout(
         REFUSAL_PROTECTION_READ_BUDGET,
-        crate::core::service::tono_kill_switch_status(),
+        crate::core::service::tono_service_status_snapshot(),
     )
     .await
     .ok()
@@ -265,8 +266,23 @@ async fn refusal_protection(release_wait_timed_out: bool) -> RefusalProtection {
     if release_wait_timed_out || release_in_progress().await {
         return classify_refusal(release_wait_timed_out, true, None);
     }
-    let protection = protection_for_refusal_dialog().await;
-    classify_refusal(false, release_in_progress().await, protection.as_ref())
+    let snapshot = protection_for_refusal_dialog().await;
+    classify_service_refusal(release_in_progress().await, snapshot.as_ref())
+}
+
+/// Wording from the Service's own reading. This App's registry misses a release another user's
+/// App started, and one of ours whose response was lost; the Service's `active_operation` does
+/// not, so a Service still running any lifecycle mutation means the barrier may yet change.
+fn classify_service_refusal(
+    app_release_in_progress: bool,
+    snapshot: Option<&ServiceStatusSnapshot>,
+) -> RefusalProtection {
+    let service_mutating = snapshot.is_some_and(|snapshot| snapshot.active_operation.is_some());
+    classify_refusal(
+        false,
+        app_release_in_progress || service_mutating,
+        snapshot.and_then(|snapshot| snapshot.kill_switch.as_ref()),
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -570,11 +586,14 @@ pub async fn hide() {
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_refusal, interactive_release_wait_error, run_interactive_cleanup_transition,
-        run_session_ending_cleanup_transition, should_abort_exit_after_cleanup, RefusalProtection,
-        INTERACTIVE_QUIT_RELEASE_BUDGET,
+        classify_refusal, classify_service_refusal, interactive_release_wait_error,
+        run_interactive_cleanup_transition, run_session_ending_cleanup_transition,
+        should_abort_exit_after_cleanup, RefusalProtection, INTERACTIVE_QUIT_RELEASE_BUDGET,
     };
-    use tono_service_protocol::{KillSwitchStatus, KillSwitchStatusMode};
+    use tono_service_protocol::{
+        KillSwitchStatus, KillSwitchStatusMode, ServiceLifecycleState, ServiceOperationKind,
+        ServiceOperationSnapshot, ServiceStatusSnapshot,
+    };
     use tokio::time::Duration;
     use parking_lot::Mutex;
     use std::{
@@ -663,6 +682,51 @@ mod tests {
             "an error that did not join an in-flight release (update fence) is not its end"
         );
         assert_eq!(classify_refusal(false, false, Some(&live)), RefusalProtection::Held);
+    }
+
+    #[test]
+    fn refusal_dialog_does_not_promise_protection_while_the_service_runs_a_mutation() {
+        let snapshot = ServiceStatusSnapshot {
+            snapshot_generation: 4,
+            // Another user's release, or ours whose response was lost: not in this App's registry.
+            active_operation: Some(ServiceOperationSnapshot {
+                id: 7,
+                kind: ServiceOperationKind::ReleaseKillSwitch,
+                started_at_ms: 10,
+                deadline_at_ms: 20,
+            }),
+            is_active: true,
+            active_generation: Some(2),
+            service_state: ServiceLifecycleState::Running,
+            core_pid: Some(1234),
+            core_generation: 1,
+            core_started_at: None,
+            last_core_exit_reason: None,
+            restart_count: 0,
+            last_recovery_at: None,
+            desired_core_should_be_running: true,
+            desired_generation: 3,
+            desired_updated_at: 0,
+            desired_state_unknown: false,
+            macos_kill_switch_wanted: false,
+            macos_kill_switch_live: false,
+            macos_kill_switch_mode: Default::default(),
+            kill_switch: Some(KillSwitchStatus {
+                wanted: true,
+                verified: true,
+                live: true,
+                mode: KillSwitchStatusMode::Blocked,
+                tunnel_permit_rendered: false,
+                endpoints: Vec::new(),
+                direct_endpoint_digest: String::new(),
+                last_error: None,
+            }),
+            network_events: Default::default(),
+        };
+        assert_eq!(
+            classify_service_refusal(false, Some(&snapshot)),
+            RefusalProtection::ReleaseMayComplete
+        );
     }
 
     #[tokio::test]
