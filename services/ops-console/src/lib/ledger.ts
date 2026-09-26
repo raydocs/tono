@@ -47,6 +47,11 @@ export function monthOf(seconds: number): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}`;
 }
 
+/** Red skeleton: the month main uses for reversals today (local clock). */
+export function reversalMonth(seconds: number): string {
+  return monthOf(seconds);
+}
+
 export function dayOf(seconds: number): string {
   const date = new Date(seconds * 1_000);
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
