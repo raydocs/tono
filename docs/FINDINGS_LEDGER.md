@@ -5,10 +5,18 @@
 还剩什么限制」。它不取代 [INTERNAL_CHANGELOG](INTERNAL_CHANGELOG.md)（交付和验证记录）、
 [SHIP_PLAN](SHIP_PLAN.md)（发布门）或 GitHub issue/PR 正文（详细分析）。
 
+## 新条目写在哪里（2026-09-25 起）
+
+新发现不再加到本页表格。每个新 ID 在 [findings.d/](findings.d/) 新建一个文件 `<ID>.md`，
+格式见 [findings.d/README.md](findings.d/README.md)。已有行的状态变化：该 ID 有分片就改分片，
+否则仍改本页表格中的原行（历史不搬家）。分片与本页同 ID 时以分片为准。合并阅读用
+`node tooling/scripts/records.mjs findings [--status open|in-PR|fixed] [--id X]`。
+下面的维护规则同样适用于分片。
+
 ## 维护规则
 
 - **同 PR 更新**：每个修复 PR、审查 PR 都要同步更新对应条目的状态和链接。
-  新发现加新行；开出 issue/PR 后把「待开」改成真实编号。
+  新发现加新分片文件；开出 issue/PR 后把「待开」改成真实编号。
 - **驳回的也要留一行**：被核实推翻、撤回或排除的结论记为 `refuted`，写一句依据，
   防止以后重复上报。重报必须给出推翻依据失效的新反例。
 - **状态值只有五种**：
@@ -117,8 +125,8 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | N7 | Windows 适配器消失被合成为 apply 成功 | fixed(1ca878cf) | [#289](https://github.com/raydocs/tono/pull/289)（含 #290） | 中·已确认 | 未证明 WFP 被绕过；夹具未跨真实 DLL |
 | N8 | Windows IPv4 已写、IPv6 失败时无 pending，下一次被当作已配置 | fixed(1ca878cf) | [#289](https://github.com/raydocs/tono/pull/289)（含 #290） | 中·已确认 | 同上 |
 | N9 | Windows 快照损坏时混合 DNS（公共 + TUN 地址）被漏判，错误接受恢复 | fixed(576d7087) | [#293](https://github.com/raydocs/tono/pull/293) | 中·已确认 | — |
-| R3-F1 | Windows 快照存在时，已带 TUN DNS 地址的新/重激活适配器被记为原始 DNS；损坏快照恢复只读 active 适配器，Disconnect 永久被拒 | in-PR | [#300](https://github.com/raydocs/tono/pull/300) | 中·已确认 | 区别于 N9；验收机需核实 wintun 删除后接口键残留 |
-| R3-F2 | Windows 加密 DNS 旁路捕获文件非原子落盘，损坏后释放永久硬拒 | in-PR | [#305](https://github.com/raydocs/tono/pull/305)（叠在 #300 上） | 中·推导 | 需持久记录隔离证据；文件跨卸载存活 |
+| R3-F1 | Windows 快照存在时，已带 TUN DNS 地址的新/重激活适配器被记为原始 DNS；损坏快照恢复只读 active 适配器，Disconnect 永久被拒 | in-PR | [#300](https://github.com/raydocs/tono/pull/300) | 中·已确认 | 区别于 N9；审查 c7463149 两条已在 PR 内修：快照存在时的孤儿 heal 只重置该适配器、不再撤 NRPT/恢复 DoH；protected apply 改为先写 `ProfileNameServer`，中断不再留下 TUN 键形状。验收机仍需核实 wintun 删除后接口键残留 |
+| R3-F2 | Windows 加密 DNS 旁路捕获文件非原子落盘，损坏后释放永久硬拒 | in-PR | [#305](https://github.com/raydocs/tono/pull/305)（叠在 #300 上） | 中·推导 | 需持久记录隔离证据；文件跨卸载存活。审查 a894f160 五条已在 PR 内修：恢复只读不消费丢失证据，提交后才退役；Disconnect 第二次恢复保留附注；enable 恢复路径证据留给下一次恢复；degraded 与捕获附注拼接；suppress 先写记录后隔离。附注保留在进程内，Service 重启会丢 |
 | R3-F3 | macOS `protected-dns.json` 损坏/权限异常时 restore、紧急解除、卸载、启动清理全被阻 | fixed(05c58d5d) | [#307](https://github.com/raydocs/tono/pull/307) | 中·推导 | 审查要求：DNS 恢复失败时紧急出口不得顺带拆 PF（M2） |
 | R3-F4 | macOS status() 把「快照有效但服务不可读」报成无快照，App 不再调用 restore | fixed(be1c75d2) | [#303](https://github.com/raydocs/tono/pull/303) | 低·已确认 | helper 契约版本级联（4.6.0 起） |
 | R3-O1 | Windows 恢复证明通过后删快照失败即拒绝拆 WFP，重试同样失败（ACL/AV 锁文件） | open | 待开 | 低·推导 | 观察项，未核实 |
@@ -167,7 +175,7 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| H4-F1 | dual 阶段吊销设备不退役共享 legacy 出口凭据，被吊销设备仍可用出口并计入账户 | in-PR | [#313](https://github.com/raydocs/tono/issues/313)，[#323](https://github.com/raydocs/tono/pull/323) | 高·推导 | 暴露面取决于生产 rollout phase（本机无法查） |
+| H4-F1 | dual 阶段吊销设备不退役共享 legacy 出口凭据，被吊销设备仍可用出口并计入账户 | in-PR | [#313](https://github.com/raydocs/tono/issues/313)，[#323](https://github.com/raydocs/tono/pull/323) | 高·推导 | 暴露面取决于生产 rollout phase（本机无法查）；列车 #570 审查 TC-anthropic-1：退役账户的就绪判断看全部 active 出口，一个未上架的新节点就让所有退役账户 503，已在分支 `fix/cp-a-20260924` 改为只看本次下发目录中的节点（未合 main） |
 | H4-F2 | 停用/退役/删除/改名的住宅（catalog 型）home exit 及其 hy2 孪生块从限制名单掉出，下发给所有账户 | in-PR | [#322](https://github.com/raydocs/tono/issues/322)，[#326](https://github.com/raydocs/tono/pull/326) | 高·推导 | roster 不按节点隔离（身份隔离）列为后续 |
 | H4-F3 | ops 角色门不覆盖 shared-admin；另有原始日志读取与 signup-allowlist 写两处未拦截且文档未列 | open | 待开 | 低·推导 | shared-admin 不拦截是已记录限制；只有配置 OPS_ROLES 且有非 owner 角色时可利用 |
 | H3-F4 | refresh 严格单次轮换无宽限且非原子：响应丢失即产生伪 401，客户端登出并释放保护 | in-PR | [#314](https://github.com/raydocs/tono/issues/314)，[#329](https://github.com/raydocs/tono/pull/329) | 高·推导 | 修复在服务端，客户端「真 401 才释放」不变；Windows 启动恢复遇 401 已不再释放（[#515](https://github.com/raydocs/tono/pull/515)） |
@@ -201,7 +209,7 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | D5 | 控制面 TLS 只做 DNS pin，无证书/SPKI 固定 | accepted-design | — | — | 依赖系统信任库；被信任的中间人 CA 可伪造目录/策略/refresh |
 | D6 | hy2 第二块与主块身份一致只由 Worker 保证，客户端只按名称后缀识别 | accepted-design | — | — | 目录本来只有 TLS 信任边界（见 X4） |
 | H11-F1 | 登出后出口凭据仍以明文留在 runtime 副本 | in-PR | [#407](https://github.com/raydocs/tono/issues/407)，[#410](https://github.com/raydocs/tono/pull/410)（Windows）、[#411](https://github.com/raydocs/tono/pull/411)（macOS） | 高·已确认 | — |
-| H11-F2 | keychain ThisDeviceOnly 未生效，迁移到另一台机器会克隆设备身份 | in-PR | [#409](https://github.com/raydocs/tono/issues/409)，[#414](https://github.com/raydocs/tono/pull/414)（macOS 硬件锚，部分修复） | 中·推导 | Windows CRED_PERSIST_LOCAL_MACHINE 与 macOS data-protection keychain 仍 open；迁移后复制行为需实机 |
+| H11-F2 | keychain ThisDeviceOnly 未生效，迁移到另一台机器会克隆设备身份 | in-PR | [#409](https://github.com/raydocs/tono/issues/409)，[#414](https://github.com/raydocs/tono/pull/414)（macOS 硬件锚，已合 main 5da90232）、[#632](https://github.com/raydocs/tono/pull/632)（Windows CRED_PERSIST_LOCAL_MACHINE + 本机会话标记） | 中·推导 | macOS data-protection keychain 仍 open（需签名链改动）；Windows 漫游副本消失与 macOS 迁移后复制行为需实机；修复前已形成的克隆不能识别 |
 | H11-F3 | 卸载保留 refresh token，重装后自动登录回原账户 | in-PR | [#408](https://github.com/raydocs/tono/issues/408)，[#412](https://github.com/raydocs/tono/pull/412) | 中·已确认 | — |
 | H15-F4 | macOS 0.0.72 遗留的含凭据 config/config.yaml 从未删除 | in-PR | [#504](https://github.com/raydocs/tono/issues/504)，[#505](https://github.com/raydocs/tono/pull/505) | 低·推导 | 与 #411 相关 |
 | #491 | Windows 从 Suspended/Error 换账户登录时保留上一账户的目录、runtime 副本与 Core | in-PR | [#491](https://github.com/raydocs/tono/issues/491)，[#506](https://github.com/raydocs/tono/pull/506) | 高·推导 | 叠在 #316 → #410 → #506 |
@@ -267,8 +275,8 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | H8-F6 | 影响客户的写操作缺少审计记录 | in-PR | [#405](https://github.com/raydocs/tono/issues/405)，[#406](https://github.com/raydocs/tono/pull/406) | 低·推导 | token-admin 路由移到 src/ops/token-admin.ts |
 | H13-F5 | Worker 不可达时 exit-agent 没有 roster 回退 | in-PR | [#463](https://github.com/raydocs/tono/issues/463)，[#464](https://github.com/raydocs/tono/pull/464) | 中·推导 | 与 #375/#384/#389 冲突，解决步骤写在 PR |
 | H13-F6 | hub 在租约丢失后仍执行作业（重复 xray_restart） | in-PR | [#465](https://github.com/raydocs/tono/issues/465)，[#466](https://github.com/raydocs/tono/pull/466) | 低·推导 | 应先于或同 #377 合并 |
-| H17-O-F4 | 为尚未注册的客户开通时，控制台填写的到期日与套餐被静默丢弃，账户首次登录后无到期、无配额 | open | 待开 | 中·已确认 | 之后没有任何提醒会发现（到期提醒与批量续期都要求已有日期） |
-| H17-O-F6 | 控制台「停用」调用退款销户接口：操作者填写的原因被丢弃，空备注被写成「退款销户」 | open | 待开 | 低·已确认 | 核实降级：恢复文案并未承诺可重绑原 Claude 号，停用确认已告知拆除范围；Claude 引用退役后不能经现有接口重新分配是否算缺陷待产品决定 |
+| H17-O-F4 | 为尚未注册的客户开通时，控制台填写的到期日与套餐被静默丢弃，账户首次登录后无到期、无配额 | in-PR | [#527](https://github.com/raydocs/tono/issues/527)，[#528](https://github.com/raydocs/tono/pull/528) | 中·已确认 | 此前开通时已丢了到期的客户不追溯补上；migration 0091 为临时编号，合并时需确认未被占用 |
+| H17-O-F6 | 控制台「停用」调用退款销户接口：操作者填写的原因被丢弃，空备注被写成「退款销户」 | in-PR | [#532](https://github.com/raydocs/tono/issues/532)，[#534](https://github.com/raydocs/tono/pull/534) | 低·已确认 | 核实降级：恢复文案并未承诺可重绑原 Claude 号，停用确认已告知拆除范围；Claude 引用退役后不能经现有接口重新分配是否算缺陷待产品决定 |
 
 ## 10. 发布流水线与安装器
 
@@ -357,7 +365,22 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | H22-C-F1 | Windows 欢迎页吞掉存储失败导致循环 | open | 待开 | 低·推导(PLAUSIBLE) | 触发条件未证实 |
 | H20-O-*, H22-O-* | Opus 席位 H20（15 条）与 H22（8 条，含 H22-O-F1 BFE 关闭时无法安装、H22-O-F2 VC++ 运行库缺失时安装门禁失败）| open（待核实）| 待开 | 待 Codex 异厂商核实 | 见交接文档 |
 | XRAY26-RMU | exit-agent 用 `--email=` 调 Xray 26 `rmu` 被拒，自 2026-09-18 起吊销不执行、计量停报；`rmu` 失败也退出 0 | in-PR | [#563](https://github.com/raydocs/tono/pull/563)（5bcc6b9d/924cafb3/b3299814）| 高·已确认(实机输出) | 未部署到节点 |
-| TC-anthropic-1 | `dual` 阶段新建/重新启用出口节点使所有已退役账户设备目录 503 | open | [#570](https://github.com/raydocs/tono/pull/570) 评论 | 高·推导 | 阻塞 #570 合并与部署 |
+| TF-opus-4 | exit-agent 停用轮不读计数，上次正常轮到停机之间的流量丢失 | fixed | [#600](https://github.com/raydocs/tono/issues/600)，[#624](https://github.com/raydocs/tono/pull/624)（f5c31d58，2026-09-25 已部署到 14 个节点） | 中·已确认 | 撤除后尽力折入最后计数，下一次可上报的轮次报出；永久退役节点仍不上报；需部署到节点 |
+| TF-opus-8 | exit-agent hy2 出错时整轮跳过 Xray 吊销与计数 | fixed | [#600](https://github.com/raydocs/tono/issues/600)，[#624](https://github.com/raydocs/tono/pull/624)（f5c31d58，2026-09-25 已部署到 14 个节点） | 中·已确认 | hy2 错误后仍做 Xray 对账并保存计数，再拒绝本轮、不 ACK；需部署到节点 |
+| TC-anthropic-1 | `dual` 阶段新建/重新启用出口节点使所有已退役账户设备目录 503 | fixed | [#570](https://github.com/raydocs/tono/pull/570)（6cfa4d9e，2026-09-25 已部署）（8ea01b3f、b6c0a817、a62703fe、f775a895）| 高·已确认(Codex) | 就绪门只看本次下发目录中的节点（hy2 归并基名、目录内家宽不计）；jev-route 7a7e1e73/bb710dc6（Opus+Codex）复审修复提交通过；**部署仍须按交接顺序：LA 节点恢复 ACK、第二节点先登记** |
+| TC-anthropic-2 | 零 active 节点时退役账户永久 503；测试未断言成功路径 | fixed | [#570](https://github.com/raydocs/tono/pull/570)（6cfa4d9e，2026-09-25 已部署） | 中·已确认(Codex，条件性) | 生产有 1 个 active 节点；`worker.test.ts` 已断言 ACK 前 503、ACK 后 200 且为设备 UUID |
+| TC-anthropic-3 | 0078 改变过滤集合但不 bump 目录 revision，Windows 拒收同 revision 不同 digest | fixed | [#570](https://github.com/raydocs/tono/pull/570)（6cfa4d9e，2026-09-25 已部署） | 中·已确认(Codex) | 运维步骤：部署且节点拉取新 roster 后，无条件用带 `expectedRevision` 的受审计 catalog PUT bump revision（写入列车 changelog 与 PR 描述）|
+| TC-anthropic-4 | migrations README 缺 0077、0088 | fixed | [#570](https://github.com/raydocs/tono/pull/570)（6cfa4d9e，2026-09-25 已部署） | 低 | README 补 0077/0081/0088 |
+| TC2-opus-1 = TC2-grok-1 | 已注册客户开通时家宽绑定先于 Claude 号分配提交，分配只读即可判定的 409（`PRODUCT_ALREADY_ASSIGNED`/`ACCOUNT_REF_IN_USE`）会留下绑定、revision 与 refresh | in-PR | [#629](https://github.com/raydocs/tono/pull/629) | 中·已确认(Opus+Grok) | 两项检查在第一次写入前预跑；预检后被并发分配抢先仍会 409 并留下绑定，此时有 `home.assign` 审计，不回滚 |
+| TC2-grok-2 | 开通的 `HOME_EXIT_INACTIVE` 在查用户前检查，未注册邮箱带停用家宽被整单拒绝（未注册路径本不绑定） | in-PR | [#629](https://github.com/raydocs/tono/pull/629) | 低·已确认 | 同时带 `line` 时以 `line` 为准，不再检查 `homeExitId` 状态 |
+| TM-claude-2 | macOS 当前版本 helper 崩溃循环时修复是空操作，启动只报通用「helper 不可用」，无提示、无管理员修复 | in-PR | [#601](https://github.com/raydocs/tono/issues/601)，[#625](https://github.com/raydocs/tono/pull/625) | 中·已确认 | Opus 发现，Codex 复核；可弹提示的调用在 25 s 窗口内见 launchd `runs` 增 ≥2 且无应答即走管理员重装；依赖 `launchctl print` 字段；未实机 |
+| TM-claude-4 | macOS 原生更新准备与 `--emergency-disarm/reset` 自行恢复 DNS 时丢掉 `originalDNSRestored:false`，用户不知原 DNS 未放回 | in-PR | [#601](https://github.com/raydocs/tono/issues/601)，[#625](https://github.com/raydocs/tono/pull/625) | 低·已确认 | 记录在 root 目录，下一次 `/dns/restore` 报一次；紧急命令终端打印；要等 App 下一次 restore |
+| TM-claude-6 | helper 记录 PF 引用写失败 + 崩溃循环时每次重启多取一个 `pfctl -E` token 且永不释放 | in-PR | [#601](https://github.com/raydocs/tono/issues/601)，[#625](https://github.com/raydocs/tono/pull/625) | 低·已确认 | 改由内核唯一匿名引用（`pfctl -e`）持有后释放新 token；解除后 PF 仍开（无 Tono 规则）至 `pfctl -d`/重启 |
+| TW-OpenAI-2 = TW-G-1 = TW-anthropic-3 | Windows 更新恢复在停 Service 前无法分类安装（组件/计划成员读不出）时 `Consumed` 原样悬挂，只有 `Uncertain` 能被 Disconnect 退役；协议文档却写留下 `Uncertain` | in-PR | [#602](https://github.com/raydocs/tono/issues/602)，[#626](https://github.com/raydocs/tono/pull/626) | 低·已确认 | 执行器取自升级前已安装版本，只对从含本改动的版本发起的升级生效；未实机 |
+| TW-anthropic-4 | Windows 更新 Prepare 在准入（App 映像、owner、签名）之前推进全局 attempt epoch，任一本地已认证调用方可让他人在途 PrepareCoreStart 被判过期 | in-PR | [#602](https://github.com/raydocs/tono/issues/602)，[#626](https://github.com/raydocs/tono/pull/626) | 低·已确认 | 已准入的真实更新仍推进全局 epoch（含另一用户，按设计）；准入后被拒的 Prepare 仍推进（H9-F3）；CI 构造不出已准入 Prepare，H9-F3 正向路径只由源码保证 |
+| TW-anthropic-5 | Windows 原生更新不写 ARP `DisplayVersion`，#508 的降级阻断比较的是旧版本 | in-PR | [#602](https://github.com/raydocs/tono/issues/602)，[#626](https://github.com/raydocs/tono/pull/626) | 低·已确认 | eef9d2ce 只加了降级阻断，未写版本；提交时写失败只告警，执行器提交清理再写（仅含本改动的执行器）；未实机 |
+| TW-anthropic-6 = TW-G-2 | Windows 安装器 `.onInit` 取得手动租约后三个无修改退出（无效/外来 ARP 记录、旧 MSI、旧自定义位置）不交还租约，Service 持续拒绝连接与恢复 | in-PR | [#602](https://github.com/raydocs/tono/issues/602)，[#626](https://github.com/raydocs/tono/pull/626) | 低·已确认 | 语言选择框取消同属此类，改为在 gate 之前显示；卸载器 `MUI_UNGETLANGUAGE` 可能的取消出口未核实、未处理；未实机 |
+| TW-OpenAI-1 = TW-anthropic-2 | Windows DHCPv4 入站/出站放行没有服务身份条件（只按端口，出站另限目的地址） | open | [#602](https://github.com/raydocs/tono/issues/602) | 低·推导(需实机) | 未改：Dhcp 服务 SID 条件需 WFP 引擎新增 `ALE_USER_ID` 安全描述符条件；DHCP 客户端流量（含取得地址前的 DISCOVER、服务 SID 类型可被改）是否带该 SID 需实机确认，错配会在保护期间丢失 DHCP 租约；实际绕过未证实 |
 
 测试覆盖缺口（夹具未跨真实 DLL、无断电/睡眠/多网卡实机、无 parser fuzz 等）不是本账条目，
 见 [审查轮记录](reports/REVIEW_ROUNDS_2026-09-23.md) 的「未覆盖」一节；找到具体失败再作为新条目上报。

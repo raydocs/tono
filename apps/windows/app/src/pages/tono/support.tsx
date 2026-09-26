@@ -187,14 +187,16 @@ const SupportPage = () => {
   })
 
   // DNS warning markers (TONO_DNS_UNVERIFIED / TONO_DNS_RESTORE_DEGRADED /
-  // TONO_DNS_POLICY_CONFLICT) ride in dnsLastError by design but are not failures — the
-  // tunnel stays protected. Showing them under "last error" panics users for a healthy
-  // connection, so they get their own row. The first two mirror DNS_WARNING_MARKERS in
-  // src-tauri/src/tono/connection_health.rs. The policy conflict is the Service's separate
-  // resolver_policy_warning, which only the diagnostics report folds into dnsLastError.
+  // TONO_DNS_CAPTURE_QUARANTINED / TONO_DNS_POLICY_CONFLICT) ride in dnsLastError by design but
+  // are not failures — the tunnel stays protected. Showing them under "last error" panics users
+  // for a healthy connection, so they get their own row. The first three mirror
+  // DNS_WARNING_MARKERS in src-tauri/src/tono/connection_health.rs. The policy conflict is the
+  // Service's separate resolver_policy_warning, which only the diagnostics report folds into
+  // dnsLastError.
   const dnsWarningMarkers = [
     'TONO_DNS_UNVERIFIED',
     'TONO_DNS_RESTORE_DEGRADED',
+    'TONO_DNS_CAPTURE_QUARANTINED',
     'TONO_DNS_POLICY_CONFLICT',
   ]
   const dnsWarning =

@@ -193,6 +193,9 @@ async function runRetention(db: D1Database, nowSec: number): Promise<void> {
   await retainConnectionDaily(db, nowSec, 400, RETAIN_LIMIT);
   await retainDeliveries(db, nowSec, 90, RETAIN_LIMIT);
   await retainActivityHours(db, nowSec, 400, RETAIN_LIMIT);
+  // Window markers outlive telemetry_windows' 30-day default so the cron pass
+  // cannot re-reach a window whose marker is already gone.
+  await retainLimited(db, 'customer_activity_windows', 'received_at', nowSec - 35 * DAY);
   await retainSessions(db, nowSec, 400, RETAIN_LIMIT);
   await retainTrafficDaily(db, nowSec, 90, RETAIN_LIMIT);
   await retainHomeLineUsage(db, nowSec, 400, RETAIN_LIMIT);

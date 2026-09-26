@@ -54,3 +54,25 @@
   无条件 revision bump 都需要 ops admin token 做受审计的 catalog PUT，本会话没有。
 - ops hub 的身份推送是否停用：由 agent 接管后 hub 推送变为冗余，是否关闭待定。
 - 首报会把 09-11 以来未计费的流量一次计入各账户，个别账户可能因此触达配额。
+
+## 续记（2026-09-25）
+
+1. **agent 升级到 #624（`aecb4cec`，main `f5c31d58`）**：13 个节点逐台替换 `/opt/tono-exit-agent/reconcile_and_report.py`
+   （旧 `03a5e5e2` 备份在各节点 `/root/tono-exit-agent-backup-20260925/`），替换后手动触发一轮，全部 `result=success`、
+   roster `+0 -0`、用量上报正常；timer 未停。先在 Westwood 做金丝雀。
+2. **`Tokyo · Sakura` 实际在线，只是换了 IP**：主机 `vm-EjSuCC` 由 `148.135.183.152` 变为 `162.4.194.103`（目录与 hub
+   `nodes.secrets.json` 仍是旧 IP，因此「SSH 与 443 均无响应」）。该机是旧布局：Xray 25.3.6、`/usr/local/etc/xray`、
+   无 api/stats、inbound 无 tag，43 个静态客户端（42 个 `u:` + 1 个无 email）。按所有者选择「保留」接入：
+   - 备份到 `/root/tono-pre-agent-backup-20260925/`（原配置、25.3.6 二进制、原 unit）；
+   - Xray 换成与 Fuji 同一个 26.3.27 二进制（sha256 `8255dd93…` 比对），`/opt/tono-xray/releases/20260925-xray-26.3.27`，
+     配置在原配置上只增加 `stats`/`policy`/`api`/`tono-api` 入站/路由、inbound tag `tono-vless`，无 email 的客户端记为
+     `slot-1`（与其他节点一致）；Reality 设置逐字相同；`xray run -test` 通过后切换，unit 与 Fuji 一致；重启后 443 外部可达、
+     API 应答。改动时该节点对客户不可达（目录指向旧 IP），无在线用户受影响。
+   - D1 登记 `exit_nodes`（`tokyo-sakura` / `Tokyo · Sakura`，节点专属 token，hash 同 `POST exit-nodes` 算法）并写
+     `ops_audit`（`exit-node.create`，actor `claude-session@ops`，type `system`）；会话内仍无 admin token，故直接写 D1。
+   - 装 agent（`aecb4cec`）与 unit/timer，首轮 `+7 -2`（补齐离线期间新增身份、移除 2 个），ACK 成功，
+     `metering_protocol_version` 自动升为 2。之后 D1 共 14 个 active 节点，最慢 ACK 55 秒。
+3. **目录**：同日经 Cloudflare Access 登录的控制台做受审计 `PUT exit-catalog`，只改 Sakura 的 `server` 为 `162.4.194.103`
+   （r54 → r55，逐行比对仅第 130 行变化；目录中的 Reality 公钥/short-id/SNI 与节点私钥核对一致）。#570 部署后另做一次
+   内容不变的 bump（r60 → r61）。**仍需**：hub `/opt/tono-ops/nodes.secrets.json` 的 Sakura 条目仍是旧 IP；
+   未做客户端实机连接验证。

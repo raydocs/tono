@@ -288,6 +288,7 @@ Function DetectExistingInstall
     ${IfNot} ${Silent}
       MessageBox MB_ICONSTOP "$(invalidExistingVersion)"
     ${EndIf}
+    Call ReleaseManualLease
     SetErrorLevel 1638
     Quit
 
@@ -295,6 +296,7 @@ Function DetectExistingInstall
     ${IfNot} ${Silent}
       MessageBox MB_ICONSTOP "$(legacyWixManualMigration)"
     ${EndIf}
+    Call ReleaseManualLease
     SetErrorLevel 1638
     Quit
 
@@ -462,6 +464,26 @@ Function .onInit
     Return
   ${EndIf}
   StrCpy $TonoPrivateUnpack 0
+  ; Before the manual gate: Cancel in the language dialog Aborts inside MUI_LANGDLL_DISPLAY,
+  ; where nothing could hand a lease back, and the gate's own dialogs then use this language.
+  !if "${DISPLAYLANGUAGESELECTOR}" == "true"
+    ; Auto-update forwards the app's UI language as `/LANG=<NSIS-lang-id>` so
+    ; the installer uses it directly and skips the interactive language
+    ; selector, letting the update start without prompting the user.
+    ; See `src-tauri/src/core/updater.rs` (`nsis_language_id`).
+    ${GetOptions} $CMDLINE "/LANG=" $0
+    ${IfNot} ${Errors}
+      ${If} $0 == "1033"
+      ${OrIf} $0 == "1049"
+      ${OrIf} $0 == "2052"
+        StrCpy $LANGUAGE $0
+      ${Else}
+        !insertmacro MUI_LANGDLL_DISPLAY
+      ${EndIf}
+    ${Else}
+      !insertmacro MUI_LANGDLL_DISPLAY
+    ${EndIf}
+  !endif
   ; Bootstrap/manual install uses only temporary bundled files until verified
   ; Disconnect and a durable native lifecycle lease have both succeeded.
   InitPluginsDir
@@ -520,25 +542,6 @@ Function .onInit
     StrCpy $UpdateMode 1
   ${EndIf}
 
-  !if "${DISPLAYLANGUAGESELECTOR}" == "true"
-    ; Auto-update forwards the app's UI language as `/LANG=<NSIS-lang-id>` so
-    ; the installer uses it directly and skips the interactive language
-    ; selector, letting the update start without prompting the user.
-    ; See `src-tauri/src/core/updater.rs` (`nsis_language_id`).
-    ${GetOptions} $CMDLINE "/LANG=" $0
-    ${IfNot} ${Errors}
-      ${If} $0 == "1033"
-      ${OrIf} $0 == "1049"
-      ${OrIf} $0 == "2052"
-        StrCpy $LANGUAGE $0
-      ${Else}
-        !insertmacro MUI_LANGDLL_DISPLAY
-      ${EndIf}
-    ${Else}
-      !insertmacro MUI_LANGDLL_DISPLAY
-    ${EndIf}
-  !endif
-
   !insertmacro SetContext
 
   !if "${INSTALLMODE}" == "perMachine"
@@ -564,6 +567,7 @@ Function .onInit
       ${IfNot} ${Silent}
         MessageBox MB_ICONSTOP "$(legacyLocationAbort)"
       ${EndIf}
+      Call ReleaseManualLease
       SetErrorLevel 5
       Abort
     ${EndIf}
@@ -1548,7 +1552,7 @@ Section Uninstall
     ; This account's $APPDATA/$LOCALAPPDATA folders were removed with every other profile's by the
     ; helper above. A recursive NSIS delete here would walk through a junction the helper skipped.
 
-    ; The account session is not in AppData: keyring stores it in Credential Manager as
+    ; The account session is not in AppData: it is a local-machine generic credential in Credential Manager,
     ; `refresh-token.tono` (tono-core WINDOWS_CRED_TARGET_REFRESH_TOKEN). Delete it so a reinstall
     ; does not come back signed in. The App also refuses a vault session its data directory did
     ; not adopt, so a missing entry or a failed delete here is not fatal.

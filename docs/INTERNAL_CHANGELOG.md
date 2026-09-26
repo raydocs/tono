@@ -4,33 +4,146 @@
 它是变更入口，不取代 [SHIP_PLAN](SHIP_PLAN.md)、[运维计划](ops/plan-2026-09-11.md)
 或各项原始验收记录。源码修复、合入 main、生成候选、实机通过、客户发布是不同状态。
 
-## 维护规则（所有者要求，2026-09-23）
+## 新条目写在哪里（2026-09-25 起）
 
-- 每次内部代码、配置、构建/测试工具或发布验收状态的有效交付，在同一个 PR 更新本页。
-  新一轮记录放在旧记录前面；同一轮后续结果加带日期的续记，不覆盖原来的失败或未知。
-- 分开写 **缺陷修复**、**新增/优化**、**工程与测试修正**。同一根因的续修、移植、测试和
-  cherry-pick 不重复算新 bug；编译失败、fixture 错误不冒充客户运行时故障。
-- 写清准确源码、分支/PR、归属门或 ops 任务；通过、失败、跳过、未执行和沿用证据分开。
-  命令、主机、实际 CI checkout 与日志链接可引用已有详细报告，不复制多套验收事实。
-- 内部包必须记版本、源码、标签/下载入口、包摘要、签名状态及包含/不包含的后续修复。
-  没有新包就明确「仅源码，无新候选」；同版本号不表示相同字节。
-- 纯咨询、只读审查无新成果、无行为影响的排版/拼写改动不制造空条目。文档整理不重跑
-  产品测试，不改写旧证据为新 SHA 的测试结果，不记密钥、账号或原始诊断数据。
-- 更新记录不是 merge、签名、部署、设备操作或推进客户更新源的授权。
+新条目不再写进本页。每次交付在 [changelog.d/](changelog.d/) 新建一个文件
+`YYYY-MM-DD-<slug>.md`，维护规则与条目模板见 [changelog.d/README.md](changelog.d/README.md)。
+同一轮的续记改该条目自己的文件。本页以下是 2026-09-25 之前的冻结历史，不再追加；
+合并阅读用 `node tooling/scripts/records.mjs changelog [--since YYYY-MM-DD]`。
 
-### 后续条目模板
+## 2026-09-25 · 运维：cp 列车 #570 部署（main 6cfa4d9e）；Sakura 目录 IP 修正
+- 归属：ops 任务（控制面部署）；随列车上线的缺陷修复见 #570 条目与 TC-anthropic-1..4。
+- 来源：main `6cfa4d9e`（#570 合并）；无代码改动，本条只记录运维动作；详见 [runbook §0.1 第十六次](ops/rollout-ops2.md)。
+- 缺陷修复：TC-anthropic-1..4 随部署生效；`Tokyo · Sakura` 目录 IP 改为 `162.4.194.103`（r55），客户可再次连接该节点。
+- 新增/优化：无。
+- 工程与测试：无。
+- 验证：部署脚本内全量测试通过；`buildSha` = `6cfa4d9e`；D1 迁移至 0092；14 个节点 ACK ≤ 65 秒；目录 r61 内容与 r55 逐字相同。
+  未做客户端实机连接验证。
+- 候选/发布：仅运维，无新候选。
+- 剩余限制：hub `nodes.secrets.json` 的 Sakura 条目仍为旧 IP；rollout 仍为 `dual`（进入 `device_only` 是单独决定）。
 
-```text
-## YYYY-MM-DD · 内部更新名称
-- 归属：G1/G2/G3/G4 或已有 ops 任务；影响平台/模块。
-- 来源：基线 → 实现源码 SHA（链接）；分支、PR；是否已合 main。
-- 缺陷修复：原失败场景 → 改后行为；关联 Issue/回归或详细记录。
-- 新增/优化：新增能力、保留行为与自行选择的边界；没有则写无。
-- 工程与测试：编译/fixture/CI 修正，与产品缺陷分开。
-- 验证：准确源码/checkout、主机、命令、决定性输出或证据链接；列未执行/沿用项。
-- 候选/发布：无新包，或标签、包源码、下载入口、SHA-256、签名及发布状态。
-- 剩余限制：尚未解决的问题/Issue、实机或外部依赖；不能声称什么。
-```
+## 2026-09-25 · Windows：更新生命周期审查跟进（恢复标记、epoch 准入、ARP 版本、安装器租约）
+
+- **归属/来源**：G3 发出去还能再发（更新事务与手动安装器）；TW-anthropic-4 兼及 G1 连接生命周期。Issue #602
+  （合并列车 #572 审查跟进，总账 TW-*）。基线 origin/main f5c31d58；分支 `fix/win-update-lifecycle-followups-20260925`
+  （红分支 `wip/win-update-lifecycle-followups-20260925-red`）；PR [#626](https://github.com/raydocs/tono/pull/626)；未合 main。`apps/windows/service`
+  （`bin/install_service/update_executor.rs`、`core/update.rs`、`core/update/security.rs`、`core/server/handlers.rs`、
+  `core/windows_kill_switch.rs` 注释、`tests/test_owner_lifecycle.rs`）、`apps/windows/app`（`installer.nsi`、
+  `scripts/windows-packaging.test.mjs`）、`docs/UPDATE_PROTOCOL_V1.md`。
+- **缺陷修复**：
+  - TW-OpenAI-2 = TW-G-1（及 TW-anthropic-3 文档）：恢复在停 Service 之前读不出已安装组件或计划成员时直接退出，
+    `Consumed` 原样悬挂；而 Disconnect 只能在证明原件完整后退役 `Uncertain`/`RolledBack`。现在这一出口把 `Consumed`
+    写成 `Uncertain`，`Replaced`（已登记后继）与 `Uncertain` 不变，不停 Service、不动文件，下次恢复重新分类。
+    `UPDATE_PROTOCOL_V1.md` 原写「留下 `Uncertain`」与代码不符，已按此改写。
+  - TW-anthropic-4：更新路由原在 owner 认证后、`update::request` 的准入前就推进全局 attempt epoch，任何本地已认证
+    调用方发一个未签名 Prepare 就能让他人在途 PrepareCoreStart 被判 `StaleReleaseEpoch`。现在推进移入
+    `update::request`，在 App 映像、无手动安装/修复、待决事务属同一 owner、签名校验都通过后才推进，仍在同一
+    lifecycle 锁内；准入后的拒绝（重放/降级、保护状态、活动 owner 等）照旧推进，保留 H9-F3 语义。
+  - TW-anthropic-5：核对 main 后确认 eef9d2ce（#508）只加了降级阻断，没有任何原生路径写 ARP `DisplayVersion`，
+    原生更新后降级检查比较的是旧版本。现在目标成为已定安装时写入：Service 在提交持久化后写（失败只告警，不撤销
+    提交）；执行器提交清理在退役开机任务前再写一次，且只在已安装身份仍是该目标时写（避免提交后手动装了别的版本、
+    开机重试把旧版本写回），失败保留任务；「已安装已释放」归档前由 Service 写，失败保持记录待决。回滚与其它归档
+    从未写过，原版本保持。待决期间手动安装器与卸载器被 gate 拦住，读不到未定版本。
+  - TW-anthropic-6 = TW-G-2：`.onInit` 取得手动租约后，`invalid_existing_version`、`legacy_wix_blocked` 与旧自定义
+    位置 `legacyLocationAbort` 三个无修改退出现在先 `Call ReleaseManualLease`。语言选择框取消在
+    `MUI_LANGDLL_DISPLAY` 内部 Abort，无处交还租约，因此把语言选择移到 gate 之前（gate 的对话框因此也用所选语言）。
+  - 未修：TW-OpenAI-1 = TW-anthropic-2（DHCPv4 放行限定 Dhcp 服务 SID）。需 WFP 引擎新增 `ALE_USER_ID` 安全描述符
+    条件；Dhcp 客户端流量（含取得地址前的 DISCOVER、服务 SID 类型可配置）是否带该 SID 只能实机确认，错配会在保护
+    期间丢 DHCP 租约，比这条 P3 加固的风险更大。保持 open。
+- **新增/优化**：无。
+- **工程与测试**：四条回归，红分支只含测试与骨架（`classify_before_stop` 原样传播错误、`finish_committed` 忽略版本
+  记录），预期以断言失败：`update_executor::tests::update_recovery_marks_a_consumed_attempt_uncertain_when_it_cannot_classify`、
+  `update_executor::tests::update_commit_records_the_installed_version_before_retiring_the_task`、
+  `test_owner_lifecycle::update_prepare_refused_at_admission_does_not_supersede_a_connect_attempt`、
+  `windows-packaging.test.mjs`「every installer init exit after the manual gate hands the lease back」。
+  第三条替换 H9-F3 的 `late_prepare_core_start_superseded_by_update_takeover_cannot_stop_the_successor_core`：
+  那条的前提（未准入的 Prepare 也推进 epoch）正是本次报告的缺陷；CI 无已安装 App 与固定更新公钥，构造不出已准入
+  Prepare，H9-F3 正向路径改由源码保证。`finish_committed` 增加版本记录参数，原有测试随签名更新。
+- **验证**：本机未编译或运行 Rust（执行位置规则）；编译与 `cargo test` 以 PR CI `windows-2025` 为准。本机：
+  `node --test` 跑 `apps/windows/app` 六个脚本测试文件 109/109 通过；新 node 测试在红分支状态以断言失败
+  （the language dialog must precede the gate）；`rustfmt --check` 改动区无差异（文件里原有的格式差异未动）。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：执行器取自升级前已安装版本，TW-OpenAI-2 与执行器侧 ARP 重试只对从含本改动的版本发起的升级生效；
+  提交与「已安装已释放」的 ARP 写入由新 Service 执行，首次升级到本版即生效。提交时 ARP 写入失败且执行器 120 s
+  等待已结束时，版本要到下次开机才补写。卸载器 `un.onInit` 的 `MUI_UNGETLANGUAGE` 在当前用户无记忆语言时可能
+  弹出语言框，其取消同样不会交还租约（按 MUI2 源码推断，未核实、未处理）。
+  DHCP SID 未做（见上）。均未实机。
+
+## 2026-09-25 · macOS：helper 崩溃循环可修复、自行释放 DNS 时的原始 DNS 丢失会告知、PF 引用不再逐次泄漏
+
+- **归属/来源**：G2 连不上有下一手（helper 坏了要能修、要说清）；Issue #601（macOS 合并列车审查 TM-claude-2/4/6，总账同名三行）。
+  macOS `Core/HelperManager.swift`、`Core/RuntimeCleanup.swift`、`Core/HelperProtocolVersion.swift`；helper
+  `KillSwitchPF.swift`、`ProtectedDNSManager.swift`、`UpdateRuntime.swift`、`main.swift`、`KillSwitchTests.swift`、`CONTRACT.sha256`。
+  基线 origin/main f5c31d58；分支 `fix/macos-helper-followups-20260925`（红分支 `wip/macos-helper-followups-20260925-red`）；PR [#625](https://github.com/raydocs/tono/pull/625)；未合 main。
+- **缺陷修复**：
+  - TM-claude-2：当前版本 helper 启动失败（PF 恢复后任一步失败会装紧急拦截再退出）时，launchd KeepAlive 每约 10 s 重启一次，永远不应答。
+    `installIfNeeded` 看到版本正确、launchd 已注册就直接返回，修复是空操作；启动时的查询随后抛出通用「helper 不可用」，#425 的提示和管理员提示都不出现。
+    现在对可以弹管理员提示的调用（Connect、Restore internet、启动修复）在该分支上做有界检测：25 s 内每秒探测 socket，
+    socket 一应答即按原路返回；`launchctl print` 的 `runs` 在窗口内增加 ≥2 次仍无应答则判定崩溃循环，走已有的管理员重装。
+    不弹提示的调用（睡眠、退出、更新准备里的 `restrictToBootstrap`）不做检测，行为不变。启动修复返回后若 helper 仍不应答，
+    改为抛出 #425 的「未在保护中，点重试并批准管理员提示」提示，而不是通用错误。PF 不放松：重装走原安装脚本，内核规则在换 daemon 期间保留。
+  - TM-claude-4：原生更新准备（含执行器回滚）和 `--emergency-disarm`/`--emergency-reset` 在 helper 内部恢复 DNS，丢掉了
+    `originalDNSRestored: false`，之后快照已归档，App 再也不会收到（对照 #487/#489）。现在这些路径把丢失记在
+    `/Library/Application Support/Tono/protected-dns.original-not-restored`（root 目录，reset 不删）；下一次 `/dns/restore` 回复带上
+    `originalDNSRestored: false` 并删除记录，App 沿用 #489 的一次性提示。两个紧急命令成功后还在终端打印同一说明。
+  - TM-claude-6：`pf.reference` 记录写失败时，新取的 `pfctl -E` token 只存在进程内存；崩溃循环下每次重启都再取一个且永不释放。
+    现在写失败时先用 `pfctl -e` 让内核持有唯一的匿名引用（xnu `DIOCSTART`：PF 已开时仅在没有匿名引用时加一，重复调用不叠加），
+    确认成功（退出码 0 或「already enabled」，且 PF 仍开）后才 `pfctl -X` 释放新 token，引用计数不经过零；确认不了则保持原行为（token 留在内存重试）。
+- **新增/优化**：无。helper 协议 4.46.0 → 4.47.0，CONTRACT 哈希按 `build-core-helper.sh` 同一管线重算（先复现 main 记录的 4.46.0 哈希）。
+- **工程与测试**：三条回归，各对应一个行为，红分支只含测试、骨架（`launchdShowsCrashLoop` 恒 false；`reportsOriginalLoss` 保持 main 行为）
+  与协议号，预期以断言失败：
+  XCTest `HelperUnprotectedNoticeTests.testLaunchdRestartingTheHelperTwiceIsACrashLoop`（`runs` 增 2 为崩溃循环、增 1 不是、无计数不算）；
+  helper `--lifecycle-self-test` 的 `ProtectedDNSManager.runDeferredOriginalLossSelfTest`（延后记录的丢失只在下一次回复报告一次）
+  与 PF 检查 9b `unrecorded-reference-not-kept`（记录路径不可写时调用后 `pfctl -s References` 不出现新的数字词（token）且 PF 仍开；
+没有任何 token 时内核回 ENOENT，所以不看退出码；
+  若测试开始时 PF 是关的，结束时 `pfctl -d` 去掉测试留下的匿名引用）。启动提示改动无单独测试。
+- **验证**：未在本机编译或运行 Swift（执行位置规则）；编译、XCTest 与需 root 的 `--lifecycle-self-test` 以 PR CI `macos-26` 为准。
+  本机只做了：`launchctl print system/com.raydocs.tono.core-helper` 以普通用户可读、含顶层 `\truns = N`（与测试夹具形状一致）；
+  `verify-swift-balance.py`（改动文件仅有 main 上已存在的两处误报）；xnu `bsd/net/pf_ioctl.c` 源码核对 `DIOCSTART`/`DIOCSTOPREF` 语义。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：崩溃循环检测依赖 `launchctl print` 的 `runs` 字段（非稳定接口），最坏多等 25 s；启动步骤慢于约 12 s 才失败的循环
+  可能一轮测不到，下次 Retry 再测；重装修不了 helper 自身启动缺陷时，用户看到「helper 未启动」加提示。DNS 丢失提示要等 App 下一次
+  `/dns/restore`（Restore internet、退出、启动清理、升级前准备），旧版 App 会消费记录而不提示。PF 记录写失败后匿名引用在解除保护后仍让
+  PF 保持开启（Tono anchor 已清空，无放行变化），直到 `pfctl -d` 或重启；若本机 `pfctl -e` 输出不含「already enabled」，退回原行为（仍泄漏），
+  以 CI 上 9b 的结果为准。均未实机验证。
+
+## 2026-09-25 · 运维：控制面部署 f5c31d58；exit-agent #624 上 14 个节点；Tokyo · Sakura 换 IP 后接入
+- 归属：ops 任务（控制面部署、出口计量与吊销）；不改客户端。
+- 来源：main `f5c31d58`（含 #624）；无代码改动，本条只记录运维动作，详细见
+  [舰队 exit-agent 接入记录 · 续记 2026-09-25](reports/FLEET_EXIT_AGENT_ROLLOUT_2026-09-24.md) 与
+  [runbook §0.1 第十五次](ops/rollout-ops2.md)。
+- 缺陷修复：TF-opus-4/8（#624）在节点上生效；`Tokyo · Sakura` 因换 IP 对客户不可达 → 已迁到 Xray 26.3.27 新布局并登记、
+  agent 运行（目录 IP 仍待修，见剩余限制）。
+- 新增/优化：无。
+- 工程与测试：无。
+- 验证：部署脚本内 control-plane 测试 892 通过；`/api/v1/system/version` = `f5c31d58`；D1 迁移至 0081；14 个节点 ACK ≤ 62 秒；
+  各节点手动一轮 `result=success`；Sakura 443 外部可达、API 应答。未做客户端实机连接验证，未在 preview 演练迁移。
+- 候选/发布：仅运维，无新候选。
+- 剩余限制：目录中 Sakura 仍为旧 IP（需受审计 catalog PUT，与 #570 部署后的 revision bump 合并）；hub
+  `nodes.secrets.json` 的 Sakura 条目仍为旧 IP；#570 未部署。
+
+## 2026-09-25 · exit-agent：停用轮保留最后计数；hy2 出错不再跳过 Xray 吊销
+
+- **归属/来源**：ops 任务（出口计量与吊销，#563 合并车审查后续）；Issue #600 的 TF-opus-4 与 TF-opus-8（其余条目仍开）。
+  基线 origin/main 13983688；分支 `fix/exit-agent-disable-counters-hy2-20260925`（红分支 `wip/exit-agent-disable-counters-hy2-20260925-red`）；
+  PR [#624](https://github.com/raydocs/tono/pull/624)；未合 main。只改 `services/exit-agent/reconcile_and_report.py`、其测试与 README。
+- **缺陷修复**：TF-opus-4：控制面答复 `EXIT_NODE_DISABLED` 的停用轮只撤客户端、不读计数，上次正常轮到停机之间的流量丢失
+  （1000→1500 仍记 1000）。改后：撤除完成（或失败）后再尽力读一次计数（同一 Xray 进程代际），折入本地状态总量，由下一次可上报的轮次报出；
+  计数读取或状态写入失败只追加到拒绝说明里，永不阻挡或替换撤除结果。TF-opus-8：hy2 目录权限不对或 allowlist 缺失时在 Xray 对账前就抛出，
+  该轮 Xray 吊销 0、计数 0、无 ACK。改后：先记下 hy2 错误，照常做 Xray 对账与计数读取并存入状态，再以 hy2 错误拒绝本轮，不发 roster/计量 ACK、
+  不上报用量，控制面仍视该节点未收敛。停用轮与 hy2 失败轮与控制面不可达轮共用新提取的 `keep_usage_locally`（行为同原不可达轮）。
+  续：adca10ac 把 hy2 的文件系统 `OSError` 也按 hy2 失败处理；增量审查（jev-route f4e3ecab，Opus 发现、Codex 核实）指出停用轮
+  `withdraw_disabled_node` 仍只接 `Refusal`，`OSError` 会跳过 Xray 撤除，已同样处理（仍以 hy2 错误拒绝该轮）。
+- **新增/优化**：无。
+- **工程与测试**：两条回归：`test_a_disabled_round_still_folds_the_final_counter_sample`（新增）；
+  `test_a_failed_hy2_publish_still_revokes_xray_and_keeps_usage_but_is_never_acknowledged` 替换原
+  `test_a_failed_hy2_publish_is_never_acknowledged`（原测试断言「hy2 失败不做 Xray 对账、不写状态」，正是本缺陷）；`run_round` 增加 `counters` 参数；
+  `test_a_hy2_filesystem_error_still_withdraws_xray_clients`（停用轮，修复前断言失败）。
+- **验证**：本机 `cd services/exit-agent && python3 -m pytest -q`：红分支两条新测试均以断言失败（2 failed, 90 passed）；修复分支 92 passed；停用轮续修后 93 passed（新测试在修复前失败）。
+  `python3 services/exit-agent/test_reconcile_and_report.py`（CI 同命令）续修后（c82ac4aa）93 OK。未在任何节点运行。
+- **候选/发布**：仅源码，无新候选。
+- **剩余限制**：**节点需部署新 agent 才生效（运维步骤，本 PR 未做，未 SSH、未部署）**。停用轮的计数由下一次能上报的轮次报出；
+  节点被永久退役则这段用量仍不会上报。#600 的 TF-opus-3/5/6/7 未处理。
 
 ## 2026-09-25 · 两端：系统时钟错误导致证书日期校验失败时点名时钟
 
@@ -212,6 +325,374 @@
 - **剩余限制**：测试员看到的「上次错误，可能已恢复」横幅读的是 Service 的 `last_error`：看门狗重装失败时写入，
   自行恢复后不清除，要等下一次成功的 arm/lock（`record_outcome`）才清。这是 Service 看门狗路径，与 #593 的 App
   分类路径不同，本 PR 未改，另需记录。未在实机复现。
+
+## 2026-09-24 · 控制面 + ops 控制台：销户保留停用原因，只有退款才记「退款销户」
+
+- **归属/来源**：ops 客户生命周期（控制面 Worker + ops 控制台）；内部审查 H17-O-F6（核实降级为低），
+  Issue [#532](https://github.com/raydocs/tono/issues/532)；基线 origin/main `8dc79a5b`，
+  分支 `fix/close-reason-audit-20260924`；未合 main。
+- **缺陷修复**：控制台「停用」调用 `POST users/{id}/close` 并带原因，Worker 接收后丢弃（且只有带正数
+  `content-length` 才读请求体），审计固定 `closed <email>`，空备注一律写「退款销户」、产品事件一律
+  `refund close`。改后：有请求体就读；原因（≤200 字）写进 `user.close` 审计行；新增可选 `refund: true`，
+  只有它才写「退款销户」备注、`refund close` 事件和审计里的 `(refund)`，否则事件记 `account closed`、
+  备注不动。控制台停用对话框加「这是退款销户」勾选。回收范围（家宽、Claude 号、allowlist、设备）不变。
+- **新增/优化**：控制台停用对话框的退款勾选（为上述修复服务）。
+- **工程与测试**：`test/ops-api.test.ts` 新增一个 `it`（非退款停用带原因 → 审计含原因、备注仍为空）；
+  旧代码上实跑失败（`expected 'closed a@example.com' to contain '客户要求暂停'`）。
+- **验证**：本机 MacBook control-plane `npx vitest run`（43 文件 / 892 用例通过）、`npm run typecheck`；
+  ops-console `npm run typecheck`、`npx vitest run`（26 文件 / 310 用例通过）、改动文件 eslint。
+  停用流程 Playwright 未在本机跑，以 PR CI `ops-console-e2e` 为准。
+- **候选/发布**：仅源码，无新候选；未部署。
+- **剩余限制**：旧版 admin 控制台「注销账号」发 `{}`，改后记为非退款；Claude 号退役后能否重绑仍待产品决定；
+  与同批 #525（销户单事务）改同一处理器，后合者按对方结构 rebase（本 PR 的原因/退款条件套进 batch 语句）。
+- **续记（2026-09-25，双厂商评审 jev-route `44cc9516`：O-F1 = C-F1、O-F2；合入 origin/main）**：
+  合入已进 main 的 #525：退款条件改为套进单个 batch 的停用语句（备注 `CASE WHEN ?`）与产品事件
+  （`refund close` / `account closed` 作为绑定参数），两边测试都保留。① 读体条件只排除了 null 与
+  `content-length: 0`，无 Content-Length 的零字节流（chunked 空体等）会进 `body()` 被判 400/415，
+  而旧代码会照常停用。`request.ts` 的 `body()` 加可选 `allowEmpty`（默认关，其他调用方不变）：
+  零字节体不论如何发送都读成 `{}`，非空体仍要求 JSON 类型；销户改为始终经它读体。② 控制台停用对话框
+  取消时复位退款勾选（对话框关闭时不卸载，状态会留到下次打开）。测试：`test/ops-api.test.ts` 新增一个
+  `it`（无 Content-Length 的空流 POST close → 200 且已停用），修复前实跑 `expected 400 to be 200`；
+  `e2e/customers-actions.spec.ts` 新增一个 test（勾退款 → 取消 → 再打开未勾选），修复前实跑失败
+  （`Received: checked`）。本机：control-plane 全套 895 用例、`typecheck`、`check:budgets`、`check:contract`
+  通过；ops-console `typecheck`、改动文件 eslint、`customers-actions.spec.ts` 中停用两条 light/dark 共 4 例通过。
+  评审建议 O-F3（原因 200 字上限前端未限）为未核实建议，本轮未改。
+
+## 2026-09-24 · 控制面 + ops 控制台：未注册客户开通时填的到期与套餐不再丢失
+
+- **归属/来源**：ops 客户生命周期（控制面 Worker + ops 控制台）；内部审查 H17-O-F4，
+  Issue [#527](https://github.com/raydocs/tono/issues/527)；基线 origin/main `8dc79a5b`，
+  分支 `fix/onboard-expiry-carry-20260924`；未合 main。
+- **缺陷修复**：开通抽屉只在客户已注册时才补发到期/套餐（第二次 `PATCH`），未注册邮箱直接跳过；
+  Worker 的 `users/onboard` 也拒收这两个字段，首次登录只带 wechat/contact/notes，账户建成后无到期。
+  改后：`users/onboard` 接受 `expiresAt`/`plan`（与 `PATCH users/{id}` 同样校验）；未注册时记在
+  `signup_allowlist`（新 migration `0091_signup_allowlist_entitlement.sql`），首次登录一起写进 `users`；
+  已注册时直接写 `users`，到期设为过去时间与 PATCH 一样立即 `enforceUser`；审计 `user.onboard`
+  注明设了哪些字段。控制台开通改为一次调用带上到期/套餐（去掉只对已注册客户生效的第二次调用），
+  未注册提示补一句「套餐和到期已经记下，客户第一次登录时生效」；fixture hub 同步接受到期。
+- **新增/优化**：无。
+- **工程与测试**：`test/ops-onboard-profile.test.ts` 新增一个 `it`（未注册邮箱带到期+套餐开通 →
+  邮箱验证码首次登录 → `users.expires_at/plan` 等于开通值）；旧代码上实跑失败（`expected 400 to be 202`）。
+- **验证**：本机 MacBook control-plane `npx vitest run`（43 文件 / 892 用例通过）、`npm run typecheck`、
+  `node tooling/scripts/check-migration-numbers.mjs`（唯一性通过，仅缺号告警）；ops-console
+  `npm run typecheck`、相关文件 eslint、`vitest run src/lib/customer-batch.test.ts test/ops-fixtures.test.ts
+  test/lint-rules.test.ts`（64 通过）。开通流程 Playwright 未在本机跑，以 PR CI `ops-console-e2e` 为准。
+- **候选/发布**：仅源码，无新候选；未部署；migration 未在远端 D1 应用。
+- **剩余限制**：migration 编号 0091 为临时取号（0077–0082、0088、0090 已被在审 PR 占用），合并时若已被占用
+  需顺延并同步 README；已在 allowlist 上但此前开通时丢了到期的客户不会被追溯补上。
+- **续记（2026-09-24，双厂商评审 528-O-F2 = 528-C-F1）**：开通查到「未注册」之后、写入待开通资料之前若客户
+  恰好首次登录，账户会按旧 allowlist 行建成、到期丢失。改为 allowlist 授权、待开通资料和「按邮箱更新已存在的
+  用户」同一个 `DB.batch` 提交，后者命中时对该用户 `enforceUser`；同时消除了「授权已提交、资料写入失败」的
+  中间态。原 `it` 追加竞态段（测试触发器在 allowlist 插入时建号）：上一版 `a0703722` 源码实跑失败
+  （`expires_at: null`），修复后通过；control-plane 全套 892 用例、typecheck 通过。CI `ops-contract` 的
+  ops 行数预算（每模块 ≤500 行）因此超限，已把到期/套餐校验与待开通资料语句移到同目录
+  `onboard-profile.ts`（`users.ts` 486 行），`check:budgets`/`check:contract` 本机通过。
+- **续记（2026-09-25，双厂商评审第二轮 jev-route `fa5ff8f9`：O-F1 = C-F1、O-F2、O-F3、O-F4）**：
+  ① 已注册客户开通时，资料/到期/套餐的 `UPDATE users` 原先排在家宽分配与 Claude 号分配之前单独提交，
+  后者抛 409（`PRODUCT_ALREADY_ASSIGNED` 等）时到期已改、却没有 `user.onboard` 审计也没有 `enforceUser`。
+  改为在分配全部成功后才写，失败的开通不改这几列，审计和 `enforceUser` 总跟在写入之后。
+  注意：带 `accountRef` 且显式传 `plan: null` 时，现在以显式值为准（原先会被分配时的 `markFirstEntitled` 补成 Claude）。
+  ② 竞态路径（查询后客户恰好首次登录）审计 `target_id` 与响应 `userId` 改为实际落到的账户 id，
+  `incomplete` 用 `registered_during_onboard` 代替 `user_not_registered`（家宽/Claude 号这次未处理，需再开通一次）。
+  ③ `FINDINGS_LEDGER.md` H17-O-F4 标为 in-PR 并关联 #527/#528。④ 控制台未注册提示拆成两句，
+  「套餐和到期已经记下」只在这次确实提交了套餐或到期时显示。测试：`ops-onboard-profile.test.ts` 新增一个 `it`
+  （已分配 Claude 号的客户再次开通带新 `accountRef`+到期+备注 → 409 且 `expires_at`/`notes` 不变），原竞态段追加
+  响应 `userId` 与审计 `target_id` 断言，两者在上一版源码实跑失败、修复后通过；ops-console 新增
+  `src/pages/customer/OnboardDrawer.test.tsx` 一个 `it`（未提交到期/套餐时不显示该句），无条件显示时实跑失败。
+  本机：control-plane 相关 4 个测试文件 356 用例、`typecheck`、`check:budgets`（`users.ts` 492 行）、`check:contract`
+  通过；ops-console `typecheck`、相关文件 eslint、该测试与 `test/lint-rules.test.ts`、`test/ops-fixtures.test.ts` 通过。
+- **续记（2026-09-25，列车 #629 重新合并 origin/main `6cfa4d9e`，含 #570）**：`users.ts` 开通冲突按两边意图合并：
+  已注册客户先签发出口身份（0077 已退役共享凭据时跳过）、再绑定家宽（main 的 `upsertHomeBinding` 零行 UPDATE
+  拒绝与 `home.assign` 审计不变）、再分配 Claude 号；之后 allowlist 授权与资料/到期/套餐的 `UPDATE users` 放进同一个
+  `DB.batch`，所以绑定或分配失败时 allowlist、资料、到期、套餐都不提交（原先 allowlist 在分配前提交），审计与
+  `enforceUser` 仍跟在这次提交之后；未注册与竞态路径不变。按 id 更新的语句移到 `onboard-profile.ts`
+  （`accountProfileWrite`，与待开通资料共用 SET），`users.ts` 496 行。0091 在 main 上未被占用（main 有 0090、0092）。
+  验证：`services/control-plane` `npx vitest run` 43 文件 / 929 用例通过；`typecheck`、`check:budgets`、`check:contract`、
+  `check-migration-numbers` 通过（仅缺号告警）。「分配 409 时 allowlist 不提交」没有专门用例。未部署。
+- **续记（2026-09-25，列车 #629 在 `cd3e8776` 上的双厂商评审 Opus+Grok 交叉核实；jev-route `cf9d375d`）**：
+  ① `TC2-opus-1 = TC2-grok-1`：已注册客户开通时，家宽绑定（`homeExitId` 的 `upsertHomeBinding`+revision+`refresh_catalog`；
+  粘贴线路的 `home-exits/assign`，可能新建家宽行、轮换密码、退役旧线路）先于 Claude 号分配提交，而分配的两个 409
+  （`PRODUCT_ALREADY_ASSIGNED`、`ACCOUNT_REF_IN_USE`）只靠只读查询即可判定，失败的开通会留下绑定。改为把这两项检查
+  抽成 `assertProductAssignable`（`createAssignedProductAccount` 仍调用同一函数），开通在第一次写入（出口身份签发）之前
+  先跑；`productAccountId` 预检顺带取出 `account_ref`（`onboard-profile.ts` 的 `onboardAllocationRef`，`accountRef`
+  优先，与分配一致）。main 的先绑定后分配顺序、`upsertHomeBinding` 零行拒绝、分配的零行 409 都不变；预检之后仍被并发
+  抢先而 409 时，已提交的绑定有 `home.assign`（或 `home-exits/assign` 自带）审计，不回滚。
+  ② `TC2-grok-2`：`HOME_EXIT_INACTIVE` 原先在查用户之前检查，未注册邮箱带停用家宽会被整单拒绝；改为只在已注册且按
+  `homeExitId` 绑定时检查，未注册路径仍只写 allowlist 与待开通资料。
+  测试：`ops-onboard-profile.test.ts` 扩两个原有 `it`（已分配客户再开通带 `homeExitId` → 409 `PRODUCT_ALREADY_ASSIGNED`，
+  且绑定为空、revision 仍为 5、资料不变；未注册邮箱带 `disabled` 家宽 → 202），在 `cd3e8776` 源码实跑分别失败
+  （`expected { '1': 1 } to be null`、`expected 409 to be 202`），修复后通过。`users.ts` 因此超 500 行预算，
+  ref 解析移到 `onboard-profile.ts`（`users.ts` 497 行）。之后合并 origin/main `33745f7d`（#630，无冲突）。
+  验证（合并后）：`services/control-plane` `npx vitest run` 43 文件 / 929 用例通过；`typecheck`、`check:budgets`、
+  `check:contract` 通过。未部署。
+
+## 2026-09-24 · 控制面列车 #570 审查续修：设备出口身份只等本次下发的节点
+
+- **归属/来源**：G1–G3 控制面（#323 退役共享凭据的续修）；`services/control-plane`。来源：列车 PR #570 审查发现
+  TC-anthropic-1（P1）与 TC-anthropic-2（P2），均经 Opus 与 Codex 核实；分支 `fix/cp-a-20260924`，基于 8fc72696；未合 main。
+- **缺陷修复**：
+  - TC-anthropic-1：`exitClientUUID` 要求**所有** active 的 `exit_nodes` 行都 ACK 过设备凭据。新建或重新启用的节点
+    `last_roster_at = 0`，于是只要有一个已登记、尚未上架的节点，所有共享凭据已退役（0077）的账户的全部设备都拿到
+    503 `EXIT_IDENTITY_PROPAGATING`。改后：`publicManagedCatalog` 先做家宽与 hy2 过滤，再从**本次下发**的目录取节点名
+    （` · hy2` 折回基名），只要求这些节点满足「有 active 的 `exit_nodes` 行且 `last_roster_at` 严格晚于凭据」。
+    目录名与 `exit_nodes.name` 的对应沿用 fleet/上架已有的按名匹配。下发了但未 ACK 的节点仍然挡住；未上架的节点不参与；
+    退役账户仍不回落共享凭据；下发目录里没有任何就绪节点时照旧 fail-closed。下发了但**没有 `exit_nodes` 行**的节点按
+    未就绪处理：它没有令牌，无法 ACK，没有任何证据表明它装上了设备凭据。
+- **新增/优化**：无。
+- **工程与测试**：
+  - 新增 `it`（`holds a retired account only on exit nodes its catalog serves`）：退役账户，目录内节点已 ACK，另有一个
+    未上架、`last_roster_at = 0` 的 active 节点，返回 200 并含设备 UUID；把该节点上架后返回 503。未改源码时先跑红：
+    `expected 503 to be 200`（第一次取目录）。
+  - TC-anthropic-2：#323 的用例删光出口后只断言响应里没有旧 UUID，503 也能过。现断言 503 `EXIT_IDENTITY_PROPAGATING`，
+    再登记 `Tono-Exit` 并以晚于凭据一秒的 `observedAt` ACK，断言 200 且含幸存设备的 UUID。
+  - fixture 修正：夹具出口名是 `Test exit-*`，与目录名对不上。`same-second`、`retires shared legacy …`（两组时钟偏移）、
+    `serves an exit identity roster …` 三个用例把 `exit-default` 改名为目录里的节点名；`retires shared legacy …` 原来
+    断言「未上架的 `Late Exit` 挡住目录」，这正是本次修掉的行为，改为先把它上架再断言 503。
+- **验证**：MacBook 本机 worktree `services/control-plane`：`npx vitest run test/worker.test.ts` 188 个用例通过（基线 187）；
+  `npx vitest run` 43 个文件 913 个用例通过；`npm run typecheck` 通过；`git diff --check` 通过。未部署，未碰远端 D1，无原生构建。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：
+  - 部署前需只读核对：目录里每个节点基名都有 active 的 `exit_nodes` 行且已 ACK。审查指出生产现有未登记的托管节点；
+    部署后，被下发该节点的退役账户会一直 503，直到节点登记并 ACK；dual 阶段未退役账户会改拿共享凭据（同 revision、
+    不同 digest，涉及 H3-F1/#316 的客户端处理）。本机无法查 D1，未核对。
+  - `device_only` 切换的预检与触发器仍看全部 active 出口，不看目录，未改。
+  - 先过滤再发身份带来两处顺序变化：家宽路由错误（503 `CATALOG_UNAVAILABLE`）先于身份错误返回；过滤后没有任何节点的
+    目录不再签发身份。
+- **续修（2026-09-24，二轮审查 Grok A1 / Codex A-F1，同分支）**：
+  - 缺陷修复（A1，P1，Opus 跨厂商核实成立）：上一版把已绑定用户自己的 catalog 家宽块（及其 ` · hy2` 孪生）也算进就绪集合；
+    家宽是 `home_exits` 行，没有任何代码把它和 `exit_nodes` 的 ACK 关联，于是该用户永远不就绪：退役账户一直 503，dual 未退役
+    账户改拿共享 UUID（同 revision、不同 digest）。8fc72696 上同一场景下发设备 UUID。改后：就绪集合排除家宽过滤器使用的同一组名字
+    （`home_exit_catalog_names`，即 `homeRoutingForUser().restricted`，按原名与 hy2 基名两种方式匹配）；出口节点仍按严格规则
+    （已登记、active、ACK 严格晚于凭据）。只剩家宽、没有出口节点的目录按零覆盖规则 fail-closed，因为家宽没有另一条 ACK 路径。
+  - 缺陷修复（A-F1，P3）：只含 hy2 块、尾部注释带占位符的模板，对不收 hy2 的客户端过滤成空列表后，文件级 `includes` 仍触发签发。
+    改为按过滤后的 proxies 列表判断：列表为空不签发（注释里的占位符原样保留）。
+  - 测试：新增两个 `it`：`serves the device identity to a bound catalog-home user once the served exit nodes ack`（断言设备 UUID）
+    与 `issues no exit identity when the served catalog filters down to no proxies`（退役账户 200、`proxies: []`）。
+    修复前在 8ea01b3f 上分别红（YAML 含共享 UUID 而非设备 UUID；`expected 503 to be 200`），修复后绿。
+  - 验证：MacBook 本机 worktree：`npx vitest run test/worker.test.ts test/ops-api.test.ts` 230 通过；`npx vitest run` 43 个文件
+    915 通过；`npm run typecheck` 通过。未部署，未碰远端 D1，无原生构建。
+  - 剩余限制：家宽节点自身是否装上设备凭据仍不在门控内（与 8fc72696 前相同）；非 `filterHomeExits` 的带 userId 调用不排除家宽
+    （当前没有这种调用方）。
+- **续修（2026-09-24，三轮审查 A-R2-F1，P2，Grok 与 Codex 各自发现、Codex 内存复现，同分支）**：
+  - 缺陷修复：`home_exits.proxy_name` 与 `exit_nodes.name` 分属两表、没有跨表唯一约束，发布也不拒重名块。上一版按家宽名排除
+    就绪集合时，与出口节点同名的家宽（`Collision`、`Collision · hy2`，或历史上的 `X · hy2` 家宽）会把该出口一并豁免：
+    出口缺行、disabled 或 ACK 为 0 时门控照样放行。改后：在同一条 `json_each` 就绪查询里，家宽块只有在原名与 hy2 基名都
+    **没有任何** `exit_nodes` 行（不论状态）时才排除；有同名出口行的一律按出口严格规则判定，仍是一次读。
+  - 有意保留（非缺陷）：dual 阶段未退役账户、下发目录只剩家宽时拿共享 UUID，是文档中的 dual 回落；退役账户与 `device_only` 仍 503。
+  - 测试：`test/worker.test.ts` 新增一个 `it`（`keeps an unacked exit node in readiness when a bound catalog home shares its name`：
+    退役账户，`Tono-Exit` 已 ACK，另登记 `Collision` 出口 ACK 为 0，并绑定同名 catalog 家宽）断言 503 `EXIT_IDENTITY_PROPAGATING`。
+    修复前在 b6c0a817 上红（`expected 200 to be 503`，即下发了设备 UUID），修复后绿。
+  - 验证：MacBook 本机 worktree：`npx vitest run test/worker.test.ts test/ops-api.test.ts` 231 通过；`npx vitest run` 43 个文件
+    916 通过；`npm run typecheck` 通过。未部署，未碰远端 D1，无原生构建。
+  - 剩余限制：未加跨表重名拒绝（建家宽时拒与出口同名、登记出口时拒与家宽同名），门控已不依赖它。
+  - 四轮（Codex 核实 a62703fe：B FIXED，A PARTIAL，A-R3-F1 P2）：出口行本身名为 `X · hy2`、只下发基名块 `X` 的同名家宽
+    仍被豁免（上一条「fail-closed」的说法不成立）。现在家宽排除条件也比对「家宽名 + ` · hy2`」；命中即纳入就绪集合，
+    按基名连接查不到出口行则记为未就绪。测试：在同一个 `it` 里把 `Collision` 出口改名为 `Collision · hy2` 再断言 503，
+    修复前红（`expected 200 to be 503`）。验证：两个文件 231 通过；列车 head 05c3c9d4 上本机 `npx vitest run` 43 文件 921 通过、`npm run typecheck` 通过（2026-09-25）。
+
+## 2026-09-24 · 控制面列车 #570 审查续修：开户轮换预检、家宽名 hy2 后缀
+
+- **归属/来源**：控制面 ops 家宽线路（ops 任务，非客户 ship 门）；`services/control-plane`。来源：列车 PR #570
+  审查发现 TC-OpenAI-1 / TC-Grok-1（均 P3，已跨厂商核实）；分支 `train/cp-20260924`，基于 26ba2b07 的一个续修提交；未合 main。
+- **缺陷修复**：
+  - TC-OpenAI-1：ops `POST users/onboard` 给已注册用户绑定一条待轮换的 socks5 家宽（`socks5_rotation_required_at` 已置）时，
+    预检只看 `home_exits.status`；`signup_allowlist` 与 users 的 notes/contact/wechat 先写入，随后
+    `upsertHomeBinding` 才抛 409 `SOCKS5_ROTATION_REQUIRED`，且没有审计行。改后：`homeExitId` 路径在第一条写入前调用
+    `assertHomeExitBindable`；`line` 路径在贴入密码与库存密码相同（即不会触发轮换）时同样先调用它。两条路径都在写入前
+    返回 409 `SOCKS5_ROTATION_REQUIRED`，不留部分写入。
+  - TC-Grok-1：catalog 类家宽的 proxyName 可以以 ` · hy2` 结尾；未在 hy2 灰度内的客户端会被剥掉该块，而
+    `routing.homeProxy` 仍指向它，客户端拒收整份目录。改后：shared-admin `home-exits` 创建与 PATCH、ops v1
+    `home-lines` 创建，对 catalog 类且名字以 `HY2_NAME_SUFFIX` 结尾的一律 400 `VALIDATION_ERROR`。hy2 剥离逻辑不变，
+    不为绑定名开例外。生产目前没有此类行（已查）。
+- **新增/优化**：无。
+- **工程与测试**：`test/ops-api.test.ts` 一个 `it`（onboard 两条路径均 409，notes 不变、allowlist 无行）；
+  `test/worker.test.ts` 一个 `it`（创建、PATCH、v1 home-lines 创建均 400）。两者在未改源码上先跑红（`expected 'after' to be 'before'`、
+  `expected 201 to be 400`），修复后绿。fixture 修正：既有用例 `keeps a retired home exit and its hy2 twin out of other accounts' catalogs`
+  用 `Home Residential B · hy2` 建 catalog 家宽，正是现在被拒的输入，改为 `Home Residential B`（仍断言其 hy2 孪生块不下发给他人）。
+- **验证**：MacBook 本机 worktree `services/control-plane`：两个改动测试文件 227 个用例通过；`npx vitest run` 43 个文件
+  912 个用例通过；`npm run typecheck` 通过。未部署，未碰远端 D1，无原生构建。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：`line` 路径贴入新密码时由 `home-exits/assign` 完成轮换，预检不拦；socks5 类名字不受后缀限制（未改）。
+  已有的 hy2 后缀 catalog 行（若将来出现）在 PATCH 任意字段时会被拒，需先改名。
+- **续记（2026-09-24，复核 8fc72696：两条均 PARTIAL，P2）**：分支 `fix/cp-b-20260924`，基于 8fc72696；未合 main。
+  - 缺陷修复：
+    - TC-OpenAI-1：预检通过后，若同一用户被并发解绑（0080 触发器给该 socks5 家宽置轮换标记），onboard 仍先写
+      `signup_allowlist` 与 notes/contact/wechat，`upsertHomeBinding` 复查后才 409，且没有 `user.onboard` 审计；
+      解绑落在复查与绑定 INSERT 之间时由触发器中止，已提交的资料写入同样不回滚。改后：已注册用户的绑定
+      （`homeExitId` 路径的 `upsertHomeBinding`、`line` 路径的 `home-exits/assign`）移到 allowlist 与资料写入之前；
+      绑定被拒时这两项都未写入，绑定成功仍由 `home.assign` 审计。
+    - TC-Grok-1：库里已有的 hy2 后缀 catalog 行仍可经 onboard `homeExitId` 与 `PUT users/{id}/home-binding`
+      （按 id 或按名）绑定。改后：共享检查 `assertHomeExitBindable` 对该行套用同一 `assertCatalogHomeProxyName`，
+      所有绑定路径返回 400 `VALIDATION_ERROR`（onboard 在任何写入前）。
+  - 新增/优化：无。
+  - 工程与测试：`test/ops-api.test.ts` 一个 `it`（包装 D1，在第一次可绑定检查返回后删除该用户绑定，模拟并发解绑；
+    断言 409 `SOCKS5_ROTATION_REQUIRED`、notes 不变、allowlist 无行），测试辅助 `ops()` 加可选 env 参数；
+    `test/worker.test.ts` 一个 `it`（直接插入已存的 `Home Stored · hy2` catalog 行，PUT 按 id、按名与 onboard 均 400，
+    无绑定）。未改源码时先跑红（`expected 'after' to be 'before'`、`expected 201 to be 400`），修复后绿。
+  - 验证：MacBook 本机 worktree `services/control-plane`：两个改动测试文件 229 个用例通过（ops-api 41、worker 188）；
+    `npx vitest run` 43 个文件 914 个用例通过；`npm run typecheck` 通过。未部署，未碰远端 D1，无原生构建。
+  - 候选/发布：无新包，仅源码。
+  - 剩余限制：绑定与 allowlist/资料写入仍是分开的语句，不是一个 D1 batch；绑定成功后若其后的账户分配 409，
+    allowlist/资料已写而没有 `user.onboard` 行（改前即如此）。触发器在复查与 INSERT 之间中止时不映射为 409
+    `SOCKS5_ROTATION_REQUIRED`（此时无其他写入）。已绑定到 hy2 后缀 catalog 行的用户，重存同一绑定也被拒，需先改名。
+- **续修（2026-09-24，二轮审查 Codex B-F1，P2，8fc72696 前即存在）**：同分支。
+  - 缺陷修复：用户已有绑定时，`upsertHomeBinding` 读到 `created_at` 后执行 `UPDATE user_home_bindings`；并发解绑落在两者之间时
+    UPDATE 影响 0 行，旧代码不看 `meta.changes` 照常返回，onboard 随后写 allowlist、notes/contact/wechat 和 `home.assign`
+    审计，返回 202 且 `binding: null`。改后：0 行时按「解绑先发生」处理：再跑 `assertHomeExitBindable`（socks5 家宽已被
+    0080 触发器置轮换标记，返回 409 `SOCKS5_ROTATION_REQUIRED`，其后不再写任何东西）；复查通过（catalog 家宽）则走与
+    读不到旧行时相同的 INSERT。修在共享函数里，`home-exits/assign` 同样受益。
+  - 测试：`test/ops-api.test.ts` 新增一个 `it`（包装 D1，在读 `created_at` 之后删除绑定）；断言 409 `SOCKS5_ROTATION_REQUIRED`、
+    notes 不变、allowlist 无行、无 `home.assign` 审计。修复前在 00190396 上红（`expected 202 to be 409`），修复后绿。
+  - 验证：MacBook 本机 worktree：`npx vitest run test/worker.test.ts test/ops-api.test.ts` 230 通过；`npx vitest run` 43 个文件
+    915 通过；`npm run typecheck` 通过。未部署，未碰远端 D1，无原生构建。
+  - 剩余限制：shared-admin `PUT users/{id}/home-binding` 有自己的一份读后 UPDATE，未改；同一窗口下 0 行后仍会 bump revision、
+    写 `home.replace` 审计，再因读回的绑定为空而出错（按代码阅读，未测）。catalog 家宽在该窗口会被重新绑定（与解绑先发生的顺序一致）。
+- **续修（2026-09-24，二轮审查 B-F1-PUT，P2，Codex 复现，同分支）**：
+  - 缺陷修复：上条剩余限制所述的 `PUT users/{id}/home-binding` 已复现：读后 UPDATE 影响 0 行时读回 null，仍 bump revision、写
+    `home.replace` 审计，随后 `publicHomeBinding(null)` 抛错，返回 500。改后：该路由不再自带读后 UPDATE/INSERT，改调已修好的
+    `upsertHomeBinding`（其首行即 `assertHomeExitBindable`，故去掉路由里重复的一次调用），按返回的 `created` 决定 201/200 与
+    `home.assign`/`home.replace`。并发解绑时 socks5 家宽在 bump revision 与审计之前返回 409 `SOCKS5_ROTATION_REQUIRED`，与 onboard 一致。
+  - 测试：`test/ops-api.test.ts` 新增一个 `it`（`PUT users/{id}/home-binding refuses before revision and audit when an unbind lands before its update`，
+    同样包装 D1 在读 `created_at` 后删除绑定）断言 409 `SOCKS5_ROTATION_REQUIRED`、目录 revision 不变、无 `home.*` 审计。
+    修复前在 7ad62239 上红（`expected 500 to be 409`），修复后绿。
+  - 验证：MacBook 本机 worktree：`npx vitest run test/worker.test.ts test/ops-api.test.ts` 231 通过；`npx vitest run` 43 个文件
+    916 通过；`npm run typecheck` 通过。未部署，未碰远端 D1，无原生构建。
+  - 剩余限制：绑定写入与其后的读回、revision、审计仍是分开的语句；绑定成功后若再有并发解绑，读回仍可能为空（窗口更小，未改）。
+
+## 2026-09-24 · 控制面合并列车 train/cp-20260924
+
+- **归属/来源**：G1–G3 控制面修复与 ops 任务的合并（各 PR 的条目见下方）；基线 origin/main
+  [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b)，分支 `train/cp-20260924`。按 PR 正文标记与
+  `prreview-r3-control-plane.md` 顺序依次 `--no-ff` 合入 23 个 PR：#349 #369 #395 → #394 #400 #402 #441 →
+  #406 #399 #381 → #451 → #404 #450 #447 → #326 #419 → #329 → #470 #486 #474 → #493 #495 → #323。
+  #375 未合：exit-agent 记录顺序是 #389→#375→#384→#464，#389 在 fleet 组。
+- **缺陷修复**：无新增修复。
+- **新增/优化**：无。
+- **工程与测试**：只做了已有记录的合并解法。#447 的 `retention.ts` 日志保留步骤改为调用 #450 的
+  `sweepDiagnosticsLogs`，这样孤儿 pending 清理不会丢。#406/#419、#486/#474 的相邻 `it` 都保留，并补回 `});`。
+  `publicTrafficPolicy` 先剥离内嵌 revision，再用 `admitStoredUnsignedEndpoints = true` 校验（#474 × #470/#486）。
+  `relistFleetNode` 保留 #451 的 `assertExitIdentityActive` 与 #493 的 `const block`；#451 的上架测试条目补上
+  Reality 字段。迁移号 0077–0082、0088、0090 各不相同，没有重编号。
+- **验证**：本机 `services/control-plane`：`npx vitest run` 43 个文件 910 个用例通过，`npm run typecheck`、
+  `check:budgets`、`check:contract` 通过；`test-policy-signing-contract.sh` 5/5 通过；
+  `macos-candidate-workflow.test.rb` 通过；`git diff --check` 通过。未做原生构建，未部署，未碰远端 D1。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：部署前的只读检查见列车 PR 正文：#323、#326、#419、#470、#486、#493、#495；另有 0077/0078
+  需在一次性远端 D1 上试跑、#329 必须先迁移，`TRAFFIC_POLICY_EMBED_REVISION` 保持关闭。
+- **续记（2026-09-25，再次合入 main 13983688；TC-anthropic-2/3）**：
+  - 合并：`git merge origin/main`（merge commit，不 rebase）。只有本页冲突，两边按条目保留、新日期在前；
+    FINDINGS_LEDGER 自动合并。main 自上次合入以来没有改 `services/control-plane`，迁移号无冲突，无代码冲突。
+  - TC-anthropic-2：列车已有断言，未新增用例。`removes the shared legacy credential …`（dual，退役账户，目录内
+    `Tono-Exit` 未 ACK）断言 503 `EXIT_IDENTITY_PROPAGATING`，ACK 晚于凭据后 200 且含设备 UUID、不含旧共享 UUID；
+    `holds a retired account only on exit nodes its catalog serves` 断言目录内 `last_roster_at = 0` 的节点挡住时 503。
+  - TC-anthropic-3（部署后必做，无条件）：0078（#326）改变家宽过滤集合但不推进目录 revision，#495 的 hy2 过滤同理；
+    Windows 把同 revision、不同 digest 当作篡改拒收。部署并让出口节点拉取、应用新 Worker 的 roster 之后，**无论**
+    `HY2_CATALOG_EMAILS` 是否设置、目录里有没有 ` · hy2` 块，都用受审计的 `PUT exit-catalog`（原 YAML，带当前
+    `expectedRevision`；写 `catalog.publish` 审计与 `catalog_publish` 回执）推进一次 revision，再确认客户端刷新。
+  - 验证：本机 worktree `services/control-plane`：`npm test`（`vitest run`）43 个文件 921 个用例通过。
+    未部署，未碰远端 D1，无原生构建。
+  - 候选/发布：无新包，仅源码。
+- **续记（2026-09-25，合入 main 8ee20a9a：#624、#525、小列车 #627（#523、#531、#578）、#628）**：
+  - 合并：`git merge origin/main`（merge commit，不 rebase）。代码冲突两处，均在 `src/index.ts`：
+    刷新路由：#329 把刷新移到 `sessions.ts` 的 `refreshSession`，#578 的 `recordClient` 改在其中 `tokens()`
+    提交轮换之后调用（`refreshSession` 增加 `req` 参数），#329 的重放宽限不变；admin 用户 PATCH：#406 已把它
+    移到 `ops/token-admin.ts`，此处删去 main 的副本，#523 的放宽（Tailscale 注册暂停时排队的吊销不挡恢复）
+    改在 `token-admin.ts` 生效。本页与 FINDINGS_LEDGER 两边按条目/行保留；TC-anthropic-1 取列车的当前行。
+  - 合并后 `legacy-handlers/users.ts` 为 508 行，超过 ops 500 行预算（main 与列车各自未超）；只读的
+    `getOpsUserHomeBinding` 原样移到 `legacy-handlers/user-home-binding.ts`，不改逻辑。
+  - 迁移号：main 0081、0092，列车 0077–0080、0082、0088、0090，互不重复。
+  - 验证：本机 worktree `services/control-plane`：`npx vitest run` 43 个文件 925 个用例通过；`npm run typecheck`、
+    `check:budgets`、`check:contract` 通过。临时去掉 `refreshSession` 里的 `recordClient` 时，#578 的
+    `records the client build …` 用例失败，恢复后通过。`token-admin.ts` 的 #523 放宽没有专门用例（#523 的用例走
+    ops 路径）。未部署，未碰远端 D1，无原生构建。
+  - 候选/发布：无新包，仅源码。
+
+## 2026-09-24 · 控制面按设备记录客户端版本（X-Tono-Client）
+
+- **归属/来源**：G1–G3 候选验收的现场证据（ops 可见性）；影响控制面 Worker 与 macOS/Windows 请求头。
+  所有者决定 2026-09-24（内部版默认开启分类连接失败遥测）的配套项。基线 origin/main
+  [8dc79a5b](https://github.com/raydocs/tono/commit/8dc79a5b)，分支 `fix/cp-client-version-20260924`，Issue #574，未合 main。
+- **缺陷修复**：无。
+- **新增/优化**：此前登录（邮箱/OIDC verify）、`auth/refresh`、`exit-catalog` 只更新 `last_seen_at`，客户端版本只存在于
+  默认关闭的遥测窗口/失败上报里，D1 无法回答设备跑 0.0.72 还是 0.0.73。现在两端每个控制面请求带
+  `X-Tono-Client: <macos|windows>/<版本>`，Worker 严格解析（仅 macos/windows，版本 ≤40 字符且只含
+  `[0-9A-Za-z.+-]`，其余忽略），在这三处写入 `devices.client_platform` / `client_version`，值不变时不写行。
+  新 migration `0092_device_client_version.sql`（仅加两列 + CHECK；合并时如编号被占按顺序重编号）。
+  不新增账号、网络或自由文本数据；缺头或格式不符保持上次值。
+- **工程与测试**：`index.ts` 行数预算不变（登录函数签名收成一行抵消新增调用）。
+- **验证**：本机 `services/control-plane` `npx vitest run test/worker.test.ts -t "records the client build"`：旧代码红
+  （无列 `no such column: client_platform`；仅加 migration 时读到 `null`），修复后绿；全量 `npx vitest run` 43 文件
+  892 用例通过，`npx tsc --noEmit` 通过。macOS/Windows 请求头改动未在本机编译，以 PR CI 为准。
+- **候选/发布**：无新包，仅源码；未部署 Worker，未对远端 D1 执行 migration。
+- **剩余限制**：运维控制台尚未展示这两列；旧客户端不带头，其设备保持 NULL 直到升级；与 #329（refresh 移入
+  `sessions.ts`）合并时需把 refresh 处的记录调用随之移动。
+
+## 2026-09-24 · ops 控制台：到期/超额会撤销设备，续期后要逐台重新登录（文案改为实情）
+
+- **归属/来源**：ops 客户生命周期（ops 控制台文案 + 控制面回归）；内部审查 H17-O-F3，
+  Issue [#530](https://github.com/raydocs/tono/issues/530)；基线 origin/main `8dc79a5b`，
+  分支 `fix/expiry-revoke-copy-20260924`；未合 main。临时产品决定（2026-09-24，待 `docs/DECISIONS.md` 统一补录）：
+  保留到期/超额撤销，续期或清零不自动恢复，每台设备重新登录后恢复。
+- **缺陷修复**：到期后 cron 一个周期内、超额上报时立即撤销名下全部设备、会话与设备级出口凭据，
+  续期/清零只改 `users`，原刷新令牌仍 401；控制台却写「到期只挡登录和取目录，不删数据，也不撤设备」。
+  改后：改到期抽屉说明、设到期/续 30 天/批量续期/改账务/清零用量的确认文案都写明设备会被撤销、
+  续期或清零后要请客户在每台设备上重新登录。Worker 行为不变。
+- **新增/优化**：无。
+- **工程与测试**：`test/worker.test.ts` 新增一个 `it`：到期 → `scheduled` → 设备 `revoked`、凭据删除 →
+  续期后原刷新令牌仍 401 → 同一安装重新登录复用同一设备、`me` 200、凭据重新生成。它钉住文案承诺的
+  现有行为，在旧代码上同样通过（本项不改 Worker 行为，没有红灯阶段）。
+- **验证**：本机 MacBook control-plane `npx vitest run test/worker.test.ts`、`npm run typecheck`；
+  ops-console `npm run typecheck`、`npx vitest run`（26 文件 / 310 用例通过）、文案文件 eslint。
+- **候选/发布**：仅源码，无新候选；未部署。
+- **剩余限制**：客户端靠被拒的会话得知（macOS Suspended 文案含「退出再登录」；Windows 见 #460/#515）；
+  具名原因码由单独的权益码改动负责，本 PR 不改 `auth.ts`、刷新语义或客户端。
+- **续记（2026-09-24，双厂商评审 531-O-F1 ≈ 531-C-F1）**：「已经到期过」不能推出「设备已被撤销」（cron 前续期、
+  逐台撤销中途续期都不会撤销或只撤一部分），且设到期、取消到期两个确认原先没提已撤销的设备。文案改为按实际状态的
+  条件句「若有设备已因到期/超额被撤销，续期/改日期/取消到期/清零不会恢复它们，要请客户在这些设备上重新登录」，
+  覆盖改到期抽屉说明、续 30 天、设到期、取消到期、批量续期、改账务、清零用量；ops-console typecheck、
+  eslint、vitest（310 用例）通过。
+
+## 2026-09-24 · 控制面：Tailscale 注册暂停时，未跑的 tailnet 吊销不再永久挡住账户恢复
+
+- **归属/来源**：ops 客户生命周期（控制面 Worker）；内部审查 H17-O-F5 / H17-G-F2，
+  Issue [#522](https://github.com/raydocs/tono/issues/522)；基线 origin/main `059a2ea2`，
+  分支 `fix/tailnet-revoke-reenable-20260924`；未合 main。
+- **缺陷修复**：生产 `TAILSCALE_ENROLLMENT_ENABLED=false` 时 `processRevocations` 直接返回，
+  停用/销户时为带 `tailscale_node_id` 的设备记下的 `revocation_jobs` 永远不完成；ops
+  `PATCH users/{id}` 与 token-admin `PATCH admin/users/{id}` 的恢复检查把这些任务算作「吊销进行中」，
+  恢复永久返回 409 `REVOCATION_PENDING`。改后：注册暂停时排队任务不再挡恢复（仍有 live 设备照旧 409）；
+  任务保持未完成，不伪装成已吊销，注册重新打开后照常执行；设备级注册围栏
+  （`issueEnrollment`）不变；ops 恢复时写审计 `user.tailnet-revocation-queued` 记下排队数。
+- **新增/优化**：无。
+- **工程与测试**：`test/ops-api.test.ts` 新增一个 `it`（注册关闭、已停用用户带排队任务 → 恢复 200、
+  任务仍未完成、审计行存在）；旧代码上实跑失败（`expected 409 to be 200`）。
+- **验证**：本机 MacBook `npx vitest run test/ops-api.test.ts`（39/39 通过）、
+  `test/worker.test.ts -t "re-enable|revocation|tailnet"`（11 通过）、`test/index-size.test.ts`、
+  `npm run typecheck`；完整套件以 PR CI 为准。
+- **候选/发布**：仅源码，无新候选；未部署。
+- **剩余限制**：未查生产 D1 中是否仍有带 `tailscale_node_id` 的设备行；注册暂停期间这些 tailnet
+  节点确实仍在 tailnet 上（审计行只是记录，不是撤销）。token-admin 路径无操作者身份，只放宽检查不写审计；
+  与 #406（把该处理器移出 `index.ts`）相邻冲突，后合者需把同一条件带过去。
+
+## 2026-09-24 · 控制面：销户改为单个 D1 事务，中途失败不再留下「资源已回收、VPN 仍可用」
+
+- **归属/来源**：ops 客户生命周期（控制面 Worker）；内部审查 H17-C-F2，
+  Issue [#524](https://github.com/raydocs/tono/issues/524)；基线 origin/main `059a2ea2`，
+  分支 `fix/refund-close-atomic-20260924`；未合 main。
+- **缺陷修复**：`POST ops/users/{id}/close` 原先分多次独立提交（解绑家宽 → 目录版本 → 退役 Claude 号
+  与事件 → 删 allowlist → 最后才 `disabled`），任一步之后失败都会保留已回收的资源而用户仍 `active`，
+  鉴权与出口名单照常放行，cron 也不会补完。改后：停用与全部回收放进同一个 `DB.batch`（一个事务），
+  停用排第一；要么全部生效，要么全部回滚。目录版本只在确实删掉绑定时递增、产品事件只在确实退役时写入
+  （`changes() > 0`，与原来的条件一致）。设备/会话撤销仍在 batch 之后由 `enforceUser` 执行，
+  账户已停用时鉴权与名单立即拒绝，遗留部分由 cron 补完。
+- **新增/优化**：无。
+- **工程与测试**：`test/ops-api.test.ts` 新增一个 `it`：用测试触发器让「停用」写入失败，断言 Claude 号
+  仍为 `assigned`、allowlist 仍在、用户仍 `active`。旧代码上实跑失败（`expected 'retired' to be 'assigned'`）。
+- **验证**：本机 MacBook `npx vitest run`（control-plane 全套 43 文件 / 892 用例通过）、
+  `npm run typecheck`；另用一次性临时用例（未提交）确认目录版本递增与产品事件在成功路径上只发生一次。
+- **候选/发布**：仅源码，无新候选；未部署。
+- **剩余限制**：家宽 SOCKS5 口令轮换标记属 #381，不在本 PR；与同批的「销户保留原因」修复
+  改同一处理器，后合者需按本 PR 的 batch 结构 rebase。
 
 ## 2026-09-24 · Windows 候选包构建：私有解包分支写出 live `Tono.exe`，载荷门拒绝
 
@@ -916,6 +1397,534 @@
     仅 intent} 组合及他人已验证 intent。验证：本机仍未运行 cargo，待 GitHub-hosted `windows-2025` CI；
     `git diff --check` 通过，改动部分 rustfmt 无新增差异。剩余限制：会话 ID 仅在原会话完全结束后才可能
     被复用，此时原调用进程已退出，未另做处理。
+
+## 2026-09-23 · 控制面：设备吊销同时退役账户共享 legacy exit 凭据
+
+- **归属/来源**：控制面凭据生命周期（ops/控制面安全修复，非客户 ship 门）；影响
+  `services/control-plane`。基线 main
+  [244075f2](https://github.com/raydocs/tono/commit/244075f28794652c5f562e67b72fde0e4d7c3184)，
+  分支 `fix/legacy-revoke-20260923`，Issue [#313](https://github.com/raydocs/tono/issues/313)；未合 main、未部署。
+- **缺陷修复**：dual rollout 阶段，设备首次拉目录时逐设备凭据尚未被全部节点 ack，会回落到账户共享的
+  `exit_credentials` UUID；吊销（DELETE、ops 动作、LRU 轮换、pending 过期）只删 `device_exit_credentials`，
+  只要账户还有别的活设备，共享 UUID 就一直在全部节点 roster 上，被吊销设备照样能连。改后：新迁移
+  `0077` 在任一设备从 pending/active 转为 revoked 时，在同一事务内永久退役该账户 legacy 凭据
+  （`retired_at`），推进目录 revision，并给其余活设备排 `refresh_catalog`；roster 的 legacy UNION 排除已退役行；
+  `exitClientUUID` 对已退役账户不再回落（设备侧等待自己的凭据就绪，未就绪返回 503
+  `EXIT_IDENTITY_PROPAGATING`；无设备的 legacy 签发返回 409 `DEVICE_IDENTITY_REQUIRED`）。
+  是退役而不是轮换：exit-agent 以 `u:<userId>` 标签管理 legacy client，同标签换 UUID 不会替换 Xray 已装的旧 UUID。
+  审查后修正：（1）ops `POST users/onboard` 对已退役账户不再预签发 legacy（此前返回 409
+  `DEVICE_IDENTITY_REQUIRED`，而 `signup_allowlist` 已写入，属部分写）；预签发移到第一条写入之前，
+  失败不留部分写入，已退役账户按逐设备凭据正常完成开户（`exitIdentityIssued=true`）。
+  （2）0077 一次性回填上线前的吊销：凡已有 revoked 设备、legacy 仍未退役的账户立即退役（`WHERE retired_at IS NULL`，幂等）。
+  范围包含"已无活设备"的账户：roster 只在账户有设备且全部不活时隐藏 legacy，新设备一登录它就回来。
+  （3）触发器改为每个一条语句、单行（远端 D1 迁移解析不了多行触发器体，见 0015/0021）：设备吊销只退役凭据，
+  revision +1 与 `refresh_catalog` 挂在 `exit_credentials.retired_at` 由 NULL 变非 NULL 上，回填也会触发。
+- **新增/优化**：无。
+- **工程与测试**：`test/worker.test.ts` 一个 `it`
+  （removes the shared legacy credential from the exit roster once any device of the account is revoked）；
+  在旧代码上先跑红（roster 仍含被吊销设备拿到的 UUID），修复后绿。审查后同一 `it` 追加：吊销后
+  ops onboard 该账户返回 202 且 `exitIdentityIssued=true`；在上一版源码上红（`expected 409 to be 202`）。
+  回填没有 vitest 覆盖（测试库从空库迁移）：本机用 sqlite3 在 0001–0076 上造数据后应用 0077 手工核对：
+  有 revoked 设备的账户被退役、纯活设备账户不动，revision 每账户 +1、存活设备排到 refresh，重跑回填不变。
+- **验证**：MacBook 本机 worktree，`npx vitest run test/worker.test.ts -t …` 先红后绿；
+  `npx vitest run`（control-plane 全部 43 文件 892 用例）通过；`npm run typecheck`、`check:budgets` 通过。CI 结果见 PR。
+  远端 D1 未试跑（不碰远端）。
+- **候选/发布**：无新包，仅源码；需要 D1 迁移 0077 + Worker 部署，均未执行。
+- **剩余限制**：exit-agent 无需改动（现有 reconcile 会删除从 roster 消失的 `u:<userId>`，hy2 allowlist 按摘要重写）；
+  部署顺序为先应用 0077 迁移、再部署 Worker。已退役账户的设备在每个 active 节点 ack 其逐设备凭据前拿到 503
+  `EXIT_IDENTITY_PROPAGATING`；只要有一个 active 但不再拉 roster 的节点，这些设备会一直 503（以前被 legacy 回落掩盖）。
+  LRU、到期、pending 过期都会触发退役，加上回填，dual 阶段的 legacy 回落会很快对大多数账户失效；
+  每个账户首次退役推进一次全局 revision，部署后头几天运营预览/ drain 的 `CATALOG_CONFLICT` 会比平时多（自愈）。
+  切断在节点下一次 roster 轮询后生效。生产 `exit_credential_rollout.phase` 未在本机确认；`device_only` 阶段 onboard
+  对已注册用户仍 409（main 上既有行为，本 PR 未改，但现在不留部分写入）。
+
+## 2026-09-23 · 控制面：hy2 条目只下发给声明支持 hy2 的客户端
+
+- **归属**：hy2 灰度（SHIP_PLAN hy2 备用传输）；控制面 `services/control-plane`。只在设置了 `HY2_CATALOG_EMAILS` 时影响客户。
+- **来源**：内部审查 H15-F8，Issue #494；分支 `fix/hy2-capability-gate-20260923`，基线 origin/main bb2ed4e4。提交时未合 main。无 migration。
+- **缺陷修复**：`publicManagedCatalog` 的判断是「请求带 `X-Tono-Accept: hy2` **或** 邮箱在 `HY2_CATALOG_EMAILS` 里」。名单内账户用 0.0.72（不发该请求头）拉目录也会收到 ` · hy2` 块，而 0.0.72 两端遇到 `type: hysteria2` 就拒收整份目录。改后：必须请求头声明 hy2；名单设置时只在声明了 hy2 的客户端里再收窄，名单本身不再放行未声明的客户端。名单未设置时，带请求头的客户端照旧收到 hy2。
+- **新增/优化**：无。
+- **工程与测试**：改写原有的一个 Worker `it`（`test/worker.test.ts`，改名为 `serves hy2 catalog blocks only to clients that declare hy2, narrowed by the gray list`）。原用例把「名单内、无请求头也给 hy2」当作期望（正是本缺陷），现改为断言不给；「名单已设、未在名单、带请求头」改为不给；另加一条断言：名单未设、带请求头时给。`wrangler.jsonc` 注释同步新语义。
+- **验证**：MacBook 本机 worktree：改写后的 `it` 在旧 `catalog.ts` 上失败（名单内无请求头的账户收到 ` · hy2`），修复后通过。`npx vitest run`（control-plane 全量）43 个文件、891 个测试通过；`npx tsc --noEmit` 通过。未部署，未碰 remote D1。
+- **候选/发布**：仅源码，无新候选；Worker 未部署。
+- **剩余限制**：生产是否设置了 `HY2_CATALOG_EMAILS`、生产目录是否已有 hy2 块，均未核实，需 owner 只读检查。名单已设时，未在名单里的 0.0.73 客户端不再收到 hy2（此前收到），这是有意的收窄。部署后若名单内账户的服务端 YAML 变化，按 `wrangler.jsonc` 注释需要 bump catalog revision。`docs/SHIP_PLAN.md` 第 5 条对名单语义的描述未在本 PR 修改。
+
+## 2026-09-23 · 重新上架：不再发布缺 Reality 设置的目录条目
+
+- **归属**：ops 任务（节点下架/上架流程）；控制面 `services/control-plane`。不属客户发布门，但影响所有客户端的目录更新。
+- **来源**：内部审查 H15-F7，Issue #492；分支 `fix/relist-complete-entry-20260923`，基线 origin/main bb2ed4e4。提交时未合 main。无 migration。
+- **缺陷修复**：控制台发起的 `catalog_relist` 任务不带条目（任务参数表为空），`relistFleetNode` 用 profile 的 IP 拼一个兜底条目，缺 `servername`、`reality-opts`、`flow`，照样发布并提升 revision；macOS 与 Windows 客户端都因一条不合格而拒收整份目录。改后：(1) 目录里没有该节点、也没有提供条目时，返回 422 `RELIST_NO_TEMPLATE`，不再猜测条目；(2) 提供的 VLESS 条目先按两端客户端的必需字段检查（`tls: true`、`servername`/`sni`、`reality-opts.public-key` 43 位 base64url、`reality-opts.short-id` 偶数位 hex ≤16，`flow`/`network` 有值时须为 `xtls-rprx-vision`/`tcp`），不完整返回 422 `CATALOG_ENTRY_INCOMPLETE` 并列出缺的字段。节点已在目录中时行为不变。
+- **新增/优化**：无。
+- **工程与测试**：一个 Worker `it`（`test/ops-jobs.test.ts` `relist refuses to publish an entry without the Reality settings clients require`）。fixture 修正：同文件 retire→drain→relist 用例原先靠兜底条目上架（正是本缺陷路径），改为直接用带 Reality 设置的完整条目调用 `relistFleetNode`。
+- **验证**：MacBook 本机 worktree：新 `it` 在旧代码上失败（任务状态 `succeeded`，期望 `failed`）；修复后通过。`npx vitest run`（control-plane 全量）43 个文件、892 个测试通过；`npx tsc --noEmit` 通过。未部署，未碰 remote D1。
+- **候选/发布**：仅源码，无新候选；Worker 未部署。
+- **剩余限制**：下架不保存原条目，控制台上架已下架节点现在会被明确拒绝，需用目录发布工具重新发布完整条目（保存原条目是后续工作）。PUT `exit-catalog` 与下架路径仍只校验结构、名字和身份占位符，未套用 Reality 字段检查（发布工具生成完整条目；全量套用需改约 24 个测试 fixture）。生产 D1 是否已有兜底模板生成的条目未核实，需 owner 只读检查。
+
+## 2026-09-23 · Worker/发布工具把策略 revision 写进被签名 json（H3-F5 服务端，默认关闭）
+
+- **归属/来源**：G1 签名信任边界；影响控制面 `src/ops/shared-admin/traffic-policy.ts`、
+  `src/traffic-policy.ts`、`src/env.ts`、共享编辑器解析 `admin/src/lib/traffic-policy.ts`，离线签名工具
+  `tooling/scripts/publish-traffic-policy.mjs` 与 `test-policy-signing-contract.sh`。基线 main bb2ed4e4，
+  分支 `fix/worker-policy-revision-20260923`；Issue #317；依赖客户端 #342、#472、#473 先发布普及；
+  提交时未合 main。
+- **缺陷修复**：策略 revision 在签名外，被重放的签名策略可任意声明 revision。新增开关
+  `TRAFFIC_POLICY_EMBED_REVISION`（仅 `'true'` 生效，未在 wrangler.jsonc 设置即关闭）：开启后
+  PUT 把即将分配的 revision（`expectedRevision + 1`）写入 canonical json，签名必须覆盖它，覆盖旧
+  字节的签名以 `TRAFFIC_POLICY_SIGNATURE_INVALID` 拒绝；dry run 用传入的 `expectedRevision`（未传则
+  用当前行 revision）绑定。读取路径不论开关：json 内若带 revision 必须等于行 revision，否则 503，
+  校验前剥离该键。签名上下文与 D1 列不变，无 migration。
+- **新增/优化**：发布工具在 dry run 前读取当前 revision 并随 dry run 与发布使用同一个
+  `expectedRevision`，并在 dry run 绑定了 revision 时核对其为 `expectedRevision + 1`；共享编辑器
+  解析忽略服务端 json 中的 `revision` 键（开启后编辑器仍能载入当前策略）。
+- **工程与测试**：新增 Worker 回归 `binds the assigned revision inside the signed policy json once
+  enabled`；签名契约脚本增加第 5 项：Worker 以 `revision` 键写入并在读取路径校验，且当 wrangler.jsonc
+  开启该开关时要求 macOS、Windows `policy.rs` 与 `sing_box.rs` 源码均绑定该键。
+- **验证**：本机新 `it` 在旧代码上失败（dry run json 无 revision：`expected undefined to be 1`），
+  修复后通过；`npx vitest run` 全量 43 文件 892 用例通过；`npm run typecheck` 通过；ops-console
+  `tsc --noEmit` 与 `vitest run src/lib/settings-publish` 通过；`test-policy-signing-contract.sh` 5/5，
+  并临时开启开关确认在 macOS 未绑定时失败（已还原）；`node --check` 发布工具。未部署。
+- **候选/发布**：无新包，仅源码；未部署 Worker，开关未开启。
+- **剩余限制**：开启顺序：先合并并发布客户端（#342、#472、#473），待其普及后再在 wrangler.jsonc 开启
+  开关并部署；契约检查只证明源码已绑定，不证明已普及。与 #470 在 `publicTrafficPolicy` 同一行
+  有文本冲突，后合者需保留两处改动（剥离 revision 后以 `admitStoredUnsignedMedia = true` 调用）。
+
+## 2026-09-23 · Worker 拒绝未签名策略中的 TCP 端点（H3-F6 后续）
+
+- **归属/来源**：G1 保护不放宽（只有签名能扩大绕行面）；影响控制面
+  `services/control-plane/src/traffic-policy.ts`。叠在 #470 分支
+  `fix/worker-unsigned-media-20260923`（943395bd）上，分支 `fix/worker-unsigned-tcp-20260923`；
+  Issue #485；提交时未合 main。
+- **缺陷修复**：`canonicalTrafficPolicy` 对 `tcpEndpoints` 不看 `trusted`，未签名发布可把任意
+  公网 IPv4:80/443 写入并下发。客户端已安全：macOS 未签名 TCP 地址白名单为空、全部丢弃；
+  Windows tono-core 不读取 `tcpEndpoints`。改后与 #470 的 media 规则一致：未签名写入含 TCP 端点
+  即 400 `VALIDATION_ERROR`，dry run 返回 `signatureRequired: true`；签名写入不变；读取路径对
+  已存的未签名行继续放行（参数由 `admitStoredUnsignedMedia` 改名为
+  `admitStoredUnsignedEndpoints`）。
+- **新增/优化**：无。
+- **工程与测试**：新增回归 `requires a signature before a TCP endpoint can leave the tunnel`；
+  无既有测试需修正。
+- **验证**：本机 `npx vitest run test/worker.test.ts -t "requires a signature before a TCP endpoint"`
+  在旧代码上失败（未签名 PUT 返回 200，期望 400），修复后通过；`npx vitest run` 全量 43 文件 893
+  用例通过；`tsc --noEmit` 通过。未部署。
+- **候选/发布**：无新包，仅源码；未部署 Worker。
+- **剩余限制**：须在 #470 之后合并；部署前需确认生产当前策略若含 `tcpEndpoints` 则为签名版本，
+  否则下一次未签名发布会被拒（读取不受影响）；ops-console 未签名发布含 TCP 端点的策略会收到 400。
+
+## 2026-09-23 · Worker 拒绝未签名策略中的 media 端点（H3-F6 Worker 侧）
+
+- **归属/来源**：G1 保护不放宽（只有签名能扩大绕行面）；影响控制面
+  `services/control-plane/src/traffic-policy.ts`。基线 main bb2ed4e4，分支
+  `fix/worker-unsigned-media-20260923`；Issue #318（Windows 客户端侧为 #340）；提交时未合 main。
+- **缺陷修复**：`canonicalTrafficPolicy` 对 `mediaEndpoints` 不看 `trusted`，未签名发布可把任意公网
+  IPv4:443/8000 写入策略；macOS 未签名 media 白名单为空会丢弃，旧 Windows 会放行。改后：未签名
+  写入（PUT）含 media 端点即 400 `VALIDATION_ERROR`（在全部逐项校验之后判断，畸形条目仍按原错误
+  报告），dry run 相应返回 `signatureRequired: true`；签名写入不变。读取路径
+  （`publicTrafficPolicy`）对本规则之前已存的未签名 media 行继续放行，避免全网策略拉取 503，
+  客户端自行丢弃这些条目。
+- **新增/优化**：无。
+- **工程与测试**：新增回归 `requires a signature before a media endpoint can leave the tunnel`。
+  测试契约修正：`validates, encrypts, versions, and serves the managed traffic policy`、
+  `admits public IPv4 in the rest of 192.0.0.0/16 …`、`accepts the Feishu family …` 原以未签名
+  方式发布含 media 的策略，改为先 dry run 再以测试密钥签名发布；无效条目循环保持未签名（逐项
+  错误先于签名要求触发，断言仍有意义）。
+- **验证**：本机 `npx vitest run test/worker.test.ts -t "requires a signature before a media endpoint"`
+  在旧代码上失败（未签名 PUT 返回 200，期望 400），修复后通过；`npx vitest run` 全量 43 文件 892
+  用例通过；`tsc --noEmit` 通过。未部署。
+- **候选/发布**：无新包，仅源码；未部署 Worker。
+- **剩余限制**：部署前需确认生产当前策略若含 media 端点则为签名版本，否则下一次未签名发布会被
+  拒（读取不受影响）；`tcpEndpoints` 同样不看 `trusted`（macOS 未签名 TCP 白名单也为空），未在本
+  PR 处理；ops-console 未签名发布含 media 的策略会收到 400。
+
+## 2026-09-23 · 控制面 refresh 轮换的丢响应宽限（#314）
+
+- **归属/来源**：G1 保护不因网络故障释放（hunt H3-F4）；影响控制面 Worker
+  `/api/v1/auth/refresh` 与 D1 `sessions`。基线 main
+  [244075f2](https://github.com/raydocs/tono/commit/244075f2)，分支
+  `fix/refresh-replay-grace-20260923`，Issue #314；未合 main、未部署。
+- **缺陷修复**：服务端已轮换 refresh、但响应丢失（大陆链路超时；客户端对超时的 POST
+  不重试），客户端下次用旧 token 得到 401，两端都把它当成会话死亡，于是登出并释放
+  PF/WFP。现在轮换会记录 `rotated_at` / `successor_id`。10 分钟内重放刚轮换的
+  token 可以恢复一次：仅当后继仍有效、且自身从未轮换时，服务端替客户端再轮换一次后继，
+  整条链仍只保留一个有效 session。窗口外、第二次重放、后继已被使用/登出/吊销时，
+  仍返回 401。吊销旧 session 与插入后继放进同一个 D1 batch，后继 INSERT 以抢到吊销为条件，
+  消除原来「旧 session 已吊销、后继插入失败」的部分提交。
+- **新增/优化**：`tokens()` 与 refresh 逻辑移到 `src/sessions.ts`（`index.ts` 行数上限 4014，
+  当前 3957）。新 migration `0079_session_rotation_successor.sql`。
+- **工程与测试**：新增一个 Worker `it`
+  （`honours one replay of a just-rotated refresh token whose response was lost`）。
+  删除 lifecycle 用例中「立即重放必须 401」这一条断言：它把无宽限写成了契约，
+  重放语义现在由新 `it` 覆盖。属于测试契约修正。
+- **客户端**：核实后不改。两端都明确设计为只有权威的账户丢失（401）才释放
+  （macOS `AccountSession+Telemetry.swift` "only auth sign-out disarms"；Windows
+  `REPORT.md` restore-401 走 `release_explicit()`），网络错误保留保护。缺陷在于服务端
+  产生了假 401。
+- **验证**：本机（MacBook，worktree）新 `it` 在旧代码上失败（重放返回 401，期望 200），
+  修复后通过；`services/control-plane` 下 `npx vitest run` 43 个文件、892 个用例全部通过；
+  `npm run typecheck`、`check:contract`、`check:budgets` 通过。未对远端 D1 执行 migration，未部署。
+- **候选/发布**：仅源码，无新候选。部署顺序：先对 D1 执行 0079 migration，再部署 Worker；
+  否则 refresh 会因缺列失败。
+- **剩余限制**：Windows 在异步写 Credential Manager 之前被终止、且超过 10 分钟后才启动，
+  这种情况仍是真 401，需要客户端持久化改动，记录在 #314。宽限期内，持有已轮换旧 token
+  的第三方可以顶掉尚未轮换的后继（合法客户端随后得到 401），这种暴露只限 10 分钟内一次。
+
+## 2026-09-23 · 目录节点名只接受控制面与客户端解码一致的写法（H10-F1）
+
+- **归属**：ops 控制面安全修复（住宅 home exit 只下发给绑定用户），非客户 ship gate；`services/control-plane`。
+- **来源**：基线 main `be1c75d2` → 分支 `fix/catalog-name-plain-20260923`；Issue #418，内部审查
+  H10-F1；提交时未合 main。与在审 #326 改同一过滤函数的相邻行，建议 #326 先合，本 PR 随后 rebase。
+- **缺陷修复**：
+  - **原问题**：按账户过滤 home exit 时，Worker 用行正则 `catalogProxyName` 读节点名；客户端用
+    YAML 解析器。写入校验不要求两者一致，名字用转义、块标量、行尾注释、续行或与 `proxyName`
+    不同的 Unicode 规范化形式写出时，过滤读到的名字不在限制名单里，已绑定的住宅节点块会下发
+    给所有账户。
+  - **修复**：Worker 没有 YAML 依赖，改为写入时 fail-closed。`PUT exit-catalog` 只接受名字是列表项
+    第一个键、单行纯文本（plain 或无转义的引号）、无注释/锚点/标签/块标量、不续行、NFC、块内只有
+    一个 `name` 键的条目（`catalogProxyPlainName` 读出的名字必须与 `catalogProxyName` 相同）。
+    home exit 的 `proxyName` 写入时规范化为 NFC，与目录名的精确比较一致。
+- **新增/优化**：无。
+- **工程与测试**：`test/worker.test.ts` 新增一个 `it`：内部审查报告中的反例（转义、`\u` 转义、
+  注释内 `{name: …}`、块标量、NFD）各 PUT 一次均 400，纯文本写法发布后未绑定账户拿不到该节点。
+  旧代码上实际跑红（第一个反例 PUT 返回 200），修复后绿。
+- **验证**：MacBook worktree `npx vitest run test/worker.test.ts -t "YAML parser would read differently"`
+  红→绿；control-plane 全量 vitest 43 文件 892 项通过；`tsc --noEmit` 无错误。CI 结果见 PR。
+- **候选/发布**：仅源码，无新候选；Worker 部署需 owner 执行。
+- **剩余限制**：只在写入时校验，生产 D1 中现存目录不会被重新校验（无生产 D1 访问，未确认其写法；
+  现有发布工具输出 plain 名字），建议部署后重新发布一次目录。未要求 home exit 登记时 `proxyName`
+  必须出现在当前目录中。macOS 行解析器与 Windows 的其他差异（丢弃不完整条目等）不在本条。
+
+## 2026-09-23 · 控制面：停用/退役的家宽出口及其 hy2 孪生节点不再对全员可见
+
+- **归属/来源**：ops 控制面安全修复（H4-F2，[#322](https://github.com/raydocs/tono/issues/322)）；
+  影响 `services/control-plane`（目录下发 + D1）。基线 main
+  [576d7087](https://github.com/raydocs/tono/commit/576d7087cc54084acef3a4cda15c433ec96bb679)，
+  分支 `fix/home-exit-visibility-20260923`；提交时未合 main。
+- **缺陷修复**：按用户过滤目录时，限制名单只收 `status='active' AND kind='catalog'`
+  的家宽出口名（0035 触发器）。停用、退役（含 `assign replace:true` 自动退役旧出口）、
+  删除或改名后，名字掉出名单，但运营发布的 YAML 仍含该块，于是这个私有住宅节点下发给
+  所有账户，并替换成各自的 UUID。另外 `<名> · hy2` 孪生块按精确名匹配，从未被限制。
+  改后行为：新增 migration `0078_home_exit_name_history.sql`，只追加不删除，记录所有曾属于
+  catalog 型家宽出口的名字，不论当前状态；限制名单改为取这份历史。
+  `filterCatalogYamlForUser` 按基名匹配，hy2 孪生块随本体一起限制或放行。只有当前绑定
+  且 active 的家宽出口会对其绑定用户放行（沿用原逻辑）。
+  审查后修正：（1）上一版先去 ` · hy2` 后缀再查名单，而名单里的名字本身没去后缀，家宽本体名就以
+  ` · hy2` 结尾时会对其他账户可见（main 上是隐藏的）。现在先按原名精确匹配，只有原名不在名单里时才去后缀找本体名。
+  （2）0078 的多语句触发器改为每个一条语句、单行（远端 D1 迁移解析不了多行触发器体，见 0015/0021）：
+  `home_exits` 上的触发器只记录名字，发布集合由历史表的 INSERT/DELETE 触发器重建，
+  因此运营有意删除历史行也会立即生效（上一版要等下一次 home_exits 写入）。
+- **新增/优化**：无。
+- **工程与测试**：一个 Worker `it`：
+  `keeps a retired home exit and its hy2 twin out of other accounts' catalogs`
+  （`test/worker.test.ts`）。在旧代码上有两处失败：hy2 孪生块在出口 active 时已对他人可见；
+  注释掉该断言后，退役后本体对他人可见。0078 的触发器不用 `OR IGNORE`，因为外层 UPSERT
+  的冲突策略会覆盖它（preview seed 的 `ON CONFLICT DO UPDATE` 会因此失败）。
+  审查后同一 `it` 追加一个本体名为 `Home Residential B · hy2` 的家宽，断言其他账户看不到；
+  在上一版源码上红（other 的目录含该名），修复后绿。触发器改写另用 sqlite3 在 0001–0078 上手工核对：
+  新建、改名、socks5→catalog、删除家宽、手工删历史行后发布集合都符合预期。
+- **验证**：MacBook 本机、worktree 基于 576d7087：`npx vitest run test/worker.test.ts -t "retired home exit"`
+  修复前红、修复后绿；`npx vitest run`（control-plane 全量）43 个文件、892 个测试全部通过。
+  审查后修正同样在本机：单测先红后绿，全量 43 文件 892 用例通过，`npm run typecheck` 通过；CI 结果见 PR。
+  没有跑 D1 remote，也没有部署；单行触发器形式未在远端 D1 试跑。
+- **候选/发布**：仅源码，无新候选；Worker 未部署，0078 未应用到生产 D1。
+- **剩余限制**：roster 仍不按节点隔离（`/api/v1/home/exit-identities` 对每个节点下发全员身份），
+  所以已解绑用户如果还记得节点参数，仍能连到住宅节点，留作后续。曾用作家宽出口的名字若改给
+  共享节点，会对所有人隐藏（fail-closed），需要运营改名，或有意删除历史行。目录 PUT 不校验
+  与家宽名冲突。
+
+## 2026-09-23 · 控制面 cron：强制扫描有上限，每个清理步骤独立 try
+
+- **归属/来源**：ops 平台 cron 健康（`/system/pulse` 的 `cronAgeSec` 依赖 cron 跑完）；
+  控制面 Worker。内部审查 H13-F7，Issue #445。基线 main bb2ed4e4 → 分支
+  `fix/enforce-cron-bound-20260923`；提交时未合 main。
+- **缺陷修复**：`enforceAll` 每 5 分钟选出所有曾失去资格的用户（无 LIMIT），对每人执行
+  `enforceUser`（3 次查询），早已强制过的用户也不例外；用户从不删除，集合只增不减。其后的
+  保留期语句不在 try 里，一旦单次调用超过 D1 查询上限（约 330 个不合格用户），后续保留期、
+  `snapshotUserUsageHours`、`runOpsCron` 全部不再运行。现在：
+  - 只选仍持有 active/pending 设备或未吊销会话的不合格用户，每 tick 最多 25 人，其余下一
+    tick 处理。新 migration `0090_sessions_user_live_index.sql` 为该查询加
+    `sessions(user_id, revoked_at)` 索引。
+  - 强制扫描、stale pending 扫描和每条保留期语句都包进独立的 `cronStep`（记录错误后继续）。
+    为满足 `index.ts` 只减不增的行数限制，保留期语句原样移到新文件 `src/retention.ts`，
+    语句与顺序不变。
+- **新增/优化**：无。
+- **工程与测试**：`test/worker.test.ts` 新增一个 `it`：先有 5 个已强制过的禁用用户，
+  再加 40 个，cron 的 prepare 次数必须不变；随后一个刚被禁用、仍有设备的用户在下一 tick
+  被吊销。旧代码失败为 `expected 205 to be 85`（多出 40 × 3，本机先红后绿）。已有用例
+  「processes durable revocations before retention housekeeping can fail」原先断言 cron 在
+  保留期失败时整体 reject；改为断言不再 reject，且失败步骤之后的会话保留期仍然执行（测试
+  契约随行为修正）。
+- **验证**：MacBook worktree：control-plane 全量 vitest 43 文件 892 测试通过，
+  `tsc --noEmit`、`check:contract`、`check:budgets` 通过。migration 只在 vitest 本地 D1
+  应用过。CI 结果以 PR 页为准。未部署。
+- **候选/发布**：无新包，仅源码（Worker）。部署时先对 D1 应用 0090 再部署 Worker；
+  未应用时查询仍可运行，只是会话查找没有索引。
+- **剩余限制**：若有 25 个以上用户的 `enforceUser` 每次都失败，它们会一直占满每 tick 的
+  名额；日志里会有逐人错误。D1 单次调用查询上限的实际值未在本账户核对。`runOpsCron`
+  内部各步骤的预算不在本条范围。
+
+## 2026-09-23 · 原始网络日志：索引没写成的 R2 对象也会被清理
+
+- **归属**：ops 任务（诊断日志保留期）；控制面 `services/control-plane`。不属客户发布门。
+- **来源**：内部审查 H14-F1，Issue #448；分支 `fix/raw-log-orphans-20260923`，基线 origin/main
+  bb2ed4e4。提交时未合 main。新增 migration `0088_diagnostics_log_pending_objects.sql`
+  （0077–0082 被在审 PR 占用，本轮按分配从 0088 起编号）。
+- **缺陷修复**：上传先写 R2、后写 `diagnostics_log_objects` 索引，保留期清理只按索引删。
+  索引插入失败或请求在两步之间被取消时，对象永远不会被删除（该桶存放未脱敏主机名，承诺
+  保留 14 天）。改后：上传在写 R2 前，用同一条语句完成重放检查并把 key 记入
+  `diagnostics_log_pending_objects`；索引行插入时由触发器清掉这条记录；定时清理把两天前仍未
+  清掉、且没有索引行指向的 key 从 R2 删除，再删记录（R2 删除失败时保留记录，下一轮重试）。
+  两天的界限来自 key 里的 UTC 日期：届时不会再有上传写同一个 key。跨 UTC 日的并发同序号
+  上传，输家的对象也按同一路径清理。
+- **新增/优化**：原索引保留期清理从 `src/index.ts` 原样移到 `sweepDiagnosticsLogs`
+  （`src/telemetry/routes.ts`），与孤儿清理放在一起；行为不变。
+- **工程与测试**：一个 Worker `it`（`test/worker.test.ts`
+  `deletes a raw log object whose index row was never written`）：临时触发器让索引插入失败，
+  上传得 503，时钟前推 3 天跑一次 `scheduled`，断言该用户前缀下没有 R2 对象。
+- **验证**：MacBook 本机 worktree：该 `it` 在旧代码上失败（R2 仍有 1 个对象），修复后通过；
+  `npx vitest run`（control-plane 全量）43 个文件、892 个测试通过；`npm run typecheck`、
+  `npm run check:budgets` 通过；上传路径的 prepare 数仍为 10（`ingest-budgets` 上限未改）。
+  未部署，未对 remote D1 执行 migration。
+- **候选/发布**：仅源码，无新候选；Worker 未部署。
+- **剩余限制**：migration 未部署前不生效；部署前已经孤立的对象没有记录，本改动删不到，
+  建议 owner 在 Cloudflare 控制台给 `tono-diagnostics-logs` 的 `logs/` 前缀设 lifecycle
+  规则（如 15 天）兜底（本 PR 未改任何远端配置）。清理每 5 分钟最多处理 50 条记录。
+
+## 2026-09-23 · 客户活动小时每个窗口只计一次；无字节时月结客户标为待核对（H8-F4）
+
+- **归属**：ops 任务（运维计划 §1.3 D1 月结汇总 / 客户 360 投影），非客户 ship gate；
+  `services/control-plane`，D1 migration `0082`。
+- **来源**：基线 main `18301fc5` → 分支 `fix/activity-hours-dedupe-20260923`；Issue #403，内部审查 H8-F4；
+  提交时未合 main。
+- **缺陷修复**：
+  - **原问题 1**：`accrueActivityHours` 用 `+=` 累加，上传钩子和 cron `projectBacklog` 对同一个
+    telemetry window 各执行一次，在线/连接分钟和窗口数翻倍（20 分钟变 40）。
+  - **修复 1**：新表 `customer_activity_windows`（0082）按 window id 记标记；标记的
+    `INSERT OR IGNORE` 与各小时 upsert 放在同一个 D1 batch，upsert 只在本次调用抢到标记时生效，
+    哪一路先到就由哪一路计一次。cron 保留 35 天标记（长于 telemetry_windows 默认 30 天）。
+    原来的分批 helper 已无调用方，一并删除。
+  - **原问题 2**：`bytes_up/bytes_down` 恒为 0，月结不分摊 server/home_line 成本，客户行却按
+    「无用量」给出确定毛利并在关账时冻结。
+  - **修复 2**：`loadMonthSummary` 对「在某节点有连接分钟但无字节记录」的客户标 `pending: true`、
+    `marginCnyMinor: null`（控制台已有待核对展示）。真实字节需要节点侧或客户端合同变更，
+    本次不补写，留在 #403。
+- **新增/优化**：无。`docs/ops/api-contract.md` 的 `GET months/{month}` 行补充缺测含义。
+- **工程与测试**：`test/ops-ingest-hooks.test.ts` 新增一个 `it`（上传窗口 → 跑 `projectBacklog` → 分钟
+  不变且该客户 `pending`）。旧代码上实际跑红（`expected 40 to be 20`），修复后绿。
+- **验证**：MacBook worktree focused vitest（ingest-hooks / customers / ledger / cron 4 文件 51 项）、
+  control-plane 全量 vitest 43 文件 892 项通过、`tsc --noEmit` 无错误。migration 只在 vitest 本地
+  D1 上应用过，未在 preview/生产 D1 演练。CI 结果见 PR。
+- **候选/发布**：仅源码，无新候选；上线需 owner 先应用 0082 再部署 Worker。
+- **剩余限制**：
+  - 成本仍无法按字节分摊，活跃客户在月结中会显示为待核对，直到有真实字节来源。
+  - 生产中已翻倍的分钟不会回写；已关账月的冻结客户行不变。
+  - 客户 360 的字节列仍显示 0。
+
+## 2026-09-23 · 重新上架：出口令牌已吊销的节点不再能上架
+
+- **归属**：ops 任务（节点下架/上架流程）；控制面 `services/control-plane`。不属客户发布门。
+- **来源**：内部审查 H14-F2，Issue #449；分支 `fix/relist-revoked-exit-20260923`，基线
+  origin/main bb2ed4e4。提交时未合 main。无 migration。与在审 #375 在 `revokeExitToken`
+  的同一条 UPDATE 上文本相邻，后合并者需保留双方改动（#375 的 `revoked_token_hash` 赋值与
+  本 PR 的目录 revision 条件）。
+- **缺陷修复**：没有在线客户的节点下架时立即吊销出口令牌并置 `exit_nodes` 为 disabled，
+  重新上架只恢复目录与 profile，节点回到所有账户的目录里却没有有效令牌；验收单按
+  `last_roster_at` 判断「出口令牌」「身份同步」，15 分钟内仍显示通过。改后：
+  (1) `bindingsOf` 对非 active 的出口节点不再认最近一次 roster，两项判为不通过；
+  (2) 上架在入队（`relistGate`，不可 override）和执行（`relistFleetNode` 前置检查，并在目录
+  CAS 写里加同一条件）两处拒绝，返回 409 `EXIT_TOKEN_REVOKED`，提示先启用出口节点、重新签发
+  令牌并部署；(3) `finishDrainedRetires` 先读目录 revision，吊销 UPDATE 以该 revision 为条件，
+  两次 cron 重叠时不会撤销期间已提交的上架。
+- **新增/优化**：无。
+- **工程与测试**：一个 Worker `it`（`test/ops-node-acceptance.test.ts` `a node whose exit token
+  retirement revoked cannot be relisted, and a stale drain cannot revoke a relisted one`）。
+  fixture 修正：`test/ops-jobs.test.ts` 的 retire→drain→relist 用例原先直接上架已吊销节点
+  （正是本缺陷路径），改为上架前先把出口节点恢复为 active，对应运营的恢复步骤。
+- **验证**：MacBook 本机 worktree：新 `it` 在旧代码上失败（验收阻塞项只有
+  `binding.catalog`）；分别只回退吊销条件或上架拒绝时，也在对应断言处失败；修复后通过。
+  `npx vitest run`（control-plane 全量）43 个文件、892 个测试通过；`npm run typecheck`、
+  `npm run check:budgets` 通过。未部署，未碰 remote D1。
+- **候选/发布**：仅源码，无新候选；Worker 未部署。
+- **剩余限制**：恢复仍需三步手工操作（PATCH `exit-nodes/{id}` 为 active、POST
+  `exit-nodes/{id}/token`、把新令牌部署到节点），上架流程只给出提示，不自动签发。
+  下架路径本身（非 drain）的即时吊销没有加 revision 条件；上架侧的写条件覆盖了它与上架的交错。
+
+## 2026-09-23 · 住宅 SOCKS5 凭据在持有人失去绑定后标记待轮换（H7-F7）
+
+- **归属**：ops 任务（家宽线路 / 控制面）；`services/control-plane`，D1 migration `0080`。
+- **来源**：基线 main → 分支 `fix/home-socks5-rotation-20260923`；Issue #379；关联 PR，提交时未合 main；内部审查 H7-F7（源码推导）。
+- **缺陷修复**：socks5 型 home exit 的上游用户名/密码明文随绑定用户的目录下发。解绑、改绑、销户或停用用户只改绑定，不记录凭据已外发；同一凭据还能直接绑给下一个用户。前持有人设备上的缓存凭据对上游仍然有效。现在：`home_exits.socks5_rotation_required_at` 由触发器在绑定删除、绑定换到其他出口、绑定用户离开 `active` 时写入；给未持有该线路的用户绑定被标记的出口返回 `409 SOCKS5_ROTATION_REQUIRED`（API 检查加触发器兜底）；存入不同的上游密码（PATCH 或粘贴带新密码的线路）或改成非 socks5 才清除标记。前持有人的目录在解绑后已不再携带凭据（回归中断言）。
+- **新增/优化**：home exit 列表返回 `socks5RotationRequired`。上游密码仍需运维在供应商侧手工修改。
+- **工程与测试**：新增一个 Worker `it`（`refuses to hand an unbound user's socks5 credential to another user until it is rotated`）；旧代码上第二个用户绑定返回 201，断言 409 失败。审查后：0080 的五个触发器各改为单行（每个本就只有一条语句；仓库在 0015/0021 注明远端 D1 迁移解析不了多行触发器体），语义不变——本机用 sqlite3 分别应用新旧 0080，`sqlite_master` 里的触发器 SQL 去空白后逐字相同；全量 43 文件 892 用例、`npm run typecheck` 通过，CI 见 PR。单行形式未在远端 D1 试跑。
+- **验证**：MacBook 本机（worktree，node_modules symlink 到主仓库）`npx vitest run test/worker.test.ts -t "until it is rotated"`：旧代码红（201≠409），修复后绿；`npx vitest run` 全量 43 文件 892 项通过；`npm run typecheck`、`check:budgets` 通过。未部署，未执行 `d1 --remote`，migration 未在生产 D1 应用。
+- **候选/发布**：无新包，仅源码；Worker 部署和 migration 应用另行授权。
+- **剩余限制**：不能自动轮换上游密码（外部住宅网关，home-agent 不接触）；推荐在上游限制来源 IP 为出口节点。未覆盖：无状态变化的权益到期、用户仍 active 时吊销单台设备。ops console 暂不显示该标记。
+
+## 2026-09-23 · ops v1 home-lines 写入口沿用 shared-admin 的家宽出口约束
+
+- **归属**：ops 任务（`docs/ops/plan-2026-09-11.md` 4.2 审查残留：开户/家宽写路径的前置校验）；
+  控制面 `services/control-plane`，控制台家宽线路页。不属客户发布门。
+- **来源**：内部审查 H8-F3，Issue #397；分支 `fix/home-lines-guard-20260923`，基线 origin/main
+  18301fc5。提交时未合 main。与在审 #326（0078 名字历史）、#381（0080 SOCKS5 轮换）改同一资源，
+  但不改它们触及的行；本 PR 不加 migration。
+- **缺陷修复**：控制台「退掉这条线路」走 v1 `DELETE home-lines/{id}`，原先直接置 `retired`：
+  不查绑定、不推进目录 revision，被绑客户的 `GET /exit-catalog` 整份 503 直到手动改绑；
+  v1 `PATCH` 可写任意 status（非法值 500）且不推进 revision；v1 `POST` 不校验 proxyName、
+  不推进 revision（其他账户下发的 YAML 变了而 revision 不变）；开户 `homeExitId` 不查出口
+  是否 active。改后：新共享函数 `assertHomeExitUnbound`（`src/home.ts`）被 shared-admin
+  DELETE、shared-admin PATCH→retired、v1 DELETE、v1 PATCH→retired 共用，仍有绑定时一律
+  `409 HOME_EXIT_IN_USE`（不自动解绑，由运营显式解绑）；v1 退役与 status 变化、v1 新建都
+  `bumpCatalogRevision`；v1 status 走白名单（400）；v1 新建用 `proxyNameField`，重名 409
+  `HOME_EXIT_CONFLICT`；开户 `homeExitId` 指向非 active 出口时在任何写之前 409
+  `HOME_EXIT_INACTIVE`。
+- **新增/优化**：无。
+- **工程与测试**：一个 Worker `it`（`test/ops-api.test.ts`
+  `home-lines create and retire move the catalog revision and refuse a bound line`）。
+- **验证**：MacBook 本机 worktree：该 `it` 在旧代码上失败（v1 新建后 revision 仍为 5，期望 6），
+  修复后通过；`npx vitest run`（control-plane 全量）43 个文件、892 个测试通过；
+  `npm run typecheck`、`npm run check:budgets` 通过。未部署，未碰 remote D1。
+- **候选/发布**：仅源码，无新候选；Worker 未部署。
+- **剩余限制**：shared-admin PATCH→disabled 仍允许在绑状态下执行（有意的 fail-closed 暂停，
+  被绑客户目录 503）；控制台未单独提示 409 的含义，沿用通用错误提示。
+
+## 2026-09-23 · 家宽出口、token-admin 用户与白名单写操作补审计
+
+- **归属**：ops 任务（`docs/ops/plan-2026-09-11.md` 5.2 角色启用：角色越权的追溯依赖完整审计，
+  见 `docs/ops/api-contract.md:154-156`）；控制面 `services/control-plane`。不属客户发布门。
+- **来源**：内部审查 H8-F6，Issue #405；分支 `fix/admin-write-audit-20260923`，基线 origin/main
+  18301fc5。提交时未合 main。无 migration。
+- **缺陷修复**：以下写操作原先不写 `ops_audit`，改后复用 `writeOpsAudit`：
+  shared-admin `PATCH home-exits/{id}`（`home.update`，摘要只列字段名，不含 SOCKS5 密码）、
+  `DELETE home-exits/{id}`（`home.delete`）；token-admin `PATCH /api/v1/admin/users/{id}`
+  （`user.usage-reset`、`user.update` 列出改动字段）、`DELETE /api/v1/admin/signup-allowlist`
+  （`allowlist.remove`，仅实际删除时）、`POST`/`DELETE /api/v1/admin/invitations`
+  （`invitation.create` 不含邀请码、`invitation.delete` 仅实际删除时）；开户 `homeExitId`
+  分支在绑定当时写 `home.assign`，后续账号指派 409 时也留痕。token-admin actor 为
+  `token-admin`（映射 `token_admin`）。
+- **新增/优化**：无。
+- **工程与测试**：`src/index.ts` 已在行数上限（`test/index-size.txt` = 4014），按预算脚本要求把
+  上述四个 token-admin 写路由原样移到 `src/ops/token-admin.ts` 再加审计；index.ts 降到 3906 行，
+  上限文件未下调（避免与其他在审 PR 冲突）。一个 Worker `it`（`test/worker.test.ts`
+  `audits a home exit SOCKS5 password change without recording the password`）。
+- **验证**：MacBook 本机 worktree：该 `it` 在旧代码上失败（无 `home.update` 审计行），修复后通过；
+  `npx vitest run`（control-plane 全量）43 个文件、892 个测试通过；`npm run typecheck`、
+  `npm run check:budgets` 通过。其余审计点无单独测试（规则 5）。未部署，未碰 remote D1。
+- **候选/发布**：仅源码，无新候选；Worker 未部署。
+- **剩余限制**：审计写入仍为尽力而为（`writeOpsAudit` 吞错），不与业务写同一事务；
+  token-admin 审计无法区分具体持 token 的人。
+
+## 2026-09-23 · 控制面遥测、失败上报、支持报告改为按账户限流
+
+- **归属/来源**：G2（失败进入客户时间线）与 ops 客户在线状态；控制面 Worker。内部审查
+  H13-F4，Issue #440。基线 main bb2ed4e4 → 分支 `fix/telemetry-ratelimit-account-20260923`；
+  提交时未合 main。
+- **缺陷修复**：`/telemetry/windows`、`/telemetry/failures`、`/diagnostics/reports` 已要求
+  用户令牌，但限流器另有一个按 `cf-connecting-ip` 计数的桶（遥测 30/h、失败 60/h、支持报告
+  30/h）。已连接客户端访问控制面走出口节点，同一节点上的所有用户共用这个 IP 预算：超过约
+  10 台开周期遥测的设备后，每小时排在后面的设备持续 429，在 ops 显示离线、失败事件丢失，
+  支持报告也可能被别人的流量拒绝。现在三条路由只按账户的小时/天桶计数，与日志上传的做法
+  一致；移除不再使用的 `RATE_LIMIT_{TELEMETRY,FAILURE,DIAGNOSTICS}_IP_HOUR`（env 类型、
+  `wrangler.jsonc`、`worker-configuration.d.ts`、`docs/ops/ingest-limits.md`）。
+- **新增/优化**：无。
+- **工程与测试**：`test/ops-ingest-hooks.test.ts` 新增一个 `it`：6 个账户从同一
+  `cf-connecting-ip` 各发满每小时 6 个窗口，全部应为 201。旧代码第 31 个请求返回 429
+  （本机先红后绿）。
+- **验证**：MacBook worktree：该 `it` 在旧代码失败；修复后 `ops-ingest-hooks`、
+  `ingest-limits`、`ingest-budgets` 3 文件 19 测试通过，control-plane 全量 vitest 43 文件
+  892 测试通过，`tsc --noEmit` 无错误。CI 结果以 PR 页为准。未部署。
+- **候选/发布**：无新包，仅源码（Worker）。
+- **剩余限制**：单个账户多台设备仍共用账户小时预算（遥测 6/h，与原来一致）。未鉴权的登录类
+  路由仍按 IP 限流，不在本条范围。
+
+## 2026-09-23 · Claude 账号指派与替换改为单个 D1 batch
+
+- **归属**：ops 任务（`docs/ops/plan-2026-09-11.md` 4.2 审查残留：开户/指派写路径；
+  其结果也是 1.6 月结对账中 assigned 账号与漏斗 `first_entitled_at` 的输入）；控制面
+  `services/control-plane`。不属客户发布门。
+- **来源**：内部审查 H8-F5，Issue #401；分支 `fix/product-account-assign-20260923`，基线
+  origin/main 18301fc5。提交时未合 main。无 migration（沿用 0023 的 `account_ref` 唯一索引与
+  每用户仅一个 assigned 的部分唯一索引）。
+- **缺陷修复**：两位运营同时把同一 pooled 账号指派给两位客户，两次都 201；输家被写上
+  `plan`、`first_entitled_at` 和 `assigned` 事件，名下却没有账号。替换先退旧、再单独建新，
+  第二步失败时客户两头落空。改后：`createAssignedProductAccount` 把「取账号 + 事件 +
+  开通标记 + 审计」放进一个 D1 batch，取账号语句带 `status='pooled'` 条件，其后每条都以
+  `changes() > 0` 串联；取账号未命中返回 409 `ACCOUNT_REF_IN_USE`，不留事件、标记或审计；
+  唯一索引冲突同样整批回滚（每用户已有 assigned 时为 409 `PRODUCT_ALREADY_ASSIGNED`）。
+  `replaceProductAccount` 把退旧、指派新号、`replaced` 事件与审计放进同一个 batch；退旧本身
+  要求目标仍可用（pooled 或尚未登记），失败时原账号保持 assigned。
+- **新增/优化**：无。
+- **工程与测试**：一个 Worker `it`（`test/worker.test.ts`
+  `assigns a pooled Claude account to only one of two concurrent users`）。
+- **验证**：MacBook 本机 worktree：该 `it` 在旧代码上失败（两个请求都 201，期望 [201, 409]），
+  修复后通过；已有替换原子性/pooled 替换测试仍通过；`npx vitest run`（control-plane 全量）
+  43 个文件、892 个测试通过；`npm run typecheck`、`npm run check:budgets` 通过。未部署，
+  未碰 remote D1。
+- **候选/发布**：仅源码，无新候选；Worker 未部署。
+- **剩余限制**：替换的部分失败路径由 batch 的事务语义保证，没有单独的故障注入测试；
+  指派审计现在与写入同批，`ops_audit` 不可写时整次指派失败（原先静默跳过审计）。
+
+## 2026-09-23 · 已冲正的账目行与冲正行锁定归属（H8-F2）
+
+- **归属**：ops 任务（运维计划 §1.3 D1 账目/月结），非客户 ship gate；`services/control-plane`。
+- **来源**：基线 main `18301fc5` → 分支 `fix/ledger-reversal-lock-20260923`；Issue #398，内部审查 H8-F2；
+  提交时未合 main。
+- **缺陷修复**：
+  - **原问题**：`PATCH ledger/{id}` 只查月份未锁，不查 `reversed_by`/`reverses`。冲正后再把
+    原行或冲正行改到另一个客户，月总额仍为 0，但同一笔钱在月报里拆成一个 −、一个 +。
+  - **修复**：已冲正的原行和冲正行不能改 `subjectType`/`subjectId`（409 `ALREADY_REVERSED`，
+    `note`/`paidAt` 照常可改）。PATCH 的 UPDATE 加条件：所在月未关账、归属变更时行仍未冲正；
+    变更 0 行按 `MONTH_CLOSED`/`ALREADY_REVERSED` 返回 409，顺带关掉「检查月份与 UPDATE 之间
+    关账」的竞态。冲正行在同一 batch 里从原行当前值复制，不再用 batch 之前读到的旧值。
+- **新增/优化**：无。`docs/ops/api-contract.md` 的 `PATCH ledger/{id}` 行补上新约束。
+- **工程与测试**：`test/ops-ledger.test.ts` 新增一个 `it`（录入 → 冲正 → 改原行/冲正行归属均 409）。
+  旧代码上实际跑红（收到 200），修复后绿。
+- **验证**：MacBook worktree `npx vitest run test/ops-ledger.test.ts`（21 项通过）、control-plane
+  全量 vitest 43 文件 892 项通过、`tsc --noEmit` 无错误。CI 结果见 PR。
+- **候选/发布**：仅源码，无新候选；Worker 部署需 owner 执行。
+- **剩余限制**：
+  - 关账「先算快照、后插入关账行」之间落进的新行仍会留在已关月却不在冻结总数里，见 #398。
+  - 冲正落在 UTC 当前月，控制台按本地月选月的不一致仍由 #191 跟踪（后端 UTC 为准）。
+  - 生产中已被拆开的冲正对不会自动修正。
+
+## 2026-09-23 · 账目按币种小数位折算人民币（H8-F1）
+
+- **归属**：ops 任务（运维计划 §1.3 D1 账目/月结），非客户 ship gate；`services/control-plane`。
+- **来源**：基线 main `18301fc5` → 分支 `fix/ledger-fx-decimals-20260923`；Issue #391，内部审查 H8-F1；
+  提交时未合 main。
+- **缺陷修复**：
+  - **原问题**：`cnyMinorFrom(amountMinor, rate)` 按两位小数算，JPY（零小数）入库少乘 100：
+    JPY 10000、汇率 0.0489 存成 489 分（¥4.89），控制台预览是 ¥489。成本、分摊、对账和
+    月结冻结值都按 1/100 计。
+  - **修复**：`fx.ts` 新增 `currencyDecimals`（JPY/KRW 为 0，其余 2，与控制台 `DECIMALS`
+    一致），`cnyMinorFrom` 按币种缩放；`ledger-recon.ts` 改用同一定义，不再自带一份。
+    `weekly-picks.ts` 只对 CNY/USD 调用，行为不变。
+- **新增/优化**：无。
+- **工程与测试**：`test/ops-ledger.test.ts` 新增一个 `it`（JPY 10000 @0.0489 → 48900）。旧代码上
+  实际跑红（收到 489），修复后绿。
+- **验证**：MacBook worktree `npx vitest run test/ops-ledger.test.ts`（21 项通过）、control-plane
+  全量 vitest 43 文件 892 项通过、`tsc --noEmit` 无错误。CI 结果见 PR。
+- **候选/发布**：仅源码，无新候选；Worker 部署需 owner 执行。
+- **剩余限制**：没有生产 D1 访问，不知道是否已有 JPY 行。已入库的错误行不自动改写；未关账月
+  可由运营冲正后重录，已关账月需 owner 决定。
+
+## 2026-09-23 · macOS 签名/公证/Sparkle workflow 凭据范围（内部审查 H5-F2）
+
+- **归属**：发布工具链加固（非客户可见行为）；`.github/workflows/macos-release.yml`。
+- **来源**：基线 main `498ed426` → 分支 `fix/macos-release-secrets-20260923`；Issue #366；
+  提交时未合 main。
+- **缺陷修复**：注释把 `macos-appcast` 称作 “gated” 环境，但审批/分支限制取决于仓库
+  环境配置，workflow 文件本身不提供 → 改为如实说明门禁位置；`build` 与
+  `validate-appcast` 的 checkout 改 `persist-credentials: false`，`release/macos` 祖先
+  检查的 fetch 单独接收只读 token。签名/公证/Sparkle secrets 原本已是 step 级，未改动。
+- **新增/优化**：无。仓库设置不在本 PR 范围。
+- **工程与测试**：`tooling/scripts/tests/macos-candidate-workflow.test.rb` 新增一段：签名
+  secrets 不得出现在 workflow/job 级 env、任一 job 无写权限、所有 checkout 不持久化
+  凭据。旧 workflow 上失败于 “build checkout must not persist the token in .git/config”。
+- **验证**：MacBook 本机 `ruby tooling/scripts/tests/macos-candidate-workflow.test.rb`
+  全部通过（修复前新增段失败）；所有 `run:` 块 `bash -n`；本机无 actionlint，未跑。
+  `build`/`validate-appcast` 只在 release 线或 release tag 上运行，PR CI 不执行，需所有者
+  在下一次 macOS 发布时观察 ancestry fetch。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：Developer ID 身份在打包步骤期间位于已解锁的临时钥匙串中，xcodebuild 与
+  打包脚本在此期间运行，这是签名所必需的。
 
 ## 2026-09-23 · Windows 发布 workflow 权限最小化（内部审查 H5-F1）
 
@@ -4452,10 +5461,7 @@
   仍会漏过（与 rev 16 相同）。Service 重启会把 epoch 归零，快照于重启前的请求
   被拒绝并表现为一次连接失败（fail-closed，重试即恢复）。第二轮修正同样
   本机未编译，委托 CI；已有回归测试走 Freshness 路径，不受本修正影响，未改。
-- **剩余限制**：不 bump epoch 的拆臂路径（如 StopClash(release=true) 在无 armed
-  时为空操作）不刷新令牌——经这些变体取消的 attempt 其迟到 prepare 仍可能通过
-  门，但触发条件比已修的 Disconnect→重连序列更窄；Service 重启会把 epoch 归零，
-  快照于重启前的请求被拒绝并表现为一次连接失败（fail-closed，重试即恢复）。
+
 ## 2026-09-23 · Windows connecting 期间到达的 policy 行为变更不再丢弃
 
 - **归属**：G1「已连接=能用」——已连接会话应按最新已安装 policy 提供 DIRECT/WeChat
@@ -4502,9 +5508,9 @@
   `windows-updates`。
 - **剩余限制**：只修 connecting 窗口的丢弃/延迟。兜底任务的代际检查与
   `handle_network_change_inner` 再次捕获代际之间仍有一个很小的锁释放窗口（与 policy_sync
-  调用方同一纪律）。`directOverlay==='off'` 在其它 Err
-  路径被前端渲染为 directOn 的问题仍独立存在（V5 旁注，不在本条范围）；Windows 11
-  实机行为未验证，夹具结论不等于设备验收。
+  调用方同一纪律）。V5 旁注的 `directOverlay==='off'` 被前端渲染为 directOn 已由
+  #296 修复（仪表盘只在 `directOverlay==='on'` 时显示 directOn），不再是剩余限制；
+  Windows 11 实机行为未验证，夹具结论不等于设备验收。
 
 ## 2026-09-23 · Windows 监视器重连成功后不再自中断丢失连接尾部
 
@@ -4602,59 +5608,6 @@
   Protected Offline 下 App 重新登录与刷新策略，都需要在 Windows 11 实机确认。开发版或非标准安装位置
   的 App 在保护开启期间无法走引导通道（失败即关闭）。macOS 部分另见 #331。
 
-## 2026-09-23 · Windows Service 保护路由只接受已安装的 Tono App
-
-- **归属/来源**：G1 保护不得放宽（内部审查 H2-F3，[#351](https://github.com/raydocs/tono/issues/351)
-  第 1 部分）；影响 Windows Service（`apps/windows/service`）。基线 main 244075f2，分支
-  `fix/win-service-app-image-20260923`；提交时未合 main。第三轮审查结论“需返工”，本条已按其
-  三个问题修改。**合并前置条件**：在 Win11 验收机的默认安装上运行
-  `icacls "C:\Program Files\Tono"`（并记录所有者，如 `(Get-Acl "C:\Program Files\Tono").Owner`），
-  确认只有 SYSTEM / Administrators / TrustedInstaller 有写权限、所有者是其中之一；拿到该证据前不得合并。
-- **缺陷修复**：
-  - Service 只证明调用方是 owner 用户（pipe PID 的 SID + `%APPDATA%` token），同用户任意进程都
-    能调用 Release、RestoreDns、StartClash 等改变 WFP/DNS/Core 的路由。现在
-    `enter_owner_lifecycle` 在取生命周期锁之前要求对端是已注册安装目录下的 `Tono.exe`（复用更新
-    路由的 `update::app_image`，含安装树 ACL 校验）。覆盖所有进入 owner lifecycle 的路由（含
-    StopClash、会话路由、GetClashLogs、OwnerGoodbye）；只读状态路由不变。卸载/修复走管理员
-    `--emergency-disarm` 与 SCM，不经管道。
-  - 审查返工 1：安装树 ACL 校验原先只信任 SYSTEM 与 Administrators，而 `C:\Program Files` 下新建
-    目录默认继承 `NT SERVICE\TrustedInstaller:(I)(F)`，安装器也不收紧 ACL，按源码推断标准安装上
-    该校验必然失败（Connect/Disconnect/Release 全被拒）。现把 TrustedInstaller
-    （S-1-5-80-956008885-…-2271478464）列为可信的所有者/写入者；CREATOR OWNER 在 Program Files
-    上只以 inherit-only 出现（已跳过），继承时替换成创建者即对象所有者，而所有者本就必须可信，
-    故不另加。Users、Authenticated Users、Everyone、owner 用户等非管理主体有写位仍判不可信。
-    此改动同样作用于更新路由的 `app_image`。
-  - 审查返工 2：只有“对端映像不是已注册的 `Tono.exe`”返回 401 `UnauthorizedOwner`；其余无法
-    完成证明的情况（注册表/ACL/文件读取失败、安装树文件被占用、树过大、对端 PID 缺失、阻塞任务
-    未完成）返回新错误码 `AppIdentityUnproven`（1016，HTTP 503），消息提示重试，若持续则修复 Tono
-    或以管理员身份运行 `tono-service.exe --emergency-disarm`（App 把该消息直接显示给用户）。
-    Release/Disconnect 在此情况下**仍拒绝**，不放行：同用户普通进程可以故意让证明失败（例如以
-    不共享读的方式打开安装树内文件），若放行等于重新打开本修复要关闭的旁路；出口是重试与已有的
-    管理员 `--emergency-disarm`。1013–1015 在 main 上已被 `StaleReleaseEpoch`、`ProtectionHeldByAnotherUser`、
-    `RemoteSessionConnectRefused` 占用，2026-09-25 合入 main 时由 1014 改号为 1016（App 已把 1014 映射为
-    “另一用户正在使用保护”）。
-- **新增/优化**：无。
-- **工程与测试**：
-  - `lifecycle_entry_refuses_when_the_app_image_proof_cannot_complete`（`server/owner_lifecycle_tests.rs`，
-    Windows `#[tokio::test]`，替换原 `a_process_of_the_owner_user_that_is_not_the_installed_app_is_refused`）：
-    lifecycle `test` feature 下映像证明改为可注入（默认放行，测试进程本就不是 App），本测试注入
-    “无法完成”的证明，经 `enter_owner_lifecycle` 断言返回 503。删掉 `enter_owner_lifecycle` 里那次
-    调用，入口会继续到 `Continue`，测试失败（审查指出原测试在删调用后仍绿）。
-  - `default_program_files_inherited_acl_is_trusted_and_user_write_is_not`（`update/security.rs`）：
-    用 SDDL 构造 Program Files 默认继承 ACL（含 TrustedInstaller:(I)(F)），断言被接受，再追加
-    Users 修改权限断言被拒。在修改前的分支上第一条断言失败（TrustedInstaller 的有效 ACE 带写位
-    被判“ordinary users can modify”）。该 SDDL 是按 Windows 默认 ACL 建的模型，尚未从设备读取。
-- **验证**：本机（MacBook）按 AGENTS.md 未运行 cargo，本机未编译；编译与测试委托本 PR 的
-  GitHub-hosted `windows-2025` CI。
-- **候选/发布**：无新包，仅源码。
-- **剩余限制**：未实机验证；需上述 `icacls` 证据后才能合并，若设备 ACL 与模型不符（例如所有者是
-  安装用户而非 Administrators），仍会全部拒绝，需在本变更内再修。Windows 未做 Authenticode，绑定的是
-  “管理员保护的已注册安装目录中的 Tono.exe”，与更新路由同等强度，不等于 macOS 代码签名。开发构建
-  （`pnpm dev` 从 `target\` 运行，`dev-service.mjs` 不带 `test` feature）与
-  `tono-service-integration-driver` 的 start/stop/logs 对已安装或开发版 Service 的生命周期路由将被
-  拒（机器上有已注册安装时 401，没有时 503），没有替代的开发路径，需 owner 明确接受。App 端未对
-  1016 做专门重试，只显示 Service 的消息。每次进入生命周期都会对 Tono.exe 做摘要并遍历安装树，耗时未实测，也未按
-  (pid, started_at) 缓存。StartClash 配置的 Service 端校验在 #351 第 2 部分单独 PR。
 
 ## 2026-09-23 · Windows App 在 Protected Offline（armed 未验证）期间的 Service 真值再同步
 
@@ -4738,6 +5691,278 @@
   机器从未 arm（Disconnect 落在 StartClash 之前），会被显示为 Protected Offline 而实际开放；
   这与 `restore.rs` 对 `Unknown` 的既有取舍（记作 armed、不 verified）一致，由 #299 的
   Service 真值轮询在 Service 可达后约 30 s 内以 `wanted=false` 纠正（未合 #299 时无自愈）。
+
+## 2026-09-22 · Windows 加密 DNS 旁路捕获文件损坏改为隔离恢复，不再永久拒绝断开
+
+- **归属/来源**：G1 断开与恢复（旁路文件损坏不得成为 Disconnect 的永久阻断）；缺陷编号
+  R3-F2（已确认，源码推导级：代码路径确定，仅掉电产生损坏文件未实机验证）。基线为
+  叠枝父提交 `9c8e5f13`（`fix/windows-dns-merge-guard-20260922`，PR #300），分支
+  `fix/windows-dns-sidecar-recovery-20260922`，叠在其上；关联 PR 见
+  `raydocs/tono` compare。本条提交时为独立修复分支，不沿用任何 main 合并授权。
+- **缺陷修复（三个面）**：
+  (1) 旁路文件非原子落盘且存在即永不重写：`protected-secure-dns.json` /
+  `protected-interface-doh.json` 用 `std::fs::write(tmp)`+`rename` 无数据 flush，严格弱于
+  主快照的原子写；损坏（0 字节/截断）后无人重写、无人删除。现在捕获文件改用与主快照
+  同级纪律（temp → write_all → sync_all → `atomic_file::replace_blocking`
+  `MOVEFILE_WRITE_THROUGH` 改名，参照 `core::desired` 的数据先于改名 flush 顺序），suppress
+  侧保留“可读即保留”的跨升级语义，但缺失或不可读时按守卫重写——只有当在位值不是本
+  build 写入的压制值（`EnableAutoDoh≠0` / 非空 DoH 模板集）才重新捕获，自身压制值永不
+  被记作“原始值”。
+  (2) 损坏后 `restore_encrypted_dns` 对 `read_capture_file()`/`restore_interface_doh()`
+  解析错 `?` 硬拒，`restore_resolver_policy` 四个调用点（无快照分支、证明通过后、损坏
+  快照恢复、卸载 rung 2）全部被阻，每次重试读同一文件，产品内无出口；suppress 早夭的
+  会话（读捕获失败发生在写 `EnableAutoDoh=0` 之前，策略根本未压制）同样被砖。现在
+  restore 侧对不可读捕获隔离（改名保留为 `protected-*.corrupt-<ts>`，无 `.json` 后缀，
+  参照主快照 quarantine 模式）后按“无捕获”语义继续：在位值即恢复结果，新标记
+  `TONO_DNS_CAPTURE_QUARANTINED` 随 `last_error` 在**成功**恢复上透出（App 映射见下方
+  续记）。选择“保持现状而非猜测 Windows 默认值”的依据：早夭面在位值就是用户原值，
+  主动写猜测默认值会破坏它；suppress 已写入的面在位值为 0，恢复后用户可在设置中重新
+  打开，损失被标记而非沉默。核心不变量：旁路文件损坏不得成为 Disconnect 的永久阻断，
+  也不得伪造“已恢复加密 DNS”的正面证据（两者均不假）。
+  (3) 卸载/紧急路径：`restore_for_uninstall` 不再因旁路文件损坏在 rung 1 早退（同一
+  隔离处理），WFP 拆除后 `EnableAutoDoh=0`/`DohFlags=0` 残留从“静默永久”变为“已标记
+  可修复”；跨卸载/重装存活的损坏旁路文件（卸载器不清持久目录）重装后首个 Disconnect
+  不再被砖。触发序列与逐环核实见 R3 审查报告 F2 及 V6 对抗核实（两处加重面）。
+- **新增/优化**：无新功能；`atomic_file` 新增阻塞线程用的同步 `replace_blocking`
+  （同 `MOVEFILE_WRITE_THROUGH` 标志，供 DNS engine 在 `bounded_dns_call` 的阻塞线程上
+  使用）。
+- **工程与测试**：一个窄回归（native 域，native_apply_tests.rs）
+  `corrupt_interface_doh_capture_is_quarantined_not_a_permanent_refusal`：enable 种正常快照后
+  使适配器离网（文档化的 "vanished counts as proven" 恢复面）并写 0 字节
+  `protected-interface-doh.json` → `facade::restore_protected()` 必须走证明路径成功、
+  `last_error` 含 `TONO_DNS_CAPTURE_QUARANTINED`、离网适配器注册表原始值被恢复、旁路文件被
+  隔离（0 字节内容保留）、主快照正常退役（当前实现每次以 "interface DoH capture is not
+  JSON" 解析错误失败）。suppress 早夭加重面由同一解析容错路径结构性修复，但 suppress 在
+  夹具下保持短路，未并入断言。夹具扩展：`test_io::Machine` 增加 `capture_dir` 改道（两个
+  捕获路径像 `snapshot_path()` 一样重定向），`restore_encrypted_dns` 的整体测试短路收窄为
+  注册表操作走夹具键表（`delete_key`/`write_dword`/`delete_value`/`write_qword` 增加
+  test_io 改道，`key_exists`/`enum_subkeys`/`write_sz`/`read_sz` 原有），文件读写/隔离走真
+  逻辑，宿主 NRPT/DoH 策略仍不可触碰；`Machine::legacy` 对空批提前返回（恢复一个全部
+  适配器已离网的快照会以 Restore 模式到达空调用），非空 restore/DHCP 批仍被拒。
+- **验证**：按所有者 2026-09-14 执行位置决定，本机（MacBook）未运行任何 cargo
+  build/test/check/clippy，只做编辑与源码自查；回归委托本 PR 的 GitHub-hosted
+  `windows-2025` Service CI：lifecycle `cargo test --locked --features standalone,client,test`
+  与 native DNS 前缀命令（`cargo test --locked --features standalone,client --lib
+  core::dns::engine::native_apply::tests::`，前置 `-- --list` 防零测试，与 windows-ci.yml
+  现有步骤一致）。提交时未获得结果；准确源码 SHA、实际 CI 输出与续记保留在关联 PR。
+- **候选/发布**：无新包，仅源码；不部署、不触碰 `appcast.xml` / `windows-updates` /
+  `latest.json`。
+- **剩余限制**：不放宽任何保护（NRPT 删除与策略注册表写失败仍 fail-closed 且可重试；
+  隔离只作用于捕获文件本身）；损坏文件的原值不可恢复，只能隔离保留供手工诊断；
+  未验证 Windows 11 实机断电产生的真实损坏文件；未把旁路文件纳入卸载器恢复状态清扫
+  （verify-V6 可选项，修复后残留只影响标记面不再阻断）；suppress 侧隔离在当次 Connect
+  只记引擎日志，经下方续记的持久记录由随后的 restore 透出标记；enable 恢复路径上的隔离
+  同样只记日志；夹具通过不等于 G1 实机验收。
+
+### 2026-09-23 续记 · 审查意见：suppress 侧隔离留下持久“原值已丢失”记录；App 映射新标记
+
+- **缺陷修复（审查 Q1）**：标准 F2 时序——捕获文件损坏 → 下一次 Connect 的 suppress
+  隔离它，但在位值已是上一会话写入的 `EnableAutoDoh=0` / 已清零的 DoH 模板，不再重捕获
+  → Disconnect 找不到捕获 `Ok(None)` → restore 报**干净成功**，用户 DoH 偏好被静默关掉，
+  违反本条“不得伪造已恢复加密 DNS 的正面证据”。现在 suppress 侧隔离时留下持久记录
+  `protected-secure-dns.lost.json` / `protected-interface-doh.lost.json`（原子写，同捕获
+  文件纪律）：`EnableAutoDoh` 在位值为 0 而无法重捕获时写；DoH 模板只要发生隔离就写
+  （已清零的模板从在位集合中消失，重捕获必然不完整）。restore 在捕获处理成功后消费该
+  记录并返回“已隔离”，于是同一条 `TONO_DNS_CAPTURE_QUARANTINED` 成功附注在两种时序下
+  都会出现；捕获写回失败时记录保留供重试；记录删不掉时仍按存在报告，绝不因此拒绝
+  release。仍不猜测 Windows 默认值。
+- **App 映射（审查 Q2）**：`connection_health.rs` 的 `DNS_WARNING_MARKERS` 与 support 页
+  `dnsWarningMarkers` 加入 `TONO_DNS_CAPTURE_QUARANTINED`，与 degraded 标记同款警告面，
+  支持页不再把它显示为 last error。连接健康判定仍要求 `enabled && snapshot_present`，
+  该标记只在断开后的成功 restore 上出现，不放宽已连接健康门。Service 侧
+  `core/update.rs` 对 `last_error.is_none()` 的严格判定未改（与 degraded 标记既有行为
+  一致：更新 Prepare 会在下一次成功 DNS 操作清掉标记前拒绝）。
+- **测试**：新增一个窄回归（审查明确要求）
+  `a_capture_quarantined_by_suppress_is_still_reported_by_restore`（native_apply_tests.rs，
+  engine 级）：0 字节 `protected-interface-doh.json` → `suppress_interface_doh()`（夹具中无
+  启用模板，即已被上一会话清零）→ `restore_interface_doh()` 必须返回 `true`，再次 restore
+  返回 `false`。修改前的分支上 suppress 隔离后不留任何文件，restore 读到 `Ok(None)` 返回
+  `false`，测试必败。`EnableAutoDoh` 一侧使用同一记录机制，但 `suppress_encrypted_dns` 在
+  夹具下仍短路、`read_dword` 无夹具改道，未测试。
+- **验证**：本机（MacBook）未编译、未运行 cargo 或前端检查（本 worktree 无
+  node_modules），委托本 PR 的 `windows-2025` Service/App CI；提交时未获得结果。
+- **剩余限制**：旧版本 build 不认识 `.lost.json` 记录（回退安装会忽略它，回到修复前的
+  静默行为，不会阻断）；损坏文件原值仍不可恢复；未实机验证。
+
+### 2026-09-25 续记 2 · 审查运行 a894f160：丢失证据保留到恢复提交之后
+
+先把 #300 分支（含其审查修复 `12e9ceae`）合入本分支；`native_apply_tests.rs` 冲突两边测试
+全部保留。
+
+- **缺陷修复（opus:F2 major = codex:F2 minor）**：engine 的 restore 在整个恢复提交前就
+  破坏性消费丢失证据——不可读捕获被改名隔离、`.lost.json` 被删除；随后接口 DoH 腿写入
+  失败、facade 删快照失败或 `bounded_dns_call` 超时丢弃返回值，重试都只看到“无捕获、无
+  记录”并报告干净恢复。现在 `restore_encrypted_dns` / `restore_interface_doh` 对丢失证据
+  **只读不消费**（不可读捕获留在原位、记录只检查存在）；新 engine 函数
+  `retire_lost_captures`（隔离仍不可读的捕获、删除记录，尽力而为）只由 facade 的
+  `settle_capture_loss` 在恢复提交（快照已删、附注已写入 `last_error`）之后调用。退役
+  失败只会让下一次恢复再次报告，方向安全。无快照时的孤儿 heal 调用恢复也不再悄悄消费
+  证据。
+- **缺陷修复（codex:F1 major）**：正常 Disconnect 执行两次恢复（release 处理器一次、
+  disarm 门的无快照一次），第二次清掉第一次的附注。现在第一次恢复提交后把附注记入
+  进程内 `CAPTURE_LOSS_NOTE`，下一次**没有自身丢失**的恢复接过它再透出一次；之后与
+  degraded 附注相同，由下一次成功的 DNS 操作清除（更新 Prepare 的严格
+  `last_error.is_none()` 判定因此不会被长期卡住），下一次显式 `enable` 丢弃它。
+- **缺陷修复（opus:F1，降为 minor）**：enable 的损坏快照恢复路径丢弃附注，而旧注释
+  声称“下一次 restore 会透出”并不成立（证据已被消费）。现在该路径只读证据、不调用
+  settle，证据留在磁盘；同一次 enable 的 suppress 会先写丢失记录再隔离，下一次恢复据此
+  报告。注释改为如实描述。
+- **缺陷修复（opus:F3 = codex:F3，minor）**：证明路径 `degraded.or(capture_note)` 在两者
+  同时存在时丢掉加密 DNS 丢失附注。现在用 `join_notes` 拼接（两条描述不同的损失），
+  与卸载 rung 2 的拼接一致。
+- **缺陷修复（opus:F4，minor）**：suppress 先改名隔离、后写丢失记录；记录写失败时唯一
+  证据已被移走。现在两个 suppress（`EnableAutoDoh` 与接口 DoH）都先写记录、后隔离；
+  记录写失败时直接返回错误，不可读文件留在原位，由下一次恢复报告。
+- **测试**：新增四个窄回归（native 域，native_apply_tests.rs）：
+  `a_failed_policy_restore_keeps_the_capture_loss_for_the_retry`（全局捕获 0 字节 + 接口
+  DoH 写入注入失败 → 第一次 `restore_encrypted_dns` 报错，重试必须返回 `true`；旧实现
+  重试返回 `false`）；`the_second_restore_of_a_disconnect_keeps_the_capture_loss_note`
+  （连续两次 `restore_protected`，第二次的 `last_error` 仍含标记）；
+  `a_capture_loss_met_by_the_enable_recovery_reaches_the_next_restore`（损坏快照 + 0 字节
+  接口捕获 → enable 恢复完成 → 随后的恢复必须报告标记）；
+  `an_unwritable_lost_record_keeps_the_unreadable_capture_in_place`（记录路径被目录占据
+  → suppress 报错且 0 字节捕获仍在原位）。opus:F3/codex:F3 未加测试：degraded 出口需要
+  持续的 live-apply 失败，native 夹具不支持非空 Restore 批，stub 引擎又不会产生捕获
+  附注；改动是两个 `Option` 的拼接。**测试修正**：既有
+  `a_capture_quarantined_by_suppress_is_still_reported_by_restore` 的第二个断言由“再次
+  restore 返回 false”改为“退役前再次 restore 仍返回 true，`retire_lost_captures` 之后返回
+  false”，对应“恢复不消费证据”的新语义。夹具 `reset_memory` 同时清空
+  `CAPTURE_LOSS_NOTE`。以上测试在修复前代码上的失败均为源码推导，未实际运行。
+- **验证**：本机（MacBook）未编译、未运行 cargo，只用 `rustfmt --check` 确认无语法
+  错误；委托本 PR 的 `windows-2025` CI。提交时未获得结果。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：`CAPTURE_LOSS_NOTE` 在进程内，Service 在两次恢复之间重启会丢失它（证据
+  已退役，此时状态不再提示）；只有一次恢复的路径（如更新 Prepare 自己发现丢失）留下的
+  附注会再被下一次恢复透出一次，更新可能多被拒绝一次；损坏文件原值仍不可恢复；合入前
+  仍需 Windows 验收机检查 wintun 接口键（见 #300 条续记 2）。
+
+## 2026-09-22 · Windows 快照合并与损坏恢复不再把 TUN DNS 地址记为原始值
+
+- **归属/来源**：G1 断开与恢复（Disconnect 不得被污染快照永久拒绝）；缺陷编号 R3-F1
+  （新根因，与 #293 的混合值判定、#290 的 protect 侧 pending 保留不同轴）。基线
+  main `576d7087`，分支 `fix/windows-dns-merge-guard-20260922`；
+  [差异与关联 PR](https://github.com/raydocs/tono/compare/main...fix/windows-dns-merge-guard-20260922)。
+  本条提交时仍是独立修复分支，不沿用任何 main 合并授权。
+- **缺陷修复（两面同一根因）**：
+  (a) `merge_snapshot` 对快照已存在时新纳入的适配器无 Tono 值检查、GUID 用精确 `==`
+  比较。一个（重新）激活时注册表已带 `198.18.0.2` 且不在快照内的适配器会被以该值
+  作为“原始 DNS”追加落盘；此后每次 Disconnect 把 `198.18.0.2` 写回该适配器并在证明
+  阶段被 `any_loopback` 无条件拒绝，产品内无出口。现在对“尚未记录原始值”的适配器
+  子集应用与无快照分支相同的 orphan 守卫与 DHCP heal 语义（新标记
+  `TONO_DNS_ORPHANED_ADAPTER`），GUID 比较统一为忽略大小写，已记录的原始值不受影响。
+  (b) `recover_unreadable_snapshot` 只读 active 适配器：损坏/缺失快照恢复期间 inactive
+  适配器上残留的 `198.18.0.2` 无人读、无人清，适配器回网后经 (a) 污染合并。现在恢复
+  证据改为枚举注册表 `Tcpip(6)\Parameters\Interfaces` 全部子键（新 engine 读取
+  `collect_interface_key_adapters`，沿用隧道排除），inactive 残留同样拒绝恢复直至
+  操作员清理，判定谓词与原 `any_loopback` 完全相同（同注册表读、更大范围）。
+  触发序列与逐环核实见 R3 审查报告 F1 及 V6 对抗核实。
+- **新增/优化**：无新功能；只收紧“什么可以成为原始值/什么可以证明恢复”的证据面。
+- **工程与测试**：两个窄回归（每行为一个）：stub 域
+  `a_fresh_adapter_already_on_tono_dns_is_never_recorded_as_original`
+  （dns/tests.rs，快照存在 + fresh 适配器带 TUN 端点 → enable 拒绝、快照不被污染，
+  当前实现在落盘后必败）；native 域
+  `corrupt_snapshot_recovery_refuses_over_an_inactive_leftover_tun_dns`
+  （native_apply_tests.rs，损坏快照 + 仅存在于注册表的 inactive 适配器 → 恢复拒绝、
+  证据保留、零写入；清理后恢复完成并隔离旧文件）。夹具扩展仅一处：OS I/O 隔离
+  Machine 增加 `subkeys` 注册表枚举，使 `enum_subkeys` 在夹具激活时改走夹具键表，
+  不触碰宿主注册表（该 helper 原无夹具路径，DoH 枚举在夹具下本就被 suppress/restore
+  短路，行为不变）。
+- **验证**：按所有者 2026-09-14 执行位置决定，本机（MacBook）未运行任何 cargo
+  build/test/check/clippy，只做编辑与源码自查；回归委托本 PR 的 GitHub-hosted
+  `windows-2025` Service CI：lifecycle `cargo test --locked --features standalone,client,test`
+  与 native DNS 前缀命令（`cargo test --locked --features standalone,client --lib
+  core::dns::engine::native_apply::tests::`，前置 `-- --list` 防零测试，命令与
+  windows-ci.yml 现有步骤一致）。提交时未获得结果；准确源码 SHA、实际 CI 输出与
+  续记保留在关联 PR，不把上一轮 main 的绿灯移用到本修复。
+- **候选/发布**：无新包，仅源码；不部署、不触碰 `appcast.xml` / `windows-updates` /
+  `latest.json`。
+- **剩余限制**：不放宽任何保护（含 TUN DNS 地址的适配器在所有路径都不得被记为
+  “已恢复原始值”；#293 混合判定与 #290 缺失适配器 pending 语义不变）；未验证
+  Windows 11 实机断电产生的真实损坏文件与 inactive 适配器回网时序；emergency 后
+  依赖操作员按拒绝信息清理适配器 DNS；夹具通过不等于 G1 实机验收。
+
+### 2026-09-23 续记 · lifecycle CI 4 项既有测试失败：恢复证据在 test 构建丢失 loopback hook
+
+`9c8e5f13` 的 lifecycle 步骤 307 通过 / 4 失败（push 与 pull_request 两个 run 的 service
+job 同因，[失败日志](https://github.com/raydocs/tono/actions/runs/35820994514/job/107052595536)）：
+`disarm_is_refused_until_dns_restore_is_proven`、
+`emergency_disarm_removes_wfp_intent_but_reports_unrestored_dns`、
+`release_is_refused_until_dns_restore_is_proven`、
+`release_when_not_armed_still_attempts_dns_restore_best_effort`。属本条 (b) 引入的
+**测试域回归**（非产品缺陷、非编译错误）：`recover_unreadable_snapshot` 的 any-loopback
+证据从 `engine_any_loopback`（test-feature 构建读 `set_live_dns_on_loopback`，是模块
+文档化的“restore 不可证明”夹具渠道）换成注册表视图谓词后，test 构建里该视图取
+`test_hooks::collected_adapters()` 的空默认值，四个夹具用 hook 表达的“机器仍在 Tono
+DNS 上”不再被听见——损坏快照被误判可以隔离，disarm 门随之打开（应 Err 得到 Ok）。
+同分支的 `unverified_startup_intent_stays_blocked_until_core_and_dns_reconcile` 等其余
+用例不受影响。修复为窄谓词 `registry_interfaces_read_as_tono_dns`：生产
+（`not(feature = "test")`）分支保持注册表全集判定不变，test-feature 构建 OR 回
+`live_dns_on_loopback`（只更 fail-closed，永不 AND），native 域与 stub 域两个新回归、
+既有夹具语义均不动，**未修改任何测试夹具**。验证仍按所有者 2026-09-14 执行位置决定
+本机零 cargo，委托同一 `windows-2025` CI 重跑；本续记提交时未获得结果，不预支绿灯。
+
+### 2026-09-23 续记 2 · 审查意见：注册表视图的名称无关 TUN 排除与子键枚举截断
+
+- **缺陷修复（审查 P1）**：上文“沿用隧道排除”不准确——注册表视图无 LUID，只剩
+  `Connection\Name == "Tono"` 一道排除。若 wintun 设备删除后
+  `Tcpip\Parameters\Interfaces\{tunGUID}\NameServer = 198.18.0.2` 残留而 `Connection\Name`
+  随设备消失，损坏快照后的每次 Connect 都会以 `tono_dns=true` 永久拒绝。现在注册表
+  视图另加名称无关排除 `is_inactive_tunnel_interface_key`：键**不在**当前活跃集、IPv4
+  `NameServer` **恰为** `198.18.0.2`、其余三值（IPv4 `ProfileNameServer`、IPv6 两值）
+  全空/缺失——这是 TUN 入站 `dns_address` 经接口 DNS API 写出的形状；Tono 自己的
+  protected apply 总是同时写 IPv4 `NameServer` 与 `ProfileNameServer`，所以被 Tono
+  重定向过的真实适配器（含 inactive）、混合值（#293）、legacy loopback、活跃适配器均
+  仍计入证据、仍拒绝假恢复。被误判为 TUN 形状的真实适配器若回网，会在 enable 中作为
+  “未记录”适配器由 (a) 守卫 heal 或拒绝，不会成为污染原始值。
+- **缺陷修复（审查 P2）**：`enum_subkeys` 原 `0..64` 静默截断；改为无上限枚举直到
+  `ERROR_NO_MORE_ITEMS`，其他状态返回错误，不再把不完整集合当完整证据
+  （Hyper-V/WSL/Docker 机器常超 64 个接口 GUID）。
+- **测试/夹具修正**：不新增测试。修改既有 native 回归
+  `corrupt_snapshot_recovery_refuses_over_an_inactive_leftover_tun_dns`：{B} 夹具改为
+  Tono apply 实际写出的形状（`NameServer` + `ProfileNameServer`），并加入仅
+  `NameServer=198.18.0.2` 的已删除 TUN 键 {C}；清理 {B} 后恢复必须在 {C} 存在时完成。
+  修改前的分支上第二次 `enable()` 会被 {C} 以 `tono_dns=true` 拒绝，测试必败。
+- **验证**：本机（MacBook）未编译、未运行 cargo，委托本 PR 的 `windows-2025` CI；
+  提交时未获得结果。
+- **剩余限制**：TUN 键形状是按 sing-tun/Windows 接口 DNS API 行为推断的，**未实机
+  核实**。需在 Windows 验收机 Disconnect（wintun 删除）后查：
+  `reg query HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\{tunGUID}`
+  是否残留 `NameServer`、是否带 `ProfileNameServer`，以及
+  `HKLM\SYSTEM\CurrentControlSet\Control\Network\{4D36E972-E325-11CE-BFC1-08002BE10318}\{tunGUID}\Connection /v Name`
+  是否消失。若 TUN 键实际带有 `ProfileNameServer` 或 IPv6 值，本排除不生效，损坏快照
+  后 Connect 仍会被拒（fail-closed，不泄漏），需改为持久化 TUN GUID 的排除。
+
+### 2026-09-25 续记 3 · 审查运行 c7463149：会话内孤儿 heal 不再撤 NRPT；apply 写入顺序
+
+- **缺陷修复（codex:F1 = opus:F1，major）**：(a) 让快照存在的 enable 复用了
+  `heal_orphaned_protected_dns_without_snapshot`，而它在重置适配器后无条件调用
+  `engine_restore_encrypted_dns`：保护会话进行中删掉 Tono NRPT catch-all、恢复 DoH；
+  heal 后复检仍拒绝（或后续落盘失败）时直接返回，末尾的 `engine_suppress_encrypted_dns`
+  不可达，NRPT 保持被撤状态。现在 heal 带 `OrphanHealScope`：无快照（无会话）时行为
+  不变；快照存在时只把传入的孤儿适配器重置为 DHCP 并刷新缓存，从不触碰 NRPT/DoH，
+  任何失败出口都保持会话原有的解析策略。
+- **缺陷修复（codex:F2，降为 minor）**：注册表视图的 TUN 排除只凭值形状（IPv4
+  `NameServer` 恰为 `198.18.0.2`、其余为空）。`engine::apply_protected` 原先先写
+  `NameServer` 再写 `ProfileNameServer`，两次写入之间中断的真实适配器正是这个形状，
+  会被排除出损坏快照恢复的证据。没有采用“按 LUID/连接名确认是 TUN”：注册表视图
+  没有 LUID，wintun 设备删除后连接名也可能消失，持久化 TUN GUID 超出本次范围。改为
+  调换两次写入顺序（先 `ProfileNameServer`）：中断后要么原值未动，要么
+  `ProfileNameServer` 已带 TUN 地址而继续计入证据。最终写入结果、写入次数与保护状态
+  不变。
+- **测试**：两个窄回归。stub 域 `an_in_session_orphan_heal_leaves_the_resolver_policy_armed`
+  （dns/tests.rs；快照 {A}、未记录的 {B} 带 TUN 地址、stub heal 无法清除 → enable 以
+  `TONO_DNS_ORPHANED_ADAPTER` 拒绝，DHCP 重置 1 次，NRPT/DoH 恢复 0 次；为此 test_hooks
+  增加 `#[cfg(test)]` 计数 `take_encrypted_restores`）。native 域
+  `an_interrupted_protected_apply_never_leaves_the_tunnel_key_shape`
+  （native_apply_tests.rs；IPv6 为 DHCP，在 IPv4 `ProfileNameServer` 写入处注入失败 →
+  读回的适配器不得被 `is_inactive_tunnel_interface_key` 判为 TUN 键；旧顺序下 `NameServer`
+  已写入，断言失败）。两个测试在修复前的代码上的失败均为源码推导，未实际运行。
+- **验证**：本机（MacBook）未编译、未运行 cargo，只用 `rustfmt --check` 确认无语法
+  错误；委托本 PR 的 `windows-2025` CI（lifecycle 与 native DNS 前缀两步）。提交时未获得
+  结果。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：TUN 键形状仍未实机核实（见续记 2 的 `reg query` 清单），合入前需在
+  Windows 验收机上检查。
 
 ## 2026-09-23 · Windows 混合 DNS 残留不能证明恢复成功
 

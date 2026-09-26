@@ -11,6 +11,7 @@ import {
   splitManagedCatalogProxies,
   catalogBaseName,
   catalogHy2Name,
+  catalogEntryMissingClientFields,
 } from '../../catalog-yaml';
 import {
   type Env,
@@ -280,19 +281,6 @@ export async function retireFleetNode(
   };
 }
 
-function proxyBlockFromProfile(name: string, publicIp: string): string {
-  return [
-    `  - name: ${name}`,
-    '    type: vless',
-    `    server: ${publicIp}`,
-    '    port: 443',
-    `    uuid: ${CLIENT_UUID_PLACEHOLDER}`,
-    '    network: tcp',
-    '    tls: true',
-    '',
-  ].join('\n');
-}
-
 function hy2FingerprintHex(raw: unknown): string | null {
   const hex = String(raw ?? '').replace(/:/g, '').trim().toLowerCase();
   return /^[0-9a-f]{64}$/.test(hex) ? hex : null;
@@ -313,6 +301,23 @@ function hy2BlockFromProfile(base: string, publicIp: string, fingerprint: string
   ].join('\n');
 }
 
+/**
+ * Retirement revokes the node's exit token and throws the new one away, so a
+ * name put back in the catalog would point customers at a node that can no
+ * longer pull a roster. No acceptance override skips this: the token has to be
+ * issued, the node re-enabled and the token deployed first.
+ */
+export async function assertExitIdentityActive(e: Env, name: string): Promise<void> {
+  const exit = await e.DB.prepare('SELECT status FROM exit_nodes WHERE name = ?').bind(name).first<Row>();
+  if (exit && String(exit.status) !== 'active') {
+    throw new ApiError(
+      409,
+      'EXIT_TOKEN_REVOKED',
+      `${name} 的出口令牌已在下架时吊销。先启用出口节点、重新签发令牌并部署到机器上，再上架`,
+    );
+  }
+}
+
 export async function relistFleetNode(
   e: Env,
   actorEmail: string,
@@ -328,16 +333,33 @@ export async function relistFleetNode(
   if (expected !== catalog.revision) {
     throw new ApiError(409, 'CATALOG_CONFLICT', 'Managed catalog changed; preview relist again');
   }
-  let block = typeof requestBody.block === 'string' ? requestBody.block : '';
+  await assertExitIdentityActive(e, name);
+  const block = typeof requestBody.block === 'string' ? requestBody.block : '';
   const profile = await e.DB.prepare(
     'SELECT public_ip, hy2_port, hy2_fingerprint FROM ops_node_profiles WHERE catalog_name = ?',
   ).bind(name).first<Row>();
   const ip = profile?.public_ip == null ? '' : String(profile.public_ip).trim();
-  if (!block.trim()) {
-    if (!ip) throw new ApiError(422, 'RELIST_NO_TEMPLATE', 'No stored catalog template for this node');
-    block = proxyBlockFromProfile(name, ip);
-  }
   let plan = relistCatalogPlan(catalog.yaml, name, block);
+  if (!plan.alreadyListed) {
+    // Neither the profile nor retirement keeps the node's Reality settings, so
+    // there is no template to rebuild the entry from. A guessed entry without
+    // them is refused by every client, which then rejects the whole catalog.
+    if (!block.trim()) {
+      throw new ApiError(
+        422,
+        'RELIST_NO_TEMPLATE',
+        'No stored catalog entry for this node; publish its full VLESS Reality entry with the catalog publish tool',
+      );
+    }
+    const missing = catalogEntryMissingClientFields(block);
+    if (missing.length > 0) {
+      throw new ApiError(
+        422,
+        'CATALOG_ENTRY_INCOMPLETE',
+        `Catalog entry for ${name} lacks fields clients require: ${missing.join(', ')}`,
+      );
+    }
+  }
   if (!plan.safe) {
     throw new ApiError(422, 'RELIST_UNSAFE', plan.warnings[0] ?? 'Node cannot be relisted');
   }
@@ -371,11 +393,14 @@ export async function relistFleetNode(
   const revision = catalog.revision + 1;
   const encrypted = await encryptCatalog(plan.yaml, requiredCatalogKey(e));
   const results = await e.DB.batch([
+    // The exit check rides in the write too: a drain sweep that revokes the
+    // token after the check above must not end with the node listed.
     e.DB.prepare(
       `UPDATE managed_exit_catalog
        SET revision = ?, ciphertext = ?, nonce = ?, content_sha256 = ?, updated_at = ?
-       WHERE singleton_id = 1 AND revision = ?`,
-    ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, changedAt, catalog.revision),
+       WHERE singleton_id = 1 AND revision = ?
+         AND NOT EXISTS (SELECT 1 FROM exit_nodes WHERE name = ? AND status <> 'active')`,
+    ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, changedAt, catalog.revision, name),
     e.DB.prepare(
       `INSERT INTO ops_node_profiles(id, catalog_name, status, created_at, updated_at)
        SELECT ?, ?, 'active', ?, ?
@@ -398,6 +423,7 @@ export async function relistFleetNode(
     ).bind(id(), changedAt, actorEmail.slice(0, 254), name, `relisted ${name}`.slice(0, 500), revision, digest),
   ]);
   if (!results[0].meta.changes) {
+    await assertExitIdentityActive(e, name);
     throw new ApiError(409, 'CATALOG_CONFLICT', 'Managed catalog changed; preview relist again');
   }
   return { revision, previousRevision: catalog.revision, alreadyListed: false, sha256: digest };

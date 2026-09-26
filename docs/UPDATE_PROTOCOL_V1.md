@@ -202,10 +202,13 @@ its recorded incarnations died.
   requires every member of the durable replacement plan (the payload tree,
   `tono-service.exe` and `core-sha256.txt`) to hash to its `new_digest`;
   three matching binaries with a later member still old is an interrupted
-  publication and rolls back (2026-09-23). A member that cannot be read
-  (sharing violation, AV lock) is not a mismatch: recovery exits with the
-  error before any rollback touches a file, leaving the attempt `Uncertain`
-  for the next recovery, as an unreadable binary already did. A complete,
+  publication and rolls back (2026-09-23). A component or member that cannot
+  be read (sharing violation, AV lock) is not a mismatch: recovery exits with
+  the error before the Service is stopped or any file is touched, and the
+  next recovery classifies again. A `Consumed` attempt is marked `Uncertain`
+  on that exit, the only in-flight marker a verified Disconnect can retire
+  once the retained originals are proven; `Replaced` (a registered
+  successor) and `Uncertain` keep their marker (2026-09-25, #602). A complete,
   verified publication stays installed; a successor that was never durably
   registered is replaced by measured-target evidence and the first
   authenticated target-identity App adopts it.
@@ -240,6 +243,17 @@ its recorded incarnations died.
   clearing the slot (otherwise they would refuse the next update's
   preparation); private attempt evidence (payload, plan, executor, package)
   is retained. A failed removal leaves the attempt pending and retryable.
+- **Installed version record (Windows, 2026-09-25, #602).** A native update
+  runs no NSIS section, so the Add/Remove Programs `DisplayVersion` that the
+  manual installer's downgrade check reads is written by the transaction when
+  the signed target becomes the settled installation: by the Service right
+  after a durable commit (a failed write does not undo the commit), again by
+  the executor's committed cleanup before it retires the boot task while the
+  installed identity is still the target, and by the Service before an
+  installed-and-released archive (a failed write keeps that record pending).
+  Rollback and the other archives never wrote it, so the original version
+  stands. While an attempt is pending the manual installer and uninstaller are
+  fenced, so neither reads a version the transaction has not settled.
 - **Launching without a live executor incarnation is provably unconsumed.**
   Consumption only accepts the exact recorded executor incarnation. When
   that incarnation is gone and the high-water still sits below the release,
