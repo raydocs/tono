@@ -190,7 +190,10 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
         // the restore task does not await that potentially long connection transaction.
         match update_recovery {
             Ok(Some(tono_service_protocol::update_contract::Protection::Connected)) => {
-                let allowed = update_recovery_connect_allowed(&state.lock().await, generation, connect_epoch);
+                let allowed = {
+                    let inner = state.lock().await;
+                    update_recovery_connect_allowed(&inner, generation, connect_epoch)
+                };
                 if allowed {
                     let state = state.clone();
                     let app = app.clone();
