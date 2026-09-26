@@ -917,6 +917,34 @@ mod lifecycle_tests {
         assert!(!copy.exists(), "A's runtime copy must not outlive the replacement sign-in");
         let _ = std::fs::remove_dir_all(&inner.catalog_dir);
     }
+
+    #[tokio::test]
+    async fn a_superseded_sign_in_leaves_no_marker_vouching_for_the_vault() {
+        let state = Arc::new(TonoState::for_test());
+        let directory = {
+            let mut inner = state.lock().await;
+            // A tunnel is starting, so adoption awaits its release: the gap in which a newer
+            // sign-in or a restore retry bumps the sign-in generation.
+            inner.fsm.begin_connect();
+            inner.catalog_dir.clone()
+        };
+        let (client, _, generation) = begin_sign_in(&state).await.unwrap();
+        state.lock().await.challenge_id = Some("challenge-a".into());
+        let auth: tono_core::auth::AuthResponse = serde_json::from_value(serde_json::json!({
+            "accessToken": "fixture-access-a",
+            "user": { "id": "account-a", "email": "a@example.test" },
+        })).unwrap();
+        let adopted = adopt_replacing_with(&state, &client, generation, "challenge-a", &auth,
+            |state| async move { begin_sign_in(&state).await.map(|_| ()) },
+            |_| {},
+        ).await;
+        assert!(adopted.is_err(), "a superseded sign-in stores no session");
+        // No newer sign-in stands on the marker A wrote: the next launch must not own whatever the
+        // vault holds (a previous installation's session) on its word.
+        let ownership = crate::tono::credentials::data_dir_owns_vault_session(&directory, &[], false);
+        let _ = std::fs::remove_dir_all(&directory);
+        assert_eq!(ownership, VaultSessionOwnership::NotOwned);
+    }
 }
 
 /// The current account, if signed in.
