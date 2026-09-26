@@ -949,8 +949,17 @@ extension KillSwitchManager {
         }
     }
 
+    /// Longest a helper command may run. A `pfctl` load or query finishes in
+    /// well under a second even on a busy Mac, and the relay-map `curl` caps
+    /// itself at 10 s (`--max-time`), so this fires only on a wedged child.
+    /// Unbounded, one held the helper's single request thread, and with it
+    /// `/core/stop`, forever (R609-F2).
     static let helperCommandDeadline: TimeInterval = 15
 
+    /// Past `deadline` the command has failed, whatever it would have done:
+    /// no caller may read a load, an enable or a release that never reported
+    /// back as done. The child gets SIGTERM, then SIGKILL, each waited on
+    /// for a second; one stuck in the kernel beyond that exits on its own.
     static func run(
         _ executable: String,
         _ arguments: [String],
@@ -963,10 +972,35 @@ extension KillSwitchManager {
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exited.signal() }
         try process.run()
-        let output = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return .init(status: process.terminationStatus, output: output)
+        // Drained on its own thread, so a child that fills the pipe still
+        // exits. The block holds the read end and the process until the
+        // child's end closes, so a read abandoned below still finishes, frees
+        // its descriptor, and the child is still reaped.
+        let output = HelperCommandOutput()
+        let reader = pipe.fileHandleForReading
+        DispatchQueue.global(qos: .utility).async {
+            withExtendedLifetime(process) {
+                output.finish(reader.readDataToEndOfFile())
+            }
+        }
+        let end = DispatchTime.now() + deadline
+        if exited.wait(timeout: end) == .success, output.wait(until: end) {
+            return .init(status: process.terminationStatus, output: output.data)
+        }
+        if process.isRunning {
+            process.terminate()
+            if exited.wait(timeout: .now() + 1) == .timedOut, process.isRunning {
+                kill(process.processIdentifier, SIGKILL)
+                _ = exited.wait(timeout: .now() + 1)
+            }
+        }
+        let name = (executable as NSString).lastPathComponent
+        throw HelperFailure.system(
+            "\(name) did not finish within \(Int(deadline.rounded(.up))) seconds."
+        )
     }
 
     static func runBoundedSystemLookup(

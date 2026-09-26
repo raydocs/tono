@@ -84,6 +84,22 @@ struct HelperCommandResult {
     }
 }
 
+/// A command's output, read on the drain thread. `data` is read only after
+/// `wait` succeeds, and the semaphore orders the write before that read.
+final class HelperCommandOutput: @unchecked Sendable {
+    private let drained = DispatchSemaphore(value: 0)
+    private(set) var data = Data()
+
+    func finish(_ data: Data) {
+        self.data = data
+        drained.signal()
+    }
+
+    func wait(until end: DispatchTime) -> Bool {
+        drained.wait(timeout: end) == .success
+    }
+}
+
 final class KillSwitchManager {
     /// Ceiling for the persisted recovery pin set of a single host. Well under
     /// the 128-address limit `validateAddresses` enforces when those pins are
