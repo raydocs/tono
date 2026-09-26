@@ -16,6 +16,25 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Applied in: PR / commit / command
 ```
 
+## 2026-09-26 · Windows: which vault session does the next launch trust after a sign-in that did not finish saving?
+
+- Status: provisional
+- Chosen: a sign-in always marks the local session marker pending (also over a
+  committed marker) before it retires anything, and commits it only after the new
+  session is durable in the vault. A switch that fails, a crash, or a commit that
+  never lands leaves the marker pending, and the next launch treats the vault
+  session as not owned: the user signs in again, through main's existing
+  unowned-session path, which releases stored protection when the Service reports
+  it armed. Rejected: keeping or restoring the previous account's committed marker,
+  which would let the next launch silently restore the previous account or trust a
+  session that never reached the vault.
+- Why stricter: a vault session is never trusted, and no account is resumed,
+  unless this installation proved that session durable. The cost is a re-login.
+  No new sign-out or release path is added; the existing unowned-session path
+  handles the case.
+- Applied in: [#642](https://github.com/raydocs/tono/pull/642) for
+  [#409](https://github.com/raydocs/tono/issues/409).
+
 ## 2026-09-24 · When may an agent merge a PR without asking?
 
 - Status: owner
