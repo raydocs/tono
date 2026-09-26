@@ -601,8 +601,10 @@ extension AccountSession {
         deviceActionError = nil
         entitlementDetail = nil
         blockedWhileReady = false
-        // An offline admission described the account just cleared (#582).
+        // An offline admission described the account just cleared (#582),
+        // and so did Tono's acceptance of its session (R612-O5).
         api.offlineGate.leaveOffline()
+        api.offlineGate.withdrawAcceptance()
         offlineVerifiedAt = nil
     }
 }

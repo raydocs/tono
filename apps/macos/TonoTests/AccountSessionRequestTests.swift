@@ -1078,6 +1078,77 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertNil(account.offlineVerifiedAt)
     }
 
+    /// R612-O5: a restore that cannot reach Tono and finds no offline grant
+    /// leaves the account in error with the cached catalog still in memory.
+    /// Connect, the entry every protected reconnect takes, must refuse it
+    /// rather than dial that cached exit.
+    func testUnreachableRestoreWithoutAGrantKeepsConnectRefused() async throws {
+        let directory = Self.offlineGrantDirectory("o5")
+        let installed = InstalledCatalogDigests(catalogSha256: "catalog-a", routingSha256: "routing-a")
+        let (account, transport, host, _) = fixture(
+            offlineGate: OfflineGrantGate(directory: directory),
+            installedCatalogConsumer: { installed }
+        )
+        defer {
+            transport.invalidateAndCancel(); HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            ManagedExitCatalogOwnership.purge()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        try await adoptTestAccount(account)
+        // Relaunch with no grant on disk and the control plane blackholed.
+        account.user = nil
+        account.state = .restoring
+        HeldAccountProtocol.install(host) { request in
+            request.client?.urlProtocol(request, didFailWithError: URLError(.cannotConnectToHost))
+        }
+        let unreachable: Error
+        do {
+            _ = try await account.api.me()
+            return XCTFail("a blackholed control plane cannot answer")
+        } catch {
+            unreachable = error
+        }
+
+        await account.settleRestoreFailure(unreachable)
+        guard case .error = account.state else {
+            return XCTFail("no grant admits this launch offline; got \(account.state)")
+        }
+        XCTAssertNotNil(
+            account.api.offlineGate.connectRefusal(
+                catalogDigest: installed.catalogSha256,
+                routingToken: installed.routingSha256
+            ),
+            "Connect must not dial the cached exit of a session Tono neither verified nor admitted offline"
+        )
+    }
+
+    /// R612-O5: clearing the account (sign-out, account loss) withdraws
+    /// Tono's acceptance of its session; Connect must not read a signed-out
+    /// session as verified online.
+    func testClearingTheAccountWithdrawsItsOnlineAcceptance() async throws {
+        let directory = Self.offlineGrantDirectory("o5-sign-out")
+        let (account, transport, host, _) = fixture(offlineGate: OfflineGrantGate(directory: directory))
+        defer {
+            transport.invalidateAndCancel(); HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            ManagedExitCatalogOwnership.purge()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        try await adoptTestAccount(account)
+        XCTAssertNil(
+            account.api.offlineGate.connectRefusal(catalogDigest: "catalog-a", routingToken: "routing-a"),
+            "a sign-in is Tono accepting the session"
+        )
+
+        account.clearAccount()
+
+        XCTAssertNotNil(
+            account.api.offlineGate.connectRefusal(catalogDigest: "catalog-a", routingToken: "routing-a"),
+            "a signed-out session is not accepted online"
+        )
+    }
+
     /// #582 M2: the server refusing this session's own renewal overwrites the
     /// offline grant with a revoked verdict. The file is never deleted.
     func testARefusedRenewalOverwritesTheOfflineGrantAsRevoked() async throws {
