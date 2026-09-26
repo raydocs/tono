@@ -12,6 +12,7 @@ Start here. Dated handoffs and one-off reviews live in [archive/](archive/).
 | [BUILD_AND_TEST.md](BUILD_AND_TEST.md) | GitHub-hosted CI, MacBook lightweight work, native-device acceptance and cache retention |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Contributor workflow and verification evidence |
 | [../AGENTS.md](../AGENTS.md) | Coding-agent rules; choose an execution host before compiling |
+| [iOS review handoff](reviews/ios-native-companion/README.md) | Draft #204 G1/G2 source-derived UI previews, portable evidence and remaining acceptance |
 
 Mac Studio no longer serves as a residential exit (owner confirmed 2026-09-14).
 Routine builds use GitHub-hosted runners; native-device acceptance remains separate.

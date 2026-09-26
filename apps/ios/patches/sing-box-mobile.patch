@@ -1,0 +1,559 @@
+diff --git a/common/tls/client.go b/common/tls/client.go
+index 7b303687c..6e168e11b 100644
+--- a/common/tls/client.go
++++ b/common/tls/client.go
+@@ -80,6 +80,9 @@ type ClientOptions struct {
+ }
+ 
+ func NewClientWithOptions(options ClientOptions) (Config, error) {
++	if err := validateLeafPin(options.Options); err != nil {
++		return nil, err
++	}
+ 	if !options.Options.Enabled {
+ 		return nil, nil
+ 	}
+diff --git a/common/tls/leaf_pin.go b/common/tls/leaf_pin.go
+new file mode 100644
+index 000000000..a48724dc6
+--- /dev/null
++++ b/common/tls/leaf_pin.go
+@@ -0,0 +1,49 @@
++package tls
++
++import (
++	"crypto/sha256"
++	"crypto/subtle"
++	"crypto/tls"
++	"errors"
++	"time"
++
++	"github.com/sagernet/sing-box/option"
++)
++
++func validateLeafPin(o option.OutboundTLSOptions) error {
++	if len(o.CertificateLeafSHA256) == 0 {
++		return nil
++	}
++	if len(o.CertificateLeafSHA256) != sha256.Size || !o.Enabled || o.Insecure || o.DisableSNI ||
++		(o.Engine != "" && o.Engine != "go") || o.ServerName == "" ||
++		len(o.CertificatePublicKeySHA256) != 0 || len(o.Certificate) != 0 || o.CertificatePath != "" ||
++		(o.UTLS != nil && o.UTLS.Enabled) || (o.Reality != nil && o.Reality.Enabled) ||
++		(o.ECH != nil && o.ECH.Enabled) {
++		return errors.New("TONO_INVALID_LEAF_PIN_OPTIONS")
++	}
++	return nil
++}
++
++func leafPinVerifier(pin []byte, name string, clock func() time.Time) func(tls.ConnectionState) error {
++	return func(state tls.ConnectionState) error {
++		if len(state.PeerCertificates) == 0 {
++			return errors.New("TONO_MISSING_LEAF")
++		}
++		leaf := state.PeerCertificates[0]
++		hash := sha256.Sum256(leaf.Raw)
++		if subtle.ConstantTimeCompare(pin, hash[:]) != 1 {
++			return errors.New("TONO_LEAF_PIN_MISMATCH")
++		}
++		now := time.Now()
++		if clock != nil {
++			now = clock()
++		}
++		if now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {
++			return errors.New("TONO_LEAF_TIME_INVALID")
++		}
++		if leaf.VerifyHostname(name) != nil {
++			return errors.New("TONO_LEAF_NAME_INVALID")
++		}
++		return nil
++	}
++}
+diff --git a/common/tls/leaf_pin_test.go b/common/tls/leaf_pin_test.go
+new file mode 100644
+index 000000000..7cb6b3d4b
+--- /dev/null
++++ b/common/tls/leaf_pin_test.go
+@@ -0,0 +1,96 @@
++package tls
++
++import (
++	"context"
++	"crypto/ecdsa"
++	"crypto/elliptic"
++	"crypto/rand"
++	"crypto/sha256"
++	stdtls "crypto/tls"
++	"crypto/x509"
++	"math/big"
++	"testing"
++	"time"
++
++	"github.com/sagernet/quic-go"
++	"github.com/sagernet/sing-box/option"
++)
++
++func TestExactLeafPinRejectsSameKeyReplacement(t *testing.T) {
++	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
++	now := time.Now()
++	mint := func(serial int64) *x509.Certificate {
++		template := &x509.Certificate{SerialNumber: big.NewInt(serial), DNSNames: []string{"node.example"}, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour)}
++		der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
++		if err != nil {
++			t.Fatal(err)
++		}
++		cert, err := x509.ParseCertificate(der)
++		if err != nil {
++			t.Fatal(err)
++		}
++		return cert
++	}
++	a, b := mint(1), mint(2)
++	pin := sha256.Sum256(a.Raw)
++	o := option.OutboundTLSOptions{Enabled: true, ServerName: "node.example", CertificateLeafSHA256: pin[:]}
++	c, err := NewSTDClient(context.Background(), nil, "", o)
++	if err != nil {
++		t.Fatal(err)
++	}
++	cfg, err := c.STDConfig()
++	if err != nil {
++		t.Fatal(err)
++	}
++	if !cfg.InsecureSkipVerify || cfg.VerifyConnection == nil {
++		t.Fatal("pin verifier not wired")
++	}
++	state := stdtls.ConnectionState{PeerCertificates: []*x509.Certificate{a}, DidResume: true}
++	if err = cfg.VerifyConnection(state); err != nil {
++		t.Fatal(err)
++	}
++	state.PeerCertificates[0] = b
++	if cfg.VerifyConnection(state) == nil {
++		t.Fatal("same key replacement accepted")
++	}
++	if leafPinVerifier(pin[:], "wrong.example", nil)(stdtls.ConnectionState{PeerCertificates: []*x509.Certificate{a}}) == nil {
++		t.Fatal("wrong hostname accepted")
++	}
++	if leafPinVerifier(pin[:], "node.example", func() time.Time { return now.Add(2 * time.Hour) })(stdtls.ConnectionState{PeerCertificates: []*x509.Certificate{a}}) == nil {
++		t.Fatal("expired leaf accepted")
++	}
++	// The actual QUIC implementation used by sing-quic/HY2 must invoke it.
++	handshake := func(leaf *x509.Certificate) error {
++		server, err := quic.ListenAddr("127.0.0.1:0", &stdtls.Config{Certificates: []stdtls.Certificate{{Certificate: [][]byte{leaf.Raw}, PrivateKey: key}}, NextProtos: []string{"h3"}}, nil)
++		if err != nil {
++			t.Fatal(err)
++		}
++		defer server.Close()
++		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
++		defer cancel()
++		go func() {
++			c, e := server.Accept(ctx)
++			if e == nil {
++				<-ctx.Done()
++				c.CloseWithError(0, "")
++			}
++		}()
++		clientConfig := cfg.Clone()
++		clientConfig.NextProtos = []string{"h3"}
++		conn, err := quic.DialAddr(ctx, server.Addr().String(), clientConfig, nil)
++		if conn != nil {
++			conn.CloseWithError(0, "")
++		}
++		return err
++	}
++	if err := handshake(a); err != nil {
++		t.Fatal("pinned QUIC handshake failed", err)
++	}
++	if handshake(b) == nil {
++		t.Fatal("QUIC accepted same-key wrong leaf")
++	}
++	o.Insecure = true
++	if _, err = NewSTDClient(context.Background(), nil, "", o); err == nil {
++		t.Fatal("insecure pin override accepted")
++	}
++}
+diff --git a/common/tls/std_client.go b/common/tls/std_client.go
+index 80fa6cb28..08d3337ac 100644
+--- a/common/tls/std_client.go
++++ b/common/tls/std_client.go
+@@ -116,6 +116,9 @@ func NewSTDClient(ctx context.Context, logger logger.ContextLogger, serverAddres
+ }
+ 
+ func newSTDClient(ctx context.Context, logger logger.ContextLogger, serverAddress string, options option.OutboundTLSOptions, allowEmptyServerName bool) (Config, error) {
++	if err := validateLeafPin(options); err != nil {
++		return nil, err
++	}
+ 	var serverName string
+ 	if options.ServerName != "" {
+ 		serverName = options.ServerName
+@@ -143,6 +146,13 @@ func newSTDClient(ctx context.Context, logger logger.ContextLogger, serverAddres
+ 			return VerifyPublicKeySHA256(options.CertificatePublicKeySHA256, rawCerts)
+ 		}
+ 	}
++	if len(options.CertificateLeafSHA256) > 0 {
++		// The exact provisioned leaf replaces CA trust, never name/time validation.
++		// VerifyConnection also runs on resumed TLS sessions (unlike peer callbacks).
++		tlsConfig.InsecureSkipVerify = true
++		pin := append([]byte(nil), options.CertificateLeafSHA256...)
++		tlsConfig.VerifyConnection = leafPinVerifier(pin, serverName, tlsConfig.Time)
++	}
+ 	if len(options.ALPN) > 0 {
+ 		tlsConfig.NextProtos = options.ALPN
+ 	}
+diff --git a/experimental/libbox/oom_profile_default.go b/experimental/libbox/oom_profile_default.go
+new file mode 100644
+index 000000000..612b7ae2b
+--- /dev/null
++++ b/experimental/libbox/oom_profile_default.go
+@@ -0,0 +1,7 @@
++//go:build (darwin || linux || windows) && !tono_mobile
++
++package libbox
++
++import "github.com/sagernet/sing-box/experimental/libbox/internal/oomprofile"
++
++func writePlatformOOMProfile(path, name string) error { return oomprofile.WriteFile(path, name) }
+diff --git a/experimental/libbox/oom_profile_mobile.go b/experimental/libbox/oom_profile_mobile.go
+new file mode 100644
+index 000000000..796ea9c07
+--- /dev/null
++++ b/experimental/libbox/oom_profile_mobile.go
+@@ -0,0 +1,12 @@
++//go:build tono_mobile
++
++package libbox
++
++import "errors"
++
++// Tono mobile never writes heap/process profiles, which can disclose account
++// credentials. Removing that optional diagnostic dependency also eliminates
++// unsupported runtime linknames; linker safety checks remain enabled.
++func writePlatformOOMProfile(path, name string) error {
++	return errors.New("TONO_MOBILE_RAW_PROFILE_DISABLED")
++}
+diff --git a/experimental/libbox/oom_report.go b/experimental/libbox/oom_report.go
+index d33236fe0..8a58f29f1 100644
+--- a/experimental/libbox/oom_report.go
++++ b/experimental/libbox/oom_report.go
+@@ -11,7 +11,6 @@ import (
+ 
+ 	"github.com/sagernet/sing-box/common/trafficcontrol"
+ 	"github.com/sagernet/sing-box/daemon"
+-	"github.com/sagernet/sing-box/experimental/libbox/internal/oomprofile"
+ 	"github.com/sagernet/sing-box/experimental/libbox/internal/runtimeinfo"
+ 	"github.com/sagernet/sing-box/log"
+ 	"github.com/sagernet/sing-box/service/oomkiller"
+@@ -242,7 +241,7 @@ func writeWithoutColors(buffer *bytes.Buffer, message string) {
+ }
+ 
+ func writeOOMProfile(filePath string, name string) {
+-	err := oomprofile.WriteFile(filePath, name)
++	err := writePlatformOOMProfile(filePath, name)
+ 	if err != nil {
+ 		return
+ 	}
+diff --git a/experimental/libbox/tono_packet_flow.go b/experimental/libbox/tono_packet_flow.go
+new file mode 100644
+index 000000000..826007798
+--- /dev/null
++++ b/experimental/libbox/tono_packet_flow.go
+@@ -0,0 +1,177 @@
++//go:build tono_mobile && with_gvisor
++
++package libbox
++
++import (
++	"context"
++	"crypto/tls"
++	"encoding/binary"
++	"errors"
++	"io"
++	"sync"
++	"time"
++
++	"github.com/sagernet/gvisor/pkg/buffer"
++	"github.com/sagernet/gvisor/pkg/tcpip"
++	"github.com/sagernet/gvisor/pkg/tcpip/header"
++	"github.com/sagernet/gvisor/pkg/tcpip/link/channel"
++	"github.com/sagernet/gvisor/pkg/tcpip/stack"
++	box "github.com/sagernet/sing-box"
++	"github.com/sagernet/sing-box/adapter"
++	"github.com/sagernet/sing-box/option"
++	tun "github.com/sagernet/sing-tun"
++	"github.com/sagernet/sing/common/logger"
++	M "github.com/sagernet/sing/common/metadata"
++	"github.com/sagernet/sing/service"
++)
++
++// TonoPacketSession transports raw IP packets, without the Darwin four-byte
++// utun header. The caller installs NE settings BEFORE starting the session.
++// Read blocks on a bounded queue; Close wakes it. No FD, listener or KVC API.
++type TonoPacketSession struct {
++	flow *tonoFlow
++	box  *box.Box
++	once sync.Once
++}
++
++func TonoStart(configuration string) (*TonoPacketSession, error) {
++	ctx, cancel := context.WithCancel(baseContext(nil))
++	f := &tonoFlow{endpoint: channel.New(128, 1280, ""), ctx: ctx, cancel: cancel}
++	p := &tonoPlatform{flow: f}
++	ctx = service.ContextWith[adapter.PlatformInterface](ctx, p)
++	opts, err := parseConfig(ctx, configuration)
++	if err != nil {
++		f.Close()
++		return nil, errors.New("TONO_CONFIG_INVALID")
++	}
++	b, err := box.New(box.Options{Context: ctx, Options: opts})
++	if err != nil {
++		f.Close()
++		return nil, errors.New("TONO_CORE_CREATE_FAILED")
++	}
++	if err = b.Start(); err != nil {
++		f.Close()
++		b.Close()
++		return nil, errors.New("TONO_CORE_START_FAILED")
++	}
++	return &TonoPacketSession{flow: f, box: b}, nil
++}
++
++func (s *TonoPacketSession) Write(packet []byte) error { return s.flow.inject(packet) }
++func (s *TonoPacketSession) Read() ([]byte, error) {
++	p := s.flow.endpoint.ReadContext(s.flow.ctx)
++	if p == nil {
++		return nil, io.EOF
++	}
++	defer p.DecRef()
++	v := p.ToView()
++	defer v.Release()
++	return append([]byte(nil), v.AsSlice()...), nil
++}
++func (s *TonoPacketSession) Close() {
++	s.once.Do(func() { s.flow.Close(); s.box.Close() })
++}
++
++// Probe the selected proxy, never a provider URLSession that escapes the tunnel.
++func (s *TonoPacketSession) Probe() error {
++	ctx, cancel := context.WithTimeout(s.flow.ctx, 10*time.Second)
++	defer cancel()
++	outbound, ok := s.box.Outbound().Outbound("Tono-Exit")
++	if !ok {
++		return errors.New("TONO_PROBE_FAILED")
++	}
++	conn, err := outbound.DialContext(ctx, "tcp", M.ParseSocksaddr("1.1.1.1:443"))
++	if err != nil {
++		return errors.New("TONO_PROBE_FAILED")
++	}
++	defer conn.Close()
++	client := tls.Client(conn, &tls.Config{ServerName: "1.1.1.1", MinVersion: tls.VersionTLS12})
++	if client.HandshakeContext(ctx) != nil {
++		return errors.New("TONO_PROBE_FAILED")
++	}
++	return nil
++}
++
++type tonoPlatform struct {
++	platformInterfaceStub
++	flow *tonoFlow
++}
++
++func (p *tonoPlatform) UsePlatformInterface() bool               { return true }
++func (p *tonoPlatform) UnderNetworkExtension() bool              { return true }
++func (p *tonoPlatform) NetworkExtensionIncludeAllNetworks() bool { return true }
++
++// Network Extension provider-created sockets are outside its own packet flow.
++// NE controls routing; never ask sing-tun to create or discover a utun device.
++func (p *tonoPlatform) OpenInterface(o *tun.Options, _ option.TunPlatformOptions) (tun.Tun, error) {
++	if o.MTU != 1280 {
++		return nil, errors.New("TONO_MTU_INVALID")
++	}
++	return p.flow, nil
++}
++func (p *tonoPlatform) CreateDefaultInterfaceMonitor(logger.Logger) tun.DefaultInterfaceMonitor {
++	return &tonoMonitor{}
++}
++
++type tonoMonitor struct{ interfaceMonitorStub }
++
++func (*tonoMonitor) Start() error { return nil }
++func (*tonoMonitor) Close() error { return nil }
++
++type tonoFlow struct {
++	endpoint *channel.Endpoint
++	ctx      context.Context
++	cancel   context.CancelFunc
++	once     sync.Once
++}
++
++var _ tun.GVisorTun = (*tonoFlow)(nil)
++
++func (f *tonoFlow) Name() (string, error)                          { return "Tono-PacketFlow", nil }
++func (f *tonoFlow) Start() error                                   { return nil }
++func (f *tonoFlow) Close() error                                   { f.once.Do(func() { f.cancel(); f.endpoint.Close() }); return nil }
++func (f *tonoFlow) UpdateRouteOptions(tun.Options) error           { return errors.New("TONO_RESTART_REQUIRED") }
++func (f *tonoFlow) Read([]byte) (int, error)                       { return 0, errors.New("TONO_RAW_IO_UNSUPPORTED") }
++func (f *tonoFlow) Write([]byte) (int, error)                      { return 0, errors.New("TONO_RAW_IO_UNSUPPORTED") }
++func (f *tonoFlow) NewStack(o tun.StackOptions) (tun.Stack, error) { return tun.NewGVisor(o) }
++func (f *tonoFlow) NewEndpoint() (stack.LinkEndpoint, stack.NICOptions, error) {
++	return f.endpoint, stack.NICOptions{}, nil
++}
++func (f *tonoFlow) WritePacket(p *stack.PacketBuffer) (int, error) {
++	var packets stack.PacketBufferList
++	packets.PushBack(p)
++	n, err := f.endpoint.WritePackets(packets)
++	if err != nil || n != 1 {
++		return 0, errors.New("TONO_PACKET_QUEUE_FULL")
++	}
++	return p.Size(), nil
++}
++func (f *tonoFlow) inject(b []byte) error {
++	select {
++	case <-f.ctx.Done():
++		return io.EOF
++	default:
++	}
++	if len(b) < 20 || len(b) > 1280 {
++		return errors.New("TONO_PACKET_INVALID")
++	}
++	var protocol tcpip.NetworkProtocolNumber
++	switch b[0] >> 4 {
++	case 4:
++		if int(b[0]&15)*4 < 20 || int(b[0]&15)*4 > len(b) || int(binary.BigEndian.Uint16(b[2:4])) != len(b) {
++			return errors.New("TONO_PACKET_INVALID")
++		}
++		protocol = header.IPv4ProtocolNumber
++	case 6:
++		if len(b) < 40 || int(binary.BigEndian.Uint16(b[4:6]))+40 != len(b) {
++			return errors.New("TONO_PACKET_INVALID")
++		}
++		protocol = header.IPv6ProtocolNumber
++	default:
++		return errors.New("TONO_PACKET_INVALID")
++	}
++	p := stack.NewPacketBuffer(stack.PacketBufferOptions{Payload: buffer.MakeWithData(append([]byte(nil), b...))})
++	defer p.DecRef()
++	f.endpoint.InjectInbound(protocol, p)
++	return nil
++}
+diff --git a/experimental/libbox/tono_packet_flow_test.go b/experimental/libbox/tono_packet_flow_test.go
+new file mode 100644
+index 000000000..6d167c372
+--- /dev/null
++++ b/experimental/libbox/tono_packet_flow_test.go
+@@ -0,0 +1,107 @@
++//go:build tono_mobile && with_gvisor
++
++package libbox
++
++import (
++	"encoding/binary"
++	"encoding/hex"
++	"net/netip"
++	"testing"
++	"time"
++
++	"github.com/sagernet/gvisor/pkg/tcpip"
++	"github.com/sagernet/gvisor/pkg/tcpip/checksum"
++	"github.com/sagernet/gvisor/pkg/tcpip/header"
++)
++
++func TestTonoPacketFlowDNSAndShutdown(t *testing.T) {
++	// Actual box -> tun factory -> gVisor -> DNS router -> packet flow, no FD.
++	const config = `{"log":{"disabled":true},"inbounds":[{"type":"tun","tag":"tun","address":["198.18.0.1/30","fdfe:dcba:9876::1/126"],"mtu":1280,"dns_mode":"disabled"}],"dns":{"servers":[{"type":"fakeip","tag":"fake","inet4_range":"198.19.0.0/16"},{"type":"udp","tag":"unused","server":"127.0.0.1"}],"rules":[{"query_type":"A","server":"fake"}],"final":"unused"},"outbounds":[{"type":"direct"}],"route":{"rules":[{"port":53,"action":"hijack-dns"},{"action":"reject"}]}}`
++	if err := CheckConfig(config); err != nil {
++		t.Fatal(err)
++	}
++	s, err := TonoStart(config)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer s.Close()
++	dns, _ := hex.DecodeString("471101000001000000000000076578616d706c6503636f6d0000010001")
++	p := make([]byte, 28+len(dns))
++	p[0] = 0x45
++	p[8] = 64
++	p[9] = 17
++	binary.BigEndian.PutUint16(p[2:4], uint16(len(p)))
++	copy(p[12:20], []byte{198, 18, 0, 1, 198, 18, 0, 2})
++	binary.BigEndian.PutUint16(p[10:12], ^checksum.Checksum(p[:20], 0))
++	binary.BigEndian.PutUint16(p[20:22], 49173)
++	binary.BigEndian.PutUint16(p[22:24], 53)
++	binary.BigEndian.PutUint16(p[24:26], uint16(8+len(dns)))
++	copy(p[28:], dns)
++	if err = s.Write(p); err != nil {
++		t.Fatal(err)
++	}
++	result := make(chan []byte, 1)
++	go func() { b, _ := s.Read(); result <- b }()
++	select {
++	case b := <-result:
++		if len(b) < 44 || b[0]>>4 != 4 || binary.BigEndian.Uint16(b[20:22]) != 53 || binary.BigEndian.Uint16(b[22:24]) != 49173 || b[28] != 0x47 || b[29] != 0x11 || b[30]&0x80 == 0 || binary.BigEndian.Uint16(b[34:36]) != 1 {
++			t.Fatalf("bad DNS response: %x", b)
++		}
++		if b[len(b)-4] != 198 || b[len(b)-3] != 19 {
++			t.Fatal("DNS did not return fake range")
++		}
++	case <-time.After(5 * time.Second):
++		t.Fatal("DNS response timed out")
++	}
++	if s.Write([]byte{0x45}) == nil {
++		t.Fatal("accepted truncated packet")
++	}
++	v6 := make([]byte, 40)
++	v6[0] = 0x60
++	v6[5] = 1
++	if s.Write(v6) == nil {
++		t.Fatal("accepted invalid IPv6 payload length")
++	}
++	// Valid IPv6 UDP reaches the real stack's reject path, not the host network.
++	v6 = make([]byte, 49)
++	v6[0] = 0x60
++	v6[5] = 9
++	v6[6] = 17
++	v6[7] = 64
++	src := netip.MustParseAddr("fdfe:dcba:9876::1").As16()
++	dst := netip.MustParseAddr("2001:4860:4860::8888").As16()
++	copy(v6[8:24], src[:])
++	copy(v6[24:40], dst[:])
++	binary.BigEndian.PutUint16(v6[40:42], 49231)
++	binary.BigEndian.PutUint16(v6[42:44], 443)
++	binary.BigEndian.PutUint16(v6[44:46], 9)
++	v6[48] = 7
++	pseudo := header.PseudoHeaderChecksum(17, tcpip.AddrFrom16(src), tcpip.AddrFrom16(dst), 9)
++	binary.BigEndian.PutUint16(v6[46:48], ^checksum.Checksum(v6[40:], pseudo))
++	if err := s.Write(v6); err != nil {
++		t.Fatal(err)
++	}
++	go func() { b, _ := s.Read(); result <- b }()
++	select {
++	case b := <-result:
++		if len(b) < 48 || b[0]>>4 != 6 || b[6] != 58 || b[40] != 1 {
++			t.Fatalf("expected ICMPv6 unreachable: %x", b)
++		}
++	case <-time.After(5 * time.Second):
++		t.Fatal("IPv6 reject response timed out")
++	}
++	go func() { b, _ := s.Read(); result <- b }()
++	s.Close()
++	s.Close()
++	select {
++	case b := <-result:
++		if b != nil {
++			t.Fatal("read after close")
++		}
++	case <-time.After(time.Second):
++		t.Fatal("close failed to wake reader")
++	}
++	if s.Write(p) == nil {
++		t.Fatal("write after close")
++	}
++}
+diff --git a/option/tls.go b/option/tls.go
+index 5c807d676..baac3a01c 100644
+--- a/option/tls.go
++++ b/option/tls.go
+@@ -118,6 +118,7 @@ type OutboundTLSOptions struct {
+ 	Certificate                badoption.Listable[string]          `json:"certificate,omitempty"`
+ 	CertificatePath            string                              `json:"certificate_path,omitempty"`
+ 	CertificatePublicKeySHA256 badoption.Listable[[]byte]          `json:"certificate_public_key_sha256,omitempty"`
++	CertificateLeafSHA256      []byte                              `json:"certificate_leaf_sha256,omitempty"`
+ 	ClientCertificate          badoption.Listable[string]          `json:"client_certificate,omitempty"`
+ 	ClientCertificatePath      string                              `json:"client_certificate_path,omitempty"`
+ 	ClientKey                  badoption.Listable[string]          `json:"client_key,omitempty"`
