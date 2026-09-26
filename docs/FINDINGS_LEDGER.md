@@ -209,7 +209,7 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | D5 | 控制面 TLS 只做 DNS pin，无证书/SPKI 固定 | accepted-design | — | — | 依赖系统信任库；被信任的中间人 CA 可伪造目录/策略/refresh |
 | D6 | hy2 第二块与主块身份一致只由 Worker 保证，客户端只按名称后缀识别 | accepted-design | — | — | 目录本来只有 TLS 信任边界（见 X4） |
 | H11-F1 | 登出后出口凭据仍以明文留在 runtime 副本 | in-PR | [#407](https://github.com/raydocs/tono/issues/407)，[#410](https://github.com/raydocs/tono/pull/410)（Windows）、[#411](https://github.com/raydocs/tono/pull/411)（macOS） | 高·已确认 | — |
-| H11-F2 | keychain ThisDeviceOnly 未生效，迁移到另一台机器会克隆设备身份 | in-PR | [#409](https://github.com/raydocs/tono/issues/409)，[#414](https://github.com/raydocs/tono/pull/414)（macOS 硬件锚，部分修复） | 中·推导 | Windows CRED_PERSIST_LOCAL_MACHINE 与 macOS data-protection keychain 仍 open；迁移后复制行为需实机 |
+| H11-F2 | keychain ThisDeviceOnly 未生效，迁移到另一台机器会克隆设备身份 | in-PR | [#409](https://github.com/raydocs/tono/issues/409)，[#414](https://github.com/raydocs/tono/pull/414)（macOS 硬件锚，已合 main 5da90232）、[#632](https://github.com/raydocs/tono/pull/632)（Windows CRED_PERSIST_LOCAL_MACHINE + 本机会话标记） | 中·推导 | macOS data-protection keychain 仍 open（需签名链改动）；Windows 漫游副本消失与 macOS 迁移后复制行为需实机；修复前已形成的克隆不能识别 |
 | H11-F3 | 卸载保留 refresh token，重装后自动登录回原账户 | in-PR | [#408](https://github.com/raydocs/tono/issues/408)，[#412](https://github.com/raydocs/tono/pull/412) | 中·已确认 | — |
 | H15-F4 | macOS 0.0.72 遗留的含凭据 config/config.yaml 从未删除 | in-PR | [#504](https://github.com/raydocs/tono/issues/504)，[#505](https://github.com/raydocs/tono/pull/505) | 低·推导 | 与 #411 相关 |
 | #491 | Windows 从 Suspended/Error 换账户登录时保留上一账户的目录、runtime 副本与 Core | in-PR | [#491](https://github.com/raydocs/tono/issues/491)，[#506](https://github.com/raydocs/tono/pull/506) | 高·推导 | 叠在 #316 → #410 → #506 |
