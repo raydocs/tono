@@ -54,6 +54,13 @@ pub(crate) fn mark_vault_session_owned(data_dir: &std::path::Path) -> std::io::R
     std::fs::write(marker_dir.join(VAULT_SESSION_MARKER), b"1")
 }
 
+/// A sign-in's answer to its local marker write. Not fatal: the next launch asks this user to
+/// sign in again.
+fn sign_in_marker_verdict(written: std::io::Result<()>) -> Result<(), String> {
+    let _ = written;
+    Ok(())
+}
+
 /// Whether the refresh token in the vault belongs to this data directory. Only the local marker
 /// answers for it: the account traces live in the roaming data directory, so they vouch only in the
 /// one-time upgrade [`adopts_unmarked_vault_session`] allows, and a directory that adopts writes
@@ -708,6 +715,15 @@ mod tests {
         // The roaming marker is removed only after the local one is written, so it still answers.
         assert_eq!(ownership(true, true, false, || false), Ownership::Owned { rebind: true });
         assert_eq!(ownership(false, false, true, || true), Ownership::NotOwned);
+    }
+
+    #[test]
+    fn a_sign_in_whose_local_marker_cannot_be_written_is_refused() {
+        // Only the local marker vouches for a vault session (#635). A sign-in that stored its
+        // session without one was disowned by the next launch: signed out, protection released.
+        let refused = super::sign_in_marker_verdict(Err(std::io::Error::other("marker directory is read-only")));
+        assert!(refused.is_err(), "a sign-in stored a session its next launch will not own");
+        assert_eq!(super::sign_in_marker_verdict(Ok(())), Ok(()));
     }
 
     #[test]
