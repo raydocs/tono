@@ -14,6 +14,27 @@ function expectInvalidCatalog(yaml: string) {
   throw new Error('expected INVALID_CATALOG');
 }
 
+const SPKI_PIN = 'q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s=';
+
+function hy2CatalogWith(pinLines: string[]): string {
+  return [
+    'proxies:',
+    '  - name: Tokyo · Sakura',
+    '    type: vless',
+    '    server: 203.0.113.60',
+    '    port: 443',
+    '    uuid: {{TONO_CLIENT_UUID}}',
+    '  - name: Tokyo · Sakura · hy2',
+    '    type: hysteria2',
+    '    server: 203.0.113.60',
+    '    port: 443',
+    '    password: {{TONO_CLIENT_UUID}}',
+    '    sni: www.microsoft.com',
+    '    fingerprint: e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db',
+    ...pinLines,
+  ].join('\n') + '\n';
+}
+
 describe('catalog hy2 contract', () => {
   it('admits a same-node hy2 block, rejects one without fingerprint, and retires both with the base name', () => {
     const vless = (name: string, ip: string) => [
@@ -141,6 +162,14 @@ describe('catalog hy2 contract', () => {
         + 'password: {{TONO_CLIENT_UUID}}, sni: www.microsoft.com, '
         + `fingerprint: e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db, certificate-public-key-sha256: ${pin}}`,
     ));
+  });
+
+  it('rejects an SPKI pin with a trailing comment, which macOS reads as part of the value', () => {
+    expectInvalidCatalog(hy2CatalogWith([`    certificate-public-key-sha256: ${SPKI_PIN} # node pin`]));
+  });
+
+  it('rejects an SPKI pin nested under another key, which macOS never reads', () => {
+    expectInvalidCatalog(hy2CatalogWith(['    tls:', `      certificate-public-key-sha256: ${SPKI_PIN}`]));
   });
 
   it('hides hy2 blocks and group members unless the viewer is on the gray list', () => {
