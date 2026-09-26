@@ -112,7 +112,7 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
         logging!(warn, Type::Service, "Protected update adoption not established: {error:#}");
     }
     let restore_deadline = tokio::time::Instant::now() + RESTORE_TRANSACTION_TIMEOUT;
-    let generation = {
+    let (generation, connect_epoch) = {
         let mut inner = state.lock().await;
         if inner.account_close.is_some() {
             return;
@@ -127,7 +127,7 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
         crate::tono::policy_sync::seed_from_cache(&mut inner);
         connection::remove_legacy_runtime_copy(&inner.catalog_dir);
         emit_status(&app, &status_of(&inner));
-        inner.sign_in_generation
+        (inner.sign_in_generation, inner.connect_generation)
     };
 
     // Three-valued on purpose: armed / proven absent / unknown. This used to be an
@@ -190,13 +190,18 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
         // the restore task does not await that potentially long connection transaction.
         match update_recovery {
             Ok(Some(tono_service_protocol::update_contract::Protection::Connected)) => {
-                let state = state.clone();
-                let app = app.clone();
-                AsyncHandler::spawn(move || async move {
-                    if let Err(error) = connection::connect(state, app).await {
-                        logging!(warn, Type::Service, "Update recovery remains incomplete: {error}");
-                    }
-                });
+                let allowed = update_recovery_connect_allowed(&state.lock().await, generation, connect_epoch);
+                if allowed {
+                    let state = state.clone();
+                    let app = app.clone();
+                    AsyncHandler::spawn(move || async move {
+                        if let Err(error) = connection::connect(state, app).await {
+                            logging!(warn, Type::Service, "Update recovery remains incomplete: {error}");
+                        }
+                    });
+                } else {
+                    logging!(info, Type::Service, "Tono: update recovery Connect skipped; a Restore internet or newer connection action during restore owns the connection");
+                }
             }
             Ok(None) => connection::schedule_startup_resume_if_proven(&state, &app, generation).await,
             // An offline obligation must stay offline. Failed adoption
@@ -214,6 +219,12 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
             .await;
         }
     }
+}
+
+/// Whether update recovery's automatic Connect still belongs to this restore.
+fn update_recovery_connect_allowed(inner: &TonoInner, generation: u64, connect_epoch: u64) -> bool {
+    let _ = connect_epoch;
+    inner.sign_in_generation == generation
 }
 
 /// Commit a `me()` answer as this session's account: its log-upload owner, the payload, and
@@ -676,6 +687,23 @@ mod barrier_before_me_tests {
         assert!(!inner.fsm.kill_switch_armed() && !inner.fsm.status().is_protection_blocked,
             "a late `me()` re-armed a barrier the user already released");
         assert_eq!(inner.kill_switch.as_ref(), Some(&kill_switch(false)));
+    }
+
+    /// #651 review (opus:F1): a Restore internet completed during restore must not be undone by
+    /// update recovery's automatic Connect (re-arm WFP and connect).
+    #[tokio::test]
+    async fn restore_internet_during_restore_skips_update_recovery_connect() {
+        let state = Arc::new(TonoState::for_test());
+        let mut inner = state.lock().await;
+        let (generation, connect_epoch) = (inner.sign_in_generation, inner.connect_generation);
+        assert!(update_recovery_connect_allowed(&inner, generation, connect_epoch),
+            "an untouched restore keeps its update recovery Connect");
+        // `disconnect()`'s own steps, then what its proven release leaves behind.
+        inner.invalidate_connection(true);
+        inner.fsm.begin_disconnect();
+        inner.fsm.sign_out_or_quit();
+        assert!(!update_recovery_connect_allowed(&inner, generation, connect_epoch),
+            "update recovery reconnected a machine the user released during restore");
     }
 }
 
