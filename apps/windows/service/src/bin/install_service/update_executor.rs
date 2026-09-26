@@ -494,8 +494,64 @@ fn publish_plan(
     plan.members.iter_mut().try_for_each(publish)
 }
 
-/// Red skeleton: keeps the old behavior (nothing is cleared).
-fn clear_retired_publish_scratch(_store_root: &Path) -> Result<(), Error> {
+/// A `.publish` file is `publish`'s staging output, never a recovery copy. When its rename failed
+/// and the attempt rolled back and was retired, nothing else removes it, and the next `prepare`
+/// refuses it. Remove one only when a retired rolled-back attempt's durable plan binds it: the
+/// archive records RolledBack/Uncertain, its retained plan names this member inside the
+/// installation, the file holds that member's new digest, and the target is back at its old
+/// digest. Anything unproven is left for `prepare` to refuse.
+fn clear_retired_publish_scratch(store_root: &Path) -> Result<(), Error> {
+    let service_dir = tono_service_protocol::service_paths().install_dir();
+    for entry in std::fs::read_dir(store_root)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(id) = name
+            .to_str()
+            .and_then(|n| n.strip_prefix("retired-"))
+            .and_then(|n| n.strip_suffix(".json"))
+        else {
+            continue;
+        };
+        let Some(a) = std::fs::read(entry.path())
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<tx::State>(&bytes).ok())
+            .and_then(|archived| archived.attempt)
+        else {
+            continue;
+        };
+        if a.receipt.attempt_id != id
+            || !matches!(
+                a.execution,
+                tx::Execution::RolledBack | tx::Execution::Uncertain
+            )
+        {
+            continue;
+        }
+        let Some(plan) = std::fs::read(store_root.join(id).join("replacement.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Plan>(&bytes).ok())
+        else {
+            continue;
+        };
+        if plan.attempt_id != id {
+            continue;
+        }
+        for m in plan.members {
+            let bound = [a.install_root.as_path(), service_dir.as_path()]
+                .iter()
+                .any(|root| m.target.starts_with(root))
+                && m.target
+                    .components()
+                    .all(|c| !matches!(c, std::path::Component::ParentDir))
+                && m.publish_scratch == path_with_suffix(&m.target, PUBLISH_SUFFIX);
+            if bound
+                && sha256(&m.publish_scratch).ok() == Some(m.new_digest)
+                && sha256(&m.target).ok() == Some(m.old_digest)
+            {
+                remove_ordinary_file_if_exists(&m.publish_scratch)?;
+            }
+        }
+    }
     Ok(())
 }
 

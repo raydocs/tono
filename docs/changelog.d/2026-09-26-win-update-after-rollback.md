@@ -17,3 +17,16 @@
 - 验证：MacBook 未运行 cargo；红分支 windows-ci run 36227225468 以该测试断言失败（service 作业，28 passed，1 failed）；修复以 PR 的 windows-ci 为准。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：Service 侧退休路径仍不删除副本，清理推迟到下一次更新的 `prepare`；未实机验证先失败后成功的完整流程。
+- **续记（2026-09-26，#657 评审 4981e1fa 确认 opus:F1（minor））**：上一版只清与安装字节相同的残留，但 `.publish` 是 `publish` 的暂存输出，
+  装的是本次尝试的新字节，从不是恢复副本。成员的发布改名失败（所有者 G3 计划的注入：对 `C:\ProgramData\Tono\bin\tono-service.exe`
+  持只读、不允许删除的句柄）→ 回滚成功 → 退休后，目标是旧字节而 `.publish` 是新字节，下一次 `prepare` 仍拒绝。
+  现在执行器在 consume 之后、`collect_candidates` 之前运行 `clear_retired_publish_scratch`：只对存储根下 `retired-<id>.json` 记为
+  RolledBack/Uncertain（即经 `retire_rolled_back` 退休）的尝试，读其保留的 `<id>/replacement.json`，成员目标在安装根或 Service 目录内、
+  无 `..`、`.publish` 路径与目标绑定，且文件字节等于该成员的 new digest、目标等于 old digest，才删除这个 `.publish`；
+  归档或计划读不出、内容不符的一律跳过，留给 `prepare` 拒绝（fail-closed 不变）。`.rollback` 的处理不变。
+  测试：新增 `update_executor::tests::update_after_a_retired_failed_publish_rename_prepares_past_its_staging_file`
+  （真实 store 与计划位置，以拒绝删除共享的句柄让 `tono-service.exe` 的发布改名真实失败，回滚、退休后运行预清理再 `prepare`）；
+  红分支 `wip/win-update-after-rollback-red2`（`0ea6ad23`，基于 `a31e7dd1`，测试 + 不清理任何文件的骨架），windows-ci run 36228989902
+  以该测试断言失败（service 作业 29 passed，1 failed：`tono-service.exe.publish` 被拒绝），两条前置断言均通过。
+  上一版 `a31e7dd1` 的 windows-ci run 36227911577、36227899484 通过。MacBook 未运行 cargo（只用 rustfmt 解析过改动文件），以 PR #657 的 windows-ci 为准。
+  剩余限制更新：没有保留计划或归档的 `.publish`（如更早版本或手动清理过证据）仍拒绝，需要人工处理；预清理本身的跳过分支没有单元测试覆盖。
