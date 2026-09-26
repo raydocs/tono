@@ -54,22 +54,26 @@ pub(crate) fn mark_vault_session_owned(data_dir: &std::path::Path) -> std::io::R
     std::fs::write(marker_dir.join(VAULT_SESSION_MARKER), b"1")
 }
 
-/// Whether the refresh token in the vault belongs to this data directory. The marker answers for
-/// sessions this build adopted. A directory an earlier build left signed in has no marker, but it
-/// has files only a signed-in account writes (`account_traces`), even when its catalog sync never
-/// succeeded; it adopts the marker once instead of signing that user out and releasing their
-/// protection. A fresh directory (a new install, or a reinstall after "delete application data")
-/// has none of them. A marker an earlier Windows build wrote into the roaming data directory still
-/// answers once: it is rewritten to the local marker directory, and the roaming copy is removed
-/// only after that write succeeded.
-pub(crate) fn data_dir_owns_vault_session(data_dir: &std::path::Path, account_traces: &[std::path::PathBuf]) -> bool {
+/// Whether the refresh token in the vault belongs to this data directory. Only the local marker
+/// answers for it: the account traces live in the roaming data directory, so they vouch only in the
+/// one-time upgrade [`adopts_unmarked_vault_session`] allows, and a directory that adopts writes
+/// the local marker. A fresh directory (a new install, or a reinstall after "delete application
+/// data") adopts nothing. A marker an earlier Windows build wrote into the roaming data directory
+/// is rewritten to the local marker directory, and the roaming copy is removed only after that
+/// write succeeded.
+pub(crate) fn data_dir_owns_vault_session(
+    data_dir: &std::path::Path,
+    account_traces: &[std::path::PathBuf],
+    legacy_roaming_session: bool,
+) -> bool {
     let marker = vault_marker_dir(data_dir).join(VAULT_SESSION_MARKER);
     if marker.exists() {
         return true;
     }
     let legacy_marker = data_dir.join(VAULT_SESSION_MARKER);
     let legacy_marker = (legacy_marker != marker && legacy_marker.exists()).then_some(legacy_marker);
-    if legacy_marker.is_none() && !account_traces.iter().any(|trace| trace.exists()) {
+    let traces = account_traces.iter().any(|trace| trace.exists());
+    if !adopts_unmarked_vault_session(legacy_marker.is_some(), legacy_roaming_session, traces) {
         return false;
     }
     match mark_vault_session_owned(data_dir) {
@@ -86,10 +90,24 @@ pub(crate) fn data_dir_owns_vault_session(data_dir: &std::path::Path, account_tr
     true
 }
 
-/// Red skeleton: today's decision for a data directory without the local marker.
-#[cfg_attr(not(test), allow(dead_code))]
-const fn adopts_unmarked_vault_session(legacy_marker: bool, _legacy_roaming_session: bool, account_traces: bool) -> bool {
-    legacy_marker || account_traces
+/// Whether a data directory without the local marker adopts the vault session (H11-F2, #409).
+/// Both signals roam, so they only upgrade an installation from before the local marker, once: a
+/// marker an earlier Windows build left in the roaming data directory, or account traces (files
+/// only a signed-in account writes, even when its catalog sync never succeeded) beside a session an
+/// earlier build stored roaming ([`StoredSession::legacy_roaming`]). Such a build may have signed
+/// in before any marker existed, and its upgrade must not sign that user out and release their
+/// protection. Beside any other session the traces may have roamed in from another PC: a missing
+/// local marker then means sign in again.
+const fn adopts_unmarked_vault_session(legacy_marker: bool, legacy_roaming_session: bool, account_traces: bool) -> bool {
+    legacy_marker || (legacy_roaming_session && account_traces)
+}
+
+/// The refresh token as the vault stored it.
+pub struct StoredSession {
+    pub token: String,
+    /// An earlier build stored it roaming (`CRED_PERSIST_ENTERPRISE`, before #632); this read
+    /// rebinds it to this machine.
+    pub legacy_roaming: bool,
 }
 
 fn account_name(key: CredentialKey) -> &'static str {
@@ -235,9 +253,15 @@ mod win_vault {
     }
 
     pub(super) fn get(target: &str, user: &str) -> Result<Option<String>, CredentialError> {
+        Ok(get_migrating(target, user)?.map(|(value, _)| value))
+    }
+
+    /// [`get`], and whether the value was stored roaming by an earlier build.
+    pub(super) fn get_migrating(target: &str, user: &str) -> Result<Option<(String, bool)>, CredentialError> {
         let _guard = vault_lock();
         let stored = read(target)?;
-        match vault_read_action(stored.as_ref().map(|(_, persist)| *persist)) {
+        let action = vault_read_action(stored.as_ref().map(|(_, persist)| *persist));
+        match action {
             VaultReadAction::MigrateToLocalMachine => {
                 if let Some((value, _)) = stored.as_ref() {
                     // Rewriting the same target replaces the roaming copy; a CredDelete here would
@@ -251,7 +275,8 @@ mod win_vault {
             }
             VaultReadAction::Absent | VaultReadAction::Use => {}
         }
-        Ok(stored.map(|(value, _)| value))
+        let legacy_roaming = action == VaultReadAction::MigrateToLocalMachine;
+        Ok(stored.map(|(value, _)| (value, legacy_roaming)))
     }
 
     pub(super) fn set(target: &str, user: &str, value: &str) -> Result<(), CredentialError> {
@@ -293,6 +318,27 @@ impl TonoCredentialStore {
         tokio::task::spawn_blocking(move || Self.get(key))
             .await
             .map_err(join_error)?
+    }
+
+    /// Async read of the refresh token that also reports whether an earlier build stored it
+    /// roaming ([`StoredSession`]). Same blocking-pool rule as [`Self::get_async`].
+    pub async fn get_session_async() -> Result<Option<StoredSession>, CredentialError> {
+        tokio::task::spawn_blocking(Self::get_session)
+            .await
+            .map_err(join_error)?
+    }
+
+    #[cfg(windows)]
+    fn get_session() -> Result<Option<StoredSession>, CredentialError> {
+        let key = CredentialKey::RefreshToken;
+        Ok(win_vault::get_migrating(&Self::target(key), account_name(key))?
+            .map(|(token, legacy_roaming)| StoredSession { token, legacy_roaming }))
+    }
+
+    /// The development vault never stored a roaming session.
+    #[cfg(not(windows))]
+    fn get_session() -> Result<Option<StoredSession>, CredentialError> {
+        Ok(Self.get(CredentialKey::RefreshToken)?.map(|token| StoredSession { token, legacy_roaming: false }))
     }
 
     /// Async adapter for writes (user-action paths; no timeout needed).

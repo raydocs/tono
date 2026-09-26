@@ -23,7 +23,7 @@ use super::diagnostics::auth_error;
 
 pub async fn load_credentials(state: &Arc<TonoState>) {
     load_credentials_from(state, || async {
-        let refresh = TonoCredentialStore::get_async(CredentialKey::RefreshToken).await;
+        let refresh = TonoCredentialStore::get_session_async().await;
         let id = TonoCredentialStore::get_async(CredentialKey::InstallationId).await;
         (refresh, id)
     })
@@ -31,11 +31,12 @@ pub async fn load_credentials(state: &Arc<TonoState>) {
 }
 
 type VaultRead = Result<Option<String>, tono_core::credentials::CredentialError>;
+type SessionRead = Result<Option<crate::tono::credentials::StoredSession>, tono_core::credentials::CredentialError>;
 
 async fn load_credentials_from<F, Fut>(state: &Arc<TonoState>, read: F)
 where
     F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = (VaultRead, VaultRead)>,
+    Fut: std::future::Future<Output = (SessionRead, VaultRead)>,
 {
     let generation = {
         let inner = state.lock().await;
@@ -92,7 +93,7 @@ where
         }
     }
     match refresh {
-        Ok(Some(token)) => {
+        Ok(Some(stored)) => {
             // Credential Manager outlives an uninstall that deletes the data directory, so a
             // token this directory never adopted is a previous installation's session — possibly
             // another person's account. Leave it unhydrated: restore then takes the signed-out
@@ -106,10 +107,12 @@ where
                 crate::tono::state::selection_path(&inner.catalog_dir),
                 inner.catalog_dir.join(crate::tono::audit::SETTINGS_FILE_NAME),
             ];
-            if crate::tono::credentials::data_dir_owns_vault_session(&inner.catalog_dir, &account_traces) {
+            if crate::tono::credentials::data_dir_owns_vault_session(
+                &inner.catalog_dir, &account_traces, stored.legacy_roaming,
+            ) {
                 // Hydrate memory only — writing the same bytes back would
                 // risk another prompting vault call.
-                let _ = inner.credentials.set_local(CredentialKey::RefreshToken, &token);
+                let _ = inner.credentials.set_local(CredentialKey::RefreshToken, &stored.token);
             } else {
                 logging!(warn, Type::Service,
                     "Tono: ignoring a stored session this installation did not create; sign in again");
@@ -530,12 +533,15 @@ mod lifecycle_tests {
     #[tokio::test]
     async fn fresh_data_dir_does_not_adopt_a_vault_refresh_token() {
         let state = Arc::new(TonoState::for_test());
-        let vault = || async {
-            let refresh: VaultRead = Ok(Some("previous-install-session".to_string()));
+        let vault = |legacy_roaming: bool| move || async move {
+            let refresh: SessionRead = Ok(Some(crate::tono::credentials::StoredSession {
+                token: "previous-install-session".to_string(),
+                legacy_roaming,
+            }));
             let id: VaultRead = Ok(Some("9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d".to_string()));
             (refresh, id)
         };
-        load_credentials_from(&state, vault).await;
+        load_credentials_from(&state, vault(false)).await;
         {
             let mut inner = state.lock().await;
             assert!(inner.credentials_loaded);
@@ -545,16 +551,17 @@ mod lifecycle_tests {
             crate::tono::credentials::mark_vault_session_owned(&inner.catalog_dir).unwrap();
             inner.credentials_loaded = false;
         }
-        load_credentials_from(&state, vault).await;
+        load_credentials_from(&state, vault(false)).await;
         {
             let inner = state.lock().await;
             assert_eq!(inner.credentials.refresh_token().unwrap().as_deref(), Some("previous-install-session"));
             let _ = std::fs::remove_dir_all(&inner.catalog_dir);
         }
 
-        // An earlier build signed in without a marker and its catalog sync never succeeded
-        // (offline, or 503 EXIT_IDENTITY_PROPAGATING), so there is no catalog cache. Another
-        // account trace, here the policy cache, still makes the session this installation's.
+        // An earlier build signed in without a marker, storing the session roaming, and its catalog
+        // sync never succeeded (offline, or 503 EXIT_IDENTITY_PROPAGATING), so there is no catalog
+        // cache. Another account trace, here the policy cache, still makes the session this
+        // installation's.
         let upgraded = Arc::new(TonoState::for_test());
         {
             let inner = upgraded.lock().await;
@@ -562,7 +569,7 @@ mod lifecycle_tests {
             assert!(!inner.catalog_cache().path().exists());
             std::fs::write(inner.policy_cache().path(), b"{}").unwrap();
         }
-        load_credentials_from(&upgraded, vault).await;
+        load_credentials_from(&upgraded, vault(true)).await;
         let inner = upgraded.lock().await;
         assert_eq!(inner.credentials.refresh_token().unwrap().as_deref(), Some("previous-install-session"),
             "an upgrade must not sign out, and release the protection of, an account that never cached a catalog");
