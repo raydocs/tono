@@ -61,6 +61,28 @@ fn account_name(key: CredentialKey) -> &'static str {
     }
 }
 
+/// Which persistence a stored session credential needs (H11-F2, #409). Red skeleton: nothing
+/// is migrated yet.
+#[cfg_attr(not(test), allow(dead_code))]
+mod vault_migration {
+    pub(super) const CRED_PERSIST_LOCAL_MACHINE_RAW: u32 = 2;
+    pub(super) const CRED_PERSIST_ENTERPRISE_RAW: u32 = 3;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(super) enum VaultReadAction {
+        Absent,
+        Use,
+        MigrateToLocalMachine,
+    }
+
+    pub(super) const fn vault_read_action(stored_persist: Option<u32>) -> VaultReadAction {
+        match stored_persist {
+            None => VaultReadAction::Absent,
+            Some(_) => VaultReadAction::Use,
+        }
+    }
+}
+
 /// The OS credential vault behind tono-core's synchronous trait. Only call
 /// inside `spawn_blocking` (or the async adapter below).
 pub struct TonoCredentialStore;
@@ -334,6 +356,18 @@ mod tests {
             tono_core::credentials::WINDOWS_CRED_TARGET_REFRESH_TOKEN
         );
         assert_eq!(account_name(CredentialKey::InstallationId), "installation-id");
+    }
+
+    #[test]
+    fn a_roaming_session_credential_is_rewritten_local_machine() {
+        use super::vault_migration::{
+            CRED_PERSIST_ENTERPRISE_RAW, CRED_PERSIST_LOCAL_MACHINE_RAW, VaultReadAction, vault_read_action,
+        };
+        // keyring 3.6.3 wrote every session entry as CRED_PERSIST_ENTERPRISE, which roams with a
+        // roaming profile: a read keeps the session and rebinds it to this machine.
+        assert_eq!(vault_read_action(Some(CRED_PERSIST_ENTERPRISE_RAW)), VaultReadAction::MigrateToLocalMachine);
+        assert_eq!(vault_read_action(Some(CRED_PERSIST_LOCAL_MACHINE_RAW)), VaultReadAction::Use);
+        assert_eq!(vault_read_action(None), VaultReadAction::Absent);
     }
 
     #[test]
