@@ -18,7 +18,9 @@ import {
   monthWords,
   pendingCustomers,
   pendingNodes,
+  reversalGate,
   reversalMonth,
+  shiftMonth,
 } from '@/lib/ledger';
 import { useResource } from '@/lib/use-resource';
 import '@/styles/settings-ledger.css';
@@ -71,8 +73,13 @@ export function Ledger() {
   }));
   const targetMonth = target.status === 'ready' && target.data.month === currentMonth
     && target.data.revision === targetRevision ? target.data : null;
-  const reverseReason = targetMonth?.closedAt === null ? null
-    : typeof targetMonth?.closedAt === 'number' ? words.reverseLocked : words.reverseWaiting;
+  const gate = reversalGate(target.status === 'ready' && targetMonth === null ? 'loading' : target.status,
+    targetMonth?.closedAt);
+  const reverseReason = gate === 'open' ? null
+    : gate === 'locked' ? words.reverseLocked
+      : gate === 'unreadable' ? words.reverseUnreadable : words.reverseWaiting;
+  /** A fresh read under a new key: the failed one must not linger as the answer. */
+  const retryTarget = useCallback(() => setTargetRevision((revision) => revision + 1), []);
   const reload = useCallback(() => {
     setClosing(false);
     setSummaryNonce((n) => n + 1);
@@ -188,10 +195,17 @@ export function Ledger() {
 
       <Section
         title={words.entries}
-        aside={locked ? (
-          <span className="min-w-0 truncate text-micro normal-case tracking-normal text-[var(--muted-foreground)]">
-            {words.lockedNote}
-          </span>
+        aside={locked || gate === 'unreadable' ? (
+          <>
+            {locked ? (
+              <span className="min-w-0 truncate text-micro normal-case tracking-normal text-[var(--muted-foreground)]">
+                {words.lockedNote}
+              </span>
+            ) : null}
+            {gate === 'unreadable' ? (
+              <Action onClick={retryTarget}>{words.reverseRetry}</Action>
+            ) : null}
+          </>
         ) : null}
       >
         <LedgerTable
@@ -226,7 +240,8 @@ export function Ledger() {
           formatCny(month0.costCnyMinor) ?? copy.missing,
           formatCny(month0.marginCnyMinor) ?? copy.missing,
           month0.unreconciled === 0 ? words.pendingNone : words.pendingCount(month0.unreconciled),
-          month0.month === currentMonth,
+          month0.month === currentMonth ? 'current'
+            : month0.month === shiftMonth(currentMonth, 1) ? 'next' : 'past',
         )}
         confirm={words.closeConfirm}
         pending={write.pending}
