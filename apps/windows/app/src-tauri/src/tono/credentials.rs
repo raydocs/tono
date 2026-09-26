@@ -54,11 +54,21 @@ pub(crate) fn mark_vault_session_owned(data_dir: &std::path::Path) -> std::io::R
     std::fs::write(marker_dir.join(VAULT_SESSION_MARKER), b"1")
 }
 
+/// What a sign-in's session marker step did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SignInMarker {
+    Existing,
+    Created,
+}
+
 /// A sign-in's answer to its local marker write. Not fatal: the next launch asks this user to
 /// sign in again.
-fn sign_in_marker_verdict(written: std::io::Result<()>) -> Result<(), String> {
-    let _ = written;
-    Ok(())
+fn sign_in_marker_verdict(
+    local_marker: bool,
+    write: impl FnOnce() -> std::io::Result<()>,
+) -> Result<SignInMarker, String> {
+    let _ = (local_marker, write());
+    Ok(SignInMarker::Created)
 }
 
 /// Whether the refresh token in the vault belongs to this data directory. Only the local marker
@@ -721,9 +731,12 @@ mod tests {
     fn a_sign_in_whose_local_marker_cannot_be_written_is_refused() {
         // Only the local marker vouches for a vault session (#635). A sign-in that stored its
         // session without one was disowned by the next launch: signed out, protection released.
-        let refused = super::sign_in_marker_verdict(Err(std::io::Error::other("marker directory is read-only")));
-        assert!(refused.is_err(), "a sign-in stored a session its next launch will not own");
-        assert_eq!(super::sign_in_marker_verdict(Ok(())), Ok(()));
+        use super::{SignInMarker, sign_in_marker_verdict as verdict};
+        let unwritable = || -> std::io::Result<()> { Err(std::io::Error::other("marker directory is read-only")) };
+        assert!(verdict(false, unwritable).is_err(), "a sign-in stored a session its next launch will not own");
+        assert_eq!(verdict(false, || Ok(())), Ok(SignInMarker::Created));
+        // A marker this machine already holds still vouches: a replacing sign-in is not refused.
+        assert_eq!(verdict(true, unwritable), Ok(SignInMarker::Existing));
     }
 
     #[test]
