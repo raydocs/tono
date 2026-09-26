@@ -382,45 +382,72 @@ pub(crate) async fn adopt_sign_in_response(
     Ok(info)
 }
 
-/// How long one wait for the vault writer's acknowledgement may take ([`commit_marker_when_durable`]).
-const SIGN_IN_SAVE_TIMEOUT: Duration = Duration::from_secs(10);
-/// The waits between commit attempts double from the first to the last, which then repeats.
-const SIGN_IN_SAVE_FIRST_RETRY: Duration = Duration::from_secs(5);
-const SIGN_IN_SAVE_LAST_RETRY: Duration = Duration::from_secs(300);
+/// The commit task's waits double from the first to the last, which then repeats: between reports
+/// that the vault has not acknowledged yet, and between tries after a failure
+/// ([`commit_marker_when_durable`]).
+const SIGN_IN_SAVE_FIRST_WAIT: Duration = Duration::from_secs(5);
+const SIGN_IN_SAVE_LAST_WAIT: Duration = Duration::from_secs(300);
 
 /// The one task that commits adopted sign-in `generation`'s marker, detached so a slow or failing
-/// vault never holds up the sign-in. Each attempt waits for the vault writer to acknowledge every
-/// earlier write ([`crate::tono::credentials::SessionCredentialStore::flush`]), then commits
-/// ([`crate::tono::credentials::SessionMarker::commit`]). It runs until the marker commits or a
-/// newer sign-in adopts; sign-out, a suspension, the account's periodic sync, the auth generation
+/// vault never holds up the sign-in. It first waits for the vault writer to acknowledge every
+/// earlier write ([`crate::tono::credentials::SessionCredentialStore::flush`]) with one request at
+/// a time: a hung vault is waited on, never asked again, so the task cannot fill the writer's
+/// queue; a failed acknowledgement is asked again after a pause. It then commits
+/// ([`crate::tono::credentials::SessionMarker::commit`]) until the file holds a committed marker or
+/// a newer sign-in adopts. Sign-out, a suspension, the account's periodic sync, the auth generation
 /// and a switch in flight do not end it. A marker still pending when the process exits vouches for
 /// nothing, and the next launch asks for a sign-in.
 async fn commit_marker_when_durable(state: Arc<TonoState>, generation: u64) {
-    let mut retry = SIGN_IN_SAVE_FIRST_RETRY;
-    for attempt in 1u64.. {
-        let credentials = {
-            let inner = state.lock().await;
-            if !inner.session_marker.awaits_commit(generation) {
-                return;
-            }
-            Arc::clone(&inner.credentials)
-        };
-        let error = match tokio::time::timeout(SIGN_IN_SAVE_TIMEOUT, credentials.flush()).await {
-            Ok(Ok(())) => {
-                let mut guard = state.lock().await;
-                let inner = &mut *guard;
-                let committed = inner.session_marker.commit(&inner.catalog_dir, generation);
-                match committed {
-                    Ok(()) => return,
-                    Err(error) => format!("the marker was not committed: {error}"),
+    let credentials = {
+        let inner = state.lock().await;
+        if !inner.session_marker.awaits_commit(generation) {
+            return;
+        }
+        Arc::clone(&inner.credentials)
+    };
+    let mut wait = SIGN_IN_SAVE_FIRST_WAIT;
+    loop {
+        let mut flush = std::pin::pin!(credentials.flush());
+        let acknowledged = loop {
+            match tokio::time::timeout(wait, flush.as_mut()).await {
+                Ok(acknowledged) => break acknowledged,
+                Err(_) => {
+                    logging!(warn, Type::Service,
+                        "Tono: the vault has not acknowledged the sign-in's session yet, so its marker stays pending");
+                    wait = (wait * 2).min(SIGN_IN_SAVE_LAST_WAIT);
                 }
             }
-            Ok(Err(error)) => format!("the session is not durable: {error}"),
-            Err(_) => format!("the vault did not acknowledge within {SIGN_IN_SAVE_TIMEOUT:?}"),
         };
-        logging!(warn, Type::Service, "Tono: sign-in session marker not committed (attempt {attempt}): {error}");
-        tokio::time::sleep(retry).await;
-        retry = (retry * 2).min(SIGN_IN_SAVE_LAST_RETRY);
+        match acknowledged {
+            Ok(()) => break,
+            Err(error) => {
+                logging!(warn, Type::Service,
+                    "Tono: the sign-in's session is not durable, so its marker stays pending: {error}");
+                tokio::time::sleep(wait).await;
+                wait = (wait * 2).min(SIGN_IN_SAVE_LAST_WAIT);
+            }
+        }
+        if !state.lock().await.session_marker.awaits_commit(generation) {
+            return;
+        }
+    }
+    let mut wait = SIGN_IN_SAVE_FIRST_WAIT;
+    loop {
+        let committed = {
+            let mut guard = state.lock().await;
+            let inner = &mut *guard;
+            inner.session_marker.commit(&inner.catalog_dir, generation)
+        };
+        match committed {
+            Ok(true) => return,
+            // A sign-in in flight writes the marker; try again once it ends.
+            Ok(false) => {}
+            Err(error) => {
+                logging!(warn, Type::Service, "Tono: the sign-in session marker was not committed: {error}");
+            }
+        }
+        tokio::time::sleep(wait).await;
+        wait = (wait * 2).min(SIGN_IN_SAVE_LAST_WAIT);
     }
 }
 

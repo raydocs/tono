@@ -155,15 +155,15 @@ fn sign_in_marker_verdict(
 /// state lock; the file is what a relaunch reads ([`data_dir_owns_vault_session`]). While the
 /// process runs, every pending marker it writes has exactly one owner: the sign-in in flight,
 /// which either adopts or puts back what the marker held before any sign-in was in flight, or
-/// else the adopted sign-in whose session is not yet durable, whose commit task only a newer
-/// adoption or the process exit ends. Outside this type only the load's one-time upgrade writes
-/// the marker, and only an absent one.
+/// else the adopted sign-in awaiting its commit, whose commit task ends only once the file holds a
+/// committed marker, a newer sign-in adopts, or the process exits. Outside this type only the
+/// load's one-time upgrade writes the marker, and only an absent one.
 #[derive(Debug, Default)]
 pub(crate) struct SessionMarker {
     /// The sign-in whose pending marker the file holds and which has stored no session yet, with
     /// what the marker goes back to if it never does.
     in_flight: Option<(u64, Restore)>,
-    /// The adopted sign-in whose marker waits for its session to be durable.
+    /// The adopted sign-in whose marker is not committed on disk yet.
     awaiting_commit: Option<u64>,
 }
 
@@ -238,21 +238,26 @@ impl SessionMarker {
     }
 
     /// Adopted sign-in `generation`'s session is durable (the vault writer acknowledged every
-    /// earlier write), so its marker commits. While a sign-in is in flight the marker is that one's
-    /// to write, and it now puts back a committed marker if it stores no session. Otherwise a
-    /// pending marker is this sign-in's, as no sign-in in flight answers for it. `Err`: the marker
-    /// could not be read or written, and the commit task tries again.
-    pub(crate) fn commit(&mut self, data_dir: &std::path::Path, generation: u64) -> std::io::Result<()> {
+    /// earlier write), so its marker commits. `Ok(true)`: nothing is left to do, as the file holds a
+    /// committed marker or a newer sign-in adopted. `Ok(false)`: a sign-in is in flight and the
+    /// marker is that one's to write. It now puts back a committed marker if it stores no session,
+    /// and this sign-in keeps the commit until the file shows it: a write-back that fails leaves a
+    /// pending marker, which the next try commits. `Err`: the marker could not be read or written.
+    /// Until `Ok(true)` the commit task tries again.
+    pub(crate) fn commit(&mut self, data_dir: &std::path::Path, generation: u64) -> std::io::Result<bool> {
         if !self.awaits_commit(generation) {
-            return Ok(());
+            return Ok(true);
         }
         if let Some((_, restore)) = &mut self.in_flight {
             *restore = Restore::Content(COMMITTED_MARKER.to_vec());
-        } else if marker_state(data_dir)? == MarkerState::Pending {
+            return Ok(false);
+        }
+        // No sign-in in flight answers for a pending marker, so it is this one's.
+        if marker_state(data_dir)? == MarkerState::Pending {
             replace_marker(data_dir, COMMITTED_MARKER)?;
         }
         self.awaiting_commit = None;
-        Ok(())
+        Ok(true)
     }
 }
 

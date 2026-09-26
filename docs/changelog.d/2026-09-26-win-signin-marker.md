@@ -146,3 +146,22 @@
   剩余限制更新：提交前进程退出（含登录在途期间），待定标记下次启动按无归属处理（需重新登录，走上文的无归属会话路径）；撤销写回失败只记日志，
   此时若有待提交的登录，其提交会把该待定标记改为已提交，否则下次启动需重新登录；退出登录成功后提交任务仍可能把标记改为已提交（凭据库已无令牌，与 main 退出登录后保留标记相同）；
   凭据库持续拒绝写入时提交任务每 300 秒重试一次，直到进程退出。
+- **续记（2026-09-26，#642 评审 fc199962 确认 codex:F1、opus:F1（均 minor））**：① codex:F1：有换账户登录在途时，`commit` 只把在途登录的写回内容改为已提交，
+  随即清空 `awaiting_commit`，唯一的提交任务结束；在途登录撤销时写回失败只记日志，已确认落库的会话就永远留下待定标记。现在提交责任只在文件真正是已提交之后才释放：
+  `SessionMarker::commit` 返回 `io::Result<bool>`，有在途登录时仍改写其写回内容，但保留 `awaiting_commit` 并返回 `Ok(false)`；提交任务稍后再试，
+  文件已是已提交（写回成功）则结束，仍是待定（写回失败）则改写为已提交；更新的登录被接纳则结束。
+  ② opus:F1：上一版提交任务每次尝试都以 10 秒超时取消 `flush()`，而 `VaultCommand::Flush` 已进入容量 64 的写入队列；凭据库卡住时每次重试多留一条，
+  约五小时后队列满，`mutate` 的 `try_send` 失败，轮换的 refresh token 进不了内存；也违背 `flush` 「调用方超时不得取消等待者」的约定。
+  现在提交任务同一时间只有一个 flush：固定（pin）同一个 flush future 反复等待，超时只记日志（间隔 5 秒起倍增、封顶 300 秒），绝不重发；
+  只有 flush 返回错误（已有应答）后才隔一段时间重发。确认落库后进入第二阶段，只重试文件提交，不再 flush。`SIGN_IN_SAVE_TIMEOUT` 删除。
+  上一条记下的四条（e812b461）与此前各轮修复逐条核对仍成立：提交任务的结束条件仍只看内存中的 `awaiting_commit`（不看文件内容、周期同步、账户状态、登录代次），
+  撤销仍是比较并交换且由后来的在途登录继承写回内容。
+  测试（两条行为各一条）：新增 `tono::credentials::tests::a_durable_session_keeps_its_commit_when_a_refused_switch_cannot_put_its_marker_back`
+  （登录 1 已接纳、换账户 2 在途时 1 确认落库；2 被拒且写回因暂存路径被占而失败一次；1 的提交任务再试；断言下次启动为 `Owned`），
+  以及 `tono::commands::account::lifecycle_tests::a_hung_vault_never_fills_the_credential_queue_with_marker_commit_retries`
+  （暂停时钟；凭据库在登录写入上挂起，推进 12 小时；断言轮换的 refresh token 仍能入队）；红分支
+  `wip/win-signin-marker-20260926-red8`（`9383fa1b`，基于 `69f6695c`，仅测试，windows-ci run 36224307467 两条均以断言失败：545 passed，2 failed；一条得到 `NotOwned`，一条为 `credential persistence queue full or closed`）。
+  上一轮红分支 run 36222576251 以断言失败，`69f6695c` 的 windows-ci run 36223207052 通过（545 passed，均已核对）。
+  MacBook 未运行 cargo（只用 rustfmt 解析过改动的 Rust 文件），以 PR #642 的 windows-ci 为准。
+  剩余限制更新：凭据库一直挂起时，每个已接纳登录的提交任务在队列里各占一条 flush（随登录次数而非时间增长），挂起期间标记保持待定；
+  在途登录撤销写回失败后、提交任务下一次尝试之前进程退出，下次启动需重新登录。
