@@ -1157,6 +1157,55 @@ mod lifecycle_tests {
         assert_eq!(ownership, VaultSessionOwnership::Owned { rebind: false },
             "two refused switches must not sign A out on the next launch");
     }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_hung_vault_never_fills_the_credential_queue_with_marker_commit_retries() {
+        use crate::tono::{credentials::SessionCredentialStore, state::TonoApiClient, transport::TonoTransport};
+        use tono_core::credentials::{CredentialError, CredentialStore as _};
+        // Credential Manager hangs on the write the sign-in queues, until the test lets it go.
+        struct HungVault(std::sync::Mutex<std::sync::mpsc::Receiver<()>>);
+        impl tono_core::credentials::CredentialStore for HungVault {
+            fn get(&self, _: CredentialKey) -> Result<Option<String>, CredentialError> { Ok(None) }
+            fn set(&self, _: CredentialKey, _: &str) -> Result<(), CredentialError> {
+                let _ = self.0.lock().unwrap().recv();
+                Ok(())
+            }
+            fn delete(&self, _: CredentialKey) -> Result<(), CredentialError> { Ok(()) }
+        }
+        let (let_go, hung) = std::sync::mpsc::channel::<()>();
+        let state = Arc::new(TonoState::for_test());
+        let directory = {
+            let mut inner = state.lock().await;
+            inner.credentials = Arc::new(SessionCredentialStore::with_test_vault(Arc::new(
+                HungVault(std::sync::Mutex::new(hung)),
+            )));
+            inner.client = Arc::new(TonoApiClient::new(
+                tono_core::auth::DEFAULT_BASE_URL, TonoTransport::new().unwrap(), inner.credentials.clone(),
+            ).unwrap());
+            inner.catalog_dir.clone()
+        };
+        let (client, _, generation) = begin_sign_in(&state).await.unwrap();
+        state.lock().await.challenge_id = Some("challenge-a".into());
+        let auth: tono_core::auth::AuthResponse = serde_json::from_value(serde_json::json!({
+            "accessToken": "fixture-access-a",
+            "refreshToken": "fixture-refresh-a",
+            "user": { "id": "account-a", "email": "a@example.test" },
+        })).unwrap();
+        adopt_replacing_with(&state, &client, generation, "challenge-a", &auth,
+            |_| async { Ok::<(), String>(()) },
+            |_| {},
+        ).await.unwrap();
+        // Half a day with the vault hung, while the marker's commit task waits for it.
+        for _ in 0..(12 * 360) {
+            tokio::time::advance(Duration::from_secs(10)).await;
+            tokio::task::yield_now().await;
+        }
+        let credentials = Arc::clone(&state.lock().await.credentials);
+        let rotated = credentials.set(CredentialKey::RefreshToken, "fixture-refresh-rotated");
+        drop(let_go);
+        let _ = std::fs::remove_dir_all(&directory);
+        assert!(rotated.is_ok(), "a rotated refresh token must still reach the queue: {:?}", rotated.err());
+    }
 }
 
 /// The current account, if signed in.

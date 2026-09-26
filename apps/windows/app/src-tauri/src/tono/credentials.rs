@@ -938,6 +938,31 @@ mod tests {
     }
 
     #[test]
+    fn a_durable_session_keeps_its_commit_when_a_refused_switch_cannot_put_its_marker_back() {
+        use super::{STAGED_MARKER, SessionMarker, VaultSessionOwnership, data_dir_owns_vault_session};
+        let directory = std::env::temp_dir().join(format!("tono-marker-{}", tono_core::auth::new_installation_id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let mut marker = SessionMarker::default();
+        // Sign-in 1 adopted its session, and switch 2 is in flight when 1's session proves durable.
+        marker.begin(&directory, 1).unwrap();
+        marker.adopted(1);
+        marker.begin(&directory, 2).unwrap();
+        let _ = marker.commit(&directory, 1);
+        // The Service refuses switch 2, and putting the marker back fails once: the staged marker
+        // cannot be created.
+        let staged = directory.join(STAGED_MARKER);
+        std::fs::create_dir(&staged).unwrap();
+        marker.undo(&directory, 2);
+        std::fs::remove_dir(&staged).unwrap();
+        // Sign-in 1's commit task tries again.
+        let _ = marker.commit(&directory, 1);
+        let ownership = data_dir_owns_vault_session(&directory, &[], false);
+        let _ = std::fs::remove_dir_all(&directory);
+        assert_eq!(ownership, VaultSessionOwnership::Owned { rebind: false },
+            "a session proven durable must not lose its marker to one failed write");
+    }
+
+    #[test]
     fn session_store_is_memory_first_and_vault_free_in_tests() {
         // Everything the ApiClient can do stays in memory; `for_test` never
         // reaches the OS vault (this test would otherwise hang on macOS
