@@ -1,5 +1,5 @@
 ## 2026-09-26 · Windows 登录先写本机会话标记，写不进则拒绝登录（#635 续修）
-- 归属：G1 账户/设备身份；影响 Windows App `tono/commands/account.rs`（`adopt_sign_in_response`）、`tono/credentials.rs`。
+- 归属：G1 账户/设备身份；影响 Windows App `tono/commands/account.rs`（`adopt_sign_in_response`）、`tono/credentials.rs`、`tono/state.rs`（`session_marker`）。
   Issue #409（H11-F2 Windows 部分），#632/#635 续修；合并回归审查（区间 `f2e24512...fb5e8485`，jev-route run `4459fadd`）
   codex:F2，登记为 CR4459-codex-F2。
 - 来源：基线 origin/main `fb5e8485`；红分支 `wip/win-signin-marker-20260926-red`（`e044b620`，测试 + 沿用旧行为的骨架），
@@ -121,3 +121,28 @@
   MacBook 未运行 cargo，以 PR #642 的 windows-ci 为准。
   剩余限制更新：换账户登录只有在 `client.adopt` 已把新会话交给凭据库之后失败落库，才会让下次启动需重新登录；此前失败则写回原标记。
   连锁情形（两次换账户登录重叠且都在 adopt 之前失败）时，后失败者写回的是先失败者的待定标记，下次启动需重新登录（安全方向）。
+- **续记（2026-09-26，#642 评审 e812b461 确认 opus:F1/F2、codex:F1/F2（均 minor））**：前几轮逐条修交错，没有修到根因：进程内没有「谁为某个待定标记负责」的记录。
+  提交路径的结束条件是「文件此刻不是本次的 `pending:<代次>`」或周期同步的登录代次，撤销写回的是本次登录读到的紧邻内容。
+  ① opus:F1：已接纳、尚未提交的 g1 的后台提交在 g2 的待定期间读到内容不符即结束，周期同步又因代次改变退出；g2 在 adopt 前失败写回 `pending:<g1>` 后无人提交。
+  ② opus:F2：周期同步兜底对暂停账户不启动，转为暂停或代次改变即退出。③ codex:F1：兜底绑定周期任务的登录代次，退出登录被拒后代次改变，原标记永不提交。
+  ④ codex:F2：两次重叠换账户都在 adopt 前失败，后撤销者写回先失败者的 `pending:<g1>`，未动过的旧账户失去归属。
+  现在：进程内的标记归属集中到 `TonoInner.session_marker`（`credentials::SessionMarker`，只在状态锁内改动），只有两个槽：`in_flight`（尚未存下会话的登录代次，及其撤销时写回的内容）
+  和 `awaiting_commit`（已接纳、会话尚未确认落库的登录代次）。写标记（`begin`，仍在任何释放/丢弃之前，写不进仍拒绝且不改动记录）：
+  取代在途登录时继承它的写回内容（被取代者的代次已失效，不可能再 adopt）；否则有待提交的登录时写回它的 `pending:<h>`；否则写回文件原内容（不存在则删除，读不出则保持待定）。
+  adopt 成功（`adopted`，与 `client.adopt` 同一锁段）：清空在途，待提交改为本次。撤销（`undo`）：只有仍是在途登录，且文件仍是本次的 `pending:<代次>`（比较并交换）才写回。
+  提交任务 `commit_marker_when_durable`：每个接纳的登录一个，只在已提交或更新的登录被接纳（`awaits_commit` 为假）时结束，与文件当时的内容、周期同步、账户状态、登录代次都无关；
+  每次等待 `flush()`（上限 10 秒），失败后间隔从 5 秒起倍增、封顶 300 秒，一直重试到进程退出。flush 成功后提交（`commit`）：有在途登录时不写文件，只把它的写回内容改为已提交；
+  否则文件为待定就改写为已提交。周期同步里的提交兜底与 `commit_marker_if_durable` 删除，`catalog_sync.rs` 与 main 相同；`record_sign_in_marker`、`holds_pending_marker` 改为模块私有，
+  标记只经 `SessionMarker` 写入（load 的一次性升级只写不存在的标记，未改）。状态、写入方、事件与不变量见 PR 描述「Marker state machine」。
+  四条为何不再可能：① g1 的提交任务不看文件内容决定是否结束；g2 写回 `pending:<g1>` 只在 g1 仍待提交（提交任务仍在）时发生，g1 在 g2 在途时提交则 g2 写回已提交内容。
+  ② / ③ 提交任务与周期同步、暂停状态、登录代次无关，退出登录（成功或被拒）不改动 `session_marker`。④ 后来的在途登录继承 A 的已提交内容，先失败者已不是在途登录，撤销为空操作；两种撤销顺序都写回 A 的标记。
+  前几轮修复逐条核对仍成立：写不进标记在任何释放/丢弃之前拒绝（d9ba823a）；被取代的登录按「仍是在途登录」撤销，与代次无关（ad7be8fc）；标记文件自带待定/已提交，崩溃后待定即 `NotOwned`（147a047f）；
+  只在 flush 确认落库后提交（c0e92466）；adopt 之后不让登录失败，已有已提交标记也先改写为待定（44d47166）；读错误照常重试（提交任务的结束只看内存中的 `awaiting_commit`），adopt 前失败写回原标记（c28a72f7）。
+  测试：新增 `tono::commands::account::lifecycle_tests::overlapping_switches_refused_before_adopting_keep_the_previous_account_marker`
+  （A 有已提交标记且隧道在启动；B 等待释放期间 C 开始并同样等待释放；服务先拒绝 B、再拒绝 C；断言两次都失败且下次启动仍为 `Owned`）；红分支
+  `wip/win-signin-marker-20260926-red7`（`5de593c4`，基于 `2535e6a2`，仅测试，windows-ci run 36222576251 以断言失败：544 passed，1 failed，得到 `NotOwned` 而非 `Owned`）。上一轮红分支 run 36218716073 以断言失败（543 passed，1 failed），
+  `2535e6a2` 的 windows-ci run 36218826226 通过（均已核对）。提交任务的重试、在途期间提交改写写回内容、撤销写回失败没有单元测试覆盖。
+  MacBook 未运行 cargo（只用 rustfmt 解析过改动的 Rust 文件），以 PR #642 的 windows-ci 为准。
+  剩余限制更新：提交前进程退出（含登录在途期间），待定标记下次启动按无归属处理（需重新登录，走上文的无归属会话路径）；撤销写回失败只记日志，
+  此时若有待提交的登录，其提交会把该待定标记改为已提交，否则下次启动需重新登录；退出登录成功后提交任务仍可能把标记改为已提交（凭据库已无令牌，与 main 退出登录后保留标记相同）；
+  凭据库持续拒绝写入时提交任务每 300 秒重试一次，直到进程退出。
