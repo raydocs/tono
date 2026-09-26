@@ -365,8 +365,13 @@ pub(crate) async fn adopt_sign_in_response(
     // Keep the Tono state lock through adoption: a resend/sign-out cannot invalidate this
     // generation between the last check and the token write.
     client.adopt(auth).await.map_err(|err| err.to_string())?;
-    // The session is stored: the marker now vouches for it, and no failure path removes it.
-    inner.sign_in_marker_pending = None;
+    // The session is stored: the pending marker this sign-in wrote now vouches for it. One left
+    // pending vouches for nothing, so a failed rewrite only asks for a sign-in on the next launch.
+    if inner.sign_in_marker_pending.take().is_some() {
+        if let Err(error) = crate::tono::credentials::commit_sign_in_marker(&inner.catalog_dir) {
+            logging!(warn, Type::Service, "Tono: failed to commit the session marker; the next launch asks to sign in: {error}");
+        }
+    }
     // tono-core has retired the previous identity: its verdicts no longer apply (#582).
     inner.offline.adopt_new_identity();
     inner.challenge_id = None;
@@ -404,7 +409,7 @@ where
         // account's connection, dropping its catalog): a marker that cannot be written refuses
         // the sign-in with protection and the previous account untouched.
         let pending = inner.sign_in_marker_pending.is_some();
-        let marker = crate::tono::credentials::record_sign_in_marker(&inner.catalog_dir, pending).map_err(|error| {
+        let marker = crate::tono::credentials::record_sign_in_marker(&inner.catalog_dir, generation, pending).map_err(|error| {
             logging!(warn, Type::Service, "Tono: {error}");
             error
         })?;

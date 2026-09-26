@@ -46,3 +46,19 @@
   剩余限制更新：写入标记之后、会话存入之前进程崩溃，标记仍留下并为凭据库原有内容作证（pending 只在内存）；撤销时删除失败，
   下次启动仍认该标记；登录待定期间若有凭据加载读到该标记（`tono_retry_restore` 或新登录开始时的 `load_credentials`，
   只在此前读库失败、凭据尚未载入时发生），本进程仍当作本机归属载入库中旧令牌，撤销后下次启动不再认。
+- **续记（2026-09-26，#642 续审 147a047f 确认 codex:F1）**：上一条的待定状态只在内存（启动时为空），标记文件本身仍只按「存在」判定；
+  写标记后、存会话前进程崩溃，或撤销删除失败后重启，标记都会为凭据库原有账户作证。现在标记文件自己带状态：
+  登录写入 `pending:<代次>`（先写 `vault-session.marker.staged` 并 `sync_all`，再改名替换，崩溃只留旧标记或新标记，不留残缺文件），
+  `client.adopt` 成功后在同一锁段内原子改写为已提交内容 `1`（`commit_sign_in_marker`）。
+  `data_dir_owns_vault_session` 读到待定标记即 `NotOwned`（不作证，需重新登录；文件留着，下一次登录会接管），
+  读到其他内容（此前各版本写的 `1` 或空文件）仍为 `Owned`，升级不会批量登出；标记存在但读不出时答 `Unrecorded`
+  （既不认领也不登出，保留防护，重试时再读）。登录遇到读不出的标记则拒绝（`TONO_SIGN_IN_NOT_SAVED`），因为它可能是不得改写的已提交标记。
+  `undo_sign_in_marker` 只删待定标记，已提交标记绝不删除；登录前已有的已提交标记仍为 `Existing`，不重写、不删除。
+  后来的登录遇到待定标记（文件或内存）照旧接管。上一条记下的「登录待定期间的凭据加载仍认该标记」随之关闭：加载读到待定标记即不认领、不载入旧令牌。
+  测试：新增 `tono::commands::account::lifecycle_tests::a_sign_in_cut_off_before_storing_its_session_leaves_no_marker_vouching_for_the_vault`
+  （释放上一隧道时进程结束，以超时丢弃 `adopt_replacing_with` 模拟，断言下次启动的归属判定为 `NotOwned`）；红分支
+  `wip/win-signin-marker-20260926-red3`（`6fae885f`，基于 `5773e3c3`，仅测试，windows-ci run 36215718981）。
+  上一轮 `5773e3c3` 的 windows-ci 通过，红分支 run 36214673497 以断言失败。提交改写失败、读不出的标记、旧格式标记没有单元测试覆盖。MacBook 未运行 cargo，以 PR #642 的 windows-ci 为准。
+  剩余限制更新：`client.adopt` 成功后、改写为已提交之前进程崩溃（或改写失败），会话已存而标记仍待定，下次启动按未登录处理
+  （需重新登录，走与任何无归属会话相同的 NoToken 恢复路径）；改写为已提交紧跟在 `client.adopt` 把写库排入队列之后，
+  写库本身仍是异步的，已提交标记之后写库失败或崩溃时，标记为凭据库原有内容作证（与此前相同，本 PR 不能消除）。

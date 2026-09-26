@@ -223,9 +223,9 @@ pub struct TonoInner {
     /// replacing a challenge invalidates network responses from every older transaction.
     pub sign_in_generation: u64,
     /// The sign-in generation whose session marker no stored session backs yet: it wrote the
-    /// marker ([`crate::tono::credentials::SignInMarker::Created`]) and has neither stored its
-    /// session nor removed the marker. Until then the marker is that sign-in's to undo, not
-    /// ownership this machine held.
+    /// marker pending ([`crate::tono::credentials::SignInMarker::Created`]) and has neither stored
+    /// its session nor removed the marker. Until then the marker is that sign-in's to commit or
+    /// undo, not ownership this machine held.
     pub sign_in_marker_pending: Option<u64>,
     pub installation_id: String,
     pub catalog_tracker: CatalogTracker,
