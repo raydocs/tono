@@ -1106,6 +1106,65 @@ mod lifecycle_tests {
         assert_eq!(ownership, VaultSessionOwnership::Owned { rebind: false },
             "a refused switch must not sign A out on the next launch");
     }
+
+    #[tokio::test]
+    async fn overlapping_switches_refused_before_adopting_keep_the_previous_account_marker() {
+        let state = Arc::new(TonoState::for_test());
+        let directory = {
+            let mut inner = state.lock().await;
+            // Account A signed in here, so a committed marker vouches for A's session, and A's
+            // tunnel is starting: every switch awaits its release.
+            crate::tono::credentials::mark_vault_session_owned(&inner.catalog_dir).unwrap();
+            inner.fsm.begin_connect();
+            inner.catalog_dir.clone()
+        };
+        fn auth(account: &str) -> tono_core::auth::AuthResponse {
+            serde_json::from_value(serde_json::json!({
+                "accessToken": format!("fixture-access-{account}"),
+                "refreshToken": format!("fixture-refresh-{account}"),
+                "user": { "id": format!("account-{account}"), "email": format!("{account}@example.test") },
+            })).unwrap()
+        }
+        let (b_releasing, b_awaits_release) = oneshot::channel::<()>();
+        let (c_releasing, c_awaits_release) = oneshot::channel::<()>();
+        let (b_done, b_finished) = oneshot::channel::<()>();
+        // B awaits A's release; C starts meanwhile and awaits it too. The Service refuses B first,
+        // then C: neither stores a session.
+        let b = async {
+            let (client, _, generation) = begin_sign_in(&state).await.unwrap();
+            state.lock().await.challenge_id = Some("challenge-b".into());
+            let adopted = adopt_replacing_with(&state, &client, generation, "challenge-b", &auth("b"),
+                move |_| async move {
+                    b_releasing.send(()).unwrap();
+                    c_awaits_release.await.unwrap();
+                    Err::<(), String>("the Service refused the release".into())
+                },
+                |_| {},
+            ).await;
+            b_done.send(()).unwrap();
+            adopted
+        };
+        let c = async {
+            b_awaits_release.await.unwrap();
+            let (client, _, generation) = begin_sign_in(&state).await.unwrap();
+            state.lock().await.challenge_id = Some("challenge-c".into());
+            adopt_replacing_with(&state, &client, generation, "challenge-c", &auth("c"),
+                move |_| async move {
+                    c_releasing.send(()).unwrap();
+                    b_finished.await.unwrap();
+                    Err::<(), String>("the Service refused the release".into())
+                },
+                |_| {},
+            ).await
+        };
+        let (b, c) = tokio::join!(b, c);
+        let ownership = crate::tono::credentials::data_dir_owns_vault_session(&directory, &[], false);
+        let _ = std::fs::remove_dir_all(&directory);
+        assert!(b.is_err() && c.is_err(), "neither switch is adopted while A's connection is still up");
+        // Nothing reached the vault, which still holds A's session, and this run is still A.
+        assert_eq!(ownership, VaultSessionOwnership::Owned { rebind: false },
+            "two refused switches must not sign A out on the next launch");
+    }
 }
 
 /// The current account, if signed in.
