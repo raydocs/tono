@@ -1068,6 +1068,36 @@ mod lifecycle_tests {
         assert_eq!(ownership, VaultSessionOwnership::NotOwned,
             "the next launch must ask for a sign-in, not restore a session B never stored");
     }
+
+    #[tokio::test]
+    async fn a_switch_refused_before_adopting_keeps_the_previous_account_marker() {
+        let state = Arc::new(TonoState::for_test());
+        let directory = {
+            let mut inner = state.lock().await;
+            // Account A signed in here, so a committed marker vouches for A's session, and A's
+            // tunnel is starting.
+            crate::tono::credentials::mark_vault_session_owned(&inner.catalog_dir).unwrap();
+            inner.fsm.begin_connect();
+            inner.catalog_dir.clone()
+        };
+        let (client, _, generation) = begin_sign_in(&state).await.unwrap();
+        state.lock().await.challenge_id = Some("challenge-b".into());
+        let auth: tono_core::auth::AuthResponse = serde_json::from_value(serde_json::json!({
+            "accessToken": "fixture-access-b",
+            "refreshToken": "fixture-refresh-b",
+            "user": { "id": "account-b", "email": "b@example.test" },
+        })).unwrap();
+        let adopted = adopt_replacing_with(&state, &client, generation, "challenge-b", &auth,
+            |_| async { Err::<(), String>("the Service refused the release".into()) },
+            |_| {},
+        ).await;
+        let ownership = crate::tono::credentials::data_dir_owns_vault_session(&directory, &[], false);
+        let _ = std::fs::remove_dir_all(&directory);
+        assert!(adopted.is_err(), "B is not adopted while A's connection is still up");
+        // Nothing reached the vault, which still holds A's session, and this run is still A.
+        assert_eq!(ownership, VaultSessionOwnership::Owned { rebind: false },
+            "a refused switch must not sign A out on the next launch");
+    }
 }
 
 /// The current account, if signed in.
