@@ -288,14 +288,16 @@ fn classify_service_refusal(
     )
 }
 
-/// Service operations that can remove the WFP barrier: the explicit release, and a core stop,
-/// whose `release_kill_switch` option the status marker does not carry. Exhaustive on purpose,
-/// so a new operation kind has to be classified here.
+/// Service operations that can remove the WFP barrier: the explicit release; a core stop, whose
+/// `release_kill_switch` option the status marker does not carry; and a core start, which
+/// disarms when an explicit release superseded it mid-start. Exhaustive on purpose, so a new
+/// operation kind has to be classified here.
 const fn operation_may_release_barrier(kind: ServiceOperationKind) -> bool {
     match kind {
-        ServiceOperationKind::ReleaseKillSwitch | ServiceOperationKind::StopCore => true,
+        ServiceOperationKind::ReleaseKillSwitch | ServiceOperationKind::StopCore | ServiceOperationKind::StartCore => {
+            true
+        }
         ServiceOperationKind::PrepareCoreStart
-        | ServiceOperationKind::StartCore
         | ServiceOperationKind::StageRuntime
         | ServiceOperationKind::LockKillSwitch
         | ServiceOperationKind::BeginDirectRuntimeReload
@@ -752,6 +754,16 @@ mod tests {
         };
         assert_eq!(
             classify_service_refusal(false, Some(&snapshot)),
+            RefusalProtection::ReleaseMayComplete
+        );
+
+        let mut starting = snapshot.clone();
+        if let Some(operation) = starting.active_operation.as_mut() {
+            // StartClash disarms when an explicit release superseded it mid-start.
+            operation.kind = ServiceOperationKind::StartCore;
+        }
+        assert_eq!(
+            classify_service_refusal(false, Some(&starting)),
             RefusalProtection::ReleaseMayComplete
         );
 
