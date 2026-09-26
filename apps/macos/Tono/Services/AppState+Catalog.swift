@@ -184,7 +184,9 @@ extension AppState {
             } else {
                 catalogSelectionRequiresChoice = true
                 autoConnectRequested = false
-                errorMessage = String(localized: "The selected cloud server was removed. Kill Switch is still blocking traffic; choose another cloud server.")
+                errorMessage = isProtectionBlocked || KillSwitchService.isArmed
+                    ? String(localized: "The selected cloud server was removed. Kill Switch is still blocking traffic; choose another cloud server.")
+                    : String(localized: "The selected cloud server was removed. Choose another cloud server.")
             }
         } else if !migrateCloudExitDefaultIfNeeded() {
             restoreProxySelection(preferredTarget: previousSelection, persistFallback: true)
