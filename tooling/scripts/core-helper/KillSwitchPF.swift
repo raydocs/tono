@@ -709,7 +709,10 @@ extension KillSwitchManager {
     /// The new token is recorded before the previous one is released, so this
     /// helper never takes PF through a zero count itself.
     static func holdPFEnableReference(
-        recordPath: String = killSwitchPFReferencePath
+        recordPath: String = killSwitchPFReferencePath,
+        releaseToken: (String) throws -> Void = {
+            _ = try KillSwitchManager.run("/sbin/pfctl", ["-X", $0])
+        }
     ) throws {
         if try heldPFEnableReference(recordPath: recordPath) != nil { return }
         guard let boot = try? TonoAuthenticatedPeer.bootSession() else {
@@ -857,6 +860,18 @@ extension KillSwitchManager {
         } else if gone {
             unsettledPFEnableAcquire = nil
         }
+    }
+
+    /// Red skeleton: the lifetime bounds are ignored.
+    static func pfEnableToken(
+        takenBy pid: pid_t,
+        spawned: time_t,
+        exited: time_t,
+        listedFrom: time_t,
+        listedTo: time_t,
+        in listing: String
+    ) -> String? {
+        pfEnableToken(takenBy: pid, in: listing)
     }
 
     /// The token `pfctl -s References` lists for pfctl process `pid`, from its

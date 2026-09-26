@@ -376,6 +376,55 @@ extension KillSwitchManager {
         }
         unlink(unansweredRecord)
 
+        // 9d. The `-E` recovery claims a listed token only when the row's age
+        //     puts it inside the killed child's own lifetime (#639 review,
+        //     opus:F1 = codex:F1). A token outlives the pfctl that took it and
+        //     PIDs come back, so an older row under the same PID is another
+        //     program's, and disarm would `-X` it. Rows are newest first, as
+        //     xnu lists them. Parsing only: no pfctl runs.
+        let referenceHeader = "TOKENS:\n"
+            + "PID      Process Name                 TOKEN                    TIMESTAMP\n"
+        let olderHolderRow =
+            "4242     pfctl                        1111111111111111111      0 days 02:00:00\n"
+        let childRow =
+            "4242     pfctl                        2222222222222222222      0 days 00:00:40\n"
+        func recoveredToken(_ rows: String) -> String? {
+            pfEnableToken(
+                takenBy: 4242,
+                spawned: 9_950,
+                exited: 9_970,
+                listedFrom: 10_000,
+                listedTo: 10_000,
+                in: referenceHeader + rows
+            )
+        }
+        check(
+            "recovered-token-only-within-child-lifetime",
+            recoveredToken(olderHolderRow) == nil
+                && recoveredToken(childRow + olderHolderRow) == "2222222222222222222"
+        )
+
+        // 9e. A token the record-failure fallback could not confirm releasing
+        //     stays in memory for the next check and disarm (#639 review,
+        //     codex:F2). The record cannot be written, as in 9b, and the `-X`
+        //     gives no answer, which is no release: forgetting the token leaks
+        //     it. The injected release throws as `run` does past its deadline,
+        //     so nothing races a clock.
+        unrecordedPFEnableReference = nil
+        try? holdPFEnableReference(
+            recordPath: unwritableRecord,
+            releaseToken: { _ in
+                throw HelperFailure.system("pfctl did not finish within 15 seconds.")
+            }
+        )
+        let keptToken = unrecordedPFEnableReference
+        check(
+            "unanswered-fallback-release-keeps-token",
+            keptToken.map { (try? pfEnableReferenceListed($0.token)) == true } == true
+        )
+        try? releasePFEnableReference(recordPath: unwritableRecord)
+        if !startedEnabled { _ = try? run("/sbin/pfctl", ["-d"]) }
+
         // 10. Full removal (`--emergency-reset`) takes back exactly the hook an
         //     arm wrote into /etc/pf.conf, keeps a line the user added later,
         //     and deletes both `.tono-backup` files (H19-O-F6). Fixture paths
