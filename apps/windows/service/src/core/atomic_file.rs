@@ -5,6 +5,42 @@ pub(crate) async fn replace(source: &Path, destination: &Path) -> std::io::Resul
     tokio::fs::rename(source, destination).await
 }
 
+/// Synchronous sibling of [`replace`] for callers that already run on a blocking thread (the
+/// DNS engine's resolver-policy captures, compiled under this same cfg). Same flags, same
+/// commit guarantee; the wait belongs to the caller's own bound (`bounded_dns_call`), not to
+/// a nested timeout.
+#[cfg(all(windows, not(feature = "test")))]
+pub(crate) fn replace_blocking(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt as _;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    // SAFETY: both paths are NUL-terminated UTF-16 buffers owned by this function.
+    let result = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
 /// How long a caller will wait for one `MOVEFILE_WRITE_THROUGH` rename.
 ///
 /// Every caller holds `OWNER_LIFECYCLE_LOCK` (staging, maintenance, desired state), and
