@@ -148,9 +148,11 @@ unavailable, not a silently removed pin or converted hash.
 HY2 with a published SPKI pin (owner, 2026-09-26; [DECISIONS](../../../docs/DECISIONS.md)):
 a managed hysteria2 block may add `certificate-public-key-sha256`, the standard
 base64 SHA-256 of the leaf's SubjectPublicKeyInfo DER (exactly 32 bytes, one
-block-style line; the control plane rejects anything else, and VLESS blocks
-never carry it). The operator computes it on the node from the same certificate
-as `fingerprint`, which stays mandatory:
+block-style line at the block's own field column, plain or simply quoted, no
+trailing comment: the only form macOS reads; the control plane rejects anything
+else, and VLESS blocks never carry it). The operator computes it on the node from
+the same certificate as `fingerprint`, which stays mandatory
+(`manage-tono-hy2-node.sh apply` reports both for every new certificate):
 
     openssl x509 -in <hy2 tls.cert> -pubkey -noout | openssl pkey -pubin -outform der \
       | openssl dgst -sha256 -binary | openssl enc -base64

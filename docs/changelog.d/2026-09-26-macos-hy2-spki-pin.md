@@ -30,3 +30,19 @@
   hy2 对所有用户可见还取决于生产 `HY2_CATALOG_EMAILS`：设了值就只有名单内账号收到 hy2 块（`catalog.ts` 剥离逻辑未改）。
   Rust sing-box 发射器不读该键。
   未实机连接 hy2。
+- 续记 2026-09-26（审查 ce2768d6：opus:F1 与 codex:F1 同根的两个 minor 加一条建议，按停止规则只修一轮）：
+  - 缺陷修复：控制面放行的钉扎写法比 macOS 解析器宽。`catalogScalar` 会剥掉行尾 `# 注释`，行正则也不限缩进层级；
+    macOS `cleanYAMLScalar` 把注释留在值里，嵌在子键下的键又挂在父路径下读不到。这两种写法都能发布成功，但 macOS
+    把钉扎当作缺失，节点悄悄保持不可用。现在控制面只接受 macOS 读得到的那一种写法：键在该条目自身字段那一列
+    （`- name:` 下面字段的列），值为裸写或成对引号，行尾不能有注释，后面也不能有更深缩进的续行。其它写法一律
+    `INVALID_CATALOG`。
+  - 新增/优化（建议）：`manage-tono-hy2-node.sh apply` 每次签发新证书时，用同一条 openssl 管道算 SPKI 钉扎，
+    JSON 输出里在 `fingerprint` 旁边多一个 `certificatePublicKeySha256`，重跑脚本就不会留下过期的 SPKI 钉扎。
+    `provision-reality-node.rb` 还不会把它写进目录源文件（未改）。
+  - 工程与测试：vitest `rejects an SPKI pin with a trailing comment, which macOS reads as part of the value` 与
+    `rejects an SPKI pin nested under another key, which macOS never reads`。红分支 `wip/macos-hy2-spki-pin-red2`
+    （`a902b3a9`，基于 PR 头 `4e5e65f5`，只含测试）。
+  - 验证：在本地基于 `4e5e65f5` 的代码跑，两个新测试都按断言失败（`expected INVALID_CATALOG`），修复后 5 个全过；
+    全量 vitest 与 `tsc --noEmit` 见 PR。另用一次性探针（未提交）确认：裸值、双引号、单引号、尾随空格照样接受；
+    续行、缩进错位、冒号后无空格、引号不成对都拒绝。节点脚本只跑了 `bash -n` / `sh -n`，没有在节点上执行。
+    托管 CI 的 run 编号记在 PR。

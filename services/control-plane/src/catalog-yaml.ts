@@ -253,14 +253,31 @@ function catalogHasFingerprint(block: string): boolean {
  * flow-mapping key into its neighbour's value and would refuse the catalog.
  */
 const HY2_SPKI_PIN_KEY = 'certificate-public-key-sha256';
+// 32 bytes: 42 free characters, a 43rd whose low two bits are zero, one pad.
+const SPKI_PIN_BASE64 = '[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=';
 
+/**
+ * Only the one form macOS `ConfigParser` reads as this node's pin: a direct
+ * field of the list item (the column of the fields under `- name:`), a plain
+ * or simply quoted value, nothing after it. macOS keeps a trailing `# comment`
+ * in the value and files a nested key under its parent's path, so either would
+ * publish a pin that macOS silently treats as absent.
+ */
 function catalogSpkiPinIsAdmissible(block: string): boolean {
   const mentions = block.split(HY2_SPKI_PIN_KEY).length - 1;
   if (mentions === 0) return true;
-  const lines = [...block.matchAll(/^[ \t]+certificate-public-key-sha256[ \t]*:/gm)].length;
-  if (mentions !== 1 || lines !== 1) return false;
-  // 32 bytes: 42 free characters, a 43rd whose low two bits are zero, one pad.
-  return /^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$/.test(catalogScalar(block, HY2_SPKI_PIN_KEY) ?? '');
+  if (mentions !== 1) return false;
+  const lines = block.split('\n');
+  const column = lines[0].match(/^ *- +/)?.[0].length;
+  const index = lines.findIndex((line) => line.includes(HY2_SPKI_PIN_KEY));
+  if (column === undefined || index < 1) return false;
+  const exact = new RegExp(
+    `^ {${column}}${HY2_SPKI_PIN_KEY}: +(?:"${SPKI_PIN_BASE64}"|'${SPKI_PIN_BASE64}'|${SPKI_PIN_BASE64}) *$`,
+  );
+  if (!exact.test(lines[index])) return false;
+  // A deeper line after a plain value continues it for a YAML parser.
+  const next = lines.slice(index + 1).find((line) => line.trim() !== '' && !/^\s*#/.test(line));
+  return next === undefined || (next.match(/^ */)?.[0].length ?? 0) <= column;
 }
 
 function catalogSkipsCertVerify(block: string): boolean {
