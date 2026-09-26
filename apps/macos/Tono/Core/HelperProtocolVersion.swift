@@ -225,7 +225,14 @@ nonisolated enum HelperProtocolVersion {
     ///   read as "no": it stops the chain, and nothing is released, forgotten
     ///   or disabled on it. A 4.47.0 daemon waits on a wedged `pfctl` forever,
     ///   holding its single request thread and with it `/core/stop`.
-    static let current = "4.48.0"
+    /// - 4.48.0 → 4.49.0: a `pfctl -E` killed at its deadline is settled only
+    ///   once that child has exited, and claims a listed token only when the
+    ///   token's age places it inside the child's lifetime. When the reference
+    ///   record cannot be written and the release of the new token gives no
+    ///   answer, the token stays in memory for disarm. A 4.48.0 daemon can
+    ///   claim, and at disarm release, another program's token under a reused
+    ///   PID, and forgets that unanswered token.
+    static let current = "4.49.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
