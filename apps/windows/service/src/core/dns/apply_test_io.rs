@@ -29,6 +29,11 @@ pub(crate) fn active() -> bool {
 
 pub(crate) struct Machine {
     pub snapshot_path: PathBuf,
+    /// Where the resolver-policy capture files (`protected-secure-dns.json`,
+    /// `protected-interface-doh.json`) are redirected while the fixture is active, the same
+    /// treatment `snapshot_path()` gives `protected-dns.json`. The capture read/quarantine/
+    /// rewrite logic then runs for real against this directory.
+    pub capture_dir: PathBuf,
     pub keys: BTreeMap<String, BTreeMap<String, String>>,
     pub adapters: Vec<ActiveAdapter>,
     pub absent: BTreeSet<String>,
@@ -86,6 +91,14 @@ impl Machine {
         Ok(())
     }
 
+    /// Registry value removal for the resolver-policy keys. An absent key or value is
+    /// success, mirroring the host helpers' tolerance.
+    pub fn delete_value(&mut self, key: &str, value: &str) {
+        if let Some(values) = self.keys.get_mut(key) {
+            values.remove(value);
+        }
+    }
+
     pub fn adapters(&mut self, include_dns: bool) -> Vec<ActiveAdapter> {
         if include_dns {
             self.effective_reads += 1;
@@ -111,6 +124,12 @@ impl Machine {
     }
 
     pub fn legacy(&mut self, entries: &[LiveApplyEntry], mode: ApplyMode) -> Vec<(String, bool)> {
+        if entries.is_empty() {
+            // An empty batch has nothing to emulate: restoring a snapshot whose adapters have
+            // all vanished still reaches the live-apply call, and only the registry legs that
+            // follow it do real work. Non-empty restore/DHCP batches stay refused below.
+            return Vec::new();
+        }
         assert!(
             mode == ApplyMode::Protect,
             "this fixture must not exercise restore/DHCP"
@@ -229,6 +248,7 @@ impl Fixture {
         );
         *slot = Some(Machine {
             snapshot_path: root.join("protected-dns.json"),
+            capture_dir: root.clone(),
             keys,
             adapters,
             absent: BTreeSet::new(),
@@ -284,6 +304,9 @@ pub(crate) fn reset_memory() {
     facade::PROTECTION_WANTED.store(false, Ordering::Release);
     facade::SELF_WRITE_TAIL_UNTIL.store(0, Ordering::Relaxed);
     *facade::RESOLVER_POLICY_CONFLICT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    *facade::CAPTURE_LOSS_NOTE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
 }

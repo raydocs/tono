@@ -5692,6 +5692,150 @@
   这与 `restore.rs` 对 `Unknown` 的既有取舍（记作 armed、不 verified）一致，由 #299 的
   Service 真值轮询在 Service 可达后约 30 s 内以 `wanted=false` 纠正（未合 #299 时无自愈）。
 
+## 2026-09-22 · Windows 加密 DNS 旁路捕获文件损坏改为隔离恢复，不再永久拒绝断开
+
+- **归属/来源**：G1 断开与恢复（旁路文件损坏不得成为 Disconnect 的永久阻断）；缺陷编号
+  R3-F2（已确认，源码推导级：代码路径确定，仅掉电产生损坏文件未实机验证）。基线为
+  叠枝父提交 `9c8e5f13`（`fix/windows-dns-merge-guard-20260922`，PR #300），分支
+  `fix/windows-dns-sidecar-recovery-20260922`，叠在其上；关联 PR 见
+  `raydocs/tono` compare。本条提交时为独立修复分支，不沿用任何 main 合并授权。
+- **缺陷修复（三个面）**：
+  (1) 旁路文件非原子落盘且存在即永不重写：`protected-secure-dns.json` /
+  `protected-interface-doh.json` 用 `std::fs::write(tmp)`+`rename` 无数据 flush，严格弱于
+  主快照的原子写；损坏（0 字节/截断）后无人重写、无人删除。现在捕获文件改用与主快照
+  同级纪律（temp → write_all → sync_all → `atomic_file::replace_blocking`
+  `MOVEFILE_WRITE_THROUGH` 改名，参照 `core::desired` 的数据先于改名 flush 顺序），suppress
+  侧保留“可读即保留”的跨升级语义，但缺失或不可读时按守卫重写——只有当在位值不是本
+  build 写入的压制值（`EnableAutoDoh≠0` / 非空 DoH 模板集）才重新捕获，自身压制值永不
+  被记作“原始值”。
+  (2) 损坏后 `restore_encrypted_dns` 对 `read_capture_file()`/`restore_interface_doh()`
+  解析错 `?` 硬拒，`restore_resolver_policy` 四个调用点（无快照分支、证明通过后、损坏
+  快照恢复、卸载 rung 2）全部被阻，每次重试读同一文件，产品内无出口；suppress 早夭的
+  会话（读捕获失败发生在写 `EnableAutoDoh=0` 之前，策略根本未压制）同样被砖。现在
+  restore 侧对不可读捕获隔离（改名保留为 `protected-*.corrupt-<ts>`，无 `.json` 后缀，
+  参照主快照 quarantine 模式）后按“无捕获”语义继续：在位值即恢复结果，新标记
+  `TONO_DNS_CAPTURE_QUARANTINED` 随 `last_error` 在**成功**恢复上透出（App 映射见下方
+  续记）。选择“保持现状而非猜测 Windows 默认值”的依据：早夭面在位值就是用户原值，
+  主动写猜测默认值会破坏它；suppress 已写入的面在位值为 0，恢复后用户可在设置中重新
+  打开，损失被标记而非沉默。核心不变量：旁路文件损坏不得成为 Disconnect 的永久阻断，
+  也不得伪造“已恢复加密 DNS”的正面证据（两者均不假）。
+  (3) 卸载/紧急路径：`restore_for_uninstall` 不再因旁路文件损坏在 rung 1 早退（同一
+  隔离处理），WFP 拆除后 `EnableAutoDoh=0`/`DohFlags=0` 残留从“静默永久”变为“已标记
+  可修复”；跨卸载/重装存活的损坏旁路文件（卸载器不清持久目录）重装后首个 Disconnect
+  不再被砖。触发序列与逐环核实见 R3 审查报告 F2 及 V6 对抗核实（两处加重面）。
+- **新增/优化**：无新功能；`atomic_file` 新增阻塞线程用的同步 `replace_blocking`
+  （同 `MOVEFILE_WRITE_THROUGH` 标志，供 DNS engine 在 `bounded_dns_call` 的阻塞线程上
+  使用）。
+- **工程与测试**：一个窄回归（native 域，native_apply_tests.rs）
+  `corrupt_interface_doh_capture_is_quarantined_not_a_permanent_refusal`：enable 种正常快照后
+  使适配器离网（文档化的 "vanished counts as proven" 恢复面）并写 0 字节
+  `protected-interface-doh.json` → `facade::restore_protected()` 必须走证明路径成功、
+  `last_error` 含 `TONO_DNS_CAPTURE_QUARANTINED`、离网适配器注册表原始值被恢复、旁路文件被
+  隔离（0 字节内容保留）、主快照正常退役（当前实现每次以 "interface DoH capture is not
+  JSON" 解析错误失败）。suppress 早夭加重面由同一解析容错路径结构性修复，但 suppress 在
+  夹具下保持短路，未并入断言。夹具扩展：`test_io::Machine` 增加 `capture_dir` 改道（两个
+  捕获路径像 `snapshot_path()` 一样重定向），`restore_encrypted_dns` 的整体测试短路收窄为
+  注册表操作走夹具键表（`delete_key`/`write_dword`/`delete_value`/`write_qword` 增加
+  test_io 改道，`key_exists`/`enum_subkeys`/`write_sz`/`read_sz` 原有），文件读写/隔离走真
+  逻辑，宿主 NRPT/DoH 策略仍不可触碰；`Machine::legacy` 对空批提前返回（恢复一个全部
+  适配器已离网的快照会以 Restore 模式到达空调用），非空 restore/DHCP 批仍被拒。
+- **验证**：按所有者 2026-09-14 执行位置决定，本机（MacBook）未运行任何 cargo
+  build/test/check/clippy，只做编辑与源码自查；回归委托本 PR 的 GitHub-hosted
+  `windows-2025` Service CI：lifecycle `cargo test --locked --features standalone,client,test`
+  与 native DNS 前缀命令（`cargo test --locked --features standalone,client --lib
+  core::dns::engine::native_apply::tests::`，前置 `-- --list` 防零测试，与 windows-ci.yml
+  现有步骤一致）。提交时未获得结果；准确源码 SHA、实际 CI 输出与续记保留在关联 PR。
+- **候选/发布**：无新包，仅源码；不部署、不触碰 `appcast.xml` / `windows-updates` /
+  `latest.json`。
+- **剩余限制**：不放宽任何保护（NRPT 删除与策略注册表写失败仍 fail-closed 且可重试；
+  隔离只作用于捕获文件本身）；损坏文件的原值不可恢复，只能隔离保留供手工诊断；
+  未验证 Windows 11 实机断电产生的真实损坏文件；未把旁路文件纳入卸载器恢复状态清扫
+  （verify-V6 可选项，修复后残留只影响标记面不再阻断）；suppress 侧隔离在当次 Connect
+  只记引擎日志，经下方续记的持久记录由随后的 restore 透出标记；enable 恢复路径上的隔离
+  同样只记日志；夹具通过不等于 G1 实机验收。
+
+### 2026-09-23 续记 · 审查意见：suppress 侧隔离留下持久“原值已丢失”记录；App 映射新标记
+
+- **缺陷修复（审查 Q1）**：标准 F2 时序——捕获文件损坏 → 下一次 Connect 的 suppress
+  隔离它，但在位值已是上一会话写入的 `EnableAutoDoh=0` / 已清零的 DoH 模板，不再重捕获
+  → Disconnect 找不到捕获 `Ok(None)` → restore 报**干净成功**，用户 DoH 偏好被静默关掉，
+  违反本条“不得伪造已恢复加密 DNS 的正面证据”。现在 suppress 侧隔离时留下持久记录
+  `protected-secure-dns.lost.json` / `protected-interface-doh.lost.json`（原子写，同捕获
+  文件纪律）：`EnableAutoDoh` 在位值为 0 而无法重捕获时写；DoH 模板只要发生隔离就写
+  （已清零的模板从在位集合中消失，重捕获必然不完整）。restore 在捕获处理成功后消费该
+  记录并返回“已隔离”，于是同一条 `TONO_DNS_CAPTURE_QUARANTINED` 成功附注在两种时序下
+  都会出现；捕获写回失败时记录保留供重试；记录删不掉时仍按存在报告，绝不因此拒绝
+  release。仍不猜测 Windows 默认值。
+- **App 映射（审查 Q2）**：`connection_health.rs` 的 `DNS_WARNING_MARKERS` 与 support 页
+  `dnsWarningMarkers` 加入 `TONO_DNS_CAPTURE_QUARANTINED`，与 degraded 标记同款警告面，
+  支持页不再把它显示为 last error。连接健康判定仍要求 `enabled && snapshot_present`，
+  该标记只在断开后的成功 restore 上出现，不放宽已连接健康门。Service 侧
+  `core/update.rs` 对 `last_error.is_none()` 的严格判定未改（与 degraded 标记既有行为
+  一致：更新 Prepare 会在下一次成功 DNS 操作清掉标记前拒绝）。
+- **测试**：新增一个窄回归（审查明确要求）
+  `a_capture_quarantined_by_suppress_is_still_reported_by_restore`（native_apply_tests.rs，
+  engine 级）：0 字节 `protected-interface-doh.json` → `suppress_interface_doh()`（夹具中无
+  启用模板，即已被上一会话清零）→ `restore_interface_doh()` 必须返回 `true`，再次 restore
+  返回 `false`。修改前的分支上 suppress 隔离后不留任何文件，restore 读到 `Ok(None)` 返回
+  `false`，测试必败。`EnableAutoDoh` 一侧使用同一记录机制，但 `suppress_encrypted_dns` 在
+  夹具下仍短路、`read_dword` 无夹具改道，未测试。
+- **验证**：本机（MacBook）未编译、未运行 cargo 或前端检查（本 worktree 无
+  node_modules），委托本 PR 的 `windows-2025` Service/App CI；提交时未获得结果。
+- **剩余限制**：旧版本 build 不认识 `.lost.json` 记录（回退安装会忽略它，回到修复前的
+  静默行为，不会阻断）；损坏文件原值仍不可恢复；未实机验证。
+
+### 2026-09-25 续记 2 · 审查运行 a894f160：丢失证据保留到恢复提交之后
+
+先把 #300 分支（含其审查修复 `12e9ceae`）合入本分支；`native_apply_tests.rs` 冲突两边测试
+全部保留。
+
+- **缺陷修复（opus:F2 major = codex:F2 minor）**：engine 的 restore 在整个恢复提交前就
+  破坏性消费丢失证据——不可读捕获被改名隔离、`.lost.json` 被删除；随后接口 DoH 腿写入
+  失败、facade 删快照失败或 `bounded_dns_call` 超时丢弃返回值，重试都只看到“无捕获、无
+  记录”并报告干净恢复。现在 `restore_encrypted_dns` / `restore_interface_doh` 对丢失证据
+  **只读不消费**（不可读捕获留在原位、记录只检查存在）；新 engine 函数
+  `retire_lost_captures`（隔离仍不可读的捕获、删除记录，尽力而为）只由 facade 的
+  `settle_capture_loss` 在恢复提交（快照已删、附注已写入 `last_error`）之后调用。退役
+  失败只会让下一次恢复再次报告，方向安全。无快照时的孤儿 heal 调用恢复也不再悄悄消费
+  证据。
+- **缺陷修复（codex:F1 major）**：正常 Disconnect 执行两次恢复（release 处理器一次、
+  disarm 门的无快照一次），第二次清掉第一次的附注。现在第一次恢复提交后把附注记入
+  进程内 `CAPTURE_LOSS_NOTE`，下一次**没有自身丢失**的恢复接过它再透出一次；之后与
+  degraded 附注相同，由下一次成功的 DNS 操作清除（更新 Prepare 的严格
+  `last_error.is_none()` 判定因此不会被长期卡住），下一次显式 `enable` 丢弃它。
+- **缺陷修复（opus:F1，降为 minor）**：enable 的损坏快照恢复路径丢弃附注，而旧注释
+  声称“下一次 restore 会透出”并不成立（证据已被消费）。现在该路径只读证据、不调用
+  settle，证据留在磁盘；同一次 enable 的 suppress 会先写丢失记录再隔离，下一次恢复据此
+  报告。注释改为如实描述。
+- **缺陷修复（opus:F3 = codex:F3，minor）**：证明路径 `degraded.or(capture_note)` 在两者
+  同时存在时丢掉加密 DNS 丢失附注。现在用 `join_notes` 拼接（两条描述不同的损失），
+  与卸载 rung 2 的拼接一致。
+- **缺陷修复（opus:F4，minor）**：suppress 先改名隔离、后写丢失记录；记录写失败时唯一
+  证据已被移走。现在两个 suppress（`EnableAutoDoh` 与接口 DoH）都先写记录、后隔离；
+  记录写失败时直接返回错误，不可读文件留在原位，由下一次恢复报告。
+- **测试**：新增四个窄回归（native 域，native_apply_tests.rs）：
+  `a_failed_policy_restore_keeps_the_capture_loss_for_the_retry`（全局捕获 0 字节 + 接口
+  DoH 写入注入失败 → 第一次 `restore_encrypted_dns` 报错，重试必须返回 `true`；旧实现
+  重试返回 `false`）；`the_second_restore_of_a_disconnect_keeps_the_capture_loss_note`
+  （连续两次 `restore_protected`，第二次的 `last_error` 仍含标记）；
+  `a_capture_loss_met_by_the_enable_recovery_reaches_the_next_restore`（损坏快照 + 0 字节
+  接口捕获 → enable 恢复完成 → 随后的恢复必须报告标记）；
+  `an_unwritable_lost_record_keeps_the_unreadable_capture_in_place`（记录路径被目录占据
+  → suppress 报错且 0 字节捕获仍在原位）。opus:F3/codex:F3 未加测试：degraded 出口需要
+  持续的 live-apply 失败，native 夹具不支持非空 Restore 批，stub 引擎又不会产生捕获
+  附注；改动是两个 `Option` 的拼接。**测试修正**：既有
+  `a_capture_quarantined_by_suppress_is_still_reported_by_restore` 的第二个断言由“再次
+  restore 返回 false”改为“退役前再次 restore 仍返回 true，`retire_lost_captures` 之后返回
+  false”，对应“恢复不消费证据”的新语义。夹具 `reset_memory` 同时清空
+  `CAPTURE_LOSS_NOTE`。以上测试在修复前代码上的失败均为源码推导，未实际运行。
+- **验证**：本机（MacBook）未编译、未运行 cargo，只用 `rustfmt --check` 确认无语法
+  错误；委托本 PR 的 `windows-2025` CI。提交时未获得结果。
+- **候选/发布**：无新包，仅源码。
+- **剩余限制**：`CAPTURE_LOSS_NOTE` 在进程内，Service 在两次恢复之间重启会丢失它（证据
+  已退役，此时状态不再提示）；只有一次恢复的路径（如更新 Prepare 自己发现丢失）留下的
+  附注会再被下一次恢复透出一次，更新可能多被拒绝一次；损坏文件原值仍不可恢复；合入前
+  仍需 Windows 验收机检查 wintun 接口键（见 #300 条续记 2）。
+
 ## 2026-09-22 · Windows 快照合并与损坏恢复不再把 TUN DNS 地址记为原始值
 
 - **归属/来源**：G1 断开与恢复（Disconnect 不得被污染快照永久拒绝）；缺陷编号 R3-F1

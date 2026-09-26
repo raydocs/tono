@@ -160,6 +160,10 @@ fn write_sz(subkey: &str, value: &str, data: &str) -> Result<()> {
 }
 
 fn delete_value(subkey: &str, value: &str) -> Result<()> {
+    #[cfg(test)]
+    if test_io::with(|io| io.delete_value(subkey, value)).is_some() {
+        return Ok(()); // The fixture registry has no policy state to delete.
+    }
     let Some(key) = RegKey::open(subkey, true)? else {
         return Ok(());
     };
@@ -249,6 +253,10 @@ fn read_flags(subkey: &str, value: &str) -> Result<Option<u64>> {
 }
 
 fn write_qword(subkey: &str, value: &str, data: u64) -> Result<()> {
+    #[cfg(test)]
+    if let Some(result) = test_io::with(|io| io.write(subkey, value, &data.to_string())) {
+        return result;
+    }
     let Some(key) = RegKey::open(subkey, true)? else {
         return Ok(());
     };
@@ -302,21 +310,150 @@ fn collect_interface_doh() -> Result<Vec<super::InterfaceDohEntry>> {
     Ok(entries)
 }
 
-fn write_interface_doh_capture(entries: &[super::InterfaceDohEntry]) -> Result<()> {
-    let path = super::interface_doh_capture_path();
-    if path.exists() {
-        return Ok(());
-    }
+/// Persist a resolver-policy capture with the same discipline as `protected-dns.json`: write
+/// the body to a temp file, flush the data, then rename with `MOVEFILE_WRITE_THROUGH`
+/// (`core::atomic_file`). The previous `std::fs::write` + plain `rename` committed neither
+/// the data nor the directory entry, so a crash or power loss could leave a zero-length
+/// capture that every later restore then failed to parse — for ever, because nothing ever
+/// rewrote or removed it (R3-F2).
+fn write_capture_atomically(path: &std::path::Path, body: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
-    let body = super::format_interface_doh_capture(entries).map_err(|error| anyhow::anyhow!(error))?;
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, body).with_context(|| format!("failed to write {}", tmp.display()))?;
-    std::fs::rename(&tmp, &path)
+    let temporary = path.with_extension("tmp");
+    if std::fs::symlink_metadata(&temporary).is_ok() {
+        std::fs::remove_file(&temporary)
+            .with_context(|| format!("failed to replace {}", temporary.display()))?;
+    }
+    let mut file = std::fs::File::create(&temporary)
+        .with_context(|| format!("failed to open {}", temporary.display()))?;
+    std::io::Write::write_all(&mut file, body.as_bytes())
+        .with_context(|| format!("failed to write {}", temporary.display()))?;
+    file.sync_all()
+        .with_context(|| format!("failed to flush {}", temporary.display()))?;
+    drop(file);
+    crate::core::atomic_file::replace_blocking(&temporary, path)
         .with_context(|| format!("failed to persist {}", path.display()))?;
+    crate::core::platform_security::secure_private_service_file_if_exists(path)?;
     Ok(())
+}
+
+/// Move an unreadable capture aside instead of deleting it — the same retention discipline
+/// as the snapshot's `quarantine_snapshot`: the corrupt bytes may still be decodable by hand
+/// in a support case, and renaming keeps them out of every later read. Best-effort by
+/// design: a quarantine that itself fails (permissions, a locked file) is logged while the
+/// caller proceeds, because a capture's unreadability must never become a permanent refusal
+/// of Disconnect or uninstall.
+fn quarantine_capture(path: &std::path::Path, reason: &str) {
+    let retained = path.with_extension(format!("corrupt-{}", super::now_unix()));
+    match std::fs::rename(path, &retained) {
+        Ok(()) => {
+            if let Err(error) =
+                crate::core::platform_security::secure_private_service_file_if_exists(&retained)
+            {
+                tracing::warn!(
+                    "dns: the quarantined capture {} could not be restricted: {error:#}",
+                    retained.display()
+                );
+            }
+            tracing::error!(
+                "dns: {reason} — the unreadable capture was kept as {}",
+                retained.display()
+            );
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            tracing::warn!(
+                "dns: an unreadable capture could not be set aside for diagnosis ({error:#}); \
+                 continuing without it"
+            );
+        }
+    }
+}
+
+/// The durable "originals lost" record kept next to a capture. Suppress writes it when it had
+/// to quarantine an unreadable capture and could not re-read the originals because the live
+/// values were already Tono's own (`EnableAutoDoh=0`, zeroed `DohFlags`); restore reports the
+/// loss while the record exists, and [`retire_lost_captures`] removes it after a committed
+/// restore surfaced it. Without it the loss lived only in the Connect that found it, and the
+/// following restore — seeing no capture at all — reported a clean result.
+fn lost_capture_marker(capture: &std::path::Path) -> std::path::PathBuf {
+    capture.with_extension("lost.json")
+}
+
+fn record_lost_capture(capture: &std::path::Path) -> Result<()> {
+    write_capture_atomically(
+        &lost_capture_marker(capture),
+        &format!("{{\"lost_at\":{}}}\n", super::now_unix()),
+    )
+}
+
+/// Whether a lost-originals record exists. Read-only: restore reports it on every attempt until
+/// it is retired. A marker whose presence cannot be determined counts as present — the loss is
+/// over-reported, never silently dropped.
+fn lost_capture_recorded(capture: &std::path::Path) -> bool {
+    let marker = lost_capture_marker(capture);
+    match std::fs::symlink_metadata(&marker) {
+        Ok(_) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => {
+            tracing::warn!(
+                "dns: the lost-capture record {} could not be checked: {error:#}",
+                marker.display()
+            );
+            true
+        }
+    }
+}
+
+/// Remove the lost-originals record, if any. A marker that cannot be deleted stays present: it
+/// is reported again on the next restore, never silently dropped, and never a refusal of the
+/// release itself.
+fn take_lost_capture(capture: &std::path::Path) -> bool {
+    let marker = lost_capture_marker(capture);
+    match std::fs::remove_file(&marker) {
+        Ok(()) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => {
+            tracing::warn!(
+                "dns: the lost-capture record {} could not be removed: {error:#}",
+                marker.display()
+            );
+            true
+        }
+    }
+}
+
+/// Retire the capture-loss evidence a committed restore has just surfaced: move a capture that
+/// still cannot be read aside for diagnosis and remove the lost-originals records. The facade
+/// calls this only after the whole restore succeeded and its note reached `last_error`;
+/// [`restore_encrypted_dns`] itself only reads the evidence. Best-effort: anything left behind
+/// is reported again by the next restore, which is the safe direction.
+pub(super) fn retire_lost_captures() -> Result<()> {
+    let global = super::encrypted_dns_capture_path();
+    if let Err(error) = read_capture_file() {
+        quarantine_capture(
+            &global,
+            &format!("encrypted DNS capture could not be read ({error:#})"),
+        );
+    }
+    take_lost_capture(&global);
+    let interface = super::interface_doh_capture_path();
+    if let Err(error) = read_interface_doh_capture() {
+        quarantine_capture(
+            &interface,
+            &format!("interface DoH capture could not be read ({error:#})"),
+        );
+    }
+    take_lost_capture(&interface);
+    Ok(())
+}
+
+fn write_interface_doh_capture(entries: &[super::InterfaceDohEntry]) -> Result<()> {
+    let body =
+        super::format_interface_doh_capture(entries).map_err(|error| anyhow::anyhow!(error))?;
+    write_capture_atomically(&super::interface_doh_capture_path(), &body)
 }
 
 fn read_interface_doh_capture() -> Result<Option<Vec<super::InterfaceDohEntry>>> {
@@ -341,8 +478,32 @@ fn delete_interface_doh_capture() -> Result<()> {
 
 fn suppress_interface_doh() -> Result<()> {
     let current = collect_interface_doh()?;
-    if read_interface_doh_capture()?.is_none() {
-        write_interface_doh_capture(&current)?;
+    match read_interface_doh_capture() {
+        // A capture this build can read stays in force: it may have been written by an older
+        // build mid-session (its cross-upgrade role), and the flags below may already be
+        // zeroed by that session.
+        Ok(Some(_)) => {}
+        unreadable => {
+            if let Err(error) = unreadable {
+                let path = super::interface_doh_capture_path();
+                // Templates an earlier session already zeroed are gone from the live set, so
+                // whatever is captured below can be incomplete: the loss must reach restore.
+                // Record first, rename second: until the record is durable the unreadable file
+                // in place is the only evidence of the loss, and a failed record keeps it there.
+                record_lost_capture(&path)?;
+                quarantine_capture(
+                    &path,
+                    &format!("interface DoH capture could not be read ({error:#})"),
+                );
+            }
+            // Only a non-empty live set is a capture worth writing: this build zeroes
+            // `DohFlags` and `collect_interface_doh` reports only enabled templates, so an
+            // empty set after our own suppress is indistinguishable from "the user had
+            // none" — capturing it would fabricate an empty "original".
+            if !current.is_empty() {
+                write_interface_doh_capture(&current)?;
+            }
+        }
     }
     for entry in current {
         write_qword(
@@ -354,19 +515,38 @@ fn suppress_interface_doh() -> Result<()> {
     Ok(())
 }
 
-fn restore_interface_doh() -> Result<()> {
-    let Some(entries) = read_interface_doh_capture()? else {
-        return Ok(());
+/// Put the captured per-adapter flags back and delete the capture. An unreadable capture is
+/// treated as "no capture": the templates it named are unrecoverable from its bytes, so the
+/// in-place (suppressed) flags stand as the restore result — reported to the caller via the
+/// `true` return, never as a permanent refusal. The loss evidence (the unreadable file, a
+/// lost-originals record) is only read here, never consumed: the facade retires it with
+/// [`retire_lost_captures`] once the whole restore has committed and the loss was surfaced,
+/// so a restore that fails on a later leg, or whose result is dropped, cannot erase it.
+/// Idempotent when no capture exists.
+fn restore_interface_doh() -> Result<bool> {
+    let path = super::interface_doh_capture_path();
+    let unreadable = match read_interface_doh_capture() {
+        Ok(Some(entries)) => {
+            for entry in entries {
+                write_qword(
+                    &interface_doh_key(&entry.guid, &entry.family, &entry.server),
+                    DOH_FLAGS,
+                    entry.flags,
+                )?;
+            }
+            delete_interface_doh_capture()?;
+            false
+        }
+        Ok(None) => false,
+        Err(error) => {
+            tracing::error!(
+                "dns: interface DoH capture could not be read ({error:#}); the in-place flags \
+                 stand and the loss is reported"
+            );
+            true
+        }
     };
-    for entry in entries {
-        write_qword(
-            &interface_doh_key(&entry.guid, &entry.family, &entry.server),
-            DOH_FLAGS,
-            entry.flags,
-        )?;
-    }
-    delete_interface_doh_capture()?;
-    Ok(())
+    Ok(unreadable | lost_capture_recorded(&path))
 }
 
 /// One adapter that can actually carry a resolver, with the interface indices its live
@@ -1203,6 +1383,10 @@ fn read_dword(subkey: &str, value: &str) -> Result<Option<u32>> {
 }
 
 fn write_dword(subkey: &str, value: &str, data: u32) -> Result<()> {
+    #[cfg(test)]
+    if let Some(result) = test_io::with(|io| io.write(subkey, value, &data.to_string())) {
+        return result;
+    }
     let Some(key) = RegKey::open(subkey, true)? else {
         bail!("registry key {subkey} does not exist");
     };
@@ -1281,6 +1465,10 @@ fn create_key(subkey: &str) -> Result<RegKey> {
 }
 
 fn delete_key(subkey: &str) -> Result<()> {
+    #[cfg(test)]
+    if test_io::with(|io| io.keys.remove(subkey)).is_some() {
+        return Ok(()); // Deleting an absent fixture key is success, as on the host.
+    }
     let wide = super_wide(subkey);
     // SAFETY: NUL-terminated key path under HKLM.
     let status = unsafe { RegDeleteKeyW(HKEY_LOCAL_MACHINE, wide.as_ptr()) };
@@ -1292,20 +1480,10 @@ fn delete_key(subkey: &str) -> Result<()> {
 }
 
 fn write_capture_file(enable_auto_doh: Option<u32>) -> Result<()> {
-    let path = super::encrypted_dns_capture_path();
-    if path.exists() {
-        return Ok(());
-    }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, super::format_encrypted_dns_capture(enable_auto_doh))
-        .with_context(|| format!("failed to write {}", tmp.display()))?;
-    std::fs::rename(&tmp, &path)
-        .with_context(|| format!("failed to persist {}", path.display()))?;
-    Ok(())
+    write_capture_atomically(
+        &super::encrypted_dns_capture_path(),
+        &super::format_encrypted_dns_capture(enable_auto_doh),
+    )
 }
 
 fn read_capture_file() -> Result<Option<Option<u32>>> {
@@ -1346,13 +1524,42 @@ fn install_nrpt() -> Result<()> {
 }
 
 /// Snapshot Encrypted DNS, turn DoH off, and force the DNS Client through TUN DNS.
+///
+/// The capture decision is made from what can be *read*, not from bare existence: a readable
+/// capture is kept (cross-upgrade semantics), a missing one is (re)written, and an unreadable
+/// one is quarantined before being rewritten — but only from a value this build did not
+/// write, so our own `EnableAutoDoh=0` can never be re-recorded as the user's "original".
+/// When nothing can be rewritten, a lost-originals record (`lost_capture_marker`) is left
+/// instead, so the next restore reports the loss rather than a clean result.
 pub(super) fn suppress_encrypted_dns() -> Result<()> {
     #[cfg(test)]
     if test_io::active() {
         return Ok(()); // Resolver-policy OS effects are outside this apply regression.
     }
-    if read_capture_file()?.is_none() {
-        write_capture_file(read_dword(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH)?)?;
+    // Both the quarantined-rewrite and the missing-file (re)capture read the live value
+    // before it is zeroed below — after that write it is ours, not the user's.
+    match read_capture_file() {
+        Ok(Some(_)) => {}
+        unreadable => {
+            let current = read_dword(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH)?;
+            let live_is_ours = current == Some(super::ENABLE_AUTO_DOH_OFF);
+            if let Err(error) = unreadable {
+                if live_is_ours {
+                    // The live `0` is ours from an earlier session: the original is gone, and
+                    // the restore that follows must say so instead of finding no capture.
+                    // Record first, rename second: a failed record keeps the unreadable file
+                    // in place as the evidence.
+                    record_lost_capture(&super::encrypted_dns_capture_path())?;
+                }
+                quarantine_capture(
+                    &super::encrypted_dns_capture_path(),
+                    &format!("encrypted DNS capture could not be read ({error:#})"),
+                );
+            }
+            if !live_is_ours {
+                write_capture_file(current)?;
+            }
+        }
     }
     write_dword(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH, super::ENABLE_AUTO_DOH_OFF)?;
     if let Err(error) = suppress_interface_doh() {
@@ -1363,28 +1570,52 @@ pub(super) fn suppress_encrypted_dns() -> Result<()> {
 }
 
 /// Put `EnableAutoDoh` back, restore per-adapter DoH flags, and delete our NRPT rule.
-/// Idempotent when no capture exists.
-pub(super) fn restore_encrypted_dns() -> Result<()> {
+/// Idempotent when no capture exists. Returns `true` when a capture is unreadable, or an
+/// earlier suppress left a lost-originals record: the in-place (suppressed) values then stand
+/// as the restore result — the saved originals are unrecoverable — and the caller must surface
+/// that loss instead of reporting a clean restore. An unreadable capture must never refuse the
+/// release itself: that refusal was permanent, because the file was neither rewritten nor
+/// removed. The loss evidence is only read here; it stays in place for every retry until the
+/// facade calls [`retire_lost_captures`] after the whole restore committed, so a failure on a
+/// later leg or in the facade, or a timed-out call whose result is dropped, cannot erase it.
+pub(super) fn restore_encrypted_dns() -> Result<bool> {
+    // Fixture-isolated recovery tests still count policy restores. The registry legs below
+    // (NRPT delete, EnableAutoDoh, per-adapter DohFlags) route into the fixture's key map,
+    // so no host policy is touched, while the capture files run for real against the
+    // fixture's redirected capture directory.
     #[cfg(test)]
-    if test_io::with(|io| io.policy_restores += 1).is_some() {
-        return Ok(()); // Isolated recovery tests must never change host NRPT/DoH policy.
-    }
+    let _ = test_io::with(|io| io.policy_restores += 1);
     if let Err(error) = delete_key(&nrpt_rule_key()) {
         tracing::error!("dns: Tono NRPT rule could not be removed: {error:#}");
         return Err(error);
     }
-    if let Some(saved) = read_capture_file()? {
-        match saved {
-            Some(value) => write_dword(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH, value)?,
-            None => delete_value(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH)?,
+    let mut lost = false;
+    match read_capture_file() {
+        Ok(Some(saved)) => {
+            match saved {
+                Some(value) => write_dword(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH, value)?,
+                None => delete_value(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH)?,
+            }
+            delete_capture_file()?;
+        }
+        Ok(None) => {}
+        Err(error) => {
+            tracing::error!(
+                "dns: encrypted DNS capture could not be read ({error:#}); the in-place value \
+                 stands and the loss is reported"
+            );
+            lost = true;
         }
     }
-    delete_capture_file()?;
-    if let Err(error) = restore_interface_doh() {
-        tracing::error!("dns: per-adapter Encrypted DNS restore failed: {error:#}");
-        return Err(error);
+    lost |= lost_capture_recorded(&super::encrypted_dns_capture_path());
+    match restore_interface_doh() {
+        Err(error) => {
+            tracing::error!("dns: per-adapter Encrypted DNS restore failed: {error:#}");
+            return Err(error);
+        }
+        Ok(interface_lost) => lost |= interface_lost,
     }
-    Ok(())
+    Ok(lost)
 }
 
 /// Group Policy's NRPT store. Whenever it holds any rule, the DNS Client applies it alone and

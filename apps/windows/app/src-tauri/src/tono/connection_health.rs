@@ -269,10 +269,16 @@ pub fn kill_switch_unhealthy_for_monitor(
 ///
 /// `TONO_DNS_UNVERIFIED`: DNS was applied but the read-back could not confirm every adapter.
 /// `TONO_DNS_RESTORE_DEGRADED`: a restore was accepted on registry evidence alone.
+/// `TONO_DNS_CAPTURE_QUARANTINED`: a restore succeeded, but an unreadable Encrypted DNS capture
+/// was quarantined, so the user's previous Encrypted DNS setting could not be put back.
 ///
 /// Treating these as unhealthy is not a cosmetic mistake: two consecutive samples invalidate
 /// Connected, and a machine that can never verify would then reconnect forever.
-const DNS_WARNING_MARKERS: [&str; 2] = ["TONO_DNS_UNVERIFIED", "TONO_DNS_RESTORE_DEGRADED"];
+const DNS_WARNING_MARKERS: [&str; 3] = [
+    "TONO_DNS_UNVERIFIED",
+    "TONO_DNS_RESTORE_DEGRADED",
+    "TONO_DNS_CAPTURE_QUARANTINED",
+];
 
 /// Whether a `last_error` string reports an actual failure rather than an unproven-but-applied
 /// state. Substring, not prefix: the Service nests these markers inside its own context.
