@@ -957,6 +957,9 @@ extension KillSwitchManager {
         queryDeadline: TimeInterval = KillSwitchManager.pfctlQueryDeadline,
         releaseToken: (String) throws -> Void = {
             _ = try KillSwitchManager.run("/sbin/pfctl", ["-X", $0])
+        },
+        listReferences: (TimeInterval) throws -> HelperCommandResult = {
+            try KillSwitchManager.listPFEnableReferences(deadline: $0)
         }
     ) throws {
         guard !supersededPFEnableReferences.isEmpty else { return }
@@ -967,7 +970,8 @@ extension KillSwitchManager {
             let token = superseded.reference.token
             if superseded.reference.boot == boot, token != keeping {
                 let listedFrom = time(nil)
-                let listing = try pfctlQuery(["-s", "References"], deadline: queryDeadline)
+                let listed = try listReferences(queryDeadline)
+                let listing = listed.status == 0 ? String(data: listed.output, encoding: .utf8) : nil
                 let listedTo = time(nil)
                 if let listing,
                    listing.split(whereSeparator: \.isWhitespace).contains(where: { $0 == token }) {
@@ -1022,26 +1026,34 @@ extension KillSwitchManager {
     static func releasePFEnableReference(
         recordPath: String = killSwitchPFReferencePath,
         queryDeadline: TimeInterval = KillSwitchManager.pfctlQueryDeadline,
-        bootSession: () throws -> String = { try TonoAuthenticatedPeer.bootSession() }
+        bootSession: () throws -> String = { try TonoAuthenticatedPeer.bootSession() },
+        listReferences: (TimeInterval) throws -> HelperCommandResult = {
+            try KillSwitchManager.listPFEnableReferences(deadline: $0)
+        }
     ) throws {
         try settlePFEnableAcquire(deadline: queryDeadline)
         guard let boot = try? bootSession() else {
             throw HelperFailure.system("Boot session unknown; PF enable references kept.")
         }
         if let held = readPFEnableReference(recordPath), held.boot == boot,
-           try pfEnableReferenceListed(held.token, deadline: queryDeadline) {
+           try pfEnableReferenceListed(
+            held.token, deadline: queryDeadline, listReferences: listReferences
+           ) {
             _ = try run("/sbin/pfctl", ["-X", held.token])
         }
         unlink(recordPath)
         if let pending = unrecordedPFEnableReference, pending.boot == boot,
-           try pfEnableReferenceListed(pending.token, deadline: queryDeadline) {
+           try pfEnableReferenceListed(
+            pending.token, deadline: queryDeadline, listReferences: listReferences
+           ) {
             _ = try run("/sbin/pfctl", ["-X", pending.token])
         }
         unrecordedPFEnableReference = nil
         try releaseSupersededPFEnableReferences(
             boot: boot,
             keeping: nil,
-            queryDeadline: queryDeadline
+            queryDeadline: queryDeadline,
+            listReferences: listReferences
         )
     }
 
@@ -1232,12 +1244,21 @@ extension KillSwitchManager {
 
     static func pfEnableReferenceListed(
         _ token: String,
-        deadline: TimeInterval = KillSwitchManager.pfctlQueryDeadline
+        deadline: TimeInterval = KillSwitchManager.pfctlQueryDeadline,
+        listReferences: (TimeInterval) throws -> HelperCommandResult = {
+            try KillSwitchManager.listPFEnableReferences(deadline: $0)
+        }
     ) throws -> Bool {
-        guard let text = try pfctlQuery(["-s", "References"], deadline: deadline) else {
+        let listed = try listReferences(deadline)
+        guard listed.status == 0, let text = String(data: listed.output, encoding: .utf8) else {
             return false
         }
         return text.split(whereSeparator: \.isWhitespace).contains { $0 == token }
+    }
+
+    /// `pfctl -s References`; the self-test replaces it to stage an answer.
+    static func listPFEnableReferences(deadline: TimeInterval) throws -> HelperCommandResult {
+        try run("/sbin/pfctl", ["-s", "References"], deadline: deadline)
     }
 
     // MARK: - Root-owned I/O and commands

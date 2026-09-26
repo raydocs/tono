@@ -624,6 +624,87 @@ extension KillSwitchManager {
         supersededPFEnableReferences = []
         unlink(unknownBootRecord)
 
+        // 9i. A release forgets a token only once pfctl has listed every
+        //     token and it was not among them (#643 review 8fa64f3b,
+        //     grok:F1). macOS 26 pfctl warns `DIOCGETSTARTERS: <error>` and
+        //     exits 0 when it cannot list: that answer says nothing about any
+        //     token, so the record, the unrecorded token and the replaced
+        //     ones all stay. Made-up tokens and boot, an injected listing; no
+        //     pfctl runs.
+        let unlistedRecord = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-lifecycle-unlisted.reference").path
+        unlink(unlistedRecord)
+        let unlistedBoot = "tono-self-test-boot"
+        let unlistedRecorded = PFEnableReference(token: "4294967323", boot: unlistedBoot)
+        let unlistedPending = PFEnableReference(token: "4294967329", boot: unlistedBoot)
+        let unlistedReplaced = PFEnableReference(token: "4294967331", boot: unlistedBoot)
+        if let record = try? JSONSerialization.data(
+            withJSONObject: ["token": unlistedRecorded.token, "boot": unlistedBoot],
+            options: [.sortedKeys]
+           ),
+           (try? atomicWrite(path: unlistedRecord, data: record, permissions: 0o600)) != nil {
+            unrecordedPFEnableReference = unlistedPending
+            supersededPFEnableReferences = [.init(reference: unlistedReplaced)]
+            let released = (try? releasePFEnableReference(
+                recordPath: unlistedRecord,
+                bootSession: { unlistedBoot },
+                listReferences: { _ in
+                    .init(
+                        status: 0,
+                        output: Data("pfctl: DIOCGETSTARTERS: Operation not permitted\n".utf8)
+                    )
+                }
+            )) != nil
+            check(
+                "unlisted-references-kept",
+                !released && readPFEnableReference(unlistedRecord) == unlistedRecorded
+                    && unrecordedPFEnableReference == unlistedPending
+                    && supersededPFEnableReferences.map(\.reference) == [unlistedReplaced]
+            )
+        } else {
+            check("unlisted-record-written", false)
+        }
+        unrecordedPFEnableReference = nil
+        supersededPFEnableReferences = []
+        unlink(unlistedRecord)
+
+        // 9j. A retry that cannot read the replaced token's row this pass
+        //     proves nothing either way (#643 review 8fa64f3b, grok:F2,
+        //     codex:F1): a row that does not parse, or a listing window a
+        //     clock step inverted, keeps the entry for the next pass, with no
+        //     `-X`. Only a readable row under another PID or process, or an
+        //     issue range apart from the one seen, is another issue. An
+        //     injected listing; no pfctl runs.
+        let retriedReplaced = PFEnableReference(token: "4294967333", boot: unlistedBoot)
+        supersededPFEnableReferences = [.init(
+            reference: retriedReplaced,
+            releaseTried: true,
+            row: .init(pid: "4242", process: "pfctl", issuedFrom: 9_960, issuedTo: 9_960)
+        )]
+        var retriedRelease = false
+        let retried = (try? releaseSupersededPFEnableReferences(
+            boot: unlistedBoot,
+            keeping: nil,
+            releaseToken: { _ in retriedRelease = true },
+            listReferences: { _ in
+                .init(status: 0, output: Data((referenceHeader
+                    + "4242     pfctl                        4294967333               0 days 0:00:40\n"
+                ).utf8))
+            }
+        )) != nil
+        check(
+            "unreadable-superseded-row-kept",
+            !retried && !retriedRelease
+                && supersededPFEnableReferences.map(\.reference) == [retriedReplaced]
+                && pfEnableRow(
+                    of: "2222222222222222222",
+                    listedFrom: 10_001,
+                    listedTo: 10_000,
+                    in: referenceHeader + childRow
+                ) == nil
+        )
+        supersededPFEnableReferences = []
+
         // 10. Full removal (`--emergency-reset`) takes back exactly the hook an
         //     arm wrote into /etc/pf.conf, keeps a line the user added later,
         //     and deletes both `.tono-backup` files (H19-O-F6). Fixture paths
