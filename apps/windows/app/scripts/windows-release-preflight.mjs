@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import {
   FORBIDDEN_PAYLOAD_NAME_PATTERNS,
   STABLE_EXTERNAL_BIN,
+  STATIC_CRT_HELPERS,
   WINDOWS_RESOURCE_ALLOWLIST,
   WINDOWS_RESOURCE_BUNDLE_ENTRIES,
   parseNsisListing,
@@ -18,6 +19,7 @@ import {
   validatePayloadEntries,
   validateReleaseFeatureTree,
   validateResourcesWhitelist,
+  validateStaticCrtImports,
   validateTauriRendererCommandSurface,
   validateTlsPolicySources,
   validateWindowsReplacementHelperSource,
@@ -304,6 +306,24 @@ const assertNsisCoreIntegrityPins = (sevenZip, installer, entries) => {
   return coreDigest
 }
 
+// Every packaged copy, including the `$PLUGINSDIR/tono-gate` one `.onInit` runs as the gate.
+const assertNsisHelpersStaticCrt = (sevenZip, installer, entries) => {
+  for (const name of STATIC_CRT_HELPERS) {
+    const copies = entries.filter(
+      (entry) => entry.base.toLowerCase() === name.toLowerCase(),
+    )
+    if (!copies.length)
+      fail(`NSIS payload has no ${name} to inspect for its imports`)
+    for (const copy of copies) {
+      const importError = validateStaticCrtImports(
+        readNsisEntry(sevenZip, installer, copy.name),
+        copy.name,
+      )
+      if (importError) fail(importError)
+    }
+  }
+}
+
 const assertNsisPayload = (installer) => {
   const sevenZip = findSevenZip()
   if (!sevenZip) {
@@ -327,6 +347,7 @@ const assertNsisPayload = (installer) => {
   }
 
   const coreSha256 = assertNsisCoreIntegrityPins(sevenZip, installer, entries)
+  assertNsisHelpersStaticCrt(sevenZip, installer, entries)
 
   return {
     sevenZip,

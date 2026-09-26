@@ -1541,73 +1541,175 @@ fn replace_existing_service_and_runtime(
     }
 }
 
-/// Make sure the dependency TonoService declares can actually be satisfied.
-///
-/// TonoService is AutoStart and hard-depends on BFE, so a machine where BFE has been switched
-/// off — routinely done by "network accelerator" and "anti-freeloader" utilities — refuses to
-/// start it at boot and never retries. Nothing in the product recovered from that: the App
-/// showed "protected, not connected" with every diagnostic field reading unknown, and rebooting
-/// did not help. The installer already holds the elevation needed to fix it, and BFE is a core
-/// Windows service that Windows Firewall and IPsec also require, so restoring it repairs the
-/// machine rather than reconfiguring it.
-///
-/// The start type goes through `sc.exe` rather than `change_config`, which takes a whole
-/// `ServiceInfo`: reconstructing one for a core OS service from our side risks writing a wrong
-/// binary path or account onto the component Windows Firewall depends on. Starting it is a
-/// single unambiguous call, so that part uses the API.
-///
-/// Never fatal: an install that otherwise succeeded must not fail over this, and the connect
-/// path reports a still-stopped BFE with instructions of its own.
+/// Exit code of `--manual-update-gate` for [`BfeUnavailable`]; kept in sync with installer.nsi,
+/// which then names the fix instead of the generic refusal.
 #[cfg(windows)]
-fn ensure_bfe_ready() -> Vec<String> {
-    use platform_lib::service::{ServiceAccess, ServiceState};
-    use platform_lib::service_manager::{ServiceManager, ServiceManagerAccess};
+const MANUAL_GATE_BFE_UNAVAILABLE_EXIT: i32 = 79;
 
-    let mut notes = Vec::new();
-    let manager = match ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT) {
-        Ok(manager) => manager,
-        Err(error) => {
-            notes.push(format!("could not open the service manager to check BFE: {error}"));
-            return notes;
-        }
-    };
-    let service =
-        match manager.open_service("BFE", ServiceAccess::QUERY_STATUS | ServiceAccess::START) {
-            Ok(service) => service,
+/// How long a stopped or StartPending BFE gets to reach Running before the helper refuses.
+#[cfg(windows)]
+const BFE_START_BUDGET: Duration = Duration::from_secs(30);
+#[cfg(windows)]
+const BFE_POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+/// The Base Filtering Engine is not running and this helper could not bring it up. Every check
+/// behind the manual gate starts with a WFP read, an RPC to BFE, and an unanswered read is never
+/// taken as "no Tono filters": the gate keeps refusing, only with a cause the user can fix.
+#[cfg(windows)]
+#[derive(Debug)]
+struct BfeUnavailable(String);
+
+#[cfg(windows)]
+impl std::fmt::Display for BfeUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "TONO_BFE_NOT_RUNNING: the Base Filtering Engine (BFE) {}, so Tono cannot check its \
+             network filters and changed nothing. In an administrator PowerShell run \
+             `sc.exe config BFE start= auto`, then `sc.exe start BFE`, and try again",
+            self.0
+        )
+    }
+}
+
+#[cfg(windows)]
+impl std::error::Error for BfeUnavailable {}
+
+/// What the helper can see of the Base Filtering Engine: the SCM in production, a script in tests.
+#[cfg(windows)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BfeState {
+    Running,
+    /// Stopped with start type Disabled.
+    Disabled,
+    Stopped,
+    /// Start, stop or continue pending, or paused: SCM has not settled.
+    Pending,
+}
+
+#[cfg(windows)]
+trait BfeControl {
+    fn state(&mut self) -> Result<BfeState, Error>;
+    fn start(&mut self) -> Result<(), Error>;
+    /// Sleep one poll interval; false once the wait budget is spent.
+    fn wait(&mut self) -> bool;
+}
+
+/// Bring BFE to Running before anything reads WFP (H22-O-F1).
+///
+/// TonoService is AutoStart and hard-depends on BFE, and "network accelerator" and
+/// "anti-freeloader" utilities routinely stop it. The installer's gate and the App's repair both
+/// read WFP first, so a stopped BFE refused them before any repair could run. A stopped BFE is
+/// started here — a core Windows service that Windows Firewall also needs, and starting it changes
+/// no setting — and StartPending is waited out rather than refused. A Disabled BFE is refused with
+/// instructions: re-enabling it changes a machine setting, which this helper leaves to the user
+/// (docs/DECISIONS.md, 2026-09-26). An SCM that cannot be read is no verdict either way; the WFP
+/// read that follows decides, and it fails closed.
+#[cfg(windows)]
+fn bring_bfe_up(bfe: &mut impl BfeControl) -> Result<(), Error> {
+    let mut start_requested = false;
+    let mut start_error = None;
+    loop {
+        let state = match bfe.state() {
+            Ok(state) => state,
             Err(error) => {
-                notes.push(format!("could not open the Base Filtering Engine: {error}"));
-                return notes;
+                eprintln!(
+                    "tono-install: could not read the Base Filtering Engine state ({error:#}); \
+                     the WFP check decides"
+                );
+                return Ok(());
             }
         };
+        match state {
+            BfeState::Running => return Ok(()),
+            BfeState::Disabled => return Err(BfeUnavailable("is disabled".into()).into()),
+            BfeState::Stopped if !start_requested => {
+                start_requested = true;
+                // A start that races another starter fails here and reads Running next time.
+                start_error = bfe.start().err().map(|error| format!("{error:#}"));
+            }
+            BfeState::Stopped => {
+                if let Some(error) = &start_error {
+                    let cause = format!("is stopped and did not start ({error})");
+                    return Err(BfeUnavailable(cause).into());
+                }
+            }
+            BfeState::Pending => {}
+        }
+        if !bfe.wait() {
+            return Err(BfeUnavailable(format!("is still {state:?}")).into());
+        }
+    }
+}
 
-    let running = match service.query_status() {
-        Ok(status) => status.current_state == ServiceState::Running,
+#[cfg(windows)]
+struct ScmBfe {
+    service: platform_lib::service::Service,
+    deadline: Instant,
+}
+
+#[cfg(windows)]
+impl BfeControl for ScmBfe {
+    fn state(&mut self) -> Result<BfeState, Error> {
+        use platform_lib::service::{ServiceStartType, ServiceState};
+
+        Ok(match self.service.query_status()?.current_state {
+            ServiceState::Running => BfeState::Running,
+            ServiceState::Stopped => {
+                if self.service.query_config()?.start_type == ServiceStartType::Disabled {
+                    BfeState::Disabled
+                } else {
+                    BfeState::Stopped
+                }
+            }
+            _ => BfeState::Pending,
+        })
+    }
+
+    fn start(&mut self) -> Result<(), Error> {
+        Ok(self.service.start::<&std::ffi::OsStr>(&[])?)
+    }
+
+    fn wait(&mut self) -> bool {
+        if Instant::now() >= self.deadline {
+            return false;
+        }
+        std::thread::sleep(BFE_POLL_INTERVAL);
+        true
+    }
+}
+
+/// [`bring_bfe_up`] against the local SCM.
+#[cfg(windows)]
+fn bring_scm_bfe_up() -> Result<(), Error> {
+    use platform_lib::service::ServiceAccess;
+    use platform_lib::service_manager::{ServiceManager, ServiceManagerAccess};
+
+    let manager = match ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
+    {
+        Ok(manager) => manager,
         Err(error) => {
-            notes.push(format!("could not query the Base Filtering Engine: {error}"));
-            return notes;
+            eprintln!(
+                "tono-install: could not open the service manager ({error}); the WFP check decides"
+            );
+            return Ok(());
         }
     };
-    if running {
-        return notes;
-    }
-
-    // Manual or Disabled is how this survives a reboot and reaches a customer again, so restore
-    // the start type before starting: a Disabled service cannot be started at all.
-    match std::process::Command::new("sc.exe")
-        .args(["config", "BFE", "start=", "auto"])
-        .output()
-    {
-        Ok(output) if !output.status.success() => notes.push(format!(
-            "could not set the Base Filtering Engine to start automatically: sc.exe exited {}",
-            output.status
-        )),
-        Err(error) => notes.push(format!("could not run sc.exe for the Base Filtering Engine: {error}")),
-        Ok(_) => {}
-    }
-    if let Err(error) = service.start(&Vec::<&std::ffi::OsStr>::new()) {
-        notes.push(format!("could not start the Base Filtering Engine: {error}"));
-    }
-    notes
+    let access = ServiceAccess::QUERY_STATUS | ServiceAccess::QUERY_CONFIG | ServiceAccess::START;
+    let service = match manager.open_service("BFE", access) {
+        Ok(service) => service,
+        Err(error) => {
+            eprintln!(
+                "tono-install: could not open the Base Filtering Engine ({error}); the WFP check \
+                 decides"
+            );
+            return Ok(());
+        }
+    };
+    bring_bfe_up(&mut ScmBfe {
+        service,
+        deadline: Instant::now() + BFE_START_BUDGET,
+    })
 }
 
 /// install and start the service
@@ -1640,6 +1742,9 @@ fn main() -> anyhow::Result<()> {
     // privileged installer state.
     let _gate = enter_repair_gate()?;
     let source = bundled_service_binary()?;
+    // manual_gate's first check reads WFP, an RPC to BFE. Bring BFE up before it, or a stopped
+    // BFE refuses this repair before it could ever reach the Service's dependency (H22-O-F1).
+    bring_scm_bfe_up()?;
     // Legacy user journals are diagnostics only. This entry has no v1 grant:
     // both runtime replacement and service-only repair require verified Disconnect.
     tokio::runtime::Runtime::new()?.block_on(tono_service_protocol::update_native::manual_gate())?;
@@ -1654,11 +1759,6 @@ fn main() -> anyhow::Result<()> {
         adopt_or_refuse_update_scratch(&target, &path_with_suffix(&target, PUBLISH_SUFFIX))?;
     }
     let staged = stage_service_binary(&source, &target)?;
-
-    // Before the service is created or started, its BFE dependency must be satisfiable.
-    for note in ensure_bfe_ready() {
-        eprintln!("tono-install: {note}");
-    }
 
     let manager_access = ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE;
     let service_manager = ServiceManager::local_computer(None::<&str>, manager_access)?;

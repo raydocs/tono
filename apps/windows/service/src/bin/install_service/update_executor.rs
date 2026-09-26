@@ -116,6 +116,17 @@ fn classify_before_stop(
     Err(error)
 }
 
+/// `--manual-update-gate`: every refusal in `begin_manual` starts with a WFP read, an RPC to BFE,
+/// so BFE comes up first. Reading first refused a merely stopped BFE as an unconfirmable network
+/// state, before the install could ever repair it (H22-O-F1).
+fn manual_update_gate(
+    bfe_up: impl FnOnce() -> Result<(), Error>,
+    begin: impl FnOnce() -> Result<(), Error>,
+) -> Result<(), Error> {
+    bfe_up()?;
+    begin()
+}
+
 pub(super) fn dispatch() -> Result<bool, Error> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     match args.as_slice() {
@@ -124,7 +135,10 @@ pub(super) fn dispatch() -> Result<bool, Error> {
             Ok(true)
         }
         [mode] if mode == "--manual-update-gate" => {
-            if let Err(error) = tokio::runtime::Runtime::new()?.block_on(native::begin_manual()) {
+            let gate = manual_update_gate(bring_scm_bfe_up, || {
+                tokio::runtime::Runtime::new()?.block_on(native::begin_manual())
+            });
+            if let Err(error) = gate {
                 if error.is::<native::ProtectionActive>() {
                     eprintln!("Error: {error:#}");
                     std::process::exit(native::MANUAL_GATE_PROTECTION_ACTIVE_EXIT);
@@ -132,6 +146,10 @@ pub(super) fn dispatch() -> Result<bool, Error> {
                 if error.is::<native::OrphanedProtection>() {
                     eprintln!("Error: {error:#}");
                     std::process::exit(native::MANUAL_GATE_ORPHANED_PROTECTION_EXIT);
+                }
+                if error.is::<BfeUnavailable>() {
+                    eprintln!("Error: {error:#}");
+                    std::process::exit(MANUAL_GATE_BFE_UNAVAILABLE_EXIT);
                 }
                 return Err(error);
             }
@@ -1301,5 +1319,50 @@ mod tests {
         // Rollback and the no-plan identity check still run with the Service stopped.
         assert!(classify_recovery(true, false, &target, &target).requires_service_stop());
         assert!(classify_recovery(false, false, &old, &target).requires_service_stop());
+    }
+
+    /// H22-O-F1: every refusal of the manual gate starts with a WFP read, an RPC to BFE. A
+    /// stopped BFE must be started, and its StartPending waited out, before that read; reading
+    /// first refused a merely stopped BFE as an unconfirmable network state and aborted install.
+    #[test]
+    fn update_manual_gate_brings_bfe_up_before_reading_wfp() {
+        struct Scripted<'a> {
+            states: std::vec::IntoIter<BfeState>,
+            log: &'a std::cell::RefCell<Vec<String>>,
+        }
+        impl BfeControl for Scripted<'_> {
+            fn state(&mut self) -> Result<BfeState, Error> {
+                let state = self.states.next().expect("BFE polled after it was Running");
+                self.log.borrow_mut().push(format!("{state:?}"));
+                Ok(state)
+            }
+            fn start(&mut self) -> Result<(), Error> {
+                self.log.borrow_mut().push("start".into());
+                Ok(())
+            }
+            fn wait(&mut self) -> bool {
+                self.log.borrow_mut().push("wait".into());
+                true
+            }
+        }
+        let log = std::cell::RefCell::new(Vec::new());
+        let mut bfe = Scripted {
+            states: vec![BfeState::Stopped, BfeState::Pending, BfeState::Running].into_iter(),
+            log: &log,
+        };
+        manual_update_gate(
+            || bring_bfe_up(&mut bfe),
+            || {
+                log.borrow_mut().push("wfp".into());
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            *log.borrow(),
+            [
+                "Stopped", "start", "wait", "Pending", "wait", "Running", "wfp"
+            ]
+        );
     }
 }
