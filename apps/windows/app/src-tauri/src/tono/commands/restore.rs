@@ -577,6 +577,107 @@ mod rejected_session_tests {
 }
 
 #[cfg(test)]
+mod barrier_before_me_tests {
+    use super::*;
+    use tokio::sync::oneshot;
+
+    type MeResult = Result<tono_core::auth::MeResponse, ApiError>;
+
+    fn kill_switch(wanted: bool) -> KillSwitchStatus {
+        serde_json::from_value(serde_json::json!({
+            "wanted": wanted, "verified": wanted, "live": wanted, "mode": "blocked",
+        })).unwrap()
+    }
+
+    fn me_answer() -> MeResult {
+        Ok(serde_json::from_value(serde_json::json!({
+            "user": { "id": "fixture-owner", "email": "fixture@example.test" },
+        })).unwrap())
+    }
+
+    /// A cold start that holds a session token: the FSM starts unprotected.
+    async fn launch_with_token() -> (Arc<TonoState>, u64) {
+        let state = Arc::new(TonoState::for_test());
+        let generation = {
+            let inner = state.lock().await;
+            inner.credentials.set_local(CredentialKey::RefreshToken, "persisted-session").unwrap();
+            inner.sign_in_generation
+        };
+        (state, generation)
+    }
+
+    /// H16-O-F7: a stored barrier is published before the network call, not after `me()` answers.
+    #[tokio::test]
+    async fn cold_restore_applies_the_stored_barrier_before_me() {
+        let (state, generation) = launch_with_token().await;
+        let (entered, at_me) = oneshot::channel::<()>();
+        let (answer, answered) = oneshot::channel::<MeResult>();
+        let protection = StoredProtection::Armed(Box::new(kill_switch(true)));
+        let restore = restore_account_with(
+            &state, generation, &protection,
+            tokio::time::Instant::now() + Duration::from_secs(10),
+            move |_| async move { entered.send(()).unwrap(); answered.await.unwrap() },
+            |_| async { Ok(()) },
+            |_| async { Ok(()) },
+            |_| {},
+        );
+        let during_me = async {
+            at_me.await.unwrap();
+            let blocked = {
+                let inner = state.lock().await;
+                inner.fsm.kill_switch_armed() && inner.fsm.status().is_protection_blocked
+            };
+            answer.send(me_answer()).unwrap();
+            blocked
+        };
+        let (_, blocked) = tokio::join!(restore, during_me);
+        assert!(blocked, "Standby must not be shown over a stored barrier while `me()` runs");
+    }
+
+    /// F515-1: a Restore internet proven while `me()` is in flight is newer than the probe. The
+    /// late answer must not put the old reading back ("Network blocked" over an open machine).
+    #[tokio::test]
+    async fn late_me_answer_does_not_reapply_a_released_barrier() {
+        let (state, generation) = launch_with_token().await;
+        let (entered, at_me) = oneshot::channel::<()>();
+        let (answer, answered) = oneshot::channel::<MeResult>();
+        let protection = StoredProtection::Armed(Box::new(kill_switch(true)));
+        let restore = restore_account_with(
+            &state, generation, &protection,
+            tokio::time::Instant::now() + Duration::from_secs(10),
+            move |_| async move { entered.send(()).unwrap(); answered.await.unwrap() },
+            |_| async { Ok(()) },
+            |_| async { Ok(()) },
+            |_| {},
+        );
+        let during_me = async {
+            at_me.await.unwrap();
+            // `disconnect()`'s own steps, then its proven Service release.
+            {
+                let mut inner = state.lock().await;
+                inner.invalidate_connection(true);
+                inner.fsm.begin_disconnect();
+            }
+            let release_state = Arc::clone(&state);
+            let release = crate::tono::connection::coordinate_release(&state, None,
+                move |_guard| async move {
+                    release_state.lock().await.kill_switch = Some(kill_switch(false));
+                    Ok(())
+                },
+                || async {},
+            ).await;
+            release.wait().await.unwrap();
+            answer.send(me_answer()).unwrap();
+        };
+        tokio::join!(restore, during_me);
+        let inner = state.lock().await;
+        assert!(!inner.fsm.kill_switch_armed() && !inner.fsm.status().is_protection_blocked,
+            "a late `me()` re-armed a barrier the user already released");
+        assert_eq!(inner.kill_switch.as_ref(), Some(&kill_switch(false)));
+    }
+}
+
+#[cfg(test)]
 mod offline_admission_tests {
     use super::*;
     use crate::tono::offline_grant::{
