@@ -420,6 +420,17 @@ impl DirectPlan {
         }
         Ok(())
     }
+
+    /// Whether the runtime emits address-free `DOMAIN-SUFFIX` web-direct rules: only alongside
+    /// the signed native-app path permit, and only for reviewed address-free suffixes.
+    fn emits_address_free_web(&self) -> bool {
+        !self.tcp_wechat_rules.is_empty()
+            && !self.wechat_process_path_regexes.is_empty()
+            && self
+                .web_suffix_rules
+                .iter()
+                .any(|(suffix, _)| is_address_free_web_suffix(suffix))
+    }
 }
 
 /// Whether a PROCESS-PATH-REGEX payload can be embedded in a Mihomo AND rule
@@ -889,7 +900,12 @@ fn runtime_value(
         put(&mut sniff, "TLS", Value::Mapping(tls));
         let mut sniffer = Mapping::new();
         put(&mut sniffer, "enable", Value::Bool(true));
-        put(&mut sniffer, "parse-pure-ip", Value::Bool(true));
+        // A sniffed SNI feeds `RuleHost()` but the dial keeps the original IP. With an
+        // address-free suffix rule in the same runtime, a raw-IP dial carrying a listed SNI
+        // would take the physical interface to any address. Signed WeChat raw-IP dials
+        // already match their path rules there, so pure-IP sniffing is off in that runtime.
+        // Mihomo defaults this key to true, so it is always written explicitly.
+        put(&mut sniffer, "parse-pure-ip", Value::Bool(!plan.emits_address_free_web()));
         put(&mut sniffer, "override-destination", Value::Bool(false));
         put(&mut sniffer, "sniff", Value::Mapping(sniff));
         put(&mut sniffer, "force-domain", Value::Sequence(force_domains));
@@ -944,12 +960,7 @@ fn runtime_value(
         // native-app path permit. That permit is what gives the staged core a
         // bounded TCP port escape through WFP; without it, a suffix route
         // would match in Mihomo and then be dropped by the kill switch.
-        let has_address_free_web = !plan.tcp_wechat_rules.is_empty()
-            && !plan.wechat_process_path_regexes.is_empty()
-            && plan
-                .web_suffix_rules
-                .iter()
-                .any(|(suffix, _)| is_address_free_web_suffix(suffix));
+        let has_address_free_web = plan.emits_address_free_web();
         let has_web = !plan.tcp_web_rules.is_empty() || has_address_free_web;
         if has_wechat {
             proxies.push(direct_outbound(DIRECT_GROUP_NAME, &plan.physical_interface));
@@ -1921,6 +1932,33 @@ reality-opts:
         assert!(!runtime_without_permit
             .yaml()
             .contains("DOMAIN-SUFFIX,bilibili.com"));
+    }
+
+    #[test]
+    fn address_free_suffix_direct_never_matches_a_sniffed_raw_ip_dial() {
+        let mut plan = direct_plan();
+        plan.web_suffix_rules = vec![("zhihu.com".to_string(), 443)];
+        plan.wechat_process_path_regexes = vec![
+            wechat_prefix_path_regex(r"C:\Program Files\Tencent\WeChat")
+                .expect("reviewed prefix"),
+        ];
+        let runtime = build_owned_runtime(
+            &three_nodes(),
+            "JP Reality 02",
+            "test-secret",
+            Some(&plan),
+        )
+        .expect("runtime");
+        assert!(runtime.yaml().contains(
+            "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,zhihu.com)),Tono-China-Web-Direct"
+        ));
+        let value = parsed(&runtime);
+        // A raw-IP dial has no Host; only pure-IP sniffing could hand the suffix rule a
+        // client-chosen SNI while the dial keeps the arbitrary original address.
+        assert_eq!(
+            get(&value, &["sniffer"])[string("parse-pure-ip")].as_bool(),
+            Some(false)
+        );
     }
 
     #[test]

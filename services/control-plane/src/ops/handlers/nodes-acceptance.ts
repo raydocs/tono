@@ -14,6 +14,7 @@ import { ApiError } from '../../errors';
 import type { AcceptanceItemDto, NodeAcceptanceDto } from '../contract';
 import { assertNodeAcceptance } from '../contract';
 import { liveQualityNodeNamed } from '../live';
+import { assertExitIdentityActive } from '../reads/fleet';
 import {
   Env,
   Row,
@@ -211,6 +212,7 @@ export async function relistGate(
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid override');
   }
   const ctx = await requireNode(e, name);
+  await assertExitIdentityActive(e, name);
   const sheet = await nodeAcceptance(e, name, ctx);
   if (sheet.sellable) return { refusal: null, overridden: [] };
   if (override === true) return { refusal: null, overridden: sheet.blockers };

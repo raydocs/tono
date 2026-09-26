@@ -115,6 +115,19 @@ Dir.mktmpdir('tono-candidate-manifest-') do |directory|
 end
 puts 'macOS 0.0.73 candidate: exact checkout, source version, bundle identity and manifest digests verified (synthetic, unsigned fixtures)'
 
+# Signing material and the token reach only the steps that use them.
+signing_secret = /secrets\.(MACOS_DEVELOPER_ID_|APPLE_NOTARY_|MACOS_KEYCHAIN_|SPARKLE_ED_)/
+abort 'signing secrets must not be injected at workflow level' if workflow.fetch('env', {}).to_s.match?(signing_secret)
+workflow.fetch('jobs').each do |id, job|
+  abort "#{id} must not inject signing secrets at job level" if job.fetch('env', {}).to_s.match?(signing_secret)
+  abort "#{id} must not gain write permissions" if job.fetch('permissions', {}).to_s.include?('write')
+  job.fetch('steps', []).each do |step|
+    next unless step.fetch('uses', '').start_with?('actions/checkout@')
+    abort "#{id} checkout must not persist the token in .git/config" unless step.fetch('with', {})['persist-credentials'] == false
+  end
+end
+puts 'macOS release secrets: step-scoped only; no write permission; checkouts do not persist credentials'
+
 # Reusable qualification and its caller share one immutable artifact namespace.
 qualification = YAML.load_file(File.join(root, workflow.fetch('jobs').fetch('qualify').fetch('uses')))
 core_uploads = [qualification, workflow].flat_map do |config|

@@ -3,7 +3,13 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 
-import { useTonoStatus } from '@/hooks/use-tono'
+import {
+  tonoAccountQueryKey,
+  tonoDevicesQueryKey,
+  tonoServersQueryKey,
+  useTonoStatus,
+} from '@/hooks/use-tono'
+import { removeCacheData } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
 import {
   formatTonoActionError,
@@ -11,8 +17,10 @@ import {
   tonoRetryRestore,
   tonoSignInStart,
   tonoSignInVerify,
+  tonoSignOut,
 } from '@/services/tono'
 import { GlassCard } from '@/tono-ui/GlassCard'
+import { hasLiveProtection } from '@/tono-ui/protection-evidence'
 import { SupportContact } from '@/tono-ui/SupportContact'
 import {
   TONO_COLORS,
@@ -44,6 +52,8 @@ const LoginPage = () => {
   const [verifying, setVerifying] = useState(false)
   const [retrying, setRetrying] = useState(false)
   const [restoringInternet, setRestoringInternet] = useState(false)
+  const [signingOut, setSigningOut] = useState(false)
+  const [signOutError, setSignOutError] = useState<string | null>(null)
   const [verifySuspended, setVerifySuspended] = useState(false)
   const [suspendedDismissed, setSuspendedDismissed] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -67,10 +77,30 @@ const LoginPage = () => {
   const suspended =
     !suspendedDismissed &&
     (verifySuspended || status?.accountState === 'suspended')
+  // Only the sign-in response says the account itself is paused. A session the
+  // control plane stopped accepting (revoked device, signed out elsewhere, a
+  // lapsed plan) also reads as suspended; signing in again is the way out.
+  const sessionEnded = suspended && !verifySuspended
+  const suspendedTitle = sessionEnded
+    ? t('tono.login.sessionEnded.title')
+    : t('tono.login.suspended.title')
 
   const restoreFailed = status?.accountState === 'error'
+  // A tunnel that is still connected carries traffic; the barrier only blocks
+  // the internet once the tunnel is gone.
   const internetBlocked =
-    status?.protectionBlocked === true || status?.killSwitch?.wanted === true
+    status?.uiState !== 'connected' &&
+    (status?.protectionBlocked === true || status?.killSwitch?.wanted === true)
+
+  const errorOffersSupport =
+    Boolean(error) &&
+    error !== t('tono.login.invalidEmail') &&
+    error !== t('tono.login.invalidCode')
+  // `auth/email/start` answers 202 for every address and a failed delivery is
+  // silent, so a code that has not arrived by the time resend opens (60 s) gets
+  // its own way to support (#596). An error already carrying support wins.
+  const showNoEmailHint =
+    codeSent && countdown === 0 && !sending && !errorOffersSupport
 
   const resetToStart = () => {
     setCodeSent(false)
@@ -189,6 +219,30 @@ const LoginPage = () => {
     }
   })
 
+  // A paused account is sent no sign-in code, so "Use another email" cannot
+  // replace a session the control plane refuses; signing out is the way off
+  // this screen. As on the Account page, it releases protection first and
+  // keeps the account when that release cannot be proven.
+  const handleSignOut = useLockFn(async () => {
+    setSigningOut(true)
+    setSignOutError(null)
+    try {
+      await tonoSignOut()
+    } catch (error) {
+      setSignOutError(formatTonoActionError(error, t))
+      return
+    } finally {
+      setSigningOut(false)
+    }
+    removeCacheData(tonoAccountQueryKey)
+    removeCacheData(tonoDevicesQueryKey)
+    removeCacheData(tonoServersQueryKey)
+    setVerifySuspended(false)
+    setSuspendedDismissed(false)
+    resetToStart()
+    await mutateTonoStatus()
+  })
+
   const inputStyle: React.CSSProperties = {
     background: 'var(--tono-surface-input)',
     border: '1px solid var(--tono-surface-input-border)',
@@ -202,6 +256,13 @@ const LoginPage = () => {
     color: '#fff',
     background: 'var(--tono-action-fill)',
   }
+
+  // A restore that did not take over the Service's barrier leaves it as it is.
+  // A locked barrier that still renders the tunnel permit is the previous
+  // session's connection carrying traffic, not a blocked machine.
+  const previousTunnelRunning =
+    status?.killSwitch?.mode === 'locked' &&
+    status.killSwitch.tunnel_permit_rendered === true
 
   const internetRecovery = internetBlocked ? (
     <div
@@ -220,11 +281,21 @@ const LoginPage = () => {
         border: `1px solid ${TONO_COLORS.protectedOffline}4D`,
       }}
     >
+      {/* The card and its sign-in gate follow the fail-closed intent; the
+          "still blocked" claim needs the Service's live barrier. */}
       <span style={{ fontSize: 13, fontWeight: 650 }}>
-        {t('tono.login.networkBlocked.title')}
+        {previousTunnelRunning
+          ? t('tono.login.networkBlocked.stillRunningTitle')
+          : hasLiveProtection(status)
+            ? t('tono.login.networkBlocked.title')
+            : t('tono.pill.title.protectionUnknown')}
       </span>
       <span style={{ fontSize: 12, lineHeight: 1.45, color: text.secondary }}>
-        {t('tono.login.networkBlocked.description')}
+        {previousTunnelRunning
+          ? t('tono.login.networkBlocked.stillRunningDescription')
+          : hasLiveProtection(status)
+            ? t('tono.login.networkBlocked.description')
+            : t('tono.login.networkBlocked.unverifiedDescription')}
       </span>
       <button
         type="button"
@@ -280,15 +351,14 @@ const LoginPage = () => {
           {internetRecovery}
           <TonoLogo connected={false} size={56} />
           <h1 className="tono-page-title" style={{ color: text.primary }}>
-            {t('tono.login.suspended.title')}
+            {suspendedTitle}
           </h1>
           <p style={{ margin: 0, fontSize: 13, color: text.secondary }}>
-            {t('tono.login.suspended.description')}
+            {sessionEnded
+              ? t('tono.login.sessionEnded.description')
+              : t('tono.login.suspended.description')}
           </p>
-          <SupportContact
-            email={email}
-            extra={t('tono.login.suspended.title')}
-          />
+          <SupportContact email={email} extra={suspendedTitle} />
           <button
             type="button"
             className="tono-link"
@@ -299,8 +369,28 @@ const LoginPage = () => {
               resetToStart()
             }}
           >
-            {t('tono.login.changeEmail')}
+            {sessionEnded
+              ? t('tono.login.sessionEnded.signIn')
+              : t('tono.login.changeEmail')}
           </button>
+
+          <button
+            type="button"
+            className="tono-link"
+            style={{ fontSize: 13, color: text.secondary }}
+            onClick={handleSignOut}
+            disabled={signingOut}
+          >
+            {t('tono.account.signOut')}
+          </button>
+          {signOutError && (
+            <span
+              role="alert"
+              style={{ fontSize: 12, color: 'var(--tono-text-error)' }}
+            >
+              {signOutError}
+            </span>
+          )}
         </GlassCard>
       </div>
     )
@@ -608,11 +698,9 @@ const LoginPage = () => {
             {error}
           </p>
         )}
-        {error &&
-          error !== t('tono.login.invalidEmail') &&
-          error !== t('tono.login.invalidCode') && (
-            <SupportContact email={email} extra={error} />
-          )}
+        {errorOffersSupport && (
+          <SupportContact email={email} extra={error ?? undefined} />
+        )}
         {codeSent && (
           <div
             id="tono-code-help"
@@ -653,6 +741,30 @@ const LoginPage = () => {
             >
               {t('tono.login.codeFrom')}
             </p>
+          </div>
+        )}
+        {showNoEmailHint && (
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              alignItems: 'center',
+              textAlign: 'center',
+            }}
+          >
+            <strong style={{ fontSize: 12, color: text.primary }}>
+              {t('tono.login.noEmail.title')}
+            </strong>
+            <span
+              style={{ fontSize: 12, lineHeight: 1.45, color: text.secondary }}
+            >
+              {t('tono.login.noEmail.description')}
+            </span>
+            <SupportContact
+              email={email}
+              extra={t('tono.login.noEmail.title')}
+            />
           </div>
         )}
       </GlassCard>

@@ -166,10 +166,23 @@ fn service_apply_result(outcome: ProxyApplyOutcome) -> Result<()> {
     }
 }
 
+/// Clear the system proxy Tono is responsible for. Locally that is only a
+/// leftover naming Tono's own listeners; see [`Sysopt::clear_owned_sysproxy`].
 pub async fn clear() -> Result<()> {
+    clear_with(false).await
+}
+
+/// The update transaction's precondition: its Service refuses to stage while
+/// the user's proxy is on, whoever set it.
+pub async fn clear_for_update() -> Result<()> {
+    clear_with(true).await
+}
+
+async fn clear_with(any_local_proxy: bool) -> Result<()> {
     let running_mode = CoreManager::global().get_running_mode();
     match proxy_backend_route(cfg!(target_os = "macos"), &running_mode) {
-        ProxyBackendRoute::Local => Sysopt::global().reset_sysproxy().await,
+        ProxyBackendRoute::Local if any_local_proxy => Sysopt::global().reset_sysproxy().await,
+        ProxyBackendRoute::Local => Sysopt::global().clear_owned_sysproxy().await,
         ProxyBackendRoute::Service => {
             SERVICE_PROXY_OPERATIONS
                 .run_final_service_operation(|| async {

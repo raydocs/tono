@@ -64,7 +64,10 @@ one `it`; no tables.
 
 ## Records and Git
 
-Every delivery updates [docs/INTERNAL_CHANGELOG.md](docs/INTERNAL_CHANGELOG.md) in the same PR (its template; the merging agent checks,
-read-only and formatting-only PRs excepted), as does each deploy, publish, self-approval and reviewed range.
-Read [docs/FINDINGS_LEDGER.md](docs/FINDINGS_LEDGER.md) before a review or bug fix; update its rows in the delivering PR. Delete stale docs.
+Every delivery adds one `docs/changelog.d/YYYY-MM-DD-<slug>.md` in the same PR ([template](docs/changelog.d/README.md); continuations edit
+that file; [docs/INTERNAL_CHANGELOG.md](docs/INTERNAL_CHANGELOG.md) is frozen history; the merging agent checks, read-only and formatting-only
+PRs excepted), as does each deploy, publish, self-approval and reviewed range. Read all: `node tooling/scripts/records.mjs changelog`.
+Read the findings (`node tooling/scripts/records.mjs findings`: [docs/FINDINGS_LEDGER.md](docs/FINDINGS_LEDGER.md) plus `docs/findings.d/`) before a
+review or bug fix; in the delivering PR add one `docs/findings.d/<ID>.md` per new finding ([format](docs/findings.d/README.md)) and update
+status in that fragment, or in the ledger row if the ID has none. Delete stale docs.
 Lines `release/macos`, `release/windows`, `main` (sole production Worker source; merge commits, no rewrite): [docs/RELEASE_LINES.md](docs/RELEASE_LINES.md).

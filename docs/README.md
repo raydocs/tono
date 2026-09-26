@@ -6,14 +6,13 @@ Start here. Dated handoffs and one-off reviews live in [archive/](archive/).
 
 | Doc | What it owns |
 |---|---|
-| [INTERNAL_CHANGELOG.md](INTERNAL_CHANGELOG.md) | Internal fixes/features, source and candidate inclusion, verification limits; update in the same delivery PR |
-| [FINDINGS_LEDGER.md](FINDINGS_LEDGER.md) | The single ledger of known findings (open / in-PR / fixed / refuted / accepted-design); read before a review or bug fix, update in the same PR |
+| [changelog.d/](changelog.d/README.md) | Internal fixes/features, source and candidate inclusion, verification limits; one new entry file per delivery PR ([INTERNAL_CHANGELOG.md](INTERNAL_CHANGELOG.md) is the frozen history before 2026-09-25) |
+| [FINDINGS_LEDGER.md](FINDINGS_LEDGER.md) + [findings.d/](findings.d/README.md) | The single ledger of known findings (open / in-PR / fixed / refuted / accepted-design); new findings are one fragment file each; read before a review or bug fix (`node tooling/scripts/records.mjs findings`), update in the same PR |
 | [reports/REVIEW_ROUNDS_2026-09-23.md](reports/REVIEW_ROUNDS_2026-09-23.md) | Review → verify → fix → diff-review → merge method, coverage and gaps of the 2026-09-22/23 rounds, reusable review constraints |
 | [BUILD_AND_TEST.md](BUILD_AND_TEST.md) | GitHub-hosted CI, MacBook lightweight work, native-device acceptance and cache retention |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Contributor workflow and verification evidence |
 | [../AGENTS.md](../AGENTS.md) | Agent rules: merge/deploy/publish conditions, invariants, verification hosts |
 | [DECISIONS.md](DECISIONS.md) | Owner and provisional product decisions (stricter option, recorded) |
-| [ENGINEERING_QUALITY_ACCEPTANCE.md](ENGINEERING_QUALITY_ACCEPTANCE.md) | Astra Max remediation scope, phased execution, diagnostic evidence and combined-source acceptance |
 
 Mac Studio no longer serves as a residential exit (owner confirmed 2026-09-14).
 Routine builds use GitHub-hosted runners; native-device acceptance remains separate.
@@ -61,5 +60,5 @@ Living operator docs. The current ops backlog is
 
 ## Archive
 
-[archive/](archive/) — session handoffs, dated reviews, Windows test reports,
+[archive/](archive/) — dated ops reviews, a few retained technical write-ups and the
 Clash Verge leftover inventory. Do not treat these as current instructions.

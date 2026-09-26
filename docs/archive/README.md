@@ -1,7 +1,8 @@
 # Archived docs
 
-Handoffs, dated reviews, and one-off test reports. They are not current
-instructions. Start at [../README.md](../README.md).
+Dated reviews and retained technical write-ups. They are not current
+instructions. Obsolete handoffs and test-line reports were removed on
+2026-09-23; their text remains in git history. Start at [../README.md](../README.md).
 
 **Machine-role correction, 2026-09-14:** the owner confirmed Mac Studio no
 longer serves as a residential exit. July handoff statements about its address,
@@ -11,6 +12,5 @@ Preserve dated evidence; do not execute old machine-specific TODOs.
 
 | Folder | Contents |
 |---|---|
-| (root) | Early product / architecture handoffs |
-| [reports/](reports/) | Windows/macOS audit and test write-ups; Clash Verge leftover inventory |
+| [reports/](reports/) | Retained Windows/macOS technical write-ups; Clash Verge leftover inventory |
 | [ops/](ops/) | Dated ops reviews and the 2026-09-10 restore drill |

@@ -14,6 +14,7 @@ import { useThemeMode } from '@/services/states'
 import {
   tonoAuditEnabled,
   tonoAuditLogPath,
+  tonoInternalBuild,
   tonoPeriodicTelemetryEnabled,
   tonoSetAuditEnabled,
   tonoSetPeriodicTelemetryEnabled,
@@ -38,6 +39,7 @@ const tonoPeriodicTelemetryEnabledQueryKey = [
 const tonoNetworkLogUploadEnabledQueryKey = [
   'tonoNetworkLogUploadEnabled',
 ] as const
+const tonoInternalBuildQueryKey = ['tonoInternalBuild'] as const
 
 const LANGUAGE_LABELS: Record<string, string> = {
   en: 'English',
@@ -252,6 +254,10 @@ export const PrivacyCard = () => {
     queryKey: tonoNetworkLogUploadEnabledQueryKey,
     queryFn: tonoNetworkLogUploadEnabled,
   })
+  const { data: internalBuild } = useQuery({
+    queryKey: tonoInternalBuildQueryKey,
+    queryFn: tonoInternalBuild,
+  })
   const logPath = auditLogInfo?.path
 
   const handleAudit = useLockFn(async (value: boolean) => {
@@ -305,6 +311,9 @@ export const PrivacyCard = () => {
         title={t('tono.settings.privacy.title')}
         tint={`${TONO_COLORS.protectedOffline}26`}
       />
+      {internalBuild && (auditEnabled ?? true) && (
+        <Row label={t('settings.sections.tono.internalDiagnostics')} />
+      )}
       <Row
         label={t('settings.sections.tono.auditLog.label')}
         subtitle={t('settings.sections.tono.auditLog.description')}
@@ -389,7 +398,9 @@ const AboutCard = () => {
     }
     try {
       const result = await checkUpdate()
-      if (result.data) {
+      if (result.error !== undefined) {
+        showNotice.error('tono.settings.about.checkFailed')
+      } else if (result.data) {
         updateRef.current?.open()
       } else {
         showNotice.success('tono.settings.about.latestVersion')

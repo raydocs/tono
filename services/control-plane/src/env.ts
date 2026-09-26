@@ -37,8 +37,12 @@ export interface Env {
   // verification is unavailable, so a signed policy cannot be published and a
   // stored signature cannot be checked — see `publicTrafficPolicy`.
   TRAFFIC_POLICY_PUBLIC_KEY?: string;
+  // 'true' writes the revision a publish will be assigned into the policy json
+  // itself, so a signature covers it (#317). Off by default: enable it only once
+  // clients that bind an embedded revision to the envelope (Windows #342, macOS)
+  // are deployed widely. Reading accepts either form whatever this says.
+  TRAFFIC_POLICY_EMBED_REVISION?: string;
   CONFIRM_CLAIM_TTL_SECONDS?: string;
-  RATE_LIMIT_DIAGNOSTICS_IP_HOUR?: string;
   RATE_LIMIT_DIAGNOSTICS_USER_HOUR?: string;
   RATE_LIMIT_DIAGNOSTICS_USER_DAY?: string;
   DIAGNOSTICS_RETENTION_SECONDS?: string;
@@ -50,10 +54,8 @@ export interface Env {
   DIAGNOSTICS_LOG_RETENTION_SECONDS?: string;
   RATE_LIMIT_DIAGNOSTICS_LOG_USER_HOUR?: string;
   RATE_LIMIT_DIAGNOSTICS_LOG_USER_DAY?: string;
-  RATE_LIMIT_TELEMETRY_IP_HOUR?: string;
   RATE_LIMIT_TELEMETRY_USER_HOUR?: string;
   RATE_LIMIT_TELEMETRY_USER_DAY?: string;
-  RATE_LIMIT_FAILURE_IP_HOUR?: string;
   RATE_LIMIT_FAILURE_USER_HOUR?: string;
   RATE_LIMIT_FAILURE_USER_DAY?: string;
   TELEMETRY_RETENTION_SECONDS?: string;

@@ -98,7 +98,7 @@ function decodeMonthSnapshot(raw: unknown): MonthSnapshot | null {
   return { customers: row.customers as MonthCustomerDto[], nodes: row.nodes as MonthNodeDto[], partial: false };
 }
 
-type BytesRow = { user_id: string; node: string; bytes: number };
+type BytesRow = { user_id: string; node: string; bytes: number; connected: number };
 type AccountRow = { id: string; user_id: string | null };
 type UserRow = { id: string; email: string };
 type CycleRow = { node_name: string };
@@ -112,7 +112,7 @@ export async function loadMonthSummary(db: D1Database, month: string, nowSec: nu
     'SELECT * FROM ops_month_close WHERE month = ?',
   ).bind(month).first<Row>();
   const activity = (await db.prepare(
-    `SELECT user_id, node, SUM(bytes_up + bytes_down) AS bytes
+    `SELECT user_id, node, SUM(bytes_up + bytes_down) AS bytes, SUM(connected_minutes) AS connected
      FROM customer_activity_hours
      WHERE hour_at >= ? AND hour_at < ? AND node IS NOT NULL AND node != ''
      GROUP BY user_id, node`,
@@ -176,10 +176,14 @@ export async function loadMonthSummary(db: D1Database, month: string, nowSec: nu
 
   const nodeBytes = new Map<string, number>();
   const userNodeBytes = new Map<string, Map<string, number>>();
+  // Connected on a node with no bytes recorded: usage exists but cannot be
+  // allocated, so that customer's margin is not a settled number.
+  const unmeteredUsers = new Set<string>();
   for (const row of activity) {
     const userId = String(row.user_id);
     const node = String(row.node);
     const bytes = Number(row.bytes ?? 0);
+    if (bytes <= 0 && Number(row.connected ?? 0) > 0) unmeteredUsers.add(userId);
     nodeBytes.set(node, (nodeBytes.get(node) ?? 0) + bytes);
     let perNode = userNodeBytes.get(userId);
     if (!perNode) {
@@ -212,7 +216,7 @@ export async function loadMonthSummary(db: D1Database, month: string, nowSec: nu
     const revenue = userRevenue.get(userId) ?? 0;
     const cost = userCost.get(userId) ?? 0;
     const used = userNodeBytes.get(userId);
-    let pending = false;
+    let pending = unmeteredUsers.has(userId);
     if (used) {
       for (const [node, bytes] of used) {
         if (bytes <= 0) continue;

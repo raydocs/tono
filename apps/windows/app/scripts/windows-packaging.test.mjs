@@ -43,6 +43,17 @@ const windowsServiceInstallerSource = readFileSync(
   new URL('../../service/src/bin/install_service.rs', import.meta.url),
   'utf8',
 )
+const windowsServiceUpdateSource = readFileSync(
+  new URL('../../service/src/core/update.rs', import.meta.url),
+  'utf8',
+)
+const windowsServiceUpdateExecutorSource = readFileSync(
+  new URL(
+    '../../service/src/bin/install_service/update_executor.rs',
+    import.meta.url,
+  ),
+  'utf8',
+)
 const windowsReleaseShSource = readFileSync(
   new URL(
     '../../../../tooling/scripts/build-windows-release.sh',
@@ -59,6 +70,14 @@ const windowsReleasePs1Source = readFileSync(
 )
 const canonicalGuiLaunchLine =
   '  nsis_tauri_utils::RunAsUser "$INSTDIR\\${MAINBINARYNAME}.exe" "$MainBinaryArgs"'
+// The private-extraction branch stages the same `.next` members first; mutate the live path only.
+const replaceInLiveInstall = (from, to) => {
+  const liveAt = installerSource.indexOf('!ifmacrodef NSIS_HOOK_PREINSTALL')
+  return (
+    installerSource.slice(0, liveAt) +
+    installerSource.slice(liveAt).replace(from, to)
+  )
+}
 
 test('NSIS private extraction cannot bypass native admission or mutate the live installation', () => {
   assert.match(
@@ -91,6 +110,26 @@ test('NSIS private extraction cannot bypass native admission or mutate the live 
     ),
     /only private payload files/,
   )
+})
+
+test('NSIS private extraction never extracts a live GUI member', () => {
+  // A live `Tono.exe` member from this branch failed the candidate payload gate (run 36095249694).
+  const privateGui =
+    /(\$\{If\} \$TonoPrivateUnpack = 1\s+SetOutPath \$INSTDIR\s+(?:;[^\n]*\s+)*File \/a "\/oname=\$\{MAINBINARYNAME\}\.exe)\.next"/
+  assert.match(installerSource, privateGui)
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(installerSource.replace(privateGui, '$1"')),
+    /private extraction must stage the GUI and Mihomo under \.next names/,
+  )
+})
+
+test('elevated setup never runs a Microsoft installer from the user temp directory', () => {
+  const code = installerSource
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*;/.test(line))
+    .join('\n')
+  assert.doesNotMatch(code, /(?:download\s+\S+|\/oname=)\s*"?\$TEMP\\/i)
+  assert.doesNotMatch(code, /ExecWait\s+['"`]"?\$TEMP\\/i)
 })
 
 test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
@@ -170,7 +209,7 @@ test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
   )
   assert.match(
     validateNsisAutomaticUpgradeFlow(
-      installerSource.replace(
+      replaceInLiveInstall(
         '  File /a "/oname=${MAINBINARYNAME}.exe.next" "${MAINBINARYSRCPATH}"',
         '  Delete "$APPDATA\\com.raydocs.tono\\owner-token"\n  File /a "/oname=${MAINBINARYNAME}.exe.next" "${MAINBINARYSRCPATH}"',
       ),
@@ -224,7 +263,7 @@ test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
   )
   assert.match(
     validateNsisAutomaticUpgradeFlow(
-      installerSource.replace(
+      replaceInLiveInstall(
         'File /a "/oname=${MAINBINARYNAME}.exe.next" "${MAINBINARYSRCPATH}"',
         'File "${MAINBINARYSRCPATH}"',
       ),
@@ -242,7 +281,7 @@ test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
   )
   assert.match(
     validateNsisAutomaticUpgradeFlow(
-      installerSource.replace(
+      replaceInLiveInstall(
         'File /a "/oname={{this}}.next"',
         'File /a "/oname={{this}}"',
       ),
@@ -305,7 +344,7 @@ test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
       installerSource.replace(
         // Mutate the live install branch without invalidating the earlier
         // private-extraction gate: this regression targets GUI launch policy.
-        '  SetOutPath $INSTDIR\n\n  !ifmacrodef NSIS_HOOK_PREINSTALL',
+        /  SetOutPath \$INSTDIR\r?\n\r?\n  !ifmacrodef NSIS_HOOK_PREINSTALL/,
         '  SetOutPath $INSTDIR\n  nsis_tauri_utils::RunAsUser "$INSTDIR\\${MAINBINARYNAME}.exe" ""\n\n  !ifmacrodef NSIS_HOOK_PREINSTALL',
       ),
     ),
@@ -346,7 +385,7 @@ test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
           `  ;${canonicalGuiLaunchLine.trimStart()}`,
         )
         .replace(
-          '  SetOutPath $INSTDIR\n\n  !ifmacrodef NSIS_HOOK_PREINSTALL',
+          /  SetOutPath \$INSTDIR\r?\n\r?\n  !ifmacrodef NSIS_HOOK_PREINSTALL/,
           `  SetOutPath $INSTDIR\n${canonicalGuiLaunchLine}\n\n  !ifmacrodef NSIS_HOOK_PREINSTALL`,
         ),
     ),
@@ -425,6 +464,171 @@ test('privileged upgrade helper coordinates Service, Mihomo, and GUI publication
   )
 })
 
+test('NSIS explains a refused gate and confirms before uninstall releases protection', () => {
+  const onInit =
+    installerSource.match(/Function \.onInit\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  const gate = onInit.slice(onInit.indexOf('--manual-update-gate'))
+  // 78: filters with no Tono Service left. Before any refusal, a non-silent install offers the
+  // confirmed path into its own proven-removal ladder; No keeps the block and changes nothing.
+  const refusalAt = gate.indexOf('${If} $0 != "0"')
+  assert.match(
+    gate.slice(0, refusalAt),
+    /\$\{If\} \$0 == "78"\s+\$\{AndIfNot\} \$\{Silent\}\s+MessageBox [^\n]*MB_YESNO "\$\(installClearsOrphanedBlock\)" IDYES (\w+)\s+SetErrorLevel 76\s+Abort [^\n]*\s+\1:\s+nsExec::ExecToLog [^\n]*--manual-orphan-gate'\s+Pop \$0/,
+  )
+  const refusal = gate.slice(refusalAt, gate.indexOf('SetErrorLevel 76', refusalAt))
+  // .onInit never shows Abort text; a refusal without a dialog is a silent exit.
+  assert.match(
+    refusal,
+    /\$\{IfNot\} \$\{Silent\}\s+\$\{If\} \$0 == "77"\s+MessageBox [^\n]*"\$\(manualInstallNeedsDisconnect\)"\s+\$\{Else\}\s+MessageBox [^\n]*"\$\(manualInstallRefused\)"/,
+  )
+  assert.doesNotMatch(refusal, /--emergency-disarm|--manual-uninstall-gate/)
+
+  const unInit =
+    installerSource.match(/Function un\.onInit\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  const gateAt = unInit.indexOf('--manual-update-gate')
+  const confirmAt = unInit.indexOf('"$(uninstallReleasesProtection)"')
+  const leaseAt = unInit.indexOf('--manual-uninstall-gate')
+  assert.ok(gateAt >= 0 && gateAt < confirmAt && confirmAt < leaseAt)
+  // An orphaned barrier gets the same confirmed release on uninstall.
+  assert.match(unInit.slice(gateAt, confirmAt), /\$\{If\} \$0 == "78"\s+StrCpy \$0 "77"/)
+  assert.match(
+    unInit.slice(gateAt, confirmAt),
+    /\$\{If\} \$0 == "77"\s+\$\{AndIfNot\} \$\{Silent\}\s+MessageBox [^\n]*MB_YESNO\b/,
+  )
+  assert.match(unInit.slice(leaseAt), /MessageBox [^\n]*"\$\(manualUninstallRefused\)"/)
+
+  for (const name of [
+    'manualInstallNeedsDisconnect',
+    'manualInstallRefused',
+    'uninstallReleasesProtection',
+    'manualUninstallRefused',
+    'installClearsOrphanedBlock',
+  ]) {
+    for (const language of ['SIMPCHINESE', 'ENGLISH', 'RUSSIAN']) {
+      assert.match(
+        installerSource,
+        new RegExp(`LangString ${name} \\$\\{LANG_${language}\\} "`),
+      )
+    }
+  }
+  assert.match(
+    windowsServiceUpdateSource,
+    /pub const MANUAL_GATE_PROTECTION_ACTIVE_EXIT: i32 = 77;/,
+  )
+  assert.match(
+    windowsServiceUpdateSource,
+    /pub const MANUAL_GATE_ORPHANED_PROTECTION_EXIT: i32 = 78;/,
+  )
+})
+
+test('a confirmed orphaned-block clear reinstalls through the fresh path, not the upgrade path', () => {
+  // An upgrade skips RemoveVergeService and hands the runtime to --replace-runtime, whose gate
+  // refuses while the filters remain and which cannot replace a Service that is gone. Once the
+  // user confirmed 78, an existing ARP record must not turn the install into that upgrade.
+  const onInit =
+    installerSource.match(/Function \.onInit\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  assert.match(
+    onInit.slice(0, onInit.indexOf('Call DetectExistingInstall')),
+    /--manual-orphan-gate'\s+Pop \$0\s+\$\{If\} \$0 == "0"\s+StrCpy \$ClearingOrphanedBlock 1\s+\$\{EndIf\}/,
+  )
+  const detector =
+    installerSource.match(
+      /Function DetectExistingInstall\b([\s\S]*?)FunctionEnd/,
+    )?.[1] ?? ''
+  const automatic =
+    detector.match(/automatic_update:([\s\S]*?)downgrade_blocked:/)?.[1] ?? ''
+  assert.match(
+    automatic,
+    /^(?:\s*;[^\n]*)*\s*\$\{If\} \$ClearingOrphanedBlock = 1\s+(?:DetailPrint [^\n]*\s+)?Return\s+\$\{EndIf\}\s+StrCpy \$UpdateMode 1/,
+  )
+  // The fresh path publishes with Rename, which never overwrites the previous install's files.
+  const installSection =
+    installerSource.match(/Section Install\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  for (const live of ['$INSTDIR\\${MAINBINARYNAME}.exe', '$INSTDIR\\\\{{this}}']) {
+    assert.match(
+      installSection,
+      new RegExp(
+        `\\$\\{If\\} \\$ClearingOrphanedBlock = 1\\s+Delete "${escape(live)}"\\s+\\$\\{EndIf\\}\\s+ClearErrors\\s+Rename "${escape(live)}\\.next" "${escape(live)}"`,
+      ),
+    )
+  }
+})
+
+test('a confirmed orphan clear retires the stale connected owner only after the barrier is gone', () => {
+  // The owner that was connected when its Service went away still says "core should run", and
+  // the Service installer's manual gate refuses on that with Disconnect advice nobody can follow.
+  const installSection =
+    installerSource.match(/Section Install\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  const removeAt = installSection.indexOf('!insertmacro RemoveVergeService')
+  const startAt = installSection.indexOf('!insertmacro StartVergeService')
+  // RemoveVergeService aborts unless WFP removal is proven, so this runs on a proven-open machine.
+  assert.match(
+    installSection.slice(removeAt, startAt),
+    /\$\{If\} \$ClearingOrphanedBlock = 1\s+nsExec::ExecToLog [^\n]*tono-service-install\.exe" --retire-orphaned-owner'\s+Pop \$0\s+\$\{If\} \$0 != "0"\s+Abort /,
+  )
+  assert.match(
+    windowsServiceUpdateExecutorSource,
+    /\[mode\] if mode == "--retire-orphaned-owner" => \{[^}]*native::retire_orphaned_owner\(\)/,
+  )
+  // The helper re-proves it: no Service, no filter, then retire, never the other way round.
+  const retire =
+    windowsServiceUpdateSource.match(
+      /pub async fn retire_orphaned_owner\(\)[\s\S]*?\n\}/,
+    )?.[0] ?? ''
+  const serviceAt = retire.indexOf('barrier_service_present()')
+  const filtersAt = retire.indexOf('residual_filters_present()')
+  const retireAt = retire.indexOf('retire_legacy_active_owner()')
+  assert.ok(serviceAt > 0 && filtersAt > serviceAt && retireAt > filtersAt)
+})
+
+test('Windows installers refuse to downgrade and hand back the manual lease on that exit', () => {
+  const windowsConfig = JSON.parse(
+    readFileSync(
+      new URL('../src-tauri/tauri.windows.conf.json', import.meta.url),
+      'utf8',
+    ),
+  )
+  // Tauri defaults this to true; an older build cannot undo a newer build's DNS changes.
+  assert.equal(windowsConfig.bundle.windows.allowDowngrades, false)
+  const blocked =
+    installerSource.match(/downgrade_blocked:([\s\S]*?)invalid_existing_version:/)?.[1] ?? ''
+  const releaseAt = blocked.indexOf('Call ReleaseManualLease')
+  assert.ok(releaseAt >= 0 && releaseAt < blocked.indexOf('Quit'))
+  const release =
+    installerSource.match(/Function ReleaseManualLease\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  assert.match(
+    release,
+    /nsExec::ExecToLog '"\$PLUGINSDIR\\tono-gate\\resources\\tono-service-install\.exe" --manual-update-finish'/,
+  )
+})
+
+test('every installer init exit after the manual gate hands the lease back', () => {
+  // TW-anthropic-6: a Quit or Abort from .onInit never reaches .onGUIEnd, and a lease left
+  // behind keeps the Service refusing Connect and skipping recovery until another installer runs.
+  const onInit =
+    installerSource.match(/Function \.onInit\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  const gateAt = onInit.indexOf('--manual-update-gate')
+  // The language dialog's Cancel Aborts inside MUI_LANGDLL_DISPLAY, where nothing can hand the
+  // lease back, so the dialog has to run before the gate takes it.
+  const languageAt = onInit.indexOf('!insertmacro MUI_LANGDLL_DISPLAY')
+  assert.ok(languageAt >= 0 && gateAt > languageAt, 'the language dialog must precede the gate')
+  const legacyLocation =
+    onInit.slice(gateAt).match(/"\$\(legacyLocationAbort\)"([\s\S]*?)\bAbort\b/)?.[1] ?? ''
+  assert.match(legacyLocation, /Call ReleaseManualLease/)
+  const detector =
+    installerSource.match(/Function DetectExistingInstall\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  for (const [label, next] of [
+    ['downgrade_blocked', 'invalid_existing_version'],
+    ['invalid_existing_version', 'legacy_wix_blocked'],
+    ['legacy_wix_blocked', 'no_existing_install'],
+  ]) {
+    const block = detector.match(new RegExp(`\\n  ${label}:([\\s\\S]*?)\\n  ${next}:`))?.[1] ?? ''
+    const releaseAt = block.indexOf('Call ReleaseManualLease')
+    assert.ok(releaseAt >= 0 && releaseAt < block.indexOf('Quit'), `${label} keeps the lease`)
+  }
+})
+
 test('NSIS uninstall removes leftover user control-plane pins', () => {
   assert.match(
     installerSource,
@@ -434,6 +638,55 @@ test('NSIS uninstall removes leftover user control-plane pins', () => {
     installerSource,
     /Delete \/REBOOTOK "\$LOCALAPPDATA\\\$\{BUNDLEID\}\\tono\\control-plane-pins\.json"/,
   )
+})
+
+test('NSIS uninstall deletes in the approving account AppData only after the link check', () => {
+  const uninstall =
+    installerSource.match(/Section Uninstall\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  // No recursive NSIS delete of app data: the helper removes it from every profile, this one
+  // included, and never walks through a link or reparse point on the way.
+  assert.doesNotMatch(uninstall, /RmDir\s+\/r\s+"\$(?:LOCAL)?APPDATA/i)
+  const checkAt = uninstall.search(
+    /tono-service-uninstall\.exe" --check-current-app-data'\s+Pop \$AppDataPathPlain/,
+  )
+  assert.ok(checkAt >= 0, 'the helper must check this account AppData before any delete there')
+  const gated = [
+    ...uninstall.matchAll(
+      /\$\{(?:If|AndIf)\} \$AppDataPathPlain == "0"[\s\S]*?\$\{EndIf\}/g,
+    ),
+  ].map((block) => [block.index, block.index + block[0].length])
+  const deletes = [
+    ...uninstall.matchAll(/^\s*(?:Delete|RmDir)\b[^\n]*\$(?:LOCAL)?APPDATA[^\n]*/gim),
+  ]
+  assert.ok(deletes.length > 0)
+  for (const line of deletes) {
+    assert.ok(
+      gated.some(([start, end]) => checkAt < start && start < line.index && line.index < end),
+      `AppData delete outside the checked block: ${line[0].trim()}`,
+    )
+  }
+})
+
+test('all-profile app data is deleted only inside the repair gate, under the uninstaller lease', () => {
+  const helperSource = readFileSync(
+    new URL('../../service/src/bin/uninstall_service.rs', import.meta.url),
+    'utf8',
+  )
+  const main =
+    helperSource.match(/#\[cfg\(windows\)\]\r?\nfn main\(\)([\s\S]*?)\r?\n\}\r?\n/)?.[1] ?? ''
+  const gateAt = main.indexOf('enter_repair_gate()?')
+  const deleteAt = main.indexOf('remove_app_data_in_profiles(')
+  // Same pending-update check and repair lock as every other cleanup mode of this helper.
+  assert.ok(gateAt >= 0 && deleteAt > gateAt, 'the app data delete must run after the repair gate')
+
+  const uninstall =
+    installerSource.match(/Section Uninstall\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  const ladderAt = uninstall.indexOf('!insertmacro RemoveVergeService')
+  const callAt = uninstall.indexOf('--delete-app-data-all-profiles')
+  // The gate admits the helper on the uninstaller's own lease, which is released only after
+  // this section (un.onUninstSuccess / un.onGUIEnd).
+  assert.ok(ladderAt >= 0 && callAt > ladderAt)
+  assert.doesNotMatch(uninstall, /--manual-update-finish/)
 })
 
 test('NSIS removes every known old payload on upgrade and uninstall', () => {
@@ -472,7 +725,7 @@ test('NSIS removes every known old payload on upgrade and uninstall', () => {
   assert.match(
     validateNsisLegacyCleanup(
       template.replace(
-        '!insertmacro RemoveVergeService\n!insertmacro StartVergeService',
+        /!insertmacro RemoveVergeService\r?\n!insertmacro StartVergeService/,
         '!insertmacro StartVergeService',
       ),
     ),
@@ -733,6 +986,15 @@ test('resources whitelist rejects whole-directory packaging', () => {
   )
 })
 
+test('bundled resource executables are built from this repository', () => {
+  const executables = WINDOWS_RESOURCE_ALLOWLIST.filter((name) =>
+    /\.exe$/i.test(name),
+  )
+  for (const name of executables) {
+    assert.match(name, /^tono-service(?:-install|-uninstall)?\.exe$/)
+  }
+})
+
 test('payload validator requires staged executables and rejects legacy junk', () => {
   const good = [
     { name: 'Tono.exe.next' },
@@ -865,7 +1127,9 @@ test('Core plugin runtime registration matches its generated ACL namespace', () 
       'utf8',
     ),
   )
-  assert.ok(capability.permissions.includes(`${runtimeName}:default`))
+  assert.ok(
+    capability.permissions.some((p) => p.startsWith(`${runtimeName}:allow-`)),
+  )
 })
 
 for (const entrypoint of [
@@ -885,3 +1149,29 @@ for (const entrypoint of [
     assert.deepEqual([...new Set(namespaces)], [corePluginAclName])
   })
 }
+
+test('Support WebRTC check link is granted to the webview opener and nothing wider', () => {
+  const support = readFileSync(
+    new URL('../src/pages/tono/support.tsx', import.meta.url),
+    'utf8',
+  )
+  const urls = [...support.matchAll(/openUrl\('([^']+)'\)/g)].map((m) => m[1])
+  assert.deepEqual(urls, ['https://ip.cx/webrtc'])
+  const capability = JSON.parse(
+    readFileSync(
+      new URL('../src-tauri/capabilities/desktop.json', import.meta.url),
+      'utf8',
+    ),
+  )
+  assert.ok(capability.permissions.includes('shell:allow-open'))
+  const config = JSON.parse(
+    readFileSync(
+      new URL('../src-tauri/tauri.conf.json', import.meta.url),
+      'utf8',
+    ),
+  )
+  // tauri-plugin-shell anchors the configured regex as ^...$.
+  const scope = new RegExp(`^${config.plugins?.shell?.open}$`)
+  assert.ok(scope.test(urls[0]))
+  assert.equal(scope.test('https://example.com/'), false)
+})

@@ -27,7 +27,7 @@ use super::monitor::{
 use super::probes::{verify_fake_ip, verify_post_lock};
 use super::status::set_stage;
 use super::direct::{CapturedTrafficPolicy, WINDOWS_OPTIONAL_DIRECT_ENABLED, spawn_optional_direct_after_connected};
-use super::platform::{detect_physical_interface, write_redacted_copy};
+use super::platform::detect_physical_interface;
 use super::reconnect::active_runtime_resume_status;
 use super::{failure::StageFailure, transaction::ConnectTransaction};
 use crate::{
@@ -195,8 +195,9 @@ pub(super) async fn run_stages(
         }
         None => None,
     };
-    // §5: the owned runtime carries a fresh random controller secret; only
-    // the redacted copy may touch disk.
+    // §5: the owned runtime carries a fresh random controller secret and the
+    // account's exit credentials. The App never writes it to the user profile;
+    // it reaches the Service over IPC.
     let secret = generate_controller_secret();
     let runtime = build_owned_runtime_with_ports(
         nodes,
@@ -208,18 +209,6 @@ pub(super) async fn run_stages(
         runtime_ports,
     )
     .map_err(StageFailure::error)?;
-    // Under the transaction like every other stage on this path. `apply_cloud_policy`'s copy is
-    // already covered because that whole stage runs inside a `wait`; this one was the only
-    // uncovered await in `run_stages`, and an %APPDATA% redirected to an offline share parks it
-    // where the `CONNECT_TRANSACTION_TIMEOUT` budget cannot reach — Connecting forever, every retry then rejected as
-    // "already connecting". The write itself never fails the connect (see `write_redacted_copy`),
-    // so this wait only trips when the budget was already spent.
-    transaction
-        .wait(
-            "writing redacted runtime copy",
-            write_redacted_copy(state, &runtime.redacted_yaml()),
-        )
-        .await?;
     let bundle = RuntimeBundle {
         yaml: runtime.yaml().to_string(),
         assets: Vec::new(),

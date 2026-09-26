@@ -8,6 +8,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { jwtSign, sha256 } from '../src/crypto';
 import worker, { parseBytesRange, retirementCatalogPlan, type Env } from '../src/index';
 import adminWorker from '../src/admin-worker';
+import { revokeExitToken } from '../src/ops/retire-dependencies';
 
 const ADMIN_TOKEN = 'admin-test-token-with-at-least-32-characters';
 const HOME_TOKEN = 'home-test-token-with-at-least-32-characters';
@@ -1318,6 +1319,196 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(identities).toEqual(expect.arrayContaining([legacy.client_uuid, device.client_uuid]));
   });
 
+  it('removes the shared legacy credential from the exit roster once any device of the account is revoked', async () => {
+    await env.DB.prepare('DELETE FROM exit_nodes').run();
+    const account = await createAccount('dual-rollout-revoke');
+    const second = await emailSignIn({
+      email: account.email,
+      deviceName: 'Second Mac',
+      installationId: 'dual-rollout-revoke-installation-two',
+    });
+    expect(second.status).toBe(200);
+    const survivor = await second.json() as any;
+    const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+
+    const catalog = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(catalog.status).toBe(200);
+    const leakedUUID = /uuid: ([0-9a-f-]{36})/.exec((await catalog.json() as any).yaml)?.[1];
+    expect(leakedUUID).toBeDefined();
+
+    const revoked = await api(`devices/${account.device.id}`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${survivor.accessToken}` },
+    });
+    expect(revoked.status).toBeLessThan(300);
+
+    const roster = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${HOME_TOKEN}` },
+    });
+    const identities = (await roster.json() as any).identities.map((entry: any) => entry.clientUUID);
+    expect(identities).not.toContain(leakedUUID);
+    // With no acknowledging exit the retired account waits; it never falls back.
+    const survivorCatalog = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${survivor.accessToken}` },
+    });
+    expect(survivorCatalog.status).toBe(503);
+    expect((await survivorCatalog.json() as any).error.code).toBe('EXIT_IDENTITY_PROPAGATING');
+
+    const survivorCredential = await env.DB.prepare(
+      'SELECT client_uuid, created_at FROM device_exit_credentials WHERE device_id = ?',
+    ).bind(survivor.device.id).first<any>();
+    const node = await admin('exit-nodes', { id: 'exit-tono', name: 'Tono-Exit' });
+    const nodeToken = String((await node.json() as any).token);
+    expect((await api('home/roster-ack', json({
+      observedAt: Number(survivorCredential.created_at) + 1,
+    }, nodeToken))).status).toBe(200);
+    const acknowledged = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${survivor.accessToken}` },
+    });
+    expect(acknowledged.status).toBe(200);
+    const acknowledgedYaml = String((await acknowledged.json() as any).yaml);
+    expect(acknowledgedYaml).toContain(survivorCredential.client_uuid);
+    expect(acknowledgedYaml).not.toContain(leakedUUID);
+
+    const onboarded = await api('ops/users/onboard', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+      },
+      body: JSON.stringify({ email: account.email }),
+    });
+    expect(onboarded.status).toBe(202);
+    expect((await onboarded.json() as any).exitIdentityIssued).toBe(true);
+  });
+
+  it('holds a retired account only on exit nodes its catalog serves', async () => {
+    const account = await createAccount('unpublished-exit');
+    await env.DB.prepare(
+      'INSERT INTO exit_credentials(user_id, client_uuid, created_at, retired_at) VALUES(?, ?, 1, 1)',
+    ).bind(account.user.id, crypto.randomUUID()).run();
+    const served = '  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n';
+    const published = await admin('exit-catalog', { yaml: `proxies:\n${served}`, expectedRevision: 0 }, 'PUT');
+    expect(published.status).toBe(200);
+    const timestamp = Math.floor(Date.now() / 1000);
+    await env.DB.prepare(
+      `INSERT INTO exit_nodes(id, name, token_hash, status, last_roster_at, created_at, updated_at)
+       VALUES('exit-served', 'Tono-Exit', ?, 'active', ?, ?, ?)`,
+    ).bind(await sha256('exit-served-token-with-at-least-32-characters'), timestamp + 3600, timestamp, timestamp).run();
+    // Registered and active (last_roster_at 0) but not yet published.
+    expect((await admin('exit-nodes', { id: 'exit-unpublished', name: 'Unpublished Exit' })).status).toBe(201);
+
+    const catalog = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(catalog.status).toBe(200);
+    const device = await env.DB.prepare(
+      'SELECT client_uuid FROM device_exit_credentials WHERE device_id = ?',
+    ).bind(account.device.id).first<any>();
+    expect((await catalog.json() as any).yaml).toContain(device.client_uuid);
+
+    const unpublished = served.replace('Tono-Exit', 'Unpublished Exit').replace('exit.example.com', 'late.example.com');
+    expect((await admin('exit-catalog', {
+      yaml: `proxies:\n${served}${unpublished}`,
+      expectedRevision: (await published.json() as any).revision,
+    }, 'PUT')).status).toBe(200);
+    const held = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(held.status).toBe(503);
+    expect((await held.json() as any).error.code).toBe('EXIT_IDENTITY_PROPAGATING');
+  });
+
+  it('serves the device identity to a bound catalog-home user once the served exit nodes ack', async () => {
+    const account = await createAccount('catalog-home-ready');
+    const block = (name: string, server: string) => `  - name: ${name}\n    type: vless\n    server: ${server}\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
+    expect((await admin('exit-catalog', {
+      yaml: `proxies:\n${block('Tono-Exit', 'exit.example.com')}${block('Home Residential A', 'home.example.com')}`,
+      expectedRevision: 0,
+    }, 'PUT')).status).toBe(200);
+    // exit-default is seeded active with an acknowledgement an hour ahead.
+    await env.DB.prepare("UPDATE exit_nodes SET name = 'Tono-Exit' WHERE id = 'exit-default'").run();
+    const home = await admin('home-exits', { proxyName: 'Home Residential A', displayName: 'Home A' });
+    expect((await admin(
+      `users/${account.user.id}/home-binding`,
+      { homeExitId: ((await home.json()) as any).homeExit.id },
+      'PUT',
+    )).status).toBe(201);
+
+    const catalog = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(catalog.status).toBe(200);
+    const yaml = String((await catalog.json() as any).yaml);
+    const device = await env.DB.prepare(
+      'SELECT client_uuid FROM device_exit_credentials WHERE device_id = ?',
+    ).bind(account.device.id).first<any>();
+    expect(yaml).toContain('Home Residential A');
+    expect(yaml).toContain(device.client_uuid);
+  });
+
+  it('keeps an unacked exit node in readiness when a bound catalog home shares its name', async () => {
+    const account = await createAccount('home-exit-collision');
+    await env.DB.prepare(
+      'INSERT INTO exit_credentials(user_id, client_uuid, created_at, retired_at) VALUES(?, ?, 1, 1)',
+    ).bind(account.user.id, crypto.randomUUID()).run();
+    const block = (name: string, server: string) => `  - name: ${name}\n    type: vless\n    server: ${server}\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
+    expect((await admin('exit-catalog', {
+      yaml: `proxies:\n${block('Tono-Exit', 'exit.example.com')}${block('Collision', 'collision.example.com')}`,
+      expectedRevision: 0,
+    }, 'PUT')).status).toBe(200);
+    // exit-default is seeded active with an acknowledgement an hour ahead.
+    await env.DB.prepare("UPDATE exit_nodes SET name = 'Tono-Exit' WHERE id = 'exit-default'").run();
+    // Registered and active, but it has never acknowledged a roster.
+    expect((await admin('exit-nodes', { id: 'exit-collision', name: 'Collision' })).status).toBe(201);
+    const home = await admin('home-exits', { proxyName: 'Collision', displayName: 'Collision home' });
+    expect((await admin(
+      `users/${account.user.id}/home-binding`,
+      { homeExitId: ((await home.json()) as any).homeExit.id },
+      'PUT',
+    )).status).toBe(201);
+
+    const catalog = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(catalog.status).toBe(503);
+    expect((await catalog.json() as any).error.code).toBe('EXIT_IDENTITY_PROPAGATING');
+    // Same when the exit row itself carries the hy2 suffix and only the base block is served.
+    await env.DB.prepare("UPDATE exit_nodes SET name = 'Collision · hy2' WHERE id = 'exit-collision'").run();
+    const suffixed = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(suffixed.status).toBe(503);
+  });
+
+  it('issues no exit identity when the served catalog filters down to no proxies', async () => {
+    const account = await createAccount('empty-served');
+    await env.DB.prepare(
+      'INSERT INTO exit_credentials(user_id, client_uuid, created_at, retired_at) VALUES(?, ?, 1, 1)',
+    ).bind(account.user.id, crypto.randomUUID()).run();
+    const yaml = `proxies:
+  - name: Tono-Exit · hy2
+    type: hysteria2
+    server: 8.8.8.8
+    port: 443
+    password: {{TONO_CLIENT_UUID}}
+    sni: www.microsoft.com
+    fingerprint: e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db
+rules: []
+# identity placeholder: {{TONO_CLIENT_UUID}}
+`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+
+    const catalog = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(catalog.status).toBe(200);
+    expect(String((await catalog.json() as any).yaml)).toMatch(/^proxies: \[\]\n/);
+  });
+
   it('provisions and rotates a node token that is bound to its usage source', async () => {
     const created = await admin('exit-nodes', { id: 'exit-new', name: 'New Exit' });
     expect(created.status).toBe(201);
@@ -1457,6 +1648,38 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     ).first<any>()).toMatchObject({ last_roster_at: 0 });
   });
 
+  it('tells a disabled or retired exit node apart from an unknown token', async () => {
+    const roster = (token: string) => api('home/exit-identities', {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect((await admin('exit-nodes/exit-a', { status: 'disabled' }, 'PATCH')).status).toBe(200);
+    expect(await revokeExitToken(env as unknown as Env, 'Test exit-b', 'ops@example.com', 1)).toBe(true);
+    for (const token of [EXIT_NODE_TOKENS['exit-a'], EXIT_NODE_TOKENS['exit-b']]) {
+      const response = await roster(token);
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({ error: { code: 'EXIT_NODE_DISABLED' } });
+    }
+    expect((await roster('unknown-exit-token-with-at-least-32-characters')).status).toBe(401);
+  });
+
+  it('keeps telling a disabled exit node to withdraw after its token is rotated', async () => {
+    // TF-opus-5: rotating a disabled node's token dropped the hash its agent
+    // still holds, so the agent got 401, kept its last roster and never withdrew.
+    const roster = (token: string) => api('home/exit-identities', {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const deployed = EXIT_NODE_TOKENS['exit-a'];
+    expect((await admin('exit-nodes/exit-a', { status: 'disabled' }, 'PATCH')).status).toBe(200);
+    expect((await admin('exit-nodes/exit-a/token', {})).status).toBe(200);
+    expect((await admin('exit-nodes/exit-a/token', {})).status).toBe(200);
+    const withdrawn = await roster(deployed);
+    expect(withdrawn.status).toBe(403);
+    expect(await withdrawn.json()).toMatchObject({ error: { code: 'EXIT_NODE_DISABLED' } });
+    // Re-enabled, the rotated-away token authenticates nothing.
+    expect((await admin('exit-nodes/exit-a', { status: 'active' }, 'PATCH')).status).toBe(200);
+    expect((await roster(deployed)).status).toBe(401);
+  });
+
   it('enforces device-only rollout readiness at the database boundary', async () => {
     await env.DB.prepare(
       "UPDATE exit_nodes SET last_roster_at = 0 WHERE id = 'exit-default'",
@@ -1470,6 +1693,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
   });
 
   it('does not treat a same-second roster acknowledgement as covering a new credential', async () => {
+    await env.DB.prepare("UPDATE exit_nodes SET name = 'Tono-Exit' WHERE id = 'exit-default'").run();
     const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
     expect((await admin('exit-credential-rollout', { phase: 'device_only' })).status).toBe(200);
@@ -1504,6 +1728,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const startedAt = Math.floor(Date.now() / 1_000) * 1_000 + offset;
     const clock = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
     try {
+      await env.DB.prepare("UPDATE exit_nodes SET name = 'Tono-Exit' WHERE id = 'exit-default'").run();
       const account = await createAccount('credential-rollout');
       const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
       expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
@@ -1518,10 +1743,14 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
         headers: { authorization: `Bearer ${HOME_TOKEN}` },
       })).status).toBe(401);
 
-      // Adding an unacknowledged node after cutover must hold new catalog
+      // Publishing an unacknowledged node after cutover must hold new catalog
       // credentials until that node has actually reconciled the roster.
       const late = await admin('exit-nodes', { id: 'exit-late', name: 'Late Exit' });
       const lateToken = String((await late.json() as any).token);
+      expect((await admin('exit-catalog', {
+        yaml: `${yaml}  - name: Late Exit\n    type: vless\n    server: late.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`,
+        expectedRevision: 1,
+      }, 'PUT')).status).toBe(200);
       const blocked = await api('exit-catalog', {
         headers: { authorization: `Bearer ${account.accessToken}` },
       });
@@ -2727,6 +2956,41 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(tailscaleRequests).toEqual([]);
   });
 
+  it('records the client build from X-Tono-Client on sign-in, token refresh and catalog fetch', async () => {
+    // With telemetry off by default, nothing else tells operations which build a
+    // device runs. Only a platform and a version are kept; anything else is dropped.
+    const as = (init: RequestInit, client: string): RequestInit => ({
+      ...init, headers: { ...init.headers as Record<string, string>, 'x-tono-client': client },
+    });
+    const started = await startEmailSignIn({
+      email: `client-build-${++sequence}@example.com`,
+      deviceName: 'Build Mac',
+      installationId: 'client-build-installation',
+    });
+    const signedIn = await api('auth/email/verify', as(json({
+      challengeId: started.challengeId, code: started.code,
+    }), 'macos/0.0.72'));
+    expect(signedIn.status).toBe(200);
+    const account = await signedIn.json() as any;
+    const build = () => env.DB.prepare('SELECT client_platform, client_version FROM devices WHERE id = ?')
+      .bind(account.device.id).first();
+    expect(await build()).toEqual({ client_platform: 'macos', client_version: '0.0.72' });
+
+    const refreshed = await api('auth/refresh', as(json({ refreshToken: account.refreshToken }), 'macos/0.0.73'));
+    expect(refreshed.status).toBe(200);
+    const { accessToken } = await refreshed.json() as any;
+    expect(await build()).toEqual({ client_platform: 'macos', client_version: '0.0.73' });
+
+    const catalog = (client: string) => api('exit-catalog', {
+      headers: { authorization: `Bearer ${accessToken}`, 'x-tono-client': client },
+    });
+    expect((await catalog('macos/0.0.74')).status).toBe(200);
+    expect(await build()).toEqual({ client_platform: 'macos', client_version: '0.0.74' });
+    expect((await catalog('macos/0.0.75 user@example.com')).status).toBe(200);
+    expect((await catalog('linux/0.0.75')).status).toBe(200);
+    expect(await build()).toEqual({ client_platform: 'macos', client_version: '0.0.74' });
+  });
+
   it('encrypts, versions, and serves the managed exit catalog only to authenticated users', async () => {
     // Identities are placeholders now: one catalog served verbatim to everyone is
     // how every account came to present the same identity at the exit, which is
@@ -2867,7 +3131,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await utf8Oversized.json() as any).error.code).toBe('INVALID_CATALOG');
   });
 
-  it('strips hy2 catalog blocks unless the account email is gray-listed', async () => {
+  it('serves hy2 catalog blocks only to clients that declare hy2, narrowed by the gray list', async () => {
     const yaml = `proxies:
   - name: Tokyo · Sakura
     type: vless
@@ -2899,8 +3163,15 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const previous = (env as unknown as Env).HY2_CATALOG_EMAILS;
     try {
       (env as unknown as Env).HY2_CATALOG_EMAILS = allowed.email;
-      const allowedFetched = await api('exit-catalog', {
+      // A gray-listed account on a client that never declared hy2 (0.0.72).
+      const oldClient = await api('exit-catalog', {
         headers: { authorization: `Bearer ${allowed.accessToken}` },
+      });
+      expect(oldClient.status).toBe(200);
+      expect((await oldClient.json() as any).yaml).not.toContain(' · hy2');
+
+      const allowedFetched = await api('exit-catalog', {
+        headers: { authorization: `Bearer ${allowed.accessToken}`, 'X-Tono-Accept': 'hy2' },
       });
       expect(allowedFetched.status).toBe(200);
       const allowedBody = await allowedFetched.json() as any;
@@ -2908,24 +3179,92 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       expect(allowedBody.yaml).toContain('Tokyo · Sakura · hy2');
       expect(allowedBody.yaml).not.toContain('TONO_CLIENT_UUID');
 
-      const stillHidden = await api('exit-catalog', {
-        headers: { authorization: `Bearer ${hidden.accessToken}` },
+      const notListed = await api('exit-catalog', {
+        headers: { authorization: `Bearer ${hidden.accessToken}`, 'X-Tono-Accept': 'hy2' },
       });
-      expect((await stillHidden.json() as any).yaml).not.toContain('hysteria2');
-
-      const headerAdmit = await api('exit-catalog', {
-        headers: {
-          authorization: `Bearer ${hidden.accessToken}`,
-          'X-Tono-Accept': 'hy2',
-        },
-      });
-      expect((await headerAdmit.json() as any).yaml).toContain('type: hysteria2');
+      expect((await notListed.json() as any).yaml).not.toContain('hysteria2');
     } finally {
       (env as unknown as Env).HY2_CATALOG_EMAILS = previous;
     }
 
+    const headerAdmit = await api('exit-catalog', {
+      headers: {
+        authorization: `Bearer ${hidden.accessToken}`,
+        'X-Tono-Accept': 'hy2',
+      },
+    });
+    expect((await headerAdmit.json() as any).yaml).toContain('type: hysteria2');
+
     const adminFetched = await admin('exit-catalog', undefined, 'GET');
     expect((await adminFetched.json() as any).yaml).toContain('type: hysteria2');
+  });
+
+  it('audits a home exit SOCKS5 password change without recording the password', async () => {
+    const created = await admin('home-exits', {
+      proxyName: 'Audit Socks Home',
+      displayName: '审计 Socks',
+      kind: 'socks5',
+      socks5Host: '203.0.113.60',
+      socks5Port: 11080,
+      socks5Username: 'resi-audit',
+      socks5Password: 'old-upstream-secret',
+    });
+    expect(created.status).toBe(201);
+    const homeId = ((await created.json()) as any).homeExit.id;
+    const patched = await admin(`home-exits/${homeId}`, { socks5Password: 'new-upstream-secret' }, 'PATCH');
+    expect(patched.status).toBe(200);
+    const audit = await env.DB.prepare(
+      "SELECT * FROM ops_audit WHERE action = 'home.update' AND target_id = ?",
+    ).bind(homeId).first<any>();
+    expect(audit).toMatchObject({ actor_type: 'token_admin', target_type: 'home_exit' });
+    expect(String(audit.summary)).toContain('socks5Password');
+    expect(String(audit.summary)).not.toContain('upstream-secret');
+  });
+
+  it('rejects a catalog name a YAML parser would read differently from the home-exit filter', async () => {
+    const catalogWithHomeName = (nameLine: string) => `proxies:
+  - name: Shared JP
+    type: vless
+    server: 1.1.1.1
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+${nameLine}
+    type: vless
+    server: 198.51.100.20
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+`;
+    for (const nameLine of [
+      '  - name: "Home\\x20A"',
+      '  - name: "\\u5BB6\\u5BBD A"',
+      '  - name: Home A # was {name: Shared}',
+      '  - name: >-\n      Home A',
+      '  - name: Café A',
+    ]) {
+      const put = await admin('exit-catalog', { yaml: catalogWithHomeName(nameLine), expectedRevision: 0 }, 'PUT');
+      expect(put.status).toBe(400);
+      expect((await put.json() as any).error.code).toBe('INVALID_CATALOG');
+    }
+
+    expect((await admin(
+      'exit-catalog',
+      { yaml: catalogWithHomeName('  - name: Home A'), expectedRevision: 0 },
+      'PUT',
+    )).status).toBe(200);
+    const home = await admin('home-exits', { proxyName: 'Home A', displayName: 'Home A' });
+    expect(home.status).toBe(201);
+    const owner = await createAccount('plain-name-owner');
+    const other = await createAccount('plain-name-other');
+    expect((await admin(
+      `users/${owner.user.id}/home-binding`,
+      { homeExitId: ((await home.json()) as any).homeExit.id },
+      'PUT',
+    )).status).toBe(201);
+    const otherCatalog = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${other.accessToken}` },
+    });
+    expect(otherCatalog.status).toBe(200);
+    expect((await otherCatalog.json() as any).yaml).not.toContain('198.51.100.20');
   });
 
   it('binds one home exit per user and filters that proxy from other catalogs', async () => {
@@ -3066,6 +3405,66 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
     expect((await admin(`home-exits/${homeABody.homeExit.id}`, undefined, 'DELETE')).status).toBe(204);
     expect((await admin(`home-exits/${homeBId}`, undefined, 'DELETE')).status).toBe(204);
+  });
+
+  it('keeps a retired home exit and its hy2 twin out of other accounts\' catalogs', async () => {
+    const yaml = `proxies:
+  - name: "Shared JP"
+    type: vless
+    server: 1.1.1.1
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+    tls: true
+  - name: "Home Residential A"
+    type: vless
+    server: 8.8.8.8
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+    tls: true
+  - name: "Home Residential A · hy2"
+    type: hysteria2
+    server: 8.8.8.8
+    port: 443
+    password: {{TONO_CLIENT_UUID}}
+    sni: www.microsoft.com
+    fingerprint: e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db
+  - name: "Home Residential B"
+    type: vless
+    server: 9.9.9.9
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+    tls: true
+  - name: "Home Residential B · hy2"
+    type: hysteria2
+    server: 9.9.9.9
+    port: 443
+    password: {{TONO_CLIENT_UUID}}
+    sni: www.microsoft.com
+    fingerprint: e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db
+`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+    const home = await admin('home-exits', { proxyName: 'Home Residential A', displayName: '家庭 A' });
+    expect(home.status).toBe(201);
+    expect((await admin('home-exits', { proxyName: 'Home Residential B', displayName: '家庭 B' })).status).toBe(201);
+    const homeId = ((await home.json()) as any).homeExit.id;
+    const owner = await createAccount('retired-home-owner');
+    const other = await createAccount('retired-home-other');
+    expect((await admin(`users/${owner.user.id}/home-binding`, { homeExitId: homeId }, 'PUT')).status).toBe(201);
+    const catalogFor = async (token: string) => ((await (await api('exit-catalog', {
+      headers: { authorization: `Bearer ${token}`, 'X-Tono-Accept': 'hy2' },
+    })).json()) as any).yaml as string;
+
+    expect(await catalogFor(owner.accessToken)).toContain('Home Residential A · hy2');
+    expect(await catalogFor(other.accessToken)).not.toContain('Home Residential A');
+    expect(await catalogFor(other.accessToken)).not.toContain('Home Residential B · hy2');
+
+    expect((await admin(`users/${owner.user.id}/home-binding`, undefined, 'DELETE')).status).toBe(204);
+    expect((await admin(`home-exits/${homeId}`, { status: 'retired' }, 'PATCH')).status).toBe(200);
+    for (const viewer of [owner, other]) {
+      const served = await catalogFor(viewer.accessToken);
+      expect(served).toContain('Shared JP');
+      expect(served).not.toContain('Home Residential A');
+    }
   });
 
   it('publishes routing metadata to bound users and validates defaultProxyName', async () => {
@@ -3414,6 +3813,83 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
     expect((await admin(`users/${owner.user.id}/home-binding`, undefined, 'DELETE')).status).toBe(204);
     expect((await admin(`home-exits/${homeId}`, undefined, 'DELETE')).status).toBe(204);
+  });
+
+  it('refuses to hand an unbound user\'s socks5 credential to another user until it is rotated', async () => {
+    const home = await admin('home-exits', {
+      proxyName: 'Home Socks Rotation',
+      displayName: '家宽 Rotation',
+      kind: 'socks5',
+      socks5Host: '203.0.113.60',
+      socks5Port: 11090,
+      socks5Username: 'resi-rot',
+      socks5Password: 'first-secret',
+    });
+    expect(home.status).toBe(201);
+    const homeId = ((await home.json()) as any).homeExit.id as string;
+    const first = await createAccount('socks5-first-holder');
+    const next = await createAccount('socks5-next-holder');
+    const catalogText = async (token: string) => (await api('exit-catalog', {
+      headers: { authorization: `Bearer ${token}` },
+    })).text();
+
+    expect((await admin(`users/${first.user.id}/home-binding`, { homeExitId: homeId }, 'PUT')).status).toBe(201);
+    expect(await catalogText(first.accessToken)).toContain('first-secret');
+    expect((await admin(`users/${first.user.id}/home-binding`, undefined, 'DELETE')).status).toBe(204);
+    expect(await catalogText(first.accessToken)).not.toContain('first-secret');
+
+    // The first holder's cached copy still works upstream, so the same
+    // credential must not become the next user's line.
+    const reused = await admin(`users/${next.user.id}/home-binding`, { homeExitId: homeId }, 'PUT');
+    expect(reused.status).toBe(409);
+    expect((await reused.json() as any).error.code).toBe('SOCKS5_ROTATION_REQUIRED');
+    const listed = (await (await admin('home-exits', undefined, 'GET')).json() as any).homeExits;
+    expect(listed.find((row: any) => row.id === homeId).socks5RotationRequired).toBe(true);
+
+    expect((await admin(`home-exits/${homeId}`, { socks5Password: 'second-secret' }, 'PATCH')).status).toBe(200);
+    expect((await admin(`users/${next.user.id}/home-binding`, { homeExitId: homeId }, 'PUT')).status).toBe(201);
+    const nextCatalog = await catalogText(next.accessToken);
+    expect(nextCatalog).toContain('second-secret');
+    expect(nextCatalog).not.toContain('first-secret');
+  });
+
+  it('refuses a catalog home exit whose proxyName ends with the hy2 suffix', async () => {
+    const suffixed = await admin('home-exits', { proxyName: 'Home Suffix · hy2', displayName: '家宽 Suffix' });
+    expect(suffixed.status).toBe(400);
+    expect((await suffixed.json() as any).error.code).toBe('VALIDATION_ERROR');
+    const plain = await admin('home-exits', { proxyName: 'Home Suffix', displayName: '家宽 Suffix' });
+    expect(plain.status).toBe(201);
+    const homeId = ((await plain.json()) as any).homeExit.id as string;
+    expect((await admin(`home-exits/${homeId}`, { proxyName: 'Home Suffix · hy2' }, 'PATCH')).status).toBe(400);
+    const line = await api('ops/home-lines', {
+      method: 'POST',
+      headers: { 'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL), 'content-type': 'application/json' },
+      body: JSON.stringify({ proxyName: 'Home Line · hy2', displayName: '家宽 Line' }),
+    });
+    expect(line.status).toBe(400);
+  });
+
+  it('refuses to bind a stored catalog home exit whose proxyName ends with the hy2 suffix', async () => {
+    // A row stored before create and PATCH refused the suffix.
+    const t = Math.floor(Date.now() / 1_000);
+    await env.DB.prepare(
+      `INSERT INTO home_exits(id, proxy_name, display_name, kind, status, created_at, updated_at)
+       VALUES('h-stored-hy2', 'Home Stored · hy2', '家宽 Stored', 'catalog', 'active', ?, ?)`,
+    ).bind(t, t).run();
+    const account = await createAccount('stored-hy2-name');
+    for (const target of [{ homeExitId: 'h-stored-hy2' }, { proxyName: 'Home Stored · hy2' }]) {
+      const bound = await admin(`users/${account.user.id}/home-binding`, target, 'PUT');
+      expect(bound.status).toBe(400);
+      expect((await bound.json() as any).error.code).toBe('VALIDATION_ERROR');
+    }
+    const onboarded = await api('ops/users/onboard', {
+      method: 'POST',
+      headers: { 'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL), 'content-type': 'application/json' },
+      body: JSON.stringify({ email: account.email, homeExitId: 'h-stored-hy2' }),
+    });
+    expect(onboarded.status).toBe(400);
+    expect(await env.DB.prepare('SELECT 1 FROM user_home_bindings WHERE user_id = ?').bind(account.user.id).first())
+      .toBeNull();
   });
 
   it('moves routingSha256 for a routing-only rotation that leaves revision and yaml untouched', async () => {
@@ -3954,6 +4430,38 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(detailBody.product.replaceCount).toBe(1);
   });
 
+  it('assigns a pooled Claude account to only one of two concurrent users', async () => {
+    const accessHeaders = {
+      'content-type': 'application/json',
+      'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+    };
+    const first = await createAccount('claude-pool-race-a');
+    const second = await createAccount('claude-pool-race-b');
+    const pooled = await api('ops/product-accounts', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ accountRef: 'acct-pool-race@example.com' }),
+    });
+    expect(pooled.status).toBe(201);
+    const assign = (userId: string) => api('ops/product-accounts', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ userId, accountRef: 'acct-pool-race@example.com' }),
+    });
+    const results = await Promise.all([assign(first.user.id), assign(second.user.id)]);
+    expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
+    const loser = results[0].status === 409 ? first : second;
+    expect((await results.find((r) => r.status === 409)!.json() as any).error.code).toBe('ACCOUNT_REF_IN_USE');
+    const loserRow = await env.DB.prepare(
+      'SELECT plan, first_entitled_at FROM users WHERE id = ?',
+    ).bind(loser.user.id).first<{ plan: string | null; first_entitled_at: number | null }>();
+    expect(loserRow).toEqual({ plan: null, first_entitled_at: null });
+    const loserEvents = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM product_account_events WHERE user_id = ? AND type = 'assigned'",
+    ).bind(loser.user.id).first<{ n: number }>();
+    expect(loserEvents!.n).toBe(0);
+  });
+
   it('stores a node billing profile and reports who is on a named node', async () => {
     const accessHeaders = {
       'content-type': 'application/json',
@@ -4003,11 +4511,22 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       ],
       version: 1,
     };
-    const blindWrite = await admin('traffic-policy', { policy }, 'PUT');
+    // Media endpoints need a signature (#318), so every write of this policy
+    // signs the bytes the endpoint says it will serve.
+    const signedWrite = async (value: unknown, expectedRevision?: number) => {
+      const preview = await admin('traffic-policy', { policy: value, dryRun: true }, 'PUT');
+      const signature = await signPolicy((await preview.json() as any).json);
+      return admin('traffic-policy', {
+        policy: value,
+        ...(expectedRevision === undefined ? {} : { expectedRevision }),
+        signature,
+      }, 'PUT');
+    };
+    const blindWrite = await signedWrite(policy);
     expect(blindWrite.status).toBe(400);
     expect((await blindWrite.json() as any).error.code).toBe('VALIDATION_ERROR');
 
-    const created = await admin('traffic-policy', { policy, expectedRevision: 0 }, 'PUT');
+    const created = await signedWrite(policy, 0);
     expect(created.status).toBe(200);
     const createdBody = await created.json() as any;
     expect(JSON.parse(createdBody.json)).toEqual({
@@ -4043,7 +4562,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       headers: { authorization: `Bearer ${account.accessToken}` },
     });
     expect(await fetched.json()).toEqual(createdBody);
-    const conflict = await admin('traffic-policy', { policy, expectedRevision: 0 }, 'PUT');
+    const conflict = await signedWrite(policy, 0);
     expect(conflict.status).toBe(409);
 
     const webPolicy = {
@@ -4054,11 +4573,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
         { host: 'ykimg.alicdn.com', ports: [443] },
       ],
     };
-    const updated = await admin(
-      'traffic-policy',
-      { policy: webPolicy, expectedRevision: 1 },
-      'PUT',
-    );
+    const updated = await signedWrite(webPolicy, 1);
     expect(updated.status).toBe(200);
     expect(JSON.parse((await updated.json() as any).json)).toEqual({
       version: 2,
@@ -4081,11 +4596,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
         { address: '49.51.67.253', ports: [443, 80] },
       ],
     };
-    const nativeUpdated = await admin(
-      'traffic-policy',
-      { policy: nativeWeChatPolicy, expectedRevision: 2 },
-      'PUT',
-    );
+    const nativeUpdated = await signedWrite(nativeWeChatPolicy, 2);
     expect(nativeUpdated.status).toBe(200);
     expect(JSON.parse((await nativeUpdated.json() as any).json)).toEqual({
       version: 4,
@@ -4202,10 +4713,16 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     }
     // The public boundary publishes through the normal admin write path and
     // is served back verbatim by publicTrafficPolicy — the realized impact
-    // was that this PUT returned 400 VALIDATION_ERROR before the fix.
+    // was that this PUT returned 400 VALIDATION_ERROR before the fix. Signed,
+    // because media endpoints need a signature (#318).
+    const boundary = await admin('traffic-policy', {
+      policy: empty('192.0.3.5', true),
+      dryRun: true,
+    }, 'PUT');
     const published = await admin('traffic-policy', {
       policy: empty('192.0.3.5', true),
       expectedRevision: 0,
+      signature: await signPolicy((await boundary.json() as any).json),
     }, 'PUT');
     expect(published.status).toBe(200);
     const served = await (await admin('traffic-policy', undefined, 'GET')).json() as any;
@@ -4333,6 +4850,121 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
     // Nothing above was stored.
     expect((await (await admin('traffic-policy', undefined, 'GET')).json() as any).revision).toBe(0);
+  });
+
+  it('requires a signature before a media endpoint can leave the tunnel', async () => {
+    // #318: an exact IP:port carve-out is only reviewed by a signature. Both
+    // clients' unsigned media allowlists are empty, so an unsigned publish
+    // carrying one is refused here instead of being silently dropped (macOS)
+    // or honoured (older Windows builds).
+    const media = {
+      version: 1,
+      domains: [],
+      mediaEndpoints: [{ address: '43.146.27.17', ports: [443] }],
+    };
+    const unsigned = await admin('traffic-policy', { policy: media, expectedRevision: 0 }, 'PUT');
+    expect(unsigned.status).toBe(400);
+    expect((await unsigned.json() as any).error.code).toBe('VALIDATION_ERROR');
+    const preview = await admin('traffic-policy', { policy: media, dryRun: true }, 'PUT');
+    const previewed = await preview.json() as any;
+    expect(previewed.signatureRequired).toBe(true);
+
+    const signed = await admin('traffic-policy', {
+      policy: media, expectedRevision: 0, signature: await signPolicy(previewed.json),
+    }, 'PUT');
+    expect(signed.status).toBe(200);
+
+    // A row stored unsigned before this rule is still served; refusing it on
+    // read would turn every policy fetch into a 503. Clients drop it.
+    await env.DB.prepare(
+      'UPDATE managed_traffic_policy SET signature = NULL WHERE singleton_id = 1',
+    ).run();
+    const account = await createAccount('unsigned-media-legacy-row');
+    const fetched = await api('traffic-policy', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(fetched.status).toBe(200);
+  });
+
+  it('requires a signature before a TCP endpoint can leave the tunnel', async () => {
+    // Same rule as media endpoints: an exact IP:port carve-out is only
+    // reviewed by a signature. macOS's unsigned TCP allowlist is empty and
+    // Windows does not read tcpEndpoints, so an unsigned one is refused here.
+    const tcp = {
+      version: 4,
+      domains: [],
+      mediaEndpoints: [],
+      webDomains: [],
+      directSuffixes: [],
+      tcpEndpoints: [{ address: '49.51.67.253', ports: [443] }],
+    };
+    const unsigned = await admin('traffic-policy', { policy: tcp, expectedRevision: 0 }, 'PUT');
+    expect(unsigned.status).toBe(400);
+    expect((await unsigned.json() as any).error.code).toBe('VALIDATION_ERROR');
+    const preview = await admin('traffic-policy', { policy: tcp, dryRun: true }, 'PUT');
+    const previewed = await preview.json() as any;
+    expect(previewed.signatureRequired).toBe(true);
+
+    const signed = await admin('traffic-policy', {
+      policy: tcp, expectedRevision: 0, signature: await signPolicy(previewed.json),
+    }, 'PUT');
+    expect(signed.status).toBe(200);
+
+    // A row stored unsigned before this rule is still served.
+    await env.DB.prepare(
+      'UPDATE managed_traffic_policy SET signature = NULL WHERE singleton_id = 1',
+    ).run();
+    const account = await createAccount('unsigned-tcp-legacy-row');
+    const fetched = await api('traffic-policy', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(fetched.status).toBe(200);
+  });
+
+  it('binds the assigned revision inside the signed policy json once enabled', async () => {
+    // #317: the envelope revision is outside the signature, so a replayed
+    // signed document could claim any revision. With the switch on, the
+    // revision this write will be assigned is part of the signed bytes.
+    const bound = { ...env, TRAFFIC_POLICY_EMBED_REVISION: 'true' } as unknown as Env;
+    const boundAdmin = async (value: unknown) => {
+      const context = createExecutionContext();
+      const response = await worker.fetch(new Request('https://test/api/v1/admin/traffic-policy', {
+        ...json(value), method: 'PUT',
+        headers: { authorization: `Bearer ${ADMIN_TOKEN}`, 'content-type': 'application/json' },
+      }), bound, context);
+      await waitOnExecutionContext(context);
+      return response;
+    };
+    const preview = await boundAdmin({ policy: unlistedPolicy, dryRun: true, expectedRevision: 0 });
+    const previewed = await preview.json() as any;
+    expect(JSON.parse(previewed.json).revision).toBe(1);
+
+    // A signature over the revision-free bytes no longer covers what is served.
+    const legacy = await admin('traffic-policy', { policy: unlistedPolicy, dryRun: true }, 'PUT');
+    const unbound = await boundAdmin({
+      policy: unlistedPolicy, expectedRevision: 0,
+      signature: await signPolicy((await legacy.json() as any).json),
+    });
+    expect((await unbound.json() as any).error.code).toBe('TRAFFIC_POLICY_SIGNATURE_INVALID');
+
+    const published = await boundAdmin({
+      policy: unlistedPolicy, expectedRevision: 0, signature: await signPolicy(previewed.json),
+    });
+    expect(published.status).toBe(200);
+    expect((await published.json() as any).json).toBe(previewed.json);
+
+    // Served whatever the switch says, with the embedded revision equal to the
+    // envelope's; a row whose envelope no longer matches is not served.
+    const account = await createAccount('embedded-policy-revision');
+    const read = () => api('traffic-policy', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    const delivered = await (await read()).json() as any;
+    expect(JSON.parse(delivered.json).revision).toBe(delivered.revision);
+    await env.DB.prepare(
+      'UPDATE managed_traffic_policy SET revision = 7 WHERE singleton_id = 1',
+    ).run();
+    expect((await read()).status).toBe(503);
   });
 
   it('will not let a signature pull a protected host out of the tunnel', async () => {
@@ -4524,7 +5156,13 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       ],
       tcpEndpoints: [{ address: '49.51.67.253', ports: [443] }],
     };
-    const written = await admin('traffic-policy', { policy: retargeted, expectedRevision: 0 }, 'PUT');
+    // Signed: the media endpoint in this shape needs a signature (#318).
+    const retargetedPreview = await admin('traffic-policy', { policy: retargeted, dryRun: true }, 'PUT');
+    const written = await admin('traffic-policy', {
+      policy: retargeted,
+      expectedRevision: 0,
+      signature: await signPolicy((await retargetedPreview.json() as any).json),
+    }, 'PUT');
     expect(written.status).toBe(200);
     const stored = JSON.parse((await written.json() as any).json);
     expect(stored.directSuffixes.map((entry: any) => entry.host)).toEqual([
@@ -4855,7 +5493,6 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const refresh = await api('auth/refresh', json({ refreshToken: first.refreshToken }));
     expect(refresh.status).toBe(200);
     const rotated = await refresh.json() as any;
-    expect((await api('auth/refresh', json({ refreshToken: first.refreshToken }))).status).toBe(401);
 
     const conf = await confirm({ ...first, accessToken: rotated.accessToken });
     expect(conf.status).toBe(200);
@@ -4958,6 +5595,30 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const activeIds = active.results.map((r: any) => r.id);
     expect(activeIds).toContain(dev2.device.id);
     expect(activeIds).toContain(dev3.device.id);
+  });
+
+  it('honours one replay of a just-rotated refresh token whose response was lost', async () => {
+    const account = await createAccount('refresh-replay');
+    const bearer = (token: string) => ({ headers: { authorization: `Bearer ${token}` } });
+    const lost = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
+    expect(lost.status).toBe(200);
+    const undelivered = await lost.json() as any;
+
+    const replay = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
+    expect(replay.status).toBe(200);
+    const recovered = await replay.json() as any;
+    expect((await api('me', bearer(recovered.accessToken))).status).toBe(200);
+    // One live session per chain: the successor the client never received is superseded.
+    expect((await api('me', bearer(undelivered.accessToken))).status).toBe(401);
+    expect((await api('auth/refresh', json({ refreshToken: undelivered.refreshToken }))).status).toBe(401);
+    // A second replay is reuse, not recovery.
+    expect((await api('auth/refresh', json({ refreshToken: account.refreshToken }))).status).toBe(401);
+
+    // Outside the grace window a replay stays rejected.
+    expect((await api('auth/refresh', json({ refreshToken: recovered.refreshToken }))).status).toBe(200);
+    await env.DB.prepare('UPDATE sessions SET rotated_at = rotated_at - 3600 WHERE user_id = ? AND rotated_at IS NOT NULL')
+      .bind(account.user.id).run();
+    expect((await api('auth/refresh', json({ refreshToken: recovered.refreshToken }))).status).toBe(401);
   });
 
   it('rejects a session inserted after its device was revoked', async () => {
@@ -5463,6 +6124,50 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     }
   });
 
+  it('keeps cron enforcement cost flat as already-enforced users accumulate', async () => {
+    const tick = async () => {
+      let prepares = 0;
+      const base = env as unknown as Env;
+      const DB = new Proxy(base.DB, {
+        get(target, prop, receiver) {
+          if (prop === 'prepare') {
+            return (...args: Parameters<D1Database['prepare']>) => {
+              prepares += 1;
+              return target.prepare(...args);
+            };
+          }
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+        },
+      });
+      const context = createExecutionContext();
+      await worker.scheduled(createScheduledController(), { ...base, DB }, context);
+      await waitOnExecutionContext(context);
+      return prepares;
+    };
+    // Disabled long ago: no live device, no unrevoked session, nothing to revoke.
+    const seedEnforced = async (prefix: string, count: number) => {
+      const t = Math.floor(Date.now() / 1000);
+      await env.DB.batch(Array.from({ length: count }, (_, index) => env.DB.prepare(
+        `INSERT INTO users(id, email, password_hash, password_salt, status, usage_bytes, created_at, updated_at)
+         VALUES(?, ?, 'x', 'x', 'disabled', 0, ?, ?)`,
+      ).bind(`${prefix}-${index}`, `${prefix}-${index}@example.com`, t, t)));
+    };
+    await seedEnforced('enforced-early', 5);
+    await tick();
+    const baseline = await tick();
+    await seedEnforced('enforced-later', 40);
+    expect(await tick()).toBe(baseline);
+
+    // A user who just lost eligibility and still holds a device is enforced.
+    const account = await createAccount('cron-enforce-live');
+    await env.DB.prepare("UPDATE users SET status = 'disabled' WHERE id = ?")
+      .bind(account.user.id).run();
+    await tick();
+    expect(await env.DB.prepare('SELECT status FROM devices WHERE id = ?')
+      .bind(account.device.id).first<any>()).toMatchObject({ status: 'revoked' });
+  });
+
   it('processes durable revocations before retention housekeeping can fail', async () => {
     const account = await createAccount('revocation-before-retention');
     resetMockInventory(account.device.id, account.enrollment.hostname);
@@ -5479,10 +6184,16 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(pending.completed_at).toBeNull();
 
     // Force the first retention statement to abort. Security enforcement must
-    // already have retried the durable deletion when this failure surfaces.
+    // already have retried the durable deletion when this failure surfaces, and
+    // the retention steps after it must still run.
     await env.DB.prepare(
       "INSERT INTO rate_limits(key, count, window_start) VALUES('force-retention-failure', 1, 0)",
     ).run();
+    const longRevoked = Math.floor(Date.now() / 1000) - 2 * 86_400;
+    await env.DB.prepare(
+      `INSERT INTO sessions(id, user_id, refresh_hash, expires_at, revoked_at, created_at)
+       VALUES('retention-after-failure', ?, 'retention-after-failure', ?, ?, ?)`,
+    ).bind(account.user.id, longRevoked, longRevoked, longRevoked).run();
     await env.DB.prepare(
       `CREATE TRIGGER test_fail_retention
        BEFORE DELETE ON rate_limits
@@ -5493,7 +6204,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     try {
       const context = createExecutionContext();
       await worker.scheduled(createScheduledController(), env as unknown as Env, context);
-      await expect(waitOnExecutionContext(context)).rejects.toThrow(/TEST_RETENTION_FAILURE/);
+      await waitOnExecutionContext(context);
 
       const completed = await env.DB.prepare(
         'SELECT completed_at, last_error FROM revocation_jobs WHERE id = ?',
@@ -5501,6 +6212,8 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       expect(completed.completed_at).toBeTypeOf('number');
       expect(completed.last_error).toBeNull();
       expect(mockInventory.some((device) => device.id === MGMT_ID)).toBe(false);
+      expect(await env.DB.prepare("SELECT id FROM sessions WHERE id = 'retention-after-failure'")
+        .first()).toBeNull();
     } finally {
       await env.DB.prepare('DROP TRIGGER IF EXISTS test_fail_retention').run();
     }
@@ -5638,6 +6351,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
   });
 
   it('serves an exit identity roster that excludes accounts an exit must drop', async () => {
+    await env.DB.prepare("UPDATE exit_nodes SET name = 'Metered' WHERE id = 'exit-default'").run();
     const yaml = `proxies:
   - name: "Metered"
     type: vless
@@ -5732,6 +6446,41 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     row = await env.DB.prepare('SELECT expires_at FROM users WHERE id = ?')
       .bind(account.user.id).first<any>();
     expect(row.expires_at).toBeNull();
+  });
+
+  // Provisional policy (2026-09-24): expiry revokes every device, session and
+  // exit credential; renewing restores nothing by itself, and each device
+  // signing in again does. The ops console copy promises exactly this.
+  it('expiry revokes every device within a cron tick and only a fresh sign-in restores service after renewal', async () => {
+    (env as unknown as Env).TAILSCALE_ENROLLMENT_ENABLED = 'false';
+    const account = await createAccount('expiry-renew');
+    await env.DB.prepare('UPDATE users SET expires_at = ? WHERE id = ?')
+      .bind(Math.floor(Date.now() / 1000) - 60, account.user.id).run();
+    const context = createExecutionContext();
+    await worker.scheduled(createScheduledController(), env as unknown as Env, context);
+    await waitOnExecutionContext(context);
+    const credentials = () => env.DB.prepare('SELECT COUNT(*) AS count FROM device_exit_credentials WHERE device_id = ?')
+      .bind(account.device.id).first<any>();
+    expect((await env.DB.prepare('SELECT status FROM devices WHERE id = ?').bind(account.device.id).first<any>()).status)
+      .toBe('revoked');
+    expect((await credentials()).count).toBe(0);
+
+    const renewed = await admin(`users/${account.user.id}`, {
+      expiresAt: Math.floor(Date.now() / 1000) + 30 * 86_400,
+    }, 'PATCH');
+    expect(renewed.status).toBe(200);
+    expect((await api('auth/refresh', json({ refreshToken: account.refreshToken }))).status).toBe(401);
+
+    const again = await emailSignIn({
+      email: account.email,
+      deviceName: 'Primary Mac',
+      installationId: 'expiry-renew-installation-one',
+    });
+    expect(again.status).toBe(200);
+    const signedIn = await again.json() as any;
+    expect(signedIn.device.id).toBe(account.device.id);
+    expect((await api('me', { headers: { authorization: `Bearer ${signedIn.accessToken}` } })).status).toBe(200);
+    expect((await credentials()).count).toBe(1);
   });
 
   it('rejects invalid expiresAt values with 400', async () => {
@@ -7322,6 +8071,34 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(await env.DB.prepare(
       'SELECT id FROM diagnostics_log_objects WHERE id = ?',
     ).bind(segment.id).first()).toBeNull();
+  });
+
+  it('deletes a raw log object whose index row was never written', async () => {
+    const account = await createAccount('log-orphan');
+    await enableDiagnosticsLogs(account);
+    await env.DB.prepare(
+      `CREATE TRIGGER test_fail_log_index BEFORE INSERT ON diagnostics_log_objects
+       BEGIN SELECT RAISE(ABORT, 'injected D1 failure'); END`,
+    ).run();
+    let failed: Response;
+    try {
+      failed = await logUpload(account.accessToken, await gzip('{"host":"secret.example"}\n'));
+    } finally {
+      await env.DB.prepare('DROP TRIGGER test_fail_log_index').run();
+    }
+    expect(failed.status).toBe(503);
+    const bucket = (env as unknown as Env).DIAGNOSTICS_LOGS;
+    expect((await bucket.list({ prefix: `logs/${account.user.id}/` })).objects).toHaveLength(1);
+
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 3 * 86_400_000);
+    try {
+      const later = createExecutionContext();
+      await worker.scheduled(createScheduledController(), env as unknown as Env, later);
+      await waitOnExecutionContext(later);
+    } finally {
+      clock.mockRestore();
+    }
+    expect((await bucket.list({ prefix: `logs/${account.user.id}/` })).objects).toHaveLength(0);
   });
 
   it('deletes diagnostics reports once they pass retention', async () => {

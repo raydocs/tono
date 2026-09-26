@@ -52,10 +52,11 @@ const BLANK: Draft = {
  * onboarding: it shows the hub's own list of what is done and what is still
  * waiting, and offers the same form again for after the login.
  *
- * The plan and the expiry are a second call, because `users/onboard` does not
- * accept them. They are on this form anyway: an operator setting a customer up
- * is thinking about what they are paying for, and making them find the detail
- * page afterwards is how accounts end up with no expiry at all.
+ * The plan and the expiry travel with the same call. For a customer who has
+ * not logged in yet the hub keeps them on the sign-up list and puts them on
+ * the account at first sign-in: they used to be a second call that only ran
+ * once a record existed, and an onboarding before registration quietly left
+ * the customer with no expiry at all.
  */
 export function OnboardDrawer({
   open,
@@ -70,6 +71,9 @@ export function OnboardDrawer({
   const ask = useAsk(onSaved);
   const [draft, setDraft] = useState<Draft>(BLANK);
   const [outcome, setOutcome] = useState<OnboardOutcome | null>(null);
+  // Whether the last onboard sent a plan or an expiry, so the checklist only
+  // says they were kept when there was something to keep.
+  const [sentEntitlement, setSentEntitlement] = useState(false);
   const [fault, setFault] = useState<string | null>(null);
 
   const exits = useResource(open ? 'home-exits' : null, (signal) => hubApi.homeExits(signal));
@@ -102,16 +106,12 @@ export function OnboardDrawer({
     else if (draft.productAccountId !== '') input.productAccountId = draft.productAccountId;
     if (draft.notes.trim() !== '') input.notes = draft.notes.trim();
     if (draft.contact.trim() !== '') input.contact = draft.contact.trim();
-    const answer = await customerApi.onboard(input);
-    setOutcome(answer);
-    if (answer.userId === null) return;
+    if (draft.plan !== '') input.plan = draft.plan;
     const expiresAt = draft.expiresAt.trim() === '' ? null : fromDateInput(draft.expiresAt);
-    const wantsPlan = draft.plan !== '';
-    if (expiresAt === null && !wantsPlan) return;
-    await customerApi.patchUser(answer.userId, {
-      ...(wantsPlan ? { plan: draft.plan } : {}),
-      ...(expiresAt === null ? {} : { expiresAt }),
-    });
+    if (expiresAt !== null) input.expiresAt = expiresAt;
+    const answer = await customerApi.onboard(input);
+    setSentEntitlement(input.plan !== undefined || input.expiresAt !== undefined);
+    setOutcome(answer);
   }
 
   function submit() {
@@ -258,7 +258,7 @@ export function OnboardDrawer({
           <p className="panel-error rounded-[8px] px-3 py-2 text-body" role="alert">{fault}</p>
         )}
 
-        {outcome === null ? null : <Checklist outcome={outcome} />}
+        {outcome === null ? null : <Checklist outcome={outcome} sentEntitlement={sentEntitlement} />}
       </DetailDrawer>
       {ask.dialog}
     </>
@@ -266,7 +266,7 @@ export function OnboardDrawer({
 }
 
 /** What the hub managed, and what it is still waiting on the customer for. */
-function Checklist({ outcome }: { outcome: OnboardOutcome }) {
+export function Checklist({ outcome, sentEntitlement }: { outcome: OnboardOutcome; sentEntitlement: boolean }) {
   const privacy = usePrivacy();
   const registered = outcome.userId !== null;
   const steps: Array<{ done: boolean; word: string }> = [
@@ -306,6 +306,7 @@ function Checklist({ outcome }: { outcome: OnboardOutcome }) {
       {!registered ? (
         <p className="text-micro normal-case tracking-normal text-[var(--muted-foreground)]">
           {copy.onboardExtrasIgnored}
+          {sentEntitlement ? copy.onboardEntitlementKept : null}
         </p>
       ) : null}
     </div>

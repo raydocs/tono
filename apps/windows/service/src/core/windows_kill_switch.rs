@@ -40,6 +40,30 @@ pub(crate) fn release_superseded(captured: u64) -> bool {
 
 fn note_explicit_release() {
     RELEASE_EPOCH.fetch_add(1, Ordering::SeqCst);
+    note_attempt_superseded();
+}
+
+/// The `PrepareCoreStart` freshness epoch (what `GET /version` reports as `release_epoch`).
+/// Bumped by every explicit release and by an admitted native update takeover: the App
+/// invalidates its in-flight connect attempt before it sends `UpdateRequest::Prepare`, and from
+/// then on the user can start a successor connection without a Disconnect. StartClash keeps
+/// comparing `RELEASE_EPOCH` only — an update is not a Disconnect and must not make a late arm
+/// retract.
+static ATTEMPT_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+/// Snapshot copied by clients into `PrepareCoreStart` (via `GET /version`).
+pub(crate) fn attempt_epoch() -> u64 {
+    ATTEMPT_EPOCH.load(Ordering::SeqCst)
+}
+
+/// True when an explicit release or an update takeover happened after `captured`.
+pub(crate) fn attempt_superseded(captured: u64) -> bool {
+    ATTEMPT_EPOCH.load(Ordering::SeqCst) != captured
+}
+
+/// Supersede every connect attempt already in flight without touching protection.
+pub(crate) fn note_attempt_superseded() {
+    ATTEMPT_EPOCH.fetch_add(1, Ordering::SeqCst);
 }
 
 /// The fail-closed intent record in the service state directory. Written atomically before
@@ -186,6 +210,10 @@ static TEST_PERSIST_FAILURE: AtomicBool = AtomicBool::new(false);
 static TEST_INSTALL_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
 #[cfg(test)]
 static TEST_PERSIST_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
+/// Test stand-in for the Windows logon-session lookup: true means the recorded owner has signed
+/// out. Defaults to "still signed in", the answer that refuses a takeover.
+#[cfg(test)]
+static TEST_OWNER_SIGNED_OUT: AtomicBool = AtomicBool::new(false);
 static NEXT_DIRECT_RELOAD_ID: AtomicU64 = AtomicU64::new(1);
 /// Longer than the App's absolute connect transaction: while this bracket expires the physical
 /// DIRECT set is empty, but a stale request must still be invalidated eventually.
@@ -529,6 +557,26 @@ fn intent_is_valid(intent: &IntentRecord) -> bool {
             .all(|endpoint| wfp_model::parse_endpoint(endpoint).is_some())
 }
 
+/// The installed Tono app, the only process that calls the control plane (the Service has no
+/// HTTP client). Rule C is scoped to this image's app id; Program Files is writable only by
+/// administrators, the same trust the core-path allowlist rests on. Empty when the app is not
+/// installed there: the bootstrap API channel is then not rendered, which fails closed.
+fn installed_tono_app_path() -> String {
+    #[cfg(all(windows, not(feature = "test")))]
+    {
+        crate::core::update::program_files()
+            .map(|root| root.join("Tono").join("Tono.exe"))
+            .ok()
+            .filter(|path| path.is_file())
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    }
+    #[cfg(not(all(windows, not(feature = "test"))))]
+    {
+        String::new()
+    }
+}
+
 /// The rule model's view of an armed session, given who the running core is. Pure, so the
 /// tunnel-permit lifetime rule is testable without a core.
 fn rule_config_for(armed: &Armed, current_core: Option<CoreInstance>) -> RuleConfig {
@@ -544,6 +592,7 @@ fn rule_config_for(armed: &Armed, current_core: Option<CoreInstance>) -> RuleCon
             .collect(),
         tun_luid,
         app_path: armed.intent.app_path.clone(),
+        tono_app_path: installed_tono_app_path(),
         // DIRECT is a bypass of a live tunnel, never an independent escape hatch. A missing or
         // changed core identity retracts both grants in the same expected-set transaction.
         direct_endpoints: if armed.intent.mode == KillSwitchStatusMode::Locked && tun_luid.is_some()
@@ -893,8 +942,9 @@ async fn install_unlocked_for(armed: &Armed, current_core: Option<CoreInstance>)
     #[cfg(all(windows, not(feature = "test")))]
     {
         let app_path = armed.intent.app_path.clone();
+        let tono_app_path = config.tono_app_path.clone();
         let result = engine_call("install", move || {
-            crate::core::wfp::install(&expected, &app_path)
+            crate::core::wfp::install(&expected, &app_path, &tono_app_path)
         })
         .await;
         // `install` ends with exact provider-set verification, so only a successful transaction
@@ -1114,6 +1164,8 @@ pub(crate) async fn arm_bootstrap(
     }
     let api_host_ips = admit_api_host_ips(&config.bootstrap_api_hosts);
     let _operation = WFP_OPERATION.lock().await;
+    // Re-checked under the WFP lock: this is the write that records the new owner.
+    authorize_takeover_for(owner_key).map_err(anyhow::Error::new)?;
     let inherited_verified = armed_guard().as_ref().is_some_and(|armed| {
         armed.intent.owner_key.as_deref() == Some(owner_key) && armed.intent.is_verified()
     });
@@ -1238,6 +1290,264 @@ pub(crate) fn authorize_write_for(
         Ok(())
     } else {
         Err(crate::core::auth::ServiceError::not_active())
+    }
+}
+
+/// Whether `caller_key` may make itself the owner of the armed protection (StartClash /
+/// PrepareCoreStart).
+///
+/// `authorize_write_for` stops a different local user from releasing the armed policy, but a
+/// start rewrites the recorded owner and stops the running Core, after which that user's
+/// release would pass. So a start is refused on the same terms while the recorded owner still
+/// has a Windows logon session (active or disconnected). Once that user has signed out nobody
+/// is left to protect and the next user may take over. Ownerless intents stay open to anyone,
+/// exactly as in `authorize_write_for`.
+pub(crate) fn authorize_takeover_for(
+    caller_key: &str,
+) -> std::result::Result<(), crate::core::auth::ServiceError> {
+    let recorded = { armed_guard().clone() }
+        .filter(|armed| armed.intent.wanted)
+        .and_then(|armed| armed.intent.owner_key);
+    match recorded {
+        Some(recorded) if recorded != caller_key && owner_signed_in(&recorded) => {
+            Err(crate::core::auth::ServiceError::protection_held_by_another_user())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// The kind of Windows session the authenticated caller's process runs in.
+#[cfg_attr(not(any(all(windows, not(feature = "test")), test)), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CallerSession {
+    /// The physical console session.
+    Console,
+    /// A Remote Desktop (or other remoting protocol) session. It reaches this PC over the
+    /// physical interface that armed protection blocks, with no inbound exception.
+    Remote,
+    /// The session could not be read.
+    Unknown,
+}
+
+/// Whether a user-initiated connect (`StartClash` / `PrepareCoreStart`) must be refused because
+/// of the caller's session (TW-anthropic-1).
+///
+/// Arming protection from a Remote Desktop session cuts that session, and once the intent is
+/// verified the block is reinstalled at every boot; the emergency release refuses while the
+/// Service answers, and a disconnected owner still counts as signed in. A PC managed only over
+/// RDP could not be recovered. So a caller that is not provably on the console may not be the one
+/// that first arms protection. An unreadable session is refused like a remote one: the refusal
+/// leaves the network exactly as it was, while a wrong "console" answer could strand the machine.
+///
+/// The one exception is a caller whose own protection is already *verified* (`armed` is the
+/// published intent). Verification is committed only after a successful lock, so it proves the
+/// barrier was actually installed for this owner; that reconnect path stays fail-closed and
+/// unchanged. A bare `wanted` intent proves nothing: `ARMED` is published before the WFP install
+/// and survives a failed one, so a local first arm that failed before committing filters must not
+/// let a Remote Desktop retry arm for the first time.
+fn remote_session_connect_refused(
+    session: CallerSession,
+    armed: Option<&IntentRecord>,
+    caller_key: &str,
+) -> bool {
+    let caller_holds_verified_protection = armed.is_some_and(|intent| {
+        intent.wanted && intent.is_verified() && intent.owner_key.as_deref() == Some(caller_key)
+    });
+    session != CallerSession::Console && !caller_holds_verified_protection
+}
+
+/// Refuse a connect from a non-console session unless the caller already holds verified
+/// protection. `caller_session_id` is `AuthenticatedOwner::peer_session_id`: read from the token of
+/// the very pipe-peer process whose SID authentication verified, while that process handle was
+/// open, so it names the calling App's session (not this Service's Session 0) and cannot be
+/// redirected by a PID reused while the request waited for the lifecycle lock.
+pub(crate) fn authorize_connect_session_for(
+    caller_key: &str,
+    caller_session_id: Option<u32>,
+) -> std::result::Result<(), crate::core::auth::ServiceError> {
+    let session = caller_session(caller_session_id);
+    let refused = {
+        let armed = armed_guard();
+        remote_session_connect_refused(
+            session,
+            armed.as_ref().map(|armed| &armed.intent),
+            caller_key,
+        )
+    };
+    if !refused {
+        return Ok(());
+    }
+    tracing::warn!("connect refused: caller session is {session:?}, not the local console");
+    let message = if session == CallerSession::Remote {
+        "Connect is not allowed from a Remote Desktop session because protection would block this \
+         remote connection; connect from the local console"
+    } else {
+        "Connect is not allowed because this Windows session could not be confirmed as the local \
+         console, and protection would block a remote connection; connect from the local console"
+    };
+    Err(crate::core::auth::ServiceError::remote_session_connect_refused(message))
+}
+
+/// The current `WTSClientProtocolType` of Windows session `session_id` (0 = console; 1 = legacy
+/// ICA and 2 = RDP are both remote). Read at the gate, not at authentication, so a console session
+/// taken over by Remote Desktop while the request waited is seen as remote. Any failure, including
+/// a peer whose session was never read, answers `Unknown`.
+#[cfg(all(windows, not(feature = "test")))]
+fn caller_session(session_id: Option<u32>) -> CallerSession {
+    use windows_sys::Win32::System::RemoteDesktop::{
+        WTS_CURRENT_SERVER_HANDLE, WTSClientProtocolType, WTSFreeMemory,
+        WTSQuerySessionInformationW,
+    };
+
+    let Some(session_id) = session_id else {
+        return CallerSession::Unknown;
+    };
+    let mut buffer: windows_sys::core::PWSTR = std::ptr::null_mut();
+    let mut returned = 0_u32;
+    if unsafe {
+        WTSQuerySessionInformationW(
+            WTS_CURRENT_SERVER_HANDLE,
+            session_id,
+            WTSClientProtocolType,
+            &mut buffer,
+            &mut returned,
+        )
+    } == 0
+        || buffer.is_null()
+    {
+        return CallerSession::Unknown;
+    }
+    // A USHORT; read unaligned because the buffer is typed as a wide string.
+    let protocol = (returned as usize >= std::mem::size_of::<u16>())
+        .then(|| unsafe { buffer.read_unaligned() });
+    unsafe { WTSFreeMemory(buffer.cast()) };
+    match protocol {
+        Some(0) => CallerSession::Console,
+        Some(_) => CallerSession::Remote,
+        None => CallerSession::Unknown,
+    }
+}
+
+/// Off Windows and in the lifecycle `test` build there is no WTS: every caller is on the console,
+/// so the gate never changes those builds' behavior.
+#[cfg(not(all(windows, not(feature = "test"))))]
+fn caller_session(_session_id: Option<u32>) -> CallerSession {
+    CallerSession::Console
+}
+
+/// True unless every Windows session a user can be signed in to was inspected and none belongs to
+/// the user whose owner key is `owner_key`. Only sessions in the Active, Connected or
+/// Disconnected state can hold a signed-in user; listener, idle, reset, down and init sessions
+/// are skipped, so a Remote Desktop listener cannot keep a takeover refused forever. Within
+/// those sessions, only an explicit "no user" (`ERROR_NO_TOKEN`) or "session gone"
+/// (`ERROR_CTX_WINSTATION_NOT_FOUND`) counts as not signed in; any other failure, and any
+/// failure to enumerate, answers true: not knowing must keep the other user's protection in
+/// place.
+#[cfg(all(windows, not(feature = "test")))]
+fn owner_signed_in(owner_key: &str) -> bool {
+    use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
+    use windows_sys::Win32::Foundation::{
+        ERROR_CTX_WINSTATION_NOT_FOUND, ERROR_NO_TOKEN, GetLastError, LocalFree,
+    };
+    use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
+    use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_USER, TokenUser};
+    use windows_sys::Win32::System::RemoteDesktop::{
+        WTS_CURRENT_SERVER_HANDLE, WTS_SESSION_INFOW, WTSActive, WTSConnected, WTSDisconnected,
+        WTSEnumerateSessionsW, WTSFreeMemory, WTSQueryUserToken,
+    };
+
+    fn session_user_key(token: &OwnedHandle) -> Option<String> {
+        let mut required = 0_u32;
+        unsafe {
+            GetTokenInformation(
+                token.as_raw_handle(),
+                TokenUser,
+                std::ptr::null_mut(),
+                0,
+                &mut required,
+            )
+        };
+        if required == 0 {
+            return None;
+        }
+        let words = (required as usize).div_ceil(std::mem::size_of::<usize>());
+        let mut buffer = vec![0_usize; words];
+        if unsafe {
+            GetTokenInformation(
+                token.as_raw_handle(),
+                TokenUser,
+                buffer.as_mut_ptr().cast(),
+                required,
+                &mut required,
+            )
+        } == 0
+        {
+            return None;
+        }
+        let user = unsafe { &*buffer.as_ptr().cast::<TOKEN_USER>() };
+        let mut text = std::ptr::null_mut();
+        if unsafe { ConvertSidToStringSidW(user.User.Sid, &mut text) } == 0 || text.is_null() {
+            return None;
+        }
+        let length = (0..)
+            .take_while(|index| unsafe { *text.add(*index) } != 0)
+            .count();
+        let sid = String::from_utf16(unsafe { std::slice::from_raw_parts(text, length) });
+        unsafe { LocalFree(text.cast()) };
+        Some(crate::core::structure::owner_key(
+            &crate::OwnerIdentity::Windows { sid: sid.ok()? },
+        ))
+    }
+
+    let mut sessions: *mut WTS_SESSION_INFOW = std::ptr::null_mut();
+    let mut count = 0_u32;
+    if unsafe { WTSEnumerateSessionsW(WTS_CURRENT_SERVER_HANDLE, 0, 1, &mut sessions, &mut count) }
+        == 0
+    {
+        tracing::warn!("logon sessions could not be enumerated; treating the owner as signed in");
+        return true;
+    }
+    let listed = unsafe { std::slice::from_raw_parts(sessions, count as usize) }
+        .iter()
+        .filter(|session| matches!(session.State, WTSActive | WTSConnected | WTSDisconnected))
+        .map(|session| session.SessionId)
+        .collect::<Vec<_>>();
+    unsafe { WTSFreeMemory(sessions.cast()) };
+    for session_id in listed {
+        let mut token = std::ptr::null_mut();
+        if unsafe { WTSQueryUserToken(session_id, &mut token) } == 0 {
+            if matches!(
+                unsafe { GetLastError() },
+                ERROR_NO_TOKEN | ERROR_CTX_WINSTATION_NOT_FOUND
+            ) {
+                // No user on this session (e.g. an empty logon screen), or it ended after the
+                // enumeration.
+                continue;
+            }
+            tracing::warn!(
+                "session {session_id} user could not be read; treating the owner as signed in"
+            );
+            return true;
+        }
+        let token = unsafe { OwnedHandle::from_raw_handle(token) };
+        match session_user_key(&token) {
+            Some(key) if key == owner_key => return true,
+            Some(_) => {}
+            None => return true,
+        }
+    }
+    false
+}
+
+#[cfg(not(all(windows, not(feature = "test"))))]
+fn owner_signed_in(_owner_key: &str) -> bool {
+    #[cfg(test)]
+    {
+        !TEST_OWNER_SIGNED_OUT.load(Ordering::Relaxed)
+    }
+    #[cfg(not(test))]
+    {
+        true
     }
 }
 
@@ -3003,6 +3313,7 @@ mod tests {
         mark_verified("owner-alice").await?;
         arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
         assert!(ARMED.lock().unwrap().as_ref().unwrap().intent.is_verified());
+        TEST_OWNER_SIGNED_OUT.store(true, Ordering::Relaxed);
         arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-bob").await?;
         assert!(!ARMED.lock().unwrap().as_ref().unwrap().intent.is_verified());
         cleanup().await;
@@ -3050,6 +3361,7 @@ mod tests {
         TEST_AMBIGUOUS_INSTALL_FAILURE.store(false, Ordering::Relaxed);
         TEST_PERSIST_ATTEMPTS.store(0, Ordering::Relaxed);
         TEST_INSTALL_ATTEMPTS.store(0, Ordering::Relaxed);
+        TEST_OWNER_SIGNED_OUT.store(false, Ordering::Relaxed);
         crate::core::dns::test_hooks::set_live_dns_on_loopback(false);
         crate::core::manager::set_running_core_identity_for_kill_switch_tests(None).await;
         *ARMED.lock().unwrap() = None;
@@ -3299,6 +3611,7 @@ mod tests {
             },
             app_data_root: std::env::temp_dir(),
             peer_pid: None,
+            peer_session_id: None,
         };
         let config = ClashConfig {
             core_config: CoreConfig {
@@ -4090,6 +4403,65 @@ mod tests {
         );
         cleanup().await;
         Ok(())
+    }
+
+    /// H2-F2: a start by a different local user must not rewrite the recorded owner of armed
+    /// protection while that user is still signed in; otherwise the takeover makes the refused
+    /// release pass.
+    #[tokio::test]
+    #[serial]
+    async fn another_signed_in_user_cannot_take_over_armed_protection() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+
+        let error = arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-bob")
+            .await
+            .expect_err("a second signed-in user must not take over armed protection");
+
+        assert_eq!(
+            error
+                .downcast_ref::<crate::core::auth::ServiceError>()
+                .map(|refusal| refusal.code),
+            Some(crate::ServiceErrorCode::ProtectionHeldByAnotherUser)
+        );
+        let on_disk: IntentRecord = serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
+        assert_eq!(on_disk.owner_key.as_deref(), Some("owner-alice"));
+        cleanup().await;
+        Ok(())
+    }
+
+    /// TW-anthropic-1: a first connect from a Remote Desktop (or unreadable) session would arm a
+    /// block that cuts that session and cannot be released remotely, so it is refused. The
+    /// console may connect, and only the caller's own *verified* protection keeps its reconnect
+    /// path: an intent left by a failed first install proves no barrier was ever committed.
+    #[test]
+    fn a_remote_session_cannot_be_the_first_to_arm_protection() {
+        use CallerSession::{Console, Remote, Unknown};
+        fn refused(session: CallerSession, armed: Option<&IntentRecord>) -> bool {
+            remote_session_connect_refused(session, armed, "owner-alice")
+        }
+        let owned = |verified: bool, owner: &str| IntentRecord {
+            verified: Some(verified),
+            owner_key: Some(owner.to_owned()),
+            ..valid_intent(KillSwitchStatusMode::Bootstrap, true)
+        };
+        let verified = owned(true, "owner-alice");
+        let intent_only = owned(false, "owner-alice");
+        let other_users = owned(true, "owner-bob");
+
+        assert!(!refused(Console, None));
+        assert!(refused(Remote, None));
+        assert!(refused(Unknown, None));
+
+        assert!(!refused(Console, Some(&verified)));
+        assert!(!refused(Remote, Some(&verified)));
+        assert!(!refused(Unknown, Some(&verified)));
+
+        assert!(!refused(Console, Some(&intent_only)));
+        assert!(refused(Remote, Some(&intent_only)));
+        assert!(refused(Unknown, Some(&intent_only)));
+
+        assert!(refused(Remote, Some(&other_users)));
     }
 
     #[tokio::test]

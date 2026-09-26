@@ -12,7 +12,7 @@ use tono_service_protocol::{
     get_status as client_get_status, get_version, load_active_owner, load_owner_desired_state,
     owner_key, release_kill_switch as client_release_kill_switch, run_ipc_server,
     start_clash as client_start_clash, stop_clash as client_stop_clash, stop_ipc_server,
-    test_client,
+    test_client, update_transaction, update_wire::UpdateRequest,
 };
 #[cfg(unix)]
 use tono_service_protocol::{
@@ -732,6 +732,69 @@ async fn late_prepare_core_start_superseded_by_release_cannot_stop_the_successor
     assert!(after.is_active);
 
     assert_eq!(stop_clash(&credentials, &second_session).await?.code, 0);
+    stop_ipc_server().await?;
+    server_handle.await??;
+    Ok(())
+}
+
+/// TW-anthropic-4: the update epoch supersedes every connect attempt in flight on this machine,
+/// and any authenticated local caller can reach the update route. Only a Prepare the Service
+/// admits (the registered App image, no manual installer or repair, the pending attempt's own
+/// owner, a signed manifest) may advance it. This one is refused at that admission, as a
+/// request from anything but the installed App is, so a legitimate attempt's PrepareCoreStart
+/// must still be served. Before the fix the route advanced the epoch on owner authentication
+/// alone and the attempt was refused as stale. An admitted takeover still supersedes the
+/// cancelled attempt (H9-F3); this runner has no installed App or pinned key to admit one.
+#[tokio::test]
+#[serial]
+async fn update_prepare_refused_at_admission_does_not_supersede_a_connect_attempt() -> Result<()> {
+    common::init_tracing_for_tests();
+    let _ = stop_ipc_server().await;
+    let server_handle = run_ipc_server().await?;
+    common::wait_for_ipc().await?;
+
+    let credentials = common::owner_credentials();
+    // A connect attempt's client-side freshness snapshot, read before its request goes out.
+    let epoch = current_release_epoch().await?;
+
+    let prepared = update_transaction(
+        &credentials,
+        UpdateRequest::Prepare {
+            manifest: "{}".to_string(),
+            signature: String::new(),
+            package_path: String::new(),
+        },
+    )
+    .await?;
+    assert_ne!(
+        prepared.code, 0,
+        "an unsigned Prepare from outside the App must be refused"
+    );
+
+    // The attempt's PrepareCoreStart arrives with that snapshot.
+    let client = test_client().await?;
+    let body = serde_json::to_value(AuthenticatedRequest {
+        credentials: credentials.clone(),
+        payload: PrepareCoreStartFreshness {
+            release_epoch: epoch,
+        },
+    })?;
+    let response = client
+        .post(IpcCommand::PrepareCoreStart.as_ref())
+        .header(
+            SERVICE_PROTOCOL_HEADER,
+            ProtocolVersion::current().header_value(),
+        )
+        .json_body(&body)
+        .send()
+        .await?
+        .json::<WireResponse<u32>>()?;
+    assert_eq!(
+        response.code, 0,
+        "a Prepare refused at admission must not supersede a connect attempt: {}",
+        response.message
+    );
+
     stop_ipc_server().await?;
     server_handle.await??;
     Ok(())

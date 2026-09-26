@@ -106,12 +106,19 @@ export async function retireDependencies(
   };
 }
 
-/** Existing exit_nodes rotate (token_hash) plus disable. Same UPDATEs as POST token / PATCH status. */
+/**
+ * Existing exit_nodes rotate (token_hash) plus disable. Same UPDATEs as POST token / PATCH status.
+ *
+ * `catalogRevision` is the revision at which the caller saw the node out of the
+ * catalog. The revoke only lands if the catalog is still at it, so a relist that
+ * committed after that read is not undone by a drain sweep working from it.
+ */
 export async function revokeExitToken(
   e: Env,
   name: string,
   actorEmail: string,
   nowSec: number,
+  catalogRevision?: number,
 ): Promise<boolean> {
   try {
     const row = await e.DB.prepare(
@@ -121,9 +128,13 @@ export async function revokeExitToken(
     const token = randomToken();
     const updated = await e.DB.prepare(
       `UPDATE exit_nodes
-       SET token_hash = ?, status = 'disabled', updated_at = ?
-       WHERE id = ? AND status = 'active'`,
-    ).bind(await sha256(token), nowSec, String(row.id)).run();
+       SET revoked_token_hash = token_hash, token_hash = ?, status = 'disabled', updated_at = ?
+       WHERE id = ? AND status = 'active'
+         AND (? IS NULL OR COALESCE(
+           (SELECT revision FROM managed_exit_catalog WHERE singleton_id = 1), 0) = ?)`,
+    ).bind(
+      await sha256(token), nowSec, String(row.id), catalogRevision ?? null, catalogRevision ?? null,
+    ).run();
     if (!Number(updated.meta.changes ?? 0)) return false;
     await writeOpsAudit(
       e,
@@ -199,13 +210,19 @@ export async function finishDrainedRetires(e: Env, actorEmail: string, nowSec: n
     return 0;
   }
   if (names.length === 0) return 0;
+  // Read the revision before the names: a relist between the two moves the
+  // revision, so every revoke below misses rather than undoing it.
+  const revisionRow = await e.DB.prepare(
+    'SELECT revision FROM managed_exit_catalog WHERE singleton_id = 1',
+  ).first<Row>();
+  const revision = Number(revisionRow?.revision ?? 0);
   const listed = await catalogNames(e);
   let revoked = 0;
   for (const name of names) {
     if (listed?.has(name)) continue;
     const deps = await retireDependencies(e, name, nowSec);
     if (deps.customersOnNode.length > 0) continue;
-    if (await revokeExitToken(e, name, actorEmail, nowSec)) revoked += 1;
+    if (await revokeExitToken(e, name, actorEmail, nowSec, revision)) revoked += 1;
   }
   return revoked;
 }

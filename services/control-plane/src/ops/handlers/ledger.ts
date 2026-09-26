@@ -172,7 +172,7 @@ export async function postLedger(req: Request, e: Env, actor: Actor): Promise<Re
   const currency = currencyForKind(kind, b.currency);
   const fxDate = parseDay(b.fxDate as string | null | undefined, utcDateString(t));
   const { rate, day } = await rateFor(e, currency, fxDate);
-  const cnyMinor = cnyMinorFrom(amountMinor, rate);
+  const cnyMinor = cnyMinorFrom(amountMinor, currency, rate);
   const entryId = id();
   const paidAt = parsePaidAt(b.paidAt);
   const note = parseNote(b.note);
@@ -214,11 +214,23 @@ export async function patchLedger(req: Request, e: Env, rawId: string, actor: Ac
   let subjectId = nullText(row.subject_id);
   if (b.subjectType !== undefined) subjectType = oneOf(b.subjectType, LEDGER_SUBJECT_TYPES, 'subjectType');
   if (b.subjectId !== undefined) subjectId = parseSubjectId(b.subjectId);
-  await e.DB.prepare(
+  // A reversed row and its reversal cancel out only while both name the same
+  // subject; moving either one splits the same money across two subjects.
+  const subjectMoves = subjectType !== String(row.subject_type) || subjectId !== nullText(row.subject_id);
+  if (subjectMoves && (nullText(row.reversed_by) || nullText(row.reverses))) {
+    throw new ApiError(409, 'ALREADY_REVERSED', 'A reversed ledger entry keeps its subject');
+  }
+  const updated = await e.DB.prepare(
     `UPDATE ops_ledger_entries
      SET note = ?, paid_at = ?, subject_type = ?, subject_id = ?, updated_at = ?
-     WHERE id = ?`,
-  ).bind(note, paidAt, subjectType, subjectId, t, entryId).run();
+     WHERE id = ?
+       AND NOT EXISTS (SELECT 1 FROM ops_month_close WHERE month = ops_ledger_entries.month)
+       AND (? = 0 OR (reversed_by IS NULL AND reverses IS NULL))`,
+  ).bind(note, paidAt, subjectType, subjectId, t, entryId, subjectMoves ? 1 : 0).run();
+  if (Number(updated.meta.changes ?? 0) !== 1) {
+    await requireOpenMonth(e.DB, String(row.month));
+    throw new ApiError(409, 'ALREADY_REVERSED', 'A reversed ledger entry keeps its subject');
+  }
   await auditWrite(e, actor.email, 'ledger.update', 'ledger_entry', entryId, `updated ${entryId}`);
   const dto = ledgerDto(await loadEntry(e, entryId));
   check(e, () => { assertLedgerEntry(dto); });
@@ -246,15 +258,12 @@ export async function postLedgerReverse(req: Request, e: Env, rawId: string, act
            fx_rate_to_cny, fx_date, cny_minor, month, paid_at, note,
            reverses, reversed_by, created_by, created_at, updated_at
          )
-         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?, ?
-         WHERE (SELECT reversed_by FROM ops_ledger_entries WHERE id = ?) IS NULL
+         SELECT ?, kind, category, subject_type, subject_id, amount_minor, currency,
+                fx_rate_to_cny, fx_date, -cny_minor, ?, NULL, ?, id, NULL, ?, ?, ?
+         FROM ops_ledger_entries
+         WHERE id = ? AND reversed_by IS NULL
            AND NOT EXISTS (SELECT 1 FROM ops_month_close WHERE month = ?)`,
-      ).bind(
-        reverseId, original.kind, original.category, original.subject_type, original.subject_id,
-        original.amount_minor, original.currency, original.fx_rate_to_cny, original.fx_date,
-        -Number(original.cny_minor), month, note, entryId, actor.email, t, t,
-        entryId, month,
-      ),
+      ).bind(reverseId, month, note, actor.email, t, t, entryId, month),
       e.DB.prepare(
         'UPDATE ops_ledger_entries SET reversed_by = ?, updated_at = ? WHERE id = ? AND reversed_by IS NULL',
       ).bind(reverseId, t, entryId),

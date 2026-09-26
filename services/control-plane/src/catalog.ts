@@ -2,10 +2,13 @@ import { type Env, type Row, now, id, requiredCatalogKey } from './env';
 import { sha256, decryptCatalog } from './crypto';
 import {
   CLIENT_UUID_PLACEHOLDER,
+  catalogBaseName,
   filterCatalogYamlForUser,
   filterHy2CatalogForViewer,
   hy2CatalogEmailAllowlist,
   requestAcceptsHy2Catalog,
+  splitManagedCatalogProxies,
+  HY2_NAME_SUFFIX,
 } from './catalog-yaml';
 import { ApiError } from './errors';
 
@@ -41,7 +44,17 @@ export async function enqueueRefreshCatalogForUser(e: Env, userId: string) {
 /// Stable across fetches on purpose: the client persists the catalog digest and
 /// compares it, so an identity that changed per request would look like a
 /// tampered catalog every time.
-export async function exitClientUUID(e: Env, userId: string, deviceId?: string | null): Promise<string> {
+///
+/// `servedNodes` are the exit node names (hy2 folded to the base name) of the
+/// catalog this response serves. Only they must hold the device credential; a
+/// node that is registered but not published is not dialed with it.
+export async function exitClientUUID(
+  e: Env,
+  userId: string,
+  deviceId?: string | null,
+  servedNodes: string[] = [],
+  servedHomes: Array<{ node: string; name: string }> = [],
+): Promise<string> {
   if (deviceId) {
     await e.DB.prepare(
       `INSERT OR IGNORE INTO device_exit_credentials(device_id, user_id, client_uuid, created_at)
@@ -58,23 +71,46 @@ export async function exitClientUUID(e: Env, userId: string, deviceId?: string |
     if (!row) {
       throw new ApiError(409, 'DEVICE_STATE_CHANGED', 'Device is no longer active');
     }
+    // A served node without an active exit_nodes row has no token to
+    // acknowledge a roster with, so nothing proves it holds the credential.
+    // A served catalog home is left out only while no exit_nodes row (any
+    // status) carries its name, its hy2 base name or that name plus the hy2
+    // suffix: the two tables share no uniqueness, so a home named like an
+    // exit must not exempt that exit.
     const readiness = await e.DB.prepare(
-      `SELECT COUNT(*) AS active_nodes,
-              SUM(CASE WHEN last_roster_at <= ? THEN 1 ELSE 0 END) AS unready_nodes
-       FROM exit_nodes WHERE status = 'active'`,
-    ).bind(Number(row.created_at)).first<Row>();
-    if (Number(readiness?.active_nodes ?? 0) < 1 || Number(readiness?.unready_nodes ?? 0) > 0) {
+      `SELECT COUNT(*) AS served_nodes,
+              SUM(CASE WHEN exit_nodes.status = 'active' AND exit_nodes.last_roster_at > ?
+                       THEN 0 ELSE 1 END) AS unready_nodes
+       FROM (
+         SELECT value AS node FROM json_each(?)
+         UNION
+         SELECT json_extract(home.value, '$.node') FROM json_each(?) home
+         WHERE EXISTS (
+           SELECT 1 FROM exit_nodes named
+           WHERE named.name IN (json_extract(home.value, '$.node'), json_extract(home.value, '$.name'))
+              OR named.name IN (json_extract(home.value, '$.node') || ?, json_extract(home.value, '$.name') || ?)
+         )
+       ) served
+       LEFT JOIN exit_nodes ON exit_nodes.name = served.node`,
+    ).bind(
+      Number(row.created_at), JSON.stringify(servedNodes), JSON.stringify(servedHomes),
+      HY2_NAME_SUFFIX, HY2_NAME_SUFFIX,
+    ).first<Row>();
+    if (Number(readiness?.served_nodes ?? 0) < 1 || Number(readiness?.unready_nodes ?? 0) > 0) {
       // During the dual phase, keep existing and newly logging-in clients on
       // the per-user credential until the device credential is confirmed on
-      // every exit. This makes the first deployment non-disruptive: exit nodes
+      // every served exit. This makes the first deployment non-disruptive: exit nodes
       // and their tokens can only be provisioned after these endpoints exist.
-      if (await exitCredentialRolloutPhase(e) === 'dual') {
+      // A revoked device may hold the shared credential, so once any device
+      // of the account is revoked it is retired (migration 0077) and never
+      // served again; this device waits for its own credential instead.
+      if (await exitCredentialRolloutPhase(e) === 'dual' && !(await legacyExitCredentialRetired(e, userId))) {
         return exitClientUUID(e, userId, null);
       }
       throw new ApiError(
         503,
         'EXIT_IDENTITY_PROPAGATING',
-        'Exit identity is waiting for every active node to acknowledge it',
+        'Exit identity is waiting for every served exit node to acknowledge it',
       );
     }
     return String(row.client_uuid);
@@ -87,8 +123,15 @@ export async function exitClientUUID(e: Env, userId: string, deviceId?: string |
     );
   }
   const existing = await e.DB.prepare(
-    'SELECT client_uuid FROM exit_credentials WHERE user_id = ?',
+    'SELECT client_uuid, retired_at FROM exit_credentials WHERE user_id = ?',
   ).bind(userId).first<Row>();
+  if (existing?.retired_at != null) {
+    throw new ApiError(
+      409,
+      'DEVICE_IDENTITY_REQUIRED',
+      'The shared exit identity of this account was retired by a device revocation',
+    );
+  }
   if (existing) return String(existing.client_uuid);
   const minted = crypto.randomUUID();
   // Legacy issuance remains available only while the explicit rollout state is
@@ -99,10 +142,17 @@ export async function exitClientUUID(e: Env, userId: string, deviceId?: string |
      SELECT id, ?, ? FROM users WHERE id = ?`,
   ).bind(minted, now(), userId).run();
   const row = await e.DB.prepare(
-    'SELECT client_uuid FROM exit_credentials WHERE user_id = ?',
+    'SELECT client_uuid FROM exit_credentials WHERE user_id = ? AND retired_at IS NULL',
   ).bind(userId).first<Row>();
   if (!row) throw new ApiError(503, 'CATALOG_UNAVAILABLE', 'Could not issue an exit identity');
   return String(row.client_uuid);
+}
+
+export async function legacyExitCredentialRetired(e: Env, userId: string) {
+  const row = await e.DB.prepare(
+    'SELECT 1 FROM exit_credentials WHERE user_id = ? AND retired_at IS NOT NULL',
+  ).bind(userId).first<Row>();
+  return row !== null;
 }
 
 export type CatalogRouting = {
@@ -166,7 +216,7 @@ export async function homeRoutingForUser(e: Env, userId: string) {
 
 async function userMaySeeHy2Catalog(e: Env, userId: string): Promise<boolean> {
   const allow = hy2CatalogEmailAllowlist(e.HY2_CATALOG_EMAILS);
-  if (allow.size === 0) return false;
+  if (allow.size === 0) return true;
   const row = await e.DB.prepare('SELECT email FROM users WHERE id = ?').bind(userId).first<Row>();
   const email = String(row?.email ?? '').trim().toLowerCase();
   return email.length > 0 && allow.has(email);
@@ -175,9 +225,11 @@ async function userMaySeeHy2Catalog(e: Env, userId: string): Promise<boolean> {
 // Rotating HY2_CATALOG_EMAILS changes the served YAML (and therefore sha256)
 // for accounts that enter or leave the gray list. Bump the fleet revision
 // after that env change or Windows treats "same revision, new digest" as
-// tampering. Clients that send `X-Tono-Accept: hy2` also keep hy2 blocks;
-// old clients omit the header and still get them stripped. Production still
-// must not PUT hy2 blocks until a Worker with this filter is live.
+// tampering. Only clients that send `X-Tono-Accept: hy2` keep hy2 blocks; a
+// set gray list narrows those further. The list never admits a client that
+// did not declare hy2: 0.0.72 omits the header and rejects the whole catalog
+// on one hy2 block. Production still must not PUT hy2 blocks until a Worker
+// with this filter is live.
 
 // The routing document is per-account server state that the fleet-wide catalog
 // revision does not describe: a rebind, a default-proxy change or a credential
@@ -244,27 +296,44 @@ export async function publicManagedCatalog(
     updatedAt = Number(row.updated_at);
   }
   let served = yaml;
-  // The stored digest authenticates the catalog template. Authenticated clients
-  // receive a stable per-account identity, so recompute the digest after
-  // substitution and any per-user home-exit filtering.
-  if (options?.userId && served.includes(CLIENT_UUID_PLACEHOLDER)) {
-    const issued = await exitClientUUID(e, options.userId, options.deviceId);
-    served = served.split(CLIENT_UUID_PLACEHOLDER).join(issued);
-  }
   let routing: CatalogRouting | undefined;
+  let homeNames = new Set<string>();
   const routedUserId = options?.filterHomeExits ? options.userId : undefined;
   if (routedUserId) {
     const home = await homeRoutingForUser(e, routedUserId);
     routing = home.routing;
+    homeNames = home.restricted;
     if (home.restricted.size > 0) {
       served = filterCatalogYamlForUser(served, home.restricted, home.allowed);
     }
   }
   if (options?.userId) {
-    const keepHy2 = Boolean(options.acceptHy2)
-      || requestAcceptsHy2Catalog(options.hy2AcceptHeader)
-      || (await userMaySeeHy2Catalog(e, options.userId));
+    const keepHy2 = (Boolean(options.acceptHy2) || requestAcceptsHy2Catalog(options.hy2AcceptHeader))
+      && (await userMaySeeHy2Catalog(e, options.userId));
     served = filterHy2CatalogForViewer(served, keepHy2);
+  }
+  // The stored digest authenticates the catalog template. Authenticated clients
+  // receive a stable per-account identity, so recompute the digest after
+  // substitution and any per-user filtering. The identity is issued after
+  // filtering so its readiness covers exactly the exit nodes this response
+  // serves. A catalog home (a name the home filter restricts) is a home_exits
+  // row, and nothing ties it to an exit_nodes acknowledgement, so it is left
+  // out unless an exit node shares its name; a catalog that serves no exit
+  // node stays fail-closed. A served list with no proxies issues nothing,
+  // even if a comment keeps the placeholder.
+  const servedItems = options?.userId && served.includes(CLIENT_UUID_PLACEHOLDER)
+    ? splitManagedCatalogProxies(served).items
+    : [];
+  if (options?.userId && servedItems.length > 0) {
+    const servedNodes = new Set<string>();
+    const servedHomes: Array<{ node: string; name: string }> = [];
+    for (const item of servedItems) {
+      const node = catalogBaseName(item.name);
+      if (homeNames.has(item.name) || homeNames.has(node)) servedHomes.push({ node, name: item.name });
+      else servedNodes.add(node);
+    }
+    const issued = await exitClientUUID(e, options.userId, options.deviceId, [...servedNodes], servedHomes);
+    served = served.split(CLIENT_UUID_PLACEHOLDER).join(issued);
   }
   return {
     revision,

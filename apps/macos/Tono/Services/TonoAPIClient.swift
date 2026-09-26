@@ -14,6 +14,27 @@ nonisolated private final class TonoNoRedirectDelegate: NSObject, URLSessionTask
     }
 }
 
+/// The credentials and the account read revision a request started under
+/// (#582). An answer counts for the session only while those credentials are
+/// still the current ones.
+nonisolated private struct SessionScope: Sendable {
+    let generation: UInt64
+    let readScope: UInt64
+}
+
+/// How one exchange's answer bears on the session (#582). Parity with the
+/// Windows `SessionUse`.
+nonisolated private enum SessionUse: Sendable {
+    /// No session: sign-in and other public endpoints.
+    case noSession
+    /// A first attempt with the held access token. Its bare 401 only means
+    /// the token is stale; the renewal that follows answers for the session.
+    case bearer(SessionScope)
+    /// `auth/refresh`, or a replay with a freshly renewed token: a 401 here
+    /// is the server refusing the session.
+    case decisive(SessionScope)
+}
+
 actor TonoAPIClient {
     enum APIError: LocalizedError, Equatable {
         case invalidConfiguration, transport(String), unauthorized, forbidden, notFound
@@ -23,6 +44,14 @@ actor TonoAPIClient {
         /// `unauthorized` so it is neither retried behind a token refresh nor
         /// reported to the user as an expired session.
         case entitlementBlocked(code: String, message: String?)
+        /// `auth/email/verify` refused the code: wrong, already used, or past
+        /// its validity window. No session is involved, so it must not read
+        /// as an expired session (#595).
+        case invalidOrExpiredCode
+        /// #588: TLS refused the control plane's certificate on its dates, so
+        /// this Mac's clock is wrong. No status line arrived: offline
+        /// admission reads it as unreachable, but the user is told the clock.
+        case clockSkew
 
         var errorDescription: String? {
             switch self {
@@ -36,6 +65,8 @@ actor TonoAPIClient {
             case let .server(_, message): message
             case .invalidResponse: String(localized: "Tono returned an invalid response.")
             case let .entitlementBlocked(code, _): Self.entitlementDescription(code)
+            case .invalidOrExpiredCode: String(localized: "That code is wrong or expired. Request a new one.")
+            case .clockSkew: CertificateClock.userMessage
             }
         }
 
@@ -58,7 +89,7 @@ actor TonoAPIClient {
     /// it names today — expiry and quota still answer 401 `UNAUTHORIZED`, which
     /// is indistinguishable from a stale access token — so the rest are accepted
     /// ahead of that server change instead of needing another client release.
-    private static let entitlementCodes: Set<String> = [
+    static let entitlementCodes: Set<String> = [
         "ACCOUNT_DISABLED",
         "ACCOUNT_EXPIRED",
         "ACCOUNT_SUSPENDED",
@@ -70,7 +101,17 @@ actor TonoAPIClient {
     private struct APIErrorBody: Decodable { let message: String?; let code: String? }
     private struct ErrorEnvelope: Decodable { let error: APIErrorBody }
     private let baseURL: URL
-    private let session: URLSession
+    /// The control-plane `URLSession`, which resolves the host through the
+    /// system resolver.
+    private let systemPath: ControlPlanePath
+    /// #584: the bundled pinned addresses, tried when the system resolver
+    /// fails before any status line.
+    private let pinnedPath: ControlPlanePath?
+    /// #584: the pinned addresses answered where the system resolver failed,
+    /// so later requests try them first. Cleared when a preferred attempt
+    /// fails, is cancelled or its body fails. Process memory only, like the Windows
+    /// client's learned preference (#583).
+    private var prefersPinnedAddresses = false
     private let keychain: KeychainStore
     private var accessToken: String?
     private var refreshTask: (id: UUID, task: Task<String, Error>)?
@@ -89,32 +130,62 @@ actor TonoAPIClient {
     /// claims are only a client refresh clock because the server still checks
     /// session, user and device state in D1 on every protected request.
     private static let accessTokenRenewalWindow: TimeInterval = 60
+    /// Platform and marketing version on every request, so the control plane
+    /// can record which build signs in, refreshes and fetches the catalog even
+    /// when no telemetry is sent. Nothing account- or network-specific.
+    private static let clientHeader = "macos/" + (
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+    )
     /// A rotated refresh token whose keychain write failed. The server has
     /// already invalidated the previous token, so this value must stay usable
     /// in-memory (and be re-persisted at the next opportunity) or the user is
     /// irreversibly logged out by a transient keychain error.
     private var unpersistedRefreshToken: String?
+    /// Where every classified server answer about this session goes, and the
+    /// writer of the offline grant (#582). Read synchronously by the account
+    /// session and by Connect.
+    nonisolated let offlineGate: OfflineGrantGate
 
-    init(baseURL: URL = TonoAPIClient.configuredBaseURL(), keychain: KeychainStore = KeychainStore(), session: URLSession? = nil) {
+    init(
+        baseURL: URL = TonoAPIClient.configuredBaseURL(),
+        keychain: KeychainStore = KeychainStore(),
+        session: URLSession? = nil,
+        offlineGate: OfflineGrantGate = OfflineGrantGate(directory: ConfigStorage.shared.appSupportDirectory),
+        pinnedPath: ControlPlanePath? = nil
+    ) {
         self.baseURL = baseURL
         self.keychain = keychain
-        if let session { self.session = session } else {
-            let configuration = URLSessionConfiguration.ephemeral
-            // Mainland cross-border paths can take several seconds to recover
-            // DNS, TLS, or connectivity. Keep the wait bounded, but do not
-            // turn a short network transition into an immediate login error.
-            configuration.timeoutIntervalForRequest = 30
-            configuration.timeoutIntervalForResource = 45
-            configuration.waitsForConnectivity = true
-            configuration.allowsExpensiveNetworkAccess = true
-            configuration.httpCookieStorage = nil
-            configuration.httpShouldSetCookies = false
-            self.session = URLSession(
-                configuration: configuration,
-                delegate: TonoNoRedirectDelegate(),
-                delegateQueue: nil
-            )
-        }
+        self.offlineGate = offlineGate
+        let urlSession = session ?? URLSession(
+            configuration: Self.controlPlaneSessionConfiguration(),
+            delegate: TonoNoRedirectDelegate(),
+            delegateQueue: nil
+        )
+        systemPath = ControlPlanePath.systemResolver(urlSession)
+        // #584: production falls back to the pinned addresses. An injected
+        // session (tests) has none unless one is passed.
+        self.pinnedPath = pinnedPath
+            ?? (session == nil ? ControlPlanePath.pinnedAddresses(for: baseURL) : nil)
+    }
+
+    /// The production control-plane session configuration. An injected
+    /// session (tests) is used as given.
+    nonisolated static func controlPlaneSessionConfiguration() -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.ephemeral
+        // Mainland cross-border paths can take several seconds to recover
+        // DNS, TLS, or connectivity. Keep the wait bounded, but do not
+        // turn a short network transition into an immediate login error.
+        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = 45
+        configuration.waitsForConnectivity = true
+        configuration.allowsExpensiveNetworkAccess = true
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        // #587: no system proxy or PAC. Another app's local proxy set as the
+        // system proxy would carry account calls, and PF blocks its upstream
+        // in Protected Offline. Windows uses no_proxy for the same reason.
+        configuration.connectionProxyDictionary = [:]
+        return configuration
     }
 
     nonisolated static func configuredBaseURL(bundle: Bundle = .main, environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
@@ -202,12 +273,7 @@ actor TonoAPIClient {
             ],
             requestIsCurrent: requestIsCurrent
         )
-        guard receipt.wasStored else {
-            throw APIError.server(
-                status: 200,
-                message: String(localized: "Tono did not store this network log. Check the device's diagnostic collection authorization.")
-            )
-        }
+        guard receipt.wasStored else { throw DiagnosticsLogNotStoredError() }
         return receipt
     }
 
@@ -222,9 +288,13 @@ actor TonoAPIClient {
     }
 
     func reportConnectFailure(
-        _ report: TonoConnectFailureReport
+        _ report: TonoConnectFailureReport,
+        requestIsCurrent: (@Sendable () -> Bool)? = nil
     ) async throws -> TonoConnectFailureReceipt {
-        try await authorizedRequest("telemetry/failures", method: "POST", body: report)
+        try await authorizedRequest(
+            "telemetry/failures", method: "POST", body: report,
+            requestIsCurrent: requestIsCurrent
+        )
     }
 
     func uploadSupportReport(
@@ -272,6 +342,8 @@ actor TonoAPIClient {
             throw APIError.invalidResponse
         }
         retireCredentialGeneration()
+        // Nothing the server told the previous identity applies to this one.
+        offlineGate.adoptNewIdentity()
         accessToken = auth.accessToken
         accessTokenExpiry = Self.expiry(ofJWT: auth.accessToken)
         do {
@@ -354,7 +426,10 @@ actor TonoAPIClient {
         // credential orphaned server-side. The body is re-encoded per attempt:
         // a 401-triggered refresh rotates the token, and revoking the
         // pre-rotation value would orphan the freshly rotated one instead.
-        if currentRefreshToken() != nil {
+        // A token that cannot be read cannot be revoked; local deletion below
+        // is all that remains, as before.
+        if (try? currentRefreshToken()) != nil {
+            let scope = SessionScope(generation: generation, readScope: offlineGate.readScope)
             do {
                 let token: String
                 if let accessToken {
@@ -364,14 +439,14 @@ actor TonoAPIClient {
                 }
                 guard generation == credentialGeneration else { return }
                 do {
-                    try await sendLogout(bearer: token)
+                    try await sendLogout(bearer: token, session: .bearer(scope))
                 } catch APIError.unauthorized {
                     guard generation == credentialGeneration else { return }
                     accessToken = nil
                     accessTokenExpiry = nil
                     let renewed = try await refreshAccessToken()
                     guard generation == credentialGeneration else { return }
-                    try await sendLogout(bearer: renewed)
+                    try await sendLogout(bearer: renewed, session: .decisive(scope))
                 }
             } catch {
                 // Refresh or revoke failed: the token is already dead
@@ -407,33 +482,45 @@ actor TonoAPIClient {
         guard !isLoggingOut else { throw CancellationError() }
     }
 
-    private func sendLogout(bearer: String) async throws {
+    private func sendLogout(bearer: String, session: SessionUse) async throws {
         let body = try TonoCoding.encoder().encode(
-            TonoLogoutRequest(refreshToken: currentRefreshToken())
+            TonoLogoutRequest(refreshToken: try? currentRefreshToken())
         )
         _ = try await sendData(
-            "auth/logout", method: "POST", body: body, bearer: bearer
+            "auth/logout", method: "POST", body: body, bearer: bearer, session: session
         )
     }
 
     /// The freshest usable refresh token: a rotated-but-unpersisted value
     /// always wins over the keychain copy it failed to replace.
-    private func currentRefreshToken() -> String? {
-        unpersistedRefreshToken ?? (try? keychain.string(for: .refreshToken))
+    ///
+    /// Only a missing item means there is no session. Any other keychain
+    /// status (a locked login keychain, interaction not allowed) is thrown as
+    /// the local, retryable read failure it is. Reported as nil, it became
+    /// `.unauthorized` without asking the server, which suspends or signs out
+    /// an account the server never refused.
+    private func currentRefreshToken() throws -> String? {
+        try unpersistedRefreshToken ?? keychain.string(for: .refreshToken)
     }
 
     private func refreshAccessToken() async throws -> String {
         if let refreshTask { return try await refreshTask.task.value }
         let id = UUID()
         let generation = credentialGeneration
+        let scope = SessionScope(generation: generation, readScope: offlineGate.readScope)
         let task = Task<String, Error> {
             try requireCredentialGeneration(generation)
             if let pending = unpersistedRefreshToken,
                (try? keychain.set(pending, for: .refreshToken)) != nil {
                 unpersistedRefreshToken = nil
             }
-            guard let refresh = currentRefreshToken() else { throw APIError.unauthorized }
-            let response: TonoTokenResponse = try await publicRequest("auth/refresh", body: TonoRefreshRequest(refreshToken: refresh))
+            guard let refresh = try currentRefreshToken() else { throw APIError.unauthorized }
+            // The renewal answers for the session: its 401 is the server refusing it.
+            let response: TonoTokenResponse = try await publicRequest(
+                "auth/refresh",
+                body: TonoRefreshRequest(refreshToken: refresh),
+                session: .decisive(scope)
+            )
             try requireCredentialGeneration(generation)
             accessToken = response.accessToken
             accessTokenExpiry = Self.expiry(ofJWT: response.accessToken)
@@ -455,11 +542,13 @@ actor TonoAPIClient {
         return try await task.value
     }
 
-    private func publicRequest<Response: Decodable, Body: Encodable>(_ path: String, body: Body) async throws -> Response {
-        try await send(path, method: "POST", body: TonoCoding.encoder().encode(body), bearer: nil)
+    private func publicRequest<Response: Decodable, Body: Encodable>(
+        _ path: String, body: Body, session: SessionUse = .noSession
+    ) async throws -> Response {
+        try await send(path, method: "POST", body: TonoCoding.encoder().encode(body), bearer: nil, session: session)
     }
     private func publicGet<Response: Decodable>(_ path: String) async throws -> Response {
-        try await send(path, method: "GET", body: nil, bearer: nil)
+        try await send(path, method: "GET", body: nil, bearer: nil, session: .noSession)
     }
     private func publicAuthRequest<Body: Encodable>(_ path: String, body: Body) async throws -> TonoAuthResponse {
         let envelope: TonoAuthEnvelope = try await publicRequest(path, body: body)
@@ -491,6 +580,7 @@ actor TonoAPIClient {
         requestIsCurrent: (@Sendable () -> Bool)? = nil
     ) async throws -> Response {
         let generation = credentialGeneration
+        let scope = SessionScope(generation: generation, readScope: offlineGate.readScope)
         try requireAuthenticatedRequest(generation)
         try Self.requireCurrent(requestIsCurrent)
         let token = try await currentAccessToken()
@@ -503,6 +593,7 @@ actor TonoAPIClient {
                 method: method,
                 body: bodyData,
                 bearer: token,
+                session: .bearer(scope),
                 additionalHeaders: additionalHeaders,
                 requestIsCurrent: requestIsCurrent
             )
@@ -523,6 +614,7 @@ actor TonoAPIClient {
                     method: method,
                     body: bodyData,
                     bearer: renewed,
+                    session: .decisive(scope),
                     additionalHeaders: additionalHeaders,
                     requestIsCurrent: requestIsCurrent
                 )
@@ -539,34 +631,36 @@ actor TonoAPIClient {
     }
     private func authorizedVoid(_ path: String, method: String) async throws {
         let generation = credentialGeneration
+        let scope = SessionScope(generation: generation, readScope: offlineGate.readScope)
         try requireAuthenticatedRequest(generation)
         let token = try await currentAccessToken()
         try requireAuthenticatedRequest(generation)
-        do { _ = try await sendData(path, method: method, body: nil, bearer: token) }
+        do { _ = try await sendData(path, method: method, body: nil, bearer: token, session: .bearer(scope)) }
         catch APIError.unauthorized {
             try requireAuthenticatedRequest(generation)
             accessToken = nil
             accessTokenExpiry = nil
             let renewed = try await refreshAccessToken()
             try requireAuthenticatedRequest(generation)
-            _ = try await sendData(path, method: method, body: nil, bearer: renewed)
+            _ = try await sendData(path, method: method, body: nil, bearer: renewed, session: .decisive(scope))
         }
         try requireAuthenticatedRequest(generation)
     }
     private func authorizedVoid<Body: Encodable>(_ path: String, method: String, body: Body) async throws {
         let generation = credentialGeneration
+        let scope = SessionScope(generation: generation, readScope: offlineGate.readScope)
         try requireAuthenticatedRequest(generation)
         let token = try await currentAccessToken()
         try requireAuthenticatedRequest(generation)
         let bodyData = try TonoCoding.encoder().encode(body)
-        do { _ = try await sendData(path, method: method, body: bodyData, bearer: token) }
+        do { _ = try await sendData(path, method: method, body: bodyData, bearer: token, session: .bearer(scope)) }
         catch APIError.unauthorized {
             try requireAuthenticatedRequest(generation)
             accessToken = nil
             accessTokenExpiry = nil
             let renewed = try await refreshAccessToken()
             try requireAuthenticatedRequest(generation)
-            _ = try await sendData(path, method: method, body: bodyData, bearer: renewed)
+            _ = try await sendData(path, method: method, body: bodyData, bearer: renewed, session: .decisive(scope))
         }
         try requireAuthenticatedRequest(generation)
     }
@@ -576,6 +670,7 @@ actor TonoAPIClient {
         method: String,
         body: Data?,
         bearer: String?,
+        session: SessionUse,
         additionalHeaders: [String: String] = [:],
         requestIsCurrent: (@Sendable () -> Bool)? = nil
     ) async throws -> Response {
@@ -584,6 +679,7 @@ actor TonoAPIClient {
             method: method,
             body: body,
             bearer: bearer,
+            session: session,
             additionalHeaders: additionalHeaders,
             requestIsCurrent: requestIsCurrent
         )
@@ -595,6 +691,7 @@ actor TonoAPIClient {
         method: String,
         body: Data?,
         bearer: String?,
+        session: SessionUse,
         additionalHeaders: [String: String] = [:],
         requestIsCurrent: (@Sendable () -> Bool)? = nil
     ) async throws -> Data {
@@ -638,6 +735,7 @@ actor TonoAPIClient {
         // TLS/timeout failure from China while TCP HTTPS still works.
         request.assumesHTTP3Capable = false
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(Self.clientHeader, forHTTPHeaderField: "X-Tono-Client")
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         if let bearer { request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization") }
         for (field, value) in additionalHeaders {
@@ -646,10 +744,17 @@ actor TonoAPIClient {
         let maximumAttempts = 2
         for attempt in 1...maximumAttempts {
             try Self.requireCurrent(requestIsCurrent)
-            let bytes: URLSession.AsyncBytes
-            let response: URLResponse
+            let answer: ControlPlaneAnswer
+            let pathLabel: String
             do {
-                (bytes, response) = try await session.bytes(for: request)
+                (answer, pathLabel) = try await exchangeOverPaths(
+                    request,
+                    method: method,
+                    auditDetails: auditDetails,
+                    requestIsCurrent: requestIsCurrent
+                )
+            } catch ControlPlaneExchangeError.invalidResponse {
+                throw APIError.invalidResponse
             } catch {
                 try await handleTransportFailure(
                     error,
@@ -661,53 +766,43 @@ actor TonoAPIClient {
                 )
                 continue
             }
-            guard let http = response as? HTTPURLResponse else {
-                throw APIError.invalidResponse
-            }
-            let maximumResponseBytes = 2 * 1024 * 1024
-            if let declared = http.value(forHTTPHeaderField: "Content-Length").flatMap(Int.init),
-               declared < 0 || declared > maximumResponseBytes {
-                throw APIError.invalidResponse
-            }
-            var data = Data()
-            data.reserveCapacity(
-                min(
-                    http.value(forHTTPHeaderField: "Content-Length").flatMap(Int.init) ?? 0,
-                    maximumResponseBytes
-                )
-            )
-            do {
-                for try await byte in bytes {
-                    guard data.count < maximumResponseBytes else {
-                        throw APIError.invalidResponse
-                    }
-                    data.append(byte)
+            let status = answer.status
+            let data = answer.body
+            if let failure = answer.bodyFailure {
+                guard !(200..<300).contains(status) else {
+                    try await handleTransportFailure(
+                        failure,
+                        method: method,
+                        attempt: attempt,
+                        maximumAttempts: maximumAttempts,
+                        requestStartedAt: requestStartedAt,
+                        auditDetails: auditDetails,
+                        httpStatus: status
+                    )
+                    continue
                 }
-            } catch let apiError as APIError {
-                throw apiError
-            } catch {
-                try await handleTransportFailure(
-                    error,
-                    method: method,
-                    attempt: attempt,
-                    maximumAttempts: maximumAttempts,
-                    requestStartedAt: requestStartedAt,
-                    auditDetails: auditDetails,
-                    httpStatus: http.statusCode
-                )
-                continue
+                // #582: a non-2xx status line is the server's answer even when
+                // its body is cut off. It is classified from what arrived and
+                // thrown as that status below, never as an unreachable control
+                // plane that offline admission accepts.
+                if Self.isCancellation(failure) {
+                    reportSessionAnswer(status: status, body: data, session: session)
+                    throw CancellationError()
+                }
             }
-            guard (200..<300).contains(http.statusCode) else {
+            reportSessionAnswer(status: status, body: data, session: session)
+            guard (200..<300).contains(status) else {
                 var rejectionDetails = auditDetails.merging([
                     "duration_ms": Self.durationMilliseconds(since: requestStartedAt),
-                    "http_status": String(http.statusCode),
+                    "http_status": String(status),
+                    "path": pathLabel,
                     // This event describes one HTTP exchange. In particular,
                     // an authenticated 401 can be followed by token refresh
                     // and a successful retry; it is not yet an operation-level
                     // control-plane failure.
                     "scope": "http_exchange",
                 ]) { _, new in new }
-                if http.statusCode == 401 {
+                if status == 401 {
                     rejectionDetails["auth_recovery_eligible"] = String(bearer != nil)
                 }
                 LocalTrafficAudit.shared.recordEvent(
@@ -715,29 +810,181 @@ actor TonoAPIClient {
                     details: rejectionDetails
                 )
                 let envelope = try? TonoCoding.decoder().decode(ErrorEnvelope.self, from: data)
-                if http.statusCode == 401 || http.statusCode == 403,
+                if status == 401 || status == 403,
                    let code = envelope?.error.code,
                    Self.entitlementCodes.contains(code) {
                     throw APIError.entitlementBlocked(
                         code: code, message: envelope?.error.message
                     )
                 }
-                if http.statusCode == 401 { throw APIError.unauthorized }; if http.statusCode == 403 { throw APIError.forbidden }
-                if http.statusCode == 404 { throw APIError.notFound }
-                if http.statusCode == 409 && envelope?.error.code == "DEVICE_LIMIT" { throw APIError.deviceLimit }
-                throw APIError.server(status: http.statusCode, message: envelope?.error.message ?? "Tono request failed (\(http.statusCode)).")
+                // #595: the Worker's refusal of a sign-in code, not an expired session. Keyed on
+                // the code: the verify endpoint also answers a plain 401 (AUTHENTICATION_FAILED).
+                if status == 401, envelope?.error.code == "INVALID_OR_EXPIRED_CODE" { throw APIError.invalidOrExpiredCode }
+                if status == 401 { throw APIError.unauthorized }; if status == 403 { throw APIError.forbidden }
+                if status == 404 { throw APIError.notFound }
+                if status == 409 && envelope?.error.code == "DEVICE_LIMIT" { throw APIError.deviceLimit }
+                throw APIError.server(status: status, message: envelope?.error.message ?? "Tono request failed (\(status)).")
             }
             LocalTrafficAudit.shared.recordEvent(
                 "control_plane_request_succeeded",
                 details: auditDetails.merging([
                     "attempt": String(attempt),
                     "duration_ms": Self.durationMilliseconds(since: requestStartedAt),
-                    "http_status": String(http.statusCode),
+                    "http_status": String(status),
+                    "path": pathLabel,
                 ]) { _, new in new }
             )
             return data
         }
         throw APIError.transport("Retry attempts exhausted.")
+    }
+
+    /// #584: one exchange, over the system resolver first and then the
+    /// pinned addresses. A healthy network keeps today's path; the pinned
+    /// client only runs where the system resolver could not deliver.
+    ///
+    /// A request moves to the next path only on a failure `shouldRetry`
+    /// would replay for its method: a read after any failure, a mutating
+    /// request only when no connection was made. An exchange that may have
+    /// reached the server is never sent again elsewhere, and an answered one
+    /// (any status line) is returned as it came. The caller's retry wraps
+    /// the whole walk, as `ApiClient` wraps the Windows transport (#583).
+    private func exchangeOverPaths(
+        _ request: URLRequest,
+        method: String,
+        auditDetails: [String: String],
+        requestIsCurrent: (@Sendable () -> Bool)?
+    ) async throws -> (ControlPlaneAnswer, String) {
+        let maximumResponseBytes = 2 * 1024 * 1024
+        guard let pinnedPath else {
+            let answer = try await systemPath.exchange(request, maximumResponseBytes)
+            return (answer, systemPath.label)
+        }
+        let pinnedFirst = prefersPinnedAddresses
+        let order = pinnedFirst ? [pinnedPath, systemPath] : [systemPath, pinnedPath]
+        // #588: a path that failed on a certificate date is the cause to
+        // report when no path answers, whatever the next path failed on.
+        var clockFailure: (any Error)?
+        for (index, path) in order.enumerated() {
+            if index > 0 { try Self.requireCurrent(requestIsCurrent) }
+            do {
+                let answer = try await path.exchange(request, maximumResponseBytes)
+                if answer.bodyFailure != nil {
+                    // A body that failed after the status line, or was
+                    // cancelled, neither keeps nor earns the preference.
+                    if index == 0, pinnedFirst { prefersPinnedAddresses = false }
+                } else if index > 0, !pinnedFirst {
+                    // The pins answered where the system resolver could not.
+                    prefersPinnedAddresses = true
+                }
+                return (answer, path.label)
+            } catch {
+                // A preferred attempt that fails or is cancelled puts the
+                // system resolver back in front for the next request.
+                if index == 0, pinnedFirst { prefersPinnedAddresses = false }
+                if CertificateClock.isDateFailure(error) { clockFailure = error }
+                guard index + 1 < order.count,
+                      !(error is ControlPlaneExchangeError),
+                      !Self.isCancellation(error),
+                      // The retry rule itself, as if this were a first attempt
+                      // with one retry left.
+                      Self.shouldRetry(
+                        method: method,
+                        error: error as NSError,
+                        responseReceived: false,
+                        attempt: 1,
+                        maximumAttempts: 2
+                      )
+                else {
+                    if let clockFailure, !(error is ControlPlaneExchangeError),
+                       !Self.isCancellation(error) {
+                        throw clockFailure
+                    }
+                    throw error
+                }
+                let failure = error as NSError
+                LocalTrafficAudit.shared.recordEvent(
+                    "control_plane_path_failed",
+                    details: auditDetails.merging([
+                        "path": path.label,
+                        "next_path": order[index + 1].label,
+                        "error_domain": failure.domain,
+                        "error_code": String(failure.code),
+                        "detail": String(failure.localizedDescription.prefix(300)),
+                    ]) { _, new in new }
+                )
+            }
+        }
+        // Unreachable: the last path either answers or throws above.
+        throw APIError.transport("No control-plane path answered.")
+    }
+
+    /// #582: the one place this client reads the server's answer about the
+    /// session. It sits below the transport retry and below every renewal, so
+    /// each answer is classified and reported whatever its caller then does
+    /// with it (a logout that swallows it, a catalog read that keeps the last
+    /// cache). Only an HTTP answer is classified: an `unauthorized` this client
+    /// throws on its own (no stored token) never reaches the sink.
+    private func reportSessionAnswer(status: Int, body: Data, session: SessionUse) {
+        let scope: SessionScope
+        let decisive: Bool
+        switch session {
+        case .noSession:
+            return
+        case let .bearer(value):
+            scope = value
+            decisive = false
+        case let .decisive(value):
+            scope = value
+            decisive = true
+        }
+        // A retired identity's late answer must never reach its replacement.
+        guard scope.generation == credentialGeneration else { return }
+        let verdict: TonoSessionVerdict
+        if (200..<300).contains(status) {
+            verdict = .verified
+        } else {
+            let code = (try? TonoCoding.decoder().decode(ErrorEnvelope.self, from: body))?.error.code
+            if status == 401 || status == 403, let code, Self.entitlementCodes.contains(code) {
+                verdict = .refused(code: code)
+            } else if status == 401, decisive {
+                verdict = .refused(code: code)
+            } else if status == 403 {
+                verdict = .forbidden
+            } else {
+                // A first attempt's bare 401 is only a stale access token, and
+                // any other status says nothing about the session.
+                return
+            }
+        }
+        // A revocation binds the session it revoked: the refresh token this
+        // actor holds now, which is the one the refused exchange carried.
+        let tokenSha256 = verdict == .verified ? nil : currentRefreshTokenDigest()
+        offlineGate.report(verdict, readScope: scope.readScope, tokenSha256: tokenSha256)
+    }
+
+    /// #582: the digest of the refresh token this session holds now, as it
+    /// was hydrated (a rotated token still in memory first), for offline
+    /// admission.
+    func currentRefreshTokenDigest() -> String? {
+        guard let token = try? currentRefreshToken() else { return nil }
+        return OfflineGrantGate.tokenDigest(token)
+    }
+
+    /// #582: record the offline grant for a catalog the server has just
+    /// confirmed. It binds only a refresh token the keychain acknowledged: a
+    /// rotated token that is only in memory would leave a grant no relaunch
+    /// could match, and a logout in progress owns these credentials.
+    func recordOfflineGrant(accountId: String, confirmed digests: InstalledCatalogDigests) {
+        guard unpersistedRefreshToken == nil, !isLoggingOut,
+              let token = try? keychain.string(for: .refreshToken) else { return }
+        offlineGate.writeGrant(OfflineGrant(
+            accountId: accountId,
+            tokenSha256: OfflineGrantGate.tokenDigest(token),
+            catalogSha256: digests.catalogSha256,
+            routingSha256: digests.routingSha256,
+            verifiedAt: Int64(Date().timeIntervalSince1970 * 1_000)
+        ))
     }
 
     nonisolated private static func requireCurrent(
@@ -783,6 +1030,7 @@ actor TonoAPIClient {
             details: failureDetails
         )
         guard willRetry else {
+            if CertificateClock.isDateFailure(error) { throw APIError.clockSkew }
             throw APIError.transport(error.localizedDescription)
         }
         try await Task.sleep(for: .seconds(1))

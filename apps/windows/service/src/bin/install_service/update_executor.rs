@@ -20,9 +20,10 @@ struct Plan {
 enum RecoveryPublication {
     /// No durable replacement plan exists, so no publication can have started.
     NoPlan,
-    /// The installed identity equals the signed target: the publication
-    /// completed and was verified before. Recovery re-establishes the
-    /// successor path; it must not revert a complete installation.
+    /// The installed identity equals the signed target and every durable
+    /// plan member is at its new digest: the publication completed and was
+    /// verified before. Recovery re-establishes the successor path; it must
+    /// not revert a complete installation.
     TargetVerified,
     /// The installed identity is not the signed target: the publication is
     /// genuinely interrupted (or a previous rollback already restored the
@@ -32,16 +33,87 @@ enum RecoveryPublication {
 
 fn classify_recovery(
     plan_present: bool,
+    plan_members_new: bool,
     installed: &Components,
     target: &Components,
 ) -> RecoveryPublication {
     if !plan_present {
         RecoveryPublication::NoPlan
-    } else if installed == target {
+    } else if plan_members_new && installed == target {
         RecoveryPublication::TargetVerified
     } else {
         RecoveryPublication::Interrupted
     }
+}
+
+impl RecoveryPublication {
+    /// Only a recovery that restores retained originals or records the old
+    /// identity needs the Service stopped. A complete, verified publication
+    /// whose successor is simply not running changes no file; stopping the
+    /// Service there restarted it, and every Service start spawns recovery
+    /// again for the still-pending attempt.
+    fn requires_service_stop(self) -> bool {
+        !matches!(self, Self::TargetVerified)
+    }
+}
+
+/// Read-only: the installed identity and the durable plan members decide
+/// what recovery may conclude. Nothing here stops the Service or writes.
+fn classify_installed(
+    a: &tx::Attempt,
+    plan_path: &Path,
+) -> Result<(Components, RecoveryPublication), Error> {
+    let service_path = tono_service_protocol::service_paths()
+        .install_dir()
+        .join("tono-service.exe");
+    let installed = native::components(&a.install_root, &service_path)?;
+    let plan_present = plan_path.exists();
+    // Three binaries at the target do not prove later members (the
+    // payload tree, `core-sha256.txt`) were published too. Only a
+    // member read as different is an interruption; an unreadable
+    // member (sharing violation, AV lock) exits like an unreadable
+    // component, before any rollback touches a file.
+    let plan_members_new = plan_present
+        && native::plan_members_at(
+            plan_path,
+            &a.receipt.attempt_id,
+            &[
+                a.install_root.as_path(),
+                tono_service_protocol::service_paths()
+                    .install_dir()
+                    .as_path(),
+            ],
+            native::PlanSide::New,
+        )?;
+    let publication = classify_recovery(
+        plan_present,
+        plan_members_new,
+        &installed,
+        &tx::target(&a.manifest).components,
+    );
+    Ok((installed, publication))
+}
+
+/// Recovery's first read, before the Service is stopped. When it cannot
+/// classify the installation at all (an unreadable component or plan member),
+/// nothing is stopped or changed and the next recovery retries. A `Consumed`
+/// marker becomes `Uncertain`, the only in-flight state a verified Disconnect
+/// can retire once the retained originals are proven; `Replaced` keeps its
+/// registered successor and `Uncertain` stays as it is.
+fn classify_before_stop(
+    store: &mut tx::Store,
+    classify: impl FnOnce() -> Result<(Components, RecoveryPublication), Error>,
+) -> Result<RecoveryPublication, Error> {
+    let error = match classify() {
+        Ok((_, publication)) => return Ok(publication),
+        Err(error) => error,
+    };
+    if store.attempt()?.execution == tx::Execution::Consumed {
+        store
+            .execution(tx::Execution::Uncertain)
+            .with_context(|| format!("unclassified recovery ({error:#}) was not recorded"))?;
+    }
+    Err(error)
 }
 
 pub(super) fn dispatch() -> Result<bool, Error> {
@@ -52,7 +124,29 @@ pub(super) fn dispatch() -> Result<bool, Error> {
             Ok(true)
         }
         [mode] if mode == "--manual-update-gate" => {
-            tokio::runtime::Runtime::new()?.block_on(native::begin_manual())?;
+            if let Err(error) = tokio::runtime::Runtime::new()?.block_on(native::begin_manual()) {
+                if error.is::<native::ProtectionActive>() {
+                    eprintln!("Error: {error:#}");
+                    std::process::exit(native::MANUAL_GATE_PROTECTION_ACTIVE_EXIT);
+                }
+                if error.is::<native::OrphanedProtection>() {
+                    eprintln!("Error: {error:#}");
+                    std::process::exit(native::MANUAL_GATE_ORPHANED_PROTECTION_EXIT);
+                }
+                return Err(error);
+            }
+            Ok(true)
+        }
+        [mode] if mode == "--manual-orphan-gate" => {
+            native::begin_manual_orphan()?;
+            Ok(true)
+        }
+        [mode] if mode == "--retire-orphaned-owner" => {
+            tokio::runtime::Runtime::new()?.block_on(native::retire_orphaned_owner())?;
+            Ok(true)
+        }
+        [mode] if mode == "--manual-uninstall-gate" => {
+            native::begin_manual_uninstall()?;
             Ok(true)
         }
         [mode] if mode == "--manual-update-finish" => {
@@ -132,7 +226,11 @@ fn execute(recovery: bool) -> Result<(), Error> {
         "executor image binding changed"
     );
     if a.receipt.phase == Phase::Committed {
-        cleanup_committed(&plan_path)?;
+        finish_committed(
+            &plan_path,
+            || record_committed_version(&a),
+            native::retire_recovery_task,
+        )?;
         return Ok(());
     }
     if recovery {
@@ -157,6 +255,15 @@ fn execute(recovery: bool) -> Result<(), Error> {
         ) {
             return Ok(());
         }
+        // Classify before touching the Service: a complete publication keeps
+        // the running Service and only records the Replaced marker.
+        let publication = classify_before_stop(&mut store, || classify_installed(&a, &plan_path))?;
+        if !publication.requires_service_stop() {
+            if a.execution != tx::Execution::Replaced {
+                store.execution(tx::Execution::Replaced)?;
+            }
+            return Ok(());
+        }
     } else {
         ensure!(
             tx::file_digest(&dir.join("package.exe"))? == tx::target(&a.manifest).artifact_sha256,
@@ -179,7 +286,26 @@ fn execute(recovery: bool) -> Result<(), Error> {
         store.consume(&self_image, tx::now()?)?;
     }
     // From here every live/repair mutation has a durable consumed high-water.
-    native::register_consumed_recovery(&store)?;
+    if recovery {
+        // Classification and rollback do not run through the ONSTART task; it only re-arms the
+        // net for this run. An unavailable Task Scheduler must not strand the attempt (#484).
+        if let Err(error) = native::register_consumed_recovery(&store) {
+            eprintln!(
+                "update recovery task could not be registered; recovering without it: {error:#}"
+            );
+        }
+    } else {
+        // No publication without the net: nothing is replaced yet, so the attempt ends
+        // RolledBack against the retained original identity instead of staying Consumed.
+        native::register_recovery_before_publication(&mut store, || {
+            native::components(
+                &a.install_root,
+                &tono_service_protocol::service_paths()
+                    .install_dir()
+                    .join("tono-service.exe"),
+            )
+        })?;
+    }
     let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
     let service = manager.open_service(
         tono_service_protocol::WINDOWS_SERVICE_NAME,
@@ -203,12 +329,8 @@ fn execute(recovery: bool) -> Result<(), Error> {
             // The installed identity — not successor liveness — classifies the
             // interruption. A user closing the new App before commit or a
             // reboot must not revert a complete, verified publication.
-            let installed = native::components(&a.install_root, &service_path)?;
-            match classify_recovery(
-                plan_path.exists(),
-                &installed,
-                &tx::target(&a.manifest).components,
-            ) {
+            let (installed, publication) = classify_installed(&a, &plan_path)?;
+            match publication {
                 RecoveryPublication::NoPlan => {
                     // There cannot have been a publication without the durable plan.
                     ensure!(
@@ -336,7 +458,11 @@ fn execute(recovery: bool) -> Result<(), Error> {
         std::thread::sleep(Duration::from_secs(1));
         let store = open_waiting()?;
         if store.attempt()?.receipt.phase == Phase::Committed {
-            cleanup_committed(&plan_path)?;
+            finish_committed(
+                &plan_path,
+                || record_committed_version(&a),
+                native::retire_recovery_task,
+            )?;
             return Ok(());
         }
     }
@@ -384,6 +510,43 @@ fn rollback_plan(plan: &mut Plan) -> Result<(), Error> {
     Ok(())
 }
 
+/// Commit ends the boot task's job: once the committed cleanup ran there is
+/// nothing left for `--update-recover` to do, so the SYSTEM ONSTART task is
+/// retired, as macOS retires its launchd job. A failed retirement leaves the
+/// task for the next boot, which lands here again and retries.
+///
+/// The committed target is also named in Add/Remove Programs first: the
+/// manual installer's downgrade check reads that version, and no NSIS section
+/// ran for a native update. The Service writes it at commit; this is the retry
+/// for a write that failed there, so a failed write keeps the task.
+fn finish_committed(
+    plan_path: &Path,
+    record_version: impl FnOnce() -> Result<(), Error>,
+    retire: impl FnOnce() -> Result<(), Error>,
+) -> Result<(), Error> {
+    cleanup_committed(plan_path)?;
+    record_version()?;
+    if let Err(error) = retire() {
+        eprintln!(
+            "committed update cleaned up; the recovery task stays until the next boot: {error:#}"
+        );
+    }
+    Ok(())
+}
+
+/// Only while the committed target is still what is installed: a manual
+/// install after the commit wrote its own version, and a boot-time retry must
+/// not name an older one over it.
+fn record_committed_version(a: &tx::Attempt) -> Result<(), Error> {
+    let service_path = tono_service_protocol::service_paths()
+        .install_dir()
+        .join("tono-service.exe");
+    if native::components(&a.install_root, &service_path)? == tx::target(&a.manifest).components {
+        native::record_installed_version(&a.manifest.app_version)?;
+    }
+    Ok(())
+}
+
 fn cleanup_committed(plan_path: &Path) -> Result<(), Error> {
     let plan: Plan = serde_json::from_slice(&std::fs::read(plan_path)?)?;
     for member in plan.members {
@@ -399,6 +562,193 @@ mod tests {
     use tono_service_protocol::update_contract::{
         Observation, Protection, Receipt, ReleaseManifest,
     };
+
+    #[test]
+    fn update_commit_retires_the_recovery_task_after_cleanup() {
+        let root = std::env::temp_dir().join(format!(
+            "tono-update-commit-retire-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let plan_path = root.join("replacement.json");
+        // Without the committed cleanup the boot task still has work left.
+        assert!(
+            finish_committed(
+                &plan_path,
+                || Ok(()),
+                || panic!("retired before the committed cleanup")
+            )
+            .is_err()
+        );
+        tx::atomic_write(
+            &plan_path,
+            &serde_json::to_vec(&Plan {
+                attempt_id: "attempt".into(),
+                members: Vec::new(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let mut retired = false;
+        finish_committed(
+            &plan_path,
+            || Ok(()),
+            || {
+                retired = true;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(
+            retired,
+            "a committed update must not leave its SYSTEM boot task"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// TW-anthropic-5: the manual installer's downgrade check reads the Add/Remove Programs
+    /// version, and a native update never ran the NSIS sections that write it. The committed
+    /// cleanup records the target version, and a failed write keeps the boot task that retries it.
+    #[test]
+    fn update_commit_records_the_installed_version_before_retiring_the_task() {
+        let root = std::env::temp_dir().join(format!(
+            "tono-update-commit-version-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let plan_path = root.join("replacement.json");
+        tx::atomic_write(
+            &plan_path,
+            &serde_json::to_vec(&Plan {
+                attempt_id: "attempt".into(),
+                members: Vec::new(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let mut retired = false;
+        let unrecorded = finish_committed(
+            &plan_path,
+            || Err(anyhow::anyhow!("installed version not written")),
+            || {
+                retired = true;
+                Ok(())
+            },
+        );
+        assert!(
+            unrecorded.is_err() && !retired,
+            "the boot task must stay until the committed version is recorded"
+        );
+        let mut recorded = false;
+        finish_committed(
+            &plan_path,
+            || {
+                recorded = true;
+                Ok(())
+            },
+            || Ok(()),
+        )
+        .unwrap();
+        assert!(
+            recorded,
+            "a committed update must record its installed version"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// TW-OpenAI-2: a recovery that cannot classify the installation (an unreadable component
+    /// or plan member) exits before the Service stop. Only `Uncertain` can later be retired by a
+    /// verified Disconnect, so a `Consumed` marker must not be left as it was; a registered
+    /// successor's `Replaced` marker is kept.
+    #[test]
+    fn update_recovery_marks_a_consumed_attempt_uncertain_when_it_cannot_classify() {
+        let root = std::env::temp_dir().join(format!(
+            "tono-update-classify-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let mut store = tx::Store::open(&root).unwrap();
+        let manifest = ReleaseManifest::decode(include_bytes!(
+            "../../../../../../tooling/scripts/tests/fixtures/update-protocol-v1/manifest.json"
+        ))
+        .unwrap();
+        let mut receipt = Receipt::decode(include_bytes!("../../../../../../tooling/scripts/tests/fixtures/update-protocol-v1/windows-receipt.json"), &manifest).unwrap();
+        receipt.installed_location_sha256 = tx::location_digest(&root);
+        let peer = tx::Image {
+            pid: 11,
+            started_at: 10,
+            path: root.join("Tono.exe"),
+            sha256: "0".repeat(64),
+        };
+        let executor = tx::Image {
+            pid: 22,
+            started_at: 20,
+            path: root.join("executor.exe"),
+            sha256: "e".repeat(64),
+        };
+        store
+            .save(tx::State {
+                consumed_sequence: 73,
+                generation: 91,
+                manual_installer: None,
+                attempt: Some(tx::Attempt {
+                    old_components: tx::target(&manifest).components.clone(),
+                    manifest,
+                    receipt,
+                    initiating_image: peer.clone(),
+                    successor_image: None,
+                    install_root: root.clone(),
+                    execution: tx::Execution::Staged,
+                    executor: Some(executor.clone()),
+                    disconnect: None,
+                }),
+            })
+            .unwrap();
+        store
+            .observe(
+                "windows:fixture-owner",
+                &peer,
+                91,
+                1_900_000_001,
+                Observation::PreparationVerified {
+                    artifact_sha256: "b".repeat(64),
+                    protection: Protection::Unprotected,
+                },
+            )
+            .unwrap();
+        store.execution(tx::Execution::Launching).unwrap();
+        store.consume(&executor, 1_900_000_002).unwrap();
+        let unreadable = || -> Result<(Components, RecoveryPublication), Error> {
+            Err(anyhow::anyhow!("installed component is locked"))
+        };
+
+        assert!(classify_before_stop(&mut store, unreadable).is_err());
+        let durable: tx::State =
+            serde_json::from_slice(&std::fs::read(root.join("state.json")).unwrap()).unwrap();
+        assert_eq!(
+            durable.attempt.unwrap().execution,
+            tx::Execution::Uncertain,
+            "an unclassifiable Consumed attempt must become retirable"
+        );
+
+        store.execution(tx::Execution::Replaced).unwrap();
+        assert!(classify_before_stop(&mut store, unreadable).is_err());
+        assert_eq!(store.attempt().unwrap().execution, tx::Execution::Replaced);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn update_executor_consumes_before_publication_and_reloads_interrupted_rollback() {
@@ -562,7 +912,7 @@ mod tests {
         };
         // A complete verified installation survives its successor exiting first.
         assert_eq!(
-            classify_recovery(true, &target, &target),
+            classify_recovery(true, true, &target, &target),
             RecoveryPublication::TargetVerified
         );
         // A mid-flight publication (neither target nor fully restored) rolls back.
@@ -572,18 +922,38 @@ mod tests {
             privileged_sha256: "op".into(),
         };
         assert_eq!(
-            classify_recovery(true, &mixed, &target),
+            classify_recovery(true, false, &mixed, &target),
             RecoveryPublication::Interrupted
         );
         // An already-restored rollback re-runs the idempotent restore.
         assert_eq!(
-            classify_recovery(true, &old, &target),
+            classify_recovery(true, false, &old, &target),
             RecoveryPublication::Interrupted
         );
         // No durable plan means no publication can have started.
         assert_eq!(
-            classify_recovery(false, &old, &target),
+            classify_recovery(false, false, &old, &target),
             RecoveryPublication::NoPlan
         );
+    }
+
+    #[test]
+    fn update_recovery_keeps_the_service_running_for_a_complete_publication() {
+        let target = Components {
+            app_sha256: "t".into(),
+            core_sha256: "tc".into(),
+            privileged_sha256: "tp".into(),
+        };
+        let old = Components {
+            app_sha256: "o".into(),
+            core_sha256: "oc".into(),
+            privileged_sha256: "op".into(),
+        };
+        // Replaced, successor closed before commit: nothing to restore, so the
+        // Service is not stopped (a stop/start would spawn recovery again).
+        assert!(!classify_recovery(true, true, &target, &target).requires_service_stop());
+        // Rollback and the no-plan identity check still run with the Service stopped.
+        assert!(classify_recovery(true, false, &target, &target).requires_service_stop());
+        assert!(classify_recovery(false, false, &old, &target).requires_service_stop());
     }
 }

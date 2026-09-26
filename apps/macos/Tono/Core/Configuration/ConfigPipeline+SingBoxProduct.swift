@@ -16,6 +16,15 @@ nonisolated extension ConfigPipeline {
         var customMirror: Mirror { Mirror(self, children: ["summary": description]) }
     }
 
+    /// Apple Continuity daemons sent to DIRECT. Matched by exact path on the
+    /// SIP-sealed system volume; a basename would admit any renamed process.
+    static let continuityDirectProcessPaths = [
+        "/usr/libexec/sharingd",
+        "/usr/libexec/rapportd",
+        "/usr/libexec/SidecarDisplayAgent",
+        "/System/Library/PrivateFrameworks/IDS.framework/identityservicesd.app/Contents/MacOS/identityservicesd",
+    ]
+
     static func singBoxUnavailableReason(_ node: ProxyNode) -> String? {
         if node.type == .hysteria2, node.tlsFingerprint != nil {
             return "TONO_SINGBOX_HY2_DER_PIN_UNSUPPORTED"
@@ -171,21 +180,24 @@ nonisolated extension ConfigPipeline {
                 dnsRules.append(["domain": plan.directResolverHosts, "action": "route", "server": "Tono-China-DNS"])
             }
             let suffixes = plan.effectiveWebDomainSuffixes
-            let resolverSuffixes = Array(Set(suffixes.map(\.host) + (plan.nativeAppDirect ? wechatDirectDNSSuffixes : []))).sorted()
+            // Sampled once. Empty when no reviewed bundle passes its signature
+            // check; an empty process_path_regex would match every process.
+            let appRegexes = plan.nativeAppDirect ? managedDirectProcessPathRegexes : []
+            let resolverSuffixes = Array(Set(suffixes.map(\.host) + (appRegexes.isEmpty ? [] : wechatDirectDNSSuffixes))).sorted()
             if !resolverSuffixes.isEmpty {
                 dnsRules.append(["domain_suffix": resolverSuffixes, "action": "route", "server": "Tono-China-DNS"])
             }
-            if plan.nativeAppDirect {
+            if !appRegexes.isEmpty {
                 // These are the helper's existing reviewed-bundle ports.
                 // Exact policy tuples below can authorize additional ports.
-                rules.append(["process_path_regex": managedDirectProcessPathRegexes,
+                rules.append(["process_path_regex": appRegexes,
                     "network": ["tcp", "udp"], "port": [80, 443, 8000, 8080], "action": "route", "outbound": appDirectGroupName])
                 for endpoint in plan.sessionEndpoints {
-                    rules.append(["process_path_regex": managedDirectProcessPathRegexes,
+                    rules.append(["process_path_regex": appRegexes,
                         "ip_cidr": ["\(endpoint.address)/32"], "network": endpoint.transport,
                         "port": [Int(endpoint.port)], "action": "route", "outbound": appDirectGroupName])
                 }
-                rules.append(["process_path_regex": managedDirectProcessPathRegexes, "action": "reject"])
+                rules.append(["process_path_regex": appRegexes, "action": "reject"])
             }
             for pin in plan.webDomainPins {
                 rules.append(["domain": [pin.host], "action": "resolve", "server": "Tono-Hosts", "strategy": "ipv4_only"])
@@ -204,7 +216,7 @@ nonisolated extension ConfigPipeline {
         dnsRules.append(["inbound": ["Tono-DNS", "Tono-TUN", "Tono-Mixed"], "query_type": ["A"], "action": "route", "server": "Tono-FakeIP"])
         rules.append(["ip_cidr": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "224.0.0.0/4", "255.255.255.255/32", "fe80::/10", "fc00::/7", "ff00::/8", "127.0.0.0/8", "::1/128"], "action": "route", "outbound": "DIRECT"])
         rules.append(["network": "udp", "port": [5353], "action": "route", "outbound": "DIRECT"])
-        rules.append(["process_name": ["sharingd", "rapportd", "SidecarDisplayAgent", "identityservicesd"], "action": "route", "outbound": "DIRECT"])
+        rules.append(["process_path": continuityDirectProcessPaths, "action": "route", "outbound": "DIRECT"])
         rules.append(["ip_version": 6, "action": "reject"])
         rules.append(["network": ["udp", "icmp"], "action": "reject"])
         let localSubnets = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "fe80::/10", "fc00::/7", "224.0.0.0/4"]

@@ -19,8 +19,14 @@
 #       base64 of the AuthKey_<key-id>.p8 App Store Connect private key.
 #   SPARKLE_ED_PRIVATE_KEY
 #       the Sparkle EdDSA private key exported with `generate_keys -x`, matching
-#       SUPublicEDKey in apps/macos/Tono/Info.plist. Only the gated
-#       macos-appcast environment may read it.
+#       SUPublicEDKey in apps/macos/Tono/Info.plist. It is stored in the
+#       macos-appcast environment and only the validate-appcast job declares that
+#       environment. Whether that job waits for a reviewer or is limited to certain
+#       branches depends on the environment's configuration in the repository
+#       settings, not on this file.
+#
+# Every secret is injected at step level, only into the step that uses it; no job
+# or workflow env carries signing material. Checkouts do not persist the token.
 #
 # The appcast job additionally requires release notes committed at
 # apps/macos/release-notes/build<CFBundleVersion>.md, and it only ever runs
@@ -123,6 +129,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
@@ -142,6 +149,7 @@ jobs:
       - name: Require the macOS release line
         env:
           CANDIDATE_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_only }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
           if [ "$CANDIDATE_ONLY" = true ]; then
@@ -150,7 +158,11 @@ jobs:
             python3 tooling/scripts/verify-desktop-version.py --expected "$CANDIDATE_VERSION"
             exit 0
           fi
-          git fetch --no-tags origin release/macos
+          # The checkout does not persist the token; hand it to this one fetch.
+          GIT_CONFIG_COUNT=1 \
+          GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+          GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')" \
+            git fetch --no-tags origin release/macos
           if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/release/macos; then
             echo "FATAL: $GITHUB_SHA is not on release/macos; refusing a macOS release from another platform line." >&2
             exit 1
@@ -328,6 +340,9 @@ jobs:
         env:
           TONO_MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_DEVELOPER_ID_APPLICATION_IDENTITY }}
           TONO_MACOS_NOTARIZE: '1'
+          # Internal build channel (owner decision 2026-09-24): only a candidate_only
+          # run is internal; a release build stays empty and keeps today's defaults.
+          TONO_BUILD_CHANNEL: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_only && 'internal' || '' }}
           ARTIFACT_NAME: ${{ steps.release-version.outputs.artifact_name }}
         run: |
           set -eu
@@ -362,7 +377,7 @@ jobs:
           (root / "candidate-manifest.json").write_text(json.dumps(report, indent=2) + "\n")
           PYTHON
 
-      - name: Upload the notarized archive for the gated appcast job
+      - name: Upload the notarized archive for the appcast job
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ${{ steps.release-version.outputs.artifact_name }}
@@ -404,6 +419,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:

@@ -514,6 +514,8 @@ class RosterControlSignals(unittest.TestCase):
         reconcile_error: Exception | None = None,
         inventory_known: bool = True,
         hy2_error: Exception | None = None,
+        persist_error: Exception | None = None,
+        counters: dict[str, int] | None = None,
     ):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -525,7 +527,7 @@ class RosterControlSignals(unittest.TestCase):
         if override is not None:
             environment["TONO_RETIRE_SHARED_LEGACY"] = override
 
-        reconcile_result = (0, 0, set() if inventory_known else None, {}, None)
+        reconcile_result = (0, 0, set() if inventory_known else None, counters or {}, None)
         with patch.dict(agent.os.environ, environment, clear=True), \
              patch.object(agent, "api_base", return_value="https://control.example"), \
              patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
@@ -544,9 +546,10 @@ class RosterControlSignals(unittest.TestCase):
                  side_effect=reconcile_error,
              ) as reconcile, \
              patch.object(agent, "sync_hy2_roster", side_effect=hy2_error), \
+             patch.object(agent, "persist_shared_legacy_retirement", side_effect=persist_error), \
              patch.object(agent, "acknowledge_roster", side_effect=ack_error) as acknowledge, \
-             patch.object(agent, "acknowledge_metering"):
-            if ack_error or reconcile_error or hy2_error or not inventory_known:
+             patch.object(agent, "acknowledge_metering") as self.acknowledge_metering:
+            if ack_error or reconcile_error or hy2_error or persist_error or not inventory_known:
                 with self.assertRaises(agent.Refusal):
                     agent.run_once(path)
             else:
@@ -564,6 +567,20 @@ class RosterControlSignals(unittest.TestCase):
         _, reconcile, _ = self.run_round(server_retire=True, override="false")
         self.assertFalse(reconcile.call_args.kwargs["retire_shared_legacy"])
 
+    def test_an_unrecognized_override_leaves_shared_legacy_in_place(self) -> None:
+        # Retirement is persisted and one-way, so a typo must not trigger it.
+        _, reconcile, _ = self.run_round(server_retire=True, override="flase")
+        self.assertFalse(reconcile.call_args.kwargs["retire_shared_legacy"])
+
+    def test_a_failed_retirement_write_still_meters_before_refusing(self) -> None:
+        path, _, acknowledge = self.run_round(
+            server_retire=True,
+            persist_error=agent.Refusal("xray rejected config.json"),
+        )
+        acknowledge.assert_called_once()
+        self.acknowledge_metering.assert_called_once()
+        self.assertTrue(path.exists())
+
     def test_an_ack_failure_does_not_persist_the_round(self) -> None:
         path, _, _ = self.run_round(
             server_retire=False,
@@ -578,13 +595,18 @@ class RosterControlSignals(unittest.TestCase):
         )
         acknowledge.assert_not_called()
 
-    def test_a_failed_hy2_publish_is_never_acknowledged(self) -> None:
+    def test_a_failed_hy2_publish_still_revokes_xray_and_keeps_usage_but_is_never_acknowledged(self) -> None:
+        # TF-opus-8: a hy2 error used to end the round before the Xray
+        # reconcile, so revoked accounts stayed on VLESS and no counter was read.
+        label = agent.client_label("usr_1")
         path, reconcile, acknowledge = self.run_round(
             server_retire=False, hy2_error=agent.Refusal("injected hy2 write failure"),
+            counters={label: 1_500},
         )
-        reconcile.assert_not_called()
+        reconcile.assert_called_once()
         acknowledge.assert_not_called()
-        self.assertFalse(path.exists())
+        self.acknowledge_metering.assert_not_called()
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["totals"], {label: 1_500})
 
     def test_an_unverifiable_live_client_inventory_is_never_acknowledged(self) -> None:
         path, _, acknowledge = self.run_round(
@@ -621,6 +643,246 @@ class RosterControlSignals(unittest.TestCase):
                 agent.run_once(path)
         reconcile.assert_not_called()
         self.assertEqual(json.loads(path.read_text(encoding="utf-8")), state)
+
+    def test_revocation_runs_before_metering_checks_and_past_a_failed_removal(self) -> None:
+        # A queued report ahead of the roster clock is a metering problem. It
+        # used to stop the round before any client was removed, and the first
+        # failed removal stopped the rest.
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        path.write_text(json.dumps({**fresh_state(), "sourceId": "exit-node-a",
+            "installedClients": ["u:gone_1", "u:gone_2"],
+            "pendingReports": [{"reportId": "r", "userId": "usr_1", "sourceId": "exit-node-a",
+                                "totalBytes": 1, "observedAt": 1_700_009_999}]}))
+        removals: list[str] = []
+
+        def fake_xray(_binary, arguments):
+            failed = False
+            if "rmu" in arguments:
+                label = arguments[-1]
+                removals.append(label)
+                failed = label == "u:gone_1"
+            return type("Result", (), {"returncode": 1 if failed else 0,
+                                       "stdout": "" if failed or "rmu" not in arguments else "Removed 1 user(s) in total.",
+                                       "stderr": "injected failure" if failed else ""})
+
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "exit-node-a",
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "xray_start_marker", return_value=None), \
+             patch.object(agent, "require_commands", return_value={
+                 "add_user": "adu", "remove_user": "rmu", "stats_query": "statsquery",
+             }), \
+             patch.object(agent, "fetch_roster",
+                          return_value=("exit-node-a", 1_700_000_000, [], False)), \
+             patch.object(agent, "run_xray", fake_xray), \
+             patch.object(agent, "sync_hy2_roster") as hy2, \
+             patch.object(agent, "acknowledge_roster") as acknowledge:
+            with self.assertRaises(agent.Refusal):
+                agent.run_once(path)
+
+        hy2.assert_called_once_with([])
+        self.assertEqual(removals, ["u:gone_1", "u:gone_2"])
+        acknowledge.assert_not_called()
+
+    def test_a_state_file_that_is_not_an_object_still_lets_revocation_run(self) -> None:
+        # Valid JSON of the wrong type used to raise AttributeError before any
+        # client was removed. It is left untouched for the operator; the round
+        # still removes the revoked client and then refuses.
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        path.write_text("[]", encoding="utf-8")
+        removals: list[str] = []
+
+        def fake_xray(_binary, arguments):
+            if "rmu" in arguments:
+                removals.append(arguments[-1])
+            stdout = "Removed 1 user(s) in total." if "rmu" in arguments else ""
+            return type("Result", (), {"returncode": 0, "stdout": stdout, "stderr": ""})
+
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "exit-node-a",
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "xray_start_marker", return_value=None), \
+             patch.object(agent, "require_commands", return_value={
+                 "add_user": "adu", "remove_user": "rmu", "stats_query": "statsquery",
+             }), \
+             patch.object(agent, "fetch_roster",
+                          return_value=("exit-node-a", 1_700_000_000, [], False)), \
+             patch.object(agent, "installed_clients", return_value={"u:gone"}), \
+             patch.object(agent, "run_xray", fake_xray), \
+             patch.object(agent, "sync_hy2_roster"), \
+             patch.object(agent, "acknowledge_roster") as acknowledge:
+            with self.assertRaisesRegex(agent.Refusal, "not a JSON object"):
+                agent.run_once(path)
+
+        self.assertEqual(removals, ["u:gone"])
+        acknowledge.assert_not_called()
+        self.assertEqual(path.read_text(encoding="utf-8"), "[]")
+
+    def test_only_an_explicit_disabled_answer_withdraws_every_client(self) -> None:
+        import io
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        removed: list[str] = []
+        listing = json.dumps({"users": [
+            {"email": "u:usr_1"}, {"email": agent.LEGACY_CLIENT_EMAIL}, {"email": "operator"},
+        ]})
+
+        def fake_xray(_binary, arguments):
+            if "rmu" in arguments:
+                removed.append(arguments[-1])
+            stdout = listing if "inbounduser" in arguments else "Removed 1 user(s) in total." if "rmu" in arguments else ""
+            return type("Result", (), {"returncode": 0, "stdout": stdout, "stderr": ""})
+
+        def round_answering(body: bytes) -> None:
+            def refuse(request, timeout=None):  # noqa: ARG001
+                raise urllib.error.HTTPError(
+                    request.full_url, 403, "Forbidden", {}, io.BytesIO(body),
+                )
+            with patch.dict(agent.os.environ, {
+                     "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "exit-node-a",
+                 }, clear=True), \
+                 patch.object(agent, "api_base", return_value="https://control.example"), \
+                 patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+                 patch.object(agent, "require_commands", return_value={
+                     "add_user": "adu", "remove_user": "rmu",
+                     "stats_query": "statsquery", "list_users": "inbounduser",
+                 }), \
+                 patch.object(agent, "run_xray", fake_xray), \
+                 patch.object(agent.urllib.request, "build_opener") as opener, \
+                 patch.object(agent, "acknowledge_roster") as acknowledge:
+                opener.return_value.open.side_effect = refuse
+                with self.assertRaises((agent.Refusal, urllib.error.HTTPError)):
+                    agent.run_once(path)
+            acknowledge.assert_not_called()
+
+        # An edge block or any other refusal is not the control plane's answer.
+        round_answering(b"<html>error code: 1010</html>")
+        self.assertEqual(removed, [])
+        round_answering(json.dumps({"error": {"code": "EXIT_NODE_DISABLED"}}).encode())
+        self.assertEqual(sorted(removed), sorted(["u:usr_1", agent.LEGACY_CLIENT_EMAIL]))
+
+    def test_a_disabled_round_still_folds_the_final_counter_sample(self) -> None:
+        # TF-opus-4: the withdrawal round never read the counters, so traffic
+        # since the last active round (1000 -> 1500) was never kept.
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        label = agent.client_label("usr_1")
+        path.write_text(json.dumps({
+            **fresh_state(), "sourceId": "exit-node-a", "installedClients": [label],
+            "totals": {label: 1_000}, "counterBaseline": {label: 1_000},
+            "userTotals": {"usr_1": 1_000},
+        }), encoding="utf-8")
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "exit-node-a",
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "xray_start_marker", return_value=None), \
+             patch.object(agent, "require_commands", return_value={
+                 "add_user": "adu", "remove_user": "rmu", "stats_query": "statsquery",
+             }), \
+             patch.object(agent, "fetch_roster",
+                          side_effect=agent.NodeDisabled("disabled")), \
+             patch.object(agent, "withdraw_disabled_node", return_value=(1, set())), \
+             patch.object(agent, "read_counters", return_value={label: 1_500}), \
+             patch.object(agent, "acknowledge_roster") as acknowledge:
+            with self.assertRaisesRegex(agent.Refusal, "disabled"):
+                agent.run_once(path)
+
+        acknowledge.assert_not_called()
+        state = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(state["totals"], {label: 1_500})
+        self.assertEqual(state["userTotals"], {"usr_1": 1_000})
+
+    def test_shared_legacy_retirement_survives_an_xray_restart(self) -> None:
+        # Mixed-case override, no live listing, and a durable inventory that no
+        # longer names shared-legacy: each used to leave it installed, and the
+        # static config brought it back on every Xray restart.
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        path.write_text(json.dumps({**fresh_state(), "installedClients": ["u:usr_1"]}))
+        config = Path(directory.name) / "config.json"
+        config.write_text(json.dumps({"inbounds": [{
+            "tag": "tono-vless", "protocol": "vless", "settings": {"clients": [
+                {"id": "11111111-1111-4111-8111-111111111111", "email": agent.LEGACY_CLIENT_EMAIL},
+                {"id": "22222222-2222-4222-8222-222222222222", "email": "operator"},
+            ]},
+        }]}))
+        calls: list[list[str]] = []
+
+        def fake_xray(_binary, arguments):
+            calls.append(arguments)
+            stdout = ('{"stat": []}' if "statsquery" in arguments
+                      else "Removed 1 user(s) in total." if "rmu" in arguments
+                      else "Added 1 user(s) in total." if "adu" in arguments else "")
+            return type("Result", (), {"returncode": 0, "stdout": stdout, "stderr": ""})
+
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "exit-node-a",
+                 "TONO_RETIRE_SHARED_LEGACY": "True", "TONO_XRAY_CONFIG": str(config),
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "xray_start_marker", return_value=None), \
+             patch.object(agent, "require_commands", return_value={
+                 "add_user": "adu", "remove_user": "rmu", "stats_query": "statsquery",
+             }), \
+             patch.object(agent, "fetch_roster", return_value=("exit-node-a", 1_700_000_000, [
+                 {"userId": "usr_1", "clientUUID": "33333333-3333-4333-8333-333333333333",
+                  "deviceId": None},
+             ], False)), \
+             patch.object(agent, "run_xray", fake_xray), \
+             patch.object(agent, "acknowledge_roster"), \
+             patch.object(agent, "acknowledge_metering"):
+            agent.run_once(path)
+
+        self.assertIn(agent.LEGACY_CLIENT_EMAIL, [a for c in calls for a in c])
+        clients = json.loads(config.read_text())["inbounds"][0]["settings"]["clients"]
+        self.assertEqual([client["email"] for client in clients], ["operator"])
+
+
+class DisabledNodeWithdrawal(unittest.TestCase):
+    def test_a_hy2_filesystem_error_still_withdraws_xray_clients(self) -> None:
+        # A disabled node must pull every Xray client even when the hy2 allowlist
+        # cannot be rewritten; the hy2 failure is still reported.
+        with patch.object(agent, "sync_hy2_roster", side_effect=PermissionError("injected lstat failure")), \
+             patch.object(agent, "installed_clients", return_value={"tono-usr_1"}), \
+             patch.object(agent, "reconcile", return_value=(0, 2, set())) as reconcile:
+            with self.assertRaisesRegex(agent.Refusal, "injected lstat failure"):
+                agent.withdraw_disabled_node(Path("/unused/xray"), {}, "127.0.0.1:1", "tag", None)
+        reconcile.assert_called_once()
+
+    def test_the_disabled_round_tells_the_operator_to_stop_xray_until_re_enabled(self) -> None:
+        # TF-opus-3: the withdrawal also pulls shared-legacy from the running
+        # Xray, and re-enabling without a restart leaves it removed.
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "exit-node-a",
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "xray_start_marker", return_value=None), \
+             patch.object(agent, "require_commands", return_value={
+                 "add_user": "adu", "remove_user": "rmu", "stats_query": "statsquery",
+             }), \
+             patch.object(agent, "fetch_roster", side_effect=agent.NodeDisabled("disabled")), \
+             patch.object(agent, "withdraw_disabled_node", return_value=(2, set())), \
+             patch.object(agent, "read_counters", return_value={}):
+            with self.assertRaisesRegex(agent.Refusal, "stop tono-xray now.*start it again.*re-enabled"):
+                agent.run_once(Path(directory.name) / "state.json")
 
 
 class Hy2RosterAuthorization(unittest.TestCase):
@@ -969,7 +1231,8 @@ class MultipleExits(unittest.TestCase):
             with self.assertRaises(agent.Refusal):
                 agent.run_once(path)
 
-        reconcile.assert_not_called()
+        # Revocation is enforced first; the future report still stays queued.
+        reconcile.assert_called_once()
         deliver.assert_not_called()
         self.assertEqual(json.loads(path.read_text(encoding="utf-8")), initial)
 
@@ -1006,12 +1269,14 @@ class ReconcileSafety(unittest.TestCase):
     def setUp(self) -> None:
         self.calls: list[list[str]] = []
         self.adu_docs: list[dict] = []
-        self.result = type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})
+        self.result = type("Result", (), {"returncode": 0, "stdout": "Added 1 user(s) in total.", "stderr": ""})
 
         def fake_run(_binary, arguments):
             self.calls.append(arguments)
             if "adu" in arguments:
                 self.adu_docs.append(json.loads(Path(arguments[-1]).read_text()))
+            if "rmu" in arguments:
+                return type("Result", (), {"returncode": 0, "stdout": "Removed 1 user(s) in total.", "stderr": ""})
             return self.result
 
         patcher = patch.object(agent, "run_xray", fake_run)
@@ -1034,7 +1299,7 @@ class ReconcileSafety(unittest.TestCase):
         self.assertEqual((added, removed), (0, 1))
         self.assertEqual(installed, {agent.LEGACY_CLIENT_EMAIL})
         self.assertEqual(len(self.calls), 1)
-        self.assertIn("--email=u:usr_1", self.calls[0])
+        self.assertIn("u:usr_1", self.calls[0])
 
     def test_an_empty_roster_with_no_installed_inventory_removes_nothing(self) -> None:
         added, removed, installed = self.reconcile([], None, None)
@@ -1046,7 +1311,7 @@ class ReconcileSafety(unittest.TestCase):
         added, removed, installed = self.reconcile([], None, {"u:usr_1"})
         self.assertEqual((added, removed), (0, 1))
         self.assertEqual(installed, set())
-        self.assertIn("--email=u:usr_1", self.calls[0])
+        self.assertIn("u:usr_1", self.calls[0])
 
     def test_nothing_is_removed_when_the_installed_set_is_unknown(self) -> None:
         # Counters used to stand in for this. They are created on first connect
@@ -1072,6 +1337,36 @@ class ReconcileSafety(unittest.TestCase):
         self.assertEqual((added, removed), (0, 0))
         self.assertEqual(installed, {"u:usr_1", agent.LEGACY_CLIENT_EMAIL})
 
+    def test_an_early_shared_legacy_removal_is_counted(self) -> None:
+        # TF-opus-6: without a live listing shared-legacy is removed first and
+        # was left out of the count (legacy + one u: client reported 1).
+        _, removed, _ = agent.reconcile(
+            Path("/unused"), {"add_user": "adu", "remove_user": "rmu"}, "127.0.0.1:10085",
+            "tono-vless", [], None, {"u:usr_1", agent.LEGACY_CLIENT_EMAIL},
+            retire_shared_legacy=True,
+        )
+        self.assertEqual(removed, 2)
+
+    def test_a_failed_early_shared_legacy_removal_still_revokes_the_rest(self) -> None:
+        # TF-opus-7: the early removal's failure is reported with the others and
+        # never skips the revocations after it.
+        attempted: list[str] = []
+
+        def fake_run(_binary, arguments):
+            attempted.append(arguments[-1])
+            if arguments[-1] == agent.LEGACY_CLIENT_EMAIL:
+                return type("Result", (), {"returncode": 0, "stdout": "Removed 0 user(s) in total.",
+                                           "stderr": "injected rpc failure"})
+            return type("Result", (), {"returncode": 0, "stdout": "Removed 1 user(s) in total.", "stderr": ""})
+
+        with patch.object(agent, "run_xray", fake_run):
+            with self.assertRaisesRegex(agent.Refusal, f"removing {agent.LEGACY_CLIENT_EMAIL} failed"):
+                agent.reconcile(
+                    Path("/unused"), {"add_user": "adu", "remove_user": "rmu"}, "127.0.0.1:10085",
+                    "tono-vless", [], None, {"u:usr_1"}, retire_shared_legacy=True,
+                )
+        self.assertEqual(attempted, [agent.LEGACY_CLIENT_EMAIL, "u:usr_1"])
+
     def test_an_account_still_on_the_roster_is_never_removed(self) -> None:
         added, removed, _ = self.reconcile(
             [{"userId": "usr_1", "clientUUID": "11111111-1111-4111-8111-111111111111"}],
@@ -1095,7 +1390,7 @@ class ReconcileSafety(unittest.TestCase):
 
         self.assertEqual((added, removed), (1, 1))
         self.assertEqual(installed, {new_label})
-        self.assertIn(f"--email={old_label}", self.calls[0])
+        self.assertIn(old_label, self.calls[0])
         self.assertIn("rmu", self.calls[0])
         self.assertIn("adu", self.calls[1])
         self.assertEqual(self.adu_docs[0]["inbounds"][0]["tag"], "tono-vless")
@@ -1111,7 +1406,91 @@ class ReconcileSafety(unittest.TestCase):
         self.assertEqual((added, removed), (0, 1))
         removals = [call for call in self.calls if "rmu" in call]
         self.assertEqual(len(removals), 1)
-        self.assertIn("--email=u:usr_gone", removals[0])
+        self.assertIn("u:usr_gone", removals[0])
+
+    def test_rmu_success_is_read_from_its_output_not_its_exit_code(self) -> None:
+        # Real Xray 26.3.27 outputs; every one exits 0.
+        def result(stdout: str):
+            return agent.subprocess.CompletedProcess([], 0, stdout, "")
+        email = "u:usr_gone"
+        missing = result(f"remove user: {email}\nrpc error: code = Unknown desc = "
+                         f"proxy/vless: User {email} not found.\nRemoved 0 user(s) in total.\n")
+        wrong_tag = result("rpc error: code = Unknown desc = app/proxyman/command: failed to get "
+                           "handler: no-such-tag > app/proxyman/inbound: handler not found: "
+                           "no-such-tag\nRemoved 0 user(s) in total.\n")
+        removed = result("Removed 1 user(s) in total.\n")
+        self.assertTrue(agent.removal_succeeded(missing, email))
+        self.assertFalse(agent.removal_succeeded(wrong_tag, email))
+        self.assertTrue(agent.removal_succeeded(removed, email))
+        # Echoed text must not pass: an email that looks like a total, and a
+        # tag that looks like a per-user not-found, both with a wrong tag.
+        spoof_email = "u:Removed 1 user(s) in total."
+        echoed_email = result(f"remove user: {spoof_email}\nrpc error: code = Unknown desc = "
+                              "app/proxyman/command: failed to get handler: no-such-tag > "
+                              "app/proxyman/inbound: handler not found: no-such-tag\n"
+                              "Removed 0 user(s) in total.\n")
+        self.assertFalse(agent.removal_succeeded(echoed_email, spoof_email))
+        spoof_tag = "User u:x not found"
+        echoed_tag = result(f"remove user: u:x\nrpc error: code = Unknown desc = "
+                            f"app/proxyman/command: failed to get handler: {spoof_tag} > "
+                            f"app/proxyman/inbound: handler not found: {spoof_tag}\n"
+                            "Removed 0 user(s) in total.\n")
+        self.assertFalse(agent.removal_succeeded(echoed_tag, "u:x"))
+        # An email with a line break prints a whole success line of its own.
+        spoof_lines = "u:x\nRemoved 1 user(s) in total.\ny"
+        echoed_lines = result(f"remove user: {spoof_lines}\nRemoved 0 user(s) in total.\n")
+        self.assertFalse(agent.removal_succeeded(echoed_lines, spoof_lines))
+        self.assertEqual(agent.addition_outcome(
+            result(f"{spoof_lines.replace('Removed', 'Added')}\nAdded 0 user(s) in total.\n"),
+            spoof_lines.replace("Removed", "Added")), "failed")
+        # The legacy `removeuser` keeps its exit-code rule.
+        self.assertTrue(agent.removal_succeeded(result(""), email, "removeuser"))
+        # The original bug was the argv: Xray 26 rejects `--email=`.
+        self.reconcile([], {email}, None)
+        self.assertEqual(
+            self.calls[0], ["api", "rmu", "--server=127.0.0.1:10085", "-tag=tono-vless", email],
+        )
+        self.assertFalse(any("--email" in arg for arg in self.calls[0]))
+        # A NUL byte never reaches subprocess, so later removals still run,
+        # and a tag with a line break is refused before any Xray call.
+        with self.assertRaises(agent.Refusal):
+            self.reconcile([], {"u:a\x00bad", "u:z"}, None)
+        self.assertIn("u:z", self.calls[-1])
+        self.assertFalse(any("u:a\x00bad" in call for call in self.calls))
+        # The legacy adduser/adi check reads "already exists" from stderr.
+        self.assertNotIn("already exists", agent.add_inbound_user(
+            Path("/unused"), "adduser", "a", "t", "u:a\x00already exists", "x").stderr)
+        # Legacy commands: only a whole line naming this email counts, never
+        # an echo of an email that merely contains the phrase.
+        failed = agent.subprocess.CompletedProcess([], 1, "", "remove user: u:not found\n")
+        self.assertFalse(agent.removal_succeeded(failed, "u:not found", "removeuser"))
+        absent = agent.subprocess.CompletedProcess([], 1, "", "rpc error: User u:x not found.\n")
+        self.assertTrue(agent.removal_succeeded(absent, "u:x", "removeuser"))
+        self.result = type("Result", (), {"returncode": 1, "stdout": "add user: u:already exists", "stderr": ""})
+        with self.assertRaises(agent.Refusal):
+            agent.reconcile(Path("/unused"), {"add_user": "adduser", "remove_user": "removeuser"},
+                            "127.0.0.1:10085", "tono-vless",
+                            [{"userId": "already exists", "clientUUID": "11111111-1111-4111-8111-111111111111"}],
+                            set(), None)
+        with patch.dict(os.environ, {"TONO_XRAY_INBOUND_TAG": "x\nRemoved 1 user(s) in total."}):
+            with self.assertRaises(agent.Refusal):
+                agent.inbound_tag()
+
+    def test_an_adu_that_exits_0_after_an_rpc_error_is_a_failure(self) -> None:
+        # Xray 26 `adu` exits 0 and prints "Added 0" when the add failed.
+        self.result = agent.subprocess.CompletedProcess([], 0, (
+            "processing inbound: tono-vless\nadd user: u:usr_1\n"
+            "rpc error: code = Unknown desc = app/proxyman/command: failed to get handler: "
+            "tono-vless > app/proxyman/inbound: handler not found: tono-vless\n"
+            "Added 0 user(s) in total.\n"), "")
+        with self.assertRaises(agent.Refusal) as refused:
+            self.reconcile(
+                [{"userId": "usr_1", "clientUUID": "11111111-1111-4111-8111-111111111111"}],
+                set(),
+                None,
+            )
+        # A refusal returns no inventory, so the label cannot be recorded or ACKed.
+        self.assertIn("adding u:usr_1 failed", str(refused.exception))
 
     def test_the_installed_label_is_the_prefixed_one(self) -> None:
         self.reconcile(
@@ -1130,7 +1509,9 @@ class ReconcileSafety(unittest.TestCase):
         # Adds are attempted whenever the node cannot be asked what it holds,
         # because clients added over the API do not survive a restart. Counting
         # them would print the whole roster as added on every run.
-        self.result = type("Result", (), {"returncode": 1, "stdout": "", "stderr": "User already exists."})
+        self.result = type("Result", (), {"returncode": 0, "stdout": (
+            "add user: u:usr_1\nrpc error: code = Unknown desc = "
+            "proxy/vless: User u:usr_1 already exists.\nAdded 0 user(s) in total.\n"), "stderr": ""})
         added, removed, _ = self.reconcile(
             [{"userId": "usr_1", "clientUUID": "11111111-1111-4111-8111-111111111111"}],
             None,
@@ -1201,6 +1582,104 @@ class StableXrayRead(unittest.TestCase):
             )
         self.assertEqual(result, (1, 0, {"u:usr_1"}, {"u:usr_1": 120}, "new"))
         self.assertEqual(reconcile.call_count, 2)
+
+
+class ControlPlaneOutage(unittest.TestCase):
+    def test_an_outage_restores_the_last_verified_roster_and_keeps_metering(self) -> None:
+        # Xray drops API-added clients when it restarts. While the control plane
+        # cannot be reached, the node reinstalls its last verified roster for at
+        # most a day and keeps folding counters. Any answer from the control
+        # plane, here the 403 EXIT_NODE_DISABLED a disabled node gets (#375),
+        # discards the copy before anything handles that answer.
+        import io
+        client_uuid = "11111111-2222-4333-8444-555555555555"
+        label = agent.client_label("usr_a", "dev_a", client_uuid)
+        roster = [{"userId": "usr_a", "clientUUID": client_uuid, "deviceId": "dev_a"}]
+        online = ("node-under-test", 1_700_000_000_000, roster, False)
+        down = urllib.error.URLError("control plane unreachable")
+        real_fetch = agent.fetch_roster
+        disabled_body = json.dumps({"error": {"code": "EXIT_NODE_DISABLED"}}).encode()
+
+        class DisabledOpener:
+            def open(self, request, timeout=None):  # noqa: ARG002
+                raise urllib.error.HTTPError(
+                    request.full_url, 403, "Forbidden", {}, io.BytesIO(disabled_body),
+                )
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        path.write_text(
+            json.dumps({**fresh_state(), "sourceId": "node-under-test"}), encoding="utf-8",
+        )
+        cache = agent.roster_cache_path(path)
+        added: list[str] = []
+        delivered: list[dict] = []
+
+        def fake_add(_binary, _command, _address, _tag, added_label, _uuid):
+            added.append(added_label)
+            return agent.subprocess.CompletedProcess([], 0, "Added 1 user(s) in total.", "")
+
+        def fake_deliver(_base, _token, queue_path, state):
+            count = len(state["pendingReports"])
+            delivered.extend(state["pendingReports"])
+            state["pendingReports"] = []
+            agent.save_state(queue_path, state)
+            return count, 0
+
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-token",
+                 "TONO_SOURCE_ID": "node-under-test",
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "require_commands", return_value={
+                 "add_user": "adu", "remove_user": "rmu",
+                 "stats_query": "statsquery", "list_users": "inbounduser",
+             }), \
+             patch.object(agent, "fetch_roster") as fetch, \
+             patch.object(agent, "installed_clients") as listing, \
+             patch.object(agent, "add_inbound_user", side_effect=fake_add), \
+             patch.object(agent, "run_xray", return_value=agent.subprocess.CompletedProcess(
+                 [], 0, "", "")), \
+             patch.object(agent, "read_counters") as counters, \
+             patch.object(agent, "xray_start_marker") as marker, \
+             patch.object(agent, "acknowledge_roster"), \
+             patch.object(agent, "acknowledge_metering"), \
+             patch.object(agent, "deliver_queue", side_effect=fake_deliver), \
+             patch.object(agent.time, "time") as clock:
+            def run(at, outcome, listed, reading, start, raises=None):
+                clock.return_value = at
+                fetch.side_effect = outcome if callable(outcome) else [outcome]
+                listing.return_value = listed
+                counters.return_value = {label: reading}
+                marker.return_value = start
+                if raises is None:
+                    agent.run_once(path)
+                else:
+                    with self.assertRaises(raises):
+                        agent.run_once(path)
+
+            run(1_000_000, online, set(), 1_000, "boot:1")
+            self.assertEqual(added, [label])
+            self.assertEqual(cache.stat().st_mode & 0o777, 0o600)
+            # Down, then Xray restarts and forgets the client: it comes back
+            # from the copy, and the 4,000 bytes before the restart are kept.
+            run(1_000_060, down, {label}, 5_000, "boot:1", raises=agent.Unreachable)
+            run(1_000_120, down, set(), 200, "boot:2", raises=agent.Unreachable)
+            self.assertEqual(added, [label, label])
+            # A copy older than a day restores nothing.
+            run(1_090_000, down, set(), 250, "boot:2", raises=agent.Refusal)
+            self.assertEqual(added, [label, label])
+            run(1_090_060, online, set(), 300, "boot:2")
+            self.assertEqual(delivered[-1]["totalBytes"], 5_300)
+            # The real fetch path, so a merged #375 raises NodeDisabled here and
+            # withdraws the clients; either way the copy must be gone.
+            with patch.object(agent.urllib.request, "build_opener", return_value=DisabledOpener()):
+                run(1_090_120, real_fetch, set(), 300, "boot:2",
+                    raises=(urllib.error.HTTPError, agent.Refusal))
+            self.assertFalse(cache.exists())
+            run(1_090_180, down, set(), 300, "boot:2", raises=agent.Refusal)
+            self.assertEqual(added, [label, label, label])
 
 
 class Delivery(unittest.TestCase):
@@ -1456,14 +1935,13 @@ class ApiHelpParsing(unittest.TestCase):
     def test_retire_shared_legacy_removes_shared_legacy_when_requested(self) -> None:
         class Result:
             returncode = 0
-            stdout = ""
+            stdout = "Removed 1 user(s) in total."
             stderr = ""
 
         removed_labels: list[str] = []
         def mock_run_xray(binary, args):
-            for arg in args:
-                if arg.startswith("--email="):
-                    removed_labels.append(arg.split("=", 1)[1])
+            if "rmu" in args:
+                removed_labels.append(args[-1])
             return Result()
 
         commands = {"add_user": "adu", "remove_user": "rmu", "stats_query": "stats"}

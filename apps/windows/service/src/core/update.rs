@@ -11,7 +11,8 @@ use crate::update_transaction::*;
 use crate::update_wire::{UpdateRequest, UpdateStatus};
 use anyhow::{Context as _, Result, ensure};
 pub use security::{
-    UserLaunch, app_image, image, install_root, parent_image, pin_path, tunnel_absent, verify_tree,
+    UserLaunch, app_image, image, install_root, parent_image, pin_path, program_files,
+    record_installed_version, tunnel_absent, verify_tree,
 };
 use std::{
     fs::OpenOptions,
@@ -236,6 +237,13 @@ pub(crate) async fn request(
             package_path,
         } => {
             let manifest = verify_manifest(manifest.as_bytes(), &signature)?;
+            // Admitted: the registered App image, no manual installer or repair, the pending
+            // attempt's own owner and a signed manifest. The App invalidated its connecting
+            // attempt before sending Prepare, so supersede that attempt's PrepareCoreStart
+            // snapshot whatever is decided from here: a late request must not stop a successor
+            // Core started after the takeover (H9-F3). A request refused above supersedes
+            // nothing, or any local caller could fail another user's connect (TW-anthropic-4).
+            wfp::note_attempt_superseded();
             if store.pending() {
                 let a = store.attempt()?;
                 ensure!(
@@ -425,42 +433,26 @@ pub(crate) async fn request(
             desired::clear_active_owner().await?;
             tunnel_absent("Tono")?;
             wfp::release().await?;
-            owner_proxy_absent(owner)?;
-            let observed = protection(owner).await?;
-            ensure!(
-                app_image(peer.pid)? == peer,
-                "Disconnect peer changed before readback"
-            );
-            store.verify_disconnect(&owner.key, &peer, now()?, observed)?;
-            let a = store.attempt()?;
-            let executor_gone = a
-                .executor
-                .as_ref()
-                .is_none_or(|e| image(e.pid).ok().as_ref() != Some(e));
-            if matches!(
-                a.execution,
-                Execution::Reserved | Execution::Extracting | Execution::Staged | Execution::Launching
-            ) && executor_gone
-            {
+            // WFP is gone from here on. Proving the release for the update
+            // evidence and archiving the record are update bookkeeping: their
+            // failure keeps the record pending but is not a release failure.
+            // An Err would read as a refused release, and the App would show
+            // a machine that is already open as Protected Offline.
+            let proven = async {
+                owner_proxy_absent(owner)?;
+                let observed = protection(owner).await?;
                 ensure!(
-                    installed_components(&a.install_root)? == a.old_components,
-                    "original installed identity changed; evidence cannot be retired"
+                    app_image(peer.pid)? == peer,
+                    "Disconnect peer changed before readback"
                 );
-                store.retire_unconsumed(&owner.key, &peer)?;
-            } else if matches!(a.execution, Execution::RolledBack | Execution::Uncertain) {
-                // A proven rollback reaches a terminal archive without
-                // lowering the consumed high-water or rewriting the recorded
-                // obligation; an unproven one stays pending below.
-                ensure!(
-                    installed_components(&a.install_root)? == a.old_components,
-                    "rollback not proven complete; evidence cannot be retired"
-                );
-                store.retire_rolled_back(&owner.key, &peer)?;
+                Ok::<_, anyhow::Error>(observed)
             }
-            // Records whose replacement is still in flight (Consumed/Replaced,
-            // a live executor, or an unproven rollback) stay pending after
-            // release. They cannot install, reconnect or commit by
-            // fabricating recovery.
+            .await;
+            let settled = proven.and_then(|observed| {
+                let at = now()?;
+                retire_after_release(&mut store, &owner.key, &peer, at, observed, installed_components)
+            });
+            return released(&store, settled);
         }
         UpdateRequest::Adopt => {
             if !store.pending() {
@@ -510,6 +502,7 @@ pub(crate) async fn request(
                 .receipt
                 .successor_generation
                 .context("missing successor generation")?;
+            let version = a.manifest.app_version.clone();
             owner_proxy_absent(owner)?;
             let actual = installed_components(&a.install_root)?;
             let observed = protection(owner).await?;
@@ -543,9 +536,209 @@ pub(crate) async fn request(
                 },
             )?;
             // Executor/recovery task owns deleting backups, only after this write.
+            // The committed target is now the installed version. A failed write does not undo
+            // the commit: the executor's committed cleanup writes it again before the boot
+            // task is retired.
+            if let Err(error) = record_installed_version(&version) {
+                tracing::warn!("update committed; installed version not recorded yet: {error:#}");
+            }
         }
     }
     status(&store)
+}
+
+/// Read-only view of the executor's durable replacement plan
+/// (`install_service::update_executor::Plan`): only what the Service and
+/// recovery verify or remove.
+#[derive(serde::Deserialize)]
+struct PlanView {
+    attempt_id: String,
+    members: Vec<PlanMemberView>,
+}
+
+#[derive(serde::Deserialize)]
+struct PlanMemberView {
+    target: PathBuf,
+    backup: PathBuf,
+    restore: PathBuf,
+    publish_scratch: PathBuf,
+    old_digest: [u8; 32],
+    new_digest: [u8; 32],
+}
+
+/// Which side of every durable plan member the installation must equal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanSide {
+    Old,
+    New,
+}
+
+fn read_plan(plan_path: &Path, attempt_id: &str, roots: &[&Path]) -> Result<Vec<PlanMemberView>> {
+    let plan: PlanView = serde_json::from_slice(&std::fs::read(plan_path)?)?;
+    ensure!(
+        plan.attempt_id == attempt_id,
+        "replacement plan belongs to a different attempt"
+    );
+    for m in &plan.members {
+        ensure!(
+            roots.iter().any(|root| m.target.starts_with(root))
+                && m.target
+                    .components()
+                    .all(|c| !matches!(c, std::path::Component::ParentDir)),
+            "replacement plan member is outside the installation"
+        );
+        for (scratch, suffix) in [
+            (&m.backup, ".rollback"),
+            (&m.restore, ".restore"),
+            (&m.publish_scratch, ".publish"),
+        ] {
+            let mut bound = m.target.clone().into_os_string();
+            bound.push(suffix);
+            ensure!(
+                *scratch == PathBuf::from(bound),
+                "replacement scratch path is not bound to its member"
+            );
+        }
+    }
+    Ok(plan.members)
+}
+
+/// Every member of the durable plan (the whole payload tree plus
+/// `core-sha256.txt`, not only the three native binaries) must hash to its
+/// recorded old or new digest. Three-component identity alone cannot tell a
+/// complete publication/rollback from one interrupted between members.
+/// `Ok(false)` only when a member was read and differs; an unreadable plan or
+/// member (sharing violation, AV lock) is `Err`, never evidence of either side.
+pub fn plan_members_at(
+    plan_path: &Path,
+    attempt_id: &str,
+    roots: &[&Path],
+    side: PlanSide,
+) -> Result<bool> {
+    for m in read_plan(plan_path, attempt_id, roots)? {
+        let expected = match side {
+            PlanSide::Old => &m.old_digest,
+            PlanSide::New => &m.new_digest,
+        };
+        let expected: String = expected.iter().map(|b| format!("{b:02x}")).collect();
+        if file_digest(&m.target)? != expected {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Every plan member must already be the target bytes before any rollback
+/// copy is removed. Idempotent: an absent copy is already released.
+fn release_replaced_backups(plan_path: &Path, attempt_id: &str, roots: &[&Path]) -> Result<()> {
+    ensure!(
+        plan_members_at(plan_path, attempt_id, roots, PlanSide::New)?,
+        "installed plan member is not the target; evidence cannot be released"
+    );
+    for m in read_plan(plan_path, attempt_id, roots)? {
+        for scratch in [&m.backup, &m.restore, &m.publish_scratch] {
+            match std::fs::symlink_metadata(scratch) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
+                Ok(meta) => {
+                    ensure!(
+                        meta.file_type().is_file(),
+                        "refusing to remove non-file rollback copy"
+                    );
+                    std::fs::remove_file(scratch)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Update bookkeeping after an explicit Disconnect already released WFP:
+/// record the verified release, then archive a record whose installed
+/// identity proves it terminal.
+fn retire_after_release(
+    store: &mut Store,
+    owner: &str,
+    peer: &Image,
+    now: u64,
+    observed: Protection,
+    installed: impl Fn(&Path) -> Result<Components>,
+) -> Result<()> {
+    store.verify_disconnect(owner, peer, now, observed)?;
+    let a = store.attempt()?;
+    let executor_gone = a
+        .executor
+        .as_ref()
+        .is_none_or(|e| image(e.pid).ok().as_ref() != Some(e));
+    if matches!(
+        a.execution,
+        Execution::Reserved | Execution::Extracting | Execution::Staged | Execution::Launching
+    ) && executor_gone
+    {
+        ensure!(
+            installed(&a.install_root)? == a.old_components,
+            "original installed identity changed; evidence cannot be retired"
+        );
+        store.retire_unconsumed(owner, peer)?;
+    } else if matches!(a.execution, Execution::RolledBack | Execution::Uncertain) {
+        // A proven rollback reaches a terminal archive without
+        // lowering the consumed high-water or rewriting the recorded
+        // obligation; an unproven one stays pending below.
+        ensure!(
+            installed(&a.install_root)? == a.old_components,
+            "rollback not proven complete; evidence cannot be retired"
+        );
+        // Without a durable plan no publication started; with one,
+        // every member must be back at its original bytes.
+        let plan = store.attempt_dir()?.join("replacement.json");
+        if plan.try_exists()? {
+            ensure!(
+                plan_members_at(
+                    &plan,
+                    &a.receipt.attempt_id,
+                    &[a.install_root.as_path(), crate::service_paths().install_dir().as_path()],
+                    PlanSide::Old,
+                )?,
+                "rollback not proven complete for every plan member; evidence cannot be retired"
+            );
+        }
+        store.retire_rolled_back(owner, peer)?;
+    } else if a.execution == Execution::Replaced {
+        // Installed and released: the publication is complete and the
+        // owner explicitly released protection. Archive it without
+        // turning release into commit; the Service removes the
+        // retained rollback copies because no commit/executor will.
+        ensure!(
+            installed(&a.install_root)? == target(&a.manifest).components,
+            "installed target not proven; evidence cannot be released"
+        );
+        // No commit will record the target version, and the archive ends the record that
+        // carries it. Name it first; a failed write keeps the record pending.
+        record_installed_version(&a.manifest.app_version)?;
+        let plan = store.attempt_dir()?.join("replacement.json");
+        let (attempt_id, root) = (a.receipt.attempt_id.clone(), a.install_root.clone());
+        let service_dir = crate::service_paths().install_dir();
+        store.retire_released_installation(owner, peer, || {
+            release_replaced_backups(&plan, &attempt_id, &[root.as_path(), service_dir.as_path()])
+        })?;
+    }
+    // Records whose replacement is still in flight (Consumed, a live
+    // executor, or an unproven rollback) stay pending after release.
+    // They cannot install, reconnect or commit by fabricating
+    // recovery.
+    Ok(())
+}
+
+/// The Disconnect response once network protection is released. A
+/// bookkeeping failure travels as `needs_attention` beside the still-pending
+/// record, never as an Err: an Err means no protection release completed.
+fn released(store: &Store, settled: Result<()>) -> Result<UpdateStatus> {
+    let mut result = status(store)?;
+    if let Err(error) = settled {
+        tracing::warn!("update Disconnect released protection; record stays pending: {error:#}");
+        result.needs_attention = Some(format!("{error:#}"));
+    }
+    Ok(result)
 }
 
 fn status(store: &Store) -> Result<UpdateStatus> {
@@ -558,6 +751,7 @@ fn status(store: &Store) -> Result<UpdateStatus> {
             .map(|a| format!("{:?}", a.execution))
             .unwrap_or_else(|| "none".into()),
         offer: None,
+        needs_attention: None,
     })
 }
 
@@ -565,26 +759,7 @@ fn status(store: &Store) -> Result<UpdateStatus> {
 /// behind durable consumption. Startup uses this same boundary after reopen.
 pub fn register_consumed_recovery(store: &Store) -> Result<()> {
     register_recovery_with(store, |dir| {
-        let command = format!(
-            "\"{}\" --update-recover",
-            dir.join("executor.exe").display()
-        );
-        let result = std::process::Command::new("C:\\Windows\\System32\\schtasks.exe")
-            .args([
-                "/Create",
-                "/TN",
-                "Tono Update Recovery v1",
-                "/SC",
-                "ONSTART",
-                "/RU",
-                "SYSTEM",
-                "/RL",
-                "HIGHEST",
-                "/TR",
-                &command,
-                "/F",
-            ])
-            .output()?;
+        let result = recovery_task_registration(&security::system_directory()?, dir).output()?;
         ensure!(
             result.status.success(),
             "could not register independent SYSTEM recovery executor"
@@ -593,9 +768,67 @@ pub fn register_consumed_recovery(store: &Store) -> Result<()> {
     })
 }
 
+/// `schtasks.exe` comes from the OS-reported system directory, not a fixed
+/// `C:\Windows`, so a Windows installed on another volume can still register
+/// the recovery of a consumed attempt.
+fn recovery_task_registration(system_directory: &Path, dir: &Path) -> std::process::Command {
+    let command = format!(
+        "\"{}\" --update-recover",
+        dir.join("executor.exe").display()
+    );
+    let mut registration = std::process::Command::new(system_directory.join("schtasks.exe"));
+    registration.args([
+        "/Create",
+        "/TN",
+        "Tono Update Recovery v1",
+        "/SC",
+        "ONSTART",
+        "/RU",
+        "SYSTEM",
+        "/RL",
+        "HIGHEST",
+        "/TR",
+        &command,
+        "/F",
+    ]);
+    registration
+}
+
 fn register_recovery_with(store: &Store, register: impl FnOnce(&Path) -> Result<()>) -> Result<()> {
     store.consumed_attempt()?;
     register(&store.attempt_dir()?)
+}
+
+/// First execution only: after consumption, before any live mutation. The ONSTART task is the
+/// safety net for a publication the Service may not survive, so an attempt that cannot register
+/// it (Task Scheduler stopped or disabled, task creation refused) must not publish. It must not
+/// stay Consumed either, with no process left to finish it (#484). Nothing has been replaced
+/// yet, so it ends RolledBack once the installed identity is proven to be the retained original.
+/// The consumed high-water is untouched and nothing is re-granted.
+pub fn register_recovery_before_publication(
+    store: &mut Store,
+    installed: impl FnOnce() -> Result<Components>,
+) -> Result<()> {
+    register_or_roll_back_unpublished(store, installed, register_consumed_recovery)
+}
+
+fn register_or_roll_back_unpublished(
+    store: &mut Store,
+    installed: impl FnOnce() -> Result<Components>,
+    register: impl FnOnce(&Store) -> Result<()>,
+) -> Result<()> {
+    let Err(error) = register(&*store) else {
+        return Ok(());
+    };
+    ensure!(
+        store.consumed_attempt()?.execution == Execution::Consumed
+            && installed()? == store.attempt()?.old_components,
+        "recovery task unavailable and the unpublished attempt is not intact: {error:#}"
+    );
+    store.execution(Execution::RolledBack)?;
+    Err(error.context(
+        "independent recovery task unavailable; the consumed update ended RolledBack before any replacement",
+    ))
 }
 
 /// Called by NSIS before live or repair writes. Only the verified package in
@@ -620,6 +853,31 @@ pub fn unpack_gate(package: &Path) -> Result<()> {
     ensure!(
         file_digest(&package)? == target(&a.manifest).artifact_sha256,
         "NSIS package changed"
+    );
+    Ok(())
+}
+
+/// The ONSTART task [`register_consumed_recovery`] creates.
+pub const RECOVERY_TASK_NAME: &str = "Tono Update Recovery v1";
+
+/// Remove the SYSTEM boot task. The executor retires it once the committed
+/// cleanup ran, as macOS retires its launchd job at commit; a final uninstall
+/// retires it after WFP removal is proven. A task that is already gone is not
+/// an error. Same scheduler binary as the registration.
+pub fn retire_recovery_task() -> Result<()> {
+    let schtasks = Path::new("C:\\Windows\\System32\\schtasks.exe");
+    let deleted = std::process::Command::new(schtasks)
+        .args(["/Delete", "/TN", RECOVERY_TASK_NAME, "/F"])
+        .output()?;
+    if deleted.status.success() {
+        return Ok(());
+    }
+    let present = std::process::Command::new(schtasks)
+        .args(["/Query", "/TN", RECOVERY_TASK_NAME])
+        .output()?;
+    ensure!(
+        !present.status.success(),
+        "could not retire the update recovery task"
     );
     Ok(())
 }
@@ -681,6 +939,106 @@ async fn manual_core_absent() -> Result<()> {
     tunnel_absent("Tono")
 }
 
+/// The manual gate refused only because Tono protection is still active: no
+/// update is pending and no other installer holds the lease. NSIS turns this
+/// into its own exit code so the customer is told to Disconnect instead of
+/// seeing the installer exit silently. It is never permission to proceed.
+#[derive(Debug)]
+pub struct ProtectionActive;
+
+impl std::fmt::Display for ProtectionActive {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Disconnect before manual installation")
+    }
+}
+
+impl std::error::Error for ProtectionActive {}
+
+/// Exit code of `--manual-update-gate` for [`ProtectionActive`]; kept in sync with installer.nsi.
+pub const MANUAL_GATE_PROTECTION_ACTIVE_EXIT: i32 = 77;
+
+/// The manual gate refused because Tono filters remain but no Tono Service is left to own them
+/// (older uninstaller, quarantined or force-removed binaries). Neither Disconnect nor the Restore
+/// Network shortcut exists then; only the installer's own proven-removal ladder can clear them.
+/// NSIS offers that after the user confirms. It is never permission by itself.
+#[derive(Debug)]
+pub struct OrphanedProtection;
+
+impl std::fmt::Display for OrphanedProtection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Tono network block remains without a Tono Service to release it")
+    }
+}
+
+impl std::error::Error for OrphanedProtection {}
+
+/// Exit code of `--manual-update-gate` for [`OrphanedProtection`]; kept in sync with installer.nsi.
+pub const MANUAL_GATE_ORPHANED_PROTECTION_EXIT: i32 = 78;
+
+/// Residual Tono filters always refuse the manual gate; who can still own them decides how. A
+/// registered Service re-arms them on start, so the user must Disconnect ([`ProtectionActive`]).
+/// With none left, the refusal says so ([`OrphanedProtection`]) instead of a dead end.
+fn residual_filter_refusal(
+    residual_filters: bool,
+    service_present: impl FnOnce() -> Result<bool>,
+) -> Result<()> {
+    if !residual_filters {
+        return Ok(());
+    }
+    // An unreadable SCM keeps the Disconnect answer; only a proven absence is an orphan.
+    if service_present().unwrap_or(true) {
+        Err(ProtectionActive.into())
+    } else {
+        Err(OrphanedProtection.into())
+    }
+}
+
+/// A runnable desired owner state refuses the manual gate; [`begin_manual`] reads it only after
+/// [`residual_filter_refusal`] found no Tono filter. A registered Service would restore the Core
+/// on start, so the user must Disconnect ([`ProtectionActive`]). With no Service left either, it
+/// is a stale owner nobody can Disconnect, such as after a confirmed orphan clear whose
+/// [`retire_orphaned_owner`] failed once the filters were removed. The refusal re-offers that
+/// confirmed recovery ([`OrphanedProtection`]), which retires the owner only after proving again
+/// that no Service and no filter is left.
+fn runnable_owner_refusal(
+    core_should_be_running: bool,
+    service_present: impl FnOnce() -> Result<bool>,
+) -> Result<()> {
+    if !core_should_be_running {
+        return Ok(());
+    }
+    // As for residual filters, an unreadable SCM keeps the Disconnect answer.
+    if service_present().unwrap_or(true) {
+        Err(ProtectionActive.into())
+    } else {
+        Err(OrphanedProtection.into())
+    }
+}
+
+/// Whether a Tono Service that can re-arm the barrier is installed: an SCM registration whose
+/// binary is still on disk. A stopped Service counts. Anything unreadable counts as present.
+fn barrier_service_present() -> Result<bool> {
+    use platform_lib::{
+        service::ServiceAccess,
+        service_manager::{ServiceManager, ServiceManagerAccess},
+    };
+    const ERROR_SERVICE_DOES_NOT_EXIST: i32 = 1060;
+    let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
+    match manager.open_service(crate::WINDOWS_SERVICE_NAME, ServiceAccess::QUERY_STATUS) {
+        Ok(_) => Ok(crate::service_paths()
+            .install_dir()
+            .join("tono-service.exe")
+            .try_exists()
+            .unwrap_or(true)),
+        Err(platform_lib::Error::Winapi(error))
+            if error.raw_os_error() == Some(ERROR_SERVICE_DOES_NOT_EXIST) =>
+        {
+            Ok(false)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
 /// NSIS calls this before *any* live or repair-resource mutation. The durable
 /// lease fences Service connect/restart even after the short-lived gate exits.
 pub async fn begin_manual() -> Result<()> {
@@ -697,20 +1055,20 @@ pub async fn begin_manual() -> Result<()> {
     }
     drop(store);
     // No stale manual lease may turn armed/unknown protection into permission.
-    ensure!(
-        !wfp::residual_filters_present().await?,
-        "Disconnect before manual installation"
-    );
+    residual_filter_refusal(
+        wfp::residual_filters_present().await?,
+        barrier_service_present,
+    )?;
     let paths = crate::service_paths();
     if paths.active_owner_path().try_exists()? {
         let active: crate::ActiveOwnerState =
             serde_json::from_slice(&std::fs::read(paths.active_owner_path())?)?;
-        ensure!(
-            !desired::load_owner_desired_state(&active.owner_key)
+        runnable_owner_refusal(
+            desired::load_owner_desired_state(&active.owner_key)
                 .await?
                 .core_should_be_running,
-            "Disconnect before manual installation"
-        );
+            barrier_service_present,
+        )?;
     }
     let restored = dns::restore_protected().await?;
     ensure!(
@@ -722,6 +1080,66 @@ pub async fn begin_manual() -> Result<()> {
     let mut next = store.state.clone();
     next.manual_installer = Some(installer);
     store.save(next)
+}
+
+/// Uninstall only, after the user confirmed releasing active protection. The
+/// uninstaller's own ladder (`RemoveVergeService`) releases protection and
+/// deletes nothing unless WFP removal is proven, so this takes the same
+/// update/installer lease as [`begin_manual`] without requiring Disconnect.
+pub fn begin_manual_uninstall() -> Result<()> {
+    let installer = parent_image()?;
+    let _repair =
+        crate::acquire_service_repair_gate()?.context("another lifecycle writer is active")?;
+    let mut store = open_store()?;
+    ensure!(!store.pending(), "update evidence pending");
+    if let Some(previous) = &store.state.manual_installer {
+        ensure!(
+            security::process_matches(previous).is_err() || *previous == installer,
+            "another manual installer is active"
+        );
+    }
+    let mut next = store.state.clone();
+    next.manual_installer = Some(installer);
+    store.save(next)
+}
+
+/// Install only, after the user confirmed clearing an orphaned barrier ([`OrphanedProtection`]).
+/// Re-checks that no Service appeared, then takes the same lease as [`begin_manual_uninstall`].
+/// The install's own `RemoveVergeService` ladder then removes the filters, and the install stops
+/// there unless that removal is proven.
+pub fn begin_manual_orphan() -> Result<()> {
+    ensure!(
+        !barrier_service_present()?,
+        "a Tono Service still owns the network barrier"
+    );
+    begin_manual_uninstall()
+}
+
+/// Install only, after a confirmed orphan clear ([`begin_manual_orphan`]) and once the install's
+/// own `RemoveVergeService` removed the filters. The owner that was connected when its Service
+/// went away still has a desired "core should run" state, and [`manual_gate`] refuses the fresh
+/// Service on it with Disconnect advice nobody can follow. It is retired only while this
+/// installer holds the lease, no Service exists and no Tono filter is left; never before.
+pub async fn retire_orphaned_owner() -> Result<()> {
+    let installer = parent_image()?;
+    let _repair =
+        crate::acquire_service_repair_gate()?.context("another lifecycle writer is active")?;
+    let store = open_store()?;
+    ensure!(!store.pending(), "update evidence pending");
+    ensure!(
+        store.state.manual_installer.as_ref() == Some(&installer),
+        "this installer does not hold the manual installer lease"
+    );
+    drop(store);
+    ensure!(
+        !barrier_service_present()?,
+        "a Tono Service still owns the network barrier"
+    );
+    ensure!(
+        !wfp::residual_filters_present().await?,
+        "Tono network filters remain; the previous connection state was kept"
+    );
+    desired::retire_legacy_active_owner().await
 }
 
 pub fn finish_manual() -> Result<()> {
@@ -770,7 +1188,14 @@ pub fn reconcile_before_desired() -> Result<bool> {
         a.execution,
         Execution::Consumed | Execution::Replaced | Execution::Uncertain
     ) {
-        register_consumed_recovery(&store)?;
+        // Recovery itself does not run through the task; the task only covers a Service that
+        // cannot load. A failed registration must not keep the recovery executor from running
+        // and leave the attempt Consumed (#484).
+        if let Err(error) = register_consumed_recovery(&store) {
+            tracing::warn!(
+                "update recovery task could not be registered; recovering without it: {error:#}"
+            );
+        }
         if a.executor
             .as_ref()
             .is_none_or(|e| image(e.pid).ok().as_ref() != Some(e))
@@ -786,6 +1211,40 @@ pub fn reconcile_before_desired() -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn update_manual_gate_names_an_orphaned_barrier_instead_of_asking_to_disconnect() {
+        // No filters: the gate does not even ask who owns them.
+        residual_filter_refusal(false, || panic!("no barrier to own")).unwrap();
+        // A registered Service re-arms its filters, so Disconnect stays the only answer.
+        let refusal = residual_filter_refusal(true, || Ok(true)).unwrap_err();
+        assert!(refusal.is::<ProtectionActive>());
+        let refusal =
+            residual_filter_refusal(true, || anyhow::bail!("SCM unreadable")).unwrap_err();
+        assert!(refusal.is::<ProtectionActive>());
+        // Filters with no Service left: Disconnect and Restore Network do not exist, so the
+        // refusal must be the one NSIS turns into the confirmed proven-removal install.
+        let refusal = residual_filter_refusal(true, || Ok(false)).unwrap_err();
+        assert!(refusal.is::<OrphanedProtection>());
+    }
+
+    /// #602 (#573 residual): a confirmed orphan clear removed the filters and the Service, then
+    /// could not persist the owner's stopped state. The re-run finds no filters, only that stale
+    /// runnable owner, and must be offered the same confirmed recovery again (78) instead of
+    /// Disconnect advice nobody can follow (77). A Service that could restore the Core still wins.
+    #[test]
+    fn update_manual_gate_reoffers_orphan_recovery_for_a_stale_runnable_owner() {
+        runnable_owner_refusal(false, || panic!("no runnable owner to refuse")).unwrap();
+        let refusal = runnable_owner_refusal(true, || Ok(true)).unwrap_err();
+        assert!(refusal.is::<ProtectionActive>());
+        let refusal = runnable_owner_refusal(true, || anyhow::bail!("SCM unreadable")).unwrap_err();
+        assert!(refusal.is::<ProtectionActive>());
+        let refusal = runnable_owner_refusal(true, || Ok(false)).unwrap_err();
+        assert!(
+            refusal.is::<OrphanedProtection>(),
+            "no Service and no filters left: expected the confirmed orphan recovery, got {refusal:#}"
+        );
+    }
 
     #[test]
     fn update_recovery_registration_requires_durable_consumption() {
@@ -816,6 +1275,154 @@ mod tests {
         assert_eq!(std::fs::read(task).unwrap(), b"reconciled");
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// #484: a consumed attempt whose recovery task cannot be registered, before anything was
+    /// replaced, ends RolledBack instead of staying Consumed with nobody left to finish it.
+    #[test]
+    fn unregistrable_recovery_task_rolls_back_the_unpublished_attempt() {
+        use crate::update_transaction::tests::{authorize, reserved};
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        let original = store.attempt().unwrap().old_components.clone();
+
+        let result = register_or_roll_back_unpublished(
+            &mut store,
+            || Ok(original),
+            |_| anyhow::bail!("task scheduler unavailable"),
+        );
+
+        assert!(result.is_err());
+        let durable: State =
+            serde_json::from_slice(&std::fs::read(root.join("state.json")).unwrap()).unwrap();
+        assert_eq!(durable.attempt.unwrap().execution, Execution::RolledBack);
+        assert_eq!(durable.consumed_sequence, 74);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_disconnect_archive_refusal_after_release_is_not_a_release_failure() {
+        use crate::update_transaction::tests::{authorize, reserved};
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        // Executor rollback could not restore every file: the tree is mixed.
+        store.execution(Execution::Uncertain).unwrap();
+        let owner = "windows:fixture-owner";
+        store.request_disconnect(owner, &peer, 1_900_000_003).unwrap();
+        let mut mixed = store.attempt().unwrap().old_components.clone();
+        mixed.app_sha256 = "f".repeat(64);
+        // WFP is already released when the archive proof runs. Its refusal
+        // keeps the record pending but must not come back as a release Err.
+        let settled = retire_after_release(
+            &mut store,
+            owner,
+            &peer,
+            1_900_000_004,
+            Protection::Unprotected,
+            |_| Ok(mixed.clone()),
+        );
+        let status = released(&store, settled).unwrap();
+        assert!(store.pending());
+        assert_eq!(status.execution, "Uncertain");
+        assert!(status.needs_attention.unwrap().contains("rollback not proven"));
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_plan_members_gate_recovery_and_rollback_on_every_member_not_three_binaries() {
+        use sha2::{Digest, Sha256};
+        let root = std::env::temp_dir().join(format!(
+            "tono-plan-members-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("resources")).unwrap();
+        let digest = |bytes: &str| {
+            let mut out = [0_u8; 32];
+            out.copy_from_slice(&Sha256::digest(bytes.as_bytes()));
+            out
+        };
+        // Same serialized shape the executor writes; core-sha256.txt is last.
+        let members = [
+            ("Tono.exe", "old-app", "new-app"),
+            ("resources/data.bin", "old-data", "new-data"),
+            ("core-sha256.txt", "old-pin", "new-pin"),
+        ]
+        .map(|(name, old, new)| {
+            let target = root.join(name);
+            let bound = |suffix: &str| {
+                let mut path = target.clone().into_os_string();
+                path.push(suffix);
+                PathBuf::from(path)
+            };
+            serde_json::json!({
+                "staged": root.join("payload").join(name),
+                "target": target,
+                "backup": bound(".rollback"),
+                "restore": bound(".restore"),
+                "publish_scratch": bound(".publish"),
+                "old_digest": digest(old),
+                "new_digest": digest(new),
+                "changed": true,
+                "published": false,
+            })
+        });
+        let plan = root.join("replacement.json");
+        std::fs::write(
+            &plan,
+            serde_json::to_vec(&serde_json::json!({"attempt_id": "a1", "members": members}))
+                .unwrap(),
+        )
+        .unwrap();
+        let roots = [root.as_path()];
+        let install = |app: &str, data: &str, pin: &str| {
+            std::fs::write(root.join("Tono.exe"), app).unwrap();
+            std::fs::write(root.join("resources/data.bin"), data).unwrap();
+            std::fs::write(root.join("core-sha256.txt"), pin).unwrap();
+        };
+        // Publication interrupted before the last member: not TargetVerified.
+        install("new-app", "new-data", "old-pin");
+        assert!(!plan_members_at(&plan, "a1", &roots, PlanSide::New).unwrap());
+        install("new-app", "new-data", "new-pin");
+        assert!(plan_members_at(&plan, "a1", &roots, PlanSide::New).unwrap());
+        assert!(plan_members_at(&plan, "other", &roots, PlanSide::New).is_err());
+        // Rollback restored the binaries but not a resource: not retirable.
+        install("old-app", "new-data", "old-pin");
+        assert!(!plan_members_at(&plan, "a1", &roots, PlanSide::Old).unwrap());
+        install("old-app", "old-data", "old-pin");
+        assert!(plan_members_at(&plan, "a1", &roots, PlanSide::Old).unwrap());
+        // A member that exists but cannot be read (a directory: open or read
+        // fails, like a sharing violation or AV lock) is an error, not a
+        // mismatch, so recovery cannot roll back a complete installation.
+        install("new-app", "new-data", "new-pin");
+        std::fs::remove_file(root.join("resources/data.bin")).unwrap();
+        std::fs::create_dir(root.join("resources/data.bin")).unwrap();
+        assert!(plan_members_at(&plan, "a1", &roots, PlanSide::New).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_recovery_registration_uses_the_os_system_directory() {
+        // The OS reports the real directory, and it holds the scheduler CLI.
+        let system = security::system_directory().unwrap();
+        assert!(system.join("schtasks.exe").is_file());
+        // Windows on another volume: the scheduler comes from that directory,
+        // never a fixed C:\Windows.
+        let registration = recovery_task_registration(
+            Path::new(r"D:\Windows\System32"),
+            Path::new(r"D:\ProgramData\Tono\updates-v1\attempt"),
+        );
+        assert_eq!(
+            Path::new(registration.get_program()),
+            Path::new(r"D:\Windows\System32\schtasks.exe")
+        );
     }
 
     #[test]

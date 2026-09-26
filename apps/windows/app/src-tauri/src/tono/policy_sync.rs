@@ -6,7 +6,7 @@
 //! restarts. A *behavior change* (the validated document differs from the
 //! active one) triggers a protected reconnect — never a release.
 
-use std::{collections::BTreeSet, net::Ipv4Addr, sync::Arc, time::Duration};
+use std::{collections::BTreeSet, net::Ipv4Addr, sync::Arc};
 
 use tauri::AppHandle;
 use tono_core::policy::{
@@ -15,13 +15,10 @@ use tono_core::policy::{
 
 use crate::tono::{
     audit::AuditEvent,
+    catalog_sync::{SyncFailure, note_session_rejected, run_with_retries},
     connection,
     state::{TonoInner, TonoState},
 };
-
-/// Same retry policy as the catalog sync (§3).
-const MAX_RETRIES: u32 = 3;
-const RETRY_DELAY: Duration = Duration::from_secs(1);
 
 /// Addresses protected at validation time: the permanently protected DoH
 /// resolvers plus the selected node's IP (never a DIRECT target).
@@ -42,11 +39,7 @@ pub fn seed_from_cache(inner: &mut TonoInner) {
     let Some(cached) = inner.policy_cache().load(&protected) else {
         return;
     };
-    inner.policy_tracker = PolicyTracker::from_installed_with_signature(
-        cached.response.revision,
-        cached.response.sha256.clone(),
-        cached.response.signature.clone(),
-    );
+    inner.policy_tracker = PolicyTracker::from_cached(&cached.response);
     inner.traffic_policy = Some(cached.policy);
 }
 
@@ -70,9 +63,9 @@ fn install_and_persist(
 
 /// One account-scoped fetch + install cycle. A behavior change under an active tunnel schedules
 /// the protected reconnect transaction (the barrier stays up throughout).
-async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generation: u64) -> Result<(), String> {
+async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generation: u64) -> Result<(), SyncFailure> {
     let client = { state.lock().await.client.clone() };
-    let response = client.traffic_policy().await.map_err(|err| err.to_string())?;
+    let response = client.traffic_policy().await.map_err(SyncFailure::from_api)?;
 
     // DIRECT activation keeps a read guard from its final snapshot check through exact WFP
     // commit. Taking the writer before the product-state mutex makes the policy document,
@@ -103,7 +96,7 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
             }
             // Benign out-of-order delivery: never an error.
             Err(PolicyError::StaleRevision) => false,
-            Err(err) => return Err(err.to_string()),
+            Err(err) => return Err(SyncFailure::Failed(err.to_string())),
         }
     };
     drop(policy_update);
@@ -125,21 +118,18 @@ pub(crate) async fn sync_with_retries_for_auth_generation(
 }
 
 async fn sync_with_retries_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generation: u64) -> Result<(), String> {
-    let mut last_error = String::new();
-    for attempt in 0..=MAX_RETRIES {
-        match sync_once_inner(state, app, auth_generation).await {
-            Ok(()) => return Ok(()),
-            Err(err) => {
-                last_error = err;
-                if attempt < MAX_RETRIES {
-                    tokio::time::sleep(RETRY_DELAY).await;
-                }
-            }
-        }
-    }
+    // Same retry policy as the catalog sync (§3).
+    let failure = match run_with_retries(|| sync_once_inner(state, app, auth_generation)).await {
+        Ok(()) => return Ok(()),
+        Err(failure) => failure,
+    };
+    let last_error = failure.to_string();
     state.audit().log(AuditEvent::PolicySyncFail {
         error: last_error.clone(),
     });
+    if matches!(failure, SyncFailure::SessionRejected) {
+        note_session_rejected(state, app, auth_generation).await;
+    }
     Err(last_error)
 }
 

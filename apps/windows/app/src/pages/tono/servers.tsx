@@ -8,6 +8,8 @@ import { useQuery } from '@/services/query-client'
 import { connectIfIdleAfterSelection } from '@/services/server-selection'
 import { useThemeMode } from '@/services/states'
 import {
+  type TonoActionErrorDescription,
+  describeTonoActionError,
   formatTonoActionError,
   idleSelectShouldConnect,
   tonoCancelServerTests,
@@ -83,6 +85,8 @@ const ServersPage = () => {
   const [testingAll, setTestingAll] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [refreshFeedback, setRefreshFeedback] = useState<string | null>(null)
+  const [refreshError, setRefreshError] =
+    useState<TonoActionErrorDescription | null>(null)
   const [searchText, setSearchText] = useState('')
   const [regionFilter, setRegionFilter] = useState<string | null>(null)
   const [savingPreferences, setSavingPreferences] = useState(false)
@@ -332,20 +336,36 @@ const ServersPage = () => {
   const handleRefresh = useLockFn(async () => {
     setRefreshing(true)
     setRefreshFeedback(null)
+    setRefreshError(null)
     setSelectError(null)
     try {
       await tonoRefreshCatalog()
       await Promise.all([mutateServers(), mutateCatalog(), mutateTonoStatus()])
       setRefreshFeedback(t('tono.nodes.refreshSuccess'))
     } catch (error) {
-      setSelectError(formatTonoActionError(error, t))
-      await mutateCatalog()
+      const { data: refreshed } = await mutateCatalog()
+      // A failed sync is recorded on the catalog status, which the refresh area shows with
+      // its cause and clears once a later sync succeeds. A refusal before any sync (signed
+      // out, superseded by an account change) is not recorded there, so it is kept here.
+      const raw = error instanceof Error ? error.message : String(error)
+      if (refreshed?.error !== raw) {
+        setRefreshError(describeTonoActionError(error, t))
+      }
     } finally {
       setRefreshing(false)
     }
   })
 
   const selected = (servers ?? []).find((server) => server.selected)
+  // #590: this page's own refresh failure is superseded once the last successful sync moves (a
+  // later periodic or manual success, or sign-in/out resetting it): the backend's `catalog.error`
+  // speaks for the catalog from then on. A later failed sync does not move it.
+  useEffect(() => {
+    setRefreshError(null)
+  }, [catalog?.lastSyncedAtMs])
+  const catalogFailure =
+    refreshError ??
+    (catalog?.error ? describeTonoActionError(catalog.error, t) : null)
   const query = searchText.trim().toLowerCase()
   const visibleServers = useMemo(() => {
     return (servers ?? []).filter((server) => {
@@ -577,21 +597,34 @@ const ServersPage = () => {
             {refreshing ? t('tono.nodes.refreshing') : t('tono.nodes.refresh')}
           </button>
         </div>
-        {(catalog?.error || refreshFeedback) && (
+        {(catalogFailure || refreshFeedback) && (
           <div
-            role={catalog?.error ? 'alert' : 'status'}
+            role={catalogFailure ? 'alert' : 'status'}
             style={{
               marginTop: 7,
-              color: catalog?.error
+              color: catalogFailure
                 ? 'var(--tono-text-error)'
                 : TONO_COLORS.latencyGood,
             }}
           >
-            {catalog?.error
+            {catalogFailure
               ? t('tono.nodes.catalogError', {
-                  error: formatTonoActionError(catalog.error, t),
+                  error: catalogFailure.message,
                 })
               : refreshFeedback}
+            {catalogFailure?.detail && (
+              <div
+                data-testid="tono-catalog-error-detail"
+                style={{
+                  marginTop: 4,
+                  color: text.secondary,
+                  overflowWrap: 'anywhere',
+                  fontFamily: TONO_MONO_STACK,
+                }}
+              >
+                {catalogFailure.detail}
+              </div>
+            )}
           </div>
         )}
       </div>

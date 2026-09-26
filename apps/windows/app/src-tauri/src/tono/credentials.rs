@@ -15,12 +15,138 @@
 //!   account close awaits its acknowledgement without holding product locks.
 //!   A stalled vault never blocks an executor thread or opens login admission.
 
+#[cfg(not(windows))]
 use keyring::Entry;
 use std::sync::Arc;
 use tono_core::credentials::{CredentialError, CredentialKey, CredentialStore, MemoryCredentialStore};
 
-/// keyring service name; entries appear as `tono/<key>` (§2).
+/// Service suffix of the Windows generic-credential targets, `<account>.tono`: the entries are
+/// `refresh-token.tono` and `installation-id.tono` (§2), the names keyring gave them before the
+/// Windows vault moved to the Credential Manager API. The uninstaller deletes the first by that
+/// name. keyring still serves the development vault on other platforms.
 const SERVICE_NAME: &str = "tono";
+
+/// Written when this installation adopts a sign-in. The session lives in Credential Manager,
+/// which survives an uninstall that deletes the data directory; a vault refresh token is only
+/// this installation's session when the marker says so. On Windows it sits under
+/// `%LOCALAPPDATA%` beside the roaming data directory (see [`vault_marker_dir`]): the session it
+/// vouches for is bound to this machine, so the marker must not roam either (H11-F2, #409).
+const VAULT_SESSION_MARKER: &str = "vault-session.marker";
+
+/// The directory that holds [`VAULT_SESSION_MARKER`] for `data_dir`. A data directory under the
+/// roaming `%APPDATA%` maps to the same relative path under `%LOCALAPPDATA%`, which does not roam.
+/// Any other directory (portable installs, test fixtures, other platforms) holds its own marker.
+fn vault_marker_dir(data_dir: &std::path::Path) -> std::path::PathBuf {
+    #[cfg(windows)]
+    {
+        if let (Some(roaming), Some(local)) = (std::env::var_os("APPDATA"), std::env::var_os("LOCALAPPDATA")) {
+            if let Ok(relative) = data_dir.strip_prefix(&roaming) {
+                return std::path::PathBuf::from(local).join(relative);
+            }
+        }
+    }
+    data_dir.to_path_buf()
+}
+
+pub(crate) fn mark_vault_session_owned(data_dir: &std::path::Path) -> std::io::Result<()> {
+    let marker_dir = vault_marker_dir(data_dir);
+    std::fs::create_dir_all(&marker_dir)?;
+    std::fs::write(marker_dir.join(VAULT_SESSION_MARKER), b"1")
+}
+
+/// Whether the refresh token in the vault belongs to this data directory. Only the local marker
+/// answers for it: the account traces live in the roaming data directory, so they vouch only in the
+/// one-time upgrade [`adopts_unmarked_vault_session`] allows, and a directory that adopts writes
+/// the local marker. A fresh directory (a new install, or a reinstall after "delete application
+/// data") adopts nothing. A marker an earlier Windows build wrote into the roaming data directory
+/// is rewritten to the local marker directory, and the roaming copy is removed only after that
+/// write succeeded.
+pub(crate) fn data_dir_owns_vault_session(
+    data_dir: &std::path::Path,
+    account_traces: &[std::path::PathBuf],
+    legacy_roaming_session: bool,
+) -> VaultSessionOwnership {
+    let marker = vault_marker_dir(data_dir).join(VAULT_SESSION_MARKER);
+    if marker.exists() {
+        return VaultSessionOwnership::Owned { rebind: legacy_roaming_session };
+    }
+    let legacy_marker = data_dir.join(VAULT_SESSION_MARKER);
+    let legacy_marker = (legacy_marker != marker && legacy_marker.exists()).then_some(legacy_marker);
+    let traces = account_traces.iter().any(|trace| trace.exists());
+    unmarked_vault_session_ownership(legacy_marker.is_some(), legacy_roaming_session, traces, || {
+        match mark_vault_session_owned(data_dir) {
+            Ok(()) => {
+                if let Some(legacy_marker) = &legacy_marker {
+                    let _ = std::fs::remove_file(legacy_marker);
+                }
+                true
+            }
+            Err(error) => {
+                tono_logging::logging!(warn, tono_logging::Type::Service,
+                    "Tono: failed to record the vault session marker: {error}");
+                false
+            }
+        }
+    })
+}
+
+/// What a load does with the vault session ([`data_dir_owns_vault_session`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum VaultSessionOwnership {
+    /// Not this installation's session: sign in again.
+    NotOwned,
+    /// This installation's session. `rebind`: an earlier build stored it roaming, and now that a
+    /// marker vouches for it, it is rewritten local-machine
+    /// ([`TonoCredentialStore::bind_session_to_machine_async`]).
+    Owned { rebind: bool },
+    /// The one-time upgrade from a roaming session could not write the local marker. That roaming
+    /// credential is its only evidence and the first refresh-token rotation would rewrite it
+    /// local-machine, so the load answers nothing: a retry, or the next launch, upgrades again
+    /// instead of signing the user out.
+    Unrecorded,
+}
+
+/// [`adopts_unmarked_vault_session`], settled by `record_marker` (the local marker write, asked
+/// only when adopting). The session is rebound to this machine only once a marker vouches for it:
+/// a rewrite that outran the marker (in a load that timed out or lost to a concurrent one, or
+/// before a failed marker write) would destroy the upgrade's evidence and sign the user out on the
+/// next load. A roaming marker still answers after a failed write, as it is removed only after the
+/// local one is written.
+fn unmarked_vault_session_ownership(
+    legacy_marker: bool,
+    legacy_roaming_session: bool,
+    account_traces: bool,
+    record_marker: impl FnOnce() -> bool,
+) -> VaultSessionOwnership {
+    if !adopts_unmarked_vault_session(legacy_marker, legacy_roaming_session, account_traces) {
+        VaultSessionOwnership::NotOwned
+    } else if record_marker() || legacy_marker {
+        VaultSessionOwnership::Owned { rebind: legacy_roaming_session }
+    } else {
+        VaultSessionOwnership::Unrecorded
+    }
+}
+
+/// Whether a data directory without the local marker adopts the vault session (H11-F2, #409).
+/// Both signals roam, so they only upgrade an installation from before the local marker, once: a
+/// marker an earlier Windows build left in the roaming data directory, or account traces (files
+/// only a signed-in account writes, even when its catalog sync never succeeded) beside a session an
+/// earlier build stored roaming ([`StoredSession::legacy_roaming`]). Such a build may have signed
+/// in before any marker existed, and its upgrade must not sign that user out and release their
+/// protection. Beside any other session the traces may have roamed in from another PC: a missing
+/// local marker then means sign in again.
+const fn adopts_unmarked_vault_session(legacy_marker: bool, legacy_roaming_session: bool, account_traces: bool) -> bool {
+    legacy_marker || (legacy_roaming_session && account_traces)
+}
+
+/// The refresh token as the vault stored it.
+pub struct StoredSession {
+    pub token: String,
+    /// An earlier build stored it roaming (`CRED_PERSIST_ENTERPRISE`, before #632). This read
+    /// leaves it roaming; it is rebound to this machine once a marker vouches for it
+    /// ([`VaultSessionOwnership::Owned`]).
+    pub legacy_roaming: bool,
+}
 
 fn account_name(key: CredentialKey) -> &'static str {
     match key {
@@ -29,47 +155,269 @@ fn account_name(key: CredentialKey) -> &'static str {
     }
 }
 
+/// Which persistence a stored session credential needs (H11-F2, #409). The session must stay on
+/// the machine that created it, so this build writes `CRED_PERSIST_LOCAL_MACHINE`. keyring 3.6.3,
+/// which earlier builds used, hard-codes `CRED_PERSIST_ENTERPRISE`: that copy roams with a roaming
+/// user profile, and a second PC would present the same device and single-use refresh token.
+#[cfg_attr(not(windows), allow(dead_code))]
+mod vault_migration {
+    /// `CREDENTIALW.Persist` values (wincred.h). Local copies keep the decision a pure function
+    /// that tests on every platform; the Windows vault asserts they match the windows crate.
+    pub(super) const CRED_PERSIST_LOCAL_MACHINE_RAW: u32 = 2;
+    pub(super) const CRED_PERSIST_ENTERPRISE_RAW: u32 = 3;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(super) enum VaultReadAction {
+        /// Nothing is stored under the target.
+        Absent,
+        /// Stored in a form this build keeps: use it as is.
+        Use,
+        /// Stored roaming by an earlier build. Rewrite the same target local-machine and use the
+        /// value either way; a failed rewrite is retried on the next read, never dropped.
+        MigrateToLocalMachine,
+    }
+
+    pub(super) const fn vault_read_action(stored_persist: Option<u32>) -> VaultReadAction {
+        match stored_persist {
+            None => VaultReadAction::Absent,
+            Some(CRED_PERSIST_ENTERPRISE_RAW) => VaultReadAction::MigrateToLocalMachine,
+            Some(_) => VaultReadAction::Use,
+        }
+    }
+}
+
+/// Windows Credential Manager, called directly: keyring cannot write any persistence but
+/// `CRED_PERSIST_ENTERPRISE`. Targets, `UserName` and the UTF-16LE blob match what keyring wrote,
+/// so entries from earlier builds read back unchanged.
+#[cfg(windows)]
+mod win_vault {
+    use super::vault_migration::{
+        CRED_PERSIST_ENTERPRISE_RAW, CRED_PERSIST_LOCAL_MACHINE_RAW, VaultReadAction, vault_read_action,
+    };
+    use tono_core::credentials::CredentialError;
+    use windows::{
+        Win32::{
+            Foundation::ERROR_NOT_FOUND,
+            Security::Credentials::{
+                CRED_FLAGS, CRED_PERSIST_ENTERPRISE, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC, CREDENTIALW,
+                CredDeleteW, CredFree, CredReadW, CredWriteW,
+            },
+        },
+        core::{HRESULT, PCWSTR, PWSTR},
+    };
+
+    const _: () = assert!(CRED_PERSIST_LOCAL_MACHINE.0 == CRED_PERSIST_LOCAL_MACHINE_RAW);
+    const _: () = assert!(CRED_PERSIST_ENTERPRISE.0 == CRED_PERSIST_ENTERPRISE_RAW);
+
+    /// Orders a read-and-migrate against this process's writes and deletes, so a migration can
+    /// never write back a value that a newer write (a rotated refresh token) already replaced.
+    /// Only ever taken on the blocking pool, like every call in this module.
+    static VAULT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn vault_lock() -> std::sync::MutexGuard<'static, ()> {
+        VAULT_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn wide(value: &str) -> Vec<u16> {
+        value.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    fn is_not_found(error: &windows::core::Error) -> bool {
+        error.code() == HRESULT::from_win32(ERROR_NOT_FOUND.0)
+    }
+
+    fn store_error(action: &str, error: &windows::core::Error) -> CredentialError {
+        CredentialError::Store(format!("Credential Manager {action} failed: {error}"))
+    }
+
+    fn decode(blob: &[u8]) -> Result<String, CredentialError> {
+        let not_utf16 = || CredentialError::Store("stored credential is not UTF-16".into());
+        if blob.len() % 2 != 0 {
+            return Err(not_utf16());
+        }
+        let units: Vec<u16> = blob.chunks_exact(2).map(|pair| u16::from_le_bytes([pair[0], pair[1]])).collect();
+        String::from_utf16(&units).map_err(|_| not_utf16())
+    }
+
+    /// The stored value and its `Persist`, or `None` when nothing is stored.
+    fn read(target: &str) -> Result<Option<(String, u32)>, CredentialError> {
+        let target = wide(target);
+        let mut credential: *mut CREDENTIALW = std::ptr::null_mut();
+        // SAFETY: `target` is NUL-terminated and outlives the call; on success the OS allocates
+        // `credential`, which is freed below.
+        if let Err(error) = unsafe { CredReadW(PCWSTR(target.as_ptr()), CRED_TYPE_GENERIC, None, &mut credential) } {
+            return if is_not_found(&error) { Ok(None) } else { Err(store_error("read", &error)) };
+        }
+        // SAFETY: CredReadW succeeded, so `credential` points at a CREDENTIALW whose blob holds
+        // `CredentialBlobSize` bytes. The blob is copied out and wiped before CredFree releases it.
+        let (blob, persist) = unsafe {
+            let stored = &*credential;
+            let size = stored.CredentialBlobSize as usize;
+            let blob = if size == 0 || stored.CredentialBlob.is_null() {
+                Vec::new()
+            } else {
+                let blob = std::slice::from_raw_parts(stored.CredentialBlob, size).to_vec();
+                std::ptr::write_bytes(stored.CredentialBlob, 0, size);
+                blob
+            };
+            let persist = stored.Persist.0;
+            CredFree(credential as *const std::ffi::c_void);
+            (blob, persist)
+        };
+        decode(&blob).map(|value| Some((value, persist)))
+    }
+
+    fn write_local_machine(target: &str, user: &str, value: &str) -> Result<(), CredentialError> {
+        let mut target = wide(target);
+        let mut user = wide(user);
+        let mut blob: Vec<u8> = value.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let blob_size = u32::try_from(blob.len())
+            .map_err(|_| CredentialError::Store("credential value is too large".into()))?;
+        let credential = CREDENTIALW {
+            Flags: CRED_FLAGS(0),
+            Type: CRED_TYPE_GENERIC,
+            TargetName: PWSTR(target.as_mut_ptr()),
+            CredentialBlobSize: blob_size,
+            CredentialBlob: blob.as_mut_ptr(),
+            Persist: CRED_PERSIST_LOCAL_MACHINE,
+            UserName: PWSTR(user.as_mut_ptr()),
+            ..Default::default()
+        };
+        // SAFETY: every pointer in `credential` borrows a buffer that outlives the call. An entry
+        // with the same target and type is replaced, including a roaming copy.
+        let result = unsafe { CredWriteW(&credential, 0) };
+        blob.fill(0);
+        result.map_err(|error| store_error("write", &error))
+    }
+
+    pub(super) fn get(target: &str, user: &str) -> Result<Option<String>, CredentialError> {
+        let _guard = vault_lock();
+        let stored = read(target)?;
+        match vault_read_action(stored.as_ref().map(|(_, persist)| *persist)) {
+            VaultReadAction::MigrateToLocalMachine => {
+                if let Some((value, _)) = stored.as_ref() {
+                    // Rewriting the same target replaces the roaming copy; a CredDelete here would
+                    // erase the session just rewritten. On failure the session is still returned
+                    // and the next read retries.
+                    if let Err(error) = write_local_machine(target, user, value) {
+                        tono_logging::logging!(warn, tono_logging::Type::Service,
+                            "Tono: could not bind the stored session to this machine: {error}");
+                    }
+                }
+            }
+            VaultReadAction::Absent | VaultReadAction::Use => {}
+        }
+        Ok(stored.map(|(value, _)| value))
+    }
+
+    /// The stored value and whether an earlier build stored it roaming, left as stored: for the
+    /// session, that roaming copy is the one-time upgrade's evidence until a marker vouches for it.
+    pub(super) fn read_unmigrated(target: &str) -> Result<Option<(String, bool)>, CredentialError> {
+        Ok(read(target)?.map(|(value, persist)| {
+            (value, vault_read_action(Some(persist)) == VaultReadAction::MigrateToLocalMachine)
+        }))
+    }
+
+    pub(super) fn set(target: &str, user: &str, value: &str) -> Result<(), CredentialError> {
+        let _guard = vault_lock();
+        write_local_machine(target, user, value)
+    }
+
+    pub(super) fn delete(target: &str) -> Result<(), CredentialError> {
+        let _guard = vault_lock();
+        let target = wide(target);
+        // SAFETY: `target` is NUL-terminated and outlives the call.
+        match unsafe { CredDeleteW(PCWSTR(target.as_ptr()), CRED_TYPE_GENERIC, None) } {
+            Ok(()) => Ok(()),
+            Err(error) if is_not_found(&error) => Ok(()),
+            Err(error) => Err(store_error("delete", &error)),
+        }
+    }
+}
+
 /// The OS credential vault behind tono-core's synchronous trait. Only call
 /// inside `spawn_blocking` (or the async adapter below).
 pub struct TonoCredentialStore;
 
 impl TonoCredentialStore {
+    #[cfg(not(windows))]
     fn entry(key: CredentialKey) -> Result<Entry, CredentialError> {
         Entry::new(SERVICE_NAME, account_name(key)).map_err(|err| CredentialError::Store(err.to_string()))
+    }
+
+    #[cfg(windows)]
+    fn target(key: CredentialKey) -> String {
+        format!("{}.{SERVICE_NAME}", account_name(key))
     }
 
     /// Async adapter: the synchronous vault call runs on the blocking pool.
     /// Join failures surface as store errors (never panic); a missing entry
     /// is `Ok(None)`, mirroring the trait.
     pub async fn get_async(key: CredentialKey) -> Result<Option<String>, CredentialError> {
-        tokio::task::spawn_blocking(move || match Self::entry(key)?.get_password() {
-            Ok(value) => Ok(Some(value)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(err) => Err(store_error(err)),
-        })
-        .await
-        .map_err(join_error)?
+        tokio::task::spawn_blocking(move || Self.get(key))
+            .await
+            .map_err(join_error)?
+    }
+
+    /// Async read of the refresh token that also reports whether an earlier build stored it
+    /// roaming ([`StoredSession`]). Same blocking-pool rule as [`Self::get_async`].
+    pub async fn get_session_async() -> Result<Option<StoredSession>, CredentialError> {
+        tokio::task::spawn_blocking(Self::get_session)
+            .await
+            .map_err(join_error)?
+    }
+
+    #[cfg(windows)]
+    fn get_session() -> Result<Option<StoredSession>, CredentialError> {
+        Ok(win_vault::read_unmigrated(&Self::target(CredentialKey::RefreshToken))?
+            .map(|(token, legacy_roaming)| StoredSession { token, legacy_roaming }))
+    }
+
+    /// The development vault never stored a roaming session.
+    #[cfg(not(windows))]
+    fn get_session() -> Result<Option<StoredSession>, CredentialError> {
+        Ok(Self.get(CredentialKey::RefreshToken)?.map(|token| StoredSession { token, legacy_roaming: false }))
+    }
+
+    /// Rebinds a session an earlier build stored roaming to this machine, once a marker vouches
+    /// for it ([`VaultSessionOwnership::Owned`]). It rewrites whatever the vault holds under the
+    /// vault lock, so it cannot restore a token a newer write or delete replaced; on failure the
+    /// session stays roaming and the next load rebinds it.
+    pub async fn bind_session_to_machine_async() -> Result<(), CredentialError> {
+        tokio::task::spawn_blocking(Self::bind_session_to_machine)
+            .await
+            .map_err(join_error)?
+    }
+
+    #[cfg(windows)]
+    fn bind_session_to_machine() -> Result<(), CredentialError> {
+        let key = CredentialKey::RefreshToken;
+        win_vault::get(&Self::target(key), account_name(key)).map(drop)
+    }
+
+    /// The development vault never stored a roaming session.
+    #[cfg(not(windows))]
+    fn bind_session_to_machine() -> Result<(), CredentialError> {
+        Ok(())
     }
 
     /// Async adapter for writes (user-action paths; no timeout needed).
     pub async fn set_async(key: CredentialKey, value: &str) -> Result<(), CredentialError> {
         let value = value.to_string();
-        tokio::task::spawn_blocking(move || Self::entry(key)?.set_password(&value).map_err(store_error))
+        tokio::task::spawn_blocking(move || Self.set(key, &value))
             .await
             .map_err(join_error)?
     }
 
     /// Async adapter for deletes.
     pub async fn delete_async(key: CredentialKey) -> Result<(), CredentialError> {
-        tokio::task::spawn_blocking(move || match Self::entry(key)?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(err) => Err(store_error(err)),
-        })
-        .await
-        .map_err(join_error)?
+        tokio::task::spawn_blocking(move || Self.delete(key))
+            .await
+            .map_err(join_error)?
     }
 }
 
+#[cfg(not(windows))]
 fn store_error(err: keyring::Error) -> CredentialError {
     CredentialError::Store(err.to_string())
 }
@@ -78,6 +426,22 @@ fn join_error(err: tokio::task::JoinError) -> CredentialError {
     CredentialError::Store(format!("credential task failed: {err}"))
 }
 
+#[cfg(windows)]
+impl CredentialStore for TonoCredentialStore {
+    fn get(&self, key: CredentialKey) -> Result<Option<String>, CredentialError> {
+        win_vault::get(&Self::target(key), account_name(key))
+    }
+
+    fn set(&self, key: CredentialKey, value: &str) -> Result<(), CredentialError> {
+        win_vault::set(&Self::target(key), account_name(key), value)
+    }
+
+    fn delete(&self, key: CredentialKey) -> Result<(), CredentialError> {
+        win_vault::delete(&Self::target(key))
+    }
+}
+
+#[cfg(not(windows))]
 impl CredentialStore for TonoCredentialStore {
     fn get(&self, key: CredentialKey) -> Result<Option<String>, CredentialError> {
         match Self::entry(key)?.get_password() {
@@ -296,12 +660,54 @@ mod tests {
 
     #[test]
     fn account_names_are_stable() {
-        // The refresh token lands at `tono/refresh-token` (§2).
+        // keyring's Windows target is `<user>.<service>`; the uninstaller deletes this name.
         assert_eq!(
-            format!("{SERVICE_NAME}/{}", account_name(CredentialKey::RefreshToken)),
-            "tono/refresh-token"
+            format!("{}.{SERVICE_NAME}", account_name(CredentialKey::RefreshToken)),
+            tono_core::credentials::WINDOWS_CRED_TARGET_REFRESH_TOKEN
         );
         assert_eq!(account_name(CredentialKey::InstallationId), "installation-id");
+    }
+
+    #[test]
+    fn a_roaming_session_credential_is_rewritten_local_machine() {
+        use super::vault_migration::{
+            CRED_PERSIST_ENTERPRISE_RAW, CRED_PERSIST_LOCAL_MACHINE_RAW, VaultReadAction, vault_read_action,
+        };
+        // keyring 3.6.3 wrote every session entry as CRED_PERSIST_ENTERPRISE, which roams with a
+        // roaming profile: a read keeps the session and rebinds it to this machine.
+        assert_eq!(vault_read_action(Some(CRED_PERSIST_ENTERPRISE_RAW)), VaultReadAction::MigrateToLocalMachine);
+        assert_eq!(vault_read_action(Some(CRED_PERSIST_LOCAL_MACHINE_RAW)), VaultReadAction::Use);
+        assert_eq!(vault_read_action(None), VaultReadAction::Absent);
+    }
+
+    #[test]
+    fn roaming_account_traces_vouch_only_for_a_session_an_earlier_build_stored_roaming() {
+        use super::adopts_unmarked_vault_session as adopts;
+        // Arguments: legacy roaming marker, session stored CRED_PERSIST_ENTERPRISE, account traces.
+        // The traces live in the roaming data directory: without the local marker they cannot make
+        // this machine the owner of a local-machine session.
+        assert!(!adopts(false, false, true), "roaming account traces alone adopted a vault session");
+        // The one-time upgrade: a build before the local marker stored the session roaming.
+        assert!(adopts(false, true, true));
+        // A roaming session on a fresh data directory is a previous installation's.
+        assert!(!adopts(false, true, false));
+        // A marker an earlier build left in the roaming data directory still answers once.
+        assert!(adopts(true, false, false));
+    }
+
+    #[test]
+    fn a_roaming_session_upgrade_is_rebound_only_once_a_marker_vouches_for_it() {
+        use super::{VaultSessionOwnership as Ownership, unmarked_vault_session_ownership as ownership};
+        // Arguments: legacy roaming marker, session stored CRED_PERSIST_ENTERPRISE, account traces,
+        // and the local marker write. The roaming credential is the upgrade's only evidence and the
+        // first token rotation rewrites it local-machine: without the local marker the load answers
+        // nothing, so a retry upgrades again (protection kept) instead of signing the user out.
+        assert_eq!(ownership(false, true, true, || false), Ownership::Unrecorded,
+            "the upgrade adopted a session it could not record");
+        assert_eq!(ownership(false, true, true, || true), Ownership::Owned { rebind: true });
+        // The roaming marker is removed only after the local one is written, so it still answers.
+        assert_eq!(ownership(true, true, false, || false), Ownership::Owned { rebind: true });
+        assert_eq!(ownership(false, false, true, || true), Ownership::NotOwned);
     }
 
     #[test]

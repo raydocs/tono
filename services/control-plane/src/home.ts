@@ -1,3 +1,4 @@
+import { HY2_NAME_SUFFIX } from './catalog-yaml';
 import { type Env, type Row, now, id, str } from './env';
 import { ApiError } from './errors';
 
@@ -19,11 +20,22 @@ export function optionalIpv4(value: unknown, field: string): string | null {
 }
 
 export function proxyNameField(value: unknown): string {
-  const name = str(value, 'proxyName', 1, 200).trim();
+  // NFC like every accepted catalog name, so the home-exit filter's exact
+  // comparison cannot miss a block over a different Unicode normalization.
+  const name = str(value, 'proxyName', 1, 200).trim().normalize('NFC');
   if (!name || /[\r\n\0]/.test(name)) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid proxyName');
   }
   return name;
+}
+
+// Clients off the hy2 gray list get every block ending in the hy2 suffix
+// stripped; a catalog home line named that way would vanish while
+// routing.homeProxy still names it, and the client rejects the whole catalog.
+export function assertCatalogHomeProxyName(kind: string, proxyName: string) {
+  if (kind === 'catalog' && proxyName.endsWith(HY2_NAME_SUFFIX)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', `proxyName of a catalog home line must not end with "${HY2_NAME_SUFFIX}"`);
+  }
 }
 
 export async function defaultProxyNameField(e: Env, value: unknown): Promise<string | null> {
@@ -107,6 +119,9 @@ export function publicHomeExit(row: Row) {
     probeAlive: row.probe_alive == null ? undefined : Number(row.probe_alive),
     probeTotal: row.probe_total == null ? undefined : Number(row.probe_total),
     probeUptimeRatio: row.probe_uptime_ratio == null ? undefined : Number(row.probe_uptime_ratio),
+    // Set once a socks5 credential has reached a user who no longer holds
+    // this binding; cleared only by storing a new upstream password.
+    socks5RotationRequired: row.socks5_rotation_required_at == null ? undefined : true,
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };
@@ -252,6 +267,26 @@ export async function loadHomeBinding(e: Env, userId: string) {
   return e.DB.prepare(`${HOME_BINDING_SELECT} WHERE user_home_bindings.user_id = ?`).bind(userId).first<Row>();
 }
 
+export function homeExitStatusField(value: unknown): string {
+  const status = str(value, 'status', 1, 20);
+  if (!['active', 'disabled', 'retired'].includes(status)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
+  }
+  return status;
+}
+
+// Retiring or deleting a line that a user is still bound to would leave that
+// user's whole catalog failing closed (503) until someone rebinds them. Every
+// write path that takes a line out of service refuses while it is bound.
+export async function assertHomeExitUnbound(e: Env, homeExitId: string) {
+  const bound = await e.DB.prepare(
+    'SELECT 1 FROM user_home_bindings WHERE home_exit_id = ? LIMIT 1',
+  ).bind(homeExitId).first<Row>();
+  if (bound) {
+    throw new ApiError(409, 'HOME_EXIT_IN_USE', 'Unbind all users before retiring or deleting this home exit');
+  }
+}
+
 export async function findSocks5Home(e: Env, host: string, port: number, username: string) {
   return e.DB.prepare(
     `SELECT * FROM home_exits
@@ -298,23 +333,54 @@ export async function insertSocks5HomeExit(
   throw new ApiError(500, 'INTERNAL_ERROR', 'Home exit insert failed');
 }
 
+// A socks5 credential that already reached a user who lost the binding stays
+// usable against the upstream from that user's cached catalog. It must not be
+// handed to anyone new until the upstream password is replaced. Re-saving the
+// same user's current binding exposes nothing new.
+export async function assertHomeExitBindable(e: Env, userId: string, homeExitId: string) {
+  const row = await e.DB.prepare(
+    `SELECT home_exits.kind, home_exits.proxy_name, home_exits.socks5_rotation_required_at,
+            (SELECT home_exit_id FROM user_home_bindings WHERE user_id = ?) AS current_home_exit_id
+     FROM home_exits WHERE home_exits.id = ?`,
+  ).bind(userId, homeExitId).first<Row>();
+  // A row stored before create and PATCH refused the hy2 suffix.
+  if (row) assertCatalogHomeProxyName(String(row.kind ?? 'catalog'), String(row.proxy_name));
+  if (
+    row
+    && String(row.kind ?? 'catalog') === 'socks5'
+    && row.socks5_rotation_required_at != null
+    && String(row.current_home_exit_id ?? '') !== homeExitId
+  ) {
+    throw new ApiError(
+      409,
+      'SOCKS5_ROTATION_REQUIRED',
+      'This home line was issued to a user who no longer holds it; change the upstream password and store the new one before binding it again',
+    );
+  }
+}
+
 export async function upsertHomeBinding(
   e: Env,
   userId: string,
   homeExitId: string,
   defaultProxyName: string | null,
 ) {
+  await assertHomeExitBindable(e, userId, homeExitId);
   const t = now();
   const existing = await e.DB.prepare(
     'SELECT created_at FROM user_home_bindings WHERE user_id = ?',
   ).bind(userId).first<Row>();
   if (existing) {
-    await e.DB.prepare(
+    const updated = await e.DB.prepare(
       `UPDATE user_home_bindings
        SET home_exit_id = ?, default_proxy_name = ?, updated_at = ?
        WHERE user_id = ?`,
     ).bind(homeExitId, defaultProxyName, t, userId).run();
-    return { created: false };
+    if (updated.meta.changes) return { created: false };
+    // An unbind landed after the read above. Continue as if it had landed
+    // first: its trigger may have flagged the line for rotation, which the
+    // re-check refuses before the caller writes anything else.
+    await assertHomeExitBindable(e, userId, homeExitId);
   }
   await e.DB.prepare(
     `INSERT INTO user_home_bindings(user_id, home_exit_id, default_proxy_name, created_at, updated_at)

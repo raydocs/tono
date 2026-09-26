@@ -1,9 +1,9 @@
 import {
   hmacSha256,
-  jwtSign,
   randomToken,
   sha256,
 } from './crypto';
+import { refreshSession, tokens } from './sessions';
 import {
   OidcVerificationError,
   verifyOidcIdToken,
@@ -21,7 +21,9 @@ import { runOpsCron } from './ops/cron';
 import { afterSnapshot, recordExitAgentAsn } from './ops/ingest-hooks';
 import { consumeRateLimit } from './ops/ingest-limits';
 import { opsIngestRoutes } from './ops/ingest';
+import { tokenAdminWrite } from './ops/token-admin';
 import { ApiError } from './errors';
+import { recordClient } from './client-identity';
 import { parseBytesRange } from './http';
 import {
   type Env,
@@ -55,7 +57,7 @@ import {
   email,
   optionalText,
 } from './request';
-import { DIAGNOSTICS_DAY_SECONDS } from './diagnostics-limits';
+import { cronStep, runHousekeepingRetention } from './retention';
 import {
   sharedAdministrativeResource,
   backfillDeviceExitCredentials,
@@ -84,10 +86,6 @@ import {
   publicDiagnosticsReport,
   publicTelemetryWindow,
   normalizedReferenceCode,
-  DIAGNOSTICS_RETENTION_DEFAULT_SECONDS,
-  DIAGNOSTICS_LOG_RETENTION_DEFAULT_SECONDS,
-  TELEMETRY_RETENTION_DEFAULT_SECONDS,
-  OPS_AUDIT_RETENTION_SECONDS,
 } from './telemetry/routes';
 
 export { parseBytesRange } from './http';
@@ -626,7 +624,7 @@ async function exitCredentialRoster(e: Env, timestamp: number) {
               credentials.client_uuid AS client_uuid
          FROM exit_credentials credentials
          JOIN users ON users.id = credentials.user_id
-        WHERE users.status = 'active'
+        WHERE credentials.retired_at IS NULL AND users.status = 'active'
           AND (users.expires_at IS NULL OR users.expires_at > ?)
           AND (users.quota_bytes IS NULL OR users.usage_bytes < users.quota_bytes)
           AND (
@@ -994,49 +992,14 @@ async function accountForOidcIdentity(
   }
 }
 
-async function completePasswordlessAuth(
-  e: Env,
-  user: Row,
-  deviceName: string,
-  installationId: string,
-) {
+async function completePasswordlessAuth(e: Env, req: Request, user: Row, deviceName: string, installationId: string) {
   if (ineligible(user)) throw new ApiError(403, 'USER_DISABLED', 'User is disabled');
-  return authResult(e, user, await ensureDevice(e, user.id, deviceName, installationId));
+  const device = await ensureDevice(e, user.id, deviceName, installationId);
+  await recordClient(e, req, String(device.id));
+  return authResult(e, user, device);
 }
 
 // --- Tokens / devices ---------------------------------------------------------
-
-async function tokens(e: Env, user: string, device: string, installation: string) {
-  const refresh = randomToken();
-  const t = now();
-  const sid = id();
-  // Every API request re-checks the session, user and device rows in auth(), so
-  // revocation does not depend on JWT expiry. A one-day access token avoids
-  // rotating three D1 rows every fifteen minutes on every idle client.
-  const accessTTL = envInt(e, 'ACCESS_TOKEN_TTL_SECONDS', 86_400);
-  const refreshTTL = envInt(e, 'REFRESH_TOKEN_TTL_SECONDS', 2_592_000);
-  try {
-    await e.DB.prepare(
-      'INSERT INTO sessions(id, user_id, refresh_hash, expires_at, created_at, device_id) VALUES(?, ?, ?, ?, ?, ?)',
-    ).bind(sid, user, await sha256(refresh), t + refreshTTL, t, device).run();
-  } catch (x) {
-    if (String(x).includes('SESSION_DEVICE_INELIGIBLE')) {
-      throw new ApiError(
-        409,
-        'DEVICE_AUTHORIZATION_CHANGED',
-        'Device authorization changed during sign-in; start sign-in again',
-      );
-    }
-    throw x;
-  }
-  return {
-    accessToken: await jwtSign(
-      { sub: user, sid, did: device, iid: installation, iat: t, exp: t + accessTTL },
-      requiredSecret(e.JWT_SECRET),
-    ),
-    refreshToken: refresh,
-  };
-}
 
 async function authResult(e: Env, u: Row, d: Row) {
   const enrollment =
@@ -1812,29 +1775,49 @@ async function enforceUser(e: Env, userId: string, processNow = true) {
   if (processNow && tailscaleEnrollmentEnabled(e)) await processRevocations(e);
 }
 
+// Users the cron enforces per tick. Each costs three queries plus one batch per
+// live device, so this keeps one invocation far below D1's per-invocation query
+// limit; users past the cap are picked up on the next tick.
+const ENFORCE_USERS_PER_TICK = 25;
+
 async function enforceAll(e: Env) {
   const t = now();
-  const q = await e.DB.prepare(
-    "SELECT id FROM users WHERE status != 'active' OR (expires_at IS NOT NULL AND expires_at <= ?) OR (quota_bytes IS NOT NULL AND usage_bytes >= quota_bytes)",
-  ).bind(t).all<Row>();
-  for (const u of q.results) {
-    try {
-      await enforceUser(e, u.id, false);
-    } catch (x) {
-      console.error('user enforcement failed', u.id, x instanceof Error ? x.message : String(x));
+  await cronStep('user enforcement scan', async () => {
+    // Only ineligible users that still hold a live device or session. Users are
+    // never deleted, so without this filter every user who ever expired or ran
+    // out of quota was re-enforced (three queries each) every five minutes.
+    const q = await e.DB.prepare(
+      `SELECT id FROM users
+       WHERE (status != 'active'
+              OR (expires_at IS NOT NULL AND expires_at <= ?)
+              OR (quota_bytes IS NOT NULL AND usage_bytes >= quota_bytes))
+         AND (EXISTS (SELECT 1 FROM devices
+                      WHERE devices.user_id = users.id AND devices.status IN ('active', 'pending'))
+              OR EXISTS (SELECT 1 FROM sessions
+                         WHERE sessions.user_id = users.id AND sessions.revoked_at IS NULL))
+       LIMIT ?`,
+    ).bind(t, ENFORCE_USERS_PER_TICK).all<Row>();
+    for (const u of q.results) {
+      try {
+        await enforceUser(e, u.id, false);
+      } catch (x) {
+        console.error('user enforcement failed', u.id, x instanceof Error ? x.message : String(x));
+      }
     }
-  }
+  });
   // Also expire any globally-stale pending devices (revocation outbox when management id present)
-  const stale = await e.DB.prepare(
-    "SELECT DISTINCT user_id FROM devices WHERE status = 'pending' AND pending_expires_at <= ?",
-  ).bind(t).all<Row>();
-  for (const row of stale.results) {
-    try {
-      await expirePending(e, row.user_id);
-    } catch (x) {
-      console.error('expirePending failed', row.user_id, x instanceof Error ? x.message : String(x));
+  await cronStep('stale pending scan', async () => {
+    const stale = await e.DB.prepare(
+      "SELECT DISTINCT user_id FROM devices WHERE status = 'pending' AND pending_expires_at <= ?",
+    ).bind(t).all<Row>();
+    for (const row of stale.results) {
+      try {
+        await expirePending(e, row.user_id);
+      } catch (x) {
+        console.error('expirePending failed', row.user_id, x instanceof Error ? x.message : String(x));
+      }
     }
-  }
+  });
   // Revocation is enforcement, not housekeeping. Run it before retention so a
   // transient failure deleting old diagnostics or telemetry cannot leave an
   // ineligible user's tailnet identity live until the next cron tick.
@@ -1851,85 +1834,7 @@ async function enforceAll(e: Env) {
       console.error('processRevocations failed', x instanceof Error ? x.message : String(x));
     }
   }
-  const rateWindow = envInt(e, 'RATE_LIMIT_WINDOW_SECONDS', 900);
-  // Diagnostics counters run on a day-long window, so pruning at twice the auth
-  // window would silently reset the per-day cap every five minutes.
-  const rateRetention = Math.max(rateWindow, DIAGNOSTICS_DAY_SECONDS) * 2;
-  await e.DB.prepare('DELETE FROM rate_limits WHERE window_start <= ?').bind(t - rateRetention).run();
-  await e.DB.prepare(
-    `DELETE FROM auth_challenges
-     WHERE expires_at <= ? OR (consumed_at IS NOT NULL AND consumed_at <= ?)`,
-  ).bind(t - 86_400, t - 86_400).run();
-  // Keep each retention branch indexable. The old OR made SQLite scan the whole
-  // sessions table every five minutes even though both predicates had indexes.
-  await e.DB.prepare(
-    `DELETE FROM sessions WHERE id IN (
-       SELECT id FROM sessions
-       WHERE revoked_at IS NOT NULL AND revoked_at <= ?
-       LIMIT 500
-     )`,
-  ).bind(t - 86_400).run();
-  await e.DB.prepare(
-    `DELETE FROM sessions WHERE id IN (
-       SELECT id FROM sessions
-       WHERE revoked_at IS NULL AND expires_at <= ?
-       LIMIT 500
-     )`,
-  ).bind(t).run();
-  // Diagnostics uploads are troubleshooting artifacts, not account records.
-  await e.DB.prepare('DELETE FROM diagnostics_reports WHERE received_at <= ?')
-    .bind(t - envInt(e, 'DIAGNOSTICS_RETENTION_SECONDS', DIAGNOSTICS_RETENTION_DEFAULT_SECONDS))
-    .run();
-  // Raw log segments: delete the payload before the index row. Losing the row
-  // first would orphan the object with nothing left pointing at it, and this
-  // bucket is the one place in the system holding unredacted hostnames.
-  const logRetention = envInt(
-    e,
-    'DIAGNOSTICS_LOG_RETENTION_SECONDS',
-    DIAGNOSTICS_LOG_RETENTION_DEFAULT_SECONDS,
-  );
-  const expiredLogs = await e.DB.prepare(
-    'SELECT id, r2_key FROM diagnostics_log_objects WHERE received_at <= ? LIMIT 50',
-  ).bind(t - logRetention).all<Row>();
-  if (expiredLogs.results.length > 0) {
-    const keys = expiredLogs.results.map((r) => String(r.r2_key));
-    const ids = expiredLogs.results.map((r) => String(r.id));
-    try {
-      await e.DIAGNOSTICS_LOGS.delete(keys);
-      // Only delete index rows from D1 if R2 deletion succeeded.
-      // Retaining the rows on failure allows the next sweep to retry deletion,
-      // preventing unredacted logs from remaining orphaned in R2.
-      const placeholders = ids.map(() => '?').join(',');
-      await e.DB.prepare(`DELETE FROM diagnostics_log_objects WHERE id IN (${placeholders})`)
-        .bind(...ids).run();
-    } catch (x) {
-      console.error('batch r2 deletion failed', x instanceof Error ? x.message : String(x));
-    }
-  }
-  await e.DB.prepare('DELETE FROM telemetry_windows WHERE received_at <= ?')
-    .bind(t - envInt(e, 'TELEMETRY_RETENTION_SECONDS', TELEMETRY_RETENTION_DEFAULT_SECONDS))
-    .run();
-  // Individual report ids are bounded retry evidence, not the billing ledger.
-  // usage_report_sources retains the monotonic per-node totals, so deleting old
-  // ids cannot lower or double-count usage; a stale replay is ignored by that
-  // source's total/observed_at guards.
-  await e.DB.prepare(
-    `DELETE FROM usage_reports WHERE report_id IN (
-       SELECT report_id FROM usage_reports
-       WHERE created_at <= ?
-       ORDER BY created_at
-       LIMIT 500
-     )`,
-  ).bind(t - 14 * 86_400).run();
-  // The audit log had no retention at all — every operator action since
-  // migration 0023, forever. Half a year is the whole useful life of "who
-  // retired that node"; the LIMIT keeps the first sweep over an old backlog
-  // from being one giant delete.
-  await e.DB.prepare(
-    `DELETE FROM ops_audit WHERE id IN (
-       SELECT id FROM ops_audit WHERE at <= ? LIMIT 500
-     )`,
-  ).bind(t - OPS_AUDIT_RETENTION_SECONDS).run();
+  await runHousekeepingRetention(e, t);
   try {
     await retainOperationsTimeseries(e.DB, t);
   } catch (x) {
@@ -1949,8 +1854,9 @@ async function enforceAll(e: Env) {
     ),
     ROUTING_RESEARCH_RETENTION_MAX_SECONDS,
   );
-  await e.DB.prepare('DELETE FROM routing_research_snapshots WHERE received_at <= ?')
-    .bind(t - routingResearchRetention).run();
+  await cronStep('routing research retention', () =>
+    e.DB.prepare('DELETE FROM routing_research_snapshots WHERE received_at <= ?')
+      .bind(t - routingResearchRetention).run());
 }
 
 async function issueEnrollment(e: Env, d: Row) {
@@ -2420,7 +2326,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       String(claimed.email).toLowerCase(),
     );
     return Response.json(await completePasswordlessAuth(
-      e,
+      e, req,
       user,
       String(claimed.device_name),
       String(claimed.installation_id),
@@ -2517,7 +2423,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     }
     const user = await accountForOidcIdentity(e, identity);
     return Response.json(await completePasswordlessAuth(
-      e,
+      e, req,
       user,
       String(reserved.device_name),
       String(reserved.installation_id),
@@ -2537,32 +2443,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
 
   if (p === '/api/v1/auth/refresh' && m === 'POST') {
     const b = await body(req, 4 * 1024);
-    const raw = str(b.refreshToken, 'refreshToken', 20, 500);
-    const t = now();
-    const s = await e.DB.prepare(
-      `SELECT sessions.*, users.status user_status, users.quota_bytes, users.usage_bytes, users.expires_at user_expires_at,
-              devices.installation_id, devices.status device_status, devices.pending_expires_at
-       FROM sessions
-       JOIN users ON users.id = sessions.user_id
-       JOIN devices ON devices.id = sessions.device_id
-       WHERE refresh_hash = ? AND revoked_at IS NULL AND sessions.expires_at > ?`,
-    ).bind(await sha256(raw), t).first<Row>();
-    if (
-      !s ||
-      s.user_status !== 'active' ||
-      !['active', 'pending'].includes(s.device_status) ||
-      (s.device_status === 'pending' && s.pending_expires_at <= t) ||
-      (s.user_expires_at !== null && s.user_expires_at <= t) ||
-      (s.quota_bytes !== null && s.usage_bytes >= s.quota_bytes)
-    ) {
-      throw new ApiError(401, 'INVALID_REFRESH_TOKEN', 'Invalid or expired refresh token');
-    }
-    const rotated = await e.DB.batch([
-      e.DB.prepare('UPDATE sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL').bind(t, s.id),
-      e.DB.prepare('UPDATE devices SET last_seen_at = ?, updated_at = ? WHERE id = ?').bind(t, t, s.device_id),
-    ]);
-    if (!rotated[0].meta.changes) throw new ApiError(401, 'INVALID_REFRESH_TOKEN', 'Refresh token was already used');
-    return Response.json(await tokens(e, s.user_id, s.device_id, s.installation_id));
+    return Response.json(await refreshSession(e, req, str(b.refreshToken, 'refreshToken', 20, 500)));
   }
 
   if (p === '/api/v1/auth/logout' && m === 'POST') {
@@ -2594,6 +2475,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
 
   if (p === '/api/v1/exit-catalog' && m === 'GET') {
     const a = await auth(req, e);
+    await recordClient(e, req, a.deviceId);
     return Response.json(await publicManagedCatalog(e, {
       userId: a.userId, deviceId: a.deviceId, filterHomeExits: true,
       hy2AcceptHeader: req.headers.get('X-Tono-Accept'),
@@ -3256,126 +3138,17 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         })),
       });
     }
-    if (p === '/api/v1/admin/signup-allowlist' && m === 'DELETE') {
-      const b = await body(req, 4 * 1024);
-      await e.DB.prepare(
-        'DELETE FROM signup_allowlist WHERE email = ?',
-      ).bind(email(b.email)).run();
-      return new Response(null, { status: 204 });
-    }
+    const tokenWrite = await tokenAdminWrite(req, e, p, m, { enforceUser });
+    if (tokenWrite) return tokenWrite;
     if (p === '/api/v1/admin/invitations' && m === 'GET') {
       const q = await e.DB.prepare(
         'SELECT id, email, expires_at, redeemed_at, created_at FROM invitations ORDER BY created_at DESC',
       ).all();
       return Response.json({ invitations: q.results });
     }
-    if (p === '/api/v1/admin/invitations' && m === 'POST') {
-      const b = await body(req, 16 * 1024);
-      const code = randomToken(24);
-      const t = now();
-      const days = Number(b.expiresInDays ?? 7);
-      if (!Number.isInteger(days) || days < 1 || days > 90) {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid expiresInDays');
-      }
-      await e.DB.prepare(
-        'INSERT INTO invitations(id, code_hash, email, expires_at, created_at) VALUES(?, ?, ?, ?, ?)',
-      ).bind(id(), await sha256(code), email(b.email), t + days * 86400, t).run();
-      return Response.json({ inviteCode: code, expiresAt: t + days * 86400 }, { status: 201 });
-    }
-    mt = p.match(/^\/api\/v1\/admin\/invitations\/([^/]+)$/);
-    if (mt && m === 'DELETE') {
-      await e.DB.prepare('DELETE FROM invitations WHERE id = ? AND redeemed_at IS NULL').bind(mt[1]).run();
-      return new Response(null, { status: 204 });
-    }
     if (p === '/api/v1/admin/users' && m === 'GET') {
       const q = await e.DB.prepare('SELECT * FROM users ORDER BY created_at DESC').all<Row>();
       return Response.json({ users: q.results.map(publicUser) });
-    }
-    mt = p.match(/^\/api\/v1\/admin\/users\/([^/]+)$/);
-    if (mt && m === 'PATCH') {
-      const b = await body(req, 16 * 1024);
-      // A misspelled field used to return 200 and change nothing. For an
-      // endpoint whose job includes clearing a billing cycle so a locked-out
-      // customer can connect again, a silent success is the worst possible
-      // answer: the operator believes the account was reset, and only the
-      // customer finds out otherwise.
-      rejectUnexpectedKeys(b, ['status', 'quotaBytes', 'deviceLimit', 'expiresAt', 'resetUsage']);
-      const status = b.status;
-      const quota = b.quotaBytes;
-      // Ending a cycle, not editing a number. The collector keeps a fleet-wide
-      // cumulative total and re-sends it every ten minutes, so zeroing
-      // `usage_bytes` on its own would be undone by the next report; moving the
-      // baseline to the counter is what actually clears the cycle.
-      const resetUsage = b.resetUsage;
-      if (resetUsage !== undefined && resetUsage !== true) {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'resetUsage may only be true');
-      }
-      const deviceLimit = b.deviceLimit;
-      const expiresAt = b.expiresAt;
-      if (status !== undefined && !['active', 'disabled'].includes(status)) {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
-      }
-      if (
-        expiresAt !== undefined &&
-        expiresAt !== null &&
-        (!Number.isSafeInteger(expiresAt) || expiresAt <= 0)
-      ) {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid expiresAt');
-      }
-      if (quota !== undefined && quota !== null && (!Number.isSafeInteger(quota) || quota < 0)) {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid quotaBytes');
-      }
-      if (
-        deviceLimit !== undefined &&
-        (!Number.isSafeInteger(deviceLimit) || deviceLimit < 1 || deviceLimit > 25)
-      ) {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid deviceLimit');
-      }
-      if (status === 'active') {
-        const residual = await e.DB.prepare(
-          `SELECT
-             users.status current_status,
-             (SELECT COUNT(*) FROM devices
-              WHERE user_id = ? AND status IN ('active', 'pending')) live_devices,
-             (SELECT COUNT(*) FROM revocation_jobs
-              JOIN devices ON devices.id = revocation_jobs.device_id
-              WHERE devices.user_id = ? AND revocation_jobs.completed_at IS NULL) pending_jobs
-           FROM users WHERE users.id = ?`,
-        ).bind(mt[1], mt[1], mt[1]).first<Row>();
-        if (!residual) throw new ApiError(404, 'NOT_FOUND', 'User not found');
-        if (
-          residual.current_status !== 'active' &&
-          ((residual.live_devices ?? 0) > 0 || (residual.pending_jobs ?? 0) > 0)
-        ) {
-          throw new ApiError(409, 'REVOCATION_PENDING', 'Wait for tailnet device revocation before re-enabling this user');
-        }
-      }
-      const updated = await e.DB.prepare(
-        `UPDATE users SET
-           status = COALESCE(?, status),
-           quota_bytes = CASE WHEN ? THEN ? ELSE quota_bytes END,
-           device_limit = CASE WHEN ? THEN ? ELSE device_limit END,
-           expires_at = CASE WHEN ? THEN ? ELSE expires_at END,
-           usage_baseline_bytes = CASE WHEN ? THEN usage_reported_bytes ELSE usage_baseline_bytes END,
-           usage_bytes = CASE WHEN ? THEN 0 ELSE usage_bytes END,
-           updated_at = ?
-         WHERE id = ?`,
-      ).bind(
-        status ?? null,
-        quota !== undefined,
-        quota ?? null,
-        deviceLimit !== undefined,
-        deviceLimit ?? null,
-        expiresAt !== undefined,
-        expiresAt ?? null,
-        resetUsage === true,
-        resetUsage === true,
-        now(),
-        mt[1],
-      ).run();
-      if (!updated.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'User not found');
-      await enforceUser(e, mt[1]);
-      return Response.json({ ok: true });
     }
   }
 

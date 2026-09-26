@@ -13,11 +13,13 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 ControlFlow::Continue(value) => value,
                 ControlFlow::Break(response) => return response,
             };
+            // A Prepare supersedes in-flight connect attempts only once `update::request` has
+            // admitted it, still under this lock (TW-anthropic-4).
             let _lifecycle = OWNER_LIFECYCLE_LOCK.lock().await;
             #[cfg(windows)]
             return match crate::core::update::request(&owner, request.payload).await {
                 Ok(status) => ok_json(status),
-                Err(error) => service_unavailable(format!("Update refused; evidence/protection retained: {error:#}")),
+                Err(error) => service_unavailable(format!("Update refused; evidence retained and no protection release completed: {error:#}")),
             };
             #[cfg(not(windows))] {
                 let _ = (request, owner);
@@ -35,7 +37,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             // The freshness snapshot clients copy into destructive owner-gated requests
             // (`PrepareCoreStart`). Filled only here, on the serving side of the pipe, so
             // `ProtocolInfo::current()` stays a pure protocol statement everywhere else.
-            info.release_epoch = windows_kill_switch::release_epoch();
+            info.release_epoch = windows_kill_switch::attempt_epoch();
             ok_json(info)
         })
         .get(IpcCommand::Status.as_ref(), |ctx| async move {
@@ -519,8 +521,9 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 };
             // No active session exists on a first connection, so this uses the same authenticated
             // owner gate as StartClash — but a destructive reconcile must also prove it is fresh.
-            // The request carries the client's snapshot of this Service's explicit-release epoch
-            // (the same RELEASE_EPOCH StartClash snapshots for itself further down). A cancelled
+            // The request carries the client's snapshot of this Service's attempt epoch (bumped
+            // by every explicit release, like the RELEASE_EPOCH StartClash snapshots for itself
+            // further down, and also by an update takeover's Prepare). A cancelled
             // attempt's request can arrive seconds late, after the user's Disconnect released and
             // a successor connection already started its own unverified Core; without this gate
             // the late request is the one destructive route with no freshness token, and it would
@@ -536,10 +539,10 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             // for such a client, and that client had this gap before revision 17 too.
             let requested_release_epoch = match request.payload {
                 PrepareCoreStartPayload::Freshness(snapshot) => snapshot.release_epoch,
-                PrepareCoreStartPayload::Legacy(()) => windows_kill_switch::release_epoch(),
+                PrepareCoreStartPayload::Legacy(()) => windows_kill_switch::attempt_epoch(),
             };
             let _lifecycle_guard =
-                match enter_owner_lifecycle(&owner, OwnerLifecycleGate::Unchecked).await {
+                match enter_owner_lifecycle(&owner, OwnerLifecycleGate::ArmedPolicyTakeover).await {
                     ControlFlow::Continue(guard) => guard,
                     ControlFlow::Break(response) => return response,
                 };
@@ -547,9 +550,9 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             // the lock while this request waited invalidates it exactly like one that completed
             // before it arrived. The refusal is side-effect free — no snapshot, no operation
             // publication, no Core stop — so the successor's runtime stays exactly as it is.
-            if windows_kill_switch::release_superseded(requested_release_epoch) {
+            if windows_kill_switch::attempt_superseded(requested_release_epoch) {
                 return service_error(ServiceError::stale_release_epoch(
-                    "PrepareCoreStart refused: an explicit release superseded this attempt",
+                    "PrepareCoreStart refused: an explicit release or update takeover superseded this attempt",
                 ));
             }
             // Decide under the lifecycle lock but before publishing this route's own operation:
@@ -602,6 +605,15 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             {
                 return service_error(ServiceError::invalid_proxy_config(error.to_string()));
             }
+            #[cfg(all(windows, not(feature = "test")))]
+            if let Err(error) = crate::core::runtime_generation::ensure_owned_runtime_config_is_safe(
+                &start_request.runtime.yaml,
+            ) {
+                return service_error(ServiceError::new(
+                    crate::ServiceErrorCode::InvalidRuntimeAsset,
+                    format!("Runtime config refused: {error}"),
+                ));
+            }
             if let Some(message) = start_clash_kill_switch_rejection(
                 std::env::consts::OS,
                 start_request
@@ -619,7 +631,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             #[cfg(feature = "test")]
             test_proxy_barrier_note_start_waiting();
             let _lifecycle_guard =
-                match enter_owner_lifecycle(&owner, OwnerLifecycleGate::Unchecked).await {
+                match enter_owner_lifecycle(&owner, OwnerLifecycleGate::ArmedPolicyTakeover).await {
                     ControlFlow::Continue(guard) => guard,
                     ControlFlow::Break(response) => return response,
                 };
@@ -653,6 +665,9 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 if let Err(error) =
                     windows_kill_switch::arm_bootstrap(kill_switch, &core_path, &owner.key).await
                 {
+                    if let Some(refusal) = error.downcast_ref::<ServiceError>() {
+                        return service_error(refusal.clone());
+                    }
                     return service_unavailable(format!(
                         "Failed to arm Windows kill switch: {error:#}"
                     ));
@@ -840,6 +855,15 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     ControlFlow::Continue(authenticated) => authenticated,
                     ControlFlow::Break(response) => return response,
                 };
+            #[cfg(all(windows, not(feature = "test")))]
+            if let Err(error) =
+                crate::core::runtime_generation::ensure_owned_runtime_config_is_safe(&request.payload.yaml)
+            {
+                return service_error(ServiceError::new(
+                    crate::ServiceErrorCode::InvalidRuntimeAsset,
+                    format!("Runtime config refused: {error}"),
+                ));
+            }
             // The guard is held for the whole operation, and for the same reason `StartClash`
             // holds it: a core must not be stopped, started, or handed to another owner while its
             // generation is being rewritten underneath it. Staging writes into the directory the
