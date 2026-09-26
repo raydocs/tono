@@ -865,6 +865,25 @@ extension KillSwitchManager {
             case let (armed?, bootstrap?):
                 pfParses = armed && bootstrap
             }
+            // R609-F2: a command past its deadline is killed and fails. It
+            // must never hold the helper's request thread, nor read as done.
+            let deadlineStarted = Date()
+            let overranFailed: Bool
+            do {
+                _ = try run("/bin/sleep", ["6.0417"], deadline: 0.5)
+                overranFailed = false
+            } catch {
+                overranFailed = true
+            }
+            let deadlineElapsed = Date().timeIntervalSince(deadlineStarted)
+            let overranChildGone =
+                (try? run("/usr/bin/pgrep", ["-f", "^/bin/sleep 6.0417$"]))?.status == 1
+            let commandDeadlineHolds = overranFailed && deadlineElapsed < 4 && overranChildGone
+            if !commandDeadlineHolds {
+                let failure = "self-test: command-deadline failed (threw \(overranFailed), "
+                    + "\(deadlineElapsed) s, child gone \(overranChildGone))\n"
+                FileHandle.standardError.write(Data(failure.utf8))
+            }
             return ruleShapesHold
                 && bundleShapesHold
                 && bundleOffWithoutTunnel
@@ -882,6 +901,7 @@ extension KillSwitchManager {
                 && rejectedPrivateTarget
                 && acceptedUDPProxyTarget
                 && rejectedQuicProxyTarget
+                && commandDeadlineHolds
         } catch {
             return false
         }

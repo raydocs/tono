@@ -949,9 +949,12 @@ extension KillSwitchManager {
         }
     }
 
+    static let helperCommandDeadline: TimeInterval = 15
+
     static func run(
         _ executable: String,
-        _ arguments: [String]
+        _ arguments: [String],
+        deadline: TimeInterval = KillSwitchManager.helperCommandDeadline
     ) throws -> HelperCommandResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
