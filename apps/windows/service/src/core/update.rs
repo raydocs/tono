@@ -994,13 +994,25 @@ fn residual_filter_refusal(
 }
 
 /// A runnable desired owner state refuses the manual gate; [`begin_manual`] reads it only after
-/// [`residual_filter_refusal`] found no Tono filter.
+/// [`residual_filter_refusal`] found no Tono filter. A registered Service would restore the Core
+/// on start, so the user must Disconnect ([`ProtectionActive`]). With no Service left either, it
+/// is a stale owner nobody can Disconnect, such as after a confirmed orphan clear whose
+/// [`retire_orphaned_owner`] failed once the filters were removed. The refusal re-offers that
+/// confirmed recovery ([`OrphanedProtection`]), which retires the owner only after proving again
+/// that no Service and no filter is left.
 fn runnable_owner_refusal(
     core_should_be_running: bool,
-    _service_present: impl FnOnce() -> Result<bool>,
+    service_present: impl FnOnce() -> Result<bool>,
 ) -> Result<()> {
-    ensure!(!core_should_be_running, ProtectionActive);
-    Ok(())
+    if !core_should_be_running {
+        return Ok(());
+    }
+    // As for residual filters, an unreadable SCM keeps the Disconnect answer.
+    if service_present().unwrap_or(true) {
+        Err(ProtectionActive.into())
+    } else {
+        Err(OrphanedProtection.into())
+    }
 }
 
 /// Whether a Tono Service that can re-arm the barrier is installed: an SCM registration whose
