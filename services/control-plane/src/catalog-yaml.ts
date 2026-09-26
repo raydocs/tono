@@ -245,6 +245,24 @@ function catalogHasFingerprint(block: string): boolean {
   return raw.length > 0 && !raw.includes('TONO_CLIENT_UUID');
 }
 
+/**
+ * Optional sing-box pin on a hysteria2 block: standard base64 SHA-256 of the
+ * leaf's SubjectPublicKeyInfo, computed by the operator on the node and never
+ * derived from `fingerprint` (the DER pin stays mandatory). The key may appear
+ * once, as a plain block-style key: clients that predate it merge an unknown
+ * flow-mapping key into its neighbour's value and would refuse the catalog.
+ */
+const HY2_SPKI_PIN_KEY = 'certificate-public-key-sha256';
+
+function catalogSpkiPinIsAdmissible(block: string): boolean {
+  const mentions = block.split(HY2_SPKI_PIN_KEY).length - 1;
+  if (mentions === 0) return true;
+  const lines = [...block.matchAll(/^[ \t]+certificate-public-key-sha256[ \t]*:/gm)].length;
+  if (mentions !== 1 || lines !== 1) return false;
+  // 32 bytes: 42 free characters, a 43rd whose low two bits are zero, one pad.
+  return /^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$/.test(catalogScalar(block, HY2_SPKI_PIN_KEY) ?? '');
+}
+
 function catalogSkipsCertVerify(block: string): boolean {
   const match = block.match(
     /skip-cert-verify\s*:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s,#}]+))/,
@@ -292,7 +310,8 @@ export function catalogEntryMissingClientFields(block: string): string[] {
 /**
  * A proxy block has exactly one managed identity placeholder.
  * VLESS: `uuid: {{TONO_CLIENT_UUID}}`. Hysteria2: `password: {{TONO_CLIENT_UUID}}`,
- * a certificate fingerprint, no `skip-cert-verify: true`, and a ` · hy2` name.
+ * a certificate fingerprint, no `skip-cert-verify: true`, a ` · hy2` name, and
+ * at most one well-formed SPKI pin. VLESS never carries the SPKI pin.
  */
 export function catalogProxyUsesManagedIdentity(block: string): boolean {
   const type = catalogProxyType(block);
@@ -302,10 +321,12 @@ export function catalogProxyUsesManagedIdentity(block: string): boolean {
     if (catalogFieldKeys(block, 'uuid') !== 0) return false;
     return catalogFieldIsPlaceholder(block, 'password')
       && catalogHasFingerprint(block)
-      && !catalogSkipsCertVerify(block);
+      && !catalogSkipsCertVerify(block)
+      && catalogSpkiPinIsAdmissible(block);
   }
   if (type !== 'vless') return false;
   if (name?.endsWith(HY2_NAME_SUFFIX)) return false;
+  if (block.includes(HY2_SPKI_PIN_KEY)) return false;
   return catalogFieldIsPlaceholder(block, 'uuid');
 }
 

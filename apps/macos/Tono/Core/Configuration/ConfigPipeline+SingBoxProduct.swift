@@ -26,7 +26,8 @@ nonisolated extension ConfigPipeline {
     ]
 
     static func singBoxUnavailableReason(_ node: ProxyNode) -> String? {
-        if node.type == .hysteria2, node.tlsFingerprint != nil {
+        // sing-box pins the SPKI, not the leaf DER; never derive one from the other.
+        if node.type == .hysteria2, canonicalSPKIPin(node.certificatePublicKeySHA256) == nil {
             return "TONO_SINGBOX_HY2_DER_PIN_UNSUPPORTED"
         }
         if node.type != .vless && node.type != .hysteria2 {
@@ -100,7 +101,8 @@ nonisolated extension ConfigPipeline {
                 if let flow = node.flow { outbound["flow"] = flow }
                 return outbound
             case .hysteria2:
-                guard let password = node.password, !password.isEmpty else {
+                guard let password = node.password, !password.isEmpty,
+                      let pin = canonicalSPKIPin(node.certificatePublicKeySHA256) else {
                     throw SingBoxError.unsupportedTransport
                 }
                 let serverName = node.sni ?? node.server
@@ -113,6 +115,7 @@ nonisolated extension ConfigPipeline {
                     "tls": [
                         "enabled": true,
                         "server_name": serverName,
+                        "certificate_public_key_sha256": [pin],
                     ],
                 ]
                 return outbound

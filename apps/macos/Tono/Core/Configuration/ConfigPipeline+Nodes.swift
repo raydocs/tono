@@ -252,7 +252,17 @@ nonisolated extension ConfigPipeline {
             throw TonoInjectionError.unsafeNode(node.name)
         }
         value.tlsFingerprint = fingerprint
+        // Optional sing-box pin. Invalid is treated as absent: the node stays
+        // admitted for the DER path and unavailable to sing-box.
+        value.certificatePublicKeySHA256 = canonicalSPKIPin(node.certificatePublicKeySHA256)
         return value
+    }
+
+    /// Standard base64 of exactly 32 bytes, in canonical form, or nil.
+    static func canonicalSPKIPin(_ raw: String?) -> String? {
+        guard let raw, let bytes = Data(base64Encoded: raw), bytes.count == 32,
+              bytes.base64EncodedString() == raw else { return nil }
+        return raw
     }
 
     static func normalizedSHA256Fingerprint(_ raw: String?) -> String? {

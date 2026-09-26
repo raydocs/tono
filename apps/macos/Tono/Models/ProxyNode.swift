@@ -116,6 +116,9 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
     var clientFingerprint: String?
     /// SHA-256 of the hy2 leaf cert. Not `client-fingerprint` (uTLS).
     var tlsFingerprint: String?
+    /// Standard base64 SHA-256 of the hy2 leaf's SubjectPublicKeyInfo, published
+    /// beside `tlsFingerprint` for sing-box. Never derived from the DER pin.
+    var certificatePublicKeySHA256: String?
     var realityPublicKey: String?
     var realityShortId: String?
 
@@ -227,6 +230,7 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
             && realityPublicKey == other.realityPublicKey
             && realityShortId == other.realityShortId
             && tlsFingerprint == other.tlsFingerprint
+            && certificatePublicKeySHA256 == other.certificatePublicKeySHA256
             && flow == other.flow
             && network == other.network
     }
@@ -239,7 +243,7 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
         case id, flag, name, type, server, port, relay, latency, isActive, subscriptionId
         case username, password, uuid, cipher, udp
         case sni, skipCertVerify, network, wsPath, wsHost, grpcServiceName, tls, alterId
-        case flow, clientFingerprint, tlsFingerprint, realityPublicKey, realityShortId
+        case flow, clientFingerprint, tlsFingerprint, certificatePublicKeySHA256, realityPublicKey, realityShortId
     }
 }
 
