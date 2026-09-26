@@ -87,10 +87,11 @@ of every workflow whose `paths:` filter matches a touched path. The filters are 
 | `apps/windows/**` (and the update-contract fixtures it lists) | `windows-ci.yml` |
 | `services/**`, `ops-panel/**` (and the tooling scripts it lists) | `services-ci.yml` |
 
-Docs-only means every touched path is `*.md` or under `docs/`, outside `.agents/`, `.claude/` and the
-uncovered paths below; it needs no run. Paths no filter
-covers (for example `.jev-route.json`, `.agents/`, `.claude/`, release or promote workflows) need
-no CI run but need a dual_cross_family review. Dispatching a promote workflow to "get a check"
+Docs-only means every touched path is `*.md` or under `docs/`, none is under `.agents/` or `.claude/`,
+and no filter above matches it; it needs no run. A `*.md` that a filter matches (for example under
+`apps/` or `services/`) needs that workflow. Non-docs paths no filter covers (for example
+`.jev-route.json`, `.agents/`, `.claude/`, release or promote workflows) need no CI run but need a
+dual_cross_family review. Dispatching a promote workflow to "get a check"
 publishes; never do it for that.
 
 ## Public repository and privileged boundaries

@@ -42,4 +42,5 @@
   INTERNAL_CHANGELOG.md 为冻结历史），本条目因此从冻结文件移到本分片；RELEASE_LINES G4 与 CONTRIBUTING 的记录位置同步改为分片。
   双厂商审查（jev-route 8a83b3bd）的 minor 一并处理：补回「不为让本地默认命令能跑而装工具链、同步构建缓存、删活动 worktree 或留存证据」
   与「产品身份是 Tono」两句；docs-only 定义排除 `.agents/`、`.claude/` 和路由配置。
-
+- **2026-09-25 续记 2（续审 d9acf197，仍只有 minor）**：docs-only 定义改为「`*.md` 或 `docs/` 下、不在 `.agents/`/`.claude/`、且不匹配任何工作流过滤器」，
+  消除循环定义；REVIEW_ROUNDS 2026-09-23 §4.4/§4.6 改指分片记录。
