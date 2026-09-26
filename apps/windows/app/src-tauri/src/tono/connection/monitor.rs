@@ -842,7 +842,7 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
         let health_invalid = legs.invalid();
         let protection_invalid = legs.protection_invalid();
 
-        let (invalidate, network_changed, core_changed, kill_switch_snapshot, service_events) = {
+        let (invalidate, network_changed, core_changed, service_events) = {
             let mut inner = state.lock().await;
 
             // L3: surface kill switch changes as they are observed.
@@ -895,7 +895,10 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
                 inner.last_network_event_at = Some(std::time::Instant::now());
             }
 
-            let snapshot_for_emit = kill_switch_changed.then(|| commands::status_of(&inner));
+            // Under the lock, like every status publisher (H16-C-F3).
+            if kill_switch_changed {
+                commands::emit_status(&app, &commands::status_of(&inner));
+            }
             let mut events: Vec<AuditEvent> = Vec::new();
             if kill_switch_changed && let Some(kill_switch) = &snapshot.kill_switch {
                 events.push(AuditEvent::KillSwitchSnapshot {
@@ -915,13 +918,10 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
                     restart_count: snapshot.restart_count,
                 });
             }
-            (invalidated, network_changed, core_changed, snapshot_for_emit, events)
+            (invalidated, network_changed, core_changed, events)
         };
         for event in service_events {
             state.audit().log(event);
-        }
-        if let Some(status) = kill_switch_snapshot {
-            commands::emit_status(&app, &status);
         }
 
         // IP Helper delivers Tono's own WinTUN/route and DNS-reconciliation callbacks

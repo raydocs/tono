@@ -261,13 +261,19 @@ async fn release_in_progress() -> bool {
 
 /// What the refusal dialog may say about protection. A release that can still run decides the
 /// wording on its own, so the Service is read only when none is; a release registered by the time
-/// the read returns still counts as running.
+/// the read returns still counts as running. A first reading that would promise protection is
+/// confirmed by a second one (F520-1).
 async fn refusal_protection(release_wait_timed_out: bool) -> RefusalProtection {
     if release_wait_timed_out || release_in_progress().await {
         return classify_refusal(release_wait_timed_out, true, None);
     }
-    let snapshot = protection_for_refusal_dialog().await;
-    classify_service_refusal(release_in_progress().await, snapshot.as_ref())
+    let first = protection_for_refusal_dialog().await;
+    let refusal = classify_service_refusal(release_in_progress().await, first.as_ref());
+    if refusal != RefusalProtection::Held {
+        return refusal;
+    }
+    let second = protection_for_refusal_dialog().await;
+    classify_service_refusal_pair(release_in_progress().await, first.as_ref(), second.as_ref())
 }
 
 /// Wording from the Service's own reading. This App's registry misses a release another user's
@@ -286,6 +292,31 @@ fn classify_service_refusal(
         app_release_in_progress || service_releasing,
         snapshot.and_then(|snapshot| snapshot.kill_switch.as_ref()),
     )
+}
+
+/// Wording from two Service readings taken one after the other (F520-1). The Service samples the
+/// kill switch before the operation marker, so a release that starts and finishes between those
+/// two samples leaves one reading with a live barrier and no operation. Its `snapshot_generation`
+/// changes when an operation starts or finishes: "stays protected" needs both readings from the
+/// same generation, each with a wanted and live barrier and no releasing operation.
+fn classify_service_refusal_pair(
+    app_release_in_progress: bool,
+    first: Option<&ServiceStatusSnapshot>,
+    second: Option<&ServiceStatusSnapshot>,
+) -> RefusalProtection {
+    let same_generation = first
+        .zip(second)
+        .is_some_and(|(first, second)| first.snapshot_generation == second.snapshot_generation);
+    match (
+        classify_service_refusal(app_release_in_progress, first),
+        classify_service_refusal(app_release_in_progress, second),
+    ) {
+        (RefusalProtection::ReleaseMayComplete, _) | (_, RefusalProtection::ReleaseMayComplete) => {
+            RefusalProtection::ReleaseMayComplete
+        }
+        (RefusalProtection::Held, RefusalProtection::Held) if same_generation => RefusalProtection::Held,
+        _ => RefusalProtection::Unconfirmed,
+    }
 }
 
 /// Service operations that can remove the WFP barrier: the explicit release; a core stop, whose
@@ -615,7 +646,7 @@ pub async fn hide() {
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_refusal, classify_service_refusal, interactive_release_wait_error,
+        classify_refusal, classify_service_refusal, classify_service_refusal_pair, interactive_release_wait_error,
         run_interactive_cleanup_transition, run_session_ending_cleanup_transition,
         should_abort_exit_after_cleanup, RefusalProtection, INTERACTIVE_QUIT_RELEASE_BUDGET,
     };
@@ -775,6 +806,55 @@ mod tests {
             classify_service_refusal(false, Some(&locking)),
             RefusalProtection::Held,
             "an operation that cannot drop the barrier is not a release"
+        );
+    }
+
+    /// F520-1: the Service samples the kill switch and the operation marker separately, so one
+    /// reading can show a live barrier and no operation after a release already ran between the
+    /// two samples. "Stays protected" needs a second reading from the same Service generation.
+    #[test]
+    fn refusal_dialog_does_not_promise_protection_across_a_service_generation_change() {
+        let first = ServiceStatusSnapshot {
+            snapshot_generation: 4,
+            active_operation: None,
+            is_active: true,
+            active_generation: Some(2),
+            service_state: ServiceLifecycleState::Running,
+            core_pid: Some(1234),
+            core_generation: 1,
+            core_started_at: None,
+            last_core_exit_reason: None,
+            restart_count: 0,
+            last_recovery_at: None,
+            desired_core_should_be_running: true,
+            desired_generation: 3,
+            desired_updated_at: 0,
+            desired_state_unknown: false,
+            macos_kill_switch_wanted: false,
+            macos_kill_switch_live: false,
+            macos_kill_switch_mode: Default::default(),
+            kill_switch: Some(KillSwitchStatus {
+                wanted: true,
+                verified: true,
+                live: true,
+                mode: KillSwitchStatusMode::Blocked,
+                tunnel_permit_rendered: false,
+                endpoints: Vec::new(),
+                direct_endpoint_digest: String::new(),
+                last_error: None,
+            }),
+            network_events: Default::default(),
+        };
+        let mut second = first.clone();
+        second.snapshot_generation = 6;
+        assert_eq!(
+            classify_service_refusal_pair(false, Some(&first), Some(&second)),
+            RefusalProtection::Unconfirmed,
+            "an operation started and finished between the two readings"
+        );
+        assert_eq!(
+            classify_service_refusal_pair(false, Some(&first), Some(&first)),
+            RefusalProtection::Held
         );
     }
 

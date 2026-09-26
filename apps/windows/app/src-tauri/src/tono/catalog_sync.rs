@@ -96,14 +96,14 @@ pub(crate) async fn note_session_rejected(state: &Arc<TonoState>, app: &AppHandl
     if !suspend_rejected_session(&mut inner, auth_generation) {
         return;
     }
-    let snapshot = commands::status_of(&inner);
+    // Under the lock, like every status publisher (H16-C-F3).
+    commands::emit_status(app, &commands::status_of(&inner));
     drop(inner);
     logging!(
         warn,
         Type::Service,
         "Tono: the control plane rejected this session; account suspended"
     );
-    commands::emit_status(app, &snapshot);
 }
 
 /// Whether the periodic sync for this authentication generation keeps running.
@@ -236,42 +236,9 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
     let client = { state.lock().await.client.clone() };
     let response = client.exit_catalog().await.map_err(SyncFailure::from_api)?;
 
-    let (selection_vanished, server_confirmed) = {
-        let mut inner = state.lock().await;
-        if inner.sign_in_generation != auth_generation {
-            return Ok(());
-        }
-        let (installed, emit) = match install_and_persist(&inner.catalog_tracker, &inner.catalog_cache(), &response) {
-            Ok(effect) if effect.installed => {
-                let node_count = effect.nodes.len();
-                inner.cancel_server_tests();
-                inner.catalog_tracker = effect.tracker;
-                inner.nodes = effect.nodes;
-                inner.routing = sanitized_routing(response.routing.as_ref(), &inner.nodes);
-                enforce_selection_survival(&mut inner);
-                let _ = ensure_usable_selection(&mut inner);
-                state.audit().log(crate::tono::audit::AuditEvent::SyncOk {
-                    revision: response.revision,
-                    node_count,
-                });
-                (true, true)
-            }
-            Ok(_) => (false, true),
-            // Benign out-of-order delivery (tono-core L5): never an error.
-            Err(CatalogError::StaleRevision) => (false, false),
-            Err(err) => return Err(SyncFailure::Failed(err.to_string())),
-        };
-        let vanished = (installed
-            && inner.catalog_requires_choice
-            && (inner.fsm.status().is_connected || inner.fsm.status().is_connecting))
-            .then_some(inner.connect_generation);
-        let snapshot = emit.then(|| commands::status_of(&inner));
-        drop(inner);
-        if let Some(snapshot) = snapshot {
-            commands::emit_status(app, &snapshot);
-        }
-        (vanished, emit)
-    };
+    let (selection_vanished, server_confirmed) =
+        commit_fetched_catalog(state, auth_generation, &response, |snapshot| commands::emit_status(app, snapshot))
+            .await?;
 
     if let Some(generation) = selection_vanished {
         if state.lock().await.sign_in_generation == auth_generation {
@@ -286,6 +253,55 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
         crate::tono::offline_grant::record_server_verified_catalog(state, auth_generation, &response).await;
     }
     Ok(())
+}
+
+/// The locked half of [`sync_once_inner`]: commit a fetched catalog for this authentication
+/// generation and publish the resulting status. Returns the connect generation whose selected
+/// exit vanished, and whether the server confirmed the catalog in memory.
+async fn commit_fetched_catalog<P>(
+    state: &Arc<TonoState>,
+    auth_generation: u64,
+    response: &tono_core::ExitCatalogResponse,
+    publish: P,
+) -> Result<(Option<u64>, bool), SyncFailure>
+where
+    P: FnOnce(&commands::TonoStatus) + Send,
+{
+    let mut inner = state.lock().await;
+    if inner.sign_in_generation != auth_generation {
+        return Ok((None, false));
+    }
+    let (installed, emit) = match install_and_persist(&inner.catalog_tracker, &inner.catalog_cache(), response) {
+        Ok(effect) if effect.installed => {
+            let node_count = effect.nodes.len();
+            inner.cancel_server_tests();
+            inner.catalog_tracker = effect.tracker;
+            inner.nodes = effect.nodes;
+            inner.routing = sanitized_routing(response.routing.as_ref(), &inner.nodes);
+            enforce_selection_survival(&mut inner);
+            let _ = ensure_usable_selection(&mut inner);
+            state.audit().log(crate::tono::audit::AuditEvent::SyncOk {
+                revision: response.revision,
+                node_count,
+            });
+            (true, true)
+        }
+        Ok(_) => (false, true),
+        // Benign out-of-order delivery (tono-core L5): never an error.
+        Err(CatalogError::StaleRevision) => (false, false),
+        Err(err) => return Err(SyncFailure::Failed(err.to_string())),
+    };
+    let vanished = (installed
+        && inner.catalog_requires_choice
+        && (inner.fsm.status().is_connected || inner.fsm.status().is_connecting))
+        .then_some(inner.connect_generation);
+    // H16-C-F3: publish before the unlock. Sign-out bumps the generation and publishes its final
+    // status under this lock, so a snapshot published after the unlock could overwrite it.
+    if emit {
+        publish(&commands::status_of(&inner));
+    }
+    drop(inner);
+    Ok((vanished, emit))
 }
 
 /// Login/restore variant whose responses cannot commit across an authentication generation.
@@ -638,9 +654,10 @@ pub fn region_rank(name: &str) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::{
-        SyncFailure, default_usable_exit, install_and_persist, is_exit_blocked, is_legacy_wire_name, names_equivalent,
-        next_catalog_exit, periodic_sync_continues, periodic_sync_interval, region_rank, replacement_for_selection,
-        run_with_retries, selected_exit_still_present, sort_server_names, suspend_rejected_session, tcp_probe_socket,
+        SyncFailure, commit_fetched_catalog, default_usable_exit, install_and_persist, is_exit_blocked,
+        is_legacy_wire_name, names_equivalent, next_catalog_exit, periodic_sync_continues, periodic_sync_interval,
+        region_rank, replacement_for_selection, run_with_retries, selected_exit_still_present, sort_server_names,
+        suspend_rejected_session, tcp_probe_socket,
     };
     use std::collections::BTreeSet;
     use std::net::Ipv4Addr;
@@ -1071,6 +1088,33 @@ mod tests {
         let corrected = install_and_persist(&accepted.tracker, &cache, &catalog(6)).unwrap();
         assert!(corrected.installed);
         assert_eq!(corrected.tracker.current_revision(), 6);
+    }
+
+    /// H16-C-F3: the sync publishes its status before it releases the state lock. Sign-out bumps
+    /// the generation and publishes SignedOut under that lock; a Ready snapshot published after
+    /// the unlock could land after it in the `tono_status` cache and never be corrected.
+    #[tokio::test]
+    async fn catalog_sync_publishes_status_before_releasing_the_state_lock() {
+        let state = std::sync::Arc::new(crate::tono::state::TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.sign_in_generation = 4;
+            let mut tracker = CatalogTracker::new();
+            tracker.install(&catalog(3)).unwrap();
+            inner.catalog_tracker = tracker;
+        }
+        let probe = std::sync::Arc::clone(&state);
+        let mut lock_held_at_publish = None;
+        let result = commit_fetched_catalog(&state, 4, &catalog(3), |_| {
+            lock_held_at_publish = Some(futures::FutureExt::now_or_never(probe.lock()).is_none());
+        })
+        .await;
+        assert!(matches!(result, Ok((None, true))), "an unchanged catalog is confirmed and published");
+        assert_eq!(
+            lock_held_at_publish,
+            Some(true),
+            "the status was published after the state lock was released"
+        );
     }
 
     #[test]
