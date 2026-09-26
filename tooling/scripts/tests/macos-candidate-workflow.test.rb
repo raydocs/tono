@@ -35,6 +35,21 @@ cases.each do |candidate, type, ref, expected|
   )
   abort "wrong branch admission: #{candidate} #{ref}\n#{output}" unless status.success? == expected
 end
+
+# A release build with no v1 installed floor ships bytes every later v1 update refuses
+# (UpdatePackage.swift), so both release workflows must stop at the ref gate instead.
+{ 'macos-release.yml' => { 'CANDIDATE_ONLY' => 'false', 'GITHUB_REF' => 'refs/heads/release/macos' },
+  'windows-release.yml' => { 'GITHUB_REF' => 'refs/heads/release/windows' } }.each do |name, ref_env|
+  release = YAML.load_file(File.join(root, '.github/workflows', name))
+  step = release.fetch('jobs').fetch('branch').fetch('steps').first
+  env = release.fetch('env', {}).merge(ref_env).merge('GITHUB_REF_TYPE' => 'branch')
+  _, status = Open3.capture2e(env.merge('UPDATE_RELEASE_SEQUENCE' => ''), '/bin/bash', '-c', step.fetch('run'))
+  abort "#{name} admitted a release build without update_release_sequence" if status.success?
+  output, status = Open3.capture2e(env.merge('UPDATE_RELEASE_SEQUENCE' => '7401'), '/bin/bash', '-c', step.fetch('run'))
+  abort "#{name} refused a release build with a sequence:\n#{output}" unless status.success?
+  abort "#{name} gate must read the dispatch input" unless step.fetch('env', {})['UPDATE_RELEASE_SEQUENCE'] == "${{ inputs.update_release_sequence || '' }}"
+end
+puts 'release workflows: an empty update_release_sequence is refused before any build'
 appcast = workflow.fetch('jobs').fetch('validate-appcast')
 expected_guard = "${{ !(github.event_name == 'workflow_dispatch' && inputs.candidate_only) }}"
 abort 'candidate must not enter the Sparkle-key environment' unless appcast['if'] == expected_guard
