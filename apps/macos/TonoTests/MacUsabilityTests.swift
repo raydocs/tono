@@ -333,7 +333,9 @@ final class MacUsabilityTests: XCTestCase {
         try await app.installManagedExitCatalog(try catalog(survivor, revision: 74), persistCache: false, allowRuntimeTransition: false)
         XCTAssertTrue(app.catalogSelectionRequiresChoice)
         let message = try XCTUnwrap(app.errorMessage)
-        XCTAssertFalse(message.contains("Kill Switch"), "no barrier exists on an idle, unarmed Mac")
+        XCTAssertNotEqual(message, String(localized: "The selected cloud server was removed. Kill Switch is still blocking traffic; choose another cloud server."),
+                          "no barrier exists on an idle, unarmed Mac")
+        XCTAssertEqual(message, String(localized: "The selected cloud server was removed. Choose another cloud server."))
         await app.finishPendingPersistence()
     }
 

@@ -65,7 +65,7 @@ extension AppState {
                 guard result.disconnectVerified == true else { throw NativeUpdateDownload.failure("Update Disconnect was not verified.") }
                 isProtectionBlocked = false
                 KillSwitchService.isArmed = false
-                consecutiveProtectionRepairCount = 0
+                resetReleasedSessionHistory()
                 RuntimeCleanup.clearCoreStarted()
             } catch {
                 isProtectionBlocked = true
@@ -97,7 +97,7 @@ extension AppState {
         RuntimeCleanup.nativeUpdateRecovery = nil
         KillSwitchService.isArmed = false
         isProtectionBlocked = false
-        consecutiveProtectionRepairCount = 0
+        resetReleasedSessionHistory()
         updateIncomplete = UpdateHandoffStore.showsIncompleteUpdate()
         errorMessage = nil
         RuntimeCleanup.clearCoreStarted()

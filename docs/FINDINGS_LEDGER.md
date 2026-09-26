@@ -70,7 +70,7 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | X1-8 | disarm 出错后未读回 helper 就发布 blocked 状态 | in-PR | [#437](https://github.com/raydocs/tono/pull/437) | 低·推导 | — |
 | X1-9 | 更新状态查询返回后未复核连接 attempt 即提交 onCoreStarted | in-PR | [#439](https://github.com/raydocs/tono/pull/439) | 低·推导 | — |
 | H16-O-F5 | 启动时从 helper 收养已 armed 的 PF 屏障，但不设 isProtectionBlocked：菜单栏与主窗显示 Standby，激活对账与 Retry 都以该标志为前提（= H16-C-F1） | open | 待开 | 中·已确认 | 全程 fail-closed，无泄漏；直到一次 Connect 或网络变化才收敛；与 H17-AUTH-MAC（#516）同改文件，排在其后 |
-| H16-O-F3 | 空闲、未 armed 的 Mac 上所选服务器被移出目录时，错误横幅称「断网保护仍在拦住直连」 | open | 待开 | 低·已确认 | 屏障不存在而文案称在拦截；药丸同时显示未连接，无泄漏；未绑定住宅线的用户都会走到这条分支 |
+| H16-O-F3 | 空闲、未 armed 的 Mac 上所选服务器被移出目录时，错误横幅称「断网保护仍在拦住直连」 | in-PR | [#601](https://github.com/raydocs/tono/issues/601)，[#649](https://github.com/raydocs/tono/pull/649) | 低·已确认 | 屏障不存在而文案称在拦截；药丸同时显示未连接，无泄漏；未绑定住宅线的用户都会走到这条分支 |
 | H16-C-F2 | 从菜单栏 Restore internet 成功释放后，已显示的账户 gate（suspended）不失效，继续称 Kill Switch 在拦截 | open | 待开 | 中·推导 | gate 读取不可观察的静态 isArmed；登录卡同一读法；SwiftUI 实际重绘需实机；排在 H16-O-F5 之后 |
 | MAC3-RECHECK-F1 | wake 保护未知与重试暂停并存时，菜单栏优先显示 Protected Offline | in-PR | [#610](https://github.com/raydocs/tono/pull/610) | 中·已确认 | `train/mac3-20260924` 已将未知判断移到暂停判断前；新增投影回归，XCTest 未运行，无新包 |
 | MAC3-RECHECK-F2 | wake reassert 成功返回后未检查取消，旧任务可覆盖保护状态并继续连接 | in-PR | [#610](https://github.com/raydocs/tono/pull/610) | 中·推导 | `train/mac3-20260924` 返回后立即检查取消；新增取消后成功返回回归，XCTest 未运行，无设备验收 |
@@ -169,7 +169,7 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | H15-F3 | 0.0.72 更新交接日记从不退役，永久显示「更新未完成」 | in-PR | [#496](https://github.com/raydocs/tono/issues/496)，[#497](https://github.com/raydocs/tono/pull/497)（macOS）、[#498](https://github.com/raydocs/tono/pull/498)（Windows） | 中·推导 | 未实跑 0.0.72→0.0.73 升级 |
 | H15-F5 | Windows 降级到 0.0.72 后残留 NRPT catch-all 且加密 DNS 关闭 | in-PR | [#507](https://github.com/raydocs/tono/issues/507)，[#508](https://github.com/raydocs/tono/pull/508) | 中·实机 | 安装器改为拒绝降级并记录安全回滚步骤；需候选包与实机 |
 | H15-F6 | 原生更新 store/账本无版本号，遇新版写入的未知字段即拒绝 | in-PR | [#501](https://github.com/raydocs/tono/issues/501)，[#502](https://github.com/raydocs/tono/pull/502)（Windows）、[#503](https://github.com/raydocs/tono/pull/503)（macOS） | 中·推导 | #503 的 helper 4.40.0 为临时编号，合并时重编号并重算 CONTRACT.sha256 |
-| H16-O-F4 | macOS 原生更新准备失败后 isConnected 已清、isProtectionBlocked 未设：各表面显示 Standby 而 PF 仍 armed，Connect 点击被静默丢弃（= H16-C-F6） | open | 待开 | 中·已确认 | 全程 fail-closed，无泄漏；本会话内不收敛；准备失败的频率需实机 |
+| H16-O-F4 | macOS 原生更新准备失败后 isConnected 已清、isProtectionBlocked 未设：各表面显示 Standby 而 PF 仍 armed，Connect 点击被静默丢弃（= H16-C-F6） | in-PR | [#601](https://github.com/raydocs/tono/issues/601)，[#649](https://github.com/raydocs/tono/pull/649) | 中·已确认 | 全程 fail-closed，无泄漏；本会话内不收敛；准备失败的频率需实机 |
 
 ## 5. 控制面（Worker）
 
