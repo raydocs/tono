@@ -342,6 +342,33 @@ extension KillSwitchManager {
         releasePFEnableReference(recordPath: unwritableRecord)
         if !startedEnabled { _ = try? run("/sbin/pfctl", ["-d"]) }
 
+        // 9c. A release must not forget a token it could not check (#639
+        //     review, opus:F2 and codex:F1). The reference query runs past a
+        //     zero deadline, so pfctl gives no answer: that is not "no longer
+        //     listed", and the record must outlive the call. The token is a
+        //     made-up number, and no `-X` runs.
+        let unansweredRecord = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-lifecycle-unanswered.reference").path
+        unlink(unansweredRecord)
+        if let boot = try? TonoAuthenticatedPeer.bootSession(),
+           let record = try? JSONSerialization.data(
+            withJSONObject: ["token": "4294967311", "boot": boot],
+            options: [.sortedKeys]
+           ),
+           (try? atomicWrite(path: unansweredRecord, data: record, permissions: 0o600)) != nil {
+            let released = (try? releasePFEnableReference(
+                recordPath: unansweredRecord,
+                queryDeadline: 0
+            )) != nil
+            check(
+                "reference-kept-past-unanswered-query",
+                !released && readPFEnableReference(unansweredRecord)?.token == "4294967311"
+            )
+        } else {
+            check("reference-unanswered-record-written", false)
+        }
+        unlink(unansweredRecord)
+
         // 10. Full removal (`--emergency-reset`) takes back exactly the hook an
         //     arm wrote into /etc/pf.conf, keeps a line the user added later,
         //     and deletes both `.tono-backup` files (H19-O-F6). Fixture paths

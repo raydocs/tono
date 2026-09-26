@@ -768,7 +768,8 @@ extension KillSwitchManager {
     /// it in this boot, and forgets it either way. PF stops only if no other
     /// program holds a reference, which is exactly the correct outcome.
     static func releasePFEnableReference(
-        recordPath: String = killSwitchPFReferencePath
+        recordPath: String = killSwitchPFReferencePath,
+        queryDeadline: TimeInterval = KillSwitchManager.helperCommandDeadline
     ) {
         if let held = readPFEnableReference(recordPath),
            held.boot == (try? TonoAuthenticatedPeer.bootSession()),
