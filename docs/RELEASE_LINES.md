@@ -147,7 +147,9 @@ has not yet run end to end.
    `services/control-plane/public/` on `main`; deploy per AGENTS.md.
 
 The proven path is `tooling/scripts/release-macos.sh --version <v> --build <n>
---publish --lifecycle-token <token>`, which does steps 2–5 except the deploy. It
+--release-sequence <n> --publish --lifecycle-token <token>`, which does steps 2–5
+except the deploy. It refuses a missing or invalid sequence and checks that the
+bundle it publishes carries that sequence. It
 builds and packages natively, so it runs on the Mac Studio, never the MacBook. Its
 bytes are a new candidate, so it does not publish an accepted workflow candidate; use
 it only where the candidate identity rule above allows a rebuild. The

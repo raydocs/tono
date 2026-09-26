@@ -87,6 +87,16 @@ jobs:
           UPDATE_RELEASE_SEQUENCE: ${{ inputs.update_release_sequence || '' }}
         run: |
           set -euo pipefail
+          # Same contract as write-build-source.sh and the Service's installed_floor():
+          # a decimal integer in 1..=9007199254740991, no sign, no leading zero.
+          sequence_is_valid() {
+            case "$UPDATE_RELEASE_SEQUENCE" in ''|0*|*[!0-9]*) return 1 ;; esac
+            [ "${#UPDATE_RELEASE_SEQUENCE}" -le 16 ] && [ "$UPDATE_RELEASE_SEQUENCE" -le 9007199254740991 ]
+          }
+          if [ -n "$UPDATE_RELEASE_SEQUENCE" ] && ! sequence_is_valid; then
+            echo "::error::update_release_sequence must be a decimal integer in 1..9007199254740991. Nothing was built."
+            exit 1
+          fi
           if [ "$CANDIDATE_ONLY" = true ]; then
             if [ "$GITHUB_REF" != "$CANDIDATE_REF" ]; then
               echo "::error::Candidate signing is restricted to $CANDIDATE_REF ($CANDIDATE_VERSION/build$CANDIDATE_BUILD)."

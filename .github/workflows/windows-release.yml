@@ -51,6 +51,19 @@ jobs:
             echo "::error::A Windows release build needs update_release_sequence (the v1 installed floor, same as the paired macOS build). Nothing was done."
             exit 1
           fi
+          # Same contract as installed_floor(): a decimal integer in 1..=9007199254740991,
+          # no sign, no leading zero.
+          case "$UPDATE_RELEASE_SEQUENCE" in
+            0*|*[!0-9]*) valid=no ;;
+            *) valid=yes ;;
+          esac
+          if [ "$valid" = yes ] && { [ "${#UPDATE_RELEASE_SEQUENCE}" -gt 16 ] || [ "$UPDATE_RELEASE_SEQUENCE" -gt 9007199254740991 ]; }; then
+            valid=no
+          fi
+          if [ "$valid" != yes ]; then
+            echo "::error::update_release_sequence must be a decimal integer in 1..9007199254740991. Nothing was done."
+            exit 1
+          fi
           echo "running from $GITHUB_REF"
 
   pinned-core:

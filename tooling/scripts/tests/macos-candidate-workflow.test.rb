@@ -45,13 +45,22 @@ end
   step = release.fetch('jobs').fetch('branch').fetch('steps').first
   literal = step.fetch('env', {}).reject { |_, value| value.to_s.include?('${{') }
   env = release.fetch('env', {}).merge(literal).merge(ref_env).merge('GITHUB_REF_TYPE' => 'branch')
-  _, status = Open3.capture2e(env.merge('UPDATE_RELEASE_SEQUENCE' => ''), '/bin/bash', '-c', step.fetch('run'))
-  abort "#{name} admitted a release build without update_release_sequence" if status.success?
-  output, status = Open3.capture2e(env.merge('UPDATE_RELEASE_SEQUENCE' => '7401'), '/bin/bash', '-c', step.fetch('run'))
-  abort "#{name} refused a release build with a sequence:\n#{output}" unless status.success?
+  ['', '0', '07401', '+7401', '-1', 'abc', 'null', '9007199254740992', '99999999999999999'].each do |sequence|
+    _, status = Open3.capture2e(env.merge('UPDATE_RELEASE_SEQUENCE' => sequence), '/bin/bash', '-c', step.fetch('run'))
+    abort "#{name} admitted a release build with update_release_sequence #{sequence.inspect}" if status.success?
+  end
+  ['7401', '9007199254740991'].each do |sequence|
+    output, status = Open3.capture2e(env.merge('UPDATE_RELEASE_SEQUENCE' => sequence), '/bin/bash', '-c', step.fetch('run'))
+    abort "#{name} refused a release build with sequence #{sequence}:\n#{output}" unless status.success?
+  end
   abort "#{name} gate must read the dispatch input" unless step.fetch('env', {})['UPDATE_RELEASE_SEQUENCE'] == "${{ inputs.update_release_sequence || '' }}"
 end
-puts 'release workflows: an empty update_release_sequence is refused before any build'
+# A candidate may omit the sequence, but one it is given must be valid.
+mac_gate = workflow.fetch('jobs').fetch('branch').fetch('steps').first.fetch('run')
+candidate = candidate_env.merge('CANDIDATE_ONLY' => 'true', 'GITHUB_REF' => candidate_env.fetch('CANDIDATE_REF'))
+_, status = Open3.capture2e(candidate.merge('UPDATE_RELEASE_SEQUENCE' => '0'), '/bin/bash', '-c', mac_gate)
+abort 'candidate admitted an invalid update_release_sequence' if status.success?
+puts 'release workflows: a missing or invalid update_release_sequence is refused before any build'
 appcast = workflow.fetch('jobs').fetch('validate-appcast')
 expected_guard = "${{ !(github.event_name == 'workflow_dispatch' && inputs.candidate_only) }}"
 abort 'candidate must not enter the Sparkle-key environment' unless appcast['if'] == expected_guard

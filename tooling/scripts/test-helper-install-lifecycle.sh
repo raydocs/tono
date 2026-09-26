@@ -392,6 +392,6 @@ restore || exit 1
 print "install lifecycle passed (previous installation restored)"
 print "  bundle token: $token"
 print "  the publish that ships this bundle wants it:"
-print "    tooling/scripts/release-macos.sh --version <x.y.z> --build <n> \\"
+print "    tooling/scripts/release-macos.sh --version <x.y.z> --build <n> --release-sequence <n> \\"
 print "      --publish --lifecycle-token $token"
 exit 0

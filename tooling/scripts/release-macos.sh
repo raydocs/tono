@@ -23,8 +23,12 @@ set -uo pipefail
 script_path=${0:A}
 
 usage() {
-  print "usage: $script_path --version <x.y.z> --build <n> [--publish] [--notes <file>]" >&2
-  print "                    [--lifecycle-token <token>]" >&2
+  print "usage: $script_path --version <x.y.z> --build <n> --release-sequence <n>" >&2
+  print "                    [--publish] [--notes <file>] [--lifecycle-token <token>]" >&2
+  print "" >&2
+  print "  --release-sequence is the v1 installed floor built into the app, a" >&2
+  print "  decimal integer in 1..9007199254740991. It is required: an app without" >&2
+  print "  one refuses every later v1 update." >&2
   print "" >&2
   print "  Without --publish: builds, notarises, verifies the gate, signs the" >&2
   print "  archive, validates the feed entry, and stops. Nothing leaves this" >&2
@@ -51,11 +55,13 @@ build=""
 publish=no
 notes=""
 lifecycle_token=""
+release_sequence=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     --version) short_version=${2:-}; shift 2 ;;
     --build) build=${2:-}; shift 2 ;;
+    --release-sequence) release_sequence=${2:-}; shift 2 ;;
     --notes) notes=${2:-}; shift 2 ;;
     --publish) publish=yes; shift ;;
     --lifecycle-token) lifecycle_token=${2:-}; shift 2 ;;
@@ -67,6 +73,10 @@ done
 [[ -n $short_version && -n $build ]] || { usage; exit 2 }
 [[ $short_version =~ '^[0-9]+\.[0-9]+\.[0-9]+$' ]] || { print -r -- "--version must be x.y.z" >&2; exit 2 }
 [[ $build =~ '^[0-9]+$' ]] || { print -r -- "--build must be a number" >&2; exit 2 }
+# Same contract as write-build-source.sh and macos-release.yml: no sign, no leading
+# zero, 1..=9007199254740991.
+[[ $release_sequence =~ '^[1-9][0-9]{0,15}$' ]] && (( release_sequence <= 9007199254740991 )) \
+  || { print -r -- "--release-sequence must be a decimal integer in 1..9007199254740991" >&2; exit 2 }
 [[ -z $lifecycle_token || $lifecycle_token =~ '^install-lifecycle:[0-9a-f]{16}$' ]] \
   || { print -r -- "--lifecycle-token is the token test-helper-install-lifecycle.sh printed" >&2; exit 2 }
 # Refused here rather than after a build and a notarisation: the install
@@ -188,6 +198,7 @@ else
   # describes the outcome and hides the one thing the operator needs to act on.
   build_log=$(/usr/bin/mktemp -t tono-release-build)
   if ! TONO_MACOS_NOTARIZE=1 TONO_MACOS_NOTARY_PROFILE=${TONO_MACOS_NOTARY_PROFILE:-tono-notary} \
+       TONO_UPDATE_RELEASE_SEQUENCE=$release_sequence \
        "$repo_root/tooling/scripts/package-macos-test.sh" "$out" "$base" > "$build_log" 2>&1; then
     print "release-macos: the build or notarisation failed:" >&2
     /usr/bin/tail -12 "$build_log" | /usr/bin/sed 's/^/  /' >&2
@@ -208,6 +219,12 @@ built_build=$(/usr/bin/plutil -extract CFBundleVersion raw -o - "$app/Contents/I
 [[ $built_version == $short_version && $built_build == $build ]] \
   || fail "the built app is $built_version ($built_build), not $short_version ($build)"
 print "  built $built_version ($built_build)"
+# Also covers a reused bundle: it must carry the floor this run was asked for.
+built_sequence=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["releaseSequence"])' \
+  "$app/Contents/Resources/tono-build-source.json" 2>/dev/null)
+[[ $built_sequence == $release_sequence ]] \
+  || fail "the built app carries release sequence ${built_sequence:-none}, not $release_sequence"
+print "  release sequence $built_sequence"
 
 if [[ -n $lifecycle_token ]]; then
   step "confirming the install lifecycle ran against this bundle"
@@ -323,7 +340,7 @@ if [[ $publish != yes ]]; then
   print "    sudo tooling/scripts/test-helper-install-lifecycle.sh --app $app"
   print "  It installs the daemon, checks what landed, puts the previous one back,"
   print "  and prints a token naming this bundle. Then:"
-  print "    $script_path --version $short_version --build $build --publish \\"
+  print "    $script_path --version $short_version --build $build --release-sequence $release_sequence --publish \\"
   print "      --lifecycle-token <the token it printed>"
   exit 0
 fi
