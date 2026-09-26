@@ -2,7 +2,7 @@
 
 - 归属：ops（记录维护）；无代码改动。
 - 来源：基线 origin/main `3470dd68`；分支 `docs/findings-status-sync-20260926`。
-- 记录同步：`docs/FINDINGS_LEDGER.md` 中 107 行 `in-PR` 所引 PR 已全部合入 main，按最后合入的 PR 改为 `fixed(<合并提交>)`；
+- 记录同步：`docs/FINDINGS_LEDGER.md` 中 105 行 `in-PR` 所引 PR 已全部合入 main，改为 `fixed(<该修复落到 main 第一父链上的合并提交>)`（经合并列车进入的记列车合入 main 的提交）；D7、H8-F4 仅部分修复，保持原状态；
   另 8 行（H21-O-F2 #611、H21-O-F5 #604、R604-F1 #609、H21-O-F9 #623、H16-O-F5 #537、H16-C-F2 #538、H17-C-F3 #535、H17-O-F7 #539）
   由 open/in-PR 改为 fixed 并补 PR 链接。`fixed` 只表示源码进 main，不表示实机验收。未动：H2-F3（#352 仍开）、H19-* 与 OD-0924-* 等无 PR 链接的行。
 - 合并回归审查：区间 `fb5e8485...3470dd68`（#640、#641、#644），jev-route 双厂商（opus + codex）run `026ef1c5`，PASSED，0 发现。
