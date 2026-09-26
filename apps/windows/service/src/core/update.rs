@@ -993,6 +993,16 @@ fn residual_filter_refusal(
     }
 }
 
+/// A runnable desired owner state refuses the manual gate; [`begin_manual`] reads it only after
+/// [`residual_filter_refusal`] found no Tono filter.
+fn runnable_owner_refusal(
+    core_should_be_running: bool,
+    _service_present: impl FnOnce() -> Result<bool>,
+) -> Result<()> {
+    ensure!(!core_should_be_running, ProtectionActive);
+    Ok(())
+}
+
 /// Whether a Tono Service that can re-arm the barrier is installed: an SCM registration whose
 /// binary is still on disk. A stopped Service counts. Anything unreadable counts as present.
 fn barrier_service_present() -> Result<bool> {
@@ -1041,12 +1051,12 @@ pub async fn begin_manual() -> Result<()> {
     if paths.active_owner_path().try_exists()? {
         let active: crate::ActiveOwnerState =
             serde_json::from_slice(&std::fs::read(paths.active_owner_path())?)?;
-        ensure!(
-            !desired::load_owner_desired_state(&active.owner_key)
+        runnable_owner_refusal(
+            desired::load_owner_desired_state(&active.owner_key)
                 .await?
                 .core_should_be_running,
-            ProtectionActive
-        );
+            barrier_service_present,
+        )?;
     }
     let restored = dns::restore_protected().await?;
     ensure!(
@@ -1204,6 +1214,24 @@ mod tests {
         // refusal must be the one NSIS turns into the confirmed proven-removal install.
         let refusal = residual_filter_refusal(true, || Ok(false)).unwrap_err();
         assert!(refusal.is::<OrphanedProtection>());
+    }
+
+    /// #602 (#573 residual): a confirmed orphan clear removed the filters and the Service, then
+    /// could not persist the owner's stopped state. The re-run finds no filters, only that stale
+    /// runnable owner, and must be offered the same confirmed recovery again (78) instead of
+    /// Disconnect advice nobody can follow (77). A Service that could restore the Core still wins.
+    #[test]
+    fn update_manual_gate_reoffers_orphan_recovery_for_a_stale_runnable_owner() {
+        runnable_owner_refusal(false, || panic!("no runnable owner to refuse")).unwrap();
+        let refusal = runnable_owner_refusal(true, || Ok(true)).unwrap_err();
+        assert!(refusal.is::<ProtectionActive>());
+        let refusal = runnable_owner_refusal(true, || anyhow::bail!("SCM unreadable")).unwrap_err();
+        assert!(refusal.is::<ProtectionActive>());
+        let refusal = runnable_owner_refusal(true, || Ok(false)).unwrap_err();
+        assert!(
+            refusal.is::<OrphanedProtection>(),
+            "no Service and no filters left: expected the confirmed orphan recovery, got {refusal:#}"
+        );
     }
 
     #[test]
