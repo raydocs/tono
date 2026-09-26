@@ -1539,6 +1539,37 @@ fn replace_existing_service_and_runtime(
     }
 }
 
+/// What the helper can see of the Base Filtering Engine: the SCM in production, a script in tests.
+#[cfg(windows)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+enum BfeState {
+    Running,
+    Disabled,
+    Stopped,
+    Pending,
+}
+
+#[cfg(windows)]
+#[allow(dead_code)]
+trait BfeControl {
+    fn state(&mut self) -> Result<BfeState, Error>;
+    fn start(&mut self) -> Result<(), Error>;
+    /// Sleep one poll interval; false once the wait budget is spent.
+    fn wait(&mut self) -> bool;
+}
+
+/// RED seam, main's behaviour extracted unchanged: `ensure_bfe_ready` probes once, starts once,
+/// never waits and never refuses.
+#[cfg(windows)]
+#[allow(dead_code)]
+fn bring_bfe_up(bfe: &mut impl BfeControl) -> Result<(), Error> {
+    if bfe.state()? != BfeState::Running {
+        let _ = bfe.start();
+    }
+    Ok(())
+}
+
 /// Make sure the dependency TonoService declares can actually be satisfied.
 ///
 /// TonoService is AutoStart and hard-depends on BFE, so a machine where BFE has been switched

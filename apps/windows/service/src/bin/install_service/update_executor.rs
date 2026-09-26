@@ -116,6 +116,16 @@ fn classify_before_stop(
     Err(error)
 }
 
+/// RED seam, main's order extracted unchanged: `--manual-update-gate` goes straight to
+/// `begin_manual`, whose first refusal reads WFP; nothing brings BFE up first.
+#[allow(dead_code)]
+fn manual_update_gate(
+    _bfe_up: impl FnOnce() -> Result<(), Error>,
+    begin: impl FnOnce() -> Result<(), Error>,
+) -> Result<(), Error> {
+    begin()
+}
+
 pub(super) fn dispatch() -> Result<bool, Error> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     match args.as_slice() {
@@ -955,5 +965,50 @@ mod tests {
         // Rollback and the no-plan identity check still run with the Service stopped.
         assert!(classify_recovery(true, false, &target, &target).requires_service_stop());
         assert!(classify_recovery(false, false, &old, &target).requires_service_stop());
+    }
+
+    /// H22-O-F1: every refusal of the manual gate starts with a WFP read, an RPC to BFE. A
+    /// stopped BFE must be started, and its StartPending waited out, before that read; reading
+    /// first refused a merely stopped BFE as an unconfirmable network state and aborted install.
+    #[test]
+    fn update_manual_gate_brings_bfe_up_before_reading_wfp() {
+        struct Scripted<'a> {
+            states: std::vec::IntoIter<BfeState>,
+            log: &'a std::cell::RefCell<Vec<String>>,
+        }
+        impl BfeControl for Scripted<'_> {
+            fn state(&mut self) -> Result<BfeState, Error> {
+                let state = self.states.next().expect("BFE polled after it was Running");
+                self.log.borrow_mut().push(format!("{state:?}"));
+                Ok(state)
+            }
+            fn start(&mut self) -> Result<(), Error> {
+                self.log.borrow_mut().push("start".into());
+                Ok(())
+            }
+            fn wait(&mut self) -> bool {
+                self.log.borrow_mut().push("wait".into());
+                true
+            }
+        }
+        let log = std::cell::RefCell::new(Vec::new());
+        let mut bfe = Scripted {
+            states: vec![BfeState::Stopped, BfeState::Pending, BfeState::Running].into_iter(),
+            log: &log,
+        };
+        manual_update_gate(
+            || bring_bfe_up(&mut bfe),
+            || {
+                log.borrow_mut().push("wfp".into());
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            *log.borrow(),
+            [
+                "Stopped", "start", "wait", "Pending", "wait", "Running", "wfp"
+            ]
+        );
     }
 }

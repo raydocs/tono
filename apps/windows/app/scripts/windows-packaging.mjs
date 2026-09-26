@@ -952,6 +952,101 @@ export function validateEmbeddedCoreDigestPin(
   return null
 }
 
+/** The three privileged helpers NSIS runs; all must start on a machine without the VC++ runtime. */
+export const STATIC_CRT_HELPERS = Object.freeze([
+  'tono-service.exe',
+  'tono-service-install.exe',
+  'tono-service-uninstall.exe',
+])
+
+const VC_REDIST_DLL = /^(?:vcruntime|msvcp|vccorlib|concrt|vcomp)\d+.*\.dll$/i
+
+/**
+ * Names of the DLLs a PE image imports, from its import (1) and delay-import (13) directories.
+ * Throws on anything that is not a readable PE image.
+ *
+ * @param {Uint8Array} bytes
+ * @returns {string[]}
+ */
+export function peImportedDlls(bytes) {
+  const pe = Buffer.from(bytes)
+  if (pe.readUInt16LE(0) !== 0x5a4d) throw new Error('no MZ header')
+  const header = pe.readUInt32LE(0x3c)
+  if (pe.readUInt32LE(header) !== 0x4550) throw new Error('no PE signature')
+  const sectionCount = pe.readUInt16LE(header + 6)
+  const optionalSize = pe.readUInt16LE(header + 20)
+  const optional = header + 24
+  const magic = pe.readUInt16LE(optional)
+  if (magic !== 0x10b && magic !== 0x20b) {
+    throw new Error(`unknown optional header magic 0x${magic.toString(16)}`)
+  }
+  const directories = optional + (magic === 0x20b ? 112 : 96)
+  const directoryCount = pe.readUInt32LE(directories - 4)
+  const sections = []
+  for (let index = 0; index < sectionCount; index += 1) {
+    const at = optional + optionalSize + 40 * index
+    sections.push({
+      va: pe.readUInt32LE(at + 12),
+      size: Math.max(pe.readUInt32LE(at + 8), pe.readUInt32LE(at + 16)),
+      raw: pe.readUInt32LE(at + 20),
+    })
+  }
+  const offset = (rva) => {
+    const section = sections.find(
+      (candidate) => rva >= candidate.va && rva < candidate.va + candidate.size,
+    )
+    if (!section) throw new Error(`RVA 0x${rva.toString(16)} is in no section`)
+    return rva - section.va + section.raw
+  }
+  const dlls = []
+  // [data directory, descriptor size, offset of the DLL-name RVA in the descriptor]
+  for (const [directory, stride, nameField] of [
+    [1, 20, 12],
+    [13, 32, 4],
+  ]) {
+    if (directory >= directoryCount) continue
+    const rva = pe.readUInt32LE(directories + 8 * directory)
+    if (!rva) continue
+    for (let at = offset(rva); ; at += stride) {
+      const nameRva = pe.readUInt32LE(at + nameField)
+      if (!nameRva) break
+      const name = offset(nameRva)
+      const end = pe.indexOf(0, name)
+      if (end < 0) throw new Error('unterminated DLL name')
+      dlls.push(pe.toString('latin1', name, end))
+    }
+  }
+  return dlls
+}
+
+/**
+ * H22-O-F2: NSIS runs `tono-service-install.exe --manual-update-gate` from `.onInit`, before
+ * Section CheckAndInstallVSRuntime, so a helper that imports the Visual C++ runtime cannot
+ * start on a machine without it and every install aborts with 76. The helpers link the CRT
+ * statically (`apps/windows/service/.cargo/config.toml`); this proves the packaged bytes do.
+ *
+ * @param {Uint8Array} binaryBytes bytes of one of {@link STATIC_CRT_HELPERS}
+ * @param {string} label binary name used in diagnostics
+ * @returns {string | null}
+ */
+export function validateStaticCrtImports(binaryBytes, label) {
+  let dlls
+  try {
+    dlls = peImportedDlls(binaryBytes)
+  } catch (error) {
+    return `${label} is not a readable PE image: ${error instanceof Error ? error.message : error}`
+  }
+  // Every Windows executable imports KERNEL32; without it the import table was not read.
+  if (!dlls.some((dll) => /^kernel32\.dll$/i.test(dll))) {
+    return `${label} import table was not read (no KERNEL32.dll among ${dlls.length} imports)`
+  }
+  const redist = dlls.filter((dll) => VC_REDIST_DLL.test(dll))
+  if (redist.length) {
+    return `${label} imports the Visual C++ runtime (${redist.join(', ')}); the installer runs it before that runtime is installed, so it must be built with +crt-static`
+  }
+  return null
+}
+
 /**
  * Pick only allowlisted files from a built release resources directory.
  * @param {string[]} basenames on-disk names under releaseDir/resources
