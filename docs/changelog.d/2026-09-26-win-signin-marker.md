@@ -16,3 +16,17 @@
 - 剩余限制：标记已写入而 `client.adopt` 随后失败（凭据写入队列满或已关闭）时，标记留下并为凭据库原有内容作证，
   与现有「标记写入后异步写库失败」属同一类；被拒绝的登录已通过服务端验证，该服务端会话未注销（与现有 adopt 失败路径相同），
   用户需重新获取验证码。未实机。
+- **续记（2026-09-26，#642 评审 d9ba823a 确认三条 minor）**：① opus:F1 / codex:F2：拒绝点在不可逆步骤之后，换账户登录时
+  `adopt_replacing_with` 已使上一账户的连接失效并释放防护，`adopt_sign_in_response` 已丢弃目录、runtime 副本和连接失败记录。
+  现在标记步骤移到 `adopt_replacing_with` 第一段锁内、代次核对之后、任何失效/释放/丢弃之前；写不进则拒绝，防护与上一账户状态都不动。
+  本机已有本地标记时不写、不拒绝（`SignInMarker::Existing`）：登录替换的是它作证的会话，不改变归属；只认本地标记，旧位置的漫游标记不算。
+  ② codex:F1：本次登录新写的标记（`Created`）在登录没有存下会话时（释放失败、被取代、`client.adopt` 失败）由 `undo_sign_in_marker` 删除；
+  只在代次未变时删（已有更新的登录开始，它可能依赖这个标记，则保留）；登录前已有的标记不删。
+  ③ codex:F3：错误改为稳定前缀 `TONO_SIGN_IN_NOT_SAVED`，前端 `tono.ts` 映射到 `tono.login.errors.signInNotSaved`
+  （中英文：「无法在这台电脑上保存登录。请重新获取验证码后再试。」），登录页遇此错误清空已被服务端消耗的验证码；i18n 类型已重新生成。
+  测试：同一条 `a_sign_in_whose_local_marker_cannot_be_written_is_refused` 改为三项判定（写不进拒绝、写入为 `Created`、已有本地标记为 `Existing`）；
+  红分支同步更新骨架（`a1a55477`，windows-ci run 36213518420）；上一版红分支 run 36212810169 已以该测试断言失败（539 passed，1 failed）。
+  本机（MacBook，仅前端）：`npx tsc --noEmit`、`eslint`、`biome format`（改动文件）通过，`npx vitest run src/services/tono.test.ts src/pages/tono/login.test.tsx` 39 passed；
+  未运行 cargo，以 PR #642 的 windows-ci 为准。标记步骤的调用位置与撤销路径没有单元测试覆盖。
+  剩余限制更新：写入标记之后、会话存入之前进程崩溃，标记留下并为凭据库原有内容作证（与此前「标记写入后异步写库失败或写库前崩溃」同类，本 PR 不能消除）；
+  被取代的登录不撤销它新写的标记；撤销时删除失败只记日志。

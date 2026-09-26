@@ -156,6 +156,8 @@ const LoginPage = () => {
       await mutateTonoStatus()
       navigate('/', { replace: true })
     } catch (error) {
+      // The server already used up this code; clear it so a new one is requested.
+      if (String(error).includes('TONO_SIGN_IN_NOT_SAVED')) setCode('')
       setError(formatTonoActionError(error, t))
     } finally {
       authRequestPendingRef.current = false
