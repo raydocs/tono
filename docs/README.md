@@ -23,7 +23,7 @@ Use the execution guide's dated status, not old handoff machine assignments.
 | Doc | What it is |
 |---|---|
 | [architecture.md](architecture.md) | System map, deployables, macOS / Windows code map |
-| [SHIP_PLAN.md](SHIP_PLAN.md) | Customer 0.0.73 — gates G1–G4; update-channel publish (G4) after owner-recorded G1–G3 evidence |
+| [SHIP_PLAN.md](SHIP_PLAN.md) | Customer 0.0.74 — gates G1–G4; update-channel publish (G4) after owner-recorded G1–G3 evidence |
 | [CONNECTION_BETA_2026-09-22.md](CONNECTION_BETA_2026-09-22.md) | G1/G2 native DNS/cancellation optimization and same-route connection measurement, not a speedup claim |
 | [UPDATE_PROTOCOL_V1.md](UPDATE_PROTOCOL_V1.md) | Shared macOS/Windows update wire values and conformance, not installation acceptance |
 | [UPDATE_INTEGRATION_V1.md](UPDATE_INTEGRATION_V1.md) | Native protected-update ownership, detached transport, paired packaging and G3 evidence boundaries |
