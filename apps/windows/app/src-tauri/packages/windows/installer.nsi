@@ -1552,7 +1552,7 @@ Section Uninstall
     ; This account's $APPDATA/$LOCALAPPDATA folders were removed with every other profile's by the
     ; helper above. A recursive NSIS delete here would walk through a junction the helper skipped.
 
-    ; The account session is not in AppData: keyring stores it in Credential Manager as
+    ; The account session is not in AppData: it is a local-machine generic credential in Credential Manager,
     ; `refresh-token.tono` (tono-core WINDOWS_CRED_TARGET_REFRESH_TOKEN). Delete it so a reinstall
     ; does not come back signed in. The App also refuses a vault session its data directory did
     ; not adopt, so a missing entry or a failed delete here is not fatal.
