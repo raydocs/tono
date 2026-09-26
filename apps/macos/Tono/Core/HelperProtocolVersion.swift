@@ -227,10 +227,12 @@ nonisolated enum HelperProtocolVersion {
     ///   holding its single request thread and with it `/core/stop`.
     /// - 4.48.0 → 4.49.0: a `pfctl -E` killed at its deadline is settled only
     ///   once that child has exited, and claims a listed token only when the
-    ///   token's age places it inside the child's lifetime. When the reference
-    ///   record cannot be written and the release of the new token gives no
-    ///   answer, the token stays in memory for disarm, as does a token a newer
-    ///   record replaced whose release gives no answer. A 4.48.0 daemon can
+    ///   token's age places it inside the child's lifetime, it was not listed
+    ///   before the spawn, and the child's exit was reported promptly. When
+    ///   the reference record cannot be written and the release of the new
+    ///   token gives no answer, the token stays in memory for disarm, as does
+    ///   a token a newer record replaced whose release gives no answer (the
+    ///   periodic check retries that one). A 4.48.0 daemon can
     ///   claim, and at disarm release, another program's token under a reused
     ///   PID, and forgets both unanswered tokens.
     static let current = "4.49.0"

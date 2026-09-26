@@ -700,28 +700,45 @@ extension KillSwitchManager {
         /// Wall-clock second read before the child was spawned.
         let spawned: time_t
         let child: PFEnableChildExit
+        /// Every word `pfctl -s References` printed just before the child
+        /// was spawned, or nil when that listing gave no answer. No token in
+        /// it can be the child's, however the wall clock moved (#643 review,
+        /// opus:F3).
+        let listedBefore: Set<String>?
+        /// `CLOCK_MONOTONIC` nanoseconds when `run` gave up on the child.
+        let gaveUp: UInt64
     }
 
     /// When a `pfctl -E` child exited: the wall-clock second its termination
-    /// handler ran, after the process was reaped. Until then the child still
-    /// holds its PID, so no other process can have taken a token under it.
-    /// Set on Foundation's queue and read on the request thread.
+    /// handler ran, after the process was reaped, and the monotonic time of
+    /// that call. Until then the child still holds its PID, so no other
+    /// process can have taken a token under it. Set on Foundation's queue and
+    /// read on the request thread.
     final class PFEnableChildExit: @unchecked Sendable {
         private let lock = NSLock()
-        private var second: time_t?
+        private var reported: (second: time_t, monotonic: UInt64)?
 
         func record() {
             lock.lock()
-            if second == nil { second = time(nil) }
+            if reported == nil {
+                reported = (time(nil), clock_gettime_nsec_np(CLOCK_MONOTONIC))
+            }
             lock.unlock()
         }
 
-        var exited: time_t? {
+        var exited: (second: time_t, monotonic: UInt64)? {
             lock.lock()
             defer { lock.unlock() }
-            return second
+            return reported
         }
     }
+
+    /// How long after `run` gave up on a `pfctl -E` child its termination
+    /// handler may run and still settle a claim. The PID is free from the
+    /// reap on, and the handler's second closes the claim window, so a late
+    /// handler would stretch that window over whoever takes the PID next
+    /// (#643 review, codex:F2). Later than this, nothing is claimed.
+    static let pfEnableExitReportLimit: UInt64 = 5_000_000_000
 
     /// Held in memory only, like `unrecordedPFEnableReference`.
     nonisolated(unsafe) static var unsettledPFEnableAcquire: PFEnableAcquire?
@@ -729,7 +746,8 @@ extension KillSwitchManager {
     /// Tokens a newer recorded one replaced that pfctl has not yet answered
     /// for: their listing or their `-X` gave no answer, so they may still be
     /// held. Held in memory only, like `unrecordedPFEnableReference`; the next
-    /// check retries them and disarm releases them (#643 review, grok:F2).
+    /// hold and the periodic check retry them while the recorded token holds
+    /// PF, and disarm releases them (#643 review, grok:F2, opus:F1).
     nonisolated(unsafe) static var supersededPFEnableReferences: [PFEnableReference] = []
 
     /// PF stays enabled while any enable reference is held. Enabling it only
@@ -744,13 +762,18 @@ extension KillSwitchManager {
     ///
     /// `releaseToken` releases a token no record could hold, or one a newer
     /// record replaced, and throws, as `run` does, when pfctl gave no answer.
+    /// `heldReference` is `heldPFEnableReference`; the self-test replaces it
+    /// to stage a check that reads a held record as not held.
     static func holdPFEnableReference(
         recordPath: String = killSwitchPFReferencePath,
         releaseToken: (String) throws -> Void = {
             _ = try KillSwitchManager.run("/sbin/pfctl", ["-X", $0])
+        },
+        heldReference: (String) throws -> PFEnableReference? = {
+            try KillSwitchManager.heldPFEnableReference(recordPath: $0)
         }
     ) throws {
-        if let held = try heldPFEnableReference(recordPath: recordPath) {
+        if let held = try heldReference(recordPath) {
             // The recorded token holds PF, so one it replaced can go now.
             try? releaseSupersededPFEnableReferences(
                 boot: held.boot,
@@ -787,6 +810,16 @@ extension KillSwitchManager {
             token = pending.token
         } else {
             unrecordedPFEnableReference = nil
+            // Status ignored, as in `settlePFEnableAcquire`: with no token at
+            // all the kernel answers ENOENT.
+            let listedBefore = (try? run(
+                "/sbin/pfctl", ["-s", "References"],
+                deadline: pfctlQueryDeadline
+            )).map {
+                Set(String(decoding: $0.output, as: UTF8.self)
+                    .split(whereSeparator: \.isWhitespace)
+                    .map(String.init))
+            }
             var child: pid_t = 0
             let spawned = time(nil)
             let childExit = PFEnableChildExit()
@@ -803,7 +836,12 @@ extension KillSwitchManager {
                 // pfctl.
                 if child > 0 {
                     unsettledPFEnableAcquire = .init(
-                        pid: child, boot: boot, spawned: spawned, child: childExit
+                        pid: child,
+                        boot: boot,
+                        spawned: spawned,
+                        child: childExit,
+                        listedBefore: listedBefore,
+                        gaveUp: clock_gettime_nsec_np(CLOCK_MONOTONIC)
                     )
                 }
                 throw error
@@ -821,6 +859,14 @@ extension KillSwitchManager {
             withJSONObject: ["token": token, "boot": boot],
             options: [.sortedKeys]
         )
+        // Listed as replaced before the write, which can throw after its
+        // rename has already dropped the previous token from the record
+        // (#643 review, codex:F4). While the record still names it, every
+        // release of replaced tokens keeps the recorded one.
+        if let previous, previous.boot == boot, previous.token != token,
+           !supersededPFEnableReferences.contains(previous) {
+            supersededPFEnableReferences.append(previous)
+        }
         do {
             try atomicWrite(path: recordPath, data: record, permissions: 0o600)
         } catch {
@@ -859,10 +905,6 @@ extension KillSwitchManager {
         // only once pfctl has answered for it: a listing or `-X` with no
         // answer leaves it held, and forgotten here nothing would release it
         // (#643 review, grok:F2).
-        if let previous, previous.boot == boot, previous.token != token,
-           !supersededPFEnableReferences.contains(previous) {
-            supersededPFEnableReferences.append(previous)
-        }
         try? releaseSupersededPFEnableReferences(
             boot: boot,
             keeping: token,
@@ -876,7 +918,9 @@ extension KillSwitchManager {
     /// those after it stay for the next check or disarm, and this throws. A
     /// token from another boot means nothing now, and one whose value is the
     /// token `keeping` still holds PF with must not be released: both are
-    /// only forgotten.
+    /// only forgotten. A boot that could not be read (nil) is not another
+    /// boot: nothing is forgotten on it, and this throws (#643 review,
+    /// grok:F3 = codex:F6).
     static func releaseSupersededPFEnableReferences(
         boot: String?,
         keeping: String?,
@@ -885,6 +929,10 @@ extension KillSwitchManager {
             _ = try KillSwitchManager.run("/sbin/pfctl", ["-X", $0])
         }
     ) throws {
+        guard !supersededPFEnableReferences.isEmpty else { return }
+        guard boot != nil else {
+            throw HelperFailure.system("Boot session unknown; replaced PF references kept.")
+        }
         while let superseded = supersededPFEnableReferences.first {
             if superseded.boot == boot, superseded.token != keeping,
                try pfEnableReferenceListed(superseded.token, deadline: queryDeadline) {
@@ -951,6 +999,15 @@ extension KillSwitchManager {
     ) throws {
         guard let acquire = unsettledPFEnableAcquire,
               let exited = acquire.child.exited else { return }
+        // Without the listing from before the spawn, or with a termination
+        // handler that ran long after `run` gave up, no row can be tied to
+        // this child: settle, claiming nothing.
+        guard let listedBefore = acquire.listedBefore,
+              exited.monotonic <= acquire.gaveUp
+                || exited.monotonic - acquire.gaveUp <= pfEnableExitReportLimit else {
+            unsettledPFEnableAcquire = nil
+            return
+        }
         let listedFrom = time(nil)
         // Status ignored: with no token at all the kernel answers ENOENT.
         let listed = try run("/sbin/pfctl", ["-s", "References"], deadline: deadline)
@@ -958,9 +1015,10 @@ extension KillSwitchManager {
         if let token = pfEnableToken(
             takenBy: acquire.pid,
             spawned: acquire.spawned,
-            exited: exited,
+            exited: exited.second,
             listedFrom: listedFrom,
             listedTo: listedTo,
+            listedBefore: listedBefore,
             in: String(decoding: listed.output, as: UTF8.self)
         ) {
             unrecordedPFEnableReference = .init(token: token, boot: acquire.boot)
@@ -982,12 +1040,18 @@ extension KillSwitchManager {
     /// the lifetime are not this child's either. The kernel hands a PID out
     /// again only after cycling through the others (up to 99999), which no Mac
     /// does inside the second or so these whole-second bounds leave open.
+    ///
+    /// The window is wall-clock time, so a clock stepped back before the
+    /// spawn can place an older token inside it. A token already listed
+    /// before the spawn (`listedBefore`) is never the child's, so it is
+    /// skipped before anything is counted (#643 review, opus:F3).
     static func pfEnableToken(
         takenBy pid: pid_t,
         spawned: time_t,
         exited: time_t,
         listedFrom: time_t,
         listedTo: time_t,
+        listedBefore: Set<String>,
         in listing: String
     ) -> String? {
         // A wall clock stepped back meanwhile orders nothing.
@@ -1002,6 +1066,7 @@ extension KillSwitchManager {
             }
             let token = String(words[2])
             guard token.range(of: #"^[0-9]{1,20}$"#, options: .regularExpression) != nil,
+                  !listedBefore.contains(token),
                   listedFrom - age >= spawned,
                   listedTo - age <= exited else {
                 continue

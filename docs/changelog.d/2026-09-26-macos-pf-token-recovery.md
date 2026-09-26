@@ -47,3 +47,25 @@
     保留下来的未回答 token 之后只按数值在列表中匹配；xnu 的 token 值在释放后可能被再次签发给别的程序，此时可能误释放（opus:F1，
     未能确证）。`exited` 是终止回调运行的时刻，不是子进程被回收的时刻，二者间隔无上界（codex:F2，按回收后需整轮 PID 回绕才会误认领判断为
     极难触发）。被替换 token 列表同样只在内存里，helper 退出即丢。未本地编译，以 macOS CI 为准；未实机。
+- **2026-09-26 续记 2（`3911934a` CI 通过；续审 run `aa24f337` 通过，确认 minor 续修）**：
+  - 缺陷修复（opus:F1 = codex:F3）：周期巡检 `superviseProtection` 在 PF 在过滤且记录的 token 被持有时提前返回，被替换列表只能等下次
+    arm 或 disarm。改后在这个提前返回里，列表非空时以记录的 token 为保留项重试释放；其它情况不变。
+  - 缺陷修复（grok:F3 = codex:F6）：disarm 读不到开机标识（nil）时，被替换 token 不经列出和 `-X` 就被遗忘。改后 nil 视为未知，
+    列表原样保留并抛错，disarm 按其它释放失败的方式记日志。
+  - 缺陷修复（opus:F3 / grok:F1 / codex:F1，墙钟回拨）：`-E` 前先取一份 `pfctl -s References` 快照；超时找回只认领快照里没有的行，
+    PID、进程名、年龄窗口和唯一行检查照旧。快照没有回答时超时找回什么也不认领（正常 `-E` 路径不受影响）。
+  - 缺陷修复（codex:F4）：`atomicWrite` 可能在 rename 之后（`fsyncParent`）抛错，此时记录已不再指向旧 token。改为写入之前就把旧 token
+    加入被替换列表；记录仍指向它时，所有释放都以记录的 token 为保留项，只遗忘不释放。
+  - 缺陷修复（opus:F4 / codex:F2 / grok:F2）：终止回调同时记单调时钟（`CLOCK_MONOTONIC`）；回调晚于 `run` 放弃子进程超过 5 s 时结算但不认领。
+  - 工程与测试（codex:F5 / grok:F4 / opus:F5）：9e 在断言之前不再 `pfctl -d`：先断言该 token 已不在 References 中；PF 在这次 disarm 后
+    由回退取得的匿名引用保持开启（设计如此，只有 `pfctl -d` 能去掉），所以断言 PF 为开启，之后才清理。9f 改走真实 hold 路径：先正常
+    hold 记录 token，再以注入的「持有检查答否」（模拟 `pfctl -s info` 以失败状态回答）让 hold 换新 token 并把旧 token 追加进列表，
+    注入的旧 token `-X` 无回答；断言旧 token 仍被列出且在列表中，随后 disarm 必须成功、两个 token 都不再列出、PF 不经清理即回到起始
+    状态（新检查 `superseded-token-released-at-disarm`）。9d 新增 `recovered-token-not-listed-before-spawn`。hold 为此新增仅供自测
+    替换的 `heldReference` 参数。
+  - helper 协议仍为 4.49.0；CONTRACT 哈希按同一管线重算。
+  - 剩余限制（补充）：opus:F2（未能确证）：一个没有回答的 `-X` 可能已在内核生效，之后若同值 token 签发给别的程序，保留的 token 只按
+    数值匹配，重试或 disarm 可能释放别人的 token；快照只防超时找回，不防这条。快照只按「列表里的所有词」排除，快照查询以非 ENOENT 的
+    失败状态回答时会是一份不完整的集合，此时退回到只靠年龄窗口的规则。子进程在内核里卡住、SIGKILL 后超过 5 s 才退出时，本子进程的
+    token 也不认领（泄漏，PF 在 disarm 后保持开启）。被替换列表非空时，每次巡检在锁内最多多等一次列出加一次 `-X` 的期限。9e 在起始
+    为关时仍需测试自己 `pfctl -d` 才回到起始状态（匿名引用）。未本地编译，以 macOS CI 为准；未实机。

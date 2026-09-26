@@ -388,13 +388,18 @@ extension KillSwitchManager {
             "4242     pfctl                        1111111111111111111      0 days 02:00:00\n"
         let childRow =
             "4242     pfctl                        2222222222222222222      0 days 00:00:40\n"
-        func recoveredToken(_ rows: String, listedTo: time_t = 10_000) -> String? {
+        func recoveredToken(
+            _ rows: String,
+            listedTo: time_t = 10_000,
+            listedBefore: Set<String> = []
+        ) -> String? {
             pfEnableToken(
                 takenBy: 4242,
                 spawned: 9_950,
                 exited: 9_970,
                 listedFrom: 10_000,
                 listedTo: listedTo,
+                listedBefore: listedBefore,
                 in: referenceHeader + rows
             )
         }
@@ -428,6 +433,18 @@ extension KillSwitchManager {
                     "4242     pfctl                        2222222222222222222      0 days 0:00:40\n"
                 ) == nil
         )
+        // A wall clock stepped back before the spawn can place an older
+        // token's row inside the window. A token listed before the spawn is
+        // never the child's: alone it claims nothing, and beside the child's
+        // own row it does not hide that one (#643 review, opus:F3).
+        check(
+            "recovered-token-not-listed-before-spawn",
+            recoveredToken(childRow, listedBefore: ["2222222222222222222"]) == nil
+                && recoveredToken(
+                    childRow + secondChildRow,
+                    listedBefore: ["3333333333333333333"]
+                ) == "2222222222222222222"
+        )
 
         // 9e. A token the record-failure fallback could not confirm releasing
         //     stays in memory for the next check and disarm (#639 review,
@@ -447,51 +464,69 @@ extension KillSwitchManager {
             "unanswered-fallback-release-keeps-token",
             keptToken.map { (try? pfEnableReferenceListed($0.token)) == true } == true
         )
-        //     Disarm must then actually release it, and PF end where it
-        //     started (#643 review, grok:F3).
+        //     Disarm must then actually release it (#643 review, grok:F3).
+        //     Checked before any cleanup, since `pfctl -d` would drop every
+        //     token itself. PF stays enabled past this disarm, on the
+        //     anonymous reference the fallback took and only `pfctl -d`
+        //     drops, so that is the state checked here; 9f checks PF back at
+        //     its starting state.
         let keptTokenReleased = (try? releasePFEnableReference(recordPath: unwritableRecord)) != nil
-        if !startedEnabled { _ = try? run("/sbin/pfctl", ["-d"]) }
         check(
             "unanswered-fallback-token-released-at-disarm",
-            keptTokenReleased && unrecordedPFEnableReference == nil
+            keptTokenReleased
                 && keptToken.map { (try? pfEnableReferenceListed($0.token)) == false } == true
-                && (try? pfEnabled()) == startedEnabled
+                && (try? pfEnabled()) == true
         )
+        if !startedEnabled { _ = try? run("/sbin/pfctl", ["-d"]) }
 
         // 9f. A token a newer recorded one replaced is forgotten only once
         //     pfctl has answered for it (#643 review, grok:F2). Its `-X` ran
         //     under `try?` after the record already named the new token, so
-        //     one with no answer leaked with nothing left to release it. The
-        //     replaced token is a real one taken here and placed where a hold
-        //     puts it; the injected release gives no answer, and the next
-        //     check, with a real release, must release it. Net-zero like 9.
+        //     one with no answer leaked with nothing left to release it. A
+        //     real hold records a token; a second hold whose held check reads
+        //     that record as not held (as when `pfctl -s info` answers with a
+        //     failure status) takes a new one and replaces it, and the
+        //     injected release of the replaced token gives no answer. It must
+        //     stay listed and tracked, and disarm must release both tokens
+        //     and leave PF where it started, with no cleanup first.
         let supersedingRecord = FileManager.default.temporaryDirectory
             .appendingPathComponent("tono-lifecycle-superseding.reference").path
         unlink(supersedingRecord)
         supersededPFEnableReferences = []
-        if let boot = try? TonoAuthenticatedPeer.bootSession(),
-           let older = try? run("/sbin/pfctl", ["-E"]), older.status == 0,
-           let olderToken = parsePFEnableToken(String(decoding: older.output, as: UTF8.self)) {
-            supersededPFEnableReferences = [.init(token: olderToken, boot: boot)]
+        unrecordedPFEnableReference = nil
+        try? holdPFEnableReference(recordPath: supersedingRecord)
+        if let older = readPFEnableReference(supersedingRecord),
+           (try? pfEnableReferenceListed(older.token)) == true {
             try? holdPFEnableReference(
                 recordPath: supersedingRecord,
                 releaseToken: { _ in
                     throw HelperFailure.system("pfctl did not finish within 15 seconds.")
-                }
+                },
+                heldReference: { _ in nil }
             )
-            let kept = readPFEnableReference(supersedingRecord) != nil
-                && supersededPFEnableReferences.map(\.token) == [olderToken]
-                && (try? pfEnableReferenceListed(olderToken)) == true
-            try? holdPFEnableReference(recordPath: supersedingRecord)
-            let retried = supersededPFEnableReferences.isEmpty
-                && (try? pfEnableReferenceListed(olderToken)) == false
-            check("unanswered-superseded-release-keeps-token", kept && retried)
-            try? releasePFEnableReference(recordPath: supersedingRecord)
-            if (try? pfEnableReferenceListed(olderToken)) == true {
-                _ = try? run("/sbin/pfctl", ["-X", olderToken])
+            let newer = readPFEnableReference(supersedingRecord)
+            check(
+                "unanswered-superseded-release-keeps-token",
+                newer != nil && newer?.token != older.token
+                    && supersededPFEnableReferences == [older]
+                    && (try? pfEnableReferenceListed(older.token)) == true
+            )
+            let supersededReleased =
+                (try? releasePFEnableReference(recordPath: supersedingRecord)) != nil
+            check(
+                "superseded-token-released-at-disarm",
+                supersededReleased && supersededPFEnableReferences.isEmpty
+                    && (try? pfEnableReferenceListed(older.token)) == false
+                    && newer.map { (try? pfEnableReferenceListed($0.token)) == false } == true
+                    && (try? pfEnabled()) == startedEnabled
+            )
+            let leftovers = [older.token, newer?.token].compactMap { $0 }
+            for token in leftovers where (try? pfEnableReferenceListed(token)) == true {
+                _ = try? run("/sbin/pfctl", ["-X", token])
             }
         } else {
             check("superseded-older-token", false)
+            try? releasePFEnableReference(recordPath: supersedingRecord)
         }
         supersededPFEnableReferences = []
         unlink(supersedingRecord)
